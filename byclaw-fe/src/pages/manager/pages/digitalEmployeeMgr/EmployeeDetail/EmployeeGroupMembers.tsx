@@ -1,7 +1,7 @@
 // @ts-nocheck
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
-import { Button, Input, message, Modal, Table, Typography } from 'antd';
+import { Button, Input, message, Modal, Table, Tooltip, Typography } from 'antd';
 import { useIntl } from '@umijs/max';
 import { queryEmployeeGroupMemberCandidates } from '@/pages/manager/service/DigitalEmployeeMgr';
 import styles from './EmployeeGroupMembers.module.less';
@@ -110,6 +110,16 @@ export default function EmployeeGroupMembers({ value = [], onChange, disabled = 
     };
   }, [intl, keyword, open, pageNum]);
 
+  useEffect(() => {
+    if (!open) return undefined;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [open]);
+
   const updateMembers = (next) => {
     onChange?.(next.map((item, index) => ({ ...item, sortOrder: index + 1 })));
   };
@@ -187,6 +197,8 @@ export default function EmployeeGroupMembers({ value = [], onChange, disabled = 
       <Modal
         open={open}
         width={800}
+        className={styles.memberSelectorModal}
+        wrapClassName={styles.memberSelectorModalWrap}
         title={intl.formatMessage({ id: 'employeeDetail.groupMember.select' })}
         onCancel={() => setOpen(false)}
         onOk={() => {
@@ -248,7 +260,15 @@ export default function EmployeeGroupMembers({ value = [], onChange, disabled = 
           locale={{ emptyText: intl.formatMessage({ id: 'employeeDetail.groupMember.candidateEmpty' }) }}
           columns={[
             { title: intl.formatMessage({ id: 'employeeDetail.groupMember.name' }), dataIndex: 'name', width: 180 },
-            { title: intl.formatMessage({ id: 'employeeDetail.groupMember.description' }), dataIndex: 'description' },
+            {
+              title: intl.formatMessage({ id: 'employeeDetail.groupMember.description' }),
+              dataIndex: 'description',
+              render: (description) => (
+                <Tooltip title={description || '-'} placement="topLeft">
+                  <div className={styles.candidateDescription}>{description || '-'}</div>
+                </Tooltip>
+              ),
+            },
             {
               title: intl.formatMessage({ id: 'employeeDetail.groupMember.type' }),
               dataIndex: 'agentType',

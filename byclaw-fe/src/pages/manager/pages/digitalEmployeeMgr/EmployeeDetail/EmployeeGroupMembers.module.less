@@ -53,6 +53,7 @@
 }
 
 .memberList {
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -60,6 +61,8 @@
 
 .memberRow {
   display: flex;
+  width: 100%;
+  box-sizing: border-box;
   min-width: 0;
   align-items: center;
   gap: 8px;
@@ -72,9 +75,19 @@
 .memberInfo {
   display: flex;
   min-width: 0;
+  max-width: 100%;
   flex: 1;
   flex-direction: column;
   gap: 2px;
+}
+
+.memberInfo :global(.@{antPrefix}-typography) {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .roleInput {
@@ -89,4 +102,55 @@
 
 .search {
   margin-bottom: 12px;
+}
+
+.candidateDescription {
+  display: -webkit-box;
+  max-width: 100%;
+  overflow: hidden;
+  line-height: 22px;
+  text-overflow: ellipsis;
+  word-break: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.memberSelectorModal {
+  :global {
+    .@{antPrefix}-modal-content {
+      display: flex;
+      max-height: calc(100vh - 48px);
+      flex-direction: column;
+    }
+
+    .@{antPrefix}-modal-body {
+      display: flex;
+      min-height: 0;
+      max-height: calc(100vh - 220px);
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .@{antPrefix}-table-wrapper {
+      min-height: 0;
+      flex: 1;
+      overflow: hidden;
+    }
+  }
+}
+
+.memberSelectorModalWrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 24px;
+  overflow: hidden !important;
+
+  :global {
+    .@{antPrefix}-modal {
+      top: 0;
+      margin: 0;
+    }
+  }
 }

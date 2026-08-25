@@ -87,6 +87,16 @@ const PersonalParamSettings: React.FC = () => {
     loadParams();
   }, []);
 
+  useEffect(() => {
+    if (!modalOpen) return undefined;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [modalOpen]);
+
   const openCreateModal = () => {
     setEditingParam(null);
     form.resetFields();
@@ -368,6 +378,8 @@ const PersonalParamSettings: React.FC = () => {
         okText={intl.formatMessage({ id: 'common.confirm' })}
         cancelText={intl.formatMessage({ id: 'common.cancel' })}
         width={640}
+        className={styles.paramModal}
+        wrapClassName={styles.paramModalWrap}
         destroyOnHidden
       >
         <Form form={form} layout="vertical" preserve={false}>

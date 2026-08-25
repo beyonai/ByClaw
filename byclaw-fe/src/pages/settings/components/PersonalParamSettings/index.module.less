@@ -50,6 +50,38 @@
   }
 }
 
+.paramModal {
+  :global {
+    .@{antPrefix}-modal-content {
+      display: flex;
+      max-height: calc(100vh - 48px);
+      flex-direction: column;
+    }
+
+    .@{antPrefix}-modal-body {
+      min-height: 0;
+      max-height: calc(100vh - 200px);
+      overflow-y: auto;
+    }
+  }
+}
+
+.paramModalWrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 24px;
+  overflow: hidden !important;
+
+  :global {
+    .@{antPrefix}-modal {
+      top: 0;
+      margin: 0;
+    }
+  }
+}
+
 .keyCell {
   display: inline-flex;
   max-width: 100%;
