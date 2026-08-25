@@ -55,7 +55,7 @@ function ThinkingProcessRender(props: IProps) {
       return; // 返回空数组或其他默认值
     }
 
-    const l = transformList(thinkList, !!isThinkDone, messageId);
+    const l = transformList(thinkList, !!isThinkDone, messageId, msg);
 
     let lStr = '';
     try {
@@ -68,7 +68,7 @@ function ThinkingProcessRender(props: IProps) {
       transformedListRef.current = lStr;
       setTransformedList(l);
     }
-  }, [JSON.stringify(thinkList), isThinkDone, messageId]);
+  }, [JSON.stringify(thinkList), isThinkDone, messageId, messageState]);
 
   useEffect(() => {
     setMyThinkCollapse(isThinkDone);

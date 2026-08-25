@@ -1,6 +1,7 @@
-import { SSEEventStatus, SSEMessageType } from '@/constants/message';
+import { IMessageState, SSEEventStatus, SSEMessageType } from '@/constants/message';
+import { IFormStatus } from '@/hooks/useSseSender/agent/typescript';
 
-import type { IMessageListItem } from '@/typescript/message';
+import type { IMessage, IMessageListItem } from '@/typescript/message';
 
 import { transformList } from './util';
 
@@ -201,5 +202,58 @@ describe('ThinkingProcessRender transformList', () => {
     const answerNode = result[0].children?.[3];
     expect(answerNode.content.substance.status).toBe('_DONE_');
     expect(answerNode.children?.[0].content.orderId).toBe('delegation-1:answer:text');
+  });
+
+  it('keeps every ancestor expanded when a nested EasyConfirm item is pending', () => {
+    const thinkList: IMessageListItem[] = [
+      {
+        uuid: 'root',
+        contentType: SSEMessageType.thinkRootTitle,
+        status: SSEEventStatus.done,
+        orginContent: '',
+        content: {
+          substance: 'Root',
+          orderId: 'root-1',
+        },
+      },
+      {
+        uuid: 'title',
+        contentType: SSEMessageType.thinkTitle,
+        status: SSEEventStatus.done,
+        orginContent: '',
+        content: {
+          substance: 'Section',
+          orderId: 'title-1',
+          parentOrderId: 'root-1',
+        },
+      },
+      {
+        uuid: 'pending',
+        contentType: SSEMessageType.askUserQuestions,
+        status: SSEEventStatus.done,
+        orginContent: '',
+        content: {
+          formStatus: IFormStatus.INIT,
+          substance: { questions: [] },
+          orderId: 'pending-1',
+          parentOrderId: 'title-1',
+        },
+      },
+    ];
+    const message = {
+      creatorId: 'assistant',
+      fromBeyond: true,
+      msgId: 'message-1',
+      messageId: 'message-1',
+      messageState: IMessageState.Answer,
+      createTime: '',
+      thinkList,
+    } as IMessage;
+
+    const result = transformList(thinkList, true, message.messageId, message);
+    const titleNode = result[0].children?.[0];
+
+    expect(result[0]).toMatchObject({ isCollapsed: false, shouldOpen: true });
+    expect(titleNode).toMatchObject({ isCollapsed: false, shouldOpen: true });
   });
 });

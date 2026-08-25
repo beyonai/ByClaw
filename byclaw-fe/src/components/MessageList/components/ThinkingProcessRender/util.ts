@@ -1,8 +1,9 @@
 import { SSEMessageType } from '@/constants/message';
 import { get, isPlainObject, set } from 'lodash';
-import type { IMessageListItem } from '@/typescript/message';
+import type { IMessage, IMessageListItem } from '@/typescript/message';
 import type { TreeNode } from './typescript';
 import { IFormStatus } from '@/hooks/useSseSender/agent/typescript';
+import { isPendingEasyConfirmListItem } from '@/components/MessagesComp/easyConfirm';
 
 const ROOT_ORDER_ID = '-1';
 
@@ -86,7 +87,26 @@ const coverExistedNodeHandlers: {
   },
 };
 
-export const transformList = (flatList: IMessageListItem[], isStreamEnd: boolean, messageId?: string): TreeNode[] => {
+const markPendingEasyConfirmBranchesOpen = (nodes: TreeNode[], message?: IMessage): boolean => {
+  if (!message) return false;
+
+  return nodes.reduce((hasPendingItem, node) => {
+    const childHasPendingItem = markPendingEasyConfirmBranchesOpen(node.children || [], message);
+    const currentNodeIsPending = isPendingEasyConfirmListItem(message, node);
+    if (childHasPendingItem) {
+      node.shouldOpen = true;
+      node.isCollapsed = false;
+    }
+    return hasPendingItem || currentNodeIsPending || childHasPendingItem;
+  }, false);
+};
+
+export const transformList = (
+  flatList: IMessageListItem[],
+  isStreamEnd: boolean,
+  messageId?: string,
+  message?: IMessage
+): TreeNode[] => {
   const result: TreeNode[] = [];
   let currentRoot: TreeNode | null = null;
   let currentParent: TreeNode | null = null;
@@ -263,6 +283,8 @@ export const transformList = (flatList: IMessageListItem[], isStreamEnd: boolean
       }
     }
   });
+
+  markPendingEasyConfirmBranchesOpen(result, message);
 
   // 更新所有非最后一个根节点的图标状态
   for (let i = result.length - 1; i >= 0; i -= 1) {

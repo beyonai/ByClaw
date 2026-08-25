@@ -12,7 +12,7 @@ import useGlobal from '@/hooks/useGlobal';
 import { IFormStatus } from '@/hooks/useSseSender/agent/typescript';
 
 import type { IAgentType } from '@/typescript/agent';
-import type { IMessage, IMessageListItem } from '@/typescript/message';
+import type { IMessage } from '@/typescript/message';
 import type { ISendProps } from '@/hooks/useChat';
 import type { DefaultValueSchema } from '@/components/QueryInput/RichInput/types';
 import { useIntl } from '@umijs/max';
@@ -20,6 +20,12 @@ import { useIntl } from '@umijs/max';
 import styles from './index.module.less';
 import inputStyle from '@/components/ChatLayoutComp/index.module.less';
 import { IMessageState } from '@/constants/message';
+import {
+  collectEasyConfirmItems,
+  isEasyConfirmContentType,
+  isPendingEasyConfirmListItem,
+} from '@/components/MessagesComp/easyConfirm';
+import type { EasyConfirmDescriptor } from '@/components/MessagesComp/easyConfirm';
 
 const inputDraftMap = new Map<string, DefaultValueSchema>();
 
@@ -49,13 +55,10 @@ type IProps = {
   myAgentType: IAgentType;
   setMyAgentType: React.Dispatch<React.SetStateAction<IAgentType>>;
   messageState?: IMessageState;
+  updateMessage: (message: IMessage) => IMessage | void;
 };
 
-type IEasyConfirmCompProps = {
-  message: IMessage;
-  messageListItemContent: IMessageListItem['content'];
-  messageListItem?: IMessageListItem;
-  thinkListItem?: IMessageListItem;
+type IEasyConfirmCompProps = EasyConfirmDescriptor & {
   [key: string]: unknown;
 };
 
@@ -74,6 +77,7 @@ const EasyConfirm = (props: IProps) => {
     myAgentType,
     setMyAgentType,
     messageState,
+    updateMessage,
   } = props;
 
   const { EventEmitter } = useGlobal();
@@ -81,7 +85,7 @@ const EasyConfirm = (props: IProps) => {
   const { token } = theme.useToken();
 
   const [page, setPage] = useState<number>(1);
-  const [list, setList] = useState<IEasyConfirmCompProps[]>([]);
+  const [eventList, setEventList] = useState<IEasyConfirmCompProps[]>([]);
 
   const currentMsgIdRef = useRef(lastMsg?.msgId || '');
   const pendingNewSessionDraftRef = useRef(false);
@@ -93,6 +97,27 @@ const EasyConfirm = (props: IProps) => {
     return uuid;
   }, []);
 
+  const messageItems = useMemo(() => collectEasyConfirmItems(lastMsg, updateMessage), [lastMsg, updateMessage]);
+  const list = useMemo(() => {
+    const itemMap = new Map<string, IEasyConfirmCompProps>();
+
+    messageItems.forEach((item) => itemMap.set(getUUId(item), item));
+    eventList.forEach((item) => {
+      const uuid = getUUId(item);
+      if (!uuid || itemMap.has(uuid) || item.message?.msgId !== lastMsg?.msgId) return;
+
+      const currentItem = [...(lastMsg?.thinkList || []), ...(lastMsg?.messageList || [])].find(
+        (messageListItem) => messageListItem.uuid === uuid
+      );
+      if (!currentItem) return;
+      if (currentItem && isEasyConfirmContentType(currentItem.contentType)) {
+        if (!lastMsg || !isPendingEasyConfirmListItem(lastMsg, currentItem)) return;
+      }
+
+      itemMap.set(uuid, item);
+    });
+    return [...itemMap.values()];
+  }, [eventList, getUUId, lastMsg, messageItems]);
   const compProps = useMemo(() => list[page - 1], [page, list]);
   const Comp = useMemo(() => {
     const contentType = compProps?.messageListItem?.contentType || compProps?.thinkListItem?.contentType;
@@ -145,7 +170,7 @@ const EasyConfirm = (props: IProps) => {
     const getter = (list: IEasyConfirmCompProps | IEasyConfirmCompProps[]) => {
       if (!list || isEmpty(list)) return;
 
-      setList((prevList) => {
+      setEventList((prevList) => {
         concat([], list).forEach((approvalFormItem) => {
           const uuid = getUUId(approvalFormItem);
 
@@ -178,8 +203,14 @@ const EasyConfirm = (props: IProps) => {
   }, []);
 
   useEffect(() => {
-    setList([]);
+    setEventList([]);
   }, [sessionId]);
+
+  useEffect(() => {
+    if (page > list.length) {
+      setPage(Math.max(list.length, 1));
+    }
+  }, [list.length, page]);
 
   if (isEmpty(list)) {
     return (
