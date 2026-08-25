@@ -40,7 +40,7 @@ Read only the reference that matches the chosen workflow, plus `collection-contr
 ## 3. Execute through validated commands
 
 1. Create or load a session before discovery. Use `init` with the derived `--source-scope` and `--materialization-target`.
-2. For public URL discovery that uses SearXNG, run `public-discover`. It starts the relocated `online-search` and `hot_discovery` channels in parallel and reports unavailable coverage without suppressing successful results.
+2. For public URL discovery that uses SearXNG, run `public-discover`. When the user explicitly requests a quantity (for example, “采集一篇”), pass that positive integer as `--requested-count`; this runs only SearXNG and uses the requested quantity as its result limit. Without `--requested-count`, it starts the relocated `online-search` and `hot_discovery` channels in parallel and reports unavailable coverage without suppressing successful results.
 3. Delegate retrieval to the selected source executor. Do not use `web_fetch`, `curl`, `wget`, `requests`, or another direct HTTP client to bypass it.
 4. Register only actual artifacts through `collect`; do not treat snippets as collected evidence or hand-edit inventory metadata.
 5. For research mode, call `report` to generate the requested research report.

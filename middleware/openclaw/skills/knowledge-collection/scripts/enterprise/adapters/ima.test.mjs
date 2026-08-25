@@ -16,6 +16,7 @@ if (process.env.IMA_CALLS_PATH) appendFileSync(process.env.IMA_CALLS_PATH, JSON.
 if (args[0] === 'auth' && args[1] === 'check') out({ checks: { token_fetch: true } });
 else if (args[0] === 'ima' && args[1] === 'knowledge' && process.env.BYCLI_SUCCESS === 'true') out([{ mediaId: 'wiki-bycli-1', title: 'ByCLI roadmap', url: 'https://ima.qq.com/wiki-bycli-1', folderPath: '/Roadmap', abstract: 'bycli preview' }]);
 else if (args[0] === 'ima' && args[1] === 'knowledge') { process.stderr.write('bycli knowledge failed'); process.exit(2); }
+else if (args[0] === 'wiki' && args[1] === 'search-base') out({ knowledge_bases: [{ id: 'kb-id', name: args[2] }] });
 else if (args[0] === 'note' && args[1] === 'search') out({ items: [{ doc_id: 'note-1', title: 'Roadmap', content: 'note preview' }] });
 else if (args[0] === 'wiki' && args[1] === 'search' && process.env.WIKI_FAILURE_MODE === 'true') { process.stderr.write('wiki search failed'); process.exit(2); }
 else if (args[0] === 'wiki' && args[1] === 'search' && process.env.BYCLI_FALLBACK_MODE === 'true') out({ items: [{ id: 'wiki-fallback-1', title: 'Wiki fallback', content: 'fallback body' }] });
@@ -31,7 +32,7 @@ test('IMA metadata-only search discovers notes and Wiki entries without material
   const { root, bin } = await fixture();
   try {
     const outputDir = join(root, 'search');
-    const result = await createImaAdapter({ bin, bycliBin: bin }).search({ outputDir, query: 'roadmap', limit: 10, metadataOnly: true, kb: 'kb-1' });
+    const result = await createImaAdapter({ bin, bycliBin: bin }).search({ outputDir, query: 'roadmap', limit: 10, metadataOnly: true });
     assert.equal(result.connector, 'ima');
     assert.equal(result.status, 'complete');
     assert.equal(result.counts.discovered, 2);
@@ -57,6 +58,25 @@ test('IMA knowledge-base listing prefers bycli results before Wiki search', asyn
     const calls = (await readFile(callsPath, 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
     assert.equal(calls.some((args) => args[0] === 'ima' && args[1] === 'knowledge'), true);
     assert.equal(calls.some((args) => args[0] === 'wiki' && args[1] === 'search'), false);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('IMA knowledge-base collection bypasses note search and resolves the Wiki ID for materialization', async () => {
+  const { root, bin } = await fixture();
+  try {
+    const callsPath = join(root, 'calls.json');
+    const outputDir = join(root, 'search');
+    const result = await createImaAdapter({
+      bin,
+      bycliBin: bin,
+      env: { ...process.env, BYCLI_SUCCESS: 'true', IMA_CALLS_PATH: callsPath },
+    }).search({ outputDir, query: 'knowledge-base collection', kb: 'kb-name', limit: 10, metadataOnly: false });
+
+    assert.equal(result.status, 'complete');
+    const calls = (await readFile(callsPath, 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+    assert.equal(calls.some((args) => args[0] === 'note' && args[1] === 'search'), false);
+    assert.equal(calls.some((args) => args[0] === 'wiki' && args[1] === 'search-base' && args[2] === 'kb-name'), true);
+    assert.equal(calls.some((args) => args[0] === 'wiki' && args[1] === 'search' && args.includes('--kb') && args[args.indexOf('--kb') + 1] === 'kb-id'), true);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

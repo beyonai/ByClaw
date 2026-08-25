@@ -45,7 +45,7 @@ function contentOf(value) {
   return '';
 }
 
-function itemFromRecord(record, sourceType, kb = '') {
+function itemFromRecord(record, sourceType, kb = '', materializationKb = '') {
   const sourceItemId = stringValue(record, ['mediaId', 'doc_id', 'docId', 'documentId', 'id', 'uuid', 'fileId']);
   if (!sourceItemId) return null;
   const title = stringValue(record, ['title', 'name', 'fileName', 'subject']) || sourceItemId;
@@ -56,8 +56,15 @@ function itemFromRecord(record, sourceType, kb = '') {
     title,
     sourceType,
     kb,
+    materializationKb,
     preview: contentOf(record) || stringValue(record, ['abstract', 'introduction']),
   };
+}
+
+function knowledgeBaseId(value, name) {
+  const bases = Array.isArray(value?.knowledge_bases) ? value.knowledge_bases : [];
+  const match = bases.find((base) => base?.name === name) || bases[0];
+  return stringValue(match, ['id']);
 }
 
 function itemIdFor(item) {
@@ -141,6 +148,7 @@ async function discover(writer, request, bin, bycliBin, env) {
   const seen = new Set();
   const rawArtifacts = [];
   const fallbackReasons = [];
+  let materializationKb = request.kb;
   const runDiscovery = async (sourceType, artifact, load) => {
     const response = await load();
     rawArtifacts.push(artifact);
@@ -148,24 +156,38 @@ async function discover(writer, request, bin, bycliBin, env) {
       const item = itemFromRecord(record, sourceType, request.kb);
       if (!item || seen.has(`${sourceType}:${item.sourceItemId}`)) continue;
       seen.add(`${sourceType}:${item.sourceItemId}`);
-      found.push({ ...item, sourceRank: found.length + 1, rawArtifacts: [artifact] });
+      found.push({ ...item, materializationKb, sourceRank: found.length + 1, rawArtifacts: [artifact] });
       if (found.length >= request.limit) break;
     }
   };
+  if (request.kb) {
+    const baseSearch = await callJson(writer, bin, env, ['wiki', 'search-base', request.kb, '--json'], 'raw/wiki-search-base.json');
+    materializationKb = knowledgeBaseId(baseSearch, request.kb);
+    if (!materializationKb) throw new Error(`ima knowledge base not found: ${request.kb}`);
+    try {
+      await runDiscovery('wiki', 'raw/bycli-knowledge.json', () => bycliKnowledgeList(writer, bycliBin, env, request.kb));
+    } catch (error) {
+      fallbackReasons.push(reasonOf(error));
+      try {
+        await runDiscovery('wiki', 'raw/wiki-search.json', () => callJson(
+          writer,
+          bin,
+          env,
+          ['wiki', 'search', request.query, '--kb', materializationKb, '--json'],
+          'raw/wiki-search.json',
+        ));
+      } catch (fallbackError) {
+        throw new Error(`IMA knowledge listing failed: bycli=${fallbackReasons.join('; ')}; wiki=${reasonOf(fallbackError)}`);
+      }
+    }
+    return { found: found.slice(0, request.limit), rawArtifacts, fallbackReasons };
+  }
   const noteArgs = ['note', 'search', '--content', request.query, '--start', '0', '--end', String(request.limit), '--json'];
   if (request.noteMode === 'title') {
     noteArgs.splice(2, 2, '--title', request.query);
   }
   await runDiscovery('note', 'raw/note-search.json', () => callJson(writer, bin, env, noteArgs, 'raw/note-search.json'));
   if (found.length < request.limit) {
-    if (request.kb) {
-      try {
-        await runDiscovery('wiki', 'raw/bycli-knowledge.json', () => bycliKnowledgeList(writer, bycliBin, env, request.kb));
-        return { found: found.slice(0, request.limit), rawArtifacts, fallbackReasons };
-      } catch (error) {
-        fallbackReasons.push(reasonOf(error));
-      }
-    }
     const wikiArgs = ['wiki', 'search', request.query, ...(request.kb ? ['--kb', request.kb] : []), '--json'];
     try {
       await runDiscovery('wiki', 'raw/wiki-search.json', () => callJson(writer, bin, env, wikiArgs, 'raw/wiki-search.json'));
@@ -184,7 +206,7 @@ async function materializeOne(writer, item, bin, env) {
   const artifact = `raw/${item.sourceType}-get-${suffix}.json`;
   const args = item.sourceType === 'note'
     ? ['note', 'get', item.sourceItemId, '--format', '0', '--json']
-    : ['wiki', 'search', item.title, ...(item.kb ? ['--kb', item.kb] : []), '--json'];
+    : ['wiki', 'search', item.title, ...(item.materializationKb ? ['--kb', item.materializationKb] : []), '--json'];
   const response = await callJson(writer, bin, env, args, artifact);
   const content = contentOf(response) || item.preview;
   if (!content) throw new Error(`ima ${item.sourceType} returned no content`);
