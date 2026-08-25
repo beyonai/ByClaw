@@ -676,22 +676,27 @@ public class ScriptService extends AbstractChatProcess {
     /**
      * WebSocket Gateway 异步模式在 Redis 流结束后由事件路由服务回调完成落库和收尾。
      */
-    public void completeAsyncGatewayContext(ChatProcessContext ctx) {
+    public boolean persistAsyncGatewayContext(ChatProcessContext ctx) {
         try {
             if (ctx.loginInfo != null) {
                 CurrentUserHolder.setLoginInfo(ctx.loginInfo);
             }
             storeMessage(ctx);
             afterProcess(ctx);
+            return true;
         }
         catch (Exception e) {
             log.error("WebSocket 异步会话收尾失败, sessionId: {}, traceId: {}", ctx.sessionId, ctx.traceId, e);
+            return false;
         }
         finally {
             CurrentUserHolder.clearLoginInfo();
-            if (ctx.sessionId != null) {
-                sessionStreamManager.stopSessionListener(String.valueOf(ctx.sessionId));
-            }
+        }
+    }
+
+    public void completeAsyncGatewayContext(ChatProcessContext ctx) {
+        if (persistAsyncGatewayContext(ctx) && ctx != null && ctx.sessionId != null) {
+            sessionStreamManager.stopSessionListener(String.valueOf(ctx.sessionId));
         }
     }
 

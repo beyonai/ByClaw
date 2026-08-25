@@ -305,8 +305,11 @@ public class AssistantChatApplicationService {
             log.error("stopChat 落库已堆积消息失败, sessionId: {}, messageId: {}", sessionId,
                 cleanupMessageId, e);
         }
-        if (sessionStreamManager != null) {
-            sessionStreamManager.stopSessionListener(String.valueOf(stopChatDto.getSessionId()));
+        // 只在本 pod 确实持有该 session 的 listener 时才停止。重启后前端补发的 STOP_CHAT 会落到
+        // 没有任何上下文的新 pod 上，此时停止动作既无对象也会连带触发运行态清理，
+        // 反而破坏重启恢复扫描赖以接管会话的运行态。
+        if (sessionStreamManager != null && sessionStreamManager.isSessionListenerActive(String.valueOf(sessionId))) {
+            sessionStreamManager.stopSessionListener(String.valueOf(sessionId));
         }
     }
 

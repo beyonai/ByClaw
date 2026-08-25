@@ -170,8 +170,17 @@ public class RunningChatSnapshotService {
         redisTemplate.delete(buildKey(ctx.sessionId, ctx.traceId, ctx.modelAnswerMessageId));
     }
 
+    /**
+     * 按本轮回答归属删除快照。
+     * <p>
+     * 快照承载恢复时重建已聚合内容的能力，因此 {@code modelAnswerMessageId} 为空（调用方无法识别
+     * 具体是哪一轮回答）时不做任何删除，避免把仍待恢复的会话内容一并清空。
+     *
+     * @param sessionId 会话 ID
+     * @param modelAnswerMessageId 本次停止对应的回答消息 ID，为空表示归属未知
+     */
     public void delete(Long sessionId, Long modelAnswerMessageId) {
-        if (sessionId == null) {
+        if (sessionId == null || modelAnswerMessageId == null) {
             return;
         }
         deleteBySession(sessionId, modelAnswerMessageId);
@@ -369,10 +378,6 @@ public class RunningChatSnapshotService {
         try {
             Set<String> keys = redisTemplate.keys(pattern);
             if (keys == null || keys.isEmpty()) {
-                return;
-            }
-            if (modelAnswerMessageId == null) {
-                redisTemplate.delete(keys);
                 return;
             }
             keys.stream()

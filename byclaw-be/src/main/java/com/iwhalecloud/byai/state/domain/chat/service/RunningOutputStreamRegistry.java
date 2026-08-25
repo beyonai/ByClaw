@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
+import com.iwhalecloud.byai.state.domain.chat.dto.ChatRuntimeState;
 import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatInfo;
 
 import lombok.extern.slf4j.Slf4j;
@@ -124,21 +125,34 @@ public class RunningOutputStreamRegistry {
         }
     }
 
+    /**
+     * 按本轮回答的归属释放运行态。
+     * <p>
+     * 释放动作会连带删除 {@link ChatRuntimeStateService} 的运行态，而重启恢复扫描完全依赖该运行态定位
+     * 需要接管的会话，因此这里必须先证明「要停的正是当前这一轮」再删除：
+     * <ul>
+     *   <li>{@code modelAnswerMessageId} 为空表示调用方未能识别出任何一轮回答（stopChat 既没有 messageId，
+     *     traceId 也解析失败），此时无法证明归属，保留运行态交由恢复扫描处理，而不是把它抹掉；</li>
+     *   <li>running 标记已不存在但运行态仍在（例如 running 标记 TTL 先到期）时，改用运行态自身记录的
+     *     modelAnswerMessageId 做归属校验，避免上一条留下永不回收的残留。</li>
+     * </ul>
+     *
+     * @param sessionId 会话 ID
+     * @param modelAnswerMessageId 本次停止对应的回答消息 ID，为空表示归属未知
+     */
     public void release(Long sessionId, Long modelAnswerMessageId) {
         if (sessionId == null) {
             return;
         }
-        String key = buildKey(sessionId);
         if (modelAnswerMessageId == null) {
-            redisTemplate.delete(key);
-            if (chatRuntimeStateService != null) {
-                chatRuntimeStateService.delete(sessionId);
-            }
+            log.info("stopChat 未能识别本轮回答，保留运行态以便重启恢复扫描接管, sessionId: {}", sessionId);
             return;
         }
 
+        String key = buildKey(sessionId);
         String value = (String) redisTemplate.opsForValue().get(key);
         if (StringUtils.isBlank(value)) {
+            releaseRuntimeStateIfSameAnswer(sessionId, modelAnswerMessageId);
             return;
         }
 
@@ -153,6 +167,19 @@ public class RunningOutputStreamRegistry {
         }
         catch (Exception e) {
             log.warn("释放运行中 OutputStream 标记失败, sessionId: {}", sessionId, e);
+        }
+    }
+
+    /**
+     * running 标记已消失时的补偿清理：只有运行态记录的正是同一轮回答才删除。
+     */
+    private void releaseRuntimeStateIfSameAnswer(Long sessionId, Long modelAnswerMessageId) {
+        if (chatRuntimeStateService == null) {
+            return;
+        }
+        ChatRuntimeState state = chatRuntimeStateService.get(sessionId);
+        if (state != null && modelAnswerMessageId.equals(state.getModelAnswerMessageId())) {
+            chatRuntimeStateService.delete(sessionId);
         }
     }
 

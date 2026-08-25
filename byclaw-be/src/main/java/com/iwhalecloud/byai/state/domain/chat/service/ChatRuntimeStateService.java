@@ -126,7 +126,11 @@ public class ChatRuntimeStateService {
             for (Object sessionId : sessionIds) {
                 ChatRuntimeState state = get(String.valueOf(sessionId));
                 if (state == null) {
-                    redisTemplate.opsForSet().remove(RUNTIME_INDEX_KEY, sessionId);
+                    // 只有运行态 key 确实不存在才剔除索引：get() 对解析异常同样返回 null，
+                    // 若一并剔除，一次瞬时反序列化失败就会让该会话永久无法被恢复扫描发现。
+                    if (!runtimeStateExists(sessionId)) {
+                        redisTemplate.opsForSet().remove(RUNTIME_INDEX_KEY, sessionId);
+                    }
                     continue;
                 }
                 if (ChatRuntimeState.STATUS_RUNNING.equals(state.getStatus())) {
@@ -141,6 +145,17 @@ public class ChatRuntimeStateService {
             log.warn("列出聊天运行态失败", e);
         }
         return states;
+    }
+
+    private boolean runtimeStateExists(Object sessionId) {
+        try {
+            return Boolean.TRUE.equals(redisTemplate.hasKey(RUNTIME_KEY_PREFIX + sessionId));
+        }
+        catch (Exception e) {
+            // 探测失败按存在处理，宁可多留一轮索引，也不误删待恢复会话。
+            log.warn("探测聊天运行态 key 失败, sessionId: {}", sessionId, e);
+            return true;
+        }
     }
 
     public boolean tryAcquireRecoveryLock(Long sessionId) {
