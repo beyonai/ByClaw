@@ -75,7 +75,7 @@ describe("ByClawSuperGatewayWorker", () => {
     );
   });
 
-  it("returns WAITING_AGENT when the internal Run releases execution for a callback", async () => {
+  it("keeps reasoning open while a delegated Agent is processing", async () => {
     const emitProtocolChunk = vi.fn(async () => undefined);
     const emitChunk = vi.fn(async () => undefined);
     const worker = createWorker({
@@ -94,12 +94,38 @@ describe("ByClawSuperGatewayWorker", () => {
     expect(emitProtocolChunk.mock.calls.map((call) => call[2])).not.toContain(
       "调度后不应展示的思考",
     );
-    expect(emitProtocolChunk).toHaveBeenCalledWith(
-      "session-1",
-      "trace-1",
-      "",
-      expect.objectContaining({ eventType: EventType.REASONING_LOG_END }),
+    expect(emitProtocolChunk.mock.calls).toContainEqual(
+      expect.arrayContaining([
+        "session-1",
+        "trace-1",
+        "",
+        expect.objectContaining({ eventType: EventType.REASONING_LOG_START }),
+      ]),
     );
+    expect(
+      emitProtocolChunk.mock.calls.some(
+        (call) => call[3]?.eventType === EventType.REASONING_LOG_END,
+      ),
+    ).toBe(false);
+  });
+
+  it("keeps reasoning open when a fast callback queues the Run for resume", async () => {
+    const emitProtocolChunk = vi.fn(async () => undefined);
+    const worker = createWorker({
+      createSessionRun: vi.fn(async () => run("WAITING_AGENT")),
+      cancelRun: vi.fn(),
+      streamEvents: () => fastCallbackEvents(),
+      emitProtocolChunk,
+    });
+
+    const result = await worker.processCommand(askCommand(), contextMock());
+
+    expect(result.status).toBe(AgentState.WAITING_AGENT);
+    expect(
+      emitProtocolChunk.mock.calls.some(
+        (call) => call[3]?.eventType === EventType.REASONING_LOG_END,
+      ),
+    ).toBe(false);
   });
 
   it("passes an expert-team reference and isolates its persistent session binding", async () => {
@@ -1175,6 +1201,20 @@ async function* suspendedEvents(): AsyncIterable<RunEvent> {
   yield event(4, "run.suspended", {
     status: "WAITING_AGENT",
     delegationId: "delegation-1",
+  });
+}
+
+/** 模拟数字员工极快回调、初始 Ask 尚未观察到 run.suspended 的竞态。 */
+async function* fastCallbackEvents(): AsyncIterable<RunEvent> {
+  yield event(1, "delegation.started", {
+    delegationId: "delegation-1",
+    agentId: "agent-1",
+    agentName: "数据分析助手",
+    task: "分析数据",
+  });
+  yield event(2, "run.status", {
+    status: "QUEUED",
+    resumed: true,
   });
 }
 

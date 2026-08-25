@@ -651,16 +651,7 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
       if (event.type === "delegation.started" && !summaryMessageId) {
         // 调度卡发出即表示 Super 已经把控制权交给子 Agent。当前执行随后只负责
         // 落库并进入 WAITING_AGENT，不能再把迟到的 Leader 思考或正文发到前端。
-        if (reasoningStarted && !reasoningEnded) {
-          await this.#presenter.emitReasoning(
-            run.id,
-            context,
-            reasoningMessageId,
-            "",
-            EventType.REASONING_LOG_END,
-          );
-          reasoningEnded = true;
-        }
+        // reasoning 保持开启，让“数字员工正在处理”工具卡在等待回调期间保持展开。
         delegationDispatched = true;
         continue;
       }
@@ -711,15 +702,6 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
         stringData(event.data.status) === "QUEUED" &&
         event.data.resumed === true
       ) {
-        if (reasoningStarted && !reasoningEnded) {
-          await this.#presenter.emitReasoning(
-            run.id,
-            context,
-            reasoningMessageId,
-            "",
-            EventType.REASONING_LOG_END,
-          );
-        }
         return new AgentTaskResult({
           status: AgentState.WAITING_AGENT,
           content: "",
@@ -768,15 +750,6 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
       }
 
       if (event.type === "run.suspended") {
-        if (reasoningStarted && !reasoningEnded) {
-          await this.#presenter.emitReasoning(
-            run.id,
-            context,
-            reasoningMessageId,
-            "",
-            EventType.REASONING_LOG_END,
-          );
-        }
         return new AgentTaskResult({
           status: AgentState.WAITING_AGENT,
           content: "",
