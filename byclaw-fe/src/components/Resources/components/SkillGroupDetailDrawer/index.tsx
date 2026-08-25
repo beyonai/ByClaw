@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Button, Empty, Modal, Popconfirm, Spin, message } from 'antd';
-import { ArrowLeftOutlined } from '@ant-design/icons';
+import { Button, Empty, Modal, Popconfirm, Spin, Tooltip, message } from 'antd';
+import { ArrowLeftOutlined, QuestionCircleOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import useGlobal from '@/hooks/useGlobal';
 import {
@@ -536,18 +536,22 @@ const SkillGroupDetailDrawer: React.FC<SkillGroupDetailDrawerProps> = ({ groupId
           <Button key="cancel" disabled={uninstalling} onClick={() => setUninstallModalOpen(false)}>
             {intl.formatMessage({ id: 'common.cancel' })}
           </Button>,
-          <Button key="preserve" disabled={uninstalling} onClick={() => void executeUninstall('PRESERVE_SHARED')}>
-            {intl.formatMessage({ id: 'resource.skillGroup.uninstallPreserve' })}
-          </Button>,
-          <Button
-            key="all"
-            danger
-            type="primary"
-            loading={uninstalling}
-            onClick={() => void executeUninstall('REMOVE_ALL')}
-          >
-            {intl.formatMessage({ id: 'resource.skillGroup.uninstallAll' })}
-          </Button>,
+          <Tooltip key="preserve" title={intl.formatMessage({ id: 'resource.skillGroup.uninstallPreserveTooltip' })}>
+            <Button disabled={uninstalling} onClick={() => void executeUninstall('PRESERVE_SHARED')}>
+              {intl.formatMessage({ id: 'resource.skillGroup.uninstallPreserve' })}
+              <span aria-hidden data-testid="uninstall-preserve-tooltip-icon">
+                <QuestionCircleOutlined />
+              </span>
+            </Button>
+          </Tooltip>,
+          <Tooltip key="all" title={intl.formatMessage({ id: 'resource.skillGroup.uninstallAllTooltip' })}>
+            <Button danger type="primary" loading={uninstalling} onClick={() => void executeUninstall('REMOVE_ALL')}>
+              {intl.formatMessage({ id: 'resource.skillGroup.uninstallAll' })}
+              <span aria-hidden data-testid="uninstall-all-tooltip-icon">
+                <QuestionCircleOutlined />
+              </span>
+            </Button>
+          </Tooltip>,
         ]}
         destroyOnHidden
       >

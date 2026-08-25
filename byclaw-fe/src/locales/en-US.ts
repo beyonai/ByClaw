@@ -114,6 +114,10 @@ export default {
     'Some skills were installed manually or are referenced by other skill groups. Removing all will remove those sources too.',
   'resource.skillGroup.uninstallPreserve': 'Only uninstall group-exclusive skills',
   'resource.skillGroup.uninstallAll': 'Uninstall all skills',
+  'resource.skillGroup.uninstallPreserveTooltip':
+    'Keep skills that are still installed manually or referenced by other skill groups.',
+  'resource.skillGroup.uninstallAllTooltip':
+    'Also remove the manual-installation and other skill-group reference sources for these skills.',
   'resource.skillGroup.manualSource': 'Manually installed',
   'resource.skillGroup.otherGroupSource': 'Also from: {groups}',
   'resource.skillGroup.uninstallSuccess': 'Skill group uninstalled successfully',

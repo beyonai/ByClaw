@@ -112,6 +112,8 @@ export default {
     '以下技能还由手工安装或其他技能组引用。全部卸载会同时移除这些来源，请选择处理方式。',
   'resource.skillGroup.uninstallPreserve': '仅卸载本组独占技能',
   'resource.skillGroup.uninstallAll': '全部技能卸载',
+  'resource.skillGroup.uninstallPreserveTooltip': '保留仍由手工安装或其他技能组引用的技能。',
+  'resource.skillGroup.uninstallAllTooltip': '同时移除这些技能的手工安装和其他技能组引用来源。',
   'resource.skillGroup.manualSource': '手工安装',
   'resource.skillGroup.otherGroupSource': '同时来自：{groups}',
   'resource.skillGroup.uninstallSuccess': '技能组卸载成功',
