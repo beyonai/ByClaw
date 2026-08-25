@@ -55,8 +55,6 @@ EVENT_PUBLISHER_PROVIDER_PATH = (
 )
 _TIMEOUT_SECONDS = 30.0
 
-os.environ.setdefault("BY_QA_EVENT_PUBLISHER_PROVIDER", EVENT_PUBLISHER_PROVIDER_PATH)
-
 PostJson = Callable[
     [str, dict[str, Any], dict[str, str]],
     Mapping[str, Any] | Awaitable[Mapping[str, Any]],
