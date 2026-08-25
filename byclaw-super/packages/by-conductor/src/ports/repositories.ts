@@ -128,15 +128,28 @@ export interface RunExecutionClaim {
 }
 
 /** 因回调超时而脱离 ResumeCommand 上下文的最终结果投递任务。 */
-export interface CallbackTimeoutDelivery {
+interface CallbackTimeoutDeliveryResult {
   runId: string;
-  externalSessionId: string;
-  traceId: string;
-  parentMessageId: string;
   runStatus: "COMPLETED" | "FAILED" | "CANCELLED";
   finalAnswer?: string;
   error?: string;
 }
+
+export type CallbackTimeoutDelivery = CallbackTimeoutDeliveryResult &
+  (
+    | {
+        externalSessionId: string;
+        traceId: string;
+        parentMessageId: string;
+      }
+    | {
+        /** 部分存在的 by-framework 路由损坏时不得静默确认，保留 Outbox 供修复后重试。 */
+        routingError: string;
+        externalSessionId?: string;
+        traceId?: string;
+        parentMessageId?: string;
+      }
+  );
 
 export interface RunExecutionQueue {
   /** 通知队列存在新工作；PostgreSQL 实现可使用 NOTIFY，本地实现直接入队。 */

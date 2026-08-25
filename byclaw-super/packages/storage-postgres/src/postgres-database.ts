@@ -1368,7 +1368,11 @@ export class PostgresRunExecutionQueue implements RunExecutionQueue {
             WHERE run_id = $1`,
           [row.run_id, input.instanceId, input.leaseMs],
         );
-        if (!row.external_session_id || !row.trace_id || !row.parent_message_id) {
+        const hasAnyExternalRoute = Boolean(
+          row.external_session_id || row.trace_id || row.parent_message_id,
+        );
+        if (!hasAnyExternalRoute) {
+          // HTTP/SSE Run 没有 by-framework 外部流，数据库 run.failed 已经是它的终态。
           await client.query(
             `UPDATE ${table(this.schema, "callback_timeout_outbox")}
                 SET delivered_at = clock_timestamp(), updated_at = clock_timestamp()
@@ -1377,14 +1381,37 @@ export class PostgresRunExecutionQueue implements RunExecutionQueue {
           );
           continue;
         }
-        deliveries.push({
+        const deliveryResult = {
           runId: row.run_id,
-          externalSessionId: row.external_session_id,
-          traceId: row.trace_id,
-          parentMessageId: row.parent_message_id,
           runStatus: row.run_status,
           ...(row.final_answer === null ? {} : { finalAnswer: row.final_answer }),
           ...(row.error_message === null ? {} : { error: row.error_message }),
+        };
+        if (!row.external_session_id || !row.trace_id) {
+          const missingFields = [
+            !row.external_session_id ? "externalSessionId" : "",
+            !row.trace_id ? "traceId" : "",
+          ].filter(Boolean);
+          deliveries.push({
+            ...deliveryResult,
+            routingError: `Callback timeout routing is incomplete: missing ${missingFields.join(", ")}`,
+            ...(row.external_session_id
+              ? { externalSessionId: row.external_session_id }
+              : {}),
+            ...(row.trace_id ? { traceId: row.trace_id } : {}),
+            ...(row.parent_message_id
+              ? { parentMessageId: row.parent_message_id }
+              : {}),
+          });
+          continue;
+        }
+        deliveries.push({
+          ...deliveryResult,
+          externalSessionId: row.external_session_id,
+          traceId: row.trace_id,
+          // session + trace 已足以关闭正确的前端流；旧数据缺少 messageId 时使用稳定节点。
+          parentMessageId:
+            row.parent_message_id ?? `${row.run_id}:super-summary:answer`,
         });
       }
       return deliveries;

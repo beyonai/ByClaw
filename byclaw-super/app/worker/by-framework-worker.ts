@@ -15,6 +15,7 @@ import {
   Plugin,
   PluginRegistry,
   ResumeCommand,
+  TaskCancelledError,
   WorkerRegistry,
   WorkerRunner,
   type AgentContext,
@@ -48,6 +49,16 @@ import {
   type WorkerProtocolEmitter,
 } from "./by-framework-run-presenter.js";
 import { truncateForLog } from "../log-format.js";
+
+const CHILD_RESUME_PROTOCOL_ERROR_CODE = "CHILD_RESUME_PROTOCOL_INVALID";
+const CHILD_RESUME_PROTOCOL_USER_MESSAGE =
+  "子 Agent 返回结果协议异常，本次调度已终止，请重试。";
+const CHILD_RESUME_NOT_RECOVERABLE_ERROR_CODE = "CHILD_RESUME_NOT_RECOVERABLE";
+const CHILD_RESUME_NOT_RECOVERABLE_USER_MESSAGE =
+  "未找到可恢复的子 Agent 调度，本次任务已终止，请重试。";
+const COMMAND_PROCESSING_ERROR_CODE = "COMMAND_PROCESSING_FAILED";
+const COMMAND_PROCESSING_USER_MESSAGE =
+  "超级助手处理异常，本次任务已终止，请重试。";
 
 export type RedisClient = ReturnType<typeof createRedis>;
 export type WorkerRunService = Pick<
@@ -153,13 +164,49 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
    * Resume 不创建新 Run，只完成回调会话，让 Connector 能收到终止事件。
    */
   async processCommand(command: GatewayCommand, context: AgentContext): Promise<AgentTaskResult> {
-    if (command instanceof ResumeCommand) {
-      return this.#processResumeCommand(command, context);
+    try {
+      if (command instanceof ResumeCommand) {
+        return await this.#processResumeCommand(command, context);
+      }
+      if (command instanceof AskAgentCommand) {
+        return await this.#processAskCommand(command, context);
+      }
+      throw new Error(`Unsupported by-framework command: ${command.actionType}`);
+    } catch (error) {
+      const normalized = toError(error);
+      // 取消仍交给 GatewayWorker 的专用分支，保留级联取消和 CANCELLED 回调语义。
+      if (error instanceof TaskCancelledError || normalized.name === "TaskCancelledError") {
+        throw error;
+      }
+      // 有上游 Agent 的 Ask 由 by-framework 返回 FAILED Resume；当前 Worker 不能越权
+      // 关闭上游拥有的共享流。Resume 自身没有这一回传分支，必须在本地显式收口。
+      if (!(command instanceof ResumeCommand) && command.header.sourceAgentType) {
+        throw error;
+      }
+      const runId = recordString(command.header.metadata, "parent_run_id");
+      const delegationId = recordString(command.header.metadata, "delegation_id");
+      this.#logger?.error(
+        {
+          ...commandLogFields(command),
+          runId,
+          delegationId,
+          error: normalized.message,
+        },
+        "处理 by-framework 命令失败，正在终止当前用户流",
+      );
+      await this.#finishFailureStream(context, {
+        errorCode: COMMAND_PROCESSING_ERROR_CODE,
+        userMessage: COMMAND_PROCESSING_USER_MESSAGE,
+        runId,
+        delegationId,
+      });
+      return new AgentTaskResult({
+        status: AgentState.FAILED,
+        content: "",
+        replyData: null,
+        metadata: { error_code: COMMAND_PROCESSING_ERROR_CODE },
+      });
     }
-    if (command instanceof AskAgentCommand) {
-      return this.#processAskCommand(command, context);
-    }
-    throw new Error(`Unsupported by-framework command: ${command.actionType}`);
   }
 
   /** 消费用户交互或子 Agent 终态回调，并恢复原 Run。 */
@@ -218,8 +265,8 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
       childResume = parseChildAgentResume(command);
     } catch (error) {
       // 协议错误属于不可重试消息。若继续抛出，Redis consumer group 会反复领取同一条
-      // Resume 并阻塞后续正常回调；记录关联字段后正常 ACK，由等待中的 Delegation
-      // 按数据库截止时间收敛。
+      // Resume 并阻塞后续正常回调；记录关联字段后正常 ACK，同时显式输出失败终态，
+      // 避免原 Run 在数据库回调截止时间到达前让前端持续空转。
       this.#logger?.warn(
         {
           ...commandLogFields(command),
@@ -230,11 +277,16 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
         },
         "拒绝协议不完整的子 Agent Resume 回调",
       );
-      context.setStreamFinished(true);
+      await this.#finishRejectedResumeStream(
+        context,
+        runId,
+        recordString(command.header.metadata, "delegation_id"),
+      );
       return new AgentTaskResult({
-        status: AgentState.COMPLETED,
+        status: AgentState.FAILED,
         content: "",
         replyData: null,
+        metadata: { error_code: CHILD_RESUME_PROTOCOL_ERROR_CODE },
       });
     }
     const resumed = childResume
@@ -257,6 +309,27 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
         ? "已持久化子 Agent Resume 回调并唤醒原 Run"
         : "收到无可恢复 Run 的子 Agent Resume 回调",
     );
+    if (childResume && !resumed.accepted && !resumed.runId) {
+      this.#logger?.warn(
+        {
+          ...commandLogFields(command),
+          requestMessageId: childResume.requestMessageId,
+          delegationId: childResume.delegationId,
+        },
+        "子 Agent Resume 未找到可恢复的 Delegation",
+      );
+      await this.#finishFailureStream(context, {
+        errorCode: CHILD_RESUME_NOT_RECOVERABLE_ERROR_CODE,
+        userMessage: CHILD_RESUME_NOT_RECOVERABLE_USER_MESSAGE,
+        delegationId: childResume.delegationId,
+      });
+      return new AgentTaskResult({
+        status: AgentState.FAILED,
+        content: "",
+        replyData: null,
+        metadata: { error_code: CHILD_RESUME_NOT_RECOVERABLE_ERROR_CODE },
+      });
+    }
     if (resumed.accepted && resumed.runId && resumed.forwardEvents !== false) {
       const beyondToken = commandString(command, "Beyond-Token");
       if (!beyondToken) {
@@ -433,6 +506,73 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
         this.#activeRuns.delete(key);
       }
     }
+  }
+
+  /** 协议不完整的终态回调无法安全恢复原 Run；立即告知用户并关闭当前 trace。 */
+  async #finishRejectedResumeStream(
+    context: AgentContext,
+    runId: string,
+    delegationId: string,
+  ): Promise<void> {
+    await this.#finishFailureStream(context, {
+      errorCode: CHILD_RESUME_PROTOCOL_ERROR_CODE,
+      userMessage: CHILD_RESUME_PROTOCOL_USER_MESSAGE,
+      runId,
+      delegationId,
+      protocolError: true,
+    });
+  }
+
+  /** 由当前 BY_SUPER trace 负责的失败必须同时包含用户正文、最终快照和流终止帧。 */
+  async #finishFailureStream(
+    context: AgentContext,
+    input: {
+      errorCode: string;
+      userMessage: string;
+      runId?: string;
+      delegationId?: string;
+      protocolError?: boolean;
+    },
+  ): Promise<void> {
+    const runId = input.runId?.trim() ?? "";
+    const delegationId = input.delegationId?.trim() ?? "";
+    const messageId = runId
+      ? `${runId}:super-summary:answer`
+      : `${context.executionId || "command"}:error`;
+    const metadata = {
+      error_code: input.errorCode,
+      ...(input.protocolError ? { protocol_error: true } : {}),
+      ...(runId ? { parent_run_id: runId } : {}),
+      ...(delegationId ? { delegation_id: delegationId } : {}),
+    };
+    const options = {
+      sourceAgentType: this.#agentType,
+      messageId,
+      parentMessageId: "-1",
+      metadata,
+    };
+    await this.#protocolEmitter.emitChunk(
+      context.sessionId,
+      context.traceId,
+      { content: input.userMessage, metadata },
+      { ...options, eventType: EventType.ANSWER_DELTA },
+    );
+    await this.#protocolEmitter.emitChunk(
+      context.sessionId,
+      context.traceId,
+      { content: input.userMessage, metadata },
+      { ...options, eventType: EventType.FINAL_ANSWER },
+    );
+    await this.#protocolEmitter.emitChunk(
+      context.sessionId,
+      context.traceId,
+      { content: "", metadata },
+      {
+        ...options,
+        eventType: EventType.APP_STREAM_RESPONSE,
+      },
+    );
+    context.setStreamFinished(true);
   }
 
   /** ResumeCommand 是新 execution；显式同步最初入站 execution，避免长期停在 WAITING_AGENT。 */

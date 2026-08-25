@@ -427,14 +427,16 @@ describe("ByClawSuperGatewayWorker", () => {
     expect(emitState).toHaveBeenCalledWith({ state: AgentState.COMPLETED }, undefined);
   });
 
-  it("acknowledges a malformed child Resume instead of poisoning the Redis consumer group", async () => {
+  it("acknowledges a malformed child Resume and terminates its user stream", async () => {
     const resumeDelegation = vi.fn();
+    const emitProtocolChunk = vi.fn(async () => undefined);
     const logger = loggerMock();
     const worker = createWorker({
       createSessionRun: vi.fn(),
       resumeDelegation,
       cancelRun: vi.fn(),
       streamEvents: () => completedEvents(),
+      emitProtocolChunk,
       logger,
     });
     const command = new ResumeCommand(
@@ -456,12 +458,51 @@ describe("ByClawSuperGatewayWorker", () => {
     const result = await worker.processCommand(command, contextMock({ setStreamFinished }));
 
     expect(result).toMatchObject({
-      status: AgentState.COMPLETED,
+      status: AgentState.FAILED,
       content: "",
       replyData: null,
+      metadata: { error_code: "CHILD_RESUME_PROTOCOL_INVALID" },
     });
     expect(setStreamFinished).toHaveBeenCalledWith(true);
     expect(resumeDelegation).not.toHaveBeenCalled();
+    for (const eventType of [
+      EventType.ANSWER_DELTA,
+      EventType.FINAL_ANSWER,
+      EventType.APP_STREAM_RESPONSE,
+    ]) {
+      expect(emitProtocolChunk).toHaveBeenCalledWith(
+        "session-1",
+        "trace-1",
+        expect.objectContaining({
+          content:
+            eventType === EventType.APP_STREAM_RESPONSE
+              ? ""
+              : "子 Agent 返回结果协议异常，本次调度已终止，请重试。",
+          metadata: expect.objectContaining({
+            error_code: "CHILD_RESUME_PROTOCOL_INVALID",
+            parent_run_id: "run-1",
+            delegation_id: "delegation-1",
+          }),
+        }),
+        expect.objectContaining({
+          eventType,
+          messageId: "run-1:super-summary:answer",
+          parentMessageId: "-1",
+          metadata: expect.objectContaining({
+            error_code: "CHILD_RESUME_PROTOCOL_INVALID",
+            parent_run_id: "run-1",
+            delegation_id: "delegation-1",
+          }),
+        }),
+      );
+    }
+    const appStreamCall = emitProtocolChunk.mock.calls.find(
+      (call) => call[3]?.eventType === EventType.APP_STREAM_RESPONSE,
+    );
+    expect(appStreamCall).toBeDefined();
+    expect(emitProtocolChunk.mock.invocationCallOrder.at(-1)).toBeLessThan(
+      setStreamFinished.mock.invocationCallOrder[0],
+    );
     expect(logger.warn).toHaveBeenCalledWith(
       expect.objectContaining({
         delegationId: "delegation-1",
@@ -470,6 +511,122 @@ describe("ByClawSuperGatewayWorker", () => {
       }),
       "拒绝协议不完整的子 Agent Resume 回调",
     );
+  });
+
+  it("recovers a child Resume delegation from parentMessageId when metadata lost it", async () => {
+    const resumeDelegation = vi.fn(async () => ({
+      accepted: true,
+      runId: "run-1",
+      forwardEvents: false,
+    }));
+    const worker = createWorker({
+      createSessionRun: vi.fn(),
+      resumeDelegation,
+      cancelRun: vi.fn(),
+      streamEvents: () => completedEvents(),
+    });
+    const command = new ResumeCommand(
+      new MessageHeader("delegation-1", "session-1", "trace-1", {
+        sourceAgentType: "BY_CHILD",
+        targetAgentType: "BY_SUPER",
+        parentMessageId: "delegation-1:request",
+        metadata: { parent_run_id: "run-1" },
+      }),
+      "",
+      AgentState.COMPLETED,
+      "子 Agent 最终回答",
+    );
+    const setStreamFinished = vi.fn();
+
+    const result = await worker.processCommand(command, contextMock({ setStreamFinished }));
+
+    expect(resumeDelegation).toHaveBeenCalledWith({
+      delegationId: "delegation-1",
+      status: AgentState.COMPLETED,
+      finalAnswer: "子 Agent 最终回答",
+    });
+    expect(result.status).toBe(AgentState.COMPLETED);
+    expect(setStreamFinished).toHaveBeenCalledWith(true);
+  });
+
+  it("terminates a terminal child Resume whose Delegation no longer exists", async () => {
+    const emitProtocolChunk = vi.fn(async () => undefined);
+    const worker = createWorker({
+      createSessionRun: vi.fn(),
+      resumeDelegation: vi.fn(async () => ({ accepted: false })),
+      cancelRun: vi.fn(),
+      streamEvents: () => completedEvents(),
+      emitProtocolChunk,
+      logger: loggerMock(),
+    });
+    const command = new ResumeCommand(
+      new MessageHeader("callback-message", "session-1", "trace-1", {
+        sourceAgentType: "BY_CHILD",
+        targetAgentType: "BY_SUPER",
+        parentMessageId: "missing-delegation:request",
+        metadata: { delegation_id: "missing-delegation" },
+      }),
+      "",
+      AgentState.COMPLETED,
+      "子 Agent 最终回答",
+    );
+    const setStreamFinished = vi.fn();
+
+    const result = await worker.processCommand(command, contextMock({ setStreamFinished }));
+
+    expect(result).toMatchObject({
+      status: AgentState.FAILED,
+      metadata: { error_code: "CHILD_RESUME_NOT_RECOVERABLE" },
+    });
+    expect(
+      emitProtocolChunk.mock.calls.map((call) => call[3]?.eventType),
+    ).toEqual([
+      EventType.ANSWER_DELTA,
+      EventType.FINAL_ANSWER,
+      EventType.APP_STREAM_RESPONSE,
+    ]);
+    expect(setStreamFinished).toHaveBeenCalledWith(true);
+  });
+
+  it("terminates a Resume when its persistence step throws", async () => {
+    const emitProtocolChunk = vi.fn(async () => undefined);
+    const worker = createWorker({
+      createSessionRun: vi.fn(),
+      resumeDelegation: vi.fn(async () => {
+        throw new Error("database unavailable");
+      }),
+      cancelRun: vi.fn(),
+      streamEvents: () => completedEvents(),
+      emitProtocolChunk,
+      logger: loggerMock(),
+    });
+    const command = new ResumeCommand(
+      new MessageHeader("callback-message", "session-1", "trace-1", {
+        sourceAgentType: "BY_CHILD",
+        targetAgentType: "BY_SUPER",
+        parentMessageId: "delegation-1:request",
+        metadata: { delegation_id: "delegation-1", parent_run_id: "run-1" },
+      }),
+      "",
+      AgentState.COMPLETED,
+      "子 Agent 最终回答",
+    );
+    const setStreamFinished = vi.fn();
+
+    const result = await worker.processCommand(command, contextMock({ setStreamFinished }));
+
+    expect(result).toMatchObject({
+      status: AgentState.FAILED,
+      metadata: { error_code: "COMMAND_PROCESSING_FAILED" },
+    });
+    expect(
+      emitProtocolChunk.mock.calls.map((call) => call[3]?.eventType),
+    ).toEqual([
+      EventType.ANSWER_DELTA,
+      EventType.FINAL_ANSWER,
+      EventType.APP_STREAM_RESPONSE,
+    ]);
+    expect(setStreamFinished).toHaveBeenCalledWith(true);
   });
 
   it("authorizes an interaction Resume before submitting the response", async () => {
@@ -504,15 +661,17 @@ describe("ByClawSuperGatewayWorker", () => {
     expect(result.replyData).toBeNull();
   });
 
-  it("rejects an interaction Resume without Beyond-Token", async () => {
+  it("terminates an interaction Resume without Beyond-Token", async () => {
     const authorizeRun = vi.fn();
     const respondToInteraction = vi.fn();
+    const emitProtocolChunk = vi.fn(async () => undefined);
     const worker = createWorker({
       createSessionRun: vi.fn(),
       authorizeRun,
       respondToInteraction,
       cancelRun: vi.fn(),
       streamEvents: () => completedEvents(),
+      emitProtocolChunk,
     });
     const command = new ResumeCommand(
       interactionHeader(""),
@@ -521,9 +680,19 @@ describe("ByClawSuperGatewayWorker", () => {
       {},
     );
 
-    await expect(worker.processCommand(command, contextMock())).rejects.toThrow(
-      "Beyond-Token metadata is required",
-    );
+    const setStreamFinished = vi.fn();
+    const result = await worker.processCommand(command, contextMock({ setStreamFinished }));
+
+    expect(result).toMatchObject({
+      status: AgentState.FAILED,
+      metadata: { error_code: "COMMAND_PROCESSING_FAILED" },
+    });
+    expect(emitProtocolChunk.mock.calls.map((call) => call[3]?.eventType)).toEqual([
+      EventType.ANSWER_DELTA,
+      EventType.FINAL_ANSWER,
+      EventType.APP_STREAM_RESPONSE,
+    ]);
+    expect(setStreamFinished).toHaveBeenCalledWith(true);
     expect(authorizeRun).not.toHaveBeenCalled();
     expect(respondToInteraction).not.toHaveBeenCalled();
   });
@@ -920,11 +1089,13 @@ describe("ByClawSuperGatewayWorker", () => {
     expect(result.status).toBe(AgentState.CANCELLED);
   });
 
-  it("rejects AskAgent without Beyond-Token", async () => {
+  it("terminates a top-level AskAgent without Beyond-Token", async () => {
+    const emitProtocolChunk = vi.fn(async () => undefined);
     const worker = createWorker({
       createSessionRun: vi.fn(),
       cancelRun: vi.fn(),
       streamEvents: () => completedEvents(),
+      emitProtocolChunk,
     });
     const command = new AskAgentCommand(
       new MessageHeader("message-1", "session-1", "trace-1", {
@@ -933,9 +1104,19 @@ describe("ByClawSuperGatewayWorker", () => {
       "hello",
     );
 
-    await expect(worker.processCommand(command, contextMock())).rejects.toThrow(
-      "Beyond-Token metadata is required",
-    );
+    const setStreamFinished = vi.fn();
+    const result = await worker.processCommand(command, contextMock({ setStreamFinished }));
+
+    expect(result).toMatchObject({
+      status: AgentState.FAILED,
+      metadata: { error_code: "COMMAND_PROCESSING_FAILED" },
+    });
+    expect(emitProtocolChunk.mock.calls.map((call) => call[3]?.eventType)).toEqual([
+      EventType.ANSWER_DELTA,
+      EventType.FINAL_ANSWER,
+      EventType.APP_STREAM_RESPONSE,
+    ]);
+    expect(setStreamFinished).toHaveBeenCalledWith(true);
   });
 
   it("reads thinkingLevel from AskAgent extraPayload", async () => {

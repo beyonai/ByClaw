@@ -24,10 +24,12 @@ export function childRequestMessageId(delegationId: string): string {
 /**
  * 解析 by-framework 1.5.x 的真实 ResumeCommand：
  * - content 可以为空；COMPLETED 的正文直接位于字符串 replyData。
- * - metadata.delegation_id 标识等待中的 Delegation。
+ * - metadata.delegation_id 优先标识等待中的 Delegation；旧回调缺失时可从确定性的
+ *   `${delegationId}:request` parentMessageId 恢复。
  * - parentMessageId 必须回指 `${delegationId}:request`，防止串单。
  *
- * 非终态不是可消费的子 Agent 回调；终态协议不完整则直接拒绝，不猜测其它 ID。
+ * 非终态不是可消费的子 Agent 回调；终态只接受两种相互可校验的确定性来源，
+ * 不从普通 messageId 或正文猜测关联关系。
  */
 export function parseChildAgentResume(command: ResumeCommand): ChildAgentResume | undefined {
   const status = command.status.trim().toUpperCase();
@@ -35,12 +37,16 @@ export function parseChildAgentResume(command: ResumeCommand): ChildAgentResume 
     return undefined;
   }
 
-  const delegationId = recordString(command.header.metadata, "delegation_id");
+  const metadataDelegationId = recordString(command.header.metadata, "delegation_id");
+  const requestMessageId = command.header.parentMessageId.trim();
+  const parentDelegationId = delegationIdFromRequestMessageId(requestMessageId);
+  const delegationId = metadataDelegationId || parentDelegationId;
   if (!delegationId) {
-    throw new Error("ResumeCommand metadata.delegation_id is required");
+    throw new Error(
+      "ResumeCommand delegation_id is required in metadata or a :request parentMessageId",
+    );
   }
 
-  const requestMessageId = command.header.parentMessageId.trim();
   const expectedRequestMessageId = childRequestMessageId(delegationId);
   if (requestMessageId !== expectedRequestMessageId) {
     throw new Error(
@@ -56,6 +62,14 @@ export function parseChildAgentResume(command: ResumeCommand): ChildAgentResume 
     status,
     finalAnswer: resumeFinalAnswer(status, command.replyData),
   };
+}
+
+/** 只从 callAgent 生成的确定性请求 ID 恢复 Delegation，空前缀不是合法 ID。 */
+function delegationIdFromRequestMessageId(requestMessageId: string): string {
+  if (!requestMessageId.endsWith(CHILD_REQUEST_SUFFIX)) {
+    return "";
+  }
+  return requestMessageId.slice(0, -CHILD_REQUEST_SUFFIX.length).trim();
 }
 
 function resumeFinalAnswer(status: string, replyData: unknown): string {

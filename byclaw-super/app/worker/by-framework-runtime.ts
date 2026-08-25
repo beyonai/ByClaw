@@ -217,6 +217,17 @@ export class ByFrameworkWorkerRuntime {
   }
 
   async #deliverTimeout(delivery: CallbackTimeoutDelivery): Promise<void> {
+    if ("routingError" in delivery) {
+      this.#logger?.error(
+        {
+          workerId: this.workerId,
+          runId: delivery.runId,
+          error: delivery.routingError,
+        },
+        "子 Agent 回调超时结果缺少外部流路由，保留 Outbox 等待修复",
+      );
+      throw new Error(delivery.routingError);
+    }
     const content =
       delivery.finalAnswer?.trim() ||
       delivery.error?.trim() ||
@@ -226,24 +237,25 @@ export class ByFrameworkWorkerRuntime {
       messageId: delivery.parentMessageId,
       metadata: { parent_run_id: delivery.runId, callback_timeout: true },
     };
+    const metadata = options.metadata;
     if (content) {
       await this.#protocolEmitter.emitChunk(
         delivery.externalSessionId,
         delivery.traceId,
-        content,
+        { content, metadata },
         { ...options, eventType: EventType.ANSWER_DELTA },
       );
       await this.#protocolEmitter.emitChunk(
         delivery.externalSessionId,
         delivery.traceId,
-        content,
+        { content, metadata },
         { ...options, eventType: EventType.FINAL_ANSWER },
       );
     }
     await this.#protocolEmitter.emitChunk(
       delivery.externalSessionId,
       delivery.traceId,
-      "",
+      { content: "", metadata },
       { ...options, eventType: EventType.APP_STREAM_RESPONSE },
     );
     const execution = await this.#registry.getExecutionByMessageId(

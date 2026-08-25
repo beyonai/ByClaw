@@ -31,11 +31,17 @@ describe("by-framework child Resume contract", () => {
     expect(parseChildAgentResume(command)?.delegationId).toBe("delegation-1");
   });
 
-  it("rejects a terminal callback without delegation metadata", () => {
+  it("recovers delegationId from the deterministic request parent when metadata is missing", () => {
     const command = resumeCommand({ metadata: {} });
 
+    expect(parseChildAgentResume(command)?.delegationId).toBe("delegation-1");
+  });
+
+  it("rejects a terminal callback without either deterministic delegation source", () => {
+    const command = resumeCommand({ metadata: {}, parentMessageId: "callback-parent" });
+
     expect(() => parseChildAgentResume(command)).toThrow(
-      "ResumeCommand metadata.delegation_id is required",
+      "ResumeCommand delegation_id is required in metadata or a :request parentMessageId",
     );
   });
 
