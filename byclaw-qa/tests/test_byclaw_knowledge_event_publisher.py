@@ -268,6 +268,45 @@ async def test_build_terminal_events_are_reported(build_status, expected):
 
 
 @pytest.mark.asyncio
+async def test_import_and_build_use_same_canonical_root_file_path():
+    calls = []
+    publisher = _publisher(calls)
+    imported = build_resource_event(
+        event_type=ResourceEventType.FILE_IMPORTED,
+        kb_code="kb-1",
+        source_path=None,
+        target_path="/ByDC.md",
+        result={"total": 1, "succeeded": 1, "failed": 0},
+    )
+    built = build_file_completed_event(
+        kb_code="kb-1",
+        task_id="task-1",
+        file_path="ByDC.md",
+        status="complete",
+        current_step="complete",
+        chunk_count=1,
+        line_count=1,
+    )
+
+    token = _bind_context()
+    try:
+        await publisher.publish(imported)
+        await publisher.publish(built)
+    finally:
+        reset_byclaw_userfs_headers(token)
+
+    object_files = [call[1]["objectFiles"][0] for call in calls]
+    assert [item["filePath"] for item in object_files] == [
+        "/ByDC.md",
+        "/ByDC.md",
+    ]
+    assert [json.loads(item["extContent"])["kb_directory"] for item in object_files] == [
+        "/",
+        "/",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_missing_callback_headers_skips_delivery():
     post_json = MagicMock()
     publisher = ByClawKnowledgeEventPublisher(post_json=post_json)

@@ -453,11 +453,18 @@ def _deduplicate_paths(paths: list[tuple[str, str]]) -> list[tuple[str, str]]:
     result = []
     seen = set()
     for path, status in paths:
-        normalized = str(path or "").strip()
+        normalized = _normalize_object_file_path(path)
         if normalized and normalized not in seen:
             seen.add(normalized)
             result.append((normalized, status))
     return result
+
+
+def _normalize_object_file_path(file_path: str) -> str:
+    normalized = str(file_path or "").strip()
+    if not normalized:
+        return ""
+    return str(PurePosixPath("/" + normalized.lstrip("/")))
 
 
 def _object_file(
@@ -469,14 +476,15 @@ def _object_file(
     metadata: Mapping[str, str],
     kb_id: str | None = None,
 ) -> dict[str, Any]:
-    path = PurePosixPath(file_path)
+    normalized_file_path = _normalize_object_file_path(file_path)
+    path = PurePosixPath(normalized_file_path)
     return {
         "sessionId": context.chat_session_id,
         "objectType": "knowledge",
         "objectName": metadata["name"],
         "objectCode": event.kb_code,
         "fileName": path.name,
-        "filePath": file_path,
+        "filePath": normalized_file_path,
         "version": "1",
         "statusCd": status,
         "extContent": json.dumps(
