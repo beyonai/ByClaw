@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from unittest.mock import MagicMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -15,6 +16,7 @@ from by_qa.knowledge_base.events import (
 
 from byclaw_knowledge_event_publisher import (
     CALLBACK_CONTEXT_EXTRA_PARAM,
+    DINGTALK_TEST_SEND_PATH,
     ByClawKnowledgeEventPublisher,
 )
 from byclaw_userfs_storage import (
@@ -323,26 +325,61 @@ async def test_missing_callback_headers_skips_delivery():
 
 
 @pytest.mark.asyncio
-async def test_batch_event_is_log_only():
+@pytest.mark.parametrize(
+    ("event_type", "task_type", "task_name"),
+    [
+        (
+            "semantic.discovery.batch.completed",
+            "ENTITY_DISCOVERY",
+            "知识实体发现",
+        ),
+        (
+            "semantic.enrich.batch.completed",
+            "ENTITY_ENRICH",
+            "知识实体整理",
+        ),
+    ],
+)
+async def test_batch_event_notifies_requesting_user(
+    event_type, task_type, task_name
+):
+    calls = []
+
+    async def get_json(path, params, headers):
+        calls.append((path, params, headers))
+        return {"resultCode": "0"}
+
     post_json = MagicMock()
-    publisher = ByClawKnowledgeEventPublisher(post_json=post_json)
+    publisher = ByClawKnowledgeEventPublisher(
+        post_json=post_json,
+        get_json=get_json,
+        user_id_resolver=lambda _: "10000077",
+        beyond_token_resolver=lambda _: "token-1",
+        batch_context_resolver=lambda *_: {
+            CALLBACK_CONTEXT_EXTRA_PARAM: {
+                "userCode": "0027011322",
+                "chatSessionId": "session-1",
+                "resourceId": "42",
+            }
+        },
+    )
     event = parse_knowledge_event(
         {
             "eventId": "event-2",
-            "eventType": "semantic.discovery.batch.completed",
+            "eventType": event_type,
             "eventVersion": 1,
             "knCode": "kb-1",
             "occurredAt": datetime.now(UTC).isoformat(),
             "payload": {
                 "batchId": "batch-1",
-                "taskType": "ENTITY_DISCOVERY",
+                "taskType": task_type,
                 "knowledgeBaseId": "168",
                 "progress": {
-                    "version": 1,
-                    "totalCount": 1,
-                    "completedCount": 1,
-                    "succeededCount": 1,
-                    "failedCount": 0,
+                    "version": 3,
+                    "totalCount": 5,
+                    "completedCount": 5,
+                    "succeededCount": 4,
+                    "failedCount": 1,
                     "skippedCount": 0,
                 },
             },
@@ -352,3 +389,110 @@ async def test_batch_event_is_log_only():
     await publisher.publish(event)
 
     post_json.assert_not_called()
+    assert calls == [
+        (
+            DINGTALK_TEST_SEND_PATH,
+            {
+                "senderUserId": "10000077",
+                "receiverUserId": "10000077",
+                "content": (
+                    f"【{task_name}】任务已完成，部分文件处理失败\n"
+                    "知识库资源 ID：42\n"
+                    "批次：batch-1\n"
+                    "总计：5 个文件\n"
+                    "成功：4 个\n"
+                    "失败：1 个\n"
+                    "跳过：0 个"
+                ),
+            },
+            {"Beyond-Token": "token-1"},
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_batch_event_skips_without_requesting_user():
+    get_json = MagicMock()
+    publisher = ByClawKnowledgeEventPublisher(
+        get_json=get_json,
+        batch_context_resolver=lambda *_: {},
+    )
+    event = parse_knowledge_event(
+        {
+            "eventId": "event-2",
+            "eventType": "semantic.enrich.batch.completed",
+            "eventVersion": 1,
+            "knCode": "kb-1",
+            "occurredAt": datetime.now(UTC).isoformat(),
+            "payload": {
+                "batchId": "batch-1",
+                "taskType": "ENTITY_ENRICH",
+                "knowledgeBaseId": "168",
+                "progress": {
+                    "version": 1,
+                    "totalCount": 0,
+                    "completedCount": 0,
+                    "succeededCount": 0,
+                    "failedCount": 0,
+                    "skippedCount": 0,
+                },
+            },
+        }
+    )
+
+    await publisher.publish(event)
+
+    get_json.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_dingtalk_transport_sends_get_with_query_params():
+    redis_client = MagicMock()
+    discovery_client = MagicMock()
+    discovery_client.discover = AsyncMock(
+        return_value=SimpleNamespace(
+            protocol="http",
+            host="be.internal",
+            port=8080,
+            path_prefix="",
+        )
+    )
+    discovery_client.close = AsyncMock()
+    response = MagicMock(is_success=True, status_code=200)
+    response.json.return_value = {"resultCode": "0"}
+    http_client = MagicMock()
+    http_client.__aenter__ = AsyncMock(return_value=http_client)
+    http_client.__aexit__ = AsyncMock(return_value=False)
+    http_client.get = AsyncMock(return_value=response)
+    params = {
+        "senderUserId": "10000077",
+        "receiverUserId": "10000077",
+        "content": "任务已完成",
+    }
+
+    with (
+        patch(
+            "byclaw_knowledge_event_publisher.init_shared_redis_from_env",
+            return_value=redis_client,
+        ),
+        patch(
+            "byclaw_knowledge_event_publisher.DiscoveryClient",
+            return_value=discovery_client,
+        ),
+        patch(
+            "byclaw_knowledge_event_publisher.httpx.AsyncClient",
+            return_value=http_client,
+        ),
+    ):
+        publisher = ByClawKnowledgeEventPublisher()
+        result = await publisher._get_by_discovery(
+            params=params,
+            headers={"Beyond-Token": "token-1"},
+        )
+
+    assert result == {"resultCode": "0"}
+    http_client.get.assert_awaited_once_with(
+        "http://be.internal:8080/byaiService/open/api/v1/dingtalk/testSend",
+        params=params,
+    )
+    discovery_client.close.assert_awaited_once()

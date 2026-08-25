@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 import json
 import os
+import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from pathlib import PurePosixPath
@@ -49,6 +50,7 @@ from redis_runtime import init_shared_redis_from_env
 SAVE_OR_UPDATE_OBJECT_FILES_PATH = (
     "/byaiService/devloop/operation/saveOrUpdateObjectFiles"
 )
+DINGTALK_TEST_SEND_PATH = "/byaiService/open/api/v1/dingtalk/testSend"
 CALLBACK_CONTEXT_EXTRA_PARAM = "_byclawCallbackContext"
 EVENT_PUBLISHER_PROVIDER_PATH = (
     "byclaw_knowledge_event_publisher:build_byclaw_knowledge_event_publisher"
@@ -59,7 +61,12 @@ PostJson = Callable[
     [str, dict[str, Any], dict[str, str]],
     Mapping[str, Any] | Awaitable[Mapping[str, Any]],
 ]
+GetJson = Callable[
+    [str, dict[str, str], dict[str, str]],
+    Mapping[str, Any] | Awaitable[Mapping[str, Any]],
+]
 BeyondTokenResolver = Callable[[str], str | Awaitable[str]]
+UserIdResolver = Callable[[str], str | Awaitable[str]]
 KnowledgeBaseResolver = Callable[
     [str], Mapping[str, Any] | Awaitable[Mapping[str, Any]]
 ]
@@ -88,20 +95,15 @@ class ByClawKnowledgeEventPublisher:
     """Translate strict by-qa events into ByClaw knowledge object updates."""
 
     post_json: PostJson | None = None
+    get_json: GetJson | None = None
     beyond_token_resolver: BeyondTokenResolver | None = None
+    user_id_resolver: UserIdResolver | None = None
     knowledge_base_resolver: KnowledgeBaseResolver | None = None
     batch_context_resolver: BatchContextResolver | None = None
 
     async def publish(self, event: KnowledgeEvent) -> None:
         if isinstance(event, DiscoveryBatchCompletedEvent | EnrichBatchCompletedEvent):
-            logger.info(
-                "byclaw knowledge event completed: event_type=%s batch_id=%s "
-                "completed_count=%s total_count=%s invoke_result=logged_only",
-                event.event_type,
-                event.payload.batch_id,
-                event.payload.progress.completed_count,
-                event.payload.progress.total_count,
-            )
+            await self._publish_batch_completed(event)
             return
 
         context = await self._resolve_context(event)
@@ -153,12 +155,70 @@ class ByClawKnowledgeEventPublisher:
             len(object_files),
         )
 
+    async def _publish_batch_completed(
+        self,
+        event: DiscoveryBatchCompletedEvent | EnrichBatchCompletedEvent,
+    ) -> None:
+        started_at = time.perf_counter()
+        context = await self._resolve_context(event)
+        if not context.user_code:
+            logger.info(
+                "byclaw knowledge event skipped: event_type=%s batch_id=%s "
+                "invoke_result=skipped_missing_user_code",
+                event.event_type,
+                event.payload.batch_id,
+            )
+            return
+
+        try:
+            user_id = await self._resolve_user_id(context.user_code)
+            headers = {
+                "Beyond-Token": await self._resolve_beyond_token(context.user_code)
+            }
+            params = {
+                "senderUserId": user_id,
+                "receiverUserId": user_id,
+                "content": _build_batch_notification(
+                    event,
+                    resource_id=context.resource_id,
+                ),
+            }
+            if self.get_json is None:
+                raw = await self._get_by_discovery(params=params, headers=headers)
+            else:
+                response = self.get_json(DINGTALK_TEST_SEND_PATH, params, headers)
+                raw = await response if inspect.isawaitable(response) else response
+            _validate_response(raw)
+        except Exception:
+            logger.exception(
+                "byclaw knowledge event failed: event_type=%s batch_id=%s "
+                "invoke_result=failed elapsed_ms=%.2f",
+                event.event_type,
+                event.payload.batch_id,
+                (time.perf_counter() - started_at) * 1000,
+            )
+            raise
+
+        logger.info(
+            "byclaw knowledge event completed: event_type=%s batch_id=%s "
+            "completed_count=%s total_count=%s invoke_result=success elapsed_ms=%.2f",
+            event.event_type,
+            event.payload.batch_id,
+            event.payload.progress.completed_count,
+            event.payload.progress.total_count,
+            (time.perf_counter() - started_at) * 1000,
+        )
+
     async def _resolve_context(self, event: KnowledgeEvent) -> ByClawCallbackContext:
         current = _context_from_headers(get_byclaw_userfs_header_context())
         if current.deliverable:
             return current
         if not isinstance(
-            event, DiscoveryFileCompletedEvent | EnrichFileCompletedEvent
+            event,
+            DiscoveryFileCompletedEvent
+            | EnrichFileCompletedEvent
+            | DiscoveryBatchCompletedEvent
+            | EnrichBatchCompletedEvent,
         ):
             return current
         if self.batch_context_resolver is None:
@@ -173,6 +233,18 @@ class ByClawKnowledgeEventPublisher:
             )
             raw = await result if inspect.isawaitable(result) else result
         return _context_from_extra_params(raw)
+
+    async def _resolve_user_id(self, user_code: str) -> str:
+        if self.user_id_resolver is None:
+            return await _resolve_user_id_from_redis(user_code)
+        result = self.user_id_resolver(user_code)
+        user_id = await result if inspect.isawaitable(result) else result
+        normalized = str(user_id or "").strip()
+        if not normalized:
+            raise ByClawKnowledgeEventPublisherError(
+                "Redis user mapping is missing for X-User-Code"
+            )
+        return normalized
 
     async def _resolve_beyond_token(self, user_code: str) -> str:
         if self.beyond_token_resolver is None:
@@ -199,6 +271,52 @@ class ByClawKnowledgeEventPublisher:
                 f"Knowledge base name is missing for code: {kb_code}"
             )
         return {"name": name, "id": kb_id}
+
+    async def _get_by_discovery(
+        self,
+        *,
+        params: dict[str, str],
+        headers: dict[str, str],
+    ) -> Mapping[str, Any]:
+        service_name = os.getenv("BE_DOMAINNAME", "ByaiService").strip()
+        redis_client = init_shared_redis_from_env()
+        discovery_client = DiscoveryClient(redis_client=redis_client, cache_interval=5)
+        try:
+            instance = await discovery_client.discover(
+                service_name,
+                health_threshold_ms=-1,
+            )
+            if not instance:
+                raise ByClawKnowledgeEventPublisherError(
+                    f"No available instances for service: {service_name}"
+                )
+            url = _build_discovered_url(instance, DINGTALK_TEST_SEND_PATH)
+            async with httpx.AsyncClient(
+                timeout=_TIMEOUT_SECONDS,
+                headers=headers,
+            ) as client:
+                response = await client.get(url, params=params)
+                try:
+                    raw = response.json()
+                except ValueError as exc:
+                    raise ByClawKnowledgeEventPublisherError(
+                        "testSend response must be JSON"
+                    ) from exc
+                if not response.is_success:
+                    raise ByClawKnowledgeEventPublisherError(
+                        f"testSend returned HTTP {response.status_code}: {raw}"
+                    )
+                if not isinstance(raw, Mapping):
+                    raise ByClawKnowledgeEventPublisherError(
+                        "testSend response must be an object"
+                    )
+                return raw
+        except httpx.HTTPError as exc:
+            raise ByClawKnowledgeEventPublisherError(
+                f"testSend HTTP error: {exc}"
+            ) from exc
+        finally:
+            await discovery_client.close()
 
     async def _post_by_discovery(
         self,
@@ -307,14 +425,10 @@ async def _resolve_knowledge_base_from_db(kb_code: str) -> Mapping[str, Any]:
 
 async def _resolve_beyond_token_from_redis(user_code: str) -> str:
     redis_client = init_shared_redis_from_env()
-    user_id = await _await_if_needed(
-        redis_client.get(f"SHARE_BFM_USER_CODE_{user_code}")
+    normalized_user_id = await _resolve_user_id_from_redis(
+        user_code,
+        redis_client=redis_client,
     )
-    normalized_user_id = _redis_string(user_id)
-    if not normalized_user_id:
-        raise ByClawKnowledgeEventPublisherError(
-            "Redis user mapping is missing for X-User-Code"
-        )
     token = await _await_if_needed(
         redis_client.hget(
             f"user:{normalized_user_id}:login:auth",
@@ -327,6 +441,53 @@ async def _resolve_beyond_token_from_redis(user_code: str) -> str:
             "Redis login state is missing Beyond-Token"
         )
     return normalized_token
+
+
+async def _resolve_user_id_from_redis(
+    user_code: str,
+    *,
+    redis_client: Any | None = None,
+) -> str:
+    client = redis_client or init_shared_redis_from_env()
+    user_id = await _await_if_needed(
+        client.get(f"SHARE_BFM_USER_CODE_{user_code}")
+    )
+    normalized_user_id = _redis_string(user_id)
+    if not normalized_user_id:
+        raise ByClawKnowledgeEventPublisherError(
+            "Redis user mapping is missing for X-User-Code"
+        )
+    return normalized_user_id
+
+
+def _build_batch_notification(
+    event: DiscoveryBatchCompletedEvent | EnrichBatchCompletedEvent,
+    *,
+    resource_id: str,
+) -> str:
+    task_name = (
+        "知识实体发现"
+        if isinstance(event, DiscoveryBatchCompletedEvent)
+        else "知识实体整理"
+    )
+    progress = event.payload.progress
+    if progress.failed_count:
+        conclusion = "任务已完成，部分文件处理失败"
+    elif progress.skipped_count:
+        conclusion = "任务已完成，部分文件已跳过"
+    else:
+        conclusion = "任务已全部成功完成"
+    return "\n".join(
+        (
+            f"【{task_name}】{conclusion}",
+            f"知识库资源 ID：{resource_id or '未提供'}",
+            f"批次：{event.payload.batch_id}",
+            f"总计：{progress.total_count} 个文件",
+            f"成功：{progress.succeeded_count} 个",
+            f"失败：{progress.failed_count} 个",
+            f"跳过：{progress.skipped_count} 个",
+        )
+    )
 
 
 def _build_object_files(
@@ -535,6 +696,7 @@ def _validate_response(raw: Any) -> None:
 
 __all__ = [
     "CALLBACK_CONTEXT_EXTRA_PARAM",
+    "DINGTALK_TEST_SEND_PATH",
     "EVENT_PUBLISHER_PROVIDER_PATH",
     "SAVE_OR_UPDATE_OBJECT_FILES_PATH",
     "ByClawCallbackContext",
