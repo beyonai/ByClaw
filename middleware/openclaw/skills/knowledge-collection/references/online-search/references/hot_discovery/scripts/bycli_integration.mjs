@@ -2,8 +2,8 @@ import { access } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { execFile } from 'node:child_process';
 
-const BYCLI_TIMEOUT_MS = 60_000;
-const LIST_TIMEOUT_MS = 120_000;
+const BYCLI_TIMEOUT_MS = 30_000;
+const LIST_TIMEOUT_MS = 60_000;
 const START_CHROME_SCRIPT = '/usr/local/bin/start-chrome.sh';
 
 export function runCommand(cmd, args, timeoutMs = BYCLI_TIMEOUT_MS) {
@@ -59,7 +59,7 @@ export function createBycliIntegration({ run = runCommand, fileExists = defaultF
   };
 
   return {
-    async loadRuntime({ baselineVersion } = {}) {
+    async loadRuntime() {
       const versionResult = await invoke('bycli', ['--version'], BYCLI_TIMEOUT_MS);
       const currentVersion = versionResult.code === 0 ? versionResult.stdout.trim() || null : null;
       const list = await invoke('bycli', ['list', '-f', 'json'], LIST_TIMEOUT_MS);
@@ -75,13 +75,8 @@ export function createBycliIntegration({ run = runCommand, fileExists = defaultF
       if (!Array.isArray(rows)) throw new Error('bycli list 输出不是数组');
       return {
         catalog: new Map(rows.map((command) => [`${command.site}/${command.name}`, command])),
-        compatibility: {
-          baselineVersion: baselineVersion || null,
-          currentVersion,
-          status: !currentVersion ? 'version_unavailable'
-            : (baselineVersion && currentVersion !== baselineVersion ? 'version_drift' : 'compatible'),
-          ...(versionResult.code !== 0 ? { versionExitCode: versionResult.code } : {}),
-        },
+        version: currentVersion,
+        ...(versionResult.code !== 0 ? { versionExitCode: versionResult.code } : {}),
       };
     },
 

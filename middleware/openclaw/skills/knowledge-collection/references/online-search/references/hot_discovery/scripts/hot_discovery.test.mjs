@@ -379,7 +379,7 @@ test('认证失败保留已完成结果、停止后续浏览器适配器并给�
   const calls = [];
   const bycli = {
     loadRuntime: async () => ({
-      compatibility: { status: 'compatible', currentVersion: '2.1.38', baselineVersion: '2.1.38' },
+      version: '2.1.38',
       catalog: new Map([
         ['credential-gateway/search', {
           strategy: 'public', browser: false, columns: ['url', 'title', 'rating'],
@@ -429,7 +429,7 @@ test('桥接在预检后断开时停止后续浏览器适配器', async () => {
   const calls = [];
   const bycli = {
     loadRuntime: async () => ({
-      compatibility: { status: 'compatible', currentVersion: '2.1.38', baselineVersion: '2.1.38' },
+      version: '2.1.38',
       catalog: new Map(['first-browser-site', 'later-browser-site'].map((site) => [`${site}/search`, {
         strategy: 'public', browser: true, columns: ['url', 'title', 'score'],
         args: [{ name: 'limit', positional: false }],
@@ -922,6 +922,7 @@ test('维度选择显式报告无覆盖维度和完全无适配器', () => {
 
 test('热度发现始终补充 general 维度并单独报告有效维度', async () => {
   const calls = [];
+  const timeouts = [];
   const result = await searchHotDiscovery(
     { query: 'state engineering', dimensions: 'it,science', tiers: '1', limit: '1' },
     {
@@ -957,11 +958,12 @@ test('热度发现始终补充 general 维度并单独报告有效维度', async
                 columns: ['url', 'title', 'snippet'],
               }],
             ]),
-            compatibility: { status: 'compatible', currentVersion: 'test', baselineVersion: 'test' },
+            version: 'test',
           };
         },
-        async invoke(_bin, args) {
+        async invoke(_bin, args, timeoutMs) {
           calls.push(args[0]);
+          timeouts.push(timeoutMs);
           return { code: 0, stdout: '[]', stderr: '' };
         },
       },
@@ -969,6 +971,7 @@ test('热度发现始终补充 general 维度并单独报告有效维度', async
   );
 
   assert.deepEqual(calls.sort(), ['general-adapter', 'it-adapter']);
+  assert.deepEqual(timeouts, [30_000, 30_000]);
   assert.deepEqual(result.dimensions, ['it', 'science']);
   assert.deepEqual(result.effectiveDimensions, ['it', 'science', 'general']);
   assert.equal(result.adapterStats['general-adapter'].status, 'ok_empty');

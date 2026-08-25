@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { spawn } from 'node:child_process';
 import { readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,6 +17,7 @@ const onlineSearchRoot = resolve(scriptDir, '../references/online-search');
 const searxngScript = join(onlineSearchRoot, 'scripts/searxng_cli.py');
 const hotDiscoveryScript = join(onlineSearchRoot, 'references/hot_discovery/scripts/hot_discovery.mjs');
 const adaptersPath = join(onlineSearchRoot, 'references/hot_discovery/adapters.md');
+const MAX_DIAGNOSTIC_STDERR_CHARS = 2_000;
 
 function requireText(value, name) {
   if (typeof value !== 'string' || !value.trim()) {
@@ -46,8 +48,30 @@ export async function runPublicProcess(spec, options = {}) {
   try {
     return await runBoundedProcess(spec, options);
   } catch (error) {
-    return { code: 1, stdout: '', stderr: error instanceof Error ? error.message : String(error) };
+    const stderr = error instanceof Error ? error.message : String(error);
+    return { code: 1, stdout: '', stderr, timedOut: /timeout after \d+ms/i.test(stderr) };
   }
+}
+
+export async function runUnboundedPublicProcess({ bin, executable, args }, options = {}) {
+  return new Promise((resolveOutcome) => {
+    const child = spawn(bin || executable, args, {
+      cwd: options.cwd,
+      env: options.env,
+      shell: false,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.once('error', (error) => {
+      resolveOutcome({ code: 1, stdout: '', stderr: error instanceof Error ? error.message : String(error) });
+    });
+    child.once('close', (code) => {
+      resolveOutcome({ code: Number.isInteger(code) ? code : 1, stdout, stderr });
+    });
+  });
 }
 
 function parseSuccess(outcome) {
@@ -62,11 +86,25 @@ function parseSuccess(outcome) {
   }
 }
 
+function safeDiagnosticStderr(stderr) {
+  if (typeof stderr !== 'string' || !stderr.trim()) return '';
+  return stderr
+    .replace(/((?:authorization|cookie|credential|password|secret|token)\s*(?:=|:)\s*)(?:Bearer\s+)?[^\s,;]+/gi, '$1[REDACTED]')
+    .slice(0, MAX_DIAGNOSTIC_STDERR_CHARS);
+}
+
 function summarize(outcome, document) {
-  return {
+  if (outcome?.skipped) return { status: 'skipped' };
+  const summary = {
     status: document ? 'success' : 'failed',
     exitCode: Number.isInteger(outcome?.code) ? outcome.code : 1,
   };
+  if (!document) {
+    summary.timedOut = Boolean(outcome?.timedOut);
+    const stderr = safeDiagnosticStderr(outcome?.stderr);
+    if (stderr) summary.stderr = stderr;
+  }
+  return summary;
 }
 
 async function defaultMerge({ hotDoc, sxDoc, warnings }) {
@@ -93,6 +131,8 @@ export async function runPublicDiscover(paths, args, options = {}) {
   const language = typeof args?.language === 'string' && args.language.trim() ? args.language.trim() : 'all';
   const pageno = String(args?.pageno || '1');
   const maxResults = String(args?.['max-results'] || '20');
+  const requestedCount = args?.['requested-count'] === undefined ? null : String(args['requested-count']);
+  const effectiveMaxResults = requestedCount || maxResults;
   const timeout = String(args?.timeout || '15');
   const timeRange = typeof args?.['time-range'] === 'string' && args['time-range'].trim()
     ? args['time-range'].trim() : null;
@@ -106,38 +146,51 @@ export async function runPublicDiscover(paths, args, options = {}) {
   const pythonExecutable = options.pythonExecutable
     || process.env.ONLINE_SEARCH_PYTHON
     || join(onlineSearchRoot, 'scripts/.venv/bin/python');
-  const runProcess = options.runProcess || runPublicProcess;
+  const runSearxngProcess = options.runProcess || runPublicProcess;
+  const runHotDiscoveryProcess = options.runProcess || runUnboundedPublicProcess;
+  const searxngTimeoutMs = Math.max(1, Math.ceil(Number(timeout) * 1_000));
 
-  const [searxngOutcome, hotOutcome] = await Promise.all([
-    runProcess({
-      channel: 'searxng',
-      executable: pythonExecutable,
-      args: [searxngScript, query, '--category', category, '--language', language,
-        '--pageno', pageno, '--max-results', maxResults, '--timeout', timeout,
-        ...(timeRange ? ['--time-range', timeRange] : [])],
-    }),
-    runProcess({
-      channel: 'hot-discovery',
-      executable: process.execPath,
-      args: [hotDiscoveryScript, 'search', '--query', query, '--tiers', tiers,
-        '--limit', limit, '--dimensions', category],
-    }),
-  ]);
+  const searxngSpec = {
+    channel: 'searxng',
+    executable: pythonExecutable,
+    args: [searxngScript, query, '--category', category, '--language', language,
+      '--pageno', pageno, '--max-results', effectiveMaxResults, '--timeout', timeout,
+      ...(timeRange ? ['--time-range', timeRange] : [])],
+  };
+  const hotDiscoverySpec = {
+    channel: 'hot-discovery',
+    executable: process.execPath,
+    args: [hotDiscoveryScript, 'search', '--query', query, '--tiers', tiers,
+      '--limit', limit, '--dimensions', category],
+  };
+  const searxngPromise = runSearxngProcess(searxngSpec, { timeoutMs: searxngTimeoutMs });
+  const hotPromise = requestedCount === null
+    ? runHotDiscoveryProcess(hotDiscoverySpec)
+    : Promise.resolve({ skipped: true });
+  const [searxngOutcome, hotOutcome] = await Promise.all([searxngPromise, hotPromise]);
 
   const sxDoc = parseSuccess(searxngOutcome);
   const hotDoc = parseSuccess(hotOutcome);
   if (!sxDoc && !hotDoc) {
+    if (hotOutcome?.skipped) throw new Error('SearXNG 未返回有效结果');
     throw new Error('SearXNG 与 hot-discovery 均未返回有效结果');
   }
 
+  const channelDiagnostics = {
+    searxng: summarize(searxngOutcome, sxDoc),
+    hotDiscovery: summarize(hotOutcome, hotDoc),
+  };
   const warnings = [];
-  if (!sxDoc) warnings.push(`SearXNG 发现失败（exit ${summarize(searxngOutcome, sxDoc).exitCode}）`);
-  if (!hotDoc) warnings.push(`hot-discovery 发现失败（exit ${summarize(hotOutcome, hotDoc).exitCode}）`);
+  if (!sxDoc) warnings.push(`SearXNG 发现失败（exit ${channelDiagnostics.searxng.exitCode}）`);
+  if (!hotDoc && !hotOutcome?.skipped) {
+    warnings.push(`hot-discovery 发现失败（exit ${channelDiagnostics.hotDiscovery.exitCode}）`);
+  }
   if (sxDoc) await writeFile(searxngSnapshot, `${JSON.stringify(sxDoc, null, 2)}\n`, 'utf8');
   if (hotDoc) await writeFile(hotSnapshot, `${JSON.stringify(hotDoc, null, 2)}\n`, 'utf8');
 
   const merge = options.merge || defaultMerge;
-  const merged = await merge({ hotDoc, sxDoc, warnings });
+  const mergedDocument = await merge({ hotDoc, sxDoc, warnings });
+  const merged = { ...mergedDocument, channelDiagnostics };
   await writeFile(mergedSnapshot, `${JSON.stringify(merged, null, 2)}\n`, 'utf8');
 
   return {
@@ -150,10 +203,7 @@ export async function runPublicDiscover(paths, args, options = {}) {
       requestedDimensions: Array.isArray(hotDoc.dimensions) ? hotDoc.dimensions : [category],
       effectiveDimensions: Array.isArray(hotDoc.effectiveDimensions) ? hotDoc.effectiveDimensions : [category],
     } : null,
-    channels: {
-      searxng: summarize(searxngOutcome, sxDoc),
-      hotDiscovery: summarize(hotOutcome, hotDoc),
-    },
+    channels: channelDiagnostics,
     snapshots: {
       searxng: sxDoc ? searxngSnapshot : null,
       hotDiscovery: hotDoc ? hotSnapshot : null,

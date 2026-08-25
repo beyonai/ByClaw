@@ -97,6 +97,7 @@ await (async () => {
   assert.equal(publicDiscoverHelp.json.ok, true);
   assert.equal(publicDiscoverHelp.json.command, 'public-discover');
   assert.match(publicDiscoverHelp.json.args['--category'], /general/);
+  assert.match(publicDiscoverHelp.json.args['--requested-count'], /明确指定/);
 
   const schema = await runCli(['command-schema']);
   assert.equal(schema.code, 0, schema.stderr);
@@ -120,6 +121,8 @@ await (async () => {
   assert.equal(schema.json.commands['crawl-seed'].properties.depth.default, 1);
   assert.deepEqual(schema.json.commands['public-discover'].required, ['session-dir', 'query']);
   assert.equal(schema.json.commands['public-discover'].properties.category.default, 'general');
+  assert.equal(schema.json.commands['public-discover'].properties['requested-count'].type, 'integer');
+  assert.equal(schema.json.commands['public-discover'].properties['requested-count'].minimum, 1);
   for (const [name, contract] of Object.entries(schema.json.commands)) {
     if (contract.type !== 'delegated-command') {
       assert.equal(contract.schemaComplete, true, `${name} schema must be explicit`);

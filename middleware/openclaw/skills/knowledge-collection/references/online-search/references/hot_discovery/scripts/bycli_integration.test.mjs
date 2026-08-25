@@ -11,10 +11,13 @@ const healthyDaemon = 'Daemon: running\nExtension: connected\n';
 
 function scriptedRunner(steps) {
   const calls = [];
+  const timeouts = [];
   return {
     calls,
-    run: async (cmd, args) => {
+    timeouts,
+    run: async (cmd, args, timeoutMs) => {
       calls.push([cmd, args]);
+      timeouts.push(timeoutMs);
       const step = steps.shift();
       assert.ok(step, `unexpected command: ${cmd} ${args.join(' ')}`);
       assert.equal(cmd, step.cmd);
@@ -44,6 +47,7 @@ test('doctor is immediately followed by daemon status even when doctor fails', a
     ['bycli', ['doctor']],
     ['bycli', ['daemon', 'status']],
   ]);
+  assert.deepEqual(runner.timeouts.slice(0, 2), [30_000, 30_000]);
 });
 
 test('runtime transport is independent from declared access tier', () => {
@@ -61,19 +65,19 @@ test('runtime transport is independent from declared access tier', () => {
   });
 });
 
-test('version drift is structured while current catalog remains usable', async () => {
+test('runtime catalog validation does not depend on a declared version baseline', async () => {
   const runner = scriptedRunner([
     { cmd: 'bycli', args: ['--version'], result: ok('2.1.38\n') },
     { cmd: 'bycli', args: ['list', '-f', 'json'], result: ok('[{"site":"weread-official","name":"search"}]') },
   ]);
   const bycli = createBycliIntegration({ run: runner.run });
 
-  const runtime = await bycli.loadRuntime({ baselineVersion: '2.1.31' });
+  const runtime = await bycli.loadRuntime();
 
-  assert.equal(runtime.compatibility.status, 'version_drift');
-  assert.equal(runtime.compatibility.baselineVersion, '2.1.31');
-  assert.equal(runtime.compatibility.currentVersion, '2.1.38');
+  assert.equal(runtime.version, '2.1.38');
+  assert.equal('compatibility' in runtime, false);
   assert.ok(runtime.catalog.has('weread-official/search'));
+  assert.deepEqual(runner.timeouts, [30_000, 60_000]);
 });
 
 test('healthy bridge passes without recovery commands', async () => {

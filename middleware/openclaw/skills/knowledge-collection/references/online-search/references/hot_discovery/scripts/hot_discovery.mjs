@@ -50,7 +50,6 @@ import { createBycliIntegration, deriveExecutionProfile } from './bycli_integrat
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ADAPTERS_MD = resolve(HERE, '..', 'adapters.md');
-const BYCLI_BASELINE_VERSION = '2.1.38';
 
 /** titleContext 硬上限（字符 = UTF-16 码元，不是字节） */
 const TITLE_CONTEXT_MAX = 100;
@@ -430,13 +429,8 @@ export async function searchHotDiscovery(argv, options = {}) {
       warnings,
     };
   }
-  const runtime = await bycli.loadRuntime({ baselineVersion: BYCLI_BASELINE_VERSION });
-  const { catalog, compatibility } = runtime;
-  if (compatibility.status !== 'compatible') {
-    warnings.push(compatibility.status === 'version_drift'
-      ? `bycli 版本 ${compatibility.currentVersion} 与声明基线 ${compatibility.baselineVersion} 不同；已按运行时目录校验，请复核策略和错误协议`
-      : '无法读取 bycli 版本；已按运行时目录校验，但无法确认协议基线');
-  }
+  const runtime = await bycli.loadRuntime();
+  const { catalog } = runtime;
 
   // ── 预校验：bycli list 能校验站点/命令存在，也能比对声明的列名是否出现在 columns 里。
   // 不一致即说明声明已过期，在跑 search 之前就告警 —— 比事后发现字段缺失更早。
@@ -494,7 +488,7 @@ export async function searchHotDiscovery(argv, options = {}) {
       markSkippedForUserAction(a);
       return;
     }
-    const r = await bycli.invoke('bycli', buildArgs(a), a.tier === 1 ? 60_000 : 120_000);
+    const r = await bycli.invoke('bycli', buildArgs(a), 30_000);
     const st = { tier: a.tier, transport: a.execution.transport, exitCode: r.code };
     if (a.driftedColumns.length) st.driftedColumns = a.driftedColumns;
 
@@ -616,8 +610,7 @@ export async function searchHotDiscovery(argv, options = {}) {
     effectiveDimensions: dims,
     // 热度值是时点观测，跨时间比较无意义。报告引用热度时须一并给出观测时间。
     observedAt: new Date().toISOString(),
-    bycliVersion: compatibility.currentVersion,
-    bycliCompatibility: compatibility,
+    bycliVersion: runtime.version || null,
     adaptersSelected: selected.length,
     candidates,
     adapterStats,
