@@ -525,56 +525,19 @@ public class DatasetApplicationService {
      * @param resourceId 资源标识
      * @param directoryPath 文件目录路径
      * @param fileDescription 文件描述
-     * @throws IOException 异常信息
-     */
-    public UploadResult uploadFiles(MultipartFile[] files, Long resourceId, String directoryPath,
-                                    String fileDescription) throws IOException {
-        return uploadFiles(files, resourceId, directoryPath, fileDescription, null);
-    }
-
-    public UploadResult uploadFiles(MultipartFile[] files, Long resourceId, String directoryPath,
-                                    String fileDescription, Boolean processFrontMatter) throws IOException {
-        return uploadFiles(files, resourceId, directoryPath, fileDescription, processFrontMatter, Boolean.FALSE, false);
-    }
-
-    /**
-     * 知识库文件上传前检查同路径同名冲突，供前端展示覆盖确认。
-     *
-     * @param request 检查请求
-     * @return 冲突文件路径
-     */
-    public KnowledgeUploadConflictCheckResponse checkUploadFileConflicts(KnowledgeUploadConflictCheckRequest request) {
-        if (request == null || request.getResourceId() == null) {
-            throw new BaseException("知识库资源标识不能为空");
-        }
-        SsResource ssResource = loadDatasetResource(request.getResourceId());
-        validateDatasetManagePermission(ssResource);
-
-        KnowledgeUploadConflictCheckResponse response = new KnowledgeUploadConflictCheckResponse();
-        List<String> overwritePaths = findExistingKnowledgeFilePaths(ssResource, request.getDirectoryPath(),
-            request.getFileNames());
-        response.setOverwritePaths(overwritePaths);
-        response.setConflict(!overwritePaths.isEmpty());
-        return response;
-    }
-
-    /***
-     * 上传文件到知识库
-     *
-     * @param files 文件信息
-     * @param resourceId 资源标识
-     * @param directoryPath 文件目录路径
-     * @param fileDescription 文件描述
      * @param processFrontMatter 是否解析 Markdown 文件中的 YAML front matter
      * @param overwrite 同路径同名文件存在时是否先删除旧文件再上传
+     * @param skipIfDuplicate 同路径同名文件存在时是否跳过
+     * @param headers 透传到 ByKC 的请求头
      * @throws IOException 异常信息
      */
     public UploadResult uploadFiles(MultipartFile[] files, Long resourceId, String directoryPath,
-                                    String fileDescription, Boolean processFrontMatter, Boolean overwrite, boolean skipIfDuplicate)
-        throws IOException {
+                                    String fileDescription, Boolean processFrontMatter, Boolean overwrite,
+                                    boolean skipIfDuplicate, Map<String, String> headers) throws IOException {
 
         SsResource ssResource = loadDatasetResource(resourceId);
         validateDatasetManagePermission(ssResource);
+        Map<String, String> forwardedHeaders = forwardKnowledgeHeaders(headers, resourceId);
 
         UploadResult uploadResult = new UploadResult();
         uploadResult.setResourceId(resourceId);
@@ -599,7 +562,7 @@ public class DatasetApplicationService {
                 : buildKnowledgeFilePath(directoryPath, multipartFile.getOriginalFilename());
             if (!zipUpload && existingFilePaths.contains(filePath)) {
                 // QA 暂不支持原子覆盖，BE 只能在用户确认 overwrite=true 后先删旧文件再导入新文件。
-                deleteKnowledgeFile(ssResource, filePath, "覆盖上传前删除知识库旧文件");
+                deleteKnowledgeFile(ssResource, filePath, "覆盖上传前删除知识库旧文件", forwardedHeaders);
             }
             kbFileImport.setFilePath(filePath);
             kbFileImport
@@ -608,7 +571,7 @@ public class DatasetApplicationService {
             kbFileImport.setProcessFrontMatter(processFrontMatter);
             kbFileImport.setMultipartFile(multipartFile);
             PythonBuildResponse<KbImportResult> importRet = feignPythonBuildService.importKnowledgeItem(kbFileImport,
-                resourceId);
+                forwardedHeaders);
             logger.info("导入文件:{}", JSON.toJSONString(importRet));
             assertPythonBuildSuccess(importRet, "上传知识库文件");
 
@@ -616,6 +579,27 @@ public class DatasetApplicationService {
         }
 
         return uploadResult;
+    }
+
+    /**
+     * 知识库文件上传前检查同路径同名冲突，供前端展示覆盖确认。
+     *
+     * @param request 检查请求
+     * @return 冲突文件路径
+     */
+    public KnowledgeUploadConflictCheckResponse checkUploadFileConflicts(KnowledgeUploadConflictCheckRequest request) {
+        if (request == null || request.getResourceId() == null) {
+            throw new BaseException("知识库资源标识不能为空");
+        }
+        SsResource ssResource = loadDatasetResource(request.getResourceId());
+        validateDatasetManagePermission(ssResource);
+
+        KnowledgeUploadConflictCheckResponse response = new KnowledgeUploadConflictCheckResponse();
+        List<String> overwritePaths = findExistingKnowledgeFilePaths(ssResource, request.getDirectoryPath(),
+            request.getFileNames());
+        response.setOverwritePaths(overwritePaths);
+        response.setConflict(!overwritePaths.isEmpty());
+        return response;
     }
 
     private boolean isZipUpload(MultipartFile multipartFile) {
@@ -676,10 +660,11 @@ public class DatasetApplicationService {
      *
      * @param datasetBuild 构建对象
      */
-    public void build(DatasetBuild datasetBuild) {
+    public void build(DatasetBuild datasetBuild, Map<String, String> headers) {
 
         SsResource ssResource = loadDatasetResource(datasetBuild.getResourceId());
         validateDatasetManagePermission(ssResource);
+        Map<String, String> forwardedHeaders = forwardKnowledgeHeaders(headers, datasetBuild.getResourceId());
 
         // 构建知识文件
         KbFileToMarkdownIndex kbFileToMarkdownIndex = new KbFileToMarkdownIndex();
@@ -688,7 +673,7 @@ public class DatasetApplicationService {
 
         logger.info("知识构建入参是:{}", JSON.toJSONString(kbFileToMarkdownIndex));
         PythonBuildResponse<Void> buildRet = feignPythonBuildService.fileToMarkdownIndex(kbFileToMarkdownIndex,
-            datasetBuild.getResourceId());
+            forwardedHeaders);
         logger.info("构建结果是:{}", JSON.toJSONString(buildRet));
         assertPythonBuildSuccess(buildRet, "构建知识库文件");
 
@@ -805,11 +790,12 @@ public class DatasetApplicationService {
      *
      * @param removeFileDto 删除文件信息
      */
-    public void removeFile(RemoveFileDto removeFileDto) {
+    public void removeFile(RemoveFileDto removeFileDto, Map<String, String> headers) {
 
         SsResource ssResource = loadDatasetResource(removeFileDto.getResourceId());
         validateDatasetManagePermission(ssResource);
-        deleteKnowledgeFile(ssResource, removeFileDto.getDirectoryPath(), "删除知识库文件");
+        deleteKnowledgeFile(ssResource, removeFileDto.getDirectoryPath(), "删除知识库文件",
+            forwardKnowledgeHeaders(headers, removeFileDto.getResourceId()));
 
     }
 
@@ -817,9 +803,11 @@ public class DatasetApplicationService {
      * 更新已存在知识库文件。更新后不会自动触发 Markdown 转换、切片或向量化。
      */
     public KbFileUpdateResult updateKnowledgeFile(Long resourceId, String filePath, String fileDescription,
-                                                  Boolean processFrontMatter, MultipartFile fileContent) {
+                                                  Boolean processFrontMatter, MultipartFile fileContent,
+                                                  Map<String, String> headers) {
         SsResource ssResource = loadDatasetResource(resourceId);
         validateDatasetManagePermission(ssResource);
+        Map<String, String> forwardedHeaders = forwardKnowledgeHeaders(headers, resourceId);
 
         KbFileUpdate kbFileUpdate = new KbFileUpdate();
         kbFileUpdate.setKnCode(ssResource.getResourceCode());
@@ -829,7 +817,7 @@ public class DatasetApplicationService {
         kbFileUpdate.setMultipartFile(fileContent);
 
         PythonBuildResponse<KbFileUpdateResult> response = feignPythonBuildService.updateKnowledgeItem(kbFileUpdate,
-            resourceId);
+            forwardedHeaders);
         assertPythonBuildSuccess(response, "更新知识库文件");
 
         KbFileUpdateResult result = response.getResultObject();
@@ -849,13 +837,14 @@ public class DatasetApplicationService {
     /**
      * 删除知识库文件。覆盖上传时复用该逻辑，保证手动删除和覆盖删除走同一套 QA 响应校验。
      */
-    private void deleteKnowledgeFile(SsResource ssResource, String filePath, String operationName) {
+    private void deleteKnowledgeFile(SsResource ssResource, String filePath, String operationName,
+                                   Map<String, String> headers) {
         KbFileDelete kbFileDelete = new KbFileDelete();
         kbFileDelete.setKnCode(ssResource.getResourceCode());
         kbFileDelete.setFilePath(filePath);
         logger.info("删除文件入参:{}", JSON.toJSONString(kbFileDelete));
         PythonBuildResponse<Void> removeResponse = feignPythonBuildService.deleteKnowledgeItem(kbFileDelete,
-            ssResource.getResourceId());
+            forwardKnowledgeHeaders(headers, ssResource.getResourceId()));
         logger.info("删除文件返回:{}", JSON.toJSONString(removeResponse));
         assertPythonBuildSuccess(removeResponse, operationName);
 
@@ -866,7 +855,7 @@ public class DatasetApplicationService {
      *
      * @param folder 知识库
      */
-    public KbDirectoryCreate createFolder(Folder folder) {
+    public KbDirectoryCreate createFolder(Folder folder, Map<String, String> headers) {
 
         Long resourceId = folder.getResourceId();
         String directoryName = folder.getDirectoryName();
@@ -874,6 +863,7 @@ public class DatasetApplicationService {
         // 查询知识库
         SsResource ssResource = loadDatasetResource(resourceId);
         validateDatasetManagePermission(ssResource);
+        Map<String, String> forwardedHeaders = forwardKnowledgeHeaders(headers, resourceId);
 
         KbDirectoryCreate kbDirectoryCreate = new KbDirectoryCreate();
         kbDirectoryCreate.setKnCode(ssResource.getResourceCode());
@@ -882,7 +872,7 @@ public class DatasetApplicationService {
         kbDirectoryCreate.setDirectoryPath(buildKnowledgeFilePath(directoryPath, directoryName));
         kbDirectoryCreate.setDirectoryDescription(folder.getDirectoryDescription());
 
-        PythonBuildResponse<Void> ret = feignPythonBuildService.createDirectory(kbDirectoryCreate, resourceId);
+        PythonBuildResponse<Void> ret = feignPythonBuildService.createDirectory(kbDirectoryCreate, forwardedHeaders);
         logger.info("创建目录:{}", JsonUtil.toJSONString(ret));
         assertPythonBuildSuccess(ret, "创建知识库目录");
 
@@ -894,18 +884,18 @@ public class DatasetApplicationService {
      *
      * @param folder 目录
      */
-    public KbDirectoryUpdate renameFolder(Folder folder) {
+    public KbDirectoryUpdate renameFolder(Folder folder, Map<String, String> headers) {
 
         SsResource ssResource = loadDatasetResource(folder.getResourceId());
         validateDatasetManagePermission(ssResource);
+        Map<String, String> forwardedHeaders = forwardKnowledgeHeaders(headers, folder.getResourceId());
 
         KbDirectoryUpdate kbDirectoryUpdate = new KbDirectoryUpdate();
         kbDirectoryUpdate.setKnCode(ssResource.getResourceCode());
         kbDirectoryUpdate.setDirectoryPath(folder.getDirectoryPath());
         kbDirectoryUpdate.setDirectoryName(folder.getDirectoryName());
 
-        PythonBuildResponse<Void> ret = feignPythonBuildService.updateDirectory(kbDirectoryUpdate,
-            folder.getResourceId());
+        PythonBuildResponse<Void> ret = feignPythonBuildService.updateDirectory(kbDirectoryUpdate, forwardedHeaders);
         logger.info("修改目录:{}", JsonUtil.toJSONString(ret));
         assertPythonBuildSuccess(ret, "重命名知识库目录");
 
@@ -917,17 +907,17 @@ public class DatasetApplicationService {
      *
      * @param folderDelete 删除目录参数
      */
-    public void deleteFolder(FolderDelete folderDelete) {
+    public void deleteFolder(FolderDelete folderDelete, Map<String, String> headers) {
 
         SsResource ssResource = loadDatasetResource(folderDelete.getResourceId());
         validateDatasetManagePermission(ssResource);
+        Map<String, String> forwardedHeaders = forwardKnowledgeHeaders(headers, folderDelete.getResourceId());
 
         KbDirectoryDelete kbDirectoryDelete = new KbDirectoryDelete();
         kbDirectoryDelete.setKnCode(ssResource.getResourceCode());
         kbDirectoryDelete.setDirectoryPath(folderDelete.getDirectoryPath());
 
-        PythonBuildResponse<Void> ret = feignPythonBuildService.deleteDirectory(kbDirectoryDelete,
-            folderDelete.getResourceId());
+        PythonBuildResponse<Void> ret = feignPythonBuildService.deleteDirectory(kbDirectoryDelete, forwardedHeaders);
         logger.info("删除目录:{}", JsonUtil.toJSONString(ret));
         assertPythonBuildSuccess(ret, "删除知识库目录");
 
@@ -936,9 +926,10 @@ public class DatasetApplicationService {
     /**
      * 批量移动知识库文件或目录。门户使用 resourceId，转发 QA 前转换为 knCode。
      */
-    public KnowledgeItemsMoveResult moveKnowledgeItems(KnowledgeItemsMoveRequest request) {
+    public KnowledgeItemsMoveResult moveKnowledgeItems(KnowledgeItemsMoveRequest request, Map<String, String> headers) {
         SsResource ssResource = loadDatasetResource(request.getResourceId());
         validateDatasetManagePermission(ssResource);
+        Map<String, String> forwardedHeaders = forwardKnowledgeHeaders(headers, request.getResourceId());
 
         boolean hasTargetDirectory = StringUtils.isNotBlank(request.getTargetDirectoryPath());
         boolean hasTargetFile = StringUtils.isNotBlank(request.getTargetFilePath());
@@ -957,7 +948,7 @@ public class DatasetApplicationService {
         qaRequest.setOverwrite(Boolean.FALSE);
 
         PythonBuildResponse<KnowledgeItemsMoveResult> response = feignPythonBuildService.moveKnowledgeItems(qaRequest,
-            request.getResourceId());
+            forwardedHeaders);
         logger.info("移动知识库文件或目录:{}", JsonUtil.toJSONString(response));
         assertPythonBuildSuccess(response, "移动知识库文件或目录");
         return response.getResultObject() == null ? new KnowledgeItemsMoveResult() : response.getResultObject();
@@ -996,11 +987,7 @@ public class DatasetApplicationService {
         qaRequest.setExtraParams(
             request.getExtraParams() == null ? Collections.emptyMap() : request.getExtraParams());
 
-        Map<String, String> forwardedHeaders = headers == null ? new HashMap<>() : new HashMap<>(headers);
-        Long resourceId = request.getResourceId();
-        if (resourceId != null) {
-            forwardedHeaders.put(FeignPythonBuildService.RESOURCE_ID_HEADER, String.valueOf(resourceId));
-        }
+        Map<String, String> forwardedHeaders = forwardKnowledgeHeaders(headers, request.getResourceId());
 
         PythonBuildResponse<KnowledgeEntityBatchResult> response = feignPythonBuildService.entityDiscovery(qaRequest,
             forwardedHeaders);
@@ -1024,11 +1011,7 @@ public class DatasetApplicationService {
             request.getExtraParams() == null ? Collections.emptyMap() : request.getExtraParams());
 
 
-        Map<String, String> forwardedHeaders = headers == null ? new HashMap<>() : new HashMap<>(headers);
-        Long resourceId = request.getResourceId();
-        if (resourceId != null) {
-            forwardedHeaders.put(FeignPythonBuildService.RESOURCE_ID_HEADER, String.valueOf(resourceId));
-        }
+        Map<String, String> forwardedHeaders = forwardKnowledgeHeaders(headers, request.getResourceId());
 
         PythonBuildResponse<KnowledgeEntityBatchResult> response = feignPythonBuildService.entityEnrich(qaRequest,
             forwardedHeaders);
@@ -1817,6 +1800,20 @@ public class DatasetApplicationService {
             }
         }
         return normalizedPath;
+    }
+
+    /**
+     * 合并门户透传请求头与知识库资源上下文，转发到 ByKC。
+     * <p>
+     * 调用方无透传头时可传 {@link Collections#emptyMap()}；本方法始终通过
+     * {@code new HashMap<>(headers)} 拷贝入参，不会直接复用不可变 map，因此后续 {@code put} 安全。
+     */
+    private Map<String, String> forwardKnowledgeHeaders(Map<String, String> headers, Long resourceId) {
+        Map<String, String> forwardedHeaders = headers == null ? new HashMap<>() : new HashMap<>(headers);
+        if (resourceId != null) {
+            forwardedHeaders.put(FeignPythonBuildService.RESOURCE_ID_HEADER, String.valueOf(resourceId));
+        }
+        return forwardedHeaders;
     }
 
     /**

@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.state.application.service.filebrowser;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.Collections;
 import java.util.List;
 
 import org.apache.commons.lang3.StringUtils;
@@ -89,7 +90,7 @@ public class FileBrowserKnowledgeTransferApplicationService {
                 multipartFile
             }, request.getTargetResourceId(), targetDirectoryPath, fileName,
                 Boolean.TRUE.equals(request.getProcessFrontMatter()), Boolean.TRUE.equals(request.getOverwrite()),
-                false);
+                false, Collections.emptyMap());
             result.setUploadedFileCount(result.getUploadedFileCount() + uploadResult.getUploadItems().size());
             for (UploadItem uploadItem : uploadResult.getUploadItems()) {
                 result.getUploadItems().add(uploadItem);
@@ -109,7 +110,7 @@ public class FileBrowserKnowledgeTransferApplicationService {
         folder.setDirectoryName(folderName);
         folder.setDirectoryDescription("");
         try {
-            datasetApplicationService.createFolder(folder);
+            datasetApplicationService.createFolder(folder, Collections.emptyMap());
             return true;
         }
         catch (RuntimeException ex) {

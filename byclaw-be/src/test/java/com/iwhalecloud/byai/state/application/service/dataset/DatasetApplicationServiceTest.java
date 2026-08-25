@@ -128,18 +128,18 @@ class DatasetApplicationServiceTest {
         SsResource resource = defaultPersonalDataset();
         when(ssResourceService.findById(100L)).thenReturn(resource);
         when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
-        when(feignPythonBuildService.createDirectory(any(), eq(100L))).thenReturn(successResponse());
+        when(feignPythonBuildService.createDirectory(any(), any())).thenReturn(successResponse());
 
         Folder folder = new Folder();
         folder.setResourceId(100L);
         folder.setDirectoryName("reports");
         folder.setDirectoryPath("/2026");
 
-        service.createFolder(folder);
+        service.createFolder(folder, Collections.emptyMap());
 
         ArgumentCaptor<com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryCreate> captor = ArgumentCaptor
             .forClass(com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryCreate.class);
-        verify(feignPythonBuildService).createDirectory(captor.capture(), eq(100L));
+        verify(feignPythonBuildService).createDirectory(captor.capture(), any());
         assertThat(captor.getValue().getKnCode()).isEqualTo("personal-kb");
         assertThat(captor.getValue().getDirectoryPath()).isEqualTo("/2026/reports");
     }
@@ -153,7 +153,7 @@ class DatasetApplicationServiceTest {
             .hasMessage("dataset.default.personal.delete.not.allowed");
 
         verify(authApplicationService, never()).hasResourceManagePermission(any());
-        verify(feignPythonBuildService, never()).deleteKnowledgeBase(any());
+        verify(feignPythonBuildService, never()).deleteKnowledgeBase(any(), any());
     }
 
     @Test
@@ -379,17 +379,17 @@ class DatasetApplicationServiceTest {
         PythonBuildResponse<KnowledgeItemsMoveResult> response = new PythonBuildResponse<>();
         response.setResultCode(PythonBuildResponse.RESPONSE_SUCCESS);
         response.setResultObject(qaResult);
-        when(feignPythonBuildService.moveKnowledgeItems(any(), eq(100L))).thenReturn(response);
+        when(feignPythonBuildService.moveKnowledgeItems(any(), any())).thenReturn(response);
 
         KnowledgeItemsMoveRequest request = new KnowledgeItemsMoveRequest();
         request.setResourceId(100L);
         request.setSourcePath(List.of("/制度/考勤.pdf", "/制度/图片"));
         request.setTargetDirectoryPath("/归档/人事");
 
-        KnowledgeItemsMoveResult result = service.moveKnowledgeItems(request);
+        KnowledgeItemsMoveResult result = service.moveKnowledgeItems(request, Collections.emptyMap());
 
         ArgumentCaptor<KbKnowledgeItemsMove> captor = ArgumentCaptor.forClass(KbKnowledgeItemsMove.class);
-        verify(feignPythonBuildService).moveKnowledgeItems(captor.capture(), eq(100L));
+        verify(feignPythonBuildService).moveKnowledgeItems(captor.capture(), any());
         assertThat(captor.getValue().getKnCode()).isEqualTo("personal-kb");
         assertThat(captor.getValue().getSourcePath()).containsExactly("/制度/考勤.pdf", "/制度/图片");
         assertThat(captor.getValue().getTargetDirectoryPath()).isEqualTo("/归档/人事");
@@ -418,17 +418,17 @@ class DatasetApplicationServiceTest {
         PythonBuildResponse<KbImportResult> response = new PythonBuildResponse<>();
         response.setResultCode(PythonBuildResponse.RESPONSE_SUCCESS);
         response.setResultObject(qaResult);
-        when(feignPythonBuildService.importKnowledgeItem(any(), eq(100L))).thenReturn(response);
+        when(feignPythonBuildService.importKnowledgeItem(any(), any())).thenReturn(response);
 
         MockMultipartFile zip = new MockMultipartFile("files", "制度.zip", "application/zip", new byte[]{
             1, 2, 3
         });
         UploadResult result = service.uploadFiles(new MockMultipartFile[]{
             zip
-        }, 100L, "/制度", null, null, false, false);
+        }, 100L, "/制度", null, null, false, false, Collections.emptyMap());
 
         ArgumentCaptor<KbFileImport> captor = ArgumentCaptor.forClass(KbFileImport.class);
-        verify(feignPythonBuildService).importKnowledgeItem(captor.capture(), eq(100L));
+        verify(feignPythonBuildService).importKnowledgeItem(captor.capture(), any());
         assertThat(captor.getValue().getKnCode()).isEqualTo("personal-kb");
         assertThat(captor.getValue().getFilePath()).isEqualTo("/制度");
         assertThat(captor.getValue().getProcessFrontMatter()).isNull();
@@ -455,13 +455,14 @@ class DatasetApplicationServiceTest {
         PythonBuildResponse<KbFileUpdateResult> response = new PythonBuildResponse<>();
         response.setResultCode(PythonBuildResponse.RESPONSE_SUCCESS);
         response.setResultObject(qaResult);
-        when(feignPythonBuildService.updateKnowledgeItem(any(), eq(100L))).thenReturn(response);
+        when(feignPythonBuildService.updateKnowledgeItem(any(), any())).thenReturn(response);
 
         MockMultipartFile file = new MockMultipartFile("fileContent", "请假.md", "text/markdown", "# 请假制度".getBytes());
-        KbFileUpdateResult result = service.updateKnowledgeFile(100L, "制度/请假.md", "", true, file);
+        KbFileUpdateResult result = service.updateKnowledgeFile(100L, "制度/请假.md", "", true, file,
+            Collections.emptyMap());
 
         ArgumentCaptor<KbFileUpdate> captor = ArgumentCaptor.forClass(KbFileUpdate.class);
-        verify(feignPythonBuildService).updateKnowledgeItem(captor.capture(), eq(100L));
+        verify(feignPythonBuildService).updateKnowledgeItem(captor.capture(), any());
         assertThat(captor.getValue().getKnCode()).isEqualTo("personal-kb");
         assertThat(captor.getValue().getFilePath()).isEqualTo("/制度/请假.md");
         assertThat(captor.getValue().getFileDescription()).isEmpty();

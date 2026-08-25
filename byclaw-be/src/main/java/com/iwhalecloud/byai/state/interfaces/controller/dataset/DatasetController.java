@@ -178,8 +178,10 @@ public class DatasetController {
      * @return ResponseUtil
      */
     @PostMapping("/createFolder")
-    public ResponseUtil<KbDirectoryCreate> createFolder(@RequestBody Folder folder) {
-        KbDirectoryCreate kbDirectoryCreate = datasetApplicationService.createFolder(folder);
+    public ResponseUtil<KbDirectoryCreate> createFolder(HttpServletRequest httpServletRequest,
+                                                        @RequestBody Folder folder) {
+        Map<String, String> headers = this.parseHeadersFromRequest(httpServletRequest);
+        KbDirectoryCreate kbDirectoryCreate = datasetApplicationService.createFolder(folder, headers);
         return ResponseUtil.successResponse(I18nUtil.get("dataset.folder.create.success"), kbDirectoryCreate);
     }
 
@@ -190,8 +192,10 @@ public class DatasetController {
      * @return ResponseUtil
      */
     @PostMapping("/renameFolder")
-    public ResponseUtil<KbDirectoryUpdate> renameFolder(@RequestBody Folder folder) {
-        KbDirectoryUpdate kbDirectoryUpdate = datasetApplicationService.renameFolder(folder);
+    public ResponseUtil<KbDirectoryUpdate> renameFolder(HttpServletRequest httpServletRequest,
+                                                        @RequestBody Folder folder) {
+        Map<String, String> headers = this.parseHeadersFromRequest(httpServletRequest);
+        KbDirectoryUpdate kbDirectoryUpdate = datasetApplicationService.renameFolder(folder, headers);
         return ResponseUtil.successResponse(I18nUtil.get("dataset.folder.rename.success"), kbDirectoryUpdate);
     }
 
@@ -202,8 +206,10 @@ public class DatasetController {
      * @return ResponseUtil
      */
     @PostMapping("/deleteFolder")
-    public ResponseUtil<SsResource> deleteFolder(@RequestBody FolderDelete folderDelete) {
-        datasetApplicationService.deleteFolder(folderDelete);
+    public ResponseUtil<SsResource> deleteFolder(HttpServletRequest httpServletRequest,
+                                                 @RequestBody FolderDelete folderDelete) {
+        Map<String, String> headers = this.parseHeadersFromRequest(httpServletRequest);
+        datasetApplicationService.deleteFolder(folderDelete, headers);
         return ResponseUtil.success(I18nUtil.get("dataset.folder.delete.success"));
     }
 
@@ -211,10 +217,11 @@ public class DatasetController {
      * 批量移动知识库文件或目录。
      */
     @PostMapping("/moveKnowledgeItems")
-    public ResponseUtil<KnowledgeItemsMoveResult> moveKnowledgeItems(
-        @Valid @RequestBody KnowledgeItemsMoveRequest request) {
+    public ResponseUtil<KnowledgeItemsMoveResult> moveKnowledgeItems(HttpServletRequest httpServletRequest,
+                                                                     @Valid @RequestBody KnowledgeItemsMoveRequest request) {
+        Map<String, String> headers = this.parseHeadersFromRequest(httpServletRequest);
         return ResponseUtil.successResponse(I18nUtil.get("dataset.items.move.success"),
-            datasetApplicationService.moveKnowledgeItems(request));
+            datasetApplicationService.moveKnowledgeItems(request, headers));
     }
 
     /**
@@ -336,18 +343,19 @@ public class DatasetController {
      * @return ResponseUtil
      */
     @PostMapping(value = "/uploadFiles", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ResponseUtil<UploadResult> uploadFiles(@RequestPart("files") MultipartFile[] files,
+    public ResponseUtil<UploadResult> uploadFiles(HttpServletRequest httpServletRequest,
+                                                  @RequestPart("files") MultipartFile[] files,
                                                   @RequestPart("resourceId") Long resourceId, @RequestPart(value = "directoryPath") String directoryPath,
                                                   @RequestPart(value = "fileDescription", required = false) String fileDescription,
                                                   @RequestPart(value = "processFrontMatter", required = false) String processFrontMatter,
                                                   @RequestPart(value = "overwrite", required = false) String overwrite,
                                                   @RequestPart(value = "skipIfDuplicate", required = false) String skipIfDuplicate) {
         try {
-
+            Map<String, String> headers = this.parseHeadersFromRequest(httpServletRequest);
             directoryPath = new String(directoryPath.getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8);
             UploadResult uploadResult = datasetApplicationService.uploadFiles(files, resourceId, directoryPath,
                 fileDescription, parseOptionalBoolean(processFrontMatter), Boolean.parseBoolean(overwrite),
-                Boolean.parseBoolean(skipIfDuplicate));
+                Boolean.parseBoolean(skipIfDuplicate), headers);
             return ResponseUtil.successResponse(I18nUtil.get("dataset.file.upload.success"), uploadResult);
         } catch (Exception e) {
             logger.error(e.getMessage(), e);
@@ -362,8 +370,9 @@ public class DatasetController {
      * @return ResponseUtil
      */
     @PostMapping(value = "/build")
-    public ResponseUtil<Void> build(@RequestBody DatasetBuild datasetBuild) {
-        datasetApplicationService.build(datasetBuild);
+    public ResponseUtil<Void> build(HttpServletRequest httpServletRequest, @RequestBody DatasetBuild datasetBuild) {
+        Map<String, String> headers = this.parseHeadersFromRequest(httpServletRequest);
+        datasetApplicationService.build(datasetBuild, headers);
         return ResponseUtil.success(I18nUtil.get("dataset.build.success"));
     }
 
@@ -500,14 +509,16 @@ public class DatasetController {
      * 更新已存在知识库文件的内容。该操作不会自动触发知识构建。
      */
     @PostMapping(value = "/knowledgeItems/update", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ResponseUtil<KbFileUpdateResult> updateKnowledgeItem(@RequestPart("resourceId") Long resourceId,
+    public ResponseUtil<KbFileUpdateResult> updateKnowledgeItem(HttpServletRequest httpServletRequest,
+                                                                @RequestPart("resourceId") Long resourceId,
                                                                 @RequestPart("filePath") String filePath,
                                                                 @RequestPart(value = "fileDescription", required = false) String fileDescription,
                                                                 @RequestPart(value = "processFrontMatter", required = false) String processFrontMatter,
                                                                 @RequestPart("fileContent") MultipartFile fileContent) {
+        Map<String, String> headers = this.parseHeadersFromRequest(httpServletRequest);
         String normalizedFilePath = new String(filePath.getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8);
         KbFileUpdateResult result = datasetApplicationService.updateKnowledgeFile(resourceId, normalizedFilePath,
-            fileDescription, parseOptionalBoolean(processFrontMatter), fileContent);
+            fileDescription, parseOptionalBoolean(processFrontMatter), fileContent, headers);
         return ResponseUtil.successResponse(I18nUtil.get("dataset.file.update.success"), result);
     }
 
@@ -517,8 +528,10 @@ public class DatasetController {
      * @param removeFileDto 删除文件信息
      */
     @PostMapping(value = "/removeFile")
-    public ResponseUtil<String> removeFile(@RequestBody RemoveFileDto removeFileDto) {
-        datasetApplicationService.removeFile(removeFileDto);
+    public ResponseUtil<String> removeFile(HttpServletRequest httpServletRequest,
+                                           @RequestBody RemoveFileDto removeFileDto) {
+        Map<String, String> headers = this.parseHeadersFromRequest(httpServletRequest);
+        datasetApplicationService.removeFile(removeFileDto, headers);
         return ResponseUtil.success(I18nUtil.get("dataset.file.remove.success"));
     }
 
