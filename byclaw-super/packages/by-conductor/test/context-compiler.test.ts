@@ -341,6 +341,9 @@ describe("OrchestratorContextCompiler", () => {
     expect(compiled.stableSystemPrompt).toContain(
       "Never ask a clarification question in ordinary assistant text",
     );
+    expect(compiled.stableSystemPrompt).toContain(
+      "If the user's request is complex or requires multiple steps to complete, you must use updateTaskPlan to plan the work.",
+    );
     expect(compiled.stableSystemPrompt).toContain("优先安排交叉复核。");
     expect(compiled.systemPrompt).not.toContain("ByClaw Super Assistant");
     expect(compiled.dynamicSystemContext).toContain('"role":"数据复核"');

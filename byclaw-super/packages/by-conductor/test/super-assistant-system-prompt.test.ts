@@ -16,6 +16,9 @@ describe("SUPER_ASSISTANT_SYSTEM_PROMPT", () => {
     expect(SUPER_ASSISTANT_SYSTEM_PROMPT).toContain(
       "Only after the user explicitly confirms the plan",
     );
+    expect(SUPER_ASSISTANT_SYSTEM_PROMPT).toContain(
+      "If the user's request is complex or requires multiple steps to complete, you must use updateTaskPlan to plan the work.",
+    );
   });
 
   it("requires user confirmation for specialist questions the leader cannot decide", () => {
