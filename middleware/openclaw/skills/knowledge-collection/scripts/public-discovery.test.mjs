@@ -9,6 +9,32 @@ import * as publicDiscovery from './public-discovery.mjs';
 
 const { runPublicDiscover } = publicDiscovery;
 
+test('requires the managed SearXNG environment when no interpreter override is configured', () => {
+  assert.throws(
+    () => publicDiscovery.resolveSearxngPython({}, {}, () => false),
+    /SearXNG Python 环境不存在[\s\S]*bootstrap-venv\.sh[\s\S]*ONLINE_SEARCH_PYTHON/,
+  );
+});
+
+test('prefers explicit SearXNG interpreter overrides over the managed environment', () => {
+  assert.equal(
+    publicDiscovery.resolveSearxngPython(
+      { pythonExecutable: '/custom/python' },
+      { ONLINE_SEARCH_PYTHON: '/environment/python' },
+      () => false,
+    ),
+    '/custom/python',
+  );
+  assert.equal(
+    publicDiscovery.resolveSearxngPython(
+      {},
+      { ONLINE_SEARCH_PYTHON: '/environment/python' },
+      () => false,
+    ),
+    '/environment/python',
+  );
+});
+
 function makeInitializedSession(sourceScope = ['public-internet']) {
   const root = mkdtempSync(join(tmpdir(), 'public-discovery-test-'));
   ensureSessionSkeleton(root);

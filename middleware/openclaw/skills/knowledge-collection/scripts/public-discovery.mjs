@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -33,6 +34,22 @@ function snapshotPath(inputDir, name) {
     throw new Error('发现快照必须位于会话 .collection-inputs 目录内');
   }
   return target;
+}
+
+export function resolveSearxngPython(options = {}, environment = process.env, pathExists = existsSync) {
+  if (options.pythonExecutable) return options.pythonExecutable;
+  if (environment.ONLINE_SEARCH_PYTHON) return environment.ONLINE_SEARCH_PYTHON;
+
+  const defaultPython = join(onlineSearchRoot, 'scripts/.venv/bin/python');
+  if (!pathExists(defaultPython)) {
+    const scriptsDir = join(onlineSearchRoot, 'scripts');
+    throw new Error(
+      `SearXNG Python 环境不存在：${defaultPython}\n`
+      + `请执行：cd ${scriptsDir} && ./bootstrap-venv.sh\n`
+      + '如由运维统一管理解释器，可显式设置 ONLINE_SEARCH_PYTHON。',
+    );
+  }
+  return defaultPython;
 }
 
 export async function runBoundedProcess({ bin, executable, args }, options = {}) {
@@ -143,9 +160,7 @@ export async function runPublicDiscover(paths, args, options = {}) {
   const searxngSnapshot = snapshotPath(inputDir, `${prefix}-searxng.json`);
   const hotSnapshot = snapshotPath(inputDir, `${prefix}-hot-discovery.json`);
   const mergedSnapshot = snapshotPath(inputDir, `${prefix}-merged.json`);
-  const pythonExecutable = options.pythonExecutable
-    || process.env.ONLINE_SEARCH_PYTHON
-    || join(onlineSearchRoot, 'scripts/.venv/bin/python');
+  const pythonExecutable = resolveSearxngPython(options);
   const runSearxngProcess = options.runProcess || runPublicProcess;
   const runHotDiscoveryProcess = options.runProcess || runUnboundedPublicProcess;
   const searxngTimeoutMs = Math.max(1, Math.ceil(Number(timeout) * 1_000));

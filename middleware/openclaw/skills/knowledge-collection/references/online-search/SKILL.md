@@ -37,14 +37,23 @@ online-search/
 
 ```bash
 cd <技能目录>/scripts
-python3.12 -m venv .venv                  # 或 python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt # 依赖:httpx/lxml/flask/msgspec 等 19 个包
+./bootstrap-venv.sh
 ```
 
 安装后调用方式（**不要直接使用系统 python，用 venv 内的**）：
 
 ```bash
 .venv/bin/python searxng_cli.py "查询词" [参数...]
+```
+
+`bootstrap-venv.sh` 要求 Python 3.12 或更高版本，会创建 `.venv`、安装 `requirements.txt`
+中的锁定依赖并验证关键模块。`.venv` 是本机生成物，已被 Git 忽略，不能提交。
+
+如需手工排查，可执行与脚本等价的命令：
+
+```bash
+python3.12 -m venv .venv                  # 或满足版本要求的 python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
 ```
 
 ## 参数
