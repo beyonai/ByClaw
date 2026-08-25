@@ -9,6 +9,7 @@ import ResourceSiderPanel from '@/layout/sider/components/ResourceSiderPanel';
 import { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentBar';
 import type { DetailPanelOptions } from '@/layout/sider/siderContentContext';
 import { useProjectTypeConfig } from '@/pages/projectSpace/hooks/useProjectTypeConfig';
+import { supportsProjectRepositories } from '@/pages/projectSpace/projectCapabilities';
 import FileResourcePanel from './FileResourcePanel';
 import ObjectFilesPanel from './ObjectFilesPanel';
 import CodesTab from '@/layout/sider/components/ProjectSpaceList/CodesTab';
@@ -34,14 +35,17 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
   const isEnglish = intl.locale.toLowerCase().startsWith('en');
   const activeEmployee = useActiveSiderAgent();
   const { project, loading: projectLoading } = useChatResourceProject(projectId);
-  const { isDevelopProjectEnabled } = useProjectTypeConfig();
+  const { isDevelopProjectEnabled, isOperationProjectEnabled } = useProjectTypeConfig();
   const [upperScopeKey, setUpperScopeKey] = useState<UpperScopeKey>('session');
   const [secondaryState, setSecondaryState] = useState<SecondaryState>(EMPTY_SECONDARY_STATE);
   const [sessionResourceRefreshKey, setSessionResourceRefreshKey] = useState(0);
   const resourceId = activeEmployee.resourceId || (project?.resourceId ? `${project.resourceId}` : undefined);
 
-  // 代码入口只对已启用研发能力的项目开放；未明确的数据项按约定保留空态。
-  const showCode = isDevelopProjectEnabled && project?.projectType === 'develop';
+  // 项目代码对已启用对应能力的研发、运营项目开放；未明确的数据项按约定保留空态。
+  const repositoryProjectEnabled =
+    (project?.projectType === 'develop' && isDevelopProjectEnabled) ||
+    (project?.projectType === 'operation' && isOperationProjectEnabled);
+  const showCode = repositoryProjectEnabled && supportsProjectRepositories(project?.projectType);
 
   useEffect(() => {
     if (!showCode && secondaryState.session === 'code') {

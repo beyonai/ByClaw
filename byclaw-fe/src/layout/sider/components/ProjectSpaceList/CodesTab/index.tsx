@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, type Key } from 'react';
-import { Empty, Input, Modal, Spin, message } from 'antd';
+import { Empty, Input, Modal, Spin, message, type MenuProps } from 'antd';
 import { BranchesOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import FilePreviewPanel from '@/components/ChatLayoutComp/ChatResourceWorkspace/FilePreviewPanel';
@@ -267,7 +267,7 @@ const CodesTab: React.FC<CodesTabProps> = ({
   );
 
   const quoteFile = useCallback(
-    (item: FileTreeItem) => {
+    (item: FileBrowserItem) => {
       if (!normalizedResourceId) return;
       EventEmitter.emit('queryInput-insert-item', {
         item: normalizeReferenceItem(item, normalizedResourceId),
@@ -275,6 +275,23 @@ const CodesTab: React.FC<CodesTabProps> = ({
       });
     },
     [EventEmitter, normalizedResourceId]
+  );
+
+  const getActionItems = useCallback((): MenuProps['items'] => {
+    if (!normalizedResourceId) return [];
+    return [
+      {
+        key: 'quote',
+        label: intl.formatMessage({ id: 'common.quote' }),
+      },
+    ];
+  }, [intl, normalizedResourceId]);
+
+  const handleAction = useCallback(
+    (key: Key, item: FileBrowserItem) => {
+      if (key === 'quote') quoteFile(item);
+    },
+    [quoteFile]
   );
 
   const handleNodeClick = useCallback(
@@ -620,6 +637,9 @@ const CodesTab: React.FC<CodesTabProps> = ({
             onLoadData={loadRepoTreeNode}
             onNodeClick={handleNodeClick}
             onNodeDoubleClick={handleNodeDoubleClick}
+            showActions={!!normalizedResourceId}
+            getActionItems={getActionItems}
+            onAction={handleAction}
           />
         );
       })}

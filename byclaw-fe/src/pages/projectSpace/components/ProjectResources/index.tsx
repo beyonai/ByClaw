@@ -503,14 +503,11 @@ const ProjectResources: React.FC<Props> = ({
     <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={intl.formatMessage({ id: 'chatResource.empty' })} />
   );
 
-  const renderCardHeader = (icon: React.ReactNode, title: string, description: string, onAdd?: () => void) => (
+  const renderCardHeader = (icon: React.ReactNode, title: string, onAdd?: () => void) => (
     <header className={styles.resourceCardHeader}>
       <div className={styles.resourceCardTitleBlock}>
         <span className={styles.resourceCardIcon}>{icon}</span>
-        <div>
-          <Typography.Title level={4}>{title}</Typography.Title>
-          <Typography.Text type="secondary">{description}</Typography.Text>
-        </div>
+        <Typography.Title level={4}>{title}</Typography.Title>
       </div>
       {onAdd && (
         <Button
@@ -679,8 +676,7 @@ const ProjectResources: React.FC<Props> = ({
         <section className={styles.resourceCategoryCard}>
           {renderCardHeader(
             <FileTextOutlined />,
-            intl.formatMessage({ id: 'projectSpace.detail.resource.sharedSpace' }),
-            intl.formatMessage({ id: 'projectSpace.resources.sharedFilesDescription' })
+            intl.formatMessage({ id: 'projectSpace.detail.resource.sharedSpace' })
           )}
           <Spin spinning={loadingFiles} className={styles.resourceCategoryBody}>
             {files.length ? files.map(renderSharedFile) : !loadingFiles && empty}
@@ -692,7 +688,6 @@ const ProjectResources: React.FC<Props> = ({
             {renderCardHeader(
               <GithubOutlined />,
               intl.formatMessage({ id: 'projectSpace.resources.sharedCode' }),
-              intl.formatMessage({ id: 'projectSpace.resources.sharedCodeDescription' }),
               onOpenRepositoryManager ? () => onOpenRepositoryManager() : undefined
             )}
             <Spin spinning={loadingRepos} className={styles.resourceCategoryBody}>
@@ -706,7 +701,6 @@ const ProjectResources: React.FC<Props> = ({
             {renderCardHeader(
               <DatabaseOutlined />,
               intl.formatMessage({ id: 'projectSpace.resources.sharedKnowledge' }),
-              intl.formatMessage({ id: 'projectSpace.resources.sharedKnowledgeDescription' }),
               openResourceModal
             )}
             {renderBoundResources(boundKnowledge, 'knowledge', <DatabaseOutlined />)}
@@ -718,7 +712,6 @@ const ProjectResources: React.FC<Props> = ({
             {renderCardHeader(
               <RobotOutlined />,
               intl.formatMessage({ id: 'projectSpace.resources.sharedEmployee' }),
-              intl.formatMessage({ id: 'projectSpace.resources.sharedEmployeeDescription' }),
               openResourceModal
             )}
             {renderBoundResources(boundEmployees, 'digital_employee', <RobotOutlined />)}
@@ -730,7 +723,6 @@ const ProjectResources: React.FC<Props> = ({
             {renderCardHeader(
               <ApartmentOutlined />,
               intl.formatMessage({ id: 'projectSpace.resources.sharedOntology' }),
-              intl.formatMessage({ id: 'projectSpace.resources.sharedOntologyDescription' }),
               openResourceModal
             )}
             {renderBoundResources(boundOntologies, 'ontology', <ApartmentOutlined />)}
