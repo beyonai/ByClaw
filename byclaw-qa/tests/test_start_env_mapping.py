@@ -22,6 +22,7 @@ def _write_fake_uv(fake_bin: Path, exec_log: Path, env_log: Path) -> None:
             printf 'REDIS_CLUSTER_HOST=%s\\n' "${{REDIS_CLUSTER_HOST-}}" >> {env_log}
             printf 'REDIS_KEY_SCHEMA_VERSION=%s\\n' "${{REDIS_KEY_SCHEMA_VERSION-}}" >> {env_log}
             printf 'BY_QA_STORAGE_PROVIDER=%s\\n' "${{BY_QA_STORAGE_PROVIDER-}}" >> {env_log}
+            printf 'BY_QA_EVENT_PUBLISHER_PROVIDER=%s\\n' "${{BY_QA_EVENT_PUBLISHER_PROVIDER-}}" >> {env_log}
             exit 0
             """
         )
@@ -108,6 +109,7 @@ def test_start_maps_file_storage_minio_source_env(tmp_path: Path) -> None:
         "REDIS_CLUSTER_HOST=",
         "REDIS_KEY_SCHEMA_VERSION=",
         "BY_QA_STORAGE_PROVIDER=byclaw_knowledge_storage:build_byclaw_knowledge_storage_provider",
+        "BY_QA_EVENT_PUBLISHER_PROVIDER=byclaw_knowledge_event_publisher:build_byclaw_knowledge_event_publisher",
     ]
 
 
@@ -175,6 +177,7 @@ def test_start_accepts_redis_cluster_source_env(tmp_path: Path) -> None:
         "REDIS_CLUSTER_HOST=10.0.0.1:6379,10.0.0.2:6379",
         "REDIS_KEY_SCHEMA_VERSION=v2",
         "BY_QA_STORAGE_PROVIDER=byclaw_knowledge_storage:build_byclaw_knowledge_storage_provider",
+        "BY_QA_EVENT_PUBLISHER_PROVIDER=byclaw_knowledge_event_publisher:build_byclaw_knowledge_event_publisher",
     ]
 
 
@@ -217,6 +220,7 @@ def test_start_accepts_redis_cluster_source_env_without_redis_database(tmp_path:
         "REDIS_CLUSTER_HOST=10.0.0.1:6379,10.0.0.2:6379",
         "REDIS_KEY_SCHEMA_VERSION=v2",
         "BY_QA_STORAGE_PROVIDER=byclaw_knowledge_storage:build_byclaw_knowledge_storage_provider",
+        "BY_QA_EVENT_PUBLISHER_PROVIDER=byclaw_knowledge_event_publisher:build_byclaw_knowledge_event_publisher",
     ]
 
 
