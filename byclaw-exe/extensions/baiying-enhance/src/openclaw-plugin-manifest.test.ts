@@ -12,7 +12,7 @@ describe("openclaw plugin manifest", () => {
       >;
     };
 
-    expect(manifest.contracts?.tools).toEqual(["baiying_call"]);
+    expect(manifest.contracts?.tools).toEqual(["baiying_call", "code_to_wiki"]);
     expect(manifest.contracts?.imageGenerationProviders).toEqual([
       "baiying-redis-image",
       "volcengine",

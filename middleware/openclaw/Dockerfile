@@ -29,8 +29,6 @@ COPY byclaw-exe/extensions/byclaw-sqlite/package.json \
 COPY byclaw-exe/extensions/byclaw-acp-adapter/package.json \
      byclaw-exe/extensions/byclaw-acp-adapter/package-lock.json \
      ./src/byclaw-acp-adapter/
-COPY byclaw-exe/extensions/byclaw-wiki/package.json \
-     ./src/byclaw-wiki/
 
 
 RUN --mount=type=cache,target=/root/.npm \
@@ -225,8 +223,6 @@ RUN set -eux; \
         test -f /opt/opencli/extension/manifest.json; \
         ;; \
     esac; \
-    npm install -g @colbymchenry/codegraph; \
-    codegraph version; \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=python312 /usr/local/bin/python3.12 /usr/local/bin/pip3.12 /usr/local/bin/
@@ -236,6 +232,7 @@ COPY --from=python312 /usr/local/lib/python3.12 /usr/local/lib/python3.12
 ARG BY_REACH_VERSION=2.0.0b1
 ARG BY_REACH_COMMIT=9d4cc902195c180767d283787b980438f80871ad
 ARG BY_REACH_SHA256=d4b3404ffdbf1247a07c45f85d21a645463cb9968673bbb3cfa048a21d37cb35
+ARG REPOWIKI_VERSION=0.3.2
 RUN set -eux; \
     ln -sf /usr/local/bin/python3.12 /usr/local/bin/python3; \
     ln -sf /usr/local/bin/python3.12 /usr/bin/python3; \
@@ -252,7 +249,8 @@ RUN set -eux; \
         redis \
         websockify \
         "by-framework==${BY_FRAMEWORK_PY_VERSION}" \
-        "patchright==${PATCHRIGHT_VERSION}"; \
+        "patchright==${PATCHRIGHT_VERSION}" \
+        "repowiki==${REPOWIKI_VERSION}"; \
     patchright install chromium; \
     python3 -m pip install --no-cache-dir \
         -c /tmp/by-reach/constraints.txt \
@@ -262,6 +260,9 @@ RUN set -eux; \
     rm -f /usr/bin/websockify; \
     ln -sf /usr/local/bin/websockify /usr/bin/websockify; \
     websockify --help >/dev/null
+
+COPY middleware/openclaw/repowiki-entrypoint.py /usr/local/bin/byclaw-repowiki
+RUN chmod +x /usr/local/bin/byclaw-repowiki
 
 COPY middleware/openclaw/verify-runtime-toolchain.sh /usr/local/bin/verify-runtime-toolchain
 RUN chmod +x /usr/local/bin/verify-runtime-toolchain \

@@ -420,7 +420,7 @@ describe("adaptAgentJson", () => {
         expect(res.listEntry.experimental).toEqual({ localModelLean: false });
     });
 
-    it("adds code_to_wiki for 百应平台赋能助手 without relTools", () => {
+    it("does not hard-code tools from the digital employee name", () => {
         const raw = {
             resourceId: "10011258",
             resourceName: "百应平台赋能助手",
@@ -436,21 +436,16 @@ describe("adaptAgentJson", () => {
             return;
         }
         expect(res.listEntry.tools).toEqual({
-            alsoAllow: [
-                "baiying_call",
-                "image_generate",
-                "byclaw_chat_context",
-                "code_to_wiki",
-            ],
+            alsoAllow: ["baiying_call", "image_generate", "byclaw_chat_context"],
         });
     });
 
-    it("adds code_to_wiki for 百应平台赋能助手 with relTools", () => {
+    it("allows code_to_wiki only when declared by relTools", () => {
         const raw = {
             resourceId: "10011259",
             resourceName: "百应平台赋能助手",
             integrationType: "NONE",
-            relTools: ["read"],
+            relTools: ["read", "code_to_wiki"],
         };
         const res = adaptAgentJson({
             raw,
@@ -464,10 +459,10 @@ describe("adaptAgentJson", () => {
         expect(res.listEntry.tools).toEqual({
             allow: [
                 "read",
+                "code_to_wiki",
                 "baiying_call",
                 "image_generate",
                 "byclaw_chat_context",
-                "code_to_wiki",
             ],
         });
     });
