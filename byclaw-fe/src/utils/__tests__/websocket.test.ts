@@ -148,6 +148,24 @@ describe('utils/websocket', () => {
     expect(socketInstance.send).toHaveBeenCalledWith(JSON.stringify({ language: 'zh-CN', type: 'NOTIFICATION' }));
   });
 
+  it('notifies reconnect subscribers only after a disconnected socket reconnects', () => {
+    mockGetToken.mockReturnValue('token-1');
+    const ws = require('../websocket').default;
+    const reconnectHandler = jest.fn();
+    ws.onReconnect(reconnectHandler);
+
+    ws.disconnect();
+    ws.init();
+    socketInstance.onopen();
+    expect(reconnectHandler).not.toHaveBeenCalled();
+
+    socketInstance.onclose({ code: 1006, reason: 'network failure' });
+    jest.advanceTimersByTime(2000);
+    socketInstances[1].onopen();
+
+    expect(reconnectHandler).toHaveBeenCalledTimes(1);
+  });
+
   it('adds current language to outgoing messages unless explicitly provided', () => {
     mockGetToken.mockReturnValue('token-1');
     const ws = require('../websocket').default;
