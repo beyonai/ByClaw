@@ -15,6 +15,7 @@ import org.junit.jupiter.api.condition.OS;
 import org.mockito.ArgumentCaptor;
 
 import com.iwhalecloud.byai.gateway.sandbox.client.model.CreateSandboxRequest;
+import com.iwhalecloud.byai.gateway.sandbox.client.model.Volume;
 import com.iwhalecloud.byai.gateway.sandbox.workspace.SandboxWorkspaceBootstrapInitializer;
 import com.iwhalecloud.byai.gateway.sandbox.workspace.model.SandboxFsInitContext;
 @DisabledOnOs(OS.WINDOWS)
@@ -63,6 +64,37 @@ class GenericSandboxSpecProcessorTest {
 
         assertThat(request.getEnv()).isNull();
         verifyNoInteractions(bootstrapInitializer);
+    }
+
+    @Test
+    void buildCreateRequest_passesVolumeOwnershipAndMode() {
+        SandboxWorkspaceBootstrapInitializer bootstrapInitializer = mock(SandboxWorkspaceBootstrapInitializer.class);
+        GenericSandboxSpecProcessor processor = new GenericSandboxSpecProcessor(bootstrapInitializer);
+
+        SandboxServiceSpec spec = new SandboxServiceSpec();
+        spec.setImage("demo/image:latest");
+
+        VolumeSpec volume = new VolumeSpec();
+        volume.setKey("home");
+        volume.setScope(VolumeScope.PRIVATE);
+        volume.setHostPath("/data/byclaw");
+        volume.setSubPath("byclaw-${user_code}/home");
+        volume.setMountPath("/home");
+        volume.setReadOnly(false);
+        volume.setUid(1001);
+        volume.setGid(1001);
+        volume.setMode("0770");
+        spec.setVolumes(List.of(volume));
+
+        CreateSandboxRequest request = processor.buildCreateRequest(
+            "user001", "code-agent", Map.of(), Map.of(), spec);
+
+        assertThat(request.getVolumes()).singleElement().satisfies(item -> {
+            assertThat(item).isInstanceOf(Volume.class);
+            assertThat(item.getUid()).isEqualTo(1001);
+            assertThat(item.getGid()).isEqualTo(1001);
+            assertThat(item.getMode()).isEqualTo("0770");
+        });
     }
 
     @Test

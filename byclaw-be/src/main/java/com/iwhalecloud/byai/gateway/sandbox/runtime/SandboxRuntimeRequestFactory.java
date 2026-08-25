@@ -214,6 +214,9 @@ final class SandboxRuntimeRequestFactory {
             item.put("readOnly", volume.getReadOnly());
             item.put("subPath", volume.getSubPath());
             item.put("scope", volume.getScope());
+            item.put("uid", volume.getUid());
+            item.put("gid", volume.getGid());
+            item.put("mode", volume.getMode());
             payload.add(item);
         }
         return payload.isEmpty() ? null : payload;
