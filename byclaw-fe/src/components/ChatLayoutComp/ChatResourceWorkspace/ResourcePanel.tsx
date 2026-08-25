@@ -94,6 +94,7 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
             sessionId={sessionId}
             projectId={project?.projectId || projectId}
             project={project}
+            resourceId={resourceId}
             refreshKey={sessionResourceRefreshKey}
             onOpenDetail={onOpenDetail}
           />

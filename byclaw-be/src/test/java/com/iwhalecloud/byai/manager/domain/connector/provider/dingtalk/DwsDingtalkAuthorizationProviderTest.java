@@ -103,8 +103,10 @@ class DwsDingtalkAuthorizationProviderTest {
 
     @Test
     void mapsValidDwsStatusToConnectedAccount() {
-        String expiresAt = "2026-08-01T12:30:00+08:00";
-        String refreshExpiresAt = "2026-09-01T12:30:00+08:00";
+        OffsetDateTime now = OffsetDateTime.now().withNano(0);
+        String expiresAt = now.plusDays(1).toString();
+        // READY 要求刷新凭证有效期超过 7 天，使用相对时间避免固定日期推进后变成 EXPIRING。
+        String refreshExpiresAt = now.plusDays(30).toString();
         when(dwsAuthService.getAuthStatus(42L, STATUS_COMMAND)).thenReturn(Map.of(
             "tokenValid", true,
             "refreshTokenValid", true,

@@ -447,6 +447,7 @@ public class DigitalEmployeeGroupApplicationService {
         member.setResourceCode(fact.getResourceCode());
         member.setName(fact.getResourceName());
         member.setDescription(fact.getResourceDesc());
+        member.setAvatar(fact.getAvatar());
         member.setTeamRole(info.getString("teamRole"));
         member.setSortOrder(info.getInteger("sortOrder"));
         member.setCreateType(ext.getCreateType());
