@@ -10,6 +10,7 @@ import {
   type AgentCapabilityCardRepository,
   type AgentCapabilityCardUpsert,
   type CallerPrincipal,
+  type CallbackTimeoutDelivery,
   type Delegation,
   type DelegationRepository,
   type ExecutionCredential,
@@ -36,7 +37,10 @@ import {
   type PoolConfig,
   type QueryResultRow,
 } from "pg";
-import { POSTGRES_TABLE_PREFIX, POSTGRES_MIGRATIONS } from "./migrations.js";
+import {
+  POSTGRES_TABLE_PREFIX,
+  POSTGRES_MIGRATIONS,
+} from "./migrations.js";
 
 const NON_TERMINAL_RUN_STATUSES = [
   "CREATED",
@@ -47,6 +51,10 @@ const NON_TERMINAL_RUN_STATUSES = [
   "SYNTHESIZING",
   "CANCELLING",
 ] as const;
+/** WAITING_AGENT 只能由可信 Resume 回调显式改回 QUEUED，不能被轮询器空转重领。 */
+const CLAIMABLE_RUN_STATUSES = NON_TERMINAL_RUN_STATUSES.filter(
+  (status) => status !== "WAITING_AGENT",
+);
 const TERMINAL_EVENT_TYPES = new Set([
   "run.completed",
   "run.failed",
@@ -860,7 +868,7 @@ export class PostgresRunExecutionQueue implements RunExecutionQueue {
               SELECT 1
                 FROM ${table(this.schema, "runs")} earlier
                WHERE earlier.session_id = r.session_id
-                 AND earlier.status = ANY($1::text[])
+                 AND earlier.status = ANY($2::text[])
                  AND (earlier.created_at, earlier.id) < (r.created_at, r.id)
             )
             AND NOT EXISTS (
@@ -872,7 +880,7 @@ export class PostgresRunExecutionQueue implements RunExecutionQueue {
           ORDER BY r.created_at, r.id
           FOR UPDATE OF r SKIP LOCKED
           LIMIT 1`,
-        [NON_TERMINAL_RUN_STATUSES],
+        [CLAIMABLE_RUN_STATUSES, NON_TERMINAL_RUN_STATUSES],
       );
       const row = candidate.rows[0];
       if (!row) {
@@ -982,6 +990,447 @@ export class PostgresRunExecutionQueue implements RunExecutionQueue {
           AND fencing_token = $3`,
       [claim.sessionId, claim.ownerInstanceId, claim.fencingToken],
     );
+  }
+
+  /** 原子提交调度挂起边界，避免 Resume 与 WAITING_AGENT 分属两个事务而丢失唤醒。 */
+  async suspendRunForDelegation(input: {
+    runId: string;
+    delegationId: string;
+    expectedRunVersion: number;
+    claim?: RunExecutionClaim;
+  }): Promise<{ runStatus: Run["status"]; suspended: boolean }> {
+    return transaction(this.pool, async (client) => {
+      if (input.claim) {
+        await assertLease(client, this.schema, input.claim);
+      }
+      // settleWaitingCallback 也采用 event lock -> Delegation/Run row locks，顺序必须一致。
+      await lockRunEventSequence(client, input.runId);
+      const selected = await client.query<{
+        delegation_status: string;
+        run_status: Run["status"];
+        run_version: number | string;
+        suspended_at: Date | string;
+      }>(
+        `SELECT d.status AS delegation_status, r.status AS run_status,
+                r.version AS run_version, clock_timestamp() AS suspended_at
+           FROM ${table(this.schema, "delegations")} d
+           JOIN ${table(this.schema, "runs")} r ON r.id = d.run_id
+          WHERE d.id = $1 AND d.run_id = $2
+          FOR UPDATE OF d, r`,
+        [input.delegationId, input.runId],
+      );
+      const row = selected.rows[0];
+      if (!row) {
+        throw new Error(`Delegation suspension target not found: ${input.delegationId}`);
+      }
+      const delegationSettled = ["COMPLETED", "FAILED", "CANCELLED", "TIMED_OUT"].includes(
+        row.delegation_status,
+      );
+      // Resume 先到时已经将 Run 改成 QUEUED；旧执行只退出，绝不再写 WAITING_AGENT。
+      if (delegationSettled || row.run_status !== "RUNNING") {
+        return { runStatus: row.run_status, suspended: false };
+      }
+      const runVersion = integer(row.run_version);
+      if (runVersion !== input.expectedRunVersion) {
+        throw new Error(`Run changed before Delegation suspension: ${input.runId}`);
+      }
+      const suspendedAt = milliseconds(row.suspended_at);
+      const updated = await client.query(
+        `UPDATE ${table(this.schema, "runs")}
+            SET status = 'WAITING_AGENT', execution_stage = 'CONNECTOR_WAITING',
+                version = version + 1, updated_at = $3
+          WHERE id = $1 AND version = $2 AND status = 'RUNNING'`,
+        [input.runId, runVersion, date(suspendedAt)],
+      );
+      if (updated.rowCount !== 1) {
+        throw new Error(`Run suspension rejected by optimistic lock: ${input.runId}`);
+      }
+      for (const event of [
+        {
+          type: "run.status" as const,
+          data: { status: "WAITING_AGENT", delegationId: input.delegationId },
+        },
+        {
+          type: "run.suspended" as const,
+          data: { status: "WAITING_AGENT", delegationId: input.delegationId },
+        },
+      ]) {
+        await appendRunEvent(client, this.schema, {
+          timestamp: suspendedAt,
+          runId: input.runId,
+          ...event,
+        });
+      }
+      await notifyRunEvent(client, this.schema, input.runId);
+      return { runStatus: "WAITING_AGENT", suspended: true };
+    });
+  }
+
+  /** 多实例安全地终结到期回调；Delegation、Run、事件和投递 Outbox 同事务提交。 */
+  async expireWaitingCallbacks(input: {
+    limit: number;
+  }): Promise<Array<{ runId: string; delegationId: string }>> {
+    return transaction(this.pool, async (client) => {
+      const candidateRefs = await client.query<{
+        delegation_id: string;
+        run_id: string;
+      }>(
+        `SELECT d.id AS delegation_id, d.run_id
+           FROM ${table(this.schema, "delegations")} d
+           JOIN ${table(this.schema, "runs")} r ON r.id = d.run_id
+          WHERE d.status = 'RUNNING'
+            AND d.callback_deadline_at IS NOT NULL
+            AND d.callback_deadline_at <= clock_timestamp()
+            AND r.status = 'WAITING_AGENT'
+            AND r.execution_stage = 'CONNECTOR_WAITING'
+          ORDER BY d.callback_deadline_at, d.id
+          LIMIT $1`,
+        [input.limit],
+      );
+      const expired: Array<{ runId: string; delegationId: string }> = [];
+      for (const candidateRef of candidateRefs.rows) {
+        // Resume/suspend/timeout 统一使用 event lock -> Delegation/Run row locks。
+        // 先无锁找候选，再在锁内重查，避免旧实现 row lock -> event lock 的死锁窗口。
+        await lockRunEventSequence(client, candidateRef.run_id);
+        const selected = await client.query<{
+          delegation_id: string;
+          run_id: string;
+          agent_id: string;
+          agent_name: string | null;
+          partial_output: string | null;
+          expired_at: Date | string;
+        }>(
+          `SELECT d.id AS delegation_id, d.run_id, d.agent_id, d.agent_name,
+                d.partial_output, clock_timestamp() AS expired_at
+           FROM ${table(this.schema, "delegations")} d
+           JOIN ${table(this.schema, "runs")} r ON r.id = d.run_id
+          WHERE d.id = $1
+            AND d.run_id = $2
+            AND d.status = 'RUNNING'
+            AND d.callback_deadline_at IS NOT NULL
+            AND d.callback_deadline_at <= clock_timestamp()
+            AND r.status = 'WAITING_AGENT'
+            AND r.execution_stage = 'CONNECTOR_WAITING'
+          FOR UPDATE OF d, r`,
+          [candidateRef.delegation_id, candidateRef.run_id],
+        );
+        const candidate = selected.rows[0];
+        if (!candidate) {
+          continue;
+        }
+        const expiredAt = milliseconds(candidate.expired_at);
+        const error = "Delegation received no terminal ResumeCommand within its callback timeout";
+        const finalAnswer = "子 Agent 在规定时间内未返回最终结果，本次调度已超时。";
+        const result = {
+          status: "timed_out",
+          output: candidate.partial_output ?? "",
+          artifacts: [],
+          error,
+        };
+        await client.query(
+          `UPDATE ${table(this.schema, "delegations")}
+              SET status = 'TIMED_OUT', result = $2::jsonb, error = $3,
+                  version = version + 1, updated_at = $4, finished_at = $4
+            WHERE id = $1 AND status = 'RUNNING'`,
+          [candidate.delegation_id, JSON.stringify(result), error, date(expiredAt)],
+        );
+        await client.query(
+          `UPDATE ${table(this.schema, "runs")}
+              SET status = 'FAILED', execution_stage = 'SETTLED',
+                  final_answer = $2, error_message = $3,
+                  version = version + 1, updated_at = $4, finished_at = $4
+            WHERE id = $1
+              AND status = 'WAITING_AGENT'
+              AND execution_stage = 'CONNECTOR_WAITING'`,
+          [candidate.run_id, finalAnswer, error, date(expiredAt)],
+        );
+        await appendRunEvent(client, this.schema, {
+          timestamp: expiredAt,
+          runId: candidate.run_id,
+          type: "delegation.failed",
+          data: {
+            delegationId: candidate.delegation_id,
+            agentId: candidate.agent_id,
+            ...(candidate.agent_name ? { agentName: candidate.agent_name } : {}),
+            status: "TIMED_OUT",
+            artifactCount: 0,
+            resultStatus: "timed_out",
+            hasOutput: Boolean(candidate.partial_output),
+            error,
+          },
+        });
+        await appendRunEvent(client, this.schema, {
+          timestamp: expiredAt,
+          runId: candidate.run_id,
+          type: "run.failed",
+          data: {
+            status: "FAILED",
+            delegationId: candidate.delegation_id,
+            timedOut: true,
+            error,
+            userMessage: finalAnswer,
+          },
+        });
+        await client.query(
+          `DELETE FROM ${table(this.schema, "run_execution_credentials")}
+            WHERE run_id = $1`,
+          [candidate.run_id],
+        );
+        // 同一 Run 的事件锁和 WAITING_AGENT 状态复查保证只有一个扫描事务到达这里；
+        // 使用普通 INSERT，避免 openGauss 不支持 PostgreSQL 的 ON CONFLICT 语法。
+        await client.query(
+          `INSERT INTO ${table(this.schema, "callback_timeout_outbox")} (
+             run_id, created_at, updated_at
+           ) VALUES ($1, $2, $2)`,
+          [candidate.run_id, date(expiredAt)],
+        );
+        await notifyRunEvent(client, this.schema, candidate.run_id);
+        expired.push({
+          runId: candidate.run_id,
+          delegationId: candidate.delegation_id,
+        });
+      }
+      if (expired.length > 0) {
+        await client.query("SELECT pg_notify($1, $2)", [
+          `byclaw_runs_${this.schema}`,
+          "callback-timeout",
+        ]);
+      }
+      return expired;
+    });
+  }
+
+  async settleWaitingCallback(input: {
+    delegationId: string;
+    status: "COMPLETED" | "FAILED" | "CANCELLED";
+    finalAnswer: string;
+  }): Promise<{ accepted: boolean; runId?: string; wakeRun?: boolean }> {
+    return transaction(this.pool, async (client) => {
+      // 事件写入会先持有 Run 事件序列锁，再通过外键读取 runs。这里必须采用相同顺序：
+      // 先定位 runId 并获取事件锁，再锁 Delegation/Run 行。否则并发 append 可能持有
+      // advisory lock 等待 runs 行，而 Resume 持有 runs 行等待 advisory lock，形成 40P01。
+      const located = await client.query<{ run_id: string }>(
+        `SELECT run_id
+           FROM ${table(this.schema, "delegations")}
+          WHERE id = $1`,
+        [input.delegationId],
+      );
+      const locatedRunId = located.rows[0]?.run_id;
+      if (!locatedRunId) {
+        return { accepted: false };
+      }
+      await lockRunEventSequence(client, locatedRunId);
+      const selected = await client.query<{
+        delegation_id: string;
+        run_id: string;
+        agent_id: string;
+        agent_name: string | null;
+        delegation_status: string;
+        run_status: string;
+        execution_stage: string;
+        callback_expired: boolean;
+        settled_at: Date | string;
+      }>(
+        `SELECT d.id AS delegation_id, d.run_id, d.agent_id, d.agent_name,
+                d.status AS delegation_status, r.status AS run_status,
+                r.execution_stage,
+                COALESCE(d.callback_deadline_at <= clock_timestamp(), false) AS callback_expired,
+                clock_timestamp() AS settled_at
+           FROM ${table(this.schema, "delegations")} d
+           JOIN ${table(this.schema, "runs")} r ON r.id = d.run_id
+          WHERE d.id = $1
+            AND d.run_id = $2
+          FOR UPDATE OF d, r`,
+        [input.delegationId, locatedRunId],
+      );
+      const row = selected.rows[0];
+      if (!row) {
+        return { accepted: false };
+      }
+      if (["COMPLETED", "FAILED", "CANCELLED", "TIMED_OUT"].includes(row.delegation_status)) {
+        return { accepted: false, runId: row.run_id };
+      }
+      // 截止时间由数据库时钟裁决；即使扫描器尚未抢到，迟到 Resume 也不能越过期限。
+      if (row.callback_expired) {
+        return { accepted: false, runId: row.run_id };
+      }
+      if (["CANCELLING", "COMPLETED", "FAILED", "CANCELLED"].includes(row.run_status)) {
+        return { accepted: false, runId: row.run_id };
+      }
+      const settledAt = milliseconds(row.settled_at);
+      const resultStatus =
+        input.status === "CANCELLED"
+          ? "cancelled"
+          : input.status === "FAILED"
+            ? "failed"
+            : "completed";
+      const error =
+        input.status === "COMPLETED"
+          ? undefined
+          : input.finalAnswer || `Child agent returned ${input.status}`;
+      const result = {
+        status: resultStatus,
+        output: input.finalAnswer,
+        artifacts: [],
+        ...(error ? { error } : {}),
+      };
+      await client.query(
+        `UPDATE ${table(this.schema, "delegations")}
+            SET status = $2, result = $3::jsonb, error = $4,
+                version = version + 1, updated_at = $5, finished_at = $5
+          WHERE id = $1`,
+        [input.delegationId, input.status, JSON.stringify(result), error ?? null, date(settledAt)],
+      );
+      await appendRunEvent(client, this.schema, {
+        timestamp: settledAt,
+        runId: row.run_id,
+        type: input.status === "COMPLETED" ? "delegation.completed" : "delegation.failed",
+        data: {
+          delegationId: row.delegation_id,
+          agentId: row.agent_id,
+          ...(row.agent_name ? { agentName: row.agent_name } : {}),
+          status: input.status,
+          artifactCount: 0,
+          resultStatus,
+          hasOutput: Boolean(input.finalAnswer),
+          ...(error ? { error } : {}),
+        },
+      });
+      const wakeRun =
+        (row.run_status === "WAITING_AGENT" && row.execution_stage === "CONNECTOR_WAITING") ||
+        row.run_status === "RUNNING";
+      if (wakeRun) {
+        await client.query(
+          `UPDATE ${table(this.schema, "runs")}
+              SET status = 'QUEUED', execution_stage = 'CONNECTOR_WAITING',
+                  version = version + 1, updated_at = $2
+            WHERE id = $1`,
+          [row.run_id, date(settledAt)],
+        );
+        await appendRunEvent(client, this.schema, {
+          timestamp: settledAt,
+          runId: row.run_id,
+          type: "run.status",
+          data: {
+            status: "QUEUED",
+            delegationId: input.delegationId,
+            resumed: true,
+          },
+        });
+        await client.query("SELECT pg_notify($1, $2)", [
+          `byclaw_runs_${this.schema}`,
+          "callback-resume",
+        ]);
+      }
+      await notifyRunEvent(client, this.schema, row.run_id);
+      return { accepted: true, runId: row.run_id, wakeRun };
+    });
+  }
+
+  async claimCallbackTimeoutDeliveries(input: {
+    instanceId: string;
+    leaseMs: number;
+    limit: number;
+  }): Promise<CallbackTimeoutDelivery[]> {
+    return transaction(this.pool, async (client) => {
+      const selected = await client.query<{
+        run_id: string;
+        external_session_id: string | null;
+        trace_id: string | null;
+        parent_message_id: string | null;
+        run_status: "COMPLETED" | "FAILED" | "CANCELLED";
+        final_answer: string | null;
+        error_message: string | null;
+      }>(
+        `SELECT o.run_id,
+                r.ingress_context->>'externalSessionId' AS external_session_id,
+                r.ingress_context->>'traceId' AS trace_id,
+                r.ingress_context->>'parentMessageId' AS parent_message_id,
+                r.status AS run_status, r.final_answer, r.error_message
+           FROM ${table(this.schema, "callback_timeout_outbox")} o
+           JOIN ${table(this.schema, "runs")} r ON r.id = o.run_id
+          WHERE o.delivered_at IS NULL
+            AND (o.claim_expires_at IS NULL OR o.claim_expires_at <= clock_timestamp())
+            AND r.status IN ('COMPLETED', 'FAILED', 'CANCELLED')
+          ORDER BY o.created_at, o.run_id
+          FOR UPDATE OF o SKIP LOCKED
+          LIMIT $1`,
+        [input.limit],
+      );
+      const deliveries: CallbackTimeoutDelivery[] = [];
+      for (const row of selected.rows) {
+        await client.query(
+          `UPDATE ${table(this.schema, "callback_timeout_outbox")}
+              SET claimed_by = $2,
+                  claim_expires_at = clock_timestamp() + ($3 * interval '1 millisecond'),
+                  attempt_count = attempt_count + 1,
+                  updated_at = clock_timestamp()
+            WHERE run_id = $1`,
+          [row.run_id, input.instanceId, input.leaseMs],
+        );
+        const hasAnyExternalRoute = Boolean(
+          row.external_session_id || row.trace_id || row.parent_message_id,
+        );
+        if (!hasAnyExternalRoute) {
+          // HTTP/SSE Run 没有 by-framework 外部流，数据库 run.failed 已经是它的终态。
+          await client.query(
+            `UPDATE ${table(this.schema, "callback_timeout_outbox")}
+                SET delivered_at = clock_timestamp(), updated_at = clock_timestamp()
+              WHERE run_id = $1 AND claimed_by = $2`,
+            [row.run_id, input.instanceId],
+          );
+          continue;
+        }
+        const deliveryResult = {
+          runId: row.run_id,
+          runStatus: row.run_status,
+          ...(row.final_answer === null ? {} : { finalAnswer: row.final_answer }),
+          ...(row.error_message === null ? {} : { error: row.error_message }),
+        };
+        if (!row.external_session_id || !row.trace_id) {
+          const missingFields = [
+            !row.external_session_id ? "externalSessionId" : "",
+            !row.trace_id ? "traceId" : "",
+          ].filter(Boolean);
+          deliveries.push({
+            ...deliveryResult,
+            routingError: `Callback timeout routing is incomplete: missing ${missingFields.join(", ")}`,
+            ...(row.external_session_id
+              ? { externalSessionId: row.external_session_id }
+              : {}),
+            ...(row.trace_id ? { traceId: row.trace_id } : {}),
+            ...(row.parent_message_id
+              ? { parentMessageId: row.parent_message_id }
+              : {}),
+          });
+          continue;
+        }
+        deliveries.push({
+          ...deliveryResult,
+          externalSessionId: row.external_session_id,
+          traceId: row.trace_id,
+          // session + trace 已足以关闭正确的前端流；旧数据缺少 messageId 时使用稳定节点。
+          parentMessageId:
+            row.parent_message_id ?? `${row.run_id}:super-summary:answer`,
+        });
+      }
+      return deliveries;
+    });
+  }
+
+  async completeCallbackTimeoutDelivery(input: {
+    runId: string;
+    instanceId: string;
+  }): Promise<boolean> {
+    const result = await this.pool.query(
+      `UPDATE ${table(this.schema, "callback_timeout_outbox")}
+          SET delivered_at = clock_timestamp(), updated_at = clock_timestamp()
+        WHERE run_id = $1
+          AND claimed_by = $2
+          AND delivered_at IS NULL`,
+      [input.runId, input.instanceId],
+    );
+    return result.rowCount === 1;
   }
 }
 
@@ -1422,6 +1871,8 @@ async function writeDelegation(
     nullableDate(delegation.finishedAt),
     delegation.agentName ?? null,
     nullableDate(delegation.lastActivityAt),
+    nullableDate(delegation.callbackDeadlineAt),
+    delegation.taskPosition ?? null,
   ];
   const updated = await client.query(
     `UPDATE ${table(schema, "delegations")}
@@ -1436,7 +1887,14 @@ async function writeDelegation(
             started_at = $10,
             finished_at = $11,
             agent_name = $12,
-            last_activity_at = $13
+            last_activity_at = $13,
+            callback_deadline_at = CASE
+              WHEN $14::timestamptz IS NULL THEN NULL
+              WHEN callback_deadline_at IS NULL
+                THEN clock_timestamp() + ($14::timestamptz - $9::timestamptz)
+              ELSE callback_deadline_at
+            END,
+            task_position = $15
       WHERE id = $1 AND version = $8::bigint - 1`,
     [
       delegation.id,
@@ -1452,6 +1910,8 @@ async function writeDelegation(
       nullableDate(delegation.finishedAt),
       delegation.agentName ?? null,
       nullableDate(delegation.lastActivityAt),
+      nullableDate(delegation.callbackDeadlineAt),
+      delegation.taskPosition ?? null,
     ],
   );
   if (updated.rowCount !== 0) {
@@ -1468,10 +1928,15 @@ async function writeDelegation(
     `INSERT INTO ${table(schema, "delegations")} (
        id, run_id, agent_id, connector_id, task, expected_output, status,
        external_ref, connector_cursor, result, partial_output, error, version,
-       created_at, updated_at, started_at, finished_at, agent_name, last_activity_at
+       created_at, updated_at, started_at, finished_at, agent_name, last_activity_at,
+       callback_deadline_at, task_position
      ) VALUES (
        $1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10::jsonb, $11, $12, $13,
-       $14, $15, $16, $17, $18, $19
+       $14, $15, $16, $17, $18, $19,
+       CASE
+         WHEN $20::timestamptz IS NULL THEN NULL
+         ELSE clock_timestamp() + ($20::timestamptz - $15::timestamptz)
+       END, $21
      )`,
     values,
   );
@@ -1482,10 +1947,7 @@ async function appendRunEvent(
   schema: string,
   event: Omit<RunEvent, "eventId">,
 ): Promise<RunEvent> {
-  await client.query(
-    "SELECT pg_advisory_xact_lock(hashtext($1)::bigint)",
-    [`byclaw-run-event:${event.runId}`],
-  );
+  await lockRunEventSequence(client, event.runId);
   const result = await client.query(
     `INSERT INTO ${table(schema, "run_events")}
        (run_id, event_id, timestamp, type, data)
@@ -1799,6 +2261,9 @@ function mapDelegation(row: QueryResultRow): Delegation {
     ...(row.agent_name === null ? {} : { agentName: text(row.agent_name) }),
     connectorId: text(row.connector_id),
     task: text(row.task),
+    ...(row.task_position === null || row.task_position === undefined
+      ? {}
+      : { taskPosition: integer(row.task_position) }),
     ...(row.expected_output === null
       ? {}
       : { expectedOutput: text(row.expected_output) }),
@@ -1824,6 +2289,9 @@ function mapDelegation(row: QueryResultRow): Delegation {
     ...(row.last_activity_at === null
       ? {}
       : { lastActivityAt: milliseconds(row.last_activity_at) }),
+    ...(row.callback_deadline_at === null
+      ? {}
+      : { callbackDeadlineAt: milliseconds(row.callback_deadline_at) }),
   };
 }
 
@@ -1964,18 +2432,46 @@ async function transaction<T>(
   pool: Pool,
   work: (client: PoolClient) => Promise<T>,
 ): Promise<T> {
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-    const result = await work(client);
-    await client.query("COMMIT");
-    return result;
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => undefined);
-    throw error;
-  } finally {
-    client.release();
+  const maxAttempts = 3;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await work(client);
+      await client.query("COMMIT");
+      return result;
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      if (!isRetryableTransactionError(error) || attempt === maxAttempts) {
+        throw error;
+      }
+    } finally {
+      client.release();
+    }
+    await transactionRetryDelay(attempt);
   }
+  throw new Error("PostgreSQL transaction retry loop exhausted");
+}
+
+/** Run 事件 ID 分配与其外键检查共用的事务级锁，所有复合事务必须先拿此锁。 */
+async function lockRunEventSequence(client: PoolClient, runId: string): Promise<void> {
+  await client.query(
+    "SELECT pg_advisory_xact_lock(hashtext($1)::bigint)",
+    [`byclaw-run-event:${runId}`],
+  );
+}
+
+function isRetryableTransactionError(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+  const code = (error as { code?: unknown }).code;
+  return code === "40P01" || code === "40001";
+}
+
+function transactionRetryDelay(attempt: number): Promise<void> {
+  const delayMs = 5 * 2 ** (attempt - 1) + Math.floor(Math.random() * 10);
+  return new Promise((resolve) => setTimeout(resolve, delayMs));
 }
 
 /** 兼容 PostgreSQL 与不支持 ON CONFLICT 的 openGauss，用事务级锁串行化 upsert。 */

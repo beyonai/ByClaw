@@ -15,6 +15,8 @@ export interface ConnectorRequest {
   userName?: string;
   sessionId: string;
   runId: string;
+  /** 整条 by-framework 父子调用链共用的 trace ID。 */
+  traceId?: string;
   delegationId: string;
   agent: AgentProfile;
   task: string;
@@ -34,6 +36,8 @@ export interface ConnectorRequest {
 
 /** Connector 对编排层声明的传输能力。 */
 export interface ConnectorCapabilities {
+  /** 终态来自当前事件流，还是来自独立的持久化回调。 */
+  completionMode: "events" | "callback";
   streaming: boolean;
   cancellation: boolean;
   artifacts: boolean;
@@ -110,10 +114,8 @@ export type ConnectorEvent = (
   cursor?: string;
 };
 
-/** 已启动的外部执行，包括可持久化引用、事件流和取消句柄。 */
-export interface ConnectorExecution {
+interface ConnectorExecutionBase {
   ref: ExternalExecutionRef;
-  events: AsyncIterable<ConnectorEvent>;
   /** 请求外部系统取消本次执行；实现必须保证重复调用安全。 */
   cancel(reason: string): Promise<void>;
   /** 向一个已暂停的外部执行提交用户输入；仅支持人机交互的 Connector 实现。 */
@@ -123,6 +125,24 @@ export interface ConnectorExecution {
     resumeToken?: Record<string, JsonValue>,
   ): Promise<void>;
 }
+
+/**
+ * 已启动的外部执行。
+ *
+ * events 模式由当前调用栈消费 Connector 事件直到终态；callback 模式在可靠投递后
+ * 立即释放调用栈，终态只允许通过独立回调结算。两种完成模型不能再伪装成同一条事件流。
+ */
+export type ConnectorExecution = ConnectorExecutionBase &
+  (
+    | {
+        completionMode?: "events";
+        events: AsyncIterable<ConnectorEvent>;
+      }
+    | {
+        completionMode: "callback";
+        events?: never;
+      }
+  );
 
 /** Connector 依赖的健康检查结果。 */
 export interface ConnectorHealth {

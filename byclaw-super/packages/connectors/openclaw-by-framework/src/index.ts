@@ -7,7 +7,7 @@ export const OPENCLAW_BY_FRAMEWORK_CONNECTOR_ID = "openclaw-by-framework";
 
 export type OpenClawConnectorOptions = Omit<
   ByFrameworkConnectorOptions,
-  "connectorId" | "targetAgentTypeResolver" | "promoteOutOfReasoningTextToOutput"
+  "connectorId" | "targetAgentTypeResolver"
 >;
 
 /** 通过公共 by-framework 传输连接当前用户的 OpenClaw Worker。 */

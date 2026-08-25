@@ -19,22 +19,21 @@ describe("createByClawSseSerializer", () => {
     expect(answer).toContain("正文");
   });
 
-  it("returns a safe answer when a downstream model call fails", () => {
+  it("returns the provider error when a downstream model call fails", () => {
     const serialize = createByClawSseSerializer();
     const output = serialize(
       event(1, "run.failed", {
         status: "FAILED",
         error: "Leader model call failed: 403: sensitive provider response",
-        userMessage: "下游模型调用异常，请切换模型或者联系管理员",
+        userMessage: "403: sensitive provider response",
       }),
     );
 
     expect(output).toContain("event: answerStart");
     expect(output).toContain("event: answerDelta");
-    expect(output).toContain("下游模型调用异常，请切换模型或者联系管理员");
+    expect(output).toContain("403: sensitive provider response");
     expect(output).toContain("event: answerEnd");
     expect(output).toContain("event: appStreamResponse");
-    expect(output).not.toContain("sensitive provider response");
     expect(output).not.toContain("event: error");
   });
 

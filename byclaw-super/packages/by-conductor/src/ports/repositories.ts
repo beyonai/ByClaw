@@ -127,6 +127,30 @@ export interface RunExecutionClaim {
   leaseExpiresAt: number;
 }
 
+/** 因回调超时而脱离 ResumeCommand 上下文的最终结果投递任务。 */
+interface CallbackTimeoutDeliveryResult {
+  runId: string;
+  runStatus: "COMPLETED" | "FAILED" | "CANCELLED";
+  finalAnswer?: string;
+  error?: string;
+}
+
+export type CallbackTimeoutDelivery = CallbackTimeoutDeliveryResult &
+  (
+    | {
+        externalSessionId: string;
+        traceId: string;
+        parentMessageId: string;
+      }
+    | {
+        /** 部分存在的 by-framework 路由损坏时不得静默确认，保留 Outbox 供修复后重试。 */
+        routingError: string;
+        externalSessionId?: string;
+        traceId?: string;
+        parentMessageId?: string;
+      }
+  );
+
 export interface RunExecutionQueue {
   /** 通知队列存在新工作；PostgreSQL 实现可使用 NOTIFY，本地实现直接入队。 */
   enqueue(run: Run): Promise<void>;
@@ -136,6 +160,41 @@ export interface RunExecutionQueue {
   heartbeat(claim: RunExecutionClaim, leaseMs: number): Promise<boolean>;
   /** 仅当前 fencing owner 可以释放，避免旧实例删除新实例的租约。 */
   release(claim: RunExecutionClaim): Promise<void>;
+  /**
+   * 与终态 Resume 使用相同数据库锁，原子提交 WAITING_AGENT 和 run.suspended。
+   * 若终态回调已经先到，只返回其 QUEUED 结果，禁止旧执行覆盖。
+   */
+  suspendRunForDelegation?(input: {
+    runId: string;
+    delegationId: string;
+    expectedRunVersion: number;
+    claim?: RunExecutionClaim;
+  }): Promise<{ runStatus: Run["status"]; suspended: boolean }>;
+  /**
+   * 原子结算到期的外部回调并直接终结 WAITING_AGENT Run。
+   * 超时不能依赖 Leader 再执行一次，否则恢复队列或模型异常会继续占住前端流。
+   * 多实例实现必须使用行锁或等价 CAS，且状态、事件在同一事务提交。
+   */
+  expireWaitingCallbacks?(input: {
+    limit: number;
+  }): Promise<Array<{ runId: string; delegationId: string }>>;
+  /** 与超时扫描使用同一锁协议，原子保存终态 Resume 并唤醒挂起 Run。 */
+  settleWaitingCallback?(input: {
+    delegationId: string;
+    status: "COMPLETED" | "FAILED" | "CANCELLED";
+    finalAnswer: string;
+  }): Promise<{ accepted: boolean; runId?: string; wakeRun?: boolean }>;
+  /** 领取已经到终态、但因没有 ResumeCommand 上下文而尚未对外投递的 Run。 */
+  claimCallbackTimeoutDeliveries?(input: {
+    instanceId: string;
+    leaseMs: number;
+    limit: number;
+  }): Promise<CallbackTimeoutDelivery[]>;
+  /** 投递成功后按 owner 确认；失败时不确认，租约到期后由任一实例重试。 */
+  completeCallbackTimeoutDelivery?(input: {
+    runId: string;
+    instanceId: string;
+  }): Promise<boolean>;
 }
 
 /** PostgreSQL 中的 Pi 原生 header + append-only entries。 */

@@ -5,6 +5,7 @@ import {
   ConnectorNotFoundError,
   ConnectorRegistry,
   DelegationService,
+  DelegationSuspendedError,
   InMemoryDelegationRepository,
   InMemoryRunExecutionQueue,
   InMemoryRunEventStore,
@@ -28,7 +29,10 @@ import {
   type Run,
   type RunAttachment,
   type Session,
+  type TaskPlanGateway,
+  type TaskPlanSnapshot,
 } from "../src/index.js";
+import { LeaderRunSuspendedError } from "../src/application/run-suspension.js";
 
 const agent: AgentProfile = {
   id: "1001",
@@ -54,6 +58,91 @@ describe("ConnectorRegistry", () => {
 });
 
 describe("DelegationService", () => {
+  it("persists callback completion and completes it idempotently from an external callback", async () => {
+    const registry = new ConnectorRegistry();
+    registry.register(fakeCallbackConnector(5));
+    const delegations = new InMemoryDelegationRepository();
+    const events = new InMemoryRunEventStore();
+    let currentTime = 10_000;
+    const service = new DelegationService(
+      registry,
+      delegations,
+      events,
+      { firstActivityMs: 100, idleMs: 200, callbackMs: 1_000 },
+      () => currentTime,
+      () => "delegation-suspended",
+    );
+
+    await expect(
+      service.execute({
+        session: {
+          id: "session-1",
+          owner: { userCode: "user-1" },
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        runId: "run-suspended",
+        agents: [agent],
+        agentId: agent.id,
+        task: "analyze later",
+        taskPosition: 1,
+        metadata: {},
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toBeInstanceOf(DelegationSuspendedError);
+
+    expect(await delegations.get("delegation-suspended")).toMatchObject({
+      status: "RUNNING",
+      taskPosition: 1,
+      externalRef: { executionId: "external" },
+      callbackDeadlineAt: 11_000,
+    });
+
+    currentTime = 10_500;
+    await expect(
+      service.execute({
+        session: {
+          id: "session-1",
+          owner: { userCode: "user-1" },
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        runId: "run-suspended",
+        agents: [agent],
+        agentId: agent.id,
+        task: "analyze later",
+        taskPosition: 1,
+        metadata: {},
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toBeInstanceOf(DelegationSuspendedError);
+    expect(await delegations.get("delegation-suspended")).toMatchObject({
+      callbackDeadlineAt: 11_000,
+    });
+
+    await expect(
+      service.completeFromExternalCallback({
+        delegationId: "delegation-suspended",
+        status: "COMPLETED",
+        finalAnswer: "callback answer",
+      }),
+    ).resolves.toMatchObject({ accepted: true, runId: "run-suspended" });
+    expect(await delegations.get("delegation-suspended")).toMatchObject({
+      status: "COMPLETED",
+      result: { status: "completed", output: "callback answer" },
+    });
+    await expect(
+      service.completeFromExternalCallback({
+        delegationId: "delegation-suspended",
+        status: "COMPLETED",
+        finalAnswer: "duplicate",
+      }),
+    ).resolves.toMatchObject({ accepted: false, runId: "run-suspended" });
+    expect((await delegations.get("delegation-suspended"))?.result?.output).toBe(
+      "callback answer",
+    );
+  });
+
   it("logs delegation lifecycle and redacted child output previews", async () => {
     const registry = new ConnectorRegistry();
     registry.register(
@@ -523,6 +612,7 @@ describe("DelegationService", () => {
     registry.register({
       ...fakeConnector(async function* () {}),
       capabilities: {
+        completionMode: "events",
         streaming: true,
         cancellation: true,
         artifacts: false,
@@ -797,6 +887,7 @@ describe("DelegationService", () => {
     registry.register({
       ...fakeConnector(async function* () {}),
       capabilities: {
+        completionMode: "events",
         streaming: true,
         cancellation: true,
         artifacts: false,
@@ -850,6 +941,7 @@ describe("DelegationService", () => {
       start,
       resume,
       capabilities: {
+        completionMode: "events",
         streaming: true,
         cancellation: true,
         artifacts: false,
@@ -957,6 +1049,209 @@ describe("DelegationService", () => {
 });
 
 describe("RunService", () => {
+  it("drops queued Leader output as soon as callAgent suspends the Run", async () => {
+    const sessions = new InMemorySessionRepository();
+    const runs = new InMemoryRunRepository(sessions);
+    const delegations = new InMemoryDelegationRepository();
+    const events = new InMemoryRunEventStore();
+    const registry = new ConnectorRegistry();
+    registry.register(fakeCallbackConnector());
+    const leaderFactory: LeaderSessionFactory = {
+      async create() {
+        return {
+          contextRevision: 0,
+          async run(input) {
+            try {
+              await input.delegate({
+                toolCallId: "delegate-suspended",
+                agentId: agent.id,
+                task: "analyze later",
+              });
+            } catch (error) {
+              if (!(error instanceof DelegationSuspendedError)) {
+                throw error;
+              }
+              // 模拟 Pi 已经排入异步回调队列、但在 callAgent 挂起后才执行的 token。
+              await input.onReasoningDelta?.("late reasoning");
+              await input.onDelta("late answer");
+              throw new LeaderRunSuspendedError(error.delegationId);
+            }
+            throw new Error("expected delegation suspension");
+          },
+          checkpoint: () => undefined,
+          markCommitted: () => undefined,
+          abort: async () => undefined,
+          dispose: () => undefined,
+        };
+      },
+      async health() {
+        return { healthy: true };
+      },
+    };
+    const service = new RunService(
+      sessions,
+      runs,
+      delegations,
+      events,
+      new DelegationService(registry, delegations, events, 1_000),
+      leaderFactory,
+    );
+
+    const run = await service.createSessionRun({
+      owner: { userCode: "user-1" },
+      message: "delegate",
+      agentList: [agent],
+    });
+
+    await waitFor(async () => (await service.getRun(run.id))?.status === "WAITING_AGENT");
+    const history = await events.list(run.id);
+    expect(history.some((event) => event.type === "run.suspended")).toBe(true);
+    expect(
+      history.some(
+        (event) => event.type === "leader.reasoning.delta" || event.type === "leader.delta",
+      ),
+    ).toBe(false);
+    await service.dispose();
+  });
+
+  it("requeues a WAITING_AGENT Run only after its persisted callback arrives", async () => {
+    const sessions = new InMemorySessionRepository();
+    const runs = new InMemoryRunRepository(sessions);
+    const delegations = new InMemoryDelegationRepository();
+    const events = new InMemoryRunEventStore();
+    const registry = new ConnectorRegistry();
+    const delegationService = new DelegationService(registry, delegations, events, 1_000);
+    const enqueue = vi.fn(async () => undefined);
+    const service = new RunService(
+      sessions,
+      runs,
+      delegations,
+      events,
+      delegationService,
+      {
+        create: vi.fn(),
+        health: vi.fn(async () => ({ healthy: true })),
+      },
+      Date.now,
+      undefined,
+      {
+        executionQueue: {
+          enqueue,
+          claimNext: vi.fn(async () => undefined),
+          heartbeat: vi.fn(async () => true),
+          release: vi.fn(async () => undefined),
+        },
+      },
+    );
+    const session = await service.createSession({ owner: { userCode: "user-1" } });
+    const waitingRun: Run = {
+      id: "run-callback",
+      sessionId: session.id,
+      input: "analyze",
+      attachments: [],
+      agentList: [agent],
+      status: "WAITING_AGENT",
+      baseContextRevision: 0,
+      attemptNo: 1,
+      executionStage: "CONNECTOR_WAITING",
+      version: 1,
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    await runs.save(waitingRun);
+    await delegations.save({
+      id: "delegation-callback",
+      runId: waitingRun.id,
+      agentId: agent.id,
+      agentName: agent.name,
+      connectorId: agent.execution.connectorId,
+      task: "analyze",
+      status: "RUNNING",
+      externalRef: { connectorId: "fake", executionId: "external-callback" },
+      version: 1,
+      createdAt: 1,
+      updatedAt: 1,
+      startedAt: 1,
+    });
+    await events.append({
+      timestamp: 2,
+      runId: waitingRun.id,
+      type: "run.suspended",
+      data: { status: "WAITING_AGENT", delegationId: "delegation-callback" },
+    });
+
+    await expect(
+      service.resumeDelegation({
+        delegationId: "delegation-callback",
+        status: "COMPLETED",
+        finalAnswer: "42",
+      }),
+    ).resolves.toMatchObject({ accepted: true, runId: waitingRun.id, afterEventId: 1 });
+    expect(await runs.get(waitingRun.id)).toMatchObject({
+      status: "QUEUED",
+      executionStage: "CONNECTOR_WAITING",
+    });
+    expect(enqueue).toHaveBeenCalledOnce();
+
+    await expect(
+      service.resumeDelegation({
+        delegationId: "delegation-callback",
+        status: "COMPLETED",
+        finalAnswer: "duplicate",
+      }),
+    ).resolves.toMatchObject({ accepted: false, runId: waitingRun.id });
+    expect(enqueue).toHaveBeenCalledOnce();
+  });
+
+  it("polls the persistent callback deadline store and reports retryable sweep failures", async () => {
+    const sessions = new InMemorySessionRepository();
+    const runs = new InMemoryRunRepository(sessions);
+    const delegations = new InMemoryDelegationRepository();
+    const events = new InMemoryRunEventStore();
+    const expireWaitingCallbacks = vi
+      .fn<() => Promise<Array<{ runId: string; delegationId: string }>>>()
+      .mockRejectedValueOnce(new Error("database unavailable"))
+      .mockResolvedValue([]);
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+    const service = new RunService(
+      sessions,
+      runs,
+      delegations,
+      events,
+      new DelegationService(new ConnectorRegistry(), delegations, events),
+      {
+        create: vi.fn(),
+        health: vi.fn(async () => ({ healthy: true })),
+      },
+      Date.now,
+      undefined,
+      {
+        executionQueue: {
+          enqueue: vi.fn(async () => undefined),
+          claimNext: vi.fn(async () => undefined),
+          heartbeat: vi.fn(async () => true),
+          release: vi.fn(async () => undefined),
+          expireWaitingCallbacks,
+        },
+        queuePollMs: 5,
+        logger,
+      },
+    );
+
+    service.start();
+    await waitFor(() => Promise.resolve(expireWaitingCallbacks.mock.calls.length > 1));
+    await service.dispose();
+    expect(expireWaitingCallbacks).toHaveBeenCalledWith({ limit: 100 });
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.objectContaining({ error: "database unavailable" }),
+      "扫描子 Agent 回调超时失败",
+    );
+  });
+
   it("stores Leader reasoning separately from visible answer deltas", async () => {
     const leaderFactory: LeaderSessionFactory = {
       async create() {
@@ -1031,7 +1326,7 @@ describe("RunService", () => {
     await service.dispose();
   });
 
-  it("adds a safe user message to downstream model failure events", async () => {
+  it("exposes the provider error message in downstream model failure events", async () => {
     const leaderFactory: LeaderSessionFactory = {
       async create() {
         return {
@@ -1063,7 +1358,7 @@ describe("RunService", () => {
       data: {
         status: "FAILED",
         error: "Leader model call failed: 403: sensitive provider response",
-        userMessage: "下游模型调用异常，请切换模型或者联系管理员",
+        userMessage: "403: sensitive provider response",
       },
     });
     await service.dispose();
@@ -1208,6 +1503,87 @@ describe("RunService", () => {
     await service.dispose();
   });
 
+  it("fails a native Leader interaction when the user response times out", async () => {
+    const leaderFactory: LeaderSessionFactory = {
+      async create() {
+        return {
+          contextRevision: 0,
+          async run(input) {
+            await input.askUser({
+              toolCallId: "tool-timeout",
+              questions: [
+                {
+                  header: "确认",
+                  question: "是否继续？",
+                  options: [
+                    { label: "继续", description: "继续执行" },
+                    { label: "停止", description: "停止执行" },
+                  ],
+                },
+              ],
+            });
+            return { text: "unexpected" };
+          },
+          checkpoint: () => undefined,
+          markCommitted: () => undefined,
+          abort: async () => undefined,
+          dispose: () => undefined,
+        };
+      },
+      async health() {
+        return { healthy: true };
+      },
+    };
+    const sessions = new InMemorySessionRepository();
+    const runs = new InMemoryRunRepository(sessions);
+    const delegations = new InMemoryDelegationRepository();
+    const events = new InMemoryRunEventStore();
+    const service = new RunService(
+      sessions,
+      runs,
+      delegations,
+      events,
+      new DelegationService(new ConnectorRegistry(), delegations, events),
+      leaderFactory,
+      Date.now,
+      undefined,
+      { userInteractionTimeoutMs: 10 },
+    );
+    const session = await service.createSession({ owner: { userCode: "user" } });
+    const run = await service.createRun({
+      sessionId: session.id,
+      message: "等待超时",
+      agentList: [],
+    });
+
+    await waitFor(async () => (await service.getRun(run.id))?.status === "FAILED");
+
+    expect(await service.getRun(run.id)).toMatchObject({
+      status: "FAILED",
+      error: expect.stringContaining("USER_INTERACTION_TIMEOUT"),
+    });
+    const requested = (await events.list(run.id)).find(
+      (event) => event.type === "interaction.requested",
+    );
+    expect(requested?.data).toMatchObject({
+      timeoutMs: 10,
+      deadlineAt: expect.any(Number),
+    });
+    expect(
+      (await events.list(run.id)).find((event) => event.type === "run.failed")
+        ?.data,
+    ).toMatchObject({
+      userMessage: "等待用户操作超时，请重新发起请求",
+    });
+    await expect(
+      service.respondToInteraction(run.id, String(requested?.data.interactionId), {
+        action: "submit",
+        text: "迟到的回答",
+      }),
+    ).rejects.toThrow("Run is already terminal:");
+    await service.dispose();
+  });
+
   it("continues a persisted native interaction after a process restart", async () => {
     const receivedMessages: string[] = [];
     const leaderFactory: LeaderSessionFactory = {
@@ -1265,6 +1641,7 @@ describe("RunService", () => {
       data: {
         interactionId: "native-restart-interaction",
         source: "leader",
+        deadlineAt: Date.now() + 60_000,
         request: { questions: [] },
       },
     });
@@ -1295,6 +1672,94 @@ describe("RunService", () => {
     expect(receivedMessages[0]).toContain("原始任务");
     expect(receivedMessages[0]).toContain("恢复后的答案");
     expect((await service.getRun(run.id))?.finalAnswer).toBe("recovered");
+    await service.dispose();
+  });
+
+  it("expires a persisted native interaction at its original deadline", async () => {
+    let leaderRuns = 0;
+    const leaderFactory: LeaderSessionFactory = {
+      async create() {
+        return {
+          contextRevision: 0,
+          async run() {
+            leaderRuns += 1;
+            return { text: "unexpected" };
+          },
+          checkpoint: () => undefined,
+          markCommitted: () => undefined,
+          abort: async () => undefined,
+          dispose: () => undefined,
+        };
+      },
+      async health() {
+        return { healthy: true };
+      },
+    };
+    const sessions = new InMemorySessionRepository();
+    const runs = new InMemoryRunRepository(sessions);
+    const delegations = new InMemoryDelegationRepository();
+    const events = new InMemoryRunEventStore();
+    const queue = new InMemoryRunExecutionQueue();
+    const session: Session = {
+      id: "session-native-expired",
+      owner: { userCode: "user-1" },
+      sessionContext: { schemaVersion: 1 },
+      sessionContextVersion: 1,
+      contextRevision: 0,
+      createdAt: 100,
+      updatedAt: 100,
+    };
+    const run: Run = {
+      id: "run-native-expired",
+      sessionId: session.id,
+      input: "原始任务",
+      thinkingLevel: "off",
+      agentList: [],
+      status: "WAITING_USER",
+      baseContextRevision: 0,
+      attemptNo: 1,
+      executionStage: "USER_INTERACTION_WAITING",
+      version: 2,
+      createdAt: 100,
+      updatedAt: 100,
+    };
+    await sessions.save(session);
+    await runs.save(run);
+    await events.append({
+      timestamp: 100,
+      runId: run.id,
+      type: "interaction.requested",
+      data: {
+        interactionId: "native-expired-interaction",
+        source: "leader",
+        timeoutMs: 100,
+        deadlineAt: 200,
+        request: { questions: [] },
+      },
+    });
+    await queue.enqueue(run);
+    const service = new RunService(
+      sessions,
+      runs,
+      delegations,
+      events,
+      new DelegationService(new ConnectorRegistry(), delegations, events),
+      leaderFactory,
+      () => 10_000,
+      undefined,
+      {
+        executionQueue: queue,
+        leaseMs: 1_000,
+        queuePollMs: 5,
+        userInteractionTimeoutMs: 5_000,
+      },
+    );
+
+    service.start();
+    await waitFor(async () => (await service.getRun(run.id))?.status === "FAILED");
+
+    expect(leaderRuns).toBe(0);
+    expect((await service.getRun(run.id))?.error).toContain("exceeded 100ms");
     await service.dispose();
   });
 
@@ -1593,6 +2058,7 @@ describe("RunService", () => {
           run: async (input) => {
             const toolController = new AbortController();
             const result = await input.delegate({
+              toolCallId: "delegate-cancelled",
               agentId: agent.id,
               task: "wait for cancellation",
               signal: toolController.signal,
@@ -1663,6 +2129,347 @@ describe("RunService", () => {
     await waitFor(async () => (await service.getRun(run.id))?.status === "CANCELLING");
 
     expect((await service.getRun(run.id))?.status).toBe("CANCELLING");
+    await service.dispose();
+  });
+});
+
+describe("RunService task plan completion guard", () => {
+  function taskPlanSnapshot(
+    status: TaskPlanSnapshot["status"],
+    version = 1,
+  ): TaskPlanSnapshot {
+    return {
+      planId: "plan-1",
+      version,
+      title: "完成复杂任务",
+      status,
+      sessionId: "external-session-1",
+      messageId: "message-1",
+      sourceRuntime: "BYCLAW_SUPER",
+      sourceRunId: "run-1",
+      tasks: [
+        {
+          taskId: "task-1",
+          position: 1,
+          title: "执行任务",
+          status:
+            status === "ACTIVE"
+              ? "IN_PROGRESS"
+              : status === "FAILED"
+                ? "FAILED"
+                : "COMPLETED",
+        },
+      ],
+    };
+  }
+
+  function createTaskPlanService(
+    leaderRun: (input: LeaderRunInput) => Promise<{ text: string }>,
+    taskPlans: TaskPlanGateway,
+    connector?: AgentConnector,
+  ) {
+    const sessions = new InMemorySessionRepository();
+    const runs = new InMemoryRunRepository(sessions);
+    const delegations = new InMemoryDelegationRepository();
+    const events = new InMemoryRunEventStore();
+    const registry = new ConnectorRegistry();
+    if (connector) {
+      registry.register(connector);
+    }
+    const leaders: LeaderSessionFactory = {
+      async create() {
+        return {
+          contextRevision: 0,
+          run: leaderRun,
+          abort: async () => undefined,
+          checkpoint: () => undefined,
+          markCommitted: () => undefined,
+          dispose: () => undefined,
+        };
+      },
+      async health() {
+        return { healthy: true };
+      },
+    };
+    const service = new RunService(
+      sessions,
+      runs,
+      delegations,
+      events,
+      new DelegationService(
+        registry,
+        delegations,
+        events,
+        1_000,
+      ),
+      leaders,
+      undefined,
+      undefined,
+      { taskPlans },
+    );
+    return { events, service };
+  }
+
+  async function createTaskPlanRun(
+    service: RunService,
+    agentList: AgentProfile[] = [],
+  ) {
+    return service.createSessionRun({
+      owner: { userCode: "user-1" },
+      message: "完成一个复杂任务",
+      agentList,
+      ingressContext: {
+        externalSessionId: "external-session-1",
+        parentMessageId: "message-1",
+      },
+      metadata: { "Beyond-Token": "secret-token" },
+    });
+  }
+
+  it("continues the Leader until the active plan reaches a terminal status", async () => {
+    const active = taskPlanSnapshot("ACTIVE");
+    const completedPlan = taskPlanSnapshot("COMPLETED", 2);
+    const taskPlans: TaskPlanGateway = {
+      loadActive: vi.fn(async () => active),
+      update: vi.fn(async () => completedPlan),
+      cancel: vi.fn(async () => undefined),
+    };
+    const messages: string[] = [];
+    const { service } = createTaskPlanService(async (input) => {
+      messages.push(input.message);
+      if (messages.length === 1) {
+        return { text: "过早结束" };
+      }
+      await input.updateTaskPlan!({
+        toolCallId: "finish-plan",
+        update: {
+          title: "完成复杂任务",
+          tasks: [{ step: "执行任务", status: "COMPLETED" }],
+        },
+      });
+      return { text: "任务已经完成" };
+    }, taskPlans);
+
+    const run = await createTaskPlanRun(service);
+    await waitFor(async () => (await service.getRun(run.id))?.status === "COMPLETED");
+
+    expect(messages).toHaveLength(2);
+    expect(messages[1]).toContain("task plan is still active");
+    expect(taskPlans.update).toHaveBeenCalledOnce();
+    expect((await service.getRun(run.id))?.finalAnswer).toBe("任务已经完成");
+    await service.dispose();
+  });
+
+  it("fails instead of reporting success when the Leader repeatedly ignores an active plan", async () => {
+    const taskPlans: TaskPlanGateway = {
+      loadActive: vi.fn(async () => taskPlanSnapshot("ACTIVE")),
+      update: vi.fn(async () => taskPlanSnapshot("FAILED", 2)),
+      cancel: vi.fn(async () => undefined),
+    };
+    const leaderRun = vi.fn(async () => ({ text: "仍然过早结束" }));
+    const { events, service } = createTaskPlanService(leaderRun, taskPlans);
+
+    const run = await createTaskPlanRun(service);
+    await waitFor(async () => (await service.getRun(run.id))?.status === "FAILED");
+
+    expect(leaderRun).toHaveBeenCalledTimes(4);
+    expect((await service.getRun(run.id))?.status).toBe("FAILED");
+    expect(taskPlans.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({
+          tasks: [
+            expect.objectContaining({
+              status: "FAILED",
+              statusReason: expect.objectContaining({ code: "RUN_FAILED" }),
+            }),
+          ],
+        }),
+      }),
+    );
+    expect((await events.list(run.id)).some(({ type }) => type === "run.completed")).toBe(false);
+    await service.dispose();
+  });
+
+  it("links delegation failures to the planned task and broadcasts terminal progress", async () => {
+    let currentPlan: TaskPlanSnapshot = {
+      ...taskPlanSnapshot("ACTIVE"),
+      tasks: [
+        {
+          taskId: "task-1",
+          position: 1,
+          title: "调度数字员工",
+          status: "PENDING",
+        },
+      ],
+    };
+    const taskPlans: TaskPlanGateway = {
+      loadActive: vi.fn(async () => currentPlan),
+      update: vi.fn(async ({ update }) => {
+        const nextStatus = update.tasks.some(({ status }) => status === "FAILED")
+          ? "FAILED"
+          : "ACTIVE";
+        currentPlan = {
+          ...currentPlan,
+          version: currentPlan.version + 1,
+          status: nextStatus,
+          tasks: update.tasks.map((task, index) => ({
+            taskId: `task-${index + 1}`,
+            position: index + 1,
+            title: task.step,
+            ...(task.description ? { description: task.description } : {}),
+            status: task.status,
+            ...(task.statusReason ? { statusReason: task.statusReason } : {}),
+          })),
+        };
+        return currentPlan;
+      }),
+      cancel: vi.fn(async () => undefined),
+    };
+    const connector = fakeConnector(async function* () {
+      yield {
+        type: "failed",
+        error: {
+          code: "DIGITAL_EMPLOYEE_UNAVAILABLE",
+          message: "employee unavailable",
+          retryable: false,
+        },
+      };
+    });
+    const { service } = createTaskPlanService(async (input) => {
+      const result = await input.delegate({
+        toolCallId: "delegate-planned-task",
+        agentId: agent.id,
+        task: "调度数字员工执行任务",
+        taskPosition: 1,
+      });
+      expect(result.status).toBe("failed");
+      return { text: "数字员工调度失败，任务未完成" };
+    }, taskPlans, connector);
+
+    const run = await createTaskPlanRun(service, [agent]);
+    await waitFor(async () => (await service.getRun(run.id))?.status === "COMPLETED");
+
+    expect(taskPlans.update).toHaveBeenCalledTimes(2);
+    expect(taskPlans.update).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        idempotencyKey: "delegate-planned-task:task-started",
+        update: expect.objectContaining({
+          tasks: [expect.objectContaining({ status: "IN_PROGRESS" })],
+        }),
+      }),
+    );
+    expect(taskPlans.update).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        idempotencyKey: "delegate-planned-task:task-failed",
+        update: expect.objectContaining({
+          tasks: [
+            expect.objectContaining({
+              status: "FAILED",
+              statusReason: {
+                code: "DELEGATION_FAILED",
+                message: "数字员工调度失败",
+              },
+            }),
+          ],
+        }),
+      }),
+    );
+    expect(currentPlan.status).toBe("FAILED");
+    expect(currentPlan.tasks[0]?.status).toBe("FAILED");
+    await service.dispose();
+  });
+
+  it("restores the planned task link when a callback delegation fails", async () => {
+    let currentPlan: TaskPlanSnapshot = {
+      ...taskPlanSnapshot("ACTIVE"),
+      tasks: [
+        {
+          taskId: "task-1",
+          position: 1,
+          title: "等待数字员工回调",
+          status: "PENDING",
+        },
+      ],
+    };
+    const taskPlans: TaskPlanGateway = {
+      loadActive: vi.fn(async () => currentPlan),
+      update: vi.fn(async ({ update }) => {
+        currentPlan = {
+          ...currentPlan,
+          version: currentPlan.version + 1,
+          status: update.tasks.some(({ status }) => status === "FAILED")
+            ? "FAILED"
+            : "ACTIVE",
+          tasks: update.tasks.map((task, index) => ({
+            taskId: `task-${index + 1}`,
+            position: index + 1,
+            title: task.step,
+            ...(task.description ? { description: task.description } : {}),
+            status: task.status,
+            ...(task.statusReason ? { statusReason: task.statusReason } : {}),
+          })),
+        };
+        return currentPlan;
+      }),
+      cancel: vi.fn(async () => undefined),
+    };
+    let leaderAttempt = 0;
+    const { service } = createTaskPlanService(async (input) => {
+      leaderAttempt += 1;
+      if (leaderAttempt === 1) {
+        try {
+          await input.delegate({
+            toolCallId: "delegate-callback-task",
+            agentId: agent.id,
+            task: "异步执行数字员工任务",
+            taskPosition: 1,
+          });
+        } catch (error) {
+          if (error instanceof DelegationSuspendedError) {
+            throw new LeaderRunSuspendedError(error.delegationId);
+          }
+          throw error;
+        }
+        throw new Error("expected callback delegation to suspend");
+      }
+      expect(input.message).toContain("trusted platform callback");
+      return { text: "数字员工失败，任务已收口" };
+    }, taskPlans, fakeCallbackConnector());
+
+    const run = await createTaskPlanRun(service, [agent]);
+    await waitFor(async () => (await service.getRun(run.id))?.status === "WAITING_AGENT");
+    const delegation = (await service.getRunDetails(run.id))?.delegations[0];
+    expect(delegation).toMatchObject({ status: "RUNNING", taskPosition: 1 });
+
+    await expect(
+      service.resumeDelegation({
+        delegationId: delegation!.id,
+        status: "FAILED",
+        finalAnswer: "digital employee unavailable",
+      }),
+    ).resolves.toMatchObject({ accepted: true, runId: run.id });
+    await waitFor(async () => (await service.getRun(run.id))?.status === "COMPLETED");
+
+    expect(taskPlans.update).toHaveBeenCalledTimes(2);
+    expect(taskPlans.update).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        idempotencyKey: `${delegation!.id}:task-failed`,
+        update: expect.objectContaining({
+          tasks: [
+            expect.objectContaining({
+              status: "FAILED",
+              statusReason: {
+                code: "DELEGATION_FAILED",
+                message: "数字员工调度失败",
+              },
+            }),
+          ],
+        }),
+      }),
+    );
+    expect(currentPlan.status).toBe("FAILED");
     await service.dispose();
   });
 });
@@ -2068,15 +2875,51 @@ function fakeConnector(events: () => AsyncIterable<ConnectorEvent>): AgentConnec
   return {
     id: "fake",
     capabilities: {
+      completionMode: "events",
       streaming: true,
       cancellation: true,
       artifacts: false,
       resumable: false,
+      attachments: true,
     },
     async start() {
       return {
         ref: { connectorId: "fake", executionId: "external" },
         events: events(),
+        cancel: async () => undefined,
+      };
+    },
+    async health() {
+      return { healthy: true };
+    },
+  };
+}
+
+function fakeCallbackConnector(resumeDelayMs = 0): AgentConnector {
+  return {
+    id: "fake",
+    capabilities: {
+      completionMode: "callback",
+      streaming: false,
+      cancellation: true,
+      artifacts: false,
+      resumable: true,
+      attachments: true,
+    },
+    async start() {
+      return {
+        completionMode: "callback",
+        ref: { connectorId: "fake", executionId: "external" },
+        cancel: async () => undefined,
+      };
+    },
+    async resume(ref) {
+      if (resumeDelayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, resumeDelayMs));
+      }
+      return {
+        completionMode: "callback",
+        ref,
         cancel: async () => undefined,
       };
     },

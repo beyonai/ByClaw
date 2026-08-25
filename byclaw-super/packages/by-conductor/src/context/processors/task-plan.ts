@@ -44,10 +44,13 @@ ${JSON.stringify(snapshot)}
 </active_task_plan>
 <task_plan_policy>
 For a request with multiple meaningful execution steps, call updateTaskPlan before doing the work when no active plan exists.
+For a complex request that needs user confirmation, create the task plan before calling askUserQuestion; waiting for confirmation may leave every task pending.
 When an active plan exists, continue it instead of creating a duplicate.
 Send the complete ordered task list whenever a task starts, completes, fails, is skipped, or the plan changes.
+Keep at most one task in progress because this runtime executes Leader work sequentially.
+When delegating work for an active plan, pass the matching task position as delegateAgent.taskPosition.
 The system owns execution identity, plan identity, versions, and task IDs. Never invent or request them.
-Before the final user answer, reconcile every task to a terminal status and update the plan one final time.
+An active plan prevents the Run from completing. Before the final user answer, reconcile every task to a terminal status and update the plan one final time.
 </task_plan_policy>`,
   };
 }

@@ -34,6 +34,7 @@ export interface AppConfig {
   delegationTimeouts: {
     firstActivityMs: number;
     idleMs: number;
+    callbackMs: number;
   };
   openClaw: {
     cancelConfirmationTimeoutMs: number;
@@ -70,6 +71,7 @@ export interface AppConfig {
   instanceId: string;
   runLeaseMs: number;
   runQueuePollMs: number;
+  runUserInteractionTimeoutMs: number;
   runCredentialMaxTtlMs: number;
   runCredentialCleanupIntervalMs: number;
   piSessionCacheDirectory?: string;
@@ -120,6 +122,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     1,
     Number.MAX_SAFE_INTEGER,
   );
+  const delegationCallbackMs = integer(
+    env.DELEGATION_CALLBACK_TIMEOUT_MS ??
+      String(defaults.delegationTimeouts.callbackMs),
+    "DELEGATION_CALLBACK_TIMEOUT_MS",
+    1,
+    Number.MAX_SAFE_INTEGER,
+  );
   if ((env.PI_PROVIDER && !env.PI_MODEL) || (!env.PI_PROVIDER && env.PI_MODEL)) {
     throw new Error("PI_PROVIDER and PI_MODEL must be configured together");
   }
@@ -152,6 +161,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     delegationTimeouts: {
       firstActivityMs: delegationFirstActivityMs,
       idleMs: delegationIdleMs,
+      callbackMs: delegationCallbackMs,
     },
     openClaw: {
       cancelConfirmationTimeoutMs: integer(
@@ -383,6 +393,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       "RUN_QUEUE_POLL_MS",
       50,
       60_000,
+    ),
+    runUserInteractionTimeoutMs: integer(
+      env.RUN_USER_INTERACTION_TIMEOUT_MS ??
+        String(defaults.run.userInteractionTimeoutMs),
+      "RUN_USER_INTERACTION_TIMEOUT_MS",
+      1_000,
+      86_400_000,
     ),
     runCredentialMaxTtlMs: integer(
       env.RUN_CREDENTIAL_MAX_TTL_MS ??

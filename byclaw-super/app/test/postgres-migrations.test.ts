@@ -33,6 +33,13 @@ describe("PostgreSQL migrations", () => {
     );
   });
 
+  it("第 11 版持久化回调截止时间和超时终态 Outbox", () => {
+    const migration = POSTGRES_MIGRATIONS.find((candidate) => candidate.version === 11);
+    expect(migration?.sql).toContain("callback_deadline_at timestamptz NULL");
+    expect(migration?.sql).toContain("callback_timeout_outbox");
+    expect(migration?.sql).toContain("WHERE status = 'RUNNING'");
+  });
+
   it("健康检查只校验数据库连通性，不依赖 migration 版本表", async () => {
     const database = new PostgresDatabase({
       host: "127.0.0.1",
