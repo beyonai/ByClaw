@@ -19,6 +19,21 @@ from urllib.parse import unquote
 BACKEND_SERVICE_ENV = "BE_DOMAINNAME"
 BACKEND_PATH_PREFIX = "/byaiService/datasetController"
 RESOURCE_ID_HEADER = "X-BYCLAW-RESOURCE-ID"
+SESSION_ID_HEADER = "X-CHAT-SESSION-ID"
+SESSION_AWARE_COMMANDS = frozenset(
+    {
+        "mkdir",
+        "rename-dir",
+        "delete-dir",
+        "check-conflicts",
+        "upload",
+        "update-file",
+        "build",
+        "entity-discovery",
+        "entity-enrich",
+        "remove-file",
+    }
+)
 
 
 def _first_non_empty_env(*names: str, default: str = "") -> str:
@@ -145,8 +160,15 @@ class ManagerTransport(Protocol):
 class ByFrameworkDiscoveryTransport:
     """Call the backend with Redis-backed login state and service discovery."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        session_id: str = "",
+        supports_session: bool = False,
+    ) -> None:
         self._closed = False
+        self._session_id = _normalize_session_id(session_id)
+        self._supports_session = supports_session
         self._loop = asyncio.new_event_loop()
         self._started = threading.Event()
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
@@ -236,6 +258,17 @@ class ByFrameworkDiscoveryTransport:
 
         service_name = os.getenv(BACKEND_SERVICE_ENV, "").strip()
         user_code = os.getenv("USER_CODE", "").strip()
+        supports_session = getattr(self, "_supports_session", False)
+        session_id = ""
+        if supports_session:
+            session_id = getattr(self, "_session_id", "") or _normalize_session_id(
+                _first_non_empty_env(
+                    "BAIYING_SESSION",
+                    "SESSION_ID",
+                    "BYCLAW_SESSION",
+                    "BYCLAW_ECOSYSTEM_SESSION",
+                )
+            )
         if not service_name or not user_code:
             raise ValueError(f"{BACKEND_SERVICE_ENV} 和 USER_CODE 必须配置")
 
@@ -254,7 +287,12 @@ class ByFrameworkDiscoveryTransport:
             token = token.decode("utf-8")
         if not isinstance(token, str) or not token.strip():
             raise ValueError("Redis 登录态缺少 Beyond-Token，请重新登录")
-        headers = {"Beyond-Token": token, "X-User-Code": user_code}
+        headers = {
+            "Beyond-Token": token,
+            "X-User-Code": user_code,
+        }
+        if session_id:
+            headers[SESSION_ID_HEADER] = session_id
         return DiscoveryClient(redis_client=redis_client, cache_interval=5), service_name, headers
 
     async def _request(
@@ -533,7 +571,7 @@ class BackendApi:
             method="POST",
             path=self._path("knowledgeItems/entityDiscovery"),
             payload=payload,
-            headers={"X-CHAT-SESSION-ID": session_id} if session_id else None,
+            headers={SESSION_ID_HEADER: session_id} if session_id else None,
         )
 
     def entity_enrich(
@@ -546,7 +584,7 @@ class BackendApi:
             method="POST",
             path=self._path("knowledgeItems/entityEnrich"),
             payload=payload,
-            headers={"X-CHAT-SESSION-ID": session_id} if session_id else None,
+            headers={SESSION_ID_HEADER: session_id} if session_id else None,
         )
 
     def remove_file(self, payload: dict[str, Any]) -> Any:
@@ -897,7 +935,7 @@ class KnowledgeManager:
                 "payload": payload,
             }
             if session_id:
-                result["headers"] = {"X-CHAT-SESSION-ID": session_id}
+                result["headers"] = {SESSION_ID_HEADER: session_id}
             return result
         value = self.api.entity_discovery(
             payload,
@@ -925,7 +963,7 @@ class KnowledgeManager:
                 "payload": payload,
             }
             if session_id:
-                result["headers"] = {"X-CHAT-SESSION-ID": session_id}
+                result["headers"] = {SESSION_ID_HEADER: session_id}
             return result
         value = self.api.entity_enrich(
             payload,
@@ -968,11 +1006,22 @@ def _add_command(
     name: str,
     description: str,
 ) -> argparse.ArgumentParser:
-    return subparsers.add_parser(
+    command = subparsers.add_parser(
         name,
         help=description,
         description=description,
     )
+    if name in SESSION_AWARE_COMMANDS:
+        command.add_argument(
+            "--session-id",
+            default="",
+            metavar="ID",
+            help=(
+                "当前任务会话 ID；显式传入时优先使用，"
+                "未提供时尝试使用运行环境中的当前会话"
+            ),
+        )
+    return command
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1250,12 +1299,6 @@ def build_parser() -> argparse.ArgumentParser:
             help="绕过新鲜成功结果的复用并重新处理",
         )
         command.add_argument(
-            "--session-id",
-            default="",
-            metavar="ID",
-            help="当前任务会话 ID；提供后作为 X-CHAT-SESSION-ID 请求头",
-        )
-        command.add_argument(
             "--extra-params-json",
             type=_json_object,
             default={},
@@ -1423,7 +1466,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     transport: ManagerTransport | None = None
     try:
-        transport = ByFrameworkDiscoveryTransport()
+        transport = ByFrameworkDiscoveryTransport(
+            session_id=getattr(args, "session_id", ""),
+            supports_session=args.command in SESSION_AWARE_COMMANDS,
+        )
         result = KnowledgeManager(BackendApi(transport)).execute(args)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0

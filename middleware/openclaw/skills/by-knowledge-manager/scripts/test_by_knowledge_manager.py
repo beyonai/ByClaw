@@ -5,7 +5,9 @@ from __future__ import annotations
 import importlib.util
 import io
 import os
+import sys
 import tempfile
+import types
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -54,6 +56,104 @@ class RedisConfigTests(unittest.TestCase):
 
 
 class RequestHeaderTests(unittest.TestCase):
+    def test_runtime_scopes_optional_chat_session_to_supported_commands(self) -> None:
+        class FakeRedis:
+            async def get(self, key: str) -> str:
+                self.assert_key = key
+                return "user-7"
+
+            async def hget(self, key: str, field: str) -> str:
+                self.assert_hash = (key, field)
+                return "token"
+
+        class FakeDiscoveryClient:
+            def __init__(self, **kwargs: object) -> None:
+                self.kwargs = kwargs
+
+        config_module = types.ModuleType("by_framework.common.config")
+        config_module.RedisConfig = dict
+        redis_module = types.ModuleType("by_framework.common.redis_client")
+        redis_module.init_redis = lambda **kwargs: FakeRedis()
+        discovery_module = types.ModuleType("by_framework.core.discovery")
+        discovery_module.DiscoveryClient = FakeDiscoveryClient
+        modules = {
+            "by_framework": types.ModuleType("by_framework"),
+            "by_framework.common": types.ModuleType("by_framework.common"),
+            "by_framework.common.config": config_module,
+            "by_framework.common.redis_client": redis_module,
+            "by_framework.core": types.ModuleType("by_framework.core"),
+            "by_framework.core.discovery": discovery_module,
+        }
+        transport = manager_module.ByFrameworkDiscoveryTransport.__new__(
+            manager_module.ByFrameworkDiscoveryTransport
+        )
+        transport._supports_session = True
+
+        with (
+            patch.dict(sys.modules, modules),
+            patch.dict(
+                os.environ,
+                {
+                    "BE_DOMAINNAME": "byclaw-be",
+                    "USER_CODE": "user-code",
+                    "SESSION_ID": "session-001",
+                },
+                clear=True,
+            ),
+        ):
+            _, _, headers = manager_module.asyncio.run(transport._runtime())
+
+        self.assertEqual(
+            headers,
+            {
+                "Beyond-Token": "token",
+                "X-User-Code": "user-code",
+                "X-CHAT-SESSION-ID": "session-001",
+            },
+        )
+
+        read_transport = manager_module.ByFrameworkDiscoveryTransport.__new__(
+            manager_module.ByFrameworkDiscoveryTransport
+        )
+        read_transport._supports_session = False
+        with (
+            patch.dict(sys.modules, modules),
+            patch.dict(
+                os.environ,
+                {"BE_DOMAINNAME": "byclaw-be", "USER_CODE": "user-code"},
+                clear=True,
+            ),
+        ):
+            _, _, read_headers = manager_module.asyncio.run(
+                read_transport._runtime()
+            )
+        self.assertEqual(
+            read_headers,
+            {"Beyond-Token": "token", "X-User-Code": "user-code"},
+        )
+
+        write_without_session = (
+            manager_module.ByFrameworkDiscoveryTransport.__new__(
+                manager_module.ByFrameworkDiscoveryTransport
+            )
+        )
+        write_without_session._supports_session = True
+        with (
+            patch.dict(sys.modules, modules),
+            patch.dict(
+                os.environ,
+                {"BE_DOMAINNAME": "byclaw-be", "USER_CODE": "user-code"},
+                clear=True,
+            ),
+        ):
+            _, _, write_headers = manager_module.asyncio.run(
+                write_without_session._runtime()
+            )
+        self.assertEqual(
+            write_headers,
+            {"Beyond-Token": "token", "X-User-Code": "user-code"},
+        )
+
     def test_single_resource_requests_include_resource_header(self) -> None:
         for values in (
             {"payload": {"resourceId": 7}},
@@ -448,12 +548,14 @@ class KnowledgeManagerTests(unittest.TestCase):
         self.assertIn("导入一个或多个文件或 ZIP", upload_help)
         self.assertIn("--resource-id ID", upload_help)
         self.assertIn("--file-path LOCAL_FILE", upload_help)
+        self.assertIn("--session-id ID", upload_help)
         self.assertIn("--dry-run", upload_help)
 
         search_output = io.StringIO()
         with redirect_stdout(search_output), self.assertRaises(SystemExit):
             parser.parse_args(["search", "--help"])
         search_help = search_output.getvalue()
+        self.assertNotIn("--session-id", search_help)
         self.assertIn("--where-json JSON", search_help)
         self.assertIn("--metadata-field NAME", search_help)
         self.assertIn("--search-mode", search_help)
@@ -464,6 +566,48 @@ class KnowledgeManagerTests(unittest.TestCase):
             exit_code = manager_module.main([])
         self.assertEqual(exit_code, 0)
         self.assertIn("by-knowledge-manager [-h] COMMAND", output.getvalue())
+
+    def test_main_passes_session_id_to_write_command_transport(self) -> None:
+        captured: dict[str, str] = {}
+
+        class FakeTransport(RecordingTransport):
+            def __init__(
+                self,
+                *,
+                session_id: str = "",
+                supports_session: bool = False,
+            ) -> None:
+                super().__init__()
+                captured["session_id"] = session_id
+                captured["supports_session"] = str(supports_session)
+
+        with patch.object(
+            manager_module,
+            "ByFrameworkDiscoveryTransport",
+            FakeTransport,
+        ):
+            output = io.StringIO()
+            with redirect_stdout(output):
+                exit_code = manager_module.main(
+                    [
+                        "mkdir",
+                        "--session-id",
+                        "session-001",
+                        "--resource-id",
+                        "7",
+                        "--directory-path",
+                        "/",
+                        "--directory-name",
+                        "docs",
+                        "--dry-run",
+                    ]
+                )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            captured,
+            {"session_id": "session-001", "supports_session": "True"},
+        )
 
 
 if __name__ == "__main__":

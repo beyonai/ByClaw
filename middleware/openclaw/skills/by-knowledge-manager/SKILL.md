@@ -37,6 +37,18 @@ python3 <by-knowledge-manager目录>/scripts/by_knowledge_manager.py <command> -
 python3 <by-knowledge-manager目录>/scripts/by_knowledge_manager.py <command> [options]
 ```
 
+## 关联任务会话
+
+变更和实体处理子命令支持可选参数 `--session-id SESSION_ID`：
+
+- 当前任务上下文存在会话 ID 时，必须显式传入 `--session-id`；不得省略，也不得依赖运行环境代为发现。
+- 显式传入时，CLI 使用该会话执行请求，并向对应会话空间发送文件变更通知。
+- 未传入时，CLI 尝试使用运行环境中的当前会话；可以确定时行为与显式传入相同。
+- 未传入且运行环境也没有当前会话时，知识库请求仍正常执行，但不会向会话空间发送文件变更通知。
+
+`--dry-run` 不调用知识库接口，因此只校验操作参数和计划。
+读取和检索子命令不需要会话 ID，也不接受 `--session-id`。
+
 ## 接收 knowledge-collection 入库交接单
 
 当上游 `knowledge-collection` 返回 `action: "ingest-handoff"` 时，读取其 `handoff`，而不是自行扩大文件、知识库或目录范围。
@@ -52,6 +64,6 @@ python3 <by-knowledge-manager目录>/scripts/by_knowledge_manager.py <command> [
 - 搜索范围不明确时，确认搜索一个还是多个知识库；多个知识库重复传入 `--resource-id`。
 - 原样保留知识库绝对路径，例如 `/`、`/产品资料`、`/产品资料/a.md`。
 - 修改前需要校验参数时使用 `--dry-run`；删除和覆盖操作遵守变更子 Skill 的确认规则。
-- 单资源请求自动携带 `X-BYCLAW-RESOURCE-ID`。多知识库检索没有唯一资源 ID，只在请求体传递 `resourceIdList`。
+- 单知识库操作必须保留其资源上下文；多知识库检索必须准确保留用户指定的完整范围，不得虚构唯一知识库。
 - 用自然语言汇报 CLI JSON，保留资源 ID、目录或文件路径、批次 ID、任务 ID、构建状态和检索命中定位信息。
 - CLI 返回 `{ "ok": false, "error": "..." }` 时修正输入或环境；不得绕过 CLI 改调其他接口。
