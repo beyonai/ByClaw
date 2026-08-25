@@ -83,6 +83,22 @@ function pickRawResumeMetadata(
   return undefined;
 }
 
+/** 仅解析 JSON 对象，解析失败时保持原有恢复提交链路不受影响。 */
+function parseResumeMetadata(resumeMetadata: unknown): Record<string, unknown> | undefined {
+  if (typeof resumeMetadata !== 'string') return undefined;
+
+  try {
+    const parsedMetadata = JSON.parse(resumeMetadata);
+    if (parsedMetadata && typeof parsedMetadata === 'object' && !Array.isArray(parsedMetadata)) {
+      return parsedMetadata;
+    }
+  } catch {
+    return undefined;
+  }
+
+  return undefined;
+}
+
 /** 将持久化结果与当前问题对齐，避免问题更新后误用旧选项。 */
 function normalizeAnswers(
   questions: IAskUserQuestion[],
@@ -341,6 +357,7 @@ export function AskUserQuestions(props: IProps) {
             disabled={isDisabled || (isAskUserQuestion && !allQuestionsAnswered)}
             onClick={async () => {
               const resumeMetadata = pickRawResumeMetadata(messageInfo, messageListItemContent);
+              const parsedResumeMetadata = parseResumeMetadata(resumeMetadata);
               const submittedAnswers = prepareAnswersForSubmit(answers);
               const finishedContent: IMessageListItemContent = {
                 ...messageListItemContent,
@@ -379,6 +396,9 @@ export function AskUserQuestions(props: IProps) {
               };
               if (resumeMetadata !== undefined) {
                 payload.metadata = resumeMetadata;
+              }
+              if (parsedResumeMetadata && Object.prototype.hasOwnProperty.call(parsedResumeMetadata, 'agentId')) {
+                payload.agentId = parsedResumeMetadata.agentId;
               }
 
               try {
