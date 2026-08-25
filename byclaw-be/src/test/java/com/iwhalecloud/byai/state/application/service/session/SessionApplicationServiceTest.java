@@ -3,12 +3,18 @@ package com.iwhalecloud.byai.state.application.service.session;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.common.message.service.ByaiMessageHotService;
+import com.iwhalecloud.byai.manager.domain.devloop.service.ScanLogService;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
+import com.iwhalecloud.byai.state.application.service.taskplan.TaskPlanApplicationService;
 import com.iwhalecloud.byai.state.domain.message.model.SessionOpeartorDto;
+import com.iwhalecloud.byai.state.domain.session.service.SessionExtService;
+import com.iwhalecloud.byai.state.domain.session.service.SessionMemberService;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 import com.iwhalecloud.byai.state.domain.session.service.SessionTitleService;
 import org.junit.jupiter.api.AfterEach;
@@ -29,6 +35,21 @@ class SessionApplicationServiceTest {
     @Mock
     private SessionTitleService sessionTitleService;
 
+    @Mock
+    private SessionExtService sessionExtService;
+
+    @Mock
+    private SessionMemberService sessionMemberService;
+
+    @Mock
+    private ByaiMessageHotService byaiMessageHotService;
+
+    @Mock
+    private ScanLogService scanLogService;
+
+    @Mock
+    private TaskPlanApplicationService taskPlanApplicationService;
+
     private SessionApplicationService sessionApplicationService;
 
     @BeforeEach
@@ -36,6 +57,12 @@ class SessionApplicationServiceTest {
         sessionApplicationService = new SessionApplicationService();
         ReflectionTestUtils.setField(sessionApplicationService, "sessionService", sessionService);
         ReflectionTestUtils.setField(sessionApplicationService, "sessionTitleService", sessionTitleService);
+        ReflectionTestUtils.setField(sessionApplicationService, "sessionExtService", sessionExtService);
+        ReflectionTestUtils.setField(sessionApplicationService, "sessionMemberService", sessionMemberService);
+        ReflectionTestUtils.setField(sessionApplicationService, "byaiMessageHotService", byaiMessageHotService);
+        ReflectionTestUtils.setField(sessionApplicationService, "scanLogService", scanLogService);
+        ReflectionTestUtils.setField(sessionApplicationService, "taskPlanApplicationService",
+            taskPlanApplicationService);
     }
 
     @AfterEach
@@ -94,5 +121,17 @@ class SessionApplicationServiceTest {
         sessionApplicationService.updateConversation(request);
 
         verify(sessionTitleService, never()).cancelInitialTitle(10L);
+    }
+
+    @Test
+    void removeConversation_removesTaskPlansWithConversationData() {
+        sessionApplicationService.removeConversation(11L);
+
+        verify(taskPlanApplicationService).deleteBySessionId(11L);
+        verify(sessionService).delete(11L);
+        verify(sessionExtService).deleteSessionExtBySessionId(11L);
+        verify(sessionMemberService).deleteBySessionId(11L);
+        verify(byaiMessageHotService).deleteByQo(any());
+        verify(scanLogService).deleteItemBySessionId(11L);
     }
 }
