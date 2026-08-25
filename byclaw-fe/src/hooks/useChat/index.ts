@@ -879,7 +879,7 @@ function useChat(props: IProps) {
     const digitalEmployeeResources = getDigitalEmployeeResources(resourceList);
     const singleInlineAgent =
       digitalEmployeeResources.length === 1 ? getAgentLaneIdentity(digitalEmployeeResources[0]) : null;
-    if (!fixedAgentId && singleInlineAgent?.agentKey) {
+    if (!fixedAgentId && singleInlineAgent?.agentKey && !isResumeChat) {
       _agentId = singleInlineAgent.agentKey;
     }
 
