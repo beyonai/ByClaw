@@ -4,14 +4,15 @@ import path from 'path';
 describe('digital employee group member selector performance', () => {
   const source = fs.readFileSync(path.resolve(__dirname, '../EmployeeGroupMembers.tsx'), 'utf8');
 
-  it('uses server-side paging instead of loading all candidates', () => {
+  it('uses server-side paging with scroll loading instead of loading all candidates', () => {
     expect(source).toContain('const CANDIDATE_PAGE_SIZE = 30;');
     expect(source).toContain('pageNum,');
     expect(source).toContain('pageSize: CANDIDATE_PAGE_SIZE');
-    expect(source).toContain('current: pageNum');
-    expect(source).toContain('onChange={(nextPagination) => setPageNum(nextPagination.current || 1)}');
+    expect(source).toContain('const loadMoreCandidates = useCallback(() => {');
+    expect(source).toContain("tableBody.addEventListener('scroll', handleScroll)");
+    expect(source).toContain('pagination={false}');
     expect(source).not.toContain('pageSize: 200');
-    expect(source).not.toContain('pagination={false}');
+    expect(source).not.toContain('current: pageNum');
   });
 
   it('caches pages briefly and cancels obsolete requests', () => {

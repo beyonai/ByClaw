@@ -24,6 +24,8 @@ public class EmployeeGroupMemberDTO {
 
     private String description;
 
+    private String avatar;
+
     private String teamRole;
 
     private Integer sortOrder;

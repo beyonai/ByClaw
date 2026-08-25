@@ -2651,7 +2651,6 @@ const ConfigForm = (props) => {
                       );
                       updateResource();
                     }}
-                    className={styles.paddingNoneHeightAuto}
                   >
                     + {intl.formatMessage({ id: 'common.plus' })}
                   </Button>
