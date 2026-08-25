@@ -200,6 +200,9 @@ public class GenericSandboxSpecProcessor implements SandboxSpecProcessor {
             if (v.getSubPath() != null) {
                 vb.subPath(subPath);
             }
+            vb.uid(v.getUid())
+                .gid(v.getGid())
+                .mode(v.getMode());
             volumes.add(vb.build());
             i++;
         }
