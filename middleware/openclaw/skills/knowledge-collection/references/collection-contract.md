@@ -70,6 +70,12 @@ collection_filters:
 - `sanitized/items/` 是唯一可交给下游 Agent 的正文目录。
 - `sanitized/metadata.json` 保存完整文章清单、物化状态和非敏感来源信息；不得包含 token、Cookie、secrets、授权缓存或其他凭据。
 
+### 会话目录边界
+
+同一采集任务只能有一个初始化后的会话根目录。来源执行器或人工补采工具产生的下载目录、图片和原始 Markdown 必须位于该会话的 `raw/` 子树；由此生成的工作副本必须位于 `markdown/items/`，最终正文必须位于 `sanitized/items/`。不得在会话根目录旁创建 `*-fulltext/`、`*-articles/` 或其他自定义交付目录。
+
+出现重复 URL、部分下载失败或正文无法物化时，保留原始证据，并在同一会话 inventory 中登记为重复、`pending` 或 `failed`。这些情况不得触发旁路归档，也不得把会话外文件作为下游正文交付。
+
 新写入的 `sanitized/metadata.json` 使用 `schemaVersion: "1.0"`，并包含：
 
 - `storage.fallback`：是否使用工作区回退目录。

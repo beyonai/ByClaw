@@ -33,6 +33,8 @@ markdown/items/*.md
 sanitized/items/*.md
 ```
 
+当 IMA 条目需要通过其他获准工具补抓全文时，下载工具的原始目录及图片必须写入当前会话的 `raw/` 子树；随后通过 `collect` 登记为当前会话的 `markdown/items/*.md` 与 `sanitized/items/*.md`。不得创建 IMA collection 会话外的全文或摘要目录。`bycli ima knowledge` 返回相同 `sourceUrl` 的多个记录时，适配器只登记第一个来源项，完整原始响应仍保留在 `raw/bycli-knowledge.json`。
+
 `collection-result.json` 的 `source` 和 `backend` 都写 `ima`，inventory 的 `sourceSkill` 写 `ima-skill`。
 执行企业 `search`、`search-all` 或 `resource` 时必须传入已授权 IMA 的 `--parent-session-dir`；metadata-only 输出会直接带有 `sourceScope=["ima"]`、`materializationTarget=candidates` 的完整 `session.json`。
 采集完成后只交付已验证的 `sanitized/items/*.md`，然后停止。

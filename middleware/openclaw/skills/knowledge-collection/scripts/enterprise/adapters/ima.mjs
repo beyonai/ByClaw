@@ -145,7 +145,8 @@ async function bycliKnowledgeList(writer, bycliBin, env, kb) {
 
 async function discover(writer, request, bin, bycliBin, env) {
   const found = [];
-  const seen = new Set();
+  const seenSourceItems = new Set();
+  const seenSourceUrls = new Set();
   const rawArtifacts = [];
   const fallbackReasons = [];
   let materializationKb = request.kb;
@@ -154,8 +155,10 @@ async function discover(writer, request, bin, bycliBin, env) {
     rawArtifacts.push(artifact);
     for (const record of records(response)) {
       const item = itemFromRecord(record, sourceType, request.kb);
-      if (!item || seen.has(`${sourceType}:${item.sourceItemId}`)) continue;
-      seen.add(`${sourceType}:${item.sourceItemId}`);
+      const sourceItemKey = item && `${sourceType}:${item.sourceItemId}`;
+      if (!item || seenSourceItems.has(sourceItemKey) || seenSourceUrls.has(item.sourceUrl)) continue;
+      seenSourceItems.add(sourceItemKey);
+      seenSourceUrls.add(item.sourceUrl);
       found.push({ ...item, materializationKb, sourceRank: found.length + 1, rawArtifacts: [artifact] });
       if (found.length >= request.limit) break;
     }
