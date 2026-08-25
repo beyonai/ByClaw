@@ -79,6 +79,7 @@ public class ShowcaseService {
     private final SequenceService sequenceService;
 
     @Autowired
+    @Lazy
     private MessageService messageService;
 
     private final ShowcaseStrategyFactory showcaseStrategyFactory;
