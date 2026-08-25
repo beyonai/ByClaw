@@ -3,11 +3,13 @@ package com.iwhalecloud.byai.state.application.service.taskplan;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.http.HttpStatus;
@@ -88,6 +90,68 @@ public class TaskPlanApplicationService {
             request.getTraceId(), request.getSourceRuntime(), request.getSourceRunId(), false,
             Boolean.TRUE.equals(request.getIncludeTerminal()));
         return plan == null ? null : snapshot(plan);
+    }
+
+    /** 为历史消息页批量查询当前用户每条回答的最新计划，包含终态计划。 */
+    public Map<Long, TaskPlanSnapshot> findLatestByMessageIds(Long sessionId, List<Long> messageIds) {
+        Long userId = CurrentUserHolder.getCurrentUserId();
+        if (userId == null || sessionId == null || messageIds == null || messageIds.isEmpty()) {
+            return Map.of();
+        }
+        List<Long> distinctMessageIds = messageIds.stream().filter(Objects::nonNull).distinct().toList();
+        if (distinctMessageIds.isEmpty()) {
+            return Map.of();
+        }
+
+        List<ByaiAgentTaskPlan> plans = planMapper.selectList(Wrappers.<ByaiAgentTaskPlan>lambdaQuery()
+            .eq(ByaiAgentTaskPlan::getUserId, userId)
+            .eq(ByaiAgentTaskPlan::getSessionId, sessionId)
+            .in(ByaiAgentTaskPlan::getMessageId, distinctMessageIds)
+            .orderByDesc(ByaiAgentTaskPlan::getUpdatedAt)
+            .orderByDesc(ByaiAgentTaskPlan::getPlanId));
+        if (plans == null || plans.isEmpty()) {
+            return Map.of();
+        }
+
+        Map<Long, ByaiAgentTaskPlan> latestByMessageId = new LinkedHashMap<>();
+        plans.stream().filter(plan -> plan.getMessageId() != null)
+            .forEach(plan -> latestByMessageId.putIfAbsent(plan.getMessageId(), plan));
+        if (latestByMessageId.isEmpty()) {
+            return Map.of();
+        }
+
+        List<Long> planIds = latestByMessageId.values().stream().map(ByaiAgentTaskPlan::getPlanId).toList();
+        List<ByaiAgentTaskItem> taskItems = itemMapper.selectList(Wrappers.<ByaiAgentTaskItem>lambdaQuery()
+            .in(ByaiAgentTaskItem::getPlanId, planIds)
+            .orderByAsc(ByaiAgentTaskItem::getPlanId)
+            .orderByAsc(ByaiAgentTaskItem::getPosition));
+        Map<Long, List<ByaiAgentTaskItem>> itemsByPlanId = taskItems == null ? Map.of()
+            : taskItems.stream().collect(Collectors.groupingBy(ByaiAgentTaskItem::getPlanId));
+
+        Map<Long, TaskPlanSnapshot> snapshots = new LinkedHashMap<>();
+        latestByMessageId.forEach((messageId, plan) -> snapshots.put(messageId,
+            snapshot(plan, itemsByPlanId.getOrDefault(plan.getPlanId(), List.of()))));
+        return snapshots;
+    }
+
+    /** 删除消息时同步清理其任务计划；item 和 event 由数据库外键级联删除。 */
+    @Transactional
+    public void deleteByMessageId(Long messageId) {
+        if (messageId == null) {
+            return;
+        }
+        planMapper.delete(Wrappers.<ByaiAgentTaskPlan>lambdaQuery()
+            .eq(ByaiAgentTaskPlan::getMessageId, messageId));
+    }
+
+    /** 删除会话时同步清理其全部任务计划；item 和 event 由数据库外键级联删除。 */
+    @Transactional
+    public void deleteBySessionId(Long sessionId) {
+        if (sessionId == null) {
+            return;
+        }
+        planMapper.delete(Wrappers.<ByaiAgentTaskPlan>lambdaQuery()
+            .eq(ByaiAgentTaskPlan::getSessionId, sessionId));
     }
 
     /** STOP_CHAT 第一步：立即封住模型的迟到更新，并对外展示“正在停止”。 */
@@ -408,6 +472,10 @@ public class TaskPlanApplicationService {
     }
 
     private TaskPlanSnapshot snapshot(ByaiAgentTaskPlan plan) {
+        return snapshot(plan, items(plan.getPlanId()));
+    }
+
+    private TaskPlanSnapshot snapshot(ByaiAgentTaskPlan plan, List<ByaiAgentTaskItem> taskItems) {
         TaskPlanSnapshot snapshot = new TaskPlanSnapshot();
         snapshot.setPlanId(String.valueOf(plan.getPlanId()));
         snapshot.setVersion(plan.getVersion());
@@ -425,7 +493,7 @@ public class TaskPlanApplicationService {
         snapshot.setCreatedAt(plan.getCreatedAt());
         snapshot.setUpdatedAt(plan.getUpdatedAt());
 
-        List<TaskPlanSnapshot.TaskSnapshot> taskSnapshots = items(plan.getPlanId()).stream().map(item -> {
+        List<TaskPlanSnapshot.TaskSnapshot> taskSnapshots = taskItems.stream().map(item -> {
             TaskPlanSnapshot.TaskSnapshot task = new TaskPlanSnapshot.TaskSnapshot();
             task.setTaskId(String.valueOf(item.getTaskId()));
             task.setPosition(item.getPosition());
