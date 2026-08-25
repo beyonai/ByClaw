@@ -28,9 +28,9 @@ import org.springframework.transaction.annotation.EnableTransactionManagement;
 class MessageServiceBeanWiringTest {
 
     @Test
-    void createsMessageAndShowcaseServicesWithTransactionalProxy() {
+    void createsMessageAndShowcaseServicesWithoutCircularReferences() {
         try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
-            context.getDefaultListableBeanFactory().setAllowCircularReferences(true);
+            context.getDefaultListableBeanFactory().setAllowCircularReferences(false);
             registerDependencies(context);
             context.register(TransactionConfiguration.class, MessageService.class, ShowcaseService.class);
 

@@ -4,10 +4,11 @@ import com.github.pagehelper.PageHelper;
 import com.iwhalecloud.byai.manager.entity.showcase.ByaiShowcase;
 import com.iwhalecloud.byai.manager.mapper.showcase.ByaiShowcaseMapper;
 import com.iwhalecloud.byai.manager.qo.showcase.ShowcaseQueryParam;
+import com.iwhalecloud.byai.common.message.qo.MessageHotQo;
+import com.iwhalecloud.byai.common.message.service.ByaiMessageHotService;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.manager.vo.showcase.ByaiShowcaseVo;
-import com.iwhalecloud.byai.state.application.service.message.MessageService;
 import com.iwhalecloud.byai.state.common.dto.FileUploadDto;
 import com.iwhalecloud.byai.state.common.exception.BdpRuntimeException;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
@@ -78,11 +79,9 @@ public class ShowcaseService {
 
     private final SequenceService sequenceService;
 
-    @Autowired
-    @Lazy
-    private MessageService messageService;
-
     private final ShowcaseStrategyFactory showcaseStrategyFactory;
+
+    private final ByaiMessageHotService byaiMessageHotService;
 
     @Autowired
     private FileService fileService;
@@ -92,10 +91,11 @@ public class ShowcaseService {
     private ResourceApplicationService resourceApplicationService;
 
     public ShowcaseService(ByaiShowcaseMapper byaiShowcaseMapper, SequenceService sequenceService,
-        ShowcaseStrategyFactory showcaseStrategyFactory) {
+        ShowcaseStrategyFactory showcaseStrategyFactory, ByaiMessageHotService byaiMessageHotService) {
         this.byaiShowcaseMapper = byaiShowcaseMapper;
         this.sequenceService = sequenceService;
         this.showcaseStrategyFactory = showcaseStrategyFactory;
+        this.byaiMessageHotService = byaiMessageHotService;
     }
 
     /**
@@ -443,7 +443,9 @@ public class ShowcaseService {
                     return null;
                 }
             }).filter(Objects::nonNull).collect(Collectors.toList());
-        return messageService.getChatHistory(list);
+        MessageHotQo messageHotQo = new MessageHotQo();
+        messageHotQo.setMessageIds(list);
+        return byaiMessageHotService.findByQo(messageHotQo);
     }
 
     public void save(ByaiShowcase showcase) {
