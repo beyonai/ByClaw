@@ -626,8 +626,10 @@ public class SandboxService {
         // 校验运行中沙箱数量是否超过系统参数上限
         checkRunningSandboxLimit();
 
-        SandboxLaunchContext launchContext = sandboxLaunchContextFactory.buildContext(userCode, resourceId,
-            routing.getSandboxType());
+        SandboxLaunchContext launchContext = StringUtils.isNotBlank(routing.getProfileKey())
+            ? sandboxLaunchContextFactory.buildContext(userCode, resourceId, routing.getSandboxType(),
+                routing.getProfileKey())
+            : sandboxLaunchContextFactory.buildContext(userCode, resourceId, routing.getSandboxType());
 
         SandboxLaunchRequest request = new SandboxLaunchRequest();
         request.setUserCode(userCode);

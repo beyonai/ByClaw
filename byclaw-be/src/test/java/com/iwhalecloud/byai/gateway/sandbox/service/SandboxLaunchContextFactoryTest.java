@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.gateway.sandbox.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -8,7 +9,13 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.Map;
+import java.util.Optional;
+
+import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpec;
+import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpecRepository;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDigEmployeeService;
+import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 
 @ExtendWith(MockitoExtension.class)
 class SandboxLaunchContextFactoryTest {
@@ -18,6 +25,12 @@ class SandboxLaunchContextFactoryTest {
 
     @Mock
     private SsResExtDigEmployeeService ssResExtDigEmployeeService;
+
+    @Mock
+    private SandboxServiceSpecRepository sandboxServiceSpecRepository;
+
+    @Mock
+    private ByaiSystemConfigService byaiSystemConfigService;
 
     @Mock
     private SandboxUserInfoFactory sandboxUserInfoFactory;
@@ -45,5 +58,19 @@ class SandboxLaunchContextFactoryTest {
             SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE);
 
         assertThat(context.getEnvs()).doesNotContainKey("IMA_HOME");
+    }
+
+    @Test
+    void buildContextLoadsSystemConfigOnlyForSpecEnvKeys() {
+        SandboxServiceSpec spec = new SandboxServiceSpec();
+        spec.setEnv(Map.of("WEB_BASE_URL", "${WEB_BASE_URL}", "TZ", "Asia/Shanghai"));
+        when(sandboxServiceSpecRepository.findByServiceKey("openclaw")).thenReturn(Optional.of(spec));
+        when(byaiSystemConfigService.getDcSystemConfigValuesByCodes(spec.getEnv().keySet()))
+            .thenReturn(Map.of("WEB_BASE_URL", "https://web.example"));
+
+        SandboxLaunchContext context = factory.buildContext("user001", 102L, "openclaw");
+
+        assertThat(context.getEnvs()).containsEntry("WEB_BASE_URL", "https://web.example")
+            .doesNotContainKey("TZ");
     }
 }
