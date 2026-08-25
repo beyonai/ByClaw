@@ -1,6 +1,8 @@
 package com.iwhalecloud.byai.state.domain.chat.service;
 
 import java.io.OutputStream;
+import java.util.Objects;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.slf4j.Logger;
@@ -101,5 +103,32 @@ public class OutputStreamManager {
             logger.info("ChatProcessContext 已移除, sessionId: {}", sessionId);
         }
         return ctx;
+    }
+
+    /**
+     * 统计当前实例所有 HTTP SSE 会话的待消费 Gateway 事件数量。
+     *
+     * @return 所有非空 Gateway 事件队列的长度总和
+     */
+    public long getTotalGatewayEventQueueSize() {
+        return contextMap.values().stream()
+            .map(ChatProcessContext::getGatewayEventQueue)
+            .filter(Objects::nonNull)
+            .mapToLong(BlockingQueue::size)
+            .sum();
+    }
+
+    /**
+     * 统计当前实例单个 HTTP SSE 会话的最大待消费 Gateway 事件数量。
+     *
+     * @return 最大队列长度；不存在 HTTP SSE 队列时返回 0
+     */
+    public long getMaxGatewayEventQueueSize() {
+        return contextMap.values().stream()
+            .map(ChatProcessContext::getGatewayEventQueue)
+            .filter(Objects::nonNull)
+            .mapToLong(BlockingQueue::size)
+            .max()
+            .orElse(0L);
     }
 }

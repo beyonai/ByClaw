@@ -20,6 +20,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import com.iwhalecloud.byai.state.domain.chat.service.StreamAckFailureRegistry;
 import com.iwhalecloud.byai.state.domain.chat.service.StreamDispatchResult;
 import com.iwhalecloud.byai.state.domain.chat.service.StreamRecordProcessor;
+import com.iwhalecloud.byai.state.domain.chat.service.SessionStreamMetrics;
 
 class RedisStreamMessageListenerTest {
 
@@ -28,6 +29,7 @@ class RedisStreamMessageListenerTest {
     private StreamOperations<String, Object, Object> streamOperations;
     private StreamRecordProcessor processor;
     private StreamAckFailureRegistry ackFailureRegistry;
+    private SessionStreamMetrics metrics;
 
     @BeforeEach
     @SuppressWarnings("unchecked")
@@ -36,11 +38,13 @@ class RedisStreamMessageListenerTest {
         redisTemplate = mock(RedisTemplate.class);
         streamOperations = mock(StreamOperations.class);
         processor = mock(StreamRecordProcessor.class);
+        metrics = mock(SessionStreamMetrics.class);
         when(redisTemplate.opsForStream()).thenReturn(streamOperations);
         ackFailureRegistry = new StreamAckFailureRegistry();
         ReflectionTestUtils.setField(listener, "redisTemplate", redisTemplate);
         ReflectionTestUtils.setField(listener, "streamRecordProcessor", processor);
         ReflectionTestUtils.setField(listener, "streamAckFailureRegistry", ackFailureRegistry);
+        ReflectionTestUtils.setField(listener, "sessionStreamMetrics", metrics);
     }
 
     @Test
@@ -95,6 +99,32 @@ class RedisStreamMessageListenerTest {
         listener.onMessage(record);
 
         verify(streamOperations, never()).acknowledge(any(), any(), any(RecordId.class));
+    }
+
+    @Test
+    void recordsReceivedAndSuccessfulAckMetrics() {
+        MapRecord<String, String, String> record = record();
+        when(processor.process(record)).thenReturn(StreamDispatchResult.HANDLED);
+        when(streamOperations.acknowledge(any(), any(), any(RecordId.class))).thenReturn(1L);
+
+        listener.onMessage(record);
+
+        verify(metrics).recordReceived();
+        verify(metrics).recordAckSuccess();
+        verify(metrics, never()).recordAckFailure();
+    }
+
+    @Test
+    void recordsAckFailureMetric() {
+        MapRecord<String, String, String> record = record();
+        when(processor.process(record)).thenReturn(StreamDispatchResult.HANDLED);
+        when(streamOperations.acknowledge(any(), any(), any(RecordId.class)))
+            .thenThrow(new IllegalStateException("redis down"));
+
+        listener.onMessage(record);
+
+        verify(metrics).recordReceived();
+        verify(metrics).recordAckFailure();
     }
 
     @SuppressWarnings("unchecked")
