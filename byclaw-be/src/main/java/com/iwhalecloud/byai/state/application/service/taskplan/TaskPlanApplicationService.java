@@ -305,6 +305,9 @@ public class TaskPlanApplicationService {
 
         List<ByaiAgentTaskItem> taskItems = reconcileTasks(plan.getPlanId(), request.getTasks(), List.of(), now);
         plan.setStatus(derivePlanStatus(taskItems));
+        PlanStatusReason planReason = derivePlanStatusReason(taskItems);
+        plan.setStatusReasonCode(planReason == null ? null : planReason.code());
+        plan.setStatusReasonMessage(planReason == null ? null : planReason.message());
         if (!"ACTIVE".equals(plan.getStatus())) {
             plan.setCompletedAt(now);
         }
@@ -334,6 +337,7 @@ public class TaskPlanApplicationService {
         Date now = new Date();
         List<ByaiAgentTaskItem> replacement = reconcileTasks(planId, request.getTasks(), items(planId), now);
         String nextStatus = derivePlanStatus(replacement);
+        PlanStatusReason planReason = derivePlanStatusReason(replacement);
         int nextVersion = plan.getVersion() + 1;
         int changed = planMapper.update(null, Wrappers.<ByaiAgentTaskPlan>lambdaUpdate()
             .eq(ByaiAgentTaskPlan::getPlanId, planId)
@@ -343,6 +347,8 @@ public class TaskPlanApplicationService {
             .set(ByaiAgentTaskPlan::getTitle, requiredText(request.getTitle(), "title", 500))
             .set(ByaiAgentTaskPlan::getLastExplanation, trimToNull(request.getExplanation(), 2000))
             .set(ByaiAgentTaskPlan::getStatus, nextStatus)
+            .set(ByaiAgentTaskPlan::getStatusReasonCode, planReason == null ? null : planReason.code())
+            .set(ByaiAgentTaskPlan::getStatusReasonMessage, planReason == null ? null : planReason.message())
             .set(ByaiAgentTaskPlan::getVersion, nextVersion)
             .set(ByaiAgentTaskPlan::getUpdatedAt, now)
             .set(ByaiAgentTaskPlan::getCompletedAt, "ACTIVE".equals(nextStatus) ? null : now));
@@ -371,6 +377,13 @@ public class TaskPlanApplicationService {
 
         Map<Integer, ByaiAgentTaskItem> byPosition = new HashMap<>();
         existing.forEach(item -> byPosition.put(item.getPosition(), item));
+        existing.stream()
+            .filter(item -> item.getPosition() > input.size())
+            .filter(item -> !"PENDING".equals(item.getStatus()))
+            .findFirst()
+            .ifPresent(item -> {
+                throw conflict("Started task at position " + item.getPosition() + " cannot be removed");
+            });
         List<ByaiAgentTaskItem> result = new ArrayList<>(input.size());
 
         for (int index = 0; index < input.size(); index++) {
@@ -380,10 +393,10 @@ public class TaskPlanApplicationService {
             }
             int position = index + 1;
             String title = requiredText(source.getStep(), "tasks[" + index + "].step", 1000);
+            String description = trimToNull(source.getDescription(), 4000);
             String status = normalizeTaskStatus(source.getStatus());
-            ByaiAgentTaskItem samePosition = byPosition.get(position);
-            ByaiAgentTaskItem previous = samePosition != null && title.equals(samePosition.getTitle())
-                ? samePosition : null;
+            ByaiAgentTaskItem previous = byPosition.get(position);
+            validateTaskMutation(previous, position, title, description, status);
 
             Long taskId = previous == null ? IdUtil.getSnowflakeNextId() : previous.getTaskId();
             ByaiAgentTaskItem item = new ByaiAgentTaskItem();
@@ -391,40 +404,156 @@ public class TaskPlanApplicationService {
             item.setPlanId(planId);
             item.setPosition(position);
             item.setTitle(title);
-            item.setDescription(trimToNull(source.getDescription(), 4000));
+            item.setDescription(description);
             item.setStatus(status);
             TaskPlanUpdateRequest.StatusReasonInput statusReason = source.getStatusReason();
-            item.setStatusReasonCode(statusReason == null ? null
-                : requiredText(statusReason.getCode(), "tasks[" + index + "].statusReason.code", 64));
-            item.setStatusReasonMessage(statusReason == null ? null
-                : trimToNull(statusReason.getMessage(), 500));
+            String statusReasonCode = statusReason == null ? null
+                : requiredText(statusReason.getCode(), "tasks[" + index + "].statusReason.code", 64);
+            String statusReasonMessage = statusReason == null ? null
+                : trimToNull(statusReason.getMessage(), 500);
+            if (previous != null && TERMINAL_TASK_STATUSES.contains(previous.getStatus())) {
+                statusReasonCode = previous.getStatusReasonCode();
+                statusReasonMessage = previous.getStatusReasonMessage();
+            }
+            item.setStatusReasonCode(statusReasonCode);
+            item.setStatusReasonMessage(statusReasonMessage);
             item.setCreatedAt(previous == null ? now : previous.getCreatedAt());
-            item.setUpdatedAt(now);
+            item.setUpdatedAt(taskChanged(previous, item) ? now : previous.getUpdatedAt());
             item.setStartedAt(resolveStartedAt(previous, status, now));
-            item.setCompletedAt(TERMINAL_TASK_STATUSES.contains(status) ? now : null);
+            item.setCompletedAt(resolveCompletedAt(previous, status, now));
             result.add(item);
         }
+        validateSequentialExecution(result);
+        applyFailFast(result, now);
         return result;
+    }
+
+    private void validateTaskMutation(ByaiAgentTaskItem previous, int position, String title, String description,
+        String status) {
+        if (previous == null) {
+            return;
+        }
+        String previousStatus = previous.getStatus();
+        if (TERMINAL_TASK_STATUSES.contains(previousStatus) && !previousStatus.equals(status)) {
+            throw conflict("Terminal task at position " + position + " cannot change from " + previousStatus
+                + " to " + status);
+        }
+        if ("IN_PROGRESS".equals(previousStatus) && "PENDING".equals(status)) {
+            throw conflict("Task at position " + position + " cannot move back to PENDING");
+        }
+        if (!"PENDING".equals(previousStatus)
+            && (!Objects.equals(previous.getTitle(), title)
+                || !Objects.equals(previous.getDescription(), description))) {
+            throw conflict("Started task at position " + position + " cannot be redefined");
+        }
+    }
+
+    private boolean taskChanged(ByaiAgentTaskItem previous, ByaiAgentTaskItem current) {
+        return previous == null
+            || !Objects.equals(previous.getTitle(), current.getTitle())
+            || !Objects.equals(previous.getDescription(), current.getDescription())
+            || !Objects.equals(previous.getStatus(), current.getStatus())
+            || !Objects.equals(previous.getStatusReasonCode(), current.getStatusReasonCode())
+            || !Objects.equals(previous.getStatusReasonMessage(), current.getStatusReasonMessage());
     }
 
     private Date resolveStartedAt(ByaiAgentTaskItem previous, String status, Date now) {
         if (previous != null && previous.getStartedAt() != null) {
             return previous.getStartedAt();
         }
-        return "PENDING".equals(status) ? null : now;
+        boolean started = "IN_PROGRESS".equals(status) || "COMPLETED".equals(status) || "FAILED".equals(status);
+        return started ? now : null;
+    }
+
+    private Date resolveCompletedAt(ByaiAgentTaskItem previous, String status, Date now) {
+        if (previous != null && previous.getCompletedAt() != null) {
+            return previous.getCompletedAt();
+        }
+        return TERMINAL_TASK_STATUSES.contains(status) ? now : null;
+    }
+
+    private void validateSequentialExecution(List<ByaiAgentTaskItem> tasks) {
+        boolean onlyPendingTailAllowed = false;
+        String haltStatus = null;
+        for (ByaiAgentTaskItem task : tasks) {
+            String status = task.getStatus();
+            if (haltStatus != null) {
+                boolean allowed = "PENDING".equals(status)
+                    || ("FAILED".equals(haltStatus) && "SKIPPED".equals(status))
+                    || ("CANCELLED".equals(haltStatus) && "CANCELLED".equals(status));
+                if (!allowed) {
+                    throw conflict("Task at position " + task.getPosition()
+                        + " cannot execute after a previous task has " + haltStatus.toLowerCase(Locale.ROOT));
+                }
+                continue;
+            }
+            if ("PENDING".equals(status)) {
+                onlyPendingTailAllowed = true;
+                continue;
+            }
+            if (onlyPendingTailAllowed) {
+                throw conflict("Task at position " + task.getPosition()
+                    + " cannot start before all previous tasks are terminal");
+            }
+            if ("IN_PROGRESS".equals(status)) {
+                onlyPendingTailAllowed = true;
+            }
+            else if ("FAILED".equals(status) || "CANCELLED".equals(status)) {
+                haltStatus = status;
+            }
+        }
+    }
+
+    private void applyFailFast(List<ByaiAgentTaskItem> tasks, Date now) {
+        String haltStatus = null;
+        for (ByaiAgentTaskItem task : tasks) {
+            if (haltStatus == null) {
+                if ("FAILED".equals(task.getStatus()) || "CANCELLED".equals(task.getStatus())) {
+                    haltStatus = task.getStatus();
+                }
+                continue;
+            }
+            if (TERMINAL_TASK_STATUSES.contains(task.getStatus())) {
+                continue;
+            }
+            boolean failed = "FAILED".equals(haltStatus);
+            task.setStatus(failed ? "SKIPPED" : "CANCELLED");
+            task.setStatusReasonCode(failed ? "BLOCKED_BY_PREVIOUS_FAILURE" : "PLAN_CANCELLED");
+            task.setStatusReasonMessage(failed ? "前序任务失败，后续任务已跳过" : "前序任务取消，后续任务已取消");
+            task.setUpdatedAt(now);
+            if (task.getCompletedAt() == null) {
+                task.setCompletedAt(now);
+            }
+        }
     }
 
     private String derivePlanStatus(List<ByaiAgentTaskItem> tasks) {
-        if (tasks.stream().anyMatch(task -> !TERMINAL_TASK_STATUSES.contains(task.getStatus()))) {
-            return "ACTIVE";
-        }
         if (tasks.stream().anyMatch(task -> "FAILED".equals(task.getStatus()))) {
             return "FAILED";
         }
         if (tasks.stream().anyMatch(task -> "CANCELLED".equals(task.getStatus()))) {
             return "CANCELLED";
         }
+        if (tasks.stream().anyMatch(task -> !TERMINAL_TASK_STATUSES.contains(task.getStatus()))) {
+            return "ACTIVE";
+        }
         return "COMPLETED";
+    }
+
+    private PlanStatusReason derivePlanStatusReason(List<ByaiAgentTaskItem> tasks) {
+        ByaiAgentTaskItem failed = tasks.stream().filter(task -> "FAILED".equals(task.getStatus())).findFirst()
+            .orElse(null);
+        if (failed != null) {
+            return new PlanStatusReason(StringUtils.defaultIfBlank(failed.getStatusReasonCode(), "TASK_FAILED"),
+                StringUtils.defaultIfBlank(failed.getStatusReasonMessage(), "任务执行失败"));
+        }
+        ByaiAgentTaskItem cancelled = tasks.stream().filter(task -> "CANCELLED".equals(task.getStatus())).findFirst()
+            .orElse(null);
+        if (cancelled != null) {
+            return new PlanStatusReason(StringUtils.defaultIfBlank(cancelled.getStatusReasonCode(), "TASK_CANCELLED"),
+                StringUtils.defaultIfBlank(cancelled.getStatusReasonMessage(), "任务执行已取消"));
+        }
+        return null;
     }
 
     private ByaiAgentTaskPlan findByExecution(Long userId, Long sessionId, Long messageId, String traceId,
@@ -501,6 +630,7 @@ public class TaskPlanApplicationService {
             task.setDescription(item.getDescription());
             task.setStatus(item.getStatus());
             task.setStatusReason(reason(item.getStatusReasonCode(), item.getStatusReasonMessage()));
+            task.setUpdatedAt(item.getUpdatedAt());
             task.setStartedAt(item.getStartedAt());
             task.setCompletedAt(item.getCompletedAt());
             return task;
@@ -609,5 +739,8 @@ public class TaskPlanApplicationService {
 
     private ResponseStatusException notFound() {
         return new ResponseStatusException(HttpStatus.NOT_FOUND, "Task plan not found");
+    }
+
+    private record PlanStatusReason(String code, String message) {
     }
 }

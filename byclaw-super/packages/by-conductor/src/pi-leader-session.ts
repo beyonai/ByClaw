@@ -108,7 +108,7 @@ export class PiLeaderSession implements LeaderSession {
           Type.Integer({
             minimum: 1,
             description:
-              "Position of the matching task in the active task plan. Required when an active task plan exists.",
+              "Optional compatibility hint. The runtime selects the authoritative current task from the active task plan.",
           }),
         ),
         expectedOutput: Type.Optional(Type.String({ description: "Desired result format" })),
@@ -124,11 +124,6 @@ export class PiLeaderSession implements LeaderSession {
         const active = wrapper?.activeInput;
         if (!active) {
           throw new Error("No active Leader run is available for delegation");
-        }
-        if (active.activeTaskPlan?.status === "ACTIVE" && params.taskPosition === undefined) {
-          throw new Error(
-            "taskPosition is required when delegating work for an active task plan",
-          );
         }
         let result;
         try {

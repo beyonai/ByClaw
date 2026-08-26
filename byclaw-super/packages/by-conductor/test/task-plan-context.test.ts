@@ -47,7 +47,7 @@ describe("TaskPlanProcessor", () => {
       "create the task plan before calling askUserQuestion",
     );
     expect(compiled.systemPrompt).toContain(
-      "pass the matching task position as delegateAgent.taskPosition",
+      "the runtime selects and advances the authoritative current task",
     );
     expect(compiled.systemPrompt).toContain(
       "The system owns execution identity, plan identity, versions, and task IDs",

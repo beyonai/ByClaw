@@ -2260,6 +2260,80 @@ describe("RunService task plan completion guard", () => {
     await service.dispose();
   });
 
+  it("selects the current planned task and completes it from a successful delegation", async () => {
+    let currentPlan: TaskPlanSnapshot = {
+      ...taskPlanSnapshot("ACTIVE"),
+      tasks: [
+        {
+          taskId: "task-1",
+          position: 1,
+          title: "调度数字员工",
+          status: "PENDING",
+        },
+      ],
+    };
+    const taskPlans: TaskPlanGateway = {
+      loadActive: vi.fn(async () => currentPlan),
+      update: vi.fn(async ({ update }) => {
+        const completedPlan = update.tasks.every(({ status }) => status === "COMPLETED");
+        currentPlan = {
+          ...currentPlan,
+          version: currentPlan.version + 1,
+          status: completedPlan ? "COMPLETED" : "ACTIVE",
+          tasks: update.tasks.map((task, index) => ({
+            taskId: `task-${index + 1}`,
+            position: index + 1,
+            title: task.step,
+            ...(task.description ? { description: task.description } : {}),
+            status: task.status,
+          })),
+        };
+        return currentPlan;
+      }),
+      cancel: vi.fn(async () => undefined),
+    };
+    const connector = fakeConnector(async function* () {
+      yield completed("任务完成");
+    });
+    const { service } = createTaskPlanService(async (input) => {
+      const result = await input.delegate({
+        toolCallId: "delegate-current-task",
+        agentId: agent.id,
+        task: "执行当前任务",
+      });
+      expect(result.status).toBe("completed");
+      return { text: "任务已经完成" };
+    }, taskPlans, connector);
+
+    const run = await createTaskPlanRun(service, [agent]);
+    await waitFor(async () => (await service.getRun(run.id))?.status === "COMPLETED");
+
+    expect(taskPlans.update).toHaveBeenCalledTimes(2);
+    expect(taskPlans.update).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        idempotencyKey: "delegate-current-task:task-started",
+        update: expect.objectContaining({
+          tasks: [expect.objectContaining({ status: "IN_PROGRESS" })],
+        }),
+      }),
+    );
+    expect(taskPlans.update).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        idempotencyKey: "delegate-current-task:task-completed",
+        update: expect.objectContaining({
+          tasks: [expect.objectContaining({ status: "COMPLETED" })],
+        }),
+      }),
+    );
+    expect((await service.getRunDetails(run.id))?.delegations[0]).toMatchObject({
+      taskPosition: 1,
+      status: "COMPLETED",
+    });
+    await service.dispose();
+  });
+
   it("fails instead of reporting success when the Leader repeatedly ignores an active plan", async () => {
     const taskPlans: TaskPlanGateway = {
       loadActive: vi.fn(async () => taskPlanSnapshot("ACTIVE")),
@@ -2343,6 +2417,13 @@ describe("RunService task plan completion guard", () => {
         taskPosition: 1,
       });
       expect(result.status).toBe("failed");
+      await expect(
+        input.delegate({
+          toolCallId: "delegate-after-failure",
+          agentId: agent.id,
+          task: "不应继续执行",
+        }),
+      ).rejects.toThrow("no further delegation is allowed");
       return { text: "数字员工调度失败，任务未完成" };
     }, taskPlans, connector);
 
