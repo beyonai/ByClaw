@@ -1,4 +1,7 @@
-import { isPreviewable } from '@/components/QueryInput/components/FileBrowserEntry/components/FileBrowserPanel/constants';
+import {
+  CODE_TEXT_EXTENSIONS,
+  isPreviewable,
+} from '@/components/QueryInput/components/FileBrowserEntry/components/FileBrowserPanel/constants';
 import { getFileIconType } from '@/constants/icon';
 import type { IKnowledgeBaseItem } from '@/layout/sider/components/Knowledge/components/KnowledgeBase/types';
 import type { FileBrowserItem } from '@/service/fileBrowser';
@@ -17,6 +20,86 @@ import {
   type FileCopyTargetType,
 } from './constants';
 
+/** 在线按文本读取的最大文件大小，避免浏览器一次性加载过大的源码/配置文件。 */
+export const MAX_TEXT_PREVIEW_SIZE = 2 * 1024 * 1024;
+
+const TEXT_FILE_NAMES = new Set([
+  '.gitattributes',
+  '.gitignore',
+  '.gitmodules',
+  '.dockerignore',
+  'dockerfile',
+  'makefile',
+  'license',
+  'procfile',
+  'readme',
+]);
+
+const BINARY_EXTENSIONS = new Set([
+  '7z',
+  'avi',
+  'bmp',
+  'class',
+  'deb',
+  'dmg',
+  'doc',
+  'docx',
+  'dll',
+  'epub',
+  'exe',
+  'flac',
+  'gif',
+  'gz',
+  'ico',
+  'iso',
+  'jar',
+  'jpeg',
+  'jpg',
+  'mkv',
+  'mov',
+  'mp3',
+  'mp4',
+  'otf',
+  'pdf',
+  'png',
+  'ppt',
+  'pptx',
+  'rar',
+  'tar',
+  'so',
+  'ttf',
+  'wav',
+  'wasm',
+  'webp',
+  'webm',
+  'woff',
+  'woff2',
+  'xls',
+  'xlsx',
+  'zip',
+]);
+
+const getLowerFileName = (name: string) => name.split('/').pop()?.toLowerCase() || '';
+
+/** 没有标准扩展名的代码/配置文件按纯文本展示，例如 .gitignore、Dockerfile。 */
+export function isTextFallbackFile(name: string) {
+  const fileName = getLowerFileName(name);
+  if (TEXT_FILE_NAMES.has(fileName)) return true;
+  if (fileName.startsWith('.')) {
+    return !BINARY_EXTENSIONS.has(fileName.split('.').pop() || '');
+  }
+  if (!fileName.includes('.')) return !BINARY_EXTENSIONS.has(fileName);
+  return !BINARY_EXTENSIONS.has(fileName.split('.').pop() || '') && !isPreviewable(fileName);
+}
+
+export function isTextPreviewFile(name: string) {
+  const extension = getLowerFileName(name).split('.').pop() || '';
+  return (
+    isTextFallbackFile(name) ||
+    ['csv', 'md', 'txt', 'log', 'json', 'html', 'xml', ...CODE_TEXT_EXTENSIONS].includes(extension)
+  );
+}
+
 export function getIconType(name: string, isDir: boolean): string {
   return getFileIconType(name, {
     isDirectory: isDir,
@@ -29,7 +112,11 @@ export function isDirectory(item: FileBrowserItem) {
 }
 
 export function canPreviewFile(item: FileBrowserItem) {
-  return !isDirectory(item) && isPreviewable(item.name);
+  if (isDirectory(item)) return false;
+  if (isTextPreviewFile(item.name)) {
+    return item.size === undefined || item.size <= MAX_TEXT_PREVIEW_SIZE;
+  }
+  return isPreviewable(item.name);
 }
 
 export function unwrapListResponse<T>(res: any): T[] {
@@ -75,6 +162,10 @@ export function getFileType(name: string): string {
   if (ext === 'jpeg') return 'jpg';
   if (['html', 'htm'].includes(ext)) return 'html';
   return ext;
+}
+
+export function getPreviewFileType(name: string) {
+  return isTextFallbackFile(name) ? 'txt' : getFileType(name);
 }
 
 export function getNormalizedSessionId(sessionId?: string) {

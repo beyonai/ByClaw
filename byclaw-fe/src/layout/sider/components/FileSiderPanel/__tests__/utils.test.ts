@@ -1,8 +1,11 @@
 import { PROJECT_FILE_PATH } from '../constants';
 import {
+  canPreviewFile,
   getCategoryRootPath,
   getDisplayFileBrowserPath,
   getFileCategoryKeyByPath,
+  getPreviewFileType,
+  MAX_TEXT_PREVIEW_SIZE,
   isProtectedRootDirectory,
 } from '../utils';
 
@@ -21,5 +24,18 @@ describe('FileSiderPanel project space paths', () => {
         isDir: true,
       })
     ).toBe(true);
+  });
+
+  it('previews extensionless repository metadata as text', () => {
+    expect(canPreviewFile({ name: '.gitattributes', path: '/.gitattributes', isDir: false })).toBe(true);
+    expect(canPreviewFile({ name: '.gitmodules', path: '/.gitmodules', isDir: false })).toBe(true);
+    expect(getPreviewFileType('.gitignore')).toBe('txt');
+  });
+
+  it('rejects oversized text files while keeping binary files on their existing preview rules', () => {
+    expect(
+      canPreviewFile({ name: '.gitignore', path: '/.gitignore', isDir: false, size: MAX_TEXT_PREVIEW_SIZE + 1 })
+    ).toBe(false);
+    expect(canPreviewFile({ name: 'archive.zip', path: '/archive.zip', isDir: false })).toBe(false);
   });
 });
