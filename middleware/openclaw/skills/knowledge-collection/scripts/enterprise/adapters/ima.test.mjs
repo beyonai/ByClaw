@@ -38,7 +38,7 @@ else if (args[0] === 'ima' && args[1] === 'knowledge' && process.env.BYCLI_DUPLI
   { mediaId: 'wiki-bycli-2', title: 'ByCLI roadmap copy', url: 'https://ima.qq.com/wiki-bycli-1', folderPath: '/Archive', abstract: 'duplicate preview' },
 ]);
 else if (args[0] === 'ima' && args[1] === 'knowledge' && process.env.BYCLI_SUCCESS === 'true') out([{
-  mediaId: 'wiki-bycli-1', title: 'ByCLI roadmap', url: process.env.BYCLI_WECHAT_URL === 'true' ? 'https://mp.weixin.qq.com/s/article-token' : 'https://ima.qq.com/wiki-bycli-1', folderPath: '/Roadmap', abstract: 'bycli preview',
+  mediaId: 'wiki-bycli-1', title: process.env.BYCLI_TITLE || 'ByCLI roadmap', url: process.env.BYCLI_WECHAT_URL === 'true' ? 'https://mp.weixin.qq.com/s/article-token' : 'https://ima.qq.com/wiki-bycli-1', folderPath: '/Roadmap', abstract: 'bycli preview',
   ...(process.env.BYCLI_WITH_INTRODUCTION === 'true' ? { introduction: 'bycli opening paragraph' } : {}),
   ...(process.env.BYCLI_WITH_TWO_COVERS === 'true'
     ? { coverUrls: ['https://img.ima.qq.com/cover-1.png', 'https://img.ima.qq.com/cover-2.png'] }
@@ -230,6 +230,28 @@ test('IMA knowledge-base collection bypasses note search and resolves the Wiki I
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+test('IMA item directories use the first five visible title characters for both work copies', async () => {
+  const { root, bin } = await fixture();
+  try {
+    const outputDir = join(root, 'search');
+    const result = await createImaAdapter({
+      bin,
+      bycliBin: bin,
+      env: {
+        ...process.env,
+        BYCLI_SUCCESS: 'true',
+        BYCLI_TITLE: '👩‍💻甲乙丙丁戊',
+      },
+    }).search({ outputDir, query: 'knowledge-base collection', kb: 'kb-name', limit: 10, metadataOnly: false });
+
+    assert.equal(result.status, 'complete');
+    const metadata = JSON.parse(await readFile(join(outputDir, 'sanitized/metadata.json'), 'utf8'));
+    const item = metadata.collection.items[0];
+    assert.match(item.materialization.markdownPath, /^markdown\/items\/👩‍💻甲乙丙丁-ima-[a-f0-9]{16}\/index\.md$/u);
+    assert.match(item.materialization.sanitizedPath, /^sanitized\/items\/👩‍💻甲乙丙丁-ima-[a-f0-9]{16}\/index\.md$/u);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test('IMA knowledge-base collection materializes its cover beside the body', async () => {
   const { root, bin } = await fixture();
   try {
@@ -258,8 +280,8 @@ test('IMA knowledge-base collection materializes its cover beside the body', asy
     assert.equal(result.status, 'complete');
     const metadata = JSON.parse(await readFile(join(outputDir, 'sanitized/metadata.json'), 'utf8'));
     const item = metadata.collection.items[0];
-    assert.match(item.materialization.markdownPath, /^markdown\/items\/ByCLI-roadmap-ima-[a-f0-9]{16}\/index\.md$/);
-    assert.match(item.materialization.sanitizedPath, /^sanitized\/items\/ByCLI-roadmap-ima-[a-f0-9]{16}\/index\.md$/);
+    assert.match(item.materialization.markdownPath, /^markdown\/items\/ByCLI-ima-[a-f0-9]{16}\/index\.md$/);
+    assert.match(item.materialization.sanitizedPath, /^sanitized\/items\/ByCLI-ima-[a-f0-9]{16}\/index\.md$/);
     assert.equal(item.materialization.contentGranularity, 'excerpt');
     assert.deepEqual(item.media, {
       coverStatus: 'materialized', coverCount: 1, materializedCoverCount: 1, reason: null,
@@ -335,7 +357,7 @@ test('IMA materializes discovered excerpts and covers when Wiki retrieval is una
     const item = metadata.collection.items[0];
     assert.equal(item.materialization.status, 'materialized');
     assert.equal(item.materialization.contentGranularity, 'excerpt');
-    assert.match(item.materialization.sanitizedPath, /^sanitized\/items\/ByCLI-roadmap-ima-[a-f0-9]{16}\/index\.md$/);
+    assert.match(item.materialization.sanitizedPath, /^sanitized\/items\/ByCLI-ima-[a-f0-9]{16}\/index\.md$/);
     assert.equal(item.media.coverStatus, 'materialized');
     assert.match(await readFile(join(outputDir, item.materialization.sanitizedPath), 'utf8'), /bycli opening paragraph/);
     assert.equal(
@@ -371,7 +393,7 @@ test('IMA resume materializes discovered excerpts without a current IMA credenti
     const materialized = JSON.parse(await readFile(join(outputDir, 'sanitized/metadata.json'), 'utf8'));
     const item = materialized.collection.items[0];
     assert.equal(item.materialization.contentGranularity, 'excerpt');
-    assert.match(item.materialization.sanitizedPath, /^sanitized\/items\/ByCLI-roadmap-ima-[a-f0-9]{16}\/index\.md$/);
+    assert.match(item.materialization.sanitizedPath, /^sanitized\/items\/ByCLI-ima-[a-f0-9]{16}\/index\.md$/);
     assert.equal(item.media.coverStatus, 'materialized');
   } finally { await rm(root, { recursive: true, force: true }); }
 });
@@ -503,7 +525,7 @@ test('IMA search materializes note Markdown through note get', async () => {
     const result = await createImaAdapter({ bin }).materialize({ sessionDir: discoveryDir, outputDir, itemIds: [itemId] });
     assert.equal(result.status, 'complete');
     const materializedMetadata = JSON.parse(await readFile(join(outputDir, 'sanitized/metadata.json'), 'utf8'));
-    assert.match(materializedMetadata.collection.items[0].materialization.sanitizedPath, /^sanitized\/items\/Roadmap-ima-[a-f0-9]{16}\/index\.md$/);
+    assert.match(materializedMetadata.collection.items[0].materialization.sanitizedPath, /^sanitized\/items\/Roadm-ima-[a-f0-9]{16}\/index\.md$/);
     assert.equal(materializedMetadata.collection.items[0].materialization.contentGranularity, 'unknown');
     assert.equal(materializedMetadata.collection.items[0].media.coverStatus, 'not-present');
     assert.match(await readFile(join(outputDir, materializedMetadata.collection.items[0].materialization.sanitizedPath), 'utf8'), /Full note content/);

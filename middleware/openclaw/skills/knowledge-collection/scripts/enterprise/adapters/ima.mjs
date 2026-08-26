@@ -19,6 +19,7 @@ const COVER_EXTENSIONS = new Map([
   ['image/webp', 'webp'],
 ]);
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+const TITLE_SEGMENTER = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 
 function reasonOf(error) {
   return error instanceof Error ? error.message : String(error);
@@ -236,12 +237,13 @@ function itemIdFor(item) {
 }
 
 function articleDirectoryName(item) {
-  const title = Array.from(String(item.title || '').normalize('NFKC')
+  const normalizedTitle = String(item.title || '').normalize('NFKC')
     .replace(/[\u0000-\u001f\\/:*?"<>|]+/g, ' ')
     .replace(/\s+/g, '-')
     .replace(/-+/g, '-')
-    .replace(/^[.-]+|[.-]+$/g, ''))
-    .slice(0, 80)
+    .replace(/^[.-]+|[.-]+$/g, '');
+  const title = Array.from(TITLE_SEGMENTER.segment(normalizedTitle), ({ segment }) => segment)
+    .slice(0, 5)
     .join('')
     .replace(/[.-]+$/g, '') || 'article';
   return `${title}-${itemIdFor(item)}`;

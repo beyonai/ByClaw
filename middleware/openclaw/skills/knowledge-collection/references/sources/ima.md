@@ -50,6 +50,7 @@ sanitized/items/<article-name>-<item-id>/
 当 IMA 条目需要通过其他获准工具补抓全文时，下载工具的原始目录及图片必须写入当前会话的 `raw/` 子树；随后由 adapter 登记为当前会话的 `markdown/items/<article-name>-<item-id>/index.md` 与 `sanitized/items/<article-name>-<item-id>/index.md`，并把正文引用的本地图片物化到对应 `sanitized/.../assets/`。不得创建 IMA collection 会话外的全文或摘要目录。`bycli ima knowledge` 返回相同 `sourceUrl` 的多个记录时，适配器只登记第一个来源项，完整原始响应仍保留在 `raw/bycli-knowledge.json`。
 
 `collection-result.json` 的 `source` 和 `backend` 都写 `ima`，inventory 的 `sourceSkill` 写 `ima-skill`。
+新物化条目的 `markdown/items/` 与 `sanitized/items/` 必须使用相同目录名：清洗后的文章标题前 5 个 Unicode 可见字符加稳定 `itemId`；完整标题仍保留在正文元数据和 inventory 中。旧会话路径不迁移。
 metadata-only 会话恢复物化时必须把共同的知识库名称保留到 `collection-result.json.filters.kb` 和 `sourceMetadata.kb`；同一次 materialize 不得混合多个知识库。
 执行企业 `search`、`search-all` 或 `resource` 时必须传入已授权 IMA 的 `--parent-session-dir`；metadata-only 输出会直接带有 `sourceScope=["ima"]`、`materializationTarget=candidates` 的完整 `session.json`。
 采集完成后只交付已验证的 `sanitized/items/<article-name>-<item-id>/index.md`，然后停止。
