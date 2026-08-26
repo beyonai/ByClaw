@@ -1148,32 +1148,39 @@ ${JSON.stringify(completedDelegations)}`;
         // 工具调用只进入 DelegationService，不让 Pi 接触 Connector Registry。
         delegate: async (delegationInput) => {
           runController.signal.throwIfAborted();
-          if (activeTaskPlan?.status === "ACTIVE") {
-            if (delegationInput.taskPosition === undefined) {
+          let resolvedTaskPosition = delegationInput.taskPosition;
+          if (activeTaskPlan) {
+            if (activeTaskPlan.status !== "ACTIVE") {
               throw new Error(
-                "taskPosition is required when delegating work for an active task plan",
+                `Task plan is ${activeTaskPlan.status}; no further delegation is allowed`,
               );
             }
-            const task = activeTaskPlan.tasks.find(
-              ({ position }) => position === delegationInput.taskPosition,
+            const orderedTasks = [...activeTaskPlan.tasks].sort(
+              (left, right) => left.position - right.position,
             );
+            const task =
+              orderedTasks.find(({ status }) => status === "IN_PROGRESS") ??
+              orderedTasks.find(({ status }) => status === "PENDING");
             if (!task) {
+              throw new Error("The active task plan has no executable task");
+            }
+            if (
+              resolvedTaskPosition !== undefined &&
+              resolvedTaskPosition !== task.position
+            ) {
               throw new Error(
-                `Task plan position ${delegationInput.taskPosition} does not exist`,
+                `Task plan position ${resolvedTaskPosition} is not the authoritative current task ${task.position}`,
               );
             }
+            resolvedTaskPosition = task.position;
             if (task.status === "PENDING") {
               await syncActiveTaskPlanTask({
-                taskPosition: delegationInput.taskPosition,
+                taskPosition: resolvedTaskPosition,
                 status: "IN_PROGRESS",
                 idempotencyKey: `${delegationInput.toolCallId}:task-started`,
               });
-            } else if (task.status !== "IN_PROGRESS") {
-              throw new Error(
-                `Task plan position ${delegationInput.taskPosition} is already ${task.status}`,
-              );
             }
-          } else if (delegationInput.taskPosition !== undefined) {
+          } else if (resolvedTaskPosition !== undefined) {
             throw new Error(
               "taskPosition can only be used when an active task plan exists",
             );
@@ -1193,8 +1200,8 @@ ${JSON.stringify(completedDelegations)}`;
             agents: current.agentList,
             agentId: delegationInput.agentId,
             task: delegationInput.task,
-            ...(delegationInput.taskPosition !== undefined
-              ? { taskPosition: delegationInput.taskPosition }
+            ...(resolvedTaskPosition !== undefined
+              ? { taskPosition: resolvedTaskPosition }
               : {}),
             // 只能从当前 Run 的附件集合按 ID 选择；未知 ID 在解析阶段被拒绝。
             attachments: resolveAttachmentSelection(
@@ -1237,17 +1244,19 @@ ${JSON.stringify(completedDelegations)}`;
           // 挂起会抛出 DelegationSuspendedError，因此不会执行到这里。
           leaderOutputPausedForDelegation = false;
           if (
-            delegationInput.taskPosition !== undefined &&
+            resolvedTaskPosition !== undefined &&
             !runController.signal.aborted
           ) {
             const terminalTaskUpdate = delegationTerminalTaskUpdate(delegated);
             if (terminalTaskUpdate) {
               await syncActiveTaskPlanTask({
-                taskPosition: delegationInput.taskPosition,
+                taskPosition: resolvedTaskPosition,
                 status: terminalTaskUpdate.status,
                 idempotencyKey:
                   `${delegationInput.toolCallId}:task-${terminalTaskUpdate.idempotencySuffix}`,
-                statusReason: terminalTaskUpdate.statusReason,
+                ...(terminalTaskUpdate.statusReason
+                  ? { statusReason: terminalTaskUpdate.statusReason }
+                  : {}),
               });
             }
           }
@@ -1257,6 +1266,11 @@ ${JSON.stringify(completedDelegations)}`;
           return delegated;
         },
         askUser: async ({ toolCallId, questions, signal }) => {
+          if (activeTaskPlan && activeTaskPlan.status !== "ACTIVE") {
+            throw new Error(
+              `Task plan is ${activeTaskPlan.status}; no further user interaction is allowed`,
+            );
+          }
           validateInteractionQuestions(questions);
           const interactionId = `${current.id}:${toolCallId}`;
           const requestedAt = this.now();
@@ -1453,9 +1467,11 @@ ${JSON.stringify(completedDelegations)}`;
             status: terminalTaskUpdate.status,
             idempotencyKey:
               `${delegation.id}:task-${terminalTaskUpdate.idempotencySuffix}`,
-            statusReason: terminalTaskUpdate.statusReason,
+            ...(terminalTaskUpdate.statusReason
+              ? { statusReason: terminalTaskUpdate.statusReason }
+              : {}),
           });
-          // 一次 Run 只会在首个 callback 委派处挂起；失败会令计划终止。
+          // 一次 Run 只会在首个 callback 委派处挂起；终态结果会先同步计划。
           break;
         }
       }
@@ -1994,10 +2010,16 @@ function validateAgentList(agentList: AgentProfile[]): void {
 }
 
 function delegationTerminalTaskUpdate(result: AgentResult): {
-  status: "FAILED" | "CANCELLED";
-  idempotencySuffix: "failed" | "cancelled";
-  statusReason: TaskPlanStatusReason;
+  status: "COMPLETED" | "FAILED" | "CANCELLED";
+  idempotencySuffix: "completed" | "failed" | "cancelled";
+  statusReason?: TaskPlanStatusReason;
 } | undefined {
+  if (result.status === "completed") {
+    return {
+      status: "COMPLETED",
+      idempotencySuffix: "completed",
+    };
+  }
   if (result.status === "failed") {
     return {
       status: "FAILED",

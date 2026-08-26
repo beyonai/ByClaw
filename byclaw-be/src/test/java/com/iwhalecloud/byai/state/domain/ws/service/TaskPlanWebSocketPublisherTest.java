@@ -34,6 +34,6 @@ class TaskPlanWebSocketPublisherTest {
         assertThat(frame.getJSONObject("data").getString("planId")).isEqualTo("plan-1");
         assertThat(frame.getJSONObject("data").getInteger("version")).isEqualTo(3);
         assertThat(frame.getJSONObject("data").getString("createdAt"))
-            .isEqualTo("1970-01-01T08:00:00+08:00");
+            .isEqualTo("1970-01-01T08:00:00.000+08:00");
     }
 }

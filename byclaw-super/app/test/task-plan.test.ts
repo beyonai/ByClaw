@@ -22,6 +22,7 @@ function snapshot(version = 1) {
           code: "WORKING",
           message: "正在分析",
         },
+        updatedAt: "2026-08-26T11:00:00.123+08:00",
       },
     ],
   };
@@ -52,6 +53,7 @@ describe("ByClaw BE task plan gateway", () => {
       code: "WORKING",
       message: "正在分析",
     });
+    expect(result?.tasks[0]?.updatedAt).toBe("2026-08-26T11:00:00.123+08:00");
     const [url, init] = fetchImpl.mock.calls[0] ?? [];
     expect(String(url)).toBe(
       "http://127.0.0.1:8086/byaiService/internal/api/v1/task-plan/active",

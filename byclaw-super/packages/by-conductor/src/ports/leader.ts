@@ -59,7 +59,7 @@ export interface LeaderRunInput {
     toolCallId: string;
     agentId: string;
     task: string;
-    /** 活动任务计划中的任务位置；存在活动计划时必填。 */
+    /** 兼容旧调用的任务位置提示；存在活动计划时由运行时选择并校验权威当前任务。 */
     taskPosition?: number;
     expectedOutput?: string;
     /** 选中要随委派透传的附件 ID；undefined=全部，[]=不带，未知 ID 会被拒绝。 */

@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.state.application.service.taskplan;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
@@ -133,6 +134,163 @@ class TaskPlanApplicationServiceTest {
         assertThat(snapshot.getTasks()).extracting(TaskPlanSnapshot.TaskSnapshot::getStatus)
             .containsExactly("COMPLETED", "IN_PROGRESS");
         verify(planMapper).update(any(), any(Wrapper.class));
+    }
+
+    @Test
+    void update_preservesCompletedTaskTimestampsWhenLaterTasksAdvance() {
+        ByaiAgentTaskPlan active = plan("ACTIVE", 2);
+        ByaiAgentTaskPlan completedPlan = plan("COMPLETED", 3);
+        when(planMapper.selectOne(any())).thenReturn(active, completedPlan);
+        when(planMapper.update(any(), any(Wrapper.class))).thenReturn(1);
+
+        Date firstCompletedAt = new Date(1_000L);
+        Date firstUpdatedAt = new Date(1_100L);
+        ByaiAgentTaskItem first = item(101L, 1, "COMPLETED");
+        first.setTitle("分析协议");
+        first.setStartedAt(new Date(500L));
+        first.setCompletedAt(firstCompletedAt);
+        first.setUpdatedAt(firstUpdatedAt);
+        ByaiAgentTaskItem second = item(102L, 2, "IN_PROGRESS");
+        second.setTitle("实现协议");
+        second.setStartedAt(new Date(2_000L));
+        List<ByaiAgentTaskItem> savedItems = new ArrayList<>(List.of(first, second));
+        when(itemMapper.selectList(any())).thenAnswer(invocation -> new ArrayList<>(savedItems));
+        doAnswer(invocation -> {
+            savedItems.clear();
+            return 2;
+        }).when(itemMapper).delete(any());
+        doAnswer(invocation -> {
+            savedItems.add(invocation.getArgument(0));
+            return 1;
+        }).when(itemMapper).insert(any(ByaiAgentTaskItem.class));
+
+        TaskPlanUpdateRequest request = request();
+        request.getTasks().getFirst().setStatus("COMPLETED");
+        request.getTasks().getFirst().setStatusReason(null);
+        request.getTasks().get(1).setStatus("COMPLETED");
+        TaskPlanSnapshot snapshot = service.update(request);
+
+        assertThat(snapshot.getTasks().getFirst().getCompletedAt()).isEqualTo(firstCompletedAt);
+        assertThat(snapshot.getTasks().getFirst().getUpdatedAt()).isEqualTo(firstUpdatedAt);
+        assertThat(snapshot.getTasks().get(1).getCompletedAt()).isAfter(firstCompletedAt);
+    }
+
+    @Test
+    void update_failsFastAndSkipsPendingTasksAfterTaskFailure() {
+        ByaiAgentTaskPlan active = plan("ACTIVE", 1);
+        ByaiAgentTaskPlan failedPlan = plan("FAILED", 2);
+        failedPlan.setStatusReasonCode("DELEGATION_FAILED");
+        failedPlan.setStatusReasonMessage("数字员工调度失败");
+        when(planMapper.selectOne(any())).thenReturn(active, failedPlan);
+        when(planMapper.update(any(), any(Wrapper.class))).thenReturn(1);
+
+        ByaiAgentTaskItem first = item(101L, 1, "IN_PROGRESS");
+        first.setTitle("分析协议");
+        first.setStartedAt(new Date(1_000L));
+        ByaiAgentTaskItem second = item(102L, 2, "PENDING");
+        second.setTitle("实现协议");
+        List<ByaiAgentTaskItem> savedItems = new ArrayList<>(List.of(first, second));
+        when(itemMapper.selectList(any())).thenAnswer(invocation -> new ArrayList<>(savedItems));
+        doAnswer(invocation -> {
+            savedItems.clear();
+            return 2;
+        }).when(itemMapper).delete(any());
+        doAnswer(invocation -> {
+            savedItems.add(invocation.getArgument(0));
+            return 1;
+        }).when(itemMapper).insert(any(ByaiAgentTaskItem.class));
+
+        TaskPlanUpdateRequest request = request();
+        request.getTasks().getFirst().setStatus("FAILED");
+        TaskPlanUpdateRequest.StatusReasonInput failure = new TaskPlanUpdateRequest.StatusReasonInput();
+        failure.setCode("DELEGATION_FAILED");
+        failure.setMessage("数字员工调度失败");
+        request.getTasks().getFirst().setStatusReason(failure);
+        TaskPlanSnapshot snapshot = service.update(request);
+
+        assertThat(snapshot.getStatus()).isEqualTo("FAILED");
+        assertThat(snapshot.getTasks()).extracting(TaskPlanSnapshot.TaskSnapshot::getStatus)
+            .containsExactly("FAILED", "SKIPPED");
+        assertThat(snapshot.getTasks().get(1).getStatusReason().getCode())
+            .isEqualTo("BLOCKED_BY_PREVIOUS_FAILURE");
+    }
+
+    @Test
+    void update_cancelsAllPendingTasksAfterCurrentTaskCancellation() {
+        ByaiAgentTaskPlan active = plan("ACTIVE", 1);
+        ByaiAgentTaskPlan cancelledPlan = plan("CANCELLED", 2);
+        cancelledPlan.setStatusReasonCode("DELEGATION_CANCELLED");
+        cancelledPlan.setStatusReasonMessage("数字员工调度已取消");
+        when(planMapper.selectOne(any())).thenReturn(active, cancelledPlan);
+        when(planMapper.update(any(), any(Wrapper.class))).thenReturn(1);
+
+        ByaiAgentTaskItem first = item(101L, 1, "IN_PROGRESS");
+        first.setTitle("分析协议");
+        first.setStartedAt(new Date(1_000L));
+        ByaiAgentTaskItem second = item(102L, 2, "PENDING");
+        second.setTitle("实现协议");
+        List<ByaiAgentTaskItem> savedItems = new ArrayList<>(List.of(first, second));
+        when(itemMapper.selectList(any())).thenAnswer(invocation -> new ArrayList<>(savedItems));
+        doAnswer(invocation -> {
+            savedItems.clear();
+            return 2;
+        }).when(itemMapper).delete(any());
+        doAnswer(invocation -> {
+            savedItems.add(invocation.getArgument(0));
+            return 1;
+        }).when(itemMapper).insert(any(ByaiAgentTaskItem.class));
+
+        TaskPlanUpdateRequest request = request();
+        request.getTasks().getFirst().setStatus("CANCELLED");
+        TaskPlanUpdateRequest.StatusReasonInput cancellation = new TaskPlanUpdateRequest.StatusReasonInput();
+        cancellation.setCode("DELEGATION_CANCELLED");
+        cancellation.setMessage("数字员工调度已取消");
+        request.getTasks().getFirst().setStatusReason(cancellation);
+        TaskPlanSnapshot snapshot = service.update(request);
+
+        assertThat(snapshot.getStatus()).isEqualTo("CANCELLED");
+        assertThat(snapshot.getTasks()).extracting(TaskPlanSnapshot.TaskSnapshot::getStatus)
+            .containsExactly("CANCELLED", "CANCELLED");
+        assertThat(snapshot.getTasks().get(1).getStatusReason().getCode()).isEqualTo("PLAN_CANCELLED");
+    }
+
+    @Test
+    void update_rejectsChangingATerminalTaskAfterThePlanAdvanced() {
+        ByaiAgentTaskPlan active = plan("ACTIVE", 2);
+        when(planMapper.selectOne(any())).thenReturn(active);
+
+        ByaiAgentTaskItem first = item(101L, 1, "COMPLETED");
+        first.setTitle("分析协议");
+        first.setCompletedAt(new Date(1_000L));
+        ByaiAgentTaskItem second = item(102L, 2, "IN_PROGRESS");
+        second.setTitle("实现协议");
+        when(itemMapper.selectList(any())).thenReturn(List.of(first, second));
+
+        TaskPlanUpdateRequest request = request();
+        request.getTasks().getFirst().setStatus("IN_PROGRESS");
+        request.getTasks().get(1).setStatus("IN_PROGRESS");
+
+        assertThatThrownBy(() -> service.update(request))
+            .hasMessageContaining("Terminal task at position 1 cannot change");
+    }
+
+    @Test
+    void update_rejectsStartingALaterTaskBeforeTheCurrentTaskFinishes() {
+        ByaiAgentTaskPlan active = plan("ACTIVE", 1);
+        when(planMapper.selectOne(any())).thenReturn(active);
+
+        ByaiAgentTaskItem first = item(101L, 1, "PENDING");
+        first.setTitle("分析协议");
+        ByaiAgentTaskItem second = item(102L, 2, "PENDING");
+        second.setTitle("实现协议");
+        when(itemMapper.selectList(any())).thenReturn(List.of(first, second));
+
+        TaskPlanUpdateRequest request = request();
+        request.getTasks().getFirst().setStatus("PENDING");
+        request.getTasks().get(1).setStatus("IN_PROGRESS");
+
+        assertThatThrownBy(() -> service.update(request))
+            .hasMessageContaining("cannot start before all previous tasks are terminal");
     }
 
     @Test

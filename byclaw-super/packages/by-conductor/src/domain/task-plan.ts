@@ -28,6 +28,7 @@ export interface TaskPlanTaskSnapshot {
   description?: string;
   status: TaskPlanTaskStatus;
   statusReason?: TaskPlanStatusReason;
+  updatedAt?: string;
   startedAt?: string;
   completedAt?: string;
 }

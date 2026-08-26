@@ -165,6 +165,7 @@ function parseTaskPlanSnapshot(value: unknown): TaskPlanSnapshot {
       );
     }
     const description = optionalString(raw.description);
+    const updatedAt = optionalString(raw.updatedAt);
     const startedAt = optionalString(raw.startedAt);
     const completedAt = optionalString(raw.completedAt);
     const statusReason = parseStatusReason(raw.statusReason);
@@ -175,6 +176,7 @@ function parseTaskPlanSnapshot(value: unknown): TaskPlanSnapshot {
       ...(description ? { description } : {}),
       status: taskStatus as TaskPlanTaskStatus,
       ...(statusReason ? { statusReason } : {}),
+      ...(updatedAt ? { updatedAt } : {}),
       ...(startedAt ? { startedAt } : {}),
       ...(completedAt ? { completedAt } : {}),
     };
