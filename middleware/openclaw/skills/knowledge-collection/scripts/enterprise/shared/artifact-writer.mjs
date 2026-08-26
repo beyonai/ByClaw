@@ -11,7 +11,11 @@ import { constants, lstatSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { dirname, extname, isAbsolute, parse, relative, resolve, sep } from 'node:path';
 import { removeSensitiveFields, sanitizeSensitive } from './secret-sanitizer.mjs';
-import { deriveCollectionStatus } from './status-model.mjs';
+import {
+  deriveCollectionStatus,
+  normalizeContentGranularity,
+  normalizeMediaState,
+} from './status-model.mjs';
 import { newSession } from '../../session.mjs';
 
 const PRIVATE_DIRECTORY_MODE = 0o700;
@@ -32,6 +36,15 @@ function resolveInside(root, relativePath) {
   const fromRoot = relative(root, target);
   if (!fromRoot || fromRoot === '..' || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) {
     throw outsideRootError();
+  }
+  return target;
+}
+
+function resolveWorkCopyFile(root, relativePath) {
+  const target = resolveInside(root, relativePath);
+  const fromRoot = relative(root, target).split(sep).join('/');
+  if (!fromRoot.startsWith('markdown/items/') && !fromRoot.startsWith('sanitized/items/')) {
+    throw new Error('path is outside removable work-copy roots');
   }
   return target;
 }
@@ -232,7 +245,7 @@ async function writePrivateFile(root, rootIdentity, relativePath, content) {
       PRIVATE_FILE_MODE,
     );
     temporaryIdentity = await lstat(temporary);
-    await handle.writeFile(content);
+    await handle.writeFile(content, { encoding: 'utf8' });
     await handle.chmod(PRIVATE_FILE_MODE);
     await handle.close();
     handle = undefined;
@@ -459,9 +472,14 @@ function normalizeInventory(root, inventory) {
     }
     return {
       ...item,
+      media: normalizeMediaState(item.media, { strict: true, coverUrls: item.coverUrls }),
       rawArtifacts: [...item.rawArtifacts],
       materialization: {
         ...item.materialization,
+        contentGranularity: normalizeContentGranularity(
+          item.materialization.contentGranularity,
+          { strict: true },
+        ),
         pendingArtifactCleanup: [...pendingArtifactCleanup],
       },
     };
@@ -600,6 +618,32 @@ export async function createArtifactWriter(root) {
     async writeBytes(relativePath, content) {
       if (!Buffer.isBuffer(content)) throw new TypeError('binary artifact must be a Buffer');
       return writePrivateFile(normalizedRoot, rootIdentity, relativePath, content);
+    },
+
+    async removeFiles(relativePaths) {
+      if (!Array.isArray(relativePaths)
+        || relativePaths.some((relativePath) => typeof relativePath !== 'string')) {
+        throw new TypeError('work-copy paths must be a string array');
+      }
+      await assertRootIdentity(normalizedRoot, rootIdentity);
+      for (const relativePath of relativePaths) {
+        const target = resolveWorkCopyFile(normalizedRoot, relativePath);
+        await rejectExistingSymlinks(normalizedRoot, target);
+        let identity;
+        try {
+          const entry = await lstat(target);
+          if (!entry.isFile() || entry.isSymbolicLink()) {
+            throw new Error('work-copy cleanup target must be a regular file');
+          }
+          identity = entry;
+        } catch (error) {
+          if (error.code === 'ENOENT') continue;
+          throw error;
+        }
+        await assertRootIdentity(normalizedRoot, rootIdentity);
+        await removeOwnedPath(target, identity, false);
+      }
+      await assertRootIdentity(normalizedRoot, rootIdentity);
     },
 
     async abort() {

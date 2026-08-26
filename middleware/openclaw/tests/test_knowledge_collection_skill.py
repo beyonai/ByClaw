@@ -433,16 +433,44 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         ):
             self.assertIn(phrase, knowledge)
 
-    def test_ima_collection_contract_requires_article_directories_and_local_cover_assets(self):
+    def test_collection_contract_separates_content_granularity_and_cover_delivery(self):
+        combined_contract = "\n".join(
+            (SKILL_ROOT / relative).read_text(encoding="utf-8")
+            for relative in (
+                "SKILL.md",
+                "references/collection-contract.md",
+                "references/sources/ima.md",
+            )
+        )
+
+        for phrase in (
+            "contentGranularity",
+            "缺失字段一律按 `unknown`",
+            "不得默认 `full-text`",
+            "必须报告 `contentGranularity`",
+            "必须报告 `mediaCovers`",
+            "不得称为完整文章正文",
+            "legacy-media-state-unknown",
+        ):
+            self.assertIn(phrase, combined_contract)
+        self.assertNotIn("do not treat snippets as collected evidence", combined_contract)
+
+    def test_ima_collection_contract_uses_a_controlled_https_cover_downloader(self):
         ima = (SKILL_ROOT / "references" / "sources" / "ima.md").read_text(encoding="utf-8")
 
         for phrase in (
             "`coverUrls`",
-            "无需重复下载到 `raw/`",
+            "受控 HTTPS 下载器",
+            "10 MiB",
+            "15 秒",
+            "3 次重定向",
+            "`media.coverStatus=materialized`",
+            "封面与正文",
             "`sanitized/items/<article-name>-<item-id>/index.md`",
-            "`sanitized/items/<article-name>-<item-id>/assets/`",
         ):
             self.assertIn(phrase, ima)
+        self.assertIn("封面失败不改变正文的物化状态", ima)
+        self.assertNotIn("任一封面下载、校验或写入失败时，该条物化失败", ima)
 
     def test_delegated_adapter_candidate_does_not_create_a_second_question(self):
         bycli = (SKILLS_ROOT / "bycli" / "SKILL.md").read_text(encoding="utf-8")

@@ -173,6 +173,12 @@ await (async () => {
     const status = await runCli(['status', '--session-dir', root]);
     assert.equal(status.code, 0, status.stderr || status.stdout);
     assert.equal(status.json.collection.materialized, 1);
+    assert.deepEqual(status.json.collection.contentGranularity, {
+      'full-text': 0, excerpt: 0, abstract: 0, unknown: 1,
+    });
+    assert.deepEqual(status.json.collection.mediaCovers, {
+      notPresent: 0, materialized: 0, unavailable: 0, unknown: 1,
+    });
     assert.equal(status.json.collection.runs, undefined);
     assert.equal(status.json.collection.retention, undefined);
     const realRoot = await realpath(root);
@@ -187,6 +193,11 @@ await (async () => {
     assert.equal(fullStatus.code, 0, fullStatus.stderr || fullStatus.stdout);
     assert.equal(fullStatus.json.collection.deliveryComplete, true);
     assert.equal(fullStatus.json.collection.collection.items.length, 1);
+    assert.equal(
+      fullStatus.json.collection.collection.items[0].materialization.contentGranularity,
+      'unknown',
+    );
+    assert.equal(fullStatus.json.collection.collection.items[0].media.coverStatus, 'unknown');
 
     const beforeInspect = await readFile(join(root, 'session.json'), 'utf8');
     const inspected = await runCli(['inspect', '--session-dir', root]);
@@ -196,6 +207,125 @@ await (async () => {
     await rm(root, { recursive: true, force: true });
   }
   console.log('PASS validated downstream handoff');
+})();
+
+await (async () => {
+  const root = await createCollectedSession();
+  try {
+    const payloadPath = join(root, '.collection-inputs/granularity.json');
+    await writeFile(payloadPath, JSON.stringify({
+      schemaVersion: '1.0', itemId: 'paper',
+      contentGranularity: 'excerpt',
+      media: {
+        coverStatus: 'unavailable', coverCount: 2, materializedCoverCount: 0,
+        reason: 'approved-cover-downloader-unavailable',
+      },
+      markdownPath: 'markdown/paper.md', sanitizedPath: 'sanitized/items/paper.md',
+      canonicalItem: {
+        title: 'Paper', url: 'https://example.com/paper', author: '', publishTime: '',
+        markdown: 'sanitized/items/paper.md', fileName: 'sanitized/items/paper.md',
+      },
+    }));
+    const collected = await runCli(['collect', '--session-dir', root, '--item-json-file', payloadPath]);
+    assert.equal(collected.code, 0, collected.stderr || collected.stdout);
+    assert.equal(collected.json.items[0].materialization.contentGranularity, 'excerpt');
+    const status = await runCli(['status', '--session-dir', root, '--full']);
+    assert.deepEqual(status.json.collection.contentGranularity, {
+      'full-text': 0, excerpt: 1, abstract: 0, unknown: 0,
+    });
+    assert.deepEqual(status.json.collection.mediaCovers, {
+      notPresent: 0, materialized: 0, unavailable: 1, unknown: 0,
+    });
+
+    const updateWithoutMediaPath = join(root, '.collection-inputs/update-without-media.json');
+    await writeFile(updateWithoutMediaPath, JSON.stringify({
+      schemaVersion: '1.0', itemId: 'paper', contentGranularity: 'excerpt',
+      markdownPath: 'markdown/paper.md', sanitizedPath: 'sanitized/items/paper.md',
+      canonicalItem: {
+        title: 'Paper', url: 'https://example.com/paper', author: '', publishTime: '',
+        markdown: 'sanitized/items/paper.md', fileName: 'sanitized/items/paper.md',
+      },
+    }));
+    const updated = await runCli([
+      'collect', '--session-dir', root, '--item-json-file', updateWithoutMediaPath,
+    ]);
+    assert.equal(updated.code, 0, updated.stderr || updated.stdout);
+    const statusAfterUpdate = await runCli(['status', '--session-dir', root, '--full']);
+    assert.equal(
+      statusAfterUpdate.json.collection.collection.items[0].media.coverStatus,
+      'unavailable',
+    );
+
+    const invalidPath = join(root, '.collection-inputs/invalid-granularity.json');
+    await writeFile(invalidPath, JSON.stringify({
+      schemaVersion: '1.0', itemId: 'paper', contentGranularity: 'full',
+      markdownPath: 'markdown/paper.md', sanitizedPath: 'sanitized/items/paper.md',
+      canonicalItem: {
+        title: 'Paper', url: 'https://example.com/paper', author: '', publishTime: '',
+        markdown: 'sanitized/items/paper.md', fileName: 'sanitized/items/paper.md',
+      },
+    }));
+    const rejected = await runCli(['collect', '--session-dir', root, '--item-json-file', invalidPath]);
+    assert.equal(rejected.code, 1);
+    assert.match(rejected.json.error, /contentGranularity/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+  console.log('PASS collect preserves valid content and media state and rejects invalid granularity');
+})();
+
+await (async () => {
+  const root = await createCollectedSession();
+  try {
+    const sessionPath = join(root, 'session.json');
+    const session = JSON.parse(await readFile(sessionPath, 'utf8'));
+    const item = session.collection.collection.items[0];
+    delete item.materialization.contentGranularity;
+    delete item.media;
+    item.coverUrls = ['https://img.test/cover-1.png', 'https://img.test/cover-2.png'];
+    await writeFile(sessionPath, JSON.stringify(session));
+    const beforeStatus = await readFile(sessionPath, 'utf8');
+
+    const status = await runCli(['status', '--session-dir', root, '--full']);
+    assert.equal(status.code, 0, status.stderr || status.stdout);
+    assert.deepEqual(status.json.collection.mediaCovers, {
+      notPresent: 0, materialized: 0, unavailable: 0, unknown: 1,
+    });
+    assert.deepEqual(status.json.collection.collection.items[0].media, {
+      coverStatus: 'unknown', coverCount: 2, materializedCoverCount: 0,
+      reason: 'legacy-media-state-unknown',
+    });
+    assert.equal(await readFile(sessionPath, 'utf8'), beforeStatus);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+  console.log('PASS status reads legacy media conservatively without rewriting the session');
+})();
+
+await (async () => {
+  const root = await createCollectedSession();
+  try {
+    const sessionPath = join(root, 'session.json');
+    const session = JSON.parse(await readFile(sessionPath, 'utf8'));
+    const item = session.collection.collection.items[0];
+    item.materialization.contentGranularity = 'full';
+    item.media = { coverStatus: 'downloaded', coverCount: 1, materializedCoverCount: 1 };
+    await writeFile(sessionPath, JSON.stringify(session));
+    const recovered = await runCli(['status', '--session-dir', root]);
+    assert.equal(recovered.code, 0, recovered.stderr || recovered.stdout);
+    assert.equal(recovered.json.warnings.some((warning) => /contentGranularity/.test(warning)), true);
+    assert.equal(recovered.json.warnings.some((warning) => /media/.test(warning)), true);
+    const status = await runCli(['status', '--session-dir', root, '--full']);
+    assert.equal(status.code, 0, status.stderr || status.stdout);
+    assert.equal(
+      status.json.collection.collection.items[0].materialization.contentGranularity,
+      'unknown',
+    );
+    assert.equal(status.json.collection.collection.items[0].media.coverStatus, 'unknown');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+  console.log('PASS legacy invalid content and media state recover conservatively');
 })();
 
 await (async () => {

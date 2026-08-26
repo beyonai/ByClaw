@@ -5,6 +5,58 @@ export const SOURCE_IDENTITY = {
   ima: { connector: 'ima', source: 'ima', backend: 'ima', sourceSkill: 'ima-skill' },
 };
 
+export const CONTENT_GRANULARITIES = new Set(['full-text', 'excerpt', 'abstract', 'unknown']);
+export const COVER_STATUSES = new Set(['not-present', 'materialized', 'unavailable', 'unknown']);
+
+export function normalizeContentGranularity(value, { strict = false } = {}) {
+  if (value === undefined) return 'unknown';
+  if (CONTENT_GRANULARITIES.has(value)) return value;
+  if (strict) throw new TypeError('materialization.contentGranularity is invalid');
+  return 'unknown';
+}
+
+export function normalizeMediaState(value, { strict = false, coverUrls = [] } = {}) {
+  const knownCoverCount = [...new Set((Array.isArray(coverUrls) ? coverUrls : [])
+    .filter((url) => typeof url === 'string' && url.trim())
+    .map((url) => url.trim()))].length;
+  const fallback = {
+    coverStatus: 'unknown',
+    coverCount: knownCoverCount,
+    materializedCoverCount: 0,
+    reason: 'legacy-media-state-unknown',
+  };
+  if (value === undefined) return fallback;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    if (strict) throw new TypeError('inventory media state is invalid');
+    return fallback;
+  }
+  const media = {
+    coverStatus: value.coverStatus,
+    coverCount: value.coverCount,
+    materializedCoverCount: value.materializedCoverCount,
+    reason: value.reason ?? null,
+  };
+  const countsValid = Number.isInteger(media.coverCount)
+    && media.coverCount >= 0
+    && Number.isInteger(media.materializedCoverCount)
+    && media.materializedCoverCount >= 0
+    && media.materializedCoverCount <= media.coverCount;
+  const reasonValid = media.reason === null || typeof media.reason === 'string';
+  const stateValid = (media.coverStatus === 'not-present'
+      && media.coverCount === 0 && media.materializedCoverCount === 0 && media.reason === null)
+    || (media.coverStatus === 'materialized'
+      && media.coverCount > 0 && media.materializedCoverCount === media.coverCount && media.reason === null)
+    || (media.coverStatus === 'unavailable'
+      && media.coverCount > 0 && media.materializedCoverCount < media.coverCount
+      && typeof media.reason === 'string' && media.reason.trim().length > 0)
+    || (media.coverStatus === 'unknown'
+      && media.materializedCoverCount === 0
+      && typeof media.reason === 'string' && media.reason.trim().length > 0);
+  if (COVER_STATUSES.has(media.coverStatus) && countsValid && reasonValid && stateValid) return media;
+  if (strict) throw new TypeError('inventory media coverStatus or counts are invalid');
+  return fallback;
+}
+
 export function deriveCollectionStatus({
   discoverySucceeded = true,
   metadataOnly = false,

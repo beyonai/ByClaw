@@ -862,7 +862,7 @@ export function cmdReport(args) {
 /** status: 研究维度摘要。 */
 export function cmdResearchStatus(args) {
   const paths = sessionPaths(args['session-dir']);
-  const { session } = loadSession(paths);
+  const { session } = loadSession(paths, { persistMigration: false });
   const warnings = [];
   const deadline = session.task.deadlineMinutes;
   if (deadline !== null && deadline !== undefined) {

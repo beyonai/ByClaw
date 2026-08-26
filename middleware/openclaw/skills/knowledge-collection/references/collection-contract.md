@@ -72,7 +72,7 @@ collection_filters:
 
 ### 会话目录边界
 
-同一采集任务只能有一个初始化后的会话根目录。来源执行器或人工补采工具产生的下载目录、图片和原始 Markdown 必须位于该会话的 `raw/` 子树；由此生成的工作副本必须位于 `markdown/items/`，最终正文必须位于 `sanitized/items/`。当原始来源响应已保存文章图片 URL 时，无需在 `raw/` 重复下载图片；交付副本必须位于 `sanitized/items/<article-name>-<item-id>/assets/`，不得仅保留远程图片链接。不得在会话根目录旁创建 `*-fulltext/`、`*-articles/` 或其他自定义交付目录。
+同一采集任务只能有一个初始化后的会话根目录。来源执行器或人工补采工具产生的下载目录、图片和原始 Markdown 必须位于该会话的 `raw/` 子树；由此生成的工作副本必须位于 `markdown/items/`，最终正文必须位于 `sanitized/items/`。当原始来源响应已保存文章图片 URL 时，无需在 `raw/` 重复下载图片；只有获准来源执行器取得的交付副本才能写入 `sanitized/items/<article-name>-<item-id>/assets/`。不得绕过来源执行器直接 HTTP 补抓、不得保留远程图片链接，也不得伪造本地资源路径。封面与正文在同一条目中处理，但媒体状态与正文物化状态相互独立：封面失败只登记媒体缺口，不得把已经成功取得的正文标记为失败；Markdown 只能引用实际成功落盘的本地封面。不得在会话根目录旁创建 `*-fulltext/`、`*-articles/` 或其他自定义交付目录。
 
 出现重复 URL、部分下载失败或正文无法物化时，保留原始证据，并在同一会话 inventory 中登记为重复、`pending` 或 `failed`。这些情况不得触发旁路归档，也不得把会话外文件作为下游正文交付。
 
@@ -82,6 +82,8 @@ collection_filters:
 - `collection.status`：采集状态 `complete`、`partial` 或 `failed`。
 - `collection.items`：完整文章清单。每项使用稳定 `itemId`，并记录 `sourceSkill`、`backend`、`sourceItemId`、`sourceUrl`、用户筛选、`rawArtifacts` 及 `materialization`。
 - `materialization.status`：`materialized`、`pending` 或 `failed`；已物化时记录准确的 `markdownPath` 与 `sanitizedPath`，文件删除或校验失败后相应路径必须置为 `null`。
+- `materialization.contentGranularity`：`full-text`、`excerpt`、`abstract` 或 `unknown`，表示正文内容粒度，与 `materialization.status`、`collection.status` 和 `deliveryComplete` 正交。旧会话或缺失字段一律按 `unknown`，不得默认 `full-text`；普通 `content`、`markdown` 或字数不能单独证明全文完整。
+- `media`：文章媒体覆盖状态。`coverStatus` 为 `not-present`、`materialized`、`unavailable` 或 `unknown`，并记录 `coverCount`、`materializedCoverCount` 与非敏感 `reason`。`unavailable` 表示至少一个已知封面未能物化，允许 `materializedCoverCount` 小于 `coverCount` 以表达部分成功。旧会话缺失或含非法 media 状态时只读归一为 `unknown`，使用 `reason=legacy-media-state-unknown`；不得猜测为无封面或已物化。
 - `materialization.pendingArtifactCleanup`：仅用于重新物化时清除旧工作副本的内部队列，只允许包含 `markdown/` 或 `sanitized/items/` 下的 Markdown，不得包含共享 `raw/`，也不得用于交付后的清理。
 - `sourceMetadata`：来源执行器的非敏感版本、任务 ID、范围和诊断信息。
 
@@ -94,6 +96,8 @@ collection_filters:
 `sourceSkill` 与 `sourceUrl` 必须是非空、可恢复的稳定身份；没有网页 URL 的来源必须写入带来源命名空间的稳定 URI，不得留空。
 
 只读兼容旧的扁平 `partial`、`storageFallback` 与 `audit_required`。新写入不得使用旧格式；旧字段不会恢复任何已删除的下游动作。
+
+`status` 和其他 inspect 路径对现有会话必须严格只读；兼容归一化只存在于返回结果中，不得回写 `session.json`、metadata 或其他会话文件。
 
 ## Legacy read compatibility
 
@@ -123,6 +127,13 @@ node scripts/knowledge-collection.mjs collect --session-dir <dir> \
       "source": "public-internet",
       "sourceSkill": "bycli",
       "backend": "bycli",
+      "contentGranularity": "unknown",
+      "media": {
+        "coverStatus": "not-present",
+        "coverCount": 0,
+        "materializedCoverCount": 0,
+        "reason": null
+      },
       "markdownPath": "markdown/post.md",
       "sanitizedPath": "sanitized/items/post.md",
       "canonicalItem": {

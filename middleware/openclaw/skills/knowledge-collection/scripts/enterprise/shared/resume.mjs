@@ -81,6 +81,9 @@ export async function readResumeCandidates(sessionDir, source, itemIds) {
       candidate.kb = typeof item.kb === 'string' ? item.kb : '';
       candidate.materializationKb = typeof item.materializationKb === 'string' ? item.materializationKb : '';
       candidate.preview = typeof item.preview === 'string' ? item.preview : '';
+      candidate.abstract = typeof item.abstract === 'string' ? item.abstract : '';
+      candidate.introduction = typeof item.introduction === 'string' ? item.introduction : '';
+      candidate.completeEvidence = item.completeEvidence === true;
       candidate.coverUrls = Array.isArray(item.coverUrls) ? item.coverUrls : [];
     }
     Object.defineProperty(candidate, 'resumeIdentity', { value: resumeIdentity });

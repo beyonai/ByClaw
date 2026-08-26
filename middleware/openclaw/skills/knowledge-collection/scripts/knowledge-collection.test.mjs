@@ -419,10 +419,8 @@ await (async () => {
   const s = await runCli(['status', '--session-dir', root]);
   assert.equal(s.json.ok, true);
   assert.equal(s.json.collection.items, 1);
-  const session = JSON.parse(readFileSync(join(root, 'session.json'), 'utf8'));
-  assert.equal(session.schemaVersion, '2.0');
-  assert.equal(session.collection.collection.items.length, 1);
-  console.log('PASS legacy migration');
+  assert.equal(existsSync(join(root, 'session.json')), false, 'legacy status 不得写入迁移状态');
+  console.log('PASS legacy read compatibility without persistence');
 })();
 
 // ── 错误路径: 锁冲突 ──

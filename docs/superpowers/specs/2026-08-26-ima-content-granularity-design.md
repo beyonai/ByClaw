@@ -11,7 +11,7 @@ IMA 知识库目录接口可能只返回 AI 摘要和正文开头，但现有采
 1. 结构化记录每个已物化正文的内容粒度，并与交付流程状态分离。
 2. 无法证明正文完整时不得标记为全文。
 3. 保留 IMA 封面与文章同次物化，并将原始无边界下载替换为受控 HTTPS 下载器。
-4. 封面下载失败时不得发布只有正文的半成品；该条物化失败并保留可审计原因。
+4. 封面下载失败只影响媒体覆盖状态，不得把已成功取得的正文标记为失败；成功封面仍与文章一同交付。
 5. IMA 恢复物化后保留知识库过滤器，避免 `collection-result.json.filters` 丢失 `kb`。
 6. 保持旧会话可读，不修改既有会话文件。
 
@@ -74,7 +74,7 @@ IMA 发现阶段继续保留来源响应中的 `coverUrls`，原始 byCLI JSON �
 - 在读取完整响应前检查 `Content-Length`（若存在），流式读取时再次执行硬字节上限。
 - 只接受允许列表中的图片 MIME 类型，并根据验证后的 MIME 决定扩展名。
 - 下载到临时文件并原子写入 `sanitized/items/<article-name>-<item-id>/assets/`；正文 Markdown 只引用已经成功落盘的相对路径。
-- 任一封面失败时不发布该条正文的半成品，该条 `materialization.status=failed`，原因保持非敏感且可审计。
+- 任一封面失败时正文仍可正常发布；成功封面保留，失败封面通过独立 media 状态和非敏感原因报告。
 
 无 `coverUrls` 的条目正常物化正文，不创建 `assets/`。禁止把远程图片链接直接写入交付 Markdown，也禁止伪造不存在的本地路径。
 
@@ -95,7 +95,7 @@ IMA 发现阶段继续保留来源响应中的 `coverUrls`，原始 byCLI JSON �
 
 - 无 `coverUrls`：`not-present`。
 - 所有 `coverUrls` 均成功落盘：`materialized`，且 `materializedCoverCount=coverCount`。
-- 下载失败：条目物化失败，`unavailable` 记录封面数量与失败原因。
+- 下载失败：正文物化状态不受影响，`unavailable` 记录封面总数、成功数与失败原因。
 
 旧会话缺失 `media` 时在只读视图中标记 `unknown`，不得默认 `not-present`。如果旧记录含 `coverUrls`，汇总必须保留其数量；除非通过显式迁移核验了本地资产，否则不得猜测为 `materialized` 或 `unavailable`。
 
@@ -121,7 +121,7 @@ metadata-only 会话恢复物化时，候选项已经保留 `kb` 和 `materializ
 ## 错误处理
 
 - 内容粒度非法：新 bundle 写入时拒绝；旧会话恢复时归一化为 `unknown` 并告警。
-- 封面下载超时、超限、重定向越界、非 HTTPS 或 MIME 不合法：该条物化失败，不发布正文半成品，媒体状态为 `unavailable`。
+- 封面下载超时、超限、重定向越界、非 HTTPS 或 MIME 不合法：正文照常物化，媒体状态为 `unavailable`，只引用成功落盘的封面。
 - KB 混合：在写 bundle 前失败，错误应列出冲突的非敏感 KB 名称。
 - 下载器不自动重试，避免重复外部请求；超时、字节和重定向边界必须可测试且使用固定安全默认值。
 
@@ -137,7 +137,7 @@ metadata-only 会话恢复物化时，候选项已经保留 `kb` 和 `materializ
 6. collect 缺省为 `unknown`，显式合法值被保留。
 7. 粒度汇总之和等于已物化数量。
 8. 有 `coverUrls` 时受控下载器取得图片，封面与正文位于同一文章目录，Markdown 使用本地相对路径。
-9. 非 HTTPS、超时、重定向超限、响应超限或 MIME 非图片时，该条失败且不发布正文半成品。
+9. 非 HTTPS、超时、重定向超限、响应超限或 MIME 非图片时，该封面失败并单独报告，正文物化结果不受影响。
 10. 无封面时状态为 `not-present`；旧会话缺失媒体状态时只读归一化为 `unknown`，且 `status` 不改写会话文件。
 11. `status` 和最终交付规范必须显式报告粒度、封面计数，并禁止把片段表述为全文。
 12. 恢复物化保留共同 `filters.kb`；混合 KB 被拒绝。

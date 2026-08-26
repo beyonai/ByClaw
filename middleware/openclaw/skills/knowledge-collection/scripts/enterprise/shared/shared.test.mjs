@@ -766,6 +766,26 @@ test('artifact writer stores sanitized JSON and private files', async () => {
   }
 });
 
+test('artifact writer writes and removes only private binary work-copy files', async () => {
+  const { createArtifactWriter } = await import('./artifact-writer.mjs');
+  const { root } = await tempCase('enterprise-binary-artifact-');
+  const outputRoot = join(root, 'output-new');
+  try {
+    const writer = await createArtifactWriter(outputRoot);
+    assert.equal(typeof writer.writeBytes, 'function');
+    assert.equal(typeof writer.removeFiles, 'function');
+    const relativePath = 'sanitized/items/article/assets/cover-1.png';
+    await writer.writeBytes(relativePath, Buffer.from('cover-bytes'));
+    assert.equal((await readFile(join(outputRoot, relativePath))).toString(), 'cover-bytes');
+    await assert.rejects(writer.writeBytes(relativePath, 'not-bytes'), /Buffer/);
+    await assert.rejects(writer.removeFiles(['raw/evidence.json']), /work-copy/);
+    await writer.removeFiles([relativePath]);
+    assert.equal(await fileExists(join(outputRoot, relativePath)), false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 function validBundle() {
   return {
     title: 'Enterprise search',
@@ -840,6 +860,19 @@ test('writeCollectionBundle rejects consumer-invalid bundle and inventory before
       bundle.inventory[0].materialization.markdownPath = null;
       bundle.inventory[0].materialization.sanitizedPath = null;
       bundle.canonicalItems = [];
+    }],
+    ['invalid content granularity', (bundle) => {
+      bundle.inventory[0].materialization.contentGranularity = 'full';
+    }],
+    ['invalid cover status', (bundle) => {
+      bundle.inventory[0].media = {
+        coverStatus: 'downloaded', coverCount: 1, materializedCoverCount: 1, reason: null,
+      };
+    }],
+    ['materialized cover count exceeds source covers', (bundle) => {
+      bundle.inventory[0].media = {
+        coverStatus: 'materialized', coverCount: 1, materializedCoverCount: 2, reason: null,
+      };
     }],
     ['materialized missing markdown path', (bundle) => {
       bundle.inventory[0].materialization.markdownPath = null;
@@ -937,7 +970,12 @@ test('writeCollectionBundle preserves metadata v1.0 and the exact seven-key coll
     const writer = await createArtifactWriter(outputRoot);
     await writer.writeText('markdown/item-1.md', '# Quarterly plan\n');
     await writer.writeText('sanitized/items/item-1.md', '# Quarterly plan\n');
-    await writer.writeCollectionBundle(validBundle());
+    const bundle = validBundle();
+    bundle.inventory[0].coverUrls = [
+      'https://img.test/cover-1.png',
+      'https://img.test/cover-2.png',
+    ];
+    await writer.writeCollectionBundle(bundle);
 
     const metadata = await readJson(join(outputRoot, 'sanitized/metadata.json'));
     assert.equal(metadata.schemaVersion, '1.0');
@@ -945,6 +983,13 @@ test('writeCollectionBundle preserves metadata v1.0 and the exact seven-key coll
     assert.equal(metadata.collection.status, 'complete');
     assert.equal(metadata.collection.items.length, 1);
     assert.deepEqual(metadata.collection.items[0].materialization.pendingArtifactCleanup, []);
+    assert.equal(metadata.collection.items[0].materialization.contentGranularity, 'unknown');
+    assert.deepEqual(metadata.collection.items[0].media, {
+      coverStatus: 'unknown',
+      coverCount: 2,
+      materializedCoverCount: 0,
+      reason: 'legacy-media-state-unknown',
+    });
     assert.equal(metadata.retention, undefined);
     assert.equal(metadata.postProcessing, undefined);
     assert.equal(Object.hasOwn(metadata.sourceMetadata, 'accessToken'), false);

@@ -7,9 +7,15 @@ import { deriveCollectionStatus, SOURCE_IDENTITY, handledOutcome, inventoryCount
 const identity = SOURCE_IDENTITY.ima;
 const MAX_CONTENT_BYTES = 50 * 1024 * 1024;
 const MAX_COVER_BYTES = 10 * 1024 * 1024;
+const MAX_COVER_TIMEOUT_MS = 15_000;
+const MAX_COVER_REDIRECTS = 3;
 const COVER_EXTENSIONS = new Map([
-  ['image/jpeg', 'jpg'], ['image/jpg', 'jpg'], ['image/png', 'png'], ['image/gif', 'gif'], ['image/webp', 'webp'],
+  ['image/jpeg', 'jpg'],
+  ['image/png', 'png'],
+  ['image/gif', 'gif'],
+  ['image/webp', 'webp'],
 ]);
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
 function reasonOf(error) {
   return error instanceof Error ? error.message : String(error);
@@ -57,11 +63,108 @@ function coverUrlsOf(value) {
   }).map((url) => url.trim()))];
 }
 
+function boundedInteger(value, fallback, maximum, label) {
+  const normalized = value === undefined ? fallback : value;
+  if (!Number.isInteger(normalized) || normalized < 1 || normalized > maximum) {
+    throw new TypeError(`${label} must be an integer between 1 and ${maximum}`);
+  }
+  return normalized;
+}
+
+function validatedCoverUrl(value) {
+  let url;
+  try { url = new URL(value); } catch { throw new Error('IMA cover URL is invalid'); }
+  if (url.protocol !== 'https:') throw new Error('IMA cover URL must use HTTPS');
+  if (url.username || url.password) throw new Error('IMA cover URL must not contain credentials');
+  return url;
+}
+
+async function readCoverBody(response, maxBytes) {
+  const contentLength = response.headers?.get?.('content-length');
+  if (contentLength !== null && contentLength !== undefined && contentLength !== '') {
+    if (!/^\d+$/.test(contentLength)) throw new Error('IMA cover content length is invalid');
+    if (Number(contentLength) > maxBytes) throw new Error('IMA cover exceeds the size limit');
+  }
+  if (response.body?.getReader) {
+    const reader = response.body.getReader();
+    const chunks = [];
+    let length = 0;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = Buffer.from(value);
+        length += chunk.length;
+        if (length > maxBytes) throw new Error('IMA cover exceeds the size limit');
+        chunks.push(chunk);
+      }
+    } catch (error) {
+      await reader.cancel(error).catch(() => {});
+      throw error;
+    }
+    if (length === 0) throw new Error('IMA cover response is empty');
+    return Buffer.concat(chunks, length);
+  }
+  if (typeof response.arrayBuffer !== 'function') throw new Error('IMA cover response body is unavailable');
+  const bytes = Buffer.from(await response.arrayBuffer());
+  if (bytes.length === 0) throw new Error('IMA cover response is empty');
+  if (bytes.length > maxBytes) throw new Error('IMA cover exceeds the size limit');
+  return bytes;
+}
+
+export async function downloadImaCover(url, options = {}) {
+  const fetchImpl = options.fetchImpl || globalThis.fetch;
+  if (typeof fetchImpl !== 'function') throw new Error('IMA cover HTTPS downloader is unavailable');
+  const maxBytes = boundedInteger(options.maxBytes, MAX_COVER_BYTES, MAX_COVER_BYTES, 'maxBytes');
+  const timeoutMs = boundedInteger(
+    options.timeoutMs, MAX_COVER_TIMEOUT_MS, MAX_COVER_TIMEOUT_MS, 'timeoutMs',
+  );
+  const maxRedirects = boundedInteger(
+    options.maxRedirects, MAX_COVER_REDIRECTS, MAX_COVER_REDIRECTS, 'maxRedirects',
+  );
+  let current = validatedCoverUrl(url);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => {
+    controller.abort(new Error('IMA cover download timed out'));
+  }, timeoutMs);
+  let redirects = 0;
+  try {
+    while (true) {
+      let response;
+      try {
+        response = await fetchImpl(current.href, { redirect: 'manual', signal: controller.signal });
+      } catch (error) {
+        if (controller.signal.aborted) throw new Error('IMA cover download timed out');
+        throw error;
+      }
+      if (REDIRECT_STATUSES.has(response?.status)) {
+        if (redirects >= maxRedirects) throw new Error('IMA cover redirect limit exceeded');
+        const location = response.headers?.get?.('location');
+        if (!location) throw new Error('IMA cover redirect is missing a location');
+        current = validatedCoverUrl(new URL(location, current).href);
+        redirects += 1;
+        continue;
+      }
+      if (!response?.ok) throw new Error(`IMA cover download failed: HTTP ${response?.status || 'unknown'}`);
+      const contentType = String(response.headers?.get?.('content-type') || '')
+        .split(';', 1)[0].trim().toLowerCase();
+      const extension = COVER_EXTENSIONS.get(contentType);
+      if (!extension) throw new Error(`IMA cover content type is unsupported: ${contentType || 'unknown'}`);
+      const bytes = await readCoverBody(response, maxBytes);
+      return { bytes, extension };
+    }
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function itemFromRecord(record, sourceType, kb = '', materializationKb = '') {
   const sourceItemId = stringValue(record, ['mediaId', 'doc_id', 'docId', 'documentId', 'id', 'uuid', 'fileId']);
   if (!sourceItemId) return null;
   const title = stringValue(record, ['title', 'name', 'fileName', 'subject']) || sourceItemId;
   const sourceUrl = stringValue(record, ['url', 'sourceUrl', 'link']) || `ima://${sourceType}/${sourceItemId}`;
+  const abstract = stringValue(record, ['abstract']);
+  const introduction = stringValue(record, ['introduction']);
   return {
     sourceItemId,
     sourceUrl,
@@ -69,9 +172,33 @@ function itemFromRecord(record, sourceType, kb = '', materializationKb = '') {
     sourceType,
     kb,
     materializationKb,
-    preview: contentOf(record) || stringValue(record, ['abstract', 'introduction']),
+    preview: contentOf(record) || [abstract, introduction].filter(Boolean).join('\n\n'),
+    abstract,
+    introduction,
+    completeEvidence: false,
     coverUrls: coverUrlsOf(record),
   };
+}
+
+export function imaContentGranularity({ completeEvidence, abstract, introduction } = {}) {
+  if (completeEvidence === true) return 'full-text';
+  if (typeof introduction === 'string' && introduction.trim()) return 'excerpt';
+  if (typeof abstract === 'string' && abstract.trim()) return 'abstract';
+  return 'unknown';
+}
+
+function mediaStateFor(item) {
+  const coverCount = Array.isArray(item.coverUrls) ? item.coverUrls.length : 0;
+  return coverCount > 0
+    ? {
+      coverStatus: 'unknown',
+      coverCount,
+      materializedCoverCount: 0,
+      reason: 'cover-materialization-pending',
+    }
+    : {
+      coverStatus: 'not-present', coverCount: 0, materializedCoverCount: 0, reason: null,
+    };
 }
 
 function knowledgeBaseId(value, name) {
@@ -106,7 +233,7 @@ function materializationPaths(item) {
   };
 }
 
-function inventoryItem(item, rawArtifacts, materialization = {}) {
+function inventoryItem(item, rawArtifacts, materialization = {}, media = mediaStateFor(item)) {
   return {
     itemId: itemIdFor(item),
     title: item.title,
@@ -117,17 +244,22 @@ function inventoryItem(item, rawArtifacts, materialization = {}) {
     kb: item.kb,
     materializationKb: item.materializationKb,
     preview: item.preview,
+    abstract: item.abstract,
+    introduction: item.introduction,
+    completeEvidence: item.completeEvidence === true,
     coverUrls: [...(item.coverUrls || [])],
     sourceSkill: identity.sourceSkill,
     backend: identity.backend,
     collectionFilters: item.kb ? { kb: item.kb } : {},
     rawArtifacts,
+    media,
     materialization: {
       status: materialization.status || 'pending',
       markdownPath: materialization.markdownPath || null,
       sanitizedPath: materialization.sanitizedPath || null,
       pendingArtifactCleanup: [],
       reason: materialization.reason || 'discovery only; materialization is deferred',
+      contentGranularity: materialization.contentGranularity || 'unknown',
     },
   };
 }
@@ -137,32 +269,33 @@ function renderedMarkdown(content, item, coverMarkdown = []) {
   return `---\ntitle: ${JSON.stringify(item.title)}\nsource: "ima"\nsource_url: ${JSON.stringify(item.sourceUrl)}\ncollection_filters: ${JSON.stringify(item.kb ? { kb: item.kb } : {})}\n---\n\n${covers}${content.trim()}\n`;
 }
 
-function coverExtension(url, contentType = '') {
-  const normalizedType = contentType.split(';', 1)[0].trim().toLowerCase();
-  if (COVER_EXTENSIONS.has(normalizedType)) return COVER_EXTENSIONS.get(normalizedType);
-  try {
-    const extension = new URL(url).pathname.match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase();
-    if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(extension)) return extension === 'jpeg' ? 'jpg' : extension;
-  } catch { /* URL was validated during discovery. */ }
-  throw new Error(`IMA cover has an unsupported content type: ${contentType || 'unknown'}`);
+function coverFailureReason(error) {
+  const message = reasonOf(error);
+  if (/timed out/i.test(message)) return 'cover-download-timeout';
+  if (/size limit|content length/i.test(message)) return 'cover-size-limit';
+  if (/redirect/i.test(message)) return 'cover-redirect-invalid';
+  if (/HTTPS|credentials|URL is invalid/i.test(message)) return 'cover-url-invalid';
+  if (/content type|response is empty|body is unavailable/i.test(message)) return 'cover-content-invalid';
+  if (/HTTP /i.test(message)) return 'cover-http-error';
+  return 'cover-download-failed';
 }
 
-async function materializeCovers(writer, item, paths, fetchImpl) {
-  const artifacts = [];
-  const markdown = [];
+async function prepareCovers(item, fetchImpl) {
+  const prepared = [];
+  const failures = [];
   for (const [index, url] of (item.coverUrls || []).entries()) {
-    if (typeof fetchImpl !== 'function') throw new Error('IMA cover downloader is unavailable');
-    const response = await fetchImpl(url, { redirect: 'follow' });
-    if (!response?.ok) throw new Error(`IMA cover download failed: HTTP ${response?.status || 'unknown'}`);
-    const bytes = Buffer.from(await response.arrayBuffer());
-    if (bytes.length === 0 || bytes.length > MAX_COVER_BYTES) throw new Error('IMA cover exceeds the size limit');
-    const extension = coverExtension(url, response.headers?.get?.('content-type') || '');
-    const name = `cover-${index + 1}.${extension}`;
-    const sanitizedPath = paths.sanitizedPath.replace(/index\.md$/, `assets/${name}`);
-    await writer.writeBytes(sanitizedPath, bytes);
-    markdown.push(`![封面 ${index + 1}](assets/${name})`);
+    try {
+      const downloaded = await downloadImaCover(url, { fetchImpl });
+      prepared.push({
+        ...downloaded,
+        name: `cover-${index + 1}.${downloaded.extension}`,
+        markdown: `![封面 ${index + 1}](assets/cover-${index + 1}.${downloaded.extension})`,
+      });
+    } catch (error) {
+      failures.push(coverFailureReason(error));
+    }
   }
-  return { artifacts, markdown };
+  return { prepared, failures };
 }
 
 function cliReason(result) {
@@ -273,14 +406,80 @@ async function materializeOne(writer, item, bin, env, fetchImpl) {
   const args = item.sourceType === 'note'
     ? ['note', 'get', item.sourceItemId, '--format', '0', '--json']
     : ['wiki', 'search', item.title, ...(item.materializationKb ? ['--kb', item.materializationKb] : []), '--json'];
-  const response = await callJson(writer, bin, env, args, artifact);
-  const content = contentOf(response) || item.preview;
-  if (!content) throw new Error(`ima ${item.sourceType} returned no content`);
-  if (Buffer.byteLength(content, 'utf8') > MAX_CONTENT_BYTES) throw new Error('IMA content exceeds materialization limit');
-  const covers = await materializeCovers(writer, item, paths, fetchImpl);
-  const markdown = renderedMarkdown(content, item, covers.markdown);
-  await Promise.all([writer.writeText(paths.markdownPath, markdown), writer.writeText(paths.sanitizedPath, markdown)]);
-  return inventoryItem(item, [...item.rawArtifacts, artifact, ...covers.artifacts], { status: 'materialized', ...paths, reason: null });
+  const createdFiles = [];
+  let rawArtifacts = item.rawArtifacts;
+  try {
+    const response = await callJson(writer, bin, env, args, artifact);
+    rawArtifacts = [...item.rawArtifacts, artifact];
+    const content = contentOf(response) || item.preview;
+    if (!content) throw new Error(`ima ${item.sourceType} returned no content`);
+    if (Buffer.byteLength(content, 'utf8') > MAX_CONTENT_BYTES) {
+      throw new Error('IMA content exceeds materialization limit');
+    }
+    const coverResult = await prepareCovers(item, fetchImpl);
+    const covers = [];
+    for (const cover of coverResult.prepared) {
+      const coverPath = paths.sanitizedPath.replace(/index\.md$/, `assets/${cover.name}`);
+      try {
+        await writer.writeBytes(coverPath, cover.bytes);
+        createdFiles.push(coverPath);
+        covers.push(cover);
+      } catch {
+        coverResult.failures.push('cover-write-failed');
+      }
+    }
+    const markdown = renderedMarkdown(content, item, covers.map((cover) => cover.markdown));
+    await writer.writeText(paths.markdownPath, markdown);
+    createdFiles.push(paths.markdownPath);
+    await writer.writeText(paths.sanitizedPath, markdown);
+    createdFiles.push(paths.sanitizedPath);
+    const media = item.coverUrls.length === 0
+      ? mediaStateFor(item)
+      : coverResult.failures.length === 0
+        ? {
+        coverStatus: 'materialized', coverCount: covers.length,
+        materializedCoverCount: covers.length, reason: null,
+      }
+        : {
+          coverStatus: 'unavailable', coverCount: item.coverUrls.length,
+          materializedCoverCount: covers.length,
+          reason: [...new Set(coverResult.failures)].join(','),
+        };
+    return inventoryItem(item, rawArtifacts, {
+      status: 'materialized',
+      ...paths,
+      reason: null,
+      contentGranularity: imaContentGranularity(item),
+    }, media);
+  } catch (error) {
+    await writer.removeFiles(createdFiles);
+    const failure = error instanceof Error ? error : new Error(reasonOf(error));
+    failure.rawArtifacts = rawArtifacts;
+    throw failure;
+  }
+}
+
+function failedInventory(item, error) {
+  const media = error?.media || (item.coverUrls?.length
+    ? {
+      coverStatus: 'unavailable', coverCount: item.coverUrls.length,
+      materializedCoverCount: 0, reason: 'article-materialization-failed-before-covers',
+    }
+    : mediaStateFor(item));
+  return inventoryItem(
+    item,
+    Array.isArray(error?.rawArtifacts) ? error.rawArtifacts : item.rawArtifacts,
+    { status: 'failed', reason: reasonOf(error) },
+    media,
+  );
+}
+
+function commonKnowledgeBase(items) {
+  const values = [...new Set(items.map((item) => item.kb).filter(Boolean))];
+  if (values.length > 1) {
+    throw new Error(`IMA materialization cannot mix knowledge bases: ${values.join(', ')}`);
+  }
+  return values[0] || '';
 }
 
 async function persistSearch(writer, request, inventory, canonicalItems, rawArtifacts, status, discovery) {
@@ -326,7 +525,7 @@ export function createImaAdapter(dependencies = {}) {
       if (!normalized.metadataOnly) {
         for (const item of discovery.found) {
           try { materialized.push(await materializeOne(writer, item, bin, env, fetchImpl)); }
-          catch (error) { materialized.push(inventoryItem(item, item.rawArtifacts, { status: 'failed', reason: reasonOf(error) })); }
+          catch (error) { materialized.push(failedInventory(item, error)); }
         }
       }
       const finalInventory = normalized.metadataOnly ? inventory : materialized;
@@ -353,14 +552,25 @@ export function createImaAdapter(dependencies = {}) {
     const writer = await createArtifactWriter(request.outputDir);
     await authCheck(bin, env);
     const candidates = await copyResumeArtifacts(writer, await readResumeCandidates(request.sessionDir, identity.source, request.itemIds || []));
+    const kb = commonKnowledgeBase(candidates);
     const inventory = [];
     for (const item of candidates) {
       try { inventory.push(await materializeOne(writer, item, bin, env, fetchImpl)); }
-      catch (error) { inventory.push(inventoryItem(item, item.rawArtifacts, { status: 'failed', reason: reasonOf(error) })); }
+      catch (error) { inventory.push(failedInventory(item, error)); }
     }
     const canonicalItems = inventory.filter((item) => item.materialization.status === 'materialized').map((item) => ({ title: item.title, url: item.sourceUrl, author: '', publishTime: '', markdown: item.materialization.sanitizedPath, fileName: item.materialization.sanitizedPath }));
     const status = deriveCollectionStatus({ itemStates: inventory.map((item) => item.materialization.status) });
-    await writer.writeCollectionBundle({ title: 'IMA materialized collection', source: identity.source, backend: identity.backend, url: 'ima://materialize', filters: {}, inventory, canonicalItems, sourceMetadata: { ...identity, operation: 'materialize' }, metadataOnly: false });
+    await writer.writeCollectionBundle({
+      title: 'IMA materialized collection',
+      source: identity.source,
+      backend: identity.backend,
+      url: 'ima://materialize',
+      filters: kb ? { kb } : {},
+      inventory,
+      canonicalItems,
+      sourceMetadata: { ...identity, operation: 'materialize', ...(kb ? { kb } : {}) },
+      metadataOnly: false,
+    });
     return handledOutcome(identity.connector, status, request.outputDir, inventoryCounts(inventory));
   }
 
