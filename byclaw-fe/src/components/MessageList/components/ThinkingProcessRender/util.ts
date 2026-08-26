@@ -6,6 +6,18 @@ import { IFormStatus } from '@/hooks/useSseSender/agent/typescript';
 import { isPendingEasyConfirmListItem } from '@/components/MessagesComp/easyConfirm';
 
 const ROOT_ORDER_ID = '-1';
+const TERMINAL_THINK_STATUS_TITLE_STATUSES = new Set(['_DONE_', '_ERROR_']);
+
+/** 状态标题在执行期间保持展开，仅在收到终态事件后折叠。 */
+const isTerminalThinkStatusTitle = (item: IMessageListItem) =>
+  `${item.contentType}` === `${SSEMessageType.thinkStatusTitle}` &&
+  TERMINAL_THINK_STATUS_TITLE_STATUSES.has(`${get(item, 'content.substance.status', '')}`);
+
+/** 通用树规则不能提前收起仍在执行的状态标题。 */
+const collapseTreeNode = (node: TreeNode) => {
+  if (`${node.contentType}` === `${SSEMessageType.thinkStatusTitle}` && !isTerminalThinkStatusTitle(node)) return;
+  node.isCollapsed = true;
+};
 
 const findParentTreeNode = (result: TreeNode[], parentOrderId: string): TreeNode | null => {
   for (const node of result) {
@@ -84,6 +96,7 @@ const coverExistedNodeHandlers: {
         ? { ...existingSubstance, ...incomingSubstance }
         : incomingSubstance
     );
+    existingNode.isCollapsed = isTerminalThinkStatusTitle(item);
   },
 };
 
@@ -117,7 +130,8 @@ export const transformList = (
     const newNode: TreeNode = {
       messageIdx,
       ...item,
-      isCollapsed: true,
+      isCollapsed:
+        `${item.contentType}` === `${SSEMessageType.thinkStatusTitle}` ? isTerminalThinkStatusTitle(item) : true,
       messageLoadingStatus: 2, // 进行中 - 2(默认); 已完成 - 1
       children: [], // 显式初始化 children 为 TreeNode[] 类型
     };
@@ -132,12 +146,12 @@ export const transformList = (
 
         // 标记前一个根节点为已完成
         if (currentRoot) {
-          currentRoot.isCollapsed = true;
+          collapseTreeNode(currentRoot);
           currentRoot.messageLoadingStatus = 1;
         }
         // 如果前一个父节点存在，也需要折叠
         if (currentParent) {
-          currentParent.isCollapsed = true;
+          collapseTreeNode(currentParent);
         }
 
         result.push(newNode);
@@ -158,7 +172,6 @@ export const transformList = (
             } else {
               set(existingNode, 'content.substance', item.content.substance);
             }
-            existingNode.isCollapsed = true;
             break;
           }
         }
@@ -197,7 +210,7 @@ export const transformList = (
             `${prevSibling.contentType}` === `${SSEMessageType.thinkTitle}` ||
             `${prevSibling.contentType}` === `${SSEMessageType.thinkStatusTitle}`
           ) {
-            prevSibling.isCollapsed = true;
+            collapseTreeNode(prevSibling);
           }
         }
 
@@ -212,7 +225,7 @@ export const transformList = (
         if (currentParent) {
           if (item?.objectType === 'function_response' && !currentParent.shouldOpen) {
             // 工具类回答主动折叠
-            currentParent.isCollapsed = true;
+            collapseTreeNode(currentParent);
           }
 
           switch (`${newNode.contentType}`) {
@@ -292,7 +305,7 @@ export const transformList = (
       const item = result[i];
       if (!item.shouldOpen) {
         result[i].messageLoadingStatus = 1;
-        result[i].isCollapsed = true;
+        collapseTreeNode(result[i]);
       }
     }
   }
