@@ -502,7 +502,6 @@ describe("Session / Run HTTP/SSE API", () => {
           contextRevision: 0,
           async run(input) {
             const res = await input.delegate({
-              toolCallId: "delegate-http",
               agentId: "agent-1",
               task: "do it",
             });

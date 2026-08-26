@@ -53,26 +53,57 @@ export interface TaskPlanSnapshot {
   tasks: TaskPlanTaskSnapshot[];
 }
 
-/** 模型只提交语义计划；执行归属和所有持久化字段由系统管理。 */
-export interface TaskPlanUpdate {
+/** 第一次创建计划；持久化 ID、版本和执行归属仍由系统管理。 */
+export interface TaskPlanCreateCommand {
+  action: "create";
   title: string;
   explanation?: string;
   tasks: Array<{
     step: string;
     description?: string;
+    status: "PENDING" | "IN_PROGRESS";
+    statusReason?: TaskPlanStatusReason;
+  }>;
+}
+
+/** 后续只允许按后端分配的 taskId 更新状态。 */
+export interface TaskPlanStatusUpdateCommand {
+  action: "update";
+  planId: string;
+  expectedVersion: number;
+  updates: Array<{
+    taskId: string;
     status: TaskPlanTaskStatus;
     statusReason?: TaskPlanStatusReason;
   }>;
 }
 
-/** 隐藏持久化字段后注入模型的计划语义视图。 */
+export type TaskPlanCommand = TaskPlanCreateCommand | TaskPlanStatusUpdateCommand;
+
+export interface TaskPlanCommandError {
+  code: string;
+  message: string;
+}
+
+export type TaskPlanCommandResult =
+  | { ok: true; plan: TaskPlanSnapshot }
+  | {
+      ok: false;
+      error: TaskPlanCommandError;
+      currentPlan?: TaskPlanSnapshot;
+    };
+
+/** 注入模型的权威计划视图；UPDATE 必须复用其中的 ID 和版本。 */
 export function toTaskPlanModelView(snapshot: TaskPlanSnapshot) {
   return {
+    planId: snapshot.planId,
+    version: snapshot.version,
     title: snapshot.title,
     status: snapshot.status,
     ...(snapshot.statusReason ? { statusReason: snapshot.statusReason } : {}),
     ...(snapshot.explanation ? { explanation: snapshot.explanation } : {}),
     tasks: snapshot.tasks.map((task) => ({
+      taskId: task.taskId,
       position: task.position,
       step: task.title,
       ...(task.description ? { description: task.description } : {}),

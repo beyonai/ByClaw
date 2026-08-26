@@ -17,10 +17,8 @@ import type {
   TaskPlanGateway,
 } from "../ports/task-plan.js";
 import type {
+  TaskPlanCommand,
   TaskPlanSnapshot,
-  TaskPlanStatusReason,
-  TaskPlanTaskStatus,
-  TaskPlanUpdate,
 } from "../domain/task-plan.js";
 import { LeaderSessionCache } from "./leader-session-cache.js";
 import type {
@@ -36,7 +34,6 @@ import type {
   SessionRepository,
 } from "../ports/repositories.js";
 import type {
-  AgentResult,
   AgentProfile,
   CallerPrincipal,
   Delegation,
@@ -1031,40 +1028,14 @@ ${JSON.stringify(completedDelegations)}`;
         try {
           activeTaskPlan = await this.#taskPlans.loadActive(taskPlanContext);
           taskPlanReady = true;
-        } catch {
-          // 查询失败不等于“没有计划”；本轮关闭计划工具，但不阻断主任务。
-          taskPlanReady = false;
+        } catch (error) {
+          throw new Error("Unable to load the authoritative task plan for this Run", {
+            cause: error,
+          });
         }
       }
       let leaderOutputPausedForDelegation = false;
       let leaderInput: LeaderRunInput;
-      const syncActiveTaskPlanTask = async (input: {
-        taskPosition: number;
-        status: TaskPlanTaskStatus;
-        idempotencyKey: string;
-        statusReason?: TaskPlanStatusReason;
-      }): Promise<TaskPlanSnapshot> => {
-        if (!activeTaskPlan || activeTaskPlan.status !== "ACTIVE") {
-          throw new Error("An active task plan is required for task-linked delegation");
-        }
-        if (!taskPlanContext || !this.#taskPlans) {
-          throw new Error("Task plan updates are not available for this run");
-        }
-        const update = taskPlanUpdateWithTaskStatus(
-          activeTaskPlan,
-          input.taskPosition,
-          input.status,
-          input.statusReason,
-        );
-        const snapshot = await this.#taskPlans.update({
-          context: taskPlanContext,
-          idempotencyKey: input.idempotencyKey,
-          update,
-        });
-        activeTaskPlan = snapshot;
-        leaderInput.activeTaskPlan = snapshot;
-        return snapshot;
-      };
       leaderInput = {
         message: leaderMessage,
         observability: {
@@ -1099,7 +1070,8 @@ ${JSON.stringify(completedDelegations)}`;
         signal: runController.signal,
         // Leader 的可见回答与思考增量被规范化为 Run 事件，供对外流协议消费。
         onDelta: async (text) => {
-          if (leaderOutputPausedForDelegation) {
+          // ACTIVE 计划尚未收口时抑制可见回答，避免过早回答在内部续跑前泄漏给用户。
+          if (leaderOutputPausedForDelegation || activeTaskPlan?.status === "ACTIVE") {
             return;
           }
           const event = {
@@ -1148,43 +1120,6 @@ ${JSON.stringify(completedDelegations)}`;
         // 工具调用只进入 DelegationService，不让 Pi 接触 Connector Registry。
         delegate: async (delegationInput) => {
           runController.signal.throwIfAborted();
-          let resolvedTaskPosition = delegationInput.taskPosition;
-          if (activeTaskPlan) {
-            if (activeTaskPlan.status !== "ACTIVE") {
-              throw new Error(
-                `Task plan is ${activeTaskPlan.status}; no further delegation is allowed`,
-              );
-            }
-            const orderedTasks = [...activeTaskPlan.tasks].sort(
-              (left, right) => left.position - right.position,
-            );
-            const task =
-              orderedTasks.find(({ status }) => status === "IN_PROGRESS") ??
-              orderedTasks.find(({ status }) => status === "PENDING");
-            if (!task) {
-              throw new Error("The active task plan has no executable task");
-            }
-            if (
-              resolvedTaskPosition !== undefined &&
-              resolvedTaskPosition !== task.position
-            ) {
-              throw new Error(
-                `Task plan position ${resolvedTaskPosition} is not the authoritative current task ${task.position}`,
-              );
-            }
-            resolvedTaskPosition = task.position;
-            if (task.status === "PENDING") {
-              await syncActiveTaskPlanTask({
-                taskPosition: resolvedTaskPosition,
-                status: "IN_PROGRESS",
-                idempotencyKey: `${delegationInput.toolCallId}:task-started`,
-              });
-            }
-          } else if (resolvedTaskPosition !== undefined) {
-            throw new Error(
-              "taskPosition can only be used when an active task plan exists",
-            );
-          }
           // Pi 可能尚有排队的流回调。委派开始即交出控制权，迟到的 Super
           // reasoning/answer 不再逐 Token 落库，也不能延迟 WAITING_AGENT。
           leaderOutputPausedForDelegation = true;
@@ -1200,9 +1135,6 @@ ${JSON.stringify(completedDelegations)}`;
             agents: current.agentList,
             agentId: delegationInput.agentId,
             task: delegationInput.task,
-            ...(resolvedTaskPosition !== undefined
-              ? { taskPosition: resolvedTaskPosition }
-              : {}),
             // 只能从当前 Run 的附件集合按 ID 选择；未知 ID 在解析阶段被拒绝。
             attachments: resolveAttachmentSelection(
               current.attachments,
@@ -1243,23 +1175,6 @@ ${JSON.stringify(completedDelegations)}`;
           // 同步 Connector 返回了真实终态时，Leader 仍需继续使用工具结果。
           // 挂起会抛出 DelegationSuspendedError，因此不会执行到这里。
           leaderOutputPausedForDelegation = false;
-          if (
-            resolvedTaskPosition !== undefined &&
-            !runController.signal.aborted
-          ) {
-            const terminalTaskUpdate = delegationTerminalTaskUpdate(delegated);
-            if (terminalTaskUpdate) {
-              await syncActiveTaskPlanTask({
-                taskPosition: resolvedTaskPosition,
-                status: terminalTaskUpdate.status,
-                idempotencyKey:
-                  `${delegationInput.toolCallId}:task-${terminalTaskUpdate.idempotencySuffix}`,
-                ...(terminalTaskUpdate.statusReason
-                  ? { statusReason: terminalTaskUpdate.statusReason }
-                  : {}),
-              });
-            }
-          }
           if (!runController.signal.aborted) {
             current = await this.#setStatus(current, "SYNTHESIZING");
           }
@@ -1359,18 +1274,22 @@ ${JSON.stringify(completedDelegations)}`;
           ? {
               updateTaskPlan: async ({
                 toolCallId,
-                update,
+                command,
                 signal,
               }) => {
                 runController.signal.throwIfAborted();
                 signal?.throwIfAborted();
-                const snapshot = await this.#taskPlans!.update({
+                const result = await this.#taskPlans!.command({
                   context: taskPlanContext,
                   idempotencyKey: toolCallId,
-                  update,
+                  command,
                 });
-                activeTaskPlan = snapshot;
-                return snapshot;
+                if (result.ok) {
+                  activeTaskPlan = result.plan;
+                } else if (result.currentPlan) {
+                  activeTaskPlan = result.currentPlan;
+                }
+                return result;
               },
             }
           : {}),
@@ -1451,30 +1370,6 @@ ${JSON.stringify(completedDelegations)}`;
             }
           : {}),
       };
-      // callback 型 Connector 会在另一轮、甚至另一实例恢复。委派中持久化的
-      // taskPosition 是恢复后唯一可信的任务关联，必须在 Leader 继续回复前收口。
-      if (!runController.signal.aborted && activeTaskPlan?.status === "ACTIVE") {
-        for (const delegation of recoveredDelegations) {
-          if (delegation.taskPosition === undefined || !delegation.result) {
-            continue;
-          }
-          const terminalTaskUpdate = delegationTerminalTaskUpdate(delegation.result);
-          if (!terminalTaskUpdate) {
-            continue;
-          }
-          await syncActiveTaskPlanTask({
-            taskPosition: delegation.taskPosition,
-            status: terminalTaskUpdate.status,
-            idempotencyKey:
-              `${delegation.id}:task-${terminalTaskUpdate.idempotencySuffix}`,
-            ...(terminalTaskUpdate.statusReason
-              ? { statusReason: terminalTaskUpdate.statusReason }
-              : {}),
-          });
-          // 一次 Run 只会在首个 callback 委派处挂起；终态结果会先同步计划。
-          break;
-        }
-      }
       let result = await leader.run(leaderInput);
       let taskPlanStallAttempts = 0;
       while (activeTaskPlan?.status === "ACTIVE") {
@@ -1651,18 +1546,23 @@ ${JSON.stringify(completedDelegations)}`;
       return;
     }
     let lastError: unknown;
-    for (let attempt = 0; attempt < 3; attempt += 1) {
+    for (let attempt = 0; attempt < 4; attempt += 1) {
       try {
         const snapshot = await this.#taskPlans.loadActive(context);
         if (!snapshot || snapshot.status !== "ACTIVE") {
           return;
         }
-        await this.#taskPlans.update({
+        const result = await this.#taskPlans.command({
           context,
           idempotencyKey: `run-failed:${run.id}:${snapshot.version}`,
-          update: taskPlanUpdateForRunFailure(snapshot),
+          command: taskPlanCommandForRunFailure(snapshot),
         });
-        return;
+        if (!result.ok) {
+          throw new Error(`${result.error.code}: ${result.error.message}`);
+        }
+        if (result.plan.status !== "ACTIVE") {
+          return;
+        }
       } catch (error) {
         lastError = error;
       }
@@ -2009,136 +1909,39 @@ function validateAgentList(agentList: AgentProfile[]): void {
   }
 }
 
-function delegationTerminalTaskUpdate(result: AgentResult): {
-  status: "COMPLETED" | "FAILED" | "CANCELLED";
-  idempotencySuffix: "completed" | "failed" | "cancelled";
-  statusReason?: TaskPlanStatusReason;
-} | undefined {
-  if (result.status === "completed") {
-    return {
-      status: "COMPLETED",
-      idempotencySuffix: "completed",
-    };
-  }
-  if (result.status === "failed") {
-    return {
-      status: "FAILED",
-      idempotencySuffix: "failed",
-      statusReason: {
-        code: "DELEGATION_FAILED",
-        message: "数字员工调度失败",
-      },
-    };
-  }
-  if (result.status === "timed_out") {
-    return {
-      status: "FAILED",
-      idempotencySuffix: "failed",
-      statusReason: {
-        code: "DELEGATION_TIMEOUT",
-        message: "数字员工调度超时",
-      },
-    };
-  }
-  if (result.status === "cancelled") {
-    return {
-      status: "CANCELLED",
-      idempotencySuffix: "cancelled",
-      statusReason: {
-        code: "DELEGATION_CANCELLED",
-        message: "数字员工调度已取消",
-      },
-    };
-  }
-  return undefined;
-}
-
-function taskPlanUpdateWithTaskStatus(
-  snapshot: TaskPlanSnapshot,
-  taskPosition: number,
-  status: TaskPlanTaskStatus,
-  statusReason?: TaskPlanStatusReason,
-): TaskPlanUpdate {
-  if (!Number.isInteger(taskPosition) || taskPosition < 1) {
-    throw new Error("taskPosition must be a positive integer");
-  }
+function taskPlanCommandForRunFailure(snapshot: TaskPlanSnapshot): TaskPlanCommand {
   const orderedTasks = [...snapshot.tasks].sort(
     (left, right) => left.position - right.position,
   );
-  if (!orderedTasks.some(({ position }) => position === taskPosition)) {
-    throw new Error(`Task plan position ${taskPosition} does not exist`);
+  const running = orderedTasks.find(({ status }) => status === "IN_PROGRESS");
+  const pending = orderedTasks.find(({ status }) => status === "PENDING");
+  const task = running ?? pending;
+  if (!task) {
+    throw new Error("Active task plan has no unfinished task to close");
   }
   return {
-    title: snapshot.title,
-    ...(snapshot.explanation ? { explanation: snapshot.explanation } : {}),
-    tasks: orderedTasks.map((task) => ({
-      step: task.title,
-      ...(task.description ? { description: task.description } : {}),
-      status: task.position === taskPosition ? status : task.status,
-      ...(task.position === taskPosition
-        ? statusReason
-          ? { statusReason }
-          : {}
-        : task.statusReason
-          ? { statusReason: task.statusReason }
-          : {}),
-    })),
-  };
-}
-
-function taskPlanUpdateForRunFailure(snapshot: TaskPlanSnapshot): TaskPlanUpdate {
-  const orderedTasks = [...snapshot.tasks].sort(
-    (left, right) => left.position - right.position,
-  );
-  const hasFailedTask = orderedTasks.some(({ status }) => status === "FAILED");
-  const firstPendingPosition = orderedTasks.find(
-    ({ status }) => status === "PENDING",
-  )?.position;
-  const hasInProgressTask = orderedTasks.some(
-    ({ status }) => status === "IN_PROGRESS",
-  );
-  return {
-    title: snapshot.title,
-    ...(snapshot.explanation ? { explanation: snapshot.explanation } : {}),
-    tasks: orderedTasks.map((task) => {
-      if (task.status === "IN_PROGRESS") {
-        return {
-          step: task.title,
-          ...(task.description ? { description: task.description } : {}),
-          status: "FAILED" as const,
-          statusReason: {
-            code: "RUN_FAILED",
-            message: "运行失败，任务计划已自动收口",
+    action: "update",
+    planId: snapshot.planId,
+    expectedVersion: snapshot.version,
+    updates: [
+      running
+        ? {
+            taskId: task.taskId,
+            status: "FAILED",
+            statusReason: {
+              code: "RUN_FAILED",
+              message: "运行失败，任务计划已自动收口",
+            },
+          }
+        : {
+            taskId: task.taskId,
+            status: "IN_PROGRESS",
+            statusReason: {
+              code: "RUN_FAILING",
+              message: "运行失败，正在收口任务计划",
+            },
           },
-        };
-      }
-      if (task.status === "PENDING") {
-        const shouldFail =
-          !hasFailedTask &&
-          !hasInProgressTask &&
-          task.position === firstPendingPosition;
-        return {
-          step: task.title,
-          ...(task.description ? { description: task.description } : {}),
-          status: shouldFail ? ("FAILED" as const) : ("SKIPPED" as const),
-          statusReason: shouldFail
-            ? {
-                code: "RUN_FAILED",
-                message: "运行失败，任务计划已自动收口",
-              }
-            : {
-                code: "RUN_ABORTED",
-                message: "运行失败，未开始任务已跳过",
-              },
-        };
-      }
-      return {
-        step: task.title,
-        ...(task.description ? { description: task.description } : {}),
-        status: task.status,
-        ...(task.statusReason ? { statusReason: task.statusReason } : {}),
-      };
-    }),
+    ],
   };
 }
 

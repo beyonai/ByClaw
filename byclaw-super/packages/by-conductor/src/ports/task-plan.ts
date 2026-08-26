@@ -1,4 +1,8 @@
-import type { TaskPlanSnapshot, TaskPlanUpdate } from "../domain/task-plan.js";
+import type {
+  TaskPlanCommand,
+  TaskPlanCommandResult,
+  TaskPlanSnapshot,
+} from "../domain/task-plan.js";
 
 export interface TaskPlanExecutionContext {
   beyondToken: string;
@@ -15,11 +19,11 @@ export interface TaskPlanExecutionContext {
 export interface TaskPlanGateway {
   loadActive(input: TaskPlanExecutionContext): Promise<TaskPlanSnapshot | undefined>;
 
-  update(input: {
+  command(input: {
     context: TaskPlanExecutionContext;
     idempotencyKey: string;
-    update: TaskPlanUpdate;
-  }): Promise<TaskPlanSnapshot>;
+    command: TaskPlanCommand;
+  }): Promise<TaskPlanCommandResult>;
 
   /** 运行时已经停止后，把同一执行上的活动计划收敛为 CANCELLED。 */
   cancel(input: {

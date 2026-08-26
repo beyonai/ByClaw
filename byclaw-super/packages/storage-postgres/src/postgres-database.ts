@@ -1872,7 +1872,6 @@ async function writeDelegation(
     delegation.agentName ?? null,
     nullableDate(delegation.lastActivityAt),
     nullableDate(delegation.callbackDeadlineAt),
-    delegation.taskPosition ?? null,
   ];
   const updated = await client.query(
     `UPDATE ${table(schema, "delegations")}
@@ -1893,8 +1892,7 @@ async function writeDelegation(
               WHEN callback_deadline_at IS NULL
                 THEN clock_timestamp() + ($14::timestamptz - $9::timestamptz)
               ELSE callback_deadline_at
-            END,
-            task_position = $15
+            END
       WHERE id = $1 AND version = $8::bigint - 1`,
     [
       delegation.id,
@@ -1911,7 +1909,6 @@ async function writeDelegation(
       delegation.agentName ?? null,
       nullableDate(delegation.lastActivityAt),
       nullableDate(delegation.callbackDeadlineAt),
-      delegation.taskPosition ?? null,
     ],
   );
   if (updated.rowCount !== 0) {
@@ -1929,14 +1926,14 @@ async function writeDelegation(
        id, run_id, agent_id, connector_id, task, expected_output, status,
        external_ref, connector_cursor, result, partial_output, error, version,
        created_at, updated_at, started_at, finished_at, agent_name, last_activity_at,
-       callback_deadline_at, task_position
+       callback_deadline_at
      ) VALUES (
        $1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10::jsonb, $11, $12, $13,
        $14, $15, $16, $17, $18, $19,
        CASE
          WHEN $20::timestamptz IS NULL THEN NULL
          ELSE clock_timestamp() + ($20::timestamptz - $15::timestamptz)
-       END, $21
+       END
      )`,
     values,
   );
@@ -2261,9 +2258,6 @@ function mapDelegation(row: QueryResultRow): Delegation {
     ...(row.agent_name === null ? {} : { agentName: text(row.agent_name) }),
     connectorId: text(row.connector_id),
     task: text(row.task),
-    ...(row.task_position === null || row.task_position === undefined
-      ? {}
-      : { taskPosition: integer(row.task_position) }),
     ...(row.expected_output === null
       ? {}
       : { expectedOutput: text(row.expected_output) }),
