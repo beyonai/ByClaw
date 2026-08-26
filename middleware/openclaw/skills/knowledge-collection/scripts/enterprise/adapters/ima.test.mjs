@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmod, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -9,18 +9,36 @@ async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'ima-adapter-'));
   const bin = join(root, 'ima-fixture.mjs');
   await writeFile(bin, `#!/usr/bin/env node
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 const args = process.argv.slice(2);
 const out = (value) => process.stdout.write(JSON.stringify(value));
 if (process.env.IMA_CALLS_PATH) appendFileSync(process.env.IMA_CALLS_PATH, JSON.stringify(args) + '\\n');
 if (args[0] === 'auth' && args[1] === 'check' && process.env.AUTH_FAILURE_MODE === 'true') { process.stderr.write('credentials unavailable'); process.exit(2); }
 else if (args[0] === 'auth' && args[1] === 'check') out({ checks: { token_fetch: true } });
+else if (args[0] === 'weixin' && args[1] === 'download' && process.env.WEIXIN_FAILURE_MODE === 'true') { process.stderr.write('weixin download failed'); process.exit(2); }
+else if (args[0] === 'weixin' && args[1] === 'download') {
+  const output = args[args.indexOf('--output') + 1];
+  if (process.env.WEIXIN_ESCAPED_PATH === 'true') {
+    const escaped = join(output, '..', 'escaped.md');
+    mkdirSync(output, { recursive: true });
+    writeFileSync(escaped, 'escaped article');
+    out([{ title: 'ByCLI roadmap', status: 'success', size: '15 B', saved: escaped }]);
+    process.exit(0);
+  }
+  const articleDir = join(output, 'ByCLI roadmap');
+  mkdirSync(join(articleDir, 'images'), { recursive: true });
+  const saved = join(articleDir, 'ByCLI roadmap.md');
+  writeFileSync(saved, '# ByCLI roadmap\\n\\nComplete WeChat body.\\n\\n![diagram](images/diagram.png)\\n\\n![missing](images/missing.png)\\n\\n![remote](https://mmbiz.qpic.cn/failed.png)\\n\\n<video src="https://mmbiz.qpic.cn/clip.mp4" controls></video>\\n');
+  writeFileSync(join(articleDir, 'images', 'diagram.png'), 'inline-image');
+  out([{ title: 'ByCLI roadmap', status: 'success', size: '72 B', saved, source_url: args[args.indexOf('--url') + 1] }]);
+}
 else if (args[0] === 'ima' && args[1] === 'knowledge' && process.env.BYCLI_DUPLICATE_URLS === 'true') out([
   { mediaId: 'wiki-bycli-1', title: 'ByCLI roadmap', url: 'https://ima.qq.com/wiki-bycli-1', folderPath: '/Roadmap', abstract: 'bycli preview' },
   { mediaId: 'wiki-bycli-2', title: 'ByCLI roadmap copy', url: 'https://ima.qq.com/wiki-bycli-1', folderPath: '/Archive', abstract: 'duplicate preview' },
 ]);
 else if (args[0] === 'ima' && args[1] === 'knowledge' && process.env.BYCLI_SUCCESS === 'true') out([{
-  mediaId: 'wiki-bycli-1', title: 'ByCLI roadmap', url: 'https://ima.qq.com/wiki-bycli-1', folderPath: '/Roadmap', abstract: 'bycli preview',
+  mediaId: 'wiki-bycli-1', title: 'ByCLI roadmap', url: process.env.BYCLI_WECHAT_URL === 'true' ? 'https://mp.weixin.qq.com/s/article-token' : 'https://ima.qq.com/wiki-bycli-1', folderPath: '/Roadmap', abstract: 'bycli preview',
   ...(process.env.BYCLI_WITH_INTRODUCTION === 'true' ? { introduction: 'bycli opening paragraph' } : {}),
   ...(process.env.BYCLI_WITH_TWO_COVERS === 'true'
     ? { coverUrls: ['https://img.ima.qq.com/cover-1.png', 'https://img.ima.qq.com/cover-2.png'] }
@@ -52,6 +70,106 @@ test('IMA metadata-only search discovers notes and Wiki entries without material
     const metadata = JSON.parse(await readFile(join(outputDir, 'sanitized/metadata.json'), 'utf8'));
     assert.deepEqual(metadata.collection.items.map((item) => item.sourceSkill), ['ima-skill', 'ima-skill']);
     assert.equal(metadata.collection.items.every((item) => item.materialization.status === 'pending'), true);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('IMA materializes trusted WeChat article URLs through bycli with localized inline images', async () => {
+  const { root, bin } = await fixture();
+  try {
+    const callsPath = join(root, 'calls.json');
+    const outputDir = join(root, 'search');
+    const result = await createImaAdapter({
+      bin,
+      bycliBin: bin,
+      env: {
+        ...process.env,
+        BYCLI_SUCCESS: 'true',
+        BYCLI_WECHAT_URL: 'true',
+        IMA_CALLS_PATH: callsPath,
+      },
+    }).search({ outputDir, query: 'knowledge-base collection', kb: 'kb-name', limit: 10, metadataOnly: false });
+
+    assert.equal(result.status, 'complete');
+    const calls = (await readFile(callsPath, 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+    const weixinCall = calls.find((args) => args[0] === 'weixin' && args[1] === 'download');
+    assert.ok(weixinCall);
+    assert.equal(weixinCall[weixinCall.indexOf('--url') + 1], 'https://mp.weixin.qq.com/s/article-token');
+    assert.equal(weixinCall[weixinCall.indexOf('--download-images') + 1], 'true');
+    assert.equal(weixinCall[weixinCall.indexOf('--site-session') + 1], 'persistent');
+    assert.equal(weixinCall[weixinCall.indexOf('--keep-tab') + 1], 'true');
+    assert.equal(calls.some((args) => args[0] === 'wiki' && args[1] === 'search'), false);
+
+    const metadata = JSON.parse(await readFile(join(outputDir, 'sanitized/metadata.json'), 'utf8'));
+    const item = metadata.collection.items[0];
+    assert.equal(item.materialization.contentGranularity, 'full-text');
+    assert.equal(item.completeEvidence, true);
+    assert.equal(item.rawArtifacts.some((artifact) => /raw\/weixin-download-.*\.json$/.test(artifact)), true);
+    assert.equal(item.rawArtifacts.some((artifact) => /raw\/weixin-.*\/ByCLI roadmap\/ByCLI roadmap\.md$/.test(artifact)), true);
+    const markdown = await readFile(join(outputDir, item.materialization.sanitizedPath), 'utf8');
+    assert.match(markdown, /Complete WeChat body/);
+    assert.match(markdown, /!\[diagram\]\(assets\/article-images\/diagram\.png\)/);
+    assert.doesNotMatch(markdown, /images\/missing\.png|https:\/\/mmbiz\.qpic\.cn|<\/video>/);
+    assert.match(markdown, /missing/);
+    assert.match(markdown, /remote/);
+    assert.equal(
+      (await readFile(join(outputDir, item.materialization.sanitizedPath.replace('index.md', 'assets/article-images/diagram.png')))).toString(),
+      'inline-image',
+    );
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('IMA rejects a bycli saved path outside its session staging directory', async () => {
+  const { root, bin } = await fixture();
+  try {
+    const outputDir = join(root, 'search');
+    const result = await createImaAdapter({
+      bin,
+      bycliBin: bin,
+      env: {
+        ...process.env,
+        BYCLI_SUCCESS: 'true',
+        BYCLI_WECHAT_URL: 'true',
+        BYCLI_WITH_INTRODUCTION: 'true',
+        WEIXIN_ESCAPED_PATH: 'true',
+      },
+    }).search({ outputDir, query: 'knowledge-base collection', kb: 'kb-name', limit: 10, metadataOnly: false });
+
+    assert.equal(result.status, 'complete');
+    const metadata = JSON.parse(await readFile(join(outputDir, 'sanitized/metadata.json'), 'utf8'));
+    const item = metadata.collection.items[0];
+    assert.equal(item.materialization.contentGranularity, 'excerpt');
+    assert.equal(item.completeEvidence, false);
+    assert.doesNotMatch(await readFile(join(outputDir, item.materialization.sanitizedPath), 'utf8'), /escaped article/);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('IMA does not switch trusted WeChat URLs to Wiki search when bycli download fails', async () => {
+  const { root, bin } = await fixture();
+  try {
+    const callsPath = join(root, 'calls.json');
+    const outputDir = join(root, 'search');
+    const result = await createImaAdapter({
+      bin,
+      bycliBin: bin,
+      env: {
+        ...process.env,
+        BYCLI_SUCCESS: 'true',
+        BYCLI_WECHAT_URL: 'true',
+        BYCLI_WITH_INTRODUCTION: 'true',
+        WEIXIN_FAILURE_MODE: 'true',
+        IMA_CALLS_PATH: callsPath,
+      },
+    }).search({ outputDir, query: 'knowledge-base collection', kb: 'kb-name', limit: 10, metadataOnly: false });
+
+    assert.equal(result.status, 'complete');
+    const calls = (await readFile(callsPath, 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+    assert.equal(calls.some((args) => args[0] === 'weixin' && args[1] === 'download'), true);
+    assert.equal(calls.some((args) => args[0] === 'wiki' && args[1] === 'search'), false);
+    const metadata = JSON.parse(await readFile(join(outputDir, 'sanitized/metadata.json'), 'utf8'));
+    const item = metadata.collection.items[0];
+    assert.equal(item.materialization.status, 'materialized');
+    assert.equal(item.materialization.contentGranularity, 'excerpt');
+    assert.equal(item.completeEvidence, false);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
@@ -258,6 +376,36 @@ test('IMA resume materializes discovered excerpts without a current IMA credenti
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+test('IMA resume does not require an IMA credential when a trusted WeChat URL can supply the body', async () => {
+  const { root, bin } = await fixture();
+  try {
+    const discoveryDir = join(root, 'discovery');
+    await createImaAdapter({
+      bin,
+      bycliBin: bin,
+      env: { ...process.env, BYCLI_SUCCESS: 'true', BYCLI_WECHAT_URL: 'true' },
+    }).search({ outputDir: discoveryDir, query: 'knowledge-base collection', kb: 'kb-name', limit: 10, metadataOnly: true });
+    const metadataPath = join(discoveryDir, 'sanitized/metadata.json');
+    const metadata = JSON.parse(await readFile(metadataPath, 'utf8'));
+    const candidate = metadata.collection.items[0];
+    candidate.preview = '';
+    candidate.abstract = '';
+    candidate.introduction = '';
+    await writeFile(metadataPath, JSON.stringify(metadata));
+
+    const outputDir = join(root, 'materialized');
+    const result = await createImaAdapter({
+      bin,
+      bycliBin: bin,
+      env: { ...process.env, AUTH_FAILURE_MODE: 'true' },
+    }).materialize({ sessionDir: discoveryDir, outputDir, itemIds: [candidate.itemId] });
+
+    assert.equal(result.status, 'complete');
+    const materialized = JSON.parse(await readFile(join(outputDir, 'sanitized/metadata.json'), 'utf8'));
+    assert.equal(materialized.collection.items[0].materialization.contentGranularity, 'full-text');
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test('IMA cover failure preserves the article and reports the media gap separately', async () => {
   const { root, bin } = await fixture();
   try {
@@ -369,13 +517,27 @@ test('IMA content granularity requires explicit completeness evidence', () => {
   assert.equal(imaContentGranularity({ genericContent: 'content field is not proof' }), 'unknown');
 });
 
-test('IMA controlled cover downloader enforces HTTPS, redirects, type, size, and timeout', async () => {
+test('IMA controlled cover downloader accepts HTTP and enforces redirects, type, size, and timeout', async () => {
   const { downloadImaCover } = await import('./ima.mjs');
   assert.equal(typeof downloadImaCover, 'function');
 
+  let httpRequestedUrl = '';
+  const httpDownloaded = await downloadImaCover('http://img.test/cover.png', {
+    fetchImpl: async (url) => {
+      httpRequestedUrl = url;
+      return {
+        status: 200,
+        ok: true,
+        headers: { get: (name) => name.toLowerCase() === 'content-type' ? 'image/png' : null },
+        arrayBuffer: async () => Buffer.from('http-cover'),
+      };
+    },
+  });
+  assert.equal(httpRequestedUrl, 'http://img.test/cover.png');
+  assert.deepEqual(httpDownloaded, { bytes: Buffer.from('http-cover'), extension: 'png' });
   await assert.rejects(
-    downloadImaCover('http://img.test/cover.png', { fetchImpl: async () => null }),
-    /HTTPS/,
+    downloadImaCover('ftp://img.test/cover.png', { fetchImpl: async () => null }),
+    /HTTP or HTTPS/,
   );
 
   const redirectFetch = async () => ({

@@ -1,6 +1,8 @@
 import crypto from 'node:crypto';
+import { lstat, readFile, readdir, realpath } from 'node:fs/promises';
+import { dirname, isAbsolute, relative, sep } from 'node:path';
 import { createArtifactWriter } from '../shared/artifact-writer.mjs';
-import { runCli } from '../shared/cli-runner.mjs';
+import { positiveEnv, runCli } from '../shared/cli-runner.mjs';
 import { copyResumeArtifacts, readResumeCandidates } from '../shared/resume.mjs';
 import { deriveCollectionStatus, SOURCE_IDENTITY, handledOutcome, inventoryCounts } from '../shared/status-model.mjs';
 
@@ -9,6 +11,7 @@ const MAX_CONTENT_BYTES = 50 * 1024 * 1024;
 const MAX_COVER_BYTES = 10 * 1024 * 1024;
 const MAX_COVER_TIMEOUT_MS = 15_000;
 const MAX_COVER_REDIRECTS = 3;
+const DEFAULT_WEIXIN_TIMEOUT_MS = 120_000;
 const COVER_EXTENSIONS = new Map([
   ['image/jpeg', 'jpg'],
   ['image/png', 'png'],
@@ -60,6 +63,22 @@ function discoveryExcerptOf(item) {
   return item.preview.trim();
 }
 
+function isTrustedWechatArticleUrl(value) {
+  let url;
+  try { url = new URL(value); } catch { return false; }
+  return url.protocol === 'https:'
+    && url.hostname === 'mp.weixin.qq.com'
+    && !url.username
+    && !url.password
+    && !url.port
+    && (url.pathname === '/s' || url.pathname.startsWith('/s/'));
+}
+
+function requiresImaAuthForMaterialization(item) {
+  return !discoveryExcerptOf(item)
+    && !(item?.sourceType === 'wiki' && isTrustedWechatArticleUrl(item.sourceUrl));
+}
+
 function coverUrlsOf(value) {
   if (!Array.isArray(value?.coverUrls)) return [];
   return [...new Set(value.coverUrls.filter((url) => {
@@ -79,7 +98,7 @@ function boundedInteger(value, fallback, maximum, label) {
 function validatedCoverUrl(value) {
   let url;
   try { url = new URL(value); } catch { throw new Error('IMA cover URL is invalid'); }
-  if (url.protocol !== 'https:') throw new Error('IMA cover URL must use HTTPS');
+  if (!['http:', 'https:'].includes(url.protocol)) throw new Error('IMA cover URL must use HTTP or HTTPS');
   if (url.username || url.password) throw new Error('IMA cover URL must not contain credentials');
   return url;
 }
@@ -119,7 +138,7 @@ async function readCoverBody(response, maxBytes) {
 
 export async function downloadImaCover(url, options = {}) {
   const fetchImpl = options.fetchImpl || globalThis.fetch;
-  if (typeof fetchImpl !== 'function') throw new Error('IMA cover HTTPS downloader is unavailable');
+  if (typeof fetchImpl !== 'function') throw new Error('IMA cover HTTP(S) downloader is unavailable');
   const maxBytes = boundedInteger(options.maxBytes, MAX_COVER_BYTES, MAX_COVER_BYTES, 'maxBytes');
   const timeoutMs = boundedInteger(
     options.timeoutMs, MAX_COVER_TIMEOUT_MS, MAX_COVER_TIMEOUT_MS, 'timeoutMs',
@@ -344,6 +363,118 @@ async function bycliKnowledgeList(writer, bycliBin, env, kb) {
   return parsed;
 }
 
+function bycliDownloadRecord(value) {
+  const candidates = Array.isArray(value) ? value : records(value);
+  return candidates.find((candidate) => objectValue(candidate) && stringValue(candidate, ['saved']))
+    || (objectValue(value) && stringValue(value, ['saved']) ? value : null);
+}
+
+function containedRelativePath(parent, child) {
+  const result = relative(parent, child);
+  if (!result || result === '..' || result.startsWith(`..${sep}`) || isAbsolute(result)) return '';
+  return result;
+}
+
+async function prepareWechatImages(savedPath, sanitizedPath) {
+  const imageDirectory = dirname(savedPath) + `${sep}images`;
+  let entries;
+  try { entries = await readdir(imageDirectory, { withFileTypes: true }); }
+  catch (error) {
+    if (error?.code === 'ENOENT') return [];
+    throw error;
+  }
+  const prepared = [];
+  let totalBytes = 0;
+  for (const entry of entries) {
+    if (!entry.isFile() || entry.isSymbolicLink()) continue;
+    const sourcePath = `${imageDirectory}${sep}${entry.name}`;
+    const sourceInfo = await lstat(sourcePath);
+    if (!sourceInfo.isFile() || sourceInfo.isSymbolicLink()) continue;
+    totalBytes += sourceInfo.size;
+    if (totalBytes > MAX_CONTENT_BYTES) throw new Error('WeChat inline images exceed materialization limit');
+    prepared.push({
+      sourcePath: `images/${entry.name}`,
+      targetPath: sanitizedPath.replace(/index\.md$/, `assets/article-images/${entry.name}`),
+      bytes: await readFile(sourcePath),
+    });
+  }
+  return prepared;
+}
+
+function sanitizeWechatMarkdown(content, preparedImages) {
+  const localized = new Map(preparedImages.map((image) => [
+    image.sourcePath,
+    image.targetPath.split('/').slice(-3).join('/'),
+  ]));
+  return content
+    .replace(/<(video|audio)\b[^>]*>[\s\S]*?<\/\1>/gi, '')
+    .replace(/!\[([^\]]*)\]\(([^)]*)\)/g, (_match, alt, rawDestination) => {
+      const destination = rawDestination.trim().split(/\s+/, 1)[0].replace(/^<|>$/g, '');
+      const local = localized.get(destination);
+      return local ? `![${alt}](${local})` : alt;
+    })
+    .replace(/!\[([^\]]*)\]\[[^\]]*\]/g, '$1')
+    .replace(/<img\b[^>]*>/gi, '');
+}
+
+async function bycliWechatDownload(writer, bycliBin, env, item, paths) {
+  const rawDirectory = `raw/weixin-${paths.suffix}`;
+  const artifact = `raw/weixin-download-${paths.suffix}.json`;
+  const outputDirectory = writer.absolute(rawDirectory);
+  const result = await runCli(bycliBin, [
+    'weixin', 'download',
+    '--url', item.sourceUrl,
+    '--output', outputDirectory,
+    '--download-images', 'true',
+    '--site-session', 'persistent',
+    '--keep-tab', 'true',
+    '-f', 'json',
+  ], {
+    env,
+    timeoutMs: positiveEnv('KNOWLEDGE_COLLECTION_WEIXIN_TIMEOUT_MS', DEFAULT_WEIXIN_TIMEOUT_MS, env),
+  });
+  let parsed = null;
+  try { parsed = JSON.parse(result.stdout); } catch { /* retained as diagnostics below */ }
+  await writer.writeJson(artifact, parsed ?? {
+    exitCode: result.exitCode,
+    stdout: result.stdout,
+    stderr: result.stderr,
+    failure: result.failure ? { code: result.failure.code, message: result.failure.message } : null,
+  });
+  const fail = (message) => {
+    const error = new Error(message);
+    error.rawArtifacts = [artifact];
+    throw error;
+  };
+  if (result.failure || result.exitCode !== 0) fail(`bycli weixin download failed: ${cliReason(result)}`);
+  if (!parsed) fail('bycli weixin download returned invalid JSON');
+  const record = bycliDownloadRecord(parsed);
+  if (!record || !/^success$/i.test(stringValue(record, ['status']))) {
+    fail('bycli weixin download did not report success');
+  }
+  const reportedPath = stringValue(record, ['saved']);
+  let outputRealPath;
+  let savedRealPath;
+  try {
+    outputRealPath = await realpath(outputDirectory);
+    savedRealPath = await realpath(reportedPath);
+  } catch {
+    fail('bycli weixin download saved path is not readable');
+  }
+  const relativeSavedPath = containedRelativePath(outputRealPath, savedRealPath);
+  if (!relativeSavedPath) fail('bycli weixin download saved path escaped its output directory');
+  const savedInfo = await lstat(savedRealPath);
+  if (!savedInfo.isFile() || savedInfo.isSymbolicLink()) fail('bycli weixin download saved path is not a regular file');
+  const content = await readFile(savedRealPath, 'utf8');
+  if (!content.trim()) fail('bycli weixin download saved an empty article');
+  return {
+    artifact,
+    content,
+    savedPath: savedRealPath,
+    savedArtifact: `${rawDirectory}/${relativeSavedPath.split(sep).join('/')}`,
+  };
+}
+
 async function discover(writer, request, bin, bycliBin, env) {
   const found = [];
   const seenSourceItems = new Set();
@@ -405,7 +536,7 @@ async function discover(writer, request, bin, bycliBin, env) {
   return { found: found.slice(0, request.limit), rawArtifacts, fallbackReasons };
 }
 
-async function materializeOne(writer, item, bin, env, fetchImpl) {
+async function materializeOne(writer, item, bin, bycliBin, env, fetchImpl) {
   const paths = materializationPaths(item);
   const artifact = `raw/${item.sourceType}-get-${paths.suffix}.json`;
   const args = item.sourceType === 'note'
@@ -413,19 +544,34 @@ async function materializeOne(writer, item, bin, env, fetchImpl) {
     : ['wiki', 'search', item.title, ...(item.materializationKb ? ['--kb', item.materializationKb] : []), '--json'];
   const createdFiles = [];
   let rawArtifacts = item.rawArtifacts;
+  let materializedItem = item;
+  let wechatImages = [];
   try {
     let content = '';
     try {
-      const response = await callJson(writer, bin, env, args, artifact);
-      rawArtifacts = [...item.rawArtifacts, artifact];
-      content = contentOf(response) || item.preview;
+      if (item.sourceType === 'wiki' && isTrustedWechatArticleUrl(item.sourceUrl)) {
+        const downloaded = await bycliWechatDownload(writer, bycliBin, env, item, paths);
+        rawArtifacts = [...item.rawArtifacts, downloaded.artifact, downloaded.savedArtifact];
+        wechatImages = await prepareWechatImages(downloaded.savedPath, paths.sanitizedPath);
+        content = sanitizeWechatMarkdown(downloaded.content, wechatImages);
+        materializedItem = { ...item, completeEvidence: true };
+      } else {
+        const response = await callJson(writer, bin, env, args, artifact);
+        rawArtifacts = [...item.rawArtifacts, artifact];
+        content = contentOf(response) || item.preview;
+      }
     } catch (error) {
+      if (Array.isArray(error?.rawArtifacts)) rawArtifacts = [...item.rawArtifacts, ...error.rawArtifacts];
       content = discoveryExcerptOf(item);
       if (!content) throw error;
     }
     if (!content) throw new Error(`ima ${item.sourceType} returned no content`);
     if (Buffer.byteLength(content, 'utf8') > MAX_CONTENT_BYTES) {
       throw new Error('IMA content exceeds materialization limit');
+    }
+    for (const image of wechatImages) {
+      await writer.writeBytes(image.targetPath, image.bytes);
+      createdFiles.push(image.targetPath);
     }
     const coverResult = await prepareCovers(item, fetchImpl);
     const covers = [];
@@ -439,7 +585,7 @@ async function materializeOne(writer, item, bin, env, fetchImpl) {
         coverResult.failures.push('cover-write-failed');
       }
     }
-    const markdown = renderedMarkdown(content, item, covers.map((cover) => cover.markdown));
+    const markdown = renderedMarkdown(content, materializedItem, covers.map((cover) => cover.markdown));
     await writer.writeText(paths.markdownPath, markdown);
     createdFiles.push(paths.markdownPath);
     await writer.writeText(paths.sanitizedPath, markdown);
@@ -456,11 +602,11 @@ async function materializeOne(writer, item, bin, env, fetchImpl) {
           materializedCoverCount: covers.length,
           reason: [...new Set(coverResult.failures)].join(','),
         };
-    return inventoryItem(item, rawArtifacts, {
+    return inventoryItem(materializedItem, rawArtifacts, {
       status: 'materialized',
       ...paths,
       reason: null,
-      contentGranularity: imaContentGranularity(item),
+      contentGranularity: imaContentGranularity(materializedItem),
     }, media);
   } catch (error) {
     await writer.removeFiles(createdFiles);
@@ -535,7 +681,7 @@ export function createImaAdapter(dependencies = {}) {
       const materialized = [];
       if (!normalized.metadataOnly) {
         for (const item of discovery.found) {
-          try { materialized.push(await materializeOne(writer, item, bin, env, fetchImpl)); }
+          try { materialized.push(await materializeOne(writer, item, bin, bycliBin, env, fetchImpl)); }
           catch (error) { materialized.push(failedInventory(item, error)); }
         }
       }
@@ -562,11 +708,11 @@ export function createImaAdapter(dependencies = {}) {
   async function materialize(request = {}) {
     const writer = await createArtifactWriter(request.outputDir);
     const candidates = await copyResumeArtifacts(writer, await readResumeCandidates(request.sessionDir, identity.source, request.itemIds || []));
-    if (candidates.some((item) => !discoveryExcerptOf(item))) await authCheck(bin, env);
+    if (candidates.some(requiresImaAuthForMaterialization)) await authCheck(bin, env);
     const kb = commonKnowledgeBase(candidates);
     const inventory = [];
     for (const item of candidates) {
-      try { inventory.push(await materializeOne(writer, item, bin, env, fetchImpl)); }
+      try { inventory.push(await materializeOne(writer, item, bin, bycliBin, env, fetchImpl)); }
       catch (error) { inventory.push(failedInventory(item, error)); }
     }
     const canonicalItems = inventory.filter((item) => item.materialization.status === 'materialized').map((item) => ({ title: item.title, url: item.sourceUrl, author: '', publishTime: '', markdown: item.materialization.sanitizedPath, fileName: item.materialization.sanitizedPath }));
