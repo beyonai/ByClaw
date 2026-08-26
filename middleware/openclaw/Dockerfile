@@ -263,6 +263,20 @@ RUN set -eux; \
     ln -sf /usr/local/bin/websockify /usr/bin/websockify; \
     websockify --help >/dev/null
 
+COPY middleware/openclaw/searxng-cli/requirements.txt /tmp/searxng-cli-requirements.txt
+RUN python3 -m venv /opt/searxng-cli-venv \
+    && /opt/searxng-cli-venv/bin/python -m pip install --no-cache-dir \
+        --requirement /tmp/searxng-cli-requirements.txt \
+    && /opt/searxng-cli-venv/bin/python -c 'import flask, httpx, lxml, msgspec, typer, yaml'
+
+COPY middleware/openclaw/searxng-cli/ /opt/searxng-cli/
+RUN set -eux; \
+    printf '%s\n' '#!/bin/sh' \
+        'exec /opt/searxng-cli-venv/bin/python /opt/searxng-cli/searxng_cli.py "$@"' \
+        > /usr/local/bin/searxng-cli; \
+    chmod 755 /usr/local/bin/searxng-cli; \
+    searxng-cli --list-engines >/dev/null
+
 COPY middleware/openclaw/verify-runtime-toolchain.sh /usr/local/bin/verify-runtime-toolchain
 RUN chmod +x /usr/local/bin/verify-runtime-toolchain \
     && /usr/local/bin/verify-runtime-toolchain

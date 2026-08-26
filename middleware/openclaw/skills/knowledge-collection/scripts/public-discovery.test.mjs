@@ -9,29 +9,44 @@ import * as publicDiscovery from './public-discovery.mjs';
 
 const { runPublicDiscover } = publicDiscovery;
 
-test('requires the managed SearXNG environment when no interpreter override is configured', () => {
-  assert.throws(
-    () => publicDiscovery.resolveSearxngPython({}, {}, () => false),
-    /SearXNG Python 环境不存在[\s\S]*bootstrap-venv\.sh[\s\S]*ONLINE_SEARCH_PYTHON/,
+test('uses the image-wide SearXNG CLI by default', () => {
+  assert.deepEqual(
+    publicDiscovery.resolveSearxngRuntime({}, {}),
+    { executable: 'searxng-cli', argsPrefix: [] },
   );
 });
 
-test('prefers explicit SearXNG interpreter overrides over the managed environment', () => {
-  assert.equal(
-    publicDiscovery.resolveSearxngPython(
+test('prefers explicit SearXNG interpreter overrides over the image-wide command', () => {
+  assert.deepEqual(
+    publicDiscovery.resolveSearxngRuntime(
       { pythonExecutable: '/custom/python' },
       { ONLINE_SEARCH_PYTHON: '/environment/python' },
-      () => false,
     ),
-    '/custom/python',
+    { executable: '/custom/python', argsPrefix: ['/opt/searxng-cli/searxng_cli.py'] },
   );
-  assert.equal(
-    publicDiscovery.resolveSearxngPython(
+  assert.deepEqual(
+    publicDiscovery.resolveSearxngRuntime(
       {},
       { ONLINE_SEARCH_PYTHON: '/environment/python' },
-      () => false,
     ),
-    '/environment/python',
+    { executable: '/environment/python', argsPrefix: ['/opt/searxng-cli/searxng_cli.py'] },
+  );
+});
+
+test('supports an explicit SearXNG script path for local development', () => {
+  assert.deepEqual(
+    publicDiscovery.resolveSearxngRuntime(
+      { pythonExecutable: '/custom/python', searxngScript: '/workspace/searxng_cli.py' },
+      { ONLINE_SEARCH_PYTHON: '/environment/python', ONLINE_SEARCH_SCRIPT: '/environment/searxng_cli.py' },
+    ),
+    { executable: '/custom/python', argsPrefix: ['/workspace/searxng_cli.py'] },
+  );
+  assert.deepEqual(
+    publicDiscovery.resolveSearxngRuntime(
+      {},
+      { ONLINE_SEARCH_PYTHON: '/environment/python', ONLINE_SEARCH_SCRIPT: '/environment/searxng_cli.py' },
+    ),
+    { executable: '/environment/python', argsPrefix: ['/environment/searxng_cli.py'] },
   );
 });
 

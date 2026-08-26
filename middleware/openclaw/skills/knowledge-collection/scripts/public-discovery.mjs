@@ -15,7 +15,7 @@ import { loadSession } from './session.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const onlineSearchRoot = resolve(scriptDir, '../references/online-search');
-const searxngScript = join(onlineSearchRoot, 'scripts/searxng_cli.py');
+const searxngRuntimeScript = '/opt/searxng-cli/searxng_cli.py';
 const hotDiscoveryScript = join(onlineSearchRoot, 'references/hot_discovery/scripts/hot_discovery.mjs');
 const adaptersPath = join(onlineSearchRoot, 'references/hot_discovery/adapters.md');
 const MAX_DIAGNOSTIC_STDERR_CHARS = 2_000;
@@ -36,20 +36,13 @@ function snapshotPath(inputDir, name) {
   return target;
 }
 
-export function resolveSearxngPython(options = {}, environment = process.env, pathExists = existsSync) {
-  if (options.pythonExecutable) return options.pythonExecutable;
-  if (environment.ONLINE_SEARCH_PYTHON) return environment.ONLINE_SEARCH_PYTHON;
-
-  const defaultPython = join(onlineSearchRoot, 'scripts/.venv/bin/python');
-  if (!pathExists(defaultPython)) {
-    const scriptsDir = join(onlineSearchRoot, 'scripts');
-    throw new Error(
-      `SearXNG Python 环境不存在：${defaultPython}\n`
-      + `请执行：cd ${scriptsDir} && ./bootstrap-venv.sh\n`
-      + '如由运维统一管理解释器，可显式设置 ONLINE_SEARCH_PYTHON。',
-    );
+export function resolveSearxngRuntime(options = {}, environment = process.env) {
+  const pythonExecutable = options.pythonExecutable || environment.ONLINE_SEARCH_PYTHON;
+  if (pythonExecutable) {
+    const script = options.searxngScript || environment.ONLINE_SEARCH_SCRIPT || searxngRuntimeScript;
+    return { executable: pythonExecutable, argsPrefix: [script] };
   }
-  return defaultPython;
+  return { executable: 'searxng-cli', argsPrefix: [] };
 }
 
 export async function runBoundedProcess({ bin, executable, args }, options = {}) {
@@ -160,15 +153,15 @@ export async function runPublicDiscover(paths, args, options = {}) {
   const searxngSnapshot = snapshotPath(inputDir, `${prefix}-searxng.json`);
   const hotSnapshot = snapshotPath(inputDir, `${prefix}-hot-discovery.json`);
   const mergedSnapshot = snapshotPath(inputDir, `${prefix}-merged.json`);
-  const pythonExecutable = resolveSearxngPython(options);
+  const searxngRuntime = resolveSearxngRuntime(options);
   const runSearxngProcess = options.runProcess || runPublicProcess;
   const runHotDiscoveryProcess = options.runProcess || runUnboundedPublicProcess;
   const searxngTimeoutMs = Math.max(1, Math.ceil(Number(timeout) * 1_000));
 
   const searxngSpec = {
     channel: 'searxng',
-    executable: pythonExecutable,
-    args: [searxngScript, query, '--category', category, '--language', language,
+    executable: searxngRuntime.executable,
+    args: [...searxngRuntime.argsPrefix, query, '--category', category, '--language', language,
       '--pageno', pageno, '--max-results', effectiveMaxResults, '--timeout', timeout,
       ...(timeRange ? ['--time-range', timeRange] : [])],
   };
