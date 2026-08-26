@@ -832,6 +832,7 @@ describe("createAgentWatchdog", () => {
                         "baiying_call",
                         "image_generate",
                         "byclaw_chat_context",
+                        "updateTaskPlan",
                     ],
                 },
             },
@@ -860,7 +861,7 @@ describe("createAgentWatchdog", () => {
         const next = writeConfigFile.mock.calls[0][0];
         const entry = next.agents.list.find((a: any) => a.id === agentId);
         expect(entry.tools).toEqual({
-            allow: ["read", "baiying_call", "image_generate", "byclaw_chat_context"],
+            allow: ["read", "baiying_call", "image_generate", "byclaw_chat_context", "updateTaskPlan"],
         });
         expect(next.skills.entries.__baiying_enhance_reload.enabled).toBe(false);
         expect(next.skills.entries.__baiying_enhance_reload.config.reason).toBe(
@@ -869,7 +870,7 @@ describe("createAgentWatchdog", () => {
         expect(
             next.skills.entries.__baiying_enhance_reload.config.managedSnapshotSignature,
         ).toContain(
-            'tools={"allow":["read","baiying_call","image_generate","byclaw_chat_context"]}',
+            'tools={"allow":["read","baiying_call","image_generate","byclaw_chat_context","updateTaskPlan"]}',
         );
     });
 
@@ -1767,7 +1768,7 @@ describe("createAgentWatchdog", () => {
                 identity: { name: "Hub Skill Agent" },
                 skills: ["hub-skill"],
                 tools: {
-                    alsoAllow: ["baiying_call", "image_generate", "byclaw_chat_context"],
+                    alsoAllow: ["baiying_call", "image_generate", "byclaw_chat_context", "updateTaskPlan"],
                 },
             },
         ]) as any;

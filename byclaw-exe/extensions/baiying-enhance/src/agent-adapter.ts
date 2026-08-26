@@ -38,6 +38,7 @@ type NativeAgentJson = {
 const CODE_TO_WIKI_EMPLOYEE_NAME = "百应平台赋能助手";
 const CODE_TO_WIKI_TOOL_NAME = "code_to_wiki";
 const BYCLAW_CHAT_CONTEXT_TOOL_NAME = "byclaw_chat_context";
+const UPDATE_TASK_PLAN_TOOL_NAME = "updateTaskPlan";
 
 function isSkillRelResource(raw: Record<string, unknown>): boolean {
     const t = String(raw.resourceBizType ?? raw.resourceType ?? "").trim().toUpperCase();
@@ -349,6 +350,7 @@ function normalizeAgentListTools(
                       "baiying_call",
                       "image_generate",
                       BYCLAW_CHAT_CONTEXT_TOOL_NAME,
+                      UPDATE_TASK_PLAN_TOOL_NAME,
                       ...extraTools,
                   ]),
               ),
@@ -359,6 +361,7 @@ function normalizeAgentListTools(
                       "baiying_call",
                       "image_generate",
                       BYCLAW_CHAT_CONTEXT_TOOL_NAME,
+                      UPDATE_TASK_PLAN_TOOL_NAME,
                       ...extraTools,
                   ]),
               ),
@@ -541,6 +544,7 @@ export function adaptAgentJson(params: {
             identity: { name },
             experimental: MANAGED_AGENT_EXPERIMENTAL,
             skills: normalizeAgentListSkills(asRecord),
+            tools: normalizeAgentListTools(asRecord),
         };
         const hubSkills = normalizeHubSkillRefs(asRecord.relSkills);
         const extraSkillPaths = normalizeExtraSkillPaths(asRecord.relSkills, asRecord.extraSkills);
@@ -588,6 +592,7 @@ export function adaptAgentJson(params: {
         },
         experimental: MANAGED_AGENT_EXPERIMENTAL,
         skills: normalizeAgentListSkills(asRecord),
+        tools: normalizeAgentListTools(asRecord),
     };
     const hubSkills = normalizeHubSkillRefs(asRecord.relSkills);
     const extraSkillPaths = normalizeExtraSkillPaths(asRecord.relSkills, asRecord.extraSkills);
