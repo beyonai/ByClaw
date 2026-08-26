@@ -8,9 +8,8 @@ DROP TABLE IF EXISTS byai_agent_task_plan;
 
 CREATE TABLE byai_agent_task_plan
 (
-    plan_id               BIGINT       NOT NULL,
+    plan_id               BIGSERIAL    NOT NULL,
     user_id               BIGINT       NOT NULL,
-    user_code             VARCHAR(128),
     session_id            BIGINT       NOT NULL,
     message_id            BIGINT       NOT NULL,
     turn_id               VARCHAR(128),
@@ -18,7 +17,6 @@ CREATE TABLE byai_agent_task_plan
     trace_id              VARCHAR(128),
     source_runtime        VARCHAR(32)   NOT NULL,
     source_run_id         VARCHAR(128)  NOT NULL,
-    create_request_id     VARCHAR(128)  NOT NULL,
     title                 VARCHAR(500)  NOT NULL,
     last_explanation      VARCHAR(2000),
     status                VARCHAR(32)   NOT NULL,
@@ -26,16 +24,17 @@ CREATE TABLE byai_agent_task_plan
     status_reason_message VARCHAR(500),
     version               INT          NOT NULL,
     tasks_payload         TEXT         NOT NULL,
-    idempotency_payload   TEXT         NOT NULL,
+    last_command_id       VARCHAR(128)  NOT NULL,
     created_at            TIMESTAMP    NOT NULL,
     updated_at            TIMESTAMP    NOT NULL,
     completed_at          TIMESTAMP,
-    CONSTRAINT pk_byai_agent_task_plan PRIMARY KEY (plan_id),
-    CONSTRAINT uk_byai_agent_task_plan_execution
-        UNIQUE (user_id, session_id, message_id, source_runtime, source_run_id),
-    CONSTRAINT uk_byai_agent_task_plan_create
-        UNIQUE (user_id, source_runtime, source_run_id, create_request_id)
+    CONSTRAINT pk_byai_agent_task_plan PRIMARY KEY (plan_id)
 );
+
+-- 同一用户的同一会话在任意时刻最多存在一个非终态任务列表。
+CREATE UNIQUE INDEX uk_agent_task_plan_active
+    ON byai_agent_task_plan (user_id, session_id)
+    WHERE status IN ('ACTIVE', 'CANCELLING');
 
 CREATE INDEX idx_agent_task_plan_message
     ON byai_agent_task_plan (user_id, session_id, message_id, updated_at DESC);

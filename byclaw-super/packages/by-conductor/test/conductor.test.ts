@@ -2239,10 +2239,7 @@ describe("RunService task plan completion guard", () => {
       await input.updateTaskPlan!({
         toolCallId: "finish-plan",
         command: {
-          action: "update",
-          planId: "plan-1",
-          expectedVersion: 1,
-          updates: [{ taskId: "task-1", status: "COMPLETED" }],
+          action: "complete_current",
         },
       });
       await input.onDelta("最终回答");
@@ -2293,32 +2290,24 @@ describe("RunService task plan completion guard", () => {
           taskId: "task-1",
           position: 1,
           title: "调度数字员工",
-          status: "PENDING",
+          status: "IN_PROGRESS",
         },
       ],
     };
     const taskPlans: TaskPlanGateway = {
       loadActive: vi.fn(async () => currentPlan),
       command: vi.fn(async ({ command }) => {
-        if (command.action !== "update") {
-          throw new Error("expected update command");
+        if (command.action !== "complete_current") {
+          throw new Error("expected complete_current command");
         }
-        const updates = new Map(command.updates.map((update) => [update.taskId, update]));
-        const nextTasks = currentPlan.tasks.map((task) => {
-          const update = updates.get(task.taskId);
-          return update
-            ? {
-                ...task,
-                status: update.status,
-                ...(update.statusReason ? { statusReason: update.statusReason } : {}),
-              }
-            : task;
-        });
-        const completedPlan = nextTasks.every(({ status }) => status === "COMPLETED");
+        const nextTasks = currentPlan.tasks.map((task) => ({
+          ...task,
+          status: "COMPLETED" as const,
+        }));
         currentPlan = {
           ...currentPlan,
           version: currentPlan.version + 1,
-          status: completedPlan ? "COMPLETED" : "ACTIVE",
+          status: "COMPLETED",
           tasks: nextTasks,
         };
         return { ok: true, plan: currentPlan };
@@ -2329,28 +2318,16 @@ describe("RunService task plan completion guard", () => {
       yield completed("任务完成");
     });
     const { service } = createTaskPlanService(async (input) => {
-      await input.updateTaskPlan!({
-        toolCallId: "plan-start-current-task",
-        command: {
-          action: "update",
-          planId: "plan-1",
-          expectedVersion: 1,
-          updates: [{ taskId: "task-1", status: "IN_PROGRESS" }],
-        },
-      });
       const result = await input.delegate({
         agentId: agent.id,
         task: "执行当前任务",
       });
       expect(result.status).toBe("completed");
-      expect(taskPlans.command).toHaveBeenCalledTimes(1);
+      expect(taskPlans.command).not.toHaveBeenCalled();
       await input.updateTaskPlan!({
         toolCallId: "plan-complete-current-task",
         command: {
-          action: "update",
-          planId: "plan-1",
-          expectedVersion: 2,
-          updates: [{ taskId: "task-1", status: "COMPLETED" }],
+          action: "complete_current",
         },
       });
       return { text: "任务已经完成" };
@@ -2359,25 +2336,11 @@ describe("RunService task plan completion guard", () => {
     const run = await createTaskPlanRun(service, [agent]);
     await waitFor(async () => (await service.getRun(run.id))?.status === "COMPLETED");
 
-    expect(taskPlans.command).toHaveBeenCalledTimes(2);
-    expect(taskPlans.command).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({
-        idempotencyKey: "plan-start-current-task",
-        command: expect.objectContaining({
-          action: "update",
-          updates: [expect.objectContaining({ taskId: "task-1", status: "IN_PROGRESS" })],
-        }),
-      }),
-    );
-    expect(taskPlans.command).toHaveBeenNthCalledWith(
-      2,
+    expect(taskPlans.command).toHaveBeenCalledOnce();
+    expect(taskPlans.command).toHaveBeenCalledWith(
       expect.objectContaining({
         idempotencyKey: "plan-complete-current-task",
-        command: expect.objectContaining({
-          action: "update",
-          updates: [expect.objectContaining({ taskId: "task-1", status: "COMPLETED" })],
-        }),
+        command: { action: "complete_current" },
       }),
     );
     const delegation = (await service.getRunDetails(run.id))?.delegations[0];
@@ -2403,12 +2366,8 @@ describe("RunService task plan completion guard", () => {
     expect(taskPlans.command).toHaveBeenCalledWith(
       expect.objectContaining({
         command: expect.objectContaining({
-          updates: [
-            expect.objectContaining({
-              status: "FAILED",
-              statusReason: expect.objectContaining({ code: "RUN_FAILED" }),
-            }),
-          ],
+          action: "fail_current",
+          statusReason: expect.objectContaining({ code: "RUN_FAILED" }),
         }),
       }),
     );
@@ -2424,34 +2383,25 @@ describe("RunService task plan completion guard", () => {
           taskId: "task-1",
           position: 1,
           title: "调度数字员工",
-          status: "PENDING",
+          status: "IN_PROGRESS",
         },
       ],
     };
     const taskPlans: TaskPlanGateway = {
       loadActive: vi.fn(async () => currentPlan),
       command: vi.fn(async ({ command }) => {
-        if (command.action !== "update") {
-          throw new Error("expected update command");
+        if (command.action !== "fail_current") {
+          throw new Error("expected fail_current command");
         }
-        const updates = new Map(command.updates.map((update) => [update.taskId, update]));
-        const nextTasks = currentPlan.tasks.map((task) => {
-          const update = updates.get(task.taskId);
-          return update
-            ? {
-                ...task,
-                status: update.status,
-                ...(update.statusReason ? { statusReason: update.statusReason } : {}),
-              }
-            : task;
-        });
-        const nextStatus = nextTasks.some(({ status }) => status === "FAILED")
-          ? "FAILED"
-          : "ACTIVE";
+        const nextTasks = currentPlan.tasks.map((task) => ({
+          ...task,
+          status: "FAILED" as const,
+          ...(command.statusReason ? { statusReason: command.statusReason } : {}),
+        }));
         currentPlan = {
           ...currentPlan,
           version: currentPlan.version + 1,
-          status: nextStatus,
+          status: "FAILED",
           tasks: nextTasks,
         };
         return { ok: true, plan: currentPlan };
@@ -2469,37 +2419,20 @@ describe("RunService task plan completion guard", () => {
       };
     });
     const { service } = createTaskPlanService(async (input) => {
-      await input.updateTaskPlan!({
-        toolCallId: "plan-start-delegated-task",
-        command: {
-          action: "update",
-          planId: "plan-1",
-          expectedVersion: 1,
-          updates: [{ taskId: "task-1", status: "IN_PROGRESS" }],
-        },
-      });
       const result = await input.delegate({
         agentId: agent.id,
         task: "调度数字员工执行任务",
       });
       expect(result.status).toBe("failed");
-      expect(taskPlans.command).toHaveBeenCalledTimes(1);
+      expect(taskPlans.command).not.toHaveBeenCalled();
       await input.updateTaskPlan!({
         toolCallId: "plan-fail-delegated-task",
         command: {
-          action: "update",
-          planId: "plan-1",
-          expectedVersion: 2,
-          updates: [
-            {
-              taskId: "task-1",
-              status: "FAILED",
-              statusReason: {
-                code: "DIGITAL_EMPLOYEE_UNAVAILABLE",
-                message: "employee unavailable",
-              },
-            },
-          ],
+          action: "fail_current",
+          statusReason: {
+            code: "DIGITAL_EMPLOYEE_UNAVAILABLE",
+            message: "employee unavailable",
+          },
         },
       });
       return { text: "数字员工调度失败，任务未完成" };
@@ -2508,30 +2441,16 @@ describe("RunService task plan completion guard", () => {
     const run = await createTaskPlanRun(service, [agent]);
     await waitFor(async () => (await service.getRun(run.id))?.status === "COMPLETED");
 
-    expect(taskPlans.command).toHaveBeenCalledTimes(2);
-    expect(taskPlans.command).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({
-        idempotencyKey: "plan-start-delegated-task",
-        command: expect.objectContaining({
-          updates: [expect.objectContaining({ status: "IN_PROGRESS" })],
-        }),
-      }),
-    );
-    expect(taskPlans.command).toHaveBeenNthCalledWith(
-      2,
+    expect(taskPlans.command).toHaveBeenCalledOnce();
+    expect(taskPlans.command).toHaveBeenCalledWith(
       expect.objectContaining({
         idempotencyKey: "plan-fail-delegated-task",
         command: expect.objectContaining({
-          updates: [
-            expect.objectContaining({
-              status: "FAILED",
-              statusReason: {
-                code: "DIGITAL_EMPLOYEE_UNAVAILABLE",
-                message: "employee unavailable",
-              },
-            }),
-          ],
+          action: "fail_current",
+          statusReason: {
+            code: "DIGITAL_EMPLOYEE_UNAVAILABLE",
+            message: "employee unavailable",
+          },
         }),
       }),
     );
@@ -2548,33 +2467,25 @@ describe("RunService task plan completion guard", () => {
           taskId: "task-1",
           position: 1,
           title: "等待数字员工回调",
-          status: "PENDING",
+          status: "IN_PROGRESS",
         },
       ],
     };
     const taskPlans: TaskPlanGateway = {
       loadActive: vi.fn(async () => currentPlan),
       command: vi.fn(async ({ command }) => {
-        if (command.action !== "update") {
-          throw new Error("expected update command");
+        if (command.action !== "fail_current") {
+          throw new Error("expected fail_current command");
         }
-        const updates = new Map(command.updates.map((update) => [update.taskId, update]));
-        const nextTasks = currentPlan.tasks.map((task) => {
-          const update = updates.get(task.taskId);
-          return update
-            ? {
-                ...task,
-                status: update.status,
-                ...(update.statusReason ? { statusReason: update.statusReason } : {}),
-              }
-            : task;
-        });
+        const nextTasks = currentPlan.tasks.map((task) => ({
+          ...task,
+          status: "FAILED" as const,
+          ...(command.statusReason ? { statusReason: command.statusReason } : {}),
+        }));
         currentPlan = {
           ...currentPlan,
           version: currentPlan.version + 1,
-          status: nextTasks.some(({ status }) => status === "FAILED")
-            ? "FAILED"
-            : "ACTIVE",
+          status: "FAILED",
           tasks: nextTasks,
         };
         return { ok: true, plan: currentPlan };
@@ -2585,15 +2496,6 @@ describe("RunService task plan completion guard", () => {
     const { service } = createTaskPlanService(async (input) => {
       leaderAttempt += 1;
       if (leaderAttempt === 1) {
-        await input.updateTaskPlan!({
-          toolCallId: "plan-start-callback-task",
-          command: {
-            action: "update",
-            planId: "plan-1",
-            expectedVersion: 1,
-            updates: [{ taskId: "task-1", status: "IN_PROGRESS" }],
-          },
-        });
         try {
           await input.delegate({
             agentId: agent.id,
@@ -2608,23 +2510,15 @@ describe("RunService task plan completion guard", () => {
         throw new Error("expected callback delegation to suspend");
       }
       expect(input.message).toContain("trusted platform callback");
-      expect(taskPlans.command).toHaveBeenCalledTimes(1);
+      expect(taskPlans.command).not.toHaveBeenCalled();
       await input.updateTaskPlan!({
         toolCallId: "plan-fail-callback-task",
         command: {
-          action: "update",
-          planId: "plan-1",
-          expectedVersion: 2,
-          updates: [
-            {
-              taskId: "task-1",
-              status: "FAILED",
-              statusReason: {
-                code: "DIGITAL_EMPLOYEE_UNAVAILABLE",
-                message: "digital employee unavailable",
-              },
-            },
-          ],
+          action: "fail_current",
+          statusReason: {
+            code: "DIGITAL_EMPLOYEE_UNAVAILABLE",
+            message: "digital employee unavailable",
+          },
         },
       });
       return { text: "数字员工失败，任务已收口" };
@@ -2645,20 +2539,16 @@ describe("RunService task plan completion guard", () => {
     ).resolves.toMatchObject({ accepted: true, runId: run.id });
     await waitFor(async () => (await service.getRun(run.id))?.status === "COMPLETED");
 
-    expect(taskPlans.command).toHaveBeenCalledTimes(2);
+    expect(taskPlans.command).toHaveBeenCalledOnce();
     expect(taskPlans.command).toHaveBeenLastCalledWith(
       expect.objectContaining({
         idempotencyKey: "plan-fail-callback-task",
         command: expect.objectContaining({
-          updates: [
-            expect.objectContaining({
-              status: "FAILED",
-              statusReason: {
-                code: "DIGITAL_EMPLOYEE_UNAVAILABLE",
-                message: "digital employee unavailable",
-              },
-            }),
-          ],
+          action: "fail_current",
+          statusReason: {
+            code: "DIGITAL_EMPLOYEE_UNAVAILABLE",
+            message: "digital employee unavailable",
+          },
         }),
       }),
     );

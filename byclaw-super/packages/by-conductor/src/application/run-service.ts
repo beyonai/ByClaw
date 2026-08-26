@@ -1910,38 +1910,15 @@ function validateAgentList(agentList: AgentProfile[]): void {
 }
 
 function taskPlanCommandForRunFailure(snapshot: TaskPlanSnapshot): TaskPlanCommand {
-  const orderedTasks = [...snapshot.tasks].sort(
-    (left, right) => left.position - right.position,
-  );
-  const running = orderedTasks.find(({ status }) => status === "IN_PROGRESS");
-  const pending = orderedTasks.find(({ status }) => status === "PENDING");
-  const task = running ?? pending;
-  if (!task) {
+  if (!snapshot.tasks.some(({ status }) => status === "IN_PROGRESS")) {
     throw new Error("Active task plan has no unfinished task to close");
   }
   return {
-    action: "update",
-    planId: snapshot.planId,
-    expectedVersion: snapshot.version,
-    updates: [
-      running
-        ? {
-            taskId: task.taskId,
-            status: "FAILED",
-            statusReason: {
-              code: "RUN_FAILED",
-              message: "运行失败，任务计划已自动收口",
-            },
-          }
-        : {
-            taskId: task.taskId,
-            status: "IN_PROGRESS",
-            statusReason: {
-              code: "RUN_FAILING",
-              message: "运行失败，正在收口任务计划",
-            },
-          },
-    ],
+    action: "fail_current",
+    statusReason: {
+      code: "RUN_FAILED",
+      message: "运行失败，任务计划已自动收口",
+    },
   };
 }
 

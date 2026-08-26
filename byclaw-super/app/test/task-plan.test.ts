@@ -14,7 +14,7 @@ function snapshot(version = 1) {
     sourceRunId: "run-1",
     tasks: [
       {
-        taskId: "4001",
+        taskId: "1",
         position: 1,
         title: "分析协议",
         status: "IN_PROGRESS",
@@ -68,7 +68,7 @@ describe("ByClaw BE task plan gateway", () => {
     });
   });
 
-  it("injects ownership and sends only IDs and statuses when updating", async () => {
+  it("injects ownership and sends a current-task action without internal IDs", async () => {
     const fetchImpl = vi.fn(async () =>
       Response.json({
         code: 0,
@@ -93,15 +93,7 @@ describe("ByClaw BE task plan gateway", () => {
       },
       idempotencyKey: "tool-call-1",
       command: {
-        action: "update",
-        planId: "1001",
-        expectedVersion: 1,
-        updates: [
-          {
-            taskId: "4001",
-            status: "COMPLETED",
-          },
-        ],
+        action: "complete_current",
       },
     });
 
@@ -115,15 +107,13 @@ describe("ByClaw BE task plan gateway", () => {
       messageId: "3001",
       sourceRuntime: "BYCLAW_SUPER",
       sourceRunId: "run-1",
-      action: "UPDATE",
-      planId: "1001",
-      expectedVersion: 1,
+      action: "COMPLETE_CURRENT",
     });
     expect(JSON.parse(String(init?.body))).not.toHaveProperty("title");
     expect(JSON.parse(String(init?.body))).not.toHaveProperty("tasks");
-    expect(JSON.parse(String(init?.body)).updates).toEqual([
-      { taskId: "4001", status: "COMPLETED" },
-    ]);
+    expect(JSON.parse(String(init?.body))).not.toHaveProperty("planId");
+    expect(JSON.parse(String(init?.body))).not.toHaveProperty("taskId");
+    expect(JSON.parse(String(init?.body))).not.toHaveProperty("expectedVersion");
   });
 
   it("parses a machine-readable conflict with the latest plan", async () => {
@@ -154,10 +144,7 @@ describe("ByClaw BE task plan gateway", () => {
         },
         idempotencyKey: "tool-call-stale",
         command: {
-          action: "update",
-          planId: "1001",
-          expectedVersion: 2,
-          updates: [{ taskId: "4001", status: "COMPLETED" }],
+          action: "complete_current",
         },
       }),
     ).resolves.toMatchObject({

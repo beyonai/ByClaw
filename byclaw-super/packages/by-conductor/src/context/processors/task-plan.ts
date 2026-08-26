@@ -44,14 +44,12 @@ ${JSON.stringify(snapshot)}
 </active_task_plan>
 <task_plan_policy>
 For a request with multiple meaningful execution steps, call updateTaskPlan with action=create before doing the work when active_task_plan is null.
-For a complex request that needs user confirmation, create the task plan before calling askUserQuestion; waiting for confirmation may leave every task pending.
-When active_task_plan exists, never create a second plan. Call action=update with its exact planId, version as expectedVersion, and taskId values.
-After creation, task definitions are immutable. Updates may contain only taskId, status, and optional statusReason.
-Keep at most one task in progress because this runtime executes Leader work sequentially.
-When delegating work for an active plan, the runtime selects and advances the authoritative current task. Do not choose or modify an earlier task position.
-The system owns execution identity, plan identity, versions, and task IDs. Never invent them; only copy trusted values from active_task_plan or a Tool Result.
-If an update fails, read error.code and currentPlan, then retry once using currentPlan IDs and version without repeating the rejected parameters.
-An active plan prevents the Run from completing. Before the final user answer, reconcile every task to a terminal status and update the plan one final time.
+For a complex request that needs user confirmation, create the task plan before calling askUserQuestion.
+When active_task_plan exists, never create a second plan. Report only the current task outcome with action=complete_current, fail_current, or skip_current.
+After creation, task definitions are immutable. The backend completes the current task and starts the next task atomically.
+The runtime owns session identity, plan identity, versions, task IDs, and task selection. Never invent or request those identifiers.
+If an update fails, read error.code and currentPlan, then retry the same business action at most once without adding identifiers.
+An active plan prevents the Run from completing. Before the final user answer, report the current task outcome until the plan reaches a terminal status.
 </task_plan_policy>`,
   };
 }

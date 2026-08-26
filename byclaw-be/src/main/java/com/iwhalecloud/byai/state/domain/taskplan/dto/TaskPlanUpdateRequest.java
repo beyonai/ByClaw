@@ -9,7 +9,7 @@ import lombok.Data;
 @Data
 public class TaskPlanUpdateRequest {
 
-    /** CREATE 首次定义计划；UPDATE 后续只按 taskId 更新状态。 */
+    /** CREATE 首次定义计划；其余动作只推进当前任务。 */
     private String action;
 
     private String idempotencyKey;
@@ -28,19 +28,14 @@ public class TaskPlanUpdateRequest {
 
     private String sourceRunId;
 
-    /** UPDATE 时由后端首次 CREATE 返回。 */
-    private String planId;
-
-    /** UPDATE 的乐观锁版本。 */
-    private Integer expectedVersion;
-
     private String title;
 
     private String explanation;
 
     private List<TaskInput> tasks = new ArrayList<>();
 
-    private List<TaskStatusUpdate> updates = new ArrayList<>();
+    /** FAIL_CURRENT/SKIP_CURRENT 可携带原因；由 Super 从扁平 Tool 参数组装。 */
+    private StatusReasonInput statusReason;
 
     @Data
     public static class TaskInput {
@@ -49,19 +44,6 @@ public class TaskPlanUpdateRequest {
 
         private String description;
 
-        private String status;
-
-        private StatusReasonInput statusReason;
-    }
-
-    @Data
-    public static class TaskStatusUpdate {
-
-        private String taskId;
-
-        private String status;
-
-        private StatusReasonInput statusReason;
     }
 
     @Data
