@@ -490,6 +490,49 @@ test('createArtifactWriter requires a new absolute output root and creates a pri
   }
 });
 
+test('createArtifactWriter publishes into an empty initialized collection session', async () => {
+  const { createArtifactWriter } = await import('./artifact-writer.mjs');
+  const { ensureSessionSkeleton, newSession } = await import('../../session.mjs');
+  const { root } = await tempCase('enterprise-existing-session-');
+  const outputDir = join(root, 'output');
+  try {
+    ensureSessionSkeleton(outputDir);
+    const original = newSession({
+      query: '采集企业知识库', sourceScope: ['ima'], materializationTarget: 'all',
+    });
+    await writeFile(join(outputDir, 'session.json'), `${JSON.stringify(original)}\n`);
+
+    const writer = await createArtifactWriter(outputDir);
+    await writer.writeText('markdown/items/article/index.md', '# Article\n');
+    await writer.writeText('sanitized/items/article/index.md', '# Article\n');
+    await writer.writeCollectionBundle({
+      title: 'IMA collection', source: 'ima', backend: 'ima', url: 'ima://search', filters: {},
+      inventory: [{
+        itemId: 'ima-1', title: 'Article', sourceUrl: 'ima://article/1', sourceItemId: '1',
+        sourceSkill: 'ima-skill', backend: 'ima', collectionFilters: {}, rawArtifacts: [],
+        materialization: {
+          status: 'materialized', markdownPath: 'markdown/items/article/index.md',
+          sanitizedPath: 'sanitized/items/article/index.md', pendingArtifactCleanup: [],
+          reason: null, contentGranularity: 'excerpt',
+        },
+      }],
+      canonicalItems: [{
+        title: 'Article', url: 'ima://article/1', author: '', publishTime: '',
+        markdown: 'sanitized/items/article/index.md', fileName: 'sanitized/items/article/index.md',
+      }],
+      sourceMetadata: {},
+    });
+
+    const session = JSON.parse(await readFile(join(outputDir, 'session.json'), 'utf8'));
+    assert.equal(session.task.query, '采集企业知识库');
+    assert.deepEqual(session.task.sourceScope, ['ima']);
+    assert.equal(session.task.materializationTarget, 'all');
+    assert.equal(session.collection.collection.items.length, 1);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('createArtifactWriter privately creates missing parents without changing existing parent permissions', async () => {
   const { createArtifactWriter } = await import('./artifact-writer.mjs');
   const { root } = await tempCase('enterprise-artifact-missing-parents-');

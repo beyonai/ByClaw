@@ -49,6 +49,22 @@ function requireAbsoluteOutputDir(values) {
   return outputDir;
 }
 
+export function resolveEnterpriseOutputRoot(parentSessionDir, requestedOutputDir) {
+  if (!isAbsolute(parentSessionDir) || !isAbsolute(requestedOutputDir)) {
+    throw new Error('enterprise session paths must be absolute');
+  }
+  const parent = resolve(parentSessionDir);
+  const requested = resolve(requestedOutputDir);
+  const rawRoot = resolve(parent, 'raw');
+  const fromRaw = relative(rawRoot, requested);
+  if (requested === parent
+    || requested === rawRoot
+    || (fromRaw && fromRaw !== '..' && !fromRaw.startsWith(`..${sep}`) && !isAbsolute(fromRaw))) {
+    return parent;
+  }
+  return requested;
+}
+
 export function assertEnterpriseScope(parentSessionDir, requestedSources) {
   if (typeof parentSessionDir !== 'string' || !isAbsolute(parentSessionDir)) {
     throw new Error('--parent-session-dir must be an absolute initialized collection session');
@@ -174,7 +190,7 @@ function help() {
     usage: 'knowledge-collection.mjs enterprise search|search-all|materialize|resource|resume-resource [options]',
     defaults: 'search defaults: limit 50, concurrency 4, cursor null, metadata-only false; search-all defaults: sources dingtalk,feishu,wecom,ima, limit 50, concurrency 4, metadata-only true',
     commands: {
-      search: '--parent-session-dir <absolute-path> --source dingtalk|feishu|wecom|ima --query <query> --output-dir <absolute-path> [--limit 1..500] [--concurrency 1..16] [--cursor <cursor>] [--metadata-only [true|false]] [--source-options <json>]',
+      search: '--parent-session-dir <absolute-path> --source dingtalk|feishu|wecom|ima --query <query> --output-dir <same path as parent-session-dir> [--limit 1..500] [--concurrency 1..16] [--cursor <cursor>] [--metadata-only [true|false]] [--source-options <json>]',
       searchAll: '--parent-session-dir <absolute-path> [--sources dingtalk,feishu,wecom,ima] --query <query> --output-root <absolute-path> [--limit 1..500] [--concurrency 1..16] [--metadata-only [true|false]]; defaults to all sources and metadata-only; continues after a connector auth failure',
       materialize: '--source dingtalk|feishu|ima --session-dir <metadata-only-session> --item-ids <id[,id...]> --output-dir <new-absolute-path> [--concurrency 1..16]',
       resource: '--parent-session-dir <absolute-path> --source dingtalk|feishu|wecom|ima --url <http(s)-url> --output-dir <absolute-path> [--minute-token <token> for feishu]',
@@ -258,6 +274,12 @@ async function main() {
       ? requireValue(values, 'parent-session-dir') : requireValue(values, 'session-dir');
     assertEnterpriseScope(scopeSessionDir, [requireValue(values, 'source')]);
     const { ['parent-session-dir']: _parentSessionDir, ...dispatchValues } = values;
+    if (command === 'search') {
+      dispatchValues['output-dir'] = resolveEnterpriseOutputRoot(
+        scopeSessionDir,
+        requireAbsoluteOutputDir(values),
+      );
+    }
     render(await dispatchEnterprise(command, dispatchValues));
     return;
   }

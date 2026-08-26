@@ -200,6 +200,16 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, skill)
 
+    def test_single_enterprise_source_publishes_into_the_initialized_session_root(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        contract = (SKILL_ROOT / "references" / "collection-contract.md").read_text(encoding="utf-8")
+        ima = (SKILL_ROOT / "references" / "sources" / "ima.md").read_text(encoding="utf-8")
+
+        for text in (skill, contract, ima):
+            self.assertIn("--output-dir` 必须等于 `--parent-session-dir", text)
+            self.assertIn("raw/ima/sanitized/items", text)
+        self.assertIn("禁止在 `raw/` 下创建第二个完整采集会话", contract)
+
     def test_agent_reach_backends_share_one_collection_contract(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
 

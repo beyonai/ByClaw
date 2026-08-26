@@ -16,7 +16,7 @@ import {
   normalizeContentGranularity,
   normalizeMediaState,
 } from './status-model.mjs';
-import { newSession } from '../../session.mjs';
+import { loadSession, newSession, sessionPaths } from '../../session.mjs';
 
 const PRIVATE_DIRECTORY_MODE = 0o700;
 const PRIVATE_FILE_MODE = 0o600;
@@ -305,6 +305,39 @@ async function createPrivateRoot(normalizedRoot) {
   }
 }
 
+async function openInitializedSessionRoot(normalizedRoot) {
+  let rootEntry;
+  try {
+    rootEntry = await lstat(normalizedRoot);
+  } catch (error) {
+    if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return null;
+    throw error;
+  }
+  const rejectExisting = () => new Error('output root must not already exist unless it is an empty initialized collection session');
+  if (!rootEntry.isDirectory() || rootEntry.isSymbolicLink()) throw rejectExisting();
+  assertSafeDirectoryMode(rootEntry);
+  let session;
+  try {
+    session = loadSession(sessionPaths(normalizedRoot), { persistMigration: false }).session;
+  } catch {
+    throw rejectExisting();
+  }
+  if (session.task?.status !== 'initialized'
+    || session.task?.publicationStatus
+    || !Array.isArray(session.collection?.collection?.items)
+    || session.collection.collection.items.length !== 0) {
+    throw rejectExisting();
+  }
+  for (const relativePath of REQUIRED_DIRECTORIES) {
+    const entry = await lstat(resolve(normalizedRoot, relativePath));
+    if (!entry.isDirectory() || entry.isSymbolicLink()) throw rejectExisting();
+  }
+  return {
+    rootIdentity: { dev: rootEntry.dev, ino: rootEntry.ino },
+    session: structuredClone(session),
+  };
+}
+
 /*
  * Threat model: private/sticky parent checks, inode identity checks, sibling staging,
  * and atomic renames protect against different-user path replacement. Node's path APIs
@@ -590,7 +623,9 @@ export async function createArtifactWriter(root) {
     throw new TypeError('output root must be an absolute path');
   }
   const normalizedRoot = resolve(root);
-  const rootIdentity = await createPrivateRoot(normalizedRoot);
+  const initializedRoot = await openInitializedSessionRoot(normalizedRoot);
+  const rootIdentity = initializedRoot?.rootIdentity || await createPrivateRoot(normalizedRoot);
+  const ownsRoot = !initializedRoot;
   let publicationState = 'open';
 
   const writer = {
@@ -653,7 +688,7 @@ export async function createArtifactWriter(root) {
       if (publicationState === 'publishing') {
         throw new Error('cannot abort a collection bundle publication in progress');
       }
-      await removeOwnedPath(normalizedRoot, rootIdentity, true);
+      if (ownsRoot) await removeOwnedPath(normalizedRoot, rootIdentity, true);
       publicationState = 'aborted';
     },
 
@@ -701,13 +736,20 @@ export async function createArtifactWriter(root) {
         if (!['candidates', 'selected', 'all'].includes(materializationTarget)) {
           throw new TypeError('bundle.materializationTarget is invalid');
         }
-        const session = newSession({
-          query: bundle.query || title,
-          sourceScope: [...new Set(sourceScope)],
-          materializationTarget,
-          status: status === 'failed' ? 'failed' : 'collected',
-          publicationStatus: 'uncommitted',
-        });
+        const session = initializedRoot
+          ? structuredClone(initializedRoot.session)
+          : newSession({
+            query: bundle.query || title,
+            sourceScope: [...new Set(sourceScope)],
+            materializationTarget,
+          });
+        if (initializedRoot) {
+          const allowed = new Set(session.task.sourceScope || []);
+          const denied = sourceScope.filter((entry) => !allowed.has(entry));
+          if (denied.length) throw new Error(`initialized session sourceScope does not allow: ${denied.join(', ')}`);
+        }
+        session.task.status = status === 'failed' ? 'failed' : 'collected';
+        session.task.publicationStatus = 'uncommitted';
         session.collection = metadata;
         await writePersistedJson(normalizedRoot, rootIdentity, 'sanitized/metadata.json', metadata);
         await writePersistedJson(normalizedRoot, rootIdentity, 'session.json', session);

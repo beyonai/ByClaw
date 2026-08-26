@@ -18,6 +18,7 @@ IMA 采集意图由 `knowledge-collection` 统一编排。笔记和一般 IMA �
 3. 所有支持 JSON 的命令必须带 `--json`，成功依据退出码和 JSON 结构共同判断。
 4. 指定知识库的文章详情列表先调用 `bycli ima knowledge <knowledgeBase> -f json`。仅当该调用失败或返回无效 JSON 时，才调用一次 `ima wiki search` 兜底；有效空列表是成功结果，不得兜底。两者都失败时如实返回失败原因，不得伪造结果。
 5. IMA 桥接只允许搜索、读取和采集笔记或 Wiki 内容；URL 导入等写入能力不属于本技能。
+6. 单一 IMA 采集会话中，`enterprise search` 的 `--output-dir` 必须等于 `--parent-session-dir`。禁止把 `raw/ima/` 初始化成第二个会话，也不得交付 `raw/ima/sanitized/items`；最终正文只能位于会话根级 `sanitized/items/`。
 
 ## 规范化产物
 

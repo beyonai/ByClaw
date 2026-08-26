@@ -74,6 +74,8 @@ collection_filters:
 
 同一采集任务只能有一个初始化后的会话根目录。来源执行器或人工补采工具产生的下载目录、图片和原始 Markdown 必须位于该会话的 `raw/` 子树；由此生成的工作副本必须位于 `markdown/items/`，最终正文必须位于 `sanitized/items/`。当原始来源响应已保存文章图片 URL 时，无需在 `raw/` 重复下载图片；只有获准来源执行器取得的交付副本才能写入 `sanitized/items/<article-name>-<item-id>/assets/`。不得绕过来源执行器直接 HTTP 补抓、不得保留远程图片链接，也不得伪造本地资源路径。封面与正文在同一条目中处理，但媒体状态与正文物化状态相互独立：封面失败只登记媒体缺口，不得把已经成功取得的正文标记为失败；Markdown 只能引用实际成功落盘的本地封面。不得在会话根目录旁创建 `*-fulltext/`、`*-articles/` 或其他自定义交付目录。
 
+单一企业来源的 `enterprise search` 必须原位发布：`--output-dir` 必须等于 `--parent-session-dir`。禁止在 `raw/` 下创建第二个完整采集会话；`raw/ima/sanitized/items`、`raw/dingtalk/session.json` 等嵌套会话或交付结构均无效。旧调用若把 `--output-dir` 指向父会话的 `raw/` 子树，runner 会将其归一到父会话根，最终正文仍只能落在根级 `sanitized/items/`。
+
 出现重复 URL、部分下载失败或正文无法物化时，保留原始证据，并在同一会话 inventory 中登记为重复、`pending` 或 `failed`。这些情况不得触发旁路归档，也不得把会话外文件作为下游正文交付。
 
 新写入的 `sanitized/metadata.json` 使用 `schemaVersion: "1.0"`，并包含：
