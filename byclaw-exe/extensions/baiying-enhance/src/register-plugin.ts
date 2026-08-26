@@ -19,6 +19,8 @@ import type { BaiyingEnhancePluginConfig } from "./types.js";
 import { loadAuthContext, resolveAuthFilePath } from "./executor/auth.js";
 import { loadPrivateParamsRuntime } from "./personal-params.js";
 import { resolveBackendServiceExecEnv } from "./backend-service-discovery.js";
+import { createBaiyingTaskPlanRuntime } from "./task-plan-runtime.js";
+import { registerUpdateTaskPlan } from "./update-task-plan-tool.js";
 import { resolveChannelSessionIdForTool } from "./channel-session-resolve.js";
 import {
   extractFinalAssistantOutput,
@@ -106,6 +108,18 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
     },
   });
   const pluginCfg = (api.pluginConfig ?? {}) as BaiyingEnhancePluginConfig;
+  const taskPlanLogger = {
+    info: (message: string) => api.logger.info(message),
+    warn: (message: string) => api.logger.warn(message),
+  };
+  registerUpdateTaskPlan({
+    api,
+    runtime: createBaiyingTaskPlanRuntime({
+      authFilePath: pluginCfg.authFilePath,
+      logger: taskPlanLogger,
+    }),
+    logger: taskPlanLogger,
+  });
   warnIfConversationHooksBlocked(api);
   api.registerReload({
     hotPrefixes: resolveConfigSyncHotPrefixes(pluginCfg),

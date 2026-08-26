@@ -51,7 +51,17 @@ describe("resolveChannelSessionIdForTool", () => {
   it("enriches explicit channel session with shared context by session key", () => {
     (globalThis as typeof globalThis & { [STORE_KEY]?: unknown })[STORE_KEY] = {
       channelRequestContextsBySessionKey: new Map([
-        ["agent:x:main", { sessionKey: "agent:x:main", traceId: "trace-shared", createdAt: Date.now(), fields: { language: "en-US" } }],
+        ["agent:x:main", {
+          sessionKey: "agent:x:main",
+          traceId: "trace-shared",
+          createdAt: Date.now(),
+          fields: {
+            language: "en-US",
+            messageId: "answer-1",
+            turnId: "turn-1",
+            laneId: "lane-1",
+          },
+        }],
       ]),
     };
 
@@ -62,6 +72,9 @@ describe("resolveChannelSessionIdForTool", () => {
     expect(r.sessionId).toBe("gw-ctx");
     expect(r.traceId).toBe("trace-shared");
     expect(r.language).toBe("en-US");
+    expect(r.messageId).toBe("answer-1");
+    expect(r.turnId).toBe("turn-1");
+    expect(r.laneId).toBe("lane-1");
   });
 
   it("resolves language from shared session context for active sessions", () => {
