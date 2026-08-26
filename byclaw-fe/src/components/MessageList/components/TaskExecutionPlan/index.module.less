@@ -64,6 +64,7 @@
   position: relative;
   display: flex;
   justify-content: center;
+  align-items: flex-start;
   min-height: 48px;
 }
 
@@ -85,12 +86,14 @@
   position: relative;
   z-index: 1;
   display: inline-flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: center;
-  padding-top: 2px;
+  width: 18px;
+  height: 24px;
+  transform: translateY(1px);
   background: var(--beyond-color-bg-container, #fff);
   font-size: 16px;
-  line-height: 18px;
+  line-height: 24px;
 }
 
 .statusCOMPLETED {
@@ -129,9 +132,9 @@
 
 .taskTitle {
   overflow: hidden;
-  color: #707680;
+  color: #667085;
   font-size: 13px;
-  font-weight: 400;
+  font-weight: 500;
   line-height: 24px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -140,8 +143,9 @@
 .taskDescription,
 .taskReason {
   overflow: hidden;
-  color: #707680;
+  color: #98a2b3;
   font-size: 13px;
+  font-weight: 400;
   line-height: 24px;
   text-overflow: ellipsis;
   white-space: nowrap;
