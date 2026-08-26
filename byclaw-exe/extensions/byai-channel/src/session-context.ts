@@ -15,6 +15,10 @@ import {
 import { resolveAgentIdFromSessionKey } from "openclaw/plugin-sdk/routing";
 import type { ConnectorAuthorizationMap } from "./connector-authorization.js";
 import {
+    isTaskPlanContinuationPending,
+    markTaskPlanContinuationPending,
+} from "../../shared/src/task-plan-runtime.js";
+import {
     createFrameworkFinalAnswerLedger,
     markRootRunOverflowFragment,
     recordRootRunAgentEnd,
@@ -174,6 +178,8 @@ export interface ActiveSdkRequest {
   to: string;
   sessionId: string;
   traceId: string;
+  /** Authoritative assistant message id allocated by the gateway for this turn. */
+  messageId?: string;
   /** Parent id from the Gateway command that owns every root-level SDK event. */
   parentMessageId: string;
   createdAt: number;
@@ -683,6 +689,7 @@ function listPendingChildSessionKeys(request: ActiveSdkRequest): Set<string> {
 }
 
 export function clearActiveSdkRequestRecord(request: ActiveSdkRequest): void {
+    markTaskPlanContinuationPending(request.sessionKey, false);
   activeSdkRequestsByTarget.delete(buildActiveSdkTargetKey(request.accountId, request.to));
   activeSdkRequestsByTraceId.delete(request.traceId);
   channelRequestContextsBySessionKey.delete(request.sessionKey);
@@ -882,6 +889,7 @@ export function registerActiveSdkRequest(params: {
     to: string;
     sessionId: string;
     traceId: string;
+    messageId?: string;
     parentMessageId?: string;
     createdAt?: number;
     language: Language;
@@ -919,6 +927,7 @@ export function registerActiveSdkRequest(params: {
         to: params.to,
         sessionId: params.sessionId,
         traceId: params.traceId,
+        messageId: normalizeAlias(params.messageId) ?? undefined,
         parentMessageId: normalizeAlias(params.parentMessageId) ?? "-1",
         createdAt: params.createdAt ?? Date.now(),
         boundRunIds: new Set<string>(),
@@ -968,6 +977,7 @@ export function registerActiveSdkRequest(params: {
         createdAt: request.createdAt,
         fields: {
             sessionId: request.sessionId,
+            messageId: request.messageId,
             parentMessageId: request.parentMessageId,
             language: request.language,
             languageProvided: request.languageProvided,
@@ -1380,7 +1390,14 @@ function isAwaitingFollowupStale(request: ActiveSdkRequest, now = Date.now()): b
   return now - request.awaitingFollowupSince >= AWAITING_FOLLOWUP_TIMEOUT_MS;
 }
 
-export function shouldCompleteActiveSdkRequest(request: ActiveSdkRequest): boolean {
+/**
+ * True once the current root run and every delegated/native follow-up are idle.
+ * Task-plan continuation is intentionally excluded: the channel uses this
+ * predicate to decide when it is safe to start the next guarded dispatch.
+ */
+export function isActiveSdkRequestReadyForTaskPlanContinuation(
+  request: ActiveSdkRequest,
+): boolean {
   // awaitingFollowup 正常会被 main 续跑的 lifecycle start 清掉；若超时仍未清，视为
   // 不会再续跑，放行完成门（followupRunStarted 不在此豁免——它表示续跑已真正开始）。
   const awaitingBlocks = request.awaitingFollowup && !isAwaitingFollowupStale(request);
@@ -1409,6 +1426,13 @@ export function shouldCompleteActiveSdkRequest(request: ActiveSdkRequest): boole
       !request.compactionRetryPending &&
       !request.overflowContinuePending &&
       !request.modelFallbackPending,
+  );
+}
+
+export function shouldCompleteActiveSdkRequest(request: ActiveSdkRequest): boolean {
+  return Boolean(
+    isActiveSdkRequestReadyForTaskPlanContinuation(request) &&
+      !isTaskPlanContinuationPending(request.sessionKey),
   );
 }
 
