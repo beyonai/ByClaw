@@ -6,6 +6,10 @@ import { deriveCollectionStatus, SOURCE_IDENTITY, handledOutcome, inventoryCount
 
 const identity = SOURCE_IDENTITY.ima;
 const MAX_CONTENT_BYTES = 50 * 1024 * 1024;
+const MAX_COVER_BYTES = 10 * 1024 * 1024;
+const COVER_EXTENSIONS = new Map([
+  ['image/jpeg', 'jpg'], ['image/jpg', 'jpg'], ['image/png', 'png'], ['image/gif', 'gif'], ['image/webp', 'webp'],
+]);
 
 function reasonOf(error) {
   return error instanceof Error ? error.message : String(error);
@@ -45,6 +49,14 @@ function contentOf(value) {
   return '';
 }
 
+function coverUrlsOf(value) {
+  if (!Array.isArray(value?.coverUrls)) return [];
+  return [...new Set(value.coverUrls.filter((url) => {
+    if (typeof url !== 'string' || !url.trim()) return false;
+    try { return ['http:', 'https:'].includes(new URL(url).protocol); } catch { return false; }
+  }).map((url) => url.trim()))];
+}
+
 function itemFromRecord(record, sourceType, kb = '', materializationKb = '') {
   const sourceItemId = stringValue(record, ['mediaId', 'doc_id', 'docId', 'documentId', 'id', 'uuid', 'fileId']);
   if (!sourceItemId) return null;
@@ -58,6 +70,7 @@ function itemFromRecord(record, sourceType, kb = '', materializationKb = '') {
     kb,
     materializationKb,
     preview: contentOf(record) || stringValue(record, ['abstract', 'introduction']),
+    coverUrls: coverUrlsOf(record),
   };
 }
 
@@ -71,9 +84,26 @@ function itemIdFor(item) {
   return `ima-${crypto.createHash('sha256').update(`${item.sourceType}\n${item.sourceItemId}`).digest('hex').slice(0, 16)}`;
 }
 
+function articleDirectoryName(item) {
+  const title = Array.from(String(item.title || '').normalize('NFKC')
+    .replace(/[\u0000-\u001f\\/:*?"<>|]+/g, ' ')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^[.-]+|[.-]+$/g, ''))
+    .slice(0, 80)
+    .join('')
+    .replace(/[.-]+$/g, '') || 'article';
+  return `${title}-${itemIdFor(item)}`;
+}
+
 function materializationPaths(item) {
   const suffix = crypto.createHash('sha256').update(`${item.sourceType}\n${item.sourceItemId}`).digest('hex').slice(0, 16);
-  return { markdownPath: `markdown/items/${suffix}.md`, sanitizedPath: `sanitized/items/${suffix}.md` };
+  const directory = articleDirectoryName(item);
+  return {
+    suffix,
+    markdownPath: `markdown/items/${directory}/index.md`,
+    sanitizedPath: `sanitized/items/${directory}/index.md`,
+  };
 }
 
 function inventoryItem(item, rawArtifacts, materialization = {}) {
@@ -84,6 +114,10 @@ function inventoryItem(item, rawArtifacts, materialization = {}) {
     sourceItemId: item.sourceItemId,
     sourceType: item.sourceType,
     materializationType: 'markdown',
+    kb: item.kb,
+    materializationKb: item.materializationKb,
+    preview: item.preview,
+    coverUrls: [...(item.coverUrls || [])],
     sourceSkill: identity.sourceSkill,
     backend: identity.backend,
     collectionFilters: item.kb ? { kb: item.kb } : {},
@@ -98,8 +132,37 @@ function inventoryItem(item, rawArtifacts, materialization = {}) {
   };
 }
 
-function renderedMarkdown(content, item) {
-  return `---\ntitle: ${JSON.stringify(item.title)}\nsource: "ima"\nsource_url: ${JSON.stringify(item.sourceUrl)}\ncollection_filters: ${JSON.stringify(item.kb ? { kb: item.kb } : {})}\n---\n\n${content.trim()}\n`;
+function renderedMarkdown(content, item, coverMarkdown = []) {
+  const covers = coverMarkdown.length ? `${coverMarkdown.join('\n\n')}\n\n` : '';
+  return `---\ntitle: ${JSON.stringify(item.title)}\nsource: "ima"\nsource_url: ${JSON.stringify(item.sourceUrl)}\ncollection_filters: ${JSON.stringify(item.kb ? { kb: item.kb } : {})}\n---\n\n${covers}${content.trim()}\n`;
+}
+
+function coverExtension(url, contentType = '') {
+  const normalizedType = contentType.split(';', 1)[0].trim().toLowerCase();
+  if (COVER_EXTENSIONS.has(normalizedType)) return COVER_EXTENSIONS.get(normalizedType);
+  try {
+    const extension = new URL(url).pathname.match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase();
+    if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(extension)) return extension === 'jpeg' ? 'jpg' : extension;
+  } catch { /* URL was validated during discovery. */ }
+  throw new Error(`IMA cover has an unsupported content type: ${contentType || 'unknown'}`);
+}
+
+async function materializeCovers(writer, item, paths, fetchImpl) {
+  const artifacts = [];
+  const markdown = [];
+  for (const [index, url] of (item.coverUrls || []).entries()) {
+    if (typeof fetchImpl !== 'function') throw new Error('IMA cover downloader is unavailable');
+    const response = await fetchImpl(url, { redirect: 'follow' });
+    if (!response?.ok) throw new Error(`IMA cover download failed: HTTP ${response?.status || 'unknown'}`);
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (bytes.length === 0 || bytes.length > MAX_COVER_BYTES) throw new Error('IMA cover exceeds the size limit');
+    const extension = coverExtension(url, response.headers?.get?.('content-type') || '');
+    const name = `cover-${index + 1}.${extension}`;
+    const sanitizedPath = paths.sanitizedPath.replace(/index\.md$/, `assets/${name}`);
+    await writer.writeBytes(sanitizedPath, bytes);
+    markdown.push(`![封面 ${index + 1}](assets/${name})`);
+  }
+  return { artifacts, markdown };
 }
 
 function cliReason(result) {
@@ -204,9 +267,9 @@ async function discover(writer, request, bin, bycliBin, env) {
   return { found: found.slice(0, request.limit), rawArtifacts, fallbackReasons };
 }
 
-async function materializeOne(writer, item, bin, env) {
-  const suffix = crypto.createHash('sha256').update(`${item.sourceType}\n${item.sourceItemId}`).digest('hex').slice(0, 16);
-  const artifact = `raw/${item.sourceType}-get-${suffix}.json`;
+async function materializeOne(writer, item, bin, env, fetchImpl) {
+  const paths = materializationPaths(item);
+  const artifact = `raw/${item.sourceType}-get-${paths.suffix}.json`;
   const args = item.sourceType === 'note'
     ? ['note', 'get', item.sourceItemId, '--format', '0', '--json']
     : ['wiki', 'search', item.title, ...(item.materializationKb ? ['--kb', item.materializationKb] : []), '--json'];
@@ -214,10 +277,10 @@ async function materializeOne(writer, item, bin, env) {
   const content = contentOf(response) || item.preview;
   if (!content) throw new Error(`ima ${item.sourceType} returned no content`);
   if (Buffer.byteLength(content, 'utf8') > MAX_CONTENT_BYTES) throw new Error('IMA content exceeds materialization limit');
-  const paths = materializationPaths(item);
-  const markdown = renderedMarkdown(content, item);
+  const covers = await materializeCovers(writer, item, paths, fetchImpl);
+  const markdown = renderedMarkdown(content, item, covers.markdown);
   await Promise.all([writer.writeText(paths.markdownPath, markdown), writer.writeText(paths.sanitizedPath, markdown)]);
-  return inventoryItem(item, [...item.rawArtifacts, artifact], { status: 'materialized', ...paths, reason: null });
+  return inventoryItem(item, [...item.rawArtifacts, artifact, ...covers.artifacts], { status: 'materialized', ...paths, reason: null });
 }
 
 async function persistSearch(writer, request, inventory, canonicalItems, rawArtifacts, status, discovery) {
@@ -245,6 +308,7 @@ export function createImaAdapter(dependencies = {}) {
   const bin = dependencies.bin || 'ima';
   const bycliBin = dependencies.bycliBin || 'bycli';
   const env = dependencies.env || process.env;
+  const fetchImpl = dependencies.fetchImpl || globalThis.fetch;
 
   async function search(request = {}) {
     const outputDir = request.outputDir;
@@ -261,7 +325,7 @@ export function createImaAdapter(dependencies = {}) {
       const materialized = [];
       if (!normalized.metadataOnly) {
         for (const item of discovery.found) {
-          try { materialized.push(await materializeOne(writer, item, bin, env)); }
+          try { materialized.push(await materializeOne(writer, item, bin, env, fetchImpl)); }
           catch (error) { materialized.push(inventoryItem(item, item.rawArtifacts, { status: 'failed', reason: reasonOf(error) })); }
         }
       }
@@ -291,7 +355,7 @@ export function createImaAdapter(dependencies = {}) {
     const candidates = await copyResumeArtifacts(writer, await readResumeCandidates(request.sessionDir, identity.source, request.itemIds || []));
     const inventory = [];
     for (const item of candidates) {
-      try { inventory.push(await materializeOne(writer, item, bin, env)); }
+      try { inventory.push(await materializeOne(writer, item, bin, env, fetchImpl)); }
       catch (error) { inventory.push(inventoryItem(item, item.rawArtifacts, { status: 'failed', reason: reasonOf(error) })); }
     }
     const canonicalItems = inventory.filter((item) => item.materialization.status === 'materialized').map((item) => ({ title: item.title, url: item.sourceUrl, author: '', publishTime: '', markdown: item.materialization.sanitizedPath, fileName: item.materialization.sanitizedPath }));

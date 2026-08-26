@@ -77,6 +77,12 @@ export async function readResumeCandidates(sessionDir, source, itemIds) {
       collectionFilters: item.collectionFilters || {},
       resumeRoot: root,
     };
+    if (source === 'ima') {
+      candidate.kb = typeof item.kb === 'string' ? item.kb : '';
+      candidate.materializationKb = typeof item.materializationKb === 'string' ? item.materializationKb : '';
+      candidate.preview = typeof item.preview === 'string' ? item.preview : '';
+      candidate.coverUrls = Array.isArray(item.coverUrls) ? item.coverUrls : [];
+    }
     Object.defineProperty(candidate, 'resumeIdentity', { value: resumeIdentity });
     return candidate;
   });

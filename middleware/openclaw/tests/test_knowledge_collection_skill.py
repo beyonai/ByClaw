@@ -433,6 +433,17 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         ):
             self.assertIn(phrase, knowledge)
 
+    def test_ima_collection_contract_requires_article_directories_and_local_cover_assets(self):
+        ima = (SKILL_ROOT / "references" / "sources" / "ima.md").read_text(encoding="utf-8")
+
+        for phrase in (
+            "`coverUrls`",
+            "无需重复下载到 `raw/`",
+            "`sanitized/items/<article-name>-<item-id>/index.md`",
+            "`sanitized/items/<article-name>-<item-id>/assets/`",
+        ):
+            self.assertIn(phrase, ima)
+
     def test_delegated_adapter_candidate_does_not_create_a_second_question(self):
         bycli = (SKILLS_ROOT / "bycli" / "SKILL.md").read_text(encoding="utf-8")
         delivery = (SKILL_ROOT / "references" / "delivery.md").read_text(encoding="utf-8")

@@ -232,7 +232,7 @@ async function writePrivateFile(root, rootIdentity, relativePath, content) {
       PRIVATE_FILE_MODE,
     );
     temporaryIdentity = await lstat(temporary);
-    await handle.writeFile(content, { encoding: 'utf8' });
+    await handle.writeFile(content);
     await handle.chmod(PRIVATE_FILE_MODE);
     await handle.close();
     handle = undefined;
@@ -594,6 +594,11 @@ export async function createArtifactWriter(root) {
     },
 
     async writeText(relativePath, content) {
+      return writePrivateFile(normalizedRoot, rootIdentity, relativePath, content);
+    },
+
+    async writeBytes(relativePath, content) {
+      if (!Buffer.isBuffer(content)) throw new TypeError('binary artifact must be a Buffer');
       return writePrivateFile(normalizedRoot, rootIdentity, relativePath, content);
     },
 
