@@ -48,6 +48,7 @@ export const hasVisibleMessageContent = (message?: Partial<IMessage>) => {
     Boolean(message.thinkList?.some(hasVisibleMessageListItem)) ||
     Boolean(message.fileList?.length || message.imageList?.length || message.resourceFrom?.length) ||
     Boolean(message.resComIds?.length || message.relatedQuestions?.length) ||
+    Boolean(message.taskPlan?.tasks?.length) ||
     hasSubstance(message.messageTip)
   );
 };
@@ -155,6 +156,7 @@ export const fetchMessageHandler = (item: any) => {
     createTime,
     collectIds,
     sessionId,
+    taskPlan,
   } = item;
 
   // usage： 1-用户 2-大模型 3-追问 4-转发消息 5-交互消息
@@ -189,6 +191,7 @@ export const fetchMessageHandler = (item: any) => {
     thinkList: [],
     fileList: [],
     imageList: [],
+    taskPlan: taskPlan || undefined,
   };
 
   // 用户消息

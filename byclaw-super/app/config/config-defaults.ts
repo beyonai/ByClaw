@@ -26,6 +26,7 @@ export const APP_CONFIG_DEFAULTS = {
   delegationTimeouts: {
     firstActivityMs: 300_000,
     idleMs: 900_000,
+    callbackMs: 10_800_000,
   },
   openClaw: {
     cancelConfirmationTimeoutMs: 30_000,
@@ -63,6 +64,7 @@ export const APP_CONFIG_DEFAULTS = {
   run: {
     leaseMs: 30_000,
     queuePollMs: 500,
+    userInteractionTimeoutMs: 900_000,
     credentialMaxTtlMs: 7_200_000,
     credentialCleanupIntervalMs: 60_000,
   },

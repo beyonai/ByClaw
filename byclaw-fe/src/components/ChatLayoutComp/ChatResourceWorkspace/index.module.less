@@ -274,7 +274,7 @@
       padding: 0;
       margin: 0 !important;
       border: 0;
-      border-radius: 0 16px 16px 0;
+      border-radius: 0;
       color: rgba(112, 118, 128, 1);
       background: #f5f5f5;
       font-size: 13px;
@@ -294,17 +294,26 @@
 
     .@{antPrefix}-tabs-tab-active .@{antPrefix}-tabs-tab-btn {
       color: var(--beyond-color-primary);
+      background: transparent;
     }
 
     .@{antPrefix}-tabs-tab-btn {
       display: flex;
+      flex: 1 1 auto;
       align-items: center;
       justify-content: center;
       width: 100%;
       max-width: 100%;
+      min-width: 100%;
+      align-self: stretch;
+      height: 100%;
+      min-height: 84px;
+      box-sizing: border-box;
       padding: 0;
       overflow: visible;
       font-size: 13px;
+      border-radius: 0 20px 20px 0;
+      background: transparent;
       text-align: center;
       text-overflow: clip;
       white-space: normal;
@@ -325,6 +334,7 @@
     }
 
     .@{antPrefix}-tabs-tab-btn {
+      min-height: 128px;
       width: max-content;
       max-width: none;
       white-space: nowrap;

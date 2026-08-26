@@ -1,12 +1,12 @@
 # 公共互联网来源路由（原 By-Reach 路由器）
 
-本文件是采集编排器 `knowledge-collection` 的内置公共互联网路由层，取代原先独立的 `agent-reach`（By-Reach）技能。
+本文件是采集编排器 `knowledge-collection` 的内置公共互联网路由器 `agent-reach`，取代原先独立的 By-Reach 技能。
 任何一次公共互联网取内容前，必须先按本文选定来源执行器，再委派该执行器；**采集编排器自身永不取内容**。
 
 角色固定为：采集编排器 `knowledge-collection`（本技能，含本路由层）、网站执行器 `bycli`、
 企业来源执行器 `dws` / `fws` / `wecomcli` / `ima`、直接查询所有者（根 Agent）。
-路由层只选择执行器并接收其返回结果，持久化、产物契约、后处理、入库与用户追问全部归采集编排器。
-来源执行器不得询问「入库 / 知识整理 / 跳过」，也不得反向加载 `knowledge-collection`。
+路由层只选择执行器并接收其返回结果，持久化、产物契约与采集交付归采集编排器。
+来源执行器不得启动任何下游动作，也不得反向加载 `knowledge-collection`。
 
 ## 网页铁律（不可协商）
 
@@ -101,7 +101,7 @@ mcporter call 'exa.web_search_exa(query: "query", numResults: 5)'
 mcporter call 'exa.get_code_context_exa(query: "code question", tokensNum: 3000)'
 ```
 
-擅长英文内容、技术文档与代码上下文搜索。中文检索优先 `online_search`
+擅长英文内容、技术文档与代码上下文搜索。中文检索优先 `online-search`
 （见 [online-search.md](online-search.md)），GitHub 仓库/代码搜索用 `gh`。
 
 ### 职场招聘
@@ -120,7 +120,7 @@ provider 诊断只是被动信息，不能替代企业业务 Skills。
 
 ## 企业来源不走本路由层
 
-企业来源（钉钉/飞书/企微/IMA）的采集、归档、批量搜索或入库按 SKILL.md「来源路由」节加载
+企业来源（钉钉/飞书/企微/IMA）的采集、归档或批量搜索按 SKILL.md「来源路由」节加载
 `dws` / `fws` / `wecomcli` / `ima-skill`，不得作为公共互联网任务交给 `bycli`。
 
 IMA 企业渠道的命令面由 `ima-skill` 提供：
@@ -128,11 +128,9 @@ IMA 企业渠道的命令面由 `ima-skill` 提供：
 ```bash
 ima auth check --test --json
 ima note search --content "<query>" --json
-ima wiki search "<query>" --kb <knowledge-base-id> --json
-ima wiki import-urls --kb <knowledge-base-id> <url> --json
 ```
 
-IMA 只允许通过 CLI 访问；认证失败时停止并提示重新连接，URL 导入属于显式知识库写操作，不得回退到 `bycli` 或直接 HTTP。
+IMA 只允许通过 CLI 访问；认证失败时停止并提示重新连接，不得回退到 `bycli` 或直接 HTTP。采集编排器不执行 IMA 写操作。
 
 ---
 

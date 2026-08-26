@@ -31,7 +31,8 @@ class FeignPythonBuildServiceTest {
         FeignPythonBuildService service = new FeignPythonBuildService();
 
         Map<String, String> resourceHeaders = ReflectionTestUtils.invokeMethod(service, "buildHeaders", 10001L);
-        Map<String, String> uploadHeaders = ReflectionTestUtils.invokeMethod(service, "buildUploadHeaders", 10001L);
+        Map<String, String> uploadHeaders = ReflectionTestUtils.invokeMethod(service, "buildUploadHeaders",
+            Map.of(FeignPythonBuildService.RESOURCE_ID_HEADER, "10001"));
         Map<String, String> legacyHeaders = ReflectionTestUtils.invokeMethod(service, "buildHeaders");
 
         assertThat(resourceHeaders).containsEntry(FeignPythonBuildService.RESOURCE_ID_HEADER, "10001");

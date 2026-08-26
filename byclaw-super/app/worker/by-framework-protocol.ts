@@ -10,7 +10,6 @@ import {
   normalizeRunAttachments,
   type CallerPrincipal,
   type RunAttachment,
-  type RunEvent,
   type SessionContextInput,
   type ThinkingLevel,
 } from "@byclaw/by-conductor";
@@ -255,30 +254,6 @@ export function recordScalar(
     }
   }
   return undefined;
-}
-
-/** 将内部事件转换为对调用方安全、稳定的执行进度。 */
-export function progressMessage(event: RunEvent): string {
-  if (event.type === "delegation.progress") {
-    return stringData(event.data.message);
-  }
-  return "";
-}
-
-/** 判断事件是否需要包在 reasoning 阶段内展示。 */
-export function isDelegationReasoningEvent(event: RunEvent): boolean {
-  return [
-    "delegation.started",
-    "delegation.display.progress",
-    "delegation.tool.started",
-    "delegation.tool.detail",
-    "delegation.tool.completed",
-    "delegation.tool.failed",
-    "delegation.output.delta",
-    "delegation.completed",
-    "delegation.failed",
-    "interaction.requested",
-  ].includes(event.type);
 }
 
 /** 构造与 GatewayDataEmitter 一致、并带业务 Agent 标识的消息体。 */

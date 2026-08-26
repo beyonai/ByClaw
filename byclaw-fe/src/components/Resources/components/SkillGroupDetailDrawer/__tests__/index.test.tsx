@@ -154,6 +154,8 @@ describe('SkillGroupDetailDrawer', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'resource.skillGroup.uninstall' }));
     expect(await screen.findByText('resource.skillGroup.uninstallSharedDescription')).toBeInTheDocument();
     expect(screen.getByText('resource.skillGroup.manualSource', { exact: false })).toBeInTheDocument();
+    expect(screen.getByTestId('uninstall-preserve-tooltip-icon')).toBeInTheDocument();
+    expect(screen.getByTestId('uninstall-all-tooltip-icon')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'resource.skillGroup.uninstallAll' }));
     await waitFor(() =>

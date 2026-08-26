@@ -97,6 +97,7 @@ public class FeignPythonBuildService {
 
     private static final int MAX_DOWNLOAD_ERROR_BODY_BYTES = 64 * 1024;
 
+    /** 知识库资源 ID 请求头，与门户透传头一并转发到 ByKC。 */
     public static final String RESOURCE_ID_HEADER = "X-Byclaw-Resource-Id";
 
     @Value("${spring.application.qADomainName:byclaw-qa-manager}")
@@ -137,10 +138,7 @@ public class FeignPythonBuildService {
     /**
      * 创建知识库。
      *
-     * @param knowledgeBaseCreate 创建请求体
-     * @param throwExceptions
-     * @return 成功时含 KnowledgeBaseInfo
-     * @throws BaseException 调用失败
+     * @param throwExceptions 为 false 时失败返回错误响应而不抛异常
      */
     public PythonBuildResponse<KnowledgeBaseInfo> createKnowledgeBase(KbKnowledgeCreate knowledgeBaseCreate,
                                                                       boolean throwExceptions) {
@@ -149,115 +147,58 @@ public class FeignPythonBuildService {
             }, throwExceptions);
     }
 
-    /**
-     * 删除知识库。
-     *
-     * @param kbKnowledgeDelete 含 knCode
-     * @return 统一响应
-     * @throws BaseException 调用失败
-     */
-    public PythonBuildResponse<Void> deleteKnowledgeBase(KbKnowledgeDelete kbKnowledgeDelete) {
-        return deleteKnowledgeBase(kbKnowledgeDelete, null);
-    }
-
+    /** 删除知识库；resourceId 写入 {@link #RESOURCE_ID_HEADER}。 */
     public PythonBuildResponse<Void> deleteKnowledgeBase(KbKnowledgeDelete kbKnowledgeDelete, Long resourceId) {
         return post(KnowledgeServiceOperation.DELETE_KB, kbKnowledgeDelete,
             new TypeReference<PythonBuildResponse<Void>>() {
             }, resourceId);
     }
 
-    /**
-     * 更新知识库名称或描述。
-     *
-     * @param kbKnowledgeUpdate 含 knCode 及待更新字段
-     * @return 统一响应
-     * @throws BaseException 调用失败
-     */
+    /** 更新知识库名称或描述。 */
     public PythonBuildResponse<Void> updateKnowledgeBase(KbKnowledgeUpdate kbKnowledgeUpdate) {
         return post(KnowledgeServiceOperation.UPDATE_KB, kbKnowledgeUpdate,
             new TypeReference<PythonBuildResponse<Void>>() {
             });
     }
 
-    /**
-     * 创建目录（可多级）。
-     *
-     * @param kbDirectoryCreate knCode、directoryPath 等
-     * @return 统一响应
-     * @throws BaseException 调用失败
-     */
-    public PythonBuildResponse<Void> createDirectory(KbDirectoryCreate kbDirectoryCreate) {
-        return createDirectory(kbDirectoryCreate, null);
-    }
 
-    public PythonBuildResponse<Void> createDirectory(KbDirectoryCreate kbDirectoryCreate, Long resourceId) {
+    /** 创建知识库目录；headers 透传门户请求头，无则传空 Map。 */
+    public PythonBuildResponse<Void> createDirectory(KbDirectoryCreate kbDirectoryCreate, Map<String, String> headers) {
         return post(KnowledgeServiceOperation.CREATE_DIR, kbDirectoryCreate,
             new TypeReference<PythonBuildResponse<Void>>() {
-            }, resourceId);
+            }, headers);
     }
 
-    /**
-     * 删除目录。
-     *
-     * @param kbDirectoryDelete knCode、directoryPath
-     * @return 统一响应
-     * @throws BaseException 调用失败
-     */
-    public PythonBuildResponse<Void> deleteDirectory(KbDirectoryDelete kbDirectoryDelete) {
-        return deleteDirectory(kbDirectoryDelete, null);
-    }
 
-    public PythonBuildResponse<Void> deleteDirectory(KbDirectoryDelete kbDirectoryDelete, Long resourceId) {
+    /** 删除知识库目录；headers 透传门户请求头，无则传空 Map。 */
+    public PythonBuildResponse<Void> deleteDirectory(KbDirectoryDelete kbDirectoryDelete, Map<String, String> headers) {
         return post(KnowledgeServiceOperation.DELETE_DIR, kbDirectoryDelete,
             new TypeReference<PythonBuildResponse<Void>>() {
-            }, resourceId);
+            }, headers);
     }
 
-    /**
-     * 重命名目录最后一级。
-     *
-     * @param kbDirectoryUpdate knCode、原路径、新目录名
-     * @return 统一响应
-     * @throws BaseException 调用失败
-     */
-    public PythonBuildResponse<Void> updateDirectory(KbDirectoryUpdate kbDirectoryUpdate) {
-        return updateDirectory(kbDirectoryUpdate, null);
-    }
 
-    public PythonBuildResponse<Void> updateDirectory(KbDirectoryUpdate kbDirectoryUpdate, Long resourceId) {
+    /** 重命名或更新知识库目录；headers 透传门户请求头，无则传空 Map。 */
+    public PythonBuildResponse<Void> updateDirectory(KbDirectoryUpdate kbDirectoryUpdate, Map<String, String> headers) {
         return post(KnowledgeServiceOperation.EDIT_DIR, kbDirectoryUpdate,
             new TypeReference<PythonBuildResponse<Void>>() {
-            }, resourceId);
+            }, headers);
     }
 
-    /**
-     * 列出目录或者文件
-     *
-     * @param kbListDir 列出文件
-     * @return PythonBuildResponse<DirOrFile>
-     */
-    public PythonBuildResponse<Data> listDir(KbListDir kbListDir) {
-        return listDir(kbListDir, null);
-    }
-
+    /** 列出目录或文件；resourceId 写入 {@link #RESOURCE_ID_HEADER}。 */
     public PythonBuildResponse<Data> listDir(KbListDir kbListDir, Long resourceId) {
         return post(KnowledgeServiceOperation.LIST_DIR, kbListDir, new TypeReference<PythonBuildResponse<Data>>() {
         }, resourceId);
     }
 
-    /**
-     * 按 QA glob 规则匹配知识库文件或目录。
-     */
-    public PythonBuildResponse<Data> glob(KbGlob request) {
-        return glob(request, null);
-    }
-
+    /** 按 glob 规则匹配知识库文件或目录；resourceId 写入 {@link #RESOURCE_ID_HEADER}。 */
     public PythonBuildResponse<Data> glob(KbGlob request, Long resourceId) {
         return post(KnowledgeServiceOperation.GLOB, request, new TypeReference<PythonBuildResponse<Data>>() {
         }, resourceId);
     }
 
-    public PythonBuildResponse<KbImportResult> importKnowledgeItem(KbFileImport kbFileImport, Long resourceId) {
+    /** 导入知识库文件（multipart）；headers 透传门户请求头，无则传空 Map。 */
+    public PythonBuildResponse<KbImportResult> importKnowledgeItem(KbFileImport kbFileImport, Map<String, String> headers) {
         try {
 
             // 文件信息
@@ -286,7 +227,7 @@ public class FeignPythonBuildService {
                     });
             }
             HttpResponse httpResponse = discoveryHttpClient.upload(endpoint.getServiceName(), requestPath,
-                    originalFilename, "fileContent", streamSupplier, this.buildUploadHeaders(resourceId), formFields)
+                    originalFilename, "fileContent", streamSupplier, this.buildUploadHeaders(headers), formFields)
                 .get(this.gatewaySecondTimeOut, TimeUnit.SECONDS);
 
             return this.parseResponse(httpResponse, new TypeReference<PythonBuildResponse<KbImportResult>>() {
@@ -299,17 +240,9 @@ public class FeignPythonBuildService {
         }
     }
 
-    /**
-     * 更新已存在知识库文档（multipart/form-data）。更新不会自动触发知识构建。
-     *
-     * @param kbFileUpdate 更新参数
-     * @return 成功时含单文件更新结果
-     */
-    public PythonBuildResponse<KbFileUpdateResult> updateKnowledgeItem(KbFileUpdate kbFileUpdate) {
-        return updateKnowledgeItem(kbFileUpdate, null);
-    }
-
-    public PythonBuildResponse<KbFileUpdateResult> updateKnowledgeItem(KbFileUpdate kbFileUpdate, Long resourceId) {
+    /** 更新已存在知识库文档（multipart，不自动触发构建）；headers 透传门户请求头。 */
+    public PythonBuildResponse<KbFileUpdateResult> updateKnowledgeItem(KbFileUpdate kbFileUpdate,
+                                                                       Map<String, String> headers) {
         try {
             MultipartFile multipartFile = kbFileUpdate.getMultipartFile();
             String originalFilename = multipartFile.getOriginalFilename();
@@ -333,7 +266,7 @@ public class FeignPythonBuildService {
                     });
             }
             HttpResponse httpResponse = discoveryHttpClient.upload(endpoint.getServiceName(), requestPath,
-                    originalFilename, "fileContent", streamSupplier, this.buildUploadHeaders(resourceId), formFields)
+                    originalFilename, "fileContent", streamSupplier, this.buildUploadHeaders(headers), formFields)
                 .get(this.gatewaySecondTimeOut, TimeUnit.SECONDS);
             return this.parseResponse(httpResponse, new TypeReference<PythonBuildResponse<KbFileUpdateResult>>() {
             }, requestPath);
@@ -345,41 +278,20 @@ public class FeignPythonBuildService {
         }
     }
 
-    /**
-     * 删除知识库文档。
-     *
-     * @param temDelete 删除条件
-     * @return 统一响应
-     * @throws BaseException 调用失败
-     */
-    public PythonBuildResponse<Void> deleteKnowledgeItem(KbFileDelete temDelete) {
-        return deleteKnowledgeItem(temDelete, null);
-    }
-
-    public PythonBuildResponse<Void> deleteKnowledgeItem(KbFileDelete temDelete, Long resourceId) {
+    /** 删除知识库文档；headers 透传门户请求头，无则传空 Map。 */
+    public PythonBuildResponse<Void> deleteKnowledgeItem(KbFileDelete temDelete, Map<String, String> headers) {
         return post(KnowledgeServiceOperation.DELETE_FILE, temDelete, new TypeReference<PythonBuildResponse<Void>>() {
-        }, resourceId);
+        }, headers);
     }
 
-    /**
-     * 读取知识库文件 Markdown 内容。
-     *
-     * @param kbFileRead 读取条件
-     * @return 文件内容
-     */
-    public PythonBuildResponse<KbFileReadResult> readFile(KbFileRead kbFileRead) {
-        return readFile(kbFileRead, null);
-    }
-
+    /** 读取知识库文件 Markdown 内容；resourceId 写入 {@link #RESOURCE_ID_HEADER}。 */
     public PythonBuildResponse<KbFileReadResult> readFile(KbFileRead kbFileRead, Long resourceId) {
         return post(KnowledgeServiceOperation.READ_FILE, kbFileRead,
             new TypeReference<PythonBuildResponse<KbFileReadResult>>() {
             }, resourceId);
     }
 
-    /**
-     * 查询知识库文件完整构建结果。
-     */
+    /** 查询知识库文件完整构建结果；resourceId 写入 {@link #RESOURCE_ID_HEADER}。 */
     public PythonBuildResponse<KnowledgeBuildResult> buildResult(KbBuildResult request, Long resourceId) {
         return post(KnowledgeServiceOperation.BUILD_RESULT, request,
             new TypeReference<PythonBuildResponse<KnowledgeBuildResult>>() {
@@ -387,6 +299,7 @@ public class FeignPythonBuildService {
     }
 
 
+    /** 查询知识库文件元数据；resourceId 写入 {@link #RESOURCE_ID_HEADER}。 */
     public PythonBuildResponse<KbFileMetadataResult> getKnowledgeFileMetadata(KbFileMetadataGet request,
                                                                               Long resourceId) {
         return post(KnowledgeServiceOperation.GET_FILE_METADATA, request,
@@ -395,14 +308,16 @@ public class FeignPythonBuildService {
     }
 
 
+    /** 移动知识库文件或目录；headers 透传门户请求头，无则传空 Map。 */
     public PythonBuildResponse<KnowledgeItemsMoveResult> moveKnowledgeItems(KbKnowledgeItemsMove request,
-                                                                            Long resourceId) {
+                                                                            Map<String, String> headers) {
         return post(KnowledgeServiceOperation.MOVE_KNOWLEDGE_ITEMS, request,
             new TypeReference<PythonBuildResponse<KnowledgeItemsMoveResult>>() {
-            }, resourceId);
+            }, headers);
     }
 
 
+    /** 查询知识库文档引用关系；resourceId 写入 {@link #RESOURCE_ID_HEADER}。 */
     public PythonBuildResponse<KnowledgeItemReferencesResult> knowledgeItemReferences(KbKnowledgeItemReferences request,
                                                                                       Long resourceId) {
         return post(KnowledgeServiceOperation.KNOWLEDGE_ITEM_REFERENCES, request,
@@ -410,42 +325,28 @@ public class FeignPythonBuildService {
             }, resourceId);
     }
 
-    /**
-     * 异步发现知识库原始文档中的实体。
-     */
+    /** 异步发现知识库文档中的实体；headers 透传门户请求头，无则传空 Map。 */
     public PythonBuildResponse<KnowledgeEntityBatchResult> entityDiscovery(KbEntityDiscovery request, Map<String, String> headers) {
         return post(KnowledgeServiceOperation.ENTITY_DISCOVERY, request,
             new TypeReference<PythonBuildResponse<KnowledgeEntityBatchResult>>() {
             }, headers);
     }
 
-    /**
-     * 异步补全知识库 KnowledgeEntity 文档中的实体信息、证据和语义关系。
-     */
+    /** 异步补全知识库实体信息；headers 透传门户请求头，无则传空 Map。 */
     public PythonBuildResponse<KnowledgeEntityBatchResult> entityEnrich(KbEntityEnrich request, Map<String, String> headers) {
         return post(KnowledgeServiceOperation.ENTITY_ENRICH, request,
             new TypeReference<PythonBuildResponse<KnowledgeEntityBatchResult>>() {
             }, headers);
     }
 
-    /**
-     * 执行知识库 chunk 检索。
-     *
-     * @param kbKnowledgeSearch 检索条件
-     * @return 检索结果
-     */
+    /** 执行知识库 chunk 检索。 */
     public PythonBuildResponse<KnowledgeSearchResult> searchKnowledgeItems(KbKnowledgeSearch kbKnowledgeSearch) {
         return post(KnowledgeServiceOperation.KNOWLEDGE_SEARCH, kbKnowledgeSearch,
             new TypeReference<PythonBuildResponse<KnowledgeSearchResult>>() {
             });
     }
 
-    /**
-     * 执行知识库 Agent DSL 文件级语义检索。
-     *
-     * @param kbKnowledgeFileSearch 检索条件
-     * @return 文件级检索结果
-     */
+    /** 执行知识库文件级语义检索。 */
     public PythonBuildResponse<KnowledgeFileSearchResult> searchKnowledgeFiles(
         KbKnowledgeFileSearch kbKnowledgeFileSearch) {
         return post(KnowledgeServiceOperation.KNOWLEDGE_FILE_SEARCH, kbKnowledgeFileSearch,
@@ -453,9 +354,7 @@ public class FeignPythonBuildService {
             });
     }
 
-    /**
-     * Agent DSL 纯元数据检索，只返回文件级结果。
-     */
+    /** 执行知识库纯元数据检索。 */
     public PythonBuildResponse<KnowledgeMetadataSearchResult> searchKnowledgeMetadata(
         KbKnowledgeMetadataSearch request) {
         return post(KnowledgeServiceOperation.KNOWLEDGE_METADATA_SEARCH, request,
@@ -463,21 +362,14 @@ public class FeignPythonBuildService {
             });
     }
 
-    /**
-     * 原样透传 Agent DSL 纯元数据检索响应，保留 QA 失败响应中的 errorCode/errorList 等扩展字段。
-     */
+    /** 元数据检索，原样透传 QA 响应（含 errorCode/errorList 等扩展字段）。 */
     public PythonBuildResponse<Object> searchKnowledgeMetadataRaw(KbKnowledgeMetadataSearch request) {
         return post(KnowledgeServiceOperation.KNOWLEDGE_METADATA_SEARCH, request,
             new TypeReference<PythonBuildResponse<Object>>() {
             });
     }
 
-    /**
-     * 上传原始文件并同步转换为 Markdown 文件流。
-     *
-     * @param multipartFile 原始文件
-     * @return Markdown 文件流结果
-     */
+    /** 上传原始文件并同步转换为 Markdown。 */
     public FileToMarkdownResult fileToMarkdown(MultipartFile multipartFile) {
         try {
             String requestPath = resolvePath(null, KnowledgeServiceOperation.FILE_TO_MARKDOWN);
@@ -493,34 +385,15 @@ public class FeignPythonBuildService {
         }
     }
 
-    /**
-     * 根据文件路径异步构建指定知识库下的文件，自动完成原始文件转 Markdown、切片和切片向量化处理。
-     *
-     * @param kbFileToMarkdownIndex 构建的文件信息
-     * @return 统一响应
-     * @throws BaseException 调用失败
-     */
-    public PythonBuildResponse<Void> fileToMarkdownIndex(KbFileToMarkdownIndex kbFileToMarkdownIndex) {
-        return fileToMarkdownIndex(kbFileToMarkdownIndex, null);
-    }
-
-    public PythonBuildResponse<Void> fileToMarkdownIndex(KbFileToMarkdownIndex kbFileToMarkdownIndex, Long resourceId) {
+    /** 异步构建知识库文件（转 Markdown、切片、向量化）；headers 透传门户请求头。 */
+    public PythonBuildResponse<Void> fileToMarkdownIndex(KbFileToMarkdownIndex kbFileToMarkdownIndex,
+                                                         Map<String, String> headers) {
         return post(KnowledgeServiceOperation.KNOWLEDGE_BUILD, kbFileToMarkdownIndex,
             new TypeReference<PythonBuildResponse<Void>>() {
-            }, resourceId);
+            }, headers);
     }
 
-    /**
-     * 下载原始文件流
-     *
-     * @param kbFileDownload 文件下载信息
-     * @return 文件流
-     * @throws BaseException 调用失败
-     */
-    public InputStream fileDownload(KbFileDownload kbFileDownload) {
-        return fileDownload(kbFileDownload, null);
-    }
-
+    /** 下载知识库原始文件流；resourceId 写入 {@link #RESOURCE_ID_HEADER}。 */
     public InputStream fileDownload(KbFileDownload kbFileDownload, Long resourceId) {
         return downloadKnowledgeFile(kbFileDownload, resourceId, KnowledgeServiceOperation.DOWNLOAD_FILE);
     }
@@ -588,16 +461,7 @@ public class FeignPythonBuildService {
         }
     }
 
-    /**
-     * 文件构建
-     *
-     * @param fileBuildStatus 入参
-     * @return PythonBuildResponse
-     */
-    public PythonBuildResponse<ProcessStatus> fileBuildStatus(FileBuildStatus fileBuildStatus) {
-        return fileBuildStatus(fileBuildStatus, null);
-    }
-
+    /** 查询知识库文件构建进度；resourceId 写入 {@link #RESOURCE_ID_HEADER}。 */
     public PythonBuildResponse<ProcessStatus> fileBuildStatus(FileBuildStatus fileBuildStatus, Long resourceId) {
         return post(KnowledgeServiceOperation.FILE_BUILD_STATUS, fileBuildStatus,
             new TypeReference<PythonBuildResponse<ProcessStatus>>() {
@@ -766,10 +630,10 @@ public class FeignPythonBuildService {
     }
 
 
-    private Map<String, String> buildUploadHeaders(Long resourceId) {
-        Map<String, String> headers = new HashMap<>();
-        headers.put("Content-Type", "multipart/form-data");
-        return this.addResourceContext(this.addAuth(headers), resourceId);
+    private Map<String, String> buildUploadHeaders(Map<String, String> headers) {
+        Map<String, String> resolvedHeaders = headers == null ? new HashMap<>() : new HashMap<>(headers);
+        resolvedHeaders.put("Content-Type", "multipart/form-data");
+        return this.addAuth(resolvedHeaders);
     }
 
     private Map<String, String> addResourceContext(Map<String, String> headers, Long resourceId) {

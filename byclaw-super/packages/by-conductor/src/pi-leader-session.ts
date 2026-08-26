@@ -14,6 +14,10 @@ import { dirname } from "node:path";
 import { Type } from "typebox";
 import { formatUserMessageWithAttachments } from "./application/attachments.js";
 import {
+  DelegationSuspendedError,
+  LeaderRunSuspendedError,
+} from "./application/run-suspension.js";
+import {
   ASK_USER_QUESTION_ENABLED,
   ASK_USER_QUESTION_TOOL_NAME,
   DELEGATE_AGENT_TOOL_NAME,
@@ -58,6 +62,7 @@ export interface PiLeaderCompactionConfig {
 export class PiLeaderSession implements LeaderSession {
   contextRevision: number;
   private activeInput: LeaderRunInput | undefined;
+  private suspendedDelegation: DelegationSuspendedError | undefined;
 
   /** 保存已配置完成的 Pi Session。 */
   private constructor(
@@ -99,6 +104,13 @@ export class PiLeaderSession implements LeaderSession {
       parameters: Type.Object({
         agentId: Type.String({ description: "Exact id from the current authorized agent list" }),
         task: Type.String({ description: "Self-contained task for the specialist" }),
+        taskPosition: Type.Optional(
+          Type.Integer({
+            minimum: 1,
+            description:
+              "Position of the matching task in the active task plan. Required when an active task plan exists.",
+          }),
+        ),
         expectedOutput: Type.Optional(Type.String({ description: "Desired result format" })),
         attachmentIds: Type.Optional(
           Type.Array(Type.String(), {
@@ -108,20 +120,39 @@ export class PiLeaderSession implements LeaderSession {
         ),
       }),
       // 将 Pi 工具调用桥接到当前 Run 注入的 DelegationService 回调。
-      execute: async (_toolCallId, params, signal) => {
+      execute: async (toolCallId, params, signal) => {
         const active = wrapper?.activeInput;
         if (!active) {
           throw new Error("No active Leader run is available for delegation");
         }
-        const result = await active.delegate({
-          agentId: params.agentId,
-          task: params.task,
-          ...(params.expectedOutput ? { expectedOutput: params.expectedOutput } : {}),
-          ...(params.attachmentIds !== undefined
-            ? { attachmentIds: params.attachmentIds }
-            : {}),
-          ...(signal ? { signal } : {}),
-        });
+        if (active.activeTaskPlan?.status === "ACTIVE" && params.taskPosition === undefined) {
+          throw new Error(
+            "taskPosition is required when delegating work for an active task plan",
+          );
+        }
+        let result;
+        try {
+          result = await active.delegate({
+            toolCallId,
+            agentId: params.agentId,
+            task: params.task,
+            ...(params.taskPosition !== undefined
+              ? { taskPosition: params.taskPosition }
+              : {}),
+            ...(params.expectedOutput ? { expectedOutput: params.expectedOutput } : {}),
+            ...(params.attachmentIds !== undefined
+              ? { attachmentIds: params.attachmentIds }
+              : {}),
+            ...(signal ? { signal } : {}),
+          });
+        } catch (error) {
+          if (error instanceof DelegationSuspendedError && wrapper) {
+            wrapper.suspendedDelegation = error;
+            // 只中止当前 Pi turn；BY_SUPER Worker 和业务 Run 都保持可恢复状态。
+            wrapper.session.agent.abort();
+          }
+          throw error;
+        }
         return {
           content: [{ type: "text", text: JSON.stringify(result) }],
           details: { status: result.status, artifactCount: result.artifacts.length },
@@ -435,6 +466,7 @@ export class PiLeaderSession implements LeaderSession {
       throw new Error("Leader session already has an active run");
     }
     this.activeInput = input;
+    this.suspendedDelegation = undefined;
     let currentAssistant = "";
     let lastAssistant = "";
     let modelErrorMessage = "";
@@ -718,8 +750,18 @@ export class PiLeaderSession implements LeaderSession {
       );
       await this.compactBeforePromptIfNeeded(userMessage);
       // Agent 授权快照通过 before_agent_start 临时注入 system prompt，不进入长期 transcript。
-      await this.session.prompt(userMessage, { source: "rpc" });
+      try {
+        await this.session.prompt(userMessage, { source: "rpc" });
+      } catch (error) {
+        if (!this.suspendedDelegation) {
+          throw error;
+        }
+      }
       await Promise.all([deltaWrites, checkpointWrites]);
+      const suspended = this.suspendedDelegation as DelegationSuspendedError | undefined;
+      if (suspended) {
+        throw new LeaderRunSuspendedError(suspended.delegationId);
+      }
       const text = lastAssistant || currentAssistant;
       if (!text.trim()) {
         throw new Error(

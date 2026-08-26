@@ -20,6 +20,8 @@ import com.iwhalecloud.byai.common.feign.response.knowledge.ModelDto;
 import com.iwhalecloud.byai.common.jwt.JwtService;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.util.StringUtil;
+import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpec;
+import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpecRepository;
 import com.iwhalecloud.byai.manager.application.service.aimodel.ModelManagementApplicationService;
 import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
 import com.iwhalecloud.byai.manager.application.service.user.UserPrivateParamApplicationService;
@@ -58,6 +60,10 @@ public class SandboxLaunchContextFactory {
     @Lazy
     @Autowired
     private ByaiSystemConfigService byaiSystemConfigService;
+
+    @Lazy
+    @Autowired
+    private SandboxServiceSpecRepository sandboxServiceSpecRepository;
 
     @Lazy
     @Autowired
@@ -135,8 +141,13 @@ public class SandboxLaunchContextFactory {
     }
 
     public SandboxLaunchContext buildContext(String userCode, Long resourceId, String sandboxType) {
+        return buildContext(userCode, resourceId, sandboxType, null);
+    }
+
+    public SandboxLaunchContext buildContext(String userCode, Long resourceId, String sandboxType, String profileKey) {
         String gatewayToken = generateGatewayToken();
-        Map<String, String> envs = buildSandboxEnvs(userCode, queryDigEmployee(resourceId), resourceId, gatewayToken);
+        Map<String, String> envs = buildSandboxEnvs(userCode, queryDigEmployee(resourceId), resourceId, sandboxType,
+            profileKey, gatewayToken);
         applySandboxAgentTypeEnv(envs, sandboxType, userCode);
         return new SandboxLaunchContext(sandboxType, envs, sandboxUserInfoFactory.build(userCode), gatewayToken);
     }
@@ -204,10 +215,13 @@ public class SandboxLaunchContextFactory {
     }
 
     private Map<String, String> buildSandboxEnvs(String userCode, SsResExtDigEmployee digEmployee, Long resourceId,
-        String gatewayToken) {
+        String sandboxType, String profileKey, String gatewayToken) {
         Map<String, String> envs = new HashMap<>(8);
 
         loadEnvFile(envs);
+
+        // 系统配置只对 SandboxServiceSpec.env 中声明的 key 生效，避免把整张配置表注入容器。
+        loadSandboxSystemConfigEnvs(envs, sandboxType, profileKey);
 
         // 加载个人设置的 env（优先级高于系统环境变量）
         loadPersonalEnvSettings(envs, userCode);
@@ -264,6 +278,32 @@ public class SandboxLaunchContextFactory {
         }
 
         return envs;
+    }
+
+    private void loadSandboxSystemConfigEnvs(Map<String, String> envs, String sandboxType, String profileKey) {
+        if (envs == null || StringUtils.isBlank(sandboxType) || sandboxServiceSpecRepository == null
+            || byaiSystemConfigService == null) {
+            return;
+        }
+
+        try {
+            SandboxServiceSpec spec = StringUtils.isNotBlank(profileKey)
+                ? sandboxServiceSpecRepository.findByServiceKeyAndProfile(sandboxType, profileKey).orElse(null)
+                : sandboxServiceSpecRepository.findByServiceKey(sandboxType).orElse(null);
+            if (spec == null || spec.getEnv() == null || spec.getEnv().isEmpty()) {
+                return;
+            }
+
+            Map<String, String> configValues = byaiSystemConfigService
+                .getDcSystemConfigValuesByCodes(spec.getEnv().keySet());
+            configValues.forEach(envs::put);
+            LOGGER.info("从 byai_system_config 加载沙箱环境变量完成，sandboxType={}，profileKey={}，envCount={}，envKeys={}",
+                sandboxType, profileKey, configValues.size(), spec.getEnv().keySet());
+        }
+        catch (Exception e) {
+            LOGGER.warn("加载沙箱系统环境变量异常，sandboxType={}，profileKey={}，原因：{}", sandboxType, profileKey,
+                e.getMessage());
+        }
     }
 
     /**

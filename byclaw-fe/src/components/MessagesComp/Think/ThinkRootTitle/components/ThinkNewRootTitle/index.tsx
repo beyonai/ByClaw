@@ -36,11 +36,12 @@ interface CollapsibleItemProps {
 
 const CollapsibleSection: React.FC<CollapsibleSectionProps> = React.memo(
   ({ children, treeNode, message, updateMessageListItemNewContent }) => {
-    const { isCollapsed = false, messageLoadingStatus = 2, contentType, messageIdx } = treeNode;
+    const { isCollapsed = false, messageLoadingStatus = 2, contentType, messageIdx, shouldOpen = false } = treeNode;
     const title = get(treeNode, 'content.substance', '');
 
-    const [isParentCollapsed, setIsParentCollapsed] = React.useState(isCollapsed);
+    const [isParentCollapsed, setIsParentCollapsed] = React.useState(shouldOpen ? false : isCollapsed);
     const isManualChangeRef = React.useRef(false);
+    const effectiveParentCollapsed = shouldOpen ? false : isParentCollapsed;
 
     const hasChildren = !!children && Array.isArray(children) && size(children) > 0;
 
@@ -82,15 +83,21 @@ const CollapsibleSection: React.FC<CollapsibleSectionProps> = React.memo(
     }, [contentType, thinkRootTitleHeaderComp, message, messageIdx, treeNode]);
 
     React.useEffect(() => {
+      if (shouldOpen) {
+        isManualChangeRef.current = false;
+        setIsParentCollapsed(false);
+        return;
+      }
       if (isManualChangeRef.current) return;
       setIsParentCollapsed(isCollapsed);
-    }, [isCollapsed]);
+    }, [isCollapsed, shouldOpen]);
 
     return (
       <div style={{ width: '100%' }}>
         <div
           className={classnames(styles.thinkingTitle, 'ub gap4 pointer')}
           onClick={() => {
+            if (shouldOpen) return;
             isManualChangeRef.current = true;
             setIsParentCollapsed(!isParentCollapsed);
           }}
@@ -98,12 +105,12 @@ const CollapsibleSection: React.FC<CollapsibleSectionProps> = React.memo(
           {HeaderComp}
           {hasChildren && (
             <div className={classnames(styles.collapseIcon, 'ub ub-ac ub-pc')}>
-              {isParentCollapsed ? <RightOutlined /> : <DownOutlined />}
+              {effectiveParentCollapsed ? <RightOutlined /> : <DownOutlined />}
             </div>
           )}
         </div>
 
-        {!isParentCollapsed && <div className={styles.sectionContent}>{children}</div>}
+        {!effectiveParentCollapsed && <div className={styles.sectionContent}>{children}</div>}
       </div>
     );
   }
@@ -119,7 +126,8 @@ const CollapsibleItem: React.FC<CollapsibleItemProps> = React.memo(
     const isFinishedRef = React.useRef(false);
 
     const [needsGradient, setNeedsGradient] = useState(false);
-    const [isCollapsed, setIsCollapsed] = useState(item.isCollapsed ?? false);
+    const [isCollapsed, setIsCollapsed] = useState(item.shouldOpen ? false : item.isCollapsed ?? false);
+    const effectiveCollapsed = item.shouldOpen ? false : isCollapsed;
 
     const hasChildren = item.children && item.children.length > 0;
     const isBigSmartOffice = `${parentTreeNode?.contentType}` === `${SSEMessageType.thinkRootTitle}`;
@@ -129,13 +137,18 @@ const CollapsibleItem: React.FC<CollapsibleItemProps> = React.memo(
     }, [item.children]);
 
     React.useEffect(() => {
+      if (item.shouldOpen) {
+        isManualChangeRef.current = false;
+        setIsCollapsed(false);
+        return;
+      }
       if (!isBoolean(item.isCollapsed)) return;
 
       isFinishedRef.current = item.isCollapsed;
 
       if (isManualChangeRef.current) return;
       setIsCollapsed(item.isCollapsed);
-    }, [item.isCollapsed]);
+    }, [item.isCollapsed, item.shouldOpen]);
 
     React.useEffect(() => {
       if (!hasTextChild) return;
@@ -176,7 +189,7 @@ const CollapsibleItem: React.FC<CollapsibleItemProps> = React.memo(
             [styles.collapsible]: hasChildren,
           })}
           onClick={() => {
-            if (!hasChildren) return;
+            if (!hasChildren || item.shouldOpen) return;
             isManualChangeRef.current = true;
             setIsCollapsed(!isCollapsed);
           }}
@@ -192,15 +205,15 @@ const CollapsibleItem: React.FC<CollapsibleItemProps> = React.memo(
             }}
           />
           {hasChildren && (
-            <div className={styles.itemCollapseIcon}>{isCollapsed ? <RightOutlined /> : <DownOutlined />}</div>
+            <div className={styles.itemCollapseIcon}>{effectiveCollapsed ? <RightOutlined /> : <DownOutlined />}</div>
           )}
         </div>
         {needsGradient && (
           <div style={{ position: 'relative' }}>
             <div
               className={classnames(styles.topGradient, {
-                [styles.close]: isCollapsed,
-                [styles.open]: !isCollapsed,
+                [styles.close]: effectiveCollapsed,
+                [styles.open]: !effectiveCollapsed,
               })}
             />
           </div>
@@ -209,8 +222,8 @@ const CollapsibleItem: React.FC<CollapsibleItemProps> = React.memo(
           {hasChildren && (
             <div
               className={classnames(styles.itemChildHeader, {
-                [styles.close]: isCollapsed,
-                [styles.open]: !isCollapsed,
+                [styles.close]: effectiveCollapsed,
+                [styles.open]: !effectiveCollapsed,
               })}
               ref={itemChildHeaderRef}
               onMouseEnter={() => {
@@ -237,8 +250,8 @@ const CollapsibleItem: React.FC<CollapsibleItemProps> = React.memo(
           <div style={{ position: 'relative' }}>
             <div
               className={classnames(styles.bottomGradient, {
-                [styles.close]: isCollapsed,
-                [styles.open]: !isCollapsed,
+                [styles.close]: effectiveCollapsed,
+                [styles.open]: !effectiveCollapsed,
               })}
             />
           </div>

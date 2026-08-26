@@ -127,6 +127,7 @@ suite("PostgreSQL persistence integration", () => {
       agentId: "agent-1",
       connectorId: "openclaw-by-framework",
       task: "resume-safe",
+      taskPosition: 2,
       status: "QUEUED",
       version: 0,
       createdAt: Date.now(),
@@ -148,6 +149,7 @@ suite("PostgreSQL persistence integration", () => {
     await expect(database.delegations.get(delegationId)).resolves.toMatchObject({
       connectorCursor: "3-0",
       partialOutput: "partial",
+      taskPosition: 2,
     });
     await database.runs.saveWithEvent?.(
       {
@@ -250,6 +252,99 @@ suite("PostgreSQL persistence integration", () => {
         now: Date.now(),
       }),
     ).resolves.toBeUndefined();
+  });
+
+  it("terminally settles one expired callback exactly once across concurrent sweepers", async () => {
+    const owner = session("callback-timeout-user");
+    sessionsToDelete.push(owner.id);
+    await database.sessions.save(owner);
+    const base = queuedRun(owner.id);
+    const waiting: Run = {
+      ...base,
+      ingressContext: {
+        externalSessionId: "external-timeout-session",
+        parentMessageId: "external-timeout-message",
+        traceId: "external-timeout-trace",
+      },
+      status: "WAITING_AGENT",
+      executionStage: "CONNECTOR_WAITING",
+    };
+    await database.runs.createWithEvent?.(waiting, {
+      runId: waiting.id,
+      timestamp: Date.now(),
+      type: "run.created",
+      data: { status: "WAITING_AGENT" },
+    });
+    const delegationId = randomUUID();
+    await database.delegations.save({
+      id: delegationId,
+      runId: waiting.id,
+      agentId: "agent-timeout",
+      agentName: "Timeout Agent",
+      connectorId: "code-by-framework",
+      task: "wait for callback",
+      status: "RUNNING",
+      externalRef: { connectorId: "code-by-framework", executionId: delegationId },
+      callbackDeadlineAt: Date.now() - 1_000,
+      version: 0,
+      createdAt: Date.now() - 2_000,
+      updatedAt: Date.now() - 2_000,
+      startedAt: Date.now() - 2_000,
+    });
+
+    const [first, second] = await Promise.all([
+      database.queue.expireWaitingCallbacks({ limit: 10 }),
+      database.queue.expireWaitingCallbacks({ limit: 10 }),
+    ]);
+    expect([...first, ...second]).toEqual([{ runId: waiting.id, delegationId }]);
+    await expect(database.delegations.get(delegationId)).resolves.toMatchObject({
+      status: "TIMED_OUT",
+      result: { status: "timed_out" },
+    });
+    await expect(database.runs.get(waiting.id)).resolves.toMatchObject({
+      status: "FAILED",
+      executionStage: "SETTLED",
+      finalAnswer: "子 Agent 在规定时间内未返回最终结果，本次调度已超时。",
+      error: "Delegation received no terminal ResumeCommand within its callback timeout",
+    });
+    expect(
+      (await database.events.list(waiting.id)).filter(
+        (event) => event.type === "delegation.failed",
+      ),
+    ).toHaveLength(1);
+    expect(
+      (await database.events.list(waiting.id)).filter(
+        (event) => event.type === "run.failed",
+      ),
+    ).toHaveLength(1);
+    const [deliveryA, deliveryB] = await Promise.all([
+      database.queue.claimCallbackTimeoutDeliveries({
+        instanceId: "delivery-a",
+        leaseMs: 30_000,
+        limit: 10,
+      }),
+      database.queue.claimCallbackTimeoutDeliveries({
+        instanceId: "delivery-b",
+        leaseMs: 30_000,
+        limit: 10,
+      }),
+    ]);
+    const deliveries = [...deliveryA, ...deliveryB];
+    expect(deliveries).toEqual([
+      expect.objectContaining({
+        runId: waiting.id,
+        runStatus: "FAILED",
+        finalAnswer: "子 Agent 在规定时间内未返回最终结果，本次调度已超时。",
+        externalSessionId: "external-timeout-session",
+      }),
+    ]);
+    const deliveryOwner = deliveryA.length > 0 ? "delivery-a" : "delivery-b";
+    await expect(
+      database.queue.completeCallbackTimeoutDelivery({
+        runId: waiting.id,
+        instanceId: deliveryOwner,
+      }),
+    ).resolves.toBe(true);
   });
 
   it("keeps PENDING Pi entries private and promotes them with revision CAS", async () => {

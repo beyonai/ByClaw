@@ -59,13 +59,13 @@
    - **内置路由层** ([agent-reach.md](agent-reach.md)): Exa 搜索、gh、RSS、站内搜索等渠道。
      **验证方式**: 通读 agent-reach.md 路由表,确认本主题是否在其覆盖范围。
    
-   - **online_search** (searxng 多引擎技能): 时间窗(`--time-range day/week/month/year`)、
+   - **online-search** (searxng 多引擎技能): 时间窗(`--time-range day/week/month/year`)、
      中文引擎(baidu/sogou/360search)、学术类别(`--category science`,含 arxiv/crossref/pubmed/openalex)。
-     **验证方式**: 通读 `skills/online_search/SKILL.md`,确认引擎可用性与本主题的语言/时效/学术性匹配度。
+     **验证方式**: 通读 `skills/knowledge-collection/references/online-search/SKILL.md`,确认引擎可用性与本主题的语言/时效/学术性匹配度。
    
    - **hot_discovery** (热度发现通道子技能): 经 bycli 适配器取平台原生热度(`citations`/`downloads`/`stars`/`score`)，
      与 searxng 并行跑后用其 `merge` 归并，双通道命中优先级最高。
-     **验证方式**: 通读 `skills/online_search/references/hot_discovery/SKILL.md`,检查本主题所属维度
+     **验证方式**: 通读 `skills/knowledge-collection/references/online-search/references/hot_discovery/SKILL.md`,检查本主题所属维度
      (packages/science/it/q&a/repos/apps/books/movies 9 个覆盖 vs 
       images/videos/music/files/dictionaries/translate/map/lyrics/radio/weather/icons 11 个无热度源)。
    
@@ -107,7 +107,7 @@
 对每一层每个分支:
 
 1. 生成子问题并附带 `researchGoal`,说明该检索要解决什么问题。
-2. 完整子研究: 多源检索(内置路由层渠道与 `online_search` 技能,分工见下方
+2. 完整子研究: 多源检索(内置路由层渠道与 `online-search` 技能,分工见下方
    「检索源分工」节)→ 读取全文(经 [agent-reach.md](agent-reach.md) 路由并委派其选中的来源执行器)
    → 过滤 → 登记采集产物。
 3. 采集产物登记: 执行器写出的 `collection-result.json` + raw/markdown/sanitized 产物,
@@ -124,23 +124,23 @@
    `new_breadth = max(2, breadth // 2)`,递归进入下一层。
 6. 某一层所有分支都失败: 停止递归,在报告中写明停止原因。
 
-### 检索源分工(内置路由层 × online_search × hot_discovery)
+### 检索源分工(内置路由层 × online-search × hot_discovery)
 
 三个检索信源互补并行,发现结果统一进入 learnings/citations;**取内容一律经 [agent-reach.md](agent-reach.md) 路由后委派来源执行器**,
-online_search 只负责发现 URL,不得直接抓取网页:
+online-search 只负责发现 URL,不得直接抓取网页:
 
-- **时间敏感**(周报/新闻/最新动态): 优先 `online_search --category news|general --time-range week|day`
+- **时间敏感**(周报/新闻/最新动态): 优先 `public-discover --category news|general`；需要时间窗时，SearXNG 独立调试可传 `--time-range week|day`
   (时间窗过滤一步到位,baidu/bing/sogou 支持);
-- **学术/标准**: 优先 `online_search --category science`(arxiv/crossref/pubmed/openalex),
+- **学术/标准**: 优先 `public-discover --category science`(arxiv/crossref/pubmed/openalex),
   不带 `--time-range`(science 引擎不支持时间窗,传了会过滤为空);
 - **英文技术/代码**: 优先内置路由层的 Exa(擅长英文技术文档与代码上下文)与 `gh`(搜 GitHub);
-- **热度优先**(需要「相关且高热」而非仅相关): 与 searxng **并行**跑
-  `online_search/references/hot_discovery`(子技能),它经 bycli 适配器取平台原生热度字段
+- **公共 URL 发现**: `public-discover` 与 SearXNG **并行**运行
+  `online-search/references/hot_discovery`(子技能),它经 bycli 适配器取平台原生热度字段
   (`citations`/`downloads`/`stars`/`score`),再用其 `merge` 子命令归并两个通道。
   归并输出的 `groups.bothChannels` 是双通道命中,优先级最高。
   **覆盖边界**: 热度集中在 packages/science/it/q&a/repos/apps/books/movies 9 个维度;
   images/videos/music/files/dictionaries/translate/map/lyrics/radio/weather/icons 这 11 个维度
-  **无免登录热度源**,不要对它们调用。中文 general 主题是弱项(免登录只有虎扑,偏体育娱乐)。
+  **无免登录热度源**；仍会运行热度发现的 `general` 兜底适配器，并如实输出覆盖缺口。中文 general 主题是弱项(免登录只有虎扑,偏体育娱乐)。
   **措辞纪律**: 33 个适配器里 30 个需本地重排,对外只能称「相关结果中较热」,不得称「平台最热」;
   热度是时点观测,引用时须给出 `observedAt`;不造统一热度分(`downloads` 与 `citations` 不可比)。
   **时序**: `init` 必须先于任何发现通道——`init` 拒绝非空目录,而快照目录由 `init` 自己创建。

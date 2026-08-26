@@ -124,6 +124,28 @@ describe('utils/messgae', () => {
     });
   });
 
+  it('fetchMessageHandler preserves historical task plans', () => {
+    const taskPlan = {
+      planId: 'plan-1',
+      version: 2,
+      title: 'Plan',
+      status: 'COMPLETED',
+      sessionId: 's1',
+      messageId: 'm2',
+      tasks: [{ taskId: 'task-1', position: 1, title: 'Step 1', status: 'COMPLETED' }],
+    };
+    const message = fetchMessageHandler({
+      creatorId: 'u2',
+      usage: '2',
+      messageId: 'm2',
+      sessionId: 's1',
+      taskPlan,
+    });
+
+    expect(message.taskPlan).toEqual(taskPlan);
+    expect(hasVisibleMessageContent(message)).toBe(true);
+  });
+
   it('fetchMessageHandler converts answer messages, inferLog, messageStruct and relatedResources', () => {
     const inferLog = JSON.stringify([
       {

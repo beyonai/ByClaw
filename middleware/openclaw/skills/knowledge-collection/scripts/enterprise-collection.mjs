@@ -4,7 +4,9 @@ import { createFeishuAdapter } from './enterprise/adapters/feishu.mjs';
 import { createWecomAdapter } from './enterprise/adapters/wecom.mjs';
 import { dispatchEnterprise, dispatchEnterpriseBatch, parseSearchBatchRequests } from './enterprise/dispatcher.mjs';
 import { createArtifactWriter } from './enterprise/shared/artifact-writer.mjs';
-import { isAbsolute } from 'node:path';
+import { loadSession, sessionPaths } from './session.mjs';
+import { lstat, readFile, realpath } from 'node:fs/promises';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
 
 export function parseArgs(argv) {
   const [command, ...rest] = argv;
@@ -47,6 +49,120 @@ function requireAbsoluteOutputDir(values) {
   return outputDir;
 }
 
+export function assertEnterpriseScope(parentSessionDir, requestedSources) {
+  if (typeof parentSessionDir !== 'string' || !isAbsolute(parentSessionDir)) {
+    throw new Error('--parent-session-dir must be an absolute initialized collection session');
+  }
+  const { session } = loadSession(sessionPaths(parentSessionDir), { persistMigration: false });
+  const allowed = Array.isArray(session.task?.sourceScope) ? session.task.sourceScope : [];
+  const denied = requestedSources.filter((source) => !allowed.includes(source));
+  if (denied.length) {
+    throw new Error(`session task.sourceScope 不允许企业来源: ${denied.join(', ')}`);
+  }
+  return session;
+}
+
+function relativeChildPath(sessionDir, relativePath, label) {
+  const target = resolve(sessionDir, relativePath);
+  const fromRoot = relative(resolve(sessionDir), target);
+  if (!fromRoot || fromRoot === '..' || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) {
+    throw new Error(`${label} 越出来源会话`);
+  }
+  return target;
+}
+
+async function readChildFile(sessionDir, relativePath, label) {
+  const rootEntry = await lstat(sessionDir);
+  if (!rootEntry.isDirectory() || rootEntry.isSymbolicLink()) {
+    throw new Error(`${label} source session must be a regular directory`);
+  }
+  const target = relativeChildPath(sessionDir, relativePath, label);
+  const entry = await lstat(target);
+  if (!entry.isFile() || entry.isSymbolicLink()) {
+    throw new Error(`${label} must not be a symbolic link`);
+  }
+  const canonicalRoot = await realpath(sessionDir);
+  const canonicalTarget = await realpath(target);
+  const fromRoot = relative(canonicalRoot, canonicalTarget);
+  if (!fromRoot || fromRoot === '..' || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) {
+    throw new Error(`${label} is outside source session`);
+  }
+  return readFile(target, 'utf8');
+}
+
+export async function writeSearchAllAggregate({
+  aggregateWriter, query, sources, metadataOnly, outcomes,
+}) {
+  const inventory = [];
+  const canonicalItems = [];
+  const sourceMetadata = { outcomes: [] };
+  let loadedBundles = 0;
+  let bundleFailures = 0;
+  for (const result of outcomes) {
+    const sourceOutcome = { source: result.source, outcome: result.outcome };
+    sourceMetadata.outcomes.push(sourceOutcome);
+    let metadata;
+    let collectionResult;
+    try {
+      metadata = JSON.parse(await readChildFile(result.sessionDir, 'sanitized/metadata.json', 'metadata'));
+      collectionResult = JSON.parse(await readChildFile(result.sessionDir, 'collection-result.json', 'collection result'));
+    } catch {
+      sourceOutcome.aggregateFailure = 'child bundle unavailable or invalid';
+      bundleFailures += 1;
+      continue;
+    }
+    loadedBundles += 1;
+    const canonicalByPath = new Map((collectionResult.items || []).map((item) => [item.fileName, item]));
+    for (const item of metadata.collection?.items || []) {
+      const prefix = result.source;
+      const materialization = { ...item.materialization };
+      if (materialization.status === 'materialized') {
+        const markdownRelative = `markdown/${prefix}/${materialization.markdownPath.replace(/^markdown\//, '')}`;
+        const sanitizedRelative = `sanitized/items/${prefix}/${materialization.sanitizedPath.replace(/^sanitized\/items\//, '')}`;
+        await aggregateWriter.writeText(markdownRelative, await readChildFile(
+          result.sessionDir, materialization.markdownPath, 'markdownPath',
+        ));
+        await aggregateWriter.writeText(sanitizedRelative, await readChildFile(
+          result.sessionDir, materialization.sanitizedPath, 'sanitizedPath',
+        ));
+        const canonical = canonicalByPath.get(materialization.sanitizedPath);
+        if (!canonical) throw new Error(`来源 ${result.source} 的 materialized 条目缺少 canonical item`);
+        canonicalItems.push({ ...canonical, markdown: sanitizedRelative, fileName: sanitizedRelative });
+        materialization.markdownPath = markdownRelative;
+        materialization.sanitizedPath = sanitizedRelative;
+      }
+      inventory.push({
+        ...item,
+        itemId: `${prefix}:${item.itemId}`,
+        duplicateOf: item.duplicateOf ? `${prefix}:${item.duplicateOf}` : null,
+        rawArtifacts: (item.rawArtifacts || []).map((artifact) => `${prefix}/${artifact}`),
+        materialization,
+      });
+    }
+  }
+  const anySucceeded = loadedBundles > 0;
+  const anyIncomplete = bundleFailures > 0
+    || outcomes.some((result) => result.outcome?.status !== 'complete');
+  await aggregateWriter.writeJson('raw/search-all.json', { command: 'search-all', outcomes });
+  await aggregateWriter.writeCollectionBundle({
+    title: `Enterprise search: ${query}`,
+    query,
+    source: 'multi-source',
+    backend: 'multi-source',
+    url: `enterprise-search-all:${encodeURIComponent(query)}`,
+    filters: { query, sources },
+    inventory,
+    canonicalItems,
+    sourceMetadata,
+    sourceScope: sources,
+    materializationTarget: metadataOnly ? 'candidates' : 'all',
+    metadataOnly,
+    discoverySucceeded: anySucceeded,
+    paginationFailed: anyIncomplete,
+  });
+  return { aggregatePath: 'raw/search-all.json', inventory: inventory.length };
+}
+
 function render(value) {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 }
@@ -58,12 +174,12 @@ function help() {
     usage: 'knowledge-collection.mjs enterprise search|search-all|materialize|resource|resume-resource [options]',
     defaults: 'search defaults: limit 50, concurrency 4, cursor null, metadata-only false; search-all defaults: sources dingtalk,feishu,wecom,ima, limit 50, concurrency 4, metadata-only true',
     commands: {
-      search: '--source dingtalk|feishu|wecom|ima --query <query> --output-dir <absolute-path> [--limit 1..500] [--concurrency 1..16] [--cursor <cursor>] [--metadata-only [true|false]] [--source-options <json>]',
-      searchAll: '[--sources dingtalk,feishu,wecom,ima] --query <query> --output-root <absolute-path> [--limit 1..500] [--concurrency 1..16] [--metadata-only [true|false]]; defaults to all sources and metadata-only; continues after a connector auth failure',
+      search: '--parent-session-dir <absolute-path> --source dingtalk|feishu|wecom|ima --query <query> --output-dir <absolute-path> [--limit 1..500] [--concurrency 1..16] [--cursor <cursor>] [--metadata-only [true|false]] [--source-options <json>]',
+      searchAll: '--parent-session-dir <absolute-path> [--sources dingtalk,feishu,wecom,ima] --query <query> --output-root <absolute-path> [--limit 1..500] [--concurrency 1..16] [--metadata-only [true|false]]; defaults to all sources and metadata-only; continues after a connector auth failure',
       materialize: '--source dingtalk|feishu|ima --session-dir <metadata-only-session> --item-ids <id[,id...]> --output-dir <new-absolute-path> [--concurrency 1..16]',
-      resource: '--source dingtalk|feishu|wecom|ima --url <http(s)-url> --output-dir <absolute-path> [--kb <knowledge-base-id> for ima] [--minute-token <token> for feishu]',
+      resource: '--parent-session-dir <absolute-path> --source dingtalk|feishu|wecom|ima --url <http(s)-url> --output-dir <absolute-path> [--minute-token <token> for feishu]',
       resumeResource: '--source wecom --session-dir <partial-session> --output-dir <new-absolute-path>',
-      legacy: 'wecom-smartpage and feishu-minutes remain supported',
+      legacy: 'wecom-smartpage and feishu-minutes remain supported and require --parent-session-dir',
     },
   };
 }
@@ -71,6 +187,7 @@ function help() {
 function commandSchema() {
   const source = { type: 'string', enum: ['dingtalk', 'feishu', 'wecom', 'ima'] };
   const absolutePath = { type: 'string', format: 'absolute-path' };
+  const parentSession = { 'parent-session-dir': absolutePath };
   const positiveLimit = { type: 'integer', minimum: 1, maximum: 500, default: 50 };
   const concurrency = { type: 'integer', minimum: 1, maximum: 16, default: 4 };
   return {
@@ -80,20 +197,20 @@ function commandSchema() {
     cli: { flagStyle: '--kebab-case', commaSeparatedArrays: ['sources', 'item-ids'] },
     commands: {
       search: {
-        type: 'object', additionalProperties: false, required: ['source', 'query', 'output-dir'],
-        properties: { source, query: { type: 'string', minLength: 1 }, 'output-dir': absolutePath, limit: positiveLimit, concurrency, cursor: { type: 'string' }, 'metadata-only': { type: 'boolean', default: false }, 'source-options': { type: 'object', cliEncoding: 'json' } },
+        type: 'object', additionalProperties: false, required: ['parent-session-dir', 'source', 'query', 'output-dir'],
+        properties: { ...parentSession, source, query: { type: 'string', minLength: 1 }, 'output-dir': absolutePath, limit: positiveLimit, concurrency, cursor: { type: 'string' }, 'metadata-only': { type: 'boolean', default: false }, 'source-options': { type: 'object', cliEncoding: 'json' } },
       },
       'search-all': {
-        type: 'object', additionalProperties: false, required: ['query', 'output-root'],
-        properties: { sources: { type: 'array', items: source, minItems: 1, uniqueItems: true, cliEncoding: 'comma-separated', default: ['dingtalk', 'feishu', 'wecom', 'ima'] }, query: { type: 'string', minLength: 1 }, 'output-root': absolutePath, limit: positiveLimit, concurrency, 'metadata-only': { type: 'boolean', default: true } },
+        type: 'object', additionalProperties: false, required: ['parent-session-dir', 'query', 'output-root'],
+        properties: { ...parentSession, sources: { type: 'array', items: source, minItems: 1, uniqueItems: true, cliEncoding: 'comma-separated', default: ['dingtalk', 'feishu', 'wecom', 'ima'] }, query: { type: 'string', minLength: 1 }, 'output-root': absolutePath, limit: positiveLimit, concurrency, 'metadata-only': { type: 'boolean', default: true } },
       },
       materialize: {
         type: 'object', additionalProperties: false, required: ['source', 'session-dir', 'item-ids', 'output-dir'],
         properties: { source: { ...source, enum: ['dingtalk', 'feishu', 'ima'] }, 'session-dir': absolutePath, 'item-ids': { type: 'array', minItems: 1, uniqueItems: true, items: { type: 'string', minLength: 1 }, cliEncoding: 'comma-separated' }, 'output-dir': absolutePath, concurrency },
       },
       resource: {
-        type: 'object', additionalProperties: false, required: ['source', 'url', 'output-dir'],
-        properties: { source, url: { type: 'string', format: 'http-url' }, 'output-dir': absolutePath, kb: { type: 'string', minLength: 1 }, 'minute-token': { type: 'string', minLength: 1 } },
+        type: 'object', additionalProperties: false, required: ['parent-session-dir', 'source', 'url', 'output-dir'],
+        properties: { ...parentSession, source, url: { type: 'string', format: 'http-url' }, 'output-dir': absolutePath, 'minute-token': { type: 'string', minLength: 1 } },
       },
       'resume-resource': {
         type: 'object', additionalProperties: false, required: ['source', 'session-dir', 'output-dir'],
@@ -114,6 +231,7 @@ async function main() {
     return;
   }
   if (command === 'wecom-smartpage') {
+    assertEnterpriseScope(requireValue(values, 'parent-session-dir'), ['wecom']);
     const url = requireValue(values, 'url');
     const outputDir = requireAbsoluteOutputDir(values);
     const outcome = await createWecomAdapter({
@@ -124,6 +242,7 @@ async function main() {
     return;
   }
   if (command === 'feishu-minutes') {
+    assertEnterpriseScope(requireValue(values, 'parent-session-dir'), ['feishu']);
     const minuteToken = requireValue(values, 'minute-token');
     const url = requireValue(values, 'url');
     const outputDir = requireAbsoluteOutputDir(values);
@@ -135,16 +254,28 @@ async function main() {
     return;
   }
   if (command === 'search' || command === 'materialize' || command === 'resource' || command === 'resume-resource') {
-    render(await dispatchEnterprise(command, values));
+    const scopeSessionDir = command === 'search' || command === 'resource'
+      ? requireValue(values, 'parent-session-dir') : requireValue(values, 'session-dir');
+    assertEnterpriseScope(scopeSessionDir, [requireValue(values, 'source')]);
+    const { ['parent-session-dir']: _parentSessionDir, ...dispatchValues } = values;
+    render(await dispatchEnterprise(command, dispatchValues));
     return;
   }
   if (command === 'search-all') {
-    const requests = parseSearchBatchRequests(values);
+    const { ['parent-session-dir']: _parentSessionDir, ...batchValues } = values;
+    const requests = parseSearchBatchRequests(batchValues);
+    const sources = requests.map((request) => request.source);
+    assertEnterpriseScope(requireValue(values, 'parent-session-dir'), sources);
     const aggregateWriter = await createArtifactWriter(requireValue(values, 'output-root'));
     const outcomes = await dispatchEnterpriseBatch('search', requests, { concurrency: Number(values.concurrency) || 4 });
-    const aggregatePath = 'raw/search-all.json';
-    await aggregateWriter.writeJson(aggregatePath, { command: 'search-all', outcomes });
-    render({ outputDir: requireValue(values, 'output-root'), aggregatePath, outcomes });
+    const aggregate = await writeSearchAllAggregate({
+      aggregateWriter,
+      query: requireValue(values, 'query'),
+      sources,
+      metadataOnly: values['metadata-only'] !== false && values['metadata-only'] !== 'false' && values['metadata-only'] !== '0',
+      outcomes,
+    });
+    render({ outputDir: requireValue(values, 'output-root'), ...aggregate, outcomes });
     return;
   }
   throw new Error(`unsupported command: ${command || '(missing)'}`);

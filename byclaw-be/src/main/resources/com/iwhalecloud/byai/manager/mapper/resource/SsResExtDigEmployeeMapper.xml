@@ -107,6 +107,7 @@
         <result column="resource_code" property="resourceCode" />
         <result column="resource_name" property="name" />
         <result column="resource_desc" property="description" />
+        <result column="avatar" property="avatar" />
         <result column="create_type" property="createType" />
         <result column="integration_type" property="integrationType" />
         <result column="agent_type" property="agentType" />
@@ -336,6 +337,7 @@
                a.resource_code,
                a.resource_name,
                a.resource_desc,
+               a.avatar,
                a.worker_agent_type,
                e.agent_type,
                e.create_type,
@@ -468,10 +470,7 @@
                 )
            )
            <if test="keyword != null and keyword != ''">
-               and (
-                    a.resource_name like concat('%', #{keyword}, '%')
-                    or a.resource_desc like concat('%', #{keyword}, '%')
-               )
+               and UPPER(a.resource_name) like concat('%', UPPER(#{keyword}), '%')
            </if>
          order by a.resource_name, a.resource_id
     </select>

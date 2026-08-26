@@ -2,8 +2,10 @@ package com.iwhalecloud.byai.state.application.service.chat;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -11,14 +13,16 @@ import com.iwhaleai.byai.framework.client.GatewayClient;
 import com.iwhalecloud.byai.common.constants.chat.ConversationObjectType;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
-import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.state.application.service.taskplan.TaskPlanApplicationService;
 import com.iwhalecloud.byai.manager.dto.session.SessionUploadResult;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
+import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatInfo;
 import com.iwhalecloud.byai.state.domain.chat.dto.StopChatDto;
+import com.iwhalecloud.byai.state.domain.chat.service.OutputStreamManager;
 import com.iwhalecloud.byai.state.domain.chat.service.RunningChatSnapshotService;
 import com.iwhalecloud.byai.state.domain.chat.service.RunningOutputStreamRegistry;
-import com.iwhalecloud.byai.state.domain.chat.service.TargetAgentResolver;
+import com.iwhalecloud.byai.state.domain.chat.service.ScriptService;
+import com.iwhalecloud.byai.state.domain.chat.service.SessionStreamManager;
 import com.iwhalecloud.byai.state.domain.chat.service.TraceIdCodec;
 import com.iwhalecloud.byai.state.domain.taskplan.dto.TaskPlanSnapshot;
 import com.iwhalecloud.byai.state.domain.ws.service.TaskPlanWebSocketPublisher;
@@ -35,7 +39,6 @@ import org.springframework.web.multipart.MultipartFile;
 class AssistantChatApplicationServiceTest {
 
     private GatewayClient gatewayClient;
-    private SsResourceService ssResourceService;
     private RunningOutputStreamRegistry runningOutputStreamRegistry;
     private RunningChatSnapshotService runningChatSnapshotService;
 
@@ -52,7 +55,6 @@ class AssistantChatApplicationServiceTest {
     @BeforeEach
     void setUp() {
         gatewayClient = mock(GatewayClient.class);
-        ssResourceService = mock(SsResourceService.class);
         runningOutputStreamRegistry = mock(RunningOutputStreamRegistry.class);
         runningChatSnapshotService = mock(RunningChatSnapshotService.class);
         taskPlanApplicationService = mock(TaskPlanApplicationService.class);
@@ -61,12 +63,7 @@ class AssistantChatApplicationServiceTest {
         sessionTitleService = mock(SessionTitleService.class);
         byaiSystemConfigService = mock(ByaiSystemConfigService.class);
 
-        TargetAgentResolver targetAgentResolver = new TargetAgentResolver();
-        ReflectionTestUtils.setField(targetAgentResolver, "ssResourceService", ssResourceService);
-
         assistantChatApplicationService = new AssistantChatApplicationService(gatewayClient);
-        ReflectionTestUtils.setField(assistantChatApplicationService, "ssResourceService", ssResourceService);
-        ReflectionTestUtils.setField(assistantChatApplicationService, "targetAgentResolver", targetAgentResolver);
         ReflectionTestUtils.setField(assistantChatApplicationService, "runningOutputStreamRegistry",
             runningOutputStreamRegistry);
         ReflectionTestUtils.setField(assistantChatApplicationService, "runningChatSnapshotService",
@@ -96,7 +93,6 @@ class AssistantChatApplicationServiceTest {
         stopChatDto.setAgentId(30L);
         stopChatDto.setSessionId(10L);
         stopChatDto.setMessageId(20L);
-        when(ssResourceService.findById(30L)).thenReturn(null);
         TaskPlanSnapshot cancelling = new TaskPlanSnapshot();
         cancelling.setStatus("CANCELLING");
         TaskPlanSnapshot cancelled = new TaskPlanSnapshot();
@@ -123,13 +119,37 @@ class AssistantChatApplicationServiceTest {
         stopChatDto.setSessionId(10L);
         stopChatDto.setTraceId(traceId);
         stopChatDto.setLaneId("lane-a");
-        when(ssResourceService.findById(30L)).thenReturn(null);
 
         assistantChatApplicationService.stopChat(stopChatDto);
 
         verify(gatewayClient).cancelSession(eq("10"), eq("user cancel task"));
         verify(runningOutputStreamRegistry).release(10L, 21L);
         verify(runningChatSnapshotService).delete(10L, 21L);
+    }
+
+    /**
+     * 重启后前端补发的 STOP_CHAT 会落到没有任何上下文的新 pod 上：
+     * 既不能停止本 pod 并不持有的 listener，也不能带着未知归属去清理运行态与快照，
+     * 否则重启恢复扫描将失去接管该会话的依据。
+     */
+    @Test
+    void stopChat_keepsRecoveryStateWhenAnswerOwnershipUnknown() {
+        SessionStreamManager sessionStreamManager = mock(SessionStreamManager.class);
+        ReflectionTestUtils.setField(assistantChatApplicationService, "sessionStreamManager", sessionStreamManager);
+        ReflectionTestUtils.setField(assistantChatApplicationService, "outputStreamManager",
+            mock(OutputStreamManager.class));
+        ReflectionTestUtils.setField(assistantChatApplicationService, "scriptService", mock(ScriptService.class));
+        when(sessionStreamManager.isSessionListenerActive("10")).thenReturn(false);
+        when(runningOutputStreamRegistry.getRunning(10L)).thenReturn(new RunningChatInfo());
+
+        StopChatDto stopChatDto = new StopChatDto();
+        stopChatDto.setSessionId(10L);
+
+        assistantChatApplicationService.stopChat(stopChatDto);
+
+        verify(sessionStreamManager, never()).stopSessionListener(anyString());
+        verify(runningOutputStreamRegistry).release(10L, null);
+        verify(runningChatSnapshotService).delete(10L, null);
     }
 
     @Test

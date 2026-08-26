@@ -83,7 +83,11 @@ const questions = [
   },
 ];
 
-function renderQuestions(initialContent: IMessageListItemContent, onUpdate = jest.fn()) {
+function renderQuestions(
+  initialContent: IMessageListItemContent,
+  onUpdate = jest.fn(),
+  messageOverrides: Record<string, unknown> = {}
+) {
   function Harness() {
     const [content, setContent] = useState(initialContent);
 
@@ -95,6 +99,7 @@ function renderQuestions(initialContent: IMessageListItemContent, onUpdate = jes
             msgId: 'message-1',
             sessionId: 'session-1',
             traceId: 'trace-1',
+            ...messageOverrides,
           } as any
         }
         messageListItem={
@@ -352,6 +357,68 @@ describe('AskUserQuestions', () => {
     expect(onUpdate).toHaveBeenLastCalledWith(
       expect.objectContaining({ substance: expect.objectContaining({ formStatus: IFormStatus.FINISH }) })
     );
+  }, 15000);
+
+  it('writes agentId from valid resume metadata into the payload', async () => {
+    const resumeMetadata = JSON.stringify({ agentId: 'agent-42', checkpointId: 'checkpoint-1' });
+    renderQuestions(
+      {
+        substance: {
+          formStatus: IFormStatus.INIT,
+          questions: [questions[0]],
+        },
+      },
+      jest.fn(),
+      { metadata: resumeMetadata }
+    );
+
+    fireEvent.click(screen.getByRole('radio', { name: /React/ }));
+    const confirmButton = screen.getByRole('button', { name: 'form.confirm' });
+    await waitFor(() => expect(confirmButton).toBeEnabled());
+    await act(async () => {
+      fireEvent.click(confirmButton);
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(mockEmit).toHaveBeenCalledWith('beyond-chat-on-send-msg', expect.any(Object)));
+    expect(mockEmit).toHaveBeenCalledWith(
+      'beyond-chat-on-send-msg',
+      expect.objectContaining({
+        sendProps: expect.objectContaining({
+          payload: expect.objectContaining({
+            metadata: resumeMetadata,
+            agentId: 'agent-42',
+          }),
+        }),
+      })
+    );
+  }, 15000);
+
+  it('keeps invalid resume metadata without writing agentId into the payload', async () => {
+    const resumeMetadata = '{invalid-json';
+    renderQuestions(
+      {
+        substance: {
+          formStatus: IFormStatus.INIT,
+          questions: [questions[0]],
+        },
+      },
+      jest.fn(),
+      { metadata: resumeMetadata }
+    );
+
+    fireEvent.click(screen.getByRole('radio', { name: /Vue/ }));
+    const confirmButton = screen.getByRole('button', { name: 'form.confirm' });
+    await waitFor(() => expect(confirmButton).toBeEnabled());
+    await act(async () => {
+      fireEvent.click(confirmButton);
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(mockEmit).toHaveBeenCalledWith('beyond-chat-on-send-msg', expect.any(Object)));
+    const emittedPayload = mockEmit.mock.calls[0][1].sendProps.payload;
+    expect(emittedPayload).toEqual(expect.objectContaining({ metadata: resumeMetadata }));
+    expect(emittedPayload).not.toHaveProperty('agentId');
   }, 15000);
 
   // 全量测试以双 worker 运行时，Ant Design 状态更新可能超过 Jest 默认的 5 秒超时。

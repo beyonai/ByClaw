@@ -4,7 +4,7 @@ import { createMessage, fetchMessageHandler, hasVisibleMessageContent } from '@/
 
 import { getMessages, getMessageState } from '@/service/message';
 
-import { IMessage } from '@/typescript/message';
+import type { IMessage, TaskPlanSnapshot } from '@/typescript/message';
 
 const _INIT_PAGESIZE_ = 20;
 
@@ -376,6 +376,33 @@ export default {
         ...state,
         sessionListMap: newSessionListMap,
       };
+    },
+    applyTaskPlanSnapshot(
+      state: IState,
+      action: { payload: { sessionId: string; messageId?: string; taskPlan: TaskPlanSnapshot } }
+    ) {
+      const { sessionId, messageId, taskPlan } = action.payload;
+      const sessionListMap = new Map(state.sessionListMap);
+      const messageInfo = sessionListMap.get(`${sessionId}`);
+      if (!messageInfo?.list?.length) return state;
+
+      let changed = false;
+      const list = messageInfo.list.map((message) => {
+        const matchesMessageId = messageId && `${message.messageId || ''}` === `${messageId}`;
+        const matchesTraceId = taskPlan.traceId && `${message.traceId || ''}` === `${taskPlan.traceId}`;
+        if (!message.fromBeyond || (!matchesMessageId && !matchesTraceId)) return message;
+
+        const currentVersion = Number(message.taskPlan?.version || 0);
+        const nextVersion = Number(taskPlan.version || 0);
+        if (currentVersion >= nextVersion) return message;
+
+        changed = true;
+        return { ...message, taskPlan };
+      });
+
+      if (!changed) return state;
+      sessionListMap.set(`${sessionId}`, { ...messageInfo, list });
+      return { ...state, sessionListMap };
     },
     setInitialSessionDataToLocateMsg(
       state: IState,

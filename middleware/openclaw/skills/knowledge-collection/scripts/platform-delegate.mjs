@@ -3,8 +3,6 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
-const INGEST_COMMANDS = new Set(['list-kb', 'upload-doc', 'upload-images', 'upload-resource', 'normalize', 'store', 'ingest']);
-
 function delegate(childScript, argv) {
   const result = spawnSync(process.execPath, [path.join(SCRIPT_DIR, childScript), ...argv], {
     stdio: ['inherit', 'pipe', 'pipe'], encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
@@ -20,10 +18,6 @@ function delegate(childScript, argv) {
 }
 
 export function delegatePlatformCommand(command, argv) {
-  if (INGEST_COMMANDS.has(command)) {
-    delegate('ingest.mjs', argv);
-    return true;
-  }
   if (command === 'enterprise') {
     delegate('enterprise-collection.mjs', argv.slice(1));
     return true;

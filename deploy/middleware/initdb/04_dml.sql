@@ -5953,3 +5953,48 @@ WHERE NOT EXISTS (
       AND existing.grant_to_obj_type = 'USER'
 );
 -- IMA OpenAPI 内置 Skill 注册结束
+
+-- ========== V0.5.1 knowledge-collection 纯采集交付 ==========
+
+SET search_path TO byai;
+
+UPDATE ss_resource
+SET resource_desc = '跨互联网与企业平台采集、归档资料，并完成规范化正文交付。',
+    update_time = CURRENT_TIMESTAMP
+WHERE resource_code = 'knowledge-collection';
+
+UPDATE byai_system_config
+SET param_value = regexp_replace(
+        param_value,
+        '\{[[:space:]]*"skillName"[[:space:]]*:[[:space:]]*"knowledge-collection"[[:space:]]*,[[:space:]]*"skillCode"[[:space:]]*:[[:space:]]*"knowledge-collection"[[:space:]]*,[[:space:]]*"skillDescZh"[[:space:]]*:[[:space:]]*"[^"]*"[[:space:]]*,[[:space:]]*"skillDescEn"[[:space:]]*:[[:space:]]*"[^"]*"[[:space:]]*\}',
+        '{"skillName":"knowledge-collection","skillCode":"knowledge-collection","skillDescZh":"跨互联网与企业平台采集、归档资料，并完成规范化正文交付；不执行任何下游动作。","skillDescEn":"Collect and archive materials across public internet and enterprise platforms, producing a validated sanitized-content handoff without downstream actions."}',
+        'g'
+    )
+WHERE param_code = 'OPENCLAW_BUNDLED_SKILLS'
+  AND regexp_replace(param_value, '\s', '', 'g')
+      LIKE '%"skillCode":"knowledge-collection"%';
+
+UPDATE ss_res_ext_skill e
+SET target_content = json_build_object(
+        'resourceId', r.resource_id,
+        'resourceCode', r.resource_code,
+        'resourceName', r.resource_name,
+        'resourceDesc', r.resource_desc,
+        'resourceBizType', r.resource_biz_type,
+        'resourceType', r.resource_type,
+        'ownerType', r.owner_type,
+        'sourceType', e.source_type,
+        'skillType', e.skill_type,
+        'skillUrl', e.skill_url,
+        'version', e.version,
+        'skillPackageFormat', e.skill_package_format,
+        'skillOriginalFilename', e.skill_original_filename,
+        'skillPackageSize', e.skill_package_size,
+        'skillPackageHash', e.skill_package_hash,
+        'syncStatus', e.sync_status,
+        'syncError', e.sync_error,
+        'lastSyncTime', to_char(e.last_sync_time, 'YYYY-MM-DD HH24:MI:SS')
+    )::text
+FROM ss_resource r
+WHERE e.resource_id = r.resource_id
+  AND r.resource_code = 'knowledge-collection';

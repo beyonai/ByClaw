@@ -48,6 +48,9 @@ class SandboxRuntimeRequestFactoryTest {
                 .readOnly(false)
                 .subPath("u1")
                 .scope("user")
+                .uid(1001)
+                .gid(1001)
+                .mode("0770")
                 .build()))
             .build();
         SandboxServiceSpec spec = new SandboxServiceSpec();
@@ -74,7 +77,10 @@ class SandboxRuntimeRequestFactoryTest {
             .containsEntry("mountPath", "/workspace")
             .containsEntry("readOnly", false)
             .containsEntry("subPath", "u1")
-            .containsEntry("scope", "user"));
+            .containsEntry("scope", "user")
+            .containsEntry("uid", 1001)
+            .containsEntry("gid", 1001)
+            .containsEntry("mode", "0770"));
     }
 
     @Test
@@ -91,6 +97,9 @@ class SandboxRuntimeRequestFactoryTest {
                 .readOnly(false)
                 .subPath("u1")
                 .scope("user")
+                .uid(1001)
+                .gid(1001)
+                .mode("0770")
                 .build()))
             .build();
         SandboxServiceSpec spec = new SandboxServiceSpec();
@@ -118,7 +127,10 @@ class SandboxRuntimeRequestFactoryTest {
             .containsEntry("mountPath", "/workspace")
             .containsEntry("readOnly", false)
             .containsEntry("subPath", "u1")
-            .containsEntry("scope", "user"));
+            .containsEntry("scope", "user")
+            .containsEntry("uid", 1001)
+            .containsEntry("gid", 1001)
+            .containsEntry("mode", "0770"));
     }
 
     @Test

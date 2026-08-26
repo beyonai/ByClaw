@@ -4,12 +4,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -154,6 +156,47 @@ class TaskPlanApplicationServiceTest {
         assertThat(snapshot.getTasks()).extracting(TaskPlanSnapshot.TaskSnapshot::getStatus)
             .containsExactly("COMPLETED", "IN_PROGRESS");
         verify(eventMapper).insert(any(ByaiAgentTaskEvent.class));
+    }
+
+    @Test
+    void findLatestByMessageIds_returnsLatestSnapshotsWithOneBatchItemQuery() {
+        ByaiAgentTaskPlan latest = plan("COMPLETED", 3);
+        latest.setPlanId(99L);
+        latest.setMessageId(12L);
+
+        ByaiAgentTaskPlan older = plan("ACTIVE", 2);
+        older.setPlanId(98L);
+        older.setMessageId(12L);
+
+        ByaiAgentTaskPlan another = plan("FAILED", 4);
+        another.setPlanId(100L);
+        another.setMessageId(13L);
+        when(planMapper.selectList(any())).thenReturn(List.of(latest, older, another));
+
+        ByaiAgentTaskItem completed = item(101L, 1, "COMPLETED");
+        completed.setPlanId(99L);
+        ByaiAgentTaskItem failed = item(102L, 1, "FAILED");
+        failed.setPlanId(100L);
+        when(itemMapper.selectList(any())).thenReturn(List.of(completed, failed));
+
+        Map<Long, TaskPlanSnapshot> snapshots = service.findLatestByMessageIds(11L, List.of(12L, 13L));
+
+        assertThat(snapshots).hasSize(2);
+        assertThat(snapshots.get(12L).getVersion()).isEqualTo(3);
+        assertThat(snapshots.get(12L).getStatus()).isEqualTo("COMPLETED");
+        assertThat(snapshots.get(12L).getTasks()).extracting(TaskPlanSnapshot.TaskSnapshot::getStatus)
+            .containsExactly("COMPLETED");
+        assertThat(snapshots.get(13L).getStatus()).isEqualTo("FAILED");
+        verify(planMapper).selectList(any());
+        verify(itemMapper).selectList(any());
+    }
+
+    @Test
+    void deleteMethods_removePlanRootsForDatabaseCascade() {
+        service.deleteByMessageId(12L);
+        service.deleteBySessionId(11L);
+
+        verify(planMapper, times(2)).delete(any());
     }
 
     private TaskPlanUpdateRequest request() {

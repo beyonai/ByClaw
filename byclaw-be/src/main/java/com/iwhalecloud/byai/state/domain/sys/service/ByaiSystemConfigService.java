@@ -16,8 +16,11 @@ import com.iwhalecloud.byai.common.web.ApplicationContextUtil;
 import io.jsonwebtoken.lang.Collections;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.apache.commons.collections.MapUtils;
@@ -76,6 +79,63 @@ public class ByaiSystemConfigService {
             byaiSystemConfig = byaiSystemConfigMapper.selectOne(queryWrapper);
         }
         return byaiSystemConfig != null ? byaiSystemConfig.getParamValue() : null;
+    }
+
+    /**
+     * 批量查询系统配置值。先一次读取配置缓存，再对缓存未命中的编码执行一次 IN 查询。
+     *
+     * @param paramCodes 参数编码集合
+     * @return 参数编码到已完成环境变量替换的参数值
+     */
+    public Map<String, String> getDcSystemConfigValuesByCodes(Iterable<String> paramCodes) {
+        if (paramCodes == null) {
+            return java.util.Collections.emptyMap();
+        }
+
+        Set<String> requestedCodes = new HashSet<>();
+        for (String paramCode : paramCodes) {
+            if (StringUtil.isNotEmpty(paramCode)) {
+                requestedCodes.add(paramCode);
+            }
+        }
+        if (requestedCodes.isEmpty()) {
+            return java.util.Collections.emptyMap();
+        }
+
+        Map<String, String> values = new LinkedHashMap<>();
+        Set<String> missedCodes = new HashSet<>(requestedCodes);
+        Map<String, String> cacheEntries;
+        try {
+            cacheEntries = RedisUtil.hmGetEntries(RedisConfig.SYSTEM_CONFIG_CODE_KEY);
+            if (cacheEntries == null) {
+                cacheEntries = java.util.Collections.emptyMap();
+            }
+        }
+        catch (Exception e) {
+            logger.warn("批量读取系统配置缓存失败，将直接查询数据库: {}", e.getMessage());
+            cacheEntries = java.util.Collections.emptyMap();
+        }
+        for (String paramCode : requestedCodes) {
+            String cacheJson = cacheEntries.get(paramCode);
+            if (StringUtil.isEmpty(cacheJson)) {
+                continue;
+            }
+            ByaiSystemConfig config = JsonUtil.parseObject(cacheJson, ByaiSystemConfig.class);
+            if (config != null) {
+                values.put(paramCode, environmentReplace(config.getParamValue()));
+                missedCodes.remove(paramCode);
+            }
+        }
+
+        if (!missedCodes.isEmpty()) {
+            LambdaQueryWrapper<ByaiSystemConfig> queryWrapper = new LambdaQueryWrapper<>();
+            queryWrapper.in(ByaiSystemConfig::getParamCode, missedCodes);
+            List<ByaiSystemConfig> configs = byaiSystemConfigMapper.selectList(queryWrapper);
+            for (ByaiSystemConfig config : configs) {
+                values.put(config.getParamCode(), environmentReplace(config.getParamValue()));
+            }
+        }
+        return values;
     }
 
     /**

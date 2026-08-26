@@ -17,7 +17,7 @@ const RESOURCE_OPTIONS = {
   dingtalk: new Map(),
   feishu: new Map([['minute-token', 'minuteToken']]),
   wecom: new Map(),
-  ima: new Map([['kb', 'kb']]),
+  ima: new Map(),
 };
 
 function requiredString(values, key) {
@@ -186,7 +186,6 @@ export function parseResourceRequest(values) {
   const sourceOptions = parseOptions(values, source, RESOURCE_OPTIONS, ['source', 'output-dir', 'url']);
   const url = parseUrl(values);
   if (source === 'feishu' && !sourceOptions.minuteToken) throw new Error('--minute-token is required for source feishu');
-  if (source === 'ima' && !sourceOptions.kb) throw new Error('--kb is required for source ima URL import');
   return { source, outputDir: absoluteOutputDir(values), url, sourceOptions };
 }
 
@@ -205,7 +204,11 @@ function defaultAdapters() {
     dingtalk: createDingtalkAdapter({ bin: process.env.DWS_CLI_BIN || 'dws', env: process.env }),
     feishu: createFwsAdapter({ bin: process.env.LARK_CLI_BIN || 'lark-cli', env: process.env }),
     wecom: createWecomAdapter({ bin: process.env.WECOM_CLI_BIN || 'wecom-cli', env: process.env }),
-    ima: createImaAdapter({ bin: process.env.IMA_CLI_BIN || 'ima', env: process.env }),
+    ima: createImaAdapter({
+      bin: process.env.IMA_CLI_BIN || 'ima',
+      bycliBin: process.env.BYCLI_BIN || 'bycli',
+      env: process.env,
+    }),
   };
 }
 

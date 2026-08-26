@@ -3,6 +3,7 @@ package com.iwhalecloud.byai.state.domain.chat.service;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -20,8 +21,6 @@ import org.springframework.data.redis.connection.stream.RecordId;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
-import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.state.domain.chat.dto.ChatRuntimeState;
 
 import jakarta.annotation.PreDestroy;
@@ -55,7 +54,7 @@ public class SessionStreamRecoveryService implements ApplicationListener<Applica
     private RedisTemplate<String, Object> redisTemplate;
 
     @Autowired
-    private SessionStreamEventRouter sessionStreamEventRouter;
+    private StreamRecordProcessor streamRecordProcessor;
 
     @Autowired
     private RunningOutputStreamRegistry runningOutputStreamRegistry;
@@ -65,6 +64,9 @@ public class SessionStreamRecoveryService implements ApplicationListener<Applica
 
     @Autowired
     private ChatRuntimeInstance chatRuntimeInstance;
+
+    @Autowired
+    private StreamAckFailureRegistry streamAckFailureRegistry;
 
     private final ScheduledExecutorService recoveryExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread thread = new Thread(r, "session-stream-recovery");
@@ -123,16 +125,50 @@ public class SessionStreamRecoveryService implements ApplicationListener<Applica
     private boolean manageLocalRecoveryCtx(ChatRuntimeState state) {
         String sessionId = String.valueOf(state.getSessionId());
         ChatProcessContext ctx = outputStreamManager.getContext(sessionId);
-        if (ctx == null || !ctx.recoveryOnly) {
+        if (ctx == null) {
             return false;
         }
+        String streamKey = sessionStreamManager.buildStreamKey(sessionId);
+        boolean liveListenerActive = !ctx.recoveryOnly && sessionStreamManager.isSessionListenerActive(sessionId);
+        if (liveListenerActive && !streamAckFailureRegistry.hasFailures(streamKey)) {
+            // 活跃 live listener 自身的 ACK retry 尚未耗尽，避免 recovery 线程与其并发 claim 同一条消息。
+            return true;
+        }
         try {
-            claimPendingMessages(sessionId);
+            if (liveListenerActive) {
+                // ACK 重试已耗尽：listener 的心跳会一直续租，靠 stale 判定永远等不到接管，
+                // 只对明确失败的消息做定向 claim，不影响该 listener 正在处理的其他消息。
+                claimAckFailedMessages(sessionId, streamKey);
+            }
+            else {
+                claimPendingMessages(sessionId);
+            }
         }
         catch (Exception e) {
             log.warn("周期 claim pending 失败, sessionId: {}", sessionId, e);
         }
         return true;
+    }
+
+    /**
+     * 对活跃 live listener 上 ACK 重试耗尽的消息执行定向 claim。
+     * <p>
+     * 这些消息已经完成业务处理，只是 ACK 未成功，重投后会被 Stream ID 幂等逻辑识别；
+     * 此处依赖 {@link StreamRecordProcessor} 的 session 锁与 listener callback 串行化。
+     */
+    private void claimAckFailedMessages(String sessionId, String streamKey) {
+        Set<String> failedIds = streamAckFailureRegistry.snapshot(streamKey);
+        if (failedIds.isEmpty()) {
+            return;
+        }
+        String consumerName = sessionStreamManager.buildConsumerName(sessionId);
+        List<RecordId> ids = failedIds.stream().map(RecordId::of).toList();
+        log.info("对 ACK 失败消息执行定向 claim, sessionId: {}, count: {}", sessionId, ids.size());
+        // 登记项在此处清除，避免 claim 反复处理同一批消息；若这批消息仍未 ACK 成功，
+        // 它们会留在 PEL 中，由后续常规 idle 扫描兜底。这些消息的业务处理已完成，
+        // 只差 ACK，因此 minIdle 传 0，不必再等待 idle 阈值累积。
+        failedIds.forEach(id -> streamAckFailureRegistry.clear(streamKey, id));
+        claimAndProcess(streamKey, consumerName, ids, 0L);
     }
 
     private void recoverState(ChatRuntimeState state) {
@@ -145,11 +181,15 @@ public class SessionStreamRecoveryService implements ApplicationListener<Applica
             return;
         }
         String sessionId = String.valueOf(state.getSessionId());
+        if (!sessionStreamManager.startSessionListener(sessionId, ctx)) {
+            outputStreamManager.removeContext(sessionId);
+            log.info("跳过接管 Session Stream，listener lease 仍由其他实例持有, sessionId: {}", sessionId);
+            return;
+        }
         runningOutputStreamRegistry.markRunning(ctx);
-        // 先处理 PEL 中已投递未 ACK 的消息（走 dispatch + 水位线去重），再启动 listener 读后续新消息，
-        // 避免 claim 与 listener 并发消费同一 consumer 造成重复 dispatch。
+        // 处理 PEL 中已投递未 ACK 的消息（走共享 processor + 水位线去重）；processor 的 session lock
+        // 串行化 claim 与 listener callback，避免同一 session 并发 dispatch。
         claimPendingMessages(sessionId);
-        sessionStreamManager.startSessionListener(sessionId, ctx);
         log.info("已接管 stale Session Stream, sessionId: {}, traceId: {}", sessionId, state.getTraceId());
     }
 
@@ -202,9 +242,18 @@ public class SessionStreamRecoveryService implements ApplicationListener<Applica
     }
 
     private void claimAndProcess(String streamKey, String consumerName, List<RecordId> ids) {
+        claimAndProcess(streamKey, consumerName, ids, PENDING_MIN_IDLE_MILLIS);
+    }
+
+    /**
+     * @param minIdleMillis claim 的最小空闲时间。常规兜底扫描使用 {@link #PENDING_MIN_IDLE_MILLIS}
+     *                      以免抢走正在处理中的消息；对已知 ACK 失败的消息则传 0，因为它们的
+     *                      业务处理已经结束，只差 ACK，不需要再等 idle 累积。
+     */
+    private void claimAndProcess(String streamKey, String consumerName, List<RecordId> ids, long minIdleMillis) {
         List<MapRecord<String, Object, Object>> claimed = redisTemplate.opsForStream()
             .claim(streamKey, SessionStreamManager.CONSUMER_GROUP, consumerName,
-                RedisStreamCommands.XClaimOptions.minIdle(Duration.ofMillis(PENDING_MIN_IDLE_MILLIS)).ids(ids));
+                RedisStreamCommands.XClaimOptions.minIdle(Duration.ofMillis(minIdleMillis)).ids(ids));
         if (claimed == null) {
             return;
         }
@@ -214,35 +263,24 @@ public class SessionStreamRecoveryService implements ApplicationListener<Applica
     }
 
     private void processClaimedRecord(MapRecord<String, Object, Object> record) {
-        Object rawValue = record.getValue().get("data");
-        String rawData = rawValue == null ? null : String.valueOf(rawValue);
-        if (rawData == null) {
-            acknowledge(record);
-            return;
-        }
-        JSONObject dataJson;
-        try {
-            dataJson = JSON.parseObject(rawData);
-        }
-        catch (Exception e) {
-            acknowledge(record);
-            return;
-        }
-        dataJson.put("stream_id", record.getId().getValue());
-        StreamDispatchResult result = sessionStreamEventRouter.dispatch(dataJson);
+        StreamDispatchResult result = streamRecordProcessor.process(record);
         if (result.shouldAcknowledge()) {
-            acknowledge(record);
+            if (acknowledge(record)) {
+                streamRecordProcessor.afterAcknowledge(result);
+            }
         }
     }
 
-    private void acknowledge(MapRecord<String, Object, Object> record) {
+    private boolean acknowledge(MapRecord<String, Object, Object> record) {
         try {
             redisTemplate.opsForStream().acknowledge(record.getStream(), SessionStreamManager.CONSUMER_GROUP,
                 record.getId());
+            return true;
         }
         catch (Exception e) {
             log.warn("ack claimed Session Stream 消息失败, stream: {}, messageId: {}", record.getStream(),
                 record.getId(), e);
+            return false;
         }
     }
 }

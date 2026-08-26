@@ -41,6 +41,15 @@ describe("TaskPlanProcessor", () => {
       "Before the final user answer, reconcile every task",
     );
     expect(compiled.systemPrompt).toContain(
+      "An active plan prevents the Run from completing",
+    );
+    expect(compiled.systemPrompt).toContain(
+      "create the task plan before calling askUserQuestion",
+    );
+    expect(compiled.systemPrompt).toContain(
+      "pass the matching task position as delegateAgent.taskPosition",
+    );
+    expect(compiled.systemPrompt).toContain(
       "The system owns execution identity, plan identity, versions, and task IDs",
     );
   });

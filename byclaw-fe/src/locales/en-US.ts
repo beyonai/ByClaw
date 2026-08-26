@@ -114,6 +114,10 @@ export default {
     'Some skills were installed manually or are referenced by other skill groups. Removing all will remove those sources too.',
   'resource.skillGroup.uninstallPreserve': 'Only uninstall group-exclusive skills',
   'resource.skillGroup.uninstallAll': 'Uninstall all skills',
+  'resource.skillGroup.uninstallPreserveTooltip':
+    'Keep skills that are still installed manually or referenced by other skill groups.',
+  'resource.skillGroup.uninstallAllTooltip':
+    'Also remove the manual-installation and other skill-group reference sources for these skills.',
   'resource.skillGroup.manualSource': 'Manually installed',
   'resource.skillGroup.otherGroupSource': 'Also from: {groups}',
   'resource.skillGroup.uninstallSuccess': 'Skill group uninstalled successfully',
@@ -870,12 +874,17 @@ export default {
   'employeeDetail.groupMember.title': 'Configure Group Members',
   'employeeDetail.groupMember.hint': 'Choose routable digital employees and set their team roles and order',
   'employeeDetail.groupMember.select': 'Select Digital Employees',
+  'employeeDetail.groupMember.add': 'Add',
+  'employeeDetail.groupMember.selectAll': 'Select all ({selected}/{max})',
+  'employeeDetail.groupMember.selectAllTooltip': 'Selected {selected} items; up to {max} items can be selected',
+  'employeeDetail.groupMember.loadedCount': 'Loaded {loaded} items / {total} items total',
   'employeeDetail.groupMember.name': 'Digital Employee',
   'employeeDetail.groupMember.description': 'Description',
   'employeeDetail.groupMember.type': 'Type',
   'employeeDetail.groupMember.rolePlaceholder': 'Team role, e.g. market research',
   'employeeDetail.groupMember.required': 'Select at least one digital employee group member',
   'employeeDetail.groupMember.roleRequired': 'Set a team role for every group member',
+  'employeeDetail.groupMember.removeConfirm': 'Are you sure you want to remove this group member?',
   'employeeDetail.groupMember.maxExceeded': 'A digital employee group can contain at most 20 members',
   'employeeDetail.groupMember.loadFailed': 'Failed to load digital employee candidates',
   'employeeDetail.groupMember.empty': 'No group members selected',
@@ -1487,6 +1496,14 @@ export default {
   // MessageList Component
   'messageList.sqlAnalysis': 'SQL Analysis',
   'messageList.defaultAIName': 'Beyond AI',
+  'messageList.taskPlan.title': 'Task execution plan',
+  'messageList.taskPlan.progress': '{completed}/{total} completed',
+  'messageList.taskPlan.status.PENDING': 'Pending',
+  'messageList.taskPlan.status.IN_PROGRESS': 'In progress',
+  'messageList.taskPlan.status.COMPLETED': 'Completed',
+  'messageList.taskPlan.status.FAILED': 'Failed',
+  'messageList.taskPlan.status.SKIPPED': 'Skipped',
+  'messageList.taskPlan.status.CANCELLED': 'Cancelled',
 
   // MessageContent Component
   'contentHeader.settings': 'Settings',

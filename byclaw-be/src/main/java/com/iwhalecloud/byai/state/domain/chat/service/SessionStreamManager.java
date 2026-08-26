@@ -12,6 +12,7 @@ import com.iwhaleai.byai.framework.common.Constants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationListener;
 import org.springframework.context.event.ContextClosedEvent;
@@ -85,6 +86,22 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
     @Autowired
     private ApplicationContext applicationContext;
 
+    @Value("${byclaw.session-stream.max-length:10000}")
+    private long sessionStreamMaxLength;
+
+    /** 已终结 Session Stream 的保留时长（小时），到期后由 Redis 回收整个 key。 */
+    @Value("${byclaw.session-stream.completed-retention-hours:24}")
+    private long completedStreamRetentionHours;
+
+    @Autowired
+    private SessionStreamLeaseService sessionStreamLeaseService;
+
+    @Autowired
+    private ChatRuntimeInstance chatRuntimeInstance;
+
+    @Autowired
+    private StreamAckFailureRegistry streamAckFailureRegistry;
+
     /** sessionId -> StreamMessageListenerContainer，按 session 管理监听容器 */
     private final Map<String, StreamMessageListenerContainer<String, MapRecord<String, String, String>>> containers =
         new ConcurrentHashMap<>();
@@ -110,6 +127,12 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
     /** sessionId -> running 标记续租任务 */
     private final Map<String, ScheduledFuture<?>> keepAliveTasks = new ConcurrentHashMap<>();
 
+    /** sessionId -> Redis 单活 listener lease */
+    private final Map<String, SessionStreamLeaseService.Lease> streamLeases = new ConcurrentHashMap<>();
+
+    /** sessionId -> Redis lease 续租任务 */
+    private final Map<String, ScheduledFuture<?>> streamLeaseTasks = new ConcurrentHashMap<>();
+
     private final ScheduledExecutorService keepAliveExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread thread = new Thread(r, "chat-running-lease-keepalive");
         thread.setDaemon(true);
@@ -130,50 +153,75 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
      * @param sessionId 会话 ID
      * @param ctx       对话上下文（用于通知 RedisStreamMessageListener 写入目标队列）
      */
-    public void startSessionListener(String sessionId, ChatProcessContext ctx) {
-        String streamKey = buildStreamKey(sessionId);
-        String consumerName = CONSUMER_NAME_PREFIX + sessionId;
-
-        // 确保消费者组存在（Stream 不存在时通过 MKSTREAM 自动创建）
-        createConsumerGroupIfAbsent(streamKey);
-
-        // 构建容器配置
-        StreamMessageListenerContainerOptions<String, MapRecord<String, String, String>> options =
-            StreamMessageListenerContainerOptions
-                .builder()
-                .pollTimeout(Duration.ofSeconds(2))
-                .build();
-
-        // 通过 ApplicationContext 获取 RedisStreamMessageListener prototype 新实例
-        RedisStreamMessageListener listener = applicationContext.getBean(RedisStreamMessageListener.class);
-
-        StreamMessageListenerContainer<String, MapRecord<String, String, String>> container =
-            StreamMessageListenerContainer.create(redisConnectionFactory, options);
-
-        container.receive(
-            Consumer.from(CONSUMER_GROUP, consumerName),
-            StreamOffset.create(streamKey, ReadOffset.lastConsumed()),
-            listener
-        );
-
-        container.start();
-
-        // 存入 map（先 stop 旧的可能存在的容器，避免重复启动）
-        StreamMessageListenerContainer<String, MapRecord<String, String, String>> old =
-            containers.put(sessionId, container);
-
-        if (old != null) {
-            try {
-                old.stop();
-            } catch (Exception e) {
-                log.warn("停止旧的 session 监听容器时发生异常, sessionId: {}", sessionId, e);
-            }
+    public boolean startSessionListener(String sessionId, ChatProcessContext ctx) {
+        SessionStreamLeaseService.Lease lease = sessionStreamLeaseService.tryAcquire(sessionId).orElse(null);
+        if (lease == null) {
+            log.info("Session Stream listener 已由其他实例持有, sessionId: {}, instanceId: {}", sessionId,
+                chatRuntimeInstance.getInstanceId());
+            return false;
         }
-        cancelKeepAlive(sessionId);
-        startSessionStatusListener(sessionId, resolveAgentId(ctx));
-        startKeepAlive(sessionId, ctx);
+        streamLeases.put(sessionId, lease);
+        StreamMessageListenerContainer<String, MapRecord<String, String, String>> container = null;
+        try {
+            String streamKey = buildStreamKey(sessionId);
+            String consumerName = buildConsumerName(sessionId);
 
-        log.info("Session Stream 监听已启动, stream: {}, consumer: {}", streamKey, consumerName);
+            // 确保消费者组存在（Stream 不存在时通过 MKSTREAM 自动创建）
+            createConsumerGroupIfAbsent(streamKey);
+
+            // 构建容器配置
+            StreamMessageListenerContainerOptions<String, MapRecord<String, String, String>> options =
+                StreamMessageListenerContainerOptions
+                    .builder()
+                    .pollTimeout(Duration.ofSeconds(2))
+                    .build();
+
+            // 通过 ApplicationContext 获取 RedisStreamMessageListener prototype 新实例
+            RedisStreamMessageListener listener = applicationContext.getBean(RedisStreamMessageListener.class);
+
+            container = StreamMessageListenerContainer.create(redisConnectionFactory, options);
+
+            container.receive(
+                Consumer.from(CONSUMER_GROUP, consumerName),
+                StreamOffset.create(streamKey, ReadOffset.lastConsumed()),
+                listener
+            );
+
+            container.start();
+
+            // 存入 map（先 stop 旧的可能存在的容器，避免重复启动）
+            StreamMessageListenerContainer<String, MapRecord<String, String, String>> old =
+                containers.put(sessionId, container);
+
+            if (old != null) {
+                try {
+                    old.stop();
+                } catch (Exception e) {
+                    log.warn("停止旧的 session 监听容器时发生异常, sessionId: {}", sessionId, e);
+                }
+            }
+            cancelKeepAlive(sessionId);
+            startSessionStatusListener(sessionId, resolveAgentId(ctx));
+            startKeepAlive(sessionId, ctx);
+            startStreamLeaseRenewal(sessionId, lease);
+
+            log.info("Session Stream 监听已启动, stream: {}, consumer: {}", streamKey, consumerName);
+            return true;
+        }
+        catch (Exception e) {
+            if (container != null) {
+                containers.remove(sessionId, container);
+                try {
+                    container.stop();
+                }
+                catch (Exception stopException) {
+                    log.warn("启动 Session Stream listener 失败后停止容器异常, sessionId: {}", sessionId, stopException);
+                }
+            }
+            cancelKeepAlive(sessionId);
+            cancelStreamLease(sessionId);
+            throw e;
+        }
     }
 
     /**
@@ -197,7 +245,10 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
             }
         }
         cancelKeepAlive(sessionId);
+        cancelStreamLease(sessionId);
         scheduleSessionStatusListenerStop(sessionId);
+        // listener 已停止，遗留的 ACK 失败登记不再有对应消费者，交回常规 idle 扫描兜底。
+        streamAckFailureRegistry.clearAll(buildStreamKey(sessionId));
 
         // 清理 OutputStreamManager 中的上下文（确保不残留）
         OutputStreamManager outputStreamManager = applicationContext.getBean(OutputStreamManager.class);
@@ -223,6 +274,10 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
             }
         }
         containers.clear();
+        streamLeaseTasks.values().forEach(task -> task.cancel(false));
+        streamLeaseTasks.clear();
+        streamLeases.values().forEach(sessionStreamLeaseService::release);
+        streamLeases.clear();
         sessionStatusTopics.keySet().forEach(this::stopSessionStatusListener);
         sessionStatusTopics.clear();
         sessionStatusPollTasks.values().forEach(task -> task.cancel(false));
@@ -276,7 +331,63 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
     }
 
     public String buildConsumerName(String sessionId) {
-        return CONSUMER_NAME_PREFIX + sessionId;
+        return CONSUMER_NAME_PREFIX + chatRuntimeInstance.getInstanceId() + ":" + sessionId;
+    }
+
+    public boolean isSessionListenerActive(String sessionId) {
+        return sessionId != null && containers.containsKey(sessionId);
+    }
+
+    /**
+     * 仅在当前 session 没有 listener 且 Consumer Group 没有 pending 时按长度清理 Stream。
+     * <p>
+     * Spring Data Redis 当前版本只暴露 MAXLEN trim，因此宁可延后清理，也不在存在 PEL 时删除记录。
+     */
+    public void trimCompletedStream(String sessionId) {
+        if (sessionId == null || isSessionListenerActive(sessionId)) {
+            return;
+        }
+        String streamKey = buildStreamKey(sessionId);
+        try {
+            var pending = redisTemplate.opsForStream().pending(streamKey, CONSUMER_GROUP);
+            if (pending != null && pending.getTotalPendingMessages() > 0) {
+                return;
+            }
+            // 先按长度裁剪，兜住「会话结束后 worker 仍追加事件」的情况。
+            redisTemplate.opsForStream().trim(streamKey, sessionStreamMaxLength, true);
+            // 单个 session 的事件量通常远小于长度上限，MAXLEN 实际不会释放内存，
+            // 因此对已终结且无 pending 的 Stream 设置过期时间，让 Redis 回收整个 key。
+            // 用 expire 而非 DEL：保留一段窗口，容忍 worker 的迟到事件与 recovery 的二次查询。
+            redisTemplate.expire(streamKey, completedStreamRetentionHours, TimeUnit.HOURS);
+            log.info("已完成 Session Stream 清理, stream: {}, retentionHours: {}", streamKey,
+                completedStreamRetentionHours);
+        }
+        catch (Exception e) {
+            log.warn("清理已完成 Session Stream 失败, stream: {}", streamKey, e);
+        }
+    }
+
+    private void startStreamLeaseRenewal(String sessionId, SessionStreamLeaseService.Lease lease) {
+        ScheduledFuture<?> future = keepAliveExecutor.scheduleAtFixedRate(() -> {
+            if (!sessionStreamLeaseService.renew(lease)) {
+                log.warn("Session Stream listener lease 续租失败, sessionId: {}, instanceId: {}", sessionId,
+                    chatRuntimeInstance.getInstanceId());
+                // lease 已失效时立即停止本地 listener，避免与新 owner 并行消费同一 session。
+                keepAliveExecutor.execute(() -> stopSessionListener(sessionId));
+            }
+        }, 30, 30, TimeUnit.SECONDS);
+        streamLeaseTasks.put(sessionId, future);
+    }
+
+    private void cancelStreamLease(String sessionId) {
+        ScheduledFuture<?> task = streamLeaseTasks.remove(sessionId);
+        if (task != null) {
+            task.cancel(false);
+        }
+        SessionStreamLeaseService.Lease lease = streamLeases.remove(sessionId);
+        if (lease != null) {
+            sessionStreamLeaseService.release(lease);
+        }
     }
 
     /**

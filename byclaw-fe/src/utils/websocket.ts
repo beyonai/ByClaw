@@ -29,6 +29,8 @@ class WebSocketManager {
 
   private messageHandlers: Map<string, MessageHandler[]> = new Map();
 
+  private reconnectHandlers: Set<() => void> = new Set();
+
   private reconnectCount: number = 0;
 
   private manuallyDisconnected = false;
@@ -155,11 +157,21 @@ class WebSocketManager {
           return;
         }
         console.log('WebSocket 连接成功');
+        const wasReconnect = this.reconnectCount > 0;
         this.isConnecting = false;
 
         this.startHeartbeat();
         this.reconnectCount = 0;
         this.resolveConnectWaiters();
+        if (wasReconnect) {
+          [...this.reconnectHandlers].forEach((handler) => {
+            try {
+              handler();
+            } catch (error) {
+              console.error('WebSocket 重连处理器执行失败:', error);
+            }
+          });
+        }
       };
 
       ws.onmessage = (event) => {
@@ -302,6 +314,14 @@ class WebSocketManager {
       this.messageHandlers.set(type, []);
     }
     this.messageHandlers.get(type)!.push(handler);
+  }
+
+  /**
+   * 注册断线重连成功回调。首次连接不会触发，避免把初始化当成断线恢复。
+   */
+  public onReconnect(handler: () => void): () => void {
+    this.reconnectHandlers.add(handler);
+    return () => this.reconnectHandlers.delete(handler);
   }
 
   /**

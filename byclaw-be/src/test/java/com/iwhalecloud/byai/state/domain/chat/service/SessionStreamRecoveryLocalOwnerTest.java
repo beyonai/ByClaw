@@ -31,6 +31,7 @@ class SessionStreamRecoveryLocalOwnerTest {
     private ChatRuntimeInstance chatRuntimeInstance;
     private SessionStreamManager sessionStreamManager;
     private RedisTemplate<String, Object> redisTemplate;
+    private StreamAckFailureRegistry streamAckFailureRegistry;
     private SessionStreamRecoveryService recoveryService;
 
     private static final String LOCAL_INSTANCE = "host:local";
@@ -45,8 +46,11 @@ class SessionStreamRecoveryLocalOwnerTest {
         sessionStreamManager = mockField("sessionStreamManager", SessionStreamManager.class);
         redisTemplate = mockField("redisTemplate", RedisTemplate.class);
         mockField("chatContextRecoveryService", ChatContextRecoveryService.class);
-        mockField("sessionStreamEventRouter", SessionStreamEventRouter.class);
+        mockField("streamRecordProcessor", StreamRecordProcessor.class);
         mockField("runningOutputStreamRegistry", RunningOutputStreamRegistry.class);
+        // 用真实注册表，便于直接登记 ACK 失败并验证定向 claim 行为。
+        streamAckFailureRegistry = new StreamAckFailureRegistry();
+        ReflectionTestUtils.setField(recoveryService, "streamAckFailureRegistry", streamAckFailureRegistry);
 
         when(chatRuntimeInstance.getInstanceId()).thenReturn(LOCAL_INSTANCE);
         when(sessionStreamManager.buildStreamKey(anyString())).thenReturn("stream:10");
@@ -102,6 +106,53 @@ class SessionStreamRecoveryLocalOwnerTest {
             .pending(anyString(), anyString(), any(org.springframework.data.domain.Range.class),
                 org.mockito.ArgumentMatchers.anyLong());
         verify(sessionStreamManager, never()).startSessionListener(any(), any());
+    }
+
+    private ChatProcessContext liveCtx() {
+        ChatProcessContext ctx = new ChatProcessContext(null, null);
+        ctx.sessionId = 10L;
+        ctx.traceId = "trace-1";
+        ctx.recoveryOnly = false;
+        return ctx;
+    }
+
+    /**
+     * live listener 活跃且无 ACK 失败：不与其并发 claim，扫描直接跳过。
+     */
+    @Test
+    void skipsClaimForHealthyLiveListener() {
+        long now = System.currentTimeMillis();
+        when(chatRuntimeStateService.listRunningStates()).thenReturn(Collections.singletonList(localState(now)));
+        when(outputStreamManager.getContext("10")).thenReturn(liveCtx());
+        when(sessionStreamManager.isSessionListenerActive("10")).thenReturn(true);
+
+        scan();
+
+        verify(redisTemplate.opsForStream(), never())
+            .pending(anyString(), anyString(), any(org.springframework.data.domain.Range.class),
+                org.mockito.ArgumentMatchers.anyLong());
+        verify(sessionStreamManager, never()).startSessionListener(any(), any());
+    }
+
+    /**
+     * live listener 活跃但 ACK 重试已耗尽：必须对登记的消息执行定向 claim，
+     * 否则 keepAlive 会持续刷新心跳，该 session 永远等不到 stale 接管，pending 永久滞留。
+     */
+    @Test
+    void claimsAckFailedMessagesForLiveListener() {
+        long now = System.currentTimeMillis();
+        when(chatRuntimeStateService.listRunningStates()).thenReturn(Collections.singletonList(localState(now)));
+        when(outputStreamManager.getContext("10")).thenReturn(liveCtx());
+        when(sessionStreamManager.isSessionListenerActive("10")).thenReturn(true);
+        streamAckFailureRegistry.record("stream:10", "100-0");
+
+        scan();
+
+        // 定向 claim 走 claim() 而非 pending() 扫描，且 minIdle 为 0。
+        verify(redisTemplate.opsForStream()).claim(eq("stream:10"), anyString(), anyString(),
+            any(org.springframework.data.redis.connection.RedisStreamCommands.XClaimOptions.class));
+        // 登记项处理后清除，避免下一轮重复 claim 同一批消息。
+        org.assertj.core.api.Assertions.assertThat(streamAckFailureRegistry.hasFailures("stream:10")).isFalse();
     }
 
     @Test

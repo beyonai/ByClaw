@@ -16,6 +16,8 @@ const skillGroupLocaleIds = [
   'resource.skillGroup.uninstallSharedDescription',
   'resource.skillGroup.uninstallPreserve',
   'resource.skillGroup.uninstallAll',
+  'resource.skillGroup.uninstallPreserveTooltip',
+  'resource.skillGroup.uninstallAllTooltip',
   'resource.skillGroup.manualSource',
   'resource.skillGroup.otherGroupSource',
   'resource.skillGroup.uninstallSuccess',

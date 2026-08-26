@@ -36,14 +36,13 @@ frontier 状态由 `scripts/crawl-state.mjs` 管理并落在 `session.json` 的 
 | 报告由谁写 | mode | 链路 |
 | --- | --- | --- |
 | 由本 Agent 写 | `research` | `init` → 三信源初检 → `plan` → 逐层 `branch` → `aggregate` → `report` |
-| 由下游写（外部消费） | `collection` | `init` → 三信源初检定域名 → sitemap + frontier → `collect` → 外部消费 run |
+| 由其他 Agent 写 | `collection` | `init` → 三信源初检定域名 → sitemap + frontier → `collect` → `status` → 交付 |
 
 按输入形态判据会错判一类真实场景：用户只给产品名、但报告由下游写。
-此时 `research` 模式的 `report` 前置永远等不到那份报告，`cleanup` 只会返回
-`retention=true, reason=research-report-pending`。判据落在归属上才收得住。
+此时不应让采集 Agent 代写最终报告；判据落在归属上才能明确采集终点。
 
 用户给的是产品名而非文档站 URL 时（"分析 xxx 这个产品"），无论哪种 mode，
-文档站域名都由三信源初检查出（内置路由层 + `online_search` + `hot_discovery`），**不得凭产品名猜域名**。
+文档站域名都由三信源初检查出（内置路由层 + `online-search` + `hot_discovery`），**不得凭产品名猜域名**。
 `research` 模式下这步发生在 `plan` 之前；`collection` 模式下它是独立的一次发现，不需要 `plan`。
 
 `research` 模式里，"通读官方文档站"这一类分支的抓取环节才使用本文档的 sitemap + frontier 流程，
@@ -65,11 +64,11 @@ frontier 状态由 `scripts/crawl-state.mjs` 管理并落在 `session.json` 的 
 下游拿到的是抽样，不说明就会被当成全量，这与报告里的「覆盖缺口」章节是同一个义务。
 
 需要研究轨迹本身也交付时（下游要看"为什么这么筛"的完整链条），才值得用 `research` 模式，
-并接受 `report` 是 `cleanup` 的硬前置 —— 此时那份 `report.md` 写成交接说明即可，不必是成品解读。
+并由采集 Agent 通过 `report` 生成带引用的交接报告，不必是成品解读。
 
 ## Step 1：发现全站 URL（优先 sitemap，不要靠搜索引擎）
 
-文档站的深层页面（`/docs/api/xxx`）搜索引擎大量不收录，`online_search` 的覆盖率不足以支撑「完整解读」。
+文档站的深层页面（`/docs/api/xxx`）搜索引擎大量不收录，`online-search` 的覆盖率不足以支撑「完整解读」。
 优先按以下顺序尝试，**取这些文件本身仍走 `bycli`**，不构成直连例外：
 
 ```bash
@@ -117,7 +116,7 @@ node scripts/knowledge-collection.mjs crawl-next --session-dir <dir> --limit 5
 bycli web read --url <URL> --stdout > <dir>/markdown/<name>.md
 ```
 
-抓完写 mark payload 到 `.post-processing-inputs/`，再登记：
+抓完写 mark payload 到会话内的临时输入目录，再登记：
 
 ```jsonc
 {"results": [
@@ -128,16 +127,14 @@ bycli web read --url <URL> --stdout > <dir>/markdown/<name>.md
 
 ```bash
 node scripts/knowledge-collection.mjs crawl-mark --session-dir <dir> \
-  --mark-json-file <dir>/.post-processing-inputs/mark.json
+  --mark-json-file <dir>/.collection-inputs/mark.json
 ```
 
 - `status` 取 `pending` / `fetched` / `failed` / `skipped`；`failed` 必须给 `reason`；
 - 未 `crawl-seed` 过的 URL 拒绝登记，避免"抓了范围外的页还记成成功"；
 - 登记成功后脚本删除 payload，失败时保留以便修正重试。
 
-`fetched` 的正文直接 `collect` 登记进 inventory，**中间没有 `normalize` 这一步**：
-`normalize` 是 `ingest` 的 dry-run 预检，只写 stdout、不落盘，其 `items[].markdown` 是正文字符串而
-`collect` 要的是相对路径，两者结构不兼容（见 [../../SKILL.md](../../SKILL.md)「`normalize` 的真实角色」）。
+`fetched` 的正文直接通过 `collect` 登记进 inventory，不运行额外的下游预处理命令。
 
 `collect` 要求 `markdownPath`（`markdown/` 下）与 `sanitizedPath`（`sanitized/items/` 下）**两个文件都已存在**，
 否则报 `必须指向普通文件`。所以抓完后自己把正文写到这两个位置（净化副本可与原文同内容），再 `collect`：
@@ -146,10 +143,13 @@ node scripts/knowledge-collection.mjs crawl-mark --session-dir <dir> \
 bycli web read --url <URL> --stdout > <dir>/markdown/<itemId>.md
 cp <dir>/markdown/<itemId>.md <dir>/sanitized/items/<itemId>.md
 node scripts/knowledge-collection.mjs collect --session-dir <dir> \
-  --item-json-file <dir>/.post-processing-inputs/batch.json
+  --item-json-file <dir>/.collection-inputs/batch.json
 ```
 
+`batch.json` 中每个首次登记的条目都必须包含 `source: "public-internet"`、`sourceSkill: "bycli"` 和 `backend: "bycli"`。无需在 `init` 时手工创建空的 `collection-result.json`。
+
 frontier 只管覆盖面，inventory 仍是唯一的证据来源，报告引用 `itemId` 不变。
+`status.crawl.coverage` 会持久报告 `duplicate`、`outOfScope` 和 `overCap`；`all` 模式下只要仍有 pending/failed、fetched 但未物化、或 `overCap > 0`，`status.collection.deliveryComplete` 就必须为 `false`。
 
 批量登记注意：inventory 身份是 `sourceSkill + sourceUrl`，每条 `canonicalItem.url` 必须是该页自己的 URL
 （`bycli web read` 在正文头部写的 `> 原文链接: <URL>`），**不要**让多篇共用同一个 URL，否则会撞成同一条身份。

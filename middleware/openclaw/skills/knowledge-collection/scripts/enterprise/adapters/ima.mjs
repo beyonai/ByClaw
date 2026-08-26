@@ -33,7 +33,8 @@ function records(value) {
 }
 
 function contentOf(value) {
-  const root = objectValue(value) || {};
+  const root = objectValue(value);
+  if (!root) return '';
   for (const key of ['markdown', 'content', 'text', 'body', 'noteContent']) {
     if (typeof root[key] === 'string' && root[key].trim()) return root[key].trim();
   }
@@ -44,8 +45,8 @@ function contentOf(value) {
   return '';
 }
 
-function itemFromRecord(record, sourceType, kb = '') {
-  const sourceItemId = stringValue(record, ['doc_id', 'docId', 'documentId', 'id', 'uuid', 'fileId']);
+function itemFromRecord(record, sourceType, kb = '', materializationKb = '') {
+  const sourceItemId = stringValue(record, ['mediaId', 'doc_id', 'docId', 'documentId', 'id', 'uuid', 'fileId']);
   if (!sourceItemId) return null;
   const title = stringValue(record, ['title', 'name', 'fileName', 'subject']) || sourceItemId;
   const sourceUrl = stringValue(record, ['url', 'sourceUrl', 'link']) || `ima://${sourceType}/${sourceItemId}`;
@@ -55,8 +56,15 @@ function itemFromRecord(record, sourceType, kb = '') {
     title,
     sourceType,
     kb,
-    preview: contentOf(record),
+    materializationKb,
+    preview: contentOf(record) || stringValue(record, ['abstract', 'introduction']),
   };
+}
+
+function knowledgeBaseId(value, name) {
+  const bases = Array.isArray(value?.knowledge_bases) ? value.knowledge_bases : [];
+  const match = bases.find((base) => base?.name === name) || bases[0];
+  return stringValue(match, ['id']);
 }
 
 function itemIdFor(item) {
@@ -121,32 +129,79 @@ async function callJson(writer, bin, env, args, artifact) {
   return parsed;
 }
 
-async function discover(writer, request, bin, env) {
+async function bycliKnowledgeList(writer, bycliBin, env, kb) {
+  const result = await runCli(bycliBin, ['ima', 'knowledge', kb, '-f', 'json'], { env });
+  if (result.failure || result.exitCode !== 0) {
+    throw new Error(`bycli ima knowledge failed: ${cliReason(result)}`);
+  }
+  let parsed;
+  try { parsed = JSON.parse(result.stdout); } catch { throw new Error('bycli ima knowledge returned invalid JSON'); }
+  if (!Array.isArray(parsed) && !objectValue(parsed)) {
+    throw new Error('bycli ima knowledge returned an unsupported JSON shape');
+  }
+  await writer.writeJson('raw/bycli-knowledge.json', parsed);
+  return parsed;
+}
+
+async function discover(writer, request, bin, bycliBin, env) {
   const found = [];
-  const seen = new Set();
+  const seenSourceItems = new Set();
+  const seenSourceUrls = new Set();
   const rawArtifacts = [];
-  const runDiscovery = async (sourceType, args, artifact) => {
-    const response = await callJson(writer, bin, env, args, artifact);
+  const fallbackReasons = [];
+  let materializationKb = request.kb;
+  const runDiscovery = async (sourceType, artifact, load) => {
+    const response = await load();
     rawArtifacts.push(artifact);
     for (const record of records(response)) {
       const item = itemFromRecord(record, sourceType, request.kb);
-      if (!item || seen.has(`${sourceType}:${item.sourceItemId}`)) continue;
-      seen.add(`${sourceType}:${item.sourceItemId}`);
-      found.push({ ...item, sourceRank: found.length + 1, rawArtifacts: [artifact] });
+      const sourceItemKey = item && `${sourceType}:${item.sourceItemId}`;
+      if (!item || seenSourceItems.has(sourceItemKey) || seenSourceUrls.has(item.sourceUrl)) continue;
+      seenSourceItems.add(sourceItemKey);
+      seenSourceUrls.add(item.sourceUrl);
+      found.push({ ...item, materializationKb, sourceRank: found.length + 1, rawArtifacts: [artifact] });
       if (found.length >= request.limit) break;
     }
   };
+  if (request.kb) {
+    const baseSearch = await callJson(writer, bin, env, ['wiki', 'search-base', request.kb, '--json'], 'raw/wiki-search-base.json');
+    materializationKb = knowledgeBaseId(baseSearch, request.kb);
+    if (!materializationKb) throw new Error(`ima knowledge base not found: ${request.kb}`);
+    try {
+      await runDiscovery('wiki', 'raw/bycli-knowledge.json', () => bycliKnowledgeList(writer, bycliBin, env, request.kb));
+    } catch (error) {
+      fallbackReasons.push(reasonOf(error));
+      try {
+        await runDiscovery('wiki', 'raw/wiki-search.json', () => callJson(
+          writer,
+          bin,
+          env,
+          ['wiki', 'search', request.query, '--kb', materializationKb, '--json'],
+          'raw/wiki-search.json',
+        ));
+      } catch (fallbackError) {
+        throw new Error(`IMA knowledge listing failed: bycli=${fallbackReasons.join('; ')}; wiki=${reasonOf(fallbackError)}`);
+      }
+    }
+    return { found: found.slice(0, request.limit), rawArtifacts, fallbackReasons };
+  }
   const noteArgs = ['note', 'search', '--content', request.query, '--start', '0', '--end', String(request.limit), '--json'];
   if (request.noteMode === 'title') {
     noteArgs.splice(2, 2, '--title', request.query);
   }
-  await runDiscovery('note', noteArgs, 'raw/note-search.json');
+  await runDiscovery('note', 'raw/note-search.json', () => callJson(writer, bin, env, noteArgs, 'raw/note-search.json'));
   if (found.length < request.limit) {
-    const wikiArgs = ['wiki', 'search', request.query, '--json'];
-    if (request.kb) wikiArgs.splice(3, 0, '--kb', request.kb);
-    await runDiscovery('wiki', wikiArgs, 'raw/wiki-search.json');
+    const wikiArgs = ['wiki', 'search', request.query, ...(request.kb ? ['--kb', request.kb] : []), '--json'];
+    try {
+      await runDiscovery('wiki', 'raw/wiki-search.json', () => callJson(writer, bin, env, wikiArgs, 'raw/wiki-search.json'));
+    } catch (error) {
+      if (fallbackReasons.length) {
+        throw new Error(`IMA knowledge listing failed: bycli=${fallbackReasons.join('; ')}; wiki=${reasonOf(error)}`);
+      }
+      throw error;
+    }
   }
-  return { found: found.slice(0, request.limit), rawArtifacts };
+  return { found: found.slice(0, request.limit), rawArtifacts, fallbackReasons };
 }
 
 async function materializeOne(writer, item, bin, env) {
@@ -154,7 +209,7 @@ async function materializeOne(writer, item, bin, env) {
   const artifact = `raw/${item.sourceType}-get-${suffix}.json`;
   const args = item.sourceType === 'note'
     ? ['note', 'get', item.sourceItemId, '--format', '0', '--json']
-    : ['wiki', 'search', item.title, ...(item.kb ? ['--kb', item.kb] : []), '--json'];
+    : ['wiki', 'search', item.title, ...(item.materializationKb ? ['--kb', item.materializationKb] : []), '--json'];
   const response = await callJson(writer, bin, env, args, artifact);
   const content = contentOf(response) || item.preview;
   if (!content) throw new Error(`ima ${item.sourceType} returned no content`);
@@ -188,6 +243,7 @@ async function persistSearch(writer, request, inventory, canonicalItems, rawArti
 
 export function createImaAdapter(dependencies = {}) {
   const bin = dependencies.bin || 'ima';
+  const bycliBin = dependencies.bycliBin || 'bycli';
   const env = dependencies.env || process.env;
 
   async function search(request = {}) {
@@ -200,7 +256,7 @@ export function createImaAdapter(dependencies = {}) {
     };
     try {
       await authCheck(bin, env);
-      const discovery = await discover(writer, normalized, bin, env);
+      const discovery = await discover(writer, normalized, bin, bycliBin, env);
       const inventory = normalized.metadataOnly ? discovery.found.map((item) => inventoryItem(item, item.rawArtifacts)) : [];
       const materialized = [];
       if (!normalized.metadataOnly) {
@@ -214,7 +270,10 @@ export function createImaAdapter(dependencies = {}) {
         title: item.title, url: item.sourceUrl, author: '', publishTime: '', markdown: item.materialization.sanitizedPath, fileName: item.materialization.sanitizedPath,
       }));
       const status = deriveCollectionStatus({ metadataOnly: normalized.metadataOnly, itemStates: finalInventory.map((item) => item.materialization.status) });
-      await persistSearch(writer, normalized, finalInventory, canonicalItems, discovery.rawArtifacts, status, { discovered: finalInventory.length });
+      await persistSearch(writer, normalized, finalInventory, canonicalItems, discovery.rawArtifacts, status, {
+        discovered: finalInventory.length,
+        fallbackReasons: discovery.fallbackReasons,
+      });
       return handledOutcome(identity.connector, status, outputDir, inventoryCounts(finalInventory));
     } catch (error) {
       if (error.auth) return handledOutcome(identity.connector, 'auth_required', outputDir, { failed: 0 });
@@ -223,17 +282,7 @@ export function createImaAdapter(dependencies = {}) {
   }
 
   async function collectResource(request = {}) {
-    const writer = await createArtifactWriter(request.outputDir);
-    try {
-      await authCheck(bin, env);
-      const response = await callJson(writer, bin, env, ['wiki', 'import-urls', '--kb', request.kb, request.url, '--json'], 'raw/import-urls.json');
-      await writer.writeJson('raw/metadata.json', { ...identity, operation: 'wiki.import-urls', status: 'complete', sourceMetadata: { ...identity, kb: request.kb, url: request.url } });
-      await writer.writeCollectionBundle({ title: `IMA URL import: ${request.url}`, source: identity.source, backend: identity.backend, url: request.url, filters: { kb: request.kb }, inventory: [], canonicalItems: [], sourceMetadata: { ...identity, operation: 'wiki.import-urls', kb: request.kb, imported: response }, metadataOnly: false });
-      return handledOutcome(identity.connector, 'complete', request.outputDir);
-    } catch (error) {
-      if (error.auth) return handledOutcome(identity.connector, 'auth_required', request.outputDir);
-      throw error;
-    }
+    return handledOutcome(identity.connector, 'unsupported_capability', request.outputDir);
   }
 
   async function materialize(request = {}) {
@@ -247,7 +296,7 @@ export function createImaAdapter(dependencies = {}) {
     }
     const canonicalItems = inventory.filter((item) => item.materialization.status === 'materialized').map((item) => ({ title: item.title, url: item.sourceUrl, author: '', publishTime: '', markdown: item.materialization.sanitizedPath, fileName: item.materialization.sanitizedPath }));
     const status = deriveCollectionStatus({ itemStates: inventory.map((item) => item.materialization.status) });
-    await writer.writeCollectionBundle({ title: 'IMA materialized collection', source: identity.source, backend: identity.backend, url: 'ima://materialize', filters: request.kb ? { kb: request.kb } : {}, inventory, canonicalItems, sourceMetadata: { ...identity, operation: 'materialize' }, metadataOnly: false });
+    await writer.writeCollectionBundle({ title: 'IMA materialized collection', source: identity.source, backend: identity.backend, url: 'ima://materialize', filters: {}, inventory, canonicalItems, sourceMetadata: { ...identity, operation: 'materialize' }, metadataOnly: false });
     return handledOutcome(identity.connector, status, request.outputDir, inventoryCounts(inventory));
   }
 

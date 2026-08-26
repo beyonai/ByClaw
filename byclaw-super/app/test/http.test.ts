@@ -460,6 +460,7 @@ describe("Session / Run HTTP/SSE API", () => {
     const connector: AgentConnector = {
       id: "fake",
       capabilities: {
+        completionMode: "events",
         streaming: true,
         cancellation: true,
         artifacts: true,
@@ -500,7 +501,11 @@ describe("Session / Run HTTP/SSE API", () => {
         return {
           contextRevision: 0,
           async run(input) {
-            const res = await input.delegate({ agentId: "agent-1", task: "do it" });
+            const res = await input.delegate({
+              toolCallId: "delegate-http",
+              agentId: "agent-1",
+              task: "do it",
+            });
             await input.onDelta("summary");
             return { text: `summary:${res.output}` };
           },

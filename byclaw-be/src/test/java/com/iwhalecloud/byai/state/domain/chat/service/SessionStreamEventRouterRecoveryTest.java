@@ -38,7 +38,6 @@ class SessionStreamEventRouterRecoveryTest {
         mockField("runningChatSnapshotService", RunningChatSnapshotService.class);
         mockField("multiDeviceBroadcastService",
             com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService.class);
-        mockField("scriptService", ScriptService.class);
         mockField("chatContextRecoveryService", ChatContextRecoveryService.class);
         mockField("cronService", CronService.class);
 
@@ -116,5 +115,13 @@ class SessionStreamEventRouterRecoveryTest {
         router.dispatch(event("105-0"));
         verify(pythonSseService, times(1)).accumulateEvent(anyString(), any());
         org.junit.jupiter.api.Assertions.assertEquals("105-0", ctx.hydratedStreamId);
+    }
+
+    @Test
+    void skipsLiveEventAlreadyIncludedInSnapshotWatermark() {
+        ChatProcessContext ctx = recoveryCtx("100-0");
+        ctx.recoveryOnly = false;
+        router.dispatch(event("50-0"));
+        verify(pythonSseService, never()).getContentFromPythonStreamV3(anyString(), any(), any(), any(), any());
     }
 }

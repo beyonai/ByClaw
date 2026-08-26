@@ -518,6 +518,78 @@ function useChat(props: IProps) {
       });
   });
 
+  /**
+   * WebSocket 断线重连后，以后端运行态为准校正当前页面，避免连接恢复但前端仍永久停留在运行中。
+   * 运行中的会话优先用快照补齐断线期间的内容；后端已无运行态时清理本地 runtime 并刷新已落库消息。
+   */
+  const reconcileCurrentSessionAfterReconnect = usePersistFn(async () => {
+    if (!sessionId) {
+      return;
+    }
+
+    try {
+      const runningInfoList: RunningChatInfo[] = await getChatRunningStatus({ sessionIds: [sessionId] });
+      const runningInfos = runningInfoList.filter(
+        (item) => `${item.sessionId}` === `${sessionId}` && item.running && item.traceId
+      );
+
+      if (!runningInfos.length) {
+        if (chatSessionRuntimeManager.isSessionRunning(sessionId)) {
+          chatSessionRuntimeManager.completeBySession(sessionId);
+          await reloadLatestMessageList();
+        }
+        return;
+      }
+
+      for (const runningInfo of runningInfos) {
+        chatSessionRuntimeManager.hydrateRunning(runningInfo);
+        const snapshot = await getChatRunningSnapshot({
+          sessionId,
+          traceId: runningInfo.traceId,
+          modelAnswerMessageId: runningInfo.modelAnswerMessageId,
+        });
+        if (!snapshot?.messageId) {
+          continue;
+        }
+
+        const answerMessage = messageListRef.current.find(
+          (item) =>
+            `${item.messageId || ''}` === `${runningInfo.modelAnswerMessageId || ''}` ||
+            `${item.msgId || ''}` === `${getAnswerClientMsgId(runningInfo.clientRequestId)}`
+        );
+        if (!answerMessage) {
+          continue;
+        }
+
+        const runtimeInfo =
+          chatSessionRuntimeManager.getByClientRequest(runningInfo.clientRequestId) ||
+          chatSessionRuntimeManager.getByTrace(sessionId, runningInfo.traceId);
+        const snapshotStreamId = snapshot.snapshotStreamId;
+        if (
+          snapshotStreamId &&
+          runtimeInfo?.lastAppliedStreamId &&
+          compareStreamId(snapshotStreamId, runtimeInfo.lastAppliedStreamId) <= 0
+        ) {
+          continue;
+        }
+
+        const snapshotAnswerMessage = createRestoredAnswerMessageFromSnapshot(snapshot, runningInfo);
+        assign(answerMessage, snapshotAnswerMessage);
+        set(answerMessage, 'messageState', IMessageState.Answer);
+        updateMessage(answerMessage, { isAssign: true });
+        chatSessionRuntimeManager.updateLastAppliedStreamId(runningInfo.clientRequestId, snapshotStreamId);
+      }
+    } catch (error) {
+      console.error('WebSocket 重连后同步会话运行态失败:', error);
+    }
+  });
+
+  useEffect(() => {
+    return webSocketManager.onReconnect(() => {
+      void reconcileCurrentSessionAfterReconnect();
+    });
+  }, [reconcileCurrentSessionAfterReconnect]);
+
   useEffect(() => {
     const handler = async (message: any) => {
       const data = get(message, 'data') || message;
@@ -807,7 +879,7 @@ function useChat(props: IProps) {
     const digitalEmployeeResources = getDigitalEmployeeResources(resourceList);
     const singleInlineAgent =
       digitalEmployeeResources.length === 1 ? getAgentLaneIdentity(digitalEmployeeResources[0]) : null;
-    if (!fixedAgentId && singleInlineAgent?.agentKey) {
+    if (!fixedAgentId && singleInlineAgent?.agentKey && !isResumeChat) {
       _agentId = singleInlineAgent.agentKey;
     }
 

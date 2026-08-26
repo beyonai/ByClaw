@@ -27,7 +27,7 @@ type RepoFormValues = {
   description?: string;
 };
 
-// 研发资源 Tab 的仓库入口只负责新增/编辑，仓库列表直接展示在资源卡片中。
+// 研发、运营资源 Tab 的仓库入口只负责新增/编辑，仓库列表直接展示在资源卡片中。
 const ProjectRepositoryManager: React.FC<Props> = ({ project, open, onClose, onChanged, editingRepo }) => {
   const intl = useIntl();
   const [saving, setSaving] = useState(false);

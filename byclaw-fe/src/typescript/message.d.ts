@@ -15,6 +15,44 @@ import { RichInputResourceList } from '@/components/QueryInput/RichInput';
 type IResourceFromItem = any;
 type IQueryCollectedState = 'collected' | 'uncollect' | 'changing';
 
+export type TaskPlanStatus = 'ACTIVE' | 'CANCELLING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
+export type TaskPlanTaskStatus = 'PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'FAILED' | 'SKIPPED' | 'CANCELLED';
+
+export type TaskPlanStatusReason = {
+  code: string;
+  message?: string;
+};
+
+export type TaskPlanTask = {
+  taskId: string;
+  position: number;
+  title: string;
+  description?: string;
+  status: TaskPlanTaskStatus;
+  statusReason?: TaskPlanStatusReason | null;
+  startedAt?: string;
+  completedAt?: string;
+};
+
+export type TaskPlanSnapshot = {
+  planId: string;
+  version: number;
+  title: string;
+  status: TaskPlanStatus;
+  statusReason?: TaskPlanStatusReason | null;
+  sessionId: string;
+  messageId: string;
+  turnId?: string | null;
+  laneId?: string | null;
+  traceId?: string;
+  sourceRuntime?: 'BYCLAW_SUPER' | 'OPENCLAW';
+  sourceRunId?: string;
+  explanation?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+  tasks: TaskPlanTask[];
+};
+
 export type IMessageListItem = {
   content: {
     substance: unknown;
@@ -120,6 +158,7 @@ export type IMessage = {
   laneId?: string;
   turnId?: string;
   multiAgent?: unknown;
+  taskPlan?: TaskPlanSnapshot;
 
   sessionId?: string;
   usage?: '1' | '2' | '3' | '4' | '5'; // 1-用户 2-大模型 3-追问、清楚上下文 4-转发消息 5-交互消息（建群、踢人等）

@@ -61,7 +61,7 @@ flowchart LR
 
 - 知识库上传、构建、读取、下载、目录操作、移动、删除等调用向本地 by-qa 透传 `resourceId`。
 - 常规文件操作通过内部请求头 `X-Byclaw-Resource-Id` 透传资源上下文。
-- 异步构建使用 by-qa 的 `fileToMarkdownIndexByResourceId` 包装接口，确保 HTTP 请求结束后后台任务仍显式绑定资源上下文。
+- 异步构建使用 by-qa 的 `fileToMarkdownIndex` 原生接口，并通过 `X-Byclaw-Resource-Id` 请求头传递资源上下文。
 - 第三方知识库直连（例如 `WHALE_AGENT`）不携带该内部请求头，OpenAPI path 和请求体保持不变。
 - FS Operation 保留统一权限校验，并将 `/resource/kg_doc/` 路径路由到知识库专用 ResourceFS。
 - 知识文件使用私有 `byclaw-qa` bucket；公共资源继续使用原 `byclaw` / `byclaw-datacloud` 存储。
@@ -70,7 +70,7 @@ flowchart LR
 ### 4.2 by-qa
 
 - 默认知识存储 Provider 改为资源感知 Provider。
-- 从门户内部请求头或 `*ByResourceId` 接口参数建立请求级资源上下文。
+- 从门户内部请求头 `X-Byclaw-Resource-Id` 建立请求级资源上下文。
 - 有资源上下文时，调用门户 FS Operation 的 RESOURCE 空间。
 - 后台构建任务显式复制并绑定资源上下文，避免请求结束后丢失 `resourceId`。
 - 暂时保留无 `resourceId` 时的 UserFS 回退，兼容尚未同步改造的 DataCloud 和旧调用方。
@@ -81,7 +81,7 @@ flowchart LR
 本轮不修改 by-datacloud。后续应完成：
 
 - DataCloud 调用门户知识库接口时统一使用知识库 `resourceId`；
-- 如果仍直接调用本地 by-qa，应携带 `X-Byclaw-Resource-Id`，或改用现有 `*ByResourceId` 接口；
+- 如果仍直接调用本地 by-qa，应携带 `X-Byclaw-Resource-Id`；
 - 上传、构建、下载、读取、目录和删除操作均需传递同一 `resourceId`；
 - DataCloud 自身任务结果文件继续使用 UserFS，不应迁入知识库 ResourceFS；
 - 完成改造并迁移历史文件后，可取消 by-qa 的 UserFS 兼容回退。

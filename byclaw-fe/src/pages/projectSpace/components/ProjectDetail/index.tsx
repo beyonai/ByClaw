@@ -14,6 +14,7 @@ import { useProjectTypeConfig } from '../../hooks/useProjectTypeConfig';
 import { checkGitHubPat, saveGitHubPat, type DevloopProjectRepo } from '@/service/devloop';
 import type { ProjectSession, ProjectSpace } from '../../types';
 import { getArrayData, getProjectTagMeta } from '../../utils';
+import { supportsProjectRepositories } from '../../projectCapabilities';
 import ProjectAccounts from '../ProjectAccounts';
 import ProjectMembers from '../ProjectMembers';
 import ProjectRequirements from '../ProjectRequirements';
@@ -80,6 +81,8 @@ const ProjectDetail: React.FC<Props> = ({
   // 研发和运营能力均以静态参数为准，避免未启用环境误展示对应的业务分区。
   const isDevelopProject = isDevelopProjectEnabled && project?.projectType === 'develop';
   const isOperationProject = isOperationProjectEnabled && project?.projectType === 'operation';
+  const repositoryProject =
+    supportsProjectRepositories(project?.projectType) && (isDevelopProject || isOperationProject);
   const currentUserId = userInfo.userId ?? userInfo.id;
   const handleRefreshProject = useCallback(() => {
     // 顶部刷新按钮做轻量防抖，避免连续点击造成详情接口并发请求和旧数据覆盖新数据。
@@ -99,9 +102,8 @@ const ProjectDetail: React.FC<Props> = ({
   const defaultRequirementAssignee = operationAssignees.find(
     (option) => currentUserId !== undefined && `${option.value}` === `${currentUserId}`
   )?.value;
-  // 运营项目和研发项目保留业务扩展页；默认、普通项目固定只展示任务和资源。
-  // 研发需求入口已迁到应用级「自动化」页；运营需求仍以本页需求页签为宿主，故只对运营项目保留。
-  const showRequirementsSection = isOperationProject;
+  // 研发需求入口已迁到应用级「自动化」页，运营项目大详情也不再展示需求页签。
+  const showRequirementsSection = false;
   const showMembersSection = isDevelopProject || isOperationProject;
   const projectCacheKey = `${project?.projectId ?? ''}`;
   const visitedSections =
@@ -152,7 +154,7 @@ const ProjectDetail: React.FC<Props> = ({
   );
 
   useEffect(() => {
-    if (!isDevelopProject) {
+    if (!repositoryProject) {
       setGithubPatSaved(true);
       return;
     }
@@ -167,7 +169,7 @@ const ProjectDetail: React.FC<Props> = ({
     return () => {
       active = false;
     };
-  }, [isDevelopProject, project?.projectId]);
+  }, [project?.projectId, repositoryProject]);
   const detailSections = useMemo(
     () =>
       PROJECT_DETAIL_SECTIONS.filter((item) => {
@@ -181,7 +183,7 @@ const ProjectDetail: React.FC<Props> = ({
         const order = isDevelopProject
           ? ['tasks', 'resources', 'members', 'integration']
           : isOperationProject
-            ? ['accounts', 'requirements', 'tasks', 'resources', 'members']
+            ? ['accounts', 'tasks', 'resources', 'members']
             : ['tasks', 'resources'];
         return order.indexOf(left.key) - order.indexOf(right.key);
       }),
@@ -232,8 +234,8 @@ const ProjectDetail: React.FC<Props> = ({
       (!showMembersSection && activeSection === 'members') ||
       (!showRequirementsSection && activeSection === 'requirements');
     if (currentTabHidden) {
-      // 运营项目按“账号、需求、任务、资源、成员”展示，并默认进入账号管理。
-      activateSection(isDevelopProject ? 'requirements' : isOperationProject ? 'accounts' : 'tasks');
+      // 运营项目按“账号、任务、资源、成员”展示，并默认进入账号管理。
+      activateSection(isOperationProject ? 'accounts' : 'tasks');
     }
   }, [
     activateSection,
@@ -442,8 +444,8 @@ const ProjectDetail: React.FC<Props> = ({
             </Button>
           )}
           {/* 研发项目的渠道配置与新增需求已迁到应用级「自动化」页，这里不再提供入口。 */}
-          {/* 新增仓库属于研发项目资源维护操作，仅在资源 Tab 展示。 */}
-          {isDevelopProject && activeSection === 'resources' && (
+          {/* 研发、运营项目都可在资源 Tab 维护共享代码仓库。 */}
+          {repositoryProject && activeSection === 'resources' && (
             <Button
               icon={<PlusOutlined />}
               onClick={() => {
@@ -469,7 +471,7 @@ const ProjectDetail: React.FC<Props> = ({
           )}
         </div>
       </div>
-      {isDevelopProject && !githubPatSaved && (
+      {repositoryProject && !githubPatSaved && (
         <Alert
           type="warning"
           showIcon
@@ -520,7 +522,7 @@ const ProjectDetail: React.FC<Props> = ({
         onCancel={() => setOperationRequirementModalOpen(false)}
         onSubmit={handleCreateOperationRequirement}
       />
-      {isDevelopProject && (
+      {repositoryProject && (
         <ProjectRepositoryManager
           project={project}
           open={repositoryManagerOpen}

@@ -9,7 +9,8 @@
 - 同 Session FIFO、不同 Session 并行及非终态 Run 接管；
 - `@earendil-works/pi-coding-agent@0.80.10` Leader；
 - Pi 原生 header + append-only entries 恢复、自动 compaction 和有界 Session cache；
-- 只包含 `delegateAgent`、`askUserQuestion` 的安全工具集合；
+- 只包含 `delegateAgent`、`askUserQuestion`、`updateTaskPlan` 等平台白名单工具的安全工具集合；
+- 任务计划由 ByClaw BE 持久化并广播；计划仍为 `ACTIVE` 时 Leader 会自动续跑，不能把 Run 错误标记为完成；
 - `@byclaw/connector-by-framework-common` 公共传输层，以及 OpenClaw、Code 两个薄 Connector；
 - OpenClaw externalRef + Redis Stream cursor 恢复；
 - 三方数字员工根据 `discoverMine` 返回信息自动选择 `INTERFACE`、`A2A`、`PAGE` 专用 Connector；
@@ -226,6 +227,9 @@ Leader 和 Connector 共用 `interaction.requested` / `interaction.responded` �
 Leader system prompt 要求只在短澄清会实质改变结果、且采用默认值有风险时提问；只问消除
 歧义所需的最少问题，同一时刻只允许一个未解决交互，提问后必须等待工具结果。submit、skip、
 cancel 等生命周期动作只由 UI/runtime 发出。
+用户交互默认最多等待 15 分钟，可通过 `RUN_USER_INTERACTION_TIMEOUT_MS` 覆盖。截止时间会随
+`interaction.requested` 事件持久化，进程重启或跨实例接管后仍按原截止时间收敛；超时
+后 Run 进入 `FAILED`。
 
 ## 环境配置
 

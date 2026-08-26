@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.Collections;
 
 import com.iwhalecloud.byai.manager.dto.resource.DatasetBuild;
 import com.iwhalecloud.byai.manager.dto.resource.UploadItem;
@@ -51,12 +52,13 @@ public class OpenClawKnowledgeDocumentService {
             normalizedDirectoryPath, resolvedDocName, language);
         UploadResult uploadResult = datasetApplicationService.uploadFiles(new MultipartFile[] {
             multipartFile
-        }, resourceId, normalizedDirectoryPath, resolvedDocName, Boolean.TRUE, Boolean.FALSE, false);
+        }, resourceId, normalizedDirectoryPath, resolvedDocName, Boolean.TRUE, Boolean.FALSE, false,
+            Collections.emptyMap());
 
         DatasetBuild datasetBuild = new DatasetBuild();
         datasetBuild.setResourceId(resourceId);
         datasetBuild.setDirectoryPath(resolveUploadedFilePath(uploadResult, normalizedDirectoryPath, resolvedDocName));
-        datasetApplicationService.build(datasetBuild);
+        datasetApplicationService.build(datasetBuild, Collections.emptyMap());
         return BUILD_KNOWLEDGE_SUCCESS;
     }
 

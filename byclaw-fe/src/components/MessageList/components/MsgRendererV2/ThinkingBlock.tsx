@@ -8,6 +8,7 @@ import type { IMessage, IMessageListItem } from '@/typescript/message';
 import ThinkNewRootTitle from '@/components/MessagesComp/Think/ThinkRootTitle/components/ThinkNewRootTitle';
 import { transformList } from '@/components/MessageList/components/ThinkingProcessRender/util';
 import type { TreeNode } from '@/components/MessageList/components/ThinkingProcessRender/typescript';
+import { hasPendingEasyConfirmItem } from '@/components/MessagesComp/easyConfirm';
 import styles from '@/components/MessageList/components/ThinkingProcessRender/index.module.less';
 
 type Props = {
@@ -22,13 +23,15 @@ export default function ThinkingBlock({ blockId, items, message, ended, updateMe
   const intl = useIntl();
   const [collapsed, setCollapsed] = useState(ended);
   const transformedList = useMemo(
-    () => transformList(items, ended, message.messageId),
-    [items, ended, message.messageId]
+    () => transformList(items, ended, message.messageId, message),
+    [items, ended, message]
   );
+  const hasPendingInteraction = hasPendingEasyConfirmItem(message, items);
+  const effectiveCollapsed = collapsed && !hasPendingInteraction;
 
   useEffect(() => {
-    setCollapsed(ended);
-  }, [ended]);
+    setCollapsed(ended && !hasPendingInteraction);
+  }, [ended, hasPendingInteraction]);
 
   const updateItem = useCallback(
     (path: string, value: unknown) => {
@@ -50,11 +53,21 @@ export default function ThinkingBlock({ blockId, items, message, ended, updateMe
     <div id={`thinkingBlock_${message.msgId}_${blockId}`}>
       <p style={{ color: '#707680' }}>
         {ended ? (
-          <span className="ub ub-ac pointer gap12" onClick={() => setCollapsed((value) => !value)}>
+          <span
+            className={classnames('ub ub-ac gap12', { pointer: !hasPendingInteraction })}
+            onClick={() => {
+              if (hasPendingInteraction) return;
+              setCollapsed((value) => !value);
+            }}
+          >
             <span style={{ color: 'var(--beyond-color-text-tertiary)' }}>
               {intl.formatMessage({ id: 'thinkingProcess.done' })}
             </span>
-            {collapsed ? <RightOutlined style={{ fontSize: 12 }} /> : <DownOutlined style={{ fontSize: 12 }} />}
+            {effectiveCollapsed ? (
+              <RightOutlined style={{ fontSize: 12 }} />
+            ) : (
+              <DownOutlined style={{ fontSize: 12 }} />
+            )}
           </span>
         ) : (
           <span className={classnames(styles.highlightText, styles.autoHighlight)}>
@@ -62,7 +75,7 @@ export default function ThinkingBlock({ blockId, items, message, ended, updateMe
           </span>
         )}
       </p>
-      {!collapsed && (
+      {!effectiveCollapsed && (
         <div className={styles.thinkingProcessWrapper}>
           {transformedList.map((item) => (
             <ThinkNewRootTitle

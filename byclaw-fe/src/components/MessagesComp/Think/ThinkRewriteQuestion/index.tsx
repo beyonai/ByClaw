@@ -14,9 +14,15 @@ import withEasyConfirm from '@/components/MessagesComp/withEasyConfirm';
 import styles from './index.module.less';
 import { ComparisonMap, IConditionItem, IFieldItem, IParadigmItem, IParadigmResultItem } from './interface';
 import { LayoutMode } from '@/constants/system';
+import { IFormStatus } from '@/hooks/useSseSender/agent/typescript';
 
 type IProps = {
-  messageListItemContent: { substance: any; metadata?: string; sourceAgentType?: string };
+  messageListItemContent: {
+    substance: any;
+    metadata?: string;
+    sourceAgentType?: string;
+    formStatus?: IFormStatus;
+  };
   message: IMessage;
   updateMessageListItemContent: (val: any) => void;
   messageIdx: number;
@@ -31,6 +37,7 @@ function ThinkRewriteQuestion(props: IProps) {
 
   const metadata = get(messageListItemContent, 'metadata', '');
   const sourceAgentType = get(messageListItemContent, 'sourceAgentType', '');
+  const isCompleted = messageListItemContent.formStatus === IFormStatus.FINISH;
   const { paradigmList: defParadigmList, query } = get(messageListItemContent, 'substance', '');
 
   const isPreviewMode = layoutMode === LayoutMode.preview;
@@ -161,6 +168,7 @@ function ThinkRewriteQuestion(props: IProps) {
 
   // 确定，中断，屏蔽按钮，重新发送继续该消息下的思考过程
   const handleSubmit = useCallback(() => {
+    if (isCompleted) return;
     setHasSubmit(true);
     const newParadigmList =
       list
@@ -196,18 +204,47 @@ function ThinkRewriteQuestion(props: IProps) {
             })),
           };
         }) || [];
-    console.log('newParadigmList', newParadigmList);
+    updateMessageListItemContent({
+      ...messageListItemContent,
+      formStatus: IFormStatus.FINISH,
+    });
+    const listProp = isThinkingProcess ? 'thinkList' : 'messageList';
+    const completedList = list.map((item) => {
+      if (`${item.contentType}` !== `${SSEMessageType.thinkRewriteQuestion}`) return item;
+      return {
+        ...item,
+        content: {
+          ...item.content,
+          formStatus: IFormStatus.FINISH,
+        },
+      };
+    });
+    EventEmitter.emit('beyond-update-message', {
+      message: {
+        ...message,
+        [listProp]: completedList,
+      },
+    });
     sendRewriteQuestion(newParadigmList);
-  }, [sendRewriteQuestion, list]);
+  }, [
+    EventEmitter,
+    isCompleted,
+    isThinkingProcess,
+    list,
+    message,
+    messageListItemContent,
+    sendRewriteQuestion,
+    updateMessageListItemContent,
+  ]);
 
   const { remainingTime, isRunning, start, reset } = useCountDown(15000, handleSubmit);
 
   React.useEffect(() => {
     reset();
-    if (isNil(defParadigmList) || !showSubmitBtn || curMessageIdx !== totalMesageListSize - 1) return;
+    if (isCompleted || isNil(defParadigmList) || !showSubmitBtn || curMessageIdx !== totalMesageListSize - 1) return;
 
     start();
-  }, [isNil(defParadigmList), showSubmitBtn, totalMesageListSize, curMessageIdx]);
+  }, [isCompleted, isNil(defParadigmList), showSubmitBtn, totalMesageListSize, curMessageIdx]);
 
   if (!paradigmList) return null;
 
@@ -258,7 +295,7 @@ function ThinkRewriteQuestion(props: IProps) {
         );
       })}
       {/* 最后一个问题 且 未提交，显示按钮 */}
-      {!isPreviewMode && showSubmitBtn && !hasSubmit && (
+      {!isPreviewMode && showSubmitBtn && !hasSubmit && !isCompleted && (
         <div className="ub ub-pe">
           <Button
             size="small"

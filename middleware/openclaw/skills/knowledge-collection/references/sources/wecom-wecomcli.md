@@ -2,7 +2,7 @@
 
 企微采集意图由 `knowledge-collection` 统一编排。命中本桥接后，先声明“委派采集模式”，再加载并遵循
 `wecomcli` skill 及匹配的子 Skill。`knowledge-collection` 负责采集目录、`raw/`、`markdown/`、
-`sanitized/items/`、`sanitized/metadata.json`、`collection-result.json`、预览和唯一后处理选择；
+`sanitized/items/`、`sanitized/metadata.json`、`collection-result.json`、预览和采集交付；
 `wecomcli` / `wecom-cli` 只负责企微 URL 或产品路由、只读命令、认证、权限、真实 ID、导出轮询和分页。
 
 ## 来源路由
@@ -84,7 +84,7 @@ sanitized/
 - `sanitized/metadata.json` 按主契约写入完整 inventory。每项提供稳定 `itemId`、`sourceSkill: wecomcli`、来源对象 ID/URL、
   用户筛选、关联 `rawArtifacts` 和 materialization 状态；尚未生成正文的列表项仍进入 inventory，但不得进入
   `collection-result.json.items`。
-- 来源执行器不得询问或执行 `入库 / 知识整理 / 跳过`；仅由 `knowledge-collection` 在采集后执行该选择。
+- 来源执行器只返回采集结果；`knowledge-collection` 验证并交付 `sanitized/items/*.md` 后停止。
 ## Knowledge collection enterprise search
 
-Only a user-named WeCom source or a clear internal-material request whose approved `sourceScope` includes WeCom may invoke enterprise search. The current connector has no knowledge-base or cloud-drive search capability, so `enterprise search` and `enterprise search-all` must record the explicit `unsupported_capability`; never claim that WeCom was actually searched. This status is isolated to the selected WeCom source and does not stop other selected sources or public-internet collection. The enterprise runner still preserves WeCom document, sheet, and SmartPage resource export, and a partial resource task can be continued with `enterprise resume-resource --source wecom --session-dir ... --output-dir <new dir>`.
+Only a user-named WeCom source or a clear internal-material request whose approved `sourceScope` includes WeCom may invoke enterprise search. Pass that initialized session as `--parent-session-dir`; the command rejects a missing or out-of-scope parent. Unsupported search capabilities must record the explicit `unsupported_capability`; never claim that WeCom was actually searched. This status is isolated to the selected WeCom source and does not stop other selected sources or public-internet collection. The enterprise runner still preserves WeCom document, sheet, and SmartPage resource export, and a partial resource task can be continued with `enterprise resume-resource --source wecom --session-dir ... --output-dir <new dir>`.

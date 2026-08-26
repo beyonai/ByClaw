@@ -16,6 +16,7 @@ import {
   getRestoredStreamKey,
   handleChatStreamError,
   handleParsedChatStream,
+  handleTaskPlanSnapshot,
   registerPendingChatContext,
   registerSessionChatContext,
   startRestoringChatStream,
@@ -302,6 +303,45 @@ describe('hooks/useChat/chatRuntime', () => {
     expect(answerMsg.messageState).toBe(IMessageState.Error);
     expect(answerMsg.messageTip).toBe('failed');
     expect(updateMessage).toHaveBeenCalledWith(answerMsg);
+  });
+
+  it('applies only the latest task plan snapshot to the active answer', () => {
+    const queryMsg: any = { msgId: 'q1', sessionId: 's1' };
+    const answerMsg: any = { msgId: 'c1', messageId: 'm1', sessionId: 's1', messageState: IMessageState.Answer };
+    const updateMessage = jest.fn((msg) => msg);
+
+    registerPendingChatContext({
+      clientRequestId: 'c1',
+      queryMsg,
+      answerMsg,
+      getMessageList: () => [queryMsg, answerMsg],
+      flowHandler: jest.fn(),
+      updateMessage,
+    });
+
+    const createSnapshot = (version: number, status: string) => ({
+      type: 'TASK_PLAN_SNAPSHOT',
+      sessionId: 's1',
+      messageId: 'm1',
+      traceId: 'trace-1',
+      data: {
+        planId: 'plan-1',
+        version,
+        title: 'Plan',
+        status: 'ACTIVE',
+        sessionId: 's1',
+        messageId: 'm1',
+        traceId: 'trace-1',
+        tasks: [{ taskId: 'task-1', position: 1, title: 'Step 1', status }],
+      },
+    });
+
+    expect(handleTaskPlanSnapshot(createSnapshot(2, 'COMPLETED'))).toBe(true);
+    expect(handleTaskPlanSnapshot(createSnapshot(1, 'IN_PROGRESS'))).toBe(true);
+
+    expect(answerMsg.taskPlan.version).toBe(2);
+    expect(answerMsg.taskPlan.tasks[0].status).toBe('COMPLETED');
+    expect(updateMessage).toHaveBeenCalledTimes(1);
   });
 
   it('buffers restored stream messages while snapshot is loading and replays by streamId', () => {

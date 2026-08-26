@@ -1,17 +1,22 @@
 # Online Search 检索信源（SearXNG 元搜索）
 
-`online_search` 是知识采集技能的第二检索信源（与内置路由层 [agent-reach.md](agent-reach.md) 并列），封装 SearXNG 249 引擎元搜索内核。
-技能本体位于 `skills/online_search/`（与 `knowledge-collection` 同级），源码版运行（Python 3.12 + venv），
+`online-search` 是知识采集技能的第二检索信源（与内置路由层 [agent-reach.md](agent-reach.md) 并列），封装 SearXNG 249 引擎元搜索内核。
+技能本体位于 `knowledge-collection/references/online-search/`，源码版运行（Python 3.12 + venv），
 一次调用聚合多引擎结果并输出单个 JSON。**只负责发现 URL，不得直接抓取网页；取内容一律委派来源执行器（公共网页 `bycli`）。**
 
 
 
-## 调用方式
+## knowledge-collection 调用方式
 
 ```bash
-cd skills/online_search/scripts
-.venv/bin/python searxng_cli.py "查询词" [--category <类别>] [--engines a,b] [--time-range week] [--language zh-CN] [--max-results N] [--timeout 15]
+node scripts/knowledge-collection.mjs public-discover --session-dir <会话目录> --query "查询词" \
+  [--category <类别>] [--language zh-CN] [--pageno 1] [--max-results N] [--timeout 15] \
+  [--tiers 1,2,3] [--limit N]
 ```
+
+该命令在 SearXNG 检索时无条件并行运行 `hot_discovery`，并把 SearXNG category 传为热度发现维度；
+`hot_discovery` 会额外补充 `general`。任一通道失败时保留另一通道的快照与候选，只有两者均失败才判定本次发现失败。
+直接运行 `online-search/scripts/searxng_cli.py` 仅适用于独立调试，不会自动启动热度发现。
 
 - 默认按 `--category` 使用内置直连白名单（`searxng_pack_settings.yml` 的 `cli.default_engines`，120 个直连可用引擎），避免超时拖累；
 - 白名单外的海外头部引擎（google/duckduckgo/wikipedia/brave 等）在无代理直连环境下不可用（2026-08-15 复测：50 个跳过引擎 47 个不可用，
@@ -31,10 +36,10 @@ cd skills/online_search/scripts
 
 ## 检索源分工（与内置路由层）
 
-- **时间敏感**（周报/新闻/最新动态）：优先 `online_search --category news|general --time-range week|day`；
-- **学术/标准**：优先 `online_search --category science`（不带 time-range）；
+- **时间敏感**（周报/新闻/最新动态）：优先 `online-search --category news|general --time-range week|day`；
+- **学术/标准**：优先 `online-search --category science`（不带 time-range）；
 - **英文技术/代码**：优先内置路由层的 Exa（擅长英文技术文档与代码上下文）与 `gh`（搜 GitHub）；
-- **通用发现**：两个信源各跑一次，同一 query 多引擎交叉验证；
+- **通用发现**：使用 `public-discover`，它会并行运行两个信源并生成合并快照；
 - **取内容**：一律委派来源执行器，公共网页按 [agent-reach.md](agent-reach.md) → `bycli web read --url <URL> --stdout`。
 
 ## 实测引擎可用性（2026-08-15 直连探测）

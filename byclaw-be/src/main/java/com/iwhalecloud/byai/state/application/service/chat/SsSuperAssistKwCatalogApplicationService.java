@@ -10,6 +10,7 @@ import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.state.application.service.dataset.DatasetApplicationService;
 import com.iwhalecloud.byai.state.domain.chat.dto.CustomFilenameMultipartFile;
 import java.io.IOException;
+import java.util.Collections;
 import java.util.List;
 import com.iwhalecloud.byai.state.domain.assitsant.service.SuperassistService;
 import com.iwhalecloud.byai.state.domain.chat.dto.FileUploadDto;
@@ -62,7 +63,8 @@ public class SsSuperAssistKwCatalogApplicationService {
         // 步骤1: 获取用户的个人对话知识库ID
         Long resourceId = this.getDatasetId();
 
-        return datasetApplicationService.uploadFiles(files, resourceId, null, null);
+        return datasetApplicationService.uploadFiles(files, resourceId, null, null, null, Boolean.FALSE, false,
+            Collections.emptyMap());
 
     }
 

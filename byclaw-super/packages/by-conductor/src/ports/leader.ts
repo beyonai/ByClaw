@@ -55,8 +55,12 @@ export interface LeaderRunInput {
   onCheckpoint?(checkpoint: PiSessionCheckpoint): Promise<void> | void;
   /** 执行一次经过授权校验的 Agent 委派。 */
   delegate(input: {
+    /** Pi 工具调用 ID；用于任务计划自动同步的幂等键。 */
+    toolCallId: string;
     agentId: string;
     task: string;
+    /** 活动任务计划中的任务位置；存在活动计划时必填。 */
+    taskPosition?: number;
     expectedOutput?: string;
     /** 选中要随委派透传的附件 ID；undefined=全部，[]=不带，未知 ID 会被拒绝。 */
     attachmentIds?: readonly string[];

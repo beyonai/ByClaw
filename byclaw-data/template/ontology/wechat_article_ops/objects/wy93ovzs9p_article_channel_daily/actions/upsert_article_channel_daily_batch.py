@@ -36,9 +36,21 @@ async def execute(params: dict) -> dict:
     article_id = params.get("article_id")
     stat_date_raw = params.get("stat_date")
     metric_mode = params.get("metric_mode")
-    items = params.get("items") or []
-    if not article_id or not stat_date_raw or not items:
+    raw_items = params.get("items") or []
+    if not article_id or not stat_date_raw or not raw_items:
         return _error("INVALID_ARGUMENT", "article_id、stat_date和items不能为空")
+    items = raw_items
+    if isinstance(raw_items, str):
+        try:
+            items = _json.loads(raw_items)
+        except (TypeError, ValueError):
+            items = None
+    if not isinstance(items, list):
+        return _error("INVALID_ITEM", "items必须是JSON数组字符串或对象列表")
+    invalid_items = [index for index, item in enumerate(items)
+                     if not isinstance(item, dict)]
+    if invalid_items:
+        return _error("INVALID_ITEM", "items数组中的每一项必须是对象", invalid_items)
     if metric_mode not in ("cumulative", "daily_increment"):
         return _error("INVALID_METRIC_MODE", "metric_mode仅支持cumulative或daily_increment")
     art = await _safe_select_by_id(wy93ovzs9p_article_mapper.select_by_id, article_id)

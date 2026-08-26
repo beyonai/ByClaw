@@ -49,7 +49,13 @@ public class ChatStreamRuntimeCoordinator {
         outputStreamManager.putContext(sessionId, ctx);
 
         // 启动监听器：使用 XREAD 轮询，从锚点之后读取，避免消费旧消息。
-        sessionStreamManager.startSessionListener(sessionId, ctx);
+        if (!sessionStreamManager.startSessionListener(sessionId, ctx)) {
+            ctx.sendByFrameworkMsgOnly = true;
+            log.info("会话 listener 已由其他实例持有，本次只发送 Gateway 消息, sessionId: {}, traceId: {}",
+                sessionId, ctx.traceId);
+            outputStreamManager.removeContext(sessionId);
+            return false;
+        }
 
         // 记录运行态，用于重开页面恢复、停止和避免重复监听。
         runningOutputStreamRegistry.markRunning(ctx);

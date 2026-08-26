@@ -10,23 +10,22 @@ REPO_ROOT = Path(__file__).parents[3]
 INITDB_DML = REPO_ROOT / "deploy" / "middleware" / "initdb" / "04_dml.sql"
 V030_DML = REPO_ROOT / "deploy" / "migrations" / "versions" / "V0.3.0" / "V0.3.0__dml.sql"
 V031_DML = REPO_ROOT / "deploy" / "migrations" / "versions" / "V0.3.1" / "V0.3.1__dml.sql"
+V051_DML = REPO_ROOT / "deploy" / "migrations" / "versions" / "V0.5.1" / "V0.5.1__dml.sql"
 META_PROMPT_SERVICE = (
     REPO_ROOT
     / "byclaw-be"
     / "src/main/java/com/iwhalecloud/byai/manager/application/service/digitemploy/MetaPromptService.java"
 )
 DESCRIPTION = (
-    "Use when the goal is to COLLECT and keep material rather than just get an answer - collect, crawl, scrape, "
-    "batch-search, archive, ingest, or organize content from internet or enterprise sources, or store "
-    "already-collected files in a knowledge base. This is the collection orchestrator and owns collection artifacts, "
-    "post-processing, and knowledge-base ingestion; prefer it over By-Reach whenever collection intent is explicit, "
-    "even for a single page or result."
+    "Use when a user explicitly asks to collect, crawl, batch-search, or archive articles, documents, URLs, or "
+    "files from public or enterprise sources. Produces traceable collection artifacts and validated sanitized "
+    "Markdown for handoff; does not perform knowledge-base ingest, knowledge organization, or downstream actions."
 )
 INTERFACE = {
     "display_name": "知识采集",
-    "short_description": "跨互联网与企业平台采集、归档资料，并衔接知识库入库或知识整理",
+    "short_description": "跨互联网与企业平台采集、归档资料，并交付规范化正文",
     "default_prompt": (
-        "Use $knowledge-collection to collect these sources and prepare the results for my chosen post-processing action."
+        "Use $knowledge-collection to collect these sources and return validated sanitized items for downstream agents."
     ),
 }
 OPENAI_YAML = f'''interface:
@@ -35,7 +34,6 @@ OPENAI_YAML = f'''interface:
   default_prompt: "{INTERFACE["default_prompt"]}"
 '''
 CHILD_SKILLS = {
-    "agent-reach/SKILL.md": "agent-reach",
     "bycli/SKILL.md": "bycli",
     "dws/SKILL.md": "dws",
     "fws/SKILL.md": "fws",
@@ -178,65 +176,57 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         self.assertEqual("knowledge-collection", frontmatter["name"])
         self.assertEqual(DESCRIPTION, frontmatter["description"])
 
-    def test_skill_defines_collection_orchestration_contract(self):
+    def test_skill_defines_collection_only_orchestration_contract(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
 
-        self.assertIn("查询 vs 采集", skill)
-        self.assertIn("加载并遵循 `agent-reach` skill", skill)
-        self.assertIn("加载并遵循 `bycli` skill", skill)
-        self.assertIn("加载并遵循 `dws` skill", skill)
-        self.assertIn("加载并遵循 `fws` skill", skill)
-        self.assertIn("加载并遵循 `wecomcli` skill", skill)
-        self.assertIn("来源执行器不得反向加载 `knowledge-collection`", skill)
-        self.assertIn("委派采集模式优先于来源执行器的通用采集后处理规则", skill)
-        self.assertIn("来源执行器只负责采集并返回结果", skill)
-        self.assertIn("来源执行器不得询问 `入库 / 知识整理 / 跳过`", skill)
-        self.assertEqual(1, skill.count("采集结果只选择一种后处理：入库 / 知识整理 / 跳过"))
-        self.assertIn("每次后处理运行只能执行一种操作", skill)
-        self.assertIn("用户已明确指定外部消费", skill)
+        for phrase in (
+            "Create or load a session before discovery",
+            "Delegate retrieval to the selected source executor",
+            "Register only actual artifacts through `collect`",
+            "Use `status` before delivery",
+            "采集完成后停止",
+            "`sanitized/items/*.md`",
+            "不得调用 `by-knowledge-manager`",
+            "不得调用 `knowledge-organizer`",
+            "不得询问 `入库 / 知识整理 / 跳过`",
+        ):
+            self.assertIn(phrase, skill)
+
+        for forbidden in (
+            "[knowledge-ingest.md]",
+            "[post-processing.md]",
+            "record the per-item result with `run`",
+            "call `report` before cleanup",
+        ):
+            self.assertNotIn(forbidden, skill)
 
     def test_agent_reach_backends_share_one_collection_contract(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
 
-        self.assertIn("**取内容前先读这一条**：采集编排器自身永不取内容", skill)
-        self.assertIn("该结果作废，按规范流程重新采集", skill)
-        self.assertIn("不得因「一个链接」「内容公开可读」「直接抓更快」跳过路由", skill)
-        self.assertIn("采集编排器自身不取内容，取内容一律委派来源执行器", skill)
+        self.assertIn("it never bypasses source executors with direct HTTP clients", skill)
         self.assertIn(
-            "不得使用 `web_fetch`、`curl`、`wget`、`requests` 或其他直接 HTTP 客户端绕过来源执行器",
+            "Do not use `web_fetch`, `curl`, `wget`, `requests`, or another direct HTTP client to bypass it",
             skill,
         )
-        self.assertIn("By-Reach 的首选执行器与 `bycli` 兜底返回的结果", skill)
-        self.assertIn("必须统一进入同一套 collection contract", skill)
-        self.assertIn("不得按执行后端分叉产物协议", skill)
+        self.assertIn("Preserve provenance", skill)
+        self.assertIn("HTTP(S) duplicates", skill)
 
     def test_explicit_collection_intent_overrides_item_count(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
 
-        self.assertIn("显式采集意图优先于页面或条目数量", skill)
-        self.assertIn("只有不存在显式采集意图时", skill)
-        self.assertIn("单个事实、单个页面", skill)
-
-    def test_bycli_route_is_selected_by_router_or_explicit_execution_intent(self):
-        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
-
-        self.assertIn("By-Reach 选择 `bycli`", skill)
-        self.assertIn("用户显式要求 byCLI、浏览器或 Adapter", skill)
-        self.assertNotIn("浏览器或 adapter 返回的结果：", skill)
+        self.assertIn("explicitly asks to collect", skill)
+        self.assertIn("A normal question, a single fact lookup, opening one page, or login is not collection work", skill)
 
     def test_owned_weixin_backend_collection_routes_directly_to_bycli(self):
-        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        routing = (SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8")
+        bycli = (SKILLS_ROOT / "bycli" / "SKILL.md").read_text(encoding="utf-8")
+        weixin = (SKILLS_ROOT / "bycli" / "references" / "weixin.md").read_text(encoding="utf-8")
 
         for phrase in (
-            "我的公众号",
-            "后台数据",
-            "`bycli` skill",
             "`published`",
             "`download-publish-data`",
-            "不得询问公众号名称、原始 ID 或“数据明细”的含义",
-            "登录、验证码或环境验证",
         ):
-            self.assertIn(phrase, skill)
+            self.assertIn(phrase, f"{routing}\n{bycli}\n{weixin}")
 
     def test_skill_has_exact_openclaw_ui_metadata(self):
         metadata_text = (SKILL_ROOT / "agents" / "openai.yaml").read_text(encoding="utf-8")
@@ -276,14 +266,14 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         ):
             self.assertIn(phrase, bridge)
         self.assertNotIn("bycli remains the single collection entry", bridge)
-        self.assertIn(f"]({relative_path})", skill)
+        self.assertIn("](references/sources/)", skill)
         self.assertTrue(bridge_path.is_file(), relative_path)
 
     def test_agent_reach_enterprise_collection_routes_to_source_bridges(self):
         collection_skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
-        agent_reach = (SKILLS_ROOT / "agent-reach" / "SKILL.md").read_text(encoding="utf-8")
+        agent_reach = (SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8")
 
-        self.assertIn("企业来源的采集、归档、批量搜索或入库请求", agent_reach)
+        self.assertIn("企业来源", agent_reach)
         self.assertIn("采集编排器 `knowledge-collection`", agent_reach)
         self.assertIn("不得作为公共互联网任务交给 `bycli`", agent_reach)
 
@@ -294,7 +284,7 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         for relative_path, child_skill in bridges.items():
             with self.subTest(relative_path=relative_path):
                 bridge = (SKILL_ROOT / relative_path).read_text(encoding="utf-8")
-                self.assertIn(f"]({relative_path})", collection_skill)
+                self.assertIn("](references/sources/)", collection_skill)
                 self.assertIn("委派采集模式", bridge)
                 self.assertIn(child_skill, bridge)
                 self.assertIn("`knowledge-collection` 负责", bridge)
@@ -356,9 +346,8 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "允许为空数组",
             "sourceSkill",
             "rawArtifacts",
-            "postProcessing",
-            "retention",
-            "只读兼容旧的扁平",
+            "materialization",
+            "安全降级为 `pending`",
         ):
             self.assertIn(phrase, contract)
 
@@ -376,210 +365,89 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         self.assertIn("metadata.json", contract)
         self.assertIn("不得写入 `collection-result.json` 顶层", contract)
 
-    def test_post_processing_defines_storage_preview_and_terminal_behavior(self):
-        processing = (SKILL_ROOT / "references" / "post-processing.md").read_text(encoding="utf-8")
-
-        for phrase in (
-            "/by/.sessions/<sessionId>/<collectionRunName>/<timestamp>/",
-            ".by-sessions",
-            "storageFallback",
-            "自动持久化",
-            "最多预存 10 个正文",
-            "可点击预览",
-            "partial",
-            "入库 / 知识整理 / 跳过",
-            "互斥",
-            "原始执行器",
-            "补采",
-            "入库确认",
-            "knowledge-organizer",
-            "audit_required=true",
-            "用户要求保留",
-            "失败或跳过时保留",
-        ):
-            self.assertIn(phrase, processing)
-
-    def test_post_processing_cleans_up_after_successful_external_consumption(self):
-        processing = (SKILL_ROOT / "references" / "post-processing.md").read_text(encoding="utf-8")
-
-        for phrase in (
-            "外部消费",
-            "`sanitized/items/*.md`",
-            "仅打开、读取或预览",
-            "不触发清理",
-            "全部成功",
-            "默认清理",
-            "失败或结果不明确时保留",
-            "部分成功时只删除成功文章的工作副本",
-            "不再询问 `入库 / 知识整理 / 跳过`",
-        ):
-            self.assertIn(phrase, processing)
-
-    def test_post_processing_defines_resumable_partial_cleanup_state_machine(self):
-        processing = (SKILL_ROOT / "references" / "post-processing.md").read_text(encoding="utf-8")
-
-        for phrase in (
-            "每次后处理运行只能执行一种操作",
-            "显式外部消费",
-            "`sanitized/items/*.md`",
-            "不得回退使用 `markdown/*.md`",
-            "`success`、`failed`、`pending` 或 `unknown`",
-            "operation + target",
-            "全部文章重新执行",
-            "仅失败/待处理文章",
-            "只删除成功文章的工作副本",
-            "保留共享 `raw/`",
-            "未选文章",
-            "cleanupStatus",
-            "knowledge-collection-post-processing.mjs",
-            "requiresGlobalStageRetry",
-            "只重试全局步骤",
-            "已有 run 的 operation、target 与 selection 不可改变",
-        ):
-            self.assertIn(phrase, processing)
-
-    def test_skip_keeps_the_session_without_creating_a_downstream_run(self):
-        processing = (SKILL_ROOT / "references" / "post-processing.md").read_text(encoding="utf-8")
-
-        for phrase in (
-            "选择跳过时",
-            "不创建 ingest、organize 或 external run",
-            "不调用 cleanup",
-            "不删除任何会话产物",
-            "结束默认三选一流程",
-        ):
-            self.assertIn(phrase, processing)
-
-    def test_ingest_executor_is_discoverable_and_requires_an_explicit_target(self):
-        relative_path = "references/knowledge-ingest.md"
+    def test_collection_only_delivery_boundary(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
-        ingest_path = SKILL_ROOT / relative_path
-        ingest = ingest_path.read_text(encoding="utf-8")
+        delivery = (SKILL_ROOT / "references" / "delivery.md").read_text(encoding="utf-8")
+        manifest = json.loads((SKILL_ROOT / "references" / "manifest.json").read_text(encoding="utf-8"))
 
-        self.assertIn(f"]({relative_path})", skill)
-        self.assertTrue(ingest_path.is_file(), relative_path)
         for phrase in (
-            "scripts/ingest.mjs",
-            "list-kb",
-            "normalize",
-            "ingest",
-            "upload-doc",
-            "--collection-result-file",
-            "--bycli-json-file",
-            "--knowledge-base-resource-id",
-            "--directory-path",
-            "by-knowledge-manager",
-            "不得静默选择",
-            "明确提供",
-            "确认目标",
-            "仅入库用户选中的范围",
-            "入库与知识整理在同一次后处理运行中互斥",
-            "选择 `入库`",
-            "`ingest` 与 `upload-doc` 执行前",
-            "默认 `/` 也必须展示",
-            "获得用户明确确认",
+            "采集完成后停止",
             "`sanitized/items/*.md`",
-            "不得使用 `markdown/*.md`",
-            "build 请求",
-            "逐篇",
+            "下游 Agent",
+            "不得调用 `by-knowledge-manager`",
+            "不得调用 `knowledge-organizer`",
+            "不得询问 `入库 / 知识整理 / 跳过`",
         ):
-            self.assertIn(phrase, ingest)
+            self.assertIn(phrase, f"{skill}\n{delivery}")
 
-        ingest_section = ingest.split("- `ingest`：", 1)[1].split("- `upload-doc`：", 1)[0]
-        upload_doc_section = ingest.split("- `upload-doc`：", 1)[1]
-        self.assertIn("--knowledge-base-resource-id", ingest_section)
-        self.assertIn("--knowledge-base-id", ingest_section)
-        self.assertIn("--knowledge-base-resource-id", upload_doc_section)
-        self.assertNotIn("--knowledge-base-id", upload_doc_section)
+        indexed_paths = {
+            item["path"] for key in ("skills", "references") for item in manifest.get(key, [])
+        }
+        self.assertIn("delivery.md", indexed_paths)
+        self.assertNotIn("post-processing.md", indexed_paths)
+        self.assertNotIn("knowledge-ingest.md", indexed_paths)
+        self.assertFalse((SKILL_ROOT / "references" / "post-processing.md").exists())
+        self.assertFalse((SKILL_ROOT / "references" / "knowledge-ingest.md").exists())
 
-        self.assertNotIn("token", ingest.lower())
-        self.assertNotIn("cookie", ingest.lower())
-
-    def test_skill_main_entry_exposes_closed_loop_execution_order(self):
+    def test_skill_main_entry_stops_after_delivery(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
 
         for phrase in (
-            "建立或加载正式会话",
             "`init`",
-            "`inspect`",
-            "`itemResults`",
-            "`run`",
-            "`cleanup`",
-            "不得直接修改正式 metadata",
+            "`collect`",
+            "`status`",
+            "采集完成后停止",
+            "下游 Agent",
         ):
             self.assertIn(phrase, skill)
 
-    def test_post_processing_state_helper_is_discoverable(self):
-        script = SKILL_ROOT / "scripts" / "collection-state.mjs"
-        cli = SKILL_ROOT / "scripts" / "knowledge-collection.mjs"
-        processing = (SKILL_ROOT / "references" / "post-processing.md").read_text(encoding="utf-8")
-
-        self.assertTrue(script.is_file())
-        self.assertTrue(cli.is_file())
-        for command in ("inspect", "collect", "run", "cleanup", "unlock-stale"):
-            self.assertIn(command, script.read_text(encoding="utf-8"))
-        self.assertIn("scripts/collection-state.mjs", processing)
-        for phrase in (
-            '"schemaVersion": "1.0"',
-            "discardUnselectedConfirmed",
-            "superseded",
-            ".post-processing-inputs/",
-            '"kind": "knowledge-base"',
-            '"kind": "knowledge-organization"',
-            '"kind": "external"',
-            "命令成功",
-            "命令失败",
-            "pid",
-            "ownerId",
-            "不能仅凭锁龄",
-        ):
-            self.assertIn(phrase, processing)
-
-    def test_post_processing_documents_post_review_recovery_contract(self):
-        contract = (SKILL_ROOT / "references" / "collection-contract.md").read_text(encoding="utf-8")
-        processing = (SKILL_ROOT / "references" / "post-processing.md").read_text(encoding="utf-8")
-        combined = f"{contract}\n{processing}"
-
-        for phrase in (
-            "pendingArtifactCleanup",
-            "安全降级为 `pending`",
-            "`sourceSkill + sourceUrl`",
-            "`skipped-retention`",
-            "`build-success`",
-            "`selection.mode` 只能是 `all` 或 `items`",
-            "脚本重新计算并校验 `sessionStatus`",
-            "锁内容写入失败",
-            "stale-lock 回收会在重命名前后再次检查锁内容",
-        ):
-            self.assertIn(phrase, combined)
+    def test_v051_updates_installed_collection_descriptions(self):
+        self.assertTrue(V051_DML.is_file())
+        upgrade = V051_DML.read_text(encoding="utf-8")
+        self.assertIn("SET search_path TO byai", upgrade)
+        self.assertIn("resource_code = 'knowledge-collection'", upgrade)
+        self.assertIn("规范化正文交付", upgrade)
+        self.assertIn("validated sanitized-content handoff", upgrade)
+        self.assertNotIn("知识库入库或知识整理", upgrade)
 
     def test_bycli_is_an_executor_when_delegated_by_knowledge_collection(self):
         bycli = (SKILLS_ROOT / "bycli" / "SKILL.md").read_text(encoding="utf-8")
 
         for phrase in (
             "浏览器与 Adapter 执行层",
-            "`knowledge-collection` 负责统一持久化、产物协议、后处理与入库或知识整理",
+            "`knowledge-collection` 只负责统一持久化、产物协议与采集交付",
+            "任何下游处理由根 Agent 另行委派",
             "网站执行器只执行或发现、修复 Adapter",
             "不得反向加载 `knowledge-collection`",
             "是否把刚才的获取过程保存成一个专用 adapter",
         ):
             self.assertIn(phrase, bycli)
 
+    def test_collection_waits_for_bycli_bridge_recovery_before_reporting_user_action(self):
+        knowledge = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+
+        for phrase in (
+            "初次 `BROWSER_CONNECT`",
+            "不得直接要求用户打开 Chrome",
+            "最终 `bridge_unavailable`",
+        ):
+            self.assertIn(phrase, knowledge)
+
     def test_delegated_adapter_candidate_does_not_create_a_second_question(self):
         bycli = (SKILLS_ROOT / "bycli" / "SKILL.md").read_text(encoding="utf-8")
-        processing = (SKILL_ROOT / "references" / "post-processing.md").read_text(encoding="utf-8")
+        delivery = (SKILL_ROOT / "references" / "delivery.md").read_text(encoding="utf-8")
 
         self.assertIn("`adapterCandidate`", bycli)
         self.assertIn("不得直接询问用户是否保存 Adapter", bycli)
         self.assertIn("直接查询所有者（根 Agent）", bycli)
-        self.assertIn("`adapterCandidate`", processing)
-        self.assertIn("不得追加第二个选择问题", processing)
+        self.assertIn("`adapterCandidate`", delivery)
+        self.assertIn("非阻塞建议", delivery)
 
     def test_orchestration_documents_use_named_actors(self):
         paths = (
             SKILL_ROOT / "SKILL.md",
-            SKILL_ROOT / "references" / "post-processing.md",
-            SKILL_ROOT / "references" / "knowledge-ingest.md",
+            SKILL_ROOT / "references" / "delivery.md",
+            SKILL_ROOT / "references" / "agent-reach.md",
             SKILL_ROOT / "references" / "sources" / "dingtalk-dws.md",
         )
         combined = "\n".join(path.read_text(encoding="utf-8") for path in paths)
@@ -596,15 +464,15 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
 
     def test_cross_skill_direct_query_and_explicit_collection_have_distinct_owners(self):
         knowledge = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
-        agent_reach = (SKILLS_ROOT / "agent-reach" / "SKILL.md").read_text(encoding="utf-8")
+        agent_reach = (SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8")
         bycli = (SKILLS_ROOT / "bycli" / "SKILL.md").read_text(encoding="utf-8")
-        processing = (SKILL_ROOT / "references" / "post-processing.md").read_text(encoding="utf-8")
+        delivery = (SKILL_ROOT / "references" / "delivery.md").read_text(encoding="utf-8")
 
-        self.assertIn("只有不存在显式采集意图时", knowledge)
-        self.assertIn("直接查询时由根 Agent", agent_reach)
-        self.assertIn("委派采集时由采集编排器", agent_reach)
+        self.assertIn("explicit collection outcome", knowledge)
+        self.assertIn("直接查询", agent_reach)
+        self.assertIn("采集编排器", agent_reach)
         self.assertIn("委派采集模式下，不直接提问", bycli)
-        self.assertEqual(1, processing.count("只询问一次：`入库 / 知识整理 / 跳过`"))
+        self.assertIn("采集完成后停止", delivery)
 
     def test_bycli_no_longer_owns_collection_orchestration(self):
         bycli = (SKILLS_ROOT / "bycli" / "SKILL.md").read_text(encoding="utf-8")
@@ -669,7 +537,7 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         downloads = markdown_section(weixin, "Published-data spreadsheet downloads")
         login = markdown_section(weixin, "Login and verification gate")
 
-        self.assertIn("@sovovs/bycli` 2.1.25", weixin)
+        self.assertIn("@sovovs/bycli` 2.1.35", weixin)
         self.assertIn("Explicit account identity or account-history intent starts with `accounts`", discovery)
         self.assertIn("Article-title or topic intent starts with `sougousearch`", discovery)
         self.assertIn("reinterpret it as topic intent", discovery)
@@ -754,8 +622,8 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "Only after `accounts` proves one unique nickname-to-`fakeid` binding",
             weixin,
         )
-        self.assertIn("Verified for byCLI 2.1.25", login)
-        self.assertNotIn("2.1.25 and later", login)
+        self.assertIn("Verified for byCLI 2.1.35", login)
+        self.assertNotIn("2.1.35 and later", login)
         self.assertIn("`create-draft` session failures return `AUTH_REQUIRED`", login)
         self.assertIn(
             "An authentication outcome from an already-consumed diagnostic rerun follows terminal priority 1",
@@ -781,23 +649,19 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "`/wxamp/`",
             "Mini Program",
             "Official Account",
-            "Only `status: draft saved` confirms success",
+            "Success statuses are `draft saved`",
             "title substrings are not matches",
             "readable, non-empty regular-file validation",
-            "oversized values return `ARGUMENT` before browser navigation",
-            "failure to confirm that requested cover returns `COMMAND_EXEC`",
+            "oversized values return `ARGUMENT` before mode dispatch",
+            "cover-confirmation failure returns `COMMAND_EXEC`",
         ):
             self.assertIn(phrase, weixin)
 
     def test_candidate_article_requires_user_confirmation_before_download(self):
-        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
         weixin = (SKILLS_ROOT / "bycli" / "references" / "weixin.md").read_text(encoding="utf-8")
 
-        self.assertIn("逐字匹配", skill)
-        self.assertIn("高度相关候选", skill)
-        for text in (skill, weixin):
-            self.assertIn("必须先询问用户确认", text)
-            self.assertIn("未确认不得下载", text)
+        self.assertIn("必须先询问用户确认", weixin)
+        self.assertIn("未确认不得下载", weixin)
         self.assertNotIn("status: invalid URL", weixin)
         self.assertNotIn("save attempted, check browser to confirm", weixin)
 

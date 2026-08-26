@@ -5,7 +5,6 @@ import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.iwhaleai.byai.framework.client.GatewayClient;
 import com.iwhalecloud.byai.common.constants.chat.ConversationObjectType;
-import com.iwhalecloud.byai.common.constants.resource.WorkerAgentType;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
@@ -14,21 +13,15 @@ import com.iwhalecloud.byai.common.message.entity.ByaiMessageRelObjDto;
 import com.iwhalecloud.byai.common.message.service.ByaiMessageHotService;
 import com.iwhalecloud.byai.common.message.service.ByaiMessageRelObjService;
 import com.iwhalecloud.byai.common.storage.model.StorageLocation;
-import com.iwhalecloud.byai.common.util.DateUtils;
-import com.iwhalecloud.byai.common.util.OkHttpUtil;
 import com.iwhalecloud.byai.common.util.StringUtil;
-import com.iwhalecloud.byai.gateway.sandbox.service.SandboxEndpointService;
 import com.iwhalecloud.byai.manager.domain.customer.service.FilesService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDigEmployeeService;
-import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.dto.resource.ResourceExtDigEmployeeDto;
 import com.iwhalecloud.byai.manager.dto.resource.UploadItem;
 import com.iwhalecloud.byai.manager.dto.session.SessionUploadResult;
 import com.iwhalecloud.byai.manager.entity.file.Files;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtDigEmployee;
-import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
-import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.qo.resource.DigEmployeeExtQo;
 import com.iwhalecloud.byai.state.common.dto.AnswerDelta;
 import com.iwhalecloud.byai.state.common.dto.MessageStructDto;
@@ -69,10 +62,7 @@ import org.springframework.web.multipart.MultipartFile;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
-import java.util.Date;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 /**
  * @author he.duming
@@ -94,9 +84,6 @@ public class AssistantChatApplicationService {
 
     @Autowired
     private FilesService filesService;
-
-    @Autowired
-    private SsResourceService ssResourceService;
 
     @Autowired
     private ConversationStoragePathResolver conversationStoragePathResolver;
@@ -163,8 +150,7 @@ public class AssistantChatApplicationService {
         }
         try {
             return JSON.parseObject(statusValue);
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             throw new BdpRuntimeException("session status is not valid json", e);
         }
     }
@@ -254,8 +240,7 @@ public class AssistantChatApplicationService {
         try {
             Long modelAnswerMessageId = TraceIdCodec.decode(stopChatDto.getTraceId()).getModelAnswerMessageId();
             return modelAnswerMessageId == null ? null : String.valueOf(modelAnswerMessageId);
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             log.warn("stopChat traceId 无法解析为 Gateway messageId, traceId={}", stopChatDto.getTraceId());
             return null;
         }
@@ -270,8 +255,7 @@ public class AssistantChatApplicationService {
         }
         try {
             return TraceIdCodec.decode(stopChatDto.getTraceId()).getModelAnswerMessageId();
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             return null;
         }
     }
@@ -305,8 +289,7 @@ public class AssistantChatApplicationService {
                     sentinel.put("event_type", ChatProcessContext.STOP_SENTINEL_EVENT);
                     sentinel.put("session_id", String.valueOf(sessionId));
                     ctx.getGatewayEventQueue().offer(sentinel);
-                }
-                else {
+                } else {
                     // 同 pod 但无队列（如 WebSocket）：直接落库收尾。
                     scriptService.flushOnStop(ctx);
                 }
@@ -318,13 +301,15 @@ public class AssistantChatApplicationService {
                 log.info("stopChat 无可落库内容（本 pod 无上下文且无快照）, sessionId: {}, messageId: {}", sessionId,
                     cleanupMessageId);
             }
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             log.error("stopChat 落库已堆积消息失败, sessionId: {}, messageId: {}", sessionId,
                 cleanupMessageId, e);
         }
-        if (sessionStreamManager != null) {
-            sessionStreamManager.stopSessionListener(String.valueOf(stopChatDto.getSessionId()));
+        // 只在本 pod 确实持有该 session 的 listener 时才停止。重启后前端补发的 STOP_CHAT 会落到
+        // 没有任何上下文的新 pod 上，此时停止动作既无对象也会连带触发运行态清理，
+        // 反而破坏重启恢复扫描赖以接管会话的运行态。
+        if (sessionStreamManager != null && sessionStreamManager.isSessionListenerActive(String.valueOf(sessionId))) {
+            sessionStreamManager.stopSessionListener(String.valueOf(sessionId));
         }
     }
 
@@ -332,13 +317,13 @@ public class AssistantChatApplicationService {
      * 文件上传
      *
      * @param multipartFiles 上传的文件
-     * @param sessionId 会话
-     * @param sessionType 会话类型
-     * @param agentId 数字员工标志
+     * @param sessionId      会话
+     * @param sessionType    会话类型
+     * @param agentId        数字员工标志
      * @return UploadResult
      */
     public SessionUploadResult uploadFiles(MultipartFile[] multipartFiles, Long sessionId, String sessionType,
-        Long agentId) throws Exception {
+                                           Long agentId) throws Exception {
 
         // 检查文件是否合法
         this.checkUploadInfo(multipartFiles, agentId);
@@ -356,8 +341,7 @@ public class AssistantChatApplicationService {
 
             sessionId = session.getSessionId();
             sessionTitleService.markInitialTitlePending(sessionId);
-        }
-        else {
+        } else {
             session = sessionService.findById(sessionId);
         }
 
@@ -368,14 +352,30 @@ public class AssistantChatApplicationService {
             sessionUploadResult.setSessionName(session.getSessionName());
         }
 
+        Map<String, Long> fileNameCountMap = new HashMap<String, Long>();
+
         for (MultipartFile multipartFile : multipartFiles) {
 
             // 创建文件上传
             String originalFilename = multipartFile.getOriginalFilename();
+            String convertFileName = multipartFile.getOriginalFilename();
+
+
+            long uploadCount = fileNameCountMap.getOrDefault(originalFilename, 0L);
+            long dbCount = filesService.countSessionFile(sessionId, originalFilename);
+
+            // 统计次数，如果已经上传过一次，防止同名覆盖，a.jpg将变成a(1).jpg
+            long duplicateCount = uploadCount + dbCount;
+            if (duplicateCount >= 1) {
+                convertFileName = this.renameDuplicateFileName(originalFilename, duplicateCount);
+            }
+
+            //上传次数加1
+            fileNameCountMap.put(originalFilename, uploadCount + 1);
 
             String userCode = CurrentUserHolder.getCurrentUserCode();
             StorageLocation location = conversationStoragePathResolver.conversationFile(userCode,
-                String.valueOf(sessionId), originalFilename);
+                String.valueOf(sessionId), convertFileName);
 
             byte[] bytes = multipartFile.getBytes();
             String contentType = multipartFile.getContentType();
@@ -387,12 +387,12 @@ public class AssistantChatApplicationService {
                 location.getPath());
 
             // 记录文件信息
-            Files byaiFiles = filesService.createUploadFile(originalFilename, contentType, null, -1L, sessionId,
+            Files byaiFiles = filesService.createUploadFile(originalFilename, convertFileName, contentType, null, -1L, sessionId,
                 fileUrl);
 
             UploadItem uploadItem = new UploadItem();
             uploadItem.setFileId(byaiFiles.getFileId());
-            uploadItem.setFileName(byaiFiles.getFileName());
+            uploadItem.setFileName(byaiFiles.getConvertFileName());
             uploadItem.setFilePath(conversationStoragePathResolver.normalizeDisplayFilePath(location.getPath()));
             uploadItem.setFileUrl(fileUrl);
             sessionUploadResult.getUploadItems().add(uploadItem);
@@ -402,9 +402,42 @@ public class AssistantChatApplicationService {
     }
 
     /**
+     * 根据原始文件名和计数器，生成重命名后的文件名
+     *
+     * @param fileName       原始文件名 例：demo.txt
+     * @param duplicateCount 计数器，0=不追加；1生成demo(1).txt；2生成demo(2).txt
+     * @return 拼接完成的文件名
+     */
+    public String renameDuplicateFileName(String fileName, Long duplicateCount) {
+
+        if (StringUtil.isEmpty(fileName)) {
+            return "default";
+        }
+
+        if (duplicateCount <= 0) {
+            return fileName;
+        }
+
+        int dotIndex = fileName.lastIndexOf('.');
+
+        String baseName;
+        String suffix;
+
+        if (dotIndex > 0) {
+            baseName = fileName.substring(0, dotIndex);
+            suffix = fileName.substring(dotIndex);
+        } else {
+            baseName = fileName;
+            suffix = "";
+        }
+        return String.format("%s(%d)%s", baseName, duplicateCount, suffix);
+    }
+
+
+    /**
      * 检查文件是否合规
      *
-     * @param files 文件信息
+     * @param files   文件信息
      * @param agentId 智能体标识
      */
     @SuppressWarnings("PMD.UnusedPrivateMethod")
@@ -486,8 +519,7 @@ public class AssistantChatApplicationService {
         if ("inferLog".equalsIgnoreCase(messageStructDto.getUpdateField())) {
             String inferLog = byaiMessage.getInferLog();
             byaiMessage.setInferLog(this.replaceContent(inferLog, messageStructDto));
-        }
-        else {
+        } else {
             String messageStruct = byaiMessage.getMessageStruct();
             byaiMessage.setMessageStruct(this.replaceContent(messageStruct, messageStructDto));
         }
@@ -514,8 +546,7 @@ public class AssistantChatApplicationService {
 
         if ("inferLog".equalsIgnoreCase(messageStructDto.getUpdateField())) {
             snapshot.setInferLog(this.replaceContent(snapshot.getInferLog(), messageStructDto));
-        }
-        else {
+        } else {
             snapshot.setMessageStruct(this.replaceContent(snapshot.getMessageStruct(), messageStructDto));
         }
 
@@ -540,8 +571,7 @@ public class AssistantChatApplicationService {
         }
         if ("inferLog".equalsIgnoreCase(messageStructDto.getUpdateField())) {
             snapshot.setInferLog(this.replaceContent(snapshot.getInferLog(), messageStructDto));
-        }
-        else {
+        } else {
             snapshot.setMessageStruct(this.replaceContent(snapshot.getMessageStruct(), messageStructDto));
         }
         runningChatSnapshotService.updateSnapshot(snapshot);
@@ -599,7 +629,7 @@ public class AssistantChatApplicationService {
     /**
      * 替换数组结构
      *
-     * @param messageStruct 消息结构
+     * @param messageStruct    消息结构
      * @param messageStructDto 消息更新入参
      * @return String
      */

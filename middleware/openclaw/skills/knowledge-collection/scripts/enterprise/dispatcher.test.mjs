@@ -89,11 +89,13 @@ test('parseResourceRequest enforces source-specific resource fields', () => {
   assert.throws(() => parseResourceRequest({ source: 'wecom', 'output-dir': '/tmp/out', url: 'not-a-url' }));
   assert.throws(() => parseResourceRequest({ source: 'feishu', 'output-dir': '/tmp/out', url: 'https://example.feishu.cn/minutes/m1' }));
   assert.deepEqual(parseResourceRequest({
-    source: 'ima', 'output-dir': '/tmp/ima', url: 'https://example.com/article', kb: 'kb-1',
+    source: 'ima', 'output-dir': '/tmp/ima', url: 'https://example.com/article',
   }), {
-    source: 'ima', outputDir: '/tmp/ima', url: 'https://example.com/article', sourceOptions: { kb: 'kb-1' },
+    source: 'ima', outputDir: '/tmp/ima', url: 'https://example.com/article', sourceOptions: {},
   });
-  assert.throws(() => parseResourceRequest({ source: 'ima', 'output-dir': '/tmp/ima', url: 'https://example.com/article' }));
+  assert.throws(() => parseResourceRequest({
+    source: 'ima', 'output-dir': '/tmp/ima', url: 'https://example.com/article', kb: 'removed',
+  }));
 });
 
 test('parseMaterializeRequest requires a new output session and explicit candidate IDs', () => {

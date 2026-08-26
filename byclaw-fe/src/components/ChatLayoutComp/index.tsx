@@ -699,6 +699,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
                   onCancel={onCancel}
                   myAgentType={myAgentType}
                   setMyAgentType={setMyAgentType}
+                  updateMessage={updateMessage}
                 />
                 {showNewSessionProjectSelector && (
                   <div className={styles.externalProjectSelector}>

@@ -1,10 +1,172 @@
 import assert from 'node:assert/strict';
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 
+import * as enterpriseCollection from './enterprise-collection.mjs';
+import { ensureSessionSkeleton, newSession } from './session.mjs';
+
 const scriptPath = resolve(dirname(new URL(import.meta.url).pathname), 'enterprise-collection.mjs');
+const collectionScriptPath = resolve(dirname(new URL(import.meta.url).pathname), 'knowledge-collection.mjs');
+
+async function createParentSession(root, sourceScope) {
+  const parent = join(root, 'parent-session');
+  ensureSessionSkeleton(parent);
+  await writeFile(join(parent, 'session.json'), `${JSON.stringify(newSession({
+    query: 'enterprise test', sourceScope, materializationTarget: 'candidates',
+  }))}\n`);
+  return parent;
+}
+
+await (async () => {
+  assert.equal(typeof enterpriseCollection.assertEnterpriseScope, 'function');
+  const root = await mkdtemp(join(tmpdir(), 'enterprise-scope-'));
+  try {
+    ensureSessionSkeleton(root);
+    await writeFile(join(root, 'session.json'), `${JSON.stringify(newSession({
+      query: 'enterprise', sourceScope: ['ima'], materializationTarget: 'candidates',
+    }))}\n`);
+    assert.doesNotThrow(() => enterpriseCollection.assertEnterpriseScope(root, ['ima']));
+    assert.throws(
+      () => enterpriseCollection.assertEnterpriseScope(root, ['feishu']),
+      /sourceScope.*feishu/,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+  console.log('PASS enterprise command boundary enforces parent source scope');
+})();
+
+await (async () => {
+  const { createArtifactWriter } = await import('./enterprise/shared/artifact-writer.mjs');
+  const root = await mkdtemp(join(tmpdir(), 'enterprise-search-all-aggregate-'));
+  const outputRoot = join(root, 'output');
+  try {
+    const aggregateWriter = await createArtifactWriter(outputRoot);
+    const sourceDir = join(outputRoot, 'ima');
+    const sourceWriter = await createArtifactWriter(sourceDir);
+    await sourceWriter.writeJson('raw/candidate.json', { id: 'candidate-1' });
+    await sourceWriter.writeCollectionBundle({
+      title: 'IMA candidates', query: 'Q3 policy', source: 'ima', backend: 'ima',
+      url: 'https://ima.example.test/search', filters: { query: 'Q3 policy' },
+      metadataOnly: true,
+      inventory: [{
+        itemId: 'candidate-1', title: 'Policy', sourceUrl: 'https://ima.example.test/item/1',
+        sourceItemId: '1', sourceSkill: 'ima-skill', backend: 'ima', collectionFilters: {},
+        rawArtifacts: ['raw/candidate.json'],
+        materialization: {
+          status: 'pending', markdownPath: null, sanitizedPath: null,
+          pendingArtifactCleanup: [], reason: 'metadata-only',
+        },
+      }],
+      canonicalItems: [], sourceMetadata: {},
+    });
+    const outcomes = [{
+      source: 'ima', sessionDir: sourceDir,
+      outcome: { status: 'complete', counts: { discovered: 1, materialized: 0, pending: 1, failed: 0 } },
+    }];
+    await enterpriseCollection.writeSearchAllAggregate({
+      aggregateWriter, outputRoot, query: 'Q3 policy', sources: ['ima'], metadataOnly: true, outcomes,
+    });
+    const status = await run(process.execPath, [collectionScriptPath, 'status', '--session-dir', outputRoot]);
+    assert.equal(status.code, 0, status.stderr || status.stdout);
+    const parsed = JSON.parse(status.stdout);
+    assert.deepEqual(parsed.task.sourceScope, ['ima']);
+    assert.equal(parsed.task.materializationTarget, 'candidates');
+    assert.equal(parsed.collection.deliveryComplete, true);
+    assert.deepEqual(parsed.downstreamInput.files, []);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+  console.log('PASS search-all aggregate is a canonical statusable session');
+})();
+
+await (async () => {
+  const { createArtifactWriter } = await import('./enterprise/shared/artifact-writer.mjs');
+  const root = await mkdtemp(join(tmpdir(), 'enterprise-search-all-missing-bundle-'));
+  const outputRoot = join(root, 'output');
+  try {
+    const aggregateWriter = await createArtifactWriter(outputRoot);
+    await enterpriseCollection.writeSearchAllAggregate({
+      aggregateWriter,
+      outputRoot,
+      query: 'missing result',
+      sources: ['ima'],
+      metadataOnly: true,
+      outcomes: [{
+        source: 'ima', sessionDir: join(outputRoot, 'missing-ima'),
+        outcome: { status: 'complete', counts: { discovered: 1, materialized: 0, pending: 1, failed: 0 } },
+      }],
+    });
+    const status = await run(process.execPath, [collectionScriptPath, 'status', '--session-dir', outputRoot]);
+    assert.equal(status.code, 0, status.stderr || status.stdout);
+    const parsed = JSON.parse(status.stdout);
+    assert.equal(parsed.collection.collectionStatus, 'failed');
+    assert.equal(parsed.collection.deliveryComplete, false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+  console.log('PASS missing search-all child bundle cannot report complete');
+})();
+
+await (async () => {
+  const root = await mkdtemp(join(tmpdir(), 'enterprise-legacy-scope-'));
+  try {
+    const result = await run(process.execPath, [
+      scriptPath, 'wecom-smartpage', '--url', 'https://doc.weixin.qq.com/smartpage/x',
+      '--output-dir', join(root, 'output'),
+    ]);
+    assert.notEqual(result.code, 0);
+    assert.match(result.stderr, /parent-session-dir/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+  console.log('PASS legacy enterprise execution also requires parent scope');
+})();
+
+await (async () => {
+  const { createArtifactWriter } = await import('./enterprise/shared/artifact-writer.mjs');
+  const root = await mkdtemp(join(tmpdir(), 'enterprise-search-all-symlink-'));
+  const outputRoot = join(root, 'output');
+  try {
+    const aggregateWriter = await createArtifactWriter(outputRoot);
+    const sourceDir = join(outputRoot, 'ima');
+    const sourceWriter = await createArtifactWriter(sourceDir);
+    await sourceWriter.writeText('markdown/item.md', '# Safe\n');
+    await sourceWriter.writeText('sanitized/items/item.md', '# Safe\n');
+    await sourceWriter.writeCollectionBundle({
+      title: 'IMA body', source: 'ima', backend: 'ima', url: 'ima://item/1', filters: {},
+      inventory: [{
+        itemId: 'item-1', title: 'Item', sourceUrl: 'ima://item/1', sourceItemId: '1',
+        sourceSkill: 'ima-skill', backend: 'ima', collectionFilters: {}, rawArtifacts: [],
+        materialization: {
+          status: 'materialized', markdownPath: 'markdown/item.md',
+          sanitizedPath: 'sanitized/items/item.md', pendingArtifactCleanup: [], reason: null,
+        },
+      }],
+      canonicalItems: [{
+        title: 'Item', url: 'ima://item/1', author: '', publishTime: '',
+        markdown: 'sanitized/items/item.md', fileName: 'sanitized/items/item.md',
+      }],
+      sourceMetadata: {},
+    });
+    const outside = join(root, 'outside.md');
+    await writeFile(outside, '# Outside\n');
+    await unlink(join(sourceDir, 'sanitized/items/item.md'));
+    await symlink(outside, join(sourceDir, 'sanitized/items/item.md'));
+    await assert.rejects(
+      enterpriseCollection.writeSearchAllAggregate({
+        aggregateWriter, outputRoot, query: 'item', sources: ['ima'], metadataOnly: false,
+        outcomes: [{ source: 'ima', sessionDir: sourceDir, outcome: { status: 'complete' } }],
+      }),
+      /symbolic link|outside source session/,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+  console.log('PASS search-all rejects child work-copy symlink escapes');
+})();
 
 function run(command, args, env) {
   return new Promise((resolveRun) => {
@@ -89,7 +251,8 @@ async function testSearchFailsWhenTheDwsExecutableCannotStart() {
   const tempRoot = await mkdtemp(join(tmpdir(), 'enterprise-collection-missing-dws-'));
   const outputDir = join(tempRoot, 'output');
   try {
-    const result = await run(process.execPath, [scriptPath, 'search', '--source', 'dingtalk', '--query', 'probe', '--output-dir', outputDir], {
+    const parent = await createParentSession(tempRoot, ['dingtalk']);
+    const result = await run(process.execPath, [scriptPath, 'search', '--parent-session-dir', parent, '--source', 'dingtalk', '--query', 'probe', '--output-dir', outputDir], {
       DWS_HOME: join(tempRoot, 'dws-home'),
       DWS_CLI_BIN: join(tempRoot, 'missing-dws'),
     });
@@ -103,7 +266,8 @@ async function testSearchFailsWhenTheFwsExecutableCannotStart() {
   const tempRoot = await mkdtemp(join(tmpdir(), 'enterprise-collection-missing-fws-'));
   const outputDir = join(tempRoot, 'output');
   try {
-    const result = await run(process.execPath, [scriptPath, 'search', '--source', 'feishu', '--query', 'probe', '--output-dir', outputDir], {
+    const parent = await createParentSession(tempRoot, ['feishu']);
+    const result = await run(process.execPath, [scriptPath, 'search', '--parent-session-dir', parent, '--source', 'feishu', '--query', 'probe', '--output-dir', outputDir], {
       LARK_HOME: join(tempRoot, 'lark-home'),
       LARK_CLI_BIN: join(tempRoot, 'missing-lark-cli'),
     });
@@ -116,9 +280,10 @@ async function testSearchFailsWhenTheFwsExecutableCannotStart() {
 async function testSearchFailsWhenConnectorHomeIsMissing() {
   const tempRoot = await mkdtemp(join(tmpdir(), 'enterprise-collection-missing-home-'));
   try {
+    const parent = await createParentSession(tempRoot, ['dingtalk', 'feishu']);
     for (const [source, home] of [['dingtalk', 'DWS_HOME'], ['feishu', 'LARK_HOME']]) {
       const outputDir = join(tempRoot, `${source}-output`);
-      const result = await run(process.execPath, [scriptPath, 'search', '--source', source, '--query', 'probe', '--output-dir', outputDir], {
+      const result = await run(process.execPath, [scriptPath, 'search', '--parent-session-dir', parent, '--source', source, '--query', 'probe', '--output-dir', outputDir], {
         DWS_HOME: '',
         LARK_HOME: '',
       });
@@ -133,7 +298,8 @@ async function testWecomExportWritesCanonicalPrivateArtifacts() {
   const outputDir = join(tempRoot, 'output');
   try {
     const fixture = await createWecomFixture(tempRoot);
-    const result = await run(process.execPath, [scriptPath, 'wecom-smartpage', '--url', 'https://doc.weixin.qq.com/smartpage/x', '--output-dir', outputDir], {
+    const parent = await createParentSession(tempRoot, ['wecom']);
+    const result = await run(process.execPath, [scriptPath, 'wecom-smartpage', '--parent-session-dir', parent, '--url', 'https://doc.weixin.qq.com/smartpage/x', '--output-dir', outputDir], {
       WECOM_CLI_BIN: fixture,
       WECOM_FIXTURE_STATE: join(tempRoot, 'wecom-state'),
       WECOM_HOME: join(tempRoot, 'wecom-home'),
@@ -158,8 +324,8 @@ async function testWecomExportWritesCanonicalPrivateArtifacts() {
     assert.equal(metadata.collection.items[0].sourceSkill, 'wecomcli');
     assert.equal(metadata.collection.items[0].materialization.markdownPath, 'markdown/document.md');
     assert.equal(metadata.collection.items[0].materialization.sanitizedPath, 'sanitized/items/document.md');
-    assert.deepEqual(metadata.retention, { auditRequired: false, userRequested: false });
-    assert.deepEqual(metadata.postProcessing.runs, []);
+    assert.equal(metadata.retention, undefined);
+    assert.equal(metadata.postProcessing, undefined);
     assert.equal(metadata.sourceMetadata.scope, 'bot-visible');
     assert.ok(metadata.sourceMetadata.backendCliVersion);
     const collection = JSON.parse(await readFile(join(outputDir, 'collection-result.json'), 'utf8'));
@@ -190,7 +356,8 @@ else process.exit(2);
   try {
     await writeFile(fixturePath, source, { mode: 0o700 });
     await chmod(fixturePath, 0o700);
-    const result = await run(process.execPath, [scriptPath, 'wecom-smartpage', '--url', 'https://doc.weixin.qq.com/smartpage/x', '--output-dir', outputDir], {
+    const parent = await createParentSession(tempRoot, ['wecom']);
+    const result = await run(process.execPath, [scriptPath, 'wecom-smartpage', '--parent-session-dir', parent, '--url', 'https://doc.weixin.qq.com/smartpage/x', '--output-dir', outputDir], {
       WECOM_CLI_BIN: fixturePath,
       KNOWLEDGE_COLLECTION_MAX_WECOM_POLLS: '2',
       WECOM_HOME: join(tempRoot, 'wecom-home'),
@@ -213,8 +380,9 @@ async function testEnterpriseCliTimeoutIsBounded() {
   try {
     await writeFile(fixturePath, '#!/usr/bin/env node\nsetTimeout(() => {}, 1000);\n', { mode: 0o700 });
     await chmod(fixturePath, 0o700);
+    const parent = await createParentSession(tempRoot, ['wecom']);
     const started = Date.now();
-    const result = await run(process.execPath, [scriptPath, 'wecom-smartpage', '--url', 'https://doc.weixin.qq.com/smartpage/x', '--output-dir', outputDir], {
+    const result = await run(process.execPath, [scriptPath, 'wecom-smartpage', '--parent-session-dir', parent, '--url', 'https://doc.weixin.qq.com/smartpage/x', '--output-dir', outputDir], {
       WECOM_CLI_BIN: fixturePath,
       KNOWLEDGE_COLLECTION_CLI_TIMEOUT_MS: '50',
       WECOM_HOME: join(tempRoot, 'wecom-home'),
@@ -234,10 +402,12 @@ async function testEnterpriseRunnerDoesNotReuseExistingOutputDir() {
   const outputDir = join(tempRoot, 'output');
   const fixture = await createWecomFixture(tempRoot);
   try {
+    const parent = await createParentSession(tempRoot, ['wecom']);
     await mkdir(outputDir);
     await writeFile(join(outputDir, 'sentinel'), 'preserve');
     const result = await run(process.execPath, [
-      scriptPath, 'wecom-smartpage', '--url', 'https://doc.weixin.qq.com/smartpage/x', '--output-dir', outputDir,
+      scriptPath, 'wecom-smartpage', '--parent-session-dir', parent,
+      '--url', 'https://doc.weixin.qq.com/smartpage/x', '--output-dir', outputDir,
     ], { WECOM_CLI_BIN: fixture, WECOM_FIXTURE_STATE: join(tempRoot, 'wecom-state'), WECOM_HOME: join(tempRoot, 'wecom-home') });
     assert.notEqual(result.code, 0);
     assert.match(result.stderr, /must not already exist/);
@@ -252,7 +422,8 @@ async function testWecomRejectsNestedBusinessFailure() {
   const outputDir = join(tempRoot, 'output');
   try {
     const fixture = await createWecomFixture(tempRoot, true);
-    const result = await run(process.execPath, [scriptPath, 'wecom-smartpage', '--url', 'https://doc.weixin.qq.com/smartpage/x', '--output-dir', outputDir], {
+    const parent = await createParentSession(tempRoot, ['wecom']);
+    const result = await run(process.execPath, [scriptPath, 'wecom-smartpage', '--parent-session-dir', parent, '--url', 'https://doc.weixin.qq.com/smartpage/x', '--output-dir', outputDir], {
       WECOM_CLI_BIN: fixture,
       WECOM_FIXTURE_STATE: join(tempRoot, 'wecom-state'),
       WECOM_HOME: join(tempRoot, 'wecom-home'),
@@ -279,9 +450,12 @@ console.log(envelope({ errcode: 0 }));
   try {
     await writeFile(fixturePath, source, { mode: 0o700 });
     await chmod(fixturePath, 0o700);
+    const parent = await createParentSession(tempRoot, ['wecom']);
     const result = await run(process.execPath, [
       scriptPath,
       'wecom-smartpage',
+      '--parent-session-dir',
+      parent,
       '--url',
       'https://doc.weixin.qq.com/smartpage/missing-task',
       '--output-dir',
@@ -306,9 +480,12 @@ async function testFeishuMinutesReadsCliCreatedTranscript() {
   const outputDir = join(tempRoot, 'output');
   try {
     const fixture = await createLarkFixture(tempRoot);
+    const parent = await createParentSession(tempRoot, ['feishu']);
     const result = await run(process.execPath, [
       scriptPath,
       'feishu-minutes',
+      '--parent-session-dir',
+      parent,
       '--minute-token',
       'minute-1',
       '--url',
@@ -334,7 +511,7 @@ async function testFeishuMinutesReadsCliCreatedTranscript() {
     assert.equal(metadata.collection.items[0].sourceSkill, 'fws');
     assert.equal(metadata.collection.items[0].sourceItemId, 'minute-1');
     assert.equal(metadata.collection.items[0].materialization.sanitizedPath, 'sanitized/items/transcript.md');
-    assert.deepEqual(metadata.postProcessing.runs, []);
+    assert.equal(metadata.postProcessing, undefined);
     const collection = JSON.parse(await readFile(join(outputDir, 'collection-result.json'), 'utf8'));
     assert.equal(collection.source, 'fws');
     assert.equal(collection.backend, 'lark-cli');
@@ -352,9 +529,12 @@ async function testFeishuCliFailurePersistsFailedMetadata() {
   try {
     await writeFile(fixturePath, '#!/usr/bin/env node\nprocess.exit(3);\n', { mode: 0o700 });
     await chmod(fixturePath, 0o700);
+    const parent = await createParentSession(tempRoot, ['feishu']);
     const result = await run(process.execPath, [
       scriptPath,
       'feishu-minutes',
+      '--parent-session-dir',
+      parent,
       '--minute-token',
       'minute-failed',
       '--url',
@@ -381,9 +561,12 @@ async function testFeishuMissingTranscriptPersistsPartialMetadata() {
   try {
     await writeFile(fixturePath, '#!/usr/bin/env node\nconsole.log(JSON.stringify({ ok: true }));\n', { mode: 0o700 });
     await chmod(fixturePath, 0o700);
+    const parent = await createParentSession(tempRoot, ['feishu']);
     const result = await run(process.execPath, [
       scriptPath,
       'feishu-minutes',
+      '--parent-session-dir',
+      parent,
       '--minute-token',
       'minute-partial',
       '--url',

@@ -2,7 +2,7 @@
 
 飞书采集意图由 `knowledge-collection` 统一编排。命中本桥接后，先声明“委派采集模式”，再加载并遵循
 `fws` skill 及匹配的产品参考。`knowledge-collection` 负责采集目录、`raw/`、`markdown/`、
-`sanitized/items/`、`sanitized/metadata.json`、`collection-result.json`、预览和唯一后处理选择；
+`sanitized/items/`、`sanitized/metadata.json`、`collection-result.json`、预览和采集交付；
 `fws` / `lark-cli` 只负责飞书产品路由、命令、身份、授权、权限、真实 token、分页和只读取数。
 
 ## 来源路由
@@ -83,7 +83,7 @@ sanitized/
 - `sanitized/metadata.json` 按主契约写入完整 inventory。每项提供稳定 `itemId`、`sourceSkill: fws`、来源对象 ID/URL、
   用户筛选、关联 `rawArtifacts` 和 materialization 状态；尚未生成正文的列表项仍进入 inventory，但不得进入
   `collection-result.json.items`。
-- 来源执行器不得询问或执行 `入库 / 知识整理 / 跳过`；仅由 `knowledge-collection` 在采集后执行该选择。
+- 来源执行器只返回采集结果；`knowledge-collection` 验证并交付 `sanitized/items/*.md` 后停止。
 ## Knowledge collection enterprise search
 
-Only a user-named Feishu source or a clear internal-material request whose approved `sourceScope` includes Feishu may invoke enterprise search. The connector reuses FWS discovery/authentication, retries explicit rate limits, and classifies structured `missing_scope` / `permission_violations` as connector authentication requirements. Batch search defaults to metadata-only and isolates FWS failures from selected sources; selected candidates are materialized later with `enterprise materialize` into a new output session.
+Only a user-named Feishu source or a clear internal-material request whose approved `sourceScope` includes Feishu may invoke enterprise search. Pass that initialized session as `--parent-session-dir`; the command rejects a missing or out-of-scope parent. The connector reuses FWS discovery/authentication, retries explicit rate limits, and classifies structured `missing_scope` / `permission_violations` as connector authentication requirements. Batch search defaults to metadata-only and isolates FWS failures from selected sources; selected candidates are materialized later with `enterprise materialize` into a new output session.

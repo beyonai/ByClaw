@@ -14,6 +14,7 @@ import ProjectBasicForm, {
   type ProjectFormValues,
 } from '../ProjectFormModal/ProjectBasicForm';
 import type { ProjectTypeOption } from '../../hooks/useProjectTypeConfig';
+import { supportsProjectRepositories } from '../../projectCapabilities';
 import styles from './index.module.less';
 
 interface Props {
@@ -23,7 +24,7 @@ interface Props {
   onCancel: () => void;
   // 父级负责查重/建项目(按表单真实类型)/存共享成员与默认员工,返回 projectId 字符串;空串表示失败(父级已提示)。
   onCreateProject: (values: ProjectFormValues) => Promise<string>;
-  // 完成:进入该项目详情(非研发项目建完即调,研发项目配完仓库后调)。
+  // 完成:进入该项目详情(普通项目建完即调,研发、运营项目配完仓库后调)。
   onFinish: (projectId: string) => void;
 }
 
@@ -58,9 +59,8 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
   const [form] = Form.useForm<ProjectFormValues>();
   const basicRef = useRef<ProjectBasicFormHandle>(null);
   const projectType = Form.useWatch('projectType', form);
-  const isDevelopProjectEnabled = (projectTypeConfigOptions ?? []).some((option) => option.value === 'develop');
-  // 仅研发项目展开「仓库」这一步及研发提示;其余类型 step1 填完直接建。
-  const isDevelopProject = isDevelopProjectEnabled && projectType === 'develop';
+  // 研发、运营项目展开「仓库」步骤;普通项目 step1 填完直接建。
+  const isRepositoryProject = supportsProjectRepositories(projectType);
 
   // 已配置仓库:按后端 repoType 区分工作区与代码仓库(存量数据无类型时按 code 处理)。
   const [repos, setRepos] = useState<DevloopProjectRepo[]>([]);
@@ -87,7 +87,7 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
     setRepos(Array.isArray(list) ? list : []);
   }, []);
 
-  // step1 提交:按表单真实值建项目拿 projectId。研发项目进 step2 继续建仓;非研发建完即完成关闭。
+  // step1 提交:按表单真实值建项目拿 projectId。研发、运营项目进 step2 继续建仓;普通项目建完即完成关闭。
   const handleCreateBasic = async () => {
     const values = await basicRef.current?.collectValues();
     if (!values) return;
@@ -96,7 +96,7 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
       const createdId = await onCreateProject(values);
       if (!createdId) return;
       setProjectId(createdId);
-      if (isDevelopProjectEnabled && values.projectType === 'develop') {
+      if (supportsProjectRepositories(values.projectType)) {
         await refreshRepos(createdId).catch(() => setRepos([]));
         setStep(1);
       } else {
@@ -289,8 +289,8 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
           {t('action.cancel')}
         </Button>,
         <Button key="next" type="primary" loading={creating} onClick={handleCreateBasic}>
-          {/* 研发项目继续 step2,主按钮为「下一步」;其余类型 step1 即建成,主按钮为「创建」。 */}
-          {isDevelopProject ? t('action.next') : t('action.create')}
+          {/* 研发、运营项目继续 step2,主按钮为「下一步」;普通项目 step1 即建成,主按钮为「创建」。 */}
+          {isRepositoryProject ? t('action.next') : t('action.create')}
         </Button>,
       ];
     }
@@ -329,8 +329,8 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
       }}
     >
       <div className={styles.wizardScroll}>
-        {/* 仅研发项目展开多步进度条;非研发 step1 即为全部,不展示步进。 */}
-        {isDevelopProject && (
+        {/* 研发、运营项目展开多步进度条;普通项目 step1 即为全部,不展示步进。 */}
+        {isRepositoryProject && (
           <Steps
             className={styles.steps}
             current={step}

@@ -4,7 +4,7 @@ import { compareStreamId, type ParsedChatStreamMessage } from '@/hooks/useSseSen
 import { IMessageState } from '@/constants/message';
 import { chatSessionRuntimeManager, type RunningChatInfo } from '@/utils/chatSessionRuntimeManager';
 
-import type { IMessage } from '@/typescript/message';
+import type { IMessage, TaskPlanSnapshot } from '@/typescript/message';
 
 type UpdateMessage = (msg: IMessage, opt?: { isAssign?: boolean }) => IMessage;
 
@@ -422,6 +422,25 @@ export const handleParsedChatStream = (parsed: ParsedChatStreamMessage) => {
   }
 
   applyParsedStreamToContext(parsed, context);
+};
+
+export const handleTaskPlanSnapshot = (message: any) => {
+  const taskPlan = get(message, 'data') as TaskPlanSnapshot | undefined;
+  if (!taskPlan?.planId || !taskPlan?.messageId) return false;
+
+  const context = findChatStreamContext(message, taskPlan);
+  if (!context) return false;
+
+  const currentVersion = Number(context.answerMsg.taskPlan?.version || 0);
+  const nextVersion = Number(taskPlan.version || 0);
+  if (currentVersion >= nextVersion) return true;
+
+  context.answerMsg.taskPlan = taskPlan;
+  context.answerMsg.messageId = `${taskPlan.messageId}`;
+  context.answerMsg.sessionId = `${taskPlan.sessionId}`;
+  if (taskPlan.traceId) context.answerMsg.traceId = taskPlan.traceId;
+  context.answerMsg = context.updateMessage(context.answerMsg);
+  return true;
 };
 
 export const flushRestoredChatStreamBuffer = (restoreKey: string) => {

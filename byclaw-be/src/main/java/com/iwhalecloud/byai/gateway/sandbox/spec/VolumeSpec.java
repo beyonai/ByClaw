@@ -36,5 +36,20 @@ public class VolumeSpec {
      * Optional subPath.
      */
     private String subPath;
-}
 
+    /**
+     * Optional numeric user ID to apply to the volume target.
+     */
+    private Integer uid;
+
+    /**
+     * Optional numeric group ID to apply to the volume target.
+     */
+    private Integer gid;
+
+    /**
+     * Optional POSIX permission mode, for example {@code 0770}.
+     * Kept as a string so leading zeroes are preserved during JSON binding.
+     */
+    private String mode;
+}

@@ -5,13 +5,23 @@ import {
 } from "../domain/attachment-inspection.js";
 import type { AttachmentResolver } from "../ports/attachment-resolver.js";
 import { DelegationService } from "./delegation-service.js";
+import { LeaderRunSuspendedError } from "./run-suspension.js";
 import type { RunIngressContextV1 } from "../domain/run-ingress-context.js";
-import type { LeaderSession, LeaderSessionFactory } from "../ports/leader.js";
+import type {
+  LeaderRunInput,
+  LeaderSession,
+  LeaderSessionFactory,
+} from "../ports/leader.js";
 import type {
   TaskPlanExecutionContext,
   TaskPlanGateway,
 } from "../ports/task-plan.js";
-import type { TaskPlanSnapshot } from "../domain/task-plan.js";
+import type {
+  TaskPlanSnapshot,
+  TaskPlanStatusReason,
+  TaskPlanTaskStatus,
+  TaskPlanUpdate,
+} from "../domain/task-plan.js";
 import { LeaderSessionCache } from "./leader-session-cache.js";
 import type {
   DelegationRepository,
@@ -26,8 +36,10 @@ import type {
   SessionRepository,
 } from "../ports/repositories.js";
 import type {
+  AgentResult,
   AgentProfile,
   CallerPrincipal,
+  Delegation,
   JsonValue,
   Run,
   RunAttachment,
@@ -38,7 +50,10 @@ import type {
   UserInteractionQuestion,
   UserInteractionResponse,
 } from "../domain/types.js";
-import { TERMINAL_RUN_STATUSES } from "../domain/types.js";
+import {
+  TERMINAL_DELEGATION_STATUSES,
+  TERMINAL_RUN_STATUSES,
+} from "../domain/types.js";
 import { resolveAttachmentSelection } from "./attachments.js";
 import {
   createSessionContext,
@@ -79,26 +94,50 @@ export interface CreateSessionRunInput extends CreateSessionInput {
 }
 
 type QueueEntry = { runId: string; metadata: Record<string, unknown> };
+
+const MAX_TASK_PLAN_STALL_ATTEMPTS = 3;
+const TASK_PLAN_CONTINUATION_MESSAGE = `The trusted runtime task plan is still active, so this Run cannot finish yet.
+Continue the unfinished steps now. Do not repeat completed work. Call updateTaskPlan whenever progress changes,
+and only provide the final user answer after every task has reached a terminal status.`;
 type SessionQueue = { running: boolean; entries: QueueEntry[] };
 type ActiveRun = { controller: AbortController; leader: LeaderSession };
 type PendingLeaderInteraction = {
   runId: string;
   resolve(response: UserInteractionResponse): void;
+  reject(error: unknown): void;
 };
 
-const DOWNSTREAM_MODEL_FAILURE_USER_MESSAGE =
-  "下游模型调用异常，请切换模型或者联系管理员";
+const DOWNSTREAM_MODEL_FAILURE_PREFIX = "Leader model call failed:";
+const USER_INTERACTION_TIMEOUT_ERROR_CODE = "USER_INTERACTION_TIMEOUT";
+const USER_INTERACTION_TIMEOUT_USER_MESSAGE =
+  "等待用户操作超时，请重新发起请求";
+
+class UserInteractionTimeoutError extends Error {
+  constructor(interactionId: string, timeoutMs: number) {
+    super(
+      `${USER_INTERACTION_TIMEOUT_ERROR_CODE}: ${interactionId} exceeded ${timeoutMs}ms`,
+    );
+    this.name = "UserInteractionTimeoutError";
+  }
+}
 
 export interface RunServiceRuntimeOptions {
   executionQueue?: RunExecutionQueue;
   checkpoints?: LeaderCheckpointStore;
   credentials?: ExecutionCredentialRepository;
+  logger?: {
+    info(bindings: Record<string, unknown>, message: string): void;
+    warn(bindings: Record<string, unknown>, message: string): void;
+    error(bindings: Record<string, unknown>, message: string): void;
+  };
   instanceId?: string;
   leaseMs?: number;
   queuePollMs?: number;
   maxConcurrentRuns?: number;
   leaderCacheMaxEntries?: number;
   leaderCacheIdleTtlMs?: number;
+  /** Leader 结构化提问等待用户响应的上限；默认 15 分钟。 */
+  userInteractionTimeoutMs?: number;
   /** 清理已过期执行凭证的周期；默认 60 秒。 */
   credentialCleanupIntervalMs?: number;
   /**
@@ -127,11 +166,13 @@ export class RunService {
   readonly #leaseMs: number;
   readonly #queuePollMs: number;
   readonly #maxConcurrentRuns: number;
+  readonly #userInteractionTimeoutMs: number;
   readonly #credentialCleanupIntervalMs: number;
   readonly #attachmentResolver: AttachmentResolver | undefined;
   readonly #taskPlans: TaskPlanGateway | undefined;
   #persistentActive = 0;
   #claimLoop: Promise<void> | undefined;
+  #callbackSweep: Promise<void> | undefined;
   #pollTimer: ReturnType<typeof setInterval> | undefined;
   #credentialCleanupTimer: ReturnType<typeof setInterval> | undefined;
   #started = false;
@@ -153,6 +194,8 @@ export class RunService {
     this.#leaseMs = runtime.leaseMs ?? 30_000;
     this.#queuePollMs = runtime.queuePollMs ?? 500;
     this.#maxConcurrentRuns = runtime.maxConcurrentRuns ?? 10;
+    this.#userInteractionTimeoutMs =
+      runtime.userInteractionTimeoutMs ?? 900_000;
     this.#credentialCleanupIntervalMs =
       runtime.credentialCleanupIntervalMs ?? 60_000;
     this.#attachmentResolver = runtime.attachmentResolver;
@@ -171,7 +214,7 @@ export class RunService {
     }
     this.#started = true;
     this.#pollTimer = setInterval(() => {
-      void this.#kickPersistentQueue();
+      void this.#sweepExpiredCallbacks().finally(() => this.#kickPersistentQueue());
     }, this.#queuePollMs);
     this.#pollTimer.unref?.();
     if (this.runtime.credentials) {
@@ -183,7 +226,7 @@ export class RunService {
       this.#credentialCleanupTimer.unref?.();
       void this.runtime.credentials.deleteExpired(this.now()).catch(() => undefined);
     }
-    void this.#kickPersistentQueue();
+    void this.#sweepExpiredCallbacks().finally(() => this.#kickPersistentQueue());
   }
 
   /** 创建会话容器；Session 本身不立即初始化模型 Session。 */
@@ -464,6 +507,117 @@ export class RunService {
   }
 
   /**
+   * 消费子 Agent 的独立终态回调，并把原 Run 从 WAITING_AGENT 重新放回执行队列。
+   * 返回的 afterEventId 供 by-framework Resume 上下文只转发暂停后的增量，避免重放旧消息。
+   */
+  async resumeDelegation(input: {
+    delegationId: string;
+    status: string;
+    finalAnswer: string;
+  }): Promise<{
+    accepted: boolean;
+    runId?: string;
+    afterEventId?: number;
+    forwardEvents?: boolean;
+  }> {
+    const normalizedStatus = input.status.trim().toUpperCase();
+    if (
+      normalizedStatus !== "COMPLETED" &&
+      normalizedStatus !== "FAILED" &&
+      normalizedStatus !== "CANCELLED"
+    ) {
+      return { accepted: false };
+    }
+    const atomicSettlement = this.runtime.executionQueue?.settleWaitingCallback;
+    if (atomicSettlement) {
+      const settled = await atomicSettlement.call(this.runtime.executionQueue, {
+        delegationId: input.delegationId,
+        status: normalizedStatus,
+        finalAnswer: input.finalAnswer,
+      });
+      if (!settled.runId) {
+        return { accepted: false };
+      }
+      const history = await this.events.list(settled.runId);
+      const suspendedEvent = history
+        .slice()
+        .reverse()
+        .find((event) => event.type === "run.suspended");
+      // 回调可能早于旧执行提交 run.suspended。delegation.started 同样是可靠的
+      // 恢复边界，避免 Resume 上下文从事件 0 重放 Super 的历史输出。
+      const resumeBoundary =
+        suspendedEvent ??
+        history
+          .slice()
+          .reverse()
+          .find(
+            (event) =>
+              event.type === "delegation.started" &&
+              event.data.delegationId === input.delegationId,
+          );
+      if (!settled.accepted) {
+        return {
+          accepted: false,
+          runId: settled.runId,
+          ...(resumeBoundary ? { afterEventId: resumeBoundary.eventId } : {}),
+        };
+      }
+      if (!settled.wakeRun) {
+        return {
+          accepted: true,
+          runId: settled.runId,
+          forwardEvents: false,
+          ...(resumeBoundary ? { afterEventId: resumeBoundary.eventId } : {}),
+        };
+      }
+      const queued = await this.runs.get(settled.runId);
+      if (queued?.status === "QUEUED") {
+        await this.#scheduleRun(queued, undefined);
+      }
+      return {
+        accepted: true,
+        runId: settled.runId,
+        forwardEvents: true,
+        ...(resumeBoundary ? { afterEventId: resumeBoundary.eventId } : {}),
+      };
+    }
+    const completed = await this.delegationService.completeFromExternalCallback(input);
+    if (!completed.runId) {
+      return { accepted: false };
+    }
+    const history = await this.events.list(completed.runId);
+    const suspendedEvent = history
+      .slice()
+      .reverse()
+      .find((event) => event.type === "run.suspended");
+    if (!completed.accepted) {
+      return {
+        accepted: false,
+        runId: completed.runId,
+        ...(suspendedEvent ? { afterEventId: suspendedEvent.eventId } : {}),
+      };
+    }
+    const run = await this.runs.get(completed.runId);
+    if (!run || TERMINAL_RUN_STATUSES.has(run.status) || run.status === "CANCELLING") {
+      return {
+        accepted: false,
+        runId: completed.runId,
+        ...(suspendedEvent ? { afterEventId: suspendedEvent.eventId } : {}),
+      };
+    }
+    const queued = await this.#setStatus(run, "QUEUED", {
+      delegationId: input.delegationId,
+      resumed: true,
+    });
+    await this.#scheduleRun(queued, undefined);
+    return {
+      accepted: true,
+      runId: queued.id,
+      ...(suspendedEvent ? { afterEventId: suspendedEvent.eventId } : {}),
+    };
+  }
+
+  /**
    * 取消排队中或执行中的 Run。
    * 执行中会先进入 CANCELLING，再同时中止 Leader、工具信号和活动 Connector。
    */
@@ -592,6 +746,43 @@ export class RunService {
     return this.#claimLoop;
   }
 
+  /** 数据库是唯一计时真相；这里只触发幂等扫描，不创建进程内 Delegation 定时器。 */
+  async #sweepExpiredCallbacks(): Promise<void> {
+    const queue = this.runtime.executionQueue;
+    if (!queue?.expireWaitingCallbacks || this.#callbackSweep || this.#stopping) {
+      return this.#callbackSweep ?? Promise.resolve();
+    }
+    this.#callbackSweep = queue
+      .expireWaitingCallbacks({ limit: 100 })
+      .then((expired) => {
+        if (expired.length > 0) {
+          this.runtime.logger?.warn(
+            {
+              instanceId: this.#instanceId,
+              expiredCount: expired.length,
+              runIds: expired.map((item) => item.runId),
+              delegationIds: expired.map((item) => item.delegationId),
+            },
+            "已终结超过回调截止时间的子 Agent 委派",
+          );
+        }
+      })
+      // 数据库短暂异常时保留 WAITING_AGENT，下个轮询周期继续扫描，但必须留下日志。
+      .catch((error: unknown) => {
+        this.runtime.logger?.error(
+          {
+            instanceId: this.#instanceId,
+            error: error instanceof Error ? error.message : String(error),
+          },
+          "扫描子 Agent 回调超时失败",
+        );
+      })
+      .finally(() => {
+        this.#callbackSweep = undefined;
+      });
+    return this.#callbackSweep;
+  }
+
   async #scheduleRun(
     run: Run,
     metadata: Record<string, unknown> | undefined,
@@ -609,7 +800,12 @@ export class RunService {
       running: false,
       entries: [],
     };
-    queue.entries.push({ runId: run.id, metadata: metadata ?? {} });
+    // callback 恢复不会再次携带入口 metadata；单实例内存队列复用首次运行保存的
+    // 短期上下文。持久队列路径仍由 credentials 仓库按 lease 恢复凭证。
+    queue.entries.push({
+      runId: run.id,
+      metadata: metadata ?? this.#ephemeralMetadata.get(run.id) ?? {},
+    });
     this.#queues.set(run.sessionId, queue);
     void this.#pump(run.sessionId);
   }
@@ -708,6 +904,11 @@ export class RunService {
     metadata: Record<string, unknown>,
     claim?: RunExecutionClaim,
   ): Promise<void> {
+    // 持久队列会在接管时从凭证仓库重建 metadata。失败收口和 callback 恢复都只
+    // 读取这个进程内副本；claim 释放时会立即删除，不进入 Run/Event/Pi 持久化。
+    if (Object.keys(metadata).length > 0) {
+      this.#ephemeralMetadata.set(run.id, structuredClone(metadata));
+    }
     const session = await this.sessions.get(run.sessionId);
     if (!session) {
       await this.#finishFailed(run, `Session not found: ${run.sessionId}`);
@@ -768,18 +969,58 @@ export class RunService {
         if (requested?.data.source === "leader") {
           this.#persistentWaiting.add(latest.id);
           void this.#kickPersistentQueue();
-          const response = await this.#waitForInteractionResponse(
-            latest.id,
-            String(requested.data.interactionId),
-            requested.eventId,
-            runController.signal,
+          const interactionId = String(requested.data.interactionId);
+          const timing = interactionTiming(
+            requested,
+            this.#userInteractionTimeoutMs,
           );
+          let response: UserInteractionResponse;
+          try {
+            response = await this.#waitForInteractionResponse(
+              latest.id,
+              interactionId,
+              requested.eventId,
+              runController.signal,
+              timing.deadlineAt,
+              timing.timeoutMs,
+            );
+          } catch (error) {
+            if (
+              error instanceof UserInteractionTimeoutError &&
+              !runController.signal.aborted
+            ) {
+              runController.abort(error);
+            }
+            throw error;
+          }
           this.#persistentWaiting.delete(latest.id);
           leaderMessage = `${latest.input}
 
 The user has now answered the clarification requested in the previous attempt.
 Continue the original task using this response:
 ${JSON.stringify(response)}`;
+        }
+      }
+      let recoveredDelegations: Delegation[] = [];
+      if (recoveringStage === "CONNECTOR_WAITING") {
+        recoveredDelegations = (await this.delegations.listByRun(latest.id))
+          .filter((delegation) => TERMINAL_DELEGATION_STATUSES.has(delegation.status));
+        const completedDelegations = recoveredDelegations
+          .map((delegation) => ({
+            delegationId: delegation.id,
+            agentId: delegation.agentId,
+            agentName: delegation.agentName,
+            task: delegation.task,
+            status: delegation.status,
+            result: delegation.result,
+          }));
+        if (completedDelegations.length > 0) {
+          leaderMessage = `${latest.input}
+
+The previously requested delegateAgent call has now returned through the trusted platform callback.
+Treat the following records as completed tool results. Do not repeat an identical delegation; continue
+the original task, dispatch only work that is still genuinely missing, and synthesize the final answer.
+${JSON.stringify(completedDelegations)}`;
         }
       }
       current = await this.#setStatus(latest, "RUNNING");
@@ -795,7 +1036,36 @@ ${JSON.stringify(response)}`;
           taskPlanReady = false;
         }
       }
-      const result = await leader.run({
+      let leaderOutputPausedForDelegation = false;
+      let leaderInput: LeaderRunInput;
+      const syncActiveTaskPlanTask = async (input: {
+        taskPosition: number;
+        status: TaskPlanTaskStatus;
+        idempotencyKey: string;
+        statusReason?: TaskPlanStatusReason;
+      }): Promise<TaskPlanSnapshot> => {
+        if (!activeTaskPlan || activeTaskPlan.status !== "ACTIVE") {
+          throw new Error("An active task plan is required for task-linked delegation");
+        }
+        if (!taskPlanContext || !this.#taskPlans) {
+          throw new Error("Task plan updates are not available for this run");
+        }
+        const update = taskPlanUpdateWithTaskStatus(
+          activeTaskPlan,
+          input.taskPosition,
+          input.status,
+          input.statusReason,
+        );
+        const snapshot = await this.#taskPlans.update({
+          context: taskPlanContext,
+          idempotencyKey: input.idempotencyKey,
+          update,
+        });
+        activeTaskPlan = snapshot;
+        leaderInput.activeTaskPlan = snapshot;
+        return snapshot;
+      };
+      leaderInput = {
         message: leaderMessage,
         observability: {
           runId: current.id,
@@ -829,6 +1099,9 @@ ${JSON.stringify(response)}`;
         signal: runController.signal,
         // Leader 的可见回答与思考增量被规范化为 Run 事件，供对外流协议消费。
         onDelta: async (text) => {
+          if (leaderOutputPausedForDelegation) {
+            return;
+          }
           const event = {
             timestamp: this.now(),
             runId: current.id,
@@ -842,6 +1115,9 @@ ${JSON.stringify(response)}`;
           }
         },
         onReasoningDelta: async (text) => {
+          if (leaderOutputPausedForDelegation) {
+            return;
+          }
           const event = {
             timestamp: this.now(),
             runId: current.id,
@@ -872,8 +1148,39 @@ ${JSON.stringify(response)}`;
         // 工具调用只进入 DelegationService，不让 Pi 接触 Connector Registry。
         delegate: async (delegationInput) => {
           runController.signal.throwIfAborted();
-          current = await this.#setStatus(current, "WAITING_AGENT");
-          runController.signal.throwIfAborted();
+          if (activeTaskPlan?.status === "ACTIVE") {
+            if (delegationInput.taskPosition === undefined) {
+              throw new Error(
+                "taskPosition is required when delegating work for an active task plan",
+              );
+            }
+            const task = activeTaskPlan.tasks.find(
+              ({ position }) => position === delegationInput.taskPosition,
+            );
+            if (!task) {
+              throw new Error(
+                `Task plan position ${delegationInput.taskPosition} does not exist`,
+              );
+            }
+            if (task.status === "PENDING") {
+              await syncActiveTaskPlanTask({
+                taskPosition: delegationInput.taskPosition,
+                status: "IN_PROGRESS",
+                idempotencyKey: `${delegationInput.toolCallId}:task-started`,
+              });
+            } else if (task.status !== "IN_PROGRESS") {
+              throw new Error(
+                `Task plan position ${delegationInput.taskPosition} is already ${task.status}`,
+              );
+            }
+          } else if (delegationInput.taskPosition !== undefined) {
+            throw new Error(
+              "taskPosition can only be used when an active task plan exists",
+            );
+          }
+          // Pi 可能尚有排队的流回调。委派开始即交出控制权，迟到的 Super
+          // reasoning/answer 不再逐 Token 落库，也不能延迟 WAITING_AGENT。
+          leaderOutputPausedForDelegation = true;
           // Pi 工具 signal 只代表该次工具调用；Run 级停止必须始终拥有更高优先级，
           // 不能因为工具传入了独立 signal 就丢失整轮取消。
           const delegationSignal = delegationInput.signal
@@ -882,9 +1189,13 @@ ${JSON.stringify(response)}`;
           const delegated = await this.delegationService.execute({
             session,
             runId: current.id,
+            traceId: current.ingressContext?.traceId ?? current.id,
             agents: current.agentList,
             agentId: delegationInput.agentId,
             task: delegationInput.task,
+            ...(delegationInput.taskPosition !== undefined
+              ? { taskPosition: delegationInput.taskPosition }
+              : {}),
             // 只能从当前 Run 的附件集合按 ID 选择；未知 ID 在解析阶段被拒绝。
             attachments: resolveAttachmentSelection(
               current.attachments,
@@ -904,7 +1215,7 @@ ${JSON.stringify(response)}`;
             },
             signal: delegationSignal,
             ...(claim ? { leaseClaim: claim } : {}),
-            ...(recoveringStage === "LEADER_SYNTHESIZING"
+            ...(recoveringStage === "LEADER_SYNTHESIZING" || recoveringStage === "CONNECTOR_WAITING"
               ? { reuseCompleted: true }
               : {}),
             onInputRequired: async (interactionId) => {
@@ -922,6 +1233,24 @@ ${JSON.stringify(response)}`;
               }
             },
           });
+          // 同步 Connector 返回了真实终态时，Leader 仍需继续使用工具结果。
+          // 挂起会抛出 DelegationSuspendedError，因此不会执行到这里。
+          leaderOutputPausedForDelegation = false;
+          if (
+            delegationInput.taskPosition !== undefined &&
+            !runController.signal.aborted
+          ) {
+            const terminalTaskUpdate = delegationTerminalTaskUpdate(delegated);
+            if (terminalTaskUpdate) {
+              await syncActiveTaskPlanTask({
+                taskPosition: delegationInput.taskPosition,
+                status: terminalTaskUpdate.status,
+                idempotencyKey:
+                  `${delegationInput.toolCallId}:task-${terminalTaskUpdate.idempotencySuffix}`,
+                statusReason: terminalTaskUpdate.statusReason,
+              });
+            }
+          }
           if (!runController.signal.aborted) {
             current = await this.#setStatus(current, "SYNTHESIZING");
           }
@@ -930,17 +1259,21 @@ ${JSON.stringify(response)}`;
         askUser: async ({ toolCallId, questions, signal }) => {
           validateInteractionQuestions(questions);
           const interactionId = `${current.id}:${toolCallId}`;
+          const requestedAt = this.now();
+          const deadlineAt = requestedAt + this.#userInteractionTimeoutMs;
           current = await this.#setStatus(current, "WAITING_USER", {
             interactionId,
             source: "leader",
           });
           const requestedEvent = await this.#appendRunEvent({
-            timestamp: this.now(),
+            timestamp: requestedAt,
             runId: current.id,
             type: "interaction.requested",
             data: {
               interactionId,
               source: "leader",
+              timeoutMs: this.#userInteractionTimeoutMs,
+              deadlineAt,
               request: {
                 questions,
                 uiPayload: toLegacyFormPayload(questions),
@@ -964,12 +1297,18 @@ ${JSON.stringify(response)}`;
                 interactionSignal.removeEventListener("abort", onAbort);
                 resolve(value);
               },
+              reject: (error) => {
+                interactionSignal.removeEventListener("abort", onAbort);
+                reject(error);
+              },
             });
             void this.#waitForInteractionResponse(
               current.id,
               interactionId,
               requestedEvent.eventId,
               interactionSignal,
+              deadlineAt,
+              this.#userInteractionTimeoutMs,
             )
               .then((value) => {
                 const pending = this.#pendingLeaderInteractions.get(interactionId);
@@ -979,7 +1318,20 @@ ${JSON.stringify(response)}`;
                 this.#pendingLeaderInteractions.delete(interactionId);
                 pending.resolve(value);
               })
-              .catch(() => undefined);
+              .catch((error: unknown) => {
+                const pending = this.#pendingLeaderInteractions.get(interactionId);
+                if (pending?.runId !== current.id) {
+                  return;
+                }
+                this.#pendingLeaderInteractions.delete(interactionId);
+                pending.reject(error);
+                if (
+                  error instanceof UserInteractionTimeoutError &&
+                  !runController.signal.aborted
+                ) {
+                  runController.abort(error);
+                }
+              });
           });
           if (!runController.signal.aborted) {
             current = await this.#setStatus(current, "RUNNING", {
@@ -998,11 +1350,13 @@ ${JSON.stringify(response)}`;
               }) => {
                 runController.signal.throwIfAborted();
                 signal?.throwIfAborted();
-                return this.#taskPlans!.update({
+                const snapshot = await this.#taskPlans!.update({
                   context: taskPlanContext,
                   idempotencyKey: toolCallId,
                   update,
                 });
+                activeTaskPlan = snapshot;
+                return snapshot;
               },
             }
           : {}),
@@ -1082,7 +1436,50 @@ ${JSON.stringify(response)}`;
                 : {}),
             }
           : {}),
-      });
+      };
+      // callback 型 Connector 会在另一轮、甚至另一实例恢复。委派中持久化的
+      // taskPosition 是恢复后唯一可信的任务关联，必须在 Leader 继续回复前收口。
+      if (!runController.signal.aborted && activeTaskPlan?.status === "ACTIVE") {
+        for (const delegation of recoveredDelegations) {
+          if (delegation.taskPosition === undefined || !delegation.result) {
+            continue;
+          }
+          const terminalTaskUpdate = delegationTerminalTaskUpdate(delegation.result);
+          if (!terminalTaskUpdate) {
+            continue;
+          }
+          await syncActiveTaskPlanTask({
+            taskPosition: delegation.taskPosition,
+            status: terminalTaskUpdate.status,
+            idempotencyKey:
+              `${delegation.id}:task-${terminalTaskUpdate.idempotencySuffix}`,
+            statusReason: terminalTaskUpdate.statusReason,
+          });
+          // 一次 Run 只会在首个 callback 委派处挂起；失败会令计划终止。
+          break;
+        }
+      }
+      let result = await leader.run(leaderInput);
+      let taskPlanStallAttempts = 0;
+      while (activeTaskPlan?.status === "ACTIVE") {
+        runController.signal.throwIfAborted();
+        if (taskPlanStallAttempts >= MAX_TASK_PLAN_STALL_ATTEMPTS) {
+          throw new Error(
+            `Leader made no task plan progress after ${MAX_TASK_PLAN_STALL_ATTEMPTS} continuation attempts`,
+          );
+        }
+        const previousPlanVersion = activeTaskPlan.version;
+        taskPlanStallAttempts += 1;
+        result = await leader.run({
+          ...leaderInput,
+          message: TASK_PLAN_CONTINUATION_MESSAGE,
+          activeTaskPlan,
+          currentTime: this.now(),
+        });
+        if (activeTaskPlan?.version !== previousPlanVersion) {
+          taskPlanStallAttempts = 0;
+        }
+      }
 
       if (runController.signal.aborted) {
         await this.#finishLocallyCancelledRun(current, "run cancelled");
@@ -1125,7 +1522,36 @@ ${JSON.stringify(response)}`;
       dirtyLeader = false;
       this.events.close(finished.id);
     } catch (error) {
-      if (controller?.signal.aborted) {
+      if (error instanceof LeaderRunSuspendedError) {
+        await this.runtime.checkpoints
+          ?.discardPending(current.id, current.attemptNo, claim)
+          .catch(() => undefined);
+        const atomicSuspension = this.runtime.executionQueue?.suspendRunForDelegation;
+        if (atomicSuspension) {
+          await atomicSuspension.call(this.runtime.executionQueue, {
+            runId: current.id,
+            delegationId: error.delegationId,
+            expectedRunVersion: current.version,
+            ...(claim ? { claim } : {}),
+          });
+          current = (await this.runs.get(current.id)) ?? current;
+        } else {
+          current = await this.#setStatus(current, "WAITING_AGENT", {
+            delegationId: error.delegationId,
+          });
+          await this.#appendRunEvent({
+            timestamp: this.now(),
+            runId: current.id,
+            type: "run.suspended",
+            data: {
+              status: "WAITING_AGENT",
+              delegationId: error.delegationId,
+            },
+          });
+        }
+      } else if (error instanceof UserInteractionTimeoutError) {
+        await this.#finishFailed(current, error.message);
+      } else if (controller?.signal.aborted) {
         await this.#finishLocallyCancelledRun(current, "run cancelled");
       } else {
         await this.#finishFailed(current, error instanceof Error ? error.message : String(error));
@@ -1196,6 +1622,38 @@ ${JSON.stringify(response)}`;
     // 计划同步不能把已经成功的运行时取消反转成网关失败；标准 STOP_CHAT
     // 仍会由 BE 在 Gateway 返回后执行权威的 confirmCancellation。
     await this.#taskPlans.cancel({ context, reason }).catch(() => undefined);
+  }
+
+  /** Run 异常终止时把活动计划收敛到 FAILED，避免前端永久停留在执行中。 */
+  async #failActiveTaskPlan(run: Run): Promise<void> {
+    if (!this.#taskPlans) {
+      return;
+    }
+    const metadata = this.#ephemeralMetadata.get(run.id) ?? {};
+    const context = this.#taskPlanContext(run, metadata);
+    if (!context) {
+      return;
+    }
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const snapshot = await this.#taskPlans.loadActive(context);
+        if (!snapshot || snapshot.status !== "ACTIVE") {
+          return;
+        }
+        await this.#taskPlans.update({
+          context,
+          idempotencyKey: `run-failed:${run.id}:${snapshot.version}`,
+          update: taskPlanUpdateForRunFailure(snapshot),
+        });
+        return;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError instanceof Error
+      ? lastError
+      : new Error(`Unable to close task plan for failed Run ${run.id}`);
   }
 
   /**
@@ -1296,11 +1754,24 @@ ${JSON.stringify(response)}`;
     if (latest && TERMINAL_RUN_STATUSES.has(latest.status)) {
       return latest;
     }
+    const runToFail = latest ?? run;
+    await this.#failActiveTaskPlan(runToFail).catch((taskPlanError) => {
+      this.runtime.logger?.warn(
+        {
+          runId: runToFail.id,
+          error:
+            taskPlanError instanceof Error
+              ? taskPlanError.message
+              : String(taskPlanError),
+        },
+        "Run 失败后的任务计划收口同步失败",
+      );
+    });
     const finished: Run = {
-      ...(latest ?? run),
+      ...runToFail,
       status: "FAILED",
       executionStage: "SETTLED",
-      version: (latest ?? run).version + 1,
+      version: runToFail.version + 1,
       error,
       updatedAt: this.now(),
       finishedAt: this.now(),
@@ -1368,39 +1839,93 @@ ${JSON.stringify(response)}`;
     interactionId: string,
     afterEventId: number,
     signal: AbortSignal,
+    deadlineAt: number,
+    timeoutMs: number,
   ): Promise<UserInteractionResponse> {
-    for await (const event of this.events.stream(runId, afterEventId, signal)) {
-      if (
-        event.type === "interaction.responded" &&
-        event.data.interactionId === interactionId
-      ) {
-        const action =
-          event.data.action === "skip" || event.data.action === "cancel"
-            ? event.data.action
-            : "submit";
-        const answers =
-          event.data.answers &&
-          typeof event.data.answers === "object" &&
-          !Array.isArray(event.data.answers)
-            ? event.data.answers
-            : undefined;
-        return {
-          action,
-          ...(answers ? { answers } : {}),
-          ...(typeof event.data.text === "string"
-            ? { text: event.data.text }
-            : {}),
-        };
+    const timeoutError = new UserInteractionTimeoutError(
+      interactionId,
+      timeoutMs,
+    );
+    const timeoutController = new AbortController();
+    const remainingMs = Math.max(0, deadlineAt - this.now());
+    const timeout = setTimeout(() => {
+      timeoutController.abort(timeoutError);
+    }, remainingMs);
+    timeout.unref?.();
+    const interactionSignal = AbortSignal.any([
+      signal,
+      timeoutController.signal,
+    ]);
+
+    try {
+      for await (const event of this.events.stream(
+        runId,
+        afterEventId,
+        interactionSignal,
+      )) {
+        if (
+          event.type === "interaction.responded" &&
+          event.data.interactionId === interactionId
+        ) {
+          const action =
+            event.data.action === "skip" || event.data.action === "cancel"
+              ? event.data.action
+              : "submit";
+          const answers =
+            event.data.answers &&
+            typeof event.data.answers === "object" &&
+            !Array.isArray(event.data.answers)
+              ? event.data.answers
+              : undefined;
+          return {
+            action,
+            ...(answers ? { answers } : {}),
+            ...(typeof event.data.text === "string"
+              ? { text: event.data.text }
+              : {}),
+          };
+        }
       }
+      if (timeoutController.signal.aborted) {
+        throw timeoutError;
+      }
+      signal.throwIfAborted();
+      throw new Error(`Interaction event stream ended: ${interactionId}`);
+    } finally {
+      clearTimeout(timeout);
     }
-    throw new Error(`Interaction event stream ended: ${interactionId}`);
   }
 }
 
 function userMessageForRunFailure(error: string): string | undefined {
-  return error.startsWith("Leader model call failed:")
-    ? DOWNSTREAM_MODEL_FAILURE_USER_MESSAGE
-    : undefined;
+  if (error.startsWith(DOWNSTREAM_MODEL_FAILURE_PREFIX)) {
+    return error.slice(DOWNSTREAM_MODEL_FAILURE_PREFIX.length).trim() || error;
+  }
+  if (error.startsWith(`${USER_INTERACTION_TIMEOUT_ERROR_CODE}:`)) {
+    return USER_INTERACTION_TIMEOUT_USER_MESSAGE;
+  }
+  return undefined;
+}
+
+function interactionTiming(
+  requested: RunEvent,
+  defaultTimeoutMs: number,
+): { deadlineAt: number; timeoutMs: number } {
+  const storedTimeoutMs = requested.data.timeoutMs;
+  const timeoutMs =
+    typeof storedTimeoutMs === "number" &&
+    Number.isFinite(storedTimeoutMs) &&
+    storedTimeoutMs > 0
+      ? storedTimeoutMs
+      : defaultTimeoutMs;
+  const deadlineAt = requested.data.deadlineAt;
+  return {
+    deadlineAt:
+      typeof deadlineAt === "number" && Number.isFinite(deadlineAt)
+        ? deadlineAt
+        : requested.timestamp + timeoutMs,
+    timeoutMs,
+  };
 }
 
 function latestLeaderModel(run: Run) {
@@ -1466,6 +1991,133 @@ function validateAgentList(agentList: AgentProfile[]): void {
     }
     seen.add(agent.id);
   }
+}
+
+function delegationTerminalTaskUpdate(result: AgentResult): {
+  status: "FAILED" | "CANCELLED";
+  idempotencySuffix: "failed" | "cancelled";
+  statusReason: TaskPlanStatusReason;
+} | undefined {
+  if (result.status === "failed") {
+    return {
+      status: "FAILED",
+      idempotencySuffix: "failed",
+      statusReason: {
+        code: "DELEGATION_FAILED",
+        message: "数字员工调度失败",
+      },
+    };
+  }
+  if (result.status === "timed_out") {
+    return {
+      status: "FAILED",
+      idempotencySuffix: "failed",
+      statusReason: {
+        code: "DELEGATION_TIMEOUT",
+        message: "数字员工调度超时",
+      },
+    };
+  }
+  if (result.status === "cancelled") {
+    return {
+      status: "CANCELLED",
+      idempotencySuffix: "cancelled",
+      statusReason: {
+        code: "DELEGATION_CANCELLED",
+        message: "数字员工调度已取消",
+      },
+    };
+  }
+  return undefined;
+}
+
+function taskPlanUpdateWithTaskStatus(
+  snapshot: TaskPlanSnapshot,
+  taskPosition: number,
+  status: TaskPlanTaskStatus,
+  statusReason?: TaskPlanStatusReason,
+): TaskPlanUpdate {
+  if (!Number.isInteger(taskPosition) || taskPosition < 1) {
+    throw new Error("taskPosition must be a positive integer");
+  }
+  const orderedTasks = [...snapshot.tasks].sort(
+    (left, right) => left.position - right.position,
+  );
+  if (!orderedTasks.some(({ position }) => position === taskPosition)) {
+    throw new Error(`Task plan position ${taskPosition} does not exist`);
+  }
+  return {
+    title: snapshot.title,
+    ...(snapshot.explanation ? { explanation: snapshot.explanation } : {}),
+    tasks: orderedTasks.map((task) => ({
+      step: task.title,
+      ...(task.description ? { description: task.description } : {}),
+      status: task.position === taskPosition ? status : task.status,
+      ...(task.position === taskPosition
+        ? statusReason
+          ? { statusReason }
+          : {}
+        : task.statusReason
+          ? { statusReason: task.statusReason }
+          : {}),
+    })),
+  };
+}
+
+function taskPlanUpdateForRunFailure(snapshot: TaskPlanSnapshot): TaskPlanUpdate {
+  const orderedTasks = [...snapshot.tasks].sort(
+    (left, right) => left.position - right.position,
+  );
+  const hasFailedTask = orderedTasks.some(({ status }) => status === "FAILED");
+  const firstPendingPosition = orderedTasks.find(
+    ({ status }) => status === "PENDING",
+  )?.position;
+  const hasInProgressTask = orderedTasks.some(
+    ({ status }) => status === "IN_PROGRESS",
+  );
+  return {
+    title: snapshot.title,
+    ...(snapshot.explanation ? { explanation: snapshot.explanation } : {}),
+    tasks: orderedTasks.map((task) => {
+      if (task.status === "IN_PROGRESS") {
+        return {
+          step: task.title,
+          ...(task.description ? { description: task.description } : {}),
+          status: "FAILED" as const,
+          statusReason: {
+            code: "RUN_FAILED",
+            message: "运行失败，任务计划已自动收口",
+          },
+        };
+      }
+      if (task.status === "PENDING") {
+        const shouldFail =
+          !hasFailedTask &&
+          !hasInProgressTask &&
+          task.position === firstPendingPosition;
+        return {
+          step: task.title,
+          ...(task.description ? { description: task.description } : {}),
+          status: shouldFail ? ("FAILED" as const) : ("SKIPPED" as const),
+          statusReason: shouldFail
+            ? {
+                code: "RUN_FAILED",
+                message: "运行失败，任务计划已自动收口",
+              }
+            : {
+                code: "RUN_ABORTED",
+                message: "运行失败，未开始任务已跳过",
+              },
+        };
+      }
+      return {
+        step: task.title,
+        ...(task.description ? { description: task.description } : {}),
+        status: task.status,
+        ...(task.statusReason ? { statusReason: task.statusReason } : {}),
+      };
+    }),
+  };
 }
 
 /** 从 Run 执行上下文 metadata 中读取短期 Beyond-Token；缺失或非字符串返回空串。 */

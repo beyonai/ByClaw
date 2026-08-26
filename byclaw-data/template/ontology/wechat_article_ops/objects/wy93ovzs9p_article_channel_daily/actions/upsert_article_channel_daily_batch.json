@@ -35,8 +35,8 @@
     },
     {
       "paramCode": "items",
-      "paramName": "渠道项数组",
-      "type": "array",
+      "paramName": "渠道指标JSON数组字符串（兼容对象列表）。每项对象字段：channel（string，必填，枚举：全部、公众号消息、公众号会话、聊天会话、朋友圈、公众号主页、推荐、搜一搜、其他）；read_count（integer，可选，大于等于0）；share_count（integer，可选，大于等于0）。示例对象字段值：channel=\"推荐\"，read_count=48，share_count=0",
+      "paramType": "STRING",
       "isRequired": true,
       "direction": "input"
     },

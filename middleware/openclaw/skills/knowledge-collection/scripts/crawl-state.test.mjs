@@ -75,6 +75,25 @@ test('max-pages 超出部分记为 overCap 而非静默丢弃', () => {
   assert.equal(out.added, 2);
   assert.equal(out.skipped.overCap, 1);
 });
+test('crawl coverage 持久化并阻止未完成的 all 交付', () => {
+  const dir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'kc-crawl-')), 's2-status');
+  run([
+    'init', '--session-dir', dir, '--query', 'all crawl',
+    '--source-scope', '["public-internet"]', '--materialization-target', 'all',
+  ]);
+  const file = path.join(dir, 'u.txt');
+  fs.writeFileSync(file, ['a', 'b', 'c'].map((x) => `https://ok.com/${x}`).join('\n'));
+  run(['crawl-seed', '--session-dir', dir, '--urls-file', file, '--max-pages', '2']);
+  const crawl = run(['crawl-status', '--session-dir', dir]);
+  assert.equal(crawl.coverage.overCap, 1);
+  run(['crawl-seed', '--session-dir', dir, '--urls-file', file, '--max-pages', '3']);
+  const expanded = run(['crawl-status', '--session-dir', dir]);
+  assert.equal(expanded.coverage.overCap, 0, '扩大 cap 并补入页面后应清除未覆盖计数');
+  const status = run(['status', '--session-dir', dir]);
+  assert.equal(status.crawl.pending, 3);
+  assert.equal(status.crawl.coverage.overCap, 0);
+  assert.equal(status.collection.deliveryComplete, false);
+});
 test('max-pages 偏斜警告(再现 Dify sitemap api-reference 批量入队)', () => {
   // 24 页全部来自 api-reference/annotations,其余 72 页被 overCap 放弃 → 触发警告
   const dir = makeSession('s2b');
@@ -94,7 +113,7 @@ test('重复 seed 不重置已有状态', () => {
   const file = path.join(dir, 'u.txt');
   fs.writeFileSync(file, 'https://ok.com/a\n');
   run(['crawl-seed', '--session-dir', dir, '--urls-file', file]);
-  const markFile = path.join(dir, '.post-processing-inputs', 'm.json');
+  const markFile = path.join(dir, '.collection-inputs', 'm.json');
   fs.writeFileSync(markFile, JSON.stringify({ results: [{ url: 'https://ok.com/a', status: 'fetched' }] }));
   run(['crawl-mark', '--session-dir', dir, '--mark-json-file', markFile]);
   const out = run(['crawl-seed', '--session-dir', dir, '--urls-file', file]);
@@ -116,7 +135,7 @@ test('crawl-next 只返回 pending,已 fetched 不再出队', () => {
   const file = path.join(dir, 'u.txt');
   fs.writeFileSync(file, 'https://ok.com/a\nhttps://ok.com/b\n');
   run(['crawl-seed', '--session-dir', dir, '--urls-file', file]);
-  const markFile = path.join(dir, '.post-processing-inputs', 'm.json');
+  const markFile = path.join(dir, '.collection-inputs', 'm.json');
   fs.writeFileSync(markFile, JSON.stringify({ results: [{ url: 'https://ok.com/a', status: 'fetched' }] }));
   run(['crawl-mark', '--session-dir', dir, '--mark-json-file', markFile]);
   const out = run(['crawl-next', '--session-dir', dir]);
@@ -127,7 +146,7 @@ test('status=failed 必须带 reason', () => {
   const file = path.join(dir, 'u.txt');
   fs.writeFileSync(file, 'https://ok.com/a\n');
   run(['crawl-seed', '--session-dir', dir, '--urls-file', file]);
-  const markFile = path.join(dir, '.post-processing-inputs', 'm.json');
+  const markFile = path.join(dir, '.collection-inputs', 'm.json');
   fs.writeFileSync(markFile, JSON.stringify({ results: [{ url: 'https://ok.com/a', status: 'failed' }] }));
   const out = run(['crawl-mark', '--session-dir', dir, '--mark-json-file', markFile], { expectFail: true });
   assert.match(out.error, /必须给出 reason/);
@@ -137,12 +156,12 @@ test('未入队 URL 拒绝登记', () => {
   const file = path.join(dir, 'u.txt');
   fs.writeFileSync(file, 'https://ok.com/a\n');
   run(['crawl-seed', '--session-dir', dir, '--urls-file', file]);
-  const markFile = path.join(dir, '.post-processing-inputs', 'm.json');
+  const markFile = path.join(dir, '.collection-inputs', 'm.json');
   fs.writeFileSync(markFile, JSON.stringify({ results: [{ url: 'https://other.com/x', status: 'fetched' }] }));
   const out = run(['crawl-mark', '--session-dir', dir, '--mark-json-file', markFile], { expectFail: true });
   assert.match(out.error, /不在 frontier 中/);
 });
-test('payload 必须位于 .post-processing-inputs/ 内', () => {
+test('payload 必须位于 .collection-inputs/ 内', () => {
   const dir = makeSession('n4');
   const file = path.join(dir, 'u.txt');
   fs.writeFileSync(file, 'https://ok.com/a\n');
@@ -150,14 +169,30 @@ test('payload 必须位于 .post-processing-inputs/ 内', () => {
   const outside = path.join(dir, 'm.json');
   fs.writeFileSync(outside, JSON.stringify({ results: [{ url: 'https://ok.com/a', status: 'fetched' }] }));
   const out = run(['crawl-mark', '--session-dir', dir, '--mark-json-file', outside], { expectFail: true });
-  assert.match(out.error, /必须位于 \.post-processing-inputs\//);
+  assert.match(out.error, /必须位于 \.collection-inputs\//);
+});
+test('payload 的符号链接父目录不能越出 .collection-inputs/', () => {
+  const dir = makeSession('n4b');
+  const file = path.join(dir, 'u.txt');
+  fs.writeFileSync(file, 'https://ok.com/a\n');
+  run(['crawl-seed', '--session-dir', dir, '--urls-file', file]);
+  const outsideDir = path.join(dir, 'outside-inputs');
+  fs.mkdirSync(outsideDir);
+  const outside = path.join(outsideDir, 'm.json');
+  fs.writeFileSync(outside, JSON.stringify({ results: [{ url: 'https://ok.com/a', status: 'fetched' }] }));
+  fs.symlinkSync(outsideDir, path.join(dir, '.collection-inputs', 'link'), 'dir');
+  const out = run([
+    'crawl-mark', '--session-dir', dir, '--mark-json-file', path.join(dir, '.collection-inputs/link/m.json'),
+  ], { expectFail: true });
+  assert.match(out.error, /必须位于 \.collection-inputs\//);
+  assert.equal(fs.existsSync(outside), true);
 });
 test('成功登记后删除 payload', () => {
   const dir = makeSession('n5');
   const file = path.join(dir, 'u.txt');
   fs.writeFileSync(file, 'https://ok.com/a\n');
   run(['crawl-seed', '--session-dir', dir, '--urls-file', file]);
-  const markFile = path.join(dir, '.post-processing-inputs', 'm.json');
+  const markFile = path.join(dir, '.collection-inputs', 'm.json');
   fs.writeFileSync(markFile, JSON.stringify({ results: [{ url: 'https://ok.com/a', status: 'fetched' }] }));
   run(['crawl-mark', '--session-dir', dir, '--mark-json-file', markFile]);
   assert.equal(fs.existsSync(markFile), false);
