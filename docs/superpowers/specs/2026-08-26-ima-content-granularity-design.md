@@ -1,4 +1,4 @@
-# IMA 内容粒度与封面降级设计
+# IMA 内容粒度与受控封面物化设计
 
 ## 背景
 
@@ -10,15 +10,16 @@ IMA 知识库目录接口可能只返回 AI 摘要和正文开头，但现有采
 
 1. 结构化记录每个已物化正文的内容粒度，并与交付流程状态分离。
 2. 无法证明正文完整时不得标记为全文。
-3. 删除 IMA 适配器的默认直接 HTTP 封面下载。
-4. 封面无法合规本地化时，正文仍可成功物化；封面缺失作为独立覆盖信息报告。
+3. 保留 IMA 封面与文章同次物化，并将原始无边界下载替换为受控 HTTPS 下载器。
+4. 封面下载失败时不得发布只有正文的半成品；该条物化失败并保留可审计原因。
 5. IMA 恢复物化后保留知识库过滤器，避免 `collection-result.json.filters` 丢失 `kb`。
 6. 保持旧会话可读，不修改既有会话文件。
 
 ## 非目标
 
-- 不新增通用网络下载器。
-- 不通过 `curl`、`wget`、`fetch`、browser eval 或其他直接 HTTP 方式下载封面。
+- 不新增可下载任意 URL 的通用网络下载器。
+- 不通过 `curl`、`wget`、browser eval 或会话外工具下载封面。
+- 不允许受控下载器处理 IMA 来源记录之外的 URL 或非 HTTPS URL。
 - 不将 `web/read` 或 `weixin/download` 误用为任意图片下载命令。
 - 不重新采集或改写已经交付的 IMA 会话。
 - 不把微信公众号全文采集纳入本次修改。
@@ -46,7 +47,7 @@ IMA 知识库目录接口可能只返回 AI 摘要和正文开头，但现有采
 - `collection.status=complete` 仅表示本次范围内的采集流程完成。
 - `deliveryComplete=true` 仅表示目标交付产物齐备。
 
-旧会话或缺失字段在读取和标准化时按 `unknown` 处理，绝不默认 `full-text`。非法枚举值在严格写入边界被拒绝；恢复旧状态时降级为 `unknown` 并产生可追踪警告。
+旧会话或缺失字段在读取和标准化时按 `unknown` 处理，绝不默认 `full-text`。非法枚举值在严格写入边界被拒绝；恢复旧状态时降级为 `unknown` 并产生可追踪警告。只读 `status` 和 `inspect` 只能在内存中兼容旧字段，不得静默改写旧会话；显式迁移或写操作才能持久化新契约。
 
 ## IMA 粒度判定
 
@@ -66,20 +67,23 @@ IMA 知识库目录接口可能只返回 AI 摘要和正文开头，但现有采
 
 IMA 发现阶段继续保留来源响应中的 `coverUrls`，原始 byCLI JSON 仍是权威来源证据。
 
-物化阶段不再默认调用 `globalThis.fetch`，也不再接受可退回到直接 HTTP 的 `fetchImpl`。当前没有合规封面下载能力时：
+物化阶段使用 IMA adapter 内置的受控 HTTPS 下载器处理来源记录中的 `coverUrls`。它不是通用下载接口，必须同时满足：
 
-- 正文正常写入 `markdown/items/<article-name>-<item-id>/index.md` 和 `sanitized/items/<article-name>-<item-id>/index.md`。
-- Markdown 不插入远程图片链接，也不伪造本地 `assets/` 路径。
-- inventory 保留 `coverUrls`，并增加结构化封面状态，区分“没有封面”和“存在封面但未本地化”。
-- 封面未本地化不使正文 `materialization.status` 变为 `failed`。
-- 状态与交付报告汇总封面缺失数量，明确这是媒体覆盖缺口。
+- 只接受 `bycli ima knowledge` 已返回并保存在 inventory/raw 证据中的 HTTPS URL。
+- 限制单张封面的响应字节数、请求超时和重定向次数；每次重定向后的目标仍必须是 HTTPS。
+- 在读取完整响应前检查 `Content-Length`（若存在），流式读取时再次执行硬字节上限。
+- 只接受允许列表中的图片 MIME 类型，并根据验证后的 MIME 决定扩展名。
+- 下载到临时文件并原子写入 `sanitized/items/<article-name>-<item-id>/assets/`；正文 Markdown 只引用已经成功落盘的相对路径。
+- 任一封面失败时不发布该条正文的半成品，该条 `materialization.status=failed`，原因保持非敏感且可审计。
+
+无 `coverUrls` 的条目正常物化正文，不创建 `assets/`。禁止把远程图片链接直接写入交付 Markdown，也禁止伪造不存在的本地路径。
 
 封面状态设计为独立对象：
 
 ```json
 {
   "media": {
-    "coverStatus": "not-present | materialized | unavailable",
+    "coverStatus": "not-present | materialized | unavailable | unknown",
     "coverCount": 0,
     "materializedCoverCount": 0,
     "reason": null
@@ -87,12 +91,13 @@ IMA 发现阶段继续保留来源响应中的 `coverUrls`，原始 byCLI JSON �
 }
 ```
 
-当前实现只会生成：
+新 IMA 会话生成：
 
 - 无 `coverUrls`：`not-present`。
-- 有 `coverUrls` 但没有合规下载器：`unavailable`，`reason=approved-cover-downloader-unavailable`。
+- 所有 `coverUrls` 均成功落盘：`materialized`，且 `materializedCoverCount=coverCount`。
+- 下载失败：条目物化失败，`unavailable` 记录封面数量与失败原因。
 
-`materialized` 为未来受支持下载器预留；本次不实现该传输能力。
+旧会话缺失 `media` 时在只读视图中标记 `unknown`，不得默认 `not-present`。如果旧记录含 `coverUrls`，汇总必须保留其数量；除非通过显式迁移核验了本地资产，否则不得猜测为 `materialized` 或 `unavailable`。
 
 ## KB 追溯
 
@@ -107,16 +112,18 @@ metadata-only 会话恢复物化时，候选项已经保留 `kb` 和 `materializ
 `status` 输出增加两组计数：
 
 - `contentGranularity`：四种粒度的已物化条目数量；总和必须等于 `materialized`。
-- `mediaCovers`：`notPresent`、`materialized`、`unavailable` 的条目数量。
+- `mediaCovers`：`notPresent`、`materialized`、`unavailable`、`unknown` 的条目数量。
 
 这些计数不参与 `deliveryComplete` 的布尔判定，避免将媒体覆盖和正文交付混为一谈。
+
+技能交付规范必须强制输出正文粒度与媒体覆盖计数。只要存在 `excerpt`、`abstract` 或 `unknown`，报告就不得把对应记录称为“完整文章正文”；应使用“记录及可获取片段/摘要”等准确措辞，并将缺失全文列入覆盖缺口。`excerpt` 和 `abstract` 可以作为有明确粒度的实际采集产物登记，不能冒充 `full-text`。
 
 ## 错误处理
 
 - 内容粒度非法：新 bundle 写入时拒绝；旧会话恢复时归一化为 `unknown` 并告警。
-- 封面存在但无合规下载能力：正文继续交付，封面状态为 `unavailable`。
+- 封面下载超时、超限、重定向越界、非 HTTPS 或 MIME 不合法：该条物化失败，不发布正文半成品，媒体状态为 `unavailable`。
 - KB 混合：在写 bundle 前失败，错误应列出冲突的非敏感 KB 名称。
-- 不引入网络重试、超时或重定向逻辑，因为本次彻底移除适配器的直接网络下载。
+- 下载器不自动重试，避免重复外部请求；超时、字节和重定向边界必须可测试且使用固定安全默认值。
 
 ## 测试设计
 
@@ -129,10 +136,12 @@ metadata-only 会话恢复物化时，候选项已经保留 `kb` 和 `materializ
 5. 旧会话缺字段归一化为 `unknown`；非法值严格写入时被拒绝。
 6. collect 缺省为 `unknown`，显式合法值被保留。
 7. 粒度汇总之和等于已物化数量。
-8. 有 `coverUrls` 时不调用任何 HTTP downloader，正文仍成功，封面状态为 `unavailable`，Markdown 无远程或伪造图片。
-9. 无封面时状态为 `not-present`。
-10. 恢复物化保留共同 `filters.kb`；混合 KB 被拒绝。
-11. 现有 IMA、collection-state、artifact-writer 和技能契约测试继续通过。
+8. 有 `coverUrls` 时受控下载器取得图片，封面与正文位于同一文章目录，Markdown 使用本地相对路径。
+9. 非 HTTPS、超时、重定向超限、响应超限或 MIME 非图片时，该条失败且不发布正文半成品。
+10. 无封面时状态为 `not-present`；旧会话缺失媒体状态时只读归一化为 `unknown`，且 `status` 不改写会话文件。
+11. `status` 和最终交付规范必须显式报告粒度、封面计数，并禁止把片段表述为全文。
+12. 恢复物化保留共同 `filters.kb`；混合 KB 被拒绝。
+13. 现有 IMA、collection-state、artifact-writer 和技能契约测试继续通过。
 
 ## 实施范围
 
