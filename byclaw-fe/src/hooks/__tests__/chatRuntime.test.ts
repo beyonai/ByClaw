@@ -57,6 +57,7 @@ describe('hooks/useChat/chatRuntime', () => {
   });
 
   it('keeps a pending context alive and applies stream payloads', () => {
+    jest.useFakeTimers();
     const queryMsg: any = { msgId: 'q1', sessionId: 's1' };
     const answerMsg: any = { msgId: 'c1', sessionId: 's1', messageState: IMessageState.Query };
     const updateMessage = jest.fn((msg) => msg);
@@ -78,11 +79,13 @@ describe('hooks/useChat/chatRuntime', () => {
     });
 
     handleParsedChatStream(createParsed());
+    jest.advanceTimersByTime(30);
 
     expect(flowHandler).toHaveBeenCalled();
-    expect(updateMessage).toHaveBeenCalledWith(queryMsg);
+    expect(updateMessage).toHaveBeenCalledTimes(1);
     expect(updateMessage).toHaveBeenCalledWith(answerMsg, { isAssign: undefined });
     expect(answerMsg.messageList).toHaveLength(1);
+    jest.useRealTimers();
   });
 
   it('does not create message cache when no context exists', () => {

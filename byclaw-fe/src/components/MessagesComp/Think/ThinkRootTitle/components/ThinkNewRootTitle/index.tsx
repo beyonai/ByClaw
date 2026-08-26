@@ -151,31 +151,37 @@ const CollapsibleItem: React.FC<CollapsibleItemProps> = React.memo(
     }, [item.isCollapsed, item.shouldOpen]);
 
     React.useEffect(() => {
-      if (!hasTextChild) return;
+      if (!hasTextChild || effectiveCollapsed || !itemChildHeaderRef.current) return undefined;
 
+      let frameId: number | undefined;
       const autoScroll = () => {
-        if (!itemChildHeaderRef.current || isFinishedRef.current) return false;
+        if (!itemChildHeaderRef.current || isFinishedRef.current || isMouseOverRef.current) return;
 
         const element = itemChildHeaderRef.current;
         const hasOverflow = element.scrollHeight > element.clientHeight;
         setNeedsGradient(hasOverflow);
         element.scrollTop = element.scrollHeight;
-
-        return true;
       };
-
-      const scrollChecker = () => {
-        window.requestIdleCallback(() => {
-          if (isMouseOverRef.current) return;
-
-          if (autoScroll()) {
-            scrollChecker();
-          }
+      const scheduleScroll = () => {
+        if (frameId !== undefined) return;
+        frameId = window.requestAnimationFrame(() => {
+          frameId = undefined;
+          autoScroll();
         });
       };
 
-      scrollChecker();
-    }, [hasTextChild]);
+      scheduleScroll();
+      const element = itemChildHeaderRef.current;
+      const resizeObserver = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(scheduleScroll) : null;
+      resizeObserver?.observe(element);
+
+      return () => {
+        if (frameId !== undefined) {
+          window.cancelAnimationFrame(frameId);
+        }
+        resizeObserver?.disconnect();
+      };
+    }, [hasTextChild, item.children, effectiveCollapsed]);
 
     return (
       <div
