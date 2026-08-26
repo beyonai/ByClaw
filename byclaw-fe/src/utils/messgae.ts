@@ -24,6 +24,33 @@ export const isTextContentType = (contentType?: SSEMessageType | string) => {
   return [`${SSEMessageType.text}`, `${SSEMessageType.thinkText}`].includes(`${contentType}`);
 };
 
+const hasSubstance = (value?: unknown) => {
+  if (typeof value === 'string') return value.trim().length > 0;
+  return Boolean(value);
+};
+
+export const hasVisibleMessageListItem = (item?: Partial<IMessageListItem>) => {
+  if (!item?.contentType) return false;
+  if (`${item.contentType}` === `${SSEMessageType.thinkTitle}`) return false;
+  return hasSubstance(get(item, 'content.substance'));
+};
+
+export const hasVisibleMessageContent = (message?: Partial<IMessage>) => {
+  if (!message) return false;
+  if (!message.fromBeyond) {
+    return hasSubstance(message.text) || Boolean(message.fileList?.length || message.imageList?.length);
+  }
+  return (
+    hasSubstance(message.text) ||
+    Boolean(message.messageList?.some(hasVisibleMessageListItem)) ||
+    Boolean(message.thinkList?.some(hasVisibleMessageListItem)) ||
+    Boolean(message.fileList?.length || message.imageList?.length || message.resourceFrom?.length) ||
+    Boolean(message.resComIds?.length || message.relatedQuestions?.length) ||
+    Boolean(message.taskPlan?.tasks?.length) ||
+    hasSubstance(message.messageTip)
+  );
+};
+
 export const createMessage = (
   param: Omit<IMessage, 'msgId' | 'creatorId' | 'createTime'> & { msgId?: string; creatorId?: string }
 ): IMessage => {
@@ -127,6 +154,7 @@ export const fetchMessageHandler = (item: any) => {
     createTime,
     collectIds,
     sessionId,
+    taskPlan,
   } = item;
 
   // usage： 1-用户 2-大模型 3-追问 4-转发消息 5-交互消息
@@ -154,6 +182,7 @@ export const fetchMessageHandler = (item: any) => {
     thinkList: [],
     fileList: [],
     imageList: [],
+    taskPlan: taskPlan || undefined,
   };
 
   // 用户消息
