@@ -13,7 +13,8 @@ import { appendFileSync } from 'node:fs';
 const args = process.argv.slice(2);
 const out = (value) => process.stdout.write(JSON.stringify(value));
 if (process.env.IMA_CALLS_PATH) appendFileSync(process.env.IMA_CALLS_PATH, JSON.stringify(args) + '\\n');
-if (args[0] === 'auth' && args[1] === 'check') out({ checks: { token_fetch: true } });
+if (args[0] === 'auth' && args[1] === 'check' && process.env.AUTH_FAILURE_MODE === 'true') { process.stderr.write('credentials unavailable'); process.exit(2); }
+else if (args[0] === 'auth' && args[1] === 'check') out({ checks: { token_fetch: true } });
 else if (args[0] === 'ima' && args[1] === 'knowledge' && process.env.BYCLI_DUPLICATE_URLS === 'true') out([
   { mediaId: 'wiki-bycli-1', title: 'ByCLI roadmap', url: 'https://ima.qq.com/wiki-bycli-1', folderPath: '/Roadmap', abstract: 'bycli preview' },
   { mediaId: 'wiki-bycli-2', title: 'ByCLI roadmap copy', url: 'https://ima.qq.com/wiki-bycli-1', folderPath: '/Archive', abstract: 'duplicate preview' },
@@ -186,6 +187,74 @@ test('IMA materialization retains cover URLs from a metadata-only knowledge-base
     const collectionResult = JSON.parse(await readFile(join(outputDir, 'collection-result.json'), 'utf8'));
     assert.deepEqual(collectionResult.filters, { kb: 'kb-name' });
     assert.equal(materializedMetadata.sourceMetadata.kb, 'kb-name');
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('IMA materializes discovered excerpts and covers when Wiki retrieval is unavailable', async () => {
+  const { root, bin } = await fixture();
+  try {
+    const outputDir = join(root, 'search');
+    const result = await createImaAdapter({
+      bin,
+      bycliBin: bin,
+      env: {
+        ...process.env,
+        BYCLI_SUCCESS: 'true',
+        BYCLI_WITH_COVER: 'true',
+        BYCLI_WITH_INTRODUCTION: 'true',
+        WIKI_FAILURE_MODE: 'true',
+      },
+      fetchImpl: async () => ({
+        status: 200,
+        ok: true,
+        headers: { get: (name) => name.toLowerCase() === 'content-type' ? 'image/png' : null },
+        arrayBuffer: async () => Buffer.from('cover-image'),
+      }),
+    }).search({ outputDir, query: 'knowledge-base collection', kb: 'kb-name', limit: 10, metadataOnly: false });
+
+    assert.equal(result.status, 'complete');
+    const metadata = JSON.parse(await readFile(join(outputDir, 'sanitized/metadata.json'), 'utf8'));
+    const item = metadata.collection.items[0];
+    assert.equal(item.materialization.status, 'materialized');
+    assert.equal(item.materialization.contentGranularity, 'excerpt');
+    assert.match(item.materialization.sanitizedPath, /^sanitized\/items\/ByCLI-roadmap-ima-[a-f0-9]{16}\/index\.md$/);
+    assert.equal(item.media.coverStatus, 'materialized');
+    assert.match(await readFile(join(outputDir, item.materialization.sanitizedPath), 'utf8'), /bycli opening paragraph/);
+    assert.equal(
+      (await readFile(join(outputDir, item.materialization.sanitizedPath.replace('index.md', 'assets/cover-1.png')))).toString(),
+      'cover-image',
+    );
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('IMA resume materializes discovered excerpts without a current IMA credential', async () => {
+  const { root, bin } = await fixture();
+  try {
+    const discoveryDir = join(root, 'discovery');
+    await createImaAdapter({
+      bin,
+      bycliBin: bin,
+      env: { ...process.env, BYCLI_SUCCESS: 'true', BYCLI_WITH_COVER: 'true', BYCLI_WITH_INTRODUCTION: 'true' },
+    }).search({ outputDir: discoveryDir, query: 'knowledge-base collection', kb: 'kb-name', limit: 10, metadataOnly: true });
+    const metadata = JSON.parse(await readFile(join(discoveryDir, 'sanitized/metadata.json'), 'utf8'));
+    const outputDir = join(root, 'materialized');
+    const result = await createImaAdapter({
+      bin,
+      env: { ...process.env, AUTH_FAILURE_MODE: 'true' },
+      fetchImpl: async () => ({
+        status: 200,
+        ok: true,
+        headers: { get: (name) => name.toLowerCase() === 'content-type' ? 'image/png' : null },
+        arrayBuffer: async () => Buffer.from('cover-image'),
+      }),
+    }).materialize({ sessionDir: discoveryDir, outputDir, itemIds: [metadata.collection.items[0].itemId] });
+
+    assert.equal(result.status, 'complete');
+    const materialized = JSON.parse(await readFile(join(outputDir, 'sanitized/metadata.json'), 'utf8'));
+    const item = materialized.collection.items[0];
+    assert.equal(item.materialization.contentGranularity, 'excerpt');
+    assert.match(item.materialization.sanitizedPath, /^sanitized\/items\/ByCLI-roadmap-ima-[a-f0-9]{16}\/index\.md$/);
+    assert.equal(item.media.coverStatus, 'materialized');
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

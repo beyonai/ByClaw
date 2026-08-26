@@ -39,6 +39,8 @@ sanitized/items/<article-name>-<item-id>/
 
 封面与正文必须作为同一条目一起处理。成功取得的封面写入该文章的 `sanitized/items/<article-name>-<item-id>/assets/`，正文只以本地相对链接引用这些已落盘封面；全部封面成功时登记 `media.coverStatus=materialized`。封面失败不改变正文的物化状态：正文成功时仍登记 `materialization.status=materialized` 并进入 canonical view；媒体单独登记 `media.coverStatus=unavailable`、原始封面数、成功封面数和非敏感失败类别。不得插入失败封面的远程链接或虚构路径，也不得泄露带签名的 URL。
 
+当指定知识库的 `bycli ima knowledge` 原始记录已包含 `abstract` 或 `introduction`，而后续 `ima wiki search` 因配额、连接或认证不可用而无法读取时，IMA adapter 必须直接物化这份已获准、可追溯的原始记录：仍使用 `<article-name>-<item-id>` 目录和受控封面下载器，并把内容粒度如实登记为 `excerpt` 或 `abstract`。不得手工复制 Markdown、不得改用 `ima-<item-id>` 平铺目录、不得跳过封面下载，也不得把失败库存条目改写成已物化。
+
 每个 materialized IMA 条目必须写入 `materialization.contentGranularity`：明确的完整性证据才允许 `full-text`；`abstract + introduction` 或正文开头标记为 `excerpt`；仅摘要为 `abstract`；普通 `content` 字段或无法证明完整度时为 `unknown`。旧会话缺失字段一律按 `unknown`，不得默认 `full-text`。该字段不改变 `complete`、`deliveryComplete` 或 `materialized` 的流程语义。
 
 旧会话缺失或含非法 media 状态时，读取结果按 `media.coverStatus=unknown`、`reason=legacy-media-state-unknown` 报告；只读 `status` 不得因此修改原会话文件。

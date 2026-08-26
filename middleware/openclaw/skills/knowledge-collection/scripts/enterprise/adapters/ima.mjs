@@ -55,6 +55,11 @@ function contentOf(value) {
   return '';
 }
 
+function discoveryExcerptOf(item) {
+  if (item?.sourceType !== 'wiki' || typeof item.preview !== 'string' || !item.preview.trim()) return '';
+  return item.preview.trim();
+}
+
 function coverUrlsOf(value) {
   if (!Array.isArray(value?.coverUrls)) return [];
   return [...new Set(value.coverUrls.filter((url) => {
@@ -409,9 +414,15 @@ async function materializeOne(writer, item, bin, env, fetchImpl) {
   const createdFiles = [];
   let rawArtifacts = item.rawArtifacts;
   try {
-    const response = await callJson(writer, bin, env, args, artifact);
-    rawArtifacts = [...item.rawArtifacts, artifact];
-    const content = contentOf(response) || item.preview;
+    let content = '';
+    try {
+      const response = await callJson(writer, bin, env, args, artifact);
+      rawArtifacts = [...item.rawArtifacts, artifact];
+      content = contentOf(response) || item.preview;
+    } catch (error) {
+      content = discoveryExcerptOf(item);
+      if (!content) throw error;
+    }
     if (!content) throw new Error(`ima ${item.sourceType} returned no content`);
     if (Buffer.byteLength(content, 'utf8') > MAX_CONTENT_BYTES) {
       throw new Error('IMA content exceeds materialization limit');
@@ -550,8 +561,8 @@ export function createImaAdapter(dependencies = {}) {
 
   async function materialize(request = {}) {
     const writer = await createArtifactWriter(request.outputDir);
-    await authCheck(bin, env);
     const candidates = await copyResumeArtifacts(writer, await readResumeCandidates(request.sessionDir, identity.source, request.itemIds || []));
+    if (candidates.some((item) => !discoveryExcerptOf(item))) await authCheck(bin, env);
     const kb = commonKnowledgeBase(candidates);
     const inventory = [];
     for (const item of candidates) {
