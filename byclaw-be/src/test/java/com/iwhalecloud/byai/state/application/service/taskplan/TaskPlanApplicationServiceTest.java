@@ -65,26 +65,34 @@ class TaskPlanApplicationServiceTest {
     }
 
     @Test
-    void create_persistsSingleRowAndReturnsServerAssignedIds() {
+    void create_usesDatabasePlanIdAndPositionTaskIds() {
         when(planMapper.selectOne(any())).thenReturn(null);
+        when(planMapper.insert(any())).thenAnswer(invocation -> {
+            ByaiAgentTaskPlan plan = invocation.getArgument(0);
+            plan.setPlanId(1L);
+            return 1;
+        });
 
         TaskPlanSnapshot snapshot = service.update(createRequest());
 
+        assertThat(snapshot.getPlanId()).isEqualTo("1");
         assertThat(snapshot.getStatus()).isEqualTo("ACTIVE");
         assertThat(snapshot.getVersion()).isEqualTo(1);
+        assertThat(snapshot.getTasks()).extracting(TaskPlanSnapshot.TaskSnapshot::getTaskId)
+            .containsExactly("1", "2");
         assertThat(snapshot.getTasks()).extracting(TaskPlanSnapshot.TaskSnapshot::getStatus)
             .containsExactly("IN_PROGRESS", "PENDING");
-        assertThat(snapshot.getTasks()).extracting(TaskPlanSnapshot.TaskSnapshot::getTaskId)
-            .doesNotContainNull();
         verify(planMapper).insert(any(ByaiAgentTaskPlan.class));
     }
 
     @Test
-    void create_replaysTheFirstSnapshotForTheSameIdempotencyKey() {
+    void create_replaysCurrentSnapshotForTheSameCommandId() {
         AtomicReference<ByaiAgentTaskPlan> stored = new AtomicReference<>();
         when(planMapper.selectOne(any())).thenAnswer(invocation -> stored.get());
         when(planMapper.insert(any())).thenAnswer(invocation -> {
-            stored.set(invocation.getArgument(0));
+            ByaiAgentTaskPlan plan = invocation.getArgument(0);
+            plan.setPlanId(1L);
+            stored.set(plan);
             return 1;
         });
 
@@ -98,9 +106,8 @@ class TaskPlanApplicationServiceTest {
     }
 
     @Test
-    void create_rejectsASecondPlanForTheSameRun() {
-        ByaiAgentTaskPlan existing = plan("ACTIVE", 1, tasks("IN_PROGRESS", "PENDING"));
-        when(planMapper.selectOne(any())).thenReturn(existing);
+    void create_rejectsAnotherActivePlanForTheSameSession() {
+        when(planMapper.selectOne(any())).thenReturn(plan("ACTIVE", 1, tasks("IN_PROGRESS", "PENDING")));
         TaskPlanUpdateRequest request = createRequest();
         request.setIdempotencyKey("another-create");
 
@@ -112,78 +119,45 @@ class TaskPlanApplicationServiceTest {
     }
 
     @Test
-    void update_changesOnlyStatusesAndAdvancesVersionWithCas() {
+    void completeCurrent_completesCurrentAndStartsNextAtomically() {
         ByaiAgentTaskPlan active = plan("ACTIVE", 1, tasks("IN_PROGRESS", "PENDING"));
         when(planMapper.selectOne(any())).thenReturn(active);
         when(planMapper.update(any(), any(Wrapper.class))).thenReturn(1);
 
-        TaskPlanUpdateRequest request = updateRequest(active, List.of(
-            statusUpdate("101", "COMPLETED", null),
-            statusUpdate("102", "IN_PROGRESS", null)));
-        TaskPlanSnapshot snapshot = service.update(request);
+        TaskPlanSnapshot snapshot = service.update(actionRequest("COMPLETE_CURRENT", "complete-1"));
 
         assertThat(snapshot.getVersion()).isEqualTo(2);
-        assertThat(snapshot.getTasks()).extracting(TaskPlanSnapshot.TaskSnapshot::getTaskId)
-            .containsExactly("101", "102");
-        assertThat(snapshot.getTasks()).extracting(TaskPlanSnapshot.TaskSnapshot::getTitle)
-            .containsExactly("分析协议", "实现协议");
         assertThat(snapshot.getTasks()).extracting(TaskPlanSnapshot.TaskSnapshot::getStatus)
             .containsExactly("COMPLETED", "IN_PROGRESS");
         verify(planMapper).update(any(), any(Wrapper.class));
     }
 
     @Test
-    void update_returnsCurrentPlanOnVersionConflict() {
-        ByaiAgentTaskPlan active = plan("ACTIVE", 3, tasks("COMPLETED", "IN_PROGRESS"));
-        when(planMapper.selectOne(any())).thenReturn(active);
-        TaskPlanUpdateRequest request = updateRequest(active,
-            List.of(statusUpdate("102", "COMPLETED", null)));
-        request.setExpectedVersion(2);
-
-        assertThatThrownBy(() -> service.update(request))
-            .isInstanceOfSatisfying(TaskPlanCommandException.class, error -> {
-                assertThat(error.getCode()).isEqualTo("VERSION_CONFLICT");
-                assertThat(error.getCurrentPlan().getVersion()).isEqualTo(3);
-            });
-    }
-
-    @Test
-    void update_rejectsChangingATerminalTask() {
+    void completeCurrent_completesThePlanWhenNoPendingTaskRemains() {
         ByaiAgentTaskPlan active = plan("ACTIVE", 2, tasks("COMPLETED", "IN_PROGRESS"));
         when(planMapper.selectOne(any())).thenReturn(active);
-        TaskPlanUpdateRequest request = updateRequest(active,
-            List.of(statusUpdate("101", "IN_PROGRESS", null)));
+        when(planMapper.update(any(), any(Wrapper.class))).thenReturn(1);
 
-        assertThatThrownBy(() -> service.update(request))
-            .isInstanceOfSatisfying(TaskPlanCommandException.class, error -> {
-                assertThat(error.getCode()).isEqualTo("ILLEGAL_TASK_TRANSITION");
-                assertThat(error.getCurrentPlan().getTasks().getFirst().getStatus()).isEqualTo("COMPLETED");
-            });
+        TaskPlanSnapshot snapshot = service.update(actionRequest("COMPLETE_CURRENT", "complete-2"));
+
+        assertThat(snapshot.getStatus()).isEqualTo("COMPLETED");
+        assertThat(snapshot.getVersion()).isEqualTo(3);
+        assertThat(snapshot.getTasks()).extracting(TaskPlanSnapshot.TaskSnapshot::getStatus)
+            .containsExactly("COMPLETED", "COMPLETED");
     }
 
     @Test
-    void update_rejectsStartingALaterTaskBeforeTheCurrentTaskFinishes() {
-        ByaiAgentTaskPlan active = plan("ACTIVE", 1, tasks("PENDING", "PENDING"));
-        when(planMapper.selectOne(any())).thenReturn(active);
-        TaskPlanUpdateRequest request = updateRequest(active,
-            List.of(statusUpdate("102", "IN_PROGRESS", null)));
-
-        assertThatThrownBy(() -> service.update(request))
-            .isInstanceOfSatisfying(TaskPlanCommandException.class,
-                error -> assertThat(error.getCode()).isEqualTo("INVALID_EXECUTION_ORDER"));
-    }
-
-    @Test
-    void update_failsFastAndSkipsPendingTasks() {
+    void failCurrent_failsFastAndSkipsPendingTasks() {
         ByaiAgentTaskPlan active = plan("ACTIVE", 1, tasks("IN_PROGRESS", "PENDING"));
         when(planMapper.selectOne(any())).thenReturn(active);
         when(planMapper.update(any(), any(Wrapper.class))).thenReturn(1);
+        TaskPlanUpdateRequest request = actionRequest("FAIL_CURRENT", "fail-1");
         TaskPlanUpdateRequest.StatusReasonInput reason = new TaskPlanUpdateRequest.StatusReasonInput();
         reason.setCode("DELEGATION_FAILED");
         reason.setMessage("数字员工调度失败");
+        request.setStatusReason(reason);
 
-        TaskPlanSnapshot snapshot = service.update(updateRequest(active,
-            List.of(statusUpdate("101", "FAILED", reason))));
+        TaskPlanSnapshot snapshot = service.update(request);
 
         assertThat(snapshot.getStatus()).isEqualTo("FAILED");
         assertThat(snapshot.getTasks()).extracting(TaskPlanSnapshot.TaskSnapshot::getStatus)
@@ -193,13 +167,25 @@ class TaskPlanApplicationServiceTest {
     }
 
     @Test
-    void cancellationPreservesCompletedWorkAndClosesUnfinishedTasks() {
+    void repeatedTerminalCommandReturnsLatestSnapshotWithoutAnotherWrite() {
+        ByaiAgentTaskPlan completed = plan("COMPLETED", 3, tasks("COMPLETED", "COMPLETED"));
+        completed.setLastCommandId("complete-2");
+        when(planMapper.selectOne(any())).thenReturn(null, completed);
+
+        TaskPlanSnapshot snapshot = service.update(actionRequest("COMPLETE_CURRENT", "complete-2"));
+
+        assertThat(snapshot.getStatus()).isEqualTo("COMPLETED");
+        assertThat(snapshot.getVersion()).isEqualTo(3);
+    }
+
+    @Test
+    void cancellationUsesTheOnlyActivePlanInTheSession() {
         ByaiAgentTaskPlan active = plan("ACTIVE", 2, tasks("COMPLETED", "IN_PROGRESS"));
         when(planMapper.selectOne(any())).thenReturn(active);
         when(planMapper.update(any(), any(Wrapper.class))).thenReturn(1);
         StopChatDto stop = new StopChatDto();
         stop.setSessionId(11L);
-        stop.setMessageId(12L);
+        stop.setMessageId(999L);
 
         TaskPlanSnapshot cancelling = service.requestCancellation(stop, "USER_STOPPED", "用户请求停止");
         TaskPlanSnapshot cancelled = service.confirmCancellation(stop, "USER_STOPPED", "用户已停止执行");
@@ -238,22 +224,16 @@ class TaskPlanApplicationServiceTest {
         request.setTitle("实现任务计划");
         TaskPlanUpdateRequest.TaskInput first = new TaskPlanUpdateRequest.TaskInput();
         first.setStep("分析协议");
-        first.setStatus("IN_PROGRESS");
         TaskPlanUpdateRequest.TaskInput second = new TaskPlanUpdateRequest.TaskInput();
         second.setStep("实现协议");
-        second.setStatus("PENDING");
         request.setTasks(List.of(first, second));
         return request;
     }
 
-    private TaskPlanUpdateRequest updateRequest(ByaiAgentTaskPlan plan,
-        List<TaskPlanUpdateRequest.TaskStatusUpdate> updates) {
+    private TaskPlanUpdateRequest actionRequest(String action, String commandId) {
         TaskPlanUpdateRequest request = baseRequest();
-        request.setAction("UPDATE");
-        request.setIdempotencyKey("update-" + plan.getVersion());
-        request.setPlanId(String.valueOf(plan.getPlanId()));
-        request.setExpectedVersion(plan.getVersion());
-        request.setUpdates(updates);
+        request.setAction(action);
+        request.setIdempotencyKey(commandId);
         return request;
     }
 
@@ -268,38 +248,27 @@ class TaskPlanApplicationServiceTest {
         return request;
     }
 
-    private TaskPlanUpdateRequest.TaskStatusUpdate statusUpdate(String taskId, String status,
-        TaskPlanUpdateRequest.StatusReasonInput reason) {
-        TaskPlanUpdateRequest.TaskStatusUpdate update = new TaskPlanUpdateRequest.TaskStatusUpdate();
-        update.setTaskId(taskId);
-        update.setStatus(status);
-        update.setStatusReason(reason);
-        return update;
-    }
-
     private ByaiAgentTaskPlan plan(String status, int version, List<TaskPlanSnapshot.TaskSnapshot> tasks) {
         ByaiAgentTaskPlan plan = new ByaiAgentTaskPlan();
         plan.setPlanId(99L);
         plan.setUserId(7L);
-        plan.setUserCode("user-7");
         plan.setSessionId(11L);
         plan.setMessageId(12L);
         plan.setTraceId("trace-1");
         plan.setSourceRuntime("BYCLAW_SUPER");
         plan.setSourceRunId("run-1");
-        plan.setCreateRequestId("create-1");
         plan.setTitle("实现任务计划");
         plan.setStatus(status);
         plan.setVersion(version);
         plan.setTasksPayload(JSON.toJSONString(tasks));
-        plan.setIdempotencyPayload("[]");
+        plan.setLastCommandId("previous-command");
         plan.setCreatedAt(new Date(1_000L));
         plan.setUpdatedAt(new Date(2_000L));
         return plan;
     }
 
     private List<TaskPlanSnapshot.TaskSnapshot> tasks(String firstStatus, String secondStatus) {
-        return List.of(task("101", 1, "分析协议", firstStatus), task("102", 2, "实现协议", secondStatus));
+        return List.of(task("1", 1, "分析协议", firstStatus), task("2", 2, "实现协议", secondStatus));
     }
 
     private TaskPlanSnapshot.TaskSnapshot task(String id, int position, String title, String status) {

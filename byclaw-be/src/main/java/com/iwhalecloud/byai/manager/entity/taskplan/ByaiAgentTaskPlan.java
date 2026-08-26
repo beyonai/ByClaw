@@ -13,12 +13,10 @@ import lombok.Data;
 @TableName("byai_agent_task_plan")
 public class ByaiAgentTaskPlan {
 
-    @TableId(value = "plan_id", type = IdType.INPUT)
+    @TableId(value = "plan_id", type = IdType.AUTO)
     private Long planId;
 
     private Long userId;
-
-    private String userCode;
 
     private Long sessionId;
 
@@ -33,8 +31,6 @@ public class ByaiAgentTaskPlan {
     private String sourceRuntime;
 
     private String sourceRunId;
-
-    private String createRequestId;
 
     private String title;
 
@@ -51,8 +47,8 @@ public class ByaiAgentTaskPlan {
     /** {@code TaskPlanSnapshot.TaskSnapshot[]} 的 JSON。 */
     private String tasksPayload;
 
-    /** 已处理工具调用及其首次权威快照的 JSON。 */
-    private String idempotencyPayload;
+    /** 最近一次成功处理的工具调用 ID，用于网络重试幂等。 */
+    private String lastCommandId;
 
     private Date createdAt;
 

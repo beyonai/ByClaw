@@ -61,24 +61,16 @@ export interface TaskPlanCreateCommand {
   tasks: Array<{
     step: string;
     description?: string;
-    status: "PENDING" | "IN_PROGRESS";
-    statusReason?: TaskPlanStatusReason;
   }>;
 }
 
-/** 后续只允许按后端分配的 taskId 更新状态。 */
-export interface TaskPlanStatusUpdateCommand {
-  action: "update";
-  planId: string;
-  expectedVersion: number;
-  updates: Array<{
-    taskId: string;
-    status: TaskPlanTaskStatus;
-    statusReason?: TaskPlanStatusReason;
-  }>;
+/** 模型只表达当前任务的结果；计划、任务和版本均由运行时按会话解析。 */
+export interface TaskPlanAdvanceCommand {
+  action: "complete_current" | "fail_current" | "skip_current";
+  statusReason?: TaskPlanStatusReason;
 }
 
-export type TaskPlanCommand = TaskPlanCreateCommand | TaskPlanStatusUpdateCommand;
+export type TaskPlanCommand = TaskPlanCreateCommand | TaskPlanAdvanceCommand;
 
 export interface TaskPlanCommandError {
   code: string;
@@ -93,17 +85,14 @@ export type TaskPlanCommandResult =
       currentPlan?: TaskPlanSnapshot;
     };
 
-/** 注入模型的权威计划视图；UPDATE 必须复用其中的 ID 和版本。 */
+/** 注入模型的权威计划视图；内部 ID 和版本不暴露给模型。 */
 export function toTaskPlanModelView(snapshot: TaskPlanSnapshot) {
   return {
-    planId: snapshot.planId,
-    version: snapshot.version,
     title: snapshot.title,
     status: snapshot.status,
     ...(snapshot.statusReason ? { statusReason: snapshot.statusReason } : {}),
     ...(snapshot.explanation ? { explanation: snapshot.explanation } : {}),
     tasks: snapshot.tasks.map((task) => ({
-      taskId: task.taskId,
       position: task.position,
       step: task.title,
       ...(task.description ? { description: task.description } : {}),

@@ -87,9 +87,7 @@ export class ByClawBeTaskPlanGateway implements TaskPlanGateway {
             tasks: command.tasks,
           }
         : {
-            planId: command.planId,
-            expectedVersion: command.expectedVersion,
-            updates: command.updates,
+            ...(command.statusReason ? { statusReason: command.statusReason } : {}),
           }),
     });
     return parseTaskPlanCommandResult(data);

@@ -72,7 +72,7 @@ export interface LeaderRunInput {
     questions: UserInteractionQuestion[];
     signal?: AbortSignal;
   }): Promise<UserInteractionResponse>;
-  /** 首次创建计划，后续只按权威 taskId/version 更新任务状态。 */
+  /** 首次创建计划，后续只表达当前任务结果；会话与内部 ID 由运行时处理。 */
   updateTaskPlan?(input: {
     toolCallId: string;
     command: TaskPlanCommand;

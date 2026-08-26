@@ -21,11 +21,12 @@ byclaw-super/docs/task-plan-frontend-protocol.md
 
 ## 2. 内部写入协议
 
-Leader 仍只看到一个 `updateTaskPlan` Tool，通过 `action` 区分首次创建和后续更新。
+Leader 仍只看到一个 `updateTaskPlan` Tool。Tool 不接收 `sessionId`、`planId`、`taskId` 或 `version`；
+运行时注入当前会话，BE 根据会话解析唯一活动计划和当前任务。
 
 ### 2.1 CREATE
 
-CREATE 只允许提交任务定义，任务初始状态只能是 `PENDING` 或 `IN_PROGRESS`：
+CREATE 只提交任务定义：
 
 ```json
 {
@@ -35,68 +36,55 @@ CREATE 只允许提交任务定义，任务初始状态只能是 `PENDING` 或 `
   "tasks": [
     {
       "step": "分析协议",
-      "description": "确认接口和状态机",
-      "status": "IN_PROGRESS"
+      "description": "确认接口和状态机"
     },
     {
-      "step": "实现协议",
-      "status": "PENDING"
+      "step": "实现协议"
     }
   ]
 }
 ```
 
 `byclaw-super` 注入可信的 `sessionId`、`messageId`、`sourceRuntime`、`sourceRunId` 和
-`idempotencyKey`。BE 生成 `planId`、`taskId` 和 `version=1`。
+`idempotencyKey`。数据库生成自增 `planId`；BE 按位置生成计划内 `taskId`（`"1"`、`"2"`……），
+第一项自动进入 `IN_PROGRESS`，其余项为 `PENDING`，初始 `version=1`。
 
-同一 Run 已有计划时返回：
+同一会话已有活动计划时返回：
 
 ```json
 {
   "ok": false,
   "error": {
     "code": "PLAN_ALREADY_EXISTS",
-    "message": "An active or historical plan already exists for this Run"
+    "message": "An active task plan already exists for this session"
   },
   "currentPlan": {}
 }
 ```
 
-### 2.2 UPDATE
+### 2.2 推进当前任务
 
-UPDATE 不再提交标题、步骤定义或完整任务数组，只提交 ID、版本和状态变化：
+后续调用只表达当前任务的业务结果：
 
 ```json
 {
-  "action": "update",
-  "planId": "90001",
-  "expectedVersion": 1,
-  "updates": [
-    {
-      "taskId": "91001",
-      "status": "COMPLETED"
-    },
-    {
-      "taskId": "91002",
-      "status": "IN_PROGRESS"
-    }
-  ]
+  "action": "complete_current"
 }
 ```
 
-后端使用 `planId + expectedVersion + status=ACTIVE` 执行 Compare-And-Set。成功后版本加一，
-返回新的完整权威快照并广播 `TASK_PLAN_SNAPSHOT`。
+支持 `complete_current`、`fail_current`、`skip_current`。失败或跳过时可增加扁平的
+`reasonCode/reasonMessage`；Super 会组装为内部 `statusReason`。BE 使用
+`userId + sessionId + 当前version + status=ACTIVE` 执行 Compare-And-Set。完成或跳过当前任务时，
+后端在同一事务中自动启动下一项；最后一项结束后自动收口计划。
 
 ## 3. Tool Result
 
-成功：
+模型可见的成功结果不包含任何内部 ID：
 
 ```json
 {
   "ok": true,
   "plan": {
-    "planId": "90001",
-    "version": 2,
     "status": "ACTIVE",
     "tasks": []
   }
@@ -110,11 +98,9 @@ UPDATE 不再提交标题、步骤定义或完整任务数组，只提交 ID、�
   "ok": false,
   "error": {
     "code": "VERSION_CONFLICT",
-    "message": "Task plan version has changed"
+    "message": "Task plan changed while it was being updated"
   },
   "currentPlan": {
-    "planId": "90001",
-    "version": 3,
     "tasks": []
   }
 }
@@ -125,20 +111,17 @@ UPDATE 不再提交标题、步骤定义或完整任务数组，只提交 ID、�
 | code | 含义 |
 |---|---|
 | `INVALID_REQUEST` | 参数或状态值不合法 |
-| `PLAN_ALREADY_EXISTS` | 同一 Run 重复创建 |
-| `PLAN_NOT_FOUND` | 计划不存在或不属于当前执行 |
-| `PLAN_NOT_ACTIVE` | 计划已经进入终态或正在取消 |
-| `TASK_NOT_FOUND` | taskId 不属于当前计划 |
-| `VERSION_CONFLICT` | expectedVersion 已过期 |
-| `ILLEGAL_TASK_TRANSITION` | 状态迁移不合法 |
+| `PLAN_ALREADY_EXISTS` | 同一会话已有活动计划 |
+| `PLAN_NOT_FOUND` | 当前会话没有活动计划 |
+| `VERSION_CONFLICT` | 并发更新导致内部版本变化 |
 | `INVALID_EXECUTION_ORDER` | 顺序计划执行次序不合法 |
 
 ## 4. 状态机
 
 | 当前状态 | 允许的新状态 |
 |---|---|
-| `PENDING` | `PENDING`、`IN_PROGRESS`、`SKIPPED`、`CANCELLED` |
-| `IN_PROGRESS` | `IN_PROGRESS`、`COMPLETED`、`FAILED`、`CANCELLED` |
+| `PENDING` | 由后端自动进入 `IN_PROGRESS`，或随计划收口 |
+| `IN_PROGRESS` | `COMPLETED`、`FAILED`、`SKIPPED`、`CANCELLED` |
 | `COMPLETED` | `COMPLETED` |
 | `FAILED` | `FAILED` |
 | `SKIPPED` | `SKIPPED` |
@@ -152,12 +135,12 @@ UPDATE 不再提交标题、步骤定义或完整任务数组，只提交 ID、�
 - 终态任务不能回退；
 - 任务失败后，未开始的后续任务自动变为 `SKIPPED`；
 - 任务取消后，未完成的后续任务自动变为 `CANCELLED`；
-- 计划终态后拒绝新的 UPDATE。
+- 计划终态后，同一会话可以在后续时间段创建新的计划。
 
 ## 5. 模型上下文与完成守卫
 
-每轮 Leader 推理前注入完整的权威模型视图，其中包含 UPDATE 所需的 `planId`、`version` 和
-每个 `taskId`。这些值只能从可信上下文或 Tool Result 复制，不能自行生成。
+每轮 Leader 推理前注入不含内部 ID 的权威模型视图。模型只能看到任务位置、定义和状态，并通过
+`complete_current/fail_current/skip_current` 汇报当前任务结果。
 
 只要计划仍为 `ACTIVE`，Runtime 就不提交 `run.completed`，而是在同一 Leader Session 内继续执行。
 连续三轮计划版本没有推进时，Run 转为 FAILED，Runtime 自动把当前任务和后续任务收口。
@@ -175,18 +158,18 @@ UPDATE 不再提交标题、步骤定义或完整任务数组，只提交 ID、�
 
 | 字段组 | 用途 |
 |---|---|
-| `plan_id/user_id/session_id/message_id` | 计划与前端回答归属 |
+| `plan_id/user_id/session_id/message_id` | 自增计划 ID 与前端回答归属 |
 | `source_runtime/source_run_id` | Runtime 执行归属 |
 | `title/status/version/...` | 计划当前状态 |
 | `tasks_payload` | `TaskPlanSnapshot.TaskSnapshot[]` JSON |
-| `idempotency_payload` | toolCallId 与首次权威结果 JSON |
+| `last_command_id` | 最近一次成功 Tool Call，用于直接网络重试幂等 |
 | `created_at/updated_at/completed_at` | 生命周期时间 |
 
 任务定义、状态、原因和时间戳全部保存在 `tasks_payload` 中。每次 UPDATE 通过一条 CAS SQL 原子替换
 计划当前快照，不再维护 item 表或 event 表。
 
-`idempotency_payload` 保存已处理 Tool Call 及其首次结果，因此旧调用在更高版本产生后重放，仍返回
-第一次调用得到的快照，不重复增加版本或广播事件。
+`last_command_id` 命中时直接返回当前权威快照，不重复增加版本或广播事件。内部版本由 BE 管理，
+不再要求模型参与乐观锁。
 
 ## 7. 停止与历史恢复
 
@@ -196,7 +179,7 @@ UPDATE 不再提交标题、步骤定义或完整任务数组，只提交 ID、�
 ACTIVE → CANCELLING → CANCELLED
 ```
 
-进入 `CANCELLING` 后拒绝迟到的 Tool UPDATE；确认 Runtime、Tool 和数字员工停止后，把所有非终态任务
+进入 `CANCELLING` 后拒绝迟到的 Tool 推进；确认 Runtime、Tool 和数字员工停止后，把所有非终态任务
 改为 `CANCELLED`。历史消息查询仍返回 `CANCELLED` 快照，Runtime 的活动计划查询只返回 `ACTIVE`。
 
 ## 8. API
@@ -218,5 +201,6 @@ DDL 位于：
 byclaw-be/src/main/resources/db/task-plan-v1.sql
 ```
 
-该脚本会依次删除旧 event、item、plan 三张表，再创建新的单表。旧任务计划数据不会迁移。脚本必须由
-人工执行，应用不会自动执行。
+该脚本会依次删除旧 event、item、plan 三张表，再创建新的单表，并创建“每个用户会话最多一个活动
+计划”的唯一索引。`plan_id` 使用数据库 `BIGSERIAL` 自增。旧任务计划数据不会迁移。脚本必须由人工
+执行，应用不会自动执行。

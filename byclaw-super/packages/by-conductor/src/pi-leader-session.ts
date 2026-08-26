@@ -190,81 +190,53 @@ export class PiLeaderSession implements LeaderSession {
       name: UPDATE_TASK_PLAN_TOOL_NAME,
       label: "Update Task Plan",
       description:
-        "Create the current execution task plan once, then update only task statuses using the backend-assigned planId, taskId, and version from active_task_plan.",
+        "Create the current session task plan once, then report only the outcome of the current task. Session, plan, task, and version identifiers are resolved by the runtime.",
       promptSnippet:
         "Create and keep a structured task plan synchronized with actual execution progress.",
       executionMode: "sequential",
-      parameters: Type.Union([
-        Type.Object(
-          {
-            action: Type.Literal("create"),
-            title: Type.String({ minLength: 1, maxLength: 500 }),
-            explanation: Type.Optional(Type.String({ maxLength: 2000 })),
-            tasks: Type.Array(
+      parameters: Type.Object(
+        {
+          action: Type.Union([
+            Type.Literal("create"),
+            Type.Literal("complete_current"),
+            Type.Literal("fail_current"),
+            Type.Literal("skip_current"),
+          ]),
+          title: Type.Optional(Type.String({ minLength: 1, maxLength: 500 })),
+          explanation: Type.Optional(Type.String({ maxLength: 2000 })),
+          tasks: Type.Optional(
+            Type.Array(
               Type.Object(
                 {
                   step: Type.String({ minLength: 1, maxLength: 1000 }),
                   description: Type.Optional(Type.String({ maxLength: 4000 })),
-                  status: Type.Union([
-                    Type.Literal("PENDING"),
-                    Type.Literal("IN_PROGRESS"),
-                  ]),
-                  statusReason: Type.Optional(
-                    Type.Object(
-                      {
-                        code: Type.String({ minLength: 1, maxLength: 64 }),
-                        message: Type.Optional(Type.String({ maxLength: 500 })),
-                      },
-                      { additionalProperties: false },
-                    ),
-                  ),
                 },
                 { additionalProperties: false },
               ),
               { minItems: 1, maxItems: 100 },
             ),
-          },
-          { additionalProperties: false },
-        ),
-        Type.Object(
-          {
-            action: Type.Literal("update"),
-            planId: Type.String({ minLength: 1 }),
-            expectedVersion: Type.Integer({ minimum: 1 }),
-            updates: Type.Array(
-              Type.Object(
-                {
-                  taskId: Type.String({ minLength: 1 }),
-                  status: Type.Union([
-                    Type.Literal("PENDING"),
-                    Type.Literal("IN_PROGRESS"),
-                    Type.Literal("COMPLETED"),
-                    Type.Literal("FAILED"),
-                    Type.Literal("SKIPPED"),
-                    Type.Literal("CANCELLED"),
-                  ]),
-                  statusReason: Type.Optional(
-                    Type.Object(
-                      {
-                        code: Type.String({ minLength: 1, maxLength: 64 }),
-                        message: Type.Optional(Type.String({ maxLength: 500 })),
-                      },
-                      { additionalProperties: false },
-                    ),
-                  ),
-                },
-                { additionalProperties: false },
-              ),
-              { minItems: 1, maxItems: 100 },
-            ),
-          },
-          { additionalProperties: false },
-        ),
-      ]),
+          ),
+          reasonCode: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
+          reasonMessage: Type.Optional(Type.String({ maxLength: 500 })),
+        },
+        { additionalProperties: false },
+      ),
       execute: async (toolCallId, params, signal) => {
         const active = wrapper?.activeInput;
         if (!active?.updateTaskPlan) {
           throw new Error("task plan updates are not available for this run");
+        }
+        if (params.action === "create" && (!params.title || !params.tasks)) {
+          throw new Error("updateTaskPlan action=create requires title and tasks");
+        }
+        if (params.action === "create" && (params.reasonCode || params.reasonMessage)) {
+          throw new Error("task outcome reasons cannot be supplied with action=create");
+        }
+        if (params.action !== "create" && (params.title || params.tasks || params.explanation)) {
+          throw new Error("task definitions can only be supplied with action=create");
+        }
+        if (params.reasonMessage && !params.reasonCode) {
+          throw new Error("reasonMessage requires reasonCode");
         }
         const result = await active.updateTaskPlan({
           toolCallId,
@@ -272,26 +244,23 @@ export class PiLeaderSession implements LeaderSession {
             params.action === "create"
               ? {
                   action: "create",
-                  title: params.title,
+                  title: params.title!,
                   ...(params.explanation ? { explanation: params.explanation } : {}),
-                  tasks: params.tasks.map((task) => ({
+                  tasks: params.tasks!.map((task) => ({
                     step: task.step,
                     ...(task.description ? { description: task.description } : {}),
-                    status: task.status,
-                    ...(task.statusReason ? { statusReason: task.statusReason } : {}),
                   })),
                 }
               : {
-                  action: "update",
-                  planId: params.planId,
-                  expectedVersion: params.expectedVersion,
-                  updates: params.updates.map((update) => ({
-                    taskId: update.taskId,
-                    status: update.status,
-                    ...(update.statusReason
-                      ? { statusReason: update.statusReason }
-                      : {}),
-                  })),
+                  action: params.action,
+                  ...(params.reasonCode
+                    ? {
+                        statusReason: {
+                          code: params.reasonCode,
+                          ...(params.reasonMessage ? { message: params.reasonMessage } : {}),
+                        },
+                      }
+                    : {}),
                 },
           ...(signal ? { signal } : {}),
         });
