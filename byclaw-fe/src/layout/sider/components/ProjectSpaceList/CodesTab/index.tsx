@@ -23,15 +23,38 @@ import {
   getTaskFileDiff,
   getProjectSessionWorktree,
   listProjectRepos,
+  listProjectRepoTree,
+  searchProjectRepoTree,
   type DevloopProjectRepo as OriDevloopProjectRepo,
+  type ProjectRepoTreeNode,
   type DevloopTaskChanges,
   type DevloopTaskFileDiff,
 } from '@/service/devloop';
-import { listFiles, searchFiles, type FileBrowserItem } from '@/service/fileBrowser';
+import type { FileBrowserItem } from '@/service/fileBrowser';
 import styles from '../index.module.less';
 
 // 单击预览与双击引用共用一次鼠标事件序列，延时用于等待可能到来的第二次点击。
 const NODE_CLICK_DELAY = 220;
+
+function toRepoFileItems(nodes: ProjectRepoTreeNode[], rootPath: string, pathPrefix = ''): FileBrowserItem[] {
+  const root = ensureDirectoryPath(rootPath);
+  const normalizedPrefix = pathPrefix.replace(/^\/+|\/+$/g, '');
+  return nodes.map((node) => {
+    const nodePath = node.path.replace(/^\/+/, '');
+    const relativePath =
+      normalizedPrefix && nodePath.startsWith(`${normalizedPrefix}/`)
+        ? nodePath.slice(normalizedPrefix.length + 1)
+        : nodePath;
+    const path = `${root}${relativePath}`;
+    const isDir = node.type === 'directory';
+    return {
+      name: node.name,
+      path: isDir ? ensureDirectoryPath(path) : path,
+      isDir,
+      size: node.size,
+    };
+  });
+}
 
 interface CodesTabProps {
   projectId: number;
@@ -130,17 +153,22 @@ const CodesTab: React.FC<CodesTabProps> = ({
 
   const fetchRepoFiles = useCallback(
     async (repo: DevloopProjectRepo, rootPath: string) => {
-      if (!resourceId || !rootPath) return;
+      if (!rootPath) return;
       const repoKey = `${repo.repoId}`;
       const requestSeq = (repoRequestSeqRef.current[repoKey] || 0) + 1;
       repoRequestSeqRef.current[repoKey] = requestSeq;
       setRepoLoadingMap((current) => ({ ...current, [repoKey]: true }));
       try {
-        const response = await listFiles({ resourceId, path: rootPath });
+        const response = await listProjectRepoTree({
+          projectId,
+          repoId: repo.repoId,
+        });
         if (requestSeq === repoRequestSeqRef.current[repoKey]) {
           setRepoFilesMap((current) => ({
             ...current,
-            [repoKey]: sortFileBrowserItems(unwrapListResponse<FileBrowserItem>(response)),
+            [repoKey]: sortFileBrowserItems(
+              toRepoFileItems(unwrapListResponse<ProjectRepoTreeNode>(response), rootPath)
+            ),
           }));
         }
       } catch (error) {
@@ -155,7 +183,7 @@ const CodesTab: React.FC<CodesTabProps> = ({
         }
       }
     },
-    [resourceId]
+    [projectId]
   );
 
   const fetchTaskChanges = useCallback(async () => {
@@ -228,21 +256,32 @@ const CodesTab: React.FC<CodesTabProps> = ({
 
   const loadRepoTreeNode = useCallback(
     async (node: FileTreeItem) => {
-      if (!resourceId || !isDirectory(node)) return;
+      if (!isDirectory(node)) return;
       const directoryPath = ensureDirectoryPath(normalizeFileBrowserPath(node.path));
       if (childrenByPath[directoryPath]) return;
       try {
-        const response = await listFiles({ resourceId, path: directoryPath });
+        const rootPath = sessionWorktreePath;
+        if (!rootPath) return;
+        const relativePath = directoryPath.slice(ensureDirectoryPath(rootPath).length).replace(/\/$/, '');
+        const repoId = repos.find((repo) => repo.repoType === 'workspace')?.repoId;
+        if (!repoId) return;
+        const response = await listProjectRepoTree({
+          projectId,
+          repoId,
+          path: relativePath || undefined,
+        });
         setChildrenByPath((current) => ({
           ...current,
-          [directoryPath]: sortFileBrowserItems(unwrapListResponse<FileBrowserItem>(response)),
+          [directoryPath]: sortFileBrowserItems(
+            toRepoFileItems(unwrapListResponse<ProjectRepoTreeNode>(response), directoryPath, relativePath)
+          ),
         }));
       } catch (error) {
         console.error('Failed to load project repository directory:', error);
         setChildrenByPath((current) => ({ ...current, [directoryPath]: [] }));
       }
     },
-    [childrenByPath, resourceId]
+    [childrenByPath, projectId, repos, sessionWorktreePath]
   );
 
   const openFilePreview = useCallback(
@@ -347,7 +386,7 @@ const CodesTab: React.FC<CodesTabProps> = ({
 
   const searchRepoFiles = useCallback(
     async (repo: DevloopProjectRepo, keyword: string) => {
-      if (!resourceId || !sessionWorktreePath) return;
+      if (!sessionWorktreePath) return;
       const repoKey = `${repo.repoId}`;
       const nextKeyword = keyword.trim();
       if (!nextKeyword) {
@@ -360,11 +399,18 @@ const CodesTab: React.FC<CodesTabProps> = ({
       repoRequestSeqRef.current[repoKey] = requestSeq;
       setRepoLoadingMap((current) => ({ ...current, [repoKey]: true }));
       try {
-        const response = await searchFiles({ resourceId, path: rootPath, keyword: nextKeyword });
+        const repoId = repo.repoId;
+        const response = await searchProjectRepoTree({
+          projectId,
+          repoId,
+          keyword: nextKeyword,
+        });
         if (requestSeq === repoRequestSeqRef.current[repoKey]) {
           setRepoFilesMap((current) => ({
             ...current,
-            [repoKey]: sortFileBrowserItems(unwrapListResponse<FileBrowserItem>(response)),
+            [repoKey]: sortFileBrowserItems(
+              toRepoFileItems(unwrapListResponse<ProjectRepoTreeNode>(response), rootPath)
+            ),
           }));
           setChildrenByPath((current) =>
             Object.fromEntries(Object.entries(current).filter(([path]) => !isPathIn(path, rootPath)))
@@ -382,7 +428,7 @@ const CodesTab: React.FC<CodesTabProps> = ({
         }
       }
     },
-    [fetchRepoFiles, resourceId, sessionWorktreePath]
+    [fetchRepoFiles, projectId, sessionWorktreePath]
   );
 
   const renderCodeChanges = () => {

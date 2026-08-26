@@ -27,20 +27,20 @@ class ProjectRepositoryServiceTest {
     Path tempDir;
 
     @Test
-    void browsesLocalGitFirstAndUsesProjectIdAsPreferredDefaultBranch() {
+    void browsesLocalGitFirstAndUsesConfiguredDefaultBranch() {
         long projectId = 203L;
         ProjectRepo repo = repository(projectId);
         Path localRepo = tempDir.resolve("workspace");
         Fixture fixture = fixture(projectId, repo);
         when(fixture.workspaceGitService.resolveRepository(repo)).thenReturn(Optional.of(localRepo));
-        when(fixture.gitCommandExecutor.executeCommandQuietly(localRepo, "git", "ls-tree", "-l", "203"))
+        when(fixture.gitCommandExecutor.executeCommandQuietly(localRepo, "git", "ls-tree", "-l", "main"))
             .thenReturn("040000 tree abcdef -\tsrc\n100644 blob 123456 12\tREADME.md\n");
 
         List<ProjectRepoTreeNodeDTO> nodes = fixture.service.listTree(projectId, repo.getRepoId(), null, null);
 
         assertThat(nodes).extracting(ProjectRepoTreeNodeDTO::getName).containsExactly("src", "README.md");
         assertThat(nodes.getFirst().getType()).isEqualTo("directory");
-        verify(fixture.gitCommandExecutor).executeCommandQuietly(localRepo, "git", "ls-tree", "-l", "203");
+        verify(fixture.gitCommandExecutor).executeCommandQuietly(localRepo, "git", "ls-tree", "-l", "main");
     }
 
     private Fixture fixture(long projectId, ProjectRepo repo) {

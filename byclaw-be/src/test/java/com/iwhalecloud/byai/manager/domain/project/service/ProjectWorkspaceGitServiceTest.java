@@ -21,34 +21,30 @@ class ProjectWorkspaceGitServiceTest {
     Path tempDir;
 
     @Test
-    void resolvesOnlyWorktreesInsideTheRequestedSessionDirectory() throws Exception {
+    void resolvesProjectWorkspaceRepositoryForSession() throws Exception {
         long projectId = 203L;
         ProjectRepo workspace = workspaceRepo(projectId);
-        Path repository = tempDir.resolve("bucket/by/projects/203/repos/workspace");
-        Files.createDirectories(repository.resolve(".git"));
-        ProjectWorkspaceGitService service = service(workspace, repository,
-            "worktree " + repository + "\nHEAD abc\n\n"
-                + "worktree " + tempDir.resolve("bucket/by/.sessions/301/workspace") + "\nHEAD def\n");
+        Path projectRoot = tempDir.resolve("bucket/by/projects/203");
+        Path configuredPath = projectRoot.resolve("repos/workspace");
+        Files.createDirectories(projectRoot.resolve(".git"));
+        ProjectWorkspaceGitService service = service(workspace, configuredPath);
 
         Path worktree = service.resolveSessionWorktree(projectId, 301L).orElseThrow();
 
-        assertThat(worktree).isEqualTo(tempDir.resolve("bucket/by/.sessions/301/workspace"));
-        assertThat(service.toSandboxPath(worktree)).contains("/by/.sessions/301/workspace/");
-        assertThat(service.resolveSessionWorktree(projectId, 30L)).isEmpty();
+        assertThat(worktree).isEqualTo(projectRoot);
+        assertThat(service.toSandboxPath(worktree)).contains("/by/projects/203/");
+        assertThat(service.resolveSessionWorktree(projectId, 30L)).contains(projectRoot);
+        assertThat(service.resolveSessionWorktree(projectId, null)).isEmpty();
     }
 
-    private ProjectWorkspaceGitService service(ProjectRepo workspace, Path repository, String worktreeOutput) {
+    private ProjectWorkspaceGitService service(ProjectRepo workspace, Path repository) {
         ProjectRepoMapper repoMapper = mock(ProjectRepoMapper.class);
         ProjectInitService initService = mock(ProjectInitService.class);
-        GitCommandExecutor executor = mock(GitCommandExecutor.class);
         when(repoMapper.selectList(any())).thenReturn(List.of(workspace));
         when(initService.getProjectRepositoryPath(workspace)).thenReturn(repository);
-        when(executor.executeCommand(repository, "git", "worktree", "list", "--porcelain"))
-            .thenReturn(worktreeOutput);
         ProjectWorkspaceGitService service = new ProjectWorkspaceGitService();
         ReflectionTestUtils.setField(service, "projectRepoMapper", repoMapper);
         ReflectionTestUtils.setField(service, "projectInitService", initService);
-        ReflectionTestUtils.setField(service, "gitCommandExecutor", executor);
         return service;
     }
 

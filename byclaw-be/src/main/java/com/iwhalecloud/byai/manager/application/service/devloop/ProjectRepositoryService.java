@@ -189,8 +189,8 @@ public class ProjectRepositoryService {
         if (ref != null && !ref.trim().isEmpty()) {
             return ref.trim();
         }
-        return projectId != null ? String.valueOf(projectId)
-            : (repo.getDefaultBranch() == null || repo.getDefaultBranch().isBlank() ? "main" : repo.getDefaultBranch());
+        return repo.getDefaultBranch() == null || repo.getDefaultBranch().isBlank()
+            ? "main" : repo.getDefaultBranch().trim();
     }
 
     private List<ProjectRepoTreeNodeDTO> listLocalTree(Path repoPath, String path, String branch) {
