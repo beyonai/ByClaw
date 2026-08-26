@@ -18,6 +18,7 @@ import com.iwhalecloud.byai.manager.dto.session.SessionUploadResult;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatInfo;
 import com.iwhalecloud.byai.state.domain.chat.dto.StopChatDto;
+import com.iwhalecloud.byai.state.domain.chat.service.ChatProcessContext;
 import com.iwhalecloud.byai.state.domain.chat.service.OutputStreamManager;
 import com.iwhalecloud.byai.state.domain.chat.service.RunningChatSnapshotService;
 import com.iwhalecloud.byai.state.domain.chat.service.RunningOutputStreamRegistry;
@@ -29,7 +30,12 @@ import com.iwhalecloud.byai.state.domain.ws.service.TaskPlanWebSocketPublisher;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 import com.iwhalecloud.byai.state.domain.session.service.SessionTitleService;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
+import com.alibaba.fastjson.JSONObject;
 import java.util.Date;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -153,6 +159,32 @@ class AssistantChatApplicationServiceTest {
     }
 
     @Test
+    void stopSentinelWaitsForBoundedQueueCapacityInsteadOfBeingDropped() throws Exception {
+        OutputStreamManager outputStreamManager = mock(OutputStreamManager.class);
+        ReflectionTestUtils.setField(assistantChatApplicationService, "outputStreamManager", outputStreamManager);
+        ReflectionTestUtils.setField(assistantChatApplicationService, "scriptService", mock(ScriptService.class));
+
+        SignallingQueue queue = new SignallingQueue(1);
+        queue.add(new JSONObject());
+        ChatProcessContext ctx = new ChatProcessContext(null, null);
+        ctx.sessionId = 10L;
+        ctx.gatewayEventQueue = queue;
+        when(outputStreamManager.getContext("10")).thenReturn(ctx);
+
+        StopChatDto stopChatDto = new StopChatDto();
+        stopChatDto.setSessionId(10L);
+        CompletableFuture<Void> flush = CompletableFuture.runAsync(() ->
+            ReflectionTestUtils.invokeMethod(assistantChatApplicationService, "flushAccumulatedMessage", stopChatDto));
+
+        assertThat(queue.awaitPut()).as("停止哨兵必须等待队列容量，不能在队列满时静默丢失").isTrue();
+        assertThat(flush.isDone()).isFalse();
+        queue.take();
+        flush.get(1, TimeUnit.SECONDS);
+
+        assertThat(queue.take().getString("event_type")).isEqualTo(ChatProcessContext.STOP_SENTINEL_EVENT);
+    }
+
+    @Test
     void uploadFiles_createsPendingSessionWithTimestampTitle() throws Exception {
         String sessionName = "File Upload 2026-08-11 14:30:25";
         ByaiSession session = new ByaiSession();
@@ -171,5 +203,24 @@ class AssistantChatApplicationServiceTest {
         assertThat(result.getSessionId()).isEqualTo(10L);
         assertThat(result.getSessionName()).isEqualTo(sessionName);
         verify(sessionTitleService).markInitialTitlePending(10L);
+    }
+
+    private static final class SignallingQueue extends ArrayBlockingQueue<JSONObject> {
+
+        private final CountDownLatch putEntered = new CountDownLatch(1);
+
+        SignallingQueue(int capacity) {
+            super(capacity);
+        }
+
+        @Override
+        public void put(JSONObject event) throws InterruptedException {
+            putEntered.countDown();
+            super.put(event);
+        }
+
+        boolean awaitPut() throws InterruptedException {
+            return putEntered.await(1, TimeUnit.SECONDS);
+        }
     }
 }

@@ -2,7 +2,9 @@ package com.iwhalecloud.byai.state.domain.chat.service;
 
 import java.time.Duration;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -25,11 +27,15 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.listener.PatternTopic;
 import org.springframework.data.redis.listener.RedisMessageListenerContainer;
 import org.springframework.data.redis.stream.StreamMessageListenerContainer;
+import org.springframework.data.redis.stream.StreamMessageListenerContainer.ConsumerStreamReadRequest;
 import org.springframework.data.redis.stream.StreamMessageListenerContainer.StreamMessageListenerContainerOptions;
+import org.springframework.data.redis.stream.StreamMessageListenerContainer.StreamReadRequest;
 import org.springframework.stereotype.Service;
 
 import com.iwhalecloud.byai.state.domain.ws.handler.RedisStreamMessageListener;
 import com.iwhalecloud.byai.state.domain.ws.handler.SessionStatusRedisMessageListener;
+
+import jakarta.annotation.PostConstruct;
 
 /**
  * Gateway 模式下按 session 动态管理 Redis Stream 监听器的服务。
@@ -51,6 +57,7 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
 
     private static final Logger log = LoggerFactory.getLogger(SessionStreamManager.class);
 
+    static final long DEFAULT_POLL_TIMEOUT_MILLIS = 2000L;
 
     /** Session 状态 Key 前缀 */
     public static final String SESSION_STATUS_KEY_PREFIX = "byai:session:";
@@ -102,6 +109,22 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
     @Autowired
     private StreamAckFailureRegistry streamAckFailureRegistry;
 
+    @Autowired
+    private SessionStreamMetrics sessionStreamMetrics;
+
+    @Value("${byclaw.session-stream.poll-timeout-millis:" + DEFAULT_POLL_TIMEOUT_MILLIS + "}")
+    private long pollTimeoutMillis;
+
+    @Value("${spring.redis.read-timeout:5000}")
+    private long redisReadTimeoutMillis;
+
+    /** 单次 XREADGROUP 最多拉取的事件数，避免一次轮询载入过大批次。 */
+    @Value("${byclaw.session-stream.read-batch-size:100}")
+    private int streamReadBatchSize;
+
+    /** Redis Stream 长轮询使用虚拟线程，阻塞等待不再为每个 session 长期占用平台线程。 */
+    private final ExecutorService streamTaskExecutor = Executors.newVirtualThreadPerTaskExecutor();
+
     /** sessionId -> StreamMessageListenerContainer，按 session 管理监听容器 */
     private final Map<String, StreamMessageListenerContainer<String, MapRecord<String, String, String>>> containers =
         new ConcurrentHashMap<>();
@@ -146,6 +169,19 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
     });
 
     /**
+     * Redis socket read timeout 必须覆盖 XREADGROUP BLOCK 时长并保留网络处理余量。
+     * 显式配置不合理时只告警，不阻止应用启动，便于存量环境先完成配置修正。
+     */
+    @PostConstruct
+    void validateTimeoutConfiguration() {
+        if (redisReadTimeoutMillis <= pollTimeoutMillis) {
+            sessionStreamMetrics.recordInvalidConfiguration();
+            log.warn("Session Stream timeout 配置缺少余量, pollTimeoutMillis: {}, redisReadTimeoutMillis: {}",
+                pollTimeoutMillis, redisReadTimeoutMillis);
+        }
+    }
+
+    /**
      * 启动指定 session 的 Redis Stream 监听器。
      * <p>
      * 应在 gatewayClient.sendMessage() 调用成功之后调用。
@@ -171,27 +207,21 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
 
             // 构建容器配置
             StreamMessageListenerContainerOptions<String, MapRecord<String, String, String>> options =
-                StreamMessageListenerContainerOptions
-                    .builder()
-                    .pollTimeout(Duration.ofSeconds(2))
-                    .build();
+                createContainerOptions();
 
             // 通过 ApplicationContext 获取 RedisStreamMessageListener prototype 新实例
             RedisStreamMessageListener listener = applicationContext.getBean(RedisStreamMessageListener.class);
 
             container = StreamMessageListenerContainer.create(redisConnectionFactory, options);
 
-            container.receive(
-                Consumer.from(CONSUMER_GROUP, consumerName),
-                StreamOffset.create(streamKey, ReadOffset.lastConsumed()),
-                listener
-            );
+            container.register(createReadRequest(sessionId, streamKey, consumerName), listener);
 
             container.start();
 
             // 存入 map（先 stop 旧的可能存在的容器，避免重复启动）
             StreamMessageListenerContainer<String, MapRecord<String, String, String>> old =
                 containers.put(sessionId, container);
+            sessionStreamMetrics.updateActiveListeners(containers.size());
 
             if (old != null) {
                 try {
@@ -211,6 +241,7 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
         catch (Exception e) {
             if (container != null) {
                 containers.remove(sessionId, container);
+                sessionStreamMetrics.updateActiveListeners(containers.size());
                 try {
                     container.stop();
                 }
@@ -235,6 +266,7 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
     public void stopSessionListener(String sessionId) {
         StreamMessageListenerContainer<String, MapRecord<String, String, String>> container =
             containers.remove(sessionId);
+        sessionStreamMetrics.updateActiveListeners(containers.size());
 
         if (container != null) {
             try {
@@ -274,6 +306,7 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
             }
         }
         containers.clear();
+        sessionStreamMetrics.updateActiveListeners(0L);
         streamLeaseTasks.values().forEach(task -> task.cancel(false));
         streamLeaseTasks.clear();
         streamLeases.values().forEach(sessionStreamLeaseService::release);
@@ -290,7 +323,23 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
         keepAliveTasks.clear();
         keepAliveExecutor.shutdownNow();
         sessionStatusExecutor.shutdownNow();
+        streamTaskExecutor.shutdownNow();
         log.info("所有 Session Stream 监听器已清理完成");
+    }
+
+    /**
+     * 构建 Session Stream 容器配置。读取批量设上限，长轮询任务使用虚拟线程承载阻塞等待。
+     */
+    StreamMessageListenerContainerOptions<String, MapRecord<String, String, String>> createContainerOptions() {
+        if (streamReadBatchSize <= 0) {
+            throw new IllegalStateException("byclaw.session-stream.read-batch-size must be greater than zero");
+        }
+        return StreamMessageListenerContainerOptions
+            .builder()
+            .pollTimeout(Duration.ofMillis(pollTimeoutMillis))
+            .batchSize(streamReadBatchSize)
+            .executor(streamTaskExecutor)
+            .build();
     }
 
     private void startKeepAlive(String sessionId, ChatProcessContext ctx) {
@@ -336,6 +385,32 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
 
     public boolean isSessionListenerActive(String sessionId) {
         return sessionId != null && containers.containsKey(sessionId);
+    }
+
+    /**
+     * 返回当前实例活跃 Session Stream listener 的只读快照，供低频聚合指标采样使用。
+     */
+    Set<String> activeSessionIdsSnapshot() {
+        return Set.copyOf(containers.keySet());
+    }
+
+    /**
+     * 构建手动 ACK 的 Consumer Group 读取请求。
+     * <p>
+     * Redis 读取或反序列化异常不会取消 subscription，poll task 会在错误处理后继续下一轮读取。
+     */
+    ConsumerStreamReadRequest<String> createReadRequest(String sessionId, String streamKey, String consumerName) {
+        return StreamReadRequest.<String>builder(StreamOffset.create(streamKey, ReadOffset.lastConsumed()))
+            .consumer(Consumer.from(CONSUMER_GROUP, consumerName))
+            .autoAcknowledge(false)
+            .errorHandler(error -> {
+                sessionStreamMetrics.recordReadError(error);
+                log.warn("Session Stream 读取异常，将继续轮询, sessionId: {}, stream: {}, consumer: {}, "
+                        + "errorType: {}, errorMessage: {}",
+                    sessionId, streamKey, consumerName, error.getClass().getSimpleName(), error.getMessage());
+            })
+            .cancelOnError(error -> false)
+            .build();
     }
 
     /**

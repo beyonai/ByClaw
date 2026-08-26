@@ -94,10 +94,19 @@ public class SessionStreamEventRouter {
         ctx.currentStreamId = dataJson.getString("stream_id");
 
         if (!ChatTransport.WEBSOCKET.equals(ctx.transport)) {
-            broadcastToOtherDevices(ctx, dataJson);
             if (ctx.gatewayEventQueue != null) {
-                ctx.gatewayEventQueue.offer(dataJson);
+                try {
+                    // 有界队列已满时阻塞 Redis listener，背压传递到 Redis Stream，
+                    // 避免 JVM 内存无界增长，也不能在未入队时返回 HANDLED 后误 ACK。
+                    ctx.gatewayEventQueue.put(dataJson);
+                }
+                catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    log.warn("等待 HTTP SSE 事件队列容量时被中断，消息保留 pending, sessionId: {}", sessionId);
+                    return StreamDispatchResult.ERROR;
+                }
             }
+            broadcastToOtherDevices(ctx, dataJson);
             return StreamDispatchResult.HANDLED;
         }
 

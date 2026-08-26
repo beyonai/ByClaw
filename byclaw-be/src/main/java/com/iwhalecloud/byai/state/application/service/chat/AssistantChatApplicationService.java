@@ -288,7 +288,14 @@ public class AssistantChatApplicationService {
                     JSONObject sentinel = new JSONObject();
                     sentinel.put("event_type", ChatProcessContext.STOP_SENTINEL_EVENT);
                     sentinel.put("session_id", String.valueOf(sessionId));
-                    ctx.getGatewayEventQueue().offer(sentinel);
+                    try {
+                        // 队列有界后必须等待已有事件被请求线程消费，确保停止哨兵不会静默丢失。
+                        ctx.getGatewayEventQueue().put(sentinel);
+                    }
+                    catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        throw e;
+                    }
                 } else {
                     // 同 pod 但无队列（如 WebSocket）：直接落库收尾。
                     scriptService.flushOnStop(ctx);
