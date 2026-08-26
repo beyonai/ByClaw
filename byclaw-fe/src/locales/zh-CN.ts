@@ -874,6 +874,7 @@ export default {
   'employeeDetail.groupMember.select': '选择数字员工',
   'employeeDetail.groupMember.add': '添加',
   'employeeDetail.groupMember.selectAll': '全选（{selected}/{max}）',
+  'employeeDetail.groupMember.selectAllTooltip': '已选中 {selected} 条数据，最多可选择 {max} 条数据',
   'employeeDetail.groupMember.loadedCount': '已加载 {loaded} 条 / 共 {total} 条数据',
   'employeeDetail.groupMember.name': '数字员工',
   'employeeDetail.groupMember.description': '描述',
@@ -1485,6 +1486,14 @@ export default {
   // MessageList组件
   'messageList.sqlAnalysis': 'SQL分析',
   'messageList.defaultAIName': '鲸智百应',
+  'messageList.taskPlan.title': '任务执行计划',
+  'messageList.taskPlan.progress': '{completed}/{total} 已完成',
+  'messageList.taskPlan.status.PENDING': '待执行',
+  'messageList.taskPlan.status.IN_PROGRESS': '执行中',
+  'messageList.taskPlan.status.COMPLETED': '已完成',
+  'messageList.taskPlan.status.FAILED': '执行失败',
+  'messageList.taskPlan.status.SKIPPED': '已跳过',
+  'messageList.taskPlan.status.CANCELLED': '已取消',
 
   // MessageContent组件
   'contentHeader.settings': '设置',

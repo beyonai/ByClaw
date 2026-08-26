@@ -172,6 +172,36 @@ describe('models/useMessageStore', () => {
     expect(second.sessionListMap.get('s1').total).toBe(3);
   });
 
+  it('applyTaskPlanSnapshot updates the matching answer and ignores stale versions', () => {
+    const messageInfo = {
+      list: [{ messageId: 'm1', fromBeyond: true, taskPlan: { version: 2 } }],
+      pageNum: 1,
+      pageSize: 20,
+      total: 1,
+      pageRange: [1, 1],
+    };
+    const state = { sessionListMap: new Map([['s1', messageInfo]]) };
+    const latestPlan = {
+      planId: 'plan-1',
+      version: 3,
+      title: 'Plan',
+      status: 'ACTIVE',
+      sessionId: 's1',
+      messageId: 'm1',
+      tasks: [],
+    };
+
+    const updated = reducers.applyTaskPlanSnapshot(state as any, {
+      payload: { sessionId: 's1', messageId: 'm1', taskPlan: latestPlan },
+    });
+    const stale = reducers.applyTaskPlanSnapshot(updated, {
+      payload: { sessionId: 's1', messageId: 'm1', taskPlan: { ...latestPlan, version: 1 } },
+    });
+
+    expect(updated.sessionListMap.get('s1').list[0].taskPlan.version).toBe(3);
+    expect(stale).toBe(updated);
+  });
+
   it('setInitialSessionDataToLocateMsg stores target message paging info', () => {
     const map = new Map();
     const next = reducers.setInitialSessionDataToLocateMsg({ sessionListMap: map } as any, {

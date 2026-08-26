@@ -1,0 +1,152 @@
+.taskPlan {
+  width: 100%;
+  padding: 4px 0;
+  color: var(--beyond-color-text);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 24px;
+  padding: 0;
+  border: 0;
+  color: var(--beyond-color-text-tertiary);
+  font: inherit;
+  text-align: left;
+  background: transparent;
+  cursor: pointer;
+  gap: 16px;
+}
+
+.headerExpanded {
+  margin-bottom: 12px;
+}
+
+.headerTitle {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  color: var(--beyond-color-text-tertiary);
+  font-size: 15px;
+  font-weight: 400;
+  line-height: 24px;
+  gap: 12px;
+
+  :global(.anticon) {
+    color: var(--beyond-color-text-tertiary);
+    font-size: 12px;
+  }
+}
+
+.progress {
+  flex: none;
+  color: var(--beyond-color-text-secondary);
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.taskList {
+  display: flex;
+  flex-direction: column;
+}
+
+.taskItem {
+  position: relative;
+  display: grid;
+  grid-template-columns: 18px 62px minmax(0, 1fr);
+  min-height: 48px;
+  column-gap: 10px;
+}
+
+.timeline {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  min-height: 48px;
+}
+
+.timelineLine {
+  position: absolute;
+  z-index: 0;
+  top: 26px;
+  bottom: -1px;
+  left: 8px;
+  width: 2px;
+  background: #d0d5dd;
+}
+
+.taskItem:last-child .timelineLine {
+  display: none;
+}
+
+.statusIcon {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 2px;
+  background: var(--beyond-color-bg-container, #fff);
+  font-size: 16px;
+  line-height: 18px;
+}
+
+.statusCOMPLETED {
+  color: #20b486;
+}
+
+.statusIN_PROGRESS {
+  color: #246bfe;
+}
+
+.statusFAILED {
+  color: #f04438;
+}
+
+.statusSKIPPED,
+.statusCANCELLED {
+  color: #98a2b3;
+}
+
+.statusPENDING {
+  color: #b3bac5;
+}
+
+.taskTime {
+  padding-top: 1px;
+  color: #707680;
+  font-size: 13px;
+  line-height: 24px;
+  white-space: nowrap;
+}
+
+.taskContent {
+  min-width: 0;
+  padding-bottom: 10px;
+}
+
+.taskTitle {
+  overflow: hidden;
+  color: #707680;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 24px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.taskDescription,
+.taskReason {
+  overflow: hidden;
+  color: #707680;
+  font-size: 13px;
+  line-height: 24px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.taskReason {
+  color: #f04438;
+}

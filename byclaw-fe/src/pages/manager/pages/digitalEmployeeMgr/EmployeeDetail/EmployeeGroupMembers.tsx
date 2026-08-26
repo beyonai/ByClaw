@@ -370,12 +370,19 @@ export default function EmployeeGroupMembers({ value = [], onChange, disabled = 
             {
               title: (
                 <div className={styles.candidateTableHeader}>
-                  <span>
-                    {intl.formatMessage(
-                      { id: 'employeeDetail.groupMember.selectAll' },
+                  <Tooltip
+                    title={intl.formatMessage(
+                      { id: 'employeeDetail.groupMember.selectAllTooltip' },
                       { selected: selectedKeys.length, max: MAX_GROUP_MEMBER_COUNT }
                     )}
-                  </span>
+                  >
+                    <span>
+                      {intl.formatMessage(
+                        { id: 'employeeDetail.groupMember.selectAll' },
+                        { selected: selectedKeys.length, max: MAX_GROUP_MEMBER_COUNT }
+                      )}
+                    </span>
+                  </Tooltip>
                   <span className={styles.candidateTableCount}>
                     {intl.formatMessage(
                       { id: 'employeeDetail.groupMember.loadedCount' },

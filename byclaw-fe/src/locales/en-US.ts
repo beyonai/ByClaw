@@ -876,6 +876,7 @@ export default {
   'employeeDetail.groupMember.select': 'Select Digital Employees',
   'employeeDetail.groupMember.add': 'Add',
   'employeeDetail.groupMember.selectAll': 'Select all ({selected}/{max})',
+  'employeeDetail.groupMember.selectAllTooltip': 'Selected {selected} items; up to {max} items can be selected',
   'employeeDetail.groupMember.loadedCount': 'Loaded {loaded} items / {total} items total',
   'employeeDetail.groupMember.name': 'Digital Employee',
   'employeeDetail.groupMember.description': 'Description',
@@ -1495,6 +1496,14 @@ export default {
   // MessageList Component
   'messageList.sqlAnalysis': 'SQL Analysis',
   'messageList.defaultAIName': 'Beyond AI',
+  'messageList.taskPlan.title': 'Task execution plan',
+  'messageList.taskPlan.progress': '{completed}/{total} completed',
+  'messageList.taskPlan.status.PENDING': 'Pending',
+  'messageList.taskPlan.status.IN_PROGRESS': 'In progress',
+  'messageList.taskPlan.status.COMPLETED': 'Completed',
+  'messageList.taskPlan.status.FAILED': 'Failed',
+  'messageList.taskPlan.status.SKIPPED': 'Skipped',
+  'messageList.taskPlan.status.CANCELLED': 'Cancelled',
 
   // MessageContent Component
   'contentHeader.settings': 'Settings',
