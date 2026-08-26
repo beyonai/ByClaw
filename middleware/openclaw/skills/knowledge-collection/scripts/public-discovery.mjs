@@ -19,6 +19,8 @@ const searxngRuntimeScript = '/opt/searxng-cli/searxng_cli.py';
 const hotDiscoveryScript = join(onlineSearchRoot, 'references/hot_discovery/scripts/hot_discovery.mjs');
 const adaptersPath = join(onlineSearchRoot, 'references/hot_discovery/adapters.md');
 const MAX_DIAGNOSTIC_STDERR_CHARS = 2_000;
+const DEFAULT_SEARXNG_PROCESS_TIMEOUT_SECONDS = 60;
+const SEARXNG_REQUEST_TIMEOUT_SECONDS = 10;
 
 function requireText(value, name) {
   if (typeof value !== 'string' || !value.trim()) {
@@ -143,7 +145,7 @@ export async function runPublicDiscover(paths, args, options = {}) {
   const maxResults = String(args?.['max-results'] || '20');
   const requestedCount = args?.['requested-count'] === undefined ? null : String(args['requested-count']);
   const effectiveMaxResults = requestedCount || maxResults;
-  const timeout = String(args?.timeout || '15');
+  const processTimeout = String(args?.timeout || DEFAULT_SEARXNG_PROCESS_TIMEOUT_SECONDS);
   const timeRange = typeof args?.['time-range'] === 'string' && args['time-range'].trim()
     ? args['time-range'].trim() : null;
   const tiers = typeof args?.tiers === 'string' && args.tiers.trim() ? args.tiers.trim() : '1,2,3';
@@ -156,13 +158,14 @@ export async function runPublicDiscover(paths, args, options = {}) {
   const searxngRuntime = resolveSearxngRuntime(options);
   const runSearxngProcess = options.runProcess || runPublicProcess;
   const runHotDiscoveryProcess = options.runProcess || runUnboundedPublicProcess;
-  const searxngTimeoutMs = Math.max(1, Math.ceil(Number(timeout) * 1_000));
+  const searxngTimeoutMs = Math.max(1, Math.ceil(Number(processTimeout) * 1_000));
 
   const searxngSpec = {
     channel: 'searxng',
     executable: searxngRuntime.executable,
     args: [...searxngRuntime.argsPrefix, query, '--category', category, '--language', language,
-      '--pageno', pageno, '--max-results', effectiveMaxResults, '--timeout', timeout,
+      '--pageno', pageno, '--max-results', effectiveMaxResults,
+      '--timeout', String(SEARXNG_REQUEST_TIMEOUT_SECONDS),
       ...(timeRange ? ['--time-range', timeRange] : [])],
   };
   const hotDiscoverySpec = {

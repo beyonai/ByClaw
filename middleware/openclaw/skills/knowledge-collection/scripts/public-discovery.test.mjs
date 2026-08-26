@@ -127,7 +127,8 @@ test('runs SearXNG and hot discovery for every SearXNG category', async () => {
   const searxngCall = calls.find(({ spec }) => spec.channel === 'searxng');
   assert.ok(searxngCall.spec.args.includes('--time-range'));
   assert.ok(searxngCall.spec.args.includes('week'));
-  assert.deepEqual(searxngCall.options, { timeoutMs: 15_000 });
+  assert.equal(searxngCall.spec.args[searxngCall.spec.args.indexOf('--timeout') + 1], '10');
+  assert.deepEqual(searxngCall.options, { timeoutMs: 60_000 });
   assert.equal(result.ok, true);
   assert.deepEqual(result.hotDiscovery.effectiveDimensions, ['images', 'general']);
   assert.equal(existsSync(result.snapshots.searxng), true);
@@ -160,7 +161,8 @@ test('uses only SearXNG when the caller explicitly requests a result count', asy
   assert.deepEqual(calls.map(({ spec }) => spec.channel), ['searxng']);
   const searxngCall = calls[0];
   assert.equal(searxngCall.spec.args[searxngCall.spec.args.indexOf('--max-results') + 1], '1');
-  assert.deepEqual(searxngCall.options, { timeoutMs: 15_000 });
+  assert.equal(searxngCall.spec.args[searxngCall.spec.args.indexOf('--timeout') + 1], '10');
+  assert.deepEqual(searxngCall.options, { timeoutMs: 60_000 });
   assert.equal(result.hotDiscovery, null);
   assert.equal(result.snapshots.hotDiscovery, null);
   assert.deepEqual(result.channels.hotDiscovery, { status: 'skipped' });

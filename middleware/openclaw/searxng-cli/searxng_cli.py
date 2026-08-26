@@ -7,7 +7,7 @@
 
 用法:
     searxng-cli "查询词" [--engines google,bing] [--category general] \
-        [--language zh-CN] [--safesearch 0] [--max-results 20] [--timeout 15]
+        [--language zh-CN] [--safesearch 0] [--max-results 20] [--timeout 10]
 """
 
 import argparse
@@ -77,7 +77,7 @@ def main() -> int:
     )
     parser.add_argument("--pageno", type=int, default=1, help="结果页码，默认 1（配合 --max-results 翻页）")
     parser.add_argument("--max-results", type=int, default=20, help="最多返回的结果条数，默认 20")
-    parser.add_argument("--timeout", type=float, default=15.0, help="单次搜索超时（秒），默认 15")
+    parser.add_argument("--timeout", type=float, default=10.0, help="单次搜索超时（秒），默认 10")
     parser.add_argument("--list-engines", action="store_true", help="列出可用引擎与类别后退出")
     args = parser.parse_args()
     if not args.list_engines and not args.query:

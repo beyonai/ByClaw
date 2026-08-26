@@ -10,7 +10,7 @@
 
 ```bash
 node scripts/knowledge-collection.mjs public-discover --session-dir <会话目录> --query "查询词" \
-  [--category <类别>] [--language zh-CN] [--pageno 1] [--max-results N] [--timeout 15] \
+  [--category <类别>] [--language zh-CN] [--pageno 1] [--max-results N] [--timeout 60] \
   [--tiers 1,2,3] [--limit N]
 ```
 

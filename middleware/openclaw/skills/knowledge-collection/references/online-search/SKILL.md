@@ -51,7 +51,7 @@ searxng-cli "查询词" [参数...]
 | `--time-range` | 时间范围过滤：`day` / `week` / `month` / `year`（仅支持该功能的引擎生效，如 baidu/bing） | 不限 |
 | `--pageno` | 结果页码（配合 `--max-results` 翻页，如 `--pageno 2` 取第 2 页） | `1` |
 | `--max-results` | 最多返回的结果条数 | `20` |
-| `--timeout` | 单次搜索超时上限（秒） | `15` |
+| `--timeout` | 单次搜索超时上限（秒） | `10` |
 | `--list-engines` | 列出全部可用引擎（按类别分组）后退出 | - |
 
 ## 示例
