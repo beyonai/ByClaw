@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.state.interfaces.controller.taskplan;
 
 import org.apache.commons.lang3.StringUtils;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -9,9 +10,12 @@ import org.springframework.web.bind.annotation.RestController;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.state.application.service.taskplan.TaskPlanApplicationService;
+import com.iwhalecloud.byai.state.application.service.taskplan.TaskPlanApplicationService.TaskPlanWriteResult;
+import com.iwhalecloud.byai.state.domain.taskplan.dto.TaskPlanCommandResult;
 import com.iwhalecloud.byai.state.domain.taskplan.dto.TaskPlanLookupRequest;
 import com.iwhalecloud.byai.state.domain.taskplan.dto.TaskPlanSnapshot;
 import com.iwhalecloud.byai.state.domain.taskplan.dto.TaskPlanUpdateRequest;
+import com.iwhalecloud.byai.state.domain.taskplan.exception.TaskPlanCommandException;
 import com.iwhalecloud.byai.state.domain.ws.service.TaskPlanWebSocketPublisher;
 
 /** byclaw-super/OpenClaw 共用的任务计划内部 API。 */
@@ -29,10 +33,33 @@ public class TaskPlanController {
     }
 
     @PostMapping("/update")
-    public ResponseUtil<TaskPlanSnapshot> update(@RequestBody TaskPlanUpdateRequest request) {
-        TaskPlanSnapshot snapshot = taskPlanService.update(request);
-        publisher.broadcast(CurrentUserHolder.getCurrentUserId(), snapshot, null);
-        return ResponseUtil.successResponse(snapshot);
+    public ResponseUtil<TaskPlanCommandResult> update(@RequestBody TaskPlanUpdateRequest request) {
+        try {
+            return commandResponse(taskPlanService.executeCommand(request));
+        }
+        catch (DuplicateKeyException e) {
+            try {
+                return commandResponse(taskPlanService.recoverCreateConflict(request));
+            }
+            catch (TaskPlanCommandException conflict) {
+                return commandFailure(conflict);
+            }
+        }
+        catch (TaskPlanCommandException e) {
+            return commandFailure(e);
+        }
+    }
+
+    private ResponseUtil<TaskPlanCommandResult> commandResponse(TaskPlanWriteResult result) {
+        if (result.changed()) {
+            publisher.broadcast(CurrentUserHolder.getCurrentUserId(), result.snapshot(), null);
+        }
+        return ResponseUtil.successResponse(TaskPlanCommandResult.success(result.snapshot()));
+    }
+
+    private ResponseUtil<TaskPlanCommandResult> commandFailure(TaskPlanCommandException error) {
+        return ResponseUtil.successResponse(
+            TaskPlanCommandResult.failure(error.getCode(), error.getMessage(), error.getCurrentPlan()));
     }
 
     @PostMapping("/active")

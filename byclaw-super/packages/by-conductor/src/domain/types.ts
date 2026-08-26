@@ -166,8 +166,6 @@ export interface Delegation {
   agentName?: string;
   connectorId: string;
   task: string;
-  /** 关联活动任务计划中的任务位置；用于异步回调后恢复任务状态。 */
-  taskPosition?: number;
   expectedOutput?: string;
   status: DelegationStatus;
   externalRef?: ExternalExecutionRef;

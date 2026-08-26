@@ -68,9 +68,13 @@ describe("ByClaw BE task plan gateway", () => {
     });
   });
 
-  it("injects ownership and idempotency fields when updating", async () => {
+  it("injects ownership and sends only IDs and statuses when updating", async () => {
     const fetchImpl = vi.fn(async () =>
-      Response.json({ code: 0, success: true, data: snapshot(2) }),
+      Response.json({
+        code: 0,
+        success: true,
+        data: { ok: true, plan: snapshot(2) },
+      }),
     );
     const gateway = new ByClawBeTaskPlanGateway({
       baseUrl: "http://127.0.0.1:8086",
@@ -78,7 +82,7 @@ describe("ByClaw BE task plan gateway", () => {
       fetchImpl: fetchImpl as typeof fetch,
     });
 
-    await gateway.update({
+    await gateway.command({
       context: {
         beyondToken: "secret-token",
         sessionId: "2001",
@@ -88,11 +92,13 @@ describe("ByClaw BE task plan gateway", () => {
         sourceRunId: "run-1",
       },
       idempotencyKey: "tool-call-1",
-      update: {
-        title: "实现任务计划",
-        tasks: [
+      command: {
+        action: "update",
+        planId: "1001",
+        expectedVersion: 1,
+        updates: [
           {
-            step: "分析协议",
+            taskId: "4001",
             status: "COMPLETED",
           },
         ],
@@ -109,10 +115,56 @@ describe("ByClaw BE task plan gateway", () => {
       messageId: "3001",
       sourceRuntime: "BYCLAW_SUPER",
       sourceRunId: "run-1",
+      action: "UPDATE",
+      planId: "1001",
+      expectedVersion: 1,
     });
-    expect(JSON.parse(String(init?.body))).not.toHaveProperty("planId");
-    expect(JSON.parse(String(init?.body))).not.toHaveProperty("expectedVersion");
-    expect(JSON.parse(String(init?.body)).tasks[0]).not.toHaveProperty("taskId");
+    expect(JSON.parse(String(init?.body))).not.toHaveProperty("title");
+    expect(JSON.parse(String(init?.body))).not.toHaveProperty("tasks");
+    expect(JSON.parse(String(init?.body)).updates).toEqual([
+      { taskId: "4001", status: "COMPLETED" },
+    ]);
+  });
+
+  it("parses a machine-readable conflict with the latest plan", async () => {
+    const gateway = new ByClawBeTaskPlanGateway({
+      baseUrl: "http://127.0.0.1:8086",
+      timeoutMs: 1_000,
+      fetchImpl: vi.fn(async () =>
+        Response.json({
+          code: 0,
+          success: true,
+          data: {
+            ok: false,
+            error: { code: "VERSION_CONFLICT", message: "version changed" },
+            currentPlan: snapshot(3),
+          },
+        }),
+      ) as typeof fetch,
+    });
+
+    await expect(
+      gateway.command({
+        context: {
+          beyondToken: "secret-token",
+          sessionId: "2001",
+          messageId: "3001",
+          sourceRuntime: "BYCLAW_SUPER",
+          sourceRunId: "run-1",
+        },
+        idempotencyKey: "tool-call-stale",
+        command: {
+          action: "update",
+          planId: "1001",
+          expectedVersion: 2,
+          updates: [{ taskId: "4001", status: "COMPLETED" }],
+        },
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: "VERSION_CONFLICT" },
+      currentPlan: { version: 3 },
+    });
   });
 
   it("treats a null active response as no plan", async () => {

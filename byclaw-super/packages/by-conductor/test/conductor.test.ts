@@ -85,7 +85,6 @@ describe("DelegationService", () => {
         agents: [agent],
         agentId: agent.id,
         task: "analyze later",
-        taskPosition: 1,
         metadata: {},
         signal: new AbortController().signal,
       }),
@@ -93,7 +92,6 @@ describe("DelegationService", () => {
 
     expect(await delegations.get("delegation-suspended")).toMatchObject({
       status: "RUNNING",
-      taskPosition: 1,
       externalRef: { executionId: "external" },
       callbackDeadlineAt: 11_000,
     });
@@ -111,7 +109,6 @@ describe("DelegationService", () => {
         agents: [agent],
         agentId: agent.id,
         task: "analyze later",
-        taskPosition: 1,
         metadata: {},
         signal: new AbortController().signal,
       }),
@@ -1063,7 +1060,6 @@ describe("RunService", () => {
           async run(input) {
             try {
               await input.delegate({
-                toolCallId: "delegate-suspended",
                 agentId: agent.id,
                 task: "analyze later",
               });
@@ -2058,7 +2054,6 @@ describe("RunService", () => {
           run: async (input) => {
             const toolController = new AbortController();
             const result = await input.delegate({
-              toolCallId: "delegate-cancelled",
               agentId: agent.id,
               task: "wait for cancellation",
               signal: toolController.signal,
@@ -2231,22 +2226,26 @@ describe("RunService task plan completion guard", () => {
     const completedPlan = taskPlanSnapshot("COMPLETED", 2);
     const taskPlans: TaskPlanGateway = {
       loadActive: vi.fn(async () => active),
-      update: vi.fn(async () => completedPlan),
+      command: vi.fn(async () => ({ ok: true, plan: completedPlan })),
       cancel: vi.fn(async () => undefined),
     };
     const messages: string[] = [];
-    const { service } = createTaskPlanService(async (input) => {
+    const { events, service } = createTaskPlanService(async (input) => {
       messages.push(input.message);
       if (messages.length === 1) {
+        await input.onDelta("不应提前展示");
         return { text: "过早结束" };
       }
       await input.updateTaskPlan!({
         toolCallId: "finish-plan",
-        update: {
-          title: "完成复杂任务",
-          tasks: [{ step: "执行任务", status: "COMPLETED" }],
+        command: {
+          action: "update",
+          planId: "plan-1",
+          expectedVersion: 1,
+          updates: [{ taskId: "task-1", status: "COMPLETED" }],
         },
       });
+      await input.onDelta("最终回答");
       return { text: "任务已经完成" };
     }, taskPlans);
 
@@ -2255,12 +2254,38 @@ describe("RunService task plan completion guard", () => {
 
     expect(messages).toHaveLength(2);
     expect(messages[1]).toContain("task plan is still active");
-    expect(taskPlans.update).toHaveBeenCalledOnce();
+    expect(taskPlans.command).toHaveBeenCalledOnce();
     expect((await service.getRun(run.id))?.finalAnswer).toBe("任务已经完成");
+    expect(
+      (await events.list(run.id))
+        .filter(({ type }) => type === "leader.delta")
+        .map(({ data }) => data),
+    ).toEqual([{ text: "最终回答" }]);
     await service.dispose();
   });
 
-  it("selects the current planned task and completes it from a successful delegation", async () => {
+  it("fails closed when the authoritative task plan cannot be loaded", async () => {
+    const taskPlans: TaskPlanGateway = {
+      loadActive: vi.fn(async () => {
+        throw new Error("BE unavailable");
+      }),
+      command: vi.fn(async () => ({ ok: true, plan: taskPlanSnapshot("FAILED", 2) })),
+      cancel: vi.fn(async () => undefined),
+    };
+    const leaderRun = vi.fn(async () => ({ text: "不应执行" }));
+    const { service } = createTaskPlanService(leaderRun, taskPlans);
+
+    const run = await createTaskPlanRun(service);
+    await waitFor(async () => (await service.getRun(run.id))?.status === "FAILED");
+
+    expect(leaderRun).not.toHaveBeenCalled();
+    expect((await service.getRun(run.id))?.error).toContain(
+      "Unable to load the authoritative task plan",
+    );
+    await service.dispose();
+  });
+
+  it("keeps delegation independent from task-plan status updates", async () => {
     let currentPlan: TaskPlanSnapshot = {
       ...taskPlanSnapshot("ACTIVE"),
       tasks: [
@@ -2274,21 +2299,29 @@ describe("RunService task plan completion guard", () => {
     };
     const taskPlans: TaskPlanGateway = {
       loadActive: vi.fn(async () => currentPlan),
-      update: vi.fn(async ({ update }) => {
-        const completedPlan = update.tasks.every(({ status }) => status === "COMPLETED");
+      command: vi.fn(async ({ command }) => {
+        if (command.action !== "update") {
+          throw new Error("expected update command");
+        }
+        const updates = new Map(command.updates.map((update) => [update.taskId, update]));
+        const nextTasks = currentPlan.tasks.map((task) => {
+          const update = updates.get(task.taskId);
+          return update
+            ? {
+                ...task,
+                status: update.status,
+                ...(update.statusReason ? { statusReason: update.statusReason } : {}),
+              }
+            : task;
+        });
+        const completedPlan = nextTasks.every(({ status }) => status === "COMPLETED");
         currentPlan = {
           ...currentPlan,
           version: currentPlan.version + 1,
           status: completedPlan ? "COMPLETED" : "ACTIVE",
-          tasks: update.tasks.map((task, index) => ({
-            taskId: `task-${index + 1}`,
-            position: index + 1,
-            title: task.step,
-            ...(task.description ? { description: task.description } : {}),
-            status: task.status,
-          })),
+          tasks: nextTasks,
         };
-        return currentPlan;
+        return { ok: true, plan: currentPlan };
       }),
       cancel: vi.fn(async () => undefined),
     };
@@ -2296,48 +2329,67 @@ describe("RunService task plan completion guard", () => {
       yield completed("任务完成");
     });
     const { service } = createTaskPlanService(async (input) => {
+      await input.updateTaskPlan!({
+        toolCallId: "plan-start-current-task",
+        command: {
+          action: "update",
+          planId: "plan-1",
+          expectedVersion: 1,
+          updates: [{ taskId: "task-1", status: "IN_PROGRESS" }],
+        },
+      });
       const result = await input.delegate({
-        toolCallId: "delegate-current-task",
         agentId: agent.id,
         task: "执行当前任务",
       });
       expect(result.status).toBe("completed");
+      expect(taskPlans.command).toHaveBeenCalledTimes(1);
+      await input.updateTaskPlan!({
+        toolCallId: "plan-complete-current-task",
+        command: {
+          action: "update",
+          planId: "plan-1",
+          expectedVersion: 2,
+          updates: [{ taskId: "task-1", status: "COMPLETED" }],
+        },
+      });
       return { text: "任务已经完成" };
     }, taskPlans, connector);
 
     const run = await createTaskPlanRun(service, [agent]);
     await waitFor(async () => (await service.getRun(run.id))?.status === "COMPLETED");
 
-    expect(taskPlans.update).toHaveBeenCalledTimes(2);
-    expect(taskPlans.update).toHaveBeenNthCalledWith(
+    expect(taskPlans.command).toHaveBeenCalledTimes(2);
+    expect(taskPlans.command).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
-        idempotencyKey: "delegate-current-task:task-started",
-        update: expect.objectContaining({
-          tasks: [expect.objectContaining({ status: "IN_PROGRESS" })],
+        idempotencyKey: "plan-start-current-task",
+        command: expect.objectContaining({
+          action: "update",
+          updates: [expect.objectContaining({ taskId: "task-1", status: "IN_PROGRESS" })],
         }),
       }),
     );
-    expect(taskPlans.update).toHaveBeenNthCalledWith(
+    expect(taskPlans.command).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
-        idempotencyKey: "delegate-current-task:task-completed",
-        update: expect.objectContaining({
-          tasks: [expect.objectContaining({ status: "COMPLETED" })],
+        idempotencyKey: "plan-complete-current-task",
+        command: expect.objectContaining({
+          action: "update",
+          updates: [expect.objectContaining({ taskId: "task-1", status: "COMPLETED" })],
         }),
       }),
     );
-    expect((await service.getRunDetails(run.id))?.delegations[0]).toMatchObject({
-      taskPosition: 1,
-      status: "COMPLETED",
-    });
+    const delegation = (await service.getRunDetails(run.id))?.delegations[0];
+    expect(delegation).toMatchObject({ status: "COMPLETED" });
+    expect(delegation).not.toHaveProperty("taskPosition");
     await service.dispose();
   });
 
   it("fails instead of reporting success when the Leader repeatedly ignores an active plan", async () => {
     const taskPlans: TaskPlanGateway = {
       loadActive: vi.fn(async () => taskPlanSnapshot("ACTIVE")),
-      update: vi.fn(async () => taskPlanSnapshot("FAILED", 2)),
+      command: vi.fn(async () => ({ ok: true, plan: taskPlanSnapshot("FAILED", 2) })),
       cancel: vi.fn(async () => undefined),
     };
     const leaderRun = vi.fn(async () => ({ text: "仍然过早结束" }));
@@ -2348,10 +2400,10 @@ describe("RunService task plan completion guard", () => {
 
     expect(leaderRun).toHaveBeenCalledTimes(4);
     expect((await service.getRun(run.id))?.status).toBe("FAILED");
-    expect(taskPlans.update).toHaveBeenCalledWith(
+    expect(taskPlans.command).toHaveBeenCalledWith(
       expect.objectContaining({
-        update: expect.objectContaining({
-          tasks: [
+        command: expect.objectContaining({
+          updates: [
             expect.objectContaining({
               status: "FAILED",
               statusReason: expect.objectContaining({ code: "RUN_FAILED" }),
@@ -2364,7 +2416,7 @@ describe("RunService task plan completion guard", () => {
     await service.dispose();
   });
 
-  it("links delegation failures to the planned task and broadcasts terminal progress", async () => {
+  it("requires the task-plan tool to record a delegation failure", async () => {
     let currentPlan: TaskPlanSnapshot = {
       ...taskPlanSnapshot("ACTIVE"),
       tasks: [
@@ -2378,24 +2430,31 @@ describe("RunService task plan completion guard", () => {
     };
     const taskPlans: TaskPlanGateway = {
       loadActive: vi.fn(async () => currentPlan),
-      update: vi.fn(async ({ update }) => {
-        const nextStatus = update.tasks.some(({ status }) => status === "FAILED")
+      command: vi.fn(async ({ command }) => {
+        if (command.action !== "update") {
+          throw new Error("expected update command");
+        }
+        const updates = new Map(command.updates.map((update) => [update.taskId, update]));
+        const nextTasks = currentPlan.tasks.map((task) => {
+          const update = updates.get(task.taskId);
+          return update
+            ? {
+                ...task,
+                status: update.status,
+                ...(update.statusReason ? { statusReason: update.statusReason } : {}),
+              }
+            : task;
+        });
+        const nextStatus = nextTasks.some(({ status }) => status === "FAILED")
           ? "FAILED"
           : "ACTIVE";
         currentPlan = {
           ...currentPlan,
           version: currentPlan.version + 1,
           status: nextStatus,
-          tasks: update.tasks.map((task, index) => ({
-            taskId: `task-${index + 1}`,
-            position: index + 1,
-            title: task.step,
-            ...(task.description ? { description: task.description } : {}),
-            status: task.status,
-            ...(task.statusReason ? { statusReason: task.statusReason } : {}),
-          })),
+          tasks: nextTasks,
         };
-        return currentPlan;
+        return { ok: true, plan: currentPlan };
       }),
       cancel: vi.fn(async () => undefined),
     };
@@ -2410,47 +2469,66 @@ describe("RunService task plan completion guard", () => {
       };
     });
     const { service } = createTaskPlanService(async (input) => {
+      await input.updateTaskPlan!({
+        toolCallId: "plan-start-delegated-task",
+        command: {
+          action: "update",
+          planId: "plan-1",
+          expectedVersion: 1,
+          updates: [{ taskId: "task-1", status: "IN_PROGRESS" }],
+        },
+      });
       const result = await input.delegate({
-        toolCallId: "delegate-planned-task",
         agentId: agent.id,
         task: "调度数字员工执行任务",
-        taskPosition: 1,
       });
       expect(result.status).toBe("failed");
-      await expect(
-        input.delegate({
-          toolCallId: "delegate-after-failure",
-          agentId: agent.id,
-          task: "不应继续执行",
-        }),
-      ).rejects.toThrow("no further delegation is allowed");
+      expect(taskPlans.command).toHaveBeenCalledTimes(1);
+      await input.updateTaskPlan!({
+        toolCallId: "plan-fail-delegated-task",
+        command: {
+          action: "update",
+          planId: "plan-1",
+          expectedVersion: 2,
+          updates: [
+            {
+              taskId: "task-1",
+              status: "FAILED",
+              statusReason: {
+                code: "DIGITAL_EMPLOYEE_UNAVAILABLE",
+                message: "employee unavailable",
+              },
+            },
+          ],
+        },
+      });
       return { text: "数字员工调度失败，任务未完成" };
     }, taskPlans, connector);
 
     const run = await createTaskPlanRun(service, [agent]);
     await waitFor(async () => (await service.getRun(run.id))?.status === "COMPLETED");
 
-    expect(taskPlans.update).toHaveBeenCalledTimes(2);
-    expect(taskPlans.update).toHaveBeenNthCalledWith(
+    expect(taskPlans.command).toHaveBeenCalledTimes(2);
+    expect(taskPlans.command).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
-        idempotencyKey: "delegate-planned-task:task-started",
-        update: expect.objectContaining({
-          tasks: [expect.objectContaining({ status: "IN_PROGRESS" })],
+        idempotencyKey: "plan-start-delegated-task",
+        command: expect.objectContaining({
+          updates: [expect.objectContaining({ status: "IN_PROGRESS" })],
         }),
       }),
     );
-    expect(taskPlans.update).toHaveBeenNthCalledWith(
+    expect(taskPlans.command).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
-        idempotencyKey: "delegate-planned-task:task-failed",
-        update: expect.objectContaining({
-          tasks: [
+        idempotencyKey: "plan-fail-delegated-task",
+        command: expect.objectContaining({
+          updates: [
             expect.objectContaining({
               status: "FAILED",
               statusReason: {
-                code: "DELEGATION_FAILED",
-                message: "数字员工调度失败",
+                code: "DIGITAL_EMPLOYEE_UNAVAILABLE",
+                message: "employee unavailable",
               },
             }),
           ],
@@ -2462,7 +2540,7 @@ describe("RunService task plan completion guard", () => {
     await service.dispose();
   });
 
-  it("restores the planned task link when a callback delegation fails", async () => {
+  it("does not update task-plan status while restoring a callback delegation", async () => {
     let currentPlan: TaskPlanSnapshot = {
       ...taskPlanSnapshot("ACTIVE"),
       tasks: [
@@ -2476,23 +2554,30 @@ describe("RunService task plan completion guard", () => {
     };
     const taskPlans: TaskPlanGateway = {
       loadActive: vi.fn(async () => currentPlan),
-      update: vi.fn(async ({ update }) => {
+      command: vi.fn(async ({ command }) => {
+        if (command.action !== "update") {
+          throw new Error("expected update command");
+        }
+        const updates = new Map(command.updates.map((update) => [update.taskId, update]));
+        const nextTasks = currentPlan.tasks.map((task) => {
+          const update = updates.get(task.taskId);
+          return update
+            ? {
+                ...task,
+                status: update.status,
+                ...(update.statusReason ? { statusReason: update.statusReason } : {}),
+              }
+            : task;
+        });
         currentPlan = {
           ...currentPlan,
           version: currentPlan.version + 1,
-          status: update.tasks.some(({ status }) => status === "FAILED")
+          status: nextTasks.some(({ status }) => status === "FAILED")
             ? "FAILED"
             : "ACTIVE",
-          tasks: update.tasks.map((task, index) => ({
-            taskId: `task-${index + 1}`,
-            position: index + 1,
-            title: task.step,
-            ...(task.description ? { description: task.description } : {}),
-            status: task.status,
-            ...(task.statusReason ? { statusReason: task.statusReason } : {}),
-          })),
+          tasks: nextTasks,
         };
-        return currentPlan;
+        return { ok: true, plan: currentPlan };
       }),
       cancel: vi.fn(async () => undefined),
     };
@@ -2500,12 +2585,19 @@ describe("RunService task plan completion guard", () => {
     const { service } = createTaskPlanService(async (input) => {
       leaderAttempt += 1;
       if (leaderAttempt === 1) {
+        await input.updateTaskPlan!({
+          toolCallId: "plan-start-callback-task",
+          command: {
+            action: "update",
+            planId: "plan-1",
+            expectedVersion: 1,
+            updates: [{ taskId: "task-1", status: "IN_PROGRESS" }],
+          },
+        });
         try {
           await input.delegate({
-            toolCallId: "delegate-callback-task",
             agentId: agent.id,
             task: "异步执行数字员工任务",
-            taskPosition: 1,
           });
         } catch (error) {
           if (error instanceof DelegationSuspendedError) {
@@ -2516,13 +2608,33 @@ describe("RunService task plan completion guard", () => {
         throw new Error("expected callback delegation to suspend");
       }
       expect(input.message).toContain("trusted platform callback");
+      expect(taskPlans.command).toHaveBeenCalledTimes(1);
+      await input.updateTaskPlan!({
+        toolCallId: "plan-fail-callback-task",
+        command: {
+          action: "update",
+          planId: "plan-1",
+          expectedVersion: 2,
+          updates: [
+            {
+              taskId: "task-1",
+              status: "FAILED",
+              statusReason: {
+                code: "DIGITAL_EMPLOYEE_UNAVAILABLE",
+                message: "digital employee unavailable",
+              },
+            },
+          ],
+        },
+      });
       return { text: "数字员工失败，任务已收口" };
     }, taskPlans, fakeCallbackConnector());
 
     const run = await createTaskPlanRun(service, [agent]);
     await waitFor(async () => (await service.getRun(run.id))?.status === "WAITING_AGENT");
     const delegation = (await service.getRunDetails(run.id))?.delegations[0];
-    expect(delegation).toMatchObject({ status: "RUNNING", taskPosition: 1 });
+    expect(delegation).toMatchObject({ status: "RUNNING" });
+    expect(delegation).not.toHaveProperty("taskPosition");
 
     await expect(
       service.resumeDelegation({
@@ -2533,17 +2645,17 @@ describe("RunService task plan completion guard", () => {
     ).resolves.toMatchObject({ accepted: true, runId: run.id });
     await waitFor(async () => (await service.getRun(run.id))?.status === "COMPLETED");
 
-    expect(taskPlans.update).toHaveBeenCalledTimes(2);
-    expect(taskPlans.update).toHaveBeenLastCalledWith(
+    expect(taskPlans.command).toHaveBeenCalledTimes(2);
+    expect(taskPlans.command).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        idempotencyKey: `${delegation!.id}:task-failed`,
-        update: expect.objectContaining({
-          tasks: [
+        idempotencyKey: "plan-fail-callback-task",
+        command: expect.objectContaining({
+          updates: [
             expect.objectContaining({
               status: "FAILED",
               statusReason: {
-                code: "DELEGATION_FAILED",
-                message: "数字员工调度失败",
+                code: "DIGITAL_EMPLOYEE_UNAVAILABLE",
+                message: "digital employee unavailable",
               },
             }),
           ],

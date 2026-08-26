@@ -2,6 +2,7 @@ import {
   TASK_PLAN_TASK_STATUSES,
   type TaskPlanExecutionContext,
   type TaskPlanGateway,
+  type TaskPlanCommandResult,
   type TaskPlanSnapshot,
   type TaskPlanStatus,
   type TaskPlanTaskStatus,
@@ -65,10 +66,10 @@ export class ByClawBeTaskPlanGateway implements TaskPlanGateway {
     return data === null ? undefined : parseTaskPlanSnapshot(data);
   }
 
-  async update(
-    input: Parameters<TaskPlanGateway["update"]>[0],
-  ): Promise<TaskPlanSnapshot> {
-    const { context, update } = input;
+  async command(
+    input: Parameters<TaskPlanGateway["command"]>[0],
+  ): Promise<TaskPlanCommandResult> {
+    const { context, command } = input;
     const data = await this.#post(UPDATE_PATH, context, {
       idempotencyKey: input.idempotencyKey,
       sessionId: context.sessionId,
@@ -78,11 +79,20 @@ export class ByClawBeTaskPlanGateway implements TaskPlanGateway {
       ...(context.laneId ? { laneId: context.laneId } : {}),
       sourceRuntime: context.sourceRuntime,
       sourceRunId: context.sourceRunId,
-      title: update.title,
-      ...(update.explanation ? { explanation: update.explanation } : {}),
-      tasks: update.tasks,
+      action: command.action.toUpperCase(),
+      ...(command.action === "create"
+        ? {
+            title: command.title,
+            ...(command.explanation ? { explanation: command.explanation } : {}),
+            tasks: command.tasks,
+          }
+        : {
+            planId: command.planId,
+            expectedVersion: command.expectedVersion,
+            updates: command.updates,
+          }),
     });
-    return parseTaskPlanSnapshot(data);
+    return parseTaskPlanCommandResult(data);
   }
 
   async cancel(
@@ -120,6 +130,27 @@ export class ByClawBeTaskPlanGateway implements TaskPlanGateway {
         new ByClawBeTaskPlanError(message, statusCode),
     });
   }
+}
+
+function parseTaskPlanCommandResult(value: unknown): TaskPlanCommandResult {
+  if (!isRecord(value) || typeof value.ok !== "boolean") {
+    throw new ByClawBeTaskPlanError("ByClaw BE task plan returned invalid command result");
+  }
+  if (value.ok) {
+    return { ok: true, plan: parseTaskPlanSnapshot(value.plan) };
+  }
+  if (!isRecord(value.error)) {
+    throw new ByClawBeTaskPlanError("ByClaw BE task plan returned invalid error result");
+  }
+  const code = requiredString(value.error, "code");
+  const message = requiredString(value.error, "message");
+  return {
+    ok: false,
+    error: { code, message },
+    ...(value.currentPlan
+      ? { currentPlan: parseTaskPlanSnapshot(value.currentPlan) }
+      : {}),
+  };
 }
 
 function parseTaskPlanSnapshot(value: unknown): TaskPlanSnapshot {

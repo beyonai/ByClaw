@@ -8,7 +8,7 @@ import com.baomidou.mybatisplus.annotation.TableName;
 
 import lombok.Data;
 
-/** Agent 任务计划当前快照。 */
+/** Agent 任务计划当前快照；任务明细和幂等结果内嵌在同一行。 */
 @Data
 @TableName("byai_agent_task_plan")
 public class ByaiAgentTaskPlan {
@@ -47,6 +47,12 @@ public class ByaiAgentTaskPlan {
     private String statusReasonMessage;
 
     private Integer version;
+
+    /** {@code TaskPlanSnapshot.TaskSnapshot[]} 的 JSON。 */
+    private String tasksPayload;
+
+    /** 已处理工具调用及其首次权威快照的 JSON。 */
+    private String idempotencyPayload;
 
     private Date createdAt;
 

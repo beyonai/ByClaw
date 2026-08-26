@@ -2,14 +2,13 @@ package com.iwhalecloud.byai.state.application.service.taskplan;
 
 import java.util.ArrayList;
 import java.util.Date;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.http.HttpStatus;
@@ -19,66 +18,98 @@ import org.springframework.web.server.ResponseStatusException;
 
 import com.alibaba.fastjson.JSON;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
-import cn.hutool.core.util.IdUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
-import com.iwhalecloud.byai.manager.entity.taskplan.ByaiAgentTaskEvent;
-import com.iwhalecloud.byai.manager.entity.taskplan.ByaiAgentTaskItem;
 import com.iwhalecloud.byai.manager.entity.taskplan.ByaiAgentTaskPlan;
-import com.iwhalecloud.byai.manager.mapper.taskplan.ByaiAgentTaskEventMapper;
-import com.iwhalecloud.byai.manager.mapper.taskplan.ByaiAgentTaskItemMapper;
 import com.iwhalecloud.byai.manager.mapper.taskplan.ByaiAgentTaskPlanMapper;
 import com.iwhalecloud.byai.state.domain.chat.dto.StopChatDto;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 import com.iwhalecloud.byai.state.domain.taskplan.dto.TaskPlanLookupRequest;
 import com.iwhalecloud.byai.state.domain.taskplan.dto.TaskPlanSnapshot;
 import com.iwhalecloud.byai.state.domain.taskplan.dto.TaskPlanUpdateRequest;
+import com.iwhalecloud.byai.state.domain.taskplan.exception.TaskPlanCommandException;
 
-/** Agent 任务计划的权威写入、查询和取消服务。 */
+import cn.hutool.core.util.IdUtil;
+
+/** Agent 任务计划的单表权威写入、查询和取消服务。 */
 @Service
 public class TaskPlanApplicationService {
 
     private static final Set<String> TASK_STATUSES = Set.of(
         "PENDING", "IN_PROGRESS", "COMPLETED", "FAILED", "SKIPPED", "CANCELLED");
 
+    private static final Set<String> CREATE_TASK_STATUSES = Set.of("PENDING", "IN_PROGRESS");
+
     private static final Set<String> TERMINAL_TASK_STATUSES = Set.of(
         "COMPLETED", "FAILED", "SKIPPED", "CANCELLED");
 
     private static final Set<String> ACTIVE_PLAN_STATUSES = Set.of("ACTIVE", "CANCELLING");
 
+    private static final Map<String, Set<String>> ALLOWED_TRANSITIONS = Map.of(
+        "PENDING", Set.of("PENDING", "IN_PROGRESS", "SKIPPED", "CANCELLED"),
+        "IN_PROGRESS", Set.of("IN_PROGRESS", "COMPLETED", "FAILED", "CANCELLED"),
+        "COMPLETED", Set.of("COMPLETED"),
+        "FAILED", Set.of("FAILED"),
+        "SKIPPED", Set.of("SKIPPED"),
+        "CANCELLED", Set.of("CANCELLED"));
+
     private static final int MAX_TASKS = 100;
 
     private final ByaiAgentTaskPlanMapper planMapper;
 
-    private final ByaiAgentTaskItemMapper itemMapper;
-
-    private final ByaiAgentTaskEventMapper eventMapper;
-
     private final SessionService sessionService;
 
-    public TaskPlanApplicationService(ByaiAgentTaskPlanMapper planMapper, ByaiAgentTaskItemMapper itemMapper,
-        ByaiAgentTaskEventMapper eventMapper, SessionService sessionService) {
+    public TaskPlanApplicationService(ByaiAgentTaskPlanMapper planMapper, SessionService sessionService) {
         this.planMapper = planMapper;
-        this.itemMapper = itemMapper;
-        this.eventMapper = eventMapper;
         this.sessionService = sessionService;
     }
 
-    /** 按可信执行归属查找计划，不存在则创建，存在则替换完整任务快照。 */
+    /** CREATE 首次定义任务；UPDATE 仅按 taskId 更新状态。 */
     @Transactional
     public TaskPlanSnapshot update(TaskPlanUpdateRequest request) {
-        requireRequest(request);
-        Long userId = CurrentUserHolder.getCurrentUserId();
-        Long sessionId = parseRequiredLong(request.getSessionId(), "sessionId");
-        Long messageId = parseRequiredLong(request.getMessageId(), "messageId");
-        String sourceRuntime = normalizeRuntime(request.getSourceRuntime());
-        requireOwnedSession(sessionId, userId);
-        ByaiAgentTaskPlan plan = findByExecution(userId, sessionId, messageId, request.getTraceId(),
-            sourceRuntime, null, true, true);
-        return plan == null ? create(request, userId, sessionId, messageId) : replace(request, userId, plan);
+        return executeCommand(request).snapshot();
     }
 
-    /** 查询当前用户在指定执行上的最新计划；没有计划时返回 null。 */
+    /** Controller 使用 changed 判断是否需要广播，幂等重放不重复发送事件。 */
+    @Transactional
+    public TaskPlanWriteResult executeCommand(TaskPlanUpdateRequest request) {
+        requireCommandRequest(request);
+        Long userId = CurrentUserHolder.getCurrentUserId();
+        Long sessionId = parseRequiredLongCommand(request.getSessionId(), "sessionId");
+        Long messageId = parseRequiredLongCommand(request.getMessageId(), "messageId");
+        String sourceRuntime = normalizeRuntimeCommand(request.getSourceRuntime());
+        requireOwnedSessionCommand(sessionId, userId);
+        String action = requiredTextCommand(request.getAction(), "action", 16).toUpperCase(Locale.ROOT);
+        return switch (action) {
+            case "CREATE" -> create(request, userId, sessionId, messageId, sourceRuntime);
+            case "UPDATE" -> updateStatuses(request, userId, sessionId, messageId, sourceRuntime);
+            default -> throw commandError("INVALID_REQUEST", "unsupported action: " + request.getAction(), null);
+        };
+    }
+
+    /** CREATE 唯一键并发冲突后，在新事务中恢复首次结果或返回已有计划。 */
+    public TaskPlanWriteResult recoverCreateConflict(TaskPlanUpdateRequest request) {
+        requireCommandRequest(request);
+        Long userId = CurrentUserHolder.getCurrentUserId();
+        Long sessionId = parseRequiredLongCommand(request.getSessionId(), "sessionId");
+        Long messageId = parseRequiredLongCommand(request.getMessageId(), "messageId");
+        String sourceRuntime = normalizeRuntimeCommand(request.getSourceRuntime());
+        String sourceRunId = requiredTextCommand(request.getSourceRunId(), "sourceRunId", 128);
+        ByaiAgentTaskPlan existing = findByExecution(userId, sessionId, messageId, request.getTraceId(), sourceRuntime,
+            sourceRunId, true, true);
+        if (existing == null) {
+            throw commandError("VERSION_CONFLICT", "Concurrent task plan creation did not become visible", null);
+        }
+        TaskPlanSnapshot replay = findReplay(existing,
+            requiredTextCommand(request.getIdempotencyKey(), "idempotencyKey", 128));
+        if (replay != null) {
+            return new TaskPlanWriteResult(replay, false);
+        }
+        throw commandError("PLAN_ALREADY_EXISTS", "An active or historical plan already exists for this Run",
+            snapshot(existing));
+    }
+
+    /** 查询一轮执行上的计划；Runtime 默认只取 ACTIVE，历史查询可包含终态。 */
     public TaskPlanSnapshot findActive(TaskPlanLookupRequest request) {
         if (request == null) {
             return null;
@@ -92,7 +123,7 @@ public class TaskPlanApplicationService {
         return plan == null ? null : snapshot(plan);
     }
 
-    /** 为历史消息页批量查询当前用户每条回答的最新计划，包含终态计划。 */
+    /** 为历史消息页批量查询每条回答的最新计划，包含终态计划。 */
     public Map<Long, TaskPlanSnapshot> findLatestByMessageIds(Long sessionId, List<Long> messageIds) {
         Long userId = CurrentUserHolder.getCurrentUserId();
         if (userId == null || sessionId == null || messageIds == null || messageIds.isEmpty()) {
@@ -102,7 +133,6 @@ public class TaskPlanApplicationService {
         if (distinctMessageIds.isEmpty()) {
             return Map.of();
         }
-
         List<ByaiAgentTaskPlan> plans = planMapper.selectList(Wrappers.<ByaiAgentTaskPlan>lambdaQuery()
             .eq(ByaiAgentTaskPlan::getUserId, userId)
             .eq(ByaiAgentTaskPlan::getSessionId, sessionId)
@@ -112,49 +142,28 @@ public class TaskPlanApplicationService {
         if (plans == null || plans.isEmpty()) {
             return Map.of();
         }
-
-        Map<Long, ByaiAgentTaskPlan> latestByMessageId = new LinkedHashMap<>();
-        plans.stream().filter(plan -> plan.getMessageId() != null)
-            .forEach(plan -> latestByMessageId.putIfAbsent(plan.getMessageId(), plan));
-        if (latestByMessageId.isEmpty()) {
-            return Map.of();
-        }
-
-        List<Long> planIds = latestByMessageId.values().stream().map(ByaiAgentTaskPlan::getPlanId).toList();
-        List<ByaiAgentTaskItem> taskItems = itemMapper.selectList(Wrappers.<ByaiAgentTaskItem>lambdaQuery()
-            .in(ByaiAgentTaskItem::getPlanId, planIds)
-            .orderByAsc(ByaiAgentTaskItem::getPlanId)
-            .orderByAsc(ByaiAgentTaskItem::getPosition));
-        Map<Long, List<ByaiAgentTaskItem>> itemsByPlanId = taskItems == null ? Map.of()
-            : taskItems.stream().collect(Collectors.groupingBy(ByaiAgentTaskItem::getPlanId));
-
         Map<Long, TaskPlanSnapshot> snapshots = new LinkedHashMap<>();
-        latestByMessageId.forEach((messageId, plan) -> snapshots.put(messageId,
-            snapshot(plan, itemsByPlanId.getOrDefault(plan.getPlanId(), List.of()))));
+        plans.stream().filter(plan -> plan.getMessageId() != null)
+            .forEach(plan -> snapshots.putIfAbsent(plan.getMessageId(), snapshot(plan)));
         return snapshots;
     }
 
-    /** 删除消息时同步清理其任务计划；item 和 event 由数据库外键级联删除。 */
     @Transactional
     public void deleteByMessageId(Long messageId) {
-        if (messageId == null) {
-            return;
+        if (messageId != null) {
+            planMapper.delete(Wrappers.<ByaiAgentTaskPlan>lambdaQuery()
+                .eq(ByaiAgentTaskPlan::getMessageId, messageId));
         }
-        planMapper.delete(Wrappers.<ByaiAgentTaskPlan>lambdaQuery()
-            .eq(ByaiAgentTaskPlan::getMessageId, messageId));
     }
 
-    /** 删除会话时同步清理其全部任务计划；item 和 event 由数据库外键级联删除。 */
     @Transactional
     public void deleteBySessionId(Long sessionId) {
-        if (sessionId == null) {
-            return;
+        if (sessionId != null) {
+            planMapper.delete(Wrappers.<ByaiAgentTaskPlan>lambdaQuery()
+                .eq(ByaiAgentTaskPlan::getSessionId, sessionId));
         }
-        planMapper.delete(Wrappers.<ByaiAgentTaskPlan>lambdaQuery()
-            .eq(ByaiAgentTaskPlan::getSessionId, sessionId));
     }
 
-    /** STOP_CHAT 第一步：立即封住模型的迟到更新，并对外展示“正在停止”。 */
     @Transactional
     public TaskPlanSnapshot requestCancellation(StopChatDto stopChatDto, String reasonCode, String reasonMessage) {
         if (stopChatDto == null || stopChatDto.getSessionId() == null) {
@@ -165,7 +174,6 @@ public class TaskPlanApplicationService {
             stopChatDto.getTraceId(), null, null, reasonCode, reasonMessage);
     }
 
-    /** 运行时直接取消时使用同一回答的执行归属定位计划。 */
     @Transactional
     public TaskPlanSnapshot requestCancellation(TaskPlanLookupRequest request, String reasonCode,
         String reasonMessage) {
@@ -186,32 +194,32 @@ public class TaskPlanApplicationService {
         if (plan == null) {
             return null;
         }
-        if ("CANCELLED".equals(plan.getStatus())) {
+        if ("CANCELLED".equals(plan.getStatus()) || "CANCELLING".equals(plan.getStatus())) {
             return snapshot(plan);
         }
-        if (!"CANCELLING".equals(plan.getStatus())) {
-            int nextVersion = plan.getVersion() + 1;
-            int changed = planMapper.update(null, Wrappers.<ByaiAgentTaskPlan>lambdaUpdate()
-                .eq(ByaiAgentTaskPlan::getPlanId, plan.getPlanId())
-                .eq(ByaiAgentTaskPlan::getUserId, userId)
-                .eq(ByaiAgentTaskPlan::getVersion, plan.getVersion())
-                .eq(ByaiAgentTaskPlan::getStatus, "ACTIVE")
-                .set(ByaiAgentTaskPlan::getStatus, "CANCELLING")
-                .set(ByaiAgentTaskPlan::getStatusReasonCode, reasonCode)
-                .set(ByaiAgentTaskPlan::getStatusReasonMessage, reasonMessage)
-                .set(ByaiAgentTaskPlan::getVersion, nextVersion)
-                .set(ByaiAgentTaskPlan::getUpdatedAt, new Date()));
-            if (changed == 0) {
-                throw conflict("Task plan changed while cancellation was requested");
-            }
-            plan = requireOwnedPlan(plan.getPlanId(), userId);
-            appendEvent(plan, "PLAN_CANCELLING", "USER", CurrentUserHolder.getCurrentUserCode(),
-                "cancel-request:" + nextVersion, snapshot(plan));
+        Date now = new Date();
+        int nextVersion = plan.getVersion() + 1;
+        int changed = planMapper.update(null, Wrappers.<ByaiAgentTaskPlan>lambdaUpdate()
+            .eq(ByaiAgentTaskPlan::getPlanId, plan.getPlanId())
+            .eq(ByaiAgentTaskPlan::getUserId, userId)
+            .eq(ByaiAgentTaskPlan::getVersion, plan.getVersion())
+            .eq(ByaiAgentTaskPlan::getStatus, "ACTIVE")
+            .set(ByaiAgentTaskPlan::getStatus, "CANCELLING")
+            .set(ByaiAgentTaskPlan::getStatusReasonCode, reasonCode)
+            .set(ByaiAgentTaskPlan::getStatusReasonMessage, reasonMessage)
+            .set(ByaiAgentTaskPlan::getVersion, nextVersion)
+            .set(ByaiAgentTaskPlan::getUpdatedAt, now));
+        if (changed == 0) {
+            throw conflict("Task plan changed while cancellation was requested");
         }
+        plan.setStatus("CANCELLING");
+        plan.setStatusReasonCode(reasonCode);
+        plan.setStatusReasonMessage(reasonMessage);
+        plan.setVersion(nextVersion);
+        plan.setUpdatedAt(now);
         return snapshot(plan);
     }
 
-    /** STOP_CHAT 第二步：运行时确认停止后，把全部未完成步骤收敛为 CANCELLED。 */
     @Transactional
     public TaskPlanSnapshot confirmCancellation(StopChatDto stopChatDto, String reasonCode, String reasonMessage) {
         if (stopChatDto == null || stopChatDto.getSessionId() == null) {
@@ -222,7 +230,6 @@ public class TaskPlanApplicationService {
             stopChatDto.getTraceId(), null, null, reasonCode, reasonMessage);
     }
 
-    /** 运行时直接取消的确认阶段。 */
     @Transactional
     public TaskPlanSnapshot confirmCancellation(TaskPlanLookupRequest request, String reasonCode,
         String reasonMessage) {
@@ -246,27 +253,22 @@ public class TaskPlanApplicationService {
         if ("CANCELLED".equals(plan.getStatus())) {
             return snapshot(plan);
         }
-
         Date now = new Date();
-        List<ByaiAgentTaskItem> items = items(plan.getPlanId());
-        for (ByaiAgentTaskItem item : items) {
-            if (TERMINAL_TASK_STATUSES.contains(item.getStatus())) {
-                continue;
-            }
-            item.setStatus("CANCELLED");
-            item.setStatusReasonCode("PLAN_CANCELLED");
-            item.setStatusReasonMessage(reasonMessage);
-            item.setUpdatedAt(now);
-            item.setCompletedAt(now);
-            itemMapper.updateById(item);
-        }
-
+        List<TaskPlanSnapshot.TaskSnapshot> tasks = tasks(plan);
+        tasks.stream().filter(task -> !TERMINAL_TASK_STATUSES.contains(task.getStatus())).forEach(task -> {
+            task.setStatus("CANCELLED");
+            task.setStatusReason(new TaskPlanSnapshot.StatusReason("PLAN_CANCELLED", reasonMessage));
+            task.setUpdatedAt(now);
+            task.setCompletedAt(now);
+        });
         int nextVersion = plan.getVersion() + 1;
+        String tasksPayload = JSON.toJSONString(tasks);
         int changed = planMapper.update(null, Wrappers.<ByaiAgentTaskPlan>lambdaUpdate()
             .eq(ByaiAgentTaskPlan::getPlanId, plan.getPlanId())
             .eq(ByaiAgentTaskPlan::getUserId, userId)
             .eq(ByaiAgentTaskPlan::getVersion, plan.getVersion())
             .in(ByaiAgentTaskPlan::getStatus, ACTIVE_PLAN_STATUSES)
+            .set(ByaiAgentTaskPlan::getTasksPayload, tasksPayload)
             .set(ByaiAgentTaskPlan::getStatus, "CANCELLED")
             .set(ByaiAgentTaskPlan::getStatusReasonCode, reasonCode)
             .set(ByaiAgentTaskPlan::getStatusReasonMessage, reasonMessage)
@@ -276,227 +278,243 @@ public class TaskPlanApplicationService {
         if (changed == 0) {
             throw conflict("Task plan changed while cancellation was confirmed");
         }
-        plan = requireOwnedPlan(plan.getPlanId(), userId);
-        TaskPlanSnapshot snapshot = snapshot(plan);
-        appendEvent(plan, "PLAN_CANCELLED", "USER", CurrentUserHolder.getCurrentUserCode(),
-            "cancel-confirm:" + nextVersion, snapshot);
-        return snapshot;
+        plan.setTasksPayload(tasksPayload);
+        plan.setStatus("CANCELLED");
+        plan.setStatusReasonCode(reasonCode);
+        plan.setStatusReasonMessage(reasonMessage);
+        plan.setVersion(nextVersion);
+        plan.setUpdatedAt(now);
+        plan.setCompletedAt(now);
+        return snapshot(plan, tasks);
     }
 
-    private TaskPlanSnapshot create(TaskPlanUpdateRequest request, Long userId, Long sessionId, Long messageId) {
+    private TaskPlanWriteResult create(TaskPlanUpdateRequest request, Long userId, Long sessionId, Long messageId,
+        String sourceRuntime) {
+        String idempotencyKey = requiredTextCommand(request.getIdempotencyKey(), "idempotencyKey", 128);
+        String sourceRunId = requiredTextCommand(request.getSourceRunId(), "sourceRunId", 128);
+        ByaiAgentTaskPlan existing = findByExecution(userId, sessionId, messageId, request.getTraceId(), sourceRuntime,
+            sourceRunId, true, true);
+        if (existing != null) {
+            TaskPlanSnapshot replay = findReplay(existing, idempotencyKey);
+            if (replay != null) {
+                return new TaskPlanWriteResult(replay, false);
+            }
+            throw commandError("PLAN_ALREADY_EXISTS", "An active or historical plan already exists for this Run",
+                snapshot(existing));
+        }
+
         Date now = new Date();
+        List<TaskPlanSnapshot.TaskSnapshot> tasks = createTasks(request.getTasks(), now);
+        validateSequentialExecution(tasks, null);
         ByaiAgentTaskPlan plan = new ByaiAgentTaskPlan();
         plan.setPlanId(IdUtil.getSnowflakeNextId());
         plan.setUserId(userId);
         plan.setUserCode(CurrentUserHolder.getCurrentUserCode());
         plan.setSessionId(sessionId);
         plan.setMessageId(messageId);
-        plan.setTurnId(trimToNull(request.getTurnId(), 128));
-        plan.setLaneId(trimToNull(request.getLaneId(), 128));
-        plan.setTraceId(trimToNull(request.getTraceId(), 128));
-        plan.setSourceRuntime(normalizeRuntime(request.getSourceRuntime()));
-        plan.setSourceRunId(requiredText(request.getSourceRunId(), "sourceRunId", 128));
-        plan.setCreateRequestId(requiredText(request.getIdempotencyKey(), "idempotencyKey", 128));
-        plan.setTitle(requiredText(request.getTitle(), "title", 500));
-        plan.setLastExplanation(trimToNull(request.getExplanation(), 2000));
+        plan.setTurnId(trimToNullCommand(request.getTurnId(), 128));
+        plan.setLaneId(trimToNullCommand(request.getLaneId(), 128));
+        plan.setTraceId(trimToNullCommand(request.getTraceId(), 128));
+        plan.setSourceRuntime(sourceRuntime);
+        plan.setSourceRunId(sourceRunId);
+        plan.setCreateRequestId(idempotencyKey);
+        plan.setTitle(requiredTextCommand(request.getTitle(), "title", 500));
+        plan.setLastExplanation(trimToNullCommand(request.getExplanation(), 2000));
+        plan.setStatus("ACTIVE");
         plan.setVersion(1);
+        plan.setTasksPayload(JSON.toJSONString(tasks));
         plan.setCreatedAt(now);
         plan.setUpdatedAt(now);
 
-        List<ByaiAgentTaskItem> taskItems = reconcileTasks(plan.getPlanId(), request.getTasks(), List.of(), now);
-        plan.setStatus(derivePlanStatus(taskItems));
-        PlanStatusReason planReason = derivePlanStatusReason(taskItems);
-        plan.setStatusReasonCode(planReason == null ? null : planReason.code());
-        plan.setStatusReasonMessage(planReason == null ? null : planReason.message());
-        if (!"ACTIVE".equals(plan.getStatus())) {
-            plan.setCompletedAt(now);
-        }
+        TaskPlanSnapshot snapshot = snapshot(plan, tasks);
+        plan.setIdempotencyPayload(withIdempotencyRecord(List.of(), idempotencyKey, snapshot));
         planMapper.insert(plan);
-        taskItems.forEach(itemMapper::insert);
-
-        TaskPlanSnapshot snapshot = snapshot(plan);
-        appendEvent(plan, "PLAN_CREATED", "AGENT_TOOL", CurrentUserHolder.getCurrentUserCode(),
-            request.getIdempotencyKey(), snapshot);
-        return snapshot;
+        return new TaskPlanWriteResult(snapshot, true);
     }
 
-    private TaskPlanSnapshot replace(TaskPlanUpdateRequest request, Long userId, ByaiAgentTaskPlan plan) {
-        Long planId = plan.getPlanId();
-        ByaiAgentTaskEvent retried = eventMapper.selectOne(Wrappers.<ByaiAgentTaskEvent>lambdaQuery()
-            .eq(ByaiAgentTaskEvent::getPlanId, planId)
-            .eq(ByaiAgentTaskEvent::getIdempotencyKey,
-                requiredText(request.getIdempotencyKey(), "idempotencyKey", 128))
+    private TaskPlanWriteResult updateStatuses(TaskPlanUpdateRequest request, Long userId, Long sessionId,
+        Long messageId, String sourceRuntime) {
+        String idempotencyKey = requiredTextCommand(request.getIdempotencyKey(), "idempotencyKey", 128);
+        Long planId = parseRequiredLongCommand(request.getPlanId(), "planId");
+        ByaiAgentTaskPlan plan = planMapper.selectOne(Wrappers.<ByaiAgentTaskPlan>lambdaQuery()
+            .eq(ByaiAgentTaskPlan::getPlanId, planId)
+            .eq(ByaiAgentTaskPlan::getUserId, userId)
             .last("LIMIT 1"));
-        if (retried != null) {
-            return snapshot(plan);
+        if (plan == null || !matchesExecution(plan, sessionId, messageId, sourceRuntime, request.getSourceRunId())) {
+            throw commandError("PLAN_NOT_FOUND", "Task plan does not belong to the current Run", null);
         }
+        TaskPlanSnapshot replay = findReplay(plan, idempotencyKey);
+        if (replay != null) {
+            return new TaskPlanWriteResult(replay, false);
+        }
+        TaskPlanSnapshot current = snapshot(plan);
         if (!"ACTIVE".equals(plan.getStatus())) {
-            throw conflict("Task plan is not active: " + plan.getStatus());
+            throw commandError("PLAN_NOT_ACTIVE", "Task plan is not active: " + plan.getStatus(), current);
+        }
+        if (request.getExpectedVersion() == null || request.getExpectedVersion() < 1) {
+            throw commandError("INVALID_REQUEST", "expectedVersion must be a positive integer", current);
+        }
+        if (!Objects.equals(request.getExpectedVersion(), plan.getVersion())) {
+            throw commandError("VERSION_CONFLICT", "Task plan version has changed", current);
+        }
+        if (request.getUpdates() == null || request.getUpdates().isEmpty()) {
+            throw commandError("INVALID_REQUEST", "updates must contain at least one task update", current);
+        }
+        if (request.getUpdates().size() > MAX_TASKS) {
+            throw commandError("INVALID_REQUEST", "updates must not contain more than " + MAX_TASKS + " entries",
+                current);
         }
 
         Date now = new Date();
-        List<ByaiAgentTaskItem> replacement = reconcileTasks(planId, request.getTasks(), items(planId), now);
-        String nextStatus = derivePlanStatus(replacement);
-        PlanStatusReason planReason = derivePlanStatusReason(replacement);
+        List<TaskPlanSnapshot.TaskSnapshot> tasks = tasks(plan);
+        Map<String, TaskPlanSnapshot.TaskSnapshot> byId = new LinkedHashMap<>();
+        tasks.forEach(task -> byId.put(task.getTaskId(), task));
+        Set<String> updatedTaskIds = new LinkedHashSet<>();
+        for (int index = 0; index < request.getUpdates().size(); index++) {
+            TaskPlanUpdateRequest.TaskStatusUpdate update = request.getUpdates().get(index);
+            if (update == null) {
+                throw commandError("INVALID_REQUEST", "updates[" + index + "] must not be null", current);
+            }
+            String taskId = requiredTextCommand(update.getTaskId(), "updates[" + index + "].taskId", 32);
+            if (!updatedTaskIds.add(taskId)) {
+                throw commandError("INVALID_REQUEST", "taskId appears more than once: " + taskId, current);
+            }
+            TaskPlanSnapshot.TaskSnapshot task = byId.get(taskId);
+            if (task == null) {
+                throw commandError("TASK_NOT_FOUND", "Task does not belong to the current plan: " + taskId,
+                    current);
+            }
+            String nextStatus = normalizeTaskStatusCommand(update.getStatus());
+            validateTransition(task, nextStatus, current);
+            applyTaskStatus(task, nextStatus, update.getStatusReason(), now);
+        }
+        validateSequentialExecution(tasks, current);
+        applyFailFast(tasks, now);
+
+        String nextStatus = derivePlanStatus(tasks);
+        PlanStatusReason reason = derivePlanStatusReason(tasks);
         int nextVersion = plan.getVersion() + 1;
+        plan.setStatus(nextStatus);
+        plan.setStatusReasonCode(reason == null ? null : reason.code());
+        plan.setStatusReasonMessage(reason == null ? null : reason.message());
+        plan.setVersion(nextVersion);
+        plan.setTasksPayload(JSON.toJSONString(tasks));
+        plan.setUpdatedAt(now);
+        plan.setCompletedAt("ACTIVE".equals(nextStatus) ? null : now);
+        TaskPlanSnapshot nextSnapshot = snapshot(plan, tasks);
+        String idempotencyPayload = withIdempotencyRecord(idempotencyRecords(plan), idempotencyKey, nextSnapshot);
+
         int changed = planMapper.update(null, Wrappers.<ByaiAgentTaskPlan>lambdaUpdate()
             .eq(ByaiAgentTaskPlan::getPlanId, planId)
             .eq(ByaiAgentTaskPlan::getUserId, userId)
-            .eq(ByaiAgentTaskPlan::getVersion, plan.getVersion())
+            .eq(ByaiAgentTaskPlan::getVersion, request.getExpectedVersion())
             .eq(ByaiAgentTaskPlan::getStatus, "ACTIVE")
-            .set(ByaiAgentTaskPlan::getTitle, requiredText(request.getTitle(), "title", 500))
-            .set(ByaiAgentTaskPlan::getLastExplanation, trimToNull(request.getExplanation(), 2000))
+            .set(ByaiAgentTaskPlan::getTasksPayload, plan.getTasksPayload())
+            .set(ByaiAgentTaskPlan::getIdempotencyPayload, idempotencyPayload)
             .set(ByaiAgentTaskPlan::getStatus, nextStatus)
-            .set(ByaiAgentTaskPlan::getStatusReasonCode, planReason == null ? null : planReason.code())
-            .set(ByaiAgentTaskPlan::getStatusReasonMessage, planReason == null ? null : planReason.message())
+            .set(ByaiAgentTaskPlan::getStatusReasonCode, plan.getStatusReasonCode())
+            .set(ByaiAgentTaskPlan::getStatusReasonMessage, plan.getStatusReasonMessage())
             .set(ByaiAgentTaskPlan::getVersion, nextVersion)
             .set(ByaiAgentTaskPlan::getUpdatedAt, now)
-            .set(ByaiAgentTaskPlan::getCompletedAt, "ACTIVE".equals(nextStatus) ? null : now));
+            .set(ByaiAgentTaskPlan::getCompletedAt, plan.getCompletedAt()));
         if (changed == 0) {
-            throw conflict("Task plan changed while it was being updated");
+            ByaiAgentTaskPlan latest = requireOwnedPlan(planId, userId);
+            TaskPlanSnapshot concurrentReplay = findReplay(latest, idempotencyKey);
+            if (concurrentReplay != null) {
+                return new TaskPlanWriteResult(concurrentReplay, false);
+            }
+            throw commandError("VERSION_CONFLICT", "Task plan changed while it was being updated", snapshot(latest));
         }
-
-        itemMapper.delete(Wrappers.<ByaiAgentTaskItem>lambdaQuery()
-            .eq(ByaiAgentTaskItem::getPlanId, planId));
-        replacement.forEach(itemMapper::insert);
-        plan = requireOwnedPlan(planId, userId);
-        TaskPlanSnapshot snapshot = snapshot(plan);
-        appendEvent(plan, "PLAN_UPDATED", "AGENT_TOOL", CurrentUserHolder.getCurrentUserCode(),
-            request.getIdempotencyKey(), snapshot);
-        return snapshot;
+        plan.setIdempotencyPayload(idempotencyPayload);
+        return new TaskPlanWriteResult(nextSnapshot, true);
     }
 
-    private List<ByaiAgentTaskItem> reconcileTasks(Long planId, List<TaskPlanUpdateRequest.TaskInput> input,
-        List<ByaiAgentTaskItem> existing, Date now) {
+    private List<TaskPlanSnapshot.TaskSnapshot> createTasks(List<TaskPlanUpdateRequest.TaskInput> input, Date now) {
         if (input == null || input.isEmpty()) {
-            throw badRequest("tasks must contain at least one task");
+            throw commandError("INVALID_REQUEST", "tasks must contain at least one task", null);
         }
         if (input.size() > MAX_TASKS) {
-            throw badRequest("tasks must not contain more than " + MAX_TASKS + " tasks");
+            throw commandError("INVALID_REQUEST", "tasks must not contain more than " + MAX_TASKS + " tasks", null);
         }
-
-        Map<Integer, ByaiAgentTaskItem> byPosition = new HashMap<>();
-        existing.forEach(item -> byPosition.put(item.getPosition(), item));
-        existing.stream()
-            .filter(item -> item.getPosition() > input.size())
-            .filter(item -> !"PENDING".equals(item.getStatus()))
-            .findFirst()
-            .ifPresent(item -> {
-                throw conflict("Started task at position " + item.getPosition() + " cannot be removed");
-            });
-        List<ByaiAgentTaskItem> result = new ArrayList<>(input.size());
-
+        List<TaskPlanSnapshot.TaskSnapshot> tasks = new ArrayList<>(input.size());
         for (int index = 0; index < input.size(); index++) {
             TaskPlanUpdateRequest.TaskInput source = input.get(index);
             if (source == null) {
-                throw badRequest("tasks[" + index + "] must not be null");
+                throw commandError("INVALID_REQUEST", "tasks[" + index + "] must not be null", null);
             }
-            int position = index + 1;
-            String title = requiredText(source.getStep(), "tasks[" + index + "].step", 1000);
-            String description = trimToNull(source.getDescription(), 4000);
-            String status = normalizeTaskStatus(source.getStatus());
-            ByaiAgentTaskItem previous = byPosition.get(position);
-            validateTaskMutation(previous, position, title, description, status);
-
-            Long taskId = previous == null ? IdUtil.getSnowflakeNextId() : previous.getTaskId();
-            ByaiAgentTaskItem item = new ByaiAgentTaskItem();
-            item.setTaskId(taskId);
-            item.setPlanId(planId);
-            item.setPosition(position);
-            item.setTitle(title);
-            item.setDescription(description);
-            item.setStatus(status);
-            TaskPlanUpdateRequest.StatusReasonInput statusReason = source.getStatusReason();
-            String statusReasonCode = statusReason == null ? null
-                : requiredText(statusReason.getCode(), "tasks[" + index + "].statusReason.code", 64);
-            String statusReasonMessage = statusReason == null ? null
-                : trimToNull(statusReason.getMessage(), 500);
-            if (previous != null && TERMINAL_TASK_STATUSES.contains(previous.getStatus())) {
-                statusReasonCode = previous.getStatusReasonCode();
-                statusReasonMessage = previous.getStatusReasonMessage();
+            String status = normalizeTaskStatusCommand(source.getStatus());
+            if (!CREATE_TASK_STATUSES.contains(status)) {
+                throw commandError("INVALID_REQUEST", "CREATE only accepts PENDING or IN_PROGRESS tasks", null);
             }
-            item.setStatusReasonCode(statusReasonCode);
-            item.setStatusReasonMessage(statusReasonMessage);
-            item.setCreatedAt(previous == null ? now : previous.getCreatedAt());
-            item.setUpdatedAt(taskChanged(previous, item) ? now : previous.getUpdatedAt());
-            item.setStartedAt(resolveStartedAt(previous, status, now));
-            item.setCompletedAt(resolveCompletedAt(previous, status, now));
-            result.add(item);
+            TaskPlanSnapshot.TaskSnapshot task = new TaskPlanSnapshot.TaskSnapshot();
+            task.setTaskId(String.valueOf(IdUtil.getSnowflakeNextId()));
+            task.setPosition(index + 1);
+            task.setTitle(requiredTextCommand(source.getStep(), "tasks[" + index + "].step", 1000));
+            task.setDescription(trimToNullCommand(source.getDescription(), 4000));
+            task.setStatus(status);
+            task.setStatusReason(statusReason(source.getStatusReason(), "tasks[" + index + "].statusReason"));
+            task.setUpdatedAt(now);
+            if ("IN_PROGRESS".equals(status)) {
+                task.setStartedAt(now);
+            }
+            tasks.add(task);
         }
-        validateSequentialExecution(result);
-        applyFailFast(result, now);
-        return result;
+        return tasks;
     }
 
-    private void validateTaskMutation(ByaiAgentTaskItem previous, int position, String title, String description,
-        String status) {
-        if (previous == null) {
-            return;
-        }
-        String previousStatus = previous.getStatus();
-        if (TERMINAL_TASK_STATUSES.contains(previousStatus) && !previousStatus.equals(status)) {
-            throw conflict("Terminal task at position " + position + " cannot change from " + previousStatus
-                + " to " + status);
-        }
-        if ("IN_PROGRESS".equals(previousStatus) && "PENDING".equals(status)) {
-            throw conflict("Task at position " + position + " cannot move back to PENDING");
-        }
-        if (!"PENDING".equals(previousStatus)
-            && (!Objects.equals(previous.getTitle(), title)
-                || !Objects.equals(previous.getDescription(), description))) {
-            throw conflict("Started task at position " + position + " cannot be redefined");
+    private void validateTransition(TaskPlanSnapshot.TaskSnapshot task, String nextStatus, TaskPlanSnapshot current) {
+        Set<String> allowed = ALLOWED_TRANSITIONS.getOrDefault(task.getStatus(), Set.of());
+        if (!allowed.contains(nextStatus)) {
+            throw commandError("ILLEGAL_TASK_TRANSITION",
+                task.getTaskId() + " cannot change from " + task.getStatus() + " to " + nextStatus, current);
         }
     }
 
-    private boolean taskChanged(ByaiAgentTaskItem previous, ByaiAgentTaskItem current) {
-        return previous == null
-            || !Objects.equals(previous.getTitle(), current.getTitle())
-            || !Objects.equals(previous.getDescription(), current.getDescription())
-            || !Objects.equals(previous.getStatus(), current.getStatus())
-            || !Objects.equals(previous.getStatusReasonCode(), current.getStatusReasonCode())
-            || !Objects.equals(previous.getStatusReasonMessage(), current.getStatusReasonMessage());
-    }
-
-    private Date resolveStartedAt(ByaiAgentTaskItem previous, String status, Date now) {
-        if (previous != null && previous.getStartedAt() != null) {
-            return previous.getStartedAt();
+    private void applyTaskStatus(TaskPlanSnapshot.TaskSnapshot task, String nextStatus,
+        TaskPlanUpdateRequest.StatusReasonInput reasonInput, Date now) {
+        String previousStatus = task.getStatus();
+        task.setStatus(nextStatus);
+        if (reasonInput != null) {
+            task.setStatusReason(statusReason(reasonInput, "statusReason"));
         }
-        boolean started = "IN_PROGRESS".equals(status) || "COMPLETED".equals(status) || "FAILED".equals(status);
-        return started ? now : null;
-    }
-
-    private Date resolveCompletedAt(ByaiAgentTaskItem previous, String status, Date now) {
-        if (previous != null && previous.getCompletedAt() != null) {
-            return previous.getCompletedAt();
+        else if (!Objects.equals(previousStatus, nextStatus)) {
+            task.setStatusReason(null);
         }
-        return TERMINAL_TASK_STATUSES.contains(status) ? now : null;
+        task.setUpdatedAt(now);
+        if (task.getStartedAt() == null && Set.of("IN_PROGRESS", "COMPLETED", "FAILED").contains(nextStatus)) {
+            task.setStartedAt(now);
+        }
+        if (task.getCompletedAt() == null && TERMINAL_TASK_STATUSES.contains(nextStatus)) {
+            task.setCompletedAt(now);
+        }
     }
 
-    private void validateSequentialExecution(List<ByaiAgentTaskItem> tasks) {
-        boolean onlyPendingTailAllowed = false;
+    private void validateSequentialExecution(List<TaskPlanSnapshot.TaskSnapshot> tasks, TaskPlanSnapshot current) {
+        boolean pendingTailOnly = false;
         String haltStatus = null;
-        for (ByaiAgentTaskItem task : tasks) {
+        for (TaskPlanSnapshot.TaskSnapshot task : tasks) {
             String status = task.getStatus();
             if (haltStatus != null) {
                 boolean allowed = "PENDING".equals(status)
                     || ("FAILED".equals(haltStatus) && "SKIPPED".equals(status))
                     || ("CANCELLED".equals(haltStatus) && "CANCELLED".equals(status));
                 if (!allowed) {
-                    throw conflict("Task at position " + task.getPosition()
-                        + " cannot execute after a previous task has " + haltStatus.toLowerCase(Locale.ROOT));
+                    throw commandError("INVALID_EXECUTION_ORDER",
+                        "Task at position " + task.getPosition() + " cannot execute after " + haltStatus, current);
                 }
                 continue;
             }
             if ("PENDING".equals(status)) {
-                onlyPendingTailAllowed = true;
+                pendingTailOnly = true;
                 continue;
             }
-            if (onlyPendingTailAllowed) {
-                throw conflict("Task at position " + task.getPosition()
-                    + " cannot start before all previous tasks are terminal");
+            if (pendingTailOnly) {
+                throw commandError("INVALID_EXECUTION_ORDER",
+                    "Task at position " + task.getPosition() + " cannot start before previous tasks are terminal",
+                    current);
             }
             if ("IN_PROGRESS".equals(status)) {
-                onlyPendingTailAllowed = true;
+                pendingTailOnly = true;
             }
             else if ("FAILED".equals(status) || "CANCELLED".equals(status)) {
                 haltStatus = status;
@@ -504,9 +522,9 @@ public class TaskPlanApplicationService {
         }
     }
 
-    private void applyFailFast(List<ByaiAgentTaskItem> tasks, Date now) {
+    private void applyFailFast(List<TaskPlanSnapshot.TaskSnapshot> tasks, Date now) {
         String haltStatus = null;
-        for (ByaiAgentTaskItem task : tasks) {
+        for (TaskPlanSnapshot.TaskSnapshot task : tasks) {
             if (haltStatus == null) {
                 if ("FAILED".equals(task.getStatus()) || "CANCELLED".equals(task.getStatus())) {
                     haltStatus = task.getStatus();
@@ -518,16 +536,15 @@ public class TaskPlanApplicationService {
             }
             boolean failed = "FAILED".equals(haltStatus);
             task.setStatus(failed ? "SKIPPED" : "CANCELLED");
-            task.setStatusReasonCode(failed ? "BLOCKED_BY_PREVIOUS_FAILURE" : "PLAN_CANCELLED");
-            task.setStatusReasonMessage(failed ? "前序任务失败，后续任务已跳过" : "前序任务取消，后续任务已取消");
+            task.setStatusReason(new TaskPlanSnapshot.StatusReason(
+                failed ? "BLOCKED_BY_PREVIOUS_FAILURE" : "PLAN_CANCELLED",
+                failed ? "前序任务失败，后续任务已跳过" : "前序任务取消，后续任务已取消"));
             task.setUpdatedAt(now);
-            if (task.getCompletedAt() == null) {
-                task.setCompletedAt(now);
-            }
+            task.setCompletedAt(now);
         }
     }
 
-    private String derivePlanStatus(List<ByaiAgentTaskItem> tasks) {
+    private String derivePlanStatus(List<TaskPlanSnapshot.TaskSnapshot> tasks) {
         if (tasks.stream().anyMatch(task -> "FAILED".equals(task.getStatus()))) {
             return "FAILED";
         }
@@ -540,18 +557,25 @@ public class TaskPlanApplicationService {
         return "COMPLETED";
     }
 
-    private PlanStatusReason derivePlanStatusReason(List<ByaiAgentTaskItem> tasks) {
-        ByaiAgentTaskItem failed = tasks.stream().filter(task -> "FAILED".equals(task.getStatus())).findFirst()
-            .orElse(null);
+    private PlanStatusReason derivePlanStatusReason(List<TaskPlanSnapshot.TaskSnapshot> tasks) {
+        TaskPlanSnapshot.TaskSnapshot failed = tasks.stream()
+            .filter(task -> "FAILED".equals(task.getStatus())).findFirst().orElse(null);
         if (failed != null) {
-            return new PlanStatusReason(StringUtils.defaultIfBlank(failed.getStatusReasonCode(), "TASK_FAILED"),
-                StringUtils.defaultIfBlank(failed.getStatusReasonMessage(), "任务执行失败"));
+            String code = failed.getStatusReason() == null ? "TASK_FAILED" : failed.getStatusReason().getCode();
+            String message = failed.getStatusReason() == null ? "任务执行失败"
+                : failed.getStatusReason().getMessage();
+            return new PlanStatusReason(StringUtils.defaultIfBlank(code, "TASK_FAILED"),
+                StringUtils.defaultIfBlank(message, "任务执行失败"));
         }
-        ByaiAgentTaskItem cancelled = tasks.stream().filter(task -> "CANCELLED".equals(task.getStatus())).findFirst()
-            .orElse(null);
+        TaskPlanSnapshot.TaskSnapshot cancelled = tasks.stream()
+            .filter(task -> "CANCELLED".equals(task.getStatus())).findFirst().orElse(null);
         if (cancelled != null) {
-            return new PlanStatusReason(StringUtils.defaultIfBlank(cancelled.getStatusReasonCode(), "TASK_CANCELLED"),
-                StringUtils.defaultIfBlank(cancelled.getStatusReasonMessage(), "任务执行已取消"));
+            String code = cancelled.getStatusReason() == null ? "TASK_CANCELLED"
+                : cancelled.getStatusReason().getCode();
+            String message = cancelled.getStatusReason() == null ? "任务执行已取消"
+                : cancelled.getStatusReason().getMessage();
+            return new PlanStatusReason(StringUtils.defaultIfBlank(code, "TASK_CANCELLED"),
+                StringUtils.defaultIfBlank(message, "任务执行已取消"));
         }
         return null;
     }
@@ -576,11 +600,22 @@ public class TaskPlanApplicationService {
         if (StringUtils.isNotBlank(sourceRuntime)) {
             query.eq(ByaiAgentTaskPlan::getSourceRuntime, normalizeRuntime(sourceRuntime));
         }
+        if (StringUtils.isNotBlank(sourceRunId)) {
+            query.eq(ByaiAgentTaskPlan::getSourceRunId, sourceRunId.trim());
+        }
         if (!includeTerminal) {
             query.in(ByaiAgentTaskPlan::getStatus, includeCancelling ? ACTIVE_PLAN_STATUSES : Set.of("ACTIVE"));
         }
         query.orderByDesc(ByaiAgentTaskPlan::getUpdatedAt).last("LIMIT 1");
         return planMapper.selectOne(query);
+    }
+
+    private boolean matchesExecution(ByaiAgentTaskPlan plan, Long sessionId, Long messageId, String sourceRuntime,
+        String sourceRunId) {
+        return Objects.equals(plan.getSessionId(), sessionId)
+            && Objects.equals(plan.getMessageId(), messageId)
+            && Objects.equals(plan.getSourceRuntime(), sourceRuntime)
+            && Objects.equals(plan.getSourceRunId(), StringUtils.trimToNull(sourceRunId));
     }
 
     private ByaiAgentTaskPlan requireOwnedPlan(Long planId, Long userId) {
@@ -589,28 +624,34 @@ public class TaskPlanApplicationService {
             .eq(ByaiAgentTaskPlan::getUserId, userId)
             .last("LIMIT 1"));
         if (plan == null) {
-            throw notFound();
+            throw commandError("PLAN_NOT_FOUND", "Task plan not found", null);
         }
         return plan;
     }
 
-    private List<ByaiAgentTaskItem> items(Long planId) {
-        return itemMapper.selectList(Wrappers.<ByaiAgentTaskItem>lambdaQuery()
-            .eq(ByaiAgentTaskItem::getPlanId, planId)
-            .orderByAsc(ByaiAgentTaskItem::getPosition));
+    private List<TaskPlanSnapshot.TaskSnapshot> tasks(ByaiAgentTaskPlan plan) {
+        if (StringUtils.isBlank(plan.getTasksPayload())) {
+            return new ArrayList<>();
+        }
+        try {
+            return new ArrayList<>(JSON.parseArray(plan.getTasksPayload(), TaskPlanSnapshot.TaskSnapshot.class));
+        }
+        catch (RuntimeException e) {
+            throw new IllegalStateException("Stored task plan payload is invalid: " + plan.getPlanId(), e);
+        }
     }
 
     private TaskPlanSnapshot snapshot(ByaiAgentTaskPlan plan) {
-        return snapshot(plan, items(plan.getPlanId()));
+        return snapshot(plan, tasks(plan));
     }
 
-    private TaskPlanSnapshot snapshot(ByaiAgentTaskPlan plan, List<ByaiAgentTaskItem> taskItems) {
+    private TaskPlanSnapshot snapshot(ByaiAgentTaskPlan plan, List<TaskPlanSnapshot.TaskSnapshot> tasks) {
         TaskPlanSnapshot snapshot = new TaskPlanSnapshot();
         snapshot.setPlanId(String.valueOf(plan.getPlanId()));
         snapshot.setVersion(plan.getVersion());
         snapshot.setTitle(plan.getTitle());
         snapshot.setStatus(plan.getStatus());
-        snapshot.setStatusReason(reason(plan.getStatusReasonCode(), plan.getStatusReasonMessage()));
+        snapshot.setStatusReason(statusReason(plan.getStatusReasonCode(), plan.getStatusReasonMessage()));
         snapshot.setSessionId(String.valueOf(plan.getSessionId()));
         snapshot.setMessageId(String.valueOf(plan.getMessageId()));
         snapshot.setTurnId(plan.getTurnId());
@@ -621,97 +662,125 @@ public class TaskPlanApplicationService {
         snapshot.setExplanation(plan.getLastExplanation());
         snapshot.setCreatedAt(plan.getCreatedAt());
         snapshot.setUpdatedAt(plan.getUpdatedAt());
-
-        List<TaskPlanSnapshot.TaskSnapshot> taskSnapshots = taskItems.stream().map(item -> {
-            TaskPlanSnapshot.TaskSnapshot task = new TaskPlanSnapshot.TaskSnapshot();
-            task.setTaskId(String.valueOf(item.getTaskId()));
-            task.setPosition(item.getPosition());
-            task.setTitle(item.getTitle());
-            task.setDescription(item.getDescription());
-            task.setStatus(item.getStatus());
-            task.setStatusReason(reason(item.getStatusReasonCode(), item.getStatusReasonMessage()));
-            task.setUpdatedAt(item.getUpdatedAt());
-            task.setStartedAt(item.getStartedAt());
-            task.setCompletedAt(item.getCompletedAt());
-            return task;
-        }).toList();
-        snapshot.setTasks(taskSnapshots);
+        snapshot.setTasks(tasks);
         return snapshot;
     }
 
-    private TaskPlanSnapshot.StatusReason reason(String code, String message) {
-        return StringUtils.isBlank(code) ? null : new TaskPlanSnapshot.StatusReason(code, message);
+    private TaskPlanSnapshot findReplay(ByaiAgentTaskPlan plan, String idempotencyKey) {
+        return idempotencyRecords(plan).stream()
+            .filter(record -> Objects.equals(record.getIdempotencyKey(), idempotencyKey))
+            .map(IdempotencyRecord::getSnapshot)
+            .findFirst()
+            .orElse(null);
     }
 
-    private void appendEvent(ByaiAgentTaskPlan plan, String eventType, String actorType, String actorId,
-        String idempotencyKey, TaskPlanSnapshot snapshot) {
-        ByaiAgentTaskEvent event = new ByaiAgentTaskEvent();
-        event.setEventId(IdUtil.getSnowflakeNextId());
-        event.setPlanId(plan.getPlanId());
-        event.setPlanVersion(plan.getVersion());
-        event.setEventType(eventType);
-        event.setActorType(actorType);
-        event.setActorId(actorId);
-        event.setIdempotencyKey(idempotencyKey);
-        event.setPayload(JSON.toJSONString(snapshot));
-        event.setCreatedAt(new Date());
-        eventMapper.insert(event);
-    }
-
-    private void requireRequest(TaskPlanUpdateRequest request) {
-        if (request == null) {
-            throw badRequest("request must not be null");
+    private List<IdempotencyRecord> idempotencyRecords(ByaiAgentTaskPlan plan) {
+        if (StringUtils.isBlank(plan.getIdempotencyPayload())) {
+            return new ArrayList<>();
         }
-        requiredText(request.getIdempotencyKey(), "idempotencyKey", 128);
-        requiredText(request.getSourceRunId(), "sourceRunId", 128);
+        try {
+            return new ArrayList<>(JSON.parseArray(plan.getIdempotencyPayload(), IdempotencyRecord.class));
+        }
+        catch (RuntimeException e) {
+            throw new IllegalStateException("Stored task plan idempotency payload is invalid: " + plan.getPlanId(), e);
+        }
+    }
+
+    private String withIdempotencyRecord(List<IdempotencyRecord> existing, String key, TaskPlanSnapshot snapshot) {
+        List<IdempotencyRecord> records = new ArrayList<>(existing);
+        records.add(new IdempotencyRecord(key, snapshot));
+        return JSON.toJSONString(records);
+    }
+
+    private void requireCommandRequest(TaskPlanUpdateRequest request) {
+        if (request == null) {
+            throw commandError("INVALID_REQUEST", "request must not be null", null);
+        }
+        requiredTextCommand(request.getIdempotencyKey(), "idempotencyKey", 128);
+        requiredTextCommand(request.getSourceRunId(), "sourceRunId", 128);
+    }
+
+    private void requireOwnedSessionCommand(Long sessionId, Long userId) {
+        ByaiSession session = sessionService.findById(sessionId);
+        if (session == null || !Objects.equals(session.getCreatorId(), userId)) {
+            throw commandError("PLAN_NOT_FOUND", "Session not found", null);
+        }
     }
 
     private void requireOwnedSession(Long sessionId, Long userId) {
         ByaiSession session = sessionService.findById(sessionId);
         if (session == null || !Objects.equals(session.getCreatorId(), userId)) {
-            throw notFound();
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Task plan not found");
         }
     }
 
-    private String normalizeRuntime(String value) {
-        String runtime = requiredText(value, "sourceRuntime", 32).toUpperCase(Locale.ROOT).replace('-', '_');
+    private String normalizeRuntimeCommand(String value) {
+        String runtime = requiredTextCommand(value, "sourceRuntime", 32).toUpperCase(Locale.ROOT).replace('-', '_');
         if (!Set.of("BYCLAW_SUPER", "OPENCLAW").contains(runtime)) {
-            throw badRequest("unsupported sourceRuntime: " + value);
+            throw commandError("INVALID_REQUEST", "unsupported sourceRuntime: " + value, null);
         }
         return runtime;
     }
 
-    private String normalizeTaskStatus(String value) {
-        String status = requiredText(value, "task status", 32).toUpperCase(Locale.ROOT).replace('-', '_');
+    private String normalizeRuntime(String value) {
+        String runtime = StringUtils.trimToEmpty(value).toUpperCase(Locale.ROOT).replace('-', '_');
+        if (!Set.of("BYCLAW_SUPER", "OPENCLAW").contains(runtime)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "unsupported sourceRuntime: " + value);
+        }
+        return runtime;
+    }
+
+    private String normalizeTaskStatusCommand(String value) {
+        String status = requiredTextCommand(value, "task status", 32).toUpperCase(Locale.ROOT).replace('-', '_');
         if (!TASK_STATUSES.contains(status)) {
-            throw badRequest("unsupported task status: " + value);
+            throw commandError("INVALID_REQUEST", "unsupported task status: " + value, null);
         }
         return status;
     }
 
-    private String requiredText(String value, String field, int maxLength) {
+    private TaskPlanSnapshot.StatusReason statusReason(TaskPlanUpdateRequest.StatusReasonInput source, String field) {
+        if (source == null) {
+            return null;
+        }
+        return new TaskPlanSnapshot.StatusReason(requiredTextCommand(source.getCode(), field + ".code", 64),
+            trimToNullCommand(source.getMessage(), 500));
+    }
+
+    private TaskPlanSnapshot.StatusReason statusReason(String code, String message) {
+        return StringUtils.isBlank(code) ? null : new TaskPlanSnapshot.StatusReason(code, message);
+    }
+
+    private String requiredTextCommand(String value, String field, int maxLength) {
         String result = StringUtils.trimToNull(value);
         if (result == null) {
-            throw badRequest(field + " is required");
+            throw commandError("INVALID_REQUEST", field + " is required", null);
         }
         if (result.length() > maxLength) {
-            throw badRequest(field + " exceeds " + maxLength + " characters");
+            throw commandError("INVALID_REQUEST", field + " exceeds " + maxLength + " characters", null);
         }
         return result;
     }
 
-    private String trimToNull(String value, int maxLength) {
+    private String trimToNullCommand(String value, int maxLength) {
         String result = StringUtils.trimToNull(value);
         if (result != null && result.length() > maxLength) {
-            throw badRequest("text exceeds " + maxLength + " characters");
+            throw commandError("INVALID_REQUEST", "text exceeds " + maxLength + " characters", null);
         }
         return result;
+    }
+
+    private Long parseRequiredLongCommand(String value, String field) {
+        Long parsed = parseOptionalLong(value);
+        if (parsed == null) {
+            throw commandError("INVALID_REQUEST", field + " must be a positive integer string", null);
+        }
+        return parsed;
     }
 
     private Long parseRequiredLong(String value, String field) {
         Long parsed = parseOptionalLong(value);
         if (parsed == null) {
-            throw badRequest(field + " must be a positive integer string");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, field + " must be a positive integer string");
         }
         return parsed;
     }
@@ -729,18 +798,49 @@ public class TaskPlanApplicationService {
         }
     }
 
-    private ResponseStatusException badRequest(String message) {
-        return new ResponseStatusException(HttpStatus.BAD_REQUEST, message);
+    private TaskPlanCommandException commandError(String code, String message, TaskPlanSnapshot currentPlan) {
+        return new TaskPlanCommandException(code, message, currentPlan);
     }
 
     private ResponseStatusException conflict(String message) {
         return new ResponseStatusException(HttpStatus.CONFLICT, message);
     }
 
-    private ResponseStatusException notFound() {
-        return new ResponseStatusException(HttpStatus.NOT_FOUND, "Task plan not found");
+    private record PlanStatusReason(String code, String message) {
     }
 
-    private record PlanStatusReason(String code, String message) {
+    public record TaskPlanWriteResult(TaskPlanSnapshot snapshot, boolean changed) {
+    }
+
+    /** 单表内嵌的幂等重放记录。 */
+    public static class IdempotencyRecord {
+
+        private String idempotencyKey;
+
+        private TaskPlanSnapshot snapshot;
+
+        public IdempotencyRecord() {
+        }
+
+        public IdempotencyRecord(String idempotencyKey, TaskPlanSnapshot snapshot) {
+            this.idempotencyKey = idempotencyKey;
+            this.snapshot = snapshot;
+        }
+
+        public String getIdempotencyKey() {
+            return idempotencyKey;
+        }
+
+        public void setIdempotencyKey(String idempotencyKey) {
+            this.idempotencyKey = idempotencyKey;
+        }
+
+        public TaskPlanSnapshot getSnapshot() {
+            return snapshot;
+        }
+
+        public void setSnapshot(TaskPlanSnapshot snapshot) {
+            this.snapshot = snapshot;
+        }
     }
 }

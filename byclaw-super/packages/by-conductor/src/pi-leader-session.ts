@@ -104,13 +104,6 @@ export class PiLeaderSession implements LeaderSession {
       parameters: Type.Object({
         agentId: Type.String({ description: "Exact id from the current authorized agent list" }),
         task: Type.String({ description: "Self-contained task for the specialist" }),
-        taskPosition: Type.Optional(
-          Type.Integer({
-            minimum: 1,
-            description:
-              "Optional compatibility hint. The runtime selects the authoritative current task from the active task plan.",
-          }),
-        ),
         expectedOutput: Type.Optional(Type.String({ description: "Desired result format" })),
         attachmentIds: Type.Optional(
           Type.Array(Type.String(), {
@@ -120,7 +113,7 @@ export class PiLeaderSession implements LeaderSession {
         ),
       }),
       // 将 Pi 工具调用桥接到当前 Run 注入的 DelegationService 回调。
-      execute: async (toolCallId, params, signal) => {
+      execute: async (_toolCallId, params, signal) => {
         const active = wrapper?.activeInput;
         if (!active) {
           throw new Error("No active Leader run is available for delegation");
@@ -128,12 +121,8 @@ export class PiLeaderSession implements LeaderSession {
         let result;
         try {
           result = await active.delegate({
-            toolCallId,
             agentId: params.agentId,
             task: params.task,
-            ...(params.taskPosition !== undefined
-              ? { taskPosition: params.taskPosition }
-              : {}),
             ...(params.expectedOutput ? { expectedOutput: params.expectedOutput } : {}),
             ...(params.attachmentIds !== undefined
               ? { attachmentIds: params.attachmentIds }
@@ -201,62 +190,132 @@ export class PiLeaderSession implements LeaderSession {
       name: UPDATE_TASK_PLAN_TOOL_NAME,
       label: "Update Task Plan",
       description:
-        "Create or replace the current execution task plan. Send the complete ordered task list every time progress changes. The system owns execution identity, plan identity, versions, and task IDs.",
+        "Create the current execution task plan once, then update only task statuses using the backend-assigned planId, taskId, and version from active_task_plan.",
       promptSnippet:
         "Create and keep a structured task plan synchronized with actual execution progress.",
       executionMode: "sequential",
-      parameters: Type.Object({
-        title: Type.String({ minLength: 1, maxLength: 500 }),
-        explanation: Type.Optional(Type.String({ maxLength: 2000 })),
-        tasks: Type.Array(
-          Type.Object({
-            step: Type.String({ minLength: 1, maxLength: 1000 }),
-            description: Type.Optional(Type.String({ maxLength: 4000 })),
-            status: Type.Union([
-              Type.Literal("PENDING"),
-              Type.Literal("IN_PROGRESS"),
-              Type.Literal("COMPLETED"),
-              Type.Literal("FAILED"),
-              Type.Literal("SKIPPED"),
-              Type.Literal("CANCELLED"),
-            ]),
-            statusReason: Type.Optional(
-              Type.Object({
-                code: Type.String({ minLength: 1, maxLength: 64 }),
-                message: Type.Optional(Type.String({ maxLength: 500 })),
-              }),
+      parameters: Type.Union([
+        Type.Object(
+          {
+            action: Type.Literal("create"),
+            title: Type.String({ minLength: 1, maxLength: 500 }),
+            explanation: Type.Optional(Type.String({ maxLength: 2000 })),
+            tasks: Type.Array(
+              Type.Object(
+                {
+                  step: Type.String({ minLength: 1, maxLength: 1000 }),
+                  description: Type.Optional(Type.String({ maxLength: 4000 })),
+                  status: Type.Union([
+                    Type.Literal("PENDING"),
+                    Type.Literal("IN_PROGRESS"),
+                  ]),
+                  statusReason: Type.Optional(
+                    Type.Object(
+                      {
+                        code: Type.String({ minLength: 1, maxLength: 64 }),
+                        message: Type.Optional(Type.String({ maxLength: 500 })),
+                      },
+                      { additionalProperties: false },
+                    ),
+                  ),
+                },
+                { additionalProperties: false },
+              ),
+              { minItems: 1, maxItems: 100 },
             ),
-          }),
-          { minItems: 1, maxItems: 100 },
+          },
+          { additionalProperties: false },
         ),
-      }),
+        Type.Object(
+          {
+            action: Type.Literal("update"),
+            planId: Type.String({ minLength: 1 }),
+            expectedVersion: Type.Integer({ minimum: 1 }),
+            updates: Type.Array(
+              Type.Object(
+                {
+                  taskId: Type.String({ minLength: 1 }),
+                  status: Type.Union([
+                    Type.Literal("PENDING"),
+                    Type.Literal("IN_PROGRESS"),
+                    Type.Literal("COMPLETED"),
+                    Type.Literal("FAILED"),
+                    Type.Literal("SKIPPED"),
+                    Type.Literal("CANCELLED"),
+                  ]),
+                  statusReason: Type.Optional(
+                    Type.Object(
+                      {
+                        code: Type.String({ minLength: 1, maxLength: 64 }),
+                        message: Type.Optional(Type.String({ maxLength: 500 })),
+                      },
+                      { additionalProperties: false },
+                    ),
+                  ),
+                },
+                { additionalProperties: false },
+              ),
+              { minItems: 1, maxItems: 100 },
+            ),
+          },
+          { additionalProperties: false },
+        ),
+      ]),
       execute: async (toolCallId, params, signal) => {
         const active = wrapper?.activeInput;
         if (!active?.updateTaskPlan) {
           throw new Error("task plan updates are not available for this run");
         }
-        const snapshot = await active.updateTaskPlan({
+        const result = await active.updateTaskPlan({
           toolCallId,
-          update: {
-            title: params.title,
-            ...(params.explanation ? { explanation: params.explanation } : {}),
-            tasks: params.tasks.map((task) => ({
-              step: task.step,
-              ...(task.description ? { description: task.description } : {}),
-              status: task.status,
-              ...(task.statusReason ? { statusReason: task.statusReason } : {}),
-            })),
-          },
+          command:
+            params.action === "create"
+              ? {
+                  action: "create",
+                  title: params.title,
+                  ...(params.explanation ? { explanation: params.explanation } : {}),
+                  tasks: params.tasks.map((task) => ({
+                    step: task.step,
+                    ...(task.description ? { description: task.description } : {}),
+                    status: task.status,
+                    ...(task.statusReason ? { statusReason: task.statusReason } : {}),
+                  })),
+                }
+              : {
+                  action: "update",
+                  planId: params.planId,
+                  expectedVersion: params.expectedVersion,
+                  updates: params.updates.map((update) => ({
+                    taskId: update.taskId,
+                    status: update.status,
+                    ...(update.statusReason
+                      ? { statusReason: update.statusReason }
+                      : {}),
+                  })),
+                },
           ...(signal ? { signal } : {}),
         });
-        // before_agent_start 每轮都会读取 activeInput；原位替换后下一次推理立即看到最新计划。
-        active.activeTaskPlan = snapshot;
+        if (result.ok) {
+          active.activeTaskPlan = result.plan;
+        } else if (result.currentPlan) {
+          active.activeTaskPlan = result.currentPlan;
+        }
+        const modelResult = result.ok
+          ? { ok: true, plan: toTaskPlanModelView(result.plan) }
+          : {
+              ok: false,
+              error: result.error,
+              ...(result.currentPlan
+                ? { currentPlan: toTaskPlanModelView(result.currentPlan) }
+                : {}),
+            };
         return {
-          content: [
-            { type: "text", text: JSON.stringify(toTaskPlanModelView(snapshot)) },
-          ],
+          content: [{ type: "text", text: JSON.stringify(modelResult) }],
           details: {
-            status: snapshot.status,
+            ok: result.ok,
+            ...(result.ok
+              ? { status: result.plan.status }
+              : { errorCode: result.error.code }),
           },
         };
       },
