@@ -120,6 +120,9 @@ export class ByFrameworkConnector implements AgentConnector {
       ...request.metadata,
       parent_run_id: request.runId,
       delegation_id: request.delegationId,
+      delegated_agent_id: request.agent.id,
+      delegated_agent_name: request.agent.name,
+      delegated_agent_type: targetAgentType,
       ...(request.parentMessageId
         ? { caller_parent_message_id: request.parentMessageId }
         : {}),

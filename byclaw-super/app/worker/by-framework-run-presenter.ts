@@ -7,6 +7,7 @@ import {
 } from "@byclaw/by-framework";
 import {
   agentReadyTitle,
+  delegationFailureUserMessage,
   protocolMessage,
   recordValue,
   stringData,
@@ -102,12 +103,19 @@ export class ByFrameworkRunPresenter {
     const agentName = stringData(event.data.agentName);
     const displayName = agentName || agentId;
     const displayPrefix = displayName ? `${displayName} ` : "";
+    const failureReason = stringData(event.data.error);
+    const failureStage = stringData(event.data.failureStage);
     const content =
       status === "_START_"
         ? `${displayPrefix}数字员工正在处理`
         : status === "_DONE_"
           ? `${displayPrefix}数字员工处理完成`
-          : `${displayPrefix}数字员工处理失败`;
+          : delegationFailureUserMessage({
+              agentName,
+              agentId,
+              reason: failureReason,
+              stage: failureStage,
+            });
 
     await this.#emitter.emitEvent({
       sessionId: context.sessionId,

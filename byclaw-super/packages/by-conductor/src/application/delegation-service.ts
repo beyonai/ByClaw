@@ -762,7 +762,12 @@ export class DelegationService {
           artifacts,
           error: event.error.message,
         };
-        await this.#finish(delegation, eventTimedOut ? "TIMED_OUT" : "FAILED", result);
+        await this.#finish(
+          delegation,
+          eventTimedOut ? "TIMED_OUT" : "FAILED",
+          result,
+          eventTimedOut ? "execution_timeout" : "agent_execution",
+        );
         return result;
       }
 
@@ -782,7 +787,7 @@ export class DelegationService {
         },
         "子 Agent 事件流未携带终态即结束",
       );
-      await this.#finish(delegation, "FAILED", result);
+      await this.#finish(delegation, "FAILED", result, "connector_stream");
       return result;
     } catch (error) {
       if (error instanceof DelegationSuspendedError) {
@@ -830,7 +835,12 @@ export class DelegationService {
         artifacts: [],
         error: message,
       };
-      await this.#finish(delegation, "FAILED", result);
+      await this.#finish(
+        delegation,
+        "FAILED",
+        result,
+        execution ? "connector_stream" : "dispatch",
+      );
       return result;
     } finally {
       if (activityTimeout) {
@@ -887,7 +897,12 @@ export class DelegationService {
         : normalizedStatus === "FAILED"
           ? "FAILED"
           : "COMPLETED";
-    await this.#finish(delegation, terminalStatus, result);
+    await this.#finish(
+      delegation,
+      terminalStatus,
+      result,
+      terminalStatus === "COMPLETED" ? undefined : "agent_callback",
+    );
     return { accepted: true, runId: delegation.runId, result };
   }
 
@@ -1108,7 +1123,16 @@ export class DelegationService {
       artifacts: [],
       error: timeoutKind && timeoutReason ? timeoutReason(timeoutKind) : "Delegation cancelled",
     };
-    await this.#finish(delegation, timedOut ? "TIMED_OUT" : "CANCELLED", result);
+    await this.#finish(
+      delegation,
+      timedOut ? "TIMED_OUT" : "CANCELLED",
+      result,
+      timeoutKind === "first_activity"
+        ? "dispatch_timeout"
+        : timeoutKind === "idle"
+          ? "execution_timeout"
+          : undefined,
+    );
     return result;
   }
 
@@ -1117,6 +1141,7 @@ export class DelegationService {
     delegation: Delegation,
     status: DelegationStatus,
     result: AgentResult,
+    failureStage?: string,
   ): Promise<void> {
     const finished: Delegation = {
       ...delegation,
@@ -1139,6 +1164,7 @@ export class DelegationService {
         artifactCount: result.artifacts.length,
         resultStatus: result.status,
         hasOutput: Boolean(result.output),
+        ...(failureStage ? { failureStage } : {}),
         ...(result.error ? { error: result.error } : {}),
       },
     });

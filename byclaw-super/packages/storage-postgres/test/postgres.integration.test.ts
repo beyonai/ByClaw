@@ -302,7 +302,7 @@ suite("PostgreSQL persistence integration", () => {
     await expect(database.runs.get(waiting.id)).resolves.toMatchObject({
       status: "FAILED",
       executionStage: "SETTLED",
-      finalAnswer: "子 Agent 在规定时间内未返回最终结果，本次调度已超时。",
+      finalAnswer: "Timeout Agent 调度超时：数字员工在规定时间内未返回最终结果。",
       error: "Delegation received no terminal ResumeCommand within its callback timeout",
     });
     expect(
@@ -332,7 +332,7 @@ suite("PostgreSQL persistence integration", () => {
       expect.objectContaining({
         runId: waiting.id,
         runStatus: "FAILED",
-        finalAnswer: "子 Agent 在规定时间内未返回最终结果，本次调度已超时。",
+        finalAnswer: "Timeout Agent 调度超时：数字员工在规定时间内未返回最终结果。",
         externalSessionId: "external-timeout-session",
       }),
     ]);

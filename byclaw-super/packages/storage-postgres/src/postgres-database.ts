@@ -1120,7 +1120,8 @@ export class PostgresRunExecutionQueue implements RunExecutionQueue {
         }
         const expiredAt = milliseconds(candidate.expired_at);
         const error = "Delegation received no terminal ResumeCommand within its callback timeout";
-        const finalAnswer = "子 Agent 在规定时间内未返回最终结果，本次调度已超时。";
+        const agentOwner = candidate.agent_name?.trim() || candidate.agent_id;
+        const finalAnswer = `${agentOwner} 调度超时：数字员工在规定时间内未返回最终结果。`;
         const result = {
           status: "timed_out",
           output: candidate.partial_output ?? "",
@@ -1156,6 +1157,7 @@ export class PostgresRunExecutionQueue implements RunExecutionQueue {
             artifactCount: 0,
             resultStatus: "timed_out",
             hasOutput: Boolean(candidate.partial_output),
+            failureStage: "callback_timeout",
             error,
           },
         });
@@ -1293,6 +1295,7 @@ export class PostgresRunExecutionQueue implements RunExecutionQueue {
           artifactCount: 0,
           resultStatus,
           hasOutput: Boolean(input.finalAnswer),
+          ...(input.status === "COMPLETED" ? {} : { failureStage: "agent_callback" }),
           ...(error ? { error } : {}),
         },
       });

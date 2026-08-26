@@ -225,6 +225,43 @@ export function agentReadyTitle(agentName: string, locale?: string): string {
     : `${agentName} 智能体已就绪`;
 }
 
+/** 委派失败文案必须指明具体数字员工和原始原因，避免误归因给超级助手。 */
+export function delegationFailureUserMessage(input: {
+  agentName?: string;
+  agentId?: string;
+  reason?: string;
+  stage?: string;
+}): string {
+  const owner = input.agentName?.trim() || input.agentId?.trim() || "下游数字员工";
+  const reason = input.reason?.trim();
+  if (reason?.startsWith(`${owner} `) || reason?.startsWith(`${owner}：`)) {
+    return reason;
+  }
+  const failure = delegationFailureLabel(input.stage);
+  return reason ? `${owner} ${failure}：${reason}` : `${owner} ${failure}`;
+}
+
+function delegationFailureLabel(stage?: string): string {
+  switch (stage?.trim()) {
+    case "dispatch":
+      return "调度失败";
+    case "dispatch_timeout":
+      return "调度超时";
+    case "agent_execution":
+      return "执行失败";
+    case "execution_timeout":
+      return "执行超时";
+    case "agent_callback":
+      return "结果回调失败";
+    case "callback_timeout":
+      return "结果回调超时";
+    case "connector_stream":
+      return "结果流消费失败";
+    default:
+      return "调度或执行失败";
+  }
+}
+
 /** 从记录中读取大小写不敏感的非空字符串值。 */
 export function recordString(record: Readonly<Record<string, unknown>>, key: string): string {
   const expected = key.toLowerCase();
