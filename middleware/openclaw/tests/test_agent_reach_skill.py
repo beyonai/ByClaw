@@ -103,6 +103,17 @@ class ByReachSkillContractTest(unittest.TestCase):
         self.assertIn("`openclaw browser --browser-profile openclaw start`", skill)
         self.assertIn("`openclaw browser --browser-profile openclaw stop`", skill)
 
+    def test_bycli_bridge_recovery_does_not_mistake_a_profile_name_for_user_chrome(self):
+        skill = BYCLI_SKILL.read_text(encoding="utf-8")
+
+        for phrase in (
+            "不得直接 STOP、不得提示用户打开桌面 Chrome",
+            "错误信息中的 profile 名称",
+            "OpenClaw 托管 Chromium",
+            "只有完成冷启动复检和一次 daemon restart 后",
+        ):
+            self.assertIn(phrase, skill)
+
     def test_bycli_groups_priority_and_stop_rules_without_relaxing_ownership(self):
         skill = BYCLI_SKILL.read_text(encoding="utf-8")
 

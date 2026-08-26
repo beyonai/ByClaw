@@ -423,6 +423,16 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         ):
             self.assertIn(phrase, bycli)
 
+    def test_collection_waits_for_bycli_bridge_recovery_before_reporting_user_action(self):
+        knowledge = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+
+        for phrase in (
+            "初次 `BROWSER_CONNECT`",
+            "不得直接要求用户打开 Chrome",
+            "最终 `bridge_unavailable`",
+        ):
+            self.assertIn(phrase, knowledge)
+
     def test_delegated_adapter_candidate_does_not_create_a_second_question(self):
         bycli = (SKILLS_ROOT / "bycli" / "SKILL.md").read_text(encoding="utf-8")
         delivery = (SKILL_ROOT / "references" / "delivery.md").read_text(encoding="utf-8")

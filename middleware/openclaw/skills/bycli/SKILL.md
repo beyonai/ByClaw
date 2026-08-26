@@ -60,7 +60,7 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 - 不要放宽 `verify/<cmd>.json` fixture 来掩盖失败——修 adapter 让输出正确
 - 不要猜测字段含义——猜错了 verify 通过但数据是错的
 - 不要在 repo 根目录 / `clis/<site>/` 留临时 dump 文件（`.dbg-*.html` / `raw-*.json`）
-- AUTH_REQUIRED（exit 77）/ BROWSER_CONNECT（exit 69）/ CAPTCHA / 限流 → 不修改代码，报告用户
+- AUTH_REQUIRED（exit 77）/ CAPTCHA / 限流 → 不修改代码，报告用户；`BROWSER_CONNECT`（exit 69）必须先完成下文的桥接恢复阶梯，只有仍未恢复才报告用户
 - 不要把 token、SESSION、Cookie、凭据写入技能文件、命令参数或对话回复
 - 对任何网站、网页或 URL 的读取、站内搜索、采集、抓取或操作任务，禁止使用 `web_fetch`、Jina Reader、Web Reader MCP、通用 `browser`、`curl`、`wget`、`requests`、原站直连或其他网页获取工具绕过 byCLI。公开可读、静态页面、raw URL、纯文本或 Markdown 内容均不是例外
 - 不要因“直接 HTTP 更快”“无需登录”“不需要渲染”或类似效率判断跳过 `bycli list -f json`、现成 adapter 或 `bycli browser` 降级路径
@@ -73,9 +73,10 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 - Agent 调用支持格式化输出的数据 / adapter 命令时加 `-f json` 获取可解析输出；`doctor`、`daemon`、`browser` 生命周期命令以及不支持 `--format` 的子命令按其原生命令执行
 - 浏览器操作前确认 `bycli doctor` 通过（仅 COOKIE/INTERCEPT/UI 策略需要）
 - 每次执行 `bycli doctor` 后（无论成功与否）必须紧接着执行 `bycli daemon status`，确认 daemon 处于 running 且 Extension 为 connected，据此判断桥接是否正常；任一不满足则视为桥接异常，按以下阶梯升级处理：
+  - 错误信息中的 profile 名称不能单独证明它是用户桌面 Chrome，也不能据此跳过恢复。桥接异常时，不得直接 STOP、不得提示用户打开桌面 Chrome，也不得把 OpenClaw 托管 Chromium 误判为用户浏览器；必须先检查托管浏览器状态并执行下面的恢复阶梯。只有完成冷启动复检和一次 daemon restart 后仍无法建立桥接，才可以要求用户协助检查。
   1. 桥接异常 → 先执行 `openclaw browser --browser-profile openclaw status`。若 Chromium 未运行，`/usr/local/bin/start-chrome.sh` 存在且可执行时使用该恢复脚本；否则执行 `openclaw browser --browser-profile openclaw start`，再执行 `bycli doctor` → `bycli daemon status`。冷启动不包含 `bycli browser open/state`
   2. 仍异常 → `bycli daemon restart`，再 `bycli daemon status` 复检
-  3. `bycli daemon restart` 后仍连接不上（daemon 未 running 或 Extension 未 connected）→ **STOP，停止一切浏览器动作**，提示用户检查 Chrome 是否正常启动、byCLI 扩展插件是否已安装并启用，恢复后再重试；不得继续驱动或降级到通用工具
+  3. `bycli daemon restart` 后仍连接不上（daemon 未 running 或 Extension 未 connected）→ **STOP，停止一切浏览器动作**，此时才提示用户检查 Chrome 是否正常启动、byCLI 扩展插件是否已安装并启用，恢复后再重试；不得继续驱动或降级到通用工具
 - 修复 adapter 时仅修改 trace `summary.md` 里 `adapterSourcePath` 指向的文件
 - 修复预算：每次失败最多 3 轮 trace → fix → retry
 - 写 adapter 后必须 `bycli browser verify` 通过 + 字段值与网页肉眼比对
@@ -189,7 +190,7 @@ session、TAB、daemon 与浏览器存活；不得调用 `state`、`tab list`、
 |---------|-----------|
 | Weixin 登录/验证：`AUTH_REQUIRED` (77)、登录 `TIMEOUT` (75)、CAPTCHA 或环境验证 | 加载 `references/weixin.md`；保留当前 TAB、daemon 和浏览器，提示用户操作后立即结束本轮。等待期间不得自行检查、AutoFix、trace 重跑、改超时或重复执行命令 |
 | AUTH_REQUIRED (exit 77，非 Weixin) | STOP，提示用户登录 |
-| BROWSER_CONNECT (exit 69) | 按「严格要求」的桥接异常阶梯执行冷启动诊断与最多一次 daemon restart；复检仍失败后才 STOP，且不得执行 `browser open/state` |
+| BROWSER_CONNECT (exit 69) | 不得因报错中的 profile 名称推断需要用户操作。按「严格要求」的桥接异常阶梯检查 OpenClaw 托管 Chromium、执行冷启动诊断与最多一次 daemon restart；复检仍失败后才 STOP，且不得执行 `browser open/state` |
 | CAPTCHA / 限流 / 环境验证（非 Weixin） | STOP，不是 adapter 问题；保持当前 TAB、daemon 和浏览器，等待用户完成验证 |
 | SELECTOR / EMPTY_RESULT / API_ERROR | 进入 AutoFix 流程 |
 | TIMEOUT / PAGE_CHANGED | 进入 AutoFix 流程（Weixin 登录 `TIMEOUT` / exit 75 除外） |
