@@ -9,6 +9,8 @@ import static org.mockito.Mockito.verify;
 import java.lang.reflect.Field;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -84,5 +86,19 @@ class SessionStreamManagerObservabilityTest {
 
         assertThat(snapshot).containsExactlyInAnyOrder("10", "20");
         assertThatThrownBy(() -> snapshot.add("30")).isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @Test
+    void createsBoundedBatchOptionsBackedByVirtualThreads() throws Exception {
+        ReflectionTestUtils.setField(manager, "pollTimeoutMillis", 1500L);
+        ReflectionTestUtils.setField(manager, "streamReadBatchSize", 64);
+
+        var options = manager.createContainerOptions();
+        FutureTask<Boolean> virtualThread = new FutureTask<>(() -> Thread.currentThread().isVirtual());
+        options.getExecutor().execute(virtualThread);
+
+        assertThat(options.getPollTimeout()).isEqualTo(java.time.Duration.ofMillis(1500L));
+        assertThat(options.getBatchSize()).hasValue(64);
+        assertThat(virtualThread.get(1, TimeUnit.SECONDS)).isTrue();
     }
 }

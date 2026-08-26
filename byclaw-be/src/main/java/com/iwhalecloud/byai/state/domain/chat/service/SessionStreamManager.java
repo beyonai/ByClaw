@@ -4,6 +4,7 @@ import java.time.Duration;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -117,6 +118,13 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
     @Value("${spring.redis.read-timeout:5000}")
     private long redisReadTimeoutMillis;
 
+    /** 单次 XREADGROUP 最多拉取的事件数，避免一次轮询载入过大批次。 */
+    @Value("${byclaw.session-stream.read-batch-size:100}")
+    private int streamReadBatchSize;
+
+    /** Redis Stream 长轮询使用虚拟线程，阻塞等待不再为每个 session 长期占用平台线程。 */
+    private final ExecutorService streamTaskExecutor = Executors.newVirtualThreadPerTaskExecutor();
+
     /** sessionId -> StreamMessageListenerContainer，按 session 管理监听容器 */
     private final Map<String, StreamMessageListenerContainer<String, MapRecord<String, String, String>>> containers =
         new ConcurrentHashMap<>();
@@ -199,10 +207,7 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
 
             // 构建容器配置
             StreamMessageListenerContainerOptions<String, MapRecord<String, String, String>> options =
-                StreamMessageListenerContainerOptions
-                    .builder()
-                    .pollTimeout(Duration.ofMillis(pollTimeoutMillis))
-                    .build();
+                createContainerOptions();
 
             // 通过 ApplicationContext 获取 RedisStreamMessageListener prototype 新实例
             RedisStreamMessageListener listener = applicationContext.getBean(RedisStreamMessageListener.class);
@@ -318,7 +323,23 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
         keepAliveTasks.clear();
         keepAliveExecutor.shutdownNow();
         sessionStatusExecutor.shutdownNow();
+        streamTaskExecutor.shutdownNow();
         log.info("所有 Session Stream 监听器已清理完成");
+    }
+
+    /**
+     * 构建 Session Stream 容器配置。读取批量设上限，长轮询任务使用虚拟线程承载阻塞等待。
+     */
+    StreamMessageListenerContainerOptions<String, MapRecord<String, String, String>> createContainerOptions() {
+        if (streamReadBatchSize <= 0) {
+            throw new IllegalStateException("byclaw.session-stream.read-batch-size must be greater than zero");
+        }
+        return StreamMessageListenerContainerOptions
+            .builder()
+            .pollTimeout(Duration.ofMillis(pollTimeoutMillis))
+            .batchSize(streamReadBatchSize)
+            .executor(streamTaskExecutor)
+            .build();
     }
 
     private void startKeepAlive(String sessionId, ChatProcessContext ctx) {
