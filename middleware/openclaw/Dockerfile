@@ -38,6 +38,7 @@ RUN --mount=type=cache,target=/root/.npm \
 COPY byclaw-exe/extensions/baiying-enhance/ ./src/baiying-enhance/
 COPY byclaw-exe/extensions/byai-channel/ ./src/byai-channel/
 COPY byclaw-exe/extensions/byclaw-sqlite/ ./src/byclaw-sqlite/
+COPY byclaw-exe/extensions/shared/ ./src/shared/
 
 RUN set -eux; \
     mkdir -p /build/out; \
