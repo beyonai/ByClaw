@@ -12,11 +12,16 @@ import com.iwhalecloud.byai.manager.entity.users.Users;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
+import org.springframework.dao.DuplicateKeyException;
 
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -124,12 +129,75 @@ class WecomUserServiceTest {
         assertThat(captor.getValue().getSourceEmail()).isEqualTo("lisi@example.com");
     }
 
+    @ParameterizedTest
+    @CsvSource({
+            "X, N",
+            "A, Y"
+    })
+    void resolveLoginInfoRejectsUnavailableBoundUser(String state, String isLocked) {
+        String fromUserId = "zhangsan";
+        UserExternalSystem binding = new UserExternalSystem();
+        binding.setUserId(1001L);
+        Users boundUser = user(1001L, "zhangsan", "张三");
+        boundUser.setState(state);
+        boundUser.setIsLocked(isLocked);
+        when(externalSystemService.findByUnionId(SourceType.WE_CHAT, fromUserId)).thenReturn(binding);
+        when(userService.findById(1001L)).thenReturn(boundUser);
+
+        LoginInfo loginInfo = service.resolveLoginInfo(fromUserId, BOT_ID);
+
+        assertThat(loginInfo).isNull();
+        assertThat(CurrentUserHolder.getLoginInfo()).isNull();
+        verify(contactUserService, never()).getUserDetail(any(), any());
+    }
+
+    @Test
+    void resolveLoginInfoRejectsLockedUserBeforeCreatingBinding() {
+        String fromUserId = "zhangsan";
+        Users lockedUser = user(1001L, "zhangsan", "张三");
+        lockedUser.setIsLocked("Y");
+        WecomUserDetail detail = new WecomUserDetail();
+        detail.setUserid(fromUserId);
+        when(contactUserService.getUserDetail(BOT_ID, fromUserId)).thenReturn(detail);
+        when(userService.findByUserCode(fromUserId)).thenReturn(lockedUser);
+
+        LoginInfo loginInfo = service.resolveLoginInfo(fromUserId, BOT_ID);
+
+        assertThat(loginInfo).isNull();
+        assertThat(CurrentUserHolder.getLoginInfo()).isNull();
+        verify(externalSystemService, never()).save(any(UserExternalSystem.class));
+    }
+
+    @Test
+    void resolveLoginInfoReturnsNullWhenConcurrentBindingSelectsAnotherUser() {
+        String fromUserId = "zhangsan";
+        Users selectedUser = user(1001L, "zhangsan", "张三");
+        WecomUserDetail detail = new WecomUserDetail();
+        detail.setUserid(fromUserId);
+        UserExternalSystem concurrentBinding = new UserExternalSystem();
+        concurrentBinding.setUserId(1002L);
+        when(externalSystemService.findByUnionId(SourceType.WE_CHAT, fromUserId))
+                .thenReturn(null, null, concurrentBinding);
+        when(contactUserService.getUserDetail(BOT_ID, fromUserId)).thenReturn(detail);
+        when(userService.findByUserCode(fromUserId)).thenReturn(selectedUser);
+        when(sequenceService.nextVal()).thenReturn(9001L);
+        doThrow(new DuplicateKeyException("duplicate binding"))
+                .when(externalSystemService).save(any(UserExternalSystem.class));
+
+        LoginInfo loginInfo = service.resolveLoginInfo(fromUserId, BOT_ID);
+
+        assertThat(loginInfo).isNull();
+        assertThat(CurrentUserHolder.getLoginInfo()).isNull();
+    }
+
     private Users user(Long userId, String userCode, String userName) {
         Users user = new Users();
         user.setUserId(userId);
         user.setUserCode(userCode);
         user.setUserName(userName);
         user.setAssistantId(userId);
+        user.setState("A");
+        user.setIsLocked("N");
         return user;
     }
 }
