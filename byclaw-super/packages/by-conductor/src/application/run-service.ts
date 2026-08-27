@@ -5,10 +5,12 @@ import {
 } from "../domain/attachment-inspection.js";
 import type { AttachmentResolver } from "../ports/attachment-resolver.js";
 import { DelegationService } from "./delegation-service.js";
+import { PlanExecutionCoordinator } from "./plan-execution-coordinator.js";
 import { LeaderRunSuspendedError } from "./run-suspension.js";
 import type { RunIngressContextV1 } from "../domain/run-ingress-context.js";
 import type {
   LeaderRunInput,
+  LeaderExecutionPhase,
   LeaderSession,
   LeaderSessionFactory,
 } from "../ports/leader.js";
@@ -92,10 +94,6 @@ export interface CreateSessionRunInput extends CreateSessionInput {
 
 type QueueEntry = { runId: string; metadata: Record<string, unknown> };
 
-const MAX_TASK_PLAN_STALL_ATTEMPTS = 3;
-const TASK_PLAN_CONTINUATION_MESSAGE = `The trusted runtime task plan is still active, so this Run cannot finish yet.
-Continue the unfinished steps now. Do not repeat completed work. Call updateTaskPlan whenever progress changes,
-and only provide the final user answer after every task has reached a terminal status.`;
 type SessionQueue = { running: boolean; entries: QueueEntry[] };
 type ActiveRun = { controller: AbortController; leader: LeaderSession };
 type PendingLeaderInteraction = {
@@ -1035,6 +1033,9 @@ ${JSON.stringify(completedDelegations)}`;
         }
       }
       let leaderOutputPausedForDelegation = false;
+      let leaderExecutionPhase: LeaderExecutionPhase = activeTaskPlan
+        ? "execute_step"
+        : "react";
       let leaderInput: LeaderRunInput;
       leaderInput = {
         message: leaderMessage,
@@ -1070,8 +1071,14 @@ ${JSON.stringify(completedDelegations)}`;
         signal: runController.signal,
         // Leader 的可见回答与思考增量被规范化为 Run 事件，供对外流协议消费。
         onDelta: async (text) => {
-          // ACTIVE 计划尚未收口时抑制可见回答，避免过早回答在内部续跑前泄漏给用户。
-          if (leaderOutputPausedForDelegation || activeTaskPlan?.status === "ACTIVE") {
+          // Plan-and-Execute 的单步骤执行和 checkpoint 都是内部片段；只有普通
+          // ReAct 或独立 finalization 可以产生用户可见回答。
+          if (
+            leaderOutputPausedForDelegation ||
+            (leaderExecutionPhase !== "react" &&
+              leaderExecutionPhase !== "finalize") ||
+            activeTaskPlan?.status === "ACTIVE"
+          ) {
             return;
           }
           const event = {
@@ -1370,27 +1377,27 @@ ${JSON.stringify(completedDelegations)}`;
             }
           : {}),
       };
-      let result = await leader.run(leaderInput);
-      let taskPlanStallAttempts = 0;
-      while (activeTaskPlan?.status === "ACTIVE") {
-        runController.signal.throwIfAborted();
-        if (taskPlanStallAttempts >= MAX_TASK_PLAN_STALL_ATTEMPTS) {
-          throw new Error(
-            `Leader made no task plan progress after ${MAX_TASK_PLAN_STALL_ATTEMPTS} continuation attempts`,
-          );
-        }
-        const previousPlanVersion = activeTaskPlan.version;
-        taskPlanStallAttempts += 1;
-        result = await leader.run({
-          ...leaderInput,
-          message: TASK_PLAN_CONTINUATION_MESSAGE,
-          activeTaskPlan,
-          currentTime: this.now(),
-        });
-        if (activeTaskPlan?.version !== previousPlanVersion) {
-          taskPlanStallAttempts = 0;
-        }
-      }
+      const planExecutor = new PlanExecutionCoordinator();
+      const result = await planExecutor.run({
+        initialMessage: leaderMessage,
+        signal: runController.signal,
+        getActiveTaskPlan: () => activeTaskPlan,
+        runPhase: async ({ phase, message, activeTaskPlan: phasePlan }) => {
+          leaderExecutionPhase = phase;
+          const phaseInput: LeaderRunInput = {
+            ...leaderInput,
+            message,
+            executionPhase: phase,
+            currentTime: this.now(),
+          };
+          if (phasePlan) {
+            phaseInput.activeTaskPlan = phasePlan;
+          } else {
+            delete phaseInput.activeTaskPlan;
+          }
+          return leader.run(phaseInput);
+        },
+      });
 
       if (runController.signal.aborted) {
         await this.#finishLocallyCancelledRun(current, "run cancelled");

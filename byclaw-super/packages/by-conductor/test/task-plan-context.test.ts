@@ -92,4 +92,88 @@ describe("TaskPlanProcessor", () => {
       "task-plan",
     );
   });
+
+  it("shows only the current task and phase-specific hard boundaries during execution", () => {
+    const compiled = new ContextCompiler([new TaskPlanProcessor()]).compile({
+      baseSystemPrompt: "base",
+      authorizedAgents: [],
+      sessionContext: { schemaVersion: 1 },
+      currentTime: 1,
+      taskPlanAvailable: true,
+      leaderExecutionPhase: "execute_step",
+      activeTaskPlan: {
+        planId: "plan-1",
+        version: 2,
+        title: "依次介绍成员",
+        status: "ACTIVE",
+        sessionId: "session-1",
+        messageId: "message-1",
+        sourceRuntime: "BYCLAW_SUPER",
+        sourceRunId: "run-1",
+        tasks: [
+          {
+            taskId: "task-1",
+            position: 1,
+            title: "介绍成员 A",
+            status: "IN_PROGRESS",
+          },
+          {
+            taskId: "task-2",
+            position: 2,
+            title: "介绍成员 B",
+            status: "PENDING",
+          },
+        ],
+      },
+    });
+
+    expect(compiled.systemPrompt).toContain('"step":"介绍成员 A"');
+    expect(compiled.systemPrompt).not.toContain("介绍成员 B");
+    expect(compiled.systemPrompt).toContain(
+      "Execute only the single IN_PROGRESS task",
+    );
+    expect(compiled.systemPrompt).toContain(
+      "Task-plan mutation is deliberately unavailable in this phase",
+    );
+  });
+
+  it("turns checkpoint and finalization into non-execution phases", () => {
+    const compile = (leaderExecutionPhase: "checkpoint" | "finalize") =>
+      new ContextCompiler([new TaskPlanProcessor()]).compile({
+        baseSystemPrompt: "base",
+        authorizedAgents: [],
+        sessionContext: { schemaVersion: 1 },
+        currentTime: 1,
+        taskPlanAvailable: true,
+        leaderExecutionPhase,
+        activeTaskPlan: {
+          planId: "plan-1",
+          version: 1,
+          title: "执行计划",
+          status: leaderExecutionPhase === "checkpoint" ? "ACTIVE" : "COMPLETED",
+          sessionId: "session-1",
+          messageId: "message-1",
+          sourceRuntime: "BYCLAW_SUPER",
+          sourceRunId: "run-1",
+          tasks: [
+            {
+              taskId: "task-1",
+              position: 1,
+              title: "当前任务",
+              status:
+                leaderExecutionPhase === "checkpoint"
+                  ? "IN_PROGRESS"
+                  : "COMPLETED",
+            },
+          ],
+        },
+      }).systemPrompt;
+
+    expect(compile("checkpoint")).toContain(
+      "This is a status checkpoint, not an execution phase",
+    );
+    expect(compile("finalize")).toContain(
+      "Do not perform more work, delegate an agent, ask a new question",
+    );
+  });
 });

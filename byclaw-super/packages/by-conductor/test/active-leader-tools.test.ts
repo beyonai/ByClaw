@@ -54,4 +54,28 @@ describe("active Leader tools", () => {
       }),
     ).toEqual(["delegateAgent", "askUserQuestion"]);
   });
+
+  it("isolates execution, checkpoint, and finalization tool sets", () => {
+    const base = {
+      authorizedAgents: [specialist],
+      hasAttachments: false,
+      inspectAttachmentAvailable: false,
+      downloadAttachmentAvailable: false,
+      expertTeam: true,
+      taskPlanAvailable: true,
+    } as const;
+
+    expect(
+      resolveActiveLeaderToolNames({ ...base, executionPhase: "execute_step" }),
+    ).toEqual(["delegateAgent", "askUserQuestion"]);
+    expect(
+      resolveActiveLeaderToolNames({ ...base, executionPhase: "checkpoint" }),
+    ).toEqual(["updateTaskPlan"]);
+    expect(
+      resolveActiveLeaderToolNames({ ...base, executionPhase: "finalize" }),
+    ).toEqual([]);
+    expect(
+      resolveActiveLeaderToolNames({ ...base, executionPhase: "react" }),
+    ).toEqual(["delegateAgent", "askUserQuestion", "updateTaskPlan"]);
+  });
 });

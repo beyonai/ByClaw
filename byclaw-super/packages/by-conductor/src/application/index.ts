@@ -4,4 +4,5 @@ export * from "./delegation-service.js";
 export * from "./run-suspension.js";
 export * from "./group-chat-memory.js";
 export * from "./leader-session-cache.js";
+export * from "./plan-execution-coordinator.js";
 export * from "./run-service.js";

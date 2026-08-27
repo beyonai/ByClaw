@@ -2230,18 +2230,23 @@ describe("RunService task plan completion guard", () => {
       cancel: vi.fn(async () => undefined),
     };
     const messages: string[] = [];
+    const phases: Array<LeaderRunInput["executionPhase"]> = [];
     const { events, service } = createTaskPlanService(async (input) => {
       messages.push(input.message);
-      if (messages.length === 1) {
+      phases.push(input.executionPhase);
+      if (input.executionPhase === "execute_step") {
         await input.onDelta("不应提前展示");
         return { text: "过早结束" };
       }
-      await input.updateTaskPlan!({
-        toolCallId: "finish-plan",
-        command: {
-          action: "complete_current",
-        },
-      });
+      if (input.executionPhase === "checkpoint") {
+        await input.updateTaskPlan!({
+          toolCallId: "finish-plan",
+          command: {
+            action: "complete_current",
+          },
+        });
+        return { text: "计划状态已更新" };
+      }
       await input.onDelta("最终回答");
       return { text: "任务已经完成" };
     }, taskPlans);
@@ -2249,8 +2254,9 @@ describe("RunService task plan completion guard", () => {
     const run = await createTaskPlanRun(service);
     await waitFor(async () => (await service.getRun(run.id))?.status === "COMPLETED");
 
-    expect(messages).toHaveLength(2);
-    expect(messages[1]).toContain("task plan is still active");
+    expect(messages).toHaveLength(3);
+    expect(phases).toEqual(["execute_step", "checkpoint", "finalize"]);
+    expect(messages[1]).toContain("Checkpoint only the authoritative current task");
     expect(taskPlans.command).toHaveBeenCalledOnce();
     expect((await service.getRun(run.id))?.finalAnswer).toBe("任务已经完成");
     expect(
@@ -2318,6 +2324,9 @@ describe("RunService task plan completion guard", () => {
       yield completed("任务完成");
     });
     const { service } = createTaskPlanService(async (input) => {
+      if (input.executionPhase === "finalize") {
+        return { text: "任务已经完成" };
+      }
       const result = await input.delegate({
         agentId: agent.id,
         task: "执行当前任务",
@@ -2330,7 +2339,7 @@ describe("RunService task plan completion guard", () => {
           action: "complete_current",
         },
       });
-      return { text: "任务已经完成" };
+      return { text: "当前步骤已经完成" };
     }, taskPlans, connector);
 
     const run = await createTaskPlanRun(service, [agent]);
@@ -2361,7 +2370,7 @@ describe("RunService task plan completion guard", () => {
     const run = await createTaskPlanRun(service);
     await waitFor(async () => (await service.getRun(run.id))?.status === "FAILED");
 
-    expect(leaderRun).toHaveBeenCalledTimes(4);
+    expect(leaderRun).toHaveBeenCalledTimes(6);
     expect((await service.getRun(run.id))?.status).toBe("FAILED");
     expect(taskPlans.command).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -2419,6 +2428,9 @@ describe("RunService task plan completion guard", () => {
       };
     });
     const { service } = createTaskPlanService(async (input) => {
+      if (input.executionPhase === "finalize") {
+        return { text: "数字员工调度失败，任务未完成" };
+      }
       const result = await input.delegate({
         agentId: agent.id,
         task: "调度数字员工执行任务",
@@ -2435,7 +2447,7 @@ describe("RunService task plan completion guard", () => {
           },
         },
       });
-      return { text: "数字员工调度失败，任务未完成" };
+      return { text: "当前步骤失败" };
     }, taskPlans, connector);
 
     const run = await createTaskPlanRun(service, [agent]);
@@ -2509,6 +2521,10 @@ describe("RunService task plan completion guard", () => {
         }
         throw new Error("expected callback delegation to suspend");
       }
+      if (input.executionPhase === "finalize") {
+        return { text: "数字员工失败，任务已收口" };
+      }
+      expect(input.executionPhase).toBe("execute_step");
       expect(input.message).toContain("trusted platform callback");
       expect(taskPlans.command).not.toHaveBeenCalled();
       await input.updateTaskPlan!({
@@ -2521,7 +2537,7 @@ describe("RunService task plan completion guard", () => {
           },
         },
       });
-      return { text: "数字员工失败，任务已收口" };
+      return { text: "当前回调步骤已收口" };
     }, taskPlans, fakeCallbackConnector());
 
     const run = await createTaskPlanRun(service, [agent]);

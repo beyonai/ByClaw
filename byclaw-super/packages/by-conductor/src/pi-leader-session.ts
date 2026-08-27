@@ -63,6 +63,7 @@ export class PiLeaderSession implements LeaderSession {
   contextRevision: number;
   private activeInput: LeaderRunInput | undefined;
   private suspendedDelegation: DelegationSuspendedError | undefined;
+  private taskPlanTransition: LeaderRunResult["taskPlanTransition"] | undefined;
 
   /** 保存已配置完成的 Pi Session。 */
   private constructor(
@@ -226,6 +227,16 @@ export class PiLeaderSession implements LeaderSession {
         if (!active?.updateTaskPlan) {
           throw new Error("task plan updates are not available for this run");
         }
+        const phase = active.executionPhase ?? "react";
+        if (phase === "execute_step" || phase === "finalize") {
+          throw new Error(`task plan updates are not allowed during ${phase}`);
+        }
+        if (phase === "checkpoint" && params.action === "create") {
+          throw new Error("a task plan cannot be created during a current-task checkpoint");
+        }
+        if (phase === "react" && params.action !== "create") {
+          throw new Error("ordinary ReAct may create a plan but cannot advance a current task");
+        }
         if (params.action === "create" && (!params.title || !params.tasks)) {
           throw new Error("updateTaskPlan action=create requires title and tasks");
         }
@@ -266,6 +277,13 @@ export class PiLeaderSession implements LeaderSession {
         });
         if (result.ok) {
           active.activeTaskPlan = result.plan;
+          if (wrapper) {
+            wrapper.taskPlanTransition = {
+              action: params.action,
+              version: result.plan.version,
+              status: result.plan.status,
+            };
+          }
         } else if (result.currentPlan) {
           active.activeTaskPlan = result.currentPlan;
         }
@@ -278,15 +296,21 @@ export class PiLeaderSession implements LeaderSession {
                 ? { currentPlan: toTaskPlanModelView(result.currentPlan) }
                 : {}),
             };
-        return {
-          content: [{ type: "text", text: JSON.stringify(modelResult) }],
+        const toolResult = {
+          content: [
+            { type: "text" as const, text: JSON.stringify(modelResult) },
+          ],
           details: {
             ok: result.ok,
             ...(result.ok
               ? { status: result.plan.status }
               : { errorCode: result.error.code }),
           },
+          // 一次成功的计划推进就是一个确定性的执行边界，不能让 Pi 在同一 ReAct
+          // 中继续调用下一步骤的工具。外层 Coordinator 会重载 BE 快照后再启动 Pi。
+          ...(result.ok ? { terminate: true } : {}),
         };
+        return toolResult;
       },
     });
     const inspectAttachment = defineTool({
@@ -421,6 +445,7 @@ export class PiLeaderSession implements LeaderSession {
                   ? { activeTaskPlan: active.activeTaskPlan }
                   : {}),
                 taskPlanAvailable: Boolean(active.updateTaskPlan),
+                leaderExecutionPhase: active.executionPhase ?? "react",
               });
               return { systemPrompt: context.systemPrompt };
             });
@@ -490,6 +515,7 @@ export class PiLeaderSession implements LeaderSession {
     }
     this.activeInput = input;
     this.suspendedDelegation = undefined;
+    this.taskPlanTransition = undefined;
     let currentAssistant = "";
     let lastAssistant = "";
     let modelErrorMessage = "";
@@ -682,6 +708,14 @@ export class PiLeaderSession implements LeaderSession {
         } else {
           this.logger?.info(fields, "Leader 工具结束");
         }
+        if (
+          event.toolName === UPDATE_TASK_PLAN_TOOL_NAME &&
+          this.taskPlanTransition
+        ) {
+          // 工具只负责提交权威状态；由 Pi Adapter 在成功结果事件上截断当前
+          // ReAct 片段，把“是否进入下一步骤”的控制权交还给外层 Coordinator。
+          this.session.agent.abort();
+        }
       } else if (event.type === "auto_retry_start") {
         this.logger?.warn(
           {
@@ -761,6 +795,7 @@ export class PiLeaderSession implements LeaderSession {
           downloadAttachmentAvailable: Boolean(input.downloadAttachment),
           expertTeam: Boolean(input.orchestrator),
           taskPlanAvailable: Boolean(input.updateTaskPlan),
+          executionPhase: input.executionPhase ?? "react",
         }),
       );
       // 群聊只把未见过的消息作为 Pi custom message 追加；cursor 和 compaction
@@ -776,7 +811,7 @@ export class PiLeaderSession implements LeaderSession {
       try {
         await this.session.prompt(userMessage, { source: "rpc" });
       } catch (error) {
-        if (!this.suspendedDelegation) {
+        if (!this.suspendedDelegation && !this.taskPlanTransition) {
           throw error;
         }
       }
@@ -785,15 +820,19 @@ export class PiLeaderSession implements LeaderSession {
       if (suspended) {
         throw new LeaderRunSuspendedError(suspended.delegationId);
       }
+      const taskPlanTransition = this.taskPlanTransition;
       const text = lastAssistant || currentAssistant;
-      if (!text.trim()) {
+      if (!text.trim() && !taskPlanTransition) {
         throw new Error(
           modelErrorMessage
             ? `Leader model call failed: ${modelErrorMessage}`
             : "Leader returned an empty response",
         );
       }
-      return { text };
+      return {
+        text,
+        ...(taskPlanTransition ? { taskPlanTransition } : {}),
+      };
     } finally {
       this.logger?.info(
         {
@@ -807,6 +846,7 @@ export class PiLeaderSession implements LeaderSession {
       input.signal.removeEventListener("abort", onAbort);
       unsubscribe();
       this.activeInput = undefined;
+      this.taskPlanTransition = undefined;
     }
   }
 

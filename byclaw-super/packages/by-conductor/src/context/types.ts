@@ -3,6 +3,7 @@ import type { ExpertTeamRuntimeSnapshotV1 } from "../domain/orchestrator.js";
 import type { SessionContextV1 } from "../domain/session-context.js";
 import type { GroupChatContextV1 } from "../domain/group-chat-context.js";
 import type { TaskPlanSnapshot } from "../domain/task-plan.js";
+import type { LeaderExecutionPhase } from "../ports/leader.js";
 
 /** 一次上下文编译所需的原始快照；读取外部数据应在进入编译器之前完成。 */
 export interface ContextBuildInput {
@@ -27,6 +28,8 @@ export interface ContextBuildInput {
   /** 当前执行的 BE 权威计划快照；仅在任务计划 Port 可用时注入。 */
   activeTaskPlan?: TaskPlanSnapshot;
   taskPlanAvailable?: boolean;
+  /** 外层 Plan-and-Execute 当前阶段，用于收窄模型上下文和规则。 */
+  leaderExecutionPhase?: LeaderExecutionPhase;
 }
 
 /** 动态追加到稳定 system prompt 后面的一个具名上下文区段。 */

@@ -11,6 +11,7 @@ import type {
   TaskPlanCommand,
   TaskPlanCommandResult,
   TaskPlanSnapshot,
+  TaskPlanStatus,
 } from "../domain/task-plan.js";
 import type {
   AgentProfile,
@@ -22,9 +23,18 @@ import type {
   UserInteractionResponse,
 } from "../domain/types.js";
 
+/** 外层 Plan-and-Execute 控制器交给 Pi 单次 ReAct 的执行阶段。 */
+export type LeaderExecutionPhase =
+  | "react"
+  | "execute_step"
+  | "checkpoint"
+  | "finalize";
+
 /** Leader 执行单次 Run 所需的授权快照和边界回调。 */
 export interface LeaderRunInput {
   message: string;
+  /** 决定本次 Pi ReAct 可见的计划上下文和工具集合；缺省保持兼容的普通 ReAct。 */
+  executionPhase?: LeaderExecutionPhase;
   /** by-framework 入站会话 ID；存在时用于声明用户可见的规范会话空间。 */
   externalSessionId?: string;
   /** 本次 Run 的附件；Leader 可据此生成摘要，工具按 ID 引用，不直接抓取内容。 */
@@ -101,6 +111,12 @@ export interface LeaderRunInput {
 /** Leader 单次 Run 的最终可见结果。 */
 export interface LeaderRunResult {
   text: string;
+  /** updateTaskPlan 已被权威后端接受；外层据此结束当前 Pi 片段并重载计划。 */
+  taskPlanTransition?: {
+    action: TaskPlanCommand["action"];
+    version: number;
+    status: TaskPlanStatus;
+  };
 }
 
 /** 每个业务 Session 独享并复用的 Pi Leader 会话协议。 */

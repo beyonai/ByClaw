@@ -1,4 +1,5 @@
 import type { AgentProfile } from "../domain/types.js";
+import type { LeaderExecutionPhase } from "../ports/leader.js";
 
 export const DELEGATE_AGENT_TOOL_NAME = "delegateAgent";
 export const ASK_USER_QUESTION_TOOL_NAME = "askUserQuestion";
@@ -52,14 +53,24 @@ export function resolveActiveLeaderToolNames(input: {
   /** 专家团团长只能委派，不能直接读取或操作附件。 */
   expertTeam: boolean;
   taskPlanAvailable?: boolean;
+  executionPhase?: LeaderExecutionPhase;
 }): string[] {
+  const phase = input.executionPhase ?? "react";
+  if (phase === "checkpoint") {
+    return input.taskPlanAvailable ? [UPDATE_TASK_PLAN_TOOL_NAME] : [];
+  }
+  if (phase === "finalize") {
+    return [];
+  }
   const allowDirectAttachmentTools = !input.expertTeam;
   return [
     ...(input.authorizedAgents.length > 0
       ? [DELEGATE_AGENT_TOOL_NAME]
       : []),
     ...(ASK_USER_QUESTION_ENABLED ? [ASK_USER_QUESTION_TOOL_NAME] : []),
-    ...(input.taskPlanAvailable ? [UPDATE_TASK_PLAN_TOOL_NAME] : []),
+    ...(phase === "react" && input.taskPlanAvailable
+      ? [UPDATE_TASK_PLAN_TOOL_NAME]
+      : []),
     ...(allowDirectAttachmentTools ? LEADER_FILE_TOOL_NAMES : []),
     ...(allowDirectAttachmentTools &&
     input.hasAttachments &&
