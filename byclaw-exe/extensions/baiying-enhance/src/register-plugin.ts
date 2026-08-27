@@ -195,16 +195,22 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
 
   const codeToWikiToolFactory = createCodeToWikiToolFactory({
     registry,
-    loadGitHubToken: async () => {
+    loadGitCredentials: async () => {
       try {
-        return (await loadUserPrivateParams()).GH_TOKEN;
+        const params = await loadUserPrivateParams();
+        return {
+          gitHubToken: params.GH_TOKEN,
+          privateHost: params.GIT_HOST,
+          privateUsername: params.GIT_USERNAME,
+          privateToken: params.GIT_TOKEN,
+        };
       } catch (err) {
         api.logger.warn(
-          `baiying-enhance: code_to_wiki GitHub credential lookup skipped: ${
+          `baiying-enhance: code_to_wiki Git credential lookup skipped: ${
             err instanceof Error ? err.message : String(err)
           }`,
         );
-        return undefined;
+        return {};
       }
     },
     resolveWorkspaceDir: (agentId) => resolveAgentWorkspaceForTool(api, agentId),

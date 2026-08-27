@@ -72,9 +72,16 @@ type RepoWikiModelRuntime = {
   modelRef: string;
 };
 
+export type GitCloneCredentials = {
+  gitHubToken?: string;
+  privateHost?: string;
+  privateUsername?: string;
+  privateToken?: string;
+};
+
 type CodeToWikiToolDeps = {
   registry: AgentRegistryState;
-  loadGitHubToken: () => Promise<string | undefined>;
+  loadGitCredentials: () => Promise<GitCloneCredentials>;
   resolveWorkspaceDir: (agentId: string) => string;
   settings?: Partial<CodeToWikiSettings>;
   logger?: LoggerLike;
@@ -278,26 +285,26 @@ export async function runCodeToWikiProcess(
   });
 }
 
-export type ParsedGitHubRepository = {
+export type ParsedGitRepository = {
   canonicalUrl: string;
+  host: string;
   name: string;
-  owner: string;
+  namespace: string;
 };
 
-export function parseGitHubRepositoryUrl(raw: string): ParsedGitHubRepository {
+export function parseGitRepositoryUrl(raw: string): ParsedGitRepository {
   let url: URL;
   try {
     url = new URL(raw.trim());
   } catch {
     throw new CodeToWikiError(
       "INVALID_REPOSITORY_URL",
-      "repository_url must be a valid HTTPS GitHub repository URL.",
+      "repository_url must be a valid HTTPS Git repository URL.",
     );
   }
   if (
     url.protocol !== "https:" ||
-    url.hostname.toLowerCase() !== "github.com" ||
-    url.port ||
+    !url.hostname ||
     url.username ||
     url.password ||
     url.search ||
@@ -305,31 +312,43 @@ export function parseGitHubRepositoryUrl(raw: string): ParsedGitHubRepository {
   ) {
     throw new CodeToWikiError(
       "INVALID_REPOSITORY_URL",
-      "Only credential-free https://github.com/<owner>/<repository> URLs are supported.",
+      "Only credential-free HTTPS Git repository URLs without query strings or fragments are supported.",
     );
   }
   const segments = url.pathname
     .split("/")
     .map((segment) => segment.trim())
     .filter(Boolean);
-  if (segments.length !== 2) {
+  if (segments.length === 0) {
     throw new CodeToWikiError(
       "INVALID_REPOSITORY_URL",
-      "repository_url must identify exactly one GitHub owner and repository.",
+      "repository_url must include a repository path.",
     );
   }
-  const owner = segments[0] ?? "";
-  const name = (segments[1] ?? "").replace(/\.git$/i, "");
-  const safeSegment = /^[a-z0-9](?:[a-z0-9_.-]{0,99})$/i;
-  if (!safeSegment.test(owner) || !safeSegment.test(name) || owner === "." || name === ".") {
+  let decodedSegments: string[];
+  try {
+    decodedSegments = segments.map((segment) => decodeURIComponent(segment));
+  } catch {
     throw new CodeToWikiError(
       "INVALID_REPOSITORY_URL",
-      "repository_url contains an invalid GitHub owner or repository name.",
+      "repository_url contains an invalid encoded path segment.",
     );
+  }
+  const name = (decodedSegments.at(-1) ?? "").replace(/\.git$/i, "").trim();
+  if (!name || name === "." || name === ".." || /[\u0000-\u001f/\\]/u.test(name)) {
+    throw new CodeToWikiError(
+      "INVALID_REPOSITORY_URL",
+      "repository_url contains an invalid repository name.",
+    );
+  }
+  url.pathname = url.pathname.replace(/\/+$/u, "");
+  if (url.hostname.toLowerCase() === "github.com" && !url.pathname.toLowerCase().endsWith(".git")) {
+    url.pathname = `${url.pathname}.git`;
   }
   return {
-    canonicalUrl: `https://github.com/${owner}/${name}.git`,
-    owner,
+    canonicalUrl: url.toString(),
+    host: url.host.toLowerCase(),
+    namespace: decodedSegments.slice(0, -1).join("/"),
     name,
   };
 }
@@ -384,7 +403,10 @@ function baseChildEnvironment(): NodeJS.ProcessEnv {
   return env;
 }
 
-export function buildGitCloneEnvironment(gitHubToken?: string): {
+export function buildGitCloneEnvironment(
+  repository: ParsedGitRepository,
+  credentials: GitCloneCredentials = {},
+): {
   env: NodeJS.ProcessEnv;
   sensitiveValues: string[];
 } {
@@ -392,16 +414,27 @@ export function buildGitCloneEnvironment(gitHubToken?: string): {
     ...baseChildEnvironment(),
     GIT_TERMINAL_PROMPT: "0",
   };
-  const token = gitHubToken?.trim() ?? "";
-  if (!token) {
+  const repositoryUrl = new URL(repository.canonicalUrl);
+  const targetHost = repository.host;
+  const gitHubToken = credentials.gitHubToken?.trim() ?? "";
+  const privateHost = credentials.privateHost?.trim().toLowerCase() ?? "";
+  const privateUsername = credentials.privateUsername?.trim() ?? "";
+  const privateToken = credentials.privateToken?.trim() ?? "";
+  const useGitHubToken = targetHost === "github.com" && Boolean(gitHubToken);
+  const useHostCredential =
+    privateHost === targetHost && Boolean(privateUsername) && Boolean(privateToken);
+  if (!useGitHubToken && !useHostCredential) {
     return { env, sensitiveValues: [] };
   }
-  const basicCredential = Buffer.from(`x-access-token:${token}`, "utf8").toString("base64");
+  const username = useGitHubToken ? "x-access-token" : privateUsername;
+  const token = useGitHubToken ? gitHubToken : privateToken;
+  const basicCredential = Buffer.from(`${username}:${token}`, "utf8").toString("base64");
+  const credentialScope = `${repositoryUrl.protocol}//${repositoryUrl.host}/`;
   return {
     env: {
       ...env,
       GIT_CONFIG_COUNT: "1",
-      GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader",
+      GIT_CONFIG_KEY_0: `http.${credentialScope}.extraheader`,
       GIT_CONFIG_VALUE_0: `Authorization: Basic ${basicCredential}`,
     },
     sensitiveValues: [token, basicCredential],
@@ -459,7 +492,7 @@ export function resolveRepoWikiModelRuntime(
   };
 }
 
-function buildCloneArgs(repository: ParsedGitHubRepository, branch?: string): string[] {
+function buildCloneArgs(repository: ParsedGitRepository, branch?: string): string[] {
   const args = ["clone", "--depth", "1", "--single-branch"];
   if (branch) {
     args.push("--branch", branch);
@@ -553,7 +586,7 @@ const toolParameters = Type.Object(
   {
     repository_url: Type.String({
       description:
-        "Public or private GitHub HTTPS repository URL. Credentials must not be embedded in the URL.",
+        "Public or private Git HTTPS repository URL. Credentials must not be embedded in the URL.",
     }),
     branch: Type.Optional(
       Type.String({
@@ -597,7 +630,9 @@ export function createCodeToWikiToolFactory(deps: CodeToWikiToolDeps): (ctx: any
       name: "code_to_wiki",
       label: "Code To Wiki",
       description:
-        "Generate complete Wiki documentation for a public or private GitHub repository. The tool shallow-clones the repository and runs RepoWiki with this digital employee's Redis-managed model.",
+        "Generate complete Wiki documentation for a public or private HTTPS Git repository. " +
+        "The tool shallow-clones the repository and runs RepoWiki with this digital employee's " +
+        "Redis-managed model.",
       parameters: toolParameters,
       async execute(
         _toolCallId: string,
@@ -612,13 +647,15 @@ export function createCodeToWikiToolFactory(deps: CodeToWikiToolDeps): (ctx: any
         let outputDir = "";
         let completed = false;
         try {
-          const repository = parseGitHubRepositoryUrl(nonEmptyString(input.repository_url));
+          const repository = parseGitRepositoryUrl(nonEmptyString(input.repository_url));
           const branch = validateBranch(input.branch);
           const language = nonEmptyString(input.language) || "zh";
           const outputFormat = nonEmptyString(input.output_format) || "markdown";
           const modelRuntime = resolveRepoWikiModelRuntime(agent, getModelApiKey);
-          const gitHubToken = (await deps.loadGitHubToken())?.trim();
-          const gitEnvironment = buildGitCloneEnvironment(gitHubToken);
+          const gitEnvironment = buildGitCloneEnvironment(
+            repository,
+            await deps.loadGitCredentials(),
+          );
 
           runRoot = await fs.mkdtemp(path.join(tmpdir(), "byclaw-repowiki-"));
           const repositoryDir = path.join(runRoot, "repository");
@@ -630,7 +667,9 @@ export function createCodeToWikiToolFactory(deps: CodeToWikiToolDeps): (ctx: any
           outputDir = path.join(
             deps.resolveWorkspaceDir(agentId),
             OUTPUT_DIRECTORY_NAME,
-            `${outputSegment(repository.owner)}-${outputSegment(repository.name)}-${timestamp}-${jobId}`,
+            `${outputSegment(
+              [repository.namespace, repository.name].filter(Boolean).join("-"),
+            )}-${timestamp}-${jobId}`,
           );
           await fs.mkdir(outputDir, { recursive: true });
 
@@ -649,9 +688,14 @@ export function createCodeToWikiToolFactory(deps: CodeToWikiToolDeps): (ctx: any
             sensitiveValues: gitEnvironment.sensitiveValues,
           });
           if (!cloneResult.ok) {
-            const authHint = gitHubToken
-              ? ""
-              : " Configure the user's GitHub credential when this is a private repository.";
+            const authHint =
+              gitEnvironment.sensitiveValues.length > 0
+                ? ""
+                : repository.host === "github.com"
+                  ? " Configure the user's GH_TOKEN when this is a private GitHub repository."
+                  : ` Configure GIT_HOST, GIT_USERNAME, and GIT_TOKEN for ${
+                      repository.host
+                    } when this is a private repository.`;
             throw new CodeToWikiError(
               cloneResult.aborted ? "TOOL_ABORTED" : "GIT_CLONE_FAILED",
               `${processFailureMessage("Git shallow clone", cloneResult)}${authHint}`,

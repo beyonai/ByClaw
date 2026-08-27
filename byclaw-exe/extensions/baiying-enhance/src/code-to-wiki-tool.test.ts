@@ -7,7 +7,7 @@ import { AgentRegistryState } from "./agent-state.js";
 import {
   buildGitCloneEnvironment,
   createCodeToWikiToolFactory,
-  parseGitHubRepositoryUrl,
+  parseGitRepositoryUrl,
   resolveRepoWikiModelRuntime,
   type ProcessRunRequest,
   type ProcessRunResult,
@@ -58,12 +58,22 @@ function processResult(overrides: Partial<ProcessRunResult> = {}): ProcessRunRes
   };
 }
 
-describe("parseGitHubRepositoryUrl", () => {
+describe("parseGitRepositoryUrl", () => {
   it("normalizes a credential-free GitHub URL", () => {
-    expect(parseGitHubRepositoryUrl("https://github.com/openai/codex")).toEqual({
+    expect(parseGitRepositoryUrl("https://github.com/openai/codex")).toEqual({
       canonicalUrl: "https://github.com/openai/codex.git",
-      owner: "openai",
+      host: "github.com",
+      namespace: "openai",
       name: "codex",
+    });
+  });
+
+  it("accepts non-GitHub hosts, custom ports, and nested namespaces", () => {
+    expect(parseGitRepositoryUrl("https://git.example.com:8443/acme/platform/wiki.git")).toEqual({
+      canonicalUrl: "https://git.example.com:8443/acme/platform/wiki.git",
+      host: "git.example.com:8443",
+      namespace: "acme/platform",
+      name: "wiki",
     });
   });
 
@@ -71,20 +81,58 @@ describe("parseGitHubRepositoryUrl", () => {
     "file:///etc/passwd",
     "ssh://git@github.com/openai/codex.git",
     "https://token@github.com/openai/codex.git",
-    "https://gitlab.com/openai/codex.git",
-    "https://github.com/openai/codex/issues",
-  ])("rejects unsafe or unsupported URL %s", (repositoryUrl) => {
-    expect(() => parseGitHubRepositoryUrl(repositoryUrl)).toThrow();
+    "http://git.example.com/openai/codex.git",
+    "https://git.example.com/",
+    "https://git.example.com/openai/codex.git?ref=main",
+  ])("rejects unsafe URL %s", (repositoryUrl) => {
+    expect(() => parseGitRepositoryUrl(repositoryUrl)).toThrow();
   });
 });
 
 describe("Git and model credentials", () => {
   it("injects GitHub credentials through process env, not the repository URL", () => {
-    const result = buildGitCloneEnvironment("github-secret");
+    const repository = parseGitRepositoryUrl("https://github.com/openai/codex");
+    const result = buildGitCloneEnvironment(repository, { gitHubToken: "github-secret" });
     expect(result.env.GIT_CONFIG_KEY_0).toBe("http.https://github.com/.extraheader");
     expect(result.env.GIT_CONFIG_VALUE_0).toMatch(/^Authorization: Basic /);
     expect(JSON.stringify(result.env)).not.toContain("github-secret");
     expect(result.sensitiveValues).toContain("github-secret");
+  });
+
+  it("does not send a GitHub token to another Git host", () => {
+    const repository = parseGitRepositoryUrl("https://gitlab.com/openai/codex.git");
+    const result = buildGitCloneEnvironment(repository, { gitHubToken: "github-secret" });
+    expect(result.env.GIT_CONFIG_COUNT).toBeUndefined();
+    expect(result.sensitiveValues).toEqual([]);
+
+    const nonDefaultPort = parseGitRepositoryUrl("https://github.com:8443/openai/codex.git");
+    expect(
+      buildGitCloneEnvironment(nonDefaultPort, { gitHubToken: "github-secret" }).env
+        .GIT_CONFIG_COUNT,
+    ).toBeUndefined();
+  });
+
+  it("injects a generic credential only when GIT_HOST exactly matches the target host", () => {
+    const repository = parseGitRepositoryUrl(
+      "https://git.example.com:8443/acme/platform/wiki.git",
+    );
+    const credentials = {
+      privateHost: "git.example.com:8443",
+      privateUsername: "git-user",
+      privateToken: "git-secret",
+    };
+    const result = buildGitCloneEnvironment(repository, credentials);
+    expect(result.env.GIT_CONFIG_KEY_0).toBe(
+      "http.https://git.example.com:8443/.extraheader",
+    );
+    expect(result.env.GIT_CONFIG_VALUE_0).toMatch(/^Authorization: Basic /);
+    expect(JSON.stringify(result.env)).not.toContain("git-secret");
+    expect(result.sensitiveValues).toContain("git-secret");
+
+    const otherRepository = parseGitRepositoryUrl("https://other.example.com/acme/wiki.git");
+    expect(
+      buildGitCloneEnvironment(otherRepository, credentials).env.GIT_CONFIG_COUNT,
+    ).toBeUndefined();
   });
 
   it("maps the Redis-backed OpenAI-compatible model for LiteLLM", () => {
@@ -114,7 +162,7 @@ describe("code_to_wiki tool factory", () => {
     const registry = new AgentRegistryState();
     const factory = createCodeToWikiToolFactory({
       registry,
-      loadGitHubToken: async () => undefined,
+      loadGitCredentials: async () => ({}),
       resolveWorkspaceDir: () => "/tmp/unused",
     });
     expect(factory({ agentId: "main" })).toBeNull();
@@ -142,7 +190,7 @@ describe("code_to_wiki tool factory", () => {
     };
     const factory = createCodeToWikiToolFactory({
       registry,
-      loadGitHubToken: async () => "github-secret",
+      loadGitCredentials: async () => ({ gitHubToken: "github-secret" }),
       resolveWorkspaceDir: () => workspace,
       getModelApiKey: () => "model-secret",
       runProcess,
@@ -194,7 +242,7 @@ describe("code_to_wiki tool factory", () => {
     let invocation = 0;
     const factory = createCodeToWikiToolFactory({
       registry,
-      loadGitHubToken: async () => undefined,
+      loadGitCredentials: async () => ({}),
       resolveWorkspaceDir: () => workspace,
       getModelApiKey: () => "model-secret",
       runProcess: async (request) => {
@@ -208,7 +256,7 @@ describe("code_to_wiki tool factory", () => {
     });
     const tool = factory({ agentId: "baiying-agent-1001" });
     const result = await tool.execute("call-2", {
-      repository_url: "https://github.com/acme/repo",
+      repository_url: "https://gitlab.com/acme/platform/repo.git",
     });
 
     expect(result.details).toEqual({
