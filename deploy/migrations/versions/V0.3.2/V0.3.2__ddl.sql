@@ -79,3 +79,38 @@ COMMENT ON COLUMN byai.byai_connector_auth.refresh_expire_time IS 'refresh token
 COMMENT ON COLUMN byai.byai_connector_auth.credential_state IS '凭证状态：READY、REFRESH_NEEDED、EXPIRING、REAUTH_REQUIRED、UNKNOWN';
 COMMENT ON COLUMN byai.byai_connector_auth.renewal_mode IS '续期模式：REFRESH_TOKEN、CREDENTIAL_REISSUE、PROBE_ONLY、NONE';
 COMMENT ON COLUMN byai.byai_connector_auth.last_verified_at IS 'Provider 最近一次权威凭证验证时间';
+
+-- 钉钉外部用户绑定去重，并保证同一来源、同一 union_id 只有一条绑定记录。
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM byai.po_user_external_system
+        WHERE union_id IS NOT NULL
+          AND btrim(union_id) <> ''
+        GROUP BY source_type, union_id
+        HAVING COUNT(DISTINCT COALESCE(user_id::text, '<null>')) > 1
+    ) THEN
+        RAISE EXCEPTION
+            'Conflicting po_user_external_system bindings must be reviewed before adding the unique index';
+    END IF;
+
+    DELETE FROM byai.po_user_external_system AS binding
+    USING (
+        SELECT ctid,
+               ROW_NUMBER() OVER (
+                   PARTITION BY source_type, union_id, user_id
+                   ORDER BY binding_time DESC NULLS LAST, id DESC NULLS LAST
+               ) AS duplicate_rank
+        FROM byai.po_user_external_system
+        WHERE union_id IS NOT NULL
+          AND btrim(union_id) <> ''
+    ) AS duplicate
+    WHERE binding.ctid = duplicate.ctid
+      AND duplicate.duplicate_rank > 1;
+END;
+$$;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_po_user_external_system_source_union
+    ON byai.po_user_external_system (source_type, union_id)
+    WHERE union_id IS NOT NULL AND btrim(union_id) <> '';
