@@ -58,6 +58,18 @@ public class UserExternalSystemService {
     }
 
     /**
+     * @param sourceType 用户类型
+     * @param sourceAccount 外部系统账号
+     * @return UserExternalSystem
+     */
+    public UserExternalSystem findBySourceAccount(Integer sourceType, String sourceAccount) {
+        LambdaQueryWrapper<UserExternalSystem> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(UserExternalSystem::getSourceType, sourceType);
+        queryWrapper.eq(UserExternalSystem::getSourceAccount, sourceAccount);
+        return userExternalSystemMapper.selectOne(queryWrapper);
+    }
+
+    /**
      * @param sourceType 来源类型
      * @param userId 系统用户 ID
      * @return UserExternalSystem

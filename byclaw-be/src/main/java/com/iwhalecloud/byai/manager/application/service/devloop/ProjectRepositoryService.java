@@ -20,6 +20,7 @@ import org.springframework.stereotype.Service;
 import lombok.extern.slf4j.Slf4j;
 
 import java.nio.file.Path;
+import java.nio.file.Files;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -194,6 +195,15 @@ public class ProjectRepositoryService {
     }
 
     private List<ProjectRepoTreeNodeDTO> listLocalTree(Path repoPath, String path, String branch) {
+        if (path != null && !path.isBlank()) {
+            Path nestedRepository = repoPath.resolve(path).normalize();
+            if (nestedRepository.startsWith(repoPath.normalize()) && isGitRepository(nestedRepository)) {
+                List<ProjectRepoTreeNodeDTO> nodes = listLocalTree(nestedRepository, null, "HEAD");
+                String prefix = path.endsWith("/") ? path : path + "/";
+                nodes.forEach(node -> node.setPath(prefix + node.getPath()));
+                return nodes;
+            }
+        }
         String treeish = path == null ? branch : branch + ":" + path;
         String output = gitCommandExecutor.executeCommandQuietly(repoPath, "git", "ls-tree", "-l", treeish);
         List<ProjectRepoTreeNodeDTO> nodes = new ArrayList<>();
@@ -236,7 +246,9 @@ public class ProjectRepositoryService {
         ProjectRepoTreeNodeDTO node = new ProjectRepoTreeNodeDTO();
         node.setName(name);
         node.setPath(parentPath == null ? nodePath : parentPath + "/" + nodePath);
-        node.setType("tree".equals(metadata[1]) ? "directory" : "file");
+        // Git submodules are emitted as mode 160000 / type commit. They are
+        // directories from the browser's perspective and must remain expandable.
+        node.setType("tree".equals(metadata[1]) || "commit".equals(metadata[1]) ? "directory" : "file");
         node.setSha(metadata[2]);
         if (metadata.length > 3 && !"-".equals(metadata[3])) {
             try {
@@ -248,6 +260,10 @@ public class ProjectRepositoryService {
         }
         node.setHasChildren("directory".equals(node.getType()));
         return node;
+    }
+
+    private boolean isGitRepository(Path path) {
+        return Files.isDirectory(path) && Files.exists(path.resolve(".git"));
     }
 
     private List<ProjectRepoBranchDTO> listLocalBranches(Path repoPath, Long projectId) {

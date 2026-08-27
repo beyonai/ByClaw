@@ -207,7 +207,13 @@ WHERE privilege_grant_id IN (
                    ORDER BY g.privilege_grant_id DESC
                ) AS row_num
         FROM byai.au_privilege_grant g
-        WHERE g.grant_obj_id = (SELECT resource_id FROM byai.ss_resource WHERE resource_code = 'bycli')
+        WHERE g.grant_obj_id = (
+            SELECT resource_id
+            FROM byai.ss_resource
+            WHERE resource_code = 'bycli'
+            ORDER BY resource_id
+            LIMIT 1
+        )
     ) ranked
     WHERE ranked.row_num > 1
 );
@@ -252,11 +258,15 @@ CROSS JOIN (
     SELECT resource_id
     FROM byai.ss_resource
     WHERE resource_code = 'bycli'
+    ORDER BY resource_id
+    LIMIT 1
 ) bycli
 CROSS JOIN (
     SELECT resource_id
     FROM byai.ss_resource
     WHERE resource_code = 'knowledge-collection'
+    ORDER BY resource_id
+    LIMIT 1
 ) knowledge_collection
 WHERE g.grant_obj_id = knowledge_collection.resource_id
   AND NOT EXISTS (
@@ -341,7 +351,13 @@ WHERE privilege_grant_id IN (
                    ORDER BY g.privilege_grant_id DESC
                ) AS row_num
         FROM byai.au_privilege_grant g
-        WHERE g.grant_obj_id = (SELECT resource_id FROM byai.ss_resource WHERE resource_code = 'agent-reach')
+        WHERE g.grant_obj_id = (
+            SELECT resource_id
+            FROM byai.ss_resource
+            WHERE resource_code = 'agent-reach'
+            ORDER BY resource_id
+            LIMIT 1
+        )
     ) ranked
     WHERE ranked.row_num > 1
 );
@@ -362,11 +378,15 @@ CROSS JOIN (
     SELECT resource_id
     FROM byai.ss_resource
     WHERE resource_code = 'agent-reach'
+    ORDER BY resource_id
+    LIMIT 1
 ) agent_reach
 CROSS JOIN (
     SELECT resource_id
     FROM byai.ss_resource
     WHERE resource_code = 'knowledge-collection'
+    ORDER BY resource_id
+    LIMIT 1
 ) knowledge_collection
 WHERE g.grant_obj_id = knowledge_collection.resource_id
   AND NOT EXISTS (
@@ -405,3 +425,23 @@ SET runtime_manifest = jsonb_set(
     update_time = CURRENT_TIMESTAMP
 WHERE connector_code = 'lark'
   AND runtime_manifest IS NOT NULL;
+
+-- 记录 ByClaw Super 内部结构版本。表结构由本版本 DDL 创建，版本数据归入 DML。
+INSERT INTO byai.byai_super_schema_migrations(version, name)
+SELECT migration.version, migration.name
+FROM (
+         SELECT 1 AS version, 'initial_multi_user_persistence' AS name
+         UNION ALL SELECT 2, 'delegation_resume_partial_output'
+         UNION ALL SELECT 3, 'plaintext_run_execution_credentials'
+         UNION ALL SELECT 4, 'delegation_agent_name'
+         UNION ALL SELECT 5, 'run_thinking_level'
+         UNION ALL SELECT 6, 'user_interaction_waiting_status'
+         UNION ALL SELECT 7, 'session_business_context'
+         UNION ALL SELECT 8, 'run_attachments'
+         UNION ALL SELECT 9, 'run_ingress_context'
+     ) migration
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM byai.byai_super_schema_migrations applied
+    WHERE applied.version = migration.version
+);

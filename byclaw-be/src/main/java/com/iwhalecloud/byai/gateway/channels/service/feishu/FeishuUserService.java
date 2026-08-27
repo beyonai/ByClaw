@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -12,7 +13,9 @@ import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.iwhalecloud.byai.common.constants.Constants;
 import com.iwhalecloud.byai.common.constants.users.SourceType;
+import com.iwhalecloud.byai.common.constants.users.UserState;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.gateway.channels.service.feishu.model.FeishuCallbackMessage;
@@ -29,6 +32,7 @@ import okhttp3.Request;
 import okhttp3.Response;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -77,12 +81,22 @@ public class FeishuUserService {
     }
 
     public LoginInfo resolveLoginInfo(FeishuCallbackMessage message) throws IOException {
+        String eventUserId = resolveStableUserId(message, null);
         List<String> eventExternalIds = resolveEventExternalIds(message);
-        Users matchedUser = findMatchedUserFromExternalSystem(eventExternalIds);
+        Users matchedUser = findMatchedUserFromSourceAccount(eventUserId);
         if (matchedUser != null) {
-            logger.info("Matched Feishu user from po_user_external_system by event ids. externalIds={}, userId={}",
-                    eventExternalIds, matchedUser.getUserId());
-            return buildLoginInfo(matchedUser);
+            logger.info("Matched Feishu user from po_user_external_system by event userId. eventUserId={}, userId={}",
+                    eventUserId, matchedUser.getUserId());
+            return resolveBoundLoginInfo(message, matchedUser);
+        }
+
+        String eventUnionId = message == null ? null : message.getSenderUnionId();
+        matchedUser = findMatchedUserFromExternalSystem(eventUnionId);
+        if (matchedUser != null) {
+            backfillSourceAccount(eventUnionId, eventUserId);
+            logger.info("Matched Feishu user from po_user_external_system by event unionId. unionId={}, userId={}",
+                    eventUnionId, matchedUser.getUserId());
+            return resolveBoundLoginInfo(message, matchedUser);
         }
 
         FeishuUserDetail userDetail;
@@ -93,19 +107,40 @@ public class FeishuUserService {
             return null;
         }
 
-        List<String> detailExternalIds = resolveDetailExternalIds(message, userDetail);
-        String externalId = detailExternalIds.isEmpty() ? null : detailExternalIds.get(0);
-        matchedUser = findMatchedUserFromExternalSystem(detailExternalIds);
+        String unionId = resolveUnionId(message, userDetail);
+        String stableUserId = resolveStableUserId(message, userDetail);
+        matchedUser = findMatchedUserFromExternalSystem(unionId);
         if (matchedUser != null) {
-            saveUserExternalSystem(externalId, matchedUser.getUserId(), userDetail);
-            return buildLoginInfo(matchedUser);
+            saveUserExternalSystem(unionId, stableUserId, matchedUser.getUserId(), userDetail);
+            return resolveBoundLoginInfo(message, matchedUser);
         }
 
         LoginInfo userInfo = resolveLoginInfoFromUserDetail(message, userDetail);
         if (userInfo != null) {
-            saveUserExternalSystem(externalId, userInfo.getUserId(), userDetail);
+            boolean bindingMatches = saveUserExternalSystem(
+                    unionId, stableUserId, userInfo.getUserId(), userDetail);
+            if (!bindingMatches) {
+                CurrentUserHolder.clearLoginInfo();
+                sendTextReply(message, "账号绑定发生冲突，请重新发送消息。");
+                return null;
+            }
+            if (extractSelectedUserCode(message.getTextContent()) != null) {
+                CurrentUserHolder.clearLoginInfo();
+                sendTextReply(message, "账号绑定成功，请重新发送您的问题。");
+                return null;
+            }
         }
         return userInfo;
+    }
+
+    private LoginInfo resolveBoundLoginInfo(FeishuCallbackMessage message, Users matchedUser) throws IOException {
+        if (isUserUnavailable(matchedUser)) {
+            logger.warn("Rejected unavailable Feishu bound user. userId={}, state={}, isLocked={}",
+                    matchedUser.getUserId(), matchedUser.getState(), matchedUser.getIsLocked());
+            sendTextReply(message, "系统账号已停用或锁定，请联系管理员。");
+            return null;
+        }
+        return buildLoginInfo(matchedUser);
     }
 
     private void handleUserDetailUnavailable(
@@ -198,17 +233,38 @@ public class FeishuUserService {
         return matchedUser;
     }
 
-    private Users findMatchedUserFromExternalSystem(List<String> externalIds) {
-        if (externalIds == null || externalIds.isEmpty()) {
+    private Users findMatchedUserFromSourceAccount(String sourceAccount) {
+        if (!StringUtils.hasText(sourceAccount)) {
             return null;
         }
-        for (String externalId : externalIds) {
-            Users matchedUser = findMatchedUserFromExternalSystem(externalId);
-            if (matchedUser != null) {
-                return matchedUser;
-            }
+
+        UserExternalSystem externalSystem =
+                userExternalSystemService.findBySourceAccount(SourceType.FEISHU, sourceAccount);
+        if (externalSystem == null || externalSystem.getUserId() == null) {
+            return null;
         }
-        return null;
+
+        Users matchedUser = userService.findById(externalSystem.getUserId());
+        if (matchedUser == null) {
+            logger.warn("Found Feishu external binding but local user is missing. sourceAccount={}, userId={}",
+                    sourceAccount, externalSystem.getUserId());
+        }
+        return matchedUser;
+    }
+
+    private void backfillSourceAccount(String unionId, String sourceAccount) {
+        if (!StringUtils.hasText(unionId) || !StringUtils.hasText(sourceAccount)) {
+            return;
+        }
+
+        UserExternalSystem externalSystem =
+                userExternalSystemService.findByUnionId(SourceType.FEISHU, unionId);
+        if (externalSystem == null || Objects.equals(externalSystem.getSourceAccount(), sourceAccount)) {
+            return;
+        }
+
+        externalSystem.setSourceAccount(sourceAccount);
+        userExternalSystemService.update(externalSystem);
     }
 
     private LoginInfo resolveLoginInfoFromUserDetail(
@@ -235,7 +291,19 @@ public class FeishuUserService {
             return null;
         }
 
-        return buildLoginInfo(users.get(0));
+        Users matchedUser = users.get(0);
+        if (isUserUnavailable(matchedUser)) {
+            logger.warn("Rejected unavailable Feishu user before binding. userId={}, state={}, isLocked={}",
+                    matchedUser.getUserId(), matchedUser.getState(), matchedUser.getIsLocked());
+            sendTextReply(message, "系统账号已停用或锁定，请联系管理员。");
+            return null;
+        }
+        return buildLoginInfo(matchedUser);
+    }
+
+    private boolean isUserUnavailable(Users user) {
+        return !UserState.ACTIVE.equals(user.getState())
+                || Constants.YES_VALUE_Y.equalsIgnoreCase(user.getIsLocked());
     }
 
     private void sendTextReply(FeishuCallbackMessage message, String content) throws IOException {
@@ -387,19 +455,24 @@ public class FeishuUserService {
         return externalIds;
     }
 
-    private List<String> resolveDetailExternalIds(FeishuCallbackMessage message, FeishuUserDetail userDetail) {
-        Set<String> externalIds = new LinkedHashSet<>();
-        if (userDetail != null) {
-            addExternalId(externalIds, userDetail.getUnionId());
-            addExternalId(externalIds, userDetail.getOpenId());
-            addExternalId(externalIds, userDetail.getUserId());
+    private String resolveStableUserId(FeishuCallbackMessage message, FeishuUserDetail userDetail) {
+        if (message != null && StringUtils.hasText(message.getSenderUserId())) {
+            return message.getSenderUserId();
         }
-        if (message != null) {
-            addExternalId(externalIds, message.getSenderUnionId());
-            addExternalId(externalIds, message.getSenderOpenId());
-            addExternalId(externalIds, message.getSenderUserId());
+        if (userDetail != null && StringUtils.hasText(userDetail.getUserId())) {
+            return userDetail.getUserId();
         }
-        return new ArrayList<>(externalIds);
+        return null;
+    }
+
+    private String resolveUnionId(FeishuCallbackMessage message, FeishuUserDetail userDetail) {
+        if (userDetail != null && StringUtils.hasText(userDetail.getUnionId())) {
+            return userDetail.getUnionId();
+        }
+        if (message != null && StringUtils.hasText(message.getSenderUnionId())) {
+            return message.getSenderUnionId();
+        }
+        return null;
     }
 
     private void addExternalId(List<String> externalIds, String externalId) {
@@ -414,34 +487,53 @@ public class FeishuUserService {
         }
     }
 
-    private void saveUserExternalSystem(String externalId, Long userId, FeishuUserDetail userDetail) {
-        if (!StringUtils.hasText(externalId) || userId == null || userDetail == null) {
-            return;
+    private boolean saveUserExternalSystem(
+            String unionId, String sourceAccount, Long userId, FeishuUserDetail userDetail) {
+        if (!StringUtils.hasText(unionId)
+                || !StringUtils.hasText(sourceAccount)
+                || userId == null
+                || userDetail == null) {
+            return false;
         }
 
-        UserExternalSystem existing = userExternalSystemService.findByUnionId(SourceType.FEISHU, externalId);
+        UserExternalSystem existing = userExternalSystemService.findByUnionId(SourceType.FEISHU, unionId);
         if (existing != null) {
             existing.setUserId(userId);
-            existing.setSourceAccount(userDetail.getEmployeeNo());
+            existing.setSourceAccount(sourceAccount);
             existing.setSourceNickname(userDetail.getName());
             existing.setSourceEmail(userDetail.getEmail());
             if (existing.getBindingTime() == null) {
                 existing.setBindingTime(new Date());
             }
             userExternalSystemService.update(existing);
-            return;
+            return true;
         }
 
         UserExternalSystem userExternalSystem = new UserExternalSystem();
         userExternalSystem.setId(sequenceService.nextVal());
         userExternalSystem.setUserId(userId);
         userExternalSystem.setSourceType(SourceType.FEISHU);
-        userExternalSystem.setSourceAccount(userDetail.getEmployeeNo());
+        userExternalSystem.setSourceAccount(sourceAccount);
         userExternalSystem.setSourceNickname(userDetail.getName());
         userExternalSystem.setSourceEmail(userDetail.getEmail());
         userExternalSystem.setBindingTime(new Date());
-        userExternalSystem.setUnionId(externalId);
-        userExternalSystemService.save(userExternalSystem);
+        userExternalSystem.setUnionId(unionId);
+        try {
+            userExternalSystemService.save(userExternalSystem);
+            return true;
+        } catch (DuplicateKeyException e) {
+            UserExternalSystem concurrentBinding =
+                    userExternalSystemService.findByUnionId(SourceType.FEISHU, unionId);
+            if (concurrentBinding == null) {
+                throw e;
+            }
+            if (!Objects.equals(concurrentBinding.getUserId(), userId)) {
+                logger.warn("Concurrent Feishu binding kept existing user. unionId={}, existingUserId={}, requestedUserId={}",
+                        unionId, concurrentBinding.getUserId(), userId);
+                return false;
+            }
+            return true;
+        }
     }
 
     private String extractSelectedUserCode(String textContent) {
