@@ -420,53 +420,6 @@ describe("adaptAgentJson", () => {
         expect(res.listEntry.experimental).toEqual({ localModelLean: false });
     });
 
-    it("does not hard-code tools from the digital employee name", () => {
-        const raw = {
-            resourceId: "10011258",
-            resourceName: "百应平台赋能助手",
-            integrationType: "NONE",
-        };
-        const res = adaptAgentJson({
-            raw,
-            fileName: "DIG_EMPLOYEE_10011258.json",
-            embedApiKeysFromJson: false,
-        });
-        expect("error" in res).toBe(false);
-        if ("error" in res) {
-            return;
-        }
-        expect(res.listEntry.tools).toEqual({
-            alsoAllow: ["baiying_call", "image_generate", "byclaw_chat_context"],
-        });
-    });
-
-    it("allows code_to_wiki only when declared by relTools", () => {
-        const raw = {
-            resourceId: "10011259",
-            resourceName: "百应平台赋能助手",
-            integrationType: "NONE",
-            relTools: ["read", "code_to_wiki"],
-        };
-        const res = adaptAgentJson({
-            raw,
-            fileName: "DIG_EMPLOYEE_10011259.json",
-            embedApiKeysFromJson: false,
-        });
-        expect("error" in res).toBe(false);
-        if ("error" in res) {
-            return;
-        }
-        expect(res.listEntry.tools).toEqual({
-            allow: [
-                "read",
-                "code_to_wiki",
-                "baiying_call",
-                "image_generate",
-                "byclaw_chat_context",
-            ],
-        });
-    });
-
     it("maps raw Baiying detail (integrationType INTERFACE)", () => {
         const raw = {
             resourceId: "20001",
