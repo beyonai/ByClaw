@@ -507,22 +507,28 @@ class ConnectorAuthorizationServiceTest {
         ConnectorAuthorizationDto result = service.start(request(), USER_ID);
 
         assertThat(result.getStatus()).isEqualTo("failed");
-        assertThat(result.getErrorCode()).isEqualTo("SESSION_ALREADY_ACTIVE");
+        assertThat(result.getErrorCode()).isEqualTo("AUTHORIZATION_START_IN_PROGRESS");
         verify(provider, never()).start(any());
     }
 
     @Test
-    void existingActiveSessionIsRejectedBeforeProviderSideEffectsAfterStartLockAcquired() {
+    void existingActiveSessionIsResumedBeforeProviderSideEffectsAfterStartLockAcquired() {
         ConnectorInfo connector = connector("lark", "lark-cli", "DEVICE_FLOW", null);
+        RedisAuthorizationSession pending = session(AuthorizationStatus.PENDING, 3L);
         when(connectorInfoService.findById(CONNECTOR_ID)).thenReturn(connector);
         when(providerRegistry.get("lark-cli")).thenReturn(provider);
-        when(sessionRepository.hasActiveSession(USER_ID, CONNECTOR_ID)).thenReturn(true);
+        when(sessionRepository.findActiveSession(USER_ID, CONNECTOR_ID)).thenReturn(Optional.of(pending));
 
         ConnectorAuthorizationDto result = service.start(request(), USER_ID);
 
-        assertThat(result.getStatus()).isEqualTo("failed");
-        assertThat(result.getErrorCode()).isEqualTo("SESSION_ALREADY_ACTIVE");
+        assertThat(result.getStatus()).isEqualTo("pending");
+        assertThat(result.getAuthorizationId()).isEqualTo(AUTHORIZATION_ID);
+        assertThat(result.getAuthorizationUrl()).isEqualTo(AUTHORIZATION_URL);
+        assertThat(result.getQrCodeUrl()).startsWith("data:image/png;base64,");
+        assertThat(result.getExpiresAt()).isEqualTo(pending.expiresAt());
+        assertThat(result.getErrorCode()).isNull();
         verify(provider, never()).start(any());
+        verify(sessionRepository, never()).create(any());
         verify(sessionRepository).releaseStartLock(USER_ID, CONNECTOR_ID, "start-lock-token");
     }
 
