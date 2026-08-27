@@ -87,7 +87,7 @@ public class DingtalkUserService {
         String textContent = DDMessage.getTextContent();
         String sessionWebhook = DDMessage.getSessionWebhook();
 
-        Users matchedUser = findMatchedUserFromExternalSystem(senderStaffId);
+        Users matchedUser = findMatchedUserFromSourceAccount(senderStaffId);
         if (matchedUser != null) {
             logger.info("Matched DingTalk user from po_user_external_system by senderStaffId. senderStaffId={}, userId={}",
                     senderStaffId, matchedUser.getUserId());
@@ -150,6 +150,25 @@ public class DingtalkUserService {
         if (matchedUser == null) {
             logger.warn("Found po_user_external_system record but local user is missing. unionId={}, userId={}",
                     unionId, externalSystem.getUserId());
+        }
+        return matchedUser;
+    }
+
+    private Users findMatchedUserFromSourceAccount(String senderStaffId) {
+        if (senderStaffId == null || senderStaffId.isBlank()) {
+            return null;
+        }
+
+        UserExternalSystem externalSystem =
+                userExternalSystemService.findBySourceAccount(SourceType.DING_TALK, senderStaffId);
+        if (externalSystem == null || externalSystem.getUserId() == null) {
+            return null;
+        }
+
+        Users matchedUser = userService.findById(externalSystem.getUserId());
+        if (matchedUser == null) {
+            logger.warn("Found DingTalk external binding but local user is missing. senderStaffId={}, userId={}",
+                    senderStaffId, externalSystem.getUserId());
         }
         return matchedUser;
     }
@@ -277,7 +296,7 @@ public class DingtalkUserService {
         UserExternalSystem existing = userExternalSystemService.findByUnionId(SourceType.DING_TALK, unionId);
         if (existing != null) {
             existing.setUserId(userId);
-            existing.setSourceAccount(userDetail.getJobNumber());
+            existing.setSourceAccount(userDetail.getUserid());
             existing.setSourceNickname(userDetail.getName());
             existing.setSourceEmail(userDetail.getEmail());
             if (existing.getBindingTime() == null) {
@@ -291,7 +310,7 @@ public class DingtalkUserService {
         userExternalSystem.setId(sequenceService.nextVal());
         userExternalSystem.setUserId(userId);
         userExternalSystem.setSourceType(SourceType.DING_TALK);
-        userExternalSystem.setSourceAccount(userDetail.getJobNumber());
+        userExternalSystem.setSourceAccount(userDetail.getUserid());
         userExternalSystem.setSourceNickname(userDetail.getName());
         userExternalSystem.setSourceEmail(userDetail.getEmail());
         userExternalSystem.setBindingTime(new Date());

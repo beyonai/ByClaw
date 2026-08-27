@@ -102,6 +102,25 @@ class DingtalkUserServiceTest {
     }
 
     @Test
+    void resolveLoginInfoUsesSenderStaffIdBindingWithoutFetchingUserDetail() throws Exception {
+        DingtalkCallbackMessage message = message("查询本月数据");
+        UserExternalSystem binding = new UserExternalSystem();
+        binding.setUserId(1001L);
+        Users boundUser = user(1001L, "zhangsan", "张三");
+
+        when(externalSystemService.findBySourceAccount(SourceType.DING_TALK, "sender-001"))
+                .thenReturn(binding);
+        when(userService.findById(1001L)).thenReturn(boundUser);
+        when(enterpriseInfoService.getEnterpriseId()).thenReturn(88L);
+
+        LoginInfo loginInfo = service.resolveLoginInfo(message);
+
+        assertThat(loginInfo).isNotNull();
+        assertThat(loginInfo.getUserId()).isEqualTo(1001L);
+        verify(tokenService, never()).getAccessToken(any(), any());
+    }
+
+    @Test
     void resolveLoginInfoDoesNotReportSuccessWhenConcurrentBindingSelectsAnotherUser() throws Exception {
         DingtalkCallbackMessage message = message("选择 userCode=zhangsan");
         OapiV2UserGetResponse.UserGetResponse detail = userDetail();
@@ -110,7 +129,7 @@ class DingtalkUserServiceTest {
         UserExternalSystem concurrentBinding = new UserExternalSystem();
         concurrentBinding.setUserId(1002L);
 
-        when(externalSystemService.findByUnionId(any(), eq("sender-001"))).thenReturn(null);
+        when(externalSystemService.findBySourceAccount(any(), eq("sender-001"))).thenReturn(null);
         when(externalSystemService.findByUnionId(any(), eq("union-001")))
                 .thenReturn(null, null, concurrentBinding);
         when(tokenService.getAccessToken("sender-001", "robot-001")).thenReturn("token");
@@ -144,7 +163,7 @@ class DingtalkUserServiceTest {
         boundUser.setState(state);
         boundUser.setIsLocked(isLocked);
 
-        when(externalSystemService.findByUnionId(SourceType.DING_TALK, "sender-001"))
+        when(externalSystemService.findBySourceAccount(SourceType.DING_TALK, "sender-001"))
                 .thenReturn(binding);
         when(userService.findById(1001L)).thenReturn(boundUser);
 
