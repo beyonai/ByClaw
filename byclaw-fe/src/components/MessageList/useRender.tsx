@@ -415,8 +415,8 @@ export default function useRender({
                 [styles.pureText]: fromOtherUser && usage !== '4',
               })}
             >
-              <MsgRenderer msg={msg} updateMessage={updateMessage} hideThinking={param?.hideThinking} />
               {fromBeyond && msg.taskPlan && <TaskExecutionPlan taskPlan={msg.taskPlan} />}
+              <MsgRenderer msg={msg} updateMessage={updateMessage} hideThinking={param?.hideThinking} />
               {messageState === IMessageState.Query && <DualBallLoading style={{ width: 32, height: 32 }} />}
             </div>
             {fromBeyond && messageState === IMessageState.Error && (

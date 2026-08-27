@@ -5,7 +5,7 @@ import {
   DownOutlined,
   LoadingOutlined,
   MinusCircleFilled,
-  RightOutlined,
+  UpOutlined,
 } from '@ant-design/icons';
 import { Tooltip } from 'antd';
 import dayjs from 'dayjs';
@@ -66,7 +66,7 @@ const TaskExecutionPlan: React.FC<Props> = ({ taskPlan }) => {
       >
         <span className={styles.headerTitle}>
           <span>{intl.formatMessage({ id: 'messageList.taskPlan.title' })}</span>
-          {collapsed ? <RightOutlined /> : <DownOutlined />}
+          {collapsed ? <DownOutlined /> : <UpOutlined />}
         </span>
         <span className={styles.progress}>
           {intl.formatMessage(
