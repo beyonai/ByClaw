@@ -21,6 +21,16 @@ class SsResExtDigEmployeeSchemaTest {
         assertThat(sql).contains("alter table byai.ss_res_ext_dig_employee alter column machine_channel type text");
     }
 
+    @Test
+    void v032CompensatesForHistoricalMachineChannelLengthLimit() throws IOException {
+        Path repoRoot = findRepoRoot();
+        Path ddl = repoRoot.resolve("deploy/migrations/versions/V0.3.2/V0.3.2__ddl.sql");
+
+        String sql = Files.readString(ddl).toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
+
+        assertThat(sql).contains("alter table byai.ss_res_ext_dig_employee alter column machine_channel type text");
+    }
+
     private Path findRepoRoot() {
         Path path = Path.of("").toAbsolutePath();
         while (path != null && !Files.exists(path.resolve("deploy/migrations/versions"))) {
