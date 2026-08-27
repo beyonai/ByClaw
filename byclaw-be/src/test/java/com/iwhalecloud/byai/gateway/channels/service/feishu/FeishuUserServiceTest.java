@@ -22,6 +22,7 @@ import okhttp3.Response;
 import okhttp3.ResponseBody;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -105,8 +106,52 @@ class FeishuUserServiceTest {
 
         assertThat(loginInfo).isNull();
         assertThat(CurrentUserHolder.getLoginInfo()).isNull();
-        verify(externalSystemService).save(any(UserExternalSystem.class));
+        ArgumentCaptor<UserExternalSystem> bindingCaptor = ArgumentCaptor.forClass(UserExternalSystem.class);
+        verify(externalSystemService).save(bindingCaptor.capture());
+        assertThat(bindingCaptor.getValue().getSourceAccount()).isEqualTo("user-001");
+        assertThat(bindingCaptor.getValue().getUnionId()).isEqualTo("union-001");
         verify(replyDispatcher).replyTextMessage("tenant-token", "message-001", "账号绑定成功，请重新发送您的问题。");
+    }
+
+    @Test
+    void resolveLoginInfoUsesSenderUserIdBindingWithoutFetchingUserDetail() throws Exception {
+        FeishuCallbackMessage message = message("查询本月数据");
+        UserExternalSystem binding = new UserExternalSystem();
+        binding.setUserId(1001L);
+        Users boundUser = user(1001L, "zhangsan", "张三");
+
+        when(externalSystemService.findBySourceAccount(SourceType.FEISHU, "user-001"))
+                .thenReturn(binding);
+        when(userService.findById(1001L)).thenReturn(boundUser);
+
+        LoginInfo loginInfo = service.resolveLoginInfo(message);
+
+        assertThat(loginInfo).isNotNull();
+        assertThat(loginInfo.getUserId()).isEqualTo(1001L);
+        verify(okHttpClient, never()).newCall(any());
+    }
+
+    @Test
+    void resolveLoginInfoBackfillsSenderUserIdWhenUnionIdBindingMatches() throws Exception {
+        FeishuCallbackMessage message = message("查询本月数据");
+        UserExternalSystem binding = new UserExternalSystem();
+        binding.setUserId(1001L);
+        binding.setUnionId("union-001");
+        Users boundUser = user(1001L, "zhangsan", "张三");
+
+        when(externalSystemService.findByUnionId(SourceType.FEISHU, "union-001"))
+                .thenReturn(binding, binding);
+        when(userService.findById(1001L)).thenReturn(boundUser);
+
+        LoginInfo loginInfo = service.resolveLoginInfo(message);
+
+        assertThat(loginInfo).isNotNull();
+        assertThat(loginInfo.getUserId()).isEqualTo(1001L);
+        ArgumentCaptor<UserExternalSystem> bindingCaptor = ArgumentCaptor.forClass(UserExternalSystem.class);
+        verify(externalSystemService).update(bindingCaptor.capture());
+        assertThat(bindingCaptor.getValue().getSourceAccount()).isEqualTo("user-001");
+        assertThat(bindingCaptor.getValue().getUnionId()).isEqualTo("union-001");
+        verify(okHttpClient, never()).newCall(any());
     }
 
     @Test
@@ -116,7 +161,7 @@ class FeishuUserServiceTest {
         binding.setUserId(1001L);
         Users disabledUser = user(1001L, "zhangsan", "张三");
         disabledUser.setState("X");
-        when(externalSystemService.findByUnionId(SourceType.FEISHU, "open-001")).thenReturn(binding);
+        when(externalSystemService.findBySourceAccount(SourceType.FEISHU, "user-001")).thenReturn(binding);
         when(userService.findById(1001L)).thenReturn(disabledUser);
 
         LoginInfo loginInfo = service.resolveLoginInfo(message);
@@ -153,7 +198,7 @@ class FeishuUserServiceTest {
         concurrentBinding.setUserId(1002L);
         when(userService.findByUserName("张三")).thenReturn(List.of(selectedUser, otherUser));
         when(externalSystemService.findByUnionId(SourceType.FEISHU, "union-001"))
-                .thenReturn(null, null, concurrentBinding);
+                .thenReturn(null, null, null, concurrentBinding);
         when(sequenceService.nextVal()).thenReturn(9001L);
         doThrow(new DuplicateKeyException("duplicate binding"))
                 .when(externalSystemService).save(any(UserExternalSystem.class));
@@ -172,6 +217,8 @@ class FeishuUserServiceTest {
         message.setAppId("app-001");
         message.setMessageId("message-001");
         message.setSenderOpenId("open-001");
+        message.setSenderUserId("user-001");
+        message.setSenderUnionId("union-001");
         message.setTextContent(textContent);
         when(tokenService.getTenantAccessToken("app-001")).thenReturn("tenant-token");
         return message;
