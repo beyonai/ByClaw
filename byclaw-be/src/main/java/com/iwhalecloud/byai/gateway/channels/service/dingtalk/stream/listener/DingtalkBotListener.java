@@ -163,6 +163,7 @@ public class DingtalkBotListener implements OpenDingTalkCallbackListener<Map<Str
         try {
             LoginInfo userInfo = dingtalkUserService.resolveLoginInfo(DDMessage);
             if (userInfo == null) {
+                dingtalkReplyDispatcher.sendTextMessage(sessionWebhook, "找不到对应用户，请联系管理员");
                 return;
             }
 

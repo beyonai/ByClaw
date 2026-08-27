@@ -3,6 +3,7 @@ package com.iwhalecloud.byai.state.application.service.taskplan;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -29,6 +30,7 @@ import com.iwhalecloud.byai.manager.entity.taskplan.ByaiAgentTaskPlan;
 import com.iwhalecloud.byai.manager.mapper.taskplan.ByaiAgentTaskPlanMapper;
 import com.iwhalecloud.byai.state.domain.chat.dto.StopChatDto;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
+import com.iwhalecloud.byai.state.domain.taskplan.dto.TaskPlanLookupRequest;
 import com.iwhalecloud.byai.state.domain.taskplan.dto.TaskPlanSnapshot;
 import com.iwhalecloud.byai.state.domain.taskplan.dto.TaskPlanUpdateRequest;
 import com.iwhalecloud.byai.state.domain.taskplan.exception.TaskPlanCommandException;
@@ -106,7 +108,7 @@ class TaskPlanApplicationServiceTest {
     }
 
     @Test
-    void create_rejectsAnotherActivePlanForTheSameSession() {
+    void create_rejectsAnotherActivePlanForTheSameExecution() {
         when(planMapper.selectOne(any())).thenReturn(plan("ACTIVE", 1, tasks("IN_PROGRESS", "PENDING")));
         TaskPlanUpdateRequest request = createRequest();
         request.setIdempotencyKey("another-create");
@@ -116,6 +118,69 @@ class TaskPlanApplicationServiceTest {
                 assertThat(error.getCode()).isEqualTo("PLAN_ALREADY_EXISTS");
                 assertThat(error.getCurrentPlan().getPlanId()).isEqualTo("99");
             });
+    }
+
+    @Test
+    void create_rejectsAnotherRuntimePlanWithoutLeakingItsSnapshot() {
+        ByaiAgentTaskPlan openClawPlan = plan("ACTIVE", 1, tasks("IN_PROGRESS", "PENDING"));
+        openClawPlan.setSourceRuntime("OPENCLAW");
+        openClawPlan.setSourceRunId("openclaw-run-1");
+        when(planMapper.selectOne(any())).thenReturn(openClawPlan);
+
+        assertThatThrownBy(() -> service.update(createRequest()))
+            .isInstanceOfSatisfying(TaskPlanCommandException.class, error -> {
+                assertThat(error.getCode()).isEqualTo("PLAN_ALREADY_EXISTS");
+                assertThat(error.getCurrentPlan()).isNull();
+            });
+    }
+
+    @Test
+    void recoverCreateConflictDoesNotLeakAnotherRuntimePlan() {
+        ByaiAgentTaskPlan openClawPlan = plan("ACTIVE", 1, tasks("IN_PROGRESS", "PENDING"));
+        openClawPlan.setSourceRuntime("OPENCLAW");
+        openClawPlan.setSourceRunId("openclaw-run-1");
+        when(planMapper.selectOne(any())).thenReturn(openClawPlan);
+
+        assertThatThrownBy(() -> service.recoverCreateConflict(createRequest()))
+            .isInstanceOfSatisfying(TaskPlanCommandException.class, error -> {
+                assertThat(error.getCode()).isEqualTo("PLAN_ALREADY_EXISTS");
+                assertThat(error.getCurrentPlan()).isNull();
+            });
+    }
+
+    @Test
+    void findActiveScopesTheQueryToTheRuntimeExecutionOwner() {
+        when(planMapper.selectOne(any())).thenReturn(null);
+        TaskPlanLookupRequest request = new TaskPlanLookupRequest();
+        request.setSessionId("11");
+        request.setMessageId("12");
+        request.setSourceRuntime("OPENCLAW");
+        request.setSourceRunId("openclaw-run-1");
+
+        assertThat(service.findActive(request)).isNull();
+
+        verify(planMapper).selectOne(argThat(wrapper -> {
+            String sql = wrapper.getSqlSegment();
+            return sql.contains("message_id")
+                && sql.contains("source_runtime")
+                && sql.contains("source_run_id");
+        }));
+    }
+
+    @Test
+    void findLatestForMessageKeepsFrontendRecoverySeparateFromRuntimeOwnership() {
+        ByaiAgentTaskPlan completed = plan("COMPLETED", 3, tasks("COMPLETED", "COMPLETED"));
+        completed.setSourceRuntime("OPENCLAW");
+        completed.setSourceRunId("openclaw-run-1");
+        when(planMapper.selectOne(any())).thenReturn(completed);
+        TaskPlanLookupRequest request = new TaskPlanLookupRequest();
+        request.setSessionId("11");
+        request.setMessageId("12");
+
+        TaskPlanSnapshot snapshot = service.findLatestForMessage(request);
+
+        assertThat(snapshot.getSourceRuntime()).isEqualTo("OPENCLAW");
+        assertThat(snapshot.getSourceRunId()).isEqualTo("openclaw-run-1");
     }
 
     @Test
@@ -179,21 +244,28 @@ class TaskPlanApplicationServiceTest {
     }
 
     @Test
-    void cancellationUsesTheOnlyActivePlanInTheSession() {
-        ByaiAgentTaskPlan active = plan("ACTIVE", 2, tasks("COMPLETED", "IN_PROGRESS"));
-        when(planMapper.selectOne(any())).thenReturn(active);
+    void stopChatCancellationCancelsEveryActiveExecutionInTheSession() {
+        ByaiAgentTaskPlan superPlan = plan("ACTIVE", 2, tasks("COMPLETED", "IN_PROGRESS"));
+        ByaiAgentTaskPlan openClawPlan = plan("ACTIVE", 1, tasks("IN_PROGRESS", "PENDING"));
+        openClawPlan.setPlanId(100L);
+        openClawPlan.setSourceRuntime("OPENCLAW");
+        openClawPlan.setSourceRunId("openclaw-run-1");
+        when(planMapper.selectList(any())).thenReturn(List.of(superPlan, openClawPlan));
         when(planMapper.update(any(), any(Wrapper.class))).thenReturn(1);
         StopChatDto stop = new StopChatDto();
         stop.setSessionId(11L);
         stop.setMessageId(999L);
 
-        TaskPlanSnapshot cancelling = service.requestCancellation(stop, "USER_STOPPED", "用户请求停止");
-        TaskPlanSnapshot cancelled = service.confirmCancellation(stop, "USER_STOPPED", "用户已停止执行");
+        List<TaskPlanSnapshot> cancelling = service.requestCancellation(stop, "USER_STOPPED", "用户请求停止");
+        List<TaskPlanSnapshot> cancelled = service.confirmCancellation(stop, "USER_STOPPED", "用户已停止执行");
 
-        assertThat(cancelling.getStatus()).isEqualTo("CANCELLING");
-        assertThat(cancelled.getStatus()).isEqualTo("CANCELLED");
-        assertThat(cancelled.getTasks()).extracting(TaskPlanSnapshot.TaskSnapshot::getStatus)
+        assertThat(cancelling).hasSize(2).allMatch(plan -> "CANCELLING".equals(plan.getStatus()));
+        assertThat(cancelled).hasSize(2).allMatch(plan -> "CANCELLED".equals(plan.getStatus()));
+        assertThat(cancelled.get(0).getTasks()).extracting(TaskPlanSnapshot.TaskSnapshot::getStatus)
             .containsExactly("COMPLETED", "CANCELLED");
+        assertThat(cancelled.get(1).getTasks()).extracting(TaskPlanSnapshot.TaskSnapshot::getStatus)
+            .containsExactly("CANCELLED", "CANCELLED");
+        verify(planMapper, times(4)).update(any(), any(Wrapper.class));
     }
 
     @Test

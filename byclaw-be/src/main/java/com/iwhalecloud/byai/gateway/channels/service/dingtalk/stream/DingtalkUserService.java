@@ -10,7 +10,9 @@ import com.dingtalk.api.DefaultDingTalkClient;
 import com.dingtalk.api.DingTalkClient;
 import com.dingtalk.api.request.OapiV2UserGetRequest;
 import com.dingtalk.api.response.OapiV2UserGetResponse;
+import com.iwhalecloud.byai.common.constants.Constants;
 import com.iwhalecloud.byai.common.constants.users.SourceType;
+import com.iwhalecloud.byai.common.constants.users.UserState;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.model.DingtalkCallbackMessage;
@@ -26,6 +28,7 @@ import com.taobao.api.ApiException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -84,11 +87,11 @@ public class DingtalkUserService {
         String textContent = DDMessage.getTextContent();
         String sessionWebhook = DDMessage.getSessionWebhook();
 
-        Users matchedUser = findMatchedUserFromExternalSystem(senderStaffId);
+        Users matchedUser = findMatchedUserFromSourceAccount(senderStaffId);
         if (matchedUser != null) {
             logger.info("Matched DingTalk user from po_user_external_system by senderStaffId. senderStaffId={}, userId={}",
                     senderStaffId, matchedUser.getUserId());
-            return buildLoginInfo(matchedUser);
+            return resolveBoundLoginInfo(matchedUser, sessionWebhook);
         }
 
         OapiV2UserGetResponse.UserGetResponse userDetail = fetchUserDetail(senderStaffId, robotCode);
@@ -99,12 +102,22 @@ public class DingtalkUserService {
             logger.info("Matched DingTalk user from po_user_external_system by unionId. senderStaffId={}, unionId={}, userId={}",
                     senderStaffId, unionId, matchedUser.getUserId());
             saveUserExternalSystem(unionId, matchedUser.getUserId(), userDetail);
-            return buildLoginInfo(matchedUser);
+            return resolveBoundLoginInfo(matchedUser, sessionWebhook);
         }
 
         LoginInfo userInfo = resolveLoginInfoFromUserDetail(sessionWebhook, textContent, userDetail);
         if (userInfo != null) {
-            saveUserExternalSystem(unionId, userInfo.getUserId(), userDetail);
+            boolean bindingMatches = saveUserExternalSystem(unionId, userInfo.getUserId(), userDetail);
+            if (!bindingMatches) {
+                CurrentUserHolder.clearLoginInfo();
+                dingtalkReplyDispatcher.sendTextMessage(sessionWebhook, "账号绑定发生冲突，请重新发送消息。");
+                return null;
+            }
+            if (extractSelectedUserCode(textContent) != null) {
+                CurrentUserHolder.clearLoginInfo();
+                dingtalkReplyDispatcher.sendTextMessage(sessionWebhook, "账号绑定成功，请重新发送您的问题。");
+                return null;
+            }
         }
         return userInfo;
     }
@@ -141,6 +154,35 @@ public class DingtalkUserService {
         return matchedUser;
     }
 
+    private Users findMatchedUserFromSourceAccount(String senderStaffId) {
+        if (senderStaffId == null || senderStaffId.isBlank()) {
+            return null;
+        }
+
+        UserExternalSystem externalSystem =
+                userExternalSystemService.findBySourceAccount(SourceType.DING_TALK, senderStaffId);
+        if (externalSystem == null || externalSystem.getUserId() == null) {
+            return null;
+        }
+
+        Users matchedUser = userService.findById(externalSystem.getUserId());
+        if (matchedUser == null) {
+            logger.warn("Found DingTalk external binding but local user is missing. senderStaffId={}, userId={}",
+                    senderStaffId, externalSystem.getUserId());
+        }
+        return matchedUser;
+    }
+
+    private LoginInfo resolveBoundLoginInfo(Users matchedUser, String sessionWebhook) throws IOException {
+        if (isUserUnavailable(matchedUser)) {
+            logger.warn("Rejected unavailable DingTalk bound user. userId={}, state={}, isLocked={}",
+                    matchedUser.getUserId(), matchedUser.getState(), matchedUser.getIsLocked());
+            dingtalkReplyDispatcher.sendTextMessage(sessionWebhook, "系统账号已停用或锁定，请联系管理员。");
+            return null;
+        }
+        return buildLoginInfo(matchedUser);
+    }
+
     private LoginInfo resolveLoginInfoFromUserDetail(
             String sessionWebhook, String textContent,
             OapiV2UserGetResponse.UserGetResponse userDetail) throws IOException {
@@ -166,7 +208,18 @@ public class DingtalkUserService {
         }
 
         Users matchedUser = users.get(0);
+        if (isUserUnavailable(matchedUser)) {
+            logger.warn("Rejected unavailable DingTalk user before binding. userId={}, state={}, isLocked={}",
+                    matchedUser.getUserId(), matchedUser.getState(), matchedUser.getIsLocked());
+            dingtalkReplyDispatcher.sendTextMessage(sessionWebhook, "系统账号已停用或锁定，请联系管理员。");
+            return null;
+        }
         return buildLoginInfo(matchedUser);
+    }
+
+    private boolean isUserUnavailable(Users user) {
+        return !UserState.ACTIVE.equals(user.getState())
+                || Constants.YES_VALUE_Y.equalsIgnoreCase(user.getIsLocked());
     }
 
     private List<Users> findUsersByUserDetail(OapiV2UserGetResponse.UserGetResponse userDetail) {
@@ -233,36 +286,51 @@ public class DingtalkUserService {
         return senderStaffId;
     }
 
-    public void saveUserExternalSystem(
+    public boolean saveUserExternalSystem(
             String unionId, Long userId,
             OapiV2UserGetResponse.UserGetResponse userDetail) {
         if (unionId == null || unionId.isBlank() || userId == null || userDetail == null) {
-            return;
+            return false;
         }
 
         UserExternalSystem existing = userExternalSystemService.findByUnionId(SourceType.DING_TALK, unionId);
         if (existing != null) {
             existing.setUserId(userId);
-            existing.setSourceAccount(userDetail.getJobNumber());
+            existing.setSourceAccount(userDetail.getUserid());
             existing.setSourceNickname(userDetail.getName());
             existing.setSourceEmail(userDetail.getEmail());
             if (existing.getBindingTime() == null) {
                 existing.setBindingTime(new Date());
             }
             userExternalSystemService.update(existing);
-            return;
+            return true;
         }
 
         UserExternalSystem userExternalSystem = new UserExternalSystem();
         userExternalSystem.setId(sequenceService.nextVal());
         userExternalSystem.setUserId(userId);
         userExternalSystem.setSourceType(SourceType.DING_TALK);
-        userExternalSystem.setSourceAccount(userDetail.getJobNumber());
+        userExternalSystem.setSourceAccount(userDetail.getUserid());
         userExternalSystem.setSourceNickname(userDetail.getName());
         userExternalSystem.setSourceEmail(userDetail.getEmail());
         userExternalSystem.setBindingTime(new Date());
         userExternalSystem.setUnionId(unionId);
-        userExternalSystemService.save(userExternalSystem);
+        try {
+            userExternalSystemService.save(userExternalSystem);
+            return true;
+        } catch (DuplicateKeyException e) {
+            UserExternalSystem concurrentBinding =
+                    userExternalSystemService.findByUnionId(SourceType.DING_TALK, unionId);
+            if (concurrentBinding == null) {
+                throw e;
+            }
+            if (!Objects.equals(concurrentBinding.getUserId(), userId)) {
+                logger.warn("Concurrent DingTalk binding kept existing user. unionId={}, existingUserId={}, requestedUserId={}",
+                        unionId, concurrentBinding.getUserId(), userId);
+                return false;
+            }
+            return true;
+        }
     }
 
     private String extractSelectedUserCode(String textContent) {

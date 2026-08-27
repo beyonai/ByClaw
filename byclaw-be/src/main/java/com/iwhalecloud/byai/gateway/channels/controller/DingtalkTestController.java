@@ -44,7 +44,6 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @RestController
 @RequestMapping("/dingtalk/test")
-@ConditionalOnProperty(name = "channel.stream.enabled", havingValue = "false", matchIfMissing = true)
 public class DingtalkTestController {
 
     private static final Logger logger = LoggerFactory.getLogger(DingtalkTestController.class);

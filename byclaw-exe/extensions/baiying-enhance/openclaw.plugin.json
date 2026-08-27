@@ -130,16 +130,6 @@
         "description": "RepoWiki wrapper executable used by code_to_wiki.",
         "default": "byclaw-repowiki"
       },
-      "repoWikiGitCommand": {
-        "type": "string",
-        "description": "Git executable used for on-demand shallow clones.",
-        "default": "git"
-      },
-      "repoWikiCloneTimeoutMs": {
-        "type": "number",
-        "description": "Maximum duration of the shallow clone phase in milliseconds.",
-        "default": 120000
-      },
       "repoWikiGenerateTimeoutMs": {
         "type": "number",
         "description": "Maximum duration of RepoWiki generation in milliseconds.",
@@ -152,7 +142,7 @@
       },
       "repoWikiMaxRepositoryBytes": {
         "type": "number",
-        "description": "Maximum allowed size in bytes for a completed shallow checkout.",
+        "description": "Maximum allowed size in bytes for the local repository passed to RepoWiki.",
         "default": 524288000
       },
       "aimodelConfigRedisKey": {

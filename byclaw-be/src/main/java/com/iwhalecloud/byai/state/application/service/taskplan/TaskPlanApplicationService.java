@@ -48,7 +48,7 @@ public class TaskPlanApplicationService {
         this.sessionService = sessionService;
     }
 
-    /** CREATE 首次定义任务；其余动作按会话推进权威当前任务。 */
+    /** CREATE 首次定义任务；其余动作按可信 Runtime 执行归属推进权威当前任务。 */
     @Transactional
     public TaskPlanSnapshot update(TaskPlanUpdateRequest request) {
         return executeCommand(request).snapshot();
@@ -62,12 +62,13 @@ public class TaskPlanApplicationService {
         Long sessionId = parseRequiredLongCommand(request.getSessionId(), "sessionId");
         Long messageId = parseRequiredLongCommand(request.getMessageId(), "messageId");
         String sourceRuntime = normalizeRuntimeCommand(request.getSourceRuntime());
+        String sourceRunId = requiredTextCommand(request.getSourceRunId(), "sourceRunId", 128);
         requireOwnedSessionCommand(sessionId, userId);
         String action = requiredTextCommand(request.getAction(), "action", 16).toUpperCase(Locale.ROOT);
         return switch (action) {
-            case "CREATE" -> create(request, userId, sessionId, messageId, sourceRuntime);
+            case "CREATE" -> create(request, userId, sessionId, messageId, sourceRuntime, sourceRunId);
             case "COMPLETE_CURRENT", "FAIL_CURRENT", "SKIP_CURRENT" ->
-                advanceCurrent(request, userId, sessionId, action);
+                advanceCurrent(request, userId, sessionId, messageId, sourceRuntime, sourceRunId, action);
             default -> throw commandError("INVALID_REQUEST", "unsupported action: " + request.getAction(), null);
         };
     }
@@ -77,16 +78,20 @@ public class TaskPlanApplicationService {
         requireCommandRequest(request);
         Long userId = CurrentUserHolder.getCurrentUserId();
         Long sessionId = parseRequiredLongCommand(request.getSessionId(), "sessionId");
-        ByaiAgentTaskPlan existing = findActiveForSession(userId, sessionId, true);
+        Long messageId = parseRequiredLongCommand(request.getMessageId(), "messageId");
+        String sourceRuntime = normalizeRuntimeCommand(request.getSourceRuntime());
+        String sourceRunId = requiredTextCommand(request.getSourceRunId(), "sourceRunId", 128);
+        ByaiAgentTaskPlan existing = findLatestActiveForSession(userId, sessionId, true);
         if (existing == null) {
             throw commandError("VERSION_CONFLICT", "Concurrent task plan creation did not become visible", null);
         }
         String idempotencyKey = requiredTextCommand(request.getIdempotencyKey(), "idempotencyKey", 128);
-        if (Objects.equals(existing.getLastCommandId(), idempotencyKey)) {
+        boolean ownedExecution = isExecutionOwner(existing, messageId, sourceRuntime, sourceRunId);
+        if (ownedExecution && Objects.equals(existing.getLastCommandId(), idempotencyKey)) {
             return new TaskPlanWriteResult(snapshot(existing), false);
         }
         throw commandError("PLAN_ALREADY_EXISTS", "An active task plan already exists for this session",
-            snapshot(existing));
+            ownedExecution ? snapshot(existing) : null);
     }
 
     /** 查询一轮执行上的计划；Runtime 默认只取 ACTIVE，历史查询可包含终态。 */
@@ -96,10 +101,32 @@ public class TaskPlanApplicationService {
         }
         Long userId = CurrentUserHolder.getCurrentUserId();
         Long sessionId = parseRequiredLong(request.getSessionId(), "sessionId");
+        Long messageId = parseRequiredLong(request.getMessageId(), "messageId");
+        String sourceRuntime = normalizeRuntime(request.getSourceRuntime());
+        String sourceRunId = requiredText(request.getSourceRunId(), "sourceRunId", 128);
         requireOwnedSession(sessionId, userId);
         ByaiAgentTaskPlan plan = Boolean.TRUE.equals(request.getIncludeTerminal())
-            ? findLatestForSession(userId, sessionId)
-            : findActiveForSession(userId, sessionId, false);
+            ? findLatestForExecution(userId, sessionId, messageId, sourceRuntime, sourceRunId)
+            : findActiveForExecution(userId, sessionId, messageId, sourceRuntime, sourceRunId, false);
+        return plan == null ? null : snapshot(plan);
+    }
+
+    /** 前端按回答消息恢复最新计划；这是只读展示查询，不具备 Runtime 更新授权语义。 */
+    public TaskPlanSnapshot findLatestForMessage(TaskPlanLookupRequest request) {
+        if (request == null) {
+            return null;
+        }
+        Long userId = CurrentUserHolder.getCurrentUserId();
+        Long sessionId = parseRequiredLong(request.getSessionId(), "sessionId");
+        Long messageId = parseRequiredLong(request.getMessageId(), "messageId");
+        requireOwnedSession(sessionId, userId);
+        ByaiAgentTaskPlan plan = planMapper.selectOne(Wrappers.<ByaiAgentTaskPlan>lambdaQuery()
+            .eq(ByaiAgentTaskPlan::getUserId, userId)
+            .eq(ByaiAgentTaskPlan::getSessionId, sessionId)
+            .eq(ByaiAgentTaskPlan::getMessageId, messageId)
+            .orderByDesc(ByaiAgentTaskPlan::getUpdatedAt)
+            .orderByDesc(ByaiAgentTaskPlan::getPlanId)
+            .last("LIMIT 1"));
         return plan == null ? null : snapshot(plan);
     }
 
@@ -145,12 +172,15 @@ public class TaskPlanApplicationService {
     }
 
     @Transactional
-    public TaskPlanSnapshot requestCancellation(StopChatDto stopChatDto, String reasonCode, String reasonMessage) {
+    public List<TaskPlanSnapshot> requestCancellation(StopChatDto stopChatDto, String reasonCode,
+        String reasonMessage) {
         if (stopChatDto == null || stopChatDto.getSessionId() == null) {
-            return null;
+            return List.of();
         }
         Long userId = CurrentUserHolder.getCurrentUserId();
-        return requestCancellation(userId, stopChatDto.getSessionId(), reasonCode, reasonMessage);
+        return findActiveForSession(userId, stopChatDto.getSessionId(), true).stream()
+            .map(plan -> requestCancellation(plan, userId, reasonCode, reasonMessage))
+            .toList();
     }
 
     @Transactional
@@ -161,16 +191,17 @@ public class TaskPlanApplicationService {
         }
         Long userId = CurrentUserHolder.getCurrentUserId();
         Long sessionId = parseRequiredLong(request.getSessionId(), "sessionId");
+        Long messageId = parseRequiredLong(request.getMessageId(), "messageId");
+        String sourceRuntime = normalizeRuntime(request.getSourceRuntime());
+        String sourceRunId = requiredText(request.getSourceRunId(), "sourceRunId", 128);
         requireOwnedSession(sessionId, userId);
-        return requestCancellation(userId, sessionId, reasonCode, reasonMessage);
+        ByaiAgentTaskPlan plan = findActiveForExecution(userId, sessionId, messageId, sourceRuntime, sourceRunId,
+            true);
+        return plan == null ? null : requestCancellation(plan, userId, reasonCode, reasonMessage);
     }
 
-    private TaskPlanSnapshot requestCancellation(Long userId, Long sessionId, String reasonCode,
+    private TaskPlanSnapshot requestCancellation(ByaiAgentTaskPlan plan, Long userId, String reasonCode,
         String reasonMessage) {
-        ByaiAgentTaskPlan plan = findActiveForSession(userId, sessionId, true);
-        if (plan == null) {
-            return null;
-        }
         if ("CANCELLED".equals(plan.getStatus()) || "CANCELLING".equals(plan.getStatus())) {
             return snapshot(plan);
         }
@@ -179,6 +210,10 @@ public class TaskPlanApplicationService {
         int changed = planMapper.update(null, Wrappers.<ByaiAgentTaskPlan>lambdaUpdate()
             .eq(ByaiAgentTaskPlan::getPlanId, plan.getPlanId())
             .eq(ByaiAgentTaskPlan::getUserId, userId)
+            .eq(ByaiAgentTaskPlan::getSessionId, plan.getSessionId())
+            .eq(ByaiAgentTaskPlan::getMessageId, plan.getMessageId())
+            .eq(ByaiAgentTaskPlan::getSourceRuntime, plan.getSourceRuntime())
+            .eq(ByaiAgentTaskPlan::getSourceRunId, plan.getSourceRunId())
             .eq(ByaiAgentTaskPlan::getVersion, plan.getVersion())
             .eq(ByaiAgentTaskPlan::getStatus, "ACTIVE")
             .set(ByaiAgentTaskPlan::getStatus, "CANCELLING")
@@ -198,12 +233,15 @@ public class TaskPlanApplicationService {
     }
 
     @Transactional
-    public TaskPlanSnapshot confirmCancellation(StopChatDto stopChatDto, String reasonCode, String reasonMessage) {
+    public List<TaskPlanSnapshot> confirmCancellation(StopChatDto stopChatDto, String reasonCode,
+        String reasonMessage) {
         if (stopChatDto == null || stopChatDto.getSessionId() == null) {
-            return null;
+            return List.of();
         }
         Long userId = CurrentUserHolder.getCurrentUserId();
-        return confirmCancellation(userId, stopChatDto.getSessionId(), reasonCode, reasonMessage);
+        return findActiveForSession(userId, stopChatDto.getSessionId(), true).stream()
+            .map(plan -> confirmCancellation(plan, userId, reasonCode, reasonMessage))
+            .toList();
     }
 
     @Transactional
@@ -214,16 +252,17 @@ public class TaskPlanApplicationService {
         }
         Long userId = CurrentUserHolder.getCurrentUserId();
         Long sessionId = parseRequiredLong(request.getSessionId(), "sessionId");
+        Long messageId = parseRequiredLong(request.getMessageId(), "messageId");
+        String sourceRuntime = normalizeRuntime(request.getSourceRuntime());
+        String sourceRunId = requiredText(request.getSourceRunId(), "sourceRunId", 128);
         requireOwnedSession(sessionId, userId);
-        return confirmCancellation(userId, sessionId, reasonCode, reasonMessage);
+        ByaiAgentTaskPlan plan = findActiveForExecution(userId, sessionId, messageId, sourceRuntime, sourceRunId,
+            true);
+        return plan == null ? null : confirmCancellation(plan, userId, reasonCode, reasonMessage);
     }
 
-    private TaskPlanSnapshot confirmCancellation(Long userId, Long sessionId, String reasonCode,
+    private TaskPlanSnapshot confirmCancellation(ByaiAgentTaskPlan plan, Long userId, String reasonCode,
         String reasonMessage) {
-        ByaiAgentTaskPlan plan = findActiveForSession(userId, sessionId, true);
-        if (plan == null) {
-            return null;
-        }
         if ("CANCELLED".equals(plan.getStatus())) {
             return snapshot(plan);
         }
@@ -240,6 +279,10 @@ public class TaskPlanApplicationService {
         int changed = planMapper.update(null, Wrappers.<ByaiAgentTaskPlan>lambdaUpdate()
             .eq(ByaiAgentTaskPlan::getPlanId, plan.getPlanId())
             .eq(ByaiAgentTaskPlan::getUserId, userId)
+            .eq(ByaiAgentTaskPlan::getSessionId, plan.getSessionId())
+            .eq(ByaiAgentTaskPlan::getMessageId, plan.getMessageId())
+            .eq(ByaiAgentTaskPlan::getSourceRuntime, plan.getSourceRuntime())
+            .eq(ByaiAgentTaskPlan::getSourceRunId, plan.getSourceRunId())
             .eq(ByaiAgentTaskPlan::getVersion, plan.getVersion())
             .in(ByaiAgentTaskPlan::getStatus, ACTIVE_PLAN_STATUSES)
             .set(ByaiAgentTaskPlan::getTasksPayload, tasksPayload)
@@ -263,16 +306,16 @@ public class TaskPlanApplicationService {
     }
 
     private TaskPlanWriteResult create(TaskPlanUpdateRequest request, Long userId, Long sessionId, Long messageId,
-        String sourceRuntime) {
+        String sourceRuntime, String sourceRunId) {
         String idempotencyKey = requiredTextCommand(request.getIdempotencyKey(), "idempotencyKey", 128);
-        String sourceRunId = requiredTextCommand(request.getSourceRunId(), "sourceRunId", 128);
-        ByaiAgentTaskPlan existing = findActiveForSession(userId, sessionId, true);
+        ByaiAgentTaskPlan existing = findLatestActiveForSession(userId, sessionId, true);
         if (existing != null) {
-            if (Objects.equals(existing.getLastCommandId(), idempotencyKey)) {
+            boolean ownedExecution = isExecutionOwner(existing, messageId, sourceRuntime, sourceRunId);
+            if (ownedExecution && Objects.equals(existing.getLastCommandId(), idempotencyKey)) {
                 return new TaskPlanWriteResult(snapshot(existing), false);
             }
             throw commandError("PLAN_ALREADY_EXISTS", "An active task plan already exists for this session",
-                snapshot(existing));
+                ownedExecution ? snapshot(existing) : null);
         }
 
         Date now = new Date();
@@ -302,15 +345,17 @@ public class TaskPlanApplicationService {
     }
 
     private TaskPlanWriteResult advanceCurrent(TaskPlanUpdateRequest request, Long userId, Long sessionId,
-        String action) {
+        Long messageId, String sourceRuntime, String sourceRunId, String action) {
         String idempotencyKey = requiredTextCommand(request.getIdempotencyKey(), "idempotencyKey", 128);
-        ByaiAgentTaskPlan plan = findActiveForSession(userId, sessionId, false);
+        ByaiAgentTaskPlan plan = findActiveForExecution(userId, sessionId, messageId, sourceRuntime, sourceRunId,
+            false);
         if (plan == null) {
-            ByaiAgentTaskPlan latest = findLatestForSession(userId, sessionId);
+            ByaiAgentTaskPlan latest = findLatestForExecution(userId, sessionId, messageId, sourceRuntime,
+                sourceRunId);
             if (latest != null && Objects.equals(latest.getLastCommandId(), idempotencyKey)) {
                 return new TaskPlanWriteResult(snapshot(latest), false);
             }
-            throw commandError("PLAN_NOT_FOUND", "No active task plan exists for this session",
+            throw commandError("PLAN_NOT_FOUND", "No active task plan exists for this execution",
                 latest == null ? null : snapshot(latest));
         }
         if (Objects.equals(plan.getLastCommandId(), idempotencyKey)) {
@@ -358,6 +403,9 @@ public class TaskPlanApplicationService {
             .eq(ByaiAgentTaskPlan::getPlanId, plan.getPlanId())
             .eq(ByaiAgentTaskPlan::getUserId, userId)
             .eq(ByaiAgentTaskPlan::getSessionId, sessionId)
+            .eq(ByaiAgentTaskPlan::getMessageId, messageId)
+            .eq(ByaiAgentTaskPlan::getSourceRuntime, sourceRuntime)
+            .eq(ByaiAgentTaskPlan::getSourceRunId, sourceRunId)
             .eq(ByaiAgentTaskPlan::getVersion, current.getVersion())
             .eq(ByaiAgentTaskPlan::getStatus, "ACTIVE")
             .set(ByaiAgentTaskPlan::getTasksPayload, plan.getTasksPayload())
@@ -369,7 +417,8 @@ public class TaskPlanApplicationService {
             .set(ByaiAgentTaskPlan::getUpdatedAt, now)
             .set(ByaiAgentTaskPlan::getCompletedAt, plan.getCompletedAt()));
         if (changed == 0) {
-            ByaiAgentTaskPlan latest = findLatestForSession(userId, sessionId);
+            ByaiAgentTaskPlan latest = findLatestForExecution(userId, sessionId, messageId, sourceRuntime,
+                sourceRunId);
             if (latest != null && Objects.equals(latest.getLastCommandId(), idempotencyKey)) {
                 return new TaskPlanWriteResult(snapshot(latest), false);
             }
@@ -517,24 +566,58 @@ public class TaskPlanApplicationService {
         return null;
     }
 
-    private ByaiAgentTaskPlan findActiveForSession(Long userId, Long sessionId, boolean includeCancelling) {
-        var query = Wrappers.<ByaiAgentTaskPlan>lambdaQuery()
+    private ByaiAgentTaskPlan findActiveForExecution(Long userId, Long sessionId, Long messageId,
+        String sourceRuntime, String sourceRunId, boolean includeCancelling) {
+        return planMapper.selectOne(Wrappers.<ByaiAgentTaskPlan>lambdaQuery()
+            .eq(ByaiAgentTaskPlan::getUserId, userId)
+            .eq(ByaiAgentTaskPlan::getSessionId, sessionId)
+            .eq(ByaiAgentTaskPlan::getMessageId, messageId)
+            .eq(ByaiAgentTaskPlan::getSourceRuntime, sourceRuntime)
+            .eq(ByaiAgentTaskPlan::getSourceRunId, sourceRunId)
+            .in(ByaiAgentTaskPlan::getStatus, includeCancelling ? ACTIVE_PLAN_STATUSES : Set.of("ACTIVE"))
+            .orderByDesc(ByaiAgentTaskPlan::getUpdatedAt)
+            .orderByDesc(ByaiAgentTaskPlan::getPlanId)
+            .last("LIMIT 1"));
+    }
+
+    private ByaiAgentTaskPlan findLatestForExecution(Long userId, Long sessionId, Long messageId,
+        String sourceRuntime, String sourceRunId) {
+        return planMapper.selectOne(Wrappers.<ByaiAgentTaskPlan>lambdaQuery()
+            .eq(ByaiAgentTaskPlan::getUserId, userId)
+            .eq(ByaiAgentTaskPlan::getSessionId, sessionId)
+            .eq(ByaiAgentTaskPlan::getMessageId, messageId)
+            .eq(ByaiAgentTaskPlan::getSourceRuntime, sourceRuntime)
+            .eq(ByaiAgentTaskPlan::getSourceRunId, sourceRunId)
+            .orderByDesc(ByaiAgentTaskPlan::getUpdatedAt)
+            .orderByDesc(ByaiAgentTaskPlan::getPlanId)
+            .last("LIMIT 1"));
+    }
+
+    private ByaiAgentTaskPlan findLatestActiveForSession(Long userId, Long sessionId, boolean includeCancelling) {
+        return planMapper.selectOne(Wrappers.<ByaiAgentTaskPlan>lambdaQuery()
             .eq(ByaiAgentTaskPlan::getUserId, userId)
             .eq(ByaiAgentTaskPlan::getSessionId, sessionId)
             .in(ByaiAgentTaskPlan::getStatus, includeCancelling ? ACTIVE_PLAN_STATUSES : Set.of("ACTIVE"))
             .orderByDesc(ByaiAgentTaskPlan::getUpdatedAt)
             .orderByDesc(ByaiAgentTaskPlan::getPlanId)
-            .last("LIMIT 1");
-        return planMapper.selectOne(query);
+            .last("LIMIT 1"));
     }
 
-    private ByaiAgentTaskPlan findLatestForSession(Long userId, Long sessionId) {
-        return planMapper.selectOne(Wrappers.<ByaiAgentTaskPlan>lambdaQuery()
+    private boolean isExecutionOwner(ByaiAgentTaskPlan plan, Long messageId, String sourceRuntime,
+        String sourceRunId) {
+        return Objects.equals(plan.getMessageId(), messageId)
+            && Objects.equals(plan.getSourceRuntime(), sourceRuntime)
+            && Objects.equals(plan.getSourceRunId(), sourceRunId);
+    }
+
+    private List<ByaiAgentTaskPlan> findActiveForSession(Long userId, Long sessionId, boolean includeCancelling) {
+        List<ByaiAgentTaskPlan> plans = planMapper.selectList(Wrappers.<ByaiAgentTaskPlan>lambdaQuery()
             .eq(ByaiAgentTaskPlan::getUserId, userId)
             .eq(ByaiAgentTaskPlan::getSessionId, sessionId)
+            .in(ByaiAgentTaskPlan::getStatus, includeCancelling ? ACTIVE_PLAN_STATUSES : Set.of("ACTIVE"))
             .orderByDesc(ByaiAgentTaskPlan::getUpdatedAt)
-            .orderByDesc(ByaiAgentTaskPlan::getPlanId)
-            .last("LIMIT 1"));
+            .orderByDesc(ByaiAgentTaskPlan::getPlanId));
+        return plans == null ? List.of() : plans;
     }
 
     private List<TaskPlanSnapshot.TaskSnapshot> tasks(ByaiAgentTaskPlan plan) {
@@ -602,6 +685,26 @@ public class TaskPlanApplicationService {
             throw commandError("INVALID_REQUEST", "unsupported sourceRuntime: " + value, null);
         }
         return runtime;
+    }
+
+    private String normalizeRuntime(String value) {
+        String runtime = requiredText(value, "sourceRuntime", 32).toUpperCase(Locale.ROOT).replace('-', '_');
+        if (!Set.of("BYCLAW_SUPER", "OPENCLAW").contains(runtime)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "unsupported sourceRuntime: " + value);
+        }
+        return runtime;
+    }
+
+    private String requiredText(String value, String field, int maxLength) {
+        String result = StringUtils.trimToNull(value);
+        if (result == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, field + " is required");
+        }
+        if (result.length() > maxLength) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                field + " exceeds " + maxLength + " characters");
+        }
+        return result;
     }
 
     private TaskPlanSnapshot.StatusReason statusReason(TaskPlanUpdateRequest.StatusReasonInput source, String field) {

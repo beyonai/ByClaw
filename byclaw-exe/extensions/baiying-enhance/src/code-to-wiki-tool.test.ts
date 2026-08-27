@@ -5,10 +5,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { AdaptedManagedAgent } from "./agent-adapter.js";
 import { AgentRegistryState } from "./agent-state.js";
 import {
-  buildGitCloneEnvironment,
   createCodeToWikiToolFactory,
-  parseGitRepositoryUrl,
   resolveRepoWikiModelRuntime,
+  runCodeToWikiProcess,
+  type ProcessOutputLine,
   type ProcessRunRequest,
   type ProcessRunResult,
 } from "./code-to-wiki-tool.js";
@@ -58,83 +58,20 @@ function processResult(overrides: Partial<ProcessRunResult> = {}): ProcessRunRes
   };
 }
 
-describe("parseGitRepositoryUrl", () => {
-  it("normalizes a credential-free GitHub URL", () => {
-    expect(parseGitRepositoryUrl("https://github.com/openai/codex")).toEqual({
-      canonicalUrl: "https://github.com/openai/codex.git",
-      host: "github.com",
-      namespace: "openai",
-      name: "codex",
-    });
-  });
+async function createWorkspaceWithRepository(): Promise<{
+  workspace: string;
+  repository: string;
+}> {
+  const createdWorkspace = await fs.mkdtemp(path.join(tmpdir(), "code-to-wiki-test-"));
+  cleanupPaths.push(createdWorkspace);
+  const workspace = await fs.realpath(createdWorkspace);
+  const repository = path.join(workspace, "repos", "private-repo");
+  await fs.mkdir(repository, { recursive: true });
+  await fs.writeFile(path.join(repository, "README.md"), "# Source\n", "utf8");
+  return { workspace, repository };
+}
 
-  it("accepts non-GitHub hosts, custom ports, and nested namespaces", () => {
-    expect(parseGitRepositoryUrl("https://git.example.com:8443/acme/platform/wiki.git")).toEqual({
-      canonicalUrl: "https://git.example.com:8443/acme/platform/wiki.git",
-      host: "git.example.com:8443",
-      namespace: "acme/platform",
-      name: "wiki",
-    });
-  });
-
-  it.each([
-    "file:///etc/passwd",
-    "ssh://git@github.com/openai/codex.git",
-    "https://token@github.com/openai/codex.git",
-    "http://git.example.com/openai/codex.git",
-    "https://git.example.com/",
-    "https://git.example.com/openai/codex.git?ref=main",
-  ])("rejects unsafe URL %s", (repositoryUrl) => {
-    expect(() => parseGitRepositoryUrl(repositoryUrl)).toThrow();
-  });
-});
-
-describe("Git and model credentials", () => {
-  it("injects GitHub credentials through process env, not the repository URL", () => {
-    const repository = parseGitRepositoryUrl("https://github.com/openai/codex");
-    const result = buildGitCloneEnvironment(repository, { gitHubToken: "github-secret" });
-    expect(result.env.GIT_CONFIG_KEY_0).toBe("http.https://github.com/.extraheader");
-    expect(result.env.GIT_CONFIG_VALUE_0).toMatch(/^Authorization: Basic /);
-    expect(JSON.stringify(result.env)).not.toContain("github-secret");
-    expect(result.sensitiveValues).toContain("github-secret");
-  });
-
-  it("does not send a GitHub token to another Git host", () => {
-    const repository = parseGitRepositoryUrl("https://gitlab.com/openai/codex.git");
-    const result = buildGitCloneEnvironment(repository, { gitHubToken: "github-secret" });
-    expect(result.env.GIT_CONFIG_COUNT).toBeUndefined();
-    expect(result.sensitiveValues).toEqual([]);
-
-    const nonDefaultPort = parseGitRepositoryUrl("https://github.com:8443/openai/codex.git");
-    expect(
-      buildGitCloneEnvironment(nonDefaultPort, { gitHubToken: "github-secret" }).env
-        .GIT_CONFIG_COUNT,
-    ).toBeUndefined();
-  });
-
-  it("injects a generic credential only when GIT_HOST exactly matches the target host", () => {
-    const repository = parseGitRepositoryUrl(
-      "https://git.example.com:8443/acme/platform/wiki.git",
-    );
-    const credentials = {
-      privateHost: "git.example.com:8443",
-      privateUsername: "git-user",
-      privateToken: "git-secret",
-    };
-    const result = buildGitCloneEnvironment(repository, credentials);
-    expect(result.env.GIT_CONFIG_KEY_0).toBe(
-      "http.https://git.example.com:8443/.extraheader",
-    );
-    expect(result.env.GIT_CONFIG_VALUE_0).toMatch(/^Authorization: Basic /);
-    expect(JSON.stringify(result.env)).not.toContain("git-secret");
-    expect(result.sensitiveValues).toContain("git-secret");
-
-    const otherRepository = parseGitRepositoryUrl("https://other.example.com/acme/wiki.git");
-    expect(
-      buildGitCloneEnvironment(otherRepository, credentials).env.GIT_CONFIG_COUNT,
-    ).toBeUndefined();
-  });
-
+describe("RepoWiki model runtime", () => {
   it("maps the Redis-backed OpenAI-compatible model for LiteLLM", () => {
     expect(resolveRepoWikiModelRuntime(managedAgent(), () => "model-secret")).toEqual({
       apiBase: "https://llm.example.test/v1",
@@ -157,106 +94,140 @@ describe("Git and model credentials", () => {
   });
 });
 
+describe("runCodeToWikiProcess", () => {
+  it("streams redacted stdout and stderr lines", async () => {
+    const progress: ProcessOutputLine[] = [];
+    const result = await runCodeToWikiProcess({
+      command: process.execPath,
+      args: [
+        "-e",
+        'process.stdout.write("Scanning 1/2\\n"); process.stderr.write("token=model-secret\\n");',
+      ],
+      env: { ...process.env },
+      timeoutMs: 5000,
+      maxOutputBytes: 16 * 1024,
+      sensitiveValues: ["model-secret"],
+      onOutputLine: (output) => progress.push(output),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(progress).toContainEqual({ stream: "stdout", line: "Scanning 1/2" });
+    expect(progress).toContainEqual({ stream: "stderr", line: "token=***" });
+  });
+});
+
 describe("code_to_wiki tool factory", () => {
   it("only exposes the tool to a registered managed digital employee", () => {
     const registry = new AgentRegistryState();
     const factory = createCodeToWikiToolFactory({
       registry,
-      loadGitCredentials: async () => ({}),
       resolveWorkspaceDir: () => "/tmp/unused",
     });
     expect(factory({ agentId: "main" })).toBeNull();
     expect(factory({ agentId: "baiying-agent-missing" })).toBeNull();
   });
 
-  it("shallow-clones privately and runs RepoWiki with the agent model", async () => {
+  it("runs RepoWiki once against an existing repository and streams progress", async () => {
     const registry = new AgentRegistryState();
     registry.replaceAll([managedAgent()]);
-    const workspace = await fs.mkdtemp(path.join(tmpdir(), "code-to-wiki-test-"));
-    cleanupPaths.push(workspace);
+    const { workspace, repository } = await createWorkspaceWithRepository();
     const requests: ProcessRunRequest[] = [];
+    const updates: Array<Record<string, any>> = [];
     const runProcess = async (request: ProcessRunRequest): Promise<ProcessRunResult> => {
       requests.push(request);
-      if (request.command === "repowiki-test") {
-        const outputIndex = request.args.indexOf("--output");
-        const outputDir = request.args[outputIndex + 1];
-        await fs.mkdir(outputDir, { recursive: true });
-        await fs.writeFile(path.join(outputDir, "README.md"), "# Generated Wiki\n", "utf8");
-      } else {
-        await fs.mkdir(path.join(request.cwd ?? "", "repository"), { recursive: true });
-        await fs.writeFile(path.join(request.cwd ?? "", "repository", "README.md"), "source", "utf8");
-      }
+      request.onOutputLine?.({ stream: "stdout", line: "Scanning source files 1/2" });
+      const outputIndex = request.args.indexOf("--output");
+      const outputDir = request.args[outputIndex + 1];
+      await fs.writeFile(path.join(outputDir, "README.md"), "# Generated Wiki\n", "utf8");
       return processResult();
     };
     const factory = createCodeToWikiToolFactory({
       registry,
-      loadGitCredentials: async () => ({ gitHubToken: "github-secret" }),
       resolveWorkspaceDir: () => workspace,
       getModelApiKey: () => "model-secret",
       runProcess,
-      randomId: () => "job-1",
-      now: () => new Date("2026-08-24T01:02:03.000Z"),
       settings: {
-        gitCommand: "git-test",
         repoWikiCommand: "repowiki-test",
       },
     });
     const tool = factory({ agentId: "baiying-agent-1001" });
-    const result = await tool.execute("call-1", {
-      repository_url: "https://github.com/acme/private-repo",
-      branch: "develop",
-      language: "zh",
-      output_format: "markdown",
-    });
+    const result = await tool.execute(
+      "call-1",
+      {
+        repository_path: "repos/private-repo",
+        output_directory: "wiki/private-repo",
+        language: "zh",
+        output_format: "markdown",
+      },
+      undefined,
+      (update: Record<string, any>) => updates.push(update),
+    );
 
     expect(result.details.ok).toBe(true);
+    expect(result.details.repository).toEqual({ path: repository });
     expect(result.details.output.files).toEqual([{ path: "README.md", size: 17 }]);
-    expect(requests).toHaveLength(2);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.command).toBe("repowiki-test");
     expect(requests[0]?.args).toEqual([
-      "clone",
-      "--depth",
-      "1",
-      "--single-branch",
-      "--branch",
-      "develop",
-      "--",
-      "https://github.com/acme/private-repo.git",
-      "repository",
+      "scan",
+      repository,
+      "--output",
+      path.join(workspace, "wiki", "private-repo"),
+      "--format",
+      "markdown",
+      "--lang",
+      "zh",
     ]);
-    expect(requests[0]?.args.join(" ")).not.toContain("github-secret");
-    expect(requests[1]?.env).toMatchObject({
+    expect(requests[0]?.env).toMatchObject({
       REPOWIKI_API_BASE: "https://llm.example.test/v1",
       REPOWIKI_API_KEY: "model-secret",
       REPOWIKI_LANG: "zh",
       REPOWIKI_MODEL: "openai/deepseek-chat",
     });
-    expect(JSON.stringify(result)).not.toContain("github-secret");
+    expect(updates.some((update) => update.details?.status === "preparing")).toBe(true);
+    expect(
+      updates.some((update) => update.details?.message === "Scanning source files 1/2"),
+    ).toBe(true);
     expect(JSON.stringify(result)).not.toContain("model-secret");
   });
 
-  it("rejects RepoWiki output when the wrapped LLM failed", async () => {
+  it("rejects repository paths outside the digital employee workspace", async () => {
     const registry = new AgentRegistryState();
     registry.replaceAll([managedAgent()]);
-    const workspace = await fs.mkdtemp(path.join(tmpdir(), "code-to-wiki-test-"));
-    cleanupPaths.push(workspace);
-    let invocation = 0;
+    const { workspace } = await createWorkspaceWithRepository();
+    const outsideRepository = await fs.mkdtemp(path.join(tmpdir(), "code-to-wiki-outside-"));
+    cleanupPaths.push(outsideRepository);
     const factory = createCodeToWikiToolFactory({
       registry,
-      loadGitCredentials: async () => ({}),
       resolveWorkspaceDir: () => workspace,
       getModelApiKey: () => "model-secret",
-      runProcess: async (request) => {
-        invocation += 1;
-        if (invocation === 1) {
-          await fs.mkdir(path.join(request.cwd ?? "", "repository"), { recursive: true });
-          return processResult();
-        }
-        return processResult({ stdout: "[LLM Error: unauthorized]" });
-      },
     });
     const tool = factory({ agentId: "baiying-agent-1001" });
     const result = await tool.execute("call-2", {
-      repository_url: "https://gitlab.com/acme/platform/repo.git",
+      repository_path: outsideRepository,
+      output_directory: "wiki/private-repo",
+    });
+
+    expect(result.details.error.code).toBe("PATH_OUTSIDE_WORKSPACE");
+  });
+
+  it("preserves an existing output directory when RepoWiki reports an LLM failure", async () => {
+    const registry = new AgentRegistryState();
+    registry.replaceAll([managedAgent()]);
+    const { workspace } = await createWorkspaceWithRepository();
+    const outputDirectory = path.join(workspace, "wiki", "private-repo");
+    await fs.mkdir(outputDirectory, { recursive: true });
+    await fs.writeFile(path.join(outputDirectory, "existing.md"), "keep", "utf8");
+    const factory = createCodeToWikiToolFactory({
+      registry,
+      resolveWorkspaceDir: () => workspace,
+      getModelApiKey: () => "model-secret",
+      runProcess: async () => processResult({ stdout: "[LLM Error: unauthorized]" }),
+    });
+    const tool = factory({ agentId: "baiying-agent-1001" });
+    const result = await tool.execute("call-3", {
+      repository_path: "repos/private-repo",
+      output_directory: "wiki/private-repo",
     });
 
     expect(result.details).toEqual({
@@ -266,5 +237,8 @@ describe("code_to_wiki tool factory", () => {
         message: "RepoWiki reported an LLM failure and did not produce trustworthy documentation.",
       },
     });
+    await expect(fs.readFile(path.join(outputDirectory, "existing.md"), "utf8")).resolves.toBe(
+      "keep",
+    );
   });
 });

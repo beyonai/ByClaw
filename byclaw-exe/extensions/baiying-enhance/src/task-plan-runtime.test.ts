@@ -103,4 +103,52 @@ describe("createBaiyingTaskPlanRuntime", () => {
 
     await expect(runtime.loadActive(context)).resolves.toBeUndefined();
   });
+
+  it("ignores an active plan owned by another runtime execution", async () => {
+    const logger = { warn: vi.fn() };
+    const runtime = createBaiyingTaskPlanRuntime({
+      fetchImpl: vi.fn(async () =>
+        Response.json({
+          code: 0,
+          msg: "ok",
+          data: {
+            ...snapshot(),
+            sourceRuntime: "BYCLAW_SUPER",
+            sourceRunId: "super-run-1",
+          },
+        }),
+      ),
+      resolveBaseUrl: async () => "http://backend/byaiService",
+      authFilePath: "/tmp/byclaw-task-plan-auth-does-not-exist.json",
+      logger,
+    });
+
+    await expect(runtime.loadActive(context)).resolves.toBeUndefined();
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining("ignored task plan owned by another execution"),
+    );
+  });
+
+  it("rejects a successful command result owned by another execution", async () => {
+    const runtime = createBaiyingTaskPlanRuntime({
+      fetchImpl: vi.fn(async () =>
+        Response.json({
+          code: 0,
+          msg: "ok",
+          data: {
+            ok: true,
+            plan: { ...snapshot(), sourceRunId: "another-run" },
+          },
+        }),
+      ),
+      resolveBaseUrl: async () => "http://backend/byaiService",
+      authFilePath: "/tmp/byclaw-task-plan-auth-does-not-exist.json",
+    });
+
+    await expect(runtime.command({
+      context,
+      idempotencyKey: "openclaw:foreign-result",
+      command: { action: "complete_current" },
+    })).rejects.toThrow("owned by another execution");
+  });
 });

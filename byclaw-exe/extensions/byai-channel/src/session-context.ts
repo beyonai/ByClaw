@@ -182,6 +182,8 @@ export interface ActiveSdkRequest {
   messageId?: string;
   /** Parent id from the Gateway command that owns every root-level SDK event. */
   parentMessageId: string;
+  /** Whether the gateway request was delegated by another agent. */
+  delegatedAgentCall: boolean;
   createdAt: number;
   firstAnswerDeltaAt?: number;
   firstVisibleResponseAt?: number;
@@ -891,6 +893,7 @@ export function registerActiveSdkRequest(params: {
     traceId: string;
     messageId?: string;
     parentMessageId?: string;
+    delegatedAgentCall?: boolean;
     createdAt?: number;
     language: Language;
     languageProvided: boolean;
@@ -929,6 +932,7 @@ export function registerActiveSdkRequest(params: {
         traceId: params.traceId,
         messageId: normalizeAlias(params.messageId) ?? undefined,
         parentMessageId: normalizeAlias(params.parentMessageId) ?? "-1",
+        delegatedAgentCall: params.delegatedAgentCall === true,
         createdAt: params.createdAt ?? Date.now(),
         boundRunIds: new Set<string>(),
         nativeChildRuns: new Map<string, NativeChildRunRecord>(),
@@ -979,6 +983,7 @@ export function registerActiveSdkRequest(params: {
             sessionId: request.sessionId,
             messageId: request.messageId,
             parentMessageId: request.parentMessageId,
+            delegatedAgentCall: request.delegatedAgentCall,
             language: request.language,
             languageProvided: request.languageProvided,
             channelExtension: request.channelExtension,

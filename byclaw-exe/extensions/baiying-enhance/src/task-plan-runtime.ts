@@ -190,6 +190,16 @@ export function parseTaskPlanCommandResult(value: unknown): TaskPlanCommandResul
   };
 }
 
+function isOwnedByContext(
+  snapshot: TaskPlanSnapshot,
+  context: TaskPlanExecutionContext,
+): boolean {
+  return snapshot.sessionId === context.sessionId &&
+    snapshot.messageId === context.messageId &&
+    snapshot.sourceRuntime === context.sourceRuntime &&
+    snapshot.sourceRunId === context.sourceRunId;
+}
+
 function setHeader(headers: Record<string, string>, name: string, value: string): void {
   const target = name.toLowerCase();
   for (const key of Object.keys(headers)) {
@@ -236,6 +246,7 @@ export function createBaiyingTaskPlanRuntime(
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
   const timeoutMs = options.timeoutMs ?? 10_000;
   const authFilePath = resolveAuthFilePath(options.authFilePath);
+  const logger = options.logger;
   const resolveBaseUrl =
     options.resolveBaseUrl ??
     (() => discoverBackendBaseUrl({ logger: options.logger }));
@@ -259,6 +270,46 @@ export function createBaiyingTaskPlanRuntime(
       baseUrlExpiresAt = Date.now() + 30_000;
     }
     return resolved;
+  }
+
+  function ownedSnapshot(
+    value: unknown,
+    context: TaskPlanExecutionContext,
+  ): TaskPlanSnapshot | undefined {
+    const snapshot = parseTaskPlanSnapshot(value);
+    if (isOwnedByContext(snapshot, context)) {
+      return snapshot;
+    }
+    logger?.warn?.(
+      `baiying-enhance: ignored task plan owned by another execution: ` +
+        `sessionId=${context.sessionId}, messageId=${context.messageId}, ` +
+        `sourceRuntime=${context.sourceRuntime}, sourceRunId=${context.sourceRunId}`,
+    );
+    return undefined;
+  }
+
+  function ownedCommandResult(
+    value: unknown,
+    context: TaskPlanExecutionContext,
+  ): TaskPlanCommandResult {
+    const result = parseTaskPlanCommandResult(value);
+    if (result.ok) {
+      if (!isOwnedByContext(result.plan, context)) {
+        throw new BaiyingTaskPlanRuntimeError(
+          "ByClaw BE task plan command returned a plan owned by another execution",
+        );
+      }
+      return result;
+    }
+    if (!result.currentPlan || isOwnedByContext(result.currentPlan, context)) {
+      return result;
+    }
+    logger?.warn?.(
+      `baiying-enhance: dropped foreign currentPlan from task plan error: ` +
+        `sessionId=${context.sessionId}, messageId=${context.messageId}, ` +
+        `sourceRuntime=${context.sourceRuntime}, sourceRunId=${context.sourceRunId}`,
+    );
+    return { ok: false, error: result.error };
   }
 
   async function post(
@@ -337,7 +388,7 @@ export function createBaiyingTaskPlanRuntime(
         },
         signal,
       );
-      return data == null ? undefined : parseTaskPlanSnapshot(data);
+      return data == null ? undefined : ownedSnapshot(data, context);
     },
 
     async command(input) {
@@ -367,7 +418,7 @@ export function createBaiyingTaskPlanRuntime(
         },
         input.signal,
       );
-      return parseTaskPlanCommandResult(data);
+      return ownedCommandResult(data, context);
     },
 
     async cancel(input) {
@@ -386,7 +437,7 @@ export function createBaiyingTaskPlanRuntime(
         },
         input.signal,
       );
-      return data == null ? undefined : parseTaskPlanSnapshot(data);
+      return data == null ? undefined : ownedSnapshot(data, context);
     },
   };
 }

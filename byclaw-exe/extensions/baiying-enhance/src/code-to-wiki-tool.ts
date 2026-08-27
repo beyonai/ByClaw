@@ -1,8 +1,8 @@
 import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import { Type } from "@sinclair/typebox";
 import type { AdaptedManagedAgent, AimodelProviderApi } from "./agent-adapter.js";
 import type { AgentRegistryState } from "./agent-state.js";
@@ -10,13 +10,10 @@ import { getCachedAimodelAuthToken } from "./aimodel-auth-cache.js";
 import { decodeBaiyingAimodelSecretRefId } from "./aimodel-config.js";
 import { MANAGED_AGENT_PREFIX } from "./types.js";
 
-const DEFAULT_CLONE_TIMEOUT_MS = 2 * 60 * 1000;
 const DEFAULT_GENERATE_TIMEOUT_MS = 30 * 60 * 1000;
 const DEFAULT_MAX_COMMAND_OUTPUT_BYTES = 128 * 1024;
 const DEFAULT_MAX_REPOSITORY_BYTES = 500 * 1024 * 1024;
 const DEFAULT_REPOWIKI_COMMAND = "byclaw-repowiki";
-const DEFAULT_GIT_COMMAND = "git";
-const OUTPUT_DIRECTORY_NAME = "generated-wikis";
 
 type LoggerLike = {
   info?: (message: string) => void;
@@ -29,12 +26,15 @@ type SecretRefLike = {
 };
 
 export type CodeToWikiSettings = {
-  gitCommand: string;
   repoWikiCommand: string;
-  cloneTimeoutMs: number;
   generateTimeoutMs: number;
   maxCommandOutputBytes: number;
   maxRepositoryBytes: number;
+};
+
+export type ProcessOutputLine = {
+  stream: "stdout" | "stderr";
+  line: string;
 };
 
 export type ProcessRunRequest = {
@@ -46,6 +46,7 @@ export type ProcessRunRequest = {
   maxOutputBytes: number;
   signal?: AbortSignal;
   sensitiveValues?: string[];
+  onOutputLine?: (output: ProcessOutputLine) => void;
 };
 
 export type ProcessRunResult = {
@@ -72,23 +73,13 @@ type RepoWikiModelRuntime = {
   modelRef: string;
 };
 
-export type GitCloneCredentials = {
-  gitHubToken?: string;
-  privateHost?: string;
-  privateUsername?: string;
-  privateToken?: string;
-};
-
 type CodeToWikiToolDeps = {
   registry: AgentRegistryState;
-  loadGitCredentials: () => Promise<GitCloneCredentials>;
   resolveWorkspaceDir: (agentId: string) => string;
   settings?: Partial<CodeToWikiSettings>;
   logger?: LoggerLike;
   runProcess?: (request: ProcessRunRequest) => Promise<ProcessRunResult>;
   getModelApiKey?: (modelId: string) => string | null;
-  now?: () => Date;
-  randomId?: () => string;
 };
 
 class CodeToWikiError extends Error {
@@ -115,17 +106,13 @@ function nonEmptyString(value: unknown): string {
 export function resolveCodeToWikiSettings(
   raw: {
     repoWikiCommand?: unknown;
-    repoWikiGitCommand?: unknown;
-    repoWikiCloneTimeoutMs?: unknown;
     repoWikiGenerateTimeoutMs?: unknown;
     repoWikiMaxCommandOutputBytes?: unknown;
     repoWikiMaxRepositoryBytes?: unknown;
   } = {},
 ): CodeToWikiSettings {
   return {
-    gitCommand: nonEmptyString(raw.repoWikiGitCommand) || DEFAULT_GIT_COMMAND,
     repoWikiCommand: nonEmptyString(raw.repoWikiCommand) || DEFAULT_REPOWIKI_COMMAND,
-    cloneTimeoutMs: positiveInteger(raw.repoWikiCloneTimeoutMs, DEFAULT_CLONE_TIMEOUT_MS),
     generateTimeoutMs: positiveInteger(raw.repoWikiGenerateTimeoutMs, DEFAULT_GENERATE_TIMEOUT_MS),
     maxCommandOutputBytes: positiveInteger(
       raw.repoWikiMaxCommandOutputBytes,
@@ -198,6 +185,48 @@ export async function runCodeToWikiProcess(
     });
     let settled = false;
     let forceKillTimer: NodeJS.Timeout | undefined;
+    let progressFlushed = false;
+    const progressDecoders = {
+      stdout: new StringDecoder("utf8"),
+      stderr: new StringDecoder("utf8"),
+    };
+    const progressPending = { stdout: "", stderr: "" };
+
+    const emitOutputLine = (stream: ProcessOutputLine["stream"], rawLine: string) => {
+      const line = redactText(rawLine, request.sensitiveValues).trim();
+      if (!line || !request.onOutputLine) {
+        return;
+      }
+      try {
+        request.onOutputLine({ stream, line });
+      } catch {
+        // Progress listeners must not interrupt the managed process.
+      }
+    };
+
+    const consumeProgress = (stream: ProcessOutputLine["stream"], value: string) => {
+      const lines = `${progressPending[stream]}${value}`.split(/\r\n|\n|\r/u);
+      progressPending[stream] = lines.pop() ?? "";
+      for (const line of lines) {
+        emitOutputLine(stream, line);
+      }
+      if (Buffer.byteLength(progressPending[stream], "utf8") > request.maxOutputBytes) {
+        emitOutputLine(stream, progressPending[stream]);
+        progressPending[stream] = "";
+      }
+    };
+
+    const flushProgress = () => {
+      if (progressFlushed) {
+        return;
+      }
+      progressFlushed = true;
+      for (const stream of ["stdout", "stderr"] as const) {
+        consumeProgress(stream, progressDecoders[stream].end());
+        emitOutputLine(stream, progressPending[stream]);
+        progressPending[stream] = "";
+      }
+    };
 
     const stop = () => {
       if (child.exitCode !== null || child.killed) {
@@ -238,25 +267,30 @@ export async function runCodeToWikiProcess(
     request.signal?.addEventListener("abort", onAbort, { once: true });
 
     child.stdout.on("data", (chunk: Buffer | string) => {
+      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       const appended = appendChunk(
         stdout,
-        Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk),
+        bytes,
         request.maxOutputBytes,
       );
       stdout = appended.buffer;
       truncated = truncated || appended.truncated;
+      consumeProgress("stdout", progressDecoders.stdout.write(bytes));
     });
     child.stderr.on("data", (chunk: Buffer | string) => {
+      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       const appended = appendChunk(
         stderr,
-        Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk),
+        bytes,
         request.maxOutputBytes,
       );
       stderr = appended.buffer;
       truncated = truncated || appended.truncated;
+      consumeProgress("stderr", progressDecoders.stderr.write(bytes));
     });
 
     child.once("error", (error) => {
+      flushProgress();
       finish({
         ok: false,
         exitCode: null,
@@ -270,6 +304,7 @@ export async function runCodeToWikiProcess(
       });
     });
     child.once("close", (exitCode, processSignal) => {
+      flushProgress();
       finish({
         ok: exitCode === 0 && !timedOut && !aborted,
         exitCode,
@@ -285,96 +320,137 @@ export async function runCodeToWikiProcess(
   });
 }
 
-export type ParsedGitRepository = {
-  canonicalUrl: string;
-  host: string;
-  name: string;
-  namespace: string;
-};
-
-export function parseGitRepositoryUrl(raw: string): ParsedGitRepository {
-  let url: URL;
-  try {
-    url = new URL(raw.trim());
-  } catch {
-    throw new CodeToWikiError(
-      "INVALID_REPOSITORY_URL",
-      "repository_url must be a valid HTTPS Git repository URL.",
-    );
-  }
-  if (
-    url.protocol !== "https:" ||
-    !url.hostname ||
-    url.username ||
-    url.password ||
-    url.search ||
-    url.hash
-  ) {
-    throw new CodeToWikiError(
-      "INVALID_REPOSITORY_URL",
-      "Only credential-free HTTPS Git repository URLs without query strings or fragments are supported.",
-    );
-  }
-  const segments = url.pathname
-    .split("/")
-    .map((segment) => segment.trim())
-    .filter(Boolean);
-  if (segments.length === 0) {
-    throw new CodeToWikiError(
-      "INVALID_REPOSITORY_URL",
-      "repository_url must include a repository path.",
-    );
-  }
-  let decodedSegments: string[];
-  try {
-    decodedSegments = segments.map((segment) => decodeURIComponent(segment));
-  } catch {
-    throw new CodeToWikiError(
-      "INVALID_REPOSITORY_URL",
-      "repository_url contains an invalid encoded path segment.",
-    );
-  }
-  const name = (decodedSegments.at(-1) ?? "").replace(/\.git$/i, "").trim();
-  if (!name || name === "." || name === ".." || /[\u0000-\u001f/\\]/u.test(name)) {
-    throw new CodeToWikiError(
-      "INVALID_REPOSITORY_URL",
-      "repository_url contains an invalid repository name.",
-    );
-  }
-  url.pathname = url.pathname.replace(/\/+$/u, "");
-  if (url.hostname.toLowerCase() === "github.com" && !url.pathname.toLowerCase().endsWith(".git")) {
-    url.pathname = `${url.pathname}.git`;
-  }
-  return {
-    canonicalUrl: url.toString(),
-    host: url.host.toLowerCase(),
-    namespace: decodedSegments.slice(0, -1).join("/"),
-    name,
-  };
+function isPathInside(root: string, candidate: string): boolean {
+  const relative = path.relative(root, candidate);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
-function validateBranch(raw: unknown): string | undefined {
-  const branch = nonEmptyString(raw);
-  if (!branch) {
-    return undefined;
+function workspaceCandidate(workspaceRoot: string, raw: unknown, fieldName: string): string {
+  const value = nonEmptyString(raw);
+  if (!value) {
+    throw new CodeToWikiError(
+      `${fieldName.toUpperCase()}_REQUIRED`,
+      `${fieldName} must be a non-empty workspace-relative or workspace-contained absolute path.`,
+    );
   }
-  if (
-    branch.length > 255 ||
-    /[\u0000-\u0020~^:?*]/u.test(branch) ||
-    branch.includes("\\") ||
-    branch.includes("[") ||
-    branch.includes("]") ||
-    branch.startsWith("-") ||
-    branch.startsWith("/") ||
-    branch.endsWith("/") ||
-    branch.endsWith(".") ||
-    branch.includes("..") ||
-    branch.includes("//") ||
-    branch.includes("@{")
-  ) {
-    throw new CodeToWikiError("INVALID_BRANCH", "branch is not a valid Git branch name.");
+  const candidate = path.isAbsolute(value)
+    ? path.resolve(value)
+    : path.resolve(workspaceRoot, value);
+  if (!isPathInside(workspaceRoot, candidate)) {
+    throw new CodeToWikiError(
+      "PATH_OUTSIDE_WORKSPACE",
+      `${fieldName} must stay inside the current digital employee workspace.`,
+    );
   }
-  return branch;
+  return candidate;
+}
+
+async function resolveWorkspaceRoot(raw: string): Promise<string> {
+  const workspaceRoot = path.resolve(raw);
+  await fs.mkdir(workspaceRoot, { recursive: true });
+  return await fs.realpath(workspaceRoot);
+}
+
+async function resolveRepositoryDirectory(
+  workspaceRoot: string,
+  raw: unknown,
+): Promise<string> {
+  const candidate = workspaceCandidate(workspaceRoot, raw, "repository_path");
+  let repositoryPath: string;
+  try {
+    repositoryPath = await fs.realpath(candidate);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
+      throw new CodeToWikiError(
+        "REPOSITORY_NOT_FOUND",
+        `repository_path does not exist: ${candidate}`,
+      );
+    }
+    throw error;
+  }
+  if (!isPathInside(workspaceRoot, repositoryPath)) {
+    throw new CodeToWikiError(
+      "PATH_OUTSIDE_WORKSPACE",
+      "repository_path resolves outside the current digital employee workspace.",
+    );
+  }
+  if (!(await fs.stat(repositoryPath)).isDirectory()) {
+    throw new CodeToWikiError(
+      "REPOSITORY_NOT_DIRECTORY",
+      `repository_path is not a directory: ${repositoryPath}`,
+    );
+  }
+  return repositoryPath;
+}
+
+async function nearestExistingAncestor(candidate: string): Promise<string> {
+  let current = candidate;
+  while (true) {
+    try {
+      await fs.lstat(current);
+      return current;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
+        throw error;
+      }
+    }
+    const parent = path.dirname(current);
+    if (parent === current) {
+      throw new CodeToWikiError("OUTPUT_DIRECTORY_INVALID", "No valid output directory parent exists.");
+    }
+    current = parent;
+  }
+}
+
+async function resolveOutputDirectory(
+  workspaceRoot: string,
+  raw: unknown,
+): Promise<{ directory: string; created: boolean }> {
+  const candidate = workspaceCandidate(workspaceRoot, raw, "output_directory");
+  if (candidate === workspaceRoot) {
+    throw new CodeToWikiError(
+      "OUTPUT_DIRECTORY_INVALID",
+      "output_directory must be a child directory of the current digital employee workspace.",
+    );
+  }
+
+  const ancestor = await nearestExistingAncestor(candidate);
+  const resolvedAncestor = await fs.realpath(ancestor);
+  if (!isPathInside(workspaceRoot, resolvedAncestor)) {
+    throw new CodeToWikiError(
+      "PATH_OUTSIDE_WORKSPACE",
+      "output_directory resolves outside the current digital employee workspace.",
+    );
+  }
+
+  let created = false;
+  try {
+    const existing = await fs.stat(candidate);
+    if (!existing.isDirectory()) {
+      throw new CodeToWikiError(
+        "OUTPUT_DIRECTORY_INVALID",
+        `output_directory is not a directory: ${candidate}`,
+      );
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
+      throw error;
+    }
+    await fs.mkdir(candidate, { recursive: true });
+    created = true;
+  }
+
+  const directory = await fs.realpath(candidate);
+  if (!isPathInside(workspaceRoot, directory)) {
+    if (created) {
+      await fs.rm(candidate, { recursive: true, force: true }).catch(() => undefined);
+    }
+    throw new CodeToWikiError(
+      "PATH_OUTSIDE_WORKSPACE",
+      "output_directory resolves outside the current digital employee workspace.",
+    );
+  }
+  return { directory, created };
 }
 
 function baseChildEnvironment(): NodeJS.ProcessEnv {
@@ -401,44 +477,6 @@ function baseChildEnvironment(): NodeJS.ProcessEnv {
     }
   }
   return env;
-}
-
-export function buildGitCloneEnvironment(
-  repository: ParsedGitRepository,
-  credentials: GitCloneCredentials = {},
-): {
-  env: NodeJS.ProcessEnv;
-  sensitiveValues: string[];
-} {
-  const env = {
-    ...baseChildEnvironment(),
-    GIT_TERMINAL_PROMPT: "0",
-  };
-  const repositoryUrl = new URL(repository.canonicalUrl);
-  const targetHost = repository.host;
-  const gitHubToken = credentials.gitHubToken?.trim() ?? "";
-  const privateHost = credentials.privateHost?.trim().toLowerCase() ?? "";
-  const privateUsername = credentials.privateUsername?.trim() ?? "";
-  const privateToken = credentials.privateToken?.trim() ?? "";
-  const useGitHubToken = targetHost === "github.com" && Boolean(gitHubToken);
-  const useHostCredential =
-    privateHost === targetHost && Boolean(privateUsername) && Boolean(privateToken);
-  if (!useGitHubToken && !useHostCredential) {
-    return { env, sensitiveValues: [] };
-  }
-  const username = useGitHubToken ? "x-access-token" : privateUsername;
-  const token = useGitHubToken ? gitHubToken : privateToken;
-  const basicCredential = Buffer.from(`${username}:${token}`, "utf8").toString("base64");
-  const credentialScope = `${repositoryUrl.protocol}//${repositoryUrl.host}/`;
-  return {
-    env: {
-      ...env,
-      GIT_CONFIG_COUNT: "1",
-      GIT_CONFIG_KEY_0: `http.${credentialScope}.extraheader`,
-      GIT_CONFIG_VALUE_0: `Authorization: Basic ${basicCredential}`,
-    },
-    sensitiveValues: [token, basicCredential],
-  };
 }
 
 function resolveSecretModelId(agent: AdaptedManagedAgent): string {
@@ -490,25 +528,6 @@ export function resolveRepoWikiModelRuntime(
     model: liteLlmModelName(provider.api, modelId),
     modelRef: agent.modelRef || `${agent.providerKey}/${modelId}`,
   };
-}
-
-function buildCloneArgs(repository: ParsedGitRepository, branch?: string): string[] {
-  const args = ["clone", "--depth", "1", "--single-branch"];
-  if (branch) {
-    args.push("--branch", branch);
-  }
-  args.push("--", repository.canonicalUrl, "repository");
-  return args;
-}
-
-function outputSegment(value: string): string {
-  return (
-    value
-      .toLowerCase()
-      .replace(/[^a-z0-9_.-]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 80) || "repository"
-  );
 }
 
 async function measureDirectoryBytes(root: string, limit: number): Promise<number> {
@@ -584,15 +603,16 @@ function toolErrorResult(error: unknown) {
 
 const toolParameters = Type.Object(
   {
-    repository_url: Type.String({
+    repository_path: Type.String({
       description:
-        "Public or private Git HTTPS repository URL. Credentials must not be embedded in the URL.",
+        "Existing repository directory. Use a path relative to the current digital employee workspace, " +
+        "or an absolute path contained by that workspace. Clone or update the repository with a Git tool first.",
     }),
-    branch: Type.Optional(
-      Type.String({
-        description: "Optional branch to shallow-clone. The repository default branch is used when omitted.",
-      }),
-    ),
+    output_directory: Type.String({
+      description:
+        "Directory where RepoWiki writes documentation. Use a workspace-relative path or a workspace-contained " +
+        "absolute path. Existing directories are reused and are never deleted by this tool.",
+    }),
     language: Type.Optional(
       Type.Union(
         [Type.Literal("en"), Type.Literal("zh"), Type.Literal("ja"), Type.Literal("ko")],
@@ -613,8 +633,6 @@ export function createCodeToWikiToolFactory(deps: CodeToWikiToolDeps): (ctx: any
   const settings = { ...resolveCodeToWikiSettings(), ...deps.settings };
   const runProcess = deps.runProcess ?? runCodeToWikiProcess;
   const getModelApiKey = deps.getModelApiKey ?? getCachedAimodelAuthToken;
-  const now = deps.now ?? (() => new Date());
-  const randomId = deps.randomId ?? randomUUID;
 
   return (ctx: any) => {
     const agentId = nonEmptyString(ctx?.agentId);
@@ -630,9 +648,9 @@ export function createCodeToWikiToolFactory(deps: CodeToWikiToolDeps): (ctx: any
       name: "code_to_wiki",
       label: "Code To Wiki",
       description:
-        "Generate complete Wiki documentation for a public or private HTTPS Git repository. " +
-        "The tool shallow-clones the repository and runs RepoWiki with this digital employee's " +
-        "Redis-managed model.",
+        "Generate Wiki documentation from an existing repository in this digital employee's workspace. " +
+        "Clone or update source code separately with a Git tool. This tool runs RepoWiki with the current " +
+        "digital employee's Redis-managed model and streams RepoWiki progress.",
       parameters: toolParameters,
       async execute(
         _toolCallId: string,
@@ -643,64 +661,19 @@ export function createCodeToWikiToolFactory(deps: CodeToWikiToolDeps): (ctx: any
           details?: Record<string, unknown>;
         }) => void,
       ) {
-        let runRoot = "";
+        let runtimeRoot = "";
         let outputDir = "";
+        let outputDirectoryCreated = false;
         let completed = false;
         try {
-          const repository = parseGitRepositoryUrl(nonEmptyString(input.repository_url));
-          const branch = validateBranch(input.branch);
           const language = nonEmptyString(input.language) || "zh";
           const outputFormat = nonEmptyString(input.output_format) || "markdown";
           const modelRuntime = resolveRepoWikiModelRuntime(agent, getModelApiKey);
-          const gitEnvironment = buildGitCloneEnvironment(
-            repository,
-            await deps.loadGitCredentials(),
+          const workspaceRoot = await resolveWorkspaceRoot(deps.resolveWorkspaceDir(agentId));
+          const repositoryDir = await resolveRepositoryDirectory(
+            workspaceRoot,
+            input.repository_path,
           );
-
-          runRoot = await fs.mkdtemp(path.join(tmpdir(), "byclaw-repowiki-"));
-          const repositoryDir = path.join(runRoot, "repository");
-          const runtimeDir = path.join(runRoot, "runtime");
-          await fs.mkdir(runtimeDir, { recursive: true });
-
-          const timestamp = now().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
-          const jobId = outputSegment(randomId()).slice(0, 12);
-          outputDir = path.join(
-            deps.resolveWorkspaceDir(agentId),
-            OUTPUT_DIRECTORY_NAME,
-            `${outputSegment(
-              [repository.namespace, repository.name].filter(Boolean).join("-"),
-            )}-${timestamp}-${jobId}`,
-          );
-          await fs.mkdir(outputDir, { recursive: true });
-
-          onUpdate?.({
-            content: [{ type: "text", text: "code_to_wiki is shallow-cloning the repository." }],
-            details: { status: "cloning" },
-          });
-          const cloneResult = await runProcess({
-            command: settings.gitCommand,
-            args: buildCloneArgs(repository, branch),
-            cwd: runRoot,
-            env: gitEnvironment.env,
-            timeoutMs: settings.cloneTimeoutMs,
-            maxOutputBytes: settings.maxCommandOutputBytes,
-            signal,
-            sensitiveValues: gitEnvironment.sensitiveValues,
-          });
-          if (!cloneResult.ok) {
-            const authHint =
-              gitEnvironment.sensitiveValues.length > 0
-                ? ""
-                : repository.host === "github.com"
-                  ? " Configure the user's GH_TOKEN when this is a private GitHub repository."
-                  : ` Configure GIT_HOST, GIT_USERNAME, and GIT_TOKEN for ${
-                      repository.host
-                    } when this is a private repository.`;
-            throw new CodeToWikiError(
-              cloneResult.aborted ? "TOOL_ABORTED" : "GIT_CLONE_FAILED",
-              `${processFailureMessage("Git shallow clone", cloneResult)}${authHint}`,
-            );
-          }
 
           const repositoryBytes = await measureDirectoryBytes(
             repositoryDir,
@@ -709,13 +682,34 @@ export function createCodeToWikiToolFactory(deps: CodeToWikiToolDeps): (ctx: any
           if (repositoryBytes > settings.maxRepositoryBytes) {
             throw new CodeToWikiError(
               "REPOSITORY_TOO_LARGE",
-              `The shallow checkout exceeds the ${settings.maxRepositoryBytes}-byte repository limit.`,
+              `repository_path exceeds the ${settings.maxRepositoryBytes}-byte repository limit.`,
             );
           }
 
+          const resolvedOutput = await resolveOutputDirectory(
+            workspaceRoot,
+            input.output_directory,
+          );
+          outputDir = resolvedOutput.directory;
+          outputDirectoryCreated = resolvedOutput.created;
+          runtimeRoot = await fs.mkdtemp(path.join(tmpdir(), "byclaw-repowiki-"));
+
           onUpdate?.({
-            content: [{ type: "text", text: "code_to_wiki is generating documentation with RepoWiki." }],
-            details: { status: "generating" },
+            content: [
+              {
+                type: "text",
+                text: [
+                  "code_to_wiki is starting RepoWiki with an existing repository.",
+                  `Repository: ${repositoryDir}`,
+                  `Output directory: ${outputDir}`,
+                ].join("\n"),
+              },
+            ],
+            details: {
+              status: "preparing",
+              repositoryPath: repositoryDir,
+              outputDirectory: outputDir,
+            },
           });
           const repoWikiResult = await runProcess({
             command: settings.repoWikiCommand,
@@ -729,10 +723,10 @@ export function createCodeToWikiToolFactory(deps: CodeToWikiToolDeps): (ctx: any
               "--lang",
               language,
             ],
-            cwd: runRoot,
+            cwd: workspaceRoot,
             env: {
               ...baseChildEnvironment(),
-              BYCLAW_REPOWIKI_DATA_DIR: runtimeDir,
+              BYCLAW_REPOWIKI_DATA_DIR: runtimeRoot,
               REPOWIKI_API_BASE: modelRuntime.apiBase,
               REPOWIKI_API_KEY: modelRuntime.apiKey,
               REPOWIKI_LANG: language,
@@ -742,6 +736,18 @@ export function createCodeToWikiToolFactory(deps: CodeToWikiToolDeps): (ctx: any
             maxOutputBytes: settings.maxCommandOutputBytes,
             signal,
             sensitiveValues: [modelRuntime.apiKey],
+            onOutputLine: ({ stream, line }) => {
+              onUpdate?.({
+                content: [{ type: "text", text: `RepoWiki: ${line}` }],
+                details: {
+                  status: "generating",
+                  stream,
+                  message: line,
+                  repositoryPath: repositoryDir,
+                  outputDirectory: outputDir,
+                },
+              });
+            },
           });
           if (!repoWikiResult.ok) {
             throw new CodeToWikiError(
@@ -783,8 +789,7 @@ export function createCodeToWikiToolFactory(deps: CodeToWikiToolDeps): (ctx: any
             details: {
               ok: true,
               repository: {
-                url: repository.canonicalUrl,
-                branch: branch ?? "default",
+                path: repositoryDir,
               },
               output: {
                 directory: outputDir,
@@ -796,7 +801,6 @@ export function createCodeToWikiToolFactory(deps: CodeToWikiToolDeps): (ctx: any
                 ref: modelRuntime.modelRef,
               },
               metrics: {
-                cloneDurationMs: cloneResult.durationMs,
                 generateDurationMs: repoWikiResult.durationMs,
                 repositoryBytes,
               },
@@ -810,11 +814,11 @@ export function createCodeToWikiToolFactory(deps: CodeToWikiToolDeps): (ctx: any
           );
           return toolErrorResult(error);
         } finally {
-          if (!completed && outputDir) {
+          if (!completed && outputDirectoryCreated && outputDir) {
             await fs.rm(outputDir, { recursive: true, force: true }).catch(() => undefined);
           }
-          if (runRoot) {
-            await fs.rm(runRoot, { recursive: true, force: true }).catch(() => undefined);
+          if (runtimeRoot) {
+            await fs.rm(runtimeRoot, { recursive: true, force: true }).catch(() => undefined);
           }
         }
       },

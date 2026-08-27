@@ -219,11 +219,15 @@ MiniMax HTTP 客户端。`baiying-redis-image` provider 在每次原生工具调
 
 ### `code_to_wiki`
 
-`code_to_wiki` 按需为 HTTPS Git 仓库生成 Wiki 文档，支持 GitHub、GitLab、Gitee 以及自建 Git 服务（包括自定义 HTTPS 端口和多级命名空间）。工具先执行 `git clone --depth 1 --single-branch`，再使用当前数字员工从 Redis 解析出的模型配置运行 RepoWiki。生成文件保存在该数字员工 workspace 的 `generated-wikis/` 目录，临时源码 checkout 和 RepoWiki 缓存在调用结束后删除。
+`code_to_wiki` 使用当前数字员工从 Redis 解析出的模型配置，为 workspace 中已经存在的本地代码仓库运行 RepoWiki。工具不再克隆或更新 Git 仓库；调用方应先使用 Git 工具准备代码，再通过必填的 `repository_path` 指向该目录。`repository_path` 可以是当前数字员工 workspace 下的相对路径，也可以是受 workspace 包含的绝对路径。
+
+生成位置由必填的 `output_directory` 指定，不再写死到 `generated-wikis/`。该路径同样必须位于当前数字员工 workspace 内。输出目录已经存在时会复用，且工具失败时不会删除其中的原有文件；由本次调用新建的输出目录则会在失败时清理。
+
+RepoWiki 运行期间，插件会将其 stdout/stderr 文本按行转换为工具进度更新。插件仍负责服务端模型密钥注入、超时与取消、LLM 错误识别、生成文件校验及临时 RepoWiki runtime 清理。
 
 工具不会根据数字员工名称开放。验收测试期间，插件会为所有托管数字员工自动授权：当 `relTools` 非空时合并进 `tools.allow`，否则写入 `tools.alsoAllow`，无需在单个数字员工配置中显式声明。
 
-公开 HTTPS Git 仓库可直接克隆；私有 GitHub 仓库使用当前用户私有参数中的 `GH_TOKEN`。其他私有 Git 服务使用用户私有参数中的 `GIT_HOST`、`GIT_USERNAME` 和 `GIT_TOKEN`；`GIT_HOST` 必须与仓库 URL 的 host（含非默认端口）完全一致，凭据才会注入。工具拒绝 URL 内嵌凭据、查询字符串和 fragment，凭据只通过 Git 子进程环境发送给明确绑定的 host，不会写入仓库 URL、持久化 Git 配置或工具输出。
+典型调用顺序为：Git 工具克隆或更新仓库并返回本地路径，然后调用 `code_to_wiki({ repository_path, output_directory, language, output_format })`。后续重新生成时复用同一个 `repository_path`，不会再次克隆。
 
 ## HTTP
 
