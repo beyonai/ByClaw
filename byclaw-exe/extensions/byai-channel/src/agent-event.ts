@@ -52,6 +52,7 @@ import {
 } from "./i18n.js";
 import { DELEGATED_TASK_STATUS } from "../../shared/src/delegated-tool-details.js"; 
 import { getToolCallUIDescription } from "./toolCallUIDescription.js";
+import { shouldEmitToolCard } from "./tool-card-visibility.js";
 
 type AgentStreamState = {
   seq: number;
@@ -155,11 +156,14 @@ async function handleToolEvent(
   event: AgentEvent,
   resolvedSessionKey: string | undefined,
 ) {
+  const data = event.data as ToolEventData;
+  if (!shouldEmitToolCard(data?.name)) {
+    return;
+  }
   const sdkEmitter = resolveSdkEmitter(request.accountId);
   if (!sdkEmitter) {
     return;
   }
-  const data = event.data as ToolEventData;
   const phase = data?.phase ?? "";
   const toolCallId = data?.toolCallId ?? "";
 
