@@ -36,7 +36,7 @@ export function resolveOpenClawTaskPlanContext(
     return undefined;
   }
   const channel = resolveChannelSessionIdForTool(ctx, sessionKey);
-  if (!channel.sessionId || !channel.messageId) {
+  if (channel.delegatedAgentCall || !channel.sessionId || !channel.messageId) {
     return undefined;
   }
   const sourceRunId =
