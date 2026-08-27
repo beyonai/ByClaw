@@ -35,6 +35,8 @@ type NativeAgentJson = {
     allowSpawnFrom?: string[];
 };
 
+const UPDATE_TASK_PLAN_TOOL_NAME = "updateTaskPlan";
+
 export type AimodelProviderApi = "openai-completions" | "anthropic-messages";
 export type AimodelModelInput = "text" | "image";
 
@@ -160,10 +162,10 @@ function normalizeAgentListTools(
     const allow = normalizeStringList(raw.relTools);
     return allow.length > 0
         ? {
-              allow: Array.from(new Set([...allow, "baiying_call"])),
+              allow: Array.from(new Set([...allow, "baiying_call", UPDATE_TASK_PLAN_TOOL_NAME])),
           }
         : {
-              alsoAllow: ["baiying_call"],
+              alsoAllow: ["baiying_call", UPDATE_TASK_PLAN_TOOL_NAME],
           };
 }
 
@@ -339,6 +341,7 @@ export function adaptAgentJson(params: {
             name,
             identity: { name },
             skills: normalizeAgentListSkills(asRecord),
+            tools: normalizeAgentListTools(asRecord),
         };
 
         return {
@@ -381,6 +384,7 @@ export function adaptAgentJson(params: {
                     : agentId,
         },
         skills: normalizeAgentListSkills(asRecord),
+        tools: normalizeAgentListTools(asRecord),
     };
 
     return {

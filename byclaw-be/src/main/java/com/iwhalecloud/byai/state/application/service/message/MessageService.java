@@ -54,9 +54,11 @@ import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.state.application.service.session.SessionApplicationService;
+import com.iwhalecloud.byai.state.application.service.taskplan.TaskPlanApplicationService;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import com.iwhalecloud.byai.state.domain.chat.dto.ContentVo;
 import com.iwhalecloud.byai.state.domain.chat.dto.ExternalMessageVo;
@@ -77,6 +79,7 @@ import com.iwhalecloud.byai.state.common.exception.BdpRuntimeException;
 import com.iwhalecloud.byai.state.domain.session.dto.MessageDto;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
+import com.iwhalecloud.byai.state.domain.taskplan.dto.TaskPlanSnapshot;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import lombok.extern.slf4j.Slf4j;
 
@@ -115,6 +118,9 @@ public class MessageService {
 
     @Autowired
     private ByaiMessageRelObjService byaiMessageRelObjService;
+
+    @Autowired
+    private TaskPlanApplicationService taskPlanApplicationService;
 
     /**
      * 转发历史记录
@@ -241,8 +247,10 @@ public class MessageService {
             }
         }
 
-        // 补充收藏信息
-        pageInfo.setList(this.appendCollectInfo(byaiMessageHotDtos, messageQo.getSessionId()));
+        // 补充收藏信息和回答关联的任务计划快照
+        List<ByaiMessageHotDtoDto> messages = this.appendCollectInfo(byaiMessageHotDtos, messageQo.getSessionId());
+        this.appendTaskPlanInfo(messages, messageQo.getSessionId());
+        pageInfo.setList(messages);
 
         return pageInfo;
 
@@ -286,6 +294,20 @@ public class MessageService {
         });
 
         return byaiMessageHotDtoDtos;
+    }
+
+    private void appendTaskPlanInfo(List<ByaiMessageHotDtoDto> messages, Long sessionId) {
+        if (ListUtil.isEmpty(messages) || sessionId == null) {
+            return;
+        }
+        List<Long> messageIds = messages.stream().map(ByaiMessageHotDtoDto::getMessageId)
+            .filter(Objects::nonNull).distinct().toList();
+        Map<Long, TaskPlanSnapshot> taskPlans = taskPlanApplicationService.findLatestByMessageIds(sessionId,
+            messageIds);
+        if (taskPlans.isEmpty()) {
+            return;
+        }
+        messages.forEach(message -> message.setTaskPlan(taskPlans.get(message.getMessageId())));
     }
 
     /**
@@ -610,8 +632,11 @@ public class MessageService {
      *
      * @param messageId 消息ID
      */
+    @Transactional
     public void deleteMessage(String messageId) {
-        byaiMessageHotService.deleteById(Long.parseLong(messageId));
+        Long parsedMessageId = Long.parseLong(messageId);
+        taskPlanApplicationService.deleteByMessageId(parsedMessageId);
+        byaiMessageHotService.deleteById(parsedMessageId);
     }
 
     /**

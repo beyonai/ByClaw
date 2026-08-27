@@ -21,6 +21,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.servlet.NoHandlerFoundException;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.util.ContentCachingRequestWrapper;
 
 import com.alibaba.fastjson.JSON;
@@ -94,6 +95,14 @@ public class GlobalExceptionHandler {
         String msg = dealMessage(e.getMessage());
         HttpStatus httpStatus = HttpStatus.INTERNAL_SERVER_ERROR;
         return new ResponseEntity<>(ResponseUtil.fail(msg), httpStatus);
+    }
+
+    /** 保留领域服务显式声明的 4xx/5xx，避免把协议错误统一伪装成 500。 */
+    @ExceptionHandler(ResponseStatusException.class)
+    public ResponseEntity<ResponseUtil<Object>> handleResponseStatusException(ResponseStatusException e) {
+        logger.warn("ResponseStatusException occurred: status={}, reason={}", e.getStatusCode(), e.getReason());
+        String msg = dealMessage(StringUtils.defaultIfBlank(e.getReason(), e.getMessage()));
+        return ResponseEntity.status(e.getStatusCode()).body(ResponseUtil.fail(msg));
     }
 
     @ExceptionHandler(value = NoHandlerFoundException.class)

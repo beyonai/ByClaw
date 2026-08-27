@@ -11,6 +11,8 @@ import { resolveBundledBaiyingResourcesDir } from "./plugin-paths.js";
 import { registerManagedAgentModelHooks } from "./managed-agent-model-hook.js";
 import { createRedisJsonStore, setSharedRedisJsonStore } from "./redis-json-store.js";
 import { loadBaiyingRedisEnvDefaults } from "./redis-env.js";
+import { createBaiyingTaskPlanRuntime } from "./task-plan-runtime.js";
+import { registerUpdateTaskPlan } from "./update-task-plan-tool.js";
 import type { BaiyingEnhancePluginConfig } from "./types.js";
 
 function resolvePluginPath(api: OpenClawPluginApi, raw: string): string {
@@ -61,6 +63,15 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
     },
   });
   const pluginCfg = (api.pluginConfig ?? {}) as BaiyingEnhancePluginConfig;
+  const taskPlanLogger = {
+    info: (message: string) => api.logger.info(message),
+    warn: (message: string) => api.logger.warn(message),
+  };
+  registerUpdateTaskPlan({
+    api,
+    runtime: createBaiyingTaskPlanRuntime({ logger: taskPlanLogger }),
+    logger: taskPlanLogger,
+  });
   api.registerReload({
     hotPrefixes: resolveConfigSyncHotPrefixes(pluginCfg),
   });

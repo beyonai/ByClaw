@@ -32,6 +32,7 @@ import { consumeWorkspaceReloadHint } from "./workspace-reload-hints.js";
 import { EventType, SseReasonMessageType } from "@byclaw/by-framework";
 import { getAgentNameById } from "./utils.js";
 import { buildAgentReadyTitle } from "./i18n.js";
+import { continueActiveTaskPlan } from "./task-plan-continuation.js";
 
 const CHANNEL_ID = "byai-channel" as const;
 
@@ -315,6 +316,7 @@ async function deliverReplyToAgentViaSdkUnderGate(
     sessionKey,
     to: `user:${message.sessionId}`,
     sessionId: message.sessionId,
+    messageId: message.messageId,
     traceId: message.traceId,
     language: message.language,
     languageProvided: message.languageProvided,
@@ -334,13 +336,6 @@ async function deliverReplyToAgentViaSdkUnderGate(
     }),
   );
 
-  const body = rt.channel.reply.formatAgentEnvelope({
-    channel: CHANNEL_ID,
-    from: `${CHANNEL_ID}:${message.userId}`,
-    timestamp: new Date(),
-    envelope: rt.channel.reply.resolveEnvelopeFormatOptions(cfg),
-    body: message.text,
-  });
   const inboundMediaPayload = await resolveSdkInboundMediaPayload({
     cfg,
     accountId: account.accountId,
@@ -349,43 +344,41 @@ async function deliverReplyToAgentViaSdkUnderGate(
     log,
   });
 
-  // 构建完整的入站上下文
-  const ctxPayload = {
-    Body: body,
-    RawBody: message.text,
-    CommandBody: message.text,
-    From: `${CHANNEL_ID}:${message.userId}`,
-    To: `user:${message.sessionId}`,
-    SessionKey: sessionKey,
-    AccountId: routing.accountId,
-    ChatType: "direct",
-    SenderName: message.userId,
-    SenderId: message.userId,
-    Provider: CHANNEL_ID,
-    Surface: CHANNEL_ID,
-    /**
-     * 不能使用message.messageId作为MessageSid，因为在需要用户交互的场景下，messageId可能会传入和上一次任务一样的messageId
-     * 相同的MessageSid，会使openclaw判断为相同的入站消息，导致直接跳过
-     */
-    // MessageSid: message.messageId,
-    MessageSid: crypto.randomUUID(),
-    OriginatingChannel: CHANNEL_ID,
-    OriginatingTo: `user:${message.sessionId}`,
-    /** Explicit gateway session id for tools (e.g. baiying_call); OpenClaw may forward to tool ctx. */
-    ChannelSessionId: message.sessionId,
-    /** Explicit gateway trace id for tools (e.g. baiying_call doc trace passthrough). */
-    ChannelTraceId: message.traceId || "",
-    ...inboundMediaPayload,
-  };
+  async function runOneDispatch(bodyText: string, includeMedia: boolean): Promise<void> {
+    const body = rt.channel.reply.formatAgentEnvelope({
+      channel: CHANNEL_ID,
+      from: `${CHANNEL_ID}:${message.userId}`,
+      timestamp: new Date(),
+      envelope: rt.channel.reply.resolveEnvelopeFormatOptions(cfg),
+      body: bodyText,
+    });
+    const ctxPayload = {
+      Body: body,
+      RawBody: bodyText,
+      CommandBody: bodyText,
+      From: `${CHANNEL_ID}:${message.userId}`,
+      To: `user:${message.sessionId}`,
+      SessionKey: sessionKey,
+      AccountId: routing.accountId,
+      ChatType: "direct",
+      SenderName: message.userId,
+      SenderId: message.userId,
+      Provider: CHANNEL_ID,
+      Surface: CHANNEL_ID,
+      // A fresh id is required for every initial or continuation dispatch.
+      MessageSid: crypto.randomUUID(),
+      OriginatingChannel: CHANNEL_ID,
+      OriginatingTo: `user:${message.sessionId}`,
+      ChannelSessionId: message.sessionId,
+      ChannelTraceId: message.traceId || "",
+      ...(includeMedia ? inboundMediaPayload : {}),
+    };
 
-  try {
     const { dispatcher, replyOptions } = rt.channel.reply.createReplyDispatcherWithTyping({
       deliver: () => {},
     });
-
     const finalizedCtx = rt.channel.reply.finalizeInboundContext(ctxPayload);
     log?.info?.(`[diagnose-sdk] finalized ctx, SessionKey: ${finalizedCtx.SessionKey}`);
-
     const dispatchResult = await rt.channel.reply.withReplyDispatcher({
       dispatcher,
       run: () =>
@@ -399,7 +392,7 @@ async function deliverReplyToAgentViaSdkUnderGate(
             disableBlockStreaming: true,
             onAgentRunStart: async (runId: string) => {
               bindActiveSdkRequestRunId(sessionKey, runId);
-              log?.info?.(`[diagnose-sdk] onAgentRunStart called, runId: ${runId}}`);
+              log?.info?.(`[diagnose-sdk] onAgentRunStart called, runId: ${runId}`);
               await onReply(buildAgentReadyTitle(message.language, sessionAgentName), "partial", {
                 parentMessageId: "-1",
                 eventType: EventType.REASONING_LOG_DELTA,
@@ -415,6 +408,17 @@ async function deliverReplyToAgentViaSdkUnderGate(
     log?.info?.(
       `[diagnose-sdk] dispatch finished, queuedFinal=${String(dispatchResult.queuedFinal)}, counts=${JSON.stringify(dispatchResult.counts)}`,
     );
+  }
+
+  try {
+    await runOneDispatch(message.text, true);
+    await continueActiveTaskPlan({
+      request: activeRequest,
+      language: message.language,
+      signal: deps.abortController?.signal,
+      logger: log,
+      dispatch: (prompt) => runOneDispatch(prompt, false),
+    });
   } catch (err) {
     log?.error?.(`[diagnose-sdk] Message dispatch failed: ${String(err)}`);
     throw err;

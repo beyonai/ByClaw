@@ -27,10 +27,12 @@ import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.manager.qo.resource.DigEmployeeExtQo;
 import com.iwhalecloud.byai.state.common.dto.AnswerDelta;
 import com.iwhalecloud.byai.state.common.dto.MessageStructDto;
+import com.iwhalecloud.byai.state.application.service.taskplan.TaskPlanApplicationService;
 import com.iwhalecloud.byai.state.domain.chat.dto.FileUploadDto;
 import com.iwhalecloud.byai.state.domain.chat.dto.PrologueDto;
 import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatSnapshotResponse;
 import com.iwhalecloud.byai.state.domain.chat.dto.StopChatDto;
+import com.iwhalecloud.byai.state.domain.taskplan.dto.TaskPlanSnapshot;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatProcessContext;
 import com.iwhalecloud.byai.state.domain.chat.service.OutputStreamManager;
 import com.iwhalecloud.byai.state.domain.chat.service.RunningChatSnapshotService;
@@ -42,6 +44,7 @@ import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import com.iwhalecloud.byai.state.domain.template.enums.DebugModeEnum;
 import com.iwhalecloud.byai.state.domain.chat.service.TargetAgentTypeResolver;
+import com.iwhalecloud.byai.state.domain.ws.service.TaskPlanWebSocketPublisher;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -95,6 +98,12 @@ public class AssistantChatApplicationService {
     private RunningChatSnapshotService runningChatSnapshotService;
 
     @Autowired
+    private TaskPlanApplicationService taskPlanApplicationService;
+
+    @Autowired
+    private TaskPlanWebSocketPublisher taskPlanWebSocketPublisher;
+
+    @Autowired
     private OutputStreamManager outputStreamManager;
 
     AssistantChatApplicationService(GatewayClient<?> gatewayClient) {
@@ -107,6 +116,11 @@ public class AssistantChatApplicationService {
      * @param stopChatDto 入参
      */
     public void stopChat(StopChatDto stopChatDto) {
+        TaskPlanSnapshot cancellingPlan = taskPlanApplicationService.requestCancellation(stopChatDto,
+            "USER_STOPPED", "用户请求停止");
+        taskPlanWebSocketPublisher.broadcast(CurrentUserHolder.getCurrentUserId(), cancellingPlan,
+            stopChatDto.getClientRequestId());
+
         SsResource ssResource = ssResourceService.findById(stopChatDto.getAgentId());
         String workerAgentType = null;
         if (ssResource == null) {
@@ -121,6 +135,12 @@ public class AssistantChatApplicationService {
 
         gatewayClient.cancelTask(String.valueOf(stopChatDto.getMessageId()), String.valueOf(stopChatDto.getSessionId()),
             "user cancel task", targetAgentType, CurrentUserHolder.getCurrentUserCode(), "force");
+
+        TaskPlanSnapshot cancelledPlan = taskPlanApplicationService.confirmCancellation(stopChatDto,
+            "USER_STOPPED", "用户已停止执行");
+        taskPlanWebSocketPublisher.broadcast(CurrentUserHolder.getCurrentUserId(), cancelledPlan,
+            stopChatDto.getClientRequestId());
+
         runningOutputStreamRegistry.release(stopChatDto.getSessionId(), stopChatDto.getMessageId());
         runningChatSnapshotService.delete(stopChatDto.getSessionId(), stopChatDto.getMessageId());
     }

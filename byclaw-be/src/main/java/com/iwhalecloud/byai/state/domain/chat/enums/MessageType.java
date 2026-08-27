@@ -6,5 +6,6 @@ public enum MessageType {
     SSE_STREAM,
     NOTIFICATION, // 通知
     STOP_CHAT,
+    TASK_PLAN_GET,
     ERROR;
 }

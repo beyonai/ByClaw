@@ -1,16 +1,10 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { adaptAgentJson, extractBaiyingPrologueModelId } from "./agent-adapter.js";
 import { MANAGED_AGENT_PREFIX } from "./types.js";
 
 describe("adaptAgentJson", () => {
     it("extracts modelId from DIG_EMPLOYEE_10000281 prologue", () => {
-        const raw = JSON.parse(
-            readFileSync(
-                new URL("../../../../DIG_EMPLOYEE_10000281.json", import.meta.url),
-                "utf8",
-            ),
-        );
+        const raw = { prologue: JSON.stringify({ modelId: -2000 }) };
         expect(extractBaiyingPrologueModelId(raw)).toBe("-2000");
     });
 
@@ -44,6 +38,9 @@ describe("adaptAgentJson", () => {
         expect(res.systemPrompt).toBe("Be brief.");
         expect(res.listEntry.model).toBeUndefined();
         expect(res.listEntry.skills).toEqual([]);
+        expect(res.listEntry.tools).toEqual({
+            alsoAllow: ["baiying_call", "updateTaskPlan"],
+        });
     });
 
     it("ignores native provider/model and keeps default-model fallback", () => {
@@ -69,6 +66,9 @@ describe("adaptAgentJson", () => {
         expect(res.listEntry.model).toBeUndefined();
         expect(res.systemPrompt).toBe("Help users.");
         expect(res.listEntry.skills).toEqual([]);
+        expect(res.listEntry.tools).toEqual({
+            alsoAllow: ["baiying_call", "updateTaskPlan"],
+        });
     });
 
     it("does not embed JSON array corePersonaDefinition in systemPrompt", () => {
@@ -222,7 +222,7 @@ describe("adaptAgentJson", () => {
             return;
         }
         expect(res.listEntry.tools).toEqual({
-            allow: ["*", "read", "write", "baiying_call"],
+            allow: ["*", "read", "write", "baiying_call", "updateTaskPlan"],
         });
     });
 

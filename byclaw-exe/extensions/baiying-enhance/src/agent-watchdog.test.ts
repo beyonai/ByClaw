@@ -623,7 +623,13 @@ describe("createAgentWatchdog", () => {
         const writeConfigFile = vi.fn(async () => {});
         const api = createMockApi(writeConfigFile, [
             { id: "main", name: "Main", identity: { name: "Main" } },
-            { id: agentId, name: "Demo", identity: { name: "Demo" } },
+            {
+                id: agentId,
+                name: "Demo",
+                identity: { name: "Demo" },
+                skills: [],
+                tools: { alsoAllow: ["baiying_call", "updateTaskPlan"] },
+            },
         ]) as any;
 
         const wd = createAgentWatchdog({
@@ -759,7 +765,7 @@ describe("createAgentWatchdog", () => {
                 name: "Demo",
                 identity: { name: "Demo" },
                 skills: [],
-                tools: { allow: ["*", "read", "write", "baiying_call"] },
+                tools: { allow: ["*", "read", "write", "baiying_call", "updateTaskPlan"] },
             },
         ]) as any;
 
@@ -785,14 +791,14 @@ describe("createAgentWatchdog", () => {
         expect(writeConfigFile).toHaveBeenCalledTimes(1);
         const next = writeConfigFile.mock.calls[0][0];
         const entry = next.agents.list.find((a: any) => a.id === agentId);
-        expect(entry.tools).toEqual({ allow: ["read", "baiying_call"] });
+        expect(entry.tools).toEqual({ allow: ["read", "baiying_call", "updateTaskPlan"] });
         expect(next.skills.entries.__baiying_enhance_reload.enabled).toBe(false);
         expect(next.skills.entries.__baiying_enhance_reload.config.reason).toBe(
             "agent-tool-policy-sync",
         );
         expect(
             next.skills.entries.__baiying_enhance_reload.config.managedSnapshotSignature,
-        ).toContain('tools={"allow":["read","baiying_call"]}');
+        ).toContain('tools={"allow":["read","baiying_call","updateTaskPlan"]}');
     });
 
     it("calls writeConfigFile once when index is missing", async () => {
@@ -891,7 +897,13 @@ describe("createAgentWatchdog", () => {
         const writeConfigFile = vi.fn(async () => {});
         const api = createMockApi(writeConfigFile, [
             { id: "main", name: "Main", identity: { name: "Main" } },
-            { id: agentId, name: "Demo", identity: { name: "Demo" } },
+            {
+                id: agentId,
+                name: "Demo",
+                identity: { name: "Demo" },
+                skills: [],
+                tools: { alsoAllow: ["baiying_call", "updateTaskPlan"] },
+            },
         ]) as any;
 
         const wd = createAgentWatchdog({

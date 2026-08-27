@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+vi.mock("openclaw/plugin-sdk/routing", () => ({
+  isSubagentSessionKey: (value: string) => value.includes(":subagent:"),
+}));
 import { resolveConfigSyncHotPrefixes, resolveDigEmployeePubSub } from "../index.js";
 
 describe("plugin reload config", () => {

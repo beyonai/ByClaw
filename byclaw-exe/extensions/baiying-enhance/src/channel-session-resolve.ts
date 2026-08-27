@@ -21,7 +21,10 @@ export type ChannelSessionSource =
 
 export interface ChannelSessionResolveResult {
   sessionId?: string;
+  messageId?: string;
   traceId?: string;
+  turnId?: string;
+  laneId?: string;
   source: ChannelSessionSource;
   language?: string;
   beyondToken?: string;
@@ -38,6 +41,7 @@ export interface SharedChannelRequestContextLike {
 interface ActiveSdkRequestLike {
   sessionKey?: string;
   sessionId?: string;
+  messageId?: string;
   traceId?: string;
   createdAt?: number;
 }
@@ -105,7 +109,17 @@ export function resolveChannelRequestContextBySessionKey(
 
 function extractCommonFieldsFromSessionKey(
   sessionKey: string | undefined,
-): Pick<ChannelSessionResolveResult, "language" | "beyondToken" | "traceId" | "sessionId" | "parentSessionKey"> {
+): Pick<
+  ChannelSessionResolveResult,
+  | "language"
+  | "beyondToken"
+  | "traceId"
+  | "sessionId"
+  | "messageId"
+  | "turnId"
+  | "laneId"
+  | "parentSessionKey"
+> {
   const context = resolveChannelRequestContextBySessionKey(sessionKey);
   if (!context) {
     return {};
@@ -119,12 +133,21 @@ function extractCommonFieldsFromSessionKey(
     normalizeText(fields?.Language) ||
     undefined;
   const sessionIdFromFields = normalizeText(fields?.sessionId);
+  const messageId =
+    normalizeText(fields?.messageId) ||
+    normalizeText(fields?.answerMessageId) ||
+    undefined;
+  const turnId = normalizeText(fields?.turnId) || undefined;
+  const laneId = normalizeText(fields?.laneId) || undefined;
   const traceFromContext = normalizeText(context.traceId);
   return {
     language,
     beyondToken,
     parentSessionKey: fields?.requesterSessionKey as string | undefined,
     ...(sessionIdFromFields ? { sessionId: sessionIdFromFields } : {}),
+    ...(messageId ? { messageId } : {}),
+    ...(turnId ? { turnId } : {}),
+    ...(laneId ? { laneId } : {}),
     ...(traceFromContext ? { traceId: traceFromContext } : {}),
   };
 }
@@ -146,6 +169,7 @@ function resolveFromGlobalStore(sessionKey: string): ChannelSessionResolveResult
       const commonFields = extractCommonFieldsFromSessionKey(bySession.sessionKey || key);
       return {
         sessionId: sid,
+        messageId: normalizeText(bySession.messageId) || undefined,
         traceId: typeof bySession.traceId === "string" ? bySession.traceId.trim() : undefined,
         source: "active_session",
         ...commonFields,
@@ -159,6 +183,7 @@ function resolveFromGlobalStore(sessionKey: string): ChannelSessionResolveResult
       const commonFields = extractCommonFieldsFromSessionKey(key);
       return {
         sessionId: sid,
+        messageId: normalizeText(byChild.messageId) || undefined,
         traceId: typeof byChild.traceId === "string" ? byChild.traceId.trim() : undefined,
         source: "child",
         ...commonFields,
@@ -201,6 +226,9 @@ export function resolveChannelSessionIdForTool(ctx: unknown, sessionKey: string)
       language: explicitLanguage || commonFields.language,
       beyondToken: explicitBeyondToken || commonFields.beyondToken,
       parentSessionKey: commonFields.parentSessionKey,
+      messageId: commonFields.messageId,
+      turnId: commonFields.turnId,
+      laneId: commonFields.laneId,
     };
   }
 

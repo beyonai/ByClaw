@@ -6,7 +6,7 @@
   "enabledByDefault": true,
   "providers": ["baiying-aimodel"],
   "contracts": {
-    "tools": ["baiying_call"]
+    "tools": ["baiying_call", "updateTaskPlan"]
   },
   "configSchema": {
     "type": "object",
