@@ -3557,10 +3557,23 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
      */
     private void submitTaskChatAfterCommit(AssistantChatDto chatDto, LoginInfo loginInfo, Long taskId) {
         Runnable chatTask = () -> {
+            LoginInfo previousLoginInfo = CurrentUserHolder.getLoginInfo();
             try {
+                // 不依赖 TTL 线程池是否成功透传上下文；定时任务必须显式绑定创建者身份，
+                // 否则 RouteService 取不到 userCode，会在发送 Gateway 前直接返回，留下只有 ask 的会话。
+                CurrentUserHolder.setLoginInfo(loginInfo);
+                log.info("[DevloopTask] 开始异步 LLM chat, taskId={}, sessionId={}, userCode={}", taskId,
+                    chatDto.getSessionId(), loginInfo == null ? null : loginInfo.getUserCode());
                 assistantChatService.chat(chatDto, new ByteArrayOutputStream(), loginInfo);
+                log.info("[DevloopTask] 异步 LLM chat 完成, taskId={}, sessionId={}", taskId, chatDto.getSessionId());
             } catch (Exception e) {
                 log.error("[DevloopTask] 异步 LLM chat 执行失败, taskId={}, sessionId={}", taskId, chatDto.getSessionId(), e);
+            } finally {
+                if (previousLoginInfo != null) {
+                    CurrentUserHolder.setLoginInfo(previousLoginInfo);
+                } else {
+                    CurrentUserHolder.clearLoginInfo();
+                }
             }
         };
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
@@ -4939,6 +4952,10 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
             return;
         }
 
+        // 调度器线程没有 HTTP 请求上下文；创建会话阶段也依赖 CurrentUserHolder 写入 creator/enterprise 等字段。
+        // 仅把 LoginInfo 传给后续 chat 不够，否则会话先以 Integer.MIN_VALUE/空企业创建，后台链路可能无法正确归属和路由。
+        LoginInfo previousLoginInfo = CurrentUserHolder.getLoginInfo();
+        CurrentUserHolder.setLoginInfo(loginInfo);
         try {
             AssistantChatDto chatDto = buildChatDtoFromConfig(chatConfig, source);
             assistantChatService.createGroupChatSession(chatDto);
@@ -4966,6 +4983,12 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
             scanLogService.recordRun(source.getSourceId(), source.getProjectId(), null, source.getSourceName(), "failed",
                 exception.getMessage());
             throw exception;
+        } finally {
+            if (previousLoginInfo != null) {
+                CurrentUserHolder.setLoginInfo(previousLoginInfo);
+            } else {
+                CurrentUserHolder.clearLoginInfo();
+            }
         }
     }
 
@@ -5055,7 +5078,10 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
         // 会话名取自动化名称，便于在会话列表里对上是哪条自动化触发的。
         chatDto.setChatContent(StringUtils.defaultIfBlank(source.getSourceName(), chatConfig.chatContent()));
         chatDto.setAccessTerminal("DevLoop");
-        chatDto.setClientRequestId(AssistantChatService.getClientRequestId());
+        // 定时任务没有真实 WebSocket 客户端；clientRequestId 会让聊天链路误判为 WebSocket，
+        // 提前返回而不等待 Redis Stream 终态，导致会话只有 ask 没有 answer。后台任务必须走 HTTP/SSE
+        // 等待路径，由 RouteService 负责等待沙箱 worker 就绪并完成 answer 落库。
+        chatDto.setClientRequestId(null);
         // 资源清单原样带上：提示词里的 @ 引用要跟到模型侧，否则引用形同虚设。
         chatDto.setResourceList(chatConfig.resourceList());
         return chatDto;

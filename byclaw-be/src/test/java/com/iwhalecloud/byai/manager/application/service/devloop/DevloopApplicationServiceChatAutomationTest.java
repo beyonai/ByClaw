@@ -107,6 +107,8 @@ class DevloopApplicationServiceChatAutomationTest {
         assertThat(dto.getChatContent()).isEqualTo("每日告警汇总");
         assertThat(dto.getSessionId()).isNull();
         assertThat(dto.getAccessTerminal()).isEqualTo("DevLoop");
+        // 定时任务没有 WebSocket 客户端，不能设置 clientRequestId，否则聊天主流程会提前异步返回，只有 ask 落库。
+        assertThat(dto.getClientRequestId()).isNull();
         // resourceList 必须跟到 DTO，否则提示词里的 @ 引用到模型侧就没了。
         assertThat(dto.getResourceList()).hasSize(1);
     }
