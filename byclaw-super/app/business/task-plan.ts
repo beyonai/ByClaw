@@ -63,7 +63,11 @@ export class ByClawBeTaskPlanGateway implements TaskPlanGateway {
       sourceRuntime: input.sourceRuntime,
       sourceRunId: input.sourceRunId,
     });
-    return data === null ? undefined : parseTaskPlanSnapshot(data);
+    if (data === null) {
+      return undefined;
+    }
+    const snapshot = parseTaskPlanSnapshot(data);
+    return isOwnedByContext(snapshot, input) ? snapshot : undefined;
   }
 
   async command(
@@ -90,7 +94,18 @@ export class ByClawBeTaskPlanGateway implements TaskPlanGateway {
             ...(command.statusReason ? { statusReason: command.statusReason } : {}),
           }),
     });
-    return parseTaskPlanCommandResult(data);
+    const result = parseTaskPlanCommandResult(data);
+    if (result.ok) {
+      if (!isOwnedByContext(result.plan, context)) {
+        throw new ByClawBeTaskPlanError(
+          "ByClaw BE task plan command returned a plan owned by another execution",
+        );
+      }
+      return result;
+    }
+    return result.currentPlan && !isOwnedByContext(result.currentPlan, context)
+      ? { ok: false, error: result.error }
+      : result;
   }
 
   async cancel(
@@ -105,7 +120,11 @@ export class ByClawBeTaskPlanGateway implements TaskPlanGateway {
       sourceRunId: context.sourceRunId,
       reason: input.reason,
     });
-    return data === null ? undefined : parseTaskPlanSnapshot(data);
+    if (data === null) {
+      return undefined;
+    }
+    const snapshot = parseTaskPlanSnapshot(data);
+    return isOwnedByContext(snapshot, context) ? snapshot : undefined;
   }
 
   async #post(
@@ -149,6 +168,16 @@ function parseTaskPlanCommandResult(value: unknown): TaskPlanCommandResult {
       ? { currentPlan: parseTaskPlanSnapshot(value.currentPlan) }
       : {}),
   };
+}
+
+function isOwnedByContext(
+  snapshot: TaskPlanSnapshot,
+  context: TaskPlanExecutionContext,
+): boolean {
+  return snapshot.sessionId === context.sessionId &&
+    snapshot.messageId === context.messageId &&
+    snapshot.sourceRuntime === context.sourceRuntime &&
+    snapshot.sourceRunId === context.sourceRunId;
 }
 
 function parseTaskPlanSnapshot(value: unknown): TaskPlanSnapshot {

@@ -374,10 +374,12 @@ public class AssistantChatApplicationService {
             stopChatDto.setMessageId(runningMessageId);
         }
 
-        TaskPlanSnapshot cancellingPlan = taskPlanApplicationService.requestCancellation(stopChatDto,
+        List<TaskPlanSnapshot> cancellingPlans = taskPlanApplicationService.requestCancellation(stopChatDto,
             "USER_STOPPED", "用户请求停止");
-        taskPlanWebSocketPublisher.broadcast(CurrentUserHolder.getCurrentUserId(), cancellingPlan,
-            stopChatDto.getClientRequestId());
+        if (cancellingPlans != null) {
+            cancellingPlans.forEach(plan -> taskPlanWebSocketPublisher.broadcast(
+                CurrentUserHolder.getCurrentUserId(), plan, stopChatDto.getClientRequestId()));
+        }
 
         /*
         SsResource ssResource = ssResourceService.findById(stopChatDto.getAgentId());
@@ -401,10 +403,12 @@ public class AssistantChatApplicationService {
 
         Long cleanupMessageId = resolveStopCleanupMessageId(stopChatDto);
 
-        TaskPlanSnapshot cancelledPlan = taskPlanApplicationService.confirmCancellation(stopChatDto,
+        List<TaskPlanSnapshot> cancelledPlans = taskPlanApplicationService.confirmCancellation(stopChatDto,
             "USER_STOPPED", "用户已停止执行");
-        taskPlanWebSocketPublisher.broadcast(CurrentUserHolder.getCurrentUserId(), cancelledPlan,
-            stopChatDto.getClientRequestId());
+        if (cancelledPlans != null) {
+            cancelledPlans.forEach(plan -> taskPlanWebSocketPublisher.broadcast(
+                CurrentUserHolder.getCurrentUserId(), plan, stopChatDto.getClientRequestId()));
+        }
 
         if (persistedBeforeStop) {
             runningOutputStreamRegistry.release(stopChatDto.getSessionId(), cleanupMessageId);

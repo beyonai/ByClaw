@@ -38,7 +38,7 @@ const activePlan: TaskPlanSnapshot = {
   ],
 };
 
-function installChannelContext(): void {
+function installChannelContext(options: { delegatedAgentCall?: boolean } = {}): void {
   (globalThis as typeof globalThis & { [STORE_KEY]?: unknown })[STORE_KEY] = {
     channelRequestContextsBySessionKey: new Map([
       [
@@ -50,6 +50,7 @@ function installChannelContext(): void {
             sessionId: "session-1",
             messageId: "answer-1",
             beyondToken: "token-1",
+            ...(options.delegatedAgentCall ? { delegatedAgentCall: true } : {}),
           },
         },
       ],
@@ -63,6 +64,19 @@ afterEach(() => {
 });
 
 describe("updateTaskPlan", () => {
+  it("does not expose task planning to an OpenClaw request delegated by another agent", () => {
+    installChannelContext({ delegatedAgentCall: true });
+    const runtime = {
+      loadActive: vi.fn(),
+      command: vi.fn(),
+      cancel: vi.fn(),
+    } as unknown as TaskPlanRuntimeBridge;
+    const ctx = { sessionKey, runId: "run-1", ChannelSessionId: "session-1" };
+
+    expect(resolveOpenClawTaskPlanContext(ctx)).toBeUndefined();
+    expect(createUpdateTaskPlanToolFactory({ runtime })(ctx)).toBeNull();
+  });
+
   it("uses authoritative channel context and hides runtime identifiers from the model", async () => {
     installChannelContext();
     const command = vi.fn(async () => ({ ok: true as const, plan: activePlan }));

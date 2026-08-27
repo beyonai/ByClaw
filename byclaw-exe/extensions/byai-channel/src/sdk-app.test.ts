@@ -147,6 +147,7 @@ describe("ByaiChannelGatewayWorker", () => {
         traceId: "trace-ask",
       }),
     );
+    expect(deliverReplyToAgentViaSdk.mock.calls[0]?.[0]?.message.delegatedAgentCall).toBeUndefined();
     expect(context.setStreamFinished).toHaveBeenCalledWith(true);
     expect(context.setFinalAnswerEmitted).toHaveBeenCalledWith(true);
     expect(finalizeSdkBusinessResult).toHaveBeenCalledTimes(1);
@@ -172,6 +173,10 @@ describe("ByaiChannelGatewayWorker", () => {
       content: "final answer",
       replyData: "final answer",
     });
+
+    expect(deliverReplyToAgentViaSdk.mock.calls[0]?.[0]?.message).toEqual(
+      expect.objectContaining({ delegatedAgentCall: true }),
+    );
   });
 
   it("dispatches RESUME content as an OpenClaw follow-up", async () => {

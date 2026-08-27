@@ -493,6 +493,7 @@ export class ByaiChannelGatewayWorker extends GatewayWorker {
       text,
       messageId,
       parentMessageId,
+      ...(isCallAgentRequest ? { delegatedAgentCall: true } : {}),
       sessionId,
       userId: this.userCode,
       timestamp: Date.now(),

@@ -530,6 +530,7 @@ async function deliverReplyToAgentViaSdkUnderGate(
     traceId: message.traceId,
     messageId: message.messageId,
     parentMessageId: message.parentMessageId,
+    delegatedAgentCall: message.delegatedAgentCall,
     createdAt: receivedAt,
     language: message.language,
     languageProvided: message.languageProvided,

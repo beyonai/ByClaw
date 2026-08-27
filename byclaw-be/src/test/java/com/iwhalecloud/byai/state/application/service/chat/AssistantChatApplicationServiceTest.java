@@ -32,6 +32,7 @@ import com.iwhalecloud.byai.state.domain.session.service.SessionTitleService;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import com.alibaba.fastjson.JSONObject;
 import java.util.Date;
+import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
@@ -110,9 +111,9 @@ class AssistantChatApplicationServiceTest {
         TaskPlanSnapshot cancelled = new TaskPlanSnapshot();
         cancelled.setStatus("CANCELLED");
         when(taskPlanApplicationService.requestCancellation(stopChatDto, "USER_STOPPED", "用户请求停止"))
-            .thenReturn(cancelling);
+            .thenReturn(List.of(cancelling));
         when(taskPlanApplicationService.confirmCancellation(stopChatDto, "USER_STOPPED", "用户已停止执行"))
-            .thenReturn(cancelled);
+            .thenReturn(List.of(cancelled));
         when(scriptService.flushFromSnapshot(10L, 20L)).thenReturn(true);
 
         assistantChatApplicationService.stopChat(stopChatDto);

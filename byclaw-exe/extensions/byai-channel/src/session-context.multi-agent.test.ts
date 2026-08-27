@@ -54,6 +54,26 @@ function registerLaneRequest(params: {
 }
 
 describe("session-context multi-agent lanes", () => {
+  it("keeps the delegated-agent marker on the active and shared request contexts", () => {
+    const request = registerActiveSdkRequest({
+      accountId: "acct-delegated",
+      sessionKey: "agent:test:direct:delegated-session",
+      to: "test:delegated-session",
+      sessionId: "delegated-session",
+      traceId: "trace-delegated",
+      delegatedAgentCall: true,
+      language: "zh_CN",
+      languageProvided: true,
+    });
+
+    expect(request.delegatedAgentCall).toBe(true);
+    expect(
+      resolveChannelRequestContextBySessionKey(request.sessionKey)?.fields.delegatedAgentCall,
+    ).toBe(true);
+
+    clearActiveSdkRequestRecord(request);
+  });
+
   it("keeps connector authorization on the active and shared request contexts", () => {
     const request = registerActiveSdkRequest({
       accountId: "acct-connectors",

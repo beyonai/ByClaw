@@ -174,6 +174,65 @@ describe("ByClaw BE task plan gateway", () => {
     ).resolves.toBeUndefined();
   });
 
+  it("ignores an active plan owned by another runtime execution", async () => {
+    const gateway = new ByClawBeTaskPlanGateway({
+      baseUrl: "http://127.0.0.1:8086",
+      timeoutMs: 1_000,
+      fetchImpl: vi.fn(async () =>
+        Response.json({
+          code: 0,
+          success: true,
+          data: {
+            ...snapshot(),
+            sourceRuntime: "OPENCLAW",
+            sourceRunId: "openclaw-run-1",
+          },
+        }),
+      ) as typeof fetch,
+    });
+
+    await expect(
+      gateway.loadActive({
+        beyondToken: "secret-token",
+        sessionId: "2001",
+        messageId: "3001",
+        sourceRuntime: "BYCLAW_SUPER",
+        sourceRunId: "run-1",
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("rejects a successful command result owned by another execution", async () => {
+    const gateway = new ByClawBeTaskPlanGateway({
+      baseUrl: "http://127.0.0.1:8086",
+      timeoutMs: 1_000,
+      fetchImpl: vi.fn(async () =>
+        Response.json({
+          code: 0,
+          success: true,
+          data: {
+            ok: true,
+            plan: { ...snapshot(), sourceRunId: "another-run" },
+          },
+        }),
+      ) as typeof fetch,
+    });
+
+    await expect(
+      gateway.command({
+        context: {
+          beyondToken: "secret-token",
+          sessionId: "2001",
+          messageId: "3001",
+          sourceRuntime: "BYCLAW_SUPER",
+          sourceRunId: "run-1",
+        },
+        idempotencyKey: "foreign-result",
+        command: { action: "complete_current" },
+      }),
+    ).rejects.toThrow("owned by another execution");
+  });
+
   it("cancels the plan with the same trusted execution identity", async () => {
     const fetchImpl = vi.fn(async () =>
       Response.json({ code: 0, success: true, data: snapshot(3) }),

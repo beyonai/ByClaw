@@ -28,6 +28,8 @@ export interface ChannelSessionResolveResult {
   language?: string;
   beyondToken?: string;
   parentSessionKey?: string;
+  /** True when the current gateway turn was delegated by another agent. */
+  delegatedAgentCall?: boolean;
   /** byai-channel account owning the originating SDK request; used to rebuild the request after restart. */
   accountId?: string;
 }
@@ -46,6 +48,7 @@ interface ActiveSdkRequestLike {
   traceId?: string;
   createdAt?: number;
   accountId?: string;
+  delegatedAgentCall?: boolean;
 }
 
 interface SessionStoreLike {
@@ -108,6 +111,7 @@ function extractCommonFieldsFromSessionKey(
   | "turnId"
   | "laneId"
   | "parentSessionKey"
+  | "delegatedAgentCall"
 > {
   const context = resolveChannelRequestContextBySessionKey(sessionKey);
   if (!context) {
@@ -128,11 +132,13 @@ function extractCommonFieldsFromSessionKey(
     undefined;
   const turnId = normalizeText(fields?.turnId) || undefined;
   const laneId = normalizeText(fields?.laneId) || undefined;
+  const delegatedAgentCall = fields?.delegatedAgentCall === true ? true : undefined;
   const traceFromContext = normalizeText(context.traceId);
   return {
     language,
     beyondToken,
     parentSessionKey: fields?.requesterSessionKey as string | undefined,
+    delegatedAgentCall,
     ...(sessionIdFromFields ? { sessionId: sessionIdFromFields } : {}),
     ...(messageId ? { messageId } : {}),
     ...(turnId ? { turnId } : {}),
@@ -162,6 +168,7 @@ function resolveFromGlobalStore(sessionKey: string): ChannelSessionResolveResult
         traceId: typeof bySession.traceId === "string" ? bySession.traceId.trim() : undefined,
         source: "active_session",
         ...commonFields,
+        delegatedAgentCall: commonFields.delegatedAgentCall ?? bySession.delegatedAgentCall === true,
         accountId: normalizeText(bySession.accountId) || undefined,
       };
     }
@@ -177,6 +184,7 @@ function resolveFromGlobalStore(sessionKey: string): ChannelSessionResolveResult
         traceId: typeof byChild.traceId === "string" ? byChild.traceId.trim() : undefined,
         source: "child",
         ...commonFields,
+        delegatedAgentCall: commonFields.delegatedAgentCall ?? byChild.delegatedAgentCall === true,
         accountId: normalizeText(byChild.accountId) || undefined,
       };
     }
@@ -217,6 +225,7 @@ export function resolveChannelSessionIdForTool(ctx: unknown, sessionKey: string)
       language: explicitLanguage || commonFields.language,
       beyondToken: explicitBeyondToken || commonFields.beyondToken,
       parentSessionKey: commonFields.parentSessionKey,
+      delegatedAgentCall: commonFields.delegatedAgentCall,
       messageId: commonFields.messageId,
       turnId: commonFields.turnId,
       laneId: commonFields.laneId,
