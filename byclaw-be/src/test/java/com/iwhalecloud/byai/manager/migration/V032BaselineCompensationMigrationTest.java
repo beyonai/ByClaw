@@ -47,7 +47,35 @@ class V032BaselineCompensationMigrationTest {
         assertThat(sql).contains(
             "resource_code = 'knowledge-collection'",
             "'bycli'",
-            "resource_name = 'bycli'"
+            "resource_name = 'bycli'",
+            "order by case when resource_name = 'bycli' then 0 else 1 end, resource_id",
+            "set grant_obj_id =",
+            "set resource_name = 'bycli'",
+            "where resource_code = 'bycli' and resource_id <>",
+            "where resource_code = 'bycli' )"
+        );
+        assertThat(sql).doesNotContain(
+            "where resource_code = 'bycli' and resource_name = 'bycli'"
+        );
+    }
+
+    @Test
+    void preservesAndDeduplicatesByCliPrivilegesBeforeDeletingDuplicateResources() throws IOException {
+        String sql = readMigration();
+
+        int privilegeRepoint = sql.indexOf("update byai.au_privilege_grant");
+        int duplicateExtensionDelete = sql.indexOf("delete from byai.ss_res_ext_skill", privilegeRepoint);
+        int duplicateResourceDelete = sql.indexOf("delete from byai.ss_resource", duplicateExtensionDelete);
+        int copiedPrivileges = sql.lastIndexOf("insert into byai.au_privilege_grant");
+
+        assertThat(privilegeRepoint).isGreaterThanOrEqualTo(0);
+        assertThat(duplicateExtensionDelete).isGreaterThan(privilegeRepoint);
+        assertThat(duplicateResourceDelete).isGreaterThan(duplicateExtensionDelete);
+        assertThat(copiedPrivileges).isGreaterThan(duplicateResourceDelete);
+        assertThat(sql).contains(
+            "partition by g.grant_obj_id, g.grant_type, g.grant_to_type",
+            "from byai.ss_resource where resource_code = 'knowledge-collection' order by resource_id limit 1",
+            "from byai.ss_resource where resource_code = 'bycli' order by resource_id limit 1"
         );
     }
 
@@ -57,9 +85,42 @@ class V032BaselineCompensationMigrationTest {
         String dml = read("deploy/migrations/versions/V0.3.1/V0.3.1__dml.sql");
 
         assertThat(ddl).doesNotContain("insert into byai_super_schema_migrations");
+        assertThat(ddl).doesNotContain("begin;", "commit;");
         assertThat(dml).contains(
             "insert into byai.byai_super_schema_migrations",
             "select 9, 'run_ingress_context'"
+        );
+    }
+
+    @Test
+    void makesV031ByCliPrivilegeQueriesDeterministicWhenHistoricalDuplicatesExist() throws IOException {
+        String dml = read("deploy/migrations/versions/V0.3.1/V0.3.1__dml.sql");
+
+        assertThat(dml).doesNotContain(
+            "(select resource_id from byai.ss_resource where resource_code = 'bycli')"
+        );
+        assertThat(dml).contains(
+            "where resource_code = 'bycli' order by resource_id limit 1",
+            "where resource_code = 'knowledge-collection' order by resource_id limit 1"
+        );
+    }
+
+    @Test
+    void makesV030StructuralAndDefaultSeedOperationsReplaySafe() throws IOException {
+        String ddl = read("deploy/migrations/versions/V0.3.0/V0.3.0__ddl.sql");
+        String dml = read("deploy/migrations/versions/V0.3.0/V0.3.0__dml.sql");
+
+        assertThat(ddl).contains(
+            "from information_schema.columns",
+            "table_name = 'byai_session'",
+            "column_name = 'project_id'"
+        );
+        assertThat(dml).contains(
+            "where not exists ( select 1 from byai.byai_project where project_id = -1 )"
+        );
+        assertThat(dml).doesNotContain(
+            "delete from byai.byai_system_config where param_code",
+            "delete from \"byai\".\"sandbox_service_spec\""
         );
     }
 

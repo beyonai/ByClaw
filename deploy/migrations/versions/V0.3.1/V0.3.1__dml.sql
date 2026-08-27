@@ -207,7 +207,13 @@ WHERE privilege_grant_id IN (
                    ORDER BY g.privilege_grant_id DESC
                ) AS row_num
         FROM byai.au_privilege_grant g
-        WHERE g.grant_obj_id = (SELECT resource_id FROM byai.ss_resource WHERE resource_code = 'bycli')
+        WHERE g.grant_obj_id = (
+            SELECT resource_id
+            FROM byai.ss_resource
+            WHERE resource_code = 'bycli'
+            ORDER BY resource_id
+            LIMIT 1
+        )
     ) ranked
     WHERE ranked.row_num > 1
 );
@@ -252,11 +258,15 @@ CROSS JOIN (
     SELECT resource_id
     FROM byai.ss_resource
     WHERE resource_code = 'bycli'
+    ORDER BY resource_id
+    LIMIT 1
 ) bycli
 CROSS JOIN (
     SELECT resource_id
     FROM byai.ss_resource
     WHERE resource_code = 'knowledge-collection'
+    ORDER BY resource_id
+    LIMIT 1
 ) knowledge_collection
 WHERE g.grant_obj_id = knowledge_collection.resource_id
   AND NOT EXISTS (
@@ -341,7 +351,13 @@ WHERE privilege_grant_id IN (
                    ORDER BY g.privilege_grant_id DESC
                ) AS row_num
         FROM byai.au_privilege_grant g
-        WHERE g.grant_obj_id = (SELECT resource_id FROM byai.ss_resource WHERE resource_code = 'agent-reach')
+        WHERE g.grant_obj_id = (
+            SELECT resource_id
+            FROM byai.ss_resource
+            WHERE resource_code = 'agent-reach'
+            ORDER BY resource_id
+            LIMIT 1
+        )
     ) ranked
     WHERE ranked.row_num > 1
 );
@@ -362,11 +378,15 @@ CROSS JOIN (
     SELECT resource_id
     FROM byai.ss_resource
     WHERE resource_code = 'agent-reach'
+    ORDER BY resource_id
+    LIMIT 1
 ) agent_reach
 CROSS JOIN (
     SELECT resource_id
     FROM byai.ss_resource
     WHERE resource_code = 'knowledge-collection'
+    ORDER BY resource_id
+    LIMIT 1
 ) knowledge_collection
 WHERE g.grant_obj_id = knowledge_collection.resource_id
   AND NOT EXISTS (

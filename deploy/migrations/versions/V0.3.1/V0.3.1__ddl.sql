@@ -186,8 +186,6 @@ COMMENT ON COLUMN byai.po_user_private_param.source_ref IS '系统托管参数�
 -- Plus the manually managed Agent capability-card table used by ByClaw Super/BE.
 -- Target schema follows the repository default. Change "byai" consistently if DB_SCHEMA differs.
 
-BEGIN;
-
 CREATE SCHEMA IF NOT EXISTS byai;
 SET search_path TO byai, public;
 
@@ -388,8 +386,6 @@ CREATE INDEX IF NOT EXISTS idx_byai_super_agent_capability_cards_fingerprint
 
 CREATE INDEX IF NOT EXISTS idx_byai_super_agent_capability_cards_status
     ON byai_super_agent_capability_cards(status);
-
-COMMIT;
 
 -- Verification
 SELECT version, name, applied_at

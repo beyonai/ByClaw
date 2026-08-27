@@ -103,7 +103,81 @@ WHERE resource_id IN (
 DELETE FROM byai.ss_resource
 WHERE resource_code = 'doc-tagger';
 
--- 4. 把仍绑定执行器 code 的编排资源改名为 knowledge-collection。
+-- 4. 将历史重复的 bycli 执行器收敛为一条规范资源。
+--    优先保留名称已规范为 byCLI 的记录，否则保留 resource_id 最小的记录。
+--    先迁移授权，再删除重复扩展和资源，避免丢失历史可见范围。
+UPDATE byai.au_privilege_grant
+SET grant_obj_id = (
+    SELECT resource_id
+    FROM byai.ss_resource
+    WHERE resource_code = 'bycli'
+    ORDER BY CASE WHEN resource_name = 'byCLI' THEN 0 ELSE 1 END, resource_id
+    LIMIT 1
+)
+WHERE grant_obj_id IN (
+    SELECT resource_id FROM byai.ss_resource WHERE resource_code = 'bycli'
+)
+  AND grant_obj_id <> (
+      SELECT resource_id
+      FROM byai.ss_resource
+      WHERE resource_code = 'bycli'
+      ORDER BY CASE WHEN resource_name = 'byCLI' THEN 0 ELSE 1 END, resource_id
+      LIMIT 1
+  );
+
+DELETE FROM byai.ss_res_ext_skill
+WHERE resource_id IN (
+    SELECT resource_id
+    FROM byai.ss_resource
+    WHERE resource_code = 'bycli'
+      AND resource_id <> (
+          SELECT resource_id
+          FROM byai.ss_resource
+          WHERE resource_code = 'bycli'
+          ORDER BY CASE WHEN resource_name = 'byCLI' THEN 0 ELSE 1 END, resource_id
+          LIMIT 1
+      )
+);
+
+DELETE FROM byai.ss_resource
+WHERE resource_code = 'bycli'
+  AND resource_id <> (
+      SELECT resource_id
+      FROM byai.ss_resource
+      WHERE resource_code = 'bycli'
+      ORDER BY CASE WHEN resource_name = 'byCLI' THEN 0 ELSE 1 END, resource_id
+      LIMIT 1
+  );
+
+UPDATE byai.ss_resource
+SET resource_name = 'byCLI',
+    update_time = CURRENT_TIMESTAMP
+WHERE resource_code = 'bycli';
+
+-- 授权迁移到规范资源后，按业务授权键清理重复记录。
+DELETE FROM byai.au_privilege_grant
+WHERE privilege_grant_id IN (
+    SELECT privilege_grant_id
+    FROM (
+        SELECT g.privilege_grant_id,
+               ROW_NUMBER() OVER (
+                   PARTITION BY g.grant_obj_id, g.grant_type, g.grant_to_type,
+                                g.grant_to_obj_id, g.grant_to_obj_type
+                   ORDER BY g.privilege_grant_id DESC
+               ) AS row_num
+        FROM byai.au_privilege_grant g
+        WHERE g.grant_obj_id = (
+            SELECT resource_id
+            FROM byai.ss_resource
+            WHERE resource_code = 'bycli'
+            ORDER BY resource_id
+            LIMIT 1
+        )
+    ) ranked
+    WHERE ranked.row_num > 1
+);
+
+-- 5. 把仍绑定执行器 code 的编排资源改名为 knowledge-collection。
 --    仅命中 resource_name = '知识采集' 的那一行，不影响 resource_name = 'byCLI' 的执行器行。
 UPDATE byai.ss_resource
 SET resource_code = 'knowledge-collection',
@@ -114,7 +188,7 @@ WHERE resource_name = '知识采集'
       SELECT 1 FROM byai.ss_resource WHERE resource_code = 'knowledge-collection'
   );
 
--- 5. 改名后仍缺失时（环境从未播种过该编排资源），按内置 Skill 范式显式插入。
+-- 6. 改名后仍缺失时（环境从未播种过该编排资源），按内置 Skill 范式显式插入。
 --    resource_id 由序列生成，避免与种子保留区固定 ID 冲突。
 INSERT INTO byai.ss_resource(resource_id,system_code,resource_biz_type,resource_type,resource_name,resource_desc,resource_version_id,host_type,catalog_id,man_org_id,man_user_id,create_by,create_time,update_by,update_time,com_acct_id,resource_status,resource_d_verid,resource_r_verid,resource_code,publish_time,auth_status,publish_portal,parent_resource_id,publish_type,owner_type,impl_type,worker_agent_type)
 SELECT nextval('byai.seq_any_table'),'BYAI','SKILL','ATOM','知识采集','网络内容采集技能。输入任意网站链接或应用名称，输出结构化的采集内容，支持网页信息抓取、应用数据提取和内容归档入库。适用于竞品信息收集、行业动态追踪、资料批量采集、内容聚合。','1.0','hosted',10,-1,10001,10001,CURRENT_TIMESTAMP,10001,CURRENT_TIMESTAMP,1,2,-1,-1,'knowledge-collection',CURRENT_TIMESTAMP,'passed',1,-1,'publish','enterprise','SKILL','NONE'
@@ -122,15 +196,15 @@ WHERE NOT EXISTS (
     SELECT 1 FROM byai.ss_resource WHERE resource_code = 'knowledge-collection'
 );
 
--- 6. 补齐 byCLI 执行器资源。守卫按 resource_name 判断，不受编排行是否已改名影响。
+-- 7. 补齐 byCLI 执行器资源。重复历史已在前文收敛，因此按业务编码守卫。
 INSERT INTO byai.ss_resource(resource_id,system_code,resource_biz_type,resource_type,resource_name,resource_desc,resource_version_id,host_type,catalog_id,man_org_id,man_user_id,create_by,create_time,update_by,update_time,com_acct_id,resource_status,resource_d_verid,resource_r_verid,resource_code,publish_time,auth_status,publish_portal,parent_resource_id,publish_type,owner_type,impl_type,worker_agent_type)
 SELECT nextval('byai.seq_any_table'),'BYAI','SKILL','ATOM','byCLI','通过浏览器与 Adapter 执行网站操作、复用或维护适配器，并返回采集结果。','1.0','hosted',10,-1,10001,10001,CURRENT_TIMESTAMP,10001,CURRENT_TIMESTAMP,1,2,-1,-1,'bycli',CURRENT_TIMESTAMP,'passed',1,-1,'publish','enterprise','SKILL','NONE'
 WHERE NOT EXISTS (
     SELECT 1 FROM byai.ss_resource
-    WHERE resource_code = 'bycli' AND resource_name = 'byCLI'
+    WHERE resource_code = 'bycli'
 );
 
--- 7. 为两个资源补齐内置 Skill 扩展记录。
+-- 8. 为两个资源补齐内置 Skill 扩展记录。
 INSERT INTO byai.ss_res_ext_skill(resource_id,skill_type,source_type,version,skill_url,skill_package_format,skill_original_filename,skill_package_size,skill_package_hash,sync_status,sync_error,last_sync_time)
 SELECT r.resource_id,'inner','SYSTEM_BUILTIN','v0.1','','zip',NULL,NULL,NULL,'SUCCESS',NULL,CURRENT_TIMESTAMP
 FROM byai.ss_resource r
@@ -139,7 +213,68 @@ WHERE r.resource_code IN ('knowledge-collection','bycli')
       SELECT 1 FROM byai.ss_res_ext_skill e WHERE e.resource_id = r.resource_id
   );
 
--- 8. 刷新运行期技能快照，清除 target_content 里残留的旧 resourceCode。
+-- 9. 从 knowledge-collection 复制缺失授权，确保补建的 byCLI 可被授权接口发现。
+INSERT INTO byai.au_privilege_grant (
+    privilege_grant_id,
+    grant_type,
+    oper_type,
+    grant_obj_type,
+    grant_obj_id,
+    eff_date,
+    exp_date,
+    status_cd,
+    create_staff,
+    create_date,
+    update_staff,
+    update_date,
+    grant_to_type,
+    grant_to_obj_id,
+    grant_to_obj_type,
+    allow_unsubscribe
+)
+SELECT nextval('byai.seq_any_table'),
+       g.grant_type,
+       g.oper_type,
+       g.grant_obj_type,
+       bycli.resource_id,
+       g.eff_date,
+       g.exp_date,
+       g.status_cd,
+       g.create_staff,
+       g.create_date,
+       g.update_staff,
+       g.update_date,
+       g.grant_to_type,
+       g.grant_to_obj_id,
+       g.grant_to_obj_type,
+       g.allow_unsubscribe
+FROM byai.au_privilege_grant g
+CROSS JOIN (
+    SELECT resource_id
+    FROM byai.ss_resource
+    WHERE resource_code = 'knowledge-collection'
+    ORDER BY resource_id
+    LIMIT 1
+) knowledge_collection
+CROSS JOIN (
+    SELECT resource_id
+    FROM byai.ss_resource
+    WHERE resource_code = 'bycli'
+    ORDER BY resource_id
+    LIMIT 1
+) bycli
+WHERE g.grant_obj_id = knowledge_collection.resource_id
+  AND NOT EXISTS (
+      SELECT 1
+      FROM byai.au_privilege_grant existing
+      WHERE existing.grant_obj_id = bycli.resource_id
+        AND existing.grant_type = g.grant_type
+        AND existing.grant_to_type = g.grant_to_type
+        AND existing.grant_to_obj_id = g.grant_to_obj_id
+        AND existing.grant_to_obj_type = g.grant_to_obj_type
+  );
+
+-- 10. 刷新运行期技能快照，清除 target_content 里残留的旧 resourceCode。
 --    字段构成与内置 Skill 批量 UPDATE 保持一致。
 UPDATE byai.ss_res_ext_skill e
 SET target_content = json_build_object(
