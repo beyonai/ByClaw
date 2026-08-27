@@ -163,14 +163,16 @@ public class SessionStreamEventRouter {
             pythonSseService.getContentFromPythonStreamV3(lineJson.toJSONString(), ctx.res,
                 messageContext, ctx.getAgentIds(), ctx);
         }
+        boolean terminalResponse = SseResponseEventEnum.appStreamResponse.equals(eventType);
+        if (terminalResponse && messageContext != null) {
+            // 快照是断线重连的对账依据，必须先写入 complete，再保存终态快照。
+            messageContext.setComplete(true);
+        }
         // 推进内存水位线，保证 live 和 recovery 重投递都不会重复推送或重复聚合。
         ctx.hydratedStreamId = StreamIdUtil.max(ctx.hydratedStreamId, ctx.currentStreamId, ctx.hydratedStreamId);
         runningChatSnapshotService.save(ctx, receivedTraceId, messageContext);
 
-        if (SseResponseEventEnum.appStreamResponse.equals(eventType)) {
-            if (messageContext != null) {
-                messageContext.setComplete(true);
-            }
+        if (terminalResponse) {
             if (ctx.markTraceComplete(receivedTraceId)) {
                 if (ctx.messageContext != null) {
                     ctx.messageContext.setComplete(true);

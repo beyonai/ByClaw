@@ -579,9 +579,15 @@ function useChat(props: IProps) {
 
         const snapshotAnswerMessage = createRestoredAnswerMessageFromSnapshot(snapshot, runningInfo);
         assign(answerMessage, snapshotAnswerMessage);
-        set(answerMessage, 'messageState', IMessageState.Answer);
+        const snapshotTerminal = snapshot.running === false;
+        set(answerMessage, 'messageState', snapshotTerminal ? IMessageState.Done : IMessageState.Answer);
         updateMessage(answerMessage, { isAssign: true });
-        chatSessionRuntimeManager.updateLastAppliedStreamId(runningInfo.clientRequestId, snapshotStreamId);
+        if (snapshotTerminal) {
+          // Redis 终态可能早于数据库落库完成，先用终态快照结束 loading 并保留完整回答。
+          chatSessionRuntimeManager.complete(runningInfo.clientRequestId);
+        } else {
+          chatSessionRuntimeManager.updateLastAppliedStreamId(runningInfo.clientRequestId, snapshotStreamId);
+        }
       }
     } catch (error) {
       console.error('WebSocket 重连后同步会话运行态失败:', error);
@@ -723,6 +729,7 @@ function useChat(props: IProps) {
           });
 
           let snapshotAnswerMsg: IMessage | undefined;
+          let snapshotTerminal = false;
           try {
             const snapshot = await getChatRunningSnapshot({
               sessionId,
@@ -732,6 +739,7 @@ function useChat(props: IProps) {
             if (disposed) return;
             if (snapshot?.messageId) {
               snapshotAnswerMsg = createRestoredAnswerMessageFromSnapshot(snapshot, runningInfo);
+              snapshotTerminal = snapshot.running === false;
             }
           } catch (error) {
             console.error(error);
@@ -748,13 +756,19 @@ function useChat(props: IProps) {
               compareStreamId(snapshotStreamId, latestRuntimeInfo.lastAppliedStreamId) > 0;
             if (shouldApplySnapshot) {
               assign(answerMsg, snapshotAnswerMsg);
-              answerMsg.cancelSSE = debounce(() => stopRestoredRunningSession(answerMsg!, runningInfo), 100);
-              set(answerMsg, 'messageState', IMessageState.Answer);
+              answerMsg.cancelSSE = snapshotTerminal
+                ? undefined
+                : debounce(() => stopRestoredRunningSession(answerMsg!, runningInfo), 100);
+              set(answerMsg, 'messageState', snapshotTerminal ? IMessageState.Done : IMessageState.Answer);
               answerMsg = updateMessage(answerMsg, { isAssign: true });
-              chatSessionRuntimeManager.updateLastAppliedStreamId(
-                latestRuntimeInfo?.clientRequestId || runningInfo.clientRequestId,
-                snapshotStreamId
-              );
+              if (snapshotTerminal) {
+                chatSessionRuntimeManager.complete(latestRuntimeInfo?.clientRequestId || runningInfo.clientRequestId);
+              } else {
+                chatSessionRuntimeManager.updateLastAppliedStreamId(
+                  latestRuntimeInfo?.clientRequestId || runningInfo.clientRequestId,
+                  snapshotStreamId
+                );
+              }
               EventEmitter.emit(
                 'RECEIVE_SESSION_RECORDS_LAST_METADATA',
                 getSessionLastAnsMsgMetadata(sessionId, answerMsg, queryMsg)

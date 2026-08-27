@@ -3,6 +3,7 @@ package com.iwhalecloud.byai.state.domain.chat.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -28,6 +29,7 @@ class SessionStreamEventRouterLiveDedupTest {
     private OutputStreamManager outputStreamManager;
     private PythonSseService pythonSseService;
     private GatewayStreamEventProcessor gatewayStreamEventProcessor;
+    private RunningChatSnapshotService runningChatSnapshotService;
     private TerminalPersistMarkerService terminalPersistMarkerService;
     private SessionStreamEventRouter router;
 
@@ -37,7 +39,7 @@ class SessionStreamEventRouterLiveDedupTest {
         outputStreamManager = mockField("outputStreamManager", OutputStreamManager.class);
         pythonSseService = mockField("pythonSseService", PythonSseService.class);
         gatewayStreamEventProcessor = mockField("gatewayStreamEventProcessor", GatewayStreamEventProcessor.class);
-        mockField("runningChatSnapshotService", RunningChatSnapshotService.class);
+        runningChatSnapshotService = mockField("runningChatSnapshotService", RunningChatSnapshotService.class);
         mockField("multiDeviceBroadcastService",
             com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService.class);
         mockField("chatContextRecoveryService", ChatContextRecoveryService.class);
@@ -117,6 +119,22 @@ class SessionStreamEventRouterLiveDedupTest {
 
         assertThat(replay.isTerminal()).as("同进程 terminal 重投应仍为 terminal").isTrue();
         assertThat(replay.getContext()).isNotNull();
+    }
+
+    @Test
+    void terminalSnapshotIsSavedAfterMessageContextBecomesComplete() {
+        when(gatewayStreamEventProcessor.normalizeEventType(any(), any()))
+            .thenReturn(SseResponseEventEnum.appStreamResponse);
+        liveCtx(null);
+        doAnswer(invocation -> {
+            MessageContext snapshotContext = invocation.getArgument(2);
+            assertThat(snapshotContext.getComplete()).isTrue();
+            return null;
+        }).when(runningChatSnapshotService).save(any(), anyString(), any());
+
+        router.dispatch(event("100-0", SseResponseEventEnum.appStreamResponse));
+
+        verify(runningChatSnapshotService).save(any(), anyString(), any());
     }
 
     /**

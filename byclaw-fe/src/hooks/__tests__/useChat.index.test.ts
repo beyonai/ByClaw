@@ -22,6 +22,7 @@ const mockSend = jest.fn((_text?: string, _payload?: any) => ({
 const mockUpdateMessage = jest.fn((msg: any) => msg);
 const mockWaitForSessionMessageLoaded = jest.fn(() => Promise.resolve());
 const mockReloadLatestMessageList = jest.fn(() => Promise.resolve());
+let mockMessageList: any[] = [];
 let mockReconnectHandler: (() => void) | undefined;
 
 jest.mock('@/utils/websocket', () => ({
@@ -57,7 +58,7 @@ jest.mock('../useSseSender/useSend', () => ({
 jest.mock('../useChat/useMessage', () => ({
   __esModule: true,
   default: jest.fn(() => ({
-    messageList: [],
+    messageList: mockMessageList,
     hasMore: false,
     deleteMessage: jest.fn(),
     setSessionId: jest.fn(),
@@ -129,6 +130,7 @@ describe('hooks/useChat/index', () => {
     mockUpdateMessage.mockImplementation((msg: any) => msg);
     mockWaitForSessionMessageLoaded.mockResolvedValue(undefined);
     mockReloadLatestMessageList.mockResolvedValue(undefined);
+    mockMessageList = [];
     mockReconnectHandler = undefined;
     mockGetChatRunningStatus.mockResolvedValue([]);
     mockGetChatRunningSnapshot.mockResolvedValue(null);
@@ -224,6 +226,50 @@ describe('hooks/useChat/index', () => {
 
     expect(chatSessionRuntimeManager.isSessionRunning('s1')).toBe(false);
     expect(mockReloadLatestMessageList).toHaveBeenCalled();
+  });
+
+  it('finishes loading from a terminal snapshot during reconnect reconciliation', async () => {
+    const answerMessage = {
+      messageId: 'answer-1',
+      msgId: 'answer_client-1',
+      messageState: IMessageState.Answer,
+      sessionId: 's1',
+    } as any;
+    mockMessageList = [answerMessage];
+    chatSessionRuntimeManager.register({
+      clientRequestId: 'client-1',
+      sessionId: 's1',
+      traceId: 'trace-1',
+      restored: true,
+    });
+    mockGetChatRunningStatus.mockResolvedValue([
+      {
+        sessionId: 's1',
+        running: true,
+        traceId: 'trace-1',
+        clientRequestId: 'client-1',
+        modelAnswerMessageId: 'answer-1',
+      },
+    ] as any);
+    mockGetChatRunningSnapshot.mockResolvedValue({
+      sessionId: 's1',
+      messageId: 'answer-1',
+      traceId: 'trace-1',
+      messageContent: 'finished answer',
+      running: false,
+      snapshotStreamId: '100-0',
+    } as any);
+
+    renderHook(() => useChat({ sessionId: 's1', addSession: jest.fn() } as any));
+
+    await act(async () => {
+      mockReconnectHandler?.();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(answerMessage.messageState).toBe(IMessageState.Done);
+    expect(chatSessionRuntimeManager.isSessionRunning('s1')).toBe(false);
   });
 
   it('restores a v2 running snapshot with its active thinking block open', async () => {

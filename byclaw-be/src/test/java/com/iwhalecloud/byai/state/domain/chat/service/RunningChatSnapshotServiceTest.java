@@ -18,6 +18,7 @@ import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatSnapshotResponse;
 import com.iwhalecloud.byai.state.domain.chat.model.MessageContext;
+import com.iwhalecloud.byai.state.domain.message.enums.MsgStatus;
 
 class RunningChatSnapshotServiceTest {
 
@@ -42,6 +43,26 @@ class RunningChatSnapshotServiceTest {
 
         assertThat(snapshot).isNotNull();
         assertThat(snapshot.getCreateTime()).isEqualTo(firstResponseTime);
+    }
+
+    @Test
+    void buildSnapshotMarksCompletedMessageAsTerminal() {
+        MessageContext messageContext = new MessageContext();
+        messageContext.setMessageId(21L);
+        messageContext.setComplete(true);
+
+        ChatProcessContext ctx = new ChatProcessContext(null, new AssistantChatDto());
+        ctx.setSessionId(3L);
+        ctx.setTraceId("trace-1");
+        ctx.setModelAnswerMessageId(21L);
+        ctx.setMessageContext(messageContext);
+
+        RunningChatSnapshotResponse snapshot = ReflectionTestUtils.invokeMethod(runningChatSnapshotService,
+            "buildSnapshot", ctx);
+
+        assertThat(snapshot).isNotNull();
+        assertThat(snapshot.getRunning()).isFalse();
+        assertThat(snapshot.getMsgStatus()).isEqualTo(MsgStatus.FINISH.getCode());
     }
 
     @Test

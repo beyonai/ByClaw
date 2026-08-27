@@ -279,7 +279,8 @@ public class RunningChatSnapshotService {
     private RunningChatSnapshotResponse buildSnapshot(ChatProcessContext ctx, String traceId,
         MessageContext messageContext, Long modelAnswerMessageId, String clientRequestId) {
         RunningChatSnapshotResponse snapshot = new RunningChatSnapshotResponse();
-        snapshot.setRunning(true);
+        boolean complete = Boolean.TRUE.equals(messageContext.getComplete());
+        snapshot.setRunning(!complete);
         snapshot.setTraceId(traceId);
         snapshot.setClientRequestId(clientRequestId);
         snapshot.setModelAnswerMessageId(modelAnswerMessageId);
@@ -299,7 +300,7 @@ public class RunningChatSnapshotService {
             messageContext.getFirstResponseTime() == null ? new Date() : messageContext.getFirstResponseTime());
         snapshot.setMessageContent(messageContext.returnAnswerText());
         snapshot.setResComIds(messageContext.getResComIds());
-        snapshot.setMsgStatus(MsgStatus.APPEND.getCode());
+        snapshot.setMsgStatus(complete ? MsgStatus.FINISH.getCode() : MsgStatus.APPEND.getCode());
         snapshot.setAccessTerminal(ctx.assistantChatDto == null ? null : ctx.assistantChatDto.getAccessTerminal());
 
         if (CollectionUtils.isNotEmpty(messageContext.getAnswerMessageList())) {
