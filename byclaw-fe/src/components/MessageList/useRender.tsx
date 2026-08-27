@@ -13,6 +13,7 @@ import DualBallLoading from '@/components/Loading/DualBallLoading';
 import WaveBallLoading from '@/components/Loading/WaveBallLoading';
 import CiteRender from '@/components/MessageList/components/CiteRender';
 import FileRender from '@/components/MessageList/components/FileRender';
+import TaskExecutionPlan from '@/components/MessageList/components/TaskExecutionPlan';
 import NotSupport from '@/components/NotSupport';
 
 import ThumbUpContent from './components/AnswerActions/ThumbUp/content';
@@ -415,6 +416,7 @@ export default function useRender({
               })}
             >
               <MsgRenderer msg={msg} updateMessage={updateMessage} hideThinking={param?.hideThinking} />
+              {fromBeyond && msg.taskPlan && <TaskExecutionPlan taskPlan={msg.taskPlan} />}
               {messageState === IMessageState.Query && <DualBallLoading style={{ width: 32, height: 32 }} />}
             </div>
             {fromBeyond && messageState === IMessageState.Error && (

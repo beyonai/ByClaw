@@ -74,12 +74,36 @@ describe('hooks/useGlobalChatRuntime', () => {
     );
     expect(mockWebSocketManager.onMessage).toHaveBeenCalledWith('ERROR', expect.any(Function));
     expect(mockWebSocketManager.onMessage).toHaveBeenCalledWith('NOTIFICATION', expect.any(Function));
-
     await act(async () => {
       await Promise.resolve();
     });
 
     expect(mockGetChatRunningStatus).toHaveBeenCalledWith({ sessionIds: ['s1'] });
+    expect(mockWebSocketManager.onMessage).toHaveBeenCalledWith('TASK_PLAN_SNAPSHOT', expect.any(Function));
+  });
+
+  it('stores task plan snapshots from websocket messages', () => {
+    renderHook(() => useGlobalChatRuntime());
+
+    const onTaskPlan = mockWebSocketManager.onMessage.mock.calls.find(([type]) => type === 'TASK_PLAN_SNAPSHOT')![1];
+    const taskPlan = {
+      planId: 'plan-1',
+      version: 1,
+      title: 'Plan',
+      status: 'ACTIVE',
+      sessionId: 's1',
+      messageId: 'm1',
+      tasks: [],
+    };
+
+    act(() => {
+      onTaskPlan({ type: 'TASK_PLAN_SNAPSHOT', sessionId: 's1', messageId: 'm1', data: taskPlan });
+    });
+
+    expect(dispatch).toHaveBeenCalledWith({
+      type: 'messageStore/applyTaskPlanSnapshot',
+      payload: { sessionId: 's1', messageId: 'm1', taskPlan },
+    });
   });
 
   it('dispatches notification sessions only for the current user', () => {
