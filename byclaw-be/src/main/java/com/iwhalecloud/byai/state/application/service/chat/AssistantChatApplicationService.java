@@ -357,12 +357,11 @@ public class AssistantChatApplicationService {
      * @param stopChatDto 入参
      */
     public void stopChat(StopChatDto stopChatDto) {
-        // 停止前将已堆积的消息落库，避免本轮回答内容丢失。
-        flushAccumulatedMessage(stopChatDto);
-
         if (stopChatDto == null || stopChatDto.getSessionId() == null) {
             return;
         }
+        // 停止前将已堆积的消息落库，避免本轮回答内容丢失。
+        boolean persistedBeforeStop = flushAccumulatedMessage(stopChatDto);
         RunningChatInfo runningInfo = runningOutputStreamRegistry.getRunning(stopChatDto.getSessionId());
         Long runningMessageId = runningInfo == null ? null : runningInfo.getModelAnswerMessageId();
         if (runningMessageId == null && chatRuntimeStateService != null) {
@@ -407,8 +406,14 @@ public class AssistantChatApplicationService {
         taskPlanWebSocketPublisher.broadcast(CurrentUserHolder.getCurrentUserId(), cancelledPlan,
             stopChatDto.getClientRequestId());
 
-        runningOutputStreamRegistry.release(stopChatDto.getSessionId(), cleanupMessageId);
-        runningChatSnapshotService.delete(stopChatDto.getSessionId(), cleanupMessageId);
+        if (persistedBeforeStop) {
+            runningOutputStreamRegistry.release(stopChatDto.getSessionId(), cleanupMessageId);
+            runningChatSnapshotService.delete(stopChatDto.getSessionId(), cleanupMessageId);
+        }
+        else {
+            log.warn("stopChat 未确认已堆积消息落库，保留运行态与快照供恢复重试, sessionId: {}, messageId: {}",
+                stopChatDto.getSessionId(), cleanupMessageId);
+        }
     }
 
     private String resolveStopExecutionId(StopChatDto stopChatDto) {
@@ -455,10 +460,10 @@ public class AssistantChatApplicationService {
      *
      * @param stopChatDto 停止入参
      */
-    private void flushAccumulatedMessage(StopChatDto stopChatDto) {
+    private boolean flushAccumulatedMessage(StopChatDto stopChatDto) {
         Long sessionId = stopChatDto.getSessionId();
         if (sessionId == null) {
-            return;
+            return false;
         }
         Long cleanupMessageId = resolveStopCleanupMessageId(stopChatDto);
         try {
@@ -477,11 +482,12 @@ public class AssistantChatApplicationService {
                         Thread.currentThread().interrupt();
                         throw e;
                     }
+                    // HTTP 请求线程消费停止哨兵后负责落库与清理，当前线程不能提前删除恢复数据。
+                    return false;
                 } else {
                     // 同 pod 但无队列（如 WebSocket）：直接落库收尾。
-                    scriptService.flushOnStop(ctx);
+                    return scriptService.flushOnStop(ctx);
                 }
-                return;
             }
             // 跨 pod：本 pod 无上下文，从 Redis 快照落库。
             boolean flushed = scriptService.flushFromSnapshot(sessionId, cleanupMessageId);
@@ -489,6 +495,7 @@ public class AssistantChatApplicationService {
                 log.info("stopChat 无可落库内容（本 pod 无上下文且无快照）, sessionId: {}, messageId: {}", sessionId,
                     cleanupMessageId);
             }
+            return flushed;
         } catch (Exception e) {
             log.error("stopChat 落库已堆积消息失败, sessionId: {}, messageId: {}", sessionId,
                 cleanupMessageId, e);
@@ -499,6 +506,7 @@ public class AssistantChatApplicationService {
         if (sessionStreamManager != null && sessionStreamManager.isSessionListenerActive(String.valueOf(sessionId))) {
             sessionStreamManager.stopSessionListener(String.valueOf(sessionId));
         }
+        return false;
     }
 
     /**

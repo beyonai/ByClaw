@@ -694,10 +694,12 @@ public class ScriptService extends AbstractChatProcess {
         }
     }
 
-    public void completeAsyncGatewayContext(ChatProcessContext ctx) {
-        if (persistAsyncGatewayContext(ctx) && ctx != null && ctx.sessionId != null) {
+    public boolean completeAsyncGatewayContext(ChatProcessContext ctx) {
+        boolean persisted = persistAsyncGatewayContext(ctx);
+        if (persisted && ctx != null && ctx.sessionId != null) {
             sessionStreamManager.stopSessionListener(String.valueOf(ctx.sessionId));
         }
+        return persisted;
     }
 
     /**
@@ -709,14 +711,14 @@ public class ScriptService extends AbstractChatProcess {
      *
      * @param ctx 运行中的聊天上下文
      */
-    public void flushOnStop(ChatProcessContext ctx) {
+    public boolean flushOnStop(ChatProcessContext ctx) {
         if (ctx == null) {
-            return;
+            return false;
         }
         if (ctx.messageContext != null) {
             ctx.messageContext.setComplete(true);
         }
-        completeAsyncGatewayContext(ctx);
+        return completeAsyncGatewayContext(ctx);
     }
 
     /**
