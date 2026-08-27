@@ -51,6 +51,7 @@ const COMMAND_SPECS = {
     title: '创建研究/采集会话骨架与 session.json',
     args: {
       '--session-dir': '必填。会话目录(必须不存在或为空)',
+      '--session-root': '用户沙箱中必填。当前 Agent 上下文提供的 /by/.sessions/<sessionId>',
       '--query': '必填。研究问题或采集任务描述',
       '--mode': 'collection(默认) | research。research 要求 report 交付后才允许整体清理',
       '--breadth': '正整数,默认 3;每层分支数',
@@ -244,6 +245,7 @@ const COMMAND_SCHEMA_OVERRIDES = {
     required: ['session-dir', 'query'],
     properties: {
       'session-dir': SCHEMA.sessionDir,
+      'session-root': SCHEMA.sessionDir,
       query: { type: 'string', minLength: 1 },
       mode: { type: 'string', enum: ['collection', 'research'], default: 'collection' },
       breadth: { ...SCHEMA.positiveInteger, default: 3 },

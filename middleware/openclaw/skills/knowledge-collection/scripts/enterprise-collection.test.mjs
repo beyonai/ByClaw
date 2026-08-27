@@ -10,8 +10,7 @@ import { ensureSessionSkeleton, newSession } from './session.mjs';
 const scriptPath = resolve(dirname(new URL(import.meta.url).pathname), 'enterprise-collection.mjs');
 const collectionScriptPath = resolve(dirname(new URL(import.meta.url).pathname), 'knowledge-collection.mjs');
 
-async function createParentSession(root, sourceScope) {
-  const parent = join(root, 'parent-session');
+async function createParentSession(root, sourceScope, parent = join(root, 'parent-session')) {
   ensureSessionSkeleton(parent);
   await writeFile(join(parent, 'session.json'), `${JSON.stringify(newSession({
     query: 'enterprise test', sourceScope, materializationTarget: 'candidates',
@@ -485,6 +484,98 @@ async function testWecomRejectsNestedBusinessFailure() {
   }
 }
 
+async function testSandboxRejectsWorkspaceOutputDirectory() {
+  const tempRoot = await mkdtemp(join(tmpdir(), 'enterprise-collection-test-'));
+  const sessionRoot = join(tempRoot, 'by', '.sessions', '20023126');
+  const outputDir = join(tempRoot, 'by', '.openclaw', 'workspace', 'collections', 'test');
+  try {
+    const fixture = await createWecomFixture(tempRoot);
+    const parent = await createParentSession(tempRoot, ['wecom'], outputDir);
+    const result = await run(process.execPath, [
+      scriptPath,
+      'wecom-smartpage',
+      '--parent-session-dir',
+      parent,
+      '--url',
+      'https://doc.weixin.qq.com/smartpage/x',
+      '--output-dir',
+      outputDir,
+    ], {
+      WECOM_CLI_BIN: fixture,
+      WECOM_FIXTURE_STATE: join(tempRoot, 'wecom-state'),
+      WECOM_HOME: join(tempRoot, 'wecom-home'),
+      KNOWLEDGE_COLLECTION_SESSION_ROOT: sessionRoot,
+      KNOWLEDGE_COLLECTION_SESSIONS_ROOT: dirname(sessionRoot),
+    });
+    assert.notEqual(result.code, 0);
+    assert.match(result.stderr, /must be under the user session root/);
+    await assert.rejects(stat(join(outputDir, 'collection-result.json')));
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+}
+
+async function testSandboxAllowsSessionOutputDirectory() {
+  const tempRoot = await mkdtemp(join(tmpdir(), 'enterprise-collection-test-'));
+  const sessionRoot = join(tempRoot, 'by', '.sessions', '20023126');
+  const outputDir = join(sessionRoot, 'collections', 'test');
+  try {
+    const fixture = await createWecomFixture(tempRoot);
+    const parent = await createParentSession(tempRoot, ['wecom']);
+    const result = await run(process.execPath, [
+      scriptPath,
+      'wecom-smartpage',
+      '--parent-session-dir',
+      parent,
+      '--url',
+      'https://doc.weixin.qq.com/smartpage/x',
+      '--output-dir',
+      outputDir,
+    ], {
+      WECOM_CLI_BIN: fixture,
+      WECOM_FIXTURE_STATE: join(tempRoot, 'wecom-state'),
+      WECOM_HOME: join(tempRoot, 'wecom-home'),
+      KNOWLEDGE_COLLECTION_SESSION_ROOT: sessionRoot,
+      KNOWLEDGE_COLLECTION_SESSIONS_ROOT: dirname(sessionRoot),
+    });
+    assert.equal(result.code, 0, result.stderr);
+    await stat(join(outputDir, 'collection-result.json'));
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+}
+
+async function testSandboxDoesNotInferCurrentSessionFromHistoricalInput() {
+  const tempRoot = await mkdtemp(join(tmpdir(), 'enterprise-collection-test-'));
+  const sessionsRoot = join(tempRoot, 'by', '.sessions');
+  const historicalRoot = join(sessionsRoot, 'other-session', 'collections', 'parent');
+  const outputDir = join(sessionsRoot, 'other-session', 'collections', 'new-output');
+  try {
+    const fixture = await createWecomFixture(tempRoot);
+    const parent = await createParentSession(tempRoot, ['wecom'], historicalRoot);
+    const result = await run(process.execPath, [
+      scriptPath,
+      'wecom-smartpage',
+      '--parent-session-dir',
+      parent,
+      '--url',
+      'https://doc.weixin.qq.com/smartpage/x',
+      '--output-dir',
+      outputDir,
+    ], {
+      WECOM_CLI_BIN: fixture,
+      WECOM_FIXTURE_STATE: join(tempRoot, 'wecom-state'),
+      WECOM_HOME: join(tempRoot, 'wecom-home'),
+      KNOWLEDGE_COLLECTION_SESSIONS_ROOT: sessionsRoot,
+    });
+    assert.notEqual(result.code, 0);
+    assert.match(result.stderr, /缺少当前 Agent 上下文的 Session Root/);
+    await assert.rejects(stat(outputDir));
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+}
+
 async function testWecomMissingTaskIdPersistsFailedMetadata() {
   const tempRoot = await mkdtemp(join(tmpdir(), 'enterprise-collection-missing-task-'));
   const outputDir = join(tempRoot, 'output');
@@ -640,6 +731,9 @@ await testSearchFailsWhenTheFwsExecutableCannotStart();
 await testSearchFailsWhenConnectorHomeIsMissing();
 await testWecomExportWritesCanonicalPrivateArtifacts();
 await testWecomRejectsNestedBusinessFailure();
+await testSandboxRejectsWorkspaceOutputDirectory();
+await testSandboxAllowsSessionOutputDirectory();
+await testSandboxDoesNotInferCurrentSessionFromHistoricalInput();
 await testWecomMissingTaskIdPersistsFailedMetadata();
 await testWecomTimeoutPersistsPartialMetadata();
 await testEnterpriseCliTimeoutIsBounded();

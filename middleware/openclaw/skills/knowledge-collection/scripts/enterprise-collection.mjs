@@ -4,7 +4,7 @@ import { createFeishuAdapter } from './enterprise/adapters/feishu.mjs';
 import { createWecomAdapter } from './enterprise/adapters/wecom.mjs';
 import { dispatchEnterprise, dispatchEnterpriseBatch, parseSearchBatchRequests } from './enterprise/dispatcher.mjs';
 import { createArtifactWriter } from './enterprise/shared/artifact-writer.mjs';
-import { loadSession, sessionPaths } from './session.mjs';
+import { assertSandboxSessionPath, loadSession, sessionPaths } from './session.mjs';
 import { lstat, readFile, realpath } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 
@@ -43,10 +43,22 @@ function requireValue(values, key) {
   return value;
 }
 
-function requireAbsoluteOutputDir(values) {
+function requireAbsoluteOutputDir(values, currentSessionRoot, { enforceSandbox = true } = {}) {
   const outputDir = requireValue(values, 'output-dir');
   if (!isAbsolute(outputDir)) throw new Error('--output-dir must be an absolute path');
-  return outputDir;
+  return enforceSandbox
+    ? assertSandboxSessionPath(outputDir, '--output-dir', { currentSessionRoot })
+    : resolve(outputDir);
+}
+
+function requireAbsoluteOutputRoot(values, currentSessionRoot) {
+  const outputRoot = requireValue(values, 'output-root');
+  if (!isAbsolute(outputRoot)) throw new Error('--output-root must be an absolute path');
+  return assertSandboxSessionPath(outputRoot, '--output-root', { currentSessionRoot });
+}
+
+function resolveCurrentSessionRoot(values) {
+  return values['session-root'];
 }
 
 export function resolveEnterpriseOutputRoot(parentSessionDir, requestedOutputDir) {
@@ -204,6 +216,7 @@ function commandSchema() {
   const source = { type: 'string', enum: ['dingtalk', 'feishu', 'wecom', 'ima'] };
   const absolutePath = { type: 'string', format: 'absolute-path' };
   const parentSession = { 'parent-session-dir': absolutePath };
+  const currentSession = { 'session-root': absolutePath };
   const positiveLimit = { type: 'integer', minimum: 1, maximum: 500, default: 50 };
   const concurrency = { type: 'integer', minimum: 1, maximum: 16, default: 4 };
   return {
@@ -214,23 +227,23 @@ function commandSchema() {
     commands: {
       search: {
         type: 'object', additionalProperties: false, required: ['parent-session-dir', 'source', 'query', 'output-dir'],
-        properties: { ...parentSession, source, query: { type: 'string', minLength: 1 }, 'output-dir': absolutePath, limit: positiveLimit, concurrency, cursor: { type: 'string' }, 'metadata-only': { type: 'boolean', default: false }, 'source-options': { type: 'object', cliEncoding: 'json' } },
+        properties: { ...parentSession, ...currentSession, source, query: { type: 'string', minLength: 1 }, 'output-dir': absolutePath, limit: positiveLimit, concurrency, cursor: { type: 'string' }, 'metadata-only': { type: 'boolean', default: false }, 'source-options': { type: 'object', cliEncoding: 'json' } },
       },
       'search-all': {
         type: 'object', additionalProperties: false, required: ['parent-session-dir', 'query', 'output-root'],
-        properties: { ...parentSession, sources: { type: 'array', items: source, minItems: 1, uniqueItems: true, cliEncoding: 'comma-separated', default: ['dingtalk', 'feishu', 'wecom', 'ima'] }, query: { type: 'string', minLength: 1 }, 'output-root': absolutePath, limit: positiveLimit, concurrency, 'metadata-only': { type: 'boolean', default: true } },
+        properties: { ...parentSession, ...currentSession, sources: { type: 'array', items: source, minItems: 1, uniqueItems: true, cliEncoding: 'comma-separated', default: ['dingtalk', 'feishu', 'wecom', 'ima'] }, query: { type: 'string', minLength: 1 }, 'output-root': absolutePath, limit: positiveLimit, concurrency, 'metadata-only': { type: 'boolean', default: true } },
       },
       materialize: {
         type: 'object', additionalProperties: false, required: ['source', 'session-dir', 'item-ids', 'output-dir'],
-        properties: { source: { ...source, enum: ['dingtalk', 'feishu', 'ima'] }, 'session-dir': absolutePath, 'item-ids': { type: 'array', minItems: 1, uniqueItems: true, items: { type: 'string', minLength: 1 }, cliEncoding: 'comma-separated' }, 'output-dir': absolutePath, concurrency },
+        properties: { ...currentSession, source: { ...source, enum: ['dingtalk', 'feishu', 'ima'] }, 'session-dir': absolutePath, 'item-ids': { type: 'array', minItems: 1, uniqueItems: true, items: { type: 'string', minLength: 1 }, cliEncoding: 'comma-separated' }, 'output-dir': absolutePath, concurrency },
       },
       resource: {
         type: 'object', additionalProperties: false, required: ['parent-session-dir', 'source', 'url', 'output-dir'],
-        properties: { ...parentSession, source, url: { type: 'string', format: 'http-url' }, 'output-dir': absolutePath, 'minute-token': { type: 'string', minLength: 1 } },
+        properties: { ...parentSession, ...currentSession, source, url: { type: 'string', format: 'http-url' }, 'output-dir': absolutePath, 'minute-token': { type: 'string', minLength: 1 } },
       },
       'resume-resource': {
         type: 'object', additionalProperties: false, required: ['source', 'session-dir', 'output-dir'],
-        properties: { source: { type: 'string', enum: ['wecom'] }, 'session-dir': absolutePath, 'output-dir': absolutePath },
+        properties: { ...currentSession, source: { type: 'string', enum: ['wecom'] }, 'session-dir': absolutePath, 'output-dir': absolutePath },
       },
     },
   };
@@ -247,9 +260,10 @@ async function main() {
     return;
   }
   if (command === 'wecom-smartpage') {
-    assertEnterpriseScope(requireValue(values, 'parent-session-dir'), ['wecom']);
+    const parentSessionDir = requireValue(values, 'parent-session-dir');
+    assertEnterpriseScope(parentSessionDir, ['wecom']);
     const url = requireValue(values, 'url');
-    const outputDir = requireAbsoluteOutputDir(values);
+    const outputDir = requireAbsoluteOutputDir(values, resolveCurrentSessionRoot(values));
     const outcome = await createWecomAdapter({
       bin: process.env.WECOM_CLI_BIN || 'wecom-cli',
       env: process.env,
@@ -258,10 +272,11 @@ async function main() {
     return;
   }
   if (command === 'feishu-minutes') {
-    assertEnterpriseScope(requireValue(values, 'parent-session-dir'), ['feishu']);
+    const parentSessionDir = requireValue(values, 'parent-session-dir');
+    assertEnterpriseScope(parentSessionDir, ['feishu']);
     const minuteToken = requireValue(values, 'minute-token');
     const url = requireValue(values, 'url');
-    const outputDir = requireAbsoluteOutputDir(values);
+    const outputDir = requireAbsoluteOutputDir(values, resolveCurrentSessionRoot(values));
     const outcome = await createFeishuAdapter({
       bin: process.env.LARK_CLI_BIN || 'lark-cli',
       env: process.env,
@@ -273,22 +288,33 @@ async function main() {
     const scopeSessionDir = command === 'search' || command === 'resource'
       ? requireValue(values, 'parent-session-dir') : requireValue(values, 'session-dir');
     assertEnterpriseScope(scopeSessionDir, [requireValue(values, 'source')]);
-    const { ['parent-session-dir']: _parentSessionDir, ...dispatchValues } = values;
+    const { ['parent-session-dir']: _parentSessionDir, ['session-root']: _sessionRoot, ...dispatchValues } = values;
+    const currentSessionRoot = resolveCurrentSessionRoot(values);
     if (command === 'search') {
-      dispatchValues['output-dir'] = resolveEnterpriseOutputRoot(
-        scopeSessionDir,
-        requireAbsoluteOutputDir(values),
+      dispatchValues['output-dir'] = assertSandboxSessionPath(
+        resolveEnterpriseOutputRoot(
+          scopeSessionDir,
+          requireAbsoluteOutputDir(values, currentSessionRoot, { enforceSandbox: false }),
+        ),
+        '--output-dir',
+        { currentSessionRoot },
       );
+    } else {
+      dispatchValues['output-dir'] = requireAbsoluteOutputDir(values, currentSessionRoot);
     }
     render(await dispatchEnterprise(command, dispatchValues));
     return;
   }
   if (command === 'search-all') {
-    const { ['parent-session-dir']: _parentSessionDir, ...batchValues } = values;
+    const { ['parent-session-dir']: _parentSessionDir, ['session-root']: _sessionRoot, ...batchValues } = values;
     const requests = parseSearchBatchRequests(batchValues);
     const sources = requests.map((request) => request.source);
     assertEnterpriseScope(requireValue(values, 'parent-session-dir'), sources);
-    const aggregateWriter = await createArtifactWriter(requireValue(values, 'output-root'));
+    const outputRoot = requireAbsoluteOutputRoot(
+      values,
+      resolveCurrentSessionRoot(values),
+    );
+    const aggregateWriter = await createArtifactWriter(outputRoot);
     const outcomes = await dispatchEnterpriseBatch('search', requests, { concurrency: Number(values.concurrency) || 4 });
     const aggregate = await writeSearchAllAggregate({
       aggregateWriter,
@@ -297,7 +323,7 @@ async function main() {
       metadataOnly: values['metadata-only'] !== false && values['metadata-only'] !== 'false' && values['metadata-only'] !== '0',
       outcomes,
     });
-    render({ outputDir: requireValue(values, 'output-root'), ...aggregate, outcomes });
+    render({ outputDir: outputRoot, ...aggregate, outcomes });
     return;
   }
   throw new Error(`unsupported command: ${command || '(missing)'}`);

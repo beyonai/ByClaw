@@ -86,6 +86,68 @@ export function isInside(root, candidate) {
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
+/**
+ * 沙箱中的新采集目录必须落在用户会话空间。环境变量仅用于测试或显式部署覆盖；
+ * 正常 OpenClaw 沙箱通过 /by/.sessions 是否存在自动启用该约束。
+ */
+export function assertSandboxSessionPath(rawPath, label, { currentSessionRoot } = {}) {
+  const candidate = path.resolve(requireString(rawPath, label));
+  const configuredRoot = process.env.KNOWLEDGE_COLLECTION_SESSION_ROOT?.trim();
+  const configuredSessionsRoot = process.env.KNOWLEDGE_COLLECTION_SESSIONS_ROOT?.trim();
+  const sessionsRoot = configuredSessionsRoot
+    ? path.resolve(configuredSessionsRoot)
+    : (fs.existsSync('/by/.sessions') ? '/by/.sessions' : null);
+  const sessionRoot = (configuredRoot || currentSessionRoot)
+    ? path.resolve(configuredRoot || currentSessionRoot)
+    : null;
+  const sandboxDetected = Boolean(configuredRoot || sessionsRoot);
+  if (sandboxDetected && !sessionRoot) {
+    throw new Error(`${label} 缺少当前 Agent 上下文的 Session Root`);
+  }
+  if (!sessionRoot) {
+    return candidate;
+  }
+  if (!sessionsRoot) {
+    throw new Error(`${label} 无法验证当前 Agent 上下文的 Session Root`);
+  }
+  const sessionRelative = path.relative(sessionsRoot, sessionRoot);
+  if (!sessionRelative
+    || sessionRelative.startsWith('..')
+    || path.isAbsolute(sessionRelative)
+    || sessionRelative.split(path.sep).length !== 1) {
+    throw new Error(`当前 Agent 上下文的 Session Root 必须是 ${sessionsRoot}/<sessionId>`);
+  }
+  if (fs.existsSync(sessionRoot)) {
+    const sessionRootEntry = fs.lstatSync(sessionRoot);
+    if (!sessionRootEntry.isDirectory() || sessionRootEntry.isSymbolicLink()) {
+      throw new Error('当前 Agent 上下文的 Session Root 必须是普通目录且不能是符号链接');
+    }
+  }
+  const outsideCurrentSessionError = () => new Error(
+    `${label} 必须位于当前用户会话根目录 ${sessionRoot}/ 下`
+    + ' (must be under the user session root)',
+  );
+  const relative = path.relative(sessionRoot, candidate);
+  const withinCurrentSession = !relative.startsWith('..')
+    && !path.isAbsolute(relative);
+  if (withinCurrentSession) {
+    if (fs.existsSync(sessionRoot)) {
+      const canonicalRoot = fs.realpathSync(sessionRoot);
+      let existingAncestor = candidate;
+      while (!fs.existsSync(existingAncestor)) {
+        const parent = path.dirname(existingAncestor);
+        if (parent === existingAncestor) break;
+        existingAncestor = parent;
+      }
+      if (!isInside(canonicalRoot, fs.realpathSync(existingAncestor))) {
+        throw outsideCurrentSessionError();
+      }
+    }
+    return candidate;
+  }
+  throw outsideCurrentSessionError();
+}
+
 export function resolveCollectionInputFile(paths, rawFilePath, label) {
   const filePath = path.resolve(requireString(rawFilePath, label));
   const inputDir = path.resolve(paths.inputDir);

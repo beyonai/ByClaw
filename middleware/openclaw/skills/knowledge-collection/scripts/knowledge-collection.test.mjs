@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -79,6 +79,67 @@ async function setupCollectedSession({ mode = 'collection' } = {}) {
 // ── CLI 帮助与平台委派 ──
 
 await (async () => {
+  const tempRoot = makeSessionDir();
+  const sessionsRoot = join(tempRoot, 'by', '.sessions');
+  const sandboxSessionRoot = join(sessionsRoot, '20023126');
+  const sandboxEnv = { KNOWLEDGE_COLLECTION_SESSIONS_ROOT: sessionsRoot };
+  const workspaceDir = join(tempRoot, 'by', '.openclaw', 'workspace', 'collections', 'test');
+  const rejected = await runCli([
+    'init', '--session-dir', workspaceDir, '--session-root', sandboxSessionRoot, '--query', 'q',
+  ], sandboxEnv);
+  assert.equal(rejected.code, 1);
+  assert.match(rejected.json.error, /必须位于当前用户会话根目录/);
+  assert.equal(existsSync(workspaceDir), false);
+
+  const untrustedRoot = join(tempRoot, 'by', '.openclaw', 'workspace');
+  const untrusted = await runCli([
+    'init', '--session-dir', join(untrustedRoot, 'collections', 'test'),
+    '--session-root', untrustedRoot, '--query', 'q',
+  ], sandboxEnv);
+  assert.equal(untrusted.code, 1);
+  assert.match(untrusted.json.error, /Session Root 必须是/);
+
+  const sessionDir = join(sandboxSessionRoot, 'accepted');
+  const accepted = await runCli([
+    'init', '--session-dir', sessionDir, '--session-root', sandboxSessionRoot, '--query', 'q',
+  ], sandboxEnv);
+  assert.equal(accepted.code, 0, accepted.stderr);
+  assert.equal(accepted.json.ok, true);
+
+  const siblingDir = join(sessionsRoot, 'other-session', 'collections', 'wrong');
+  const sibling = await runCli([
+    'init', '--session-dir', siblingDir, '--session-root', sandboxSessionRoot, '--query', 'q',
+  ], sandboxEnv);
+  assert.equal(sibling.code, 1);
+  assert.match(sibling.json.error, /当前用户会话根目录/);
+  assert.equal(existsSync(siblingDir), false);
+
+  const outside = join(tempRoot, 'outside');
+  mkdirSync(outside);
+  symlinkSync(outside, join(sandboxSessionRoot, 'collections'));
+  const escapedDir = join(sandboxSessionRoot, 'collections', 'escaped');
+  const escaped = await runCli([
+    'init', '--session-dir', escapedDir, '--session-root', sandboxSessionRoot, '--query', 'q',
+  ], sandboxEnv);
+  assert.equal(escaped.code, 1);
+  assert.match(escaped.json.error, /必须位于当前用户会话根目录/);
+  assert.equal(existsSync(join(outside, 'collections')), false);
+
+  const linkedRootTarget = join(tempRoot, 'linked-root-target');
+  mkdirSync(linkedRootTarget);
+  const linkedSessionRoot = join(sessionsRoot, 'linked-session');
+  symlinkSync(linkedRootTarget, linkedSessionRoot);
+  const linkedRoot = await runCli([
+    'init', '--session-dir', join(linkedSessionRoot, 'collections', 'escaped'),
+    '--session-root', linkedSessionRoot, '--query', 'q',
+  ], sandboxEnv);
+  assert.equal(linkedRoot.code, 1);
+  assert.match(linkedRoot.json.error, /普通目录且不能是符号链接/);
+  assert.equal(existsSync(join(linkedRootTarget, 'collections')), false);
+  rmSync(tempRoot, { recursive: true, force: true });
+})();
+
+await (async () => {
   assert.equal(existsSync(routerScriptPath), true, 'local command routing must live outside the CLI entrypoint');
   assert.equal(existsSync(platformDelegatePath), true, 'platform command delegation must live outside the CLI entrypoint');
   const h = await runCli(['help']);
@@ -103,6 +164,7 @@ await (async () => {
   assert.equal(schema.code, 0, schema.stderr);
   assert.equal(schema.json.schemaVersion, '1.0');
   assert.deepEqual(schema.json.commands.init.required, ['session-dir', 'query']);
+  assert.equal(schema.json.commands.init.properties['session-root'].format, 'absolute-path');
   assert.equal(schema.json.commands.init.properties['source-scope'].type, 'array');
   assert.deepEqual(schema.json.commands.init.properties['source-scope'].items.enum, [
     'public-internet', 'dingtalk', 'feishu', 'wecom', 'ima',

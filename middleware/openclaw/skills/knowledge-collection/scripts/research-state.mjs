@@ -27,6 +27,7 @@ import {
   withSessionLock,
   ensureSessionSkeleton,
   isInside,
+  assertSandboxSessionPath,
 } from './session.mjs';
 import { deliveryCompleteForSession } from './delivery-state.mjs';
 
@@ -509,7 +510,9 @@ function renderTree(session) {
 
 /** init: 创建会话骨架 + session.json(研究任务参数;可选 --collection-result-input-file 预置采集清单)。 */
 export function cmdInit(args) {
-  const root = path.resolve(requireString(args['session-dir'], '--session-dir'));
+  const root = assertSandboxSessionPath(args['session-dir'], '--session-dir', {
+    currentSessionRoot: args['session-root'],
+  });
   const query = typeof args.query === 'string' ? args.query : '';
   if (!query.trim()) {
     throw new Error('--query 是必填项');
