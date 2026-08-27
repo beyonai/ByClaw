@@ -133,6 +133,8 @@ export type IMessage = {
   metadata?: string;
 
   text?: string; // markdown文本
+  /** 输入框展示文本，仅用于前端显示；发送给后端的 text 仍使用资源占位符。 */
+  displayText?: string;
   suggest?: string[]; // 推荐问题
 
   msgId: string;

@@ -414,7 +414,14 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
   finallySendQuery = (data: any) => {
     // Chat、Employees 等输入框会覆盖 getSendPayload，项目选择必须在公共发送出口统一补入。
     const selectedProject = this.props.selectedProject || this.selectedProject;
-    if (!this.props.sessionId && selectedProject) {
+    const currentInputPayload = this.getCurrentInputPayload();
+    if (currentInputPayload?.displayText) {
+      // 发送给后端的 text 需要保留 {{DIG_EMPLOYEE_xxx}}，临时会话标题使用用户可见的员工名称。
+      set(data, 'displayText', currentInputPayload.displayText);
+    }
+    // 上传附件会提前生成 sessionId，但当前页面仍属于新建任务；此时必须优先使用用户选择的项目，
+    // 不能因为 sessionId 已存在就误走历史会话分支，回退到默认项目。
+    if (selectedProject && (!this.props.sessionId || this.props.isBottom === false)) {
       set(data, 'payload.selectedProjectId', selectedProject.projectId);
       set(data, 'payload.selectedProjectName', selectedProject.projectName);
     } else if (this.props.sessionId && this.props.projectId !== undefined) {
@@ -423,7 +430,6 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
     }
 
     let { resourceList = [] } = this.state;
-    const currentInputPayload = this.getCurrentInputPayload();
     if (currentInputPayload?.resourceList) {
       resourceList = currentInputPayload.resourceList;
     }
@@ -711,7 +717,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
 
   renderContextUsed() {
     const { contextUsed } = this.props;
-    if (!contextUsed || !contextUsed.percent) return null;
+    if (!contextUsed || contextUsed.percent === null || contextUsed.percent === undefined) return null;
 
     return (
       <div>

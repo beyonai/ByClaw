@@ -372,6 +372,8 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
                 agentId,
                 sessionType: 'AGENT',
                 sessionId,
+                // 新建任务上传文件会提前创建会话，创建时就传入当前选择的项目，避免先落到默认项目。
+                projectId: this.props.selectedProject?.projectId || this.props.projectId,
               }}
               onCreate={(fileItem: IFile) => {
                 return this.onCreateFile({

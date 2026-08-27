@@ -53,6 +53,7 @@ import type { IState } from '@/models/useEmployees';
 import type { RichInputResourceList } from '@/components/QueryInput/RichInput';
 import type { IMessageInfo } from '@/models/useMessageStore';
 import { getSessionLastAnsMsgMetadata } from './util';
+import { resolveDigitalEmployeePlaceholders } from '@/utils/session';
 
 type ISseRes = {
   message: IMessageListItem;
@@ -108,6 +109,9 @@ type IProps = {
  */
 export type ISendProps = {
   queryQuestion: string;
+
+  /** 输入框展示给用户的文本，包含数字员工名称；queryQuestion 仍保留后端识别所需的占位符。 */
+  displayText?: string;
   inheritQryMsgId?: IMessage['msgId'];
   payload?: Record<string, unknown>;
   msgOpt?: {
@@ -797,7 +801,7 @@ function useChat(props: IProps) {
       return false;
     }
 
-    const { queryQuestion, payload = {}, msgOpt = {} } = sendProps;
+    const { queryQuestion, displayText, payload = {}, msgOpt = {} } = sendProps;
     const preliminaryDigitalEmployeeResources = getDigitalEmployeeResources(sendProps.resourceList);
     const isResumeChat = get(payload, 'actionType') === 'RESUME';
     let isContinuingRunningTrace = false;
@@ -826,10 +830,14 @@ function useChat(props: IProps) {
     let { resourceList } = sendProps;
 
     const myExtParams = get(payload, 'extParams');
-    const selectedProjectId = !sessionId
-      ? getProjectNumber(get(payload, 'selectedProjectId')) ?? getProjectNumber(getStoredProjectScopeId())
-      : undefined;
-    const selectedProjectName = !sessionId ? get(payload, 'selectedProjectName') : undefined;
+    // 上传附件会提前生成 sessionId，但页面仍是新建任务；明确传入的项目选择优先于会话 ID 判断。
+    const hasExplicitSelectedProject = get(payload, 'selectedProjectId') !== undefined;
+    const selectedProjectId = hasExplicitSelectedProject
+      ? getProjectNumber(get(payload, 'selectedProjectId'))
+      : !sessionId
+        ? getProjectNumber(getStoredProjectScopeId())
+        : undefined;
+    const selectedProjectName = hasExplicitSelectedProject ? get(payload, 'selectedProjectName') : undefined;
     const restPayload = omit(payload, ['extParams', 'selectedProjectId', 'selectedProjectName']);
 
     // 新建会话以输入框当前明确选择的项目为准，本地存储只作为首次加载时的兜底。
@@ -891,6 +899,7 @@ function useChat(props: IProps) {
     // 创建用户查询消息对象
     let newQueryMsg = createMessage({
       text: _queryQuestion,
+      displayText,
       fromBeyond: false,
       messageState: IMessageState.Done,
       sessionId,
@@ -1002,7 +1011,8 @@ function useChat(props: IProps) {
     const newAnswerMsg = primaryEntry.answerMsg;
     const clientRequestId = primaryEntry.lane.clientRequestId;
     const projectId = getProjectNumber(get(restPayload, 'projectId'));
-    const isNewProjectSession = projectId !== undefined && !sessionId;
+    // 新建任务上传文件后虽已有 sessionId，但首条消息仍需创建左侧临时会话缓存。
+    const isNewProjectSession = projectId !== undefined && (!sessionId || hasExplicitSelectedProject);
     const multiAgent = isMultiAgentSend
       ? {
         turnId,
@@ -1039,7 +1049,14 @@ function useChat(props: IProps) {
           projectId: `${projectId}`,
           projectName: get(restPayload, 'projectName'),
           clientRequestId: primaryEntry.lane.clientRequestId,
-          sessionName: newQueryMsg.text || 'New Chat',
+          // 项目侧栏会先展示临时会话，不能把输入组件的数字员工占位符展示给用户。
+          sessionName:
+            newQueryMsg.displayText ||
+            resolveDigitalEmployeePlaceholders(newQueryMsg.text || 'New Chat', [
+              ...((resourceList || []) as any),
+              { resourceId: primaryEntry.lane.agentId, resourceName: primaryEntry.lane.agentName },
+            ]) ||
+            'New Chat',
           sessionContent: newQueryMsg.text || '',
           updateTime: new Date().toISOString(),
         });

@@ -20,6 +20,7 @@ import { IMessageListItem } from '@/typescript/message';
 import type { ISession } from '@/typescript/session';
 import type { IOnionsProps } from '@/hooks/useChat';
 import { chatSessionRuntimeManager } from '@/utils/chatSessionRuntimeManager';
+import { resolveDigitalEmployeePlaceholders } from '@/utils/session';
 
 type IProps = {
   addSession: (newSession: ISession) => void;
@@ -157,13 +158,29 @@ function useHandler(props: IProps) {
           type: 'session/updateSession',
           payload: {
             ...pick(sseRes, ['sessionName', 'updateTime']),
+            sessionName: resolveDigitalEmployeePlaceholders(
+              sseRes.sessionName || newQueryMsg.displayText || newQueryMsg.text,
+              [
+                ...((newQueryMsg.resourceList || []) as any),
+                { resourceId: newAnswerMsg.agentId, resourceName: newAnswerMsg.agentName },
+              ]
+            ),
             sessionId: newSessionId,
           },
         });
       } else {
+        const resolvedSessionName = resolveDigitalEmployeePlaceholders(
+          sseRes.sessionName || newQueryMsg.displayText || newQueryMsg.text,
+          [
+            ...((newQueryMsg.resourceList || []) as any),
+            { resourceId: newAnswerMsg.agentId, resourceName: newAnswerMsg.agentName },
+          ]
+        );
         const createdSession = {
           ...(sseRes as ISession),
           sessionId: newSessionId,
+          // createSession 事件有时仍返回输入框内部的数字员工占位符，使用本轮消息携带的资源名称兜底转换。
+          ...(resolvedSessionName ? { sessionName: resolvedSessionName } : {}),
         };
         addSession(createdSession);
 

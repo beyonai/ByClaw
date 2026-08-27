@@ -472,7 +472,8 @@ const Employees = () => {
                     setIsBottom(false);
                   },
                 }}
-                queryInputWrapperClassName={!isBottom ? styles.employeeQueryInputWrapper : undefined}
+                // 员工详情页进入聊天态后仍保持与新建任务一致的白色输入区域，避免回退成数字员工输入框的灰色样式。
+                queryInputWrapperClassName={styles.employeeQueryInputWrapper}
                 // 员工详情固定与当前数字员工聊天，不显示 @ 入口，也不恢复任何历史输入草稿。
                 cannotAt
                 disableInputDraft

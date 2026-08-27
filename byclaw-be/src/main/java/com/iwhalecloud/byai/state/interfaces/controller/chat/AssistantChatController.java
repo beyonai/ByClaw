@@ -297,10 +297,11 @@ public class AssistantChatController {
         @Parameter(description = "会话ID，可选") @RequestParam(value = "sessionId", required = false) Long sessionId,
         @Parameter(description = "会话类型，可选") @RequestParam(value = "sessionType", required = false,
             defaultValue = SessionType.SUPER_AGENT) String sessionType,
-        @Parameter(description = "数字员工，可选") @RequestParam(value = "agentId", required = false) Long agentId) {
+        @Parameter(description = "数字员工，可选") @RequestParam(value = "agentId", required = false) Long agentId,
+        @Parameter(description = "项目，可选") @RequestParam(value = "projectId", required = false) Long projectId) {
         try {
             UploadResult uploadResult = assistantChatApplicationService.uploadFiles(files, sessionId, sessionType,
-                agentId);
+                agentId, projectId);
             return ResponseUtil.success(uploadResult);
         }
         catch (Exception e) {
