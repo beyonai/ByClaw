@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -12,7 +13,9 @@ import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.iwhalecloud.byai.common.constants.Constants;
 import com.iwhalecloud.byai.common.constants.users.SourceType;
+import com.iwhalecloud.byai.common.constants.users.UserState;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.gateway.channels.service.feishu.model.FeishuCallbackMessage;
@@ -29,6 +32,7 @@ import okhttp3.Request;
 import okhttp3.Response;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -82,7 +86,7 @@ public class FeishuUserService {
         if (matchedUser != null) {
             logger.info("Matched Feishu user from po_user_external_system by event ids. externalIds={}, userId={}",
                     eventExternalIds, matchedUser.getUserId());
-            return buildLoginInfo(matchedUser);
+            return resolveBoundLoginInfo(message, matchedUser);
         }
 
         FeishuUserDetail userDetail;
@@ -98,14 +102,34 @@ public class FeishuUserService {
         matchedUser = findMatchedUserFromExternalSystem(detailExternalIds);
         if (matchedUser != null) {
             saveUserExternalSystem(externalId, matchedUser.getUserId(), userDetail);
-            return buildLoginInfo(matchedUser);
+            return resolveBoundLoginInfo(message, matchedUser);
         }
 
         LoginInfo userInfo = resolveLoginInfoFromUserDetail(message, userDetail);
         if (userInfo != null) {
-            saveUserExternalSystem(externalId, userInfo.getUserId(), userDetail);
+            boolean bindingMatches = saveUserExternalSystem(externalId, userInfo.getUserId(), userDetail);
+            if (!bindingMatches) {
+                CurrentUserHolder.clearLoginInfo();
+                sendTextReply(message, "账号绑定发生冲突，请重新发送消息。");
+                return null;
+            }
+            if (extractSelectedUserCode(message.getTextContent()) != null) {
+                CurrentUserHolder.clearLoginInfo();
+                sendTextReply(message, "账号绑定成功，请重新发送您的问题。");
+                return null;
+            }
         }
         return userInfo;
+    }
+
+    private LoginInfo resolveBoundLoginInfo(FeishuCallbackMessage message, Users matchedUser) throws IOException {
+        if (isUserUnavailable(matchedUser)) {
+            logger.warn("Rejected unavailable Feishu bound user. userId={}, state={}, isLocked={}",
+                    matchedUser.getUserId(), matchedUser.getState(), matchedUser.getIsLocked());
+            sendTextReply(message, "系统账号已停用或锁定，请联系管理员。");
+            return null;
+        }
+        return buildLoginInfo(matchedUser);
     }
 
     private void handleUserDetailUnavailable(
@@ -235,7 +259,19 @@ public class FeishuUserService {
             return null;
         }
 
-        return buildLoginInfo(users.get(0));
+        Users matchedUser = users.get(0);
+        if (isUserUnavailable(matchedUser)) {
+            logger.warn("Rejected unavailable Feishu user before binding. userId={}, state={}, isLocked={}",
+                    matchedUser.getUserId(), matchedUser.getState(), matchedUser.getIsLocked());
+            sendTextReply(message, "系统账号已停用或锁定，请联系管理员。");
+            return null;
+        }
+        return buildLoginInfo(matchedUser);
+    }
+
+    private boolean isUserUnavailable(Users user) {
+        return !UserState.ACTIVE.equals(user.getState())
+                || Constants.YES_VALUE_Y.equalsIgnoreCase(user.getIsLocked());
     }
 
     private void sendTextReply(FeishuCallbackMessage message, String content) throws IOException {
@@ -414,9 +450,9 @@ public class FeishuUserService {
         }
     }
 
-    private void saveUserExternalSystem(String externalId, Long userId, FeishuUserDetail userDetail) {
+    private boolean saveUserExternalSystem(String externalId, Long userId, FeishuUserDetail userDetail) {
         if (!StringUtils.hasText(externalId) || userId == null || userDetail == null) {
-            return;
+            return false;
         }
 
         UserExternalSystem existing = userExternalSystemService.findByUnionId(SourceType.FEISHU, externalId);
@@ -429,7 +465,7 @@ public class FeishuUserService {
                 existing.setBindingTime(new Date());
             }
             userExternalSystemService.update(existing);
-            return;
+            return true;
         }
 
         UserExternalSystem userExternalSystem = new UserExternalSystem();
@@ -441,7 +477,22 @@ public class FeishuUserService {
         userExternalSystem.setSourceEmail(userDetail.getEmail());
         userExternalSystem.setBindingTime(new Date());
         userExternalSystem.setUnionId(externalId);
-        userExternalSystemService.save(userExternalSystem);
+        try {
+            userExternalSystemService.save(userExternalSystem);
+            return true;
+        } catch (DuplicateKeyException e) {
+            UserExternalSystem concurrentBinding =
+                    userExternalSystemService.findByUnionId(SourceType.FEISHU, externalId);
+            if (concurrentBinding == null) {
+                throw e;
+            }
+            if (!Objects.equals(concurrentBinding.getUserId(), userId)) {
+                logger.warn("Concurrent Feishu binding kept existing user. externalId={}, existingUserId={}, requestedUserId={}",
+                        externalId, concurrentBinding.getUserId(), userId);
+                return false;
+            }
+            return true;
+        }
     }
 
     private String extractSelectedUserCode(String textContent) {
