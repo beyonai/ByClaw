@@ -1,5 +1,12 @@
 package com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream;
 
+import java.util.concurrent.TimeUnit;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
+
 import com.dingtalk.api.DefaultDingTalkClient;
 import com.dingtalk.api.DingTalkClient;
 import com.dingtalk.api.request.OapiGettokenRequest;
@@ -7,12 +14,6 @@ import com.dingtalk.api.response.OapiGettokenResponse;
 import com.iwhalecloud.byai.common.util.RedisUtil;
 import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.model.DingtalkRobotChannelConfig;
 import com.taobao.api.ApiException;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Service;
-import org.springframework.util.StringUtils;
-
-import java.util.concurrent.TimeUnit;
 
 @Service
 public class DingtalkTokenService {
@@ -30,7 +31,7 @@ public class DingtalkTokenService {
 
     public String getAccessToken(String senderStaffId, String robotCode) {
         if (!StringUtils.hasText(senderStaffId)) {
-            throw new IllegalStateException("DingTalk senderStaffId is empty");
+            throw new IllegalStateException("Get getAccessToken fail， DingTalk senderStaffId is empty");
         }
         DingtalkRobotChannelConfig robotConfig = robotConfigService.getRobotConfig(robotCode);
 
