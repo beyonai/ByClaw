@@ -5078,10 +5078,10 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
         // 会话名取自动化名称，便于在会话列表里对上是哪条自动化触发的。
         chatDto.setChatContent(StringUtils.defaultIfBlank(source.getSourceName(), chatConfig.chatContent()));
         chatDto.setAccessTerminal("DevLoop");
-        // 定时任务没有真实 WebSocket 客户端；clientRequestId 会让聊天链路误判为 WebSocket，
-        // 提前返回而不等待 Redis Stream 终态，导致会话只有 ask 没有 answer。后台任务必须走 HTTP/SSE
-        // 等待路径，由 RouteService 负责等待沙箱 worker 就绪并完成 answer 落库。
-        chatDto.setClientRequestId(null);
+        // 定时任务的执行结果需要通过 WebSocket 推送到前端运行中的会话页面，
+        // 因此必须保留 clientRequestId；登录上下文已在调度线程和异步 chat 线程中显式绑定，
+        // 不会再因为缺少用户身份而在 Gateway 发送前提前返回。
+        chatDto.setClientRequestId(AssistantChatService.getClientRequestId());
         // 资源清单原样带上：提示词里的 @ 引用要跟到模型侧，否则引用形同虚设。
         chatDto.setResourceList(chatConfig.resourceList());
         return chatDto;
