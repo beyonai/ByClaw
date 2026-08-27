@@ -63,7 +63,8 @@ public class GitHubRepositoryProvider implements GitRepositoryProvider {
                 ProjectRepoTreeNodeDTO node = new ProjectRepoTreeNodeDTO();
                 node.setName(item.path("name").asText());
                 node.setPath(item.path("path").asText());
-                node.setType("dir".equals(item.path("type").asText()) ? "directory" : "file");
+                String itemType = item.path("type").asText();
+                node.setType("dir".equals(itemType) || "commit".equals(itemType) ? "directory" : "file");
                 node.setSize(item.has("size") ? item.path("size").asLong() : null);
                 node.setSha(item.path("sha").asText(null));
                 node.setUrl(item.path("html_url").asText(null));
@@ -108,7 +109,8 @@ public class GitHubRepositoryProvider implements GitRepositoryProvider {
                 int separatorIndex = itemPath.lastIndexOf('/');
                 node.setName(separatorIndex >= 0 ? itemPath.substring(separatorIndex + 1) : itemPath);
                 node.setPath(itemPath);
-                node.setType("tree".equals(item.path("type").asText()) ? "directory" : "file");
+                String itemType = item.path("type").asText();
+                node.setType("tree".equals(itemType) || "commit".equals(itemType) ? "directory" : "file");
                 node.setSize(item.has("size") ? item.path("size").asLong() : null);
                 node.setSha(item.path("sha").asText(null));
                 node.setHasChildren("directory".equals(node.getType()));
