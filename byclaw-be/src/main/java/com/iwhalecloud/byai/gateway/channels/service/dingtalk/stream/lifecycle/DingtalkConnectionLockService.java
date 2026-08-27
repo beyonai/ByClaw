@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.lifecycle;
 
 import com.iwhalecloud.byai.common.util.RedisUtil;
 import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.config.DingtalkStreamProperties;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.lang.management.ManagementFactory;
@@ -16,6 +17,7 @@ public class DingtalkConnectionLockService {
     private final LeaseOperations leaseOperations;
     private final String instanceId;
 
+    @Autowired
     public DingtalkConnectionLockService(DingtalkStreamProperties properties) {
         this(properties, new RedisLeaseOperations(), ManagementFactory.getRuntimeMXBean().getName());
     }

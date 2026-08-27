@@ -2,13 +2,29 @@ package com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.lifecycle;
 
 import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.config.DingtalkStreamProperties;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 
 import java.util.HashMap;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 class DingtalkConnectionLockServiceTest {
+
+    @Test
+    void springCanCreateBeanWithProductionConstructor() {
+        assertThatCode(() -> {
+            try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
+                context.getBeanFactory().registerSingleton("dingtalkStreamProperties", new DingtalkStreamProperties());
+                context.registerBean(DingtalkConnectionLockService.class);
+
+                context.refresh();
+
+                assertThat(context.getBean(DingtalkConnectionLockService.class)).isNotNull();
+            }
+        }).doesNotThrowAnyException();
+    }
 
     @Test
     void acquireRenewAndReleaseAlwaysUseTheSameOwnerToken() {
