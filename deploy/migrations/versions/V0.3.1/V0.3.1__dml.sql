@@ -405,3 +405,23 @@ SET runtime_manifest = jsonb_set(
     update_time = CURRENT_TIMESTAMP
 WHERE connector_code = 'lark'
   AND runtime_manifest IS NOT NULL;
+
+-- 记录 ByClaw Super 内部结构版本。表结构由本版本 DDL 创建，版本数据归入 DML。
+INSERT INTO byai.byai_super_schema_migrations(version, name)
+SELECT migration.version, migration.name
+FROM (
+         SELECT 1 AS version, 'initial_multi_user_persistence' AS name
+         UNION ALL SELECT 2, 'delegation_resume_partial_output'
+         UNION ALL SELECT 3, 'plaintext_run_execution_credentials'
+         UNION ALL SELECT 4, 'delegation_agent_name'
+         UNION ALL SELECT 5, 'run_thinking_level'
+         UNION ALL SELECT 6, 'user_interaction_waiting_status'
+         UNION ALL SELECT 7, 'session_business_context'
+         UNION ALL SELECT 8, 'run_attachments'
+         UNION ALL SELECT 9, 'run_ingress_context'
+     ) migration
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM byai.byai_super_schema_migrations applied
+    WHERE applied.version = migration.version
+);

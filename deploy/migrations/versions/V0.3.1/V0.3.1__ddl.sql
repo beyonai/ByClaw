@@ -389,25 +389,6 @@ CREATE INDEX IF NOT EXISTS idx_byai_super_agent_capability_cards_fingerprint
 CREATE INDEX IF NOT EXISTS idx_byai_super_agent_capability_cards_status
     ON byai_super_agent_capability_cards(status);
 
-INSERT INTO byai_super_schema_migrations(version, name)
-SELECT migration.version, migration.name
-FROM (
-         SELECT 1 AS version, 'initial_multi_user_persistence' AS name
-         UNION ALL SELECT 2, 'delegation_resume_partial_output'
-         UNION ALL SELECT 3, 'plaintext_run_execution_credentials'
-         UNION ALL SELECT 4, 'delegation_agent_name'
-         UNION ALL SELECT 5, 'run_thinking_level'
-         UNION ALL SELECT 6, 'user_interaction_waiting_status'
-         UNION ALL SELECT 7, 'session_business_context'
-         UNION ALL SELECT 8, 'run_attachments'
-         UNION ALL SELECT 9, 'run_ingress_context'
-     ) migration
-WHERE NOT EXISTS (
-    SELECT 1
-    FROM byai_super_schema_migrations applied
-    WHERE applied.version = migration.version
-);
-
 COMMIT;
 
 -- Verification
@@ -420,4 +401,3 @@ FROM information_schema.tables
 WHERE table_schema = 'byai'
   AND table_name LIKE 'byai_super_%'
 ORDER BY table_name;
-

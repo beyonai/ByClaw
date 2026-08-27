@@ -233,8 +233,8 @@ class ConnectorSchemaTest {
         assertThat(ddlSql).contains(
             "'access_expire_time', 'timestamp'",
             "'refresh_expire_time', 'timestamp'",
-            "'credential_state', 'varchar(32) default ''unknown'''",
-            "'renewal_mode', 'varchar(32) default ''none'''",
+            "'credential_state', 'varchar(32) default ''unknown'' not null'",
+            "'renewal_mode', 'varchar(32) default ''none'' not null'",
             "'last_verified_at', 'timestamp'"
         );
         assertThat(dmlSql).contains("set access_expire_time = expire_time");

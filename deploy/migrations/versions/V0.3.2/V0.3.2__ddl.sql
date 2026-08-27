@@ -24,8 +24,14 @@ $$ LANGUAGE plpgsql;
 
 SELECT byai.add_column_if_missing('byai', 'byai_connector_auth', 'access_expire_time', 'TIMESTAMP');
 SELECT byai.add_column_if_missing('byai', 'byai_connector_auth', 'refresh_expire_time', 'TIMESTAMP');
-SELECT byai.add_column_if_missing('byai', 'byai_connector_auth', 'credential_state', 'VARCHAR(32) DEFAULT ''UNKNOWN''');
-SELECT byai.add_column_if_missing('byai', 'byai_connector_auth', 'renewal_mode', 'VARCHAR(32) DEFAULT ''NONE''');
+SELECT byai.add_column_if_missing(
+    'byai', 'byai_connector_auth', 'credential_state',
+    'VARCHAR(32) DEFAULT ''UNKNOWN'' NOT NULL'
+);
+SELECT byai.add_column_if_missing(
+    'byai', 'byai_connector_auth', 'renewal_mode',
+    'VARCHAR(32) DEFAULT ''NONE'' NOT NULL'
+);
 SELECT byai.add_column_if_missing('byai', 'byai_connector_auth', 'last_verified_at', 'TIMESTAMP');
 
 DROP FUNCTION byai.add_column_if_missing(TEXT, TEXT, TEXT, TEXT);
