@@ -15,6 +15,8 @@ public class ChatRuntimeState {
 
     public static final String STATUS_RUNNING = "RUNNING";
 
+    public static final String STATUS_HANDOFF_REQUESTED = "HANDOFF_REQUESTED";
+
     public static final String STATUS_CANCELED = "CANCELED";
 
     public static final String STATUS_FINISHED = "FINISHED";
@@ -50,6 +52,8 @@ public class ChatRuntimeState {
     private Long startedAt;
 
     private Long lastHeartbeatAt;
+
+    private Long handoffRequestedAt;
 
     private String status = STATUS_RUNNING;
 }

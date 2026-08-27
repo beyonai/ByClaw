@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.state.domain.chat.service;
 
 import java.time.Duration;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -111,6 +112,12 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
 
     @Autowired
     private SessionStreamMetrics sessionStreamMetrics;
+
+    @Autowired
+    private OutputStreamManager outputStreamManager;
+
+    @Autowired
+    private ChatRuntimeStateService chatRuntimeStateService;
 
     @Value("${byclaw.session-stream.poll-timeout-millis:" + DEFAULT_POLL_TIMEOUT_MILLIS + "}")
     private long pollTimeoutMillis;
@@ -296,6 +303,11 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
     @Override
     public void onApplicationEvent(ContextClosedEvent event) {
         log.info("应用关闭，开始清理所有 Session Stream 监听器...");
+        Set<String> activeSessionIds = new HashSet<>(containers.keySet());
+        activeSessionIds.addAll(streamLeases.keySet());
+        // 先停止续租与 Stream 消费，确认本实例不再处理新事件后，再发布可接管状态并释放 listener lease。
+        keepAliveTasks.values().forEach(task -> task.cancel(false));
+        keepAliveTasks.clear();
         for (Map.Entry<String, StreamMessageListenerContainer<String, MapRecord<String, String, String>>> entry :
             containers.entrySet()) {
             try {
@@ -307,6 +319,12 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
         }
         containers.clear();
         sessionStreamMetrics.updateActiveListeners(0L);
+        for (String sessionId : activeSessionIds) {
+            ChatProcessContext ctx = outputStreamManager.getContext(sessionId);
+            if (chatRuntimeStateService.requestHandoff(ctx)) {
+                log.info("已将聊天运行态标记为可接管, sessionId: {}", sessionId);
+            }
+        }
         streamLeaseTasks.values().forEach(task -> task.cancel(false));
         streamLeaseTasks.clear();
         streamLeases.values().forEach(sessionStreamLeaseService::release);
@@ -319,8 +337,6 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
         sessionStatusStopTasks.clear();
         sessionStatusFields.clear();
         sessionStatusLastValues.clear();
-        keepAliveTasks.values().forEach(task -> task.cancel(false));
-        keepAliveTasks.clear();
         keepAliveExecutor.shutdownNow();
         sessionStatusExecutor.shutdownNow();
         streamTaskExecutor.shutdownNow();

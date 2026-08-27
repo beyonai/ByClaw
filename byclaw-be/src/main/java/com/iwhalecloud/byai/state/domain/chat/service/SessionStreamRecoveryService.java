@@ -103,6 +103,10 @@ public class SessionStreamRecoveryService implements ApplicationListener<Applica
         long now = System.currentTimeMillis();
         String localInstanceId = chatRuntimeInstance.getInstanceId();
         for (ChatRuntimeState state : states) {
+            if (ChatRuntimeState.STATUS_HANDOFF_REQUESTED.equals(state.getStatus())) {
+                recoverState(state, true);
+                continue;
+            }
             Long heartbeat = state.getLastHeartbeatAt() == null ? state.getStartedAt() : state.getLastHeartbeatAt();
             // 本机正在恢复消费的 session：周期补捞 pending，不做超时收尾，会话结束由 worker 终止事件驱动。
             if (localInstanceId.equals(state.getOwnerInstanceId()) && manageLocalRecoveryCtx(state)) {
@@ -111,7 +115,7 @@ public class SessionStreamRecoveryService implements ApplicationListener<Applica
             if (heartbeat != null && now - heartbeat < STALE_HEARTBEAT_MILLIS) {
                 continue;
             }
-            recoverState(state);
+            recoverState(state, false);
         }
     }
 
@@ -141,7 +145,7 @@ public class SessionStreamRecoveryService implements ApplicationListener<Applica
                 claimAckFailedMessages(sessionId, streamKey);
             }
             else {
-                claimPendingMessages(sessionId);
+                claimPendingMessages(sessionId, PENDING_MIN_IDLE_MILLIS);
             }
         }
         catch (Exception e) {
@@ -171,7 +175,7 @@ public class SessionStreamRecoveryService implements ApplicationListener<Applica
         claimAndProcess(streamKey, consumerName, ids, 0L);
     }
 
-    private void recoverState(ChatRuntimeState state) {
+    private void recoverState(ChatRuntimeState state, boolean gracefulHandoff) {
         if (state == null || state.getSessionId() == null || !chatRuntimeStateService.tryAcquireRecoveryLock(state.getSessionId())) {
             return;
         }
@@ -189,8 +193,9 @@ public class SessionStreamRecoveryService implements ApplicationListener<Applica
         runningOutputStreamRegistry.markRunning(ctx);
         // 处理 PEL 中已投递未 ACK 的消息（走共享 processor + 水位线去重）；processor 的 session lock
         // 串行化 claim 与 listener callback，避免同一 session 并发 dispatch。
-        claimPendingMessages(sessionId);
-        log.info("已接管 stale Session Stream, sessionId: {}, traceId: {}", sessionId, state.getTraceId());
+        claimPendingMessages(sessionId, gracefulHandoff ? 0L : PENDING_MIN_IDLE_MILLIS);
+        log.info("已接管 Session Stream, sessionId: {}, traceId: {}, gracefulHandoff: {}", sessionId,
+            state.getTraceId(), gracefulHandoff);
     }
 
     /**
@@ -200,6 +205,10 @@ public class SessionStreamRecoveryService implements ApplicationListener<Applica
      * 避免抢走仍可能被正常消费者处理中的消息。
      */
     private void claimPendingMessages(String sessionId) {
+        claimPendingMessages(sessionId, PENDING_MIN_IDLE_MILLIS);
+    }
+
+    private void claimPendingMessages(String sessionId, long minIdleMillis) {
         String streamKey = sessionStreamManager.buildStreamKey(sessionId);
         String consumerName = sessionStreamManager.buildConsumerName(sessionId);
         String cursor = null;
@@ -226,12 +235,12 @@ public class SessionStreamRecoveryService implements ApplicationListener<Applica
             for (PendingMessage pendingMessage : pendingMessages) {
                 lastId = pendingMessage.getId().getValue();
                 // idle 未满阈值的暂不 claim，留待 recovery owner 活跃期下一轮周期 claim 补捞。
-                if (pendingMessage.getElapsedTimeSinceLastDelivery().toMillis() >= PENDING_MIN_IDLE_MILLIS) {
+                if (pendingMessage.getElapsedTimeSinceLastDelivery().toMillis() >= minIdleMillis) {
                     ids.add(pendingMessage.getId());
                 }
             }
             if (!ids.isEmpty()) {
-                claimAndProcess(streamKey, consumerName, ids);
+                claimAndProcess(streamKey, consumerName, ids, minIdleMillis);
             }
             if (pendingMessages.size() < PENDING_CLAIM_BATCH_SIZE) {
                 return;
@@ -241,14 +250,10 @@ public class SessionStreamRecoveryService implements ApplicationListener<Applica
         log.warn("claim pending 达到最大分页数 {}, 提前结束, stream: {}", MAX_CLAIM_PAGES, streamKey);
     }
 
-    private void claimAndProcess(String streamKey, String consumerName, List<RecordId> ids) {
-        claimAndProcess(streamKey, consumerName, ids, PENDING_MIN_IDLE_MILLIS);
-    }
-
     /**
      * @param minIdleMillis claim 的最小空闲时间。常规兜底扫描使用 {@link #PENDING_MIN_IDLE_MILLIS}
-     *                      以免抢走正在处理中的消息；对已知 ACK 失败的消息则传 0，因为它们的
-     *                      业务处理已经结束，只差 ACK，不需要再等 idle 累积。
+     *                      以免抢走正在处理中的消息；已知 ACK 失败或旧 Pod 已完成优雅交接时传 0，
+     *                      不需要再等待 idle 累积。
      */
     private void claimAndProcess(String streamKey, String consumerName, List<RecordId> ids, long minIdleMillis) {
         List<MapRecord<String, Object, Object>> claimed = redisTemplate.opsForStream()

@@ -169,4 +169,18 @@ class SessionStreamRecoveryLocalOwnerTest {
         // tryAcquireRecoveryLock 返回 false，recoverState 提前退出，不启动 listener，但确实尝试了抢占。
         verify(chatRuntimeStateService, atLeastOnce()).tryAcquireRecoveryLock(eq(10L));
     }
+
+    @Test
+    void takesOverGracefulHandoffWithoutWaitingForHeartbeatToBecomeStale() {
+        long now = System.currentTimeMillis();
+        ChatRuntimeState state = localState(now);
+        state.setStatus(ChatRuntimeState.STATUS_HANDOFF_REQUESTED);
+        state.setLastHeartbeatAt(now);
+        when(chatRuntimeStateService.listRunningStates()).thenReturn(Collections.singletonList(state));
+        when(chatRuntimeStateService.tryAcquireRecoveryLock(eq(10L))).thenReturn(false);
+
+        scan();
+
+        verify(chatRuntimeStateService).tryAcquireRecoveryLock(10L);
+    }
 }
