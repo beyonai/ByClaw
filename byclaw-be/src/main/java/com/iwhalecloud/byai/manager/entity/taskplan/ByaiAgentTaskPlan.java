@@ -20,7 +20,7 @@ public class ByaiAgentTaskPlan {
 
     private Long sessionId;
 
-    private Long messageId;
+    private String messageId;
 
     private String turnId;
 
