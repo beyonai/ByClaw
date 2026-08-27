@@ -47,6 +47,9 @@ byclaw-qa/client.py
 !.env.example
 auth-profiles.json
 upload.sh
+deploy/config/nginx-standalone.conf
+deploy/config/ssl/
+.trivyignore
 
 # byclaw-data：本体 OWL 包（体积大/环境差异大，由部署或本地生成；仅保留 README 占位）
 byclaw-data/resource/import_package_owl_onto/**
@@ -74,6 +77,55 @@ byclaw-data/resource/import_package_owl_onto_bak/
 # Agent/local tool state
 .codegraph/
 .playwright-mcp/
+.playwright-cli/
+.superpowers/
+docs/superpowers/
+docs/connectors/
+docs/bycli-recorder/
+.claude/settings.local.json
+.neuralmemory/
+.rtk/
 
 # Vscode
 .vscode/
+
+# Docker build artifacts
+**/build-info.json
+.trivyignore
+
+/deploy/middleware/initdb-official/
+/deploy/middleware/local-storage/
+/deploy/middleware/miniodata/
+/deploy/middleware/official-opengauss-data-compatible/
+
+
+
+/middleware/openclaw/.containerignore.local.macos
+/deploy/middleware/Containerfile.opengauss-official
+/middleware/openclaw/Dockerfile.local.macos
+/deploy/middleware/opensandbox-server.toml
+/byclaw-exe/extensions/baiying-enhance/pnpm-lock.yaml
+/byclaw-exe/extensions/byai-channel/pnpm-lock.yaml
+/byclaw-exe/extensions/baiying-enhance/pnpm-workspace.yaml
+/byclaw-exe/extensions/byai-channel/pnpm-workspace.yaml
+/scripts/upload_docs.py
+
+byclaw-data/trace_result.json
+byclaw-data/.vscode/launch.json
+byclaw-data/.vscode/settings.json
+.vscode/launch.json
+
+.workbuddy/
+.worktrees/
+
+.codegraph
+
+.uv-cache/
+
+.pnpm-store/
+
+# AOCI index files (local only, not committed to submodule repo)
+aoci.txt
+aoci.meta.txt
+aoci.code.txt
+.aoci/
