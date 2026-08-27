@@ -13,6 +13,10 @@ import { createRedisJsonStore, setSharedRedisJsonStore } from "./redis-json-stor
 import { loadBaiyingRedisEnvDefaults } from "./redis-env.js";
 import { createBaiyingCallToolFactory } from "./baiying-call-tool.js";
 import {
+  createCodeToWikiToolFactory,
+  resolveCodeToWikiSettings,
+} from "./code-to-wiki-tool.js";
+import {
   registerBaiyingNativeImageRouting,
 } from "./image-generation/native-image-provider.js";
 import type { BaiyingEnhancePluginConfig } from "./types.js";
@@ -31,6 +35,7 @@ import {
   markBaiyingEnhanceColdStartUnavailable,
   resetBaiyingEnhanceColdStartReadiness,
 } from "./cold-start-readiness.js";
+import { resolveDefaultManagedWorkspacePath } from "./workspace-paths.js";
 
 function resolvePluginPath(api: OpenClawPluginApi, raw: string): string {
   if (path.isAbsolute(raw)) {
@@ -80,6 +85,19 @@ function resolveColdStartReadySettleMs(): number {
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function resolveAgentWorkspaceForTool(api: OpenClawPluginApi, agentId: string): string {
+  try {
+    const cfg = api.runtime?.config?.current?.() ?? api.runtime?.config?.loadConfig?.();
+    const entry = cfg?.agents?.list?.find((candidate) => candidate.id === agentId);
+    if (typeof entry?.workspace === "string" && entry.workspace.trim()) {
+      return entry.workspace.trim();
+    }
+  } catch {
+    // Fall back to the standard managed-agent workspace layout.
+  }
+  return resolveDefaultManagedWorkspacePath(agentId);
 }
 
 function warnIfConversationHooksBlocked(api: OpenClawPluginApi): void {
@@ -162,6 +180,46 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
     { name: "baiying_call" },
   );
 
+  const loadUserPrivateParams = async (): Promise<Record<string, string>> => {
+    const authContext = await loadAuthContext(resolveAuthFilePath(pluginCfg.authFilePath));
+    const runtime = await loadPrivateParamsRuntime({
+      authContext,
+      logger: {
+        info: (message) => api.logger.info(message),
+        warn: (message) => api.logger.warn(message),
+        error: (message) => api.logger.error(message),
+      },
+    });
+    return runtime?.params ?? {};
+  };
+
+  const codeToWikiToolFactory = createCodeToWikiToolFactory({
+    registry,
+    loadGitHubToken: async () => {
+      try {
+        return (await loadUserPrivateParams()).GH_TOKEN;
+      } catch (err) {
+        api.logger.warn(
+          `baiying-enhance: code_to_wiki GitHub credential lookup skipped: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+        return undefined;
+      }
+    },
+    resolveWorkspaceDir: (agentId) => resolveAgentWorkspaceForTool(api, agentId),
+    settings: resolveCodeToWikiSettings(pluginCfg),
+    logger: {
+      info: (message) => api.logger.info(message),
+      warn: (message) => api.logger.warn(message),
+    },
+  });
+  api.registerTool(
+    (ctx) => codeToWikiToolFactory(ctx),
+    { name: "code_to_wiki" },
+  );
+  api.logger.info("baiying-enhance: code_to_wiki RepoWiki tool factory ready");
+
   registerBaiyingNativeImageRouting({
     api,
     registry,
@@ -179,16 +237,7 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
     }
     let privateParams: Record<string, string> = {};
     try {
-      const authContext = await loadAuthContext(resolveAuthFilePath(pluginCfg.authFilePath));
-      const runtime = await loadPrivateParamsRuntime({
-        authContext,
-        logger: {
-          info: (message) => api.logger.info(message),
-          warn: (message) => api.logger.warn(message),
-          error: (message) => api.logger.error(message),
-        },
-      });
-      privateParams = runtime?.params ?? {};
+      privateParams = await loadUserPrivateParams();
     } catch (err) {
       api.logger.warn(
         `baiying-enhance: resolve_exec_env private params skipped: ${

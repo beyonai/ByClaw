@@ -217,6 +217,20 @@ MiniMax HTTP 客户端。`baiying-redis-image` provider 在每次原生工具调
 
 该格式的托管 agent 仍会保留 **`baiying_call`**，用于调用百应关联资源桥接工具：当 `relTools` 非空时合并进 `tools.allow`，否则写为 `tools.alsoAllow`。数字员工 JSON 内容变化后，Redis Pub/Sub 或显式 flush 触发重新扫描时，`relTools` 变更会随配置同步写回；插件同时写入一个禁用的内部 `skills.entries.__baiying_enhance_reload` 标记，让 OpenClaw 刷新 skills/tools 快照，无需重启网关。
 
+### `code_to_wiki`
+
+`code_to_wiki` 按需为 GitHub 仓库生成 Wiki 文档。工具先执行 `git clone --depth 1 --single-branch`，再使用当前数字员工从 Redis 解析出的模型配置运行 RepoWiki。生成文件保存在该数字员工 workspace 的 `generated-wikis/` 目录，临时源码 checkout 和 RepoWiki 缓存在调用结束后删除。
+
+工具不会根据数字员工名称自动开放。需要在数字员工根配置中显式声明：
+
+```json
+{
+  "relTools": ["code_to_wiki"]
+}
+```
+
+公开 GitHub 仓库可直接克隆；私有 GitHub 仓库使用当前用户私有参数中的 `GH_TOKEN`，凭据仅通过 Git 子进程环境传递，不会写入仓库 URL、Git 配置或工具输出。工具只接受不包含凭据的 `https://github.com/<owner>/<repository>` 地址。
+
 ## HTTP
 
 - `GET /plugins/baiying-enhance/health`（需网关认证）

@@ -35,8 +35,6 @@ type NativeAgentJson = {
     allowSpawnFrom?: string[];
 };
 
-const CODE_TO_WIKI_EMPLOYEE_NAME = "百应平台赋能助手";
-const CODE_TO_WIKI_TOOL_NAME = "code_to_wiki";
 const BYCLAW_CHAT_CONTEXT_TOOL_NAME = "byclaw_chat_context";
 const UPDATE_TASK_PLAN_TOOL_NAME = "updateTaskPlan";
 
@@ -337,11 +335,6 @@ function normalizeAgentListTools(
     raw: Record<string, unknown>,
 ): NonNullable<AgentListEntry["tools"]> {
     const allow = normalizeStringList(raw.relTools);
-    const extraTools =
-        nonEmpty(raw.resourceName) === CODE_TO_WIKI_EMPLOYEE_NAME ||
-        nonEmpty(raw.name) === CODE_TO_WIKI_EMPLOYEE_NAME
-            ? [CODE_TO_WIKI_TOOL_NAME]
-            : [];
     return allow.length > 0
         ? {
               allow: Array.from(
@@ -351,7 +344,6 @@ function normalizeAgentListTools(
                       "image_generate",
                       BYCLAW_CHAT_CONTEXT_TOOL_NAME,
                       UPDATE_TASK_PLAN_TOOL_NAME,
-                      ...extraTools,
                   ]),
               ),
           }
@@ -362,7 +354,6 @@ function normalizeAgentListTools(
                       "image_generate",
                       BYCLAW_CHAT_CONTEXT_TOOL_NAME,
                       UPDATE_TASK_PLAN_TOOL_NAME,
-                      ...extraTools,
                   ]),
               ),
           };
