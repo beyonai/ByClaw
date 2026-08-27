@@ -57,6 +57,30 @@ mvn -B -f byclaw-be/pom.xml verify
 cd byclaw-exe && pip install -e ".[dev]" && ruff check . && pytest
 ```
 
+## Database migration and release governance
+
+Treat any schema or data change as a database migration. This includes DDL and DML
+written under `deploy/migrations/versions/`, as well as changes to the initialization
+SQL files under `deploy/middleware/initdb/`.
+
+- If the user's request does not explicitly name the migration version, stop and ask
+  which exact version to use before creating or editing any DDL/DML migration. Do not
+  infer a version from the highest existing directory, automatically increment a
+  version, or choose a monthly/release version on the user's behalf. The fact that
+  `deploy/migrations/versions/` appears to be sequential is not permission to advance it.
+- If a version is provided, use that exact version and follow the existing migration
+  naming/layout conventions. Do not create an additional version merely because the
+  requested version already has other work unless the user explicitly directs that.
+- Do not run `deploy/migrations/merge_migrations.py`, manually merge migration files,
+  or otherwise modify `deploy/middleware/initdb/` as part of ordinary development work
+  unless the user explicitly authorizes that release operation. The repository's
+  release process assigns this to the version administrator: immediately before
+  creating a release tag, the version administrator runs
+  `deploy/migrations/merge_migrations.py` to merge versioned migrations into
+  `deploy/middleware/initdb/`.
+- Keep development changes in the appropriate version directory. Never treat a
+  migration merge as a routine cleanup or as an implicit final step.
+
 ## Hard rules
 
 1. **Never commit secrets** (API keys, tokens, private URLs, production connection strings). Use `.env.example` for variable names only.
