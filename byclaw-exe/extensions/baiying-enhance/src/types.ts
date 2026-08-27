@@ -87,6 +87,18 @@ export type BaiyingEnhancePluginConfig = {
     defaultProxyUrl?: string;
     /** Default API key for the proxy endpoint. */
     defaultApiKey?: string;
+    /** RepoWiki integration command. Default: byclaw-repowiki. */
+    repoWikiCommand?: string;
+    /** Git command used for on-demand shallow clones. Default: git. */
+    repoWikiGitCommand?: string;
+    /** Maximum time for the shallow clone phase. Default: 120000 ms. */
+    repoWikiCloneTimeoutMs?: number;
+    /** Maximum time for RepoWiki document generation. Default: 1800000 ms. */
+    repoWikiGenerateTimeoutMs?: number;
+    /** Maximum captured bytes per stdout/stderr stream. Default: 131072. */
+    repoWikiMaxCommandOutputBytes?: number;
+    /** Maximum size of a completed shallow checkout. Default: 524288000 bytes. */
+    repoWikiMaxRepositoryBytes?: number;
     /** Redis Hash key for Baiying AI model config. Default `byai:aimodel:config`. */
     aimodelConfigRedisKey?: string;
     /** Redis Hash key for Baiying AI model type list. Default `byai:aimodel:typelist`; field `LLM` supplies the default model. */
