@@ -113,21 +113,23 @@ class ConnectorSchemaTest {
 
     @Test
     void connectorCredentialLifecycleMigrationAddsMetadataWithoutPersistingTokens() throws Exception {
-        String sql = read("deploy/migrations/versions/V0.3.2/V0.3.2__ddl.sql");
+        String ddl = read("deploy/migrations/versions/V0.3.2/V0.3.2__ddl.sql");
+        String dml = read("deploy/migrations/versions/V0.3.2/V0.3.2__dml.sql");
 
-        assertThat(sql).contains(
+        assertThat(ddl).contains(
             "'access_expire_time', 'timestamp'",
             "'refresh_expire_time', 'timestamp'",
-            "'credential_state', 'varchar(32)'",
-            "'renewal_mode', 'varchar(32)'",
-            "'last_verified_at', 'timestamp'",
-            "set access_expire_time = expire_time"
+            "'credential_state', 'varchar(32) default ''unknown'' not null'",
+            "'renewal_mode', 'varchar(32) default ''none'' not null'",
+            "'last_verified_at', 'timestamp'"
         );
-        assertThat(sql).doesNotContain(
+        assertThat(ddl).doesNotContain("update byai.byai_connector_auth");
+        assertThat(dml).contains("set access_expire_time = expire_time");
+        assertThat(ddl + dml).doesNotContain(
             "'byai_connector_auth', 'access_token'",
             "'byai_connector_auth', 'refresh_token'"
         );
-        assertThat(sql).doesNotContain("when 'lark-cli' then 'refresh_token'");
+        assertThat(dml).doesNotContain("when 'lark-cli' then 'refresh_token'");
     }
 
     @Test

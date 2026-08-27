@@ -24,35 +24,17 @@ $$ LANGUAGE plpgsql;
 
 SELECT byai.add_column_if_missing('byai', 'byai_connector_auth', 'access_expire_time', 'TIMESTAMP');
 SELECT byai.add_column_if_missing('byai', 'byai_connector_auth', 'refresh_expire_time', 'TIMESTAMP');
-SELECT byai.add_column_if_missing('byai', 'byai_connector_auth', 'credential_state', 'VARCHAR(32)');
-SELECT byai.add_column_if_missing('byai', 'byai_connector_auth', 'renewal_mode', 'VARCHAR(32)');
+SELECT byai.add_column_if_missing(
+    'byai', 'byai_connector_auth', 'credential_state',
+    'VARCHAR(32) DEFAULT ''UNKNOWN'' NOT NULL'
+);
+SELECT byai.add_column_if_missing(
+    'byai', 'byai_connector_auth', 'renewal_mode',
+    'VARCHAR(32) DEFAULT ''NONE'' NOT NULL'
+);
 SELECT byai.add_column_if_missing('byai', 'byai_connector_auth', 'last_verified_at', 'TIMESTAMP');
 
 DROP FUNCTION byai.add_column_if_missing(TEXT, TEXT, TEXT, TEXT);
-
-UPDATE byai.byai_connector_auth
-SET access_expire_time = expire_time
-WHERE access_expire_time IS NULL
-  AND expire_time IS NOT NULL;
-
-UPDATE byai.byai_connector_auth AS auth
-SET credential_state = COALESCE(auth.credential_state, 'UNKNOWN'),
-    renewal_mode = COALESCE(
-        auth.renewal_mode,
-        CASE info.provider_code
-            WHEN 'dws-dingtalk' THEN 'REFRESH_TOKEN'
-            WHEN 'wecom-cli' THEN 'PROBE_ONLY'
-            ELSE 'NONE'
-        END
-    )
-FROM byai.byai_connector_info AS info
-WHERE info.connector_id = auth.connector_id
-  AND (auth.credential_state IS NULL OR auth.renewal_mode IS NULL);
-
-UPDATE byai.byai_connector_auth
-SET credential_state = COALESCE(credential_state, 'UNKNOWN'),
-    renewal_mode = COALESCE(renewal_mode, 'NONE')
-WHERE credential_state IS NULL OR renewal_mode IS NULL;
 
 ALTER TABLE byai.byai_connector_auth
     ALTER COLUMN credential_state SET DEFAULT 'UNKNOWN';

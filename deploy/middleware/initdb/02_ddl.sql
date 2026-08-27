@@ -1842,3 +1842,307 @@ COMMENT ON COLUMN byai.byai_connector_auth.last_sync_time IS '凭证最后同步
 COMMENT ON COLUMN byai.byai_connector_auth.create_by IS '创建人标识';
 COMMENT ON COLUMN byai.byai_connector_auth.create_time IS '创建时间，新增自动填充';
 COMMENT ON COLUMN byai.byai_connector_auth.update_time IS '更新时间，新增不赋值为NULL，更新时手动填充';
+
+-- ========== V0.3.1 ByClaw Super 结构（同步已应用版本） ==========
+-- ByClaw Super consolidated PostgreSQL/OpenGauss schema.
+-- Source: byclaw-super/packages/storage-postgres/src/migrations.ts (versions 1-9)
+-- Plus the manually managed Agent capability-card table used by ByClaw Super/BE.
+-- Target schema follows the repository default. Change "byai" consistently if DB_SCHEMA differs.
+
+
+CREATE SCHEMA IF NOT EXISTS byai;
+SET search_path TO byai, public;
+
+CREATE TABLE IF NOT EXISTS byai_super_schema_migrations (
+                                                            version integer PRIMARY KEY,
+                                                            name text NOT NULL,
+                                                            applied_at timestamptz NOT NULL DEFAULT now()
+    );
+
+CREATE TABLE IF NOT EXISTS byai_super_sessions (
+                                                   id uuid PRIMARY KEY,
+                                                   owner_version smallint NOT NULL DEFAULT 1,
+                                                   user_code text NOT NULL,
+                                                   tenant_id text NULL,
+                                                   namespace text NULL,
+                                                   user_name text NULL,
+                                                   status text NOT NULL DEFAULT 'ACTIVE',
+                                                   context_revision bigint NOT NULL DEFAULT 0,
+                                                   created_at timestamptz NOT NULL,
+                                                   updated_at timestamptz NOT NULL,
+                                                   archived_at timestamptz NULL,
+                                                   session_context jsonb NOT NULL DEFAULT '{"schemaVersion":1}'::jsonb,
+                                                   session_context_version bigint NOT NULL DEFAULT 1,
+                                                   CONSTRAINT sessions_owner_v1 CHECK (
+                                                   owner_version <> 1 OR (tenant_id IS NULL AND namespace IS NULL)
+    ),
+    CONSTRAINT sessions_context_version_positive CHECK (session_context_version > 0)
+    );
+
+CREATE INDEX IF NOT EXISTS sessions_owner_updated_idx
+    ON byai_super_sessions(owner_version, user_code, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS byai_super_runs (
+                                               id uuid PRIMARY KEY,
+                                               session_id uuid NOT NULL REFERENCES byai_super_sessions(id) ON DELETE CASCADE,
+    input text NOT NULL,
+    agent_snapshot jsonb NOT NULL,
+    status text NOT NULL,
+    base_context_revision bigint NOT NULL DEFAULT 0,
+    attempt_no integer NOT NULL DEFAULT 0,
+    execution_stage text NOT NULL DEFAULT 'QUEUED',
+    lease_fencing_token bigint NULL,
+    final_answer text NULL,
+    error_code text NULL,
+    error_message text NULL,
+    version bigint NOT NULL DEFAULT 0,
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL,
+    started_at timestamptz NULL,
+    finished_at timestamptz NULL,
+    thinking_level text NOT NULL DEFAULT 'off',
+    attachments jsonb NOT NULL DEFAULT '[]'::jsonb,
+    ingress_context jsonb NULL,
+    CONSTRAINT runs_thinking_level_check
+    CHECK (thinking_level IN ('off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'))
+    );
+
+CREATE INDEX IF NOT EXISTS runs_session_created_idx
+    ON byai_super_runs(session_id, created_at, id);
+
+CREATE INDEX IF NOT EXISTS runs_claim_idx
+    ON byai_super_runs(status, created_at)
+    WHERE status IN (
+    'CREATED', 'QUEUED', 'RUNNING', 'WAITING_AGENT', 'WAITING_USER',
+    'SYNTHESIZING', 'CANCELLING'
+    );
+
+CREATE TABLE IF NOT EXISTS byai_super_delegations (
+                                                      id uuid PRIMARY KEY,
+                                                      run_id uuid NOT NULL REFERENCES byai_super_runs(id) ON DELETE CASCADE,
+    agent_id text NOT NULL,
+    connector_id text NOT NULL,
+    task text NOT NULL,
+    expected_output text NULL,
+    status text NOT NULL,
+    external_ref jsonb NULL,
+    connector_cursor text NULL,
+    result jsonb NULL,
+    error text NULL,
+    partial_output text NULL,
+    agent_name text NULL,
+    version bigint NOT NULL DEFAULT 0,
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL,
+    started_at timestamptz NULL,
+    finished_at timestamptz NULL
+    );
+
+CREATE INDEX IF NOT EXISTS delegations_run_created_idx
+    ON byai_super_delegations(run_id, created_at, id);
+
+CREATE TABLE IF NOT EXISTS byai_super_run_events (
+                                                     run_id uuid NOT NULL REFERENCES byai_super_runs(id) ON DELETE CASCADE,
+    event_id bigint NOT NULL,
+    timestamp timestamptz NOT NULL,
+    type text NOT NULL,
+    data jsonb NOT NULL,
+    PRIMARY KEY (run_id, event_id)
+    );
+
+CREATE TABLE IF NOT EXISTS byai_super_pi_sessions (
+                                                      session_id uuid PRIMARY KEY REFERENCES byai_super_sessions(id) ON DELETE CASCADE,
+    pi_session_id text NOT NULL,
+    pi_sdk_version text NOT NULL,
+    session_format_version integer NOT NULL,
+    header jsonb NOT NULL,
+    active_leaf_id text NULL,
+    revision bigint NOT NULL,
+    entry_count bigint NOT NULL,
+    content_bytes bigint NOT NULL,
+    checksum text NOT NULL,
+    model_provider text NULL,
+    model_id text NULL,
+    updated_at timestamptz NOT NULL
+    );
+
+CREATE TABLE IF NOT EXISTS byai_super_pi_session_entries (
+                                                             session_id uuid NOT NULL REFERENCES byai_super_sessions(id) ON DELETE CASCADE,
+    seq bigint NOT NULL,
+    entry_id text NOT NULL,
+    parent_id text NULL,
+    entry_type text NOT NULL,
+    entry_json jsonb NOT NULL,
+    visibility text NOT NULL,
+    run_id uuid NULL REFERENCES byai_super_runs(id) ON DELETE SET NULL,
+    attempt_no integer NULL,
+    created_at timestamptz NOT NULL,
+    PRIMARY KEY (session_id, seq),
+    UNIQUE (session_id, entry_id),
+    CONSTRAINT pi_entry_visibility CHECK (visibility IN ('COMMITTED', 'PENDING'))
+    );
+
+CREATE INDEX IF NOT EXISTS pi_entries_run_attempt_idx
+    ON byai_super_pi_session_entries(run_id, attempt_no, visibility);
+
+CREATE TABLE IF NOT EXISTS byai_super_ingress_session_bindings (
+                                                                   source text NOT NULL,
+                                                                   owner_version smallint NOT NULL DEFAULT 1,
+                                                                   user_code text NOT NULL,
+                                                                   tenant_id text NULL,
+                                                                   namespace text NULL,
+                                                                   external_session_id text NOT NULL,
+                                                                   session_id uuid NOT NULL REFERENCES byai_super_sessions(id) ON DELETE CASCADE,
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL,
+    PRIMARY KEY (source, owner_version, user_code, external_session_id),
+    CONSTRAINT ingress_binding_owner_v1 CHECK (
+                                                  owner_version <> 1 OR (tenant_id IS NULL AND namespace IS NULL)
+    )
+    );
+
+CREATE TABLE IF NOT EXISTS byai_super_session_execution_leases (
+                                                                   session_id uuid PRIMARY KEY REFERENCES byai_super_sessions(id) ON DELETE CASCADE,
+    owner_instance_id text NOT NULL,
+    fencing_token bigint NOT NULL,
+    lease_expires_at timestamptz NOT NULL,
+    heartbeat_at timestamptz NOT NULL,
+    run_id uuid NOT NULL REFERENCES byai_super_runs(id) ON DELETE CASCADE,
+    attempt_no integer NOT NULL
+    );
+
+CREATE INDEX IF NOT EXISTS session_leases_expiry_idx
+    ON byai_super_session_execution_leases(lease_expires_at);
+
+-- Final shape after migration v3. The encrypted credential columns from v1 no longer exist.
+CREATE TABLE IF NOT EXISTS byai_super_run_execution_credentials (
+                                                                    run_id uuid PRIMARY KEY REFERENCES byai_super_runs(id) ON DELETE CASCADE,
+    credential text NOT NULL,
+    expires_at timestamptz NOT NULL,
+    created_at timestamptz NOT NULL
+    );
+
+CREATE INDEX IF NOT EXISTS run_credentials_expiry_idx
+    ON byai_super_run_execution_credentials(expires_at);
+
+-- Manually managed capability-card table. It is used by the repository but is not in migrations.ts.
+CREATE TABLE IF NOT EXISTS byai_super_agent_capability_cards (
+                                                                 system_code varchar(64) NOT NULL,
+    agent_id varchar(200) NOT NULL,
+    agent_code varchar(128),
+    agent_name varchar(200),
+    schema_version varchar(64) NOT NULL,
+    generator_version varchar(32) NOT NULL,
+    source_version varchar(128),
+    source_fingerprint varchar(128) NOT NULL,
+    card text NOT NULL,
+    routing_text varchar(1024),
+    quality text,
+    status varchar(16) NOT NULL DEFAULT 'ACTIVE',
+    version integer NOT NULL DEFAULT 0,
+    created_at timestamp NOT NULL DEFAULT now(),
+    updated_at timestamp NOT NULL DEFAULT now(),
+    CONSTRAINT pk_byai_super_agent_capability_cards PRIMARY KEY (system_code, agent_id)
+    );
+
+CREATE INDEX IF NOT EXISTS idx_byai_super_agent_capability_cards_fingerprint
+    ON byai_super_agent_capability_cards(source_fingerprint);
+
+CREATE INDEX IF NOT EXISTS idx_byai_super_agent_capability_cards_status
+    ON byai_super_agent_capability_cards(status);
+
+-- ========== V0.3.2 (manually synchronized at 2026-08-27) ==========
+-- V0.3.2 增量 DDL：增加 refresh-aware 连接器凭证生命周期元数据。
+-- CLI 管理的 access token、refresh token 仍只保存在用户隔离 native-home，本迁移不保存任何 token 值。
+SET search_path TO byai;
+
+CREATE OR REPLACE FUNCTION byai.add_column_if_missing(
+    p_schema_name TEXT,
+    p_table_name TEXT,
+    p_column_name TEXT,
+    p_column_definition TEXT
+) RETURNS VOID AS $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = p_schema_name
+          AND table_name = p_table_name
+          AND column_name = p_column_name
+    ) THEN
+        EXECUTE 'ALTER TABLE ' || quote_ident(p_schema_name) || '.' || quote_ident(p_table_name)
+            || ' ADD COLUMN ' || quote_ident(p_column_name) || ' ' || p_column_definition;
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+SELECT byai.add_column_if_missing('byai', 'byai_connector_auth', 'access_expire_time', 'TIMESTAMP');
+SELECT byai.add_column_if_missing('byai', 'byai_connector_auth', 'refresh_expire_time', 'TIMESTAMP');
+SELECT byai.add_column_if_missing(
+    'byai', 'byai_connector_auth', 'credential_state',
+    'VARCHAR(32) DEFAULT ''UNKNOWN'' NOT NULL'
+);
+SELECT byai.add_column_if_missing(
+    'byai', 'byai_connector_auth', 'renewal_mode',
+    'VARCHAR(32) DEFAULT ''NONE'' NOT NULL'
+);
+SELECT byai.add_column_if_missing('byai', 'byai_connector_auth', 'last_verified_at', 'TIMESTAMP');
+
+DROP FUNCTION byai.add_column_if_missing(TEXT, TEXT, TEXT, TEXT);
+
+ALTER TABLE byai.byai_connector_auth
+    ALTER COLUMN credential_state SET DEFAULT 'UNKNOWN';
+
+ALTER TABLE byai.byai_connector_auth
+    ALTER COLUMN credential_state SET NOT NULL;
+
+ALTER TABLE byai.byai_connector_auth
+    ALTER COLUMN renewal_mode SET DEFAULT 'NONE';
+
+ALTER TABLE byai.byai_connector_auth
+    ALTER COLUMN renewal_mode SET NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_byai_connector_auth_user_state
+    ON byai.byai_connector_auth (user_id, connector_id, status_cd, enable_flag, credential_state);
+
+COMMENT ON COLUMN byai.byai_connector_auth.expire_time IS '兼容字段：当前 access token 或等价短期凭证到期时间';
+COMMENT ON COLUMN byai.byai_connector_auth.access_expire_time IS '当前 access token 或等价短期凭证到期时间';
+COMMENT ON COLUMN byai.byai_connector_auth.refresh_expire_time IS 'refresh token 或等价长期续期能力到期时间，不保存 token 值';
+COMMENT ON COLUMN byai.byai_connector_auth.credential_state IS '凭证状态：READY、REFRESH_NEEDED、EXPIRING、REAUTH_REQUIRED、UNKNOWN';
+COMMENT ON COLUMN byai.byai_connector_auth.renewal_mode IS '续期模式：REFRESH_TOKEN、CREDENTIAL_REISSUE、PROBE_ONLY、NONE';
+COMMENT ON COLUMN byai.byai_connector_auth.last_verified_at IS 'Provider 最近一次权威凭证验证时间';
+
+-- 钉钉外部用户绑定去重，并保证同一来源、同一 union_id 只有一条绑定记录。
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM byai.po_user_external_system
+        WHERE union_id IS NOT NULL
+          AND btrim(union_id) <> ''
+        GROUP BY source_type, union_id
+        HAVING COUNT(DISTINCT COALESCE(user_id::text, '<null>')) > 1
+    ) THEN
+        RAISE EXCEPTION
+            'Conflicting po_user_external_system bindings must be reviewed before adding the unique index';
+    END IF;
+
+    DELETE FROM byai.po_user_external_system AS binding
+    USING (
+        SELECT ctid,
+               ROW_NUMBER() OVER (
+                   PARTITION BY source_type, union_id, user_id
+                   ORDER BY binding_time DESC NULLS LAST, id DESC NULLS LAST
+               ) AS duplicate_rank
+        FROM byai.po_user_external_system
+        WHERE union_id IS NOT NULL
+          AND btrim(union_id) <> ''
+    ) AS duplicate
+    WHERE binding.ctid = duplicate.ctid
+      AND duplicate.duplicate_rank > 1;
+END;
+$$;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_po_user_external_system_source_union
+    ON byai.po_user_external_system (source_type, union_id)
+    WHERE union_id IS NOT NULL AND btrim(union_id) <> '';
