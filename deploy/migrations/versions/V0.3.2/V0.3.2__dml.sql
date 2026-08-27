@@ -1,4 +1,4 @@
--- V0.5.0 增量数据：修复 knowledge-collection / bycli 资源未落库的历史状态
+-- V0.3.2 增量数据：修复 knowledge-collection / bycli 资源未落库的历史状态
 --
 -- 背景：V0.3.1 把「知识采集」资源从执行器 bycli 改名为编排 Skill knowledge-collection，
 -- 并另建独立的 byCLI 执行器资源。部分环境只执行了该版本的配置段（OPENCLAW_BUNDLED_SKILLS），
