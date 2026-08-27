@@ -3,6 +3,7 @@ package com.iwhalecloud.byai.manager.domain.project.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.iwhalecloud.byai.manager.application.service.project.ProjectInitService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.GitSubmodulePathResolver;
+import com.iwhalecloud.byai.manager.domain.devloop.service.GitSubmodulePathResolver.ResolvedSubmodule;
 import com.iwhalecloud.byai.manager.entity.devloop.ProjectRepo;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectRepoMapper;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -67,6 +68,39 @@ public class ProjectWorkspaceGitService {
             .filter(path -> Files.isDirectory(path) && Files.exists(path.resolve(".git")));
     }
 
+    /**
+     * 返回数据库仓库配置与 workspace 实际 Git 仓库的交集。
+     * workspace 根仓排在首位，其余代码仓库按 .gitmodules 中的顺序返回。
+     */
+    public List<ResolvedRepository> resolveRepositories(Long projectId) {
+        if (projectId == null) {
+            return List.of();
+        }
+        List<ProjectRepo> repos = projectRepoMapper.selectList(new LambdaQueryWrapper<ProjectRepo>()
+            .eq(ProjectRepo::getProjectId, projectId).orderByAsc(ProjectRepo::getRepoId));
+        ProjectRepo workspaceRepo = repos.stream()
+            .filter(repo -> "workspace".equalsIgnoreCase(repo.getRepoType())).findFirst().orElse(null);
+        if (workspaceRepo == null) {
+            return List.of();
+        }
+        Path configuredPath = projectInitService.getProjectRepositoryPath(workspaceRepo);
+        Path workspacePath = configuredPath.getParent() == null ? null : configuredPath.getParent().getParent();
+        if (!isGitRepository(workspacePath)) {
+            return List.of();
+        }
+
+        List<ResolvedRepository> resolved = new java.util.ArrayList<>();
+        resolved.add(new ResolvedRepository(workspaceRepo, workspacePath));
+        List<ProjectRepo> codeRepos = repos.stream()
+            .filter(repo -> !"workspace".equalsIgnoreCase(repo.getRepoType())).toList();
+        for (ResolvedSubmodule submodule : new GitSubmodulePathResolver().resolveAll(workspacePath, codeRepos)) {
+            if (isGitRepository(submodule.path())) {
+                resolved.add(new ResolvedRepository(submodule.repo(), submodule.path()));
+            }
+        }
+        return resolved;
+    }
+
     /** 定位项目 workspace 根仓；项目代码实际位于 /by/projects/{projectId} 下。 */
     public Optional<Path> resolveSessionWorktree(Long projectId, Object sessionId) {
         if (sessionId == null) {
@@ -87,5 +121,8 @@ public class ProjectWorkspaceGitService {
         }
         String sandboxPath = normalized.substring(index);
         return Optional.of(sandboxPath.endsWith("/") ? sandboxPath : sandboxPath + "/");
+    }
+
+    public record ResolvedRepository(ProjectRepo repo, Path path) {
     }
 }

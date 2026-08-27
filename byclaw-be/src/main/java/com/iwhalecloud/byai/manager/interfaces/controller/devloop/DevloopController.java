@@ -563,7 +563,8 @@ public class DevloopController {
     public ResponseUtil<Map<String, Object>> getTaskChanges(@RequestBody Map<String, Object> params) {
         Long sessionId = Long.valueOf(
             params.get("sessionId") != null ? params.get("sessionId").toString() : params.get("taskId").toString());
-        return applicationService.getTaskChanges(sessionId);
+        Long repoId = params.get("repoId") != null ? Long.valueOf(params.get("repoId").toString()) : null;
+        return applicationService.getTaskChanges(sessionId, repoId);
     }
 
     /** 获取指定代码仓库中单个文件的本地 diff(unified 文本),供前端 modal 逐行渲染变更内容 */

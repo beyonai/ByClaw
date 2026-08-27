@@ -254,6 +254,13 @@ public class ProjectController {
         return ResponseUtil.successResponse(projectApplicationService.listProjectRepos(projectId));
     }
 
+    /** 查询当前 workspace 中实际存在且已配置的 Git 仓库交集。 */
+    @PostMapping("/repo/available-list")
+    public ResponseUtil<List<Map<String, Object>>> listAvailableProjectRepos(@RequestBody Map<String, Object> params) {
+        Long projectId = MapParamUtil.getLongValue(params, "projectId");
+        return ResponseUtil.successResponse(projectRepositoryService.listAvailableRepositories(projectId));
+    }
+
     /** 查询项目 workspace 仓库中指定会话对应的实际 worktree。 */
     @PostMapping("/repo/session-worktree")
     public ResponseUtil<Map<String, Object>> getProjectSessionWorktree(@RequestBody Map<String, Object> params) {

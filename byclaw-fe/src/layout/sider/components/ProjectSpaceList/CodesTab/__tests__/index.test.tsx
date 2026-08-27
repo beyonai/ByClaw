@@ -2,11 +2,10 @@ import React from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { FileTreeItem } from '@/layout/sider/components/FileSiderPanel/constants';
 import {
-  getProjectSessionWorktree,
   getTaskChanges,
   getTaskFileDiff,
+  listAvailableProjectRepos,
   listProjectRepoTree,
-  listProjectRepos,
   searchProjectRepoTree,
 } from '@/service/devloop';
 import CodesTab from '../index';
@@ -14,9 +13,8 @@ import CodesTab from '../index';
 jest.mock('@/service/devloop', () => ({
   getTaskChanges: jest.fn(),
   getTaskFileDiff: jest.fn(),
-  getProjectSessionWorktree: jest.fn(),
+  listAvailableProjectRepos: jest.fn(),
   listProjectRepoTree: jest.fn(),
-  listProjectRepos: jest.fn(),
   searchProjectRepoTree: jest.fn(),
 }));
 
@@ -101,24 +99,33 @@ jest.mock('@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock', 
   </section>
 ));
 
-const mockListProjectRepos = listProjectRepos as jest.MockedFunction<typeof listProjectRepos>;
+const mockListAvailableProjectRepos = listAvailableProjectRepos as jest.MockedFunction<
+  typeof listAvailableProjectRepos
+>;
 const mockListProjectRepoTree = listProjectRepoTree as jest.MockedFunction<typeof listProjectRepoTree>;
 const mockSearchProjectRepoTree = searchProjectRepoTree as jest.MockedFunction<typeof searchProjectRepoTree>;
 const mockGetTaskChanges = getTaskChanges as jest.MockedFunction<typeof getTaskChanges>;
 const mockGetTaskFileDiff = getTaskFileDiff as jest.MockedFunction<typeof getTaskFileDiff>;
-const mockGetProjectSessionWorktree = getProjectSessionWorktree as jest.MockedFunction<
-  typeof getProjectSessionWorktree
->;
 
 describe('CodesTab', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    // 仓库页签只渲染工作区仓库，其余仓库仅参与列表查询。
-    mockListProjectRepos.mockResolvedValue([
-      { repoId: 1, projectId: 203, repoFullName: 'beyonai/ByClaw', repoType: 'workspace' },
-      { repoId: 2, projectId: 203, repoFullName: 'standalone-repo' },
+    mockListAvailableProjectRepos.mockResolvedValue([
+      {
+        repoId: 1,
+        projectId: 203,
+        repoFullName: 'beyonai/ByClaw',
+        repoType: 'workspace',
+        path: '/by/projects/203/',
+      },
+      {
+        repoId: 2,
+        projectId: 203,
+        repoFullName: 'beyonai/byclaw-test',
+        repoType: 'code',
+        path: '/by/projects/203/beyonai/byclaw-test/',
+      },
     ]);
-    mockGetProjectSessionWorktree.mockResolvedValue({ found: true, path: '/by/projects/203/' });
     mockListProjectRepoTree.mockImplementation(async ({ path = '' }) =>
       path
         ? [{ name: 'README.md', path: `${path}/README.md`, type: 'file' }]
@@ -150,20 +157,36 @@ describe('CodesTab', () => {
   it('loads the workspace repository from its current session directory', async () => {
     render(<CodesTab projectId={203} resourceId="agent-9" sessionId="301" />);
 
-    await waitFor(() => expect(mockListProjectRepos).toHaveBeenCalledWith(203));
+    await waitFor(() => expect(mockListAvailableProjectRepos).toHaveBeenCalledWith(203));
     await waitFor(() => expect(mockListProjectRepoTree).toHaveBeenCalledWith({ projectId: 203, repoId: 1 }));
 
     expect(screen.getByTestId('repo-beyonai/ByClaw')).toHaveTextContent('/by/projects/203/');
-    expect(screen.queryByTestId('repo-standalone-repo')).toBeNull();
+    expect(screen.queryByTestId('repo-beyonai/byclaw-test')).toBeNull();
+  });
+
+  it('switches to a configured submodule repository and loads its files and changes', async () => {
+    render(<CodesTab projectId={203} resourceId="agent-9" sessionId="301" codeChangesEnabled />);
+
+    const workspace = await screen.findByTestId('repo-beyonai/ByClaw');
+    fireEvent.click(within(workspace).getByRole('button', { name: 'beyonai/ByClaw' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'beyonai/byclaw-test' }));
+
+    const submodule = await screen.findByTestId('repo-beyonai/byclaw-test');
+    expect(within(submodule).getByTestId('repo-files-beyonai/byclaw-test')).toHaveTextContent(
+      '/by/projects/203/beyonai/byclaw-test/'
+    );
+    await waitFor(() => {
+      expect(mockListProjectRepoTree).toHaveBeenCalledWith({ projectId: 203, repoId: 2 });
+      expect(mockGetTaskChanges).toHaveBeenCalledWith(301, 2);
+    });
   });
 
   it('keeps the session code file list empty when no matching worktree exists', async () => {
-    mockGetProjectSessionWorktree.mockResolvedValue({ found: false });
+    mockListAvailableProjectRepos.mockResolvedValue([]);
 
     render(<CodesTab projectId={203} resourceId="agent-9" sessionId="301" />);
 
-    const repoBlock = await screen.findByTestId('repo-beyonai/ByClaw');
-    expect(within(repoBlock).getByTestId('repo-files-beyonai/ByClaw')).not.toHaveTextContent('README.md');
+    await screen.findByText('projectSpace.detail.repo.emptyRepositories');
     expect(mockListProjectRepoTree).not.toHaveBeenCalled();
   });
 
@@ -274,7 +297,7 @@ describe('CodesTab', () => {
     const changesView = within(repoBlock).getByTestId('repo-changes-beyonai/ByClaw');
     const searchInput = within(repoBlock).getByPlaceholderText('projectSpace.detail.repo.searchPlaceholder');
 
-    await waitFor(() => expect(mockGetTaskChanges).toHaveBeenCalledWith(301));
+    await waitFor(() => expect(mockGetTaskChanges).toHaveBeenCalledWith(301, 1));
     const changesButton = within(repoBlock).getByRole('button', {
       name: 'projectSpace.detail.repo.showCodeChanges',
     });
@@ -300,7 +323,7 @@ describe('CodesTab', () => {
     );
 
     const repoBlock = await screen.findByTestId('repo-beyonai/ByClaw');
-    await waitFor(() => expect(mockGetTaskChanges).toHaveBeenCalledWith(301));
+    await waitFor(() => expect(mockGetTaskChanges).toHaveBeenCalledWith(301, 1));
     mockListProjectRepoTree.mockClear();
     mockGetTaskChanges.mockClear();
 
@@ -308,7 +331,7 @@ describe('CodesTab', () => {
 
     await waitFor(() => {
       expect(mockListProjectRepoTree).toHaveBeenCalledWith({ projectId: 203, repoId: 1 });
-      expect(mockGetTaskChanges).toHaveBeenCalledWith(301);
+      expect(mockGetTaskChanges).toHaveBeenCalledWith(301, 1);
     });
   });
 

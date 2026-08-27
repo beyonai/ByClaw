@@ -3930,6 +3930,11 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
 
     /** 查询任务对应 worktree 的代码变更。 */
     public ResponseUtil<Map<String, Object>> getTaskChanges(Long sessionId) {
+        return getTaskChanges(sessionId, null);
+    }
+
+    /** 查询任务在指定 workspace/子模块仓库中的代码变更。repoId 为空时兼容查询 workspace 根仓。 */
+    public ResponseUtil<Map<String, Object>> getTaskChanges(Long sessionId, Long repoId) {
         if (sessionId == null) {
             return ResponseUtil.failRes(I18nUtil.get("devloop.task.session.id.required"));
         }
@@ -3939,21 +3944,29 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
         }
         // 代码变更是只读展示，任何本地 Git 异常都不抛前端：顶层兜底并返回 http_error 空态。
         try {
-            Optional<ProjectRepo> workspaceRepo = projectWorkspaceGitService.findWorkspaceRepo(s.getProjectId());
-            Optional<Path> worktree = projectWorkspaceGitService.resolveSessionWorktree(s.getProjectId(), sessionId);
-            if (workspaceRepo.isEmpty() || worktree.isEmpty()) {
+            List<ProjectWorkspaceGitService.ResolvedRepository> repositories =
+                projectWorkspaceGitService.resolveRepositories(s.getProjectId());
+            ProjectWorkspaceGitService.ResolvedRepository selected = repositories.stream()
+                .filter(item -> repoId == null
+                    ? "workspace".equalsIgnoreCase(item.repo().getRepoType())
+                    : repoId.equals(item.repo().getRepoId()))
+                .findFirst().orElse(null);
+            if (selected == null) {
                 return ResponseUtil.successResponse(emptyLocalChangesMap());
             }
-            LocalGitChangeService.LocalChangeResult local = localGitChangeService.collectChanges(worktree.get(),
-                "main");
+            String baseBranch = selected.repo().getDefaultBranch() == null
+                || selected.repo().getDefaultBranch().isBlank() ? "main" : selected.repo().getDefaultBranch();
+            LocalGitChangeService.LocalChangeResult local = localGitChangeService.collectChanges(selected.path(),
+                baseBranch);
             if (local.getStatus() != LocalGitChangeService.LocalStatus.OK) {
                 return ResponseUtil.successResponse(emptyLocalChangesMap());
             }
-            Map<String, Object> changes = localResultToMap(local, workspaceRepo.get().getRepoFullName());
+            Map<String, Object> changes = localResultToMap(local, selected.repo().getRepoFullName());
+            changes.put("repoId", selected.repo().getRepoId());
             @SuppressWarnings("unchecked")
             List<Map<String, Object>> files = (List<Map<String, Object>>) changes.get("files");
             for (Map<String, Object> file : files) {
-                file.put("repoId", workspaceRepo.get().getRepoId());
+                file.put("repoId", selected.repo().getRepoId());
                 file.put("source", "local");
             }
             return ResponseUtil.successResponse(changes);
@@ -3987,13 +4000,18 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
             if (s == null) {
                 return ResponseUtil.failRes(I18nUtil.get("devloop.task.session.not.found"));
             }
-            ProjectRepo repo = projectWorkspaceGitService.findWorkspaceRepo(s.getProjectId()).orElse(null);
-            if (repo == null || (repoId != null && !repoId.equals(repo.getRepoId()))) {
+            ProjectWorkspaceGitService.ResolvedRepository selected = projectWorkspaceGitService
+                .resolveRepositories(s.getProjectId()).stream()
+                .filter(item -> repoId == null
+                    ? "workspace".equalsIgnoreCase(item.repo().getRepoType())
+                    : repoId.equals(item.repo().getRepoId()))
+                .findFirst().orElse(null);
+            if (selected == null) {
                 return ResponseUtil.failRes(I18nUtil.get("devloop.task.repository.not.found"));
             }
-            Path workspaceDir = projectWorkspaceGitService.resolveSessionWorktree(s.getProjectId(), sessionId)
-                .orElse(null);
-            LocalGitChangeService.FileDiffResult result = localGitChangeService.fileDiff(workspaceDir, "main",
+            String baseBranch = selected.repo().getDefaultBranch() == null
+                || selected.repo().getDefaultBranch().isBlank() ? "main" : selected.repo().getDefaultBranch();
+            LocalGitChangeService.FileDiffResult result = localGitChangeService.fileDiff(selected.path(), baseBranch,
                 filePath);
             Map<String, Object> map = new HashMap<>();
             map.put("status", result.getStatus().name().toLowerCase());

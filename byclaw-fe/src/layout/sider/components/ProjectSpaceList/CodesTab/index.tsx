@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, type Key } from 'react';
-import { Empty, Input, Modal, Spin, message, type MenuProps } from 'antd';
-import { BranchesOutlined } from '@ant-design/icons';
+import { Dropdown, Empty, Input, Modal, Spin, message, type MenuProps } from 'antd';
+import { BranchesOutlined, DownOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import FilePreviewPanel from '@/components/ChatLayoutComp/ChatResourceWorkspace/FilePreviewPanel';
 import { DragType } from '@/components/QueryInput/withDrag';
@@ -21,11 +21,10 @@ import type { DetailPanelOptions } from '@/layout/sider/siderContentContext';
 import {
   getTaskChanges,
   getTaskFileDiff,
-  getProjectSessionWorktree,
-  listProjectRepos,
+  listAvailableProjectRepos,
   listProjectRepoTree,
   searchProjectRepoTree,
-  type DevloopProjectRepo as OriDevloopProjectRepo,
+  type AvailableProjectRepo,
   type ProjectRepoTreeNode,
   type DevloopTaskChanges,
   type DevloopTaskFileDiff,
@@ -69,7 +68,7 @@ interface CodesTabProps {
   onNodeClick?: (event: React.MouseEvent, node: FileTreeItem) => void;
 }
 
-type DevloopProjectRepo = OriDevloopProjectRepo;
+type DevloopProjectRepo = AvailableProjectRepo;
 
 type ProjectDetailTranslate = (id: string, values?: Record<string, string | number>) => string;
 
@@ -126,7 +125,7 @@ const CodesTab: React.FC<CodesTabProps> = ({
   );
   const [repos, setRepos] = useState<DevloopProjectRepo[]>([]);
   const [reposLoading, setReposLoading] = useState(false);
-  const [sessionWorktreePath, setSessionWorktreePath] = useState<string | null>(null);
+  const [selectedRepoId, setSelectedRepoId] = useState<number | null>(null);
   const [repoFilesMap, setRepoFilesMap] = useState<Record<string, FileBrowserItem[]>>({});
   const [repoLoadingMap, setRepoLoadingMap] = useState<Record<string, boolean>>({});
   const [repoSearchValueMap, setRepoSearchValueMap] = useState<Record<string, string>>({});
@@ -139,16 +138,13 @@ const CodesTab: React.FC<CodesTabProps> = ({
   const [diffModalData, setDiffModalData] = useState<DevloopTaskFileDiff | null>(null);
   const [diffModalLoading, setDiffModalLoading] = useState(false);
   const repoRequestSeqRef = useRef<Record<string, number>>({});
+  const taskChangesRequestSeqRef = useRef(0);
   const clickTimerRef = useRef<number | null>(null);
   const normalizedResourceId = resourceId === undefined || resourceId === '' ? undefined : `${resourceId}`;
 
-  const repoRootPathMap = useMemo(
-    () =>
-      repos.reduce<Record<string, string>>((result, repo) => {
-        if (sessionWorktreePath) result[`${repo.repoId}`] = sessionWorktreePath;
-        return result;
-      }, {}),
-    [repos, sessionWorktreePath]
+  const selectedRepo = useMemo(
+    () => repos.find((repo) => repo.repoId === selectedRepoId) || repos[0],
+    [repos, selectedRepoId]
   );
 
   const fetchRepoFiles = useCallback(
@@ -187,37 +183,35 @@ const CodesTab: React.FC<CodesTabProps> = ({
   );
 
   const fetchTaskChanges = useCallback(async () => {
-    if (!codeChangesEnabled || !sessionId) {
+    const requestSeq = taskChangesRequestSeqRef.current + 1;
+    taskChangesRequestSeqRef.current = requestSeq;
+    if (!codeChangesEnabled || !sessionId || !selectedRepo) {
       setTaskChanges(null);
       return;
     }
     setTaskChangesLoading(true);
     try {
-      const response = await getTaskChanges(Number(sessionId));
-      setTaskChanges(response || null);
+      const response = await getTaskChanges(Number(sessionId), selectedRepo.repoId);
+      if (requestSeq === taskChangesRequestSeqRef.current) setTaskChanges(response || null);
     } catch (error) {
       console.error('Failed to load task changes:', error);
-      setTaskChanges(null);
+      if (requestSeq === taskChangesRequestSeqRef.current) setTaskChanges(null);
     } finally {
-      setTaskChangesLoading(false);
+      if (requestSeq === taskChangesRequestSeqRef.current) setTaskChangesLoading(false);
     }
-  }, [codeChangesEnabled, sessionId]);
+  }, [codeChangesEnabled, selectedRepo, sessionId]);
 
   const fetchRepos = useCallback(async () => {
     if (!projectId) return;
     setReposLoading(true);
     try {
-      const response = await listProjectRepos(projectId);
+      const response = await listAvailableProjectRepos(projectId);
       const nextRepos = Array.isArray(response) ? response : [];
-      const workspaceRepo = nextRepos.find((repo) => repo.repoType === 'workspace');
-      setRepos(workspaceRepo ? [workspaceRepo] : []);
-      if (workspaceRepo && sessionId) {
-        const worktree = await getProjectSessionWorktree(projectId, Number(sessionId));
-        const rootPath = worktree?.found && worktree.path ? ensureDirectoryPath(worktree.path) : null;
-        setSessionWorktreePath(rootPath);
-        if (rootPath) await fetchRepoFiles(workspaceRepo, rootPath);
-      } else {
-        setSessionWorktreePath(null);
+      setRepos(nextRepos);
+      const nextSelectedRepo = nextRepos[0];
+      setSelectedRepoId(nextSelectedRepo?.repoId || null);
+      if (nextSelectedRepo?.path && sessionId) {
+        await fetchRepoFiles(nextSelectedRepo, ensureDirectoryPath(nextSelectedRepo.path));
       }
     } catch (error) {
       console.error('Failed to load project repositories:', error);
@@ -229,7 +223,7 @@ const CodesTab: React.FC<CodesTabProps> = ({
 
   useEffect(() => {
     setRepos([]);
-    setSessionWorktreePath(null);
+    setSelectedRepoId(null);
     setRepoFilesMap({});
     setRepoLoadingMap({});
     setRepoSearchValueMap({});
@@ -239,6 +233,7 @@ const CodesTab: React.FC<CodesTabProps> = ({
     setDiffModalFile(null);
     setDiffModalData(null);
     repoRequestSeqRef.current = {};
+    taskChangesRequestSeqRef.current += 1;
     void fetchRepos();
   }, [fetchRepos, refreshKey]);
 
@@ -260,10 +255,10 @@ const CodesTab: React.FC<CodesTabProps> = ({
       const directoryPath = ensureDirectoryPath(normalizeFileBrowserPath(node.path));
       if (childrenByPath[directoryPath]) return;
       try {
-        const rootPath = sessionWorktreePath;
+        const rootPath = selectedRepo?.path ? ensureDirectoryPath(selectedRepo.path) : null;
         if (!rootPath) return;
         const relativePath = directoryPath.slice(ensureDirectoryPath(rootPath).length).replace(/\/$/, '');
-        const repoId = repos.find((repo) => repo.repoType === 'workspace')?.repoId;
+        const repoId = selectedRepo?.repoId;
         if (!repoId) return;
         const response = await listProjectRepoTree({
           projectId,
@@ -281,7 +276,7 @@ const CodesTab: React.FC<CodesTabProps> = ({
         setChildrenByPath((current) => ({ ...current, [directoryPath]: [] }));
       }
     },
-    [childrenByPath, projectId, repos, sessionWorktreePath]
+    [childrenByPath, projectId, selectedRepo]
   );
 
   const openFilePreview = useCallback(
@@ -386,15 +381,15 @@ const CodesTab: React.FC<CodesTabProps> = ({
 
   const searchRepoFiles = useCallback(
     async (repo: DevloopProjectRepo, keyword: string) => {
-      if (!sessionWorktreePath) return;
+      if (!repo.path) return;
       const repoKey = `${repo.repoId}`;
       const nextKeyword = keyword.trim();
       if (!nextKeyword) {
-        await fetchRepoFiles(repo, sessionWorktreePath);
+        await fetchRepoFiles(repo, ensureDirectoryPath(repo.path));
         return;
       }
 
-      const rootPath = sessionWorktreePath;
+      const rootPath = ensureDirectoryPath(repo.path);
       const requestSeq = (repoRequestSeqRef.current[repoKey] || 0) + 1;
       repoRequestSeqRef.current[repoKey] = requestSeq;
       setRepoLoadingMap((current) => ({ ...current, [repoKey]: true }));
@@ -428,7 +423,7 @@ const CodesTab: React.FC<CodesTabProps> = ({
         }
       }
     },
-    [fetchRepoFiles, projectId, sessionWorktreePath]
+    [fetchRepoFiles, projectId]
   );
 
   const renderCodeChanges = () => {
@@ -608,11 +603,24 @@ const CodesTab: React.FC<CodesTabProps> = ({
     );
   };
 
-  const displayRepos = useMemo(() => {
-    return repos.filter((repo) => repo.repoType === 'workspace');
-  }, [repos]);
+  const switchRepository = useCallback(
+    async (repoId: number) => {
+      const repo = repos.find((item) => item.repoId === repoId);
+      if (!repo || repo.repoId === selectedRepoId) return;
+      setSelectedRepoId(repo.repoId);
+      setChildrenByPath({});
+      setExpandedKeys([]);
+      setDiffModalFile(null);
+      setDiffModalData(null);
+      setTaskChanges(null);
+      if (!repoFilesMap[`${repo.repoId}`] && repo.path) {
+        await fetchRepoFiles(repo, ensureDirectoryPath(repo.path));
+      }
+    },
+    [fetchRepoFiles, repoFilesMap, repos, selectedRepoId]
+  );
 
-  if (!displayRepos.length) {
+  if (!selectedRepo) {
     return (
       <div className={styles.detailResourcePanel}>
         <div className={styles.detailReposEmpty}>
@@ -627,68 +635,78 @@ const CodesTab: React.FC<CodesTabProps> = ({
     );
   }
 
-  const fillContainer = displayRepos.length <= 1;
+  const repo = selectedRepo;
+  const repoKey = `${repo.repoId}`;
+  const currentPath = ensureDirectoryPath(repo.path);
+  const showChangesView = !!repoChangesViewMap[repoKey];
+  const taskChangeCount = taskChanges?.files?.length || 0;
+  const loading = showChangesView ? taskChangesLoading : !!repoLoadingMap[repoKey];
+  const repoMenuItems: MenuProps['items'] = repos.map((item) => ({
+    key: `${item.repoId}`,
+    label: item.repoFullName,
+  }));
 
   return (
-    <div className={styles.detailResourcePanel} style={fillContainer ? undefined : { padding: 10 }}>
-      {displayRepos.map((repo) => {
-        const repoKey = `${repo.repoId}`;
-        const currentPath = repoRootPathMap[repoKey] || '/';
-        const showChangesView = !!repoChangesViewMap[repoKey];
-        const taskChangeCount = taskChanges?.files?.length || 0;
-        const loading = showChangesView ? taskChangesLoading : !!repoLoadingMap[repoKey];
-        return (
-          <FileSpaceBlock
-            key={repoKey}
-            title={repo.repoFullName}
-            fillContainer={fillContainer}
-            headerExtra={
-              <button
-                type="button"
-                className={`${styles.repoChangesButton} ${showChangesView ? styles.repoChangesButtonActive : ''}`}
-                aria-label={t(showChangesView ? 'repo.showFiles' : 'repo.showCodeChanges')}
-                onClick={() => setRepoChangesViewMap((current) => ({ ...current, [repoKey]: !current[repoKey] }))}
+    <div className={styles.detailResourcePanel}>
+      <FileSpaceBlock
+        key={repoKey}
+        title={repo.repoFullName}
+        fillContainer
+        headerExtra={
+          <>
+            {repos.length > 1 ? (
+              <Dropdown
+                menu={{ items: repoMenuItems, onClick: ({ key }) => void switchRepository(Number(key)) }}
+                trigger={['click']}
               >
-                <BranchesOutlined />
-                {taskChangeCount > 0 && <span className={styles.repoChangesCount}>{taskChangeCount}</span>}
-              </button>
-            }
-            contentBefore={
-              <div className={styles.detailRepoSearch}>
-                <Input.Search
-                  allowClear
-                  value={repoSearchValueMap[repoKey] || ''}
-                  placeholder={intl.formatMessage({ id: 'projectSpace.detail.repo.searchPlaceholder' })}
-                  loading={!!repoLoadingMap[repoKey]}
-                  onChange={(event) =>
-                    setRepoSearchValueMap((current) => ({ ...current, [repoKey]: event.target.value }))
-                  }
-                  onSearch={(value) => void searchRepoFiles(repo, value)}
-                  onClear={() => void searchRepoFiles(repo, '')}
-                />
-              </div>
-            }
-            alternateContent={renderCodeChanges()}
-            showAlternateContent={showChangesView}
-            loading={loading}
-            items={repoFilesMap[repoKey] || []}
-            currentPath={currentPath}
-            emptyText={intl.formatMessage({
-              id: sessionId ? 'projectSpace.detail.repo.emptyFiles' : 'projectSpace.detail.repo.emptySession',
-            })}
-            resourceEmptyStyle
-            childrenByPath={childrenByPath}
-            expandedKeys={expandedKeys}
-            onExpand={setExpandedKeys}
-            onLoadData={loadRepoTreeNode}
-            onNodeClick={handleNodeClick}
-            onNodeDoubleClick={handleNodeDoubleClick}
-            showActions={!!normalizedResourceId}
-            getActionItems={getActionItems}
-            onAction={handleAction}
-          />
-        );
-      })}
+                <button type="button" className={styles.repoSelector} aria-label={repo.repoFullName}>
+                  <DownOutlined />
+                </button>
+              </Dropdown>
+            ) : null}
+            <button
+              type="button"
+              className={`${styles.repoChangesButton} ${showChangesView ? styles.repoChangesButtonActive : ''}`}
+              aria-label={t(showChangesView ? 'repo.showFiles' : 'repo.showCodeChanges')}
+              onClick={() => setRepoChangesViewMap((current) => ({ ...current, [repoKey]: !current[repoKey] }))}
+            >
+              <BranchesOutlined />
+              {taskChangeCount > 0 && <span className={styles.repoChangesCount}>{taskChangeCount}</span>}
+            </button>
+          </>
+        }
+        contentBefore={
+          <div className={styles.detailRepoSearch}>
+            <Input.Search
+              allowClear
+              value={repoSearchValueMap[repoKey] || ''}
+              placeholder={intl.formatMessage({ id: 'projectSpace.detail.repo.searchPlaceholder' })}
+              loading={!!repoLoadingMap[repoKey]}
+              onChange={(event) => setRepoSearchValueMap((current) => ({ ...current, [repoKey]: event.target.value }))}
+              onSearch={(value) => void searchRepoFiles(repo, value)}
+              onClear={() => void searchRepoFiles(repo, '')}
+            />
+          </div>
+        }
+        alternateContent={renderCodeChanges()}
+        showAlternateContent={showChangesView}
+        loading={loading}
+        items={repoFilesMap[repoKey] || []}
+        currentPath={currentPath}
+        emptyText={intl.formatMessage({
+          id: sessionId ? 'projectSpace.detail.repo.emptyFiles' : 'projectSpace.detail.repo.emptySession',
+        })}
+        resourceEmptyStyle
+        childrenByPath={childrenByPath}
+        expandedKeys={expandedKeys}
+        onExpand={setExpandedKeys}
+        onLoadData={loadRepoTreeNode}
+        onNodeClick={handleNodeClick}
+        onNodeDoubleClick={handleNodeDoubleClick}
+        showActions={!!normalizedResourceId}
+        getActionItems={getActionItems}
+        onAction={handleAction}
+      />
       {renderFileDiffModal()}
     </div>
   );

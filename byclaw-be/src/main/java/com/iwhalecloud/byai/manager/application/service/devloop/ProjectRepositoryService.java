@@ -19,8 +19,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import lombok.extern.slf4j.Slf4j;
 
-import java.nio.file.Path;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -165,6 +165,31 @@ public class ProjectRepositoryService {
         return result;
     }
 
+    /** 查询数据库配置与 workspace 实际 Git 仓库的交集，供项目代码仓库切换。 */
+    public List<Map<String, Object>> listAvailableRepositories(Long projectId) {
+        requireProject(projectId);
+        List<Map<String, Object>> repositories = new ArrayList<>();
+        for (ProjectWorkspaceGitService.ResolvedRepository item
+            : projectWorkspaceGitService.resolveRepositories(projectId)) {
+            String path = projectWorkspaceGitService.toSandboxPath(item.path()).orElse(null);
+            if (path == null) {
+                continue;
+            }
+            Map<String, Object> result = new HashMap<>();
+            ProjectRepo repo = item.repo();
+            result.put("repoId", repo.getRepoId());
+            result.put("projectId", repo.getProjectId());
+            result.put("repoFullName", repo.getRepoFullName());
+            result.put("repoUrl", repo.getRepoUrl());
+            result.put("defaultBranch", repo.getDefaultBranch());
+            result.put("repoType", repo.getRepoType());
+            result.put("provider", repo.getProvider());
+            result.put("path", path);
+            repositories.add(result);
+        }
+        return repositories;
+    }
+
     private ProjectRepo requireRepo(Long repoId) {
         if (repoId == null) {
             throw new BaseException(50500, "project.repo.id.required");
@@ -205,7 +230,8 @@ public class ProjectRepositoryService {
             }
         }
         String treeish = path == null ? branch : branch + ":" + path;
-        String output = gitCommandExecutor.executeCommandQuietly(repoPath, "git", "ls-tree", "-l", treeish);
+        String output = gitCommandExecutor.executeCommandQuietly(repoPath, "git", "-c", "safe.directory=*",
+            "ls-tree", "-l", treeish);
         List<ProjectRepoTreeNodeDTO> nodes = new ArrayList<>();
         for (String line : output.split("\\R")) {
             ProjectRepoTreeNodeDTO node = parseTreeNode(line, path);
@@ -219,7 +245,8 @@ public class ProjectRepositoryService {
     }
 
     private List<ProjectRepoTreeNodeDTO> searchLocalTree(Path repoPath, String keyword, String branch) {
-        String output = gitCommandExecutor.executeCommandQuietly(repoPath, "git", "ls-tree", "-r", "-l", branch);
+        String output = gitCommandExecutor.executeCommandQuietly(repoPath, "git", "-c", "safe.directory=*",
+            "ls-tree", "-r", "-l", branch);
         String normalizedKeyword = keyword.toLowerCase(Locale.ROOT);
         List<ProjectRepoTreeNodeDTO> nodes = new ArrayList<>();
         for (String line : output.split("\\R")) {
@@ -267,7 +294,8 @@ public class ProjectRepositoryService {
     }
 
     private List<ProjectRepoBranchDTO> listLocalBranches(Path repoPath, Long projectId) {
-        String output = gitCommandExecutor.executeCommandQuietly(repoPath, "git", "for-each-ref",
+        String output = gitCommandExecutor.executeCommandQuietly(repoPath, "git", "-c", "safe.directory=*",
+            "for-each-ref",
             "--format=%(refname:short)%09%(objectname)", "refs/heads", "refs/remotes/origin");
         Map<String, String> branches = new LinkedHashMap<>();
         for (String line : output.split("\\R")) {
@@ -295,7 +323,8 @@ public class ProjectRepositoryService {
     }
 
     private ProjectRepoFileContentDTO getLocalFileContent(Path repoPath, String branch, String path) {
-        byte[] bytes = gitCommandExecutor.executeCommandBytesQuietly(repoPath, "git", "show", branch + ":" + path);
+        byte[] bytes = gitCommandExecutor.executeCommandBytesQuietly(repoPath, "git", "-c", "safe.directory=*",
+            "show", branch + ":" + path);
         boolean binary = isBinary(bytes);
         ProjectRepoFileContentDTO file = new ProjectRepoFileContentDTO();
         file.setName(path.substring(path.lastIndexOf('/') + 1));

@@ -281,6 +281,11 @@ export const updateProjectRepo = (data: {
 export const listProjectRepos = (projectId: number) =>
   POST<DevloopProjectRepo[]>('/byaiService/project/repo/list', { projectId });
 
+export type AvailableProjectRepo = DevloopProjectRepo & { path: string };
+
+export const listAvailableProjectRepos = (projectId: number) =>
+  POST<AvailableProjectRepo[]>('/byaiService/project/repo/available-list', { projectId });
+
 export type ProjectSessionWorktree = {
   found: boolean;
   path?: string;
@@ -694,8 +699,8 @@ export type DevloopTaskChanges = {
   }[];
 };
 
-export const getTaskChanges = (sessionId: number) =>
-  POST<DevloopTaskChanges>('/byaiService/devloop/task/changes', { sessionId });
+export const getTaskChanges = (sessionId: number, repoId?: number) =>
+  POST<DevloopTaskChanges>('/byaiService/devloop/task/changes', { sessionId, repoId });
 
 // 单个文件的本地 diff（unified 文本），供右侧预览抽屉逐行渲染。status: ok | no_workspace | not_git_repo | git_error。
 export type DevloopTaskFileDiff = {

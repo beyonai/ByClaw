@@ -14,6 +14,22 @@ import org.springframework.test.util.ReflectionTestUtils;
 class DevloopControllerTaskFileDiffTest {
 
     @Test
+    void passesRepoIdToTaskChangesService() {
+        DevloopApplicationService applicationService = mock(DevloopApplicationService.class);
+        DevloopController controller = new DevloopController();
+        ReflectionTestUtils.setField(controller, "applicationService", applicationService);
+        ResponseUtil<Map<String, Object>> expected = ResponseUtil.successResponse(Map.of("status", "ok"));
+        when(applicationService.getTaskChanges(5001L, 301L)).thenReturn(expected);
+
+        ResponseUtil<Map<String, Object>> actual = controller.getTaskChanges(Map.of(
+            "sessionId", 5001L,
+            "repoId", 301L));
+
+        assertThat(actual).isSameAs(expected);
+        verify(applicationService).getTaskChanges(5001L, 301L);
+    }
+
+    @Test
     void passesRepoIdToApplicationService() {
         DevloopApplicationService applicationService = mock(DevloopApplicationService.class);
         DevloopController controller = new DevloopController();
