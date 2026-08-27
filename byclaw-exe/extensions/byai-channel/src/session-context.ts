@@ -2,6 +2,10 @@ import path from "node:path";
 import { EmitOptions, EventType, type GatewayDataEmitter } from "@byclaw/by-framework";
 import type { ByaiInboundMessage, Language } from "./types.js";
 import { isSessionDispatchBusy } from "./session-dispatch-gate.js";
+import {
+    isTaskPlanContinuationPending,
+    markTaskPlanContinuationPending,
+} from "../../shared/src/task-plan-runtime.js";
 
 const CHANNEL_ID = "byai-channel" as const;
 const DEFAULT_ACCOUNT_KEY = "default";
@@ -64,6 +68,7 @@ export interface ActiveSdkRequest {
     sessionKey: string;
     to: string;
     sessionId: string;
+    messageId?: string;
     traceId: string;
     createdAt: number;
     boundRunIds: Set<string>;
@@ -193,6 +198,7 @@ function buildActiveSdkTargetKey(accountId: string, to: string): string {
 }
 
 export function clearActiveSdkRequestRecord(request: ActiveSdkRequest): void {
+    markTaskPlanContinuationPending(request.sessionKey, false);
     activeSdkRequestsByTarget.delete(buildActiveSdkTargetKey(request.accountId, request.to));
     activeSdkRequestsByTraceId.delete(request.traceId);
     channelRequestContextsBySessionKey.delete(request.sessionKey);
@@ -312,6 +318,7 @@ export function registerActiveSdkRequest(params: {
     sessionKey: string;
     to: string;
     sessionId: string;
+    messageId?: string;
     traceId: string;
     language: Language;
     languageProvided: boolean;
@@ -344,6 +351,7 @@ export function registerActiveSdkRequest(params: {
         sessionKey: params.sessionKey,
         to: params.to,
         sessionId: params.sessionId,
+        messageId: params.messageId?.trim() || undefined,
         traceId: params.traceId,
         createdAt: Date.now(),
         boundRunIds: new Set<string>(),
@@ -378,6 +386,7 @@ export function registerActiveSdkRequest(params: {
         createdAt: request.createdAt,
         fields: {
             sessionId: request.sessionId,
+            messageId: request.messageId,
             language: request.language,
             languageProvided: request.languageProvided,
             channelExtension: request.channelExtension,
@@ -473,7 +482,8 @@ export function shouldDeferActiveSdkFinal(accountId: string, to: string): boolea
     return (
         request.pendingChildSessionKeys.size > 0 ||
         request.awaitingFollowup ||
-        request.followupRunStarted
+        request.followupRunStarted ||
+        isTaskPlanContinuationPending(request.sessionKey)
     );
 }
 
@@ -605,7 +615,9 @@ export function markActiveSdkOutboundSent(
     return request;
 }
 
-export function shouldCompleteActiveSdkRequest(request: ActiveSdkRequest): boolean {
+export function isActiveSdkRequestReadyForTaskPlanContinuation(
+    request: ActiveSdkRequest,
+): boolean {
     return Boolean(
         request.rootLifecyclePhase &&
         request.pendingChildSessionKeys.size === 0 &&
@@ -614,6 +626,13 @@ export function shouldCompleteActiveSdkRequest(request: ActiveSdkRequest): boole
         !request.followupRunStarted &&
         !request.compactionRetryPending &&
         !request.modelFallbackPending,
+    );
+}
+
+export function shouldCompleteActiveSdkRequest(request: ActiveSdkRequest): boolean {
+    return Boolean(
+        isActiveSdkRequestReadyForTaskPlanContinuation(request) &&
+        !isTaskPlanContinuationPending(request.sessionKey),
     );
 }
 

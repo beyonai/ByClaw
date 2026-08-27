@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.state.domain.message.dto;
 
 import com.iwhalecloud.byai.common.message.entity.ByaiMessageHotDto;
+import com.iwhalecloud.byai.state.domain.taskplan.dto.TaskPlanSnapshot;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -30,5 +31,8 @@ public class ByaiMessageHotDtoDto extends ByaiMessageHotDto {
     private Set<Long> mentionUserIds;
 
     private String contentTags;
+
+    /** 与模型回答 messageId 关联的最新任务计划快照。 */
+    private TaskPlanSnapshot taskPlan;
 
 }
