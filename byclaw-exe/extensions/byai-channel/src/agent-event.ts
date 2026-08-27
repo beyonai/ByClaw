@@ -31,6 +31,7 @@ import {
   buildToolResultTitle as buildLocalizedToolResultTitle,
   buildToolStartTitle as buildLocalizedToolStartTitle,
 } from "./i18n.js";
+import { shouldEmitToolCard } from "./tool-card-visibility.js";
 
 type AgentStreamState = {
   seq: number;
@@ -134,11 +135,14 @@ async function handleToolEvent(
   event: AgentEvent,
   isChildSession: boolean,
 ) {
+  const data = event.data as ToolEventData;
+  if (!shouldEmitToolCard(data?.name)) {
+    return;
+  }
   const sdkEmitter = resolveSdkEmitter(request.accountId);
   if (!sdkEmitter) {
     return;
   }
-  const data = event.data as ToolEventData;
   const phase = data?.phase ?? "";
   const toolCallId = data?.toolCallId ?? "";
 
