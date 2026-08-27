@@ -45,6 +45,7 @@ describe("adaptAgentJson", () => {
                 "image_generate",
                 "byclaw_chat_context",
                 "updateTaskPlan",
+                "code_to_wiki",
             ],
         });
     });
@@ -79,6 +80,7 @@ describe("adaptAgentJson", () => {
                 "image_generate",
                 "byclaw_chat_context",
                 "updateTaskPlan",
+                "code_to_wiki",
             ],
         });
     });
@@ -432,6 +434,7 @@ describe("adaptAgentJson", () => {
                 "image_generate",
                 "byclaw_chat_context",
                 "updateTaskPlan",
+                "code_to_wiki",
             ],
         });
         expect(res.listEntry.experimental).toEqual({ localModelLean: false });
