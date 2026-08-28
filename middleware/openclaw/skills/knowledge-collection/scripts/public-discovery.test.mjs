@@ -143,6 +143,54 @@ test('runs SearXNG and hot discovery for every SearXNG category', async () => {
   });
 });
 
+test('returns merged user action without discarding successful SearXNG discovery', async () => {
+  const { paths } = makeInitializedSession();
+  const result = await runPublicDiscover(paths, { query: 'agent' }, {
+    runProcess: async (spec) => spec.channel === 'searxng'
+      ? {
+        code: 0,
+        stdout: JSON.stringify({
+          query: 'agent',
+          results: [{ url: 'https://example.com/a', title: 'A', engine: 'google' }],
+        }),
+        stderr: '',
+      }
+      : {
+        code: 0,
+        stdout: JSON.stringify({
+          query: 'agent',
+          candidates: [],
+          warnings: ['byCLI 浏览器桥接不可用；已停止浏览器适配器并等待人工恢复。'],
+          requiresUserAction: {
+            kind: 'bridge_unavailable',
+            message: 'bridge unavailable',
+          },
+        }),
+        stderr: '',
+      },
+  });
+
+  const expectedAction = {
+    kind: 'bridge_unavailable',
+    message: 'bridge unavailable',
+    fallbackPolicy: {
+      allowDirectHttp: false,
+      allowGenericBrowser: false,
+      nextAction: 'stop-and-report',
+    },
+  };
+  assert.deepEqual(result.requiresUserAction, expectedAction);
+  assert.deepEqual(result.merged.requiresUserAction, expectedAction);
+  assert.equal(result.merged.groups.searxngTop.length, 1);
+  assert.match(result.merged.warnings.join('\n'), /禁止使用.*HTTP.*通用浏览器.*降级/);
+  const mergedSnapshot = JSON.parse(readFileSync(result.snapshots.merged, 'utf8'));
+  assert.deepEqual(
+    mergedSnapshot.requiresUserAction,
+    expectedAction,
+  );
+  assert.match(mergedSnapshot.warnings.join('\n'), /禁止使用.*HTTP.*通用浏览器.*降级/);
+});
+
 test('uses only SearXNG when the caller explicitly requests a result count', async () => {
   const { paths } = makeInitializedSession();
   const calls = [];

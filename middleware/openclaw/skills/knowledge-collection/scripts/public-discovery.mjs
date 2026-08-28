@@ -221,6 +221,7 @@ export async function runPublicDiscover(paths, args, options = {}) {
       merged: mergedSnapshot,
     },
     merged,
+    ...(merged.requiresUserAction ? { requiresUserAction: merged.requiresUserAction } : {}),
     warnings,
   };
 }
