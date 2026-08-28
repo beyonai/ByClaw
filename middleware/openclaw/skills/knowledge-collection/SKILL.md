@@ -1,6 +1,6 @@
 ---
 name: knowledge-collection
-description: Use when a user explicitly asks to collect, crawl, batch-search, or archive articles, documents, URLs, or files from public or enterprise sources. Produces traceable collection artifacts and validated sanitized Markdown for handoff; does not perform knowledge-base ingest, knowledge organization, or downstream actions.
+description: Use when a user explicitly asks to collect, crawl, batch-search, or archive articles, documents, URLs, or files from public or enterprise sources. Produces traceable collection artifacts and validated sanitized Markdown for handoff without proactively prompting for downstream choices.
 ---
 
 # Knowledge Collection
@@ -83,11 +83,6 @@ Use `node scripts/knowledge-collection.mjs command-schema` for the machine-reada
 
 下游 Agent 的输入只能是本次会话中已经校验、确实存在的 `sanitized/items/*.md` 文件；不得把 `raw/`、`markdown/`、摘要、候选元数据、缺失文件或会话状态文件作为下游正文输入。具体规则见 [delivery.md](references/delivery.md)。
 
-本技能不拥有也不执行任何后续动作：
+采集流程不得主动询问 `入库 / 知识整理 / 跳过`。采集阶段交付完成后，由根 Agent 根据用户已经表达的意图决定是否调用 `by-knowledge-manager`、`knowledge-organizer` 或其他下游 Skill，无需为了这三个选项再次询问用户。
 
-- 不得调用 `by-knowledge-manager`。
-- 不得调用 `knowledge-organizer`。
-- 不得询问 `入库 / 知识整理 / 跳过`。
-- 不得替主 Agent 选择或启动其他下游 Skill。
-
-所有命令输出均为 JSON。失败时返回结构化错误和实际失败来源、权限限制或覆盖缺口，不得编造替代结果。交付上述信息后立即结束，由主 Agent 决定是否以及如何委派下一步。
+所有命令输出均为 JSON。失败时返回结构化错误和实际失败来源、权限限制或覆盖缺口，不得编造替代结果。交付上述信息后结束采集阶段，由根 Agent 继续编排已获用户授权的后续动作。
