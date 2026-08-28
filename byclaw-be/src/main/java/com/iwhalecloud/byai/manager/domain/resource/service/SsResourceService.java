@@ -31,6 +31,7 @@ import com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.common.util.ListUtil;
 import com.iwhalecloud.byai.common.util.StringUtil;
+
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Date;
@@ -40,6 +41,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
+
 import com.iwhalecloud.byai.manager.qo.resource.DirAndFileQo;
 import com.iwhalecloud.byai.manager.qo.resource.ResourceQo;
 import com.iwhalecloud.byai.manager.vo.resource.DirAndFileVo;
@@ -61,19 +63,27 @@ import org.springframework.stereotype.Service;
 @Service
 public class SsResourceService {
 
-    /** 序列服务，用于生成 {@link SsResource#getResourceId()} */
+    /**
+     * 序列服务，用于生成 {@link SsResource#getResourceId()}
+     */
     @Autowired
     private SequenceService sequenceService;
 
-    /** 资源主表 Mapper */
+    /**
+     * 资源主表 Mapper
+     */
     @Autowired
     private SsResourceMapper ssResourceMapper;
 
-    /** 数字员工扩展表 Mapper */
+    /**
+     * 数字员工扩展表 Mapper
+     */
     @Autowired
     private SsResExtDigEmployeeMapper ssResExtDigEmployeeMapper;
 
-    /** 本体资源扩展表 Mapper */
+    /**
+     * 本体资源扩展表 Mapper
+     */
     @Autowired
     private SsResExtOntologyMapper ssResExtOntologyMapper;
 
@@ -192,7 +202,7 @@ public class SsResourceService {
     /**
      * 按主键或资源编码查询（可只传其一）
      *
-     * @param resourceId 资源主键，可空
+     * @param resourceId   资源主键，可空
      * @param resourceCode 资源编码，可空
      * @return 单条记录，无匹配时可能为 null
      */
@@ -223,24 +233,22 @@ public class SsResourceService {
     }
 
     /**
-     * 按全局资源编码查询唯一资源。保留给历史调用；新资源幂等优先使用 systemCode + resourceBizType + resourceCode。
+     * 根据编码批量查找资源
+     *
+     * @param resourceCodes 资源编码
+     * @return List<SsResource>
      */
-    public SsResource findUniqueByResourceCode(String resourceCode) {
-        List<SsResource> resources = findByCode(resourceCode);
-        if (ListUtil.isEmpty(resources)) {
-            return null;
-        }
-        if (resources.size() > 1) {
-            throw new BaseException("资源编码不唯一：" + resourceCode);
-        }
-        return resources.get(0);
+    public List<SsResource> findByResourceCode(List<String> resourceCodes) {
+        LambdaQueryWrapper<SsResource> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.in(SsResource::getResourceCode, resourceCodes);
+        return ssResourceMapper.selectList(queryWrapper);
     }
 
     /**
      * 按 systemCode + resourceBizType + resourceCode 查询唯一资源。
      */
     public SsResource findUniqueBySystemCodeAndBizTypeAndResourceCode(String systemCode, String resourceBizType,
-        String resourceCode) {
+                                                                      String resourceCode) {
         if (StringUtil.isEmpty(systemCode) || StringUtil.isEmpty(resourceBizType) || StringUtil.isEmpty(resourceCode)) {
             return null;
         }
@@ -277,7 +285,7 @@ public class SsResourceService {
     /**
      * 按资源编码和资源类型查询资源。
      *
-     * @param resourceCode 资源编码
+     * @param resourceCode    资源编码
      * @param resourceBizType 资源业务类型
      * @return 匹配资源列表
      */
@@ -298,13 +306,13 @@ public class SsResourceService {
      * ontologyBaseCode，经各自扩展表 target_content.ontologyBaseCode 缩小范围后再匹配 ss_resource。
      * 本体子资源不允许跨库按编码模糊命中，ontologyBaseCode 为空时直接返回空列表。
      *
-     * @param resourceCode 资源编码
-     * @param resourceBizType 资源业务类型
+     * @param resourceCode     资源编码
+     * @param resourceBizType  资源业务类型
      * @param ontologyBaseCode 所属本体库编码，本体子资源必填
      * @return 匹配资源列表
      */
     public List<SsResource> findByCodeAndBizTypeAndOntologyBaseCode(String resourceCode, String resourceBizType,
-        String ontologyBaseCode) {
+                                                                    String ontologyBaseCode) {
         if (StringUtil.isEmpty(resourceCode) || StringUtil.isEmpty(resourceBizType)) {
             return Collections.emptyList();
         }
@@ -417,8 +425,7 @@ public class SsResourceService {
             if (StringUtils.isNotBlank(ontologyBaseCode)) {
                 target.put(resourceId, ontologyBaseCode);
             }
-        }
-        catch (Exception ignored) {
+        } catch (Exception ignored) {
             // 历史脏数据不影响主查询，缺失时由调用方按资源树兜底。
         }
     }
@@ -430,9 +437,9 @@ public class SsResourceService {
     /**
      * 按系统来源、资源类型和资源编码查询资源。
      *
-     * @param systemCode 系统来源
+     * @param systemCode      系统来源
      * @param resourceBizType 资源业务类型
-     * @param resourceCode 资源编码
+     * @param resourceCode    资源编码
      * @return 匹配的资源，不存在时返回 null
      */
     public SsResource findByImportIdentity(String systemCode, String resourceBizType, String resourceCode) {
@@ -478,8 +485,8 @@ public class SsResourceService {
     /**
      * 统计同名资源数量（用于校验重名）
      *
-     * @param resourceName 资源名称
-     * @param resourceBizType 资源业务类型，可空表示不按类型过滤
+     * @param resourceName      资源名称
+     * @param resourceBizType   资源业务类型，可空表示不按类型过滤
      * @param resourceIdNoEqual 排除的资源主键（编辑时排除自身），可空
      * @return 匹配条数
      */
@@ -501,7 +508,7 @@ public class SsResourceService {
     /**
      * 生成不重名的资源名称。若基础名称已存在，则按已有基础名称数量追加“(x)”。
      *
-     * @param baseName 基础名称
+     * @param baseName        基础名称
      * @param resourceBizType 资源业务类型，可空表示全类型校验
      * @return 可用资源名称
      */
@@ -722,20 +729,20 @@ public class SsResourceService {
     /**
      * 创建资源主表记录（分配主键、默认系统码、父子与发布类型等）
      *
-     * @param resourceBizType 资源业务类型
-     * @param resourceCode 业务侧传入的资源编码
-     * @param resourceName 名称
-     * @param resourceDesc 描述，可空
-     * @param resourceStatus 状态枚举数值
-     * @param ownerType 资源归属类型：enterprise-企业，personal-个人
-     * @param systemCode 系统来源
+     * @param resourceBizType   资源业务类型
+     * @param resourceCode      业务侧传入的资源编码
+     * @param resourceName      名称
+     * @param resourceDesc      描述，可空
+     * @param resourceStatus    状态枚举数值
+     * @param ownerType         资源归属类型：enterprise-企业，personal-个人
+     * @param systemCode        系统来源
      * @param resourceVersionId 资源版本
-     * @param catalodId 资源目录
+     * @param catalodId         资源目录
      * @return 插入后的实体
      */
     public SsResource createResource(String resourceBizType, String resourceCode, String resourceName,
-        String resourceDesc, Integer resourceStatus, String ownerType, String systemCode, String resourceVersionId,
-        Long catalodId) {
+                                     String resourceDesc, Integer resourceStatus, String ownerType, String systemCode, String resourceVersionId,
+                                     Long catalodId) {
 
         SsResource ssResource = new SsResource();
         ssResource.setResourceBizType(resourceBizType);
@@ -794,7 +801,7 @@ public class SsResourceService {
     /**
      * 更新资源名称与描述，并刷新更新人、更新时间
      *
-     * @param resourceId 资源主键
+     * @param resourceId   资源主键
      * @param resourceName 新名称
      * @param resourceDesc 新描述
      * @return 更新后的实体
@@ -855,7 +862,7 @@ public class SsResourceService {
     /**
      * 分页查询未注销的数字员工资源（用于启动时 Redis 全量同步等批处理场景）。
      *
-     * @param pageNum 页码，从 1 开始
+     * @param pageNum  页码，从 1 开始
      * @param pageSize 每页条数
      * @return 当前页资源列表，无数据时返回空列表
      */

@@ -23,11 +23,11 @@ import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.manager.application.service.project.ProjectInitService;
 import com.iwhalecloud.byai.manager.application.service.project.ProjectWorkspaceManifestService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectMemberService;
+import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectResourceService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectService;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectDTO;
 import com.iwhalecloud.byai.manager.entity.devloop.Project;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectRepoMapper;
-import com.iwhalecloud.byai.manager.mapper.devloop.ProjectResourceMapper;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 
 @ExtendWith(MockitoExtension.class)
@@ -43,7 +43,7 @@ class ProjectApplicationServiceCreateTest {
     private ProjectRepoMapper projectRepoMapper;
 
     @Mock
-    private ProjectResourceMapper projectResourceMapper;
+    private ProjectResourceService projectResourceService;
 
     @Mock
     private ProjectMemberService projectMemberService;
@@ -125,7 +125,7 @@ class ProjectApplicationServiceCreateTest {
         ReflectionTestUtils.setField(service, "projectService", projectService);
         ReflectionTestUtils.setField(service, "sequenceService", sequenceService);
         ReflectionTestUtils.setField(service, "projectRepoMapper", projectRepoMapper);
-        ReflectionTestUtils.setField(service, "projectResourceMapper", projectResourceMapper);
+        ReflectionTestUtils.setField(service, "projectResourceService", projectResourceService);
         ReflectionTestUtils.setField(service, "projectMemberService", projectMemberService);
         ReflectionTestUtils.setField(service, "projectInitService", projectInitService);
         ReflectionTestUtils.setField(service, "projectWorkspaceManifestService", projectWorkspaceManifestService);

@@ -21,6 +21,7 @@ import com.iwhalecloud.byai.common.feign.request.datacloud.TermsOptionsReq;
 import com.iwhalecloud.byai.common.feign.response.DataCloudResponse;
 import com.iwhalecloud.byai.common.feign.response.datacloud.InvokeActionResp;
 import com.iwhalecloud.byai.common.feign.response.datacloud.QueryByKnowledgeResp;
+import com.iwhalecloud.byai.common.feign.response.datacloud.TemplateSubmitResp;
 import com.iwhalecloud.byai.common.feign.response.datacloud.TermsOptionsResp;
 import com.iwhalecloud.byai.common.jwt.JwtService;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
@@ -146,8 +147,13 @@ public class FeignDataCloudService {
 
     /**
      * 提交工作区模板（POST /api/v1/ontology-manager/workspace/templates/submit）。
+     *
+     * @param submitWorkspaceTemplateReq 提交请求
+     * @param headers                    透传请求头
+     * @return 模板提交结果
      */
-    public DataCloudResponse<JSONObject> submitWorkspaceTemplates(SubmitWorkspaceTemplateReq submitWorkspaceTemplateReq) {
+    public DataCloudResponse<TemplateSubmitResp> submitWorkspaceTemplates(
+        SubmitWorkspaceTemplateReq submitWorkspaceTemplateReq, Map<String, String> headers) {
 
         String path = "/api/v1/ontology-manager/workspace/templates/submit";
         String url = buildDisplayUrl(path, null);
@@ -156,16 +162,13 @@ public class FeignDataCloudService {
         logDatacloudStart("POST", url, startTime, submitWorkspaceTemplateReq);
         try {
 
-            Map<String, String> headers = this.buildHeaders();
-            headers.put("X-User-Code", CurrentUserHolder.getCurrentUserCode());
-
             HttpResponse response = discoveryHttpClient.post(serviceName, path, headers, submitWorkspaceTemplateReq,
                 null).get(this.gatewaySecondTimeOut, TimeUnit.SECONDS);
 
             String body = JSON.toJSONString(response.getData());
             logDatacloudEnd("POST", url, startTime, startNanos, body, body);
 
-            return JSON.parseObject(body, new TypeReference<DataCloudResponse<JSONObject>>() {
+            return JSON.parseObject(body, new TypeReference<DataCloudResponse<TemplateSubmitResp>>() {
             });
         } catch (Exception e) {
             logDatacloudError("POST", url, startTime, startNanos, submitWorkspaceTemplateReq, e);

@@ -8,7 +8,7 @@ public class ProjectResourceDTO {
     private Long id;
     private Long projectId;
     private String resourceType;
-    private String resourceId;
+    private Long resourceId;
     private String resourceName;
     private Integer sortNo;
 }

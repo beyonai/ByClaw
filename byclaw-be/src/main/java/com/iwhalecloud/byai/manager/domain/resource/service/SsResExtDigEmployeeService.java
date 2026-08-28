@@ -161,7 +161,7 @@ public class SsResExtDigEmployeeService {
     public ResourceExtDigEmployeeDto findExtDigEmployeeById(Long resourceId) {
         List<Long> resourceIds = Collections.singletonList(resourceId);
         List<ResourceExtDigEmployeeDto> resourceExtDigEmployeeDtos = this.findExtDigEmployeeByIds(resourceIds);
-        return resourceExtDigEmployeeDtos.isEmpty() ? null : resourceExtDigEmployeeDtos.get(0);
+        return resourceExtDigEmployeeDtos.isEmpty() ? null : resourceExtDigEmployeeDtos.getFirst();
     }
 
     /**

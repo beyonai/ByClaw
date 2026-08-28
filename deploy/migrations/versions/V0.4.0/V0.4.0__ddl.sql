@@ -652,7 +652,7 @@ CREATE TABLE IF NOT EXISTS byai.byai_project_resource
     id            BIGINT       NOT NULL,
     project_id    BIGINT       NOT NULL,
     resource_type VARCHAR(32)  NOT NULL,
-    resource_id   VARCHAR(128) NOT NULL,
+    resource_id   BIGINT       NOT NULL,
     resource_name VARCHAR(255),
     sort_no       INT          NOT NULL DEFAULT 0,
     create_by     BIGINT,
