@@ -352,6 +352,7 @@ public class RouteService {
      * 替换内容中的资源占位符
      * 将 {{resourceType_resourceId}} 格式替换为对应的资源名称
      * 如果资源类型为 DIG_EMPLOYEE，则在名称前添加 @ 符号，并在替换内容后添加空格
+     * 如果资源类型为 COMMON_FILE 或 COMMON_FOLDER，则替换为 [resourceName](resourceId)
      *
      * @param content      原始内容
      * @param resourceList 资源列表
@@ -387,7 +388,7 @@ public class RouteService {
             String replacement = resolveResourcePlaceholder(placeholder, resourceMap);
 
             if (replacement != null) {
-                replacement = prefixResourcePlaceholder(replacement);
+                replacement = prefixResourcePlaceholder(placeholder, replacement, resourceMap);
                 matcher.appendReplacement(result, java.util.regex.Matcher.quoteReplacement(replacement + " "));
             }
             // 如果找不到对应的资源，保留原占位符
@@ -422,8 +423,12 @@ public class RouteService {
         return content.substring(placeholder.length());
     }
 
-    private String prefixResourcePlaceholder(String replacement) {
-        if (replacement.startsWith("@")) {
+    private String prefixResourcePlaceholder(String placeholder, String replacement,
+                                             Map<String, ResourceVo> resourceMap) {
+        String firstPlaceholder = StringUtils.substringBefore(placeholder, "#");
+        ResourceVo firstResource = resourceMap.get(firstPlaceholder);
+        if (firstResource != null && (AgentMetaEnum.DIG_EMPLOYEE.equals(firstResource.getResourceType())
+            || isCommonFileResource(firstResource))) {
             return replacement;
         }
         return "#" + replacement;
@@ -457,8 +462,15 @@ public class RouteService {
         // 如果资源类型为 DIG_EMPLOYEE，则在名称前添加 @ 符号
         if (AgentMetaEnum.DIG_EMPLOYEE.equals(resource.getResourceType())) {
             replacement = "@" + replacement;
+        } else if (isCommonFileResource(resource)) {
+            replacement = "[" + replacement + "](" + resource.getResourceId() + ")";
         }
         return replacement;
+    }
+
+    private boolean isCommonFileResource(ResourceVo resource) {
+        return AgentMetaEnum.COMMON_FILE.equals(resource.getResourceType())
+            || AgentMetaEnum.COMMON_FOLDER.equals(resource.getResourceType());
     }
 
     private List<MultiAgentLaneRoute> buildMultiAgentLaneRoutes(ChatProcessContext ctx,
