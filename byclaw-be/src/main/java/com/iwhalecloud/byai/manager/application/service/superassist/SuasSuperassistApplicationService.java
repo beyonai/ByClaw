@@ -856,61 +856,64 @@ public class SuasSuperassistApplicationService {
      */
     public void initExpertTeams(LoginInfo loginInfo) {
 
+        try {
+            // 获取初始化模板
+            String paramCode = "INIT_DEFAULT_PROJECT_EXPERT_TEAMS_TEMPLATE";
+            JSONArray initTemplates = this.getInitTemplateArray(loginInfo, paramCode);
 
-        // 获取初始化模板
-        String paramCode = "INIT_DEFAULT_PROJECT_EXPERT_TEAMS_TEMPLATE_bak";
-        JSONArray initTemplates = this.getInitTemplateArray(loginInfo, paramCode);
 
+            for (int i = 0; initTemplates != null && i < initTemplates.size(); i++) {
+                JSONObject jsonObject = initTemplates.getJSONObject(i);
 
-        for (int i = 0; initTemplates != null && i < initTemplates.size(); i++) {
-            JSONObject jsonObject = initTemplates.getJSONObject(i);
+                //初始化项目
+                Project project = this.initProject(jsonObject, loginInfo);
 
-            //初始化项目
-            Project project = this.initProject(jsonObject, loginInfo);
-
-            // 将用户加入项目
-            boolean isMember = projectMemberService.isMember(project.getProjectId(), loginInfo.getUserId());
-            if (!isMember) {
-                projectMemberService.addMember(project.getProjectId(), loginInfo.getUserId(), MemberRole.MEMBER);
-            }
-
-            //初始化专家团
-            Map<String, AgentPrologueDto.ModelInfo> modelInfoMap = new HashMap<String, AgentPrologueDto.ModelInfo>();
-
-            JSONArray expertTeams = jsonObject.getJSONArray("expertTeams");
-            for (int j = i; expertTeams != null && j < expertTeams.size(); j++) {
-
-                JSONObject expertTeamTemplate = expertTeams.getJSONObject(j);
-
-                //初始化数字员工
-                List<EmployeeGroupMemberDTO> employeeGroupMembers = new ArrayList<>();
-                JSONArray digitalEmployees = expertTeamTemplate.getJSONArray("digitalEmployees");
-                for (int k = 0; digitalEmployees != null && k < digitalEmployees.size(); k++) {
-
-                    JSONObject relEmployeeTemplate = digitalEmployees.getJSONObject(k);
-                    ResourceExtDigEmployeeDto relEmployee = this.createEmployeeByTemplate(relEmployeeTemplate, loginInfo, modelInfoMap, Collections.emptyList());
-                    SsResExtDigEmployee ssResExtDigEmployee = relEmployee.getSsResExtDigEmployee();
-
-                    EmployeeGroupMemberDTO employeeGroupMemberDTO = new EmployeeGroupMemberDTO();
-                    employeeGroupMemberDTO.setResourceId(relEmployee.getResourceId());
-                    employeeGroupMemberDTO.setResourceCode(relEmployee.getResourceCode());
-                    employeeGroupMemberDTO.setName(relEmployee.getResourceName());
-                    employeeGroupMemberDTO.setDescription(relEmployee.getResourceDesc());
-                    employeeGroupMemberDTO.setAvatar(relEmployee.getAvatar());
-                    employeeGroupMemberDTO.setTeamRole(relEmployeeTemplate.getString("teamRole"));
-                    employeeGroupMemberDTO.setSortOrder(k);
-                    employeeGroupMemberDTO.setWorkerAgentType(relEmployee.getWorkerAgentType());
-                    employeeGroupMemberDTO.setCreateType(ssResExtDigEmployee.getCreateType());
-                    employeeGroupMemberDTO.setIntegrationType(ssResExtDigEmployee.getIntegrationType());
-                    employeeGroupMemberDTO.setAgentType(ssResExtDigEmployee.getAgentType());
-                    employeeGroupMembers.add(employeeGroupMemberDTO);
+                // 将用户加入项目
+                boolean isMember = projectMemberService.isMember(project.getProjectId(), loginInfo.getUserId());
+                if (!isMember) {
+                    projectMemberService.addMember(project.getProjectId(), loginInfo.getUserId(), MemberRole.MEMBER);
                 }
 
-                //创建专家团
-                ResourceExtDigEmployeeDto expertTeamEmployee = this.createEmployeeByTemplate(expertTeamTemplate, loginInfo, modelInfoMap, employeeGroupMembers);
-                logger.info("初始化专家团成功:{}", JSON.toJSONString(expertTeamEmployee));
+                //初始化专家团
+                Map<String, AgentPrologueDto.ModelInfo> modelInfoMap = new HashMap<String, AgentPrologueDto.ModelInfo>();
 
+                JSONArray expertTeams = jsonObject.getJSONArray("expertTeams");
+                for (int j = i; expertTeams != null && j < expertTeams.size(); j++) {
+
+                    JSONObject expertTeamTemplate = expertTeams.getJSONObject(j);
+
+                    //初始化数字员工
+                    List<EmployeeGroupMemberDTO> employeeGroupMembers = new ArrayList<>();
+                    JSONArray digitalEmployees = expertTeamTemplate.getJSONArray("digitalEmployees");
+                    for (int k = 0; digitalEmployees != null && k < digitalEmployees.size(); k++) {
+
+                        JSONObject relEmployeeTemplate = digitalEmployees.getJSONObject(k);
+                        ResourceExtDigEmployeeDto relEmployee = this.createEmployeeByTemplate(relEmployeeTemplate, loginInfo, modelInfoMap, Collections.emptyList());
+                        SsResExtDigEmployee ssResExtDigEmployee = relEmployee.getSsResExtDigEmployee();
+
+                        EmployeeGroupMemberDTO employeeGroupMemberDTO = new EmployeeGroupMemberDTO();
+                        employeeGroupMemberDTO.setResourceId(relEmployee.getResourceId());
+                        employeeGroupMemberDTO.setResourceCode(relEmployee.getResourceCode());
+                        employeeGroupMemberDTO.setName(relEmployee.getResourceName());
+                        employeeGroupMemberDTO.setDescription(relEmployee.getResourceDesc());
+                        employeeGroupMemberDTO.setAvatar(relEmployee.getAvatar());
+                        employeeGroupMemberDTO.setTeamRole(relEmployeeTemplate.getString("teamRole"));
+                        employeeGroupMemberDTO.setSortOrder(k);
+                        employeeGroupMemberDTO.setWorkerAgentType(relEmployee.getWorkerAgentType());
+                        employeeGroupMemberDTO.setCreateType(ssResExtDigEmployee.getCreateType());
+                        employeeGroupMemberDTO.setIntegrationType(ssResExtDigEmployee.getIntegrationType());
+                        employeeGroupMemberDTO.setAgentType(ssResExtDigEmployee.getAgentType());
+                        employeeGroupMembers.add(employeeGroupMemberDTO);
+                    }
+
+                    //创建专家团
+                    ResourceExtDigEmployeeDto expertTeamEmployee = this.createEmployeeByTemplate(expertTeamTemplate, loginInfo, modelInfoMap, employeeGroupMembers);
+                    logger.info("初始化专家团成功:{}", JSON.toJSONString(expertTeamEmployee));
+
+                }
             }
+        } catch (Exception e) {
+            logger.error(e.getMessage(), e);
         }
     }
 
@@ -1015,6 +1018,8 @@ public class SuasSuperassistApplicationService {
             project.setCreateBy(users.getUserId());
             projectService.save(project);
 
+            // 创始人关联项目
+            projectMemberService.addMember(project.getProjectId(), project.getCreateBy(), "owner");
 
             //初始化本体对象
             List<String> objectCodes = this.initSubmitWorkspaceTemplate(users);
