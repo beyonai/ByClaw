@@ -160,6 +160,7 @@ await (async () => {
   assert.match(publicDiscoverHelp.json.args['--category'], /general/);
   assert.match(publicDiscoverHelp.json.args['--requested-count'], /明确指定/);
   assert.match(publicDiscoverHelp.json.args['--requested-count'], /SearXNG 无候选.*hot-discovery/);
+  assert.match(publicDiscoverHelp.json.args['--timeout'], /SearXNG 与 hot-discovery/);
 
   const schema = await runCli(['command-schema']);
   assert.equal(schema.code, 0, schema.stderr);
@@ -221,8 +222,36 @@ await (async () => {
   const missingPublicDiscoverSession = await runCli([
     'public-discover', '--session-dir', '/does-not-exist', '--query', 'q',
   ]);
+  assert.notEqual(missingPublicDiscoverSession.stdout.trim(), '{}');
   assert.equal(missingPublicDiscoverSession.code, 1);
+  assert.equal(missingPublicDiscoverSession.json.ok, false);
   assert.match(missingPublicDiscoverSession.json.error, /采集会话目录不存在/);
+
+  const asyncDiscoveryRoot = makeSessionDir();
+  const asyncDiscoveryInit = await runCli([
+    'init', '--session-dir', asyncDiscoveryRoot, '--query', 'async discovery',
+    '--source-scope', '["public-internet"]', '--materialization-target', 'candidates',
+  ]);
+  assert.equal(asyncDiscoveryInit.code, 0, asyncDiscoveryInit.stderr);
+  const fixtureBinDir = join(asyncDiscoveryRoot, 'fixture-bin');
+  const fixtureSearxng = join(fixtureBinDir, 'searxng-cli');
+  mkdirSync(fixtureBinDir);
+  writeFileSync(fixtureSearxng, `#!/usr/bin/env node
+process.stdout.write(JSON.stringify({
+  query: 'async discovery',
+  results: [{ url: 'https://example.com/article', title: 'Async result', engine: 'fixture' }],
+}));
+`);
+  chmodSync(fixtureSearxng, 0o700);
+  const asyncDiscovery = await runCli([
+    'public-discover', '--session-dir', asyncDiscoveryRoot, '--query', 'async discovery',
+    '--requested-count', '1',
+  ], { PATH: `${fixtureBinDir}:${process.env.PATH}` });
+  assert.notEqual(asyncDiscovery.stdout.trim(), '{}');
+  assert.equal(asyncDiscovery.code, 0, asyncDiscovery.stderr);
+  assert.equal(asyncDiscovery.json.ok, true);
+  assert.equal(asyncDiscovery.json.action, 'public-discover');
+  rmSync(asyncDiscoveryRoot, { recursive: true, force: true });
 
   const siteCrawlFrontmatter = readFileSync(siteCrawlSkillPath, 'utf8').split('---')[1];
   assert.match(siteCrawlFrontmatter, /Do not use for one known URL/);

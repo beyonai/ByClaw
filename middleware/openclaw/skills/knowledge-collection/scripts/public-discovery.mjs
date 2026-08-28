@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve, sep } from 'node:path';
@@ -63,27 +62,6 @@ export async function runPublicProcess(spec, options = {}) {
     const stderr = error instanceof Error ? error.message : String(error);
     return { code: 1, stdout: '', stderr, timedOut: /timeout after \d+ms/i.test(stderr) };
   }
-}
-
-export async function runUnboundedPublicProcess({ bin, executable, args }, options = {}) {
-  return new Promise((resolveOutcome) => {
-    const child = spawn(bin || executable, args, {
-      cwd: options.cwd,
-      env: options.env,
-      shell: false,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', (chunk) => { stdout += chunk; });
-    child.stderr.on('data', (chunk) => { stderr += chunk; });
-    child.once('error', (error) => {
-      resolveOutcome({ code: 1, stdout: '', stderr: error instanceof Error ? error.message : String(error) });
-    });
-    child.once('close', (code) => {
-      resolveOutcome({ code: Number.isInteger(code) ? code : 1, stdout, stderr });
-    });
-  });
 }
 
 function parseSuccess(outcome) {
@@ -158,8 +136,8 @@ export async function runPublicDiscover(paths, args, options = {}) {
   const mergedSnapshot = snapshotPath(inputDir, `${prefix}-merged.json`);
   const searxngRuntime = resolveSearxngRuntime(options);
   const runSearxngProcess = options.runProcess || runPublicProcess;
-  const runHotDiscoveryProcess = options.runProcess || runUnboundedPublicProcess;
-  const searxngTimeoutMs = Math.max(1, Math.ceil(Number(processTimeout) * 1_000));
+  const runHotDiscoveryProcess = options.runProcess || runPublicProcess;
+  const processTimeoutMs = Math.max(1, Math.ceil(Number(processTimeout) * 1_000));
 
   const searxngSpec = {
     channel: 'searxng',
@@ -179,15 +157,15 @@ export async function runPublicDiscover(paths, args, options = {}) {
   let hotOutcome;
   if (requestedCount === null) {
     [searxngOutcome, hotOutcome] = await Promise.all([
-      runSearxngProcess(searxngSpec, { timeoutMs: searxngTimeoutMs }),
-      runHotDiscoveryProcess(hotDiscoverySpec),
+      runSearxngProcess(searxngSpec, { timeoutMs: processTimeoutMs }),
+      runHotDiscoveryProcess(hotDiscoverySpec, { timeoutMs: processTimeoutMs }),
     ]);
   } else {
-    searxngOutcome = await runSearxngProcess(searxngSpec, { timeoutMs: searxngTimeoutMs });
+    searxngOutcome = await runSearxngProcess(searxngSpec, { timeoutMs: processTimeoutMs });
     const requestedSxDoc = parseSuccess(searxngOutcome);
     hotOutcome = requestedSxDoc && Array.isArray(requestedSxDoc.results) && requestedSxDoc.results.length > 0
       ? { skipped: true }
-      : await runHotDiscoveryProcess(hotDiscoverySpec);
+      : await runHotDiscoveryProcess(hotDiscoverySpec, { timeoutMs: processTimeoutMs });
   }
 
   const sxDoc = parseSuccess(searxngOutcome);

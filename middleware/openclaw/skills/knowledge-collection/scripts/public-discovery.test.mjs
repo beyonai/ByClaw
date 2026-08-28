@@ -123,7 +123,10 @@ test('runs SearXNG and hot discovery for every SearXNG category', async () => {
 
   assert.deepEqual(calls.map(({ spec }) => spec.channel).sort(), ['hot-discovery', 'searxng']);
   assert.deepEqual(calls.find(({ spec }) => spec.channel === 'hot-discovery').spec.args.slice(-2), ['--dimensions', 'images']);
-  assert.equal(calls.find(({ spec }) => spec.channel === 'hot-discovery').options, undefined);
+  assert.deepEqual(
+    calls.find(({ spec }) => spec.channel === 'hot-discovery').options,
+    { timeoutMs: 60_000 },
+  );
   const searxngCall = calls.find(({ spec }) => spec.channel === 'searxng');
   assert.ok(searxngCall.spec.args.includes('--time-range'));
   assert.ok(searxngCall.spec.args.includes('week'));
@@ -264,6 +267,7 @@ test('falls back to hot discovery when requested SearXNG result set is empty', a
     query: '浩鲸科技',
     'requested-count': '1',
     'max-results': '20',
+    timeout: '0.025',
   }, {
     runProcess: async (spec, options) => {
       calls.push({ spec, options });
@@ -289,10 +293,39 @@ test('falls back to hot discovery when requested SearXNG result set is empty', a
     hotDiscoveryCall.spec.args[hotDiscoveryCall.spec.args.indexOf('--limit') + 1],
     '1',
   );
-  assert.equal(hotDiscoveryCall.options, undefined);
+  assert.deepEqual(calls.map(({ options }) => options), [
+    { timeoutMs: 25 },
+    { timeoutMs: 25 },
+  ]);
   assert.equal(result.merged.usedHotDiscovery, true);
   assert.deepEqual(result.channels.hotDiscovery, { status: 'success', exitCode: 0 });
   assert.equal(existsSync(result.snapshots.hotDiscovery), true);
+});
+
+test('applies a custom outer timeout to both public discovery channels', async () => {
+  const { paths } = makeInitializedSession();
+  const calls = [];
+  await runPublicDiscover(paths, {
+    query: 'timeout bounds',
+    timeout: '0.025',
+  }, {
+    runProcess: async (spec, options) => {
+      calls.push({ spec, options });
+      return spec.channel === 'searxng'
+        ? { code: 0, stdout: JSON.stringify({ query: 'timeout bounds', results: [] }), stderr: '' }
+        : {
+          code: 0,
+          stdout: JSON.stringify({ query: 'timeout bounds', candidates: [] }),
+          stderr: '',
+        };
+    },
+    merge: ({ sxDoc }) => ({ query: sxDoc.query }),
+  });
+
+  assert.deepEqual(calls.map(({ options }) => options), [
+    { timeoutMs: 25 },
+    { timeoutMs: 25 },
+  ]);
 });
 
 test('falls back to hot discovery when requested SearXNG output is invalid', async () => {

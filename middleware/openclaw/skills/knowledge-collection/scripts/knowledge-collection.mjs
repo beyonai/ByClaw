@@ -39,7 +39,7 @@ const COMMAND_SPECS = {
       '--pageno': '可选。SearXNG 页码，默认 1',
       '--max-results': '可选。SearXNG 结果上限，默认 20',
       '--requested-count': '可选。用户明确指定的采集篇数；先运行 SearXNG，SearXNG 无候选或输出无效时自动回退到 hot-discovery',
-      '--timeout': '可选。SearXNG 外层进程总等待秒数，默认 60；单个引擎请求固定为 10 秒',
+      '--timeout': '可选。SearXNG 与 hot-discovery 外层进程总等待秒数，默认 60；SearXNG 单个引擎请求固定为 10 秒',
       '--time-range': '可选。SearXNG 时间范围：day | week | month | year',
       '--tiers': '可选。hot-discovery 档位，默认 1,2,3',
       '--limit': '可选。每个 hot-discovery 适配器的结果上限，默认 20',
@@ -474,7 +474,7 @@ function compactRequested(args) {
   return args.compact === true || args.compact === 'true' || args.compact === '1';
 }
 
-function main() {
+async function main() {
   const { command: rawCommand, args, positionals } = parseArgs(process.argv.slice(2));
   const command = rawCommand || 'help';
   if (command === 'help') {
@@ -511,15 +511,13 @@ function main() {
     throw new Error(`未知命令: ${command}`);
   }
 
-  render(executeLocalCommand(canonical, args), compactRequested(args));
+  render(await executeLocalCommand(canonical, args), compactRequested(args));
 }
 
-try {
-  main();
-} catch (error) {
+main().catch((error) => {
   render({
     ok: false,
     error: error instanceof Error ? error.message : String(error),
   }, false);
   process.exitCode = 1;
-}
+});
