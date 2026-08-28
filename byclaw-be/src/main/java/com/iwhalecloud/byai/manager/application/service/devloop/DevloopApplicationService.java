@@ -5794,6 +5794,23 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
         return ResponseUtil.successResponse(result);
     }
 
+    /** 创建不绑定项目的用户级账号，账号所有权始终取当前登录用户。 */
+    @Transactional(rollbackFor = Exception.class)
+    public ResponseUtil<Map<String, Object>> createGlobalOperationAccount(OperationAccountDTO dto) {
+        String validationError = validateOperationAccount(dto, false);
+        if (validationError != null) {
+            return ResponseUtil.failRes(validationError);
+        }
+        OperationAccount account = new OperationAccount();
+        applyOperationAccountDto(account, dto);
+        account.setProjectId(null);
+        account.setCreateBy(CurrentUserHolder.getCurrentUserId());
+        OperationAccount created = operationAccountService.create(account);
+        Map<String, Object> result = new HashMap<>();
+        result.put("accountId", created.getAccountId());
+        return ResponseUtil.successResponse(result);
+    }
+
     /**
      * 编辑运营账号，项目归属由已有账号反查，避免请求跨项目修改。
      */
@@ -5809,9 +5826,11 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
         if (existing == null) {
             return ResponseUtil.failRes(I18nUtil.get("devloop.operationAccount.notFound"));
         }
-        String accessError = validateOperationProjectAccess(existing.getProjectId());
-        if (accessError != null) {
-            return ResponseUtil.failRes(accessError);
+        if (existing.getProjectId() != null) {
+            String accessError = validateOperationProjectAccess(existing.getProjectId());
+            if (accessError != null) {
+                return ResponseUtil.failRes(accessError);
+            }
         }
         if (!operationAccountAccessService.canAccess(existing, existing.getProjectId(),
             CurrentUserHolder.getCurrentUserId())) {
@@ -5852,9 +5871,11 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
         if (existing == null) {
             return ResponseUtil.failRes(I18nUtil.get("devloop.operationAccount.notFound"));
         }
-        String accessError = validateOperationProjectAccess(existing.getProjectId());
-        if (accessError != null) {
-            return ResponseUtil.failRes(accessError);
+        if (existing.getProjectId() != null) {
+            String accessError = validateOperationProjectAccess(existing.getProjectId());
+            if (accessError != null) {
+                return ResponseUtil.failRes(accessError);
+            }
         }
         if (!operationAccountAccessService.canAccess(existing, existing.getProjectId(),
             CurrentUserHolder.getCurrentUserId())) {
@@ -5880,6 +5901,16 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
         return ResponseUtil.successResponse(result);
     }
 
+    /** 查询当前用户创建的全部有效账号，包括项目账号和用户级账号。 */
+    public ResponseUtil<List<Map<String, Object>>> listGlobalOperationAccounts() {
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (OperationAccount account : operationAccountService.listGlobalByUserId(
+            CurrentUserHolder.getCurrentUserId())) {
+            result.add(toOperationAccountMap(account));
+        }
+        return ResponseUtil.successResponse(result);
+    }
+
     /**
      * 校验采集沙箱属于当前用户，成功后回写对应平台账号状态。
      */
@@ -5892,9 +5923,11 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
         if (account == null) {
             return ResponseUtil.failRes(I18nUtil.get("devloop.operationAccount.notFound"));
         }
-        String accessError = validateOperationProjectAccess(account.getProjectId());
-        if (accessError != null) {
-            return ResponseUtil.failRes(accessError);
+        if (account.getProjectId() != null) {
+            String accessError = validateOperationProjectAccess(account.getProjectId());
+            if (accessError != null) {
+                return ResponseUtil.failRes(accessError);
+            }
         }
         if (!operationAccountAccessService.canAccess(account, account.getProjectId(),
             CurrentUserHolder.getCurrentUserId())) {

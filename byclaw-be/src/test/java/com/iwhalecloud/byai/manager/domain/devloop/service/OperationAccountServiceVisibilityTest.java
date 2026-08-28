@@ -64,4 +64,29 @@ class OperationAccountServiceVisibilityTest {
 
         verifyNoInteractions(operationAccountMapper);
     }
+
+    @Test
+    void listsAllActiveAccountsCreatedByCurrentUserIncludingProjectAccounts() {
+        List<OperationAccount> expected = List.of(new OperationAccount());
+        when(operationAccountMapper.selectList(any())).thenReturn(expected);
+
+        List<OperationAccount> actual = service.listGlobalByUserId(10L);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Wrapper<OperationAccount>> captor = ArgumentCaptor.forClass(Wrapper.class);
+        verify(operationAccountMapper).selectList(captor.capture());
+        assertThat(actual).isSameAs(expected);
+
+        LambdaQueryWrapper<OperationAccount> query = (LambdaQueryWrapper<OperationAccount>) captor.getValue();
+        assertThat(query.getSqlSegment()).contains("create_by =", "status_cd", "ORDER BY create_time DESC")
+            .doesNotContain("project_id IS NULL");
+        assertThat(query.getParamNameValuePairs().values()).containsExactlyInAnyOrder(10L, "00A");
+    }
+
+    @Test
+    void returnsEmptyGlobalListForMissingUserWithoutQueryingMapper() {
+        assertThat(service.listGlobalByUserId(null)).isEmpty();
+
+        verifyNoInteractions(operationAccountMapper);
+    }
 }

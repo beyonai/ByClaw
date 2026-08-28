@@ -24,7 +24,13 @@ public class OperationAccountAccessService {
 
     /** 判断当前用户是否能访问指定项目下的账号。 */
     public boolean canAccess(OperationAccount account, Long projectId, Long userId) {
-        if (account == null || account.getProjectId() == null || projectId == null || userId == null) {
+        if (account == null || userId == null) {
+            return false;
+        }
+        if (account.getProjectId() == null) {
+            return account.getCreateBy() != null && Objects.equals(account.getCreateBy(), userId);
+        }
+        if (projectId == null) {
             return false;
         }
         return Objects.equals(account.getProjectId(), projectId)

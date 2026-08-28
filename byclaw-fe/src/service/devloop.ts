@@ -584,6 +584,11 @@ export const listOperationAccounts = (projectId: number) =>
 export const createOperationAccount = (data: OperationAccountPayload) =>
   POST<{ accountId: number }>('/byaiService/devloop/operation/account/create', data);
 
+export const listGlobalOperationAccounts = () => POST<any[]>('/byaiService/devloop/operation/account/user/list', {});
+
+export const createGlobalOperationAccount = (data: Omit<OperationAccountPayload, 'projectId'>) =>
+  POST<{ accountId: number }>('/byaiService/devloop/operation/account/user/create', data);
+
 export const updateOperationAccount = (data: OperationAccountPayload & { accountId: string | number }) =>
   POST<void>('/byaiService/devloop/operation/account/update', data);
 

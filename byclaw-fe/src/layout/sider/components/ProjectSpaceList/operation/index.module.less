@@ -485,6 +485,18 @@
   background: #f3f7ff;
 }
 
+.accountLoginNoticeGrid,
+.accountGridLoading {
+  grid-column: 1 / -1;
+}
+
+.accountGridLoading {
+  min-height: 88px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .accountLoginNoticeContent {
   display: flex;
   min-width: 0;
@@ -742,7 +754,8 @@
 }
 
 // 项目大详情账号卡片将更多操作固定到右下角，避免遮挡右上角登录状态标签。
-.accountPanelCompact .accountCardMoreAction {
+.accountPanelCompact .accountCardMoreAction,
+.accountCardCompact .accountCardMoreAction {
   top: auto;
   right: 8px;
   bottom: 8px;

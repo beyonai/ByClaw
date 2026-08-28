@@ -145,6 +145,39 @@ class DevloopOperationAccountAuthorizationTest {
     }
 
     @Test
+    void listsCurrentUsersGlobalAccounts() {
+        OperationAccount owned = account(1L, null, CURRENT_USER_ID);
+        when(operationAccountService.listGlobalByUserId(CURRENT_USER_ID)).thenReturn(List.of(owned));
+
+        ResponseUtil<List<Map<String, Object>>> response = service.listGlobalOperationAccounts();
+
+        assertThat(response.getCode()).isEqualTo(ResponseUtil.SUCCESS);
+        assertThat(response.getData()).extracting(item -> item.get("accountId")).containsExactly(1L);
+        verify(operationAccountService).listGlobalByUserId(CURRENT_USER_ID);
+        verify(projectMapper, never()).selectById(any());
+    }
+
+    @Test
+    void createsGlobalAccountWithoutProject() {
+        OperationAccountDTO dto = validDto(null, null);
+        when(operationAccountService.create(any())).thenAnswer(invocation -> {
+            OperationAccount created = invocation.getArgument(0);
+            created.setAccountId(88L);
+            return created;
+        });
+
+        ResponseUtil<Map<String, Object>> response = service.createGlobalOperationAccount(dto);
+
+        ArgumentCaptor<OperationAccount> captor = ArgumentCaptor.forClass(OperationAccount.class);
+        verify(operationAccountService).create(captor.capture());
+        assertThat(response.getCode()).isEqualTo(ResponseUtil.SUCCESS);
+        assertThat(response.getData()).containsEntry("accountId", 88L);
+        assertThat(captor.getValue().getProjectId()).isNull();
+        assertThat(captor.getValue().getCreateBy()).isEqualTo(CURRENT_USER_ID);
+        verify(projectMapper, never()).selectById(any());
+    }
+
+    @Test
     void preservesMissingUpdateParameterAndAccountIdErrorsBeforeAccountLookup() {
         ResponseUtil<Void> missingParameter = service.updateOperationAccount(null);
         ResponseUtil<Void> missingAccountId = service.updateOperationAccount(new OperationAccountDTO());
@@ -312,6 +345,24 @@ class DevloopOperationAccountAuthorizationTest {
         assertAuthorizationOrder(existing);
         verify(sandboxRecordMapper, never()).selectRunningByUser(any());
         verify(operationAccountService, never()).update(any());
+    }
+
+    @Test
+    void allowsCreatorToLoginToGlobalAccountWithoutProjectLookup() {
+        OperationAccount existing = account(6L, null, CURRENT_USER_ID);
+        when(operationAccountService.findById(6L)).thenReturn(existing);
+        when(operationAccountAccessService.canAccess(existing, null, CURRENT_USER_ID)).thenReturn(true);
+        SsSandboxRecord running = new SsSandboxRecord();
+        running.setSandboxId("sandbox-global");
+        when(sandboxRecordMapper.selectRunningByUser(CURRENT_USER_CODE)).thenReturn(List.of(running));
+
+        ResponseUtil<Map<String, Object>> response = service.loginOperationAccount(6L, "sandbox-global");
+
+        assertThat(response.getCode()).isEqualTo(ResponseUtil.SUCCESS);
+        assertThat(response.getData()).containsEntry("accountId", 6L).containsEntry("loginStatus", "online");
+        verify(operationAccountAccessService).canAccess(existing, null, CURRENT_USER_ID);
+        verify(projectMapper, never()).selectById(any());
+        verify(operationAccountService).update(any());
     }
 
     @ParameterizedTest

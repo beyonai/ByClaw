@@ -704,6 +704,18 @@ public class DevloopController {
         return applicationService.createOperationAccount(dto);
     }
 
+    /** 查询当前用户创建的全部有效账号，包括项目账号和用户级账号。 */
+    @PostMapping("/operation/account/user/list")
+    public ResponseUtil<List<Map<String, Object>>> listGlobalOperationAccounts() {
+        return applicationService.listGlobalOperationAccounts();
+    }
+
+    /** 新增不绑定项目的用户级账号。 */
+    @PostMapping("/operation/account/user/create")
+    public ResponseUtil<Map<String, Object>> createGlobalOperationAccount(@RequestBody OperationAccountDTO dto) {
+        return applicationService.createGlobalOperationAccount(dto);
+    }
+
     /** 编辑运营平台账号的展示信息和平台侧账号标识。 */
     @PostMapping("/operation/account/update")
     public ResponseUtil<Void> updateOperationAccount(@RequestBody OperationAccountDTO dto) {

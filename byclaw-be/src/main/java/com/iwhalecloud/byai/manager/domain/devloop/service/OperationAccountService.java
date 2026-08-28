@@ -75,4 +75,15 @@ public class OperationAccountService {
             .orderByDesc(OperationAccount::getCreateTime);
         return operationAccountMapper.selectList(wrapper);
     }
+
+    /** 查询当前用户创建的全部有效账号，包括项目账号和用户级账号。 */
+    public List<OperationAccount> listGlobalByUserId(Long userId) {
+        if (userId == null) {
+            return List.of();
+        }
+        LambdaQueryWrapper<OperationAccount> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(OperationAccount::getCreateBy, userId).eq(OperationAccount::getStatusCd, "00A")
+            .orderByDesc(OperationAccount::getCreateTime);
+        return operationAccountMapper.selectList(wrapper);
+    }
 }

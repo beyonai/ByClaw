@@ -41,6 +41,7 @@ import {
 } from '@/service/connector';
 
 import styles from './index.module.less';
+import GlobalAccountSection from './GlobalAccountSection';
 
 dayjs.extend(customParseFormat);
 dayjs.extend(utc);
@@ -262,6 +263,7 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
   // 分别控制设置列表、完整配置、授权说明和真实授权进度的显示状态。
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [configurationOpen, setConfigurationOpen] = useState(false);
+  const [accountToolbar, setAccountToolbar] = useState<React.ReactNode>(null);
   const [catalogRefreshing, setCatalogRefreshing] = useState(false);
   const [authorizingConnector, setAuthorizingConnector] = useState<Connector | undefined>(undefined);
   // 一次性授权任务由后端创建，包含真实二维码或第三方授权链接。
@@ -1040,11 +1042,12 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
         )}
       </Modal>
 
-      {/* 完整配置面板预留给后续连接器管理能力。 */}
+      {/* 完整配置面板统一管理系统连接器与当前用户自定义账号。 */}
       <Drawer
         className={styles.configurationDrawer}
         open={configurationOpen}
         title="连接器配置"
+        extra={accountToolbar}
         width={Math.min(980, window.innerWidth - 24)}
         onClose={() => setConfigurationOpen(false)}
       >
@@ -1053,6 +1056,7 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
             {connectors.length
               ? connectors.map((connector) => renderConnectorItem(connector, true))
               : !loadingConnectors && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无连接器" />}
+            <GlobalAccountSection onToolbarChange={setAccountToolbar} />
           </div>
         </Spin>
       </Drawer>

@@ -58,10 +58,17 @@ class OperationAccountAccessServiceTest {
     }
 
     @Test
+    void allowsGlobalAccountOnlyForItsCreator() {
+        assertThat(accessService.canAccess(account(null, 10L), null, 10L)).isTrue();
+        assertThat(accessService.canAccess(account(null, 10L), null, 11L)).isFalse();
+        assertThat(accessService.canAccess(account(null, null), null, 10L)).isFalse();
+    }
+
+    @Test
     void rejectsAccessWhenRequiredIdentityOrProjectDataIsMissing() {
         assertThat(accessService.canAccess(null, 100L, 10L)).isFalse();
         assertThat(accessService.canAccess(account(100L, 10L), null, 10L)).isFalse();
-        assertThat(accessService.canAccess(account(null, 10L), 100L, 10L)).isFalse();
+        assertThat(accessService.canAccess(account(null, 10L), 100L, 10L)).isTrue();
         assertThat(accessService.canAccess(account(100L, 10L), 100L, null)).isFalse();
         assertThat(accessService.canAccess(account(100L, null), 100L, null)).isFalse();
     }
