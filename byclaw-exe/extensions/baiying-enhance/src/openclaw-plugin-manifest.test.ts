@@ -10,12 +10,12 @@ describe("openclaw plugin manifest", () => {
         string,
         { configSignals?: Array<{ rootPath?: string; required?: string[] }> }
       >;
+      configSchema?: { properties?: Record<string, unknown> };
     };
 
     expect(manifest.contracts?.tools).toEqual([
       "baiying_call",
       "updateTaskPlan",
-      "code_to_wiki",
     ]);
     expect(manifest.contracts?.imageGenerationProviders).toEqual([
       "baiying-redis-image",
@@ -30,5 +30,10 @@ describe("openclaw plugin manifest", () => {
         required: ["enabled"],
       },
     ]);
+    expect(manifest.configSchema?.properties?.zreadModelSyncEnabled).toMatchObject({
+      type: "boolean",
+      default: true,
+    });
+    expect(manifest.configSchema?.properties).not.toHaveProperty("repoWikiCommand");
   });
 });

@@ -95,6 +95,7 @@ ARG TARGETARCH
 ARG NPM_REGISTRY=https://registry.npmmirror.com
 ARG WECOM_CLI_VERSION=0.1.9
 ARG LARKSUITE_CLI_VERSION=1.0.85
+ARG ZREAD_CLI_VERSION=0.2.13
 ARG IMA_OPENAPI_CLI_VERSION=0.1.3
 ARG IMA_OPENAPI_CLI_INTEGRITY=sha512-ckur/WWHugygFu130u/Zmn2IU9w7Ghc2cmPPxS6lFWvETSz7Rl3lqQGjMLmhSbTY2eCIR8DvqOzozOf5rWRbHg==
 ARG INSTALL_BROWSER_STACK=true
@@ -135,11 +136,13 @@ RUN npm config set registry "${NPM_REGISTRY}" --global \
         "hyperframes@${HYPERFRAMES_VERSION}" \
         "@remotion/cli@${REMOTION_VERSION}" \
         "@byclaw/by-framework@${BY_FRAMEWORK_TS_VERSION}" \
+        "zread_cli@${ZREAD_CLI_VERSION}" \
         "/tmp/ima-openapi-cli-${IMA_OPENAPI_CLI_VERSION}.tgz" \
     && test "$(ima --version)" = "${IMA_OPENAPI_CLI_VERSION}" \
     && ima auth --help >/dev/null \
     && ima note --help >/dev/null \
     && ima wiki --help >/dev/null \
+    && zread version --stdio | grep -F "\"version\":\"${ZREAD_CLI_VERSION}\"" >/dev/null \
     && rm -f "/tmp/ima-openapi-cli-${IMA_OPENAPI_CLI_VERSION}.tgz"
 
 ARG OPENCLI_VERSION=2.1.40
@@ -232,7 +235,6 @@ COPY --from=python312 /usr/local/lib/python3.12 /usr/local/lib/python3.12
 ARG BY_REACH_VERSION=2.0.0b1
 ARG BY_REACH_COMMIT=9d4cc902195c180767d283787b980438f80871ad
 ARG BY_REACH_SHA256=d4b3404ffdbf1247a07c45f85d21a645463cb9968673bbb3cfa048a21d37cb35
-ARG REPOWIKI_VERSION=0.3.2
 RUN set -eux; \
     ln -sf /usr/local/bin/python3.12 /usr/local/bin/python3; \
     ln -sf /usr/local/bin/python3.12 /usr/bin/python3; \
@@ -249,8 +251,7 @@ RUN set -eux; \
         redis \
         websockify \
         "by-framework==${BY_FRAMEWORK_PY_VERSION}" \
-        "patchright==${PATCHRIGHT_VERSION}" \
-        "repowiki==${REPOWIKI_VERSION}"; \
+        "patchright==${PATCHRIGHT_VERSION}"; \
     patchright install chromium; \
     python3 -m pip install --no-cache-dir \
         -c /tmp/by-reach/constraints.txt \
@@ -274,9 +275,6 @@ RUN set -eux; \
         > /usr/local/bin/searxng-cli; \
     chmod 755 /usr/local/bin/searxng-cli; \
     searxng-cli --list-engines >/dev/null
-
-COPY middleware/openclaw/repowiki-entrypoint.py /usr/local/bin/byclaw-repowiki
-RUN chmod +x /usr/local/bin/byclaw-repowiki
 
 COPY middleware/openclaw/verify-runtime-toolchain.sh /usr/local/bin/verify-runtime-toolchain
 RUN chmod +x /usr/local/bin/verify-runtime-toolchain \
