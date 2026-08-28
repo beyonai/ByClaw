@@ -140,6 +140,42 @@ describe("DelegationService", () => {
     );
   });
 
+  it("persists no callback deadline when the callback timeout is disabled", async () => {
+    const registry = new ConnectorRegistry();
+    registry.register(fakeCallbackConnector(5));
+    const delegations = new InMemoryDelegationRepository();
+    const events = new InMemoryRunEventStore();
+    const service = new DelegationService(
+      registry,
+      delegations,
+      events,
+      { firstActivityMs: 100, idleMs: 200, callbackMs: 0 },
+      () => 10_000,
+      () => "delegation-without-deadline",
+    );
+
+    await expect(
+      service.execute({
+        session: {
+          id: "session-no-callback-timeout",
+          owner: { userCode: "user-1" },
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        runId: "run-no-callback-timeout",
+        agents: [agent],
+        agentId: agent.id,
+        task: "long task",
+        metadata: {},
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toBeInstanceOf(DelegationSuspendedError);
+
+    expect(await delegations.get("delegation-without-deadline")).not.toHaveProperty(
+      "callbackDeadlineAt",
+    );
+  });
+
   it("logs delegation lifecycle and redacted child output previews", async () => {
     const registry = new ConnectorRegistry();
     registry.register(
@@ -1248,6 +1284,60 @@ describe("RunService", () => {
     );
   });
 
+  it("does not scan or enforce persisted callback deadlines when the timeout is disabled", async () => {
+    const sessions = new InMemorySessionRepository();
+    const runs = new InMemoryRunRepository(sessions);
+    const delegations = new InMemoryDelegationRepository();
+    const events = new InMemoryRunEventStore();
+    const expireWaitingCallbacks = vi.fn(async () => []);
+    const settleWaitingCallback = vi.fn(async () => ({
+      accepted: false,
+      runId: "run-with-legacy-deadline",
+    }));
+    const service = new RunService(
+      sessions,
+      runs,
+      delegations,
+      events,
+      new DelegationService(new ConnectorRegistry(), delegations, events),
+      {
+        create: vi.fn(),
+        health: vi.fn(async () => ({ healthy: true })),
+      },
+      Date.now,
+      undefined,
+      {
+        executionQueue: {
+          enqueue: vi.fn(async () => undefined),
+          claimNext: vi.fn(async () => undefined),
+          heartbeat: vi.fn(async () => true),
+          release: vi.fn(async () => undefined),
+          expireWaitingCallbacks,
+          settleWaitingCallback,
+        },
+        callbackTimeoutEnabled: false,
+        queuePollMs: 5,
+      },
+    );
+
+    service.start();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await service.resumeDelegation({
+      delegationId: "delegation-with-legacy-deadline",
+      status: "COMPLETED",
+      finalAnswer: "done",
+    });
+    await service.dispose();
+
+    expect(expireWaitingCallbacks).not.toHaveBeenCalled();
+    expect(settleWaitingCallback).toHaveBeenCalledWith({
+      delegationId: "delegation-with-legacy-deadline",
+      status: "COMPLETED",
+      finalAnswer: "done",
+      enforceDeadline: false,
+    });
+  });
+
   it("stores Leader reasoning separately from visible answer deltas", async () => {
     const leaderFactory: LeaderSessionFactory = {
       async create() {
@@ -1499,14 +1589,14 @@ describe("RunService", () => {
     await service.dispose();
   });
 
-  it("fails a native Leader interaction when the user response times out", async () => {
+  it("keeps a native Leader interaction waiting until the user responds", async () => {
     const leaderFactory: LeaderSessionFactory = {
       async create() {
         return {
           contextRevision: 0,
           async run(input) {
-            await input.askUser({
-              toolCallId: "tool-timeout",
+            const response = await input.askUser({
+              toolCallId: "tool-no-timeout",
               questions: [
                 {
                   header: "确认",
@@ -1518,7 +1608,7 @@ describe("RunService", () => {
                 },
               ],
             });
-            return { text: "unexpected" };
+            return { text: response.text ?? "no answer" };
           },
           checkpoint: () => undefined,
           markCommitted: () => undefined,
@@ -1542,52 +1632,54 @@ describe("RunService", () => {
       new DelegationService(new ConnectorRegistry(), delegations, events),
       leaderFactory,
       Date.now,
-      undefined,
-      { userInteractionTimeoutMs: 10 },
     );
     const session = await service.createSession({ owner: { userCode: "user" } });
     const run = await service.createRun({
       sessionId: session.id,
-      message: "等待超时",
+      message: "持续等待",
       agentList: [],
     });
 
-    await waitFor(async () => (await service.getRun(run.id))?.status === "FAILED");
-
-    expect(await service.getRun(run.id)).toMatchObject({
-      status: "FAILED",
-      error: expect.stringContaining("USER_INTERACTION_TIMEOUT"),
-    });
+    await waitFor(async () => (await service.getRun(run.id))?.status === "WAITING_USER");
     const requested = (await events.list(run.id)).find(
       (event) => event.type === "interaction.requested",
     );
-    expect(requested?.data).toMatchObject({
-      timeoutMs: 10,
-      deadlineAt: expect.any(Number),
+    expect(requested?.data).not.toHaveProperty("timeoutMs");
+    expect(requested?.data).not.toHaveProperty("deadlineAt");
+
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(await service.getRun(run.id)).toMatchObject({
+      status: "WAITING_USER",
     });
     expect(
-      (await events.list(run.id)).find((event) => event.type === "run.failed")
-        ?.data,
-    ).toMatchObject({
-      userMessage: "等待用户操作超时，请重新发起请求",
+      (await events.list(run.id)).some((event) => event.type === "run.failed"),
+    ).toBe(false);
+
+    await service.respondToInteraction(run.id, String(requested?.data.interactionId), {
+      action: "submit",
+      text: "稍后的回答",
     });
-    await expect(
-      service.respondToInteraction(run.id, String(requested?.data.interactionId), {
-        action: "submit",
-        text: "迟到的回答",
-      }),
-    ).rejects.toThrow("Run is already terminal:");
+    await waitFor(async () => (await service.getRun(run.id))?.status === "COMPLETED");
+    expect((await service.getRun(run.id))?.finalAnswer).toBe("稍后的回答");
     await service.dispose();
   });
 
   it("continues a persisted native interaction after a process restart", async () => {
     const receivedMessages: string[] = [];
+    const receivedCredentials: string[] = [];
+    const restartAttachment: RunAttachment = {
+      id: "restart-attachment",
+      name: "restart.txt",
+      mimeType: "text/plain",
+      size: 7,
+    };
     const leaderFactory: LeaderSessionFactory = {
       async create() {
         return {
           contextRevision: 0,
           async run(input) {
             receivedMessages.push(input.message);
+            await input.inspectAttachment?.({ attachmentId: restartAttachment.id });
             return { text: "recovered" };
           },
           checkpoint: () => undefined,
@@ -1618,6 +1710,7 @@ describe("RunService", () => {
       id: "run-native-restart",
       sessionId: session.id,
       input: "原始任务",
+      attachments: [restartAttachment],
       thinkingLevel: "off",
       agentList: [],
       status: "WAITING_USER",
@@ -1637,9 +1730,23 @@ describe("RunService", () => {
       data: {
         interactionId: "native-restart-interaction",
         source: "leader",
-        deadlineAt: Date.now() + 60_000,
         request: { questions: [] },
       },
+    });
+    const storedCredentials = new Map<string, ExecutionCredential>();
+    const credentials: ExecutionCredentialRepository = {
+      save: async (credential) => {
+        storedCredentials.set(credential.runId, structuredClone(credential));
+      },
+      loadForLease: async ({ runId }) => storedCredentials.get(runId),
+      delete: async (runId) => {
+        storedCredentials.delete(runId);
+      },
+    };
+    await credentials.save({
+      runId: run.id,
+      secret: "old-token",
+      createdAt: 1,
     });
     await queue.enqueue(run);
     const service = new RunService(
@@ -1653,6 +1760,19 @@ describe("RunService", () => {
       undefined,
       {
         executionQueue: queue,
+        credentials,
+        attachmentResolver: {
+          inspect: async ({ attachment, credential, mode }) => {
+            receivedCredentials.push(credential);
+            return {
+              attachmentId: attachment.id,
+              name: attachment.name,
+              mode,
+              text: "resumed",
+              truncated: false,
+            };
+          },
+        },
         leaseMs: 1_000,
         queuePollMs: 5,
       },
@@ -1660,18 +1780,24 @@ describe("RunService", () => {
     service.start();
     expect(receivedMessages).toHaveLength(0);
 
-    await service.respondToInteraction(run.id, "native-restart-interaction", {
-      action: "submit",
-      text: "恢复后的答案",
-    });
+    await service.respondToInteraction(
+      run.id,
+      "native-restart-interaction",
+      {
+        action: "submit",
+        text: "恢复后的答案",
+      },
+      "new-token",
+    );
     await waitFor(async () => (await service.getRun(run.id))?.status === "COMPLETED");
     expect(receivedMessages[0]).toContain("原始任务");
     expect(receivedMessages[0]).toContain("恢复后的答案");
+    expect(receivedCredentials).toEqual(["new-token"]);
     expect((await service.getRun(run.id))?.finalAnswer).toBe("recovered");
     await service.dispose();
   });
 
-  it("expires a persisted native interaction at its original deadline", async () => {
+  it("ignores a legacy deadline when recovering a persisted native interaction", async () => {
     let leaderRuns = 0;
     const leaderFactory: LeaderSessionFactory = {
       async create() {
@@ -1697,7 +1823,7 @@ describe("RunService", () => {
     const events = new InMemoryRunEventStore();
     const queue = new InMemoryRunExecutionQueue();
     const session: Session = {
-      id: "session-native-expired",
+      id: "session-native-legacy-deadline",
       owner: { userCode: "user-1" },
       sessionContext: { schemaVersion: 1 },
       sessionContextVersion: 1,
@@ -1706,7 +1832,7 @@ describe("RunService", () => {
       updatedAt: 100,
     };
     const run: Run = {
-      id: "run-native-expired",
+      id: "run-native-legacy-deadline",
       sessionId: session.id,
       input: "原始任务",
       thinkingLevel: "off",
@@ -1726,7 +1852,7 @@ describe("RunService", () => {
       runId: run.id,
       type: "interaction.requested",
       data: {
-        interactionId: "native-expired-interaction",
+        interactionId: "native-legacy-deadline-interaction",
         source: "leader",
         timeoutMs: 100,
         deadlineAt: 200,
@@ -1747,15 +1873,22 @@ describe("RunService", () => {
         executionQueue: queue,
         leaseMs: 1_000,
         queuePollMs: 5,
-        userInteractionTimeoutMs: 5_000,
       },
     );
 
     service.start();
-    await waitFor(async () => (await service.getRun(run.id))?.status === "FAILED");
+    await waitFor(async () => (await service.getRun(run.id))?.status === "WAITING_USER");
+    await new Promise((resolve) => setTimeout(resolve, 25));
 
     expect(leaderRuns).toBe(0);
-    expect((await service.getRun(run.id))?.error).toContain("exceeded 100ms");
+    expect((await service.getRun(run.id))?.status).toBe("WAITING_USER");
+    await service.respondToInteraction(run.id, "native-legacy-deadline-interaction", {
+      action: "submit",
+      text: "继续执行",
+    });
+    await waitFor(async () => (await service.getRun(run.id))?.status === "COMPLETED");
+    expect(leaderRuns).toBe(1);
+    expect((await service.getRun(run.id))?.finalAnswer).toBe("unexpected");
     await service.dispose();
   });
 
@@ -1898,41 +2031,6 @@ describe("RunService", () => {
     expect(started).toContain("second");
     await service.cancelRun(first.id, "test cleanup");
     await service.dispose();
-  });
-
-  it("启动持久队列时会定期清理过期的执行凭证", async () => {
-    const leaderFactory = new ControlledLeaderFactory();
-    const sessions = new InMemorySessionRepository();
-    const runs = new InMemoryRunRepository(sessions);
-    const delegations = new InMemoryDelegationRepository();
-    const events = new InMemoryRunEventStore();
-    const credentials: ExecutionCredentialRepository = {
-      save: vi.fn(async () => undefined),
-      loadForLease: vi.fn(async () => undefined),
-      delete: vi.fn(async () => undefined),
-      deleteExpired: vi.fn(async () => 0),
-    };
-    const service = new RunService(
-      sessions,
-      runs,
-      delegations,
-      events,
-      new DelegationService(new ConnectorRegistry(), delegations, events),
-      leaderFactory,
-      Date.now,
-      undefined,
-      {
-        executionQueue: new InMemoryRunExecutionQueue(),
-        credentials,
-        credentialCleanupIntervalMs: 5,
-      },
-    );
-
-    service.start();
-    await waitFor(() => vi.mocked(credentials.deleteExpired).mock.calls.length >= 2);
-    await service.dispose();
-
-    expect(credentials.deleteExpired).toHaveBeenCalled();
   });
 
   it("serializes runs per session and cancels queued work", async () => {
@@ -2784,7 +2882,6 @@ describe("RunService inspectAttachment 接线", () => {
       delete: async (runId) => {
         stored.delete(runId);
       },
-      deleteExpired: async () => 0,
     };
     const captured: { input?: LeaderRunInput } = {};
     const leaders: LeaderSessionFactory = {
@@ -2832,7 +2929,7 @@ describe("RunService inspectAttachment 接线", () => {
       message: "takeover",
       agentList: [],
       attachments: [attachmentA],
-      executionCredential: { secret: "lease-secret", expiresAt: Date.now() + 60_000 },
+      executionCredential: { secret: "lease-secret" },
     });
 
     service.start();

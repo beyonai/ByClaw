@@ -227,9 +227,11 @@ Leader 和 Connector 共用 `interaction.requested` / `interaction.responded` �
 Leader system prompt 要求只在短澄清会实质改变结果、且采用默认值有风险时提问；只问消除
 歧义所需的最少问题，同一时刻只允许一个未解决交互，提问后必须等待工具结果。submit、skip、
 cancel 等生命周期动作只由 UI/runtime 发出。
-用户交互默认最多等待 15 分钟，可通过 `RUN_USER_INTERACTION_TIMEOUT_MS` 覆盖。截止时间会随
-`interaction.requested` 事件持久化，进程重启或跨实例接管后仍按原截止时间收敛；超时
-后 Run 进入 `FAILED`。
+用户交互不设超时；Run 会保持 `WAITING_USER`，直到用户提交、跳过、取消，或 Run 被外部取消。
+进程重启或跨实例接管后，会继续等待同一个持久化交互。
+子 Agent 调度受理后等待终态 `ResumeCommand` 默认也不设超时，Run 保持
+`WAITING_AGENT`。原有绝对截止时间和超时结算逻辑仍保留；将
+`DELEGATION_CALLBACK_TIMEOUT_MS` 设为正数即可重新启用，`0` 表示关闭。
 
 ## 环境配置
 
@@ -287,8 +289,8 @@ ARK_API_KEY=
 
 创建 Session/Run、查询、取消和订阅 SSE 都必须通过请求头传入 `Beyond-Token`。为了让其他实例
 在故障接管后继续执行非终态 Run，Token 会写入专用凭证表；只有持有当前 Session lease 和有效
-fencing token 的实例才能读取，并在 Run 终态或凭证过期后删除。Token 不写入 Run、Event、Pi
-Session 或日志。
+fencing token 的实例才能读取。Super 不再为该凭证设置内部超时；经验签的表单 Resume
+会用最新 `Beyond-Token` 覆盖它，Run 终态时删除。Token 不写入 Run、Event、Pi Session 或日志。
 `userCode` 从验签后的 Token claim 中读取；授权 Agent 列表由服务携带同一
 Token 调用 ByClaw BE 获取，调用方不再传入这两个字段。
 

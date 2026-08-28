@@ -70,10 +70,9 @@ export interface CreateRunInput {
   attachments?: RunAttachment[];
   ingressContext?: RunIngressContextV1;
   metadata?: Record<string, unknown>;
-  /** 仅写入专用短期凭证表，不写入 Run、Event 或 Pi Session。 */
+  /** 仅写入专用执行凭证表，不写入 Run、Event 或 Pi Session。 */
   executionCredential?: {
     secret: string;
-    expiresAt: number;
   };
 }
 
@@ -86,7 +85,6 @@ export interface CreateSessionRunInput extends CreateSessionInput {
   metadata?: Record<string, unknown>;
   executionCredential?: {
     secret: string;
-    expiresAt: number;
   };
 }
 
@@ -105,18 +103,6 @@ type PendingLeaderInteraction = {
 };
 
 const DOWNSTREAM_MODEL_FAILURE_PREFIX = "Leader model call failed:";
-const USER_INTERACTION_TIMEOUT_ERROR_CODE = "USER_INTERACTION_TIMEOUT";
-const USER_INTERACTION_TIMEOUT_USER_MESSAGE =
-  "等待用户操作超时，请重新发起请求";
-
-class UserInteractionTimeoutError extends Error {
-  constructor(interactionId: string, timeoutMs: number) {
-    super(
-      `${USER_INTERACTION_TIMEOUT_ERROR_CODE}: ${interactionId} exceeded ${timeoutMs}ms`,
-    );
-    this.name = "UserInteractionTimeoutError";
-  }
-}
 
 export interface RunServiceRuntimeOptions {
   executionQueue?: RunExecutionQueue;
@@ -133,13 +119,11 @@ export interface RunServiceRuntimeOptions {
   maxConcurrentRuns?: number;
   leaderCacheMaxEntries?: number;
   leaderCacheIdleTtlMs?: number;
-  /** Leader 结构化提问等待用户响应的上限；默认 15 分钟。 */
-  userInteractionTimeoutMs?: number;
-  /** 清理已过期执行凭证的周期；默认 60 秒。 */
-  credentialCleanupIntervalMs?: number;
+  /** 是否扫描并执行子 Agent 终态回调截止时间；默认开启以兼容库调用。 */
+  callbackTimeoutEnabled?: boolean;
   /**
    * 附件读取边界；注入后 Leader 可通过 inspectAttachment / downloadAttachment
-   * 用 Run 短期凭证经 BE 安全读取本轮附件。未实现对应能力时工具不暴露。
+   * 用 Run 执行凭证经 BE 安全读取本轮附件。未实现对应能力时工具不暴露。
    */
   attachmentResolver?: AttachmentResolver;
   /** BE 权威任务计划 Port；缺失时不向 Leader 暴露 updateTaskPlan。 */
@@ -163,15 +147,12 @@ export class RunService {
   readonly #leaseMs: number;
   readonly #queuePollMs: number;
   readonly #maxConcurrentRuns: number;
-  readonly #userInteractionTimeoutMs: number;
-  readonly #credentialCleanupIntervalMs: number;
   readonly #attachmentResolver: AttachmentResolver | undefined;
   readonly #taskPlans: TaskPlanGateway | undefined;
   #persistentActive = 0;
   #claimLoop: Promise<void> | undefined;
   #callbackSweep: Promise<void> | undefined;
   #pollTimer: ReturnType<typeof setInterval> | undefined;
-  #credentialCleanupTimer: ReturnType<typeof setInterval> | undefined;
   #started = false;
   #stopping = false;
 
@@ -191,10 +172,6 @@ export class RunService {
     this.#leaseMs = runtime.leaseMs ?? 30_000;
     this.#queuePollMs = runtime.queuePollMs ?? 500;
     this.#maxConcurrentRuns = runtime.maxConcurrentRuns ?? 10;
-    this.#userInteractionTimeoutMs =
-      runtime.userInteractionTimeoutMs ?? 900_000;
-    this.#credentialCleanupIntervalMs =
-      runtime.credentialCleanupIntervalMs ?? 60_000;
     this.#attachmentResolver = runtime.attachmentResolver;
     this.#taskPlans = runtime.taskPlans;
     this.#leaderCache = new LeaderSessionCache(leaders, {
@@ -214,15 +191,6 @@ export class RunService {
       void this.#sweepExpiredCallbacks().finally(() => this.#kickPersistentQueue());
     }, this.#queuePollMs);
     this.#pollTimer.unref?.();
-    if (this.runtime.credentials) {
-      this.#credentialCleanupTimer = setInterval(() => {
-        void this.runtime.credentials
-          ?.deleteExpired(this.now())
-          .catch(() => undefined);
-      }, this.#credentialCleanupIntervalMs);
-      this.#credentialCleanupTimer.unref?.();
-      void this.runtime.credentials.deleteExpired(this.now()).catch(() => undefined);
-    }
     void this.#sweepExpiredCallbacks().finally(() => this.#kickPersistentQueue());
   }
 
@@ -255,11 +223,12 @@ export class RunService {
     return this.sessions.getOwned(sessionId, owner);
   }
 
-  /** 提交一个待处理的人机交互；可同时覆盖 Leader 原生工具和 Connector 适配路径。 */
+  /** 提交一个待处理的人机交互；可同时刷新本 Run 的执行凭证。 */
   async respondToInteraction(
     runId: string,
     interactionId: string,
     response: UserInteractionResponse,
+    executionCredentialSecret?: string,
   ): Promise<void> {
     if (!isUserInteractionResponse(response)) {
       throw new Error("Invalid user interaction response");
@@ -270,6 +239,18 @@ export class RunService {
     }
     if (TERMINAL_RUN_STATUSES.has(run.status)) {
       throw new Error(`Run is already terminal: ${runId} (${run.status})`);
+    }
+    const refreshedSecret = executionCredentialSecret?.trim();
+    if (refreshedSecret && this.runtime.credentials) {
+      await this.runtime.credentials.save({
+        runId,
+        secret: refreshedSecret,
+        createdAt: this.now(),
+      });
+      const metadata = this.#ephemeralMetadata.get(runId);
+      if (metadata) {
+        metadata["Beyond-Token"] = refreshedSecret;
+      }
     }
     if (
       await this.delegationService.respondToInteraction(
@@ -326,7 +307,7 @@ export class RunService {
     await this.sessions.delete(sessionId);
   }
 
-  /** 首个入口原子创建业务 Session、Run、run.created 和短期执行凭证。 */
+  /** 首个入口原子创建业务 Session、Run、run.created 和执行凭证。 */
   async createSessionRun(input: CreateSessionRunInput): Promise<Run> {
     validateAgentList(input.agentList);
     const now = this.now();
@@ -367,7 +348,6 @@ export class RunService {
       ? {
           runId: run.id,
           secret: input.executionCredential.secret,
-          expiresAt: input.executionCredential.expiresAt,
           createdAt: now,
         }
       : undefined;
@@ -435,7 +415,6 @@ export class RunService {
       ? {
           runId: run.id,
           secret: input.executionCredential.secret,
-          expiresAt: input.executionCredential.expiresAt,
           createdAt: now,
         }
       : undefined;
@@ -531,6 +510,7 @@ export class RunService {
         delegationId: input.delegationId,
         status: normalizedStatus,
         finalAnswer: input.finalAnswer,
+        enforceDeadline: this.runtime.callbackTimeoutEnabled !== false,
       });
       if (!settled.runId) {
         return { accepted: false };
@@ -690,10 +670,6 @@ export class RunService {
       clearInterval(this.#pollTimer);
       this.#pollTimer = undefined;
     }
-    if (this.#credentialCleanupTimer) {
-      clearInterval(this.#credentialCleanupTimer);
-      this.#credentialCleanupTimer = undefined;
-    }
     for (const active of this.#active.values()) {
       active.controller.abort(new Error("service shutting down"));
       await active.leader.abort().catch(() => undefined);
@@ -746,7 +722,12 @@ export class RunService {
   /** 数据库是唯一计时真相；这里只触发幂等扫描，不创建进程内 Delegation 定时器。 */
   async #sweepExpiredCallbacks(): Promise<void> {
     const queue = this.runtime.executionQueue;
-    if (!queue?.expireWaitingCallbacks || this.#callbackSweep || this.#stopping) {
+    if (
+      this.runtime.callbackTimeoutEnabled === false ||
+      !queue?.expireWaitingCallbacks ||
+      this.#callbackSweep ||
+      this.#stopping
+    ) {
       return this.#callbackSweep ?? Promise.resolve();
     }
     this.#callbackSweep = queue
@@ -798,7 +779,7 @@ export class RunService {
       entries: [],
     };
     // callback 恢复不会再次携带入口 metadata；单实例内存队列复用首次运行保存的
-    // 短期上下文。持久队列路径仍由 credentials 仓库按 lease 恢复凭证。
+    // 进程内上下文。持久队列路径仍由 credentials 仓库按 lease 恢复凭证。
     queue.entries.push({
       runId: run.id,
       metadata: metadata ?? this.#ephemeralMetadata.get(run.id) ?? {},
@@ -807,7 +788,7 @@ export class RunService {
     void this.#pump(run.sessionId);
   }
 
-  /** 读取经过 lease 校验的短期凭证，执行完成后释放当前 Session lease。 */
+  /** 读取经过 lease 校验的执行凭证，执行完成后释放当前 Session lease。 */
   async #executeClaim(claim: RunExecutionClaim): Promise<void> {
     const queue = this.runtime.executionQueue;
     if (!queue) {
@@ -832,10 +813,9 @@ export class RunService {
           runId: run.id,
           instanceId: claim.ownerInstanceId,
           fencingToken: claim.fencingToken,
-          now: this.now(),
         });
         if (!credential) {
-          await this.#finishFailed(run, "EXECUTION_CREDENTIAL_EXPIRED");
+          await this.#finishFailed(run, "EXECUTION_CREDENTIAL_MISSING");
           return;
         }
         metadata = {
@@ -903,8 +883,9 @@ export class RunService {
   ): Promise<void> {
     // 持久队列会在接管时从凭证仓库重建 metadata。失败收口和 callback 恢复都只
     // 读取这个进程内副本；claim 释放时会立即删除，不进入 Run/Event/Pi 持久化。
+    metadata = structuredClone(metadata);
     if (Object.keys(metadata).length > 0) {
-      this.#ephemeralMetadata.set(run.id, structuredClone(metadata));
+      this.#ephemeralMetadata.set(run.id, metadata);
     }
     const session = await this.sessions.get(run.sessionId);
     if (!session) {
@@ -967,29 +948,13 @@ export class RunService {
           this.#persistentWaiting.add(latest.id);
           void this.#kickPersistentQueue();
           const interactionId = String(requested.data.interactionId);
-          const timing = interactionTiming(
-            requested,
-            this.#userInteractionTimeoutMs,
+          const response = await this.#waitForInteractionResponse(
+            latest.id,
+            interactionId,
+            requested.eventId,
+            runController.signal,
           );
-          let response: UserInteractionResponse;
-          try {
-            response = await this.#waitForInteractionResponse(
-              latest.id,
-              interactionId,
-              requested.eventId,
-              runController.signal,
-              timing.deadlineAt,
-              timing.timeoutMs,
-            );
-          } catch (error) {
-            if (
-              error instanceof UserInteractionTimeoutError &&
-              !runController.signal.aborted
-            ) {
-              runController.abort(error);
-            }
-            throw error;
-          }
+          await this.#reloadExecutionCredential(latest.id, metadata, claim);
           this.#persistentWaiting.delete(latest.id);
           leaderMessage = `${latest.input}
 
@@ -1189,7 +1154,6 @@ ${JSON.stringify(completedDelegations)}`;
           validateInteractionQuestions(questions);
           const interactionId = `${current.id}:${toolCallId}`;
           const requestedAt = this.now();
-          const deadlineAt = requestedAt + this.#userInteractionTimeoutMs;
           current = await this.#setStatus(current, "WAITING_USER", {
             interactionId,
             source: "leader",
@@ -1201,8 +1165,6 @@ ${JSON.stringify(completedDelegations)}`;
             data: {
               interactionId,
               source: "leader",
-              timeoutMs: this.#userInteractionTimeoutMs,
-              deadlineAt,
               request: {
                 questions,
                 uiPayload: toLegacyFormPayload(questions),
@@ -1236,8 +1198,6 @@ ${JSON.stringify(completedDelegations)}`;
               interactionId,
               requestedEvent.eventId,
               interactionSignal,
-              deadlineAt,
-              this.#userInteractionTimeoutMs,
             )
               .then((value) => {
                 const pending = this.#pendingLeaderInteractions.get(interactionId);
@@ -1254,14 +1214,9 @@ ${JSON.stringify(completedDelegations)}`;
                 }
                 this.#pendingLeaderInteractions.delete(interactionId);
                 pending.reject(error);
-                if (
-                  error instanceof UserInteractionTimeoutError &&
-                  !runController.signal.aborted
-                ) {
-                  runController.abort(error);
-                }
               });
           });
+          await this.#reloadExecutionCredential(current.id, metadata, claim);
           if (!runController.signal.aborted) {
             current = await this.#setStatus(current, "RUNNING", {
               interactionId,
@@ -1293,7 +1248,7 @@ ${JSON.stringify(completedDelegations)}`;
               },
             }
           : {}),
-        // inspectAttachment 用 Run 短期凭证经 Resolver 安全读取本轮附件；
+        // inspectAttachment 用 Run 执行凭证经 Resolver 安全读取本轮附件；
         // 工具层只能传 attachmentId，附件对象必须在 current.attachments 中命中。
         ...(this.#attachmentResolver
           ? {
@@ -1460,8 +1415,6 @@ ${JSON.stringify(completedDelegations)}`;
             },
           });
         }
-      } else if (error instanceof UserInteractionTimeoutError) {
-        await this.#finishFailed(current, error.message);
       } else if (controller?.signal.aborted) {
         await this.#finishLocallyCancelledRun(current, "run cancelled");
       } else {
@@ -1488,7 +1441,7 @@ ${JSON.stringify(completedDelegations)}`;
     }
   }
 
-  /** 只从可信 Run 快照和短期凭证构造计划归属，模型不能覆盖这些字段。 */
+  /** 只从可信 Run 快照和执行凭证构造计划归属，模型不能覆盖这些字段。 */
   #taskPlanContext(
     run: Run,
     metadata: Record<string, unknown>,
@@ -1755,61 +1708,53 @@ ${JSON.stringify(completedDelegations)}`;
     interactionId: string,
     afterEventId: number,
     signal: AbortSignal,
-    deadlineAt: number,
-    timeoutMs: number,
   ): Promise<UserInteractionResponse> {
-    const timeoutError = new UserInteractionTimeoutError(
-      interactionId,
-      timeoutMs,
-    );
-    const timeoutController = new AbortController();
-    const remainingMs = Math.max(0, deadlineAt - this.now());
-    const timeout = setTimeout(() => {
-      timeoutController.abort(timeoutError);
-    }, remainingMs);
-    timeout.unref?.();
-    const interactionSignal = AbortSignal.any([
-      signal,
-      timeoutController.signal,
-    ]);
-
-    try {
-      for await (const event of this.events.stream(
-        runId,
-        afterEventId,
-        interactionSignal,
-      )) {
-        if (
-          event.type === "interaction.responded" &&
-          event.data.interactionId === interactionId
-        ) {
-          const action =
-            event.data.action === "skip" || event.data.action === "cancel"
-              ? event.data.action
-              : "submit";
-          const answers =
-            event.data.answers &&
-            typeof event.data.answers === "object" &&
-            !Array.isArray(event.data.answers)
-              ? event.data.answers
-              : undefined;
-          return {
-            action,
-            ...(answers ? { answers } : {}),
-            ...(typeof event.data.text === "string"
-              ? { text: event.data.text }
-              : {}),
-          };
-        }
+    for await (const event of this.events.stream(runId, afterEventId, signal)) {
+      if (
+        event.type === "interaction.responded" &&
+        event.data.interactionId === interactionId
+      ) {
+        const action =
+          event.data.action === "skip" || event.data.action === "cancel"
+            ? event.data.action
+            : "submit";
+        const answers =
+          event.data.answers &&
+          typeof event.data.answers === "object" &&
+          !Array.isArray(event.data.answers)
+            ? event.data.answers
+            : undefined;
+        return {
+          action,
+          ...(answers ? { answers } : {}),
+          ...(typeof event.data.text === "string"
+            ? { text: event.data.text }
+            : {}),
+        };
       }
-      if (timeoutController.signal.aborted) {
-        throw timeoutError;
-      }
-      signal.throwIfAborted();
-      throw new Error(`Interaction event stream ended: ${interactionId}`);
-    } finally {
-      clearTimeout(timeout);
     }
+    signal.throwIfAborted();
+    throw new Error(`Interaction event stream ended: ${interactionId}`);
+  }
+
+  /** Resume 可能由另一实例消费；被唤醒的 lease owner 需重读其写入的最新凭证。 */
+  async #reloadExecutionCredential(
+    runId: string,
+    metadata: Record<string, unknown>,
+    claim: RunExecutionClaim | undefined,
+  ): Promise<void> {
+    if (!claim || !this.runtime.credentials) {
+      return;
+    }
+    const credential = await this.runtime.credentials.loadForLease({
+      runId,
+      instanceId: claim.ownerInstanceId,
+      fencingToken: claim.fencingToken,
+    });
+    if (!credential) {
+      throw new Error("EXECUTION_CREDENTIAL_MISSING");
+    }
+    metadata["Beyond-Token"] = credential.secret;
   }
 }
 
@@ -1817,31 +1762,7 @@ function userMessageForRunFailure(error: string): string | undefined {
   if (error.startsWith(DOWNSTREAM_MODEL_FAILURE_PREFIX)) {
     return error.slice(DOWNSTREAM_MODEL_FAILURE_PREFIX.length).trim() || error;
   }
-  if (error.startsWith(`${USER_INTERACTION_TIMEOUT_ERROR_CODE}:`)) {
-    return USER_INTERACTION_TIMEOUT_USER_MESSAGE;
-  }
   return undefined;
-}
-
-function interactionTiming(
-  requested: RunEvent,
-  defaultTimeoutMs: number,
-): { deadlineAt: number; timeoutMs: number } {
-  const storedTimeoutMs = requested.data.timeoutMs;
-  const timeoutMs =
-    typeof storedTimeoutMs === "number" &&
-    Number.isFinite(storedTimeoutMs) &&
-    storedTimeoutMs > 0
-      ? storedTimeoutMs
-      : defaultTimeoutMs;
-  const deadlineAt = requested.data.deadlineAt;
-  return {
-    deadlineAt:
-      typeof deadlineAt === "number" && Number.isFinite(deadlineAt)
-        ? deadlineAt
-        : requested.timestamp + timeoutMs,
-    timeoutMs,
-  };
 }
 
 function latestLeaderModel(run: Run) {

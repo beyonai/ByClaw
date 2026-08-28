@@ -71,9 +71,6 @@ export interface AppConfig {
   instanceId: string;
   runLeaseMs: number;
   runQueuePollMs: number;
-  runUserInteractionTimeoutMs: number;
-  runCredentialMaxTtlMs: number;
-  runCredentialCleanupIntervalMs: number;
   piSessionCacheDirectory?: string;
   piSessionCacheMaxEntries: number;
   piSessionCacheIdleTtlMs: number;
@@ -126,7 +123,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     env.DELEGATION_CALLBACK_TIMEOUT_MS ??
       String(defaults.delegationTimeouts.callbackMs),
     "DELEGATION_CALLBACK_TIMEOUT_MS",
-    1,
+    0,
     Number.MAX_SAFE_INTEGER,
   );
   if ((env.PI_PROVIDER && !env.PI_MODEL) || (!env.PI_PROVIDER && env.PI_MODEL)) {
@@ -393,27 +390,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       "RUN_QUEUE_POLL_MS",
       50,
       60_000,
-    ),
-    runUserInteractionTimeoutMs: integer(
-      env.RUN_USER_INTERACTION_TIMEOUT_MS ??
-        String(defaults.run.userInteractionTimeoutMs),
-      "RUN_USER_INTERACTION_TIMEOUT_MS",
-      1_000,
-      86_400_000,
-    ),
-    runCredentialMaxTtlMs: integer(
-      env.RUN_CREDENTIAL_MAX_TTL_MS ??
-        String(defaults.run.credentialMaxTtlMs),
-      "RUN_CREDENTIAL_MAX_TTL_MS",
-      1_000,
-      86_400_000,
-    ),
-    runCredentialCleanupIntervalMs: integer(
-      env.RUN_CREDENTIAL_CLEANUP_INTERVAL_MS ??
-        String(defaults.run.credentialCleanupIntervalMs),
-      "RUN_CREDENTIAL_CLEANUP_INTERVAL_MS",
-      1_000,
-      3_600_000,
     ),
     ...(env.PI_SESSION_CACHE_DIR
       ? { piSessionCacheDirectory: nonEmpty(env.PI_SESSION_CACHE_DIR, "PI_SESSION_CACHE_DIR") }

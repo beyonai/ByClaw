@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { PostgresRunExecutionQueue } from "../src/postgres-database.js";
 
 describe("Postgres Run callback locking", () => {
-  it("lets an early callback atomically queue a still-RUNNING Run", async () => {
+  it("accepts an expired callback when deadline enforcement is disabled", async () => {
     const statements: string[] = [];
     const settledAt = new Date("2026-08-22T04:00:00.000Z");
     let nextEventId = 1;
@@ -21,7 +21,7 @@ describe("Postgres Run callback locking", () => {
             delegation_status: "RUNNING",
             run_status: "RUNNING",
             execution_stage: "LEADER_RUNNING",
-            callback_expired: false,
+            callback_expired: true,
             settled_at: settledAt,
           },
         ]);
@@ -46,6 +46,7 @@ describe("Postgres Run callback locking", () => {
         delegationId: "delegation-1",
         status: "COMPLETED",
         finalAnswer: "done",
+        enforceDeadline: false,
       }),
     ).resolves.toEqual({ accepted: true, runId: "run-1", wakeRun: true });
 
@@ -56,6 +57,40 @@ describe("Postgres Run callback locking", () => {
           sql.includes("version = version + 1"),
       ),
     ).toBe(true);
+  });
+
+  it("rejects an expired callback when deadline enforcement is enabled", async () => {
+    const settledAt = new Date("2026-08-22T04:00:00.000Z");
+    const client = fakeClient(async (sql) => {
+      if (sql.includes("SELECT run_id") && sql.includes("delegations")) {
+        return result([{ run_id: "run-1" }]);
+      }
+      if (sql.includes("FOR UPDATE OF d, r")) {
+        return result([
+          {
+            delegation_id: "delegation-1",
+            run_id: "run-1",
+            agent_id: "agent-1",
+            agent_name: "Agent 1",
+            delegation_status: "RUNNING",
+            run_status: "WAITING_AGENT",
+            execution_stage: "CONNECTOR_WAITING",
+            callback_expired: true,
+            settled_at: settledAt,
+          },
+        ]);
+      }
+      return result([]);
+    });
+    const queue = new PostgresRunExecutionQueue(fakePool([client]), "byai");
+
+    await expect(
+      queue.settleWaitingCallback({
+        delegationId: "delegation-1",
+        status: "COMPLETED",
+        finalAnswer: "late",
+      }),
+    ).resolves.toEqual({ accepted: false, runId: "run-1" });
   });
 
   it("commits WAITING_AGENT and run.suspended under one event-first lock order", async () => {

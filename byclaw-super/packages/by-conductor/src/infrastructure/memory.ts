@@ -313,7 +313,7 @@ export class InMemoryRunExecutionQueue implements RunExecutionQueue {
   }
 }
 
-/** 仅用于单元测试的短期执行凭证仓库。 */
+/** 仅用于单元测试的 Run 执行凭证仓库。 */
 export class InMemoryExecutionCredentialRepository
 implements ExecutionCredentialRepository {
   readonly #items = new Map<string, ExecutionCredential>();
@@ -326,28 +326,15 @@ implements ExecutionCredentialRepository {
     runId: string;
     instanceId: string;
     fencingToken: number;
-    now: number;
   }): Promise<ExecutionCredential | undefined> {
     const item = this.#items.get(input.runId);
-    return item && item.expiresAt > input.now
-      ? structuredClone(item)
-      : undefined;
+    return item ? structuredClone(item) : undefined;
   }
 
   async delete(runId: string): Promise<void> {
     this.#items.delete(runId);
   }
 
-  async deleteExpired(now: number): Promise<number> {
-    let deleted = 0;
-    for (const [runId, credential] of this.#items) {
-      if (credential.expiresAt <= now) {
-        this.#items.delete(runId);
-        deleted += 1;
-      }
-    }
-    return deleted;
-  }
 }
 
 function bindingKey(input: {
