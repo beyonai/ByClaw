@@ -13,6 +13,7 @@ interface ObjectFilesPanelProps {
   projectId?: number | string;
   sessionId?: number | string;
   objectType?: ProjectObjectFileType;
+
   /** 外部资源 Tab 刷新时递增，用于重新读取关联文件列表。 */
   refreshToken?: number;
   onOpenDetail?: (panel: React.ReactNode, options: DetailPanelOptions) => void;
@@ -322,13 +323,13 @@ const ObjectFilesPanel: React.FC<ObjectFilesPanelProps> = ({
         ? items.length
           ? renderKnowledgeFiles()
           : !loading && (
-              <Empty
-                image={Empty.PRESENTED_IMAGE_SIMPLE}
-                description={intl.formatMessage({ id: 'chatResource.empty' })}
-              />
-            )
+            <Empty
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              description={intl.formatMessage({ id: 'chatResource.empty' })}
+            />
+          )
         : items.length
-        ? items.map((item) => (
+          ? items.map((item) => (
             <div
               key={item.key}
               className={styles.resourceSimpleItem}
@@ -387,7 +388,7 @@ const ObjectFilesPanel: React.FC<ObjectFilesPanelProps> = ({
               <RightOutlined />
             </div>
           ))
-        : !loading && (
+          : !loading && (
             <Empty
               image={Empty.PRESENTED_IMAGE_SIMPLE}
               description={intl.formatMessage({ id: 'chatResource.empty' })}

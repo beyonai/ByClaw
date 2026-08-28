@@ -71,6 +71,8 @@ class RouteServiceTest {
     private ProjectService projectService;
     private ProjectResourceService projectResourceService;
     private UserBucketNamingService userBucketNamingService;
+    private ProjectService projectService;
+    private ProjectResourceService projectResourceService;
     private RouteService routeService;
     private StaticMessageSource messageSource;
 
@@ -89,6 +91,8 @@ class RouteServiceTest {
         projectService = mock(ProjectService.class);
         projectResourceService = mock(ProjectResourceService.class);
         userBucketNamingService = mock(UserBucketNamingService.class);
+        projectService = mock(ProjectService.class);
+        projectResourceService = mock(ProjectResourceService.class);
         messageSource = new StaticMessageSource();
         messageSource.addMessage("sandbox.launch.progress.start", Locale.SIMPLIFIED_CHINESE, "个人助理正在启动中，请等待");
         messageSource.addMessage("sandbox.launch.progress.waiting", Locale.SIMPLIFIED_CHINESE, "个人助理仍在启动中，请稍等");
@@ -123,6 +127,8 @@ class RouteServiceTest {
         ReflectionTestUtils.setField(routeService, "projectService", projectService);
         ReflectionTestUtils.setField(routeService, "projectResourceService", projectResourceService);
         ReflectionTestUtils.setField(routeService, "userBucketNamingService", userBucketNamingService);
+        ReflectionTestUtils.setField(routeService, "projectService", projectService);
+        ReflectionTestUtils.setField(routeService, "projectResourceService", projectResourceService);
         ReflectionTestUtils.setField(routeService, "fileStorageLocalPath", "/mnt/byclaw");
         ReflectionTestUtils.setField(I18nUtil.class, "messageSource", messageSource);
         LocaleContextHolder.setLocale(Locale.SIMPLIFIED_CHINESE);
@@ -132,6 +138,11 @@ class RouteServiceTest {
         loginInfo.setUserId(100L);
         loginInfo.setUserName("testUser");
         CurrentUserHolder.setLoginInfo(loginInfo);
+
+        Project project = new Project();
+        project.setProjectId(123L);
+        project.setProjectName("test-project");
+        when(projectService.findById(123L)).thenReturn(project);
     }
 
     @AfterEach

@@ -111,8 +111,8 @@ const ChatResourceWorkspace: React.FC<ChatResourceWorkspaceProps> = ({
           className={
             hasDetailTabs
               ? `${styles.floatingResourcePanel} ${
-                  hasFilePreview ? styles.floatingResourcePanelHalf : ''
-                } ${listOpen ? '' : styles.floatingResourcePanelHidden}`
+                hasFilePreview ? styles.floatingResourcePanelHalf : ''
+              } ${listOpen ? '' : styles.floatingResourcePanelHidden}`
               : styles.dockedResourcePanel
           }
           aria-hidden={hasDetailTabs && !listOpen}

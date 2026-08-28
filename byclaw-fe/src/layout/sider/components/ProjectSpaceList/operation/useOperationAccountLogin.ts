@@ -115,7 +115,9 @@ export function useOperationAccountLogin(onLoggedIn?: () => void | Promise<void>
             navigateSuccess = true;
           } catch (firstError) {
             // 首次失败，等待5秒后重试（给浏览器更多启动时间）
-            await new Promise(resolve => setTimeout(resolve, 5000));
+            await new Promise((resolve) => {
+              setTimeout(resolve, 5000);
+            });
             await navigateSandboxBrowser({
               sandboxId: sandboxInfo.sandboxId,
               targetUrl: loginUrl,
