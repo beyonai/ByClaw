@@ -537,7 +537,10 @@ public class AuthApplicationService {
         validateResourceUseApplyAuditAllowed(ssResource);
         validateResourceUseSettingPermission(ssResource);
 
-        List<PrivilegeGrant> pendingApplyList = listPendingUseApplyPrivileges(ssResource);
+        boolean history = Boolean.TRUE.equals(qo.getHistory());
+        List<PrivilegeGrant> pendingApplyList = history
+            ? listHistoryUseApplyPrivileges(ssResource)
+            : listPendingUseApplyPrivileges(ssResource);
         if (CollectionUtils.isEmpty(pendingApplyList)) {
             return Collections.emptyList();
         }
@@ -554,9 +557,34 @@ public class AuthApplicationService {
             vo.setUserId(item.getGrantToObjId());
             vo.setUserName(getUserDisplayName(userMap.get(item.getGrantToObjId())));
             vo.setApplyTime(item.getCreateDate());
-            vo.setApplyStatus(I18nUtil.get(USE_APPLY_PENDING_LABEL_KEY));
+            vo.setApplyStatus(history ? getUseApplyStatusLabel(item.getStatusCd())
+                : I18nUtil.get(USE_APPLY_PENDING_LABEL_KEY));
             return vo;
         }).collect(Collectors.toList());
+    }
+
+    private List<PrivilegeGrant> listHistoryUseApplyPrivileges(SsResource ssResource) {
+        LambdaQueryWrapper<PrivilegeGrant> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(PrivilegeGrant::getGrantObjId, ssResource.getResourceId());
+        queryWrapper.eq(PrivilegeGrant::getGrantObjType, ssResource.getResourceBizType());
+        queryWrapper.eq(PrivilegeGrant::getGrantType, GrantType.AVAILABLE_USE);
+        queryWrapper.eq(PrivilegeGrant::getGrantToObjType, GrantToObjType.USER);
+        queryWrapper.eq(PrivilegeGrant::getGrantToType, Color.RED);
+        queryWrapper.eq(PrivilegeGrant::getOperType, OperType.READ);
+        queryWrapper.in(PrivilegeGrant::getStatusCd, "X", "R");
+        queryWrapper.orderByDesc(PrivilegeGrant::getCreateDate);
+        queryWrapper.orderByDesc(PrivilegeGrant::getPrivilegeGrantId);
+        return privilegeGrantMapper.selectList(queryWrapper);
+    }
+
+    private String getUseApplyStatusLabel(String statusCd) {
+        if ("X".equalsIgnoreCase(statusCd)) {
+            return "审核通过";
+        }
+        if ("R".equalsIgnoreCase(statusCd)) {
+            return "已驳回";
+        }
+        return statusCd;
     }
 
     /**

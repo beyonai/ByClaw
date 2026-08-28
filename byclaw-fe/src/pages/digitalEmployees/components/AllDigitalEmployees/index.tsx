@@ -31,7 +31,7 @@ import UseApplyAuditDrawer from '@/pages/manager/components/UseApplyAuditDrawer'
 import { applyResourceUse } from '@/pages/manager/service/resources';
 import type { IOnOkParams } from '@/components/Resources/components/ResourceFilter';
 import { getDcSystemConfig } from '@/pages/manager/service/session';
-import { sortDefaultDigitalEmployeeFirst } from '@/pages/digitalEmployees/utils';
+import { sortDigitalEmployeeByRecent, sortDefaultDigitalEmployeeFirst } from '@/pages/digitalEmployees/utils';
 
 type DisableActionList = Array<'delete' | 'apply' | 'unapply' | 'edit'>;
 
@@ -363,10 +363,10 @@ function AllDigitalEmployees(
   }, [EventEmitter, curActiveLink, dropdownParam, getSearch, searchName]);
 
   const defaultResourceId = defaultDigEmployeeId || userInfo?.defaultDigEmployeeId;
-  const visibleList = useMemo(
-    () => sortDefaultDigitalEmployeeFirst(list, defaultResourceId),
-    [defaultResourceId, list]
-  );
+  const visibleList = useMemo(() => {
+    const sortedList = sortDefaultDigitalEmployeeFirst(list, defaultResourceId);
+    return source === 'available' ? sortDigitalEmployeeByRecent(sortedList) : sortedList;
+  }, [defaultResourceId, list, source]);
 
   const showNoUsePermissionWarning = React.useCallback(() => {
     message.destroy();

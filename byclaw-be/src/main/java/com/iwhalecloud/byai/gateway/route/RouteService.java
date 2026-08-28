@@ -722,8 +722,12 @@ public class RouteService {
             return projectInfo;
         }
 
-        Project project = projectService.findById(projectId);
+        // Tests and部分轻量调用场景可能未注入 ProjectService；此时仍保留项目 ID，
+        // 让工作区路径及下游项目上下文可以继续生成。
+        Project project = projectService == null ? null : projectService.findById(projectId);
         if (project == null) {
+            projectInfo.put("project_id", projectId);
+            projectInfo.put("workspace", resolveSandboxProjectWorkspace(projectId));
             return projectInfo;
         }
 

@@ -150,7 +150,7 @@
 
 .employeePreviewHeader {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 22px;
 }
 
@@ -172,7 +172,14 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-top: 18px;
+}
+
+.employeePreviewHeaderInfo {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
 }
 
 .employeePreviewTitle {

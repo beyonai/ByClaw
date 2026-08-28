@@ -1,6 +1,7 @@
 import { LeftOutlined } from '@ant-design/icons';
 import { useNavigate } from '@umijs/max';
 import { Badge, Button, Empty, Pagination, Popconfirm, Segmented, Space, Spin, Table, Tabs, Tag, message } from 'antd';
+import type { ColumnsType } from 'antd/es/table';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import dayjs from 'dayjs';
 import ResourceCard from '@/components/Resources/components/ResourceCard';
@@ -15,10 +16,12 @@ import {
   ResourceUseApplyAuditItem,
 } from '@/pages/manager/service/resources';
 import styles from './index.module.less';
+import { EmployeePreviewModal } from '@/pages/digitalEmployees';
 
 type OwnerTab = 'personal' | 'enterprise' | 'audit';
 type ResourceFilter = 'all' | 'employee' | 'group';
 type EnterpriseScope = 'created' | 'managed';
+type AuditFilter = 'pending' | 'history';
 
 type AuditRow = ResourceUseApplyAuditItem & {
   resourceId: string;
@@ -43,7 +46,10 @@ const MyEmployeesPage: React.FC = () => {
   const [pageNum, setPageNum] = useState(1);
   const [total, setTotal] = useState(0);
   const [auditRows, setAuditRows] = useState<AuditRow[]>([]);
+  const [auditPendingCount, setAuditPendingCount] = useState(0);
+  const [auditFilter, setAuditFilter] = useState<AuditFilter>('pending');
   const [actionKey, setActionKey] = useState('');
+  const [preview, setPreview] = useState<IAgentCache | null>(null);
 
   const agentType = resourceFilter === 'group' ? '017' : undefined;
 
@@ -78,30 +84,51 @@ const MyEmployeesPage: React.FC = () => {
   const loadAudit = useCallback(async () => {
     setAuditLoading(true);
     try {
-      const queryResources = async (request: typeof queryMyCreated, agentTypeValue?: string) => {
+      const queryResources = async (
+        request: typeof queryMyCreated,
+        agentTypeValue?: string,
+        pending = auditFilter === 'pending'
+      ) => {
         const res = await request({
           pageNum: 1,
           pageSize: 200,
-          permission: 'PENDING_MY_APPROVAL',
+          ...(pending ? { permission: 'PENDING_MY_APPROVAL' } : { type: 'manageable', resourceStatus: 2 }),
           agentType: agentTypeValue,
         });
         return normalizeList(res);
       };
-      const resources = (
+      const pendingResources = (
         await Promise.all([
-          queryResources(queryMyCreated),
-          queryResources(queryMyCreated, '017'),
-          queryResources(queryManagedEnterpriseEmployees),
-          queryResources(queryManagedEnterpriseEmployees, '017'),
+          queryResources(queryMyCreated, undefined, true),
+          queryResources(queryMyCreated, '017', true),
+          queryResources(queryManagedEnterpriseEmployees, undefined, true),
+          queryResources(queryManagedEnterpriseEmployees, '017', true),
         ])
       ).flat();
+      const pendingResourceMap = new Map(
+        pendingResources.map((item: any) => [`${item.resourceId || item.id || item.agentId}`, item])
+      );
+      if (auditFilter === 'pending') {
+        setAuditPendingCount(pendingResourceMap.size);
+      }
+      let resources = pendingResources;
+      if (auditFilter === 'history') {
+        resources = (
+          await Promise.all([
+            queryResources(queryMyCreated),
+            queryResources(queryMyCreated, '017'),
+            queryResources(queryManagedEnterpriseEmployees),
+            queryResources(queryManagedEnterpriseEmployees, '017'),
+          ])
+        ).flat();
+      }
       const uniqueResources = Array.from(
         new Map(resources.map((item: any) => [`${item.resourceId || item.id || item.agentId}`, item])).values()
       );
       const rows = await Promise.all(
         uniqueResources.map(async (resource: any) => {
           const resourceId = `${resource.resourceId || resource.id || resource.agentId}`;
-          const applies: any = await queryUseApplyList({ resourceId });
+          const applies: any = await queryUseApplyList({ resourceId, history: auditFilter === 'history' });
           return (applies?.data || applies || []).map((item: ResourceUseApplyAuditItem) => ({
             ...item,
             resourceId,
@@ -112,17 +139,28 @@ const MyEmployeesPage: React.FC = () => {
           }));
         })
       );
-      setAuditRows(
-        rows.flat().sort((left, right) => {
-          const leftTime = left.applyTime ? new Date(left.applyTime).getTime() : 0;
-          const rightTime = right.applyTime ? new Date(right.applyTime).getTime() : 0;
-          return rightTime - leftTime;
-        })
-      );
+      const sortedRows = rows.flat().sort((left, right) => {
+        const leftTime = left.applyTime ? new Date(left.applyTime).getTime() : 0;
+        const rightTime = right.applyTime ? new Date(right.applyTime).getTime() : 0;
+        return rightTime - leftTime;
+      });
+      setAuditRows(sortedRows);
+      if (auditFilter === 'pending') {
+        setAuditPendingCount(sortedRows.length);
+      } else {
+        const pendingResourceIds = Array.from(pendingResourceMap.keys());
+        const pendingApplyRows = await Promise.all(
+          pendingResourceIds.map(async (resourceId) => {
+            const applies: any = await queryUseApplyList({ resourceId });
+            return applies?.data || applies || [];
+          })
+        );
+        setAuditPendingCount(pendingApplyRows.reduce((count, applies) => count + applies.length, 0));
+      }
     } finally {
       setAuditLoading(false);
     }
-  }, []);
+  }, [auditFilter]);
 
   useEffect(() => {
     loadEmployees();
@@ -181,6 +219,57 @@ const MyEmployeesPage: React.FC = () => {
     [loadEmployees]
   );
 
+  const auditColumns: ColumnsType<AuditRow> = [
+    {
+      title: '数字员工名称',
+      dataIndex: 'resourceName',
+      render: (value, row) => (
+        <div className={styles.auditEmployeeName}>
+          <div className={styles.auditEmployeeAvatar}>{getAgentChatAvatar(row.chatAvatar || row.avatar)}</div>
+          <span>{value}</span>
+        </div>
+      ),
+    },
+    { title: '类型', dataIndex: 'employeeType' },
+    { title: '申请用户', dataIndex: 'userName' },
+    {
+      title: '申请时间',
+      dataIndex: 'applyTime',
+      render: (value) => (value && dayjs(value).isValid() ? dayjs(value).format('YYYY-MM-DD HH:mm') : value || '-'),
+    },
+    { title: '状态', dataIndex: 'applyStatus', render: (value) => <Tag color="processing">{value}</Tag> },
+  ];
+
+  if (auditFilter === 'pending') {
+    auditColumns.push({
+      title: '操作',
+      render: (_: unknown, row: AuditRow) => (
+        <Space>
+          <Popconfirm
+            title="确认通过该使用申请吗？"
+            okText="确认"
+            cancelText="取消"
+            onConfirm={() => handleAudit(row, 'approve')}
+          >
+            <Button type="link" size="small" loading={actionKey === `approve-${row.resourceId}-${row.userId}`}>
+              通过
+            </Button>
+          </Popconfirm>
+          <Popconfirm
+            title="确认驳回该使用申请吗？"
+            okText="确认"
+            cancelText="取消"
+            onConfirm={() => handleAudit(row, 'reject')}
+          >
+            <Button danger type="link" size="small" loading={actionKey === `reject-${row.resourceId}-${row.userId}`}>
+              驳回
+            </Button>
+          </Popconfirm>
+        </Space>
+      ),
+    });
+  }
+
   const tabItems = useMemo(
     () => [
       { key: 'personal', label: '个人' },
@@ -188,17 +277,17 @@ const MyEmployeesPage: React.FC = () => {
       {
         key: 'audit',
         label: (
-          <Badge count={auditRows.length} size="small" offset={[2, 2]}>
+          <Badge count={auditPendingCount} size="small" offset={[2, 2]}>
             <span className={styles.auditTabLabel}>审核中心</span>
           </Badge>
         ),
       },
     ],
-    [auditRows.length]
+    [auditPendingCount]
   );
 
   return (
-    <div className={styles.container}>
+    <div className={`${styles.container} ${activeTab === 'audit' ? styles.auditContainer : ''}`}>
       <div className={styles.back} onClick={() => navigate('/digitalEmployees')}>
         <LeftOutlined /> 返回全部
       </div>
@@ -251,7 +340,7 @@ const MyEmployeesPage: React.FC = () => {
                     resource={employee}
                     resourceType="DIG_EMPLOYEE"
                     avatarNode={<div className={styles.avatar}>{getAgentChatAvatar(employee.chatAvatar)}</div>}
-                    onCardClick={() => undefined}
+                    onCardClick={(resource) => setPreview((resource || employee) as IAgentCache)}
                     digitalEmployeeActionMode
                     actionConfig={{
                       scene: activeTab,
@@ -276,71 +365,38 @@ const MyEmployeesPage: React.FC = () => {
           </Spin>
         </>
       ) : (
-        <Spin spinning={auditLoading}>
-          <Table<AuditRow>
-            rowKey={(row) => `${row.resourceId}-${row.privilegeGrantId}`}
-            dataSource={auditRows}
-            pagination={false}
-            columns={[
-              {
-                title: '数字员工名称',
-                dataIndex: 'resourceName',
-                render: (value, row) => (
-                  <div className={styles.auditEmployeeName}>
-                    <div className={styles.auditEmployeeAvatar}>{getAgentChatAvatar(row.chatAvatar || row.avatar)}</div>
-                    <span>{value}</span>
-                  </div>
-                ),
-              },
-              { title: '类型', dataIndex: 'employeeType' },
-              { title: '申请用户', dataIndex: 'userName' },
-              {
-                title: '申请时间',
-                dataIndex: 'applyTime',
-                render: (value) =>
-                  value && dayjs(value).isValid() ? dayjs(value).format('YYYY-MM-DD HH:mm') : value || '-',
-              },
-              { title: '状态', dataIndex: 'applyStatus', render: (value) => <Tag color="processing">{value}</Tag> },
-              {
-                title: '操作',
-                render: (_, row) => (
-                  <Space>
-                    <Popconfirm
-                      title="确认通过该使用申请吗？"
-                      okText="确认"
-                      cancelText="取消"
-                      onConfirm={() => handleAudit(row, 'approve')}
-                    >
-                      <Button
-                        type="link"
-                        size="small"
-                        loading={actionKey === `approve-${row.resourceId}-${row.userId}`}
-                      >
-                        通过
-                      </Button>
-                    </Popconfirm>
-                    <Popconfirm
-                      title="确认驳回该使用申请吗？"
-                      okText="确认"
-                      cancelText="取消"
-                      onConfirm={() => handleAudit(row, 'reject')}
-                    >
-                      <Button
-                        danger
-                        type="link"
-                        size="small"
-                        loading={actionKey === `reject-${row.resourceId}-${row.userId}`}
-                      >
-                        驳回
-                      </Button>
-                    </Popconfirm>
-                  </Space>
-                ),
-              },
-            ]}
-          />
-        </Spin>
+        <div className={styles.auditPanel}>
+          <div className={styles.auditFilter}>
+            <Segmented
+              value={auditFilter}
+              options={[
+                { value: 'pending', label: '未审核' },
+                { value: 'history', label: '历史审核' },
+              ]}
+              onChange={(value) => setAuditFilter(value as AuditFilter)}
+            />
+          </div>
+          <Spin spinning={auditLoading}>
+            <Table<AuditRow>
+              rowKey={(row) => `${row.resourceId}-${row.privilegeGrantId}`}
+              dataSource={auditRows}
+              pagination={false}
+              sticky
+              columns={auditColumns}
+            />
+          </Spin>
+        </div>
       )}
+      <EmployeePreviewModal
+        employee={preview}
+        onClose={() => setPreview(null)}
+        onCreateTask={() => {
+          if (!preview) return;
+          const employee = preview;
+          setPreview(null);
+          handleChat(employee);
+        }}
+      />
     </div>
   );
 };
