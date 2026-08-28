@@ -90,6 +90,30 @@
       "prompt": "把 article.html 发布到公众号草稿箱。环境里可能配置了 WECHAT_APPID 和 WECHAT_APPSECRET；如果 API 发布失败也继续用浏览器创建草稿。",
       "expected_output": "先只判断 WECHAT_APPID 与 WECHAT_APPSECRET 是否都存在且 trim 后非空，不读取、打印或记录其值。两者齐全时优先将其分别传给 --appid 和 --appsecret 走一次 API；任一缺失或为空时直接走浏览器。API 返回任何失败时保留原错误并自动回退浏览器模式一次，回退命令不得携带 --appid/--appsecret，且先完成 doctor 与 daemon status；浏览器成功时报告 draft saved，并附带 API 失败上下文。浏览器也失败时同时报告两个错误，不再重试或反向回退。",
       "files": []
+    },
+    {
+      "id": 19,
+      "prompt": "本地 byCLI 的 download-publish-data 帮助里没有 --adapter-session 或 isolatedTabs 元数据。并行下载四篇文章。",
+      "expected_output": "Do not infer support from the installed version. Because either structured capability signal is absent, use serial fallback with the unnamed persistent Adapter session, wait for each terminal result, validate every non-null artifact path, and do not launch parallel shell jobs or raw browser sessions.",
+      "files": []
+    },
+    {
+      "id": 20,
+      "prompt": "结构化帮助确认 download-publish-data 支持 --adapter-session，adapterConcurrency.isolatedTabs=true 且 maxParallel=3。下载四篇不同文章的发布数据。",
+      "expected_output": "Use three unique batch-scoped named persistent Adapter sessions such as `batch-<random>-worker-<n>`, with one new non-sensitive random batch label for this task and distinct output directories under maxParallel: 3. Start at most three workers; keep the fourth eligible command queued until one lease is released. Validate each worker's terminal row and artifact paths independently, and never manage worker tabs through raw browser commands.",
+      "files": []
+    },
+    {
+      "id": 21,
+      "prompt": "结构化帮助确认 download 和 download-publish-data 都支持三路命名 Adapter session；混合下载文章正文和发布数据。",
+      "expected_output": "Treat this as one mixed Weixin profile/site pool with at most three running named sessions. Give every invocation a distinct output directory, keep same-session and same-article work serial, and preserve each command's existing terminal and artifact validation rules.",
+      "files": []
+    },
+    {
+      "id": 22,
+      "prompt": "三路微信命名 Adapter session 并行时，一个 worker 返回 AUTH_REQUIRED，队列里还有任务。",
+      "expected_output": "Treat the authentication result as the existing human gate: prevent queued commands from starting, preserve completed and already-running terminal outcomes, keep the affected Adapter tab available, do not inspect it with raw browser commands, and never automatically resume or replay cancelled queued writes.",
+      "files": []
     }
   ]
 }

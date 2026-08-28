@@ -19,7 +19,7 @@ META_PROMPT_SERVICE = (
 DESCRIPTION = (
     "Use when a user explicitly asks to collect, crawl, batch-search, or archive articles, documents, URLs, or "
     "files from public or enterprise sources. Produces traceable collection artifacts and validated sanitized "
-    "Markdown for handoff; does not perform knowledge-base ingest, knowledge organization, or downstream actions."
+    "Markdown for handoff without proactively prompting for downstream choices."
 )
 INTERFACE = {
     "display_name": "知识采集",
@@ -186,11 +186,14 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "Use `status` before delivery",
             "采集完成后停止",
             "`sanitized/items/*.md`",
-            "不得调用 `by-knowledge-manager`",
-            "不得调用 `knowledge-organizer`",
-            "不得询问 `入库 / 知识整理 / 跳过`",
+            "采集流程不得主动询问 `入库 / 知识整理 / 跳过`",
+            "由根 Agent 根据用户已经表达的意图决定是否调用",
+            "`by-knowledge-manager`、`knowledge-organizer` 或其他下游 Skill",
         ):
             self.assertIn(phrase, skill)
+
+        self.assertNotIn("不得调用 `by-knowledge-manager`", skill)
+        self.assertNotIn("不得调用 `knowledge-organizer`", skill)
 
         for forbidden in (
             "[knowledge-ingest.md]",
@@ -384,11 +387,14 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "采集完成后停止",
             "`sanitized/items/*.md`",
             "下游 Agent",
-            "不得调用 `by-knowledge-manager`",
-            "不得调用 `knowledge-organizer`",
-            "不得询问 `入库 / 知识整理 / 跳过`",
+            "不得主动询问 `入库 / 知识整理 / 跳过`",
+            "根 Agent 根据用户已经表达的意图决定是否调用",
+            "`by-knowledge-manager`、`knowledge-organizer` 或其他下游 Skill",
         ):
             self.assertIn(phrase, f"{skill}\n{delivery}")
+
+        self.assertNotIn("不得调用 `by-knowledge-manager`", f"{skill}\n{delivery}")
+        self.assertNotIn("不得调用 `knowledge-organizer`", f"{skill}\n{delivery}")
 
         indexed_paths = {
             item["path"] for key in ("skills", "references") for item in manifest.get(key, [])
@@ -470,7 +476,7 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
 
         for phrase in (
             "`coverUrls`",
-            "受控 HTTPS 下载器",
+            "受控 HTTP(S) 下载器",
             "10 MiB",
             "15 秒",
             "3 次重定向",
@@ -577,6 +583,27 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "加载 `knowledge-collection`",
         ):
             self.assertNotIn(phrase, weixin)
+
+    def test_weixin_parallel_downloads_require_named_session_capability(self):
+        weixin = (SKILLS_ROOT / "bycli" / "references" / "weixin.md").read_text(encoding="utf-8")
+        downloads = markdown_section(weixin, "Published-data spreadsheet downloads")
+
+        for phrase in (
+            "`--adapter-session`",
+            "`adapterConcurrency.isolatedTabs: true`",
+            "`maxParallel: 3`",
+            "three unique worker names",
+            "batch-scoped",
+            "`batch-<random>-worker-<n>`",
+            "fourth eligible command",
+            "distinct output directory",
+            "same Adapter session remain serial",
+            "serial fallback",
+            "`download-publish-data` and `download`",
+        ):
+            self.assertIn(phrase, downloads)
+        self.assertNotIn("`--adapter-session worker-<n>`", downloads)
+        self.assertNotIn("`create-draft` and `save-articles`", downloads)
 
     def test_weixin_reference_closes_executor_terminal_states(self):
         weixin = (SKILLS_ROOT / "bycli" / "references" / "weixin.md").read_text(encoding="utf-8")
