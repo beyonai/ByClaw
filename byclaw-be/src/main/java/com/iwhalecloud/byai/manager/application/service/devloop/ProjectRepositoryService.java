@@ -230,10 +230,11 @@ public class ProjectRepositoryService {
             }
         }
         String treeish = path == null ? branch : branch + ":" + path;
-        String output = gitCommandExecutor.executeCommandQuietly(repoPath, "git", "-c", "safe.directory=*",
-            "ls-tree", "-l", treeish);
+        byte[] outputBytes = gitCommandExecutor.executeCommandBytesQuietly(repoPath, "git", "-c", "safe.directory=*",
+            "ls-tree", "-l", "-z", treeish);
+        String output = new String(outputBytes, StandardCharsets.UTF_8);
         List<ProjectRepoTreeNodeDTO> nodes = new ArrayList<>();
-        for (String line : output.split("\\R")) {
+        for (String line : output.split(String.valueOf('\0'))) {
             ProjectRepoTreeNodeDTO node = parseTreeNode(line, path);
             if (node != null) {
                 nodes.add(node);
@@ -245,11 +246,12 @@ public class ProjectRepositoryService {
     }
 
     private List<ProjectRepoTreeNodeDTO> searchLocalTree(Path repoPath, String keyword, String branch) {
-        String output = gitCommandExecutor.executeCommandQuietly(repoPath, "git", "-c", "safe.directory=*",
-            "ls-tree", "-r", "-l", branch);
+        byte[] outputBytes = gitCommandExecutor.executeCommandBytesQuietly(repoPath, "git", "-c", "safe.directory=*",
+            "ls-tree", "-r", "-l", "-z", branch);
+        String output = new String(outputBytes, StandardCharsets.UTF_8);
         String normalizedKeyword = keyword.toLowerCase(Locale.ROOT);
         List<ProjectRepoTreeNodeDTO> nodes = new ArrayList<>();
-        for (String line : output.split("\\R")) {
+        for (String line : output.split(String.valueOf('\0'))) {
             ProjectRepoTreeNodeDTO node = parseTreeNode(line, null);
             if (node != null && node.getPath().toLowerCase(Locale.ROOT).contains(normalizedKeyword)) {
                 nodes.add(node);
