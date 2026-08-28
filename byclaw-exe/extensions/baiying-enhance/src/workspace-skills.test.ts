@@ -145,6 +145,7 @@ describe("workspace-skills", () => {
       {
         listEntry: {
           skills: [
+            "project-context",
             "json-skill",
             "extra-filter-name",
             "missing-extra",
@@ -209,6 +210,40 @@ describe("workspace-skills", () => {
     await expect(fs.access(path.join(workspaceSkillDir, "scripts", "removed-legacy-helper.mjs"))).rejects.toThrow();
     expect(copySpy).toHaveBeenCalledTimes(1);
     copySpy.mockRestore();
+  });
+
+  it("enables the platform project context skill for every managed agent", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "baiying-project-context-workspace-"));
+    const stateDir = await mkdtemp(path.join(tmpdir(), "baiying-project-context-state-"));
+    const bundledSkillsDir = await mkdtemp(path.join(tmpdir(), "baiying-project-context-bundled-"));
+    process.env.OPENCLAW_STATE_DIR = stateDir;
+    const bundledSkillDir = path.join(bundledSkillsDir, "project-context");
+    await mkdir(bundledSkillDir, { recursive: true });
+    await writeFile(
+      path.join(bundledSkillDir, "SKILL.md"),
+      "---\nname: project-context\nbyclaw_managed: true\n---\n# Project Context\n",
+      "utf8",
+    );
+    const api = {
+      runtime: {
+        config: {
+          loadConfig: () => ({ agents: { list: [{ id: "baiying-agent-1", workspace }] } }),
+        },
+      },
+    } as any;
+
+    const result = await mergeWorkspaceSkillsIntoManagedAgents({
+      api,
+      managed: [{ agentId: "baiying-agent-1", listEntry: { id: "baiying-agent-1", skills: [] } }],
+      includeMainShared: false,
+      mainParentAgentId: "main",
+      bundledSkillsDir,
+    });
+
+    expect(result[0]?.listEntry.skills).toEqual(["project-context"]);
+    await expect(
+      fs.readFile(path.join(workspace, "skills", "project-context", "SKILL.md"), "utf8"),
+    ).resolves.toContain("# Project Context");
   });
 
   it("leaves ordinary and future connector skills untouched unless the bundled skill explicitly opts in", async () => {
@@ -290,7 +325,7 @@ describe("workspace-skills", () => {
     ).resolves.toMatchObject([
       {
         listEntry: {
-          skills: ["inner-filter-name"],
+          skills: ["project-context", "inner-filter-name"],
         },
       },
     ]);

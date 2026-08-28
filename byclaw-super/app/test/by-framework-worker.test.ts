@@ -641,7 +641,7 @@ describe("ByClawSuperGatewayWorker", () => {
     expect(setStreamFinished).toHaveBeenCalledWith(true);
   });
 
-  it("authorizes an interaction Resume before submitting the response", async () => {
+  it("authorizes an interaction Resume and refreshes the Run credential", async () => {
     const authorizeRun = vi.fn(async () => ({
       run: run("WAITING_USER"),
       session: { id: "session-1" },
@@ -663,10 +663,15 @@ describe("ByClawSuperGatewayWorker", () => {
       beyondToken: "secret-token",
       systemCode: "system-1",
     });
-    expect(respondToInteraction).toHaveBeenCalledWith("run-1", "interaction-1", {
-      action: "submit",
-      text: "用户选择 A",
-    });
+    expect(respondToInteraction).toHaveBeenCalledWith(
+      "run-1",
+      "interaction-1",
+      {
+        action: "submit",
+        text: "用户选择 A",
+      },
+      "secret-token",
+    );
     expect(setStreamFinished).toHaveBeenCalledWith(true);
     expect(result.status).toBe(AgentState.COMPLETED);
     expect(result.content).toBe("");

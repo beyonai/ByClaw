@@ -220,12 +220,17 @@ suite("PostgreSQL persistence integration", () => {
       [run.id],
     );
     expect(storedCredential.rows[0]?.credential).toBe("short-lived-token");
+    await database.pool.query(
+      `UPDATE "${database.schema}"."byai_super_run_execution_credentials"
+          SET expires_at = clock_timestamp() - interval '1 second'
+        WHERE run_id = $1`,
+      [run.id],
+    );
     await expect(
       database.credentials.loadForLease({
         runId: run.id,
         instanceId: "instance-a",
         fencingToken: first?.fencingToken ?? 0,
-        now: Date.now(),
       }),
     ).resolves.toMatchObject({
       runId: run.id,
@@ -247,7 +252,6 @@ suite("PostgreSQL persistence integration", () => {
         runId: run.id,
         instanceId: "instance-a",
         fencingToken: first?.fencingToken ?? 0,
-        now: Date.now(),
       }),
     ).resolves.toBeUndefined();
   });
@@ -496,7 +500,6 @@ suite("PostgreSQL persistence integration", () => {
         agentList: [],
         executionCredential: {
           secret: "short-lived-token",
-          expiresAt: Date.now() + 60_000,
         },
       });
       sessionsToDelete.push(run.sessionId);
@@ -635,7 +638,6 @@ function executionCredential(runId: string): ExecutionCredential {
   return {
     runId,
     secret: "short-lived-token",
-    expiresAt: now + 60_000,
     createdAt: now,
   };
 }

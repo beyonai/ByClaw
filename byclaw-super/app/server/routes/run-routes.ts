@@ -100,6 +100,7 @@ export function registerRunRoutes(
           run.id,
           request.params.interactionId,
           request.body,
+          auth.beyondToken,
         );
         return reply.code(202).send({
           runId: run.id,

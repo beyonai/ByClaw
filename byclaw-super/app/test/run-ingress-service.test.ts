@@ -107,6 +107,9 @@ describe("RunIngressService self-exclusion", () => {
       parentMessageId: "gateway-message-1",
       "Beyond-Token": PRINCIPAL_TOKEN,
     });
+    expect(runService.createSessionRun.mock.calls[0][0].executionCredential).toEqual({
+      secret: PRINCIPAL_TOKEN,
+    });
   });
 
   it("continues with an empty agent list and exposes the catalog error when discover fails", async () => {
@@ -121,7 +124,6 @@ describe("RunIngressService self-exclusion", () => {
           throw new Error("ByClaw BE discover request failed: fetch failed");
         },
       },
-      7_200_000,
       undefined,
       { info: vi.fn(), warn },
     );
@@ -250,7 +252,6 @@ describe("RunIngressService group chat snapshot", () => {
       runService.impl,
       verify,
       catalog([agent("agent-a")]),
-      7_200_000,
       groupChatContexts,
     );
 
@@ -293,7 +294,6 @@ describe("RunIngressService group chat snapshot", () => {
       runService.impl,
       verify,
       catalog([agent("agent-a")]),
-      7_200_000,
       { load },
       { info: vi.fn(), warn },
     );
@@ -331,7 +331,6 @@ describe("RunIngressService group chat snapshot", () => {
       runService.impl,
       verify,
       catalog([agent("agent-a")]),
-      7_200_000,
       { load },
     );
 
@@ -361,7 +360,6 @@ describe("RunIngressService group chat snapshot", () => {
       runService.impl,
       async () => ({ userCode: "creator" }),
       catalog([]),
-      7_200_000,
       undefined,
       { info: vi.fn(), warn: vi.fn() },
       { resolve },
@@ -398,7 +396,6 @@ describe("RunIngressService group chat snapshot", () => {
       runService.impl,
       async () => ({ userCode: "creator" }),
       catalog([]),
-      7_200_000,
       undefined,
       { info: vi.fn(), warn },
       { resolve },
@@ -447,7 +444,6 @@ describe("RunIngressService expert-team orchestration", () => {
       runService.impl,
       async () => ({ userCode: "creator" }),
       { listAuthorizedAgents },
-      7_200_000,
       undefined,
       undefined,
       undefined,
@@ -492,7 +488,6 @@ describe("RunIngressService expert-team orchestration", () => {
       runService.impl,
       async () => ({ userCode: "creator" }),
       catalog([agent("personal-agent")]),
-      7_200_000,
       undefined,
       undefined,
       undefined,

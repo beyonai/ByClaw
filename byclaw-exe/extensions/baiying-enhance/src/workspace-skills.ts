@@ -11,6 +11,8 @@ const PLUGIN_SKILLS_DIR_NAME = "plugin-skills";
 const SKILL_DOC_FILE_NAME = "SKILL.md";
 const MANAGED_BUNDLED_SKILL_FIELD = "byclaw_managed";
 const MANAGED_BUNDLED_SKILL_DIGEST_FILE = ".byclaw-managed-source.sha256";
+// 平台级只读能力对所有百应数字员工可用，不要求每个员工在资源关系中重复绑定。
+const CORE_BUNDLED_SKILLS = ["project-context"];
 const bundledSkillDigestCache = new Map<string, Promise<string>>();
 
 function normalizeSkillName(raw: unknown): string {
@@ -425,6 +427,7 @@ export async function mergeWorkspaceSkillsIntoManagedAgents<T extends AgentWithS
     const workspaceDir = resolveAgentWorkspaceDir(params.api, agent.agentId);
     const bundledSkillsDir = resolveBundledSkillsDir(params.bundledSkillsDir);
     const managedSkillCandidates = mergeSkillNames(
+      CORE_BUNDLED_SKILLS,
       agent.listEntry.skills ?? [],
       (agent.extraSkillPaths ?? []).map(skillDirNameFromPath),
     );
@@ -434,7 +437,7 @@ export async function mergeWorkspaceSkillsIntoManagedAgents<T extends AgentWithS
     const baseSkills = resolveSkillNamesFromPluginRoot(agent.listEntry.skills ?? [], pluginSkills);
     const extraSkills = await scanWorkspaceSkillNamesByPaths(workspaceDir, agent.extraSkillPaths);
     const agentSkills = await scanWorkspaceSkillNames(workspaceDir);
-    const skills = mergeSkillNames(baseSkills, extraSkills, agentSkills, sharedSkills);
+    const skills = mergeSkillNames(CORE_BUNDLED_SKILLS, baseSkills, extraSkills, agentSkills, sharedSkills);
     out.push({
       ...agent,
       listEntry: {

@@ -262,10 +262,15 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
       if (authorized.run.id !== runId) {
         throw new Error(`Authorized Run does not match Resume target: ${runId}`);
       }
-      await this.#runService.respondToInteraction(runId, interactionId, {
-        action: "submit",
-        text: extractMessage(command.content),
-      });
+      await this.#runService.respondToInteraction(
+        runId,
+        interactionId,
+        {
+          action: "submit",
+          text: extractMessage(command.content),
+        },
+        beyondToken,
+      );
       // 这是对既有 Run 的辅助输入，不是一个新的聊天终态。标记当前 Resume
       // context 已收尾，避免 by-framework 自动发送 APP_STREAM_RESPONSE 提前关闭共享流。
       context.setStreamFinished(true);
