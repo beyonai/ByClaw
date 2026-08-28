@@ -285,6 +285,10 @@ async function getInboundMessageFromByFramework(data: AskAgentCommand | ResumeCo
       questionText = `${remindPrefix}\n${questionText}`;
     }
   }
+  const projectInfo = data.header.metadata?.project_info;
+  if (projectInfo) {
+    questionText = `${questionText}\n<project_context>${JSON.stringify(projectInfo)}</project_context>`;
+  }
   return {
     files,
     text: questionText,

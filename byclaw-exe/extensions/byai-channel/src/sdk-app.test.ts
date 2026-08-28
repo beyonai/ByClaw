@@ -157,6 +157,24 @@ describe("ByaiChannelGatewayWorker", () => {
     );
   });
 
+  it("appends project info as project context to the inbound question", async () => {
+    const { context, worker } = createWorker();
+    const projectInfo = { projectId: "project-test", projectName: "Test Project" };
+    const command = new AskAgentCommand(
+      new MessageHeader("message-project", "session-project", "trace-project", {
+        targetAgentType: "BYCLAW_EXE_user-test",
+        metadata: { project_info: projectInfo },
+      }),
+      "hello",
+    );
+
+    await worker.processCommand(command, context as never);
+
+    expect(deliverReplyToAgentViaSdk.mock.calls[0]?.[0]?.message.text).toBe(
+      `hello\n<project_context>${JSON.stringify(projectInfo)}</project_context>`,
+    );
+  });
+
   it("duplicates final content into replyData for a callAgent callback", async () => {
     const { context, worker } = createWorker();
     const command = new AskAgentCommand(
