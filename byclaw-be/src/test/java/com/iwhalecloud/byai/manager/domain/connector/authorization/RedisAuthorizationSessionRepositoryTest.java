@@ -134,6 +134,94 @@ class RedisAuthorizationSessionRepositoryTest {
     }
 
     @Test
+    void findActiveSessionReturnsOwnedPendingAndFinalizingSessions() throws Exception {
+        RedisAuthorizationSession pending = session(AuthorizationStatus.PENDING, futureExpiry(), 0L);
+        RedisAuthorizationSession finalizing = session(AuthorizationStatus.FINALIZING, futureExpiry(), 1L);
+        when(valueOperations.get(USER_INDEX_KEY)).thenReturn(AUTHORIZATION_ID);
+        when(valueOperations.get(SESSION_KEY)).thenReturn(
+            objectMapper.writeValueAsString(pending),
+            objectMapper.writeValueAsString(finalizing));
+
+        assertThat(repository.findActiveSession(USER_ID, CONNECTOR_ID)).contains(pending);
+        assertThat(repository.findActiveSession(USER_ID, CONNECTOR_ID)).contains(finalizing);
+    }
+
+    @Test
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    void findActiveSessionClearsMissingAndMalformedSessionIndexes() {
+        when(valueOperations.get(USER_INDEX_KEY)).thenReturn(AUTHORIZATION_ID);
+        when(valueOperations.get(SESSION_KEY)).thenReturn(null, "{not-json");
+        when(redisTemplate.execute(
+            any(RedisScript.class), eq(List.of(USER_INDEX_KEY)), eq(AUTHORIZATION_ID))).thenReturn(1L);
+
+        assertThat(repository.findActiveSession(USER_ID, CONNECTOR_ID)).isEmpty();
+        assertThat(repository.findActiveSession(USER_ID, CONNECTOR_ID)).isEmpty();
+
+        verify(redisTemplate, times(2)).execute(
+            any(RedisScript.class), eq(List.of(USER_INDEX_KEY)), eq(AUTHORIZATION_ID));
+    }
+
+    @Test
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    void findActiveSessionClearsTerminalAndIdentityMismatchedIndexesWithValueGuard() throws Exception {
+        RedisAuthorizationSession terminal = session(AuthorizationStatus.CONNECTED, futureExpiry(), 2L);
+        RedisAuthorizationSession otherUser = copy(
+            terminal,
+            AUTHORIZATION_ID,
+            "other-user",
+            CONNECTOR_ID,
+            "connector",
+            "provider",
+            AuthorizationStatus.PENDING,
+            futureExpiry());
+        RedisAuthorizationSession otherConnector = copy(
+            terminal,
+            AUTHORIZATION_ID,
+            USER_ID,
+            99L,
+            "connector",
+            "provider",
+            AuthorizationStatus.PENDING,
+            futureExpiry());
+        when(valueOperations.get(USER_INDEX_KEY)).thenReturn(AUTHORIZATION_ID);
+        when(valueOperations.get(SESSION_KEY)).thenReturn(
+            objectMapper.writeValueAsString(terminal),
+            objectMapper.writeValueAsString(otherUser),
+            objectMapper.writeValueAsString(otherConnector));
+        when(redisTemplate.execute(
+            any(RedisScript.class), eq(List.of(USER_INDEX_KEY)), eq(AUTHORIZATION_ID))).thenReturn(1L);
+        ArgumentCaptor<RedisScript> scriptCaptor = ArgumentCaptor.forClass(RedisScript.class);
+
+        assertThat(repository.findActiveSession(USER_ID, CONNECTOR_ID)).isEmpty();
+        assertThat(repository.findActiveSession(USER_ID, CONNECTOR_ID)).isEmpty();
+        assertThat(repository.findActiveSession(USER_ID, CONNECTOR_ID)).isEmpty();
+
+        verify(redisTemplate, times(3)).execute(
+            scriptCaptor.capture(), eq(List.of(USER_INDEX_KEY)), eq(AUTHORIZATION_ID));
+        assertThat(scriptCaptor.getValue().getScriptAsString()).contains(
+            "if redis.call('GET', KEYS[1]) == ARGV[1] then",
+            "return redis.call('DEL', KEYS[1])",
+            "return 0");
+    }
+
+    @Test
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    void findActiveSessionUsesExistingAtomicCleanupForExpiredSession() throws Exception {
+        RedisAuthorizationSession expired = session(
+            AuthorizationStatus.PENDING,
+            new Date(System.currentTimeMillis() - 1L),
+            0L);
+        when(valueOperations.get(USER_INDEX_KEY)).thenReturn(AUTHORIZATION_ID);
+        when(valueOperations.get(SESSION_KEY)).thenReturn(objectMapper.writeValueAsString(expired));
+        when(redisTemplate.execute(any(RedisScript.class), any(List.class), eq(AUTHORIZATION_ID))).thenReturn(1L);
+
+        assertThat(repository.findActiveSession(USER_ID, CONNECTOR_ID)).isEmpty();
+
+        verify(redisTemplate).execute(
+            any(RedisScript.class), eq(List.of(SESSION_KEY, USER_INDEX_KEY)), eq(AUTHORIZATION_ID));
+    }
+
+    @Test
     @SuppressWarnings({"rawtypes", "unchecked"})
     void statusTransitionLockUsesUniqueTokenTtlAndCompareDeleteRelease() {
         Duration ttl = Duration.ofSeconds(90);

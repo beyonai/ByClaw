@@ -697,6 +697,119 @@ test('merge 对 hot-file 顶层元数据执行白名单', () => {
   assert.equal(JSON.stringify(result).includes('BODY'), false);
 });
 
+test('merge 安全保留 requiresUserAction 并固定禁止降级策略', () => {
+  const result = mergeDocuments({
+    hotDoc: {
+      query: 'agent',
+      candidates: [],
+      requiresUserAction: {
+        kind: 'bridge_unavailable',
+        source: 'google',
+        errorCode: 'BROWSER_CONNECT',
+        message: 'bridge unavailable',
+        fallbackPolicy: { allowDirectHttp: true },
+        nested: { content: 'BODY' },
+      },
+    },
+    sxDoc: { query: 'agent', results: [] },
+    arDoc: null,
+    normalizer: n,
+  });
+
+  assert.deepEqual(result.requiresUserAction, {
+    kind: 'bridge_unavailable',
+    source: 'google',
+    errorCode: 'BROWSER_CONNECT',
+    message: 'bridge unavailable',
+    fallbackPolicy: {
+      allowDirectHttp: false,
+      allowGenericBrowser: false,
+      nextAction: 'stop-and-report',
+    },
+  });
+  assert.equal(JSON.stringify(result).includes('BODY'), false);
+  assert.match(result.warnings.join('\n'), /禁止使用.*HTTP.*通用浏览器.*降级/);
+});
+
+test('merge 限制 requiresUserAction 字符串长度并拒绝非字符串字段', () => {
+  const result = mergeDocuments({
+    hotDoc: {
+      query: 'agent',
+      candidates: [],
+      requiresUserAction: {
+        kind: ` ${'k'.repeat(101)} `,
+        source: ` ${'s'.repeat(201)} `,
+        errorCode: ` ${'e'.repeat(101)} `,
+        message: ` ${'m'.repeat(1_001)} `,
+      },
+    },
+    sxDoc: { query: 'agent', results: [] },
+    arDoc: null,
+    normalizer: n,
+  });
+
+  assert.equal(result.requiresUserAction.kind.length, 100);
+  assert.equal(result.requiresUserAction.source.length, 200);
+  assert.equal(result.requiresUserAction.errorCode.length, 100);
+  assert.equal(result.requiresUserAction.message.length, 1_000);
+
+  const invalidOptionalFields = mergeDocuments({
+    hotDoc: {
+      query: 'agent',
+      candidates: [],
+      requiresUserAction: {
+        kind: 'bridge_unavailable',
+        source: { content: 'BODY' },
+        errorCode: ['BROWSER_CONNECT'],
+        message: 69,
+      },
+    },
+    sxDoc: { query: 'agent', results: [] },
+    arDoc: null,
+    normalizer: n,
+  });
+  assert.deepEqual(invalidOptionalFields.requiresUserAction, {
+    kind: 'bridge_unavailable',
+    fallbackPolicy: {
+      allowDirectHttp: false,
+      allowGenericBrowser: false,
+      nextAction: 'stop-and-report',
+    },
+  });
+  assert.equal(JSON.stringify(invalidOptionalFields).includes('BODY'), false);
+});
+
+test('merge 要求 requiresUserAction.kind 是非空字符串', () => {
+  for (const kind of ['   ', 69, null, { value: 'bridge_unavailable' }]) {
+    const result = mergeDocuments({
+      hotDoc: {
+        query: 'agent',
+        candidates: [],
+        requiresUserAction: { kind, message: 'untrusted' },
+      },
+      sxDoc: { query: 'agent', results: [] },
+      arDoc: null,
+      normalizer: n,
+    });
+    assert.equal(result.requiresUserAction, undefined);
+  }
+});
+
+test('merge 忽略结构无效 hot-file 中的 requiresUserAction', () => {
+  const result = mergeDocuments({
+    hotDoc: {
+      query: 'agent',
+      candidates: { invalid: true },
+      requiresUserAction: { kind: 'bridge_unavailable', message: 'untrusted' },
+    },
+    sxDoc: { query: 'agent', results: [] },
+    arDoc: null,
+    normalizer: n,
+  });
+
+  assert.equal(result.requiresUserAction, undefined);
+});
+
 test('hot-file 排名字段必须是有效正整数且不超过窗口', () => {
   const invalidRanks = [
     { rankInSource: -1, searchWindowSize: 10 },

@@ -78,6 +78,7 @@ class TaskPlanApplicationServiceTest {
         TaskPlanSnapshot snapshot = service.update(createRequest());
 
         assertThat(snapshot.getPlanId()).isEqualTo("1");
+        assertThat(snapshot.getMessageId()).isEqualTo("run-1:ready");
         assertThat(snapshot.getStatus()).isEqualTo("ACTIVE");
         assertThat(snapshot.getVersion()).isEqualTo(1);
         assertThat(snapshot.getTasks()).extracting(TaskPlanSnapshot.TaskSnapshot::getTaskId)
@@ -153,7 +154,7 @@ class TaskPlanApplicationServiceTest {
         when(planMapper.selectOne(any())).thenReturn(null);
         TaskPlanLookupRequest request = new TaskPlanLookupRequest();
         request.setSessionId("11");
-        request.setMessageId("12");
+        request.setMessageId("delegation-1");
         request.setSourceRuntime("OPENCLAW");
         request.setSourceRunId("openclaw-run-1");
 
@@ -175,12 +176,27 @@ class TaskPlanApplicationServiceTest {
         when(planMapper.selectOne(any())).thenReturn(completed);
         TaskPlanLookupRequest request = new TaskPlanLookupRequest();
         request.setSessionId("11");
-        request.setMessageId("12");
+        request.setMessageId("run-1:ready");
 
         TaskPlanSnapshot snapshot = service.findLatestForMessage(request);
 
         assertThat(snapshot.getSourceRuntime()).isEqualTo("OPENCLAW");
         assertThat(snapshot.getSourceRunId()).isEqualTo("openclaw-run-1");
+    }
+
+    @Test
+    void requestCancellationAcceptsOpaqueMessageId() {
+        when(planMapper.selectOne(any())).thenReturn(plan("ACTIVE", 1, tasks("IN_PROGRESS", "PENDING")));
+        when(planMapper.update(any(), any(Wrapper.class))).thenReturn(1);
+        TaskPlanLookupRequest request = new TaskPlanLookupRequest();
+        request.setSessionId("11");
+        request.setMessageId("run-1:ready");
+        request.setSourceRuntime("BYCLAW_SUPER");
+        request.setSourceRunId("run-1");
+
+        TaskPlanSnapshot snapshot = service.requestCancellation(request, "USER_STOPPED", "用户请求停止");
+
+        assertThat(snapshot.getStatus()).isEqualTo("CANCELLING");
     }
 
     @Test
@@ -272,6 +288,8 @@ class TaskPlanApplicationServiceTest {
     void findLatestByMessageIdsReadsEmbeddedTasksWithoutASecondTable() {
         ByaiAgentTaskPlan latest = plan("COMPLETED", 3, tasks("COMPLETED", "COMPLETED"));
         ByaiAgentTaskPlan older = plan("ACTIVE", 2, tasks("COMPLETED", "IN_PROGRESS"));
+        latest.setMessageId("12");
+        older.setMessageId("12");
         older.setPlanId(98L);
         when(planMapper.selectList(any())).thenReturn(List.of(latest, older));
 
@@ -313,7 +331,7 @@ class TaskPlanApplicationServiceTest {
         TaskPlanUpdateRequest request = new TaskPlanUpdateRequest();
         request.setIdempotencyKey("tool-call-1");
         request.setSessionId("11");
-        request.setMessageId("12");
+        request.setMessageId("run-1:ready");
         request.setTraceId("trace-1");
         request.setSourceRuntime("BYCLAW_SUPER");
         request.setSourceRunId("run-1");
@@ -325,7 +343,7 @@ class TaskPlanApplicationServiceTest {
         plan.setPlanId(99L);
         plan.setUserId(7L);
         plan.setSessionId(11L);
-        plan.setMessageId(12L);
+        plan.setMessageId("run-1:ready");
         plan.setTraceId("trace-1");
         plan.setSourceRuntime("BYCLAW_SUPER");
         plan.setSourceRunId("run-1");

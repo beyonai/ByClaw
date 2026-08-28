@@ -60,7 +60,7 @@ public class TaskPlanApplicationService {
         requireCommandRequest(request);
         Long userId = CurrentUserHolder.getCurrentUserId();
         Long sessionId = parseRequiredLongCommand(request.getSessionId(), "sessionId");
-        Long messageId = parseRequiredLongCommand(request.getMessageId(), "messageId");
+        String messageId = requiredTextCommand(request.getMessageId(), "messageId", 128);
         String sourceRuntime = normalizeRuntimeCommand(request.getSourceRuntime());
         String sourceRunId = requiredTextCommand(request.getSourceRunId(), "sourceRunId", 128);
         requireOwnedSessionCommand(sessionId, userId);
@@ -78,7 +78,7 @@ public class TaskPlanApplicationService {
         requireCommandRequest(request);
         Long userId = CurrentUserHolder.getCurrentUserId();
         Long sessionId = parseRequiredLongCommand(request.getSessionId(), "sessionId");
-        Long messageId = parseRequiredLongCommand(request.getMessageId(), "messageId");
+        String messageId = requiredTextCommand(request.getMessageId(), "messageId", 128);
         String sourceRuntime = normalizeRuntimeCommand(request.getSourceRuntime());
         String sourceRunId = requiredTextCommand(request.getSourceRunId(), "sourceRunId", 128);
         ByaiAgentTaskPlan existing = findLatestActiveForSession(userId, sessionId, true);
@@ -101,7 +101,7 @@ public class TaskPlanApplicationService {
         }
         Long userId = CurrentUserHolder.getCurrentUserId();
         Long sessionId = parseRequiredLong(request.getSessionId(), "sessionId");
-        Long messageId = parseRequiredLong(request.getMessageId(), "messageId");
+        String messageId = requiredText(request.getMessageId(), "messageId", 128);
         String sourceRuntime = normalizeRuntime(request.getSourceRuntime());
         String sourceRunId = requiredText(request.getSourceRunId(), "sourceRunId", 128);
         requireOwnedSession(sessionId, userId);
@@ -118,7 +118,7 @@ public class TaskPlanApplicationService {
         }
         Long userId = CurrentUserHolder.getCurrentUserId();
         Long sessionId = parseRequiredLong(request.getSessionId(), "sessionId");
-        Long messageId = parseRequiredLong(request.getMessageId(), "messageId");
+        String messageId = requiredText(request.getMessageId(), "messageId", 128);
         requireOwnedSession(sessionId, userId);
         ByaiAgentTaskPlan plan = planMapper.selectOne(Wrappers.<ByaiAgentTaskPlan>lambdaQuery()
             .eq(ByaiAgentTaskPlan::getUserId, userId)
@@ -136,14 +136,16 @@ public class TaskPlanApplicationService {
         if (userId == null || sessionId == null || messageIds == null || messageIds.isEmpty()) {
             return Map.of();
         }
-        List<Long> distinctMessageIds = messageIds.stream().filter(Objects::nonNull).distinct().toList();
-        if (distinctMessageIds.isEmpty()) {
+        Map<String, Long> historyMessageIds = new LinkedHashMap<>();
+        messageIds.stream().filter(Objects::nonNull)
+            .forEach(messageId -> historyMessageIds.putIfAbsent(String.valueOf(messageId), messageId));
+        if (historyMessageIds.isEmpty()) {
             return Map.of();
         }
         List<ByaiAgentTaskPlan> plans = planMapper.selectList(Wrappers.<ByaiAgentTaskPlan>lambdaQuery()
             .eq(ByaiAgentTaskPlan::getUserId, userId)
             .eq(ByaiAgentTaskPlan::getSessionId, sessionId)
-            .in(ByaiAgentTaskPlan::getMessageId, distinctMessageIds)
+            .in(ByaiAgentTaskPlan::getMessageId, historyMessageIds.keySet())
             .orderByDesc(ByaiAgentTaskPlan::getUpdatedAt)
             .orderByDesc(ByaiAgentTaskPlan::getPlanId));
         if (plans == null || plans.isEmpty()) {
@@ -151,7 +153,12 @@ public class TaskPlanApplicationService {
         }
         Map<Long, TaskPlanSnapshot> snapshots = new LinkedHashMap<>();
         plans.stream().filter(plan -> plan.getMessageId() != null)
-            .forEach(plan -> snapshots.putIfAbsent(plan.getMessageId(), snapshot(plan)));
+            .forEach(plan -> {
+                Long historyMessageId = historyMessageIds.get(plan.getMessageId());
+                if (historyMessageId != null) {
+                    snapshots.putIfAbsent(historyMessageId, snapshot(plan));
+                }
+            });
         return snapshots;
     }
 
@@ -159,7 +166,7 @@ public class TaskPlanApplicationService {
     public void deleteByMessageId(Long messageId) {
         if (messageId != null) {
             planMapper.delete(Wrappers.<ByaiAgentTaskPlan>lambdaQuery()
-                .eq(ByaiAgentTaskPlan::getMessageId, messageId));
+                .eq(ByaiAgentTaskPlan::getMessageId, String.valueOf(messageId)));
         }
     }
 
@@ -191,7 +198,7 @@ public class TaskPlanApplicationService {
         }
         Long userId = CurrentUserHolder.getCurrentUserId();
         Long sessionId = parseRequiredLong(request.getSessionId(), "sessionId");
-        Long messageId = parseRequiredLong(request.getMessageId(), "messageId");
+        String messageId = requiredText(request.getMessageId(), "messageId", 128);
         String sourceRuntime = normalizeRuntime(request.getSourceRuntime());
         String sourceRunId = requiredText(request.getSourceRunId(), "sourceRunId", 128);
         requireOwnedSession(sessionId, userId);
@@ -252,7 +259,7 @@ public class TaskPlanApplicationService {
         }
         Long userId = CurrentUserHolder.getCurrentUserId();
         Long sessionId = parseRequiredLong(request.getSessionId(), "sessionId");
-        Long messageId = parseRequiredLong(request.getMessageId(), "messageId");
+        String messageId = requiredText(request.getMessageId(), "messageId", 128);
         String sourceRuntime = normalizeRuntime(request.getSourceRuntime());
         String sourceRunId = requiredText(request.getSourceRunId(), "sourceRunId", 128);
         requireOwnedSession(sessionId, userId);
@@ -305,7 +312,7 @@ public class TaskPlanApplicationService {
         return snapshot(plan, tasks);
     }
 
-    private TaskPlanWriteResult create(TaskPlanUpdateRequest request, Long userId, Long sessionId, Long messageId,
+    private TaskPlanWriteResult create(TaskPlanUpdateRequest request, Long userId, Long sessionId, String messageId,
         String sourceRuntime, String sourceRunId) {
         String idempotencyKey = requiredTextCommand(request.getIdempotencyKey(), "idempotencyKey", 128);
         ByaiAgentTaskPlan existing = findLatestActiveForSession(userId, sessionId, true);
@@ -345,7 +352,7 @@ public class TaskPlanApplicationService {
     }
 
     private TaskPlanWriteResult advanceCurrent(TaskPlanUpdateRequest request, Long userId, Long sessionId,
-        Long messageId, String sourceRuntime, String sourceRunId, String action) {
+        String messageId, String sourceRuntime, String sourceRunId, String action) {
         String idempotencyKey = requiredTextCommand(request.getIdempotencyKey(), "idempotencyKey", 128);
         ByaiAgentTaskPlan plan = findActiveForExecution(userId, sessionId, messageId, sourceRuntime, sourceRunId,
             false);
@@ -566,7 +573,7 @@ public class TaskPlanApplicationService {
         return null;
     }
 
-    private ByaiAgentTaskPlan findActiveForExecution(Long userId, Long sessionId, Long messageId,
+    private ByaiAgentTaskPlan findActiveForExecution(Long userId, Long sessionId, String messageId,
         String sourceRuntime, String sourceRunId, boolean includeCancelling) {
         return planMapper.selectOne(Wrappers.<ByaiAgentTaskPlan>lambdaQuery()
             .eq(ByaiAgentTaskPlan::getUserId, userId)
@@ -580,7 +587,7 @@ public class TaskPlanApplicationService {
             .last("LIMIT 1"));
     }
 
-    private ByaiAgentTaskPlan findLatestForExecution(Long userId, Long sessionId, Long messageId,
+    private ByaiAgentTaskPlan findLatestForExecution(Long userId, Long sessionId, String messageId,
         String sourceRuntime, String sourceRunId) {
         return planMapper.selectOne(Wrappers.<ByaiAgentTaskPlan>lambdaQuery()
             .eq(ByaiAgentTaskPlan::getUserId, userId)
@@ -603,7 +610,7 @@ public class TaskPlanApplicationService {
             .last("LIMIT 1"));
     }
 
-    private boolean isExecutionOwner(ByaiAgentTaskPlan plan, Long messageId, String sourceRuntime,
+    private boolean isExecutionOwner(ByaiAgentTaskPlan plan, String messageId, String sourceRuntime,
         String sourceRunId) {
         return Objects.equals(plan.getMessageId(), messageId)
             && Objects.equals(plan.getSourceRuntime(), sourceRuntime)
@@ -644,7 +651,7 @@ public class TaskPlanApplicationService {
         snapshot.setStatus(plan.getStatus());
         snapshot.setStatusReason(statusReason(plan.getStatusReasonCode(), plan.getStatusReasonMessage()));
         snapshot.setSessionId(String.valueOf(plan.getSessionId()));
-        snapshot.setMessageId(String.valueOf(plan.getMessageId()));
+        snapshot.setMessageId(plan.getMessageId());
         snapshot.setTurnId(plan.getTurnId());
         snapshot.setLaneId(plan.getLaneId());
         snapshot.setTraceId(plan.getTraceId());

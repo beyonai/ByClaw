@@ -59,6 +59,7 @@ public class ConnectorAuthorizationService {
     private static final String PROVIDER_NOT_CONFIGURED = "PROVIDER_NOT_CONFIGURED";
     private static final String AUTHORIZATION_NOT_FOUND = "AUTHORIZATION_NOT_FOUND";
     private static final String SESSION_ALREADY_ACTIVE = "SESSION_ALREADY_ACTIVE";
+    private static final String AUTHORIZATION_START_IN_PROGRESS = "AUTHORIZATION_START_IN_PROGRESS";
     private static final String AUTH_BINDING_FAILED = "AUTH_BINDING_FAILED";
     private static final String CONNECTOR_MANIFEST_INVALID = "CONNECTOR_MANIFEST_INVALID";
     private static final String AUTH_CANCELLED = "AUTH_CANCELLED";
@@ -215,20 +216,17 @@ public class ConnectorAuthorizationService {
             return failed(
                 null,
                 connector.getConnectorId(),
-                SESSION_ALREADY_ACTIVE,
-                "当前连接器已有进行中的授权任务",
+                AUTHORIZATION_START_IN_PROGRESS,
+                "连接器授权正在启动，请稍后重试",
                 null
             );
         }
         try {
-            if (sessionRepository.hasActiveSession(userId, connector.getConnectorId())) {
-                return failed(
-                    null,
-                    connector.getConnectorId(),
-                    SESSION_ALREADY_ACTIVE,
-                    "当前连接器已有进行中的授权任务",
-                    null
-                );
+            Optional<RedisAuthorizationSession> activeSession =
+                sessionRepository.findActiveSession(userId, connector.getConnectorId());
+            if (activeSession.isPresent()) {
+                RedisAuthorizationSession session = activeSession.get();
+                return toDto(session, decryptBestEffort(session.authorizationUrlCipher()));
             }
             return startLocked(request, userId, connector, provider);
         } finally {

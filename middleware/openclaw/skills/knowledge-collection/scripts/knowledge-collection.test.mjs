@@ -159,6 +159,7 @@ await (async () => {
   assert.equal(publicDiscoverHelp.json.command, 'public-discover');
   assert.match(publicDiscoverHelp.json.args['--category'], /general/);
   assert.match(publicDiscoverHelp.json.args['--requested-count'], /明确指定/);
+  assert.match(publicDiscoverHelp.json.args['--requested-count'], /SearXNG 无候选.*hot-discovery/);
 
   const schema = await runCli(['command-schema']);
   assert.equal(schema.code, 0, schema.stderr);
