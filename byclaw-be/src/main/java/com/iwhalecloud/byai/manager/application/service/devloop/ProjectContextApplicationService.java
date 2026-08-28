@@ -198,14 +198,13 @@ public class ProjectContextApplicationService {
 
         Set<Long> numericIds = bindings.stream()
             .map(ProjectResource::getResourceId)
-            .map(this::parseLong)
             .filter(Objects::nonNull)
             .collect(Collectors.toCollection(LinkedHashSet::new));
         Map<Long, SsResource> resourcesById = ssResourceService.findByIdList(numericIds).stream()
             .collect(Collectors.toMap(SsResource::getResourceId, item -> item, (left, right) -> left, LinkedHashMap::new));
 
         for (ProjectResource binding : bindings) {
-            SsResource resource = resourcesById.get(parseLong(binding.getResourceId()));
+            SsResource resource = resourcesById.get(binding.getResourceId());
             ProjectContextDto.ResourceSummary summary = toResourceSummary(binding, resource);
             String bizType = StringUtils.upperCase(summary.getResourceBizType());
             if ("knowledge".equalsIgnoreCase(binding.getResourceType())
@@ -311,14 +310,6 @@ public class ProjectContextApplicationService {
         result.setSharedFiles(summaries);
         result.getCounts().put("sharedFiles", total);
         result.getTruncated().put("sharedFiles", total > summaries.size());
-    }
-
-    private Long parseLong(String value) {
-        try {
-            return StringUtils.isBlank(value) ? null : Long.valueOf(value);
-        } catch (NumberFormatException ignored) {
-            return null;
-        }
     }
 
     /** 防止历史仓库地址中意外保存的 URL user-info 被返回给模型。 */

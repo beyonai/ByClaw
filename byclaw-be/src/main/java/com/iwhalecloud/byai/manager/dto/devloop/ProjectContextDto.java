@@ -64,7 +64,7 @@ public class ProjectContextDto {
     @Setter
     public static class ResourceSummary {
         private String bindingType;
-        private String resourceId;
+        private Long resourceId;
         private String resourceName;
         private String resourceBizType;
         private String resourceCode;

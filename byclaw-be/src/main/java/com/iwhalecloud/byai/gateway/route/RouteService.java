@@ -10,12 +10,14 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
+import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectResourceService;
+import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectService;
+import com.iwhalecloud.byai.manager.entity.devloop.Project;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
@@ -54,7 +56,9 @@ import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.state.infrastructure.common.constants.SseResponseEventEnum;
 import com.iwhalecloud.byai.state.infrastructure.utils.ChatUtils;
 import com.iwhalecloud.byai.state.infrastructure.utils.CompletionsUtils;
+
 import static com.iwhalecloud.byai.gateway.sandbox.service.SandboxService.WORKER_READY_TIMEOUT_MS;
+
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
@@ -101,6 +105,10 @@ public class RouteService {
 
     @Autowired
     private UserBucketNamingService userBucketNamingService;
+    @Autowired
+    private ProjectService projectService;
+    @Autowired
+    private ProjectResourceService projectResourceService;
 
     /**
      * 判断是否为接口集成类型
@@ -116,9 +124,9 @@ public class RouteService {
             return false;
         }
         return chatAgentResourceInfo.stream().anyMatch(
-                item -> item.getId().equals(agentId) &&
-                        "FROM_THIRD".equals(item.getCreateType()) &&
-                        "INTERFACE".equals(item.getIntegrationType()));
+            item -> item.getId().equals(agentId) &&
+                "FROM_THIRD".equals(item.getCreateType()) &&
+                "INTERFACE".equals(item.getIntegrationType()));
     }
 
     /**
@@ -135,9 +143,9 @@ public class RouteService {
             return false;
         }
         return chatAgentResourceInfo.stream().anyMatch(
-                item -> item.getId().equals(agentId) &&
-                        "FROM_THIRD".equals(item.getCreateType()) &&
-                        "A2A".equals(item.getIntegrationType()));
+            item -> item.getId().equals(agentId) &&
+                "FROM_THIRD".equals(item.getCreateType()) &&
+                "A2A".equals(item.getIntegrationType()));
     }
 
     /**
@@ -164,8 +172,8 @@ public class RouteService {
 
         String sessionId = String.valueOf(ctx.sessionId);
         String userCode = (ctx.loginInfo != null && ctx.loginInfo.getUserCode() != null)
-                ? ctx.loginInfo.getUserCode()
-                : "";
+            ? ctx.loginInfo.getUserCode()
+            : "";
         if (userCode.isEmpty()) {
             return;
         }
@@ -215,8 +223,7 @@ public class RouteService {
                 );
                 log.info("Gateway SDK 消息发送成功, messageId: {}, targetWorker: {}, sessionId: {}, content: {}",
                     response.getMessageId(), response.getTargetWorkerId(), sessionId, content);
-            }
-            else {
+            } else {
                 Map<String, Object> multiAgentParams = buildMultiAgentGatewayParams(ctx.getParams(),
                     multiAgentMetadata, laneRoutes);
                 GatewayClient.SendResponse response = sendMessageWithWorkerRetry(
@@ -346,9 +353,9 @@ public class RouteService {
      * 将 {{resourceType_resourceId}} 格式替换为对应的资源名称
      * 如果资源类型为 DIG_EMPLOYEE，则在名称前添加 @ 符号，并在替换内容后添加空格
      *
-     * @param content 原始内容
+     * @param content      原始内容
      * @param resourceList 资源列表
-     * @param agentId 当前目标数字员工 ID
+     * @param agentId      当前目标数字员工 ID
      * @return 替换后的内容
      */
     private String replaceResourcePlaceholders(String content, List<ResourceVo> resourceList, Long agentId) {
@@ -455,8 +462,8 @@ public class RouteService {
     }
 
     private List<MultiAgentLaneRoute> buildMultiAgentLaneRoutes(ChatProcessContext ctx,
-        MultiAgentMetadata multiAgentMetadata, String workerAgentType, Long fallbackAgentId, String fallbackAnswerMessageId,
-        String fallbackTraceId, String userCode) {
+                                                                MultiAgentMetadata multiAgentMetadata, String workerAgentType, Long fallbackAgentId, String fallbackAnswerMessageId,
+                                                                String fallbackTraceId, String userCode) {
         if (multiAgentMetadata == null || !multiAgentMetadata.hasLanes()) {
             return Collections.emptyList();
         }
@@ -498,7 +505,7 @@ public class RouteService {
     }
 
     private Map<String, Object> buildLaneParams(Map<String, Object> baseParams, MultiAgentMetadata multiAgentMetadata,
-        MultiAgentMetadata.Lane lane, LaneAgentInfo laneAgentInfo, String traceId) {
+                                                MultiAgentMetadata.Lane lane, LaneAgentInfo laneAgentInfo, String traceId) {
         Map<String, Object> laneParams = new HashMap<>(baseParams == null ? Collections.emptyMap() : baseParams);
         JSONObject lanePayload = multiAgentMetadata.buildLanePayload(lane, traceId);
         laneParams.put("agent_id", laneAgentInfo.agentId);
@@ -509,7 +516,7 @@ public class RouteService {
     }
 
     private Map<String, Object> buildMultiAgentGatewayParams(Map<String, Object> baseParams,
-        MultiAgentMetadata multiAgentMetadata, List<MultiAgentLaneRoute> laneRoutes) {
+                                                             MultiAgentMetadata multiAgentMetadata, List<MultiAgentLaneRoute> laneRoutes) {
         Map<String, Object> params = new HashMap<>(baseParams == null ? Collections.emptyMap() : baseParams);
         JSONObject payload = new JSONObject();
         if (multiAgentMetadata != null) {
@@ -547,7 +554,7 @@ public class RouteService {
     }
 
     private LaneAgentInfo resolveLaneAgentInfo(MultiAgentMetadata.Lane lane, Map<String, Object> params,
-        Long fallbackAgentId) {
+                                               Long fallbackAgentId) {
         Long laneAgentId = lane.getAgentId() == null ? fallbackAgentId : lane.getAgentId();
         String fallbackAgentCode = params == null ? null : MapParamUtil.getStringValue(params, "agent_code");
         String fallbackAgentName = params == null ? null : MapParamUtil.getStringValue(params, "agent_name");
@@ -565,7 +572,7 @@ public class RouteService {
 
     @SuppressWarnings("unchecked")
     private AgentResourceChatInfoDto findLaneAgent(MultiAgentMetadata.Lane lane, Map<String, Object> params,
-        Long laneAgentId) {
+                                                   Long laneAgentId) {
         if (params == null || !(params.get("agent_list") instanceof List)) {
             return null;
         }
@@ -590,8 +597,7 @@ public class RouteService {
     private Long parseLong(String value) {
         try {
             return StringUtils.isBlank(value) ? null : Long.valueOf(value);
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             return null;
         }
     }
@@ -612,8 +618,8 @@ public class RouteService {
 
         String currentUserName = CurrentUserHolder.getCurrentUserName();
         Map<String, Object> metadata = reqMetadata == null
-          ? new HashMap<>()
-          : JSON.parseObject(reqMetadata, Map.class);
+            ? new HashMap<>()
+            : JSON.parseObject(reqMetadata, Map.class);
         metadata.put("language", ChatUtils.getLanguage());
         LoginInfo loginInfo = CurrentUserHolder.getLoginInfo();
         if (loginInfo != null) {
@@ -628,10 +634,11 @@ public class RouteService {
         if (channelExtension != null && !channelExtension.isEmpty()) {
             metadata.put("channelExtension", channelExtension);
         }
-        if (chatDto.getProjectId() != null) {
-            JSONObject projectInfo = new JSONObject();
-            projectInfo.put("project_id", chatDto.getProjectId());
-            projectInfo.put("workspace", resolveSandboxProjectWorkspace(chatDto.getProjectId()));
+
+        // 构建项目信息
+        Long projectId = chatDto.getProjectId();
+        if (projectId != null) {
+            JSONObject projectInfo = this.buildProjectInfo(projectId);
             metadata.put("project_info", projectInfo);
         }
 
@@ -653,10 +660,10 @@ public class RouteService {
         String actionType = chatDto.getActionType() == null ? ActionType.ASK_AGENT : chatDto.getActionType();
         Map<String, Object> gatewayParams = params == null ? new HashMap<>() : new HashMap<>(params);
         if (ActionType.ASK_AGENT.equals(actionType)
-                && StringUtils.isNotBlank(sessionId)
-                && ctx != null
-                && ctx.getUserMessageId() != null
-                && ctx.getUserMessageId() > 0) {
+            && StringUtils.isNotBlank(sessionId)
+            && ctx != null
+            && ctx.getUserMessageId() != null
+            && ctx.getUserMessageId() > 0) {
             Map<String, Object> groupChat = new HashMap<>();
             groupChat.put("schemaVersion", "byclaw.group-chat-ref/v1");
             groupChat.put("conversationKey", sessionId);
@@ -684,19 +691,48 @@ public class RouteService {
             }
 
             log.error("Gateway SDK 消息发送失败, sessionId: {}, errorCode: {}, error: {}",
-                    sessionId, response.getErrorCode(), response.getError());
+                sessionId, response.getErrorCode(), response.getError());
 
             if (retryAttemptsAfterWorkerReady < maxRetryAttemptsAfterWorkerReady
-                    && shouldRetryAfterSandboxReady(targetAgentType, userCode, response)) {
+                && shouldRetryAfterSandboxReady(targetAgentType, userCode, response)) {
                 retryAttemptsAfterWorkerReady++;
                 log.info("Gateway SDK 消息发送失败，按远端沙箱退出处理并重拉后重试一次, sessionId: {}, userCode: {}, agentId: {}, targetAgentType: {}, errorCode: {}",
-                        sessionId, userCode, agentId, targetAgentType, response.getErrorCode());
+                    sessionId, userCode, agentId, targetAgentType, response.getErrorCode());
                 restartSandboxWithProgress(ctx, userCode, agentId, targetAgentType);
                 continue;
             }
 
             throw new BdpRuntimeException("Gateway SDK 消息发送失败: " + response.getError());
         }
+    }
+
+
+    /**
+     * 项目信息放到龙虾里面
+     *
+     * @param projectId 项目标识
+     * @return JSONObject
+     */
+    private JSONObject buildProjectInfo(Long projectId) {
+
+        // 项目信息放到龙虾里面
+        JSONObject projectInfo = new JSONObject();
+
+        if (projectId == null) {
+            return projectInfo;
+        }
+
+        Project project = projectService.findById(projectId);
+        if (project == null) {
+            return projectInfo;
+        }
+
+        projectInfo.put("project_id", project.getProjectId());
+        projectInfo.put("project_name", project.getProjectName());
+        projectInfo.put("project_resources", projectResourceService.listBoundResourceByProjectId(projectId));
+        projectInfo.put("workspace", resolveSandboxProjectWorkspace(project.getProjectId()));
+
+        return projectInfo;
     }
 
     /**
@@ -738,15 +774,14 @@ public class RouteService {
     }
 
     private void restartSandboxWithProgress(ChatProcessContext ctx, String userCode, Long agentId,
-        String targetAgentType) {
+                                            String targetAgentType) {
         sendSandboxProgressMessage(ctx, SseResponseEventEnum.reasoningLogStart,
             I18nUtil.get("sandbox.launch.progress.start"));
 
         SandboxLaunchData launchData;
         try {
             launchData = sandboxService.restartSandboxAfterRemoteExitWithoutWait(userCode, agentId, targetAgentType);
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             String failureMessage = resolveSandboxLaunchFailureMessage(e);
             sendSandboxProgressMessage(ctx, SseResponseEventEnum.reasoningLogEnd, failureMessage);
             throw new BdpRuntimeException(failureMessage, e);
@@ -811,8 +846,8 @@ public class RouteService {
                                                  String userCode,
                                                  GatewayClient.SendResponse response) {
         return isUserSandboxAgentType(targetAgentType, userCode)
-                && (ExecutionStatus.ERR_WORKER_NOT_ONLINE.equalsIgnoreCase(response.getErrorCode())
-                || ExecutionStatus.ERR_AGENT_TYPE_UNAVAILABLE.equalsIgnoreCase(response.getErrorCode()));
+            && (ExecutionStatus.ERR_WORKER_NOT_ONLINE.equalsIgnoreCase(response.getErrorCode())
+            || ExecutionStatus.ERR_AGENT_TYPE_UNAVAILABLE.equalsIgnoreCase(response.getErrorCode()));
     }
 
     private boolean isUserSandboxAgentType(String targetAgentType, String userCode) {
@@ -851,7 +886,7 @@ public class RouteService {
         private final JSONObject laneMetadata;
 
         private MultiAgentLaneRoute(MultiAgentMetadata.Lane lane, LaneAgentInfo agentInfo, Map<String, Object> params,
-            String targetAgentType, String answerMessageId, String traceId, JSONObject laneMetadata) {
+                                    String targetAgentType, String answerMessageId, String traceId, JSONObject laneMetadata) {
             this.lane = lane;
             this.agentInfo = agentInfo;
             this.params = params;
