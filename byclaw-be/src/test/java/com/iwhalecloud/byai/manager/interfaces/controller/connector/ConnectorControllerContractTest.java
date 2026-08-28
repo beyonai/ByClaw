@@ -3,6 +3,8 @@ package com.iwhalecloud.byai.manager.interfaces.controller.connector;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 
 import java.lang.reflect.Method;
 import java.lang.reflect.Field;
@@ -24,10 +26,24 @@ class ConnectorControllerContractTest {
             .containsExactly("/authorization/status");
         assertThat(findMethod("handleAuthorizationCallback").getAnnotation(GetMapping.class).value())
             .containsExactly("/authorization/callback/{providerCode}");
+        assertThat(findMethod("handleAuthorizationCallback").getAnnotation(GetMapping.class).produces())
+            .containsExactly(MediaType.TEXT_HTML_VALUE);
+        assertThat(findMethod("handleAuthorizationCallback").getReturnType()).isEqualTo(ResponseEntity.class);
         assertThat(findMethod("completeSkillAuthorization").getAnnotation(PostMapping.class).value())
             .containsExactly("/authorization/skill-complete");
         assertThat(findMethod("revokeAuthorization").getAnnotation(PostMapping.class).value())
             .containsExactly("/authorization/revoke");
+    }
+
+    @Test
+    void callbackPageIsHumanReadableAndDoesNotExposeAuthorizationData() {
+        String success = ConnectorAuthorizationCallbackPage.render(true);
+        String failed = ConnectorAuthorizationCallbackPage.render(false);
+
+        assertThat(success).contains("GitHub 授权成功", "window.close()", "关闭页面");
+        assertThat(failed).contains("GitHub 授权未完成", "重新授权");
+        assertThat(success).doesNotContain("authorizationId", "access_token", "refresh_token");
+        assertThat(failed).doesNotContain("authorizationId", "access_token", "refresh_token");
     }
 
     @Test

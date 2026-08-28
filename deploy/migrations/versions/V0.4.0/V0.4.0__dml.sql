@@ -15,12 +15,17 @@ WHERE NOT EXISTS (
 );
 
 UPDATE byai.byai_connector_info
-SET provider_code = 'github-oauth2',
+SET connector_name = 'GitHub',
+    description = '通过 OAuth2 连接 GitHub 用户账号',
+    connector_type = 'SYSTEM',
+    provider_code = 'github-oauth2',
     skill_code = 'github',
     auth_mode = 'OAUTH2',
     auth_config = '{"clientIdEnv":"GITHUB_OAUTH_CLIENT_ID","clientSecretEnv":"GITHUB_OAUTH_CLIENT_SECRET","redirectUriEnv":"GITHUB_OAUTH_REDIRECT_URI","scope":"read:user repo"}',
     request_config = '{}',
     runtime_manifest = '{"schemaVersion":"1.0","id":"github","version":"1.0.0","runtime":{"type":"oauth2","authorizeIn":"be-auth-job"},"authStorage":{"mode":"credential-reference","owner":"be-auth-job","runtimeMutation":"provider-refresh-only","environment":{}},"skill":{"code":"github","source":"system-builtin","installScope":"user","grantScope":"agent"}}',
+    sort = 40,
+    status_cd = '00A',
     update_time = CURRENT_TIMESTAMP
 WHERE connector_code = 'github';
 

@@ -849,7 +849,13 @@ public class ConnectorAuthorizationService {
                 return result;
             }
         } catch (RuntimeException e) {
-            // Provider failures are converted to a stable, non-sensitive result below.
+            log.warn(
+                "[ConnectorAuth] 授权Provider启动失败, connectorId={}, providerCode={}, exceptionType={}",
+                context.connectorId(),
+                context.providerCode(),
+                e.getClass().getSimpleName(),
+                e
+            );
         }
         return new AuthorizationStartResult(
             AuthorizationStatus.FAILED,

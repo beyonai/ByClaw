@@ -1,4 +1,4 @@
-import { Alert, Button, Dropdown, Input, Modal, Segmented, Tag, Typography, message } from 'antd';
+import { Button, Dropdown, Input, Segmented, Tag, Typography, message } from 'antd';
 import { EllipsisOutlined, PlusOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useIntl, useSelector } from '@umijs/max';
@@ -11,7 +11,7 @@ import {
 import { createOperationRequirement, listProjectMembers } from '@/service/devloop';
 import { PROJECT_DETAIL_SECTIONS, type ProjectDetailSection } from '../../constants';
 import { useProjectTypeConfig } from '../../hooks/useProjectTypeConfig';
-import { checkGitHubPat, saveGitHubPat, type DevloopProjectRepo } from '@/service/devloop';
+import { type DevloopProjectRepo } from '@/service/devloop';
 import type { ProjectSession, ProjectSpace } from '../../types';
 import { getArrayData, getProjectTagMeta } from '../../utils';
 import { supportsProjectRepositories } from '../../projectCapabilities';
@@ -72,10 +72,6 @@ const ProjectDetail: React.FC<Props> = ({
   const [repositoryManagerOpen, setRepositoryManagerOpen] = useState(false);
   const [editingRepository, setEditingRepository] = useState<DevloopProjectRepo>();
   const [repositoryRefreshVersion, setRepositoryRefreshVersion] = useState(0);
-  const [githubPatOpen, setGithubPatOpen] = useState(false);
-  const [githubPat, setGithubPat] = useState('');
-  const [githubPatSaved, setGithubPatSaved] = useState(true);
-  const [githubPatLoading, setGithubPatLoading] = useState(false);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { isDevelopProjectEnabled, isOperationProjectEnabled } = useProjectTypeConfig();
   // 研发和运营能力均以静态参数为准，避免未启用环境误展示对应的业务分区。
@@ -153,23 +149,6 @@ const ProjectDetail: React.FC<Props> = ({
     [projectCacheKey]
   );
 
-  useEffect(() => {
-    if (!repositoryProject) {
-      setGithubPatSaved(true);
-      return;
-    }
-    let active = true;
-    void checkGitHubPat()
-      .then((response: any) => {
-        if (active) setGithubPatSaved(Boolean(response?.hasPat ?? response?.data?.hasPat));
-      })
-      .catch(() => {
-        if (active) setGithubPatSaved(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [project?.projectId, repositoryProject]);
   const detailSections = useMemo(
     () =>
       PROJECT_DETAIL_SECTIONS.filter((item) => {
@@ -471,18 +450,6 @@ const ProjectDetail: React.FC<Props> = ({
           )}
         </div>
       </div>
-      {repositoryProject && !githubPatSaved && (
-        <Alert
-          type="warning"
-          showIcon
-          className={styles.projectInitAlert}
-          message={
-            <Button type="link" size="small" onClick={() => setGithubPatOpen(true)}>
-              {intl.formatMessage({ id: 'projectSpace.github.notConfigured' })}
-            </Button>
-          }
-        />
-      )}
       <div className={styles.detailTabs}>
         <Segmented
           value={activeSection}
@@ -537,34 +504,6 @@ const ProjectDetail: React.FC<Props> = ({
           }}
         />
       )}
-      <Modal
-        open={githubPatOpen}
-        title={intl.formatMessage({ id: 'projectSpace.github.configure' })}
-        okText={intl.formatMessage({ id: 'common.save' })}
-        confirmLoading={githubPatLoading}
-        onCancel={() => setGithubPatOpen(false)}
-        onOk={async () => {
-          if (!githubPat.trim() || githubPatLoading) return;
-          setGithubPatLoading(true);
-          try {
-            await saveGitHubPat(githubPat.trim());
-            message.success(intl.formatMessage({ id: 'projectSpace.github.saveSuccess' }));
-            setGithubPatSaved(true);
-            setGithubPat('');
-            setGithubPatOpen(false);
-          } catch (error: any) {
-            message.error(error?.message || intl.formatMessage({ id: 'projectSpace.github.saveFailed' }));
-          } finally {
-            setGithubPatLoading(false);
-          }
-        }}
-      >
-        <Input.Password
-          value={githubPat}
-          placeholder={intl.formatMessage({ id: 'projectSpace.github.placeholder' })}
-          onChange={(event) => setGithubPat(event.target.value)}
-        />
-      </Modal>
     </section>
   );
 };

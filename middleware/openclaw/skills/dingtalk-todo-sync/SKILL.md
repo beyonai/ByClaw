@@ -16,7 +16,7 @@ metadata:
 ## Default Configuration
 
 - **Default repository**: `beyonai/ByClaw`
-- **GitHub 授权**: OAuth Device Flow（自动）
+- **GitHub 授权**: 平台 GitHub 连接器统一授权
 - **钉钉**: 需要 `DINGTALK_WEBHOOK_URL` 环境变量（Webhook 机器人地址）
 - **可选**: `DINGTALK_WEBHOOK_SECRET`（加签密钥）
 
@@ -31,7 +31,7 @@ metadata:
 node skills/github-issues-mgmt/scripts/gh-issues-list.mjs --limit 1
 ```
 
-If `"auth_required": true` → output 的 `message` 字段已包含授权链接和 code，直接展示给用户。用户确认后执行 `node skills/github-code-analysis/scripts/gh-auth-login.mjs --poll`。
+If `"auth_required": true` → 展示 output 的 `message`，提示用户先在平台连接器中授权 GitHub，然后停止本次同步。连接器授权后的新凭据会在新建或重启沙箱时注入。
 
 ---
 

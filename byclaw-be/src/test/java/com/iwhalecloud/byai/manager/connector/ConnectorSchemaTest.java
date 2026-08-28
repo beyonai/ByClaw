@@ -47,6 +47,21 @@ class ConnectorSchemaTest {
     }
 
     @Test
+    void githubConnectorMigrationRepairsExistingInactiveTemplate() throws Exception {
+        String dml = normalizeSql(readPreservingCase(
+            "deploy/migrations/versions/V0.4.0/V0.4.0__dml.sql"));
+
+        assertThat(dml).contains(
+            "WHERE NOT EXISTS ( SELECT 1 FROM byai.byai_connector_info WHERE connector_code = 'github' )",
+            "UPDATE byai.byai_connector_info SET connector_name = 'GitHub'",
+            "connector_type = 'SYSTEM'",
+            "provider_code = 'github-oauth2'",
+            "sort = 40",
+            "status_cd = '00A'",
+            "WHERE connector_code = 'github'");
+    }
+
+    @Test
     void imaMigrationSeedsOnlyCredentialFormMetadataAndManagedEnvironmentManifest() throws Exception {
         String sql = readPreservingCase("deploy/migrations/versions/V0.4.0/V0.4.0__dml.sql");
         ImaConnectorSeed seed = extractImaConnectorSeed(sql);

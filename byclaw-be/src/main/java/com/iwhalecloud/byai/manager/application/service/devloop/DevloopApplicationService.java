@@ -23,7 +23,6 @@ import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.util.ListUtil;
 import com.iwhalecloud.byai.common.util.MapParamUtil;
 import com.iwhalecloud.byai.common.util.StringUtil;
-import com.iwhalecloud.byai.manager.application.service.job.DevloopPatService;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
@@ -273,7 +272,7 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
     private ConnectorManifestCommandResolver connectorManifestCommandResolver;
 
     @Autowired
-    private DevloopPatService patService;
+    private GitHubCredentialResolver githubCredentialResolver;
 
     @Autowired
     private ProjectMemberService projectMemberService;
@@ -2025,7 +2024,7 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
         List<ScanRequireItem> items;
         String type = source.getSourceType();
         if ("github_issue".equals(type)) {
-            String pat = patService.getGitHubPat(source.getCreateBy());
+            String pat = githubCredentialResolver.resolve(source.getCreateBy());
             if (pat == null) {
                 return ResponseUtil.failRes(I18nUtil.get("devloop.github.pat.not.configured"));
             }

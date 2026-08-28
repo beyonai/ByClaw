@@ -1167,8 +1167,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
   // 新增和编辑渠道共用保存状态，统一控制确定按钮的加载反馈。
   const [sourceSaving, setSourceSaving] = useState(false);
   const [hasPatSaved, setHasPatSaved] = useState(false);
-  // GH_TOKEN 查询是否已回,用于避免结果未到时研发项目提醒条闪现;查询失败也置 true(按未配置提醒)。
-  const [patChecked, setPatChecked] = useState(false);
   const [groupOptions, setGroupOptions] = useState<{ value: string; label: string }[]>([]);
   const [groupSearching, setGroupSearching] = useState(false);
   const [dwsAuthed, setDwsAuthed] = useState(false);
@@ -3175,15 +3173,12 @@ const ProjectDetailPanel: React.FC<Props> = ({
   useEffect(() => {
     checkGitHubPat()
       .then((res: any) => {
-        // hasPat 直接反映个人参数配置里的 GH_TOKEN 是否已设置,研发项目提醒条与 GitHub 收集源共用它。
+        // hasPat 反映兼容的个人参数 GH_TOKEN 是否已设置，仅用于 GitHub 收集源。
         setHasPatSaved(!!res?.hasPat);
       })
       .catch((error) => {
         // PAT 状态只是 GitHub 收集源的辅助信息，失败时不影响详情页其它 tab 功能。
         console.error('Failed to check GitHub PAT:', error);
-      })
-      .finally(() => {
-        setPatChecked(true);
       });
   }, []);
 
@@ -3393,20 +3388,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
     });
     // 轻提示引导用户怎么聊出需求,并指向回答下方的“沉淀为需求”闭环。
     message.info(t('requirement.addMenu.chatTip'));
-  };
-
-  // 研发项目依赖个人参数配置里的 GH_TOKEN(agent clone/push 私有仓库);未配置时点提醒条弹友好说明,
-  // 引导去设置。以提醒为主,不阻塞任何 tab 功能。直达 personalParams tab 靠 navigate state 传 tab。
-  const openGithubTokenGuide = () => {
-    Modal.confirm({
-      title: t('githubToken.reminder.title'),
-      content: t('githubToken.reminder.content'),
-      okText: t('githubToken.reminder.goSetting'),
-      cancelText: t('githubToken.reminder.later'),
-      onOk: () => {
-        navigate('/settings', { state: { tab: 'personalParams' } });
-      },
-    });
   };
 
   const requirementAddMenuItems: MenuProps['items'] = [
@@ -7089,20 +7070,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
                 </Button>
               )}
             </div>
-          }
-        />
-      )}
-      {/* 研发项目未配置 GH_TOKEN 时贴一条提醒;点击整条打开友好引导弹窗。以提醒为主,可关闭,不阻塞。 */}
-      {isDevelopProject && patChecked && !hasPatSaved && (
-        <Alert
-          className={styles.githubTokenAlert}
-          type="warning"
-          showIcon
-          closable
-          message={
-            <span className={styles.githubTokenAlertText} onClick={openGithubTokenGuide}>
-              {t('githubToken.reminder.alert')}
-            </span>
           }
         />
       )}
