@@ -10,7 +10,7 @@ export interface PostgresMigration {
 
 export const POSTGRES_TABLE_PREFIX = "byai_super_";
 
-/** 持久化模型：业务状态、Pi 原生记录、跨实例租约和短期执行凭证。 */
+/** 持久化模型：业务状态、Pi 原生记录、跨实例租约和 Run 执行凭证。 */
 export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [
   {
     version: 1,

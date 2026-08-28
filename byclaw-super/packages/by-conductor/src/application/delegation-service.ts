@@ -76,7 +76,7 @@ export interface DelegationTimeoutOptions {
   firstActivityMs: number;
   /** 执行期间连续无任何可信活动的最长时间。 */
   idleMs: number;
-  /** callback Connector 受理后等待终态回调的绝对时限。 */
+  /** callback Connector 受理后等待终态回调的绝对时限；0 表示禁用。 */
   callbackMs: number;
 }
 
@@ -118,7 +118,7 @@ export class DelegationService {
       : {
           firstActivityMs: timeoutOptions.firstActivityMs ?? 300_000,
           idleMs: timeoutOptions.idleMs ?? 900_000,
-          callbackMs: timeoutOptions.callbackMs ?? 300_000,
+          callbackMs: timeoutOptions.callbackMs ?? 0,
         };
   }
 
@@ -982,18 +982,20 @@ export class DelegationService {
     return updated;
   }
 
-  /** callAgent 已可靠受理；保存唯一的绝对回调截止时间，不受子流活动影响。 */
+  /** callAgent 已可靠受理；启用时保存唯一的绝对回调截止时间。 */
   async #checkpointCallbackWait(
     delegation: Delegation,
     partialOutput: string,
   ): Promise<Delegation> {
     const acceptedAt = this.now();
+    const { callbackDeadlineAt: persistedDeadline, ...withoutDeadline } = delegation;
     const updated: Delegation = {
-      ...delegation,
+      ...withoutDeadline,
       partialOutput,
       // 恢复崩溃前已可靠投递的 callback 执行时，不得把绝对截止时间向后延长。
-      callbackDeadlineAt:
-        delegation.callbackDeadlineAt ?? acceptedAt + this.#timeouts.callbackMs,
+      ...(this.#timeouts.callbackMs > 0
+        ? { callbackDeadlineAt: persistedDeadline ?? acceptedAt + this.#timeouts.callbackMs }
+        : {}),
       version: delegation.version + 1,
       updatedAt: acceptedAt,
     };

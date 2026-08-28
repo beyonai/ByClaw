@@ -29,13 +29,10 @@ describe("应用配置", () => {
       APP_CONFIG_DEFAULTS.database.maxConnections,
     );
     expect(config.runLeaseMs).toBe(APP_CONFIG_DEFAULTS.run.leaseMs);
-    expect(config.runUserInteractionTimeoutMs).toBe(
-      APP_CONFIG_DEFAULTS.run.userInteractionTimeoutMs,
-    );
     expect(config.delegationTimeouts).toEqual({
       firstActivityMs: 300_000,
       idleMs: 900_000,
-      callbackMs: 10_800_000,
+      callbackMs: 0,
     });
     expect(config.openClaw).toEqual({
       cancelConfirmationTimeoutMs: 30_000,
@@ -54,16 +51,14 @@ describe("应用配置", () => {
     });
   });
 
-  it("解析数据库 idle timeout 和执行凭证清理周期", () => {
+  it("解析数据库 idle timeout 和实例 ID", () => {
     const config = loadConfig({
       ...required,
       DB_IDLE_TIMEOUT_MS: "45000",
-      RUN_CREDENTIAL_CLEANUP_INTERVAL_MS: "120000",
       BYCLAW_INSTANCE_ID: "instance-a",
     });
 
     expect(config.database.idleTimeoutMs).toBe(45_000);
-    expect(config.runCredentialCleanupIntervalMs).toBe(120_000);
     expect(config.instanceId).toBe("instance-a");
   });
 
@@ -82,7 +77,6 @@ describe("应用配置", () => {
       DB_HOST: "postgres.internal",
       DB_PORT: "6432",
       RUN_LEASE_MS: "45000",
-      RUN_USER_INTERACTION_TIMEOUT_MS: "600000",
       PI_PROVIDER: "volcengine-ark",
       PI_MODEL: "deepseek-test",
       ARK_BASE_URL: "https://ark.example.test/api/v3",
@@ -100,7 +94,6 @@ describe("应用配置", () => {
     expect(config.database.host).toBe("postgres.internal");
     expect(config.database.port).toBe(6_432);
     expect(config.runLeaseMs).toBe(45_000);
-    expect(config.runUserInteractionTimeoutMs).toBe(600_000);
     expect(config.delegationTimeouts).toEqual({
       firstActivityMs: 240_000,
       idleMs: 800_000,

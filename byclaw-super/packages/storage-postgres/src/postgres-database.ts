@@ -1206,6 +1206,7 @@ export class PostgresRunExecutionQueue implements RunExecutionQueue {
     delegationId: string;
     status: "COMPLETED" | "FAILED" | "CANCELLED";
     finalAnswer: string;
+    enforceDeadline?: boolean;
   }): Promise<{ accepted: boolean; runId?: string; wakeRun?: boolean }> {
     return transaction(this.pool, async (client) => {
       // 事件写入会先持有 Run 事件序列锁，再通过外键读取 runs。这里必须采用相同顺序：
@@ -1252,8 +1253,8 @@ export class PostgresRunExecutionQueue implements RunExecutionQueue {
       if (["COMPLETED", "FAILED", "CANCELLED", "TIMED_OUT"].includes(row.delegation_status)) {
         return { accepted: false, runId: row.run_id };
       }
-      // 截止时间由数据库时钟裁决；即使扫描器尚未抢到，迟到 Resume 也不能越过期限。
-      if (row.callback_expired) {
+      // 启用超时时由数据库时钟裁决；即使扫描器尚未抢到，迟到 Resume 也不能越过期限。
+      if (input.enforceDeadline !== false && row.callback_expired) {
         return { accepted: false, runId: row.run_id };
       }
       if (["CANCELLING", "COMPLETED", "FAILED", "CANCELLED"].includes(row.run_status)) {
@@ -1454,7 +1455,6 @@ implements ExecutionCredentialRepository {
     runId: string;
     instanceId: string;
     fencingToken: number;
-    now: number;
   }): Promise<ExecutionCredential | undefined> {
     const result = await this.pool.query(
       `SELECT c.*
@@ -1463,11 +1463,10 @@ implements ExecutionCredentialRepository {
          JOIN ${table(this.schema, "session_execution_leases")} l
            ON l.session_id = r.session_id AND l.run_id = r.id
         WHERE c.run_id = $1
-          AND c.expires_at > $2
-          AND l.owner_instance_id = $3
-          AND l.fencing_token = $4
+          AND l.owner_instance_id = $2
+          AND l.fencing_token = $3
           AND l.lease_expires_at > clock_timestamp()`,
-      [input.runId, date(input.now), input.instanceId, input.fencingToken],
+      [input.runId, input.instanceId, input.fencingToken],
     );
     return result.rows[0] ? mapCredential(result.rows[0]) : undefined;
   }
@@ -1478,15 +1477,6 @@ implements ExecutionCredentialRepository {
       [runId],
     );
   }
-
-  async deleteExpired(now: number): Promise<number> {
-    const result = await this.pool.query(
-      `DELETE FROM ${table(this.schema, "run_execution_credentials")}
-        WHERE expires_at <= $1`,
-      [date(now)],
-    );
-    return result.rowCount ?? 0;
-  }
 }
 
 async function writeCredential(
@@ -1494,18 +1484,13 @@ async function writeCredential(
   schema: string,
   credential: ExecutionCredential,
 ): Promise<void> {
-  const values = [
-    credential.runId,
-    credential.secret,
-    date(credential.expiresAt),
-    date(credential.createdAt),
-  ];
+  const values = [credential.runId, credential.secret, date(credential.createdAt)];
   await advisoryLock(client, `credential:${credential.runId}`);
   const updated = await client.query(
     `UPDATE ${table(schema, "run_execution_credentials")}
         SET credential = $2,
-            expires_at = $3,
-            created_at = $4
+            expires_at = 'infinity'::timestamptz,
+            created_at = $3
       WHERE run_id = $1`,
     values,
   );
@@ -1513,7 +1498,7 @@ async function writeCredential(
     await client.query(
       `INSERT INTO ${table(schema, "run_execution_credentials")} (
          run_id, credential, expires_at, created_at
-       ) VALUES ($1, $2, $3, $4)`,
+       ) VALUES ($1, $2, 'infinity'::timestamptz, $3)`,
       values,
     );
   }
@@ -2420,7 +2405,6 @@ function mapCredential(row: QueryResultRow): ExecutionCredential {
   return {
     runId: text(row.run_id),
     secret: text(row.credential),
-    expiresAt: milliseconds(row.expires_at),
     createdAt: milliseconds(row.created_at),
   };
 }
