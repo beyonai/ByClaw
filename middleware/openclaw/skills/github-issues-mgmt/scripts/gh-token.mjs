@@ -1,5 +1,25 @@
+import { readFileSync } from 'node:fs';
+
+const DEFAULT_CREDENTIAL_FILE = '/by/.connector-auth/.github/credential.json';
+
+function projectedGitHubToken() {
+  const credentialFile = process.env.BYCLAW_GITHUB_CREDENTIAL_FILE || DEFAULT_CREDENTIAL_FILE;
+  try {
+    const credential = JSON.parse(readFileSync(credentialFile, 'utf8'));
+    return credential?.provider === 'github' && typeof credential?.accessToken === 'string'
+      ? credential.accessToken.trim()
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 export function getGitHubToken() {
-  return process.env.BY_GH_TOKEN || process.env.GH_TOKEN || process.env.GITHUB_TOKEN || null;
+  return projectedGitHubToken()
+    || process.env.BY_GH_TOKEN
+    || process.env.GH_TOKEN
+    || process.env.GITHUB_TOKEN
+    || null;
 }
 
 export async function requireGitHubToken() {

@@ -162,8 +162,8 @@ describe("deliverReplyToAgentViaSdk overflow continuation media handling", () =>
     await result.finalize();
 
     expect(contexts).toHaveLength(2);
-    expect(contexts[0]?.MediaPath).toBe("/by/.sessions/user-media/report.png");
-    expect(contexts[0]?.MediaPaths).toEqual(["/by/.sessions/user-media/report.png"]);
+    expect(contexts[0]?.MediaPath).toBe("/by/report.png");
+    expect(contexts[0]?.MediaPaths).toEqual(["/by/report.png"]);
     expect(contexts[1]?.RawBody).toContain("上一轮回答因对话达到上下文窗口上限而被截断");
     expect(contexts[1]).not.toHaveProperty("MediaPath");
     expect(contexts[1]).not.toHaveProperty("MediaPaths");

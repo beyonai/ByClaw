@@ -31,7 +31,7 @@ node skills/github-issues-mgmt/scripts/gh-issues-list.mjs --limit 1
 
 **If `"ok": true`** → proceed based on user intent.
 
-**If `"auth_required": true`** → 展示返回的 `message`，提示用户先在平台连接器中授权 GitHub，然后停止本次 GitHub 操作。连接器授权后的新凭据会在新建或重启沙箱时注入。
+**If `"auth_required": true`** → 展示返回的 `message`，提示用户先在平台连接器中授权 GitHub，然后停止本次 GitHub 操作。授权成功后，凭据会通过用户私有工作区自动同步到当前沙箱，无需重启。
 
 **禁止**：不得向用户索要 GITHUB_TOKEN、PAT、Personal Access Token，也不得自行发起第二套 Device Flow。
 

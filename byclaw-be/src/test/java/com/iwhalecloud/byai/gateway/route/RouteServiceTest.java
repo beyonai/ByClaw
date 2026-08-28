@@ -473,6 +473,60 @@ class RouteServiceTest {
     }
 
     @Test
+    void route_formatsCommonFilePlaceholderAsMarkdownLink() throws Exception {
+        ChatProcessContext ctx = buildContext();
+        ctx.getAssistantChatDto().setChatContent("{{COMMON_FILE_file-001}}请读取");
+
+        ResourceVo file = new ResourceVo();
+        file.setResourceType(AgentMetaEnum.COMMON_FILE);
+        file.setResourceId("file-001");
+        file.setResourceName("合同.pdf");
+        ctx.getAssistantChatDto().setResourceList(Arrays.asList(file));
+
+        when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any()))
+                .thenAnswer(invocation -> {
+                    ctx.gatewayEventQueue.offer(currentTraceDoneEvent(ctx));
+                    return successResponse();
+                });
+
+        routeService.route(ctx);
+
+        ArgumentCaptor<Object> contentCaptor = ArgumentCaptor.forClass(Object.class);
+        verify(gatewayClient).sendMessage(anyString(), anyString(), contentCaptor.capture(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any());
+        org.assertj.core.api.Assertions.assertThat(contentCaptor.getValue())
+                .isEqualTo("[合同.pdf](file-001) 请读取");
+    }
+
+    @Test
+    void route_formatsCommonFolderPlaceholderAsMarkdownLink() throws Exception {
+        ChatProcessContext ctx = buildContext();
+        ctx.getAssistantChatDto().setChatContent("{{COMMON_FOLDER_folder-001}}请列出文件");
+
+        ResourceVo folder = new ResourceVo();
+        folder.setResourceType(AgentMetaEnum.COMMON_FOLDER);
+        folder.setResourceId("folder-001");
+        folder.setResourceName("项目资料");
+        ctx.getAssistantChatDto().setResourceList(Arrays.asList(folder));
+
+        when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any()))
+                .thenAnswer(invocation -> {
+                    ctx.gatewayEventQueue.offer(currentTraceDoneEvent(ctx));
+                    return successResponse();
+                });
+
+        routeService.route(ctx);
+
+        ArgumentCaptor<Object> contentCaptor = ArgumentCaptor.forClass(Object.class);
+        verify(gatewayClient).sendMessage(anyString(), anyString(), contentCaptor.capture(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any());
+        org.assertj.core.api.Assertions.assertThat(contentCaptor.getValue())
+                .isEqualTo("[项目资料](folder-001) 请列出文件");
+    }
+
+    @Test
     void route_sendsSingleAgentHandoffRequestWithoutBackendContextInjection() throws Exception {
         ChatProcessContext ctx = buildContext();
         ctx.getAssistantChatDto().setChatContent("请承接上条 coder 交接单，并给出 reviewer 结论");

@@ -31,7 +31,7 @@ metadata:
 node skills/github-issues-mgmt/scripts/gh-issues-list.mjs --limit 1
 ```
 
-If `"auth_required": true` → 展示 output 的 `message`，提示用户先在平台连接器中授权 GitHub，然后停止本次同步。连接器授权后的新凭据会在新建或重启沙箱时注入。
+If `"auth_required": true` → 展示 output 的 `message`，提示用户先在平台连接器中授权 GitHub，然后停止本次同步。授权成功后凭据会通过用户私有工作区自动同步到当前沙箱，无需重启。
 
 ---
 

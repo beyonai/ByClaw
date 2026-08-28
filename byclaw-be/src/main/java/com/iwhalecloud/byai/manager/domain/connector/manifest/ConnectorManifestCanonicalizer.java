@@ -12,6 +12,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -96,6 +97,25 @@ public class ConnectorManifestCanonicalizer {
         }
     }
 
+    /** Returns the shared-volume credential projection declared by the connector, if any. */
+    public Optional<CredentialProjectionSpec> extractCredentialProjection(
+            ConnectorInfo connector, String manifestJson) {
+        String canonicalManifest = canonicalize(connector, manifestJson);
+        try {
+            JsonNode authStorage = objectMapper.readTree(canonicalManifest).path("authStorage");
+            if (!"credential-reference".equals(authStorage.path("mode").textValue())
+                    || !"shared-volume-projection".equals(authStorage.path("runtimeMutation").textValue())) {
+                return Optional.empty();
+            }
+            return Optional.of(new CredentialProjectionSpec(authStorage.path("projectionPath").textValue()));
+        } catch (JsonProcessingException e) {
+            throw new InvalidConnectorManifestException("Invalid connector Manifest JSON", e);
+        }
+    }
+
+    public record CredentialProjectionSpec(String projectionPath) {
+    }
+
     private void validateRoot(JsonNode root, String connectorCode, String connectorSkillCode) {
         requireObject(root, "Manifest root");
         rejectSensitiveFields(root);
@@ -145,9 +165,14 @@ public class ConnectorManifestCanonicalizer {
             throw invalid("runtime.type and authStorage.mode are incompatible");
         }
         requireAllowedText(authStorage, "owner", "be-auth-job", "user-sandbox-auth-job");
-        requireAllowedText(authStorage, "runtimeMutation", "provider-refresh-only", "sandbox-native");
+        String runtimeMutation = requireAllowedText(authStorage, "runtimeMutation", "provider-refresh-only",
+            "sandbox-native", "shared-volume-projection");
         if ("native-home".equals(storageMode)) {
-            validateNativePath(requireNonBlankText(authStorage, "nativePath"));
+            if ("shared-volume-projection".equals(runtimeMutation)) {
+                throw invalid("native-home must not use shared-volume-projection");
+            }
+            validateConnectorAuthPath(requireNonBlankText(authStorage, "nativePath"), "nativePath");
+            rejectProjectionPath(authStorage, storageMode);
             rejectManagedEnvironmentKeys(authStorage, storageMode);
         } else if ("managed-environment".equals(storageMode)) {
             if (authStorage.has("nativePath")) {
@@ -156,12 +181,19 @@ public class ConnectorManifestCanonicalizer {
             requireText(runtime, "authorizeIn", "be-auth-job");
             requireText(authStorage, "owner", "be-auth-job");
             requireText(authStorage, "runtimeMutation", "provider-refresh-only");
+            rejectProjectionPath(authStorage, storageMode);
             validateManagedEnvironmentKeys(authStorage);
         } else {
             if (authStorage.has("nativePath")) {
                 throw invalid("credential-reference must not define nativePath");
             }
             rejectManagedEnvironmentKeys(authStorage, storageMode);
+            if ("shared-volume-projection".equals(runtimeMutation)) {
+                validateConnectorAuthPath(requireNonBlankText(authStorage, "projectionPath"), "projectionPath");
+                requireText(authStorage, "owner", "be-auth-job");
+            } else {
+                rejectProjectionPath(authStorage, storageMode);
+            }
         }
         JsonNode environment = requireObject(authStorage.get("environment"), "authStorage.environment");
         if ("managed-environment".equals(storageMode) && !environment.isEmpty()) {
@@ -207,21 +239,27 @@ public class ConnectorManifestCanonicalizer {
         }
     }
 
-    private void validateNativePath(String value) {
+    private void validateConnectorAuthPath(String value, String fieldName) {
         try {
             Path path = Path.of(value);
             if (!path.isAbsolute() || !path.normalize().startsWith(CONNECTOR_AUTH_ROOT)
                     || path.normalize().equals(CONNECTOR_AUTH_ROOT)) {
-                throw invalid("authStorage.nativePath must be under /by/.connector-auth/");
+                throw invalid("authStorage." + fieldName + " must be under /by/.connector-auth/");
             }
         } catch (InvalidPathException e) {
-            throw invalid("authStorage.nativePath is invalid");
+            throw invalid("authStorage." + fieldName + " is invalid");
         }
     }
 
     private void rejectManagedEnvironmentKeys(JsonNode authStorage, String storageMode) {
         if (authStorage.has("managedEnvironmentKeys")) {
             throw invalid(storageMode + " must not define managedEnvironmentKeys");
+        }
+    }
+
+    private void rejectProjectionPath(JsonNode authStorage, String storageMode) {
+        if (authStorage.has("projectionPath")) {
+            throw invalid(storageMode + " must not define projectionPath");
         }
     }
 

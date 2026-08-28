@@ -47,18 +47,19 @@ class ConnectorSchemaTest {
     }
 
     @Test
-    void githubConnectorMigrationRepairsExistingInactiveTemplate() throws Exception {
+    void githubConnectorMigrationReplacesTemplateWithFinalDefinition() throws Exception {
         String dml = normalizeSql(readPreservingCase(
             "deploy/migrations/versions/V0.4.0/V0.4.0__dml.sql"));
 
         assertThat(dml).contains(
-            "WHERE NOT EXISTS ( SELECT 1 FROM byai.byai_connector_info WHERE connector_code = 'github' )",
-            "UPDATE byai.byai_connector_info SET connector_name = 'GitHub'",
-            "connector_type = 'SYSTEM'",
-            "provider_code = 'github-oauth2'",
-            "sort = 40",
-            "status_cd = '00A'",
-            "WHERE connector_code = 'github'");
+            "DELETE FROM byai.byai_connector_info WHERE connector_code = 'github'",
+            "INSERT INTO byai.byai_connector_info",
+            "'SYSTEM'",
+            "'github-oauth2'",
+            "shared-volume-projection",
+            "projectionPath",
+            "/by/.connector-auth/.github/credential.json",
+            "40");
     }
 
     @Test
@@ -644,11 +645,17 @@ class ConnectorSchemaTest {
         List<ImaConnectorSeed> imaSeeds = new ArrayList<>();
         int insertStart = sql.indexOf(insertMarker);
         while (insertStart >= 0) {
+            int statementEnd = findSqlStatementEnd(sql, insertStart);
+            String statement = sql.substring(insertStart, statementEnd + 1);
+            if (!statement.contains("'ima-openapi'")) {
+                insertStart = sql.indexOf(insertMarker, statementEnd + 1);
+                continue;
+            }
             ImaConnectorSeed seed = extractConnectorInsert(sql, insertStart, insertMarker);
             if ("ima-openapi".equals(seed.values().get("connector_code"))) {
                 imaSeeds.add(seed);
             }
-            insertStart = sql.indexOf(insertMarker, insertStart + insertMarker.length());
+            insertStart = sql.indexOf(insertMarker, statementEnd + 1);
         }
         assertThat(imaSeeds).as("IMA connector INSERT").hasSize(1);
         return imaSeeds.getFirst();

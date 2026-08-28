@@ -65,6 +65,29 @@ class ConnectorCredentialWorkspaceServiceTest {
     }
 
     @Test
+    void resolveProjectionFileMapsManifestPathIntoUserBucket() throws Exception {
+        stubValidUserAndBucket();
+
+        Path file = service.resolveProjectionFile(
+            USER_ID, "/by/.connector-auth/.custom/nested/oauth.json");
+
+        assertThat(file).isEqualTo(tempDir.toRealPath()
+            .resolve("byclaw-user001/by/.connector-auth/.custom/nested/oauth.json"));
+        assertThat(file.getParent()).isDirectory();
+    }
+
+    @Test
+    void resolveProjectionFileRejectsPathsOutsidePrivateConnectorRoot() {
+        assertThatThrownBy(() -> service.resolveProjectionFile(USER_ID, "/tmp/credential.json"))
+            .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.resolveProjectionFile(
+            USER_ID, "/by/.connector-auth/../credential.json"))
+            .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.resolveProjectionFile(USER_ID, "/by/.connector-auth"))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void constructorRejectsNullOrBlankStorageRoot() {
         assertThatThrownBy(() -> new ConnectorCredentialWorkspaceService(
             loginApplicationService, userBucketNamingService, null))
@@ -229,8 +252,6 @@ class ConnectorCredentialWorkspaceServiceTest {
         Files.writeString(storageFile, "not a directory");
         service = new ConnectorCredentialWorkspaceService(
             loginApplicationService, userBucketNamingService, storageFile.toString());
-        when(loginApplicationService.getLoginInfo(USER_ID)).thenReturn(loginInfo("user001"));
-        when(userBucketNamingService.buildUserBucketName("user001")).thenReturn("byclaw-user001");
 
         assertThatThrownBy(() -> service.resolve(USER_ID, "github"))
             .isInstanceOf(IllegalStateException.class);
