@@ -259,7 +259,7 @@ const EasyConfirm = (props: IProps) => {
           {compProps &&
             (Comp ? (
               <Suspense>
-                <Comp {...compProps} key={getUUId(compProps)} />
+                <Comp {...compProps} key={getUUId(compProps)} renderInEasyConfirm />
               </Suspense>
             ) : (
               <NotSupport />
