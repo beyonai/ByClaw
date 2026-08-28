@@ -1054,6 +1054,7 @@ public class AuthApplicationService {
         queryWrapper.eq(PrivilegeGrant::getOperType, OperType.READ);
         queryWrapper.eq(PrivilegeGrant::getStatusCd, USE_APPLY_PENDING_STATUS);
         queryWrapper.orderByDesc(PrivilegeGrant::getCreateDate);
+        queryWrapper.orderByDesc(PrivilegeGrant::getPrivilegeGrantId);
         return privilegeGrantMapper.selectList(queryWrapper);
     }
 

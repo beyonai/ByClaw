@@ -597,6 +597,7 @@ export interface ResourceOperationPermissions {
   canAuditUse: boolean; // 是否有审核权限
   canSetDefault: boolean; // 是否有设为默认权限
   canRestore: boolean; // 是否有恢复权限
+  useApplyPending?: boolean; // 使用申请是否待审核
 }
 
 /**

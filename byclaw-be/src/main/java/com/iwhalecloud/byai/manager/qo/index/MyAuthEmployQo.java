@@ -25,5 +25,15 @@ public class MyAuthEmployQo extends AuthQo {
      */
     private String type = "all";
 
+    /**
+     * 数字员工类型。017 表示数字员工组；为空时保持历史行为，查询全部类型。
+     */
+    private String agentType;
+
+    /**
+     * 是否排除数字员工组。true 时排除 agentType=017。
+     */
+    private Boolean excludeEmployeeGroup;
+
     private String machineChannel;
 }

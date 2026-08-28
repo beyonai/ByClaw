@@ -233,6 +233,11 @@ export default [
             component: './digitalEmployees',
           },
           {
+            path: '/myEmployees',
+            name: 'myEmployees',
+            component: './myEmployees',
+          },
+          {
             path: '/digitalEmployeesCreate',
             name: 'digitalEmployeesCreate',
             component: './manager/pages/digitalEmployeeMgr/EmployeeDetail',
