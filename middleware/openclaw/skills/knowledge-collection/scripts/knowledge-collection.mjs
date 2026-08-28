@@ -30,7 +30,7 @@ function defineCommand(spec) {
 const COMMAND_SPECS = {
   'public-discover': defineCommand({
     group: 'discovery',
-    title: '并行运行 SearXNG 与 hot-discovery，持久化并合并公共 URL 候选',
+    title: '运行 SearXNG 与按需 hot-discovery，持久化并合并公共 URL 候选',
     args: {
       '--session-dir': '必填。已由 init 创建的会话目录',
       '--query': '必填。公共互联网检索词',
@@ -38,7 +38,7 @@ const COMMAND_SPECS = {
       '--language': '可选。SearXNG 语言，默认 all',
       '--pageno': '可选。SearXNG 页码，默认 1',
       '--max-results': '可选。SearXNG 结果上限，默认 20',
-      '--requested-count': '可选。用户明确指定的采集篇数；指定时只运行 SearXNG',
+      '--requested-count': '可选。用户明确指定的采集篇数；先运行 SearXNG，SearXNG 无候选或输出无效时自动回退到 hot-discovery',
       '--timeout': '可选。SearXNG 外层进程总等待秒数，默认 60；单个引擎请求固定为 10 秒',
       '--time-range': '可选。SearXNG 时间范围：day | week | month | year',
       '--tiers': '可选。hot-discovery 档位，默认 1,2,3',

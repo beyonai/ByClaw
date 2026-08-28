@@ -92,3 +92,25 @@ test('healthy bridge passes without recovery commands', async () => {
   assert.deepEqual(outcome, { ok: true, attempts: 1 });
   assert.equal(runner.calls.length, 2);
 });
+
+test('cold starts managed Chrome with the recovery script before daemon restart', async () => {
+  const runner = scriptedRunner([
+    { cmd: 'bycli', args: ['doctor'], result: failed(69, 'BROWSER_CONNECT') },
+    { cmd: 'bycli', args: ['daemon', 'status'], result: failed(1) },
+    {
+      cmd: 'openclaw',
+      args: ['browser', '--browser-profile', 'openclaw', 'status'],
+      result: ok('stopped'),
+    },
+    { cmd: '/usr/local/bin/start-chrome.sh', args: [], result: ok() },
+    { cmd: 'bycli', args: ['doctor'], result: ok('Everything looks good') },
+    { cmd: 'bycli', args: ['daemon', 'status'], result: ok(healthyDaemon) },
+  ]);
+  const bycli = createBycliIntegration({ run: runner.run, fileExists: async () => true });
+
+  const outcome = await bycli.ensureBridge();
+
+  assert.deepEqual(outcome, { ok: true, attempts: 2 });
+  assert.deepEqual(runner.calls[3], ['/usr/local/bin/start-chrome.sh', []]);
+  assert.equal(runner.calls.some(([cmd, args]) => cmd === 'bycli' && args[1] === 'restart'), false);
+});

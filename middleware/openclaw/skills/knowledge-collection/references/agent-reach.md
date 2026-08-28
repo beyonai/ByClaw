@@ -23,6 +23,8 @@ bycli web read --url <URL> --stdout
 不得使用 `web_fetch`、`curl`、`wget`、`requests`。**byCLI 无法完成时必须停止并报告，不得回退到其他网页获取工具。**
 已经用直连拿到内容时该结果作废，按规范流程重新采集。
 
+`knowledge-collection public-discover` 自己负责公共发现的回退、桥接恢复和候选证据落盘。SearXNG 无候选或输出无效时，不得脱离 `public-discover` 手工执行 `bycli <site> search` 补结果；应由命令内置的 `hot_discovery` 回退进入统一恢复链路。其他经路由的 byCLI 命令出现 `BROWSER_CONNECT` 时，必须按已加载的 `bycli` skill 执行托管浏览器状态检查、`/usr/local/bin/start-chrome.sh` 冷启动或标准启动回退、复检与最多一次 daemon restart，不得直接要求用户连接桌面 Chrome。
+
 ## 路由表
 
 | 目标 | 首选执行器 | 唯一允许的兜底 |

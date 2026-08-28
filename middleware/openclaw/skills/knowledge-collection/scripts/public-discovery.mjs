@@ -172,13 +172,22 @@ export async function runPublicDiscover(paths, args, options = {}) {
     channel: 'hot-discovery',
     executable: process.execPath,
     args: [hotDiscoveryScript, 'search', '--query', query, '--tiers', tiers,
-      '--limit', limit, '--dimensions', category],
+      '--limit', requestedCount || limit, '--dimensions', category],
   };
-  const searxngPromise = runSearxngProcess(searxngSpec, { timeoutMs: searxngTimeoutMs });
-  const hotPromise = requestedCount === null
-    ? runHotDiscoveryProcess(hotDiscoverySpec)
-    : Promise.resolve({ skipped: true });
-  const [searxngOutcome, hotOutcome] = await Promise.all([searxngPromise, hotPromise]);
+  let searxngOutcome;
+  let hotOutcome;
+  if (requestedCount === null) {
+    [searxngOutcome, hotOutcome] = await Promise.all([
+      runSearxngProcess(searxngSpec, { timeoutMs: searxngTimeoutMs }),
+      runHotDiscoveryProcess(hotDiscoverySpec),
+    ]);
+  } else {
+    searxngOutcome = await runSearxngProcess(searxngSpec, { timeoutMs: searxngTimeoutMs });
+    const requestedSxDoc = parseSuccess(searxngOutcome);
+    hotOutcome = requestedSxDoc && Array.isArray(requestedSxDoc.results) && requestedSxDoc.results.length > 0
+      ? { skipped: true }
+      : await runHotDiscoveryProcess(hotDiscoverySpec);
+  }
 
   const sxDoc = parseSuccess(searxngOutcome);
   const hotDoc = parseSuccess(hotOutcome);
