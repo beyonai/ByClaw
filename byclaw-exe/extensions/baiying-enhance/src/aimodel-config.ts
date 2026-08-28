@@ -68,6 +68,13 @@ type BaiyingReasoningConfig = {
     budgets?: AimodelThinkingBudgets;
 };
 
+export type ResolvedDefaultBaiyingAimodelProviderBundle = {
+    providerKey: string;
+    modelRef: string;
+    provider: ProviderBundle;
+    hash: string;
+};
+
 function nonEmptyString(value: unknown): string {
     return typeof value === "string" && value.trim() ? value.trim() : "";
 }
@@ -488,12 +495,7 @@ export async function resolveDefaultBaiyingAimodelProviderBundle(params: {
     modelType?: string;
     secretProviderName: string;
     log: LoggerLike;
-}): Promise<{
-    providerKey: string;
-    modelRef: string;
-    provider: ProviderBundle;
-    hash: string;
-} | null> {
+}): Promise<ResolvedDefaultBaiyingAimodelProviderBundle | null> {
     const redisKey = resolveAimodelTypeListRedisKey(params.redisKey);
     const typelistField = resolveAimodelTypeListField(params.modelType);
     const payload = await params.redisJsonStore.getHashJson?.({

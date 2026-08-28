@@ -4,6 +4,7 @@ import {
     resolveAimodelSecretProviderName,
     resolveAimodelTypeListRedisKey,
     resolveDefaultBaiyingAimodelProviderBundle,
+    type ResolvedDefaultBaiyingAimodelProviderBundle,
 } from "./aimodel-config.js";
 import {
     aimodelDefaultLlmIndexChanged,
@@ -30,6 +31,9 @@ export type AimodelDefaultRunSyncDeps = {
         | ((opts?: { fullWorkspaceReseed?: boolean; deletedSourceKeys?: string[] }) => Promise<void>)
         | undefined;
     aimodelSecretResolverScriptPath?: string;
+    onDefaultAimodelResolved?: (
+        resolved: ResolvedDefaultBaiyingAimodelProviderBundle,
+    ) => void | Promise<void>;
 };
 
 export type AimodelDefaultRunSyncOptions = {
@@ -208,6 +212,15 @@ export async function resolveMainDefaultAimodelOnAgentRun(
             `baiying-enhance: main agent run could not read Redis default LLM (key=${aimodelTypeListRedisKey}); check REDIS_* env for the gateway process`,
         );
         return undefined;
+    }
+    try {
+        await deps.onDefaultAimodelResolved?.(resolved);
+    } catch (error) {
+        deps.api.logger.warn(
+            `baiying-enhance: default LLM observer failed: ${
+                error instanceof Error ? error.message : String(error)
+            }`,
+        );
     }
 
     const bundle: ResolvedDefaultBundle = {

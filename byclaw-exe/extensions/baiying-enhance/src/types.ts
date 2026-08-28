@@ -87,14 +87,12 @@ export type BaiyingEnhancePluginConfig = {
     defaultProxyUrl?: string;
     /** Default API key for the proxy endpoint. */
     defaultApiKey?: string;
-    /** RepoWiki integration command. Default: byclaw-repowiki. */
-    repoWikiCommand?: string;
-    /** Maximum time for RepoWiki document generation. Default: 1800000 ms. */
-    repoWikiGenerateTimeoutMs?: number;
-    /** Maximum captured bytes per stdout/stderr stream. Default: 131072. */
-    repoWikiMaxCommandOutputBytes?: number;
-    /** Maximum size of the local repository passed to RepoWiki. Default: 524288000 bytes. */
-    repoWikiMaxRepositoryBytes?: number;
+    /** Synchronize the Redis platform default LLM into Zread's runtime config. Default: true. */
+    zreadModelSyncEnabled?: boolean;
+    /** Zread CLI executable. Default: zread. */
+    zreadCommand?: string;
+    /** Maximum time for one `zread config --stdio` synchronization. Default: 30000 ms. */
+    zreadConfigTimeoutMs?: number;
     /** Redis Hash key for Baiying AI model config. Default `byai:aimodel:config`. */
     aimodelConfigRedisKey?: string;
     /** Redis Hash key for Baiying AI model type list. Default `byai:aimodel:typelist`; field `LLM` supplies the default model. */

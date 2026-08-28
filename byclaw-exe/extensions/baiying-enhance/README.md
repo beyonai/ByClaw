@@ -217,17 +217,13 @@ MiniMax HTTP 客户端。`baiying-redis-image` provider 在每次原生工具调
 
 该格式的托管 agent 仍会保留 **`baiying_call`**，用于调用百应关联资源桥接工具：当 `relTools` 非空时合并进 `tools.allow`，否则写为 `tools.alsoAllow`。数字员工 JSON 内容变化后，Redis Pub/Sub 或显式 flush 触发重新扫描时，`relTools` 变更会随配置同步写回；插件同时写入一个禁用的内部 `skills.entries.__baiying_enhance_reload` 标记，让 OpenClaw 刷新 skills/tools 快照，无需重启网关。
 
-### `code_to_wiki`
+### Zread 默认模型同步
 
-`code_to_wiki` 使用当前数字员工从 Redis 解析出的模型配置，为 workspace 中已经存在的本地代码仓库运行 RepoWiki。工具不再克隆或更新 Git 仓库；调用方应先使用 Git 工具准备代码，再通过必填的 `repository_path` 指向该目录。`repository_path` 可以是当前数字员工 workspace 下的相对路径，也可以是受 workspace 包含的绝对路径。
+插件默认将 Redis `byai:aimodel:typelist` Hash 的 `LLM` 字段中 `isDefault=1` 的平台默认模型同步到运行用户的 Zread 配置。同步复用 OpenClaw 已有的默认模型解析与解密缓存，只支持 OpenAI-compatible provider；Anthropic provider 会保留现有 Zread 配置并输出告警。
 
-生成位置由必填的 `output_directory` 指定，不再写死到 `generated-wikis/`。该路径同样必须位于当前数字员工 workspace 内。输出目录已经存在时会复用，且工具失败时不会删除其中的原有文件；由本次调用新建的输出目录则会在失败时清理。
+插件通过 `zread config --stdio` 的 JSON-line 协议写入 `llm_provider=custom`、BaseURL、模型名和 API Key，不把密钥放入命令行或日志。首次启动会同步一次，之后 main agent 每次检查 Redis 默认模型时会按模型配置签名去重并在变化后重新同步。可通过 `zreadModelSyncEnabled=false` 禁用，或用 `zreadCommand`、`zreadConfigTimeoutMs` 调整命令及超时。
 
-RepoWiki 运行期间，插件会将其 stdout/stderr 文本按行转换为工具进度更新。插件仍负责服务端模型密钥注入、超时与取消、LLM 错误识别、生成文件校验及临时 RepoWiki runtime 清理。
-
-工具不会根据数字员工名称开放。验收测试期间，插件会为所有托管数字员工自动授权：当 `relTools` 非空时合并进 `tools.allow`，否则写入 `tools.alsoAllow`，无需在单个数字员工配置中显式声明。
-
-典型调用顺序为：Git 工具克隆或更新仓库并返回本地路径，然后调用 `code_to_wiki({ repository_path, output_directory, language, output_format })`。后续重新生成时复用同一个 `repository_path`，不会再次克隆。
+同步成功后，agent 可以在已经准备好的本地仓库根目录直接运行 `zread generate --stdio -y --draft resume --skip-failed`；生成内容由 Zread 写入该仓库的 `.zread/wiki/`，stdout JSON 事件可直接作为生成进度消费。运行时镜像内置 `zread-wiki` skill，只提供该直接调用约定与“不得重复克隆”的边界，不包装或代理 CLI。
 
 ## HTTP
 

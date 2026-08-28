@@ -1,12 +1,12 @@
 {
   "id": "baiying-enhance",
   "name": "Baiying Enhance",
-  "description": "Sync authorized Baiying digital employees from Redis, expose Baiying resources, generate repository documentation with RepoWiki, and route native image generation through Redis-selected models.",
+  "description": "Sync authorized Baiying digital employees from Redis, expose Baiying resources, and route native image generation through Redis-selected models.",
   "version": "1.0.0",
   "enabledByDefault": true,
   "providers": ["baiying-aimodel"],
   "contracts": {
-    "tools": ["baiying_call", "updateTaskPlan", "code_to_wiki"],
+    "tools": ["baiying_call", "updateTaskPlan"],
     "imageGenerationProviders": ["baiying-redis-image", "volcengine"]
   },
   "imageGenerationProviderMetadata": {
@@ -125,25 +125,20 @@
         "type": "string",
         "description": "Default API key for the proxy endpoint."
       },
-      "repoWikiCommand": {
+      "zreadModelSyncEnabled": {
+        "type": "boolean",
+        "description": "Synchronize the Redis platform default LLM into the runtime user's Zread config. Default true.",
+        "default": true
+      },
+      "zreadCommand": {
         "type": "string",
-        "description": "RepoWiki wrapper executable used by code_to_wiki.",
-        "default": "byclaw-repowiki"
+        "description": "Zread CLI executable used for runtime model configuration.",
+        "default": "zread"
       },
-      "repoWikiGenerateTimeoutMs": {
+      "zreadConfigTimeoutMs": {
         "type": "number",
-        "description": "Maximum duration of RepoWiki generation in milliseconds.",
-        "default": 1800000
-      },
-      "repoWikiMaxCommandOutputBytes": {
-        "type": "number",
-        "description": "Maximum captured bytes for each command output stream.",
-        "default": 131072
-      },
-      "repoWikiMaxRepositoryBytes": {
-        "type": "number",
-        "description": "Maximum allowed size in bytes for the local repository passed to RepoWiki.",
-        "default": 524288000
+        "description": "Maximum duration of one zread config --stdio synchronization in milliseconds.",
+        "default": 30000
       },
       "aimodelConfigRedisKey": {
         "type": "string",

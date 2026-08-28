@@ -3,6 +3,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/compat";
 import { AgentRegistryState } from "./agent-state.js";
+import {
+  DEFAULT_AIMODEL_TYPELIST_FIELD,
+  resolveAimodelSecretProviderName,
+  resolveAimodelTypeListRedisKey,
+  resolveDefaultBaiyingAimodelProviderBundle,
+  type ResolvedDefaultBaiyingAimodelProviderBundle,
+} from "./aimodel-config.js";
 import { registerBaiyingAimodelRuntimeProvider } from "./aimodel-runtime-provider.js";
 import { resolveDefaultContentIndexPath } from "./agent-content-index.js";
 import { registerBaiyingHttpRoutes } from "./http-routes.js";
@@ -12,10 +19,6 @@ import { registerManagedAgentModelHooks } from "./managed-agent-model-hook.js";
 import { createRedisJsonStore, setSharedRedisJsonStore } from "./redis-json-store.js";
 import { loadBaiyingRedisEnvDefaults } from "./redis-env.js";
 import { createBaiyingCallToolFactory } from "./baiying-call-tool.js";
-import {
-  createCodeToWikiToolFactory,
-  resolveCodeToWikiSettings,
-} from "./code-to-wiki-tool.js";
 import {
   registerBaiyingNativeImageRouting,
 } from "./image-generation/native-image-provider.js";
@@ -35,7 +38,10 @@ import {
   markBaiyingEnhanceColdStartUnavailable,
   resetBaiyingEnhanceColdStartReadiness,
 } from "./cold-start-readiness.js";
-import { resolveDefaultManagedWorkspacePath } from "./workspace-paths.js";
+import {
+  createZreadDefaultModelSync,
+  resolveZreadModelSyncSettings,
+} from "./zread-default-model-sync.js";
 
 function resolvePluginPath(api: OpenClawPluginApi, raw: string): string {
   if (path.isAbsolute(raw)) {
@@ -85,19 +91,6 @@ function resolveColdStartReadySettleMs(): number {
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function resolveAgentWorkspaceForTool(api: OpenClawPluginApi, agentId: string): string {
-  try {
-    const cfg = api.runtime?.config?.current?.() ?? api.runtime?.config?.loadConfig?.();
-    const entry = cfg?.agents?.list?.find((candidate) => candidate.id === agentId);
-    if (typeof entry?.workspace === "string" && entry.workspace.trim()) {
-      return entry.workspace.trim();
-    }
-  } catch {
-    // Fall back to the standard managed-agent workspace layout.
-  }
-  return resolveDefaultManagedWorkspacePath(agentId);
 }
 
 function warnIfConversationHooksBlocked(api: OpenClawPluginApi): void {
@@ -153,6 +146,36 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
       error: (message) => api.logger.error(message),
     },
   });
+  const zreadModelSyncSettings = resolveZreadModelSyncSettings(pluginCfg);
+  const zreadDefaultModelSync = createZreadDefaultModelSync({
+    settings: zreadModelSyncSettings,
+    logger: {
+      info: (message) => api.logger.info(message),
+      warn: (message) => api.logger.warn(message),
+    },
+  });
+  const notifyZreadDefaultModel = (
+    resolved: ResolvedDefaultBaiyingAimodelProviderBundle,
+  ): Promise<void> => {
+    return zreadDefaultModelSync.notify(resolved);
+  };
+  const syncZreadDefaultModelFromRedis = async (): Promise<void> => {
+    if (!zreadModelSyncSettings.enabled) {
+      return;
+    }
+    const resolved = await resolveDefaultBaiyingAimodelProviderBundle({
+      redisJsonStore,
+      redisKey: resolveAimodelTypeListRedisKey(pluginCfg.aimodelTypeListRedisKey),
+      modelType: DEFAULT_AIMODEL_TYPELIST_FIELD,
+      secretProviderName: resolveAimodelSecretProviderName(
+        pluginCfg.aimodelSecretProviderName,
+      ),
+      log: { warn: (message) => api.logger.warn(message) },
+    });
+    if (resolved) {
+      await notifyZreadDefaultModel(resolved);
+    }
+  };
 
   setSharedRedisJsonStore(redisJsonStore);
 
@@ -192,21 +215,6 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
     });
     return runtime?.params ?? {};
   };
-
-  const codeToWikiToolFactory = createCodeToWikiToolFactory({
-    registry,
-    resolveWorkspaceDir: (agentId) => resolveAgentWorkspaceForTool(api, agentId),
-    settings: resolveCodeToWikiSettings(pluginCfg),
-    logger: {
-      info: (message) => api.logger.info(message),
-      warn: (message) => api.logger.warn(message),
-    },
-  });
-  api.registerTool(
-    (ctx) => codeToWikiToolFactory(ctx),
-    { name: "code_to_wiki" },
-  );
-  api.logger.info("baiying-enhance: code_to_wiki RepoWiki tool factory ready");
 
   registerBaiyingNativeImageRouting({
     api,
@@ -282,6 +290,7 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
       pluginRuntimeDir,
       "aimodel-secret-resolver-cli.js",
     ),
+    onDefaultAimodelResolved: notifyZreadDefaultModel,
   });
 
   let digEmployeeAuthWatch:
@@ -448,6 +457,13 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
         });
       }
       await agentWatch.start({ deferInitialFlush: true });
+      await syncZreadDefaultModelFromRedis().catch((err) => {
+        api.logger.warn(
+          `baiying-enhance: initial Zread default model sync failed: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      });
       void mainContextTemplateWatch?.start().catch((err) => {
         api.logger.warn(
           `baiying-enhance: main context template watcher failed: ${

@@ -37,8 +37,6 @@ type NativeAgentJson = {
 
 const BYCLAW_CHAT_CONTEXT_TOOL_NAME = "byclaw_chat_context";
 const UPDATE_TASK_PLAN_TOOL_NAME = "updateTaskPlan";
-// Temporary rollout: expose RepoWiki to every managed digital employee during acceptance testing.
-const CODE_TO_WIKI_TOOL_NAME = "code_to_wiki";
 
 function isSkillRelResource(raw: Record<string, unknown>): boolean {
     const t = String(raw.resourceBizType ?? raw.resourceType ?? "").trim().toUpperCase();
@@ -346,7 +344,6 @@ function normalizeAgentListTools(
                       "image_generate",
                       BYCLAW_CHAT_CONTEXT_TOOL_NAME,
                       UPDATE_TASK_PLAN_TOOL_NAME,
-                      CODE_TO_WIKI_TOOL_NAME,
                   ]),
               ),
           }
@@ -357,7 +354,6 @@ function normalizeAgentListTools(
                       "image_generate",
                       BYCLAW_CHAT_CONTEXT_TOOL_NAME,
                       UPDATE_TASK_PLAN_TOOL_NAME,
-                      CODE_TO_WIKI_TOOL_NAME,
                   ]),
               ),
           };
