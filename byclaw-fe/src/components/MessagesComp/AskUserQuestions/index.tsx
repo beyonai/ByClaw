@@ -180,7 +180,7 @@ export function AskUserQuestions(props: IProps) {
   const isPreviewMode = layoutMode === LayoutMode.preview;
   const isThinkingProcess = !!props.thinkListItem;
   const updateField = isThinkingProcess ? 'inferLog' : 'messageStruct';
-  const isDisabled = formStatus === IFormStatus.FINISH || isPreviewMode || submitting;
+  const isDisabled = messageInfo.isHistoryMsg || formStatus === IFormStatus.FINISH || isPreviewMode || submitting;
 
   const updateAnswer = (questionIndex: number, answerPatch: Partial<IAskUserQuestionAnswer>) => {
     const nextAnswers = answers.map((answer, index) => {

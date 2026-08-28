@@ -186,6 +186,31 @@ describe('AskUserQuestions', () => {
     );
   });
 
+  it('disables the form for a historical message', () => {
+    renderQuestions(
+      {
+        substance: {
+          formStatus: IFormStatus.INIT,
+          questions: [questions[0]],
+          answers: [
+            {
+              question: 'Which framework?',
+              header: 'framework',
+              selectedOptions: ['React'],
+              otherSelected: false,
+              otherText: '',
+            },
+          ],
+        },
+      },
+      jest.fn(),
+      { isHistoryMsg: true }
+    );
+
+    expect(screen.getByRole('radio', { name: /React/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'form.confirm' })).toBeDisabled();
+  });
+
   it('requires free text when the other option is selected in single-select mode', () => {
     renderQuestions({
       substance: {
