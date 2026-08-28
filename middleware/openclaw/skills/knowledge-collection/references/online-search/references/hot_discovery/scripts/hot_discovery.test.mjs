@@ -24,6 +24,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const decl = parseDeclarations(await readFile(resolve(HERE, '..', 'adapters.md'), 'utf8'));
 const n = (u, options) => normalizeUrl(u, decl, options);
 const identityN = (u) => normalizeUrl(u, decl);
+const publicN = (u) => normalizeUrl(u, decl, { preserveHostname: true });
 
 // ═══════════════ §6.3 那 6 种形态：基础四条规则实测只对齐 1 种 ═══════════════
 
@@ -35,6 +36,12 @@ test('形态 1：末尾斜杠（基础四条已能对齐）', () => {
 test('形态 2：www. 前缀（基础四条漏过）', () => {
   assert.equal(n('https://github.com/langchain-ai/langchain'),
                n('https://www.github.com/langchain-ai/langchain'));
+});
+
+test('公开 URL 保留原始 www 主机名，去重身份仍折叠 www', () => {
+  const source = 'https://www.iwhalecloud.com/?utm_source=search#about';
+  assert.equal(publicN(source), 'https://www.iwhalecloud.com/');
+  assert.equal(identityN(source), 'https://iwhalecloud.com/');
 });
 
 test('形态 3：等价路径变体 /tree/master —— 已知缺口，刻意不对齐', () => {
@@ -526,6 +533,38 @@ test('merge 丢弃 hot-file 未知字段并保留跨通道命中', () => {
   assert.equal('citations' in candidate, false);
   assert.equal('injected' in candidate.popularity, false);
   assert.deepEqual(candidate.popularity.allMetrics, { downloads: 10 });
+});
+
+test('同一去重身份保留可访问主 URL 和全部脱敏 URL 变体', () => {
+  const result = mergeDocuments({
+    hotDoc: null,
+    sxDoc: {
+      query: '浩鲸科技',
+      results: [
+        {
+          url: 'https://www.iwhalecloud.com/?utm_source=baidu',
+          title: '浩鲸科技',
+          engine: 'baidu',
+        },
+        {
+          url: 'https://iwhalecloud.com/?token=SECRET',
+          title: '浩鲸科技',
+          engine: 'bing',
+        },
+      ],
+    },
+    arDoc: null,
+    normalizer: publicN,
+    identityNormalizer: identityN,
+  });
+
+  assert.equal(result.totals.afterDedup, 1);
+  assert.equal(result.groups.searxngTop[0].url, 'https://www.iwhalecloud.com/');
+  assert.deepEqual(result.groups.searxngTop[0].sourceUrls, [
+    'https://www.iwhalecloud.com/',
+    'https://iwhalecloud.com/',
+  ]);
+  assert.doesNotMatch(JSON.stringify(result), /SECRET/);
 });
 
 test('merge 丢弃 malformed hot candidate 并告警', () => {

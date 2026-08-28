@@ -121,13 +121,14 @@ function summarize(outcome, document) {
 
 async function defaultMerge({ hotDoc, sxDoc, warnings }) {
   const declarations = parseDeclarations(await readFile(adaptersPath, 'utf8'));
-  const normalizer = (url) => normalizeUrl(url, declarations);
+  const publicUrlNormalizer = (url) => normalizeUrl(url, declarations, { preserveHostname: true });
+  const identityNormalizer = (url) => normalizeUrl(url, declarations);
   return mergeDocuments({
     hotDoc,
     sxDoc,
     arDoc: null,
-    normalizer,
-    identityNormalizer: normalizer,
+    normalizer: publicUrlNormalizer,
+    identityNormalizer,
     inputWarnings: warnings,
   });
 }

@@ -143,6 +143,36 @@ test('runs SearXNG and hot discovery for every SearXNG category', async () => {
   });
 });
 
+test('default merge preserves the source hostname used for acquisition', async () => {
+  const { paths } = makeInitializedSession();
+  const result = await runPublicDiscover(paths, { query: '浩鲸科技' }, {
+    runProcess: async (spec) => spec.channel === 'searxng'
+      ? {
+        code: 0,
+        stdout: JSON.stringify({
+          query: '浩鲸科技',
+          results: [
+            { url: 'https://www.iwhalecloud.com/', title: '浩鲸科技', engine: 'baidu' },
+            { url: 'https://iwhalecloud.com/', title: '浩鲸科技', engine: 'bing' },
+          ],
+        }),
+        stderr: '',
+      }
+      : {
+        code: 0,
+        stdout: JSON.stringify({ query: '浩鲸科技', candidates: [] }),
+        stderr: '',
+      },
+  });
+
+  const candidate = result.merged.groups.searxngTop[0];
+  assert.equal(candidate.url, 'https://www.iwhalecloud.com/');
+  assert.deepEqual(candidate.sourceUrls, [
+    'https://www.iwhalecloud.com/',
+    'https://iwhalecloud.com/',
+  ]);
+});
+
 test('returns merged user action without discarding successful SearXNG discovery', async () => {
   const { paths } = makeInitializedSession();
   const result = await runPublicDiscover(paths, { query: 'agent' }, {
