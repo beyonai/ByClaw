@@ -26,8 +26,8 @@ import {
   assertNoSensitiveKeys,
   withSessionLock,
   ensureSessionSkeleton,
-  isInside,
   assertSandboxSessionPath,
+  resolveSandboxPath,
 } from './session.mjs';
 import { deliveryCompleteForSession } from './delivery-state.mjs';
 
@@ -824,11 +824,10 @@ export function cmdReport(args) {
       );
     }
     const reportPath = typeof args['report-path'] === 'string' && args['report-path'].trim()
-      ? path.resolve(args['report-path'])
+      ? resolveSandboxPath(args['report-path'], '--report-path', {
+        currentSessionRoot: args['session-root'],
+      })
       : path.join(paths.root, REPORT_FILENAME);
-    if (!isInside(paths.root, reportPath)) {
-      throw new Error(`报告文件必须在会话目录内: ${paths.root}`);
-    }
     let stat;
     try {
       stat = fs.lstatSync(reportPath);

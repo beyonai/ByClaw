@@ -155,7 +155,7 @@ await (async () => {
 await (async () => {
   const schema = await runCli(['command-schema']);
   assert.equal(schema.json.commands.collect.properties['item-json-file'].format, 'collection-input-file');
-  assert.deepEqual(Object.keys(schema.json.commands.inspect.properties).sort(), ['full', 'session-dir']);
+  assert.deepEqual(Object.keys(schema.json.commands.inspect.properties).sort(), ['full', 'session-dir', 'session-root']);
   for (const flag of ['--operation', '--target-json', '--drain-pending']) {
     const result = await runCli(['inspect', '--session-dir', '/tmp/not-used', flag, 'x']);
     assert.equal(result.code, 1);

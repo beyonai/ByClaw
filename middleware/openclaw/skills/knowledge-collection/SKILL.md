@@ -10,16 +10,16 @@ Collect traceable source materials and deliver validated, sanitized Markdown. Th
 ## 0. 默认落盘位置
 
 在创建任何采集目录或调用 `init` 前，先读取当前 Agent 上下文提供的 **Session Root**。在用户沙箱中，
-本次任务的所有采集文件默认且必须落在 `/by/.sessions/<sessionId>/` 下；推荐使用
+本次任务的采集文件默认落在 `/by/.sessions/<sessionId>/` 下；推荐使用
 `/by/.sessions/<sessionId>/collections/<task-name>/` 作为唯一采集会话根。这里的 `<sessionId>` 是当前聊天会话 ID，
 必须来自 Agent 上下文中的 Session Root，不得使用登录 Cookie、`BAIYING_SESSION` 或其他认证会话值推断。
-在用户沙箱调用 `init` 时，必须同时显式传入 `--session-root <Session Root>` 与位于其下的 `--session-dir`；
-企业采集若从历史会话读取并向当前会话输出，也必须传入同一个 `--session-root`。
+`--session-dir`、`--parent-session-dir`、`--output-dir`、`--output-root` 与显式 `--report-path` 以 `/` 开头时按
+绝对路径使用，可指向沙箱内任意可写位置；使用相对路径时必须同时显式传入 `--session-root <Session Root>`，
+并相对于该 Session Root 解析。
 
-不得把 OpenClaw workspace（如 `/by/.openclaw/workspace-*`）、进程当前目录或 `/tmp` 作为用户沙箱中的默认交付位置。
-`--session-dir`、`--parent-session-dir`、`--output-dir`、`--output-root` 以及来源执行器的暂存目录都必须位于上述当前
-Session Root 内。只有本地开发/测试不在用户沙箱中，或继续读取一个已存在的历史采集会话时，才允许使用其他显式路径；
-新建采集会话仍必须回到当前 Session Root。若上下文没有提供 Session Root，不得猜测 sessionId，应先向上游取得当前会话目录。
+不得依赖进程当前目录解释相对路径。相对路径中的 `..` 或符号链接不得越出当前 Session Root。若相对路径调用的上下文
+没有提供 Session Root，不得猜测 sessionId，应先向上游取得当前会话目录。绝对路径不受 Session Root 成员关系限制，
+但会话内部的 `.collection-inputs/`、`raw/`、`markdown/` 和 `sanitized/items/` 布局仍必须遵守本 Skill 的目录契约。
 
 ## 1. Decide whether to use this skill
 
