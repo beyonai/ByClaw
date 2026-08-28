@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, type Key } from 'react';
-import { Dropdown, Empty, Modal, Typography, message, type MenuProps } from 'antd';
-import { EllipsisOutlined } from '@ant-design/icons';
-import { useIntl, useSelector } from '@umijs/max';
+import { Button, Dropdown, Empty, Modal, Typography, Upload, message, type MenuProps } from 'antd';
+import { EllipsisOutlined, FolderAddOutlined, UploadOutlined } from '@ant-design/icons';
+import { getLocale, useIntl, useSelector } from '@umijs/max';
 import FileSpaceBlock from '@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock';
-import type { FileTreeItem } from '@/layout/sider/components/FileSiderPanel/constants';
+import CreateFolderModal from '@/layout/sider/components/FileSiderPanel/components/CreateFolderModal';
+import { SHARED_FILE_PATH, type FileTreeItem } from '@/layout/sider/components/FileSiderPanel/constants';
 import {
   canPreviewFile,
   ensureDirectoryPath,
@@ -33,8 +34,10 @@ import {
   deleteFiles,
   downloadFile,
   downloadFolder,
+  createFolder,
   listFiles,
   renameFile,
+  uploadFiles,
   type FileBrowserItem,
 } from '@/service/fileBrowser';
 import { downloadFile as downloadUrlFile } from '@/utils/file';
@@ -43,6 +46,7 @@ import FilePreviewPanel from './FilePreviewPanel';
 import projectStyles from '@/pages/projectSpace/index.module.less';
 import { useInfiniteScroll } from '@/pages/projectSpace/hooks/useInfiniteScroll';
 import { filterSessionRootItems } from './sessionResourceUtils';
+import styles from './index.module.less';
 
 type ProjectFileItem = FileBrowserItem & {
   fileId: number;
@@ -83,6 +87,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   cardMode = false,
 }) => {
   const intl = useIntl();
+  const language = getLocale();
   const { EventEmitter } = useGlobal();
   const userInfo = useSelector((state: any) => state.user.userInfo);
   const [items, setItems] = useState<FileBrowserItem[]>([]);
@@ -91,11 +96,17 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   const [loading, setLoading] = useState(false);
   const [renameTarget, setRenameTarget] = useState<FileBrowserItem | null>(null);
   const [renameLoading, setRenameLoading] = useState(false);
+  const [createFolderOpen, setCreateFolderOpen] = useState(false);
+  const [createFolderName, setCreateFolderName] = useState('');
+  const [creatingFolder, setCreatingFolder] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [visibleProjectItemCount, setVisibleProjectItemCount] = useState(20);
   const clickTimerRef = useRef<number | null>(null);
-  const rootPath = getSessionFilePath(sessionId);
   // 项目详情异步加载期间也使用外部项目 ID，确保首次会话文件请求即可过滤仓库目录。
   const projectId = projectIdProp ?? Number(project?.projectId);
+  const isLocalSharedFiles = scope === 'project' && Number(project?.projectId ?? projectId) === -1;
+  const usesFileBrowser = scope === 'session' || isLocalSharedFiles;
+  const rootPath = isLocalSharedFiles ? SHARED_FILE_PATH : getSessionFilePath(sessionId);
   const canManageProjectFiles = useMemo(() => {
     const currentUserId = userInfo?.userId ?? userInfo?.id;
     return (
@@ -115,17 +126,24 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
       setItems([]);
       return;
     }
+    if (usesFileBrowser && !resourceId) {
+      setItems([]);
+      return;
+    }
 
     setLoading(true);
     try {
-      if (scope === 'project') {
+      if (isLocalSharedFiles) {
+        const response = await listFiles({ resourceId: resourceId!, path: rootPath, language });
+        setItems(sortFileBrowserItems(unwrapListResponse<FileBrowserItem>(response)));
+      } else if (scope === 'project') {
         const response = await listProjectSpaceFiles(projectId);
         setItems(sortFileBrowserItems(unwrapListResponse<DevloopProjectSpaceFile>(response).map(normalizeProjectFile)));
       } else {
         // eslint-disable-next-line lines-around-comment
         // 文件与仓库并行查询，但等两者都结束后再更新列表，避免仓库目录先闪现后消失。
         const [filesResult, reposResult] = await Promise.allSettled([
-          listFiles({ resourceId: resourceId!, path: rootPath }),
+          listFiles({ resourceId: resourceId!, path: rootPath, language }),
           projectId ? listProjectRepos(projectId) : Promise.resolve<DevloopProjectRepo[]>([]),
         ]);
         if (filesResult.status === 'rejected') throw filesResult.reason;
@@ -144,7 +162,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [projectId, resourceId, rootPath, scope, sessionId]);
+  }, [isLocalSharedFiles, language, projectId, resourceId, rootPath, scope, sessionId, usesFileBrowser]);
 
   useEffect(() => {
     setChildrenByPath({});
@@ -168,7 +186,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
     async (path: string) => {
       if (!resourceId) return;
       const normalizedPath = ensureDirectoryPath(normalizeFileBrowserPath(path));
-      const response = await listFiles({ resourceId, path: normalizedPath });
+      const response = await listFiles({ resourceId, path: normalizedPath, language });
       const nextItems = sortFileBrowserItems(unwrapListResponse<FileBrowserItem>(response));
       if (normalizedPath === rootPath) {
         setItems(nextItems);
@@ -176,12 +194,12 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         setChildrenByPath((current) => ({ ...current, [normalizedPath]: nextItems }));
       }
     },
-    [resourceId, rootPath]
+    [language, resourceId, rootPath]
   );
 
   const handleLoadData = useCallback(
     async (node: FileTreeItem) => {
-      if (scope !== 'session' || !isDirectory(node)) return;
+      if (!usesFileBrowser || !isDirectory(node)) return;
       const path = ensureDirectoryPath(normalizeFileBrowserPath(node.path));
       if (childrenByPath[path]) return;
       try {
@@ -191,7 +209,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         setChildrenByPath((current) => ({ ...current, [path]: [] }));
       }
     },
-    [childrenByPath, loadDirectory, scope]
+    [childrenByPath, loadDirectory, usesFileBrowser]
   );
 
   const quoteFile = useCallback(
@@ -320,7 +338,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         ...(resourceId ? ['quote'] : []),
         ...(canPreviewFile(item) ? ['preview'] : []),
         'download',
-        ...(scope === 'session' || canManageProjectFiles ? ['rename', 'delete'] : []),
+        ...(usesFileBrowser || canManageProjectFiles ? ['rename', 'delete'] : []),
         ...(scope === 'session' && !isDirectory(item) && projectId ? ['saveToProject'] : []),
       ];
       const labels: Record<string, string> = {
@@ -337,8 +355,42 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         label: <div className={employeeStyles.dropdownMenuItem}>{labels[key]}</div>,
       }));
     },
-    [canManageProjectFiles, intl, projectId, resourceId, scope]
+    [canManageProjectFiles, intl, projectId, resourceId, scope, usesFileBrowser]
   );
+
+  const handleUpload = useCallback(
+    async (fileList: File[]) => {
+      if (!resourceId || !fileList.length || uploading) return;
+      setUploading(true);
+      try {
+        await uploadFiles(resourceId, rootPath, fileList);
+        message.success(intl.formatMessage({ id: 'fileBrowser.upload.success' }));
+        await loadRoot();
+      } catch (error: any) {
+        message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.upload.failed' }));
+      } finally {
+        setUploading(false);
+      }
+    },
+    [intl, loadRoot, resourceId, rootPath, uploading]
+  );
+
+  const handleCreateFolder = useCallback(async () => {
+    const name = createFolderName.trim();
+    if (!resourceId || !name) return;
+    setCreatingFolder(true);
+    try {
+      await createFolder({ resourceId, path: `${ensureDirectoryPath(rootPath)}${name}/` });
+      message.success(intl.formatMessage({ id: 'fileBrowser.createFolder.success' }));
+      setCreateFolderOpen(false);
+      setCreateFolderName('');
+      await loadRoot();
+    } catch (error: any) {
+      message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.createFolder.failed' }));
+    } finally {
+      setCreatingFolder(false);
+    }
+  }, [createFolderName, intl, loadRoot, resourceId, rootPath]);
 
   const handleAction = useCallback(
     (key: Key, item: FileBrowserItem) => {
@@ -484,8 +536,30 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         fillContainer
         loading={loading}
         items={items}
-        currentPath={scope === 'session' ? rootPath : '/.project/'}
+        currentPath={usesFileBrowser ? rootPath : '/.project/'}
         emptyText={intl.formatMessage({ id: emptyTextId })}
+        contentBefore={
+          isLocalSharedFiles ? (
+            <div className={styles.localSharedToolbar}>
+              <Upload
+                showUploadList={false}
+                multiple
+                disabled={uploading}
+                beforeUpload={(file, fileList) => {
+                  if (file === fileList[0]) void handleUpload(fileList as unknown as File[]);
+                  return false;
+                }}
+              >
+                <Button size="small" icon={<UploadOutlined />} loading={uploading}>
+                  {intl.formatMessage({ id: 'fileBrowser.toolbar.upload' })}
+                </Button>
+              </Upload>
+              <Button size="small" icon={<FolderAddOutlined />} onClick={() => setCreateFolderOpen(true)}>
+                {intl.formatMessage({ id: 'fileBrowser.toolbar.newFolder' })}
+              </Button>
+            </div>
+          ) : null
+        }
         childrenByPath={childrenByPath}
         expandedKeys={expandedKeys}
         showActions
@@ -504,6 +578,18 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         onOk={handleRename}
         onCancel={() => {
           if (!renameLoading) setRenameTarget(null);
+        }}
+      />
+      <CreateFolderModal
+        open={createFolderOpen}
+        value={createFolderName}
+        loading={creatingFolder}
+        onChange={setCreateFolderName}
+        onOk={() => void handleCreateFolder()}
+        onCancel={() => {
+          if (creatingFolder) return;
+          setCreateFolderOpen(false);
+          setCreateFolderName('');
         }}
       />
     </>

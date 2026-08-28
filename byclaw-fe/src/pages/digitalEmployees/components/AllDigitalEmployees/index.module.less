@@ -150,6 +150,25 @@
   }
 }
 
+.compactLayout {
+  .spinningWrapper {
+    height: auto;
+    min-height: 160px;
+
+    :global {
+      .@{antPrefix}-spin-container {
+        height: auto;
+        min-height: 160px;
+      }
+    }
+  }
+
+  .messageRowWrap {
+    height: auto;
+    min-height: 0;
+  }
+}
+
 .employeeAvatar {
   width: 56px;
   height: 56px;

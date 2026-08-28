@@ -79,9 +79,9 @@ class ProjectContextApplicationServiceTest {
         repo.setRepoUrl("https://secret-token@github.com/beyonai/byclaw-test.git");
         when(projectRepoMapper.selectList(any())).thenReturn(List.of(repo));
 
-        ProjectResource knowledgeBinding = binding("101", "knowledge", "历史知识库");
-        ProjectResource deletedKnowledgeBinding = binding("missing", "knowledge", "已删除知识库");
-        ProjectResource ontologyBinding = binding("bad-id", "ontology", "已删除本体对象");
+        ProjectResource knowledgeBinding = binding(101L, "knowledge", "历史知识库");
+        ProjectResource deletedKnowledgeBinding = binding(99901L, "knowledge", "已删除知识库");
+        ProjectResource ontologyBinding = binding(99902L, "ontology", "已删除本体对象");
         when(projectResourceMapper.selectList(any()))
             .thenReturn(List.of(knowledgeBinding, deletedKnowledgeBinding, ontologyBinding));
         SsResource knowledge = new SsResource();
@@ -170,7 +170,7 @@ class ProjectContextApplicationServiceTest {
         return project;
     }
 
-    private ProjectResource binding(String resourceId, String resourceType, String resourceName) {
+    private ProjectResource binding(Long resourceId, String resourceType, String resourceName) {
         ProjectResource binding = new ProjectResource();
         binding.setResourceId(resourceId);
         binding.setResourceType(resourceType);

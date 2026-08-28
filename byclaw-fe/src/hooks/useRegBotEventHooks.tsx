@@ -1,6 +1,6 @@
 import { get, isEmpty, set, unset, pick } from 'lodash';
 import { useCallback, useState } from 'react';
-import { useSelector, useDispatch, useNavigate, getIntl } from '@umijs/max';
+import { useSelector, useDispatch, useNavigate } from '@umijs/max';
 import { message as antdMessage } from 'antd';
 
 import useGlobal from '@/hooks/useGlobal';
@@ -23,7 +23,6 @@ import { ITask } from '@/typescript/task';
 const useRegBotEventHooks = (props: {
   loadSsoIframeUrl?: string;
   taskId?: string;
-  stepId?: string;
   stepTaskId?: string;
   setSpinning?: React.Dispatch<React.SetStateAction<boolean>>;
   message?: Partial<IMessage>;
@@ -33,8 +32,7 @@ const useRegBotEventHooks = (props: {
   };
   getTodoItem?: () => ITask;
 }): any => {
-  const { taskId, stepId, stepTaskId, loadSsoIframeUrl, setSpinning, message, messageIdx, submitBtnInfo, getTodoItem } =
-    props;
+  const { taskId, stepTaskId, loadSsoIframeUrl, setSpinning, message, messageIdx, submitBtnInfo, getTodoItem } = props;
   const { metadata } = message || {};
 
   const { setAgentId, setSessionId, EventEmitter } = useGlobal();
@@ -295,7 +293,6 @@ const useRegBotEventHooks = (props: {
           submitBtnInfo: {
             submitBtnBId: bId,
           },
-          stepId,
           stepTaskId,
         },
         message,
@@ -357,29 +354,6 @@ const useRegBotEventHooks = (props: {
               statusCd: 'Completed',
             },
           });
-
-          if (stepId) {
-            // todo: 若是stepId存在，则请求流程sse
-            const intl = getIntl();
-            EventEmitter.emit('beyond-chat-on-send-msg', {
-              sendProps: {
-                queryQuestion: intl.formatMessage({ id: 'common.approve' }),
-                payload: {
-                  taskOperateType: 'FEEDBACK',
-                  llmMessageId: message?.messageId || '',
-                  taskStepId: stepId,
-                },
-                msgOpt: {
-                  answerMsg: {
-                    ...message,
-                  },
-                },
-              },
-              sendConf: {
-                onlyQuery: true,
-              },
-            });
-          }
         })
         .finally(() => {
           setSpinning?.(false);

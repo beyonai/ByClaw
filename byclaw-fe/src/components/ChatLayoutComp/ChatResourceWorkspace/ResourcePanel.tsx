@@ -68,13 +68,17 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
         { key: 'model', label: label('chatResource.model') },
       ];
     }
+    const projectFileLabelId =
+      Number(project?.projectId ?? projectId) === -1
+        ? 'chatResource.localSharedFile'
+        : 'chatResource.projectCloudDrive';
     return [
-      { key: 'file', label: label('chatResource.sessionFile') },
-      { key: 'projectFile', label: label('chatResource.projectFile') },
+      { key: 'file', label: label('chatResource.processFile') },
+      { key: 'projectFile', label: label(projectFileLabelId) },
       ...(showSessionKnowledge ? [{ key: 'knowledge', label: label('chatResource.projectKnowledge') }] : []),
       ...(showCode ? [{ key: 'code', label: label('chatResource.projectCode') }] : []),
     ];
-  }, [intl, showCode, showSessionKnowledge, upperScopeKey]);
+  }, [intl, project?.projectId, projectId, showCode, showSessionKnowledge, upperScopeKey]);
 
   const upperSecondaryKey = secondaryState[upperScopeKey];
   const empty = (
@@ -101,7 +105,7 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
           <FileResourcePanel
             scope="project"
             sessionId={sessionId}
-            projectId={project?.projectId || projectId}
+            projectId={project?.projectId ? Number(project.projectId) : projectId}
             project={project}
             resourceId={resourceId}
             refreshKey={sessionResourceRefreshKey}

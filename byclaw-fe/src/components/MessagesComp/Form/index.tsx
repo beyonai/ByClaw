@@ -7,7 +7,7 @@ import { Button, message } from 'antd';
 import useGlobal from '@/hooks/useGlobal';
 import { IFormStatus } from '@/hooks/useSseSender/agent/typescript';
 import { submitForm } from '@/service/agent';
-import type { IMessage } from '@/typescript/message';
+import type { IMessage, IMessageListItem } from '@/typescript/message';
 import { LayoutMode } from '@/constants/system';
 import MessageForm, { IFormItem } from '@/components/MessageForm';
 import styles from './index.module.less';
@@ -17,24 +17,27 @@ export type IMessageListItemContent = {
   pluginAppId: string;
   pluginMachineId: string;
   formStatus: IFormStatus;
-  stepId: string;
+  sourceAgentType: string;
 };
 
 export type IProps = {
   message: IMessage;
   updateMessageListItemContent: (messageListItemContent: IMessageListItemContent) => void;
   messageListItemContent: IMessageListItemContent;
+  messageListItem?: IMessageListItem;
+  thinkListItem?: IMessageListItem;
 };
 
 function FormComp(props: IProps) {
   const { updateMessageListItemContent, messageListItemContent, message: messageInfo } = props;
-  const { substance = [], pluginAppId, pluginMachineId, formStatus, stepId } = messageListItemContent || {};
+  const { substance = [], pluginAppId, pluginMachineId, formStatus, sourceAgentType } = messageListItemContent || {};
   const { messageId } = messageInfo || {};
   const intl = useIntl();
   const { EventEmitter, layoutMode } = useGlobal();
   const isPreviewMode = layoutMode === LayoutMode.preview;
+  const { resumeMessageId } = props.messageListItem || props.thinkListItem || {};
 
-  const formRef = useRef<any>();
+  const formRef = useRef<any>(undefined);
 
   return (
     <div className={classnames(styles.myForm, 'mW600')} key={`${pluginAppId}_${pluginMachineId}`}>
@@ -89,7 +92,6 @@ function FormComp(props: IProps) {
                 ...messageListItemContent,
                 formStatus: IFormStatus.FINISH,
               });
-              if (!stepId) return;
               // 处理表单数据
               const formContentString = substance
                 .map((item) => {
@@ -105,10 +107,13 @@ function FormComp(props: IProps) {
                     { formContent: formContentString, msg: result.msg }
                   ),
                   payload: {
-                    taskOperateType: 'FEEDBACK',
+                    resumeMessageId,
+                    sourceAgentType,
+                    actionType: 'RESUME',
                     llmMessageId: messageId,
-                    taskStepId: stepId,
+                    traceId: messageInfo.traceId,
                   },
+                  inheritQryMsgId: messageInfo.queryMsgId,
                   msgOpt: {
                     answerMsg: {
                       ...messageInfo,

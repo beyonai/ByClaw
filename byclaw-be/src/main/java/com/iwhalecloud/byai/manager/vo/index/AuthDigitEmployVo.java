@@ -100,6 +100,11 @@ public class AuthDigitEmployVo {
     private Long creatorId;
 
     /**
+     * 创建人名称
+     */
+    private String creatorName;
+
+    /**
      * 是否我创建的
      */
     private boolean myCreate;

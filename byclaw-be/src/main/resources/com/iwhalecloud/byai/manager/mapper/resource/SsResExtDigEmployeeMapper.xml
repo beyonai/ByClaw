@@ -260,6 +260,31 @@
                     <when test="type != null and type == 'manager'">
                         and k.allow_manage_count > 0
                     </when>
+                    <when test="type != null and type == 'managerExcludingOwner'">
+                        and k.allow_manage_count > 0
+                        and (a.create_by is null or a.create_by != #{userId})
+                    </when>
+                    <when test="type != null and type == 'manageable'">
+                        and (
+                            a.create_by = #{userId}
+                            or k.allow_manage_count > 0
+                            <if test="platformManager == true">
+                                or 1 = 1
+                            </if>
+                            <if test="managerOrgPathCodes != null and managerOrgPathCodes.size() > 0">
+                                or exists (
+                                    select 1 from po_organization org
+                                    where org.org_id = a.man_org_id
+                                    and (
+                                        <foreach collection="managerOrgPathCodes" item="pathCode" separator=" or ">
+                                            org.path_code = #{pathCode}
+                                            or org.path_code like concat(#{pathCode}, '.%')
+                                        </foreach>
+                                    )
+                                )
+                            </if>
+                        )
+                    </when>
                 </choose>
                 <if test="systemCodes != null and systemCodes.size() > 0">
                     and a.system_code in
@@ -575,7 +600,14 @@
         <where>
             <!-- 基础过滤条件 -->
             and a.resource_biz_type = 'DIG_EMPLOYEE'
-            and coalesce(b.agent_type, '') != '017'
+            <choose>
+                <when test="agentType != null and agentType != ''">
+                    and b.agent_type = #{agentType}
+                </when>
+                <otherwise>
+                    and coalesce(b.agent_type, '') != '017'
+                </otherwise>
+            </choose>
             and (
                 <if test="defaultDigEmployeeId != null and includeAllResourceStatus != true and (resourceStatus == null or resourceStatus == 2)">
                     (a.owner_type = 'personal_default' and a.resource_id = #{defaultDigEmployeeId})
@@ -629,6 +661,27 @@
                 <foreach collection="systemCodes" item="item" open="(" separator="," close=")">
                     #{item}
                 </foreach>
+            </if>
+            <if test="type != null and type == 'manageable'">
+                and (
+                    a.create_by = #{userId}
+                    or k.allow_manage_count > 0
+                    <if test="platformManager == true">
+                        or 1 = 1
+                    </if>
+                    <if test="managerOrgPathCodes != null and managerOrgPathCodes.size() > 0">
+                        or exists (
+                            select 1 from po_organization org
+                            where org.org_id = a.man_org_id
+                            and (
+                                <foreach collection="managerOrgPathCodes" item="pathCode" separator=" or ">
+                                    org.path_code = #{pathCode}
+                                    or org.path_code like concat(#{pathCode}, '.%')
+                                </foreach>
+                            )
+                        )
+                    </if>
+                )
             </if>
             <if test="catalogIds != null and catalogIds.size() > 0">
                 and a.catalog_id in
