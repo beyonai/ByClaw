@@ -696,6 +696,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
                   multiChoicesMsgId={multiChoicesMsgId}
                   setMultiChoicesMsgId={setMultiChoicesMsgId}
                   previewInDetailPanel
+                  enableConversationNavigator={isPC && !notificationSession && !isMultiChoices}
                 />
               </div>
             )}

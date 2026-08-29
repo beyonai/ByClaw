@@ -3380,6 +3380,9 @@ export default {
   'skillDetail.generatingCurlScript': '正在生成curl脚本...',
 
   'newChat.alreadyLatestSession': '已经是最新会话',
+  'conversationNavigator.label': '会话导航',
+  'conversationNavigator.conversation': '第 {index} 轮会话',
+  'conversationNavigator.jumpTo': '跳转到第 {index} 轮会话',
 
   'sandbox.waitTips': '正在初始化安全沙箱环境，请稍候...',
   'sandbox.status.running': '沙箱运行中',

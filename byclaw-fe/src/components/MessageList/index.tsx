@@ -11,6 +11,7 @@ import useRender from './useRender';
 import DividerTips from './components/DividerTips';
 import SystemTips from './components/SystemTips';
 import MessageInfiniteScroll from './components/MessageInfiniteScroll';
+import ConversationNavigator from './components/ConversationNavigator';
 
 import { generateUniqueId } from '@/utils/math';
 
@@ -35,6 +36,7 @@ type IProps = {
   showToBottomBtn?: boolean;
   updateMessage: (message: IMessage) => IMessage;
   deleteMessage: (message: IMessage) => void;
+  enableConversationNavigator?: boolean;
 };
 
 const emptyArr: Array<unknown> = [];
@@ -164,6 +166,7 @@ function MessageList(props: IProps, ref: any) {
     sessionId,
     hideAction,
     previewInDetailPanel = false,
+    enableConversationNavigator = false,
   } = props;
   const { multiChoicesList = emptyArr, setMultiChoicesMsgId, multiChoicesMsgId } = props;
 
@@ -253,6 +256,18 @@ function MessageList(props: IProps, ref: any) {
           </MessageInfiniteScroll>
         </div>
       </MessageListContext.Provider>
+      {enableConversationNavigator && sessionId && (
+        <ConversationNavigator
+          sessionId={sessionId}
+          messageList={messageList}
+          scrollContainerId={scrollMessageDomId.current}
+          onLoadedMessageClick={() => {
+            if (infiniteScrollRef.current) {
+              infiniteScrollRef.current.isLastScrollAtBottom = false;
+            }
+          }}
+        />
+      )}
       {toBottomBtnVisable && showToBottomBtn && (
         <div className={classnames(styles.toBottomBtn, 'pointer')}>
           <Button

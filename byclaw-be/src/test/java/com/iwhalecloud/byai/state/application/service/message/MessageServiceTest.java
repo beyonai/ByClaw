@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.iwhalecloud.byai.common.message.entity.ByaiMessage;
+import com.iwhalecloud.byai.common.message.entity.ConversationOutlineItem;
 import com.iwhalecloud.byai.common.message.service.ByaiMessageHotService;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.state.application.service.taskplan.TaskPlanApplicationService;
@@ -81,6 +82,20 @@ class MessageServiceTest {
 
         verify(taskPlanApplicationService).deleteByMessageId(12L);
         verify(byaiMessageHotService).deleteById(12L);
+    }
+
+    @Test
+    void getConversationOutline_returnsLightweightMessages() {
+        ConversationOutlineItem item = new ConversationOutlineItem();
+        item.setMessageId(12L);
+        item.setContent("answer summary");
+        when(byaiMessageHotService.selectConversationOutline(11L)).thenReturn(List.of(item));
+
+        MessageQo query = new MessageQo();
+        query.setSessionId(11L);
+
+        assertThat(service.getConversationOutline(query)).containsExactly(item);
+        verify(byaiMessageHotService).selectConversationOutline(11L);
     }
 
     private ByaiMessage message(Long messageId, Integer usage) {
