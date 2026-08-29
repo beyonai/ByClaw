@@ -17,6 +17,11 @@ public class ByaiSessionDto extends ByaiSession {
     private String projectName;
 
     /**
+     * 项目云盘知识库资源 ID
+     */
+    private Long cloudResourceId;
+
+    /**
      * 图标
      */
     private String avatar;
