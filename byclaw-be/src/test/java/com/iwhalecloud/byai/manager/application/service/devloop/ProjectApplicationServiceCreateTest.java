@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.context.support.StaticMessageSource;
 import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -70,6 +71,7 @@ class ProjectApplicationServiceCreateTest {
         LoginInfo loginInfo = new LoginInfo();
         loginInfo.setUserId(88L);
         CurrentUserHolder.setLoginInfo(loginInfo);
+        LocaleContextHolder.setLocale(Locale.SIMPLIFIED_CHINESE);
 
         originalMessageSource = ReflectionTestUtils.getField(I18nUtil.class, "messageSource");
         StaticMessageSource messageSource = new StaticMessageSource();
@@ -81,6 +83,7 @@ class ProjectApplicationServiceCreateTest {
     @AfterEach
     void clearCurrentUser() {
         CurrentUserHolder.clearLoginInfo();
+        LocaleContextHolder.resetLocaleContext();
         ReflectionTestUtils.setField(I18nUtil.class, "messageSource", originalMessageSource);
     }
 
