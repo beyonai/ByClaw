@@ -230,6 +230,11 @@ describe('ConnectorControl authorization states', () => {
     expect(connectorCard?.parentElement).toBe(accountCard?.parentElement);
     expect(connectorCard).toHaveClass('compactItem');
     expect(accountCard).not.toHaveClass('compactItem');
+    expect(accountCard).toHaveClass('accountCardDrawerCompact');
+    const accountCardFooter = accountCard?.querySelector('.accountCardFooter');
+    expect(accountCardFooter).not.toBeNull();
+    expect(accountCard?.querySelector('.accountPlatformName')?.parentElement).toBe(accountCardFooter);
+    expect(accountCard?.querySelector('.accountCardActions')?.parentElement).toBe(accountCardFooter);
   });
 
   it('creates a global custom account without a project and refreshes the cards', async () => {

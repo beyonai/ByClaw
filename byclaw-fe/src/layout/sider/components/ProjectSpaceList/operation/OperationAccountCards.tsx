@@ -14,6 +14,7 @@ export interface OperationAccountCardsProps {
   loginConfirming?: boolean;
   deletingAccountId?: OperationIdentifier | null;
   compact?: boolean;
+  drawerCompact?: boolean;
   onAccountClick?: (account: OperationAccount) => void;
   onEditAccount?: (account: OperationAccount) => void;
   onDeleteAccount?: (account: OperationAccount) => void | Promise<void>;
@@ -48,6 +49,7 @@ const OperationAccountCards = ({
   loginConfirming = false,
   deletingAccountId,
   compact = false,
+  drawerCompact = false,
   onAccountClick,
   onEditAccount,
   onDeleteAccount,
@@ -90,13 +92,38 @@ const OperationAccountCards = ({
         const status = account.loginStatus || 'unknown';
         const canLogin = LOGIN_PLATFORM_CODES.has(account.platformId);
         const editable = canEditAccount(account);
+        const loginActions = (
+          <div className={styles.accountCardActions}>
+            {onLogin && canLogin && (
+              <Button
+                type="link"
+                size="small"
+                icon={<LoginOutlined />}
+                loading={`${loginPreparingAccountId ?? ''}` === `${account.id}`}
+                disabled={
+                  !!loginTarget ||
+                  loginConfirming ||
+                  (loginPreparingAccountId !== undefined &&
+                    loginPreparingAccountId !== null &&
+                    `${loginPreparingAccountId}` !== `${account.id}`)
+                }
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void Promise.resolve(onLogin(account)).catch(() => undefined);
+                }}
+              >
+                {t(status === 'logged_in' ? 'relogin' : 'login')}
+              </Button>
+            )}
+          </div>
+        );
 
         return (
           <article
             key={String(account.id)}
             className={`${styles.accountCard} ${compact ? styles.accountCardCompact : ''} ${
-              onAccountClick ? styles.accountCardClickable : ''
-            }`}
+              drawerCompact ? styles.accountCardDrawerCompact : ''
+            } ${onAccountClick ? styles.accountCardClickable : ''}`}
             role={onAccountClick ? 'button' : undefined}
             tabIndex={onAccountClick ? 0 : undefined}
             onClick={() => onAccountClick?.(account)}
@@ -140,32 +167,17 @@ const OperationAccountCards = ({
                 />
               </Dropdown>
             )}
-            <div className={styles.accountPlatformName}>{platformLabel}</div>
-            <div className={styles.accountCardFooter}>
-              <div className={styles.accountCardActions}>
-                {onLogin && canLogin && (
-                  <Button
-                    type="link"
-                    size="small"
-                    icon={<LoginOutlined />}
-                    loading={`${loginPreparingAccountId ?? ''}` === `${account.id}`}
-                    disabled={
-                      !!loginTarget ||
-                      loginConfirming ||
-                      (loginPreparingAccountId !== undefined &&
-                        loginPreparingAccountId !== null &&
-                        `${loginPreparingAccountId}` !== `${account.id}`)
-                    }
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      void Promise.resolve(onLogin(account)).catch(() => undefined);
-                    }}
-                  >
-                    {t(status === 'logged_in' ? 'relogin' : 'login')}
-                  </Button>
-                )}
+            {drawerCompact ? (
+              <div className={styles.accountCardFooter}>
+                <div className={styles.accountPlatformName}>{platformLabel}</div>
+                {loginActions}
               </div>
-            </div>
+            ) : (
+              <>
+                <div className={styles.accountPlatformName}>{platformLabel}</div>
+                <div className={styles.accountCardFooter}>{loginActions}</div>
+              </>
+            )}
           </article>
         );
       })}

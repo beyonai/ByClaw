@@ -70,6 +70,7 @@ const GlobalAccountSection = ({ onToolbarChange }: GlobalAccountSectionProps) =>
       accounts={accounts}
       compact
       cardsOnly
+      drawerCardLayout
       toolbarPlacement="external"
       showPlatformFilter={false}
       allowAccountEditing={false}

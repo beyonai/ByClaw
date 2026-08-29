@@ -35,6 +35,7 @@ export interface OperationAccountPanelProps {
   showPlatformFilter?: boolean;
   allowAccountEditing?: boolean;
   cardsOnly?: boolean;
+  drawerCardLayout?: boolean;
   onBack?: () => void;
   onAccountClick?: (account: OperationAccount) => void;
   onLogin?: (account: OperationAccount) => void | Promise<void>;
@@ -64,6 +65,7 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
   showPlatformFilter = true,
   allowAccountEditing = true,
   cardsOnly = false,
+  drawerCardLayout = false,
   onBack,
   onAccountClick,
   onLogin,
@@ -229,6 +231,7 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
       accounts={filteredAccounts}
       platformOptions={availablePlatformOptions}
       compact={compact}
+      drawerCompact={drawerCardLayout}
       canEditAccount={(account) => allowAccountEditing && canSaveAccount && account.canEdit !== false}
       loginTarget={loginTarget}
       loginPreparingAccountId={loginPreparingAccountId}
