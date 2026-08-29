@@ -127,7 +127,13 @@ describe("updateTaskPlan", () => {
     const result = await promptHook?.({}, { sessionKey, runId: "run-1" });
     const prompt = String(result?.appendSystemContext ?? "");
     expect(prompt).toContain(
-      "如果用户提的是一个多步骤任务或者复杂任务，请用 updateTaskPlan 来规划",
+      "如果用户提出复杂任务，或任务包含多个有实际意义的执行步骤，你必须使用 updateTaskPlan 进行规划。",
+    );
+    expect(prompt).toContain(
+      "当 active_task_plan 为 null 时，必须在开始执行前调用 updateTaskPlan（action=create）创建任务计划；不得仅在回复中列出步骤来代替工具调用。",
+    );
+    expect(prompt).toContain(
+      "当 active_task_plan 已存在时，不得重复创建计划；必须使用 complete_current、fail_current 或 skip_current 推进当前任务状态。",
     );
     expect(prompt).toContain(
       "If the user asks for a multi-step task or a complex task, use updateTaskPlan to plan it.",
