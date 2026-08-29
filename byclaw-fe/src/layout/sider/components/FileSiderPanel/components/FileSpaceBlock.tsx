@@ -244,7 +244,9 @@ const FileSpaceBlock: React.FC<FileSpaceBlockProps> = ({
         )}
       </div>
       <div
-        className={`${styles.fileSpaceAlternateContent} ${showAlternateContent ? '' : styles.fileSpaceContentHidden}`}
+        className={`${styles.fileSpaceAlternateContent} ${
+          showAlternateContent ? styles.fileSpaceAlternateContentVisible : styles.fileSpaceContentHidden
+        }`}
       >
         {alternateContent}
       </div>
