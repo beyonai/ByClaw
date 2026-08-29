@@ -998,12 +998,9 @@ public class SuasSuperassistApplicationService {
         String projectType = jsonObject.getString("projectType");
         String description = jsonObject.getString("description");
         String isShare = jsonObject.getString("isShare");
-        String userCode = jsonObject.getString("userCode");
 
         JSONArray resources = jsonObject.getJSONArray("resources");
 
-        //默认初始化项目的用户
-        Users users = userService.findByUserCode(userCode);
 
         //不存在则创建
         Project project = projectService.findByProjectName(projectName);
@@ -1015,14 +1012,12 @@ public class SuasSuperassistApplicationService {
             project.setDescription(description);
             project.setIsShare(isShare);
             project.setCreateTime(new Date());
-            project.setCreateBy(users.getUserId());
+            project.setCreateBy(loginInfo.getUserId());
             projectService.save(project);
 
-            // 创始人关联项目
-            projectMemberService.addMember(project.getProjectId(), project.getCreateBy(), "owner");
 
             //初始化本体对象
-            List<String> objectCodes = this.initSubmitWorkspaceTemplate(users);
+            List<String> objectCodes = this.initSubmitWorkspaceTemplate();
             logger.info("初始化对象:{}", objectCodes);
 
             for (int i = 0; resources != null && i < resources.size(); i++) {
@@ -1053,10 +1048,11 @@ public class SuasSuperassistApplicationService {
     /**
      * 调用 DataCloud 提交工作区模板，初始化本体。
      *
-     * @param users 当前用户
      * @return 首个模板提交结果中的对象编码列表，无结果时返回空列表
      */
-    private List<String> initSubmitWorkspaceTemplate(Users users) {
+    private List<String> initSubmitWorkspaceTemplate() {
+
+        Users users = userService.findByUserCode("adminvip");
 
         Map<String, String> headers = new HashMap<>();
         headers.put("X-User-Code", users.getUserCode());
