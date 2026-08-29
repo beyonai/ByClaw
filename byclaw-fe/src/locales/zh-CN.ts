@@ -1508,6 +1508,10 @@ export default {
   'messageList.taskPlan.status.FAILED': '执行失败',
   'messageList.taskPlan.status.SKIPPED': '已跳过',
   'messageList.taskPlan.status.CANCELLED': '已取消',
+  'messageList.askUser.title': '需要你的回答',
+  'messageList.askUser.answered': '已回答的问题',
+  'messageList.askUser.previous': '上一题',
+  'messageList.askUser.next': '下一题',
 
   // MessageContent组件
   'contentHeader.settings': '设置',

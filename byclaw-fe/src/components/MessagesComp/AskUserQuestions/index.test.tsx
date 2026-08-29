@@ -86,7 +86,8 @@ const questions = [
 function renderQuestions(
   initialContent: IMessageListItemContent,
   onUpdate = jest.fn(),
-  messageOverrides: Record<string, unknown> = {}
+  messageOverrides: Record<string, unknown> = {},
+  presentation: 'dock' | 'transcript' = 'dock'
 ) {
   function Harness() {
     const [content, setContent] = useState(initialContent);
@@ -110,6 +111,7 @@ function renderQuestions(
           } as any
         }
         messageListItemContent={content}
+        presentation={presentation}
         updateMessageListItemContent={(nextContent) => {
           onUpdate(nextContent);
           setContent(nextContent);
@@ -128,6 +130,52 @@ beforeEach(() => {
 });
 
 describe('AskUserQuestions', () => {
+  it('hides a pending question in the transcript so the active dock is the only interactive surface', () => {
+    renderQuestions(
+      {
+        substance: {
+          formStatus: IFormStatus.INIT,
+          questions: [questions[0]],
+        },
+      },
+      jest.fn(),
+      {},
+      'transcript'
+    );
+
+    expect(screen.queryByRole('radio')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'form.confirm' })).not.toBeInTheDocument();
+  });
+
+  it('renders a compact answered summary in the transcript after completion', () => {
+    renderQuestions(
+      {
+        formStatus: IFormStatus.FINISH,
+        substance: {
+          formStatus: IFormStatus.FINISH,
+          questions: [questions[0]],
+          answers: [
+            {
+              question: 'Which framework?',
+              header: 'framework',
+              selectedOptions: ['React'],
+              otherSelected: false,
+              otherText: '',
+            },
+          ],
+        },
+      },
+      jest.fn(),
+      {},
+      'transcript'
+    );
+
+    expect(screen.getByText('Which framework?')).toBeInTheDocument();
+    expect(screen.getByText('React')).toBeInTheDocument();
+    expect(screen.queryByRole('radio')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'form.confirm' })).not.toBeInTheDocument();
+  });
+
   it('converts structured answers into natural language for the LLM', () => {
     expect(
       buildQueryQuestion([
@@ -231,7 +279,7 @@ describe('AskUserQuestions', () => {
     expect(screen.getByRole('button', { name: 'form.confirm' })).toBeEnabled();
   });
 
-  it('renders single and tab question titles as markdown', () => {
+  it('renders single and paged question titles as markdown', () => {
     const markdownQuestions = [
       { ...questions[0], question: 'Choose **one framework**' },
       { ...questions[1], question: 'Choose *capabilities*' },
@@ -253,8 +301,9 @@ describe('AskUserQuestions', () => {
       },
     });
 
-    expect(screen.getByRole('tab', { name: 'Choose one framework' }).querySelector('strong')).not.toBeNull();
-    expect(screen.getByRole('tab', { name: 'Choose capabilities' }).querySelector('em')).not.toBeNull();
+    expect(screen.getByText('one framework').tagName).toBe('STRONG');
+    fireEvent.click(screen.getByRole('radio', { name: /React/ }));
+    expect(screen.getByText('capabilities').tagName).toBe('EM');
   });
 
   // Ant Design 选项交互与异步持久化在双 worker 钩子中可能超过默认 5 秒。
@@ -291,7 +340,7 @@ describe('AskUserQuestions', () => {
     );
   }, 15000);
 
-  it('uses tabs for multiple questions and requires every question to be answered', () => {
+  it('pages through multiple questions and requires every question to be answered', () => {
     renderQuestions({
       substance: {
         formStatus: IFormStatus.INIT,
@@ -299,11 +348,12 @@ describe('AskUserQuestions', () => {
       },
     });
 
-    expect(screen.getByRole('tab', { name: 'Which framework?' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Which capabilities?' })).toBeInTheDocument();
+    expect(screen.getByText('Which framework?')).toBeInTheDocument();
+    expect(screen.getByText('1 / 2')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('radio', { name: /React/ }));
-    expect(screen.getByRole('tab', { name: 'Which capabilities?' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByText('Which capabilities?')).toBeInTheDocument();
+    expect(screen.getByText('2 / 2')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'form.confirm' })).toBeDisabled();
 
     fireEvent.click(screen.getByRole('checkbox', { name: /Testing/ }));

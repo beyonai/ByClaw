@@ -1518,6 +1518,10 @@ export default {
   'messageList.taskPlan.status.FAILED': 'Failed',
   'messageList.taskPlan.status.SKIPPED': 'Skipped',
   'messageList.taskPlan.status.CANCELLED': 'Cancelled',
+  'messageList.askUser.title': 'Your answer is needed',
+  'messageList.askUser.answered': 'Answered questions',
+  'messageList.askUser.previous': 'Previous question',
+  'messageList.askUser.next': 'Next question',
 
   // MessageContent Component
   'contentHeader.settings': 'Settings',
