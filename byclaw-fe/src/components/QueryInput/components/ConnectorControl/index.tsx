@@ -7,6 +7,7 @@ import {
   EllipsisOutlined,
   FileTextOutlined,
   GlobalOutlined,
+  GithubOutlined,
   LinkOutlined,
   LoadingOutlined,
   QrcodeOutlined,
@@ -40,6 +41,7 @@ import {
 } from '@/service/connector';
 
 import styles from './index.module.less';
+import GlobalAccountSection from './GlobalAccountSection';
 
 dayjs.extend(customParseFormat);
 dayjs.extend(utc);
@@ -136,6 +138,7 @@ const connectorIconMap: Record<string, React.ReactNode> = {
   dingtalk: <AntdIcon type="icon-dingding1" />,
   wecom: <AntdIcon type="icon-qiyeweixin" />,
   lark: <AntdIcon type="icon-feishu" />,
+  github: <GithubOutlined />,
 };
 
 const getConnectorIcon = (connectorCode: string) => connectorIconMap[connectorCode] || <ApiOutlined />;
@@ -158,6 +161,12 @@ const mapConnectorListItem = (item: ConnectorListItem): Connector => ({
   authMode: item.authMode,
   credentialForm: item.credentialForm,
 });
+
+// 快捷列表优先展示当前已授权且启用的连接器，同组内保留后端原始顺序。
+export const prioritizeEnabledConnectors = (items: Connector[]) => [
+  ...items.filter((item) => item.enableFlag === 'Y'),
+  ...items.filter((item) => item.enableFlag !== 'Y'),
+];
 
 const authorizationTerminalMessages: Partial<Record<ConnectorAuthorization['status'], string>> = {
   failed: '授权未完成，请重新发起连接',
@@ -254,6 +263,7 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
   // 分别控制设置列表、完整配置、授权说明和真实授权进度的显示状态。
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [configurationOpen, setConfigurationOpen] = useState(false);
+  const [accountToolbar, setAccountToolbar] = useState<React.ReactNode>(null);
   const [catalogRefreshing, setCatalogRefreshing] = useState(false);
   const [authorizingConnector, setAuthorizingConnector] = useState<Connector | undefined>(undefined);
   // 一次性授权任务由后端创建，包含真实二维码或第三方授权链接。
@@ -363,7 +373,7 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
   }, [authorizingConnector, closeLocalAuthorization, connectors]);
 
   const enabledConnectors = useMemo(() => connectors.filter((connector) => connector.enableFlag === 'Y'), [connectors]);
-  const previewConnectors = useMemo(() => connectors.slice(0, 3), [connectors]);
+  const previewConnectors = useMemo(() => prioritizeEnabledConnectors(connectors).slice(0, 3), [connectors]);
 
   const loadAuthorizedConnectors = useCallback(
     async (reportAuthorizationRefreshFailure = false) => {
@@ -1032,11 +1042,12 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
         )}
       </Modal>
 
-      {/* 完整配置面板预留给后续连接器管理能力。 */}
+      {/* 完整配置面板统一管理系统连接器与当前用户自定义账号。 */}
       <Drawer
         className={styles.configurationDrawer}
         open={configurationOpen}
         title="连接器配置"
+        extra={accountToolbar}
         width={Math.min(980, window.innerWidth - 24)}
         onClose={() => setConfigurationOpen(false)}
       >
@@ -1045,6 +1056,7 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
             {connectors.length
               ? connectors.map((connector) => renderConnectorItem(connector, true))
               : !loadingConnectors && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无连接器" />}
+            <GlobalAccountSection onToolbarChange={setAccountToolbar} />
           </div>
         </Spin>
       </Drawer>

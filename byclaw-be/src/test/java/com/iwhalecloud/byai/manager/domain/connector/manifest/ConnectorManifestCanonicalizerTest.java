@@ -35,6 +35,50 @@ class ConnectorManifestCanonicalizerTest {
     }
 
     @Test
+    void acceptsOAuth2SharedVolumeCredentialProjection() {
+        ConnectorInfo connector = new ConnectorInfo();
+        connector.setConnectorCode("github");
+        connector.setSkillCode("github");
+        String manifest = """
+            {"schemaVersion":"1.0","id":"github","version":"1.0.0",
+             "runtime":{"type":"oauth2","authorizeIn":"be-auth-job"},
+             "authStorage":{"mode":"credential-reference","owner":"be-auth-job",
+                 "runtimeMutation":"shared-volume-projection",
+                 "projectionPath":"/by/.connector-auth/.github/credential.json","environment":{}},
+             "skill":{"code":"github","source":"system-builtin","installScope":"user","grantScope":"agent"}}
+            """;
+
+        ConnectorManifestCanonicalizer canonicalizer = new ConnectorManifestCanonicalizer(new ObjectMapper());
+        String canonical = canonicalizer.canonicalize(connector, manifest);
+
+        assertThat(canonical).contains("\"runtimeMutation\":\"shared-volume-projection\"",
+            "\"projectionPath\":\"/by/.connector-auth/.github/credential.json\"");
+        assertThat(canonicalizer.extractCredentialProjection(connector, manifest))
+            .hasValueSatisfying(projection -> assertThat(projection.projectionPath())
+                .isEqualTo("/by/.connector-auth/.github/credential.json"));
+    }
+
+    @Test
+    void sharedVolumeProjectionRequiresPrivateConnectorAuthPath() {
+        ConnectorInfo connector = new ConnectorInfo();
+        connector.setConnectorCode("github");
+        connector.setSkillCode("github");
+        String manifest = """
+            {"schemaVersion":"1.0","id":"github","version":"1.0.0",
+             "runtime":{"type":"oauth2","authorizeIn":"be-auth-job"},
+             "authStorage":{"mode":"credential-reference","owner":"be-auth-job",
+                 "runtimeMutation":"shared-volume-projection",
+                 "projectionPath":"/tmp/credential.json","environment":{}},
+             "skill":{"code":"github","source":"system-builtin","installScope":"user","grantScope":"agent"}}
+            """;
+
+        assertThatThrownBy(() -> new ConnectorManifestCanonicalizer(new ObjectMapper())
+            .canonicalize(connector, manifest))
+            .isInstanceOf(InvalidConnectorManifestException.class)
+            .hasMessageContaining("under /by/.connector-auth/");
+    }
+
+    @Test
     void acceptsCliManagedEnvironmentManifestAndExtractsItsAllowlist() {
         ConnectorInfo connector = connector("ima-openapi");
         connector.setSkillCode("ima-skill");

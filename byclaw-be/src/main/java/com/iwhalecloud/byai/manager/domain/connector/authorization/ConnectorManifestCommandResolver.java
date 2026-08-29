@@ -48,7 +48,11 @@ public class ConnectorManifestCommandResolver {
     public ManifestCommandCatalog resolve(ConnectorInfo connector) {
         String canonical = canonicalizer.canonicalize(connector, connector == null ? null : connector.getRuntimeManifest());
         try {
-            JsonNode commandsNode = objectMapper.readTree(canonical).path("runtime").path("commands");
+            JsonNode runtimeNode = objectMapper.readTree(canonical).path("runtime");
+            if ("oauth2".equals(runtimeNode.path("type").textValue())) {
+                return ManifestCommandCatalog.withoutCommands(sha256(canonical), placeholderPolicies);
+            }
+            JsonNode commandsNode = runtimeNode.path("commands");
             Map<String, List<List<String>>> commands = new LinkedHashMap<>();
             commandsNode.fields().forEachRemaining(action -> {
                 List<List<String>> group = new ArrayList<>();

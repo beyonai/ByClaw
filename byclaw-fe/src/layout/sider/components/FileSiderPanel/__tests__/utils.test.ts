@@ -5,7 +5,9 @@ import {
   getDisplayFileBrowserPath,
   getFileCategoryKeyByPath,
   getPreviewFileType,
+  isPathIn,
   MAX_TEXT_PREVIEW_SIZE,
+  normalizeFileBrowserPath,
   isProtectedRootDirectory,
 } from '../utils';
 
@@ -24,6 +26,11 @@ describe('FileSiderPanel project space paths', () => {
         isDir: true,
       })
     ).toBe(true);
+  });
+
+  it('keeps the sandbox prefix stable for tree keys while matching legacy category roots', () => {
+    expect(normalizeFileBrowserPath('/by/.sessions/1/requirements/')).toBe('/by/.sessions/1/requirements/');
+    expect(isPathIn('/by/.sessions/1/requirements/file.txt', '/.sessions/')).toBe(true);
   });
 
   it('previews extensionless repository metadata as text', () => {

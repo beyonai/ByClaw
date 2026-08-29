@@ -23,7 +23,6 @@ import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.util.ListUtil;
 import com.iwhalecloud.byai.common.util.MapParamUtil;
 import com.iwhalecloud.byai.common.util.StringUtil;
-import com.iwhalecloud.byai.manager.application.service.job.DevloopPatService;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
@@ -273,7 +272,7 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
     private ConnectorManifestCommandResolver connectorManifestCommandResolver;
 
     @Autowired
-    private DevloopPatService patService;
+    private GitHubCredentialResolver githubCredentialResolver;
 
     @Autowired
     private ProjectMemberService projectMemberService;
@@ -2025,7 +2024,7 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
         List<ScanRequireItem> items;
         String type = source.getSourceType();
         if ("github_issue".equals(type)) {
-            String pat = patService.getGitHubPat(source.getCreateBy());
+            String pat = githubCredentialResolver.resolve(source.getCreateBy());
             if (pat == null) {
                 return ResponseUtil.failRes(I18nUtil.get("devloop.github.pat.not.configured"));
             }
@@ -3686,10 +3685,11 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
         new RepoProviderSpec("Gitea", "gitea.com", "GITEA_TOKEN", "$GITEA_TOKEN@"));
 
     /**
-     * 按代码平台生成「仓库访问说明」段,填入模板 ${repoCloneHint} 占位符。 显式 repoUrl(自建/私有实例)优先直用;否则按平台公共域名 + 令牌变量拼带令牌的 clone 地址。
+     * 按代码平台生成「仓库访问说明」段。GitHub 使用标准 URL 和沙箱 credential helper；其他平台保留既有令牌变量约定。
      */
     public static String buildRepoCloneHint(String provider, String repoUrl, String repoFullName) {
         RepoProviderSpec spec = repoProviderSpec(provider);
+        boolean github = "github".equalsIgnoreCase(StringUtils.defaultIfBlank(provider, "github"));
         // repoFullName 形如 owner/repo 才按公共域名拼接;显式 repoUrl 一律直用,兼容自建实例。
         boolean hasFullName = repoFullName != null && !repoFullName.trim().isEmpty();
         String cloneUrl;
@@ -3701,16 +3701,22 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
         } else {
             cloneUrl = "";
         }
+        if (github) {
+            return "- 目标仓库全路径为 " + repoFullName + "，它可能是私有仓库；GitHub 访问凭据由平台连接器统一管理。\n"
+                + "- 直接使用标准地址克隆：git clone " + cloneUrl + "\n"
+                + "- Git 凭据助手会从用户私有工作区读取当前授权，请勿把 Token 拼进 URL、命令参数或 Git remote。\n"
+                + "- 若提示仓库或分支不存在，请先确认平台 GitHub 连接器已授权，不要据此在本地新建独立项目。";
+        }
         return "- 目标仓库全路径为 " + repoFullName + "，它可能是私有仓库；" + spec.label() + " 访问令牌(PAT)已配置在环境变量 " + spec.tokenEnv()
             + " 中，请直接使用它克隆和推送。\n" + "- 用带令牌的完整地址克隆：git clone " + cloneUrl + "\n"
             + "- 若提示仓库或分支不存在，通常是私有仓库权限问题，请确认已使用环境变量 " + spec.tokenEnv() + " 中的令牌，不要据此判定仓库不存在、也不要改为在本地新建独立项目。";
     }
 
-    /**
-     * 在 http(s):// 之后插入令牌前缀,得到带令牌的 clone 地址(令牌以 $VAR 形式留给 shell 展开,不含明文)。 必须手工拼接:前缀含 $GH_TOKEN 之类的 $,走 replaceFirst
-     * 会被当成分组引用直接抛 IllegalArgumentException。 非 http(s) 地址(如 git@ SSH)原样返回,令牌注入对它无意义。
-     */
+    /** GitHub 保持无凭据标准 URL；其他平台延续在 HTTP(S) URL 中注入对应环境变量的既有行为。 */
     public static String tokenizedRepoCloneUrl(String provider, String repoUrl) {
+        if ("github".equalsIgnoreCase(StringUtils.defaultIfBlank(provider, "github"))) {
+            return repoUrl;
+        }
         String prefix = repoProviderSpec(provider).cloneUrlPrefix();
         for (String scheme : new String[]{
             "https://", "http://"
@@ -5788,6 +5794,23 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
         return ResponseUtil.successResponse(result);
     }
 
+    /** 创建不绑定项目的用户级账号，账号所有权始终取当前登录用户。 */
+    @Transactional(rollbackFor = Exception.class)
+    public ResponseUtil<Map<String, Object>> createGlobalOperationAccount(OperationAccountDTO dto) {
+        String validationError = validateOperationAccount(dto, false);
+        if (validationError != null) {
+            return ResponseUtil.failRes(validationError);
+        }
+        OperationAccount account = new OperationAccount();
+        applyOperationAccountDto(account, dto);
+        account.setProjectId(null);
+        account.setCreateBy(CurrentUserHolder.getCurrentUserId());
+        OperationAccount created = operationAccountService.create(account);
+        Map<String, Object> result = new HashMap<>();
+        result.put("accountId", created.getAccountId());
+        return ResponseUtil.successResponse(result);
+    }
+
     /**
      * 编辑运营账号，项目归属由已有账号反查，避免请求跨项目修改。
      */
@@ -5803,9 +5826,11 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
         if (existing == null) {
             return ResponseUtil.failRes(I18nUtil.get("devloop.operationAccount.notFound"));
         }
-        String accessError = validateOperationProjectAccess(existing.getProjectId());
-        if (accessError != null) {
-            return ResponseUtil.failRes(accessError);
+        if (existing.getProjectId() != null) {
+            String accessError = validateOperationProjectAccess(existing.getProjectId());
+            if (accessError != null) {
+                return ResponseUtil.failRes(accessError);
+            }
         }
         if (!operationAccountAccessService.canAccess(existing, existing.getProjectId(),
             CurrentUserHolder.getCurrentUserId())) {
@@ -5846,9 +5871,11 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
         if (existing == null) {
             return ResponseUtil.failRes(I18nUtil.get("devloop.operationAccount.notFound"));
         }
-        String accessError = validateOperationProjectAccess(existing.getProjectId());
-        if (accessError != null) {
-            return ResponseUtil.failRes(accessError);
+        if (existing.getProjectId() != null) {
+            String accessError = validateOperationProjectAccess(existing.getProjectId());
+            if (accessError != null) {
+                return ResponseUtil.failRes(accessError);
+            }
         }
         if (!operationAccountAccessService.canAccess(existing, existing.getProjectId(),
             CurrentUserHolder.getCurrentUserId())) {
@@ -5874,6 +5901,16 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
         return ResponseUtil.successResponse(result);
     }
 
+    /** 查询当前用户创建的全部有效账号，包括项目账号和用户级账号。 */
+    public ResponseUtil<List<Map<String, Object>>> listGlobalOperationAccounts() {
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (OperationAccount account : operationAccountService.listGlobalByUserId(
+            CurrentUserHolder.getCurrentUserId())) {
+            result.add(toOperationAccountMap(account));
+        }
+        return ResponseUtil.successResponse(result);
+    }
+
     /**
      * 校验采集沙箱属于当前用户，成功后回写对应平台账号状态。
      */
@@ -5886,9 +5923,11 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
         if (account == null) {
             return ResponseUtil.failRes(I18nUtil.get("devloop.operationAccount.notFound"));
         }
-        String accessError = validateOperationProjectAccess(account.getProjectId());
-        if (accessError != null) {
-            return ResponseUtil.failRes(accessError);
+        if (account.getProjectId() != null) {
+            String accessError = validateOperationProjectAccess(account.getProjectId());
+            if (accessError != null) {
+                return ResponseUtil.failRes(accessError);
+            }
         }
         if (!operationAccountAccessService.canAccess(account, account.getProjectId(),
             CurrentUserHolder.getCurrentUserId())) {

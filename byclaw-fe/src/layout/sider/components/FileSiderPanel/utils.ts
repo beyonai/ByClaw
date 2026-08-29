@@ -204,6 +204,9 @@ export function isProtectedRootDirectory(item: FileBrowserItem) {
 
 export function getDisplayFileBrowserPath(path: string) {
   const normalizedPath = normalizeFileBrowserPath(path);
+  if (normalizedPath === DISPLAY_FILE_PATH_PREFIX || normalizedPath.startsWith(`${DISPLAY_FILE_PATH_PREFIX}/`)) {
+    return ensureDirectoryPath(normalizedPath);
+  }
   return normalizedPath === ROOT_FILE_PATH
     ? `${DISPLAY_FILE_PATH_PREFIX}/`
     : `${DISPLAY_FILE_PATH_PREFIX}${normalizedPath}`;
@@ -229,8 +232,13 @@ export function getMessagePayloadSessionId(payload: any) {
 }
 
 export function isPathIn(path: string, rootPath: string) {
-  const normalizedPath = normalizeFileBrowserPath(path).toLowerCase();
-  const normalizedRoot = ensureDirectoryPath(normalizeFileBrowserPath(rootPath)).toLowerCase();
+  const stripSandboxPrefix = (value: string) => {
+    if (value === DISPLAY_FILE_PATH_PREFIX) return ROOT_FILE_PATH;
+    if (value.startsWith(`${DISPLAY_FILE_PATH_PREFIX}/`)) return value.slice(3);
+    return value;
+  };
+  const normalizedPath = stripSandboxPrefix(normalizeFileBrowserPath(path)).toLowerCase();
+  const normalizedRoot = ensureDirectoryPath(stripSandboxPrefix(normalizeFileBrowserPath(rootPath))).toLowerCase();
   return normalizedPath === normalizedRoot.slice(0, -1) || normalizedPath.startsWith(normalizedRoot);
 }
 

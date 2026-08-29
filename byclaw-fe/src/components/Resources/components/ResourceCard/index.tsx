@@ -328,6 +328,7 @@ const RenderContent = (props: ResourceCardProps) => {
   const intl = useIntl();
   const dispatch = useDispatch();
   const { agentId, agentInfo, EventEmitter } = useGlobal();
+  const [digitalEmployeeMenuOpen, setDigitalEmployeeMenuOpen] = useState(false);
   const { userInfo, defaultDigEmployeeId } = useSelector(
     ({ user, employees }: { user: any; employees: IEmployeesState }) => ({
       userInfo: user.userInfo,
@@ -1010,19 +1011,13 @@ const RenderContent = (props: ResourceCardProps) => {
             </div>
 
             {digitalEmployeeActionMode && (
-              <div
-                className={styles.digitalEmployeeActions}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  event.preventDefault();
-                }}
-              >
-                {resource.approveStatus === 'S' ? (
+              <div className={styles.digitalEmployeeActions} onClick={(event) => event.stopPropagation()}>
+                {resource.approveStatus === 'S' || isTruthyFlag(resource.useApplyPending) ? (
                   <div className={styles.applyActionWrap}>
                     <Button disabled shape="circle" icon={<PlusOutlined className={styles.cardActionBtnIcon} />} />
                     <span className={styles.pendingApplyText}>待授权通过</span>
                   </div>
-                ) : resource.canApplyUse ? (
+                ) : !isTruthyFlag(resource.hasUsePermission) && isTruthyFlag(resource.canApplyUse) ? (
                   <Tooltip title="使用申请">
                     <Popconfirm
                       title={intl.formatMessage({ id: 'digitalEmployees.applyConfirm' })}
@@ -1050,11 +1045,20 @@ const RenderContent = (props: ResourceCardProps) => {
                       <Button
                         shape="circle"
                         icon={<MessageOutlined className={styles.cardActionBtnIcon} />}
-                        onClick={() => onChat?.()}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onChat?.();
+                        }}
                       />
                     </Tooltip>
                     {!!effectiveMenuItems?.length ? (
-                      <Dropdown menu={{ items: effectiveMenuItems }} placement="bottomRight">
+                      <Dropdown
+                        menu={{ items: effectiveMenuItems }}
+                        placement="bottomRight"
+                        trigger={['click']}
+                        open={digitalEmployeeMenuOpen}
+                        onOpenChange={setDigitalEmployeeMenuOpen}
+                      >
                         <Button type="text" icon={<EllipsisOutlined className={styles.cardActionBtnIcon} />} />
                       </Dropdown>
                     ) : (

@@ -42,7 +42,7 @@ public class SessionStreamEventRouter {
     private MultiDeviceBroadcastService multiDeviceBroadcastService;
 
     @Autowired
-    private RunningChatSnapshotService runningChatSnapshotService;
+    private RunningChatSnapshotWriteBehind runningChatSnapshotWriteBehind;
 
     @Autowired
     private GatewayStreamEventProcessor gatewayStreamEventProcessor;
@@ -65,6 +65,9 @@ public class SessionStreamEventRouter {
     @Autowired
     private TerminalPersistMarkerService terminalPersistMarkerService;
 
+    @Autowired
+    private ScopedSessionEventService scopedSessionEventService;
+
     /**
      * Redis Stream 统一入口。HTTP SSE 投递到请求线程队列，WebSocket 直接推送到已登记的 Channel。
      */
@@ -72,6 +75,16 @@ public class SessionStreamEventRouter {
         String sessionId = dataJson == null ? null : dataJson.getString("session_id");
         if (StringUtils.isBlank(sessionId)) {
             return StreamDispatchResult.INTENTIONALLY_IGNORED;
+        }
+        try {
+            if (scopedSessionEventService != null
+                && scopedSessionEventService.handleIfNecessary(parseLong(sessionId), dataJson)) {
+                return StreamDispatchResult.HANDLED;
+            }
+        }
+        catch (Exception e) {
+            log.warn("处理外部子会话事件失败, sessionId: {}, dataJson: {}", sessionId, dataJson, e);
+            return StreamDispatchResult.ERROR;
         }
         if (isBackgroundAnswerMessageEvent(dataJson.getString("event_type"))) {
             try {
@@ -170,7 +183,13 @@ public class SessionStreamEventRouter {
         }
         // 推进内存水位线，保证 live 和 recovery 重投递都不会重复推送或重复聚合。
         ctx.hydratedStreamId = StreamIdUtil.max(ctx.hydratedStreamId, ctx.currentStreamId, ctx.hydratedStreamId);
-        runningChatSnapshotService.save(ctx, receivedTraceId, messageContext);
+        String snapshotKey = runningSnapshotKey(ctx, receivedTraceId, messageContext);
+        if (terminalResponse) {
+            runningChatSnapshotWriteBehind.flushNow(snapshotKey, ctx, receivedTraceId, messageContext);
+        }
+        else {
+            runningChatSnapshotWriteBehind.enqueue(snapshotKey, ctx, receivedTraceId, messageContext);
+        }
 
         if (terminalResponse) {
             if (ctx.markTraceComplete(receivedTraceId)) {
@@ -182,6 +201,12 @@ public class SessionStreamEventRouter {
             }
         }
         return WebSocketRouteResult.broadcasting();
+    }
+
+    private String runningSnapshotKey(ChatProcessContext ctx, String traceId, MessageContext messageContext) {
+        Long messageId = messageContext == null ? null : messageContext.getMessageId();
+        return String.valueOf(ctx == null ? null : ctx.sessionId) + ":"
+            + StringUtils.defaultString(traceId) + ":" + String.valueOf(messageId);
     }
 
     /**
@@ -196,7 +221,7 @@ public class SessionStreamEventRouter {
         boolean terminalEventType = SseResponseEventEnum.appStreamResponse.equals(eventType)
             || SseResponseEventEnum.error.equals(eventType);
         if (!terminalEventType) {
-            log.info("Stream 增量事件已处理，跳过重复推送, sessionId: {}, traceId: {}, streamId: {}", ctx.sessionId,
+            log.debug("Stream 增量事件已处理，跳过重复推送, sessionId: {}, traceId: {}, streamId: {}", ctx.sessionId,
                 ctx.traceId, ctx.currentStreamId);
             return WebSocketRouteResult.ignored();
         }

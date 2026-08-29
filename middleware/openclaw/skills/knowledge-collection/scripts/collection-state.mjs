@@ -149,6 +149,25 @@ function validateMarkdownPath(root, relativePath, label, expectedDirectory) {
   return candidate;
 }
 
+function validateRawArtifacts(root, rawArtifacts) {
+  if (!Array.isArray(rawArtifacts)) throw new Error('rawArtifacts 必须是字符串数组');
+  const validated = rawArtifacts.map((artifact, index) => {
+    const label = `rawArtifacts[${index}]`;
+    const candidate = validateRelativePath(root, artifact, label);
+    validatePathPrefix(root, artifact, 'raw', label);
+    const stat = fs.statSync(candidate);
+    if (!stat.isFile()) throw new Error(`${label} 必须指向普通文件`);
+    if (stat.size <= 0) throw new Error(`${label} 必须指向非空文件`);
+    try {
+      fs.accessSync(candidate, fs.constants.R_OK);
+    } catch {
+      throw new Error(`${label} 必须指向当前进程可读的文件`);
+    }
+    return artifact;
+  });
+  return [...new Set(validated)];
+}
+
 function safeWorkCopy(paths, relativePath, directory, { requireExisting = false } = {}) {
   if (typeof relativePath !== 'string' || !relativePath.trim()) return false;
   if (!MARKDOWN_EXTENSIONS.has(path.extname(relativePath).toLowerCase())) return false;
@@ -514,6 +533,8 @@ function validateCanonicalItem(item, sanitizedPath) {
 
 function markOneMaterialized(paths, session, metadata, collectionResult, update) {
   const itemId = requireString(update.itemId, 'itemId');
+  const rawArtifacts = update.rawArtifacts === undefined
+    ? undefined : validateRawArtifacts(paths.root, update.rawArtifacts);
   let inventory = metadata.collection.items.find((item) => item.itemId === itemId);
   if (!inventory) {
     const canonical = update.canonicalItem && typeof update.canonicalItem === 'object'
@@ -541,7 +562,7 @@ function markOneMaterialized(paths, session, metadata, collectionResult, update)
       backend,
       collectionFilters: collectionResult.filters && typeof collectionResult.filters === 'object'
         ? clone(collectionResult.filters) : {},
-      rawArtifacts: [],
+      rawArtifacts: rawArtifacts ?? [],
       media: normalizeMediaState(undefined),
       materialization: {
         status: 'pending', markdownPath: null, sanitizedPath: null,
@@ -565,6 +586,7 @@ function markOneMaterialized(paths, session, metadata, collectionResult, update)
     .filter((value) => typeof value === 'string'
       && value !== markdownPath && value !== sanitizedPath);
   inventory.title = update.canonicalItem.title;
+  if (rawArtifacts !== undefined) inventory.rawArtifacts = rawArtifacts;
   inventory.materialization = {
     status: 'materialized',
     markdownPath,

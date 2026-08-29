@@ -4,7 +4,6 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.iwhalecloud.byai.common.constants.devloop.DeleteFlag;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
-import com.iwhalecloud.byai.manager.application.service.job.DevloopPatService;
 import com.iwhalecloud.byai.manager.domain.devloop.provider.GitRepositoryProvider;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectService;
 import com.iwhalecloud.byai.manager.domain.project.service.ProjectWorkspaceGitService;
@@ -45,7 +44,7 @@ public class ProjectRepositoryService {
     private ProjectRepoMapper projectRepoMapper;
 
     @Autowired
-    private DevloopPatService patService;
+    private GitHubCredentialResolver githubCredentialResolver;
 
     @Autowired
     private ProjectWorkspaceGitService projectWorkspaceGitService;
@@ -354,7 +353,7 @@ public class ProjectRepositoryService {
     }
 
     private String currentUserToken() {
-        return patService.getGitHubPat(String.valueOf(CurrentUserHolder.getCurrentUserId()));
+        return githubCredentialResolver.resolve(CurrentUserHolder.getCurrentUserId());
     }
 
     private void requireProject(Long projectId) {

@@ -13,6 +13,12 @@
 - status / report_format 入参保留，但脚本仍硬编码写入 "approved" / "html"，调用方传值无效
 """
 async def execute(params: dict) -> dict:
+    project_id = str(params.get("projectId") or "").strip()
+    if not project_id:
+        return {"records": [{"success": False, "code": "PROJECT_ID_REQUIRED", "error": "projectId不能为空"}], "total": 1, "meta": {"total": 1}}
+    account_code = str(params.get("account_code") or "").strip()
+    if not account_code:
+        return {"records": [{"success": False, "code": "ACCOUNT_CODE_REQUIRED", "error": "account_code不能为空"}], "total": 1, "meta": {"total": 1}}
     import json as _json
     from datetime import date as _date, datetime as _datetime
 
@@ -68,10 +74,17 @@ async def execute(params: dict) -> dict:
     review_result_raw = params.get("review_result")
     input_fingerprint = params.get("input_fingerprint")
     report_html = params.get("report_html") or ""
-    if not run_id or not input_fingerprint or not report_html:
+    account_name = str(params.get("account_name") or "").strip()
+    analysis_stage = params.get("analysis_stage", "post_publish")
+    if not run_id or not input_fingerprint or not report_html or not account_name:
         return _error("INVALID_ARGUMENT", "run_id、input_fingerprint和report_html不能为空")
     if not isinstance(input_fingerprint, str) or len(input_fingerprint) > 100:
         return _error("INVALID_FINGERPRINT", "input_fingerprint必须是长度不超过100的字符串")
+    if analysis_stage not in ("pre_publish", "post_publish"):
+        return _error("INVALID_ANALYSIS_STAGE", "analysis_stage必须是pre_publish或post_publish")
+    learning_outcome = params.get("learning_outcome")
+    if learning_outcome not in (None, "supported", "not_supported", "conditional", "inconclusive"):
+        return _error("INVALID_LEARNING_OUTCOME", "learning_outcome取值无效")
     if params.get("report_format", "html") != "html":
         return _error("INVALID_REPORT_FORMAT", "report_format必须是html")
     if not report_html.lstrip().lower().startswith("<!doctype html>"):
@@ -81,7 +94,7 @@ async def execute(params: dict) -> dict:
 
     F = Wy93ovzs9pArticleAnalysisResult.F
     existing = await wy93ovzs9p_article_analysis_result_mapper.select_one(
-        Q.eq(F.run_id, run_id))
+        Q.eq(F.projectId, project_id).eq(F.account_code, account_code).eq(F.run_id, run_id))
     if existing:
         if _get(existing, "input_fingerprint") != input_fingerprint:
             return _error("IDEMPOTENCY_CONFLICT", "相同run_id对应不同输入指纹")
@@ -103,6 +116,11 @@ async def execute(params: dict) -> dict:
     external_benchmarks = params.get("external_benchmarks")
     if external_benchmarks is not None and not isinstance(external_benchmarks, str):
         external_benchmarks = _json.dumps(external_benchmarks, ensure_ascii=False)
+    def _json_text(name):
+        value = params.get(name)
+        if value is not None and not isinstance(value, str):
+            return _json.dumps(value, ensure_ascii=False)
+        return value
     # review_result 落库规则：保持原类型，dict → json.dumps，其他原样
     if review_result_raw is not None and not isinstance(review_result_raw, str):
         review_result_value = _json.dumps(review_result_raw, ensure_ascii=False)
@@ -110,7 +128,22 @@ async def execute(params: dict) -> dict:
         review_result_value = review_result_raw
 
     values = {
+        "projectId": project_id,
+            "account_code": account_code, "account_name": account_name,
         "run_id": run_id, "analysis_type": params.get("analysis_type"),
+        "analysis_stage": analysis_stage,
+        "source_run_id": params.get("source_run_id"),
+        "platform": params.get("platform"),
+        "content_role": params.get("content_role"),
+        "topic": params.get("topic"),
+        "target_audience": params.get("target_audience"),
+        "audience_fit_analysis": _json_text("audience_fit_analysis"),
+        "recommended_publish_time": params.get("recommended_publish_time"),
+        "recommended_keywords": _json_text("recommended_keywords"),
+        "publishing_execution_card": _json_text("publishing_execution_card"),
+        "desired_action": params.get("desired_action"),
+        "tested_element": params.get("tested_element"),
+        "learning_outcome": params.get("learning_outcome"),
         "article_id": params.get("article_id"),
         "collection_id": params.get("collection_id"),
         "period_start": _to_date(params.get("period_start")),

@@ -149,9 +149,11 @@ export function deliveredAnswerTextCovers(sessionKey: string | undefined, text: 
       continue;
     }
     if (entry === normalized) {
+      console.log("[byai-channel] deliveredAnswerTextCovers hit exact match");
       return true;
     }
     if (entry.length >= MIN_PREFIX_MATCH_CHARS && normalized.startsWith(entry)) {
+      console.log("[byai-channel] deliveredAnswerTextCovers hit prefix match");
       return true;
     }
   }

@@ -2,12 +2,33 @@
   "action_code": "upsert_article",
   "action_name": "写入或更新文章",
   "action_type": "OPERATION",
-  "action_desc": "按 id 或 canonical_url 业务键写入/更新文章；校验 word_count 与 tags，正文变化时同步 content_hash",
+  "action_desc": "按 id 或 canonical_url 业务键写入/更新文章；publish_time 必须为精确到秒的 ISO-8601 时间；校验 word_count 与 tags，正文变化时同步 content_hash",
   "permission_roles": [
     "ops",
     "admin"
   ],
   "params": [
+    {
+      "paramCode": "projectId",
+      "paramName": "项目ID",
+      "type": "string",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
+      "paramCode": "account_code",
+      "paramName": "公众号编码",
+      "type": "string",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
+      "paramCode": "account_name",
+      "paramName": "公众号名称",
+      "type": "string",
+      "isRequired": true,
+      "direction": "input"
+    },
     {
       "paramCode": "id",
       "paramName": "文章ID",
@@ -24,7 +45,7 @@
     },
     {
       "paramCode": "publish_time",
-      "paramName": "发布时间",
+      "paramName": "发布时间（ISO-8601，精确到秒）",
       "type": "string",
       "isRequired": false,
       "direction": "input"

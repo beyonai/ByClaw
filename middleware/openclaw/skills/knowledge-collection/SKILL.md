@@ -10,16 +10,16 @@ Collect traceable source materials and deliver validated, sanitized Markdown. Th
 ## 0. 默认落盘位置
 
 在创建任何采集目录或调用 `init` 前，先读取当前 Agent 上下文提供的 **Session Root**。在用户沙箱中，
-本次任务的所有采集文件默认且必须落在 `/by/.sessions/<sessionId>/` 下；推荐使用
+本次任务的采集文件默认落在 `/by/.sessions/<sessionId>/` 下；推荐使用
 `/by/.sessions/<sessionId>/collections/<task-name>/` 作为唯一采集会话根。这里的 `<sessionId>` 是当前聊天会话 ID，
 必须来自 Agent 上下文中的 Session Root，不得使用登录 Cookie、`BAIYING_SESSION` 或其他认证会话值推断。
-在用户沙箱调用 `init` 时，必须同时显式传入 `--session-root <Session Root>` 与位于其下的 `--session-dir`；
-企业采集若从历史会话读取并向当前会话输出，也必须传入同一个 `--session-root`。
+`--session-dir`、`--parent-session-dir`、`--output-dir`、`--output-root` 与显式 `--report-path` 以 `/` 开头时按
+绝对路径使用，可指向沙箱内任意可写位置；使用相对路径时必须同时显式传入 `--session-root <Session Root>`，
+并相对于该 Session Root 解析。
 
-不得把 OpenClaw workspace（如 `/by/.openclaw/workspace-*`）、进程当前目录或 `/tmp` 作为用户沙箱中的默认交付位置。
-`--session-dir`、`--parent-session-dir`、`--output-dir`、`--output-root` 以及来源执行器的暂存目录都必须位于上述当前
-Session Root 内。只有本地开发/测试不在用户沙箱中，或继续读取一个已存在的历史采集会话时，才允许使用其他显式路径；
-新建采集会话仍必须回到当前 Session Root。若上下文没有提供 Session Root，不得猜测 sessionId，应先向上游取得当前会话目录。
+不得依赖进程当前目录解释相对路径。相对路径中的 `..` 或符号链接不得越出当前 Session Root。若相对路径调用的上下文
+没有提供 Session Root，不得猜测 sessionId，应先向上游取得当前会话目录。绝对路径不受 Session Root 成员关系限制，
+但会话内部的 `.collection-inputs/`、`raw/`、`markdown/` 和 `sanitized/items/` 布局仍必须遵守本 Skill 的目录契约。
 
 ## 1. Decide whether to use this skill
 
@@ -55,13 +55,15 @@ Read only the reference that matches the chosen workflow, plus `collection-contr
 
 ## 3. Execute through validated commands
 
-1. Create or load a session before discovery. Use `init` with the derived `--source-scope` and `--materialization-target`.
+1. Create or load a session before discovery. Before any source executor, browser preflight, or delegated acquisition command, complete that initialization. Use `init` with the derived `--source-scope` and `--materialization-target`. When the user already selected direct source URLs, initialize their inventory as `pending` before acquisition so a terminal source gate remains reportable.
 2. For public URL discovery that uses SearXNG, run `public-discover`. When the user explicitly requests a quantity (for example, “采集一篇”), pass that positive integer as `--requested-count`; this runs SearXNG first with the requested quantity as its result limit, then automatically falls back to the relocated `hot_discovery` channel only when SearXNG returns no candidates or invalid output. Without `--requested-count`, it starts the relocated `online-search` and `hot_discovery` channels in parallel and reports unavailable coverage without suppressing successful results. Do not compensate for an empty discovery result by manually invoking a `bycli <site> search` command, because that bypasses the collection command's recovery and provenance path.
 
    Public discovery keeps normalized deduplication separate from acquisition URLs. Use the selected candidate's `url` unchanged for the first acquisition attempt. When that attempt fails and the candidate has `sourceUrls`, retry the remaining listed variants in order. Never reconstruct an acquisition URL from a duplicate key, and never persist a variant containing credentials or sensitive parameters.
 3. Delegate retrieval to the selected source executor. Do not use `web_fetch`, `curl`, `wget`, `requests`, or another direct HTTP client to bypass it.
 
    当选用的执行器是 `bycli` 时，初次 `BROWSER_CONNECT` 是桥接恢复信号，不是要求用户操作桌面浏览器的证据。执行器必须先完成托管浏览器恢复阶梯（状态检查、冷启动、`doctor`/`daemon status` 复检，以及最多一次 daemon restart），再报告桥接失败；采集编排器不得直接要求用户打开 Chrome，也不得将这次首次失败归类为认证问题。只有最终 `bridge_unavailable`，或明确的登录、MFA、CAPTCHA、认证结果，才可作为需要用户处理的事项对外说明。
+
+   Authentication failure does not undo initialization. Preserve `session.json`, keep every selected source visible as `failed` or `pending`, and run `status` before reporting the stopped collection. A directory without `session.json` is not a partial or failed collection terminal state.
 4. Register only actual artifacts through `collect`; excerpts and abstracts are valid typed artifacts only when their actual `contentGranularity` is recorded, but they must never be treated or described as full text. Do not hand-edit inventory metadata.
 5. For research mode, call `report` to generate the requested research report.
 6. Use `status` before delivery. It distinguishes source records, duplicate groups, materialized bodies, pending bodies, failed bodies, content granularity, media coverage, crawl coverage, and `collection.deliveryComplete`.

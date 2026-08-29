@@ -4,38 +4,41 @@ import unittest
 from pathlib import Path
 
 
-SKILL_ROOT = Path(__file__).parents[1] / "skills" / "agent-reach"
+ROUTING_REFERENCE = (
+    Path(__file__).parents[1]
+    / "skills"
+    / "knowledge-collection"
+    / "references"
+    / "agent-reach.md"
+)
 BYCLI_SKILL = Path(__file__).parents[1] / "skills" / "bycli" / "SKILL.md"
 
 
 class ByReachSkillContractTest(unittest.TestCase):
-    def test_technical_skill_identity_is_stable_while_product_surface_is_by_reach(self):
-        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
-        metadata = (SKILL_ROOT / "agents" / "openai.yaml").read_text(encoding="utf-8")
+    def test_agent_reach_is_the_embedded_public_internet_router(self):
+        routing = ROUTING_REFERENCE.read_text(encoding="utf-8")
 
-        self.assertIn("name: agent-reach", skill)
-        self.assertIn("# By-Reach", skill)
-        self.assertIn("By-Reach v2", skill)
-        self.assertIn("by-reach doctor --json", skill)
-        self.assertIn("~/.by-reach/", skill)
-        self.assertIn('display_name: "By-Reach"', metadata)
-        self.assertIn("$agent-reach", metadata)
+        self.assertIn("# 公共互联网来源路由（原 By-Reach 路由器）", routing)
+        self.assertIn("内置公共互联网路由器 `agent-reach`", routing)
+        self.assertIn("by-reach doctor --json", routing)
+        self.assertIn("~/.by-reach/", routing)
 
     def test_webpages_use_bycli_before_any_acquisition(self):
-        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        skill = ROUTING_REFERENCE.read_text(encoding="utf-8")
+        plain_skill = skill.replace("**", "")
 
         for phrase in (
             "任何网站、网页或 URL",
-            "必须无条件选择并加载 `bycli` skill",
+            "必须无条件加载 `bycli` skill",
             "`bycli web read --url <URL> --stdout`",
             "byCLI 无法完成时必须停止并报告",
             "不得回退到其他网页获取工具",
         ):
-            self.assertIn(phrase, skill)
+            self.assertIn(phrase, plain_skill)
         self.assertNotRegex(skill, re.compile(r"(?i)jina|web reader|opencli"))
 
     def test_platform_channels_keep_only_approved_executor_and_bycli_fallback_paths(self):
-        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        skill = ROUTING_REFERENCE.read_text(encoding="utf-8")
 
         for phrase in (
             "`twitter-cli`",
@@ -45,17 +48,17 @@ class ByReachSkillContractTest(unittest.TestCase):
             "`gh` CLI",
             "`feedparser`",
             "`exa.web_search_exa`",
-            "只允许一次 byCLI 兜底",
+            "才允许一次 byCLI 兜底",
         ):
             self.assertIn(phrase, skill)
 
-    def test_bycli_skill_names_by_reach_as_the_router_product(self):
+    def test_bycli_skill_names_the_embedded_knowledge_collection_router(self):
         skill = BYCLI_SKILL.read_text(encoding="utf-8")
 
-        self.assertIn("## By-Reach 边界", skill)
-        self.assertIn("By-Reach 选择 byCLI", skill)
-        self.assertIn("路由器 `agent-reach`（By-Reach）", skill)
-        self.assertNotIn("Agent Reach 选择 byCLI", skill)
+        self.assertIn("## 路由边界", skill)
+        self.assertIn("`knowledge-collection` 的内置路由层", skill)
+        self.assertIn("路由层必须无条件选择并加载 `bycli` skill", skill)
+        self.assertNotIn("路由器 `agent-reach`（By-Reach）", skill)
 
     def test_bycli_routing_guidance_never_teaches_direct_http_bypasses(self):
         """Only adapter implementation code may use its own managed HTTP client.
@@ -94,6 +97,26 @@ class ByReachSkillContractTest(unittest.TestCase):
             "接管用户已打开的 TAB",
         ):
             self.assertIn(phrase, skill)
+
+    def test_bycli_named_adapter_sessions_are_capability_gated_and_separate_from_raw_browser(self):
+        skill = BYCLI_SKILL.read_text(encoding="utf-8")
+        browser = (BYCLI_SKILL.parent / "references" / "browser.md").read_text(encoding="utf-8")
+
+        for phrase in (
+            "`--adapter-session`",
+            "Adapter session",
+            "workflow-specific reference",
+            "structured help",
+            "legacy shared mode",
+        ):
+            self.assertIn(phrase, skill)
+        for phrase in (
+            "raw browser surface",
+            "Adapter surface",
+            "`--adapter-session`",
+            "cannot inspect",
+        ):
+            self.assertIn(phrase, browser)
 
     def test_bycli_uses_one_profile_explicit_openclaw_browser_command(self):
         skill = BYCLI_SKILL.read_text(encoding="utf-8")
@@ -145,6 +168,13 @@ class ByReachSkillContractTest(unittest.TestCase):
         self.assertIn("不需要", expected[14])
         self.assertIn("/usr/local/bin/start-chrome.sh 存在且可执行", expected[15])
         self.assertIn("openclaw browser --browser-profile openclaw start", expected[15])
+        self.assertIn("serial fallback", expected[19])
+        self.assertIn("maxParallel: 3", expected[20])
+        self.assertIn("fourth", expected[20])
+        self.assertIn("batch-scoped", expected[20])
+        self.assertIn("mixed", expected[21])
+        self.assertIn("authentication", expected[22])
+        self.assertIn("queued", expected[22])
 
 
 if __name__ == "__main__":

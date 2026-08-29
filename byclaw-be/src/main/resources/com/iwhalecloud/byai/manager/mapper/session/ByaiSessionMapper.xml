@@ -77,6 +77,17 @@
             <if test="enterpriseId != null">
                 AND a.enterprise_id = #{enterpriseId}
             </if>
+            <choose>
+                <when test="sessionId != null">
+                    AND a.session_id = #{sessionId}
+                </when>
+                <when test="parentSessionId != null">
+                    AND a.parent_session_id = #{parentSessionId}
+                </when>
+                <otherwise>
+                    AND a.parent_session_id IS NULL
+                </otherwise>
+            </choose>
             <if test="objectType != null and objectType != ''">
                 AND a.object_type = #{objectType}
             </if>
@@ -213,6 +224,8 @@
         <result column="update_time" property="updateTime" />
         <result column="state" property="state" />
         <result column="project_id" property="projectId" />
+        <result column="project_name" property="projectName" />
+        <result column="cloud_resource_id" property="cloudResourceId" />
         <result column="avatar" property="avatar" />
         <result column="match_type" property="matchType" />
         <result column="match_text" property="matchText" />
@@ -244,6 +257,7 @@
                a.state,
                a.project_id,
                b.project_name,
+               b.cloud_resource_id,
                r.avatar
         <choose>
             <when test="digitalEmployeeSearch">
@@ -373,6 +387,7 @@
                  JOIN byai_project b ON a.project_id = b.project_id
                  LEFT JOIN ss_resource r ON a.object_id = r.resource_id
         WHERE b.project_id = #{projectId}
+          AND a.parent_session_id IS NULL
         <!-- 运营会话只在运营项目展示，避免普通研发任务视图混入运营任务。 -->
         AND (b.project_type = 'operation'
              OR NOT EXISTS (SELECT 1 FROM byai_session_ext oe

@@ -1504,13 +1504,24 @@ export default {
   'messageList.sqlAnalysis': 'SQL Analysis',
   'messageList.defaultAIName': 'Beyond AI',
   'messageList.taskPlan.title': 'Task execution plan',
+  'messageList.taskPlan.updated': 'Task plan updated',
   'messageList.taskPlan.progress': '{completed}/{total} completed',
+  'messageList.taskPlan.summary.COMPLETED': '{count} completed',
+  'messageList.taskPlan.summary.IN_PROGRESS': '{count} in progress',
+  'messageList.taskPlan.summary.PENDING': '{count} pending',
+  'messageList.taskPlan.summary.FAILED': '{count} failed',
+  'messageList.taskPlan.summary.CANCELLED': '{count} cancelled',
+  'messageList.taskPlan.summary.SKIPPED': '{count} skipped',
   'messageList.taskPlan.status.PENDING': 'Pending',
   'messageList.taskPlan.status.IN_PROGRESS': 'In progress',
   'messageList.taskPlan.status.COMPLETED': 'Completed',
   'messageList.taskPlan.status.FAILED': 'Failed',
   'messageList.taskPlan.status.SKIPPED': 'Skipped',
   'messageList.taskPlan.status.CANCELLED': 'Cancelled',
+  'messageList.askUser.title': 'Your answer is needed',
+  'messageList.askUser.answered': 'Answered questions',
+  'messageList.askUser.previous': 'Previous question',
+  'messageList.askUser.next': 'Next question',
 
   // MessageContent Component
   'contentHeader.settings': 'Settings',
@@ -1668,6 +1679,7 @@ export default {
 
   'toolCall.input': 'Input',
   'toolCall.output': 'Output',
+  'contextEvent.input': 'Injected input',
   'toolCall.collapse': 'Collapse details',
 
   quote: 'Quote',
@@ -2010,11 +2022,6 @@ export default {
   'projectSpace.members.confirmUnbind': 'Confirm unbinding',
   'projectSpace.members.unbindSuccess': 'Digital employee unbound',
   'projectSpace.members.unbindFailed': 'Failed to unbind digital employee',
-  'projectSpace.github.notConfigured': 'Configure a GitHub token to read code repositories and changes.',
-  'projectSpace.github.configure': 'Configure GitHub token',
-  'projectSpace.github.saveSuccess': 'GitHub token saved',
-  'projectSpace.github.saveFailed': 'Failed to save GitHub token',
-  'projectSpace.github.placeholder': 'Enter a GitHub Personal Access Token',
   // Ops project accounts, task orchestration, and workflows
   'projectSpace.operation.platform.all': 'All accounts',
   'projectSpace.operation.platform.wechat': 'WeChat OA',
@@ -2022,6 +2029,8 @@ export default {
   'projectSpace.operation.platform.video': 'WeChat Video',
   'projectSpace.operation.platform.douyin': 'Douyin',
   'projectSpace.operation.account.entry': 'Ops account management',
+  'connector.accounts.title': 'Accounts',
+  'connector.accounts.loadFailed': 'Failed to load accounts. Try again later',
   'projectSpace.operation.account.title': 'Ops account management',
   'projectSpace.operation.account.description': 'Manage platform accounts, sign-in status, and content data',
   'projectSpace.operation.account.back': 'Back to project',
@@ -3167,14 +3176,6 @@ export default {
   'projectSpace.detail.requirement.addMenu.chatDesc': 'Open a project session and capture it as a requirement',
   'projectSpace.detail.requirement.addMenu.chatTip':
     'Just chat your idea to me; once it is clear, tap "Capture as requirement" under a reply to save it',
-  // GH_TOKEN reminder for develop projects: an alert plus a friendly guide dialog. Reminder only, not enforced.
-  'projectSpace.detail.githubToken.reminder.alert':
-    'Develop projects need a GitHub access token (GH_TOKEN) to pull and push code. You have not set one yet — click here to go to settings',
-  'projectSpace.detail.githubToken.reminder.title': 'Set up your GitHub access token',
-  'projectSpace.detail.githubToken.reminder.content':
-    'Develop projects use your GitHub access token (GH_TOKEN) to clone and push private repositories. It lives in Personal Parameters and is visible only to you. Set it up now so develop tasks can run smoothly.',
-  'projectSpace.detail.githubToken.reminder.goSetting': 'Go to settings',
-  'projectSpace.detail.githubToken.reminder.later': 'Maybe later',
   // Markdown editor
   'markdownField.insertImage': 'Insert image',
   'markdownField.insertFile': 'Insert attachment',
@@ -3519,6 +3520,14 @@ export default {
   'spec.integrationTest.orchestrator.statusTitle': '② status.json contract (source of truth, write atomically)',
   'spec.integrationTest.orchestrator.enumTitle': '③ status enum (closed set)',
   'spec.integrationTest.orchestrator.scriptTitle': '④ Orchestration script skeleton (bash)',
+
+  'fileChanges.ariaLabel': 'File changes',
+  'fileChanges.title': 'Edited {count} files',
+  'fileChanges.showMore': 'Show {count} more files',
+  'fileChanges.collapse': 'Collapse',
+  'fileChanges.diffLoadFailed': 'Failed to load file changes',
+  'fileChanges.noDiff': 'The file has no net changes',
+  'fileChanges.expandUnchanged': '{count} unchanged lines',
 
   ...secondEdition,
 };

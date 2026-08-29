@@ -32,6 +32,8 @@ interface FileSpaceBlockProps {
   groups?: FileSpaceGroup[];
   childrenByPath: Record<string, FileBrowserItem[]>;
   expandedKeys: Key[];
+  // 传入后由调用方接管 rc-tree 的懒加载缓存，刷新时可重新请求已展开过的目录。
+  loadedKeys?: Key[];
   switchOptions?: { label: React.ReactNode; value: string }[];
   switchValue?: string;
   // 外层已有统一工具栏时隐藏自身标题栏，避免同一文件列表重复出现卡片头部。
@@ -72,6 +74,7 @@ const FileSpaceBlock: React.FC<FileSpaceBlockProps> = ({
   groups,
   childrenByPath,
   expandedKeys,
+  loadedKeys,
   switchOptions,
   switchValue,
   hideHeader = false,
@@ -146,6 +149,7 @@ const FileSpaceBlock: React.FC<FileSpaceBlockProps> = ({
         items={treeItems}
         childrenByPath={childrenByPath}
         expandedKeys={expandedKeys}
+        loadedKeys={loadedKeys}
         currentPath={treeCurrentPath}
         loading={treeLoading}
         emptyText={treeEmptyText}

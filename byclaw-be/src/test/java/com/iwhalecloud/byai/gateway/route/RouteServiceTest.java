@@ -13,6 +13,9 @@ import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
 import com.iwhalecloud.byai.manager.application.service.devloop.ProjectApplicationService;
 import com.iwhalecloud.byai.manager.application.service.user.UserBucketNamingService;
+import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectResourceService;
+import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectService;
+import com.iwhalecloud.byai.manager.entity.devloop.Project;
 import com.iwhalecloud.byai.state.common.enums.AgentTypeEnum;
 import com.iwhalecloud.byai.state.common.exception.BdpRuntimeException;
 import com.iwhalecloud.byai.state.domain.agent.enums.AgentMetaEnum;
@@ -20,6 +23,7 @@ import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import com.iwhalecloud.byai.state.domain.chat.model.MessageContext;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatStreamRuntimeCoordinator;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatProcessContext;
+import com.iwhalecloud.byai.state.domain.chat.service.SystemParamTargetAgentResolver;
 import com.iwhalecloud.byai.state.domain.chat.service.GatewayStreamEventProcessor;
 import com.iwhalecloud.byai.state.domain.chat.service.PythonSseService;
 import com.iwhalecloud.byai.state.domain.chat.service.TargetAgentResolver;
@@ -62,7 +66,10 @@ class RouteServiceTest {
     private SequenceService sequenceService;
     private JwtService jwtService;
     private TargetAgentResolver targetAgentResolver;
+    private SystemParamTargetAgentResolver systemParamTargetAgentResolver;
     private ProjectApplicationService projectApplicationService;
+    private ProjectService projectService;
+    private ProjectResourceService projectResourceService;
     private UserBucketNamingService userBucketNamingService;
     private RouteService routeService;
     private StaticMessageSource messageSource;
@@ -77,7 +84,10 @@ class RouteServiceTest {
         sequenceService = mock(SequenceService.class);
         jwtService = mock(JwtService.class);
         targetAgentResolver = new TargetAgentResolver();
+        systemParamTargetAgentResolver = mock(SystemParamTargetAgentResolver.class);
         projectApplicationService = mock(ProjectApplicationService.class);
+        projectService = mock(ProjectService.class);
+        projectResourceService = mock(ProjectResourceService.class);
         userBucketNamingService = mock(UserBucketNamingService.class);
         messageSource = new StaticMessageSource();
         messageSource.addMessage("sandbox.launch.progress.start", Locale.SIMPLIFIED_CHINESE, "个人助理正在启动中，请等待");
@@ -96,6 +106,8 @@ class RouteServiceTest {
         messageSource.addMessage("sandbox.launch.model.config.required", Locale.US,
                 "Sandbox startup failed because model parameters are incomplete. Please contact the administrator.");
         when(jwtService.createJwt(any())).thenReturn("test-beyond-token");
+        when(systemParamTargetAgentResolver.resolve(any(), anyString()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
 
         routeService = new RouteService();
         ReflectionTestUtils.setField(routeService, "gatewayClient", gatewayClient);
@@ -106,7 +118,10 @@ class RouteServiceTest {
         ReflectionTestUtils.setField(routeService, "sequenceService", sequenceService);
         ReflectionTestUtils.setField(routeService, "jwtService", jwtService);
         ReflectionTestUtils.setField(routeService, "targetAgentResolver", targetAgentResolver);
+        ReflectionTestUtils.setField(routeService, "systemParamTargetAgentResolver", systemParamTargetAgentResolver);
         ReflectionTestUtils.setField(routeService, "projectApplicationService", projectApplicationService);
+        ReflectionTestUtils.setField(routeService, "projectService", projectService);
+        ReflectionTestUtils.setField(routeService, "projectResourceService", projectResourceService);
         ReflectionTestUtils.setField(routeService, "userBucketNamingService", userBucketNamingService);
         ReflectionTestUtils.setField(routeService, "fileStorageLocalPath", "/mnt/byclaw");
         ReflectionTestUtils.setField(I18nUtil.class, "messageSource", messageSource);
@@ -117,6 +132,11 @@ class RouteServiceTest {
         loginInfo.setUserId(100L);
         loginInfo.setUserName("testUser");
         CurrentUserHolder.setLoginInfo(loginInfo);
+
+        Project project = new Project();
+        project.setProjectId(123L);
+        project.setProjectName("test-project");
+        when(projectService.findById(123L)).thenReturn(project);
     }
 
     @AfterEach
@@ -322,6 +342,10 @@ class RouteServiceTest {
     void route_sendsActualProjectWorkspaceRelativeToCurrentUserBucket() throws Exception {
         ChatProcessContext ctx = buildContext();
         ctx.getAssistantChatDto().setProjectId(123L);
+        Project project = mock(Project.class);
+        when(project.getProjectId()).thenReturn(123L);
+        when(project.getProjectName()).thenReturn("test-project");
+        when(projectService.findById(123L)).thenReturn(project);
         when(userBucketNamingService.buildUserBucketName("u1")).thenReturn("byclaw-u1");
         when(projectApplicationService.getProjectWorkspacePath(123L))
             .thenReturn(Paths.get("/mnt/byclaw/byclaw-u1/by/projects/123"));
@@ -348,6 +372,10 @@ class RouteServiceTest {
     void route_keepsActualProjectWorkspaceWhenItIsOutsideCurrentUserBucket() throws Exception {
         ChatProcessContext ctx = buildContext();
         ctx.getAssistantChatDto().setProjectId(123L);
+        Project project = mock(Project.class);
+        when(project.getProjectId()).thenReturn(123L);
+        when(project.getProjectName()).thenReturn("test-project");
+        when(projectService.findById(123L)).thenReturn(project);
         when(userBucketNamingService.buildUserBucketName("u1")).thenReturn("byclaw-u1");
         when(projectApplicationService.getProjectWorkspacePath(123L))
             .thenReturn(Paths.get("/external/projects/123"));
@@ -470,6 +498,60 @@ class RouteServiceTest {
         verify(gatewayClient).sendMessage(anyString(), anyString(), contentCaptor.capture(), anyString(), any(),
                 anyString(), anyString(), anyString(), anyString(), any(), any());
         org.assertj.core.api.Assertions.assertThat(contentCaptor.getValue()).isEqualTo("#persona-cfo 22");
+    }
+
+    @Test
+    void route_formatsCommonFilePlaceholderAsMarkdownLink() throws Exception {
+        ChatProcessContext ctx = buildContext();
+        ctx.getAssistantChatDto().setChatContent("{{COMMON_FILE_file-001}}请读取");
+
+        ResourceVo file = new ResourceVo();
+        file.setResourceType(AgentMetaEnum.COMMON_FILE);
+        file.setResourceId("file-001");
+        file.setResourceName("合同.pdf");
+        ctx.getAssistantChatDto().setResourceList(Arrays.asList(file));
+
+        when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any()))
+                .thenAnswer(invocation -> {
+                    ctx.gatewayEventQueue.offer(currentTraceDoneEvent(ctx));
+                    return successResponse();
+                });
+
+        routeService.route(ctx);
+
+        ArgumentCaptor<Object> contentCaptor = ArgumentCaptor.forClass(Object.class);
+        verify(gatewayClient).sendMessage(anyString(), anyString(), contentCaptor.capture(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any());
+        org.assertj.core.api.Assertions.assertThat(contentCaptor.getValue())
+                .isEqualTo("[合同.pdf](file-001) 请读取");
+    }
+
+    @Test
+    void route_formatsCommonFolderPlaceholderAsMarkdownLink() throws Exception {
+        ChatProcessContext ctx = buildContext();
+        ctx.getAssistantChatDto().setChatContent("{{COMMON_FOLDER_folder-001}}请列出文件");
+
+        ResourceVo folder = new ResourceVo();
+        folder.setResourceType(AgentMetaEnum.COMMON_FOLDER);
+        folder.setResourceId("folder-001");
+        folder.setResourceName("项目资料");
+        ctx.getAssistantChatDto().setResourceList(Arrays.asList(folder));
+
+        when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any()))
+                .thenAnswer(invocation -> {
+                    ctx.gatewayEventQueue.offer(currentTraceDoneEvent(ctx));
+                    return successResponse();
+                });
+
+        routeService.route(ctx);
+
+        ArgumentCaptor<Object> contentCaptor = ArgumentCaptor.forClass(Object.class);
+        verify(gatewayClient).sendMessage(anyString(), anyString(), contentCaptor.capture(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any());
+        org.assertj.core.api.Assertions.assertThat(contentCaptor.getValue())
+                .isEqualTo("[项目资料](folder-001) 请列出文件");
     }
 
     @Test

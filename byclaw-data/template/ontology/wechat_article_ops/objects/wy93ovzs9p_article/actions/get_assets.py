@@ -10,10 +10,21 @@ def _b64decode(s):
 
 
 async def execute(params: dict) -> dict:
+    project_id = str(params.get("projectId") or "").strip()
+    if not project_id:
+        return {"records": [{"success": False, "code": "PROJECT_ID_REQUIRED", "error": "projectId不能为空"}], "total": 1, "meta": {"total": 1}}
+    account_code = str(params.get("account_code") or "").strip()
+    if not account_code:
+        return {"records": [{"success": False, "code": "ACCOUNT_CODE_REQUIRED", "error": "account_code不能为空"}], "total": 1, "meta": {"total": 1}}
     import json as _json
 
+    def _get(entity, key, default=None):
+        if isinstance(entity, dict):
+            return entity.get(key, default)
+        return getattr(entity, key, default)
+
     F_art = Wy93ovzs9pArticle.F
-    q = Q
+    q = Q.eq(F_art.projectId, project_id).eq(F_art.account_code, account_code)
 
     if params.get("start"):
         q = q.gte(F_art.publish_time, str(params["start"]))
@@ -49,11 +60,11 @@ async def execute(params: dict) -> dict:
     for r in records:
         aid = r.get("id")
         metric = await wy93ovzs9p_article_metric_daily_mapper.select_one(
-            Q.eq(F_metric.article_id, aid).order_by(F_metric.stat_date, desc=True).limit(1))
+            Q.eq(F_metric.projectId, project_id).eq(F_metric.account_code, account_code).eq(F_metric.article_id, aid).order_by(F_metric.stat_date, desc=True).limit(1))
         coll = None
         if r.get("collection_id"):
             c = await wy93ovzs9p_article_collection_mapper.select_by_id(int(r["collection_id"]))
-            if c:
+            if c and _get(c, "projectId") == project_id and _get(c, "account_code") == account_code:
                 coll = {"id": c.id, "name": c.collection_name, "type": c.collection_type}
         try:
             tags = _json.loads(r.get("tags")) if isinstance(r.get("tags"), str) else (r.get("tags") or [])

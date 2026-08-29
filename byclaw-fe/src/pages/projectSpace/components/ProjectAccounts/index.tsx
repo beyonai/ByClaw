@@ -2,6 +2,7 @@ import { App } from 'antd';
 import { useCallback, useEffect, useState } from 'react';
 import { useIntl } from '@umijs/max';
 import {
+  normalizeOperationAccounts,
   OperationAccountPanel,
   useOperationAccountLogin,
   type OperationAccount,
@@ -22,38 +23,8 @@ interface Props {
   onRefreshToolbarChange?: (toolbar: React.ReactNode | null) => void;
 }
 
-const normalizeLoginStatus = (account: Record<string, any>): OperationAccount['loginStatus'] => {
-  const status = `${account.loginStatus || account.status || ''}`.trim().toLowerCase();
-  if (['logged_in', 'online', 'connected'].includes(status) || account.loggedIn === true) return 'logged_in';
-  if (['expired', 'invalid'].includes(status)) return 'expired';
-  if (['logged_out', 'offline', 'disconnected'].includes(status) || account.loggedIn === false) return 'logged_out';
-  return 'unknown';
-};
-
 // 账号接口存在新旧字段并行返回的情况，大详情在数据入口统一转换为账号卡片结构。
-export const normalizeAccounts = (source: unknown): OperationAccount[] => {
-  if (!Array.isArray(source)) return [];
-
-  return source
-    .filter((item): item is Record<string, any> => !!item && typeof item === 'object')
-    .map((item, index) => ({
-      id: item.id ?? item.operationAccountId ?? item.accountPkId ?? item.accountId ?? `operation-account-${index}`,
-      platformId: `${item.platformId ?? item.platformCode ?? item.platform ?? item.channelId ?? ''}`,
-      accountName:
-        item.accountName ||
-        item.name ||
-        (`${item.platformId ?? item.platformCode ?? item.platform ?? item.channelId ?? ''}` === 'CustomLink'
-          ? '自定义链接'
-          : ''),
-      accountId: `${item.accountCode ?? item.platformAccountId ?? item.platformAccountCode ?? item.accountId ?? ''}`,
-      avatar: item.avatar,
-      loginStatus: normalizeLoginStatus(item),
-      metrics: item.metrics,
-      canEdit: item.canEdit,
-      customUrl: item.customUrl || undefined,
-    }))
-    .filter((item) => item.platformId && item.accountName);
-};
+export const normalizeAccounts = normalizeOperationAccounts;
 
 export const buildOperationAccountPayload = (projectId: number, values: OperationAccountFormValues) => {
   const isCustomLink = values.platformId === 'CustomLink';
@@ -78,7 +49,7 @@ const ProjectAccounts: React.FC<Props> = ({ project, keyword = '', onToolbarChan
     setLoading(true);
     try {
       const result = await listOperationAccounts(Number(project.projectId));
-      setAccounts(normalizeAccounts(result));
+      setAccounts(normalizeOperationAccounts(result));
     } finally {
       setLoading(false);
     }

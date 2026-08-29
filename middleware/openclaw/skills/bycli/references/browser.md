@@ -11,6 +11,7 @@ This reference is for **driving a live browser** to accomplish an agent task. If
 ## Session 补充说明
 
 - `bycli browser *` commands require a `<session>` positional immediately after `browser`. Use the same session name for a multi-step flow; use a different name to isolate parallel browser work.
+- This guidance applies only to the raw browser surface. The Adapter surface uses the separate `--adapter-session` contract when structured command help explicitly supports it. A raw browser session with the same text name cannot inspect, focus, navigate, or close an Adapter-managed tab.
 - Owned browser sessions keep a tab lease alive between calls. Release it with `bycli browser <session> close` or let the idle timeout expire.
 - `bycli browser <session> bind` binds the Chrome tab you already have open to that session. Use this for logged-in pages, SSO flows, or pages you manually positioned before handing control to the agent.
 - `--window foreground|background` chooses whether byCLI creates/focuses a foreground browser window or uses a background one.

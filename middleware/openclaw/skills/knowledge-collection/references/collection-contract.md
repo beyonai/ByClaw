@@ -72,11 +72,11 @@ collection_filters:
 
 ### 会话目录边界
 
-在用户沙箱中，采集会话根必须位于当前聊天会话的 `/by/.sessions/<sessionId>/` 下，推荐布局为
+在用户沙箱中，推荐把采集会话根放在当前聊天会话的
 `/by/.sessions/<sessionId>/collections/<task-name>/`。`sessionId` 取自 Agent 上下文提供的 Session Root，不能从登录认证
-环境变量或 Cookie 推导。OpenClaw workspace、进程当前目录和 `/tmp` 都不是用户采集产物的默认落盘位置。
-沙箱内初始化时必须用 `--session-root` 显式传递这个可信 Session Root；历史 workspace 会话只能作为读取输入，
-不能继续作为 `--output-dir` 或 `--output-root` 接收新产物。
+环境变量或 Cookie 推导。对外路径参数以 `/` 开头时按绝对路径使用，可指向沙箱内任意可写位置；相对路径以可信的
+`--session-root /by/.sessions/<sessionId>` 为基准解析，不得依赖进程当前目录。相对路径规范化后的结果以及其真实祖先
+不得通过 `..` 或符号链接越出该 Session Root。绝对历史会话和绝对输出路径不要求属于当前 Session Root。
 
 同一采集任务只能有一个初始化后的会话根目录。来源执行器或人工补采工具产生的下载目录、图片和原始 Markdown 必须位于该会话的 `raw/` 子树；由此生成的工作副本必须位于 `markdown/items/`，最终正文必须位于 `sanitized/items/`。当原始来源响应已保存文章图片 URL 时，无需在 `raw/` 重复下载图片；只有获准来源执行器取得的交付副本才能写入 `sanitized/items/<article-name>-<item-id>/assets/`。不得绕过来源执行器直接 HTTP 补抓、不得保留远程图片链接，也不得伪造本地资源路径。封面与正文在同一条目中处理，但媒体状态与正文物化状态相互独立：封面失败只登记媒体缺口，不得把已经成功取得的正文标记为失败；Markdown 只能引用实际成功落盘的本地封面。不得在会话根目录旁创建 `*-fulltext/`、`*-articles/` 或其他自定义交付目录。
 
@@ -135,6 +135,7 @@ node scripts/knowledge-collection.mjs collect --session-dir <dir> \
       "source": "public-internet",
       "sourceSkill": "bycli",
       "backend": "bycli",
+      "rawArtifacts": ["raw/source-response.json"],
       "contentGranularity": "unknown",
       "media": {
         "coverStatus": "not-present",
@@ -158,6 +159,8 @@ node scripts/knowledge-collection.mjs collect --session-dir <dir> \
 ```
 
 payload 文件必须位于当前会话的 `.collection-inputs/` 内，成功登记后会被删除。单条时也可直接使用上面 `items[]` 中的对象作为根节点。`source` 必须对应父会话的 `task.sourceScope`（`dws → dingtalk`、`fws → feishu`）；`canonicalItem.markdown` 与 `fileName` 必须相等且都是相对采集根的完整路径。
+
+`rawArtifacts` 是可选的来源恢复证据列表。每个显式登记的文件必须位于 `raw/`、真实存在、非空、可读且不是符号链接；重复路径按首次出现顺序去重。`rawArtifacts` 省略时保留 inventory 中已有的列表，显式传入时替换当前列表，传入空数组表示明确清空当前来源证据。
 
 只有需要在建会话时预置包含 pending 条目的完整清单，才使用 `--metadata-input-file`。只有导入历史兼容视图时才需要 `--collection-result-input-file`；新会话的第一次 `collect` 不再要求预置它。除此之外一律通过 `collect` 登记。
 

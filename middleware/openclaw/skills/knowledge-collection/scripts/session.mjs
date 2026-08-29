@@ -86,12 +86,7 @@ export function isInside(root, candidate) {
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
-/**
- * 沙箱中的新采集目录必须落在用户会话空间。环境变量仅用于测试或显式部署覆盖；
- * 正常 OpenClaw 沙箱通过 /by/.sessions 是否存在自动启用该约束。
- */
-export function assertSandboxSessionPath(rawPath, label, { currentSessionRoot } = {}) {
-  const candidate = path.resolve(requireString(rawPath, label));
+function resolveTrustedSessionRoot(currentSessionRoot, label) {
   const configuredRoot = process.env.KNOWLEDGE_COLLECTION_SESSION_ROOT?.trim();
   const configuredSessionsRoot = process.env.KNOWLEDGE_COLLECTION_SESSIONS_ROOT?.trim();
   const sessionsRoot = configuredSessionsRoot
@@ -100,12 +95,8 @@ export function assertSandboxSessionPath(rawPath, label, { currentSessionRoot } 
   const sessionRoot = (configuredRoot || currentSessionRoot)
     ? path.resolve(configuredRoot || currentSessionRoot)
     : null;
-  const sandboxDetected = Boolean(configuredRoot || sessionsRoot);
-  if (sandboxDetected && !sessionRoot) {
-    throw new Error(`${label} 缺少当前 Agent 上下文的 Session Root`);
-  }
   if (!sessionRoot) {
-    return candidate;
+    throw new Error(`${label} 缺少当前 Agent 上下文的 Session Root`);
   }
   if (!sessionsRoot) {
     throw new Error(`${label} 无法验证当前 Agent 上下文的 Session Root`);
@@ -123,29 +114,61 @@ export function assertSandboxSessionPath(rawPath, label, { currentSessionRoot } 
       throw new Error('当前 Agent 上下文的 Session Root 必须是普通目录且不能是符号链接');
     }
   }
-  const outsideCurrentSessionError = () => new Error(
-    `${label} 必须位于当前用户会话根目录 ${sessionRoot}/ 下`
-    + ' (must be under the user session root)',
-  );
-  const relative = path.relative(sessionRoot, candidate);
-  const withinCurrentSession = !relative.startsWith('..')
-    && !path.isAbsolute(relative);
-  if (withinCurrentSession) {
-    if (fs.existsSync(sessionRoot)) {
-      const canonicalRoot = fs.realpathSync(sessionRoot);
-      let existingAncestor = candidate;
-      while (!fs.existsSync(existingAncestor)) {
-        const parent = path.dirname(existingAncestor);
-        if (parent === existingAncestor) break;
-        existingAncestor = parent;
-      }
-      if (!isInside(canonicalRoot, fs.realpathSync(existingAncestor))) {
-        throw outsideCurrentSessionError();
-      }
+  return sessionRoot;
+}
+
+function nearestExistingAncestor(candidate) {
+  let existingAncestor = candidate;
+  while (!fs.existsSync(existingAncestor)) {
+    const parent = path.dirname(existingAncestor);
+    if (parent === existingAncestor) break;
+    existingAncestor = parent;
+  }
+  return existingAncestor;
+}
+
+/**
+ * 对外路径以绝对路径传入时保持其位置；相对路径必须基于可信 Session Root 解析。
+ * 相对路径仍需通过规范化路径和真实祖先双重校验，防止 `..` 或符号链接逃逸。
+ */
+export function resolveSandboxPath(rawPath, label, { currentSessionRoot } = {}) {
+  const requested = requireString(rawPath, label);
+  if (path.isAbsolute(requested)) {
+    const candidate = path.resolve(requested);
+    if (fs.existsSync(candidate) && fs.lstatSync(candidate).isSymbolicLink()) {
+      throw new Error(`${label} 不能是符号链接`);
+    }
+    const ancestor = nearestExistingAncestor(candidate);
+    if (ancestor !== candidate && !fs.statSync(ancestor).isDirectory()) {
+      throw new Error(`${label} 的现有祖先必须是目录`);
     }
     return candidate;
   }
-  throw outsideCurrentSessionError();
+
+  const sessionRoot = resolveTrustedSessionRoot(currentSessionRoot, label);
+  const candidate = path.resolve(sessionRoot, requested);
+  const relative = path.relative(sessionRoot, candidate);
+  const withinCurrentSession = !relative.startsWith('..')
+    && !path.isAbsolute(relative);
+  if (!withinCurrentSession) {
+    throw new Error(`${label} 相对路径越出当前 Session Root: ${sessionRoot}`);
+  }
+  if (fs.existsSync(sessionRoot)) {
+    const canonicalRoot = fs.realpathSync(sessionRoot);
+    const existingAncestor = nearestExistingAncestor(candidate);
+    if (fs.existsSync(candidate) && fs.lstatSync(candidate).isSymbolicLink()) {
+      throw new Error(`${label} 不能是符号链接`);
+    }
+    if ((existingAncestor !== candidate && !fs.statSync(existingAncestor).isDirectory())
+      || !isInside(canonicalRoot, fs.realpathSync(existingAncestor))) {
+      throw new Error(`${label} 相对路径通过符号链接越出当前 Session Root: ${sessionRoot}`);
+    }
+  }
+  return candidate;
+}
+
+export function assertSandboxSessionPath(rawPath, label, options = {}) {
+  return resolveSandboxPath(rawPath, label, options);
 }
 
 export function resolveCollectionInputFile(paths, rawFilePath, label) {

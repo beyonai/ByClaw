@@ -161,7 +161,7 @@ describe('ResourceCard', () => {
     expect(screen.queryByText('resource.installSkill')).toBeNull();
   });
 
-  it('uses default digital employee tag style when the digital employee is default', () => {
+  it('shows the default digital employee badge when the digital employee is default', () => {
     renderWithQueryClient(
       <ResourceCard
         resource={{
@@ -169,12 +169,11 @@ describe('ResourceCard', () => {
           resourceName: 'Default Employee',
           resourceBizType: 'DIG_EMPLOYEE',
           isDefault: true,
-          tagName: 'Custom Tag',
         }}
       />
     );
 
-    expect(screen.getByText('resource.defaultDigitalEmployee').parentElement).toHaveClass('digitalEmployeeDefaultTag');
+    expect(screen.getByText('resource.defaultDigitalEmployee')).toHaveClass('defaultDigitalEmployeeBadge');
   });
 
   it('keeps permission-based actions alongside apply use for a digital employee', () => {
@@ -255,12 +254,13 @@ describe('ResourceCard', () => {
           resourceName: 'Personal Employee',
           resourceBizType: 'DIG_EMPLOYEE',
           ownerType: 'personal',
-          tagName: 'Personal Tag',
         }}
       />
     );
 
-    expect(screen.getByText('Personal Tag').parentElement).toHaveClass('digitalEmployeePersonalTag');
+    expect(screen.getByText('digitalEmployees.tag.personalEmployee').parentElement).toHaveClass(
+      'digitalEmployeePersonalTag'
+    );
   });
 
   it('keeps non digital employee tags on the base tag style', () => {

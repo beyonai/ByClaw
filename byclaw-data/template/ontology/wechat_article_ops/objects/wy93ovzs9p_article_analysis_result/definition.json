@@ -1,10 +1,74 @@
 {
   "entity_code": "wy93ovzs9p_article_analysis_result",
   "entity_name": "分析结果",
-  "entity_desc": "单篇/周报/合集三类分析的最终结果，含结构化分析 JSON、外部对标、HTML 报告、运行元数据、Reviewer 结果；run_id 为幂等键",
+  "entity_desc": "按 account_code 隔离的单篇/周报/合集分析结果，含发布前后阶段、结构化知识、HTML 报告和审校结果；run_id 为全局幂等键",
   "submitted_fields": [
     {
+      "property_code": "projectId",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "account_code",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "account_name",
+      "data_type": "STRING"
+    },
+    {
       "property_code": "analysis_type",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "analysis_stage",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "source_run_id",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "platform",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "content_role",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "topic",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "target_audience",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "audience_fit_analysis",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "recommended_publish_time",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "recommended_keywords",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "publishing_execution_card",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "desired_action",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "tested_element",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "learning_outcome",
       "data_type": "STRING"
     },
     {

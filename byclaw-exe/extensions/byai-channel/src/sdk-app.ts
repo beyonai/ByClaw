@@ -24,7 +24,6 @@ import {
   resolveActiveSdkRequestByTraceId,
   registerSdkEmitter,
   clearActiveSdkRequestRecord,
-  resolveSdkLocalFilePath,
   buildSdkChunkEvent,
   buildSdkStateEvent,
   withSdkEmitMetadata,
@@ -177,7 +176,6 @@ async function getInboundMessageFromByFramework(data: AskAgentCommand | ResumeCo
       resourceCode: string;
       extData?: string;
     }[] = data.extraPayload?.resource_list || [];
-    const { sessionId } = data.header;
     const baiyingCallHandledResourceTypes = [
       "AGENT",
       "TOOLKIT",
@@ -194,14 +192,11 @@ async function getInboundMessageFromByFramework(data: AskAgentCommand | ResumeCo
     const userCode = getUserCode();
     const runtime = getByaiRuntime();
     resourceList.forEach((item) => {
-      if (item.resourceType === "DIG_EMPLOYEE") {
+      if (["DIG_EMPLOYEE", "COMMON_FILE", "COMMON_FOLDER"].includes(item.resourceType)) {
+        // 以上3种类型，均已在原始提示词中处理了，无需再放到 remind context 中
         return;
       }
-      if (item.resourceType === "COMMON_FILE") {
-        remindTextArr.push(`- file: ${resolveSdkLocalFilePath(item.resourceId, sessionId)}`);
-      } else if (item.resourceType === "COMMON_FOLDER") {
-        remindTextArr.push(`- folder: ${resolveSdkLocalFilePath(item.resourceId, sessionId)}`);
-      } else if (item.resourceType?.toLowerCase() === "skill") {
+      if (item.resourceType?.toLowerCase() === "skill") {
         if (!item.extData) return;
         let skillExt: {
           skillUrl: string;

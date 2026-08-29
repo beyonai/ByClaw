@@ -24,6 +24,7 @@ public class ConnectorCredentialWorkspaceService {
 
     private static final Pattern PROVIDER_CODE_PATTERN = Pattern.compile("[a-z0-9-]+");
     private static final Pattern BUCKET_PATTERN = Pattern.compile("[a-z0-9][a-z0-9-]{1,61}[a-z0-9]");
+    private static final Path SANDBOX_CONNECTOR_AUTH_ROOT = Path.of("/by/.connector-auth");
     private static final Set<PosixFilePermission> PRIVATE_DIRECTORY_PERMISSIONS = Set.of(
         PosixFilePermission.OWNER_READ,
         PosixFilePermission.OWNER_WRITE,
@@ -51,36 +52,14 @@ public class ConnectorCredentialWorkspaceService {
     }
 
     public ConnectorCliWorkspace resolve(Long userId, String providerCode) {
-        if (userId == null || userId <= 0) {
-            throw new IllegalArgumentException("userId must be positive");
-        }
+        validateUserId(userId);
         if (providerCode == null || !PROVIDER_CODE_PATTERN.matcher(providerCode).matches()) {
             throw new IllegalArgumentException("providerCode must match [a-z0-9-]+");
         }
 
-        LoginInfo loginInfo;
-        try {
-            loginInfo = loginApplicationService.getLoginInfo(userId);
-        } catch (RuntimeException e) {
-            throw new IllegalStateException("Unable to resolve login information for userId " + userId, e);
-        }
-        if (loginInfo == null || loginInfo.getUserCode() == null || loginInfo.getUserCode().isBlank()) {
-            throw new IllegalStateException("Unable to resolve login information for userId " + userId);
-        }
-
-        String bucket;
-        try {
-            bucket = userBucketNamingService.buildUserBucketName(loginInfo.getUserCode());
-        } catch (RuntimeException e) {
-            throw new IllegalStateException("Unable to resolve credential bucket for userId " + userId, e);
-        }
-        if (bucket == null || !BUCKET_PATTERN.matcher(bucket).matches()) {
-            throw new IllegalStateException("Unable to resolve credential bucket for userId " + userId);
-        }
-
         try {
             Path trustedRoot = trustedStorageRoot();
-            Path bucketDirectory = secureDirectory(trustedRoot, bucket, trustedRoot, userId);
+            Path bucketDirectory = secureDirectory(trustedRoot, resolveBucket(userId), trustedRoot, userId);
             Path byDirectory = secureDirectory(bucketDirectory, "by", trustedRoot, userId);
             Path authDirectory = secureDirectory(byDirectory, ".connector-auth", trustedRoot, userId);
             Path home = secureDirectory(authDirectory, "." + providerCode, trustedRoot, userId);
@@ -96,6 +75,44 @@ public class ConnectorCredentialWorkspaceService {
         }
     }
 
+    /** Resolves a manifest-declared sandbox projection path into the user's private host bucket. */
+    public Path resolveProjectionFile(Long userId, String projectionPath) {
+        validateUserId(userId);
+        final Path sandboxPath;
+        try {
+            sandboxPath = Path.of(projectionPath).normalize();
+        } catch (InvalidPathException | NullPointerException e) {
+            throw new IllegalArgumentException("projectionPath is invalid", e);
+        }
+        if (!sandboxPath.isAbsolute() || !sandboxPath.startsWith(SANDBOX_CONNECTOR_AUTH_ROOT)
+                || sandboxPath.equals(SANDBOX_CONNECTOR_AUTH_ROOT) || sandboxPath.getFileName() == null) {
+            throw new IllegalArgumentException("projectionPath must name a file under /by/.connector-auth/");
+        }
+
+        try {
+            Path trustedRoot = trustedStorageRoot();
+            Path bucketDirectory = secureDirectory(trustedRoot, resolveBucket(userId), trustedRoot, userId);
+            Path byDirectory = secureDirectory(bucketDirectory, "by", trustedRoot, userId);
+            Path authDirectory = secureDirectory(byDirectory, ".connector-auth", trustedRoot, userId);
+            Path relative = SANDBOX_CONNECTOR_AUTH_ROOT.relativize(sandboxPath);
+            Path parent = authDirectory;
+            for (int index = 0; index < relative.getNameCount() - 1; index++) {
+                String segment = relative.getName(index).toString();
+                if (segment.isBlank() || ".".equals(segment) || "..".equals(segment)) {
+                    throw new IllegalArgumentException("projectionPath contains an invalid directory segment");
+                }
+                parent = secureDirectory(parent, segment, trustedRoot, userId);
+            }
+            Path file = parent.resolve(relative.getFileName().toString()).normalize();
+            if (!file.getParent().equals(parent) || !file.startsWith(trustedRoot)) {
+                throw new IllegalStateException("Credential projection escapes storage root for userId " + userId);
+            }
+            return file;
+        } catch (IOException | SecurityException e) {
+            throw new IllegalStateException("Unable to resolve credential projection for userId " + userId, e);
+        }
+    }
+
     private Path trustedStorageRoot() throws IOException {
         Files.createDirectories(configuredStorageRoot);
         Path realRoot = configuredStorageRoot.toRealPath();
@@ -103,6 +120,34 @@ public class ConnectorCredentialWorkspaceService {
             throw new IOException("Configured storage root is not a directory");
         }
         return realRoot;
+    }
+
+    private void validateUserId(Long userId) {
+        if (userId == null || userId <= 0) {
+            throw new IllegalArgumentException("userId must be positive");
+        }
+    }
+
+    private String resolveBucket(Long userId) {
+        LoginInfo loginInfo;
+        try {
+            loginInfo = loginApplicationService.getLoginInfo(userId);
+        } catch (RuntimeException e) {
+            throw new IllegalStateException("Unable to resolve login information for userId " + userId, e);
+        }
+        if (loginInfo == null || loginInfo.getUserCode() == null || loginInfo.getUserCode().isBlank()) {
+            throw new IllegalStateException("Unable to resolve login information for userId " + userId);
+        }
+        final String bucket;
+        try {
+            bucket = userBucketNamingService.buildUserBucketName(loginInfo.getUserCode());
+        } catch (RuntimeException e) {
+            throw new IllegalStateException("Unable to resolve credential bucket for userId " + userId, e);
+        }
+        if (bucket == null || !BUCKET_PATTERN.matcher(bucket).matches()) {
+            throw new IllegalStateException("Unable to resolve credential bucket for userId " + userId);
+        }
+        return bucket;
     }
 
     private Path secureDirectory(Path parent, String segment, Path trustedRoot, Long userId) throws IOException {

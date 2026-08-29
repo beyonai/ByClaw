@@ -29,5 +29,6 @@ describe('OperationAccountPanel', () => {
     expect(screen.getByText('知乎运营后台')).toBeInTheDocument();
     expect(screen.getByText('https://www.zhihu.com/creator')).toHaveAttribute('title', 'https://www.zhihu.com/creator');
     expect(screen.queryByText('custom')).not.toBeInTheDocument();
+    expect(screen.getByText('知乎运营后台').closest('.accountCard')).not.toHaveClass('accountCardDrawerCompact');
   });
 });

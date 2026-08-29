@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.manager.application.service.job;
 
 import com.iwhalecloud.byai.common.util.RedisUtil;
+import com.iwhalecloud.byai.manager.application.service.devloop.GitHubCredentialResolver;
 import com.iwhalecloud.byai.manager.domain.devloop.service.DingtalkScanService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.DingtalkTodoScanService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.GitHubIssueScanService;
@@ -74,7 +75,7 @@ public class DevloopScanJob {
     private DingtalkTodoScanService dingtalkTodoScanService;
 
     @Autowired
-    private DevloopPatService patService;
+    private GitHubCredentialResolver githubCredentialResolver;
 
     @Autowired
     private com.iwhalecloud.byai.manager.application.service.devloop.DevloopApplicationService devloopApplicationService;
@@ -139,7 +140,7 @@ public class DevloopScanJob {
                 devloopApplicationService.executeChatSourceSchedule(source);
                 return;
             case SOURCE_TYPE_GITHUB_ISSUE:
-                String pat = patService.getGitHubPat(source.getCreateBy());
+                String pat = githubCredentialResolver.resolve(source.getCreateBy());
                 if (pat == null || pat.isEmpty()) {
                     logger.warn("[DevloopScanJob] No GitHub PAT for user: {}",
                         source.getCreateBy());

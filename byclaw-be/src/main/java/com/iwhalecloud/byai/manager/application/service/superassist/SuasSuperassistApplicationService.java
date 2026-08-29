@@ -30,6 +30,7 @@ import com.iwhalecloud.byai.common.util.ListUtil;
 import com.iwhalecloud.byai.common.util.MapParamUtil;
 import com.iwhalecloud.byai.common.util.RedisUtil;
 import com.iwhalecloud.byai.common.util.StringUtil;
+import com.iwhalecloud.byai.manager.application.service.devloop.ProjectApplicationService;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeApplicationService;
 import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
 import com.iwhalecloud.byai.manager.domain.aimodel.enums.ModelOwnerType;
@@ -147,6 +148,9 @@ public class SuasSuperassistApplicationService {
 
     @Autowired
     private JwtService jwtService;
+
+    @Autowired
+    private ProjectApplicationService projectApplicationService;
 
 
     /**
@@ -856,61 +860,63 @@ public class SuasSuperassistApplicationService {
      */
     public void initExpertTeams(LoginInfo loginInfo) {
 
+        try {
 
-        // 获取初始化模板
-        String paramCode = "INIT_DEFAULT_PROJECT_EXPERT_TEAMS_TEMPLATE_bak";
-        JSONArray initTemplates = this.getInitTemplateArray(loginInfo, paramCode);
+            // 放置用户到当前线程
+            CurrentUserHolder.setLoginInfo(loginInfo);
+
+            // 获取初始化模板
+            String paramCode = "INIT_DEFAULT_PROJECT_EXPERT_TEAMS_TEMPLATE";
+            JSONArray initTemplates = this.getInitTemplateArray(loginInfo, paramCode);
 
 
-        for (int i = 0; initTemplates != null && i < initTemplates.size(); i++) {
-            JSONObject jsonObject = initTemplates.getJSONObject(i);
+            for (int i = 0; initTemplates != null && i < initTemplates.size(); i++) {
+                JSONObject jsonObject = initTemplates.getJSONObject(i);
 
-            //初始化项目
-            Project project = this.initProject(jsonObject, loginInfo);
+                //初始化项目
+                Project project = this.initProject(jsonObject, loginInfo);
+                logger.info("初始化项目成功:{}", JSON.toJSONString(project));
 
-            // 将用户加入项目
-            boolean isMember = projectMemberService.isMember(project.getProjectId(), loginInfo.getUserId());
-            if (!isMember) {
-                projectMemberService.addMember(project.getProjectId(), loginInfo.getUserId(), MemberRole.MEMBER);
-            }
+                //初始化专家团
+                Map<String, AgentPrologueDto.ModelInfo> modelInfoMap = new HashMap<String, AgentPrologueDto.ModelInfo>();
 
-            //初始化专家团
-            Map<String, AgentPrologueDto.ModelInfo> modelInfoMap = new HashMap<String, AgentPrologueDto.ModelInfo>();
+                JSONArray expertTeams = jsonObject.getJSONArray("expertTeams");
+                for (int j = i; expertTeams != null && j < expertTeams.size(); j++) {
 
-            JSONArray expertTeams = jsonObject.getJSONArray("expertTeams");
-            for (int j = i; expertTeams != null && j < expertTeams.size(); j++) {
+                    JSONObject expertTeamTemplate = expertTeams.getJSONObject(j);
 
-                JSONObject expertTeamTemplate = expertTeams.getJSONObject(j);
+                    //初始化数字员工
+                    List<EmployeeGroupMemberDTO> employeeGroupMembers = new ArrayList<>();
+                    JSONArray digitalEmployees = expertTeamTemplate.getJSONArray("digitalEmployees");
+                    for (int k = 0; digitalEmployees != null && k < digitalEmployees.size(); k++) {
 
-                //初始化数字员工
-                List<EmployeeGroupMemberDTO> employeeGroupMembers = new ArrayList<>();
-                JSONArray digitalEmployees = expertTeamTemplate.getJSONArray("digitalEmployees");
-                for (int k = 0; digitalEmployees != null && k < digitalEmployees.size(); k++) {
+                        JSONObject relEmployeeTemplate = digitalEmployees.getJSONObject(k);
+                        ResourceExtDigEmployeeDto relEmployee = this.createEmployeeByTemplate(relEmployeeTemplate, loginInfo, modelInfoMap, Collections.emptyList());
+                        SsResExtDigEmployee ssResExtDigEmployee = relEmployee.getSsResExtDigEmployee();
 
-                    JSONObject relEmployeeTemplate = digitalEmployees.getJSONObject(k);
-                    ResourceExtDigEmployeeDto relEmployee = this.createEmployeeByTemplate(relEmployeeTemplate, loginInfo, modelInfoMap, Collections.emptyList());
-                    SsResExtDigEmployee ssResExtDigEmployee = relEmployee.getSsResExtDigEmployee();
+                        EmployeeGroupMemberDTO employeeGroupMemberDTO = new EmployeeGroupMemberDTO();
+                        employeeGroupMemberDTO.setResourceId(relEmployee.getResourceId());
+                        employeeGroupMemberDTO.setResourceCode(relEmployee.getResourceCode());
+                        employeeGroupMemberDTO.setName(relEmployee.getResourceName());
+                        employeeGroupMemberDTO.setDescription(relEmployee.getResourceDesc());
+                        employeeGroupMemberDTO.setAvatar(relEmployee.getAvatar());
+                        employeeGroupMemberDTO.setTeamRole(relEmployeeTemplate.getString("teamRole"));
+                        employeeGroupMemberDTO.setSortOrder(k);
+                        employeeGroupMemberDTO.setWorkerAgentType(relEmployee.getWorkerAgentType());
+                        employeeGroupMemberDTO.setCreateType(ssResExtDigEmployee.getCreateType());
+                        employeeGroupMemberDTO.setIntegrationType(ssResExtDigEmployee.getIntegrationType());
+                        employeeGroupMemberDTO.setAgentType(ssResExtDigEmployee.getAgentType());
+                        employeeGroupMembers.add(employeeGroupMemberDTO);
+                    }
 
-                    EmployeeGroupMemberDTO employeeGroupMemberDTO = new EmployeeGroupMemberDTO();
-                    employeeGroupMemberDTO.setResourceId(relEmployee.getResourceId());
-                    employeeGroupMemberDTO.setResourceCode(relEmployee.getResourceCode());
-                    employeeGroupMemberDTO.setName(relEmployee.getResourceName());
-                    employeeGroupMemberDTO.setDescription(relEmployee.getResourceDesc());
-                    employeeGroupMemberDTO.setAvatar(relEmployee.getAvatar());
-                    employeeGroupMemberDTO.setTeamRole(relEmployeeTemplate.getString("teamRole"));
-                    employeeGroupMemberDTO.setSortOrder(k);
-                    employeeGroupMemberDTO.setWorkerAgentType(relEmployee.getWorkerAgentType());
-                    employeeGroupMemberDTO.setCreateType(ssResExtDigEmployee.getCreateType());
-                    employeeGroupMemberDTO.setIntegrationType(ssResExtDigEmployee.getIntegrationType());
-                    employeeGroupMemberDTO.setAgentType(ssResExtDigEmployee.getAgentType());
-                    employeeGroupMembers.add(employeeGroupMemberDTO);
+                    //创建专家团
+                    ResourceExtDigEmployeeDto expertTeamEmployee = this.createEmployeeByTemplate(expertTeamTemplate, loginInfo, modelInfoMap, employeeGroupMembers);
+                    logger.info("初始化专家团成功:{}", JSON.toJSONString(expertTeamEmployee));
+
                 }
-
-                //创建专家团
-                ResourceExtDigEmployeeDto expertTeamEmployee = this.createEmployeeByTemplate(expertTeamTemplate, loginInfo, modelInfoMap, employeeGroupMembers);
-                logger.info("初始化专家团成功:{}", JSON.toJSONString(expertTeamEmployee));
-
             }
+        } catch (Exception e) {
+            logger.error(e.getMessage(), e);
         }
     }
 
@@ -995,12 +1001,9 @@ public class SuasSuperassistApplicationService {
         String projectType = jsonObject.getString("projectType");
         String description = jsonObject.getString("description");
         String isShare = jsonObject.getString("isShare");
-        String userCode = jsonObject.getString("userCode");
 
         JSONArray resources = jsonObject.getJSONArray("resources");
 
-        //默认初始化项目的用户
-        Users users = userService.findByUserCode(userCode);
 
         //不存在则创建
         Project project = projectService.findByProjectName(projectName);
@@ -1012,12 +1015,16 @@ public class SuasSuperassistApplicationService {
             project.setDescription(description);
             project.setIsShare(isShare);
             project.setCreateTime(new Date());
-            project.setCreateBy(users.getUserId());
+            project.setCreateBy(loginInfo.getUserId());
+
+            //初始化云盘
+            SsResource cloudResource = projectApplicationService.createCloudResource(project);
+            project.setCloudResourceId(cloudResource.getResourceId());
+
             projectService.save(project);
 
-
             //初始化本体对象
-            List<String> objectCodes = this.initSubmitWorkspaceTemplate(users);
+            List<String> objectCodes = this.initSubmitWorkspaceTemplate();
             logger.info("初始化对象:{}", objectCodes);
 
             for (int i = 0; resources != null && i < resources.size(); i++) {
@@ -1039,6 +1046,21 @@ public class SuasSuperassistApplicationService {
                 resource.setDeleteFlag(DeleteFlag.NORMAL);
                 projectResourceService.save(resource);
             }
+        } else {
+
+            // 初始化项目云盘
+            Long cloudResourceId = project.getCloudResourceId();
+            if (cloudResourceId == null) {
+                SsResource cloudResource = projectApplicationService.createCloudResource(project);
+                project.setCloudResourceId(cloudResource.getResourceId());
+                projectService.update(project);
+            }
+        }
+
+        // 将用户加入项目
+        boolean isMember = projectMemberService.isMember(project.getProjectId(), loginInfo.getUserId());
+        if (!isMember) {
+            projectMemberService.addMember(project.getProjectId(), loginInfo.getUserId(), MemberRole.OWNER);
         }
 
         return project;
@@ -1048,10 +1070,11 @@ public class SuasSuperassistApplicationService {
     /**
      * 调用 DataCloud 提交工作区模板，初始化本体。
      *
-     * @param users 当前用户
      * @return 首个模板提交结果中的对象编码列表，无结果时返回空列表
      */
-    private List<String> initSubmitWorkspaceTemplate(Users users) {
+    private List<String> initSubmitWorkspaceTemplate() {
+
+        Users users = userService.findByUserCode("adminvip");
 
         Map<String, String> headers = new HashMap<>();
         headers.put("X-User-Code", users.getUserCode());

@@ -10,6 +10,20 @@
   ],
   "params": [
     {
+      "paramCode": "projectId",
+      "paramName": "项目ID",
+      "type": "string",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
+      "paramCode": "account_code",
+      "paramName": "公众号编码",
+      "type": "string",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
       "paramCode": "keyword",
       "paramName": "合集名称关键字",
       "type": "string",

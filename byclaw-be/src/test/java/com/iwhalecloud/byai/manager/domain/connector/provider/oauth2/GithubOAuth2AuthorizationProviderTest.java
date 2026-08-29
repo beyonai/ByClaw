@@ -202,7 +202,7 @@ class GithubOAuth2AuthorizationProviderTest {
     }
 
     @Test
-    void startRejectsRedirectUriThatDoesNotMatchConfiguredCallback() {
+    void startUsesConfiguredCallbackInsteadOfFrontendReturnUrl() {
         GithubOAuth2AuthorizationProvider provider = new GithubOAuth2AuthorizationProvider(
             mock(GithubOAuth2Client.class), mock(ConnectorCredentialSecretStore.class), new ObjectMapper(), name -> "secret"
         );
@@ -212,9 +212,48 @@ class GithubOAuth2AuthorizationProviderTest {
                 "redirectUri", "https://app.example/callback"), null
         );
 
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> provider.start(context))
-            .isInstanceOf(IllegalArgumentException.class)
-            .hasMessageContaining("redirectUrl");
+        AuthorizationStartResult result = provider.start(context);
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.PENDING);
+        assertThat(result.authorizationUrl()).contains("redirect_uri=https%3A%2F%2Fapp.example%2Fcallback");
+    }
+
+    @Test
+    void startReportsIncompleteOAuthAppConfiguration() {
+        GithubOAuth2AuthorizationProvider provider = new GithubOAuth2AuthorizationProvider(
+            mock(GithubOAuth2Client.class), mock(ConnectorCredentialSecretStore.class), new ObjectMapper(),
+            name -> {
+                throw new IllegalStateException("missing environment value");
+            }
+        );
+        AuthorizationStartContext context = new AuthorizationStartContext(
+            UUID.randomUUID().toString(), "1001", 1003L, "github", "github-oauth2", "http://localhost:8000/chat",
+            Map.of("clientIdEnv", "GITHUB_OAUTH_CLIENT_ID", "clientSecretEnv", "GITHUB_OAUTH_CLIENT_SECRET",
+                "scope", "read:user repo", "redirectUriEnv", "GITHUB_OAUTH_REDIRECT_URI"), null
+        );
+
+        AuthorizationStartResult result = provider.start(context);
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.FAILED);
+        assertThat(result.errorCode()).isEqualTo("OAUTH_PROVIDER_CONFIG_INVALID");
+        assertThat(result.errorMessage()).isEqualTo("GitHub OAuth2未配置完整，请联系管理员");
+    }
+
+    @Test
+    void startAllowsHttpCallbackForExistingNonTlsDeployments() {
+        GithubOAuth2AuthorizationProvider provider = new GithubOAuth2AuthorizationProvider(
+            mock(GithubOAuth2Client.class), mock(ConnectorCredentialSecretStore.class), new ObjectMapper(), name -> "secret"
+        );
+        AuthorizationStartContext context = new AuthorizationStartContext(
+            UUID.randomUUID().toString(), "1001", 1003L, "github", "github-oauth2", "http://localhost:8000/chat",
+            Map.of("clientId", "client-1", "clientSecretEnv", "GITHUB_CLIENT_SECRET", "scope", "read:user",
+                "redirectUri", "http://localhost:8000/byaiService/connector/authorization/callback/github-oauth2"), null
+        );
+
+        AuthorizationStartResult result = provider.start(context);
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.PENDING);
+        assertThat(result.authorizationUrl()).contains("redirect_uri=http%3A%2F%2Flocalhost%3A8000%2FbyaiService%2Fconnector");
     }
 
     private String oauthState(AuthorizationStartResult start) {

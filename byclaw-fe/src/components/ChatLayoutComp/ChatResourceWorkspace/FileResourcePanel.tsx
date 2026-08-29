@@ -4,7 +4,11 @@ import { EllipsisOutlined, FolderAddOutlined, UploadOutlined } from '@ant-design
 import { getLocale, useIntl, useSelector } from '@umijs/max';
 import FileSpaceBlock from '@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock';
 import CreateFolderModal from '@/layout/sider/components/FileSiderPanel/components/CreateFolderModal';
-import { SHARED_FILE_PATH, type FileTreeItem } from '@/layout/sider/components/FileSiderPanel/constants';
+import {
+  DISPLAY_FILE_PATH_PREFIX,
+  SHARED_FILE_PATH,
+  type FileTreeItem,
+} from '@/layout/sider/components/FileSiderPanel/constants';
 import {
   canPreviewFile,
   ensureDirectoryPath,
@@ -92,6 +96,8 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   const userInfo = useSelector((state: any) => state.user.userInfo);
   const [items, setItems] = useState<FileBrowserItem[]>([]);
   const [childrenByPath, setChildrenByPath] = useState<Record<string, FileBrowserItem[]>>({});
+  // Tree 会缓存已触发过 loadData 的目录；刷新时必须同步清空，否则再次展开不会发起请求。
+  const [loadedDirectoryKeys, setLoadedDirectoryKeys] = useState<Key[]>([]);
   const [expandedKeys, setExpandedKeys] = useState<Key[]>([]);
   const [loading, setLoading] = useState(false);
   const [renameTarget, setRenameTarget] = useState<FileBrowserItem | null>(null);
@@ -106,7 +112,9 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   const projectId = projectIdProp ?? Number(project?.projectId);
   const isLocalSharedFiles = scope === 'project' && Number(project?.projectId ?? projectId) === -1;
   const usesFileBrowser = scope === 'session' || isLocalSharedFiles;
-  const rootPath = isLocalSharedFiles ? SHARED_FILE_PATH : getSessionFilePath(sessionId);
+  const rootPath = `${DISPLAY_FILE_PATH_PREFIX}${
+    isLocalSharedFiles ? SHARED_FILE_PATH : getSessionFilePath(sessionId)
+  }`;
   const canManageProjectFiles = useMemo(() => {
     const currentUserId = userInfo?.userId ?? userInfo?.id;
     return (
@@ -131,6 +139,10 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
       return;
     }
 
+    // 刷新根目录时同时作废目录树缓存；否则 rc-tree 会认为已展开过的目录无需再次调用 loadData。
+    setChildrenByPath({});
+    setLoadedDirectoryKeys([]);
+    setExpandedKeys([]);
     setLoading(true);
     try {
       if (isLocalSharedFiles) {
@@ -166,6 +178,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
 
   useEffect(() => {
     setChildrenByPath({});
+    setLoadedDirectoryKeys([]);
     setExpandedKeys([]);
     setRenameTarget(null);
     void loadRoot();
@@ -193,6 +206,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
       } else {
         setChildrenByPath((current) => ({ ...current, [normalizedPath]: nextItems }));
       }
+      setLoadedDirectoryKeys((current) => (current.includes(normalizedPath) ? current : [...current, normalizedPath]));
     },
     [language, resourceId, rootPath]
   );
@@ -562,6 +576,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         }
         childrenByPath={childrenByPath}
         expandedKeys={expandedKeys}
+        loadedKeys={loadedDirectoryKeys}
         showActions
         onRefresh={loadRoot}
         onExpand={setExpandedKeys}

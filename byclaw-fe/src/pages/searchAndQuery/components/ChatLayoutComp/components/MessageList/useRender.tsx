@@ -44,7 +44,6 @@ const SHOW_SAVE_TO_WORKSPACE_ENTRY = false;
 export default function useRender({
   updateMessage,
   deleteMessage,
-  hideAction,
 }: {
   updateMessage: (message: IMessage) => void;
   deleteMessage: (message: IMessage) => void;

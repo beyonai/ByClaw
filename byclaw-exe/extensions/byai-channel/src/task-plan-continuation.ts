@@ -1,6 +1,8 @@
 import {
+  clearTaskPlanExecutionContext,
   markTaskPlanContinuationPending,
   resolveTaskPlanRuntimeBridge,
+  resolveTaskPlanExecutionContext,
   type TaskPlanExecutionContext,
   type TaskPlanSnapshot,
 } from "../../shared/src/task-plan-runtime.js";
@@ -27,6 +29,17 @@ function buildExecutionContext(request: ActiveSdkRequest): TaskPlanExecutionCont
   const messageId = request.messageId?.trim();
   if (!messageId) {
     return undefined;
+  }
+  const remembered = resolveTaskPlanExecutionContext(request.sessionKey);
+  if (
+    remembered &&
+    remembered.sessionId === request.sessionId &&
+    remembered.messageId === messageId
+  ) {
+    return {
+      ...remembered,
+      ...(request.beyondToken ? { beyondToken: request.beyondToken } : {}),
+    };
   }
   const runIds = [...request.boundRunIds];
   const sourceRunId = runIds[runIds.length - 1] || request.traceId || request.sessionKey;
@@ -113,6 +126,7 @@ export async function continueActiveTaskPlan(params: {
   try {
     activePlan = await bridge.loadActive(firstContext, params.signal);
     if (activePlan?.status !== "ACTIVE") {
+      clearTaskPlanExecutionContext(params.request.sessionKey);
       markTaskPlanContinuationPending(params.request.sessionKey, false);
       return;
     }
@@ -143,6 +157,7 @@ export async function continueActiveTaskPlan(params: {
       const context = buildExecutionContext(params.request) ?? firstContext;
       const latest = await bridge.loadActive(context, params.signal);
       if (latest?.status !== "ACTIVE") {
+        clearTaskPlanExecutionContext(params.request.sessionKey);
         markTaskPlanContinuationPending(params.request.sessionKey, false);
         return;
       }
@@ -174,6 +189,7 @@ export async function continueActiveTaskPlan(params: {
         },
         signal: params.signal,
       });
+      clearTaskPlanExecutionContext(params.request.sessionKey);
       markTaskPlanContinuationPending(params.request.sessionKey, false);
       if (!failure.ok && failure.currentPlan?.status === "ACTIVE") {
         throw new Error(

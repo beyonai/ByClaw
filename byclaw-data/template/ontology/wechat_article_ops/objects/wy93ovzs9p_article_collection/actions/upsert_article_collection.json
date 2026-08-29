@@ -9,6 +9,27 @@
   ],
   "params": [
     {
+      "paramCode": "projectId",
+      "paramName": "项目ID",
+      "type": "string",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
+      "paramCode": "account_code",
+      "paramName": "公众号编码",
+      "type": "string",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
+      "paramCode": "account_name",
+      "paramName": "公众号名称",
+      "type": "string",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
       "paramCode": "id",
       "paramName": "合集ID",
       "type": "integer",
@@ -33,14 +54,14 @@
     },
     {
       "paramCode": "start_date",
-      "paramName": "业务周期开始",
+      "paramName": "业务周期开始（YYYY-MM-DD）",
       "type": "date",
       "isRequired": false,
       "direction": "input"
     },
     {
       "paramCode": "end_date",
-      "paramName": "业务周期结束",
+      "paramName": "业务周期结束（YYYY-MM-DD）",
       "type": "date",
       "isRequired": false,
       "direction": "input"

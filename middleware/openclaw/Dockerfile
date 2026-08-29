@@ -145,7 +145,7 @@ RUN npm config set registry "${NPM_REGISTRY}" --global \
     && zread version --stdio | grep -F "\"version\":\"${ZREAD_CLI_VERSION}\"" >/dev/null \
     && rm -f "/tmp/ima-openapi-cli-${IMA_OPENAPI_CLI_VERSION}.tgz"
 
-ARG OPENCLI_VERSION=2.1.40
+ARG OPENCLI_VERSION=2.1.44
 ARG OPENCLI_EXTENSION_VERSION=2.1.21
 RUN set -eux; \
     if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
@@ -300,6 +300,7 @@ RUN ln -s /app /app/node_modules/openclaw
 
 
 COPY middleware/openclaw/skills/ /app/skills/
+COPY middleware/openclaw/runtime-tools/ /usr/local/lib/byclaw/runtime-tools/
 
 # 复用镜像全局 by-framework，确保文档转换脚本能按本地 node_modules 路径解析依赖。
 RUN rm -rf /app/skills/by-doc-to-markdown/scripts/node_modules/@byclaw/by-framework \

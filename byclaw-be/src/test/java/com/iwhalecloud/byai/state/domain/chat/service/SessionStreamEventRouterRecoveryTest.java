@@ -35,7 +35,7 @@ class SessionStreamEventRouterRecoveryTest {
         outputStreamManager = mockField("outputStreamManager", OutputStreamManager.class);
         pythonSseService = mockField("pythonSseService", PythonSseService.class);
         gatewayStreamEventProcessor = mockField("gatewayStreamEventProcessor", GatewayStreamEventProcessor.class);
-        mockField("runningChatSnapshotService", RunningChatSnapshotService.class);
+        mockField("runningChatSnapshotWriteBehind", RunningChatSnapshotWriteBehind.class);
         mockField("multiDeviceBroadcastService",
             com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService.class);
         mockField("chatContextRecoveryService", ChatContextRecoveryService.class);

@@ -3,17 +3,22 @@ package com.iwhalecloud.byai.gateway.sandbox.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
 
+import java.util.Map;
+import java.util.Optional;
+
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-
-import java.util.Map;
-import java.util.Optional;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.ValueOperations;
 
 import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpec;
 import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpecRepository;
+import com.iwhalecloud.byai.manager.application.service.devloop.GitHubCredentialResolver;
+import com.iwhalecloud.byai.manager.application.service.user.UserPrivateParamApplicationService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDigEmployeeService;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 
@@ -34,6 +39,20 @@ class SandboxLaunchContextFactoryTest {
 
     @Mock
     private SandboxUserInfoFactory sandboxUserInfoFactory;
+
+    @Mock
+    private StringRedisTemplate stringRedisTemplate;
+
+    @Mock
+    private ValueOperations<String, String> valueOperations;
+
+    @Mock
+    private GitHubCredentialResolver githubCredentialResolver;
+
+    @BeforeEach
+    void setUp() {
+        when(stringRedisTemplate.opsForValue()).thenReturn(valueOperations);
+    }
 
     @Test
     void buildContext_generatesRandomGatewayTokenAndInjectsItIntoEnvs() {
@@ -72,5 +91,28 @@ class SandboxLaunchContextFactoryTest {
 
         assertThat(context.getEnvs()).containsEntry("WEB_BASE_URL", "https://web.example")
             .doesNotContainKey("TZ");
+    }
+
+    @Test
+    void buildContextPrefersConnectorTokenOverLegacyPersonalToken() {
+        String redisKey = UserPrivateParamApplicationService.buildPrivateParamRedisKey("user001");
+        when(valueOperations.get(redisKey)).thenReturn("{\"params\":{\"GH_TOKEN\":\"legacy-token\"}}");
+        when(githubCredentialResolver.resolveByUserCode("user001")).thenReturn("connector-token");
+
+        SandboxLaunchContext context = factory.buildContext("user001", 103L,
+            SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE);
+
+        assertThat(context.getEnvs()).containsEntry("GH_TOKEN", "connector-token");
+    }
+
+    @Test
+    void buildContextKeepsLegacyPersonalTokenWhenResolverReturnsNoToken() {
+        String redisKey = UserPrivateParamApplicationService.buildPrivateParamRedisKey("user001");
+        when(valueOperations.get(redisKey)).thenReturn("{\"params\":{\"GH_TOKEN\":\"legacy-token\"}}");
+
+        SandboxLaunchContext context = factory.buildContext("user001", 104L,
+            SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE);
+
+        assertThat(context.getEnvs()).containsEntry("GH_TOKEN", "legacy-token");
     }
 }

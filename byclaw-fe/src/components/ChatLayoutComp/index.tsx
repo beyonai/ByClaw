@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useRef, useState, useMe
 import { useDispatch, useIntl, useSelector } from '@umijs/max';
 import { isEmpty, last, size } from 'lodash';
 import { notification } from 'antd';
+import { ArrowLeftOutlined, LockOutlined } from '@ant-design/icons';
 
 import MessageList from '@/components/MessageList';
 
@@ -26,6 +27,8 @@ import useEventEmitterHooks from './hooks/useEventEmitterHooks';
 import ChatTitle from './ChatTitle';
 import MultiChoices from './components/MultiChoices';
 import EasyConfirm from './components/EasyConfirm';
+import TaskExecutionPlan from '@/components/MessageList/components/TaskExecutionPlan';
+import { selectLatestTaskPlan } from '@/components/MessageList/components/TaskExecutionPlan/projection';
 
 import type { IState as UseEmployeesIState } from '@/models/useEmployees.ts';
 
@@ -41,6 +44,8 @@ import {
 } from '@/layout/sider/siderContentContext';
 import { closeChatResourceTab, upsertChatResourceTab, type ChatResourceTab } from './ChatResourceWorkspace/tabState';
 import { isNotificationSession } from '@/utils/session';
+import { qryConversations } from '@/service/layout';
+import { isExternalChildSession } from '@/utils/scopedSession';
 
 type IProps = {
   sessionId: string;
@@ -135,7 +140,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
   const resourceWorkspaceOwnedRef = useRef(false);
   const { setDetailPanel, clearDetailPanel } = React.useContext(SiderContentContext);
 
-  const { EventEmitter, setAgentId, platform, agentId } = useGlobal();
+  const { EventEmitter, setAgentId, setSessionId: setGlobalSessionId, platform, agentId } = useGlobal();
   const isPC = platform === Platform.pc;
   const { getSandboxesInfoUrl } = useAppStore();
 
@@ -202,6 +207,21 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     return target;
   }, [sessionId, sessionList]);
 
+  useEffect(() => {
+    if (!sessionId || currentSession) return undefined;
+    let cancelled = false;
+    qryConversations({ sessionId, pageNum: 1, pageSize: 1 })
+      .then((response) => {
+        const exactSession = response?.list?.[0];
+        if (cancelled || !exactSession) return;
+        addSession({ ...exactSession, sessionId: `${exactSession.sessionId}` });
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [addSession, currentSession, sessionId]);
+
   const sessionProjectId = useMemo(() => {
     // 路由状态在刷新或非项目列表入口时可能丢失，优先从当前会话的后端归属字段恢复。
     const candidateProjectId = projectId ?? currentSession?.projectId;
@@ -212,7 +232,8 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
   }, [currentSession?.projectId, projectId]);
 
   const notificationSession = isNotificationSession(currentSession);
-  const effectiveReadOnly = Boolean(readOnly || notificationSession);
+  const externalChildSession = isExternalChildSession(currentSession);
+  const effectiveReadOnly = Boolean(readOnly || notificationSession || externalChildSession);
 
   useEffect(() => {
     if (fixedAgentId) {
@@ -472,6 +493,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     onBeforeSend,
   });
   const lastMsg = last(messageList);
+  const latestTaskPlan = useMemo(() => selectLatestTaskPlan(messageList, sessionId), [messageList, sessionId]);
 
   const guardedSendQuery = useCallback(
     (sendProps: ISendProps, sendConf?: ISendConf) => {
@@ -686,6 +708,11 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
                 })}
                 id="queryInputWrapper"
               >
+                {latestTaskPlan ? (
+                  <div className={styles.taskPlanDock}>
+                    <TaskExecutionPlan taskPlan={latestTaskPlan} />
+                  </div>
+                ) : null}
                 <EasyConfirm
                   messageState={messageState}
                   disabledInput={disabledInput}
@@ -713,6 +740,17 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
                   </div>
                 )}
                 {/* {isBottom && TopButtons} */}
+              </div>
+            )}
+            {externalChildSession && (
+              <div className={styles.childSessionReadOnlyNotice}>
+                <span className={styles.childSessionReadOnlyCopy}>
+                  <LockOutlined />子 Agent 会话为只读，消息由外部执行器持续同步
+                </span>
+                <button type="button" onClick={() => setGlobalSessionId?.(`${currentSession?.parentSessionId || ''}`)}>
+                  <ArrowLeftOutlined />
+                  返回主会话继续任务
+                </button>
               </div>
             )}
             {isMultiChoices && (

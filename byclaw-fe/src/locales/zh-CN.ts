@@ -1494,13 +1494,24 @@ export default {
   'messageList.sqlAnalysis': 'SQL分析',
   'messageList.defaultAIName': '鲸智百应',
   'messageList.taskPlan.title': '任务执行计划',
+  'messageList.taskPlan.updated': '任务计划已更新',
   'messageList.taskPlan.progress': '{completed}/{total} 已完成',
+  'messageList.taskPlan.summary.COMPLETED': '{count} 已完成',
+  'messageList.taskPlan.summary.IN_PROGRESS': '{count} 进行中',
+  'messageList.taskPlan.summary.PENDING': '{count} 待处理',
+  'messageList.taskPlan.summary.FAILED': '{count} 失败',
+  'messageList.taskPlan.summary.CANCELLED': '{count} 已取消',
+  'messageList.taskPlan.summary.SKIPPED': '{count} 已跳过',
   'messageList.taskPlan.status.PENDING': '待执行',
   'messageList.taskPlan.status.IN_PROGRESS': '执行中',
   'messageList.taskPlan.status.COMPLETED': '已完成',
   'messageList.taskPlan.status.FAILED': '执行失败',
   'messageList.taskPlan.status.SKIPPED': '已跳过',
   'messageList.taskPlan.status.CANCELLED': '已取消',
+  'messageList.askUser.title': '需要你的回答',
+  'messageList.askUser.answered': '已回答的问题',
+  'messageList.askUser.previous': '上一题',
+  'messageList.askUser.next': '下一题',
 
   // MessageContent组件
   'contentHeader.settings': '设置',
@@ -1653,6 +1664,7 @@ export default {
 
   'toolCall.input': '输入',
   'toolCall.output': '输出',
+  'contextEvent.input': '注入内容',
   'toolCall.collapse': '收起详情',
 
   quote: '引用',
@@ -1986,11 +1998,6 @@ export default {
   'projectSpace.members.confirmUnbind': '确定解绑',
   'projectSpace.members.unbindSuccess': '数字员工解绑成功',
   'projectSpace.members.unbindFailed': '数字员工解绑失败',
-  'projectSpace.github.notConfigured': '未配置 GitHub Token，点击配置后才能读取代码仓库和变更。',
-  'projectSpace.github.configure': '配置 GitHub Token',
-  'projectSpace.github.saveSuccess': 'GitHub Token 已保存',
-  'projectSpace.github.saveFailed': 'GitHub Token 保存失败',
-  'projectSpace.github.placeholder': '请输入 GitHub Personal Access Token',
   // 运营项目账号、任务编排与工作流
   'projectSpace.operation.platform.all': '全部账号',
   'projectSpace.operation.platform.wechat': '微信公众号',
@@ -1999,6 +2006,8 @@ export default {
   'projectSpace.operation.platform.douyin': '抖音',
   'projectSpace.operation.platform.customLink': '自定义链接',
   'projectSpace.operation.account.entry': '运营账号管理',
+  'connector.accounts.title': '账号',
+  'connector.accounts.loadFailed': '账号加载失败，请稍后重试',
   'projectSpace.operation.account.title': '运营账号管理',
   'projectSpace.operation.account.description': '统一管理不同平台的多个账号、登录状态和内容数据',
   'projectSpace.operation.account.back': '返回项目详情',
@@ -3108,14 +3117,6 @@ export default {
   'projectSpace.detail.requirement.addMenu.chatDesc': '进入项目会话，聊完沉淀为需求',
   // 聊天录入进入新会话后的引导:告诉用户直接聊需求,聊清楚后在回答下方沉淀为需求。
   'projectSpace.detail.requirement.addMenu.chatTip': '直接把想法聊给我，聊清楚后在回答下方点「沉淀为需求」即可入库',
-  // 研发项目 GH_TOKEN 未配置提醒:提醒条 + 点击后的友好引导弹窗。以提醒为主,不强制。
-  'projectSpace.detail.githubToken.reminder.alert':
-    '研发项目需要 GitHub 访问令牌（GH_TOKEN）才能拉取和推送代码，你还没有配置，点此前往设置',
-  'projectSpace.detail.githubToken.reminder.title': '配置 GitHub 访问令牌',
-  'projectSpace.detail.githubToken.reminder.content':
-    '研发项目在克隆和推送私有仓库时需要用到你的 GitHub 访问令牌（GH_TOKEN）。它保存在「个人参数配置」里，仅你可见。现在去配置一下吧，配置后即可正常运行研发任务。',
-  'projectSpace.detail.githubToken.reminder.goSetting': '去设置',
-  'projectSpace.detail.githubToken.reminder.later': '稍后再说',
   // Markdown 编辑器
   'markdownField.insertImage': '插入图片',
   'markdownField.insertFile': '插入附件',
@@ -3452,6 +3453,14 @@ export default {
   'spec.integrationTest.orchestrator.statusTitle': '② status.json 契约(状态真相源,需原子写入)',
   'spec.integrationTest.orchestrator.enumTitle': '③ status 状态枚举(封闭取值)',
   'spec.integrationTest.orchestrator.scriptTitle': '④ 编排脚本骨架示例(bash)',
+
+  'fileChanges.ariaLabel': '文件变动',
+  'fileChanges.title': '已编辑 {count} 个文件',
+  'fileChanges.showMore': '再显示 {count} 个文件',
+  'fileChanges.collapse': '收起',
+  'fileChanges.diffLoadFailed': '文件变更详情加载失败',
+  'fileChanges.noDiff': '文件没有净变化',
+  'fileChanges.expandUnchanged': '{count} 行未变更的内容',
 
   ...secondEdition,
 };

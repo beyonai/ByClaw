@@ -15,6 +15,7 @@ import {
 import { resolveAgentIdFromSessionKey } from "openclaw/plugin-sdk/routing";
 import type { ConnectorAuthorizationMap } from "./connector-authorization.js";
 import {
+    clearTaskPlanExecutionContext,
     isTaskPlanContinuationPending,
     markTaskPlanContinuationPending,
 } from "../../shared/src/task-plan-runtime.js";
@@ -40,33 +41,15 @@ const MAX_CHAT_CONTEXT_TEXT_CHARS = 12000;
 
 export { SESSION_FILES_ROOT, getSessionPathBySessionId };
 
-export function resolveSdkLocalFilePath(rawPath: string, sessionId: string): string {
-    const sessionRoot = getSessionPathBySessionId(sessionId);
-    if (!path.posix.isAbsolute(rawPath)) {
-        return path.posix.resolve(sessionRoot, rawPath);
-    }
-
-    const normalizedRawPath = path.posix.normalize(rawPath);
-    const normalizedSessionRoot = path.posix.normalize(sessionRoot);
-    if (
-        normalizedRawPath === normalizedSessionRoot ||
-        normalizedRawPath.startsWith(`${normalizedSessionRoot}/`)
-    ) {
+export function resolveSdkLocalFilePath(rawPath: string): string {
+    // 先按绝对路径归一化，避免重复斜杠和父目录片段让结果逃逸出 /by。
+    const normalizedRawPath = path.posix.normalize(`/${rawPath.trim().replace(/^\/+/, "")}`);
+    if (normalizedRawPath === "/by" || normalizedRawPath.startsWith("/by/")) {
         return normalizedRawPath;
     }
 
-    for (let start = 0; start < normalizedSessionRoot.length; start += 1) {
-        const overlap = normalizedSessionRoot.slice(start);
-        if (
-            overlap.length <= 1 ||
-            (normalizedRawPath !== overlap && !normalizedRawPath.startsWith(`${overlap}/`))
-        ) {
-            continue;
-        }
-        return `${normalizedSessionRoot.slice(0, start)}${normalizedRawPath}`;
-    }
-
-    return normalizedRawPath;
+    const relativePath = normalizedRawPath.replace(/^\/+/, "");
+    return relativePath ? path.posix.join("/by", relativePath) : "/by";
 }
 
 export interface ByaiSdkSessionContext {
@@ -692,6 +675,7 @@ function listPendingChildSessionKeys(request: ActiveSdkRequest): Set<string> {
 
 export function clearActiveSdkRequestRecord(request: ActiveSdkRequest): void {
     markTaskPlanContinuationPending(request.sessionKey, false);
+    clearTaskPlanExecutionContext(request.sessionKey);
   activeSdkRequestsByTarget.delete(buildActiveSdkTargetKey(request.accountId, request.to));
   activeSdkRequestsByTraceId.delete(request.traceId);
   channelRequestContextsBySessionKey.delete(request.sessionKey);

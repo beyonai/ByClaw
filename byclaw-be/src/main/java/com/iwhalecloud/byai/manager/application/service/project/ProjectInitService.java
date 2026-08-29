@@ -24,6 +24,7 @@ import com.iwhalecloud.byai.common.exception.ByAiArgumentException;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.state.application.service.session.ByClawUserWorkspacePaths;
 import com.iwhalecloud.byai.manager.application.service.user.UserBucketNamingService;
+import com.iwhalecloud.byai.manager.application.service.devloop.GitHubCredentialResolver;
 import com.iwhalecloud.byai.manager.config.GitWorkspaceConfig;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectService;
 import com.iwhalecloud.byai.manager.domain.project.service.GitCommandExecutor;
@@ -93,6 +94,9 @@ public class ProjectInitService {
 
     @Autowired
     private ObjectMapper objectMapper;
+
+    @Autowired
+    private GitHubCredentialResolver githubCredentialResolver;
 
     /**
      * 初始化项目工作目录。
@@ -862,6 +866,11 @@ public class ProjectInitService {
      * @return GitHub Token，如果未配置则返回 null
      */
     private String getUserGitHubToken() {
+        String connectorToken = githubCredentialResolver == null
+            ? null : githubCredentialResolver.resolve(CurrentUserHolder.getCurrentUserId());
+        if (StringUtils.isNotBlank(connectorToken)) {
+            return connectorToken;
+        }
         try {
             String userCode = CurrentUserHolder.getCurrentUserCode();
             if (StringUtils.isBlank(userCode)) {

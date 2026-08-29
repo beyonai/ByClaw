@@ -29,8 +29,14 @@ jest.mock('@/components/MessageList/lazyHandler', () => ({
       function EasyConfirmTestComponent(props: {
         thinkListItem?: { uuid?: string };
         messageListItem?: { uuid?: string };
+        presentation?: string;
       }) {
-        return <div data-testid={`easy-confirm-${props.thinkListItem?.uuid || props.messageListItem?.uuid}`} />;
+        return (
+          <div
+            data-testid={`easy-confirm-${props.thinkListItem?.uuid || props.messageListItem?.uuid}`}
+            data-presentation={props.presentation}
+          />
+        );
       },
   },
 }));
@@ -91,7 +97,7 @@ describe('EasyConfirm', () => {
       />
     );
 
-    expect(screen.getByTestId('easy-confirm-pending-1')).toBeInTheDocument();
+    expect(screen.getByTestId('easy-confirm-pending-1')).toHaveAttribute('data-presentation', 'dock');
     expect(screen.queryByTestId('query-input')).not.toBeInTheDocument();
   });
 

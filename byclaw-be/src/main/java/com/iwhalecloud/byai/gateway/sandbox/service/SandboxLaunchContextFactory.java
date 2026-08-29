@@ -24,6 +24,7 @@ import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpec;
 import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpecRepository;
 import com.iwhalecloud.byai.manager.application.service.aimodel.ModelManagementApplicationService;
 import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
+import com.iwhalecloud.byai.manager.application.service.devloop.GitHubCredentialResolver;
 import com.iwhalecloud.byai.manager.application.service.user.UserPrivateParamApplicationService;
 import com.iwhalecloud.byai.manager.domain.aimodel.service.AiModelService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDigEmployeeService;
@@ -92,6 +93,10 @@ public class SandboxLaunchContextFactory {
     @Lazy
     @Autowired
     private StringRedisTemplate stringRedisTemplate;
+
+    @Lazy
+    @Autowired
+    private GitHubCredentialResolver githubCredentialResolver;
 
     /**
      * 根据 resourceId 解析沙箱路由。
@@ -225,6 +230,11 @@ public class SandboxLaunchContextFactory {
 
         // 加载个人设置的 env（优先级高于系统环境变量）
         loadPersonalEnvSettings(envs, userCode);
+
+        // GitHub 连接器是首选凭据来源；解析器内部仍保留旧 GH_TOKEN 个人参数回退。
+        // GH_TOKEN 这里只作为 SandboxServiceSpec 模板上下文，最终是否以 GH_TOKEN 或 BY_GH_TOKEN 注入
+        // 由不同 sandbox profile 的 spec.env 决定。
+        loadGitHubCredential(envs, userCode);
 
         envs.put("gateway_token", gatewayToken);
         envs.put("OPENCLAW_GATEWAY_TOKEN", gatewayToken);
@@ -369,6 +379,21 @@ public class SandboxLaunchContextFactory {
         }
         catch (Exception e) {
             LOGGER.warn("构建沙箱 Beyond-Token 异常，userCode：{}，原因：{}", userCode, e.getMessage());
+        }
+    }
+
+    private void loadGitHubCredential(Map<String, String> envs, String userCode) {
+        if (githubCredentialResolver == null || StringUtils.isBlank(userCode)) {
+            return;
+        }
+        try {
+            String token = githubCredentialResolver.resolveByUserCode(userCode);
+            if (StringUtils.isNotBlank(token)) {
+                envs.put("GH_TOKEN", token);
+            }
+        }
+        catch (RuntimeException e) {
+            LOGGER.warn("解析用户 GitHub 连接器凭据异常，userCode={}，原因：{}", userCode, e.getMessage());
         }
     }
 

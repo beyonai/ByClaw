@@ -5,17 +5,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-/**
- * 带令牌 clone 地址拼接。回归重点:令牌前缀含 $,曾用 replaceFirst 实现,替换串里的 $GH_TOKEN
- * 被正则当成分组引用,集成测试 backend 直跑的 clone 步骤直接抛 IllegalArgumentException。
- */
+/** 代码平台 clone 地址与安全凭据提示。 */
 class DevloopRepoCloneUrlTest {
 
     @Test
-    @DisplayName("github: https 地址插入 $GH_TOKEN@ 前缀，不触发正则分组引用")
-    void tokenizesGithubHttpsUrl() {
+    @DisplayName("github: 保留标准 https 地址，由 Git credential helper 提供凭据")
+    void keepsGithubHttpsUrlTokenFree() {
         assertThat(DevloopApplicationService.tokenizedRepoCloneUrl("github", "https://github.com/acme/app.git"))
-            .isEqualTo("https://$GH_TOKEN@github.com/acme/app.git");
+            .isEqualTo("https://github.com/acme/app.git");
     }
 
     @Test
@@ -33,17 +30,17 @@ class DevloopRepoCloneUrlTest {
     }
 
     @Test
-    @DisplayName("http 自建实例升级为 https 并注入令牌")
-    void upgradesHttpToHttps() {
+    @DisplayName("github 显式地址不再改写或注入令牌")
+    void keepsExplicitGithubUrl() {
         assertThat(DevloopApplicationService.tokenizedRepoCloneUrl("github", "http://git.internal/acme/app.git"))
-            .isEqualTo("https://$GH_TOKEN@git.internal/acme/app.git");
+            .isEqualTo("http://git.internal/acme/app.git");
     }
 
     @Test
     @DisplayName("provider 为空或大写都落到 github 约定")
     void fallsBackToGithubSpec() {
         assertThat(DevloopApplicationService.tokenizedRepoCloneUrl(null, "https://github.com/acme/app.git"))
-            .isEqualTo("https://$GH_TOKEN@github.com/acme/app.git");
+            .isEqualTo("https://github.com/acme/app.git");
         assertThat(DevloopApplicationService.tokenizedRepoCloneUrl("GitLab", "https://gitlab.com/g/app.git"))
             .isEqualTo("https://oauth2:$GL_TOKEN@gitlab.com/g/app.git");
     }
@@ -66,10 +63,12 @@ class DevloopRepoCloneUrlTest {
     }
 
     @Test
-    @DisplayName("buildRepoCloneHint 对显式完整地址也不再抛分组引用异常")
+    @DisplayName("GitHub clone 提示使用标准地址和平台 credential helper")
     void buildRepoCloneHintHandlesExplicitUrl() {
         String hint = DevloopApplicationService.buildRepoCloneHint("github", "https://github.com/acme/app.git",
             "acme/app");
-        assertThat(hint).contains("git clone https://$GH_TOKEN@github.com/acme/app.git").contains("GH_TOKEN");
+        assertThat(hint)
+            .contains("git clone https://github.com/acme/app.git", "Git 凭据助手", "平台 GitHub 连接器")
+            .doesNotContain("$GH_TOKEN", "https://GH_TOKEN@");
     }
 }

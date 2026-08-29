@@ -1,4 +1,10 @@
 async def execute(params: dict) -> dict:
+    project_id = str(params.get("projectId") or "").strip()
+    if not project_id:
+        return {"records": [{"success": False, "code": "PROJECT_ID_REQUIRED", "error": "projectId不能为空"}], "total": 1, "meta": {"total": 1}}
+    account_code = str(params.get("account_code") or "").strip()
+    if not account_code:
+        return {"records": [{"success": False, "code": "ACCOUNT_CODE_REQUIRED", "error": "account_code不能为空"}], "total": 1, "meta": {"total": 1}}
     from datetime import date as _date, datetime as _datetime
 
     def _to_date(v):
@@ -40,7 +46,7 @@ async def execute(params: dict) -> dict:
         return _error("INVALID_DATE_RANGE", "as_of_date必须是合法日期")
 
     AF = Wy93ovzs9pArticle.F
-    aq = (Q.gte(AF.publish_time, str(start))
+    aq = (Q.eq(AF.projectId, project_id).eq(AF.account_code, account_code).gte(AF.publish_time, str(start))
           .lte(AF.publish_time, str(end))
           .order_by(AF.publish_time, "desc").limit(500))
     article_page = await wy93ovzs9p_article_mapper.select(aq)
@@ -49,7 +55,7 @@ async def execute(params: dict) -> dict:
     MF = Wy93ovzs9pArticleMetricDaily.F
     items = []
     for article in articles:
-        mq = (Q.eq(MF.article_id, _get(article, "id")).lte(MF.stat_date, as_of_date)
+        mq = (Q.eq(MF.projectId, project_id).eq(MF.account_code, account_code).eq(MF.article_id, _get(article, "id")).lte(MF.stat_date, as_of_date)
               .order_by(MF.stat_date, "desc").limit(1))
         metric = await wy93ovzs9p_article_metric_daily_mapper.select_one(mq)
         stat_date = _get(metric, "stat_date")
