@@ -821,4 +821,5 @@ COMMENT ON TABLE byai.artifact_data_record IS '已发布HTML Artifact持久化�
 ALTER TABLE byai_project ADD COLUMN cloud_resource_id bigint;
 COMMENT ON COLUMN byai_project.cloud_resource_id IS '云盘知识库资源ID';
 
-
+-- 设置默认值为 personal
+ALTER TABLE ss_resource ALTER COLUMN owner_type SET DEFAULT 'personal';
