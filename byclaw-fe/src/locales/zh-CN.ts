@@ -3451,5 +3451,13 @@ export default {
   'spec.integrationTest.orchestrator.enumTitle': '③ status 状态枚举(封闭取值)',
   'spec.integrationTest.orchestrator.scriptTitle': '④ 编排脚本骨架示例(bash)',
 
+  'fileChanges.ariaLabel': '文件变动',
+  'fileChanges.title': '已编辑 {count} 个文件',
+  'fileChanges.showMore': '再显示 {count} 个文件',
+  'fileChanges.collapse': '收起',
+  'fileChanges.diffLoadFailed': '文件变更详情加载失败',
+  'fileChanges.noDiff': '文件没有净变化',
+  'fileChanges.expandUnchanged': '{count} 行未变更的内容',
+
   ...secondEdition,
 };

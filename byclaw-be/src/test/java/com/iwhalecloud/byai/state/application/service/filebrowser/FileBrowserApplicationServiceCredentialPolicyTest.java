@@ -14,6 +14,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.multipart.MultipartFile;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.iwhalecloud.byai.common.storage.UserFS;
 import com.iwhalecloud.byai.state.application.service.session.ByClawSkillResourceApplicationService;
 import com.iwhalecloud.byai.state.domain.filebrowser.vo.FileBrowserItemVo;
 
@@ -28,7 +30,7 @@ class FileBrowserApplicationServiceCredentialPolicyTest {
         FileBrowserProviderFactory providerFactory = mock(FileBrowserProviderFactory.class);
         when(providerFactory.getProvider()).thenReturn(provider);
         service = new FileBrowserApplicationService(providerFactory,
-            mock(ByClawSkillResourceApplicationService.class));
+            mock(ByClawSkillResourceApplicationService.class), mock(UserFS.class), mock(ObjectMapper.class));
     }
 
     @Test

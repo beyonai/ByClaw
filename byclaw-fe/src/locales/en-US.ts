@@ -3518,5 +3518,13 @@ export default {
   'spec.integrationTest.orchestrator.enumTitle': '③ status enum (closed set)',
   'spec.integrationTest.orchestrator.scriptTitle': '④ Orchestration script skeleton (bash)',
 
+  'fileChanges.ariaLabel': 'File changes',
+  'fileChanges.title': 'Edited {count} files',
+  'fileChanges.showMore': 'Show {count} more files',
+  'fileChanges.collapse': 'Collapse',
+  'fileChanges.diffLoadFailed': 'Failed to load file changes',
+  'fileChanges.noDiff': 'The file has no net changes',
+  'fileChanges.expandUnchanged': '{count} unchanged lines',
+
   ...secondEdition,
 };
