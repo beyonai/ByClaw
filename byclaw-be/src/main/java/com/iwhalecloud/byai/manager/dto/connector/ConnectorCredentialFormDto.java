@@ -12,5 +12,7 @@ public class ConnectorCredentialFormDto {
 
     private String helpUrl;
 
+    private String helpText;
+
     private List<ConnectorCredentialFieldDto> fields;
 }

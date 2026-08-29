@@ -196,6 +196,8 @@ Use `--auth-source env` only when the user explicitly requests it or Browser Bri
 
 Never use `--auth-source env` for `sougousearch`, `collections`, `collection-detail`, `drafts`, `published`, `download`, `download-publish-data`, or `create-draft`; those commands do not expose that option. `create-draft --appid/--appsecret` is a separate official-API mode, not Weixin environment authentication.
 
+In ByClaw, the optional “微信公众号 API” connector may provision `WECHAT_APPID` and `WECHAT_APPSECRET` after validating the submitted AppID/AppSecret through the official token endpoint. The connector stores no access token. Do not describe this connector as browser, Cookie, `--auth-source env`, or `WECHAT_TOKEN` authentication. A `40164` verification result means the ByClaw backend egress IP must be added to the Official Account IP allowlist; it is not proof that the credential pair is invalid.
+
 `WECHAT_APPID` and `WECHAT_APPSECRET` are local routing inputs only for `create-draft`. Check presence and trimmed non-emptiness without displaying values. Do not unset or modify them. Pass both only when both are valid; otherwise pass neither. Never copy their literal values into chat, traces, fixtures, committed files, or shell history.
 
 For `WECHAT_TOKEN`, `WECHAT_COOKIE`, and `WECHAT_FINGERPRINT`, never mix browser-derived and environment-derived values. If variables are missing, name them without displaying their values. If the complete set exists but authentication fails, ask the user to replace that same-session set because it may be expired or mixed across sessions. This replacement rule does not apply to `WECHAT_APPID` / `WECHAT_APPSECRET`; their failed API attempt follows the automatic browser fallback above.

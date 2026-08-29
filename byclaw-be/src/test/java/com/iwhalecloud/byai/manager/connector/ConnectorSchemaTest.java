@@ -73,7 +73,7 @@ class ConnectorSchemaTest {
     @Test
     void imaMigrationSeedsOnlyCredentialFormMetadataAndManagedEnvironmentManifest() throws Exception {
         String sql = readPreservingCase("deploy/migrations/versions/V0.4.0/V0.4.0__dml.sql");
-        ImaConnectorSeed seed = extractImaConnectorSeed(sql);
+        ConnectorInsertSeed seed = extractConnectorSeed(sql, "ima-openapi");
         JsonNode authConfig = parseJson(seed.values().get("auth_config"));
         JsonNode runtimeManifest = parseJson(seed.values().get("runtime_manifest"));
         JsonNode expectedAuthConfig = parseJson("""
@@ -109,6 +109,33 @@ class ConnectorSchemaTest {
     }
 
     @Test
+    void weixinOfficialApiMigrationSeedsCredentialFormAndManagedEnvironmentManifest() throws Exception {
+        String sql = readPreservingCase("deploy/migrations/versions/V0.4.0/V0.4.0__dml.sql");
+        ConnectorInsertSeed seed = extractConnectorSeed(sql, "weixin-official-api");
+        JsonNode authConfig = parseJson(seed.values().get("auth_config"));
+        JsonNode runtimeManifest = parseJson(seed.values().get("runtime_manifest"));
+
+        assertThat(seed.values()).containsEntry("connector_code", "weixin-official-api")
+            .containsEntry("connector_name", "微信公众号 API")
+            .containsEntry("provider_code", "weixin-official-api")
+            .containsEntry("skill_code", "bycli")
+            .containsEntry("auth_mode", "AK_SK")
+            .containsEntry("sort", "55");
+        assertThat(authConfig.at("/credentialForm/helpUrl").asText()).isEqualTo("https://mp.weixin.qq.com/");
+        assertThat(authConfig.at("/credentialForm/helpText").asText()).contains("IP 白名单", "40164");
+        assertThat(authConfig.at("/credentialForm/fields/0/key").asText()).isEqualTo("appId");
+        assertThat(authConfig.at("/credentialForm/fields/1/key").asText()).isEqualTo("appSecret");
+        assertThat(runtimeManifest.at("/authStorage/managedEnvironmentKeys"))
+            .isEqualTo(parseJson("[\"WECHAT_APPID\",\"WECHAT_APPSECRET\"]"));
+        assertThat(runtimeManifest.at("/skill/code").asText()).isEqualTo("bycli");
+        assertThat(new ConnectorManifestCanonicalizer(OBJECT_MAPPER).canonicalize(
+            connector("weixin-official-api", "bycli"), seed.values().get("runtime_manifest")))
+            .contains("\"mode\":\"managed-environment\"");
+        assertThat(normalizeSql(seed.statement())).contains(
+            "WHERE NOT EXISTS ( SELECT 1 FROM byai.byai_connector_info WHERE connector_code = 'weixin-official-api' )");
+    }
+
+    @Test
     void imaSeedExtractionIgnoresOtherConnectorInsertStatements() throws Exception {
         String sql = readPreservingCase("deploy/migrations/versions/V0.4.0/V0.4.0__dml.sql") + """
 
@@ -119,7 +146,7 @@ class ConnectorSchemaTest {
             );
             """;
 
-        assertThat(extractImaConnectorSeed(sql).values())
+        assertThat(extractConnectorSeed(sql, "ima-openapi").values())
             .containsEntry("connector_code", "ima-openapi");
     }
 
@@ -128,8 +155,8 @@ class ConnectorSchemaTest {
         String migration = readPreservingCase("deploy/migrations/versions/V0.4.0/V0.4.0__dml.sql");
         String initdb = readPreservingCase("deploy/middleware/initdb/04_dml.sql");
 
-        ImaConnectorSeed migrationSeed = extractImaConnectorSeed(migration);
-        ImaConnectorSeed initdbSeed = extractImaConnectorSeed(initdb);
+        ConnectorInsertSeed migrationSeed = extractConnectorSeed(migration, "ima-openapi");
+        ConnectorInsertSeed initdbSeed = extractConnectorSeed(initdb, "ima-openapi");
         assertThat(initdbSeed.values()).isEqualTo(migrationSeed.values());
     }
 
@@ -648,28 +675,28 @@ class ConnectorSchemaTest {
         return matcher.group(1);
     }
 
-    private ImaConnectorSeed extractImaConnectorSeed(String sql) {
+    private ConnectorInsertSeed extractConnectorSeed(String sql, String connectorCode) {
         String insertMarker = "INSERT INTO byai.byai_connector_info";
-        List<ImaConnectorSeed> imaSeeds = new ArrayList<>();
+        List<ConnectorInsertSeed> seeds = new ArrayList<>();
         int insertStart = sql.indexOf(insertMarker);
         while (insertStart >= 0) {
             int statementEnd = findSqlStatementEnd(sql, insertStart);
             String statement = sql.substring(insertStart, statementEnd + 1);
-            if (!statement.contains("'ima-openapi'")) {
+            if (!statement.contains("'" + connectorCode + "'")) {
                 insertStart = sql.indexOf(insertMarker, statementEnd + 1);
                 continue;
             }
-            ImaConnectorSeed seed = extractConnectorInsert(sql, insertStart, insertMarker);
-            if ("ima-openapi".equals(seed.values().get("connector_code"))) {
-                imaSeeds.add(seed);
+            ConnectorInsertSeed seed = extractConnectorInsert(sql, insertStart, insertMarker);
+            if (connectorCode.equals(seed.values().get("connector_code"))) {
+                seeds.add(seed);
             }
             insertStart = sql.indexOf(insertMarker, statementEnd + 1);
         }
-        assertThat(imaSeeds).as("IMA connector INSERT").hasSize(1);
-        return imaSeeds.getFirst();
+        assertThat(seeds).as(connectorCode + " connector INSERT").hasSize(1);
+        return seeds.getFirst();
     }
 
-    private ImaConnectorSeed extractConnectorInsert(String sql, int insertStart, String insertMarker) {
+    private ConnectorInsertSeed extractConnectorInsert(String sql, int insertStart, String insertMarker) {
         int statementEnd = findSqlStatementEnd(sql, insertStart);
         String statement = sql.substring(insertStart, statementEnd + 1);
         int columnsStart = statement.indexOf('(', insertMarker.length());
@@ -687,7 +714,7 @@ class ConnectorSchemaTest {
         for (int index = 0; index < columns.size(); index++) {
             mapped.put(columns.get(index).trim(), sqlValue(values.get(index)));
         }
-        return new ImaConnectorSeed(statement, Map.copyOf(mapped));
+        return new ConnectorInsertSeed(statement, Map.copyOf(mapped));
     }
 
     private int findSqlStatementEnd(String sql, int start) {
@@ -854,6 +881,6 @@ class ConnectorSchemaTest {
     ) {
     }
 
-    private record ImaConnectorSeed(String statement, Map<String, String> values) {
+    private record ConnectorInsertSeed(String statement, Map<String, String> values) {
     }
 }

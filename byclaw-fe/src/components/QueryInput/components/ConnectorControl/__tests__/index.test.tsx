@@ -1857,7 +1857,7 @@ describe('ConnectorControl authorization states', () => {
     expect(screen.getByLabelText('Client ID')).toHaveAttribute('maxLength', '256');
     expect(screen.getByLabelText('API Key')).toHaveAttribute('type', 'password');
     expect(screen.getByLabelText('API Key')).toHaveAttribute('autocomplete', 'off');
-    expect(screen.getByRole('link', { name: '前往 IMA 获取凭据' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: '前往IMA获取凭据' })).toHaveAttribute(
       'href',
       'https://ima.qq.com/openapi'
     );
@@ -2044,22 +2044,128 @@ describe('ConnectorControl authorization states', () => {
     expect(screen.queryByLabelText('Client ID')).not.toBeInTheDocument();
   });
 
-  it('does not show IMA credential UI for another AK_SK connector', async () => {
+  it('opens and submits a generic dynamic credential form for Weixin Official Account API', async () => {
     mockQueryConnectorList.mockResolvedValue({
       list: [
         {
-          connectorId: 11,
-          connectorCode: 'another-ak-sk',
-          connectorName: '其他凭据连接器',
+          connectorId: 12,
+          connectorCode: 'weixin-official-api',
+          connectorName: '微信公众号 API',
           connectorType: 'SYSTEM',
-          description: '其他知识库',
+          description: '微信公众号官方 API',
           enableFlag: null,
           authMode: 'AK_SK',
           credentialForm: {
-            helpUrl: 'https://example.com/credentials',
+            helpUrl: 'https://mp.weixin.qq.com/',
+            helpText: '设置与开发 → 开发接口管理 → 基本配置 → 公众号开发信息；请配置 IP 白名单。',
             fields: [
-              { key: 'clientId', label: 'Client ID', inputType: 'text', maxLength: 256 },
-              { key: 'apiKey', label: 'API Key', inputType: 'password', maxLength: 2048 },
+              { key: 'appId', label: 'AppID', inputType: 'text', maxLength: 256 },
+              { key: 'appSecret', label: 'AppSecret', inputType: 'password', maxLength: 2048 },
+            ],
+          },
+        },
+      ],
+      pageNum: 1,
+      pageSize: 100,
+      total: 1,
+      totalPages: 1,
+    });
+    mockStartConnectorCredentialAuthorization.mockResolvedValue({
+      authorizationId: 'weixin-authorization-12',
+      connectorId: 12,
+      status: 'connected',
+    });
+
+    render(<ConnectorControl canAuthorize />);
+    fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
+    fireEvent.click(await screen.findByRole('button', { name: '连接' }));
+
+    expect(await screen.findByRole('heading', { name: '连接 微信公众号 API' })).toBeInTheDocument();
+    expect(screen.getByText(/公众号开发信息；请配置 IP 白名单/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '前往微信公众号 API获取凭据' })).toHaveAttribute(
+      'href',
+      'https://mp.weixin.qq.com/'
+    );
+    fireEvent.change(screen.getByLabelText('AppID'), { target: { value: 'wx-app' } });
+    fireEvent.change(screen.getByLabelText('AppSecret'), { target: { value: 'wx-secret' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存并连接' }));
+
+    await waitFor(() =>
+      expect(mockStartConnectorCredentialAuthorization).toHaveBeenCalledWith({
+        connectorId: 12,
+        redirectUrl: window.location.origin,
+        credentials: { appId: 'wx-app', appSecret: 'wx-secret' },
+        cancelToken: expect.any(AbortController),
+      })
+    );
+  });
+
+  it.each([
+    ['CONNECTOR_CREDENTIAL_INVALID', 'AppID 或 AppSecret 无效，请检查后重试'],
+    ['WEIXIN_IP_NOT_ALLOWLISTED', '请将 ByClaw 后端出口 IP 加入公众号 IP 白名单后重试'],
+    ['CONNECTOR_VERIFICATION_TIMEOUT', '微信接口暂时不可用，凭据未保存，请稍后重试'],
+    ['CONNECTOR_VERIFICATION_FAILED', '微信接口暂时不可用，凭据未保存，请稍后重试'],
+    ['PROVIDER_PROTOCOL_ERROR', '微信公众号 API 凭据验证失败，请检查后重试'],
+  ])('maps Weixin credential error %s to safe copy', async (errorCode, expected) => {
+    mockQueryConnectorList.mockResolvedValue({
+      list: [
+        {
+          connectorId: 12,
+          connectorCode: 'weixin-official-api',
+          connectorName: '微信公众号 API',
+          connectorType: 'SYSTEM',
+          description: '微信公众号官方 API',
+          enableFlag: null,
+          authMode: 'AK_SK',
+          credentialForm: {
+            helpUrl: 'https://mp.weixin.qq.com/',
+            fields: [
+              { key: 'appId', label: 'AppID', inputType: 'text', maxLength: 256 },
+              { key: 'appSecret', label: 'AppSecret', inputType: 'password', maxLength: 2048 },
+            ],
+          },
+        },
+      ],
+      pageNum: 1,
+      pageSize: 100,
+      total: 1,
+      totalPages: 1,
+    });
+    mockStartConnectorCredentialAuthorization.mockResolvedValue({
+      authorizationId: 'wx-failed',
+      connectorId: 12,
+      status: 'failed',
+      errorCode,
+      errorMessage: 'wx-secret must not be rendered',
+    });
+
+    render(<ConnectorControl canAuthorize />);
+    fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
+    fireEvent.click(await screen.findByRole('button', { name: '连接' }));
+    fireEvent.change(screen.getByLabelText('AppID'), { target: { value: 'wx-app' } });
+    fireEvent.change(screen.getByLabelText('AppSecret'), { target: { value: 'wx-secret' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存并连接' }));
+
+    await waitFor(() => expect(mockMessageError).toHaveBeenCalledWith(expected));
+    expect(screen.queryByText(/wx-secret must not be rendered/)).not.toBeInTheDocument();
+  });
+
+  it('explains Weixin AppSecret revocation scope before unlinking', async () => {
+    mockQueryConnectorList.mockResolvedValue({
+      list: [
+        {
+          connectorId: 12,
+          connectorCode: 'weixin-official-api',
+          connectorName: '微信公众号 API',
+          connectorType: 'SYSTEM',
+          description: '微信公众号官方 API',
+          enableFlag: 'Y',
+          authMode: 'AK_SK',
+          credentialForm: {
+            helpUrl: 'https://mp.weixin.qq.com/',
+            fields: [
+              { key: 'appId', label: 'AppID', inputType: 'text', maxLength: 256 },
+              { key: 'appSecret', label: 'AppSecret', inputType: 'password', maxLength: 2048 },
             ],
           },
         },
@@ -2072,11 +2178,12 @@ describe('ConnectorControl authorization states', () => {
 
     render(<ConnectorControl canAuthorize />);
     fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
-    fireEvent.click(await screen.findByRole('button', { name: '连接' }));
+    fireEvent.click(await screen.findByRole('button', { name: '更多微信公众号 API操作' }));
+    fireEvent.click(await screen.findByText('取消授权'));
 
-    expect(await screen.findByRole('heading', { name: '连接 其他凭据连接器 作为 AI 知识库' })).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: '连接 IMA' })).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Client ID')).not.toBeInTheDocument();
+    expect(await screen.findByText('仅移除 ByClaw 保存的凭据，微信公众平台上的 AppSecret 仍保持有效'))
+      .toBeInTheDocument();
+    Modal.destroyAll();
   });
 
   it('does not show IMA revocation copy for another AK_SK connector', async () => {
@@ -2110,7 +2217,8 @@ describe('ConnectorControl authorization states', () => {
     fireEvent.click(await screen.findByRole('button', { name: '更多其他凭据连接器操作' }));
     fireEvent.click(await screen.findByText('取消授权'));
 
-    expect(await screen.findByText('当前 CLI 登录凭证将被清除，再次使用时需要重新授权。')).toBeInTheDocument();
+    expect(await screen.findByText('仅移除 ByClaw 保存的凭据，第三方平台上的凭据仍保持有效。'))
+      .toBeInTheDocument();
     expect(screen.queryByText('仅移除 ByClaw 保存的凭据，IMA 网站上的 API Key 仍保持有效。')).not.toBeInTheDocument();
     const refreshCount = mockQueryAllConnectors.mock.calls.length;
     fireEvent.click(screen.getByRole('button', { name: '确认取消授权' }));
@@ -2172,7 +2280,7 @@ describe('ConnectorControl authorization states', () => {
           authMode: 'AK_SK',
           credentialForm: {
             helpUrl: 'https://ima.qq.com/openapi',
-            fields: [{ key: 'clientId', label: 'Client ID', inputType: 'text', maxLength: 256 }],
+            fields: [],
           },
         },
       ],

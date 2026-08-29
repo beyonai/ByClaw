@@ -575,6 +575,13 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "必须串行执行",
             "精确 URL + `--date`",
             "Chrome 下载事件",
+            "optional “微信公众号 API” connector",
+            "WECHAT_APPID",
+            "WECHAT_APPSECRET",
+            "official token endpoint",
+            "stores no access token",
+            "40164",
+            "ByClaw backend egress IP",
         ):
             self.assertIn(phrase, weixin)
         for phrase in (

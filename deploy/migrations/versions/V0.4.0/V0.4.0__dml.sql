@@ -28,6 +28,22 @@ WHERE NOT EXISTS (
     SELECT 1 FROM byai.byai_connector_info WHERE connector_code = 'ima-openapi'
 );
 
+-- 微信公众号 API 连接器。迁移只声明表单和受管环境变量；access_token 不落库。
+INSERT INTO byai.byai_connector_info (
+    connector_id, connector_code, connector_name, description, connector_type,
+    provider_code, skill_code, auth_mode, auth_config, request_config, runtime_manifest, sort
+)
+SELECT nextval('byai.seq_any_table'), 'weixin-official-api', '微信公众号 API',
+       '通过微信公众号官方 API 连接公众号服务', 'SYSTEM',
+       'weixin-official-api', 'bycli', 'AK_SK',
+       '{"credentialForm":{"helpUrl":"https://mp.weixin.qq.com/","helpText":"前往设置与开发 → 开发接口管理 → 基本配置 → 公众号开发信息获取 AppID 和 AppSecret。若返回 40164，请将 ByClaw 后端出口 IP 加入公众号 IP 白名单后重试。","fields":[{"key":"appId","label":"AppID","inputType":"text","maxLength":256},{"key":"appSecret","label":"AppSecret","inputType":"password","maxLength":2048}]}}',
+       '{}',
+       '{"schemaVersion":"1.0","id":"weixin-official-api","version":"1.0.0","runtime":{"type":"cli","authorizeIn":"be-auth-job","commands":{"version":[["bycli","--version"]]}},"authStorage":{"mode":"managed-environment","owner":"be-auth-job","runtimeMutation":"provider-refresh-only","managedEnvironmentKeys":["WECHAT_APPID","WECHAT_APPSECRET"],"environment":{}},"skill":{"code":"bycli","source":"system-builtin","installScope":"user","grantScope":"agent"}}',
+       55
+WHERE NOT EXISTS (
+    SELECT 1 FROM byai.byai_connector_info WHERE connector_code = 'weixin-official-api'
+);
+
 -- IMA OpenAPI 内置 Skill 注册
 -- CLI 与 skill 文件随 OpenClaw 镜像提供；数据库仅注册目录、运行期快照和可发现权限。
 UPDATE byai.byai_system_config c
