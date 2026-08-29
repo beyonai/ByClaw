@@ -85,6 +85,20 @@ class LocalGitChangeServiceTest {
         assertThat(result.getDiff()).contains("+# Product requirements", "+- First item");
     }
 
+    @Test
+    void returnsContentDiffForStagedAddedFile() throws Exception {
+        Path repo = initializeRepository("staged-file-diff");
+        Files.createDirectories(repo.resolve(".trellis/tasks/00-join"));
+        Files.writeString(repo.resolve(".trellis/tasks/00-join/prd.md"), "# Product requirements\n");
+        git(repo, "add", ".trellis/tasks/00-join/prd.md");
+
+        LocalGitChangeService.FileDiffResult result = new LocalGitChangeService().fileDiff(
+            repo, "main", ".trellis/tasks/00-join/prd.md");
+
+        assertThat(result.getStatus()).isEqualTo(LocalGitChangeService.LocalStatus.OK);
+        assertThat(result.getDiff()).contains("+# Product requirements");
+    }
+
     private Path initializeRepository(String name) throws Exception {
         Path repo = tempDir.resolve(name);
         Files.createDirectories(repo);

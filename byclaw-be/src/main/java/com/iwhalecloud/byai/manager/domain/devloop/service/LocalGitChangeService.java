@@ -167,7 +167,7 @@ public class LocalGitChangeService {
             String baseRef = resolveBaseRef(dir, baseBranch);
             // git diff 不会为未跟踪文件生成内容；Changes 列表虽已列出 A 文件，预览时需要与空文件比较。
             String workingStatus = runGit(dir, "status", "--porcelain", "-uall", "--", filePath);
-            if (isUntrackedStatus(workingStatus)) {
+            if (isAddedStatus(workingStatus)) {
                 String diff = runGitAllowExitCode(dir, 1, "diff", "--no-index", "--", "/dev/null", filePath);
                 return new FileDiffResult(LocalStatus.OK, filePath, diff, null);
             }
@@ -187,9 +187,9 @@ public class LocalGitChangeService {
         }
     }
 
-    private boolean isUntrackedStatus(String status) {
+    private boolean isAddedStatus(String status) {
         for (String line : status.split("\\R")) {
-            if (line.startsWith("??")) {
+            if (line.startsWith("??") || line.startsWith("A ") || line.startsWith(" A")) {
                 return true;
             }
         }
