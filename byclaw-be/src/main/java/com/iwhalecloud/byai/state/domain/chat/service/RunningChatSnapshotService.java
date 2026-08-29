@@ -213,6 +213,8 @@ public class RunningChatSnapshotService {
             messageContext.setAnswerText(new StringBuilder(StringUtils.defaultString(snapshot.getMessageContent())));
             messageContext.setResComIds(snapshot.getResComIds());
             messageContext.setMsgStatus(snapshot.getMsgStatus());
+            messageContext.setComplete(Boolean.FALSE.equals(snapshot.getRunning())
+                || MsgStatus.FINISH.getCode().equals(snapshot.getMsgStatus()));
             if (StringUtils.isNotBlank(snapshot.getMessageStruct())) {
                 messageContext.setAnswerMessageList(JSON.parseArray(snapshot.getMessageStruct(), AnswerDelta.class));
                 if (CollectionUtils.isNotEmpty(messageContext.getAnswerMessageList())) {

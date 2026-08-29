@@ -37,6 +37,8 @@ public class ScopedSessionEventService {
 
     private static final String TEAM_SNAPSHOT_EVENT = "agent-teams/snapshot";
 
+    private static final String SESSION_STATUS_EVENT = "session.status";
+
     private static final Set<String> TERMINAL_STATUSES = Set.of("completed", "failed", "cancelled", "canceled",
         "stopped", "error");
 
@@ -127,6 +129,7 @@ public class ScopedSessionEventService {
             ByaiMessageHotDtoDto persisted;
             synchronized (messageContext) {
                 pythonSseService.accumulateEvent(lineJson.toJSONString(), messageContext);
+                terminal = terminal || Boolean.TRUE.equals(messageContext.getComplete());
                 if (terminal) {
                     messageContext.setComplete(true);
                 }
@@ -203,7 +206,7 @@ public class ScopedSessionEventService {
         return normalize(SseResponseEventEnum.appStreamResponse).equals(eventType)
             || normalize(SseResponseEventEnum.error).equals(eventType)
             || TERMINAL_EVENTS.contains(externalEvent)
-            || TERMINAL_STATUSES.contains(status);
+            || (SESSION_STATUS_EVENT.equals(externalEvent) && TERMINAL_STATUSES.contains(status));
     }
 
     private String normalize(String value) {
