@@ -1,5 +1,11 @@
 """重写版本：用户画像每日数据 upsert"""
 async def execute(params: dict) -> dict:
+    project_id = str(params.get("projectId") or "").strip()
+    if not project_id:
+        return {"records": [{"success": False, "code": "PROJECT_ID_REQUIRED", "error": "projectId不能为空"}], "total": 1, "meta": {"total": 1}}
+    account_code = str(params.get("account_code") or "").strip()
+    if not account_code:
+        return {"records": [{"success": False, "code": "ACCOUNT_CODE_REQUIRED", "error": "account_code不能为空"}], "total": 1, "meta": {"total": 1}}
     import json as _json
     from datetime import date as _date, datetime as _datetime
 
@@ -60,10 +66,13 @@ async def execute(params: dict) -> dict:
         return (all(0 <= x <= 1 for x in shares)
                 and (not shares or 0.99 <= sum(shares) <= 1.01))
 
-    allowed = {"article_id", "stat_date", "gender_distribution", "age_distribution",
+    allowed = {"projectId", "account_code", "account_name", "article_id", "stat_date", "gender_distribution", "age_distribution",
                "region_distribution", "sample_size", "source_batch_id"}
     values, err = _writable(params, allowed)
     if err: return err
+    values["projectId"] = project_id
+    if not str(params.get("account_name") or "").strip():
+        return _error("ACCOUNT_NAME_REQUIRED", "account_name不能为空")
     if not values.get("article_id") or not values.get("stat_date"):
         return _error("INVALID_ARGUMENT", "article_id和stat_date不能为空")
 
@@ -83,11 +92,13 @@ async def execute(params: dict) -> dict:
         return _error("INVALID_ARGUMENT", "sample_size不能小于0")
 
     art = await wy93ovzs9p_article_mapper.select_by_id(article_id)
-    if art is None:
+    if art is None or _get(art, "projectId") != project_id or _get(art, "account_code") != account_code:
         return _error("ARTICLE_NOT_FOUND", "article_id对应文章不存在")
 
     F = Wy93ovzs9pArticleUserProfileDaily.F
-    q = Q.eq(F.article_id, article_id).eq(F.stat_date, stat_date)
+    values["account_code"] = account_code
+    values["account_name"] = str(params.get("account_name") or "").strip()
+    q = Q.eq(F.projectId, project_id).eq(F.account_code, account_code).eq(F.article_id, article_id).eq(F.stat_date, stat_date)
     entity = await wy93ovzs9p_article_user_profile_daily_mapper.select_one(q)
     key = {"article_id": article_id, "stat_date": str(stat_date)}
     if entity:

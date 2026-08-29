@@ -7,6 +7,12 @@
 - SQL LIKE 用 escape=backslash，避免 %/_ 等用户输入污染匹配
 - 按 id 倒序（最近创建的合集优先）"""
 async def execute(params: dict) -> dict:
+    project_id = str(params.get("projectId") or "").strip()
+    if not project_id:
+        return {"records": [{"success": False, "code": "PROJECT_ID_REQUIRED", "error": "projectId不能为空"}], "total": 1, "meta": {"total": 1}}
+    account_code = str(params.get("account_code") or "").strip()
+    if not account_code:
+        return {"records": [{"success": False, "code": "ACCOUNT_CODE_REQUIRED", "error": "account_code不能为空"}], "total": 1, "meta": {"total": 1}}
     import json as _json
 
     def _err(code, message):
@@ -47,7 +53,7 @@ async def execute(params: dict) -> dict:
     pattern = f"%{safe_kw}%"
 
     # 3. 构造查询：模糊匹配 + 分页 + 按 id 倒序
-    q = (Q.like(F.collection_name, pattern)
+    q = (Q.eq(F.projectId, project_id).eq(F.account_code, account_code).like(F.collection_name, pattern)
            .order_by(F.id, desc=True)
            .page(page, page_size))
 

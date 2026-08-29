@@ -1,7 +1,7 @@
 {
   "entity_code": "wy93ovzs9p_article",
   "entity_name": "文章",
-  "entity_desc": "公众号内部文章的元数据（标题、发布时间、正文、形态、归属合集等），canonical_url 为业务唯一键",
+  "entity_desc": "多公众号文章元数据；account_code 与 canonical_url 共同构成业务唯一键，author 仅表示作者",
   "term_sync": {
     "enabled": true,
     "term_name_field": "title",
@@ -13,6 +13,18 @@
     ]
   },
   "submitted_fields": [
+    {
+      "property_code": "projectId",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "account_code",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "account_name",
+      "data_type": "STRING"
+    },
     {
       "property_code": "title",
       "data_type": "STRING"

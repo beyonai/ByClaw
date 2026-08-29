@@ -9,6 +9,27 @@
   ],
   "params": [
     {
+      "paramCode": "projectId",
+      "paramName": "项目ID",
+      "type": "string",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
+      "paramCode": "account_code",
+      "paramName": "公众号编码",
+      "type": "string",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
+      "paramCode": "account_name",
+      "paramName": "公众号名称",
+      "type": "string",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
       "paramCode": "article_id",
       "paramName": "文章ID",
       "type": "integer",
@@ -19,7 +40,7 @@
     },
     {
       "paramCode": "stat_date",
-      "paramName": "统计日期",
+      "paramName": "统计日期（YYYY-MM-DD）",
       "type": "date",
       "isRequired": true,
       "direction": "input"

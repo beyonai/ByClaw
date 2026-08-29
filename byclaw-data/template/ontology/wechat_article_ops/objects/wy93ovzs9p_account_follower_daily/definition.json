@@ -1,0 +1,47 @@
+{
+  "entity_code": "wy93ovzs9p_account_follower_daily",
+  "entity_name": "账号每日粉丝数据",
+  "entity_desc": "公众号账号每日粉丝快照；account_code 与 stat_date 构成业务唯一键，累计关注和当日新增、取关、净增保持公众号后台原始口径",
+  "submitted_fields": [
+    {
+      "property_code": "projectId",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "account_code",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "account_name",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "stat_date",
+      "data_type": "DATE"
+    },
+    {
+      "property_code": "new_follow_count",
+      "data_type": "INTEGER"
+    },
+    {
+      "property_code": "unfollow_count",
+      "data_type": "INTEGER"
+    },
+    {
+      "property_code": "net_follow_count",
+      "data_type": "INTEGER"
+    },
+    {
+      "property_code": "follower_count",
+      "data_type": "INTEGER"
+    },
+    {
+      "property_code": "source_batch_id",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "collected_at",
+      "data_type": "STRING"
+    }
+  ]
+}

@@ -10,22 +10,36 @@
   ],
   "params": [
     {
+      "paramCode": "projectId",
+      "paramName": "项目ID",
+      "type": "string",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
+      "paramCode": "account_code",
+      "paramName": "公众号编码",
+      "type": "string",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
       "paramCode": "start",
-      "paramName": "发文周期开始",
+      "paramName": "发文周期开始（YYYY-MM-DD）",
       "type": "date",
       "isRequired": true,
       "direction": "input"
     },
     {
       "paramCode": "end",
-      "paramName": "发文周期结束",
+      "paramName": "发文周期结束（YYYY-MM-DD）",
       "type": "date",
       "isRequired": true,
       "direction": "input"
     },
     {
       "paramCode": "as_of_date",
-      "paramName": "指标日期",
+      "paramName": "指标日期（YYYY-MM-DD）",
       "type": "date",
       "isRequired": false,
       "direction": "input"
@@ -55,7 +69,7 @@
     },
     {
       "paramCode": "as_of_date_out",
-      "paramName": "指标日期",
+      "paramName": "指标日期（YYYY-MM-DD）",
       "type": "date",
       "isRequired": false,
       "direction": "output"

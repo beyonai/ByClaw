@@ -8,6 +8,20 @@
   ],
   "params": [
     {
+      "paramCode": "projectId",
+      "paramName": "项目ID",
+      "type": "string",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
+      "paramCode": "account_code",
+      "paramName": "公众号编码",
+      "type": "string",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
       "paramCode": "article_id",
       "paramName": "文章ID",
       "type": "integer",
@@ -23,7 +37,7 @@
     },
     {
       "paramCode": "as_of_date",
-      "paramName": "数据可见截止日期",
+      "paramName": "数据可见截止日期（YYYY-MM-DD）",
       "type": "date",
       "isRequired": false,
       "direction": "input"
@@ -51,14 +65,14 @@
     },
     {
       "paramCode": "publish_date",
-      "paramName": "发布日期",
+      "paramName": "发布日期（YYYY-MM-DD）",
       "type": "date",
       "isRequired": false,
       "direction": "output"
     },
     {
       "paramCode": "as_of_date_out",
-      "paramName": "截止日期",
+      "paramName": "截止日期（YYYY-MM-DD）",
       "type": "date",
       "isRequired": false,
       "direction": "output"

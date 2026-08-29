@@ -1,5 +1,11 @@
 """重写版本：渠道每日数据批量 upsert"""
 async def execute(params: dict) -> dict:
+    project_id = str(params.get("projectId") or "").strip()
+    if not project_id:
+        return {"records": [{"success": False, "code": "PROJECT_ID_REQUIRED", "error": "projectId不能为空"}], "total": 1, "meta": {"total": 1}}
+    account_code = str(params.get("account_code") or "").strip()
+    if not account_code:
+        return {"records": [{"success": False, "code": "ACCOUNT_CODE_REQUIRED", "error": "account_code不能为空"}], "total": 1, "meta": {"total": 1}}
     import json as _json
     from datetime import date as _date, datetime as _datetime
 
@@ -37,6 +43,8 @@ async def execute(params: dict) -> dict:
     stat_date_raw = params.get("stat_date")
     metric_mode = params.get("metric_mode")
     raw_items = params.get("items") or []
+    if not str(params.get("account_name") or "").strip():
+        return _error("ACCOUNT_NAME_REQUIRED", "account_name不能为空")
     if not article_id or not stat_date_raw or not raw_items:
         return _error("INVALID_ARGUMENT", "article_id、stat_date和items不能为空")
     items = raw_items
@@ -54,7 +62,7 @@ async def execute(params: dict) -> dict:
     if metric_mode not in ("cumulative", "daily_increment"):
         return _error("INVALID_METRIC_MODE", "metric_mode仅支持cumulative或daily_increment")
     art = await _safe_select_by_id(wy93ovzs9p_article_mapper.select_by_id, article_id)
-    if art is None:
+    if art is None or _get(art, "projectId") != project_id or _get(art, "account_code") != account_code:
         return _error("ARTICLE_NOT_FOUND", "article_id对应文章不存在")
     if len({item.get("channel") for item in items}) != len(items):
         return _error("DUPLICATE_CHANNEL", "items中channel不能重复")
@@ -73,7 +81,8 @@ async def execute(params: dict) -> dict:
             rows.append({"success": False, "operation": "failed", "index": index,
                          "code": "INVALID_CHANNEL", "error": "channel不在允许枚举中"})
             continue
-        values = {"article_id": article_id, "stat_date": stat_date,
+        values = {"projectId": project_id,
+            "account_code": account_code, "account_name": str(params.get("account_name") or "").strip(), "article_id": article_id, "stat_date": stat_date,
                   "metric_mode": metric_mode, "channel": channel,
                   "read_count": item.get("read_count"),
                   "share_count": item.get("share_count")}
@@ -83,7 +92,7 @@ async def execute(params: dict) -> dict:
                          "channel": channel, "code": "INVALID_METRIC",
                          "error": "渠道指标不能小于0"})
             continue
-        q = (Q.eq(F.article_id, article_id).eq(F.stat_date, stat_date)
+        q = (Q.eq(F.projectId, project_id).eq(F.account_code, account_code).eq(F.article_id, article_id).eq(F.stat_date, stat_date)
              .eq(F.channel, channel).eq(F.metric_mode, metric_mode))
         entity = await wy93ovzs9p_article_channel_daily_mapper.select_one(q)
         if entity:

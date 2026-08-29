@@ -1,0 +1,69 @@
+{
+  "action_code": "get_account_follower_window",
+  "action_name": "查询账号粉丝窗口",
+  "action_type": "QUERY",
+  "action_desc": "返回截止日、前一日、7日前、30日前的最近可见粉丝快照及连续趋势，缺失值不补零",
+  "permission_roles": [
+    "analyst",
+    "ops",
+    "admin"
+  ],
+  "params": [
+    {
+      "paramCode": "projectId",
+      "paramName": "项目ID",
+      "type": "string",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
+      "paramCode": "account_code",
+      "paramName": "公众号编码",
+      "type": "string",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
+      "paramCode": "data_as_of",
+      "paramName": "数据截止日（YYYY-MM-DD）",
+      "type": "date",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
+      "paramCode": "days",
+      "paramName": "趋势天数",
+      "type": "integer",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "success",
+      "paramName": "是否成功",
+      "type": "boolean",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "summary",
+      "paramName": "四值摘要",
+      "type": "object",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "trend",
+      "paramName": "每日粉丝趋势",
+      "type": "array",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "missing_dates",
+      "paramName": "缺失日期",
+      "type": "array",
+      "isRequired": false,
+      "direction": "output"
+    }
+  ]
+}

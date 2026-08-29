@@ -1,6 +1,12 @@
 """重写版本（按文档 16.2）：单篇文章分析上下文
 变更：article_data 字段集合新增 url 和 canonical_url（对齐文档示例/业务键/报告模板）"""
 async def execute(params: dict) -> dict:
+    project_id = str(params.get("projectId") or "").strip()
+    if not project_id:
+        return {"records": [{"success": False, "code": "PROJECT_ID_REQUIRED", "error": "projectId不能为空"}], "total": 1, "meta": {"total": 1}}
+    account_code = str(params.get("account_code") or "").strip()
+    if not account_code:
+        return {"records": [{"success": False, "code": "ACCOUNT_CODE_REQUIRED", "error": "account_code不能为空"}], "total": 1, "meta": {"total": 1}}
     import json as _json
     from datetime import date as _date, datetime as _datetime
 
@@ -50,11 +56,11 @@ async def execute(params: dict) -> dict:
         return _error("INVALID_ARGUMENT", "article_id不能为空")
 
     article = await wy93ovzs9p_article_mapper.select_by_id(article_id)
-    if not article:
+    if not article or _get(article, "projectId") != project_id or _get(article, "account_code") != account_code:
         return _error("ARTICLE_NOT_FOUND", "文章不存在")
 
     MF = Wy93ovzs9pArticleMetricDaily.F
-    mq = Q.eq(MF.article_id, article_id)
+    mq = Q.eq(MF.projectId, project_id).eq(MF.account_code, account_code).eq(MF.article_id, article_id)
     if requested_date:
         mq = mq.eq(MF.stat_date, _to_date(requested_date))
     else:
@@ -65,7 +71,7 @@ async def execute(params: dict) -> dict:
     actual_date = _to_date(_get(metric, "stat_date"))
 
     CF = Wy93ovzs9pArticleChannelDaily.F
-    channel_query = Q.eq(CF.article_id, article_id).eq(CF.stat_date, actual_date)
+    channel_query = Q.eq(CF.projectId, project_id).eq(CF.account_code, account_code).eq(CF.article_id, article_id).eq(CF.stat_date, actual_date)
     channel_page = await wy93ovzs9p_article_channel_daily_mapper.select(channel_query)
     channels = channel_page.get("records", [])
     modes = sorted({_get(row, "metric_mode") for row in channels})
@@ -74,7 +80,7 @@ async def execute(params: dict) -> dict:
     channels = [row for row in channels if _get(row, "metric_mode") == selected_mode]
 
     PF = Wy93ovzs9pArticleUserProfileDaily.F
-    profile_query = (Q.eq(PF.article_id, article_id)
+    profile_query = (Q.eq(PF.projectId, project_id).eq(PF.account_code, account_code).eq(PF.article_id, article_id)
                      .lte(PF.stat_date, actual_date)
                      .order_by(PF.stat_date, "desc").limit(1))
     profile = await wy93ovzs9p_article_user_profile_daily_mapper.select_one(profile_query)
@@ -83,6 +89,8 @@ async def execute(params: dict) -> dict:
     coll_id = _get(article, "collection_id")
     if coll_id:
         collection = await wy93ovzs9p_article_collection_mapper.select_by_id(coll_id)
+        if collection is not None and (_get(collection, "projectId") != project_id or _get(collection, "account_code") != account_code):
+            collection = None
 
     article_data = _entity_dict(article, ["id", "title", "author", "publish_time",
                                           "category", "tags", "collection_id",

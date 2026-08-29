@@ -5,6 +5,13 @@
   "action_desc": "公众号运营本体健康检查；不读任何业务表，仅返回 Action 运行时可达状态",
   "params": [
     {
+      "paramCode": "projectId",
+      "paramName": "项目ID",
+      "type": "string",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
       "paramCode": "success",
       "paramName": "是否成功",
       "type": "boolean",

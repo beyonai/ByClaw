@@ -4,6 +4,18 @@
   "entity_desc": "每篇文章截至每日统计时点的全量读者画像（性别/年龄段/地域分布）；查询时返回请求日期之前最近一条的真实 profile_stat_date",
   "submitted_fields": [
     {
+      "property_code": "projectId",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "account_code",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "account_name",
+      "data_type": "STRING"
+    },
+    {
       "property_code": "article_id",
       "data_type": "INTEGER"
     },
