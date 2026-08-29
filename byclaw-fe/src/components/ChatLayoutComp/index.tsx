@@ -27,6 +27,8 @@ import useEventEmitterHooks from './hooks/useEventEmitterHooks';
 import ChatTitle from './ChatTitle';
 import MultiChoices from './components/MultiChoices';
 import EasyConfirm from './components/EasyConfirm';
+import TaskExecutionPlan from '@/components/MessageList/components/TaskExecutionPlan';
+import { selectLatestTaskPlan } from '@/components/MessageList/components/TaskExecutionPlan/projection';
 
 import type { IState as UseEmployeesIState } from '@/models/useEmployees.ts';
 
@@ -491,6 +493,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     onBeforeSend,
   });
   const lastMsg = last(messageList);
+  const latestTaskPlan = useMemo(() => selectLatestTaskPlan(messageList, sessionId), [messageList, sessionId]);
 
   const guardedSendQuery = useCallback(
     (sendProps: ISendProps, sendConf?: ISendConf) => {
@@ -704,6 +707,11 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
                 })}
                 id="queryInputWrapper"
               >
+                {latestTaskPlan ? (
+                  <div className={styles.taskPlanDock}>
+                    <TaskExecutionPlan taskPlan={latestTaskPlan} />
+                  </div>
+                ) : null}
                 <EasyConfirm
                   messageState={messageState}
                   disabledInput={disabledInput}

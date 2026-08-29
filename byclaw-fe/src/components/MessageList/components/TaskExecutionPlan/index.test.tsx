@@ -6,13 +6,16 @@ jest.mock('@umijs/max', () => ({
   useIntl: () => ({
     formatMessage: ({ id }: { id: string }, values?: Record<string, number>) => {
       if (id === 'messageList.taskPlan.progress') return `${values?.completed}/${values?.total} completed`;
+      if (id === 'messageList.taskPlan.summary.COMPLETED') return `${values?.count} completed`;
+      if (id === 'messageList.taskPlan.summary.IN_PROGRESS') return `${values?.count} in progress`;
+      if (id === 'messageList.taskPlan.summary.PENDING') return `${values?.count} pending`;
       return id;
     },
   }),
 }));
 
 describe('TaskExecutionPlan', () => {
-  it('renders tasks by position and shows completed progress', () => {
+  it('renders compact status counts and expands tasks in position order', () => {
     const taskPlan: TaskPlanSnapshot = {
       planId: 'plan-1',
       version: 1,
@@ -23,13 +26,23 @@ describe('TaskExecutionPlan', () => {
       tasks: [
         { taskId: 'task-2', position: 2, title: 'Second task', status: 'IN_PROGRESS' },
         { taskId: 'task-1', position: 1, title: 'First task', status: 'COMPLETED' },
+        { taskId: 'task-3', position: 3, title: 'Third task', status: 'PENDING' },
       ],
     };
 
     render(<TaskExecutionPlan taskPlan={taskPlan} />);
 
-    expect(screen.getByText('1/2 completed')).toBeInTheDocument();
-    expect(screen.getAllByText(/task$/).map((node) => node.textContent)).toEqual(['First task', 'Second task']);
+    const toggle = screen.getByRole('button', { name: 'messageList.taskPlan.title' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByText('1 completed · 1 in progress · 1 pending')).toBeInTheDocument();
+
+    fireEvent.click(toggle);
+
+    expect(screen.getAllByText(/task$/).map((node) => node.textContent)).toEqual([
+      'First task',
+      'Second task',
+      'Third task',
+    ]);
   });
 
   it('collapses completed plans by default and supports toggling', () => {
