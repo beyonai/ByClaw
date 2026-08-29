@@ -58,12 +58,27 @@ public class GithubOAuth2AuthorizationProvider
 
     @Override
     public AuthorizationStartResult start(AuthorizationStartContext context) {
-        String clientId = clientId(context.providerConfig());
-        required(context.providerConfig(), "clientSecretEnv");
-        String scope = required(context.providerConfig(), "scope");
-        String redirectUri = redirectUri(context.providerConfig());
-        if (StringUtils.hasText(context.redirectUrl()) && !redirectUri.equals(context.redirectUrl())) {
-            throw new IllegalArgumentException("OAuth2 redirectUrl与已注册回调不一致");
+        String clientId;
+        String clientSecretEnv;
+        String scope;
+        String redirectUri;
+        try {
+            clientId = clientId(context.providerConfig());
+            clientSecretEnv = required(context.providerConfig(), "clientSecretEnv");
+            // Fail before redirecting the user when the deployment forgot to provide the OAuth App secret.
+            secretResolver.resolve(clientSecretEnv);
+            scope = required(context.providerConfig(), "scope");
+            redirectUri = redirectUri(context.providerConfig());
+        } catch (RuntimeException e) {
+            return new AuthorizationStartResult(
+                AuthorizationStatus.FAILED,
+                null,
+                null,
+                null,
+                null,
+                "OAUTH_PROVIDER_CONFIG_INVALID",
+                "GitHub OAuth2未配置完整，请联系管理员"
+            );
         }
         String state = OAuth2State.create(context.authorizationId());
         String verifier = randomValue(64);
@@ -73,7 +88,7 @@ public class GithubOAuth2AuthorizationProvider
         providerState.put("codeVerifier", verifier);
         providerState.put("redirectUri", redirectUri);
         providerState.put("clientId", clientId);
-        providerState.put("clientSecretEnv", required(context.providerConfig(), "clientSecretEnv"));
+        providerState.put("clientSecretEnv", clientSecretEnv);
         providerState.put("scope", scope);
         String url = AUTHORIZE_URL + "?client_id=" + encode(clientId)
             + "&redirect_uri=" + encode(redirectUri)
@@ -243,8 +258,10 @@ public class GithubOAuth2AuthorizationProvider
             ? direct.toString() : secretResolver.resolve(required(config, "redirectUriEnv"));
         try {
             java.net.URI uri = java.net.URI.create(value);
-            if (!uri.isAbsolute() || !"https".equalsIgnoreCase(uri.getScheme()) || !StringUtils.hasText(uri.getHost())) {
-                throw new IllegalArgumentException("OAuth2 redirectUri必须是HTTPS绝对地址");
+            boolean https = "https".equalsIgnoreCase(uri.getScheme());
+            boolean http = "http".equalsIgnoreCase(uri.getScheme());
+            if (!uri.isAbsolute() || (!https && !http) || !StringUtils.hasText(uri.getHost())) {
+                throw new IllegalArgumentException("OAuth2 redirectUri必须是HTTP或HTTPS绝对地址");
             }
             return uri.toString();
         } catch (RuntimeException e) {

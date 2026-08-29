@@ -7,7 +7,10 @@ import { ResourceElementType } from '../elements/resource';
 import { DefaultValueSchema, IResourceType, MentionTriggerInfo, Resource } from '../types';
 import getElementData, { getElementDisplayText } from './getElementData';
 
-export const IdInBracesRegex = /^[\w./\u4e00-\u9fa5]+#[\w./\u4e00-\u9fa5]+.*$/;
+// Resource identifiers may contain hyphens (for example, UUIDs). Match any
+// non-separator characters around the `#` delimiter instead of relying on
+// `\w`, which excludes `-` and leaves agent-skill placeholders unresolved.
+export const IdInBracesRegex = /^[^#]+#[^#]+.*$/;
 
 const isEditableElement = (element: Element): element is EditableElementType => {
   return element.type === ELEMENT_EDITABLE;

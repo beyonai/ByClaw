@@ -7,6 +7,7 @@ import {
   EllipsisOutlined,
   FileTextOutlined,
   GlobalOutlined,
+  GithubOutlined,
   LinkOutlined,
   LoadingOutlined,
   QrcodeOutlined,
@@ -136,6 +137,7 @@ const connectorIconMap: Record<string, React.ReactNode> = {
   dingtalk: <AntdIcon type="icon-dingding1" />,
   wecom: <AntdIcon type="icon-qiyeweixin" />,
   lark: <AntdIcon type="icon-feishu" />,
+  github: <GithubOutlined />,
 };
 
 const getConnectorIcon = (connectorCode: string) => connectorIconMap[connectorCode] || <ApiOutlined />;
@@ -158,6 +160,12 @@ const mapConnectorListItem = (item: ConnectorListItem): Connector => ({
   authMode: item.authMode,
   credentialForm: item.credentialForm,
 });
+
+// 快捷列表优先展示当前已授权且启用的连接器，同组内保留后端原始顺序。
+export const prioritizeEnabledConnectors = (items: Connector[]) => [
+  ...items.filter((item) => item.enableFlag === 'Y'),
+  ...items.filter((item) => item.enableFlag !== 'Y'),
+];
 
 const authorizationTerminalMessages: Partial<Record<ConnectorAuthorization['status'], string>> = {
   failed: '授权未完成，请重新发起连接',
@@ -363,7 +371,7 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
   }, [authorizingConnector, closeLocalAuthorization, connectors]);
 
   const enabledConnectors = useMemo(() => connectors.filter((connector) => connector.enableFlag === 'Y'), [connectors]);
-  const previewConnectors = useMemo(() => connectors.slice(0, 3), [connectors]);
+  const previewConnectors = useMemo(() => prioritizeEnabledConnectors(connectors).slice(0, 3), [connectors]);
 
   const loadAuthorizedConnectors = useCallback(
     async (reportAuthorizationRefreshFailure = false) => {

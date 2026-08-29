@@ -25,7 +25,21 @@ public final class ManifestCommandCatalog {
             Map<String, List<List<String>>> commands,
             String digest,
             Map<String, PlaceholderPolicy> placeholderPolicies) {
-        this.commands = immutableCommands(commands);
+        this(commands, digest, placeholderPolicies, false);
+    }
+
+    static ManifestCommandCatalog withoutCommands(
+            String digest,
+            Map<String, PlaceholderPolicy> placeholderPolicies) {
+        return new ManifestCommandCatalog(Map.of(), digest, placeholderPolicies, true);
+    }
+
+    private ManifestCommandCatalog(
+            Map<String, List<List<String>>> commands,
+            String digest,
+            Map<String, PlaceholderPolicy> placeholderPolicies,
+            boolean allowEmptyCommands) {
+        this.commands = immutableCommands(commands, allowEmptyCommands);
         this.digest = Objects.requireNonNull(digest, "digest");
         this.placeholderPolicies = Map.copyOf(placeholderPolicies == null ? Map.of() : placeholderPolicies);
         validateTemplatePlaceholders();
@@ -88,8 +102,13 @@ public final class ManifestCommandCatalog {
         return group.get(index);
     }
 
-    private Map<String, List<List<String>>> immutableCommands(Map<String, List<List<String>>> source) {
+    private Map<String, List<List<String>>> immutableCommands(
+            Map<String, List<List<String>>> source,
+            boolean allowEmptyCommands) {
         if (source == null || source.isEmpty()) {
+            if (allowEmptyCommands) {
+                return Map.of();
+            }
             throw invalid("Manifest commands must not be empty");
         }
         Map<String, List<List<String>>> copy = new LinkedHashMap<>();

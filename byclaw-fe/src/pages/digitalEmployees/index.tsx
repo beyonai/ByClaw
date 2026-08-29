@@ -13,6 +13,7 @@ import { getFileUrl } from '@/utils/file';
 import useDigitalEmployeeAuditCount from '@/hooks/useDigitalEmployeeAuditCount';
 import { applyResourceUse, queryResourceOperationPermissions } from '@/pages/manager/service/resources';
 import EmployFormModal from '@/pages/manager/pages/digitalEmployeeMgr/components/EmployFormModal';
+import MdPreview from '@/components/Preview/Md';
 
 import classnames from 'classnames';
 
@@ -270,7 +271,7 @@ const DigitalEmployeesPage: React.FC = () => {
   );
 };
 
-function EmployeePreviewModal({ employee, onClose, onCreateTask }: any) {
+export function EmployeePreviewModal({ employee, onClose, onCreateTask }: any) {
   const intl = useIntl();
   const [detail, setDetail] = useState<any>(employee);
   const [permissions, setPermissions] = useState<any>(null);
@@ -382,9 +383,47 @@ function EmployeePreviewModal({ employee, onClose, onCreateTask }: any) {
     return <AntdIcon type={icon} />;
   };
   const groupMembers = Array.isArray(detail?.employeeGroupMembers) ? detail.employeeGroupMembers : [];
-  const workStandard = detail?.workStandard || detail?.roleAttributes || detail?.corePersonaDefinition || '';
+  const workStandard = useMemo(() => {
+    const raw = detail?.workStandard || detail?.roleAttributes || detail?.corePersonaDefinition || '';
+    let parsed = raw;
+    for (let depth = 0; depth < 3 && typeof parsed === 'string'; depth += 1) {
+      try {
+        const next = JSON.parse(parsed);
+        parsed = next;
+      } catch {
+        break;
+      }
+    }
+    if (Array.isArray(parsed)) {
+      const workItems = parsed.filter(
+        (item: any) =>
+          item?.name === '工作规范' ||
+          item?.nameEn === 'Work Standard' ||
+          item?.key === 'agent' ||
+          item?.key === 'workStandard'
+      );
+      const values = (workItems.length ? workItems : parsed)
+        .map((item: any) => (typeof item === 'object' && item !== null ? item.value : item))
+        .filter((value: any) => value !== undefined && value !== null && `${value}`.trim())
+        .map((value: any) => `${value}`.replace(/\\n/g, '\n').replace(/\\r/g, '\r'))
+        .join('\n\n');
+      return values;
+    }
+    if (parsed && typeof parsed === 'object' && 'value' in parsed) {
+      return `${parsed.value || ''}`.replace(/\\n/g, '\n').replace(/\\r/g, '\r');
+    }
+    return `${parsed || raw || ''}`.replace(/\\n/g, '\n').replace(/\\r/g, '\r');
+  }, [detail]);
   const examples = useMemo(() => {
-    const raw = detail?.faqs || detail?.exampleQuestions || detail?.workDescription || detail?.questionList;
+    let prologue = detail?.prologue;
+    for (let depth = 0; depth < 3 && typeof prologue === 'string'; depth += 1) {
+      try {
+        prologue = JSON.parse(prologue);
+      } catch {
+        break;
+      }
+    }
+    const raw = detail?.openingQuestion ?? detail?.openingQuestions ?? prologue?.openingQuestion;
     if (Array.isArray(raw))
       return raw
         .map((item: any) => (typeof item === 'string' ? item : item?.infoTitle || item?.question || item?.content))
@@ -431,29 +470,31 @@ function EmployeePreviewModal({ employee, onClose, onCreateTask }: any) {
               <div className={styles.employeePreviewAvatar}>
                 {getAgentChatAvatar(detail.chatAvatar || detail.avatar)}
               </div>
-              {hasUsePermission ? (
-                <Button type="primary" icon={<PlusOutlined />} onClick={onCreateTask}>
-                  新建任务
-                </Button>
-              ) : (
-                <Popconfirm
-                  title={intl.formatMessage({ id: 'digitalEmployees.applyConfirm' })}
-                  okText={intl.formatMessage({ id: 'common.confirm' })}
-                  cancelText={intl.formatMessage({ id: 'common.cancel' })}
-                  disabled={isApplyPending || applyLoading}
-                  onConfirm={handleApplyUse}
-                >
-                  <Button type="primary" icon={<PlusOutlined />} disabled={isApplyPending} loading={applyLoading}>
-                    {isApplyPending ? '待授权通过' : '使用申请'}
+              <div className={styles.employeePreviewHeaderInfo}>
+                <div className={styles.employeePreviewTitleRow}>
+                  <Typography.Title level={3} className={styles.employeePreviewTitle}>
+                    {detail.name || detail.resourceName}
+                  </Typography.Title>
+                  <span className={styles.employeePreviewTag}>{employeeTypeLabel}</span>
+                </div>
+                {hasUsePermission ? (
+                  <Button type="primary" icon={<PlusOutlined />} onClick={onCreateTask}>
+                    新建任务
                   </Button>
-                </Popconfirm>
-              )}
-            </div>
-            <div className={styles.employeePreviewTitleRow}>
-              <Typography.Title level={3} className={styles.employeePreviewTitle}>
-                {detail.name || detail.resourceName}
-              </Typography.Title>
-              <span className={styles.employeePreviewTag}>{employeeTypeLabel}</span>
+                ) : (
+                  <Popconfirm
+                    title={intl.formatMessage({ id: 'digitalEmployees.applyConfirm' })}
+                    okText={intl.formatMessage({ id: 'common.confirm' })}
+                    cancelText={intl.formatMessage({ id: 'common.cancel' })}
+                    disabled={isApplyPending || applyLoading}
+                    onConfirm={handleApplyUse}
+                  >
+                    <Button type="primary" icon={<PlusOutlined />} disabled={isApplyPending} loading={applyLoading}>
+                      {isApplyPending ? '待授权通过' : '使用申请'}
+                    </Button>
+                  </Popconfirm>
+                )}
+              </div>
             </div>
             <div className={styles.employeePreviewCreator}>
               创建者: {detail.createUserName || detail.creatorName || '-'}
@@ -484,7 +525,9 @@ function EmployeePreviewModal({ employee, onClose, onCreateTask }: any) {
             />
             <div className={styles.previewResourceList}>
               {resourceTab === 'WORK_STANDARD' ? (
-                <div className={styles.previewWorkStandard}>{workStandard || '暂无工作规范'}</div>
+                <div className={styles.previewWorkStandard}>
+                  {workStandard ? <MdPreview content={workStandard} /> : '暂无工作规范'}
+                </div>
               ) : resourceTab === 'MEMBERS' ? (
                 groupMembers.length ? (
                   groupMembers.map((member: any, index: number) => (

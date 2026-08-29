@@ -275,6 +275,7 @@ export interface ResourceImportResult {
  */
 export interface ResourceUseApplyParams {
   resourceId: string | number; // 资源ID
+  history?: boolean; // 是否查询已处理的历史申请
 }
 
 /**

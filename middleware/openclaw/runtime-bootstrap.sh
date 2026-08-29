@@ -36,6 +36,11 @@ mkdir -p \
   "${OPENCLI_CONFIG_DIR}" \
   "${OPENCLI_CACHE_DIR}"
 
+GITHUB_GIT_CREDENTIAL_HELPER="/usr/local/lib/byclaw/runtime-tools/git-credential.mjs"
+if command -v git >/dev/null 2>&1 && [ -x "${GITHUB_GIT_CREDENTIAL_HELPER}" ]; then
+  git config --global credential.https://github.com.helper "${GITHUB_GIT_CREDENTIAL_HELPER}"
+fi
+
 if [ ! -f "${OPENCLAW_CONFIG_FILE}" ] && [ -f /usr/local/share/openclaw/openclaw.json ]; then
   cp /usr/local/share/openclaw/openclaw.json "${OPENCLAW_CONFIG_FILE}"
 fi

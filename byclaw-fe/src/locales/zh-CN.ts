@@ -1998,11 +1998,6 @@ export default {
   'projectSpace.members.confirmUnbind': '确定解绑',
   'projectSpace.members.unbindSuccess': '数字员工解绑成功',
   'projectSpace.members.unbindFailed': '数字员工解绑失败',
-  'projectSpace.github.notConfigured': '未配置 GitHub Token，点击配置后才能读取代码仓库和变更。',
-  'projectSpace.github.configure': '配置 GitHub Token',
-  'projectSpace.github.saveSuccess': 'GitHub Token 已保存',
-  'projectSpace.github.saveFailed': 'GitHub Token 保存失败',
-  'projectSpace.github.placeholder': '请输入 GitHub Personal Access Token',
   // 运营项目账号、任务编排与工作流
   'projectSpace.operation.platform.all': '全部账号',
   'projectSpace.operation.platform.wechat': '微信公众号',
@@ -3120,14 +3115,6 @@ export default {
   'projectSpace.detail.requirement.addMenu.chatDesc': '进入项目会话，聊完沉淀为需求',
   // 聊天录入进入新会话后的引导:告诉用户直接聊需求,聊清楚后在回答下方沉淀为需求。
   'projectSpace.detail.requirement.addMenu.chatTip': '直接把想法聊给我，聊清楚后在回答下方点「沉淀为需求」即可入库',
-  // 研发项目 GH_TOKEN 未配置提醒:提醒条 + 点击后的友好引导弹窗。以提醒为主,不强制。
-  'projectSpace.detail.githubToken.reminder.alert':
-    '研发项目需要 GitHub 访问令牌（GH_TOKEN）才能拉取和推送代码，你还没有配置，点此前往设置',
-  'projectSpace.detail.githubToken.reminder.title': '配置 GitHub 访问令牌',
-  'projectSpace.detail.githubToken.reminder.content':
-    '研发项目在克隆和推送私有仓库时需要用到你的 GitHub 访问令牌（GH_TOKEN）。它保存在「个人参数配置」里，仅你可见。现在去配置一下吧，配置后即可正常运行研发任务。',
-  'projectSpace.detail.githubToken.reminder.goSetting': '去设置',
-  'projectSpace.detail.githubToken.reminder.later': '稍后再说',
   // Markdown 编辑器
   'markdownField.insertImage': '插入图片',
   'markdownField.insertFile': '插入附件',
