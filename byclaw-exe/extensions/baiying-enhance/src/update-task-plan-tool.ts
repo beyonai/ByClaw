@@ -2,8 +2,11 @@ import { Type } from "@sinclair/typebox";
 import { isSubagentSessionKey } from "openclaw/plugin-sdk/routing";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/compat";
 import {
+  clearTaskPlanExecutionContext,
   markTaskPlanContinuationPending,
+  rememberTaskPlanExecutionContext,
   registerTaskPlanRuntimeBridge,
+  resolveTaskPlanExecutionContext,
   toTaskPlanModelView,
   type TaskPlanCommand,
   type TaskPlanExecutionContext,
@@ -38,6 +41,22 @@ export function resolveOpenClawTaskPlanContext(
   const channel = resolveChannelSessionIdForTool(ctx, sessionKey);
   if (channel.delegatedAgentCall || !channel.sessionId || !channel.messageId) {
     return undefined;
+  }
+  // Automatic continuations are new OpenClaw runs. Keep using the run identity
+  // that created the plan so the backend's execution-ownership check still matches.
+  const remembered = resolveTaskPlanExecutionContext(sessionKey);
+  if (
+    remembered &&
+    remembered.sessionId === channel.sessionId &&
+    remembered.messageId === channel.messageId
+  ) {
+    return {
+      ...remembered,
+      ...(channel.beyondToken ? { beyondToken: channel.beyondToken } : {}),
+    };
+  }
+  if (remembered) {
+    clearTaskPlanExecutionContext(sessionKey);
   }
   const sourceRunId =
     normalizeText(record.runId) ||
@@ -182,7 +201,11 @@ export function createUpdateTaskPlanToolFactory(params: {
           });
           const currentPlan = result.ok ? result.plan : result.currentPlan;
           if (currentPlan?.status === "ACTIVE") {
+            rememberTaskPlanExecutionContext(executionContext);
             markTaskPlanContinuationPending(executionContext.sessionKey, true);
+          } else if (currentPlan) {
+            clearTaskPlanExecutionContext(executionContext.sessionKey);
+            markTaskPlanContinuationPending(executionContext.sessionKey, false);
           }
           const modelResult = result.ok
             ? { ok: true, plan: toTaskPlanModelView(result.plan) }
@@ -252,6 +275,7 @@ export function registerUpdateTaskPlan(params: {
     try {
       const activePlan = await params.runtime.loadActive(executionContext);
       if (activePlan?.status === "ACTIVE") {
+        rememberTaskPlanExecutionContext(executionContext);
         markTaskPlanContinuationPending(executionContext.sessionKey, true);
       }
       return {
