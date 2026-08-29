@@ -135,6 +135,7 @@ node scripts/knowledge-collection.mjs collect --session-dir <dir> \
       "source": "public-internet",
       "sourceSkill": "bycli",
       "backend": "bycli",
+      "rawArtifacts": ["raw/source-response.json"],
       "contentGranularity": "unknown",
       "media": {
         "coverStatus": "not-present",
@@ -158,6 +159,8 @@ node scripts/knowledge-collection.mjs collect --session-dir <dir> \
 ```
 
 payload 文件必须位于当前会话的 `.collection-inputs/` 内，成功登记后会被删除。单条时也可直接使用上面 `items[]` 中的对象作为根节点。`source` 必须对应父会话的 `task.sourceScope`（`dws → dingtalk`、`fws → feishu`）；`canonicalItem.markdown` 与 `fileName` 必须相等且都是相对采集根的完整路径。
+
+`rawArtifacts` 是可选的来源恢复证据列表。每个显式登记的文件必须位于 `raw/`、真实存在、非空、可读且不是符号链接；重复路径按首次出现顺序去重。`rawArtifacts` 省略时保留 inventory 中已有的列表，显式传入时替换当前列表，传入空数组表示明确清空当前来源证据。
 
 只有需要在建会话时预置包含 pending 条目的完整清单，才使用 `--metadata-input-file`。只有导入历史兼容视图时才需要 `--collection-result-input-file`；新会话的第一次 `collect` 不再要求预置它。除此之外一律通过 `collect` 登记。
 

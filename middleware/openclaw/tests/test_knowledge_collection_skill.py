@@ -359,6 +359,9 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "允许为空数组",
             "sourceSkill",
             "rawArtifacts",
+            "`rawArtifacts` 省略时保留",
+            "显式传入时替换",
+            "必须位于 `raw/`",
             "materialization",
             "安全降级为 `pending`",
         ):
