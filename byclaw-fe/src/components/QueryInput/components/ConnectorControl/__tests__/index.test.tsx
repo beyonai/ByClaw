@@ -231,6 +231,7 @@ describe('ConnectorControl authorization states', () => {
     expect(connectorCard).toHaveClass('compactItem');
     expect(accountCard).not.toHaveClass('compactItem');
     expect(accountCard).toHaveClass('accountCardDrawerCompact');
+    expect(drawerContent?.querySelector('.accountLoginNotice')).not.toBeInTheDocument();
     const accountCardFooter = accountCard?.querySelector('.accountCardFooter');
     expect(accountCardFooter).not.toBeNull();
     expect(accountCard?.querySelector('.accountPlatformName')?.parentElement).toBe(accountCardFooter);
