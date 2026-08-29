@@ -1668,6 +1668,7 @@ export default {
 
   'toolCall.input': 'Input',
   'toolCall.output': 'Output',
+  'contextEvent.input': 'Injected input',
   'toolCall.collapse': 'Collapse details',
 
   quote: 'Quote',

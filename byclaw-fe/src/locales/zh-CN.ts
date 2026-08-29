@@ -1653,6 +1653,7 @@ export default {
 
   'toolCall.input': '输入',
   'toolCall.output': '输出',
+  'contextEvent.input': '注入内容',
   'toolCall.collapse': '收起详情',
 
   quote: '引用',

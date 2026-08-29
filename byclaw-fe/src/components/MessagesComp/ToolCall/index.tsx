@@ -5,6 +5,7 @@ import {
   CloseOutlined,
   CopyOutlined,
   DownOutlined,
+  FileTextOutlined,
   LoadingOutlined,
   RightOutlined,
 } from '@ant-design/icons';
@@ -14,6 +15,7 @@ import { get, isNil } from 'lodash';
 import { SSEEventStatus } from '@/constants/message';
 import { copyTextToClipboard } from '@/utils/copy';
 
+import AgentTeamsActivity, { isAgentTeamsSnapshot, type AgentTeamsSnapshot } from './AgentTeamsActivity';
 import styles from './index.module.less';
 
 /** 工具调用状态。'_ERROR_' 由算法侧在调用失败时下发，与其他 think 类组件的口径一致 */
@@ -32,6 +34,13 @@ export type IToolCallSubstance = {
   status?: IToolCallStatus;
 
   description?: string;
+
+  source?: string;
+  schemaVersion?: number;
+  eventKind?: string;
+  team?: AgentTeamsSnapshot['team'];
+  archived?: boolean;
+  capturedAt?: string;
 };
 
 export type IProps = {
@@ -73,6 +82,7 @@ function ToolCall(props: IProps) {
   const inputText = formatDetail(input);
   const outputText = formatDetail(output);
   const hasDetail = Boolean(inputText || outputText);
+  const isContextEvent = typeof substance !== 'string' && substance?.eventKind === 'context';
 
   // 标签里只放工具名。后端下发的 title 形如「调用工具: Bash」，前缀由标签自带的图标表达
   const toolName = title ?? '';
@@ -108,12 +118,12 @@ function ToolCall(props: IProps) {
     );
   };
 
-  const renderSection = (section: 'input' | 'output', text: string) => {
+  const renderSection = (section: 'input' | 'output', text: string, labelId?: string) => {
     const copied = copiedSection === section;
 
     return (
       <div className={classnames(styles.section, { [styles.outputSection]: section === 'output' })}>
-        <div className={styles.sectionLabel}>{intl.formatMessage({ id: `toolCall.${section}` })}</div>
+        <div className={styles.sectionLabel}>{intl.formatMessage({ id: labelId ?? `toolCall.${section}` })}</div>
         <div className={styles.sectionContent}>
           <Tooltip title={intl.formatMessage({ id: copied ? 'common.copySuccess' : 'common.copy' })} placement="top">
             <button
@@ -131,11 +141,16 @@ function ToolCall(props: IProps) {
     );
   };
 
+  if (isAgentTeamsSnapshot(substance)) {
+    return <AgentTeamsActivity snapshot={substance} />;
+  }
+
   return (
     <div
       className={classnames(styles.toolCall, {
         [styles.doneCall]: status === SSEEventStatus.done,
         [styles.errorCall]: status === '_ERROR_',
+        [styles.contextEvent]: isContextEvent,
       })}
     >
       <div
@@ -145,8 +160,11 @@ function ToolCall(props: IProps) {
           setExpanded((prevExpanded) => !prevExpanded);
         }}
       >
-        {isRunning && <LoadingOutlined className={styles.statusIcon} />}
-        {status === SSEEventStatus.done && <CheckOutlined className={classnames(styles.statusIcon, styles.done)} />}
+        {isContextEvent && <FileTextOutlined className={classnames(styles.statusIcon, styles.contextIcon)} />}
+        {!isContextEvent && isRunning && <LoadingOutlined className={styles.statusIcon} />}
+        {!isContextEvent && status === SSEEventStatus.done && (
+          <CheckOutlined className={classnames(styles.statusIcon, styles.done)} />
+        )}
         {status === '_ERROR_' && <CloseOutlined className={classnames(styles.statusIcon, styles.error)} />}
         <span className={styles.toolIdentity}>{toolName || intl.formatMessage({ id: 'toolCall.defaultTitle' })}</span>
         {description && <span className={styles.description}>{description}</span>}
@@ -155,8 +173,8 @@ function ToolCall(props: IProps) {
 
       {expanded && hasDetail && (
         <div className={styles.detail}>
-          {inputText && renderSection('input', inputText)}
-          {outputText && renderSection('output', outputText)}
+          {inputText && renderSection('input', inputText, isContextEvent ? 'contextEvent.input' : undefined)}
+          {outputText && renderSection('output', outputText, isContextEvent ? 'contextEvent.input' : undefined)}
           <button type="button" className={styles.collapseButton} onClick={() => setExpanded(false)}>
             {intl.formatMessage({ id: 'toolCall.collapse' })}
             <DownOutlined className={styles.collapseButtonIcon} />
