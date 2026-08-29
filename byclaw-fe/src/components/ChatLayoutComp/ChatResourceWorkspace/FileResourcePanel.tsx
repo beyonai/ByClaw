@@ -4,7 +4,11 @@ import { EllipsisOutlined, FolderAddOutlined, UploadOutlined } from '@ant-design
 import { getLocale, useIntl, useSelector } from '@umijs/max';
 import FileSpaceBlock from '@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock';
 import CreateFolderModal from '@/layout/sider/components/FileSiderPanel/components/CreateFolderModal';
-import { SHARED_FILE_PATH, type FileTreeItem } from '@/layout/sider/components/FileSiderPanel/constants';
+import {
+  DISPLAY_FILE_PATH_PREFIX,
+  SHARED_FILE_PATH,
+  type FileTreeItem,
+} from '@/layout/sider/components/FileSiderPanel/constants';
 import {
   canPreviewFile,
   ensureDirectoryPath,
@@ -108,7 +112,9 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   const projectId = projectIdProp ?? Number(project?.projectId);
   const isLocalSharedFiles = scope === 'project' && Number(project?.projectId ?? projectId) === -1;
   const usesFileBrowser = scope === 'session' || isLocalSharedFiles;
-  const rootPath = isLocalSharedFiles ? SHARED_FILE_PATH : getSessionFilePath(sessionId);
+  const rootPath = `${DISPLAY_FILE_PATH_PREFIX}${
+    isLocalSharedFiles ? SHARED_FILE_PATH : getSessionFilePath(sessionId)
+  }`;
   const canManageProjectFiles = useMemo(() => {
     const currentUserId = userInfo?.userId ?? userInfo?.id;
     return (
