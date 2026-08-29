@@ -7,6 +7,7 @@
         <result column="project_name" property="projectName"/>
         <result column="description" property="description"/>
         <result column="resource_id" property="resourceId"/>
+        <result column="cloud_resource_id" property="cloudResourceId"/>
         <result column="project_type" property="projectType"/>
         <result column="is_share" property="isShare"/>
         <result column="init_status" property="initStatus"/>
@@ -31,6 +32,7 @@
                a.project_name,
                a.description,
                a.resource_id,
+               a.cloud_resource_id,
                a.project_type,
                a.is_share,
                a.init_status,

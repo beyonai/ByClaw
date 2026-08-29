@@ -23,6 +23,9 @@ public class Project {
 
     private Long resourceId;
 
+    /** 云盘知识库资源ID */
+    private Long cloudResourceId;
+
     /** 项目类型：normal普通项目，develop研发项目 */
     private String projectType;
 

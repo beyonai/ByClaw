@@ -817,3 +817,8 @@ CREATE INDEX IF NOT EXISTS idx_artifact_data_record_list
     ON byai.artifact_data_record (artifact_id, collection_name, create_time DESC);
 
 COMMENT ON TABLE byai.artifact_data_record IS '已发布HTML Artifact持久化的通用JSON数据';
+
+ALTER TABLE byai_project ADD COLUMN cloud_resource_id bigint;
+COMMENT ON COLUMN byai_project.cloud_resource_id IS '云盘知识库资源ID';
+
+

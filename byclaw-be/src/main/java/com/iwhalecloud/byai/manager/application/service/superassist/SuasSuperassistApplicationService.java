@@ -30,6 +30,7 @@ import com.iwhalecloud.byai.common.util.ListUtil;
 import com.iwhalecloud.byai.common.util.MapParamUtil;
 import com.iwhalecloud.byai.common.util.RedisUtil;
 import com.iwhalecloud.byai.common.util.StringUtil;
+import com.iwhalecloud.byai.manager.application.service.devloop.ProjectApplicationService;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeApplicationService;
 import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
 import com.iwhalecloud.byai.manager.domain.aimodel.enums.ModelOwnerType;
@@ -147,6 +148,9 @@ public class SuasSuperassistApplicationService {
 
     @Autowired
     private JwtService jwtService;
+
+    @Autowired
+    private ProjectApplicationService projectApplicationService;
 
 
     /**
@@ -857,6 +861,10 @@ public class SuasSuperassistApplicationService {
     public void initExpertTeams(LoginInfo loginInfo) {
 
         try {
+
+            // 放置用户到当前线程
+            CurrentUserHolder.setLoginInfo(loginInfo);
+
             // 获取初始化模板
             String paramCode = "INIT_DEFAULT_PROJECT_EXPERT_TEAMS_TEMPLATE";
             JSONArray initTemplates = this.getInitTemplateArray(loginInfo, paramCode);
@@ -867,12 +875,7 @@ public class SuasSuperassistApplicationService {
 
                 //初始化项目
                 Project project = this.initProject(jsonObject, loginInfo);
-
-                // 将用户加入项目
-                boolean isMember = projectMemberService.isMember(project.getProjectId(), loginInfo.getUserId());
-                if (!isMember) {
-                    projectMemberService.addMember(project.getProjectId(), loginInfo.getUserId(), MemberRole.MEMBER);
-                }
+                logger.info("初始化项目成功:{}", JSON.toJSONString(project));
 
                 //初始化专家团
                 Map<String, AgentPrologueDto.ModelInfo> modelInfoMap = new HashMap<String, AgentPrologueDto.ModelInfo>();
@@ -1013,8 +1016,12 @@ public class SuasSuperassistApplicationService {
             project.setIsShare(isShare);
             project.setCreateTime(new Date());
             project.setCreateBy(loginInfo.getUserId());
-            projectService.save(project);
 
+            //初始化云盘
+            SsResource cloudResource = projectApplicationService.createCloudResource(project);
+            project.setCloudResourceId(cloudResource.getResourceId());
+
+            projectService.save(project);
 
             //初始化本体对象
             List<String> objectCodes = this.initSubmitWorkspaceTemplate();
@@ -1039,6 +1046,21 @@ public class SuasSuperassistApplicationService {
                 resource.setDeleteFlag(DeleteFlag.NORMAL);
                 projectResourceService.save(resource);
             }
+        } else {
+
+            // 初始化项目云盘
+            Long cloudResourceId = project.getCloudResourceId();
+            if (cloudResourceId == null) {
+                SsResource cloudResource = projectApplicationService.createCloudResource(project);
+                project.setCloudResourceId(cloudResource.getResourceId());
+                projectService.update(project);
+            }
+        }
+
+        // 将用户加入项目
+        boolean isMember = projectMemberService.isMember(project.getProjectId(), loginInfo.getUserId());
+        if (!isMember) {
+            projectMemberService.addMember(project.getProjectId(), loginInfo.getUserId(), MemberRole.OWNER);
         }
 
         return project;
