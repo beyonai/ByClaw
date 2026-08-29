@@ -714,6 +714,29 @@
   }
 }
 
+.accountCardDrawerCompact {
+  box-sizing: border-box;
+  height: 88px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+
+  .accountCardFooter {
+    min-height: 28px;
+    margin-top: 4px;
+    justify-content: space-between;
+  }
+
+  .accountPlatformName {
+    min-width: 0;
+    margin-top: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
 .accountCardClickable {
   cursor: pointer;
 
