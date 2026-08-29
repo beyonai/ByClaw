@@ -411,6 +411,60 @@ await (async () => {
   console.log('PASS source scope and materialization target');
 })();
 
+await (async () => {
+  const root = makeSessionDir();
+  const metadataPath = join(tmpdir(), `kc-weixin-selected-${process.pid}-${Date.now()}.json`);
+  const urls = [
+    'https://mp.weixin.qq.com/s/article-1',
+    'https://mp.weixin.qq.com/s/article-2',
+    'https://mp.weixin.qq.com/s/article-3',
+    'https://mp.weixin.qq.com/s/article-4',
+  ];
+  writeFileSync(metadataPath, JSON.stringify({
+    schemaVersion: '1.0',
+    storage: { fallback: false },
+    collection: {
+      status: 'partial',
+      items: urls.map((sourceUrl, index) => ({
+        itemId: `weixin-selected-${index + 1}`,
+        title: `Selected Weixin article ${index + 1}`,
+        sourceUrl,
+        sourceItemId: null,
+        sourceSkill: 'bycli',
+        backend: 'weixin',
+        collectionFilters: {},
+        rawArtifacts: [],
+        materialization: {
+          status: 'pending', markdownPath: null, sanitizedPath: null,
+          pendingArtifactCleanup: [], reason: 'awaiting-acquisition',
+          contentGranularity: 'unknown',
+        },
+      })),
+    },
+  }, null, 2));
+  try {
+    const initialized = await runCli([
+      'init', '--session-dir', root, '--query', 'selected Weixin articles',
+      '--materialization-target', 'selected', '--metadata-input-file', metadataPath,
+    ]);
+    assert.equal(initialized.code, 0, initialized.stderr || initialized.stdout);
+    assert.equal(existsSync(join(root, 'session.json')), true);
+
+    const status = await runCli(['status', '--session-dir', root]);
+    assert.equal(status.code, 0, status.stderr || status.stdout);
+    assert.equal(status.json.collection.sourceRecords, 4);
+    assert.equal(status.json.collection.materialized, 0);
+    assert.equal(status.json.collection.pending, 4);
+    assert.equal(status.json.collection.failed, 0);
+    assert.equal(status.json.collection.deliveryComplete, false);
+    assert.deepEqual(status.json.downstreamInput.files, []);
+  } finally {
+    rmSync(metadataPath, { force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+  console.log('PASS selected inventory remains reportable before Weixin acquisition');
+})();
+
 // ── 站点爬取报告模板必须满足统一 report 契约 ──
 
 await (async () => {

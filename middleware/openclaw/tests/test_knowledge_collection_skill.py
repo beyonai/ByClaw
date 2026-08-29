@@ -608,6 +608,46 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         self.assertNotIn("`--adapter-session worker-<n>`", downloads)
         self.assertNotIn("`create-draft` and `save-articles`", downloads)
 
+    def test_weixin_login_gate_uses_persistent_logical_operation_state(self):
+        bycli_root = SKILLS_ROOT / "bycli"
+        bycli = (bycli_root / "SKILL.md").read_text(encoding="utf-8")
+        weixin = (bycli_root / "references" / "weixin.md").read_text(encoding="utf-8")
+        collection = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        gate_runner = bycli_root / "scripts" / "weixin-login-gate.mjs"
+
+        self.assertTrue(gate_runner.is_file())
+        for phrase in (
+            "same logical operation fingerprint",
+            "Retry-shaped user messages never create a new original command",
+            "`再次重试`",
+            "does not explicitly confirm that verification was completed",
+            "`weixin-login-gate.mjs`",
+            "`--verification-confirmed true`",
+            "must not execute another byCLI command",
+            "terminal for the current collection task",
+            "new chat turn",
+            "Changing `--output`, `--adapter-session`",
+        ):
+            self.assertIn(phrase, weixin)
+
+        for phrase in (
+            "Every browser-backed Weixin command must run through",
+            "`scripts/weixin-login-gate.mjs`",
+            "A retry-shaped user message is not explicit verification completion",
+            "`byCLI 2.1.44`",
+            "至少 5 秒的租约启动错峰",
+        ):
+            self.assertIn(phrase, bycli)
+
+        for phrase in (
+            "Before any source executor, browser preflight, or delegated acquisition command",
+            "Authentication failure does not undo initialization",
+            "`session.json`",
+            "`failed` or `pending`",
+            "run `status`",
+        ):
+            self.assertIn(phrase, collection)
+
     def test_weixin_reference_closes_executor_terminal_states(self):
         weixin = (SKILLS_ROOT / "bycli" / "references" / "weixin.md").read_text(encoding="utf-8")
         discovery = markdown_section(weixin, "Official-account and article discovery")
@@ -616,7 +656,7 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         downloads = markdown_section(weixin, "Published-data spreadsheet downloads")
         login = markdown_section(weixin, "Login and verification gate")
 
-        self.assertIn("@sovovs/bycli` 2.1.35", weixin)
+        self.assertIn("@sovovs/bycli` 2.1.44", weixin)
         self.assertIn("Explicit account identity or account-history intent starts with `accounts`", discovery)
         self.assertIn("Article-title or topic intent starts with `sougousearch`", discovery)
         self.assertIn("reinterpret it as topic intent", discovery)
@@ -701,8 +741,8 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "Only after `accounts` proves one unique nickname-to-`fakeid` binding",
             weixin,
         )
-        self.assertIn("Verified for byCLI 2.1.35", login)
-        self.assertNotIn("2.1.35 and later", login)
+        self.assertIn("Verified for byCLI 2.1.44", login)
+        self.assertNotIn("2.1.44 and later", login)
         self.assertIn("`create-draft` session failures return `AUTH_REQUIRED`", login)
         self.assertIn(
             "An authentication outcome from an already-consumed diagnostic rerun follows terminal priority 1",

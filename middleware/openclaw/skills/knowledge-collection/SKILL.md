@@ -55,13 +55,15 @@ Read only the reference that matches the chosen workflow, plus `collection-contr
 
 ## 3. Execute through validated commands
 
-1. Create or load a session before discovery. Use `init` with the derived `--source-scope` and `--materialization-target`.
+1. Create or load a session before discovery. Before any source executor, browser preflight, or delegated acquisition command, complete that initialization. Use `init` with the derived `--source-scope` and `--materialization-target`. When the user already selected direct source URLs, initialize their inventory as `pending` before acquisition so a terminal source gate remains reportable.
 2. For public URL discovery that uses SearXNG, run `public-discover`. When the user explicitly requests a quantity (for example, “采集一篇”), pass that positive integer as `--requested-count`; this runs SearXNG first with the requested quantity as its result limit, then automatically falls back to the relocated `hot_discovery` channel only when SearXNG returns no candidates or invalid output. Without `--requested-count`, it starts the relocated `online-search` and `hot_discovery` channels in parallel and reports unavailable coverage without suppressing successful results. Do not compensate for an empty discovery result by manually invoking a `bycli <site> search` command, because that bypasses the collection command's recovery and provenance path.
 
    Public discovery keeps normalized deduplication separate from acquisition URLs. Use the selected candidate's `url` unchanged for the first acquisition attempt. When that attempt fails and the candidate has `sourceUrls`, retry the remaining listed variants in order. Never reconstruct an acquisition URL from a duplicate key, and never persist a variant containing credentials or sensitive parameters.
 3. Delegate retrieval to the selected source executor. Do not use `web_fetch`, `curl`, `wget`, `requests`, or another direct HTTP client to bypass it.
 
    当选用的执行器是 `bycli` 时，初次 `BROWSER_CONNECT` 是桥接恢复信号，不是要求用户操作桌面浏览器的证据。执行器必须先完成托管浏览器恢复阶梯（状态检查、冷启动、`doctor`/`daemon status` 复检，以及最多一次 daemon restart），再报告桥接失败；采集编排器不得直接要求用户打开 Chrome，也不得将这次首次失败归类为认证问题。只有最终 `bridge_unavailable`，或明确的登录、MFA、CAPTCHA、认证结果，才可作为需要用户处理的事项对外说明。
+
+   Authentication failure does not undo initialization. Preserve `session.json`, keep every selected source visible as `failed` or `pending`, and run `status` before reporting the stopped collection. A directory without `session.json` is not a partial or failed collection terminal state.
 4. Register only actual artifacts through `collect`; excerpts and abstracts are valid typed artifacts only when their actual `contentGranularity` is recorded, but they must never be treated or described as full text. Do not hand-edit inventory metadata.
 5. For research mode, call `report` to generate the requested research report.
 6. Use `status` before delivery. It distinguishes source records, duplicate groups, materialized bodies, pending bodies, failed bodies, content granularity, media coverage, crawl coverage, and `collection.deliveryComplete`.
