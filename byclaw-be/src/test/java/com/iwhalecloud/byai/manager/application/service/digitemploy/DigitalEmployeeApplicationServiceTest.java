@@ -50,6 +50,7 @@ import com.iwhalecloud.byai.manager.vo.resource.DigitalEmployeeVo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupInstallResultVo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupUninstallPreviewVo;
 import com.iwhalecloud.byai.state.domain.resource.service.ResourceAuthContextService;
+import com.iwhalecloud.byai.state.domain.resource.service.ResourceArtifactStorageService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.state.application.service.session.ByClawSkillDeleteApplicationService;
 import com.iwhalecloud.byai.state.application.service.session.ByClawSkillPathResolver;
@@ -103,6 +104,7 @@ class DigitalEmployeeApplicationServiceTest {
     private SystemConfigService systemConfigService;
     private TemplateRuleInfoApplicationService templateRuleInfoApplicationService;
     private ResourceAuthContextService resourceAuthContextService;
+    private ResourceArtifactStorageService resourceArtifactStorageService;
     private RobotChannelRegistryCoordinator robotChannelRegistryCoordinator;
     private DigEmployeeChangeEventPublisher digEmployeeChangeEventPublisher;
     private DigitalEmployeeRuntimeRefreshService digitalEmployeeRuntimeRefreshService;
@@ -128,6 +130,7 @@ class DigitalEmployeeApplicationServiceTest {
         systemConfigService = mock(SystemConfigService.class);
         templateRuleInfoApplicationService = mock(TemplateRuleInfoApplicationService.class);
         resourceAuthContextService = mock(ResourceAuthContextService.class);
+        resourceArtifactStorageService = mock(ResourceArtifactStorageService.class);
         robotChannelRegistryCoordinator = mock(RobotChannelRegistryCoordinator.class);
         digEmployeeChangeEventPublisher = mock(DigEmployeeChangeEventPublisher.class);
         digitalEmployeeRuntimeRefreshService = mock(DigitalEmployeeRuntimeRefreshService.class);
@@ -158,6 +161,7 @@ class DigitalEmployeeApplicationServiceTest {
         ReflectionTestUtils.setField(service, "systemConfigService", systemConfigService);
         ReflectionTestUtils.setField(service, "templateRuleInfoApplicationService", templateRuleInfoApplicationService);
         ReflectionTestUtils.setField(service, "resourceAuthContextService", resourceAuthContextService);
+        ReflectionTestUtils.setField(service, "resourceArtifactStorageService", resourceArtifactStorageService);
         ReflectionTestUtils.setField(service, "robotChannelRegistryCoordinator", robotChannelRegistryCoordinator);
         ReflectionTestUtils.setField(service, "digEmployeeChangeEventPublisher", digEmployeeChangeEventPublisher);
         ReflectionTestUtils.setField(service, "digitalEmployeeRuntimeRefreshService",
@@ -252,6 +256,24 @@ class DigitalEmployeeApplicationServiceTest {
         assertThat(superassist.getDefaultDigEmployeeId()).isEqualTo(201L);
         verify(suasSuperassistService).updateById(superassist);
         verify(ssResourceService, never()).updateResourceEntity(any(SsResource.class));
+    }
+
+    @Test
+    void deleteDigitalEmployee_invalidatesEffectiveAuthorizationAfterRemovingResource() {
+        EmployeeIdDTO dto = new EmployeeIdDTO();
+        dto.setResourceId(200L);
+        SsResource resource = buildDigitalEmployee(200L, OwnerType.ENTERPRISE, 1L);
+        when(ssResourceService.findById(200L)).thenReturn(resource);
+        when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
+        when(digitalEmployeeGroupApplicationService.isGroup(200L)).thenReturn(false);
+
+        service.deleteDigitalEmployee(dto);
+
+        assertThat(resource.getResourceStatus()).isEqualTo(ResourceStatus.REMOVED.getNum());
+        InOrder order = inOrder(ssResourceService, authApplicationService);
+        order.verify(ssResourceService).updateResourceEntity(resource);
+        order.verify(authApplicationService).invalidateResourceAuthorizationCachesAfterCommit(200L,
+            ResourceBizTypeEnum.DIG_EMPLOYEE.name());
     }
 
     /**

@@ -17,6 +17,7 @@ import com.iwhalecloud.byai.manager.domain.auth.service.PrivilegeGrantService;
 import com.iwhalecloud.byai.manager.domain.organization.service.OrganizationService;
 import com.iwhalecloud.byai.manager.domain.position.service.PositionService;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceBizTypeEnum;
+import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.domain.station.service.StationService;
 import com.iwhalecloud.byai.manager.domain.superassist.service.SuasSuperassistService;
@@ -1211,10 +1212,12 @@ class AuthApplicationServiceTest {
         OrganizationService organizationService = mock(OrganizationService.class);
         PositionService positionService = mock(PositionService.class);
         StationService stationService = mock(StationService.class);
+        SsResourceService ssResourceService = mock(SsResourceService.class);
         ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
         ReflectionTestUtils.setField(service, "organizationService", organizationService);
         ReflectionTestUtils.setField(service, "positionService", positionService);
         ReflectionTestUtils.setField(service, "stationService", stationService);
+        ReflectionTestUtils.setField(service, "ssResourceService", ssResourceService);
 
         when(organizationService.findEffectiveOrganizationIdsByUserId(1001L)).thenReturn(Set.of(10L, 20L));
         when(positionService.findPositionByUserId(1001L)).thenReturn(List.of());
@@ -1226,6 +1229,10 @@ class AuthApplicationServiceTest {
         parentOrgGrant.setGrantToObjType(GrantToObjType.ORG);
         parentOrgGrant.setGrantToObjId(10L);
         parentOrgGrant.setGrantToType(Color.RED);
+        SsResource activeResource = new SsResource();
+        activeResource.setResourceId(500L);
+        activeResource.setResourceStatus(ResourceStatus.LIST.getNum());
+        when(ssResourceService.findByIdList(any())).thenReturn(List.of(activeResource));
         when(privilegeGrantService.findPrivilegeByQo(any())).thenAnswer(invocation -> {
             PrivilegeGrantQo qo = invocation.getArgument(0);
             return GrantToObjType.ORG.equals(qo.getGrantToObjType()) ? List.of(parentOrgGrant) : List.of();
@@ -1245,10 +1252,12 @@ class AuthApplicationServiceTest {
         OrganizationService organizationService = mock(OrganizationService.class);
         PositionService positionService = mock(PositionService.class);
         StationService stationService = mock(StationService.class);
+        SsResourceService ssResourceService = mock(SsResourceService.class);
         ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
         ReflectionTestUtils.setField(service, "organizationService", organizationService);
         ReflectionTestUtils.setField(service, "positionService", positionService);
         ReflectionTestUtils.setField(service, "stationService", stationService);
+        ReflectionTestUtils.setField(service, "ssResourceService", ssResourceService);
 
         when(organizationService.findEffectiveOrganizationIdsByUserId(1001L)).thenReturn(Set.of(10L, 20L));
         when(positionService.findPositionByUserId(1001L)).thenReturn(List.of());
@@ -1266,6 +1275,10 @@ class AuthApplicationServiceTest {
         childOrgBlacklist.setGrantToObjType(GrantToObjType.ORG);
         childOrgBlacklist.setGrantToObjId(20L);
         childOrgBlacklist.setGrantToType(Color.BLACK);
+        SsResource activeResource = new SsResource();
+        activeResource.setResourceId(500L);
+        activeResource.setResourceStatus(ResourceStatus.LIST.getNum());
+        when(ssResourceService.findByIdList(any())).thenReturn(List.of(activeResource));
         when(privilegeGrantService.findPrivilegeByQo(any())).thenAnswer(invocation -> {
             PrivilegeGrantQo qo = invocation.getArgument(0);
             return GrantToObjType.ORG.equals(qo.getGrantToObjType())
@@ -1275,6 +1288,73 @@ class AuthApplicationServiceTest {
         Map<String, String> resources = service.buildUserAuthResources(1001L);
 
         assertThat(resources).doesNotContainKey("500");
+    }
+
+    @Test
+    void buildUserAuthResources_excludesRemovedResources() {
+        AuthApplicationService service = new AuthApplicationService();
+        PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
+        OrganizationService organizationService = mock(OrganizationService.class);
+        PositionService positionService = mock(PositionService.class);
+        StationService stationService = mock(StationService.class);
+        SsResourceService ssResourceService = mock(SsResourceService.class);
+        ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
+        ReflectionTestUtils.setField(service, "organizationService", organizationService);
+        ReflectionTestUtils.setField(service, "positionService", positionService);
+        ReflectionTestUtils.setField(service, "stationService", stationService);
+        ReflectionTestUtils.setField(service, "ssResourceService", ssResourceService);
+
+        when(organizationService.findEffectiveOrganizationIdsByUserId(1001L)).thenReturn(Set.of());
+        when(positionService.findPositionByUserId(1001L)).thenReturn(List.of());
+        when(stationService.getStationByUserId(1001L)).thenReturn(null);
+
+        PrivilegeGrant grant = new PrivilegeGrant();
+        grant.setGrantObjId(500L);
+        grant.setGrantObjType(ResourceBizTypeEnum.DIG_EMPLOYEE.name());
+        grant.setGrantToObjType(GrantToObjType.USER);
+        grant.setGrantToObjId(1001L);
+        grant.setGrantToType(Color.RED);
+        when(privilegeGrantService.findPrivilegeByQo(any())).thenAnswer(invocation -> {
+            PrivilegeGrantQo qo = invocation.getArgument(0);
+            return GrantToObjType.USER.equals(qo.getGrantToObjType()) ? List.of(grant) : List.of();
+        });
+
+        SsResource removedResource = new SsResource();
+        removedResource.setResourceId(500L);
+        removedResource.setResourceStatus(ResourceStatus.REMOVED.getNum());
+        when(ssResourceService.findByIdList(Set.of(500L))).thenReturn(List.of(removedResource));
+
+        assertThat(service.buildUserAuthResources(1001L)).doesNotContainKey("500");
+    }
+
+    @Test
+    void invalidateResourceAuthorizationCachesAfterCommit_evictsInheritedUsersAndRebuildsTheirCaches() {
+        AuthApplicationService service = new AuthApplicationService();
+        PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
+        UsersMapper usersMapper = mock(UsersMapper.class);
+        AuthRedisApplicationService authRedisApplicationService = mock(AuthRedisApplicationService.class);
+        AuthRedisSyncService authRedisSyncService = mock(AuthRedisSyncService.class);
+        ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
+        ReflectionTestUtils.setField(service, "usersMapper", usersMapper);
+        ReflectionTestUtils.setField(service, "authRedisApplicationService", authRedisApplicationService);
+        ReflectionTestUtils.setField(service, "authRedisSyncService", authRedisSyncService);
+
+        PrivilegeGrant organizationGrant = new PrivilegeGrant();
+        organizationGrant.setGrantObjId(500L);
+        organizationGrant.setGrantObjType(ResourceBizTypeEnum.DIG_EMPLOYEE.name());
+        organizationGrant.setGrantToObjType(GrantToObjType.ORG);
+        organizationGrant.setGrantToObjId(202L);
+        organizationGrant.setGrantToType(Color.RED);
+        when(privilegeGrantService.listActiveRedGrantsForGrantObject(500L,
+            ResourceBizTypeEnum.DIG_EMPLOYEE.name())).thenReturn(List.of(organizationGrant));
+        when(usersMapper.findUserIdsByOrgIdListIncludingChildren(List.of(202L))).thenReturn(List.of(1001L, 1002L));
+
+        service.invalidateResourceAuthorizationCachesAfterCommit(500L,
+            ResourceBizTypeEnum.DIG_EMPLOYEE.name());
+
+        verify(authRedisApplicationService).removeUserAuthByResourceIds(1001L, Set.of("500"));
+        verify(authRedisApplicationService).removeUserAuthByResourceIds(1002L, Set.of("500"));
+        verify(authRedisSyncService).asyncSyncAuthChangedUsers(Set.of(1001L, 1002L), "RESOURCE_REMOVED");
     }
 
     private AuthApplicationService newExplicitUserPermissionService(List<PrivilegeGrant> grants) {
