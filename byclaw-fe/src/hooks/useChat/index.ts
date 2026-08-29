@@ -23,6 +23,13 @@ import useAppStore from '@/models/common/useAppStore';
 import { createMessage, fetchMessageHandler } from '@/utils/messgae';
 import { hydrateV2RuntimeState } from '@/utils/messageV2Runtime';
 import { getFileTypeByName } from '@/utils/file';
+import {
+  commitScopedStream,
+  isExternalChildExtParams,
+  isExternalChildSession,
+  isScopedChildProjection,
+  isScopedStreamNewer,
+} from '@/utils/scopedSession';
 
 import useHandler from './useHandler';
 import useMessage from './useMessage';
@@ -197,17 +204,26 @@ function useChat(props: IProps) {
   const messageListRef = useRef<IMessage[]>([]);
   const pendingProjectIdByClientRequestRef = useRef(new Map<string, string>());
   const boundProjectSessionKeysRef = useRef(new Set<string>());
+  const scopedChildWatermarksRef = useRef(new Map<string, string>());
   const [runtimeVersion, setRuntimeVersion] = useState(0);
 
-  const { userInfo, extParamsBySessionId } = useSelector((state: ConnectState) => ({
+  const { userInfo, extParamsBySessionId, sessionList } = useSelector((state: ConnectState) => ({
     userInfo: state.user.userInfo,
     extParamsBySessionId: state.session.extParamsBySessionId,
+    sessionList: state.session.sessionList,
   }));
   const { defaultDigEmployeeId, employeesList } = useSelector((state: { employees: IEmployeesState }) => ({
     defaultDigEmployeeId: state.employees.defaultDigEmployeeId,
     employeesList: state.employees.employeesList,
   }));
   const dispatch = useDispatch();
+
+  const isCurrentExternalChildSession = useMemo(
+    () =>
+      isExternalChildSession(sessionList?.find((item) => `${item.sessionId}` === `${sessionId}`)) ||
+      isExternalChildExtParams(get(extParamsBySessionId, `${sessionId}`)),
+    [extParamsBySessionId, sessionId, sessionList]
+  );
 
   const { agentId, EventEmitter } = useGlobal();
   const { setUserCollectModalOpen, setLoginModalOpen } = useAppStore();
@@ -522,6 +538,50 @@ function useChat(props: IProps) {
       });
   });
 
+  const applyScopedChildProjection = usePersistFn(async (projection: any, envelopeStreamId?: string) => {
+    const projectionSessionId = `${projection?.sessionId || ''}`;
+    if (!projectionSessionId || projectionSessionId !== `${sessionId}`) return false;
+
+    await waitForSessionMessageLoaded(projectionSessionId);
+    const streamId = projection?.snapshotStreamId || projection?.streamId || envelopeStreamId;
+    if (!isScopedStreamNewer(scopedChildWatermarksRef.current, projectionSessionId, streamId)) return true;
+
+    const message = fetchMessageHandler({
+      ...projection,
+      sessionId: projectionSessionId,
+    });
+    const terminal = projection?.running === false || `${projection?.msgStatus}` === '0';
+    set(message, 'messageState', terminal ? IMessageState.Done : IMessageState.Answer);
+    set(message, 'thinkDone', terminal);
+    set(message, 'snapshotStreamId', streamId);
+    set(message, 'streamId', streamId);
+    hydrateV2RuntimeState(message);
+    updateMessage(message, { isAssign: true, allowCreateSession: false });
+    commitScopedStream(scopedChildWatermarksRef.current, projectionSessionId, streamId);
+    return true;
+  });
+
+  const reconcileScopedChildProjection = usePersistFn(async () => {
+    if (!sessionId || !isCurrentExternalChildSession) return false;
+    try {
+      await waitForSessionMessageLoaded(sessionId);
+      const snapshot = await getChatRunningSnapshot({
+        sessionId,
+        traceId: `external-child-${sessionId}`,
+      });
+      if (snapshot?.messageId) {
+        await applyScopedChildProjection(snapshot, snapshot.snapshotStreamId);
+      } else {
+        await reloadLatestMessageList();
+      }
+      return true;
+    } catch (error) {
+      console.error('同步外部子会话快照失败:', error);
+      await reloadLatestMessageList();
+      return true;
+    }
+  });
+
   /**
    * WebSocket 断线重连后，以后端运行态为准校正当前页面，避免连接恢复但前端仍永久停留在运行中。
    * 运行中的会话优先用快照补齐断线期间的内容；后端已无运行态时清理本地 runtime 并刷新已落库消息。
@@ -530,6 +590,8 @@ function useChat(props: IProps) {
     if (!sessionId) {
       return;
     }
+
+    if (await reconcileScopedChildProjection()) return;
 
     try {
       const runningInfoList: RunningChatInfo[] = await getChatRunningStatus({ sessionIds: [sessionId] });
@@ -605,6 +667,13 @@ function useChat(props: IProps) {
       const data = get(message, 'data') || message;
       const clientRequestId = get(message, 'clientRequestId');
       const messageSessionId = get(data, 'sessionId') || get(message, 'sessionId');
+      if (
+        (isCurrentExternalChildSession || isScopedChildProjection(data)) &&
+        `${messageSessionId}` === `${sessionId}` &&
+        (await applyScopedChildProjection(data, get(message, 'streamId')))
+      ) {
+        return;
+      }
       await waitForSessionMessageLoaded(messageSessionId);
 
       const newMsg = fetchMessageHandler({
@@ -650,10 +719,21 @@ function useChat(props: IProps) {
     return () => {
       webSocketManager.offMessage('NEW_MESSAGE', handler);
     };
-  }, [sessionId, updateMessage, waitForSessionMessageLoaded]);
+  }, [
+    applyScopedChildProjection,
+    isCurrentExternalChildSession,
+    sessionId,
+    updateMessage,
+    waitForSessionMessageLoaded,
+  ]);
 
   useEffect(() => {
-    if (!sessionId) {
+    if (!isCurrentExternalChildSession) return;
+    void reconcileScopedChildProjection();
+  }, [isCurrentExternalChildSession, reconcileScopedChildProjection, sessionId]);
+
+  useEffect(() => {
+    if (!sessionId || isCurrentExternalChildSession) {
       return;
     }
     let disposed = false;
@@ -792,7 +872,7 @@ function useChat(props: IProps) {
         flushRestoredChatStreamBuffer(restoreKey);
       });
     };
-  }, [sessionId, waitForSessionMessageLoaded]);
+  }, [isCurrentExternalChildSession, sessionId, waitForSessionMessageLoaded]);
 
   /**
    * 发送查询函数

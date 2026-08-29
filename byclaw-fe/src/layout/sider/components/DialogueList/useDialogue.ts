@@ -22,7 +22,9 @@ function useDialogue(props: { tabKey?: SessionType; getSearch: (tabKey: SessionT
   const { sessionList, pagination } = useSelector((state: ConnectState) => state.session);
 
   const { list: currentList, pagination: currentPagination } = React.useMemo(() => {
-    if (tabKey === SessionType.all) return { list: sessionList, pagination };
+    if (tabKey === SessionType.all) {
+      return { list: sessionList.filter((session) => !session.parentSessionId), pagination };
+    }
 
     return { list: [], pagination: { pageSize: 10, pageIndex: 0, total: 0 } };
   }, [tabKey, pagination, sessionList]);
