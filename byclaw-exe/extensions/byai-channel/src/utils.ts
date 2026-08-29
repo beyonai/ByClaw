@@ -182,13 +182,14 @@ async function getUserId(userCode: string, redis: RedisClient) {
   return normalizeId(userId);
 }
 
-export async function emitOutOfBandSdkEvent(params: {
+export async function emitOutOfBandSdkEvent(input: {
   sessionId?: string;
   data: Record<string, any>;
   eventType: string;
   params?: {
     traceId?: string;
     dataStreamName?: string;
+    metadata?: Record<string, any>;
   }
 }) {
   const redisInfo = getRedisInfo();
@@ -205,20 +206,21 @@ export async function emitOutOfBandSdkEvent(params: {
   // 需要和 byclaw-be/src/main/java/com/iwhalecloud/byai/state/domain/chat/service/SessionEventStreamListener.java 中的 DEFAULT_STREAM_KEY 一致
   const DEFAULT_STREAM_KEY = "byai_gateway:session_event:data_stream";
   const emitter = new GatewayDataEmitter(redis, {
-    dataStreamName: params.params?.dataStreamName || DEFAULT_STREAM_KEY,
+    dataStreamName: input.params?.dataStreamName || DEFAULT_STREAM_KEY,
   });
   await emitter.emitEvent({
     data: {
-      ...params.data,
+      ...input.data,
       userId,
       userCode,
       created: Math.floor(Date.now() / 1000),
       contentType: SseMessageType.text,
       id: generateRandomId().toUpperCase(),
     },
-    sessionId: params.sessionId || "",
-    traceId: params.params?.traceId || generateRandomId(),
-    eventType: params.eventType,
+    sessionId: input.sessionId || "",
+    traceId: input.params?.traceId || generateRandomId(),
+    eventType: input.eventType,
+    metadata: input.params?.metadata,
   });
   redis.quit();
 }

@@ -24,7 +24,7 @@ import {
   deliveredAnswerTextCovers,
   recordPushedAnswerText,
 } from "./answer-text-ledger.js";
-import { parseSessionIdFromTo } from "./outbound-dedup.js";
+import { parseAgentIdFromTo, parseSessionIdFromTo } from "./outbound-dedup.js";
 import { EventType } from "@byclaw/by-framework";
 import { emitOutOfBandSdkEvent, generateRandomId } from "./utils.js";
 
@@ -80,11 +80,12 @@ async function emitOutOfBandSdkText(params: {
   text: string;
 }): Promise<boolean> {
   const sessionId = parseSessionIdFromTo(params.to);
+  const agentId = parseAgentIdFromTo(params.to);
   if (!sessionId || !params.text) {
     return false;
   }
   console.log(
-    `[byai-channel] outbound out-of-band emit: to=${params.to} sessionId=${sessionId} textLength=${params.text.length}`,
+    `[byai-channel] outbound out-of-band emit: to=${params.to} sessionId=${sessionId} text=${params.text.length > 40 ? `${params.text.slice(0, 20)}...${params.text.slice(-20)}` : params.text}`,
   );
   await emitOutOfBandSdkEvent({
     sessionId,
@@ -100,6 +101,9 @@ async function emitOutOfBandSdkText(params: {
       ]
     },
     eventType: EventType.ANSWER_DELTA,
+    params: {
+      metadata: agentId ? { agentId: agentId.replace(/^baiying-agent-/, "") } : undefined,
+    },
   });
   return true;
 }
@@ -263,12 +267,14 @@ export const byaiChannelPlugin: ChannelPlugin<ResolvedByaiAccount, ByaiProbe> = 
     textChunkLimit: 10000,
 
     sendText: async (ctx: ChannelOutboundContext) => {
+      const sessionId = parseSessionIdFromTo(ctx.to);
       console.log("=======================sendText==========================");
       console.log({
+        sessionId,
         to: ctx.to,
         accountId: ctx.accountId,
         replyToId: ctx.replyToId,
-        textLength: ctx.text?.length ?? 0,
+        text: ctx.text && ctx.text.length > 40 ? `${ctx.text.slice(0, 20)}...${ctx.text.slice(-20)}` : ctx.text,
       });
 
       const { to, accountId, replyToId } = ctx;
@@ -297,6 +303,7 @@ export const byaiChannelPlugin: ChannelPlugin<ResolvedByaiAccount, ByaiProbe> = 
       // out-of-band：无 active request（infra 注入等）。整段作为独立一条 emit。
       // cron/heartbeat 在源头不走 deliver，不会到达这里。
       if (!request) {
+        console.log("[byai-channel] ready to emit out-of-band text, sessionId: ", sessionId);
         await emitOutOfBandSdkText({ to, text });
         return okResult;
       }
