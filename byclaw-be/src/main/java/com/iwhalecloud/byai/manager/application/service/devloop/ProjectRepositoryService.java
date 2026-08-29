@@ -229,8 +229,18 @@ public class ProjectRepositoryService {
             }
         }
         String treeish = path == null ? branch : branch + ":" + path;
-        byte[] outputBytes = gitCommandExecutor.executeCommandBytesQuietly(repoPath, "git", "-c", "safe.directory=*",
-            "ls-tree", "-l", "-z", treeish);
+        byte[] outputBytes;
+        try {
+            outputBytes = gitCommandExecutor.executeCommandBytesQuietly(repoPath, "git", "-c", "safe.directory=*",
+                "ls-tree", "-l", "-z", treeish);
+        }
+        catch (Exception e) {
+            // 新增但未提交的目录不存在于 branch tree；继续用工作区未跟踪文件补树，不能回退到远程而丢失本地内容。
+            if (path == null) {
+                throw e;
+            }
+            outputBytes = new byte[0];
+        }
         String output = new String(outputBytes, StandardCharsets.UTF_8);
         List<ProjectRepoTreeNodeDTO> nodes = new ArrayList<>();
         for (String line : output.split(String.valueOf('\0'))) {

@@ -595,6 +595,15 @@
       max-height: none;
     }
   }
+
+  // Changes 替代视图与文件树共享剩余高度，列表过长时在面板内部滚动，避免底部内容被抽屉裁掉。
+  .fileSpaceAlternateContent {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
 }
 
 .fileSpaceBlockPlain {
