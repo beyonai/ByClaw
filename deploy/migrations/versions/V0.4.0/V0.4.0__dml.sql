@@ -1,7 +1,6 @@
 
 -- GitHub OAuth2 连接器。仅记录部署环境变量名，Client Secret 不进入数据库或 Runtime Manifest。
-DELETE FROM byai.byai_connector_info
-WHERE connector_code = 'github';
+DELETE FROM byai.byai_connector_info WHERE connector_code = 'github';
 
 INSERT INTO byai.byai_connector_info (
     connector_id, connector_code, connector_name, description, connector_type,

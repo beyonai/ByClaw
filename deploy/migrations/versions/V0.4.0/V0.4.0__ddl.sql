@@ -1,6 +1,23 @@
 -- V0.4.0 研发闭环·集成测试环境模块
 -- 集成测试环境:回答"在哪测/怎么连/怎么部署/用什么账号登录"。
 -- 注意:定时(cron)和执行员工不在这里,归属"独立测试数字员工"配置(需求级,一份),避免与环境重复。
+
+-- 连接器授权记录允许在连接器模板重建时保留历史数据，不能被连接器信息表的外键阻塞。
+-- 约束删除是幂等的，兼容已执行过部分迁移的环境。
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'fk_byai_connector_auth_connector'
+          AND conrelid = 'byai.byai_connector_auth'::regclass
+    ) THEN
+        ALTER TABLE byai.byai_connector_auth
+            DROP CONSTRAINT fk_byai_connector_auth_connector;
+    END IF;
+END
+$$;
+
 CREATE TABLE IF NOT EXISTS byai.byai_integration_env (
     env_id              BIGINT          NOT NULL,
     project_id          BIGINT          NOT NULL,
