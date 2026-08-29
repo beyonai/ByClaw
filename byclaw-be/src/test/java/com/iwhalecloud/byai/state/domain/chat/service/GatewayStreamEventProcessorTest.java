@@ -4,6 +4,7 @@ import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.state.common.dto.AnswerDelta;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
+import com.iwhalecloud.byai.state.infrastructure.common.constants.SseResponseEventEnum;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -11,6 +12,69 @@ import static org.assertj.core.api.Assertions.assertThat;
 class GatewayStreamEventProcessorTest {
 
     private final GatewayStreamEventProcessor processor = new GatewayStreamEventProcessor();
+
+    @Test
+    void normalizeEventType_preservesExplicitParentAssistantOutput() {
+        ChatProcessContext ctx = new ChatProcessContext(null, new AssistantChatDto());
+        ctx.setTargetAgentType("target-agent");
+
+        JSONObject metadata = new JSONObject();
+        metadata.put("session_scope", "parent");
+        metadata.put("event_kind", "assistant.chunk");
+
+        JSONObject dataJson = new JSONObject();
+        dataJson.put("event_type", SseResponseEventEnum.answerDelta);
+        dataJson.put("source_agent_type", "gateway-agent");
+        dataJson.put("metadata", metadata);
+
+        assertThat(processor.normalizeEventType(ctx, dataJson)).isEqualTo(SseResponseEventEnum.answerDelta);
+    }
+
+    @Test
+    void normalizeEventType_preservesTeamScopeAnswerProjection() {
+        ChatProcessContext ctx = new ChatProcessContext(null, new AssistantChatDto());
+        ctx.setTargetAgentType("target-agent");
+
+        JSONObject metadata = new JSONObject();
+        metadata.put("session_scope", "team");
+        metadata.put("event_kind", "activity.snapshot");
+
+        JSONObject dataJson = new JSONObject();
+        dataJson.put("event_type", SseResponseEventEnum.answerDelta);
+        dataJson.put("source_agent_type", "gateway-agent");
+        dataJson.put("metadata", metadata);
+
+        assertThat(processor.normalizeEventType(ctx, dataJson)).isEqualTo(SseResponseEventEnum.answerDelta);
+    }
+
+    @Test
+    void normalizeEventType_preservesAnyExplicitSemanticProjection() {
+        ChatProcessContext ctx = new ChatProcessContext(null, new AssistantChatDto());
+        ctx.setTargetAgentType("target-agent");
+
+        JSONObject metadata = new JSONObject();
+        metadata.put("session_scope", "parent");
+        metadata.put("event_kind", "todo/write");
+
+        JSONObject dataJson = new JSONObject();
+        dataJson.put("event_type", SseResponseEventEnum.answerDelta);
+        dataJson.put("source_agent_type", "external-agent");
+        dataJson.put("metadata", metadata);
+
+        assertThat(processor.normalizeEventType(ctx, dataJson)).isEqualTo(SseResponseEventEnum.answerDelta);
+    }
+
+    @Test
+    void normalizeEventType_keepsLegacyNonTargetAnswerAsReasoningWithoutExplicitScope() {
+        ChatProcessContext ctx = new ChatProcessContext(null, new AssistantChatDto());
+        ctx.setTargetAgentType("target-agent");
+
+        JSONObject dataJson = new JSONObject();
+        dataJson.put("event_type", SseResponseEventEnum.answerDelta);
+        dataJson.put("source_agent_type", "gateway-agent");
+
+        assertThat(processor.normalizeEventType(ctx, dataJson)).isEqualTo(SseResponseEventEnum.reasoningLogDelta);
+    }
 
     @Test
     void buildEventData_preservesLaneMetadataFromGatewayMetadata() {
