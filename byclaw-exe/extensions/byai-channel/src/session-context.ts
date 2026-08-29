@@ -15,6 +15,7 @@ import {
 import { resolveAgentIdFromSessionKey } from "openclaw/plugin-sdk/routing";
 import type { ConnectorAuthorizationMap } from "./connector-authorization.js";
 import {
+    clearTaskPlanExecutionContext,
     isTaskPlanContinuationPending,
     markTaskPlanContinuationPending,
 } from "../../shared/src/task-plan-runtime.js";
@@ -692,6 +693,7 @@ function listPendingChildSessionKeys(request: ActiveSdkRequest): Set<string> {
 
 export function clearActiveSdkRequestRecord(request: ActiveSdkRequest): void {
     markTaskPlanContinuationPending(request.sessionKey, false);
+    clearTaskPlanExecutionContext(request.sessionKey);
   activeSdkRequestsByTarget.delete(buildActiveSdkTargetKey(request.accountId, request.to));
   activeSdkRequestsByTraceId.delete(request.traceId);
   channelRequestContextsBySessionKey.delete(request.sessionKey);
