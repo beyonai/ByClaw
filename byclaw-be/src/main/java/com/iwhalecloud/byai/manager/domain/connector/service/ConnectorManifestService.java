@@ -10,12 +10,14 @@ import java.util.Set;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.iwhalecloud.byai.common.ecrypt.Sm4Util;
 import com.iwhalecloud.byai.manager.domain.connector.manifest.ConnectorManifestCanonicalizer;
+import com.iwhalecloud.byai.manager.domain.connector.manifest.ConnectorManifestCanonicalizer.CredentialProjectionSpec;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 import com.iwhalecloud.byai.manager.entity.users.UserPrivateParam;
 import com.iwhalecloud.byai.manager.mapper.users.UserPrivateParamMapper;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
+import java.util.Optional;
 
 /** 将渠道 Runtime Manifest 中的环境变量物化为用户系统托管个人参数。 */
 @Service
@@ -243,6 +245,12 @@ public class ConnectorManifestService {
     public List<String> managedEnvironmentKeys(ConnectorInfo connector) {
         requireConnector(connector);
         return canonicalizer.extractManagedEnvironmentKeys(connector, connector.getRuntimeManifest());
+    }
+
+    /** Returns the manifest-declared shared-volume credential projection, if configured. */
+    public Optional<CredentialProjectionSpec> credentialProjection(ConnectorInfo connector) {
+        requireConnector(connector);
+        return canonicalizer.extractCredentialProjection(connector, connector.getRuntimeManifest());
     }
 
     private boolean updateManagedEnvironmentStatus(

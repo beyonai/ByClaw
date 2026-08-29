@@ -298,7 +298,7 @@ async function resolveSdkInboundMediaPayload(params: {
       continue;
     }
 
-    const resolvedPath = resolveSdkLocalFilePath(rawPath, params.sessionId);
+    const resolvedPath = resolveSdkLocalFilePath(rawPath);
 
     if (seenSources.has(resolvedPath)) {
       continue;

@@ -11,7 +11,11 @@ import { compact, head, isEmpty, size } from 'lodash';
 import { getRuntimeActualUrl } from '@/utils';
 import { getTopLevelCatalogs } from '@/utils/catalog';
 import { agentHandler } from '@/utils/agent';
-import { deleteDigitalEmployee, getAllDigitalEmployeesV2 } from '@/service/digitalEmployees';
+import {
+  deleteDigitalEmployee,
+  getAllDigitalEmployeesV2,
+  queryMyCreatedAndSubscribedAgentsV2,
+} from '@/service/digitalEmployees';
 import Empty from '@/components/Empty';
 import InfiniteScroll from '@/components/InfiniteScroll';
 import { getDefaultPagination, paginationReducer } from '@/utils/pageInfo';
@@ -27,7 +31,7 @@ import UseApplyAuditDrawer from '@/pages/manager/components/UseApplyAuditDrawer'
 import { applyResourceUse } from '@/pages/manager/service/resources';
 import type { IOnOkParams } from '@/components/Resources/components/ResourceFilter';
 import { getDcSystemConfig } from '@/pages/manager/service/session';
-import { sortDefaultDigitalEmployeeFirst } from '@/pages/digitalEmployees/utils';
+import { sortDigitalEmployeeByRecent, sortDefaultDigitalEmployeeFirst } from '@/pages/digitalEmployees/utils';
 
 type DisableActionList = Array<'delete' | 'apply' | 'unapply' | 'edit'>;
 
@@ -69,10 +73,25 @@ function AllDigitalEmployees(
     dropdownParam?: IOnOkParams;
     buildFilterParam?: (activeTab: string, filterParam?: IOnOkParams) => Record<string, any>;
     mode?: 'employee' | 'group';
+    source?: 'official' | 'available';
+    onEmployeeClick?: (employee: IAgentCache) => void;
+    hideCategories?: boolean;
+    compactLayout?: boolean;
+    scrollableTarget?: string;
   },
   ref: any
 ) {
-  const { searchName, dropdownParam, buildFilterParam, mode = 'employee' } = props;
+  const {
+    searchName,
+    dropdownParam,
+    buildFilterParam,
+    mode = 'employee',
+    source = 'official',
+    onEmployeeClick,
+    hideCategories = false,
+    compactLayout = false,
+    scrollableTarget,
+  } = props;
   const isEmployeeGroup = mode === 'group';
   const listTabKey = isEmployeeGroup ? 'group' : 'enterprise';
   const catalogSearchParamKey = isEmployeeGroup ? 'groupCatalogId' : 'enterpriseCatalogId';
@@ -158,7 +177,7 @@ function AllDigitalEmployees(
         pageSize: paginationInfo.pageSize,
         keyword,
         ...(buildFilterParam?.(listTabKey, filterParam) || {}),
-        ownerType: 'enterprise',
+        ...(source === 'official' ? { ownerType: 'enterprise' } : {}),
         ...(isEmployeeGroup ? { agentType: '017' } : {}),
         orderField: 'updateTime',
         orderBy: 'desc',
@@ -168,7 +187,17 @@ function AllDigitalEmployees(
         params.catalogId = catalogId;
       }
 
-      return getAllDigitalEmployeesV2(params, abortControllerRef.current)
+      let request;
+      if (source === 'available') {
+        request = queryMyCreatedAndSubscribedAgentsV2(
+          { ...params, agentType: isEmployeeGroup ? '017' : undefined, excludeEmployeeGroup: !isEmployeeGroup },
+          abortControllerRef.current
+        );
+      } else {
+        request = getAllDigitalEmployeesV2(params, abortControllerRef.current);
+      }
+
+      return request
         .then((res) => {
           const { list: responseList, ...rest } = res || {};
           const mappedList = responseList?.map?.((item: IAgent) => agentHandler(item)) || [];
@@ -192,7 +221,7 @@ function AllDigitalEmployees(
           console.error(e);
         });
     },
-    [buildFilterParam, isEmployeeGroup, listTabKey, paginationInfo.pageSize]
+    [buildFilterParam, isEmployeeGroup, listTabKey, paginationInfo.pageSize, source]
   );
 
   const getSearch = React.useCallback(
@@ -279,8 +308,9 @@ function AllDigitalEmployees(
       setList((prevList) => {
         return compact([
           ...prevList.map((item: IAgentCache) => {
+            const itemIdentity = `${item.resourceId ?? item.id ?? item.agentId ?? ''}`;
             if (defaultResourceId) {
-              const isDefault = `${item.resourceId ?? item.id ?? item.agentId}` === `${defaultResourceId}`;
+              const isDefault = itemIdentity === `${defaultResourceId}`;
               return {
                 ...item,
                 isDefault,
@@ -288,13 +318,13 @@ function AllDigitalEmployees(
                 ownerType: !isDefault && item.ownerType === 'personal_default' ? 'personal' : item.ownerType,
               };
             }
-            if (ApplyList.includes(`${item.id}`)) {
+            if (ApplyList.includes(itemIdentity)) {
               return {
                 ...item,
                 approveStatus: 'S',
               };
             }
-            if (unApplyList.includes(`${item.id}`)) {
+            if (unApplyList.includes(itemIdentity)) {
               return {
                 ...item,
                 approveStatus: '',
@@ -333,10 +363,10 @@ function AllDigitalEmployees(
   }, [EventEmitter, curActiveLink, dropdownParam, getSearch, searchName]);
 
   const defaultResourceId = defaultDigEmployeeId || userInfo?.defaultDigEmployeeId;
-  const visibleList = useMemo(
-    () => sortDefaultDigitalEmployeeFirst(list, defaultResourceId),
-    [defaultResourceId, list]
-  );
+  const visibleList = useMemo(() => {
+    const sortedList = sortDefaultDigitalEmployeeFirst(list, defaultResourceId);
+    return source === 'available' ? sortDigitalEmployeeByRecent(sortedList) : sortedList;
+  }, [defaultResourceId, list, source]);
 
   const showNoUsePermissionWarning = React.useCallback(() => {
     message.destroy();
@@ -345,6 +375,10 @@ function AllDigitalEmployees(
 
   const onClickEmployee = React.useCallback(
     (employee: IAgentCache) => {
+      if (onEmployeeClick) {
+        onEmployeeClick(employee);
+        return;
+      }
       if (employee.canApplyUse) {
         showNoUsePermissionWarning();
         return;
@@ -391,6 +425,47 @@ function AllDigitalEmployees(
       showNoUsePermissionWarning,
       trackerEmployeeClick,
       listTabKey,
+      onEmployeeClick,
+    ]
+  );
+
+  const onChatEmployee = React.useCallback(
+    (employee: IAgentCache) => {
+      const normalizedEmployee = agentHandler(employee);
+      const targetId = normalizedEmployee.agentId || normalizedEmployee.id || normalizedEmployee.resourceId;
+      if (!targetId) {
+        message.error(intl.formatMessage({ id: 'digitalEmployees.noPermission' }));
+        return;
+      }
+      trackerEmployeeClick(normalizedEmployee, 'marketAgentRedirect');
+      dispatch({
+        type: 'employees/updateEmployee',
+        payload: { employee: normalizedEmployee },
+      });
+      setAgentId?.(`${targetId}`);
+      setSessionId?.('');
+      const nextSearchParams = new URLSearchParams({
+        tab: listTabKey,
+        [catalogSearchParamKey]: curActiveLink,
+      });
+      navigate(`/employees?${nextSearchParams.toString()}`, {
+        state: {
+          keepSiderActiveKey: 'agent',
+          selectedAgentId: `${targetId}`,
+          selectedEmployee: normalizedEmployee,
+        },
+      });
+    },
+    [
+      catalogSearchParamKey,
+      curActiveLink,
+      dispatch,
+      intl,
+      listTabKey,
+      navigate,
+      setAgentId,
+      setSessionId,
+      trackerEmployeeClick,
     ]
   );
 
@@ -455,48 +530,57 @@ function AllDigitalEmployees(
         EventEmitter.emit('beyond-update-employee', {
           ApplyList: [resourceId],
         });
-
-        getSearch(searchName || '', dropdownParam, 1, curActiveLink);
       } catch (error: any) {
         message.error(error?.message || error || intl.formatMessage({ id: 'common.operateFailed' }));
       }
     },
-    [applyResourceUse, EventEmitter, intl, searchName, dropdownParam, curActiveLink]
+    [EventEmitter, intl]
   );
 
   return (
-    <div className="full-width full-height ub ub-ver">
+    <div
+      className={classnames('full-width ub ub-ver', {
+        'full-height': !compactLayout,
+        [styles.compactLayout]: compactLayout,
+      })}
+    >
       {bannerLoaded && bannerUrl && (
         <div className="mb-16">
           <img className={styles.marketBg} src={bannerUrl} alt="poster" />
         </div>
       )}
+      {!hideCategories && (
+        <div
+          id="guideStep2-5"
+          className={classnames('ub ub-ac gap8', styles.body)}
+          style={{ marginBottom: '16px', minHeight: '35px' }}
+        >
+          <Tabs
+            className={classnames('ub-f1', styles.tabs)}
+            activeKey={curActiveLink}
+            items={myEmployeesTypeList.map((_) => {
+              return {
+                label: _.dirName,
+                key: `${_.catalogId}`,
+              };
+            })}
+            onChange={(activeKey) => {
+              const nextActiveKey = `${activeKey}`;
+              const nextSearchParams = new URLSearchParams(searchParams);
+              nextSearchParams.set(catalogSearchParamKey, nextActiveKey);
+              setCurActiveLink(nextActiveKey);
+              setSearchParams(nextSearchParams);
+              getSearch(searchName || '', dropdownParam, 1, activeKey);
+            }}
+          />
+        </div>
+      )}
       <div
-        id="guideStep2-5"
-        className={classnames('ub ub-ac gap8', styles.body)}
-        style={{ marginBottom: '16px', minHeight: '35px' }}
+        className={classnames('ub ub-ver overflow-auto hideThumb', { 'ub-f1': !compactLayout })}
+        style={{ position: 'relative', maxHeight: compactLayout ? 'none' : undefined }}
+        id={scrollableTarget ? undefined : scrollerId}
       >
-        <Tabs
-          className={classnames('ub-f1', styles.tabs)}
-          activeKey={curActiveLink}
-          items={myEmployeesTypeList.map((_) => {
-            return {
-              label: _.dirName,
-              key: `${_.catalogId}`,
-            };
-          })}
-          onChange={(activeKey) => {
-            const nextActiveKey = `${activeKey}`;
-            const nextSearchParams = new URLSearchParams(searchParams);
-            nextSearchParams.set(catalogSearchParamKey, nextActiveKey);
-            setCurActiveLink(nextActiveKey);
-            setSearchParams(nextSearchParams);
-            getSearch(searchName || '', dropdownParam, 1, activeKey);
-          }}
-        />
-      </div>
-      <div className="ub ub-f1 ub-ver overflow-auto hideThumb" style={{ position: 'relative' }} id={scrollerId}>
-        <div className={classnames(styles.sectionsContainer, 'ub-f1')}>
+        <div className={classnames(styles.sectionsContainer, { 'ub-f1': !compactLayout })}>
           <Spin
             wrapperClassName={styles.spinningWrapper}
             tip={intl.formatMessage({ id: 'common.loading' })}
@@ -524,7 +608,7 @@ function AllDigitalEmployees(
                   </div>
                 }
                 dataLength={list.length}
-                scrollableTarget={scrollerId}
+                scrollableTarget={scrollableTarget || scrollerId}
                 className={classnames(styles.messageRowWrap, { [styles.hasMore]: hasMore })}
                 scrollThreshold="50px"
                 hasChildren={list.length > 0}
@@ -544,10 +628,10 @@ function AllDigitalEmployees(
                           <div className={styles.employeeAvatar}>{getAgentChatAvatar(employee.chatAvatar)}</div>
                         }
                         onCardClick={(resource) => onClickEmployee((resource as IAgentCache) || employee)}
-                        cardClickDisabled={(resource) => !!resource.canApplyUse}
-                        onCardClickDisabled={showNoUsePermissionWarning}
+                        digitalEmployeeActionMode
                         actionConfig={{
                           scene: 'enterprise',
+                          onChat: () => onChatEmployee(employee),
                           onEdit: () => onEditEmployee(employee),
                           onAuth: (type: any) => onAuthEmployee(employee, type),
                           onApplyUse: () => onApplyEmployee(employee),

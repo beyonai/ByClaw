@@ -198,7 +198,7 @@ export default {
   'resource.systemBuiltin': '系统内置',
   'resource.personalDefaultAssistant': '默认个人助理',
   'resource.defaultPersonalAssistant': '默认个人助理',
-  'resource.defaultDigitalEmployee': '默认数字员工',
+  'resource.defaultDigitalEmployee': '默认',
   'resource.personalDefaultKnowledgeDoc': '默认知识库',
   'resource.personalDefaultKnowledgeDeleteNotAllowed': '默认个人知识库不允许删除',
   'resource.personalAssistant': '个人助理',
@@ -504,6 +504,9 @@ export default {
   'chatResource.file': '文件',
   'chatResource.sessionFile': '会话文件',
   'chatResource.projectFile': '项目文件',
+  'chatResource.processFile': '过程文件',
+  'chatResource.localSharedFile': '本地共享文件',
+  'chatResource.projectCloudDrive': '项目云盘',
   'chatResource.projectKnowledge': '项目知识',
   'chatResource.resizeSections': '调整会话与项目资源区域高度',
   'chatResource.knowledge': '知识',
@@ -869,6 +872,10 @@ export default {
   'digitalEmployees.createPersonal': '创建个人助理',
   'digitalEmployees.createGroup': '创建数字员工组',
   'digitalEmployees.employeeGroup': '数字员工组',
+  'digitalEmployees.tag.personalEmployee': '个人数字员工',
+  'digitalEmployees.tag.enterpriseEmployee': '企业数字员工',
+  'digitalEmployees.tag.personalGroup': '个人数字员工组',
+  'digitalEmployees.tag.enterpriseGroup': '企业数字员工组',
   'employeeDetail.groupMember.title': '配置组成员',
   'employeeDetail.groupMember.hint': '选择可调度的数字员工，并配置其团队角色和顺序',
   'employeeDetail.groupMember.select': '选择数字员工',
@@ -1979,11 +1986,6 @@ export default {
   'projectSpace.members.confirmUnbind': '确定解绑',
   'projectSpace.members.unbindSuccess': '数字员工解绑成功',
   'projectSpace.members.unbindFailed': '数字员工解绑失败',
-  'projectSpace.github.notConfigured': '未配置 GitHub Token，点击配置后才能读取代码仓库和变更。',
-  'projectSpace.github.configure': '配置 GitHub Token',
-  'projectSpace.github.saveSuccess': 'GitHub Token 已保存',
-  'projectSpace.github.saveFailed': 'GitHub Token 保存失败',
-  'projectSpace.github.placeholder': '请输入 GitHub Personal Access Token',
   // 运营项目账号、任务编排与工作流
   'projectSpace.operation.platform.all': '全部账号',
   'projectSpace.operation.platform.wechat': '微信公众号',
@@ -3101,14 +3103,6 @@ export default {
   'projectSpace.detail.requirement.addMenu.chatDesc': '进入项目会话，聊完沉淀为需求',
   // 聊天录入进入新会话后的引导:告诉用户直接聊需求,聊清楚后在回答下方沉淀为需求。
   'projectSpace.detail.requirement.addMenu.chatTip': '直接把想法聊给我，聊清楚后在回答下方点「沉淀为需求」即可入库',
-  // 研发项目 GH_TOKEN 未配置提醒:提醒条 + 点击后的友好引导弹窗。以提醒为主,不强制。
-  'projectSpace.detail.githubToken.reminder.alert':
-    '研发项目需要 GitHub 访问令牌（GH_TOKEN）才能拉取和推送代码，你还没有配置，点此前往设置',
-  'projectSpace.detail.githubToken.reminder.title': '配置 GitHub 访问令牌',
-  'projectSpace.detail.githubToken.reminder.content':
-    '研发项目在克隆和推送私有仓库时需要用到你的 GitHub 访问令牌（GH_TOKEN）。它保存在「个人参数配置」里，仅你可见。现在去配置一下吧，配置后即可正常运行研发任务。',
-  'projectSpace.detail.githubToken.reminder.goSetting': '去设置',
-  'projectSpace.detail.githubToken.reminder.later': '稍后再说',
   // Markdown 编辑器
   'markdownField.insertImage': '插入图片',
   'markdownField.insertFile': '插入附件',

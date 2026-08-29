@@ -14,6 +14,8 @@ import com.iwhalecloud.byai.common.ecrypt.Sm4Util;
 import com.iwhalecloud.byai.manager.application.service.user.UserPrivateParamApplicationService;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatus;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatusResult;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialProjectionEvent;
+import com.iwhalecloud.byai.manager.domain.connector.manifest.ConnectorManifestCanonicalizer.CredentialProjectionSpec;
 import com.iwhalecloud.byai.manager.domain.connector.manifest.InvalidConnectorManifestException;
 import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorAuth;
@@ -27,6 +29,7 @@ import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.context.ApplicationEventPublisher;
 
 class ConnectorConnectionStateServiceTest {
 
@@ -39,6 +42,7 @@ class ConnectorConnectionStateServiceTest {
     private ConnectorManifestService manifestService;
     private UserService userService;
     private UserPrivateParamApplicationService privateParamService;
+    private ApplicationEventPublisher eventPublisher;
     private ConnectorConnectionStateService service;
 
     @BeforeEach
@@ -49,13 +53,15 @@ class ConnectorConnectionStateServiceTest {
         manifestService = mock(ConnectorManifestService.class);
         userService = mock(UserService.class);
         privateParamService = mock(UserPrivateParamApplicationService.class);
+        eventPublisher = mock(ApplicationEventPublisher.class);
         service = new ConnectorConnectionStateService(
             connectorAuthMapper,
             connectorInfoMapper,
             sequenceService,
             manifestService,
             userService,
-            privateParamService
+            privateParamService,
+            eventPublisher
         );
         when(connectorAuthMapper.insertActiveIgnoreConflict(any())).thenReturn(1);
         when(connectorAuthMapper.updateById(any())).thenReturn(1);
@@ -92,6 +98,45 @@ class ConnectorConnectionStateServiceTest {
             .contains("authorization-1", "workspace-ref", "ou_1001");
         verify(manifestService).upsertAndEnable(1001L, connector);
         verify(privateParamService).refreshPrivateParamCacheAfterCommit(1001L, "tester");
+    }
+
+    @Test
+    void manifestProjectedAuthorizationPublishesCredentialProjectionAfterStateWrite() {
+        ConnectorInfo connector = connector();
+        connector.setConnectorCode("github");
+        connector.setProviderCode("github-oauth2");
+        when(connectorAuthMapper.selectOne(any())).thenReturn(null);
+        when(sequenceService.nextVal()).thenReturn(8100L);
+        when(manifestService.upsertAndEnable(1001L, connector)).thenReturn(false);
+        when(manifestService.credentialProjection(connector)).thenReturn(java.util.Optional.of(
+            new CredentialProjectionSpec("/by/.connector-auth/.github/credential.json")));
+
+        service.saveEnabledAuthorization(USER_ID, connector, new AuthorizationStatusResult(
+            AuthorizationStatus.CONNECTED, "42", "octocat", null, "credential-ref", null, null), "auth-id");
+
+        ArgumentCaptor<Object> event = ArgumentCaptor.forClass(Object.class);
+        verify(eventPublisher).publishEvent(event.capture());
+        assertThat(event.getValue()).isEqualTo(new ConnectorCredentialProjectionEvent(
+            1001L, CONNECTOR_ID, ConnectorCredentialProjectionEvent.Action.SYNC));
+    }
+
+    @Test
+    void disablingManifestProjectedConnectorPublishesProjectionDeletion() {
+        ConnectorInfo connector = connector();
+        connector.setConnectorCode("github");
+        connector.setProviderCode("github-oauth2");
+        ConnectorAuth auth = activeAuth();
+        auth.setEnableFlag("Y");
+        when(connectorAuthMapper.selectOne(any())).thenReturn(auth);
+        when(connectorInfoMapper.selectById(CONNECTOR_ID)).thenReturn(connector);
+        when(manifestService.disable(1001L, connector)).thenReturn(false);
+        when(manifestService.credentialProjection(connector)).thenReturn(java.util.Optional.of(
+            new CredentialProjectionSpec("/by/.connector-auth/.github/credential.json")));
+
+        service.updateEnableFlag(USER_ID, CONNECTOR_ID, false);
+
+        verify(eventPublisher).publishEvent(new ConnectorCredentialProjectionEvent(
+            1001L, CONNECTOR_ID, ConnectorCredentialProjectionEvent.Action.DELETE));
     }
 
     @Test

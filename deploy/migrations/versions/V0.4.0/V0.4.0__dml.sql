@@ -1,28 +1,18 @@
 
 -- GitHub OAuth2 连接器。仅记录部署环境变量名，Client Secret 不进入数据库或 Runtime Manifest。
+DELETE FROM byai.byai_connector_info
+WHERE connector_code = 'github';
+
 INSERT INTO byai.byai_connector_info (
     connector_id, connector_code, connector_name, description, connector_type,
     provider_code, skill_code, auth_mode, auth_config, request_config, runtime_manifest, sort
 )
-SELECT nextval('byai.seq_any_table'), 'github', 'GitHub', '通过 OAuth2 连接 GitHub 用户账号', 'SYSTEM',
+VALUES (nextval('byai.seq_any_table'), 'github', 'GitHub', '通过 OAuth2 连接 GitHub 用户账号', 'SYSTEM',
        'github-oauth2', 'github', 'OAUTH2',
        '{"clientIdEnv":"GITHUB_OAUTH_CLIENT_ID","clientSecretEnv":"GITHUB_OAUTH_CLIENT_SECRET","redirectUriEnv":"GITHUB_OAUTH_REDIRECT_URI","scope":"read:user repo"}',
        '{}',
-       '{"schemaVersion":"1.0","id":"github","version":"1.0.0","runtime":{"type":"oauth2","authorizeIn":"be-auth-job"},"authStorage":{"mode":"credential-reference","owner":"be-auth-job","runtimeMutation":"provider-refresh-only","environment":{}},"skill":{"code":"github","source":"system-builtin","installScope":"user","grantScope":"agent"}}',
-       40
-WHERE NOT EXISTS (
-    SELECT 1 FROM byai.byai_connector_info WHERE connector_code = 'github'
-);
-
-UPDATE byai.byai_connector_info
-SET provider_code = 'github-oauth2',
-    skill_code = 'github',
-    auth_mode = 'OAUTH2',
-    auth_config = '{"clientIdEnv":"GITHUB_OAUTH_CLIENT_ID","clientSecretEnv":"GITHUB_OAUTH_CLIENT_SECRET","redirectUriEnv":"GITHUB_OAUTH_REDIRECT_URI","scope":"read:user repo"}',
-    request_config = '{}',
-    runtime_manifest = '{"schemaVersion":"1.0","id":"github","version":"1.0.0","runtime":{"type":"oauth2","authorizeIn":"be-auth-job"},"authStorage":{"mode":"credential-reference","owner":"be-auth-job","runtimeMutation":"provider-refresh-only","environment":{}},"skill":{"code":"github","source":"system-builtin","installScope":"user","grantScope":"agent"}}',
-    update_time = CURRENT_TIMESTAMP
-WHERE connector_code = 'github';
+       '{"schemaVersion":"1.0","id":"github","version":"1.0.0","runtime":{"type":"oauth2","authorizeIn":"be-auth-job"},"authStorage":{"mode":"credential-reference","owner":"be-auth-job","runtimeMutation":"shared-volume-projection","projectionPath":"/by/.connector-auth/.github/credential.json","environment":{}},"skill":{"code":"github","source":"system-builtin","installScope":"user","grantScope":"agent"}}',
+       40);
 
 -- IMA OpenAPI 连接器。凭据仅由后续用户私有参数流程写入，迁移仅声明前端表单与受管环境白名单。
 INSERT INTO byai.byai_connector_info (
@@ -395,7 +385,7 @@ delete from byai.byai_ai_prompt where prompt_code in
     ('DEVLOOP_TASK_START_PROMPT', 'DEVLOOP_REQUIREMENT_SCORE_PROMPT', 'DEVLOOP_REQUIREMENT_SPLIT_SCORE_PROMPT');
 
 INSERT INTO byai.byai_ai_prompt (prompt_id, prompt_group_code, prompt_code, prompt_name, prompt_desc, prompt_filed_code, prompt_zh_template, prompt_en_template, create_by, create_time, update_time, model_code)
-VALUES (nextval('byai.seq_any_table'), 'DEVLOOP_PROMPT', 'DEVLOOP_TASK_START_PROMPT', '研发任务启动提示词', '研发闭环任务启动提示词模板，占位符 ${projectName} ${repoFullName} ${branchName} ${taskType} ${title} ${description} ${repoCloneHint}(后端按代码平台生成带令牌的克隆说明)', 'DEVLOOP_TASK_START_PROMPT', '请处理以下任务：
+VALUES (nextval('byai.seq_any_table'), 'DEVLOOP_PROMPT', 'DEVLOOP_TASK_START_PROMPT', '研发任务启动提示词', '研发闭环任务启动提示词模板，占位符 ${projectName} ${repoFullName} ${branchName} ${taskType} ${title} ${description} ${repoCloneHint}(后端按代码平台生成安全克隆说明)', 'DEVLOOP_TASK_START_PROMPT', '请处理以下任务：
 ## 任务信息
 - 项目：${projectName}
 - 代码仓库：${repoFullName}

@@ -36,42 +36,69 @@ public class FileBrowserApplicationService {
     }
 
     public List<FileBrowserItemVo> list(String userCode, Long resourceId, String relativePath) {
-        return providerFactory.getProvider().list(userCode, resourceId, relativePath);
+        FileBrowserPathPolicy.assertBrowsable(relativePath);
+        return providerFactory.getProvider().list(userCode, resourceId, relativePath).stream()
+            .filter(item -> !FileBrowserPathPolicy.isProtected(item.getPath()))
+            .toList();
     }
 
     public void upload(String userCode, Long resourceId, String relativePath, MultipartFile[] files) throws Exception {
+        FileBrowserPathPolicy.assertBrowsable(relativePath);
+        if (files != null) {
+            for (MultipartFile file : files) {
+                if (file != null) {
+                    FileBrowserPathPolicy.assertNoProtectedIntersection(
+                        resolveChildPath(relativePath, file.getOriginalFilename()));
+                }
+            }
+        }
         providerFactory.getProvider().upload(userCode, resourceId, relativePath, files);
         byClawSkillResourceApplicationService.registerFileManagedSkills(userCode, resourceId, relativePath,
             files == null ? java.util.Collections.emptyList() : java.util.Arrays.asList(files));
     }
 
     public InputStream download(String userCode, Long resourceId, String relativePath) {
+        FileBrowserPathPolicy.assertBrowsable(relativePath);
         return providerFactory.getProvider().download(userCode, resourceId, relativePath);
     }
 
     public void delete(String userCode, Long resourceId, List<String> relativePaths) {
         assertNotResourceManagedPath(relativePaths);
+        assertNoProtectedIntersection(relativePaths);
         providerFactory.getProvider().delete(userCode, resourceId, relativePaths);
     }
 
     public void rename(String userCode, Long resourceId, String sourcePath, String newName) {
         assertNotResourceManagedPath(List.of(sourcePath));
+        FileBrowserPathPolicy.assertNoProtectedIntersection(sourcePath);
+        FileBrowserPathPolicy.assertBrowsable(resolveSiblingPath(sourcePath, newName));
         providerFactory.getProvider().rename(userCode, resourceId, sourcePath, newName);
     }
 
     public void move(String userCode, Long resourceId, List<String> sourcePaths, String targetDirectory) {
         assertNotResourceManagedPath(sourcePaths);
         assertNotResourceManagedPath(List.of(targetDirectory));
+        assertNoProtectedIntersection(sourcePaths);
+        FileBrowserPathPolicy.assertBrowsable(targetDirectory);
+        for (String sourcePath : sourcePaths) {
+            FileBrowserPathPolicy.assertNoProtectedIntersection(
+                resolveChildPath(targetDirectory, fileName(sourcePath)));
+        }
         providerFactory.getProvider().move(userCode, resourceId, sourcePaths, targetDirectory);
     }
 
     public void copy(String userCode, Long resourceId, String sourcePath, String targetDirectory) {
+        FileBrowserPathPolicy.assertNoProtectedIntersection(sourcePath);
+        FileBrowserPathPolicy.assertBrowsable(targetDirectory);
+        FileBrowserPathPolicy.assertNoProtectedIntersection(
+            resolveChildPath(targetDirectory, fileName(sourcePath)));
         FileBrowserProvider provider = providerFactory.getProvider();
         ensureFolder(userCode, resourceId, targetDirectory);
         provider.copy(userCode, resourceId, sourcePath, targetDirectory);
     }
 
     public void createFolder(String userCode, Long resourceId, String relativePath) {
+        FileBrowserPathPolicy.assertBrowsable(relativePath);
         providerFactory.getProvider().createFolder(userCode, resourceId, relativePath);
     }
 
@@ -79,6 +106,7 @@ public class FileBrowserApplicationService {
      * 幂等确保文件夹存在。按层级逐级创建，避免 .shared/.log 这类系统目录因父目录缺失而创建失败。
      */
     public void ensureFolder(String userCode, Long resourceId, String relativePath) {
+        FileBrowserPathPolicy.assertBrowsable(relativePath);
         String normalizedPath = normalizeDirPath(relativePath);
         if ("/".equals(normalizedPath)) {
             return;
@@ -102,10 +130,14 @@ public class FileBrowserApplicationService {
     }
 
     public List<FileBrowserItemVo> search(String userCode, Long resourceId, String relativePath, String keyword) {
-        return providerFactory.getProvider().search(userCode, resourceId, relativePath, keyword);
+        FileBrowserPathPolicy.assertBrowsable(relativePath);
+        return providerFactory.getProvider().search(userCode, resourceId, relativePath, keyword).stream()
+            .filter(item -> !FileBrowserPathPolicy.isProtected(item.getPath()))
+            .toList();
     }
 
     public void downloadFolder(String userCode, Long resourceId, String relativePath, OutputStream outputStream) throws IOException {
+        FileBrowserPathPolicy.assertNoProtectedIntersection(relativePath);
         providerFactory.getProvider().downloadFolder(userCode, resourceId, relativePath, outputStream);
     }
 
@@ -158,6 +190,34 @@ public class FileBrowserApplicationService {
                     normalizedPath));
             }
         }
+    }
+
+    private void assertNoProtectedIntersection(List<String> paths) {
+        if (paths != null) {
+            paths.forEach(FileBrowserPathPolicy::assertNoProtectedIntersection);
+        }
+    }
+
+    private String resolveSiblingPath(String sourcePath, String newName) {
+        String normalizedSource = FileBrowserPathPolicy.normalize(sourcePath);
+        int slash = normalizedSource.lastIndexOf('/');
+        String parent = slash <= 0 ? "" : normalizedSource.substring(0, slash);
+        return resolveChildPath(parent, newName);
+    }
+
+    private String resolveChildPath(String parentPath, String childName) {
+        if (StringUtils.isBlank(childName) || childName.contains("/") || childName.contains("\\")
+                || childName.contains("..")) {
+            throw new IllegalArgumentException("非法文件名: " + childName);
+        }
+        String parent = FileBrowserPathPolicy.normalize(parentPath);
+        return "/".equals(parent) ? "/" + childName : parent + "/" + childName;
+    }
+
+    private String fileName(String path) {
+        String normalized = FileBrowserPathPolicy.normalize(path);
+        int slash = normalized.lastIndexOf('/');
+        return normalized.substring(slash + 1);
     }
 
     private boolean isResourceManagedSkillPath(String normalizedPath) {

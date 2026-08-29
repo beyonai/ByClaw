@@ -8,8 +8,8 @@ import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.storage.UserFS;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxUserContextRunner;
 import com.iwhalecloud.byai.manager.application.service.devloop.DevloopApplicationService;
+import com.iwhalecloud.byai.manager.application.service.devloop.GitHubCredentialResolver;
 import com.iwhalecloud.byai.manager.application.service.devloop.IntegrationRunAsyncConfig;
-import com.iwhalecloud.byai.manager.application.service.job.DevloopPatService;
 import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
 import com.iwhalecloud.byai.manager.domain.devloop.exec.CommandExecSpec;
 import com.iwhalecloud.byai.manager.domain.devloop.exec.CommandRunner;
@@ -163,7 +163,7 @@ public class IntegrationRunExecutor {
     private LoginApplicationService loginApplicationService;
 
     @Autowired
-    private DevloopPatService patService;
+    private GitHubCredentialResolver githubCredentialResolver;
 
     @Autowired
     private ScanItemTaskService scanItemTaskService;
@@ -322,7 +322,7 @@ public class IntegrationRunExecutor {
             return checkout;
         }
         // 私有仓库令牌:取触发用户配置的 PAT,未配置则按公开仓库尝试(clone 失败时会落到 step 日志里)。
-        checkout.token = patService.getGitHubPat(run.getCreateBy() == null ? null : String.valueOf(run.getCreateBy()));
+        checkout.token = githubCredentialResolver.resolve(run.getCreateBy());
         return checkout;
     }
 

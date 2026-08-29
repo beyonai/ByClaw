@@ -20,4 +20,9 @@ public class ResourceUseApplyQo {
      */
     @NotNull(message = "resourceId不能为空")
     private Long resourceId;
+
+    /**
+     * 是否查询已处理的历史申请。未传或 false 时仅查询待审核申请。
+     */
+    private Boolean history;
 }

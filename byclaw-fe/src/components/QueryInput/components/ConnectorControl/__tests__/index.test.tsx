@@ -512,6 +512,59 @@ describe('ConnectorControl authorization states', () => {
     expect(screen.getByRole('dialog', { name: '连接器设置' })).toBeInTheDocument();
   });
 
+  it('prioritizes enabled connectors in the three-item chat preview', async () => {
+    mockQueryConnectorList.mockResolvedValue({
+      list: [
+        {
+          connectorId: 1,
+          connectorCode: 'lark',
+          connectorName: '飞书',
+          connectorType: 'SYSTEM',
+          description: '',
+          enableFlag: null,
+        },
+        {
+          connectorId: 2,
+          connectorCode: 'wecom',
+          connectorName: '企业微信',
+          connectorType: 'SYSTEM',
+          description: '',
+          enableFlag: null,
+        },
+        {
+          connectorId: 3,
+          connectorCode: 'dingtalk',
+          connectorName: '钉钉',
+          connectorType: 'SYSTEM',
+          description: '',
+          enableFlag: null,
+        },
+        {
+          connectorId: 4,
+          connectorCode: 'github',
+          connectorName: 'GitHub',
+          connectorType: 'SYSTEM',
+          description: '',
+          enableFlag: 'Y',
+        },
+      ],
+      pageNum: 1,
+      pageSize: 100,
+      total: 4,
+      totalPages: 1,
+    });
+
+    render(<ConnectorControl canAuthorize />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '查看已连接连接器' }));
+    const dialog = screen.getByRole('dialog', { name: '连接器设置' });
+
+    expect(await within(dialog).findByText('GitHub')).toBeInTheDocument();
+    expect(within(dialog).getByText('飞书')).toBeInTheDocument();
+    expect(within(dialog).getByText('企业微信')).toBeInTheDocument();
+    expect(within(dialog).queryByText('钉钉')).not.toBeInTheDocument();
+  });
+
   it('does not show the view-all action when the connector list is empty', async () => {
     mockQueryConnectorList.mockResolvedValue({
       list: [],

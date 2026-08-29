@@ -500,6 +500,9 @@ export default {
   'chatResource.file': 'Files',
   'chatResource.sessionFile': 'Session Files',
   'chatResource.projectFile': 'Project Files',
+  'chatResource.processFile': 'Process Files',
+  'chatResource.localSharedFile': 'Local Shared Files',
+  'chatResource.projectCloudDrive': 'Project Drive',
   'chatResource.projectKnowledge': 'Project Knowledge',
   'chatResource.resizeSections': 'Resize session and project resource sections',
   'chatResource.knowledge': 'Knowledge',
@@ -871,6 +874,10 @@ export default {
   'digitalEmployees.createPersonal': 'Create',
   'digitalEmployees.createGroup': 'Create',
   'digitalEmployees.employeeGroup': 'Groups',
+  'digitalEmployees.tag.personalEmployee': 'Personal Employee',
+  'digitalEmployees.tag.enterpriseEmployee': 'Enterprise Employee',
+  'digitalEmployees.tag.personalGroup': 'Personal Employee Group',
+  'digitalEmployees.tag.enterpriseGroup': 'Enterprise Employee Group',
   'employeeDetail.groupMember.title': 'Configure Group Members',
   'employeeDetail.groupMember.hint': 'Choose routable digital employees and set their team roles and order',
   'employeeDetail.groupMember.select': 'Select Digital Employees',
@@ -2003,11 +2010,6 @@ export default {
   'projectSpace.members.confirmUnbind': 'Confirm unbinding',
   'projectSpace.members.unbindSuccess': 'Digital employee unbound',
   'projectSpace.members.unbindFailed': 'Failed to unbind digital employee',
-  'projectSpace.github.notConfigured': 'Configure a GitHub token to read code repositories and changes.',
-  'projectSpace.github.configure': 'Configure GitHub token',
-  'projectSpace.github.saveSuccess': 'GitHub token saved',
-  'projectSpace.github.saveFailed': 'Failed to save GitHub token',
-  'projectSpace.github.placeholder': 'Enter a GitHub Personal Access Token',
   // Ops project accounts, task orchestration, and workflows
   'projectSpace.operation.platform.all': 'All accounts',
   'projectSpace.operation.platform.wechat': 'WeChat OA',
@@ -3160,14 +3162,6 @@ export default {
   'projectSpace.detail.requirement.addMenu.chatDesc': 'Open a project session and capture it as a requirement',
   'projectSpace.detail.requirement.addMenu.chatTip':
     'Just chat your idea to me; once it is clear, tap "Capture as requirement" under a reply to save it',
-  // GH_TOKEN reminder for develop projects: an alert plus a friendly guide dialog. Reminder only, not enforced.
-  'projectSpace.detail.githubToken.reminder.alert':
-    'Develop projects need a GitHub access token (GH_TOKEN) to pull and push code. You have not set one yet — click here to go to settings',
-  'projectSpace.detail.githubToken.reminder.title': 'Set up your GitHub access token',
-  'projectSpace.detail.githubToken.reminder.content':
-    'Develop projects use your GitHub access token (GH_TOKEN) to clone and push private repositories. It lives in Personal Parameters and is visible only to you. Set it up now so develop tasks can run smoothly.',
-  'projectSpace.detail.githubToken.reminder.goSetting': 'Go to settings',
-  'projectSpace.detail.githubToken.reminder.later': 'Maybe later',
   // Markdown editor
   'markdownField.insertImage': 'Insert image',
   'markdownField.insertFile': 'Insert attachment',

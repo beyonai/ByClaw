@@ -226,8 +226,9 @@ function EmployeeRelatedToMe(props: IProps, ref: any) {
       setList((prevList) => {
         return compact([
           ...prevList.map((item: IAgentCache) => {
+            const itemIdentity = `${item.resourceId ?? item.id ?? item.agentId ?? ''}`;
             if (defaultResourceId) {
-              const isDefault = `${item.resourceId ?? item.id ?? item.agentId}` === `${defaultResourceId}`;
+              const isDefault = itemIdentity === `${defaultResourceId}`;
               return {
                 ...item,
                 isDefault,
@@ -235,13 +236,13 @@ function EmployeeRelatedToMe(props: IProps, ref: any) {
                 ownerType: !isDefault && item.ownerType === 'personal_default' ? 'personal' : item.ownerType,
               };
             }
-            if (ApplyList.includes(`${item.id}`)) {
+            if (ApplyList.includes(itemIdentity)) {
               return {
                 ...item,
                 approveStatus: 'S',
               };
             }
-            if (unApplyList.includes(`${item.id}`)) {
+            if (unApplyList.includes(itemIdentity)) {
               return {
                 ...item,
                 approveStatus: '',
@@ -318,6 +319,25 @@ function EmployeeRelatedToMe(props: IProps, ref: any) {
       message.error(intl.formatMessage({ id: 'digitalEmployees.noPermission' }));
     },
     [curActiveLink, dispatch, intl, navigate, setAgentId, setSessionId, trackerEmployeeClick]
+  );
+
+  const onChatEmployee = React.useCallback(
+    (employee: IAgentCache) => {
+      const normalizedEmployee = agentHandler(employee);
+      const targetId = normalizedEmployee.agentId || normalizedEmployee.id || normalizedEmployee.resourceId;
+      if (!targetId) return;
+      dispatch({ type: 'employees/updateEmployee', payload: { employee: normalizedEmployee } });
+      setAgentId?.(`${targetId}`);
+      setSessionId?.('');
+      navigate(`/employees?tab=personal&personalCatalogId=${curActiveLink}`, {
+        state: {
+          keepSiderActiveKey: 'agent',
+          selectedAgentId: `${targetId}`,
+          selectedEmployee: normalizedEmployee,
+        },
+      });
+    },
+    [curActiveLink, dispatch, navigate, setAgentId, setSessionId]
   );
 
   const onEditEmployee = React.useCallback(
@@ -454,8 +474,10 @@ function EmployeeRelatedToMe(props: IProps, ref: any) {
                           <div className={styles.employeeAvatar}>{getAgentChatAvatar(employee.chatAvatar)}</div>
                         }
                         onCardClick={(resource) => onClickEmployee((resource as IAgentCache) || employee)}
+                        digitalEmployeeActionMode
                         actionConfig={{
                           scene: 'personal',
+                          onChat: () => onChatEmployee(employee),
                           onEdit: () => onEditEmployee(employee),
                           onAuth: (type: any) => onAuthEmployee(employee, type),
                           onApplyUse: () => onApplyEmployee(employee),

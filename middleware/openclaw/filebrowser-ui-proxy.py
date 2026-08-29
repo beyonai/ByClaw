@@ -19,6 +19,8 @@ TEXT_EXTENSIONS = {
     ".log", ".md", ".mjs", ".py", ".sh", ".ts", ".tsx", ".txt", ".xml", ".yaml", ".yml",
 }
 
+PROTECTED_VIRTUAL_ROOTS = ("/.connector-auth", "/by/.connector-auth")
+
 
 def normalize_baseurl(value):
     value = (value or "/filebrowser").strip()
@@ -79,6 +81,14 @@ def path_matches_allowed_roots(normalized, allowed_roots):
         if normalized == pattern or normalized.startswith(pattern.rstrip("/") + "/"):
             return True
     return False
+
+
+def is_protected_virtual_path(value):
+    normalized = normalize_user_path(value)
+    return any(
+        normalized == root or normalized.startswith(root.rstrip("/") + "/")
+        for root in PROTECTED_VIRTUAL_ROOTS
+    )
 
 
 def json_bytes(payload):
@@ -153,7 +163,7 @@ class FileBrowserUIHandler(BaseHTTPRequestHandler):
             self.handle_api(path[len(self.baseurl + "/openclaw-api"):], parsed.query)
             return
         if path.startswith(self.baseurl + "/api/"):
-            self.proxy_to_upstream()
+            self.send_error_json(404, "native file API is disabled")
             return
         if path.startswith(self.baseurl + "/static/"):
             self.proxy_to_upstream()
@@ -219,6 +229,8 @@ class FileBrowserUIHandler(BaseHTTPRequestHandler):
         normalized = normalize_user_path(user_path)
         if normalized == "/":
             normalized = self.default_path
+        if is_protected_virtual_path(normalized):
+            raise PermissionError("system credential directory is not accessible")
         if not self.is_allowed_path(normalized):
             raise PermissionError("path is outside workspace")
         target = os.path.join(self.root, normalized.lstrip("/"))
@@ -316,6 +328,8 @@ class FileBrowserUIHandler(BaseHTTPRequestHandler):
                 continue
             child = os.path.join(target, name)
             try:
+                if is_protected_virtual_path(self.rel_path(child)):
+                    continue
                 items.append(self.file_payload(child))
             except OSError:
                 continue

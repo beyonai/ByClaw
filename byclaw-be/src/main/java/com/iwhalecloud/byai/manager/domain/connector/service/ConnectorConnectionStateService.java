@@ -19,6 +19,10 @@ import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.beans.factory.annotation.Autowired;
+
+import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialProjectionEvent;
 
 /** 在同一事务中维护连接器授权绑定和用户 Runtime Manifest 快照。 */
 @Service
@@ -30,6 +34,25 @@ public class ConnectorConnectionStateService {
     private final ConnectorManifestService manifestService;
     private final UserService userService;
     private final UserPrivateParamApplicationService privateParamService;
+    private final ApplicationEventPublisher eventPublisher;
+
+    @Autowired
+    public ConnectorConnectionStateService(
+            ConnectorAuthMapper connectorAuthMapper,
+            ConnectorInfoMapper connectorInfoMapper,
+            SequenceService sequenceService,
+            ConnectorManifestService manifestService,
+            UserService userService,
+            UserPrivateParamApplicationService privateParamService,
+            ApplicationEventPublisher eventPublisher) {
+        this.connectorAuthMapper = connectorAuthMapper;
+        this.connectorInfoMapper = connectorInfoMapper;
+        this.sequenceService = sequenceService;
+        this.manifestService = manifestService;
+        this.userService = userService;
+        this.privateParamService = privateParamService;
+        this.eventPublisher = eventPublisher;
+    }
 
     public ConnectorConnectionStateService(
             ConnectorAuthMapper connectorAuthMapper,
@@ -38,12 +61,8 @@ public class ConnectorConnectionStateService {
             ConnectorManifestService manifestService,
             UserService userService,
             UserPrivateParamApplicationService privateParamService) {
-        this.connectorAuthMapper = connectorAuthMapper;
-        this.connectorInfoMapper = connectorInfoMapper;
-        this.sequenceService = sequenceService;
-        this.manifestService = manifestService;
-        this.userService = userService;
-        this.privateParamService = privateParamService;
+        this(connectorAuthMapper, connectorInfoMapper, sequenceService, manifestService, userService,
+            privateParamService, event -> { });
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -66,6 +85,7 @@ public class ConnectorConnectionStateService {
             auth = insertOrUpdateWinner(auth, userId, connector, statusResult, authorizationId, now);
         }
         scheduleCacheRefresh(manifestChanged, user);
+        publishCredentialProjection(user.userId(), connector, ConnectorCredentialProjectionEvent.Action.SYNC);
         return auth;
     }
 
@@ -112,6 +132,9 @@ public class ConnectorConnectionStateService {
         auth.setUpdateTime(new Date());
         requireSingleAffectedRow(connectorAuthMapper.updateById(auth));
         scheduleCacheRefresh(manifestChanged, user);
+        publishCredentialProjection(user.userId(), connector, enabled
+            ? ConnectorCredentialProjectionEvent.Action.SYNC
+            : ConnectorCredentialProjectionEvent.Action.DELETE);
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -146,6 +169,7 @@ public class ConnectorConnectionStateService {
             requireSingleAffectedRow(connectorAuthMapper.updateById(auth));
         }
         scheduleCacheRefresh(manifestChanged, user);
+        publishCredentialProjection(user.userId(), connector, ConnectorCredentialProjectionEvent.Action.DELETE);
     }
 
     public ConnectorAuth findEnabledActiveAuthorization(String userId, Long connectorId) {
@@ -259,6 +283,21 @@ public class ConnectorConnectionStateService {
     private void putIfHasText(Map<String, Object> metadata, String key, String value) {
         if (StringUtils.hasText(value)) {
             metadata.put(key, value);
+        }
+    }
+
+    private void publishCredentialProjection(
+            Long userId, ConnectorInfo connector, ConnectorCredentialProjectionEvent.Action action) {
+        if (connector == null) {
+            return;
+        }
+        try {
+            if (manifestService.credentialProjection(connector).isPresent()) {
+                eventPublisher.publishEvent(new ConnectorCredentialProjectionEvent(
+                    userId, connector.getConnectorId(), action));
+            }
+        } catch (RuntimeException ignored) {
+            // A malformed or legacy manifest must not prevent the authorization state from being saved.
         }
     }
 
