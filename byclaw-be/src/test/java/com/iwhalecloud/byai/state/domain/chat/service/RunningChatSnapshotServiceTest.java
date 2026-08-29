@@ -5,9 +5,11 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.eq;
 
 import java.util.Collections;
 import java.util.Date;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -19,6 +21,8 @@ import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatSnapshotResponse;
 import com.iwhalecloud.byai.state.domain.chat.model.MessageContext;
 import com.iwhalecloud.byai.state.domain.message.enums.MsgStatus;
+import com.iwhalecloud.byai.state.domain.message.dto.ByaiMessageHotDtoDto;
+import org.mockito.ArgumentCaptor;
 
 class RunningChatSnapshotServiceTest {
 
@@ -117,5 +121,46 @@ class RunningChatSnapshotServiceTest {
 
         assertThat(snapshot).isNull();
         verify(redisTemplate, never()).keys("byai:chat:running:snapshot:3:*");
+    }
+
+    @Test
+    void saveExternalChildPublishesReconnectSnapshotBeforeAsyncDatabaseFlush() {
+        RedisTemplate<String, Object> redisTemplate = mock(RedisTemplate.class);
+        ValueOperations<String, Object> valueOperations = mock(ValueOperations.class);
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        RunningChatSnapshotService service = new RunningChatSnapshotService();
+        ReflectionTestUtils.setField(service, "redisTemplate", redisTemplate);
+        ByaiMessageHotDtoDto message = new ByaiMessageHotDtoDto();
+        message.setSessionId(20L);
+        message.setMessageId(21L);
+        message.setMessageContent("latest child output");
+
+        service.saveExternalChild(message, "123-4", false);
+
+        ArgumentCaptor<String> json = ArgumentCaptor.forClass(String.class);
+        verify(valueOperations).set(eq("byai:chat:running:snapshot:20:external-child-20"), json.capture(),
+            eq(1800L), eq(TimeUnit.SECONDS));
+        RunningChatSnapshotResponse snapshot = JSONObject.parseObject(json.getValue(), RunningChatSnapshotResponse.class);
+        assertThat(snapshot.getMessageContent()).isEqualTo("latest child output");
+        assertThat(snapshot.getSnapshotStreamId()).isEqualTo("123-4");
+        assertThat(snapshot.getRunning()).isTrue();
+        assertThat(snapshot.getMsgStatus()).isEqualTo(MsgStatus.APPEND.getCode());
+    }
+
+    @Test
+    void markExternalChildPersistedStoresTheDurableStreamWatermark() {
+        RedisTemplate<String, Object> redisTemplate = mock(RedisTemplate.class);
+        ValueOperations<String, Object> valueOperations = mock(ValueOperations.class);
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        RunningChatSnapshotService service = new RunningChatSnapshotService();
+        ReflectionTestUtils.setField(service, "redisTemplate", redisTemplate);
+        ByaiMessageHotDtoDto message = new ByaiMessageHotDtoDto();
+        message.setSessionId(20L);
+        message.setMessageId(21L);
+        message.setMetadata("{\"event_stream_id\":\"123-4\"}");
+
+        service.markExternalChildPersisted(message);
+
+        verify(valueOperations).set("byai:chat:scoped:persisted:20:21", "123-4", 1800L, TimeUnit.SECONDS);
     }
 }
