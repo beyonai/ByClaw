@@ -15,6 +15,7 @@ jest.mock('@umijs/max', () => ({
 }));
 
 jest.mock('@/components/AntdIcon', () => () => null);
+jest.mock('@/hooks/useGlobal', () => () => ({ EventEmitter: { emit: jest.fn() } }));
 jest.mock('@umijs/max', () => ({
   useSelector: (selector: (state: any) => unknown) => selector({ user: { userInfo: { userId: 1 } } }),
 }));
@@ -28,16 +29,31 @@ jest.mock('@/service/connector', () => ({
   startConnectorCredentialAuthorization: jest.fn(),
   updateConnectorEnable: jest.fn(),
 }));
-jest.mock('@umijs/max', () => ({
-  useSelector: (selector: (state: any) => any) =>
-    selector({
-      user: {
-        userInfo: {
-          userId: 1,
-        },
-      },
-    }),
+jest.mock('@/service/devloop', () => ({
+  createGlobalOperationAccount: jest.fn(),
+  listGlobalOperationAccounts: jest.fn(),
+  loginOperationAccount: jest.fn(),
 }));
+jest.mock('@umijs/max', () => {
+  const intl = {
+    formatMessage: ({ id }: { id: string }) =>
+      ({
+        'projectSpace.operation.account.add': '新增账号',
+        'connector.accounts.title': '账号',
+      }[id] || id),
+  };
+  return {
+    useSelector: (selector: (state: any) => any) =>
+      selector({
+        user: {
+          userInfo: {
+            userId: 1,
+          },
+        },
+      }),
+    useIntl: () => intl,
+  };
+});
 jest.mock('antd', () => {
   const antd = jest.requireActual('antd');
   return {
@@ -62,6 +78,7 @@ import {
   updateConnectorEnable,
   type ConnectorAuthorization,
 } from '@/service/connector';
+import { createGlobalOperationAccount, listGlobalOperationAccounts } from '@/service/devloop';
 import ConnectorControl, * as ConnectorControlModule from '../index';
 
 jest.setTimeout(15000);
@@ -84,6 +101,12 @@ const mockStartConnectorCredentialAuthorization = startConnectorCredentialAuthor
   typeof startConnectorCredentialAuthorization
 >;
 const mockUpdateConnectorEnable = updateConnectorEnable as jest.MockedFunction<typeof updateConnectorEnable>;
+const mockCreateGlobalOperationAccount = createGlobalOperationAccount as jest.MockedFunction<
+  typeof createGlobalOperationAccount
+>;
+const mockListGlobalOperationAccounts = listGlobalOperationAccounts as jest.MockedFunction<
+  typeof listGlobalOperationAccounts
+>;
 
 type TerminalErrorClassifier = (authorization: { status: string; errorMessage?: string }) => string | undefined;
 type CredentialExpirationFormatter = (
@@ -118,6 +141,17 @@ describe('ConnectorControl authorization states', () => {
     mockCancelConnectorAuthorization.mockResolvedValue(true);
     mockRevokeConnectorAuthorization.mockResolvedValue(true);
     mockUpdateConnectorEnable.mockResolvedValue(true);
+    mockCreateGlobalOperationAccount.mockResolvedValue({ accountId: 88 });
+    mockListGlobalOperationAccounts.mockResolvedValue([
+      {
+        accountId: 7,
+        platformCode: 'CustomLink',
+        accountName: 'ima',
+        accountCode: 'custom',
+        customUrl: 'https://ima.qq.com/wikis/',
+        loginStatus: 'online',
+      },
+    ]);
     mockStartConnectorAuthorization.mockReset();
     mockStartConnectorCredentialAuthorization.mockReset();
     mockGetConnectorAuthorization.mockReset();
@@ -159,6 +193,141 @@ describe('ConnectorControl authorization states', () => {
     await waitFor(() => {
       expect(mockQueryConnectorList).toHaveBeenCalledWith({ pageNum: 1, pageSize: 100, keyword: '' });
     });
+  });
+
+  it('shows all global custom accounts and the add account action in the configuration drawer', async () => {
+    render(<ConnectorControl canAuthorize />);
+
+    expect(mockListGlobalOperationAccounts).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
+    fireEvent.click(await screen.findByText('查看全部连接器'));
+
+    expect(await screen.findByText('ima')).toBeInTheDocument();
+    expect(screen.getByText('https://ima.qq.com/wikis/')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /新增账号/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '账号操作' })).not.toBeInTheDocument();
+    expect(mockListGlobalOperationAccounts).toHaveBeenCalledTimes(1);
+  });
+
+  it('mixes global account cards with connector cards and keeps the add action in the drawer header', async () => {
+    render(<ConnectorControl canAuthorize />);
+
+    fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
+    fireEvent.click(await screen.findByText('查看全部连接器'));
+
+    const drawerContent = screen.getByText('连接器配置').closest('.ant-drawer-content');
+    expect(drawerContent).not.toBeNull();
+    const drawerHeader = drawerContent?.querySelector('.ant-drawer-header');
+    expect(drawerHeader).not.toBeNull();
+    expect(within(drawerHeader as HTMLElement).getByRole('button', { name: /新增账号/ })).toBeInTheDocument();
+    expect(within(drawerContent as HTMLElement).queryByRole('heading', { name: '账号' })).not.toBeInTheDocument();
+
+    const connectorCard = (await within(drawerContent as HTMLElement).findByText('企业微信')).closest('.connectorItem');
+    const accountCard = (await within(drawerContent as HTMLElement).findByText('ima')).closest('.accountCard');
+    expect(connectorCard).not.toBeNull();
+    expect(accountCard).not.toBeNull();
+    expect(connectorCard?.parentElement).toBe(accountCard?.parentElement);
+    expect(connectorCard).toHaveClass('compactItem');
+    expect(accountCard).not.toHaveClass('compactItem');
+  });
+
+  it('creates a global custom account without a project and refreshes the cards', async () => {
+    render(<ConnectorControl canAuthorize />);
+
+    fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
+    fireEvent.click(await screen.findByText('查看全部连接器'));
+    fireEvent.click(await screen.findByRole('button', { name: /新增账号/ }));
+    fireEvent.click(await screen.findByRole('radio', { name: 'projectSpace.operation.platform.customLink' }));
+    fireEvent.change(screen.getByLabelText('projectSpace.operation.accountForm.field.customLinkName'), {
+      target: { value: '微信公众号' },
+    });
+    fireEvent.change(screen.getByLabelText('projectSpace.operation.accountForm.field.customUrl'), {
+      target: { value: 'https://mp.weixin.qq.com/' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'projectSpace.operation.accountForm.save' }));
+
+    await waitFor(() =>
+      expect(mockCreateGlobalOperationAccount).toHaveBeenCalledWith({
+        platformCode: 'CustomLink',
+        accountCode: '',
+        accountName: '微信公众号',
+        customUrl: 'https://mp.weixin.qq.com/',
+      })
+    );
+    expect(mockListGlobalOperationAccounts).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the refreshed account list when the initial request resolves last', async () => {
+    const initialAccounts = [
+      {
+        accountId: 7,
+        platformCode: 'CustomLink',
+        accountName: 'ima',
+        accountCode: 'custom',
+        customUrl: 'https://ima.qq.com/wikis/',
+        loginStatus: 'online',
+      },
+    ];
+    const refreshedAccounts = [
+      ...initialAccounts,
+      {
+        accountId: 8,
+        platformCode: 'CustomLink',
+        accountName: '微信公众号',
+        accountCode: 'custom',
+        customUrl: 'https://mp.weixin.qq.com/',
+        loginStatus: 'online',
+      },
+    ];
+    let resolveInitialRequest!: (accounts: typeof initialAccounts) => void;
+    let resolveRefreshRequest!: (accounts: typeof refreshedAccounts) => void;
+    mockListGlobalOperationAccounts
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveInitialRequest = resolve;
+          })
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveRefreshRequest = resolve;
+          })
+      );
+
+    const { unmount } = render(<ConnectorControl canAuthorize />);
+
+    try {
+      fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
+      fireEvent.click(await screen.findByText('查看全部连接器'));
+      await waitFor(() => expect(mockListGlobalOperationAccounts).toHaveBeenCalledTimes(1));
+
+      fireEvent.click(await screen.findByRole('button', { name: /新增账号/ }));
+      fireEvent.click(await screen.findByRole('radio', { name: 'projectSpace.operation.platform.customLink' }));
+      fireEvent.change(screen.getByLabelText('projectSpace.operation.accountForm.field.customLinkName'), {
+        target: { value: '微信公众号' },
+      });
+      fireEvent.change(screen.getByLabelText('projectSpace.operation.accountForm.field.customUrl'), {
+        target: { value: 'https://mp.weixin.qq.com/' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'projectSpace.operation.accountForm.save' }));
+
+      await waitFor(() => expect(mockListGlobalOperationAccounts).toHaveBeenCalledTimes(2));
+      await act(async () => {
+        resolveRefreshRequest(refreshedAccounts);
+        await Promise.resolve();
+      });
+      expect(await screen.findByText('微信公众号')).toBeInTheDocument();
+
+      await act(async () => {
+        resolveInitialRequest(initialAccounts);
+        await Promise.resolve();
+      });
+      expect(screen.getByText('微信公众号')).toBeInTheDocument();
+    } finally {
+      unmount();
+    }
   });
 
   it('keeps the latest connector list when an older request resolves last', async () => {

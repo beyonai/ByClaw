@@ -437,20 +437,20 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
                 effectiveDateRange: values.collectConfig?.effectiveDateRange,
               }
               : {
-                  ...values.collectConfig,
-                  periodMonth:
+                ...values.collectConfig,
+                periodMonth:
                     values.collectConfig?.periodType === 'yearly' && values.collectConfig.periodYearDateTime?.isValid()
                       ? values.collectConfig.periodYearDateTime.month() + 1
                       : values.collectConfig?.periodMonth,
-                  periodDay:
+                periodDay:
                     values.collectConfig?.periodType === 'yearly' && values.collectConfig.periodYearDateTime?.isValid()
                       ? values.collectConfig.periodYearDateTime.date()
                       : values.collectConfig?.periodDay,
-                  periodTime:
+                periodTime:
                     values.collectConfig?.periodType === 'yearly'
                       ? values.collectConfig.periodYearDateTime
                       : values.collectConfig?.periodTime,
-                }),
+              }),
             cronExpr: buildOperationCollectionCron(values.collectConfig),
           }
           : undefined;

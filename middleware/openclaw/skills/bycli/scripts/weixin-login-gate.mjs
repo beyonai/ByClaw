@@ -1,0 +1,289 @@
+#!/usr/bin/env node
+
+import { createHash } from 'node:crypto';
+import { spawn } from 'node:child_process';
+import {
+  mkdir, readFile, rename, rm, writeFile,
+} from 'node:fs/promises';
+import { basename, isAbsolute, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+
+const SCHEMA_VERSION = '1.0';
+const EXCLUDED_OPTIONS = new Map([
+  ['--output', true],
+  ['--adapter-session', true],
+  ['--adapter-queue-timeout', true],
+  ['--site-session', true],
+  ['--keep-tab', true],
+  ['--format', true],
+  ['-f', true],
+  ['--trace', true],
+  ['--verbose', false],
+  ['-v', false],
+]);
+const TRANSIENT_QUERY_KEYS = new Set([
+  'abtest_cookie', 'ascene', 'chksm', 'clicktime', 'countrycode',
+  'devicetype', 'enterid', 'exportkey', 'fontScale', 'lang', 'nettype',
+  'pass_ticket', 'scene', 'sessionid', 'version', 'wx_header',
+]);
+const HUMAN_GATE_CODES = new Set([
+  'AUTH_REQUIRED',
+  'CAPTCHA',
+  'ENVIRONMENT_VALIDATION',
+  'MFA_REQUIRED',
+]);
+const HUMAN_GATE_TEXT = /auth_required|captcha|mfa_required|environment[_ -]verification|login|环境异常|去验证|验证码|安全验证/i;
+
+function normalizeUrl(value) {
+  try {
+    const parsed = new URL(value);
+    if (!['mp.weixin.qq.com', 'weixin.sogou.com'].includes(parsed.hostname)) return value;
+    for (const key of [...parsed.searchParams.keys()]) {
+      if (TRANSIENT_QUERY_KEYS.has(key)) parsed.searchParams.delete(key);
+    }
+    parsed.searchParams.sort();
+    parsed.hash = '';
+    return parsed.toString();
+  } catch {
+    return value;
+  }
+}
+
+function optionName(value) {
+  const separator = value.indexOf('=');
+  return separator === -1 ? value : value.slice(0, separator);
+}
+
+function canonicalCommand(argv) {
+  if (!Array.isArray(argv) || argv.length < 3
+    || basename(String(argv[0])) !== 'bycli' || argv[1] !== 'weixin') {
+    throw new Error('gate command must begin with: bycli weixin <command>');
+  }
+  const canonical = ['bycli', 'weixin', String(argv[2])];
+  for (let index = 3; index < argv.length; index += 1) {
+    const raw = String(argv[index]);
+    const name = optionName(raw);
+    if (EXCLUDED_OPTIONS.has(name)) {
+      if (EXCLUDED_OPTIONS.get(name) && !raw.includes('=')) index += 1;
+      continue;
+    }
+    if (raw.startsWith('--url=')) {
+      canonical.push(`--url=${normalizeUrl(raw.slice('--url='.length))}`);
+      continue;
+    }
+    canonical.push(raw === '--url' ? raw : normalizeUrl(raw));
+    if (raw === '--url' && index + 1 < argv.length) {
+      index += 1;
+      canonical.push(normalizeUrl(String(argv[index])));
+    }
+  }
+  return canonical;
+}
+
+export function operationFingerprint(argv) {
+  return createHash('sha256')
+    .update(JSON.stringify(canonicalCommand(argv)))
+    .digest('hex');
+}
+
+function errorCode(result) {
+  const combined = `${result?.stdout || ''}\n${result?.stderr || ''}`;
+  const codeMatch = combined.match(/["']?code["']?\s*[:=]\s*["']?([A-Z_]+)/i);
+  return codeMatch?.[1]?.toUpperCase() || null;
+}
+
+function isHumanGate(result) {
+  const code = errorCode(result);
+  if (Number(result?.exitCode) === 77 || HUMAN_GATE_CODES.has(code)) return true;
+  if (Number(result?.exitCode) !== 75 && code !== 'TIMEOUT') return false;
+  return HUMAN_GATE_TEXT.test(`${result?.stdout || ''}\n${result?.stderr || ''}`);
+}
+
+async function readState(path) {
+  try {
+    const parsed = JSON.parse(await readFile(path, 'utf8'));
+    if (parsed?.schemaVersion !== SCHEMA_VERSION || typeof parsed.phase !== 'string') {
+      throw new Error('invalid Weixin login-gate state');
+    }
+    return parsed;
+  } catch (error) {
+    if (error?.code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+async function writeState(path, state) {
+  const temporary = `${path}.${process.pid}.${Date.now()}.tmp`;
+  const payload = `${JSON.stringify({
+    schemaVersion: SCHEMA_VERSION,
+    phase: state.phase,
+    initialAttempts: state.initialAttempts,
+    rerunConsumed: state.rerunConsumed,
+    lastCode: state.lastCode,
+    updatedAt: new Date().toISOString(),
+  }, null, 2)}\n`;
+  await writeFile(temporary, payload, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+  await rename(temporary, path);
+}
+
+function blockedResult(operationFingerprintValue, phase, reason) {
+  return {
+    executed: false,
+    exitCode: 77,
+    stdout: '',
+    stderr: '',
+    operationFingerprint: operationFingerprintValue,
+    phase,
+    reason,
+  };
+}
+
+export async function runGate({
+  stateDir,
+  argv,
+  verificationConfirmed = false,
+  execute,
+}) {
+  if (!isAbsolute(stateDir)) throw new Error('stateDir must be an absolute path');
+  if (typeof execute !== 'function') throw new Error('execute must be a function');
+  const fingerprint = operationFingerprint(argv);
+  await mkdir(stateDir, { recursive: true, mode: 0o700 });
+  const statePath = join(stateDir, `${fingerprint}.json`);
+  const lockPath = join(stateDir, `${fingerprint}.lock`);
+  await mkdir(lockPath, { mode: 0o700 });
+  try {
+    const state = await readState(statePath);
+    if (state?.phase === 'terminal' || state?.phase === 'rerun-consumed') {
+      if (state.phase === 'rerun-consumed') {
+        await writeState(statePath, {
+          ...state,
+          phase: 'terminal',
+          rerunConsumed: true,
+          lastCode: state.lastCode || 'INTERRUPTED_AFTER_RERUN_CONSUMPTION',
+        });
+      }
+      return blockedResult(fingerprint, 'terminal', 'login-gate-rerun-exhausted');
+    }
+    if (state?.phase === 'complete') {
+      return blockedResult(fingerprint, 'complete', 'operation-already-complete');
+    }
+    if (state?.phase === 'waiting-confirmation' && verificationConfirmed !== true) {
+      return blockedResult(
+        fingerprint,
+        'waiting-confirmation',
+        'explicit-verification-confirmation-required',
+      );
+    }
+
+    const isConfirmedRerun = state?.phase === 'waiting-confirmation';
+    if (isConfirmedRerun) {
+      await writeState(statePath, {
+        ...state,
+        phase: 'rerun-consumed',
+        rerunConsumed: true,
+        lastCode: state.lastCode,
+      });
+    }
+
+    const childResult = await execute(argv);
+    const humanGate = isHumanGate(childResult);
+    let phase = 'complete';
+    if (humanGate) phase = isConfirmedRerun ? 'terminal' : 'waiting-confirmation';
+    else if (Number(childResult?.exitCode) !== 0) phase = 'terminal';
+    await writeState(statePath, {
+      phase,
+      initialAttempts: state?.initialAttempts || 1,
+      rerunConsumed: isConfirmedRerun,
+      lastCode: errorCode(childResult),
+    });
+    return {
+      ...childResult,
+      executed: true,
+      operationFingerprint: fingerprint,
+      phase,
+      reason: null,
+    };
+  } finally {
+    await rm(lockPath, { recursive: true, force: true });
+  }
+}
+
+function parseCli(argv) {
+  const separator = argv.indexOf('--');
+  if (separator === -1) throw new Error('missing -- before the bycli command');
+  const options = argv.slice(0, separator);
+  const command = argv.slice(separator + 1);
+  let stateDir = '';
+  let verificationConfirmed = false;
+  for (let index = 0; index < options.length; index += 1) {
+    if (options[index] === '--state-dir') {
+      stateDir = options[index + 1] || '';
+      index += 1;
+    } else if (options[index] === '--verification-confirmed') {
+      verificationConfirmed = options[index + 1] === 'true';
+      index += 1;
+    } else {
+      throw new Error(`unknown option: ${options[index]}`);
+    }
+  }
+  return { stateDir, verificationConfirmed, command };
+}
+
+function executeCommand(argv) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(argv[0], argv.slice(1), {
+      env: process.env,
+      stdio: ['inherit', 'pipe', 'pipe'],
+    });
+    const stdout = [];
+    const stderr = [];
+    child.stdout.on('data', chunk => stdout.push(chunk));
+    child.stderr.on('data', chunk => stderr.push(chunk));
+    child.once('error', reject);
+    child.once('close', (code, signal) => resolve({
+      exitCode: Number.isInteger(code) ? code : 1,
+      signal: signal || null,
+      stdout: Buffer.concat(stdout).toString('utf8'),
+      stderr: Buffer.concat(stderr).toString('utf8'),
+    }));
+  });
+}
+
+async function main() {
+  const { stateDir, verificationConfirmed, command } = parseCli(process.argv.slice(2));
+  const result = await runGate({
+    stateDir,
+    argv: command,
+    verificationConfirmed,
+    execute: executeCommand,
+  });
+  if (result.executed) {
+    process.stdout.write(result.stdout || '');
+    process.stderr.write(result.stderr || '');
+  } else {
+    process.stderr.write(`${JSON.stringify({
+      ok: false,
+      gate: {
+        executed: false,
+        phase: result.phase,
+        reason: result.reason,
+      },
+      error: {
+        code: 'AUTH_REQUIRED',
+        message: result.reason,
+        exitCode: 77,
+      },
+    }, null, 2)}\n`);
+  }
+  process.exitCode = Number(result.exitCode) || 0;
+}
+
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+  main().catch(error => {
+    process.stderr.write(`${JSON.stringify({
+      ok: false,
+      error: { code: 'ARGUMENT', message: error.message, exitCode: 2 },
+    }, null, 2)}\n`);
+    process.exitCode = 2;
+  });
+}

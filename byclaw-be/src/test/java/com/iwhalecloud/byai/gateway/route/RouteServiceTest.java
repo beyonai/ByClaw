@@ -132,6 +132,11 @@ class RouteServiceTest {
         loginInfo.setUserId(100L);
         loginInfo.setUserName("testUser");
         CurrentUserHolder.setLoginInfo(loginInfo);
+
+        Project project = new Project();
+        project.setProjectId(123L);
+        project.setProjectName("test-project");
+        when(projectService.findById(123L)).thenReturn(project);
     }
 
     @AfterEach

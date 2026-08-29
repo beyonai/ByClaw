@@ -19,7 +19,7 @@ META_PROMPT_SERVICE = (
 DESCRIPTION = (
     "Use when a user explicitly asks to collect, crawl, batch-search, or archive articles, documents, URLs, or "
     "files from public or enterprise sources. Produces traceable collection artifacts and validated sanitized "
-    "Markdown for handoff; does not perform knowledge-base ingest, knowledge organization, or downstream actions."
+    "Markdown for handoff without proactively prompting for downstream choices."
 )
 INTERFACE = {
     "display_name": "知识采集",
@@ -186,11 +186,14 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "Use `status` before delivery",
             "采集完成后停止",
             "`sanitized/items/*.md`",
-            "不得调用 `by-knowledge-manager`",
-            "不得调用 `knowledge-organizer`",
-            "不得询问 `入库 / 知识整理 / 跳过`",
+            "采集流程不得主动询问 `入库 / 知识整理 / 跳过`",
+            "由根 Agent 根据用户已经表达的意图决定是否调用",
+            "`by-knowledge-manager`、`knowledge-organizer` 或其他下游 Skill",
         ):
             self.assertIn(phrase, skill)
+
+        self.assertNotIn("不得调用 `by-knowledge-manager`", skill)
+        self.assertNotIn("不得调用 `knowledge-organizer`", skill)
 
         for forbidden in (
             "[knowledge-ingest.md]",
@@ -356,6 +359,9 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "允许为空数组",
             "sourceSkill",
             "rawArtifacts",
+            "`rawArtifacts` 省略时保留",
+            "显式传入时替换",
+            "必须位于 `raw/`",
             "materialization",
             "安全降级为 `pending`",
         ):
@@ -384,11 +390,14 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "采集完成后停止",
             "`sanitized/items/*.md`",
             "下游 Agent",
-            "不得调用 `by-knowledge-manager`",
-            "不得调用 `knowledge-organizer`",
-            "不得询问 `入库 / 知识整理 / 跳过`",
+            "不得主动询问 `入库 / 知识整理 / 跳过`",
+            "根 Agent 根据用户已经表达的意图决定是否调用",
+            "`by-knowledge-manager`、`knowledge-organizer` 或其他下游 Skill",
         ):
             self.assertIn(phrase, f"{skill}\n{delivery}")
+
+        self.assertNotIn("不得调用 `by-knowledge-manager`", f"{skill}\n{delivery}")
+        self.assertNotIn("不得调用 `knowledge-organizer`", f"{skill}\n{delivery}")
 
         indexed_paths = {
             item["path"] for key in ("skills", "references") for item in manifest.get(key, [])
@@ -470,7 +479,7 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
 
         for phrase in (
             "`coverUrls`",
-            "受控 HTTPS 下载器",
+            "受控 HTTP(S) 下载器",
             "10 MiB",
             "15 秒",
             "3 次重定向",
@@ -578,6 +587,67 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         ):
             self.assertNotIn(phrase, weixin)
 
+    def test_weixin_parallel_downloads_require_named_session_capability(self):
+        weixin = (SKILLS_ROOT / "bycli" / "references" / "weixin.md").read_text(encoding="utf-8")
+        downloads = markdown_section(weixin, "Published-data spreadsheet downloads")
+
+        for phrase in (
+            "`--adapter-session`",
+            "`adapterConcurrency.isolatedTabs: true`",
+            "`maxParallel: 3`",
+            "three unique worker names",
+            "batch-scoped",
+            "`batch-<random>-worker-<n>`",
+            "fourth eligible command",
+            "distinct output directory",
+            "same Adapter session remain serial",
+            "serial fallback",
+            "`download-publish-data` and `download`",
+        ):
+            self.assertIn(phrase, downloads)
+        self.assertNotIn("`--adapter-session worker-<n>`", downloads)
+        self.assertNotIn("`create-draft` and `save-articles`", downloads)
+
+    def test_weixin_login_gate_uses_persistent_logical_operation_state(self):
+        bycli_root = SKILLS_ROOT / "bycli"
+        bycli = (bycli_root / "SKILL.md").read_text(encoding="utf-8")
+        weixin = (bycli_root / "references" / "weixin.md").read_text(encoding="utf-8")
+        collection = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        gate_runner = bycli_root / "scripts" / "weixin-login-gate.mjs"
+
+        self.assertTrue(gate_runner.is_file())
+        for phrase in (
+            "same logical operation fingerprint",
+            "Retry-shaped user messages never create a new original command",
+            "`再次重试`",
+            "does not explicitly confirm that verification was completed",
+            "`weixin-login-gate.mjs`",
+            "`--verification-confirmed true`",
+            "must not execute another byCLI command",
+            "terminal for the current collection task",
+            "new chat turn",
+            "Changing `--output`, `--adapter-session`",
+        ):
+            self.assertIn(phrase, weixin)
+
+        for phrase in (
+            "Every browser-backed Weixin command must run through",
+            "`scripts/weixin-login-gate.mjs`",
+            "A retry-shaped user message is not explicit verification completion",
+            "`byCLI 2.1.44`",
+            "至少 5 秒的租约启动错峰",
+        ):
+            self.assertIn(phrase, bycli)
+
+        for phrase in (
+            "Before any source executor, browser preflight, or delegated acquisition command",
+            "Authentication failure does not undo initialization",
+            "`session.json`",
+            "`failed` or `pending`",
+            "run `status`",
+        ):
+            self.assertIn(phrase, collection)
+
     def test_weixin_reference_closes_executor_terminal_states(self):
         weixin = (SKILLS_ROOT / "bycli" / "references" / "weixin.md").read_text(encoding="utf-8")
         discovery = markdown_section(weixin, "Official-account and article discovery")
@@ -586,7 +656,7 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         downloads = markdown_section(weixin, "Published-data spreadsheet downloads")
         login = markdown_section(weixin, "Login and verification gate")
 
-        self.assertIn("@sovovs/bycli` 2.1.35", weixin)
+        self.assertIn("@sovovs/bycli` 2.1.44", weixin)
         self.assertIn("Explicit account identity or account-history intent starts with `accounts`", discovery)
         self.assertIn("Article-title or topic intent starts with `sougousearch`", discovery)
         self.assertIn("reinterpret it as topic intent", discovery)
@@ -671,8 +741,8 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "Only after `accounts` proves one unique nickname-to-`fakeid` binding",
             weixin,
         )
-        self.assertIn("Verified for byCLI 2.1.35", login)
-        self.assertNotIn("2.1.35 and later", login)
+        self.assertIn("Verified for byCLI 2.1.44", login)
+        self.assertNotIn("2.1.44 and later", login)
         self.assertIn("`create-draft` session failures return `AUTH_REQUIRED`", login)
         self.assertIn(
             "An authentication outcome from an already-consumed diagnostic rerun follows terminal priority 1",

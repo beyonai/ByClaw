@@ -17,6 +17,26 @@ BEGIN
     END IF;
 END
 $$;
+-- OpenGauss 不支持 ADD COLUMN 的 IF NOT EXISTS 形式，统一通过信息架构表做幂等判断。
+CREATE OR REPLACE FUNCTION byai.add_column_if_missing(
+    p_schema_name TEXT,
+    p_table_name TEXT,
+    p_column_name TEXT,
+    p_column_definition TEXT
+) RETURNS VOID AS $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = p_schema_name
+          AND table_name = p_table_name
+          AND column_name = p_column_name
+    ) THEN
+        EXECUTE 'ALTER TABLE ' || quote_ident(p_schema_name) || '.' || quote_ident(p_table_name)
+            || ' ADD COLUMN ' || quote_ident(p_column_name) || ' ' || p_column_definition;
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
 
 CREATE TABLE IF NOT EXISTS byai.byai_integration_env (
     env_id              BIGINT          NOT NULL,
@@ -223,9 +243,9 @@ CREATE INDEX IF NOT EXISTS idx_integration_run_step_run ON byai.byai_integration
 -- 运营需求复用扫描源主表，source_type=collect/publish/analyze 时表示运营需求。
 -- 研发渠道仍使用原有类型和字段，新增列均允许为空，不改变钉钉、GitHub 扫描逻辑。
 ALTER TABLE byai.byai_scan_source ALTER COLUMN source_name TYPE VARCHAR(500);
-ALTER TABLE byai.byai_scan_source ADD COLUMN IF NOT EXISTS source_description TEXT;
-ALTER TABLE byai.byai_scan_source ADD COLUMN IF NOT EXISTS assignee BIGINT;
-ALTER TABLE byai.byai_scan_source ADD COLUMN IF NOT EXISTS due_time TIMESTAMP;
+SELECT byai.add_column_if_missing('byai', 'byai_scan_source', 'source_description', 'TEXT');
+SELECT byai.add_column_if_missing('byai', 'byai_scan_source', 'assignee', 'BIGINT');
+SELECT byai.add_column_if_missing('byai', 'byai_scan_source', 'due_time', 'TIMESTAMP');
 -- chat 型自动化是应用级的，不归属任何项目，所以 project_id 必须允许为空。
 ALTER TABLE byai.byai_scan_source ALTER COLUMN project_id DROP NOT NULL;
 
@@ -258,7 +278,7 @@ CREATE INDEX IF NOT EXISTS idx_session_ext_operation_assignee
 CREATE TABLE byai_project_account
 (
     account_id    BIGINT      NOT NULL,
-    project_id    BIGINT      NOT NULL,
+    project_id    BIGINT,
     platform_code VARCHAR(20) NOT NULL,
     account_code  VARCHAR(100),
     account_name  VARCHAR(100),
@@ -278,7 +298,7 @@ CREATE TABLE byai_project_account
 
 COMMENT ON TABLE byai_project_account IS '运营账号表';
 COMMENT ON COLUMN byai_project_account.account_id IS '账号ID（PK）';
-COMMENT ON COLUMN byai_project_account.project_id IS '所属项目ID → byai_project.project_id';
+COMMENT ON COLUMN byai_project_account.project_id IS '所属项目ID；为空表示用户级账号，非空表示项目级账号 → byai_project.project_id';
 COMMENT ON COLUMN byai_project_account.platform_code IS '平台编码：WeChatAccount-微信公众号 / Xiaohongshu-小红书 / WeChatChannels-视频号 / CustomLink-自定义链接 / Internet-互联网 / GitHub-GitHub';
 COMMENT ON COLUMN byai_project_account.account_code IS '账号编码（平台账号唯一标识，如 oa-beyond-ai）';
 COMMENT ON COLUMN byai_project_account.account_name IS '账号名称（如 BeyondAI实验室）';
@@ -490,17 +510,23 @@ CREATE INDEX IF NOT EXISTS idx_scan_item_task_session ON byai.byai_scan_item_tas
 
 -- 仓库区分工作区与代码仓库:研发项目须有且仅有一个 workspace 仓库承载项目上下文/产出,其余为 code 代码仓库。
 -- 存量行默认 code;工作区先行由应用层保证,DB 仅存类型不强约束唯一,避免历史数据迁移期写入失败。
-ALTER TABLE byai.byai_project_repo ADD COLUMN IF NOT EXISTS repo_type VARCHAR(16) NOT NULL DEFAULT 'code';
+SELECT byai.add_column_if_missing(
+    'byai', 'byai_project_repo', 'repo_type',
+    'VARCHAR(16) NOT NULL DEFAULT ''code'''
+);
 COMMENT ON COLUMN byai.byai_project_repo.repo_type IS '仓库类型 workspace工作区(项目上下文/产出落点,单个)/code代码仓库(可多个)';
 
 -- 仓库代码平台:决定 clone host 与令牌注入(github->GH_TOKEN,gitlab->GL_TOKEN oauth2前缀,gitea->GITEA_TOKEN)。
 -- 存量行默认 github;自建/私有实例靠 repo_url 显式完整地址兜底,不受 host 拼接影响。
-ALTER TABLE byai.byai_project_repo ADD COLUMN IF NOT EXISTS provider VARCHAR(20) NOT NULL DEFAULT 'github';
+SELECT byai.add_column_if_missing(
+    'byai', 'byai_project_repo', 'provider',
+    'VARCHAR(20) NOT NULL DEFAULT ''github'''
+);
 COMMENT ON COLUMN byai.byai_project_repo.provider IS '代码平台 github/gitlab/gitea;决定 clone host 与令牌变量,存量默认 github';
 
 -- 仓库用途描述:人工填写,给后来人和大模型理解该仓库承担什么职责。
 -- 需求 AI 预拆据此判断该改哪些仓库,仅凭 owner/repo 名字猜职责经常拆错。可空,存量行为 NULL。
-ALTER TABLE byai.byai_project_repo ADD COLUMN IF NOT EXISTS description TEXT;
+SELECT byai.add_column_if_missing('byai', 'byai_project_repo', 'description', 'TEXT');
 COMMENT ON COLUMN byai.byai_project_repo.description IS '仓库用途描述,人工填写;供需求AI预拆判断职责归属与人工理解';
 
 -- 项目描述仍由前后端限制最多500个字符；存储改为TEXT，避免不同数据库对中文VARCHAR长度语义不一致。
@@ -508,17 +534,22 @@ ALTER TABLE byai.byai_project ALTER COLUMN description TYPE TEXT;
 COMMENT ON COLUMN byai.byai_project.description IS '项目描述,前后端限制最多500个字符';
 
 -- 研发项目工作区初始化状态:架构数字员工建成工作区前禁止建需求/启动任务。
-ALTER TABLE byai.byai_project ADD COLUMN IF NOT EXISTS init_status VARCHAR(16);
+SELECT byai.add_column_if_missing('byai', 'byai_project', 'init_status', 'VARCHAR(16)');
 COMMENT ON COLUMN byai.byai_project.init_status IS '研发项目初始化状态 pending待初始化/initialized工作区已建好待架构员工/initializing架构员工进行中/ready已就绪;仅 develop 未 ready 前禁用建需求与启动任务。无列默认值,应用层建项目时显式赋值';
-ALTER TABLE byai.byai_project ADD COLUMN IF NOT EXISTS build_index VARCHAR(4) NOT NULL DEFAULT 'N';
+SELECT byai.add_column_if_missing(
+    'byai', 'byai_project', 'build_index',
+    'VARCHAR(4) NOT NULL DEFAULT ''N'''
+);
 COMMENT ON COLUMN byai.byai_project.build_index IS '初始化是否建索引 Y建立/N不建立(默认)';
-ALTER TABLE byai.byai_project ADD COLUMN IF NOT EXISTS index_skills VARCHAR(512);
+SELECT byai.add_column_if_missing('byai', 'byai_project', 'index_skills', 'VARCHAR(512)');
 COMMENT ON COLUMN byai.byai_project.index_skills IS '建索引所需技能包,逗号分隔(如 trellis,superpowers)';
 -- 初始化交给架构数字员工在沙箱里做:必须记住是哪条会话,轮询才知道该读哪个任务状态文件。
-ALTER TABLE byai.byai_project ADD COLUMN IF NOT EXISTS init_session_id BIGINT;
+SELECT byai.add_column_if_missing('byai', 'byai_project', 'init_session_id', 'BIGINT');
 COMMENT ON COLUMN byai.byai_project.init_session_id IS '工作区初始化会话ID(架构数字员工会话);轮询按此会话读 /by/.acp-runs/sessions/<会话ID>.json 判完成。空表示尚未下发初始化';
-ALTER TABLE byai.byai_project ADD COLUMN IF NOT EXISTS init_fail_reason VARCHAR(500);
+SELECT byai.add_column_if_missing('byai', 'byai_project', 'init_fail_reason', 'VARCHAR(500)');
 COMMENT ON COLUMN byai.byai_project.init_fail_reason IS '上次工作区初始化失败/超时原因;重新下发初始化时清空';
+
+DROP FUNCTION byai.add_column_if_missing(TEXT, TEXT, TEXT, TEXT);
 
 -- 运营任务模板只保存模板目录元数据和默认配置；用户补充的任务参数进入会话提示词，不回写系统模板。
 CREATE TABLE IF NOT EXISTS byai.byai_task_template (

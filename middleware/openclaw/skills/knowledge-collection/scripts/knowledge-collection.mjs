@@ -51,7 +51,7 @@ const COMMAND_SPECS = {
     title: '创建研究/采集会话骨架与 session.json',
     args: {
       '--session-dir': '必填。会话目录(必须不存在或为空)',
-      '--session-root': '用户沙箱中必填。当前 Agent 上下文提供的 /by/.sessions/<sessionId>',
+      '--session-root': '相对路径必填。当前 Agent 上下文提供的 /by/.sessions/<sessionId>',
       '--query': '必填。研究问题或采集任务描述',
       '--mode': 'collection(默认) | research。research 要求 report 交付后才允许整体清理',
       '--breadth': '正整数,默认 3;每层分支数',
@@ -118,7 +118,7 @@ const COMMAND_SPECS = {
     title: '校验并标记报告完成,渲染 research-tree.md',
     args: {
       '--session-dir': '必填',
-      '--report-path': '可选。默认 <session-dir>/report.md;必须在会话目录内',
+      '--report-path': '可选。默认 <session-dir>/report.md；绝对路径按原位置使用，相对路径位于当前 Session Root 下',
       '--stop-reason': '可选。未达到配置 depth 而提前停止的原因',
       '--allow-incomplete': '可选布尔。显式允许不完整报告',
     },
@@ -208,14 +208,15 @@ const COMMAND_SPECS = {
   }),
 };
 
-const GLOBAL_FLAGS = new Set(['help', 'compact', 'pretty']);
+const GLOBAL_FLAGS = new Set(['help', 'compact', 'pretty', 'session-root']);
 const LEGACY_ALIASES = new Map([
   ['init-session', 'init'],
   ['mark-materialized', 'collect'],
 ]);
 
 const SCHEMA = {
-  sessionDir: { type: 'string', format: 'absolute-path' },
+  sessionDir: { type: 'string', format: 'sandbox-path' },
+  sessionRoot: { type: 'string', format: 'absolute-path' },
   file: { type: 'string', format: 'file-path' },
   inputFile: { type: 'string', format: 'collection-input-file' },
   jsonArray: { type: 'array', cliEncoding: 'json', items: { type: 'string' } },
@@ -245,7 +246,7 @@ const COMMAND_SCHEMA_OVERRIDES = {
     required: ['session-dir', 'query'],
     properties: {
       'session-dir': SCHEMA.sessionDir,
-      'session-root': SCHEMA.sessionDir,
+      'session-root': SCHEMA.sessionRoot,
       query: { type: 'string', minLength: 1 },
       mode: { type: 'string', enum: ['collection', 'research'], default: 'collection' },
       breadth: { ...SCHEMA.positiveInteger, default: 3 },
@@ -305,7 +306,7 @@ const COMMAND_SCHEMA_OVERRIDES = {
     required: ['session-dir'],
     properties: {
       'session-dir': SCHEMA.sessionDir,
-      'report-path': { type: 'string', format: 'path-within-session' },
+      'report-path': { type: 'string', format: 'sandbox-path' },
       'stop-reason': { type: 'string', minLength: 1 },
       'allow-incomplete': { ...SCHEMA.boolean, default: false },
     },
@@ -341,11 +342,15 @@ function commandSchema() {
     if (!override) {
       throw new Error(`命令 ${name} 缺少 machine-readable schema`);
     }
+    const properties = { ...override.properties };
+    if (Object.hasOwn(properties, 'session-dir') && !Object.hasOwn(properties, 'session-root')) {
+      properties['session-root'] = SCHEMA.sessionRoot;
+    }
     commands[name] = {
       type: 'object',
       additionalProperties: false,
       required: override.required,
-      properties: override.properties,
+      properties,
       schemaComplete: true,
       ...(override.allOf ? { allOf: override.allOf } : {}),
       ...(override.oneOf ? { oneOf: override.oneOf } : {}),
@@ -440,13 +445,17 @@ function commandHelp(command) {
   if (!spec) {
     return { ok: false, error: `未知命令: ${command}`, commands: Object.keys(COMMAND_SPECS) };
   }
+  const args = { ...spec.args };
+  if (spec.group !== 'platform' && Object.hasOwn(args, '--session-dir') && !Object.hasOwn(args, '--session-root')) {
+    args['--session-root'] = '相对路径必填。当前 Agent 上下文提供的 /by/.sessions/<sessionId>';
+  }
   return {
     ok: true,
     command: canonical,
     title: spec.title,
     group: spec.group,
     deprecated: Boolean(spec.deprecated),
-    args: spec.args,
+    args,
     example: spec.example,
     legacyAlias: [...LEGACY_ALIASES.entries()].find(([, target]) => target === canonical)?.[0] || undefined,
   };

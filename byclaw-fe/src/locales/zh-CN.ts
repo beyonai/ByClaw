@@ -2006,6 +2006,8 @@ export default {
   'projectSpace.operation.platform.douyin': '抖音',
   'projectSpace.operation.platform.customLink': '自定义链接',
   'projectSpace.operation.account.entry': '运营账号管理',
+  'connector.accounts.title': '账号',
+  'connector.accounts.loadFailed': '账号加载失败，请稍后重试',
   'projectSpace.operation.account.title': '运营账号管理',
   'projectSpace.operation.account.description': '统一管理不同平台的多个账号、登录状态和内容数据',
   'projectSpace.operation.account.back': '返回项目详情',

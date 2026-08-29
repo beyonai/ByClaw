@@ -1,15 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Dropdown, Empty, Modal, Select, Segmented, Spin, Tag } from 'antd';
-import {
-  ArrowLeftOutlined,
-  DeleteOutlined,
-  EditOutlined,
-  LoginOutlined,
-  MoreOutlined,
-  PlusOutlined,
-  ReloadOutlined,
-} from '@ant-design/icons';
+import { Button, Empty, Select, Segmented, Spin } from 'antd';
+import { ArrowLeftOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
+import OperationAccountCards from './OperationAccountCards';
 import OperationAccountFormModal from './OperationAccountFormModal';
 import type {
   OperationAccount,
@@ -39,6 +32,9 @@ export interface OperationAccountPanelProps {
   toolbarPlacement?: 'inline' | 'external';
   onToolbarChange?: (toolbar: React.ReactNode | null) => void;
   onRefreshToolbarChange?: (toolbar: React.ReactNode | null) => void;
+  showPlatformFilter?: boolean;
+  allowAccountEditing?: boolean;
+  cardsOnly?: boolean;
   onBack?: () => void;
   onAccountClick?: (account: OperationAccount) => void;
   onLogin?: (account: OperationAccount) => void | Promise<void>;
@@ -47,15 +43,6 @@ export interface OperationAccountPanelProps {
   onDeleteAccount?: (account: OperationAccount) => void | Promise<void>;
   onSaveAccount?: (values: OperationAccountFormValues, account?: OperationAccount | null) => void | Promise<void>;
 }
-
-// 登录状态使用固定颜色，避免接口中不同平台的状态文案直接影响视觉语义。
-const ACCOUNT_STATUS_COLOR: Record<NonNullable<OperationAccount['loginStatus']>, string> = {
-  logged_in: 'success',
-  // 未登录需要提醒用户完成平台登录，使用黄色警示色与已登录状态拉开差异。
-  logged_out: 'warning',
-  expired: 'warning',
-  unknown: 'default',
-};
 
 const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
   accounts = [],
@@ -74,6 +61,9 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
   toolbarPlacement = 'inline',
   onToolbarChange,
   onRefreshToolbarChange,
+  showPlatformFilter = true,
+  allowAccountEditing = true,
+  cardsOnly = false,
   onBack,
   onAccountClick,
   onLogin,
@@ -113,10 +103,6 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
     [platformT]
   );
   const availablePlatformOptions = platformOptions?.length ? platformOptions : defaultPlatformOptions;
-  const platformOptionMap = useMemo(
-    () => new Map(availablePlatformOptions.map((option) => [option.value, option])),
-    [availablePlatformOptions]
-  );
   const filterOptions = useMemo(
     () => [
       { value: 'all', label: platformT('all') },
@@ -141,12 +127,14 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
     // 大详情把账号筛选和新增账号提升到页面顶部，刷新按钮单独放到最右侧。
     onToolbarChange(
       <div className={styles.accountPanelActions}>
-        <Select
-          className={styles.accountCompactFilter}
-          value={activePlatform}
-          options={filterOptions}
-          onChange={(value) => setActivePlatform(String(value))}
-        />
+        {showPlatformFilter && (
+          <Select
+            className={styles.accountCompactFilter}
+            value={activePlatform}
+            options={filterOptions}
+            onChange={(value) => setActivePlatform(String(value))}
+          />
+        )}
         {canSaveAccount && (
           // 大详情页的新增账号按钮与需求 Tab 的新增需求按钮使用统一的次级按钮样式。
           <Button icon={<PlusOutlined />} onClick={openAddAccountModal}>
@@ -176,6 +164,7 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
     onRefreshToolbarChange,
     onToolbarChange,
     openAddAccountModal,
+    showPlatformFilter,
     t,
     toolbarPlacement,
   ]);
@@ -215,31 +204,72 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
     [onSaveAccount]
   );
 
-  const handleAccountKeyDown = useCallback(
-    (event: React.KeyboardEvent<HTMLElement>, account: OperationAccount) => {
-      if (event.target !== event.currentTarget || !onAccountClick || (event.key !== 'Enter' && event.key !== ' ')) {
-        return;
-      }
-      event.preventDefault();
-      onAccountClick(account);
-    },
-    [onAccountClick]
+  const loginNotice = loginTarget ? (
+    <section
+      className={`${styles.accountLoginNotice} ${cardsOnly ? styles.accountLoginNoticeGrid : ''}`}
+      aria-live="polite"
+    >
+      <div className={styles.accountLoginNoticeContent}>
+        <strong>{loginT('remoteTitle', { account: loginTarget.accountName })}</strong>
+        <span>{loginT('remoteHint')}</span>
+      </div>
+      <div className={styles.accountLoginNoticeActions}>
+        <Button disabled={loginConfirming} onClick={onCancelLogin}>
+          {loginT('cancel')}
+        </Button>
+        <Button type="primary" loading={loginConfirming} onClick={() => void onConfirmLogin?.()}>
+          {loginT('complete')}
+        </Button>
+      </div>
+    </section>
+  ) : null;
+
+  const accountCards = (
+    <OperationAccountCards
+      accounts={filteredAccounts}
+      platformOptions={availablePlatformOptions}
+      compact={compact}
+      canEditAccount={(account) => allowAccountEditing && canSaveAccount && account.canEdit !== false}
+      loginTarget={loginTarget}
+      loginPreparingAccountId={loginPreparingAccountId}
+      loginConfirming={loginConfirming}
+      deletingAccountId={deletingAccountId}
+      onAccountClick={onAccountClick}
+      onEditAccount={openEditAccountModal}
+      onDeleteAccount={onDeleteAccount}
+      onLogin={onLogin}
+    />
   );
 
-  const handleDeleteAccount = useCallback(
-    (account: OperationAccount) => {
-      if (!onDeleteAccount) return;
-      Modal.confirm({
-        title: t('deleteConfirmTitle'),
-        content: t('deleteConfirmContent', { account: account.accountName }),
-        okText: t('deleteConfirmOk'),
-        cancelText: t('deleteConfirmCancel'),
-        okButtonProps: { danger: true },
-        onOk: () => onDeleteAccount(account),
-      });
-    },
-    [onDeleteAccount, t]
+  const accountFormModal = (
+    <OperationAccountFormModal
+      open={accountFormOpen}
+      account={editingAccount}
+      platformOptions={availablePlatformOptions}
+      loading={savingAccount}
+      onCancel={() => {
+        setAccountFormOpen(false);
+        setEditingAccount(null);
+      }}
+      onSubmit={handleSaveAccount}
+    />
   );
+
+  if (cardsOnly) {
+    return (
+      <>
+        {loginNotice}
+        {loading && filteredAccounts.length === 0 ? (
+          <div className={styles.accountGridLoading}>
+            <Spin />
+          </div>
+        ) : (
+          accountCards
+        )}
+        {accountFormModal}
+      </>
+    );
+  }
 
   return (
     <div
@@ -265,7 +295,7 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
         </div>
         {toolbarPlacement === 'inline' && (
           <div className={styles.accountPanelActions}>
-            {compact && (
+            {compact && showPlatformFilter && (
               <Select
                 className={styles.accountCompactFilter}
                 value={activePlatform}
@@ -287,32 +317,19 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
         )}
       </header>
 
-      {loginTarget && (
-        <section className={styles.accountLoginNotice} aria-live="polite">
-          <div className={styles.accountLoginNoticeContent}>
-            <strong>{loginT('remoteTitle', { account: loginTarget.accountName })}</strong>
-            <span>{loginT('remoteHint')}</span>
-          </div>
-          <div className={styles.accountLoginNoticeActions}>
-            <Button disabled={loginConfirming} onClick={onCancelLogin}>
-              {loginT('cancel')}
-            </Button>
-            <Button type="primary" loading={loginConfirming} onClick={() => void onConfirmLogin?.()}>
-              {loginT('complete')}
-            </Button>
-          </div>
-        </section>
-      )}
+      {loginNotice}
 
-      <div className={styles.accountFilterRow}>
-        <Segmented
-          className={styles.accountPlatformFilter}
-          value={activePlatform}
-          options={filterOptions}
-          onChange={(value) => setActivePlatform(String(value))}
-        />
-        <span className={styles.accountFilterCount}>{t('resultCount', { count: filteredAccounts.length })}</span>
-      </div>
+      {showPlatformFilter && (
+        <div className={styles.accountFilterRow}>
+          <Segmented
+            className={styles.accountPlatformFilter}
+            value={activePlatform}
+            options={filterOptions}
+            onChange={(value) => setActivePlatform(String(value))}
+          />
+          <span className={styles.accountFilterCount}>{t('resultCount', { count: filteredAccounts.length })}</span>
+        </div>
+      )}
 
       <Spin spinning={loading} wrapperClassName={styles.accountPanelSpin}>
         {filteredAccounts.length === 0 ? (
@@ -320,122 +337,11 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
             <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('empty')} />
           </div>
         ) : (
-          <div className={styles.accountGrid}>
-            {filteredAccounts.map((account) => {
-              const platform = platformOptionMap.get(account.platformId);
-              const platformLabel = platform?.label || account.platformId;
-              const accountName =
-                account.accountName || (account.platformId === 'CustomLink' ? platformLabel : account.accountName);
-              const accountSubtitle =
-                account.platformId === 'CustomLink' && account.customUrl ? account.customUrl : account.accountId;
-              const status = account.loginStatus || 'unknown';
-              // 当前支持的四个运营平台均通过 UI Agent 浏览器登录，历史短编码继续兼容。自定义链接平台也支持登录。
-              const canLogin = [
-                'WeChatAccount',
-                'wechat',
-                'Xiaohongshu',
-                'xiaohongshu',
-                'WeChatChannels',
-                'video',
-                'Douyin',
-                'douyin',
-                'CustomLink',
-              ].includes(account.platformId);
-              const canEditAccount = canSaveAccount && account.canEdit !== false;
-              return (
-                <article
-                  key={String(account.id)}
-                  className={`${styles.accountCard} ${onAccountClick ? styles.accountCardClickable : ''}`}
-                  role={onAccountClick ? 'button' : undefined}
-                  tabIndex={onAccountClick ? 0 : undefined}
-                  onClick={() => onAccountClick?.(account)}
-                  onKeyDown={(event) => handleAccountKeyDown(event, account)}
-                >
-                  <div className={styles.accountCardHeader}>
-                    <span className={styles.accountPlatformMark}>{platform?.mark || platformLabel.slice(0, 1)}</span>
-                    <div className={styles.accountCardIdentity}>
-                      <strong title={accountName}>{accountName}</strong>
-                      <span title={accountSubtitle}>{accountSubtitle}</span>
-                    </div>
-                    <Tag className={styles.accountStatusTag} color={ACCOUNT_STATUS_COLOR[status]}>
-                      {t(`status.${status}`)}
-                    </Tag>
-                  </div>
-                  {canEditAccount && (
-                    <Dropdown
-                      trigger={['hover']}
-                      menu={{
-                        items: [
-                          { key: 'edit', icon: <EditOutlined />, label: t('edit') },
-                          ...(onDeleteAccount
-                            ? [{ key: 'delete', danger: true, icon: <DeleteOutlined />, label: t('delete') }]
-                            : []),
-                        ],
-                        onClick: ({ key, domEvent }) => {
-                          domEvent.stopPropagation();
-                          if (key === 'edit') openEditAccountModal(account);
-                          if (key === 'delete') handleDeleteAccount(account);
-                        },
-                      }}
-                    >
-                      {/* 编辑和删除收进悬停菜单，避免常驻按钮挤占账号信息区域。 */}
-                      <Button
-                        type="text"
-                        size="small"
-                        className={styles.accountCardMoreAction}
-                        icon={<MoreOutlined />}
-                        loading={`${deletingAccountId ?? ''}` === `${account.id}`}
-                        aria-label="账号操作"
-                        onClick={(event) => event.stopPropagation()}
-                      />
-                    </Dropdown>
-                  )}
-                  <div className={styles.accountPlatformName}>{platformLabel}</div>
-                  {/* 当前版本暂不展示账号指标和近 30 天统计，仅保留账号操作按钮。 */}
-                  <div className={styles.accountCardFooter}>
-                    <div className={styles.accountCardActions}>
-                      {onLogin && canLogin && (
-                        <Button
-                          type="link"
-                          size="small"
-                          icon={<LoginOutlined />}
-                          loading={`${loginPreparingAccountId ?? ''}` === `${account.id}`}
-                          disabled={
-                            !!loginTarget ||
-                            loginConfirming ||
-                            (loginPreparingAccountId !== undefined &&
-                              loginPreparingAccountId !== null &&
-                              `${loginPreparingAccountId}` !== `${account.id}`)
-                          }
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            // 登录失败由统一请求层提示，卡片侧消费 reject，避免事件回调产生未处理 Promise。
-                            void Promise.resolve(onLogin(account)).catch(() => undefined);
-                          }}
-                        >
-                          {t(status === 'logged_in' ? 'relogin' : 'login')}
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
+          <div className={styles.accountGrid}>{accountCards}</div>
         )}
       </Spin>
 
-      <OperationAccountFormModal
-        open={accountFormOpen}
-        account={editingAccount}
-        platformOptions={availablePlatformOptions}
-        loading={savingAccount}
-        onCancel={() => {
-          setAccountFormOpen(false);
-          setEditingAccount(null);
-        }}
-        onSubmit={handleSaveAccount}
-      />
+      {accountFormModal}
     </div>
   );
 };

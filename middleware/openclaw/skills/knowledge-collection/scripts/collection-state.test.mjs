@@ -77,16 +77,19 @@ await (async () => {
     ]);
     assert.equal(initialized.code, 0, initialized.stderr || initialized.stdout);
     await Promise.all([
+      mkdir(join(root, 'raw'), { recursive: true }),
       mkdir(join(root, 'markdown'), { recursive: true }),
       mkdir(join(root, 'sanitized/items'), { recursive: true }),
       mkdir(join(root, '.collection-inputs'), { recursive: true }),
     ]);
+    await writeFile(join(root, 'raw/fresh.json'), '{"status":"ok"}\n');
     await writeFile(join(root, 'markdown/fresh.md'), '# Fresh\n');
     await writeFile(join(root, 'sanitized/items/fresh.md'), '# Fresh\n');
     const payloadPath = join(root, '.collection-inputs/fresh.json');
     await writeFile(payloadPath, JSON.stringify({
       schemaVersion: '1.0', itemId: 'fresh',
       source: 'public-internet', sourceSkill: 'bycli', backend: 'bycli',
+      rawArtifacts: ['raw/fresh.json'],
       markdownPath: 'markdown/fresh.md', sanitizedPath: 'sanitized/items/fresh.md',
       canonicalItem: {
         title: 'Fresh', url: 'https://example.com/fresh', author: '', publishTime: '',
@@ -101,6 +104,11 @@ await (async () => {
     const status = await runCli(['status', '--session-dir', root]);
     assert.equal(status.json.collection.deliveryComplete, true);
     assert.equal(status.json.downstreamInput.files.length, 1);
+    const session = JSON.parse(await readFile(join(root, 'session.json'), 'utf8'));
+    assert.deepEqual(
+      session.collection.collection.items[0].rawArtifacts,
+      ['raw/fresh.json'],
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -155,7 +163,7 @@ await (async () => {
 await (async () => {
   const schema = await runCli(['command-schema']);
   assert.equal(schema.json.commands.collect.properties['item-json-file'].format, 'collection-input-file');
-  assert.deepEqual(Object.keys(schema.json.commands.inspect.properties).sort(), ['full', 'session-dir']);
+  assert.deepEqual(Object.keys(schema.json.commands.inspect.properties).sort(), ['full', 'session-dir', 'session-root']);
   for (const flag of ['--operation', '--target-json', '--drain-pending']) {
     const result = await runCli(['inspect', '--session-dir', '/tmp/not-used', flag, 'x']);
     assert.equal(result.code, 1);
@@ -423,6 +431,96 @@ await (async () => {
     await rm(root, { recursive: true, force: true });
   }
   console.log('PASS cleanup never removes another current work copy');
+})();
+
+await (async () => {
+  const root = await createCollectedSession();
+  try {
+    await mkdir(join(root, 'raw'), { recursive: true });
+    await writeFile(join(root, 'raw/source-response.json'), '{"status":"ok"}\n');
+    const payloadPath = join(root, '.collection-inputs/raw-artifacts.json');
+    await writeFile(payloadPath, JSON.stringify({
+      schemaVersion: '1.0', itemId: 'paper',
+      rawArtifacts: ['raw/source-response.json', 'raw/source-response.json'],
+      markdownPath: 'markdown/paper.md', sanitizedPath: 'sanitized/items/paper.md',
+      canonicalItem: {
+        title: 'Paper', url: 'https://example.com/paper', author: '', publishTime: '',
+        markdown: 'sanitized/items/paper.md', fileName: 'sanitized/items/paper.md',
+      },
+    }));
+    const collected = await runCli(['collect', '--session-dir', root, '--item-json-file', payloadPath]);
+    assert.equal(collected.code, 0, collected.stderr || collected.stdout);
+    const session = JSON.parse(await readFile(join(root, 'session.json'), 'utf8'));
+    assert.deepEqual(
+      session.collection.collection.items[0].rawArtifacts,
+      ['raw/source-response.json'],
+    );
+    const updatePath = join(root, '.collection-inputs/raw-artifacts-omitted.json');
+    await writeFile(updatePath, JSON.stringify({
+      schemaVersion: '1.0', itemId: 'paper',
+      markdownPath: 'markdown/paper.md', sanitizedPath: 'sanitized/items/paper.md',
+      canonicalItem: {
+        title: 'Paper updated', url: 'https://example.com/paper', author: '', publishTime: '',
+        markdown: 'sanitized/items/paper.md', fileName: 'sanitized/items/paper.md',
+      },
+    }));
+    const updated = await runCli(['collect', '--session-dir', root, '--item-json-file', updatePath]);
+    assert.equal(updated.code, 0, updated.stderr || updated.stdout);
+    const updatedSession = JSON.parse(await readFile(join(root, 'session.json'), 'utf8'));
+    assert.deepEqual(
+      updatedSession.collection.collection.items[0].rawArtifacts,
+      ['raw/source-response.json'],
+    );
+    const clearPath = join(root, '.collection-inputs/raw-artifacts-clear.json');
+    await writeFile(clearPath, JSON.stringify({
+      schemaVersion: '1.0', itemId: 'paper', rawArtifacts: [],
+      markdownPath: 'markdown/paper.md', sanitizedPath: 'sanitized/items/paper.md',
+      canonicalItem: {
+        title: 'Paper updated', url: 'https://example.com/paper', author: '', publishTime: '',
+        markdown: 'sanitized/items/paper.md', fileName: 'sanitized/items/paper.md',
+      },
+    }));
+    const cleared = await runCli(['collect', '--session-dir', root, '--item-json-file', clearPath]);
+    assert.equal(cleared.code, 0, cleared.stderr || cleared.stdout);
+    const clearedSession = JSON.parse(await readFile(join(root, 'session.json'), 'utf8'));
+    assert.deepEqual(clearedSession.collection.collection.items[0].rawArtifacts, []);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+  console.log('PASS collect persists explicit raw artifacts');
+})();
+
+await (async () => {
+  const root = await createCollectedSession();
+  try {
+    await mkdir(join(root, 'raw'), { recursive: true });
+    await writeFile(join(root, 'raw/source-response.json'), '{"status":"ok"}\n');
+    await symlink('source-response.json', join(root, 'raw/source-link.json'));
+    for (const rawArtifacts of [
+      ['markdown/paper.md'],
+      ['raw/missing.json'],
+      ['raw/source-link.json'],
+      'raw/source-response.json',
+      [7],
+    ]) {
+      const payloadPath = join(root, '.collection-inputs/invalid-raw-artifact.json');
+      await writeFile(payloadPath, JSON.stringify({
+        schemaVersion: '1.0', itemId: 'paper', rawArtifacts,
+        markdownPath: 'markdown/paper.md', sanitizedPath: 'sanitized/items/paper.md',
+        canonicalItem: {
+          title: 'Paper', url: 'https://example.com/paper', author: '', publishTime: '',
+          markdown: 'sanitized/items/paper.md', fileName: 'sanitized/items/paper.md',
+        },
+      }));
+      const collected = await runCli(['collect', '--session-dir', root, '--item-json-file', payloadPath]);
+      assert.equal(collected.code, 1, `accepted invalid raw artifacts ${JSON.stringify(rawArtifacts)}`);
+      const session = JSON.parse(await readFile(join(root, 'session.json'), 'utf8'));
+      assert.deepEqual(session.collection.collection.items[0].rawArtifacts, []);
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+  console.log('PASS collect rejects invalid raw artifact paths');
 })();
 
 await (async () => {

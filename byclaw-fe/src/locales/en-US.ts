@@ -2029,6 +2029,8 @@ export default {
   'projectSpace.operation.platform.video': 'WeChat Video',
   'projectSpace.operation.platform.douyin': 'Douyin',
   'projectSpace.operation.account.entry': 'Ops account management',
+  'connector.accounts.title': 'Accounts',
+  'connector.accounts.loadFailed': 'Failed to load accounts. Try again later',
   'projectSpace.operation.account.title': 'Ops account management',
   'projectSpace.operation.account.description': 'Manage platform accounts, sign-in status, and content data',
   'projectSpace.operation.account.back': 'Back to project',
