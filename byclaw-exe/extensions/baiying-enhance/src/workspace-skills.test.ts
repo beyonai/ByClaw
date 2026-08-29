@@ -147,6 +147,7 @@ describe("workspace-skills", () => {
           skills: [
             "project-context",
             "notice",
+            "project-cloud-knowledge",
             "json-skill",
             "extra-filter-name",
             "missing-extra",
@@ -218,7 +219,11 @@ describe("workspace-skills", () => {
     const stateDir = await mkdtemp(path.join(tmpdir(), "baiying-project-context-state-"));
     const bundledSkillsDir = await mkdtemp(path.join(tmpdir(), "baiying-project-context-bundled-"));
     process.env.OPENCLAW_STATE_DIR = stateDir;
-    for (const [skillName, title] of [["project-context", "Project Context"], ["notice", "Notice"]]) {
+    for (const [skillName, title] of [
+      ["project-context", "Project Context"],
+      ["notice", "Notice"],
+      ["project-cloud-knowledge", "Project Cloud Knowledge"],
+    ]) {
       const bundledSkillDir = path.join(bundledSkillsDir, skillName);
       await mkdir(bundledSkillDir, { recursive: true });
       await writeFile(
@@ -243,13 +248,20 @@ describe("workspace-skills", () => {
       bundledSkillsDir,
     });
 
-    expect(result[0]?.listEntry.skills).toEqual(["project-context", "notice"]);
+    expect(result[0]?.listEntry.skills).toEqual([
+      "project-context",
+      "notice",
+      "project-cloud-knowledge",
+    ]);
     await expect(
       fs.readFile(path.join(workspace, "skills", "project-context", "SKILL.md"), "utf8"),
     ).resolves.toContain("# Project Context");
     await expect(
       fs.readFile(path.join(workspace, "skills", "notice", "SKILL.md"), "utf8"),
     ).resolves.toContain("# Notice");
+    await expect(
+      fs.readFile(path.join(workspace, "skills", "project-cloud-knowledge", "SKILL.md"), "utf8"),
+    ).resolves.toContain("# Project Cloud Knowledge");
   });
 
   it("leaves ordinary and future connector skills untouched unless the bundled skill explicitly opts in", async () => {
@@ -331,7 +343,7 @@ describe("workspace-skills", () => {
     ).resolves.toMatchObject([
       {
         listEntry: {
-          skills: ["project-context", "notice", "inner-filter-name"],
+          skills: ["project-context", "notice", "project-cloud-knowledge", "inner-filter-name"],
         },
       },
     ]);

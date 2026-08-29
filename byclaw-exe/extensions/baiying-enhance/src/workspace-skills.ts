@@ -11,8 +11,8 @@ const PLUGIN_SKILLS_DIR_NAME = "plugin-skills";
 const SKILL_DOC_FILE_NAME = "SKILL.md";
 const MANAGED_BUNDLED_SKILL_FIELD = "byclaw_managed";
 const MANAGED_BUNDLED_SKILL_DIGEST_FILE = ".byclaw-managed-source.sha256";
-// 平台级只读能力对所有百应数字员工可用，不要求每个员工在资源关系中重复绑定。
-const CORE_BUNDLED_SKILLS = ["project-context", "notice"];
+// 平台级能力对所有百应数字员工可用，不要求每个员工在资源关系中重复绑定。
+const CORE_BUNDLED_SKILLS = ["project-context", "notice", "project-cloud-knowledge"];
 const bundledSkillDigestCache = new Map<string, Promise<string>>();
 
 function normalizeSkillName(raw: unknown): string {
