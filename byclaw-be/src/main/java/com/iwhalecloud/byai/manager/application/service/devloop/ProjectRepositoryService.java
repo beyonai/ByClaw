@@ -239,9 +239,52 @@ public class ProjectRepositoryService {
                 nodes.add(node);
             }
         }
+        appendUntrackedChildren(repoPath, path, nodes);
         nodes.sort(Comparator.comparing(ProjectRepoTreeNodeDTO::getType)
             .thenComparing(ProjectRepoTreeNodeDTO::getName, String.CASE_INSENSITIVE_ORDER));
         return nodes;
+    }
+
+    /** ls-tree 只读取提交内容；补充当前工作区中未跟踪文件，且按目录层级只返回直接子节点。 */
+    private void appendUntrackedChildren(Path repoPath, String path, List<ProjectRepoTreeNodeDTO> nodes) {
+        byte[] outputBytes = gitCommandExecutor.executeCommandBytesQuietly(repoPath, "git", "-c", "safe.directory=*",
+            "ls-files", "--others", "--exclude-standard", "-z");
+        if (outputBytes == null || outputBytes.length == 0) {
+            return;
+        }
+        String prefix = path == null || path.isBlank() ? "" : path.replaceAll("^/+|/+$", "") + "/";
+        Map<String, ProjectRepoTreeNodeDTO> existing = nodes.stream()
+            .collect(Collectors.toMap(ProjectRepoTreeNodeDTO::getName, Function.identity(), (left, right) -> left));
+        for (String file : new String(outputBytes, StandardCharsets.UTF_8).split(String.valueOf('\0'))) {
+            if (file.isBlank() || !file.startsWith(prefix)) {
+                continue;
+            }
+            String remainder = file.substring(prefix.length());
+            int slash = remainder.indexOf('/');
+            String childName = slash < 0 ? remainder : remainder.substring(0, slash);
+            if (childName.isBlank() || existing.containsKey(childName)) {
+                continue;
+            }
+            String childPath = prefix + childName;
+            ProjectRepoTreeNodeDTO node = new ProjectRepoTreeNodeDTO();
+            node.setName(childName);
+            node.setPath(childPath);
+            node.setType(slash >= 0 ? "directory" : "file");
+            node.setHasChildren(slash >= 0);
+            if (slash < 0) {
+                try {
+                    Path localFile = repoPath.resolve(file).normalize();
+                    if (localFile.startsWith(repoPath.normalize()) && Files.isRegularFile(localFile)) {
+                        node.setSize(Files.size(localFile));
+                    }
+                }
+                catch (Exception ignored) {
+                    // 文件在扫描期间消失时仍保留树节点，下一次刷新会重新对齐。
+                }
+            }
+            nodes.add(node);
+            existing.put(childName, node);
+        }
     }
 
     private List<ProjectRepoTreeNodeDTO> searchLocalTree(Path repoPath, String keyword, String branch) {

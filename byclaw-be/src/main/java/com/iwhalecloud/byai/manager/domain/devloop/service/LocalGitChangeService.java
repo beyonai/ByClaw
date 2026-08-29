@@ -334,7 +334,8 @@ public class LocalGitChangeService {
 
     /** git status --porcelain:补充未 commit 的工作区改动(新增/修改/删除/重命名),覆盖已 commit 的同名项。 */
     private void collectWorkingTree(File dir, Map<String, LocalFileChange> out) throws Exception {
-        String output = runGit(dir, "status", "--porcelain");
+        // -uall 禁止 Git 将未跟踪目录折叠成单行 ?? directory/，确保前端能看到目录下每个新增文件。
+        String output = runGit(dir, "status", "--porcelain", "-uall");
         for (String line : output.split("\n")) {
             if (line.trim().isEmpty() || line.length() < 3) {
                 continue;

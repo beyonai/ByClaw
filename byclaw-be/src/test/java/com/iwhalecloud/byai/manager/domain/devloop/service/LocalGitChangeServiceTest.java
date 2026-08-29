@@ -60,6 +60,20 @@ class LocalGitChangeServiceTest {
             .containsExactly("app.txt");
     }
 
+    @Test
+    void expandsUntrackedDirectoriesIntoIndividualFiles() throws Exception {
+        Path repo = initializeRepository("untracked-directory");
+        Files.createDirectories(repo.resolve("scripts/nested"));
+        Files.writeString(repo.resolve("scripts/setup.sh"), "echo setup\n");
+        Files.writeString(repo.resolve("scripts/nested/run.sh"), "echo run\n");
+
+        LocalGitChangeService.LocalChangeResult result = new LocalGitChangeService().collectChanges(repo, "main");
+
+        assertThat(result.getFiles()).extracting(LocalGitChangeService.LocalFileChange::getFilename)
+            .contains("scripts/setup.sh", "scripts/nested/run.sh")
+            .doesNotContain("scripts");
+    }
+
     private Path initializeRepository(String name) throws Exception {
         Path repo = tempDir.resolve(name);
         Files.createDirectories(repo);
