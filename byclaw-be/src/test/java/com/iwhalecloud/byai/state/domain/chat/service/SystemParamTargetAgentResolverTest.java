@@ -26,57 +26,50 @@ class SystemParamTargetAgentResolverTest {
 
     @BeforeEach
     void setUp() {
-        resolver = new SystemParamTargetAgentResolver(systemConfigService, privateParamCacheReader,
-            "ENABLE_EXTERNAL_WORKER", "EXTERNAL_{userCode}");
+        resolver = new SystemParamTargetAgentResolver(systemConfigService, privateParamCacheReader);
     }
 
     @Test
     void keepsCurrentTargetWhenSystemParameterIsMissing() {
-        when(systemConfigService.getDcSystemConfigValueByCode("ENABLE_EXTERNAL_WORKER")).thenReturn(null);
+        when(systemConfigService.getDcSystemConfigValueByCode("ENABLE_DSH")).thenReturn(null);
 
         String result = resolver.resolve("DEFAULT_WORKER", "user-a");
 
         assertThat(result).isEqualTo("DEFAULT_WORKER");
-        verify(systemConfigService).getDcSystemConfigValueByCode("ENABLE_EXTERNAL_WORKER");
+        verify(systemConfigService).getDcSystemConfigValueByCode("ENABLE_DSH");
     }
 
     @Test
     void keepsCurrentTargetUnlessSystemParameterIsExactlyOne() {
-        when(systemConfigService.getDcSystemConfigValueByCode("ENABLE_EXTERNAL_WORKER")).thenReturn("true");
+        when(systemConfigService.getDcSystemConfigValueByCode("ENABLE_DSH")).thenReturn("true");
 
         assertThat(resolver.resolve("DEFAULT_WORKER", "user-a")).isEqualTo("DEFAULT_WORKER");
     }
 
     @Test
-    void expandsUserCodeInConfiguredTargetTemplateWhenEnabled() {
-        when(systemConfigService.getDcSystemConfigValueByCode("ENABLE_EXTERNAL_WORKER")).thenReturn(" 1\n");
+    void routesToUserDshWorkerWhenGloballyEnabled() {
+        when(systemConfigService.getDcSystemConfigValueByCode("ENABLE_DSH")).thenReturn(" 1\n");
 
-        assertThat(resolver.resolve("DEFAULT_WORKER", " user-a ")).isEqualTo("EXTERNAL_user-a");
+        assertThat(resolver.resolve("DEFAULT_WORKER", " user-a ")).isEqualTo("BYCLAW_DSH_user-a");
     }
 
     @Test
     void personalEnableOverridesGlobalDisable() {
-        when(privateParamCacheReader.getValue("user-a", "ENABLE_EXTERNAL_WORKER")).thenReturn("1");
+        when(privateParamCacheReader.getValue("user-a", "ENABLE_DSH")).thenReturn("1");
 
-        assertThat(resolver.resolve("DEFAULT_WORKER", "user-a")).isEqualTo("EXTERNAL_user-a");
+        assertThat(resolver.resolve("DEFAULT_WORKER", "user-a")).isEqualTo("BYCLAW_DSH_user-a");
     }
 
     @Test
     void personalDisableOverridesGlobalEnable() {
-        when(privateParamCacheReader.getValue("user-a", "ENABLE_EXTERNAL_WORKER")).thenReturn("0");
-        lenient().when(systemConfigService.getDcSystemConfigValueByCode("ENABLE_EXTERNAL_WORKER")).thenReturn("1");
+        when(privateParamCacheReader.getValue("user-a", "ENABLE_DSH")).thenReturn("0");
+        lenient().when(systemConfigService.getDcSystemConfigValueByCode("ENABLE_DSH")).thenReturn("1");
 
         assertThat(resolver.resolve("DEFAULT_WORKER", "user-a")).isEqualTo("DEFAULT_WORKER");
     }
 
     @Test
-    void keepsCurrentTargetWhenConfigurationOrUserCodeIsBlank() {
-        assertThat(new SystemParamTargetAgentResolver(systemConfigService, privateParamCacheReader,
-            "", "EXTERNAL_{userCode}")
-            .resolve("DEFAULT_WORKER", "user-a")).isEqualTo("DEFAULT_WORKER");
-        assertThat(new SystemParamTargetAgentResolver(systemConfigService, privateParamCacheReader,
-            "ENABLE_EXTERNAL_WORKER", "")
-            .resolve("DEFAULT_WORKER", "user-a")).isEqualTo("DEFAULT_WORKER");
+    void keepsCurrentTargetWhenUserCodeIsBlank() {
         assertThat(resolver.resolve("DEFAULT_WORKER", " ")).isEqualTo("DEFAULT_WORKER");
     }
 }
