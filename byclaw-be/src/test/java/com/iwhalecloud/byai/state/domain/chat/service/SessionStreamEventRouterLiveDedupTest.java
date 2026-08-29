@@ -29,7 +29,7 @@ class SessionStreamEventRouterLiveDedupTest {
     private OutputStreamManager outputStreamManager;
     private PythonSseService pythonSseService;
     private GatewayStreamEventProcessor gatewayStreamEventProcessor;
-    private RunningChatSnapshotService runningChatSnapshotService;
+    private RunningChatSnapshotWriteBehind runningChatSnapshotWriteBehind;
     private TerminalPersistMarkerService terminalPersistMarkerService;
     private SessionStreamEventRouter router;
 
@@ -39,7 +39,8 @@ class SessionStreamEventRouterLiveDedupTest {
         outputStreamManager = mockField("outputStreamManager", OutputStreamManager.class);
         pythonSseService = mockField("pythonSseService", PythonSseService.class);
         gatewayStreamEventProcessor = mockField("gatewayStreamEventProcessor", GatewayStreamEventProcessor.class);
-        runningChatSnapshotService = mockField("runningChatSnapshotService", RunningChatSnapshotService.class);
+        runningChatSnapshotWriteBehind = mockField("runningChatSnapshotWriteBehind",
+            RunningChatSnapshotWriteBehind.class);
         mockField("multiDeviceBroadcastService",
             com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService.class);
         mockField("chatContextRecoveryService", ChatContextRecoveryService.class);
@@ -127,14 +128,14 @@ class SessionStreamEventRouterLiveDedupTest {
             .thenReturn(SseResponseEventEnum.appStreamResponse);
         liveCtx(null);
         doAnswer(invocation -> {
-            MessageContext snapshotContext = invocation.getArgument(2);
+            MessageContext snapshotContext = invocation.getArgument(3);
             assertThat(snapshotContext.getComplete()).isTrue();
             return null;
-        }).when(runningChatSnapshotService).save(any(), anyString(), any());
+        }).when(runningChatSnapshotWriteBehind).flushNow(anyString(), any(), anyString(), any());
 
         router.dispatch(event("100-0", SseResponseEventEnum.appStreamResponse));
 
-        verify(runningChatSnapshotService).save(any(), anyString(), any());
+        verify(runningChatSnapshotWriteBehind).flushNow(anyString(), any(), anyString(), any());
     }
 
     /**

@@ -1504,13 +1504,24 @@ export default {
   'messageList.sqlAnalysis': 'SQL Analysis',
   'messageList.defaultAIName': 'Beyond AI',
   'messageList.taskPlan.title': 'Task execution plan',
+  'messageList.taskPlan.updated': 'Task plan updated',
   'messageList.taskPlan.progress': '{completed}/{total} completed',
+  'messageList.taskPlan.summary.COMPLETED': '{count} completed',
+  'messageList.taskPlan.summary.IN_PROGRESS': '{count} in progress',
+  'messageList.taskPlan.summary.PENDING': '{count} pending',
+  'messageList.taskPlan.summary.FAILED': '{count} failed',
+  'messageList.taskPlan.summary.CANCELLED': '{count} cancelled',
+  'messageList.taskPlan.summary.SKIPPED': '{count} skipped',
   'messageList.taskPlan.status.PENDING': 'Pending',
   'messageList.taskPlan.status.IN_PROGRESS': 'In progress',
   'messageList.taskPlan.status.COMPLETED': 'Completed',
   'messageList.taskPlan.status.FAILED': 'Failed',
   'messageList.taskPlan.status.SKIPPED': 'Skipped',
   'messageList.taskPlan.status.CANCELLED': 'Cancelled',
+  'messageList.askUser.title': 'Your answer is needed',
+  'messageList.askUser.answered': 'Answered questions',
+  'messageList.askUser.previous': 'Previous question',
+  'messageList.askUser.next': 'Next question',
 
   // MessageContent Component
   'contentHeader.settings': 'Settings',
@@ -1668,6 +1679,7 @@ export default {
 
   'toolCall.input': 'Input',
   'toolCall.output': 'Output',
+  'contextEvent.input': 'Injected input',
   'toolCall.collapse': 'Collapse details',
 
   quote: 'Quote',

@@ -30,6 +30,7 @@ const compMap: Record<string, React.LazyExoticComponent<any>> = {
   [`${SSEMessageType.employee}`]: lazy(() => import('@/components/MessagesComp/Employee')),
   [`${SSEMessageType.iframe}`]: lazy(() => import('@/components/MessagesComp/Iframe')),
   [`${SSEMessageType.approvalForm}`]: lazy(() => import('@/components/MessagesComp/ApprovalForm')),
+  [`${SSEMessageType.taskOutline}`]: lazy(() => import('@/components/MessagesComp/TaskPlanUpdate')),
   [`${SSEMessageType.application}`]: lazy(() => import('@/components/MessagesComp/Application')),
   [`${SSEMessageType.forward}`]: lazy(() => import('@/components/MessagesComp/Forward')),
   [`${SSEMessageType.asr}`]: lazy(() => import('@/components/MessagesComp/Asr')),
