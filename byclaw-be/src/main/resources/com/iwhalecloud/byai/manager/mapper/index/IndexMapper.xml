@@ -251,9 +251,6 @@
             <if test="agentType != null and agentType != ''">
                 and b.agent_type = #{agentType}
             </if>
-            <if test="excludeEmployeeGroup == true">
-                and coalesce(b.agent_type, '') != '017'
-            </if>
             <!-- 关键字搜索 -->
             <if test="keyword != null and keyword != ''">
                 and UPPER(a.resource_name) like concat('%', UPPER(#{keyword}), '%')
