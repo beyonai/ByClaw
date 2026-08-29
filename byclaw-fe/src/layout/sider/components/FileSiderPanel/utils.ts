@@ -189,6 +189,8 @@ export function getCategoryActivePath(category: FileCategoryItem, sessionId?: st
 }
 
 export function normalizeFileBrowserPath(path?: string) {
+  const pathWithoutSandboxRoot = path === '/by' ? '/' : path?.startsWith('/by/') ? path.substring(3) : path;
+  if (pathWithoutSandboxRoot !== path) return normalizeFileBrowserPath(pathWithoutSandboxRoot);
   const normalizedPath = `${path || '/'}`.trim().replace(/\\/g, '/').replace(/\/+/g, '/');
   if (!normalizedPath || normalizedPath === '/') {
     return '/';

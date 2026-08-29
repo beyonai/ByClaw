@@ -42,7 +42,7 @@ class FileBrowserApplicationServiceCredentialPolicyTest {
 
         assertThat(service.list("user", 10L, "/"))
             .extracting(FileBrowserItemVo::getPath)
-            .containsExactly("/.openclaw", "/README.md");
+            .containsExactly("/by/.openclaw", "/by/README.md");
     }
 
     @Test
@@ -80,6 +80,15 @@ class FileBrowserApplicationServiceCredentialPolicyTest {
         assertThat(service.list("user", 10L, "/.connector-auth-backup")).isEmpty();
 
         verify(provider).list("user", 10L, "/.connector-auth-backup");
+    }
+
+    @Test
+    void externalByPrefixIsRemovedBeforeProviderCall() {
+        when(provider.list("user", 10L, "/.sessions/20029790")).thenReturn(List.of());
+
+        assertThat(service.list("user", 10L, "/by/.sessions/20029790/")).isEmpty();
+
+        verify(provider).list("user", 10L, "/.sessions/20029790");
     }
 
     private FileBrowserItemVo item(String path, boolean directory) {
