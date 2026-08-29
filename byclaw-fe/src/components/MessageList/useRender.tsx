@@ -14,7 +14,6 @@ import WaveBallLoading from '@/components/Loading/WaveBallLoading';
 import CiteRender from '@/components/MessageList/components/CiteRender';
 import FileRender from '@/components/MessageList/components/FileRender';
 import ReplyFileArtifacts from '@/components/MessageList/components/ReplyFileArtifacts';
-import TaskExecutionPlan from '@/components/MessageList/components/TaskExecutionPlan';
 import NotSupport from '@/components/NotSupport';
 
 import ThumbUpContent from './components/AnswerActions/ThumbUp/content';
@@ -485,7 +484,6 @@ export default function useRender({
                 [styles.pureText]: fromOtherUser && usage !== '4',
               })}
             >
-              {fromBeyond && msg.taskPlan && <TaskExecutionPlan taskPlan={msg.taskPlan} />}
               {isV2Message(msg) ? (
                 <MsgRendererV2 msg={msg} updateMessage={updateMessage} hideThinking={param?.hideThinking} />
               ) : (

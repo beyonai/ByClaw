@@ -4,9 +4,16 @@ import useGlobal from '@/hooks/useGlobal';
 import classnames from 'classnames';
 import { get } from 'lodash';
 import { useIntl } from '@umijs/max';
-import { Button, Checkbox, Input, Radio, Tabs } from 'antd';
+import { Button, Checkbox, Input, Radio } from 'antd';
 import type { InputRef } from 'antd';
 import { useRef, useState } from 'react';
+import {
+  CheckCircleOutlined,
+  EditOutlined,
+  LeftOutlined,
+  QuestionCircleOutlined,
+  RightOutlined,
+} from '@ant-design/icons';
 import { LayoutMode } from '@/constants/system';
 import withEasyConfirm from '@/components/MessagesComp/withEasyConfirm';
 import Md from '@/components/Preview/Md';
@@ -51,6 +58,7 @@ export type IProps = {
   messageListItemContent: IMessageListItemContent;
   messageListItem?: IMessageListItem;
   thinkListItem?: IMessageListItem;
+  presentation?: 'dock' | 'transcript';
 };
 
 /** 是否视为「有有效 metadata」：空串不应挡住助手消息上的完整 JSON */
@@ -161,8 +169,14 @@ export function AskUserQuestions(props: IProps) {
   const { updateMessageListItemContent, messageListItemContent, message: messageInfo } = props;
 
   const { sourceAgentType, submitting, formStatus } = messageListItemContent || {};
-  const { questions = [], answers: savedAnswers } = get(messageListItemContent, 'substance') || {};
+  const {
+    questions = [],
+    answers: savedAnswers,
+    formStatus: substanceFormStatus,
+  } = get(messageListItemContent, 'substance') || {};
   const answers = normalizeAnswers(questions, savedAnswers);
+  const effectiveFormStatus = formStatus ?? substanceFormStatus;
+  const isFinished = effectiveFormStatus === IFormStatus.FINISH;
   const isAskUserQuestion = questions.length > 0;
   const allQuestionsAnswered =
     isAskUserQuestion && answers.every((answer) => getEffectiveSelectedOptions(answer).length > 0);
@@ -176,11 +190,35 @@ export function AskUserQuestions(props: IProps) {
   const [activeQuestionKey, setActiveQuestionKey] = useState(() =>
     questions[0] ? getQuestionKey(questions[0], 0) : undefined
   );
+  const activeQuestionIndex = Math.max(
+    questions.findIndex((question, index) => getQuestionKey(question, index) === activeQuestionKey),
+    0
+  );
 
   const isPreviewMode = layoutMode === LayoutMode.preview;
   const isThinkingProcess = !!props.thinkListItem;
   const updateField = isThinkingProcess ? 'inferLog' : 'messageStruct';
-  const isDisabled = messageInfo.isHistoryMsg || formStatus === IFormStatus.FINISH || isPreviewMode || submitting;
+  const isDisabled = messageInfo.isHistoryMsg || isFinished || isPreviewMode || submitting;
+
+  if (props.presentation !== 'dock') {
+    if (!isFinished) return null;
+
+    return (
+      <section className={styles.answerSummary} aria-label={intl.formatMessage({ id: 'messageList.askUser.answered' })}>
+        <span className={styles.summaryIcon} aria-hidden="true">
+          <CheckCircleOutlined />
+        </span>
+        <div className={styles.summaryBody}>
+          {questions.map((question, index) => (
+            <div className={styles.summaryRow} key={getQuestionKey(question, index)}>
+              <span className={styles.summaryQuestion}>{question.question}</span>
+              <span className={styles.summaryAnswer}>{getEffectiveSelectedOptions(answers[index]).join('、')}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+    );
+  }
 
   const updateAnswer = (questionIndex: number, answerPatch: Partial<IAskUserQuestionAnswer>) => {
     const nextAnswers = answers.map((answer, index) => {
@@ -214,17 +252,24 @@ export function AskUserQuestions(props: IProps) {
 
     return (
       <div className={styles.optionList}>
-        {question.options.map((option) => {
+        {question.options.map((option, optionIndex) => {
+          const isSelected = selectedOptions.includes(option.label);
           const optionContent = (
             <div className={styles.optionContent}>
-              <div className={styles.optionLabel}>{option.label}</div>
+              <div className={styles.optionHeading}>
+                <span className={styles.optionIndex}>{optionIndex + 1}</span>
+                <span className={styles.optionLabel}>{option.label}</span>
+              </div>
               {option.description ? <div className={styles.optionDescription}>{option.description}</div> : null}
             </div>
           );
 
           if (question.multiSelect) {
             return (
-              <label className={styles.optionItem} key={option.label}>
+              <label
+                className={classnames(styles.optionItem, { [styles.optionSelected]: isSelected })}
+                key={option.label}
+              >
                 <Checkbox
                   checked={selectedOptions.includes(option.label)}
                   disabled={isDisabled}
@@ -241,7 +286,10 @@ export function AskUserQuestions(props: IProps) {
           }
 
           return (
-            <label className={styles.optionItem} key={option.label}>
+            <label
+              className={classnames(styles.optionItem, { [styles.optionSelected]: isSelected })}
+              key={option.label}
+            >
               <Radio
                 checked={selectedOptions[0] === option.label}
                 disabled={isDisabled}
@@ -261,7 +309,9 @@ export function AskUserQuestions(props: IProps) {
           );
         })}
         <div
-          className={classnames(styles.optionItem, styles.otherOption)}
+          className={classnames(styles.optionItem, styles.otherOption, {
+            [styles.optionSelected]: otherSelected,
+          })}
           role="button"
           tabIndex={isDisabled ? -1 : 0}
           onClick={selectOther}
@@ -295,7 +345,12 @@ export function AskUserQuestions(props: IProps) {
             />
           )}
           <div className={styles.optionContent}>
-            <div className={styles.optionLabel}>{intl.formatMessage({ id: 'resource.other' })}</div>
+            <div className={styles.optionHeading}>
+              <span className={classnames(styles.optionIndex, styles.otherIndex)}>
+                <EditOutlined />
+              </span>
+              <span className={styles.optionLabel}>{intl.formatMessage({ id: 'resource.other' })}</span>
+            </div>
             <Input
               ref={(input) => {
                 otherInputRefs.current[questionIndex] = input;
@@ -318,41 +373,62 @@ export function AskUserQuestions(props: IProps) {
     );
   };
 
-  let questionContent = null;
-  if (questions.length > 1) {
-    questionContent = (
-      <Tabs
-        activeKey={activeQuestionKey}
-        onChange={setActiveQuestionKey}
-        items={questions.map((question, index) => ({
-          key: getQuestionKey(question, index),
-          label: (
-            <div className={styles.questionMarkdown}>
-              <Md content={question.question} />
-            </div>
-          ),
-          children: renderQuestionOptions(question, index),
-        }))}
-      />
-    );
-  } else if (questions[0]) {
-    questionContent = (
-      <div className={styles.singleQuestion}>
-        <div className={classnames(styles.questionTitle, styles.questionMarkdown)}>
-          <Md content={questions[0].question} />
-        </div>
-        {renderQuestionOptions(questions[0], 0)}
-      </div>
-    );
-  }
+  const activeQuestion = questions[activeQuestionIndex];
+  const activeAnswer = answers[activeQuestionIndex];
+  const activeQuestionAnswered = activeAnswer && getEffectiveSelectedOptions(activeAnswer).length > 0;
 
   return (
-    <div className={classnames(styles.thinkTaskUserInput, 'ub ub-ac')}>
-      <div className={classnames('ub-f1', styles.questionForm)}>
-        {questionContent}
-        <div className="ub ub-pe ub-ac">
+    <section className={styles.questionDock} aria-label={intl.formatMessage({ id: 'messageList.askUser.title' })}>
+      <header className={styles.dockHeader}>
+        <span className={styles.eyebrow}>
+          <QuestionCircleOutlined />
+          {intl.formatMessage({ id: 'messageList.askUser.title' })}
+        </span>
+        {questions.length > 1 ? (
+          <span className={styles.questionProgress}>
+            {activeQuestionIndex + 1} / {questions.length}
+          </span>
+        ) : null}
+      </header>
+      <div className={styles.questionForm}>
+        {activeQuestion ? (
+          <div className={styles.singleQuestion}>
+            <div className={classnames(styles.questionTitle, styles.questionMarkdown)}>
+              <Md content={activeQuestion.question} />
+            </div>
+            {renderQuestionOptions(activeQuestion, activeQuestionIndex)}
+          </div>
+        ) : null}
+        <footer className={styles.formFooter}>
+          <div className={styles.questionNav}>
+            {questions.length > 1 ? (
+              <>
+                <Button
+                  type="text"
+                  icon={<LeftOutlined />}
+                  aria-label={intl.formatMessage({ id: 'messageList.askUser.previous' })}
+                  disabled={activeQuestionIndex === 0}
+                  onClick={() => {
+                    const previousIndex = activeQuestionIndex - 1;
+                    setActiveQuestionKey(getQuestionKey(questions[previousIndex], previousIndex));
+                  }}
+                />
+                <Button
+                  type="text"
+                  icon={<RightOutlined />}
+                  aria-label={intl.formatMessage({ id: 'messageList.askUser.next' })}
+                  disabled={activeQuestionIndex === questions.length - 1 || !activeQuestionAnswered}
+                  onClick={() => {
+                    const nextIndex = activeQuestionIndex + 1;
+                    setActiveQuestionKey(getQuestionKey(questions[nextIndex], nextIndex));
+                  }}
+                />
+              </>
+            ) : null}
+          </div>
           <Button
             type="primary"
+            className={styles.confirmButton}
             loading={submitting}
             disabled={isDisabled || (isAskUserQuestion && !allQuestionsAnswered)}
             onClick={async () => {
@@ -440,13 +516,11 @@ export function AskUserQuestions(props: IProps) {
               }
             }}
           >
-            {formStatus === IFormStatus.FINISH
-              ? intl.formatMessage({ id: 'form.completed' })
-              : intl.formatMessage({ id: 'form.confirm' })}
+            {isFinished ? intl.formatMessage({ id: 'form.completed' }) : intl.formatMessage({ id: 'form.confirm' })}
           </Button>
-        </div>
+        </footer>
       </div>
-    </div>
+    </section>
   );
 }
 

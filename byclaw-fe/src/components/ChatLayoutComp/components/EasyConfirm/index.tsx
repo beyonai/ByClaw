@@ -1,6 +1,6 @@
 import React, { Suspense, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import classnames from 'classnames';
-import { Pagination, theme } from 'antd';
+import { Pagination } from 'antd';
 import { concat, isEmpty, merge } from 'lodash';
 // import CloseOutlined from '@ant-design/icons/CloseOutlined';
 
@@ -82,7 +82,6 @@ const EasyConfirm = (props: IProps) => {
 
   const { EventEmitter } = useGlobal();
   const { formatMessage } = useIntl();
-  const { token } = theme.useToken();
 
   const [page, setPage] = useState<number>(1);
   const [eventList, setEventList] = useState<IEasyConfirmCompProps[]>([]);
@@ -242,7 +241,7 @@ const EasyConfirm = (props: IProps) => {
 
   return (
     <>
-      <div className={classnames(styles.easyConfirm, 'ub ub-ver gap8')} style={{ boxShadow: token.boxShadowTertiary }}>
+      <div className={classnames(styles.easyConfirm, 'ub ub-ver gap8')}>
         <div className="ub ub-pj" style={{ display: list.length > 1 ? 'flex' : 'none' }}>
           <div>{formatMessage({ id: 'easyConfirm.pagination.title' })}</div>
           <Pagination
@@ -259,7 +258,7 @@ const EasyConfirm = (props: IProps) => {
           {compProps &&
             (Comp ? (
               <Suspense>
-                <Comp {...compProps} key={getUUId(compProps)} renderInEasyConfirm />
+                <Comp {...compProps} presentation="dock" key={getUUId(compProps)} renderInEasyConfirm />
               </Suspense>
             ) : (
               <NotSupport />

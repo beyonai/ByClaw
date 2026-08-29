@@ -63,6 +63,14 @@ class ConnectorSchemaTest {
     }
 
     @Test
+    void v040MigrationDropsConnectorAuthorizationForeignKey() throws Exception {
+        String ddl = readPreservingCase("deploy/migrations/versions/V0.4.0/V0.4.0__ddl.sql");
+
+        assertThat(ddl).contains("DROP CONSTRAINT fk_byai_connector_auth_connector");
+        assertThat(ddl).contains("WHERE conname = 'fk_byai_connector_auth_connector'");
+    }
+
+    @Test
     void imaMigrationSeedsOnlyCredentialFormMetadataAndManagedEnvironmentManifest() throws Exception {
         String sql = readPreservingCase("deploy/migrations/versions/V0.4.0/V0.4.0__dml.sql");
         ImaConnectorSeed seed = extractImaConnectorSeed(sql);

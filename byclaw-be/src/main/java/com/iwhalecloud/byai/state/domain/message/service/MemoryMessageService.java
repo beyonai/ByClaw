@@ -113,6 +113,17 @@ public class MemoryMessageService {
     }
 
     /**
+     * 保存可重放的消息。相同 messageId 已存在时执行选择性更新，避免恢复或重投产生重复记录。
+     */
+    public ByaiMessageHotDtoDto saveOrUpdate(Long sessionId, Integer usage, MessageContext messageStruct,
+        AssistantChatDto assistantChatDto) {
+        ByaiMessageHotDtoDto byaiMessageHotDto = this.generateMessage(sessionId, usage, messageStruct,
+            assistantChatDto);
+        byaiMessageHotService.updateSelective(byaiMessageHotDto);
+        return byaiMessageHotDto;
+    }
+
+    /**
      * 生成消息对象
      *
      * @param sessionId 会话ID

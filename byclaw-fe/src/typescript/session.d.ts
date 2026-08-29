@@ -1,11 +1,11 @@
-import { IChatModeType } from "@/constants/query";
-import { SessionType } from "@/constants/session";
+import { IChatModeType } from '@/constants/query';
+import { SessionType } from '@/constants/session';
 
 
 export interface ISession {
   sessionContent?: ReactNode;
   sessionName: string; // 列表中的会话名称
-  parentSessionId: number; // 列表中的父会话ID
+  parentSessionId?: string | number; // 列表中的父会话ID
   creatorId?: number; // 列表中的创建者ID
   createTime: string; // 会话的创建时间
   updateTime: string; // 会话的创建时间

@@ -1494,13 +1494,24 @@ export default {
   'messageList.sqlAnalysis': 'SQL分析',
   'messageList.defaultAIName': '鲸智百应',
   'messageList.taskPlan.title': '任务执行计划',
+  'messageList.taskPlan.updated': '任务计划已更新',
   'messageList.taskPlan.progress': '{completed}/{total} 已完成',
+  'messageList.taskPlan.summary.COMPLETED': '{count} 已完成',
+  'messageList.taskPlan.summary.IN_PROGRESS': '{count} 进行中',
+  'messageList.taskPlan.summary.PENDING': '{count} 待处理',
+  'messageList.taskPlan.summary.FAILED': '{count} 失败',
+  'messageList.taskPlan.summary.CANCELLED': '{count} 已取消',
+  'messageList.taskPlan.summary.SKIPPED': '{count} 已跳过',
   'messageList.taskPlan.status.PENDING': '待执行',
   'messageList.taskPlan.status.IN_PROGRESS': '执行中',
   'messageList.taskPlan.status.COMPLETED': '已完成',
   'messageList.taskPlan.status.FAILED': '执行失败',
   'messageList.taskPlan.status.SKIPPED': '已跳过',
   'messageList.taskPlan.status.CANCELLED': '已取消',
+  'messageList.askUser.title': '需要你的回答',
+  'messageList.askUser.answered': '已回答的问题',
+  'messageList.askUser.previous': '上一题',
+  'messageList.askUser.next': '下一题',
 
   // MessageContent组件
   'contentHeader.settings': '设置',
@@ -1653,6 +1664,7 @@ export default {
 
   'toolCall.input': '输入',
   'toolCall.output': '输出',
+  'contextEvent.input': '注入内容',
   'toolCall.collapse': '收起详情',
 
   quote: '引用',

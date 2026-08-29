@@ -71,6 +71,11 @@
   }
 }
 
+.taskPlanDock {
+  width: calc(100% - 32px);
+  margin: 0 auto 8px;
+}
+
 .shortcuts {
   display: flex;
   // justify-content: center;
@@ -141,4 +146,50 @@
   right: 10px;
   background-color: rgba(255, 255, 255, 0.8);
   border-radius: 8px;
+}
+.childSessionReadOnlyNotice {
+  width: min(860px, calc(100% - 40px));
+  min-height: 48px;
+  margin: 8px auto 10px;
+  padding: 8px 10px 8px 14px;
+  border: 1px solid #d8e3f2;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  color: #536176;
+  background: linear-gradient(100deg, #f5f8fc 0%, #fbfdff 100%);
+  box-shadow: 0 5px 18px rgba(27, 52, 88, 0.06);
+
+  button {
+    height: 32px;
+    padding: 0 12px;
+    border: 1px solid #b9cef1;
+    border-radius: 9px;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    color: #1c5fc9;
+    background: #fff;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+
+    &:hover,
+    &:focus-visible {
+      border-color: #246bfe;
+      color: #0c52c5;
+      background: #edf4ff;
+      outline: none;
+    }
+  }
+}
+
+.childSessionReadOnlyCopy {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
 }
