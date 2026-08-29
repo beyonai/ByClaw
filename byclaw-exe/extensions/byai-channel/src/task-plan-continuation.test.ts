@@ -23,14 +23,19 @@ vi.mock("../../shared/src/redis-compat.js", () => ({
   readRedisConfig: vi.fn(() => ({})),
 }));
 import {
+  clearTaskPlanExecutionContext,
   isTaskPlanContinuationPending,
   markTaskPlanContinuationPending,
+  rememberTaskPlanExecutionContext,
   registerTaskPlanRuntimeBridge,
   type TaskPlanRuntimeBridge,
   type TaskPlanSnapshot,
 } from "../../shared/src/task-plan-runtime.js";
 import {
+  bindActiveSdkRequestRunId,
   clearActiveSdkRequestRecord,
+  markActiveSdkRootLifecycleFinished,
+  markActiveSdkRootLifecycleStarted,
   registerActiveSdkRequest,
   shouldCompleteActiveSdkRequest,
   type ActiveSdkRequest,
@@ -83,6 +88,7 @@ afterEach(() => {
     clearActiveSdkRequestRecord(request);
     request = undefined;
   }
+  clearTaskPlanExecutionContext("agent:main:direct:session-1");
 });
 
 describe("continueActiveTaskPlan", () => {
@@ -121,6 +127,47 @@ describe("continueActiveTaskPlan", () => {
     expect(dispatch.mock.calls[0]?.[0]).toContain("权威任务计划仍处于 ACTIVE");
     expect(runtime.command).not.toHaveBeenCalled();
     expect(isTaskPlanContinuationPending(active.sessionKey)).toBe(false);
+  });
+
+  it("uses the plan owner's run identity after OpenClaw starts a follow-up run", async () => {
+    const active = createReadyRequest();
+    rememberTaskPlanExecutionContext({
+      sessionKey: active.sessionKey,
+      sessionId: active.sessionId,
+      messageId: active.messageId!,
+      traceId: active.traceId,
+      sourceRuntime: "OPENCLAW",
+      sourceRunId: "owner-run",
+      beyondToken: active.beyondToken,
+    });
+    bindActiveSdkRequestRunId(active.sessionKey, "follow-up-run");
+    markActiveSdkRootLifecycleStarted(active.sessionKey, "follow-up-run");
+    markActiveSdkRootLifecycleFinished(active.sessionKey, "end", "follow-up-run");
+    const loadActive = vi
+      .fn()
+      .mockResolvedValueOnce(plan("ACTIVE", 1))
+      .mockResolvedValueOnce(plan("COMPLETED", 2));
+    const runtime = {
+      loadActive,
+      command: vi.fn(),
+      cancel: vi.fn(),
+    } as unknown as TaskPlanRuntimeBridge;
+    registerTaskPlanRuntimeBridge(runtime);
+
+    await continueActiveTaskPlan({
+      request: active,
+      language: "zh_CN",
+      dispatch: async () => {
+        bindActiveSdkRequestRunId(active.sessionKey, "second-follow-up-run");
+        markActiveSdkRootLifecycleStarted(active.sessionKey, "second-follow-up-run");
+        markActiveSdkRootLifecycleFinished(active.sessionKey, "end", "second-follow-up-run");
+      },
+    });
+
+    expect(loadActive.mock.calls.map(([context]) => context.sourceRunId)).toEqual([
+      "owner-run",
+      "owner-run",
+    ]);
   });
 
   it("does not dispatch another continuation after the request is stopped", async () => {

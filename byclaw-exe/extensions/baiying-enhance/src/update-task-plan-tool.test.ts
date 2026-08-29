@@ -4,8 +4,10 @@ vi.mock("openclaw/plugin-sdk/routing", () => ({
 }));
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/compat";
 import {
+  clearTaskPlanExecutionContext,
   isTaskPlanContinuationPending,
   markTaskPlanContinuationPending,
+  resolveTaskPlanExecutionContext,
   type TaskPlanRuntimeBridge,
   type TaskPlanSnapshot,
 } from "../../shared/src/task-plan-runtime.js";
@@ -61,6 +63,7 @@ function installChannelContext(options: { delegatedAgentCall?: boolean } = {}): 
 afterEach(() => {
   delete (globalThis as typeof globalThis & { [STORE_KEY]?: unknown })[STORE_KEY];
   markTaskPlanContinuationPending(sessionKey, false);
+  clearTaskPlanExecutionContext(sessionKey);
 });
 
 describe("updateTaskPlan", () => {
@@ -118,6 +121,46 @@ describe("updateTaskPlan", () => {
     expect(result.content[0].text).not.toContain("task-secret");
     expect(result.content[0].text).not.toContain('"version"');
     expect(isTaskPlanContinuationPending(sessionKey)).toBe(true);
+    expect(resolveTaskPlanExecutionContext(sessionKey)?.sourceRunId).toBe("run-1");
+    expect(resolveTaskPlanExecutionContext(sessionKey)).not.toHaveProperty("beyondToken");
+  });
+
+  it("keeps the plan owner's run identity across automatic follow-up runs", async () => {
+    installChannelContext();
+    const completedPlan: TaskPlanSnapshot = {
+      ...activePlan,
+      version: 4,
+      status: "COMPLETED",
+      tasks: activePlan.tasks.map((task) => ({ ...task, status: "COMPLETED" })),
+    };
+    const command = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true as const, plan: activePlan })
+      .mockResolvedValueOnce({ ok: true as const, plan: completedPlan });
+    const runtime = {
+      loadActive: vi.fn(),
+      command,
+      cancel: vi.fn(),
+    } as unknown as TaskPlanRuntimeBridge;
+    const factory = createUpdateTaskPlanToolFactory({ runtime });
+    const firstTool = factory({ sessionKey, runId: "run-1" }) as {
+      execute: (toolCallId: string, params: Record<string, unknown>) => Promise<unknown>;
+    };
+
+    await firstTool.execute("tool-create", {
+      action: "create",
+      title: "Complex request",
+      tasks: [{ step: "First step" }],
+    });
+
+    const followUpTool = factory({ sessionKey, runId: "run-2" }) as {
+      execute: (toolCallId: string, params: Record<string, unknown>) => Promise<unknown>;
+    };
+    await followUpTool.execute("tool-complete", { action: "complete_current" });
+
+    expect(command.mock.calls[1]?.[0].context.sourceRunId).toBe("run-1");
+    expect(resolveTaskPlanExecutionContext(sessionKey)).toBeUndefined();
+    expect(isTaskPlanContinuationPending(sessionKey)).toBe(false);
   });
 
   it("injects the requested planning instruction and active plan into each eligible root agent", async () => {
