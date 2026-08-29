@@ -1,9 +1,11 @@
 package com.iwhalecloud.byai.state.domain.chat.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.iwhalecloud.byai.manager.application.service.user.UserPrivateParamCacheReader;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -17,12 +19,15 @@ class SystemParamTargetAgentResolverTest {
     @Mock
     private ByaiSystemConfigService systemConfigService;
 
+    @Mock
+    private UserPrivateParamCacheReader privateParamCacheReader;
+
     private SystemParamTargetAgentResolver resolver;
 
     @BeforeEach
     void setUp() {
-        resolver = new SystemParamTargetAgentResolver(systemConfigService, "ENABLE_EXTERNAL_WORKER",
-            "EXTERNAL_{userCode}");
+        resolver = new SystemParamTargetAgentResolver(systemConfigService, privateParamCacheReader,
+            "ENABLE_EXTERNAL_WORKER", "EXTERNAL_{userCode}");
     }
 
     @Test
@@ -50,10 +55,27 @@ class SystemParamTargetAgentResolverTest {
     }
 
     @Test
+    void personalEnableOverridesGlobalDisable() {
+        when(privateParamCacheReader.getValue("user-a", "ENABLE_EXTERNAL_WORKER")).thenReturn("1");
+
+        assertThat(resolver.resolve("DEFAULT_WORKER", "user-a")).isEqualTo("EXTERNAL_user-a");
+    }
+
+    @Test
+    void personalDisableOverridesGlobalEnable() {
+        when(privateParamCacheReader.getValue("user-a", "ENABLE_EXTERNAL_WORKER")).thenReturn("0");
+        lenient().when(systemConfigService.getDcSystemConfigValueByCode("ENABLE_EXTERNAL_WORKER")).thenReturn("1");
+
+        assertThat(resolver.resolve("DEFAULT_WORKER", "user-a")).isEqualTo("DEFAULT_WORKER");
+    }
+
+    @Test
     void keepsCurrentTargetWhenConfigurationOrUserCodeIsBlank() {
-        assertThat(new SystemParamTargetAgentResolver(systemConfigService, "", "EXTERNAL_{userCode}")
+        assertThat(new SystemParamTargetAgentResolver(systemConfigService, privateParamCacheReader,
+            "", "EXTERNAL_{userCode}")
             .resolve("DEFAULT_WORKER", "user-a")).isEqualTo("DEFAULT_WORKER");
-        assertThat(new SystemParamTargetAgentResolver(systemConfigService, "ENABLE_EXTERNAL_WORKER", "")
+        assertThat(new SystemParamTargetAgentResolver(systemConfigService, privateParamCacheReader,
+            "ENABLE_EXTERNAL_WORKER", "")
             .resolve("DEFAULT_WORKER", "user-a")).isEqualTo("DEFAULT_WORKER");
         assertThat(resolver.resolve("DEFAULT_WORKER", " ")).isEqualTo("DEFAULT_WORKER");
     }

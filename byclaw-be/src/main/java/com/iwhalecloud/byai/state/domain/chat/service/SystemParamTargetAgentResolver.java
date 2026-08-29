@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.domain.chat.service;
 
+import com.iwhalecloud.byai.manager.application.service.user.UserPrivateParamCacheReader;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Value;
@@ -16,16 +17,20 @@ public class SystemParamTargetAgentResolver {
 
     private final ByaiSystemConfigService systemConfigService;
 
+    private final UserPrivateParamCacheReader privateParamCacheReader;
+
     private final String enableParamCode;
 
     private final String targetAgentTemplate;
 
     public SystemParamTargetAgentResolver(
             ByaiSystemConfigService systemConfigService,
+            UserPrivateParamCacheReader privateParamCacheReader,
             @Value("${byclaw.chat.target-override.enable-param:}") String enableParamCode,
             @Value("${byclaw.chat.target-override.agent-template:}") String targetAgentTemplate
     ) {
         this.systemConfigService = systemConfigService;
+        this.privateParamCacheReader = privateParamCacheReader;
         this.enableParamCode = StringUtils.trimToEmpty(enableParamCode);
         this.targetAgentTemplate = StringUtils.trimToEmpty(targetAgentTemplate);
     }
@@ -35,10 +40,14 @@ public class SystemParamTargetAgentResolver {
             || StringUtils.isBlank(userCode)) {
             return currentTargetAgentType;
         }
-        String enabled = systemConfigService.getDcSystemConfigValueByCode(enableParamCode);
+        String normalizedUserCode = StringUtils.trim(userCode);
+        String enabled = privateParamCacheReader.getValue(normalizedUserCode, enableParamCode);
+        if (StringUtils.isBlank(enabled)) {
+            enabled = systemConfigService.getDcSystemConfigValueByCode(enableParamCode);
+        }
         if (!"1".equals(StringUtils.trim(enabled))) {
             return currentTargetAgentType;
         }
-        return StringUtils.replace(targetAgentTemplate, "{userCode}", StringUtils.trim(userCode));
+        return StringUtils.replace(targetAgentTemplate, "{userCode}", normalizedUserCode);
     }
 }
