@@ -1188,24 +1188,9 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
         return max;
     }
 
-    // ========== 需求级就绪批量集成(定时调度入口) ==========
-
-    /**
-     * 定时批量集成入口:遍历所有启用测试配置的项目,按各自 cron 到点后挑「就绪」需求触发集成。 由 DevloopIntegrationBatchJob 持分布式锁后单节点调用;单个项目失败不影响其余项目。
-     */
-    public void runScheduledIntegrationBatches() {
-        for (TesterConfig config : testerConfigService.listEnabled()) {
-            try {
-                runBatchForProject(config);
-            } catch (Exception e) {
-                logger.error("[IntegrationBatch] 项目 {} 批量集成失败", config.getProjectId(), e);
-            }
-        }
-    }
-
     /**
      * 失败打回引擎:扫所有「待打回」的失败执行,按项目策略归因目标环节并驱动会话回到该环节重工。 达到 maxRounds 上限则停手,按 createDefectWhenUnclear 决定是否建集成缺陷需求交人工;
-     * 每条失败执行经 kickbackAt 幂等闸门只处理一次。由 DevloopIntegrationBatchJob 持锁后单节点调用。
+     * 每条失败执行经 kickbackAt 幂等闸门只处理一次。由独立失败打回调度器持锁后单节点调用。
      */
     public void runKickbackSweep() {
         List<IntegrationRun> pending = integrationRunService.listPendingKickback();
@@ -1277,8 +1262,7 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
 
     /**
      * 集成测试结果回收:扫「已下发测试员工、仍 running」的执行,按会话 [PHASE] tester 打点判定终态。 tester DONE=通过、tester REJECT=失败(读结构化结果文件补
-     * total/passed/failed,失败记 kickbackTo 供打回引擎接手); 无打点且超时判 timeout。收尾只写本 run,不驱动重工——重工仍由 runKickbackSweep 幂等处理。 由
-     * DevloopIntegrationBatchJob 持锁后单节点调用,与批量触发、打回同一周期。
+     * total/passed/failed,失败记 kickbackTo 供打回引擎接手); 无打点且超时判 timeout。收尾只写本 run,不驱动重工——重工仍由 runKickbackSweep 幂等处理。
      */
     public void runIntegrationResultSweep() {
         List<IntegrationRun> running = integrationRunService.listRunningWithSession();
@@ -1610,127 +1594,6 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
         + "1. 先用 self-developed-rules skill 打点 [PHASE] ${target} REJECT 集成测试失败,记录本次打回原因与目标环节。\n"
         + "2. 回到目标分支定位并修复导致集成失败的问题,完成后自测确保编译与相关测试通过。\n" + "3. 修复改动提交并推送到原任务分支,提交信息说明本次为集成失败重工。\n"
         + "4. 若失败原因不清或无法复现,明确说明遇到的问题,不要臆造修复。\n\n" + "请开始重工处理。";
-
-    /**
-     * 单项目一次批量集成:cron 到点校验 → 选就绪需求(受并发额度约束)→ 对每个启用套件各起一次挂需求的 run。 就绪 = 其下所有子任务 coder 环节 done(requireAllCoded
-     * 关闭时不校验)且尚无挂需求的执行; 失败后的重集成属打回引擎(Phase D)显式触发,不由本批量循环重复起。
-     */
-    private void runBatchForProject(TesterConfig config) {
-        Long projectId = config.getProjectId();
-        // 挂需求的执行只由批量写入,故最新一条即「上次批量时间」,据此判断本项目 cron 是否到点。
-        List<IntegrationRun> reqRuns = integrationRunService.listWithRequirementByProject(projectId);
-        Date lastBatchAt = reqRuns.isEmpty() ? null : reqRuns.get(0).getCreateTime();
-        if (!isBatchDue(config.getCron(), config.getTimezone(), lastBatchAt)) {
-            return;
-        }
-        List<IntegrationSuite> enabledSuites = integrationSuiteService.listByProjectId(projectId).stream()
-            .filter(s -> "1".equals(s.getEnabled())).collect(java.util.stream.Collectors.toList());
-        if (enabledSuites.isEmpty()) {
-            logger.info("[IntegrationBatch] 项目 {} 无启用套件,跳过", projectId);
-            return;
-        }
-        List<IntegrationEnv> envs = integrationEnvService.listByProjectId(projectId);
-        if (envs.isEmpty()) {
-            logger.info("[IntegrationBatch] 项目 {} 无集成环境,跳过", projectId);
-            return;
-        }
-        Long envId = envs.get(0).getEnvId();
-
-        // 按需求取最新执行:判断是否在跑(占额度)与是否已有挂需求执行(不重复入选)。
-        Map<Long, IntegrationRun> latestRunByReq = new HashMap<>();
-        for (IntegrationRun run : reqRuns) {
-            latestRunByReq.putIfAbsent(run.getRequirementId(), run);
-        }
-        boolean requireAllCoded = !"0".equals(config.getRequireAllCoded());
-        Map<Long, DevloopPhaseService.PhaseSnapshot> snapshotCache = new HashMap<>();
-        Map<Long, List<ScanItemTask>> tasksByReq = new LinkedHashMap<>();
-        for (ScanItemTask t : scanItemTaskService.listByProject(projectId)) {
-            tasksByReq.computeIfAbsent(t.getRequirementId(), k -> new ArrayList<>()).add(t);
-        }
-        // 并发额度:同一时刻在跑的需求数不超过 maxConcurrentReqs;已在跑的先扣掉。
-        int maxConcurrent = config.getMaxConcurrentReqs() == null ? 2 : config.getMaxConcurrentReqs();
-        int running = 0;
-        List<Long> readyReqIds = new ArrayList<>();
-        for (Map.Entry<Long, List<ScanItemTask>> entry : tasksByReq.entrySet()) {
-            IntegrationRun latest = latestRunByReq.get(entry.getKey());
-            if (latest != null) {
-                if ("running".equals(latest.getStatus())) {
-                    running++;
-                }
-                // 已有挂需求执行:重集成由打回引擎接管,批量不重复入选。
-                continue;
-            }
-            if (requireAllCoded && !allTasksCoded(entry.getValue(), snapshotCache)) {
-                continue;
-            }
-            readyReqIds.add(entry.getKey());
-        }
-        int slots = maxConcurrent - running;
-        if (slots <= 0 || readyReqIds.isEmpty()) {
-            return;
-        }
-        Long operatorId = config.getUpdateBy() != null ? config.getUpdateBy() : config.getCreateBy();
-        int admitted = 0;
-        for (Long reqId : readyReqIds) {
-            if (admitted >= slots) {
-                break;
-            }
-            for (IntegrationSuite suite : enabledSuites) {
-                integrationRunService.startRun(suite.getSuiteId(), envId, operatorId, reqId);
-            }
-            admitted++;
-        }
-        logger.info("[IntegrationBatch] 项目 {} 触发 {} 个就绪需求 × {} 个套件", projectId, admitted, enabledSuites.size());
-    }
-
-    /**
-     * 需求下所有子任务的 coder 环节是否都 done(空需求视为未就绪)。
-     */
-    private boolean allTasksCoded(List<ScanItemTask> tasks, Map<Long, DevloopPhaseService.PhaseSnapshot> cache) {
-        if (tasks.isEmpty()) {
-            return false;
-        }
-        for (ScanItemTask t : tasks) {
-            if (!isPhaseDone(snapshotFor(t.getSessionId(), cache), "coder")) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    /**
-     * 本项目批量 cron 是否到点:以上次批量时间为基准算下一次应跑时间,已过则到点。 首次(无上次批量)、cron 为空、或解析失败时到点(避免漏跑),按配置时区比较。
-     */
-    private boolean isBatchDue(String cron, String timezone, Date lastBatchAt) {
-        if (cron == null || cron.trim().isEmpty() || lastBatchAt == null) {
-            return true;
-        }
-        java.time.ZoneId zone = resolveZone(timezone);
-        try {
-            org.springframework.scheduling.support.CronExpression expr = org.springframework.scheduling.support.CronExpression
-                .parse(toSpringCron(cron));
-            java.time.LocalDateTime last = java.time.LocalDateTime.ofInstant(lastBatchAt.toInstant(), zone);
-            java.time.LocalDateTime nextDue = expr.next(last);
-            return nextDue != null && !nextDue.isAfter(java.time.LocalDateTime.now(zone));
-        } catch (Exception e) {
-            logger.warn("[IntegrationBatch] 无效 cron '{}',本次按到点处理", cron, e);
-            return true;
-        }
-    }
-
-    /**
-     * 解析配置时区,非法或为空退回 Asia/Shanghai(与出厂默认一致)。
-     */
-    private java.time.ZoneId resolveZone(String timezone) {
-        if (timezone == null || timezone.trim().isEmpty()) {
-            return java.time.ZoneId.of("Asia/Shanghai");
-        }
-        try {
-            return java.time.ZoneId.of(timezone.trim());
-        } catch (Exception e) {
-            return java.time.ZoneId.of("Asia/Shanghai");
-        }
-    }
 
     /**
      * 5 段 Unix cron(分 时 日 月 周)补秒位成 Spring 6 段;已是 6 段原样返回。

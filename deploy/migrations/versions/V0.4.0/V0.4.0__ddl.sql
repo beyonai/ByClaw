@@ -823,3 +823,8 @@ COMMENT ON COLUMN byai_project.cloud_resource_id IS '云盘知识库资源ID';
 
 -- 设置默认值为 personal
 ALTER TABLE ss_resource ALTER COLUMN owner_type SET DEFAULT 'personal';
+
+-- Remove the unused legacy scheduled-task module. Task instances reference tasks,
+-- so the instance table must be dropped first.
+DROP TABLE IF EXISTS byai.byai_schedule_task_inst;
+DROP TABLE IF EXISTS byai.byai_schedule_task;
