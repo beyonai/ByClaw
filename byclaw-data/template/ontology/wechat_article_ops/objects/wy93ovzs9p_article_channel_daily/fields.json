@@ -1,5 +1,44 @@
 [
   {
+    "property_code": "projectId",
+    "property_name": "项目ID",
+    "data_type": "STRING",
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "category"
+      }
+    },
+    "required": true,
+    "max_length": 100
+  },
+  {
+    "property_code": "account_code",
+    "property_name": "公众号编码",
+    "data_type": "STRING",
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "category"
+      }
+    },
+    "required": true,
+    "max_length": 100
+  },
+  {
+    "property_code": "account_name",
+    "property_name": "公众号名称",
+    "data_type": "STRING",
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "name"
+      }
+    },
+    "required": true,
+    "max_length": 200
+  },
+  {
     "property_code": "article_id",
     "property_name": "文章ID",
     "data_type": "INTEGER",

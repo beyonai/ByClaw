@@ -10,6 +10,20 @@
   ],
   "params": [
     {
+      "paramCode": "projectId",
+      "paramName": "项目ID",
+      "type": "string",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
+      "paramCode": "account_code",
+      "paramName": "公众号编码",
+      "type": "string",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
       "paramCode": "analysis_id",
       "paramName": "分析结果ID",
       "type": "integer",
@@ -45,6 +59,97 @@
       "direction": "output"
     },
     {
+      "paramCode": "analysis_stage",
+      "paramName": "分析阶段",
+      "type": "string",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "source_run_id",
+      "paramName": "关联发布前运行ID",
+      "type": "string",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "platform",
+      "paramName": "发布平台",
+      "type": "string",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "content_role",
+      "paramName": "内容角色",
+      "type": "string",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "topic",
+      "paramName": "内容主题",
+      "type": "string",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "target_audience",
+      "paramName": "目标人群",
+      "type": "string",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "audience_fit_analysis",
+      "paramName": "目标人群匹配分析",
+      "type": "object",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "recommended_publish_time",
+      "paramName": "推荐发布时间",
+      "type": "string",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "recommended_keywords",
+      "paramName": "推荐关键词及位置",
+      "type": "array",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "publishing_execution_card",
+      "paramName": "发布执行卡",
+      "type": "object",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "desired_action",
+      "paramName": "期望用户动作",
+      "type": "string",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "tested_element",
+      "paramName": "实验元素",
+      "type": "string",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "learning_outcome",
+      "paramName": "经验验证结果",
+      "type": "string",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
       "paramCode": "article_id",
       "paramName": "文章ID",
       "type": "integer",
@@ -60,21 +165,21 @@
     },
     {
       "paramCode": "period_start",
-      "paramName": "周报开始",
+      "paramName": "周报开始（YYYY-MM-DD）",
       "type": "date",
       "isRequired": false,
       "direction": "output"
     },
     {
       "paramCode": "period_end",
-      "paramName": "周报结束",
+      "paramName": "周报结束（YYYY-MM-DD）",
       "type": "date",
       "isRequired": false,
       "direction": "output"
     },
     {
       "paramCode": "stat_date",
-      "paramName": "指标日期",
+      "paramName": "指标日期（YYYY-MM-DD）",
       "type": "date",
       "isRequired": false,
       "direction": "output"

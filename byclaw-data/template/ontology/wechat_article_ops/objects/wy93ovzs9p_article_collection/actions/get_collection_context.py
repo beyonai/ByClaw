@@ -1,5 +1,11 @@
 """重写版本（按文档 16.5）：合集分析上下文"""
 async def execute(params: dict) -> dict:
+    project_id = str(params.get("projectId") or "").strip()
+    if not project_id:
+        return {"records": [{"success": False, "code": "PROJECT_ID_REQUIRED", "error": "projectId不能为空"}], "total": 1, "meta": {"total": 1}}
+    account_code = str(params.get("account_code") or "").strip()
+    if not account_code:
+        return {"records": [{"success": False, "code": "ACCOUNT_CODE_REQUIRED", "error": "account_code不能为空"}], "total": 1, "meta": {"total": 1}}
     import json as _json
     from datetime import date as _date, datetime as _datetime
 
@@ -35,17 +41,17 @@ async def execute(params: dict) -> dict:
         return _error("INVALID_ARGUMENT", "stat_date必须是合法日期字符串")
 
     collection = await wy93ovzs9p_article_collection_mapper.select_by_id(collection_id)
-    if not collection:
+    if not collection or _get(collection, "projectId") != project_id or _get(collection, "account_code") != account_code:
         return _error("COLLECTION_NOT_FOUND", "合集不存在")
 
     AF = Wy93ovzs9pArticle.F
     page = await wy93ovzs9p_article_mapper.select(
-        Q.eq(AF.collection_id, collection_id).order_by(AF.publish_time, "desc").limit(500))
+        Q.eq(AF.projectId, project_id).eq(AF.account_code, account_code).eq(AF.collection_id, collection_id).order_by(AF.publish_time, "desc").limit(500))
     articles = page.get("records", [])
     MF = Wy93ovzs9pArticleMetricDaily.F
     items = []
     for article in articles:
-        mq = Q.eq(MF.article_id, _get(article, "id"))
+        mq = Q.eq(MF.projectId, project_id).eq(MF.account_code, account_code).eq(MF.article_id, _get(article, "id"))
         mq = (mq.eq(MF.stat_date, stat_date) if stat_date else
               mq.order_by(MF.stat_date, "desc").limit(1))
         metric = await wy93ovzs9p_article_metric_daily_mapper.select_one(mq)

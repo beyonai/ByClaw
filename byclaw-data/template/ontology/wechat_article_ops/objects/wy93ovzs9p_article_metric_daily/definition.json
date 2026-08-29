@@ -4,6 +4,18 @@
   "entity_desc": "每篇文章截至每日统计时点的全量后台指标和衍生指标；衍生指标由 Action 按公式计算后落库",
   "submitted_fields": [
     {
+      "property_code": "projectId",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "account_code",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "account_name",
+      "data_type": "STRING"
+    },
+    {
       "property_code": "article_id",
       "data_type": "INTEGER"
     },

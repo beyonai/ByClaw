@@ -10,6 +10,27 @@
   ],
   "params": [
     {
+      "paramCode": "projectId",
+      "paramName": "项目ID",
+      "type": "string",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
+      "paramCode": "account_code",
+      "paramName": "公众号编码",
+      "type": "string",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
+      "paramCode": "account_name",
+      "paramName": "公众号名称",
+      "type": "string",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
       "paramCode": "run_id",
       "paramName": "幂等运行ID(UUID)",
       "type": "string",
@@ -21,6 +42,97 @@
       "paramName": "分析类型",
       "type": "string",
       "isRequired": true,
+      "direction": "input"
+    },
+    {
+      "paramCode": "analysis_stage",
+      "paramName": "分析阶段",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "source_run_id",
+      "paramName": "关联发布前运行ID",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "platform",
+      "paramName": "发布平台",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "content_role",
+      "paramName": "内容角色",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "topic",
+      "paramName": "内容主题",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "target_audience",
+      "paramName": "目标人群",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "audience_fit_analysis",
+      "paramName": "目标人群匹配分析(JSON字符串)",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "recommended_publish_time",
+      "paramName": "推荐发布时间",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "recommended_keywords",
+      "paramName": "推荐关键词及位置(JSON字符串)",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "publishing_execution_card",
+      "paramName": "发布执行卡(JSON字符串)",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "desired_action",
+      "paramName": "期望用户动作",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "tested_element",
+      "paramName": "实验元素",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "learning_outcome",
+      "paramName": "经验验证结果",
+      "type": "string",
+      "isRequired": false,
       "direction": "input"
     },
     {
@@ -39,21 +151,21 @@
     },
     {
       "paramCode": "period_start",
-      "paramName": "周报开始(weekly)",
+      "paramName": "周报开始(weekly，YYYY-MM-DD)",
       "type": "date",
       "isRequired": false,
       "direction": "input"
     },
     {
       "paramCode": "period_end",
-      "paramName": "周报结束(weekly)",
+      "paramName": "周报结束(weekly，YYYY-MM-DD)",
       "type": "date",
       "isRequired": false,
       "direction": "input"
     },
     {
       "paramCode": "stat_date",
-      "paramName": "指标日期",
+      "paramName": "指标日期（YYYY-MM-DD）",
       "type": "date",
       "isRequired": false,
       "direction": "input"

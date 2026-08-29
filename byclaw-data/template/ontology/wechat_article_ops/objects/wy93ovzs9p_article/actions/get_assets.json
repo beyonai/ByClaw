@@ -10,22 +10,36 @@
   ],
   "params": [
     {
+      "paramCode": "projectId",
+      "paramName": "项目ID",
+      "type": "string",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
+      "paramCode": "account_code",
+      "paramName": "公众号编码",
+      "type": "string",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
       "paramCode": "start",
-      "paramName": "起始日期",
+      "paramName": "起始日期（YYYY-MM-DD）",
       "type": "date",
       "isRequired": false,
       "direction": "input"
     },
     {
       "paramCode": "end",
-      "paramName": "结束日期",
+      "paramName": "结束日期（YYYY-MM-DD）",
       "type": "date",
       "isRequired": false,
       "direction": "input"
     },
     {
       "paramCode": "stat_date",
-      "paramName": "指标日期",
+      "paramName": "指标日期（YYYY-MM-DD）",
       "type": "date",
       "isRequired": false,
       "direction": "input"

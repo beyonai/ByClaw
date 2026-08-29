@@ -11,6 +11,12 @@
 - 排序：按 publish_time 倒序 + id 倒序（id 倒序作为 tiebreaker 保证稳定排序）
 注意：q = Q 作为起点，不要用 Q.eq(F.id, F.id) 占位，否则会被 mapper 当作真实条件过滤掉"""
 async def execute(params: dict) -> dict:
+    project_id = str(params.get("projectId") or "").strip()
+    if not project_id:
+        return {"records": [{"success": False, "code": "PROJECT_ID_REQUIRED", "error": "projectId不能为空"}], "total": 1, "meta": {"total": 1}}
+    account_code = str(params.get("account_code") or "").strip()
+    if not account_code:
+        return {"records": [{"success": False, "code": "ACCOUNT_CODE_REQUIRED", "error": "account_code不能为空"}], "total": 1, "meta": {"total": 1}}
     import json as _json
 
     def _err(code, message):
@@ -59,7 +65,7 @@ async def execute(params: dict) -> dict:
     F = Wy93ovzs9pArticle.F
 
     # 2. 构造条件：q = Q 作为起点，逐步链式累加
-    q = Q
+    q = Q.eq(F.projectId, project_id).eq(F.account_code, account_code)
     if title_keyword:
         safe_kw = title_keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         q = q.like(F.title, f"%{safe_kw}%")

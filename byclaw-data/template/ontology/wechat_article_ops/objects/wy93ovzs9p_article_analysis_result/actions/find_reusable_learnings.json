@@ -1,9 +1,10 @@
 {
-  "action_code": "upsert_article_user_profile_daily",
-  "action_name": "写入或更新文章每日用户画像",
-  "action_type": "OPERATION",
-  "action_desc": "按 (article_id,stat_date) 业务键写入/更新画像；校验三个 distribution 占比 0-1 与合计 0.99-1.01",
+  "action_code": "find_reusable_learnings",
+  "action_name": "检索可复用文章经验",
+  "action_type": "QUERY",
+  "action_desc": "按平台、内容角色、主题、目标人群和目标动作检索已批准的发布后复盘知识",
   "permission_roles": [
+    "analyst",
     "ops",
     "admin"
   ],
@@ -23,60 +24,58 @@
       "direction": "input"
     },
     {
-      "paramCode": "account_name",
-      "paramName": "公众号名称",
+      "paramCode": "platform",
+      "paramName": "发布平台",
       "type": "string",
-      "isRequired": true,
+      "isRequired": false,
       "direction": "input"
     },
     {
-      "paramCode": "article_id",
-      "paramName": "文章ID",
+      "paramCode": "content_role",
+      "paramName": "内容角色",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "topic",
+      "paramName": "主题关键词",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "target_audience",
+      "paramName": "目标人群关键词",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "desired_action",
+      "paramName": "期望用户动作",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "tested_element",
+      "paramName": "实验元素",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "learning_outcome",
+      "paramName": "经验结果",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "limit",
+      "paramName": "返回上限",
       "type": "integer",
-      "isRequired": true,
-      "direction": "input",
-      "term_type_code": "wy93ovzs9p_article_title",
-      "term_data_type": "LIST_TERM"
-    },
-    {
-      "paramCode": "stat_date",
-      "paramName": "统计日期（YYYY-MM-DD）",
-      "type": "date",
-      "isRequired": true,
-      "direction": "input"
-    },
-    {
-      "paramCode": "gender_distribution",
-      "paramName": "性别分布(JSON)",
-      "type": "string",
-      "isRequired": false,
-      "direction": "input"
-    },
-    {
-      "paramCode": "age_distribution",
-      "paramName": "年龄段分布(JSON)",
-      "type": "string",
-      "isRequired": false,
-      "direction": "input"
-    },
-    {
-      "paramCode": "region_distribution",
-      "paramName": "地域分布(JSON)",
-      "type": "string",
-      "isRequired": false,
-      "direction": "input"
-    },
-    {
-      "paramCode": "sample_size",
-      "paramName": "画像有效样本量",
-      "type": "integer",
-      "isRequired": false,
-      "direction": "input"
-    },
-    {
-      "paramCode": "source_batch_id",
-      "paramName": "数据导入批次ID",
-      "type": "string",
       "isRequired": false,
       "direction": "input"
     },
@@ -88,15 +87,15 @@
       "direction": "output"
     },
     {
-      "paramCode": "operation",
-      "paramName": "操作类型",
-      "type": "string",
+      "paramCode": "items",
+      "paramName": "可复用经验",
+      "type": "array",
       "isRequired": false,
       "direction": "output"
     },
     {
-      "paramCode": "id",
-      "paramName": "记录ID",
+      "paramCode": "total",
+      "paramName": "返回数量",
       "type": "integer",
       "isRequired": false,
       "direction": "output"
@@ -115,8 +114,5 @@
       "isRequired": false,
       "direction": "output"
     }
-  ],
-  "object_references": [
-    "wy93ovzs9p_article"
   ]
 }

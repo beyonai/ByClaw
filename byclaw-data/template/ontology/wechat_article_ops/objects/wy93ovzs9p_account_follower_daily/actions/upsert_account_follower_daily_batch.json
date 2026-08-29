@@ -1,0 +1,89 @@
+{
+  "action_code": "upsert_account_follower_daily_batch",
+  "action_name": "批量写入账号每日粉丝数据",
+  "action_type": "UPDATE",
+  "action_desc": "按 account_code、stat_date 幂等写入公众号用户增长导出；保留新关注、取关、净增和累计关注的后台原始口径",
+  "permission_roles": [
+    "ops",
+    "admin"
+  ],
+  "params": [
+    {
+      "paramCode": "projectId",
+      "paramName": "项目ID",
+      "type": "string",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
+      "paramCode": "account_code",
+      "paramName": "公众号编码",
+      "type": "string",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
+      "paramCode": "account_name",
+      "paramName": "公众号名称",
+      "type": "string",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
+      "paramCode": "items",
+      "paramName": "每日粉丝数据数组",
+      "type": "array",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
+      "paramCode": "source_batch_id",
+      "paramName": "数据批次ID",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "collected_at",
+      "paramName": "采集时间",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "success",
+      "paramName": "是否成功",
+      "type": "boolean",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "inserted",
+      "paramName": "新增条数",
+      "type": "integer",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "updated",
+      "paramName": "更新条数",
+      "type": "integer",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "failed",
+      "paramName": "失败条数",
+      "type": "integer",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "errors",
+      "paramName": "错误明细",
+      "type": "array",
+      "isRequired": false,
+      "direction": "output"
+    }
+  ]
+}

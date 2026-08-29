@@ -1,5 +1,11 @@
 """新增 Action（按文档 16.3）：7/30天窗口分析"""
 async def execute(params: dict) -> dict:
+    project_id = str(params.get("projectId") or "").strip()
+    if not project_id:
+        return {"records": [{"success": False, "code": "PROJECT_ID_REQUIRED", "error": "projectId不能为空"}], "total": 1, "meta": {"total": 1}}
+    account_code = str(params.get("account_code") or "").strip()
+    if not account_code:
+        return {"records": [{"success": False, "code": "ACCOUNT_CODE_REQUIRED", "error": "account_code不能为空"}], "total": 1, "meta": {"total": 1}}
     import json as _json
     from datetime import date as _date, datetime as _datetime, timedelta
 
@@ -47,7 +53,7 @@ async def execute(params: dict) -> dict:
         return _error("INVALID_METRIC_MODE", "channel_metric_mode不合法")
 
     article = await wy93ovzs9p_article_mapper.select_by_id(article_id)
-    if article is None:
+    if article is None or _get(article, "projectId") != project_id or _get(article, "account_code") != account_code:
         return _error("ARTICLE_NOT_FOUND", "文章不存在")
     publish_time = _get(article, "publish_time")
     if publish_time is None:
@@ -64,7 +70,7 @@ async def execute(params: dict) -> dict:
         return _error("INVALID_ARGUMENT", "as_of_date必须是合法日期")
 
     MF = Wy93ovzs9pArticleMetricDaily.F
-    latest_query = (Q.eq(MF.article_id, article_id)
+    latest_query = (Q.eq(MF.projectId, project_id).eq(MF.account_code, account_code).eq(MF.article_id, article_id)
                     .order_by(MF.stat_date, "desc").limit(1))
     if as_of_date:
         latest_query = latest_query.lte(MF.stat_date, as_of_date)
@@ -77,7 +83,7 @@ async def execute(params: dict) -> dict:
     for days in window_days:
         target_date = publish_date + timedelta(days=days - 1)
         visible_target = min(target_date, effective_as_of)
-        metric_query = (Q.eq(MF.article_id, article_id)
+        metric_query = (Q.eq(MF.projectId, project_id).eq(MF.account_code, account_code).eq(MF.article_id, article_id)
                         .lte(MF.stat_date, visible_target)
                         .order_by(MF.stat_date, "desc").limit(1))
         metric = await wy93ovzs9p_article_metric_daily_mapper.select_one(metric_query)
@@ -98,7 +104,7 @@ async def execute(params: dict) -> dict:
         metric_stat_date = _to_date(_get(metric, "stat_date"))
 
         CF = Wy93ovzs9pArticleChannelDaily.F
-        channel_query = (Q.eq(CF.article_id, article_id)
+        channel_query = (Q.eq(CF.projectId, project_id).eq(CF.account_code, account_code).eq(CF.article_id, article_id)
                          .gte(CF.stat_date, publish_date)
                          .lte(CF.stat_date, visible_target)
                          .limit(1000))

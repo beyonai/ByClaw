@@ -4,6 +4,18 @@
   "entity_desc": "每篇文章每天各渠道阅读与分享人数；metric_mode 区分全量/增量，批次内同一 metric_mode",
   "submitted_fields": [
     {
+      "property_code": "projectId",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "account_code",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "account_name",
+      "data_type": "STRING"
+    },
+    {
       "property_code": "article_id",
       "data_type": "INTEGER"
     },
