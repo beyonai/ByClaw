@@ -165,6 +165,12 @@ public class LocalGitChangeService {
                     I18nUtil.get("devloop.git.workspace.not.repository"));
             }
             String baseRef = resolveBaseRef(dir, baseBranch);
+            // git diff 不会为未跟踪文件生成内容；Changes 列表虽已列出 A 文件，预览时需要与空文件比较。
+            String workingStatus = runGit(dir, "status", "--porcelain", "-uall", "--", filePath);
+            if (isUntrackedStatus(workingStatus)) {
+                String diff = runGitAllowExitCode(dir, 1, "diff", "--no-index", "--", "/dev/null", filePath);
+                return new FileDiffResult(LocalStatus.OK, filePath, diff, null);
+            }
             // 单文件 diff:范围与列表一致,-- 后限定文件路径。已提交 + 未提交改动都会体现在 base..HEAD 与工作区叠加中,
             // 这里用 base 到工作区(不加 ...HEAD)一次性覆盖:git diff {base} -- {file} 比较基线与当前工作区。
             String diff = runGit(dir, "diff", baseRef, "--", filePath);
@@ -179,6 +185,15 @@ public class LocalGitChangeService {
             return new FileDiffResult(LocalStatus.GIT_ERROR, filePath, null,
                 I18nUtil.get("devloop.git.command.failed", e.getMessage()));
         }
+    }
+
+    private boolean isUntrackedStatus(String status) {
+        for (String line : status.split("\\R")) {
+            if (line.startsWith("??")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** 基线引用解析:优先当前分支上游，其次 reflog 创建起点，最后回退 main。 */
@@ -409,6 +424,11 @@ public class LocalGitChangeService {
      * stderr 单独读取、不混入 stdout(否则 git 的 fatal 提示会被当成变更行解析);退出码非 0 时抛异常带上 stderr。
      */
     private String runGit(File dir, String... args) throws Exception {
+        return runGitAllowExitCode(dir, 0, args);
+    }
+
+    /** 执行允许额外退出码的 git 命令；git diff --no-index 对有差异时约定返回 1。 */
+    private String runGitAllowExitCode(File dir, int allowedExitCode, String... args) throws Exception {
         Process process = newGit(dir, args).start();
         // stdout 与 stderr 分开读:stdout 才是可解析数据,stderr 仅用于报错。
         StringBuilder stdout = new StringBuilder();
@@ -430,7 +450,7 @@ public class LocalGitChangeService {
             process.destroyForcibly();
             throw new IllegalStateException(I18nUtil.get("devloop.git.command.timeout", String.join(" ", args)));
         }
-        if (process.exitValue() != 0) {
+        if (process.exitValue() != 0 && process.exitValue() != allowedExitCode) {
             // 非 0 退出(如 dubious ownership、非法 ref):抛异常带 stderr,由上层收敛为 GIT_ERROR,不把错误文本当数据。
             throw new IllegalStateException(I18nUtil.get("devloop.git.command.failed",
                 "git " + String.join(" ", args) + ": " + stderr.toString().trim()));

@@ -74,6 +74,17 @@ class LocalGitChangeServiceTest {
             .doesNotContain("scripts");
     }
 
+    @Test
+    void returnsContentDiffForUntrackedFile() throws Exception {
+        Path repo = initializeRepository("untracked-file-diff");
+        Files.writeString(repo.resolve("prd.md"), "# Product requirements\n\n- First item\n");
+
+        LocalGitChangeService.FileDiffResult result = new LocalGitChangeService().fileDiff(repo, "main", "prd.md");
+
+        assertThat(result.getStatus()).isEqualTo(LocalGitChangeService.LocalStatus.OK);
+        assertThat(result.getDiff()).contains("+# Product requirements", "+- First item");
+    }
+
     private Path initializeRepository(String name) throws Exception {
         Path repo = tempDir.resolve(name);
         Files.createDirectories(repo);
