@@ -1,6 +1,8 @@
 import {
   createManualRequirement,
+  getTaskChanges,
   getTaskPhases,
+  listAvailableProjectRepos,
   listProjectRepos,
   listRequirementsByProject,
   listTasks,
@@ -54,6 +56,21 @@ describe('Devloop task service', () => {
     listProjectRepos(203);
 
     expect(mockPOST).toHaveBeenCalledWith('/byaiService/project/repo/list', { projectId: 203 });
+  });
+
+  it('queries repositories that are both configured and present in the workspace', () => {
+    listAvailableProjectRepos(203);
+
+    expect(mockPOST).toHaveBeenCalledWith('/byaiService/project/repo/available-list', { projectId: 203 });
+  });
+
+  it('queries task changes for the selected repository', () => {
+    getTaskChanges(301, 20014947);
+
+    expect(mockPOST).toHaveBeenCalledWith('/byaiService/devloop/task/changes', {
+      sessionId: 301,
+      repoId: 20014947,
+    });
   });
 
   // 覆盖所有手工录入字段（含来源类型和关联仓库）的前后端请求契约。

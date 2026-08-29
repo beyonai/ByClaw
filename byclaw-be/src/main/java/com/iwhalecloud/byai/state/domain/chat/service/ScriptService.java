@@ -100,6 +100,9 @@ public class ScriptService extends AbstractChatProcess {
     private MemoryMessageService memoryMessageService;
 
     @Autowired
+    private ScopedMessageWriteBehind scopedMessageWriteBehind;
+
+    @Autowired
     private SequenceService sequenceService;
 
     @Autowired
@@ -355,7 +358,14 @@ public class ScriptService extends AbstractChatProcess {
         userContext.setAnswerText(new StringBuilder(ctx.assistantChatDto.getChatContent()));
         // userContext.setAnswerText(dealContent(ctx.assistantChatDto));
         userContext.setTaskId(ctx.taskId);
-        memoryMessageService.save(ctx.sessionId, USER_INPUT.getCode(), userContext, ctx.assistantChatDto);
+        ByaiMessageHotDtoDto message = memoryMessageService.generateMessage(ctx.sessionId, USER_INPUT.getCode(),
+            userContext, ctx.assistantChatDto);
+        scopedMessageWriteBehind.enqueue(
+            "root:user:" + ctx.sessionId + ":" + ctx.userMessageId,
+            ctx.sessionId,
+            message,
+            true
+        );
     }
 
     /**
@@ -694,10 +704,12 @@ public class ScriptService extends AbstractChatProcess {
         }
     }
 
-    public void completeAsyncGatewayContext(ChatProcessContext ctx) {
-        if (persistAsyncGatewayContext(ctx) && ctx != null && ctx.sessionId != null) {
+    public boolean completeAsyncGatewayContext(ChatProcessContext ctx) {
+        boolean persisted = persistAsyncGatewayContext(ctx);
+        if (persisted && ctx != null && ctx.sessionId != null) {
             sessionStreamManager.stopSessionListener(String.valueOf(ctx.sessionId));
         }
+        return persisted;
     }
 
     /**
@@ -709,14 +721,14 @@ public class ScriptService extends AbstractChatProcess {
      *
      * @param ctx 运行中的聊天上下文
      */
-    public void flushOnStop(ChatProcessContext ctx) {
+    public boolean flushOnStop(ChatProcessContext ctx) {
         if (ctx == null) {
-            return;
+            return false;
         }
         if (ctx.messageContext != null) {
             ctx.messageContext.setComplete(true);
         }
-        completeAsyncGatewayContext(ctx);
+        return completeAsyncGatewayContext(ctx);
     }
 
     /**
@@ -970,8 +982,9 @@ public class ScriptService extends AbstractChatProcess {
             Optional.ofNullable(assistantChatDto).map(AssistantChatDto::getExtParams)
                 .filter(params -> params.containsKey("beyondTaskId"))
                 .ifPresent(params -> messageContext.setTaskId(MapParamUtil.getLongValue(params, "beyondTaskId"))); // 保存LLM应答的信息
-            systemReponse = memoryMessageService.save(sessionId, SYSTEM_RESPONSE.getCode(), messageContext,
-                assistantChatDto);
+            systemReponse = ctx.recoveryOnly
+                ? memoryMessageService.saveOrUpdate(sessionId, SYSTEM_RESPONSE.getCode(), messageContext, assistantChatDto)
+                : memoryMessageService.save(sessionId, SYSTEM_RESPONSE.getCode(), messageContext, assistantChatDto);
         }
 
         BeanUtils.copyProperties(systemReponse, resMsg);

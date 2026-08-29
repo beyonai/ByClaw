@@ -1,6 +1,6 @@
 ---
 name: online-search
-description: 源码版 SearXNG 元搜索 CLI，一次调用聚合 40+ 搜索引擎结果并输出结构化 JSON。适合需要真实网页搜索结果、多引擎交叉验证、时间窗过滤（最近一天/周/月/年）、学术类别（arxiv/crossref/pubmed/openalex）或中文搜索（baidu/sogou/360search）的场景。基于 SearXNG 249 引擎元搜索内核，Python 3.12 + venv 运行，无需常驻服务。
+description: 镜像内置的 SearXNG 元搜索 CLI，一次调用聚合 40+ 搜索引擎结果并输出结构化 JSON。适合需要真实网页搜索结果、多引擎交叉验证、时间窗过滤（最近一天/周/月/年）、学术类别（arxiv/crossref/pubmed/openalex）或中文搜索（baidu/sogou/360search）的场景。无需常驻服务。
 ---
 
 # Online Search（SearXNG 元搜索 CLI）
@@ -12,7 +12,7 @@ description: 源码版 SearXNG 元搜索 CLI，一次调用聚合 40+ 搜索引�
 > `knowledge-collection` 采集公共 URL 时，必须使用 `public-discover`，该命令会与 SearXNG
 > 并行运行 `hot_discovery`；直接运行本 CLI 仅用于独立调试。
 
-基于 SearXNG（249 引擎元搜索内核）的**进程内搜索 CLI（源码版）**：每次调用起一个进程，完成搜索后向 stdout 输出单个 JSON 对象并退出。**不启动 Web 服务、不监听端口、不写缓存**。
+基于 SearXNG（249 引擎元搜索内核）的**进程内搜索 CLI**：每次调用起一个进程，完成搜索后向 stdout 输出单个 JSON 对象并退出。**不启动 Web 服务、不监听端口、不写缓存**。
 
 ## 目录结构
 
@@ -26,35 +26,18 @@ online-search/
 │       └── scripts/
 │           ├── hot_discovery.mjs
 │           └── hot_discovery.test.mjs
-└── scripts/
-    ├── searxng_cli.py           # ★ 搜索 CLI 入口（进程内调用 SearXNG 核心）
-    ├── searxng_pack_settings.yml # 引擎白名单/超时/代理配置
-    ├── requirements.txt         # Python 依赖清单
-    └── searx/                   # ★ SearXNG 核心源码包（249 引擎模块，勿改）
 ```
 
-## 安装（首次使用，目标机器需 Python 3.12）
+## 运行
+
+OpenClaw 镜像在构建时已将 SearXNG 核心、锁定 Python 依赖和启动器安装为全局命令；无需在 skill 目录创建 venv。直接调用：
 
 ```bash
-cd <技能目录>/scripts
-./bootstrap-venv.sh
+searxng-cli "查询词" [参数...]
 ```
 
-安装后调用方式（**不要直接使用系统 python，用 venv 内的**）：
-
-```bash
-.venv/bin/python searxng_cli.py "查询词" [参数...]
-```
-
-`bootstrap-venv.sh` 要求 Python 3.12 或更高版本，会创建 `.venv`、安装 `requirements.txt`
-中的锁定依赖并验证关键模块。`.venv` 是本机生成物，已被 Git 忽略，不能提交。
-
-如需手工排查，可执行与脚本等价的命令：
-
-```bash
-python3.12 -m venv .venv                  # 或满足版本要求的 python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt
-```
+仅在运维或开发需要显式指定解释器时设置 `ONLINE_SEARCH_PYTHON`；镜像内默认使用
+`/opt/searxng-cli/searxng_cli.py`，本地开发可同时设置 `ONLINE_SEARCH_SCRIPT` 指向仓库中的入口脚本。
 
 ## 参数
 
@@ -68,33 +51,33 @@ python3.12 -m venv .venv                  # 或满足版本要求的 python3 -m 
 | `--time-range` | 时间范围过滤：`day` / `week` / `month` / `year`（仅支持该功能的引擎生效，如 baidu/bing） | 不限 |
 | `--pageno` | 结果页码（配合 `--max-results` 翻页，如 `--pageno 2` 取第 2 页） | `1` |
 | `--max-results` | 最多返回的结果条数 | `20` |
-| `--timeout` | 单次搜索超时上限（秒） | `15` |
+| `--timeout` | 单次搜索超时上限（秒） | `10` |
 | `--list-engines` | 列出全部可用引擎（按类别分组）后退出 | - |
 
 ## 示例
 
 ```bash
 # 默认 general 类别：自动使用内置直连白名单（23 个引擎），无需指定引擎
-.venv/bin/python searxng_cli.py "deep learning" --max-results 10
+searxng-cli "deep learning" --max-results 10
 
 # 时间窗过滤：最近一周的新闻（周报/实时动态场景首选）
-.venv/bin/python searxng_cli.py "AI" --category news --time-range week --max-results 5
+searxng-cli "AI" --category news --time-range week --max-results 5
 
 # 学术检索：science 类别含 arxiv/crossref/pubmed/openalex 等学术引擎
-.venv/bin/python searxng_cli.py "ontology engineering" --category science --max-results 5
+searxng-cli "ontology engineering" --category science --max-results 5
 
 # 中文搜索（general 白名单已含 baidu/sogou/360search 等中文引擎）
-.venv/bin/python searxng_cli.py "量子计算" --language zh-CN --max-results 5
+searxng-cli "量子计算" --language zh-CN --max-results 5
 
 # 翻页取第 2 页结果
-.venv/bin/python searxng_cli.py "量子计算" --category general --pageno 2 --max-results 5
+searxng-cli "量子计算" --category general --pageno 2 --max-results 5
 
 # 查看可用引擎（全量，不受白名单限制）
-.venv/bin/python searxng_cli.py --list-engines
+searxng-cli --list-engines
 ```
 
 **引擎选择机制**：
-- **默认**：不传 `--engines` 时，按 `--category` 使用内置直连白名单（配置在 `scripts/searxng_pack_settings.yml` 的 `cli.default_engines` 段，共 120 个直连可用引擎、14 个类别），避免全量引擎带来的超时拖累
+- **默认**：不传 `--engines` 时，按 `--category` 使用内置直连白名单（配置在 `/opt/searxng-cli/searxng_pack_settings.yml` 的 `cli.default_engines` 段，共 120 个直连可用引擎、14 个类别），避免全量引擎带来的超时拖累
 - **全量**：想用某类别全部引擎，删除配置中对应类别的白名单条目即可
 - **手动指定**：传 `--engines` 可覆盖白名单（如需要海外引擎时配合代理使用）
 
@@ -169,7 +152,7 @@ node scripts/knowledge-collection.mjs public-discover \
 
 ```bash
 # 通道 1（本技能）
-.venv/bin/python searxng_cli.py "AI agent framework" --category it --max-results 20 > /tmp/sx.json
+searxng-cli "AI agent framework" --category it --max-results 20 > /tmp/sx.json
 
 # 通道 2（子技能，同时跑）
 node references/hot_discovery/scripts/hot_discovery.mjs search \
@@ -197,9 +180,9 @@ node references/hot_discovery/scripts/hot_discovery.mjs merge \
 
 ## 注意事项
 
-- **默认直连，内置白名单**：上游引擎请求直连互联网，默认按类别使用 120 个实测直连可用引擎（配置见 `scripts/searxng_pack_settings.yml` 的 `cli.default_engines` 段）；海外引擎（google、duckduckgo、wikipedia、brave 等）在无代理环境会超时/被拒，属预期行为，其余引擎自动降级不影响结果
-- **可选代理**：如需访问被墙的海外引擎，编辑 `scripts/searxng_pack_settings.yml`，在 `outgoing:` 下加入 `proxies: {all://: [http://127.0.0.1:7890]}` 后重新运行即可（CLI 每次调用读取该配置，改完即生效）；SearXNG 使用自定义网络层，**不读取系统环境变量代理**
-- **运行环境**：需要 Python 3.12 + venv（见「安装」节）；SearXNG 使用自定义网络层，venv 安装一次后即可重复使用
+- **默认直连，内置白名单**：上游引擎请求直连互联网，默认按类别使用 120 个实测直连可用引擎（配置见 `/opt/searxng-cli/searxng_pack_settings.yml` 的 `cli.default_engines` 段）；海外引擎（google、duckduckgo、wikipedia、brave 等）在无代理环境会超时/被拒，属预期行为，其余引擎自动降级不影响结果
+- **可选代理**：如需访问被墙的海外引擎，在构建镜像前修改 `middleware/openclaw/searxng-cli/searxng_pack_settings.yml`，在 `outgoing:` 下加入 `proxies: {all://: [http://127.0.0.1:7890]}` 后重新构建；SearXNG 使用自定义网络层，**不读取系统环境变量代理**
+- **运行环境**：镜像构建时安装 Python 3.12 依赖到独立 venv；运行时只需 `searxng-cli`
 - 本 CLI 不启动 Flask 服务、不监听端口、不写缓存（valkey/redis 已禁用为内存模式）
 - 首次启动约 1.5s（加载全部引擎）；搜索本身耗时见 `elapsed_sec`，上限受 `--timeout` 约束
 

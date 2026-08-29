@@ -127,7 +127,6 @@ suite("PostgreSQL persistence integration", () => {
       agentId: "agent-1",
       connectorId: "openclaw-by-framework",
       task: "resume-safe",
-      taskPosition: 2,
       status: "QUEUED",
       version: 0,
       createdAt: Date.now(),
@@ -149,7 +148,6 @@ suite("PostgreSQL persistence integration", () => {
     await expect(database.delegations.get(delegationId)).resolves.toMatchObject({
       connectorCursor: "3-0",
       partialOutput: "partial",
-      taskPosition: 2,
     });
     await database.runs.saveWithEvent?.(
       {
@@ -222,12 +220,17 @@ suite("PostgreSQL persistence integration", () => {
       [run.id],
     );
     expect(storedCredential.rows[0]?.credential).toBe("short-lived-token");
+    await database.pool.query(
+      `UPDATE "${database.schema}"."byai_super_run_execution_credentials"
+          SET expires_at = clock_timestamp() - interval '1 second'
+        WHERE run_id = $1`,
+      [run.id],
+    );
     await expect(
       database.credentials.loadForLease({
         runId: run.id,
         instanceId: "instance-a",
         fencingToken: first?.fencingToken ?? 0,
-        now: Date.now(),
       }),
     ).resolves.toMatchObject({
       runId: run.id,
@@ -249,7 +252,6 @@ suite("PostgreSQL persistence integration", () => {
         runId: run.id,
         instanceId: "instance-a",
         fencingToken: first?.fencingToken ?? 0,
-        now: Date.now(),
       }),
     ).resolves.toBeUndefined();
   });
@@ -304,7 +306,7 @@ suite("PostgreSQL persistence integration", () => {
     await expect(database.runs.get(waiting.id)).resolves.toMatchObject({
       status: "FAILED",
       executionStage: "SETTLED",
-      finalAnswer: "子 Agent 在规定时间内未返回最终结果，本次调度已超时。",
+      finalAnswer: "Timeout Agent 调度超时：数字员工在规定时间内未返回最终结果。",
       error: "Delegation received no terminal ResumeCommand within its callback timeout",
     });
     expect(
@@ -334,7 +336,7 @@ suite("PostgreSQL persistence integration", () => {
       expect.objectContaining({
         runId: waiting.id,
         runStatus: "FAILED",
-        finalAnswer: "子 Agent 在规定时间内未返回最终结果，本次调度已超时。",
+        finalAnswer: "Timeout Agent 调度超时：数字员工在规定时间内未返回最终结果。",
         externalSessionId: "external-timeout-session",
       }),
     ]);
@@ -498,7 +500,6 @@ suite("PostgreSQL persistence integration", () => {
         agentList: [],
         executionCredential: {
           secret: "short-lived-token",
-          expiresAt: Date.now() + 60_000,
         },
       });
       sessionsToDelete.push(run.sessionId);
@@ -637,7 +638,6 @@ function executionCredential(runId: string): ExecutionCredential {
   return {
     runId,
     secret: "short-lived-token",
-    expiresAt: now + 60_000,
     createdAt: now,
   };
 }

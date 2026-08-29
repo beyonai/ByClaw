@@ -14,7 +14,6 @@ import com.iwhalecloud.byai.manager.mapper.session.ByaiSessionMapper;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -89,6 +88,30 @@ class DevloopApplicationServiceTaskChangesTest {
         verify(fixture.localGitChangeService).fileDiff(worktree, "main", "src/App.tsx");
     }
 
+    @Test
+    void readsChangesFromSelectedSubmoduleRepository() {
+        long sessionId = 5001L;
+        long projectId = 100L;
+        ProjectRepo workspace = workspaceRepo(projectId);
+        ProjectRepo codeRepo = codeRepo(projectId);
+        Path workspacePath = tempDir.resolve("bucket/by/projects/100");
+        Path codePath = workspacePath.resolve("beyonai/byclaw-test");
+        ServiceFixture fixture = fixture(sessionId, projectId, workspace, workspacePath);
+        when(fixture.workspaceGitService.resolveRepositories(projectId)).thenReturn(List.of(
+            new ProjectWorkspaceGitService.ResolvedRepository(workspace, workspacePath),
+            new ProjectWorkspaceGitService.ResolvedRepository(codeRepo, codePath)));
+        LocalGitChangeService.LocalChangeResult result = mock(LocalGitChangeService.LocalChangeResult.class);
+        when(result.getStatus()).thenReturn(LocalGitChangeService.LocalStatus.OK);
+        when(result.getFiles()).thenReturn(List.of());
+        when(fixture.localGitChangeService.collectChanges(codePath, "main")).thenReturn(result);
+
+        ResponseUtil<Map<String, Object>> response = fixture.service.getTaskChanges(sessionId, codeRepo.getRepoId());
+
+        assertThat(response.getData()).containsEntry("repoId", codeRepo.getRepoId())
+            .containsEntry("repoFullName", codeRepo.getRepoFullName());
+        verify(fixture.localGitChangeService).collectChanges(codePath, "main");
+    }
+
     private ServiceFixture fixture(long sessionId, long projectId, ProjectRepo workspace, Path worktree) {
         ByaiSessionMapper sessionMapper = mock(ByaiSessionMapper.class);
         LocalGitChangeService localGitChangeService = mock(LocalGitChangeService.class);
@@ -97,15 +120,15 @@ class DevloopApplicationServiceTaskChangesTest {
         session.setSessionId(sessionId);
         session.setProjectId(projectId);
         when(sessionMapper.selectById(sessionId)).thenReturn(session);
-        when(workspaceGitService.findWorkspaceRepo(projectId)).thenReturn(Optional.ofNullable(workspace));
-        when(workspaceGitService.resolveSessionWorktree(projectId, sessionId))
-            .thenReturn(Optional.ofNullable(worktree));
+        when(workspaceGitService.resolveRepositories(projectId)).thenReturn(workspace == null || worktree == null
+            ? List.of()
+            : List.of(new ProjectWorkspaceGitService.ResolvedRepository(workspace, worktree)));
 
         DevloopApplicationService service = new DevloopApplicationService();
         ReflectionTestUtils.setField(service, "byaiSessionMapper", sessionMapper);
         ReflectionTestUtils.setField(service, "localGitChangeService", localGitChangeService);
         ReflectionTestUtils.setField(service, "projectWorkspaceGitService", workspaceGitService);
-        return new ServiceFixture(service, localGitChangeService);
+        return new ServiceFixture(service, localGitChangeService, workspaceGitService);
     }
 
     private ProjectRepo workspaceRepo(long projectId) {
@@ -117,7 +140,18 @@ class DevloopApplicationServiceTaskChangesTest {
         return repo;
     }
 
+    private ProjectRepo codeRepo(long projectId) {
+        ProjectRepo repo = new ProjectRepo();
+        repo.setRepoId(901L);
+        repo.setProjectId(projectId);
+        repo.setRepoType("code");
+        repo.setRepoFullName("beyonai/byclaw-test");
+        repo.setDefaultBranch("main");
+        return repo;
+    }
+
     private record ServiceFixture(DevloopApplicationService service,
-                                  LocalGitChangeService localGitChangeService) {
+                                  LocalGitChangeService localGitChangeService,
+                                  ProjectWorkspaceGitService workspaceGitService) {
     }
 }

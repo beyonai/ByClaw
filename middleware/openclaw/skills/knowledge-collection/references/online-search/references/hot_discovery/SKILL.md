@@ -49,7 +49,7 @@ node $SKILL/hot_discovery.mjs search \
     --out <会话目录>/.collection-inputs/hot-discovery-$(date +%s).json
 
 # ② searxng 通道（另一个进程，同时跑）
-<技能目录>/scripts/.venv/bin/python searxng_cli.py "AI agent framework" \
+searxng-cli "AI agent framework" \
     --category it --max-results 20 > /tmp/sx.json
 
 # ③ 归并（两边都完成后）

@@ -23,6 +23,13 @@ import useAppStore from '@/models/common/useAppStore';
 import { createMessage, fetchMessageHandler } from '@/utils/messgae';
 import { hydrateV2RuntimeState } from '@/utils/messageV2Runtime';
 import { getFileTypeByName } from '@/utils/file';
+import {
+  commitScopedStream,
+  isExternalChildExtParams,
+  isExternalChildSession,
+  isScopedChildProjection,
+  isScopedStreamNewer,
+} from '@/utils/scopedSession';
 
 import useHandler from './useHandler';
 import useMessage from './useMessage';
@@ -53,6 +60,7 @@ import type { IState } from '@/models/useEmployees';
 import type { RichInputResourceList } from '@/components/QueryInput/RichInput';
 import type { IMessageInfo } from '@/models/useMessageStore';
 import { getSessionLastAnsMsgMetadata } from './util';
+import { resolveDigitalEmployeePlaceholders } from '@/utils/session';
 
 type ISseRes = {
   message: IMessageListItem;
@@ -108,6 +116,9 @@ type IProps = {
  */
 export type ISendProps = {
   queryQuestion: string;
+
+  /** 输入框展示给用户的文本，包含数字员工名称；queryQuestion 仍保留后端识别所需的占位符。 */
+  displayText?: string;
   inheritQryMsgId?: IMessage['msgId'];
   payload?: Record<string, unknown>;
   msgOpt?: {
@@ -193,17 +204,26 @@ function useChat(props: IProps) {
   const messageListRef = useRef<IMessage[]>([]);
   const pendingProjectIdByClientRequestRef = useRef(new Map<string, string>());
   const boundProjectSessionKeysRef = useRef(new Set<string>());
+  const scopedChildWatermarksRef = useRef(new Map<string, string>());
   const [runtimeVersion, setRuntimeVersion] = useState(0);
 
-  const { userInfo, extParamsBySessionId } = useSelector((state: ConnectState) => ({
+  const { userInfo, extParamsBySessionId, sessionList } = useSelector((state: ConnectState) => ({
     userInfo: state.user.userInfo,
     extParamsBySessionId: state.session.extParamsBySessionId,
+    sessionList: state.session.sessionList,
   }));
   const { defaultDigEmployeeId, employeesList } = useSelector((state: { employees: IEmployeesState }) => ({
     defaultDigEmployeeId: state.employees.defaultDigEmployeeId,
     employeesList: state.employees.employeesList,
   }));
   const dispatch = useDispatch();
+
+  const isCurrentExternalChildSession = useMemo(
+    () =>
+      isExternalChildSession(sessionList?.find((item) => `${item.sessionId}` === `${sessionId}`)) ||
+      isExternalChildExtParams(get(extParamsBySessionId, `${sessionId}`)),
+    [extParamsBySessionId, sessionId, sessionList]
+  );
 
   const { agentId, EventEmitter } = useGlobal();
   const { setUserCollectModalOpen, setLoginModalOpen } = useAppStore();
@@ -518,6 +538,50 @@ function useChat(props: IProps) {
       });
   });
 
+  const applyScopedChildProjection = usePersistFn(async (projection: any, envelopeStreamId?: string) => {
+    const projectionSessionId = `${projection?.sessionId || ''}`;
+    if (!projectionSessionId || projectionSessionId !== `${sessionId}`) return false;
+
+    await waitForSessionMessageLoaded(projectionSessionId);
+    const streamId = projection?.snapshotStreamId || projection?.streamId || envelopeStreamId;
+    if (!isScopedStreamNewer(scopedChildWatermarksRef.current, projectionSessionId, streamId)) return true;
+
+    const message = fetchMessageHandler({
+      ...projection,
+      sessionId: projectionSessionId,
+    });
+    const terminal = projection?.running === false || `${projection?.msgStatus}` === '0';
+    set(message, 'messageState', terminal ? IMessageState.Done : IMessageState.Answer);
+    set(message, 'thinkDone', terminal);
+    set(message, 'snapshotStreamId', streamId);
+    set(message, 'streamId', streamId);
+    hydrateV2RuntimeState(message);
+    updateMessage(message, { isAssign: true, allowCreateSession: false });
+    commitScopedStream(scopedChildWatermarksRef.current, projectionSessionId, streamId);
+    return true;
+  });
+
+  const reconcileScopedChildProjection = usePersistFn(async () => {
+    if (!sessionId || !isCurrentExternalChildSession) return false;
+    try {
+      await waitForSessionMessageLoaded(sessionId);
+      const snapshot = await getChatRunningSnapshot({
+        sessionId,
+        traceId: `external-child-${sessionId}`,
+      });
+      if (snapshot?.messageId) {
+        await applyScopedChildProjection(snapshot, snapshot.snapshotStreamId);
+      } else {
+        await reloadLatestMessageList();
+      }
+      return true;
+    } catch (error) {
+      console.error('同步外部子会话快照失败:', error);
+      await reloadLatestMessageList();
+      return true;
+    }
+  });
+
   /**
    * WebSocket 断线重连后，以后端运行态为准校正当前页面，避免连接恢复但前端仍永久停留在运行中。
    * 运行中的会话优先用快照补齐断线期间的内容；后端已无运行态时清理本地 runtime 并刷新已落库消息。
@@ -526,6 +590,8 @@ function useChat(props: IProps) {
     if (!sessionId) {
       return;
     }
+
+    if (await reconcileScopedChildProjection()) return;
 
     try {
       const runningInfoList: RunningChatInfo[] = await getChatRunningStatus({ sessionIds: [sessionId] });
@@ -575,9 +641,15 @@ function useChat(props: IProps) {
 
         const snapshotAnswerMessage = createRestoredAnswerMessageFromSnapshot(snapshot, runningInfo);
         assign(answerMessage, snapshotAnswerMessage);
-        set(answerMessage, 'messageState', IMessageState.Answer);
+        const snapshotTerminal = snapshot.running === false;
+        set(answerMessage, 'messageState', snapshotTerminal ? IMessageState.Done : IMessageState.Answer);
         updateMessage(answerMessage, { isAssign: true });
-        chatSessionRuntimeManager.updateLastAppliedStreamId(runningInfo.clientRequestId, snapshotStreamId);
+        if (snapshotTerminal) {
+          // Redis 终态可能早于数据库落库完成，先用终态快照结束 loading 并保留完整回答。
+          chatSessionRuntimeManager.complete(runningInfo.clientRequestId);
+        } else {
+          chatSessionRuntimeManager.updateLastAppliedStreamId(runningInfo.clientRequestId, snapshotStreamId);
+        }
       }
     } catch (error) {
       console.error('WebSocket 重连后同步会话运行态失败:', error);
@@ -595,6 +667,13 @@ function useChat(props: IProps) {
       const data = get(message, 'data') || message;
       const clientRequestId = get(message, 'clientRequestId');
       const messageSessionId = get(data, 'sessionId') || get(message, 'sessionId');
+      if (
+        (isCurrentExternalChildSession || isScopedChildProjection(data)) &&
+        `${messageSessionId}` === `${sessionId}` &&
+        (await applyScopedChildProjection(data, get(message, 'streamId')))
+      ) {
+        return;
+      }
       await waitForSessionMessageLoaded(messageSessionId);
 
       const newMsg = fetchMessageHandler({
@@ -640,10 +719,21 @@ function useChat(props: IProps) {
     return () => {
       webSocketManager.offMessage('NEW_MESSAGE', handler);
     };
-  }, [sessionId, updateMessage, waitForSessionMessageLoaded]);
+  }, [
+    applyScopedChildProjection,
+    isCurrentExternalChildSession,
+    sessionId,
+    updateMessage,
+    waitForSessionMessageLoaded,
+  ]);
 
   useEffect(() => {
-    if (!sessionId) {
+    if (!isCurrentExternalChildSession) return;
+    void reconcileScopedChildProjection();
+  }, [isCurrentExternalChildSession, reconcileScopedChildProjection, sessionId]);
+
+  useEffect(() => {
+    if (!sessionId || isCurrentExternalChildSession) {
       return;
     }
     let disposed = false;
@@ -719,6 +809,7 @@ function useChat(props: IProps) {
           });
 
           let snapshotAnswerMsg: IMessage | undefined;
+          let snapshotTerminal = false;
           try {
             const snapshot = await getChatRunningSnapshot({
               sessionId,
@@ -728,6 +819,7 @@ function useChat(props: IProps) {
             if (disposed) return;
             if (snapshot?.messageId) {
               snapshotAnswerMsg = createRestoredAnswerMessageFromSnapshot(snapshot, runningInfo);
+              snapshotTerminal = snapshot.running === false;
             }
           } catch (error) {
             console.error(error);
@@ -744,13 +836,19 @@ function useChat(props: IProps) {
               compareStreamId(snapshotStreamId, latestRuntimeInfo.lastAppliedStreamId) > 0;
             if (shouldApplySnapshot) {
               assign(answerMsg, snapshotAnswerMsg);
-              answerMsg.cancelSSE = debounce(() => stopRestoredRunningSession(answerMsg!, runningInfo), 100);
-              set(answerMsg, 'messageState', IMessageState.Answer);
+              answerMsg.cancelSSE = snapshotTerminal
+                ? undefined
+                : debounce(() => stopRestoredRunningSession(answerMsg!, runningInfo), 100);
+              set(answerMsg, 'messageState', snapshotTerminal ? IMessageState.Done : IMessageState.Answer);
               answerMsg = updateMessage(answerMsg, { isAssign: true });
-              chatSessionRuntimeManager.updateLastAppliedStreamId(
-                latestRuntimeInfo?.clientRequestId || runningInfo.clientRequestId,
-                snapshotStreamId
-              );
+              if (snapshotTerminal) {
+                chatSessionRuntimeManager.complete(latestRuntimeInfo?.clientRequestId || runningInfo.clientRequestId);
+              } else {
+                chatSessionRuntimeManager.updateLastAppliedStreamId(
+                  latestRuntimeInfo?.clientRequestId || runningInfo.clientRequestId,
+                  snapshotStreamId
+                );
+              }
               EventEmitter.emit(
                 'RECEIVE_SESSION_RECORDS_LAST_METADATA',
                 getSessionLastAnsMsgMetadata(sessionId, answerMsg, queryMsg)
@@ -774,7 +872,7 @@ function useChat(props: IProps) {
         flushRestoredChatStreamBuffer(restoreKey);
       });
     };
-  }, [sessionId, waitForSessionMessageLoaded]);
+  }, [isCurrentExternalChildSession, sessionId, waitForSessionMessageLoaded]);
 
   /**
    * 发送查询函数
@@ -797,7 +895,7 @@ function useChat(props: IProps) {
       return false;
     }
 
-    const { queryQuestion, payload = {}, msgOpt = {} } = sendProps;
+    const { queryQuestion, displayText, payload = {}, msgOpt = {} } = sendProps;
     const preliminaryDigitalEmployeeResources = getDigitalEmployeeResources(sendProps.resourceList);
     const isResumeChat = get(payload, 'actionType') === 'RESUME';
     let isContinuingRunningTrace = false;
@@ -826,10 +924,14 @@ function useChat(props: IProps) {
     let { resourceList } = sendProps;
 
     const myExtParams = get(payload, 'extParams');
-    const selectedProjectId = !sessionId
-      ? getProjectNumber(get(payload, 'selectedProjectId')) ?? getProjectNumber(getStoredProjectScopeId())
-      : undefined;
-    const selectedProjectName = !sessionId ? get(payload, 'selectedProjectName') : undefined;
+    // 上传附件会提前生成 sessionId，但页面仍是新建任务；明确传入的项目选择优先于会话 ID 判断。
+    const hasExplicitSelectedProject = get(payload, 'selectedProjectId') !== undefined;
+    const selectedProjectId = hasExplicitSelectedProject
+      ? getProjectNumber(get(payload, 'selectedProjectId'))
+      : !sessionId
+        ? getProjectNumber(getStoredProjectScopeId())
+        : undefined;
+    const selectedProjectName = hasExplicitSelectedProject ? get(payload, 'selectedProjectName') : undefined;
     const restPayload = omit(payload, ['extParams', 'selectedProjectId', 'selectedProjectName']);
 
     // 新建会话以输入框当前明确选择的项目为准，本地存储只作为首次加载时的兜底。
@@ -891,6 +993,7 @@ function useChat(props: IProps) {
     // 创建用户查询消息对象
     let newQueryMsg = createMessage({
       text: _queryQuestion,
+      displayText,
       fromBeyond: false,
       messageState: IMessageState.Done,
       sessionId,
@@ -1002,7 +1105,8 @@ function useChat(props: IProps) {
     const newAnswerMsg = primaryEntry.answerMsg;
     const clientRequestId = primaryEntry.lane.clientRequestId;
     const projectId = getProjectNumber(get(restPayload, 'projectId'));
-    const isNewProjectSession = projectId !== undefined && !sessionId;
+    // 新建任务上传文件后虽已有 sessionId，但首条消息仍需创建左侧临时会话缓存。
+    const isNewProjectSession = projectId !== undefined && (!sessionId || hasExplicitSelectedProject);
     const multiAgent = isMultiAgentSend
       ? {
         turnId,
@@ -1039,7 +1143,14 @@ function useChat(props: IProps) {
           projectId: `${projectId}`,
           projectName: get(restPayload, 'projectName'),
           clientRequestId: primaryEntry.lane.clientRequestId,
-          sessionName: newQueryMsg.text || 'New Chat',
+          // 项目侧栏会先展示临时会话，不能把输入组件的数字员工占位符展示给用户。
+          sessionName:
+            newQueryMsg.displayText ||
+            resolveDigitalEmployeePlaceholders(newQueryMsg.text || 'New Chat', [
+              ...((resourceList || []) as any),
+              { resourceId: primaryEntry.lane.agentId, resourceName: primaryEntry.lane.agentName },
+            ]) ||
+            'New Chat',
           sessionContent: newQueryMsg.text || '',
           updateTime: new Date().toISOString(),
         });

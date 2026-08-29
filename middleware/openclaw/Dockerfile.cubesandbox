@@ -97,10 +97,14 @@ COPY --from=ext-builder /build/out/ /app/extensions/
 
 # add openclaw skills (overwrite same-name files with project content)
 COPY middleware/openclaw/skills/ /app/skills/
+COPY middleware/openclaw/runtime-tools/ /usr/local/lib/byclaw/runtime-tools/
 
 # add filebrowser
 COPY middleware/openclaw/linux-amd64-filebrowser/filebrowser /usr/local/bin/filebrowser
 RUN chmod 0755 /usr/local/bin/filebrowser
+COPY middleware/openclaw/filebrowser-ui-proxy.py /usr/local/bin/openclaw-filebrowser-ui-proxy
+COPY middleware/openclaw/filebrowser-ui/ /usr/local/share/openclaw/filebrowser-ui/
+RUN chmod 0755 /usr/local/bin/openclaw-filebrowser-ui-proxy
 
 # add DingTalk workspace cli dws from the repository instead of downloading at build time
 COPY middleware/openclaw/cli/dws /usr/local/bin/dws
@@ -116,14 +120,24 @@ RUN set -eux; \
       'FILEBROWSER_PORT="${FILEBROWSER_PORT:-8082}"' \
       'FILEBROWSER_ROOT="${FILEBROWSER_ROOT:-/by}"' \
       'FILEBROWSER_BASEURL="${FILEBROWSER_BASEURL:-/filebrowser}"' \
+      'FILEBROWSER_UPSTREAM_PORT="${FILEBROWSER_UPSTREAM_PORT:-18082}"' \
       '' \
       'mkdir -p "${FILEBROWSER_ROOT}"' \
-      'exec filebrowser \' \
+      'filebrowser \' \
+      '  --root "${FILEBROWSER_ROOT}" \' \
+      '  --port "${FILEBROWSER_UPSTREAM_PORT}" \' \
+      '  --address 127.0.0.1 \' \
+      '  --noauth \' \
+      '  --baseurl "${FILEBROWSER_BASEURL}" &' \
+      'exec python3 /usr/local/bin/openclaw-filebrowser-ui-proxy \' \
       '  --root "${FILEBROWSER_ROOT}" \' \
       '  --port "${FILEBROWSER_PORT}" \' \
       '  --address 0.0.0.0 \' \
-      '  --noauth \' \
-      '  --baseurl "${FILEBROWSER_BASEURL}"' \
+      '  --baseurl "${FILEBROWSER_BASEURL}" \' \
+      '  --upstream "http://127.0.0.1:${FILEBROWSER_UPSTREAM_PORT}" \' \
+      '  --ui-dir /usr/local/share/openclaw/filebrowser-ui \' \
+      '  --default-path "${FILEBROWSER_ROOT}" \' \
+      '  --allowed-roots "${FILEBROWSER_ROOT}"' \
       >/usr/local/bin/startFilebrowser.sh; \
     printf '%s\n' \
       '#!/bin/sh' \
@@ -135,6 +149,7 @@ RUN set -eux; \
       'DWS_CONFIG_DIR="${DWS_CONFIG_DIR:-${OPENCLAW_STATE_DIR}/.dws}"' \
       '' \
       'mkdir -p "${OPENCLAW_STATE_DIR}" "${DWS_CONFIG_DIR}"' \
+      'if command -v git >/dev/null 2>&1 && [ -x /usr/local/lib/byclaw/runtime-tools/git-credential.mjs ]; then git config --global credential.https://github.com.helper /usr/local/lib/byclaw/runtime-tools/git-credential.mjs; fi' \
       'exec node dist/index.js gateway \' \
       '  --bind=lan \' \
       '  --port="${OPENCLAW_GATEWAY_PORT}" \' \

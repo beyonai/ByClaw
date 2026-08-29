@@ -3,6 +3,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/compat";
 import { AgentRegistryState } from "./agent-state.js";
+import {
+  DEFAULT_AIMODEL_TYPELIST_FIELD,
+  resolveAimodelSecretProviderName,
+  resolveAimodelTypeListRedisKey,
+  resolveDefaultBaiyingAimodelProviderBundle,
+  type ResolvedDefaultBaiyingAimodelProviderBundle,
+} from "./aimodel-config.js";
 import { registerBaiyingAimodelRuntimeProvider } from "./aimodel-runtime-provider.js";
 import { resolveDefaultContentIndexPath } from "./agent-content-index.js";
 import { registerBaiyingHttpRoutes } from "./http-routes.js";
@@ -19,6 +26,8 @@ import type { BaiyingEnhancePluginConfig } from "./types.js";
 import { loadAuthContext, resolveAuthFilePath } from "./executor/auth.js";
 import { loadPrivateParamsRuntime } from "./personal-params.js";
 import { resolveBackendServiceExecEnv } from "./backend-service-discovery.js";
+import { createBaiyingTaskPlanRuntime } from "./task-plan-runtime.js";
+import { registerUpdateTaskPlan } from "./update-task-plan-tool.js";
 import { resolveChannelSessionIdForTool } from "./channel-session-resolve.js";
 import {
   extractFinalAssistantOutput,
@@ -29,6 +38,10 @@ import {
   markBaiyingEnhanceColdStartUnavailable,
   resetBaiyingEnhanceColdStartReadiness,
 } from "./cold-start-readiness.js";
+import {
+  createZreadDefaultModelSync,
+  resolveZreadModelSyncSettings,
+} from "./zread-default-model-sync.js";
 
 function resolvePluginPath(api: OpenClawPluginApi, raw: string): string {
   if (path.isAbsolute(raw)) {
@@ -106,6 +119,18 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
     },
   });
   const pluginCfg = (api.pluginConfig ?? {}) as BaiyingEnhancePluginConfig;
+  const taskPlanLogger = {
+    info: (message: string) => api.logger.info(message),
+    warn: (message: string) => api.logger.warn(message),
+  };
+  registerUpdateTaskPlan({
+    api,
+    runtime: createBaiyingTaskPlanRuntime({
+      authFilePath: pluginCfg.authFilePath,
+      logger: taskPlanLogger,
+    }),
+    logger: taskPlanLogger,
+  });
   warnIfConversationHooksBlocked(api);
   api.registerReload({
     hotPrefixes: resolveConfigSyncHotPrefixes(pluginCfg),
@@ -121,6 +146,36 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
       error: (message) => api.logger.error(message),
     },
   });
+  const zreadModelSyncSettings = resolveZreadModelSyncSettings(pluginCfg);
+  const zreadDefaultModelSync = createZreadDefaultModelSync({
+    settings: zreadModelSyncSettings,
+    logger: {
+      info: (message) => api.logger.info(message),
+      warn: (message) => api.logger.warn(message),
+    },
+  });
+  const notifyZreadDefaultModel = (
+    resolved: ResolvedDefaultBaiyingAimodelProviderBundle,
+  ): Promise<void> => {
+    return zreadDefaultModelSync.notify(resolved);
+  };
+  const syncZreadDefaultModelFromRedis = async (): Promise<void> => {
+    if (!zreadModelSyncSettings.enabled) {
+      return;
+    }
+    const resolved = await resolveDefaultBaiyingAimodelProviderBundle({
+      redisJsonStore,
+      redisKey: resolveAimodelTypeListRedisKey(pluginCfg.aimodelTypeListRedisKey),
+      modelType: DEFAULT_AIMODEL_TYPELIST_FIELD,
+      secretProviderName: resolveAimodelSecretProviderName(
+        pluginCfg.aimodelSecretProviderName,
+      ),
+      log: { warn: (message) => api.logger.warn(message) },
+    });
+    if (resolved) {
+      await notifyZreadDefaultModel(resolved);
+    }
+  };
 
   setSharedRedisJsonStore(redisJsonStore);
 
@@ -148,6 +203,19 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
     { name: "baiying_call" },
   );
 
+  const loadUserPrivateParams = async (): Promise<Record<string, string>> => {
+    const authContext = await loadAuthContext(resolveAuthFilePath(pluginCfg.authFilePath));
+    const runtime = await loadPrivateParamsRuntime({
+      authContext,
+      logger: {
+        info: (message) => api.logger.info(message),
+        warn: (message) => api.logger.warn(message),
+        error: (message) => api.logger.error(message),
+      },
+    });
+    return runtime?.params ?? {};
+  };
+
   registerBaiyingNativeImageRouting({
     api,
     registry,
@@ -165,16 +233,7 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
     }
     let privateParams: Record<string, string> = {};
     try {
-      const authContext = await loadAuthContext(resolveAuthFilePath(pluginCfg.authFilePath));
-      const runtime = await loadPrivateParamsRuntime({
-        authContext,
-        logger: {
-          info: (message) => api.logger.info(message),
-          warn: (message) => api.logger.warn(message),
-          error: (message) => api.logger.error(message),
-        },
-      });
-      privateParams = runtime?.params ?? {};
+      privateParams = await loadUserPrivateParams();
     } catch (err) {
       api.logger.warn(
         `baiying-enhance: resolve_exec_env private params skipped: ${
@@ -231,6 +290,7 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
       pluginRuntimeDir,
       "aimodel-secret-resolver-cli.js",
     ),
+    onDefaultAimodelResolved: notifyZreadDefaultModel,
   });
 
   let digEmployeeAuthWatch:
@@ -397,6 +457,13 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
         });
       }
       await agentWatch.start({ deferInitialFlush: true });
+      await syncZreadDefaultModelFromRedis().catch((err) => {
+        api.logger.warn(
+          `baiying-enhance: initial Zread default model sync failed: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      });
       void mainContextTemplateWatch?.start().catch((err) => {
         api.logger.warn(
           `baiying-enhance: main context template watcher failed: ${

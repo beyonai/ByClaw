@@ -26,7 +26,8 @@ import {
   assertNoSensitiveKeys,
   withSessionLock,
   ensureSessionSkeleton,
-  isInside,
+  assertSandboxSessionPath,
+  resolveSandboxPath,
 } from './session.mjs';
 import { deliveryCompleteForSession } from './delivery-state.mjs';
 
@@ -509,7 +510,9 @@ function renderTree(session) {
 
 /** init: 创建会话骨架 + session.json(研究任务参数;可选 --collection-result-input-file 预置采集清单)。 */
 export function cmdInit(args) {
-  const root = path.resolve(requireString(args['session-dir'], '--session-dir'));
+  const root = assertSandboxSessionPath(args['session-dir'], '--session-dir', {
+    currentSessionRoot: args['session-root'],
+  });
   const query = typeof args.query === 'string' ? args.query : '';
   if (!query.trim()) {
     throw new Error('--query 是必填项');
@@ -821,11 +824,10 @@ export function cmdReport(args) {
       );
     }
     const reportPath = typeof args['report-path'] === 'string' && args['report-path'].trim()
-      ? path.resolve(args['report-path'])
+      ? resolveSandboxPath(args['report-path'], '--report-path', {
+        currentSessionRoot: args['session-root'],
+      })
       : path.join(paths.root, REPORT_FILENAME);
-    if (!isInside(paths.root, reportPath)) {
-      throw new Error(`报告文件必须在会话目录内: ${paths.root}`);
-    }
     let stat;
     try {
       stat = fs.lstatSync(reportPath);
@@ -862,7 +864,7 @@ export function cmdReport(args) {
 /** status: 研究维度摘要。 */
 export function cmdResearchStatus(args) {
   const paths = sessionPaths(args['session-dir']);
-  const { session } = loadSession(paths);
+  const { session } = loadSession(paths, { persistMigration: false });
   const warnings = [];
   const deadline = session.task.deadlineMinutes;
   if (deadline !== null && deadline !== undefined) {

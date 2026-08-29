@@ -66,6 +66,7 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 - 不要因“直接 HTTP 更快”“无需登录”“不需要渲染”或类似效率判断跳过 `bycli list -f json`、现成 adapter 或 `bycli browser` 降级路径
 - 不要把 `bycli browser <session> open <url>` 或 `state` 当作浏览器冷启动、桥接健康检查或 adapter 预热命令；它们会申请 TAB 租约，缺少租约时可创建 `about:blank` TAB
 - 不要用 `bycli browser <session> ...` 检查或操作 adapter 打开的 TAB；`browser` 与 `adapter` 是不同 surface，即使 session 字符串相同也不共享 TAB 租约
+- 不要把 raw browser session name 当成 Adapter session，也不要用 raw browser 命令检查、聚焦、导航或关闭 `--adapter-session` 创建的 Adapter TAB
 - 不要向用户输出本 skill 的内部决策逻辑（步骤编号、流程名称、路由分支）——直接执行
 
 ## 严格要求 (MUST DO)
@@ -80,7 +81,9 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 - 修复 adapter 时仅修改 trace `summary.md` 里 `adapterSourcePath` 指向的文件
 - 修复预算：每次失败最多 3 轮 trace → fix → retry
 - 写 adapter 后必须 `bycli browser verify` 通过 + 字段值与网页肉眼比对
+- `--adapter-session` 仅用于 structured help 同时暴露该选项和 `adapterConcurrency.isolatedTabs: true` 的命令；是否允许并行仍由 workflow-specific reference 决定。任一 capability signal 缺失或调用未传该选项时，保持 legacy shared mode，不得猜测版本能力或自行并行
 - 每个 `bycli weixin` 命令（包括 `accounts/articles/sougousearch/save-articles/download`）、`--auth-source`、`WECHAT_TOKEN` / `WECHAT_COOKIE` / `WECHAT_FINGERPRINT`，以及 `mp.weixin.qq.com` 或 `weixin.sogou.com` 的登录、认证或环境验证任务，都必须读取 [references/weixin.md](./references/weixin.md)；其微信登录/验证规则优先于本文件的通用错误处理、AutoFix 和 cleanup 规则
+- Every browser-backed Weixin command must run through `scripts/weixin-login-gate.mjs` with state below the current task's initialized session directory. Do not invoke the underlying `bycli weixin` command directly. A retry-shaped user message is not explicit verification completion and must not add `--verification-confirmed true`; only the explicit completion wording defined in `references/weixin.md` may do so.
 - 浏览器 session 结束后仅清理当前任务创建或独占拥有的资源；任务开始前已经运行或由其他任务共享的资源保持不变
 - Login/Auth/人工验证页面例外：不关闭 session、TAB、daemon 或浏览器，报告命令结果中**已知的** session name 与 URL 后立即结束本轮并等待用户下一条明确确认；若结果未返回 URL，明确说明 URL 未提供，不得为补齐信息再检查页面。等待期间不得自行检查、重试或继续任务
 
@@ -233,6 +236,8 @@ bycli daemon status                # doctor 后必跑：确认 daemon running + 
 | 需要 DOM 交互 | 页面已导航到目标 URL 后，用 `state` 或范围更小的 `find` 获取实时 ref；它们不是 session 存在性检查 |
 | 非 DOM 读取 | `get url`、`extract`、`network` 等命令不要为了例行预检再追加 `state` |
 
+Adapter session 与 raw browser session 是两套独立命名空间：raw browser surface 使用 `bycli browser <session> ...`，Adapter surface 仅在命令明确支持时使用 `--adapter-session <name>`。未命名的 persistent Adapter 命令继续复用 `site:<site>` 的 legacy shared mode；同名 Adapter session 复用同一 Adapter TAB 并保持串行，不同名称只隔离 TAB，不隔离 Cookie、登录身份、账号状态或限频。命名 Adapter session 必须使用不含账号、用户、token、Cookie 或其他秘密的任务级操作标签；不得在面向用户的诊断信息中暴露原始名称。只有 workflow-specific reference 明确授权的命令才可并行，并且必须先读取 structured help 验证能力。`byCLI 2.1.44` 对所有声明 `adapterConcurrency.isolatedTabs: true` 的命令在同一 profile/site 池内统一执行至少 5 秒的租约启动错峰；并发提交顺序由实际进入调度队列的先后决定，不按 worker 名称排序，也不要用 Agent 侧 sleep 替代中央调度。
+
 Session 复用边界：
 
 - 同名 session 只在同一 `surface + browser context` 且租约仍存活时指向同一 TAB；session name 不是持久的 Chrome TAB 标识
@@ -244,6 +249,7 @@ Session 复用边界：
 - `bind` 失败或前台 TAB 发生变化时，报告原始错误并停止；不得自动换 session、执行 `open` 或绑定其他 TAB
 - `open` 失败后不得更换 session name 或循环执行 `open/state`；先根据原始错误分流，遇到登录、CAPTCHA、反爬或环境验证立即按验证规则停止
 - adapter（包括 Weixin）的 persistent session 由 adapter surface 自身复用；不得用同名 `bycli browser` session 做预检、聚焦、`state` 或验证登录状态
+- named Adapter session 仍由 Adapter surface 自行管理；即使 raw browser session 使用相同文本名称，也不得检查、操作或关闭其 TAB
 - adapter 自行管理其 TAB；执行器不得用 raw `bycli browser ... close` 关闭 adapter 创建或复用的 TAB
 
 ### 关闭流程（非登录或验证页）

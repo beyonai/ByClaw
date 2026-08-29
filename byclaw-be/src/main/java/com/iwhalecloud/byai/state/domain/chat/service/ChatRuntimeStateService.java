@@ -11,6 +11,7 @@ import java.util.concurrent.TimeUnit;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 
 import com.alibaba.fastjson.JSON;
@@ -35,6 +36,30 @@ public class ChatRuntimeStateService {
     private static final long RUNTIME_TTL_SECONDS = 24 * 60 * 60L;
 
     private static final long RECOVERY_LOCK_TTL_SECONDS = 120L;
+
+    /** 心跳与关闭交接都用单 key Lua 更新，避免关闭线程和最后一次 keepalive 相互覆盖。 */
+    private static final DefaultRedisScript<Long> TOUCH_SCRIPT = new DefaultRedisScript<>("""
+        local current = redis.call('get', KEYS[1])
+        if not current then return 0 end
+        local ok, state = pcall(cjson.decode, current)
+        if not ok or state.token ~= ARGV[1] or state.status ~= 'RUNNING' then return 0 end
+        state.ownerInstanceId = ARGV[2]
+        state.lastHeartbeatAt = tonumber(ARGV[3])
+        redis.call('set', KEYS[1], cjson.encode(state), 'EX', ARGV[4])
+        return 1
+        """, Long.class);
+
+    private static final DefaultRedisScript<Long> REQUEST_HANDOFF_SCRIPT = new DefaultRedisScript<>("""
+        local current = redis.call('get', KEYS[1])
+        if not current then return 0 end
+        local ok, state = pcall(cjson.decode, current)
+        if not ok or state.token ~= ARGV[1] or state.ownerInstanceId ~= ARGV[2]
+            or state.status ~= 'RUNNING' then return 0 end
+        state.status = 'HANDOFF_REQUESTED'
+        state.handoffRequestedAt = tonumber(ARGV[3])
+        redis.call('set', KEYS[1], cjson.encode(state), 'EX', ARGV[4])
+        return 1
+        """, Long.class);
 
     @Autowired
     private RedisTemplate<String, Object> redisTemplate;
@@ -79,15 +104,34 @@ public class ChatRuntimeStateService {
         if (ctx == null || ctx.sessionId == null || StringUtils.isBlank(ctx.runningOutputStreamToken)) {
             return;
         }
-        ChatRuntimeState state = get(ctx.sessionId);
-        if (state == null || !ctx.runningOutputStreamToken.equals(state.getToken())) {
-            return;
+        Long updated = redisTemplate.execute(TOUCH_SCRIPT, List.of(buildKey(ctx.sessionId)),
+            ctx.runningOutputStreamToken, chatRuntimeInstance.getInstanceId(), String.valueOf(System.currentTimeMillis()),
+            String.valueOf(RUNTIME_TTL_SECONDS));
+        if (updated != null && updated > 0) {
+            redisTemplate.opsForSet().add(RUNTIME_INDEX_KEY, String.valueOf(ctx.sessionId));
         }
-        state.setLastHeartbeatAt(System.currentTimeMillis());
-        state.setOwnerInstanceId(chatRuntimeInstance.getInstanceId());
-        redisTemplate.opsForValue().set(buildKey(ctx.sessionId), JSON.toJSONString(state), RUNTIME_TTL_SECONDS,
-            TimeUnit.SECONDS);
-        redisTemplate.opsForSet().add(RUNTIME_INDEX_KEY, String.valueOf(ctx.sessionId));
+    }
+
+    /**
+     * 将当前实例持有的会话原子标记为可交接。token 与 owner 双重校验可防止旧 Pod 覆盖新 Pod 已接管的状态。
+     */
+    public boolean requestHandoff(ChatProcessContext ctx) {
+        if (ctx == null || ctx.sessionId == null || StringUtils.isBlank(ctx.runningOutputStreamToken)) {
+            return false;
+        }
+        try {
+            Long updated = redisTemplate.execute(REQUEST_HANDOFF_SCRIPT, List.of(buildKey(ctx.sessionId)),
+                ctx.runningOutputStreamToken, chatRuntimeInstance.getInstanceId(),
+                String.valueOf(System.currentTimeMillis()), String.valueOf(RUNTIME_TTL_SECONDS));
+            if (updated != null && updated > 0) {
+                redisTemplate.opsForSet().add(RUNTIME_INDEX_KEY, String.valueOf(ctx.sessionId));
+                return true;
+            }
+        }
+        catch (Exception e) {
+            log.warn("标记聊天运行态交接失败, sessionId: {}, traceId: {}", ctx.sessionId, ctx.traceId, e);
+        }
+        return false;
     }
 
     public ChatRuntimeState get(Long sessionId) {
@@ -133,7 +177,8 @@ public class ChatRuntimeStateService {
                     }
                     continue;
                 }
-                if (ChatRuntimeState.STATUS_RUNNING.equals(state.getStatus())) {
+                if (ChatRuntimeState.STATUS_RUNNING.equals(state.getStatus())
+                    || ChatRuntimeState.STATUS_HANDOFF_REQUESTED.equals(state.getStatus())) {
                     states.add(state);
                 }
                 else {

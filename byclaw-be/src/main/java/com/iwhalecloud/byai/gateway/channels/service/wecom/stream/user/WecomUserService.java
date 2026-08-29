@@ -1,6 +1,8 @@
 package com.iwhalecloud.byai.gateway.channels.service.wecom.stream.user;
 
+import com.iwhalecloud.byai.common.constants.Constants;
 import com.iwhalecloud.byai.common.constants.users.SourceType;
+import com.iwhalecloud.byai.common.constants.users.UserState;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.manager.domain.enterprise.service.EnterpriseInfoService;
@@ -13,11 +15,13 @@ import com.iwhalecloud.byai.manager.entity.users.Users;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.util.Date;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * Resolves a WeCom {@code from.userid} to a Byclaw user, mirroring
@@ -76,6 +80,11 @@ public class WecomUserService {
                 logger.warn("WeCom external binding present but local user missing. userId={}", binding.getUserId());
                 return null;
             }
+            if (isUserUnavailable(user)) {
+                logger.warn("Rejected unavailable WeCom bound user. userId={}, state={}, isLocked={}",
+                        user.getUserId(), user.getState(), user.getIsLocked());
+                return null;
+            }
             return buildLoginInfo(user);
         }
 
@@ -99,8 +108,21 @@ public class WecomUserService {
         if (matchedUser == null) {
             return null;
         }
-        saveUserExternalSystem(fromUserId, matchedUser.getUserId(), detail);
+        if (isUserUnavailable(matchedUser)) {
+            logger.warn("Rejected unavailable WeCom user before binding. userId={}, state={}, isLocked={}",
+                    matchedUser.getUserId(), matchedUser.getState(), matchedUser.getIsLocked());
+            return null;
+        }
+        if (!saveUserExternalSystem(fromUserId, matchedUser.getUserId(), detail)) {
+            logger.warn("Concurrent WeCom binding kept a different local user. sourceType={}", SourceType.WE_CHAT);
+            return null;
+        }
         return matchedUser;
+    }
+
+    private boolean isUserUnavailable(Users user) {
+        return !UserState.ACTIVE.equals(user.getState())
+                || Constants.YES_VALUE_Y.equalsIgnoreCase(user.getIsLocked());
     }
 
     private Users findMatchedUserFromDetail(WecomUserDetail detail) {
@@ -143,9 +165,9 @@ public class WecomUserService {
         return null;
     }
 
-    public void saveUserExternalSystem(String externalUserId, Long userId, WecomUserDetail userDetail) {
+    public boolean saveUserExternalSystem(String externalUserId, Long userId, WecomUserDetail userDetail) {
         if (!StringUtils.hasText(externalUserId) || userId == null || userDetail == null) {
-            return;
+            return false;
         }
 
         UserExternalSystem existing = userExternalSystemService.findByUnionId(SourceType.WE_CHAT, externalUserId);
@@ -156,7 +178,7 @@ public class WecomUserService {
                 existing.setBindingTime(new Date());
             }
             userExternalSystemService.update(existing);
-            return;
+            return true;
         }
 
         UserExternalSystem externalSystem = new UserExternalSystem();
@@ -165,7 +187,22 @@ public class WecomUserService {
         externalSystem.setSourceType(SourceType.WE_CHAT);
         externalSystem.setBindingTime(new Date());
         fillExternalSystem(externalSystem, externalUserId, userDetail);
-        userExternalSystemService.save(externalSystem);
+        try {
+            userExternalSystemService.save(externalSystem);
+            return true;
+        } catch (DuplicateKeyException e) {
+            UserExternalSystem concurrentBinding =
+                    userExternalSystemService.findByUnionId(SourceType.WE_CHAT, externalUserId);
+            if (concurrentBinding == null) {
+                throw e;
+            }
+            if (!Objects.equals(concurrentBinding.getUserId(), userId)) {
+                logger.warn("Concurrent WeCom binding kept existing user. existingUserId={}, requestedUserId={}",
+                        concurrentBinding.getUserId(), userId);
+                return false;
+            }
+            return true;
+        }
     }
 
     private void fillExternalSystem(UserExternalSystem externalSystem,

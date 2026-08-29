@@ -46,12 +46,17 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
     (project?.projectType === 'develop' && isDevelopProjectEnabled) ||
     (project?.projectType === 'operation' && isOperationProjectEnabled);
   const showCode = repositoryProjectEnabled && supportsProjectRepositories(project?.projectType);
+  // 研发项目的知识由代码/研发流程承载，当前会话不展示“项目知识”；普通项目和运营项目保留该入口。
+  const showSessionKnowledge = project?.projectType !== 'develop';
 
   useEffect(() => {
-    if (!showCode && secondaryState.session === 'code') {
+    if (
+      (!showSessionKnowledge && secondaryState.session === 'knowledge') ||
+      (!showCode && secondaryState.session === 'code')
+    ) {
       setSecondaryState((current) => ({ ...current, session: 'file' }));
     }
-  }, [secondaryState.session, showCode]);
+  }, [secondaryState.session, showCode, showSessionKnowledge]);
 
   const upperSecondaryItems = useMemo(() => {
     const label = (id: string) => intl.formatMessage({ id });
@@ -63,13 +68,17 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
         { key: 'model', label: label('chatResource.model') },
       ];
     }
+    const projectFileLabelId =
+      Number(project?.projectId ?? projectId) === -1
+        ? 'chatResource.localSharedFile'
+        : 'chatResource.projectCloudDrive';
     return [
-      { key: 'file', label: label('chatResource.sessionFile') },
-      { key: 'projectFile', label: label('chatResource.projectFile') },
-      { key: 'knowledge', label: label('chatResource.projectKnowledge') },
+      { key: 'file', label: label('chatResource.processFile') },
+      { key: 'projectFile', label: label(projectFileLabelId) },
+      ...(showSessionKnowledge ? [{ key: 'knowledge', label: label('chatResource.projectKnowledge') }] : []),
       ...(showCode ? [{ key: 'code', label: label('chatResource.projectCode') }] : []),
     ];
-  }, [intl, showCode, upperScopeKey]);
+  }, [intl, project?.projectId, projectId, showCode, showSessionKnowledge, upperScopeKey]);
 
   const upperSecondaryKey = secondaryState[upperScopeKey];
   const empty = (
@@ -96,10 +105,21 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
           <FileResourcePanel
             scope="project"
             sessionId={sessionId}
-            projectId={project?.projectId || projectId}
+            projectId={project?.projectId ? Number(project.projectId) : projectId}
             project={project}
             resourceId={resourceId}
             refreshKey={sessionResourceRefreshKey}
+            onOpenDetail={onOpenDetail}
+          />
+        );
+      }
+      if (upperSecondaryKey === 'knowledge' && showSessionKnowledge) {
+        return (
+          <ObjectFilesPanel
+            objectType="knowledge"
+            projectId={project?.projectId || projectId}
+            sessionId={sessionId}
+            refreshToken={sessionResourceRefreshKey}
             onOpenDetail={onOpenDetail}
           />
         );
@@ -112,17 +132,6 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
             sessionId={sessionId}
             refreshKey={sessionResourceRefreshKey}
             codeChangesEnabled
-            onOpenDetail={onOpenDetail}
-          />
-        );
-      }
-      if (upperSecondaryKey === 'knowledge') {
-        return (
-          <ObjectFilesPanel
-            objectType="knowledge"
-            projectId={project?.projectId || projectId}
-            sessionId={sessionId}
-            refreshToken={sessionResourceRefreshKey}
             onOpenDetail={onOpenDetail}
           />
         );
@@ -149,6 +158,7 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
     sessionResourceRefreshKey,
     sessionId,
     showCode,
+    showSessionKnowledge,
     upperScopeKey,
     upperSecondaryKey,
   ]);

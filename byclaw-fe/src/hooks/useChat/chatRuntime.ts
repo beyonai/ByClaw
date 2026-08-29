@@ -19,6 +19,8 @@ export type ChatStreamRuntimeContext = {
   getMessageList: () => IMessage[];
   flowHandler: (props: any) => any;
   updateMessage: UpdateMessage;
+  answerFlushTimer?: ReturnType<typeof setTimeout>;
+  answerFlushQueued?: boolean;
 };
 
 const pendingChatContexts = new Map<string, ChatStreamRuntimeContext>();
@@ -26,9 +28,11 @@ const laneChatContexts = new Map<string, ChatStreamRuntimeContext>();
 const traceChatContexts = new Map<string, ChatStreamRuntimeContext>();
 const turnChatContexts = new Map<string, Map<string, ChatStreamRuntimeContext>>();
 const sessionChatContexts = new Map<string, Map<string, ChatStreamRuntimeContext>>();
+const queuedAnswerContexts = new Set<ChatStreamRuntimeContext>();
 const restoringStreamKeys = new Set<string>();
 const restoredStreamBuffer = new Map<string, ParsedChatStreamMessage[]>();
 const MAX_BUFFERED_STREAM_SIZE = 200;
+const ANSWER_FLUSH_INTERVAL_MS = 30;
 
 const safeParseMetadata = (metadata: unknown): Record<string, unknown> => {
   if (!metadata) return {};
@@ -64,6 +68,43 @@ const getScopedKey = (sessionId?: string | number, value?: string | number) => `
 
 const getSessionContexts = (sessionId?: string | number) =>
   sessionId ? sessionChatContexts.get(`${sessionId}`) : undefined;
+
+const clearAnswerFlush = (context: ChatStreamRuntimeContext) => {
+  if (context.answerFlushTimer) {
+    clearTimeout(context.answerFlushTimer);
+    context.answerFlushTimer = undefined;
+  }
+  context.answerFlushQueued = false;
+  queuedAnswerContexts.delete(context);
+};
+
+const flushAnswerMessage = (context: ChatStreamRuntimeContext) => {
+  clearAnswerFlush(context);
+  context.answerMsg = context.updateMessage(context.answerMsg, { isAssign: context.restored });
+};
+
+const flushQueuedAnswers = () => {
+  Array.from(queuedAnswerContexts).forEach((context) => flushAnswerMessage(context));
+};
+
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      flushQueuedAnswers();
+    }
+  });
+}
+
+const scheduleAnswerFlush = (context: ChatStreamRuntimeContext) => {
+  queuedAnswerContexts.add(context);
+  if (context.answerFlushQueued) return;
+
+  context.answerFlushQueued = true;
+  context.answerFlushTimer = setTimeout(() => {
+    context.answerFlushTimer = undefined;
+    flushAnswerMessage(context);
+  }, ANSWER_FLUSH_INTERVAL_MS);
+};
 
 export const getChatStreamClientRequestId = (message: any, res?: any) =>
   getMessageValue(message, res, ['clientRequestId', 'data.clientRequestId', 'metadata.clientRequestId']);
@@ -115,6 +156,12 @@ export const registerPendingChatContext = (context: ChatStreamRuntimeContext) =>
 export const unregisterPendingChatContext = (clientRequestId?: string) => {
   if (!clientRequestId) return;
   const context = pendingChatContexts.get(`${clientRequestId}`);
+  // A context can be unregistered by cancellation or disconnect recovery before
+  // a coalesced UI update's timer fires. Flush that latest state first so the
+  // trailing stream delta is not lost and no timer can update after cleanup.
+  if (context?.answerFlushQueued) {
+    flushAnswerMessage(context);
+  }
   pendingChatContexts.delete(`${clientRequestId}`);
   if (context?.laneId) {
     laneChatContexts.delete(`${context.laneId}`);
@@ -320,6 +367,7 @@ const markParsedStreamApplied = (context: ChatStreamRuntimeContext, parsed: Pars
 };
 
 const completeChatStreamContext = (context: ChatStreamRuntimeContext, messageState: IMessageState) => {
+  clearAnswerFlush(context);
   if (context.answerMsg.messageState !== IMessageState.Cancel) {
     set(context.answerMsg, 'messageState', messageState);
   }
@@ -395,10 +443,13 @@ const applyParsedStreamToContext = (parsed: ParsedChatStreamMessage, context: Ch
     completeChatStreamContext(context, IMessageState.Done);
   }
 
-  if (!context.onlyQuery) {
-    context.queryMsg = context.updateMessage(context.queryMsg);
+  if (['error', 'appStreamResponse'].includes(eventName)) {
+    // Terminal events must be visible immediately before the runtime context
+    // is removed, while intermediate deltas are coalesced below.
+    flushAnswerMessage(context);
+  } else {
+    scheduleAnswerFlush(context);
   }
-  context.answerMsg = context.updateMessage(context.answerMsg, { isAssign: context.restored });
   markParsedStreamApplied(context, parsed);
 };
 
@@ -482,6 +533,7 @@ export const hydrateRunningSessions = (runningInfoList: RunningChatInfo[] = []) 
 };
 
 export const clearChatRuntime = () => {
+  Array.from(queuedAnswerContexts).forEach(clearAnswerFlush);
   pendingChatContexts.clear();
   laneChatContexts.clear();
   traceChatContexts.clear();

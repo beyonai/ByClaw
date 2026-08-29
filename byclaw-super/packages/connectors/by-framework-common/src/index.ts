@@ -38,6 +38,7 @@ export interface ByFrameworkCallAgentInput {
   messageId?: string;
   parentMessageId?: string;
   routePolicy?: "FAIL_FAST" | "SEND_ANYWAY" | "WAKE_AND_WAIT" | "WAKE_AND_QUEUE" | "QUEUE_ONLY";
+  availabilityTimeoutMs?: number;
 }
 
 export interface ByFrameworkCallAgentResult {
@@ -119,6 +120,9 @@ export class ByFrameworkConnector implements AgentConnector {
       ...request.metadata,
       parent_run_id: request.runId,
       delegation_id: request.delegationId,
+      delegated_agent_id: request.agent.id,
+      delegated_agent_name: request.agent.name,
+      delegated_agent_type: targetAgentType,
       ...(request.parentMessageId
         ? { caller_parent_message_id: request.parentMessageId }
         : {}),
@@ -165,6 +169,7 @@ export class ByFrameworkConnector implements AgentConnector {
         messageId: childRequestMessageId,
         parentMessageId: request.delegationId,
         routePolicy: "WAKE_AND_WAIT",
+        availabilityTimeoutMs: 60000,
       });
     } catch (error) {
       this.#logger?.error(

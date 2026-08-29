@@ -96,6 +96,7 @@ CREATE TABLE byai.po_user_access_token (user_access_token_id bigint, user_id big
 CREATE TABLE byai.po_user_account_change_log (change_log_id bigint, user_id bigint, change_type character varying(20), change_time timestamp without time zone, old_value character varying(255), new_value character varying(255), need_reverify smallint, create_time timestamp without time zone);
 CREATE TABLE byai.po_user_common_ip (common_ip_id bigint, user_id bigint, ip_address character varying(50), first_use_time timestamp without time zone, last_use_time timestamp without time zone, use_count integer, create_time timestamp without time zone, update_time timestamp without time zone);
 CREATE TABLE byai.po_user_external_system (id bigint, user_id bigint, source_type integer, source_account character varying(255), source_nickname character varying(255), source_email character varying(255), source_dep_id character varying(255), source_dep_name character varying(255), union_id character varying(255), binding_time timestamp without time zone);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_po_user_external_system_source_union ON byai.po_user_external_system (source_type, union_id) WHERE union_id IS NOT NULL AND btrim(union_id) <> '';
 CREATE TABLE byai.po_user_menu (user_id bigint, menu_detail text);
 CREATE TABLE byai.po_users (user_id bigint, user_name character varying(255), email character varying(255), phone character varying(255), user_code character varying(255), pwd character varying(255), address text, remark character varying(255), user_eff_date timestamp without time zone, user_exp_date timestamp without time zone, create_date timestamp without time zone, update_date timestamp without time zone, state character(1), state_time timestamp without time zone, is_locked character(1), last_login_date timestamp without time zone, security_question_id numeric(3,0), security_answer character varying(120), thumbnail_uri character varying(400), ext_attr character varying(1000), assistant_id bigint, user_number character varying(300), station_id bigint, register_type smallint, apple_user_id character varying(255));
 CREATE TABLE byai.po_users_organization (id bigint, user_id bigint, org_id bigint, position_id bigint, user_type character varying(50));
@@ -1535,15 +1536,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_po_user_token_quota_user
 CREATE TABLE IF NOT EXISTS byai.byai_project (
     project_id      BIGINT          NOT NULL,
     project_name    VARCHAR(100)    NOT NULL,
-    description     TEXT,
+    description     VARCHAR(500),
     resource_id     BIGINT,
     project_type    VARCHAR(20)     NOT NULL DEFAULT 'normal',
     is_share        VARCHAR(10)     NOT NULL DEFAULT 'N',
-    init_status     VARCHAR(16),
-    build_index     VARCHAR(4)      NOT NULL DEFAULT 'N',
-    index_skills    VARCHAR(512),
-    init_session_id BIGINT,
-    init_fail_reason VARCHAR(500),
     create_by       BIGINT,
     create_time     TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
     update_by       BIGINT,
@@ -1559,11 +1555,6 @@ COMMENT ON COLUMN byai.byai_project.description IS '项目描述';
 COMMENT ON COLUMN byai.byai_project.resource_id IS '关联Agent资源ID';
 COMMENT ON COLUMN byai.byai_project.project_type IS '项目类型：normal普通项目，develop研发项目';
 COMMENT ON COLUMN byai.byai_project.is_share IS '是否分享：N-不分享，Y-可分享';
-COMMENT ON COLUMN byai.byai_project.init_status IS '研发项目工作区初始化状态 pending待初始化/initializing初始化中/ready已就绪';
-COMMENT ON COLUMN byai.byai_project.build_index IS '初始化是否建索引 Y建立/N不建立';
-COMMENT ON COLUMN byai.byai_project.index_skills IS '建索引所需技能包,逗号分隔';
-COMMENT ON COLUMN byai.byai_project.init_session_id IS '工作区初始化会话ID';
-COMMENT ON COLUMN byai.byai_project.init_fail_reason IS '上次工作区初始化失败或超时原因';
 COMMENT ON COLUMN byai.byai_project.create_by IS '创建人';
 COMMENT ON COLUMN byai.byai_project.create_time IS '创建时间';
 COMMENT ON COLUMN byai.byai_project.update_by IS '更新人';
@@ -1571,7 +1562,20 @@ COMMENT ON COLUMN byai.byai_project.update_time IS '更新时间';
 COMMENT ON COLUMN byai.byai_project.delete_flag IS '删除标记 0正常 1删除';
 
 -- 项目关联会话
-ALTER TABLE byai_session ADD COLUMN project_id BIGINT NOT NULL DEFAULT -1;
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'byai'
+          AND table_name = 'byai_session'
+          AND column_name = 'project_id'
+    ) THEN
+        ALTER TABLE byai.byai_session
+            ADD COLUMN project_id BIGINT NOT NULL DEFAULT -1;
+    END IF;
+END;
+$$;
 COMMENT ON COLUMN byai_session.project_id IS '项目ID,-1代表无归属项目,即默认项目';
 
 -- 项目关联成员
@@ -1604,9 +1608,6 @@ CREATE TABLE IF NOT EXISTS byai.byai_project_repo (
     repo_full_name  VARCHAR(200)    NOT NULL,
     repo_url        VARCHAR(500),
     default_branch  VARCHAR(100)    DEFAULT 'main',
-    description     TEXT,
-    repo_type       VARCHAR(16)     NOT NULL DEFAULT 'code',
-    provider        VARCHAR(20)     NOT NULL DEFAULT 'github',
     create_by       VARCHAR(64),
     create_time     TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT pk_byai_project_repo PRIMARY KEY (repo_id)
@@ -1618,9 +1619,6 @@ COMMENT ON COLUMN byai.byai_project_repo.project_id IS '所属项目ID';
 COMMENT ON COLUMN byai.byai_project_repo.repo_full_name IS '仓库全名 owner/repo';
 COMMENT ON COLUMN byai.byai_project_repo.repo_url IS '仓库地址';
 COMMENT ON COLUMN byai.byai_project_repo.default_branch IS '默认分支';
-COMMENT ON COLUMN byai.byai_project_repo.description IS '仓库用途描述';
-COMMENT ON COLUMN byai.byai_project_repo.repo_type IS '仓库类型 workspace工作区/code代码仓库';
-COMMENT ON COLUMN byai.byai_project_repo.provider IS '代码平台 github/gitlab/gitea';
 
 -- 项目空间共享文件表
 CREATE TABLE IF NOT EXISTS byai.byai_project_share_file
@@ -1858,193 +1856,222 @@ COMMENT ON COLUMN byai.byai_connector_auth.create_by IS '创建人标识';
 COMMENT ON COLUMN byai.byai_connector_auth.create_time IS '创建时间，新增自动填充';
 COMMENT ON COLUMN byai.byai_connector_auth.update_time IS '更新时间，新增不赋值为NULL，更新时手动填充';
 
--- ========== V0.3.1 (merged at 2026-08-18 16:19:56) ==========
--- V0.3.1 增量 DDL：为已有环境增加连接器授权、Runtime Manifest 和系统托管参数快照结构。
--- 所有新增表、字段、约束和索引均采用幂等方式，支持升级脚本安全重放。
-SET search_path TO byai;
-
--- 连接器基础元信息：保存平台级连接器模板；runtime_manifest 在后续兼容字段块中幂等补充。
-CREATE TABLE IF NOT EXISTS byai.byai_connector_info
-(
-    connector_id   BIGINT       NOT NULL PRIMARY KEY,
-    connector_code VARCHAR(64)  NOT NULL,
-    connector_name VARCHAR(128) NOT NULL,
-    icon_url       VARCHAR(512),
-    description    TEXT,
-    connector_type VARCHAR(32)  NOT NULL,
-    provider_code  VARCHAR(64),
-    skill_code     VARCHAR(64),
-    auth_mode      VARCHAR(32),
-    auth_config    VARCHAR(4096),
-    request_config VARCHAR(4096),
-    sort           INT                   DEFAULT 0,
-    status_cd      VARCHAR(3)   NOT NULL DEFAULT '00A',
-    create_by      VARCHAR(64),
-    create_time    TIMESTAMP    NOT NULL DEFAULT NOW(),
-    update_time    TIMESTAMP
-);
-
--- connector_code 保证平台连接器编码唯一；状态与排序联合索引服务连接器列表查询。
-CREATE UNIQUE INDEX IF NOT EXISTS uk_byai_connector_info_code
-    ON byai.byai_connector_info (connector_code);
-
-CREATE INDEX IF NOT EXISTS idx_byai_connector_info_status_sort
-    ON byai.byai_connector_info (status_cd, sort, create_time);
-
-COMMENT ON TABLE byai.byai_connector_info IS '连接器基础元信息（平台连接器模板）';
-COMMENT ON COLUMN byai.byai_connector_info.connector_id IS '主键，Long类型连接器ID，业务层生成';
-COMMENT ON COLUMN byai.byai_connector_info.connector_code IS '连接器业务编码，全局唯一';
-COMMENT ON COLUMN byai.byai_connector_info.connector_name IS '连接器展示名称';
-COMMENT ON COLUMN byai.byai_connector_info.icon_url IS '连接器图标地址';
-COMMENT ON COLUMN byai.byai_connector_info.description IS '连接器功能简介';
-COMMENT ON COLUMN byai.byai_connector_info.connector_type IS '连接器类型：SYSTEM=系统内置，CUSTOM=自定义连接器';
-COMMENT ON COLUMN byai.byai_connector_info.provider_code IS '授权 Provider 路由编码';
-COMMENT ON COLUMN byai.byai_connector_info.skill_code IS 'OpenClaw Skill 路由编码';
-COMMENT ON COLUMN byai.byai_connector_info.auth_mode IS '授权方式：NONE、OAUTH2、AK_SK、PASSWORD、TOKEN、DEVICE_FLOW、CLI_INIT，允许为空';
-COMMENT ON COLUMN byai.byai_connector_info.auth_config IS '连接器通用授权模板配置，JSON字符串';
-COMMENT ON COLUMN byai.byai_connector_info.request_config IS '连接器公共请求配置，JSON字符串';
-COMMENT ON COLUMN byai.byai_connector_info.sort IS '前端页面排序权重';
-COMMENT ON COLUMN byai.byai_connector_info.status_cd IS '状态编码：00A=有效，00X=无效';
-COMMENT ON COLUMN byai.byai_connector_info.create_by IS '创建人标识';
-COMMENT ON COLUMN byai.byai_connector_info.create_time IS '创建时间，新增自动填充';
-COMMENT ON COLUMN byai.byai_connector_info.update_time IS '更新时间，新增不赋值为NULL，更新时手动填充';
+-- ========== V0.3.1 ByClaw Super 结构（同步已应用版本） ==========
+-- ByClaw Super consolidated PostgreSQL/OpenGauss schema.
+-- Source: byclaw-super/packages/storage-postgres/src/migrations.ts (versions 1-9)
+-- Plus the manually managed Agent capability-card table used by ByClaw Super/BE.
+-- Target schema follows the repository default. Change "byai" consistently if DB_SCHEMA differs.
 
 
--- 用户连接器授权绑定记录：保存连接开关与授权状态，CLI 真实凭证仍存放在用户 native-home。
-CREATE TABLE IF NOT EXISTS byai.byai_connector_auth
-(
-    auth_id         BIGINT      NOT NULL PRIMARY KEY,
-    user_id         VARCHAR(64) NOT NULL,
-    connector_id    BIGINT      NOT NULL,
-    auth_name       VARCHAR(128),
-    auth_mode       VARCHAR(32),
-    auth_credential TEXT,
-    expire_time     TIMESTAMP,
-    enable_flag     CHAR(1)     NOT NULL DEFAULT 'N',
-    status_cd       VARCHAR(3)  NOT NULL DEFAULT '00A',
-    last_sync_time  TIMESTAMP,
-    create_by       VARCHAR(64),
-    create_time     TIMESTAMP   NOT NULL DEFAULT NOW(),
-    update_time     TIMESTAMP
-);
+CREATE SCHEMA IF NOT EXISTS byai;
+SET search_path TO byai, public;
 
--- 为兼容可能已存在的表，外键通过系统目录检查后再创建。
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1
-        FROM pg_constraint
-        WHERE conname = 'fk_byai_connector_auth_connector'
-    ) THEN
-        ALTER TABLE byai.byai_connector_auth
-            ADD CONSTRAINT fk_byai_connector_auth_connector
-                FOREIGN KEY (connector_id)
-                    REFERENCES byai.byai_connector_info (connector_id);
-    END IF;
-END
-$$;
+CREATE TABLE IF NOT EXISTS byai_super_schema_migrations (
+                                                            version integer PRIMARY KEY,
+                                                            name text NOT NULL,
+                                                            applied_at timestamptz NOT NULL DEFAULT now()
+    );
 
--- 普通索引加速按用户、连接器、状态和有效期查询授权记录。
-CREATE INDEX IF NOT EXISTS idx_byai_connector_auth_user_connector
-    ON byai.byai_connector_auth (user_id, connector_id, status_cd, enable_flag, expire_time);
+CREATE TABLE IF NOT EXISTS byai_super_sessions (
+                                                   id uuid PRIMARY KEY,
+                                                   owner_version smallint NOT NULL DEFAULT 1,
+                                                   user_code text NOT NULL,
+                                                   tenant_id text NULL,
+                                                   namespace text NULL,
+                                                   user_name text NULL,
+                                                   status text NOT NULL DEFAULT 'ACTIVE',
+                                                   context_revision bigint NOT NULL DEFAULT 0,
+                                                   created_at timestamptz NOT NULL,
+                                                   updated_at timestamptz NOT NULL,
+                                                   archived_at timestamptz NULL,
+                                                   session_context jsonb NOT NULL DEFAULT '{"schemaVersion":1}'::jsonb,
+                                                   session_context_version bigint NOT NULL DEFAULT 1,
+                                                   CONSTRAINT sessions_owner_v1 CHECK (
+                                                   owner_version <> 1 OR (tenant_id IS NULL AND namespace IS NULL)
+    ),
+    CONSTRAINT sessions_context_version_positive CHECK (session_context_version > 0)
+    );
 
--- 创建有效授权唯一索引前，先按“可用优先、最近更新优先”保留一条记录并软删除其余历史重复项。
-WITH ranked_active_authorizations AS (
-    SELECT auth_id,
-           ROW_NUMBER() OVER (
-               PARTITION BY user_id, connector_id
-                        ORDER BY CASE WHEN enable_flag = 'Y' THEN 0 ELSE 1 END ASC,
-                        update_time DESC NULLS LAST,
-                        create_time DESC NULLS LAST,
-                        auth_id DESC NULLS LAST
-           ) AS row_num
-    FROM byai.byai_connector_auth
-    WHERE status_cd = '00A'
-)
-UPDATE byai.byai_connector_auth AS duplicate_auth
-SET status_cd = '00X',
-    enable_flag = 'N',
-    update_time = CURRENT_TIMESTAMP
-FROM ranked_active_authorizations AS ranked
-WHERE duplicate_auth.auth_id = ranked.auth_id
-  AND ranked.row_num > 1;
+CREATE INDEX IF NOT EXISTS sessions_owner_updated_idx
+    ON byai_super_sessions(owner_version, user_code, updated_at DESC);
 
--- 部分唯一索引保证升级后同一用户、同一连接器最多只有一条有效授权记录。
-CREATE UNIQUE INDEX IF NOT EXISTS uk_byai_connector_auth_active_user_connector
-    ON byai.byai_connector_auth (user_id, connector_id)
-    WHERE status_cd = '00A';
+CREATE TABLE IF NOT EXISTS byai_super_runs (
+                                               id uuid PRIMARY KEY,
+                                               session_id uuid NOT NULL REFERENCES byai_super_sessions(id) ON DELETE CASCADE,
+    input text NOT NULL,
+    agent_snapshot jsonb NOT NULL,
+    status text NOT NULL,
+    base_context_revision bigint NOT NULL DEFAULT 0,
+    attempt_no integer NOT NULL DEFAULT 0,
+    execution_stage text NOT NULL DEFAULT 'QUEUED',
+    lease_fencing_token bigint NULL,
+    final_answer text NULL,
+    error_code text NULL,
+    error_message text NULL,
+    version bigint NOT NULL DEFAULT 0,
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL,
+    started_at timestamptz NULL,
+    finished_at timestamptz NULL,
+    thinking_level text NOT NULL DEFAULT 'off',
+    attachments jsonb NOT NULL DEFAULT '[]'::jsonb,
+    ingress_context jsonb NULL,
+    CONSTRAINT runs_thinking_level_check
+    CHECK (thinking_level IN ('off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'))
+    );
 
-COMMENT ON TABLE byai.byai_connector_auth IS '用户连接器授权绑定记录';
-COMMENT ON COLUMN byai.byai_connector_auth.auth_id IS '主键，Long类型授权记录ID，业务层生成';
-COMMENT ON COLUMN byai.byai_connector_auth.user_id IS '归属用户ID';
-COMMENT ON COLUMN byai.byai_connector_auth.connector_id IS '关联byai.byai_connector_info.connector_id';
-COMMENT ON COLUMN byai.byai_connector_auth.auth_name IS '用户自定义授权账号别名';
-COMMENT ON COLUMN byai.byai_connector_auth.auth_mode IS '授权方式（冗余，与连接器模板保持一致）：NONE、OAUTH2、AK_SK、PASSWORD、TOKEN、DEVICE_FLOW、CLI_INIT，允许为空';
-COMMENT ON COLUMN byai.byai_connector_auth.auth_credential IS '加密后的授权凭证JSON，禁止明文存储密钥';
-COMMENT ON COLUMN byai.byai_connector_auth.expire_time IS '凭证过期时间';
-COMMENT ON COLUMN byai.byai_connector_auth.enable_flag IS '连接启用标识：Y=开启连接，N=关闭连接，新建默认关闭';
-COMMENT ON COLUMN byai.byai_connector_auth.status_cd IS '状态编码：00A=有效，00X=无效（软删除）';
-COMMENT ON COLUMN byai.byai_connector_auth.last_sync_time IS '凭证最后同步刷新时间';
-COMMENT ON COLUMN byai.byai_connector_auth.create_by IS '创建人标识';
-COMMENT ON COLUMN byai.byai_connector_auth.create_time IS '创建时间，新增自动填充';
-COMMENT ON COLUMN byai.byai_connector_auth.update_time IS '更新时间，新增不赋值为NULL，更新时手动填充';
+CREATE INDEX IF NOT EXISTS runs_session_created_idx
+    ON byai_super_runs(session_id, created_at, id);
 
+CREATE INDEX IF NOT EXISTS runs_claim_idx
+    ON byai_super_runs(status, created_at)
+    WHERE status IN (
+    'CREATED', 'QUEUED', 'RUNNING', 'WAITING_AGENT', 'WAITING_USER',
+    'SYNTHESIZING', 'CANCELLING'
+    );
 
--- 连接器 Runtime Manifest 模板与用户系统托管快照字段。
--- 使用临时辅助函数兼容不同历史库结构：字段存在时跳过，不覆盖已有数据。
-CREATE OR REPLACE FUNCTION byai.add_column_if_missing(
-    p_schema_name TEXT,
-    p_table_name TEXT,
-    p_column_name TEXT,
-    p_column_definition TEXT
-) RETURNS VOID AS $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1
-        FROM information_schema.columns
-        WHERE table_schema = p_schema_name
-          AND table_name = p_table_name
-          AND column_name = p_column_name
-    ) THEN
-        EXECUTE 'ALTER TABLE ' || quote_ident(p_schema_name) || '.' || quote_ident(p_table_name)
-            || ' ADD COLUMN ' || quote_ident(p_column_name) || ' ' || p_column_definition;
-    END IF;
-END;
-$$ LANGUAGE plpgsql;
+CREATE TABLE IF NOT EXISTS byai_super_delegations (
+                                                      id uuid PRIMARY KEY,
+                                                      run_id uuid NOT NULL REFERENCES byai_super_runs(id) ON DELETE CASCADE,
+    agent_id text NOT NULL,
+    connector_id text NOT NULL,
+    task text NOT NULL,
+    expected_output text NULL,
+    status text NOT NULL,
+    external_ref jsonb NULL,
+    connector_cursor text NULL,
+    result jsonb NULL,
+    error text NULL,
+    partial_output text NULL,
+    agent_name text NULL,
+    version bigint NOT NULL DEFAULT 0,
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL,
+    started_at timestamptz NULL,
+    finished_at timestamptz NULL
+    );
 
--- 平台连接器保存规范化 Runtime Manifest；用户参数增加来源类型与连接器业务标识。
-SELECT byai.add_column_if_missing('byai', 'byai_connector_info', 'runtime_manifest', 'TEXT');
-SELECT byai.add_column_if_missing('byai', 'byai_connector_info', 'skill_code', 'VARCHAR(64)');
-SELECT byai.add_column_if_missing(
-    'byai',
-    'po_user_private_param',
-    'param_source',
-    'VARCHAR(32) NOT NULL DEFAULT ''USER'''
-);
-SELECT byai.add_column_if_missing('byai', 'po_user_private_param', 'source_ref', 'VARCHAR(128)');
+CREATE INDEX IF NOT EXISTS delegations_run_created_idx
+    ON byai_super_delegations(run_id, created_at, id);
 
-DROP FUNCTION byai.add_column_if_missing(TEXT, TEXT, TEXT, TEXT);
+CREATE TABLE IF NOT EXISTS byai_super_run_events (
+                                                     run_id uuid NOT NULL REFERENCES byai_super_runs(id) ON DELETE CASCADE,
+    event_id bigint NOT NULL,
+    timestamp timestamptz NOT NULL,
+    type text NOT NULL,
+    data jsonb NOT NULL,
+    PRIMARY KEY (run_id, event_id)
+    );
 
--- 同一用户、同一连接器可以保存多条环境参数，但同一参数名只能有一条未删除记录。
-DROP INDEX IF EXISTS byai.uk_po_user_private_param_connector;
-DROP INDEX IF EXISTS byai.uk_po_user_private_param_connector_null_ref;
+CREATE TABLE IF NOT EXISTS byai_super_pi_sessions (
+                                                      session_id uuid PRIMARY KEY REFERENCES byai_super_sessions(id) ON DELETE CASCADE,
+    pi_session_id text NOT NULL,
+    pi_sdk_version text NOT NULL,
+    session_format_version integer NOT NULL,
+    header jsonb NOT NULL,
+    active_leaf_id text NULL,
+    revision bigint NOT NULL,
+    entry_count bigint NOT NULL,
+    content_bytes bigint NOT NULL,
+    checksum text NOT NULL,
+    model_provider text NULL,
+    model_id text NULL,
+    updated_at timestamptz NOT NULL
+    );
 
-CREATE UNIQUE INDEX IF NOT EXISTS uk_po_user_private_param_connector
-    ON byai.po_user_private_param (user_id, param_source, source_ref, param_key)
-    WHERE delete_flag = '0' AND param_source = 'CONNECTOR' AND source_ref IS NOT NULL;
+CREATE TABLE IF NOT EXISTS byai_super_pi_session_entries (
+                                                             session_id uuid NOT NULL REFERENCES byai_super_sessions(id) ON DELETE CASCADE,
+    seq bigint NOT NULL,
+    entry_id text NOT NULL,
+    parent_id text NULL,
+    entry_type text NOT NULL,
+    entry_json jsonb NOT NULL,
+    visibility text NOT NULL,
+    run_id uuid NULL REFERENCES byai_super_runs(id) ON DELETE SET NULL,
+    attempt_no integer NULL,
+    created_at timestamptz NOT NULL,
+    PRIMARY KEY (session_id, seq),
+    UNIQUE (session_id, entry_id),
+    CONSTRAINT pi_entry_visibility CHECK (visibility IN ('COMMITTED', 'PENDING'))
+    );
 
-CREATE UNIQUE INDEX IF NOT EXISTS uk_po_user_private_param_connector_null_ref
-    ON byai.po_user_private_param (user_id, param_source, param_key)
-    WHERE delete_flag = '0' AND param_source = 'CONNECTOR' AND source_ref IS NULL;
+CREATE INDEX IF NOT EXISTS pi_entries_run_attempt_idx
+    ON byai_super_pi_session_entries(run_id, attempt_no, visibility);
 
-COMMENT ON COLUMN byai.byai_connector_info.runtime_manifest IS '连接器最新 Runtime Manifest 模板，规范化完整 JSON';
-COMMENT ON COLUMN byai.po_user_private_param.param_source IS '参数来源：USER用户维护，CONNECTOR系统托管连接器环境参数';
-COMMENT ON COLUMN byai.po_user_private_param.source_ref IS '系统托管参数来源业务标识，连接器环境参数使用 connector_code';
+CREATE TABLE IF NOT EXISTS byai_super_ingress_session_bindings (
+                                                                   source text NOT NULL,
+                                                                   owner_version smallint NOT NULL DEFAULT 1,
+                                                                   user_code text NOT NULL,
+                                                                   tenant_id text NULL,
+                                                                   namespace text NULL,
+                                                                   external_session_id text NOT NULL,
+                                                                   session_id uuid NOT NULL REFERENCES byai_super_sessions(id) ON DELETE CASCADE,
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL,
+    PRIMARY KEY (source, owner_version, user_code, external_session_id),
+    CONSTRAINT ingress_binding_owner_v1 CHECK (
+                                                  owner_version <> 1 OR (tenant_id IS NULL AND namespace IS NULL)
+    )
+    );
 
--- ========== V0.3.2 (merged at 2026-08-18 16:19:56) ==========
+CREATE TABLE IF NOT EXISTS byai_super_session_execution_leases (
+                                                                   session_id uuid PRIMARY KEY REFERENCES byai_super_sessions(id) ON DELETE CASCADE,
+    owner_instance_id text NOT NULL,
+    fencing_token bigint NOT NULL,
+    lease_expires_at timestamptz NOT NULL,
+    heartbeat_at timestamptz NOT NULL,
+    run_id uuid NOT NULL REFERENCES byai_super_runs(id) ON DELETE CASCADE,
+    attempt_no integer NOT NULL
+    );
+
+CREATE INDEX IF NOT EXISTS session_leases_expiry_idx
+    ON byai_super_session_execution_leases(lease_expires_at);
+
+-- Final shape after migration v3. The encrypted credential columns from v1 no longer exist.
+CREATE TABLE IF NOT EXISTS byai_super_run_execution_credentials (
+                                                                    run_id uuid PRIMARY KEY REFERENCES byai_super_runs(id) ON DELETE CASCADE,
+    credential text NOT NULL,
+    expires_at timestamptz NOT NULL,
+    created_at timestamptz NOT NULL
+    );
+
+CREATE INDEX IF NOT EXISTS run_credentials_expiry_idx
+    ON byai_super_run_execution_credentials(expires_at);
+
+-- Manually managed capability-card table. It is used by the repository but is not in migrations.ts.
+CREATE TABLE IF NOT EXISTS byai_super_agent_capability_cards (
+                                                                 system_code varchar(64) NOT NULL,
+    agent_id varchar(200) NOT NULL,
+    agent_code varchar(128),
+    agent_name varchar(200),
+    schema_version varchar(64) NOT NULL,
+    generator_version varchar(32) NOT NULL,
+    source_version varchar(128),
+    source_fingerprint varchar(128) NOT NULL,
+    card text NOT NULL,
+    routing_text varchar(1024),
+    quality text,
+    status varchar(16) NOT NULL DEFAULT 'ACTIVE',
+    version integer NOT NULL DEFAULT 0,
+    created_at timestamp NOT NULL DEFAULT now(),
+    updated_at timestamp NOT NULL DEFAULT now(),
+    CONSTRAINT pk_byai_super_agent_capability_cards PRIMARY KEY (system_code, agent_id)
+    );
+
+CREATE INDEX IF NOT EXISTS idx_byai_super_agent_capability_cards_fingerprint
+    ON byai_super_agent_capability_cards(source_fingerprint);
+
+CREATE INDEX IF NOT EXISTS idx_byai_super_agent_capability_cards_status
+    ON byai_super_agent_capability_cards(status);
+
+-- ========== V0.3.2 (manually synchronized at 2026-08-27) ==========
 -- V0.3.2 增量 DDL：增加 refresh-aware 连接器凭证生命周期元数据。
 -- CLI 管理的 access token、refresh token 仍只保存在用户隔离 native-home，本迁移不保存任何 token 值。
 SET search_path TO byai;
+
+-- 补偿部分历史环境未执行 V0.2.0 后续字段扩容的问题；机器人渠道配置为 JSON，可能超过 500 字符。
+ALTER TABLE byai.ss_res_ext_dig_employee
+    ALTER COLUMN machine_channel TYPE text;
 
 CREATE OR REPLACE FUNCTION byai.add_column_if_missing(
     p_schema_name TEXT,
@@ -2068,14 +2095,17 @@ $$ LANGUAGE plpgsql;
 
 SELECT byai.add_column_if_missing('byai', 'byai_connector_auth', 'access_expire_time', 'TIMESTAMP');
 SELECT byai.add_column_if_missing('byai', 'byai_connector_auth', 'refresh_expire_time', 'TIMESTAMP');
-SELECT byai.add_column_if_missing('byai', 'byai_connector_auth', 'credential_state', 'VARCHAR(32) DEFAULT ''UNKNOWN''');
-SELECT byai.add_column_if_missing('byai', 'byai_connector_auth', 'renewal_mode', 'VARCHAR(32) DEFAULT ''NONE''');
+SELECT byai.add_column_if_missing(
+    'byai', 'byai_connector_auth', 'credential_state',
+    'VARCHAR(32) DEFAULT ''UNKNOWN'' NOT NULL'
+);
+SELECT byai.add_column_if_missing(
+    'byai', 'byai_connector_auth', 'renewal_mode',
+    'VARCHAR(32) DEFAULT ''NONE'' NOT NULL'
+);
 SELECT byai.add_column_if_missing('byai', 'byai_connector_auth', 'last_verified_at', 'TIMESTAMP');
 
 DROP FUNCTION byai.add_column_if_missing(TEXT, TEXT, TEXT, TEXT);
-
--- 说明：凭证状态回填（access_expire_time / credential_state / renewal_mode）已迁至 V0.3.2__dml.sql。
--- 新增列自带 DEFAULT，已有行在 ADD COLUMN 时即被填充，因此下方 SET NOT NULL 不依赖回填顺序。
 
 ALTER TABLE byai.byai_connector_auth
     ALTER COLUMN credential_state SET DEFAULT 'UNKNOWN';
@@ -2089,31 +2119,6 @@ ALTER TABLE byai.byai_connector_auth
 ALTER TABLE byai.byai_connector_auth
     ALTER COLUMN renewal_mode SET NOT NULL;
 
--- V0.3.1 的唯一索引可能在旧环境中已经被标记执行但实际未落库；本版本再次以幂等方式修复历史重复有效绑定。
-WITH ranked_active_authorizations AS (
-    SELECT auth_id,
-           ROW_NUMBER() OVER (
-               PARTITION BY user_id, connector_id
-               ORDER BY CASE WHEN enable_flag = 'Y' THEN 0 ELSE 1 END ASC,
-                        update_time DESC NULLS LAST,
-                        create_time DESC NULLS LAST,
-                        auth_id DESC NULLS LAST
-           ) AS row_num
-    FROM byai.byai_connector_auth
-    WHERE status_cd = '00A'
-)
-UPDATE byai.byai_connector_auth AS duplicate_auth
-SET status_cd = '00X',
-    enable_flag = 'N',
-    update_time = CURRENT_TIMESTAMP
-FROM ranked_active_authorizations AS ranked
-WHERE duplicate_auth.auth_id = ranked.auth_id
-  AND ranked.row_num > 1;
-
-CREATE UNIQUE INDEX IF NOT EXISTS uk_byai_connector_auth_active_user_connector
-    ON byai.byai_connector_auth (user_id, connector_id)
-    WHERE status_cd = '00A';
-
 CREATE INDEX IF NOT EXISTS idx_byai_connector_auth_user_state
     ON byai.byai_connector_auth (user_id, connector_id, status_cd, enable_flag, credential_state);
 
@@ -2124,60 +2129,37 @@ COMMENT ON COLUMN byai.byai_connector_auth.credential_state IS '凭证状态：R
 COMMENT ON COLUMN byai.byai_connector_auth.renewal_mode IS '续期模式：REFRESH_TOKEN、CREDENTIAL_REISSUE、PROBE_ONLY、NONE';
 COMMENT ON COLUMN byai.byai_connector_auth.last_verified_at IS 'Provider 最近一次权威凭证验证时间';
 
--- Artifact publication metadata. Object bytes remain in the configured storage backend.
-SET search_path TO byai;
+-- 钉钉外部用户绑定去重，并保证同一来源、同一 union_id 只有一条绑定记录。
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM byai.po_user_external_system
+        WHERE union_id IS NOT NULL
+          AND btrim(union_id) <> ''
+        GROUP BY source_type, union_id
+        HAVING COUNT(DISTINCT COALESCE(user_id::text, '<null>')) > 1
+    ) THEN
+        RAISE EXCEPTION
+            'Conflicting po_user_external_system bindings must be reviewed before adding the unique index';
+    END IF;
 
-CREATE TABLE IF NOT EXISTS byai.byai_artifact (
-    artifact_id        VARCHAR(36)    NOT NULL,
-    owner_user_id      BIGINT         NOT NULL,
-    owner_user_code    VARCHAR(100)   NOT NULL,
-    status             VARCHAR(16)    NOT NULL,
-    kind               VARCHAR(20),
-    storage_type       VARCHAR(32)    NOT NULL,
-    storage_root       VARCHAR(500)   NOT NULL,
-    storage_prefix     VARCHAR(1000)  NOT NULL,
-    original_key       VARCHAR(1200)  NOT NULL,
-    content_prefix     VARCHAR(1200)  NOT NULL,
-    original_name      VARCHAR(500)   NOT NULL,
-    display_name       VARCHAR(500),
-    entry_point        VARCHAR(1000),
-    content_type       VARCHAR(200),
-    file_size          BIGINT         NOT NULL DEFAULT 0,
-    expanded_size      BIGINT         NOT NULL DEFAULT 0,
-    sha256             VARCHAR(64),
-    access_key_hash    VARCHAR(64)    NOT NULL,
-    warnings_json      TEXT,
-    expires_at         TIMESTAMP      NOT NULL,
-    create_time        TIMESTAMP      NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    update_time        TIMESTAMP      NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT pk_byai_artifact PRIMARY KEY (artifact_id)
-);
+    DELETE FROM byai.po_user_external_system AS binding
+    USING (
+        SELECT ctid,
+               ROW_NUMBER() OVER (
+                   PARTITION BY source_type, union_id, user_id
+                   ORDER BY binding_time DESC NULLS LAST, id DESC NULLS LAST
+               ) AS duplicate_rank
+        FROM byai.po_user_external_system
+        WHERE union_id IS NOT NULL
+          AND btrim(union_id) <> ''
+    ) AS duplicate
+    WHERE binding.ctid = duplicate.ctid
+      AND duplicate.duplicate_rank > 1;
+END;
+$$;
 
-CREATE INDEX IF NOT EXISTS idx_byai_artifact_owner
-    ON byai.byai_artifact (owner_user_id, create_time DESC);
-
-CREATE INDEX IF NOT EXISTS idx_byai_artifact_cleanup
-    ON byai.byai_artifact (status, expires_at);
-
-COMMENT ON TABLE byai.byai_artifact IS '限时预览与下载Artifact元数据';
-COMMENT ON COLUMN byai.byai_artifact.access_key_hash IS '不记名访问密钥的SHA-256，仅上传响应返回原始密钥';
-COMMENT ON COLUMN byai.byai_artifact.storage_type IS '创建时实际使用的存储后端，切换默认后仍用于读取历史Artifact';
-
--- General-purpose JSON records persisted by published HTML Artifacts.
-CREATE TABLE IF NOT EXISTS byai.artifact_data_record (
-    id               VARCHAR(36)   NOT NULL,
-    artifact_id      VARCHAR(36)   NOT NULL,
-    collection_name  VARCHAR(64)   NOT NULL,
-    record_key       VARCHAR(36)   NOT NULL,
-    data_json        JSONB         NOT NULL,
-    version          INTEGER       NOT NULL DEFAULT 1,
-    create_time      TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    update_time      TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT pk_artifact_data_record PRIMARY KEY (id),
-    CONSTRAINT uk_artifact_data_record_key UNIQUE (artifact_id, record_key)
-);
-
-CREATE INDEX IF NOT EXISTS idx_artifact_data_record_list
-    ON byai.artifact_data_record (artifact_id, collection_name, create_time DESC);
-
-COMMENT ON TABLE byai.artifact_data_record IS '已发布HTML Artifact持久化的通用JSON数据';
+CREATE UNIQUE INDEX IF NOT EXISTS uk_po_user_external_system_source_union
+    ON byai.po_user_external_system (source_type, union_id)
+    WHERE union_id IS NOT NULL AND btrim(union_id) <> '';

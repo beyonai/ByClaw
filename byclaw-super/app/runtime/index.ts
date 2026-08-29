@@ -110,8 +110,7 @@ function buildRunServiceOptions(config: AppConfig, database: PostgresDatabase) {
     maxConcurrentRuns: config.worker.maxConcurrency,
     leaderCacheMaxEntries: config.piSessionCacheMaxEntries,
     leaderCacheIdleTtlMs: config.piSessionCacheIdleTtlMs,
-    userInteractionTimeoutMs: config.runUserInteractionTimeoutMs,
-    credentialCleanupIntervalMs: config.runCredentialCleanupIntervalMs,
+    callbackTimeoutEnabled: config.delegationTimeouts.callbackMs > 0,
   };
 }
 
@@ -304,7 +303,7 @@ export async function createApplication(config = loadConfig()): Promise<Applicat
   });
 
   // 4) Run 流水线：RunService（快照授权、调度 Leader）+ 入站鉴权与 Run 创建。
-  //    附件读取边界：按 fileId 经 BE 下载，凭 Run 短期凭证鉴权；契约见 .dev/attachments-be-read-contract.md。
+  //    附件读取边界：按 fileId 经 BE 下载，凭 Run 执行凭证鉴权；契约见 .dev/attachments-be-read-contract.md。
   const attachmentResolver = new ByAiAttachmentResolver({
     ...config.byClawBe,
     endpointResolver,
@@ -337,7 +336,6 @@ export async function createApplication(config = loadConfig()): Promise<Applicat
     runService,
     createBeyondTokenVerifier(config.auth),
     agentCatalog,
-    config.runCredentialMaxTtlMs,
     groupChatContexts,
     ingressLogger,
     resourceModels,

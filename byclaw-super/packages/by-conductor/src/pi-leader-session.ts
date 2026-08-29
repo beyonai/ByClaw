@@ -104,13 +104,6 @@ export class PiLeaderSession implements LeaderSession {
       parameters: Type.Object({
         agentId: Type.String({ description: "Exact id from the current authorized agent list" }),
         task: Type.String({ description: "Self-contained task for the specialist" }),
-        taskPosition: Type.Optional(
-          Type.Integer({
-            minimum: 1,
-            description:
-              "Position of the matching task in the active task plan. Required when an active task plan exists.",
-          }),
-        ),
         expectedOutput: Type.Optional(Type.String({ description: "Desired result format" })),
         attachmentIds: Type.Optional(
           Type.Array(Type.String(), {
@@ -120,25 +113,16 @@ export class PiLeaderSession implements LeaderSession {
         ),
       }),
       // 将 Pi 工具调用桥接到当前 Run 注入的 DelegationService 回调。
-      execute: async (toolCallId, params, signal) => {
+      execute: async (_toolCallId, params, signal) => {
         const active = wrapper?.activeInput;
         if (!active) {
           throw new Error("No active Leader run is available for delegation");
         }
-        if (active.activeTaskPlan?.status === "ACTIVE" && params.taskPosition === undefined) {
-          throw new Error(
-            "taskPosition is required when delegating work for an active task plan",
-          );
-        }
         let result;
         try {
           result = await active.delegate({
-            toolCallId,
             agentId: params.agentId,
             task: params.task,
-            ...(params.taskPosition !== undefined
-              ? { taskPosition: params.taskPosition }
-              : {}),
             ...(params.expectedOutput ? { expectedOutput: params.expectedOutput } : {}),
             ...(params.attachmentIds !== undefined
               ? { attachmentIds: params.attachmentIds }
@@ -206,62 +190,101 @@ export class PiLeaderSession implements LeaderSession {
       name: UPDATE_TASK_PLAN_TOOL_NAME,
       label: "Update Task Plan",
       description:
-        "Create or replace the current execution task plan. Send the complete ordered task list every time progress changes. The system owns execution identity, plan identity, versions, and task IDs.",
+        "Create the current session task plan once, then report only the outcome of the current task. Session, plan, task, and version identifiers are resolved by the runtime.",
       promptSnippet:
         "Create and keep a structured task plan synchronized with actual execution progress.",
       executionMode: "sequential",
-      parameters: Type.Object({
-        title: Type.String({ minLength: 1, maxLength: 500 }),
-        explanation: Type.Optional(Type.String({ maxLength: 2000 })),
-        tasks: Type.Array(
-          Type.Object({
-            step: Type.String({ minLength: 1, maxLength: 1000 }),
-            description: Type.Optional(Type.String({ maxLength: 4000 })),
-            status: Type.Union([
-              Type.Literal("PENDING"),
-              Type.Literal("IN_PROGRESS"),
-              Type.Literal("COMPLETED"),
-              Type.Literal("FAILED"),
-              Type.Literal("SKIPPED"),
-              Type.Literal("CANCELLED"),
-            ]),
-            statusReason: Type.Optional(
-              Type.Object({
-                code: Type.String({ minLength: 1, maxLength: 64 }),
-                message: Type.Optional(Type.String({ maxLength: 500 })),
-              }),
+      parameters: Type.Object(
+        {
+          action: Type.Union([
+            Type.Literal("create"),
+            Type.Literal("complete_current"),
+            Type.Literal("fail_current"),
+            Type.Literal("skip_current"),
+          ]),
+          title: Type.Optional(Type.String({ minLength: 1, maxLength: 500 })),
+          explanation: Type.Optional(Type.String({ maxLength: 2000 })),
+          tasks: Type.Optional(
+            Type.Array(
+              Type.Object(
+                {
+                  step: Type.String({ minLength: 1, maxLength: 1000 }),
+                  description: Type.Optional(Type.String({ maxLength: 4000 })),
+                },
+                { additionalProperties: false },
+              ),
+              { minItems: 1, maxItems: 100 },
             ),
-          }),
-          { minItems: 1, maxItems: 100 },
-        ),
-      }),
+          ),
+          reasonCode: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
+          reasonMessage: Type.Optional(Type.String({ maxLength: 500 })),
+        },
+        { additionalProperties: false },
+      ),
       execute: async (toolCallId, params, signal) => {
         const active = wrapper?.activeInput;
         if (!active?.updateTaskPlan) {
           throw new Error("task plan updates are not available for this run");
         }
-        const snapshot = await active.updateTaskPlan({
+        if (params.action === "create" && (!params.title || !params.tasks)) {
+          throw new Error("updateTaskPlan action=create requires title and tasks");
+        }
+        if (params.action === "create" && (params.reasonCode || params.reasonMessage)) {
+          throw new Error("task outcome reasons cannot be supplied with action=create");
+        }
+        if (params.action !== "create" && (params.title || params.tasks || params.explanation)) {
+          throw new Error("task definitions can only be supplied with action=create");
+        }
+        if (params.reasonMessage && !params.reasonCode) {
+          throw new Error("reasonMessage requires reasonCode");
+        }
+        const result = await active.updateTaskPlan({
           toolCallId,
-          update: {
-            title: params.title,
-            ...(params.explanation ? { explanation: params.explanation } : {}),
-            tasks: params.tasks.map((task) => ({
-              step: task.step,
-              ...(task.description ? { description: task.description } : {}),
-              status: task.status,
-              ...(task.statusReason ? { statusReason: task.statusReason } : {}),
-            })),
-          },
+          command:
+            params.action === "create"
+              ? {
+                  action: "create",
+                  title: params.title!,
+                  ...(params.explanation ? { explanation: params.explanation } : {}),
+                  tasks: params.tasks!.map((task) => ({
+                    step: task.step,
+                    ...(task.description ? { description: task.description } : {}),
+                  })),
+                }
+              : {
+                  action: params.action,
+                  ...(params.reasonCode
+                    ? {
+                        statusReason: {
+                          code: params.reasonCode,
+                          ...(params.reasonMessage ? { message: params.reasonMessage } : {}),
+                        },
+                      }
+                    : {}),
+                },
           ...(signal ? { signal } : {}),
         });
-        // before_agent_start 每轮都会读取 activeInput；原位替换后下一次推理立即看到最新计划。
-        active.activeTaskPlan = snapshot;
+        if (result.ok) {
+          active.activeTaskPlan = result.plan;
+        } else if (result.currentPlan) {
+          active.activeTaskPlan = result.currentPlan;
+        }
+        const modelResult = result.ok
+          ? { ok: true, plan: toTaskPlanModelView(result.plan) }
+          : {
+              ok: false,
+              error: result.error,
+              ...(result.currentPlan
+                ? { currentPlan: toTaskPlanModelView(result.currentPlan) }
+                : {}),
+            };
         return {
-          content: [
-            { type: "text", text: JSON.stringify(toTaskPlanModelView(snapshot)) },
-          ],
+          content: [{ type: "text", text: JSON.stringify(modelResult) }],
           details: {
-            status: snapshot.status,
+            ok: result.ok,
+            ...(result.ok
+              ? { status: result.plan.status }
+              : { errorCode: result.error.code }),
           },
         };
       },

@@ -2,7 +2,11 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Empty, Spin, message } from 'antd';
 import { getMimeType } from '@/components/QueryInput/components/FileBrowserEntry/components/FileBrowserPanel/constants';
 import fileSiderStyles from '@/layout/sider/components/FileSiderPanel/index.module.less';
-import { getFileType } from '@/layout/sider/components/FileSiderPanel/utils';
+import {
+  getPreviewFileType,
+  MAX_TEXT_PREVIEW_SIZE,
+  isTextPreviewFile,
+} from '@/layout/sider/components/FileSiderPanel/utils';
 import { downloadChatFileArtifact } from '@/service/chatFileArtifact';
 import { downloadResourceFileForPreview } from '@/service/file';
 import { downloadFile as downloadFileBrowserFile } from '@/service/fileBrowser';
@@ -133,6 +137,7 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
   const sourcePath = getFilePathFromUrl(path) || path;
   const previewFileUrl =
     fileUrl || (source === 'fileBrowser' && sourcePath ? getCommonFilePreviewUrl(sourcePath) : undefined);
+  const previewType = getPreviewFileType(fileName);
 
   const loadFileBrowserFile = useCallback(
     async (filePath: string) => {
@@ -261,6 +266,9 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
 
     void loadFile()
       .then((result) => {
+        if (isTextPreviewFile(fileName) && result.size > MAX_TEXT_PREVIEW_SIZE) {
+          throw new Error('文件过大，无法在线预览，请下载查看');
+        }
         if (active) setBlob(result);
       })
       .catch((error: any) => {
@@ -292,7 +300,7 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
         <React.Suspense fallback={null}>
           <PreViewFile
             data={blob}
-            type={getFileType(fileName)}
+            type={previewType}
             title={fileName}
             resolveMarkdownImage={previewFileUrl || (resourceId && sourcePath) ? resolveRelativeResource : undefined}
             resolveHtmlResource={previewFileUrl || (resourceId && sourcePath) ? resolveRelativeResource : undefined}

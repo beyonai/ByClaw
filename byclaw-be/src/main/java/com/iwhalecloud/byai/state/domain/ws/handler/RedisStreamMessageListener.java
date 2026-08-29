@@ -12,8 +12,8 @@ import org.springframework.data.redis.connection.stream.MapRecord;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.stream.StreamListener;
 import org.springframework.stereotype.Component;
-import io.micrometer.core.instrument.MeterRegistry;
 
+import com.iwhalecloud.byai.state.domain.chat.service.SessionStreamMetrics;
 import com.iwhalecloud.byai.state.domain.chat.service.SessionStreamManager;
 import com.iwhalecloud.byai.state.domain.chat.service.StreamAckFailureRegistry;
 import com.iwhalecloud.byai.state.domain.chat.service.StreamRecordProcessor;
@@ -63,32 +63,35 @@ public class RedisStreamMessageListener implements StreamListener<String, MapRec
     @Autowired
     private StreamAckFailureRegistry streamAckFailureRegistry;
 
-    @Autowired(required = false)
-    private MeterRegistry meterRegistry;
+    @Autowired
+    private SessionStreamMetrics sessionStreamMetrics;
 
     @Override
     public void onMessage(MapRecord<String, String, String> message) {
+        sessionStreamMetrics.recordReceived();
         try {
             StreamDispatchResult result = streamRecordProcessor.process(message);
             if (result.shouldAcknowledge()) {
                 if (acknowledge(message)) {
-                    incrementMetric("byclaw.session.stream.ack.success");
                     streamRecordProcessor.afterAcknowledge(result);
                 }
                 else {
-                    incrementMetric("byclaw.session.stream.ack.failure");
                     scheduleAckRetry(message, result, 1);
                 }
             }
             else {
-                incrementMetric(result == StreamDispatchResult.MISSING_CONTEXT
-                    ? "byclaw.session.stream.missing_context" : "byclaw.session.stream.pending");
+                if (result == StreamDispatchResult.MISSING_CONTEXT) {
+                    sessionStreamMetrics.recordMissingContext();
+                }
+                else {
+                    sessionStreamMetrics.recordPending();
+                }
                 logger.warn("Redis Stream 消息暂不 ACK, result: {}, stream: {}, messageId: {}",
                     result, message.getStream(), message.getId());
             }
         }
         catch (Exception e) {
-            incrementMetric("byclaw.session.stream.dispatch.error");
+            sessionStreamMetrics.recordDispatchError();
             logger.error("处理 Redis Stream 消息失败，将保留 pending, stream: {}, messageId: {}",
                 message.getStream(), message.getId(), e);
         }
@@ -119,18 +122,14 @@ public class RedisStreamMessageListener implements StreamListener<String, MapRec
             redisTemplate.opsForStream()
                 .acknowledge(message.getStream(), SessionStreamManager.CONSUMER_GROUP, message.getId());
             streamAckFailureRegistry.clear(message.getStream(), message.getId().getValue());
+            sessionStreamMetrics.recordAckSuccess();
             return true;
         }
         catch (Exception e) {
+            sessionStreamMetrics.recordAckFailure();
             logger.warn("ack Session Stream 消息失败, stream: {}, messageId: {}",
                 message.getStream(), message.getId(), e);
             return false;
-        }
-    }
-
-    private void incrementMetric(String name) {
-        if (meterRegistry != null) {
-            meterRegistry.counter(name).increment();
         }
     }
 }

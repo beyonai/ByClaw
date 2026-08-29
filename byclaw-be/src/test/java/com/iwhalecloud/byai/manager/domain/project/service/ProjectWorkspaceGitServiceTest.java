@@ -21,35 +21,72 @@ class ProjectWorkspaceGitServiceTest {
     Path tempDir;
 
     @Test
-    void resolvesOnlyWorktreesInsideTheRequestedSessionDirectory() throws Exception {
+    void resolvesProjectWorkspaceRepositoryForSession() throws Exception {
         long projectId = 203L;
         ProjectRepo workspace = workspaceRepo(projectId);
-        Path repository = tempDir.resolve("bucket/by/projects/203/repos/workspace");
-        Files.createDirectories(repository.resolve(".git"));
-        ProjectWorkspaceGitService service = service(workspace, repository,
-            "worktree " + repository + "\nHEAD abc\n\n"
-                + "worktree " + tempDir.resolve("bucket/by/.sessions/301/workspace") + "\nHEAD def\n");
+        Path projectRoot = tempDir.resolve("bucket/by/projects/203");
+        Path configuredPath = projectRoot.resolve("repos/workspace");
+        Files.createDirectories(projectRoot.resolve(".git"));
+        ProjectWorkspaceGitService service = service(workspace, configuredPath);
 
         Path worktree = service.resolveSessionWorktree(projectId, 301L).orElseThrow();
 
-        assertThat(worktree).isEqualTo(tempDir.resolve("bucket/by/.sessions/301/workspace"));
-        assertThat(service.toSandboxPath(worktree)).contains("/by/.sessions/301/workspace/");
-        assertThat(service.resolveSessionWorktree(projectId, 30L)).isEmpty();
+        assertThat(worktree).isEqualTo(projectRoot);
+        assertThat(service.toSandboxPath(worktree)).contains("/by/projects/203/");
+        assertThat(service.resolveSessionWorktree(projectId, 30L)).contains(projectRoot);
+        assertThat(service.resolveSessionWorktree(projectId, null)).isEmpty();
     }
 
-    private ProjectWorkspaceGitService service(ProjectRepo workspace, Path repository, String worktreeOutput) {
+    @Test
+    void resolvesOnlyConfiguredRepositoriesThatExistInWorkspaceGitmodules() throws Exception {
+        long projectId = 203L;
+        ProjectRepo workspace = workspaceRepo(projectId);
+        ProjectRepo codeRepo = codeRepo(projectId, 901L, "beyonai/byclaw-test");
+        ProjectRepo missingRepo = codeRepo(projectId, 902L, "beyonai/missing");
+        Path projectRoot = tempDir.resolve("bucket/by/projects/203");
+        Path configuredPath = projectRoot.resolve("repos/workspace");
+        Files.createDirectories(projectRoot.resolve(".git"));
+        Path submodule = projectRoot.resolve("beyonai/byclaw-test");
+        Files.createDirectories(submodule);
+        Files.writeString(submodule.resolve(".git"), "gitdir: ../../.git/modules/beyonai/byclaw-test\n");
+        Files.writeString(projectRoot.resolve(".gitmodules"), """
+            [submodule "beyonai/byclaw-test"]
+                path = beyonai/byclaw-test
+                url = https://github.com/beyonai/byclaw-test.git
+            """);
+        ProjectWorkspaceGitService service = service(List.of(workspace, codeRepo, missingRepo), workspace,
+            configuredPath);
+
+        List<ProjectWorkspaceGitService.ResolvedRepository> repositories = service.resolveRepositories(projectId);
+
+        assertThat(repositories).extracting(item -> item.repo().getRepoId())
+            .containsExactly(workspace.getRepoId(), codeRepo.getRepoId());
+        assertThat(repositories.get(1).path()).isEqualTo(submodule);
+    }
+
+    private ProjectWorkspaceGitService service(ProjectRepo workspace, Path repository) {
+        return service(List.of(workspace), workspace, repository);
+    }
+
+    private ProjectWorkspaceGitService service(List<ProjectRepo> repos, ProjectRepo workspace, Path repository) {
         ProjectRepoMapper repoMapper = mock(ProjectRepoMapper.class);
         ProjectInitService initService = mock(ProjectInitService.class);
-        GitCommandExecutor executor = mock(GitCommandExecutor.class);
-        when(repoMapper.selectList(any())).thenReturn(List.of(workspace));
+        when(repoMapper.selectList(any())).thenReturn(repos);
         when(initService.getProjectRepositoryPath(workspace)).thenReturn(repository);
-        when(executor.executeCommand(repository, "git", "worktree", "list", "--porcelain"))
-            .thenReturn(worktreeOutput);
         ProjectWorkspaceGitService service = new ProjectWorkspaceGitService();
         ReflectionTestUtils.setField(service, "projectRepoMapper", repoMapper);
         ReflectionTestUtils.setField(service, "projectInitService", initService);
-        ReflectionTestUtils.setField(service, "gitCommandExecutor", executor);
         return service;
+    }
+
+    private ProjectRepo codeRepo(long projectId, long repoId, String fullName) {
+        ProjectRepo repo = new ProjectRepo();
+        repo.setRepoId(repoId);
+        repo.setProjectId(projectId);
+        repo.setRepoType("code");
+        repo.setRepoFullName(fullName);
+        repo.setRepoUrl("https://github.com/" + fullName + ".git");
+        return repo;
     }
 
     private ProjectRepo workspaceRepo(long projectId) {

@@ -18,6 +18,7 @@ import com.iwhalecloud.byai.manager.dto.session.SessionUploadResult;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatInfo;
 import com.iwhalecloud.byai.state.domain.chat.dto.StopChatDto;
+import com.iwhalecloud.byai.state.domain.chat.service.ChatProcessContext;
 import com.iwhalecloud.byai.state.domain.chat.service.OutputStreamManager;
 import com.iwhalecloud.byai.state.domain.chat.service.RunningChatSnapshotService;
 import com.iwhalecloud.byai.state.domain.chat.service.RunningOutputStreamRegistry;
@@ -29,7 +30,13 @@ import com.iwhalecloud.byai.state.domain.ws.service.TaskPlanWebSocketPublisher;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 import com.iwhalecloud.byai.state.domain.session.service.SessionTitleService;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
+import com.alibaba.fastjson.JSONObject;
 import java.util.Date;
+import java.util.List;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -41,6 +48,8 @@ class AssistantChatApplicationServiceTest {
     private GatewayClient gatewayClient;
     private RunningOutputStreamRegistry runningOutputStreamRegistry;
     private RunningChatSnapshotService runningChatSnapshotService;
+    private OutputStreamManager outputStreamManager;
+    private ScriptService scriptService;
 
     private SessionService sessionService;
 
@@ -57,6 +66,8 @@ class AssistantChatApplicationServiceTest {
         gatewayClient = mock(GatewayClient.class);
         runningOutputStreamRegistry = mock(RunningOutputStreamRegistry.class);
         runningChatSnapshotService = mock(RunningChatSnapshotService.class);
+        outputStreamManager = mock(OutputStreamManager.class);
+        scriptService = mock(ScriptService.class);
         taskPlanApplicationService = mock(TaskPlanApplicationService.class);
         taskPlanWebSocketPublisher = mock(TaskPlanWebSocketPublisher.class);
         sessionService = mock(SessionService.class);
@@ -68,6 +79,8 @@ class AssistantChatApplicationServiceTest {
             runningOutputStreamRegistry);
         ReflectionTestUtils.setField(assistantChatApplicationService, "runningChatSnapshotService",
             runningChatSnapshotService);
+        ReflectionTestUtils.setField(assistantChatApplicationService, "outputStreamManager", outputStreamManager);
+        ReflectionTestUtils.setField(assistantChatApplicationService, "scriptService", scriptService);
         ReflectionTestUtils.setField(assistantChatApplicationService, "sessionService", sessionService);
         ReflectionTestUtils.setField(assistantChatApplicationService, "sessionTitleService", sessionTitleService);
         ReflectionTestUtils.setField(assistantChatApplicationService, "byaiSystemConfigService", byaiSystemConfigService);
@@ -98,9 +111,10 @@ class AssistantChatApplicationServiceTest {
         TaskPlanSnapshot cancelled = new TaskPlanSnapshot();
         cancelled.setStatus("CANCELLED");
         when(taskPlanApplicationService.requestCancellation(stopChatDto, "USER_STOPPED", "用户请求停止"))
-            .thenReturn(cancelling);
+            .thenReturn(List.of(cancelling));
         when(taskPlanApplicationService.confirmCancellation(stopChatDto, "USER_STOPPED", "用户已停止执行"))
-            .thenReturn(cancelled);
+            .thenReturn(List.of(cancelled));
+        when(scriptService.flushFromSnapshot(10L, 20L)).thenReturn(true);
 
         assistantChatApplicationService.stopChat(stopChatDto);
 
@@ -119,12 +133,27 @@ class AssistantChatApplicationServiceTest {
         stopChatDto.setSessionId(10L);
         stopChatDto.setTraceId(traceId);
         stopChatDto.setLaneId("lane-a");
+        when(scriptService.flushFromSnapshot(10L, 21L)).thenReturn(true);
 
         assistantChatApplicationService.stopChat(stopChatDto);
 
         verify(gatewayClient).cancelSession(eq("10"), eq("user cancel task"));
         verify(runningOutputStreamRegistry).release(10L, 21L);
         verify(runningChatSnapshotService).delete(10L, 21L);
+    }
+
+    @Test
+    void stopChat_keepsRecoveryDataWhenSnapshotPersistenceFails() {
+        StopChatDto stopChatDto = new StopChatDto();
+        stopChatDto.setSessionId(10L);
+        stopChatDto.setMessageId(20L);
+        when(scriptService.flushFromSnapshot(10L, 20L)).thenReturn(false);
+
+        assistantChatApplicationService.stopChat(stopChatDto);
+
+        verify(gatewayClient).cancelSession(eq("10"), eq("user cancel task"));
+        verify(runningOutputStreamRegistry, never()).release(10L, 20L);
+        verify(runningChatSnapshotService, never()).delete(10L, 20L);
     }
 
     /**
@@ -136,9 +165,6 @@ class AssistantChatApplicationServiceTest {
     void stopChat_keepsRecoveryStateWhenAnswerOwnershipUnknown() {
         SessionStreamManager sessionStreamManager = mock(SessionStreamManager.class);
         ReflectionTestUtils.setField(assistantChatApplicationService, "sessionStreamManager", sessionStreamManager);
-        ReflectionTestUtils.setField(assistantChatApplicationService, "outputStreamManager",
-            mock(OutputStreamManager.class));
-        ReflectionTestUtils.setField(assistantChatApplicationService, "scriptService", mock(ScriptService.class));
         when(sessionStreamManager.isSessionListenerActive("10")).thenReturn(false);
         when(runningOutputStreamRegistry.getRunning(10L)).thenReturn(new RunningChatInfo());
 
@@ -148,8 +174,30 @@ class AssistantChatApplicationServiceTest {
         assistantChatApplicationService.stopChat(stopChatDto);
 
         verify(sessionStreamManager, never()).stopSessionListener(anyString());
-        verify(runningOutputStreamRegistry).release(10L, null);
-        verify(runningChatSnapshotService).delete(10L, null);
+        verify(runningOutputStreamRegistry, never()).release(10L, null);
+        verify(runningChatSnapshotService, never()).delete(10L, null);
+    }
+
+    @Test
+    void stopSentinelWaitsForBoundedQueueCapacityInsteadOfBeingDropped() throws Exception {
+        SignallingQueue queue = new SignallingQueue(1);
+        queue.add(new JSONObject());
+        ChatProcessContext ctx = new ChatProcessContext(null, null);
+        ctx.sessionId = 10L;
+        ctx.gatewayEventQueue = queue;
+        when(outputStreamManager.getContext("10")).thenReturn(ctx);
+
+        StopChatDto stopChatDto = new StopChatDto();
+        stopChatDto.setSessionId(10L);
+        CompletableFuture<Void> flush = CompletableFuture.runAsync(() ->
+            ReflectionTestUtils.invokeMethod(assistantChatApplicationService, "flushAccumulatedMessage", stopChatDto));
+
+        assertThat(queue.awaitPut()).as("停止哨兵必须等待队列容量，不能在队列满时静默丢失").isTrue();
+        assertThat(flush.isDone()).isFalse();
+        queue.take();
+        flush.get(1, TimeUnit.SECONDS);
+
+        assertThat(queue.take().getString("event_type")).isEqualTo(ChatProcessContext.STOP_SENTINEL_EVENT);
     }
 
     @Test
@@ -171,5 +219,24 @@ class AssistantChatApplicationServiceTest {
         assertThat(result.getSessionId()).isEqualTo(10L);
         assertThat(result.getSessionName()).isEqualTo(sessionName);
         verify(sessionTitleService).markInitialTitlePending(10L);
+    }
+
+    private static final class SignallingQueue extends ArrayBlockingQueue<JSONObject> {
+
+        private final CountDownLatch putEntered = new CountDownLatch(1);
+
+        SignallingQueue(int capacity) {
+            super(capacity);
+        }
+
+        @Override
+        public void put(JSONObject event) throws InterruptedException {
+            putEntered.countDown();
+            super.put(event);
+        }
+
+        boolean awaitPut() throws InterruptedException {
+            return putEntered.await(1, TimeUnit.SECONDS);
+        }
     }
 }

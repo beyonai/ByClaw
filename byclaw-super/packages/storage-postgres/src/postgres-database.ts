@@ -1120,7 +1120,8 @@ export class PostgresRunExecutionQueue implements RunExecutionQueue {
         }
         const expiredAt = milliseconds(candidate.expired_at);
         const error = "Delegation received no terminal ResumeCommand within its callback timeout";
-        const finalAnswer = "子 Agent 在规定时间内未返回最终结果，本次调度已超时。";
+        const agentOwner = candidate.agent_name?.trim() || candidate.agent_id;
+        const finalAnswer = `${agentOwner} 调度超时：数字员工在规定时间内未返回最终结果。`;
         const result = {
           status: "timed_out",
           output: candidate.partial_output ?? "",
@@ -1156,6 +1157,7 @@ export class PostgresRunExecutionQueue implements RunExecutionQueue {
             artifactCount: 0,
             resultStatus: "timed_out",
             hasOutput: Boolean(candidate.partial_output),
+            failureStage: "callback_timeout",
             error,
           },
         });
@@ -1204,6 +1206,7 @@ export class PostgresRunExecutionQueue implements RunExecutionQueue {
     delegationId: string;
     status: "COMPLETED" | "FAILED" | "CANCELLED";
     finalAnswer: string;
+    enforceDeadline?: boolean;
   }): Promise<{ accepted: boolean; runId?: string; wakeRun?: boolean }> {
     return transaction(this.pool, async (client) => {
       // 事件写入会先持有 Run 事件序列锁，再通过外键读取 runs。这里必须采用相同顺序：
@@ -1250,8 +1253,8 @@ export class PostgresRunExecutionQueue implements RunExecutionQueue {
       if (["COMPLETED", "FAILED", "CANCELLED", "TIMED_OUT"].includes(row.delegation_status)) {
         return { accepted: false, runId: row.run_id };
       }
-      // 截止时间由数据库时钟裁决；即使扫描器尚未抢到，迟到 Resume 也不能越过期限。
-      if (row.callback_expired) {
+      // 启用超时时由数据库时钟裁决；即使扫描器尚未抢到，迟到 Resume 也不能越过期限。
+      if (input.enforceDeadline !== false && row.callback_expired) {
         return { accepted: false, runId: row.run_id };
       }
       if (["CANCELLING", "COMPLETED", "FAILED", "CANCELLED"].includes(row.run_status)) {
@@ -1293,6 +1296,7 @@ export class PostgresRunExecutionQueue implements RunExecutionQueue {
           artifactCount: 0,
           resultStatus,
           hasOutput: Boolean(input.finalAnswer),
+          ...(input.status === "COMPLETED" ? {} : { failureStage: "agent_callback" }),
           ...(error ? { error } : {}),
         },
       });
@@ -1451,7 +1455,6 @@ implements ExecutionCredentialRepository {
     runId: string;
     instanceId: string;
     fencingToken: number;
-    now: number;
   }): Promise<ExecutionCredential | undefined> {
     const result = await this.pool.query(
       `SELECT c.*
@@ -1460,11 +1463,10 @@ implements ExecutionCredentialRepository {
          JOIN ${table(this.schema, "session_execution_leases")} l
            ON l.session_id = r.session_id AND l.run_id = r.id
         WHERE c.run_id = $1
-          AND c.expires_at > $2
-          AND l.owner_instance_id = $3
-          AND l.fencing_token = $4
+          AND l.owner_instance_id = $2
+          AND l.fencing_token = $3
           AND l.lease_expires_at > clock_timestamp()`,
-      [input.runId, date(input.now), input.instanceId, input.fencingToken],
+      [input.runId, input.instanceId, input.fencingToken],
     );
     return result.rows[0] ? mapCredential(result.rows[0]) : undefined;
   }
@@ -1475,15 +1477,6 @@ implements ExecutionCredentialRepository {
       [runId],
     );
   }
-
-  async deleteExpired(now: number): Promise<number> {
-    const result = await this.pool.query(
-      `DELETE FROM ${table(this.schema, "run_execution_credentials")}
-        WHERE expires_at <= $1`,
-      [date(now)],
-    );
-    return result.rowCount ?? 0;
-  }
 }
 
 async function writeCredential(
@@ -1491,18 +1484,13 @@ async function writeCredential(
   schema: string,
   credential: ExecutionCredential,
 ): Promise<void> {
-  const values = [
-    credential.runId,
-    credential.secret,
-    date(credential.expiresAt),
-    date(credential.createdAt),
-  ];
+  const values = [credential.runId, credential.secret, date(credential.createdAt)];
   await advisoryLock(client, `credential:${credential.runId}`);
   const updated = await client.query(
     `UPDATE ${table(schema, "run_execution_credentials")}
         SET credential = $2,
-            expires_at = $3,
-            created_at = $4
+            expires_at = 'infinity'::timestamptz,
+            created_at = $3
       WHERE run_id = $1`,
     values,
   );
@@ -1510,7 +1498,7 @@ async function writeCredential(
     await client.query(
       `INSERT INTO ${table(schema, "run_execution_credentials")} (
          run_id, credential, expires_at, created_at
-       ) VALUES ($1, $2, $3, $4)`,
+       ) VALUES ($1, $2, 'infinity'::timestamptz, $3)`,
       values,
     );
   }
@@ -1872,7 +1860,6 @@ async function writeDelegation(
     delegation.agentName ?? null,
     nullableDate(delegation.lastActivityAt),
     nullableDate(delegation.callbackDeadlineAt),
-    delegation.taskPosition ?? null,
   ];
   const updated = await client.query(
     `UPDATE ${table(schema, "delegations")}
@@ -1893,8 +1880,7 @@ async function writeDelegation(
               WHEN callback_deadline_at IS NULL
                 THEN clock_timestamp() + ($14::timestamptz - $9::timestamptz)
               ELSE callback_deadline_at
-            END,
-            task_position = $15
+            END
       WHERE id = $1 AND version = $8::bigint - 1`,
     [
       delegation.id,
@@ -1911,7 +1897,6 @@ async function writeDelegation(
       delegation.agentName ?? null,
       nullableDate(delegation.lastActivityAt),
       nullableDate(delegation.callbackDeadlineAt),
-      delegation.taskPosition ?? null,
     ],
   );
   if (updated.rowCount !== 0) {
@@ -1929,14 +1914,14 @@ async function writeDelegation(
        id, run_id, agent_id, connector_id, task, expected_output, status,
        external_ref, connector_cursor, result, partial_output, error, version,
        created_at, updated_at, started_at, finished_at, agent_name, last_activity_at,
-       callback_deadline_at, task_position
+       callback_deadline_at
      ) VALUES (
        $1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10::jsonb, $11, $12, $13,
        $14, $15, $16, $17, $18, $19,
        CASE
          WHEN $20::timestamptz IS NULL THEN NULL
          ELSE clock_timestamp() + ($20::timestamptz - $15::timestamptz)
-       END, $21
+       END
      )`,
     values,
   );
@@ -2261,9 +2246,6 @@ function mapDelegation(row: QueryResultRow): Delegation {
     ...(row.agent_name === null ? {} : { agentName: text(row.agent_name) }),
     connectorId: text(row.connector_id),
     task: text(row.task),
-    ...(row.task_position === null || row.task_position === undefined
-      ? {}
-      : { taskPosition: integer(row.task_position) }),
     ...(row.expected_output === null
       ? {}
       : { expectedOutput: text(row.expected_output) }),
@@ -2423,7 +2405,6 @@ function mapCredential(row: QueryResultRow): ExecutionCredential {
   return {
     runId: text(row.run_id),
     secret: text(row.credential),
-    expiresAt: milliseconds(row.expires_at),
     createdAt: milliseconds(row.created_at),
   };
 }

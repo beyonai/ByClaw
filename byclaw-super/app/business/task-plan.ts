@@ -2,6 +2,7 @@ import {
   TASK_PLAN_TASK_STATUSES,
   type TaskPlanExecutionContext,
   type TaskPlanGateway,
+  type TaskPlanCommandResult,
   type TaskPlanSnapshot,
   type TaskPlanStatus,
   type TaskPlanTaskStatus,
@@ -62,13 +63,17 @@ export class ByClawBeTaskPlanGateway implements TaskPlanGateway {
       sourceRuntime: input.sourceRuntime,
       sourceRunId: input.sourceRunId,
     });
-    return data === null ? undefined : parseTaskPlanSnapshot(data);
+    if (data === null) {
+      return undefined;
+    }
+    const snapshot = parseTaskPlanSnapshot(data);
+    return isOwnedByContext(snapshot, input) ? snapshot : undefined;
   }
 
-  async update(
-    input: Parameters<TaskPlanGateway["update"]>[0],
-  ): Promise<TaskPlanSnapshot> {
-    const { context, update } = input;
+  async command(
+    input: Parameters<TaskPlanGateway["command"]>[0],
+  ): Promise<TaskPlanCommandResult> {
+    const { context, command } = input;
     const data = await this.#post(UPDATE_PATH, context, {
       idempotencyKey: input.idempotencyKey,
       sessionId: context.sessionId,
@@ -78,11 +83,29 @@ export class ByClawBeTaskPlanGateway implements TaskPlanGateway {
       ...(context.laneId ? { laneId: context.laneId } : {}),
       sourceRuntime: context.sourceRuntime,
       sourceRunId: context.sourceRunId,
-      title: update.title,
-      ...(update.explanation ? { explanation: update.explanation } : {}),
-      tasks: update.tasks,
+      action: command.action.toUpperCase(),
+      ...(command.action === "create"
+        ? {
+            title: command.title,
+            ...(command.explanation ? { explanation: command.explanation } : {}),
+            tasks: command.tasks,
+          }
+        : {
+            ...(command.statusReason ? { statusReason: command.statusReason } : {}),
+          }),
     });
-    return parseTaskPlanSnapshot(data);
+    const result = parseTaskPlanCommandResult(data);
+    if (result.ok) {
+      if (!isOwnedByContext(result.plan, context)) {
+        throw new ByClawBeTaskPlanError(
+          "ByClaw BE task plan command returned a plan owned by another execution",
+        );
+      }
+      return result;
+    }
+    return result.currentPlan && !isOwnedByContext(result.currentPlan, context)
+      ? { ok: false, error: result.error }
+      : result;
   }
 
   async cancel(
@@ -97,7 +120,11 @@ export class ByClawBeTaskPlanGateway implements TaskPlanGateway {
       sourceRunId: context.sourceRunId,
       reason: input.reason,
     });
-    return data === null ? undefined : parseTaskPlanSnapshot(data);
+    if (data === null) {
+      return undefined;
+    }
+    const snapshot = parseTaskPlanSnapshot(data);
+    return isOwnedByContext(snapshot, context) ? snapshot : undefined;
   }
 
   async #post(
@@ -120,6 +147,37 @@ export class ByClawBeTaskPlanGateway implements TaskPlanGateway {
         new ByClawBeTaskPlanError(message, statusCode),
     });
   }
+}
+
+function parseTaskPlanCommandResult(value: unknown): TaskPlanCommandResult {
+  if (!isRecord(value) || typeof value.ok !== "boolean") {
+    throw new ByClawBeTaskPlanError("ByClaw BE task plan returned invalid command result");
+  }
+  if (value.ok) {
+    return { ok: true, plan: parseTaskPlanSnapshot(value.plan) };
+  }
+  if (!isRecord(value.error)) {
+    throw new ByClawBeTaskPlanError("ByClaw BE task plan returned invalid error result");
+  }
+  const code = requiredString(value.error, "code");
+  const message = requiredString(value.error, "message");
+  return {
+    ok: false,
+    error: { code, message },
+    ...(value.currentPlan
+      ? { currentPlan: parseTaskPlanSnapshot(value.currentPlan) }
+      : {}),
+  };
+}
+
+function isOwnedByContext(
+  snapshot: TaskPlanSnapshot,
+  context: TaskPlanExecutionContext,
+): boolean {
+  return snapshot.sessionId === context.sessionId &&
+    snapshot.messageId === context.messageId &&
+    snapshot.sourceRuntime === context.sourceRuntime &&
+    snapshot.sourceRunId === context.sourceRunId;
 }
 
 function parseTaskPlanSnapshot(value: unknown): TaskPlanSnapshot {
@@ -165,6 +223,7 @@ function parseTaskPlanSnapshot(value: unknown): TaskPlanSnapshot {
       );
     }
     const description = optionalString(raw.description);
+    const updatedAt = optionalString(raw.updatedAt);
     const startedAt = optionalString(raw.startedAt);
     const completedAt = optionalString(raw.completedAt);
     const statusReason = parseStatusReason(raw.statusReason);
@@ -175,6 +234,7 @@ function parseTaskPlanSnapshot(value: unknown): TaskPlanSnapshot {
       ...(description ? { description } : {}),
       status: taskStatus as TaskPlanTaskStatus,
       ...(statusReason ? { statusReason } : {}),
+      ...(updatedAt ? { updatedAt } : {}),
       ...(startedAt ? { startedAt } : {}),
       ...(completedAt ? { completedAt } : {}),
     };

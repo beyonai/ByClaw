@@ -17,10 +17,8 @@ import type {
   TaskPlanGateway,
 } from "../ports/task-plan.js";
 import type {
+  TaskPlanCommand,
   TaskPlanSnapshot,
-  TaskPlanStatusReason,
-  TaskPlanTaskStatus,
-  TaskPlanUpdate,
 } from "../domain/task-plan.js";
 import { LeaderSessionCache } from "./leader-session-cache.js";
 import type {
@@ -36,7 +34,6 @@ import type {
   SessionRepository,
 } from "../ports/repositories.js";
 import type {
-  AgentResult,
   AgentProfile,
   CallerPrincipal,
   Delegation,
@@ -73,10 +70,9 @@ export interface CreateRunInput {
   attachments?: RunAttachment[];
   ingressContext?: RunIngressContextV1;
   metadata?: Record<string, unknown>;
-  /** 仅写入专用短期凭证表，不写入 Run、Event 或 Pi Session。 */
+  /** 仅写入专用执行凭证表，不写入 Run、Event 或 Pi Session。 */
   executionCredential?: {
     secret: string;
-    expiresAt: number;
   };
 }
 
@@ -89,7 +85,6 @@ export interface CreateSessionRunInput extends CreateSessionInput {
   metadata?: Record<string, unknown>;
   executionCredential?: {
     secret: string;
-    expiresAt: number;
   };
 }
 
@@ -108,18 +103,6 @@ type PendingLeaderInteraction = {
 };
 
 const DOWNSTREAM_MODEL_FAILURE_PREFIX = "Leader model call failed:";
-const USER_INTERACTION_TIMEOUT_ERROR_CODE = "USER_INTERACTION_TIMEOUT";
-const USER_INTERACTION_TIMEOUT_USER_MESSAGE =
-  "等待用户操作超时，请重新发起请求";
-
-class UserInteractionTimeoutError extends Error {
-  constructor(interactionId: string, timeoutMs: number) {
-    super(
-      `${USER_INTERACTION_TIMEOUT_ERROR_CODE}: ${interactionId} exceeded ${timeoutMs}ms`,
-    );
-    this.name = "UserInteractionTimeoutError";
-  }
-}
 
 export interface RunServiceRuntimeOptions {
   executionQueue?: RunExecutionQueue;
@@ -136,13 +119,11 @@ export interface RunServiceRuntimeOptions {
   maxConcurrentRuns?: number;
   leaderCacheMaxEntries?: number;
   leaderCacheIdleTtlMs?: number;
-  /** Leader 结构化提问等待用户响应的上限；默认 15 分钟。 */
-  userInteractionTimeoutMs?: number;
-  /** 清理已过期执行凭证的周期；默认 60 秒。 */
-  credentialCleanupIntervalMs?: number;
+  /** 是否扫描并执行子 Agent 终态回调截止时间；默认开启以兼容库调用。 */
+  callbackTimeoutEnabled?: boolean;
   /**
    * 附件读取边界；注入后 Leader 可通过 inspectAttachment / downloadAttachment
-   * 用 Run 短期凭证经 BE 安全读取本轮附件。未实现对应能力时工具不暴露。
+   * 用 Run 执行凭证经 BE 安全读取本轮附件。未实现对应能力时工具不暴露。
    */
   attachmentResolver?: AttachmentResolver;
   /** BE 权威任务计划 Port；缺失时不向 Leader 暴露 updateTaskPlan。 */
@@ -166,15 +147,12 @@ export class RunService {
   readonly #leaseMs: number;
   readonly #queuePollMs: number;
   readonly #maxConcurrentRuns: number;
-  readonly #userInteractionTimeoutMs: number;
-  readonly #credentialCleanupIntervalMs: number;
   readonly #attachmentResolver: AttachmentResolver | undefined;
   readonly #taskPlans: TaskPlanGateway | undefined;
   #persistentActive = 0;
   #claimLoop: Promise<void> | undefined;
   #callbackSweep: Promise<void> | undefined;
   #pollTimer: ReturnType<typeof setInterval> | undefined;
-  #credentialCleanupTimer: ReturnType<typeof setInterval> | undefined;
   #started = false;
   #stopping = false;
 
@@ -194,10 +172,6 @@ export class RunService {
     this.#leaseMs = runtime.leaseMs ?? 30_000;
     this.#queuePollMs = runtime.queuePollMs ?? 500;
     this.#maxConcurrentRuns = runtime.maxConcurrentRuns ?? 10;
-    this.#userInteractionTimeoutMs =
-      runtime.userInteractionTimeoutMs ?? 900_000;
-    this.#credentialCleanupIntervalMs =
-      runtime.credentialCleanupIntervalMs ?? 60_000;
     this.#attachmentResolver = runtime.attachmentResolver;
     this.#taskPlans = runtime.taskPlans;
     this.#leaderCache = new LeaderSessionCache(leaders, {
@@ -217,15 +191,6 @@ export class RunService {
       void this.#sweepExpiredCallbacks().finally(() => this.#kickPersistentQueue());
     }, this.#queuePollMs);
     this.#pollTimer.unref?.();
-    if (this.runtime.credentials) {
-      this.#credentialCleanupTimer = setInterval(() => {
-        void this.runtime.credentials
-          ?.deleteExpired(this.now())
-          .catch(() => undefined);
-      }, this.#credentialCleanupIntervalMs);
-      this.#credentialCleanupTimer.unref?.();
-      void this.runtime.credentials.deleteExpired(this.now()).catch(() => undefined);
-    }
     void this.#sweepExpiredCallbacks().finally(() => this.#kickPersistentQueue());
   }
 
@@ -258,11 +223,12 @@ export class RunService {
     return this.sessions.getOwned(sessionId, owner);
   }
 
-  /** 提交一个待处理的人机交互；可同时覆盖 Leader 原生工具和 Connector 适配路径。 */
+  /** 提交一个待处理的人机交互；可同时刷新本 Run 的执行凭证。 */
   async respondToInteraction(
     runId: string,
     interactionId: string,
     response: UserInteractionResponse,
+    executionCredentialSecret?: string,
   ): Promise<void> {
     if (!isUserInteractionResponse(response)) {
       throw new Error("Invalid user interaction response");
@@ -273,6 +239,18 @@ export class RunService {
     }
     if (TERMINAL_RUN_STATUSES.has(run.status)) {
       throw new Error(`Run is already terminal: ${runId} (${run.status})`);
+    }
+    const refreshedSecret = executionCredentialSecret?.trim();
+    if (refreshedSecret && this.runtime.credentials) {
+      await this.runtime.credentials.save({
+        runId,
+        secret: refreshedSecret,
+        createdAt: this.now(),
+      });
+      const metadata = this.#ephemeralMetadata.get(runId);
+      if (metadata) {
+        metadata["Beyond-Token"] = refreshedSecret;
+      }
     }
     if (
       await this.delegationService.respondToInteraction(
@@ -329,7 +307,7 @@ export class RunService {
     await this.sessions.delete(sessionId);
   }
 
-  /** 首个入口原子创建业务 Session、Run、run.created 和短期执行凭证。 */
+  /** 首个入口原子创建业务 Session、Run、run.created 和执行凭证。 */
   async createSessionRun(input: CreateSessionRunInput): Promise<Run> {
     validateAgentList(input.agentList);
     const now = this.now();
@@ -370,7 +348,6 @@ export class RunService {
       ? {
           runId: run.id,
           secret: input.executionCredential.secret,
-          expiresAt: input.executionCredential.expiresAt,
           createdAt: now,
         }
       : undefined;
@@ -438,7 +415,6 @@ export class RunService {
       ? {
           runId: run.id,
           secret: input.executionCredential.secret,
-          expiresAt: input.executionCredential.expiresAt,
           createdAt: now,
         }
       : undefined;
@@ -534,6 +510,7 @@ export class RunService {
         delegationId: input.delegationId,
         status: normalizedStatus,
         finalAnswer: input.finalAnswer,
+        enforceDeadline: this.runtime.callbackTimeoutEnabled !== false,
       });
       if (!settled.runId) {
         return { accepted: false };
@@ -693,10 +670,6 @@ export class RunService {
       clearInterval(this.#pollTimer);
       this.#pollTimer = undefined;
     }
-    if (this.#credentialCleanupTimer) {
-      clearInterval(this.#credentialCleanupTimer);
-      this.#credentialCleanupTimer = undefined;
-    }
     for (const active of this.#active.values()) {
       active.controller.abort(new Error("service shutting down"));
       await active.leader.abort().catch(() => undefined);
@@ -749,7 +722,12 @@ export class RunService {
   /** 数据库是唯一计时真相；这里只触发幂等扫描，不创建进程内 Delegation 定时器。 */
   async #sweepExpiredCallbacks(): Promise<void> {
     const queue = this.runtime.executionQueue;
-    if (!queue?.expireWaitingCallbacks || this.#callbackSweep || this.#stopping) {
+    if (
+      this.runtime.callbackTimeoutEnabled === false ||
+      !queue?.expireWaitingCallbacks ||
+      this.#callbackSweep ||
+      this.#stopping
+    ) {
       return this.#callbackSweep ?? Promise.resolve();
     }
     this.#callbackSweep = queue
@@ -801,7 +779,7 @@ export class RunService {
       entries: [],
     };
     // callback 恢复不会再次携带入口 metadata；单实例内存队列复用首次运行保存的
-    // 短期上下文。持久队列路径仍由 credentials 仓库按 lease 恢复凭证。
+    // 进程内上下文。持久队列路径仍由 credentials 仓库按 lease 恢复凭证。
     queue.entries.push({
       runId: run.id,
       metadata: metadata ?? this.#ephemeralMetadata.get(run.id) ?? {},
@@ -810,7 +788,7 @@ export class RunService {
     void this.#pump(run.sessionId);
   }
 
-  /** 读取经过 lease 校验的短期凭证，执行完成后释放当前 Session lease。 */
+  /** 读取经过 lease 校验的执行凭证，执行完成后释放当前 Session lease。 */
   async #executeClaim(claim: RunExecutionClaim): Promise<void> {
     const queue = this.runtime.executionQueue;
     if (!queue) {
@@ -835,10 +813,9 @@ export class RunService {
           runId: run.id,
           instanceId: claim.ownerInstanceId,
           fencingToken: claim.fencingToken,
-          now: this.now(),
         });
         if (!credential) {
-          await this.#finishFailed(run, "EXECUTION_CREDENTIAL_EXPIRED");
+          await this.#finishFailed(run, "EXECUTION_CREDENTIAL_MISSING");
           return;
         }
         metadata = {
@@ -906,8 +883,9 @@ export class RunService {
   ): Promise<void> {
     // 持久队列会在接管时从凭证仓库重建 metadata。失败收口和 callback 恢复都只
     // 读取这个进程内副本；claim 释放时会立即删除，不进入 Run/Event/Pi 持久化。
+    metadata = structuredClone(metadata);
     if (Object.keys(metadata).length > 0) {
-      this.#ephemeralMetadata.set(run.id, structuredClone(metadata));
+      this.#ephemeralMetadata.set(run.id, metadata);
     }
     const session = await this.sessions.get(run.sessionId);
     if (!session) {
@@ -970,29 +948,13 @@ export class RunService {
           this.#persistentWaiting.add(latest.id);
           void this.#kickPersistentQueue();
           const interactionId = String(requested.data.interactionId);
-          const timing = interactionTiming(
-            requested,
-            this.#userInteractionTimeoutMs,
+          const response = await this.#waitForInteractionResponse(
+            latest.id,
+            interactionId,
+            requested.eventId,
+            runController.signal,
           );
-          let response: UserInteractionResponse;
-          try {
-            response = await this.#waitForInteractionResponse(
-              latest.id,
-              interactionId,
-              requested.eventId,
-              runController.signal,
-              timing.deadlineAt,
-              timing.timeoutMs,
-            );
-          } catch (error) {
-            if (
-              error instanceof UserInteractionTimeoutError &&
-              !runController.signal.aborted
-            ) {
-              runController.abort(error);
-            }
-            throw error;
-          }
+          await this.#reloadExecutionCredential(latest.id, metadata, claim);
           this.#persistentWaiting.delete(latest.id);
           leaderMessage = `${latest.input}
 
@@ -1031,40 +993,14 @@ ${JSON.stringify(completedDelegations)}`;
         try {
           activeTaskPlan = await this.#taskPlans.loadActive(taskPlanContext);
           taskPlanReady = true;
-        } catch {
-          // 查询失败不等于“没有计划”；本轮关闭计划工具，但不阻断主任务。
-          taskPlanReady = false;
+        } catch (error) {
+          throw new Error("Unable to load the authoritative task plan for this Run", {
+            cause: error,
+          });
         }
       }
       let leaderOutputPausedForDelegation = false;
       let leaderInput: LeaderRunInput;
-      const syncActiveTaskPlanTask = async (input: {
-        taskPosition: number;
-        status: TaskPlanTaskStatus;
-        idempotencyKey: string;
-        statusReason?: TaskPlanStatusReason;
-      }): Promise<TaskPlanSnapshot> => {
-        if (!activeTaskPlan || activeTaskPlan.status !== "ACTIVE") {
-          throw new Error("An active task plan is required for task-linked delegation");
-        }
-        if (!taskPlanContext || !this.#taskPlans) {
-          throw new Error("Task plan updates are not available for this run");
-        }
-        const update = taskPlanUpdateWithTaskStatus(
-          activeTaskPlan,
-          input.taskPosition,
-          input.status,
-          input.statusReason,
-        );
-        const snapshot = await this.#taskPlans.update({
-          context: taskPlanContext,
-          idempotencyKey: input.idempotencyKey,
-          update,
-        });
-        activeTaskPlan = snapshot;
-        leaderInput.activeTaskPlan = snapshot;
-        return snapshot;
-      };
       leaderInput = {
         message: leaderMessage,
         observability: {
@@ -1099,7 +1035,8 @@ ${JSON.stringify(completedDelegations)}`;
         signal: runController.signal,
         // Leader 的可见回答与思考增量被规范化为 Run 事件，供对外流协议消费。
         onDelta: async (text) => {
-          if (leaderOutputPausedForDelegation) {
+          // ACTIVE 计划尚未收口时抑制可见回答，避免过早回答在内部续跑前泄漏给用户。
+          if (leaderOutputPausedForDelegation || activeTaskPlan?.status === "ACTIVE") {
             return;
           }
           const event = {
@@ -1148,36 +1085,6 @@ ${JSON.stringify(completedDelegations)}`;
         // 工具调用只进入 DelegationService，不让 Pi 接触 Connector Registry。
         delegate: async (delegationInput) => {
           runController.signal.throwIfAborted();
-          if (activeTaskPlan?.status === "ACTIVE") {
-            if (delegationInput.taskPosition === undefined) {
-              throw new Error(
-                "taskPosition is required when delegating work for an active task plan",
-              );
-            }
-            const task = activeTaskPlan.tasks.find(
-              ({ position }) => position === delegationInput.taskPosition,
-            );
-            if (!task) {
-              throw new Error(
-                `Task plan position ${delegationInput.taskPosition} does not exist`,
-              );
-            }
-            if (task.status === "PENDING") {
-              await syncActiveTaskPlanTask({
-                taskPosition: delegationInput.taskPosition,
-                status: "IN_PROGRESS",
-                idempotencyKey: `${delegationInput.toolCallId}:task-started`,
-              });
-            } else if (task.status !== "IN_PROGRESS") {
-              throw new Error(
-                `Task plan position ${delegationInput.taskPosition} is already ${task.status}`,
-              );
-            }
-          } else if (delegationInput.taskPosition !== undefined) {
-            throw new Error(
-              "taskPosition can only be used when an active task plan exists",
-            );
-          }
           // Pi 可能尚有排队的流回调。委派开始即交出控制权，迟到的 Super
           // reasoning/answer 不再逐 Token 落库，也不能延迟 WAITING_AGENT。
           leaderOutputPausedForDelegation = true;
@@ -1193,9 +1100,6 @@ ${JSON.stringify(completedDelegations)}`;
             agents: current.agentList,
             agentId: delegationInput.agentId,
             task: delegationInput.task,
-            ...(delegationInput.taskPosition !== undefined
-              ? { taskPosition: delegationInput.taskPosition }
-              : {}),
             // 只能从当前 Run 的附件集合按 ID 选择；未知 ID 在解析阶段被拒绝。
             attachments: resolveAttachmentSelection(
               current.attachments,
@@ -1236,31 +1140,20 @@ ${JSON.stringify(completedDelegations)}`;
           // 同步 Connector 返回了真实终态时，Leader 仍需继续使用工具结果。
           // 挂起会抛出 DelegationSuspendedError，因此不会执行到这里。
           leaderOutputPausedForDelegation = false;
-          if (
-            delegationInput.taskPosition !== undefined &&
-            !runController.signal.aborted
-          ) {
-            const terminalTaskUpdate = delegationTerminalTaskUpdate(delegated);
-            if (terminalTaskUpdate) {
-              await syncActiveTaskPlanTask({
-                taskPosition: delegationInput.taskPosition,
-                status: terminalTaskUpdate.status,
-                idempotencyKey:
-                  `${delegationInput.toolCallId}:task-${terminalTaskUpdate.idempotencySuffix}`,
-                statusReason: terminalTaskUpdate.statusReason,
-              });
-            }
-          }
           if (!runController.signal.aborted) {
             current = await this.#setStatus(current, "SYNTHESIZING");
           }
           return delegated;
         },
         askUser: async ({ toolCallId, questions, signal }) => {
+          if (activeTaskPlan && activeTaskPlan.status !== "ACTIVE") {
+            throw new Error(
+              `Task plan is ${activeTaskPlan.status}; no further user interaction is allowed`,
+            );
+          }
           validateInteractionQuestions(questions);
           const interactionId = `${current.id}:${toolCallId}`;
           const requestedAt = this.now();
-          const deadlineAt = requestedAt + this.#userInteractionTimeoutMs;
           current = await this.#setStatus(current, "WAITING_USER", {
             interactionId,
             source: "leader",
@@ -1272,8 +1165,6 @@ ${JSON.stringify(completedDelegations)}`;
             data: {
               interactionId,
               source: "leader",
-              timeoutMs: this.#userInteractionTimeoutMs,
-              deadlineAt,
               request: {
                 questions,
                 uiPayload: toLegacyFormPayload(questions),
@@ -1307,8 +1198,6 @@ ${JSON.stringify(completedDelegations)}`;
               interactionId,
               requestedEvent.eventId,
               interactionSignal,
-              deadlineAt,
-              this.#userInteractionTimeoutMs,
             )
               .then((value) => {
                 const pending = this.#pendingLeaderInteractions.get(interactionId);
@@ -1325,14 +1214,9 @@ ${JSON.stringify(completedDelegations)}`;
                 }
                 this.#pendingLeaderInteractions.delete(interactionId);
                 pending.reject(error);
-                if (
-                  error instanceof UserInteractionTimeoutError &&
-                  !runController.signal.aborted
-                ) {
-                  runController.abort(error);
-                }
               });
           });
+          await this.#reloadExecutionCredential(current.id, metadata, claim);
           if (!runController.signal.aborted) {
             current = await this.#setStatus(current, "RUNNING", {
               interactionId,
@@ -1345,22 +1229,26 @@ ${JSON.stringify(completedDelegations)}`;
           ? {
               updateTaskPlan: async ({
                 toolCallId,
-                update,
+                command,
                 signal,
               }) => {
                 runController.signal.throwIfAborted();
                 signal?.throwIfAborted();
-                const snapshot = await this.#taskPlans!.update({
+                const result = await this.#taskPlans!.command({
                   context: taskPlanContext,
                   idempotencyKey: toolCallId,
-                  update,
+                  command,
                 });
-                activeTaskPlan = snapshot;
-                return snapshot;
+                if (result.ok) {
+                  activeTaskPlan = result.plan;
+                } else if (result.currentPlan) {
+                  activeTaskPlan = result.currentPlan;
+                }
+                return result;
               },
             }
           : {}),
-        // inspectAttachment 用 Run 短期凭证经 Resolver 安全读取本轮附件；
+        // inspectAttachment 用 Run 执行凭证经 Resolver 安全读取本轮附件；
         // 工具层只能传 attachmentId，附件对象必须在 current.attachments 中命中。
         ...(this.#attachmentResolver
           ? {
@@ -1437,28 +1325,6 @@ ${JSON.stringify(completedDelegations)}`;
             }
           : {}),
       };
-      // callback 型 Connector 会在另一轮、甚至另一实例恢复。委派中持久化的
-      // taskPosition 是恢复后唯一可信的任务关联，必须在 Leader 继续回复前收口。
-      if (!runController.signal.aborted && activeTaskPlan?.status === "ACTIVE") {
-        for (const delegation of recoveredDelegations) {
-          if (delegation.taskPosition === undefined || !delegation.result) {
-            continue;
-          }
-          const terminalTaskUpdate = delegationTerminalTaskUpdate(delegation.result);
-          if (!terminalTaskUpdate) {
-            continue;
-          }
-          await syncActiveTaskPlanTask({
-            taskPosition: delegation.taskPosition,
-            status: terminalTaskUpdate.status,
-            idempotencyKey:
-              `${delegation.id}:task-${terminalTaskUpdate.idempotencySuffix}`,
-            statusReason: terminalTaskUpdate.statusReason,
-          });
-          // 一次 Run 只会在首个 callback 委派处挂起；失败会令计划终止。
-          break;
-        }
-      }
       let result = await leader.run(leaderInput);
       let taskPlanStallAttempts = 0;
       while (activeTaskPlan?.status === "ACTIVE") {
@@ -1549,8 +1415,6 @@ ${JSON.stringify(completedDelegations)}`;
             },
           });
         }
-      } else if (error instanceof UserInteractionTimeoutError) {
-        await this.#finishFailed(current, error.message);
       } else if (controller?.signal.aborted) {
         await this.#finishLocallyCancelledRun(current, "run cancelled");
       } else {
@@ -1577,7 +1441,7 @@ ${JSON.stringify(completedDelegations)}`;
     }
   }
 
-  /** 只从可信 Run 快照和短期凭证构造计划归属，模型不能覆盖这些字段。 */
+  /** 只从可信 Run 快照和执行凭证构造计划归属，模型不能覆盖这些字段。 */
   #taskPlanContext(
     run: Run,
     metadata: Record<string, unknown>,
@@ -1635,18 +1499,23 @@ ${JSON.stringify(completedDelegations)}`;
       return;
     }
     let lastError: unknown;
-    for (let attempt = 0; attempt < 3; attempt += 1) {
+    for (let attempt = 0; attempt < 4; attempt += 1) {
       try {
         const snapshot = await this.#taskPlans.loadActive(context);
         if (!snapshot || snapshot.status !== "ACTIVE") {
           return;
         }
-        await this.#taskPlans.update({
+        const result = await this.#taskPlans.command({
           context,
           idempotencyKey: `run-failed:${run.id}:${snapshot.version}`,
-          update: taskPlanUpdateForRunFailure(snapshot),
+          command: taskPlanCommandForRunFailure(snapshot),
         });
-        return;
+        if (!result.ok) {
+          throw new Error(`${result.error.code}: ${result.error.message}`);
+        }
+        if (result.plan.status !== "ACTIVE") {
+          return;
+        }
       } catch (error) {
         lastError = error;
       }
@@ -1839,61 +1708,53 @@ ${JSON.stringify(completedDelegations)}`;
     interactionId: string,
     afterEventId: number,
     signal: AbortSignal,
-    deadlineAt: number,
-    timeoutMs: number,
   ): Promise<UserInteractionResponse> {
-    const timeoutError = new UserInteractionTimeoutError(
-      interactionId,
-      timeoutMs,
-    );
-    const timeoutController = new AbortController();
-    const remainingMs = Math.max(0, deadlineAt - this.now());
-    const timeout = setTimeout(() => {
-      timeoutController.abort(timeoutError);
-    }, remainingMs);
-    timeout.unref?.();
-    const interactionSignal = AbortSignal.any([
-      signal,
-      timeoutController.signal,
-    ]);
-
-    try {
-      for await (const event of this.events.stream(
-        runId,
-        afterEventId,
-        interactionSignal,
-      )) {
-        if (
-          event.type === "interaction.responded" &&
-          event.data.interactionId === interactionId
-        ) {
-          const action =
-            event.data.action === "skip" || event.data.action === "cancel"
-              ? event.data.action
-              : "submit";
-          const answers =
-            event.data.answers &&
-            typeof event.data.answers === "object" &&
-            !Array.isArray(event.data.answers)
-              ? event.data.answers
-              : undefined;
-          return {
-            action,
-            ...(answers ? { answers } : {}),
-            ...(typeof event.data.text === "string"
-              ? { text: event.data.text }
-              : {}),
-          };
-        }
+    for await (const event of this.events.stream(runId, afterEventId, signal)) {
+      if (
+        event.type === "interaction.responded" &&
+        event.data.interactionId === interactionId
+      ) {
+        const action =
+          event.data.action === "skip" || event.data.action === "cancel"
+            ? event.data.action
+            : "submit";
+        const answers =
+          event.data.answers &&
+          typeof event.data.answers === "object" &&
+          !Array.isArray(event.data.answers)
+            ? event.data.answers
+            : undefined;
+        return {
+          action,
+          ...(answers ? { answers } : {}),
+          ...(typeof event.data.text === "string"
+            ? { text: event.data.text }
+            : {}),
+        };
       }
-      if (timeoutController.signal.aborted) {
-        throw timeoutError;
-      }
-      signal.throwIfAborted();
-      throw new Error(`Interaction event stream ended: ${interactionId}`);
-    } finally {
-      clearTimeout(timeout);
     }
+    signal.throwIfAborted();
+    throw new Error(`Interaction event stream ended: ${interactionId}`);
+  }
+
+  /** Resume 可能由另一实例消费；被唤醒的 lease owner 需重读其写入的最新凭证。 */
+  async #reloadExecutionCredential(
+    runId: string,
+    metadata: Record<string, unknown>,
+    claim: RunExecutionClaim | undefined,
+  ): Promise<void> {
+    if (!claim || !this.runtime.credentials) {
+      return;
+    }
+    const credential = await this.runtime.credentials.loadForLease({
+      runId,
+      instanceId: claim.ownerInstanceId,
+      fencingToken: claim.fencingToken,
+    });
+    if (!credential) {
+      throw new Error("EXECUTION_CREDENTIAL_MISSING");
+    }
+    metadata["Beyond-Token"] = credential.secret;
   }
 }
 
@@ -1901,31 +1762,7 @@ function userMessageForRunFailure(error: string): string | undefined {
   if (error.startsWith(DOWNSTREAM_MODEL_FAILURE_PREFIX)) {
     return error.slice(DOWNSTREAM_MODEL_FAILURE_PREFIX.length).trim() || error;
   }
-  if (error.startsWith(`${USER_INTERACTION_TIMEOUT_ERROR_CODE}:`)) {
-    return USER_INTERACTION_TIMEOUT_USER_MESSAGE;
-  }
   return undefined;
-}
-
-function interactionTiming(
-  requested: RunEvent,
-  defaultTimeoutMs: number,
-): { deadlineAt: number; timeoutMs: number } {
-  const storedTimeoutMs = requested.data.timeoutMs;
-  const timeoutMs =
-    typeof storedTimeoutMs === "number" &&
-    Number.isFinite(storedTimeoutMs) &&
-    storedTimeoutMs > 0
-      ? storedTimeoutMs
-      : defaultTimeoutMs;
-  const deadlineAt = requested.data.deadlineAt;
-  return {
-    deadlineAt:
-      typeof deadlineAt === "number" && Number.isFinite(deadlineAt)
-        ? deadlineAt
-        : requested.timestamp + timeoutMs,
-    timeoutMs,
-  };
 }
 
 function latestLeaderModel(run: Run) {
@@ -1993,130 +1830,16 @@ function validateAgentList(agentList: AgentProfile[]): void {
   }
 }
 
-function delegationTerminalTaskUpdate(result: AgentResult): {
-  status: "FAILED" | "CANCELLED";
-  idempotencySuffix: "failed" | "cancelled";
-  statusReason: TaskPlanStatusReason;
-} | undefined {
-  if (result.status === "failed") {
-    return {
-      status: "FAILED",
-      idempotencySuffix: "failed",
-      statusReason: {
-        code: "DELEGATION_FAILED",
-        message: "数字员工调度失败",
-      },
-    };
-  }
-  if (result.status === "timed_out") {
-    return {
-      status: "FAILED",
-      idempotencySuffix: "failed",
-      statusReason: {
-        code: "DELEGATION_TIMEOUT",
-        message: "数字员工调度超时",
-      },
-    };
-  }
-  if (result.status === "cancelled") {
-    return {
-      status: "CANCELLED",
-      idempotencySuffix: "cancelled",
-      statusReason: {
-        code: "DELEGATION_CANCELLED",
-        message: "数字员工调度已取消",
-      },
-    };
-  }
-  return undefined;
-}
-
-function taskPlanUpdateWithTaskStatus(
-  snapshot: TaskPlanSnapshot,
-  taskPosition: number,
-  status: TaskPlanTaskStatus,
-  statusReason?: TaskPlanStatusReason,
-): TaskPlanUpdate {
-  if (!Number.isInteger(taskPosition) || taskPosition < 1) {
-    throw new Error("taskPosition must be a positive integer");
-  }
-  const orderedTasks = [...snapshot.tasks].sort(
-    (left, right) => left.position - right.position,
-  );
-  if (!orderedTasks.some(({ position }) => position === taskPosition)) {
-    throw new Error(`Task plan position ${taskPosition} does not exist`);
+function taskPlanCommandForRunFailure(snapshot: TaskPlanSnapshot): TaskPlanCommand {
+  if (!snapshot.tasks.some(({ status }) => status === "IN_PROGRESS")) {
+    throw new Error("Active task plan has no unfinished task to close");
   }
   return {
-    title: snapshot.title,
-    ...(snapshot.explanation ? { explanation: snapshot.explanation } : {}),
-    tasks: orderedTasks.map((task) => ({
-      step: task.title,
-      ...(task.description ? { description: task.description } : {}),
-      status: task.position === taskPosition ? status : task.status,
-      ...(task.position === taskPosition
-        ? statusReason
-          ? { statusReason }
-          : {}
-        : task.statusReason
-          ? { statusReason: task.statusReason }
-          : {}),
-    })),
-  };
-}
-
-function taskPlanUpdateForRunFailure(snapshot: TaskPlanSnapshot): TaskPlanUpdate {
-  const orderedTasks = [...snapshot.tasks].sort(
-    (left, right) => left.position - right.position,
-  );
-  const hasFailedTask = orderedTasks.some(({ status }) => status === "FAILED");
-  const firstPendingPosition = orderedTasks.find(
-    ({ status }) => status === "PENDING",
-  )?.position;
-  const hasInProgressTask = orderedTasks.some(
-    ({ status }) => status === "IN_PROGRESS",
-  );
-  return {
-    title: snapshot.title,
-    ...(snapshot.explanation ? { explanation: snapshot.explanation } : {}),
-    tasks: orderedTasks.map((task) => {
-      if (task.status === "IN_PROGRESS") {
-        return {
-          step: task.title,
-          ...(task.description ? { description: task.description } : {}),
-          status: "FAILED" as const,
-          statusReason: {
-            code: "RUN_FAILED",
-            message: "运行失败，任务计划已自动收口",
-          },
-        };
-      }
-      if (task.status === "PENDING") {
-        const shouldFail =
-          !hasFailedTask &&
-          !hasInProgressTask &&
-          task.position === firstPendingPosition;
-        return {
-          step: task.title,
-          ...(task.description ? { description: task.description } : {}),
-          status: shouldFail ? ("FAILED" as const) : ("SKIPPED" as const),
-          statusReason: shouldFail
-            ? {
-                code: "RUN_FAILED",
-                message: "运行失败，任务计划已自动收口",
-              }
-            : {
-                code: "RUN_ABORTED",
-                message: "运行失败，未开始任务已跳过",
-              },
-        };
-      }
-      return {
-        step: task.title,
-        ...(task.description ? { description: task.description } : {}),
-        status: task.status,
-        ...(task.statusReason ? { statusReason: task.statusReason } : {}),
-      };
-    }),
+    action: "fail_current",
+    statusReason: {
+      code: "RUN_FAILED",
+      message: "运行失败，任务计划已自动收口",
+    },
   };
 }
 

@@ -67,12 +67,20 @@ collection_filters:
 
 - `raw/` 保存来源执行器取得的原始产物，并包含 `raw/metadata.json`。
 - `sanitized/` 保存可预览的净化产物，并包含 `sanitized/metadata.json`。
-- `sanitized/items/` 是唯一可交给下游 Agent 的正文目录。
+- `sanitized/items/` 是唯一可交给下游 Agent 的正文目录。正文可使用 `sanitized/items/<article-name>-<item-id>/index.md` 的文章目录布局；与正文绑定的本地资源放在同一目录的 `assets/`，并由 Markdown 使用相对链接引用。
 - `sanitized/metadata.json` 保存完整文章清单、物化状态和非敏感来源信息；不得包含 token、Cookie、secrets、授权缓存或其他凭据。
 
 ### 会话目录边界
 
-同一采集任务只能有一个初始化后的会话根目录。来源执行器或人工补采工具产生的下载目录、图片和原始 Markdown 必须位于该会话的 `raw/` 子树；由此生成的工作副本必须位于 `markdown/items/`，最终正文必须位于 `sanitized/items/`。不得在会话根目录旁创建 `*-fulltext/`、`*-articles/` 或其他自定义交付目录。
+在用户沙箱中，推荐把采集会话根放在当前聊天会话的
+`/by/.sessions/<sessionId>/collections/<task-name>/`。`sessionId` 取自 Agent 上下文提供的 Session Root，不能从登录认证
+环境变量或 Cookie 推导。对外路径参数以 `/` 开头时按绝对路径使用，可指向沙箱内任意可写位置；相对路径以可信的
+`--session-root /by/.sessions/<sessionId>` 为基准解析，不得依赖进程当前目录。相对路径规范化后的结果以及其真实祖先
+不得通过 `..` 或符号链接越出该 Session Root。绝对历史会话和绝对输出路径不要求属于当前 Session Root。
+
+同一采集任务只能有一个初始化后的会话根目录。来源执行器或人工补采工具产生的下载目录、图片和原始 Markdown 必须位于该会话的 `raw/` 子树；由此生成的工作副本必须位于 `markdown/items/`，最终正文必须位于 `sanitized/items/`。当原始来源响应已保存文章图片 URL 时，无需在 `raw/` 重复下载图片；只有获准来源执行器取得的交付副本才能写入 `sanitized/items/<article-name>-<item-id>/assets/`。不得绕过来源执行器直接 HTTP 补抓、不得保留远程图片链接，也不得伪造本地资源路径。封面与正文在同一条目中处理，但媒体状态与正文物化状态相互独立：封面失败只登记媒体缺口，不得把已经成功取得的正文标记为失败；Markdown 只能引用实际成功落盘的本地封面。不得在会话根目录旁创建 `*-fulltext/`、`*-articles/` 或其他自定义交付目录。
+
+单一企业来源的 `enterprise search` 必须原位发布：`--output-dir` 必须等于 `--parent-session-dir`。禁止在 `raw/` 下创建第二个完整采集会话；`raw/ima/sanitized/items`、`raw/dingtalk/session.json` 等嵌套会话或交付结构均无效。旧调用若把 `--output-dir` 指向父会话的 `raw/` 子树，runner 会将其归一到父会话根，最终正文仍只能落在根级 `sanitized/items/`。
 
 出现重复 URL、部分下载失败或正文无法物化时，保留原始证据，并在同一会话 inventory 中登记为重复、`pending` 或 `failed`。这些情况不得触发旁路归档，也不得把会话外文件作为下游正文交付。
 
@@ -82,6 +90,8 @@ collection_filters:
 - `collection.status`：采集状态 `complete`、`partial` 或 `failed`。
 - `collection.items`：完整文章清单。每项使用稳定 `itemId`，并记录 `sourceSkill`、`backend`、`sourceItemId`、`sourceUrl`、用户筛选、`rawArtifacts` 及 `materialization`。
 - `materialization.status`：`materialized`、`pending` 或 `failed`；已物化时记录准确的 `markdownPath` 与 `sanitizedPath`，文件删除或校验失败后相应路径必须置为 `null`。
+- `materialization.contentGranularity`：`full-text`、`excerpt`、`abstract` 或 `unknown`，表示正文内容粒度，与 `materialization.status`、`collection.status` 和 `deliveryComplete` 正交。旧会话或缺失字段一律按 `unknown`，不得默认 `full-text`；普通 `content`、`markdown` 或字数不能单独证明全文完整。
+- `media`：文章媒体覆盖状态。`coverStatus` 为 `not-present`、`materialized`、`unavailable` 或 `unknown`，并记录 `coverCount`、`materializedCoverCount` 与非敏感 `reason`。`unavailable` 表示至少一个已知封面未能物化，允许 `materializedCoverCount` 小于 `coverCount` 以表达部分成功。旧会话缺失或含非法 media 状态时只读归一为 `unknown`，使用 `reason=legacy-media-state-unknown`；不得猜测为无封面或已物化。
 - `materialization.pendingArtifactCleanup`：仅用于重新物化时清除旧工作副本的内部队列，只允许包含 `markdown/` 或 `sanitized/items/` 下的 Markdown，不得包含共享 `raw/`，也不得用于交付后的清理。
 - `sourceMetadata`：来源执行器的非敏感版本、任务 ID、范围和诊断信息。
 
@@ -94,6 +104,8 @@ collection_filters:
 `sourceSkill` 与 `sourceUrl` 必须是非空、可恢复的稳定身份；没有网页 URL 的来源必须写入带来源命名空间的稳定 URI，不得留空。
 
 只读兼容旧的扁平 `partial`、`storageFallback` 与 `audit_required`。新写入不得使用旧格式；旧字段不会恢复任何已删除的下游动作。
+
+`status` 和其他 inspect 路径对现有会话必须严格只读；兼容归一化只存在于返回结果中，不得回写 `session.json`、metadata 或其他会话文件。
 
 ## Legacy read compatibility
 
@@ -123,6 +135,14 @@ node scripts/knowledge-collection.mjs collect --session-dir <dir> \
       "source": "public-internet",
       "sourceSkill": "bycli",
       "backend": "bycli",
+      "rawArtifacts": ["raw/source-response.json"],
+      "contentGranularity": "unknown",
+      "media": {
+        "coverStatus": "not-present",
+        "coverCount": 0,
+        "materializedCoverCount": 0,
+        "reason": null
+      },
       "markdownPath": "markdown/post.md",
       "sanitizedPath": "sanitized/items/post.md",
       "canonicalItem": {
@@ -139,6 +159,8 @@ node scripts/knowledge-collection.mjs collect --session-dir <dir> \
 ```
 
 payload 文件必须位于当前会话的 `.collection-inputs/` 内，成功登记后会被删除。单条时也可直接使用上面 `items[]` 中的对象作为根节点。`source` 必须对应父会话的 `task.sourceScope`（`dws → dingtalk`、`fws → feishu`）；`canonicalItem.markdown` 与 `fileName` 必须相等且都是相对采集根的完整路径。
+
+`rawArtifacts` 是可选的来源恢复证据列表。每个显式登记的文件必须位于 `raw/`、真实存在、非空、可读且不是符号链接；重复路径按首次出现顺序去重。`rawArtifacts` 省略时保留 inventory 中已有的列表，显式传入时替换当前列表，传入空数组表示明确清空当前来源证据。
 
 只有需要在建会话时预置包含 pending 条目的完整清单，才使用 `--metadata-input-file`。只有导入历史兼容视图时才需要 `--collection-result-input-file`；新会话的第一次 `collect` 不再要求预置它。除此之外一律通过 `collect` 登记。
 

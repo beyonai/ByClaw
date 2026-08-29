@@ -217,6 +217,14 @@ MiniMax HTTP 客户端。`baiying-redis-image` provider 在每次原生工具调
 
 该格式的托管 agent 仍会保留 **`baiying_call`**，用于调用百应关联资源桥接工具：当 `relTools` 非空时合并进 `tools.allow`，否则写为 `tools.alsoAllow`。数字员工 JSON 内容变化后，Redis Pub/Sub 或显式 flush 触发重新扫描时，`relTools` 变更会随配置同步写回；插件同时写入一个禁用的内部 `skills.entries.__baiying_enhance_reload` 标记，让 OpenClaw 刷新 skills/tools 快照，无需重启网关。
 
+### Zread 默认模型同步
+
+插件默认将 Redis `byai:aimodel:typelist` Hash 的 `LLM` 字段中 `isDefault=1` 的平台默认模型同步到运行用户的 Zread 配置。同步复用 OpenClaw 已有的默认模型解析与解密缓存，只支持 OpenAI-compatible provider；Anthropic provider 会保留现有 Zread 配置并输出告警。
+
+插件通过 `zread config --stdio` 的 JSON-line 协议写入 `llm_provider=custom`、BaseURL、模型名和 API Key，不把密钥放入命令行或日志。首次启动会同步一次，之后 main agent 每次检查 Redis 默认模型时会按模型配置签名去重并在变化后重新同步。可通过 `zreadModelSyncEnabled=false` 禁用，或用 `zreadCommand`、`zreadConfigTimeoutMs` 调整命令及超时。
+
+同步成功后，agent 可以在已经准备好的本地仓库根目录直接运行 `zread generate --stdio -y --draft resume --skip-failed`；生成内容由 Zread 写入该仓库的 `.zread/wiki/`，stdout JSON 事件可直接作为生成进度消费。运行时镜像内置 `zread-wiki` skill，只提供该直接调用约定与“不得重复克隆”的边界，不包装或代理 CLI。
+
 ## HTTP
 
 - `GET /plugins/baiying-enhance/health`（需网关认证）

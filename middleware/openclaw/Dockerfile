@@ -29,8 +29,6 @@ COPY byclaw-exe/extensions/byclaw-sqlite/package.json \
 COPY byclaw-exe/extensions/byclaw-acp-adapter/package.json \
      byclaw-exe/extensions/byclaw-acp-adapter/package-lock.json \
      ./src/byclaw-acp-adapter/
-COPY byclaw-exe/extensions/byclaw-wiki/package.json \
-     ./src/byclaw-wiki/
 
 
 RUN --mount=type=cache,target=/root/.npm \
@@ -97,6 +95,7 @@ ARG TARGETARCH
 ARG NPM_REGISTRY=https://registry.npmmirror.com
 ARG WECOM_CLI_VERSION=0.1.9
 ARG LARKSUITE_CLI_VERSION=1.0.85
+ARG ZREAD_CLI_VERSION=0.2.13
 ARG IMA_OPENAPI_CLI_VERSION=0.1.3
 ARG IMA_OPENAPI_CLI_INTEGRITY=sha512-ckur/WWHugygFu130u/Zmn2IU9w7Ghc2cmPPxS6lFWvETSz7Rl3lqQGjMLmhSbTY2eCIR8DvqOzozOf5rWRbHg==
 ARG INSTALL_BROWSER_STACK=true
@@ -137,14 +136,16 @@ RUN npm config set registry "${NPM_REGISTRY}" --global \
         "hyperframes@${HYPERFRAMES_VERSION}" \
         "@remotion/cli@${REMOTION_VERSION}" \
         "@byclaw/by-framework@${BY_FRAMEWORK_TS_VERSION}" \
+        "zread_cli@${ZREAD_CLI_VERSION}" \
         "/tmp/ima-openapi-cli-${IMA_OPENAPI_CLI_VERSION}.tgz" \
     && test "$(ima --version)" = "${IMA_OPENAPI_CLI_VERSION}" \
     && ima auth --help >/dev/null \
     && ima note --help >/dev/null \
     && ima wiki --help >/dev/null \
+    && zread version --stdio | grep -F "\"version\":\"${ZREAD_CLI_VERSION}\"" >/dev/null \
     && rm -f "/tmp/ima-openapi-cli-${IMA_OPENAPI_CLI_VERSION}.tgz"
 
-ARG OPENCLI_VERSION=2.1.40
+ARG OPENCLI_VERSION=2.1.44
 ARG OPENCLI_EXTENSION_VERSION=2.1.21
 RUN set -eux; \
     if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
@@ -225,8 +226,6 @@ RUN set -eux; \
         test -f /opt/opencli/extension/manifest.json; \
         ;; \
     esac; \
-    npm install -g @colbymchenry/codegraph; \
-    codegraph version; \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=python312 /usr/local/bin/python3.12 /usr/local/bin/pip3.12 /usr/local/bin/
@@ -263,6 +262,20 @@ RUN set -eux; \
     ln -sf /usr/local/bin/websockify /usr/bin/websockify; \
     websockify --help >/dev/null
 
+COPY middleware/openclaw/searxng-cli/requirements.txt /tmp/searxng-cli-requirements.txt
+RUN python3 -m venv /opt/searxng-cli-venv \
+    && /opt/searxng-cli-venv/bin/python -m pip install --no-cache-dir \
+        --requirement /tmp/searxng-cli-requirements.txt \
+    && /opt/searxng-cli-venv/bin/python -c 'import flask, httpx, lxml, msgspec, typer, yaml'
+
+COPY middleware/openclaw/searxng-cli/ /opt/searxng-cli/
+RUN set -eux; \
+    printf '%s\n' '#!/bin/sh' \
+        'exec /opt/searxng-cli-venv/bin/python /opt/searxng-cli/searxng_cli.py "$@"' \
+        > /usr/local/bin/searxng-cli; \
+    chmod 755 /usr/local/bin/searxng-cli; \
+    searxng-cli --list-engines >/dev/null
+
 COPY middleware/openclaw/verify-runtime-toolchain.sh /usr/local/bin/verify-runtime-toolchain
 RUN chmod +x /usr/local/bin/verify-runtime-toolchain \
     && /usr/local/bin/verify-runtime-toolchain
@@ -287,6 +300,7 @@ RUN ln -s /app /app/node_modules/openclaw
 
 
 COPY middleware/openclaw/skills/ /app/skills/
+COPY middleware/openclaw/runtime-tools/ /usr/local/lib/byclaw/runtime-tools/
 
 # 复用镜像全局 by-framework，确保文档转换脚本能按本地 node_modules 路径解析依赖。
 RUN rm -rf /app/skills/by-doc-to-markdown/scripts/node_modules/@byclaw/by-framework \

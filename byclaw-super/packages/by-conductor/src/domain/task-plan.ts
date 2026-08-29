@@ -28,6 +28,7 @@ export interface TaskPlanTaskSnapshot {
   description?: string;
   status: TaskPlanTaskStatus;
   statusReason?: TaskPlanStatusReason;
+  updatedAt?: string;
   startedAt?: string;
   completedAt?: string;
 }
@@ -52,19 +53,39 @@ export interface TaskPlanSnapshot {
   tasks: TaskPlanTaskSnapshot[];
 }
 
-/** 模型只提交语义计划；执行归属和所有持久化字段由系统管理。 */
-export interface TaskPlanUpdate {
+/** 第一次创建计划；持久化 ID、版本和执行归属仍由系统管理。 */
+export interface TaskPlanCreateCommand {
+  action: "create";
   title: string;
   explanation?: string;
   tasks: Array<{
     step: string;
     description?: string;
-    status: TaskPlanTaskStatus;
-    statusReason?: TaskPlanStatusReason;
   }>;
 }
 
-/** 隐藏持久化字段后注入模型的计划语义视图。 */
+/** 模型只表达当前任务的结果；计划、任务和版本均由运行时按会话解析。 */
+export interface TaskPlanAdvanceCommand {
+  action: "complete_current" | "fail_current" | "skip_current";
+  statusReason?: TaskPlanStatusReason;
+}
+
+export type TaskPlanCommand = TaskPlanCreateCommand | TaskPlanAdvanceCommand;
+
+export interface TaskPlanCommandError {
+  code: string;
+  message: string;
+}
+
+export type TaskPlanCommandResult =
+  | { ok: true; plan: TaskPlanSnapshot }
+  | {
+      ok: false;
+      error: TaskPlanCommandError;
+      currentPlan?: TaskPlanSnapshot;
+    };
+
+/** 注入模型的权威计划视图；内部 ID 和版本不暴露给模型。 */
 export function toTaskPlanModelView(snapshot: TaskPlanSnapshot) {
   return {
     title: snapshot.title,

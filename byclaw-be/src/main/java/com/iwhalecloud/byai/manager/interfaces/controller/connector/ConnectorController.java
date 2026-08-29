@@ -21,6 +21,9 @@ import com.iwhalecloud.byai.manager.dto.connector.UpdateConnectorEnableRequest;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.qo.connector.ConnectorQo;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -81,18 +84,27 @@ public class ConnectorController {
         return ResponseUtil.successResponse(connectorAuthorizationService.status(authorizationId, currentUserId()));
     }
 
-    @GetMapping("/authorization/callback/{providerCode}")
-    public ResponseUtil<ConnectorAuthorizationDto> handleAuthorizationCallback(
+    @GetMapping(value = "/authorization/callback/{providerCode}", produces = MediaType.TEXT_HTML_VALUE)
+    public ResponseEntity<String> handleAuthorizationCallback(
             @org.springframework.web.bind.annotation.PathVariable String providerCode,
             @RequestParam(value = "code", required = false) String code,
             @RequestParam(value = "state", required = false) String state,
             @RequestParam(value = "error", required = false) String error,
             @RequestParam(value = "error_description", required = false) String errorDescription) {
-        return ResponseUtil.successResponse(connectorAuthorizationService.callback(
+        ConnectorAuthorizationDto authorization = connectorAuthorizationService.callback(
             providerCode,
             new AuthorizationCallback(code, state, error, errorDescription),
             currentUserId()
-        ));
+        );
+        boolean connected = "connected".equals(authorization.getStatus());
+        return ResponseEntity.ok()
+            .contentType(MediaType.parseMediaType("text/html;charset=UTF-8"))
+            .header(HttpHeaders.CACHE_CONTROL, "no-store")
+            .header("Content-Security-Policy",
+                "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; "
+                    + "base-uri 'none'; frame-ancestors 'none'")
+            .header("X-Content-Type-Options", "nosniff")
+            .body(ConnectorAuthorizationCallbackPage.render(connected));
     }
 
     @PostMapping("/authorization/cancel")

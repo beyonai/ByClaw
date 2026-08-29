@@ -5,9 +5,12 @@ import java.util.List;
 
 import lombok.Data;
 
-/** update_task_plan 工具写入协议。运行归属字段由运行时适配器注入，不由模型填写。 */
+/** updateTaskPlan 内部写入协议。运行归属字段由运行时适配器注入，不由模型填写。 */
 @Data
 public class TaskPlanUpdateRequest {
+
+    /** CREATE 首次定义计划；其余动作只推进当前任务。 */
+    private String action;
 
     private String idempotencyKey;
 
@@ -31,6 +34,9 @@ public class TaskPlanUpdateRequest {
 
     private List<TaskInput> tasks = new ArrayList<>();
 
+    /** FAIL_CURRENT/SKIP_CURRENT 可携带原因；由 Super 从扁平 Tool 参数组装。 */
+    private StatusReasonInput statusReason;
+
     @Data
     public static class TaskInput {
 
@@ -38,9 +44,6 @@ public class TaskPlanUpdateRequest {
 
         private String description;
 
-        private String status;
-
-        private StatusReasonInput statusReason;
     }
 
     @Data

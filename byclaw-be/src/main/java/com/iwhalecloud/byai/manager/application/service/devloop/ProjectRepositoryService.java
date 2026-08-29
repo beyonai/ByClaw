@@ -4,7 +4,6 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.iwhalecloud.byai.common.constants.devloop.DeleteFlag;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
-import com.iwhalecloud.byai.manager.application.service.job.DevloopPatService;
 import com.iwhalecloud.byai.manager.domain.devloop.provider.GitRepositoryProvider;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectService;
 import com.iwhalecloud.byai.manager.domain.project.service.ProjectWorkspaceGitService;
@@ -19,6 +18,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import lombok.extern.slf4j.Slf4j;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -44,7 +44,7 @@ public class ProjectRepositoryService {
     private ProjectRepoMapper projectRepoMapper;
 
     @Autowired
-    private DevloopPatService patService;
+    private GitHubCredentialResolver githubCredentialResolver;
 
     @Autowired
     private ProjectWorkspaceGitService projectWorkspaceGitService;
@@ -164,6 +164,31 @@ public class ProjectRepositoryService {
         return result;
     }
 
+    /** 查询数据库配置与 workspace 实际 Git 仓库的交集，供项目代码仓库切换。 */
+    public List<Map<String, Object>> listAvailableRepositories(Long projectId) {
+        requireProject(projectId);
+        List<Map<String, Object>> repositories = new ArrayList<>();
+        for (ProjectWorkspaceGitService.ResolvedRepository item
+            : projectWorkspaceGitService.resolveRepositories(projectId)) {
+            String path = projectWorkspaceGitService.toSandboxPath(item.path()).orElse(null);
+            if (path == null) {
+                continue;
+            }
+            Map<String, Object> result = new HashMap<>();
+            ProjectRepo repo = item.repo();
+            result.put("repoId", repo.getRepoId());
+            result.put("projectId", repo.getProjectId());
+            result.put("repoFullName", repo.getRepoFullName());
+            result.put("repoUrl", repo.getRepoUrl());
+            result.put("defaultBranch", repo.getDefaultBranch());
+            result.put("repoType", repo.getRepoType());
+            result.put("provider", repo.getProvider());
+            result.put("path", path);
+            repositories.add(result);
+        }
+        return repositories;
+    }
+
     private ProjectRepo requireRepo(Long repoId) {
         if (repoId == null) {
             throw new BaseException(50500, "project.repo.id.required");
@@ -189,15 +214,26 @@ public class ProjectRepositoryService {
         if (ref != null && !ref.trim().isEmpty()) {
             return ref.trim();
         }
-        return projectId != null ? String.valueOf(projectId)
-            : (repo.getDefaultBranch() == null || repo.getDefaultBranch().isBlank() ? "main" : repo.getDefaultBranch());
+        return repo.getDefaultBranch() == null || repo.getDefaultBranch().isBlank()
+            ? "main" : repo.getDefaultBranch().trim();
     }
 
     private List<ProjectRepoTreeNodeDTO> listLocalTree(Path repoPath, String path, String branch) {
+        if (path != null && !path.isBlank()) {
+            Path nestedRepository = repoPath.resolve(path).normalize();
+            if (nestedRepository.startsWith(repoPath.normalize()) && isGitRepository(nestedRepository)) {
+                List<ProjectRepoTreeNodeDTO> nodes = listLocalTree(nestedRepository, null, "HEAD");
+                String prefix = path.endsWith("/") ? path : path + "/";
+                nodes.forEach(node -> node.setPath(prefix + node.getPath()));
+                return nodes;
+            }
+        }
         String treeish = path == null ? branch : branch + ":" + path;
-        String output = gitCommandExecutor.executeCommandQuietly(repoPath, "git", "ls-tree", "-l", treeish);
+        byte[] outputBytes = gitCommandExecutor.executeCommandBytesQuietly(repoPath, "git", "-c", "safe.directory=*",
+            "ls-tree", "-l", "-z", treeish);
+        String output = new String(outputBytes, StandardCharsets.UTF_8);
         List<ProjectRepoTreeNodeDTO> nodes = new ArrayList<>();
-        for (String line : output.split("\\R")) {
+        for (String line : output.split(String.valueOf('\0'))) {
             ProjectRepoTreeNodeDTO node = parseTreeNode(line, path);
             if (node != null) {
                 nodes.add(node);
@@ -209,10 +245,12 @@ public class ProjectRepositoryService {
     }
 
     private List<ProjectRepoTreeNodeDTO> searchLocalTree(Path repoPath, String keyword, String branch) {
-        String output = gitCommandExecutor.executeCommandQuietly(repoPath, "git", "ls-tree", "-r", "-l", branch);
+        byte[] outputBytes = gitCommandExecutor.executeCommandBytesQuietly(repoPath, "git", "-c", "safe.directory=*",
+            "ls-tree", "-r", "-l", "-z", branch);
+        String output = new String(outputBytes, StandardCharsets.UTF_8);
         String normalizedKeyword = keyword.toLowerCase(Locale.ROOT);
         List<ProjectRepoTreeNodeDTO> nodes = new ArrayList<>();
-        for (String line : output.split("\\R")) {
+        for (String line : output.split(String.valueOf('\0'))) {
             ProjectRepoTreeNodeDTO node = parseTreeNode(line, null);
             if (node != null && node.getPath().toLowerCase(Locale.ROOT).contains(normalizedKeyword)) {
                 nodes.add(node);
@@ -236,7 +274,9 @@ public class ProjectRepositoryService {
         ProjectRepoTreeNodeDTO node = new ProjectRepoTreeNodeDTO();
         node.setName(name);
         node.setPath(parentPath == null ? nodePath : parentPath + "/" + nodePath);
-        node.setType("tree".equals(metadata[1]) ? "directory" : "file");
+        // Git submodules are emitted as mode 160000 / type commit. They are
+        // directories from the browser's perspective and must remain expandable.
+        node.setType("tree".equals(metadata[1]) || "commit".equals(metadata[1]) ? "directory" : "file");
         node.setSha(metadata[2]);
         if (metadata.length > 3 && !"-".equals(metadata[3])) {
             try {
@@ -250,8 +290,13 @@ public class ProjectRepositoryService {
         return node;
     }
 
+    private boolean isGitRepository(Path path) {
+        return Files.isDirectory(path) && Files.exists(path.resolve(".git"));
+    }
+
     private List<ProjectRepoBranchDTO> listLocalBranches(Path repoPath, Long projectId) {
-        String output = gitCommandExecutor.executeCommandQuietly(repoPath, "git", "for-each-ref",
+        String output = gitCommandExecutor.executeCommandQuietly(repoPath, "git", "-c", "safe.directory=*",
+            "for-each-ref",
             "--format=%(refname:short)%09%(objectname)", "refs/heads", "refs/remotes/origin");
         Map<String, String> branches = new LinkedHashMap<>();
         for (String line : output.split("\\R")) {
@@ -279,7 +324,8 @@ public class ProjectRepositoryService {
     }
 
     private ProjectRepoFileContentDTO getLocalFileContent(Path repoPath, String branch, String path) {
-        byte[] bytes = gitCommandExecutor.executeCommandBytesQuietly(repoPath, "git", "show", branch + ":" + path);
+        byte[] bytes = gitCommandExecutor.executeCommandBytesQuietly(repoPath, "git", "-c", "safe.directory=*",
+            "show", branch + ":" + path);
         boolean binary = isBinary(bytes);
         ProjectRepoFileContentDTO file = new ProjectRepoFileContentDTO();
         file.setName(path.substring(path.lastIndexOf('/') + 1));
@@ -307,7 +353,7 @@ public class ProjectRepositoryService {
     }
 
     private String currentUserToken() {
-        return patService.getGitHubPat(String.valueOf(CurrentUserHolder.getCurrentUserId()));
+        return githubCredentialResolver.resolve(CurrentUserHolder.getCurrentUserId());
     }
 
     private void requireProject(Long projectId) {

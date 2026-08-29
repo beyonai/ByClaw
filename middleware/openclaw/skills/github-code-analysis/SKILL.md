@@ -26,7 +26,7 @@ metadata:
 ## Default Configuration
 
 - **Default repository**: `beyonai/ByClaw`
-- **授权方式**: OAuth Device Flow（自动，无需手动配置）
+- **授权方式**: 平台 GitHub 连接器统一授权
 - 用户不指定仓库时使用默认值，无需询问
 
 ## Workflow
@@ -43,20 +43,9 @@ node skills/github-code-analysis/scripts/gh-pr-list.mjs --limit 1
 
 **If `"ok": true`** → proceed based on user intent.
 
-**If `"auth_required": true`** → the output already contains `verification_uri`, `user_code`, and `message`. Do these things:
-1. Show the `message` field content to the user verbatim (it has the link and code)
-2. STOP and wait for user to say "授权完了" / "done" / "好了"
-3. When user confirms, execute:
+**If `"auth_required": true`** → 展示返回的 `message`，提示用户先在平台连接器中授权 GitHub，然后停止本次 GitHub 操作。授权成功后，凭据会通过用户私有工作区自动同步到当前沙箱，无需重启。
 
-```bash
-node skills/github-code-analysis/scripts/gh-auth-login.mjs --poll
-```
-
-4. If poll returns `"ok": true` → 授权成功，重新执行用户的原始请求
-5. If poll returns `"retry": true` → 告诉用户"还没完成，请确认浏览器中已授权"
-6. If poll returns expired error → 重新执行 Step 0（会生成新的授权码）
-
-**禁止**：不得提及 GITHUB_TOKEN、PAT、Personal Access Token、环境变量、手动配置。授权完全由脚本自动处理。
+**禁止**：不得向用户索要 GITHUB_TOKEN、PAT、Personal Access Token，也不得自行发起第二套 Device Flow。
 
 ---
 

@@ -15,6 +15,10 @@ import {
 import { resolveAgentIdFromSessionKey } from "openclaw/plugin-sdk/routing";
 import type { ConnectorAuthorizationMap } from "./connector-authorization.js";
 import {
+    isTaskPlanContinuationPending,
+    markTaskPlanContinuationPending,
+} from "../../shared/src/task-plan-runtime.js";
+import {
     createFrameworkFinalAnswerLedger,
     markRootRunOverflowFragment,
     recordRootRunAgentEnd,
@@ -36,33 +40,15 @@ const MAX_CHAT_CONTEXT_TEXT_CHARS = 12000;
 
 export { SESSION_FILES_ROOT, getSessionPathBySessionId };
 
-export function resolveSdkLocalFilePath(rawPath: string, sessionId: string): string {
-    const sessionRoot = getSessionPathBySessionId(sessionId);
-    if (!path.posix.isAbsolute(rawPath)) {
-        return path.posix.resolve(sessionRoot, rawPath);
-    }
-
-    const normalizedRawPath = path.posix.normalize(rawPath);
-    const normalizedSessionRoot = path.posix.normalize(sessionRoot);
-    if (
-        normalizedRawPath === normalizedSessionRoot ||
-        normalizedRawPath.startsWith(`${normalizedSessionRoot}/`)
-    ) {
+export function resolveSdkLocalFilePath(rawPath: string): string {
+    // 先按绝对路径归一化，避免重复斜杠和父目录片段让结果逃逸出 /by。
+    const normalizedRawPath = path.posix.normalize(`/${rawPath.trim().replace(/^\/+/, "")}`);
+    if (normalizedRawPath === "/by" || normalizedRawPath.startsWith("/by/")) {
         return normalizedRawPath;
     }
 
-    for (let start = 0; start < normalizedSessionRoot.length; start += 1) {
-        const overlap = normalizedSessionRoot.slice(start);
-        if (
-            overlap.length <= 1 ||
-            (normalizedRawPath !== overlap && !normalizedRawPath.startsWith(`${overlap}/`))
-        ) {
-            continue;
-        }
-        return `${normalizedSessionRoot.slice(0, start)}${normalizedRawPath}`;
-    }
-
-    return normalizedRawPath;
+    const relativePath = normalizedRawPath.replace(/^\/+/, "");
+    return relativePath ? path.posix.join("/by", relativePath) : "/by";
 }
 
 export interface ByaiSdkSessionContext {
@@ -174,8 +160,12 @@ export interface ActiveSdkRequest {
   to: string;
   sessionId: string;
   traceId: string;
+  /** Authoritative assistant message id allocated by the gateway for this turn. */
+  messageId?: string;
   /** Parent id from the Gateway command that owns every root-level SDK event. */
   parentMessageId: string;
+  /** Whether the gateway request was delegated by another agent. */
+  delegatedAgentCall: boolean;
   createdAt: number;
   firstAnswerDeltaAt?: number;
   firstVisibleResponseAt?: number;
@@ -683,6 +673,7 @@ function listPendingChildSessionKeys(request: ActiveSdkRequest): Set<string> {
 }
 
 export function clearActiveSdkRequestRecord(request: ActiveSdkRequest): void {
+    markTaskPlanContinuationPending(request.sessionKey, false);
   activeSdkRequestsByTarget.delete(buildActiveSdkTargetKey(request.accountId, request.to));
   activeSdkRequestsByTraceId.delete(request.traceId);
   channelRequestContextsBySessionKey.delete(request.sessionKey);
@@ -882,7 +873,9 @@ export function registerActiveSdkRequest(params: {
     to: string;
     sessionId: string;
     traceId: string;
+    messageId?: string;
     parentMessageId?: string;
+    delegatedAgentCall?: boolean;
     createdAt?: number;
     language: Language;
     languageProvided: boolean;
@@ -919,7 +912,9 @@ export function registerActiveSdkRequest(params: {
         to: params.to,
         sessionId: params.sessionId,
         traceId: params.traceId,
+        messageId: normalizeAlias(params.messageId) ?? undefined,
         parentMessageId: normalizeAlias(params.parentMessageId) ?? "-1",
+        delegatedAgentCall: params.delegatedAgentCall === true,
         createdAt: params.createdAt ?? Date.now(),
         boundRunIds: new Set<string>(),
         nativeChildRuns: new Map<string, NativeChildRunRecord>(),
@@ -968,7 +963,9 @@ export function registerActiveSdkRequest(params: {
         createdAt: request.createdAt,
         fields: {
             sessionId: request.sessionId,
+            messageId: request.messageId,
             parentMessageId: request.parentMessageId,
+            delegatedAgentCall: request.delegatedAgentCall,
             language: request.language,
             languageProvided: request.languageProvided,
             channelExtension: request.channelExtension,
@@ -1380,7 +1377,14 @@ function isAwaitingFollowupStale(request: ActiveSdkRequest, now = Date.now()): b
   return now - request.awaitingFollowupSince >= AWAITING_FOLLOWUP_TIMEOUT_MS;
 }
 
-export function shouldCompleteActiveSdkRequest(request: ActiveSdkRequest): boolean {
+/**
+ * True once the current root run and every delegated/native follow-up are idle.
+ * Task-plan continuation is intentionally excluded: the channel uses this
+ * predicate to decide when it is safe to start the next guarded dispatch.
+ */
+export function isActiveSdkRequestReadyForTaskPlanContinuation(
+  request: ActiveSdkRequest,
+): boolean {
   // awaitingFollowup 正常会被 main 续跑的 lifecycle start 清掉；若超时仍未清，视为
   // 不会再续跑，放行完成门（followupRunStarted 不在此豁免——它表示续跑已真正开始）。
   const awaitingBlocks = request.awaitingFollowup && !isAwaitingFollowupStale(request);
@@ -1409,6 +1413,13 @@ export function shouldCompleteActiveSdkRequest(request: ActiveSdkRequest): boole
       !request.compactionRetryPending &&
       !request.overflowContinuePending &&
       !request.modelFallbackPending,
+  );
+}
+
+export function shouldCompleteActiveSdkRequest(request: ActiveSdkRequest): boolean {
+  return Boolean(
+    isActiveSdkRequestReadyForTaskPlanContinuation(request) &&
+      !isTaskPlanContinuationPending(request.sessionKey),
   );
 }
 

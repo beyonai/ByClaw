@@ -6,6 +6,48 @@ import type { IMessage, IMessageListItem } from '@/typescript/message';
 import { transformList } from './util';
 
 describe('ThinkingProcessRender transformList', () => {
+  it('keeps a status title expanded until an update with the same orderId reaches a terminal status', () => {
+    const statusTitle: IMessageListItem = {
+      contentType: SSEMessageType.thinkStatusTitle,
+      status: SSEEventStatus.start,
+      objectType: 'tool_call',
+      content: {
+        substance: { title: '数字员工正在处理', status: '_START_' },
+        orderId: 'delegation-1',
+        parentOrderId: '-1',
+      },
+    };
+    const child: IMessageListItem = {
+      contentType: SSEMessageType.thinkText,
+      status: SSEEventStatus.query,
+      content: {
+        substance: '数字员工已就绪',
+        orderId: 'delegation-1:progress',
+        parentOrderId: 'delegation-1',
+      },
+    };
+
+    const runningResult = transformList([statusTitle, child], false);
+
+    expect(runningResult[0].isCollapsed).toBe(false);
+    expect(runningResult[0].children?.[0].content.orderId).toBe('delegation-1:progress');
+    expect(transformList([statusTitle, child], true)[0].isCollapsed).toBe(false);
+
+    const completedStatusTitle: IMessageListItem = {
+      ...statusTitle,
+      status: SSEEventStatus.done,
+      content: {
+        ...statusTitle.content,
+        substance: { title: '数字员工处理完成', status: '_DONE_' },
+      },
+    };
+    const completedResult = transformList([statusTitle, child, completedStatusTitle], false);
+
+    expect(completedResult[0].isCollapsed).toBe(true);
+    expect(completedResult[0].content.substance).toEqual({ title: '数字员工处理完成', status: '_DONE_' });
+    expect(completedResult[0].children?.[0].content.orderId).toBe('delegation-1:progress');
+  });
+
   it('attaches nodes to the matched parentOrderId node instead of the current title node', () => {
     const thinkList: IMessageListItem[] = [
       {

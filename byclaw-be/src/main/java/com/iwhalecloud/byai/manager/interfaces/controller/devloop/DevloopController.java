@@ -563,7 +563,8 @@ public class DevloopController {
     public ResponseUtil<Map<String, Object>> getTaskChanges(@RequestBody Map<String, Object> params) {
         Long sessionId = Long.valueOf(
             params.get("sessionId") != null ? params.get("sessionId").toString() : params.get("taskId").toString());
-        return applicationService.getTaskChanges(sessionId);
+        Long repoId = params.get("repoId") != null ? Long.valueOf(params.get("repoId").toString()) : null;
+        return applicationService.getTaskChanges(sessionId, repoId);
     }
 
     /** 获取指定代码仓库中单个文件的本地 diff(unified 文本),供前端 modal 逐行渲染变更内容 */
@@ -701,6 +702,18 @@ public class DevloopController {
     @PostMapping("/operation/account/create")
     public ResponseUtil<Map<String, Object>> createOperationAccount(@RequestBody OperationAccountDTO dto) {
         return applicationService.createOperationAccount(dto);
+    }
+
+    /** 查询当前用户创建的全部有效账号，包括项目账号和用户级账号。 */
+    @PostMapping("/operation/account/user/list")
+    public ResponseUtil<List<Map<String, Object>>> listGlobalOperationAccounts() {
+        return applicationService.listGlobalOperationAccounts();
+    }
+
+    /** 新增不绑定项目的用户级账号。 */
+    @PostMapping("/operation/account/user/create")
+    public ResponseUtil<Map<String, Object>> createGlobalOperationAccount(@RequestBody OperationAccountDTO dto) {
+        return applicationService.createGlobalOperationAccount(dto);
     }
 
     /** 编辑运营平台账号的展示信息和平台侧账号标识。 */

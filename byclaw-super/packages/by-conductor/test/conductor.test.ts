@@ -85,7 +85,6 @@ describe("DelegationService", () => {
         agents: [agent],
         agentId: agent.id,
         task: "analyze later",
-        taskPosition: 1,
         metadata: {},
         signal: new AbortController().signal,
       }),
@@ -93,7 +92,6 @@ describe("DelegationService", () => {
 
     expect(await delegations.get("delegation-suspended")).toMatchObject({
       status: "RUNNING",
-      taskPosition: 1,
       externalRef: { executionId: "external" },
       callbackDeadlineAt: 11_000,
     });
@@ -111,7 +109,6 @@ describe("DelegationService", () => {
         agents: [agent],
         agentId: agent.id,
         task: "analyze later",
-        taskPosition: 1,
         metadata: {},
         signal: new AbortController().signal,
       }),
@@ -140,6 +137,42 @@ describe("DelegationService", () => {
     ).resolves.toMatchObject({ accepted: false, runId: "run-suspended" });
     expect((await delegations.get("delegation-suspended"))?.result?.output).toBe(
       "callback answer",
+    );
+  });
+
+  it("persists no callback deadline when the callback timeout is disabled", async () => {
+    const registry = new ConnectorRegistry();
+    registry.register(fakeCallbackConnector(5));
+    const delegations = new InMemoryDelegationRepository();
+    const events = new InMemoryRunEventStore();
+    const service = new DelegationService(
+      registry,
+      delegations,
+      events,
+      { firstActivityMs: 100, idleMs: 200, callbackMs: 0 },
+      () => 10_000,
+      () => "delegation-without-deadline",
+    );
+
+    await expect(
+      service.execute({
+        session: {
+          id: "session-no-callback-timeout",
+          owner: { userCode: "user-1" },
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        runId: "run-no-callback-timeout",
+        agents: [agent],
+        agentId: agent.id,
+        task: "long task",
+        metadata: {},
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toBeInstanceOf(DelegationSuspendedError);
+
+    expect(await delegations.get("delegation-without-deadline")).not.toHaveProperty(
+      "callbackDeadlineAt",
     );
   });
 
@@ -1063,7 +1096,6 @@ describe("RunService", () => {
           async run(input) {
             try {
               await input.delegate({
-                toolCallId: "delegate-suspended",
                 agentId: agent.id,
                 task: "analyze later",
               });
@@ -1250,6 +1282,60 @@ describe("RunService", () => {
       expect.objectContaining({ error: "database unavailable" }),
       "扫描子 Agent 回调超时失败",
     );
+  });
+
+  it("does not scan or enforce persisted callback deadlines when the timeout is disabled", async () => {
+    const sessions = new InMemorySessionRepository();
+    const runs = new InMemoryRunRepository(sessions);
+    const delegations = new InMemoryDelegationRepository();
+    const events = new InMemoryRunEventStore();
+    const expireWaitingCallbacks = vi.fn(async () => []);
+    const settleWaitingCallback = vi.fn(async () => ({
+      accepted: false,
+      runId: "run-with-legacy-deadline",
+    }));
+    const service = new RunService(
+      sessions,
+      runs,
+      delegations,
+      events,
+      new DelegationService(new ConnectorRegistry(), delegations, events),
+      {
+        create: vi.fn(),
+        health: vi.fn(async () => ({ healthy: true })),
+      },
+      Date.now,
+      undefined,
+      {
+        executionQueue: {
+          enqueue: vi.fn(async () => undefined),
+          claimNext: vi.fn(async () => undefined),
+          heartbeat: vi.fn(async () => true),
+          release: vi.fn(async () => undefined),
+          expireWaitingCallbacks,
+          settleWaitingCallback,
+        },
+        callbackTimeoutEnabled: false,
+        queuePollMs: 5,
+      },
+    );
+
+    service.start();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await service.resumeDelegation({
+      delegationId: "delegation-with-legacy-deadline",
+      status: "COMPLETED",
+      finalAnswer: "done",
+    });
+    await service.dispose();
+
+    expect(expireWaitingCallbacks).not.toHaveBeenCalled();
+    expect(settleWaitingCallback).toHaveBeenCalledWith({
+      delegationId: "delegation-with-legacy-deadline",
+      status: "COMPLETED",
+      finalAnswer: "done",
+      enforceDeadline: false,
+    });
   });
 
   it("stores Leader reasoning separately from visible answer deltas", async () => {
@@ -1503,14 +1589,14 @@ describe("RunService", () => {
     await service.dispose();
   });
 
-  it("fails a native Leader interaction when the user response times out", async () => {
+  it("keeps a native Leader interaction waiting until the user responds", async () => {
     const leaderFactory: LeaderSessionFactory = {
       async create() {
         return {
           contextRevision: 0,
           async run(input) {
-            await input.askUser({
-              toolCallId: "tool-timeout",
+            const response = await input.askUser({
+              toolCallId: "tool-no-timeout",
               questions: [
                 {
                   header: "确认",
@@ -1522,7 +1608,7 @@ describe("RunService", () => {
                 },
               ],
             });
-            return { text: "unexpected" };
+            return { text: response.text ?? "no answer" };
           },
           checkpoint: () => undefined,
           markCommitted: () => undefined,
@@ -1546,52 +1632,54 @@ describe("RunService", () => {
       new DelegationService(new ConnectorRegistry(), delegations, events),
       leaderFactory,
       Date.now,
-      undefined,
-      { userInteractionTimeoutMs: 10 },
     );
     const session = await service.createSession({ owner: { userCode: "user" } });
     const run = await service.createRun({
       sessionId: session.id,
-      message: "等待超时",
+      message: "持续等待",
       agentList: [],
     });
 
-    await waitFor(async () => (await service.getRun(run.id))?.status === "FAILED");
-
-    expect(await service.getRun(run.id)).toMatchObject({
-      status: "FAILED",
-      error: expect.stringContaining("USER_INTERACTION_TIMEOUT"),
-    });
+    await waitFor(async () => (await service.getRun(run.id))?.status === "WAITING_USER");
     const requested = (await events.list(run.id)).find(
       (event) => event.type === "interaction.requested",
     );
-    expect(requested?.data).toMatchObject({
-      timeoutMs: 10,
-      deadlineAt: expect.any(Number),
+    expect(requested?.data).not.toHaveProperty("timeoutMs");
+    expect(requested?.data).not.toHaveProperty("deadlineAt");
+
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(await service.getRun(run.id)).toMatchObject({
+      status: "WAITING_USER",
     });
     expect(
-      (await events.list(run.id)).find((event) => event.type === "run.failed")
-        ?.data,
-    ).toMatchObject({
-      userMessage: "等待用户操作超时，请重新发起请求",
+      (await events.list(run.id)).some((event) => event.type === "run.failed"),
+    ).toBe(false);
+
+    await service.respondToInteraction(run.id, String(requested?.data.interactionId), {
+      action: "submit",
+      text: "稍后的回答",
     });
-    await expect(
-      service.respondToInteraction(run.id, String(requested?.data.interactionId), {
-        action: "submit",
-        text: "迟到的回答",
-      }),
-    ).rejects.toThrow("Run is already terminal:");
+    await waitFor(async () => (await service.getRun(run.id))?.status === "COMPLETED");
+    expect((await service.getRun(run.id))?.finalAnswer).toBe("稍后的回答");
     await service.dispose();
   });
 
   it("continues a persisted native interaction after a process restart", async () => {
     const receivedMessages: string[] = [];
+    const receivedCredentials: string[] = [];
+    const restartAttachment: RunAttachment = {
+      id: "restart-attachment",
+      name: "restart.txt",
+      mimeType: "text/plain",
+      size: 7,
+    };
     const leaderFactory: LeaderSessionFactory = {
       async create() {
         return {
           contextRevision: 0,
           async run(input) {
             receivedMessages.push(input.message);
+            await input.inspectAttachment?.({ attachmentId: restartAttachment.id });
             return { text: "recovered" };
           },
           checkpoint: () => undefined,
@@ -1622,6 +1710,7 @@ describe("RunService", () => {
       id: "run-native-restart",
       sessionId: session.id,
       input: "原始任务",
+      attachments: [restartAttachment],
       thinkingLevel: "off",
       agentList: [],
       status: "WAITING_USER",
@@ -1641,9 +1730,23 @@ describe("RunService", () => {
       data: {
         interactionId: "native-restart-interaction",
         source: "leader",
-        deadlineAt: Date.now() + 60_000,
         request: { questions: [] },
       },
+    });
+    const storedCredentials = new Map<string, ExecutionCredential>();
+    const credentials: ExecutionCredentialRepository = {
+      save: async (credential) => {
+        storedCredentials.set(credential.runId, structuredClone(credential));
+      },
+      loadForLease: async ({ runId }) => storedCredentials.get(runId),
+      delete: async (runId) => {
+        storedCredentials.delete(runId);
+      },
+    };
+    await credentials.save({
+      runId: run.id,
+      secret: "old-token",
+      createdAt: 1,
     });
     await queue.enqueue(run);
     const service = new RunService(
@@ -1657,6 +1760,19 @@ describe("RunService", () => {
       undefined,
       {
         executionQueue: queue,
+        credentials,
+        attachmentResolver: {
+          inspect: async ({ attachment, credential, mode }) => {
+            receivedCredentials.push(credential);
+            return {
+              attachmentId: attachment.id,
+              name: attachment.name,
+              mode,
+              text: "resumed",
+              truncated: false,
+            };
+          },
+        },
         leaseMs: 1_000,
         queuePollMs: 5,
       },
@@ -1664,18 +1780,24 @@ describe("RunService", () => {
     service.start();
     expect(receivedMessages).toHaveLength(0);
 
-    await service.respondToInteraction(run.id, "native-restart-interaction", {
-      action: "submit",
-      text: "恢复后的答案",
-    });
+    await service.respondToInteraction(
+      run.id,
+      "native-restart-interaction",
+      {
+        action: "submit",
+        text: "恢复后的答案",
+      },
+      "new-token",
+    );
     await waitFor(async () => (await service.getRun(run.id))?.status === "COMPLETED");
     expect(receivedMessages[0]).toContain("原始任务");
     expect(receivedMessages[0]).toContain("恢复后的答案");
+    expect(receivedCredentials).toEqual(["new-token"]);
     expect((await service.getRun(run.id))?.finalAnswer).toBe("recovered");
     await service.dispose();
   });
 
-  it("expires a persisted native interaction at its original deadline", async () => {
+  it("ignores a legacy deadline when recovering a persisted native interaction", async () => {
     let leaderRuns = 0;
     const leaderFactory: LeaderSessionFactory = {
       async create() {
@@ -1701,7 +1823,7 @@ describe("RunService", () => {
     const events = new InMemoryRunEventStore();
     const queue = new InMemoryRunExecutionQueue();
     const session: Session = {
-      id: "session-native-expired",
+      id: "session-native-legacy-deadline",
       owner: { userCode: "user-1" },
       sessionContext: { schemaVersion: 1 },
       sessionContextVersion: 1,
@@ -1710,7 +1832,7 @@ describe("RunService", () => {
       updatedAt: 100,
     };
     const run: Run = {
-      id: "run-native-expired",
+      id: "run-native-legacy-deadline",
       sessionId: session.id,
       input: "原始任务",
       thinkingLevel: "off",
@@ -1730,7 +1852,7 @@ describe("RunService", () => {
       runId: run.id,
       type: "interaction.requested",
       data: {
-        interactionId: "native-expired-interaction",
+        interactionId: "native-legacy-deadline-interaction",
         source: "leader",
         timeoutMs: 100,
         deadlineAt: 200,
@@ -1751,15 +1873,22 @@ describe("RunService", () => {
         executionQueue: queue,
         leaseMs: 1_000,
         queuePollMs: 5,
-        userInteractionTimeoutMs: 5_000,
       },
     );
 
     service.start();
-    await waitFor(async () => (await service.getRun(run.id))?.status === "FAILED");
+    await waitFor(async () => (await service.getRun(run.id))?.status === "WAITING_USER");
+    await new Promise((resolve) => setTimeout(resolve, 25));
 
     expect(leaderRuns).toBe(0);
-    expect((await service.getRun(run.id))?.error).toContain("exceeded 100ms");
+    expect((await service.getRun(run.id))?.status).toBe("WAITING_USER");
+    await service.respondToInteraction(run.id, "native-legacy-deadline-interaction", {
+      action: "submit",
+      text: "继续执行",
+    });
+    await waitFor(async () => (await service.getRun(run.id))?.status === "COMPLETED");
+    expect(leaderRuns).toBe(1);
+    expect((await service.getRun(run.id))?.finalAnswer).toBe("unexpected");
     await service.dispose();
   });
 
@@ -1904,41 +2033,6 @@ describe("RunService", () => {
     await service.dispose();
   });
 
-  it("启动持久队列时会定期清理过期的执行凭证", async () => {
-    const leaderFactory = new ControlledLeaderFactory();
-    const sessions = new InMemorySessionRepository();
-    const runs = new InMemoryRunRepository(sessions);
-    const delegations = new InMemoryDelegationRepository();
-    const events = new InMemoryRunEventStore();
-    const credentials: ExecutionCredentialRepository = {
-      save: vi.fn(async () => undefined),
-      loadForLease: vi.fn(async () => undefined),
-      delete: vi.fn(async () => undefined),
-      deleteExpired: vi.fn(async () => 0),
-    };
-    const service = new RunService(
-      sessions,
-      runs,
-      delegations,
-      events,
-      new DelegationService(new ConnectorRegistry(), delegations, events),
-      leaderFactory,
-      Date.now,
-      undefined,
-      {
-        executionQueue: new InMemoryRunExecutionQueue(),
-        credentials,
-        credentialCleanupIntervalMs: 5,
-      },
-    );
-
-    service.start();
-    await waitFor(() => vi.mocked(credentials.deleteExpired).mock.calls.length >= 2);
-    await service.dispose();
-
-    expect(credentials.deleteExpired).toHaveBeenCalled();
-  });
-
   it("serializes runs per session and cancels queued work", async () => {
     const leaderFactory = new ControlledLeaderFactory();
     const { service } = createRunService(leaderFactory);
@@ -2058,7 +2152,6 @@ describe("RunService", () => {
           run: async (input) => {
             const toolController = new AbortController();
             const result = await input.delegate({
-              toolCallId: "delegate-cancelled",
               agentId: agent.id,
               task: "wait for cancellation",
               signal: toolController.signal,
@@ -2231,22 +2324,23 @@ describe("RunService task plan completion guard", () => {
     const completedPlan = taskPlanSnapshot("COMPLETED", 2);
     const taskPlans: TaskPlanGateway = {
       loadActive: vi.fn(async () => active),
-      update: vi.fn(async () => completedPlan),
+      command: vi.fn(async () => ({ ok: true, plan: completedPlan })),
       cancel: vi.fn(async () => undefined),
     };
     const messages: string[] = [];
-    const { service } = createTaskPlanService(async (input) => {
+    const { events, service } = createTaskPlanService(async (input) => {
       messages.push(input.message);
       if (messages.length === 1) {
+        await input.onDelta("不应提前展示");
         return { text: "过早结束" };
       }
       await input.updateTaskPlan!({
         toolCallId: "finish-plan",
-        update: {
-          title: "完成复杂任务",
-          tasks: [{ step: "执行任务", status: "COMPLETED" }],
+        command: {
+          action: "complete_current",
         },
       });
+      await input.onDelta("最终回答");
       return { text: "任务已经完成" };
     }, taskPlans);
 
@@ -2255,15 +2349,108 @@ describe("RunService task plan completion guard", () => {
 
     expect(messages).toHaveLength(2);
     expect(messages[1]).toContain("task plan is still active");
-    expect(taskPlans.update).toHaveBeenCalledOnce();
+    expect(taskPlans.command).toHaveBeenCalledOnce();
     expect((await service.getRun(run.id))?.finalAnswer).toBe("任务已经完成");
+    expect(
+      (await events.list(run.id))
+        .filter(({ type }) => type === "leader.delta")
+        .map(({ data }) => data),
+    ).toEqual([{ text: "最终回答" }]);
+    await service.dispose();
+  });
+
+  it("fails closed when the authoritative task plan cannot be loaded", async () => {
+    const taskPlans: TaskPlanGateway = {
+      loadActive: vi.fn(async () => {
+        throw new Error("BE unavailable");
+      }),
+      command: vi.fn(async () => ({ ok: true, plan: taskPlanSnapshot("FAILED", 2) })),
+      cancel: vi.fn(async () => undefined),
+    };
+    const leaderRun = vi.fn(async () => ({ text: "不应执行" }));
+    const { service } = createTaskPlanService(leaderRun, taskPlans);
+
+    const run = await createTaskPlanRun(service);
+    await waitFor(async () => (await service.getRun(run.id))?.status === "FAILED");
+
+    expect(leaderRun).not.toHaveBeenCalled();
+    expect((await service.getRun(run.id))?.error).toContain(
+      "Unable to load the authoritative task plan",
+    );
+    await service.dispose();
+  });
+
+  it("keeps delegation independent from task-plan status updates", async () => {
+    let currentPlan: TaskPlanSnapshot = {
+      ...taskPlanSnapshot("ACTIVE"),
+      tasks: [
+        {
+          taskId: "task-1",
+          position: 1,
+          title: "调度数字员工",
+          status: "IN_PROGRESS",
+        },
+      ],
+    };
+    const taskPlans: TaskPlanGateway = {
+      loadActive: vi.fn(async () => currentPlan),
+      command: vi.fn(async ({ command }) => {
+        if (command.action !== "complete_current") {
+          throw new Error("expected complete_current command");
+        }
+        const nextTasks = currentPlan.tasks.map((task) => ({
+          ...task,
+          status: "COMPLETED" as const,
+        }));
+        currentPlan = {
+          ...currentPlan,
+          version: currentPlan.version + 1,
+          status: "COMPLETED",
+          tasks: nextTasks,
+        };
+        return { ok: true, plan: currentPlan };
+      }),
+      cancel: vi.fn(async () => undefined),
+    };
+    const connector = fakeConnector(async function* () {
+      yield completed("任务完成");
+    });
+    const { service } = createTaskPlanService(async (input) => {
+      const result = await input.delegate({
+        agentId: agent.id,
+        task: "执行当前任务",
+      });
+      expect(result.status).toBe("completed");
+      expect(taskPlans.command).not.toHaveBeenCalled();
+      await input.updateTaskPlan!({
+        toolCallId: "plan-complete-current-task",
+        command: {
+          action: "complete_current",
+        },
+      });
+      return { text: "任务已经完成" };
+    }, taskPlans, connector);
+
+    const run = await createTaskPlanRun(service, [agent]);
+    await waitFor(async () => (await service.getRun(run.id))?.status === "COMPLETED");
+
+    expect(taskPlans.command).toHaveBeenCalledOnce();
+    expect(taskPlans.command).toHaveBeenCalledWith(
+      expect.objectContaining({
+        idempotencyKey: "plan-complete-current-task",
+        command: { action: "complete_current" },
+      }),
+    );
+    const delegation = (await service.getRunDetails(run.id))?.delegations[0];
+    expect(delegation).toMatchObject({ status: "COMPLETED" });
+    expect(delegation).not.toHaveProperty("taskPosition");
     await service.dispose();
   });
 
   it("fails instead of reporting success when the Leader repeatedly ignores an active plan", async () => {
     const taskPlans: TaskPlanGateway = {
       loadActive: vi.fn(async () => taskPlanSnapshot("ACTIVE")),
-      update: vi.fn(async () => taskPlanSnapshot("FAILED", 2)),
+      command: vi.fn(async () => ({ ok: true, plan: taskPlanSnapshot("FAILED", 2) })),
       cancel: vi.fn(async () => undefined),
     };
     const leaderRun = vi.fn(async () => ({ text: "仍然过早结束" }));
@@ -2274,15 +2461,11 @@ describe("RunService task plan completion guard", () => {
 
     expect(leaderRun).toHaveBeenCalledTimes(4);
     expect((await service.getRun(run.id))?.status).toBe("FAILED");
-    expect(taskPlans.update).toHaveBeenCalledWith(
+    expect(taskPlans.command).toHaveBeenCalledWith(
       expect.objectContaining({
-        update: expect.objectContaining({
-          tasks: [
-            expect.objectContaining({
-              status: "FAILED",
-              statusReason: expect.objectContaining({ code: "RUN_FAILED" }),
-            }),
-          ],
+        command: expect.objectContaining({
+          action: "fail_current",
+          statusReason: expect.objectContaining({ code: "RUN_FAILED" }),
         }),
       }),
     );
@@ -2290,7 +2473,7 @@ describe("RunService task plan completion guard", () => {
     await service.dispose();
   });
 
-  it("links delegation failures to the planned task and broadcasts terminal progress", async () => {
+  it("requires the task-plan tool to record a delegation failure", async () => {
     let currentPlan: TaskPlanSnapshot = {
       ...taskPlanSnapshot("ACTIVE"),
       tasks: [
@@ -2298,30 +2481,28 @@ describe("RunService task plan completion guard", () => {
           taskId: "task-1",
           position: 1,
           title: "调度数字员工",
-          status: "PENDING",
+          status: "IN_PROGRESS",
         },
       ],
     };
     const taskPlans: TaskPlanGateway = {
       loadActive: vi.fn(async () => currentPlan),
-      update: vi.fn(async ({ update }) => {
-        const nextStatus = update.tasks.some(({ status }) => status === "FAILED")
-          ? "FAILED"
-          : "ACTIVE";
+      command: vi.fn(async ({ command }) => {
+        if (command.action !== "fail_current") {
+          throw new Error("expected fail_current command");
+        }
+        const nextTasks = currentPlan.tasks.map((task) => ({
+          ...task,
+          status: "FAILED" as const,
+          ...(command.statusReason ? { statusReason: command.statusReason } : {}),
+        }));
         currentPlan = {
           ...currentPlan,
           version: currentPlan.version + 1,
-          status: nextStatus,
-          tasks: update.tasks.map((task, index) => ({
-            taskId: `task-${index + 1}`,
-            position: index + 1,
-            title: task.step,
-            ...(task.description ? { description: task.description } : {}),
-            status: task.status,
-            ...(task.statusReason ? { statusReason: task.statusReason } : {}),
-          })),
+          status: "FAILED",
+          tasks: nextTasks,
         };
-        return currentPlan;
+        return { ok: true, plan: currentPlan };
       }),
       cancel: vi.fn(async () => undefined),
     };
@@ -2337,42 +2518,37 @@ describe("RunService task plan completion guard", () => {
     });
     const { service } = createTaskPlanService(async (input) => {
       const result = await input.delegate({
-        toolCallId: "delegate-planned-task",
         agentId: agent.id,
         task: "调度数字员工执行任务",
-        taskPosition: 1,
       });
       expect(result.status).toBe("failed");
+      expect(taskPlans.command).not.toHaveBeenCalled();
+      await input.updateTaskPlan!({
+        toolCallId: "plan-fail-delegated-task",
+        command: {
+          action: "fail_current",
+          statusReason: {
+            code: "DIGITAL_EMPLOYEE_UNAVAILABLE",
+            message: "employee unavailable",
+          },
+        },
+      });
       return { text: "数字员工调度失败，任务未完成" };
     }, taskPlans, connector);
 
     const run = await createTaskPlanRun(service, [agent]);
     await waitFor(async () => (await service.getRun(run.id))?.status === "COMPLETED");
 
-    expect(taskPlans.update).toHaveBeenCalledTimes(2);
-    expect(taskPlans.update).toHaveBeenNthCalledWith(
-      1,
+    expect(taskPlans.command).toHaveBeenCalledOnce();
+    expect(taskPlans.command).toHaveBeenCalledWith(
       expect.objectContaining({
-        idempotencyKey: "delegate-planned-task:task-started",
-        update: expect.objectContaining({
-          tasks: [expect.objectContaining({ status: "IN_PROGRESS" })],
-        }),
-      }),
-    );
-    expect(taskPlans.update).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({
-        idempotencyKey: "delegate-planned-task:task-failed",
-        update: expect.objectContaining({
-          tasks: [
-            expect.objectContaining({
-              status: "FAILED",
-              statusReason: {
-                code: "DELEGATION_FAILED",
-                message: "数字员工调度失败",
-              },
-            }),
-          ],
+        idempotencyKey: "plan-fail-delegated-task",
+        command: expect.objectContaining({
+          action: "fail_current",
+          statusReason: {
+            code: "DIGITAL_EMPLOYEE_UNAVAILABLE",
+            message: "employee unavailable",
+          },
         }),
       }),
     );
@@ -2381,7 +2557,7 @@ describe("RunService task plan completion guard", () => {
     await service.dispose();
   });
 
-  it("restores the planned task link when a callback delegation fails", async () => {
+  it("does not update task-plan status while restoring a callback delegation", async () => {
     let currentPlan: TaskPlanSnapshot = {
       ...taskPlanSnapshot("ACTIVE"),
       tasks: [
@@ -2389,29 +2565,28 @@ describe("RunService task plan completion guard", () => {
           taskId: "task-1",
           position: 1,
           title: "等待数字员工回调",
-          status: "PENDING",
+          status: "IN_PROGRESS",
         },
       ],
     };
     const taskPlans: TaskPlanGateway = {
       loadActive: vi.fn(async () => currentPlan),
-      update: vi.fn(async ({ update }) => {
+      command: vi.fn(async ({ command }) => {
+        if (command.action !== "fail_current") {
+          throw new Error("expected fail_current command");
+        }
+        const nextTasks = currentPlan.tasks.map((task) => ({
+          ...task,
+          status: "FAILED" as const,
+          ...(command.statusReason ? { statusReason: command.statusReason } : {}),
+        }));
         currentPlan = {
           ...currentPlan,
           version: currentPlan.version + 1,
-          status: update.tasks.some(({ status }) => status === "FAILED")
-            ? "FAILED"
-            : "ACTIVE",
-          tasks: update.tasks.map((task, index) => ({
-            taskId: `task-${index + 1}`,
-            position: index + 1,
-            title: task.step,
-            ...(task.description ? { description: task.description } : {}),
-            status: task.status,
-            ...(task.statusReason ? { statusReason: task.statusReason } : {}),
-          })),
+          status: "FAILED",
+          tasks: nextTasks,
         };
-        return currentPlan;
+        return { ok: true, plan: currentPlan };
       }),
       cancel: vi.fn(async () => undefined),
     };
@@ -2421,10 +2596,8 @@ describe("RunService task plan completion guard", () => {
       if (leaderAttempt === 1) {
         try {
           await input.delegate({
-            toolCallId: "delegate-callback-task",
             agentId: agent.id,
             task: "异步执行数字员工任务",
-            taskPosition: 1,
           });
         } catch (error) {
           if (error instanceof DelegationSuspendedError) {
@@ -2435,13 +2608,25 @@ describe("RunService task plan completion guard", () => {
         throw new Error("expected callback delegation to suspend");
       }
       expect(input.message).toContain("trusted platform callback");
+      expect(taskPlans.command).not.toHaveBeenCalled();
+      await input.updateTaskPlan!({
+        toolCallId: "plan-fail-callback-task",
+        command: {
+          action: "fail_current",
+          statusReason: {
+            code: "DIGITAL_EMPLOYEE_UNAVAILABLE",
+            message: "digital employee unavailable",
+          },
+        },
+      });
       return { text: "数字员工失败，任务已收口" };
     }, taskPlans, fakeCallbackConnector());
 
     const run = await createTaskPlanRun(service, [agent]);
     await waitFor(async () => (await service.getRun(run.id))?.status === "WAITING_AGENT");
     const delegation = (await service.getRunDetails(run.id))?.delegations[0];
-    expect(delegation).toMatchObject({ status: "RUNNING", taskPosition: 1 });
+    expect(delegation).toMatchObject({ status: "RUNNING" });
+    expect(delegation).not.toHaveProperty("taskPosition");
 
     await expect(
       service.resumeDelegation({
@@ -2452,20 +2637,16 @@ describe("RunService task plan completion guard", () => {
     ).resolves.toMatchObject({ accepted: true, runId: run.id });
     await waitFor(async () => (await service.getRun(run.id))?.status === "COMPLETED");
 
-    expect(taskPlans.update).toHaveBeenCalledTimes(2);
-    expect(taskPlans.update).toHaveBeenLastCalledWith(
+    expect(taskPlans.command).toHaveBeenCalledOnce();
+    expect(taskPlans.command).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        idempotencyKey: `${delegation!.id}:task-failed`,
-        update: expect.objectContaining({
-          tasks: [
-            expect.objectContaining({
-              status: "FAILED",
-              statusReason: {
-                code: "DELEGATION_FAILED",
-                message: "数字员工调度失败",
-              },
-            }),
-          ],
+        idempotencyKey: "plan-fail-callback-task",
+        command: expect.objectContaining({
+          action: "fail_current",
+          statusReason: {
+            code: "DIGITAL_EMPLOYEE_UNAVAILABLE",
+            message: "digital employee unavailable",
+          },
         }),
       }),
     );
@@ -2701,7 +2882,6 @@ describe("RunService inspectAttachment 接线", () => {
       delete: async (runId) => {
         stored.delete(runId);
       },
-      deleteExpired: async () => 0,
     };
     const captured: { input?: LeaderRunInput } = {};
     const leaders: LeaderSessionFactory = {
@@ -2749,7 +2929,7 @@ describe("RunService inspectAttachment 接线", () => {
       message: "takeover",
       agentList: [],
       attachments: [attachmentA],
-      executionCredential: { secret: "lease-secret", expiresAt: Date.now() + 60_000 },
+      executionCredential: { secret: "lease-secret" },
     });
 
     service.start();

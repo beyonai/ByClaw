@@ -7,7 +7,7 @@ const plugin = {
   id: "baiying-enhance",
   name: "Baiying Enhance",
   description:
-    "Sync authorized Baiying digital employee JSON from Redis into OpenClaw config; sub-agents via sessions_spawn.",
+    "Sync authorized Baiying digital employees from Redis and expose Baiying resource tools.",
   register(api: OpenClawPluginApi) {
     const registerStarted = performance.now();
     registerBaiyingEnhancePlugin(api);

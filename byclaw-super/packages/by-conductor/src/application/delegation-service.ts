@@ -49,8 +49,6 @@ export interface ExecuteDelegationInput {
   agents: AgentProfile[];
   agentId: string;
   task: string;
-  /** 关联活动任务计划中的任务位置；callback 恢复时必须持久保留。 */
-  taskPosition?: number;
   expectedOutput?: string;
   /** 本次委派选中的附件；由编排层从当前 Run 的附件集合按 ID 解析后注入。 */
   attachments?: readonly RunAttachment[];
@@ -78,7 +76,7 @@ export interface DelegationTimeoutOptions {
   firstActivityMs: number;
   /** 执行期间连续无任何可信活动的最长时间。 */
   idleMs: number;
-  /** callback Connector 受理后等待终态回调的绝对时限。 */
+  /** callback Connector 受理后等待终态回调的绝对时限；0 表示禁用。 */
   callbackMs: number;
 }
 
@@ -120,7 +118,7 @@ export class DelegationService {
       : {
           firstActivityMs: timeoutOptions.firstActivityMs ?? 300_000,
           idleMs: timeoutOptions.idleMs ?? 900_000,
-          callbackMs: timeoutOptions.callbackMs ?? 300_000,
+          callbackMs: timeoutOptions.callbackMs ?? 0,
         };
   }
 
@@ -132,12 +130,6 @@ export class DelegationService {
     // AbortSignal 不会为“注册监听前已经发生”的取消补发事件。先在任何持久化或
     // Connector 投递之前拒绝，避免已停止的 Run 仍创建并启动新委派。
     input.signal.throwIfAborted();
-    if (
-      input.taskPosition !== undefined &&
-      (!Number.isInteger(input.taskPosition) || input.taskPosition < 1)
-    ) {
-      throw new Error("taskPosition must be a positive integer");
-    }
     const agent = input.agents.find((candidate) => candidate.id === input.agentId);
     if (!agent) {
       throw new UnauthorizedAgentError(input.agentId);
@@ -186,7 +178,6 @@ export class DelegationService {
             candidate.result &&
             candidate.agentId === agent.id &&
             candidate.task === input.task &&
-            candidate.taskPosition === input.taskPosition &&
             candidate.expectedOutput === input.expectedOutput,
         );
       if (completed?.result) {
@@ -214,7 +205,6 @@ export class DelegationService {
           !TERMINAL_DELEGATION_STATUSES.has(candidate.status) &&
           candidate.agentId === agent.id &&
           candidate.task === input.task &&
-          candidate.taskPosition === input.taskPosition &&
           candidate.expectedOutput === input.expectedOutput,
       );
     const delegationId = existing?.id ?? this.createId();
@@ -226,7 +216,6 @@ export class DelegationService {
       agentName: agent.name,
       connectorId: connector.id,
       task: input.task,
-      ...(input.taskPosition !== undefined ? { taskPosition: input.taskPosition } : {}),
       ...(input.expectedOutput ? { expectedOutput: input.expectedOutput } : {}),
       status: "QUEUED",
       version: 0,
@@ -245,7 +234,6 @@ export class DelegationService {
             agentName: agent.name,
             connectorId: connector.id,
             task: input.task,
-            ...(input.taskPosition !== undefined ? { taskPosition: input.taskPosition } : {}),
             ...(input.expectedOutput ? { expectedOutput: input.expectedOutput } : {}),
             ...(input.attachments?.length
               ? {
@@ -774,7 +762,12 @@ export class DelegationService {
           artifacts,
           error: event.error.message,
         };
-        await this.#finish(delegation, eventTimedOut ? "TIMED_OUT" : "FAILED", result);
+        await this.#finish(
+          delegation,
+          eventTimedOut ? "TIMED_OUT" : "FAILED",
+          result,
+          eventTimedOut ? "execution_timeout" : "agent_execution",
+        );
         return result;
       }
 
@@ -794,7 +787,7 @@ export class DelegationService {
         },
         "子 Agent 事件流未携带终态即结束",
       );
-      await this.#finish(delegation, "FAILED", result);
+      await this.#finish(delegation, "FAILED", result, "connector_stream");
       return result;
     } catch (error) {
       if (error instanceof DelegationSuspendedError) {
@@ -842,7 +835,12 @@ export class DelegationService {
         artifacts: [],
         error: message,
       };
-      await this.#finish(delegation, "FAILED", result);
+      await this.#finish(
+        delegation,
+        "FAILED",
+        result,
+        execution ? "connector_stream" : "dispatch",
+      );
       return result;
     } finally {
       if (activityTimeout) {
@@ -899,7 +897,12 @@ export class DelegationService {
         : normalizedStatus === "FAILED"
           ? "FAILED"
           : "COMPLETED";
-    await this.#finish(delegation, terminalStatus, result);
+    await this.#finish(
+      delegation,
+      terminalStatus,
+      result,
+      terminalStatus === "COMPLETED" ? undefined : "agent_callback",
+    );
     return { accepted: true, runId: delegation.runId, result };
   }
 
@@ -979,18 +982,20 @@ export class DelegationService {
     return updated;
   }
 
-  /** callAgent 已可靠受理；保存唯一的绝对回调截止时间，不受子流活动影响。 */
+  /** callAgent 已可靠受理；启用时保存唯一的绝对回调截止时间。 */
   async #checkpointCallbackWait(
     delegation: Delegation,
     partialOutput: string,
   ): Promise<Delegation> {
     const acceptedAt = this.now();
+    const { callbackDeadlineAt: persistedDeadline, ...withoutDeadline } = delegation;
     const updated: Delegation = {
-      ...delegation,
+      ...withoutDeadline,
       partialOutput,
       // 恢复崩溃前已可靠投递的 callback 执行时，不得把绝对截止时间向后延长。
-      callbackDeadlineAt:
-        delegation.callbackDeadlineAt ?? acceptedAt + this.#timeouts.callbackMs,
+      ...(this.#timeouts.callbackMs > 0
+        ? { callbackDeadlineAt: persistedDeadline ?? acceptedAt + this.#timeouts.callbackMs }
+        : {}),
       version: delegation.version + 1,
       updatedAt: acceptedAt,
     };
@@ -1120,7 +1125,16 @@ export class DelegationService {
       artifacts: [],
       error: timeoutKind && timeoutReason ? timeoutReason(timeoutKind) : "Delegation cancelled",
     };
-    await this.#finish(delegation, timedOut ? "TIMED_OUT" : "CANCELLED", result);
+    await this.#finish(
+      delegation,
+      timedOut ? "TIMED_OUT" : "CANCELLED",
+      result,
+      timeoutKind === "first_activity"
+        ? "dispatch_timeout"
+        : timeoutKind === "idle"
+          ? "execution_timeout"
+          : undefined,
+    );
     return result;
   }
 
@@ -1129,6 +1143,7 @@ export class DelegationService {
     delegation: Delegation,
     status: DelegationStatus,
     result: AgentResult,
+    failureStage?: string,
   ): Promise<void> {
     const finished: Delegation = {
       ...delegation,
@@ -1151,6 +1166,7 @@ export class DelegationService {
         artifactCount: result.artifacts.length,
         resultStatus: result.status,
         hasOutput: Boolean(result.output),
+        ...(failureStage ? { failureStage } : {}),
         ...(result.error ? { error: result.error } : {}),
       },
     });

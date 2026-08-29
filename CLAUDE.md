@@ -136,4 +136,28 @@ fix(be): correct pagination boundary
 - Do not add a `.ai/` directory; agent config lives in this file and `AGENTS.md`.
 - Root docs in English; module-internal docs follow the module's existing language (often Chinese).
 
+### Database migration and release governance
+
+Treat every schema or data change as a database migration. This includes DDL and DML
+under `deploy/migrations/versions/` and any change to
+`deploy/middleware/initdb/` initialization SQL.
+
+- Before creating or editing a DDL/DML migration, check whether the user specified
+  the exact target version. If not, do not proceed with a guessed version: ask the
+  user which version to use. Never select the next version by scanning
+  `deploy/migrations/versions/`, and never decide that a monthly or release version
+  should be incremented (for example, turning `0.4.0` work into `0.4.1`, `0.4.2`, or
+  `0.5.0`) without explicit instruction.
+- When the user supplies a version, use that exact version and the repository's
+  established directory/file naming conventions. Do not invent another version to
+  avoid a conflict unless the user explicitly asks for that.
+- Do not invoke `deploy/migrations/merge_migrations.py`, manually copy/append
+  migration SQL, or otherwise merge into `deploy/middleware/initdb/` during normal
+  development. This merge is a release-governance operation owned by the version
+  administrator, who runs `deploy/migrations/merge_migrations.py` immediately before
+  tagging a release. A development task must not perform that merge implicitly.
+- Keep new migration work in its explicitly approved version directory; leave
+  `deploy/middleware/initdb/` unchanged unless the user explicitly authorizes the
+  release merge.
+
 @RTK.md

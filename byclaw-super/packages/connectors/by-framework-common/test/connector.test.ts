@@ -66,6 +66,9 @@ describe("ByFrameworkConnector", () => {
         metadata: expect.objectContaining({
           parent_run_id: "run-1",
           delegation_id: "delegation-1",
+          delegated_agent_id: "1001",
+          delegated_agent_name: "Analyst",
+          delegated_agent_type: "BYCLAW_EXE_user-1",
           caller_parent_message_id: "parent-message-1",
         }),
       }),

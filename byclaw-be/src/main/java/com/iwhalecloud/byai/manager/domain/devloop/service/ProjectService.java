@@ -11,6 +11,7 @@ import com.iwhalecloud.byai.manager.mapper.devloop.ProjectMapper;
 import com.iwhalecloud.byai.manager.qo.devloop.ProjectQo;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+
 import java.util.List;
 
 /**
@@ -26,16 +27,44 @@ public class ProjectService {
     @Autowired
     private ProjectMapper projectMapper;
 
+    /**
+     * 新增项目。
+     *
+     * @param project 项目实体
+     */
     public void save(Project project) {
         projectMapper.insert(project);
     }
 
+    /**
+     * 按主键更新项目。
+     *
+     * @param project 项目实体
+     */
     public void update(Project project) {
         projectMapper.updateById(project);
     }
 
+    /**
+     * 按项目 ID 查询。
+     *
+     * @param projectId 项目 ID
+     * @return 项目实体，不存在则返回 null
+     */
     public Project findById(Long projectId) {
         return projectMapper.selectById(projectId);
+    }
+
+    /**
+     * 按项目名称查询。
+     *
+     * @param projectName 项目名称
+     * @return 项目实体，不存在则返回 null
+     */
+    public Project findByProjectName(String projectName) {
+        LambdaQueryWrapper<Project> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(Project::getProjectName, projectName);
+        return projectMapper.selectOne(wrapper, false);
     }
 
     /**
@@ -63,7 +92,7 @@ public class ProjectService {
     /**
      * 判断项目名称是否已存在。
      *
-     * @param projectName 项目名称
+     * @param projectName      项目名称
      * @param excludeProjectId 编辑时排除自身，可为 null
      */
     public boolean existsProjectName(String projectName, Long excludeProjectId) {

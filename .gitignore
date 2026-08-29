@@ -123,3 +123,9 @@ byclaw-data/.vscode/settings.json
 .uv-cache/
 
 .pnpm-store/
+
+# AOCI index files (local only, not committed to submodule repo)
+aoci.txt
+aoci.meta.txt
+aoci.code.txt
+.aoci/

@@ -22,7 +22,8 @@ public class DigitalEmployeeQo extends AuthQo {
     private String agentType;
 
     /**
-     * all:全部,authorize-授权给我,owner-我创建的,manager-管理
+     * all:全部,authorize-授权给我,owner-我创建的,manager-管理,managerExcludingOwner-授权我管理且非我创建,
+     * manageable-我创建的或我能管理的
      */
     private String type;
 

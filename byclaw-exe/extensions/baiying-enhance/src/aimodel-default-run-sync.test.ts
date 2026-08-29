@@ -126,6 +126,37 @@ describe("aimodel-default-run-sync", () => {
         });
     });
 
+    it("notifies observers after resolving the Redis default model", async () => {
+        const deps = createDeps();
+        deps.onDefaultAimodelResolved = vi.fn();
+
+        await resolveMainDefaultAimodelOnAgentRun(deps, "main");
+
+        expect(deps.onDefaultAimodelResolved).toHaveBeenCalledWith(bundle);
+    });
+
+    it("waits for asynchronous default-model observers", async () => {
+        const deps = createDeps();
+        let releaseObserver: (() => void) | undefined;
+        deps.onDefaultAimodelResolved = vi.fn(
+            () =>
+                new Promise<void>((resolve) => {
+                    releaseObserver = resolve;
+                }),
+        );
+        let settled = false;
+
+        const pending = resolveMainDefaultAimodelOnAgentRun(deps, "main").then(() => {
+            settled = true;
+        });
+        await vi.waitFor(() => expect(deps.onDefaultAimodelResolved).toHaveBeenCalled());
+        expect(settled).toBe(false);
+
+        releaseObserver?.();
+        await pending;
+        expect(settled).toBe(true);
+    });
+
     it("triggers flush and returns override when Redis default LLM is registered by the sync", async () => {
         const cfg = {
             agents: {

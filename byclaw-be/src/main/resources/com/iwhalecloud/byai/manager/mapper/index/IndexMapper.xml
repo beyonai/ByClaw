@@ -12,6 +12,7 @@
         <result column="agent_home_url" property="agentHomeUrl" />
         <result column="avatar" property="avatar" />
         <result column="create_by" property="creatorId" />
+        <result column="creator_name" property="creatorName" />
         <result column="chat_avatar" property="chatAvatar" />
         <result column="is_top" property="isTop" />
         <result column="top_time" property="topTime" />
@@ -113,6 +114,7 @@
                a.owner_type,
                a.avatar,
                a.create_by,
+               creator.user_name as creator_name,
                b.agent_type,
                b.agent_home_url,
                b.prologue,
@@ -134,6 +136,8 @@
         from ss_resource a
                  left join ss_res_ext_dig_employee b
                      on a.resource_id = b.resource_id
+                 left join po_users creator
+                     on a.create_by = creator.user_id
                  <!-- 当前用户超级助手下的子智能体置顶信息 -->
                  left join (
                      select suas.is_top,
@@ -243,6 +247,13 @@
                     and (k.red_count &gt; 0 or a.create_by = #{userId})
                 </otherwise>
             </choose>
+            <!-- 可选数字员工类型过滤：017 为数字员工组；为空时保持历史行为 -->
+            <if test="agentType != null and agentType != ''">
+                and b.agent_type = #{agentType}
+            </if>
+            <if test="excludeEmployeeGroup == true">
+                and (b.agent_type is null or b.agent_type != '017')
+            </if>
             <!-- 关键字搜索 -->
             <if test="keyword != null and keyword != ''">
                 and UPPER(a.resource_name) like concat('%', UPPER(#{keyword}), '%')

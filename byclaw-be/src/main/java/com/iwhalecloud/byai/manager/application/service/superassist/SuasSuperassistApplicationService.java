@@ -1,19 +1,29 @@
 package com.iwhalecloud.byai.manager.application.service.superassist;
 
+import cn.hutool.core.bean.BeanUtil;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
 import com.iwhalecloud.byai.common.constants.Constants;
+import com.iwhalecloud.byai.common.constants.devloop.DeleteFlag;
+import com.iwhalecloud.byai.common.constants.devloop.MemberRole;
+import com.iwhalecloud.byai.common.constants.devloop.ProjectResourceType;
 import com.iwhalecloud.byai.common.constants.resource.ResourceBizType;
 import com.iwhalecloud.byai.common.ecrypt.Sm4Util;
+import com.iwhalecloud.byai.common.feign.client.FeignDataCloudService;
 import com.iwhalecloud.byai.common.feign.client.FeignTokenSaverService;
 import com.iwhalecloud.byai.common.feign.request.conversation.AgentPrologueDto;
+import com.iwhalecloud.byai.common.feign.request.datacloud.SubmitWorkspaceTemplateReq;
 import com.iwhalecloud.byai.common.feign.request.token.TokenSaveRequest;
+import com.iwhalecloud.byai.common.feign.response.DataCloudResponse;
+import com.iwhalecloud.byai.common.feign.response.datacloud.TemplateSubmitResp;
+import com.iwhalecloud.byai.common.feign.response.datacloud.TemplateSubmitResult;
 import com.iwhalecloud.byai.common.feign.response.token.TokenApiResponse;
 import com.iwhalecloud.byai.common.feign.response.token.TokenDto;
 import com.iwhalecloud.byai.common.feign.response.token.TokenKeyResult;
 import com.iwhalecloud.byai.common.feign.response.token.TokenPageResult;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
+import com.iwhalecloud.byai.common.jwt.JwtService;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.util.ListUtil;
@@ -21,6 +31,7 @@ import com.iwhalecloud.byai.common.util.MapParamUtil;
 import com.iwhalecloud.byai.common.util.RedisUtil;
 import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeApplicationService;
+import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
 import com.iwhalecloud.byai.manager.domain.aimodel.enums.ModelOwnerType;
 import com.iwhalecloud.byai.manager.domain.aimodel.enums.ModelProtocol;
 import com.iwhalecloud.byai.manager.domain.aimodel.enums.ModelSourceType;
@@ -30,32 +41,39 @@ import com.iwhalecloud.byai.manager.domain.auth.enums.GrantToObjType;
 import com.iwhalecloud.byai.manager.domain.auth.enums.GrantType;
 import com.iwhalecloud.byai.manager.domain.auth.enums.OperType;
 import com.iwhalecloud.byai.manager.domain.auth.service.PrivilegeGrantService;
+import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectMemberService;
+import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectResourceService;
+import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDigEmployeeService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtSkillService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceRelDetailService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
+import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.dto.aimodel.ModelQuota;
 import com.iwhalecloud.byai.manager.dto.aimodel.TokenSaver;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDTO;
+import com.iwhalecloud.byai.manager.dto.digitemploy.EmployeeGroupMemberDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.RelResourceInfo;
 import com.iwhalecloud.byai.manager.dto.digitemploy.SsResourceDTO;
+import com.iwhalecloud.byai.manager.dto.resource.ResourceExtDigEmployeeDto;
 import com.iwhalecloud.byai.manager.dto.resource.SsResExtSkillDto;
 import com.iwhalecloud.byai.manager.entity.aimodel.ByaiAimodel;
 import com.iwhalecloud.byai.manager.entity.auth.PrivilegeGrant;
+import com.iwhalecloud.byai.manager.entity.devloop.Project;
+import com.iwhalecloud.byai.manager.entity.devloop.ProjectResource;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtDigEmployee;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtSkill;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail;
 import com.iwhalecloud.byai.manager.entity.superassist.SuasSuperassist;
 import com.iwhalecloud.byai.manager.domain.superassist.service.SuasSuperassistService;
+import com.iwhalecloud.byai.manager.entity.users.Users;
 import com.iwhalecloud.byai.manager.qo.aimodel.DefaultAiModelQo;
 import com.iwhalecloud.byai.manager.qo.aimodel.FindAiModelQo;
 import com.iwhalecloud.byai.state.application.service.dataset.DatasetApplicationService;
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+
+import java.util.*;
+
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import org.slf4j.Logger;
@@ -109,6 +127,28 @@ public class SuasSuperassistApplicationService {
     @Autowired
     private DigitalEmployeeApplicationService digitalEmployeeApplicationService;
 
+    @Autowired
+    private ProjectService projectService;
+
+    @Autowired
+    private ProjectMemberService projectMemberService;
+
+    @Autowired
+    private ProjectResourceService projectResourceService;
+
+    @Autowired
+    private FeignDataCloudService feignDataCloudService;
+
+    @Autowired
+    private UserService userService;
+
+    @Autowired
+    private LoginApplicationService loginApplicationService;
+
+    @Autowired
+    private JwtService jwtService;
+
+
     /**
      * 初始化用户超级助手和知识库
      *
@@ -119,15 +159,14 @@ public class SuasSuperassistApplicationService {
 
         try {
 
-            SuasSuperassist suasSuperassist = this.createDefaultResourcesIfNotExists(loginInfo, false);
+            SuasSuperassist suasSuperassist = this.createDefaultResourcesIfNotExists(loginInfo);
 
             loginInfo.setSessionDatasetId(suasSuperassist.getSessionDatasetId());
             loginInfo.setDefaultDigEmployeeId(suasSuperassist.getDefaultDigEmployeeId());
 
             return suasSuperassist;
 
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             logger.error("初始化超级助手知识库失败:{}", e.getMessage(), e);
             // 返回 null 让调用方知道需要从数据库重新查询
             return null;
@@ -137,8 +176,11 @@ public class SuasSuperassistApplicationService {
 
     /**
      * 初始化用户超级助手、默认个人知识库和默认超级助手数字员工。
+     *
+     * @param loginInfo 用户登陆信息
+     * @return 超级助手信息
      */
-    public SuasSuperassist createDefaultResourcesIfNotExists(LoginInfo loginInfo, boolean throwExceptions) {
+    public SuasSuperassist createDefaultResourcesIfNotExists(LoginInfo loginInfo) {
 
         CurrentUserHolder.setLoginInfo(loginInfo);
 
@@ -166,8 +208,7 @@ public class SuasSuperassistApplicationService {
 
             // 更新超级助手
             suasSuperassistService.updateById(suasSuperassist);
-        }
-        else {
+        } else {
 
             suasSuperassist = new SuasSuperassist();
             suasSuperassist.setSuperassistId(sequenceService.nextVal());
@@ -195,16 +236,19 @@ public class SuasSuperassistApplicationService {
     }
 
     /**
-     * 初始化默认数字员工
+     * 按模板初始化默认数字员工。
      *
-     * @param loginInfo 登陆用户信息
+     * @param loginInfo        登陆用户信息
+     * @param defaultDatasetId 默认个人知识库 ID
+     * @return 默认超级助手数字员工资源 ID
      */
     private Long initDigEmployeeByTemplate(LoginInfo loginInfo, Long defaultDatasetId) {
         Long userId = loginInfo.getUserId();
         Long defaultDigEmployeeId = loginInfo.getDefaultDigEmployeeId();
 
         // 获取初始化模板
-        JSONArray initTemplates = this.getInitTemplateArray(loginInfo);
+        String paramCode = "INIT_DEFAULT_DIGEMPLOYEE_TEMPLATE";
+        JSONArray initTemplates = this.getInitTemplateArray(loginInfo, paramCode);
 
         if (ListUtil.isEmpty(initTemplates)) {
             return defaultDigEmployeeId;
@@ -250,8 +294,7 @@ public class SuasSuperassistApplicationService {
             if (Constants.YES_VALUE_Y.equalsIgnoreCase(isRelDefaultDataset)) {
                 digitalEmployeeDTO.setRelIds(List.of(defaultDatasetId));
                 digitalEmployeeDTO.setPrologue(this.buildPrologue(prologue, modelInfo, defaultDatasetId));
-            }
-            else {
+            } else {
                 digitalEmployeeDTO.setRelIds(new ArrayList<>());
                 digitalEmployeeDTO.setPrologue(this.buildPrologue(prologue, modelInfo, null));
             }
@@ -282,9 +325,9 @@ public class SuasSuperassistApplicationService {
      *
      * @param ssResource 资源信息
      * @param jsonObject 模板资源配置
-     * @param loginInfo 登陆信息
+     * @param loginInfo  登陆信息
      */
-    private void compareDigEmployee(SsResource ssResource, JSONObject jsonObject, LoginInfo loginInfo) {
+    private ResourceExtDigEmployeeDto compareDigEmployee(SsResource ssResource, JSONObject jsonObject, LoginInfo loginInfo) {
 
         try {
             String resourceDesc = jsonObject.getString("resourceDesc");
@@ -302,8 +345,7 @@ public class SuasSuperassistApplicationService {
                     ssResExtDigEmployeeService.update(ssResExtDigEmployee);
                 }
 
-            }
-            else {
+            } else {
 
                 ssResExtDigEmployee = new SsResExtDigEmployee();
                 ssResExtDigEmployee.setResourceId(ssResource.getResourceId());
@@ -314,19 +356,26 @@ public class SuasSuperassistApplicationService {
             }
 
             digitalEmployeeApplicationService.syncExistingDigEmployeeConfigToRedisQuietly(ssResource.getResourceId());
-        }
-        catch (Exception e) {
+
+
+            ResourceExtDigEmployeeDto resourceExtDigEmployeeDto = new ResourceExtDigEmployeeDto();
+            BeanUtil.copyProperties(ssResource, resourceExtDigEmployeeDto);
+            resourceExtDigEmployeeDto.setSsResExtDigEmployee(ssResExtDigEmployee);
+            return resourceExtDigEmployeeDto;
+
+        } catch (Exception e) {
             logger.error(e.getMessage(), e);
+            return null;
         }
     }
 
     /**
      * 添加关联关系
      *
-     * @param resourceId 资源
+     * @param resourceId    资源
      * @param relResourceId 关联资源
-     * @param userId 用户
-     * @param comAcctId 企业标识
+     * @param userId        用户
+     * @param comAcctId     企业标识
      */
     private void saveSsResourceRelDetail(Long resourceId, Long relResourceId, Long userId, Long comAcctId) {
         SsResourceRelDetail ssResourceRelDetail = new SsResourceRelDetail();
@@ -341,14 +390,15 @@ public class SuasSuperassistApplicationService {
     }
 
     /**
-     * 对比数字员工扩展属性
+     * 对比并补齐数字员工扩展属性及关联技能/工具。
      *
-     * @param ssResExtDigEmployee 数据员工扩展信息
-     * @param jsonObject 当前模板数据
-     * @return boolean
+     * @param ssResExtDigEmployee 数字员工扩展信息
+     * @param jsonObject          当前模板数据
+     * @param loginInfo           登陆信息
+     * @return 是否发生变更
      */
     private boolean compareExtDigEmployee(SsResExtDigEmployee ssResExtDigEmployee, JSONObject jsonObject,
-        LoginInfo loginInfo) {
+                                          LoginInfo loginInfo) {
 
         Long userId = loginInfo.getUserId();
         Long comAcctId = loginInfo.getComAcctId();
@@ -430,10 +480,11 @@ public class SuasSuperassistApplicationService {
     }
 
     /**
-     * 构奸关联工具编码
+     * 解析并关联工具编码到数字员工。
      *
      * @param digitalEmployeeDTO 数字员工新增对象
-     * @param relToolCodes 工具编码
+     * @param relToolCodes       工具编码，逗号分隔
+     * @param userId             用户标识
      */
     private void handleRelToolCodes(DigitalEmployeeDTO digitalEmployeeDTO, String relToolCodes, Long userId) {
 
@@ -477,8 +528,8 @@ public class SuasSuperassistApplicationService {
      * 处理关联技能
      *
      * @param digitalEmployeeDTO 保存入参
-     * @param relSkillCodes 关联技能编码
-     * @param userId 用户标识
+     * @param relSkillCodes      关联技能编码
+     * @param userId             用户标识
      */
     private void handleRelSkillCodes(DigitalEmployeeDTO digitalEmployeeDTO, String relSkillCodes, Long userId) {
 
@@ -502,7 +553,7 @@ public class SuasSuperassistApplicationService {
      * 授权资源
      *
      * @param ssResource 资源
-     * @param userId 用户标识
+     * @param userId     用户标识
      */
     private void authResource(SsResource ssResource, Long userId) {
 
@@ -557,11 +608,12 @@ public class SuasSuperassistApplicationService {
     }
 
     /**
-     * 设置其他初始化数字员工模型信息
+     * 组装数字员工开场白，写入模型信息及可选默认知识库。
      *
-     * @param prologue 描述
-     * @param modelInfo 默认模型协议
-     * @return String
+     * @param prologue         开场白 JSON
+     * @param modelInfo        默认模型信息
+     * @param defaultDatasetId 默认知识库 ID，可为 null
+     * @return 组装后的开场白 JSON
      */
     private String buildPrologue(String prologue, AgentPrologueDto.ModelInfo modelInfo, Long defaultDatasetId) {
         if (StringUtil.isEmpty(prologue)) {
@@ -585,9 +637,10 @@ public class SuasSuperassistApplicationService {
     }
 
     /**
-     * 初始化模型信息
+     * 按模型协议解析或创建默认模型信息。
      *
-     * @return AgentPrologueDto
+     * @param modelProtocol 模型协议
+     * @return 模型信息，默认模型不存在时返回 null
      */
     private AgentPrologueDto.ModelInfo buildDefaultModelInfo(String modelProtocol) {
 
@@ -609,20 +662,16 @@ public class SuasSuperassistApplicationService {
             // 如果没有初始化过，则调用接口创建
             if (ListUtil.isNotEmpty(tokenSaverModels)) {
                 byaiAimodel = tokenSaverModels.getFirst();
-            }
-            else {
+            } else {
                 byaiAimodel = this.createTokenSaverModel(tokenSaver, modelProtocol);
             }
-        }
-        else if (ModelProtocol.ANTHROPIC.equalsIgnoreCase(modelProtocol)) {
+        } else if (ModelProtocol.ANTHROPIC.equalsIgnoreCase(modelProtocol)) {
             DefaultAiModelQo defaultAiModelQo = new DefaultAiModelQo();
             defaultAiModelQo.setModelProtocol(modelProtocol);
             defaultAiModelQo.setModelType(Constants.DEFAULT_MODEL_TYPE_LLM);
             defaultAiModelQo.setStatus(Constants.STATUS_ENABLED);
             byaiAimodel = byaiAimodelService.getDefaultAiModel(defaultAiModelQo);
-        }
-
-        else {
+        } else {
             DefaultAiModelQo defaultAiModelQo = new DefaultAiModelQo();
             defaultAiModelQo.setModelProtocol(modelProtocol);
             defaultAiModelQo.setModelType(Constants.DEFAULT_MODEL_TYPE_LLM);
@@ -645,9 +694,11 @@ public class SuasSuperassistApplicationService {
     }
 
     /**
-     * 创建TokenSaver模型
+     * 创建 TokenSaver 个人模型。
      *
-     * @return ByaiAimodel
+     * @param tokenSaver    TokenSaver 配置
+     * @param modelProtocol 模型协议
+     * @return 新建的模型实体
      */
     private ByaiAimodel createTokenSaverModel(TokenSaver tokenSaver, String modelProtocol) {
 
@@ -682,8 +733,7 @@ public class SuasSuperassistApplicationService {
         newByaiAimodel.setModelName(tokenName);
         if (ModelProtocol.ANTHROPIC.equalsIgnoreCase(modelProtocol)) {
             newByaiAimodel.setUrl(tokenSaver.getAnthropicApiUrl());
-        }
-        else {
+        } else {
             newByaiAimodel.setUrl(tokenSaver.getApiUrl());
         }
         newByaiAimodel.setModelProtocol(modelProtocol);
@@ -705,7 +755,7 @@ public class SuasSuperassistApplicationService {
      * 模型内置参数
      *
      * @param modelProtocol 模型端点
-     * @param apiKey 密钥
+     * @param apiKey        密钥
      * @return String
      */
     private String buildInParams(String modelProtocol, String apiKey) {
@@ -715,8 +765,7 @@ public class SuasSuperassistApplicationService {
             Map<String, String> keyMap = Map.of("key", "x-api-key", "value", apiKey);
             Map<String, String> contentTypeMap = Map.of("key", "Content-Type", "value", "application/json");
             inParams.put("headers", List.of(keyMap, contentTypeMap));
-        }
-        else {
+        } else {
             inParams.put("headers", List.of(Map.of("key", "", "value", "")));
         }
         inParams.put("connectTimeoutSec", 32);
@@ -745,16 +794,19 @@ public class SuasSuperassistApplicationService {
     }
 
     /**
-     * 获取初始化模板信息，替换好用户信息，根据当前语言环境获取
+     * 获取初始化模板，替换用户占位符，并按当前语言环境取对应数组。
      *
      * @param loginInfo 登陆信息
-     * @return String
+     * @param paramCode 系统配置参数编码
+     * @return 模板 JSON 数组
      */
-    private JSONArray getInitTemplateArray(LoginInfo loginInfo) {
+    private JSONArray getInitTemplateArray(LoginInfo loginInfo, String paramCode) {
 
-        String paramCode = "INIT_DEFAULT_DIGEMPLOYEE_TEMPLATE";
 
         String initTemplateStr = byaiSystemConfigService.findByParamCode(paramCode);
+        if (StringUtil.isEmpty(initTemplateStr)) {
+            return new JSONArray();
+        }
 
         Long userId = loginInfo.getUserId();
         String userCode = loginInfo.getUserCode();
@@ -770,13 +822,17 @@ public class SuasSuperassistApplicationService {
         // 选择中英文模板进行切换
         if (I18nUtil.ENGLISH.equalsIgnoreCase(loginInfo.getLanguage())) {
             return jsonObjectTemplate.getJSONArray(I18nUtil.ENGLISH);
-        }
-        else {
+        } else {
             return jsonObjectTemplate.getJSONArray(I18nUtil.CHINSES);
         }
 
     }
 
+    /**
+     * 解析当前用户默认数字员工 ID；优先取登录态缓存，否则回退查超级助手表。
+     *
+     * @return 默认数字员工资源 ID，不存在则返回 null
+     */
     public Long resolveCurrentUserDefaultDigitalEmployeeId() {
         Long defaultDigEmployeeId = CurrentUserHolder.getDefaultDigEmployeeId();
         if (defaultDigEmployeeId != null) {
@@ -791,6 +847,233 @@ public class SuasSuperassistApplicationService {
         }
         SuasSuperassist suasSuperassist = suasSuperassistService.findById(assistantId);
         return suasSuperassist == null ? null : suasSuperassist.getDefaultDigEmployeeId();
+    }
+
+    /**
+     * 初始化专家团
+     *
+     * @param loginInfo 登陆信息
+     */
+    public void initExpertTeams(LoginInfo loginInfo) {
+
+        try {
+            // 获取初始化模板
+            String paramCode = "INIT_DEFAULT_PROJECT_EXPERT_TEAMS_TEMPLATE";
+            JSONArray initTemplates = this.getInitTemplateArray(loginInfo, paramCode);
+
+
+            for (int i = 0; initTemplates != null && i < initTemplates.size(); i++) {
+                JSONObject jsonObject = initTemplates.getJSONObject(i);
+
+                //初始化项目
+                Project project = this.initProject(jsonObject, loginInfo);
+
+                // 将用户加入项目
+                boolean isMember = projectMemberService.isMember(project.getProjectId(), loginInfo.getUserId());
+                if (!isMember) {
+                    projectMemberService.addMember(project.getProjectId(), loginInfo.getUserId(), MemberRole.MEMBER);
+                }
+
+                //初始化专家团
+                Map<String, AgentPrologueDto.ModelInfo> modelInfoMap = new HashMap<String, AgentPrologueDto.ModelInfo>();
+
+                JSONArray expertTeams = jsonObject.getJSONArray("expertTeams");
+                for (int j = i; expertTeams != null && j < expertTeams.size(); j++) {
+
+                    JSONObject expertTeamTemplate = expertTeams.getJSONObject(j);
+
+                    //初始化数字员工
+                    List<EmployeeGroupMemberDTO> employeeGroupMembers = new ArrayList<>();
+                    JSONArray digitalEmployees = expertTeamTemplate.getJSONArray("digitalEmployees");
+                    for (int k = 0; digitalEmployees != null && k < digitalEmployees.size(); k++) {
+
+                        JSONObject relEmployeeTemplate = digitalEmployees.getJSONObject(k);
+                        ResourceExtDigEmployeeDto relEmployee = this.createEmployeeByTemplate(relEmployeeTemplate, loginInfo, modelInfoMap, Collections.emptyList());
+                        SsResExtDigEmployee ssResExtDigEmployee = relEmployee.getSsResExtDigEmployee();
+
+                        EmployeeGroupMemberDTO employeeGroupMemberDTO = new EmployeeGroupMemberDTO();
+                        employeeGroupMemberDTO.setResourceId(relEmployee.getResourceId());
+                        employeeGroupMemberDTO.setResourceCode(relEmployee.getResourceCode());
+                        employeeGroupMemberDTO.setName(relEmployee.getResourceName());
+                        employeeGroupMemberDTO.setDescription(relEmployee.getResourceDesc());
+                        employeeGroupMemberDTO.setAvatar(relEmployee.getAvatar());
+                        employeeGroupMemberDTO.setTeamRole(relEmployeeTemplate.getString("teamRole"));
+                        employeeGroupMemberDTO.setSortOrder(k);
+                        employeeGroupMemberDTO.setWorkerAgentType(relEmployee.getWorkerAgentType());
+                        employeeGroupMemberDTO.setCreateType(ssResExtDigEmployee.getCreateType());
+                        employeeGroupMemberDTO.setIntegrationType(ssResExtDigEmployee.getIntegrationType());
+                        employeeGroupMemberDTO.setAgentType(ssResExtDigEmployee.getAgentType());
+                        employeeGroupMembers.add(employeeGroupMemberDTO);
+                    }
+
+                    //创建专家团
+                    ResourceExtDigEmployeeDto expertTeamEmployee = this.createEmployeeByTemplate(expertTeamTemplate, loginInfo, modelInfoMap, employeeGroupMembers);
+                    logger.info("初始化专家团成功:{}", JSON.toJSONString(expertTeamEmployee));
+
+                }
+            }
+        } catch (Exception e) {
+            logger.error(e.getMessage(), e);
+        }
+    }
+
+
+    /**
+     * 模拟模板创建数字员工
+     *
+     * @param jsonObject   模板对象
+     * @param loginInfo    登陆信息
+     * @param modelInfoMap 模型缓存
+     * @return SsResource
+     */
+    private ResourceExtDigEmployeeDto createEmployeeByTemplate(JSONObject jsonObject, LoginInfo loginInfo, Map<String, AgentPrologueDto.ModelInfo> modelInfoMap, List<EmployeeGroupMemberDTO> employeeGroupMembers) {
+
+        Long userId = loginInfo.getUserId();
+        Long defaultDatasetId = loginInfo.getSessionDatasetId();
+
+        String resourceCode = jsonObject.getString("resourceCode");
+        String modelProtocol = jsonObject.getString("modelProtocol");
+        String relSkillCodes = jsonObject.getString("relSkillCodes");
+        String relToolCodes = jsonObject.getString("relToolCodes");
+        String isRelDefaultDataset = jsonObject.getString("isRelDefaultDataset");
+
+        // 先从当前map获取，没有再查或者创建，不用重复查询
+        AgentPrologueDto.ModelInfo modelInfo = modelInfoMap.get(modelProtocol);
+        if (modelInfo == null) {
+            modelInfo = this.buildDefaultModelInfo(modelProtocol);
+            modelInfoMap.put(modelProtocol, modelInfo);
+        }
+
+
+        // 如果已经存在了，不再进行初始化
+        SsResource ssResource = ssResourceService.findByIdOrCode(null, resourceCode);
+        if (ssResource != null) {
+            // 对技能进行对比
+            return this.compareDigEmployee(ssResource, jsonObject, loginInfo);
+        }
+
+        DigitalEmployeeDTO digitalEmployeeDTO = new DigitalEmployeeDTO();
+        MapParamUtil.copyProperties(jsonObject, digitalEmployeeDTO);
+        digitalEmployeeDTO.setRelIds(new ArrayList<>());
+        digitalEmployeeDTO.setRelResourceInfoList(new ArrayList<>());
+        digitalEmployeeDTO.setEmployeeGroupMembers(employeeGroupMembers);
+
+        // 其他类型数字员工设置默认模型
+        String prologue = digitalEmployeeDTO.getPrologue();
+
+        // 是否关联默认知识库
+        if (Constants.YES_VALUE_Y.equalsIgnoreCase(isRelDefaultDataset)) {
+            digitalEmployeeDTO.setRelIds(List.of(defaultDatasetId));
+            digitalEmployeeDTO.setPrologue(this.buildPrologue(prologue, modelInfo, defaultDatasetId));
+        } else {
+            digitalEmployeeDTO.setRelIds(new ArrayList<>());
+            digitalEmployeeDTO.setPrologue(this.buildPrologue(prologue, modelInfo, null));
+        }
+
+        // 关联工具agent|tool|view
+        this.handleRelToolCodes(digitalEmployeeDTO, relToolCodes, userId);
+
+        // 处理关联技能
+        this.handleRelSkillCodes(digitalEmployeeDTO, relSkillCodes, userId);
+
+        // 保存数字员工
+        ResourceExtDigEmployeeDto extDigEmployeeDto = digitalEmployeeApplicationService.saveDigitalEmployee(digitalEmployeeDTO);
+
+        // 同步openClaw工作空间：透传原始入参，relTools / relPrompt 等不入 DB 的运行期字段需要从入参直接进 JSON。
+        digitalEmployeeApplicationService.synOpenClawWorkSpace(extDigEmployeeDto.getResourceId(), digitalEmployeeDTO);
+
+        return extDigEmployeeDto;
+    }
+
+
+    /**
+     * 按模板初始化项目；同名项目已存在则直接返回。
+     *
+     * @param jsonObject 项目模板配置
+     * @return 项目实体
+     */
+    private Project initProject(JSONObject jsonObject, LoginInfo loginInfo) {
+
+        String projectName = jsonObject.getString("projectName");
+        String projectType = jsonObject.getString("projectType");
+        String description = jsonObject.getString("description");
+        String isShare = jsonObject.getString("isShare");
+
+        JSONArray resources = jsonObject.getJSONArray("resources");
+
+
+        //不存在则创建
+        Project project = projectService.findByProjectName(projectName);
+        if (project == null) {
+            project = new Project();
+            project.setProjectId(sequenceService.nextVal());
+            project.setProjectName(projectName);
+            project.setProjectType(projectType);
+            project.setDescription(description);
+            project.setIsShare(isShare);
+            project.setCreateTime(new Date());
+            project.setCreateBy(loginInfo.getUserId());
+            projectService.save(project);
+
+
+            //初始化本体对象
+            List<String> objectCodes = this.initSubmitWorkspaceTemplate();
+            logger.info("初始化对象:{}", objectCodes);
+
+            for (int i = 0; resources != null && i < resources.size(); i++) {
+                JSONObject resourceJSONObject = resources.getJSONObject(i);
+
+                String resourceCode = resourceJSONObject.getString("resourceCode");
+
+                SsResource ssResource = ssResourceService.findByIdOrCode(null, resourceCode);
+
+                ProjectResource resource = new ProjectResource();
+                resource.setId(sequenceService.nextVal());
+                resource.setProjectId(project.getProjectId());
+                resource.setResourceType(ProjectResourceType.fromResourceBizType(ssResource.getResourceBizType()));
+                resource.setResourceId(ssResource.getResourceId());
+                resource.setResourceName(ssResource.getResourceName());
+                resource.setSortNo(i);
+                resource.setCreateBy(loginInfo.getUserId());
+                resource.setCreateTime(new Date());
+                resource.setDeleteFlag(DeleteFlag.NORMAL);
+                projectResourceService.save(resource);
+            }
+        }
+
+        return project;
+    }
+
+
+    /**
+     * 调用 DataCloud 提交工作区模板，初始化本体。
+     *
+     * @return 首个模板提交结果中的对象编码列表，无结果时返回空列表
+     */
+    private List<String> initSubmitWorkspaceTemplate() {
+
+        Users users = userService.findByUserCode("adminvip");
+
+        Map<String, String> headers = new HashMap<>();
+        headers.put("X-User-Code", users.getUserCode());
+
+        LoginInfo loginInfo = loginApplicationService.getLoginInfo(users.getUserCode());
+        headers.put("Beyond-Token", jwtService.createJwt(loginInfo));
+        headers.put("Content-Type", "application/json");
+
+        SubmitWorkspaceTemplateReq submitTemplateReq = new SubmitWorkspaceTemplateReq();
+        submitTemplateReq.setPersonal(false);
+        submitTemplateReq.setSqlite(false);
+        submitTemplateReq.setReuseTargetTables(true);
+        submitTemplateReq.setConfirmDropTargetTables(false);
+        logger.info("初始化DataCloud本体请求:{}", JSON.toJSONString(submitTemplateReq));
+        DataCloudResponse<TemplateSubmitResp> dataCloudResponse = feignDataCloudService.submitWorkspaceTemplates(submitTemplateReq, headers);
+        logger.info("初始化DataCloud本体返回:{}", JSON.toJSONString(dataCloudResponse));
+
+        TemplateSubmitResp templateSubmitResp = dataCloudResponse.getData();
+        List<TemplateSubmitResult> results = templateSubmitResp.getResults();
+
+        return ListUtil.isNotEmpty(results) ? results.getFirst().getObjectCodes() : Collections.emptyList();
     }
 
 }

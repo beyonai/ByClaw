@@ -8,7 +8,7 @@ import {
   cmdCrawlSeed, cmdCrawlNext, cmdCrawlMark, cmdCrawlStatus,
 } from './crawl-state.mjs';
 import { runPublicDiscover } from './public-discovery.mjs';
-import { sessionPaths } from './session.mjs';
+import { resolveSandboxPath, sessionPaths } from './session.mjs';
 
 const RESEARCH_HANDLERS = {
   init: (args) => cmdInit(args),
@@ -67,17 +67,23 @@ function status(paths, args) {
 }
 
 export function executeLocalCommand(command, args) {
+  const normalizedArgs = {
+    ...args,
+    'session-dir': resolveSandboxPath(args['session-dir'], '--session-dir', {
+      currentSessionRoot: args['session-root'],
+    }),
+  };
   const researchHandler = RESEARCH_HANDLERS[command];
   if (researchHandler) {
-    return researchHandler(args);
+    return researchHandler(normalizedArgs);
   }
-  const paths = sessionPaths(args['session-dir']);
+  const paths = sessionPaths(normalizedArgs['session-dir']);
   if (command === 'status') {
-    return status(paths, args);
+    return status(paths, normalizedArgs);
   }
   const sessionHandler = SESSION_HANDLERS[command];
   if (sessionHandler) {
-    return sessionHandler(paths, args);
+    return sessionHandler(paths, normalizedArgs);
   }
   throw new Error(`未知命令: ${command}`);
 }

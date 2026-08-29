@@ -4,7 +4,7 @@ import { createFeishuAdapter } from './enterprise/adapters/feishu.mjs';
 import { createWecomAdapter } from './enterprise/adapters/wecom.mjs';
 import { dispatchEnterprise, dispatchEnterpriseBatch, parseSearchBatchRequests } from './enterprise/dispatcher.mjs';
 import { createArtifactWriter } from './enterprise/shared/artifact-writer.mjs';
-import { loadSession, sessionPaths } from './session.mjs';
+import { loadSession, resolveSandboxPath, sessionPaths } from './session.mjs';
 import { lstat, readFile, realpath } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 
@@ -43,10 +43,47 @@ function requireValue(values, key) {
   return value;
 }
 
-function requireAbsoluteOutputDir(values) {
-  const outputDir = requireValue(values, 'output-dir');
-  if (!isAbsolute(outputDir)) throw new Error('--output-dir must be an absolute path');
-  return outputDir;
+const EXTERNAL_PATHS_BY_COMMAND = {
+  search: ['parent-session-dir', 'output-dir'],
+  'search-all': ['parent-session-dir', 'output-root'],
+  materialize: ['session-dir', 'output-dir'],
+  resource: ['parent-session-dir', 'output-dir'],
+  'resume-resource': ['session-dir', 'output-dir'],
+  'wecom-smartpage': ['parent-session-dir', 'output-dir'],
+  'feishu-minutes': ['parent-session-dir', 'output-dir'],
+};
+
+export function normalizeEnterprisePaths(command, values) {
+  const pathKeys = EXTERNAL_PATHS_BY_COMMAND[command];
+  if (!pathKeys) throw new Error(`unsupported enterprise command: ${command || '(missing)'}`);
+  const normalized = { ...values };
+  for (const key of pathKeys) {
+    normalized[key] = resolveSandboxPath(requireValue(values, key), `--${key}`, {
+      currentSessionRoot: values['session-root'],
+    });
+  }
+  if (command === 'search') {
+    normalized['output-dir'] = resolveEnterpriseOutputRoot(
+      normalized['parent-session-dir'], normalized['output-dir'],
+    );
+  }
+  return normalized;
+}
+
+export function resolveEnterpriseOutputRoot(parentSessionDir, requestedOutputDir) {
+  if (!isAbsolute(parentSessionDir) || !isAbsolute(requestedOutputDir)) {
+    throw new Error('enterprise session paths must be absolute');
+  }
+  const parent = resolve(parentSessionDir);
+  const requested = resolve(requestedOutputDir);
+  const rawRoot = resolve(parent, 'raw');
+  const fromRaw = relative(rawRoot, requested);
+  if (requested === parent
+    || requested === rawRoot
+    || (fromRaw && fromRaw !== '..' && !fromRaw.startsWith(`..${sep}`) && !isAbsolute(fromRaw))) {
+    return parent;
+  }
+  return requested;
 }
 
 export function assertEnterpriseScope(parentSessionDir, requestedSources) {
@@ -174,11 +211,11 @@ function help() {
     usage: 'knowledge-collection.mjs enterprise search|search-all|materialize|resource|resume-resource [options]',
     defaults: 'search defaults: limit 50, concurrency 4, cursor null, metadata-only false; search-all defaults: sources dingtalk,feishu,wecom,ima, limit 50, concurrency 4, metadata-only true',
     commands: {
-      search: '--parent-session-dir <absolute-path> --source dingtalk|feishu|wecom|ima --query <query> --output-dir <absolute-path> [--limit 1..500] [--concurrency 1..16] [--cursor <cursor>] [--metadata-only [true|false]] [--source-options <json>]',
-      searchAll: '--parent-session-dir <absolute-path> [--sources dingtalk,feishu,wecom,ima] --query <query> --output-root <absolute-path> [--limit 1..500] [--concurrency 1..16] [--metadata-only [true|false]]; defaults to all sources and metadata-only; continues after a connector auth failure',
-      materialize: '--source dingtalk|feishu|ima --session-dir <metadata-only-session> --item-ids <id[,id...]> --output-dir <new-absolute-path> [--concurrency 1..16]',
-      resource: '--parent-session-dir <absolute-path> --source dingtalk|feishu|wecom|ima --url <http(s)-url> --output-dir <absolute-path> [--minute-token <token> for feishu]',
-      resumeResource: '--source wecom --session-dir <partial-session> --output-dir <new-absolute-path>',
+      search: '--session-root </by/.sessions/sessionId> --parent-session-dir <sandbox-path> --source dingtalk|feishu|wecom|ima --query <query> --output-dir <sandbox-path; same resolved path as parent-session-dir> [--limit 1..500] [--concurrency 1..16] [--cursor <cursor>] [--metadata-only [true|false]] [--source-options <json>]',
+      searchAll: '--session-root </by/.sessions/sessionId> --parent-session-dir <sandbox-path> [--sources dingtalk,feishu,wecom,ima] --query <query> --output-root <sandbox-path> [--limit 1..500] [--concurrency 1..16] [--metadata-only [true|false]]; defaults to all sources and metadata-only; continues after a connector auth failure',
+      materialize: '--session-root </by/.sessions/sessionId> --source dingtalk|feishu|ima --session-dir <sandbox-path> --item-ids <id[,id...]> --output-dir <sandbox-path> [--concurrency 1..16]',
+      resource: '--session-root </by/.sessions/sessionId> --parent-session-dir <sandbox-path> --source dingtalk|feishu|wecom|ima --url <http(s)-url> --output-dir <sandbox-path> [--minute-token <token> for feishu]',
+      resumeResource: '--session-root </by/.sessions/sessionId> --source wecom --session-dir <sandbox-path> --output-dir <sandbox-path>',
       legacy: 'wecom-smartpage and feishu-minutes remain supported and require --parent-session-dir',
     },
   };
@@ -187,7 +224,9 @@ function help() {
 function commandSchema() {
   const source = { type: 'string', enum: ['dingtalk', 'feishu', 'wecom', 'ima'] };
   const absolutePath = { type: 'string', format: 'absolute-path' };
-  const parentSession = { 'parent-session-dir': absolutePath };
+  const sandboxPath = { type: 'string', format: 'sandbox-path' };
+  const parentSession = { 'parent-session-dir': sandboxPath };
+  const currentSession = { 'session-root': absolutePath };
   const positiveLimit = { type: 'integer', minimum: 1, maximum: 500, default: 50 };
   const concurrency = { type: 'integer', minimum: 1, maximum: 16, default: 4 };
   return {
@@ -198,23 +237,23 @@ function commandSchema() {
     commands: {
       search: {
         type: 'object', additionalProperties: false, required: ['parent-session-dir', 'source', 'query', 'output-dir'],
-        properties: { ...parentSession, source, query: { type: 'string', minLength: 1 }, 'output-dir': absolutePath, limit: positiveLimit, concurrency, cursor: { type: 'string' }, 'metadata-only': { type: 'boolean', default: false }, 'source-options': { type: 'object', cliEncoding: 'json' } },
+        properties: { ...parentSession, ...currentSession, source, query: { type: 'string', minLength: 1 }, 'output-dir': sandboxPath, limit: positiveLimit, concurrency, cursor: { type: 'string' }, 'metadata-only': { type: 'boolean', default: false }, 'source-options': { type: 'object', cliEncoding: 'json' } },
       },
       'search-all': {
         type: 'object', additionalProperties: false, required: ['parent-session-dir', 'query', 'output-root'],
-        properties: { ...parentSession, sources: { type: 'array', items: source, minItems: 1, uniqueItems: true, cliEncoding: 'comma-separated', default: ['dingtalk', 'feishu', 'wecom', 'ima'] }, query: { type: 'string', minLength: 1 }, 'output-root': absolutePath, limit: positiveLimit, concurrency, 'metadata-only': { type: 'boolean', default: true } },
+        properties: { ...parentSession, ...currentSession, sources: { type: 'array', items: source, minItems: 1, uniqueItems: true, cliEncoding: 'comma-separated', default: ['dingtalk', 'feishu', 'wecom', 'ima'] }, query: { type: 'string', minLength: 1 }, 'output-root': sandboxPath, limit: positiveLimit, concurrency, 'metadata-only': { type: 'boolean', default: true } },
       },
       materialize: {
         type: 'object', additionalProperties: false, required: ['source', 'session-dir', 'item-ids', 'output-dir'],
-        properties: { source: { ...source, enum: ['dingtalk', 'feishu', 'ima'] }, 'session-dir': absolutePath, 'item-ids': { type: 'array', minItems: 1, uniqueItems: true, items: { type: 'string', minLength: 1 }, cliEncoding: 'comma-separated' }, 'output-dir': absolutePath, concurrency },
+        properties: { ...currentSession, source: { ...source, enum: ['dingtalk', 'feishu', 'ima'] }, 'session-dir': sandboxPath, 'item-ids': { type: 'array', minItems: 1, uniqueItems: true, items: { type: 'string', minLength: 1 }, cliEncoding: 'comma-separated' }, 'output-dir': sandboxPath, concurrency },
       },
       resource: {
         type: 'object', additionalProperties: false, required: ['parent-session-dir', 'source', 'url', 'output-dir'],
-        properties: { ...parentSession, source, url: { type: 'string', format: 'http-url' }, 'output-dir': absolutePath, 'minute-token': { type: 'string', minLength: 1 } },
+        properties: { ...parentSession, ...currentSession, source, url: { type: 'string', format: 'http-url' }, 'output-dir': sandboxPath, 'minute-token': { type: 'string', minLength: 1 } },
       },
       'resume-resource': {
         type: 'object', additionalProperties: false, required: ['source', 'session-dir', 'output-dir'],
-        properties: { source: { type: 'string', enum: ['wecom'] }, 'session-dir': absolutePath, 'output-dir': absolutePath },
+        properties: { ...currentSession, source: { type: 'string', enum: ['wecom'] }, 'session-dir': sandboxPath, 'output-dir': sandboxPath },
       },
     },
   };
@@ -231,9 +270,11 @@ async function main() {
     return;
   }
   if (command === 'wecom-smartpage') {
-    assertEnterpriseScope(requireValue(values, 'parent-session-dir'), ['wecom']);
+    const normalizedValues = normalizeEnterprisePaths(command, values);
+    const parentSessionDir = normalizedValues['parent-session-dir'];
+    assertEnterpriseScope(parentSessionDir, ['wecom']);
     const url = requireValue(values, 'url');
-    const outputDir = requireAbsoluteOutputDir(values);
+    const outputDir = normalizedValues['output-dir'];
     const outcome = await createWecomAdapter({
       bin: process.env.WECOM_CLI_BIN || 'wecom-cli',
       env: process.env,
@@ -242,10 +283,12 @@ async function main() {
     return;
   }
   if (command === 'feishu-minutes') {
-    assertEnterpriseScope(requireValue(values, 'parent-session-dir'), ['feishu']);
+    const normalizedValues = normalizeEnterprisePaths(command, values);
+    const parentSessionDir = normalizedValues['parent-session-dir'];
+    assertEnterpriseScope(parentSessionDir, ['feishu']);
     const minuteToken = requireValue(values, 'minute-token');
     const url = requireValue(values, 'url');
-    const outputDir = requireAbsoluteOutputDir(values);
+    const outputDir = normalizedValues['output-dir'];
     const outcome = await createFeishuAdapter({
       bin: process.env.LARK_CLI_BIN || 'lark-cli',
       env: process.env,
@@ -254,19 +297,22 @@ async function main() {
     return;
   }
   if (command === 'search' || command === 'materialize' || command === 'resource' || command === 'resume-resource') {
+    const normalizedValues = normalizeEnterprisePaths(command, values);
     const scopeSessionDir = command === 'search' || command === 'resource'
-      ? requireValue(values, 'parent-session-dir') : requireValue(values, 'session-dir');
+      ? normalizedValues['parent-session-dir'] : normalizedValues['session-dir'];
     assertEnterpriseScope(scopeSessionDir, [requireValue(values, 'source')]);
-    const { ['parent-session-dir']: _parentSessionDir, ...dispatchValues } = values;
+    const { ['parent-session-dir']: _parentSessionDir, ['session-root']: _sessionRoot, ...dispatchValues } = normalizedValues;
     render(await dispatchEnterprise(command, dispatchValues));
     return;
   }
   if (command === 'search-all') {
-    const { ['parent-session-dir']: _parentSessionDir, ...batchValues } = values;
+    const normalizedValues = normalizeEnterprisePaths(command, values);
+    const { ['parent-session-dir']: _parentSessionDir, ['session-root']: _sessionRoot, ...batchValues } = normalizedValues;
     const requests = parseSearchBatchRequests(batchValues);
     const sources = requests.map((request) => request.source);
-    assertEnterpriseScope(requireValue(values, 'parent-session-dir'), sources);
-    const aggregateWriter = await createArtifactWriter(requireValue(values, 'output-root'));
+    assertEnterpriseScope(normalizedValues['parent-session-dir'], sources);
+    const outputRoot = normalizedValues['output-root'];
+    const aggregateWriter = await createArtifactWriter(outputRoot);
     const outcomes = await dispatchEnterpriseBatch('search', requests, { concurrency: Number(values.concurrency) || 4 });
     const aggregate = await writeSearchAllAggregate({
       aggregateWriter,
@@ -275,7 +321,7 @@ async function main() {
       metadataOnly: values['metadata-only'] !== false && values['metadata-only'] !== 'false' && values['metadata-only'] !== '0',
       outcomes,
     });
-    render({ outputDir: requireValue(values, 'output-root'), ...aggregate, outcomes });
+    render({ outputDir: outputRoot, ...aggregate, outcomes });
     return;
   }
   throw new Error(`unsupported command: ${command || '(missing)'}`);

@@ -75,14 +75,14 @@ V1 不使用 tenantId、namespace 或 System-Code。不存在或越权统一返�
 - ByClaw BE 地址优先读取 Redis `byai_gateway:sd:instances:ByaiService`，没有有效实例时回退 `BYCLAW_BE_BASE_URL`；
 - Pi 的 `delegateAgent` 在执行前仍会服务端校验 Agent ID；
 - 所有 Session/Run API 都要求通过请求头传入 `Beyond-Token`，本服务按 ByClaw 登录 JWT 公钥验签后再转发给 Connector；
-- `Beyond-Token` 明文只写入专用短期凭证表，不写入 Run、Delegation、事件、Pi entries
-  或日志，且只有当前 lease/fencing owner 可以读取；
+- `Beyond-Token` 明文只写入专用执行凭证表，不写入 Run、Delegation、事件、Pi entries
+  或日志，只有当前 lease/fencing owner 可以读取；Super 不设内部过期时间，Resume 会刷新为最新 Token；
 - 当前服务不运行 Shell、CLI 或不可信代码。
 - Worker 结构化日志不输出任务正文和 `Beyond-Token`。
 
 ## 状态
 
 当前已完成 HTTP/SSE 与 `BY_SUPER` Worker 双入口、PostgreSQL 真相源、Pi 原生 checkpoint、
-持久 Worker binding、多实例 Run lease/fencing、短期凭证和 OpenClaw cursor resume。
+持久 Worker binding、多实例 Run lease/fencing、Run 执行凭证和 OpenClaw cursor resume。
 上线前仍需完成真实 PostgreSQL + Pi + OpenClaw 的分阶段 kill/failover 验收。Artifact
 内容持久化属于后续里程碑。

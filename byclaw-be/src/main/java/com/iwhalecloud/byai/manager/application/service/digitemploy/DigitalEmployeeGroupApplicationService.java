@@ -257,9 +257,6 @@ public class DigitalEmployeeGroupApplicationService {
         if (group == null || input == null || !isGroup(input.getAgentType())) {
             throw invalidConfig("数字员工组类型必须为 017");
         }
-        if (!"enterprise".equals(StringUtils.trimToEmpty(group.getOwnerType()))) {
-            throw invalidConfig("数字员工组必须归属企业");
-        }
         if (!WorkerAgentType.BY_SUPER.getCode().equals(group.getWorkerAgentType())) {
             throw invalidConfig("数字员工组运行类型必须为 BY_SUPER");
         }

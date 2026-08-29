@@ -58,6 +58,7 @@ type TaskPlanSnapshot = {
     description?: string;
     status: TaskStatus;
     statusReason?: StatusReason;
+    updatedAt?: string;
     startedAt?: string;
     completedAt?: string;
   }>;
@@ -93,7 +94,7 @@ type TaskPlanSnapshot = {
 | `SKIPPED` | 已跳过 | 是 |
 | `CANCELLED` | 已取消 | 是 |
 
-当前 Leader 策略要求顺序执行，正常情况下最多保留一个 `IN_PROGRESS`。但消费者应以 BE 快照为准，不要自行推算计划总状态。
+BE 强制任务顺序执行：最多一个 `IN_PROGRESS`，终态任务不能回退，后一步开始后不能重定义或移除前面的任务。任一任务失败或取消时，BE 会立即收口后续任务并把计划推进到对应终态。消费者应以 BE 快照为准，不要自行推算计划总状态。
 
 ## 3. 正常执行时序
 
@@ -117,13 +118,13 @@ sequenceDiagram
     SUPER-->>L: 隐去持久化字段后的计划视图
 
     opt 委派数字员工
-        L->>SUPER: delegateAgent(taskPosition)
+        L->>SUPER: delegateAgent
+        SUPER->>SUPER: 从权威快照选择当前任务
         SUPER->>BE: 对应任务 PENDING → IN_PROGRESS
         SUPER->>W: 执行任务
         W-->>SUPER: 执行结果
-        SUPER->>BE: 失败/超时/取消时自动更新任务
-        Note over L,SUPER: 成功结果仍由 Leader 判断业务是否完成
-        L->>SUPER: updateTaskPlan（例如改为 COMPLETED）
+        SUPER->>BE: 根据真实结果自动写入 COMPLETED/FAILED/CANCELLED
+        BE->>BE: 失败或取消时立即收口全部后续任务
     end
 
     loop 计划仍为 ACTIVE
@@ -269,10 +270,13 @@ sequenceDiagram
 ## 6. 自动状态处理
 
 - 委派开始：对应任务是 `PENDING` 时，Super 自动改为 `IN_PROGRESS`。
+- 委派成功：自动改为 `COMPLETED`，完成时间由 BE 在首次进入终态时生成。
 - 委派失败：自动改为 `FAILED / DELEGATION_FAILED`。
 - 委派超时：自动改为 `FAILED / DELEGATION_TIMEOUT`。
 - 委派取消：自动改为 `CANCELLED / DELEGATION_CANCELLED`。
-- 委派成功：不会自动标记 `COMPLETED`；Leader 需要检查结果后调用 `updateTaskPlan`。
+- 失败或取消：BE 立即关闭后续任务并把计划置为终态；Super 禁止继续委派或发起用户交互。
+- 时间字段：`startedAt/completedAt` 只在首次状态迁移时写入，后续完整快照更新不会覆盖；任务内容和状态未变化时也不会刷新 `updatedAt`。
+- 顺序保护：任务进入终态后不能回退；后一步开始后，前面已开始的任务不能改名、删除或修改状态。
 - Run 异常：`IN_PROGRESS` 改为 `FAILED / RUN_FAILED`；未开始任务通常改为 `SKIPPED / RUN_ABORTED`，保证计划不会永久停留在执行中。
 - 用户停止：Super 中止 Leader 和委派，再调用 BE 的 cancel 接口；最终计划状态以 BE 返回为准。
 

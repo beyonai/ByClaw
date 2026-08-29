@@ -1,8 +1,9 @@
 package com.iwhalecloud.byai.state.domain.chat.service;
 
-import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ArrayBlockingQueue;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatInfo;
@@ -23,6 +24,10 @@ public class ChatStreamRuntimeCoordinator {
     @Autowired
     private RunningOutputStreamRegistry runningOutputStreamRegistry;
 
+    /** 单个 HTTP SSE 会话允许在 JVM 中暂存的最大 Redis Stream 事件数。 */
+    @Value("${byclaw.session-stream.http-queue-capacity:1024}")
+    private int gatewayEventQueueCapacity;
+
     /**
      * 准备当前 session 的 Redis Stream 运行态。
      *
@@ -42,7 +47,7 @@ public class ChatStreamRuntimeCoordinator {
 
         // HTTP SSE 保留请求线程消费队列；WebSocket 由统一事件路由服务异步推送。
         if (!ChatTransport.WEBSOCKET.equals(ctx.transport)) {
-            ctx.gatewayEventQueue = new LinkedBlockingQueue<>();
+            ctx.gatewayEventQueue = new ArrayBlockingQueue<>(gatewayEventQueueCapacity);
         }
 
         // 缓存上下文，供 Redis 监听器查找。

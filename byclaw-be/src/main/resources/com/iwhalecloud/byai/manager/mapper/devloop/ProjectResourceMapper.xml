@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.devloop.ProjectResourceMapper">
+
+    <resultMap id="ProjectBoundResourceDtoResultMap"
+               type="com.iwhalecloud.byai.manager.dto.devloop.ProjectBoundResourceDto">
+        <result column="resource_id" property="resourceId"/>
+        <result column="resource_name" property="resourceName"/>
+        <result column="resource_code" property="resourceCode"/>
+        <result column="resource_type" property="resourceType"/>
+    </resultMap>
+
+    <!-- 关联 ss_resource 取实时名称与编码。 -->
+    <select id="listResourceByProjectId" resultMap="ProjectBoundResourceDtoResultMap">
+        SELECT a.resource_id,
+               a.resource_name,
+               a.resource_code,
+               b.resource_type
+        FROM ss_resource a
+                 JOIN byai_project_resource b ON a.resource_id = b.resource_id
+        WHERE b.project_id = #{projectId}
+          AND (b.delete_flag IS NULL OR b.delete_flag &lt;&gt; '1')
+        ORDER BY b.resource_type ASC,
+                 b.sort_no ASC,
+                 b.id ASC
+    </select>
+
+</mapper>

@@ -27,6 +27,18 @@
   background: var(--beyond-color-error);
 }
 
+.contextEvent {
+  border-color: color-mix(in srgb, var(--beyond-color-primary) 18%, var(--beyond-color-border-secondary, #e1e4e8));
+
+  &::before {
+    background: var(--beyond-color-primary);
+  }
+
+  .header {
+    background: color-mix(in srgb, var(--beyond-color-primary) 5%, var(--beyond-color-bg-base, #fff));
+  }
+}
+
 .header {
   min-height: 50px;
   padding: 10px 14px 10px 16px;
@@ -64,6 +76,11 @@
 
 .error {
   color: var(--beyond-color-error);
+}
+
+.contextIcon {
+  color: var(--beyond-color-primary);
+  font-size: 14px;
 }
 
 .collapseIcon {

@@ -1,0 +1,439 @@
+.teamCard {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  border: 1px solid #d9e2ef;
+  border-radius: 14px;
+  background: radial-gradient(circle at 92% -20%, rgba(36, 107, 254, 0.13), transparent 38%),
+    linear-gradient(145deg, #fff 0%, #f7faff 100%);
+  box-shadow: 0 10px 30px rgba(25, 48, 79, 0.08);
+}
+
+.cardAccent {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 4px;
+  background: linear-gradient(180deg, #246bfe 0%, #54c7ec 100%);
+}
+
+.cardHeader {
+  min-height: 70px;
+  padding: 14px 16px 12px 18px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.teamMark {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
+  border: 1px solid rgba(36, 107, 254, 0.2);
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #0d58ee;
+  background: #edf4ff;
+  font-size: 18px;
+}
+
+.teamCopy {
+  min-width: 0;
+  flex: 1;
+}
+
+.teamName {
+  overflow: hidden;
+  color: #172033;
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 22px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.teamMeta {
+  margin-top: 2px;
+  color: #738096;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.liveBadge {
+  padding: 4px 8px;
+  border: 1px solid #b9e8d0;
+  border-radius: 999px;
+  color: #13764c;
+  background: #effcf5;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.archivedBadge {
+  border-color: #dce0e7;
+  color: #6d7480;
+  background: #f5f6f8;
+}
+
+.panelTrigger {
+  height: 32px;
+  padding: 0 11px;
+  border: 1px solid #c9d8f4;
+  border-radius: 9px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #1557d5;
+  background: rgba(255, 255, 255, 0.82);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+
+  &:hover,
+  &:focus-visible {
+    border-color: #246bfe;
+    background: #edf4ff;
+    outline: none;
+  }
+}
+
+.memberStrip {
+  padding: 0 16px 14px 18px;
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+}
+
+.memberChip {
+  height: 30px;
+  padding: 0 9px 0 4px;
+  border: 1px solid #e2e8f1;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #3a4658;
+  background: rgba(255, 255, 255, 0.84);
+  cursor: pointer;
+
+  &:not(:disabled):hover,
+  &:not(:disabled):focus-visible {
+    border-color: #9ebcf8;
+    color: #1557d5;
+    outline: none;
+  }
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.65;
+  }
+}
+
+.miniAvatar {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  background: linear-gradient(145deg, #1f73ff, #1648a6);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.memberChipName {
+  max-width: 112px;
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activityDrawer {
+  :global(.@{antPrefix}-drawer-header) {
+    min-height: 58px;
+    border-bottom: 1px solid #e8edf4;
+  }
+
+  :global(.@{antPrefix}-drawer-title) {
+    color: #162035;
+    font-size: 16px;
+    font-weight: 650;
+  }
+
+  :global(.@{antPrefix}-drawer-body) {
+    padding: 0 20px 28px;
+    background: #f7f9fc;
+  }
+}
+
+.panelHero {
+  margin: 0 -20px 20px;
+  padding: 24px 22px 20px;
+  color: #fff;
+  background: linear-gradient(125deg, rgba(255, 255, 255, 0.08) 1px, transparent 1px) 0 0 / 18px 18px,
+    linear-gradient(135deg, #102650 0%, #174f9e 58%, #167cb2 100%);
+
+  h2 {
+    margin: 5px 0 4px;
+    color: #fff;
+    font-size: 21px;
+    line-height: 30px;
+  }
+
+  p {
+    margin: 0;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 12px;
+  }
+}
+
+.heroEyebrow {
+  color: #84d6ff;
+  font-family: Menlo, Monaco, Consolas, monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.heroStats {
+  margin-top: 18px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+
+  span {
+    padding: 9px 10px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 9px;
+    color: rgba(255, 255, 255, 0.66);
+    background: rgba(255, 255, 255, 0.08);
+    font-size: 11px;
+  }
+
+  strong {
+    margin-right: 3px;
+    color: #fff;
+    font-size: 16px;
+  }
+}
+
+.panelSection + .panelSection {
+  margin-top: 22px;
+}
+
+.sectionHeading {
+  margin-bottom: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #253148;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.sectionCount {
+  min-width: 22px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 999px;
+  color: #607089;
+  background: #e9eef5;
+  font-size: 11px;
+  line-height: 20px;
+  text-align: center;
+}
+
+.memberList,
+.taskList {
+  display: grid;
+  gap: 8px;
+}
+
+.memberRow {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #e0e6ef;
+  border-radius: 12px;
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  color: inherit;
+  background: #fff;
+  text-align: left;
+  box-shadow: 0 3px 12px rgba(27, 49, 80, 0.04);
+  cursor: pointer;
+
+  &:not(:disabled):hover,
+  &:not(:disabled):focus-visible {
+    border-color: #92b3f5;
+    box-shadow: 0 7px 20px rgba(36, 107, 254, 0.1);
+    outline: none;
+    transform: translateY(-1px);
+  }
+
+  &:disabled {
+    cursor: default;
+  }
+}
+
+.avatar {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  border-radius: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  background: linear-gradient(145deg, #276ff2, #163f8d);
+  font-size: 14px;
+  font-weight: 700;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
+}
+
+.memberMain {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.memberHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+
+  strong {
+    overflow: hidden;
+    color: #202b3d;
+    font-size: 13px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.activityState {
+  position: relative;
+  padding-left: 10px;
+  color: #788397;
+  font-size: 10px;
+
+  &::before {
+    position: absolute;
+    top: 5px;
+    left: 0;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: #a6afbc;
+    content: '';
+  }
+}
+
+.activityWorking {
+  color: #13764c;
+
+  &::before {
+    background: #22b573;
+    box-shadow: 0 0 0 3px rgba(34, 181, 115, 0.12);
+  }
+}
+
+.memberRole,
+.currentTask {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memberRole {
+  margin-top: 2px;
+  color: #8993a4;
+  font-size: 11px;
+}
+
+.currentTask {
+  margin-top: 7px;
+  color: #48566b;
+  font-size: 11px;
+}
+
+.progressLine {
+  margin-top: 7px;
+  display: grid;
+  grid-template-columns: 1fr 30px;
+  align-items: center;
+  gap: 8px;
+  color: #738096;
+  font-size: 10px;
+
+  :global(.@{antPrefix}-progress) {
+    margin: 0;
+    line-height: 1;
+  }
+}
+
+.openArrow {
+  align-self: center;
+  color: #94a1b4;
+  font-size: 11px;
+}
+
+.taskRow {
+  padding: 11px 12px;
+  border: 1px solid #e3e8ef;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.86);
+}
+
+.taskIcon {
+  color: #3479f4;
+  font-size: 14px;
+}
+
+.taskIconDone {
+  color: #24a66a;
+}
+
+.taskCopy {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+
+  strong,
+  span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  strong {
+    color: #2c3749;
+    font-size: 12px;
+  }
+
+  span {
+    margin-top: 2px;
+    color: #8a94a4;
+    font-size: 10px;
+  }
+}
+
+.taskState {
+  color: #266adf;
+  font-size: 10px;
+}
+
+.taskStateDone {
+  color: #21895a;
+}

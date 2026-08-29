@@ -35,6 +35,7 @@ import {
   commandThinkingLevel,
   defaultWorkerId,
   delay,
+  delegationFailureUserMessage,
   externalSessionBindingKey,
   extractMessage,
   extractUserInput,
@@ -57,8 +58,18 @@ const CHILD_RESUME_NOT_RECOVERABLE_ERROR_CODE = "CHILD_RESUME_NOT_RECOVERABLE";
 const CHILD_RESUME_NOT_RECOVERABLE_USER_MESSAGE =
   "未找到可恢复的子 Agent 调度，本次任务已终止，请重试。";
 const COMMAND_PROCESSING_ERROR_CODE = "COMMAND_PROCESSING_FAILED";
-const COMMAND_PROCESSING_USER_MESSAGE =
-  "超级助手处理异常，本次任务已终止，请重试。";
+
+/** 保留已由 Delegation 事件确定的失败责任方，避免总入口再改写为 Super 异常。 */
+class AttributedDelegationFailure extends Error {
+  constructor(
+    readonly errorSource: string,
+    readonly errorDetail: string,
+    userMessage: string,
+  ) {
+    super(userMessage);
+    this.name = "AttributedDelegationFailure";
+  }
+}
 
 export type RedisClient = ReturnType<typeof createRedis>;
 export type WorkerRunService = Pick<
@@ -185,18 +196,22 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
       }
       const runId = recordString(command.header.metadata, "parent_run_id");
       const delegationId = recordString(command.header.metadata, "delegation_id");
+      const failure = commandFailurePresentation(command, error);
       this.#logger?.error(
         {
           ...commandLogFields(command),
           runId,
           delegationId,
+          errorSource: failure.errorSource,
           error: normalized.message,
         },
         "处理 by-framework 命令失败，正在终止当前用户流",
       );
       await this.#finishFailureStream(context, {
         errorCode: COMMAND_PROCESSING_ERROR_CODE,
-        userMessage: COMMAND_PROCESSING_USER_MESSAGE,
+        userMessage: failure.userMessage,
+        errorSource: failure.errorSource,
+        errorDetail: failure.errorDetail,
         runId,
         delegationId,
       });
@@ -204,7 +219,11 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
         status: AgentState.FAILED,
         content: "",
         replyData: null,
-        metadata: { error_code: COMMAND_PROCESSING_ERROR_CODE },
+        metadata: {
+          error_code: COMMAND_PROCESSING_ERROR_CODE,
+          error_source: failure.errorSource,
+          error_detail: failure.errorDetail,
+        },
       });
     }
   }
@@ -243,10 +262,15 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
       if (authorized.run.id !== runId) {
         throw new Error(`Authorized Run does not match Resume target: ${runId}`);
       }
-      await this.#runService.respondToInteraction(runId, interactionId, {
-        action: "submit",
-        text: extractMessage(command.content),
-      });
+      await this.#runService.respondToInteraction(
+        runId,
+        interactionId,
+        {
+          action: "submit",
+          text: extractMessage(command.content),
+        },
+        beyondToken,
+      );
       // 这是对既有 Run 的辅助输入，不是一个新的聊天终态。标记当前 Resume
       // context 已收尾，避免 by-framework 自动发送 APP_STREAM_RESPONSE 提前关闭共享流。
       context.setStreamFinished(true);
@@ -529,6 +553,8 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
     input: {
       errorCode: string;
       userMessage: string;
+      errorSource?: string;
+      errorDetail?: string;
       runId?: string;
       delegationId?: string;
       protocolError?: boolean;
@@ -541,6 +567,8 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
       : `${context.executionId || "command"}:error`;
     const metadata = {
       error_code: input.errorCode,
+      ...(input.errorSource ? { error_source: input.errorSource } : {}),
+      ...(input.errorDetail ? { error_detail: input.errorDetail } : {}),
       ...(input.protocolError ? { protocol_error: true } : {}),
       ...(runId ? { parent_run_id: runId } : {}),
       ...(delegationId ? { delegation_id: delegationId } : {}),
@@ -701,6 +729,9 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
     let answer = "";
     let answerEmitted = false;
     let delegationDispatched = false;
+    let delegationFailure:
+      | { agentName: string; agentId: string; reason: string; stage: string }
+      | undefined;
     let waitingForLeaderInteraction = false;
     // Resume 订阅可能先看到旧执行在挂起前已排队的 token。只有新 attempt 开始后
     // 的 Leader 输出才属于恢复汇总阶段。
@@ -777,6 +808,15 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
       }
 
       this.#logRunStep(run, context, event);
+
+      if (event.type === "delegation.failed") {
+        delegationFailure = {
+          agentName: stringData(event.data.agentName),
+          agentId: stringData(event.data.agentId),
+          reason: stringData(event.data.error),
+          stage: stringData(event.data.failureStage),
+        };
+      }
 
       if (!summaryMessageId && this.#presenter.opensReasoning(event)) {
         await ensureReasoningOpen();
@@ -969,8 +1009,16 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
         this.#deleteActiveRunMappings(run.id);
         const userMessage = stringData(event.data.userMessage);
         if (userMessage) {
-          await emitAnswerDelta(userMessage);
-          if (await finishSummaryStream(userMessage)) {
+          const attributedUserMessage = delegationFailure
+            ? delegationFailureUserMessage({
+                agentName: delegationFailure.agentName,
+                agentId: delegationFailure.agentId,
+                reason: userMessage,
+                stage: delegationFailure.stage,
+              })
+            : userMessage;
+          await emitAnswerDelta(attributedUserMessage);
+          if (await finishSummaryStream(attributedUserMessage)) {
             return new AgentTaskResult({
               status: AgentState.COMPLETED,
               content: "",
@@ -979,9 +1027,22 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
           }
           return new AgentTaskResult({
             status: AgentState.COMPLETED,
-            content: userMessage,
+            content: attributedUserMessage,
             replyData: { runId: run.id },
           });
+        }
+        if (delegationFailure) {
+          const errorSource = delegationFailure.agentName || delegationFailure.agentId || "下游数字员工";
+          throw new AttributedDelegationFailure(
+            errorSource,
+            delegationFailure.reason || error,
+            delegationFailureUserMessage({
+              agentName: delegationFailure.agentName,
+              agentId: delegationFailure.agentId,
+              reason: delegationFailure.reason || error,
+              stage: delegationFailure.stage,
+            }),
+          );
         }
         throw new Error(error);
       }
@@ -1066,4 +1127,55 @@ function isLeaderInteractionEvent(
   type: "interaction.requested" | "interaction.responded",
 ): boolean {
   return event.type === type && stringData(event.data.source) === "leader";
+}
+
+/** 把 processCommand 总入口的异常按命令来源和消费阶段说清楚。 */
+function commandFailurePresentation(
+  command: GatewayCommand,
+  error: unknown,
+): { userMessage: string; errorSource: string; errorDetail: string } {
+  if (error instanceof AttributedDelegationFailure) {
+    return {
+      userMessage: error.message,
+      errorSource: error.errorSource,
+      errorDetail: error.errorDetail,
+    };
+  }
+
+  const normalized = toError(error);
+  const metadata = command.header.metadata;
+  const delegatedAgentName = recordString(metadata, "delegated_agent_name");
+  const delegatedAgentType = recordString(metadata, "delegated_agent_type");
+  const sourceAgentType = (command.header.sourceAgentType ?? "").trim();
+  const errorSource = delegatedAgentName || delegatedAgentType || sourceAgentType || "by-framework";
+  const displaySource = delegatedAgentName
+    ? `${delegatedAgentName}${delegatedAgentType ? `（${delegatedAgentType}）` : ""}`
+    : delegatedAgentType || sourceAgentType;
+  const failureKind =
+    error instanceof BeyondTokenAuthError || normalized.name === "BeyondTokenAuthError"
+      ? "鉴权失败"
+      : "消费失败";
+
+  if (command instanceof ResumeCommand) {
+    const callbackKind = recordString(metadata, "interaction_id")
+      ? "用户交互回调"
+      : "数字员工结果回调";
+    const sourcePrefix = delegatedAgentName
+      ? `${displaySource}的`
+      : displaySource
+        ? `${displaySource} 的`
+        : "";
+    return {
+      userMessage: `${sourcePrefix}${callbackKind}${failureKind}：${normalized.message}`,
+      errorSource,
+      errorDetail: normalized.message,
+    };
+  }
+
+  const sourcePrefix = sourceAgentType ? `来自 ${sourceAgentType} 的` : "by-framework ";
+  return {
+    userMessage: `${sourcePrefix}入站请求${failureKind}：${normalized.message}`,
+    errorSource,
+    errorDetail: normalized.message,
+  };
 }

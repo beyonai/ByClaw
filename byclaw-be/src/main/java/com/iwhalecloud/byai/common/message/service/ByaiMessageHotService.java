@@ -106,7 +106,12 @@ public class ByaiMessageHotService {
         if (existing == null) {
             ByaiMessage byaiMessage = new ByaiMessage();
             BeanUtils.copyProperties(byaiMessageHotDto, byaiMessage);
-            byaiMessage.setUpdateTime(new Date());
+            Date now = new Date();
+            byaiMessage.setId(sequenceService.nextVal());
+            if (byaiMessage.getCreateTime() == null) {
+                byaiMessage.setCreateTime(now);
+            }
+            byaiMessage.setUpdateTime(now);
             log.info("updateSelective: 消息不存在, 执行插入, messageId={}", byaiMessageHotDto.getMessageId());
             int rows = byaiMessageMapper.insertBatch(List.of(byaiMessage));
             if (rows != 1) {

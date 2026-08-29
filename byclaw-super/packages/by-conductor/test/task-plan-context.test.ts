@@ -34,11 +34,12 @@ describe("TaskPlanProcessor", () => {
 
     expect(compiled.systemPrompt).toContain("<active_task_plan>");
     expect(compiled.systemPrompt).toContain('"step":"定位实现"');
-    expect(compiled.systemPrompt).not.toContain('"planId"');
-    expect(compiled.systemPrompt).not.toContain('"version"');
-    expect(compiled.systemPrompt).not.toContain('"taskId"');
+    expect(compiled.systemPrompt).not.toContain('"planId":"plan-1"');
+    expect(compiled.systemPrompt).not.toContain('"version":2');
+    expect(compiled.systemPrompt).not.toContain('"taskId":"task-1"');
+    expect(compiled.systemPrompt).toContain("After creation, task definitions are immutable");
     expect(compiled.systemPrompt).toContain(
-      "Before the final user answer, reconcile every task",
+      "Before the final user answer, report the current task outcome",
     );
     expect(compiled.systemPrompt).toContain(
       "An active plan prevents the Run from completing",
@@ -47,10 +48,10 @@ describe("TaskPlanProcessor", () => {
       "create the task plan before calling askUserQuestion",
     );
     expect(compiled.systemPrompt).toContain(
-      "pass the matching task position as delegateAgent.taskPosition",
+      "The backend completes the current task and starts the next task atomically",
     );
     expect(compiled.systemPrompt).toContain(
-      "The system owns execution identity, plan identity, versions, and task IDs",
+      "The runtime owns session identity, plan identity, versions, task IDs",
     );
   });
 

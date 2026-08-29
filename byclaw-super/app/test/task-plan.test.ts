@@ -14,7 +14,7 @@ function snapshot(version = 1) {
     sourceRunId: "run-1",
     tasks: [
       {
-        taskId: "4001",
+        taskId: "1",
         position: 1,
         title: "分析协议",
         status: "IN_PROGRESS",
@@ -22,6 +22,7 @@ function snapshot(version = 1) {
           code: "WORKING",
           message: "正在分析",
         },
+        updatedAt: "2026-08-26T11:00:00.123+08:00",
       },
     ],
   };
@@ -52,6 +53,7 @@ describe("ByClaw BE task plan gateway", () => {
       code: "WORKING",
       message: "正在分析",
     });
+    expect(result?.tasks[0]?.updatedAt).toBe("2026-08-26T11:00:00.123+08:00");
     const [url, init] = fetchImpl.mock.calls[0] ?? [];
     expect(String(url)).toBe(
       "http://127.0.0.1:8086/byaiService/internal/api/v1/task-plan/active",
@@ -66,9 +68,13 @@ describe("ByClaw BE task plan gateway", () => {
     });
   });
 
-  it("injects ownership and idempotency fields when updating", async () => {
+  it("injects ownership and sends a current-task action without internal IDs", async () => {
     const fetchImpl = vi.fn(async () =>
-      Response.json({ code: 0, success: true, data: snapshot(2) }),
+      Response.json({
+        code: 0,
+        success: true,
+        data: { ok: true, plan: snapshot(2) },
+      }),
     );
     const gateway = new ByClawBeTaskPlanGateway({
       baseUrl: "http://127.0.0.1:8086",
@@ -76,7 +82,7 @@ describe("ByClaw BE task plan gateway", () => {
       fetchImpl: fetchImpl as typeof fetch,
     });
 
-    await gateway.update({
+    await gateway.command({
       context: {
         beyondToken: "secret-token",
         sessionId: "2001",
@@ -86,14 +92,8 @@ describe("ByClaw BE task plan gateway", () => {
         sourceRunId: "run-1",
       },
       idempotencyKey: "tool-call-1",
-      update: {
-        title: "实现任务计划",
-        tasks: [
-          {
-            step: "分析协议",
-            status: "COMPLETED",
-          },
-        ],
+      command: {
+        action: "complete_current",
       },
     });
 
@@ -107,10 +107,51 @@ describe("ByClaw BE task plan gateway", () => {
       messageId: "3001",
       sourceRuntime: "BYCLAW_SUPER",
       sourceRunId: "run-1",
+      action: "COMPLETE_CURRENT",
     });
+    expect(JSON.parse(String(init?.body))).not.toHaveProperty("title");
+    expect(JSON.parse(String(init?.body))).not.toHaveProperty("tasks");
     expect(JSON.parse(String(init?.body))).not.toHaveProperty("planId");
+    expect(JSON.parse(String(init?.body))).not.toHaveProperty("taskId");
     expect(JSON.parse(String(init?.body))).not.toHaveProperty("expectedVersion");
-    expect(JSON.parse(String(init?.body)).tasks[0]).not.toHaveProperty("taskId");
+  });
+
+  it("parses a machine-readable conflict with the latest plan", async () => {
+    const gateway = new ByClawBeTaskPlanGateway({
+      baseUrl: "http://127.0.0.1:8086",
+      timeoutMs: 1_000,
+      fetchImpl: vi.fn(async () =>
+        Response.json({
+          code: 0,
+          success: true,
+          data: {
+            ok: false,
+            error: { code: "VERSION_CONFLICT", message: "version changed" },
+            currentPlan: snapshot(3),
+          },
+        }),
+      ) as typeof fetch,
+    });
+
+    await expect(
+      gateway.command({
+        context: {
+          beyondToken: "secret-token",
+          sessionId: "2001",
+          messageId: "3001",
+          sourceRuntime: "BYCLAW_SUPER",
+          sourceRunId: "run-1",
+        },
+        idempotencyKey: "tool-call-stale",
+        command: {
+          action: "complete_current",
+        },
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: "VERSION_CONFLICT" },
+      currentPlan: { version: 3 },
+    });
   });
 
   it("treats a null active response as no plan", async () => {
@@ -131,6 +172,65 @@ describe("ByClaw BE task plan gateway", () => {
         sourceRunId: "run-1",
       }),
     ).resolves.toBeUndefined();
+  });
+
+  it("ignores an active plan owned by another runtime execution", async () => {
+    const gateway = new ByClawBeTaskPlanGateway({
+      baseUrl: "http://127.0.0.1:8086",
+      timeoutMs: 1_000,
+      fetchImpl: vi.fn(async () =>
+        Response.json({
+          code: 0,
+          success: true,
+          data: {
+            ...snapshot(),
+            sourceRuntime: "OPENCLAW",
+            sourceRunId: "openclaw-run-1",
+          },
+        }),
+      ) as typeof fetch,
+    });
+
+    await expect(
+      gateway.loadActive({
+        beyondToken: "secret-token",
+        sessionId: "2001",
+        messageId: "3001",
+        sourceRuntime: "BYCLAW_SUPER",
+        sourceRunId: "run-1",
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("rejects a successful command result owned by another execution", async () => {
+    const gateway = new ByClawBeTaskPlanGateway({
+      baseUrl: "http://127.0.0.1:8086",
+      timeoutMs: 1_000,
+      fetchImpl: vi.fn(async () =>
+        Response.json({
+          code: 0,
+          success: true,
+          data: {
+            ok: true,
+            plan: { ...snapshot(), sourceRunId: "another-run" },
+          },
+        }),
+      ) as typeof fetch,
+    });
+
+    await expect(
+      gateway.command({
+        context: {
+          beyondToken: "secret-token",
+          sessionId: "2001",
+          messageId: "3001",
+          sourceRuntime: "BYCLAW_SUPER",
+          sourceRunId: "run-1",
+        },
+        idempotencyKey: "foreign-result",
+        command: { action: "complete_current" },
+      }),
+    ).rejects.toThrow("owned by another execution");
   });
 
   it("cancels the plan with the same trusted execution identity", async () => {

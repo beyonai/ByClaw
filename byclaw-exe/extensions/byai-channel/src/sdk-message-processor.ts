@@ -22,6 +22,7 @@ import {
   resolveSdkLocalFilePath,
   registerAgentRunEndPromise,
   markActiveSdkCompactionRetryPending,
+  markActiveSdkDispatchSettled,
   markActiveSdkOverflowContinuePending,
   resolveActiveSdkRequestBySessionKey,
   withSdkEmitMetadata,
@@ -74,6 +75,7 @@ import {
   parseByaiLaneMetadata,
 } from "./multi-agent.js";
 import { loadGroupChatContextForAgent } from "./group-chat-context.js";
+import { continueActiveTaskPlan } from "./task-plan-continuation.js";
 
 const CHANNEL_ID = BYAI_CHANNEL_ID;
 const MANAGED_BAIYING_AGENT_PREFIX = "baiying-agent-";
@@ -296,7 +298,7 @@ async function resolveSdkInboundMediaPayload(params: {
       continue;
     }
 
-    const resolvedPath = resolveSdkLocalFilePath(rawPath, params.sessionId);
+    const resolvedPath = resolveSdkLocalFilePath(rawPath);
 
     if (seenSources.has(resolvedPath)) {
       continue;
@@ -526,7 +528,9 @@ async function deliverReplyToAgentViaSdkUnderGate(
     to: To,
     sessionId: message.sessionId,
     traceId: message.traceId,
+    messageId: message.messageId,
     parentMessageId: message.parentMessageId,
+    delegatedAgentCall: message.delegatedAgentCall,
     createdAt: receivedAt,
     language: message.language,
     languageProvided: message.languageProvided,
@@ -730,6 +734,10 @@ async function deliverReplyToAgentViaSdkUnderGate(
       log?.info?.(
         `[diagnose-sdk] dispatch finished, queuedFinal=${String(dispatchResult.queuedFinal)}, counts=${JSON.stringify(dispatchResult.counts)}`,
       );
+      // The prepared dispatch promise is authoritative for the no-run
+      // (precheck-blocked) path. Root runs with lifecycle events ignore this
+      // flag and continue to use rootLifecyclePhase as their drain signal.
+      markActiveSdkDispatchSettled(sessionKey);
     } catch (err) {
       if (dispatchStartedAt > 0) {
         emitByaiSdkDispatchCompleted(diagnosticRef, diagnosticTrace, {
@@ -747,6 +755,16 @@ async function deliverReplyToAgentViaSdkUnderGate(
   try {
     await runOneDispatch(message.text);
     await maybeContinueAfterOverflow();
+    await continueActiveTaskPlan({
+      request: activeRequest,
+      language: message.language,
+      signal: deps.abortController?.signal,
+      logger: log,
+      dispatch: async (prompt) => {
+        await runOneDispatch(prompt, { includeMedia: false });
+        await maybeContinueAfterOverflow();
+      },
+    });
   } catch (err) {
     const errorText = formatDispatchError(err);
     if (isOpenClawContextOverflowDispatchError(err)) {

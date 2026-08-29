@@ -1,12 +1,12 @@
 {
   "id": "baiying-enhance",
   "name": "Baiying Enhance",
-  "description": "Sync authorized Baiying digital employee JSON from Redis into OpenClaw, expose Redis-backed resources through baiying_call, and route native image_generate requests through Redis-selected image models.",
+  "description": "Sync authorized Baiying digital employees from Redis, expose Baiying resources, and route native image generation through Redis-selected models.",
   "version": "1.0.0",
   "enabledByDefault": true,
   "providers": ["baiying-aimodel"],
   "contracts": {
-    "tools": ["baiying_call"],
+    "tools": ["baiying_call", "updateTaskPlan"],
     "imageGenerationProviders": ["baiying-redis-image", "volcengine"]
   },
   "imageGenerationProviderMetadata": {
@@ -124,6 +124,21 @@
       "defaultApiKey": {
         "type": "string",
         "description": "Default API key for the proxy endpoint."
+      },
+      "zreadModelSyncEnabled": {
+        "type": "boolean",
+        "description": "Synchronize the Redis platform default LLM into the runtime user's Zread config. Default true.",
+        "default": true
+      },
+      "zreadCommand": {
+        "type": "string",
+        "description": "Zread CLI executable used for runtime model configuration.",
+        "default": "zread"
+      },
+      "zreadConfigTimeoutMs": {
+        "type": "number",
+        "description": "Maximum duration of one zread config --stdio synchronization in milliseconds.",
+        "default": 30000
       },
       "aimodelConfigRedisKey": {
         "type": "string",

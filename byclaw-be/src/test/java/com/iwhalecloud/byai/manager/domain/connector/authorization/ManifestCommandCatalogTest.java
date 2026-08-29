@@ -39,6 +39,27 @@ class ManifestCommandCatalogTest {
     }
 
     @Test
+    void resolvesOAuth2ManifestWithoutCliCommands() {
+        ConnectorInfo connector = new ConnectorInfo();
+        connector.setConnectorCode("github");
+        connector.setSkillCode("github");
+        connector.setRuntimeManifest("""
+            {"schemaVersion":"1.0","id":"github","version":"1.0.0",
+             "runtime":{"type":"oauth2","authorizeIn":"be-auth-job"},
+             "authStorage":{"mode":"credential-reference","owner":"be-auth-job",
+               "runtimeMutation":"provider-refresh-only","environment":{}},
+             "skill":{"code":"github","source":"system-builtin","installScope":"user","grantScope":"agent"}}
+            """);
+
+        ManifestCommandCatalog catalog = resolver().resolve(connector);
+
+        assertThat(catalog.digest()).hasSize(64);
+        assertThatThrownBy(() -> catalog.size("login"))
+            .isInstanceOf(InvalidConnectorManifestException.class)
+            .hasMessageContaining("login");
+    }
+
+    @Test
     void rejectsMissingUnknownAndPartialPlaceholders() {
         ManifestCommandCatalog catalog = new ManifestCommandCatalog(
             Map.of("login", List.of(List.of("lark-cli", "${deviceCode}"))),

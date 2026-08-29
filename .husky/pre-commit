@@ -1,5 +1,4 @@
 #!/usr/bin/env sh
-. "$(dirname -- "$0")/_/husky.sh"
 
 # ============================================================
 # Pre-commit hook — smart module-level checks
@@ -28,6 +27,11 @@ for file in $STAGED_FILES; do
     byclaw-supper/*) HAS_SUPPER=true ;;
   esac
 done
+
+# Git 会向 hook 导出当前仓库专属的 GIT_DIR、GIT_INDEX_FILE 等变量。
+# 后续测试若在临时目录创建 Git 仓库，继承这些变量会误操作当前 worktree。
+# staged 文件识别完成后清除这些变量，让子进程按各自工作目录发现仓库。
+unset $(git rev-parse --local-env-vars)
 
 EXIT_CODE=0
 

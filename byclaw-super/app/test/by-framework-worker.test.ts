@@ -605,7 +605,12 @@ describe("ByClawSuperGatewayWorker", () => {
         sourceAgentType: "BY_CHILD",
         targetAgentType: "BY_SUPER",
         parentMessageId: "delegation-1:request",
-        metadata: { delegation_id: "delegation-1", parent_run_id: "run-1" },
+        metadata: {
+          delegation_id: "delegation-1",
+          parent_run_id: "run-1",
+          delegated_agent_name: "数据分析助手",
+          delegated_agent_type: "BY_CHILD",
+        },
       }),
       "",
       AgentState.COMPLETED,
@@ -626,10 +631,17 @@ describe("ByClawSuperGatewayWorker", () => {
       EventType.FINAL_ANSWER,
       EventType.APP_STREAM_RESPONSE,
     ]);
+    expect(emitProtocolChunk.mock.calls[0]?.[2]).toMatchObject({
+      content: "数据分析助手（BY_CHILD）的数字员工结果回调消费失败：database unavailable",
+      metadata: expect.objectContaining({
+        error_source: "数据分析助手",
+        error_detail: "database unavailable",
+      }),
+    });
     expect(setStreamFinished).toHaveBeenCalledWith(true);
   });
 
-  it("authorizes an interaction Resume before submitting the response", async () => {
+  it("authorizes an interaction Resume and refreshes the Run credential", async () => {
     const authorizeRun = vi.fn(async () => ({
       run: run("WAITING_USER"),
       session: { id: "session-1" },
@@ -651,10 +663,15 @@ describe("ByClawSuperGatewayWorker", () => {
       beyondToken: "secret-token",
       systemCode: "system-1",
     });
-    expect(respondToInteraction).toHaveBeenCalledWith("run-1", "interaction-1", {
-      action: "submit",
-      text: "用户选择 A",
-    });
+    expect(respondToInteraction).toHaveBeenCalledWith(
+      "run-1",
+      "interaction-1",
+      {
+        action: "submit",
+        text: "用户选择 A",
+      },
+      "secret-token",
+    );
     expect(setStreamFinished).toHaveBeenCalledWith(true);
     expect(result.status).toBe(AgentState.COMPLETED);
     expect(result.content).toBe("");
@@ -692,6 +709,13 @@ describe("ByClawSuperGatewayWorker", () => {
       EventType.FINAL_ANSWER,
       EventType.APP_STREAM_RESPONSE,
     ]);
+    expect(emitProtocolChunk.mock.calls[0]?.[2]).toMatchObject({
+      content: "BY_PARENT 的用户交互回调鉴权失败：Beyond-Token metadata is required",
+      metadata: expect.objectContaining({
+        error_source: "BY_PARENT",
+        error_detail: "Beyond-Token metadata is required",
+      }),
+    });
     expect(setStreamFinished).toHaveBeenCalledWith(true);
     expect(authorizeRun).not.toHaveBeenCalled();
     expect(respondToInteraction).not.toHaveBeenCalled();
@@ -787,7 +811,7 @@ describe("ByClawSuperGatewayWorker", () => {
     });
 
     await expect(worker.processCommand(askCommand(), contextMock())).rejects.toThrow(
-      "下游数字员工不可用",
+      "失败员工 调度失败：下游数字员工不可用",
     );
 
     expect(emitEvent).toHaveBeenCalledTimes(2);
@@ -796,6 +820,13 @@ describe("ByClawSuperGatewayWorker", () => {
         messageId: "delegation-failed",
         parentMessageId: "-1",
         data: expect.objectContaining({
+          choices: [
+            expect.objectContaining({
+              delta: {
+                content: "失败员工 调度失败：下游数字员工不可用",
+              },
+            }),
+          ],
           contentType: "3009",
           status: "_ERROR_",
         }),
@@ -1116,6 +1147,13 @@ describe("ByClawSuperGatewayWorker", () => {
       EventType.FINAL_ANSWER,
       EventType.APP_STREAM_RESPONSE,
     ]);
+    expect(emitProtocolChunk.mock.calls[0]?.[2]).toMatchObject({
+      content: "by-framework 入站请求鉴权失败：Beyond-Token metadata is required",
+      metadata: expect.objectContaining({
+        error_source: "by-framework",
+        error_detail: "Beyond-Token metadata is required",
+      }),
+    });
     expect(setStreamFinished).toHaveBeenCalledWith(true);
   });
 
@@ -1458,6 +1496,7 @@ async function* failedDelegationEvents(): AsyncIterable<RunEvent> {
     resultStatus: "failed",
     artifactCount: 0,
     hasOutput: false,
+    failureStage: "dispatch",
     error: "下游数字员工不可用",
   });
   yield event(3, "run.failed", { error: "下游数字员工不可用" });

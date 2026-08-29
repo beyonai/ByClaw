@@ -7,7 +7,11 @@ import type { PiSessionCheckpoint } from "../pi-session-checkpoint.js";
 import type { SessionContextV1 } from "../domain/session-context.js";
 import type { GroupChatContextV1 } from "../domain/group-chat-context.js";
 import type { ExpertTeamRuntimeSnapshotV1 } from "../domain/orchestrator.js";
-import type { TaskPlanSnapshot, TaskPlanUpdate } from "../domain/task-plan.js";
+import type {
+  TaskPlanCommand,
+  TaskPlanCommandResult,
+  TaskPlanSnapshot,
+} from "../domain/task-plan.js";
 import type {
   AgentProfile,
   AgentResult,
@@ -55,12 +59,8 @@ export interface LeaderRunInput {
   onCheckpoint?(checkpoint: PiSessionCheckpoint): Promise<void> | void;
   /** 执行一次经过授权校验的 Agent 委派。 */
   delegate(input: {
-    /** Pi 工具调用 ID；用于任务计划自动同步的幂等键。 */
-    toolCallId: string;
     agentId: string;
     task: string;
-    /** 活动任务计划中的任务位置；存在活动计划时必填。 */
-    taskPosition?: number;
     expectedOutput?: string;
     /** 选中要随委派透传的附件 ID；undefined=全部，[]=不带，未知 ID 会被拒绝。 */
     attachmentIds?: readonly string[];
@@ -72,12 +72,12 @@ export interface LeaderRunInput {
     questions: UserInteractionQuestion[];
     signal?: AbortSignal;
   }): Promise<UserInteractionResponse>;
-  /** 创建或以完整任务数组更新本轮任务计划。 */
+  /** 首次创建计划，后续只表达当前任务结果；会话与内部 ID 由运行时处理。 */
   updateTaskPlan?(input: {
     toolCallId: string;
-    update: TaskPlanUpdate;
+    command: TaskPlanCommand;
     signal?: AbortSignal;
-  }): Promise<TaskPlanSnapshot>;
+  }): Promise<TaskPlanCommandResult>;
   /**
    * 受控读取当前 Run 某个附件的有界内容。仅当本轮存在附件且注入了 Resolver 时可用；
    * 工具层只能传 attachmentId，真正的附件对象由服务端从本轮附件集合解析。

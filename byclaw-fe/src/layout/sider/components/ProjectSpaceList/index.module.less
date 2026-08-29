@@ -783,12 +783,6 @@
   padding: 12px 10px 8px;
 }
 
-// 研发项目 GH_TOKEN 未配置提醒条,贴在 tab 上方,整条文案可点击进入引导弹窗。
-.githubTokenAlert {
-  flex-shrink: 0;
-  margin: 10px 10px 0;
-}
-
 .projectInitAlert {
   flex-shrink: 0;
   margin: 10px 10px 0;
@@ -814,12 +808,6 @@
 .detailProjectInitTag {
   color: #d46b08;
   background: #fff7e6;
-}
-
-.githubTokenAlertText {
-  cursor: pointer;
-  text-decoration: underline;
-  text-underline-offset: 2px;
 }
 
 .detailCountRow {
@@ -2245,6 +2233,27 @@
 
   &:hover,
   &.repoChangesButtonActive {
+    color: #246bfe;
+    background: #eaf2ff;
+  }
+}
+
+.repoSelector {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: #728096;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: color 0.2s, background-color 0.2s;
+
+  &:hover {
     color: #246bfe;
     background: #eaf2ff;
   }

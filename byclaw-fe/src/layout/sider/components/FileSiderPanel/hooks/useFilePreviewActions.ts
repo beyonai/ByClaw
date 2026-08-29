@@ -3,7 +3,14 @@ import { message } from 'antd';
 import { useIntl } from '@umijs/max';
 import { getMimeType } from '@/components/QueryInput/components/FileBrowserEntry/components/FileBrowserPanel/constants';
 import { downloadFile, downloadFolder, type FileBrowserItem } from '@/service/fileBrowser';
-import { canPreviewFile, ensureDirectoryPath, getFileType, isDirectory } from '../utils';
+import {
+  canPreviewFile,
+  ensureDirectoryPath,
+  getPreviewFileType,
+  isDirectory,
+  isTextPreviewFile,
+  MAX_TEXT_PREVIEW_SIZE,
+} from '../utils';
 
 interface UseFilePreviewActionsOptions {
   resourceId: string;
@@ -33,7 +40,7 @@ export default function useFilePreviewActions({
       }
       EventEmitter.emit('beyond-main-driver-message', {
         data: options.blob ?? undefined,
-        type: getFileType(item.name),
+        type: getPreviewFileType(item.name),
         title: item.name,
         className: previewClassName,
       });
@@ -52,6 +59,9 @@ export default function useFilePreviewActions({
       try {
         const res: any = await downloadFile(resourceId, item.path);
         const rawBlob = res?.file instanceof Blob ? res.file : new Blob([res?.file || res]);
+        if (isTextPreviewFile(item.name) && rawBlob.size > MAX_TEXT_PREVIEW_SIZE) {
+          throw new Error('文件过大，无法在线预览，请下载查看');
+        }
         const mimeType = getMimeType(item.name);
         const blob = mimeType ? new Blob([rawBlob], { type: mimeType }) : rawBlob;
         renderPreviewPanel(item, { blob, loading: false });

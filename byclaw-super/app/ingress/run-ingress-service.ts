@@ -108,7 +108,6 @@ export class RunIngressService {
     private readonly runService: RunService,
     private readonly verifyBeyondToken: BeyondTokenVerifier,
     private readonly agentCatalog: AuthorizedAgentCatalog,
-    private readonly credentialMaxTtlMs = 7_200_000,
     private readonly groupChatContexts?: GroupChatContextProvider,
     private readonly logger?: RunIngressLogger,
     private readonly resourceModels?: ResourceModelResolver,
@@ -117,8 +116,7 @@ export class RunIngressService {
 
   /** 创建新 Session，并在其中创建首个 Run。 */
   async createSessionRun(input: CreateSessionRunRequest): Promise<Run> {
-    const authenticated = await this.authenticate(input);
-    const principal = authenticated.principal;
+    const principal = await this.authenticate(input);
     const attachments = input.attachments ?? [];
     const message = resolveRunMessage(input.message, attachments);
     const [orchestration, loadedContext] = await Promise.all([
@@ -157,7 +155,7 @@ export class RunIngressService {
       thinkingLevel: input.thinkingLevel ?? "off",
       agentList,
       ...(ingressContext ? { ingressContext } : {}),
-      // Token 同时写入专用短期凭证表，供其他实例在 lease 接管后恢复。
+      // Token 同时写入专用执行凭证表，供其他实例在 lease 接管后恢复。
       // externalSessionId 也放入 metadata 供本实例立即执行；持久化真值在 ingressContext。
       metadata: {
         ...(input.metadata ?? {}),
@@ -171,7 +169,6 @@ export class RunIngressService {
       },
       executionCredential: {
         secret: input.beyondToken,
-        expiresAt: authenticated.credentialExpiresAt,
       },
     });
     this.logRunReceived(
@@ -187,8 +184,7 @@ export class RunIngressService {
 
   /** 校验 Session owner 后，在同一 Session/Pi 上下文中追加一个 Run。 */
   async createRun(input: AppendSessionRunRequest): Promise<Run> {
-    const authenticated = await this.authenticate(input);
-    const principal = authenticated.principal;
+    const principal = await this.authenticate(input);
     await this.requireOwnedSession(input.sessionId, principal);
     const attachments = input.attachments ?? [];
     const message = resolveRunMessage(input.message, attachments);
@@ -240,7 +236,6 @@ export class RunIngressService {
       },
       executionCredential: {
         secret: input.beyondToken,
-        expiresAt: authenticated.credentialExpiresAt,
       },
     });
     this.logRunReceived(
@@ -256,7 +251,7 @@ export class RunIngressService {
 
   /** 验证凭证并构建 Worker binding 和 HTTP 授权共用的调用者身份。 */
   async resolvePrincipal(input: AuthenticatedIngressRequest): Promise<CallerPrincipal> {
-    return (await this.authenticate(input)).principal;
+    return this.authenticate(input);
   }
 
   /**
@@ -276,24 +271,14 @@ export class RunIngressService {
     return agent;
   }
 
-  /** 一次验签同时得到 owner 与凭证有效期，避免同一请求重复验签。 */
-  private async authenticate(input: AuthenticatedIngressRequest): Promise<{
-    principal: CallerPrincipal;
-    credentialExpiresAt: number;
-  }> {
+  /** 一次验签构建 owner，避免同一请求重复验签。 */
+  private async authenticate(input: AuthenticatedIngressRequest): Promise<CallerPrincipal> {
     const claims = await this.verify(input);
-    const principal: CallerPrincipal = {
+    return {
       userCode: claims.userCode,
       ...(claimString(claims.userName) || claimString(claims.user_name)
         ? { userName: claimString(claims.userName) || claimString(claims.user_name) }
         : {}),
-    };
-    const maxExpiresAt = Date.now() + this.credentialMaxTtlMs;
-    const jwtExpiresAt =
-      typeof claims.exp === "number" ? claims.exp * 1_000 : Number.POSITIVE_INFINITY;
-    return {
-      principal,
-      credentialExpiresAt: Math.min(maxExpiresAt, jwtExpiresAt),
     };
   }
 

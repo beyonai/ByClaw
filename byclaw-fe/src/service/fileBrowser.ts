@@ -11,6 +11,7 @@ export interface FileBrowserItem {
 export interface FileBrowserListParams {
   resourceId: string | number;
   path?: string;
+  language?: string;
 }
 
 export interface FileBrowserDeleteParams {

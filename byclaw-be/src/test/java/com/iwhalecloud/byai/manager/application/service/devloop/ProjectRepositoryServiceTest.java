@@ -14,6 +14,9 @@ import com.iwhalecloud.byai.manager.dto.devloop.ProjectRepoTreeNodeDTO;
 import com.iwhalecloud.byai.manager.entity.devloop.Project;
 import com.iwhalecloud.byai.manager.entity.devloop.ProjectRepo;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectRepoMapper;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
@@ -27,20 +30,114 @@ class ProjectRepositoryServiceTest {
     Path tempDir;
 
     @Test
-    void browsesLocalGitFirstAndUsesProjectIdAsPreferredDefaultBranch() {
+    void browsesLocalGitFirstAndUsesConfiguredDefaultBranch() {
         long projectId = 203L;
         ProjectRepo repo = repository(projectId);
         Path localRepo = tempDir.resolve("workspace");
         Fixture fixture = fixture(projectId, repo);
         when(fixture.workspaceGitService.resolveRepository(repo)).thenReturn(Optional.of(localRepo));
-        when(fixture.gitCommandExecutor.executeCommandQuietly(localRepo, "git", "ls-tree", "-l", "203"))
-            .thenReturn("040000 tree abcdef -\tsrc\n100644 blob 123456 12\tREADME.md\n");
+        when(fixture.gitCommandExecutor.executeCommandBytesQuietly(localRepo, "git", "-c", "safe.directory=*",
+            "ls-tree", "-l", "-z", "main"))
+            .thenReturn(gitOutput("040000 tree abcdef -\tsrc", "100644 blob 123456 12\tREADME.md"));
 
         List<ProjectRepoTreeNodeDTO> nodes = fixture.service.listTree(projectId, repo.getRepoId(), null, null);
 
         assertThat(nodes).extracting(ProjectRepoTreeNodeDTO::getName).containsExactly("src", "README.md");
         assertThat(nodes.getFirst().getType()).isEqualTo("directory");
-        verify(fixture.gitCommandExecutor).executeCommandQuietly(localRepo, "git", "ls-tree", "-l", "203");
+        verify(fixture.gitCommandExecutor).executeCommandBytesQuietly(localRepo, "git", "-c", "safe.directory=*",
+            "ls-tree", "-l", "-z", "main");
+    }
+
+    @Test
+    void treatsGitSubmoduleEntryAsExpandableDirectory() {
+        long projectId = 203L;
+        ProjectRepo repo = repository(projectId);
+        Path localRepo = tempDir.resolve("workspace");
+        Fixture fixture = fixture(projectId, repo);
+        when(fixture.workspaceGitService.resolveRepository(repo)).thenReturn(Optional.of(localRepo));
+        when(fixture.gitCommandExecutor.executeCommandBytesQuietly(localRepo, "git", "-c", "safe.directory=*",
+            "ls-tree", "-l", "-z", "main"))
+            .thenReturn(gitOutput("160000 commit abcdef -\tbeyonai/byclaw-test"));
+
+        List<ProjectRepoTreeNodeDTO> nodes = fixture.service.listTree(projectId, repo.getRepoId(), null, null);
+
+        assertThat(nodes).singleElement().satisfies(node -> {
+            assertThat(node.getName()).isEqualTo("byclaw-test");
+            assertThat(node.getType()).isEqualTo("directory");
+            assertThat(node.getHasChildren()).isTrue();
+        });
+    }
+
+    @Test
+    void keepsUtf8DirectoryNamesInsteadOfGitOctalEscapes() {
+        long projectId = 203L;
+        ProjectRepo repo = repository(projectId);
+        Path localRepo = tempDir.resolve("workspace");
+        Fixture fixture = fixture(projectId, repo);
+        when(fixture.workspaceGitService.resolveRepository(repo)).thenReturn(Optional.of(localRepo));
+        when(fixture.gitCommandExecutor.executeCommandBytesQuietly(localRepo, "git", "-c", "safe.directory=*",
+            "ls-tree", "-l", "-z", "main"))
+            .thenReturn(gitOutput(
+                "040000 tree abcdef -\t成果",
+                "040000 tree bcdefa -\t渠道",
+                "040000 tree cdefab -\t素材",
+                "040000 tree defabc -\t写法",
+                "040000 tree efabcd -\t运营"));
+
+        List<ProjectRepoTreeNodeDTO> nodes = fixture.service.listTree(projectId, repo.getRepoId(), null, null);
+
+        assertThat(nodes).extracting(ProjectRepoTreeNodeDTO::getName)
+            .containsExactlyInAnyOrder("成果", "渠道", "素材", "写法", "运营");
+        assertThat(nodes).allSatisfy(node -> assertThat(node.getName()).doesNotContain("\\"));
+    }
+
+    @Test
+    void listsSubmoduleContentsFromItsGitRepositoryAndKeepsPathPrefix() throws IOException {
+        long projectId = 203L;
+        ProjectRepo repo = repository(projectId);
+        Path localRepo = tempDir.resolve("workspace");
+        Path submodule = localRepo.resolve("beyonai/byclaw-test");
+        Files.createDirectories(submodule);
+        Files.writeString(submodule.resolve(".git"), "gitdir: ../../.git/modules/beyonai/byclaw-test\n");
+        Fixture fixture = fixture(projectId, repo);
+        when(fixture.workspaceGitService.resolveRepository(repo)).thenReturn(Optional.of(localRepo));
+        when(fixture.gitCommandExecutor.executeCommandBytesQuietly(submodule, "git", "-c", "safe.directory=*",
+            "ls-tree", "-l", "-z", "HEAD"))
+            .thenReturn(gitOutput("040000 tree abcdef -\tbyclaw-be"));
+
+        List<ProjectRepoTreeNodeDTO> nodes = fixture.service.listTree(projectId, repo.getRepoId(),
+            "beyonai/byclaw-test", null);
+
+        assertThat(nodes).singleElement().satisfies(node -> {
+            assertThat(node.getName()).isEqualTo("byclaw-be");
+            assertThat(node.getPath()).isEqualTo("beyonai/byclaw-test/byclaw-be");
+            assertThat(node.getType()).isEqualTo("directory");
+        });
+    }
+
+    @Test
+    void listsOnlyRepositoriesResolvedFromTheWorkspace() {
+        long projectId = 203L;
+        ProjectRepo workspace = repository(projectId);
+        ProjectRepo codeRepo = repository(projectId);
+        codeRepo.setRepoId(901L);
+        codeRepo.setRepoType("code");
+        codeRepo.setRepoFullName("beyonai/byclaw-test");
+        Fixture fixture = fixture(projectId, workspace);
+        when(fixture.workspaceGitService.resolveRepositories(projectId)).thenReturn(List.of(
+            new ProjectWorkspaceGitService.ResolvedRepository(workspace, Path.of("/bucket/by/projects/203")),
+            new ProjectWorkspaceGitService.ResolvedRepository(codeRepo,
+                Path.of("/bucket/by/projects/203/beyonai/byclaw-test"))));
+        when(fixture.workspaceGitService.toSandboxPath(Path.of("/bucket/by/projects/203")))
+            .thenReturn(Optional.of("/by/projects/203/"));
+        when(fixture.workspaceGitService.toSandboxPath(Path.of("/bucket/by/projects/203/beyonai/byclaw-test")))
+            .thenReturn(Optional.of("/by/projects/203/beyonai/byclaw-test/"));
+
+        List<java.util.Map<String, Object>> repositories = fixture.service.listAvailableRepositories(projectId);
+
+        assertThat(repositories).extracting(item -> item.get("repoId"))
+            .containsExactly(workspace.getRepoId(), codeRepo.getRepoId());
+        assertThat(repositories.get(1)).containsEntry("path", "/by/projects/203/beyonai/byclaw-test/");
     }
 
     private Fixture fixture(long projectId, ProjectRepo repo) {
@@ -71,6 +168,10 @@ class ProjectRepositoryServiceTest {
         repo.setRepoFullName("org/workspace");
         repo.setDefaultBranch("main");
         return repo;
+    }
+
+    private byte[] gitOutput(String... records) {
+        return (String.join(String.valueOf('\0'), records) + '\0').getBytes(StandardCharsets.UTF_8);
     }
 
     private record Fixture(ProjectRepositoryService service, ProjectWorkspaceGitService workspaceGitService,

@@ -14,6 +14,13 @@ jest.mock(
   })
 );
 
+jest.mock('@/components/MessageList/lazyHandler', () => ({
+  __esModule: true,
+  default: {
+    lazyComp: () => () => <div data-testid="status-title" />,
+  },
+}));
+
 const message = {
   creatorId: 'assistant',
   fromBeyond: true,
@@ -48,6 +55,41 @@ const createTreeNode = (): TreeNode => ({
 });
 
 describe('ThinkNewRootTitle', () => {
+  it('collapses a running status title when its status update completes', () => {
+    const runningNode: TreeNode = {
+      ...createTreeNode(),
+      contentType: SSEMessageType.thinkStatusTitle,
+      content: {
+        substance: { title: '数字员工正在处理', status: '_START_' },
+        orderId: 'delegation-1',
+      },
+      isCollapsed: false,
+      shouldOpen: false,
+    };
+    const { rerender } = render(
+      <ThinkNewRootTitle message={message} treeNode={runningNode} updateMessageListItemContent={() => message} />
+    );
+
+    expect(screen.getByTestId('thinking-node-child')).toBeInTheDocument();
+
+    rerender(
+      <ThinkNewRootTitle
+        message={message}
+        treeNode={{
+          ...runningNode,
+          content: {
+            ...runningNode.content,
+            substance: { title: '数字员工处理完成', status: '_DONE_' },
+          },
+          isCollapsed: true,
+        }}
+        updateMessageListItemContent={() => message}
+      />
+    );
+
+    expect(screen.queryByTestId('thinking-node-child')).not.toBeInTheDocument();
+  });
+
   it('does not allow a branch containing a pending interaction to be collapsed', () => {
     render(
       <ThinkNewRootTitle message={message} treeNode={createTreeNode()} updateMessageListItemContent={() => message} />

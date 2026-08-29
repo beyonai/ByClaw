@@ -11,6 +11,19 @@
         <result column="share_link" property="shareLink"/>
     </resultMap>
 
+    <resultMap id="ProjectContextSharedFileDtoResultMap"
+               type="com.iwhalecloud.byai.manager.dto.devloop.ProjectContextSharedFileDto">
+        <result column="file_id" property="fileId"/>
+        <result column="file_name" property="fileName"/>
+        <result column="file_type" property="fileType"/>
+        <result column="length" property="length"/>
+        <result column="content_type" property="contentType"/>
+        <result column="create_by" property="createBy"/>
+        <result column="chat_id" property="chatId"/>
+        <result column="share_link" property="shareLink"/>
+        <result column="create_time" property="createTime"/>
+    </resultMap>
+
     <select id="listSpaceFiles" resultMap="ProjectShareFileListDtoResultMap">
         SELECT a.file_id,
                a.file_name,
@@ -21,6 +34,30 @@
                  JOIN byai_project_share_file b ON a.file_id = b.file_id
         WHERE a.project_id = #{projectId}
         ORDER BY b.create_time DESC
+    </select>
+
+    <select id="listContextFiles" resultMap="ProjectContextSharedFileDtoResultMap">
+        SELECT a.file_id,
+               a.file_name,
+               a.file_type,
+               a.length,
+               a.content_type,
+               b.create_by,
+               a.chat_id,
+               b.share_link,
+               b.create_time
+        FROM byai_project_share_file b
+                 JOIN byai_files a ON a.file_id = b.file_id
+        WHERE b.project_id = #{projectId}
+        ORDER BY b.create_time DESC, b.share_id DESC
+        LIMIT #{limit}
+    </select>
+
+    <select id="countContextFiles" resultType="long">
+        SELECT COUNT(1)
+        FROM byai_project_share_file b
+                 JOIN byai_files a ON a.file_id = b.file_id
+        WHERE b.project_id = #{projectId}
     </select>
 
 </mapper>

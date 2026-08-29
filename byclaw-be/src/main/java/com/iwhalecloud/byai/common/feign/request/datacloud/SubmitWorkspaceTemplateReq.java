@@ -14,17 +14,17 @@ public class SubmitWorkspaceTemplateReq {
 
     @JsonProperty("is_personal")
     @JSONField(name = "is_personal")
-    private Boolean isPersonal;
+    private boolean isPersonal;
 
     @JsonProperty("is_sqlite")
     @JSONField(name = "is_sqlite")
-    private Boolean isSqlite;
+    private boolean isSqlite;
 
     @JsonProperty("reuse_target_tables")
     @JSONField(name = "reuse_target_tables")
-    private Boolean reuseTargetTables;
+    private boolean reuseTargetTables;
 
     @JsonProperty("confirm_drop_target_tables")
     @JSONField(name = "confirm_drop_target_tables")
-    private Boolean confirmDropTargetTables;
+    private boolean confirmDropTargetTables;
 }

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -79,6 +79,109 @@ async function setupCollectedSession({ mode = 'collection' } = {}) {
 // ── CLI 帮助与平台委派 ──
 
 await (async () => {
+  const tempRoot = makeSessionDir();
+  const sessionsRoot = join(tempRoot, 'by', '.sessions');
+  const sandboxSessionRoot = join(sessionsRoot, '20023126');
+  const sandboxEnv = { KNOWLEDGE_COLLECTION_SESSIONS_ROOT: sessionsRoot };
+  const workspaceDir = join(tempRoot, 'by', '.openclaw', 'workspace', 'collections', 'test');
+  const absoluteOutside = await runCli([
+    'init', '--session-dir', workspaceDir, '--session-root', sandboxSessionRoot, '--query', 'q',
+  ], sandboxEnv);
+  assert.equal(absoluteOutside.code, 0, absoluteOutside.stderr || absoluteOutside.stdout);
+  assert.equal(absoluteOutside.json.sessionDir, workspaceDir);
+
+  const untrustedRoot = join(tempRoot, 'by', '.openclaw', 'workspace');
+  const untrusted = await runCli([
+    'init', '--session-dir', 'collections/test',
+    '--session-root', untrustedRoot, '--query', 'q',
+  ], sandboxEnv);
+  assert.equal(untrusted.code, 1);
+  assert.match(untrusted.json.error, /Session Root 必须是/);
+
+  const sessionDir = join(sandboxSessionRoot, 'accepted');
+  const accepted = await runCli([
+    'init', '--session-dir', 'accepted', '--session-root', sandboxSessionRoot, '--query', 'q',
+  ], sandboxEnv);
+  assert.equal(accepted.code, 0, accepted.stderr);
+  assert.equal(accepted.json.ok, true);
+  assert.equal(accepted.json.sessionDir, sessionDir);
+
+  const relativeStatus = await runCli([
+    'status', '--session-dir', 'accepted', '--session-root', sandboxSessionRoot,
+  ], sandboxEnv);
+  assert.equal(relativeStatus.code, 0, relativeStatus.stderr || relativeStatus.stdout);
+  assert.equal(relativeStatus.json.ok, true);
+
+  const researchSessionDir = join(sandboxSessionRoot, 'research-relative');
+  const researchInit = await runCli([
+    'init', '--session-dir', 'research-relative', '--session-root', sandboxSessionRoot,
+    '--query', 'relative report', '--mode', 'research', '--depth', '1',
+  ], sandboxEnv);
+  assert.equal(researchInit.code, 0, researchInit.stderr || researchInit.stdout);
+  const researchPlan = await runCli([
+    'plan', '--session-dir', 'research-relative', '--session-root', sandboxSessionRoot,
+    '--initial-search', '["fixture"]', '--channels',
+    '{"builtin-routing":{"state":"used"},"searxng":{"state":"used"},"hot-discovery":{"state":"used"}}',
+  ], sandboxEnv);
+  assert.equal(researchPlan.code, 0, researchPlan.stderr || researchPlan.stdout);
+  const researchBranch = await runCli([
+    'branch', '--session-dir', 'research-relative', '--session-root', sandboxSessionRoot,
+    '--level', '1', '--query', 'fixture branch', '--status', 'failed', '--reason', 'fixture source unavailable',
+  ], sandboxEnv);
+  assert.equal(researchBranch.code, 0, researchBranch.stderr || researchBranch.stdout);
+  const relativeReportPath = join(sandboxSessionRoot, 'reports', 'relative-report.md');
+  mkdirSync(join(sandboxSessionRoot, 'reports'), { recursive: true });
+  writeFileSync(relativeReportPath, [
+    '## 采集范围', '范围。', '## 采集成果', '成果。',
+    '## 来源与追溯', '来源。', '## 覆盖缺口与局限', '局限。',
+  ].join('\n'));
+  const relativeReport = await runCli([
+    'report', '--session-dir', 'research-relative', '--session-root', sandboxSessionRoot,
+    '--report-path', 'reports/relative-report.md',
+  ], sandboxEnv);
+  assert.equal(relativeReport.code, 0, relativeReport.stderr || relativeReport.stdout);
+  const researchSession = JSON.parse(readFileSync(join(researchSessionDir, 'session.json'), 'utf8'));
+  assert.equal(researchSession.research.reportPath, relativeReportPath);
+
+  const siblingDir = join(sessionsRoot, 'other-session', 'collections', 'wrong');
+  const sibling = await runCli([
+    'init', '--session-dir', siblingDir, '--session-root', sandboxSessionRoot, '--query', 'q',
+  ], sandboxEnv);
+  assert.equal(sibling.code, 0, sibling.stderr || sibling.stdout);
+  assert.equal(sibling.json.sessionDir, siblingDir);
+
+  const relativeEscape = await runCli([
+    'init', '--session-dir', '../escaped', '--session-root', sandboxSessionRoot, '--query', 'q',
+  ], sandboxEnv);
+  assert.equal(relativeEscape.code, 1);
+  assert.match(relativeEscape.json.error, /Session Root|越出/);
+
+  const outside = join(tempRoot, 'outside');
+  mkdirSync(outside);
+  symlinkSync(outside, join(sandboxSessionRoot, 'collections'));
+  const escapedDir = join(sandboxSessionRoot, 'collections', 'escaped');
+  const escaped = await runCli([
+    'init', '--session-dir', 'collections/escaped', '--session-root', sandboxSessionRoot, '--query', 'q',
+  ], sandboxEnv);
+  assert.equal(escaped.code, 1);
+  assert.match(escaped.json.error, /Session Root|符号链接|越出/);
+  assert.equal(existsSync(join(outside, 'collections')), false);
+
+  const linkedRootTarget = join(tempRoot, 'linked-root-target');
+  mkdirSync(linkedRootTarget);
+  const linkedSessionRoot = join(sessionsRoot, 'linked-session');
+  symlinkSync(linkedRootTarget, linkedSessionRoot);
+  const linkedRoot = await runCli([
+    'init', '--session-dir', 'collections/escaped',
+    '--session-root', linkedSessionRoot, '--query', 'q',
+  ], sandboxEnv);
+  assert.equal(linkedRoot.code, 1);
+  assert.match(linkedRoot.json.error, /普通目录且不能是符号链接/);
+  assert.equal(existsSync(join(linkedRootTarget, 'collections')), false);
+  rmSync(tempRoot, { recursive: true, force: true });
+})();
+
+await (async () => {
   assert.equal(existsSync(routerScriptPath), true, 'local command routing must live outside the CLI entrypoint');
   assert.equal(existsSync(platformDelegatePath), true, 'platform command delegation must live outside the CLI entrypoint');
   const h = await runCli(['help']);
@@ -98,11 +201,15 @@ await (async () => {
   assert.equal(publicDiscoverHelp.json.command, 'public-discover');
   assert.match(publicDiscoverHelp.json.args['--category'], /general/);
   assert.match(publicDiscoverHelp.json.args['--requested-count'], /明确指定/);
+  assert.match(publicDiscoverHelp.json.args['--requested-count'], /SearXNG 无候选.*hot-discovery/);
+  assert.match(publicDiscoverHelp.json.args['--timeout'], /SearXNG 与 hot-discovery/);
 
   const schema = await runCli(['command-schema']);
   assert.equal(schema.code, 0, schema.stderr);
   assert.equal(schema.json.schemaVersion, '1.0');
   assert.deepEqual(schema.json.commands.init.required, ['session-dir', 'query']);
+  assert.equal(schema.json.commands.init.properties['session-dir'].format, 'sandbox-path');
+  assert.equal(schema.json.commands.init.properties['session-root'].format, 'absolute-path');
   assert.equal(schema.json.commands.init.properties['source-scope'].type, 'array');
   assert.deepEqual(schema.json.commands.init.properties['source-scope'].items.enum, [
     'public-internet', 'dingtalk', 'feishu', 'wecom', 'ima',
@@ -111,11 +218,14 @@ await (async () => {
   assert.deepEqual(schema.json.commands.init.properties['materialization-target'].enum, ['candidates', 'selected', 'all']);
   assert.equal(schema.json.commands.init.properties['materialization-target'].default, 'selected');
   assert.deepEqual(schema.json.commands.plan.required, ['session-dir', 'initial-search', 'channels']);
+  assert.equal(schema.json.commands.plan.properties['session-root'].format, 'absolute-path');
   assert.equal(schema.json.commands.plan.properties['initial-search'].type, 'array');
   assert.equal(schema.json.commands.plan.properties.channels.type, 'object');
   assert.equal(schema.json.commands.branch.properties.level.type, 'integer');
   assert.equal(schema.json.commands.branch.properties.level.minimum, 1);
   assert.equal(schema.json.commands.branch.properties.status.default, 'done');
+  assert.equal(schema.json.commands.report.properties['report-path'].format, 'sandbox-path');
+  assert.equal(schema.json.commands.status.properties['session-root'].format, 'absolute-path');
   assert.equal(schema.json.commands.collect.properties['item-json-file'].format, 'collection-input-file');
   assert.equal(schema.json.commands['crawl-seed'].properties['max-pages'].type, 'integer');
   assert.equal(schema.json.commands['crawl-seed'].properties.depth.default, 1);
@@ -158,8 +268,36 @@ await (async () => {
   const missingPublicDiscoverSession = await runCli([
     'public-discover', '--session-dir', '/does-not-exist', '--query', 'q',
   ]);
+  assert.notEqual(missingPublicDiscoverSession.stdout.trim(), '{}');
   assert.equal(missingPublicDiscoverSession.code, 1);
+  assert.equal(missingPublicDiscoverSession.json.ok, false);
   assert.match(missingPublicDiscoverSession.json.error, /采集会话目录不存在/);
+
+  const asyncDiscoveryRoot = makeSessionDir();
+  const asyncDiscoveryInit = await runCli([
+    'init', '--session-dir', asyncDiscoveryRoot, '--query', 'async discovery',
+    '--source-scope', '["public-internet"]', '--materialization-target', 'candidates',
+  ]);
+  assert.equal(asyncDiscoveryInit.code, 0, asyncDiscoveryInit.stderr);
+  const fixtureBinDir = join(asyncDiscoveryRoot, 'fixture-bin');
+  const fixtureSearxng = join(fixtureBinDir, 'searxng-cli');
+  mkdirSync(fixtureBinDir);
+  writeFileSync(fixtureSearxng, `#!/usr/bin/env node
+process.stdout.write(JSON.stringify({
+  query: 'async discovery',
+  results: [{ url: 'https://example.com/article', title: 'Async result', engine: 'fixture' }],
+}));
+`);
+  chmodSync(fixtureSearxng, 0o700);
+  const asyncDiscovery = await runCli([
+    'public-discover', '--session-dir', asyncDiscoveryRoot, '--query', 'async discovery',
+    '--requested-count', '1',
+  ], { PATH: `${fixtureBinDir}:${process.env.PATH}` });
+  assert.notEqual(asyncDiscovery.stdout.trim(), '{}');
+  assert.equal(asyncDiscovery.code, 0, asyncDiscovery.stderr);
+  assert.equal(asyncDiscovery.json.ok, true);
+  assert.equal(asyncDiscovery.json.action, 'public-discover');
+  rmSync(asyncDiscoveryRoot, { recursive: true, force: true });
 
   const siteCrawlFrontmatter = readFileSync(siteCrawlSkillPath, 'utf8').split('---')[1];
   assert.match(siteCrawlFrontmatter, /Do not use for one known URL/);
@@ -170,6 +308,10 @@ await (async () => {
   assert.deepEqual(enterpriseSchema.json.commands['search-all'].properties.sources.default, ['dingtalk', 'feishu', 'wecom', 'ima']);
   assert.ok(enterpriseSchema.json.commands.search.required.includes('parent-session-dir'));
   assert.ok(enterpriseSchema.json.commands.resource.required.includes('parent-session-dir'));
+  assert.equal(enterpriseSchema.json.commands.search.properties['parent-session-dir'].format, 'sandbox-path');
+  assert.equal(enterpriseSchema.json.commands.search.properties['output-dir'].format, 'sandbox-path');
+  assert.equal(enterpriseSchema.json.commands['search-all'].properties['output-root'].format, 'sandbox-path');
+  assert.equal(enterpriseSchema.json.commands.materialize.properties['session-dir'].format, 'sandbox-path');
 
   const enterprise = await runCli(['enterprise', '--help']);
   assert.equal(enterprise.code, 0);
@@ -269,6 +411,60 @@ await (async () => {
   console.log('PASS source scope and materialization target');
 })();
 
+await (async () => {
+  const root = makeSessionDir();
+  const metadataPath = join(tmpdir(), `kc-weixin-selected-${process.pid}-${Date.now()}.json`);
+  const urls = [
+    'https://mp.weixin.qq.com/s/article-1',
+    'https://mp.weixin.qq.com/s/article-2',
+    'https://mp.weixin.qq.com/s/article-3',
+    'https://mp.weixin.qq.com/s/article-4',
+  ];
+  writeFileSync(metadataPath, JSON.stringify({
+    schemaVersion: '1.0',
+    storage: { fallback: false },
+    collection: {
+      status: 'partial',
+      items: urls.map((sourceUrl, index) => ({
+        itemId: `weixin-selected-${index + 1}`,
+        title: `Selected Weixin article ${index + 1}`,
+        sourceUrl,
+        sourceItemId: null,
+        sourceSkill: 'bycli',
+        backend: 'weixin',
+        collectionFilters: {},
+        rawArtifacts: [],
+        materialization: {
+          status: 'pending', markdownPath: null, sanitizedPath: null,
+          pendingArtifactCleanup: [], reason: 'awaiting-acquisition',
+          contentGranularity: 'unknown',
+        },
+      })),
+    },
+  }, null, 2));
+  try {
+    const initialized = await runCli([
+      'init', '--session-dir', root, '--query', 'selected Weixin articles',
+      '--materialization-target', 'selected', '--metadata-input-file', metadataPath,
+    ]);
+    assert.equal(initialized.code, 0, initialized.stderr || initialized.stdout);
+    assert.equal(existsSync(join(root, 'session.json')), true);
+
+    const status = await runCli(['status', '--session-dir', root]);
+    assert.equal(status.code, 0, status.stderr || status.stdout);
+    assert.equal(status.json.collection.sourceRecords, 4);
+    assert.equal(status.json.collection.materialized, 0);
+    assert.equal(status.json.collection.pending, 4);
+    assert.equal(status.json.collection.failed, 0);
+    assert.equal(status.json.collection.deliveryComplete, false);
+    assert.deepEqual(status.json.downstreamInput.files, []);
+  } finally {
+    rmSync(metadataPath, { force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+  console.log('PASS selected inventory remains reportable before Weixin acquisition');
+})();
+
 // ── 站点爬取报告模板必须满足统一 report 契约 ──
 
 await (async () => {
@@ -342,12 +538,18 @@ await (async () => {
   assert.equal(incomplete.code, 1);
   assert.match(incomplete.json.error, /缺少必填章节/);
 
-  writeFileSync(join(root, 'report.md'), [
+  const externalReportRoot = makeSessionDir();
+  const externalReportPath = join(externalReportRoot, 'report.md');
+  writeFileSync(externalReportPath, [
     '# 报告', '## 采集范围', '公开互联网', '## 采集成果', '1 篇正文',
     '## 来源与追溯', 'arXiv', '## 覆盖缺口与局限', '无数据局限',
   ].join('\n'));
-  const rep2 = await runCli(['report', '--session-dir', root, '--stop-reason', '时间预算用尽,仅完成第一层']);
+  const rep2 = await runCli([
+    'report', '--session-dir', root, '--report-path', externalReportPath,
+    '--stop-reason', '时间预算用尽,仅完成第一层',
+  ]);
   assert.equal(rep2.json.ok, true);
+  assert.equal(rep2.json.reportPath, externalReportPath);
   assert.equal(rep2.json.deliverySummary.materialized, 1);
   assert.equal(rep2.json.deliverySummary.uniqueContentGroups, 1);
   assert.equal(rep2.json.deliverySummary.deliveryComplete, true);
@@ -356,6 +558,7 @@ await (async () => {
   assert.ok(tree.includes('AgentK'));
   assert.ok(tree.includes('item-x1'));
   assert.ok(tree.includes('时间预算用尽'));
+  rmSync(externalReportRoot, { recursive: true, force: true });
   console.log('PASS research flow with anti-fabrication gates');
 })();
 
@@ -419,10 +622,8 @@ await (async () => {
   const s = await runCli(['status', '--session-dir', root]);
   assert.equal(s.json.ok, true);
   assert.equal(s.json.collection.items, 1);
-  const session = JSON.parse(readFileSync(join(root, 'session.json'), 'utf8'));
-  assert.equal(session.schemaVersion, '2.0');
-  assert.equal(session.collection.collection.items.length, 1);
-  console.log('PASS legacy migration');
+  assert.equal(existsSync(join(root, 'session.json')), false, 'legacy status 不得写入迁移状态');
+  console.log('PASS legacy read compatibility without persistence');
 })();
 
 // ── 错误路径: 锁冲突 ──

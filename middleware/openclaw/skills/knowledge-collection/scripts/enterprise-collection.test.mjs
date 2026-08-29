@@ -10,8 +10,57 @@ import { ensureSessionSkeleton, newSession } from './session.mjs';
 const scriptPath = resolve(dirname(new URL(import.meta.url).pathname), 'enterprise-collection.mjs');
 const collectionScriptPath = resolve(dirname(new URL(import.meta.url).pathname), 'knowledge-collection.mjs');
 
-async function createParentSession(root, sourceScope) {
-  const parent = join(root, 'parent-session');
+await (async () => {
+  assert.equal(typeof enterpriseCollection.normalizeEnterprisePaths, 'function');
+  const root = await mkdtemp(join(tmpdir(), 'enterprise-paths-'));
+  const sessionsRoot = join(root, 'by', '.sessions');
+  const sessionRoot = join(sessionsRoot, 'session-1');
+  const previousSessionsRoot = process.env.KNOWLEDGE_COLLECTION_SESSIONS_ROOT;
+  process.env.KNOWLEDGE_COLLECTION_SESSIONS_ROOT = sessionsRoot;
+  try {
+    await mkdir(sessionRoot, { recursive: true });
+    const relativePaths = enterpriseCollection.normalizeEnterprisePaths('resource', {
+      source: 'ima',
+      'session-root': sessionRoot,
+      'parent-session-dir': 'collections/parent',
+      'output-dir': 'collections/output',
+    });
+    assert.equal(relativePaths['parent-session-dir'], join(sessionRoot, 'collections/parent'));
+    assert.equal(relativePaths['output-dir'], join(sessionRoot, 'collections/output'));
+
+    const absoluteParent = join(root, 'absolute-parent');
+    const absoluteOutput = join(root, 'absolute-output');
+    const absolutePaths = enterpriseCollection.normalizeEnterprisePaths('resource', {
+      source: 'ima',
+      'session-root': sessionRoot,
+      'parent-session-dir': absoluteParent,
+      'output-dir': absoluteOutput,
+    });
+    assert.equal(absolutePaths['parent-session-dir'], absoluteParent);
+    assert.equal(absolutePaths['output-dir'], absoluteOutput);
+
+    const batchPaths = enterpriseCollection.normalizeEnterprisePaths('search-all', {
+      'session-root': sessionRoot,
+      'parent-session-dir': 'collections/parent',
+      'output-root': 'batch-output',
+    });
+    assert.equal(batchPaths['output-root'], join(sessionRoot, 'batch-output'));
+
+    assert.throws(() => enterpriseCollection.normalizeEnterprisePaths('materialize', {
+      source: 'ima',
+      'session-root': sessionRoot,
+      'session-dir': '../escape',
+      'output-dir': 'output',
+    }), /Session Root|越出/);
+  } finally {
+    if (previousSessionsRoot === undefined) delete process.env.KNOWLEDGE_COLLECTION_SESSIONS_ROOT;
+    else process.env.KNOWLEDGE_COLLECTION_SESSIONS_ROOT = previousSessionsRoot;
+    await rm(root, { recursive: true, force: true });
+  }
+  console.log('PASS enterprise external paths support absolute and Session-Root-relative values');
+})();
+
+async function createParentSession(root, sourceScope, parent = join(root, 'parent-session')) {
   ensureSessionSkeleton(parent);
   await writeFile(join(parent, 'session.json'), `${JSON.stringify(newSession({
     query: 'enterprise test', sourceScope, materializationTarget: 'candidates',
@@ -21,6 +70,7 @@ async function createParentSession(root, sourceScope) {
 
 await (async () => {
   assert.equal(typeof enterpriseCollection.assertEnterpriseScope, 'function');
+  assert.equal(typeof enterpriseCollection.resolveEnterpriseOutputRoot, 'function');
   const root = await mkdtemp(join(tmpdir(), 'enterprise-scope-'));
   try {
     ensureSessionSkeleton(root);
@@ -28,6 +78,8 @@ await (async () => {
       query: 'enterprise', sourceScope: ['ima'], materializationTarget: 'candidates',
     }))}\n`);
     assert.doesNotThrow(() => enterpriseCollection.assertEnterpriseScope(root, ['ima']));
+    assert.equal(enterpriseCollection.resolveEnterpriseOutputRoot(root, root), root);
+    assert.equal(enterpriseCollection.resolveEnterpriseOutputRoot(root, join(root, 'raw/ima')), root);
     assert.throws(
       () => enterpriseCollection.assertEnterpriseScope(root, ['feishu']),
       /sourceScope.*feishu/,
@@ -225,6 +277,24 @@ console.log(JSON.stringify({ ok: true, data: { minute_token: 'minute-1' } }));
   return fixturePath;
 }
 
+async function createImaFixture(root) {
+  const fixturePath = join(root, 'ima-cli');
+  await writeFile(fixturePath, `#!/usr/bin/env node
+const args = process.argv.slice(2);
+const out = (value) => process.stdout.write(JSON.stringify(value));
+if (args[0] === 'auth' && args[1] === 'check') out({ checks: { token_fetch: true } });
+else if (args[0] === 'wiki' && args[1] === 'search-base') out({ knowledge_bases: [{ id: 'kb-1', name: args[2] }] });
+else if (args[0] === 'ima' && args[1] === 'knowledge') out([{
+  mediaId: 'article-1', title: '企业 AI 实践', url: 'https://ima.example.test/article-1',
+  abstract: '摘要', introduction: '引言', coverUrls: [],
+}]);
+else if (args[0] === 'wiki' && args[1] === 'search') out({ content: '摘要\\n\\n引言' });
+else process.exit(2);
+`, { mode: 0o700 });
+  await chmod(fixturePath, 0o700);
+  return fixturePath;
+}
+
 async function assertMode(path, expected) {
   const mode = (await stat(path)).mode & 0o777;
   assert.equal(mode, expected, `${path} mode`);
@@ -249,9 +319,9 @@ async function testScriptHasValidSyntax() {
 
 async function testSearchFailsWhenTheDwsExecutableCannotStart() {
   const tempRoot = await mkdtemp(join(tmpdir(), 'enterprise-collection-missing-dws-'));
-  const outputDir = join(tempRoot, 'output');
   try {
     const parent = await createParentSession(tempRoot, ['dingtalk']);
+    const outputDir = join(parent, 'raw/dingtalk');
     const result = await run(process.execPath, [scriptPath, 'search', '--parent-session-dir', parent, '--source', 'dingtalk', '--query', 'probe', '--output-dir', outputDir], {
       DWS_HOME: join(tempRoot, 'dws-home'),
       DWS_CLI_BIN: join(tempRoot, 'missing-dws'),
@@ -260,6 +330,31 @@ async function testSearchFailsWhenTheDwsExecutableCannotStart() {
     assert.match(result.stderr, /failed to start: ENOENT/);
     await assert.rejects(stat(outputDir), { code: 'ENOENT' });
   } finally { await rm(tempRoot, { recursive: true, force: true }); }
+}
+
+async function testImaSearchPublishesAtTheOuterSessionRoot() {
+  const tempRoot = await mkdtemp(join(tmpdir(), 'enterprise-collection-ima-root-'));
+  try {
+    const parent = await createParentSession(tempRoot, ['ima']);
+    const requestedNestedOutput = join(parent, 'raw/ima');
+    const fixture = await createImaFixture(tempRoot);
+    const result = await run(process.execPath, [
+      scriptPath, 'search', '--parent-session-dir', parent, '--source', 'ima',
+      '--query', '企业级AI应用落地实践', '--kb', '企业级AI应用落地实践',
+      '--limit', '1', '--output-dir', requestedNestedOutput,
+    ], { IMA_CLI_BIN: fixture, BYCLI_BIN: fixture });
+
+    assert.equal(result.code, 0, result.stderr || result.stdout);
+    const outcome = JSON.parse(result.stdout);
+    assert.equal(outcome.outputDir, parent);
+    const session = JSON.parse(await readFile(join(parent, 'session.json'), 'utf8'));
+    assert.equal(session.collection.collection.items.length, 1);
+    assert.equal(session.collection.collection.items[0].materialization.status, 'materialized');
+    await stat(join(parent, session.collection.collection.items[0].materialization.sanitizedPath));
+    await assert.rejects(stat(requestedNestedOutput), { code: 'ENOENT' });
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
 }
 
 async function testSearchFailsWhenTheFwsExecutableCannotStart() {
@@ -439,6 +534,96 @@ async function testWecomRejectsNestedBusinessFailure() {
   }
 }
 
+async function testSandboxAllowsAbsoluteWorkspaceOutputDirectory() {
+  const tempRoot = await mkdtemp(join(tmpdir(), 'enterprise-collection-test-'));
+  const sessionRoot = join(tempRoot, 'by', '.sessions', '20023126');
+  const outputDir = join(tempRoot, 'by', '.openclaw', 'workspace', 'collections', 'test');
+  try {
+    const fixture = await createWecomFixture(tempRoot);
+    const parent = await createParentSession(tempRoot, ['wecom'], outputDir);
+    const result = await run(process.execPath, [
+      scriptPath,
+      'wecom-smartpage',
+      '--parent-session-dir',
+      parent,
+      '--url',
+      'https://doc.weixin.qq.com/smartpage/x',
+      '--output-dir',
+      outputDir,
+    ], {
+      WECOM_CLI_BIN: fixture,
+      WECOM_FIXTURE_STATE: join(tempRoot, 'wecom-state'),
+      WECOM_HOME: join(tempRoot, 'wecom-home'),
+      KNOWLEDGE_COLLECTION_SESSION_ROOT: sessionRoot,
+      KNOWLEDGE_COLLECTION_SESSIONS_ROOT: dirname(sessionRoot),
+    });
+    assert.equal(result.code, 0, result.stderr);
+    await stat(join(outputDir, 'collection-result.json'));
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+}
+
+async function testSandboxAllowsSessionOutputDirectory() {
+  const tempRoot = await mkdtemp(join(tmpdir(), 'enterprise-collection-test-'));
+  const sessionRoot = join(tempRoot, 'by', '.sessions', '20023126');
+  const outputDir = join(sessionRoot, 'collections', 'test');
+  try {
+    const fixture = await createWecomFixture(tempRoot);
+    const parent = await createParentSession(tempRoot, ['wecom']);
+    const result = await run(process.execPath, [
+      scriptPath,
+      'wecom-smartpage',
+      '--parent-session-dir',
+      parent,
+      '--url',
+      'https://doc.weixin.qq.com/smartpage/x',
+      '--output-dir',
+      outputDir,
+    ], {
+      WECOM_CLI_BIN: fixture,
+      WECOM_FIXTURE_STATE: join(tempRoot, 'wecom-state'),
+      WECOM_HOME: join(tempRoot, 'wecom-home'),
+      KNOWLEDGE_COLLECTION_SESSION_ROOT: sessionRoot,
+      KNOWLEDGE_COLLECTION_SESSIONS_ROOT: dirname(sessionRoot),
+    });
+    assert.equal(result.code, 0, result.stderr);
+    await stat(join(outputDir, 'collection-result.json'));
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+}
+
+async function testAbsoluteHistoricalPathsDoNotRequireCurrentSessionRoot() {
+  const tempRoot = await mkdtemp(join(tmpdir(), 'enterprise-collection-test-'));
+  const sessionsRoot = join(tempRoot, 'by', '.sessions');
+  const historicalRoot = join(sessionsRoot, 'other-session', 'collections', 'parent');
+  const outputDir = join(sessionsRoot, 'other-session', 'collections', 'new-output');
+  try {
+    const fixture = await createWecomFixture(tempRoot);
+    const parent = await createParentSession(tempRoot, ['wecom'], historicalRoot);
+    const result = await run(process.execPath, [
+      scriptPath,
+      'wecom-smartpage',
+      '--parent-session-dir',
+      parent,
+      '--url',
+      'https://doc.weixin.qq.com/smartpage/x',
+      '--output-dir',
+      outputDir,
+    ], {
+      WECOM_CLI_BIN: fixture,
+      WECOM_FIXTURE_STATE: join(tempRoot, 'wecom-state'),
+      WECOM_HOME: join(tempRoot, 'wecom-home'),
+      KNOWLEDGE_COLLECTION_SESSIONS_ROOT: sessionsRoot,
+    });
+    assert.equal(result.code, 0, result.stderr);
+    await stat(join(outputDir, 'collection-result.json'));
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+}
+
 async function testWecomMissingTaskIdPersistsFailedMetadata() {
   const tempRoot = await mkdtemp(join(tmpdir(), 'enterprise-collection-missing-task-'));
   const outputDir = join(tempRoot, 'output');
@@ -588,11 +773,15 @@ async function testFeishuMissingTranscriptPersistsPartialMetadata() {
 }
 
 await testScriptHasValidSyntax();
+await testImaSearchPublishesAtTheOuterSessionRoot();
 await testSearchFailsWhenTheDwsExecutableCannotStart();
 await testSearchFailsWhenTheFwsExecutableCannotStart();
 await testSearchFailsWhenConnectorHomeIsMissing();
 await testWecomExportWritesCanonicalPrivateArtifacts();
 await testWecomRejectsNestedBusinessFailure();
+await testSandboxAllowsAbsoluteWorkspaceOutputDirectory();
+await testSandboxAllowsSessionOutputDirectory();
+await testAbsoluteHistoricalPathsDoNotRequireCurrentSessionRoot();
 await testWecomMissingTaskIdPersistsFailedMetadata();
 await testWecomTimeoutPersistsPartialMetadata();
 await testEnterpriseCliTimeoutIsBounded();

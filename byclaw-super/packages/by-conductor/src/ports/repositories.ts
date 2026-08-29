@@ -43,13 +43,13 @@ export interface RunRepository {
     event: Omit<RunEvent, "eventId">,
     claim?: RunExecutionClaim,
   ): Promise<RunEvent>;
-  /** PostgreSQL 实现用同一事务创建 Run、首事件及其短期执行凭证。 */
+  /** PostgreSQL 实现用同一事务创建 Run、首事件及其执行凭证。 */
   createWithEvent?(
     run: Run,
     event: Omit<RunEvent, "eventId">,
     credential?: ExecutionCredential,
   ): Promise<RunEvent>;
-  /** 首个入口用同一事务创建 Session、Run、首事件和短期执行凭证。 */
+  /** 首个入口用同一事务创建 Session、Run、首事件和执行凭证。 */
   createSessionWithRun?(
     session: Session,
     run: Run,
@@ -183,6 +183,8 @@ export interface RunExecutionQueue {
     delegationId: string;
     status: "COMPLETED" | "FAILED" | "CANCELLED";
     finalAnswer: string;
+    /** false 时忽略历史 callback_deadline_at，用于临时关闭回调超时。 */
+    enforceDeadline?: boolean;
   }): Promise<{ accepted: boolean; runId?: string; wakeRun?: boolean }>;
   /** 领取已经到终态、但因没有 ResumeCommand 上下文而尚未对外投递的 Run。 */
   claimCallbackTimeoutDeliveries?(input: {
@@ -243,15 +245,13 @@ export interface LeaderCheckpointStore {
   ): Promise<void>;
 }
 
-/** 短期凭证存储；loadForLease 必须在 SQL 中校验当前 lease、fencing 和过期时间。 */
+/** Run 执行凭证存储；loadForLease 必须在 SQL 中校验当前 lease 和 fencing。 */
 export interface ExecutionCredentialRepository {
   save(credential: ExecutionCredential): Promise<void>;
   loadForLease(input: {
     runId: string;
     instanceId: string;
     fencingToken: number;
-    now: number;
   }): Promise<ExecutionCredential | undefined>;
   delete(runId: string): Promise<void>;
-  deleteExpired(now: number): Promise<number>;
 }

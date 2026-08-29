@@ -145,6 +145,8 @@ describe("workspace-skills", () => {
       {
         listEntry: {
           skills: [
+            "project-context",
+            "notice",
             "json-skill",
             "extra-filter-name",
             "missing-extra",
@@ -209,6 +211,45 @@ describe("workspace-skills", () => {
     await expect(fs.access(path.join(workspaceSkillDir, "scripts", "removed-legacy-helper.mjs"))).rejects.toThrow();
     expect(copySpy).toHaveBeenCalledTimes(1);
     copySpy.mockRestore();
+  });
+
+  it("enables platform core skills for every managed agent", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "baiying-project-context-workspace-"));
+    const stateDir = await mkdtemp(path.join(tmpdir(), "baiying-project-context-state-"));
+    const bundledSkillsDir = await mkdtemp(path.join(tmpdir(), "baiying-project-context-bundled-"));
+    process.env.OPENCLAW_STATE_DIR = stateDir;
+    for (const [skillName, title] of [["project-context", "Project Context"], ["notice", "Notice"]]) {
+      const bundledSkillDir = path.join(bundledSkillsDir, skillName);
+      await mkdir(bundledSkillDir, { recursive: true });
+      await writeFile(
+        path.join(bundledSkillDir, "SKILL.md"),
+        `---\nname: ${skillName}\nbyclaw_managed: true\n---\n# ${title}\n`,
+        "utf8",
+      );
+    }
+    const api = {
+      runtime: {
+        config: {
+          loadConfig: () => ({ agents: { list: [{ id: "baiying-agent-1", workspace }] } }),
+        },
+      },
+    } as any;
+
+    const result = await mergeWorkspaceSkillsIntoManagedAgents({
+      api,
+      managed: [{ agentId: "baiying-agent-1", listEntry: { id: "baiying-agent-1", skills: [] } }],
+      includeMainShared: false,
+      mainParentAgentId: "main",
+      bundledSkillsDir,
+    });
+
+    expect(result[0]?.listEntry.skills).toEqual(["project-context", "notice"]);
+    await expect(
+      fs.readFile(path.join(workspace, "skills", "project-context", "SKILL.md"), "utf8"),
+    ).resolves.toContain("# Project Context");
+    await expect(
+      fs.readFile(path.join(workspace, "skills", "notice", "SKILL.md"), "utf8"),
+    ).resolves.toContain("# Notice");
   });
 
   it("leaves ordinary and future connector skills untouched unless the bundled skill explicitly opts in", async () => {
@@ -290,7 +331,7 @@ describe("workspace-skills", () => {
     ).resolves.toMatchObject([
       {
         listEntry: {
-          skills: ["inner-filter-name"],
+          skills: ["project-context", "notice", "inner-filter-name"],
         },
       },
     ]);

@@ -2,6 +2,7 @@ import useGlobal from '@/hooks/useGlobal';
 import { IMessageState } from '@/constants/message';
 import type { IMessage, IMessageListItem } from '@/typescript/message';
 import React, { useCallback, useEffect } from 'react';
+import { isPendingEasyConfirmListItem } from './easyConfirm';
 
 export type EasyConfirmComponentProps = {
   message: IMessage;
@@ -10,6 +11,9 @@ export type EasyConfirmComponentProps = {
   messageListItem?: IMessageListItem;
   thinkListItem?: IMessageListItem;
   updateMessageListItemContent: (messageListItemContent: any) => IMessage;
+
+  /** 仅供 EasyConfirm 外部承载实例使用，普通消息实例仍隐藏待处理交互。 */
+  renderInEasyConfirm?: boolean;
 };
 
 function getLatestListItem(
@@ -71,6 +75,11 @@ export default function withEasyConfirm<P extends EasyConfirmComponentProps>(Com
         EventEmitter.emit('beyond-easyconfirm-set-approvalform-item', props);
       }
     }, []);
+
+    if (!props.renderInEasyConfirm) {
+      const currentItem = props.thinkListItem || props.messageListItem;
+      if (currentItem && isPendingEasyConfirmListItem(props.message, currentItem)) return null;
+    }
 
     return <Comp {...props} updateMessageListItemContent={updateMessageListItemContent} />;
   };

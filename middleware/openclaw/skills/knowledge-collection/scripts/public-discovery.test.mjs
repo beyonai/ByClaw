@@ -9,29 +9,44 @@ import * as publicDiscovery from './public-discovery.mjs';
 
 const { runPublicDiscover } = publicDiscovery;
 
-test('requires the managed SearXNG environment when no interpreter override is configured', () => {
-  assert.throws(
-    () => publicDiscovery.resolveSearxngPython({}, {}, () => false),
-    /SearXNG Python 环境不存在[\s\S]*bootstrap-venv\.sh[\s\S]*ONLINE_SEARCH_PYTHON/,
+test('uses the image-wide SearXNG CLI by default', () => {
+  assert.deepEqual(
+    publicDiscovery.resolveSearxngRuntime({}, {}),
+    { executable: 'searxng-cli', argsPrefix: [] },
   );
 });
 
-test('prefers explicit SearXNG interpreter overrides over the managed environment', () => {
-  assert.equal(
-    publicDiscovery.resolveSearxngPython(
+test('prefers explicit SearXNG interpreter overrides over the image-wide command', () => {
+  assert.deepEqual(
+    publicDiscovery.resolveSearxngRuntime(
       { pythonExecutable: '/custom/python' },
       { ONLINE_SEARCH_PYTHON: '/environment/python' },
-      () => false,
     ),
-    '/custom/python',
+    { executable: '/custom/python', argsPrefix: ['/opt/searxng-cli/searxng_cli.py'] },
   );
-  assert.equal(
-    publicDiscovery.resolveSearxngPython(
+  assert.deepEqual(
+    publicDiscovery.resolveSearxngRuntime(
       {},
       { ONLINE_SEARCH_PYTHON: '/environment/python' },
-      () => false,
     ),
-    '/environment/python',
+    { executable: '/environment/python', argsPrefix: ['/opt/searxng-cli/searxng_cli.py'] },
+  );
+});
+
+test('supports an explicit SearXNG script path for local development', () => {
+  assert.deepEqual(
+    publicDiscovery.resolveSearxngRuntime(
+      { pythonExecutable: '/custom/python', searxngScript: '/workspace/searxng_cli.py' },
+      { ONLINE_SEARCH_PYTHON: '/environment/python', ONLINE_SEARCH_SCRIPT: '/environment/searxng_cli.py' },
+    ),
+    { executable: '/custom/python', argsPrefix: ['/workspace/searxng_cli.py'] },
+  );
+  assert.deepEqual(
+    publicDiscovery.resolveSearxngRuntime(
+      {},
+      { ONLINE_SEARCH_PYTHON: '/environment/python', ONLINE_SEARCH_SCRIPT: '/environment/searxng_cli.py' },
+    ),
+    { executable: '/environment/python', argsPrefix: ['/environment/searxng_cli.py'] },
   );
 });
 
@@ -108,11 +123,15 @@ test('runs SearXNG and hot discovery for every SearXNG category', async () => {
 
   assert.deepEqual(calls.map(({ spec }) => spec.channel).sort(), ['hot-discovery', 'searxng']);
   assert.deepEqual(calls.find(({ spec }) => spec.channel === 'hot-discovery').spec.args.slice(-2), ['--dimensions', 'images']);
-  assert.equal(calls.find(({ spec }) => spec.channel === 'hot-discovery').options, undefined);
+  assert.deepEqual(
+    calls.find(({ spec }) => spec.channel === 'hot-discovery').options,
+    { timeoutMs: 60_000 },
+  );
   const searxngCall = calls.find(({ spec }) => spec.channel === 'searxng');
   assert.ok(searxngCall.spec.args.includes('--time-range'));
   assert.ok(searxngCall.spec.args.includes('week'));
-  assert.deepEqual(searxngCall.options, { timeoutMs: 15_000 });
+  assert.equal(searxngCall.spec.args[searxngCall.spec.args.indexOf('--timeout') + 1], '10');
+  assert.deepEqual(searxngCall.options, { timeoutMs: 60_000 });
   assert.equal(result.ok, true);
   assert.deepEqual(result.hotDiscovery.effectiveDimensions, ['images', 'general']);
   assert.equal(existsSync(result.snapshots.searxng), true);
@@ -127,7 +146,85 @@ test('runs SearXNG and hot discovery for every SearXNG category', async () => {
   });
 });
 
-test('uses only SearXNG when the caller explicitly requests a result count', async () => {
+test('default merge preserves the source hostname used for acquisition', async () => {
+  const { paths } = makeInitializedSession();
+  const result = await runPublicDiscover(paths, { query: '浩鲸科技' }, {
+    runProcess: async (spec) => spec.channel === 'searxng'
+      ? {
+        code: 0,
+        stdout: JSON.stringify({
+          query: '浩鲸科技',
+          results: [
+            { url: 'https://www.iwhalecloud.com/', title: '浩鲸科技', engine: 'baidu' },
+            { url: 'https://iwhalecloud.com/', title: '浩鲸科技', engine: 'bing' },
+          ],
+        }),
+        stderr: '',
+      }
+      : {
+        code: 0,
+        stdout: JSON.stringify({ query: '浩鲸科技', candidates: [] }),
+        stderr: '',
+      },
+  });
+
+  const candidate = result.merged.groups.searxngTop[0];
+  assert.equal(candidate.url, 'https://www.iwhalecloud.com/');
+  assert.deepEqual(candidate.sourceUrls, [
+    'https://www.iwhalecloud.com/',
+    'https://iwhalecloud.com/',
+  ]);
+});
+
+test('returns merged user action without discarding successful SearXNG discovery', async () => {
+  const { paths } = makeInitializedSession();
+  const result = await runPublicDiscover(paths, { query: 'agent' }, {
+    runProcess: async (spec) => spec.channel === 'searxng'
+      ? {
+        code: 0,
+        stdout: JSON.stringify({
+          query: 'agent',
+          results: [{ url: 'https://example.com/a', title: 'A', engine: 'google' }],
+        }),
+        stderr: '',
+      }
+      : {
+        code: 0,
+        stdout: JSON.stringify({
+          query: 'agent',
+          candidates: [],
+          warnings: ['byCLI 浏览器桥接不可用；已停止浏览器适配器并等待人工恢复。'],
+          requiresUserAction: {
+            kind: 'bridge_unavailable',
+            message: 'bridge unavailable',
+          },
+        }),
+        stderr: '',
+      },
+  });
+
+  const expectedAction = {
+    kind: 'bridge_unavailable',
+    message: 'bridge unavailable',
+    fallbackPolicy: {
+      allowDirectHttp: false,
+      allowGenericBrowser: false,
+      nextAction: 'stop-and-report',
+    },
+  };
+  assert.deepEqual(result.requiresUserAction, expectedAction);
+  assert.deepEqual(result.merged.requiresUserAction, expectedAction);
+  assert.equal(result.merged.groups.searxngTop.length, 1);
+  assert.match(result.merged.warnings.join('\n'), /禁止使用.*HTTP.*通用浏览器.*降级/);
+  const mergedSnapshot = JSON.parse(readFileSync(result.snapshots.merged, 'utf8'));
+  assert.deepEqual(
+    mergedSnapshot.requiresUserAction,
+    expectedAction,
+  );
+  assert.match(mergedSnapshot.warnings.join('\n'), /禁止使用.*HTTP.*通用浏览器.*降级/);
+});
+
+test('uses only SearXNG when a requested result count is satisfied', async () => {
   const { paths } = makeInitializedSession();
   const calls = [];
   const result = await runPublicDiscover(paths, {
@@ -137,7 +234,14 @@ test('uses only SearXNG when the caller explicitly requests a result count', asy
   }, {
     runProcess: async (spec, options) => {
       calls.push({ spec, options });
-      return { code: 0, stdout: JSON.stringify({ query: 'DeepSeek', results: [] }), stderr: '' };
+      return {
+        code: 0,
+        stdout: JSON.stringify({
+          query: 'DeepSeek',
+          results: [{ url: 'https://example.com/deepseek', title: 'DeepSeek', engine: 'google' }],
+        }),
+        stderr: '',
+      };
     },
     merge: ({ hotDoc, sxDoc }) => ({ query: sxDoc.query, hotDoc }),
   });
@@ -145,7 +249,8 @@ test('uses only SearXNG when the caller explicitly requests a result count', asy
   assert.deepEqual(calls.map(({ spec }) => spec.channel), ['searxng']);
   const searxngCall = calls[0];
   assert.equal(searxngCall.spec.args[searxngCall.spec.args.indexOf('--max-results') + 1], '1');
-  assert.deepEqual(searxngCall.options, { timeoutMs: 15_000 });
+  assert.equal(searxngCall.spec.args[searxngCall.spec.args.indexOf('--timeout') + 1], '10');
+  assert.deepEqual(searxngCall.options, { timeoutMs: 60_000 });
   assert.equal(result.hotDiscovery, null);
   assert.equal(result.snapshots.hotDiscovery, null);
   assert.deepEqual(result.channels.hotDiscovery, { status: 'skipped' });
@@ -153,6 +258,115 @@ test('uses only SearXNG when the caller explicitly requests a result count', asy
   assert.deepEqual(JSON.parse(readFileSync(result.snapshots.merged, 'utf8')).channelDiagnostics.hotDiscovery, {
     status: 'skipped',
   });
+});
+
+test('falls back to hot discovery when requested SearXNG result set is empty', async () => {
+  const { paths } = makeInitializedSession();
+  const calls = [];
+  const result = await runPublicDiscover(paths, {
+    query: '浩鲸科技',
+    'requested-count': '1',
+    'max-results': '20',
+    timeout: '0.025',
+  }, {
+    runProcess: async (spec, options) => {
+      calls.push({ spec, options });
+      return spec.channel === 'searxng'
+        ? { code: 0, stdout: JSON.stringify({ query: '浩鲸科技', results: [] }), stderr: '' }
+        : {
+          code: 0,
+          stdout: JSON.stringify({
+            query: '浩鲸科技',
+            candidates: [],
+            dimensions: ['general'],
+            effectiveDimensions: ['general'],
+          }),
+          stderr: '',
+        };
+    },
+    merge: ({ hotDoc, sxDoc }) => ({ query: sxDoc.query, usedHotDiscovery: Boolean(hotDoc) }),
+  });
+
+  assert.deepEqual(calls.map(({ spec }) => spec.channel), ['searxng', 'hot-discovery']);
+  const hotDiscoveryCall = calls[1];
+  assert.equal(
+    hotDiscoveryCall.spec.args[hotDiscoveryCall.spec.args.indexOf('--limit') + 1],
+    '1',
+  );
+  assert.deepEqual(calls.map(({ options }) => options), [
+    { timeoutMs: 25 },
+    { timeoutMs: 25 },
+  ]);
+  assert.equal(result.merged.usedHotDiscovery, true);
+  assert.deepEqual(result.channels.hotDiscovery, { status: 'success', exitCode: 0 });
+  assert.equal(existsSync(result.snapshots.hotDiscovery), true);
+});
+
+test('applies a custom outer timeout to both public discovery channels', async () => {
+  const { paths } = makeInitializedSession();
+  const calls = [];
+  await runPublicDiscover(paths, {
+    query: 'timeout bounds',
+    timeout: '0.025',
+  }, {
+    runProcess: async (spec, options) => {
+      calls.push({ spec, options });
+      return spec.channel === 'searxng'
+        ? { code: 0, stdout: JSON.stringify({ query: 'timeout bounds', results: [] }), stderr: '' }
+        : {
+          code: 0,
+          stdout: JSON.stringify({ query: 'timeout bounds', candidates: [] }),
+          stderr: '',
+        };
+    },
+    merge: ({ sxDoc }) => ({ query: sxDoc.query }),
+  });
+
+  assert.deepEqual(calls.map(({ options }) => options), [
+    { timeoutMs: 25 },
+    { timeoutMs: 25 },
+  ]);
+});
+
+test('falls back to hot discovery when requested SearXNG output is invalid', async () => {
+  const { paths } = makeInitializedSession();
+  const calls = [];
+  const result = await runPublicDiscover(paths, {
+    query: '浩鲸科技',
+    'requested-count': '1',
+  }, {
+    runProcess: async (spec) => {
+      calls.push(spec);
+      return spec.channel === 'searxng'
+        ? { code: 1, stdout: '', stderr: 'invalid response' }
+        : {
+          code: 0,
+          stdout: JSON.stringify({
+            query: '浩鲸科技',
+            candidates: [],
+            dimensions: ['general'],
+            effectiveDimensions: ['general'],
+          }),
+          stderr: '',
+        };
+    },
+    merge: ({ hotDoc, sxDoc, warnings }) => ({
+      query: hotDoc.query,
+      hasSearxng: Boolean(sxDoc),
+      warnings,
+    }),
+  });
+
+  assert.deepEqual(calls.map((spec) => spec.channel), ['searxng', 'hot-discovery']);
+  assert.equal(result.merged.hasSearxng, false);
+  assert.deepEqual(result.channels.searxng, {
+    status: 'failed',
+    exitCode: 1,
+    timedOut: false,
+    stderr: 'invalid response',
+  });
+  assert.deepEqual(result.channels.hotDiscovery, { status: 'success', exitCode: 0 });
+  assert.match(result.warnings.join('\n'), /SearXNG 发现失败/);
 });
 
 test('keeps SearXNG output when hot discovery fails', async () => {

@@ -73,7 +73,7 @@ const KNOWN_QUIRKS = new Set([
 // 【不解决】等价路径变体（/tree/master）。判定两个路径是否同一资源需要站点语义，
 // 无通用规则，且尝试对齐反有误合并风险（/tree/v1 与 /tree/v2 是不同内容）。已知缺口。
 
-export function normalizeUrl(raw, cfg = {}) {
+export function normalizeUrl(raw, cfg = {}, { preserveHostname = false } = {}) {
   if (typeof raw !== 'string' || !raw.trim()) return null;
   const paramAllow = cfg.queryParamAllowlist || {};
   const mobileAllow = new Set(cfg.mobileSubdomainAllowlist || []);
@@ -95,7 +95,7 @@ export function normalizeUrl(raw, cfg = {}) {
   // 规则 6：移动子域按白名单归一，不用 m.* 通配 —— 个别站点 m. 是独立内容
   if (mobileAllow.has(host)) host = host.replace(/^(m|mobile)\./, '');
   // 规则 5：去 www.
-  host = host.replace(/^www\./, '');
+  if (!preserveHostname) host = host.replace(/^www\./, '');
   u.hostname = host;
 
   // 规则 7：已声明站点按白名单保留身份参数；未知站点只删除明确追踪参数。
@@ -772,6 +772,17 @@ const ADAPTER_STAT_SCALAR_KEYS = new Set([
   'metric_missing', 'title_missing', 'url_missing',
 ]);
 const ADAPTER_STAT_ARRAY_KEYS = new Set(['driftedColumns', 'shapeUnexpectedFields']);
+const USER_ACTION_STRING_LIMITS = Object.freeze({
+  kind: 100,
+  source: 200,
+  errorCode: 100,
+  message: 1_000,
+});
+const BLOCKED_FALLBACK_POLICY = Object.freeze({
+  allowDirectHttp: false,
+  allowGenericBrowser: false,
+  nextAction: 'stop-and-report',
+});
 
 function sanitizeAdapterStats(value) {
   if (!isRecord(value)) return {};
@@ -790,6 +801,17 @@ function sanitizeAdapterStats(value) {
     sites.push([site, Object.fromEntries(fields)]);
   }
   return Object.fromEntries(sites);
+}
+
+function sanitizeRequiresUserAction(value) {
+  if (!isRecord(value) || typeof value.kind !== 'string' || !value.kind.trim()) return null;
+  const action = {};
+  for (const [key, limit] of Object.entries(USER_ACTION_STRING_LIMITS)) {
+    if (typeof value[key] === 'string' && value[key].trim()) {
+      action[key] = value[key].trim().slice(0, limit);
+    }
+  }
+  return { ...action, fallbackPolicy: { ...BLOCKED_FALLBACK_POLICY } };
 }
 
 export async function readJsonIfGiven(p, label) {
@@ -827,6 +849,9 @@ export function mergeDocuments({
     && Number.isFinite(Date.parse(hotDoc.observedAt))
     ? hotDoc.observedAt : new Date().toISOString();
   const adapterStats = invalidHotDoc ? {} : sanitizeAdapterStats(hotDoc?.adapterStats);
+  const requiresUserAction = invalidHotDoc
+    ? null
+    : sanitizeRequiresUserAction(hotDoc?.requiresUserAction);
   const hotWarnings = invalidHotDoc || !Array.isArray(hotDoc?.warnings) ? []
     : hotDoc.warnings.filter((w) => typeof w === 'string').slice(0, 500).map((w) => w.slice(0, 1000));
   const hotRows = hotDoc && Array.isArray(hotDoc.candidates) ? hotDoc.candidates : [];
@@ -853,10 +878,15 @@ export function mergeDocuments({
     const prev = byKey.get(key);
     if (!prev) {
       byKey.set(key, {
-        ...c, url: publicUrl, _dedupKey: key, _popularities: c.popularity ? [c.popularity] : [],
+        ...c,
+        url: publicUrl,
+        _dedupKey: key,
+        _sourceUrls: [publicUrl],
+        _popularities: c.popularity ? [c.popularity] : [],
       });
       continue;
     }
+    if (!prev._sourceUrls.includes(publicUrl)) prev._sourceUrls.push(publicUrl);
     // 合并 discoveredBy —— 这是「双通道命中」判定的唯一依据
     prev.discoveredBy = [...new Set([...prev.discoveredBy, ...c.discoveredBy])];
     prev._verifiedDiscoveredBy = [...new Set([
@@ -872,6 +902,8 @@ export function mergeDocuments({
 
   const all = [...byKey.values()];
   for (const candidate of all) {
+    if (candidate._sourceUrls.length > 1) candidate.sourceUrls = [...candidate._sourceUrls];
+    delete candidate._sourceUrls;
     candidate.discoveredBy.sort();
     candidate._verifiedDiscoveredBy.sort();
     const popularityBySourceMetric = new Map();
@@ -968,9 +1000,13 @@ export function mergeDocuments({
       unverified: unverified.slice(0, unverifiedLimit),
     },
     adapterStats,
+    ...(requiresUserAction ? { requiresUserAction } : {}),
     warnings: [
       ...inputWarnings.filter((w) => typeof w === 'string'),
       ...hotWarnings,
+      ...(requiresUserAction
+        ? ['需要人工处理；禁止使用直接 HTTP 客户端或通用浏览器降级，必须停止并报告。']
+        : []),
       ...(sxProvided ? [] : ['searxng 通道缺失 —— 热度结果仍可用，但相关性通道未参与']),
       ...(invalidHotDoc ? ['hot-file 结构无效 —— 已忽略该通道'] : []),
       ...(invalidSearxngDoc ? ['searxng-file 结构无效 —— 已忽略该通道'] : []),

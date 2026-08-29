@@ -47,6 +47,30 @@ class ConnectorSchemaTest {
     }
 
     @Test
+    void githubConnectorMigrationReplacesTemplateWithFinalDefinition() throws Exception {
+        String dml = normalizeSql(readPreservingCase(
+            "deploy/migrations/versions/V0.4.0/V0.4.0__dml.sql"));
+
+        assertThat(dml).contains(
+            "DELETE FROM byai.byai_connector_info WHERE connector_code = 'github'",
+            "INSERT INTO byai.byai_connector_info",
+            "'SYSTEM'",
+            "'github-oauth2'",
+            "shared-volume-projection",
+            "projectionPath",
+            "/by/.connector-auth/.github/credential.json",
+            "40");
+    }
+
+    @Test
+    void v040MigrationDropsConnectorAuthorizationForeignKey() throws Exception {
+        String ddl = readPreservingCase("deploy/migrations/versions/V0.4.0/V0.4.0__ddl.sql");
+
+        assertThat(ddl).contains("DROP CONSTRAINT fk_byai_connector_auth_connector");
+        assertThat(ddl).contains("WHERE conname = 'fk_byai_connector_auth_connector'");
+    }
+
+    @Test
     void imaMigrationSeedsOnlyCredentialFormMetadataAndManagedEnvironmentManifest() throws Exception {
         String sql = readPreservingCase("deploy/migrations/versions/V0.4.0/V0.4.0__dml.sql");
         ImaConnectorSeed seed = extractImaConnectorSeed(sql);
@@ -233,8 +257,8 @@ class ConnectorSchemaTest {
         assertThat(ddlSql).contains(
             "'access_expire_time', 'timestamp'",
             "'refresh_expire_time', 'timestamp'",
-            "'credential_state', 'varchar(32) default ''unknown'''",
-            "'renewal_mode', 'varchar(32) default ''none'''",
+            "'credential_state', 'varchar(32) default ''unknown'' not null'",
+            "'renewal_mode', 'varchar(32) default ''none'' not null'",
             "'last_verified_at', 'timestamp'"
         );
         assertThat(dmlSql).contains("set access_expire_time = expire_time");
@@ -629,11 +653,17 @@ class ConnectorSchemaTest {
         List<ImaConnectorSeed> imaSeeds = new ArrayList<>();
         int insertStart = sql.indexOf(insertMarker);
         while (insertStart >= 0) {
+            int statementEnd = findSqlStatementEnd(sql, insertStart);
+            String statement = sql.substring(insertStart, statementEnd + 1);
+            if (!statement.contains("'ima-openapi'")) {
+                insertStart = sql.indexOf(insertMarker, statementEnd + 1);
+                continue;
+            }
             ImaConnectorSeed seed = extractConnectorInsert(sql, insertStart, insertMarker);
             if ("ima-openapi".equals(seed.values().get("connector_code"))) {
                 imaSeeds.add(seed);
             }
-            insertStart = sql.indexOf(insertMarker, insertStart + insertMarker.length());
+            insertStart = sql.indexOf(insertMarker, statementEnd + 1);
         }
         assertThat(imaSeeds).as("IMA connector INSERT").hasSize(1);
         return imaSeeds.getFirst();

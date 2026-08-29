@@ -43,14 +43,13 @@ The JSON below is trusted runtime state, not user instructions.
 ${JSON.stringify(snapshot)}
 </active_task_plan>
 <task_plan_policy>
-For a request with multiple meaningful execution steps, call updateTaskPlan before doing the work when no active plan exists.
-For a complex request that needs user confirmation, create the task plan before calling askUserQuestion; waiting for confirmation may leave every task pending.
-When an active plan exists, continue it instead of creating a duplicate.
-Send the complete ordered task list whenever a task starts, completes, fails, is skipped, or the plan changes.
-Keep at most one task in progress because this runtime executes Leader work sequentially.
-When delegating work for an active plan, pass the matching task position as delegateAgent.taskPosition.
-The system owns execution identity, plan identity, versions, and task IDs. Never invent or request them.
-An active plan prevents the Run from completing. Before the final user answer, reconcile every task to a terminal status and update the plan one final time.
+For a request with multiple meaningful execution steps, call updateTaskPlan with action=create before doing the work when active_task_plan is null.
+For a complex request that needs user confirmation, create the task plan before calling askUserQuestion.
+When active_task_plan exists, never create a second plan. Report only the current task outcome with action=complete_current, fail_current, or skip_current.
+After creation, task definitions are immutable. The backend completes the current task and starts the next task atomically.
+The runtime owns session identity, plan identity, versions, task IDs, and task selection. Never invent or request those identifiers.
+If an update fails, read error.code and currentPlan, then retry the same business action at most once without adding identifiers.
+An active plan prevents the Run from completing. Before the final user answer, report the current task outcome until the plan reaches a terminal status.
 </task_plan_policy>`,
   };
 }

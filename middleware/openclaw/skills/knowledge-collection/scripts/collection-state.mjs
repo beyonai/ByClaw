@@ -23,6 +23,12 @@ import {
   resolveCollectionInputFile,
 } from './session.mjs';
 import { deliveryCompleteForSession, summarizeCrawlDelivery } from './delivery-state.mjs';
+import {
+  CONTENT_GRANULARITIES,
+  COVER_STATUSES,
+  normalizeContentGranularity,
+  normalizeMediaState,
+} from './enterprise/shared/status-model.mjs';
 
 const METADATA_VERSION = '1.0';
 const SENSITIVE_METADATA_KEY = /(token|cookie|secret|password|authorization|credential|device[_-]?code)/i;
@@ -143,6 +149,25 @@ function validateMarkdownPath(root, relativePath, label, expectedDirectory) {
   return candidate;
 }
 
+function validateRawArtifacts(root, rawArtifacts) {
+  if (!Array.isArray(rawArtifacts)) throw new Error('rawArtifacts 必须是字符串数组');
+  const validated = rawArtifacts.map((artifact, index) => {
+    const label = `rawArtifacts[${index}]`;
+    const candidate = validateRelativePath(root, artifact, label);
+    validatePathPrefix(root, artifact, 'raw', label);
+    const stat = fs.statSync(candidate);
+    if (!stat.isFile()) throw new Error(`${label} 必须指向普通文件`);
+    if (stat.size <= 0) throw new Error(`${label} 必须指向非空文件`);
+    try {
+      fs.accessSync(candidate, fs.constants.R_OK);
+    } catch {
+      throw new Error(`${label} 必须指向当前进程可读的文件`);
+    }
+    return artifact;
+  });
+  return [...new Set(validated)];
+}
+
 function safeWorkCopy(paths, relativePath, directory, { requireExisting = false } = {}) {
   if (typeof relativePath !== 'string' || !relativePath.trim()) return false;
   if (!MARKDOWN_EXTENSIONS.has(path.extname(relativePath).toLowerCase())) return false;
@@ -166,11 +191,12 @@ function materializationFromCanonical(root, item) {
     validateMarkdownPath(root, markdownPath, 'legacy markdownPath', 'markdown');
     return {
       status: 'materialized', markdownPath, sanitizedPath, pendingArtifactCleanup: [], reason: null,
+      contentGranularity: 'unknown',
     };
   } catch {
     return {
       status: 'pending', markdownPath: null, sanitizedPath: null,
-      pendingArtifactCleanup: [], reason: 'materialization-missing',
+      pendingArtifactCleanup: [], reason: 'materialization-missing', contentGranularity: 'unknown',
     };
   }
 }
@@ -233,6 +259,18 @@ function normalizeMaterializations(paths, metadata) {
       || safeWorkCopy(paths, relativePath, path.join('sanitized', 'items'))
     )))];
     item.materialization = materialization;
+    const previousGranularity = materialization.contentGranularity;
+    materialization.contentGranularity = normalizeContentGranularity(previousGranularity);
+    if (previousGranularity !== undefined && previousGranularity !== materialization.contentGranularity) {
+      warnings.push(`inventory ${item.itemId || '<unknown>'} materialization.contentGranularity 无效，已降级为 unknown`);
+      recovered = true;
+    }
+    const previousMedia = item.media;
+    item.media = normalizeMediaState(previousMedia, { coverUrls: item.coverUrls });
+    if (previousMedia !== undefined && JSON.stringify(previousMedia) !== JSON.stringify(item.media)) {
+      warnings.push(`inventory ${item.itemId || '<unknown>'} media 无效，已降级为 unknown`);
+      recovered = true;
+    }
 
     const materialized = materialization.status === 'materialized';
     const markdownValid = materialized
@@ -254,6 +292,7 @@ function normalizeMaterializations(paths, metadata) {
     materialization.markdownPath = null;
     materialization.sanitizedPath = null;
     materialization.reason = 'materialization-invalid';
+    materialization.contentGranularity = 'unknown';
     warnings.push(`inventory ${item.itemId || '<unknown>'} materialization 无效，已降级为 pending`);
     recovered = true;
   }
@@ -300,6 +339,13 @@ function validateMetadata(metadata) {
     if (!MATERIALIZATION_STATUSES.has(item?.materialization?.status)) {
       throw new Error(`inventory ${itemId} materialization.status 无效`);
     }
+    if (!CONTENT_GRANULARITIES.has(item.materialization.contentGranularity)) {
+      throw new Error(`inventory ${itemId} materialization.contentGranularity 无效`);
+    }
+    if (!COVER_STATUSES.has(item?.media?.coverStatus)) {
+      throw new Error(`inventory ${itemId} media.coverStatus 无效`);
+    }
+    normalizeMediaState(item.media, { strict: true });
     if (!Array.isArray(item.rawArtifacts)
       || item.rawArtifacts.some((artifact) => typeof artifact !== 'string')) {
       throw new Error(`inventory ${itemId} rawArtifacts 必须是字符串数组`);
@@ -487,6 +533,8 @@ function validateCanonicalItem(item, sanitizedPath) {
 
 function markOneMaterialized(paths, session, metadata, collectionResult, update) {
   const itemId = requireString(update.itemId, 'itemId');
+  const rawArtifacts = update.rawArtifacts === undefined
+    ? undefined : validateRawArtifacts(paths.root, update.rawArtifacts);
   let inventory = metadata.collection.items.find((item) => item.itemId === itemId);
   if (!inventory) {
     const canonical = update.canonicalItem && typeof update.canonicalItem === 'object'
@@ -514,10 +562,11 @@ function markOneMaterialized(paths, session, metadata, collectionResult, update)
       backend,
       collectionFilters: collectionResult.filters && typeof collectionResult.filters === 'object'
         ? clone(collectionResult.filters) : {},
-      rawArtifacts: [],
+      rawArtifacts: rawArtifacts ?? [],
+      media: normalizeMediaState(undefined),
       materialization: {
         status: 'pending', markdownPath: null, sanitizedPath: null,
-        pendingArtifactCleanup: [], reason: null,
+        pendingArtifactCleanup: [], reason: null, contentGranularity: 'unknown',
       },
     };
     metadata.collection.items.push(inventory);
@@ -537,6 +586,7 @@ function markOneMaterialized(paths, session, metadata, collectionResult, update)
     .filter((value) => typeof value === 'string'
       && value !== markdownPath && value !== sanitizedPath);
   inventory.title = update.canonicalItem.title;
+  if (rawArtifacts !== undefined) inventory.rawArtifacts = rawArtifacts;
   inventory.materialization = {
     status: 'materialized',
     markdownPath,
@@ -546,7 +596,11 @@ function markOneMaterialized(paths, session, metadata, collectionResult, update)
       ...oldPaths,
     ])],
     reason: null,
+    contentGranularity: normalizeContentGranularity(update.contentGranularity, { strict: true }),
   };
+  inventory.media = update.media === undefined
+    ? normalizeMediaState(inventory.media, { strict: true, coverUrls: inventory.coverUrls })
+    : normalizeMediaState(update.media, { strict: true, coverUrls: inventory.coverUrls });
   const persistedCanonicalItem = canonicalViewItem(update.canonicalItem);
   const canonicalIndex = collectionResult.items.findIndex((item) => item.fileName === sanitizedPath);
   if (canonicalIndex >= 0) collectionResult.items[canonicalIndex] = persistedCanonicalItem;
@@ -586,6 +640,25 @@ export function cmdCollect(paths, args) {
   });
 }
 
+function contentGranularityCounts(items) {
+  const counts = { 'full-text': 0, excerpt: 0, abstract: 0, unknown: 0 };
+  for (const item of items) {
+    if (item.materialization.status === 'materialized') {
+      counts[item.materialization.contentGranularity] += 1;
+    }
+  }
+  return counts;
+}
+
+function mediaCoverCounts(items) {
+  const counts = { notPresent: 0, materialized: 0, unavailable: 0, unknown: 0 };
+  const keys = {
+    'not-present': 'notPresent', materialized: 'materialized', unavailable: 'unavailable', unknown: 'unknown',
+  };
+  for (const item of items) counts[keys[item.media.coverStatus]] += 1;
+  return counts;
+}
+
 function metadataSummary(metadata) {
   const items = metadata.collection.items;
   const count = (status) => items.filter((item) => item.materialization.status === status).length;
@@ -597,6 +670,8 @@ function metadataSummary(metadata) {
     materialized: count('materialized'),
     pending: count('pending'),
     failed: count('failed'),
+    contentGranularity: contentGranularityCounts(items),
+    mediaCovers: mediaCoverCounts(items),
     uniqueContentGroups: groups.size,
     duplicates: items.length - groups.size,
   };
@@ -650,7 +725,7 @@ export function buildDownstreamInput(paths, collectionResult) {
 }
 
 export function collectionStatus(paths) {
-  const loaded = loadCollectionSession(paths, { persistRecovery: true });
+  const loaded = loadCollectionSession(paths, { persistRecovery: false });
   const { session, metadata, collectionResult } = loaded;
   const items = metadata.collection.items;
   const count = (status) => items.filter((item) => item.materialization.status === status).length;
@@ -665,6 +740,8 @@ export function collectionStatus(paths) {
     materialized: count('materialized'),
     pending,
     failed,
+    contentGranularity: contentGranularityCounts(items),
+    mediaCovers: mediaCoverCounts(items),
     uniqueContentGroups: groups.size,
     duplicates: items.length - groups.size,
     materializationTarget,

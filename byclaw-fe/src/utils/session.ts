@@ -28,6 +28,40 @@ export const formatSessionName = (item: ISession) => {
   return item.sessionName;
 };
 
+type DigitalEmployeeResource = {
+  resourceId?: string | number;
+  resourceCode?: string;
+  id?: string | number;
+  resourceName?: string;
+  agentName?: string;
+  name?: string;
+};
+
+const DIGITAL_EMPLOYEE_PLACEHOLDER = /\{\{DIG_EMPLOYEE_([^}#]+)(?:#[^}]*)?\}\}/g;
+
+/** 将临时会话标题中的数字员工占位符转换为本轮引用的员工名称。 */
+export const resolveDigitalEmployeePlaceholders = (
+  value: unknown,
+  resources: DigitalEmployeeResource[] = []
+): string => {
+  if (typeof value !== 'string' || !value.includes('{{DIG_EMPLOYEE_')) return typeof value === 'string' ? value : '';
+
+  const resourceNames = new Map<string, string>();
+  resources.forEach((resource) => {
+    const name = `${resource.resourceName || resource.agentName || resource.name || ''}`.trim();
+    if (!name) return;
+    [resource.resourceId, resource.resourceCode, resource.id].forEach((key) => {
+      if (key !== undefined && key !== null && `${key}`.trim()) {
+        resourceNames.set(`${key}`.trim(), name);
+      }
+    });
+  });
+
+  return value.replace(DIGITAL_EMPLOYEE_PLACEHOLDER, (placeholder, resourceKey: string) => {
+    return resourceNames.get(resourceKey.trim()) || placeholder;
+  });
+};
+
 /** 通知会话由通知中心负责展示，不应进入普通聊天交互。 */
 export const isNotificationSession = (session?: Pick<ISession, 'objectType'> | null) =>
   `${session?.objectType || ''}`.toLowerCase() === 'notification';

@@ -11,8 +11,12 @@ import { constants, lstatSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { dirname, extname, isAbsolute, parse, relative, resolve, sep } from 'node:path';
 import { removeSensitiveFields, sanitizeSensitive } from './secret-sanitizer.mjs';
-import { deriveCollectionStatus } from './status-model.mjs';
-import { newSession } from '../../session.mjs';
+import {
+  deriveCollectionStatus,
+  normalizeContentGranularity,
+  normalizeMediaState,
+} from './status-model.mjs';
+import { loadSession, newSession, sessionPaths } from '../../session.mjs';
 
 const PRIVATE_DIRECTORY_MODE = 0o700;
 const PRIVATE_FILE_MODE = 0o600;
@@ -32,6 +36,15 @@ function resolveInside(root, relativePath) {
   const fromRoot = relative(root, target);
   if (!fromRoot || fromRoot === '..' || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) {
     throw outsideRootError();
+  }
+  return target;
+}
+
+function resolveWorkCopyFile(root, relativePath) {
+  const target = resolveInside(root, relativePath);
+  const fromRoot = relative(root, target).split(sep).join('/');
+  if (!fromRoot.startsWith('markdown/items/') && !fromRoot.startsWith('sanitized/items/')) {
+    throw new Error('path is outside removable work-copy roots');
   }
   return target;
 }
@@ -292,6 +305,39 @@ async function createPrivateRoot(normalizedRoot) {
   }
 }
 
+async function openInitializedSessionRoot(normalizedRoot) {
+  let rootEntry;
+  try {
+    rootEntry = await lstat(normalizedRoot);
+  } catch (error) {
+    if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return null;
+    throw error;
+  }
+  const rejectExisting = () => new Error('output root must not already exist unless it is an empty initialized collection session');
+  if (!rootEntry.isDirectory() || rootEntry.isSymbolicLink()) throw rejectExisting();
+  assertSafeDirectoryMode(rootEntry);
+  let session;
+  try {
+    session = loadSession(sessionPaths(normalizedRoot), { persistMigration: false }).session;
+  } catch {
+    throw rejectExisting();
+  }
+  if (session.task?.status !== 'initialized'
+    || session.task?.publicationStatus
+    || !Array.isArray(session.collection?.collection?.items)
+    || session.collection.collection.items.length !== 0) {
+    throw rejectExisting();
+  }
+  for (const relativePath of REQUIRED_DIRECTORIES) {
+    const entry = await lstat(resolve(normalizedRoot, relativePath));
+    if (!entry.isDirectory() || entry.isSymbolicLink()) throw rejectExisting();
+  }
+  return {
+    rootIdentity: { dev: rootEntry.dev, ino: rootEntry.ino },
+    session: structuredClone(session),
+  };
+}
+
 /*
  * Threat model: private/sticky parent checks, inode identity checks, sibling staging,
  * and atomic renames protect against different-user path replacement. Node's path APIs
@@ -459,9 +505,14 @@ function normalizeInventory(root, inventory) {
     }
     return {
       ...item,
+      media: normalizeMediaState(item.media, { strict: true, coverUrls: item.coverUrls }),
       rawArtifacts: [...item.rawArtifacts],
       materialization: {
         ...item.materialization,
+        contentGranularity: normalizeContentGranularity(
+          item.materialization.contentGranularity,
+          { strict: true },
+        ),
         pendingArtifactCleanup: [...pendingArtifactCleanup],
       },
     };
@@ -572,7 +623,9 @@ export async function createArtifactWriter(root) {
     throw new TypeError('output root must be an absolute path');
   }
   const normalizedRoot = resolve(root);
-  const rootIdentity = await createPrivateRoot(normalizedRoot);
+  const initializedRoot = await openInitializedSessionRoot(normalizedRoot);
+  const rootIdentity = initializedRoot?.rootIdentity || await createPrivateRoot(normalizedRoot);
+  const ownsRoot = !initializedRoot;
   let publicationState = 'open';
 
   const writer = {
@@ -597,6 +650,37 @@ export async function createArtifactWriter(root) {
       return writePrivateFile(normalizedRoot, rootIdentity, relativePath, content);
     },
 
+    async writeBytes(relativePath, content) {
+      if (!Buffer.isBuffer(content)) throw new TypeError('binary artifact must be a Buffer');
+      return writePrivateFile(normalizedRoot, rootIdentity, relativePath, content);
+    },
+
+    async removeFiles(relativePaths) {
+      if (!Array.isArray(relativePaths)
+        || relativePaths.some((relativePath) => typeof relativePath !== 'string')) {
+        throw new TypeError('work-copy paths must be a string array');
+      }
+      await assertRootIdentity(normalizedRoot, rootIdentity);
+      for (const relativePath of relativePaths) {
+        const target = resolveWorkCopyFile(normalizedRoot, relativePath);
+        await rejectExistingSymlinks(normalizedRoot, target);
+        let identity;
+        try {
+          const entry = await lstat(target);
+          if (!entry.isFile() || entry.isSymbolicLink()) {
+            throw new Error('work-copy cleanup target must be a regular file');
+          }
+          identity = entry;
+        } catch (error) {
+          if (error.code === 'ENOENT') continue;
+          throw error;
+        }
+        await assertRootIdentity(normalizedRoot, rootIdentity);
+        await removeOwnedPath(target, identity, false);
+      }
+      await assertRootIdentity(normalizedRoot, rootIdentity);
+    },
+
     async abort() {
       if (publicationState === 'committed') {
         throw new Error('cannot abort a committed collection bundle');
@@ -604,7 +688,7 @@ export async function createArtifactWriter(root) {
       if (publicationState === 'publishing') {
         throw new Error('cannot abort a collection bundle publication in progress');
       }
-      await removeOwnedPath(normalizedRoot, rootIdentity, true);
+      if (ownsRoot) await removeOwnedPath(normalizedRoot, rootIdentity, true);
       publicationState = 'aborted';
     },
 
@@ -652,13 +736,20 @@ export async function createArtifactWriter(root) {
         if (!['candidates', 'selected', 'all'].includes(materializationTarget)) {
           throw new TypeError('bundle.materializationTarget is invalid');
         }
-        const session = newSession({
-          query: bundle.query || title,
-          sourceScope: [...new Set(sourceScope)],
-          materializationTarget,
-          status: status === 'failed' ? 'failed' : 'collected',
-          publicationStatus: 'uncommitted',
-        });
+        const session = initializedRoot
+          ? structuredClone(initializedRoot.session)
+          : newSession({
+            query: bundle.query || title,
+            sourceScope: [...new Set(sourceScope)],
+            materializationTarget,
+          });
+        if (initializedRoot) {
+          const allowed = new Set(session.task.sourceScope || []);
+          const denied = sourceScope.filter((entry) => !allowed.has(entry));
+          if (denied.length) throw new Error(`initialized session sourceScope does not allow: ${denied.join(', ')}`);
+        }
+        session.task.status = status === 'failed' ? 'failed' : 'collected';
+        session.task.publicationStatus = 'uncommitted';
         session.collection = metadata;
         await writePersistedJson(normalizedRoot, rootIdentity, 'sanitized/metadata.json', metadata);
         await writePersistedJson(normalizedRoot, rootIdentity, 'session.json', session);

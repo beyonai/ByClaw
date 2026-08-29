@@ -1,7 +1,7 @@
 import { DownOutlined } from '@ant-design/icons';
 import { Button, Checkbox, Spin } from 'antd';
 import classnames from 'classnames';
-import { head, last, pullAll, size, uniq, isEmpty, get } from 'lodash';
+import { head, last, pullAll, uniq, isEmpty } from 'lodash';
 import React, { forwardRef, useCallback, useImperativeHandle } from 'react';
 
 import { IMessageState } from '@/constants/message';
@@ -50,6 +50,107 @@ export const MessageListContext = React.createContext<IMessageListContext>({
 });
 
 const scrollThreshold = 50;
+
+type MessageRowProps = {
+  msg: IMessage;
+  index: number;
+  messageCount: number;
+  choicesMessageList: IMessage[];
+  isMultiChoices: boolean;
+  multiChoicesList: IMultiChoicesType[];
+  multiChoicesMsgId?: string[];
+  setMultiChoicesMsgId?: React.Dispatch<React.SetStateAction<string[]>>;
+  hideAction?: boolean;
+  renderMessage: (
+    message: IMessage,
+    param?: { showRelatedQuestions?: boolean; hideAction?: boolean; hideThinking?: boolean }
+  ) => React.ReactNode;
+};
+
+const MessageRow = React.memo(function MessageRow({
+  msg,
+  index,
+  messageCount,
+  choicesMessageList,
+  isMultiChoices,
+  multiChoicesList,
+  multiChoicesMsgId,
+  setMultiChoicesMsgId,
+  hideAction,
+  renderMessage,
+}: MessageRowProps) {
+  const { msgId, messageState, fromBeyond, isHide, usage, text } = msg;
+
+  if (isHide) return null;
+
+  const isChecked = multiChoicesMsgId?.includes(msgId) && isMultiChoices;
+  const isDividerTips = `${usage}` === '3';
+  const isSystemTips = `${usage}` === '5';
+  const isMemoryMode = multiChoicesList.includes('memory');
+  let showMultiChoicesBox = isMultiChoices;
+
+  if (isMemoryMode) {
+    showMultiChoicesBox = false;
+    if (fromBeyond) {
+      showMultiChoicesBox = checkAnswerMessageCanMemory(msg);
+    }
+  }
+
+  return (
+    <div
+      key={`${msgId}_wrapper`}
+      className={classnames('ub ub-pa mW900', styles.msgWrapper, {
+        [styles.msgWrapperSelected]: isChecked,
+      })}
+      id={`wrapper_${msgId}`}
+      style={{ zIndex: messageCount - index, position: 'relative' }}
+    >
+      {showMultiChoicesBox && (
+        <div
+          className={classnames('ub', {
+            'ub-ac': !fromBeyond,
+            'ub-as': fromBeyond,
+          })}
+          style={{ minWidth: 16, padding: '6px 12px 6px 0' }}
+        >
+          <Checkbox
+            value={msgId}
+            checked={isChecked}
+            disabled={![IMessageState.Done, IMessageState.Cancel].includes(messageState)}
+            onChange={(e) => {
+              if (e.target.checked) {
+                setMultiChoicesMsgId?.((prevList) =>
+                  uniq([...prevList, ...multiChoicesHandler(msg, index, choicesMessageList)])
+                );
+              } else {
+                setMultiChoicesMsgId?.((prevList) => {
+                  if (isMemoryMode) {
+                    const answer = choicesMessageList[index + 1];
+                    if (answer?.fromBeyond) {
+                      return [...pullAll(prevList, [msgId, answer.msgId])];
+                    }
+                  }
+                  return [...pullAll(prevList, [msgId])];
+                });
+              }
+            }}
+          />
+        </div>
+      )}
+
+      <div className="ub-f1 mW850" key={`${msgId}_msgContent`}>
+        {isDividerTips && <DividerTips text={text} />}
+        {isSystemTips && <SystemTips text={text} />}
+        {!isDividerTips &&
+          !isSystemTips &&
+          renderMessage(msg, {
+            showRelatedQuestions: messageCount === index + 1,
+            hideAction: isMultiChoices || hideAction,
+          })}
+      </div>
+    </div>
+  );
+});
 
 function MessageList(props: IProps, ref: any) {
   const {
@@ -134,89 +235,21 @@ function MessageList(props: IProps, ref: any) {
             lowestPageNum={lowestPageNum}
             appendItemsAutoScrollBottom={false}
           >
-            {messageList.map((msg, idx, arr) => {
-              const { msgId, messageState, fromBeyond, isHide } = msg;
-              const { usage, text } = msg;
-
-              if (isHide) return null;
-
-              const isChecked = multiChoicesMsgId?.includes(msgId) && isMultiChoices;
-              const isDividerTips = `${usage}` === '3';
-              const isSystemTips = `${usage}` === '5';
-
-              const isMemoryMode = multiChoicesList.includes('memory');
-              let showMultiChoicesBox = isMultiChoices;
-
-              if (isMemoryMode) {
-                showMultiChoicesBox = false;
-
-                if (fromBeyond) {
-                  showMultiChoicesBox = checkAnswerMessageCanMemory(msg);
-                }
-              }
-
-              return (
-                <div
-                  key={`${msgId}_wrapper`}
-                  className={classnames('ub ub-pa mW900', styles.msgWrapper, {
-                    [styles.msgWrapperSelected]: isChecked,
-                  })}
-                  id={`wrapper_${msgId}`}
-                  style={{ zIndex: arr.length - idx, position: 'relative' }}
-                >
-                  {showMultiChoicesBox && (
-                    <div
-                      className={classnames('ub', {
-                        'ub-ac': !fromBeyond,
-                        'ub-as': fromBeyond,
-                      })}
-                      style={{
-                        minWidth: 16,
-                        padding: '6px 12px 6px 0',
-                      }}
-                    >
-                      <Checkbox
-                        value={msgId}
-                        checked={isChecked}
-                        disabled={![IMessageState.Done, IMessageState.Cancel].includes(messageState)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setMultiChoicesMsgId?.((prevList) => {
-                              const list = [...prevList];
-
-                              list.push(...multiChoicesHandler(msg, idx, arr));
-
-                              return uniq(list);
-                            });
-                          } else {
-                            setMultiChoicesMsgId?.((prevList) => {
-                              if (isMemoryMode) {
-                                const Answer = get(arr, `${idx + 1}`) as IMessage;
-                                if (Answer && Answer.fromBeyond) {
-                                  return [...pullAll(prevList, [msgId, Answer.msgId])];
-                                }
-                              }
-                              return [...pullAll(prevList, [msgId])];
-                            });
-                          }
-                        }}
-                      />
-                    </div>
-                  )}
-
-                  <div className="ub-f1 mW850" key={`${msgId}_msgContent`}>
-                    {isDividerTips && <DividerTips text={text} />}
-                    {isSystemTips && <SystemTips text={text} />}
-                    {!isDividerTips &&
-                      !isSystemTips &&
-                      renderMessage(msg, {
-                        showRelatedQuestions: size(arr) === idx + 1,
-                        hideAction: isMultiChoices || hideAction,
-                      })}
-                  </div>
-                </div>
-              );
-            })}
+            {messageList.map((msg, idx) => (
+              <MessageRow
+                key={`${msg.msgId}_wrapper`}
+                msg={msg}
+                index={idx}
+                messageCount={messageList.length}
+                choicesMessageList={isMultiChoices ? messageList : (emptyArr as IMessage[])}
+                isMultiChoices={isMultiChoices}
+                multiChoicesList={multiChoicesList}
+                multiChoicesMsgId={multiChoicesMsgId}
+                setMultiChoicesMsgId={setMultiChoicesMsgId}
+                hideAction={hideAction}
+                renderMessage={renderMessage}
+              />
+            ))}
           </MessageInfiniteScroll>
         </div>
       </MessageListContext.Provider>

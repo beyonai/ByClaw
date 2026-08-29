@@ -52,6 +52,8 @@ export interface ByaiSdkInboundMessage {
   messageId: string;
   /** Parent command message id used to preserve cross-worker callAgent nesting. */
   parentMessageId?: string;
+  /** True when this request was delegated by another agent rather than started by the user. */
+  delegatedAgentCall?: boolean;
   sessionId: string;
   userId: string;
   text: string;

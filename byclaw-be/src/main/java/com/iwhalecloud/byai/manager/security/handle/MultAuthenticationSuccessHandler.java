@@ -41,6 +41,7 @@ import jakarta.servlet.ServletOutputStream;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpSession;
+
 import java.io.IOException;
 import java.util.Date;
 import java.util.concurrent.Executor;
@@ -113,15 +114,15 @@ public class MultAuthenticationSuccessHandler implements AuthenticationSuccessHa
     /**
      * 登陆成功事件
      *
-     * @param request 请求
-     * @param response 响应
+     * @param request        请求
+     * @param response       响应
      * @param authentication 认证异常俗话上
-     * @throws IOException IO异常信息
+     * @throws IOException      IO异常信息
      * @throws ServletException ServletException
      */
     @Override
     public void onAuthenticationSuccess(HttpServletRequest request, HttpServletResponse response,
-        Authentication authentication) throws IOException, ServletException {
+                                        Authentication authentication) throws IOException, ServletException {
 
         // 非正常用户访问
         Object principal = authentication.getPrincipal();
@@ -146,8 +147,7 @@ public class MultAuthenticationSuccessHandler implements AuthenticationSuccessHa
             && loginInfo.getIsDefaultPwd()) {
             loginResponse.setCode(LoginResponse.DEFAULT_PWD);
             loginResponse.setMsg(I18nUtil.get("login.default.pwd.reset"));
-        }
-        else {
+        } else {
             loginResponse.setCode(LoginResponse.SUCCESS);
             loginResponse.setMsg(I18nUtil.get("login.login.successful"));
         }
@@ -169,6 +169,9 @@ public class MultAuthenticationSuccessHandler implements AuthenticationSuccessHa
             loginInfo.setSessionDatasetId(suasSuperassist.getSessionDatasetId());
             loginInfo.setDefaultDigEmployeeId(suasSuperassist.getDefaultDigEmployeeId());
         }
+
+        //初始化专家团
+        suasSuperassistApplicationService.initExpertTeams(loginInfo);
 
         // 共享session实现
         loginApplicationService.shareSession(httpSession, loginInfo);
@@ -204,8 +207,7 @@ public class MultAuthenticationSuccessHandler implements AuthenticationSuccessHa
                 sandboxService.launchSandbox(sandboxUserCode, null);
                 authRedisSyncService.asyncSyncUserAuthToRedis(loginInfo.getUserId());
                 tokenSaverProvisionService.provisionIfNeeded(loginInfo.getUserId(), sandboxUserCode);
-            }
-            catch (Exception e) {
+            } catch (Exception e) {
                 logger.warn("登录后异步启动沙箱失败，用户编码：{}", sandboxUserCode, e);
             }
         });
@@ -247,8 +249,7 @@ public class MultAuthenticationSuccessHandler implements AuthenticationSuccessHa
     private void mountUserBucket(String userCode) {
         try {
             userFS.mount();
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             logger.error("登录后挂载用户bucket失败，系统继续登录流程, userCode={}", userCode, e);
         }
     }
@@ -256,7 +257,7 @@ public class MultAuthenticationSuccessHandler implements AuthenticationSuccessHa
     /**
      * 登陆响应
      *
-     * @param response 响应头
+     * @param response      响应头
      * @param loginResponse 响应信息
      */
     private void writeResponse(HttpServletResponse response, LoginResponse loginResponse) {
@@ -265,8 +266,7 @@ public class MultAuthenticationSuccessHandler implements AuthenticationSuccessHa
             ObjectMapper objectMapper = new ObjectMapper();
             objectMapper.writeValue(outputStream, loginResponse);
             outputStream.flush();
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             logger.error(e.getMessage(), e);
         }
     }
@@ -280,20 +280,15 @@ public class MultAuthenticationSuccessHandler implements AuthenticationSuccessHa
     private String parseLoginType(Authentication authentication) {
         if (authentication instanceof UsernameAuthentication) {
             return LoginType.USERNAME;
-        }
-        else if (authentication instanceof IwhaleAuthentication) {
+        } else if (authentication instanceof IwhaleAuthentication) {
             return LoginType.IWHALE;
-        }
-        else if (authentication instanceof DingtalkAuthentication) {
+        } else if (authentication instanceof DingtalkAuthentication) {
             return LoginType.DINGTALK;
-        }
-        else if (authentication instanceof CasAuthentication) {
+        } else if (authentication instanceof CasAuthentication) {
             return LoginType.CAS;
-        }
-        else if (authentication instanceof FeiLianAuthentication) {
+        } else if (authentication instanceof FeiLianAuthentication) {
             return LoginType.FEI_lIAN;
-        }
-        else if (authentication instanceof AppleAuthentication) {
+        } else if (authentication instanceof AppleAuthentication) {
             return LoginType.APPLE;
         }
         return null;

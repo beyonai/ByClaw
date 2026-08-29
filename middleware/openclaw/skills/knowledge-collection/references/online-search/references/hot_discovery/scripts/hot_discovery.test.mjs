@@ -24,6 +24,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const decl = parseDeclarations(await readFile(resolve(HERE, '..', 'adapters.md'), 'utf8'));
 const n = (u, options) => normalizeUrl(u, decl, options);
 const identityN = (u) => normalizeUrl(u, decl);
+const publicN = (u) => normalizeUrl(u, decl, { preserveHostname: true });
 
 // ═══════════════ §6.3 那 6 种形态：基础四条规则实测只对齐 1 种 ═══════════════
 
@@ -35,6 +36,12 @@ test('形态 1：末尾斜杠（基础四条已能对齐）', () => {
 test('形态 2：www. 前缀（基础四条漏过）', () => {
   assert.equal(n('https://github.com/langchain-ai/langchain'),
                n('https://www.github.com/langchain-ai/langchain'));
+});
+
+test('公开 URL 保留原始 www 主机名，去重身份仍折叠 www', () => {
+  const source = 'https://www.iwhalecloud.com/?utm_source=search#about';
+  assert.equal(publicN(source), 'https://www.iwhalecloud.com/');
+  assert.equal(identityN(source), 'https://iwhalecloud.com/');
 });
 
 test('形态 3：等价路径变体 /tree/master —— 已知缺口，刻意不对齐', () => {
@@ -528,6 +535,38 @@ test('merge 丢弃 hot-file 未知字段并保留跨通道命中', () => {
   assert.deepEqual(candidate.popularity.allMetrics, { downloads: 10 });
 });
 
+test('同一去重身份保留可访问主 URL 和全部脱敏 URL 变体', () => {
+  const result = mergeDocuments({
+    hotDoc: null,
+    sxDoc: {
+      query: '浩鲸科技',
+      results: [
+        {
+          url: 'https://www.iwhalecloud.com/?utm_source=baidu',
+          title: '浩鲸科技',
+          engine: 'baidu',
+        },
+        {
+          url: 'https://iwhalecloud.com/?token=SECRET',
+          title: '浩鲸科技',
+          engine: 'bing',
+        },
+      ],
+    },
+    arDoc: null,
+    normalizer: publicN,
+    identityNormalizer: identityN,
+  });
+
+  assert.equal(result.totals.afterDedup, 1);
+  assert.equal(result.groups.searxngTop[0].url, 'https://www.iwhalecloud.com/');
+  assert.deepEqual(result.groups.searxngTop[0].sourceUrls, [
+    'https://www.iwhalecloud.com/',
+    'https://iwhalecloud.com/',
+  ]);
+  assert.doesNotMatch(JSON.stringify(result), /SECRET/);
+});
+
 test('merge 丢弃 malformed hot candidate 并告警', () => {
   const result = mergeDocuments({
     hotDoc: { candidates: [null, { url: 'not-a-url', title: 'x' }] },
@@ -695,6 +734,119 @@ test('merge 对 hot-file 顶层元数据执行白名单', () => {
   assert.equal(result.warnings[0], 'valid warning');
   assert.equal(result.warnings[1].length, 1000);
   assert.equal(JSON.stringify(result).includes('BODY'), false);
+});
+
+test('merge 安全保留 requiresUserAction 并固定禁止降级策略', () => {
+  const result = mergeDocuments({
+    hotDoc: {
+      query: 'agent',
+      candidates: [],
+      requiresUserAction: {
+        kind: 'bridge_unavailable',
+        source: 'google',
+        errorCode: 'BROWSER_CONNECT',
+        message: 'bridge unavailable',
+        fallbackPolicy: { allowDirectHttp: true },
+        nested: { content: 'BODY' },
+      },
+    },
+    sxDoc: { query: 'agent', results: [] },
+    arDoc: null,
+    normalizer: n,
+  });
+
+  assert.deepEqual(result.requiresUserAction, {
+    kind: 'bridge_unavailable',
+    source: 'google',
+    errorCode: 'BROWSER_CONNECT',
+    message: 'bridge unavailable',
+    fallbackPolicy: {
+      allowDirectHttp: false,
+      allowGenericBrowser: false,
+      nextAction: 'stop-and-report',
+    },
+  });
+  assert.equal(JSON.stringify(result).includes('BODY'), false);
+  assert.match(result.warnings.join('\n'), /禁止使用.*HTTP.*通用浏览器.*降级/);
+});
+
+test('merge 限制 requiresUserAction 字符串长度并拒绝非字符串字段', () => {
+  const result = mergeDocuments({
+    hotDoc: {
+      query: 'agent',
+      candidates: [],
+      requiresUserAction: {
+        kind: ` ${'k'.repeat(101)} `,
+        source: ` ${'s'.repeat(201)} `,
+        errorCode: ` ${'e'.repeat(101)} `,
+        message: ` ${'m'.repeat(1_001)} `,
+      },
+    },
+    sxDoc: { query: 'agent', results: [] },
+    arDoc: null,
+    normalizer: n,
+  });
+
+  assert.equal(result.requiresUserAction.kind.length, 100);
+  assert.equal(result.requiresUserAction.source.length, 200);
+  assert.equal(result.requiresUserAction.errorCode.length, 100);
+  assert.equal(result.requiresUserAction.message.length, 1_000);
+
+  const invalidOptionalFields = mergeDocuments({
+    hotDoc: {
+      query: 'agent',
+      candidates: [],
+      requiresUserAction: {
+        kind: 'bridge_unavailable',
+        source: { content: 'BODY' },
+        errorCode: ['BROWSER_CONNECT'],
+        message: 69,
+      },
+    },
+    sxDoc: { query: 'agent', results: [] },
+    arDoc: null,
+    normalizer: n,
+  });
+  assert.deepEqual(invalidOptionalFields.requiresUserAction, {
+    kind: 'bridge_unavailable',
+    fallbackPolicy: {
+      allowDirectHttp: false,
+      allowGenericBrowser: false,
+      nextAction: 'stop-and-report',
+    },
+  });
+  assert.equal(JSON.stringify(invalidOptionalFields).includes('BODY'), false);
+});
+
+test('merge 要求 requiresUserAction.kind 是非空字符串', () => {
+  for (const kind of ['   ', 69, null, { value: 'bridge_unavailable' }]) {
+    const result = mergeDocuments({
+      hotDoc: {
+        query: 'agent',
+        candidates: [],
+        requiresUserAction: { kind, message: 'untrusted' },
+      },
+      sxDoc: { query: 'agent', results: [] },
+      arDoc: null,
+      normalizer: n,
+    });
+    assert.equal(result.requiresUserAction, undefined);
+  }
+});
+
+test('merge 忽略结构无效 hot-file 中的 requiresUserAction', () => {
+  const result = mergeDocuments({
+    hotDoc: {
+      query: 'agent',
+      candidates: { invalid: true },
+      requiresUserAction: { kind: 'bridge_unavailable', message: 'untrusted' },
+    },
+    sxDoc: { query: 'agent', results: [] },
+    arDoc: null,
+    normalizer: n,
+  });
+
+  assert.equal(result.requiresUserAction, undefined);
 });
 
 test('hot-file 排名字段必须是有效正整数且不超过窗口', () => {

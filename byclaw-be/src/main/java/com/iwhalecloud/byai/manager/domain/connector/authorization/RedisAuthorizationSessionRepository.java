@@ -156,6 +156,13 @@ public class RedisAuthorizationSessionRepository {
         return 0
         """;
 
+    private static final String REMOVE_ACTIVE_INDEX_IF_MATCHES_LUA = """
+        if redis.call('GET', KEYS[1]) == ARGV[1] then
+            return redis.call('DEL', KEYS[1])
+        end
+        return 0
+        """;
+
     private static final RedisScript<Long> CREATE_SCRIPT = new DefaultRedisScript<>(CREATE_LUA, Long.class);
     private static final RedisScript<Long> COMPARE_AND_SET_STATUS_SCRIPT =
         new DefaultRedisScript<>(COMPARE_AND_SET_STATUS_LUA, Long.class);
@@ -165,6 +172,8 @@ public class RedisAuthorizationSessionRepository {
         new DefaultRedisScript<>(REMOVE_EXPIRED_LUA, Long.class);
     private static final RedisScript<Long> RELEASE_STATUS_LOCK_SCRIPT =
         new DefaultRedisScript<>(RELEASE_STATUS_LOCK_LUA, Long.class);
+    private static final RedisScript<Long> REMOVE_ACTIVE_INDEX_IF_MATCHES_SCRIPT =
+        new DefaultRedisScript<>(REMOVE_ACTIVE_INDEX_IF_MATCHES_LUA, Long.class);
 
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
@@ -220,6 +229,30 @@ public class RedisAuthorizationSessionRepository {
             return Optional.empty();
         }
         return find(authorizationId).filter(session -> userId.equals(session.userId()));
+    }
+
+    public Optional<RedisAuthorizationSession> findActiveSession(String userId, Long connectorId) {
+        if (!StringUtils.hasText(userId) || connectorId == null) {
+            return Optional.empty();
+        }
+        String indexKey = userIndexKey(userId, connectorId);
+        String authorizationId = redisTemplate.opsForValue().get(indexKey);
+        if (!StringUtils.hasText(authorizationId)) {
+            return Optional.empty();
+        }
+        Optional<RedisAuthorizationSession> activeSession = find(authorizationId)
+            .filter(session -> userId.equals(session.userId()))
+            .filter(session -> connectorId.equals(session.connectorId()))
+            .filter(session -> session.status() == AuthorizationStatus.PENDING
+                || session.status() == AuthorizationStatus.FINALIZING);
+        if (activeSession.isPresent()) {
+            return activeSession;
+        }
+        redisTemplate.execute(
+            REMOVE_ACTIVE_INDEX_IF_MATCHES_SCRIPT,
+            List.of(indexKey),
+            authorizationId);
+        return Optional.empty();
     }
 
     public boolean hasActiveSession(String userId, Long connectorId) {
