@@ -3,6 +3,7 @@ package com.iwhalecloud.byai.manager.mapper.message;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessageHotDto;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessage;
+import com.iwhalecloud.byai.common.message.entity.ConversationOutlineItem;
 import com.iwhalecloud.byai.common.message.qo.MessageHotDelQo;
 import com.iwhalecloud.byai.common.message.qo.MessageHotPageQo;
 import com.iwhalecloud.byai.common.message.qo.MessageHotQo;
@@ -129,5 +130,12 @@ public interface ByaiMessageMapper extends BaseMapper<ByaiMessage> {
      * @return 消息数量
      */
     Long countPositionInSession(@Param("sessionId") Long sessionId, @Param("messageId") Long messageId);
-}
 
+    /**
+     * Query the lightweight message outline used by the conversation navigator.
+     *
+     * @param sessionId session identifier
+     * @return visible user and assistant messages in chronological order
+     */
+    List<ConversationOutlineItem> selectConversationOutline(@Param("sessionId") Long sessionId);
+}

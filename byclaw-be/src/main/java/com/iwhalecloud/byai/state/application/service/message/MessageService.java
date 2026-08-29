@@ -12,6 +12,7 @@ import com.iwhalecloud.byai.state.domain.message.dto.ByaiMessageHotDtoDto;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessage;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessageHotDto;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessageRelObjDto;
+import com.iwhalecloud.byai.common.message.entity.ConversationOutlineItem;
 import com.iwhalecloud.byai.common.message.qo.MessageHotPageQo;
 import com.iwhalecloud.byai.common.message.qo.MessageHotQo;
 import com.iwhalecloud.byai.common.message.qo.MessageRelObjQo;
@@ -264,6 +265,19 @@ public class MessageService {
 
         return pageInfo;
 
+    }
+
+    /**
+     * Get the lightweight message outline for the conversation navigator.
+     *
+     * @param messageQo message query containing the session identifier
+     * @return visible user and assistant message summaries
+     */
+    public List<ConversationOutlineItem> getConversationOutline(MessageQo messageQo) {
+        if (messageQo == null || messageQo.getSessionId() == null || messageQo.getSessionId() <= 0) {
+            throw new BdpRuntimeException(I18nUtil.get("assistant.man.session.id.not.empty"));
+        }
+        return byaiMessageHotService.selectConversationOutline(messageQo.getSessionId());
     }
 
     private List<ByaiMessageHotDtoDto> appendCollectInfo(List<ByaiMessageHotDto> byaiMessageHots, Long sessionId) {

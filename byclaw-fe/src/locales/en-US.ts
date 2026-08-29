@@ -3441,6 +3441,9 @@ export default {
   'skillDetail.generatingCurlScript': 'Generating curl script...',
 
   'newChat.alreadyLatestSession': 'Already in the latest session',
+  'conversationNavigator.label': 'Conversation navigation',
+  'conversationNavigator.conversation': 'Conversation {index}',
+  'conversationNavigator.jumpTo': 'Jump to conversation {index}',
 
   'sandbox.waitTips': 'Initializing sandbox environment, please wait...',
   'sandbox.status.running': 'Sandbox Running',
