@@ -333,11 +333,12 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
       );
     }
     if (key === 'processFile' || key === 'projectCloud') {
+      const selectedProjectId = this.props.selectedProject?.projectId;
       return (
         <FileResourcePanel
           scope={key === 'processFile' ? 'session' : 'project'}
           sessionId={`${this.props.sessionId || ''}`}
-          projectId={this.props.projectId}
+          projectId={this.props.projectId ?? (selectedProjectId ? Number(selectedProjectId) : undefined)}
           resourceId={this.props.globalContext.agentId}
           onOpenDetail={() => undefined}
         />
@@ -586,22 +587,38 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
         icon: <LinkOutlined aria-hidden />,
         content: this.renderDirectToolContent('connector', bottomRight),
       },
-      {
-        key: 'processFile',
-        label: '过程文件',
-        icon: 'icon-a-Data-fileshujuwenjian',
-        content: this.renderDirectToolContent('processFile', null),
-      },
-      {
-        key: 'projectCloud',
-        label: '项目云盘',
-        icon: 'icon-a-Folder-openwenjianjia-kai',
-        content: this.renderDirectToolContent('projectCloud', bottomRight),
-      },
     ];
-    const panelItems = [...topMenuItems, ...moreMenuItems];
-    const visibleMenuItems = this.state.moreToolsExpanded ? panelItems : topMenuItems;
-    const activeMenu = panelItems.find((item) => item.key === this.state.activeToolMenuKey) || topMenuItems[0];
+    // 过程文件和项目文件只对已进入的真实会话开放；新建会话、未登录以及定时任务输入框不展示。
+    const hasCurrentSession = Boolean(this.props.sessionId && this.props.isBottom);
+    // 新建会话尚未回填 projectId 时，项目选择器通过 selectedProject 提供当前项目上下文。
+    const currentProjectId = Number(this.props.projectId ?? this.props.selectedProject?.projectId);
+    const hasProjectContext = Number.isFinite(currentProjectId);
+    const sessionFileMenuItems = [
+      ...(hasCurrentSession
+        ? [
+          {
+            key: 'processFile',
+            label: '过程文件',
+            icon: 'icon-a-Data-fileshujuwenjian',
+            content: this.renderDirectToolContent('processFile', null),
+          },
+        ]
+        : []),
+      ...(hasProjectContext
+        ? [
+          {
+            key: 'projectCloud',
+            label: currentProjectId === -1 ? '共享文件' : '项目云盘',
+            icon: 'icon-a-Folder-openwenjianjia-kai',
+            content: this.renderDirectToolContent('projectCloud', bottomRight),
+          },
+        ]
+        : []),
+    ];
+    const allTopMenuItems = [...topMenuItems, ...sessionFileMenuItems];
+    const panelItems = [...allTopMenuItems, ...moreMenuItems];
+    const visibleMenuItems = this.state.moreToolsExpanded ? panelItems : allTopMenuItems;
+    const activeMenu = panelItems.find((item) => item.key === this.state.activeToolMenuKey) || allTopMenuItems[0];
 
     return (
       <div className={styles.tools}>
@@ -628,7 +645,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
                   <div className={styles.toolsMenuNav}>
                     {visibleMenuItems.map((item, index) => (
                       <React.Fragment key={item.key}>
-                        {index === 3 && <Divider className={styles.toolsMenuNavDivider} />}
+                        {item.key === 'processFile' && index > 0 && <Divider className={styles.toolsMenuNavDivider} />}
                         <button
                           type="button"
                           className={classNames(styles.toolsMenuNavItem, {
@@ -652,9 +669,9 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
                         const moreToolsExpanded = !this.state.moreToolsExpanded;
                         this.setState({
                           moreToolsExpanded,
-                          ...(moreToolsExpanded || topMenuItems.some((item) => item.key === activeMenu.key)
+                          ...(moreToolsExpanded || allTopMenuItems.some((item) => item.key === activeMenu.key)
                             ? {}
-                            : { activeToolMenuKey: topMenuItems[0].key }),
+                            : { activeToolMenuKey: allTopMenuItems[0].key }),
                         });
                       }}
                     >

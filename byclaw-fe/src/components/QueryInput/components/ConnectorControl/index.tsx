@@ -129,6 +129,9 @@ const CREDENTIAL_FIELD_KEY_PATTERN = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
 type ConnectorControlProps = {
   canAuthorize: boolean;
   inline?: boolean;
+
+  /** 输入框外部仅展示已连接连接器，不提供新增/管理入口。 */
+  outside?: boolean;
   // 兼容尚未同步升级的调用方；连接器状态只以后端全局开关为准。
   value?: Connector[];
   onChange?: (connectors: Connector[]) => void;
@@ -275,30 +278,47 @@ const ConnectorIcon = ({ connector }: { connector: Connector }) => (
   <span className={styles.connectorIcon}>{connector.icon}</span>
 );
 
-const ConnectorSelection = ({ value, onOpen }: { value: Connector[]; onOpen: () => void }) => {
+const ConnectorSelection = ({
+  value,
+  onOpen,
+  interactive = true,
+}: {
+  value: Connector[];
+  onOpen?: () => void;
+  interactive?: boolean;
+}) => {
   if (!value.length) return null;
 
   // 工具栏空间有限，最多回显三个官方图标，其余连接器用数量汇总。
   const displayedConnectors = value.slice(0, 3);
   const remainingCount = value.length - displayedConnectors.length;
+  const avatarGroup = (
+    <Avatar.Group className={styles.selectionGroup} size={28}>
+      {displayedConnectors.map((connector) => (
+        <Avatar key={connector.id} className={styles.selectionAvatar} aria-label={connector.name}>
+          <ConnectorIcon connector={connector} />
+        </Avatar>
+      ))}
+      {remainingCount > 0 && <Avatar className={styles.selectionMoreAvatar}>+{remainingCount}</Avatar>}
+    </Avatar.Group>
+  );
 
   return (
-    <Tooltip title="查看已连接连接器">
-      <button className={styles.selection} type="button" aria-label="查看已连接连接器" onClick={onOpen}>
-        <Avatar.Group className={styles.selectionGroup} size={28}>
-          {displayedConnectors.map((connector) => (
-            <Avatar key={connector.id} className={styles.selectionAvatar} aria-label={connector.name}>
-              <ConnectorIcon connector={connector} />
-            </Avatar>
-          ))}
-          {remainingCount > 0 && <Avatar className={styles.selectionMoreAvatar}>+{remainingCount}</Avatar>}
-        </Avatar.Group>
-      </button>
+    <Tooltip title={interactive ? '查看已连接连接器' : undefined}>
+      {interactive ? (
+        <button className={styles.selection} type="button" aria-label="查看已连接连接器" onClick={onOpen}>
+          {avatarGroup}
+        </button>
+      ) : (
+        <span className={classNames(styles.selection, styles.selectionStatic)} aria-label="已连接连接器">
+          {avatarGroup}
+        </span>
+      )}
     </Tooltip>
   );
 };
 
-const ConnectorControl = ({ canAuthorize, inline = false }: ConnectorControlProps) => {
+const ConnectorControl = ({ canAuthorize, inline = false, outside = false }: ConnectorControlProps) => {
   const { userInfo } = useSelector((state: any) => state.user);
 
   // 分别控制设置列表、完整配置、授权说明和真实授权进度的显示状态。
@@ -900,8 +920,8 @@ const ConnectorControl = ({ canAuthorize, inline = false }: ConnectorControlProp
           </div>
         )
       ) : enabledConnectors.length ? (
-        <ConnectorSelection value={enabledConnectors} onOpen={openSettings} />
-      ) : (
+        <ConnectorSelection value={enabledConnectors} onOpen={openSettings} interactive={!outside} />
+      ) : outside ? null : (
         <Tooltip title="连接器">
           <span aria-label="连接器设置" className={styles.trigger} role="button" onClick={openSettings}>
             <LinkOutlined />

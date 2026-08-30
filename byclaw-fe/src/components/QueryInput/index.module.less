@@ -172,6 +172,10 @@
   display: flex;
   align-items: center;
 
+  :global(.byclaw-connector-outside-tool:empty) {
+    display: none;
+  }
+
   :global {
     .@{antPrefix}-space:has(> .@{antPrefix}-space-item:nth-child(4)) {
       > .@{antPrefix}-space-item:nth-child(-n + 3) {
@@ -188,15 +192,21 @@
 
 .toolsMenu {
   display: flex;
-  min-width: 500px;
+  width: 760px;
+  min-width: 0;
   max-width: min(760px, calc(100vw - 32px));
-  min-height: 280px;
+  min-height: 320px;
+  max-height: calc(100vh - 32px);
+  box-sizing: border-box;
   padding: 8px;
+  overflow: hidden;
 
   .toolsMenuNav {
     width: 180px;
     padding: 4px 6px 4px 4px;
     border-right: 1px solid var(--beyond-color-border-secondary);
+    overflow-y: auto;
+    overflow-x: hidden;
   }
 
   .toolsMenuNavItem {
@@ -236,8 +246,8 @@
 
   .toolsMenuPanel {
     flex: 1;
-    min-width: 260px;
-    max-height: 320px;
+    min-width: 0;
+    height: 304px;
     overflow: auto;
     padding: 12px 14px;
   }

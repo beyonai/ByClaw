@@ -793,6 +793,39 @@ describe('ConnectorControl authorization states', () => {
     expect(screen.getByRole('dialog', { name: '连接器设置' })).toBeInTheDocument();
   });
 
+  it('shows enabled connectors outside the input without an interactive settings trigger', async () => {
+    mockQueryConnectorList.mockResolvedValue({
+      list: [
+        {
+          connectorId: 1,
+          connectorCode: 'dingtalk',
+          connectorName: '钉钉',
+          connectorType: 'SYSTEM',
+          description: '',
+          enableFlag: 'Y',
+        },
+      ],
+      pageNum: 1,
+      pageSize: 100,
+      total: 1,
+      totalPages: 1,
+    });
+
+    const { container } = render(<ConnectorControl canAuthorize outside />);
+
+    await waitFor(() => expect(container.querySelector('.ant-avatar-group')).not.toBeNull());
+    expect(screen.queryByRole('button', { name: '查看已连接连接器' })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('已连接连接器')).toBeInTheDocument();
+  });
+
+  it('does not render an outside connector item when none are enabled', async () => {
+    const { container } = render(<ConnectorControl canAuthorize outside />);
+
+    await waitFor(() => expect(mockQueryConnectorList).toHaveBeenCalledTimes(1));
+    expect(container.querySelector('.ant-avatar-group')).toBeNull();
+    expect(screen.queryByLabelText('连接器设置')).not.toBeInTheDocument();
+  });
+
   it('prioritizes enabled connectors in the three-item chat preview', async () => {
     mockQueryConnectorList.mockResolvedValue({
       list: [
