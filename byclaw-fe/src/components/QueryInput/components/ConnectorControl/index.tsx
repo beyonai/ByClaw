@@ -978,14 +978,14 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
 
       <Modal
         centered
-        className={styles.credentialModal}
+        className={classNames(styles.credentialModal, credentialSchema?.helpText && styles.credentialModalWithHelp)}
         closable={!startingAuthorization}
         footer={null}
         keyboard={!startingAuthorization}
         maskClosable={!startingAuthorization}
         open={!!authorizingConnector && !!credentialSchema && !authorizationSession}
         zIndex={1200}
-        width={credentialSchema?.helpText ? 640 : 480}
+        width={credentialSchema?.helpText ? '80vw' : 480}
         onCancel={() => {
           if (!startingAuthorization) {
             void cancelAuthorization();

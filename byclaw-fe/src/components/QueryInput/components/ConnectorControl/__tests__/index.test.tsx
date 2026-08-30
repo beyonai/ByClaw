@@ -2189,11 +2189,18 @@ describe('ConnectorControl authorization states', () => {
 
     const credentialHeading = await screen.findByRole('heading', { name: '连接 微信公众号 API' });
     expect(credentialHeading).toBeInTheDocument();
-    expect(credentialHeading.closest('.ant-modal')).toHaveStyle({ width: '640px' });
+    expect(credentialHeading.closest('.ant-modal')).toHaveStyle({ width: '80vw' });
+    expect(credentialHeading.closest('.ant-modal')).toHaveClass('credentialModalWithHelp');
     const helpCard = screen.getByRole('region', { name: '凭据获取说明' });
     expect(helpCard).toHaveClass('credentialHelpCard');
     expect(screen.getByRole('heading', { name: '连接器作用' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: '获取步骤' })).toBeInTheDocument();
+    const stepsToggle = screen.getByRole('button', { name: '获取步骤' });
+    expect(stepsToggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('list')).not.toBeInTheDocument();
+
+    fireEvent.click(stepsToggle);
+
+    expect(stepsToggle).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getAllByRole('listitem')).toHaveLength(7);
     expect(screen.getByRole('heading', { name: '安全提示' }).parentElement).toHaveClass('warningSection');
     expect(helpCard).toHaveTextContent('“设置与开发” → “开发接口管理” → “基本配置”');

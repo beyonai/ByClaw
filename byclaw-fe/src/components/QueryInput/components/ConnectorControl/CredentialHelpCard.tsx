@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import styles from './CredentialHelpCard.module.less';
 
 interface CredentialHelpCardProps {
@@ -50,6 +51,16 @@ const parseHelpSections = (helpText: string): HelpSection[] =>
 const CredentialHelpCard = ({ helpText }: CredentialHelpCardProps) => {
   const sections = parseHelpSections(helpText);
   const hasStructuredSection = sections.some((section) => section.title);
+  const [expandedStepSections, setExpandedStepSections] = useState<Set<number>>(() => new Set());
+
+  const toggleStepSection = (index: number) => {
+    setExpandedStepSections((current) => {
+      const next = new Set(current);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
+  };
 
   if (!hasStructuredSection) {
     return (
@@ -66,16 +77,39 @@ const CredentialHelpCard = ({ helpText }: CredentialHelpCardProps) => {
           className={`${styles.helpSection}${section.warning ? ` ${styles.warningSection}` : ''}`}
           key={`${section.title ?? '说明'}-${index}`}
         >
-          {section.title && <h3>{section.title}</h3>}
-          {section.steps ? (
-            <ol>
-              {section.steps.map((step, stepIndex) => (
-                <li key={`${stepIndex}-${step}`}>{step}</li>
-              ))}
-            </ol>
-          ) : (
-            section.body && <p>{section.body}</p>
-          )}
+          {section.title &&
+            (section.steps ? (
+              <h3>
+                <button
+                  aria-controls={`credential-help-steps-${index}`}
+                  aria-expanded={expandedStepSections.has(index)}
+                  className={styles.stepToggle}
+                  type="button"
+                  onClick={() => toggleStepSection(index)}
+                >
+                  <span>{section.title}</span>
+                  <span
+                    aria-hidden="true"
+                    className={`${styles.stepToggleIcon}${
+                      expandedStepSections.has(index) ? ` ${styles.stepToggleIconExpanded}` : ''
+                    }`}
+                  >
+                    ›
+                  </span>
+                </button>
+              </h3>
+            ) : (
+              <h3>{section.title}</h3>
+            ))}
+          {section.steps
+            ? expandedStepSections.has(index) && (
+              <ol id={`credential-help-steps-${index}`}>
+                {section.steps.map((step, stepIndex) => (
+                  <li key={`${stepIndex}-${step}`}>{step}</li>
+                ))}
+              </ol>
+            )
+            : section.body && <p>{section.body}</p>}
         </div>
       ))}
     </section>

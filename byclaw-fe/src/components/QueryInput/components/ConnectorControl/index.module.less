@@ -202,6 +202,11 @@
   }
 }
 
+.credentialModalWithHelp {
+  min-width: 640px;
+  max-width: 1250px;
+}
+
 .credentialContent {
   max-height: calc(100vh - 96px);
   padding: 0 4px;
@@ -466,6 +471,12 @@
   .connectorIcon {
     width: 42px;
     height: 42px;
+  }
+}
+
+@media (max-width: 672px) {
+  .credentialModalWithHelp {
+    min-width: 0;
   }
 }
 
