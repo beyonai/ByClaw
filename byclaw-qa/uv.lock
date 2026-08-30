@@ -315,7 +315,7 @@ wheels = [
 
 [[package]]
 name = "by-qa"
-version = "0.2.6"
+version = "0.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -323,9 +323,9 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "python-dotenv" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/dd/15/2a4159bd4bc805c6d0b84d73890aec83f19598a0220ad121a0780c475ee0/by_qa-0.2.6.tar.gz", hash = "sha256:531117c17a5bb98e1767ac3bb3d3d3c8b9ec05b12bc7399cce34165057672c87", size = 462051, upload-time = "2026-08-19T13:18:50.189Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/59/1d/42653281f0a953208b616239f321c3232d8f7d85de56d5281b0cb7a14772/by_qa-0.4.0.tar.gz", hash = "sha256:777d263c61d353d41abfae643d73fdbf69951197bb6eab0749f829d9fba164bc", size = 487963, upload-time = "2026-08-30T16:06:04.049Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/8d/5e/3f320b99011febacaa0c87efa40fbcc5bc39a30d3928d32398a3834d07b4/by_qa-0.2.6-py3-none-any.whl", hash = "sha256:fbc33ffb6e940410b4b04443fdfcb6c68e4d55bd06db5fe361e8a53e38bbdb16", size = 317751, upload-time = "2026-08-19T13:18:48.291Z" },
+    { url = "https://files.pythonhosted.org/packages/3f/79/4c8c8aeee6670f24980a22bfbd8b989fb2f49cc115bd95b4ac1a084b1d17/by_qa-0.4.0-py3-none-any.whl", hash = "sha256:7d4da2adfab2214ade23a762d1ec61c75a5146d97f4e21cf154994dfe4897f29", size = 344398, upload-time = "2026-08-30T16:06:02.37Z" },
 ]
 
 [package.optional-dependencies]
@@ -381,7 +381,7 @@ requires-dist = [
     { name = "by-framework", specifier = "==0.2.2.dev11" },
     { name = "by-framework-langgraph", specifier = "==0.0.3.dev2" },
     { name = "by-framework-trace-langfuse", specifier = "==0.0.3.dev2" },
-    { name = "by-qa", extras = ["all"], specifier = "==0.2.6" },
+    { name = "by-qa", extras = ["all"], specifier = "==0.4.0" },
     { name = "langfuse", specifier = "==4.3.1" },
 ]
 
