@@ -174,38 +174,45 @@ const OperationAccountCards = ({
                 <strong title={accountName}>{accountName}</strong>
                 <span title={accountSubtitle}>{accountSubtitle}</span>
               </div>
-              <Tag className={styles.accountStatusTag} color={isLoginTarget ? 'processing' : ACCOUNT_STATUS_COLOR[status]}>
-                {t(`status.${isLoginTarget ? 'logging_in' : status}`)}
-              </Tag>
+              <div className={styles.accountCardHeaderActions}>
+                <Tag
+                  className={styles.accountStatusTag}
+                  color={isLoginTarget ? 'processing' : ACCOUNT_STATUS_COLOR[status]}
+                >
+                  {t(`status.${isLoginTarget ? 'logging_in' : status}`)}
+                </Tag>
+                {editable && (
+                  <Dropdown
+                    trigger={['hover']}
+                    menu={{
+                      items: [
+                        { key: 'edit', icon: <EditOutlined />, label: t('edit') },
+                        ...(onDeleteAccount
+                          ? [{ key: 'delete', danger: true, icon: <DeleteOutlined />, label: t('delete') }]
+                          : []),
+                      ],
+                      onClick: ({ key, domEvent }) => {
+                        domEvent.stopPropagation();
+                        if (key === 'edit') onEditAccount?.(account);
+                        if (key === 'delete') handleDeleteAccount(account);
+                      },
+                    }}
+                  >
+                    <Button
+                      type="text"
+                      size="small"
+                      className={`${styles.accountCardMoreAction} ${
+                        drawerCompact ? styles.accountCardMoreActionDrawer : ''
+                      }`}
+                      icon={<MoreOutlined />}
+                      loading={`${deletingAccountId ?? ''}` === `${account.id}`}
+                      aria-label="账号操作"
+                      onClick={(event) => event.stopPropagation()}
+                    />
+                  </Dropdown>
+                )}
+              </div>
             </div>
-            {editable && (
-              <Dropdown
-                trigger={['hover']}
-                menu={{
-                  items: [
-                    { key: 'edit', icon: <EditOutlined />, label: t('edit') },
-                    ...(onDeleteAccount
-                      ? [{ key: 'delete', danger: true, icon: <DeleteOutlined />, label: t('delete') }]
-                      : []),
-                  ],
-                  onClick: ({ key, domEvent }) => {
-                    domEvent.stopPropagation();
-                    if (key === 'edit') onEditAccount?.(account);
-                    if (key === 'delete') handleDeleteAccount(account);
-                  },
-                }}
-              >
-                <Button
-                  type="text"
-                  size="small"
-                  className={styles.accountCardMoreAction}
-                  icon={<MoreOutlined />}
-                  loading={`${deletingAccountId ?? ''}` === `${account.id}`}
-                  aria-label="账号操作"
-                  onClick={(event) => event.stopPropagation()}
-                />
-              </Dropdown>
-            )}
             {isLoginTarget ? (
               drawerCompact ? (
                 inlineLoginFooter

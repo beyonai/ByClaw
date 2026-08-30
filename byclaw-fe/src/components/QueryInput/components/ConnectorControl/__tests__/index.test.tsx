@@ -242,6 +242,10 @@ describe('ConnectorControl authorization states', () => {
     expect(connectorCard).toHaveClass('compactItem');
     expect(accountCard).not.toHaveClass('compactItem');
     expect(accountCard).toHaveClass('accountCardDrawerCompact');
+    const accountCardHeader = accountCard?.querySelector('.accountCardHeader');
+    const accountAction = within(accountCard as HTMLElement).getByRole('button', { name: '账号操作' });
+    expect(accountCardHeader).toContainElement(accountAction);
+    expect(accountAction).toHaveClass('accountCardMoreActionDrawer');
     expect(drawerContent?.querySelector('.accountLoginNotice')).not.toBeInTheDocument();
     const accountCardFooter = accountCard?.querySelector('.accountCardFooter');
     expect(accountCardFooter).not.toBeNull();

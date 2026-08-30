@@ -734,6 +734,13 @@
   transition: opacity 0.2s ease;
 }
 
+.accountCardHeaderActions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .accountCardMoreAction {
   position: absolute;
   top: 12px;
@@ -752,6 +759,13 @@
   top: auto;
   right: 8px;
   bottom: 8px;
+}
+
+// Drawer 账号卡片始终在状态标签旁展示管理入口，不占用底部登录操作区域。
+.accountCardDrawerCompact .accountCardMoreActionDrawer {
+  position: static;
+  opacity: 1;
+  pointer-events: auto;
 }
 
 // 卡片悬停后以更多菜单替换状态标签，菜单展开时不会挤动账号名称和底部操作区域。
