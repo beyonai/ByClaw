@@ -34,6 +34,7 @@ interface Props {
   showSpaceTab?: boolean;
   showSkillTab?: boolean;
   agentIds?: string;
+  onlyTab?: string;
 }
 
 /** 「工具」Tab：不含对象类型 */
@@ -50,6 +51,7 @@ const ResourceTabsCompact: React.FC<Props> = ({
   showKnowledgeTab,
   showSkillTab,
   agentIds,
+  onlyTab,
 }) => {
   const [activeTab, setActiveTab] = useState<string>();
   const userSelectedTabRef = useRef(false);
@@ -429,12 +431,13 @@ const ResourceTabsCompact: React.FC<Props> = ({
     if (isOpenSource) visible.push('file');
     if (!visible.length) return;
     setActiveTab((current) => {
+      if (onlyTab && visible.includes(onlyTab)) return current === onlyTab ? current : onlyTab;
       if (userSelectedTabRef.current && current && visible.includes(current)) {
         return current;
       }
-      return visible[0];
+      return current === visible[0] ? current : visible[0];
     });
-  }, [isPanelOpen, showKnowledgeTab, showSkillTab, agentIds, visibleKeys, isOpenSource]);
+  }, [isPanelOpen, showKnowledgeTab, showSkillTab, agentIds, visibleKeys, isOpenSource, onlyTab]);
 
   const tabItems = useMemo(() => {
     const items: {
@@ -626,7 +629,8 @@ const ResourceTabsCompact: React.FC<Props> = ({
     const tabOrder = isOpenSource
       ? ['skill', 'knowledge', 'tool', 'view', 'object', 'space', 'file']
       : ['knowledge', 'tool', 'view', 'object', 'space'];
-    return tabOrder.map((key) => items.find((item) => item.key === key)).filter(Boolean) as typeof items;
+    const ordered = tabOrder.map((key) => items.find((item) => item.key === key)).filter(Boolean) as typeof items;
+    return onlyTab ? ordered.filter((item) => item.key === onlyTab) : ordered;
   }, [
     intl,
     onSelect,
@@ -644,6 +648,7 @@ const ResourceTabsCompact: React.FC<Props> = ({
     sharedLoading,
     getSharedTabResources,
     resolvedSessionId,
+    onlyTab,
     fileList,
     fileLoading,
     pathHistory,
@@ -700,13 +705,14 @@ const ResourceTabsCompact: React.FC<Props> = ({
       return visibleKeys.includes(tab.key);
     });
 
-    return [
+    const tabs = [
       ...(isOpenSource ? [skillTab] : []),
       ...filteredConditionalTabs,
       baseTabs[0],
       ...(isOpenSource ? [fileTab] : []),
     ];
-  }, [agentType, intl, visibleKeys, isOpenSource]);
+    return onlyTab ? tabs.filter((tab) => tab.key === onlyTab) : tabs;
+  }, [agentType, intl, visibleKeys, isOpenSource, onlyTab]);
 
   if (!hasAnyTab) {
     return (

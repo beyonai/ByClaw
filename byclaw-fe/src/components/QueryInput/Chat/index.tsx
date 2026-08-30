@@ -311,7 +311,9 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
       <>
         <Space size={14} className={styles.bottomRight}>
           {/* 连接器控制组件直接管理用户级全局开关，消息 payload 不再携带连接器 ID。 */}
-          <ConnectorControl canAuthorize={!!this.props.userInfo} />
+          <span className="byclaw-connector-outside-tool">
+            <ConnectorControl canAuthorize={!!this.props.userInfo} />
+          </span>
           {/* 多员工模式下 @ 入口始终保留，用于继续追加数字员工。 */}
           <MentionPopover
             type="@"
@@ -344,25 +346,26 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
               </span>
             </Tooltip>
           </MentionPopover>
-          {this.checkCanQuote() && (
-            <MentionPopover
-              type="#"
-              chatMode={chatMode}
-              agentId={quoteAgentId}
-              sessionId={sessionId}
-              resourceAgentIds={this.getResourceAgentIds()}
-              onSelect={this.onSelectMentionPopoverItem}
-              popoverPos={showMentionPopoverType === '#' ? staticEmptyObject : undefined}
-              onClose={() => this.setState((prev) => ({ ...prev, showMentionPopoverType: '' }))}
-            >
+          <MentionPopover
+            type="#"
+            chatMode={chatMode}
+            agentId={quoteAgentId}
+            sessionId={sessionId}
+            resourceAgentIds={this.getResourceAgentIds()}
+            onSelect={this.onSelectMentionPopoverItem}
+            popoverPos={showMentionPopoverType === '#' ? staticEmptyObject : undefined}
+            onClose={() => this.setState((prev) => ({ ...prev, showMentionPopoverType: '' }))}
+          >
+            <Tooltip title="选择技能">
               <span
+                aria-label="技能"
                 className={styles.attachment}
                 onClick={() => this.setState((prev) => ({ ...prev, showMentionPopoverType: '#' }))}
               >
                 #
               </span>
-            </MentionPopover>
-          )}
+            </Tooltip>
+          </MentionPopover>
           {this.checkCanUploadFile() && (
             <UploadFile
               ref={this.uploadFileRef}

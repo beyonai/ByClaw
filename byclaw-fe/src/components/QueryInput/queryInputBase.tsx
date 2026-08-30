@@ -1,6 +1,7 @@
 import React from 'react';
 
 import { getIntl } from '@umijs/max';
+import { LinkOutlined } from '@ant-design/icons';
 import { Button, ConfigProvider, Divider, message, Popover, Progress, Space } from 'antd';
 import { get, isBoolean, isEmpty, isNil, pullAllBy, set, trim, compact, omit } from 'lodash';
 import classNames from 'classnames';
@@ -23,6 +24,11 @@ import type { IAgentFileUploadConf } from '../../hooks/useAgentUploadFileConfig'
 import type { DefaultValueSchema } from './RichInput/types';
 import type { ContextUsed } from '@/hooks/useContextUsed';
 import { getLastMentionedDigitalEmployeeId } from './utils/mention';
+import EmployeeList from '@/layout/sider/components/EmployeeList';
+import ResourceTabs from './RichInput/mentionPopover/resourceTabsCompact';
+import { ResourceType } from './RichInput/utils/constants';
+import ConnectorControl from './components/ConnectorControl';
+import FileResourcePanel from '@/components/ChatLayoutComp/ChatResourceWorkspace/FileResourcePanel';
 
 export type IProps = {
   getMessageList?: () => Array<IMessage>;
@@ -75,6 +81,9 @@ export type IState = {
   resourceList: RichInputResourceList;
   connectNet?: boolean;
   connectNetAgentId?: string;
+  toolsPopoverOpen?: boolean;
+  activeToolMenuKey?: string;
+  moreToolsExpanded?: boolean;
 };
 
 const AUTOSEND_TIMEOUT = 5000;
@@ -110,6 +119,9 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
       fileList: [],
       singleChatTargetRealHumanFlag: true,
       connectNet: false,
+      toolsPopoverOpen: false,
+      activeToolMenuKey: 'expert',
+      moreToolsExpanded: false,
     } as S & IState;
   }
 
@@ -277,6 +289,61 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
   getQuoteAgentId = (): string | undefined => {
     const agentIds = this.getQuoteAgentIds();
     return agentIds.length === 1 ? agentIds[0] : undefined;
+  };
+
+  renderDirectToolContent = (key: string, fallback: React.ReactNode) => {
+    if (key === 'expert') {
+      return (
+        <EmployeeList
+          chatMode={chatModeMap.expert}
+          onSelect={(item) => this.onSelectMentionPopoverItem(item, ResourceType.digitalEmployee)}
+          excludedAgentIds={this.getInlineDigitalEmployeeList().map((item) => `${item.resourceId}`)}
+        />
+      );
+    }
+    if (key === 'skill') {
+      return (
+        <ResourceTabs
+          open
+          agentId={this.getQuoteAgentId()}
+          sessionId={this.props.sessionId}
+          agentIds={this.getResourceAgentIds()}
+          showKnowledgeTab
+          showSkillTab
+          onlyTab="skill"
+          onSelect={(item, type) => this.onSelectMentionPopoverItem(item, type)}
+        />
+      );
+    }
+    if (key === 'connector') {
+      return <ConnectorControl canAuthorize={!!this.props.userInfo} inline />;
+    }
+    if (['knowledge', 'tool', 'space', 'file', 'object'].includes(key)) {
+      return (
+        <ResourceTabs
+          open
+          agentId={this.getQuoteAgentId()}
+          sessionId={this.props.sessionId}
+          agentIds={this.getResourceAgentIds()}
+          onlyTab={key}
+          showKnowledgeTab
+          showSkillTab
+          onSelect={(item, type) => this.onSelectMentionPopoverItem(item, type)}
+        />
+      );
+    }
+    if (key === 'processFile' || key === 'projectCloud') {
+      return (
+        <FileResourcePanel
+          scope={key === 'processFile' ? 'session' : 'project'}
+          sessionId={`${this.props.sessionId || ''}`}
+          projectId={this.props.projectId}
+          resourceId={this.props.globalContext.agentId}
+          onOpenDetail={() => undefined}
+        />
+      );
+    }
+    return fallback;
   };
 
   autoSend = () => {
@@ -476,9 +543,65 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
 
   inputLower = () => {
     const { onCancel, cannotSend } = this.props;
-
-    const BottomRightRender = this.bottomRightRender();
     const canSend = this.checkCanSend();
+    const bottomLeft = this.bottomLeftRender();
+    const bottomRight = this.bottomRightRender();
+    const hasTools = !!bottomLeft || !!bottomRight;
+    const moreMenuItems = [
+      {
+        key: 'knowledge',
+        label: '知识',
+        icon: 'icon-zhishi',
+        content: this.renderDirectToolContent('knowledge', bottomRight),
+      },
+      {
+        key: 'object',
+        label: '本体',
+        icon: 'icon-tongxun',
+        content: this.renderDirectToolContent('object', bottomRight),
+      },
+      {
+        key: 'tool',
+        label: '工具',
+        icon: 'icon-a-Database-networkshujukuwangluo',
+        content: this.renderDirectToolContent('tool', bottomRight),
+      },
+    ];
+    const topMenuItems = [
+      {
+        key: 'expert',
+        label: getIntl().formatMessage({ id: 'common.digitalEmployee' }),
+        icon: 'icon-cebianlan-shuziyuangong',
+        content: this.renderDirectToolContent('expert', bottomRight),
+      },
+      {
+        key: 'skill',
+        label: '技能',
+        icon: 'icon-chajian',
+        content: this.renderDirectToolContent('skill', bottomRight),
+      },
+      {
+        key: 'connector',
+        label: '连接器',
+        icon: <LinkOutlined aria-hidden />,
+        content: this.renderDirectToolContent('connector', bottomRight),
+      },
+      {
+        key: 'processFile',
+        label: '过程文件',
+        icon: 'icon-a-Data-fileshujuwenjian',
+        content: this.renderDirectToolContent('processFile', null),
+      },
+      {
+        key: 'projectCloud',
+        label: '项目云盘',
+        icon: 'icon-a-Folder-openwenjianjia-kai',
+        content: this.renderDirectToolContent('projectCloud', bottomRight),
+      },
+    ];
+    const panelItems = [...topMenuItems, ...moreMenuItems];
+    const visibleMenuItems = this.state.moreToolsExpanded ? panelItems : topMenuItems;
+    const activeMenu = panelItems.find((item) => item.key === this.state.activeToolMenuKey) || topMenuItems[0];
 
     return (
       <div className={styles.tools}>
@@ -491,14 +614,84 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
             },
           }}
         >
-          <Space>{this.bottomLeftRender()}</Space>
+          {hasTools && (
+            <Popover
+              trigger="click"
+              placement="topLeft"
+              open={this.state.toolsPopoverOpen}
+              onOpenChange={(open) => this.setState({ toolsPopoverOpen: open })}
+              destroyOnHidden
+              arrow={false}
+              overlayClassName={styles.toolsPopover}
+              content={
+                <div className={styles.toolsMenu} onMouseLeave={() => undefined}>
+                  <div className={styles.toolsMenuNav}>
+                    {visibleMenuItems.map((item, index) => (
+                      <React.Fragment key={item.key}>
+                        {index === 3 && <Divider className={styles.toolsMenuNavDivider} />}
+                        <button
+                          type="button"
+                          className={classNames(styles.toolsMenuNavItem, {
+                            [styles.toolsMenuNavItemActive]: activeMenu.key === item.key,
+                          })}
+                          onMouseEnter={() => this.setState({ activeToolMenuKey: item.key })}
+                          onFocus={() => this.setState({ activeToolMenuKey: item.key })}
+                          onClick={() => this.setState({ activeToolMenuKey: item.key })}
+                        >
+                          {typeof item.icon === 'string' ? <AntdIcon type={item.icon} /> : item.icon}
+                          <span>{item.label}</span>
+                          <AntdIcon type="icon-a-Arrow-rightjiantouyou" />
+                        </button>
+                      </React.Fragment>
+                    ))}
+                    <button
+                      type="button"
+                      className={styles.toolsMenuNavItem}
+                      aria-expanded={this.state.moreToolsExpanded}
+                      onClick={() => {
+                        const moreToolsExpanded = !this.state.moreToolsExpanded;
+                        this.setState({
+                          moreToolsExpanded,
+                          ...(moreToolsExpanded || topMenuItems.some((item) => item.key === activeMenu.key)
+                            ? {}
+                            : { activeToolMenuKey: topMenuItems[0].key }),
+                        });
+                      }}
+                    >
+                      <AntdIcon type="icon-a-Moregengduo" />
+                      <span>{this.state.moreToolsExpanded ? '收起' : '更多'}</span>
+                      <AntdIcon type={this.state.moreToolsExpanded ? 'icon-a-Upshang' : 'icon-a-Downxia'} />
+                    </button>
+                  </div>
+                  <div className={styles.toolsMenuPanel}>
+                    {panelItems.map((item) => (
+                      <div
+                        key={item.key}
+                        className={classNames(styles.toolsMenuPanelContent, {
+                          [styles.toolsMenuPanelContentActive]: activeMenu.key === item.key,
+                        })}
+                      >
+                        <div className={styles.toolsMenuPanelTitle}>{item.label}</div>
+                        {!!item.content && <div className={styles.toolsMenuSection}>{item.content}</div>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              }
+            >
+              <Button
+                type="text"
+                className={styles.addToolButton}
+                aria-label="打开聊天工具"
+                icon={<AntdIcon type="icon-a-Plusjia" style={{ fontSize: 20 }} />}
+              />
+            </Popover>
+          )}
+          <div className={styles.outsideTools}>{bottomRight}</div>
         </ConfigProvider>
         <Space className={styles.toolsRight}>
-          {BottomRightRender}
-
           {!cannotSend && (
             <>
-              {BottomRightRender && <Divider type="vertical" />}
               {!this.checkIsSending() ? (
                 <Button
                   icon={<AntdIcon type="icon-fasong-tingzhi" style={{ fontSize: 24 }} />}

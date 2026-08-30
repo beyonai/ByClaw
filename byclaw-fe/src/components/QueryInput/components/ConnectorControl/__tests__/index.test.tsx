@@ -885,6 +885,55 @@ describe('ConnectorControl authorization states', () => {
     expect(await screen.findByRole('heading', { name: '连接 钉钉 作为 AI 知识库' })).toBeInTheDocument();
   });
 
+  it('keeps the authorization modal mounted for inline connector cards', async () => {
+    mockQueryConnectorList.mockResolvedValue({
+      list: [
+        {
+          connectorId: 1,
+          connectorCode: 'dingtalk',
+          connectorName: '钉钉',
+          connectorType: 'SYSTEM',
+          description: '',
+          enableFlag: null,
+        },
+      ],
+      pageNum: 1,
+      pageSize: 100,
+      total: 1,
+      totalPages: 1,
+    });
+
+    render(<ConnectorControl canAuthorize inline />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '连接' }));
+    expect(await screen.findByRole('heading', { name: '连接 钉钉 作为 AI 知识库' })).toBeInTheDocument();
+  });
+
+  it('opens reauthorization from an inline connector card', async () => {
+    mockQueryConnectorList.mockResolvedValue({
+      list: [
+        {
+          connectorId: 1,
+          connectorCode: 'dingtalk',
+          connectorName: '钉钉',
+          connectorType: 'SYSTEM',
+          description: '',
+          enableFlag: 'Y',
+        },
+      ],
+      pageNum: 1,
+      pageSize: 100,
+      total: 1,
+      totalPages: 1,
+    });
+
+    render(<ConnectorControl canAuthorize inline />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '更多钉钉操作' }));
+    fireEvent.click(await screen.findByText('重新授权'));
+    expect(await screen.findByRole('heading', { name: '连接 钉钉 作为 AI 知识库' })).toBeInTheDocument();
+  });
+
   it('confirms and revokes an existing connector authorization', async () => {
     mockQueryConnectorList.mockResolvedValue({
       list: [
@@ -1857,10 +1906,7 @@ describe('ConnectorControl authorization states', () => {
     expect(screen.getByLabelText('Client ID')).toHaveAttribute('maxLength', '256');
     expect(screen.getByLabelText('API Key')).toHaveAttribute('type', 'password');
     expect(screen.getByLabelText('API Key')).toHaveAttribute('autocomplete', 'off');
-    expect(screen.getByRole('link', { name: '前往IMA获取凭据' })).toHaveAttribute(
-      'href',
-      'https://ima.qq.com/openapi'
-    );
+    expect(screen.getByRole('link', { name: '前往IMA获取凭据' })).toHaveAttribute('href', 'https://ima.qq.com/openapi');
   });
 
   it('does not submit an empty IMA credential form', async () => {
@@ -2181,8 +2227,9 @@ describe('ConnectorControl authorization states', () => {
     fireEvent.click(await screen.findByRole('button', { name: '更多微信公众号 API操作' }));
     fireEvent.click(await screen.findByText('取消授权'));
 
-    expect(await screen.findByText('仅移除 ByClaw 保存的凭据，微信公众平台上的 AppSecret 仍保持有效'))
-      .toBeInTheDocument();
+    expect(
+      await screen.findByText('仅移除 ByClaw 保存的凭据，微信公众平台上的 AppSecret 仍保持有效')
+    ).toBeInTheDocument();
     Modal.destroyAll();
   });
 
@@ -2217,8 +2264,7 @@ describe('ConnectorControl authorization states', () => {
     fireEvent.click(await screen.findByRole('button', { name: '更多其他凭据连接器操作' }));
     fireEvent.click(await screen.findByText('取消授权'));
 
-    expect(await screen.findByText('仅移除 ByClaw 保存的凭据，第三方平台上的凭据仍保持有效。'))
-      .toBeInTheDocument();
+    expect(await screen.findByText('仅移除 ByClaw 保存的凭据，第三方平台上的凭据仍保持有效。')).toBeInTheDocument();
     expect(screen.queryByText('仅移除 ByClaw 保存的凭据，IMA 网站上的 API Key 仍保持有效。')).not.toBeInTheDocument();
     const refreshCount = mockQueryAllConnectors.mock.calls.length;
     fireEvent.click(screen.getByRole('button', { name: '确认取消授权' }));
