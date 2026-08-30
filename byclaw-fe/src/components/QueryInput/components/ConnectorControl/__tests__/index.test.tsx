@@ -244,13 +244,34 @@ describe('ConnectorControl authorization states', () => {
     fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
     fireEvent.click(await screen.findByText('查看全部连接器'));
     fireEvent.click(await screen.findByRole('button', { name: /新增账号/ }));
-    fireEvent.click(await screen.findByRole('radio', { name: 'projectSpace.operation.platform.customLink' }));
-    fireEvent.change(screen.getByLabelText('projectSpace.operation.accountForm.field.customLinkName'), {
-      target: { value: '微信公众号' },
-    });
-    fireEvent.change(screen.getByLabelText('projectSpace.operation.accountForm.field.customUrl'), {
-      target: { value: 'https://mp.weixin.qq.com/' },
-    });
+    const accountModal = (await screen.findByText('projectSpace.operation.accountForm.addTitle')).closest(
+      '[role="dialog"]'
+    );
+    expect(accountModal).not.toBeNull();
+    expect(
+      within(accountModal as HTMLElement).queryByText('projectSpace.operation.accountForm.field.platform')
+    ).not.toBeInTheDocument();
+    expect(within(accountModal as HTMLElement).queryAllByRole('radio')).toHaveLength(0);
+    expect(
+      await within(accountModal as HTMLElement).findByLabelText(
+        'projectSpace.operation.accountForm.field.customLinkName'
+      )
+    ).toBeInTheDocument();
+    expect(
+      within(accountModal as HTMLElement).getByLabelText('projectSpace.operation.accountForm.field.customUrl')
+    ).toBeInTheDocument();
+    fireEvent.change(
+      within(accountModal as HTMLElement).getByLabelText('projectSpace.operation.accountForm.field.customLinkName'),
+      {
+        target: { value: '微信公众号' },
+      }
+    );
+    fireEvent.change(
+      within(accountModal as HTMLElement).getByLabelText('projectSpace.operation.accountForm.field.customUrl'),
+      {
+        target: { value: 'https://mp.weixin.qq.com/' },
+      }
+    );
     fireEvent.click(screen.getByRole('button', { name: 'projectSpace.operation.accountForm.save' }));
 
     await waitFor(() =>
@@ -310,7 +331,8 @@ describe('ConnectorControl authorization states', () => {
       await waitFor(() => expect(mockListGlobalOperationAccounts).toHaveBeenCalledTimes(1));
 
       fireEvent.click(await screen.findByRole('button', { name: /新增账号/ }));
-      fireEvent.click(await screen.findByRole('radio', { name: 'projectSpace.operation.platform.customLink' }));
+      expect(screen.queryByText('projectSpace.operation.accountForm.field.platform')).not.toBeInTheDocument();
+      expect(screen.queryAllByRole('radio')).toHaveLength(0);
       fireEvent.change(screen.getByLabelText('projectSpace.operation.accountForm.field.customLinkName'), {
         target: { value: '微信公众号' },
       });

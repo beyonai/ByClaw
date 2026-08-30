@@ -34,6 +34,7 @@ export interface OperationAccountPanelProps {
   onRefreshToolbarChange?: (toolbar: React.ReactNode | null) => void;
   showPlatformFilter?: boolean;
   allowAccountEditing?: boolean;
+  fixedCreatePlatformId?: string;
   cardsOnly?: boolean;
   drawerCardLayout?: boolean;
   onBack?: () => void;
@@ -64,6 +65,7 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
   onRefreshToolbarChange,
   showPlatformFilter = true,
   allowAccountEditing = true,
+  fixedCreatePlatformId,
   cardsOnly = false,
   drawerCardLayout = false,
   onBack,
@@ -231,6 +233,7 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
       open={accountFormOpen}
       account={editingAccount}
       platformOptions={availablePlatformOptions}
+      fixedPlatformId={fixedCreatePlatformId}
       loading={savingAccount}
       onCancel={() => {
         setAccountFormOpen(false);

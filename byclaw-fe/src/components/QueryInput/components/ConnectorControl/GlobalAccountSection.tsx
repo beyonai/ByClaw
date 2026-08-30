@@ -68,6 +68,7 @@ const GlobalAccountSection = ({ onToolbarChange }: GlobalAccountSectionProps) =>
   return (
     <OperationAccountPanel
       accounts={accounts}
+      fixedCreatePlatformId="CustomLink"
       compact
       cardsOnly
       drawerCardLayout

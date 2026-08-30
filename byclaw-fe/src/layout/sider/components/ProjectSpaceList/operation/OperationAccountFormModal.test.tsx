@@ -54,4 +54,31 @@ describe('OperationAccountFormModal', () => {
       )
     );
   });
+
+  it('hides the platform field and submits a fixed custom-link platform', async () => {
+    const onSubmit = jest.fn();
+    render(<OperationAccountFormModal open fixedPlatformId="CustomLink" onCancel={jest.fn()} onSubmit={onSubmit} />);
+
+    expect(screen.queryByLabelText('projectSpace.operation.accountForm.field.platform')).not.toBeInTheDocument();
+    expect(screen.queryAllByRole('radio')).toHaveLength(0);
+    fireEvent.change(await screen.findByLabelText('projectSpace.operation.accountForm.field.customLinkName'), {
+      target: { value: '微信公众号' },
+    });
+    fireEvent.change(screen.getByLabelText('projectSpace.operation.accountForm.field.customUrl'), {
+      target: { value: 'https://mp.weixin.qq.com/' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'projectSpace.operation.accountForm.save' }));
+
+    await waitFor(() =>
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          platformId: 'CustomLink',
+          accountName: '微信公众号',
+          accountId: '',
+          customUrl: 'https://mp.weixin.qq.com/',
+        }),
+        undefined
+      )
+    );
+  });
 });
