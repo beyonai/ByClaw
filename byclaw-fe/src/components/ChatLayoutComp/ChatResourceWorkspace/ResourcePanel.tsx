@@ -21,6 +21,7 @@ type SecondaryState = Record<UpperScopeKey, string>;
 interface ResourcePanelProps {
   sessionId: string;
   projectId?: number;
+  cloudResourceId?: string | number;
   onOpenDetail: (panel: React.ReactNode, options: DetailPanelOptions) => void;
 }
 
@@ -29,7 +30,7 @@ const EMPTY_SECONDARY_STATE: SecondaryState = {
   employee: 'knowledge',
 };
 
-const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onOpenDetail }) => {
+const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, cloudResourceId, onOpenDetail }) => {
   const intl = useIntl();
   const isEnglish = intl.locale.toLowerCase().startsWith('en');
   const activeEmployee = useActiveSiderAgent();
@@ -39,7 +40,14 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
   const [secondaryState, setSecondaryState] = useState<SecondaryState>(EMPTY_SECONDARY_STATE);
   const [sessionResourceRefreshKey, setSessionResourceRefreshKey] = useState(0);
   const resourceId = activeEmployee.resourceId || (project?.resourceId ? `${project.resourceId}` : undefined);
-  const projectCloudResourceId = project?.cloudResourceId ? `${project.cloudResourceId}` : resourceId;
+  // 项目云盘必须优先使用项目知识库 ID；详情接口缺少 cloudResourceId 时兼容项目 resourceId，不能回退到当前员工资源。
+  const projectCloudResourceId = cloudResourceId
+    ? `${cloudResourceId}`
+    : project?.cloudResourceId
+      ? `${project.cloudResourceId}`
+      : project?.resourceId
+        ? `${project.resourceId}`
+        : undefined;
 
   // 项目代码对已启用对应能力的研发、运营项目开放；未明确的数据项按约定保留空态。
   const repositoryProjectEnabled =

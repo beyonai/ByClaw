@@ -236,9 +236,9 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({
               selectedProject={
                 projectId !== undefined
                   ? {
-                      projectId: String(projectId),
-                      projectName: projects.find((item) => `${item.projectId}` === `${projectId}`)?.projectName || '',
-                    }
+                    projectId: String(projectId),
+                    projectName: projects.find((item) => `${item.projectId}` === `${projectId}`)?.projectName || '',
+                  }
                   : undefined
               }
               placeholder={intl.formatMessage({ id: 'automation.promptTip' })}

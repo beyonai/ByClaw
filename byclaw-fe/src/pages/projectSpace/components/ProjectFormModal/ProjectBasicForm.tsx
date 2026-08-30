@@ -485,10 +485,10 @@ const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
             label={formT('field.projectName')}
             rules={[
               { required: true, message: formT('validation.projectNameRequired') },
-              { max: 15, message: formT('validation.projectNameMaxLength') },
+              { max: 100, message: formT('validation.projectNameMaxLength') },
             ]}
           >
-            <Input maxLength={15} showCount placeholder={formT('placeholder.projectName')} />
+            <Input maxLength={100} showCount placeholder={formT('placeholder.projectName')} />
           </Form.Item>
           <Form.Item
             name="description"

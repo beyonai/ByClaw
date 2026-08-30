@@ -655,7 +655,7 @@ const ProjectSpacePage: React.FC = () => {
       >
         <Input
           autoFocus
-          maxLength={15}
+          maxLength={100}
           value={renameValue}
           onChange={(event) => setRenameValue(event.target.value)}
           onPressEnter={() => void handleRenameProject()}

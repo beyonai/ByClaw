@@ -99,9 +99,9 @@ public class ProjectApplicationService {
     private static final String PROJECT_TYPE_DEFAULT = "default";
 
     /**
-     * 项目名称前后端统一限制为 15 个字符。
+     * 项目名称前后端统一限制为 100 个字符。
      */
-    private static final int PROJECT_NAME_MAX_LENGTH = 15;
+    private static final int PROJECT_NAME_MAX_LENGTH = 100;
 
     /**
      * 项目描述业务层统一限制为 500 个字符，数据库使用 TEXT 避免中文存储长度语义差异。

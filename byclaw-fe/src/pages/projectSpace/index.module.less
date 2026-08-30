@@ -1628,9 +1628,10 @@
   min-height: 120px;
   flex: 1;
   display: flex;
-  align-items: center;
-  justify-content: center;
+  align-items: flex-start;
+  justify-content: flex-start;
   padding: 12px;
+  overflow: auto;
 }
 
 .projectScheduleList {
@@ -1659,11 +1660,13 @@
 .resourceCloudBreadcrumb {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 2px;
   padding: 4px 14px 0;
   color: #98a2b3;
-  white-space: nowrap;
-  overflow: hidden;
+  white-space: normal;
+  overflow: visible;
+  word-break: break-all;
 
   :global(.ant-btn-link) {
     color: #98a2b3;

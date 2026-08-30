@@ -368,6 +368,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
       <ChatResourceWorkspace
         sessionId={sessionId}
         projectId={sessionProjectId}
+        cloudResourceId={currentSession?.cloudResourceId}
         listOpen={resourceListOpen}
         tabs={resourceTabs}
         activeTabKey={activeResourceTabKey}

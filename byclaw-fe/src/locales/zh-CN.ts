@@ -1729,7 +1729,7 @@ export default {
   'projectSpace.projectForm.placeholder.projectName': '请输入项目名称',
   'projectSpace.projectForm.placeholder.description': '请输入项目描述',
   'projectSpace.projectForm.validation.projectNameRequired': '请输入项目名称',
-  'projectSpace.projectForm.validation.projectNameMaxLength': '项目名称不能超过15个字',
+  'projectSpace.projectForm.validation.projectNameMaxLength': '项目名称不能超过100个字',
   'projectSpace.projectForm.validation.descriptionMaxLength': '项目描述不能超过500个字符',
   'projectSpace.projectForm.validation.knowledgeRequired': '请选择至少一个知识库',
   'projectSpace.projectForm.validation.digitalEmployeeRequired': '请选择至少一个数字员工',

@@ -55,7 +55,9 @@ const ProjectDetail: React.FC<Props> = ({
   const [requirementsRefreshVersion, setRequirementsRefreshVersion] = useState(0);
   // 已访问 Tab 保持挂载以缓存列表数据；切换项目时只保留默认任务 Tab，避免复用上一个项目的数据。
   // 各 Tab 常驻后工具栏也要按 Tab 分开缓存，否则隐藏 Tab 的 effect 会覆盖当前 Tab 的按钮。
-  const [sectionToolbarMap, setSectionToolbarMap] = useState<Partial<Record<ProjectDetailSection, React.ReactNode>>>({});
+  const [sectionToolbarMap, setSectionToolbarMap] = useState<Partial<Record<ProjectDetailSection, React.ReactNode>>>(
+    {}
+  );
   const [, setSectionRefreshToolbarMap] = useState<Partial<Record<ProjectDetailSection, React.ReactNode>>>({});
   const [repositoryManagerOpen, setRepositoryManagerOpen] = useState(false);
   const [editingRepository, setEditingRepository] = useState<DevloopProjectRepo>();
@@ -64,7 +66,9 @@ const ProjectDetail: React.FC<Props> = ({
   const [scheduleTaskCreating, setScheduleTaskCreating] = useState(false);
   const [editingScheduleTask, setEditingScheduleTask] = useState<any>();
   const [scheduleRefreshVersion, setScheduleRefreshVersion] = useState(0);
-  const [resourceReferenceHandler, setResourceReferenceHandler] = useState<(resource: any) => void>(() => () => undefined);
+  const [resourceReferenceHandler, setResourceReferenceHandler] = useState<(resource: any) => void>(
+    () => () => undefined
+  );
   const isOperationProject = project?.projectType === 'operation';
   const repositoryProject = supportsProjectRepositories(project?.projectType);
   const currentUserId = userInfo.userId ?? userInfo.id;
@@ -220,24 +224,24 @@ const ProjectDetail: React.FC<Props> = ({
     try {
       const collectConfig = values.collectConfig
         ? {
-            ...values.collectConfig,
-            // 表单态使用 Dayjs，接口保存字符串；生效区间拆成后端校验使用的两个字段。
-            onceTime: values.collectConfig.onceTime?.isValid()
-              ? values.collectConfig.onceTime.format('YYYY-MM-DD HH:mm:ss')
-              : undefined,
-            periodTime: values.collectConfig.periodTime?.isValid()
-              ? values.collectConfig.periodTime.format('HH:mm:ss')
-              : undefined,
-            periodYearDateTime: values.collectConfig.periodYearDateTime?.isValid()
-              ? values.collectConfig.periodYearDateTime.format('YYYY-MM-DD HH:mm:ss')
-              : undefined,
-            effectiveStartDate: values.collectConfig.effectiveDateRange?.[0]?.isValid()
-              ? values.collectConfig.effectiveDateRange[0].format('YYYY-MM-DD')
-              : undefined,
-            effectiveEndDate: values.collectConfig.effectiveDateRange?.[1]?.isValid()
-              ? values.collectConfig.effectiveDateRange[1].format('YYYY-MM-DD')
-              : undefined,
-          }
+          ...values.collectConfig,
+          // 表单态使用 Dayjs，接口保存字符串；生效区间拆成后端校验使用的两个字段。
+          onceTime: values.collectConfig.onceTime?.isValid()
+            ? values.collectConfig.onceTime.format('YYYY-MM-DD HH:mm:ss')
+            : undefined,
+          periodTime: values.collectConfig.periodTime?.isValid()
+            ? values.collectConfig.periodTime.format('HH:mm:ss')
+            : undefined,
+          periodYearDateTime: values.collectConfig.periodYearDateTime?.isValid()
+            ? values.collectConfig.periodYearDateTime.format('YYYY-MM-DD HH:mm:ss')
+            : undefined,
+          effectiveStartDate: values.collectConfig.effectiveDateRange?.[0]?.isValid()
+            ? values.collectConfig.effectiveDateRange[0].format('YYYY-MM-DD')
+            : undefined,
+          effectiveEndDate: values.collectConfig.effectiveDateRange?.[1]?.isValid()
+            ? values.collectConfig.effectiveDateRange[1].format('YYYY-MM-DD')
+            : undefined,
+        }
         : undefined;
       await createOperationRequirement({
         projectId: Number(project.projectId),
@@ -263,64 +267,66 @@ const ProjectDetail: React.FC<Props> = ({
   return (
     <section className={styles.detail}>
       <div className={styles.detailMain}>
-        {!scheduleTaskCreating && <div className={styles.detailHeader}>
-          <div className={styles.detailHeading}>
-            <div className={styles.detailTitleRow}>
-              <nav className={styles.detailBreadcrumb} aria-label={intl.formatMessage({ id: 'sider.projectSpace' })}>
-                <button type="button" className={styles.detailBreadcrumbLink} onClick={onBack}>
-                  {intl.formatMessage({ id: 'sider.projectSpace' })}
-                </button>
-                <span className={styles.detailBreadcrumbSeparator}>/</span>
-                <span className={styles.detailBreadcrumbCurrent} title={project.projectName}>
-                  {project.projectName}
-                </span>
-              </nav>
-              {(onEditProject || onDeleteProject) && (
-                <Dropdown
-                  trigger={['click']}
-                  menu={{
-                    items: [
-                      ...(onEditProject
-                        ? [{ key: 'edit', label: intl.formatMessage({ id: 'projectSpace.detail.common.edit' }) }]
-                        : []),
-                      ...(onDeleteProject
-                        ? [
+        {!scheduleTaskCreating && (
+          <div className={styles.detailHeader}>
+            <div className={styles.detailHeading}>
+              <div className={styles.detailTitleRow}>
+                <nav className={styles.detailBreadcrumb} aria-label={intl.formatMessage({ id: 'sider.projectSpace' })}>
+                  <button type="button" className={styles.detailBreadcrumbLink} onClick={onBack}>
+                    {intl.formatMessage({ id: 'sider.projectSpace' })}
+                  </button>
+                  <span className={styles.detailBreadcrumbSeparator}>/</span>
+                  <span className={styles.detailBreadcrumbCurrent} title={project.projectName}>
+                    {project.projectName}
+                  </span>
+                </nav>
+                {(onEditProject || onDeleteProject) && (
+                  <Dropdown
+                    trigger={['click']}
+                    menu={{
+                      items: [
+                        ...(onEditProject
+                          ? [{ key: 'edit', label: intl.formatMessage({ id: 'projectSpace.detail.common.edit' }) }]
+                          : []),
+                        ...(onDeleteProject
+                          ? [
                             {
                               key: 'delete',
                               danger: true,
                               label: intl.formatMessage({ id: 'projectSpace.detail.common.delete' }),
                             },
                           ]
-                        : []),
-                    ],
-                    onClick: ({ key }) => {
-                      if (key === 'edit') onEditProject?.(project);
-                      if (key === 'delete') onDeleteProject?.(project);
-                    },
-                  }}
-                >
-                  {/* 更多按钮常驻显示，项目编辑和删除操作统一收口到菜单中。 */}
-                  <Button
-                    type="text"
-                    className={styles.detailProjectMoreButton}
-                    icon={<EllipsisOutlined />}
-                    aria-label={intl.formatMessage({ id: 'common.more' })}
-                  />
-                </Dropdown>
+                          : []),
+                      ],
+                      onClick: ({ key }) => {
+                        if (key === 'edit') onEditProject?.(project);
+                        if (key === 'delete') onDeleteProject?.(project);
+                      },
+                    }}
+                  >
+                    {/* 更多按钮常驻显示，项目编辑和删除操作统一收口到菜单中。 */}
+                    <Button
+                      type="text"
+                      className={styles.detailProjectMoreButton}
+                      icon={<EllipsisOutlined />}
+                      aria-label={intl.formatMessage({ id: 'common.more' })}
+                    />
+                  </Dropdown>
+                )}
+              </div>
+              <Typography.Text type="secondary" className={styles.detailDescription}>
+                {project.description || intl.formatMessage({ id: 'projectSpace.projectCard.emptyDescription' })}
+              </Typography.Text>
+            </div>
+            <div className={styles.detailHeaderActions}>
+              {onNewSession && (
+                <Button icon={<PlusOutlined />} onClick={() => onNewSession()}>
+                  {intl.formatMessage({ id: 'projectSpace.newChatName' })}
+                </Button>
               )}
             </div>
-            <Typography.Text type="secondary" className={styles.detailDescription}>
-              {project.description || intl.formatMessage({ id: 'projectSpace.projectCard.emptyDescription' })}
-            </Typography.Text>
           </div>
-          <div className={styles.detailHeaderActions}>
-            {onNewSession && (
-              <Button icon={<PlusOutlined />} onClick={() => onNewSession()}>
-                {intl.formatMessage({ id: 'projectSpace.newChatName' })}
-              </Button>
-            )}
-          </div>
-        </div>}
+        )}
         <div className={styles.detailBody}>
           {scheduleTaskCreating ? (
             <AutomationEditor

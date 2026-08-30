@@ -1,17 +1,4 @@
-import {
-  Button,
-  Drawer,
-  Dropdown,
-  Empty,
-  Input,
-  Modal,
-  Select,
-  Spin,
-  Switch,
-  Typography,
-  Upload,
-  message,
-} from 'antd';
+import { Button, Drawer, Dropdown, Empty, Input, Modal, Select, Spin, Switch, Typography, Upload, message } from 'antd';
 import {
   ApartmentOutlined,
   BranchesOutlined,
@@ -29,12 +16,14 @@ import {
   RobotOutlined,
   UploadOutlined,
 } from '@ant-design/icons';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useIntl } from '@umijs/max';
 import { getAgentChatAvatar } from '@/utils/agent';
 import AntdIcon from '@/components/AntdIcon';
 import { getFileIconType } from '@/constants/icon';
 import FilePreviewPanel from '@/components/ChatLayoutComp/ChatResourceWorkspace/FilePreviewPanel';
+import FileResourcePanel from '@/components/ChatLayoutComp/ChatResourceWorkspace/FileResourcePanel';
+import { SiderContentContext } from '@/layout/sider/siderContentContext';
 import FileSpaceBlock from '@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock';
 import type { FileTreeItem } from '@/layout/sider/components/FileSiderPanel/constants';
 import {
@@ -65,7 +54,6 @@ import { listOntologyBases, pageOntologyResources } from '@/service/ontology';
 import {
   createFolder,
   deleteFolder,
-  queryDirAndFileByLevel,
   removeFile,
   uploadFiles as uploadKnowledgeFiles,
 } from '@/service/knowledgeCenter';
@@ -74,6 +62,7 @@ import { useDigitalEmployeeOptions } from '../../hooks/useDigitalEmployeeOptions
 import { getProjectResourceCategoryCount, supportsProjectRepositories } from '../../projectCapabilities';
 import type { ProjectBoundResource, ProjectSpace } from '../../types';
 import styles from '../../index.module.less';
+import { queryProjectCloudDrive } from '@/components/ProjectCloudDrive';
 
 interface Props {
   project: ProjectSpace;
@@ -133,6 +122,7 @@ const ProjectResources: React.FC<Props> = ({
   repositoryRefreshVersion = 0,
 }) => {
   const intl = useIntl();
+  const siderContentContext = useContext(SiderContentContext);
   const [files, setFiles] = useState<DevloopProjectSpaceFile[]>([]);
   const [cloudPath, setCloudPath] = useState('/');
   const [expandedCard, setExpandedCard] = useState<string | null>(null);
@@ -193,21 +183,20 @@ const ProjectResources: React.FC<Props> = ({
     }
     setLoadingFiles(true);
     try {
-      const nextFiles = (
-        (await queryDirAndFileByLevel({
-          resourceId: Number(cloudResourceId),
-          directoryPath: cloudPath,
-          language: intl.locale,
-        })) || []
-      ).map((item: any) => ({
-        fileId: Number(item.fileId ?? item.id),
-        fileName: item.fileName || item.name,
-        fileUrl: item.directoryPath ? `${item.directoryPath.replace(/\/$/, '')}/${item.fileName || item.name}` : '',
-        isDir: item.type === 'directory',
-        directoryPath: item.directoryPath,
-        size: item.size,
-        projectId: Number(project.projectId),
-      }));
+      const nextFiles = await queryProjectCloudDrive(Number(cloudResourceId), cloudPath, intl.locale).then((items) =>
+        items.map((item) => {
+          const fileName = item.name;
+          return {
+            fileId: Number(item.fileId),
+            fileName,
+            fileUrl: item.path,
+            isDir: item.isDir,
+            directoryPath: item.path,
+            size: item.size,
+            projectId: Number(project.projectId),
+          };
+        })
+      );
       setFiles(nextFiles);
     } catch (error: any) {
       setFiles([]);
@@ -219,7 +208,12 @@ const ProjectResources: React.FC<Props> = ({
 
   const loadScheduleTasks = useCallback(async () => {
     try {
-      const response = await listScanSources({ projectId: Number(project.projectId), onlyMine: false, pageNum: 1, pageSize: 100 });
+      const response = await listScanSources({
+        projectId: Number(project.projectId),
+        onlyMine: false,
+        pageNum: 1,
+        pageSize: 100,
+      });
       const data = response?.data ?? response;
       setScheduleTasks(Array.isArray(data) ? data : data?.list || data?.rows || []);
     } catch {
@@ -555,11 +549,11 @@ const ProjectResources: React.FC<Props> = ({
         setFilePreviewContent((prev) =>
           prev
             ? {
-                ...prev,
-                path: file.path || prev.path,
-                content: file.binary ? file.base64Content || '' : file.content || '',
-                binary: file.binary,
-              }
+              ...prev,
+              path: file.path || prev.path,
+              content: file.binary ? file.base64Content || '' : file.content || '',
+              binary: file.binary,
+            }
             : null
         );
       } catch (error: any) {
@@ -584,6 +578,8 @@ const ProjectResources: React.FC<Props> = ({
   const empty = (
     <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={intl.formatMessage({ id: 'chatResource.empty' })} />
   );
+  // 云盘展示统一由 FileResourcePanel 负责，保留旧数据加载逻辑供刷新状态使用。
+  void files;
 
   const cloudResourceId = project.cloudResourceId ? Number(project.cloudResourceId) : undefined;
   const handleCreateFolder = async () => {
@@ -783,7 +779,14 @@ const ProjectResources: React.FC<Props> = ({
             onClick: async ({ key, domEvent }) => {
               domEvent.stopPropagation();
               const path = file.fileUrl || `${cloudPath}${file.fileName}`;
-              if (key === 'reference') onResourceReference?.({ resourceId: file.fileId, name: file.fileName, resourceName: file.fileName, resourceType: file.isDir ? 'COMMON_FOLDER' : 'COMMON_FILE', path });
+              if (key === 'reference')
+                onResourceReference?.({
+                  resourceId: file.fileId,
+                  name: file.fileName,
+                  resourceName: file.fileName,
+                  resourceType: file.isDir ? 'COMMON_FOLDER' : 'COMMON_FILE',
+                  path,
+                });
               if (key === 'delete' && cloudResourceId) {
                 if (file.isDir) await deleteFolder({ resourceId: cloudResourceId, directoryPath: path });
                 else await removeFile({ resourceId: String(cloudResourceId), directoryPath: path });
@@ -799,6 +802,8 @@ const ProjectResources: React.FC<Props> = ({
       </div>
     );
   };
+
+  void renderSharedFile;
 
   const renderRepository = (repo: DevloopProjectRepo) => (
     <div
@@ -904,29 +909,23 @@ const ProjectResources: React.FC<Props> = ({
               </>
             ) : undefined
           )}
-          {cloudPath !== '/' && <div className={styles.resourceCloudBreadcrumb}>
-            {['/', ...cloudPath.split('/').filter(Boolean)].map((part, index, parts) => {
-              const path = index === 0 ? '/' : `/${parts.slice(1, index + 1).join('/')}/`;
-              return (
-                <span key={path}>
-                  {index > 0 && <span>/</span>}
-                  <Button type="link" size="small" onClick={() => setCloudPath(path)}>
-                    {index === 0 ? '全部文件' : part}
-                  </Button>
-                </span>
-              );
-            })}
-          </div>}
-          <Spin spinning={loadingFiles} className={styles.resourceCategoryBody}>
-            {files.length
-              ? files.map(renderSharedFile)
-              : !loadingFiles &&
-                (project.cloudResourceId ? (
-                  empty
-                ) : (
-                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无项目知识库" />
-                ))}
-          </Spin>
+          <FileResourcePanel
+            scope="project"
+            sessionId=""
+            projectId={Number(project.projectId)}
+            project={project}
+            resourceId={cloudResourceId ? String(cloudResourceId) : undefined}
+            onOpenDetail={(panel, options) => siderContentContext.setDetailPanel?.(panel, options)}
+            onPreviewFile={(item) => {
+              setPreviewFile({
+                fileId: Number((item as any).fileId),
+                fileName: item.name,
+                fileUrl: item.path,
+                isDir: false,
+                projectId: Number(project.projectId),
+              } as DevloopProjectSpaceFile);
+            }}
+          />
         </section>
 
         {repositoryProject && (
@@ -966,9 +965,7 @@ const ProjectResources: React.FC<Props> = ({
                 icon={<PlusOutlined />}
                 className={styles.resourceCardExpandButton}
                 aria-label={intl.formatMessage({ id: 'common.add' })}
-                onClick={() =>
-                  onOpenScheduleTaskCreate?.()
-                }
+                onClick={() => onOpenScheduleTaskCreate?.()}
               />
               <Button
                 type="text"
@@ -1187,10 +1184,10 @@ const ProjectResources: React.FC<Props> = ({
         {previewFile && (
           <FilePreviewPanel
             fileName={previewFile.fileName}
-            resourceId={project.resourceId ? `${project.resourceId}` : undefined}
-            path={previewFile.fileUrl || `/by/.project/${previewFile.fileName}`}
-            fileUrl={previewFile.fileUrl || undefined}
-            source="fileBrowser"
+            resourceId={project.cloudResourceId ? `${project.cloudResourceId}` : undefined}
+            path={previewFile.fileUrl || `/${previewFile.fileName}`}
+            fileUrl={undefined}
+            source="dataset"
           />
         )}
       </Drawer>

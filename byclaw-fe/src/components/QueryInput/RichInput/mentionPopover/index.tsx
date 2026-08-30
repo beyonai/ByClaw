@@ -201,7 +201,7 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
       }}
       styles={{
         body: {
-          height: '50vh',
+          height: '65vh',
           minWidth: 320,
           padding: 0,
         },

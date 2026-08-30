@@ -1745,7 +1745,7 @@ export default {
   'projectSpace.projectForm.placeholder.projectName': 'Enter project name',
   'projectSpace.projectForm.placeholder.description': 'Enter project description',
   'projectSpace.projectForm.validation.projectNameRequired': 'Enter project name',
-  'projectSpace.projectForm.validation.projectNameMaxLength': 'Project name cannot exceed 15 characters',
+  'projectSpace.projectForm.validation.projectNameMaxLength': 'Project name cannot exceed 100 characters',
   'projectSpace.projectForm.validation.descriptionMaxLength': 'Project description cannot exceed 500 characters',
   'projectSpace.projectForm.validation.knowledgeRequired': 'Select at least one knowledge base',
   'projectSpace.projectForm.validation.digitalEmployeeRequired': 'Select at least one digital employee',

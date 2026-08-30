@@ -42,14 +42,16 @@ import {
   uploadFiles,
   type FileBrowserItem,
 } from '@/service/fileBrowser';
-import { queryDirAndFileByLevel } from '@/service/knowledgeCenter';
+import { deleteFolder, removeFile, renameFolder } from '@/service/knowledgeCenter';
 import { downloadFile as downloadUrlFile } from '@/utils/file';
+import { downloadResourceFile } from '@/service/file';
 import type { DetailPanelOptions } from '@/layout/sider/siderContentContext';
 import FilePreviewPanel from './FilePreviewPanel';
 import projectStyles from '@/pages/projectSpace/index.module.less';
 import { useInfiniteScroll } from '@/pages/projectSpace/hooks/useInfiniteScroll';
 import { filterSessionRootItems } from './sessionResourceUtils';
 import styles from './index.module.less';
+import { queryProjectCloudDrive } from '@/components/ProjectCloudDrive';
 
 type ProjectFileItem = FileBrowserItem & {
   fileId: number;
@@ -64,6 +66,7 @@ interface FileResourcePanelProps {
   resourceId?: string;
   refreshKey?: number;
   onOpenDetail: (panel: React.ReactNode, options: DetailPanelOptions) => void;
+  onPreviewFile?: (item: FileBrowserItem) => void;
   // 项目大详情使用卡片视图；会话资源继续复用原文件树交互。
   cardMode?: boolean;
 }
@@ -79,6 +82,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   resourceId,
   refreshKey = 0,
   onOpenDetail,
+  onPreviewFile,
   cardMode = false,
 }) => {
   const intl = useIntl();
@@ -104,9 +108,10 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   const projectId = projectIdProp ?? Number(project?.projectId);
   const isLocalSharedFiles = scope === 'project' && Number(project?.projectId ?? projectId) === -1;
   const usesFileBrowser = scope === 'session' || isLocalSharedFiles;
-  const rootPath = `${DISPLAY_FILE_PATH_PREFIX}${
-    isLocalSharedFiles ? SHARED_FILE_PATH : getSessionFilePath(sessionId)
-  }`;
+  const rootPath =
+    scope === 'project' && !isLocalSharedFiles
+      ? '/'
+      : `${DISPLAY_FILE_PATH_PREFIX}${isLocalSharedFiles ? SHARED_FILE_PATH : getSessionFilePath(sessionId)}`;
   const canManageProjectFiles = useMemo(() => {
     const currentUserId = userInfo?.userId ?? userInfo?.id;
     return (
@@ -150,22 +155,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         const response = await listFiles({ resourceId: resourceId!, path: rootPath, language });
         setItems(sortFileBrowserItems(unwrapListResponse<FileBrowserItem>(response)));
       } else if (scope === 'project') {
-        const response = await queryDirAndFileByLevel({
-          resourceId: Number(resourceId),
-          directoryPath: '/',
-          language,
-        });
-        const cloudItems = (response || []).map((item: any) => {
-          const name = item.fileName || item.name || '文件';
-          const directoryPath = item.directoryPath || '/';
-          return {
-            name,
-            path: `${directoryPath.replace(/\/$/, '')}/${name}` || `/${name}`,
-            isDir: item.type === 'directory',
-            fileId: item.fileId ?? item.id,
-            fileUrl: '',
-          } as ProjectFileItem;
-        });
+        const cloudItems = await queryProjectCloudDrive(resourceId, '/', language);
         setItems(sortFileBrowserItems(cloudItems));
       } else {
         // eslint-disable-next-line lines-around-comment
@@ -204,6 +194,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
     setVisibleProjectItemCount(20);
   }, [projectId, cardMode, items.length]);
 
+
   useEffect(
     () => () => {
       if (clickTimerRef.current !== null) window.clearTimeout(clickTimerRef.current);
@@ -217,17 +208,11 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
       const normalizedPath = ensureDirectoryPath(normalizeFileBrowserPath(path));
       const response =
         scope === 'project'
-          ? await queryDirAndFileByLevel({ resourceId: Number(resourceId), directoryPath: normalizedPath, language })
+          ? await queryProjectCloudDrive(resourceId, normalizedPath, language)
           : await listFiles({ resourceId, path: normalizedPath, language });
       const nextItems = sortFileBrowserItems(
         scope === 'project'
-          ? (response || []).map((item: any) => ({
-              name: item.fileName || item.name || '文件',
-              path: `${(item.directoryPath || normalizedPath).replace(/\/$/, '')}/${item.fileName || item.name}`,
-              isDir: item.type === 'directory',
-              fileId: item.fileId ?? item.id,
-              fileUrl: '',
-            }))
+          ? response
           : unwrapListResponse<FileBrowserItem>(response)
       );
       if (normalizedPath === rootPath) {
@@ -237,7 +222,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
       }
       setLoadedDirectoryKeys((current) => (current.includes(normalizedPath) ? current : [...current, normalizedPath]));
     },
-    [language, resourceId, rootPath]
+    [language, resourceId, rootPath, scope]
   );
 
   const handleLoadData = useCallback(
@@ -275,6 +260,11 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
       const projectFile = isProjectFile(item) ? item : undefined;
       const projectFileUrl = projectFile?.fileUrl || undefined;
 
+      if (onPreviewFile) {
+        onPreviewFile(item);
+        return;
+      }
+
       // 预览是工作区内部页签，不调用全局抽屉，因而可以与其它资源同时打开。
       onOpenDetail(
         <FilePreviewPanel
@@ -283,7 +273,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
           path={projectFileUrl ? undefined : item.path}
           fileUrl={projectFileUrl}
           sessionId={scope === 'session' ? sessionId : undefined}
-          source="fileBrowser"
+          source={scope === 'project' ? 'dataset' : 'fileBrowser'}
         />,
         {
           tabKey: `${scope}-file:${projectFile?.fileId || item.path}`,
@@ -291,7 +281,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         }
       );
     },
-    [intl, onOpenDetail, resourceId, scope, sessionId]
+    [intl, onOpenDetail, onPreviewFile, resourceId, scope, sessionId]
   );
 
   const downloadResource = useCallback(
@@ -308,6 +298,16 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         duration: 0,
       });
       try {
+        if (scope === 'project') {
+          const response: any = await downloadResourceFile({
+            resourceId,
+            directoryPath: item.path,
+          });
+          const blob = response?.file instanceof Blob ? response.file : new Blob([response?.file || response]);
+          downloadUrlFile({ file: blob, fileName: response?.fileName || item.name });
+          message.destroy(messageKey);
+          return;
+        }
         const response: any = isDirectory(item)
           ? await downloadFolder(resourceId, ensureDirectoryPath(item.path))
           : await downloadFile(resourceId, item.path);
@@ -329,7 +329,15 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
     async (item: FileBrowserItem) => {
       try {
         if (isProjectFile(item)) {
-          await deleteProjectSpaceFile({ projectId, fileId: item.fileId });
+          if (scope === 'project' && resourceId) {
+            if (item.isDir) {
+              await deleteFolder({ resourceId: Number(resourceId), directoryPath: item.path });
+            } else {
+              await removeFile({ resourceId: String(resourceId), directoryPath: item.path });
+            }
+          } else {
+            await deleteProjectSpaceFile({ projectId, fileId: item.fileId });
+          }
           await loadRoot();
         } else if (resourceId) {
           await deleteFiles({ resourceId, paths: [item.path] });
@@ -460,8 +468,17 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
       setRenameLoading(true);
       try {
         if (isProjectFile(renameTarget)) {
-          await renameProjectSpaceFile({ projectId, fileId: renameTarget.fileId, fileName: newName });
-          await loadRoot();
+          if (scope === 'project' && resourceId) {
+            await renameFolder({
+              resourceId: Number(resourceId),
+              directoryName: newName,
+              directoryPath: renameTarget.path,
+            });
+            await loadDirectory(getParentDirectoryPath(renameTarget.path));
+          } else {
+            await renameProjectSpaceFile({ projectId, fileId: renameTarget.fileId, fileName: newName });
+            await loadRoot();
+          }
         } else if (resourceId) {
           const parentPath = getParentDirectoryPath(renameTarget.path);
           await renameFile({ resourceId, sourcePath: renameTarget.path, newName });
@@ -582,7 +599,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         fillContainer
         loading={loading}
         items={items}
-        currentPath={usesFileBrowser ? rootPath : '/.project/'}
+        currentPath={rootPath}
         emptyText={scope === 'project' && !resourceId ? '暂无项目知识库' : intl.formatMessage({ id: emptyTextId })}
         contentBefore={
           isLocalSharedFiles ? (
