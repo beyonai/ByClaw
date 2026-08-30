@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.connector.provider.weixinopen;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -9,8 +10,24 @@ import static org.mockito.Mockito.when;
 import java.time.Instant;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 
 class WeixinOpenPlatformEventServiceTest {
+
+    @Test
+    void isCreatedBySpringWithRuntimeDependencies() {
+        try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
+            context.registerBean(WeixinOpenPlatformConfigResolver.class,
+                () -> mock(WeixinOpenPlatformConfigResolver.class));
+            context.registerBean(WeixinOpenPlatformCrypto.class, () -> mock(WeixinOpenPlatformCrypto.class));
+            context.registerBean(WeixinComponentTicketStore.class, () -> mock(WeixinComponentTicketStore.class));
+            context.registerBean(WeixinAuthorizerAuthStore.class, () -> mock(WeixinAuthorizerAuthStore.class));
+            context.registerBean(WeixinOpenPlatformEventService.class);
+
+            assertThatCode(context::refresh).doesNotThrowAnyException();
+            assertThat(context.getBean(WeixinOpenPlatformEventService.class)).isNotNull();
+        }
+    }
 
     @Test
     void decryptsAndStoresAComponentVerifyTicket() {

@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.manager.domain.connector.provider.weixinopen;
 
 import java.time.Instant;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -15,6 +16,7 @@ public class WeixinOpenPlatformEventService {
     private final WeixinAuthorizerAuthStore authStore;
     private final WeixinOpenPlatformXml xml;
 
+    @Autowired
     public WeixinOpenPlatformEventService(
             WeixinOpenPlatformConfigResolver configResolver,
             WeixinOpenPlatformCrypto crypto,
