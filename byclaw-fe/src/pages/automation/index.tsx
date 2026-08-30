@@ -62,7 +62,7 @@ const Automation: React.FC = () => {
           onSaved={() => navigate('/automation')}
         />
       ) : activeTab === 'tasks' ? (
-        <AutomationListPanel headerLeading={tabNavigation} />
+        <AutomationListPanel headerLeading={tabNavigation} projectId={projectId} />
       ) : (
         <AutomationRunPanel headerLeading={tabNavigation} />
       )}

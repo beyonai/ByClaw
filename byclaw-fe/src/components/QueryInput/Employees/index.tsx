@@ -280,6 +280,8 @@ class EmployeesInputChat extends QueryInputBase<IProps, IState> {
                 agentId,
                 sessionType: 'AGENT',
                 sessionId,
+                // 上传接口会提前创建临时会话，必须同步带上当前选择的项目，避免会话落到默认项目。
+                projectId: this.props.projectId ?? this.props.selectedProject?.projectId,
               }}
               onCreate={(fileItem: IFile) => {
                 return this.onEmployeeCreateFile({
@@ -297,6 +299,9 @@ class EmployeesInputChat extends QueryInputBase<IProps, IState> {
                   payload: {
                     sessionId: mySessionId,
                     sessionName,
+                    isLocalSession: true,
+                    projectName: this.props.selectedProject?.projectName,
+                    projectId: this.props.projectId ?? this.props.selectedProject?.projectId,
                     objectId: agentId,
                     objectType: agentId ? 'DigEmployee' : undefined,
                     agentType: this.props.myAgentType,

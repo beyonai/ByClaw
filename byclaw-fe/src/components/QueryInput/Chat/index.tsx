@@ -394,6 +394,9 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
                   payload: {
                     sessionId: mySessionId,
                     sessionName,
+                    isLocalSession: true,
+                    projectName: this.props.selectedProject?.projectName,
+                    projectId: this.props.projectId ?? this.props.selectedProject?.projectId,
                     objectId: agentId,
                     objectType: agentId ? 'DigEmployee' : undefined,
                     agentType: this.props.myAgentType,

@@ -25,6 +25,9 @@ export interface ISession {
   avatar?: string;
   theme?: string;
 
+  /** 会话由文件上传等流程在服务端列表可见前本地创建。 */
+  isLocalSession?: boolean;
+
   citeMsgIdList?: string[];
   participants?: Array<{
     participantName: string;

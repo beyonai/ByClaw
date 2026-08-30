@@ -5,6 +5,7 @@ import {
   DatabaseOutlined,
   DeleteOutlined,
   DownOutlined,
+  EllipsisOutlined,
   EditOutlined,
   FullscreenExitOutlined,
   FullscreenOutlined,
@@ -51,12 +52,7 @@ import {
 } from '@/service/devloop';
 import { listResourceUseAuth } from '@/pages/manager/service/resources';
 import { listOntologyBases, pageOntologyResources } from '@/service/ontology';
-import {
-  createFolder,
-  deleteFolder,
-  removeFile,
-  uploadFiles as uploadKnowledgeFiles,
-} from '@/service/knowledgeCenter';
+import { createFolder, deleteFolder, removeFile, uploadFiles as uploadKnowledgeFiles } from '@/service/knowledgeCenter';
 import { ResourceTypeMap } from '@/constants/resource';
 import { useDigitalEmployeeOptions } from '../../hooks/useDigitalEmployeeOptions';
 import { getProjectResourceCategoryCount, supportsProjectRepositories } from '../../projectCapabilities';
@@ -87,13 +83,6 @@ const EMPTY_SELECTION: ResourceSelection = {
   knowledge: [],
   digital_employee: [],
   ontology: [],
-};
-
-const formatTaskSchedule = (task: any) => {
-  const cron = `${task?.cronExpr || ''}`.trim();
-  const daily = cron.match(/^(\d+)\s+(\d+)\s+\*\s+\*\s+\*$/);
-  if (daily) return `每天${Number(daily[2])}点${Number(daily[1]) ? `${daily[1]}分` : ''}`;
-  return task?.schedule || cron || '—';
 };
 
 const toFileBrowserItem = (node: ProjectRepoTreeNode): RepoFileItem => ({
@@ -871,7 +860,7 @@ const ProjectResources: React.FC<Props> = ({
         style={{ gridTemplateColumns: `repeat(${resourceCategoryCount}, minmax(0, 1fr))` }}
       >
         <section
-          className={`${styles.resourceCategoryCard} ${
+          className={`${styles.resourceCategoryCard} ${styles.resourceCloudDriveCard} ${
             expandedCard === 'cloudDrive' ? styles.resourceCategoryCardExpanded : ''
           }`}
         >
@@ -915,6 +904,7 @@ const ProjectResources: React.FC<Props> = ({
             projectId={Number(project.projectId)}
             project={project}
             resourceId={cloudResourceId ? String(cloudResourceId) : undefined}
+            fillContainer
             onOpenDetail={(panel, options) => siderContentContext.setDetailPanel?.(panel, options)}
             onPreviewFile={(item) => {
               setPreviewFile({
@@ -993,9 +983,6 @@ const ProjectResources: React.FC<Props> = ({
                     <Typography.Text strong ellipsis={{ tooltip: task.sourceName }}>
                       {task.sourceName || '-'}
                     </Typography.Text>
-                    <Typography.Text type="secondary" ellipsis>
-                      {formatTaskSchedule(task)}
-                    </Typography.Text>
                     <Dropdown
                       trigger={['hover']}
                       menu={{
@@ -1029,7 +1016,7 @@ const ProjectResources: React.FC<Props> = ({
                         },
                       }}
                     >
-                      <Button type="text" size="small" icon={<MoreOutlined />} />
+                      <Button type="text" size="small" icon={<EllipsisOutlined />} />
                     </Dropdown>
                   </div>
                 ))}

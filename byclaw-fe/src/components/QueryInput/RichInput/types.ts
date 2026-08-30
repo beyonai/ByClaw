@@ -69,6 +69,7 @@ export interface Props {
   canSend?: (payload: { text: string }) => boolean;
   canQuote: boolean;
   resourceAgentIds?: string;
+  projectCloudResourceId?: string | number;
 }
 
 export interface MentionTriggerInfo {

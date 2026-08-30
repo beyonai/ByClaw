@@ -202,11 +202,11 @@ public class ProjectApplicationService {
         project.setProjectName(projectName);
         project.setDescription(dto.getDescription());
         project.setResourceId(dto.getResourceId());
-        String projectType = dto.getProjectType() != null ? dto.getProjectType() : "normal";
+        // 项目类型字段已废弃，所有新项目统一按普通项目处理。
+        String projectType = "normal";
         project.setProjectType(projectType);
         project.setIsShare(dto.getIsShare() != null ? dto.getIsShare() : Constants.NO_VALUE_N);
-        // 研发项目须先由架构数字员工初始化工作区,建成前禁止建需求/启动任务;普通项目直接就绪。
-        project.setInitStatus("develop".equals(projectType) ? "pending" : "ready");
+        project.setInitStatus("ready");
         project.setBuildIndex(Constants.NO_VALUE_N);
         project.setCreateBy(CurrentUserHolder.getCurrentUserId());
         project.setCreateTime(new Date());
@@ -316,19 +316,6 @@ public class ProjectApplicationService {
         }
         if (dto.getResourceId() != null) {
             project.setResourceId(dto.getResourceId());
-        }
-        if (dto.getProjectType() != null) {
-            if (PROJECT_TYPE_DEFAULT.equals(project.getProjectType())
-                && !PROJECT_TYPE_DEFAULT.equals(dto.getProjectType())) {
-                // 默认项目类型由系统维护，编辑时只能回显，不能被接口改成普通/研发项目。
-                throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.default.type.change.forbidden");
-            }
-            if (!PROJECT_TYPE_DEFAULT.equals(project.getProjectType())
-                && PROJECT_TYPE_DEFAULT.equals(dto.getProjectType())) {
-                // 默认项目不允许通过编辑接口手动创建，避免普通项目被改成系统内置分组。
-                throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.type.to.default.forbidden");
-            }
-            project.setProjectType(dto.getProjectType());
         }
         if (PROJECT_TYPE_DEFAULT.equals(project.getProjectType())) {
             if (dto.getIsShare() != null && !Constants.NO_VALUE_N.equalsIgnoreCase(dto.getIsShare())) {
@@ -659,7 +646,6 @@ public class ProjectApplicationService {
         map.put("projectName", project.getProjectName());
         map.put("description", project.getDescription());
         map.put("resourceId", project.getResourceId());
-        map.put("projectType", project.getProjectType());
         map.put("isShare", project.getIsShare());
         // 研发项目初始化状态与配置:前端据此拦截建需求/启动任务并展示初始化中指示。
         map.put("initStatus", project.getInitStatus());
@@ -680,7 +666,7 @@ public class ProjectApplicationService {
      * 「查不到」和「调用失败」，前者可以继续走追问兜底，后者必须重试或报错。
      *
      * @param sessionId 会话 ID，必填
-     * @return 含 bound、projectId、projectName、projectType
+     * @return 含 bound、projectId、projectName
      */
     public Map<String, Object> resolveProjectBySession(Long sessionId) {
         if (sessionId == null) {
@@ -694,13 +680,11 @@ public class ProjectApplicationService {
             map.put("bound", false);
             map.put("projectId", null);
             map.put("projectName", null);
-            map.put("projectType", null);
             return map;
         }
         map.put("bound", true);
         map.put("projectId", project.getProjectId());
         map.put("projectName", project.getProjectName());
-        map.put("projectType", project.getProjectType());
         return map;
     }
 

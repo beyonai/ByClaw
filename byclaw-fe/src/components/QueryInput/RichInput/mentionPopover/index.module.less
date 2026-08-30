@@ -62,3 +62,46 @@
   min-width: 0;
   height: 100%;
 }
+
+.projectFileSearchItem {
+  cursor: pointer;
+  padding: 10px 16px;
+  transition: background-color 0.2s ease;
+
+  &:hover {
+    background: #f5f7fa;
+  }
+}
+
+.projectFileSearchPanel {
+  padding: 8px;
+}
+
+.projectFileSearchContent {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  gap: 8px;
+}
+
+.projectFileSearchIcon {
+  flex: none;
+  color: #6b8fd6;
+  font-size: 18px;
+}
+
+.projectFileSearchName {
+  min-width: 0;
+  overflow: hidden;
+  color: #303846;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.projectFileSearchType {
+  flex: none;
+  margin-left: auto;
+  color: #9aa4b2;
+  font-size: 12px;
+}

@@ -55,9 +55,6 @@
             <!-- PostgreSQL 默认 LIKE 区分大小写，项目名称统一转换后支持大小写混输搜索。 -->
             AND LOWER(a.project_name) LIKE CONCAT('%', LOWER(#{keyword}), '%')
         </if>
-        <if test="projectType != null and projectType != ''">
-            AND a.project_type = #{projectType}
-        </if>
         <if test="isShare != null and isShare != ''">
             AND a.is_share = #{isShare}
         </if>
@@ -67,8 +64,7 @@
     <select id="selectVisibleDevelopProjectIds" resultType="java.lang.Long">
         SELECT a.project_id
         FROM byai_project a
-        WHERE a.project_type = 'develop'
-          AND (a.delete_flag IS NULL OR a.delete_flag != '1')
+        WHERE (a.delete_flag IS NULL OR a.delete_flag != '1')
           AND (a.create_by = #{userId}
             OR a.project_id IN (SELECT project_id
                                 FROM byai_project_member

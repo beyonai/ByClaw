@@ -825,6 +825,13 @@
   }
 }
 
+// 项目云盘复用文件树组件时由外层卡片承接高度，内容按实际高度撑开，不在卡片内部产生二次滚动条。
+.resourceCloudDriveCard {
+  .resourceCategoryBody {
+    overflow: hidden;
+  }
+}
+
 .detailEmpty {
   height: 100%;
   border-radius: 12px;

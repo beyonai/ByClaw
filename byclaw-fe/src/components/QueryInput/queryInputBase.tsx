@@ -489,7 +489,8 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
     }
     // 上传附件会提前生成 sessionId，但当前页面仍属于新建任务；此时必须优先使用用户选择的项目，
     // 不能因为 sessionId 已存在就误走历史会话分支，回退到默认项目。
-    if (selectedProject && (!this.props.sessionId || this.props.isBottom === false)) {
+    // 文件上传会提前创建临时 sessionId；此时仍应优先使用输入框选择的项目，避免项目归属丢失。
+    if (selectedProject && (!this.props.sessionId || this.props.isBottom === false || this.props.projectId === undefined)) {
       set(data, 'payload.selectedProjectId', selectedProject.projectId);
       set(data, 'payload.selectedProjectName', selectedProject.projectName);
     } else if (this.props.sessionId && this.props.projectId !== undefined) {
@@ -923,6 +924,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
           }}
           canQuote={this.checkCanQuote()}
           resourceAgentIds={this.getResourceAgentIds()}
+          projectCloudResourceId={this.props.projectCloudResourceId}
         />
         {this.getAssitantTrigger()}
       </div>
