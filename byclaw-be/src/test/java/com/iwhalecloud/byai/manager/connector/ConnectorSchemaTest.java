@@ -118,7 +118,7 @@ class ConnectorSchemaTest {
         assertThat(seed.values()).containsEntry("connector_code", "weixin-official-api")
             .containsEntry("connector_name", "微信公众号 API")
             .containsEntry("provider_code", "weixin-official-api")
-            .containsEntry("skill_code", "bycli")
+            .containsEntry("skill_code", "wechat-api")
             .containsEntry("auth_mode", "AK_SK")
             .containsEntry("sort", "55");
         assertThat(authConfig.at("/credentialForm/helpUrl").asText())
@@ -144,15 +144,17 @@ class ConnectorSchemaTest {
         assertThat(authConfig.at("/credentialForm/fields/1/key").asText()).isEqualTo("appSecret");
         assertThat(runtimeManifest.at("/authStorage/managedEnvironmentKeys"))
             .isEqualTo(parseJson("[\"WECHAT_APPID\",\"WECHAT_APPSECRET\"]"));
-        assertThat(runtimeManifest.at("/skill/code").asText()).isEqualTo("bycli");
+        assertThat(runtimeManifest.at("/skill/code").asText()).isEqualTo("wechat-api");
         assertThat(new ConnectorManifestCanonicalizer(OBJECT_MAPPER).canonicalize(
-            connector("weixin-official-api", "bycli"), seed.values().get("runtime_manifest")))
+            connector("weixin-official-api", "wechat-api"), seed.values().get("runtime_manifest")))
             .contains("\"mode\":\"managed-environment\"");
         assertThat(normalizeSql(seed.statement())).contains(
             "WHERE NOT EXISTS ( SELECT 1 FROM byai.byai_connector_info WHERE connector_code = 'weixin-official-api' )");
         assertThat(normalizeSql(sql)).contains(
             "UPDATE byai.byai_connector_info SET description =",
+            "skill_code = 'wechat-api'",
             "auth_config =",
+            "runtime_manifest =",
             "WHERE connector_code = 'weixin-official-api'");
     }
 
