@@ -207,7 +207,6 @@ class EmployeesInputChat extends QueryInputBase<IProps, IState> {
     } = this.props;
     const { showMentionPopoverType } = this.state;
 
-    const canQuote = this.checkCanQuote();
     const quoteAgentId = this.getQuoteAgentId();
     const mentionDigitalEmployeeTip = getIntl().formatMessage({ id: 'queryInput.tooltip.mentionDigitalEmployee' });
 
@@ -215,7 +214,9 @@ class EmployeesInputChat extends QueryInputBase<IProps, IState> {
       <>
         <Space size={14} className={styles.bottomRight}>
           {/* 连接器控制组件直接管理用户级全局开关，消息 payload 不再携带连接器 ID。 */}
-          <ConnectorControl canAuthorize={!!this.props.userInfo} />
+          <span className="byclaw-connector-outside-tool">
+            <ConnectorControl canAuthorize={!!this.props.userInfo} />
+          </span>
           {/* 员工详情已固定当前聊天对象，不展示追加 @ 数字员工入口。 */}
           {!cannotAt && (
             <MentionPopover
@@ -250,25 +251,26 @@ class EmployeesInputChat extends QueryInputBase<IProps, IState> {
               </Tooltip>
             </MentionPopover>
           )}
-          {canQuote && (
-            <MentionPopover
-              type="#"
-              chatMode={chatMode}
-              agentId={quoteAgentId}
-              sessionId={sessionId}
-              resourceAgentIds={this.getResourceAgentIds()}
-              onSelect={this.onSelectMentionPopoverItem}
-              popoverPos={showMentionPopoverType === '#' ? staticEmptyObject : undefined}
-              onClose={() => this.setState((prev) => ({ ...prev, showMentionPopoverType: '' }))}
-            >
+          <MentionPopover
+            type="#"
+            chatMode={chatMode}
+            agentId={quoteAgentId}
+            sessionId={sessionId}
+            resourceAgentIds={this.getResourceAgentIds()}
+            onSelect={this.onSelectMentionPopoverItem}
+            popoverPos={showMentionPopoverType === '#' ? staticEmptyObject : undefined}
+            onClose={() => this.setState((prev) => ({ ...prev, showMentionPopoverType: '' }))}
+          >
+            <Tooltip title="选择技能">
               <span
+                aria-label="技能"
                 className={styles.attachment}
                 onClick={() => this.setState((prev) => ({ ...prev, showMentionPopoverType: '#' }))}
               >
                 #
               </span>
-            </MentionPopover>
-          )}
+            </Tooltip>
+          </MentionPopover>
           {this.checkCanUploadFile() && (
             <UploadFile
               ref={this.uploadFileRef}

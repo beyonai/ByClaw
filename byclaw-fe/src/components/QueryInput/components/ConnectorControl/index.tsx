@@ -128,6 +128,7 @@ const CREDENTIAL_FIELD_KEY_PATTERN = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
 
 type ConnectorControlProps = {
   canAuthorize: boolean;
+  inline?: boolean;
   // 兼容尚未同步升级的调用方；连接器状态只以后端全局开关为准。
   value?: Connector[];
   onChange?: (connectors: Connector[]) => void;
@@ -297,7 +298,7 @@ const ConnectorSelection = ({ value, onOpen }: { value: Connector[]; onOpen: () 
   );
 };
 
-const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
+const ConnectorControl = ({ canAuthorize, inline = false }: ConnectorControlProps) => {
   const { userInfo } = useSelector((state: any) => state.user);
 
   // 分别控制设置列表、完整配置、授权说明和真实授权进度的显示状态。
@@ -746,8 +747,8 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
     cancelAuthorizationInBackground(authorizationId);
   };
 
-  // 未登录或功能开关关闭时，不在聊天框显示连接器入口。
-  if (!CONNECTOR_ENTRY_VISIBLE || !canAuthorize) return null;
+  // 未登录或功能开关关闭时，不在聊天框显示连接器入口；嵌入式列表仍保留可见的登录/配置反馈。
+  if (!CONNECTOR_ENTRY_VISIBLE || (!canAuthorize && !inline)) return null;
 
   const credentialSchema = hasValidCredentialForm(authorizingConnector)
     ? authorizingConnector.credentialForm
@@ -874,8 +875,31 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
 
   return (
     <>
-      {/* 未开启时显示入口；全局开启的连接器直接回显图标并打开同一设置面板。 */}
-      {enabledConnectors.length ? (
+      {/* 内嵌模式展示连接器卡片；授权弹窗和配置抽屉仍复用下面的统一渲染。 */}
+      {inline ? (
+        !canAuthorize ? (
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="登录后即可使用连接器" />
+        ) : (
+          <div className={styles.configurationGrid}>
+            {loadingConnectors && <span>正在加载连接器…</span>}
+            {connectors.length
+              ? connectors.map((connector) => renderConnectorItem(connector, true))
+              : !loadingConnectors && (
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description={
+                    <Button type="link" onClick={openSettings}>
+                      管理连接器
+                    </Button>
+                  }
+                />
+              )}
+            <Button type="link" onClick={openSettings}>
+              打开连接器设置
+            </Button>
+          </div>
+        )
+      ) : enabledConnectors.length ? (
         <ConnectorSelection value={enabledConnectors} onOpen={openSettings} />
       ) : (
         <Tooltip title="连接器">

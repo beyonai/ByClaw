@@ -991,6 +991,55 @@ describe('ConnectorControl authorization states', () => {
     expect(await screen.findByRole('heading', { name: '连接 钉钉 作为 AI 知识库' })).toBeInTheDocument();
   });
 
+  it('keeps the authorization modal mounted for inline connector cards', async () => {
+    mockQueryConnectorList.mockResolvedValue({
+      list: [
+        {
+          connectorId: 1,
+          connectorCode: 'dingtalk',
+          connectorName: '钉钉',
+          connectorType: 'SYSTEM',
+          description: '',
+          enableFlag: null,
+        },
+      ],
+      pageNum: 1,
+      pageSize: 100,
+      total: 1,
+      totalPages: 1,
+    });
+
+    render(<ConnectorControl canAuthorize inline />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '连接' }));
+    expect(await screen.findByRole('heading', { name: '连接 钉钉 作为 AI 知识库' })).toBeInTheDocument();
+  });
+
+  it('opens reauthorization from an inline connector card', async () => {
+    mockQueryConnectorList.mockResolvedValue({
+      list: [
+        {
+          connectorId: 1,
+          connectorCode: 'dingtalk',
+          connectorName: '钉钉',
+          connectorType: 'SYSTEM',
+          description: '',
+          enableFlag: 'Y',
+        },
+      ],
+      pageNum: 1,
+      pageSize: 100,
+      total: 1,
+      totalPages: 1,
+    });
+
+    render(<ConnectorControl canAuthorize inline />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '更多钉钉操作' }));
+    fireEvent.click(await screen.findByText('重新授权'));
+    expect(await screen.findByRole('heading', { name: '连接 钉钉 作为 AI 知识库' })).toBeInTheDocument();
+  });
+
   it('confirms and revokes an existing connector authorization', async () => {
     mockQueryConnectorList.mockResolvedValue({
       list: [

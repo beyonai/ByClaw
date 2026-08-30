@@ -236,8 +236,8 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
                         onSelect={onSelectAgentTool}
                         keyword={inputText}
                         agentIds={resourceAgentIds}
-                        showKnowledgeTab={!!currentAgent && currentAgent.knowledgeCount !== 0}
-                        showSkillTab={!!currentAgent && currentAgent.skillsCount !== 0}
+                        showKnowledgeTab={!currentAgent || currentAgent.knowledgeCount !== 0}
+                        showSkillTab={!currentAgent || currentAgent.skillsCount !== 0}
                       />
                     </div>
                   );
@@ -263,8 +263,8 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
                             sessionId={sessionId}
                             onSelect={onSelectAgentTool}
                             header={resourceHeader}
-                            showKnowledgeTab={!!currentAgent && currentAgent.knowledgeCount !== 0}
-                            showSkillTab={!!currentAgent && currentAgent.skillsCount !== 0}
+                            showKnowledgeTab={!currentAgent || currentAgent.knowledgeCount !== 0}
+                            showSkillTab={!currentAgent || currentAgent.skillsCount !== 0}
                           />
                         </div>
                       )}
