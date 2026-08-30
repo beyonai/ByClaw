@@ -11,7 +11,6 @@ import type { DetailPanelOptions } from '@/layout/sider/siderContentContext';
 import { useProjectTypeConfig } from '@/pages/projectSpace/hooks/useProjectTypeConfig';
 import { supportsProjectRepositories } from '@/pages/projectSpace/projectCapabilities';
 import FileResourcePanel from './FileResourcePanel';
-import ObjectFilesPanel from './ObjectFilesPanel';
 import CodesTab from '@/layout/sider/components/ProjectSpaceList/CodesTab';
 import { useChatResourceProject } from './useChatResourceProject';
 import styles from './index.module.less';
@@ -40,23 +39,18 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
   const [secondaryState, setSecondaryState] = useState<SecondaryState>(EMPTY_SECONDARY_STATE);
   const [sessionResourceRefreshKey, setSessionResourceRefreshKey] = useState(0);
   const resourceId = activeEmployee.resourceId || (project?.resourceId ? `${project.resourceId}` : undefined);
+  const projectCloudResourceId = project?.cloudResourceId ? `${project.cloudResourceId}` : resourceId;
 
   // 项目代码对已启用对应能力的研发、运营项目开放；未明确的数据项按约定保留空态。
   const repositoryProjectEnabled =
     (project?.projectType === 'develop' && isDevelopProjectEnabled) ||
     (project?.projectType === 'operation' && isOperationProjectEnabled);
   const showCode = repositoryProjectEnabled && supportsProjectRepositories(project?.projectType);
-  // 研发项目的知识由代码/研发流程承载，当前会话不展示“项目知识”；普通项目和运营项目保留该入口。
-  const showSessionKnowledge = project?.projectType !== 'develop';
-
   useEffect(() => {
-    if (
-      (!showSessionKnowledge && secondaryState.session === 'knowledge') ||
-      (!showCode && secondaryState.session === 'code')
-    ) {
+    if (!showCode && secondaryState.session === 'code') {
       setSecondaryState((current) => ({ ...current, session: 'file' }));
     }
-  }, [secondaryState.session, showCode, showSessionKnowledge]);
+  }, [secondaryState.session, showCode]);
 
   const upperSecondaryItems = useMemo(() => {
     const label = (id: string) => intl.formatMessage({ id });
@@ -75,10 +69,9 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
     return [
       { key: 'file', label: label('chatResource.processFile') },
       { key: 'projectFile', label: label(projectFileLabelId) },
-      ...(showSessionKnowledge ? [{ key: 'knowledge', label: label('chatResource.projectKnowledge') }] : []),
       ...(showCode ? [{ key: 'code', label: label('chatResource.projectCode') }] : []),
     ];
-  }, [intl, project?.projectId, projectId, showCode, showSessionKnowledge, upperScopeKey]);
+  }, [intl, project?.projectId, projectId, showCode, upperScopeKey]);
 
   const upperSecondaryKey = secondaryState[upperScopeKey];
   const empty = (
@@ -107,19 +100,8 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
             sessionId={sessionId}
             projectId={project?.projectId ? Number(project.projectId) : projectId}
             project={project}
-            resourceId={resourceId}
+            resourceId={projectCloudResourceId}
             refreshKey={sessionResourceRefreshKey}
-            onOpenDetail={onOpenDetail}
-          />
-        );
-      }
-      if (upperSecondaryKey === 'knowledge' && showSessionKnowledge) {
-        return (
-          <ObjectFilesPanel
-            objectType="knowledge"
-            projectId={project?.projectId || projectId}
-            sessionId={sessionId}
-            refreshToken={sessionResourceRefreshKey}
             onOpenDetail={onOpenDetail}
           />
         );
@@ -158,7 +140,6 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
     sessionResourceRefreshKey,
     sessionId,
     showCode,
-    showSessionKnowledge,
     upperScopeKey,
     upperSecondaryKey,
   ]);
@@ -186,7 +167,7 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
               id: upperScopeKey === 'session' ? 'chatResource.currentSession' : 'chatResource.currentEmployee',
             })}
           >
-            {upperScopeKey === 'session' && ['file', 'projectFile', 'knowledge', 'code'].includes(upperSecondaryKey) ? (
+            {upperScopeKey === 'session' && ['file', 'projectFile', 'code'].includes(upperSecondaryKey) ? (
               <div className={styles.secondaryNavActions}>
                 <Button
                   type="text"

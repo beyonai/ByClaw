@@ -1,4 +1,17 @@
-import { Button, Drawer, Dropdown, Empty, Modal, Select, Spin, Typography, message } from 'antd';
+import {
+  Button,
+  Drawer,
+  Dropdown,
+  Empty,
+  Input,
+  Modal,
+  Select,
+  Spin,
+  Switch,
+  Typography,
+  Upload,
+  message,
+} from 'antd';
 import {
   ApartmentOutlined,
   BranchesOutlined,
@@ -6,13 +19,15 @@ import {
   DeleteOutlined,
   DownOutlined,
   EditOutlined,
-  FileTextOutlined,
+  FullscreenExitOutlined,
+  FullscreenOutlined,
   GithubOutlined,
   MoreOutlined,
   PlusOutlined,
   ReloadOutlined,
   RightOutlined,
   RobotOutlined,
+  UploadOutlined,
 } from '@ant-design/icons';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useIntl } from '@umijs/max';
@@ -33,7 +48,10 @@ import {
   listProjectRepoTree,
   listProjectRepos,
   listProjectResources,
-  listProjectSpaceFiles,
+  listScanSources,
+  toggleScanSource,
+  triggerScan,
+  deleteScanSource,
   deleteProjectRepo,
   saveProjectResources,
   type DevloopProjectRepo,
@@ -44,6 +62,13 @@ import {
 } from '@/service/devloop';
 import { listResourceUseAuth } from '@/pages/manager/service/resources';
 import { listOntologyBases, pageOntologyResources } from '@/service/ontology';
+import {
+  createFolder,
+  deleteFolder,
+  queryDirAndFileByLevel,
+  removeFile,
+  uploadFiles as uploadKnowledgeFiles,
+} from '@/service/knowledgeCenter';
 import { ResourceTypeMap } from '@/constants/resource';
 import { useDigitalEmployeeOptions } from '../../hooks/useDigitalEmployeeOptions';
 import { getProjectResourceCategoryCount, supportsProjectRepositories } from '../../projectCapabilities';
@@ -56,6 +81,10 @@ interface Props {
 
   /** 研发、运营项目共享代码仓库新增复用项目仓库管理表单。 */
   onOpenRepositoryManager?: (repo?: DevloopProjectRepo) => void;
+  onOpenScheduleTaskCreate?: () => void;
+  onEditScheduleTask?: (task: any) => void;
+  onResourceReference?: (resource: any) => void;
+  scheduleRefreshVersion?: number;
 
   /** 仓库新增/编辑后由详情页递增，确保资源卡片立即重新读取列表。 */
   repositoryRefreshVersion?: number;
@@ -69,6 +98,13 @@ const EMPTY_SELECTION: ResourceSelection = {
   knowledge: [],
   digital_employee: [],
   ontology: [],
+};
+
+const formatTaskSchedule = (task: any) => {
+  const cron = `${task?.cronExpr || ''}`.trim();
+  const daily = cron.match(/^(\d+)\s+(\d+)\s+\*\s+\*\s+\*$/);
+  if (daily) return `每天${Number(daily[2])}点${Number(daily[1]) ? `${daily[1]}分` : ''}`;
+  return task?.schedule || cron || '—';
 };
 
 const toFileBrowserItem = (node: ProjectRepoTreeNode): RepoFileItem => ({
@@ -90,10 +126,20 @@ const ProjectResources: React.FC<Props> = ({
   project,
   onRefreshToolbarChange,
   onOpenRepositoryManager,
+  onOpenScheduleTaskCreate,
+  onEditScheduleTask,
+  onResourceReference,
+  scheduleRefreshVersion = 0,
   repositoryRefreshVersion = 0,
 }) => {
   const intl = useIntl();
   const [files, setFiles] = useState<DevloopProjectSpaceFile[]>([]);
+  const [cloudPath, setCloudPath] = useState('/');
+  const [expandedCard, setExpandedCard] = useState<string | null>(null);
+  const [createFolderOpen, setCreateFolderOpen] = useState(false);
+  const [folderName, setFolderName] = useState('');
+  const [fileUploading, setFileUploading] = useState(false);
+  const [scheduleTasks, setScheduleTasks] = useState<any[]>([]);
   const [repos, setRepos] = useState<DevloopProjectRepo[]>([]);
   const [boundResources, setBoundResources] = useState<ProjectBoundResource[]>(
     project.resources || project.boundResources || []
@@ -139,16 +185,47 @@ const ProjectResources: React.FC<Props> = ({
   const resourceCategoryCount = getProjectResourceCategoryCount(project.projectType);
 
   const loadFiles = useCallback(async () => {
+    const cloudResourceId = project.cloudResourceId;
+    if (!cloudResourceId) {
+      setFiles([]);
+      message.info('当前项目暂无项目知识库，无法展示云盘文件');
+      return;
+    }
     setLoadingFiles(true);
     try {
-      setFiles((await listProjectSpaceFiles(Number(project.projectId))) || []);
+      const nextFiles = (
+        (await queryDirAndFileByLevel({
+          resourceId: Number(cloudResourceId),
+          directoryPath: cloudPath,
+          language: intl.locale,
+        })) || []
+      ).map((item: any) => ({
+        fileId: Number(item.fileId ?? item.id),
+        fileName: item.fileName || item.name,
+        fileUrl: item.directoryPath ? `${item.directoryPath.replace(/\/$/, '')}/${item.fileName || item.name}` : '',
+        isDir: item.type === 'directory',
+        directoryPath: item.directoryPath,
+        size: item.size,
+        projectId: Number(project.projectId),
+      }));
+      setFiles(nextFiles);
     } catch (error: any) {
       setFiles([]);
       message.error(error?.message || intl.formatMessage({ id: 'projectSpace.resources.loadFilesFailed' }));
     } finally {
       setLoadingFiles(false);
     }
-  }, [intl, project.projectId]);
+  }, [cloudPath, intl, project.cloudResourceId, project.projectId, project.resourceId]);
+
+  const loadScheduleTasks = useCallback(async () => {
+    try {
+      const response = await listScanSources({ projectId: Number(project.projectId), onlyMine: false, pageNum: 1, pageSize: 100 });
+      const data = response?.data ?? response;
+      setScheduleTasks(Array.isArray(data) ? data : data?.list || data?.rows || []);
+    } catch {
+      setScheduleTasks([]);
+    }
+  }, [project.projectId]);
 
   const loadRepos = useCallback(async () => {
     if (!repositoryProject) return;
@@ -193,7 +270,12 @@ const ProjectResources: React.FC<Props> = ({
     void loadFiles();
     void loadRepos();
     void loadBoundResources();
-  }, [loadBoundResources, loadFiles, loadRepos, repositoryRefreshVersion]);
+    void loadScheduleTasks();
+  }, [loadBoundResources, loadFiles, loadRepos, loadScheduleTasks, repositoryRefreshVersion, scheduleRefreshVersion]);
+
+  useEffect(() => {
+    setCloudPath('/');
+  }, [project.projectId]);
 
   const loadResourceOptions = useCallback(async () => {
     if (!isOperationProject) return;
@@ -473,11 +555,11 @@ const ProjectResources: React.FC<Props> = ({
         setFilePreviewContent((prev) =>
           prev
             ? {
-              ...prev,
-              path: file.path || prev.path,
-              content: file.binary ? file.base64Content || '' : file.content || '',
-              binary: file.binary,
-            }
+                ...prev,
+                path: file.path || prev.path,
+                content: file.binary ? file.base64Content || '' : file.content || '',
+                binary: file.binary,
+              }
             : null
         );
       } catch (error: any) {
@@ -503,23 +585,78 @@ const ProjectResources: React.FC<Props> = ({
     <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={intl.formatMessage({ id: 'chatResource.empty' })} />
   );
 
-  const renderCardHeader = (icon: React.ReactNode, title: string, onAdd?: () => void) => (
+  const cloudResourceId = project.cloudResourceId ? Number(project.cloudResourceId) : undefined;
+  const handleCreateFolder = async () => {
+    const name = folderName.trim();
+    if (!cloudResourceId || !name) return;
+    try {
+      await createFolder({
+        resourceId: cloudResourceId,
+        directoryPath: '/',
+        directoryName: name,
+        directoryDescription: '',
+      });
+      message.success('文件夹创建成功');
+      setCreateFolderOpen(false);
+      setFolderName('');
+      await loadFiles();
+    } catch (error: any) {
+      message.error(error?.message || '文件夹创建失败');
+    }
+  };
+
+  const handleUploadFiles = async (fileList: File[]) => {
+    if (!cloudResourceId || !fileList.length) return;
+    setFileUploading(true);
+    try {
+      const formData = new FormData();
+      fileList.forEach((file) => formData.append('files', file));
+      formData.append('resourceId', String(cloudResourceId));
+      formData.append('directoryPath', '/');
+      await uploadKnowledgeFiles(formData);
+      message.success('文件上传成功');
+      await loadFiles();
+    } catch (error: any) {
+      message.error(error?.message || '文件上传失败');
+    } finally {
+      setFileUploading(false);
+    }
+  };
+
+  const renderCardHeader = (
+    title: string,
+    cardKey: string,
+    onAdd?: () => void,
+    extra?: React.ReactNode,
+    iconOnlyAdd = false
+  ) => (
     <header className={styles.resourceCardHeader}>
       <div className={styles.resourceCardTitleBlock}>
-        <span className={styles.resourceCardIcon}>{icon}</span>
         <Typography.Title level={4}>{title}</Typography.Title>
       </div>
-      {onAdd && (
+      <div className={styles.resourceCardHeaderActions}>
+        {extra}
+        {onAdd && (
+          <Button
+            type="text"
+            size="small"
+            icon={<PlusOutlined />}
+            className={iconOnlyAdd ? styles.resourceCardExpandButton : styles.resourceCardAddButton}
+            aria-label={iconOnlyAdd ? intl.formatMessage({ id: 'common.add' }) : undefined}
+            onClick={onAdd}
+          >
+            {!iconOnlyAdd && intl.formatMessage({ id: 'common.add' })}
+          </Button>
+        )}
         <Button
           type="text"
           size="small"
-          icon={<PlusOutlined />}
-          className={styles.resourceCardAddButton}
-          onClick={onAdd}
-        >
-          {intl.formatMessage({ id: 'common.add' })}
-        </Button>
-      )}
+          className={styles.resourceCardExpandButton}
+          icon={expandedCard === cardKey ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
+          aria-label={expandedCard === cardKey ? '收起' : '展开'}
+          onClick={() => setExpandedCard((current) => (current === cardKey ? null : cardKey))}
+        />
+      </div>
     </header>
   );
 
@@ -584,29 +721,84 @@ const ProjectResources: React.FC<Props> = ({
   const boundEmployees = boundResources.filter((resource) => resource.resourceType === 'digital_employee');
   const boundOntologies = boundResources.filter((resource) => resource.resourceType === 'ontology');
 
-  const renderSharedFile = (file: DevloopProjectSpaceFile) => (
-    <div
-      key={file.fileId}
-      className={styles.resourceSimpleItem}
-      role="button"
-      tabIndex={0}
-      onClick={() => setPreviewFile(file)}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter' || event.key === ' ') setPreviewFile(file);
-      }}
-    >
-      <AntdIcon type={`icon-${getFileIconType(file.fileName)}`} className={styles.resourceFileIcon} />
-      <div className={styles.resourceSimpleMain}>
-        <Typography.Text strong ellipsis={{ tooltip: file.fileName }}>
-          {file.fileName}
-        </Typography.Text>
-        <Typography.Text type="secondary" ellipsis>
-          {file.fileUrl || intl.formatMessage({ id: 'projectSpace.detail.resource.sharedSpace' })}
-        </Typography.Text>
+  const renderSharedFile = (file: DevloopProjectSpaceFile) => {
+    const metadata = [
+      (file as any).size || (file as any).fileSize,
+      (file as any).updateTime || (file as any).updatedAt,
+      (file as any).creatorName,
+    ]
+      .filter(Boolean)
+      .join(' · ');
+    return (
+      <div
+        key={file.fileId}
+        className={styles.resourceSimpleItem}
+        role="button"
+        tabIndex={0}
+        onDoubleClick={() =>
+          onResourceReference?.({
+            resourceId: file.fileId,
+            name: file.fileName,
+            resourceName: file.fileName,
+            resourceType: file.isDir ? 'COMMON_FOLDER' : 'COMMON_FILE',
+            path: file.fileUrl,
+          })
+        }
+        onClick={() => {
+          if (file.isDir) {
+            const nextPath = `${cloudPath.replace(/\/$/, '')}/${file.fileName}`.replace(/^\/?/, '/');
+            setCloudPath(`${nextPath}/`);
+          } else setPreviewFile(file);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            if (file.isDir) {
+              const nextPath = `${cloudPath.replace(/\/$/, '')}/${file.fileName}`.replace(/^\/?/, '/');
+              setCloudPath(`${nextPath}/`);
+            } else setPreviewFile(file);
+          }
+        }}
+      >
+        <AntdIcon
+          type={`icon-${file.isDir ? 'a-Folder-openwenjianjia-kai' : getFileIconType(file.fileName)}`}
+          className={styles.resourceFileIcon}
+        />
+        <div className={styles.resourceSimpleMain}>
+          <Typography.Text strong ellipsis={{ tooltip: file.fileName }}>
+            {file.fileName}
+          </Typography.Text>
+          <Typography.Text type="secondary" ellipsis>
+            {metadata || file.fileUrl || intl.formatMessage({ id: 'projectSpace.detail.resource.sharedSpace' })}
+          </Typography.Text>
+        </div>
+        <Dropdown
+          trigger={['click']}
+          menu={{
+            items: [
+              { key: 'reference', label: '引用' },
+              { key: 'rename', label: '重命名' },
+              { key: 'delete', label: '删除', danger: true },
+            ],
+            onClick: async ({ key, domEvent }) => {
+              domEvent.stopPropagation();
+              const path = file.fileUrl || `${cloudPath}${file.fileName}`;
+              if (key === 'reference') onResourceReference?.({ resourceId: file.fileId, name: file.fileName, resourceName: file.fileName, resourceType: file.isDir ? 'COMMON_FOLDER' : 'COMMON_FILE', path });
+              if (key === 'delete' && cloudResourceId) {
+                if (file.isDir) await deleteFolder({ resourceId: cloudResourceId, directoryPath: path });
+                else await removeFile({ resourceId: String(cloudResourceId), directoryPath: path });
+                await loadFiles();
+              }
+              if (key === 'rename') message.info('请使用知识库目录管理中的重命名功能');
+            },
+          }}
+        >
+          <Button type="text" size="small" icon={<MoreOutlined />} onClick={(event) => event.stopPropagation()} />
+        </Dropdown>
+        <RightOutlined />
       </div>
-      <RightOutlined />
-    </div>
-  );
+    );
+  };
 
   const renderRepository = (repo: DevloopProjectRepo) => (
     <div
@@ -673,22 +865,82 @@ const ProjectResources: React.FC<Props> = ({
         className={styles.resourceCategoryGrid}
         style={{ gridTemplateColumns: `repeat(${resourceCategoryCount}, minmax(0, 1fr))` }}
       >
-        <section className={styles.resourceCategoryCard}>
+        <section
+          className={`${styles.resourceCategoryCard} ${
+            expandedCard === 'cloudDrive' ? styles.resourceCategoryCardExpanded : ''
+          }`}
+        >
           {renderCardHeader(
-            <FileTextOutlined />,
-            intl.formatMessage({ id: 'projectSpace.detail.resource.sharedSpace' })
+            '项目云盘',
+            'cloudDrive',
+            undefined,
+            cloudResourceId ? (
+              <>
+                <Button
+                  type="text"
+                  size="small"
+                  className={styles.resourceCardExpandButton}
+                  icon={<PlusOutlined />}
+                  aria-label="新建文件夹"
+                  onClick={() => setCreateFolderOpen(true)}
+                />
+                <Upload
+                  showUploadList={false}
+                  multiple
+                  beforeUpload={(_, fileList) => {
+                    void handleUploadFiles(fileList as unknown as File[]);
+                    return false;
+                  }}
+                >
+                  <Button
+                    type="text"
+                    size="small"
+                    className={styles.resourceCardExpandButton}
+                    icon={<UploadOutlined />}
+                    aria-label="上传文件"
+                    loading={fileUploading}
+                  />
+                </Upload>
+              </>
+            ) : undefined
           )}
+          {cloudPath !== '/' && <div className={styles.resourceCloudBreadcrumb}>
+            {['/', ...cloudPath.split('/').filter(Boolean)].map((part, index, parts) => {
+              const path = index === 0 ? '/' : `/${parts.slice(1, index + 1).join('/')}/`;
+              return (
+                <span key={path}>
+                  {index > 0 && <span>/</span>}
+                  <Button type="link" size="small" onClick={() => setCloudPath(path)}>
+                    {index === 0 ? '全部文件' : part}
+                  </Button>
+                </span>
+              );
+            })}
+          </div>}
           <Spin spinning={loadingFiles} className={styles.resourceCategoryBody}>
-            {files.length ? files.map(renderSharedFile) : !loadingFiles && empty}
+            {files.length
+              ? files.map(renderSharedFile)
+              : !loadingFiles &&
+                (project.cloudResourceId ? (
+                  empty
+                ) : (
+                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无项目知识库" />
+                ))}
           </Spin>
         </section>
 
         {repositoryProject && (
-          <section className={styles.resourceCategoryCard}>
+          <section
+            className={`${styles.resourceCategoryCard} ${
+              expandedCard === 'code' ? styles.resourceCategoryCardExpanded : ''
+            }`}
+          >
             {renderCardHeader(
-              <GithubOutlined />,
               intl.formatMessage({ id: 'projectSpace.resources.sharedCode' }),
-              onOpenRepositoryManager ? () => onOpenRepositoryManager() : undefined
+              'code',
+              onOpenRepositoryManager ? () => onOpenRepositoryManager() : undefined,
+              undefined,
+              true
             )}
             <Spin spinning={loadingRepos} className={styles.resourceCategoryBody}>
               {repos.length ? repos.map(renderRepository) : !loadingRepos && empty}
@@ -696,11 +948,116 @@ const ProjectResources: React.FC<Props> = ({
           </section>
         )}
 
+        <section
+          className={`${styles.resourceCategoryCard} ${
+            expandedCard === 'schedule' ? styles.resourceCategoryCardExpanded : ''
+          }`}
+        >
+          <header className={styles.resourceCardHeader}>
+            <div className={styles.resourceCardTitleBlock}>
+              <Typography.Title level={4}>
+                {intl.formatMessage({ id: 'employees.scheduleTaskList.title', defaultMessage: '定时任务' })}
+              </Typography.Title>
+            </div>
+            <div className={styles.resourceCardHeaderActions}>
+              <Button
+                type="text"
+                size="small"
+                icon={<PlusOutlined />}
+                className={styles.resourceCardExpandButton}
+                aria-label={intl.formatMessage({ id: 'common.add' })}
+                onClick={() =>
+                  onOpenScheduleTaskCreate?.()
+                }
+              />
+              <Button
+                type="text"
+                size="small"
+                className={styles.resourceCardExpandButton}
+                icon={expandedCard === 'schedule' ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
+                onClick={() => setExpandedCard((current) => (current === 'schedule' ? null : 'schedule'))}
+              />
+            </div>
+          </header>
+          <div className={styles.projectScheduleBody}>
+            {scheduleTasks.length ? (
+              <div className={styles.projectScheduleList}>
+                {scheduleTasks.map((task) => (
+                  <div key={task.sourceId} className={styles.projectScheduleRow}>
+                    <Switch
+                      className={styles.projectScheduleSwitch}
+                      size="small"
+                      checked={task.enabled === true || task.enabled === 1 || task.enabled === '1'}
+                      onChange={async (checked) => {
+                        await toggleScanSource(Number(task.sourceId), checked ? '1' : '0');
+                        await loadScheduleTasks();
+                      }}
+                    />
+                    <Typography.Text strong ellipsis={{ tooltip: task.sourceName }}>
+                      {task.sourceName || '-'}
+                    </Typography.Text>
+                    <Typography.Text type="secondary" ellipsis>
+                      {formatTaskSchedule(task)}
+                    </Typography.Text>
+                    <Dropdown
+                      trigger={['hover']}
+                      menu={{
+                        items: [
+                          { key: 'run', label: '立即执行' },
+                          { key: 'edit', label: '编辑' },
+                          { key: 'delete', label: '删除', danger: true },
+                        ],
+                        onClick: async ({ key }) => {
+                          if (key === 'run') {
+                            try {
+                              await triggerScan(Number(task.sourceId));
+                              message.success('定时任务已开始执行');
+                              await loadScheduleTasks();
+                            } catch (error: any) {
+                              message.error(error?.message || '定时任务执行失败');
+                            }
+                          }
+                          if (key === 'edit') onEditScheduleTask?.(task);
+                          if (key === 'delete') {
+                            Modal.confirm({
+                              title: '确认删除定时任务？',
+                              content: task.sourceName || '该定时任务',
+                              okButtonProps: { danger: true },
+                              onOk: async () => {
+                                await deleteScanSource(Number(task.sourceId));
+                                await loadScheduleTasks();
+                              },
+                            });
+                          }
+                        },
+                      }}
+                    >
+                      <Button type="text" size="small" icon={<MoreOutlined />} />
+                    </Dropdown>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description={intl.formatMessage({
+                  id: 'employees.scheduleTaskList.empty',
+                  defaultMessage: '暂无定时任务',
+                })}
+              />
+            )}
+          </div>
+        </section>
+
         {isOperationProject && (
-          <section className={styles.resourceCategoryCard}>
+          <section
+            className={`${styles.resourceCategoryCard} ${
+              expandedCard === 'knowledge' ? styles.resourceCategoryCardExpanded : ''
+            }`}
+          >
             {renderCardHeader(
-              <DatabaseOutlined />,
               intl.formatMessage({ id: 'projectSpace.resources.sharedKnowledge' }),
+              'knowledge',
               openResourceModal
             )}
             {renderBoundResources(boundKnowledge, 'knowledge', <DatabaseOutlined />)}
@@ -708,10 +1065,14 @@ const ProjectResources: React.FC<Props> = ({
         )}
 
         {isOperationProject && (
-          <section className={styles.resourceCategoryCard}>
+          <section
+            className={`${styles.resourceCategoryCard} ${
+              expandedCard === 'employee' ? styles.resourceCategoryCardExpanded : ''
+            }`}
+          >
             {renderCardHeader(
-              <RobotOutlined />,
               intl.formatMessage({ id: 'projectSpace.resources.sharedEmployee' }),
+              'employee',
               openResourceModal
             )}
             {renderBoundResources(boundEmployees, 'digital_employee', <RobotOutlined />)}
@@ -719,16 +1080,36 @@ const ProjectResources: React.FC<Props> = ({
         )}
 
         {isOperationProject && (
-          <section className={styles.resourceCategoryCard}>
+          <section
+            className={`${styles.resourceCategoryCard} ${
+              expandedCard === 'ontology' ? styles.resourceCategoryCardExpanded : ''
+            }`}
+          >
             {renderCardHeader(
-              <ApartmentOutlined />,
               intl.formatMessage({ id: 'projectSpace.resources.sharedOntology' }),
+              'ontology',
               openResourceModal
             )}
             {renderBoundResources(boundOntologies, 'ontology', <ApartmentOutlined />)}
           </section>
         )}
       </div>
+
+      <Modal
+        open={createFolderOpen}
+        title="新建文件夹"
+        onCancel={() => setCreateFolderOpen(false)}
+        onOk={() => void handleCreateFolder()}
+        okButtonProps={{ disabled: !folderName.trim() }}
+        destroyOnClose
+      >
+        <Input
+          value={folderName}
+          placeholder="请输入文件夹名称"
+          maxLength={100}
+          onChange={(event) => setFolderName(event.target.value)}
+        />
+      </Modal>
 
       {isOperationProject && (
         <Modal

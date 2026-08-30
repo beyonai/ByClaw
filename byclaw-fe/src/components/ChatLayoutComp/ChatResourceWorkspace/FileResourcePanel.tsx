@@ -27,12 +27,10 @@ import useGlobal from '@/hooks/useGlobal';
 import type { ProjectSpace } from '@/pages/projectSpace/types';
 import {
   deleteProjectSpaceFile,
-  listProjectSpaceFiles,
   listProjectRepos,
   type DevloopProjectRepo,
   renameProjectSpaceFile,
   saveProjectFileToSpace,
-  type DevloopProjectSpaceFile,
 } from '@/service/devloop';
 import {
   deleteFiles,
@@ -44,6 +42,7 @@ import {
   uploadFiles,
   type FileBrowserItem,
 } from '@/service/fileBrowser';
+import { queryDirAndFileByLevel } from '@/service/knowledgeCenter';
 import { downloadFile as downloadUrlFile } from '@/utils/file';
 import type { DetailPanelOptions } from '@/layout/sider/siderContentContext';
 import FilePreviewPanel from './FilePreviewPanel';
@@ -68,14 +67,6 @@ interface FileResourcePanelProps {
   // 项目大详情使用卡片视图；会话资源继续复用原文件树交互。
   cardMode?: boolean;
 }
-
-const normalizeProjectFile = (file: DevloopProjectSpaceFile): ProjectFileItem => ({
-  name: file.fileName,
-  path: file.fileUrl || `/.project/${file.fileId}/${file.fileName}`,
-  isDir: false,
-  fileId: file.fileId,
-  fileUrl: file.fileUrl,
-});
 
 // 项目共享文件接口没有 FileBrowserItem 的目录字段，转换后即可复用左侧文件树及操作菜单。
 const isProjectFile = (item: FileBrowserItem): item is ProjectFileItem => Number.isFinite((item as any).fileId);
@@ -108,6 +99,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   const [uploading, setUploading] = useState(false);
   const [visibleProjectItemCount, setVisibleProjectItemCount] = useState(20);
   const clickTimerRef = useRef<number | null>(null);
+  const missingProjectKnowledgeNotifiedRef = useRef(false);
   // 项目详情异步加载期间也使用外部项目 ID，确保首次会话文件请求即可过滤仓库目录。
   const projectId = projectIdProp ?? Number(project?.projectId);
   const isLocalSharedFiles = scope === 'project' && Number(project?.projectId ?? projectId) === -1;
@@ -134,6 +126,15 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
       setItems([]);
       return;
     }
+    if (scope === 'project' && !resourceId) {
+      setItems([]);
+      if (!missingProjectKnowledgeNotifiedRef.current) {
+        missingProjectKnowledgeNotifiedRef.current = true;
+        message.info('当前项目暂无项目知识库，无法展示云盘文件');
+      }
+      return;
+    }
+    if (scope === 'project') missingProjectKnowledgeNotifiedRef.current = false;
     if (usesFileBrowser && !resourceId) {
       setItems([]);
       return;
@@ -149,8 +150,23 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         const response = await listFiles({ resourceId: resourceId!, path: rootPath, language });
         setItems(sortFileBrowserItems(unwrapListResponse<FileBrowserItem>(response)));
       } else if (scope === 'project') {
-        const response = await listProjectSpaceFiles(projectId);
-        setItems(sortFileBrowserItems(unwrapListResponse<DevloopProjectSpaceFile>(response).map(normalizeProjectFile)));
+        const response = await queryDirAndFileByLevel({
+          resourceId: Number(resourceId),
+          directoryPath: '/',
+          language,
+        });
+        const cloudItems = (response || []).map((item: any) => {
+          const name = item.fileName || item.name || '文件';
+          const directoryPath = item.directoryPath || '/';
+          return {
+            name,
+            path: `${directoryPath.replace(/\/$/, '')}/${name}` || `/${name}`,
+            isDir: item.type === 'directory',
+            fileId: item.fileId ?? item.id,
+            fileUrl: '',
+          } as ProjectFileItem;
+        });
+        setItems(sortFileBrowserItems(cloudItems));
       } else {
         // eslint-disable-next-line lines-around-comment
         // 文件与仓库并行查询，但等两者都结束后再更新列表，避免仓库目录先闪现后消失。
@@ -199,8 +215,21 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
     async (path: string) => {
       if (!resourceId) return;
       const normalizedPath = ensureDirectoryPath(normalizeFileBrowserPath(path));
-      const response = await listFiles({ resourceId, path: normalizedPath, language });
-      const nextItems = sortFileBrowserItems(unwrapListResponse<FileBrowserItem>(response));
+      const response =
+        scope === 'project'
+          ? await queryDirAndFileByLevel({ resourceId: Number(resourceId), directoryPath: normalizedPath, language })
+          : await listFiles({ resourceId, path: normalizedPath, language });
+      const nextItems = sortFileBrowserItems(
+        scope === 'project'
+          ? (response || []).map((item: any) => ({
+              name: item.fileName || item.name || '文件',
+              path: `${(item.directoryPath || normalizedPath).replace(/\/$/, '')}/${item.fileName || item.name}`,
+              isDir: item.type === 'directory',
+              fileId: item.fileId ?? item.id,
+              fileUrl: '',
+            }))
+          : unwrapListResponse<FileBrowserItem>(response)
+      );
       if (normalizedPath === rootPath) {
         setItems(nextItems);
       } else {
@@ -213,7 +242,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
 
   const handleLoadData = useCallback(
     async (node: FileTreeItem) => {
-      if (!usesFileBrowser || !isDirectory(node)) return;
+      if (!isDirectory(node)) return;
       const path = ensureDirectoryPath(normalizeFileBrowserPath(node.path));
       if (childrenByPath[path]) return;
       try {
@@ -524,7 +553,10 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
             ))
           ) : (
             <div className={projectStyles.resourceCardEmpty}>
-              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={intl.formatMessage({ id: emptyTextId })} />
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description={!resourceId ? '暂无项目知识库' : intl.formatMessage({ id: emptyTextId })}
+              />
             </div>
           )}
           <div ref={projectCardSentinelRef} className={projectStyles.loadMoreSentinel} />
@@ -551,7 +583,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         loading={loading}
         items={items}
         currentPath={usesFileBrowser ? rootPath : '/.project/'}
-        emptyText={intl.formatMessage({ id: emptyTextId })}
+        emptyText={scope === 'project' && !resourceId ? '暂无项目知识库' : intl.formatMessage({ id: emptyTextId })}
         contentBefore={
           isLocalSharedFiles ? (
             <div className={styles.localSharedToolbar}>

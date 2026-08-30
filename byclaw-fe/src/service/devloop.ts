@@ -165,6 +165,9 @@ export type DevloopProjectSpaceFile = {
   fileId: number;
   fileName: string;
   fileUrl: string;
+  isDir?: boolean;
+  directoryPath?: string;
+  size?: number;
   projectId: number;
   shareLink?: string | null;
 };

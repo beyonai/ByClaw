@@ -88,6 +88,27 @@
 .auditPanel {
   min-height: 0;
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.auditTableSpin {
+  min-height: 0;
+  flex: 1;
+
+  :global {
+    .@{antPrefix}-spin-container {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+    }
+  }
+}
+
+.auditTableWrap {
+  min-height: 0;
+  flex: 1;
   overflow: auto;
 }
 

@@ -79,6 +79,19 @@ export default function useOnPasteFiles(params: {
     (e: ClipboardEvent<HTMLDivElement>) => {
       const items = e.clipboardData?.items;
       if (typeof onPasteFiles === 'function' && items) {
+        // 浏览器从网页复制链接时会优先提供 HTML。Slate 对超长 href 的默认
+        // 反序列化可能把链接属性内容插入编辑器，导致输入框显示编码后的长串。
+        // 优先使用纯文本，保证普通文字和 URL 粘贴都按用户看到的内容插入。
+        const html = e.clipboardData.getData('text/html');
+        const plainText = e.clipboardData.getData('text/plain');
+        const hasFile = Array.from(items).some((item) => item.kind === 'file');
+        const hasSlatePayload = Array.from(items).some((item) => item.type === 'application/x-byai-slate');
+        if (html && plainText && !hasFile && !hasSlatePayload) {
+          e.preventDefault();
+          Transforms.insertText(editor, plainText);
+          return;
+        }
+
         const files: File[] = [];
         Array.from(items).forEach((item) => {
           console.log(item.kind, item.type);

@@ -50,7 +50,8 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
   const intl = useIntl();
 
   const isInput = isInputMode(chatMode);
-  const shouldShowTag = employee?.tagName || employee?.isDefault;
+  // @ 员工候选列表统一使用“默认”标签，隐藏个人/助手型等分类标签。
+  const shouldShowTag = isInput ? true : employee?.tagName || employee?.isDefault;
   const defaultTagText = intl.formatMessage({ id: 'resource.defaultDigitalEmployee' });
 
   const menuItems = (item: IAgentCache) => {
@@ -204,29 +205,44 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
     [dispatch, navigate, setAgentId, setSessionId, trackerEmployeeClick]
   );
 
-  const TagRender = useCallback((item: IAgentCache) => {
-    if (item?.isDefault) {
+  const TagRender = useCallback(
+    (item: IAgentCache) => {
+      if (isInput) {
+        return (
+          <span className={classNames(styles.defaultTag)}>
+            <span className={styles.tagText}>{defaultTagText}</span>
+          </span>
+        );
+      }
+      const tagName = `${item?.tagName || ''}`.trim();
+      // 员工列表接口返回的 tagName 可能是国际化 key（如 digemployee.tag.personal.assistant），
+      // 这里统一解析，避免将 key 原样展示在 @ 员工候选列表中。
+      const localizedTagName = tagName ? intl.formatMessage({ id: tagName, defaultMessage: tagName }) : '';
+
+      if (item?.isDefault) {
+        return (
+          <span className={classNames(styles.defaultTag)}>
+            <span className={styles.tagText}>{defaultTagText}</span>
+          </span>
+        );
+      }
+
+      if (item?.ownerType === 'personal' || item?.ownerType === 'personal_default') {
+        return (
+          <span className={classNames(styles.personalTag)}>
+            <span className={styles.tagText}>{localizedTagName}</span>
+          </span>
+        );
+      }
+
       return (
-        <span className={classNames(styles.defaultTag)}>
-          <span className={styles.tagText}>{defaultTagText}</span>
+        <span className={styles.tag}>
+          <span className={styles.tagText}>{localizedTagName}</span>
         </span>
       );
-    }
-
-    if (item?.ownerType === 'personal' || item?.ownerType === 'personal_default') {
-      return (
-        <span className={classNames(styles.personalTag)}>
-          <span className={styles.tagText}>{item?.tagName}</span>
-        </span>
-      );
-    }
-
-    return (
-      <span className={styles.tag}>
-        <span className={styles.tagText}>{item?.tagName}</span>
-      </span>
-    );
-  }, []);
+    },
+    [defaultTagText, intl, isInput]
+  );
 
   return (
     <List.Item

@@ -273,6 +273,12 @@
   white-space: nowrap;
 }
 
+.projectIcon {
+  flex: 0 0 auto;
+  color: @workspace-muted-text-color;
+  font-size: 15px;
+}
+
 .projectTypeTag {
   flex: 0 0 auto;
   padding: 0 4px;
@@ -331,7 +337,8 @@
   min-width: 0;
   height: 34px;
   flex: 1;
-  padding: 0 8px 0 4px;
+  // 会话名称与上方项目名称的文字起始位置对齐，抵消项目图标及其间距占用的宽度。
+  padding: 0 8px 0 31px;
   border: 0;
   display: flex;
   align-items: center;

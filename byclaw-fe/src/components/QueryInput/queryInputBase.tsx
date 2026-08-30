@@ -848,9 +848,11 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
 
   checkCanQuote = () => {
     const { employeesList } = this.props;
-    const quoteAgentId = this.getQuoteAgentId();
+    const inlineAgentIds = this.getInlineDigitalEmployeeList().map((item) => `${item.resourceId}`);
+    const quoteAgentId = inlineAgentIds.length === 1 ? inlineAgentIds[0] : undefined;
 
-    if (!quoteAgentId || !employeesList) return false;
+    // # 资源入口始终可用：未 @ 员工时展示全部资源，已 @ 员工时再按员工范围过滤。
+    if (!quoteAgentId || !employeesList) return true;
     // 页面集成类型的数字员工，不允许#技能
     const integrationType = employeesList?.find(
       (item) =>
@@ -866,7 +868,9 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
   chechCannotAt = () => this.props.cannotAt;
 
   getResourceAgentIds = (): string | undefined => {
-    return this.getQuoteAgentId();
+    // 仅使用输入框内显式 @ 的员工作为资源过滤条件；会话默认员工不应限制 # 的全量列表。
+    const inlineAgentIds = Array.from(new Set(this.getInlineDigitalEmployeeList().map((item) => `${item.resourceId}`)));
+    return inlineAgentIds.length ? inlineAgentIds.join(',') : undefined;
   };
 
   renderInput() {

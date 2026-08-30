@@ -258,6 +258,11 @@ export default [
             component: './projectSpace',
           },
           {
+            path: '/projectSpace/scheduleTaskCreate',
+            name: 'projectSpaceScheduleTaskCreate',
+            component: './projectSpace/scheduleTaskCreate',
+          },
+          {
             name: 'settings',
             path: '/settings',
             component: './settings',

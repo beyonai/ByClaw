@@ -1,5 +1,5 @@
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from 'react';
-import { Button, Form, Input, Modal, Radio, Select, Spin, Switch, Tooltip, message } from 'antd';
+import { Button, Form, Input, Modal, Select, Spin, Switch, Tooltip, message } from 'antd';
 import type { FormInstance } from 'antd';
 import { CloseCircleFilled, PlusOutlined } from '@ant-design/icons';
 import { useIntl, useSelector } from '@umijs/max';
@@ -9,7 +9,6 @@ import { listProjectMembers } from '@/service/devloop';
 import { listOntologyBases, pageOntologyResources } from '@/service/ontology';
 import { ResourceTypeMap } from '@/constants/resource';
 import type { ProjectResourcePayload, ProjectResourceType } from '@/service/devloop';
-import { DEFAULT_PROJECT_TYPE_OPTION, PROJECT_TYPE_OPTIONS } from '../../constants';
 import type { ProjectTypeOption } from '../../hooks/useProjectTypeConfig';
 import type { ProjectSpace } from '../../types';
 import type { DefaultAgentConfig } from '@/service/devloop';
@@ -83,7 +82,7 @@ const normalizeShareMember = (member: any): ProjectShareMember => {
 
 const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
   (
-    { open, form, initialValues, projectId, creatorId, projectTypeConfigOptions, projectTypeLoading, onEnterSubmit },
+    { open, form, initialValues, projectId, creatorId, onEnterSubmit },
     ref
   ) => {
     const intl = useIntl();
@@ -107,27 +106,7 @@ const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
     const currentUserName = userInfo.userName || userInfo.userNickName || userInfo.nickName || currentUserCode;
     const formT = useCallback((id: string) => intl.formatMessage({ id: `projectSpace.projectForm.${id}` }), [intl]);
     const memberT = useCallback((id: string) => intl.formatMessage({ id: `projectSpace.members.${id}` }), [intl]);
-    const configuredProjectTypeOptions = projectTypeConfigOptions?.length
-      ? projectTypeConfigOptions
-      : PROJECT_TYPE_OPTIONS;
-    const localizedProjectTypeLabels = useMemo(
-      () => ({
-        normal: formT('type.normal'),
-        operation: formT('type.operation'),
-        develop: formT('type.develop'),
-        default: formT('type.default'),
-      }),
-      [formT]
-    );
-    const localizedProjectTypeOptions = useMemo(
-      () =>
-        configuredProjectTypeOptions.map((option) => ({
-          ...option,
-          label: localizedProjectTypeLabels[option.value] || option.label,
-        })),
-      [configuredProjectTypeOptions, localizedProjectTypeLabels]
-    );
-    const isDevelopProjectEnabled = configuredProjectTypeOptions.some((option) => option.value === 'develop');
+    const isDevelopProjectEnabled = false;
     const projectType = Form.useWatch('projectType', form);
     const sharedFlag = Form.useWatch('sharedFlag', form);
     const isDevelopProject = isDevelopProjectEnabled && projectType === 'develop';
@@ -141,6 +120,8 @@ const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
         sharedFlag: false,
         shareMembers: [],
         ...initialValues,
+        // 创建项目默认为普通项目；编辑已有项目时保留原类型，仅隐藏类型字段不再允许修改。
+        projectType: initialValues?.projectType || ('normal' as ProjectSpace['projectType']),
       };
       if (values.projectType === 'default') {
         // 默认项目固定为不共享，编辑弹窗回显时也不使用接口里的共享值。
@@ -148,8 +129,7 @@ const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
       }
       return values;
     }, [initialValues]);
-    const isEditingDefaultProject = !!projectId && formInitialValues.projectType === 'default';
-    const isDefaultProject = projectType === 'default' || isEditingDefaultProject;
+    const isDefaultProject = projectType === 'default';
     // 研发项目与运营项目一样强制共享,共享成员区块照常显示可配置(仅开关锁死为开)。
     const isProjectShared = !isDefaultProject && (isForcedSharedProject || !!sharedFlag);
     const normalizeProjectShareMember = useCallback(
@@ -162,36 +142,6 @@ const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
       },
       [creatorId]
     );
-    const visibleProjectTypeOptions = useMemo(() => {
-      const selectableOptions = localizedProjectTypeOptions.filter((option) => option.value !== 'default');
-
-      // 默认项目只用于编辑默认项目时回显，不放入新建项目和普通项目编辑的下拉选项。
-      if (formInitialValues.projectType === 'default') {
-        const defaultOption = localizedProjectTypeOptions.find((option) => option.value === 'default') || {
-          ...DEFAULT_PROJECT_TYPE_OPTION,
-          label: localizedProjectTypeLabels.default,
-        };
-        return [defaultOption, ...selectableOptions];
-      }
-
-      if (!selectableOptions.some((option) => option.value === formInitialValues.projectType)) {
-        // 历史业务项目在当前环境未配置对应类型时仅允许回显，避免 Select 出现空值。
-        return [
-          {
-            label:
-              localizedProjectTypeLabels[formInitialValues.projectType] ||
-              localizedProjectTypeOptions.find((option) => option.value === formInitialValues.projectType)?.label ||
-              formInitialValues.projectType,
-            value: formInitialValues.projectType,
-            disabled: true,
-          },
-          ...selectableOptions,
-        ];
-      }
-
-      return selectableOptions;
-    }, [formInitialValues.projectType, localizedProjectTypeLabels, localizedProjectTypeOptions]);
-
     useEffect(() => {
       if (!open) return;
       // Antd Form 的 initialValues 只在首次挂载生效，每次打开弹窗时主动重置，避免新建项目带出上次旧值。
@@ -213,12 +163,6 @@ const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
       setResourceValidationTriggered(false);
       setShareMembersLoaded(!projectId);
     }, [form, formInitialValues, normalizeProjectShareMember, open, projectId]);
-
-    useEffect(() => {
-      if (!open || projectId || !visibleProjectTypeOptions.length) return;
-      // 新建项目始终采用当前下拉列表第一项，静态参数异步返回后也会同步更新默认值。
-      form.setFieldValue('projectType', visibleProjectTypeOptions[0].value);
-    }, [form, open, projectId, visibleProjectTypeOptions]);
 
     useEffect(() => {
       if (!open || !projectId) return;
@@ -527,18 +471,6 @@ const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
       onEnterSubmit();
     };
 
-    const handleProjectTypeChange = (value: ProjectSpace['projectType']) => {
-      const isForcedSharedType = (isDevelopProjectEnabled && value === 'develop') || value === 'operation';
-      form.setFieldValue('projectType', value);
-      if (isForcedSharedType) {
-        form.setFieldValue('sharedFlag', true);
-        return;
-      }
-      // 切回普通项目时恢复默认不共享，避免沿用强制共享项目的状态。
-      form.setFieldValue('sharedFlag', false);
-      form.setFields([{ name: 'shareMembers', errors: [] }]);
-    };
-
     return (
       <>
         <Form
@@ -565,20 +497,6 @@ const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
           >
             {/* 项目描述限制 500 字，默认展示两行，避免新建项目弹窗被描述字段撑高。 */}
             <Input.TextArea rows={2} maxLength={500} showCount placeholder={formT('placeholder.description')} />
-          </Form.Item>
-          <Form.Item name="projectType" label={formT('field.projectType')}>
-            <Radio.Group
-              className={styles.projectTypeTabs}
-              optionType="button"
-              buttonStyle="solid"
-              options={visibleProjectTypeOptions.map((option) => ({
-                value: option.value,
-                label: option.label,
-                disabled:
-                  projectTypeLoading || (isEditingDefaultProject ? option.value !== 'default' : option.disabled),
-              }))}
-              onChange={(event) => handleProjectTypeChange(event.target.value as ProjectSpace['projectType'])}
-            />
           </Form.Item>
           {isOperationProject && (
             <Form.Item label={formT('field.resources')}>

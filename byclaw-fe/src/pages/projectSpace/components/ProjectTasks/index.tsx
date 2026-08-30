@@ -47,6 +47,8 @@ import { isCurrentUserTaskAssignee } from '@/layout/sider/components/ProjectSpac
 interface Props {
   project: ProjectSpace;
   keyword?: string;
+  /** 项目大详情固定使用看板时由外层指定，普通项目也可展示看板。 */
+  viewMode?: 'list' | 'board';
   onOpenSession?: (session: ProjectSession) => void;
   onToolbarChange?: (toolbar: React.ReactNode | null) => void;
   onRefreshToolbarChange?: (toolbar: React.ReactNode | null) => void;
@@ -154,6 +156,18 @@ const getTaskCreateTime = (task: DevloopTaskItem) => {
   return parsed.isValid() ? parsed.valueOf() : 0;
 };
 
+const getTaskEditTime = (task: DevloopTaskItem) => {
+  const value =
+    task.updateTime ||
+    (task as any).updatedAt ||
+    (task as any).modifyTime ||
+    (task as any).modifiedTime ||
+    getTaskCreateTime(task);
+  if (!value) return 0;
+  const parsed = dayjs(value);
+  return parsed.isValid() ? parsed.valueOf() : 0;
+};
+
 const formatTaskCreateTime = (task: DevloopTaskItem) => {
   const timestamp = getTaskCreateTime(task);
   return timestamp ? dayjs(timestamp).format('YYYY-MM-DD HH:mm') : '-';
@@ -161,10 +175,11 @@ const formatTaskCreateTime = (task: DevloopTaskItem) => {
 
 const sortTasks = (items: DevloopTaskItem[]) =>
   [...items].sort((left, right) => {
+    // 项目详情按最近编辑时间倒序，最近修改的任务始终显示在最前面。
+    const timeDifference = getTaskEditTime(right) - getTaskEditTime(left);
+    if (timeDifference !== 0) return timeDifference;
     const statusDifference = getTaskStatusOrder(left) - getTaskStatusOrder(right);
     if (statusDifference !== 0) return statusDifference;
-    const timeDifference = getTaskCreateTime(right) - getTaskCreateTime(left);
-    if (timeDifference !== 0) return timeDifference;
     // 创建时间相同时按任务主键倒序，确保列表顺序稳定。
     return Number(right.taskId || right.sessionId || 0) - Number(left.taskId || left.sessionId || 0);
   });
@@ -172,6 +187,7 @@ const sortTasks = (items: DevloopTaskItem[]) =>
 const ProjectTasks: React.FC<Props> = ({
   project,
   keyword = '',
+  viewMode,
   onOpenSession,
   onToolbarChange,
   onRefreshToolbarChange,
@@ -184,10 +200,9 @@ const ProjectTasks: React.FC<Props> = ({
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  // 任务 Tab 两种模式：list 是卡片列表，board 就是原来右上角「任务视图」的看板，默认进看板。
-  // 仅研发/运营项目有看板（看板按四状态分列查询），普通项目只有列表。
+  // 任务支持列表和看板两种模式；项目大详情可显式指定看板，普通项目同样适用。
   const [taskViewMode, setTaskViewMode] = useState<'list' | 'board'>(
-    project.projectType === 'develop' || project.projectType === 'operation' ? 'board' : 'list'
+    viewMode || (project.projectType === 'develop' || project.projectType === 'operation' ? 'board' : 'list')
   );
   const requestingRef = useRef(false);
   const taskDetailRequestIdRef = useRef(0);
@@ -204,6 +219,10 @@ const ProjectTasks: React.FC<Props> = ({
   const [taskSaving, setTaskSaving] = useState(false);
   const [memberOptions, setMemberOptions] = useState<Array<{ label: string; value: string | number }>>([]);
   const currentUserId = userInfo.userId ?? userInfo.id;
+  useEffect(() => {
+    if (viewMode) setTaskViewMode(viewMode);
+  }, [viewMode]);
+
   useEffect(() => {
     // 切换项目类型时同步筛选开关，避免沿用上一个项目的任务筛选状态。
     setOnlyMine(project.projectType === 'develop' || project.projectType === 'operation');

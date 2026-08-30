@@ -2,6 +2,7 @@ import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } 
 import {
   BulbOutlined,
   DownOutlined,
+  FolderOutlined,
   LoadingOutlined,
   ReloadOutlined,
   RightOutlined,
@@ -20,7 +21,7 @@ import useAppStore from '@/models/common/useAppStore';
 import { useProjectList } from '@/pages/projectSpace/hooks/useProjectList';
 import { useProjectScopeId } from '@/pages/projectSpace/hooks/useProjectScopeId';
 import type { ProjectSession, ProjectSpace } from '@/pages/projectSpace/types';
-import { getArrayData, getPageTotal, getProjectTagMeta, normalizeProjectSession } from '@/pages/projectSpace/utils';
+import { getArrayData, getPageTotal, normalizeProjectSession } from '@/pages/projectSpace/utils';
 import { listProjectSessionsByQo } from '@/service/devloop';
 import { getChatRunningStatus } from '@/service/message';
 import { chatSessionRuntimeManager, type RunningChatInfo } from '@/utils/chatSessionRuntimeManager';
@@ -676,7 +677,6 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
 
   const renderProjectSessions = (project: ProjectSpace) => {
     const projectId = normalizeProjectId(project.projectId);
-    const projectTag = getProjectTagMeta(project);
     const sessionState = sessionStateMap[projectId] || createEmptySessionState();
     const hasMoreSessions = sessionState.loaded && sessionState.total > sessionState.sessions.length;
     const canCollapseSessions =
@@ -710,16 +710,6 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
 
         {sessionState.loaded && !sessionState.sessions.length && !sessionState.error && (
           <div className={styles.sessionListAction}>
-            <span
-              className={classNames(
-                styles.projectTypeTag,
-                styles.sessionProjectTypeSpacer,
-                styles[`projectTypeTag${projectTag.classSuffix}`]
-              )}
-              aria-hidden="true"
-            >
-              {intl.formatMessage({ id: projectTag.messageId })}
-            </span>
             <div className={styles.sessionEmpty}>{intl.formatMessage({ id: 'workspaceSider.emptySessions' })}</div>
           </div>
         )}
@@ -733,16 +723,6 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
             )}
           >
             <button type="button" className={styles.sessionItem} onClick={() => handleOpenSession(project, session)}>
-              <span
-                className={classNames(
-                  styles.projectTypeTag,
-                  styles.sessionProjectTypeSpacer,
-                  styles[`projectTypeTag${projectTag.classSuffix}`]
-                )}
-                aria-hidden="true"
-              >
-                {intl.formatMessage({ id: projectTag.messageId })}
-              </span>
               <span className={styles.sessionName}>
                 {session.sessionName || intl.formatMessage({ id: 'workspaceSider.newSession' })}
               </span>
@@ -764,16 +744,6 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
 
         {hasMoreSessions && (
           <div className={styles.sessionListAction}>
-            <span
-              className={classNames(
-                styles.projectTypeTag,
-                styles.sessionProjectTypeSpacer,
-                styles[`projectTypeTag${projectTag.classSuffix}`]
-              )}
-              aria-hidden="true"
-            >
-              {intl.formatMessage({ id: projectTag.messageId })}
-            </span>
             <button
               type="button"
               className={styles.loadMoreSessions}
@@ -788,16 +758,6 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
 
         {canCollapseSessions && (
           <div className={styles.sessionListAction}>
-            <span
-              className={classNames(
-                styles.projectTypeTag,
-                styles.sessionProjectTypeSpacer,
-                styles[`projectTypeTag${projectTag.classSuffix}`]
-              )}
-              aria-hidden="true"
-            >
-              {intl.formatMessage({ id: projectTag.messageId })}
-            </span>
             <button type="button" className={styles.loadMoreSessions} onClick={handleCollapseSessions}>
               {intl.formatMessage({ id: 'workspaceSider.collapseSessions' })}
             </button>
@@ -886,16 +846,11 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
           {projects.map((project) => {
             const projectId = normalizeProjectId(project.projectId);
             const isExpanded = expandedProjectIds.has(projectId);
-            const projectTag = getProjectTagMeta(project);
             return (
               <div key={projectId} className={styles.projectItem} role="treeitem" aria-expanded={isExpanded}>
                 <div className={styles.projectRow}>
                   <button type="button" className={styles.projectButton} onClick={() => handleProjectClick(project)}>
-                    <span
-                      className={classNames(styles.projectTypeTag, styles[`projectTypeTag${projectTag.classSuffix}`])}
-                    >
-                      {intl.formatMessage({ id: projectTag.messageId })}
-                    </span>
+                    <FolderOutlined className={styles.projectIcon} aria-hidden="true" />
                     <span className={styles.projectName} title={project.projectName}>
                       {project.projectName || intl.formatMessage({ id: 'projectSpace.unnamedProject' })}
                     </span>

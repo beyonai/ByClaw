@@ -15,9 +15,34 @@
 .tabs {
   flex-shrink: 0;
 
-  :global(.ant-tabs-nav),
-  :global(.beyond-tabs-nav) {
-    margin-bottom: 0;
+  :global {
+    .ant-tabs-nav,
+    .beyond-tabs-nav {
+      margin-bottom: 0;
+
+      .ant-tabs-tab {
+        padding: 6px 0;
+        font-size: 18px;
+        line-height: 26px;
+
+        + .ant-tabs-tab {
+          margin-left: 24px;
+        }
+      }
+
+      .ant-tabs-tab-btn {
+        color: var(--beyond-color-text) !important;
+        font-size: 18px;
+        font-weight: 500;
+        line-height: 26px;
+        text-shadow: none !important;
+      }
+
+      .ant-tabs-ink-bar {
+        height: 3px;
+        background-color: var(--beyond-color-text);
+      }
+    }
   }
 }
 
