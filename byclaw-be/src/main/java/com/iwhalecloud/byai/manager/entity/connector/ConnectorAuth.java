@@ -30,6 +30,9 @@ public class ConnectorAuth {
     /** 用户自定义授权账号别名 */
     private String authName;
 
+    /** 外部平台账号标识，用于接收平台撤销事件时检索授权记录 */
+    private String externalAccountId;
+
     /** 授权方式（冗余）：NONE、OAUTH2、AK_SK、PASSWORD、TOKEN、DEVICE_FLOW、CLI_INIT，允许为空 */
     private String authMode;
 

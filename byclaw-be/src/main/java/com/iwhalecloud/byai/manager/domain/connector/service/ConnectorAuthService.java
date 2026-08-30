@@ -85,7 +85,7 @@ public class ConnectorAuthService {
         }
         Map<String, Boolean> states = new LinkedHashMap<>();
         for (ConnectorEnableStateDto state : connectorAuthMapper.selectConnectorEnableStates(String.valueOf(userId))) {
-            states.put(resolveSkillCode(state), Boolean.TRUE.equals(state.getEnabled()));
+            states.merge(resolveSkillCode(state), Boolean.TRUE.equals(state.getEnabled()), Boolean::logicalOr);
         }
         return states;
     }

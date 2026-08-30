@@ -157,6 +157,17 @@ class ConnectorAuthServiceTest {
     }
 
     @Test
+    void findConnectorEnableStatesKeepsSharedSkillEnabledWhenAnyConnectorIsEnabled() {
+        when(connectorAuthMapper.selectConnectorEnableStates("1001"))
+            .thenReturn(java.util.List.of(
+                state("weixin-official-api", "wechat-api", true),
+                state("weixin-open-platform", "wechat-api", false)));
+
+        assertThat(service.findConnectorEnableStates(1001L))
+            .containsExactly(Map.entry("wechat-api", true));
+    }
+
+    @Test
     void findConnectorEnableStatesReturnsEmptyMapForInvalidUser() {
         assertThat(service.findConnectorEnableStates(null)).isEmpty();
         assertThat(service.findConnectorEnableStates(0L)).isEmpty();

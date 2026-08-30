@@ -159,6 +159,45 @@ class ConnectorSchemaTest {
     }
 
     @Test
+    void weixinOpenPlatformMigrationReusesConnectorAuthAndDefinesOAuth2Connector() throws Exception {
+        String ddl = readPreservingCase("deploy/migrations/versions/V0.4.0/V0.4.0__ddl.sql");
+        String sql = readPreservingCase("deploy/migrations/versions/V0.4.0/V0.4.0__dml.sql");
+        ConnectorInsertSeed seed = extractConnectorSeed(sql, "weixin-open-platform");
+        JsonNode authConfig = parseJson(seed.values().get("auth_config"));
+        JsonNode runtimeManifest = parseJson(seed.values().get("runtime_manifest"));
+
+        assertThat(ddl).contains(
+            "'byai_connector_auth', 'external_account_id', 'VARCHAR(128)'",
+            "CREATE INDEX IF NOT EXISTS idx_byai_connector_auth_external_account",
+            "ON byai.byai_connector_auth (connector_id, external_account_id, status_cd)");
+        assertThat(ddl).doesNotContain(
+            "byai_weixin_component_ticket",
+            "byai_weixin_authorizer_binding");
+        assertThat(seed.values()).containsEntry("connector_code", "weixin-open-platform")
+            .containsEntry("connector_name", "微信开放平台第三方平台")
+            .containsEntry("provider_code", "weixin-open-platform")
+            .containsEntry("skill_code", "wechat-api")
+            .containsEntry("auth_mode", "OAUTH2")
+            .containsEntry("sort", "56");
+        assertThat(authConfig).isEqualTo(parseJson("""
+            {"componentAppidEnv":"WECHAT_COMPONENT_APPID",
+             "componentAppsecretEnv":"WECHAT_COMPONENT_APPSECRET",
+             "callbackTokenEnv":"WECHAT_COMPONENT_CALLBACK_TOKEN",
+             "encodingAesKeyEnv":"WECHAT_COMPONENT_ENCODING_AES_KEY",
+             "redirectUriEnv":"WECHAT_COMPONENT_REDIRECT_URI"}
+            """));
+        assertThat(runtimeManifest.at("/runtime/type").asText()).isEqualTo("oauth2");
+        assertThat(runtimeManifest.at("/runtime/authorizeIn").asText()).isEqualTo("be-auth-job");
+        assertThat(runtimeManifest.at("/authStorage/mode").asText()).isEqualTo("credential-reference");
+        assertThat(runtimeManifest.at("/authStorage/runtimeMutation").asText()).isEqualTo("provider-refresh-only");
+        assertThat(runtimeManifest.at("/authStorage").has("managedEnvironmentKeys")).isFalse();
+        assertThat(runtimeManifest.at("/authStorage").has("projectionPath")).isFalse();
+        assertThat(new ConnectorManifestCanonicalizer(OBJECT_MAPPER).canonicalize(
+            connector("weixin-open-platform", "wechat-api"), seed.values().get("runtime_manifest")))
+            .contains("\"mode\":\"credential-reference\"");
+    }
+
+    @Test
     void imaSeedExtractionIgnoresOtherConnectorInsertStatements() throws Exception {
         String sql = readPreservingCase("deploy/migrations/versions/V0.4.0/V0.4.0__dml.sql") + """
 

@@ -52,6 +52,21 @@ public interface ConnectorAuthMapper extends BaseMapper<ConnectorAuth> {
         """)
     List<ConnectorEnableStateDto> selectConnectorEnableStates(@Param("userId") String userId);
 
+    /** 按 Provider 和外部账号查询全部有效授权，用于处理平台级撤销事件。 */
+    @Select("""
+        SELECT auth.*
+        FROM byai_connector_auth auth
+        INNER JOIN byai_connector_info info ON info.connector_id = auth.connector_id
+        WHERE info.provider_code = #{providerCode}
+          AND info.status_cd = '00A'
+          AND auth.external_account_id = #{externalAccountId}
+          AND auth.status_cd = '00A'
+        ORDER BY auth.auth_id ASC
+        """)
+    List<ConnectorAuth> selectActiveByProviderAndExternalAccount(
+        @Param("providerCode") String providerCode,
+        @Param("externalAccountId") String externalAccountId);
+
     /** 并发首次绑定时忽略有效授权唯一键冲突，兼容 openGauss。 */
     @Insert("""
         MERGE INTO byai_connector_auth target
@@ -61,6 +76,7 @@ public interface ConnectorAuthMapper extends BaseMapper<ConnectorAuth> {
                 #{auth.userId} AS user_id,
                 #{auth.connectorId} AS connector_id,
                 #{auth.authName} AS auth_name,
+                #{auth.externalAccountId} AS external_account_id,
                 #{auth.authMode} AS auth_mode,
                 #{auth.authCredential} AS auth_credential,
                 #{auth.expireTime} AS expire_time,
@@ -82,11 +98,12 @@ public interface ConnectorAuthMapper extends BaseMapper<ConnectorAuth> {
             AND target.status_cd = '00A'
         )
         WHEN NOT MATCHED THEN INSERT (
-            auth_id, user_id, connector_id, auth_name, auth_mode, auth_credential,
+            auth_id, user_id, connector_id, auth_name, external_account_id, auth_mode, auth_credential,
             expire_time, access_expire_time, refresh_expire_time, credential_state, renewal_mode,
             last_verified_at, enable_flag, status_cd, last_sync_time, create_by, create_time, update_time
         ) VALUES (
-            source.auth_id, source.user_id, source.connector_id, source.auth_name, source.auth_mode,
+            source.auth_id, source.user_id, source.connector_id, source.auth_name,
+            source.external_account_id, source.auth_mode,
             source.auth_credential, source.expire_time, source.access_expire_time, source.refresh_expire_time,
             source.credential_state, source.renewal_mode, source.last_verified_at,
             source.enable_flag, source.status_cd,

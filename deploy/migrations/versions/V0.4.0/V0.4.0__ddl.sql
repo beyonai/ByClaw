@@ -549,6 +549,13 @@ COMMENT ON COLUMN byai.byai_project.init_session_id IS '工作区初始化会话
 SELECT byai.add_column_if_missing('byai', 'byai_project', 'init_fail_reason', 'VARCHAR(500)');
 COMMENT ON COLUMN byai.byai_project.init_fail_reason IS '上次工作区初始化失败/超时原因;重新下发初始化时清空';
 
+-- 外部平台账号的通用可检索标识。微信开放平台写入 authorizer_appid。
+SELECT byai.add_column_if_missing('byai', 'byai_connector_auth', 'external_account_id', 'VARCHAR(128)');
+COMMENT ON COLUMN byai.byai_connector_auth.external_account_id IS '外部平台账号标识，可用于授权撤销事件定位；敏感资料仍保存于加密凭据';
+
+CREATE INDEX IF NOT EXISTS idx_byai_connector_auth_external_account
+    ON byai.byai_connector_auth (connector_id, external_account_id, status_cd);
+
 DROP FUNCTION byai.add_column_if_missing(TEXT, TEXT, TEXT, TEXT);
 
 -- 运营任务模板只保存模板目录元数据和默认配置；用户补充的任务参数进入会话提示词，不回写系统模板。
@@ -752,7 +759,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_byai_connector_credential_secret_active
     ON byai.byai_connector_credential_secret (user_id, connector_id, provider_code)
     WHERE status_cd = '00A';
 
-COMMENT ON TABLE byai.byai_connector_credential_secret IS '连接器 OAuth2 等真实凭证密文；授权绑定表仅保存 credential_reference';
+COMMENT ON TABLE byai.byai_connector_credential_secret IS '连接器 OAuth2 等真实凭证密文；通用授权记录仅保存 credential_reference';
 COMMENT ON COLUMN byai.byai_connector_credential_secret.credential_reference IS '随机 UUID 凭证引用，不含 token';
 COMMENT ON COLUMN byai.byai_connector_credential_secret.access_token_cipher IS 'SM4 加密的 access token，禁止写入日志或响应';
 COMMENT ON COLUMN byai.byai_connector_credential_secret.refresh_token_cipher IS 'SM4 加密的 refresh token，允许为空';

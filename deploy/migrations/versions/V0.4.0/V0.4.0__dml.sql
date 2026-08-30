@@ -52,6 +52,34 @@ SET description = '安全保存公众号 AppID/AppSecret，供 byCLI 通过官�
     runtime_manifest = '{"schemaVersion":"1.0","id":"weixin-official-api","version":"1.0.0","runtime":{"type":"cli","authorizeIn":"be-auth-job","commands":{"version":[["bycli","--version"]]}},"authStorage":{"mode":"managed-environment","owner":"be-auth-job","runtimeMutation":"provider-refresh-only","managedEnvironmentKeys":["WECHAT_APPID","WECHAT_APPSECRET"],"environment":{}},"skill":{"code":"wechat-api","source":"system-builtin","installScope":"user","grantScope":"agent"}}'
 WHERE connector_code = 'weixin-official-api';
 
+-- 微信开放平台第三方平台连接器。平台级密钥仅从后端部署环境读取，不投影到用户沙箱。
+INSERT INTO byai.byai_connector_info (
+    connector_id, connector_code, connector_name, description, connector_type,
+    provider_code, skill_code, auth_mode, auth_config, request_config, runtime_manifest, sort
+)
+SELECT nextval('byai.seq_any_table'), 'weixin-open-platform', '微信开放平台第三方平台',
+       '由公众号管理员扫码授权并读取公众号账号资料', 'SYSTEM',
+       'weixin-open-platform', 'wechat-api', 'OAUTH2',
+       '{"componentAppidEnv":"WECHAT_COMPONENT_APPID","componentAppsecretEnv":"WECHAT_COMPONENT_APPSECRET","callbackTokenEnv":"WECHAT_COMPONENT_CALLBACK_TOKEN","encodingAesKeyEnv":"WECHAT_COMPONENT_ENCODING_AES_KEY","redirectUriEnv":"WECHAT_COMPONENT_REDIRECT_URI"}',
+       '{}',
+       '{"schemaVersion":"1.0","id":"weixin-open-platform","version":"1.0.0","runtime":{"type":"oauth2","authorizeIn":"be-auth-job"},"authStorage":{"mode":"credential-reference","owner":"be-auth-job","runtimeMutation":"provider-refresh-only","environment":{}},"skill":{"code":"wechat-api","source":"system-builtin","installScope":"user","grantScope":"agent"}}',
+       56
+WHERE NOT EXISTS (
+    SELECT 1 FROM byai.byai_connector_info WHERE connector_code = 'weixin-open-platform'
+);
+
+UPDATE byai.byai_connector_info
+SET connector_name = '微信开放平台第三方平台',
+    description = '由公众号管理员扫码授权并读取公众号账号资料',
+    provider_code = 'weixin-open-platform',
+    skill_code = 'wechat-api',
+    auth_mode = 'OAUTH2',
+    auth_config = '{"componentAppidEnv":"WECHAT_COMPONENT_APPID","componentAppsecretEnv":"WECHAT_COMPONENT_APPSECRET","callbackTokenEnv":"WECHAT_COMPONENT_CALLBACK_TOKEN","encodingAesKeyEnv":"WECHAT_COMPONENT_ENCODING_AES_KEY","redirectUriEnv":"WECHAT_COMPONENT_REDIRECT_URI"}',
+    request_config = '{}',
+    runtime_manifest = '{"schemaVersion":"1.0","id":"weixin-open-platform","version":"1.0.0","runtime":{"type":"oauth2","authorizeIn":"be-auth-job"},"authStorage":{"mode":"credential-reference","owner":"be-auth-job","runtimeMutation":"provider-refresh-only","environment":{}},"skill":{"code":"wechat-api","source":"system-builtin","installScope":"user","grantScope":"agent"}}',
+    sort = 56
+WHERE connector_code = 'weixin-open-platform';
+
 -- IMA OpenAPI 内置 Skill 注册
 -- CLI 与 skill 文件随 OpenClaw 镜像提供；数据库仅注册目录、运行期快照和可发现权限。
 UPDATE byai.byai_system_config c

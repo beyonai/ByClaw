@@ -5,6 +5,8 @@ import java.util.Optional;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationProviderRegistry;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorAuthorizationProvider;
@@ -16,7 +18,7 @@ import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 @Service
 public class ConnectorAuthorizationRevocationService {
 
-    private static final Duration REVOCATION_LOCK_TTL = Duration.ofSeconds(30);
+    private static final Duration REVOCATION_LOCK_TTL = Duration.ofMinutes(2);
 
     private final ConnectorInfoService connectorInfoService;
     private final AuthorizationProviderRegistry providerRegistry;
@@ -69,6 +71,8 @@ public class ConnectorAuthorizationRevocationService {
         if (lockToken.isEmpty()) {
             throw new IllegalStateException("当前连接器已有进行中的授权任务");
         }
+        boolean releaseDeferred = deferLockReleaseUntilTransactionCompletion(
+            userId, connectorId, lockToken.get());
         try {
             if (sessionRepository.hasActiveSession(userId, connectorId)) {
                 throw new IllegalStateException("当前连接器已有进行中的授权任务");
@@ -80,7 +84,9 @@ public class ConnectorAuthorizationRevocationService {
             revoker.revoke(userId, connector);
             connectionStateService.revokeAuthorization(userId, connectorId);
         } finally {
-            releaseLockBestEffort(userId, connectorId, lockToken.get());
+            if (!releaseDeferred) {
+                releaseLockBestEffort(userId, connectorId, lockToken.get());
+            }
         }
     }
 
@@ -89,11 +95,28 @@ public class ConnectorAuthorizationRevocationService {
         if (lockToken.isEmpty()) {
             throw new IllegalStateException("当前连接器已有进行中的授权任务");
         }
+        boolean releaseDeferred = deferLockReleaseUntilTransactionCompletion(
+            userId, connectorId, lockToken.get());
         try {
             connectionStateService.revokeAuthorization(userId, connectorId);
         } finally {
-            releaseLockBestEffort(userId, connectorId, lockToken.get());
+            if (!releaseDeferred) {
+                releaseLockBestEffort(userId, connectorId, lockToken.get());
+            }
         }
+    }
+
+    private boolean deferLockReleaseUntilTransactionCompletion(String userId, Long connectorId, String token) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            return false;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCompletion(int status) {
+                releaseLockBestEffort(userId, connectorId, token);
+            }
+        });
+        return true;
     }
 
     private void releaseLockBestEffort(String userId, Long connectorId, String token) {
