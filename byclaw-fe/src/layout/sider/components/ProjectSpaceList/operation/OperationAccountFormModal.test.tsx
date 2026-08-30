@@ -81,4 +81,47 @@ describe('OperationAccountFormModal', () => {
       )
     );
   });
+
+  it('keeps a fixed custom-link platform hidden while editing', async () => {
+    const onSubmit = jest.fn();
+    const account = {
+      id: 7,
+      platformId: 'CustomLink',
+      accountName: 'ima',
+      accountId: 'custom',
+      customUrl: 'https://ima.qq.com/wikis/',
+      loginStatus: 'logged_in' as const,
+    };
+
+    render(
+      <OperationAccountFormModal
+        open
+        account={account}
+        fixedPlatformId="CustomLink"
+        onCancel={jest.fn()}
+        onSubmit={onSubmit}
+      />
+    );
+
+    expect(screen.queryByLabelText('projectSpace.operation.accountForm.field.platform')).not.toBeInTheDocument();
+    expect(screen.queryAllByRole('radio')).toHaveLength(0);
+    expect(await screen.findByLabelText('projectSpace.operation.accountForm.field.customLinkName')).toHaveValue('ima');
+
+    fireEvent.change(screen.getByLabelText('projectSpace.operation.accountForm.field.customLinkName'), {
+      target: { value: 'IMA 知识库' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'projectSpace.operation.accountForm.save' }));
+
+    await waitFor(() =>
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          platformId: 'CustomLink',
+          accountName: 'IMA 知识库',
+          accountId: '',
+          customUrl: 'https://ima.qq.com/wikis/',
+        }),
+        account
+      )
+    );
+  });
 });

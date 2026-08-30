@@ -18,6 +18,7 @@ export interface ConnectorCredentialField {
 
 export interface ConnectorCredentialForm {
   helpUrl: string;
+  helpLinkText?: string;
   helpText?: string;
   fields: ConnectorCredentialField[];
 }

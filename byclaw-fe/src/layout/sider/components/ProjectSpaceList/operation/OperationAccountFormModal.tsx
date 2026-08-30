@@ -32,7 +32,7 @@ const OperationAccountFormModal: React.FC<OperationAccountFormModalProps> = ({
   const [submitting, setSubmitting] = useState(false);
   // 状态更新存在一个渲染间隔，使用同步标记拦截这个间隔内的连续点击。
   const submittingRef = useRef(false);
-  const [selectedPlatform, setSelectedPlatform] = useState<string>(account?.platformId || fixedPlatformId || '');
+  const [selectedPlatform, setSelectedPlatform] = useState<string>(fixedPlatformId || account?.platformId || '');
   const t = useCallback((id: string) => intl.formatMessage({ id: `projectSpace.operation.accountForm.${id}` }), [intl]);
   const platformT = useCallback(
     (id: string) => intl.formatMessage({ id: `projectSpace.operation.platform.${id}` }),
@@ -52,14 +52,13 @@ const OperationAccountFormModal: React.FC<OperationAccountFormModalProps> = ({
   );
   const availablePlatformOptions = platformOptions?.length ? platformOptions : defaultPlatformOptions;
   const defaultPlatformId = availablePlatformOptions[0]?.value;
-  const fixedCreatePlatformId = account ? undefined : fixedPlatformId;
   const isSubmitting = loading || submitting;
 
   useEffect(() => {
     if (!open) return;
     // 每次打开都按当前编辑对象重置，避免上一次新增或编辑残留到下一次操作。
     form.resetFields();
-    const platformId = account?.platformId || fixedCreatePlatformId || defaultPlatformId;
+    const platformId = fixedPlatformId || account?.platformId || defaultPlatformId;
     setSelectedPlatform(platformId);
     form.setFieldsValue({
       platformId,
@@ -67,7 +66,7 @@ const OperationAccountFormModal: React.FC<OperationAccountFormModalProps> = ({
       accountId: account?.accountId || '',
       customUrl: account?.customUrl || '',
     });
-  }, [account, defaultPlatformId, fixedCreatePlatformId, form, open]);
+  }, [account, defaultPlatformId, fixedPlatformId, form, open]);
 
   // 自定义链接没有平台账号 ID，但复用 accountName 保存用户填写的链接名称。
   useEffect(() => {
@@ -86,7 +85,7 @@ const OperationAccountFormModal: React.FC<OperationAccountFormModalProps> = ({
     setSubmitting(true);
     try {
       const values = await form.validateFields();
-      values.platformId = fixedCreatePlatformId || values.platformId;
+      values.platformId = fixedPlatformId || values.platformId;
       // 自定义链接平台不需要平台账号 ID，链接名称仍通过 accountName 保存。
       if (values.platformId === 'CustomLink') {
         values.accountId = '';
@@ -100,7 +99,7 @@ const OperationAccountFormModal: React.FC<OperationAccountFormModalProps> = ({
       submittingRef.current = false;
       setSubmitting(false);
     }
-  }, [account, fixedCreatePlatformId, form, loading, onSubmit, t]);
+  }, [account, fixedPlatformId, form, loading, onSubmit, t]);
 
   const handleCancel = useCallback(() => {
     if (!isSubmitting) onCancel();
@@ -126,7 +125,7 @@ const OperationAccountFormModal: React.FC<OperationAccountFormModalProps> = ({
     >
       <Form<OperationAccountFormValues> form={form} layout="vertical">
         <div className={styles.operationFormGrid}>
-          {!fixedCreatePlatformId && (
+          {!fixedPlatformId && (
             <Form.Item
               className={styles.operationFormFull}
               label={t('field.platform')}

@@ -9,7 +9,12 @@ import {
   type OperationAccount,
   type OperationAccountFormValues,
 } from '@/layout/sider/components/ProjectSpaceList/operation';
-import { createGlobalOperationAccount, listGlobalOperationAccounts } from '@/service/devloop';
+import {
+  createGlobalOperationAccount,
+  deleteOperationAccount,
+  listGlobalOperationAccounts,
+  updateOperationAccount,
+} from '@/service/devloop';
 
 interface GlobalAccountSectionProps {
   onToolbarChange?: (toolbar: ReactNode | null) => void;
@@ -20,6 +25,7 @@ const GlobalAccountSection = ({ onToolbarChange }: GlobalAccountSectionProps) =>
   const [accounts, setAccounts] = useState<OperationAccount[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [deletingAccountId, setDeletingAccountId] = useState<OperationAccount['id'] | null>(null);
   const loadGenerationRef = useRef(0);
 
   const loadAccounts = useCallback(async () => {
@@ -52,10 +58,15 @@ const GlobalAccountSection = ({ onToolbarChange }: GlobalAccountSectionProps) =>
   useEffect(() => closeRemoteDesktop, [closeRemoteDesktop]);
 
   const handleSave = useCallback(
-    async (values: OperationAccountFormValues) => {
+    async (values: OperationAccountFormValues, account?: OperationAccount | null) => {
       setSaving(true);
       try {
-        await createGlobalOperationAccount(buildGlobalOperationAccountPayload(values));
+        const payload = buildGlobalOperationAccountPayload(values);
+        if (account) {
+          await updateOperationAccount({ ...payload, accountId: account.id });
+        } else {
+          await createGlobalOperationAccount(payload);
+        }
         await loadAccounts();
         message.success(intl.formatMessage({ id: 'projectSpace.operation.account.saveSuccess' }));
       } finally {
@@ -63,6 +74,23 @@ const GlobalAccountSection = ({ onToolbarChange }: GlobalAccountSectionProps) =>
       }
     },
     [intl, loadAccounts]
+  );
+
+  const handleDelete = useCallback(
+    async (account: OperationAccount) => {
+      setDeletingAccountId(account.id);
+      try {
+        await deleteOperationAccount(account.id);
+        if (`${loginTarget?.id ?? ''}` === `${account.id}`) closeRemoteDesktop();
+        await loadAccounts();
+        message.success(intl.formatMessage({ id: 'projectSpace.operation.account.deleteSuccess' }));
+      } catch {
+        // 请求层已统一提示错误；Drawer 保留当前账号列表并恢复卡片操作状态。
+      } finally {
+        setDeletingAccountId(null);
+      }
+    },
+    [closeRemoteDesktop, intl, loadAccounts, loginTarget?.id]
   );
 
   return (
@@ -74,14 +102,16 @@ const GlobalAccountSection = ({ onToolbarChange }: GlobalAccountSectionProps) =>
       drawerCardLayout
       toolbarPlacement="external"
       showPlatformFilter={false}
-      allowAccountEditing={false}
+      allowAccountEditing
       onToolbarChange={onToolbarChange}
       loading={loading}
       savingAccount={saving}
+      deletingAccountId={deletingAccountId}
       loginTarget={loginTarget}
       loginPreparingAccountId={loginPreparingAccountId}
       loginConfirming={loginConfirming}
       onRefresh={loadAccounts}
+      onDeleteAccount={handleDelete}
       onSaveAccount={handleSave}
       onLogin={handleLogin}
       onConfirmLogin={handleConfirmLogin}
