@@ -121,8 +121,25 @@ class ConnectorSchemaTest {
             .containsEntry("skill_code", "bycli")
             .containsEntry("auth_mode", "AK_SK")
             .containsEntry("sort", "55");
-        assertThat(authConfig.at("/credentialForm/helpUrl").asText()).isEqualTo("https://mp.weixin.qq.com/");
-        assertThat(authConfig.at("/credentialForm/helpText").asText()).contains("IP 白名单", "40164");
+        assertThat(authConfig.at("/credentialForm/helpUrl").asText())
+            .isEqualTo("https://developers.weixin.qq.com/platform");
+        assertThat(authConfig.at("/credentialForm/helpLinkText").asText())
+            .isEqualTo("前往微信开发者平台获取凭据");
+        assertThat(authConfig.at("/credentialForm/helpText").asText())
+            .contains(
+                "连接器作用",
+                "bycli weixin create-draft",
+                "不会直接群发或正式发布文章",
+                "获取步骤",
+                "设置与开发",
+                "开发接口管理",
+                "基本配置",
+                "开发者 ID 区域复制 AppID",
+                "AppSecret 区域点击“查看”或“重置”",
+                "任务沙箱出口 IP",
+                "40164",
+                "安全提示");
+        assertThat(authConfig.at("/credentialForm/helpText").asText()).hasSizeLessThanOrEqualTo(500);
         assertThat(authConfig.at("/credentialForm/fields/0/key").asText()).isEqualTo("appId");
         assertThat(authConfig.at("/credentialForm/fields/1/key").asText()).isEqualTo("appSecret");
         assertThat(runtimeManifest.at("/authStorage/managedEnvironmentKeys"))
@@ -133,6 +150,10 @@ class ConnectorSchemaTest {
             .contains("\"mode\":\"managed-environment\"");
         assertThat(normalizeSql(seed.statement())).contains(
             "WHERE NOT EXISTS ( SELECT 1 FROM byai.byai_connector_info WHERE connector_code = 'weixin-official-api' )");
+        assertThat(normalizeSql(sql)).contains(
+            "UPDATE byai.byai_connector_info SET description =",
+            "auth_config =",
+            "WHERE connector_code = 'weixin-official-api'");
     }
 
     @Test

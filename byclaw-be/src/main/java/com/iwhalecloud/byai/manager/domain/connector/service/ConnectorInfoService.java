@@ -34,6 +34,8 @@ public class ConnectorInfoService {
 
     private static final int MAX_HELP_TEXT_LENGTH = 500;
 
+    private static final int MAX_HELP_LINK_TEXT_LENGTH = 100;
+
     private static final Pattern CREDENTIAL_FIELD_KEY = Pattern.compile("[A-Za-z][A-Za-z0-9_]{0,63}");
 
     @Autowired
@@ -120,6 +122,10 @@ public class ConnectorInfoService {
         if (form.containsKey("helpText") && helpText == null) {
             return null;
         }
+        String helpLinkText = sanitizeHelpLinkText(form);
+        if (form.containsKey("helpLinkText") && helpLinkText == null) {
+            return null;
+        }
         JSONArray fields = form.getJSONArray("fields");
         if (fields == null || fields.isEmpty() || fields.size() > MAX_CREDENTIAL_FIELDS) {
             return null;
@@ -138,6 +144,7 @@ public class ConnectorInfoService {
         }
         ConnectorCredentialFormDto result = new ConnectorCredentialFormDto();
         result.setHelpUrl(form.getString("helpUrl"));
+        result.setHelpLinkText(helpLinkText);
         result.setHelpText(helpText);
         result.setFields(sanitizedFields);
         return result;
@@ -150,6 +157,18 @@ public class ConnectorInfoService {
         }
         String sanitized = helpText.trim();
         return sanitized.isEmpty() || sanitized.length() > MAX_HELP_TEXT_LENGTH ? null : sanitized;
+    }
+
+    private static String sanitizeHelpLinkText(JSONObject form) {
+        Object value = form.get("helpLinkText");
+        if (value == null) {
+            return null;
+        }
+        if (!(value instanceof String helpLinkText)) {
+            return null;
+        }
+        String sanitized = helpLinkText.trim();
+        return sanitized.isEmpty() || sanitized.length() > MAX_HELP_LINK_TEXT_LENGTH ? null : sanitized;
     }
 
     private static ConnectorCredentialFieldDto sanitizeCredentialField(JSONObject field) {

@@ -34,15 +34,21 @@ INSERT INTO byai.byai_connector_info (
     provider_code, skill_code, auth_mode, auth_config, request_config, runtime_manifest, sort
 )
 SELECT nextval('byai.seq_any_table'), 'weixin-official-api', '微信公众号 API',
-       '通过微信公众号官方 API 连接公众号服务', 'SYSTEM',
+       '安全保存公众号 AppID/AppSecret，供 byCLI 通过官方 API 创建草稿', 'SYSTEM',
        'weixin-official-api', 'bycli', 'AK_SK',
-       '{"credentialForm":{"helpUrl":"https://mp.weixin.qq.com/","helpText":"前往设置与开发 → 开发接口管理 → 基本配置 → 公众号开发信息获取 AppID 和 AppSecret。若返回 40164，请将 ByClaw 后端出口 IP 加入公众号 IP 白名单后重试。","fields":[{"key":"appId","label":"AppID","inputType":"text","maxLength":256},{"key":"appSecret","label":"AppSecret","inputType":"password","maxLength":2048}]}}',
+       '{"credentialForm":{"helpUrl":"https://developers.weixin.qq.com/platform","helpLinkText":"前往微信开发者平台获取凭据","helpText":"连接器作用：安全保存公众号 AppID 和 AppSecret，并在启用时提供给数字员工。使用 bycli weixin create-draft 时会优先调用公众号官方 API 上传封面和正文图片、创建草稿；不会直接群发或正式发布文章，也不保存 access_token。\n\n获取步骤：\n1. 点击下方链接登录微信公众平台，使用公众号管理员或有开发权限的微信扫码。\n2. 登录后选择要连接的目标公众号，进入公众号后台。\n3. 打开“设置与开发” → “开发接口管理” → “基本配置”，找到公众号开发信息。\n4. 在开发者 ID 区域复制 AppID。\n5. 在 AppSecret 区域点击“查看”或“重置”，由管理员扫码确认后复制新值。\n6. 将 ByClaw 后端和任务沙箱出口 IP 加入 IP 白名单，避免 40164。\n7. 返回本页填写 AppID、AppSecret，点击“保存并连接”。\n\n安全提示：AppSecret 相当于 API 密码，请勿发送到聊天、截图、工单或代码仓库。重置后旧值失效，需要重新连接。","fields":[{"key":"appId","label":"AppID","inputType":"text","maxLength":256},{"key":"appSecret","label":"AppSecret","inputType":"password","maxLength":2048}]}}',
        '{}',
        '{"schemaVersion":"1.0","id":"weixin-official-api","version":"1.0.0","runtime":{"type":"cli","authorizeIn":"be-auth-job","commands":{"version":[["bycli","--version"]]}},"authStorage":{"mode":"managed-environment","owner":"be-auth-job","runtimeMutation":"provider-refresh-only","managedEnvironmentKeys":["WECHAT_APPID","WECHAT_APPSECRET"],"environment":{}},"skill":{"code":"bycli","source":"system-builtin","installScope":"user","grantScope":"agent"}}',
        55
 WHERE NOT EXISTS (
     SELECT 1 FROM byai.byai_connector_info WHERE connector_code = 'weixin-official-api'
 );
+
+-- 同步更新已存在的连接器元数据，避免仅在首次初始化数据库时展示新版引导。
+UPDATE byai.byai_connector_info
+SET description = '安全保存公众号 AppID/AppSecret，供 byCLI 通过官方 API 创建草稿',
+    auth_config = '{"credentialForm":{"helpUrl":"https://developers.weixin.qq.com/platform","helpLinkText":"前往微信开发者平台获取凭据","helpText":"连接器作用：安全保存公众号 AppID 和 AppSecret，并在启用时提供给数字员工。使用 bycli weixin create-draft 时会优先调用公众号官方 API 上传封面和正文图片、创建草稿；不会直接群发或正式发布文章，也不保存 access_token。\n\n获取步骤：\n1. 点击下方链接登录微信公众平台，使用公众号管理员或有开发权限的微信扫码。\n2. 登录后选择要连接的目标公众号，进入公众号后台。\n3. 打开“设置与开发” → “开发接口管理” → “基本配置”，找到公众号开发信息。\n4. 在开发者 ID 区域复制 AppID。\n5. 在 AppSecret 区域点击“查看”或“重置”，由管理员扫码确认后复制新值。\n6. 将 ByClaw 后端和任务沙箱出口 IP 加入 IP 白名单，避免 40164。\n7. 返回本页填写 AppID、AppSecret，点击“保存并连接”。\n\n安全提示：AppSecret 相当于 API 密码，请勿发送到聊天、截图、工单或代码仓库。重置后旧值失效，需要重新连接。","fields":[{"key":"appId","label":"AppID","inputType":"text","maxLength":256},{"key":"appSecret","label":"AppSecret","inputType":"password","maxLength":2048}]}}'
+WHERE connector_code = 'weixin-official-api';
 
 -- IMA OpenAPI 内置 Skill 注册
 -- CLI 与 skill 文件随 OpenClaw 镜像提供；数据库仅注册目录、运行期快照和可发现权限。

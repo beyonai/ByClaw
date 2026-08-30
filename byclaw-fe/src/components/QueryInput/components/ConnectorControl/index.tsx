@@ -41,6 +41,7 @@ import {
 } from '@/service/connector';
 
 import styles from './index.module.less';
+import CredentialHelpCard from './CredentialHelpCard';
 import GlobalAccountSection from './GlobalAccountSection';
 
 dayjs.extend(customParseFormat);
@@ -225,6 +226,14 @@ const hasValidCredentialForm = (
   ) {
     return false;
   }
+  if (
+    credentialForm.helpLinkText !== undefined &&
+    (typeof credentialForm.helpLinkText !== 'string' ||
+      credentialForm.helpLinkText.trim().length === 0 ||
+      credentialForm.helpLinkText.trim().length > 100)
+  ) {
+    return false;
+  }
 
   const keys = new Set<string>();
   return credentialForm.fields.every((field) => {
@@ -381,10 +390,7 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
   }, [canAuthorize, closeLocalAuthorization]);
 
   useEffect(() => {
-    if (
-      authorizingConnector?.authMode === 'AK_SK' &&
-      !hasValidCredentialForm(authorizingConnector)
-    ) {
+    if (authorizingConnector?.authMode === 'AK_SK' && !hasValidCredentialForm(authorizingConnector)) {
       closeLocalAuthorization();
     }
   }, [authorizingConnector, closeLocalAuthorization]);
@@ -972,14 +978,14 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
 
       <Modal
         centered
-        className={styles.credentialModal}
+        className={classNames(styles.credentialModal, credentialSchema?.helpText && styles.credentialModalWithHelp)}
         closable={!startingAuthorization}
         footer={null}
         keyboard={!startingAuthorization}
         maskClosable={!startingAuthorization}
         open={!!authorizingConnector && !!credentialSchema && !authorizationSession}
         zIndex={1200}
-        width={480}
+        width={credentialSchema?.helpText ? '80vw' : 480}
         onCancel={() => {
           if (!startingAuthorization) {
             void cancelAuthorization();
@@ -987,16 +993,15 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
         }}
       >
         {authorizingConnector && credentialSchema && (
-          <div className={styles.credentialContent}>
+          <div
+            className={classNames(
+              styles.credentialContent,
+              credentialSchema.helpText && styles.credentialContentWithHelp
+            )}
+          >
             <ConnectorIcon connector={authorizingConnector} />
             <h2>连接 {authorizingConnector.name}</h2>
             <p>请输入所需凭据。验证通过后将加密保存，仅在连接器启用时使用。</p>
-            {credentialSchema.helpText && <p>{credentialSchema.helpText.trim()}</p>}
-            {isSafeCredentialHelpUrl(credentialSchema.helpUrl) && (
-              <a href={credentialSchema.helpUrl} rel="noopener noreferrer" target="_blank">
-                前往{authorizingConnector.name}获取凭据
-              </a>
-            )}
             <Form<CredentialValues>
               autoComplete="off"
               className={styles.credentialForm}
@@ -1005,23 +1010,38 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
               preserve={false}
               onFinish={(values) => void startCredentialAuthorization(values)}
             >
-              {credentialSchema.fields.map((field) => (
-                <Form.Item
-                  key={field.key}
-                  label={field.label}
-                  name={field.key}
-                  rules={[{ required: true, whitespace: true, message: `请输入${field.label}` }]}
-                >
-                  {field.inputType === 'password' ? (
-                    <Input.Password autoComplete="off" maxLength={field.maxLength} />
-                  ) : (
-                    <Input autoComplete="off" maxLength={field.maxLength} />
-                  )}
-                </Form.Item>
-              ))}
-              <Button block htmlType="submit" loading={startingAuthorization} size="large" type="primary">
-                保存并连接
-              </Button>
+              <div className={styles.credentialFormBody}>
+                {credentialSchema.helpText && <CredentialHelpCard helpText={credentialSchema.helpText} />}
+                {isSafeCredentialHelpUrl(credentialSchema.helpUrl) && (
+                  <a
+                    className={styles.credentialHelpLink}
+                    href={credentialSchema.helpUrl}
+                    rel="noopener noreferrer"
+                    target="_blank"
+                  >
+                    {credentialSchema.helpLinkText?.trim() || `前往${authorizingConnector.name}获取凭据`}
+                  </a>
+                )}
+                {credentialSchema.fields.map((field) => (
+                  <Form.Item
+                    key={field.key}
+                    label={field.label}
+                    name={field.key}
+                    rules={[{ required: true, whitespace: true, message: `请输入${field.label}` }]}
+                  >
+                    {field.inputType === 'password' ? (
+                      <Input.Password autoComplete="off" maxLength={field.maxLength} />
+                    ) : (
+                      <Input autoComplete="off" maxLength={field.maxLength} />
+                    )}
+                  </Form.Item>
+                ))}
+              </div>
+              <div className={styles.credentialActions}>
+                <Button block htmlType="submit" loading={startingAuthorization} size="large" type="primary">
+                  保存并连接
+                </Button>
+              </div>
             </Form>
           </div>
         )}

@@ -49,6 +49,7 @@ class ConnectorInfoServiceTest {
         ConnectorListDto dto = credentialConnector("""
             {"credentialForm":{
               "helpUrl":"https://mp.weixin.qq.com/",
+              "helpLinkText":"  前往微信开发者平台获取凭据  ",
               "helpText":"  设置与开发 → 开发接口管理 → 基本配置 → 公众号开发信息  ",
               "fields":[
                 {"key":"appId","label":"AppID","inputType":"text","maxLength":256},
@@ -61,6 +62,8 @@ class ConnectorInfoServiceTest {
 
         assertThat(dto.getCredentialForm()).isNotNull();
         assertThat(dto.getCredentialForm().getHelpUrl()).isEqualTo("https://mp.weixin.qq.com/");
+        assertThat(dto.getCredentialForm().getHelpLinkText())
+            .isEqualTo("前往微信开发者平台获取凭据");
         assertThat(dto.getCredentialForm().getHelpText())
             .isEqualTo("设置与开发 → 开发接口管理 → 基本配置 → 公众号开发信息");
         assertThat(dto.getCredentialForm().getFields())
@@ -92,6 +95,36 @@ class ConnectorInfoServiceTest {
               {"key":"appId","label":"AppID","inputType":"text","maxLength":256}
             ]}}
             """.formatted("x".repeat(501)));
+        assertInvalidCredentialForm("""
+            {"credentialForm":{"helpUrl":"https://mp.weixin.qq.com/","helpLinkText":"   ","fields":[
+              {"key":"appId","label":"AppID","inputType":"text","maxLength":256}
+            ]}}
+            """);
+        assertInvalidCredentialForm("""
+            {"credentialForm":{"helpUrl":"https://mp.weixin.qq.com/","helpLinkText":"%s","fields":[
+              {"key":"appId","label":"AppID","inputType":"text","maxLength":256}
+            ]}}
+            """.formatted("x".repeat(101)));
+        assertInvalidCredentialForm("""
+            {"credentialForm":{"helpUrl":"https://mp.weixin.qq.com/","helpLinkText":123,"fields":[
+              {"key":"appId","label":"AppID","inputType":"text","maxLength":256}
+            ]}}
+            """);
+        assertInvalidCredentialForm("""
+            {"credentialForm":{"helpUrl":"https://mp.weixin.qq.com/","helpLinkText":true,"fields":[
+              {"key":"appId","label":"AppID","inputType":"text","maxLength":256}
+            ]}}
+            """);
+        assertInvalidCredentialForm("""
+            {"credentialForm":{"helpUrl":"https://mp.weixin.qq.com/","helpLinkText":["link"],"fields":[
+              {"key":"appId","label":"AppID","inputType":"text","maxLength":256}
+            ]}}
+            """);
+        assertInvalidCredentialForm("""
+            {"credentialForm":{"helpUrl":"https://mp.weixin.qq.com/","helpLinkText":{"text":"link"},"fields":[
+              {"key":"appId","label":"AppID","inputType":"text","maxLength":256}
+            ]}}
+            """);
     }
 
     private static ConnectorListDto credentialConnector(String authConfig) {
