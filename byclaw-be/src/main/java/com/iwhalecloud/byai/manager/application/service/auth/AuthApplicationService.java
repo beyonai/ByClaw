@@ -46,6 +46,7 @@ import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.station.Station;
 import com.iwhalecloud.byai.manager.entity.superassist.SuasSuperassist;
 import com.iwhalecloud.byai.manager.entity.users.Users;
+import com.iwhalecloud.byai.manager.entity.users.UsersOrganization;
 import com.iwhalecloud.byai.manager.mapper.auth.PrivilegeGrantMapper;
 import com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper;
 import com.iwhalecloud.byai.manager.qo.auth.AuthDetailQo;
@@ -78,6 +79,7 @@ import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.common.login.bean.UserStation;
 import com.iwhalecloud.byai.manager.mapper.users.UsersMapper;
+import com.iwhalecloud.byai.manager.mapper.users.UsersOrganizationMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import com.iwhalecloud.byai.manager.vo.auth.AuthVo;
@@ -137,6 +139,9 @@ public class AuthApplicationService {
 
     @Autowired
     private PrivilegeGrantMapper privilegeGrantMapper;
+
+    @Autowired
+    private UsersOrganizationMapper usersOrganizationMapper;
 
     @Autowired
     private PrivilegeGrantService privilegeGrantService;
@@ -256,6 +261,115 @@ public class AuthApplicationService {
     }
 
     /**
+     * 计算指定用户对各资源的管理权限映射，用于写入 Redis 管理权限 Hash（USER:RESOURCES:MANAGE:{userId}）。
+     * <p>
+     * 覆盖三个维度，与后台运行时 hasResourceManagePermission/hasResourceMemberSettingPermission 保持一致：
+     * <ol>
+     *   <li>显式 ALLOW_MANAGE RED 授权（含 USER/ORG/POST/STATION 维度继承），通过 {@link #listAuthPrivilegeGrant} 计算。</li>
+     *   <li>资源创建人（ss_resource.create_by == userId）。对于资源创建时已自动补授权（ensureCreatorDefaultPrivileges）
+     *       的场景维度 1 已覆盖；此处兜底处理个人助理等未补授权的场景。</li>
+     *   <li>组织管理员对其所管理组织（含下级）的 man_org_id 资源。此维度不产生 au_privilege_grant 记录，
+     *       须按组织归属关系实时计算。</li>
+     * </ol>
+     * 全局管理角色（PLAT_MAN 等）不在此处处理，由调用方（AuthRedisSyncService）单独写入全局角色标记 key。
+     *
+     * @param userId 用户标识
+     * @return 资源管理权限映射，key 为 resourceId（String），value 为 resourceBizType
+     */
+    public Map<String, String> buildUserManageResources(Long userId) {
+        if (userId == null) {
+            return new HashMap<>();
+        }
+        Map<String, String> result = new HashMap<>();
+
+        // --- 维度 1：显式 ALLOW_MANAGE 授权（USER/ORG/POST/STATION 继承，RED/BLACK 过滤） ---
+        List<PrivilegeGrant> authList = listAuthPrivilegeGrant(GrantType.ALLOW_MANAGE, null,
+            GrantToObjType.USER, userId, null);
+        authList = filterEffectiveResourceGrants(authList);
+        if (!CollectionUtils.isEmpty(authList)) {
+            Map<Long, List<PrivilegeGrant>> authByResource = authList.stream()
+                .filter(item -> item.getGrantObjId() != null)
+                .collect(Collectors.groupingBy(PrivilegeGrant::getGrantObjId));
+            for (Map.Entry<Long, List<PrivilegeGrant>> entry : authByResource.entrySet()) {
+                Long resourceId = entry.getKey();
+                List<PrivilegeGrant> resourceAuths = entry.getValue();
+                boolean hasRedAuth = resourceAuths.stream()
+                    .anyMatch(auth -> Color.RED.equals(auth.getGrantToType()));
+                boolean hasBlackAuth = resourceAuths.stream()
+                    .anyMatch(auth -> Color.BLACK.equals(auth.getGrantToType()));
+                if (hasRedAuth && !hasBlackAuth) {
+                    String resourceType = resourceAuths.stream()
+                        .filter(auth -> Color.RED.equals(auth.getGrantToType()))
+                        .findFirst()
+                        .map(PrivilegeGrant::getGrantObjType)
+                        .orElse(null);
+                    if (resourceType != null) {
+                        result.put(String.valueOf(resourceId), resourceType);
+                    }
+                }
+            }
+        }
+
+        // --- 维度 2：资源创建人 ---
+        {
+            com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.iwhalecloud.byai.manager.entity.resource.SsResource> qw =
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
+            qw.eq(com.iwhalecloud.byai.manager.entity.resource.SsResource::getCreateBy, userId)
+              .ne(com.iwhalecloud.byai.manager.entity.resource.SsResource::getResourceStatus,
+                  com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus.REMOVED.getNum());
+            List<com.iwhalecloud.byai.manager.entity.resource.SsResource> createdResources =
+                ssResourceMapper.selectList(qw);
+            if (!CollectionUtils.isEmpty(createdResources)) {
+                for (com.iwhalecloud.byai.manager.entity.resource.SsResource resource : createdResources) {
+                    if (resource.getResourceId() != null && resource.getResourceBizType() != null) {
+                        result.put(String.valueOf(resource.getResourceId()), resource.getResourceBizType());
+                    }
+                }
+            }
+        }
+
+        // --- 维度 3：组织管理员（对其管理组织及所有下级组织名下的 man_org_id 资源） ---
+        {
+            com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.iwhalecloud.byai.manager.entity.users.UsersOrganization> uoqw =
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
+            uoqw.eq(com.iwhalecloud.byai.manager.entity.users.UsersOrganization::getUserId, userId)
+                .eq(com.iwhalecloud.byai.manager.entity.users.UsersOrganization::getUserType,
+                    com.iwhalecloud.byai.common.constants.users.UserType.ORG_MAN);
+            List<com.iwhalecloud.byai.manager.entity.users.UsersOrganization> orgManagerRecords =
+                usersOrganizationMapper.selectList(uoqw);
+            if (!CollectionUtils.isEmpty(orgManagerRecords)) {
+                Set<Long> managedOrgIds = new HashSet<>();
+                for (com.iwhalecloud.byai.manager.entity.users.UsersOrganization uo : orgManagerRecords) {
+                    if (uo.getOrgId() != null) {
+                        List<Long> selfAndDescendants =
+                            organizationService.findSelfAndDescendantOrgIds(uo.getOrgId());
+                        managedOrgIds.addAll(selfAndDescendants);
+                    }
+                }
+                if (!managedOrgIds.isEmpty()) {
+                    com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.iwhalecloud.byai.manager.entity.resource.SsResource> rqw =
+                        new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
+                    rqw.in(com.iwhalecloud.byai.manager.entity.resource.SsResource::getManOrgId, managedOrgIds)
+                       .ne(com.iwhalecloud.byai.manager.entity.resource.SsResource::getResourceStatus,
+                           com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus.REMOVED.getNum());
+                    List<com.iwhalecloud.byai.manager.entity.resource.SsResource> orgResources =
+                        ssResourceMapper.selectList(rqw);
+                    if (!CollectionUtils.isEmpty(orgResources)) {
+                        for (com.iwhalecloud.byai.manager.entity.resource.SsResource resource : orgResources) {
+                            if (resource.getResourceId() != null && resource.getResourceBizType() != null) {
+                                result.put(String.valueOf(resource.getResourceId()),
+                                    resource.getResourceBizType());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        return result;
+    }
+
+    /**
      * 有效授权缓存只保留仍存在且未注销的资源。授权表保留历史记录，资源重新上架后可按原授权重新生效。
      */
     private List<PrivilegeGrant> filterEffectiveResourceGrants(List<PrivilegeGrant> authList) {
@@ -327,8 +441,10 @@ public class AuthApplicationService {
         Runnable task = () -> {
             for (Long userId : affectedUserIds) {
                 authRedisApplicationService.removeUserAuthByResourceIds(userId, removedResourceIds);
+                authRedisApplicationService.removeUserManageAuthByResourceIds(userId, removedResourceIds);
             }
             authRedisSyncService.asyncSyncAuthChangedUsers(affectedUserIds, RESOURCE_REMOVED_AUTH_SYNC_HINT);
+            authRedisSyncService.asyncSyncManageAuthChangedUsers(affectedUserIds, RESOURCE_REMOVED_AUTH_SYNC_HINT);
         };
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
@@ -995,6 +1111,33 @@ public class AuthApplicationService {
                 UserType.BUSINESS_MAN));
         return hasGlobalAdminRole
             || ADMIN_VIP_USER_CODE.equalsIgnoreCase(CurrentUserHolder.getCurrentUserCode());
+    }
+
+    /**
+     * 判断指定用户（非当前登录用户）是否拥有不受单资源授权限制的全局资源管理权限。
+     * <p>
+     * {@link #isCurrentUserGlobalResourceManager()} 依赖 {@link CurrentUserHolder} 线程本地上下文，
+     * 只能判断当前请求的登录用户；异步同步场景（如 Redis 管理权限刷新）需要按 userId 查库判断，故单独提供本方法。
+     *
+     * @param userId 用户标识
+     * @return 是否为全局资源管理角色
+     */
+    public boolean isGlobalResourceManagerByUserId(Long userId) {
+        if (userId == null) {
+            return false;
+        }
+        Users user = userService.findById(userId);
+        if (user != null && ADMIN_VIP_USER_CODE.equalsIgnoreCase(user.getUserCode())) {
+            return true;
+        }
+        LambdaQueryWrapper<UsersOrganization> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(UsersOrganization::getUserId, userId);
+        List<UsersOrganization> userOrgs = usersOrganizationMapper.selectList(queryWrapper);
+        if (CollectionUtils.isEmpty(userOrgs)) {
+            return false;
+        }
+        return userOrgs.stream().anyMatch(item -> StringUtils.equalsAny(item.getUserType(), UserType.PLAT_MAN,
+            UserType.PLAT_DEVOPS, UserType.BUSINESS_MAN));
     }
 
     /**
@@ -1777,6 +1920,7 @@ public class AuthApplicationService {
         Runnable task = () -> {
             logger.info("授权变更涉及用户数：{}，开始同步权限到Redis", syncUserIds.size());
             this.authRedisSyncService.asyncSyncAuthChangedUsers(syncUserIds, grantType);
+            this.authRedisSyncService.asyncSyncManageAuthChangedUsers(syncUserIds, grantType);
         };
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {

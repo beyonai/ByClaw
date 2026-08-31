@@ -32,6 +32,7 @@ import com.iwhalecloud.byai.manager.entity.users.Users;
 import com.iwhalecloud.byai.manager.mapper.auth.PrivilegeGrantMapper;
 import com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper;
 import com.iwhalecloud.byai.manager.mapper.users.UsersMapper;
+import com.iwhalecloud.byai.manager.mapper.users.UsersOrganizationMapper;
 import com.iwhalecloud.byai.manager.qo.auth.AuthDetailQo;
 import com.iwhalecloud.byai.manager.qo.auth.PrivilegeGrantQo;
 import com.iwhalecloud.byai.manager.qo.auth.ResourceMemberQueryQo;
@@ -1325,6 +1326,211 @@ class AuthApplicationServiceTest {
         when(ssResourceService.findByIdList(Set.of(500L))).thenReturn(List.of(removedResource));
 
         assertThat(service.buildUserAuthResources(1001L)).doesNotContainKey("500");
+    }
+
+    @Test
+    void buildUserManageResources_returnsResourceWithEffectiveAllowManageRedGrant() {
+        AuthApplicationService service = new AuthApplicationService();
+        PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
+        OrganizationService organizationService = mock(OrganizationService.class);
+        PositionService positionService = mock(PositionService.class);
+        StationService stationService = mock(StationService.class);
+        SsResourceService ssResourceService = mock(SsResourceService.class);
+        SsResourceMapper ssResourceMapper = mock(SsResourceMapper.class);
+        UsersOrganizationMapper usersOrganizationMapper = mock(UsersOrganizationMapper.class);
+        ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
+        ReflectionTestUtils.setField(service, "organizationService", organizationService);
+        ReflectionTestUtils.setField(service, "positionService", positionService);
+        ReflectionTestUtils.setField(service, "stationService", stationService);
+        ReflectionTestUtils.setField(service, "ssResourceService", ssResourceService);
+        ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "usersOrganizationMapper", usersOrganizationMapper);
+
+        when(organizationService.findEffectiveOrganizationIdsByUserId(1001L)).thenReturn(Set.of());
+        when(positionService.findPositionByUserId(1001L)).thenReturn(List.of());
+        when(stationService.getStationByUserId(1001L)).thenReturn(null);
+        when(ssResourceMapper.selectList(any())).thenReturn(List.of());
+        when(usersOrganizationMapper.selectList(any())).thenReturn(List.of());
+
+        PrivilegeGrant manageGrant = new PrivilegeGrant();
+        manageGrant.setGrantObjId(500L);
+        manageGrant.setGrantObjType(ResourceBizTypeEnum.DIG_EMPLOYEE.name());
+        manageGrant.setGrantToObjType(GrantToObjType.USER);
+        manageGrant.setGrantToObjId(1001L);
+        manageGrant.setGrantToType(Color.RED);
+        when(privilegeGrantService.findPrivilegeByQo(any())).thenAnswer(invocation -> {
+            PrivilegeGrantQo qo = invocation.getArgument(0);
+            return GrantToObjType.USER.equals(qo.getGrantToObjType()) ? List.of(manageGrant) : List.of();
+        });
+        SsResource activeResource = new SsResource();
+        activeResource.setResourceId(500L);
+        activeResource.setResourceStatus(ResourceStatus.LIST.getNum());
+        when(ssResourceService.findByIdList(Set.of(500L))).thenReturn(List.of(activeResource));
+
+        Map<String, String> resources = service.buildUserManageResources(1001L);
+
+        assertThat(resources).containsEntry("500", ResourceBizTypeEnum.DIG_EMPLOYEE.name());
+        verify(privilegeGrantService).findPrivilegeByQo(argThat(qo -> GrantType.ALLOW_MANAGE.equals(qo.getGrantType())
+            && GrantToObjType.USER.equals(qo.getGrantToObjType())));
+    }
+
+    @Test
+    void buildUserManageResources_blackGrantOverridesRedGrant() {
+        AuthApplicationService service = new AuthApplicationService();
+        PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
+        OrganizationService organizationService = mock(OrganizationService.class);
+        PositionService positionService = mock(PositionService.class);
+        StationService stationService = mock(StationService.class);
+        SsResourceService ssResourceService = mock(SsResourceService.class);
+        SsResourceMapper ssResourceMapper = mock(SsResourceMapper.class);
+        UsersOrganizationMapper usersOrganizationMapper = mock(UsersOrganizationMapper.class);
+        ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
+        ReflectionTestUtils.setField(service, "organizationService", organizationService);
+        ReflectionTestUtils.setField(service, "positionService", positionService);
+        ReflectionTestUtils.setField(service, "stationService", stationService);
+        ReflectionTestUtils.setField(service, "ssResourceService", ssResourceService);
+        ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "usersOrganizationMapper", usersOrganizationMapper);
+
+        when(organizationService.findEffectiveOrganizationIdsByUserId(1001L)).thenReturn(Set.of());
+        when(positionService.findPositionByUserId(1001L)).thenReturn(List.of());
+        when(stationService.getStationByUserId(1001L)).thenReturn(null);
+        when(ssResourceMapper.selectList(any())).thenReturn(List.of());
+        when(usersOrganizationMapper.selectList(any())).thenReturn(List.of());
+
+        PrivilegeGrant redGrant = new PrivilegeGrant();
+        redGrant.setGrantObjId(500L);
+        redGrant.setGrantObjType(ResourceBizTypeEnum.DIG_EMPLOYEE.name());
+        redGrant.setGrantToObjType(GrantToObjType.USER);
+        redGrant.setGrantToObjId(1001L);
+        redGrant.setGrantToType(Color.RED);
+        PrivilegeGrant blackGrant = new PrivilegeGrant();
+        blackGrant.setGrantObjId(500L);
+        blackGrant.setGrantObjType(ResourceBizTypeEnum.DIG_EMPLOYEE.name());
+        blackGrant.setGrantToObjType(GrantToObjType.USER);
+        blackGrant.setGrantToObjId(1001L);
+        blackGrant.setGrantToType(Color.BLACK);
+        when(privilegeGrantService.findPrivilegeByQo(any())).thenAnswer(invocation -> {
+            PrivilegeGrantQo qo = invocation.getArgument(0);
+            return GrantToObjType.USER.equals(qo.getGrantToObjType()) ? List.of(redGrant, blackGrant) : List.of();
+        });
+        SsResource activeResource = new SsResource();
+        activeResource.setResourceId(500L);
+        activeResource.setResourceStatus(ResourceStatus.LIST.getNum());
+        when(ssResourceService.findByIdList(Set.of(500L))).thenReturn(List.of(activeResource));
+
+        assertThat(service.buildUserManageResources(1001L)).doesNotContainKey("500");
+    }
+
+    @Test
+    void buildUserManageResources_includesResourcesCreatedByUser() {
+        AuthApplicationService service = new AuthApplicationService();
+        PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
+        OrganizationService organizationService = mock(OrganizationService.class);
+        PositionService positionService = mock(PositionService.class);
+        StationService stationService = mock(StationService.class);
+        SsResourceMapper ssResourceMapper = mock(SsResourceMapper.class);
+        UsersOrganizationMapper usersOrganizationMapper = mock(UsersOrganizationMapper.class);
+        ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
+        ReflectionTestUtils.setField(service, "organizationService", organizationService);
+        ReflectionTestUtils.setField(service, "positionService", positionService);
+        ReflectionTestUtils.setField(service, "stationService", stationService);
+        ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "usersOrganizationMapper", usersOrganizationMapper);
+
+        when(organizationService.findEffectiveOrganizationIdsByUserId(1001L)).thenReturn(Set.of());
+        when(positionService.findPositionByUserId(1001L)).thenReturn(List.of());
+        when(stationService.getStationByUserId(1001L)).thenReturn(null);
+        when(privilegeGrantService.findPrivilegeByQo(any())).thenReturn(List.of());
+        when(usersOrganizationMapper.selectList(any())).thenReturn(List.of());
+
+        SsResource createdResource = new SsResource();
+        createdResource.setResourceId(600L);
+        createdResource.setResourceBizType(ResourceBizTypeEnum.DIG_EMPLOYEE.name());
+        createdResource.setCreateBy(1001L);
+        createdResource.setResourceStatus(ResourceStatus.LIST.getNum());
+        when(ssResourceMapper.selectList(argThat(qw -> qw != null))).thenReturn(List.of(createdResource));
+
+        assertThat(service.buildUserManageResources(1001L)).containsEntry("600",
+            ResourceBizTypeEnum.DIG_EMPLOYEE.name());
+    }
+
+    @Test
+    void buildUserManageResources_includesResourcesUnderManagedOrganization() {
+        AuthApplicationService service = new AuthApplicationService();
+        PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
+        OrganizationService organizationService = mock(OrganizationService.class);
+        PositionService positionService = mock(PositionService.class);
+        StationService stationService = mock(StationService.class);
+        SsResourceMapper ssResourceMapper = mock(SsResourceMapper.class);
+        UsersOrganizationMapper usersOrganizationMapper = mock(UsersOrganizationMapper.class);
+        ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
+        ReflectionTestUtils.setField(service, "organizationService", organizationService);
+        ReflectionTestUtils.setField(service, "positionService", positionService);
+        ReflectionTestUtils.setField(service, "stationService", stationService);
+        ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "usersOrganizationMapper", usersOrganizationMapper);
+
+        when(organizationService.findEffectiveOrganizationIdsByUserId(1001L)).thenReturn(Set.of());
+        when(positionService.findPositionByUserId(1001L)).thenReturn(List.of());
+        when(stationService.getStationByUserId(1001L)).thenReturn(null);
+        when(privilegeGrantService.findPrivilegeByQo(any())).thenReturn(List.of());
+
+        com.iwhalecloud.byai.manager.entity.users.UsersOrganization orgManRecord =
+            new com.iwhalecloud.byai.manager.entity.users.UsersOrganization();
+        orgManRecord.setUserId(1001L);
+        orgManRecord.setOrgId(10L);
+        orgManRecord.setUserType(UserType.ORG_MAN);
+        when(usersOrganizationMapper.selectList(any())).thenReturn(List.of(orgManRecord));
+        when(organizationService.findSelfAndDescendantOrgIds(10L)).thenReturn(List.of(10L, 11L));
+
+        SsResource orgResource = new SsResource();
+        orgResource.setResourceId(700L);
+        orgResource.setResourceBizType(ResourceBizTypeEnum.DIG_EMPLOYEE.name());
+        orgResource.setManOrgId(11L);
+        orgResource.setResourceStatus(ResourceStatus.LIST.getNum());
+        // First selectList call resolves the creator-dimension query (empty), second resolves org resources.
+        when(ssResourceMapper.selectList(any())).thenReturn(List.of()).thenReturn(List.of(orgResource));
+
+        assertThat(service.buildUserManageResources(1001L)).containsEntry("700",
+            ResourceBizTypeEnum.DIG_EMPLOYEE.name());
+    }
+
+    @Test
+    void buildUserManageResources_returnsEmptyMapForNullUserId() {
+        AuthApplicationService service = new AuthApplicationService();
+        assertThat(service.buildUserManageResources(null)).isEmpty();
+    }
+
+    @Test
+    void isGlobalResourceManagerByUserId_trueForAdminVipUserCode() {
+        AuthApplicationService service = new AuthApplicationService();
+        UserService userService = mock(UserService.class);
+        UsersOrganizationMapper usersOrganizationMapper = mock(UsersOrganizationMapper.class);
+        ReflectionTestUtils.setField(service, "userService", userService);
+        ReflectionTestUtils.setField(service, "usersOrganizationMapper", usersOrganizationMapper);
+
+        Users adminUser = new Users();
+        adminUser.setUserCode("adminvip");
+        when(userService.findById(1001L)).thenReturn(adminUser);
+
+        assertThat(service.isGlobalResourceManagerByUserId(1001L)).isTrue();
+    }
+
+    @Test
+    void isGlobalResourceManagerByUserId_falseForOrdinaryUserWithoutGlobalRole() {
+        AuthApplicationService service = new AuthApplicationService();
+        UserService userService = mock(UserService.class);
+        UsersOrganizationMapper usersOrganizationMapper = mock(UsersOrganizationMapper.class);
+        ReflectionTestUtils.setField(service, "userService", userService);
+        ReflectionTestUtils.setField(service, "usersOrganizationMapper", usersOrganizationMapper);
+
+        Users ordinaryUser = new Users();
+        ordinaryUser.setUserCode("someone");
+        when(userService.findById(1001L)).thenReturn(ordinaryUser);
+        when(usersOrganizationMapper.selectList(any())).thenReturn(List.of());
+
+        assertThat(service.isGlobalResourceManagerByUserId(1001L)).isFalse();
     }
 
     @Test
