@@ -2,7 +2,6 @@ import {
   type CallerPrincipal,
   type IngressSessionBindingRepository,
   type RunEvent,
-  type RunService,
 } from "@byclaw/by-conductor";
 import {
   AgentState,
@@ -17,13 +16,11 @@ import {
   ResumeCommand,
   TaskCancelledError,
   WorkerRegistry,
-  WorkerRunner,
   type AgentContext,
   type GatewayCommand,
-  createRedis,
 } from "@byclaw/by-framework";
 import { BeyondTokenAuthError } from "../auth/beyond-token.js";
-import type { RunIngressService } from "../ingress/run-ingress-service.js";
+import { truncateForLog } from "../log-format.js";
 import {
   commandAgentName,
   commandGroupChatRef,
@@ -49,7 +46,12 @@ import {
   ByFrameworkRunPresenter,
   type WorkerProtocolEmitter,
 } from "./by-framework-run-presenter.js";
-import { truncateForLog } from "../log-format.js";
+import type {
+  ByClawSuperWorkerOptions,
+  WorkerLogger,
+  WorkerRunIngress,
+  WorkerRunService,
+} from "./by-framework-worker-contracts.js";
 
 const CHILD_RESUME_PROTOCOL_ERROR_CODE = "CHILD_RESUME_PROTOCOL_INVALID";
 const CHILD_RESUME_PROTOCOL_USER_MESSAGE =
@@ -58,6 +60,100 @@ const CHILD_RESUME_NOT_RECOVERABLE_ERROR_CODE = "CHILD_RESUME_NOT_RECOVERABLE";
 const CHILD_RESUME_NOT_RECOVERABLE_USER_MESSAGE =
   "未找到可恢复的子 Agent 调度，本次任务已终止，请重试。";
 const COMMAND_PROCESSING_ERROR_CODE = "COMMAND_PROCESSING_FAILED";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 文件内部模型：不参与对外 API
+// ─────────────────────────────────────────────────────────────────────────────
+
+type AuthorizedRunContext = Awaited<ReturnType<WorkerRunIngress["authorizeRun"]>>;
+type WorkerRun = Awaited<ReturnType<WorkerRunIngress["createRun"]>>;
+
+interface AskCommandData {
+  message: string;
+  attachments: ReturnType<typeof extractUserInput>["attachments"];
+  thinkingLevel: ReturnType<typeof commandThinkingLevel>;
+  groupChatRef: ReturnType<typeof commandGroupChatRef>;
+  orchestrator: ReturnType<typeof commandOrchestratorRef>;
+  sessionContext: ReturnType<typeof commandSessionContext>;
+  agentName: string;
+  auth: { beyondToken: string; systemCode?: string };
+  metadata: Record<string, unknown>;
+}
+
+interface AskSessionBinding {
+  externalSessionId: string;
+  key: string;
+  sessionId?: string;
+}
+
+interface ForwardedRun {
+  id: string;
+  sessionId: string;
+  createdAt: number;
+}
+
+interface DelegationFailureInfo {
+  agentName: string;
+  agentId: string;
+  reason: string;
+  stage: string;
+}
+
+interface RunForwardingState {
+  reasoningStarted: boolean;
+  reasoningEnded: boolean;
+  answer: string;
+  answerEmitted: boolean;
+  delegationDispatched: boolean;
+  delegationFailure?: DelegationFailureInfo;
+  waitingForLeaderInteraction: boolean;
+  resumedAttemptStarted: boolean;
+}
+
+interface RunForwardingScope {
+  run: ForwardedRun;
+  principal: CallerPrincipal;
+  context: AgentContext;
+  reasoningMessageId: string;
+  summaryMessageId?: string;
+}
+
+interface FailureStreamInput {
+  errorCode: string;
+  userMessage: string;
+  errorSource?: string;
+  errorDetail?: string;
+  runId?: string;
+  delegationId?: string;
+  protocolError?: boolean;
+}
+
+interface ResumeCommandHandlerOptions {
+  runService: WorkerRunService;
+  runIngress: WorkerRunIngress;
+  finishFailureStream(context: AgentContext, input: FailureStreamInput): Promise<void>;
+  forwardRun(
+    authorized: AuthorizedRunContext,
+    context: AgentContext,
+    afterEventId: number,
+  ): Promise<AgentTaskResult>;
+  logger?: WorkerLogger;
+}
+
+interface AskCommandHandlerOptions {
+  registry: WorkerRegistry;
+  runService: WorkerRunService;
+  runIngress: WorkerRunIngress;
+  sessionBindings?: IngressSessionBindingRepository;
+  forwardRun(
+    run: WorkerRun,
+    principal: CallerPrincipal,
+    context: AgentContext,
+    agentName: string,
+    locale?: string,
+  ): Promise<AgentTaskResult>;
+  logger?: WorkerLogger;
+}
 
 /** 保留已由 Delegation 事件确定的失败责任方，避免总入口再改写为 Super 异常。 */
 class AttributedDelegationFailure extends Error {
@@ -71,33 +167,9 @@ class AttributedDelegationFailure extends Error {
   }
 }
 
-export type RedisClient = ReturnType<typeof createRedis>;
-export type WorkerRunService = Pick<
-  RunService,
-  "streamEvents" | "cancelRun" | "respondToInteraction" | "resumeDelegation"
->;
-export type WorkerRunIngress = Pick<
-  RunIngressService,
-  "createSessionRun" | "createRun" | "resolvePrincipal" | "authorizeRun"
->;
-
-export interface WorkerLogger {
-  info(bindings: Record<string, unknown>, message: string): void;
-  warn(bindings: Record<string, unknown>, message: string): void;
-  error(bindings: Record<string, unknown>, message: string): void;
-}
-
-export interface ByClawSuperWorkerOptions {
-  workerId: string;
-  agentType: string;
-  redis: RedisClient;
-  registry?: WorkerRegistry;
-  runService: WorkerRunService;
-  runIngress: WorkerRunIngress;
-  sessionBindings?: IngressSessionBindingRepository;
-  protocolEmitter?: WorkerProtocolEmitter;
-  logger?: WorkerLogger;
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// 框架适配插件
+// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * GatewayWorker 会在 ResumeCommand 进入 processCommand 前自动发送一个面向框架内部的
@@ -133,106 +205,208 @@ class SuppressResumeStatePlugin extends Plugin {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// ResumeCommand 用例
+// ─────────────────────────────────────────────────────────────────────────────
+
 /**
- * byclaw-super 的 by-framework 入站 Worker。
- * 它把 AskAgent 转为内部 Run，并把 Run 事件映射回 by-framework 流式协议。
+ * 负责 ResumeCommand 的完整恢复用例。
+ *
+ * Worker 只做命令路由；本类集中管理用户交互恢复、子 Agent 回调校验、Run 唤醒和
+ * 恢复后事件转发，避免同一条链路分散在 GatewayWorker 的多个分支中。
  */
-export class ByClawSuperGatewayWorker extends GatewayWorker {
-  readonly #agentType: string;
-  readonly #registry: WorkerRegistry;
+class ByFrameworkResumeCommandHandler {
   readonly #runService: WorkerRunService;
   readonly #runIngress: WorkerRunIngress;
-  readonly #protocolEmitter: WorkerProtocolEmitter;
-  readonly #presenter: ByFrameworkRunPresenter;
+  readonly #finishFailureStream: ResumeCommandHandlerOptions["finishFailureStream"];
+  readonly #forwardRun: ResumeCommandHandlerOptions["forwardRun"];
   readonly #logger: WorkerLogger | undefined;
-  readonly #sessionBindings: IngressSessionBindingRepository | undefined;
-  readonly #activeRuns = new Map<string, string>();
-  readonly #externalSessionBindings = new Map<string, string>();
 
-  /** 注入共享 Redis、业务 Run 入口和日志实现。 */
-  constructor(options: ByClawSuperWorkerOptions) {
-    const registry = options.registry ?? new WorkerRegistry(options.redis);
-    const pluginRegistry = new PluginRegistry();
-    pluginRegistry.registerBundle(new SuppressResumeStatePlugin());
-    super(options.workerId, registry, options.redis, pluginRegistry);
-    this.#agentType = options.agentType;
-    this.#registry = registry;
+  constructor(options: ResumeCommandHandlerOptions) {
     this.#runService = options.runService;
     this.#runIngress = options.runIngress;
-    this.#protocolEmitter = options.protocolEmitter ?? new GatewayDataEmitter(options.redis);
-    this.#presenter = new ByFrameworkRunPresenter(this.#agentType, this.#protocolEmitter);
+    this.#finishFailureStream = options.finishFailureStream;
+    this.#forwardRun = options.forwardRun;
     this.#logger = options.logger;
-    this.#sessionBindings = options.sessionBindings;
   }
 
-  /** 声明当前 Worker 可处理的逻辑 Agent 类型，供 by-framework 注册和路由。 */
-  getAgentTypes(): ReadonlyArray<string> {
-    return [this.#agentType];
+  /** 按固定步骤消费用户交互或子 Agent 终态回调，并恢复原 Run。 */
+  async handle(command: ResumeCommand, context: AgentContext): Promise<AgentTaskResult> {
+    this.#logReceivedCommand(command);
+    const runId = recordString(command.header.metadata, "parent_run_id");
+
+    // Step 1：用户交互 Resume 只补充既有 Run 的输入，不进入子 Agent 结算流程。
+    const interactionResult = await this.#resumeUserInteraction(command, context, runId);
+    if (interactionResult) {
+      return interactionResult;
+    }
+
+    // Step 2：严格校验子 Agent 回调与 Delegation 的关联字段，协议错误直接收口。
+    const parsed = await this.#parseChildResume(command, context, runId);
+    if ("failure" in parsed) {
+      return parsed.failure;
+    }
+    const childResume = parsed.childResume;
+
+    // Step 3：将合法终态写入持久化真相，并把 WAITING_AGENT Run 重新放回执行队列。
+    const resumed = childResume
+      ? await this.#runService.resumeDelegation({
+          delegationId: childResume.delegationId,
+          status: childResume.status,
+          finalAnswer: childResume.finalAnswer,
+        })
+      : { accepted: false };
+    this.#logSettlement(command, childResume, resumed);
+
+    // Step 4：关联不到 Delegation 的终态不能静默丢弃，需要给当前用户流明确失败结果。
+    if (childResume && !resumed.accepted && !resumed.runId) {
+      return await this.#rejectUnrecoverableResume(command, context, childResume.delegationId);
+    }
+
+    // Step 5：只有真正唤醒 Run 的回调才接管后续事件；重复或辅助回调在当前上下文结束。
+    if (resumed.accepted && resumed.runId && resumed.forwardEvents !== false) {
+      const { authorized } = await this.#authorizeResumeRun(command, resumed.runId);
+      return await this.#forwardRun(authorized, context, resumed.afterEventId ?? 0);
+    }
+    return this.#completeAuxiliaryResume(context);
   }
 
-  /**
-   * 处理 AskAgent 与子 Agent 回调 Resume。
-   * Resume 不创建新 Run，只完成回调会话，让 Connector 能收到终止事件。
-   */
-  async processCommand(command: GatewayCommand, context: AgentContext): Promise<AgentTaskResult> {
+  async #resumeUserInteraction(
+    command: ResumeCommand,
+    context: AgentContext,
+    runId: string,
+  ): Promise<AgentTaskResult | undefined> {
+    const interactionId = recordString(command.header.metadata, "interaction_id");
+    if (!interactionId || !runId) {
+      return undefined;
+    }
+
+    const { authorized, beyondToken } = await this.#authorizeResumeRun(command, runId);
+    if (authorized.run.id !== runId) {
+      throw new Error(`Authorized Run does not match Resume target: ${runId}`);
+    }
+    await this.#runService.respondToInteraction(
+      runId,
+      interactionId,
+      {
+        action: "submit",
+        text: extractMessage(command.content),
+      },
+      beyondToken,
+    );
+
+    // 交互 Resume 不是新聊天终态，禁止框架提前关闭共享输出流。
+    context.setStreamFinished(true);
+    this.#logger?.info(
+      { ...commandLogFields(command), runId, interactionId },
+      "已恢复用户交互",
+    );
+    return this.#completedResult();
+  }
+
+  async #parseChildResume(
+    command: ResumeCommand,
+    context: AgentContext,
+    runId: string,
+  ): Promise<
+    | { childResume: ReturnType<typeof parseChildAgentResume> }
+    | { failure: AgentTaskResult }
+  > {
     try {
-      if (command instanceof ResumeCommand) {
-        return await this.#processResumeCommand(command, context);
-      }
-      if (command instanceof AskAgentCommand) {
-        return await this.#processAskCommand(command, context);
-      }
-      throw new Error(`Unsupported by-framework command: ${command.actionType}`);
+      return { childResume: parseChildAgentResume(command) };
     } catch (error) {
-      const normalized = toError(error);
-      // 取消仍交给 GatewayWorker 的专用分支，保留级联取消和 CANCELLED 回调语义。
-      if (error instanceof TaskCancelledError || normalized.name === "TaskCancelledError") {
-        throw error;
-      }
-      // 有上游 Agent 的 Ask 由 by-framework 返回 FAILED Resume；当前 Worker 不能越权
-      // 关闭上游拥有的共享流。Resume 自身没有这一回传分支，必须在本地显式收口。
-      if (!(command instanceof ResumeCommand) && command.header.sourceAgentType) {
-        throw error;
-      }
-      const runId = recordString(command.header.metadata, "parent_run_id");
+      // 协议错误不可重试：正常结束 Redis 消费，同时显式关闭当前用户流。
       const delegationId = recordString(command.header.metadata, "delegation_id");
-      const failure = commandFailurePresentation(command, error);
-      this.#logger?.error(
+      this.#logger?.warn(
         {
           ...commandLogFields(command),
-          runId,
+          status: command.status,
+          parentMessageId: command.header.parentMessageId,
           delegationId,
-          errorSource: failure.errorSource,
-          error: normalized.message,
+          error: toError(error).message,
         },
-        "处理 by-framework 命令失败，正在终止当前用户流",
+        "拒绝协议不完整的子 Agent Resume 回调",
       );
       await this.#finishFailureStream(context, {
-        errorCode: COMMAND_PROCESSING_ERROR_CODE,
-        userMessage: failure.userMessage,
-        errorSource: failure.errorSource,
-        errorDetail: failure.errorDetail,
+        errorCode: CHILD_RESUME_PROTOCOL_ERROR_CODE,
+        userMessage: CHILD_RESUME_PROTOCOL_USER_MESSAGE,
         runId,
         delegationId,
+        protocolError: true,
       });
-      return new AgentTaskResult({
-        status: AgentState.FAILED,
-        content: "",
-        replyData: null,
-        metadata: {
-          error_code: COMMAND_PROCESSING_ERROR_CODE,
-          error_source: failure.errorSource,
-          error_detail: failure.errorDetail,
-        },
-      });
+      return {
+        failure: new AgentTaskResult({
+          status: AgentState.FAILED,
+          content: "",
+          replyData: null,
+          metadata: { error_code: CHILD_RESUME_PROTOCOL_ERROR_CODE },
+        }),
+      };
     }
   }
 
-  /** 消费用户交互或子 Agent 终态回调，并恢复原 Run。 */
-  async #processResumeCommand(
+  async #rejectUnrecoverableResume(
     command: ResumeCommand,
     context: AgentContext,
+    delegationId: string,
   ): Promise<AgentTaskResult> {
+    this.#logger?.warn(
+      {
+        ...commandLogFields(command),
+        requestMessageId: command.header.parentMessageId,
+        delegationId,
+      },
+      "子 Agent Resume 未找到可恢复的 Delegation",
+    );
+    await this.#finishFailureStream(context, {
+      errorCode: CHILD_RESUME_NOT_RECOVERABLE_ERROR_CODE,
+      userMessage: CHILD_RESUME_NOT_RECOVERABLE_USER_MESSAGE,
+      delegationId,
+    });
+    return new AgentTaskResult({
+      status: AgentState.FAILED,
+      content: "",
+      replyData: null,
+      metadata: { error_code: CHILD_RESUME_NOT_RECOVERABLE_ERROR_CODE },
+    });
+  }
+
+  async #authorizeResumeRun(
+    command: ResumeCommand,
+    runId: string,
+  ): Promise<{ authorized: AuthorizedRunContext; beyondToken: string }> {
+    const beyondToken = this.#requireBeyondToken(command);
+    const systemCode = commandString(command, "System-Code");
+    const authorized = await this.#runIngress.authorizeRun(runId, {
+      beyondToken,
+      ...(systemCode ? { systemCode } : {}),
+    });
+    return { authorized, beyondToken };
+  }
+
+  #requireBeyondToken(command: ResumeCommand): string {
+    const beyondToken = commandString(command, "Beyond-Token");
+    if (!beyondToken) {
+      throw new BeyondTokenAuthError("Beyond-Token metadata is required");
+    }
+    return beyondToken;
+  }
+
+  #completeAuxiliaryResume(context: AgentContext): AgentTaskResult {
+    // 无人等待或重复回调只是辅助命令，不应关闭共享会话流。
+    context.setStreamFinished(true);
+    return this.#completedResult();
+  }
+
+  #completedResult(): AgentTaskResult {
+    return new AgentTaskResult({
+      status: AgentState.COMPLETED,
+      content: "",
+      replyData: null,
+    });
+  }
+
+  #logReceivedCommand(command: ResumeCommand): void {
     this.#logger?.info(
       {
         ...commandLogFields(command),
@@ -247,79 +421,13 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
       },
       "收到 by-framework ResumeCommand",
     );
-    const interactionId = recordString(command.header.metadata, "interaction_id");
-    const runId = recordString(command.header.metadata, "parent_run_id");
-    if (interactionId && runId) {
-      const beyondToken = commandString(command, "Beyond-Token");
-      if (!beyondToken) {
-        throw new BeyondTokenAuthError("Beyond-Token metadata is required");
-      }
-      const systemCode = commandString(command, "System-Code");
-      const authorized = await this.#runIngress.authorizeRun(runId, {
-        beyondToken,
-        ...(systemCode ? { systemCode } : {}),
-      });
-      if (authorized.run.id !== runId) {
-        throw new Error(`Authorized Run does not match Resume target: ${runId}`);
-      }
-      await this.#runService.respondToInteraction(
-        runId,
-        interactionId,
-        {
-          action: "submit",
-          text: extractMessage(command.content),
-        },
-        beyondToken,
-      );
-      // 这是对既有 Run 的辅助输入，不是一个新的聊天终态。标记当前 Resume
-      // context 已收尾，避免 by-framework 自动发送 APP_STREAM_RESPONSE 提前关闭共享流。
-      context.setStreamFinished(true);
-      this.#logger?.info(
-        { ...commandLogFields(command), runId, interactionId },
-        "已恢复用户交互",
-      );
-      return new AgentTaskResult({
-        status: AgentState.COMPLETED,
-        content: "",
-        replyData: null,
-      });
-    }
-    let childResume: ReturnType<typeof parseChildAgentResume>;
-    try {
-      childResume = parseChildAgentResume(command);
-    } catch (error) {
-      // 协议错误属于不可重试消息。若继续抛出，Redis consumer group 会反复领取同一条
-      // Resume 并阻塞后续正常回调；记录关联字段后正常 ACK，同时显式输出失败终态，
-      // 避免原 Run 在数据库回调截止时间到达前让前端持续空转。
-      this.#logger?.warn(
-        {
-          ...commandLogFields(command),
-          status: command.status,
-          parentMessageId: command.header.parentMessageId,
-          delegationId: recordString(command.header.metadata, "delegation_id"),
-          error: toError(error).message,
-        },
-        "拒绝协议不完整的子 Agent Resume 回调",
-      );
-      await this.#finishRejectedResumeStream(
-        context,
-        runId,
-        recordString(command.header.metadata, "delegation_id"),
-      );
-      return new AgentTaskResult({
-        status: AgentState.FAILED,
-        content: "",
-        replyData: null,
-        metadata: { error_code: CHILD_RESUME_PROTOCOL_ERROR_CODE },
-      });
-    }
-    const resumed = childResume
-      ? await this.#runService.resumeDelegation({
-          delegationId: childResume.delegationId,
-          status: childResume.status,
-          finalAnswer: childResume.finalAnswer,
-        })
-      : { accepted: false };
+  }
+
+  #logSettlement(
+    command: ResumeCommand,
+    childResume: ReturnType<typeof parseChildAgentResume>,
+    resumed: Awaited<ReturnType<WorkerRunService["resumeDelegation"]>>,
+  ): void {
     this.#logger?.info(
       {
         ...commandLogFields(command),
@@ -333,178 +441,61 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
         ? "已持久化子 Agent Resume 回调并唤醒原 Run"
         : "收到无可恢复 Run 的子 Agent Resume 回调",
     );
-    if (childResume && !resumed.accepted && !resumed.runId) {
-      this.#logger?.warn(
-        {
-          ...commandLogFields(command),
-          requestMessageId: childResume.requestMessageId,
-          delegationId: childResume.delegationId,
-        },
-        "子 Agent Resume 未找到可恢复的 Delegation",
-      );
-      await this.#finishFailureStream(context, {
-        errorCode: CHILD_RESUME_NOT_RECOVERABLE_ERROR_CODE,
-        userMessage: CHILD_RESUME_NOT_RECOVERABLE_USER_MESSAGE,
-        delegationId: childResume.delegationId,
-      });
-      return new AgentTaskResult({
-        status: AgentState.FAILED,
-        content: "",
-        replyData: null,
-        metadata: { error_code: CHILD_RESUME_NOT_RECOVERABLE_ERROR_CODE },
-      });
-    }
-    if (resumed.accepted && resumed.runId && resumed.forwardEvents !== false) {
-      const beyondToken = commandString(command, "Beyond-Token");
-      if (!beyondToken) {
-        throw new BeyondTokenAuthError("Beyond-Token metadata is required");
-      }
-      const systemCode = commandString(command, "System-Code");
-      const authorized = await this.#runIngress.authorizeRun(resumed.runId, {
-        beyondToken,
-        ...(systemCode ? { systemCode } : {}),
-      });
-      try {
-        const result = await this.#forwardRunEvents(
-          authorized.run,
-          authorized.session.owner,
-          context,
-          "超级助手",
-          authorized.session.sessionContext.locale,
-          {
-            afterEventId: resumed.afterEventId ?? 0,
-            summaryMessageId: `${authorized.run.id}:super-summary`,
-          },
-        );
-        await this.#markOriginalExecutionFinished(authorized.run, result.status);
-        return result;
-      } catch (error) {
-        await this.#markOriginalExecutionFinished(authorized.run, AgentState.FAILED);
-        throw error;
-      }
-    }
-    // 无人等待或重复回调只是辅助命令，不应关闭共享会话流。
-    context.setStreamFinished(true);
-    return new AgentTaskResult({
-      status: AgentState.COMPLETED,
-      content: "",
-      replyData: null,
-    });
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AskAgentCommand 用例
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 负责 AskAgentCommand 的完整入站用例。
+ *
+ * 身份解析、Session 定位、Run 创建、活动索引和取消监控都在此处闭环；Worker 无需了解
+ * Ask 命令内部的业务步骤。
+ */
+class ByFrameworkAskCommandHandler {
+  readonly #registry: WorkerRegistry;
+  readonly #runService: WorkerRunService;
+  readonly #runIngress: WorkerRunIngress;
+  readonly #sessionBindings: IngressSessionBindingRepository | undefined;
+  readonly #forwardRun: AskCommandHandlerOptions["forwardRun"];
+  readonly #logger: WorkerLogger | undefined;
+  readonly #activeRuns = new Map<string, string>();
+  readonly #externalSessionBindings = new Map<string, string>();
+
+  constructor(options: AskCommandHandlerOptions) {
+    this.#registry = options.registry;
+    this.#runService = options.runService;
+    this.#runIngress = options.runIngress;
+    this.#sessionBindings = options.sessionBindings;
+    this.#forwardRun = options.forwardRun;
+    this.#logger = options.logger;
   }
 
-  /** 验证 AskAgent、创建内部 Run，并转发 Super 自己拥有的输出。 */
-  async #processAskCommand(
-    command: AskAgentCommand,
-    context: AgentContext,
-  ): Promise<AgentTaskResult> {
-    const { message, attachments } = extractUserInput(command.content);
-    const beyondToken = commandString(command, "Beyond-Token");
-    if (!beyondToken) {
-      throw new BeyondTokenAuthError("Beyond-Token metadata is required");
-    }
-    const systemCode = commandString(command, "System-Code");
-    const thinkingLevel = commandThinkingLevel(command);
-    const groupChatRef = commandGroupChatRef(command);
-    const orchestrator = commandOrchestratorRef(command);
-    const sessionContext = commandSessionContext(command);
-    const agentName = commandAgentName(command) || "超级助手";
-
+  /** 按固定步骤把 AskAgentCommand 转为内部 Run，并转发 Run 输出。 */
+  async handle(command: AskAgentCommand, context: AgentContext): Promise<AgentTaskResult> {
+    // Step 1：解析协议字段并完成调用者鉴权，后续步骤只使用可信身份。
+    const data = this.#parseCommand(command);
     await context.checkCancelled();
     this.#logger?.info(commandLogFields(command), "开始处理 by-framework 入站任务");
-    const auth = {
-      beyondToken,
-      ...(systemCode ? { systemCode } : {}),
-    };
-    const metadata = { ...command.header.metadata };
-    const principal = await this.#runIngress.resolvePrincipal(auth);
-    const bindingExternalSessionId = orchestratorBindingSessionId(
-      command.header.sessionId,
-      orchestrator,
-    );
-    const bindingKey = externalSessionBindingKey(principal, bindingExternalSessionId);
-    const sessionId = this.#sessionBindings
-      ? await this.#sessionBindings.get({
-          source: "by-framework",
-          userCode: principal.userCode,
-          externalSessionId: bindingExternalSessionId,
-        })
-      : this.#externalSessionBindings.get(bindingKey);
-    const sourceAgentId = commandSourceAgentId(command) || orchestrator?.id || "";
-    const run = sessionId
-      ? await this.#runIngress.createRun({
-          sessionId,
-          message,
-          thinkingLevel,
-          ...(attachments.length > 0 ? { attachments } : {}),
-          ...(sourceAgentId ? { sourceAgentId } : {}),
-          ...(command.header.sessionId ? { externalSessionId: command.header.sessionId } : {}),
-          parentMessageId: command.header.messageId,
-          traceId: command.header.traceId,
-          metadata,
-          ...(groupChatRef ? { groupChatRef } : {}),
-          ...(orchestrator ? { orchestrator } : {}),
-          ...auth,
-        })
-      : await this.#runIngress.createSessionRun({
-          message,
-          thinkingLevel,
-          ...(sessionContext ? { context: sessionContext } : {}),
-          ...(attachments.length > 0 ? { attachments } : {}),
-          ...(sourceAgentId ? { sourceAgentId } : {}),
-          ...(command.header.sessionId ? { externalSessionId: command.header.sessionId } : {}),
-          parentMessageId: command.header.messageId,
-          traceId: command.header.traceId,
-          metadata,
-          ...(groupChatRef ? { groupChatRef } : {}),
-          ...(orchestrator ? { orchestrator } : {}),
-          ...auth,
-        });
-    if (this.#sessionBindings) {
-      await this.#sessionBindings.bind({
-        source: "by-framework",
-        userCode: principal.userCode,
-        externalSessionId: bindingExternalSessionId,
-        sessionId: run.sessionId,
-        now: Date.now(),
-      });
-    } else {
-      this.#externalSessionBindings.set(bindingKey, run.sessionId);
-    }
-    this.#activeRuns.set(command.header.messageId, run.id);
-    if (context.executionId) {
-      this.#activeRuns.set(context.executionId, run.id);
-    }
-    const stopCancellationMonitor = this.#monitorPersistedCancellation(command, context, run.id);
-    this.#logger?.info(
-      { ...commandLogFields(command), runId: run.id },
-      "by-framework 入站任务已创建 Run",
-    );
+    const principal = await this.#runIngress.resolvePrincipal(data.auth);
 
-    let keepActiveRunMapping = false;
-    try {
-      if (context.isCancelRequested()) {
-        await this.#runService.cancelRun(run.id, "by-framework task cancelled");
-        await context.checkCancelled();
-      }
-      const result = await this.#forwardRunEvents(
-        run,
-        principal,
-        context,
-        agentName,
-        sessionContext?.locale,
-      );
-      keepActiveRunMapping = result.status === AgentState.WAITING_AGENT;
-      return result;
-    } finally {
-      stopCancellationMonitor();
-      if (!keepActiveRunMapping) {
-        this.#deleteActiveRunMappings(run.id);
-      }
-    }
+    // Step 2：将外部会话定位到已有内部 Session；首次请求允许暂时没有绑定。
+    const binding = await this.#resolveSessionBinding(command, data, principal);
+
+    // Step 3：在已有 Session 追加 Run，或者为首次请求原子创建 Session + Run。
+    const run = await this.#createRun(command, data, binding.sessionId);
+
+    // Step 4：持久化会话关联并建立取消路由，确保外部 execution 能找到内部 Run。
+    await this.#registerRun(command, context, principal, binding, run);
+
+    // Step 5：转发 Run 事件；只有 WAITING_AGENT 状态需要保留活动索引供后续取消。
+    return await this.#executeRun(command, context, principal, data, run);
   }
 
-  /** 将 by-framework 的取消控制消息映射到正在执行的内部 Run。 */
-  async onCancelTask(command: unknown): Promise<void> {
+  /** 将 by-framework 的取消控制命令映射到当前活动 Run。 */
+  async handleCancel(command: unknown): Promise<void> {
     if (!(command instanceof CancelTaskCommand)) {
       return;
     }
@@ -520,11 +511,11 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
       "正在取消 by-framework 入站 Run",
     );
     await this.#runService.cancelRun(runId, command.reason || "by-framework task cancelled");
-    this.#deleteActiveRunMappings(runId);
+    this.releaseRun(runId);
   }
 
-  /** 清理同一 Run 在原 messageId、executionId 和 Resume 上下文中的全部临时映射。 */
-  #deleteActiveRunMappings(runId: string): void {
+  /** 清理同一 Run 在 messageId 和 executionId 下的全部活动索引。 */
+  releaseRun(runId: string): void {
     for (const [key, mappedRunId] of this.#activeRuns) {
       if (mappedRunId === runId) {
         this.#activeRuns.delete(key);
@@ -532,109 +523,143 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
     }
   }
 
-  /** 协议不完整的终态回调无法安全恢复原 Run；立即告知用户并关闭当前 trace。 */
-  async #finishRejectedResumeStream(
-    context: AgentContext,
-    runId: string,
-    delegationId: string,
-  ): Promise<void> {
-    await this.#finishFailureStream(context, {
-      errorCode: CHILD_RESUME_PROTOCOL_ERROR_CODE,
-      userMessage: CHILD_RESUME_PROTOCOL_USER_MESSAGE,
-      runId,
-      delegationId,
-      protocolError: true,
+  #parseCommand(command: AskAgentCommand): AskCommandData {
+    const { message, attachments } = extractUserInput(command.content);
+    const beyondToken = commandString(command, "Beyond-Token");
+    if (!beyondToken) {
+      throw new BeyondTokenAuthError("Beyond-Token metadata is required");
+    }
+    const systemCode = commandString(command, "System-Code");
+    return {
+      message,
+      attachments,
+      thinkingLevel: commandThinkingLevel(command),
+      groupChatRef: commandGroupChatRef(command),
+      orchestrator: commandOrchestratorRef(command),
+      sessionContext: commandSessionContext(command),
+      agentName: commandAgentName(command) || "超级助手",
+      auth: {
+        beyondToken,
+        ...(systemCode ? { systemCode } : {}),
+      },
+      metadata: { ...command.header.metadata },
+    };
+  }
+
+  async #resolveSessionBinding(
+    command: AskAgentCommand,
+    data: AskCommandData,
+    principal: CallerPrincipal,
+  ): Promise<AskSessionBinding> {
+    const externalSessionId = orchestratorBindingSessionId(
+      command.header.sessionId,
+      data.orchestrator,
+    );
+    const key = externalSessionBindingKey(principal, externalSessionId);
+    const sessionId = this.#sessionBindings
+      ? await this.#sessionBindings.get({
+          source: "by-framework",
+          userCode: principal.userCode,
+          externalSessionId,
+        })
+      : this.#externalSessionBindings.get(key);
+    return {
+      externalSessionId,
+      key,
+      ...(sessionId ? { sessionId } : {}),
+    };
+  }
+
+  async #createRun(
+    command: AskAgentCommand,
+    data: AskCommandData,
+    sessionId?: string,
+  ): Promise<WorkerRun> {
+    const sourceAgentId = commandSourceAgentId(command) || data.orchestrator?.id || "";
+    const commonInput = {
+      message: data.message,
+      thinkingLevel: data.thinkingLevel,
+      ...(data.attachments.length > 0 ? { attachments: data.attachments } : {}),
+      ...(sourceAgentId ? { sourceAgentId } : {}),
+      ...(command.header.sessionId ? { externalSessionId: command.header.sessionId } : {}),
+      parentMessageId: command.header.messageId,
+      traceId: command.header.traceId,
+      metadata: data.metadata,
+      ...(data.groupChatRef ? { groupChatRef: data.groupChatRef } : {}),
+      ...(data.orchestrator ? { orchestrator: data.orchestrator } : {}),
+      ...data.auth,
+    };
+    if (sessionId) {
+      return await this.#runIngress.createRun({ sessionId, ...commonInput });
+    }
+    return await this.#runIngress.createSessionRun({
+      ...commonInput,
+      ...(data.sessionContext ? { context: data.sessionContext } : {}),
     });
   }
 
-  /** 由当前 BY_SUPER trace 负责的失败必须同时包含用户正文、最终快照和流终止帧。 */
-  async #finishFailureStream(
+  async #registerRun(
+    command: AskAgentCommand,
     context: AgentContext,
-    input: {
-      errorCode: string;
-      userMessage: string;
-      errorSource?: string;
-      errorDetail?: string;
-      runId?: string;
-      delegationId?: string;
-      protocolError?: boolean;
-    },
+    principal: CallerPrincipal,
+    binding: AskSessionBinding,
+    run: WorkerRun,
   ): Promise<void> {
-    const runId = input.runId?.trim() ?? "";
-    const delegationId = input.delegationId?.trim() ?? "";
-    const messageId = runId
-      ? `${runId}:super-summary:answer`
-      : `${context.executionId || "command"}:error`;
-    const metadata = {
-      error_code: input.errorCode,
-      ...(input.errorSource ? { error_source: input.errorSource } : {}),
-      ...(input.errorDetail ? { error_detail: input.errorDetail } : {}),
-      ...(input.protocolError ? { protocol_error: true } : {}),
-      ...(runId ? { parent_run_id: runId } : {}),
-      ...(delegationId ? { delegation_id: delegationId } : {}),
-    };
-    const options = {
-      sourceAgentType: this.#agentType,
-      messageId,
-      parentMessageId: "-1",
-      metadata,
-    };
-    await this.#protocolEmitter.emitChunk(
-      context.sessionId,
-      context.traceId,
-      { content: input.userMessage, metadata },
-      { ...options, eventType: EventType.ANSWER_DELTA },
+    if (this.#sessionBindings) {
+      await this.#sessionBindings.bind({
+        source: "by-framework",
+        userCode: principal.userCode,
+        externalSessionId: binding.externalSessionId,
+        sessionId: run.sessionId,
+        now: Date.now(),
+      });
+    } else {
+      this.#externalSessionBindings.set(binding.key, run.sessionId);
+    }
+    this.#activeRuns.set(command.header.messageId, run.id);
+    if (context.executionId) {
+      this.#activeRuns.set(context.executionId, run.id);
+    }
+    this.#logger?.info(
+      { ...commandLogFields(command), runId: run.id },
+      "by-framework 入站任务已创建 Run",
     );
-    await this.#protocolEmitter.emitChunk(
-      context.sessionId,
-      context.traceId,
-      { content: input.userMessage, metadata },
-      { ...options, eventType: EventType.FINAL_ANSWER },
-    );
-    await this.#protocolEmitter.emitChunk(
-      context.sessionId,
-      context.traceId,
-      { content: "", metadata },
-      {
-        ...options,
-        eventType: EventType.APP_STREAM_RESPONSE,
-      },
-    );
-    context.setStreamFinished(true);
   }
 
-  /** ResumeCommand 是新 execution；显式同步最初入站 execution，避免长期停在 WAITING_AGENT。 */
-  async #markOriginalExecutionFinished(
-    run: { ingressContext?: { externalSessionId?: string; parentMessageId?: string } },
-    status: string,
-  ): Promise<void> {
-    if (
-      ![AgentState.COMPLETED, AgentState.FAILED, AgentState.CANCELLED].includes(
-        status as AgentState,
-      )
-    ) {
-      return;
+  async #executeRun(
+    command: AskAgentCommand,
+    context: AgentContext,
+    principal: CallerPrincipal,
+    data: AskCommandData,
+    run: WorkerRun,
+  ): Promise<AgentTaskResult> {
+    const stopCancellationMonitor = this.#monitorPersistedCancellation(command, context, run.id);
+    let keepActiveRunMapping = false;
+    try {
+      if (context.isCancelRequested()) {
+        await this.#runService.cancelRun(run.id, "by-framework task cancelled");
+        await context.checkCancelled();
+      }
+      const result = await this.#forwardRun(
+        run,
+        principal,
+        context,
+        data.agentName,
+        data.sessionContext?.locale,
+      );
+      keepActiveRunMapping = result.status === AgentState.WAITING_AGENT;
+      return result;
+    } finally {
+      stopCancellationMonitor();
+      if (!keepActiveRunMapping) {
+        this.releaseRun(run.id);
+      }
     }
-    const sessionId = run.ingressContext?.externalSessionId;
-    const messageId = run.ingressContext?.parentMessageId;
-    if (!sessionId || !messageId) {
-      return;
-    }
-    const execution = await this.#registry.getExecutionByMessageId(messageId, sessionId);
-    if (!execution?.execution_id) {
-      return;
-    }
-    await this.#registry.markExecutionFinished(
-      String(execution.execution_id),
-      sessionId,
-      status,
-    );
   }
 
   /**
-   * 兜底 claim 与 cancel 并发窗口：取消方可能在 Worker 写入 worker_id 前只把
-   * execution 标记为 cancel_requested，因而没有控制消息能触发 onCancelTask。
-   * 运行期间轮询同一 execution 真相，确保这种取消也能进入内部 RunService。
+   * 兜底 claim 与 cancel 并发窗口：取消方可能在 Worker 写入 worker_id 前只写入
+   * cancel_requested，因此运行期间需要轮询 execution 真相并转发给内部 Run。
    */
   #monitorPersistedCancellation(
     command: GatewayCommand,
@@ -712,10 +737,306 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
       clearInterval(timer);
     };
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 协议辅助函数
+// ─────────────────────────────────────────────────────────────────────────────
+
+function isLeaderInteractionEvent(
+  event: RunEvent,
+  type: "interaction.requested" | "interaction.responded",
+): boolean {
+  return event.type === type && stringData(event.data.source) === "leader";
+}
+
+/** 把 processCommand 总入口的异常按命令来源和消费阶段说清楚。 */
+function commandFailurePresentation(
+  command: GatewayCommand,
+  error: unknown,
+): { userMessage: string; errorSource: string; errorDetail: string } {
+  if (error instanceof AttributedDelegationFailure) {
+    return {
+      userMessage: error.message,
+      errorSource: error.errorSource,
+      errorDetail: error.errorDetail,
+    };
+  }
+
+  const normalized = toError(error);
+  const metadata = command.header.metadata;
+  const delegatedAgentName = recordString(metadata, "delegated_agent_name");
+  const delegatedAgentType = recordString(metadata, "delegated_agent_type");
+  const sourceAgentType = (command.header.sourceAgentType ?? "").trim();
+  const errorSource = delegatedAgentName || delegatedAgentType || sourceAgentType || "by-framework";
+  const displaySource = delegatedAgentName
+    ? `${delegatedAgentName}${delegatedAgentType ? `（${delegatedAgentType}）` : ""}`
+    : delegatedAgentType || sourceAgentType;
+  const failureKind =
+    error instanceof BeyondTokenAuthError || normalized.name === "BeyondTokenAuthError"
+      ? "鉴权失败"
+      : "消费失败";
+
+  if (command instanceof ResumeCommand) {
+    const callbackKind = recordString(metadata, "interaction_id")
+      ? "用户交互回调"
+      : "数字员工结果回调";
+    const sourcePrefix = delegatedAgentName
+      ? `${displaySource}的`
+      : displaySource
+        ? `${displaySource} 的`
+        : "";
+    return {
+      userMessage: `${sourcePrefix}${callbackKind}${failureKind}：${normalized.message}`,
+      errorSource,
+      errorDetail: normalized.message,
+    };
+  }
+
+  const sourcePrefix = sourceAgentType ? `来自 ${sourceAgentType} 的` : "by-framework ";
+  return {
+    userMessage: `${sourcePrefix}入站请求${failureKind}：${normalized.message}`,
+    errorSource,
+    errorDetail: normalized.message,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 对外阅读入口：文件唯一导出的核心 Worker 类
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * byclaw-super 的 by-framework 入站 Worker。
+ * 它把 AskAgent 转为内部 Run，并把 Run 事件映射回 by-framework 流式协议。
+ */
+export class ByClawSuperGatewayWorker extends GatewayWorker {
+  readonly #agentType: string;
+  readonly #registry: WorkerRegistry;
+  readonly #runService: WorkerRunService;
+  readonly #protocolEmitter: WorkerProtocolEmitter;
+  readonly #presenter: ByFrameworkRunPresenter;
+  readonly #logger: WorkerLogger | undefined;
+  readonly #askCommandHandler: ByFrameworkAskCommandHandler;
+  readonly #resumeCommandHandler: ByFrameworkResumeCommandHandler;
+
+  /** 注入共享 Redis、业务 Run 入口和日志实现。 */
+  constructor(options: ByClawSuperWorkerOptions) {
+    const registry = options.registry ?? new WorkerRegistry(options.redis);
+    const pluginRegistry = new PluginRegistry();
+    pluginRegistry.registerBundle(new SuppressResumeStatePlugin());
+    super(options.workerId, registry, options.redis, pluginRegistry);
+    this.#agentType = options.agentType;
+    this.#registry = registry;
+    this.#runService = options.runService;
+    this.#protocolEmitter = options.protocolEmitter ?? new GatewayDataEmitter(options.redis);
+    this.#presenter = new ByFrameworkRunPresenter(this.#agentType, this.#protocolEmitter);
+    this.#logger = options.logger;
+    this.#askCommandHandler = new ByFrameworkAskCommandHandler({
+      registry: this.#registry,
+      runService: this.#runService,
+      runIngress: options.runIngress,
+      forwardRun: (run, principal, context, agentName, locale) =>
+        this.#forwardRunEvents(run, principal, context, agentName, locale),
+      ...(options.sessionBindings ? { sessionBindings: options.sessionBindings } : {}),
+      ...(this.#logger ? { logger: this.#logger } : {}),
+    });
+    this.#resumeCommandHandler = new ByFrameworkResumeCommandHandler({
+      runService: this.#runService,
+      runIngress: options.runIngress,
+      finishFailureStream: (context, input) => this.#finishFailureStream(context, input),
+      forwardRun: (authorized, context, afterEventId) =>
+        this.#forwardResumedRun(authorized, context, afterEventId),
+      ...(this.#logger ? { logger: this.#logger } : {}),
+    });
+  }
+
+  /** 声明当前 Worker 可处理的逻辑 Agent 类型，供 by-framework 注册和路由。 */
+  getAgentTypes(): ReadonlyArray<string> {
+    return [this.#agentType];
+  }
+
+  /**
+   * 处理 AskAgent 与子 Agent 回调 Resume。
+   * Resume 不创建新 Run，只完成回调会话，让 Connector 能收到终止事件。
+   */
+  async processCommand(command: GatewayCommand, context: AgentContext): Promise<AgentTaskResult> {
+    try {
+      if (command instanceof ResumeCommand) {
+        return await this.#resumeCommandHandler.handle(command, context);
+      }
+      if (command instanceof AskAgentCommand) {
+        return await this.#askCommandHandler.handle(command, context);
+      }
+      throw new Error(`Unsupported by-framework command: ${command.actionType}`);
+    } catch (error) {
+      return await this.#handleCommandFailure(command, context, error);
+    }
+  }
+
+  /** 将命令异常按框架所有权规则转换为“继续抛出”或“当前用户流失败终态”。 */
+  async #handleCommandFailure(
+    command: GatewayCommand,
+    context: AgentContext,
+    error: unknown,
+  ): Promise<AgentTaskResult> {
+    const normalized = toError(error);
+
+    // Step 1：取消异常必须交回 GatewayWorker，保留框架原生的级联取消语义。
+    if (error instanceof TaskCancelledError || normalized.name === "TaskCancelledError") {
+      throw error;
+    }
+
+    // Step 2：有上游 Agent 的 Ask 由框架回传 FAILED Resume，当前 Worker 不关闭共享流。
+    if (!(command instanceof ResumeCommand) && command.header.sourceAgentType) {
+      throw error;
+    }
+
+    // Step 3：其余异常属于当前 BY_SUPER trace，补齐责任方、Run 和 Delegation 信息。
+    const runId = recordString(command.header.metadata, "parent_run_id");
+    const delegationId = recordString(command.header.metadata, "delegation_id");
+    const failure = commandFailurePresentation(command, error);
+    this.#logger?.error(
+      {
+        ...commandLogFields(command),
+        runId,
+        delegationId,
+        errorSource: failure.errorSource,
+        error: normalized.message,
+      },
+      "处理 by-framework 命令失败，正在终止当前用户流",
+    );
+
+    // Step 4：由当前 Worker 负责输出用户正文、最终快照和流结束帧。
+    await this.#finishFailureStream(context, {
+      errorCode: COMMAND_PROCESSING_ERROR_CODE,
+      userMessage: failure.userMessage,
+      errorSource: failure.errorSource,
+      errorDetail: failure.errorDetail,
+      runId,
+      delegationId,
+    });
+    return new AgentTaskResult({
+      status: AgentState.FAILED,
+      content: "",
+      replyData: null,
+      metadata: {
+        error_code: COMMAND_PROCESSING_ERROR_CODE,
+        error_source: failure.errorSource,
+        error_detail: failure.errorDetail,
+      },
+    });
+  }
+
+  /** 将 by-framework 的取消控制消息映射到正在执行的内部 Run。 */
+  async onCancelTask(command: unknown): Promise<void> {
+    await this.#askCommandHandler.handleCancel(command);
+  }
+
+  /** 由当前 BY_SUPER trace 负责的失败必须同时包含用户正文、最终快照和流终止帧。 */
+  async #finishFailureStream(
+    context: AgentContext,
+    input: FailureStreamInput,
+  ): Promise<void> {
+    const runId = input.runId?.trim() ?? "";
+    const delegationId = input.delegationId?.trim() ?? "";
+    const messageId = runId
+      ? `${runId}:super-summary:answer`
+      : `${context.executionId || "command"}:error`;
+    const metadata = {
+      error_code: input.errorCode,
+      ...(input.errorSource ? { error_source: input.errorSource } : {}),
+      ...(input.errorDetail ? { error_detail: input.errorDetail } : {}),
+      ...(input.protocolError ? { protocol_error: true } : {}),
+      ...(runId ? { parent_run_id: runId } : {}),
+      ...(delegationId ? { delegation_id: delegationId } : {}),
+    };
+    const options = {
+      sourceAgentType: this.#agentType,
+      messageId,
+      parentMessageId: "-1",
+      metadata,
+    };
+    await this.#protocolEmitter.emitChunk(
+      context.sessionId,
+      context.traceId,
+      { content: input.userMessage, metadata },
+      { ...options, eventType: EventType.ANSWER_DELTA },
+    );
+    await this.#protocolEmitter.emitChunk(
+      context.sessionId,
+      context.traceId,
+      { content: input.userMessage, metadata },
+      { ...options, eventType: EventType.FINAL_ANSWER },
+    );
+    await this.#protocolEmitter.emitChunk(
+      context.sessionId,
+      context.traceId,
+      { content: "", metadata },
+      {
+        ...options,
+        eventType: EventType.APP_STREAM_RESPONSE,
+      },
+    );
+    context.setStreamFinished(true);
+  }
+
+  /** Resume Handler 已完成业务恢复；本方法只负责把恢复后的 Run 事件映射回框架流。 */
+  async #forwardResumedRun(
+    authorized: AuthorizedRunContext,
+    context: AgentContext,
+    afterEventId: number,
+  ): Promise<AgentTaskResult> {
+    try {
+      const result = await this.#forwardRunEvents(
+        authorized.run,
+        authorized.session.owner,
+        context,
+        "超级助手",
+        authorized.session.sessionContext.locale,
+        {
+          afterEventId,
+          summaryMessageId: `${authorized.run.id}:super-summary`,
+        },
+      );
+      await this.#markOriginalExecutionFinished(authorized.run, result.status);
+      return result;
+    } catch (error) {
+      await this.#markOriginalExecutionFinished(authorized.run, AgentState.FAILED);
+      throw error;
+    }
+  }
+
+  /** ResumeCommand 是新 execution；显式同步最初入站 execution，避免长期停在 WAITING_AGENT。 */
+  async #markOriginalExecutionFinished(
+    run: { ingressContext?: { externalSessionId?: string; parentMessageId?: string } },
+    status: string,
+  ): Promise<void> {
+    if (
+      ![AgentState.COMPLETED, AgentState.FAILED, AgentState.CANCELLED].includes(
+        status as AgentState,
+      )
+    ) {
+      return;
+    }
+    const sessionId = run.ingressContext?.externalSessionId;
+    const messageId = run.ingressContext?.parentMessageId;
+    if (!sessionId || !messageId) {
+      return;
+    }
+    const execution = await this.#registry.getExecutionByMessageId(messageId, sessionId);
+    if (!execution?.execution_id) {
+      return;
+    }
+    await this.#registry.markExecutionFinished(
+      String(execution.execution_id),
+      sessionId,
+      status,
+    );
+  }
 
   /** 订阅内部事件流，并只输出简化进度与 Leader 最终回答；终态时记录一条业务返回日志。 */
   async #forwardRunEvents(
-    run: { id: string; sessionId: string; createdAt: number },
+    run: ForwardedRun,
     principal: CallerPrincipal,
     context: AgentContext,
     agentName: string,
@@ -724,331 +1045,354 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
   ): Promise<AgentTaskResult> {
     const afterEventId = options.afterEventId ?? 0;
     const summaryMessageId = options.summaryMessageId;
-    let reasoningStarted = false;
-    let reasoningEnded = false;
-    let answer = "";
-    let answerEmitted = false;
-    let delegationDispatched = false;
-    let delegationFailure:
-      | { agentName: string; agentId: string; reason: string; stage: string }
-      | undefined;
-    let waitingForLeaderInteraction = false;
-    // Resume 订阅可能先看到旧执行在挂起前已排队的 token。只有新 attempt 开始后
-    // 的 Leader 输出才属于恢复汇总阶段。
-    let resumedAttemptStarted = !summaryMessageId;
-    const reasoningMessageId = summaryMessageId
-      ? `${summaryMessageId}:reasoning`
-      : `${run.id}:reasoning`;
-
-    const emitAnswerDelta = async (content: string) => {
-      if (!summaryMessageId) {
-        await context.emitChunk(content, EventType.ANSWER_DELTA);
-        answerEmitted = true;
-        return;
-      }
-      await this.#protocolEmitter.emitChunk(context.sessionId, context.traceId, content, {
-        eventType: EventType.ANSWER_DELTA,
-        sourceAgentType: this.#agentType,
-        messageId: `${summaryMessageId}:answer`,
-        parentMessageId: "-1",
-        metadata: { parent_run_id: run.id, display_role: "super" },
-      });
-      answerEmitted = true;
+    const scope: RunForwardingScope = {
+      run,
+      principal,
+      context,
+      reasoningMessageId: summaryMessageId
+        ? `${summaryMessageId}:reasoning`
+        : `${run.id}:reasoning`,
+      ...(summaryMessageId ? { summaryMessageId } : {}),
+    };
+    const state: RunForwardingState = {
+      reasoningStarted: false,
+      reasoningEnded: false,
+      answer: "",
+      answerEmitted: false,
+      delegationDispatched: false,
+      waitingForLeaderInteraction: false,
+      // Resume 先忽略挂起前已排队的 token，直到新的 run.attempt 明确开始。
+      resumedAttemptStarted: !summaryMessageId,
     };
 
-    const finishSummaryStream = async (finalAnswer: string): Promise<boolean> => {
-      if (!summaryMessageId) {
-        return false;
-      }
-      if (finalAnswer) {
-        await this.#protocolEmitter.emitChunk(context.sessionId, context.traceId, finalAnswer, {
-          eventType: EventType.FINAL_ANSWER,
-          sourceAgentType: this.#agentType,
-          messageId: `${summaryMessageId}:answer`,
-          parentMessageId: "-1",
-          metadata: { parent_run_id: run.id, display_role: "super" },
-        });
-      }
-      await this.#protocolEmitter.emitChunk(context.sessionId, context.traceId, "", {
-        eventType: EventType.APP_STREAM_RESPONSE,
-        sourceAgentType: this.#agentType,
-        messageId: `${summaryMessageId}:answer`,
-        parentMessageId: "-1",
-        metadata: { parent_run_id: run.id, display_role: "super" },
-      });
-      // Resume 的 GatewayWorker 会按 AgentTaskResult 再发一次 finalAnswer/appStreamResponse；
-      // 这里已使用独立 Super 节点完成收尾，因此阻止框架用 Delegation ID 重复发送。
-      context.setStreamFinished(true);
-      return true;
-    };
-
-    // 按 byai-channel 协议：未开启或已收尾时先补一条思考开始帧，再写增量。
-    const ensureReasoningOpen = async () => {
-      if (!reasoningStarted || reasoningEnded) {
-        await this.#presenter.emitReasoning(
-          run.id,
-          context,
-          reasoningMessageId,
-          "",
-          EventType.REASONING_LOG_START,
-        );
-        reasoningStarted = true;
-        reasoningEnded = false;
-      }
-    };
-
+    // Step 1：首次 Ask 输出就绪标题；Resume 从暂停边界继续，不重复标题。
     if (afterEventId === 0) {
       await this.#presenter.emitReadyTitle(run.id, context, agentName, locale);
     }
 
+    // Step 2：逐个处理持久 Run 事件；每个事件的业务分支集中在 #forwardRunEvent。
     for await (const event of this.#runService.streamEvents(run.id, afterEventId)) {
       if (context.isCancelRequested()) {
         await this.#runService.cancelRun(run.id, "by-framework task cancelled");
         await context.checkCancelled();
       }
-
       this.#logRunStep(run, context, event);
-
-      if (event.type === "delegation.failed") {
-        delegationFailure = {
-          agentName: stringData(event.data.agentName),
-          agentId: stringData(event.data.agentId),
-          reason: stringData(event.data.error),
-          stage: stringData(event.data.failureStage),
-        };
-      }
-
-      if (!summaryMessageId && this.#presenter.opensReasoning(event)) {
-        await ensureReasoningOpen();
-      }
-      await this.#presenter.forwardOwnedEvent(event, context);
-
-      if (summaryMessageId && event.type === "run.attempt") {
-        resumedAttemptStarted = true;
-        continue;
-      }
-
-      if (event.type === "delegation.started" && !summaryMessageId) {
-        // 调度卡发出即表示 Super 已经把控制权交给子 Agent。当前执行随后只负责
-        // 落库并进入 WAITING_AGENT，不能再把迟到的 Leader 思考或正文发到前端。
-        // reasoning 保持开启，让“数字员工正在处理”工具卡在等待回调期间保持展开。
-        delegationDispatched = true;
-        continue;
-      }
-
-      if (isLeaderInteractionEvent(event, "interaction.requested")) {
-        if (reasoningStarted && !reasoningEnded) {
-          await this.#presenter.emitReasoning(
-            run.id,
-            context,
-            reasoningMessageId,
-            "",
-            EventType.REASONING_LOG_END,
-          );
-          reasoningEnded = true;
-        }
-        waitingForLeaderInteraction = true;
-        continue;
-      }
-      if (isLeaderInteractionEvent(event, "interaction.responded")) {
-        waitingForLeaderInteraction = false;
-        continue;
-      }
-
-      // AskUserQuestion 已经交出控制权。异步写入队列中迟到的 Leader 增量属于提问前
-      // 的输出，不得越过问题卡；用户回答后，下一条增量会重新开启 reasoning。
-      if (
-        waitingForLeaderInteraction &&
-        (event.type === "leader.reasoning.delta" || event.type === "leader.delta")
-      ) {
-        continue;
-      }
-
-      // 初次执行在 callAgent 后应立即挂起。事件队列中可能仍有 Leader 已经生成的
-      // 增量，它们属于交出控制权前的迟到输出，不能越过数字员工调度卡。
-      if (
-        !summaryMessageId &&
-        delegationDispatched &&
-        (event.type === "leader.reasoning.delta" || event.type === "leader.delta")
-      ) {
-        continue;
-      }
-
-      // 极快回调会先把 RUNNING Run 原子改回 QUEUED。初始 Ask 上下文此时只需
-      // 结束等待；真正的恢复与最终输出由 ResumeCommand 上下文独占。
-      if (
-        !summaryMessageId &&
-        event.type === "run.status" &&
-        stringData(event.data.status) === "QUEUED" &&
-        event.data.resumed === true
-      ) {
-        return new AgentTaskResult({
-          status: AgentState.WAITING_AGENT,
-          content: "",
-          replyData: null,
-        });
-      }
-
-      if (
-        summaryMessageId &&
-        !resumedAttemptStarted &&
-        (event.type === "leader.reasoning.delta" || event.type === "leader.delta")
-      ) {
-        continue;
-      }
-
-      if (event.type === "leader.reasoning.delta" && !summaryMessageId) {
-        await ensureReasoningOpen();
-        const delta = stringData(event.data.text);
-        if (delta) {
-          await this.#presenter.emitReasoning(
-            run.id,
-            context,
-            reasoningMessageId,
-            delta,
-            EventType.REASONING_LOG_DELTA,
-          );
-        }
-      }
-
-      if (event.type === "leader.delta") {
-        if (reasoningStarted && !reasoningEnded) {
-          await this.#presenter.emitReasoning(
-            run.id,
-            context,
-            reasoningMessageId,
-            "",
-            EventType.REASONING_LOG_END,
-          );
-          reasoningEnded = true;
-        }
-        const delta = stringData(event.data.text);
-        if (delta) {
-          answer += delta;
-          await emitAnswerDelta(delta);
-        }
-      }
-
-      if (event.type === "run.suspended") {
-        return new AgentTaskResult({
-          status: AgentState.WAITING_AGENT,
-          content: "",
-          // Run/Delegation 关联已经持久化在数据库。若把 runId 放入 replyData，
-          // GatewayWorker 会将其序列化为 FINAL_ANSWER，导致尚未完成的调度提前出现伪终态。
-          replyData: null,
-        });
-      }
-
-      if (event.type === "run.completed") {
-        const finalAnswer = stringData(event.data.finalAnswer);
-        if (!answer && finalAnswer) {
-          answer = finalAnswer;
-        }
-        if (reasoningStarted && !reasoningEnded) {
-          await this.#presenter.emitReasoning(
-            run.id,
-            context,
-            reasoningMessageId,
-            "",
-            EventType.REASONING_LOG_END,
-          );
-        }
-        this.#logRunFinished(principal, run, "completed", run.createdAt, finalAnswer);
-        this.#deleteActiveRunMappings(run.id);
-        const completedAnswer = answer || finalAnswer;
-        if (completedAnswer && !answerEmitted) {
-          await emitAnswerDelta(completedAnswer);
-        }
-        if (await finishSummaryStream(completedAnswer)) {
-          return new AgentTaskResult({
-            status: AgentState.COMPLETED,
-            content: "",
-            replyData: null,
-          });
-        }
-        return new AgentTaskResult({
-          status: AgentState.COMPLETED,
-          content: completedAnswer,
-          replyData: { runId: run.id },
-        });
-      }
-
-      if (event.type === "run.cancelled") {
-        if (reasoningStarted && !reasoningEnded) {
-          await this.#presenter.emitReasoning(
-            run.id,
-            context,
-            reasoningMessageId,
-            "",
-            EventType.REASONING_LOG_END,
-          );
-        }
-        await context.checkCancelled();
-        const reason = stringData(event.data.reason) || "run cancelled";
-        this.#logRunFinished(principal, run, "cancelled", run.createdAt, reason);
-        this.#deleteActiveRunMappings(run.id);
-        return new AgentTaskResult({
-          status: AgentState.CANCELLED,
-          content: "",
-          replyData: { runId: run.id, reason },
-        });
-      }
-
-      if (event.type === "run.failed") {
-        if (reasoningStarted && !reasoningEnded) {
-          await this.#presenter.emitReasoning(
-            run.id,
-            context,
-            reasoningMessageId,
-            "",
-            EventType.REASONING_LOG_END,
-          );
-        }
-        const error = stringData(event.data.error) || "Run failed";
-        this.#logRunFinished(principal, run, "failed", run.createdAt, error);
-        this.#deleteActiveRunMappings(run.id);
-        const userMessage = stringData(event.data.userMessage);
-        if (userMessage) {
-          const attributedUserMessage = delegationFailure
-            ? delegationFailureUserMessage({
-                agentName: delegationFailure.agentName,
-                agentId: delegationFailure.agentId,
-                reason: userMessage,
-                stage: delegationFailure.stage,
-              })
-            : userMessage;
-          await emitAnswerDelta(attributedUserMessage);
-          if (await finishSummaryStream(attributedUserMessage)) {
-            return new AgentTaskResult({
-              status: AgentState.COMPLETED,
-              content: "",
-              replyData: null,
-            });
-          }
-          return new AgentTaskResult({
-            status: AgentState.COMPLETED,
-            content: attributedUserMessage,
-            replyData: { runId: run.id },
-          });
-        }
-        if (delegationFailure) {
-          const errorSource = delegationFailure.agentName || delegationFailure.agentId || "下游数字员工";
-          throw new AttributedDelegationFailure(
-            errorSource,
-            delegationFailure.reason || error,
-            delegationFailureUserMessage({
-              agentName: delegationFailure.agentName,
-              agentId: delegationFailure.agentId,
-              reason: delegationFailure.reason || error,
-              stage: delegationFailure.stage,
-            }),
-          );
-        }
-        throw new Error(error);
+      const result = await this.#forwardRunEvent(scope, state, event);
+      if (result) {
+        return result;
       }
     }
 
     throw new Error(`Run event stream ended without a terminal event: ${run.id}`);
+  }
+
+  /** 处理一个 Run 事件；普通事件返回空，只有挂起或终态才返回框架结果。 */
+  async #forwardRunEvent(
+    scope: RunForwardingScope,
+    state: RunForwardingState,
+    event: RunEvent,
+  ): Promise<AgentTaskResult | undefined> {
+    const { context } = scope;
+
+    // Step 1：先记录失败责任方，再转发属于 BY_SUPER 自己的状态卡和交互卡。
+    if (event.type === "delegation.failed") {
+      state.delegationFailure = {
+        agentName: stringData(event.data.agentName),
+        agentId: stringData(event.data.agentId),
+        reason: stringData(event.data.error),
+        stage: stringData(event.data.failureStage),
+      };
+    }
+    if (!scope.summaryMessageId && this.#presenter.opensReasoning(event)) {
+      await this.#openReasoning(scope, state);
+    }
+    await this.#presenter.forwardOwnedEvent(event, context);
+
+    // Step 2：维护恢复、委派和用户交互边界，防止旧 token 越过新的 UI 节点。
+    if (scope.summaryMessageId && event.type === "run.attempt") {
+      state.resumedAttemptStarted = true;
+      return undefined;
+    }
+    if (event.type === "delegation.started" && !scope.summaryMessageId) {
+      state.delegationDispatched = true;
+      return undefined;
+    }
+    if (isLeaderInteractionEvent(event, "interaction.requested")) {
+      await this.#closeReasoning(scope, state);
+      state.waitingForLeaderInteraction = true;
+      return undefined;
+    }
+    if (isLeaderInteractionEvent(event, "interaction.responded")) {
+      state.waitingForLeaderInteraction = false;
+      return undefined;
+    }
+
+    // Step 3：交出控制权后忽略排队中的旧增量；它们不能越过交互卡或委派卡。
+    const leaderDelta =
+      event.type === "leader.reasoning.delta" || event.type === "leader.delta";
+    if (state.waitingForLeaderInteraction && leaderDelta) {
+      return undefined;
+    }
+    if (!scope.summaryMessageId && state.delegationDispatched && leaderDelta) {
+      return undefined;
+    }
+
+    // 极快回调可能先将 Run 改回 QUEUED；初始 Ask 只结束等待，输出由 Resume 上下文接管。
+    if (
+      !scope.summaryMessageId &&
+      event.type === "run.status" &&
+      stringData(event.data.status) === "QUEUED" &&
+      event.data.resumed === true
+    ) {
+      return this.#waitingAgentResult();
+    }
+    if (scope.summaryMessageId && !state.resumedAttemptStarted && leaderDelta) {
+      return undefined;
+    }
+
+    // Step 4：Leader 增量是唯一需要逐条写入 by-framework DataStream 的业务正文。
+    if (event.type === "leader.reasoning.delta" && !scope.summaryMessageId) {
+      await this.#forwardReasoningDelta(scope, state, stringData(event.data.text));
+      return undefined;
+    }
+    if (event.type === "leader.delta") {
+      await this.#forwardAnswerDelta(scope, state, stringData(event.data.text));
+      return undefined;
+    }
+
+    // Step 5：挂起保留 Run/Delegation 真相；完成、取消、失败分别进入明确的收口函数。
+    if (event.type === "run.suspended") {
+      return this.#waitingAgentResult();
+    }
+    if (event.type === "run.completed") {
+      return await this.#completeForwardedRun(scope, state, event);
+    }
+    if (event.type === "run.cancelled") {
+      return await this.#cancelForwardedRun(scope, state, event);
+    }
+    if (event.type === "run.failed") {
+      return await this.#failForwardedRun(scope, state, event);
+    }
+    return undefined;
+  }
+
+  async #forwardReasoningDelta(
+    scope: RunForwardingScope,
+    state: RunForwardingState,
+    delta: string,
+  ): Promise<void> {
+    if (!delta) {
+      return;
+    }
+    await this.#openReasoning(scope, state);
+    await this.#presenter.emitReasoning(
+      scope.run.id,
+      scope.context,
+      scope.reasoningMessageId,
+      delta,
+      EventType.REASONING_LOG_DELTA,
+    );
+  }
+
+  async #forwardAnswerDelta(
+    scope: RunForwardingScope,
+    state: RunForwardingState,
+    delta: string,
+  ): Promise<void> {
+    await this.#closeReasoning(scope, state);
+    if (!delta) {
+      return;
+    }
+    state.answer += delta;
+    await this.#emitAnswerDelta(scope, state, delta);
+  }
+
+  async #openReasoning(scope: RunForwardingScope, state: RunForwardingState): Promise<void> {
+    if (state.reasoningStarted && !state.reasoningEnded) {
+      return;
+    }
+    await this.#presenter.emitReasoning(
+      scope.run.id,
+      scope.context,
+      scope.reasoningMessageId,
+      "",
+      EventType.REASONING_LOG_START,
+    );
+    state.reasoningStarted = true;
+    state.reasoningEnded = false;
+  }
+
+  async #closeReasoning(scope: RunForwardingScope, state: RunForwardingState): Promise<void> {
+    if (!state.reasoningStarted || state.reasoningEnded) {
+      return;
+    }
+    await this.#presenter.emitReasoning(
+      scope.run.id,
+      scope.context,
+      scope.reasoningMessageId,
+      "",
+      EventType.REASONING_LOG_END,
+    );
+    state.reasoningEnded = true;
+  }
+
+  async #emitAnswerDelta(
+    scope: RunForwardingScope,
+    state: RunForwardingState,
+    content: string,
+  ): Promise<void> {
+    if (!scope.summaryMessageId) {
+      await scope.context.emitChunk(content, EventType.ANSWER_DELTA);
+      state.answerEmitted = true;
+      return;
+    }
+    await this.#protocolEmitter.emitChunk(
+      scope.context.sessionId,
+      scope.context.traceId,
+      content,
+      {
+        eventType: EventType.ANSWER_DELTA,
+        sourceAgentType: this.#agentType,
+        messageId: `${scope.summaryMessageId}:answer`,
+        parentMessageId: "-1",
+        metadata: { parent_run_id: scope.run.id, display_role: "super" },
+      },
+    );
+    state.answerEmitted = true;
+  }
+
+  async #finishSummaryStream(scope: RunForwardingScope, finalAnswer: string): Promise<boolean> {
+    if (!scope.summaryMessageId) {
+      return false;
+    }
+    const options = {
+      sourceAgentType: this.#agentType,
+      messageId: `${scope.summaryMessageId}:answer`,
+      parentMessageId: "-1",
+      metadata: { parent_run_id: scope.run.id, display_role: "super" },
+    };
+    if (finalAnswer) {
+      await this.#protocolEmitter.emitChunk(
+        scope.context.sessionId,
+        scope.context.traceId,
+        finalAnswer,
+        { ...options, eventType: EventType.FINAL_ANSWER },
+      );
+    }
+    await this.#protocolEmitter.emitChunk(scope.context.sessionId, scope.context.traceId, "", {
+      ...options,
+      eventType: EventType.APP_STREAM_RESPONSE,
+    });
+    // 当前 Resume 上下文已使用独立 Super 节点收尾，禁止 GatewayWorker 再发一次终态。
+    scope.context.setStreamFinished(true);
+    return true;
+  }
+
+  async #completeForwardedRun(
+    scope: RunForwardingScope,
+    state: RunForwardingState,
+    event: RunEvent,
+  ): Promise<AgentTaskResult> {
+    const finalAnswer = stringData(event.data.finalAnswer);
+    state.answer ||= finalAnswer;
+    await this.#closeReasoning(scope, state);
+    this.#logRunFinished(scope.principal, scope.run, "completed", scope.run.createdAt, finalAnswer);
+    this.#askCommandHandler.releaseRun(scope.run.id);
+
+    const completedAnswer = state.answer || finalAnswer;
+    if (completedAnswer && !state.answerEmitted) {
+      await this.#emitAnswerDelta(scope, state, completedAnswer);
+    }
+    if (await this.#finishSummaryStream(scope, completedAnswer)) {
+      return this.#completedResult();
+    }
+    return new AgentTaskResult({
+      status: AgentState.COMPLETED,
+      content: completedAnswer,
+      replyData: { runId: scope.run.id },
+    });
+  }
+
+  async #cancelForwardedRun(
+    scope: RunForwardingScope,
+    state: RunForwardingState,
+    event: RunEvent,
+  ): Promise<AgentTaskResult> {
+    await this.#closeReasoning(scope, state);
+    await scope.context.checkCancelled();
+    const reason = stringData(event.data.reason) || "run cancelled";
+    this.#logRunFinished(scope.principal, scope.run, "cancelled", scope.run.createdAt, reason);
+    this.#askCommandHandler.releaseRun(scope.run.id);
+    return new AgentTaskResult({
+      status: AgentState.CANCELLED,
+      content: "",
+      replyData: { runId: scope.run.id, reason },
+    });
+  }
+
+  async #failForwardedRun(
+    scope: RunForwardingScope,
+    state: RunForwardingState,
+    event: RunEvent,
+  ): Promise<AgentTaskResult> {
+    await this.#closeReasoning(scope, state);
+    const error = stringData(event.data.error) || "Run failed";
+    this.#logRunFinished(scope.principal, scope.run, "failed", scope.run.createdAt, error);
+    this.#askCommandHandler.releaseRun(scope.run.id);
+
+    const userMessage = stringData(event.data.userMessage);
+    if (userMessage) {
+      const attributedMessage = state.delegationFailure
+        ? delegationFailureUserMessage({
+            agentName: state.delegationFailure.agentName,
+            agentId: state.delegationFailure.agentId,
+            reason: userMessage,
+            stage: state.delegationFailure.stage,
+          })
+        : userMessage;
+      await this.#emitAnswerDelta(scope, state, attributedMessage);
+      if (await this.#finishSummaryStream(scope, attributedMessage)) {
+        return this.#completedResult();
+      }
+      return new AgentTaskResult({
+        status: AgentState.COMPLETED,
+        content: attributedMessage,
+        replyData: { runId: scope.run.id },
+      });
+    }
+
+    if (state.delegationFailure) {
+      const failure = state.delegationFailure;
+      const errorSource = failure.agentName || failure.agentId || "下游数字员工";
+      throw new AttributedDelegationFailure(
+        errorSource,
+        failure.reason || error,
+        delegationFailureUserMessage({
+          agentName: failure.agentName,
+          agentId: failure.agentId,
+          reason: failure.reason || error,
+          stage: failure.stage,
+        }),
+      );
+    }
+    throw new Error(error);
+  }
+
+  #waitingAgentResult(): AgentTaskResult {
+    return new AgentTaskResult({
+      status: AgentState.WAITING_AGENT,
+      content: "",
+      // replyData 必须为空，否则 GatewayWorker 会把未完成的调度序列化成伪 FINAL_ANSWER。
+      replyData: null,
+    });
+  }
+
+  #completedResult(): AgentTaskResult {
+    return new AgentTaskResult({
+      status: AgentState.COMPLETED,
+      content: "",
+      replyData: null,
+    });
   }
 
   /**
@@ -1120,62 +1464,4 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
       "Run 结束",
     );
   }
-}
-
-function isLeaderInteractionEvent(
-  event: RunEvent,
-  type: "interaction.requested" | "interaction.responded",
-): boolean {
-  return event.type === type && stringData(event.data.source) === "leader";
-}
-
-/** 把 processCommand 总入口的异常按命令来源和消费阶段说清楚。 */
-function commandFailurePresentation(
-  command: GatewayCommand,
-  error: unknown,
-): { userMessage: string; errorSource: string; errorDetail: string } {
-  if (error instanceof AttributedDelegationFailure) {
-    return {
-      userMessage: error.message,
-      errorSource: error.errorSource,
-      errorDetail: error.errorDetail,
-    };
-  }
-
-  const normalized = toError(error);
-  const metadata = command.header.metadata;
-  const delegatedAgentName = recordString(metadata, "delegated_agent_name");
-  const delegatedAgentType = recordString(metadata, "delegated_agent_type");
-  const sourceAgentType = (command.header.sourceAgentType ?? "").trim();
-  const errorSource = delegatedAgentName || delegatedAgentType || sourceAgentType || "by-framework";
-  const displaySource = delegatedAgentName
-    ? `${delegatedAgentName}${delegatedAgentType ? `（${delegatedAgentType}）` : ""}`
-    : delegatedAgentType || sourceAgentType;
-  const failureKind =
-    error instanceof BeyondTokenAuthError || normalized.name === "BeyondTokenAuthError"
-      ? "鉴权失败"
-      : "消费失败";
-
-  if (command instanceof ResumeCommand) {
-    const callbackKind = recordString(metadata, "interaction_id")
-      ? "用户交互回调"
-      : "数字员工结果回调";
-    const sourcePrefix = delegatedAgentName
-      ? `${displaySource}的`
-      : displaySource
-        ? `${displaySource} 的`
-        : "";
-    return {
-      userMessage: `${sourcePrefix}${callbackKind}${failureKind}：${normalized.message}`,
-      errorSource,
-      errorDetail: normalized.message,
-    };
-  }
-
-  const sourcePrefix = sourceAgentType ? `来自 ${sourceAgentType} 的` : "by-framework ";
-  return {
-    userMessage: `${sourcePrefix}入站请求${failureKind}：${normalized.message}`,
-    errorSource,
-    errorDetail: normalized.message,
-  };
 }

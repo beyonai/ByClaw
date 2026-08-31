@@ -24,6 +24,7 @@ const PLAN_STATUSES = new Set<TaskPlanStatus>(TASK_PLAN_STATUSES);
 const TASK_STATUSES = new Set<TaskPlanTaskStatus>(TASK_PLAN_TASK_STATUSES);
 
 type LoggerLike = {
+  info?: (message: string) => void;
   warn?: (message: string) => void;
 };
 
@@ -282,8 +283,11 @@ export function createBaiyingTaskPlanRuntime(
     }
     logger?.warn?.(
       `baiying-enhance: ignored task plan owned by another execution: ` +
-        `sessionId=${context.sessionId}, messageId=${context.messageId}, ` +
-        `sourceRuntime=${context.sourceRuntime}, sourceRunId=${context.sourceRunId}`,
+        `expectedSessionId=${context.sessionId}, actualSessionId=${snapshot.sessionId}, ` +
+        `expectedMessageId=${context.messageId}, actualMessageId=${snapshot.messageId}, ` +
+        `expectedSourceRuntime=${context.sourceRuntime}, actualSourceRuntime=${snapshot.sourceRuntime}, ` +
+        `expectedSourceRunId=${context.sourceRunId}, actualSourceRunId=${snapshot.sourceRunId}, ` +
+        `planId=${snapshot.planId}, version=${snapshot.version}, status=${snapshot.status}`,
     );
     return undefined;
   }
@@ -306,8 +310,12 @@ export function createBaiyingTaskPlanRuntime(
     }
     logger?.warn?.(
       `baiying-enhance: dropped foreign currentPlan from task plan error: ` +
-        `sessionId=${context.sessionId}, messageId=${context.messageId}, ` +
-        `sourceRuntime=${context.sourceRuntime}, sourceRunId=${context.sourceRunId}`,
+        `expectedSessionId=${context.sessionId}, actualSessionId=${result.currentPlan.sessionId}, ` +
+        `expectedMessageId=${context.messageId}, actualMessageId=${result.currentPlan.messageId}, ` +
+        `expectedSourceRuntime=${context.sourceRuntime}, actualSourceRuntime=${result.currentPlan.sourceRuntime}, ` +
+        `expectedSourceRunId=${context.sourceRunId}, actualSourceRunId=${result.currentPlan.sourceRunId}, ` +
+        `planId=${result.currentPlan.planId}, version=${result.currentPlan.version}, ` +
+        `status=${result.currentPlan.status}, errorCode=${result.error.code}`,
     );
     return { ok: false, error: result.error };
   }
@@ -388,7 +396,14 @@ export function createBaiyingTaskPlanRuntime(
         },
         signal,
       );
-      return data == null ? undefined : ownedSnapshot(data, context);
+      const plan = data == null ? undefined : ownedSnapshot(data, context);
+      logger?.info?.(
+        `[task-plan] active lookup result sessionId=${context.sessionId}, messageId=${context.messageId}, ` +
+          `traceId=${context.traceId ?? "-"}, sourceRuntime=${context.sourceRuntime}, ` +
+          `sourceRunId=${context.sourceRunId}, backendHit=${data != null}, ownedHit=${Boolean(plan)}, ` +
+          `planId=${plan?.planId ?? "-"}, version=${plan?.version ?? "-"}, status=${plan?.status ?? "-"}`,
+      );
+      return plan;
     },
 
     async command(input) {
@@ -418,7 +433,16 @@ export function createBaiyingTaskPlanRuntime(
         },
         input.signal,
       );
-      return ownedCommandResult(data, context);
+      const result = ownedCommandResult(data, context);
+      const currentPlan = result.ok ? result.plan : result.currentPlan;
+      logger?.info?.(
+        `[task-plan] backend command result action=${command.action}, idempotencyKey=${input.idempotencyKey}, ` +
+          `ok=${result.ok}, sessionId=${context.sessionId}, messageId=${context.messageId}, ` +
+          `sourceRuntime=${context.sourceRuntime}, sourceRunId=${context.sourceRunId}, ` +
+          `planId=${currentPlan?.planId ?? "-"}, version=${currentPlan?.version ?? "-"}, ` +
+          `status=${currentPlan?.status ?? "-"}, errorCode=${result.ok ? "-" : result.error.code}`,
+      );
+      return result;
     },
 
     async cancel(input) {
