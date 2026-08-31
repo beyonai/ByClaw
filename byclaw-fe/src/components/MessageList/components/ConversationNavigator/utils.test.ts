@@ -6,6 +6,7 @@ import {
   createLocalOutlineItems,
   mergeOutlineItems,
   normalizeConversationSummary,
+  shouldShowConversationNavigator,
 } from './utils';
 
 const item = (messageId: string, usage: number, content: string, position: number): ConversationOutlineItem => ({
@@ -81,5 +82,16 @@ describe('ConversationNavigator utils', () => {
 
   it('hides unresolved digital employee identifiers', () => {
     expect(normalizeConversationSummary('请找{{DIG_EMPLOYEE_11105921}}处理')).toBe('请找@数字员工 处理');
+  });
+
+  it('shows the navigator only when there are at least three conversation turns', () => {
+    const turns = buildConversationTurns([
+      item('1', 1, 'first', 1),
+      item('2', 1, 'second', 2),
+      item('3', 1, 'third', 3),
+    ]);
+
+    expect(shouldShowConversationNavigator(turns.slice(0, 2))).toBe(false);
+    expect(shouldShowConversationNavigator(turns)).toBe(true);
   });
 });

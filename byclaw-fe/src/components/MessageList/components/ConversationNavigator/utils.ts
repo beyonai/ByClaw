@@ -15,6 +15,8 @@ export type ConversationTurn = {
 
 const SUMMARY_LENGTH = 160;
 
+export const MINIMUM_CONVERSATION_TURNS_FOR_NAVIGATOR = 3;
+
 const DIGITAL_EMPLOYEE_PLACEHOLDER = /\{\{DIG_EMPLOYEE_[^}#]+(?:#[^}]*)?}}/;
 
 const extractObjectText = (value: unknown): string => {
@@ -149,3 +151,6 @@ export const buildConversationTurns = (items: ConversationOutlineItem[]): Conver
 
   return turns;
 };
+
+export const shouldShowConversationNavigator = (turns: ConversationTurn[]) =>
+  turns.length >= MINIMUM_CONVERSATION_TURNS_FOR_NAVIGATOR;

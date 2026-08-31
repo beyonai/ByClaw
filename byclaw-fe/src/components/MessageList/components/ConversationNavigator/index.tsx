@@ -7,7 +7,12 @@ import useGlobal from '@/hooks/useGlobal';
 import { getMessageOutline, type ConversationOutlineItem } from '@/service/message';
 import type { IMessage } from '@/typescript/message';
 import styles from './index.module.less';
-import { buildConversationTurns, createLocalOutlineItems, mergeOutlineItems } from './utils';
+import {
+  buildConversationTurns,
+  createLocalOutlineItems,
+  mergeOutlineItems,
+  shouldShowConversationNavigator,
+} from './utils';
 
 type Props = {
   sessionId: string;
@@ -125,7 +130,7 @@ export default function ConversationNavigator({
     [dispatch, EventEmitter, onLoadedMessageClick, sessionId, turns]
   );
 
-  if (!turns.length) return null;
+  if (!shouldShowConversationNavigator(turns)) return null;
 
   return (
     <nav className={styles.navigator} aria-label={intl.formatMessage({ id: 'conversationNavigator.label' })}>
