@@ -3427,6 +3427,11 @@ export default {
   'fileChanges.diffLoadFailed': '文件变更详情加载失败',
   'fileChanges.noDiff': '文件没有净变化',
   'fileChanges.expandUnchanged': '{count} 行未变更的内容',
+  'editDiff.title': '文件修改',
+  'editDiff.phase.running': '修改中',
+  'editDiff.phase.applied': '已应用',
+  'editDiff.phase.failed': '修改失败',
+  'editDiff.binary': '二进制文件已变更',
 
   ...secondEdition,
 };

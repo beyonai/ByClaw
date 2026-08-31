@@ -1,6 +1,10 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
 
 import { qryConversations } from '@/service/layout';
+import {
+  clearAgentTeamsSnapshots,
+  publishAgentTeamsSnapshot,
+} from '@/components/MessagesComp/ToolCall/agentTeamsStore';
 import ChildSessionNavigator from '../ChildSessionNavigator';
 
 const mockDispatch = jest.fn();
@@ -47,6 +51,7 @@ describe('ChildSessionNavigator', () => {
   beforeEach(() => {
     jest.useFakeTimers();
     jest.clearAllMocks();
+    clearAgentTeamsSnapshots();
     newMessageHandler = undefined;
     reconnectHandler = undefined;
     mockOnMessage.mockImplementation((type: string, handler: (message: any) => void | Promise<void>) => {
@@ -206,5 +211,25 @@ describe('ChildSessionNavigator', () => {
 
     expect(await screen.findByRole('button', { name: '打开子会话列表' })).toHaveTextContent('1 个子代理');
     expect(mockQryConversations).toHaveBeenCalledTimes(2);
+  });
+
+  it('shows exactly one child per member when a team snapshot is present', async () => {
+    const root = session('root-1', '主会话');
+    mockQryConversations.mockResolvedValue({
+      list: [session('child-1', '架构舵手', 'root-1'), session('leader-child', '团队队长', 'root-1')],
+    } as any);
+    publishAgentTeamsSnapshot('root-1', {
+      schemaVersion: 2,
+      eventKind: 'agent-teams/snapshot',
+      capturedAt: '2026-08-31T08:00:00Z',
+      team: {
+        teamId: 'team-1',
+        captainSessionId: 'dsh-root',
+        members: [{ id: 'member-1', byclawSessionId: 'child-1', name: '架构舵手' }],
+      },
+    });
+
+    render(<ChildSessionNavigator sessionId="root-1" currentSession={root} />);
+    expect(await screen.findByRole('button', { name: '打开子会话列表' })).toHaveTextContent('1 个子代理');
   });
 });

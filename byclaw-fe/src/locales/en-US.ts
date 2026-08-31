@@ -3493,6 +3493,11 @@ export default {
   'fileChanges.diffLoadFailed': 'Failed to load file changes',
   'fileChanges.noDiff': 'The file has no net changes',
   'fileChanges.expandUnchanged': '{count} unchanged lines',
+  'editDiff.title': 'File edit',
+  'editDiff.phase.running': 'Editing',
+  'editDiff.phase.applied': 'Applied',
+  'editDiff.phase.failed': 'Failed',
+  'editDiff.binary': 'Binary file changed',
 
   ...secondEdition,
 };
