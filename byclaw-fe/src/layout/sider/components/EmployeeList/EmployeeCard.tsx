@@ -51,7 +51,8 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
 
   const isInput = isInputMode(chatMode);
   // @ 员工候选列表统一使用“默认”标签，隐藏个人/助手型等分类标签。
-  const shouldShowTag = isInput ? true : employee?.tagName || employee?.isDefault;
+  // 输入框候选列表仅给真正的默认数字员工显示“默认”标签，避免每个员工都重复展示。
+  const shouldShowTag = isInput ? employee?.isDefault : employee?.tagName || employee?.isDefault;
   const defaultTagText = intl.formatMessage({ id: 'resource.defaultDigitalEmployee' });
 
   const menuItems = (item: IAgentCache) => {

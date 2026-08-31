@@ -249,7 +249,28 @@
     min-width: 0;
     height: 304px;
     overflow: auto;
-    padding: 12px 14px;
+    padding: 8px 10px;
+  }
+
+  .toolsMenuPanelFileResource {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+
+    .toolsMenuPanelContentActive {
+      display: flex;
+      flex: 1;
+      flex-direction: column;
+      min-height: 0;
+    }
+
+    .toolsMenuSection {
+      display: flex;
+      flex: 1;
+      align-items: stretch;
+      min-height: 0;
+      overflow: hidden;
+    }
   }
 
   .toolsMenuPanelContent {
@@ -258,13 +279,6 @@
 
   .toolsMenuPanelContentActive {
     display: block;
-  }
-
-  .toolsMenuPanelTitle {
-    margin-bottom: 12px;
-    color: var(--beyond-color-text);
-    font-size: 16px;
-    font-weight: 600;
   }
 
   .toolsMenuPanel-expert,

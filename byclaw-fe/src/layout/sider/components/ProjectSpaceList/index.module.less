@@ -3329,6 +3329,7 @@
 
 .kanbanBoard {
   flex: 1;
+  min-width: 0;
   min-height: 0;
   display: flex;
   gap: 16px;
@@ -3347,9 +3348,10 @@
 }
 
 .kanbanColumn {
-  flex: 1;
-  min-width: 260px;
-  max-width: 320px;
+  // 四列在详情主体内等分，避免列内容的最小尺寸把最后一列挤出可视区域。
+  flex: 1 1 0;
+  min-width: 220px;
+  max-width: none;
   min-height: 0;
   display: flex;
   flex-direction: column;

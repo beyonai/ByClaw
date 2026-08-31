@@ -361,6 +361,7 @@ describe('ConnectorControl authorization states', () => {
     fireEvent.click(await screen.findByText('查看全部连接器'));
     fireEvent.mouseEnter(await screen.findByRole('button', { name: '账号操作' }));
     fireEvent.click(await screen.findByText('projectSpace.operation.account.delete'));
+    expect(await screen.findAllByText('projectSpace.operation.account.deleteConfirmTitle')).not.toHaveLength(0);
     fireEvent.click(await screen.findByRole('button', { name: 'projectSpace.operation.account.deleteConfirmOk' }));
 
     await waitFor(() => expect(mockDeleteOperationAccount).toHaveBeenCalledWith(7));

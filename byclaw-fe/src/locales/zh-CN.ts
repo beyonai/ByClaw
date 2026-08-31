@@ -494,7 +494,7 @@ export default {
   labelCard: '指标卡',
 
   'chat.placeholder': '请输入你想了解的问题',
-  'chat.expert.placeholder': '发消息，输入 @ 选择对话对象',
+  'chat.expert.placeholder': '发消息，点击 + 选择对话对象',
   // 'chat.smart.placeholder': '请输入你的智办任务，输入@选择对话对象，或输入#引用知识、技能',
   'chatTitle.saveAsTemplate': '保存为模板',
   'chatResource.title': '会话资源',

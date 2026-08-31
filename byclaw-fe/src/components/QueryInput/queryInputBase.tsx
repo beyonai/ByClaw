@@ -63,11 +63,14 @@ export type IProps = {
   /** 当前会话所属项目。 */
   projectId?: number;
 
+  /** 当前会话所属项目的知识库 ID，用于项目云盘浏览。 */
+  projectCloudResourceId?: string | number;
+
   /** 控制新会话项目选择入口，避免通知等复用输入框误展示。 */
   enableTaskTemplate?: boolean;
 
   /** 输入框外部项目选择器当前选中的项目。 */
-  selectedProject?: { projectId: string; projectName: string };
+  selectedProject?: { projectId: string; projectName: string; cloudResourceId?: string | number };
 
   /** 新建任务上传文件生成会话后，由外层决定是否暂时保持新建任务视图。 */
   onFileUploadSessionCreated?: (sessionId: string) => void;
@@ -172,7 +175,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
 
   onSelectMentionPopoverItem: RichInputRef['insertItem'] = (item, type) => {
     this.richInputRef.current?.insertItem(item, type);
-    this.setState((prev) => ({ ...prev, showMentionPopoverType: '' }));
+    this.setState((prev) => ({ ...prev, showMentionPopoverType: '', toolsPopoverOpen: false }));
   };
 
   restoreInputDraft = () => {
@@ -296,6 +299,8 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
       return (
         <EmployeeList
           chatMode={chatModeMap.expert}
+          hideCategoryTabs
+          compactCard
           onSelect={(item) => this.onSelectMentionPopoverItem(item, ResourceType.digitalEmployee)}
           excludedAgentIds={this.getInlineDigitalEmployeeList().map((item) => `${item.resourceId}`)}
         />
@@ -311,6 +316,8 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
           showKnowledgeTab
           showSkillTab
           onlyTab="skill"
+          hideTabBar
+          hideBorder
           onSelect={(item, type) => this.onSelectMentionPopoverItem(item, type)}
         />
       );
@@ -339,7 +346,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
           scope={key === 'processFile' ? 'session' : 'project'}
           sessionId={`${this.props.sessionId || ''}`}
           projectId={this.props.projectId ?? (selectedProjectId ? Number(selectedProjectId) : undefined)}
-          resourceId={this.props.globalContext.agentId}
+          resourceId={key === 'projectCloud' ? this.props.projectCloudResourceId : this.props.globalContext.agentId}
           onOpenDetail={() => undefined}
         />
       );
@@ -490,7 +497,10 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
     // 上传附件会提前生成 sessionId，但当前页面仍属于新建任务；此时必须优先使用用户选择的项目，
     // 不能因为 sessionId 已存在就误走历史会话分支，回退到默认项目。
     // 文件上传会提前创建临时 sessionId；此时仍应优先使用输入框选择的项目，避免项目归属丢失。
-    if (selectedProject && (!this.props.sessionId || this.props.isBottom === false || this.props.projectId === undefined)) {
+    if (
+      selectedProject &&
+      (!this.props.sessionId || this.props.isBottom === false || this.props.projectId === undefined)
+    ) {
       set(data, 'payload.selectedProjectId', selectedProject.projectId);
       set(data, 'payload.selectedProjectName', selectedProject.projectName);
     } else if (this.props.sessionId && this.props.projectId !== undefined) {
@@ -635,7 +645,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
           {hasTools && (
             <Popover
               trigger="click"
-              placement="topLeft"
+              placement="bottomLeft"
               open={this.state.toolsPopoverOpen}
               onOpenChange={(open) => this.setState({ toolsPopoverOpen: open })}
               destroyOnHidden
@@ -681,7 +691,11 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
                       <AntdIcon type={this.state.moreToolsExpanded ? 'icon-a-Upshang' : 'icon-a-Downxia'} />
                     </button>
                   </div>
-                  <div className={styles.toolsMenuPanel}>
+                  <div
+                    className={classNames(styles.toolsMenuPanel, {
+                      [styles.toolsMenuPanelFileResource]: ['processFile', 'projectCloud'].includes(activeMenu.key),
+                    })}
+                  >
                     {panelItems.map((item) => (
                       <div
                         key={item.key}
@@ -689,7 +703,6 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
                           [styles.toolsMenuPanelContentActive]: activeMenu.key === item.key,
                         })}
                       >
-                        <div className={styles.toolsMenuPanelTitle}>{item.label}</div>
                         {!!item.content && <div className={styles.toolsMenuSection}>{item.content}</div>}
                       </div>
                     ))}

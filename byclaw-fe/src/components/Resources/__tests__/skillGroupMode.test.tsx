@@ -241,7 +241,7 @@ describe('Resources enterprise skill mode', () => {
   it('defaults to single skills and preserves the enterprise tab', () => {
     renderAt('?tab=enterprise');
 
-    expect(screen.getByText('resource.enterpriseSkillSingle')).toBeTruthy();
+    expect(screen.getByText('resource.official')).toBeTruthy();
     expect(screen.getByTestId('resource-list')).toBeTruthy();
     expect(window.location.search).toBe('?tab=enterprise');
   });
@@ -290,7 +290,7 @@ describe('Resources enterprise skill mode', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: 'resource.skillGroup' }));
 
     expect(window.location.search).toBe('?tab=enterprise&kind=group');
-    expect(screen.getByText('resource.enterpriseSkillGroup')).toBeTruthy();
+    expect(screen.getByText('resource.official')).toBeTruthy();
     expect(screen.getByTestId('skill-group-list')).toBeTruthy();
     expect(screen.queryByTestId('resource-list')).toBeNull();
   });
@@ -325,7 +325,7 @@ describe('Resources enterprise skill mode', () => {
 
   it('renders the group mode label and keeps single-skill mode for personal skills', () => {
     const groupView = renderAt('?tab=enterprise&kind=group');
-    expect(screen.getByText('resource.enterpriseSkillGroup')).toBeTruthy();
+    expect(screen.getByText('resource.official')).toBeTruthy();
     expect(screen.getByTestId('skill-group-list')).toBeTruthy();
 
     groupView.unmount();
@@ -374,12 +374,12 @@ describe('Resources enterprise skill mode', () => {
   it('clears enterprise skill kind when changing to another tab', () => {
     renderAt('?tab=enterprise&kind=group');
 
-    fireEvent.click(screen.getByRole('button', { name: 'resource.personalcommon.skill' }));
+    fireEvent.click(screen.getByRole('button', { name: 'resource.available' }));
     expect(window.location.search).toBe('?tab=personal');
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'resource.enterpriseSkillSingle' })[0]);
+    fireEvent.click(screen.getByTestId('enterprise-skill-tab-trigger'));
     expect(window.location.search).toBe('?tab=enterprise');
-    expect(screen.getByText('resource.enterpriseSkillSingle')).toBeTruthy();
+    expect(screen.getByText('resource.official')).toBeTruthy();
     expect(screen.queryByTestId('skill-group-list')).toBeNull();
   });
 

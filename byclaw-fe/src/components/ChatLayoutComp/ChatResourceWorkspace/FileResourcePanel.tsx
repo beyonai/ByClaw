@@ -103,7 +103,6 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   const [uploading, setUploading] = useState(false);
   const [visibleProjectItemCount, setVisibleProjectItemCount] = useState(20);
   const clickTimerRef = useRef<number | null>(null);
-  const missingProjectKnowledgeNotifiedRef = useRef(false);
   // 项目详情异步加载期间也使用外部项目 ID，确保首次会话文件请求即可过滤仓库目录。
   const projectId = projectIdProp ?? Number(project?.projectId);
   const isLocalSharedFiles = scope === 'project' && Number(project?.projectId ?? projectId) === -1;
@@ -133,13 +132,8 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
     }
     if (scope === 'project' && !resourceId) {
       setItems([]);
-      if (!missingProjectKnowledgeNotifiedRef.current) {
-        missingProjectKnowledgeNotifiedRef.current = true;
-        message.info('当前项目暂无项目知识库，无法展示云盘文件');
-      }
       return;
     }
-    if (scope === 'project') missingProjectKnowledgeNotifiedRef.current = false;
     if (usesFileBrowser && !resourceId) {
       setItems([]);
       return;
@@ -572,7 +566,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
             <div className={projectStyles.resourceCardEmpty}>
               <Empty
                 image={Empty.PRESENTED_IMAGE_SIMPLE}
-                description={!resourceId ? '暂无项目知识库' : intl.formatMessage({ id: emptyTextId })}
+                description={!resourceId ? '暂未初始化项目知识库' : intl.formatMessage({ id: emptyTextId })}
               />
             </div>
           )}
@@ -600,7 +594,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         loading={loading}
         items={items}
         currentPath={rootPath}
-        emptyText={scope === 'project' && !resourceId ? '暂无项目知识库' : intl.formatMessage({ id: emptyTextId })}
+        emptyText={scope === 'project' && !resourceId ? '暂未初始化项目知识库' : intl.formatMessage({ id: emptyTextId })}
         contentBefore={
           isLocalSharedFiles ? (
             <div className={styles.localSharedToolbar}>

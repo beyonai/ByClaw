@@ -167,7 +167,6 @@ const ProjectResources: React.FC<Props> = ({
     const cloudResourceId = project.cloudResourceId;
     if (!cloudResourceId) {
       setFiles([]);
-      message.info('当前项目暂无项目知识库，无法展示云盘文件');
       return;
     }
     setLoadingFiles(true);

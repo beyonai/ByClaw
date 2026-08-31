@@ -8,8 +8,6 @@ import OntologySiderPanel from '@/layout/sider/components/OntologySiderPanel';
 import ResourceSiderPanel from '@/layout/sider/components/ResourceSiderPanel';
 import { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentBar';
 import type { DetailPanelOptions } from '@/layout/sider/siderContentContext';
-import { useProjectTypeConfig } from '@/pages/projectSpace/hooks/useProjectTypeConfig';
-import { supportsProjectRepositories } from '@/pages/projectSpace/projectCapabilities';
 import FileResourcePanel from './FileResourcePanel';
 import CodesTab from '@/layout/sider/components/ProjectSpaceList/CodesTab';
 import { useChatResourceProject } from './useChatResourceProject';
@@ -35,7 +33,6 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
   const isEnglish = intl.locale.toLowerCase().startsWith('en');
   const activeEmployee = useActiveSiderAgent();
   const { project, loading: projectLoading } = useChatResourceProject(projectId);
-  const { isDevelopProjectEnabled, isOperationProjectEnabled } = useProjectTypeConfig();
   const [upperScopeKey, setUpperScopeKey] = useState<UpperScopeKey>('session');
   const [secondaryState, setSecondaryState] = useState<SecondaryState>(EMPTY_SECONDARY_STATE);
   const [sessionResourceRefreshKey, setSessionResourceRefreshKey] = useState(0);
@@ -49,11 +46,8 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
         ? `${project.resourceId}`
         : undefined;
 
-  // 项目代码对已启用对应能力的研发、运营项目开放；未明确的数据项按约定保留空态。
-  const repositoryProjectEnabled =
-    (project?.projectType === 'develop' && isDevelopProjectEnabled) ||
-    (project?.projectType === 'operation' && isOperationProjectEnabled);
-  const showCode = repositoryProjectEnabled && supportsProjectRepositories(project?.projectType);
+  // 项目类型已废弃，所有项目和会话统一展示项目代码模块。
+  const showCode = true;
   useEffect(() => {
     if (!showCode && secondaryState.session === 'code') {
       setSecondaryState((current) => ({ ...current, session: 'file' }));

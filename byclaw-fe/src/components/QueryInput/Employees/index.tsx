@@ -307,6 +307,22 @@ class EmployeesInputChat extends QueryInputBase<IProps, IState> {
                     agentType: this.props.myAgentType,
                   },
                 });
+                const projectId = this.props.projectId ?? this.props.selectedProject?.projectId;
+                if (projectId !== undefined && projectId !== null) {
+                  this.props.globalContext.EventEmitter.emit('projectSpace-session-refresh', {
+                    projectId,
+                    projectName: this.props.selectedProject?.projectName,
+                    session: {
+                      sessionId: mySessionId,
+                      sessionName,
+                      projectId,
+                      projectName: this.props.selectedProject?.projectName,
+                      updateTime: new Date().toISOString(),
+                      createTime: new Date().toISOString(),
+                      isLocalSession: true,
+                    },
+                  });
+                }
               }}
             />
           )}

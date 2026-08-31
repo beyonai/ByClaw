@@ -46,6 +46,7 @@ import { closeChatResourceTab, upsertChatResourceTab, type ChatResourceTab } fro
 import { isNotificationSession } from '@/utils/session';
 import { qryConversations } from '@/service/layout';
 import { isExternalChildSession } from '@/utils/scopedSession';
+import { useChatResourceProject } from './ChatResourceWorkspace/useChatResourceProject';
 
 type IProps = {
   sessionId: string;
@@ -231,6 +232,9 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
       ? normalizedProjectId
       : undefined;
   }, [currentSession?.projectId, projectId]);
+  const { project: sessionProject } = useChatResourceProject(sessionProjectId);
+  const sessionCloudResourceId =
+    currentSession?.cloudResourceId || selectedProject?.cloudResourceId || sessionProject?.cloudResourceId;
 
   const notificationSession = isNotificationSession(currentSession);
   const externalChildSession = isExternalChildSession(currentSession);
@@ -724,7 +728,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
                   queryInputProps={{
                     ...queryInputProps,
                     projectId: sessionProjectId,
-                    projectCloudResourceId: currentSession?.cloudResourceId || selectedProject?.cloudResourceId,
+                    projectCloudResourceId: sessionCloudResourceId,
                     selectedProject,
                   }}
                   lastMsg={lastMsg}

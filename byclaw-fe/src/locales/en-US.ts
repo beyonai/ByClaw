@@ -489,7 +489,7 @@ export default {
   labelCard: 'Indicator Card',
 
   'chat.placeholder': 'Enter the question you want to know',
-  'chat.expert.placeholder': 'Send a message, enter @ to select conversation partner',
+  'chat.expert.placeholder': 'Send a message, click + to select a conversation partner',
   // 'chat.smart.placeholder':
   //   'Please enter your task. You can enter @ to select a conversation partner, or enter # to reference knowledge and skills',
   'chatTitle.saveAsTemplate': 'Save as Template',

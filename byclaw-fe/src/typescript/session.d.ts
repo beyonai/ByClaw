@@ -11,6 +11,7 @@ export interface ISession {
   updateTime: string; // 会话的创建时间
   sessionId: string; // 列表中的会话ID
   projectId?: string | number; // 项目空间会话所属项目ID
+  cloudResourceId?: string | number; // 会话所属项目的知识库 ID
   enterpriseId?: number; // 列表中的企业ID
   objectId?: number; // 列表中的对象ID
   objectType?: string; // 列表中的对象类型

@@ -204,6 +204,17 @@
     margin: 0;
   }
 }
+
+.compactCard {
+  .employeesList {
+    :global {
+      .@{antPrefix}-list-item {
+        padding: 4px 8px;
+      }
+    }
+  }
+}
+
 .list {
   flex: 1 1 auto;
   overflow: auto;
