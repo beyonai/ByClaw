@@ -15,6 +15,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 
+import com.iwhalecloud.byai.common.discovery.ApplicationServiceEndpoint;
 import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpec;
 import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpecRepository;
 import com.iwhalecloud.byai.manager.application.service.devloop.GitHubCredentialResolver;
@@ -49,9 +50,13 @@ class SandboxLaunchContextFactoryTest {
     @Mock
     private GitHubCredentialResolver githubCredentialResolver;
 
+    @Mock
+    private ApplicationServiceEndpoint applicationServiceEndpoint;
+
     @BeforeEach
     void setUp() {
         when(stringRedisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(applicationServiceEndpoint.getBaseUrl()).thenReturn("http://192.168.0.83:8086/byaiService");
     }
 
     @Test
@@ -67,6 +72,7 @@ class SandboxLaunchContextFactoryTest {
         assertThat(first.getEnvs())
             .containsEntry("gateway_token", first.getGatewayToken())
             .containsEntry("OPENCLAW_GATEWAY_TOKEN", first.getGatewayToken())
+            .containsEntry("BYAI_SERVICE_BASE_URL", "http://192.168.0.83:8086/byaiService")
             .containsEntry("USER_CODE", "user001")
             .doesNotContainKey("BYCLAW_USER_CODE");
     }

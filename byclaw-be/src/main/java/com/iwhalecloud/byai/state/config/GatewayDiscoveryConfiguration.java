@@ -1,48 +1,25 @@
 package com.iwhalecloud.byai.state.config;
 
-import com.iwhaleai.byai.framework.common.RedisClient;
-import com.iwhaleai.byai.framework.core.discovery.ServiceRegistry;
-import jakarta.annotation.PreDestroy;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.ApplicationRunner;
-import org.springframework.boot.web.servlet.context.ServletWebServerInitializedEvent;
-import org.springframework.context.ApplicationListener;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
 import java.util.HashMap;
 import java.util.Map;
 
+import jakarta.annotation.PreDestroy;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.ApplicationRunner;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+import com.iwhaleai.byai.framework.common.RedisClient;
+import com.iwhaleai.byai.framework.core.discovery.ServiceRegistry;
+import com.iwhalecloud.byai.common.discovery.ApplicationServiceEndpoint;
+
 /**
- * Spring Boot 集成 SDK 服务注册与发现配置。 1. 动态端口捕获：支持 server.port=0 情况，监听 ServletWebServerInitializedEvent 获取真实端口。 2.
- * 显式生命周期管理：解决 DevTools 重启导致的 "Pool not open" 问题。 原因：RedisClient 在 SDK 中是静态单例，Spring 销毁旧 Context 时会关闭连接池， 重启后的新 Context
- * 获取到的仍是旧的已关闭单例。 解决方法：通过 RedisClient.init() 强制重新初始化。 3. 灵活网络配置：引入 gateway.discovery.host 支持手动指定注册 Host，适配 Docker/NAT
- * 环境。
+ * Spring Boot 集成 by-framework 服务注册与发现配置。
+ * 注册端点由 {@link ApplicationServiceEndpoint} 统一管理，此处负责创建注册器并管理其生命周期。
  */
 @Slf4j
 @Configuration
-public class GatewayDiscoveryConfiguration implements ApplicationListener<ServletWebServerInitializedEvent> {
-
-    @Value("${spring.application.name:beclaw-be}")
-    private String serviceName;
-
-    @Value("${gateway.discovery.host:#{null}}")
-    private String discoveryHost;
-
-    @Value("${gateway.discovery.port:#{null}}")
-    private Integer actualServerPort;
-
-    @Override
-    public void onApplicationEvent(ServletWebServerInitializedEvent event) {
-        // 捕获 Web 容器启动后的真实端口
-        if (this.actualServerPort == null) {
-            this.actualServerPort = event.getWebServer().getPort();
-            log.info(">>> 检测到应用运行时端口: {}", actualServerPort);
-        }
-        if ("AUTO".equalsIgnoreCase(this.discoveryHost)) {
-            this.discoveryHost = null;
-        }
-    }
+public class GatewayDiscoveryConfiguration {
 
     /**
      * 将 ServiceRegistry 注册为 Bean。
@@ -56,18 +33,15 @@ public class GatewayDiscoveryConfiguration implements ApplicationListener<Servle
      * 启动完成后自动执行服务注册。
      */
     @Bean
-    public ApplicationRunner serviceRegistrationRunner(ServiceRegistry registry) {
+    public ApplicationRunner serviceRegistrationRunner(ApplicationServiceEndpoint serviceEndpoint) {
         return args -> {
             Map<String, Object> metadata = new HashMap<>();
             metadata.put("framework", "spring-boot");
             metadata.put("version", "3.2.0");
 
-            log.info(">>> 正在向注册中心注册服务: {} (Host: {}, Port: {})", serviceName,
-                discoveryHost != null ? discoveryHost : "AUTO", actualServerPort);
-
-            // 注册服务
-            registry.register(serviceName, discoveryHost, actualServerPort, 1, metadata, 5);
-            log.info(">>> 服务注册成功，实例 ID: {}", registry.getCurrentInstance().getId());
+            log.info(">>> 正在向注册中心注册服务: {}", serviceEndpoint.getServiceName());
+            serviceEndpoint.register(metadata);
+            log.info(">>> 服务注册成功，访问地址: {}", serviceEndpoint.getBaseUrl());
         };
     }
 

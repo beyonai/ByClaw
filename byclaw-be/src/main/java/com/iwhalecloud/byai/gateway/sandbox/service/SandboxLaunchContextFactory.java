@@ -16,6 +16,7 @@ import org.springframework.stereotype.Service;
 import com.alibaba.fastjson.JSON;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.constants.resource.WorkerAgentType;
+import com.iwhalecloud.byai.common.discovery.ApplicationServiceEndpoint;
 import com.iwhalecloud.byai.common.feign.response.knowledge.ModelDto;
 import com.iwhalecloud.byai.common.jwt.JwtService;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
@@ -49,6 +50,9 @@ public class SandboxLaunchContextFactory {
 
     @Value("${sandbox.model_provider_name:iwhalecloud}")
     private String modelProviderName;
+
+    @Autowired
+    private ApplicationServiceEndpoint applicationServiceEndpoint;
 
     @Lazy
     @Autowired
@@ -238,6 +242,8 @@ public class SandboxLaunchContextFactory {
 
         envs.put("gateway_token", gatewayToken);
         envs.put("OPENCLAW_GATEWAY_TOKEN", gatewayToken);
+        // 直接使用 by-framework 当前注册实例生成地址，确保协议、Host、端口和路径始终与注册内容一致。
+        envs.put("BYAI_SERVICE_BASE_URL", applicationServiceEndpoint.getBaseUrl());
         applyCurrentUserAuthEnv(envs, userCode);
 
         if (digEmployee == null || StringUtils.isBlank(digEmployee.getPrologue())) {
