@@ -27,6 +27,7 @@ import {
 } from '@/components/MessagesComp/easyConfirm';
 import type { EasyConfirmDescriptor } from '@/components/MessagesComp/easyConfirm';
 import { notifyEasyConfirmInteraction } from '@/components/MessagesComp/withEasyConfirm';
+import { chatSessionRuntimeManager } from '@/utils/chatSessionRuntimeManager';
 
 const inputDraftMap = new Map<string, DefaultValueSchema>();
 
@@ -209,6 +210,13 @@ const EasyConfirm = (props: IProps) => {
   useEffect(() => {
     setEventList([]);
   }, [sessionId]);
+
+  useEffect(() => {
+    if (!sessionId) return;
+
+    // 用户提交交互内容后同步清除会话暂停标记，侧边栏随运行时状态立即恢复。
+    chatSessionRuntimeManager.setSessionWaitingForUserInput(sessionId, list.length > 0);
+  }, [list.length, sessionId]);
 
   useEffect(() => {
     const currentItemKeys = new Set(list.map(getUUId).filter(Boolean));

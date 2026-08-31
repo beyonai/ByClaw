@@ -1032,6 +1032,7 @@ export default {
   'workspaceSider.retry': '重试',
   'workspaceSider.loadMore': '查看更多',
   'workspaceSider.collapseSessions': '收起',
+  'workspaceSider.sessionNeedsUserInput': '需要用户输入',
   'workspaceSider.time.justNow': '刚刚',
   'workspaceSider.time.minutesAgo': '{count}分钟前',
   'workspaceSider.time.hoursAgo': '{count}小时前',

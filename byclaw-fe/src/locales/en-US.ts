@@ -1036,6 +1036,7 @@ export default {
   'workspaceSider.retry': 'Retry',
   'workspaceSider.loadMore': 'View more',
   'workspaceSider.collapseSessions': 'Collapse',
+  'workspaceSider.sessionNeedsUserInput': 'User input required',
   'workspaceSider.time.justNow': 'Just now',
   'workspaceSider.time.minutesAgo': '{count} min ago',
   'workspaceSider.time.hoursAgo': '{count} hr ago',

@@ -11,6 +11,7 @@ import {
 import { useDispatch, useIntl, useLocation, useNavigate } from '@umijs/max';
 import classNames from 'classnames';
 import dayjs from 'dayjs';
+import { Tag } from 'antd';
 import AntdIcon from '@/components/AntdIcon';
 import { clearEasyConfirmInputDraft } from '@/components/ChatLayoutComp/components/EasyConfirm';
 import { hydrateRunningSessions } from '@/hooks/useChat/chatRuntime';
@@ -182,7 +183,7 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
   const sessionStateMapRef = useRef(sessionStateMap);
   const sessionLoadingProjectIdsRef = useRef<Set<string>>(new Set());
   const hasStoredExpandedProjectIdsRef = useRef(hasStoredExpandedProjectIds());
-  const runningSessionIdsKeyRef = useRef('');
+  const displayedSessionRuntimeKeyRef = useRef('');
 
   useEffect(() => {
     expandedProjectIdsRef.current = expandedProjectIds;
@@ -220,27 +221,35 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
     }
   }, [loadedSessionIdsKey]);
 
-  const updateDisplayedRunningSessions = useCallback(() => {
-    const nextRunningSessionIdsKey = Object.values(sessionStateMapRef.current)
+  const updateDisplayedSessionRuntime = useCallback(() => {
+    const nextDisplayedSessionRuntimeKey = Object.values(sessionStateMapRef.current)
       .flatMap((sessionState) => sessionState.sessions)
       .map((session) => `${session.sessionId || ''}`.trim())
-      .filter((loadedSessionId) => loadedSessionId && chatSessionRuntimeManager.isSessionRunning(loadedSessionId))
+      .filter(Boolean)
+      .map((loadedSessionId) => {
+        const isRunning = chatSessionRuntimeManager.isSessionRunning(loadedSessionId);
+        const isWaitingForUserInput = chatSessionRuntimeManager.isSessionWaitingForUserInput(loadedSessionId);
+        return isRunning || isWaitingForUserInput
+          ? `${loadedSessionId}:${isRunning ? 'running' : 'idle'}:${isWaitingForUserInput ? 'waiting' : 'active'}`
+          : '';
+      })
+      .filter(Boolean)
       .sort()
       .join(',');
-    if (nextRunningSessionIdsKey === runningSessionIdsKeyRef.current) return;
+    if (nextDisplayedSessionRuntimeKey === displayedSessionRuntimeKeyRef.current) return;
 
-    runningSessionIdsKeyRef.current = nextRunningSessionIdsKey;
+    displayedSessionRuntimeKeyRef.current = nextDisplayedSessionRuntimeKey;
     setRuntimeVersion((version) => version + 1);
   }, []);
 
   useEffect(() => {
-    // 流式游标也会触发 manager 通知，仅在可见会话的 running 集合变化时刷新侧边栏。
-    return chatSessionRuntimeManager.subscribe(updateDisplayedRunningSessions);
-  }, [updateDisplayedRunningSessions]);
+    // 流式游标也会触发 manager 通知，仅在可见会话的运行或等待输入状态变化时刷新侧边栏。
+    return chatSessionRuntimeManager.subscribe(updateDisplayedSessionRuntime);
+  }, [updateDisplayedSessionRuntime]);
 
   useEffect(() => {
-    updateDisplayedRunningSessions();
-  }, [sessionStateMap, updateDisplayedRunningSessions]);
+    updateDisplayedSessionRuntime();
+  }, [sessionStateMap, updateDisplayedSessionRuntime]);
 
   useEffect(() => {
     void syncRunningStatus();
@@ -726,7 +735,9 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
                 {session.sessionName || intl.formatMessage({ id: 'workspaceSider.newSession' })}
               </span>
               <span className={styles.sessionTime}>
-                {chatSessionRuntimeManager.isSessionRunning(`${session.sessionId}`) ? (
+                {chatSessionRuntimeManager.isSessionWaitingForUserInput(`${session.sessionId}`) ? (
+                  <Tag color="blue">{intl.formatMessage({ id: 'workspaceSider.sessionNeedsUserInput' })}</Tag>
+                ) : chatSessionRuntimeManager.isSessionRunning(`${session.sessionId}`) ? (
                   <LoadingOutlined />
                 ) : (
                   formatSessionTime(session.updateTime || session.createTime, intl)

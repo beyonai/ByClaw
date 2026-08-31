@@ -12,6 +12,7 @@ type RuntimeInfo = {
   agentName?: string | null;
   agentType?: string;
   restored?: boolean;
+  waitingForUserInput?: boolean;
   lastAppliedStreamId?: string;
   cancel?: () => void;
 };
@@ -186,6 +187,32 @@ class ChatSessionRuntimeManager {
   isSessionRunning(sessionId?: string): boolean {
     if (!sessionId) return false;
     return Boolean(this.activeClientRequestIdsBySessionId.get(`${sessionId}`)?.size);
+  }
+
+  isSessionWaitingForUserInput(sessionId?: string | number): boolean {
+    return this.getAllBySession(sessionId).some((runtimeInfo) => runtimeInfo.waitingForUserInput);
+  }
+
+  setWaitingForUserInput(clientRequestId: string | undefined, waitingForUserInput: boolean): void {
+    if (!clientRequestId) return;
+    const info = this.activeByClientRequestId.get(`${clientRequestId}`);
+    if (!info || Boolean(info.waitingForUserInput) === waitingForUserInput) return;
+
+    info.waitingForUserInput = waitingForUserInput;
+    this.emitChange();
+  }
+
+  setSessionWaitingForUserInput(sessionId: string | number | undefined, waitingForUserInput: boolean): void {
+    const runtimeInfoList = this.getAllBySession(sessionId);
+    const changedRuntimeInfoList = runtimeInfoList.filter(
+      (runtimeInfo) => Boolean(runtimeInfo.waitingForUserInput) !== waitingForUserInput
+    );
+    if (!changedRuntimeInfoList.length) return;
+
+    changedRuntimeInfoList.forEach((runtimeInfo) => {
+      runtimeInfo.waitingForUserInput = waitingForUserInput;
+    });
+    this.emitChange();
   }
 
   getBySession(sessionId?: string): RuntimeInfo | undefined {

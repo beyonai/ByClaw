@@ -7,7 +7,7 @@ jest.mock('@/hooks/useSseSender/chatStream', () => ({
   },
 }));
 
-import { IMessageState } from '@/constants/message';
+import { IMessageState, SSEMessageType } from '@/constants/message';
 import { chatSessionRuntimeManager } from '@/utils/chatSessionRuntimeManager';
 
 import {
@@ -85,6 +85,48 @@ describe('hooks/useChat/chatRuntime', () => {
     expect(updateMessage).toHaveBeenCalledTimes(1);
     expect(updateMessage).toHaveBeenCalledWith(answerMsg, { isAssign: undefined });
     expect(answerMsg.messageList).toHaveLength(1);
+    jest.useRealTimers();
+  });
+
+  it('marks a running session when a stream message requires user input', () => {
+    jest.useFakeTimers();
+    const queryMsg: any = { msgId: 'q1', sessionId: 's1' };
+    const answerMsg: any = { msgId: 'c1', sessionId: 's1', messageState: IMessageState.Query };
+    const updateMessage = jest.fn((msg) => msg);
+    const flowHandler = jest.fn(({ newAnswerMsg, sseRes }) => {
+      newAnswerMsg.messageState = IMessageState.Answer;
+      newAnswerMsg.messageList = [sseRes.message];
+    });
+
+    registerPendingChatContext({
+      clientRequestId: 'c1',
+      queryMsg,
+      answerMsg,
+      getMessageList: () => [queryMsg, answerMsg],
+      flowHandler,
+      updateMessage,
+    });
+    chatSessionRuntimeManager.register({
+      clientRequestId: 'c1',
+      sessionId: 's1',
+    });
+
+    handleParsedChatStream(
+      createParsed({
+        formattedPayload: {
+          sessionId: 's1',
+          message: {
+            uuid: 'pending-1',
+            contentType: SSEMessageType.askUserQuestions,
+            content: { substance: { questions: [] } },
+            status: '_DONE_',
+          },
+        },
+      })
+    );
+
+    expect(chatSessionRuntimeManager.isSessionWaitingForUserInput('s1')).toBe(true);
+    jest.runOnlyPendingTimers();
     jest.useRealTimers();
   });
 
