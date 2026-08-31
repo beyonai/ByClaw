@@ -2545,39 +2545,71 @@ describe('ConnectorControl authorization states', () => {
     Modal.destroyAll();
   });
 
-  it('rejects malformed IMA metadata before opening authorization', async () => {
-    mockQueryConnectorList.mockResolvedValue({
-      list: [
-        {
-          connectorId: 10,
-          connectorCode: 'ima-openapi',
-          connectorName: 'IMA',
-          connectorType: 'SYSTEM',
-          description: 'IMA 知识库',
-          enableFlag: null,
-          authMode: 'AK_SK',
-          credentialForm: {
-            helpUrl: 'https://ima.qq.com/openapi',
-            fields: [],
-          },
-        },
-      ],
-      pageNum: 1,
-      pageSize: 100,
-      total: 1,
-      totalPages: 1,
-    });
+  it('refreshes malformed IMA metadata and opens the credential form', async () => {
+    const malformedIma = {
+      connectorId: 10,
+      connectorCode: 'ima-openapi',
+      connectorName: 'IMA',
+      connectorType: 'SYSTEM' as const,
+      description: 'IMA 知识库',
+      enableFlag: null,
+      authMode: 'AK_SK',
+      credentialForm: {
+        helpUrl: 'https://ima.qq.com/openapi',
+        fields: [],
+      },
+    };
+    const validIma = {
+      ...malformedIma,
+      credentialForm: {
+        helpUrl: 'https://ima.qq.com/openapi',
+        fields: [
+          { key: 'clientId', label: 'Client ID', inputType: 'text' as const, maxLength: 256 },
+          { key: 'apiKey', label: 'API Key', inputType: 'password' as const, maxLength: 2048 },
+        ],
+      },
+    };
+    mockQueryAllConnectors
+      .mockResolvedValueOnce([malformedIma])
+      .mockResolvedValueOnce([malformedIma])
+      .mockResolvedValue([validIma]);
 
     render(<ConnectorControl canAuthorize />);
     fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
     fireEvent.click(await screen.findByRole('button', { name: '连接' }));
 
-    await waitFor(() => expect(mockMessageError).toHaveBeenCalledWith('IMA 连接配置暂不可用，请刷新后重试'));
-    await waitFor(() =>
-      expect(screen.queryByRole('heading', { name: '连接 IMA 作为 AI 知识库' })).not.toBeInTheDocument()
-    );
+    await waitFor(() => expect(mockQueryAllConnectors).toHaveBeenCalledTimes(3));
+    expect(await screen.findByLabelText('Client ID')).toBeInTheDocument();
+    expect(screen.getByLabelText('API Key')).toBeInTheDocument();
+    expect(mockMessageError).not.toHaveBeenCalledWith('IMA 连接配置暂不可用，请稍后重试');
+  });
+
+  it('keeps IMA authorization closed when metadata recovery fails', async () => {
+    const malformedIma = {
+      connectorId: 10,
+      connectorCode: 'ima-openapi',
+      connectorName: 'IMA',
+      connectorType: 'SYSTEM' as const,
+      description: 'IMA 知识库',
+      enableFlag: null,
+      authMode: 'AK_SK',
+      credentialForm: {
+        helpUrl: 'https://ima.qq.com/openapi',
+        fields: [],
+      },
+    };
+    mockQueryAllConnectors
+      .mockResolvedValueOnce([malformedIma])
+      .mockResolvedValueOnce([malformedIma])
+      .mockRejectedValueOnce(new Error('offline'));
+
+    render(<ConnectorControl canAuthorize />);
+    fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
+    fireEvent.click(await screen.findByRole('button', { name: '连接' }));
+
+    await waitFor(() => expect(mockMessageError).toHaveBeenCalledWith('IMA 连接配置暂不可用，请稍后重试'));
+    await waitFor(() => expect(screen.queryByRole('status', { name: 'IMA状态刷新中' })).not.toBeInTheDocument());
     expect(screen.queryByLabelText('Client ID')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '立即前往授权' })).not.toBeInTheDocument();
   });
 
   it.each(['', 'javascript:alert(1)', 'data:text/plain,credentials', '/ima/openapi', 'not a valid URL'])(

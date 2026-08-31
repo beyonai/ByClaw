@@ -447,6 +447,7 @@ const ConnectorControl = ({ canAuthorize, inline = false, outside = false }: Con
         if (connectorLoadGenerationRef.current !== requestGeneration) return;
         const connectorList = list.map(mapConnectorListItem);
         setConnectors(connectorList);
+        return connectorList;
       } catch {
         if (connectorLoadGenerationRef.current !== requestGeneration) return;
         if (reportAuthorizationRefreshFailure) {
@@ -627,17 +628,26 @@ const ConnectorControl = ({ canAuthorize, inline = false, outside = false }: Con
     });
   };
 
-  const beginAuthorization = (connector: Connector) => {
+  const beginAuthorization = async (connector: Connector) => {
+    let connectorForAuthorization = connector;
+
     if (connector.authMode === 'AK_SK' && !hasValidCredentialForm(connector)) {
-      message.error(`${connector.name} 连接配置暂不可用，请刷新后重试`);
-      return;
+      const refreshedConnectors = await loadAuthorizedConnectors();
+      const refreshedConnector = refreshedConnectors?.find((item) => item.id === connector.id);
+
+      if (!hasValidCredentialForm(refreshedConnector)) {
+        message.error(`${connector.name} 连接配置暂不可用，请稍后重试`);
+        return;
+      }
+
+      connectorForAuthorization = refreshedConnector;
     }
 
     // 先展示权限说明，再进入对应平台的授权步骤。
     abortCredentialVerification();
     invalidateAuthorizationRequests();
     setStartingAuthorization(false);
-    setAuthorizingConnector(connector);
+    setAuthorizingConnector(connectorForAuthorization);
     setAuthorizationSession(undefined);
   };
 
@@ -801,7 +811,7 @@ const ConnectorControl = ({ canAuthorize, inline = false, outside = false }: Con
                 { key: 'revoke', danger: true, icon: <DisconnectOutlined />, label: '取消授权' },
               ],
               onClick: ({ key }) => {
-                if (key === 'reauthorize') beginAuthorization(connector);
+                if (key === 'reauthorize') void beginAuthorization(connector);
                 if (key === 'revoke') confirmRevokeAuthorization(connector);
               },
             }}
@@ -834,7 +844,7 @@ const ConnectorControl = ({ canAuthorize, inline = false, outside = false }: Con
       return (
         <Button
           type="text"
-          onClick={() => beginAuthorization(connector)}
+          onClick={() => void beginAuthorization(connector)}
           style={{ color: 'var(--beyond-color-primary)' }}
         >
           连接
