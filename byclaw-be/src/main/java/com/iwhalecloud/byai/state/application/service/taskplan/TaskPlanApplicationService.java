@@ -10,6 +10,8 @@ import java.util.Objects;
 import java.util.Set;
 
 import org.apache.commons.lang3.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,6 +33,8 @@ import com.iwhalecloud.byai.state.domain.taskplan.exception.TaskPlanCommandExcep
 /** Agent 任务计划的单表权威写入、查询和取消服务。 */
 @Service
 public class TaskPlanApplicationService {
+
+    private static final Logger log = LoggerFactory.getLogger(TaskPlanApplicationService.class);
 
     private static final Set<String> TERMINAL_TASK_STATUSES = Set.of(
         "COMPLETED", "FAILED", "SKIPPED", "CANCELLED");
@@ -65,6 +69,10 @@ public class TaskPlanApplicationService {
         String sourceRunId = requiredTextCommand(request.getSourceRunId(), "sourceRunId", 128);
         requireOwnedSessionCommand(sessionId, userId);
         String action = requiredTextCommand(request.getAction(), "action", 16).toUpperCase(Locale.ROOT);
+        log.info("[task-plan] command received action={}, idempotencyKey={}, userId={}, sessionId={}, messageId={}, "
+            + "traceId={}, turnId={}, laneId={}, sourceRuntime={}, sourceRunId={}", action,
+            request.getIdempotencyKey(), userId, sessionId, messageId, request.getTraceId(), request.getTurnId(),
+            request.getLaneId(), sourceRuntime, sourceRunId);
         return switch (action) {
             case "CREATE" -> create(request, userId, sessionId, messageId, sourceRuntime, sourceRunId);
             case "COMPLETE_CURRENT", "FAIL_CURRENT", "SKIP_CURRENT" ->
@@ -108,6 +116,11 @@ public class TaskPlanApplicationService {
         ByaiAgentTaskPlan plan = Boolean.TRUE.equals(request.getIncludeTerminal())
             ? findLatestForExecution(userId, sessionId, messageId, sourceRuntime, sourceRunId)
             : findActiveForExecution(userId, sessionId, messageId, sourceRuntime, sourceRunId, false);
+        log.info("[task-plan] active lookup userId={}, sessionId={}, messageId={}, traceId={}, sourceRuntime={}, "
+            + "sourceRunId={}, includeTerminal={}, hit={}, planId={}, version={}, status={}", userId, sessionId,
+            messageId, request.getTraceId(), sourceRuntime, sourceRunId, request.getIncludeTerminal(), plan != null,
+            plan == null ? null : plan.getPlanId(), plan == null ? null : plan.getVersion(),
+            plan == null ? null : plan.getStatus());
         return plan == null ? null : snapshot(plan);
     }
 
@@ -319,8 +332,18 @@ public class TaskPlanApplicationService {
         if (existing != null) {
             boolean ownedExecution = isExecutionOwner(existing, messageId, sourceRuntime, sourceRunId);
             if (ownedExecution && Objects.equals(existing.getLastCommandId(), idempotencyKey)) {
+                log.info("[task-plan] create idempotent replay planId={}, version={}, userId={}, sessionId={}, "
+                    + "messageId={}, sourceRuntime={}, sourceRunId={}, idempotencyKey={}", existing.getPlanId(),
+                    existing.getVersion(), userId, sessionId, messageId, sourceRuntime, sourceRunId, idempotencyKey);
                 return new TaskPlanWriteResult(snapshot(existing), false);
             }
+            log.warn("[task-plan] create rejected by active session plan userId={}, sessionId={}, "
+                + "requestedMessageId={}, requestedSourceRuntime={}, requestedSourceRunId={}, idempotencyKey={}, "
+                + "existingPlanId={}, existingVersion={}, existingStatus={}, existingMessageId={}, "
+                + "existingSourceRuntime={}, existingSourceRunId={}, existingLastCommandId={}, ownerMatch={}",
+                userId, sessionId, messageId, sourceRuntime, sourceRunId, idempotencyKey, existing.getPlanId(),
+                existing.getVersion(), existing.getStatus(), existing.getMessageId(), existing.getSourceRuntime(),
+                existing.getSourceRunId(), existing.getLastCommandId(), ownedExecution);
             throw commandError("PLAN_ALREADY_EXISTS", "An active task plan already exists for this session",
                 ownedExecution ? snapshot(existing) : null);
         }
@@ -348,6 +371,9 @@ public class TaskPlanApplicationService {
         if (planMapper.insert(plan) != 1 || plan.getPlanId() == null) {
             throw new IllegalStateException("Task plan insert did not return an auto-generated plan_id");
         }
+        log.info("[task-plan] plan created planId={}, version={}, userId={}, sessionId={}, messageId={}, "
+            + "sourceRuntime={}, sourceRunId={}, idempotencyKey={}", plan.getPlanId(), plan.getVersion(), userId,
+            sessionId, messageId, sourceRuntime, sourceRunId, idempotencyKey);
         return new TaskPlanWriteResult(snapshot(plan, tasks), true);
     }
 
@@ -360,8 +386,28 @@ public class TaskPlanApplicationService {
             ByaiAgentTaskPlan latest = findLatestForExecution(userId, sessionId, messageId, sourceRuntime,
                 sourceRunId);
             if (latest != null && Objects.equals(latest.getLastCommandId(), idempotencyKey)) {
+                log.info("[task-plan] advance idempotent replay action={}, planId={}, version={}, status={}, "
+                    + "userId={}, sessionId={}, messageId={}, sourceRuntime={}, sourceRunId={}, idempotencyKey={}",
+                    action, latest.getPlanId(), latest.getVersion(), latest.getStatus(), userId, sessionId, messageId,
+                    sourceRuntime, sourceRunId, idempotencyKey);
                 return new TaskPlanWriteResult(snapshot(latest), false);
             }
+            ByaiAgentTaskPlan sessionActive = findLatestActiveForSession(userId, sessionId, true);
+            log.warn("[task-plan] active execution lookup miss action={}, idempotencyKey={}, userId={}, sessionId={}, "
+                + "requestedMessageId={}, requestedSourceRuntime={}, requestedSourceRunId={}, "
+                + "exactLatestPlanId={}, exactLatestVersion={}, exactLatestStatus={}, exactLatestLastCommandId={}, "
+                + "sessionActivePlanId={}, sessionActiveVersion={}, sessionActiveStatus={}, sessionActiveMessageId={}, "
+                + "sessionActiveSourceRuntime={}, sessionActiveSourceRunId={}, sessionActiveLastCommandId={}",
+                action, idempotencyKey, userId, sessionId, messageId, sourceRuntime, sourceRunId,
+                latest == null ? null : latest.getPlanId(), latest == null ? null : latest.getVersion(),
+                latest == null ? null : latest.getStatus(), latest == null ? null : latest.getLastCommandId(),
+                sessionActive == null ? null : sessionActive.getPlanId(),
+                sessionActive == null ? null : sessionActive.getVersion(),
+                sessionActive == null ? null : sessionActive.getStatus(),
+                sessionActive == null ? null : sessionActive.getMessageId(),
+                sessionActive == null ? null : sessionActive.getSourceRuntime(),
+                sessionActive == null ? null : sessionActive.getSourceRunId(),
+                sessionActive == null ? null : sessionActive.getLastCommandId());
             throw commandError("PLAN_NOT_FOUND", "No active task plan exists for this execution",
                 latest == null ? null : snapshot(latest));
         }
@@ -426,12 +472,22 @@ public class TaskPlanApplicationService {
         if (changed == 0) {
             ByaiAgentTaskPlan latest = findLatestForExecution(userId, sessionId, messageId, sourceRuntime,
                 sourceRunId);
+            log.warn("[task-plan] optimistic update miss action={}, planId={}, expectedVersion={}, userId={}, "
+                + "sessionId={}, messageId={}, sourceRuntime={}, sourceRunId={}, idempotencyKey={}, "
+                + "latestVersion={}, latestStatus={}, latestLastCommandId={}", action, plan.getPlanId(),
+                current.getVersion(), userId, sessionId, messageId, sourceRuntime, sourceRunId, idempotencyKey,
+                latest == null ? null : latest.getVersion(), latest == null ? null : latest.getStatus(),
+                latest == null ? null : latest.getLastCommandId());
             if (latest != null && Objects.equals(latest.getLastCommandId(), idempotencyKey)) {
                 return new TaskPlanWriteResult(snapshot(latest), false);
             }
             throw commandError("VERSION_CONFLICT", "Task plan changed while it was being updated",
                 latest == null ? null : snapshot(latest));
         }
+        log.info("[task-plan] current task advanced action={}, planId={}, version={}->{}, status={}, userId={}, "
+            + "sessionId={}, messageId={}, sourceRuntime={}, sourceRunId={}, idempotencyKey={}", action,
+            plan.getPlanId(), current.getVersion(), nextVersion, nextStatus, userId, sessionId, messageId,
+            sourceRuntime, sourceRunId, idempotencyKey);
         return new TaskPlanWriteResult(nextSnapshot, true);
     }
 
