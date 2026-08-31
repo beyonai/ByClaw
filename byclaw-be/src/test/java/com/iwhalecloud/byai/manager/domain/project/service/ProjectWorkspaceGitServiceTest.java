@@ -132,6 +132,27 @@ class ProjectWorkspaceGitServiceTest {
             .containsExactly(actualPath);
     }
 
+    @Test
+    void pairsDshRepositoryWhenCloneDirectoryNameDiffersFromDatabaseName() throws Exception {
+        long projectId = 29441L;
+        ProjectRepo codeRepo = codeRepo(projectId, 901L, "beyonai/byclaw-test");
+        Path projectRoot = tempDir.resolve("bucket/by/projects/29441");
+        Path actualPath = projectRoot.resolve("repos/chat-leads-mvp");
+        Path configuredPath = projectRoot.resolve("repos/byclaw-test");
+        Files.createDirectories(actualPath.resolve(".git"));
+
+        ProjectRepoMapper repoMapper = mock(ProjectRepoMapper.class);
+        ProjectInitService initService = mock(ProjectInitService.class);
+        when(repoMapper.selectList(any())).thenReturn(List.of(codeRepo));
+        when(initService.getProjectRepositoryPath(codeRepo)).thenReturn(configuredPath);
+        ProjectWorkspaceGitService service = new ProjectWorkspaceGitService();
+        ReflectionTestUtils.setField(service, "projectRepoMapper", repoMapper);
+        ReflectionTestUtils.setField(service, "projectInitService", initService);
+
+        assertThat(service.resolveRepositories(projectId)).extracting(item -> item.path())
+            .containsExactly(actualPath);
+    }
+
     private ProjectWorkspaceGitService service(ProjectRepo workspace, Path repository) {
         return service(List.of(workspace), workspace, repository);
     }

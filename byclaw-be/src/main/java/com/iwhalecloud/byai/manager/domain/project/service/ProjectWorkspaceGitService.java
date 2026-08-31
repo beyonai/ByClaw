@@ -105,7 +105,12 @@ public class ProjectWorkspaceGitService {
 
         // DSH/无 workspace 场景：按数据库仓库名解析 repos/ 下的独立 Git 仓库。
         List<ResolvedRepository> resolved = new java.util.ArrayList<>();
-        Map<String, Path> discovered = discoverDshRepositories(repos);
+        List<Path> discoveredPaths = discoverDshRepositoryPaths(repos);
+        Map<String, Path> discovered = new HashMap<>();
+        discoveredPaths.forEach(path -> discovered.putIfAbsent(
+            path.getFileName().toString().toLowerCase(Locale.ROOT), path));
+        java.util.Set<Path> usedPaths = new java.util.HashSet<>();
+        java.util.Set<ProjectRepo> resolvedRepos = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
         for (ProjectRepo repo : repos) {
             Path repositoryPath = projectInitService.getProjectRepositoryPath(repo);
             if (!isGitRepository(repositoryPath)) {
@@ -113,7 +118,20 @@ public class ProjectWorkspaceGitService {
             }
             if (isGitRepository(repositoryPath)) {
                 resolved.add(new ResolvedRepository(repo, repositoryPath));
+                usedPaths.add(repositoryPath);
+                resolvedRepos.add(repo);
             }
+        }
+        // DSH 可能以任务/工作区名称落盘，目录名与数据库 repoFullName 不一致。
+        // 在已确认项目仓库目录存在的前提下，将剩余数据库记录与剩余实际仓库按稳定顺序配对，
+        // 避免 available-list 因名称漂移返回空列表。
+        List<ProjectRepo> unresolvedRepos = repos.stream().filter(repo -> !resolvedRepos.contains(repo)).toList();
+        List<Path> unresolvedPaths = discoveredPaths.stream().filter(path -> !usedPaths.contains(path)).toList();
+        int pairCount = Math.min(unresolvedRepos.size(), unresolvedPaths.size());
+        for (int i = 0; i < pairCount; i++) {
+            ProjectRepo repo = unresolvedRepos.get(i);
+            Path path = unresolvedPaths.get(i);
+            resolved.add(new ResolvedRepository(repo, path));
         }
         return resolved;
     }
@@ -122,8 +140,8 @@ public class ProjectWorkspaceGitService {
      * DSH 的仓库目录以实际 clone 名称为准。数据库中的 repoFullName 可能来自不同 provider，
      * 或者初始化时使用了 URL 解析结果；当精确拼接路径失败时，从同一项目的 repos 目录发现 Git 仓库。
      */
-    private Map<String, Path> discoverDshRepositories(List<ProjectRepo> repos) {
-        Map<String, Path> discovered = new HashMap<>();
+    private List<Path> discoverDshRepositoryPaths(List<ProjectRepo> repos) {
+        List<Path> discovered = new java.util.ArrayList<>();
         if (repos == null || repos.isEmpty()) {
             return discovered;
         }
@@ -135,7 +153,11 @@ public class ProjectWorkspaceGitService {
             }
             try (Stream<Path> children = Files.list(reposRoot)) {
                 children.filter(this::isGitRepository)
-                    .forEach(path -> discovered.putIfAbsent(path.getFileName().toString().toLowerCase(Locale.ROOT), path));
+                    .forEach(path -> {
+                        if (!discovered.contains(path)) {
+                            discovered.add(path);
+                        }
+                    });
             }
             catch (Exception ignored) {
                 // 目录不可读时保留精确路径结果，不影响 codeagent 及已有仓库浏览。
