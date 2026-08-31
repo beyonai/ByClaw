@@ -20,7 +20,7 @@ INSERT INTO byai.byai_connector_info (
 )
 SELECT nextval('byai.seq_any_table'), 'ima-openapi', 'IMA', '通过 IMA OpenAPI 连接 IMA 服务', 'SYSTEM',
        'ima-openapi', 'ima-skill', 'AK_SK',
-       '{"credentialForm":{"helpUrl":"https://ima.qq.com/agent-interface","fields":[{"key":"clientId","label":"Client ID","inputType":"text","maxLength":256},{"key":"apiKey","label":"API Key","inputType":"password","maxLength":2048}]}}',
+       '{"credentialForm":{"helpUrl":"https://ima.qq.com/agent-interface","helpLinkText":"前往 IMA 获取 API 凭据","helpText":"连接器作用：安全保存 IMA OpenAPI 的 Client ID 和 API Key，供数字员工访问 IMA 笔记和知识库。\n\n获取步骤：\n1. 点击下方链接进入 IMA 智能体接口页面并登录。\n2. 创建或选择需要连接的应用。\n3. 复制 Client ID 和 API Key。\n4. 返回本页填写凭据，点击“保存并连接”。\n\n安全提示：API Key 相当于账号密码，请勿发送到聊天、截图、工单或代码仓库。重新生成后旧值可能失效，需要重新连接。","fields":[{"key":"clientId","label":"Client ID","inputType":"text","maxLength":256},{"key":"apiKey","label":"API Key","inputType":"password","maxLength":2048}]}}',
        '{}',
        '{"schemaVersion":"1.0","id":"ima-openapi","version":"1.0.0","runtime":{"type":"cli","authorizeIn":"be-auth-job","commands":{"version":[["ima","--version"]]}},"authStorage":{"mode":"managed-environment","owner":"be-auth-job","runtimeMutation":"provider-refresh-only","managedEnvironmentKeys":["IMA_OPENAPI_CLIENTID","IMA_OPENAPI_APIKEY"],"environment":{}},"skill":{"code":"ima-skill","source":"system-builtin","installScope":"user","grantScope":"agent"}}',
        50
@@ -44,14 +44,6 @@ WHERE NOT EXISTS (
     SELECT 1 FROM byai.byai_connector_info WHERE connector_code = 'weixin-official-api'
 );
 
--- 同步更新已存在的连接器元数据，避免仅在首次初始化数据库时展示新版引导。
-UPDATE byai.byai_connector_info
-SET description = '安全保存公众号 AppID/AppSecret，供 byCLI 通过官方 API 创建草稿',
-    skill_code = 'wechat-api',
-    auth_config = '{"credentialForm":{"helpUrl":"https://developers.weixin.qq.com/platform","helpLinkText":"前往微信开发者平台获取凭据","helpText":"连接器作用：安全保存公众号 AppID 和 AppSecret，并在启用时提供给数字员工。使用 bycli weixin create-draft 时会优先调用公众号官方 API 上传封面和正文图片、创建草稿；不会直接群发或正式发布文章，也不保存 access_token。\n\n获取步骤：\n1. 点击下方链接登录微信公众平台，使用公众号管理员或有开发权限的微信扫码。\n2. 登录后选择要连接的目标公众号，进入公众号后台。\n3. 打开“设置与开发” → “开发接口管理” → “基本配置”，找到公众号开发信息。\n4. 在开发者 ID 区域复制 AppID。\n5. 在 AppSecret 区域点击“查看”或“重置”，由管理员扫码确认后复制新值。\n6. 将 ByClaw 后端和任务沙箱出口 IP 加入 IP 白名单，避免 40164。\n7. 返回本页填写 AppID、AppSecret，点击“保存并连接”。\n\n安全提示：AppSecret 相当于 API 密码，请勿发送到聊天、截图、工单或代码仓库。重置后旧值失效，需要重新连接。","fields":[{"key":"appId","label":"AppID","inputType":"text","maxLength":256},{"key":"appSecret","label":"AppSecret","inputType":"password","maxLength":2048}]}}',
-    runtime_manifest = '{"schemaVersion":"1.0","id":"weixin-official-api","version":"1.0.0","runtime":{"type":"cli","authorizeIn":"be-auth-job","commands":{"version":[["bycli","--version"]]}},"authStorage":{"mode":"managed-environment","owner":"be-auth-job","runtimeMutation":"provider-refresh-only","managedEnvironmentKeys":["WECHAT_APPID","WECHAT_APPSECRET"],"environment":{}},"skill":{"code":"wechat-api","source":"system-builtin","installScope":"user","grantScope":"agent"}}'
-WHERE connector_code = 'weixin-official-api';
-
 -- 微信开放平台第三方平台连接器。平台级密钥仅从后端部署环境读取，不投影到用户沙箱。
 INSERT INTO byai.byai_connector_info (
     connector_id, connector_code, connector_name, description, connector_type,
@@ -67,18 +59,6 @@ SELECT nextval('byai.seq_any_table'), 'weixin-open-platform', '微信开放平�
 WHERE NOT EXISTS (
     SELECT 1 FROM byai.byai_connector_info WHERE connector_code = 'weixin-open-platform'
 );
-
-UPDATE byai.byai_connector_info
-SET connector_name = '微信开放平台第三方平台',
-    description = '由公众号管理员扫码授权并读取公众号账号资料',
-    provider_code = 'weixin-open-platform',
-    skill_code = 'wechat-api',
-    auth_mode = 'OAUTH2',
-    auth_config = '{"componentAppidEnv":"WECHAT_COMPONENT_APPID","componentAppsecretEnv":"WECHAT_COMPONENT_APPSECRET","callbackTokenEnv":"WECHAT_COMPONENT_CALLBACK_TOKEN","encodingAesKeyEnv":"WECHAT_COMPONENT_ENCODING_AES_KEY","redirectUriEnv":"WECHAT_COMPONENT_REDIRECT_URI"}',
-    request_config = '{}',
-    runtime_manifest = '{"schemaVersion":"1.0","id":"weixin-open-platform","version":"1.0.0","runtime":{"type":"oauth2","authorizeIn":"be-auth-job"},"authStorage":{"mode":"credential-reference","owner":"be-auth-job","runtimeMutation":"provider-refresh-only","environment":{}},"skill":{"code":"wechat-api","source":"system-builtin","installScope":"user","grantScope":"agent"}}',
-    sort = 56
-WHERE connector_code = 'weixin-open-platform';
 
 -- IMA OpenAPI 内置 Skill 注册
 -- CLI 与 skill 文件随 OpenClaw 镜像提供；数据库仅注册目录、运行期快照和可发现权限。
@@ -113,40 +93,35 @@ WHERE NOT EXISTS (
 INSERT INTO byai.ss_res_ext_skill (
     resource_id, skill_type, source_type, version, skill_url,
     skill_package_format, skill_original_filename, skill_package_size,
-    skill_package_hash, sync_status, sync_error, last_sync_time
+    skill_package_hash, sync_status, sync_error, last_sync_time, target_content
 )
 SELECT
     r.resource_id, 'inner', 'SYSTEM_BUILTIN', '0.1.3', '', 'zip', NULL, NULL, NULL,
-    'SUCCESS', NULL, CURRENT_TIMESTAMP
+    'SUCCESS', NULL, CURRENT_TIMESTAMP,
+    json_build_object(
+        'resourceId', r.resource_id,
+        'resourceCode', r.resource_code,
+        'resourceName', r.resource_name,
+        'resourceDesc', r.resource_desc,
+        'resourceBizType', r.resource_biz_type,
+        'resourceType', r.resource_type,
+        'ownerType', r.owner_type,
+        'sourceType', 'SYSTEM_BUILTIN',
+        'skillType', 'inner',
+        'skillUrl', '',
+        'version', '0.1.3',
+        'skillPackageFormat', 'zip',
+        'skillOriginalFilename', NULL,
+        'skillPackageSize', NULL,
+        'skillPackageHash', NULL,
+        'syncStatus', 'SUCCESS',
+        'syncError', NULL,
+        'lastSyncTime', to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')
+    )::text
 FROM byai.ss_resource r
 WHERE NOT EXISTS (
     SELECT 1 FROM byai.ss_res_ext_skill e WHERE e.resource_id = r.resource_id
 )
-  AND r.resource_code = 'ima-skill';
-
-UPDATE byai.ss_res_ext_skill e
-SET target_content = json_build_object(
-    'resourceId', r.resource_id,
-    'resourceCode', r.resource_code,
-    'resourceName', r.resource_name,
-    'resourceDesc', r.resource_desc,
-    'resourceBizType', r.resource_biz_type,
-    'resourceType', r.resource_type,
-    'ownerType', r.owner_type,
-    'sourceType', e.source_type,
-    'skillType', e.skill_type,
-    'skillUrl', e.skill_url,
-    'version', e.version,
-    'skillPackageFormat', e.skill_package_format,
-    'skillOriginalFilename', e.skill_original_filename,
-    'skillPackageSize', e.skill_package_size,
-    'skillPackageHash', e.skill_package_hash,
-    'syncStatus', e.sync_status,
-    'syncError', e.sync_error,
-    'lastSyncTime', to_char(e.last_sync_time, 'YYYY-MM-DD HH24:MI:SS')
-)::text
-FROM byai.ss_resource r
-WHERE e.resource_id = r.resource_id
   AND r.resource_code = 'ima-skill';
 
 INSERT INTO byai.au_privilege_grant (
@@ -616,60 +591,6 @@ INSERT INTO byai.byai_system_config_list
 VALUES
     (nextval('byai.seq_any_table'), 'DIG_EMPLOYEE_AGENT_TYPE', '数字员工类型',
      '数字员工组', 'Digital Employee Group', '017', '数字员工组', 6);
--- By-Reach v2 产品面迁移：保留 agent-reach 技术代码，将显示名称和说明升级为 By-Reach。
--- V0.3.1 已发布，不能重写；本版本仅更新已有数据，且可重复执行。
-UPDATE byai.byai_system_config c
-SET param_value = regexp_replace(
-    regexp_replace(
-        regexp_replace(
-            c.param_value,
-            '"skillName"[[:space:]]*:[[:space:]]*"agent-reach"',
-            '"skillName":"By-Reach"',
-            'g'
-        ),
-        '"skillDescZh"[[:space:]]*:[[:space:]]*"路由公开互联网渠道能力，并按 ByClaw 覆盖规则选择 byCLI 等执行器。"',
-        '"skillDescZh":"路由公共互联网渠道，并按 By-Reach v2 策略选择已批准的执行器。"',
-        'g'
-    ),
-    '"skillDescEn"[[:space:]]*:[[:space:]]*"Route public-internet channels and select executors such as byCLI according to ByClaw override rules\."',
-    '"skillDescEn":"Route public-internet channels and select approved By-Reach v2 executors."',
-    'g'
-)
-WHERE c.param_code = 'OPENCLAW_BUNDLED_SKILLS'
-  AND regexp_replace(c.param_value, '\s', '', 'g') LIKE '%"skillCode":"agent-reach"%';
-
-UPDATE byai.ss_resource
-SET resource_name = 'By-Reach',
-    resource_desc = '路由公共互联网渠道，并按 By-Reach v2 策略选择已批准的执行器。',
-    update_time = CURRENT_TIMESTAMP
-WHERE resource_code = 'agent-reach';
-
--- 资源扩展记录保存了资源字段快照，名称变更后同步重建，避免 API 返回旧展示信息。
-UPDATE byai.ss_res_ext_skill e
-SET target_content = json_build_object(
-    'resourceId', r.resource_id,
-    'resourceCode', r.resource_code,
-    'resourceName', r.resource_name,
-    'resourceDesc', r.resource_desc,
-    'resourceBizType', r.resource_biz_type,
-    'resourceType', r.resource_type,
-    'ownerType', r.owner_type,
-    'sourceType', e.source_type,
-    'skillType', e.skill_type,
-    'skillUrl', e.skill_url,
-    'version', e.version,
-    'skillPackageFormat', e.skill_package_format,
-    'skillOriginalFilename', e.skill_original_filename,
-    'skillPackageSize', e.skill_package_size,
-    'skillPackageHash', e.skill_package_hash,
-    'syncStatus', e.sync_status,
-    'syncError', e.sync_error,
-    'lastSyncTime', to_char(e.last_sync_time, 'YYYY-MM-DD HH24:MI:SS')
-)::text
-FROM byai.ss_resource r
-WHERE e.resource_id = r.resource_id
-  AND r.resource_code = 'agent-reach';
-
 delete from byai.byai_ai_prompt where prompt_group_code in('SUMMARY_CHAT_CONTENT') and prompt_code in('SUMMARY_CHAT_CONTENT');
 INSERT INTO byai.byai_ai_prompt (prompt_id, prompt_group_code, prompt_code, prompt_name, prompt_desc, prompt_filed_code, prompt_zh_template, prompt_en_template, create_by, create_time, update_time, model_code) VALUES (nextval('byai.seq_any_table'), 'SUMMARY_CHAT_CONTENT', 'SUMMARY_CHAT_CONTENT', '会话总结提示词', '会话总结提示词模板，占位符 ${chatContent}', 'chatContent', '基于下面用户输入内容生成会话标题
 用户输入原文：${chatContent}
@@ -776,44 +697,38 @@ WHERE NOT EXISTS (
 INSERT INTO byai.ss_res_ext_skill (
     resource_id, skill_type, source_type, version, skill_url,
     skill_package_format, skill_original_filename, skill_package_size,
-    skill_package_hash, sync_status, sync_error, last_sync_time
+    skill_package_hash, sync_status, sync_error, last_sync_time, target_content
 )
 SELECT
     r.resource_id, 'inner', 'SYSTEM_BUILTIN', 'v0.1', '', 'zip', NULL, NULL, NULL,
-    'SUCCESS', NULL, CURRENT_TIMESTAMP
+    'SUCCESS', NULL, CURRENT_TIMESTAMP,
+    json_build_object(
+        'resourceId', r.resource_id,
+        'resourceCode', r.resource_code,
+        'resourceName', r.resource_name,
+        'resourceDesc', r.resource_desc,
+        'resourceBizType', r.resource_biz_type,
+        'resourceType', r.resource_type,
+        'ownerType', r.owner_type,
+        'sourceType', 'SYSTEM_BUILTIN',
+        'skillType', 'inner',
+        'skillUrl', '',
+        'version', 'v0.1',
+        'skillPackageFormat', 'zip',
+        'skillOriginalFilename', NULL,
+        'skillPackageSize', NULL,
+        'skillPackageHash', NULL,
+        'syncStatus', 'SUCCESS',
+        'syncError', NULL,
+        'lastSyncTime', to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')
+    )::text
 FROM byai.ss_resource r
 WHERE NOT EXISTS (
     SELECT 1 FROM byai.ss_res_ext_skill e WHERE e.resource_id = r.resource_id
 )
   AND r.resource_code = 'by-skill-installer';
 
--- 4. 重建运行期技能快照，避免资源 ID 曾被其他技能复用时残留错误 target_content
-UPDATE byai.ss_res_ext_skill e
-SET target_content = json_build_object(
-    'resourceId', r.resource_id,
-    'resourceCode', r.resource_code,
-    'resourceName', r.resource_name,
-    'resourceDesc', r.resource_desc,
-    'resourceBizType', r.resource_biz_type,
-    'resourceType', r.resource_type,
-    'ownerType', r.owner_type,
-    'sourceType', e.source_type,
-    'skillType', e.skill_type,
-    'skillUrl', e.skill_url,
-    'version', e.version,
-    'skillPackageFormat', e.skill_package_format,
-    'skillOriginalFilename', e.skill_original_filename,
-    'skillPackageSize', e.skill_package_size,
-    'skillPackageHash', e.skill_package_hash,
-    'syncStatus', e.sync_status,
-    'syncError', e.sync_error,
-    'lastSyncTime', to_char(e.last_sync_time, 'YYYY-MM-DD HH24:MI:SS')
-)::text
-FROM byai.ss_resource r
-WHERE e.resource_id = r.resource_id
-  AND r.resource_code = 'by-skill-installer';
-
--- 5. 清理历史重复授权，保证脚本重放不会累积重复数据
+-- 4. 清理历史重复授权，保证脚本重放不会累积重复数据
 DELETE FROM byai.au_privilege_grant
 WHERE privilege_grant_id IN (
     SELECT privilege_grant_id
@@ -833,7 +748,7 @@ WHERE privilege_grant_id IN (
     WHERE ranked.row_num > 1
 );
 
--- 6. 复制 knowledge-collection 的可用授权，使未传 ownerType 的技能列表也能发现该技能
+-- 5. 复制 knowledge-collection 的可用授权，使未传 ownerType 的技能列表也能发现该技能
 INSERT INTO byai.au_privilege_grant (
     privilege_grant_id, grant_type, oper_type, grant_obj_type, grant_obj_id,
     eff_date, exp_date, status_cd, create_staff, create_date, update_staff,
