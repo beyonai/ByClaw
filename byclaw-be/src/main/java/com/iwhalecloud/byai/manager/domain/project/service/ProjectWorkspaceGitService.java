@@ -14,6 +14,9 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.Map;
+import java.util.HashMap;
+import java.util.stream.Stream;
 
 /**
  * 项目 workspace 仓库及其 worktree 的本地路径解析服务。
@@ -102,13 +105,60 @@ public class ProjectWorkspaceGitService {
 
         // DSH/无 workspace 场景：按数据库仓库名解析 repos/ 下的独立 Git 仓库。
         List<ResolvedRepository> resolved = new java.util.ArrayList<>();
+        Map<String, Path> discovered = discoverDshRepositories(repos);
         for (ProjectRepo repo : repos) {
             Path repositoryPath = projectInitService.getProjectRepositoryPath(repo);
+            if (!isGitRepository(repositoryPath)) {
+                repositoryPath = discovered.get(repositoryName(repo));
+            }
             if (isGitRepository(repositoryPath)) {
                 resolved.add(new ResolvedRepository(repo, repositoryPath));
             }
         }
         return resolved;
+    }
+
+    /**
+     * DSH 的仓库目录以实际 clone 名称为准。数据库中的 repoFullName 可能来自不同 provider，
+     * 或者初始化时使用了 URL 解析结果；当精确拼接路径失败时，从同一项目的 repos 目录发现 Git 仓库。
+     */
+    private Map<String, Path> discoverDshRepositories(List<ProjectRepo> repos) {
+        Map<String, Path> discovered = new HashMap<>();
+        if (repos == null || repos.isEmpty()) {
+            return discovered;
+        }
+        for (ProjectRepo repo : repos) {
+            Path configured = projectInitService.getProjectRepositoryPath(repo);
+            Path reposRoot = configured == null ? null : configured.getParent();
+            if (reposRoot == null || !Files.isDirectory(reposRoot)) {
+                continue;
+            }
+            try (Stream<Path> children = Files.list(reposRoot)) {
+                children.filter(this::isGitRepository)
+                    .forEach(path -> discovered.putIfAbsent(path.getFileName().toString().toLowerCase(Locale.ROOT), path));
+            }
+            catch (Exception ignored) {
+                // 目录不可读时保留精确路径结果，不影响 codeagent 及已有仓库浏览。
+            }
+        }
+        return discovered;
+    }
+
+    private String repositoryName(ProjectRepo repo) {
+        String value = repo == null ? null : repo.getRepoFullName();
+        if (value == null || value.isBlank()) {
+            value = repo == null ? null : repo.getRepoUrl();
+        }
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+        String cleaned = value.replace('\\', '/');
+        int slash = cleaned.lastIndexOf('/');
+        String name = slash >= 0 ? cleaned.substring(slash + 1) : cleaned;
+        if (name.endsWith(".git")) {
+            name = name.substring(0, name.length() - 4);
+        }
+        return name.toLowerCase(Locale.ROOT);
     }
 
     private Path resolveCodeagentWorkspacePath(ProjectRepo workspaceRepo) {
