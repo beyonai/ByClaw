@@ -34,13 +34,12 @@ class ApplicationServiceEndpointTest {
     }
 
     @Test
-    void registerUsesConfiguredEndpointIncludingContextPath() {
+    void registerKeepsPathPrefixUnset() {
         Map<String, Object> metadata = Map.of("framework", "spring-boot");
 
         serviceEndpoint.register(metadata);
 
-        verify(serviceRegistry).register("beclaw-be", "http", "192.168.0.83", 8086, "/byaiService", 1,
-            metadata, 5);
+        verify(serviceRegistry).register("beclaw-be", "192.168.0.83", 8086, 1, metadata, 5);
     }
 
     @Test
@@ -49,7 +48,6 @@ class ApplicationServiceEndpointTest {
             .protocol("http")
             .host("192.168.0.83")
             .port(8086)
-            .pathPrefix("/byaiService")
             .build();
         when(serviceRegistry.getCurrentInstance()).thenReturn(instance);
 
@@ -62,6 +60,6 @@ class ApplicationServiceEndpointTest {
 
         serviceEndpoint.register(Map.of());
 
-        verify(serviceRegistry).register("beclaw-be", "http", null, 8086, "/byaiService", 1, Map.of(), 5);
+        verify(serviceRegistry).register("beclaw-be", null, 8086, 1, Map.of(), 5);
     }
 }

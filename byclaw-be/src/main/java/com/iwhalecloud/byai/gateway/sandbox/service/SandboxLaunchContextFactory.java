@@ -242,7 +242,7 @@ public class SandboxLaunchContextFactory {
 
         envs.put("gateway_token", gatewayToken);
         envs.put("OPENCLAW_GATEWAY_TOKEN", gatewayToken);
-        // 直接使用 by-framework 当前注册实例生成地址，确保协议、Host、端口和路径始终与注册内容一致。
+        // 协议、Host 和端口取自当前注册实例，上下文路径由统一端点组件补充，不写入注册信息。
         envs.put("BYAI_SERVICE_BASE_URL", applicationServiceEndpoint.getBaseUrl());
         applyCurrentUserAuthEnv(envs, userCode);
 

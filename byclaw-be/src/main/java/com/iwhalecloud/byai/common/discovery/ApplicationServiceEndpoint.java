@@ -13,12 +13,10 @@ import com.iwhaleai.byai.framework.core.discovery.ServiceInstance;
 import com.iwhaleai.byai.framework.core.discovery.ServiceRegistry;
 
 /**
- * 管理当前应用向 by-framework 注册的服务端点，并提供与注册实例完全一致的访问地址。
+ * 管理当前应用向 by-framework 注册的服务端点，并提供包含应用上下文路径的访问地址。
  */
 @Component
 public class ApplicationServiceEndpoint implements ApplicationListener<ServletWebServerInitializedEvent> {
-
-    private static final String SERVICE_PROTOCOL = "http";
 
     private final ServiceRegistry serviceRegistry;
 
@@ -47,15 +45,15 @@ public class ApplicationServiceEndpoint implements ApplicationListener<ServletWe
     }
 
     /**
-     * 使用统一维护的协议、地址、端口和上下文路径注册当前应用实例。
+     * 使用统一维护的地址和端口注册当前应用实例。
+     * 注册信息保持不设置 pathPrefix，由既有调用方自行处理服务上下文路径。
      */
     public void register(Map<String, Object> metadata) {
-        serviceRegistry.register(serviceName, SERVICE_PROTOCOL, resolveDiscoveryHost(), requireServerPort(),
-            normalizeContextPath(contextPath), 1, metadata, 5);
+        serviceRegistry.register(serviceName, resolveDiscoveryHost(), requireServerPort(), 1, metadata, 5);
     }
 
     /**
-     * 根据 by-framework 中的当前注册实例生成沙箱访问本应用的基础地址。
+     * 根据 by-framework 中的当前注册实例和应用上下文路径生成沙箱访问本应用的基础地址。
      */
     public String getBaseUrl() {
         ServiceInstance instance = serviceRegistry.getCurrentInstance();
@@ -67,7 +65,7 @@ public class ApplicationServiceEndpoint implements ApplicationListener<ServletWe
             .scheme(instance.getProtocol())
             .host(instance.getHost())
             .port(instance.getPort())
-            .path(normalizeContextPath(instance.getPathPrefix()))
+            .path(normalizeContextPath(contextPath))
             .build()
             .toUriString();
     }
