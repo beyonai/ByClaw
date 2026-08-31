@@ -570,6 +570,15 @@
   display: none;
 }
 
+// 仅在替代视图可见时承接剩余高度；隐藏时保持 display:none，避免 Changes 默认露出。
+.fileSpaceAlternateContentVisible {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
 // 任务成果等抽屉场景使用剩余可用高度，文件树内部滚动以保留持续浏览体验。
 .fileSpaceBlockFill {
   flex: 1;

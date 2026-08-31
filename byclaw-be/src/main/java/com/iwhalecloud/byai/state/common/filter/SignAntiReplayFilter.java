@@ -40,6 +40,9 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
 
     private static final String FEISHU_BOT_EVENT_CALLBACK_PATH = "/feishu/bot/events";
 
+    private static final String WEIXIN_OPEN_PLATFORM_EVENT_CALLBACK_PATH =
+        "/connector/authorization/callback/weixin-open-platform/events";
+
     private static final String THIRD_PARTY_SKILL_INSTALL_PATH = "/tool/installThirdPartySkill";
 
     private static final String THIRD_PARTY_SKILL_MANAGEABLE_DIGITAL_EMPLOYEE_PATH =
@@ -86,9 +89,9 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
             filterChain.doFilter(request, response);
             return;
         }
-        // 飞书开放平台回调由 Controller 内部校验 verificationToken/encryptKey，
+        // 飞书/微信开放平台事件回调由各自的 Controller/Service 校验平台签名与加密内容，
         // 外部平台不会携带系统签名头，必须在签名防重放过滤器中直接放行。
-        if (this.isFeishuBotEventCallback(request)) {
+        if (this.isFeishuBotEventCallback(request) || this.isWeixinOpenPlatformEventCallback(request)) {
             filterChain.doFilter(request, response);
             return;
         }
@@ -188,6 +191,20 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
 
     private boolean isThirdPartySkillInstall(HttpServletRequest request) {
         return isRequestPath(request, THIRD_PARTY_SKILL_INSTALL_PATH);
+    }
+
+    private boolean isWeixinOpenPlatformEventCallback(HttpServletRequest request) {
+        return isExactPostRequestPath(request, WEIXIN_OPEN_PLATFORM_EVENT_CALLBACK_PATH);
+    }
+
+    private boolean isExactPostRequestPath(HttpServletRequest request, String expectedPath) {
+        if (request == null || !"POST".equalsIgnoreCase(request.getMethod())) {
+            return false;
+        }
+        String requestUri = StringUtils.defaultString(request.getRequestURI());
+        String expectedUri = StringUtils.defaultString(request.getContextPath()) + expectedPath;
+        String normalizedUri = requestUri.endsWith("/") ? requestUri.substring(0, requestUri.length() - 1) : requestUri;
+        return normalizedUri.equals(expectedUri);
     }
 
     private boolean isThirdPartySkillMarketplaceRequest(HttpServletRequest request) {

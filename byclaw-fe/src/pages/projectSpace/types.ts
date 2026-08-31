@@ -72,6 +72,7 @@ export interface ProjectSpace {
   projectName: string;
   description?: string;
   resourceId?: string | number | null;
+  cloudResourceId?: string | number | null;
   projectType: ProjectType;
   isShare: ProjectShareFlag;
   sharedFlag: boolean;

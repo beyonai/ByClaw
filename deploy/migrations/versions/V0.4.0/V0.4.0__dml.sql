@@ -28,6 +28,58 @@ WHERE NOT EXISTS (
     SELECT 1 FROM byai.byai_connector_info WHERE connector_code = 'ima-openapi'
 );
 
+-- 微信公众号 API 连接器。迁移只声明表单和受管环境变量；access_token 不落库。
+INSERT INTO byai.byai_connector_info (
+    connector_id, connector_code, connector_name, description, connector_type,
+    provider_code, skill_code, auth_mode, auth_config, request_config, runtime_manifest, sort
+)
+SELECT nextval('byai.seq_any_table'), 'weixin-official-api', '微信公众号 API',
+       '安全保存公众号 AppID/AppSecret，供 byCLI 通过官方 API 创建草稿', 'SYSTEM',
+       'weixin-official-api', 'wechat-api', 'AK_SK',
+       '{"credentialForm":{"helpUrl":"https://developers.weixin.qq.com/platform","helpLinkText":"前往微信开发者平台获取凭据","helpText":"连接器作用：安全保存公众号 AppID 和 AppSecret，并在启用时提供给数字员工。使用 bycli weixin create-draft 时会优先调用公众号官方 API 上传封面和正文图片、创建草稿；不会直接群发或正式发布文章，也不保存 access_token。\n\n获取步骤：\n1. 点击下方链接登录微信公众平台，使用公众号管理员或有开发权限的微信扫码。\n2. 登录后选择要连接的目标公众号，进入公众号后台。\n3. 打开“设置与开发” → “开发接口管理” → “基本配置”，找到公众号开发信息。\n4. 在开发者 ID 区域复制 AppID。\n5. 在 AppSecret 区域点击“查看”或“重置”，由管理员扫码确认后复制新值。\n6. 将 ByClaw 后端和任务沙箱出口 IP 加入 IP 白名单，避免 40164。\n7. 返回本页填写 AppID、AppSecret，点击“保存并连接”。\n\n安全提示：AppSecret 相当于 API 密码，请勿发送到聊天、截图、工单或代码仓库。重置后旧值失效，需要重新连接。","fields":[{"key":"appId","label":"AppID","inputType":"text","maxLength":256},{"key":"appSecret","label":"AppSecret","inputType":"password","maxLength":2048}]}}',
+       '{}',
+       '{"schemaVersion":"1.0","id":"weixin-official-api","version":"1.0.0","runtime":{"type":"cli","authorizeIn":"be-auth-job","commands":{"version":[["bycli","--version"]]}},"authStorage":{"mode":"managed-environment","owner":"be-auth-job","runtimeMutation":"provider-refresh-only","managedEnvironmentKeys":["WECHAT_APPID","WECHAT_APPSECRET"],"environment":{}},"skill":{"code":"wechat-api","source":"system-builtin","installScope":"user","grantScope":"agent"}}',
+       55
+WHERE NOT EXISTS (
+    SELECT 1 FROM byai.byai_connector_info WHERE connector_code = 'weixin-official-api'
+);
+
+-- 同步更新已存在的连接器元数据，避免仅在首次初始化数据库时展示新版引导。
+UPDATE byai.byai_connector_info
+SET description = '安全保存公众号 AppID/AppSecret，供 byCLI 通过官方 API 创建草稿',
+    skill_code = 'wechat-api',
+    auth_config = '{"credentialForm":{"helpUrl":"https://developers.weixin.qq.com/platform","helpLinkText":"前往微信开发者平台获取凭据","helpText":"连接器作用：安全保存公众号 AppID 和 AppSecret，并在启用时提供给数字员工。使用 bycli weixin create-draft 时会优先调用公众号官方 API 上传封面和正文图片、创建草稿；不会直接群发或正式发布文章，也不保存 access_token。\n\n获取步骤：\n1. 点击下方链接登录微信公众平台，使用公众号管理员或有开发权限的微信扫码。\n2. 登录后选择要连接的目标公众号，进入公众号后台。\n3. 打开“设置与开发” → “开发接口管理” → “基本配置”，找到公众号开发信息。\n4. 在开发者 ID 区域复制 AppID。\n5. 在 AppSecret 区域点击“查看”或“重置”，由管理员扫码确认后复制新值。\n6. 将 ByClaw 后端和任务沙箱出口 IP 加入 IP 白名单，避免 40164。\n7. 返回本页填写 AppID、AppSecret，点击“保存并连接”。\n\n安全提示：AppSecret 相当于 API 密码，请勿发送到聊天、截图、工单或代码仓库。重置后旧值失效，需要重新连接。","fields":[{"key":"appId","label":"AppID","inputType":"text","maxLength":256},{"key":"appSecret","label":"AppSecret","inputType":"password","maxLength":2048}]}}',
+    runtime_manifest = '{"schemaVersion":"1.0","id":"weixin-official-api","version":"1.0.0","runtime":{"type":"cli","authorizeIn":"be-auth-job","commands":{"version":[["bycli","--version"]]}},"authStorage":{"mode":"managed-environment","owner":"be-auth-job","runtimeMutation":"provider-refresh-only","managedEnvironmentKeys":["WECHAT_APPID","WECHAT_APPSECRET"],"environment":{}},"skill":{"code":"wechat-api","source":"system-builtin","installScope":"user","grantScope":"agent"}}'
+WHERE connector_code = 'weixin-official-api';
+
+-- 微信开放平台第三方平台连接器。平台级密钥仅从后端部署环境读取，不投影到用户沙箱。
+INSERT INTO byai.byai_connector_info (
+    connector_id, connector_code, connector_name, description, connector_type,
+    provider_code, skill_code, auth_mode, auth_config, request_config, runtime_manifest, sort
+)
+SELECT nextval('byai.seq_any_table'), 'weixin-open-platform', '微信开放平台第三方平台',
+       '由公众号管理员扫码授权并读取公众号账号资料', 'SYSTEM',
+       'weixin-open-platform', 'wechat-api', 'OAUTH2',
+       '{"componentAppidEnv":"WECHAT_COMPONENT_APPID","componentAppsecretEnv":"WECHAT_COMPONENT_APPSECRET","callbackTokenEnv":"WECHAT_COMPONENT_CALLBACK_TOKEN","encodingAesKeyEnv":"WECHAT_COMPONENT_ENCODING_AES_KEY","redirectUriEnv":"WECHAT_COMPONENT_REDIRECT_URI"}',
+       '{}',
+       '{"schemaVersion":"1.0","id":"weixin-open-platform","version":"1.0.0","runtime":{"type":"oauth2","authorizeIn":"be-auth-job"},"authStorage":{"mode":"credential-reference","owner":"be-auth-job","runtimeMutation":"provider-refresh-only","environment":{}},"skill":{"code":"wechat-api","source":"system-builtin","installScope":"user","grantScope":"agent"}}',
+       56
+WHERE NOT EXISTS (
+    SELECT 1 FROM byai.byai_connector_info WHERE connector_code = 'weixin-open-platform'
+);
+
+UPDATE byai.byai_connector_info
+SET connector_name = '微信开放平台第三方平台',
+    description = '由公众号管理员扫码授权并读取公众号账号资料',
+    provider_code = 'weixin-open-platform',
+    skill_code = 'wechat-api',
+    auth_mode = 'OAUTH2',
+    auth_config = '{"componentAppidEnv":"WECHAT_COMPONENT_APPID","componentAppsecretEnv":"WECHAT_COMPONENT_APPSECRET","callbackTokenEnv":"WECHAT_COMPONENT_CALLBACK_TOKEN","encodingAesKeyEnv":"WECHAT_COMPONENT_ENCODING_AES_KEY","redirectUriEnv":"WECHAT_COMPONENT_REDIRECT_URI"}',
+    request_config = '{}',
+    runtime_manifest = '{"schemaVersion":"1.0","id":"weixin-open-platform","version":"1.0.0","runtime":{"type":"oauth2","authorizeIn":"be-auth-job"},"authStorage":{"mode":"credential-reference","owner":"be-auth-job","runtimeMutation":"provider-refresh-only","environment":{}},"skill":{"code":"wechat-api","source":"system-builtin","installScope":"user","grantScope":"agent"}}',
+    sort = 56
+WHERE connector_code = 'weixin-open-platform';
+
 -- IMA OpenAPI 内置 Skill 注册
 -- CLI 与 skill 文件随 OpenClaw 镜像提供；数据库仅注册目录、运行期快照和可发现权限。
 UPDATE byai.byai_system_config c
@@ -986,3 +1038,6 @@ SET param_value = '[
 ]',
     update_time = CURRENT_TIMESTAMP
 WHERE param_code = 'TEMPLATE_DIGITAL_EMPLOYEE';
+
+-- 设置默认值为 personal
+update ss_resource set owner_type ='personal' where owner_type is null;

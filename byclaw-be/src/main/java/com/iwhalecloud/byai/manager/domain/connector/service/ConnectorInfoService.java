@@ -22,12 +22,21 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * 连接器基础元信息领域服务。
  */
 @Service
 public class ConnectorInfoService {
+
+    private static final int MAX_CREDENTIAL_FIELDS = 8;
+
+    private static final int MAX_HELP_TEXT_LENGTH = 500;
+
+    private static final int MAX_HELP_LINK_TEXT_LENGTH = 100;
+
+    private static final Pattern CREDENTIAL_FIELD_KEY = Pattern.compile("[A-Za-z][A-Za-z0-9_]{0,63}");
 
     @Autowired
     private ConnectorInfoMapper connectorInfoMapper;
@@ -96,7 +105,7 @@ public class ConnectorInfoService {
             }
             JSONObject root = JSON.parseObject(connector.getAuthConfig());
             JSONObject form = root == null ? null : root.getJSONObject("credentialForm");
-            ConnectorCredentialFormDto sanitized = sanitizeImaCredentialForm(form);
+            ConnectorCredentialFormDto sanitized = sanitizeCredentialForm(form);
             connector.setCredentialForm(sanitized);
         } catch (RuntimeException ignored) {
             connector.setCredentialForm(null);
@@ -105,12 +114,20 @@ public class ConnectorInfoService {
         }
     }
 
-    private static ConnectorCredentialFormDto sanitizeImaCredentialForm(JSONObject form) {
+    private static ConnectorCredentialFormDto sanitizeCredentialForm(JSONObject form) {
         if (form == null || !isSafeHelpUrl(form.getString("helpUrl"))) {
             return null;
         }
+        String helpText = sanitizeHelpText(form);
+        if (form.containsKey("helpText") && helpText == null) {
+            return null;
+        }
+        String helpLinkText = sanitizeHelpLinkText(form);
+        if (form.containsKey("helpLinkText") && helpLinkText == null) {
+            return null;
+        }
         JSONArray fields = form.getJSONArray("fields");
-        if (fields == null || fields.size() != 2) {
+        if (fields == null || fields.isEmpty() || fields.size() > MAX_CREDENTIAL_FIELDS) {
             return null;
         }
         List<ConnectorCredentialFieldDto> sanitizedFields = new ArrayList<>();
@@ -119,36 +136,57 @@ public class ConnectorInfoService {
             if (!(value instanceof JSONObject field)) {
                 return null;
             }
-            ConnectorCredentialFieldDto sanitized = sanitizeImaCredentialField(field);
+            ConnectorCredentialFieldDto sanitized = sanitizeCredentialField(field);
             if (sanitized == null || !keys.add(sanitized.getKey())) {
                 return null;
             }
             sanitizedFields.add(sanitized);
         }
-        if (!keys.equals(Set.of("clientId", "apiKey"))) {
-            return null;
-        }
         ConnectorCredentialFormDto result = new ConnectorCredentialFormDto();
         result.setHelpUrl(form.getString("helpUrl"));
+        result.setHelpLinkText(helpLinkText);
+        result.setHelpText(helpText);
         result.setFields(sanitizedFields);
         return result;
     }
 
-    private static ConnectorCredentialFieldDto sanitizeImaCredentialField(JSONObject field) {
+    private static String sanitizeHelpText(JSONObject form) {
+        String helpText = form.getString("helpText");
+        if (helpText == null) {
+            return null;
+        }
+        String sanitized = helpText.trim();
+        return sanitized.isEmpty() || sanitized.length() > MAX_HELP_TEXT_LENGTH ? null : sanitized;
+    }
+
+    private static String sanitizeHelpLinkText(JSONObject form) {
+        Object value = form.get("helpLinkText");
+        if (value == null) {
+            return null;
+        }
+        if (!(value instanceof String helpLinkText)) {
+            return null;
+        }
+        String sanitized = helpLinkText.trim();
+        return sanitized.isEmpty() || sanitized.length() > MAX_HELP_LINK_TEXT_LENGTH ? null : sanitized;
+    }
+
+    private static ConnectorCredentialFieldDto sanitizeCredentialField(JSONObject field) {
         String key = field.getString("key");
         String label = field.getString("label");
         String inputType = field.getString("inputType");
         Integer maxLength = field.getInteger("maxLength");
-        boolean clientId = "clientId".equals(key) && "text".equals(inputType) && maxLength != null
-            && maxLength > 0 && maxLength <= 256;
-        boolean apiKey = "apiKey".equals(key) && "password".equals(inputType) && maxLength != null
-            && maxLength > 0 && maxLength <= 2048;
-        if ((!clientId && !apiKey) || label == null || label.trim().isEmpty() || label.length() > 100) {
+        boolean validKey = key != null && CREDENTIAL_FIELD_KEY.matcher(key).matches();
+        boolean validType = "text".equals(inputType) || "password".equals(inputType);
+        String sanitizedLabel = label == null ? null : label.trim();
+        boolean validLabel = sanitizedLabel != null && !sanitizedLabel.isEmpty() && sanitizedLabel.length() <= 100;
+        boolean validMaxLength = maxLength != null && maxLength > 0 && maxLength <= 2048;
+        if (!validKey || !validType || !validLabel || !validMaxLength) {
             return null;
         }
         ConnectorCredentialFieldDto result = new ConnectorCredentialFieldDto();
         result.setKey(key);
-        result.setLabel(label.trim());
+        result.setLabel(sanitizedLabel);
         result.setInputType(inputType);
         result.setMaxLength(maxLength);
         return result;

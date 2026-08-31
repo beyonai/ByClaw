@@ -14,6 +14,9 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.Map;
+import java.util.HashMap;
+import java.util.stream.Stream;
 
 /**
  * 项目 workspace 仓库及其 worktree 的本地路径解析服务。
@@ -57,6 +60,12 @@ public class ProjectWorkspaceGitService {
         if (repo == null) {
             return Optional.empty();
         }
+        // DSH 将仓库直接放在 /by/projects/{projectId}/repos/{repoName}，没有 codeagent 的
+        // 项目根仓和 .gitmodules。优先尝试仓库自身路径，不影响后面的 codeagent 规则。
+        Path directPath = projectInitService.getProjectRepositoryPath(repo);
+        if (isGitRepository(directPath)) {
+            return Optional.of(directPath);
+        }
         Optional<Path> workspacePath = resolveWorkspaceRepository(repo.getProjectId());
         if (workspacePath.isEmpty()) {
             return Optional.empty();
@@ -80,25 +89,103 @@ public class ProjectWorkspaceGitService {
             .eq(ProjectRepo::getProjectId, projectId).orderByAsc(ProjectRepo::getRepoId));
         ProjectRepo workspaceRepo = repos.stream()
             .filter(repo -> "workspace".equalsIgnoreCase(repo.getRepoType())).findFirst().orElse(null);
-        if (workspaceRepo == null) {
-            return List.of();
-        }
-        Path configuredPath = projectInitService.getProjectRepositoryPath(workspaceRepo);
-        Path workspacePath = configuredPath.getParent() == null ? null : configuredPath.getParent().getParent();
-        if (!isGitRepository(workspacePath)) {
-            return List.of();
+        Path workspacePath = workspaceRepo == null ? null : resolveCodeagentWorkspacePath(workspaceRepo);
+        if (isGitRepository(workspacePath)) {
+            List<ResolvedRepository> resolved = new java.util.ArrayList<>();
+            resolved.add(new ResolvedRepository(workspaceRepo, workspacePath));
+            List<ProjectRepo> codeRepos = repos.stream()
+                .filter(repo -> !"workspace".equalsIgnoreCase(repo.getRepoType())).toList();
+            for (ResolvedSubmodule submodule : new GitSubmodulePathResolver().resolveAll(workspacePath, codeRepos)) {
+                if (isGitRepository(submodule.path())) {
+                    resolved.add(new ResolvedRepository(submodule.repo(), submodule.path()));
+                }
+            }
+            return resolved;
         }
 
+        // DSH/无 workspace 场景：按数据库仓库名解析 repos/ 下的独立 Git 仓库。
         List<ResolvedRepository> resolved = new java.util.ArrayList<>();
-        resolved.add(new ResolvedRepository(workspaceRepo, workspacePath));
-        List<ProjectRepo> codeRepos = repos.stream()
-            .filter(repo -> !"workspace".equalsIgnoreCase(repo.getRepoType())).toList();
-        for (ResolvedSubmodule submodule : new GitSubmodulePathResolver().resolveAll(workspacePath, codeRepos)) {
-            if (isGitRepository(submodule.path())) {
-                resolved.add(new ResolvedRepository(submodule.repo(), submodule.path()));
+        List<Path> discoveredPaths = discoverDshRepositoryPaths(repos);
+        Map<String, Path> discovered = new HashMap<>();
+        discoveredPaths.forEach(path -> discovered.putIfAbsent(
+            path.getFileName().toString().toLowerCase(Locale.ROOT), path));
+        java.util.Set<Path> usedPaths = new java.util.HashSet<>();
+        java.util.Set<ProjectRepo> resolvedRepos = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        for (ProjectRepo repo : repos) {
+            Path repositoryPath = projectInitService.getProjectRepositoryPath(repo);
+            if (!isGitRepository(repositoryPath)) {
+                repositoryPath = discovered.get(repositoryName(repo));
+            }
+            if (isGitRepository(repositoryPath)) {
+                resolved.add(new ResolvedRepository(repo, repositoryPath));
+                usedPaths.add(repositoryPath);
+                resolvedRepos.add(repo);
             }
         }
+        // DSH 可能以任务/工作区名称落盘，目录名与数据库 repoFullName 不一致。
+        // 在已确认项目仓库目录存在的前提下，将剩余数据库记录与剩余实际仓库按稳定顺序配对，
+        // 避免 available-list 因名称漂移返回空列表。
+        List<ProjectRepo> unresolvedRepos = repos.stream().filter(repo -> !resolvedRepos.contains(repo)).toList();
+        List<Path> unresolvedPaths = discoveredPaths.stream().filter(path -> !usedPaths.contains(path)).toList();
+        int pairCount = Math.min(unresolvedRepos.size(), unresolvedPaths.size());
+        for (int i = 0; i < pairCount; i++) {
+            ProjectRepo repo = unresolvedRepos.get(i);
+            Path path = unresolvedPaths.get(i);
+            resolved.add(new ResolvedRepository(repo, path));
+        }
         return resolved;
+    }
+
+    /**
+     * DSH 的仓库目录以实际 clone 名称为准。数据库中的 repoFullName 可能来自不同 provider，
+     * 或者初始化时使用了 URL 解析结果；当精确拼接路径失败时，从同一项目的 repos 目录发现 Git 仓库。
+     */
+    private List<Path> discoverDshRepositoryPaths(List<ProjectRepo> repos) {
+        List<Path> discovered = new java.util.ArrayList<>();
+        if (repos == null || repos.isEmpty()) {
+            return discovered;
+        }
+        for (ProjectRepo repo : repos) {
+            Path configured = projectInitService.getProjectRepositoryPath(repo);
+            Path reposRoot = configured == null ? null : configured.getParent();
+            if (reposRoot == null || !Files.isDirectory(reposRoot)) {
+                continue;
+            }
+            try (Stream<Path> children = Files.list(reposRoot)) {
+                children.filter(this::isGitRepository)
+                    .forEach(path -> {
+                        if (!discovered.contains(path)) {
+                            discovered.add(path);
+                        }
+                    });
+            }
+            catch (Exception ignored) {
+                // 目录不可读时保留精确路径结果，不影响 codeagent 及已有仓库浏览。
+            }
+        }
+        return discovered;
+    }
+
+    private String repositoryName(ProjectRepo repo) {
+        String value = repo == null ? null : repo.getRepoFullName();
+        if (value == null || value.isBlank()) {
+            value = repo == null ? null : repo.getRepoUrl();
+        }
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+        String cleaned = value.replace('\\', '/');
+        int slash = cleaned.lastIndexOf('/');
+        String name = slash >= 0 ? cleaned.substring(slash + 1) : cleaned;
+        if (name.endsWith(".git")) {
+            name = name.substring(0, name.length() - 4);
+        }
+        return name.toLowerCase(Locale.ROOT);
+    }
+
+    private Path resolveCodeagentWorkspacePath(ProjectRepo workspaceRepo) {
+        Path configuredPath = projectInitService.getProjectRepositoryPath(workspaceRepo);
+        return configuredPath.getParent() == null ? null : configuredPath.getParent().getParent();
     }
 
     /** 定位项目 workspace 根仓；项目代码实际位于 /by/projects/{projectId} 下。 */

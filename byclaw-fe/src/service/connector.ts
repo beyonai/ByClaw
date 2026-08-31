@@ -10,7 +10,7 @@ export interface ConnectorListQuery {
 }
 
 export interface ConnectorCredentialField {
-  key: 'clientId' | 'apiKey';
+  key: string;
   label: string;
   inputType: 'text' | 'password';
   maxLength: number;
@@ -18,6 +18,8 @@ export interface ConnectorCredentialField {
 
 export interface ConnectorCredentialForm {
   helpUrl: string;
+  helpLinkText?: string | null;
+  helpText?: string | null;
   fields: ConnectorCredentialField[];
 }
 
@@ -78,7 +80,7 @@ export interface StartConnectorAuthorizationPayload {
 export interface ConnectorCredentialAuthorizationPayload {
   connectorId: ConnectorId;
   redirectUrl: string;
-  credentials: Record<ConnectorCredentialField['key'], string>;
+  credentials: Record<string, string>;
   // request 封装使用该 AbortController 的 signal 传给 Axios。
   cancelToken?: AbortController;
 }

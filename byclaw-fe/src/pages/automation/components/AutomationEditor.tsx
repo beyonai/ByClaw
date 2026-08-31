@@ -19,11 +19,26 @@ import styles from '../index.module.less';
 interface AutomationEditorProps {
   source?: AutomationSource;
   template?: AutomationTemplate;
+  projectId?: string | number;
+  projectCloudResourceId?: string | number;
+  breadcrumbLabel?: string;
+  breadcrumbItemLabel?: string;
+  onResourceReferenceChange?: (handler: (resource: any) => void) => void;
   onCancel: () => void;
   onSaved: () => void | Promise<void>;
 }
 
-const AutomationEditor: React.FC<AutomationEditorProps> = ({ source, template, onCancel, onSaved }) => {
+const AutomationEditor: React.FC<AutomationEditorProps> = ({
+  source,
+  template,
+  projectId,
+  projectCloudResourceId,
+  breadcrumbLabel,
+  breadcrumbItemLabel,
+  onResourceReferenceChange,
+  onCancel,
+  onSaved,
+}) => {
   const intl = useIntl();
   const [form] = Form.useForm<AutomationFormValues>();
   const [saving, setSaving] = useState(false);
@@ -33,6 +48,21 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({ source, template, o
   });
   const [promptDraftVersion, setPromptDraftVersion] = useState(0);
   const { projects, loading: projectsLoading } = useProjectList();
+  const selectedProjectId = Form.useWatch('projectId', form);
+  const currentProjectId = projectId ?? selectedProjectId;
+  const currentProject = projects.find((item) => `${item.projectId}` === `${currentProjectId}`);
+  useEffect(() => {
+    onResourceReferenceChange?.((resource) => {
+      const name = resource?.name || resource?.fileName || resource?.resourceName;
+      if (!name) return;
+      setPromptDraft((current) => ({
+        text: `${current.text || ''}${current.text ? ' ' : ''}#${name}`,
+        resourceList: [...(current.resourceList || []), resource],
+      }));
+      setPromptDraftVersion((version) => version + 1);
+    });
+    return () => onResourceReferenceChange?.(() => undefined);
+  }, [onResourceReferenceChange]);
   const scheduleMode = Form.useWatch('scheduleMode', form);
   const intervalUnit = Form.useWatch('intervalUnit', form);
   const intervalValue = Form.useWatch('intervalValue', form);
@@ -87,9 +117,12 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({ source, template, o
       const config = parseAutomationConfig(source?.config);
       setPromptDraft({ text: config.chatContent, resourceList: config.resourceList });
     }
+    if (!source && projectId !== undefined && projectId !== null) {
+      initialValues.projectId = String(projectId);
+    }
     setPromptDraftVersion((version) => version + 1);
     form.setFieldsValue(initialValues);
-  }, [form, source, template]);
+  }, [form, projectId, source, template]);
 
   const handleSave = async () => {
     try {
@@ -142,9 +175,17 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({ source, template, o
       <div className={styles.editorHeader}>
         <div className={styles.editorBreadcrumb}>
           <Button type="text" className={styles.editorBreadcrumbLink} onClick={onCancel}>
-            {intl.formatMessage({ id: 'automation.title' })}
+            {breadcrumbLabel || intl.formatMessage({ id: 'automation.title' })}
           </Button>
           <span className={styles.editorBreadcrumbSeparator}>/</span>
+          {breadcrumbItemLabel && (
+            <>
+              <Button type="text" className={styles.editorBreadcrumbLink} onClick={onCancel}>
+                {breadcrumbItemLabel}
+              </Button>
+              <span className={styles.editorBreadcrumbSeparator}>/</span>
+            </>
+          )}
           <span className={styles.editorBreadcrumbCurrent}>
             {intl.formatMessage({ id: source?.sourceId ? 'automation.editTitle' : 'automation.addTitle' })}
           </span>
@@ -157,7 +198,12 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({ source, template, o
         </Space>
       </div>
       <div className={styles.editorScroll}>
-        <Form form={form} layout="vertical" className={styles.editorForm}>
+        <Form
+          form={form}
+          layout="vertical"
+          className={styles.editorForm}
+          initialValues={projectId !== undefined && projectId !== null ? { projectId: String(projectId) } : undefined}
+        >
           <Form.Item
             name="sourceName"
             label={intl.formatMessage({ id: 'automation.name' })}
@@ -196,6 +242,17 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({ source, template, o
           <Form.Item label={intl.formatMessage({ id: 'automation.prompt' })} required>
             <QueryInput
               key={promptDraftVersion}
+              projectId={currentProjectId !== undefined ? Number(currentProjectId) : undefined}
+              projectCloudResourceId={projectCloudResourceId ?? currentProject?.cloudResourceId}
+              selectedProject={
+                currentProjectId !== undefined
+                  ? {
+                    projectId: String(currentProjectId),
+                    projectName: currentProject?.projectName || '',
+                    cloudResourceId: projectCloudResourceId ?? currentProject?.cloudResourceId,
+                  }
+                  : undefined
+              }
               placeholder={intl.formatMessage({ id: 'automation.promptTip' })}
               minRows={6}
               maxRows={12}

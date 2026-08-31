@@ -647,6 +647,7 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
           .filter((resource) => resource.resourceType === ResourceType.digitalEmployee)
           .flatMap((resource) => [resource.resourceId, resource.resourceCode].filter(Boolean).map((item) => `${item}`))}
         resourceAgentIds={props.resourceAgentIds}
+        projectCloudResourceId={props.projectCloudResourceId}
       />
     </div>
   );

@@ -16,10 +16,15 @@ byclaw_managed: true
 
 ## 资源标识解析
 
-优先从可信上下文或会话返回里读取 `cloud_resource_id` / `cloudResourceId`，传给 `--resource-id`。
+优先从可信上下文或 `project-context` 返回的 `project.cloudResourceId`（兼容 `cloud_resource_id`）读取，传给 `--resource-id`。
 
 ```xml
-<project_context>{"project_id":20014944,"cloud_resource_id":9001,"workspace":"/by/projects/20014944"}</project_context>
+<project_context>{"project_id":20014944,"workspace":"/by/projects/20014944"}</project_context>
+```
+
+```bash
+node <project-context目录>/scripts/project-context.mjs basic --project-id 20014944
+# 使用返回 JSON 中 project.cloudResourceId
 ```
 
 没有项目云盘知识库资源 ID 时，先向用户说明当前项目未初始化项目云盘知识库或上下文缺失；不要猜 ID，也不要用普通知识库 `resourceId` 冒充。

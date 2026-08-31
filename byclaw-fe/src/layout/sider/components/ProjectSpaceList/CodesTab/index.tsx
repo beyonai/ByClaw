@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, type Key } from 'react';
-import { Dropdown, Empty, Input, Modal, Spin, message, type MenuProps } from 'antd';
+import { Drawer, Dropdown, Empty, Input, Spin, message, type MenuProps } from 'antd';
 import { BranchesOutlined, DownOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import FilePreviewPanel from '@/components/ChatLayoutComp/ChatResourceWorkspace/FilePreviewPanel';
@@ -555,25 +555,25 @@ const CodesTab: React.FC<CodesTabProps> = ({
     );
   };
 
-  const renderFileDiffModal = () => {
+  const renderFileDiffDrawer = () => {
     const open = !!diffModalFile;
     const lines = parseDiffLines(diffModalData?.diff);
     const status = diffModalData?.status;
     const hasDiff = status === 'ok' && lines.some((line) => line.type === 'add' || line.type === 'del');
     const fileName = diffModalFile ? splitFilePath(diffModalFile).name : '';
     return (
-      <Modal
+      <Drawer
         open={open}
-        onCancel={closeFileDiff}
-        footer={null}
-        width={900}
+        onClose={closeFileDiff}
+        placement="right"
+        width={760}
         title={
           <div className={styles.diffModalTitle}>
             <span className={styles.diffModalName}>{fileName}</span>
             {diffModalFile ? <span className={styles.diffModalPath}>{diffModalFile}</span> : null}
           </div>
         }
-        className={styles.diffModal}
+        className={styles.diffDrawer}
       >
         {diffModalLoading ? (
           <div className={styles.diffModalEmpty}>
@@ -599,7 +599,7 @@ const CodesTab: React.FC<CodesTabProps> = ({
             })}
           </div>
         )}
-      </Modal>
+      </Drawer>
     );
   };
 
@@ -707,7 +707,7 @@ const CodesTab: React.FC<CodesTabProps> = ({
         getActionItems={getActionItems}
         onAction={handleAction}
       />
-      {renderFileDiffModal()}
+      {renderFileDiffDrawer()}
     </div>
   );
 };

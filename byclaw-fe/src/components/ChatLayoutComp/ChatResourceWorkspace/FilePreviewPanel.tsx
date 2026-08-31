@@ -8,7 +8,7 @@ import {
   isTextPreviewFile,
 } from '@/layout/sider/components/FileSiderPanel/utils';
 import { downloadChatFileArtifact } from '@/service/chatFileArtifact';
-import { downloadResourceFileForPreview } from '@/service/file';
+import { downloadResourceFile } from '@/service/file';
 import { downloadFile as downloadFileBrowserFile } from '@/service/fileBrowser';
 import { getFileUrl } from '@/utils/file';
 import type { MarkdownImageResolver } from '@/components/Preview/Md';
@@ -134,7 +134,14 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
   const [blob, setBlob] = useState<Blob | null>(null);
   const [loading, setLoading] = useState(true);
   const markdownImageCacheRef = useRef<Map<string, Promise<Blob>>>(new Map());
-  const sourcePath = getFilePathFromUrl(path) || path;
+  const sourcePath = (() => {
+    const rawPath = getFilePathFromUrl(path) || path;
+    if (!rawPath) return rawPath;
+    const normalized = normalizeFilePath(rawPath);
+    const segments = normalized.split('/').filter(Boolean);
+    if (segments.length >= 2 && segments.at(-1) === segments.at(-2)) segments.pop();
+    return `${normalized.startsWith('/') ? '/' : ''}${segments.join('/')}`;
+  })();
   const previewFileUrl =
     fileUrl || (source === 'fileBrowser' && sourcePath ? getCommonFilePreviewUrl(sourcePath) : undefined);
   const previewType = getPreviewFileType(fileName);
@@ -187,10 +194,9 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
       const loadFromSourcePath = () =>
         source === 'fileBrowser'
           ? loadFileBrowserFile(resolvedPath)
-          : downloadResourceFileForPreview({
+          : downloadResourceFile({
             resourceId: resourceId!,
             directoryPath: resolvedPath,
-            language: 'zh-CN',
           });
       const request = (
         previewFileUrl
@@ -241,10 +247,9 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
           response =
             source === 'fileBrowser'
               ? await loadFileBrowserFile(sourcePath)
-              : await downloadResourceFileForPreview({
+              : await downloadResourceFile({
                 resourceId,
                 directoryPath: sourcePath,
-                language: 'zh-CN',
               });
         } catch (error) {
           if (!previewFileUrl) throw error;

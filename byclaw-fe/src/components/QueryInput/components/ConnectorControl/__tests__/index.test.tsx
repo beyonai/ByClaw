@@ -31,8 +31,10 @@ jest.mock('@/service/connector', () => ({
 }));
 jest.mock('@/service/devloop', () => ({
   createGlobalOperationAccount: jest.fn(),
+  deleteOperationAccount: jest.fn(),
   listGlobalOperationAccounts: jest.fn(),
   loginOperationAccount: jest.fn(),
+  updateOperationAccount: jest.fn(),
 }));
 jest.mock('@umijs/max', () => {
   const intl = {
@@ -78,7 +80,12 @@ import {
   updateConnectorEnable,
   type ConnectorAuthorization,
 } from '@/service/connector';
-import { createGlobalOperationAccount, listGlobalOperationAccounts } from '@/service/devloop';
+import {
+  createGlobalOperationAccount,
+  deleteOperationAccount,
+  listGlobalOperationAccounts,
+  updateOperationAccount,
+} from '@/service/devloop';
 import ConnectorControl, * as ConnectorControlModule from '../index';
 
 jest.setTimeout(15000);
@@ -104,9 +111,11 @@ const mockUpdateConnectorEnable = updateConnectorEnable as jest.MockedFunction<t
 const mockCreateGlobalOperationAccount = createGlobalOperationAccount as jest.MockedFunction<
   typeof createGlobalOperationAccount
 >;
+const mockDeleteOperationAccount = deleteOperationAccount as jest.MockedFunction<typeof deleteOperationAccount>;
 const mockListGlobalOperationAccounts = listGlobalOperationAccounts as jest.MockedFunction<
   typeof listGlobalOperationAccounts
 >;
+const mockUpdateOperationAccount = updateOperationAccount as jest.MockedFunction<typeof updateOperationAccount>;
 
 type TerminalErrorClassifier = (authorization: { status: string; errorMessage?: string }) => string | undefined;
 type CredentialExpirationFormatter = (
@@ -142,6 +151,8 @@ describe('ConnectorControl authorization states', () => {
     mockRevokeConnectorAuthorization.mockResolvedValue(true);
     mockUpdateConnectorEnable.mockResolvedValue(true);
     mockCreateGlobalOperationAccount.mockResolvedValue({ accountId: 88 });
+    mockDeleteOperationAccount.mockResolvedValue(undefined);
+    mockUpdateOperationAccount.mockResolvedValue(undefined);
     mockListGlobalOperationAccounts.mockResolvedValue([
       {
         accountId: 7,
@@ -206,7 +217,7 @@ describe('ConnectorControl authorization states', () => {
     expect(await screen.findByText('ima')).toBeInTheDocument();
     expect(screen.getByText('https://ima.qq.com/wikis/')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /新增账号/ })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '账号操作' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '账号操作' })).toBeInTheDocument();
     expect(mockListGlobalOperationAccounts).toHaveBeenCalledTimes(1);
   });
 
@@ -231,6 +242,11 @@ describe('ConnectorControl authorization states', () => {
     expect(connectorCard).toHaveClass('compactItem');
     expect(accountCard).not.toHaveClass('compactItem');
     expect(accountCard).toHaveClass('accountCardDrawerCompact');
+    const accountCardHeader = accountCard?.querySelector('.accountCardHeader');
+    const accountAction = within(accountCard as HTMLElement).getByRole('button', { name: '账号操作' });
+    expect(accountCardHeader).toContainElement(accountAction);
+    expect(accountAction).toHaveClass('accountCardMoreActionDrawer');
+    expect(drawerContent?.querySelector('.accountLoginNotice')).not.toBeInTheDocument();
     const accountCardFooter = accountCard?.querySelector('.accountCardFooter');
     expect(accountCardFooter).not.toBeNull();
     expect(accountCard?.querySelector('.accountPlatformName')?.parentElement).toBe(accountCardFooter);
@@ -243,13 +259,34 @@ describe('ConnectorControl authorization states', () => {
     fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
     fireEvent.click(await screen.findByText('查看全部连接器'));
     fireEvent.click(await screen.findByRole('button', { name: /新增账号/ }));
-    fireEvent.click(await screen.findByRole('radio', { name: 'projectSpace.operation.platform.customLink' }));
-    fireEvent.change(screen.getByLabelText('projectSpace.operation.accountForm.field.customLinkName'), {
-      target: { value: '微信公众号' },
-    });
-    fireEvent.change(screen.getByLabelText('projectSpace.operation.accountForm.field.customUrl'), {
-      target: { value: 'https://mp.weixin.qq.com/' },
-    });
+    const accountModal = (await screen.findByText('projectSpace.operation.accountForm.addTitle')).closest(
+      '[role="dialog"]'
+    );
+    expect(accountModal).not.toBeNull();
+    expect(
+      within(accountModal as HTMLElement).queryByText('projectSpace.operation.accountForm.field.platform')
+    ).not.toBeInTheDocument();
+    expect(within(accountModal as HTMLElement).queryAllByRole('radio')).toHaveLength(0);
+    expect(
+      await within(accountModal as HTMLElement).findByLabelText(
+        'projectSpace.operation.accountForm.field.customLinkName'
+      )
+    ).toBeInTheDocument();
+    expect(
+      within(accountModal as HTMLElement).getByLabelText('projectSpace.operation.accountForm.field.customUrl')
+    ).toBeInTheDocument();
+    fireEvent.change(
+      within(accountModal as HTMLElement).getByLabelText('projectSpace.operation.accountForm.field.customLinkName'),
+      {
+        target: { value: '微信公众号' },
+      }
+    );
+    fireEvent.change(
+      within(accountModal as HTMLElement).getByLabelText('projectSpace.operation.accountForm.field.customUrl'),
+      {
+        target: { value: 'https://mp.weixin.qq.com/' },
+      }
+    );
     fireEvent.click(screen.getByRole('button', { name: 'projectSpace.operation.accountForm.save' }));
 
     await waitFor(() =>
@@ -261,6 +298,76 @@ describe('ConnectorControl authorization states', () => {
       })
     );
     expect(mockListGlobalOperationAccounts).toHaveBeenCalledTimes(2);
+  });
+
+  it('edits a global custom account with its platform fixed and refreshes the cards', async () => {
+    render(<ConnectorControl canAuthorize />);
+
+    fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
+    fireEvent.click(await screen.findByText('查看全部连接器'));
+    fireEvent.mouseEnter(await screen.findByRole('button', { name: '账号操作' }, { timeout: 5000 }));
+    fireEvent.click(await screen.findByText('projectSpace.operation.account.edit'));
+
+    expect(screen.queryByText('projectSpace.operation.accountForm.field.platform')).not.toBeInTheDocument();
+    fireEvent.change(await screen.findByLabelText('projectSpace.operation.accountForm.field.customLinkName'), {
+      target: { value: 'IMA 知识库' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'projectSpace.operation.accountForm.save' }));
+
+    await waitFor(() =>
+      expect(mockUpdateOperationAccount).toHaveBeenCalledWith({
+        accountId: 7,
+        platformCode: 'CustomLink',
+        accountCode: '',
+        accountName: 'IMA 知识库',
+        customUrl: 'https://ima.qq.com/wikis/',
+      })
+    );
+    expect(mockListGlobalOperationAccounts).toHaveBeenCalledTimes(2);
+  });
+
+  it('confirms and deletes a global account before refreshing the cards', async () => {
+    let resolveDelete!: () => void;
+    mockDeleteOperationAccount.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveDelete = resolve;
+        })
+    );
+    render(<ConnectorControl canAuthorize />);
+
+    fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
+    fireEvent.click(await screen.findByText('查看全部连接器'));
+    fireEvent.mouseEnter(await screen.findByRole('button', { name: '账号操作' }));
+    fireEvent.click(await screen.findByText('projectSpace.operation.account.delete'));
+    expect(await screen.findAllByText('projectSpace.operation.account.deleteConfirmTitle')).not.toHaveLength(0);
+    fireEvent.click(screen.getByRole('button', { name: 'projectSpace.operation.account.deleteConfirmOk' }));
+
+    await waitFor(() => expect(mockDeleteOperationAccount).toHaveBeenCalledWith(7));
+    expect(screen.getByRole('button', { name: '账号操作' })).toHaveClass('ant-btn-loading');
+    await act(async () => {
+      resolveDelete();
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(mockListGlobalOperationAccounts).toHaveBeenCalledTimes(2));
+    expect(mockMessageSuccess).toHaveBeenCalledWith('projectSpace.operation.account.deleteSuccess');
+  });
+
+  it('keeps the account available when deleting it fails', async () => {
+    mockDeleteOperationAccount.mockRejectedValueOnce(new Error('delete failed'));
+    render(<ConnectorControl canAuthorize />);
+
+    fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
+    fireEvent.click(await screen.findByText('查看全部连接器'));
+    fireEvent.mouseEnter(await screen.findByRole('button', { name: '账号操作' }));
+    fireEvent.click(await screen.findByText('projectSpace.operation.account.delete'));
+    expect(await screen.findAllByText('projectSpace.operation.account.deleteConfirmTitle')).not.toHaveLength(0);
+    fireEvent.click(await screen.findByRole('button', { name: 'projectSpace.operation.account.deleteConfirmOk' }));
+
+    await waitFor(() => expect(mockDeleteOperationAccount).toHaveBeenCalledWith(7));
+    expect(mockListGlobalOperationAccounts).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('ima')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: '账号操作' })).not.toHaveClass('ant-btn-loading'));
   });
 
   it('keeps the refreshed account list when the initial request resolves last', async () => {
@@ -309,7 +416,8 @@ describe('ConnectorControl authorization states', () => {
       await waitFor(() => expect(mockListGlobalOperationAccounts).toHaveBeenCalledTimes(1));
 
       fireEvent.click(await screen.findByRole('button', { name: /新增账号/ }));
-      fireEvent.click(await screen.findByRole('radio', { name: 'projectSpace.operation.platform.customLink' }));
+      expect(screen.queryByText('projectSpace.operation.accountForm.field.platform')).not.toBeInTheDocument();
+      expect(screen.queryAllByRole('radio')).toHaveLength(0);
       fireEvent.change(screen.getByLabelText('projectSpace.operation.accountForm.field.customLinkName'), {
         target: { value: '微信公众号' },
       });
@@ -686,6 +794,39 @@ describe('ConnectorControl authorization states', () => {
     expect(screen.getByRole('dialog', { name: '连接器设置' })).toBeInTheDocument();
   });
 
+  it('shows enabled connectors outside the input without an interactive settings trigger', async () => {
+    mockQueryConnectorList.mockResolvedValue({
+      list: [
+        {
+          connectorId: 1,
+          connectorCode: 'dingtalk',
+          connectorName: '钉钉',
+          connectorType: 'SYSTEM',
+          description: '',
+          enableFlag: 'Y',
+        },
+      ],
+      pageNum: 1,
+      pageSize: 100,
+      total: 1,
+      totalPages: 1,
+    });
+
+    const { container } = render(<ConnectorControl canAuthorize outside />);
+
+    await waitFor(() => expect(container.querySelector('.ant-avatar-group')).not.toBeNull());
+    expect(screen.queryByRole('button', { name: '查看已连接连接器' })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('已连接连接器')).toBeInTheDocument();
+  });
+
+  it('does not render an outside connector item when none are enabled', async () => {
+    const { container } = render(<ConnectorControl canAuthorize outside />);
+
+    await waitFor(() => expect(mockQueryConnectorList).toHaveBeenCalledTimes(1));
+    expect(container.querySelector('.ant-avatar-group')).toBeNull();
+    expect(screen.queryByLabelText('连接器设置')).not.toBeInTheDocument();
+  });
+
   it('prioritizes enabled connectors in the three-item chat preview', async () => {
     mockQueryConnectorList.mockResolvedValue({
       list: [
@@ -884,6 +1025,55 @@ describe('ConnectorControl authorization states', () => {
     expect(await screen.findByRole('heading', { name: '连接 钉钉 作为 AI 知识库' })).toBeInTheDocument();
   });
 
+  it('keeps the authorization modal mounted for inline connector cards', async () => {
+    mockQueryConnectorList.mockResolvedValue({
+      list: [
+        {
+          connectorId: 1,
+          connectorCode: 'dingtalk',
+          connectorName: '钉钉',
+          connectorType: 'SYSTEM',
+          description: '',
+          enableFlag: null,
+        },
+      ],
+      pageNum: 1,
+      pageSize: 100,
+      total: 1,
+      totalPages: 1,
+    });
+
+    render(<ConnectorControl canAuthorize inline />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '连接' }));
+    expect(await screen.findByRole('heading', { name: '连接 钉钉 作为 AI 知识库' })).toBeInTheDocument();
+  });
+
+  it('opens reauthorization from an inline connector card', async () => {
+    mockQueryConnectorList.mockResolvedValue({
+      list: [
+        {
+          connectorId: 1,
+          connectorCode: 'dingtalk',
+          connectorName: '钉钉',
+          connectorType: 'SYSTEM',
+          description: '',
+          enableFlag: 'Y',
+        },
+      ],
+      pageNum: 1,
+      pageSize: 100,
+      total: 1,
+      totalPages: 1,
+    });
+
+    render(<ConnectorControl canAuthorize inline />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '更多钉钉操作' }));
+    fireEvent.click(await screen.findByText('重新授权'));
+    expect(await screen.findByRole('heading', { name: '连接 钉钉 作为 AI 知识库' })).toBeInTheDocument();
+  });
+
   it('confirms and revokes an existing connector authorization', async () => {
     mockQueryConnectorList.mockResolvedValue({
       list: [
@@ -912,6 +1102,43 @@ describe('ConnectorControl authorization states', () => {
     fireEvent.click(screen.getByRole('button', { name: '确认取消授权' }));
 
     await waitFor(() => expect(mockRevokeConnectorAuthorization).toHaveBeenCalledWith(1));
+  });
+
+  it('keeps the configuration drawer open while revoke confirmation is active', async () => {
+    mockQueryConnectorList.mockResolvedValue({
+      list: [
+        {
+          connectorId: 10,
+          connectorCode: 'ima-openapi',
+          connectorName: 'IMA',
+          connectorType: 'SYSTEM',
+          description: 'IMA 知识库',
+          enableFlag: 'Y',
+          authMode: 'AK_SK',
+        },
+      ],
+      pageNum: 1,
+      pageSize: 100,
+      total: 1,
+      totalPages: 1,
+    });
+
+    render(<ConnectorControl canAuthorize />);
+    fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
+    fireEvent.click(await screen.findByText('查看全部连接器'));
+    fireEvent.click(await screen.findByRole('button', { name: '更多IMA操作' }));
+    fireEvent.click(await screen.findByText('取消授权'));
+
+    expect(await screen.findAllByText('取消IMA授权？')).not.toHaveLength(0);
+    const drawerMask = document.querySelector('.ant-drawer-mask');
+    expect(drawerMask).not.toBeNull();
+    fireEvent.click(drawerMask as HTMLElement);
+
+    expect(screen.getByText('连接器配置').closest('.ant-drawer')).toHaveClass('ant-drawer-open');
+    fireEvent.click(screen.getByRole('button', { name: '确认取消授权' }));
+
+    await waitFor(() => expect(mockRevokeConnectorAuthorization).toHaveBeenCalledWith(10));
+    expect(screen.getByText('连接器配置').closest('.ant-drawer')).toHaveClass('ant-drawer-open');
   });
 
   it('clears stale expiration immediately when revocation succeeds and the list refresh fails', async () => {
@@ -1852,14 +2079,13 @@ describe('ConnectorControl authorization states', () => {
     fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
     fireEvent.click(await screen.findByRole('button', { name: '连接' }));
 
-    expect(await screen.findByRole('heading', { name: '连接 IMA' })).toBeInTheDocument();
+    const credentialHeading = await screen.findByRole('heading', { name: '连接 IMA' });
+    expect(credentialHeading).toBeInTheDocument();
+    expect(credentialHeading.closest('.ant-modal')).toHaveStyle({ width: '480px' });
     expect(screen.getByLabelText('Client ID')).toHaveAttribute('maxLength', '256');
     expect(screen.getByLabelText('API Key')).toHaveAttribute('type', 'password');
     expect(screen.getByLabelText('API Key')).toHaveAttribute('autocomplete', 'off');
-    expect(screen.getByRole('link', { name: '前往 IMA 获取凭据' })).toHaveAttribute(
-      'href',
-      'https://ima.qq.com/openapi'
-    );
+    expect(screen.getByRole('link', { name: '前往IMA获取凭据' })).toHaveAttribute('href', 'https://ima.qq.com/openapi');
   });
 
   it('does not submit an empty IMA credential form', async () => {
@@ -2043,23 +2269,97 @@ describe('ConnectorControl authorization states', () => {
     expect(screen.queryByLabelText('Client ID')).not.toBeInTheDocument();
   });
 
-  it('does not show IMA credential UI for another AK_SK connector', async () => {
+  it('opens and submits a generic dynamic credential form for Weixin Official Account API', async () => {
     mockQueryConnectorList.mockResolvedValue({
       list: [
         {
-          connectorId: 11,
-          connectorCode: 'another-ak-sk',
-          connectorName: '其他凭据连接器',
+          connectorId: 12,
+          connectorCode: 'weixin-official-api',
+          connectorName: '微信公众号 API',
           connectorType: 'SYSTEM',
-          description: '其他知识库',
+          description: '微信公众号官方 API',
+          enableFlag: null,
+          authMode: 'AK_SK',
+          credentialForm: {
+            helpUrl: 'https://developers.weixin.qq.com/platform',
+            helpLinkText: '前往微信开发者平台获取凭据',
+            helpText:
+              '连接器作用：安全保存公众号 AppID 和 AppSecret，并在启用时提供给数字员工。使用 bycli weixin create-draft 时会优先调用公众号官方 API 上传封面和正文图片、创建草稿；不会直接群发或正式发布文章，也不保存 access_token。\n\n获取步骤：\n1. 点击下方链接登录微信公众平台，使用公众号管理员或有开发权限的微信扫码。\n2. 登录后选择要连接的目标公众号，进入公众号后台。\n3. 打开“设置与开发” → “开发接口管理” → “基本配置”，找到公众号开发信息。\n4. 在开发者 ID 区域复制 AppID。\n5. 在 AppSecret 区域点击“查看”或“重置”，由管理员扫码确认后复制新值。\n6. 将 ByClaw 后端和任务沙箱出口 IP 加入 IP 白名单，避免 40164。\n7. 返回本页填写 AppID、AppSecret，点击“保存并连接”。\n\n安全提示：AppSecret 相当于 API 密码，请勿发送到聊天、截图、工单或代码仓库。重置后旧值失效，需要重新连接。',
+            fields: [
+              { key: 'appId', label: 'AppID', inputType: 'text', maxLength: 256 },
+              { key: 'appSecret', label: 'AppSecret', inputType: 'password', maxLength: 2048 },
+            ],
+          },
+        },
+      ],
+      pageNum: 1,
+      pageSize: 100,
+      total: 1,
+      totalPages: 1,
+    });
+    mockStartConnectorCredentialAuthorization.mockResolvedValue({
+      authorizationId: 'weixin-authorization-12',
+      connectorId: 12,
+      status: 'connected',
+    });
+
+    render(<ConnectorControl canAuthorize />);
+    fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
+    fireEvent.click(await screen.findByRole('button', { name: '连接' }));
+
+    const credentialHeading = await screen.findByRole('heading', { name: '连接 微信公众号 API' });
+    expect(credentialHeading).toBeInTheDocument();
+    expect(credentialHeading.closest('.ant-modal')).toHaveStyle({ width: '80vw' });
+    expect(credentialHeading.closest('.ant-modal')).toHaveClass('credentialModalWithHelp');
+    const helpCard = screen.getByRole('region', { name: '凭据获取说明' });
+    expect(helpCard).toHaveClass('credentialHelpCard');
+    expect(screen.getByRole('heading', { name: '连接器作用' })).toBeInTheDocument();
+    const stepsToggle = screen.getByRole('button', { name: '获取步骤' });
+    expect(stepsToggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('list')).not.toBeInTheDocument();
+
+    fireEvent.click(stepsToggle);
+
+    expect(stepsToggle).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getAllByRole('listitem')).toHaveLength(7);
+    expect(screen.getByRole('heading', { name: '安全提示' }).parentElement).toHaveClass('warningSection');
+    expect(helpCard).toHaveTextContent('“设置与开发” → “开发接口管理” → “基本配置”');
+    expect(helpCard).toHaveTextContent('不会直接群发或正式发布文章');
+    expect(screen.getByRole('link', { name: '前往微信开发者平台获取凭据' })).toHaveAttribute(
+      'href',
+      'https://developers.weixin.qq.com/platform'
+    );
+    expect(helpCard.parentElement).toHaveClass('credentialFormBody');
+    expect(screen.getByRole('button', { name: '保存并连接' }).parentElement).toHaveClass('credentialActions');
+    fireEvent.change(screen.getByLabelText('AppID'), { target: { value: 'wx-app' } });
+    fireEvent.change(screen.getByLabelText('AppSecret'), { target: { value: 'wx-secret' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存并连接' }));
+
+    await waitFor(() =>
+      expect(mockStartConnectorCredentialAuthorization).toHaveBeenCalledWith({
+        connectorId: 12,
+        redirectUrl: window.location.origin,
+        credentials: { appId: 'wx-app', appSecret: 'wx-secret' },
+        cancelToken: expect.any(AbortController),
+      })
+    );
+  });
+
+  it('uses the common help card for unstructured credential guidance', async () => {
+    mockQueryConnectorList.mockResolvedValue({
+      list: [
+        {
+          connectorId: 13,
+          connectorCode: 'generic-credential-connector',
+          connectorName: '通用凭据连接器',
+          connectorType: 'SYSTEM',
+          description: '通用凭据连接器',
           enableFlag: null,
           authMode: 'AK_SK',
           credentialForm: {
             helpUrl: 'https://example.com/credentials',
-            fields: [
-              { key: 'clientId', label: 'Client ID', inputType: 'text', maxLength: 256 },
-              { key: 'apiKey', label: 'API Key', inputType: 'password', maxLength: 2048 },
-            ],
+            helpText: '普通凭据说明',
+            fields: [{ key: 'apiKey', label: 'API Key', inputType: 'password', maxLength: 2048 }],
           },
         },
       ],
@@ -2073,9 +2373,96 @@ describe('ConnectorControl authorization states', () => {
     fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
     fireEvent.click(await screen.findByRole('button', { name: '连接' }));
 
-    expect(await screen.findByRole('heading', { name: '连接 其他凭据连接器 作为 AI 知识库' })).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: '连接 IMA' })).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Client ID')).not.toBeInTheDocument();
+    const helpCard = await screen.findByRole('region', { name: '凭据获取说明' });
+    expect(helpCard).toHaveClass('credentialHelpCard');
+    expect(helpCard).toHaveTextContent('普通凭据说明');
+  });
+
+  it.each([
+    ['CONNECTOR_CREDENTIAL_INVALID', 'AppID 或 AppSecret 无效，请检查后重试'],
+    ['WEIXIN_IP_NOT_ALLOWLISTED', '请将 ByClaw 后端出口 IP 加入公众号 IP 白名单后重试'],
+    ['CONNECTOR_VERIFICATION_TIMEOUT', '微信接口暂时不可用，凭据未保存，请稍后重试'],
+    ['CONNECTOR_VERIFICATION_FAILED', '微信接口暂时不可用，凭据未保存，请稍后重试'],
+    ['PROVIDER_PROTOCOL_ERROR', '微信公众号 API 凭据验证失败，请检查后重试'],
+  ])('maps Weixin credential error %s to safe copy', async (errorCode, expected) => {
+    mockQueryConnectorList.mockResolvedValue({
+      list: [
+        {
+          connectorId: 12,
+          connectorCode: 'weixin-official-api',
+          connectorName: '微信公众号 API',
+          connectorType: 'SYSTEM',
+          description: '微信公众号官方 API',
+          enableFlag: null,
+          authMode: 'AK_SK',
+          credentialForm: {
+            helpUrl: 'https://developers.weixin.qq.com/platform',
+            fields: [
+              { key: 'appId', label: 'AppID', inputType: 'text', maxLength: 256 },
+              { key: 'appSecret', label: 'AppSecret', inputType: 'password', maxLength: 2048 },
+            ],
+          },
+        },
+      ],
+      pageNum: 1,
+      pageSize: 100,
+      total: 1,
+      totalPages: 1,
+    });
+    mockStartConnectorCredentialAuthorization.mockResolvedValue({
+      authorizationId: 'wx-failed',
+      connectorId: 12,
+      status: 'failed',
+      errorCode,
+      errorMessage: 'wx-secret must not be rendered',
+    });
+
+    render(<ConnectorControl canAuthorize />);
+    fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
+    fireEvent.click(await screen.findByRole('button', { name: '连接' }));
+    fireEvent.change(screen.getByLabelText('AppID'), { target: { value: 'wx-app' } });
+    fireEvent.change(screen.getByLabelText('AppSecret'), { target: { value: 'wx-secret' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存并连接' }));
+
+    await waitFor(() => expect(mockMessageError).toHaveBeenCalledWith(expected));
+    expect(screen.queryByText(/wx-secret must not be rendered/)).not.toBeInTheDocument();
+  });
+
+  it('explains Weixin AppSecret revocation scope before unlinking', async () => {
+    mockQueryConnectorList.mockResolvedValue({
+      list: [
+        {
+          connectorId: 12,
+          connectorCode: 'weixin-official-api',
+          connectorName: '微信公众号 API',
+          connectorType: 'SYSTEM',
+          description: '微信公众号官方 API',
+          enableFlag: 'Y',
+          authMode: 'AK_SK',
+          credentialForm: {
+            helpUrl: 'https://developers.weixin.qq.com/platform',
+            fields: [
+              { key: 'appId', label: 'AppID', inputType: 'text', maxLength: 256 },
+              { key: 'appSecret', label: 'AppSecret', inputType: 'password', maxLength: 2048 },
+            ],
+          },
+        },
+      ],
+      pageNum: 1,
+      pageSize: 100,
+      total: 1,
+      totalPages: 1,
+    });
+
+    render(<ConnectorControl canAuthorize />);
+    fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
+    fireEvent.click(await screen.findByRole('button', { name: '更多微信公众号 API操作' }));
+    fireEvent.click(await screen.findByText('取消授权'));
+
+    expect(
+      await screen.findByText('仅移除 ByClaw 保存的凭据，微信公众平台上的 AppSecret 仍保持有效')
+    ).toBeInTheDocument();
+    Modal.destroyAll();
   });
 
   it('does not show IMA revocation copy for another AK_SK connector', async () => {
@@ -2109,7 +2496,7 @@ describe('ConnectorControl authorization states', () => {
     fireEvent.click(await screen.findByRole('button', { name: '更多其他凭据连接器操作' }));
     fireEvent.click(await screen.findByText('取消授权'));
 
-    expect(await screen.findByText('当前 CLI 登录凭证将被清除，再次使用时需要重新授权。')).toBeInTheDocument();
+    expect(await screen.findByText('仅移除 ByClaw 保存的凭据，第三方平台上的凭据仍保持有效。')).toBeInTheDocument();
     expect(screen.queryByText('仅移除 ByClaw 保存的凭据，IMA 网站上的 API Key 仍保持有效。')).not.toBeInTheDocument();
     const refreshCount = mockQueryAllConnectors.mock.calls.length;
     fireEvent.click(screen.getByRole('button', { name: '确认取消授权' }));
@@ -2158,38 +2545,73 @@ describe('ConnectorControl authorization states', () => {
     Modal.destroyAll();
   });
 
-  it('closes local authorization from malformed IMA metadata', async () => {
-    mockQueryConnectorList.mockResolvedValue({
-      list: [
-        {
-          connectorId: 10,
-          connectorCode: 'ima-openapi',
-          connectorName: 'IMA',
-          connectorType: 'SYSTEM',
-          description: 'IMA 知识库',
-          enableFlag: null,
-          authMode: 'AK_SK',
-          credentialForm: {
-            helpUrl: 'https://ima.qq.com/openapi',
-            fields: [{ key: 'clientId', label: 'Client ID', inputType: 'text', maxLength: 256 }],
-          },
-        },
-      ],
-      pageNum: 1,
-      pageSize: 100,
-      total: 1,
-      totalPages: 1,
-    });
+  it('opens the credential form when optional IMA help metadata is null', async () => {
+    const malformedIma = {
+      connectorId: 10,
+      connectorCode: 'ima-openapi',
+      connectorName: 'IMA',
+      connectorType: 'SYSTEM' as const,
+      description: 'IMA 知识库',
+      enableFlag: null,
+      authMode: 'AK_SK',
+      credentialForm: {
+        helpUrl: 'https://ima.qq.com/openapi',
+        fields: [],
+      },
+    };
+    const validIma = {
+      ...malformedIma,
+      credentialForm: {
+        helpUrl: 'https://ima.qq.com/openapi',
+        helpText: null,
+        helpLinkText: null,
+        fields: [
+          { key: 'clientId', label: 'Client ID', inputType: 'text' as const, maxLength: 256 },
+          { key: 'apiKey', label: 'API Key', inputType: 'password' as const, maxLength: 2048 },
+        ],
+      },
+    };
+    mockQueryAllConnectors
+      .mockResolvedValueOnce([malformedIma])
+      .mockResolvedValueOnce([malformedIma])
+      .mockResolvedValue([validIma]);
 
     render(<ConnectorControl canAuthorize />);
     fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
     fireEvent.click(await screen.findByRole('button', { name: '连接' }));
 
-    await waitFor(() =>
-      expect(screen.queryByRole('heading', { name: '连接 IMA 作为 AI 知识库' })).not.toBeInTheDocument()
-    );
+    await waitFor(() => expect(mockQueryAllConnectors).toHaveBeenCalledTimes(3));
+    expect(await screen.findByLabelText('Client ID')).toBeInTheDocument();
+    expect(screen.getByLabelText('API Key')).toBeInTheDocument();
+    expect(mockMessageError).not.toHaveBeenCalledWith('IMA 连接配置暂不可用，请稍后重试');
+  });
+
+  it('keeps IMA authorization closed when metadata recovery fails', async () => {
+    const malformedIma = {
+      connectorId: 10,
+      connectorCode: 'ima-openapi',
+      connectorName: 'IMA',
+      connectorType: 'SYSTEM' as const,
+      description: 'IMA 知识库',
+      enableFlag: null,
+      authMode: 'AK_SK',
+      credentialForm: {
+        helpUrl: 'https://ima.qq.com/openapi',
+        fields: [],
+      },
+    };
+    mockQueryAllConnectors
+      .mockResolvedValueOnce([malformedIma])
+      .mockResolvedValueOnce([malformedIma])
+      .mockRejectedValueOnce(new Error('offline'));
+
+    render(<ConnectorControl canAuthorize />);
+    fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
+    fireEvent.click(await screen.findByRole('button', { name: '连接' }));
+
+    await waitFor(() => expect(mockMessageError).toHaveBeenCalledWith('IMA 连接配置暂不可用，请稍后重试'));
+    await waitFor(() => expect(screen.queryByRole('status', { name: 'IMA状态刷新中' })).not.toBeInTheDocument());
     expect(screen.queryByLabelText('Client ID')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '立即前往授权' })).not.toBeInTheDocument();
   });
 
   it.each(['', 'javascript:alert(1)', 'data:text/plain,credentials', '/ima/openapi', 'not a valid URL'])(

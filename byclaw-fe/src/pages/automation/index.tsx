@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { CalendarOutlined } from '@ant-design/icons';
-import { useIntl } from '@umijs/max';
+import { useIntl, useLocation, useNavigate } from '@umijs/max';
 import classnames from 'classnames';
 import AntdIcon from '@/components/AntdIcon';
 import useAppStore from '@/models/common/useAppStore';
 
 import AutomationListPanel from './components/AutomationPanel';
 import AutomationRunPanel from './components/AutomationRunPanel';
+import AutomationEditor from './components/AutomationEditor';
 
 import styles from './index.module.less';
 
@@ -17,8 +18,13 @@ import styles from './index.module.less';
  */
 const Automation: React.FC = () => {
   const intl = useIntl();
+  const location = useLocation();
+  const navigate = useNavigate();
   const { isSiderCollapsed } = useAppStore();
   const [activeTab, setActiveTab] = useState<'tasks' | 'runs'>('tasks');
+  const searchParams = new URLSearchParams(location.search || '');
+  const creating = searchParams.get('create') === '1';
+  const projectId = searchParams.get('projectId') || undefined;
   const tabNavigation = (
     <div
       className={classnames(styles.automationTabs, isSiderCollapsed && styles.automationTabsCollapsed)}
@@ -49,8 +55,14 @@ const Automation: React.FC = () => {
 
   return (
     <div className={styles.automationPage}>
-      {activeTab === 'tasks' ? (
-        <AutomationListPanel headerLeading={tabNavigation} />
+      {creating ? (
+        <AutomationEditor
+          projectId={projectId}
+          onCancel={() => navigate('/automation')}
+          onSaved={() => navigate('/automation')}
+        />
+      ) : activeTab === 'tasks' ? (
+        <AutomationListPanel headerLeading={tabNavigation} projectId={projectId} />
       ) : (
         <AutomationRunPanel headerLeading={tabNavigation} />
       )}

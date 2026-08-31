@@ -54,6 +54,19 @@
         <result column="doc_usage" property="docUsage" />
     </resultMap>
 
+    <resultMap id="ConversationOutlineResultMap"
+        type="com.iwhalecloud.byai.common.message.entity.ConversationOutlineItem">
+        <result column="message_id" property="messageId" />
+        <result column="role" property="role" />
+        <result column="usage" property="usage" />
+        <result column="content" property="content" />
+        <result column="related_resources" property="relatedResources" />
+        <result column="creator_name" property="creatorName" />
+        <result column="create_time" property="createTime" />
+        <result column="position" property="position" />
+        <result column="total_count" property="totalCount" />
+    </resultMap>
+
     <!-- 通用查询列 -->
     <sql id="Base_Column_List">
         id, access_terminal, append_index, archived_at, belong_date, call_logs, create_time, creator_id, creator_name, enterprise_id,
@@ -236,6 +249,36 @@
         FROM byai_message
         WHERE session_id = #{sessionId}
           AND message_id &lt;= #{messageId}
+    </select>
+
+    <select id="selectConversationOutline" resultMap="ConversationOutlineResultMap">
+        SELECT message_id,
+               "role",
+               "usage",
+               LEFT(COALESCE(NULLIF(final_content, ''), NULLIF(message_content, ''), ''), 800) AS content,
+               related_resources,
+               creator_name,
+               create_time,
+               position,
+               total_count
+        FROM (
+            SELECT message_id,
+                   "role",
+                   "usage",
+                   final_content,
+                   message_content,
+                   related_resources,
+                   creator_name,
+                   create_time,
+                   archived_at,
+                   ROW_NUMBER() OVER (ORDER BY create_time DESC, message_id DESC) AS position,
+                   COUNT(1) OVER () AS total_count
+            FROM byai_message
+            WHERE session_id = #{sessionId}
+        ) outline
+        WHERE archived_at IS NULL
+          AND "usage" IN (1, 2, 4)
+        ORDER BY create_time ASC, message_id ASC
     </select>
 
 </mapper>

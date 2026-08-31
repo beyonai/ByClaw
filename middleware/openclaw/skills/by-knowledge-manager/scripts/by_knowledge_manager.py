@@ -261,14 +261,7 @@ class ByFrameworkDiscoveryTransport:
         supports_session = getattr(self, "_supports_session", False)
         session_id = ""
         if supports_session:
-            session_id = getattr(self, "_session_id", "") or _normalize_session_id(
-                _first_non_empty_env(
-                    "BAIYING_SESSION",
-                    "SESSION_ID",
-                    "BYCLAW_SESSION",
-                    "BYCLAW_ECOSYSTEM_SESSION",
-                )
-            )
+            session_id = getattr(self, "_session_id", "")
         if not service_name or not user_code:
             raise ValueError(f"{BACKEND_SERVICE_ENV} 和 USER_CODE 必须配置")
 
@@ -1017,8 +1010,7 @@ def _add_command(
             default="",
             metavar="ID",
             help=(
-                "当前任务会话 ID；显式传入时优先使用，"
-                "未提供时尝试使用运行环境中的当前会话"
+                "当前任务上下文中的会话 ID；未提供时不发送会话文件变更通知"
             ),
         )
     return command

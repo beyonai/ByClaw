@@ -10,6 +10,7 @@ import styles from './index.module.less';
 interface ChatResourceWorkspaceProps {
   sessionId: string;
   projectId?: number;
+  cloudResourceId?: string | number;
   listOpen: boolean;
   tabs: ChatResourceTab[];
   activeTabKey: string;
@@ -22,6 +23,7 @@ interface ChatResourceWorkspaceProps {
 const ChatResourceWorkspace: React.FC<ChatResourceWorkspaceProps> = ({
   sessionId,
   projectId,
+  cloudResourceId,
   listOpen,
   tabs,
   activeTabKey,
@@ -51,6 +53,7 @@ const ChatResourceWorkspace: React.FC<ChatResourceWorkspaceProps> = ({
       key={sessionId}
       sessionId={sessionId}
       projectId={projectId}
+      cloudResourceId={cloudResourceId}
       onOpenDetail={(panel, options) => onOpenDetail(panel, options)}
     />
   );

@@ -20,6 +20,8 @@ export interface AgentProfile {
   description?: string;
   /** 编排者为该 Agent 配置的团队职责，不影响 Connector 路由。 */
   role?: string;
+  /** BE 返回并经入口归一化的 Skill 编码，仅用于能力识别，不代表 Leader 可直接执行。 */
+  skills?: string[];
   execution: AgentExecutionTarget;
 }
 

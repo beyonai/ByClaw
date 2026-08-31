@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -31,12 +32,14 @@ import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 import com.iwhalecloud.byai.state.domain.session.service.SessionTitleService;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import com.alibaba.fastjson.JSONObject;
+
 import java.util.Date;
 import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -210,7 +213,7 @@ class AssistantChatApplicationServiceTest {
             .thenReturn("{\"enabled\":false}");
         when(sessionTitleService.buildFileUploadTitle(any(Date.class))).thenReturn(sessionName);
         when(sessionService.createSession(eq(sessionName), eq("h_as"), eq(null),
-            eq(ConversationObjectType.SUPER_ASSISTANT), eq(0)))
+            eq(ConversationObjectType.SUPER_ASSISTANT), eq(0), isNull()))
             .thenReturn(session);
 
         SessionUploadResult result = assistantChatApplicationService.uploadFiles(new MultipartFile[0], null, "h_as",

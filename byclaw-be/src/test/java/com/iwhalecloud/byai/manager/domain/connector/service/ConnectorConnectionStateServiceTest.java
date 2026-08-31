@@ -77,14 +77,16 @@ class ConnectorConnectionStateServiceTest {
         when(connectorAuthMapper.selectOne(any())).thenReturn(null);
         when(sequenceService.nextVal()).thenReturn(8001L);
         when(manifestService.upsertAndEnable(1001L, connector)).thenReturn(true);
-        AuthorizationStatusResult result = new AuthorizationStatusResult(
-            AuthorizationStatus.CONNECTED,
+        AuthorizationStatusResult result = AuthorizationStatusResult.connected(
             "ou_1001",
             "Tester",
+            com.iwhalecloud.byai.manager.domain.connector.authorization.CredentialState.READY,
+            com.iwhalecloud.byai.manager.domain.connector.authorization.CredentialRenewalMode.REFRESH_TOKEN,
             new Date(System.currentTimeMillis() + 60_000L),
-            "workspace-ref",
             null,
-            null
+            new Date(),
+            "workspace-ref",
+            Map.of("username", "gh_1001", "principalName", "Example Corp")
         );
 
         ConnectorAuth binding = service.saveEnabledAuthorization(USER_ID, connector, result, "authorization-1");
@@ -94,8 +96,15 @@ class ConnectorConnectionStateServiceTest {
         assertThat(binding).isSameAs(captor.getValue());
         assertThat(binding.getEnableFlag()).isEqualTo("Y");
         assertThat(binding.getUserId()).isEqualTo(USER_ID);
-        assertThat(Sm4Util.decrypt(binding.getAuthCredential()))
-            .contains("authorization-1", "workspace-ref", "ou_1001");
+        assertThat(binding.getExternalAccountId()).isEqualTo("ou_1001");
+        Map<String, Object> credential = com.alibaba.fastjson.JSON.parseObject(
+            Sm4Util.decrypt(binding.getAuthCredential()), Map.class);
+        assertThat(credential)
+            .containsEntry("authorizationId", "authorization-1")
+            .containsEntry("credentialReference", "workspace-ref")
+            .containsEntry("accountId", "ou_1001")
+            .containsEntry("username", "gh_1001")
+            .containsEntry("principalName", "Example Corp");
         verify(manifestService).upsertAndEnable(1001L, connector);
         verify(privateParamService).refreshPrivateParamCacheAfterCommit(1001L, "tester");
     }

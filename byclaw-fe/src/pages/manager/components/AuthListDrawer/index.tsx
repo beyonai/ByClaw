@@ -163,7 +163,7 @@ const AuthListDrawer = (props) => {
           type="info"
           showIcon
           message={intl.formatMessage({ id: 'auth.organizationIncludesDescendants' })}
-          style={{ marginBottom: 16 }}
+          style={{ marginTop: 12, marginBottom: 16 }}
         />
       )}
       <Row className={styles.selectionWrap} gutter={16}>

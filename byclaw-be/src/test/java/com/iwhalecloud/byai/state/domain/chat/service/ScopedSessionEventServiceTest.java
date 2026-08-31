@@ -17,6 +17,7 @@ import com.iwhalecloud.byai.state.domain.chat.enums.ChatUseageEnum;
 import com.iwhalecloud.byai.state.domain.chat.model.ExternalChildSessionBinding;
 import com.iwhalecloud.byai.state.domain.chat.model.MessageContext;
 import com.iwhalecloud.byai.state.domain.message.dto.ByaiMessageHotDtoDto;
+import com.iwhalecloud.byai.state.domain.message.enums.MsgStatus;
 import com.iwhalecloud.byai.state.domain.message.service.MemoryMessageService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -60,6 +61,7 @@ class ScopedSessionEventServiceTest {
     @Test
     void childEventIsPersistedInItsOwnConversationAndNotRoutedIntoParent() {
         JSONObject metadata = childMetadata("worker-child-1", "架构舵手", "架构负责人");
+        metadata.put("event_kind", "session.status");
         JSONObject event = streamEvent("answerDelta", "子 Agent 的最终结论", metadata);
         ByaiSession child = childSession(200L, 100L, 900L);
         when(childSessionService.ensureBinding(100L, metadata))
@@ -158,8 +160,71 @@ class ScopedSessionEventServiceTest {
     }
 
     @Test
+    void lateChildEventDoesNotReopenAPreviouslyCompletedProjection() {
+        JSONObject metadata = childMetadata("worker-child-1", "架构舵手", "架构负责人");
+        metadata.put("session_status", "running");
+        metadata.put("event_kind", "session.output");
+        JSONObject event = streamEvent("reasoningLogDelta", "终态后的晚到结论", metadata);
+        event.put("stream_id", "2-0");
+        ByaiSession child = childSession(200L, 100L, 900L);
+        when(childSessionService.ensureBinding(100L, metadata))
+            .thenReturn(new ExternalChildSessionBinding(child, "worker-child-1", 201L));
+
+        MessageContext completedContext = new MessageContext(AgentTypeEnum.AGENT, 201L);
+        completedContext.setComplete(true);
+        when(runningChatSnapshotService.hydrateMessageContext(any(), any())).thenReturn(completedContext);
+        when(gatewayStreamEventProcessor.buildEventData(any(ChatProcessContext.class), eq(event), eq(metadata)))
+            .thenReturn(event.getString("data"));
+
+        ByaiMessageHotDtoDto persisted = new ByaiMessageHotDtoDto();
+        persisted.setMessageId(201L);
+        persisted.setSessionId(200L);
+        persisted.setCreatorId(900L);
+        when(memoryMessageService.generateMessage(eq(200L), eq(ChatUseageEnum.SYSTEM_RESPONSE.getCode()),
+            eq(completedContext), any(AssistantChatDto.class))).thenReturn(persisted);
+        when(runningChatSnapshotService.saveExternalChild(eq(persisted), eq("2-0"), any(Boolean.class)))
+            .thenReturn(true);
+
+        assertThat(service.handleIfNecessary(100L, event)).isTrue();
+
+        assertThat(persisted.getMsgStatus()).isEqualTo(MsgStatus.FINISH.getCode());
+        verify(runningChatSnapshotService).saveExternalChild(persisted, "2-0", true);
+        verify(childMessageWriteBehind).enqueue("child:200:201", 200L, persisted, true);
+        verify(projectionBroadcaster).enqueue(eq("100:worker-child-1"), eq(900L), any(JSONObject.class), eq(true));
+    }
+
+    @Test
+    void completedStatusOnAContentEventDoesNotFinalizeTheChildProjection() {
+        JSONObject metadata = childMetadata("worker-child-1", "架构舵手", "架构负责人");
+        metadata.put("event_kind", "context");
+        JSONObject event = streamEvent("reasoningLogDelta", "上下文注入", metadata);
+        ByaiSession child = childSession(200L, 100L, 900L);
+        when(childSessionService.ensureBinding(100L, metadata))
+            .thenReturn(new ExternalChildSessionBinding(child, "worker-child-1", 201L));
+        when(gatewayStreamEventProcessor.buildEventData(any(ChatProcessContext.class), eq(event), eq(metadata)))
+            .thenReturn(event.getString("data"));
+
+        ByaiMessageHotDtoDto persisted = new ByaiMessageHotDtoDto();
+        persisted.setMessageId(201L);
+        persisted.setSessionId(200L);
+        persisted.setCreatorId(900L);
+        when(memoryMessageService.generateMessage(eq(200L), eq(ChatUseageEnum.SYSTEM_RESPONSE.getCode()),
+            any(MessageContext.class), any(AssistantChatDto.class))).thenReturn(persisted);
+        when(runningChatSnapshotService.saveExternalChild(eq(persisted), eq("1-0"), any(Boolean.class)))
+            .thenReturn(true);
+
+        assertThat(service.handleIfNecessary(100L, event)).isTrue();
+
+        assertThat(persisted.getMsgStatus()).isEqualTo(MsgStatus.APPEND.getCode());
+        verify(runningChatSnapshotService).saveExternalChild(persisted, "1-0", false);
+        verify(childMessageWriteBehind).enqueue("child:200:201", 200L, persisted, false);
+        verify(projectionBroadcaster).enqueue(eq("100:worker-child-1"), eq(900L), any(JSONObject.class), eq(false));
+    }
+
+    @Test
     void snapshotFailureKeepsTheStreamEventUnacknowledged() {
         JSONObject metadata = childMetadata("worker-child-1", "架构舵手", "架构负责人");
+        metadata.put("event_kind", "session.status");
         JSONObject event = streamEvent("answerDelta", "不能丢失的正文", metadata);
         ByaiSession child = childSession(200L, 100L, 900L);
         when(childSessionService.ensureBinding(100L, metadata))

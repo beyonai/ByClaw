@@ -11,9 +11,6 @@ import lombok.Setter;
 @Setter
 public class ProjectQo extends QueryObject {
 
-    /** 项目类型：normal / develop */
-    private String projectType;
-
     /** 是否分享：Y / N */
     private String isShare;
 

@@ -127,6 +127,8 @@ public class AuthApplicationService {
 
     private static final String ADMIN_VIP_USER_CODE = "adminvip";
 
+    private static final String RESOURCE_REMOVED_AUTH_SYNC_HINT = "RESOURCE_REMOVED";
+
     private static final Set<String> MANAGE_USE_INHERIT_TARGET_TYPES = Set.of(GrantToObjType.USER, GrantToObjType.ORG,
         GrantToObjType.POST, GrantToObjType.STATION);
 
@@ -212,6 +214,7 @@ public class AuthApplicationService {
         // 查询用户所有来源的授权（USER直接授权 + ORG组织授权 + POST岗位授权 + STATION驻地授权）
         List<String> grantTypes = Arrays.asList(GrantType.AVAILABLE_USE, GrantType.FORCE_USE);
         List<PrivilegeGrant> authList = listAuthPrivilegeGrant(null, null, GrantToObjType.USER, userId, grantTypes);
+        authList = filterEffectiveResourceGrants(authList);
 
         if (CollectionUtils.isEmpty(authList)) {
             return new HashMap<>();
@@ -250,6 +253,94 @@ public class AuthApplicationService {
         logger.debug("AuthApplicationService buildUserAuthResources cost time:{}", endTime - startTime);
 
         return result;
+    }
+
+    /**
+     * 有效授权缓存只保留仍存在且未注销的资源。授权表保留历史记录，资源重新上架后可按原授权重新生效。
+     */
+    private List<PrivilegeGrant> filterEffectiveResourceGrants(List<PrivilegeGrant> authList) {
+        if (CollectionUtils.isEmpty(authList)) {
+            return Collections.emptyList();
+        }
+        Set<Long> resourceIds = authList.stream().map(PrivilegeGrant::getGrantObjId).filter(Objects::nonNull)
+            .collect(Collectors.toSet());
+        if (CollectionUtils.isEmpty(resourceIds)) {
+            return Collections.emptyList();
+        }
+        List<SsResource> resources = ssResourceService.findByIdList(resourceIds);
+        if (CollectionUtils.isEmpty(resources)) {
+            return Collections.emptyList();
+        }
+        Set<Long> effectiveResourceIds = resources.stream()
+            .filter(Objects::nonNull)
+            .filter(resource -> !Objects.equals(resource.getResourceStatus(), ResourceStatus.REMOVED.getNum()))
+            .map(SsResource::getResourceId)
+            .filter(Objects::nonNull)
+            .collect(Collectors.toSet());
+        return authList.stream().filter(grant -> effectiveResourceIds.contains(grant.getGrantObjId()))
+            .collect(Collectors.toList());
+    }
+
+    /**
+     * 资源注销后清除所有直接或继承用户的有效授权缓存，并在事务提交后重新构建完整缓存。
+     * 数据库授权记录继续保留，用于审计以及资源重新上架后的授权恢复。
+     */
+    public void invalidateResourceAuthorizationCachesAfterCommit(Long resourceId, String resourceBizType) {
+        if (resourceId == null || StringUtils.isBlank(resourceBizType)) {
+            return;
+        }
+        List<PrivilegeGrant> grants = privilegeGrantService.listActiveRedGrantsForGrantObject(resourceId,
+            resourceBizType);
+        if (CollectionUtils.isEmpty(grants)) {
+            return;
+        }
+
+        Set<Long> userIds = new HashSet<>();
+        Set<Long> orgIds = new HashSet<>();
+        Set<Long> postIds = new HashSet<>();
+        Set<Long> stationIds = new HashSet<>();
+        for (PrivilegeGrant grant : grants) {
+            if (grant == null || grant.getGrantToObjId() == null) {
+                continue;
+            }
+            String targetType = grant.getGrantToObjType();
+            if (GrantToObjType.USER.equalsIgnoreCase(targetType)) {
+                userIds.add(grant.getGrantToObjId());
+            }
+            else if (GrantToObjType.ORG.equalsIgnoreCase(targetType)) {
+                orgIds.add(grant.getGrantToObjId());
+            }
+            else if (GrantToObjType.POST.equalsIgnoreCase(targetType)) {
+                postIds.add(grant.getGrantToObjId());
+            }
+            else if (GrantToObjType.STATION.equalsIgnoreCase(targetType)) {
+                stationIds.add(grant.getGrantToObjId());
+            }
+        }
+        expandTargetUserIds(userIds, orgIds, postIds, stationIds);
+        if (CollectionUtils.isEmpty(userIds)) {
+            return;
+        }
+
+        Set<Long> affectedUserIds = new HashSet<>(userIds);
+        Set<String> removedResourceIds = Set.of(String.valueOf(resourceId));
+        Runnable task = () -> {
+            for (Long userId : affectedUserIds) {
+                authRedisApplicationService.removeUserAuthByResourceIds(userId, removedResourceIds);
+            }
+            authRedisSyncService.asyncSyncAuthChangedUsers(affectedUserIds, RESOURCE_REMOVED_AUTH_SYNC_HINT);
+        };
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    task.run();
+                }
+            });
+        }
+        else {
+            task.run();
+        }
     }
 
     /**

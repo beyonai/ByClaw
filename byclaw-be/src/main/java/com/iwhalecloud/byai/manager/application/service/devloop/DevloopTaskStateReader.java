@@ -15,16 +15,12 @@ import com.iwhalecloud.byai.common.storage.UserFS;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxUserContextRunner;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskStateDto;
 import com.iwhalecloud.byai.manager.dto.devloop.E2eStatusDto;
-import com.iwhalecloud.byai.manager.dto.devloop.IntegrationResultDto;
 
 @Service
 public class DevloopTaskStateReader {
 
     static final String SESSION_STATE_PATH = "/by/.acp-runs/sessions/%s.json";
     private static final String SUPPORTED_SCHEMA_VERSION = "2.0.0";
-
-    /** 测试员工写入的集成结果文件;字段为 camelCase,用不改命名策略的原始 mapper 读。 */
-    private static final String INTEGRATION_RESULT_PATH = "/by/.sessions/%s/integration-result.json";
 
     /** 结果根目录,结构见规范页 /spec/integrationTest:status.json + reports/ + logs/ + artifacts/。 */
     private static final String E2E_RESULT_DIR = "/by/.sessions/%s/e2e-result";
@@ -49,30 +45,7 @@ public class DevloopTaskStateReader {
     }
 
     /**
-     * 读集成测试结果文件(测试员工写)。文件缺失(员工尚未写完)返回 null,由 poller 按未完成继续等待;
-     * 存在则解析结构化计数供看板列使用。
-     */
-    public IntegrationResultDto readIntegrationResult(String userCode, Long sessionId) {
-        return userContextRunner.callAsUser(userCode, () -> readResult(sessionId));
-    }
-
-    private IntegrationResultDto readResult(Long sessionId) {
-        String path = INTEGRATION_RESULT_PATH.formatted(sessionId);
-        try (InputStream inputStream = userFS.read(path)) {
-            if (inputStream == null) {
-                return null;
-            }
-            return resultObjectMapper.readValue(inputStream, IntegrationResultDto.class);
-        }
-        catch (IOException e) {
-            // 文件不存在是正常态(员工还没写),不抛错,交 poller 继续等待。
-            return null;
-        }
-    }
-
-    /**
-     * 读 status.json(规范页 /spec/integrationTest 定义的结果真相源)。它比 integration-result.json
-     * 多带状态、失败用例 message 与截图路径,故优先读它;缺失时调用方退回旧五字段文件。
+     * 读 status.json(规范页 /spec/integrationTest 定义的结果真相源)，包含状态、失败用例 message 与截图路径。
      */
     public E2eStatusDto readE2eStatus(String userCode, Long sessionId) {
         return userContextRunner.callAsUser(userCode, () -> readStatus(sessionId));

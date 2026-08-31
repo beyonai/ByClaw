@@ -165,6 +165,7 @@ public class ProjectContextApplicationService {
         summary.setInitStatus(project.getInitStatus());
         summary.setBuildIndex(project.getBuildIndex());
         summary.setIndexSkills(project.getIndexSkills());
+        summary.setCloudResourceId(project.getCloudResourceId());
         summary.setCreateBy(project.getCreateBy());
         summary.setCreateTime(project.getCreateTime());
         return summary;

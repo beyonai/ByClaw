@@ -1066,6 +1066,7 @@ public class ConnectorAuthorizationService {
         auth.setConnectorId(connector.getConnectorId());
         auth.setAuthMode(connector.getAuthMode());
         auth.setAuthName(accountName(statusResult));
+        auth.setExternalAccountId(statusResult == null ? null : statusResult.accountId());
         auth.setAuthCredential(buildCredential(connector, statusResult, authorizationId));
         auth.setEnableFlag("Y");
         auth.setStatusCd("00A");
@@ -1113,6 +1114,7 @@ public class ConnectorAuthorizationService {
             putIfHasText(metadata, "credentialReference", statusResult.credentialReference());
             putIfHasText(metadata, "accountId", statusResult.accountId());
             putIfHasText(metadata, "accountName", statusResult.accountName());
+            statusResult.accountAttributes().forEach((key, value) -> putIfHasText(metadata, key, value));
         }
         return Sm4Util.encrypt(JSON.toJSONString(metadata));
     }

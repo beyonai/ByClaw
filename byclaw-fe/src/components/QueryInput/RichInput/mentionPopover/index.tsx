@@ -1,6 +1,6 @@
 import { chatModeMap } from '@/constants/query';
 import type { IChatModeType } from '@/constants/query';
-import { ConfigProvider, Popover } from 'antd';
+import { ConfigProvider, Empty, List, Popover, Spin } from 'antd';
 import type { PopoverProps } from 'antd';
 import type { TooltipRef } from 'antd/es/tooltip';
 import classNames from 'classnames';
@@ -17,6 +17,9 @@ import { useIntl, useSelector } from '@umijs/max';
 import type { IState as UseEmployeesIState } from '@/models/useEmployees.ts';
 import { getAgentChatAvatar } from '@/utils/agent';
 import { ResourceTypeMap } from '@/constants/resource';
+import { searchDirAndFile } from '@/service/knowledgeCenter';
+import { normalizeProjectCloudDriveItem } from '@/components/ProjectCloudDrive';
+import { getFileIconType } from '@/constants/icon';
 
 interface MentionPopoverProps {
   type?: '@' | '#';
@@ -35,6 +38,7 @@ interface MentionPopoverProps {
   excludedAgentIds?: string[];
   children?: React.ReactNode;
   placement?: PopoverProps['placement'];
+  projectCloudResourceId?: string | number;
 }
 
 const MentionPopover: React.FC<MentionPopoverProps> = ({
@@ -50,14 +54,18 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
   excludedAgentIds,
   children,
   placement,
+  projectCloudResourceId,
 }) => {
   const { trackerEmployeeClick } = useTracker();
   const intl = useIntl();
   const popoverRef = useRef<TooltipRef>(null);
-  const open = !!popoverPos;
+  // 项目云盘 @ 搜索需要等用户输入关键词后再展示，单独输入 @ 时不弹空面板。
+  const open = !!popoverPos && (type !== '@' || !projectCloudResourceId || !!inputText?.trim());
   const { top, left } = popoverPos || {};
 
   const [currentAgent, setCurrentAgent] = useState<IAgentCache | null>(null);
+  const [projectFiles, setProjectFiles] = useState<any[]>([]);
+  const [projectFilesLoading, setProjectFilesLoading] = useState(false);
   const { employeesList } = useSelector(({ employees }: { employees: UseEmployeesIState }) => employees);
   const scopedAgentId = resourceAgentIds
     ?.split(',')
@@ -65,6 +73,37 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
     .find(Boolean);
   const resolvedAgentId = currentAgent?.agentId || scopedAgentId || agentId;
   const isExpertResourceOverlayOpen = chatMode === chatModeMap.expert && !!currentAgent;
+
+  useEffect(() => {
+    if (type !== '@' || !projectCloudResourceId || !inputText?.trim()) {
+      setProjectFiles([]);
+      return;
+    }
+    let active = true;
+    setProjectFilesLoading(true);
+    searchDirAndFile({
+      resourceId: Number(projectCloudResourceId),
+      directoryPath: '/',
+      keyword: inputText.trim(),
+    })
+      .then((response: any) => {
+        if (!active) return;
+        const data = response?.data ?? response;
+        const rows = Array.isArray(data)
+          ? data
+          : data?.list || data?.rows || data?.records || data?.data?.list || data?.data?.rows || [];
+        setProjectFiles(Array.isArray(rows) ? rows : []);
+      })
+      .catch(() => {
+        if (active) setProjectFiles([]);
+      })
+      .finally(() => {
+        if (active) setProjectFilesLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [inputText, projectCloudResourceId, type]);
 
   useEffect(() => {
     if (open && popoverRef.current) {
@@ -201,7 +240,7 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
       }}
       styles={{
         body: {
-          height: '50vh',
+          height: '65vh',
           minWidth: 320,
           padding: 0,
         },
@@ -236,9 +275,61 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
                         onSelect={onSelectAgentTool}
                         keyword={inputText}
                         agentIds={resourceAgentIds}
-                        showKnowledgeTab={!!currentAgent && currentAgent.knowledgeCount !== 0}
-                        showSkillTab={!!currentAgent && currentAgent.skillsCount !== 0}
+                        showKnowledgeTab={!currentAgent || currentAgent.knowledgeCount !== 0}
+                        showSkillTab={!currentAgent || currentAgent.skillsCount !== 0}
                       />
+                    </div>
+                  );
+                }
+
+                if (type === '@' && projectCloudResourceId) {
+                  return (
+                    <div className={styles.projectFileSearchPanel}>
+                      <Spin spinning={projectFilesLoading}>
+                        {projectFiles.length ? (
+                          <List
+                            dataSource={projectFiles}
+                            renderItem={(item: any) => {
+                              const name = item.fileName || item.name || '文件';
+                              const normalizedItem = normalizeProjectCloudDriveItem(item);
+                              const path = normalizedItem.path;
+                              const resourceType = normalizedItem.isDir
+                                ? ResourceType.commonFolder
+                                : ResourceType.commonFile;
+                              return (
+                                <List.Item
+                                  className={styles.projectFileSearchItem}
+                                  onClick={() =>
+                                    onSelect(
+                                      { id: path, collectionName: name, resourceId: path, resourceName: name },
+                                      resourceType
+                                    )
+                                  }
+                                >
+                                  <span className={styles.projectFileSearchContent}>
+                                    <AntdIcon
+                                      type={`icon-${
+                                        normalizedItem.isDir ? 'a-Folder-openwenjianjia-kai' : getFileIconType(name)
+                                      }`}
+                                      className={styles.projectFileSearchIcon}
+                                    />
+                                    <span className={styles.projectFileSearchName} title={name}>
+                                      {name}
+                                    </span>
+                                    <span className={styles.projectFileSearchType}>
+                                      {normalizedItem.isDir ? '文件夹' : '文件'}
+                                    </span>
+                                  </span>
+                                </List.Item>
+                              );
+                            }}
+                          />
+                        ) : (
+                          !projectFilesLoading && (
+                            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无匹配文件" />
+                          )
+                        )}
+                      </Spin>
                     </div>
                   );
                 }
@@ -263,8 +354,8 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
                             sessionId={sessionId}
                             onSelect={onSelectAgentTool}
                             header={resourceHeader}
-                            showKnowledgeTab={!!currentAgent && currentAgent.knowledgeCount !== 0}
-                            showSkillTab={!!currentAgent && currentAgent.skillsCount !== 0}
+                            showKnowledgeTab={!currentAgent || currentAgent.knowledgeCount !== 0}
+                            showSkillTab={!currentAgent || currentAgent.skillsCount !== 0}
                           />
                         </div>
                       )}

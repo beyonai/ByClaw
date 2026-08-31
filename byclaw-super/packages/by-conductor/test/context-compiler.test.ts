@@ -12,6 +12,7 @@ const analyst: AgentProfile = {
   code: "analyst",
   name: "数据分析专家",
   description: "分析结构化数据",
+  skills: ["data-analysis"],
   execution: {
     connectorId: "openclaw",
     targetId: "internal-target-1",
@@ -40,6 +41,7 @@ describe("ContextCompiler", () => {
     expect(compiled.dynamicSystemContext).toContain('"id":"1001"');
     expect(compiled.dynamicSystemContext).toContain('"code":"analyst"');
     expect(compiled.dynamicSystemContext).toContain('"name":"数据分析专家"');
+    expect(compiled.dynamicSystemContext).toContain('"skills":["data-analysis"]');
     expect(compiled.dynamicSystemContext).not.toContain("openclaw");
     expect(compiled.dynamicSystemContext).not.toContain("internal-target-1");
     expect(compiled.diagnostics.fingerprint).toMatch(/^[a-f0-9]{64}$/);

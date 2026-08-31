@@ -37,7 +37,7 @@ node scripts/project-context.mjs files --project-id 20014944 --size 50
 ```
 
 - `current`：完整项目上下文。
-- `basic`：项目基本信息。
+- `basic`：项目基本信息，位于返回 JSON 的 `project` 对象：`projectId`、`projectName`、`description`、`projectType`、`isShare`、`initStatus`、`buildIndex`、`indexSkills`、`cloudResourceId`（项目云盘知识库资源 ID）、`createBy`、`createTime`。
 - `repos`：代码仓库。
 - `resources`：知识库、数字员工、本体库、对象、视图、场景。
 - `members`：项目成员；不返回手机号。

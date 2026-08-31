@@ -1,9 +1,8 @@
-import { Button, Empty, Input, Spin, Tag } from 'antd';
-import { PlusOutlined, SearchOutlined } from '@ant-design/icons';
+import { Button, Empty, Input, Spin } from 'antd';
+import { FolderOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import classNames from 'classnames';
 import type { ProjectSpace } from '../../types';
-import { getProjectTagMeta } from '../../utils';
 import styles from '../../index.module.less';
 
 interface Props {
@@ -45,7 +44,6 @@ const ProjectSidebar: React.FC<Props> = ({
         <div className={styles.sidebarList}>
           {projects.length ? (
             projects.map((project) => {
-              const projectTag = getProjectTagMeta(project);
               return (
                 <button
                   type="button"
@@ -56,17 +54,12 @@ const ProjectSidebar: React.FC<Props> = ({
                   onClick={() => onSelectProject(project)}
                 >
                   <span className={styles.sidebarProjectMain}>
+                    <FolderOutlined className={styles.projectIcon} />
                     <strong>{project.projectName}</strong>
                     <small>
                       {project.description || intl.formatMessage({ id: 'projectSpace.projectCard.emptyDescription' })}
                     </small>
                   </span>
-                  <Tag
-                    bordered={false}
-                    className={classNames(styles.projectTypeTag, styles[`projectTypeTag${projectTag.classSuffix}`])}
-                  >
-                    {intl.formatMessage({ id: projectTag.messageId })}
-                  </Tag>
                 </button>
               );
             })

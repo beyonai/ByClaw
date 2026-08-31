@@ -1,16 +1,16 @@
 import { getProjectResourceCategoryCount, supportsProjectRepositories } from '../projectCapabilities';
 
 describe('project capabilities', () => {
-  it('enables shared repositories for development and operation projects', () => {
+  it('uses the same project capabilities for every project', () => {
     expect(supportsProjectRepositories('develop')).toBe(true);
     expect(supportsProjectRepositories('operation')).toBe(true);
-    expect(supportsProjectRepositories('normal')).toBe(false);
-    expect(supportsProjectRepositories('default')).toBe(false);
+    expect(supportsProjectRepositories('normal')).toBe(true);
+    expect(supportsProjectRepositories('default')).toBe(true);
   });
 
-  it('includes the shared repository card in operation project resources', () => {
+  it('uses the same resource layout for every project', () => {
     expect(getProjectResourceCategoryCount('develop')).toBe(2);
-    expect(getProjectResourceCategoryCount('operation')).toBe(5);
-    expect(getProjectResourceCategoryCount('normal')).toBe(1);
+    expect(getProjectResourceCategoryCount('operation')).toBe(2);
+    expect(getProjectResourceCategoryCount('normal')).toBe(2);
   });
 });

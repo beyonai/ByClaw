@@ -34,6 +34,7 @@ export interface OperationAccountPanelProps {
   onRefreshToolbarChange?: (toolbar: React.ReactNode | null) => void;
   showPlatformFilter?: boolean;
   allowAccountEditing?: boolean;
+  fixedCreatePlatformId?: string;
   cardsOnly?: boolean;
   drawerCardLayout?: boolean;
   onBack?: () => void;
@@ -64,6 +65,7 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
   onRefreshToolbarChange,
   showPlatformFilter = true,
   allowAccountEditing = true,
+  fixedCreatePlatformId,
   cardsOnly = false,
   drawerCardLayout = false,
   onBack,
@@ -85,11 +87,6 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
   );
   const platformT = useCallback(
     (id: string) => intl.formatMessage({ id: `projectSpace.operation.platform.${id}` }),
-    [intl]
-  );
-  const loginT = useCallback(
-    (id: string, values?: Record<string, string | number>) =>
-      intl.formatMessage({ id: `projectSpace.operation.accountLogin.${id}` }, values),
     [intl]
   );
   // 账号接口未配置平台字典时沿用产品支持的平台，后端下发时优先使用后端数据。
@@ -116,6 +113,11 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
     () => (activePlatform === 'all' ? accounts : accounts.filter((account) => account.platformId === activePlatform)),
     [accounts, activePlatform]
   );
+  const displayedAccounts = useMemo(() => {
+    if (!loginTarget) return filteredAccounts;
+    const targetId = String(loginTarget.id);
+    return [loginTarget, ...filteredAccounts.filter((account) => String(account.id) !== targetId)];
+  }, [filteredAccounts, loginTarget]);
   // 没有管理权限或没有保存回调时，隐藏新增和编辑入口，防止出现不可完成的操作。
   const canSaveAccount = canManage && !!onSaveAccount;
   const openAddAccountModal = useCallback(() => {
@@ -206,29 +208,9 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
     [onSaveAccount]
   );
 
-  const loginNotice = loginTarget ? (
-    <section
-      className={`${styles.accountLoginNotice} ${cardsOnly ? styles.accountLoginNoticeGrid : ''}`}
-      aria-live="polite"
-    >
-      <div className={styles.accountLoginNoticeContent}>
-        <strong>{loginT('remoteTitle', { account: loginTarget.accountName })}</strong>
-        <span>{loginT('remoteHint')}</span>
-      </div>
-      <div className={styles.accountLoginNoticeActions}>
-        <Button disabled={loginConfirming} onClick={onCancelLogin}>
-          {loginT('cancel')}
-        </Button>
-        <Button type="primary" loading={loginConfirming} onClick={() => void onConfirmLogin?.()}>
-          {loginT('complete')}
-        </Button>
-      </div>
-    </section>
-  ) : null;
-
   const accountCards = (
     <OperationAccountCards
-      accounts={filteredAccounts}
+      accounts={displayedAccounts}
       platformOptions={availablePlatformOptions}
       compact={compact}
       drawerCompact={drawerCardLayout}
@@ -241,6 +223,8 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
       onEditAccount={openEditAccountModal}
       onDeleteAccount={onDeleteAccount}
       onLogin={onLogin}
+      onConfirmLogin={onConfirmLogin}
+      onCancelLogin={onCancelLogin}
     />
   );
 
@@ -249,6 +233,7 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
       open={accountFormOpen}
       account={editingAccount}
       platformOptions={availablePlatformOptions}
+      fixedPlatformId={fixedCreatePlatformId}
       loading={savingAccount}
       onCancel={() => {
         setAccountFormOpen(false);
@@ -261,8 +246,7 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
   if (cardsOnly) {
     return (
       <>
-        {loginNotice}
-        {loading && filteredAccounts.length === 0 ? (
+        {loading && displayedAccounts.length === 0 ? (
           <div className={styles.accountGridLoading}>
             <Spin />
           </div>
@@ -320,8 +304,6 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
         )}
       </header>
 
-      {loginNotice}
-
       {showPlatformFilter && (
         <div className={styles.accountFilterRow}>
           <Segmented
@@ -335,7 +317,7 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
       )}
 
       <Spin spinning={loading} wrapperClassName={styles.accountPanelSpin}>
-        {filteredAccounts.length === 0 ? (
+        {displayedAccounts.length === 0 ? (
           <div className={styles.accountEmpty}>
             <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('empty')} />
           </div>

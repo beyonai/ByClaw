@@ -8,6 +8,7 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.convert.Convert;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -408,7 +409,7 @@ public class SessionService {
      * 编辑会话模板消息
      *
      * @param sessionId 会话ID
-     * @param request 编辑请求
+     * @param request   编辑请求
      */
     public void editTemplateMessage(Long sessionId, TemplateMessageEditRequestDto request) {
         logger.info("开始编辑模板会话消息: sessionId={}, messageId={}", sessionId, request.getMessageId());
@@ -444,7 +445,7 @@ public class SessionService {
      * 保存会话为模板
      *
      * @param originalSessionId 会话ID
-     * @param request 保存请求
+     * @param request           保存请求
      * @return Long 保存结果
      */
     public Long saveAsTemplate(Long originalSessionId, TemplateSaveRequestDto request) {
@@ -469,7 +470,7 @@ public class SessionService {
      * 保存模板扩展参数
      */
     private void saveTemplateExtParams(Long sessionId, String templateTitle, Long originalSessionId,
-        TemplateSaveRequestDto request) {
+                                       TemplateSaveRequestDto request) {
         long currentTime = System.currentTimeMillis();
 
         // 保存模板标题
@@ -622,7 +623,7 @@ public class SessionService {
      * 更新会话模板
      *
      * @param templateSessionId 会话ID
-     * @param request 更新请求
+     * @param request           更新请求
      * @return MemoryResponse 更新结果
      */
     public Long updateTemplate(Long templateSessionId, TemplateUpdateRequestDto request) {
@@ -644,7 +645,7 @@ public class SessionService {
      * 更新模板扩展参数
      *
      * @param sessionId 会话标识
-     * @param request 请求
+     * @param request   请求
      */
     private void updateTemplateExtParams(Long sessionId, TemplateUpdateRequestDto request) {
         logger.info("开始更新模板扩展参数: sessionId={}", sessionId);
@@ -687,8 +688,7 @@ public class SessionService {
             // 更新现有参数
             existingExt.setExtParamValue(paramValue);
             byaiSessionExtMapper.updateById(existingExt);
-        }
-        else {
+        } else {
             // 新增参数
             long currentTime = System.currentTimeMillis();
             ByaiSessionExt newExt = new ByaiSessionExt();
@@ -748,11 +748,11 @@ public class SessionService {
      * 复制模板会话消息
      *
      * @param templateSessionId 模板会话ID
-     * @param request 复制请求
+     * @param request           复制请求
      * @return MemoryResponse 复制结果
      */
     public TemplateMessagesCopyResponseDto copyTemplateMessages(Long templateSessionId,
-        TemplateMessagesCopyRequestDto request) {
+                                                                TemplateMessagesCopyRequestDto request) {
 
         logger.info("开始复制模板会话消息: templateSessionId={}, originalSessionId={}", templateSessionId,
             request.getOriginalSessionId());
@@ -772,8 +772,7 @@ public class SessionService {
             originalMessages = this.getMessagesByIds(request.getMessageIds());
             logger.info("按消息ID列表查询消息: originalSessionId={}, messageIds={}, 查询到消息数={}", request.getOriginalSessionId(),
                 request.getMessageIds(), originalMessages.size());
-        }
-        else {
+        } else {
             // 按会话ID查询所有消息
             originalMessages = this.getSessionMessagesFromES(request.getOriginalSessionId());
             logger.info("按会话ID查询所有消息: originalSessionId={}, 查询到消息数={}", request.getOriginalSessionId(),
@@ -807,8 +806,7 @@ public class SessionService {
                         .newMessageId(newMessageId).status("SUCCESS").build();
                     results.add(result);
                     successCount++;
-                }
-                catch (Exception e) {
+                } catch (Exception e) {
                     logger.error("构建消息数据失败: originalMessageId={}, error={}", originalMessage.get("messageId"),
                         e.getMessage(), e);
                     TemplateMessagesCopyResponseDto.MessageCopyResult result = TemplateMessagesCopyResponseDto.MessageCopyResult
@@ -827,8 +825,7 @@ public class SessionService {
                 }
             }
 
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             logger.error("批量复制消息失败: templateSessionId={}, error={}", templateSessionId, e.getMessage(), e);
             // 如果批量索引失败，将所有成功构建的消息标记为失败
             for (TemplateMessagesCopyResponseDto.MessageCopyResult result : results) {
@@ -871,7 +868,7 @@ public class SessionService {
      * 构建新的消息记录
      */
     private Map<String, Object> buildNewMessage(Map<String, Object> originalMessage, Long templateSessionId,
-        Map<String, TemplateMessagesCopyRequestDto.FileInfo> fileMappings) {
+                                                Map<String, TemplateMessagesCopyRequestDto.FileInfo> fileMappings) {
 
         Long newMessageId = sequenceService.nextVal(); // 生成新的消息ID
 
@@ -892,7 +889,7 @@ public class SessionService {
      * 替换消息中的文件信息
      */
     private void replaceFileInfoInMessage(Map<String, Object> message,
-        Map<String, TemplateMessagesCopyRequestDto.FileInfo> fileMappings) {
+                                          Map<String, TemplateMessagesCopyRequestDto.FileInfo> fileMappings) {
         // 如果文件映射为空，说明没有文件需要替换
         if (fileMappings == null || fileMappings.isEmpty()) {
             logger.debug("文件映射为空，跳过文件信息替换");
@@ -917,8 +914,7 @@ public class SessionService {
                         String updatedJson = JSON.toJSONString(relatedResources);
                         message.put("relatedResources", updatedJson);
                     }
-                }
-                catch (Exception e) {
+                } catch (Exception e) {
                     logger.warn("解析relatedResources JSON失败: {}", e.getMessage());
                 }
             }
@@ -929,7 +925,7 @@ public class SessionService {
      * 替换relatedResources中的文件信息
      */
     private boolean replaceFileInfoInRelatedResources(Map<String, Object> relatedResources,
-        Map<String, TemplateMessagesCopyRequestDto.FileInfo> fileMappings) {
+                                                      Map<String, TemplateMessagesCopyRequestDto.FileInfo> fileMappings) {
         boolean hasChanges = false;
 
         // 1. 替换顶层files数组中的文件信息
@@ -976,7 +972,7 @@ public class SessionService {
      * @return 是否有文件ID被替换
      */
     private boolean replaceFileIdsInArray(Map<String, Object> parentMap, String arrayKey,
-        Map<String, TemplateMessagesCopyRequestDto.FileInfo> fileMappings) {
+                                          Map<String, TemplateMessagesCopyRequestDto.FileInfo> fileMappings) {
         boolean hasChanges = false;
         Object fileIdsObj = parentMap.get(arrayKey);
         if (fileIdsObj instanceof List) {
@@ -1005,7 +1001,7 @@ public class SessionService {
      * @return 是否有文件信息被替换
      */
     private boolean replaceFilesInArray(Map<String, Object> parentMap, String arrayKey,
-        Map<String, TemplateMessagesCopyRequestDto.FileInfo> fileMappings) {
+                                        Map<String, TemplateMessagesCopyRequestDto.FileInfo> fileMappings) {
         boolean hasChanges = false;
         Object filesObj = parentMap.get(arrayKey);
         if (filesObj instanceof List) {
@@ -1042,7 +1038,7 @@ public class SessionService {
      * 构建空的复制结果
      */
     private TemplateMessagesCopyResponseDto buildEmptyCopyResult(Long templateSessionId, Long originalSessionId,
-        LocalDateTime startTime) {
+                                                                 LocalDateTime startTime) {
         return TemplateMessagesCopyResponseDto.builder().templateSessionId(templateSessionId)
             .originalSessionId(originalSessionId).totalCount(0).successCount(0).failedCount(0).startTime(startTime)
             .endTime(LocalDateTime.now()).results(Collections.emptyList()).build();
@@ -1087,11 +1083,11 @@ public class SessionService {
      * 复制模板会话成员
      *
      * @param templateSessionId 模板会话ID
-     * @param request 复制请求
+     * @param request           复制请求
      * @return MemoryResponse 复制结果
      */
     public TemplateMembersCopyResponseDto copyTemplateMembers(Long templateSessionId,
-        TemplateMembersCopyRequestDto request) {
+                                                              TemplateMembersCopyRequestDto request) {
 
         logger.info("开始复制模板会话成员: templateSessionId={}, originalSessionId={}", templateSessionId,
             request.getOriginalSessionId());
@@ -1134,8 +1130,7 @@ public class SessionService {
                         .status("SUCCESS").build();
                     results.add(result);
                     successCount++;
-                }
-                catch (Exception e) {
+                } catch (Exception e) {
                     logger.error("构建成员数据失败: originalMemberId={}, error={}", originalMember.getByaiSessionMemberId(),
                         e.getMessage(), e);
                     TemplateMembersCopyResponseDto.MemberCopyResult result = TemplateMembersCopyResponseDto.MemberCopyResult
@@ -1152,8 +1147,7 @@ public class SessionService {
                 logger.info("批量插入成员完成: templateSessionId={}, 插入数量={}", templateSessionId, batchResult);
             }
 
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             logger.error("批量复制成员失败: templateSessionId={}, error={}", templateSessionId, e.getMessage(), e);
             // 如果批量插入失败，将所有成功构建的成员标记为失败
             for (TemplateMembersCopyResponseDto.MemberCopyResult result : results) {
@@ -1185,7 +1179,7 @@ public class SessionService {
      * 构建空的成员复制结果
      */
     private TemplateMembersCopyResponseDto buildEmptyMemberCopyResult(Long templateSessionId, Long originalSessionId,
-        LocalDateTime startTime) {
+                                                                      LocalDateTime startTime) {
         return TemplateMembersCopyResponseDto.builder().templateSessionId(templateSessionId)
             .originalSessionId(originalSessionId).totalCount(0).successCount(0).failedCount(0).startTime(startTime)
             .endTime(LocalDateTime.now()).results(Collections.emptyList()).build();
@@ -1195,7 +1189,7 @@ public class SessionService {
      * 构建新的成员记录
      */
     private ByaiSessionMember buildNewMember(ByaiSessionMember originalMember, Long templateSessionId,
-        Map<Long, Long> sessionMemberIdMappings) {
+                                             Map<Long, Long> sessionMemberIdMappings) {
 
         // 确定新的用户ID
         Long newSessionMemberId = sessionMemberIdMappings.get(originalMember.getByaiSessionMemberId());
@@ -1268,13 +1262,14 @@ public class SessionService {
      *
      * @param sessionName 会话名称
      * @param sessionType 会话类型
-     * @param objectId 对象标识
-     * @param objectType 对象类型
-     * @param isDebug 是否调试
+     * @param objectId    对象标识
+     * @param objectType  对象类型
+     * @param isDebug     是否调试
+     * @param projectId   项目标识
      * @return ByaiSession
      */
     public ByaiSession createSession(String sessionName, String sessionType, Long objectId, String objectType,
-        Integer isDebug) {
+                                     Integer isDebug, Long projectId) {
         ByaiSession byaiSession = new ByaiSession();
         byaiSession.setSessionId(sequenceService.nextVal());
         byaiSession.setParentSessionId(-1L);
@@ -1286,6 +1281,7 @@ public class SessionService {
         byaiSession.setIsDebug(isDebug);
         byaiSession.setCreatorId(CurrentUserHolder.getCurrentUserId());
         byaiSession.setEnterpriseId(CurrentUserHolder.getEnterpriseId());
+        byaiSession.setProjectId(projectId);
         byaiSessionMapper.insert(byaiSession);
         return byaiSession;
     }

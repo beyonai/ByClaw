@@ -575,6 +575,13 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "必须串行执行",
             "精确 URL + `--date`",
             "Chrome 下载事件",
+            "optional “微信公众号 API” connector",
+            "WECHAT_APPID",
+            "WECHAT_APPSECRET",
+            "official token endpoint",
+            "stores no access token",
+            "40164",
+            "ByClaw backend egress IP",
         ):
             self.assertIn(phrase, weixin)
         for phrase in (
@@ -769,12 +776,26 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "Mini Program",
             "Official Account",
             "Success statuses are `draft saved`",
+            "## Create-draft final response",
+            "Whether browser fallback was triggered",
+            "Use the command's structured status as the authoritative evidence",
+            "prompt-injection assessments",
+            "uncertain write outcome",
+            "Do not create a browser fallback draft",
+            "`no final status`",
+            "If the failing stage cannot be determined, classify it as uncertain",
+            "scripts/weixin-login-gate.mjs",
+            "paused, non-terminal operation",
+            "process-level facts",
             "title substrings are not matches",
             "readable, non-empty regular-file validation",
             "oversized values return `ARGUMENT` before mode dispatch",
             "cover-confirmation failure returns `COMMAND_EXEC`",
         ):
             self.assertIn(phrase, weixin)
+
+        self.assertNotIn("Any API failure—including", weixin)
+        self.assertNotIn("their failed API attempt follows the automatic browser fallback", weixin)
 
     def test_candidate_article_requires_user_confirmation_before_download(self):
         weixin = (SKILLS_ROOT / "bycli" / "references" / "weixin.md").read_text(encoding="utf-8")

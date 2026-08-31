@@ -8,6 +8,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import java.util.List;
+
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
@@ -40,6 +42,38 @@ class AccessTokenVerifyInterceptorTest {
             "http://localhost:8086/byaiService/tool/installThirdPartySkill"));
         assertFalse(interceptor.checkUrlByRegex(
             "http://localhost:8086/system/session/currentUser"));
+    }
+
+    @Test
+    void allowsAnonymousWeixinOpenPlatformEventsWithContextPathAndTrailingSlash() {
+        AccessTokenVerifyInterceptor interceptor = new AccessTokenVerifyInterceptor();
+        for (String path : List.of(
+                "/byaiService/connector/authorization/callback/weixin-open-platform/events",
+                "/byaiService/connector/authorization/callback/weixin-open-platform/events/")) {
+            MockHttpServletRequest request = new MockHttpServletRequest("POST", path);
+            request.setContextPath("/byaiService");
+
+            assertTrue(interceptor.preHandle(request, new MockHttpServletResponse(), new Object()));
+        }
+    }
+
+    @Test
+    void doesNotAnonymouslyAllowLookalikeOrNonPostWeixinEventPaths() {
+        AccessTokenVerifyInterceptor interceptor = new AccessTokenVerifyInterceptor();
+        for (MockHttpServletRequest request : List.of(
+                request("POST", "/other/connector/authorization/callback/weixin-open-platform/events", ""),
+                request("POST", "/byaiService/connector/authorization/callback/weixin-open-platform/events/more",
+                    "/byaiService"),
+                request("GET", "/byaiService/connector/authorization/callback/weixin-open-platform/events",
+                    "/byaiService"))) {
+            assertFalse(interceptor.preHandle(request, new MockHttpServletResponse(), new Object()));
+        }
+    }
+
+    private MockHttpServletRequest request(String method, String uri, String contextPath) {
+        MockHttpServletRequest request = new MockHttpServletRequest(method, uri);
+        request.setContextPath(contextPath);
+        return request;
     }
 
     @Test

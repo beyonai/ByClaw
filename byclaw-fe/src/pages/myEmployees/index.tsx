@@ -31,6 +31,20 @@ type AuditRow = ResourceUseApplyAuditItem & {
   chatAvatar?: string;
 };
 
+const formatAuditStatus = (status: unknown, history: boolean) => {
+  const normalized = `${status ?? ''}`.trim().toUpperCase();
+  if (normalized === 'X' || normalized === 'A' || normalized === 'APPROVED' || normalized === 'PASS') {
+    return '审核通过';
+  }
+  if (normalized === 'R' || normalized === 'REJECTED' || normalized === 'REJECT') {
+    return '已驳回';
+  }
+  if (history) {
+    return `${status || '已处理'}`;
+  }
+  return '待审核';
+};
+
 const PAGE_SIZE = 20;
 
 const normalizeList = (value: any) => (value?.list || value?.data?.list || []).map((item: any) => agentHandler(item));
@@ -139,11 +153,18 @@ const MyEmployeesPage: React.FC = () => {
           }));
         })
       );
-      const sortedRows = rows.flat().sort((left, right) => {
-        const leftTime = left.applyTime ? new Date(left.applyTime).getTime() : 0;
-        const rightTime = right.applyTime ? new Date(right.applyTime).getTime() : 0;
-        return rightTime - leftTime;
-      });
+      const sortedRows = rows
+        .flat()
+        // 历史审核只展示已处理记录，兼容后端旧版本偶尔返回的待审核数据。
+        .filter(
+          (row) => auditFilter !== 'history' || !['P', 'PENDING', '待审核'].includes(`${row.applyStatus}`.toUpperCase())
+        )
+        .map((row) => ({ ...row, applyStatus: formatAuditStatus(row.applyStatus, auditFilter === 'history') }))
+        .sort((left, right) => {
+          const leftTime = left.applyTime ? new Date(left.applyTime).getTime() : 0;
+          const rightTime = right.applyTime ? new Date(right.applyTime).getTime() : 0;
+          return rightTime - leftTime;
+        });
       setAuditRows(sortedRows);
       if (auditFilter === 'pending') {
         setAuditPendingCount(sortedRows.length);
@@ -189,7 +210,7 @@ const MyEmployeesPage: React.FC = () => {
   };
 
   const handleChat = useCallback(
-    (employee: IAgentCache) => {
+    (employee: IAgentCache, question?: string) => {
       const targetId = employee.agentId || employee.id || employee.resourceId;
       if (!targetId) return;
       const normalizedEmployee = agentHandler(employee);
@@ -198,6 +219,7 @@ const MyEmployeesPage: React.FC = () => {
           keepSiderActiveKey: 'agent',
           selectedAgentId: `${targetId}`,
           selectedEmployee: normalizedEmployee,
+          initialQuestion: question,
         },
       });
     },
@@ -237,10 +259,16 @@ const MyEmployeesPage: React.FC = () => {
       dataIndex: 'applyTime',
       render: (value) => (value && dayjs(value).isValid() ? dayjs(value).format('YYYY-MM-DD HH:mm') : value || '-'),
     },
-    { title: '状态', dataIndex: 'applyStatus', render: (value) => <Tag color="processing">{value}</Tag> },
   ];
 
   if (auditFilter === 'pending') {
+    auditColumns.push({
+      title: '状态',
+      dataIndex: 'applyStatus',
+      render: (value) => (
+        <Tag color={value === '已驳回' ? 'error' : value === '审核通过' ? 'success' : 'processing'}>{value}</Tag>
+      ),
+    });
     auditColumns.push({
       title: '操作',
       render: (_: unknown, row: AuditRow) => (
@@ -277,7 +305,7 @@ const MyEmployeesPage: React.FC = () => {
       {
         key: 'audit',
         label: (
-          <Badge count={auditPendingCount} size="small" offset={[2, 2]}>
+          <Badge count={auditPendingCount} size="small" offset={[2, -2]}>
             <span className={styles.auditTabLabel}>审核中心</span>
           </Badge>
         ),
@@ -376,25 +404,27 @@ const MyEmployeesPage: React.FC = () => {
               onChange={(value) => setAuditFilter(value as AuditFilter)}
             />
           </div>
-          <Spin spinning={auditLoading}>
-            <Table<AuditRow>
-              rowKey={(row) => `${row.resourceId}-${row.privilegeGrantId}`}
-              dataSource={auditRows}
-              pagination={false}
-              sticky
-              columns={auditColumns}
-            />
+          <Spin spinning={auditLoading} wrapperClassName={styles.auditTableSpin}>
+            <div className={styles.auditTableWrap}>
+              <Table<AuditRow>
+                rowKey={(row) => `${row.resourceId}-${row.privilegeGrantId}`}
+                dataSource={auditRows}
+                pagination={false}
+                sticky
+                columns={auditColumns}
+              />
+            </div>
           </Spin>
         </div>
       )}
       <EmployeePreviewModal
         employee={preview}
         onClose={() => setPreview(null)}
-        onCreateTask={() => {
+        onCreateTask={(question?: string) => {
           if (!preview) return;
           const employee = preview;
           setPreview(null);
-          handleChat(employee);
+          handleChat(employee, question);
         }}
       />
     </div>

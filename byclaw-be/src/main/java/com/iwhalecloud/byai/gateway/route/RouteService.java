@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.gateway.route;
 
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -67,6 +69,7 @@ import lombok.extern.slf4j.Slf4j;
 public class RouteService {
 
     private static final int SANDBOX_STARTUP_WAIT_ROUNDS = 5;
+    private static final String SESSION_WORKSPACE_ROOT = "/by/.sessions";
 
     @Value("${file.storage.local.path}")
     private String fileStorageLocalPath;
@@ -174,7 +177,7 @@ public class RouteService {
 
         ctx.loginInfo = CurrentUserHolder.getLoginInfo();
 
-        String sessionId = String.valueOf(ctx.sessionId);
+        String sessionId = ctx.sessionId == null ? null : String.valueOf(ctx.sessionId);
         String userCode = (ctx.loginInfo != null && ctx.loginInfo.getUserCode() != null)
             ? ctx.loginInfo.getUserCode()
             : "";
@@ -654,8 +657,9 @@ public class RouteService {
 
         // 构建项目信息
         Long projectId = chatDto.getProjectId();
+        String workspace = resolveSandboxWorkspace(projectId, sessionId);
         if (projectId != null) {
-            JSONObject projectInfo = this.buildProjectInfo(projectId);
+            JSONObject projectInfo = this.buildProjectInfo(projectId, workspace);
             metadata.put("project_info", projectInfo);
         }
 
@@ -676,6 +680,7 @@ public class RouteService {
 
         String actionType = chatDto.getActionType() == null ? ActionType.ASK_AGENT : chatDto.getActionType();
         Map<String, Object> gatewayParams = params == null ? new HashMap<>() : new HashMap<>(params);
+        gatewayParams.put("cwd", workspace);
         if (ActionType.ASK_AGENT.equals(actionType)
             && StringUtils.isNotBlank(sessionId)
             && ctx != null
@@ -728,9 +733,10 @@ public class RouteService {
      * 项目信息放到龙虾里面
      *
      * @param projectId 项目标识
+     * @param workspace 沙箱内权威工作目录
      * @return JSONObject
      */
-    private JSONObject buildProjectInfo(Long projectId) {
+    private JSONObject buildProjectInfo(Long projectId, String workspace) {
 
         // 项目信息放到龙虾里面
         JSONObject projectInfo = new JSONObject();
@@ -744,16 +750,48 @@ public class RouteService {
         Project project = projectService == null ? null : projectService.findById(projectId);
         if (project == null) {
             projectInfo.put("project_id", projectId);
-            projectInfo.put("workspace", resolveSandboxProjectWorkspace(projectId));
+            projectInfo.put("workspace", workspace);
             return projectInfo;
         }
 
         projectInfo.put("project_id", project.getProjectId());
         projectInfo.put("project_name", project.getProjectName());
         projectInfo.put("project_resources", projectResourceService.listBoundResourceByProjectId(projectId));
-        projectInfo.put("workspace", resolveSandboxProjectWorkspace(project.getProjectId()));
+        projectInfo.put("workspace", workspace);
 
         return projectInfo;
+    }
+
+    /**
+     * 解析沙箱内会话工作目录。项目会话使用项目工作区，普通会话使用会话私有工作区。
+     */
+    private String resolveSandboxWorkspace(Long projectId, String sessionId) {
+        if (projectId != null) {
+            return resolveSandboxProjectWorkspace(projectId);
+        }
+        if (StringUtils.isBlank(sessionId)) {
+            throw new BdpRuntimeException("会话工作目录解析失败：缺少会话 ID");
+        }
+        ensureConversationWorkspaceExists(sessionId);
+        return SESSION_WORKSPACE_ROOT + "/" + sessionId;
+    }
+
+    private void ensureConversationWorkspaceExists(String sessionId) {
+        Path conversationWorkspace = Paths.get(fileStorageLocalPath, resolveCurrentUserBucket(),
+                "by", ".sessions", sessionId)
+            .toAbsolutePath()
+            .normalize();
+        try {
+            if (Files.exists(conversationWorkspace)) {
+                if (!Files.isDirectory(conversationWorkspace)) {
+                    throw new BdpRuntimeException("会话工作目录初始化失败：目标路径不是目录 " + conversationWorkspace);
+                }
+                return;
+            }
+            Files.createDirectories(conversationWorkspace);
+        } catch (IOException | SecurityException e) {
+            throw new BdpRuntimeException("会话工作目录初始化失败：" + conversationWorkspace, e);
+        }
     }
 
     /**

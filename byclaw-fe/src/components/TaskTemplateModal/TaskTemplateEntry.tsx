@@ -19,7 +19,7 @@ interface Props {
   projectId?: number;
   sessionId?: string;
   onApply: (prompt: string) => void;
-  onProjectChange?: (project: { projectId: string; projectName: string }) => void;
+  onProjectChange?: (project: { projectId: string; projectName: string; cloudResourceId?: string | number }) => void;
 }
 
 type RecommendedQuestionTemplate = {
@@ -29,7 +29,7 @@ type RecommendedQuestionTemplate = {
   prompt: string;
 };
 
-type ProjectOption = Pick<ProjectSpace, 'projectId' | 'projectName'>;
+type ProjectOption = Pick<ProjectSpace, 'projectId' | 'projectName' | 'cloudResourceId'>;
 
 const normalizeProjectType = (projectType?: ProjectType): Exclude<ProjectType, 'default'> => {
   // 默认项目按普通项目处理；会话没有项目归属时 useChatResourceProject 也会解析到默认项目。
@@ -96,6 +96,7 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
       onProjectChange?.({
         projectId: `${selectedProject.projectId}`,
         projectName: selectedProject.projectName,
+        cloudResourceId: selectedProject.cloudResourceId,
       });
     }
   }, [onProjectChange, projectOptions, selectedProjectValue, sessionId]);
@@ -246,6 +247,7 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
       onProjectChange?.({
         projectId: `${createdProject.projectId}`,
         projectName: createdProject.projectName,
+        cloudResourceId: createdProject.cloudResourceId,
       });
       EventEmitter.emit('projectSpace-list-refresh', { projectId: savedProjectId });
       message.success(intl.formatMessage({ id: 'projectSpace.message.createSuccess' }));
@@ -269,6 +271,7 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
         onProjectChange?.({
           projectId: createdProjectId,
           projectName,
+          cloudResourceId: createdProject?.cloudResourceId,
         });
       }
     },
@@ -317,6 +320,7 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
                 onProjectChange?.({
                   projectId: `${selectedProject.projectId}`,
                   projectName: selectedProject.projectName,
+                  cloudResourceId: selectedProject.cloudResourceId,
                 });
               }
             }}

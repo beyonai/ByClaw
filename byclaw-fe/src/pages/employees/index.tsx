@@ -17,7 +17,6 @@ import { queryResourceOperationPermissions } from '@/pages/manager/service/resou
 import { IAgentCache } from '@/typescript/agent';
 import { getAgentChatAvatar, agentHandler, isSandboxAgent } from '@/utils/agent';
 import { AgentInfo } from '@/pages/digitalEmployees/components/AllDigitalEmployees/components/AvatarCardItem';
-// import useAppStore from '@/models/common/useAppStore';
 import { getAllDigitalEmployeesV2 } from '@/service/digitalEmployees';
 import { getStoredProjectScopeId } from '@/pages/projectSpace/constants';
 
@@ -25,8 +24,6 @@ import RenderRightTop from '../digitalEmployees/components/AllDigitalEmployees/R
 import RenderRightBottom from '../digitalEmployees/components/AllDigitalEmployees/RenderRightBottom';
 import AgentIframe from './components/AgentIframe';
 import { canShowEmployeeChat, type EmployeeUsePermission } from './chatPermission';
-// import ScheduleTaskModal from './components/ScheduleTaskModal';
-// import ScheduleTaskList from './components/ScheduleTaskList';
 
 import styles from './index.module.less';
 
@@ -47,9 +44,6 @@ const getStoredProjectChatContext = (): ProjectChatContext => {
 };
 
 const Employees = () => {
-  // const { ENV } = useAppStore();
-  // const isScheduleTaskEnabled = !ENV?.includes?.('scheduleTask');
-
   const intl = useIntl();
   const dispatch = useDispatch();
   const location = useLocation();
@@ -70,18 +64,17 @@ const Employees = () => {
   const [coreCompetencies, setCoreCompetencies] = useState<any[]>([]);
   const [employeeUsePermission, setEmployeeUsePermission] = useState<EmployeeUsePermission | null>(null);
 
-  // const [scheduleTaskVisible, setScheduleTaskVisible] = useState(false);
-  // const [editTask, setEditTask] = useState<any>(null);
-  // const [taskListRefreshKey, setTaskListRefreshKey] = useState(0);
-
   const searchParamAgentId = searchParams.get('agentId') || '';
   const routeState = location.state as {
     selectedAgentId?: string;
     selectedEmployee?: IAgentCache;
     keepSiderActiveKey?: string;
+    initialQuestion?: string;
   } | null;
   const routeStateAgentId = `${routeState?.selectedAgentId || ''}`;
   const routeStateEmployee = routeState?.selectedEmployee;
+  const initialQuestion = `${routeState?.initialQuestion || ''}`.trim();
+  const initialQuestionSentRef = useRef(false);
   const previousRouteSelectionRef = useRef('');
   const staleEmployeeSessionIdRef = useRef('');
   const fileUploadSessionIdRef = useRef('');
@@ -111,28 +104,6 @@ const Employees = () => {
   const employeeTab = searchParams.get('tab');
   const employeeResourceId = `${detailAgentInfo?.resourceId || detailAgentInfo?.id || ''}`;
 
-  // const handleScheduleTaskOk = (values: any) => {
-  //   // 创建/更新成功后刷新任务列表
-  //   console.log('定时任务操作成功:', values);
-  //   setTaskListRefreshKey((prev) => prev + 1);
-  //   setEditTask(null); // 清空编辑任务
-  // };
-
-  // const handleRefreshTaskList = () => {
-  //   // 刷新任务列表的回调
-  //   setTaskListRefreshKey((prev) => prev + 1);
-  // };
-
-  // const handleEditTask = (task: any) => {
-  //   setEditTask(task);
-  //   setScheduleTaskVisible(true);
-  // };
-
-  // const handleAddTask = () => {
-  //   setEditTask(null); // 清空编辑任务
-  //   setScheduleTaskVisible(true);
-  // };
-
   const { descText, sampleQuestionList, prologueText } = useMemo(() => {
     const payload = {
       descText: appInfo?.resourceDesc,
@@ -159,6 +130,20 @@ const Employees = () => {
   const canChat = useMemo(() => {
     return canShowEmployeeChat(employeeTab, employeeResourceId, employeeUsePermission);
   }, [employeeResourceId, employeeTab, employeeUsePermission]);
+
+  useEffect(() => {
+    initialQuestionSentRef.current = false;
+  }, [initialQuestion, myAgentId]);
+
+  useEffect(() => {
+    if (!initialQuestion || !canChat || initialQuestionSentRef.current || !detailAgentInfo) return;
+    initialQuestionSentRef.current = true;
+    // 等输入组件挂载后回填推荐问题，避免路由切换时事件早于 QueryInput 监听器注册。
+    const timer = window.setTimeout(() => {
+      EventEmitter.emit('queryInput-set-value', initialQuestion);
+    }, 200);
+    return () => window.clearTimeout(timer);
+  }, [EventEmitter, canChat, detailAgentInfo, initialQuestion]);
 
   const disableActionList = React.useMemo(() => {
     const list: ('delete' | 'apply' | 'unapply')[] = [];
@@ -387,15 +372,6 @@ const Employees = () => {
                   history.back();
                 }}
               />
-              {/* {isScheduleTaskEnabled && canChat && (
-                <ScheduleTaskList
-                  agentInfo={agentInfo as IAgentCache}
-                  onAddTask={handleAddTask}
-                  onEditTask={handleEditTask}
-                  onRefresh={handleRefreshTaskList}
-                  refreshKey={taskListRefreshKey}
-                />
-              )} */}
             </div>
           )}
           {!isBottom && (
@@ -488,18 +464,6 @@ const Employees = () => {
           )}
         </div>
       </div>
-
-      {/* 添加/编辑定时任务弹窗 */}
-      {/* <ScheduleTaskModal
-        open={scheduleTaskVisible}
-        onClose={() => {
-          setScheduleTaskVisible(false);
-          setEditTask(null); // 关闭时清空编辑任务
-        }}
-        agentInfo={agentInfo as IAgentCache}
-        onOk={handleScheduleTaskOk}
-        editTask={editTask}
-      /> */}
     </>
   );
 };
