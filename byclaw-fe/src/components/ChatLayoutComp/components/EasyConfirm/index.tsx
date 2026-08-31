@@ -26,6 +26,7 @@ import {
   isPendingEasyConfirmListItem,
 } from '@/components/MessagesComp/easyConfirm';
 import type { EasyConfirmDescriptor } from '@/components/MessagesComp/easyConfirm';
+import { notifyEasyConfirmInteraction } from '@/components/MessagesComp/withEasyConfirm';
 
 const inputDraftMap = new Map<string, DefaultValueSchema>();
 
@@ -117,6 +118,10 @@ const EasyConfirm = (props: IProps) => {
     });
     return [...itemMap.values()];
   }, [eventList, getUUId, lastMsg, messageItems]);
+  const notificationStateRef = useRef({
+    sessionId,
+    itemKeys: new Set(list.map(getUUId).filter(Boolean)),
+  });
   const compProps = useMemo(() => list[page - 1], [page, list]);
   const Comp = useMemo(() => {
     const contentType = compProps?.messageListItem?.contentType || compProps?.thinkListItem?.contentType;
@@ -204,6 +209,30 @@ const EasyConfirm = (props: IProps) => {
   useEffect(() => {
     setEventList([]);
   }, [sessionId]);
+
+  useEffect(() => {
+    const currentItemKeys = new Set(list.map(getUUId).filter(Boolean));
+    const notificationState = notificationStateRef.current;
+
+    // 切换会话时把已有待处理项作为基线，避免为历史消息发送通知。
+    if (notificationState.sessionId !== sessionId) {
+      notificationStateRef.current = { sessionId, itemKeys: currentItemKeys };
+      return;
+    }
+
+    list.forEach((item) => {
+      const itemKey = getUUId(item);
+      if (!itemKey || notificationState.itemKeys.has(itemKey)) return;
+
+      void notifyEasyConfirmInteraction({
+        title: formatMessage({ id: 'easyConfirm.notification.title' }),
+        body: formatMessage({ id: 'easyConfirm.notification.body' }),
+        permissionDenied: formatMessage({ id: 'easyConfirm.notification.permissionDenied' }),
+        tag: `easy-confirm-${sessionId}-${itemKey}`,
+      });
+    });
+    notificationStateRef.current = { sessionId, itemKeys: currentItemKeys };
+  }, [formatMessage, getUUId, list, sessionId]);
 
   useEffect(() => {
     if (page > list.length) {

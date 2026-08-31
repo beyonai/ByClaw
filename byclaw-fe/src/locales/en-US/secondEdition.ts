@@ -357,4 +357,8 @@ export default {
     'You do not have management permission for knowledge bases under the current digital employee.',
   'context.used.format': '{percent}% context used, {usedTokens} / {contextTokens}',
   'easyConfirm.pagination.title': 'Please select the operation step',
+  'easyConfirm.notification.title': 'Task requires your attention',
+  'easyConfirm.notification.body': 'A new task requires your confirmation or input. Return to the page to continue.',
+  'easyConfirm.notification.permissionDenied':
+    'Browser notifications are turned off. To avoid missing tasks that require your confirmation or input, allow notifications in your browser site settings.',
 };
