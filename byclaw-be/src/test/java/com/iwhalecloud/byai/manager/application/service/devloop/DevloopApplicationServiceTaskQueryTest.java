@@ -168,6 +168,24 @@ class DevloopApplicationServiceTaskQueryTest {
 
     @Test
     @SuppressWarnings({ "rawtypes", "unchecked" })
+    void listsOnlyRootSessionsAndExcludesChildTasks() {
+        Page<ByaiSession> page = new Page<>(1, 20);
+        page.setRecords(Collections.emptyList());
+        page.setTotal(0);
+        when(byaiSessionMapper.selectPage(any(Page.class), any())).thenReturn(page);
+
+        DevloopTaskListQueryDto query = new DevloopTaskListQueryDto();
+        query.setProjectId(203L);
+
+        service.listTasks(query);
+
+        ArgumentCaptor<LambdaQueryWrapper<ByaiSession>> captor = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
+        verify(byaiSessionMapper).selectPage(any(Page.class), captor.capture());
+        assertThat(captor.getValue().getSqlSegment()).contains("parent_session_id IS NULL");
+    }
+
+    @Test
+    @SuppressWarnings({ "rawtypes", "unchecked" })
     void returnsSessionBoundAgentSoInputCanMentionEmployee() {
         ByaiSession session = new ByaiSession();
         session.setSessionId(321L);
