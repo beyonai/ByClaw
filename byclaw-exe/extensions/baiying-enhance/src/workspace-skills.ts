@@ -1,5 +1,4 @@
 import { promises as fs, watch, type FSWatcher } from "node:fs";
-import { createHash } from "node:crypto";
 import path from "node:path";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/compat";
 import type { AgentListEntry } from "./types.js";
@@ -9,11 +8,6 @@ import { resolveStateDir } from "./workspace-paths.js";
 const SKILLS_DIR_NAME = "skills";
 const PLUGIN_SKILLS_DIR_NAME = "plugin-skills";
 const SKILL_DOC_FILE_NAME = "SKILL.md";
-const MANAGED_BUNDLED_SKILL_FIELD = "byclaw_managed";
-const MANAGED_BUNDLED_SKILL_DIGEST_FILE = ".byclaw-managed-source.sha256";
-// 平台级能力对所有百应数字员工可用，不要求每个员工在资源关系中重复绑定。
-const CORE_BUNDLED_SKILLS = ["project-context", "notice", "project-cloud-knowledge"];
-const bundledSkillDigestCache = new Map<string, Promise<string>>();
 
 function normalizeSkillName(raw: unknown): string {
   return typeof raw === "string" ? raw.trim() : "";
@@ -71,25 +65,6 @@ function parseSkillFrontmatterName(content: string): string | undefined {
     return value || undefined;
   }
   return undefined;
-}
-
-function isManagedBundledSkill(content: string): boolean {
-  const text = content.replace(/^\uFEFF/, "");
-  if (!text.startsWith("---")) {
-    return false;
-  }
-  const lines = text.split(/\r?\n/);
-  for (let i = 1; i < lines.length; i += 1) {
-    const line = lines[i]?.trim();
-    if (line === "---" || line === "...") {
-      break;
-    }
-    const match = new RegExp(`^${MANAGED_BUNDLED_SKILL_FIELD}\\s*:\\s*(.*)$`).exec(line ?? "");
-    if (match) {
-      return unquoteYamlScalar(match[1] ?? "").toLowerCase() === "true";
-    }
-  }
-  return false;
 }
 
 async function readSkillName(skillsDir: string, dirName: string): Promise<string> {
@@ -207,133 +182,6 @@ async function scanWorkspaceSkillNamesByPaths(
   return mergeSkillNames(names);
 }
 
-function resolveBundledSkillsDir(override?: string): string {
-  return override?.trim() || process.env.OPENCLAW_BUNDLED_SKILLS_DIR?.trim() || "/app/skills";
-}
-
-async function digestBundledSkill(sourceDir: string): Promise<string> {
-  const resolvedSourceDir = path.resolve(sourceDir);
-  const cached = bundledSkillDigestCache.get(resolvedSourceDir);
-  if (cached) {
-    return cached;
-  }
-  const pending = (async () => {
-    const hash = createHash("sha256");
-    const walk = async (currentDir: string, relativeDir: string): Promise<void> => {
-      const entries = await fs.readdir(currentDir, { withFileTypes: true });
-      entries.sort((a, b) => a.name.localeCompare(b.name));
-      for (const entry of entries) {
-        const relativePath = path.posix.join(relativeDir, entry.name);
-        const absolutePath = path.join(currentDir, entry.name);
-        if (entry.isDirectory()) {
-          hash.update(`directory:${relativePath}\0`);
-          await walk(absolutePath, relativePath);
-        } else if (entry.isFile()) {
-          hash.update(`file:${relativePath}\0`);
-          hash.update(await fs.readFile(absolutePath));
-        } else if (entry.isSymbolicLink()) {
-          hash.update(`symlink:${relativePath}\0${await fs.readlink(absolutePath)}\0`);
-        }
-      }
-    };
-    await walk(resolvedSourceDir, "");
-    return hash.digest("hex");
-  })();
-  bundledSkillDigestCache.set(resolvedSourceDir, pending);
-  return pending;
-}
-
-async function removeEntriesAbsentFromBundledSource(sourceDir: string, targetDir: string): Promise<void> {
-  let targetEntries: Awaited<ReturnType<typeof fs.readdir>>;
-  try {
-    targetEntries = await fs.readdir(targetDir, { withFileTypes: true });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
-      return;
-    }
-    throw error;
-  }
-  for (const targetEntry of targetEntries) {
-    if (targetEntry.name === MANAGED_BUNDLED_SKILL_DIGEST_FILE) {
-      continue;
-    }
-    const sourcePath = path.join(sourceDir, targetEntry.name);
-    const targetPath = path.join(targetDir, targetEntry.name);
-    let sourceStat: Awaited<ReturnType<typeof fs.lstat>>;
-    try {
-      sourceStat = await fs.lstat(sourcePath);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
-        await fs.rm(targetPath, { recursive: true, force: true });
-        continue;
-      }
-      throw error;
-    }
-    const matchingType =
-      (sourceStat.isDirectory() && targetEntry.isDirectory()) ||
-      (sourceStat.isFile() && targetEntry.isFile()) ||
-      (sourceStat.isSymbolicLink() && targetEntry.isSymbolicLink());
-    if (!matchingType) {
-      await fs.rm(targetPath, { recursive: true, force: true });
-      continue;
-    }
-    if (sourceStat.isDirectory()) {
-      await removeEntriesAbsentFromBundledSource(sourcePath, targetPath);
-    }
-  }
-}
-
-async function refreshManagedBundledSkill(
-  workspaceDir: string,
-  skillPath: unknown,
-  bundledSkillsDir: string,
-): Promise<void> {
-  const dirName = skillDirNameFromPath(skillPath);
-  if (!dirName) {
-    return;
-  }
-  const sourceDir = path.join(bundledSkillsDir, dirName);
-  const sourceSkillFile = path.join(sourceDir, SKILL_DOC_FILE_NAME);
-  let sourceContent: string;
-  try {
-    sourceContent = await fs.readFile(sourceSkillFile, "utf8");
-  } catch {
-    return;
-  }
-  if (!isManagedBundledSkill(sourceContent)) {
-    return;
-  }
-
-  const targetDir = path.join(workspaceDir, SKILLS_DIR_NAME, dirName);
-  try {
-    if ((await fs.lstat(targetDir)).isSymbolicLink()) {
-      return;
-    }
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
-      throw error;
-    }
-  }
-  if (path.resolve(sourceDir) === path.resolve(targetDir)) {
-    return;
-  }
-  const sourceDigest = await digestBundledSkill(sourceDir);
-  try {
-    const installedDigest = await fs.readFile(path.join(targetDir, MANAGED_BUNDLED_SKILL_DIGEST_FILE), "utf8");
-    if (installedDigest.trim() === sourceDigest) {
-      return;
-    }
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
-      throw error;
-    }
-  }
-  await fs.mkdir(path.dirname(targetDir), { recursive: true });
-  await removeEntriesAbsentFromBundledSource(sourceDir, targetDir);
-  await fs.cp(sourceDir, targetDir, { recursive: true, force: true });
-  await fs.writeFile(path.join(targetDir, MANAGED_BUNDLED_SKILL_DIGEST_FILE), `${sourceDigest}\n`, "utf8");
-}
-
 async function scanSkillRoot(skillsDir: string): Promise<ScannedSkill[]> {
   let entries: Awaited<ReturnType<typeof fs.readdir>>;
   try {
@@ -415,7 +263,6 @@ export async function mergeWorkspaceSkillsIntoManagedAgents<T extends AgentWithS
   managed: T[];
   includeMainShared: boolean;
   mainParentAgentId: string;
-  bundledSkillsDir?: string;
 }): Promise<T[]> {
   const sharedSkills = params.includeMainShared
     ? await scanWorkspaceSkillNames(resolveAgentWorkspaceDir(params.api, params.mainParentAgentId))
@@ -425,19 +272,10 @@ export async function mergeWorkspaceSkillsIntoManagedAgents<T extends AgentWithS
   const out: T[] = [];
   for (const agent of params.managed) {
     const workspaceDir = resolveAgentWorkspaceDir(params.api, agent.agentId);
-    const bundledSkillsDir = resolveBundledSkillsDir(params.bundledSkillsDir);
-    const managedSkillCandidates = mergeSkillNames(
-      CORE_BUNDLED_SKILLS,
-      agent.listEntry.skills ?? [],
-      (agent.extraSkillPaths ?? []).map(skillDirNameFromPath),
-    );
-    for (const skillName of managedSkillCandidates) {
-      await refreshManagedBundledSkill(workspaceDir, skillName, bundledSkillsDir);
-    }
     const baseSkills = resolveSkillNamesFromPluginRoot(agent.listEntry.skills ?? [], pluginSkills);
     const extraSkills = await scanWorkspaceSkillNamesByPaths(workspaceDir, agent.extraSkillPaths);
     const agentSkills = await scanWorkspaceSkillNames(workspaceDir);
-    const skills = mergeSkillNames(CORE_BUNDLED_SKILLS, baseSkills, extraSkills, agentSkills, sharedSkills);
+    const skills = mergeSkillNames(baseSkills, extraSkills, agentSkills, sharedSkills);
     out.push({
       ...agent,
       listEntry: {
