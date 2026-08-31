@@ -7,6 +7,7 @@ import {
   DelegationService,
   DelegationSuspendedError,
   InMemoryDelegationRepository,
+  InMemoryExecutionCredentialRepository,
   InMemoryRunExecutionQueue,
   InMemoryRunEventStore,
   InMemoryRunRepository,
@@ -1144,6 +1145,217 @@ describe("RunService", () => {
       ),
     ).toBe(false);
     await service.dispose();
+  });
+
+  it("preserves complete ephemeral metadata across sequential callback delegations", async () => {
+    const sessions = new InMemorySessionRepository();
+    const runs = new InMemoryRunRepository(sessions);
+    const delegations = new InMemoryDelegationRepository();
+    const events = new InMemoryRunEventStore();
+    const registry = new ConnectorRegistry();
+    const dispatchedMetadata: Array<Record<string, unknown>> = [];
+    registry.register({
+      ...fakeCallbackConnector(),
+      async start(request) {
+        dispatchedMetadata.push(structuredClone(request.metadata));
+        return {
+          completionMode: "callback",
+          ref: {
+            connectorId: "fake",
+            executionId: `external-${dispatchedMetadata.length}`,
+          },
+          cancel: async () => undefined,
+        };
+      },
+    });
+    let leaderRunCount = 0;
+    const leaders: LeaderSessionFactory = {
+      async create() {
+        return {
+          contextRevision: 0,
+          async run(input) {
+            leaderRunCount += 1;
+            try {
+              await input.delegate({
+                agentId: agent.id,
+                task: leaderRunCount === 1 ? "first task" : "second task",
+              });
+            } catch (error) {
+              if (!(error instanceof DelegationSuspendedError)) {
+                throw error;
+              }
+              throw new LeaderRunSuspendedError(error.delegationId);
+            }
+            throw new Error("expected delegation suspension");
+          },
+          checkpoint: () => undefined,
+          markCommitted: () => undefined,
+          abort: async () => undefined,
+          dispose: () => undefined,
+        };
+      },
+      async health() {
+        return { healthy: true };
+      },
+    };
+    const service = new RunService(
+      sessions,
+      runs,
+      delegations,
+      events,
+      new DelegationService(registry, delegations, events, 1_000),
+      leaders,
+      Date.now,
+      undefined,
+      {
+        executionQueue: new InMemoryRunExecutionQueue(),
+        credentials: new InMemoryExecutionCredentialRepository(),
+        queuePollMs: 5,
+      },
+    );
+    service.start();
+    const run = await service.createSessionRun({
+      owner: { userCode: "user-1" },
+      message: "delegate twice",
+      agentList: [agent],
+      metadata: {
+        "Beyond-Token": "token-1",
+        "System-Code": "system-1",
+        channelExtension: { source: "byclaw-be" },
+      },
+      executionCredential: { secret: "token-1" },
+    });
+
+    await waitFor(() => Promise.resolve(dispatchedMetadata.length === 1));
+    const [firstDelegation] = await delegations.listByRun(run.id);
+    await service.resumeDelegation({
+      delegationId: firstDelegation!.id,
+      status: "COMPLETED",
+      finalAnswer: "first done",
+    });
+    await waitFor(() => Promise.resolve(dispatchedMetadata.length === 2));
+
+    expect(dispatchedMetadata).toEqual([
+      {
+        "Beyond-Token": "token-1",
+        "System-Code": "system-1",
+        channelExtension: { source: "byclaw-be" },
+      },
+      {
+        "Beyond-Token": "token-1",
+        "System-Code": "system-1",
+        channelExtension: { source: "byclaw-be" },
+      },
+    ]);
+    await service.cancelRun(run.id, "test complete");
+    await service.dispose();
+  });
+
+  it("restores complete metadata from credentials when another instance claims the Run", async () => {
+    const sessions = new InMemorySessionRepository();
+    const runs = new InMemoryRunRepository(sessions);
+    const delegations = new InMemoryDelegationRepository();
+    const events = new InMemoryRunEventStore();
+    const queue = new InMemoryRunExecutionQueue();
+    const credentials = new InMemoryExecutionCredentialRepository();
+    const registry = new ConnectorRegistry();
+    const dispatchedMetadata: Array<Record<string, unknown>> = [];
+    registry.register({
+      ...fakeCallbackConnector(),
+      async start(request) {
+        dispatchedMetadata.push(structuredClone(request.metadata));
+        return {
+          completionMode: "callback",
+          ref: { connectorId: "fake", executionId: "external-takeover" },
+          cancel: async () => undefined,
+        };
+      },
+    });
+    const delegationService = new DelegationService(registry, delegations, events, 1_000);
+    const idleLeaders: LeaderSessionFactory = {
+      create: vi.fn(),
+      health: vi.fn(async () => ({ healthy: true })),
+    };
+    const receivingService = new RunService(
+      sessions,
+      runs,
+      delegations,
+      events,
+      delegationService,
+      idleLeaders,
+      Date.now,
+      undefined,
+      {
+        executionQueue: queue,
+        credentials,
+        instanceId: "receiving-instance",
+        maxConcurrentRuns: 0,
+      },
+    );
+    const run = await receivingService.createSessionRun({
+      owner: { userCode: "user-1" },
+      message: "delegate after takeover",
+      agentList: [agent],
+      metadata: {
+        "Beyond-Token": "token-1",
+        "System-Code": "system-1",
+        channelExtension: { source: "byclaw-be" },
+      },
+      executionCredential: { secret: "token-1" },
+    });
+
+    const claimingLeaders: LeaderSessionFactory = {
+      async create() {
+        return {
+          contextRevision: 0,
+          async run(input) {
+            try {
+              await input.delegate({ agentId: agent.id, task: "claimed task" });
+            } catch (error) {
+              if (!(error instanceof DelegationSuspendedError)) {
+                throw error;
+              }
+              throw new LeaderRunSuspendedError(error.delegationId);
+            }
+            throw new Error("expected delegation suspension");
+          },
+          checkpoint: () => undefined,
+          markCommitted: () => undefined,
+          abort: async () => undefined,
+          dispose: () => undefined,
+        };
+      },
+      async health() {
+        return { healthy: true };
+      },
+    };
+    const claimingService = new RunService(
+      sessions,
+      runs,
+      delegations,
+      events,
+      delegationService,
+      claimingLeaders,
+      Date.now,
+      undefined,
+      {
+        executionQueue: queue,
+        credentials,
+        instanceId: "claiming-instance",
+        queuePollMs: 5,
+      },
+    );
+    claimingService.start();
+
+    await waitFor(() => Promise.resolve(dispatchedMetadata.length === 1));
+    expect(dispatchedMetadata[0]).toEqual({
+      "Beyond-Token": "token-1",
+      "System-Code": "system-1",
+      channelExtension: { source: "byclaw-be" },
+    });
+
+    await claimingService.cancelRun(run.id, "test complete");
+    await Promise.all([receivingService.dispose(), claimingService.dispose()]);
   });
 
   it("requeues a WAITING_AGENT Run only after its persisted callback arrives", async () => {
