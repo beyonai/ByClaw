@@ -1272,7 +1272,6 @@ public class SessionService {
                                      Integer isDebug, Long projectId) {
         ByaiSession byaiSession = new ByaiSession();
         byaiSession.setSessionId(sequenceService.nextVal());
-        byaiSession.setParentSessionId(-1L);
         byaiSession.setCreateTime(new Date());
         byaiSession.setSessionName(sessionName);
         byaiSession.setSessionType(sessionType);
