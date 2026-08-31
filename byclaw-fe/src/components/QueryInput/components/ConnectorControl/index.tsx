@@ -224,6 +224,7 @@ const hasValidCredentialForm = (
   if (credentialForm.fields.length < 1 || credentialForm.fields.length > 8) return false;
   if (
     credentialForm.helpText !== undefined &&
+    credentialForm.helpText !== null &&
     (typeof credentialForm.helpText !== 'string' ||
       credentialForm.helpText.trim().length === 0 ||
       credentialForm.helpText.trim().length > 500)
@@ -232,6 +233,7 @@ const hasValidCredentialForm = (
   }
   if (
     credentialForm.helpLinkText !== undefined &&
+    credentialForm.helpLinkText !== null &&
     (typeof credentialForm.helpLinkText !== 'string' ||
       credentialForm.helpLinkText.trim().length === 0 ||
       credentialForm.helpLinkText.trim().length > 100)

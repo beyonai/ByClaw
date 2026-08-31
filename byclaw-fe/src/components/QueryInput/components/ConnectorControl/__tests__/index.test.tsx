@@ -2545,7 +2545,7 @@ describe('ConnectorControl authorization states', () => {
     Modal.destroyAll();
   });
 
-  it('refreshes malformed IMA metadata and opens the credential form', async () => {
+  it('opens the credential form when optional IMA help metadata is null', async () => {
     const malformedIma = {
       connectorId: 10,
       connectorCode: 'ima-openapi',
@@ -2563,6 +2563,8 @@ describe('ConnectorControl authorization states', () => {
       ...malformedIma,
       credentialForm: {
         helpUrl: 'https://ima.qq.com/openapi',
+        helpText: null,
+        helpLinkText: null,
         fields: [
           { key: 'clientId', label: 'Client ID', inputType: 'text' as const, maxLength: 256 },
           { key: 'apiKey', label: 'API Key', inputType: 'password' as const, maxLength: 2048 },
