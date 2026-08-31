@@ -1,6 +1,6 @@
 import React, { useMemo, type Key } from 'react';
-import { Dropdown, Empty, Spin, Tooltip, Tree, type MenuProps } from 'antd';
-import { EllipsisOutlined } from '@ant-design/icons';
+import { Button, Dropdown, Empty, Popover, Spin, Tree, message, type MenuProps } from 'antd';
+import { CopyOutlined, EllipsisOutlined } from '@ant-design/icons';
 import AntdIcon from '@/components/AntdIcon';
 import employeeStyles from '@/layout/sider/components/EmployeeList/index.module.less';
 import commonStyles from '../../Knowledge/components/common.module.less';
@@ -15,6 +15,8 @@ import {
   sortFileBrowserItems,
 } from '../utils';
 import styles from '../index.module.less';
+import { copyTextToClipboard } from '@/utils/copy';
+import { useIntl } from '@umijs/max';
 
 interface FileTreeListProps {
   items: FileBrowserItem[];
@@ -35,6 +37,40 @@ interface FileTreeListProps {
   getActionItems: (item: FileBrowserItem) => MenuProps['items'];
   onAction: (key: Key, item: FileBrowserItem) => void;
 }
+
+export const FilePathTooltip: React.FC<{ item: FileBrowserItem; children: React.ReactNode }> = ({ item, children }) => {
+  const intl = useIntl();
+  const handleCopy = (event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    void copyTextToClipboard(item.path, () => message.success(intl.formatMessage({ id: 'fileBrowser.copy.success' })));
+  };
+  return (
+    <Popover
+      placement="right"
+      trigger="hover"
+      overlayClassName={styles.filePathTooltipOverlay}
+      content={
+        <div className={styles.filePathTooltip}>
+          <div className={styles.filePathTooltipName}>{item.name}</div>
+          <div className={styles.filePathTooltipPathRow}>
+            <span className={styles.filePathTooltipPath}>{item.path}</span>
+            <Button
+              type="text"
+              size="small"
+              icon={<CopyOutlined />}
+              className={styles.filePathTooltipCopy}
+              aria-label={intl.formatMessage({ id: 'common.copy' })}
+              onClick={handleCopy}
+            />
+          </div>
+        </div>
+      }
+    >
+      {children}
+    </Popover>
+  );
+};
 
 function toFileTreeData(
   list: FileBrowserItem[],
@@ -105,11 +141,11 @@ const FileTreeList: React.FC<FileTreeListProps> = ({
                   ? 'a-Folder-openwenjianjia-kai'
                   : getIconType(item.name, isDirectory(item));
                 return (
-                  <Tooltip title={item.name} placement="right">
+                  <FilePathTooltip item={item}>
                     <span>
                       <AntdIcon type={`icon-${iconType}`} />
                     </span>
-                  </Tooltip>
+                  </FilePathTooltip>
                 );
               }}
               className={`${commonStyles.tree} ${styles.fileTree}`}
@@ -136,7 +172,7 @@ const FileTreeList: React.FC<FileTreeListProps> = ({
                       .filter(Boolean)
                       .join(' ')}
                   >
-                    <Tooltip title={item.name} placement="right">
+                    <FilePathTooltip item={item}>
                       <span
                         className={[styles.treeTitleName, previewable ? styles.previewableTreeTitle : '']
                           .filter(Boolean)
@@ -144,7 +180,7 @@ const FileTreeList: React.FC<FileTreeListProps> = ({
                       >
                         <span className={styles.treeTitleText}>{item.name}</span>
                       </span>
-                    </Tooltip>
+                    </FilePathTooltip>
                     {showActions && (
                       <Dropdown
                         trigger={['hover']}

@@ -1,5 +1,5 @@
 import { Button, Empty, Input, Spin } from 'antd';
-import { FolderOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons';
+import { PlusOutlined, SearchOutlined, ShareAltOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import classNames from 'classnames';
 import type { ProjectSpace } from '../../types';
@@ -54,7 +54,7 @@ const ProjectSidebar: React.FC<Props> = ({
                   onClick={() => onSelectProject(project)}
                 >
                   <span className={styles.sidebarProjectMain}>
-                    <FolderOutlined className={styles.projectIcon} />
+                    <ShareAltOutlined className={styles.projectIcon} />
                     <strong>{project.projectName}</strong>
                     <small>
                       {project.description || intl.formatMessage({ id: 'projectSpace.projectCard.emptyDescription' })}

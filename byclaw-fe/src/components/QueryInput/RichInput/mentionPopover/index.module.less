@@ -85,6 +85,49 @@
   gap: 8px;
 }
 
+.mentionResourceSections {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 8px;
+  overflow: auto;
+}
+
+.mentionResourceSection {
+  display: flex;
+  flex-direction: column;
+  min-height: 120px;
+  overflow: hidden;
+}
+
+.projectFileSearchEmpty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+}
+
+.projectFileSearchSpin {
+  flex: 1;
+
+  :global(.@{antPrefix}-spin-container) {
+    height: 100%;
+  }
+
+  .projectFileSearchEmpty {
+    min-height: 100%;
+  }
+}
+
+.mentionResourceSectionTitle {
+  margin-bottom: 6px;
+  color: #667085;
+  font-size: 13px;
+  font-weight: 500;
+}
+
 .projectFileSearchIcon {
   flex: none;
   color: #6b8fd6;

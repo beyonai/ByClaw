@@ -257,6 +257,7 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({
               minRows={6}
               maxRows={12}
               enableTaskTemplate={false}
+              mentionPopoverPlacement="bottomLeft"
               cannotSend
               inputDraft={promptDraft}
               onInputDraftChange={(draft) =>

@@ -663,6 +663,7 @@ const ConfigForm = (props) => {
     employeeGroupMembers = [],
     setEmployeeGroupMembers,
     imageModelSelect,
+    ttsModelSelect,
   } = props;
 
   const intl = useIntl();
@@ -2499,6 +2500,7 @@ const ConfigForm = (props) => {
                 </Popover>
               </div>
               {imageModelSelect}
+              {ttsModelSelect}
             </div>
 
             {/* 数字员工/数字员工组类型 */}

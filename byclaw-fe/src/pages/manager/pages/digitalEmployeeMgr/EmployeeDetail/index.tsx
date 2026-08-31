@@ -514,6 +514,7 @@ const EmployeeDetail = ({ loading }) => {
 
   const [form] = Form.useForm();
   const selectedImageModelId = Form.useWatch('imageModelId', { form, preserve: true });
+  const selectedTtsModelId = Form.useWatch('ttsModelId', { form, preserve: true });
 
   // 新建场景：根据 URL query 覆盖 ConfigForm 默认值
   useEffect(() => {
@@ -808,6 +809,7 @@ const EmployeeDetail = ({ loading }) => {
             relIds: detailRelIds,
             employeeGroupMembers: detailEmployeeGroupMembers,
             imageModelId: detailImageModelId,
+            ttsModelId: detailTtsModelId,
           } = res || {};
 
           setEmployeeGroupMembers(
@@ -1017,6 +1019,7 @@ const EmployeeDetail = ({ loading }) => {
               ownerType: detailOwnerType || ownerType,
               agentType: detailAgentType || routeAgentType || agentType,
               imageModelId: normalizeImageModelId(detailImageModelId),
+              ttsModelId: detailTtsModelId,
               advancedSettings: advancedSettingsParsed,
               // 为受控的必填项提供初始值以回显
               coreAbility: res?.ability || '',
@@ -1416,6 +1419,9 @@ const EmployeeDetail = ({ loading }) => {
         } = res;
         const queryData = omit(resultDataRef.current || {}, ['roleAttributes', 'relPrompt', 'workStandard']);
         applyImageModelId(queryData, form.getFieldValue('imageModelId'));
+        const ttsModelId = normalizeImageModelId(form.getFieldValue('ttsModelId'));
+        if (ttsModelId === undefined) delete queryData.ttsModelId;
+        else queryData.ttsModelId = ttsModelId;
         const param = {};
 
         set(queryData, 'avatar', avatar);
@@ -2071,6 +2077,19 @@ const EmployeeDetail = ({ loading }) => {
                     disabled={readOnly}
                     onChange={(value) => {
                       form.setFieldValue('imageModelId', value);
+                      onValuesChange();
+                    }}
+                  />
+                }
+                ttsModelSelect={
+                  <ImageModelSelect
+                    value={selectedTtsModelId}
+                    modelType="TTS"
+                    label="文生语音模型"
+                    configurationLabel="文生语音模型配置"
+                    disabled={readOnly}
+                    onChange={(value) => {
+                      form.setFieldValue('ttsModelId', value);
                       onValuesChange();
                     }}
                   />

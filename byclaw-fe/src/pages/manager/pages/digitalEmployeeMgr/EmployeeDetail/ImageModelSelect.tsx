@@ -1,4 +1,4 @@
-import { DownOutlined, PictureOutlined } from '@ant-design/icons';
+import { DownOutlined, PictureOutlined, SoundOutlined } from '@ant-design/icons';
 import { Alert, Button, Popover, Radio, Spin, Tabs } from 'antd';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useIntl } from '@umijs/max';
@@ -20,12 +20,14 @@ interface ImageModelSelectProps {
   value?: string;
   onChange: (value: string | undefined) => void;
   disabled?: boolean;
+  modelType?: string;
+  label?: string;
+  configurationLabel?: string;
 }
 
 type ModelScope = 'mine' | 'public';
 
 const IMAGE_MODEL_QUERY = {
-  modelType: 'IMAGE_GENERATION',
   status: 'ENABLED',
   pageNum: 1,
   pageSize: 1000,
@@ -34,9 +36,10 @@ const IMAGE_MODEL_QUERY = {
 const isSuccessfulResponse = (response?: ModelListByPageResponse) =>
   response?.code === undefined || response.code === 0;
 
-const ImageModelSelect = ({ value, onChange, disabled = false }: ImageModelSelectProps) => {
+const ImageModelSelect = ({ value, onChange, disabled = false, modelType = 'IMAGE_GENERATION', label, configurationLabel }: ImageModelSelectProps) => {
   const intl = useIntl();
   const globalDefaultLabel = intl.formatMessage({ id: 'employeeDetail.imageModelGlobalDefault' });
+  const displayLabel = label || intl.formatMessage({ id: 'employeeDetail.imageModel' });
   const [loading, setLoading] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
   const [open, setOpen] = useState(false);
@@ -54,7 +57,8 @@ const ImageModelSelect = ({ value, onChange, disabled = false }: ImageModelSelec
   const loadModels = useCallback(() => {
     setLoading(true);
     setLoadFailed(false);
-    Promise.all([getPersonalModelList(IMAGE_MODEL_QUERY), getPublicModelList(IMAGE_MODEL_QUERY)])
+    const query = { ...IMAGE_MODEL_QUERY, modelType };
+    Promise.all([getPersonalModelList(query), getPublicModelList(query)])
       .then(([personalResponse, publicResponse]) => {
         if (!isSuccessfulResponse(personalResponse) || !isSuccessfulResponse(publicResponse)) {
           throw new Error('image model request failed');
@@ -73,7 +77,7 @@ const ImageModelSelect = ({ value, onChange, disabled = false }: ImageModelSelec
       .finally(() => {
         if (mountedRef.current) setLoading(false);
       });
-  }, [globalDefaultLabel]);
+  }, [globalDefaultLabel, modelType]);
 
   useEffect(() => {
     loadModels();
@@ -89,7 +93,7 @@ const ImageModelSelect = ({ value, onChange, disabled = false }: ImageModelSelec
 
   const popoverContent = (
     <div className={styles.modelPopover}>
-      <div className={styles.popoverTitle}>{intl.formatMessage({ id: 'employeeDetail.imageModelConfiguration' })}</div>
+      <div className={styles.popoverTitle}>{configurationLabel || intl.formatMessage({ id: 'employeeDetail.imageModelConfiguration' })}</div>
       <Tabs
         activeKey={activeScope}
         className={styles.scopeTabs}
@@ -131,7 +135,7 @@ const ImageModelSelect = ({ value, onChange, disabled = false }: ImageModelSelec
 
   return (
     <div className={styles.imageModelConfig}>
-      <span className={styles.configLabel}>{intl.formatMessage({ id: 'employeeDetail.imageModel' })}</span>
+      <span className={styles.configLabel}>{displayLabel}</span>
       <Popover
         arrow={false}
         content={popoverContent}
@@ -141,13 +145,13 @@ const ImageModelSelect = ({ value, onChange, disabled = false }: ImageModelSelec
         onOpenChange={setOpen}
       >
         <button
-          aria-label={intl.formatMessage({ id: 'employeeDetail.imageModel' })}
+          aria-label={displayLabel}
           className={styles.modelTrigger}
           disabled={disabled || loading || loadFailed}
           title={selectedLabel}
           type="button"
         >
-          <PictureOutlined className={styles.modelIcon} />
+          {modelType === 'TTS' ? <SoundOutlined className={styles.modelIcon} /> : <PictureOutlined className={styles.modelIcon} />}
           <span className={styles.selectedModel}>{selectedLabel}</span>
           <DownOutlined className={styles.downIcon} />
         </button>

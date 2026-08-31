@@ -4,6 +4,7 @@ import { useIntl, useLocation, useNavigate } from '@umijs/max';
 import classnames from 'classnames';
 import AntdIcon from '@/components/AntdIcon';
 import useAppStore from '@/models/common/useAppStore';
+import { useProjectScopeId } from '@/pages/projectSpace/hooks/useProjectScopeId';
 
 import AutomationListPanel from './components/AutomationPanel';
 import AutomationRunPanel from './components/AutomationRunPanel';
@@ -21,10 +22,12 @@ const Automation: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const { isSiderCollapsed } = useAppStore();
+  const [scopedProjectId] = useProjectScopeId();
   const [activeTab, setActiveTab] = useState<'tasks' | 'runs'>('tasks');
   const searchParams = new URLSearchParams(location.search || '');
   const creating = searchParams.get('create') === '1';
-  const projectId = searchParams.get('projectId') || undefined;
+  const routeProjectId = searchParams.get('projectId') || undefined;
+  const projectId = creating ? routeProjectId || scopedProjectId || undefined : routeProjectId;
   const tabNavigation = (
     <div
       className={classnames(styles.automationTabs, isSiderCollapsed && styles.automationTabsCollapsed)}

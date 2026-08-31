@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Button, Empty, Input, Spin, Tooltip, message } from 'antd';
-import { FolderOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons';
+import { PlusOutlined, SearchOutlined, ShareAltOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import classNames from 'classnames';
 import useGlobal from '@/hooks/useGlobal';
@@ -171,7 +171,7 @@ const ProjectCenterList: React.FC = () => {
                 >
                   <span className={styles.projectMain}>
                     <span className={styles.projectTitleRow}>
-                      <FolderOutlined className={styles.projectIcon} />
+                      <ShareAltOutlined className={styles.projectIcon} />
                       <strong>{project.projectName}</strong>
                     </span>
                     <small>{project.description || '-'}</small>

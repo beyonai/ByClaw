@@ -3,6 +3,7 @@ import { Button, Dropdown, Empty, Modal, Typography, Upload, message, type MenuP
 import { EllipsisOutlined, FolderAddOutlined, UploadOutlined } from '@ant-design/icons';
 import { getLocale, useIntl, useSelector } from '@umijs/max';
 import FileSpaceBlock from '@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock';
+import { FilePathTooltip } from '@/layout/sider/components/FileSiderPanel/components/FileTreeList';
 import CreateFolderModal from '@/layout/sider/components/FileSiderPanel/components/CreateFolderModal';
 import {
   DISPLAY_FILE_PATH_PREFIX,
@@ -251,9 +252,6 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         message.warning(intl.formatMessage({ id: 'fileBrowser.preview.unavailable' }));
         return;
       }
-      const projectFile = isProjectFile(item) ? item : undefined;
-      const projectFileUrl = projectFile?.fileUrl || undefined;
-
       if (onPreviewFile) {
         onPreviewFile(item);
         return;
@@ -263,14 +261,14 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
       onOpenDetail(
         <FilePreviewPanel
           fileName={item.name}
-          resourceId={projectFileUrl ? undefined : resourceId}
-          path={projectFileUrl ? undefined : item.path}
-          fileUrl={projectFileUrl}
+          resourceId={resourceId}
+          path={item.path}
+          fileUrl={undefined}
           sessionId={scope === 'session' ? sessionId : undefined}
           source={scope === 'project' ? 'dataset' : 'fileBrowser'}
         />,
         {
-          tabKey: `${scope}-file:${projectFile?.fileId || item.path}`,
+          tabKey: `${scope}-file:${isProjectFile(item) ? item.fileId : item.path}`,
           title: item.name,
         }
       );
@@ -539,9 +537,11 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
                 onDoubleClick={() => handleNodeDoubleClick(item as FileTreeItem)}
               >
                 <div className={projectStyles.dataCardHeader}>
-                  <Typography.Text strong ellipsis={{ tooltip: item.name }}>
-                    {item.name}
-                  </Typography.Text>
+                  <FilePathTooltip item={item}>
+                    <Typography.Text strong ellipsis>
+                      {item.name}
+                    </Typography.Text>
+                  </FilePathTooltip>
                   <Dropdown
                     trigger={['hover']}
                     menu={{
@@ -594,6 +594,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         loading={loading}
         items={items}
         currentPath={rootPath}
+        resourceEmptyStyle
         emptyText={scope === 'project' && !resourceId ? '暂未初始化项目知识库' : intl.formatMessage({ id: emptyTextId })}
         contentBefore={
           isLocalSharedFiles ? (

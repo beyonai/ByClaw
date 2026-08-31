@@ -172,6 +172,10 @@
   display: flex;
   align-items: center;
 
+  &.outsideToolsWithTools {
+    margin-left: 12px;
+  }
+
   :global(.byclaw-connector-outside-tool:empty) {
     display: none;
   }
@@ -192,10 +196,11 @@
 
 .toolsMenu {
   display: flex;
-  width: 760px;
+  width: 100%;
   min-width: 0;
-  max-width: min(760px, calc(100vw - 32px));
-  min-height: 320px;
+  max-width: 100%;
+  height: 100%;
+  min-height: 0;
   max-height: calc(100vh - 32px);
   box-sizing: border-box;
   padding: 8px;
@@ -247,9 +252,11 @@
   .toolsMenuPanel {
     flex: 1;
     min-width: 0;
-    height: 304px;
-    overflow: auto;
-    padding: 8px 10px;
+    height: auto;
+    min-height: 0;
+    box-sizing: border-box;
+    overflow: hidden;
+    padding: 4px 6px;
   }
 
   .toolsMenuPanelFileResource {
@@ -275,10 +282,25 @@
 
   .toolsMenuPanelContent {
     display: none;
+    height: 100%;
+    min-height: 0;
   }
 
   .toolsMenuPanelContentActive {
-    display: block;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+
+    > * {
+      min-height: 0;
+    }
+
+    :global(.connectorList) {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+    }
   }
 
   .toolsMenuPanel-expert,

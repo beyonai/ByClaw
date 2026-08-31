@@ -2,7 +2,6 @@ import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } 
 import {
   BulbOutlined,
   DownOutlined,
-  FolderOutlined,
   LoadingOutlined,
   ReloadOutlined,
   RightOutlined,
@@ -850,7 +849,7 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
               <div key={projectId} className={styles.projectItem} role="treeitem" aria-expanded={isExpanded}>
                 <div className={styles.projectRow}>
                   <button type="button" className={styles.projectButton} onClick={() => handleProjectClick(project)}>
-                    <FolderOutlined className={styles.projectIcon} aria-hidden="true" />
+                    <ShareAltOutlined className={styles.projectIcon} aria-hidden="true" />
                     <span className={styles.projectName} title={project.projectName}>
                       {project.projectName || intl.formatMessage({ id: 'projectSpace.unnamedProject' })}
                     </span>

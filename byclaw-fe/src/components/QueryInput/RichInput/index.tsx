@@ -134,14 +134,29 @@ export { RichInputResourceList };
 
 // 主组件
 const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
-  const { style, chatMode, agentType, onChange, onSend, inAgentRoute, agentId, defaultPlaceholder, canSend, canQuote } =
-    props;
+  const {
+    style,
+    chatMode,
+    agentType,
+    onChange,
+    onSend,
+    inAgentRoute,
+    agentId,
+    defaultPlaceholder,
+    canSend,
+    canQuote,
+    mentionPopoverPlacement,
+  } = props;
+  const shouldPlaceMentionBelow =
+    mentionPopoverPlacement?.startsWith('bottom') || props.isInputAtBottom === false;
+  const effectiveMentionPlacement = shouldPlaceMentionBelow ? 'bottomLeft' : mentionPopoverPlacement;
   const intl = useIntl();
   const [mentionPopoverData, setMentionPopoverData] = useState<Partial<MentionTriggerInfo>>({});
   const mentionType = mentionPopoverData.type;
   const editor = useMemo<Editor>(() => withEditableNavigation(withMention(withHistory(withReact(createEditor())))), []);
   const isFirstAutoOnChange = useRef(true);
   const editorWrapRef = useRef<HTMLDivElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
   const lastChatModeRef = useRef(chatMode);
   const insertItemRef = useRef<RichInputRef['insertItem']>(() => undefined);
   const { EventEmitter } = useGlobal();
@@ -383,7 +398,23 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
         if (triggerInfo.type === '#' && !checkIfCanQuote()) {
           return;
         }
-        setMentionPopoverData(triggerInfo);
+        // @ 面板应与聊天输入框等宽，并紧贴输入框上方；# 面板仍使用光标定位。
+        if (triggerInfo.type === '@' && wrapRef.current) {
+          // RichInput 只包裹编辑区域，取外层 queryInputBase 才能覆盖完整的聊天输入框（含工具栏）。
+          const inputContainer = wrapRef.current.closest<HTMLElement>('#queryInputBase') || wrapRef.current;
+          const rect = inputContainer.getBoundingClientRect();
+          setMentionPopoverData({
+            ...triggerInfo,
+            position: {
+              ...triggerInfo.position,
+              left: rect.left,
+              top: shouldPlaceMentionBelow ? rect.bottom : rect.top,
+              width: rect.width,
+            },
+          });
+        } else {
+          setMentionPopoverData(triggerInfo);
+        }
       } else if (mentionType) {
         handleCloseMention();
       }
@@ -609,7 +640,7 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
   });
 
   return (
-    <div className={styles.wrap} style={style}>
+    <div className={styles.wrap} style={style} ref={wrapRef}>
       <Slate editor={editor} initialValue={value} onValueChange={setValue} onChange={myOnChange}>
         <div className={styles.editorWrap} ref={editorWrapRef}>
           <Editable
@@ -648,6 +679,8 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
           .flatMap((resource) => [resource.resourceId, resource.resourceCode].filter(Boolean).map((item) => `${item}`))}
         resourceAgentIds={props.resourceAgentIds}
         projectCloudResourceId={props.projectCloudResourceId}
+        projectId={props.projectId}
+        placement={effectiveMentionPlacement}
       />
     </div>
   );

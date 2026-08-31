@@ -260,7 +260,7 @@ const AllEmployees = (props: IProps, ref: ForwardedRef<IRef>) => {
       {!isLoading && (
         <div
           id="allEmployeeListWrap"
-          className={classNames('full-height overflow-auto', {
+          className={classNames('full-height overflow-auto', pStyles.employeeListScrollWrap, {
             hideThumb: !isInput,
           })}
         >
@@ -274,6 +274,7 @@ const AllEmployees = (props: IProps, ref: ForwardedRef<IRef>) => {
             hasMore={hasMore}
             dataLength={employeesList.length}
             hasChildren={employeesList.length > 0}
+            height={props.compactCard ? '100%' : undefined}
             loader={
               <Skeleton avatar={{ size: 'default', shape: 'circle' }} paragraph={false} active style={{ padding: 8 }} />
             }
@@ -290,7 +291,7 @@ const AllEmployees = (props: IProps, ref: ForwardedRef<IRef>) => {
             scrollableTarget="allEmployeeListWrap"
             inverse={false}
             scrollThreshold="50px"
-            style={{ overflow: 'visible', paddingBottom: hasMore ? '20px' : 0 }}
+            style={{ overflow: props.compactCard ? 'auto' : 'visible', paddingBottom: hasMore ? '20px' : 0 }}
           >
             <List
               className={pStyles.employeesList}

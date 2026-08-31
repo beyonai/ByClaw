@@ -12,7 +12,9 @@ export interface ProjectCloudDriveItem {
 
 /** 统一项目云盘接口记录到文件树所使用的路径语义。 */
 export const normalizeProjectCloudDriveItem = (item: any, fallbackDirectoryPath = '/'): ProjectCloudDriveItem => {
-  const name = `${item?.fileName || item?.name || '文件'}`.trim();
+  const rawName = `${item?.fileName || item?.name || '文件'}`.trim();
+  // 接口返回的 fileName 偶尔是完整路径；列表展示和预览参数只使用当前节点名称。
+  const name = rawName.split('/').filter(Boolean).at(-1) || rawName;
   const directoryPath = normalizeFileBrowserPath(item?.directoryPath || fallbackDirectoryPath || '/');
   let parentPath = directoryPath === '/' ? '/' : directoryPath.replace(/\/$/, '');
   // 兼容接口偶发把当前文件名重复拼到 directoryPath 的情况（如 /a.txt/a.txt）。
@@ -26,7 +28,15 @@ export const normalizeProjectCloudDriveItem = (item: any, fallbackDirectoryPath 
       ? parentPath
       : `${parentPath === '/' ? '' : parentPath}/${name}`;
   const path = normalizeFileBrowserPath(rawPath);
-  const isDir = item?.type === 'directory';
+  const itemType = `${item?.type || item?.fileType || item?.resourceType || ''}`.toLowerCase();
+  const isDir =
+    item?.isDir === true ||
+    item?.isDir === 'true' ||
+    item?.dir === true ||
+    item?.dir === 'true' ||
+    itemType === 'directory' ||
+    itemType === 'folder' ||
+    itemType === 'dir';
   return {
     name,
     path: isDir ? ensureDirectoryPath(path) : path,

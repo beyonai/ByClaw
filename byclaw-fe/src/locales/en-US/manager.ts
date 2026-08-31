@@ -448,6 +448,7 @@ export default {
   'modelMgr.modal.modelTypeRERANK': 'RERANK',
   'modelMgr.modal.modelTypeEMBEDDING': 'EMBEDDING',
   'modelMgr.modal.modelTypeIMAGE_GENERATION': 'Image generation',
+  'modelMgr.modal.modelTypeTTS': 'Text to speech (TTS)',
   'modelMgr.modal.minimaxModel': 'MiniMax model',
   'modelMgr.modal.minimaxModelPlaceholder': 'Enter a MiniMax model, for example image-01',
   'modelMgr.modal.minimaxModelRequired': 'Please enter a MiniMax model',

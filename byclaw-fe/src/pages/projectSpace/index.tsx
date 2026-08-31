@@ -3,10 +3,10 @@ import { Button, Dropdown, Empty, Input, Modal, message } from 'antd';
 import {
   DeleteOutlined,
   EditOutlined,
-  FolderOutlined,
   MoreOutlined,
   PlusOutlined,
   SearchOutlined,
+  ShareAltOutlined,
 } from '@ant-design/icons';
 import { useIntl, useLocation, useNavigate, useSelector } from '@umijs/max';
 import dayjs from 'dayjs';
@@ -510,7 +510,7 @@ const ProjectSpacePage: React.FC = () => {
                   }}
                 >
                   <span className={styles.projectCardIcon}>
-                    <FolderOutlined />
+                    <ShareAltOutlined />
                   </span>
                   <span className={styles.projectCardBody}>
                     <span className={styles.projectCardTitleRow}>

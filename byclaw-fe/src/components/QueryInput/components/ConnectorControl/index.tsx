@@ -129,6 +129,7 @@ const CREDENTIAL_FIELD_KEY_PATTERN = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
 type ConnectorControlProps = {
   canAuthorize: boolean;
   inline?: boolean;
+  userInfo?: any;
 
   /** 输入框外部仅展示已连接连接器，不提供新增/管理入口。 */
   outside?: boolean;
@@ -320,8 +321,9 @@ const ConnectorSelection = ({
   );
 };
 
-const ConnectorControl = ({ canAuthorize, inline = false, outside = false }: ConnectorControlProps) => {
-  const { userInfo } = useSelector((state: any) => state.user);
+const ConnectorControl = ({ canAuthorize, inline = false, outside = false, userInfo: userInfoProp }: ConnectorControlProps) => {
+  const storeUserInfo = useSelector((state: any) => state.user?.userInfo);
+  const userInfo = userInfoProp || storeUserInfo;
 
   // 分别控制设置列表、完整配置、授权说明和真实授权进度的显示状态。
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -920,10 +922,10 @@ const ConnectorControl = ({ canAuthorize, inline = false, outside = false }: Con
         !canAuthorize ? (
           <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="登录后即可使用连接器" />
         ) : (
-          <div className={styles.configurationGrid}>
+          <div className={classNames(styles.connectorList, styles.connectorListInline)}>
             {loadingConnectors && <span>正在加载连接器…</span>}
             {connectors.length
-              ? connectors.map((connector) => renderConnectorItem(connector, true))
+              ? connectors.map((connector) => renderConnectorItem(connector))
               : !loadingConnectors && (
                 <Empty
                   image={Empty.PRESENTED_IMAGE_SIMPLE}
