@@ -678,6 +678,7 @@ const ConfigForm = (props) => {
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [robotModalOpen, setRobotModalOpen] = useState(false);
   const [modelPopoverOpen, setModelPopoverOpen] = useState(false);
+  const [moreModelsOpen, setMoreModelsOpen] = useState(false);
   const [robotItem, setRobotItem] = useState<RobotConfig>({ channel: '' });
   const [robotEditingIndex, setRobotEditingIndex] = useState<number | null>(null);
   const [templateData, setTemplateData] = useState([]);
@@ -2499,8 +2500,20 @@ const ConfigForm = (props) => {
                   </button>
                 </Popover>
               </div>
-              {imageModelSelect}
-              {ttsModelSelect}
+              {!moreModelsOpen && (
+                <button type="button" className={styles.moreModelsButton} onClick={() => setMoreModelsOpen(true)}>
+                  <span>更多模型</span>
+                </button>
+              )}
+              {moreModelsOpen && (
+                <>
+                  {imageModelSelect}
+                  {ttsModelSelect}
+                  <button type="button" className={styles.moreModelsButton} onClick={() => setMoreModelsOpen(false)}>
+                    <span>收起更多模型</span>
+                  </button>
+                </>
+              )}
             </div>
 
             {/* 数字员工/数字员工组类型 */}

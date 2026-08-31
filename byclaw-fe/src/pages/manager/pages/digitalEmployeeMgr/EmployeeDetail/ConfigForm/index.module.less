@@ -1677,6 +1677,33 @@
   justify-content: flex-end;
 }
 
+.moreModelsButton {
+  display: flex;
+  align-items: center;
+  grid-column: 1 / -1;
+  justify-self: stretch;
+  gap: 12px;
+  width: 100%;
+  padding: 0;
+  color: var(~'--@{antPrefix}-color-text-tertiary');
+  font-size: 14px;
+  line-height: 32px;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+
+  &::before,
+  &::after {
+    flex: 1;
+    border-top: 1px dashed var(~'--@{antPrefix}-color-border-secondary');
+    content: '';
+  }
+
+  &:hover {
+    color: var(~'--@{antPrefix}-color-text-secondary');
+  }
+}
+
 .modelConfigLabel {
   flex: 0 0 auto;
   color: var(~'--@{antPrefix}-color-text');

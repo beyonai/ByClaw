@@ -217,7 +217,7 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
       trigger={[]}
       destroyOnHidden
       placement={placement || (isAtPopover ? 'topLeft' : undefined)}
-      autoAdjustOverflow={false}
+      autoAdjustOverflow
       ref={popoverRef}
       arrow={false}
       onOpenChange={(v) => {
