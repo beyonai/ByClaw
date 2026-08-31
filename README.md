@@ -25,7 +25,7 @@
 
 **ByClaw（鲸智百应）** 就是为解决这个问题而生——企业级智能体组织操作系统，支撑新质生产力的可信 AI 底座。它是 OpenClaw 的"企业增强版"，在开源智能体内核之上叠加了企业生产环境所需的核心能力：多租户隔离、统一安全网关、合规沙箱、长程任务支持、动态算力分配与释放。从一个 Agent 的 PoC 到千人组织的全面落地，ByClaw 提供完整的技术底座——**让企业敢部署、CEO 敢拍板、CIO 敢签字、CFO 敢算账**。
 
-[核心亮点](#核心亮点) · [架构总览](#架构总览) · [快速开始](#快速开始) · [痛点与方案](#痛点与解决方案) · [参与贡献](CONTRIBUTING.md) · [安全策略](SECURITY.md)
+[核心亮点](#核心亮点) · [功能概览](#功能概览) · [架构总览](#架构总览) · [快速开始](#快速开始) · [参与贡献](CONTRIBUTING.md) · [安全策略](SECURITY.md)
 
 ---
 
@@ -36,6 +36,28 @@
 - **智能反向代理** — 将多个 MCP/Skill 能力压缩到恒定级别的上下文，多智能体生产级运行的"中枢神经系统"
 - **多租户运行时** — 单实例统一部署、统一管理，支撑整个组织
 - **统一安全网关** — 身份认证、会话管控、零信任访问
+
+---
+
+## 功能概览
+
+ByClaw 围绕“数字员工执行任务、组织资源支撑执行、企业平台统一治理”形成完整产品能力。
+
+| 序号 | 功能领域 | 主要能力 |
+|:---:|------|------|
+| 1 | 智能对话与任务执行 | 流式对话、文件输入、`@` 数字员工、资源引用、交互确认、任务计划、执行过程和结果文件 |
+| 2 | 数字员工与数字员工组 | 超级助手、个人助理、企业数字员工、数字员工组、创建配置、发布授权、资源装配和调试 |
+| 3 | 项目空间与团队协作 | 项目、成员、项目会话、共享文件、项目云盘、代码仓库、项目资源、任务和计划执行 |
+| 4 | 知识管理与智能问答 | 个人及企业知识库、目录文件管理、知识构建、检索问答、权限共享和元数据 |
+| 5 | 知识采集与知识整理 | 通过 ByCLI/OpenCLI 采集外部内容，保留来源和原始产物，并整理为知识库或个人记忆 |
+| 6 | 工具、技能与技能超市 | Agent、MCP、工具集，个人及企业技能、技能超市、技能组、安装卸载及数字员工绑定 |
+| 7 | 本体与结构化业务能力 | 本体库、场景、对象、视图、关系、数据源、动作、企业同步和数字员工安装 |
+| 8 | 文件与成果管理 | 文件浏览、上传下载、搜索、预览、复制移动、目录管理、知识沉淀和会话产物 |
+| 9 | 自动化与计划任务 | 单次或周期任务、工作空间关联、启停、立即执行、运行记录和失败排查 |
+| 10 | 模型、沙箱与智能体运行时 | 个人及企业模型、模型调试、配额、OpenSandbox、OpenClaw 和多智能体执行 |
+| 11 | 企业管理、开放接入与运维 | 组织岗位、角色权限、运营看板、系统配置、通知反馈、多渠道、开放 API 和部署监控 |
+
+各项功能的用途、适用角色、使用入口和启用条件见 [ByClaw 功能介绍](docs/features.md)。
 
 ---
 
@@ -106,9 +128,11 @@ flowchart TB
     be --> ws["WebSocket / SSE<br/>流式会话"]
     be --> qa["byclaw-qa<br/>知识库管理 / QA Worker"]
     be --> data["byclaw-data<br/>DataCloud MCP / Gateway Worker"]
+    be --> super["byclaw-super<br/>多智能体主管 / 授权委派 / 持久运行"]
     be --> exe["byclaw-exe<br/>Skills / Extensions"]
     be --> sandbox["OpenSandbox<br/>隔离执行环境"]
     sandbox --> sandboxRuntime["沙箱容器<br/>byclaw-openclaw / Agent Runtime"]
+    super --> sandboxRuntime
     data --> sandboxRuntime
     exe --> sandboxRuntime
     qa --> infra["Redis / OpenGauss / MinIO"]
@@ -116,14 +140,15 @@ flowchart TB
     be --> infra
 ```
 
-| 模块 | 职责 | 关键能力 |
-|------|------|----------|
-| `byclaw-fe` | Web 门户与管理控制台 | 对话、知识中心、数字员工、工作中心、工具中心、沙箱页面、移动端适配 |
-| `byclaw-be` | 核心业务后端与统一网关 | 认证授权、会话管理、资源管理、数字员工管理、文件管理、Feign 调用、WebSocket |
-| `byclaw-qa` | 知识库与问答服务 | 知识导入、索引构建、检索问答、QA Worker、知识资源映射 |
-| `byclaw-data` | 数据云与智能体执行服务 | DataCloud MCP、Gateway Worker、数据查询分析、工具调用、结果文件存储 |
-| `byclaw-exe` | 扩展插件与技能脚本 | Skills、Extensions、业务脚本、能力扩展 |
-| `middleware` | 基础运行组件 | Redis、MinIO、OpenGauss、OpenSandbox 等运行依赖 |
+| 序号 | 模块 | 职责 | 关键能力 |
+|:---:|------|------|----------|
+| 1 | `byclaw-fe` | Web 门户与管理控制台 | 对话、知识中心、数字员工、工作中心、工具中心、沙箱页面、移动端适配 |
+| 2 | `byclaw-be` | 核心业务后端与统一网关 | 认证授权、会话管理、资源管理、数字员工管理、文件管理、Feign 调用、WebSocket |
+| 3 | `byclaw-qa` | 知识库与问答服务 | 知识导入、索引构建、检索问答、QA Worker、知识资源映射 |
+| 4 | `byclaw-data` | 数据云与智能体执行服务 | DataCloud MCP、Gateway Worker、数据查询分析、工具调用、结果文件存储 |
+| 5 | `byclaw-super` | 多智能体主管与持久运行服务 | 任务规划、授权委派、用户交互、Run 状态、SSE、恢复与故障接管 |
+| 6 | `byclaw-exe` | 扩展插件与技能脚本 | Skills、Extensions、业务脚本、能力扩展 |
+| 7 | `middleware` | 基础运行组件 | Redis、MinIO、OpenGauss、OpenSandbox 等运行依赖 |
 
 同步链路以 REST、WebSocket、SSE 和 Feign 为主，异步链路以 Redis Pub/Sub、Redis Stream、Worker 消费和后台任务为主。控制流由后端统一编排，数据流按资源类型进入数据库、对象存储、缓存、沙箱或外部业务系统。
 
@@ -158,14 +183,14 @@ flowchart TB
     devops -.-> py
 ```
 
-| 层次 | 技术选型 | 说明 |
-|------|----------|------|
-| 前端 | React 18、Umi Max 4、TypeScript、Ant Design 5 | 企业级 Web 控制台与对话体验 |
-| 后端 | Java 21、Spring Boot 3.4、Spring Security、Spring Session、MyBatis | 核心 API、认证授权、资源治理、服务编排 |
-| AI / Agent | Spring AI、LangChain4j、MCP、OpenClaw、by-framework、by-qa、by-datacloud | 模型接入、智能体执行、知识问答、数据分析 |
-| 通信 | REST、WebSocket、SSE、OpenFeign、Redis Pub/Sub | 同步请求、流式响应、服务间调用和异步通知 |
-| 存储 | OpenGauss / PostgreSQL、Redis、MinIO、文件挂载 | 结构化数据、缓存消息、对象文件和沙箱数据 |
-| 工程化 | Docker Compose、pnpm、Maven、uv、GitHub Actions | 本地开发、镜像构建、依赖管理和 CI/CD |
+| 序号 | 层次 | 技术选型 | 说明 |
+|:---:|------|----------|------|
+| 1 | 前端 | React 18、Umi Max 4、TypeScript、Ant Design 5 | 企业级 Web 控制台与对话体验 |
+| 2 | 后端 | Java 21、Spring Boot 3.4、Spring Security、Spring Session、MyBatis | 核心 API、认证授权、资源治理、服务编排 |
+| 3 | AI / Agent | Spring AI、LangChain4j、MCP、OpenClaw、by-framework、by-qa、by-datacloud | 模型接入、智能体执行、知识问答、数据分析 |
+| 4 | 通信 | REST、WebSocket、SSE、OpenFeign、Redis Pub/Sub | 同步请求、流式响应、服务间调用和异步通知 |
+| 5 | 存储 | OpenGauss / PostgreSQL、Redis、MinIO、文件挂载 | 结构化数据、缓存消息、对象文件和沙箱数据 |
+| 6 | 工程化 | Docker Compose、pnpm、Maven、uv、GitHub Actions | 本地开发、镜像构建、依赖管理和 CI/CD |
 
 ### 部署架构
 
@@ -248,15 +273,15 @@ flowchart LR
 
 ### 环境要求
 
-| 工具 | 版本要求 | 验证命令 |
-|------|---------|---------|
-| Docker & Compose V2 | 最新版 | `docker compose version` |
-| Node.js | >= 18.20 | `node --version` |
-| pnpm | >= 9.x | `pnpm --version` |
-| JDK | 21 | `java -version` |
-| Maven | >= 3.8 | `mvn --version` |
-| Python | >= 3.12 | `python3 --version` |
-| uv | 任意版本 | `uv --version` |
+| 序号 | 工具 | 版本要求 | 验证命令 |
+|:---:|------|---------|---------|
+| 1 | Docker & Compose V2 | 最新版 | `docker compose version` |
+| 2 | Node.js | >= 18.20 | `node --version` |
+| 3 | pnpm | >= 9.x | `pnpm --version` |
+| 4 | JDK | 21 | `java -version` |
+| 5 | Maven | >= 3.8 | `mvn --version` |
+| 6 | Python | >= 3.12 | `python3 --version` |
+| 7 | uv | 任意版本 | `uv --version` |
 
 ### Docker 一键部署
 
@@ -329,6 +354,7 @@ ByClaw/
 ├── byclaw-be/          # 后端服务（Spring Boot 3.4, Java 21）
 ├── byclaw-data/        # 数据云服务（Python 3.12, uv）
 ├── byclaw-qa/          # QA 与 Agent 服务（Python 3.12, uv）
+├── byclaw-super/       # 多智能体主管与持久运行服务（TypeScript, pnpm）
 ├── byclaw-exe/         # 扩展插件与技能脚本
 ├── deploy/             # Docker Compose 部署配置
 ├── docs/               # 项目文档
@@ -340,17 +366,17 @@ ByClaw/
 
 ## 端口说明
 
-| 服务 | 默认端口 |
-|------|:--------:|
-| 前端（Nginx） | 8080 |
-| 后端 HTTP | 8086 |
-| 后端 WebSocket | 8082 |
-| QA Manager | 8000 |
-| DataCloud | 8087 |
-| Redis | 6379 |
-| MinIO API / Console | 9000 / 9001 |
-| OpenGauss | 5432 |
-| OpenSandbox | 9005 |
+| 序号 | 服务 | 默认端口 |
+|:---:|------|:--------:|
+| 1 | 前端（Nginx） | 8080 |
+| 2 | 后端 HTTP | 8086 |
+| 3 | 后端 WebSocket | 8082 |
+| 4 | QA Manager | 8000 |
+| 5 | DataCloud | 8087 |
+| 6 | Redis | 6379 |
+| 7 | MinIO API / Console | 9000 / 9001 |
+| 8 | OpenGauss | 5432 |
+| 9 | OpenSandbox | 9005 |
 
 ---
 

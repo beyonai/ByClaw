@@ -13,14 +13,15 @@ ByClaw 是一个企业级 AI 智能助手平台，提供：
 
 ## 快速导航
 
-| 读者 | 推荐入口 |
-|------|---------|
-| 🚀 **想快速体验** | [快速开始](./getting-started/) |
-| 📖 **想部署使用** | [部署指南](./deployment/) |
-| 🏗️ **想了解架构** | [架构设计](./architecture/) |
-| 👨‍💻 **想开发贡献** | [开发指南](./development/) |
-| 🔌 **想集成 API** | [API 文档](./api/) |
-| ❓ **遇到问题** | [常见问题](./getting-started/faq.md) |
+| 序号 | 读者 | 推荐入口 |
+|:---:|------|---------|
+| 1 | **想了解功能** | [功能介绍](./features.md) |
+| 2 | 🚀 **想快速体验** | [快速开始](./getting-started/) |
+| 3 | 📖 **想部署使用** | [部署指南](./deployment/) |
+| 4 | 🏗️ **想了解架构** | [架构设计](./architecture/) |
+| 5 | 👨‍💻 **想开发贡献** | [开发指南](./development/) |
+| 6 | 🔌 **想集成 API** | [API 文档](./api/) |
+| 7 | ❓ **遇到问题** | [常见问题](./getting-started/faq.md) |
 
 ## 目录结构
 
@@ -38,13 +39,13 @@ docs/
 
 ## 项目模块
 
-| 模块 | 技术栈 | 说明 |
-|------|--------|------|
-| [byclaw-fe](../byclaw-fe/) | React + Umi Max + TypeScript | 前端 Web 应用 |
-| [byclaw-be](../byclaw-be/) | Spring Boot 3 + Java 21 | 后端服务 |
-| [byclaw-exe](../byclaw-exe/) | Python | 扩展插件和技能脚本 |
-| [byclaw-data](../byclaw-data/) | Python (uv) | 数据云服务（Agent 编排） |
-| [byclaw-qa](../byclaw-qa/) | Python (uv) | QA 管理和 Agent 服务 |
+| 序号 | 模块 | 技术栈 | 说明 |
+|:---:|------|--------|------|
+| 1 | [byclaw-fe](../byclaw-fe/) | React + Umi Max + TypeScript | 前端 Web 应用 |
+| 2 | [byclaw-be](../byclaw-be/) | Spring Boot 3 + Java 21 | 后端服务 |
+| 3 | [byclaw-exe](../byclaw-exe/) | Python | 扩展插件和技能脚本 |
+| 4 | [byclaw-data](../byclaw-data/) | Python (uv) | 数据云服务（Agent 编排） |
+| 5 | [byclaw-qa](../byclaw-qa/) | Python (uv) | QA 管理和 Agent 服务 |
 
 ## 相关链接
 
