@@ -17,6 +17,8 @@ import { resolveConfigSyncHotPrefixes, resolveDigEmployeePubSub } from "./plugin
 import { resolveBundledBaiyingResourcesDir } from "./plugin-paths.js";
 import { registerManagedAgentModelHooks } from "./managed-agent-model-hook.js";
 import { createRedisJsonStore, setSharedRedisJsonStore } from "./redis-json-store.js";
+import { createManagePermissionStore } from "./manage-permission-store.js";
+import { registerManagePermissionGuard } from "./manage-permission-guard.js";
 import { loadBaiyingRedisEnvDefaults } from "./redis-env.js";
 import { createBaiyingCallToolFactory } from "./baiying-call-tool.js";
 import {
@@ -178,6 +180,14 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
   };
 
   setSharedRedisJsonStore(redisJsonStore);
+
+  const managePermissionStore = createManagePermissionStore({
+    logger: {
+      info: (message) => api.logger.info(message),
+      warn: (message) => api.logger.warn(message),
+    },
+  });
+  registerManagePermissionGuard({ api, store: managePermissionStore });
 
   registerBaiyingAimodelRuntimeProvider(api, pluginCfg);
 
@@ -520,6 +530,7 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
       agentWatch = undefined;
       await redisJsonStore.close();
       setSharedRedisJsonStore(null);
+      await managePermissionStore.close();
     },
   });
 }

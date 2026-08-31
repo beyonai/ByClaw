@@ -92,6 +92,21 @@ public class OrganizationService {
         return organizationMapper.selectById(orgId);
     }
 
+    /**
+     * 查询指定组织自身及其全部下级组织的 ID 集合（按 path_code 前缀匹配）。
+     * 用于组织管理员权限的向下穿透判断（管理父组织即管理其所有子组织）。
+     *
+     * @param orgId 组织标识
+     * @return 组织自身及下级组织 ID 集合；组织不存在或无 path_code 时返回空集合
+     */
+    public java.util.List<Long> findSelfAndDescendantOrgIds(Long orgId) {
+        Organization organization = findById(orgId);
+        if (organization == null || organization.getPathCode() == null) {
+            return java.util.Collections.emptyList();
+        }
+        return organizationMapper.selectUnderlingList(organization.getPathCode());
+    }
+
     /***
      * 新增组织
      *

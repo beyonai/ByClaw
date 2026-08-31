@@ -1,6 +1,9 @@
 package com.iwhalecloud.byai.manager.application.service.auth;
 
-import com.iwhalecloud.byai.common.util.RedisUtil;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Set;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -10,9 +13,7 @@ import org.springframework.data.redis.core.SessionCallback;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Set;
+import com.iwhalecloud.byai.common.util.RedisUtil;
 
 /**
  * 用户权限Redis缓存服务
@@ -201,6 +202,178 @@ public class AuthRedisApplicationService {
 
         String key = getUserAuthKey(userId);
         return RedisUtil.hmGet(key, resourceId);
+    }
+
+    // -------------------------------------------------------------------------
+    // 管理权限 Hash：USER:RESOURCES:MANAGE:{userId}
+    // 与使用权 Hash（USER:RESOURCES:AUTH:{userId}）完全对称，独立存储，互不干扰
+    // -------------------------------------------------------------------------
+
+    private static final String USER_MANAGE_KEY_PREFIX = "USER:RESOURCES:MANAGE:";
+
+    /** 全局资源管理角色标记 key，value="1" 表示该用户是全局资源管理角色 */
+    private static final String GLOBAL_MANAGER_KEY_PREFIX = "USER:IS_GLOBAL_RESOURCE_MANAGER:";
+
+    public String getManageKey(Long userId) {
+        if (userId == null) {
+            return null;
+        }
+        return USER_MANAGE_KEY_PREFIX + userId;
+    }
+
+    public String getGlobalManagerKey(Long userId) {
+        if (userId == null) {
+            return null;
+        }
+        return GLOBAL_MANAGER_KEY_PREFIX + userId;
+    }
+
+    /**
+     * 写入用户管理权限到 Redis Hash（先清空再写入）。
+     * 逻辑与 writeUserAuth 完全对称。
+     */
+    public void writeUserManageAuth(Long userId, Map<String, String> resourceManageMap) {
+        if (userId == null) {
+            return;
+        }
+        String key = getManageKey(userId);
+        if (resourceManageMap == null || resourceManageMap.isEmpty()) {
+            clearUserManageAuth(userId);
+            return;
+        }
+        clearUserManageAuth(userId);
+        Map<String, String> hashEntries = new HashMap<>(resourceManageMap.size());
+        resourceManageMap.forEach((resourceId, resourceType) -> {
+            if (resourceId != null && resourceType != null) {
+                hashEntries.put(resourceId, resourceType);
+            }
+        });
+        if (!hashEntries.isEmpty()) {
+            RedisUtil.hmPutAll(key, hashEntries);
+        }
+    }
+
+    public void clearUserManageAuth(Long userId) {
+        if (userId == null) {
+            return;
+        }
+        RedisUtil.removeKey(getManageKey(userId));
+    }
+
+    /**
+     * 按资源 ID 删除管理权限 Hash 中的指定条目。
+     */
+    public void removeUserManageAuthByResourceIds(Long userId, Set<String> resourceIds) {
+        if (userId == null || resourceIds == null || resourceIds.isEmpty()) {
+            return;
+        }
+        String key = getManageKey(userId);
+        for (String resourceId : resourceIds) {
+            if (resourceId != null) {
+                RedisUtil.hmDelete(key, resourceId);
+            }
+        }
+    }
+
+    /**
+     * 查询用户对指定资源是否具有管理权限。
+     * 同时检查全局管理角色标记，只要二者之一命中即返回 true。
+     */
+    public boolean hasManagePermission(Long userId, String resourceId) {
+        if (userId == null || resourceId == null) {
+            return false;
+        }
+        // 检查全局管理角色标记
+        String globalKey = getGlobalManagerKey(userId);
+        String globalFlag = RedisUtil.getString(globalKey);
+        if ("1".equals(globalFlag)) {
+            return true;
+        }
+        // 检查资源级管理权限 Hash
+        String manageKey = getManageKey(userId);
+        return RedisUtil.hmGet(manageKey, resourceId) != null;
+    }
+
+    /**
+     * 标记用户为全局资源管理角色（写入 USER:IS_GLOBAL_RESOURCE_MANAGER:{userId}="1"）。
+     */
+    public void markGlobalResourceManager(Long userId) {
+        if (userId == null) {
+            return;
+        }
+        RedisUtil.setString(getGlobalManagerKey(userId), "1");
+    }
+
+    /**
+     * 清除用户的全局资源管理角色标记（角色降级时调用）。
+     */
+    public void clearGlobalResourceManagerMark(Long userId) {
+        if (userId == null) {
+            return;
+        }
+        RedisUtil.removeKey(getGlobalManagerKey(userId));
+    }
+
+    /**
+     * Pipeline批量写入多个用户的管理权限到Redis，同时写入/清除全局管理角色标记 key。
+     * 与 pipelineBatchWriteUserAuth 完全对称。
+     *
+     * @param userManageMap 用户管理权限映射，key为userId，value为该用户的资源管理权限映射
+     * @param globalManagerUserIds 全局管理角色用户ID集合，仅这些用户的全局标记 key 会被置为 "1"，其余用户的该 key 会被删除
+     */
+    @SuppressWarnings("unchecked")
+    public void pipelineBatchWriteUserManageAuth(Map<Long, Map<String, String>> userManageMap,
+        Set<Long> globalManagerUserIds) {
+        if (userManageMap == null || userManageMap.isEmpty()) {
+            return;
+        }
+        Set<Long> effectiveGlobalManagerUserIds = globalManagerUserIds == null ? Set.of() : globalManagerUserIds;
+
+        try {
+            stringRedisTemplate.executePipelined(new SessionCallback<Object>() {
+                @Override
+                public Object execute(RedisOperations operations) throws DataAccessException {
+                    for (Map.Entry<Long, Map<String, String>> entry : userManageMap.entrySet()) {
+                        Long userId = entry.getKey();
+                        Map<String, String> resourceManageMap = entry.getValue();
+                        String key = getManageKey(userId);
+
+                        operations.delete(key);
+                        if (resourceManageMap != null && !resourceManageMap.isEmpty()) {
+                            Map<String, Object> hashEntries = new HashMap<>(resourceManageMap.size());
+                            resourceManageMap.forEach((k, v) -> {
+                                if (k != null && v != null) {
+                                    hashEntries.put(k, v);
+                                }
+                            });
+                            if (!hashEntries.isEmpty()) {
+                                operations.opsForHash().putAll(key, hashEntries);
+                            }
+                        }
+
+                        String globalManagerKey = getGlobalManagerKey(userId);
+                        if (effectiveGlobalManagerUserIds.contains(userId)) {
+                            operations.opsForValue().set(globalManagerKey, "1");
+                        }
+                        else {
+                            operations.delete(globalManagerKey);
+                        }
+                    }
+                    return null;
+                }
+            });
+        } catch (Exception e) {
+            logger.error("Pipeline批量写入用户管理权限到Redis失败，回退为逐条写入，原因：{}", e.getMessage());
+            userManageMap.forEach((userId, resourceManageMap) -> {
+                writeUserManageAuth(userId, resourceManageMap);
+                if (effectiveGlobalManagerUserIds.contains(userId)) {
+                    markGlobalResourceManager(userId);
+                }
+                else {
+                    clearGlobalResourceManagerMark(userId);
+                }
+            });
+        }
     }
 
     /**
