@@ -1,5 +1,5 @@
 import React from 'react';
-import { render } from '@testing-library/react';
+import { fireEvent, render } from '@testing-library/react';
 
 import { HtmlRender } from './Html';
 
@@ -48,5 +48,19 @@ describe('HtmlRender blob URL lifecycle', () => {
 
     expect(createObjectURL).toHaveBeenCalledTimes(2);
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:owned-html');
+  });
+
+  it('opens links from the html preview in a new tab', () => {
+    const { container } = render(<HtmlRender content='<a href="https://example.com">open</a>' />);
+    const iframe = container.querySelector('iframe') as HTMLIFrameElement;
+    const previewDocument = document.implementation.createHTMLDocument('preview');
+    previewDocument.body.innerHTML = '<a href="https://example.com">open</a>';
+    Object.defineProperty(iframe, 'contentDocument', { configurable: true, value: previewDocument });
+
+    fireEvent.load(iframe);
+
+    const link = previewDocument.querySelector('a');
+    expect(link?.target).toBe('_blank');
+    expect(link?.rel).toBe('noopener noreferrer');
   });
 });

@@ -16,8 +16,8 @@ import styles from './Html.module.less';
 //   },
 // });
 
+/* eslint-disable lines-around-comment */
 export interface HtmlPreviewProps {
-
   /** 资源链接 */
   // eslint-disable-next-line react/no-unused-prop-types
   href?: string;
@@ -28,12 +28,33 @@ export interface HtmlPreviewProps {
   /** 标题 */
   title?: string;
 }
+/* eslint-enable lines-around-comment */
 
 const isRelativeResourcePath = (path: string) =>
   !path.startsWith('/') && !path.startsWith('#') && !path.startsWith('//') && !/^[a-z][a-z\d+.-]*:/i.test(path);
 
+const rewriteReportLinks = (document: Document, content: string) => {
+  // 运营报表中的标题 href 是本地 reportHref，预览 Blob 中没有对应目录，需改用数据里的原文 url。
+  const reportLinks = new Map<string, string>();
+  const pattern = /"url"\s*:\s*"(https?:\/\/[^"\\]+)"[\s\S]*?"reportHref"\s*:\s*"([^"]+)"/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(content))) {
+    try {
+      reportLinks.set(match[2], JSON.parse(`"${match[1]}"`));
+    } catch {
+      // 忽略格式异常的记录，保留原始链接。
+    }
+  }
+  document.querySelectorAll<HTMLAnchorElement>('a[href]').forEach((anchor) => {
+    const originalHref = anchor.getAttribute('href') || '';
+    const externalHref = reportLinks.get(originalHref);
+    if (externalHref) anchor.setAttribute('href', externalHref);
+  });
+};
+
 const resolveHtmlResources = async (content: string, resolver: MarkdownImageResolver) => {
   const document = new DOMParser().parseFromString(content, 'text/html');
+  rewriteReportLinks(document, content);
   const resourceNodes = [
     ...Array.from(document.querySelectorAll<HTMLElement>('img[src], source[src]')).map((element) => ({
       element,
@@ -42,6 +63,10 @@ const resolveHtmlResources = async (content: string, resolver: MarkdownImageReso
     ...Array.from(document.querySelectorAll<HTMLElement>('video[poster]')).map((element) => ({
       element,
       attribute: 'poster',
+    })),
+    ...Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href]')).map((element) => ({
+      element,
+      attribute: 'href',
     })),
   ];
   const objectUrls: string[] = [];
@@ -59,6 +84,10 @@ const resolveHtmlResources = async (content: string, resolver: MarkdownImageReso
           element.setAttribute(attribute, objectUrl);
         } else if (resolvedResource) {
           element.setAttribute(attribute, resolvedResource);
+        }
+        if (element.tagName === 'A') {
+          (element as HTMLAnchorElement).target = '_blank';
+          (element as HTMLAnchorElement).rel = 'noopener noreferrer';
         }
       } catch {
         // 单个资源解析失败时保留原始地址，不影响 HTML 其它内容预览。
@@ -84,6 +113,13 @@ export const HtmlRender = React.memo(
     const htmlContent = content !== undefined ? content : blobContent;
 
     const onLoad = () => {
+      // HTML 在 iframe 中预览时，链接默认可能被当前 iframe 接管，导致点击后出现空白页。
+      // 统一改为新标签页打开，并保留安全的 opener 防护。
+      const document = ref.current?.contentDocument;
+      document?.querySelectorAll<HTMLAnchorElement>('a[href]').forEach((anchor) => {
+        anchor.target = '_blank';
+        anchor.rel = 'noopener noreferrer';
+      });
       setLoading(false);
     };
 

@@ -147,9 +147,6 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
     canQuote,
     mentionPopoverPlacement,
   } = props;
-  const shouldPlaceMentionBelow =
-    mentionPopoverPlacement?.startsWith('bottom') || props.isInputAtBottom === false;
-  const effectiveMentionPlacement = shouldPlaceMentionBelow ? 'bottomLeft' : mentionPopoverPlacement;
   const intl = useIntl();
   const [mentionPopoverData, setMentionPopoverData] = useState<Partial<MentionTriggerInfo>>({});
   const mentionType = mentionPopoverData.type;
@@ -383,7 +380,8 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
 
   const handleCloseMention = useCallback(() => {
     setMentionPopoverData({});
-  }, []);
+    props.onResourcePopoverChange?.({ open: false });
+  }, [props]);
 
   // 这个onchange不仅仅包括输入，光标的变化也会触发
   const myOnChange = (value: Descendant[]) => {
@@ -398,20 +396,16 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
         if (triggerInfo.type === '#' && !checkIfCanQuote()) {
           return;
         }
-        // @ 面板应与聊天输入框等宽，并紧贴输入框上方；# 面板仍使用光标定位。
+        // @ 面板只使用输入框宽度和统一 placement；# 面板仍使用光标定位。
         if (triggerInfo.type === '@' && wrapRef.current) {
           // RichInput 只包裹编辑区域，取外层 queryInputBase 才能覆盖完整的聊天输入框（含工具栏）。
           const inputContainer = wrapRef.current.closest<HTMLElement>('#queryInputBase') || wrapRef.current;
           const rect = inputContainer.getBoundingClientRect();
           setMentionPopoverData({
             ...triggerInfo,
-            position: {
-              ...triggerInfo.position,
-              left: rect.left,
-              top: shouldPlaceMentionBelow ? rect.bottom : rect.top,
-              width: rect.width,
-            },
+            position: { width: rect.width },
           });
+          props.onResourcePopoverChange?.({ open: true, inputText: triggerInfo.inputText, width: rect.width });
         } else {
           setMentionPopoverData(triggerInfo);
         }
@@ -665,23 +659,27 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
           {agentPlaceholder}
         </div>
       </Slate>
-      <MentionPopover
-        key={agentId}
-        agentId={agentId}
-        type={mentionType as '@' | '#'}
-        onSelect={insertItem}
-        popoverPos={mentionPopoverData.position}
-        inputText={mentionPopoverData.inputText}
-        onClose={handleCloseMention}
-        chatMode={chatMode}
-        excludedAgentIds={getResourceList(value, true)
-          .filter((resource) => resource.resourceType === ResourceType.digitalEmployee)
-          .flatMap((resource) => [resource.resourceId, resource.resourceCode].filter(Boolean).map((item) => `${item}`))}
-        resourceAgentIds={props.resourceAgentIds}
-        projectCloudResourceId={props.projectCloudResourceId}
-        projectId={props.projectId}
-        placement={effectiveMentionPlacement}
-      />
+      {mentionType !== '@' && (
+        <MentionPopover
+          key={agentId}
+          agentId={agentId}
+          type={mentionType as '@' | '#'}
+          onSelect={insertItem}
+          popoverPos={mentionPopoverData.position}
+          inputText={mentionPopoverData.inputText}
+          onClose={handleCloseMention}
+          chatMode={chatMode}
+          excludedAgentIds={getResourceList(value, true)
+            .filter((resource) => resource.resourceType === ResourceType.digitalEmployee)
+            .flatMap((resource) =>
+              [resource.resourceId, resource.resourceCode].filter(Boolean).map((item) => `${item}`)
+            )}
+          resourceAgentIds={props.resourceAgentIds}
+          projectCloudResourceId={props.projectCloudResourceId}
+          projectId={props.projectId}
+          placement={mentionPopoverPlacement}
+        />
+      )}
     </div>
   );
 });
