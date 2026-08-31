@@ -370,10 +370,10 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
 
     resourceWorkspaceOwnedRef.current = true;
     setDetailPanel?.(
-        <ChatResourceWorkspace
-          sessionId={sessionId}
-          projectId={sessionProjectId}
-          cloudResourceId={sessionCloudResourceId}
+      <ChatResourceWorkspace
+        sessionId={sessionId}
+        projectId={sessionProjectId}
+        cloudResourceId={sessionCloudResourceId}
         listOpen={resourceListOpen}
         tabs={resourceTabs}
         activeTabKey={activeResourceTabKey}

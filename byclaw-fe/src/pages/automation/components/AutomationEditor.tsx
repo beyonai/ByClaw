@@ -202,9 +202,7 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({
           form={form}
           layout="vertical"
           className={styles.editorForm}
-          initialValues={
-            projectId !== undefined && projectId !== null ? { projectId: String(projectId) } : undefined
-          }
+          initialValues={projectId !== undefined && projectId !== null ? { projectId: String(projectId) } : undefined}
         >
           <Form.Item
             name="sourceName"
