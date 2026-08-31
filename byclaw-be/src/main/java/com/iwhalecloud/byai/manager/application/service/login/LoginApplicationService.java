@@ -355,6 +355,7 @@ public class LoginApplicationService {
             try {
                 sandboxService.ensureSandboxReady(userCode, -1L, null);
                 authRedisSyncService.asyncSyncUserAuthToRedis(userId);
+                authRedisSyncService.asyncSyncUserManageAuthToRedis(userId);
             }
             catch (Exception e) {
                 logger.warn("异步启动用户沙箱失败，用户编码：{}", userCode, e);
