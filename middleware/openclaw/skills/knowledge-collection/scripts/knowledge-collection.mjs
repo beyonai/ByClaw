@@ -38,7 +38,7 @@ const COMMAND_SPECS = {
       '--language': '可选。SearXNG 语言，默认 all',
       '--pageno': '可选。SearXNG 页码，默认 1',
       '--max-results': '可选。SearXNG 结果上限，默认 20',
-      '--requested-count': '可选。用户明确指定的采集篇数；先运行 SearXNG，SearXNG 无候选或输出无效时自动回退到 hot-discovery',
+      '--requested-count': '可选。用户明确指定的采集篇数；先运行 SearXNG，可用文章候选不足时自动回退到 hot-discovery',
       '--timeout': '可选。SearXNG 与 hot-discovery 外层进程总等待秒数，默认 60；SearXNG 单个引擎请求固定为 10 秒',
       '--time-range': '可选。SearXNG 时间范围：day | week | month | year',
       '--tiers': '可选。hot-discovery 档位，默认 1,2,3',
@@ -133,6 +133,16 @@ const COMMAND_SPECS = {
       '--dry-run': '可选。仅校验,不持久化',
     },
     example: 'knowledge-collection.mjs collect --session-dir /tmp/kc1 --item-json-file /tmp/kc1/.collection-inputs/items.json',
+  }),
+  'materialize-wechat': defineCommand({
+    group: 'collection',
+    title: '校验 byCLI Weixin 下载结果，净化正文并生成 collect payload',
+    args: {
+      '--session-dir': '必填。已由 init 创建的会话目录',
+      '--executor-result-file': '必填。位于会话 raw/ 下的 byCLI Weixin 下载结果 JSON',
+      '--item-id': '必填。小写字母、数字、下划线或连字符组成的稳定条目 ID',
+    },
+    example: 'knowledge-collection.mjs materialize-wechat --session-dir /tmp/kc1 --executor-result-file /tmp/kc1/raw/bycli/weixin/item/download-result.json --item-id item',
   }),
   inspect: defineCommand({
     group: 'collection',
@@ -312,6 +322,14 @@ const COMMAND_SCHEMA_OVERRIDES = {
     },
   },
   collect: { required: ['session-dir', 'item-json-file'], properties: { 'session-dir': SCHEMA.sessionDir, 'item-json-file': SCHEMA.inputFile, 'dry-run': SCHEMA.boolean } },
+  'materialize-wechat': {
+    required: ['session-dir', 'executor-result-file', 'item-id'],
+    properties: {
+      'session-dir': SCHEMA.sessionDir,
+      'executor-result-file': SCHEMA.file,
+      'item-id': { type: 'string', pattern: '^[a-z0-9][a-z0-9_-]{0,63}$' },
+    },
+  },
   inspect: { required: ['session-dir'], properties: { 'session-dir': SCHEMA.sessionDir, full: SCHEMA.boolean } },
   'unlock-stale': { required: ['session-dir'], properties: { 'session-dir': SCHEMA.sessionDir } },
   'export-views': { required: ['session-dir'], properties: { 'session-dir': SCHEMA.sessionDir } },
