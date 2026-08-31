@@ -3339,11 +3339,20 @@
   // 四列不足以容纳时仅允许横向滚动，纵向滚动由每个状态列独立处理。
   overflow-x: auto;
   overflow-y: hidden;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
+  scrollbar-width: thin;
+  scrollbar-color: #c8cdd5 transparent;
 
   &::-webkit-scrollbar {
-    display: none;
+    height: 6px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: #c8cdd5;
+    border-radius: 3px;
   }
 }
 

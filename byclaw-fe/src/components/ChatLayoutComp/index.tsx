@@ -370,10 +370,10 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
 
     resourceWorkspaceOwnedRef.current = true;
     setDetailPanel?.(
-      <ChatResourceWorkspace
-        sessionId={sessionId}
-        projectId={sessionProjectId}
-        cloudResourceId={currentSession?.cloudResourceId}
+        <ChatResourceWorkspace
+          sessionId={sessionId}
+          projectId={sessionProjectId}
+          cloudResourceId={sessionCloudResourceId}
         listOpen={resourceListOpen}
         tabs={resourceTabs}
         activeTabKey={activeResourceTabKey}
@@ -396,6 +396,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     resourceWorkspaceVisible,
     resourceWorkspaceRefreshKey,
     sessionId,
+    sessionCloudResourceId,
     sessionProjectId,
     setDetailPanel,
     toggleResourceList,

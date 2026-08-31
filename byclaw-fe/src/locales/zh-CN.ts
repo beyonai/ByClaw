@@ -2782,7 +2782,7 @@ export default {
   'projectSpace.detail.resource.unnamedSession': '未命名会话',
   'projectSpace.detail.resource.sharedSpace': '共享文件',
   'projectSpace.detail.resource.sessionSpace': '会话空间',
-  'projectSpace.detail.resource.emptySharedFiles': '暂无共享文件',
+  'projectSpace.detail.resource.emptySharedFiles': '暂无云盘文件',
   'projectSpace.detail.resource.emptySessionFiles': '该会话暂无文件',
   'projectSpace.detail.resource.emptySessions': '暂无会话',
   'projectSpace.detail.resource.emptyCurrentSession': '暂无当前会话',

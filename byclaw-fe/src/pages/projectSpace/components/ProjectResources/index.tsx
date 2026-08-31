@@ -1021,13 +1021,15 @@ const ProjectResources: React.FC<Props> = ({
                 ))}
               </div>
             ) : (
-              <Empty
-                image={Empty.PRESENTED_IMAGE_SIMPLE}
-                description={intl.formatMessage({
-                  id: 'employees.scheduleTaskList.empty',
-                  defaultMessage: '暂无定时任务',
-                })}
-              />
+              <div className={styles.projectScheduleEmpty}>
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description={intl.formatMessage({
+                    id: 'employees.scheduleTaskList.empty',
+                    defaultMessage: '暂无定时任务',
+                  })}
+                />
+              </div>
             )}
           </div>
         </section>

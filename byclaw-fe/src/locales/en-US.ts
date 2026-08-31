@@ -2824,7 +2824,7 @@ export default {
   'projectSpace.detail.resource.unnamedSession': 'Unnamed conversation',
   'projectSpace.detail.resource.sharedSpace': 'Shared Files',
   'projectSpace.detail.resource.sessionSpace': 'Sessions',
-  'projectSpace.detail.resource.emptySharedFiles': 'No shared files',
+  'projectSpace.detail.resource.emptySharedFiles': 'No cloud drive files',
   'projectSpace.detail.resource.emptySessionFiles': 'No files in this conversation',
   'projectSpace.detail.resource.emptySessions': 'No conversations',
   'projectSpace.detail.resource.emptyCurrentSession': 'No current conversation',

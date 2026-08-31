@@ -332,6 +332,7 @@ const ProjectDetail: React.FC<Props> = ({
             <AutomationEditor
               source={editingScheduleTask}
               projectId={project.projectId}
+              projectCloudResourceId={project.cloudResourceId}
               breadcrumbLabel={project.projectName}
               onCancel={() => {
                 setScheduleTaskCreating(false);

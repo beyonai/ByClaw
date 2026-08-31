@@ -20,6 +20,7 @@ interface AutomationEditorProps {
   source?: AutomationSource;
   template?: AutomationTemplate;
   projectId?: string | number;
+  projectCloudResourceId?: string | number;
   breadcrumbLabel?: string;
   breadcrumbItemLabel?: string;
   onResourceReferenceChange?: (handler: (resource: any) => void) => void;
@@ -31,6 +32,7 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({
   source,
   template,
   projectId,
+  projectCloudResourceId,
   breadcrumbLabel,
   breadcrumbItemLabel,
   onResourceReferenceChange,
@@ -46,6 +48,9 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({
   });
   const [promptDraftVersion, setPromptDraftVersion] = useState(0);
   const { projects, loading: projectsLoading } = useProjectList();
+  const selectedProjectId = Form.useWatch('projectId', form);
+  const currentProjectId = projectId ?? selectedProjectId;
+  const currentProject = projects.find((item) => `${item.projectId}` === `${currentProjectId}`);
   useEffect(() => {
     onResourceReferenceChange?.((resource) => {
       const name = resource?.name || resource?.fileName || resource?.resourceName;
@@ -193,7 +198,14 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({
         </Space>
       </div>
       <div className={styles.editorScroll}>
-        <Form form={form} layout="vertical" className={styles.editorForm}>
+        <Form
+          form={form}
+          layout="vertical"
+          className={styles.editorForm}
+          initialValues={
+            projectId !== undefined && projectId !== null ? { projectId: String(projectId) } : undefined
+          }
+        >
           <Form.Item
             name="sourceName"
             label={intl.formatMessage({ id: 'automation.name' })}
@@ -232,12 +244,14 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({
           <Form.Item label={intl.formatMessage({ id: 'automation.prompt' })} required>
             <QueryInput
               key={promptDraftVersion}
-              projectId={projectId !== undefined ? Number(projectId) : undefined}
+              projectId={currentProjectId !== undefined ? Number(currentProjectId) : undefined}
+              projectCloudResourceId={projectCloudResourceId ?? currentProject?.cloudResourceId}
               selectedProject={
-                projectId !== undefined
+                currentProjectId !== undefined
                   ? {
-                    projectId: String(projectId),
-                    projectName: projects.find((item) => `${item.projectId}` === `${projectId}`)?.projectName || '',
+                    projectId: String(currentProjectId),
+                    projectName: currentProject?.projectName || '',
+                    cloudResourceId: projectCloudResourceId ?? currentProject?.cloudResourceId,
                   }
                   : undefined
               }
