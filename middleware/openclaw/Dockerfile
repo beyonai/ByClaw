@@ -145,7 +145,7 @@ RUN npm config set registry "${NPM_REGISTRY}" --global \
     && zread version --stdio | grep -F "\"version\":\"${ZREAD_CLI_VERSION}\"" >/dev/null \
     && rm -f "/tmp/ima-openapi-cli-${IMA_OPENAPI_CLI_VERSION}.tgz"
 
-ARG OPENCLI_VERSION=2.1.50
+ARG OPENCLI_VERSION=2.1.53
 ARG OPENCLI_EXTENSION_VERSION=2.1.21
 RUN set -eux; \
     if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
