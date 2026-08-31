@@ -57,6 +57,12 @@ public class ProjectWorkspaceGitService {
         if (repo == null) {
             return Optional.empty();
         }
+        // DSH 将仓库直接放在 /by/projects/{projectId}/repos/{repoName}，没有 codeagent 的
+        // 项目根仓和 .gitmodules。优先尝试仓库自身路径，不影响后面的 codeagent 规则。
+        Path directPath = projectInitService.getProjectRepositoryPath(repo);
+        if (isGitRepository(directPath)) {
+            return Optional.of(directPath);
+        }
         Optional<Path> workspacePath = resolveWorkspaceRepository(repo.getProjectId());
         if (workspacePath.isEmpty()) {
             return Optional.empty();
@@ -80,25 +86,34 @@ public class ProjectWorkspaceGitService {
             .eq(ProjectRepo::getProjectId, projectId).orderByAsc(ProjectRepo::getRepoId));
         ProjectRepo workspaceRepo = repos.stream()
             .filter(repo -> "workspace".equalsIgnoreCase(repo.getRepoType())).findFirst().orElse(null);
-        if (workspaceRepo == null) {
-            return List.of();
-        }
-        Path configuredPath = projectInitService.getProjectRepositoryPath(workspaceRepo);
-        Path workspacePath = configuredPath.getParent() == null ? null : configuredPath.getParent().getParent();
-        if (!isGitRepository(workspacePath)) {
-            return List.of();
+        Path workspacePath = workspaceRepo == null ? null : resolveCodeagentWorkspacePath(workspaceRepo);
+        if (isGitRepository(workspacePath)) {
+            List<ResolvedRepository> resolved = new java.util.ArrayList<>();
+            resolved.add(new ResolvedRepository(workspaceRepo, workspacePath));
+            List<ProjectRepo> codeRepos = repos.stream()
+                .filter(repo -> !"workspace".equalsIgnoreCase(repo.getRepoType())).toList();
+            for (ResolvedSubmodule submodule : new GitSubmodulePathResolver().resolveAll(workspacePath, codeRepos)) {
+                if (isGitRepository(submodule.path())) {
+                    resolved.add(new ResolvedRepository(submodule.repo(), submodule.path()));
+                }
+            }
+            return resolved;
         }
 
+        // DSH/无 workspace 场景：按数据库仓库名解析 repos/ 下的独立 Git 仓库。
         List<ResolvedRepository> resolved = new java.util.ArrayList<>();
-        resolved.add(new ResolvedRepository(workspaceRepo, workspacePath));
-        List<ProjectRepo> codeRepos = repos.stream()
-            .filter(repo -> !"workspace".equalsIgnoreCase(repo.getRepoType())).toList();
-        for (ResolvedSubmodule submodule : new GitSubmodulePathResolver().resolveAll(workspacePath, codeRepos)) {
-            if (isGitRepository(submodule.path())) {
-                resolved.add(new ResolvedRepository(submodule.repo(), submodule.path()));
+        for (ProjectRepo repo : repos) {
+            Path repositoryPath = projectInitService.getProjectRepositoryPath(repo);
+            if (isGitRepository(repositoryPath)) {
+                resolved.add(new ResolvedRepository(repo, repositoryPath));
             }
         }
         return resolved;
+    }
+
+    private Path resolveCodeagentWorkspacePath(ProjectRepo workspaceRepo) {
+        Path configuredPath = projectInitService.getProjectRepositoryPath(workspaceRepo);
+        return configuredPath.getParent() == null ? null : configuredPath.getParent().getParent();
     }
 
     /** 定位项目 workspace 根仓；项目代码实际位于 /by/projects/{projectId} 下。 */
