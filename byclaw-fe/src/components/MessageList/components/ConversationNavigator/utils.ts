@@ -1,4 +1,5 @@
 import getDisplayAnswer from '@/components/QueryInput/getDisplayAnswer';
+import getDisplayQuestion from '@/components/QueryInput/getDisplayQuestion';
 import type { ConversationOutlineItem } from '@/service/message';
 import type { IMessage } from '@/typescript/message';
 
@@ -13,6 +14,8 @@ export type ConversationTurn = {
 };
 
 const SUMMARY_LENGTH = 160;
+
+const DIGITAL_EMPLOYEE_PLACEHOLDER = /\{\{DIG_EMPLOYEE_[^}#]+(?:#[^}]*)?}}/;
 
 const extractObjectText = (value: unknown): string => {
   if (!value) return '';
@@ -37,6 +40,7 @@ export const normalizeConversationSummary = (content?: string) => {
   }
 
   text = text
+    .replace(new RegExp(DIGITAL_EMPLOYEE_PLACEHOLDER.source, 'g'), '@数字员工 ')
     .replace(/<[^>]+>/g, ' ')
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
@@ -50,20 +54,39 @@ export const normalizeConversationSummary = (content?: string) => {
   return `${text.slice(0, SUMMARY_LENGTH)}...`;
 };
 
+const selectResolvedDisplayContent = (preferred?: string, fallback?: string) => {
+  if (preferred && !DIGITAL_EMPLOYEE_PLACEHOLDER.test(preferred)) return preferred;
+  if (fallback && !DIGITAL_EMPLOYEE_PLACEHOLDER.test(fallback)) return fallback;
+  return preferred || fallback;
+};
+
+const getLocalDisplayContent = (message: IMessage) => {
+  if (message.fromBeyond) {
+    return getDisplayAnswer(message.messageList) || message.text;
+  }
+  return (
+    selectResolvedDisplayContent(
+      getDisplayQuestion({ text: message.text, resourceList: message.resourceList }),
+      message.displayText
+    ) || message.text
+  );
+};
+
 export const createLocalOutlineItems = (messageList: IMessage[]): ConversationOutlineItem[] =>
   messageList
     .filter((message) => !message.isHide && !['3', '5'].includes(`${message.usage || ''}`))
-    .map((message, index) => ({
-      messageId: `${message.messageId || message.msgId}`,
-      usage: Number(message.usage || (message.fromBeyond ? 2 : 1)),
-      content: message.fromBeyond
-        ? getDisplayAnswer(message.messageList) || message.text
-        : message.displayText || message.text,
-      creatorName: message.creatorName || message.agentName,
-      createTime: message.createTime,
-      position: index + 1,
-      totalCount: messageList.length,
-    }));
+    .map((message, index) => {
+      return {
+        messageId: `${message.messageId || message.msgId}`,
+        usage: Number(message.usage || (message.fromBeyond ? 2 : 1)),
+        content: message.text,
+        displayContent: getLocalDisplayContent(message),
+        creatorName: message.creatorName || message.agentName,
+        createTime: message.createTime,
+        position: index + 1,
+        totalCount: messageList.length,
+      };
+    });
 
 export const mergeOutlineItems = (
   remoteItems: ConversationOutlineItem[],
@@ -76,7 +99,10 @@ export const mergeOutlineItems = (
     if (!localItem) return item;
     return {
       ...item,
-      content: localItem.content || item.content,
+      displayContent: selectResolvedDisplayContent(
+        localItem.displayContent || localItem.content,
+        item.displayContent || item.content
+      ),
       creatorName: localItem.creatorName || item.creatorName,
     };
   });
@@ -89,7 +115,7 @@ export const buildConversationTurns = (items: ConversationOutlineItem[]): Conver
   items.forEach((item) => {
     const messageId = `${item.messageId}`;
     const usage = `${item.usage}`;
-    const content = normalizeConversationSummary(item.content);
+    const content = normalizeConversationSummary(item.displayContent || item.content);
     if (['1', '4'].includes(usage)) {
       turns.push({
         id: messageId,

@@ -139,6 +139,7 @@ export default function ConversationNavigator({
                 key={turn.id}
                 placement="right"
                 mouseEnterDelay={0.15}
+                overlayClassName={styles.tooltipOverlay}
                 title={
                   <div className={styles.tooltip}>
                     <div className={styles.tooltipTitle}>
@@ -152,7 +153,7 @@ export default function ConversationNavigator({
                 <button
                   type="button"
                   className={classnames(styles.markerButton, {
-                    [styles.active]: active && hoveredIndex === null,
+                    [styles.active]: active,
                     [styles.hovered]: hoverDistance === 0,
                     [styles.near]: hoverDistance === 1,
                     [styles.far]: hoverDistance === 2,

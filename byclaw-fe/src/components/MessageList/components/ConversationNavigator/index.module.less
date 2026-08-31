@@ -39,13 +39,6 @@
   border: 0;
   cursor: pointer;
 
-  &.active {
-    .marker {
-      width: 24px;
-      background: var(--beyond-color-text-secondary);
-    }
-  }
-
   &.far {
     .marker {
       width: 20px;
@@ -71,6 +64,29 @@
     outline: 1px solid var(--beyond-color-primary);
     outline-offset: 2px;
   }
+
+  &.active {
+    .marker {
+      width: 28px;
+      height: 4px;
+      background: var(--beyond-color-primary);
+      border-radius: 2px;
+    }
+
+    &.near {
+      .marker {
+        width: 36px;
+      }
+    }
+
+    &.hovered,
+    &:focus-visible {
+      .marker {
+        width: 48px;
+        background: var(--beyond-color-primary);
+      }
+    }
+  }
 }
 
 .marker {
@@ -79,12 +95,21 @@
   height: 3px;
   background: var(--beyond-color-text-tertiary, #86909c);
   border-radius: 1px;
-  transition: width 0.16s ease, background-color 0.16s ease;
+  transition: width 0.16s ease, height 0.16s ease, background-color 0.16s ease;
+}
+
+.tooltipOverlay:global(.ant-tooltip) {
+  max-width: min(320px, calc(100vw - 32px));
+}
+
+.tooltipOverlay :global(.ant-tooltip-inner) {
+  overflow: hidden;
+  max-width: 100%;
 }
 
 .tooltip {
   width: 280px;
-  max-width: min(280px, 45vw);
+  max-width: 100%;
 }
 
 .tooltipTitle,

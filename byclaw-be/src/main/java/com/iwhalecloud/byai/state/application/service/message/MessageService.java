@@ -122,6 +122,9 @@ public class MessageService {
     private ByaiMessageHotService byaiMessageHotService;
 
     @Autowired
+    private ConversationOutlineDisplayService conversationOutlineDisplayService;
+
+    @Autowired
     private ByaiMessageRelObjService byaiMessageRelObjService;
 
     @Autowired
@@ -277,7 +280,8 @@ public class MessageService {
         if (messageQo == null || messageQo.getSessionId() == null || messageQo.getSessionId() <= 0) {
             throw new BdpRuntimeException(I18nUtil.get("assistant.man.session.id.not.empty"));
         }
-        return byaiMessageHotService.selectConversationOutline(messageQo.getSessionId());
+        return conversationOutlineDisplayService.enrich(
+            byaiMessageHotService.selectConversationOutline(messageQo.getSessionId()));
     }
 
     private List<ByaiMessageHotDtoDto> appendCollectInfo(List<ByaiMessageHotDto> byaiMessageHots, Long sessionId) {

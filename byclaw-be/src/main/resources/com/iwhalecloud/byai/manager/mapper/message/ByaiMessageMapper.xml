@@ -60,6 +60,7 @@
         <result column="role" property="role" />
         <result column="usage" property="usage" />
         <result column="content" property="content" />
+        <result column="related_resources" property="relatedResources" />
         <result column="creator_name" property="creatorName" />
         <result column="create_time" property="createTime" />
         <result column="position" property="position" />
@@ -255,6 +256,7 @@
                "role",
                "usage",
                LEFT(COALESCE(NULLIF(final_content, ''), NULLIF(message_content, ''), ''), 800) AS content,
+               related_resources,
                creator_name,
                create_time,
                position,
@@ -265,6 +267,7 @@
                    "usage",
                    final_content,
                    message_content,
+                   related_resources,
                    creator_name,
                    create_time,
                    archived_at,
