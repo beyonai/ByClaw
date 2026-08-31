@@ -8,6 +8,7 @@ import {
   cmdCrawlSeed, cmdCrawlNext, cmdCrawlMark, cmdCrawlStatus,
 } from './crawl-state.mjs';
 import { runPublicDiscover } from './public-discovery.mjs';
+import { runWechatMaterialize } from './wechat-materializer.mjs';
 import { resolveSandboxPath, sessionPaths } from './session.mjs';
 
 const RESEARCH_HANDLERS = {
@@ -20,6 +21,7 @@ const RESEARCH_HANDLERS = {
 
 const SESSION_HANDLERS = {
   'public-discover': (paths, args) => runPublicDiscover(paths, args),
+  'materialize-wechat': (paths, args) => runWechatMaterialize(paths, args),
   collect: (paths, args) => cmdCollect(paths, args),
   inspect: (paths, args) => cmdInspect(paths, args),
   'crawl-seed': (paths, args) => cmdCrawlSeed(paths, args),

@@ -241,6 +241,21 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         ):
             self.assertIn(phrase, f"{routing}\n{bycli}\n{weixin}")
 
+    def test_adaptive_discovery_and_wechat_materialization_are_documented(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        routing = (SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8")
+        online_search = (SKILL_ROOT / "references" / "online-search.md").read_text(encoding="utf-8")
+        contract = (SKILL_ROOT / "references" / "collection-contract.md").read_text(encoding="utf-8")
+
+        for phrase in ("可用文章候选", "candidateQuality", "`materialize-wechat`", "阶段耗时"):
+            self.assertIn(phrase, skill)
+        self.assertIn("`bycli weixin download --url <URL>`", routing)
+        self.assertIn("自适应", online_search)
+        self.assertIn("`contentGranularity=unknown`", contract)
+        self.assertIn("`wechat-materialization-low-confidence`", contract)
+        for forbidden_fallback in ("`curl`", "`wget`", "`requests`"):
+            self.assertIn(forbidden_fallback, routing)
+
     def test_skill_has_exact_openclaw_ui_metadata(self):
         metadata_text = (SKILL_ROOT / "agents" / "openai.yaml").read_text(encoding="utf-8")
         interface = parse_interface(metadata_text)

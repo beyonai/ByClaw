@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -201,8 +201,13 @@ await (async () => {
   assert.equal(publicDiscoverHelp.json.command, 'public-discover');
   assert.match(publicDiscoverHelp.json.args['--category'], /general/);
   assert.match(publicDiscoverHelp.json.args['--requested-count'], /明确指定/);
-  assert.match(publicDiscoverHelp.json.args['--requested-count'], /SearXNG 无候选.*hot-discovery/);
+  assert.match(publicDiscoverHelp.json.args['--requested-count'], /可用文章候选不足.*hot-discovery/);
   assert.match(publicDiscoverHelp.json.args['--timeout'], /SearXNG 与 hot-discovery/);
+
+  const wechatMaterializeHelp = await runCli(['materialize-wechat', '--help']);
+  assert.equal(wechatMaterializeHelp.code, 0);
+  assert.equal(wechatMaterializeHelp.json.command, 'materialize-wechat');
+  assert.match(wechatMaterializeHelp.json.args['--executor-result-file'], /raw\/.*JSON/);
 
   const schema = await runCli(['command-schema']);
   assert.equal(schema.code, 0, schema.stderr);
@@ -233,6 +238,13 @@ await (async () => {
   assert.equal(schema.json.commands['public-discover'].properties.category.default, 'general');
   assert.equal(schema.json.commands['public-discover'].properties['requested-count'].type, 'integer');
   assert.equal(schema.json.commands['public-discover'].properties['requested-count'].minimum, 1);
+  assert.deepEqual(schema.json.commands['materialize-wechat'].required, [
+    'session-dir', 'executor-result-file', 'item-id',
+  ]);
+  assert.equal(
+    schema.json.commands['materialize-wechat'].properties['item-id'].pattern,
+    '^[a-z0-9][a-z0-9_-]{0,63}$',
+  );
   for (const [name, contract] of Object.entries(schema.json.commands)) {
     if (contract.type !== 'delegated-command') {
       assert.equal(contract.schemaComplete, true, `${name} schema must be explicit`);
@@ -285,7 +297,11 @@ await (async () => {
   writeFileSync(fixtureSearxng, `#!/usr/bin/env node
 process.stdout.write(JSON.stringify({
   query: 'async discovery',
-  results: [{ url: 'https://example.com/article', title: 'Async result', engine: 'fixture' }],
+  results: [{
+    url: 'https://example.com/news/async-discovery-report',
+    title: 'Async discovery 深度报道',
+    engine: 'fixture',
+  }],
 }));
 `);
   chmodSync(fixtureSearxng, 0o700);
@@ -298,6 +314,49 @@ process.stdout.write(JSON.stringify({
   assert.equal(asyncDiscovery.json.ok, true);
   assert.equal(asyncDiscovery.json.action, 'public-discover');
   rmSync(asyncDiscoveryRoot, { recursive: true, force: true });
+
+  const wechatRoot = makeSessionDir();
+  const wechatInit = await runCli([
+    'init', '--session-dir', wechatRoot, '--query', 'WeChat materializer CLI',
+    '--source-scope', '["public-internet"]', '--materialization-target', 'selected',
+  ]);
+  assert.equal(wechatInit.code, 0, wechatInit.stderr);
+  const rawWechatDir = join(wechatRoot, 'raw/bycli/weixin/cli-fixture');
+  mkdirSync(rawWechatDir, { recursive: true });
+  const rawWechatMarkdown = join(rawWechatDir, 'index.md');
+  writeFileSync(rawWechatMarkdown, [
+    '# CLI 微信文章', '', '测试作者', '',
+    '第一段正文。', '', '第二段正文。', '', '第三段正文。', '',
+    '第四段正文。', '', '第五段正文。', '', '第六段正文。', '',
+    '注：作者声明。', '', '相关阅读', '',
+    '[推荐](https://mp.weixin.qq.com/s/related)', '', '赞赏', '',
+  ].join('\n'));
+  const rawWechatResult = join(rawWechatDir, 'download-result.json');
+  writeFileSync(rawWechatResult, JSON.stringify({
+    status: 'downloaded',
+    saved: 'raw/bycli/weixin/cli-fixture/index.md',
+    size: statSync(rawWechatMarkdown).size,
+    title: 'CLI 微信文章',
+    author: '测试作者',
+    publish_time: '2026-08-31T00:00:00Z',
+    source_url: 'https://weixin.sogou.com/link?url=cli-fixture',
+    resolved_url: 'https://mp.weixin.qq.com/s/cli-fixture',
+  }));
+  const materializedWechat = await runCli([
+    'materialize-wechat', '--session-dir', wechatRoot,
+    '--executor-result-file', rawWechatResult, '--item-id', 'cli-fixture',
+  ]);
+  assert.equal(materializedWechat.code, 0, materializedWechat.stderr || materializedWechat.stdout);
+  assert.equal(materializedWechat.json.materialization.contentGranularity, 'full-text');
+  const collectedWechat = await runCli([
+    'collect', '--session-dir', wechatRoot,
+    '--item-json-file', materializedWechat.json.collectPayloadPath,
+  ]);
+  assert.equal(collectedWechat.code, 0, collectedWechat.stderr || collectedWechat.stdout);
+  const wechatStatus = await runCli(['status', '--session-dir', wechatRoot]);
+  assert.equal(wechatStatus.json.collection.deliveryComplete, true);
+  assert.equal(wechatStatus.json.collection.contentGranularity['full-text'], 1);
+  rmSync(wechatRoot, { recursive: true, force: true });
 
   const siteCrawlFrontmatter = readFileSync(siteCrawlSkillPath, 'utf8').split('---')[1];
   assert.match(siteCrawlFrontmatter, /Do not use for one known URL/);

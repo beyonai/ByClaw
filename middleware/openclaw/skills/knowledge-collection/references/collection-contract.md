@@ -164,6 +164,23 @@ payload 文件必须位于当前会话的 `.collection-inputs/` 内，成功登�
 
 只有需要在建会话时预置包含 pending 条目的完整清单，才使用 `--metadata-input-file`。只有导入历史兼容视图时才需要 `--collection-result-input-file`；新会话的第一次 `collect` 不再要求预置它。除此之外一律通过 `collect` 登记。
 
+## 微信下载结果物化
+
+对 `bycli weixin download` 已保存到会话 `raw/` 下的结果，使用：
+
+```bash
+node scripts/knowledge-collection.mjs materialize-wechat --session-dir <dir> \
+  --executor-result-file <dir>/raw/bycli/weixin/<item-id>/download-result.json \
+  --item-id <item-id>
+```
+
+执行器结果 JSON 必须记录成功状态、`saved`、实际字节数、标题、作者、发布时间、`source_url` 和可信的
+`resolved_url=https://mp.weixin.qq.com/s...`。命令只删除确定的微信 UI、远程图片引用和纯推荐链接块，保留正文结语与作者免责声明；
+高置信度时写入 `markdown/items/<item-id>/index.md`、`sanitized/items/<item-id>/index.md` 并返回
+`.collection-inputs/` 下的 `collectPayloadPath`。低置信度、登录页或疑似截断内容不生成 payload，而是保留 raw 证据并登记
+`materialization.status=pending`、`contentGranularity=unknown`，原因固定为 `wechat-materialization-low-confidence`。
+不得用正文长度或清洗成功本身把 unknown 提升为 full-text，也不得手工编辑 session inventory。
+
 ## 交付
 
 运行 `status` 后，只交付 `status.downstreamInput.files` 列出的、已验证存在于 `sanitized/items/` 下的 Markdown。详细终止规则见 [delivery.md](delivery.md)。
