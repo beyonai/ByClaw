@@ -835,3 +835,6 @@ ALTER TABLE ss_resource ALTER COLUMN owner_type SET DEFAULT 'personal';
 -- so the instance table must be dropped first.
 DROP TABLE IF EXISTS byai.byai_schedule_task_inst;
 DROP TABLE IF EXISTS byai.byai_schedule_task;
+
+alter table ss_res_ext_dig_employee add column tts_model_id bigint;
+comment on column ss_res_ext_dig_employee.tts_model_id is 'TTS语音模型id';
