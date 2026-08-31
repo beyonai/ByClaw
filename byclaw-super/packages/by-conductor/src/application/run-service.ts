@@ -348,6 +348,7 @@ export class RunService {
       ? {
           runId: run.id,
           secret: input.executionCredential.secret,
+          metadata: persistedExecutionMetadata(input.metadata),
           createdAt: now,
         }
       : undefined;
@@ -415,6 +416,7 @@ export class RunService {
       ? {
           runId: run.id,
           secret: input.executionCredential.secret,
+          metadata: persistedExecutionMetadata(input.metadata),
           createdAt: now,
         }
       : undefined;
@@ -733,6 +735,9 @@ export class RunService {
     this.#callbackSweep = queue
       .expireWaitingCallbacks({ limit: 100 })
       .then((expired) => {
+        for (const item of expired) {
+          this.#ephemeralMetadata.delete(item.runId);
+        }
         if (expired.length > 0) {
           this.runtime.logger?.warn(
             {
@@ -794,6 +799,7 @@ export class RunService {
     if (!queue) {
       return;
     }
+    let retainEphemeralMetadata = false;
     try {
       const run = await this.runs.get(claim.runId);
       if (!run || TERMINAL_RUN_STATUSES.has(run.status)) {
@@ -819,6 +825,7 @@ export class RunService {
           return;
         }
         metadata = {
+          ...(credential.metadata ?? {}),
           ...metadata,
           "Beyond-Token": credential.secret,
         };
@@ -839,11 +846,19 @@ export class RunService {
         );
       }
       await this.#execute(run, metadata, claim);
+      const latest = await this.runs.get(claim.runId);
+      retainEphemeralMetadata = Boolean(
+        latest && !TERMINAL_RUN_STATUSES.has(latest.status),
+      );
     } finally {
       if (this.#executionClaims.get(claim.runId) === claim) {
         this.#executionClaims.delete(claim.runId);
       }
-      this.#ephemeralMetadata.delete(claim.runId);
+      // callback/用户交互恢复会把同一个非终态 Run 再次入队，且不会重新携带入口
+      // metadata。单实例内需保留这份执行上下文，直到 Run 真正终结。
+      if (!retainEphemeralMetadata) {
+        this.#ephemeralMetadata.delete(claim.runId);
+      }
       await queue.release(claim).catch(() => undefined);
     }
   }
@@ -1386,6 +1401,7 @@ ${JSON.stringify(completedDelegations)}`;
         await this.#saveRunWithEvent(finished, completionEvent);
       }
       dirtyLeader = false;
+      this.#ephemeralMetadata.delete(finished.id);
       this.events.close(finished.id);
     } catch (error) {
       if (error instanceof LeaderRunSuspendedError) {
@@ -1578,6 +1594,7 @@ ${JSON.stringify(completedDelegations)}`;
     for (let attempt = 0; attempt < 5; attempt += 1) {
       const latest = (await this.runs.get(run.id)) ?? run;
       if (TERMINAL_RUN_STATUSES.has(latest.status)) {
+        this.#ephemeralMetadata.delete(latest.id);
         this.events.close(latest.id);
         return latest;
       }
@@ -1605,6 +1622,7 @@ ${JSON.stringify(completedDelegations)}`;
           data: { status: "CANCELLED", reason },
         });
         await this.runtime.credentials?.delete(finished.id).catch(() => undefined);
+        this.#ephemeralMetadata.delete(finished.id);
         this.events.close(finished.id);
         return finished;
       } catch (error) {
@@ -1621,6 +1639,7 @@ ${JSON.stringify(completedDelegations)}`;
   async #finishFailed(run: Run, error: string): Promise<Run> {
     const latest = await this.runs.get(run.id);
     if (latest && TERMINAL_RUN_STATUSES.has(latest.status)) {
+      this.#ephemeralMetadata.delete(latest.id);
       return latest;
     }
     const runToFail = latest ?? run;
@@ -1667,12 +1686,14 @@ ${JSON.stringify(completedDelegations)}`;
     } catch (saveError) {
       const concurrent = await this.runs.get(finished.id);
       if (concurrent && TERMINAL_RUN_STATUSES.has(concurrent.status)) {
+        this.#ephemeralMetadata.delete(concurrent.id);
         this.events.close(concurrent.id);
         return concurrent;
       }
       throw saveError;
     }
     await this.runtime.credentials?.delete(finished.id).catch(() => undefined);
+    this.#ephemeralMetadata.delete(finished.id);
     this.events.close(finished.id);
     return finished;
   }
@@ -1754,7 +1775,10 @@ ${JSON.stringify(completedDelegations)}`;
     if (!credential) {
       throw new Error("EXECUTION_CREDENTIAL_MISSING");
     }
-    metadata["Beyond-Token"] = credential.secret;
+    const currentMetadata = { ...metadata };
+    Object.assign(metadata, credential.metadata ?? {}, currentMetadata, {
+      "Beyond-Token": credential.secret,
+    });
   }
 }
 
@@ -1847,4 +1871,13 @@ function taskPlanCommandForRunFailure(snapshot: TaskPlanSnapshot): TaskPlanComma
 function readBeyondToken(metadata: Record<string, unknown>): string {
   const value = metadata["Beyond-Token"];
   return typeof value === "string" ? value.trim() : "";
+}
+
+/** 凭证单独保存 Beyond-Token，其他入口 metadata 随 lease 受保护地持久化。 */
+function persistedExecutionMetadata(
+  metadata: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  const persisted = structuredClone(metadata ?? {});
+  delete persisted["Beyond-Token"];
+  return persisted;
 }

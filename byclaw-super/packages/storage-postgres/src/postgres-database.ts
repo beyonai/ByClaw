@@ -1484,8 +1484,24 @@ async function writeCredential(
   schema: string,
   credential: ExecutionCredential,
 ): Promise<void> {
-  const values = [credential.runId, credential.secret, date(credential.createdAt)];
   await advisoryLock(client, `credential:${credential.runId}`);
+  let metadata = credential.metadata;
+  if (metadata === undefined) {
+    const existing = await client.query(
+      `SELECT credential
+         FROM ${table(schema, "run_execution_credentials")}
+        WHERE run_id = $1`,
+      [credential.runId],
+    );
+    metadata = existing.rows[0]
+      ? decodeStoredCredential(text(existing.rows[0].credential)).metadata ?? {}
+      : {};
+  }
+  const values = [
+    credential.runId,
+    encodeStoredCredential({ ...credential, metadata }),
+    date(credential.createdAt),
+  ];
   const updated = await client.query(
     `UPDATE ${table(schema, "run_execution_credentials")}
         SET credential = $2,
@@ -2402,11 +2418,50 @@ function readLeaderModelSelection(raw: unknown) {
 }
 
 function mapCredential(row: QueryResultRow): ExecutionCredential {
+  const stored = decodeStoredCredential(text(row.credential));
   return {
     runId: text(row.run_id),
-    secret: text(row.credential),
+    secret: stored.secret,
+    metadata: stored.metadata ?? {},
     createdAt: milliseconds(row.created_at),
   };
+}
+
+const EXECUTION_CONTEXT_FORMAT = "byclaw-execution-context-v1";
+
+/** 新记录使用版本化 JSON；旧的纯 token 文本继续兼容读取。 */
+function encodeStoredCredential(credential: ExecutionCredential): string {
+  return JSON.stringify({
+    format: EXECUTION_CONTEXT_FORMAT,
+    secret: credential.secret,
+    metadata: credential.metadata ?? {},
+  });
+}
+
+function decodeStoredCredential(value: string): Pick<ExecutionCredential, "secret" | "metadata"> {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      !Array.isArray(parsed) &&
+      (parsed as Record<string, unknown>).format === EXECUTION_CONTEXT_FORMAT &&
+      typeof (parsed as Record<string, unknown>).secret === "string"
+    ) {
+      const record = parsed as Record<string, unknown>;
+      const metadata = record.metadata;
+      return {
+        secret: record.secret as string,
+        metadata:
+          metadata && typeof metadata === "object" && !Array.isArray(metadata)
+            ? (metadata as Record<string, unknown>)
+            : {},
+      };
+    }
+  } catch {
+    // 旧版 credential 是任意纯文本 token，不要求符合 JSON。
+  }
+  return { secret: value, metadata: {} };
 }
 
 async function transaction<T>(
