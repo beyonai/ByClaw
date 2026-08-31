@@ -334,6 +334,7 @@ const ConnectorControl = ({ canAuthorize, inline = false, outside = false }: Con
   const [loadingConnectors, setLoadingConnectors] = useState(false);
   const [updatingConnectorIds, setUpdatingConnectorIds] = useState<Set<ConnectorId>>(new Set());
   const [revokingConnectorIds, setRevokingConnectorIds] = useState<Set<ConnectorId>>(new Set());
+  const [revokeConfirmationOpen, setRevokeConfirmationOpen] = useState(false);
   const [startingAuthorization, setStartingAuthorization] = useState(false);
   const [checkingAuthorization, setCheckingAuthorization] = useState(false);
   const [credentialFormVersion, setCredentialFormVersion] = useState(0);
@@ -585,6 +586,7 @@ const ConnectorControl = ({ canAuthorize, inline = false, outside = false }: Con
   };
 
   const confirmRevokeAuthorization = (connector: Connector) => {
+    setRevokeConfirmationOpen(true);
     Modal.confirm({
       title: `取消${connector.name}授权？`,
       content:
@@ -599,6 +601,7 @@ const ConnectorControl = ({ canAuthorize, inline = false, outside = false }: Con
       okButtonProps: { danger: true },
       cancelText: '暂不取消',
       centered: true,
+      afterClose: () => setRevokeConfirmationOpen(false),
       onOk: async () => {
         setRevokingConnectorIds((ids) => new Set([...ids, connector.id]));
         try {
@@ -625,6 +628,11 @@ const ConnectorControl = ({ canAuthorize, inline = false, outside = false }: Con
   };
 
   const beginAuthorization = (connector: Connector) => {
+    if (connector.authMode === 'AK_SK' && !hasValidCredentialForm(connector)) {
+      message.error(`${connector.name} 连接配置暂不可用，请刷新后重试`);
+      return;
+    }
+
     // 先展示权限说明，再进入对应平台的授权步骤。
     abortCredentialVerification();
     invalidateAuthorizationRequests();
@@ -1151,6 +1159,7 @@ const ConnectorControl = ({ canAuthorize, inline = false, outside = false }: Con
         title="连接器配置"
         extra={accountToolbar}
         width={Math.min(980, window.innerWidth - 24)}
+        maskClosable={!revokeConfirmationOpen && revokingConnectorIds.size === 0}
         onClose={() => setConfigurationOpen(false)}
       >
         <Spin spinning={loadingConnectors}>

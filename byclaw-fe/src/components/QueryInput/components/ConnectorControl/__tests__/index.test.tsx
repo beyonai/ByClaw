@@ -1104,6 +1104,43 @@ describe('ConnectorControl authorization states', () => {
     await waitFor(() => expect(mockRevokeConnectorAuthorization).toHaveBeenCalledWith(1));
   });
 
+  it('keeps the configuration drawer open while revoke confirmation is active', async () => {
+    mockQueryConnectorList.mockResolvedValue({
+      list: [
+        {
+          connectorId: 10,
+          connectorCode: 'ima-openapi',
+          connectorName: 'IMA',
+          connectorType: 'SYSTEM',
+          description: 'IMA 知识库',
+          enableFlag: 'Y',
+          authMode: 'AK_SK',
+        },
+      ],
+      pageNum: 1,
+      pageSize: 100,
+      total: 1,
+      totalPages: 1,
+    });
+
+    render(<ConnectorControl canAuthorize />);
+    fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
+    fireEvent.click(await screen.findByText('查看全部连接器'));
+    fireEvent.click(await screen.findByRole('button', { name: '更多IMA操作' }));
+    fireEvent.click(await screen.findByText('取消授权'));
+
+    expect(await screen.findAllByText('取消IMA授权？')).not.toHaveLength(0);
+    const drawerMask = document.querySelector('.ant-drawer-mask');
+    expect(drawerMask).not.toBeNull();
+    fireEvent.click(drawerMask as HTMLElement);
+
+    expect(screen.getByText('连接器配置').closest('.ant-drawer')).toHaveClass('ant-drawer-open');
+    fireEvent.click(screen.getByRole('button', { name: '确认取消授权' }));
+
+    await waitFor(() => expect(mockRevokeConnectorAuthorization).toHaveBeenCalledWith(10));
+    expect(screen.getByText('连接器配置').closest('.ant-drawer')).toHaveClass('ant-drawer-open');
+  });
+
   it('clears stale expiration immediately when revocation succeeds and the list refresh fails', async () => {
     const connectedConnectorPage = {
       list: [
@@ -2508,7 +2545,7 @@ describe('ConnectorControl authorization states', () => {
     Modal.destroyAll();
   });
 
-  it('closes local authorization from malformed IMA metadata', async () => {
+  it('rejects malformed IMA metadata before opening authorization', async () => {
     mockQueryConnectorList.mockResolvedValue({
       list: [
         {
@@ -2535,6 +2572,7 @@ describe('ConnectorControl authorization states', () => {
     fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
     fireEvent.click(await screen.findByRole('button', { name: '连接' }));
 
+    await waitFor(() => expect(mockMessageError).toHaveBeenCalledWith('IMA 连接配置暂不可用，请刷新后重试'));
     await waitFor(() =>
       expect(screen.queryByRole('heading', { name: '连接 IMA 作为 AI 知识库' })).not.toBeInTheDocument()
     );
