@@ -6,6 +6,7 @@
 
 - `task.sourceScope`：本任务实际允许使用的来源，默认 `public-internet`；企业来源只能因用户点名或明确内部语境加入。
 - `task.materializationTarget`：`candidates`、`selected` 或 `all`。
+- `task.discoveryGate`：公共来源授权状态，记录最多两轮发现、分类后的候选、耗尽状态与 `stopReason`。用户明确提供的 URL 由 `init --direct-urls` 登记为 `origin=user-provided`；Agent 自己发现或记忆的 URL 不得放入该参数。
 - `collection.collection.status`：`complete`、`partial` 或 `failed`。
 - `collection.collection.items`：完整文章清单，可以包含尚未物化的 pending/failed 条目。
 - `research`：研究问题、分支、learnings、citations、context 与报告路径。
@@ -89,7 +90,7 @@ collection_filters:
 
 - `storage.fallback`：是否使用工作区回退目录。
 - `collection.status`：采集状态 `complete`、`partial` 或 `failed`。
-- `collection.items`：完整文章清单。每项使用稳定 `itemId`，并记录 `sourceSkill`、`backend`、`sourceItemId`、`sourceUrl`、用户筛选、`rawArtifacts` 及 `materialization`。
+- `collection.items`：完整文章清单。每项使用稳定 `itemId`，并记录 `sourceSkill`、`backend`、`sourceItemId`、`sourceUrl`、用户筛选、`rawArtifacts` 及 `materialization`。公共发现条目还记录 `discoveryCandidateId`，它必须指向本会话 `task.discoveryGate.candidates` 中的 `article` 或用户明确提供的 URL。
 - `materialization.status`：`materialized`、`pending` 或 `failed`；已物化时记录准确的 `markdownPath` 与 `sanitizedPath`，文件删除或校验失败后相应路径必须置为 `null`。
 - `materialization.contentGranularity`：`full-text`、`excerpt`、`abstract` 或 `unknown`，表示正文内容粒度，与 `materialization.status`、`collection.status` 和 `deliveryComplete` 正交。旧会话或缺失字段一律按 `unknown`，不得默认 `full-text`；普通 `content`、`markdown` 或字数不能单独证明全文完整。
 - `media`：文章媒体覆盖状态。`coverStatus` 为 `not-present`、`materialized`、`unavailable` 或 `unknown`，并记录 `coverCount`、`materializedCoverCount` 与非敏感 `reason`。`unavailable` 表示至少一个已知封面未能物化，允许 `materializedCoverCount` 小于 `coverCount` 以表达部分成功。旧会话缺失或含非法 media 状态时只读归一为 `unknown`，使用 `reason=legacy-media-state-unknown`；不得猜测为无封面或已物化。
@@ -97,6 +98,8 @@ collection_filters:
 - `sourceMetadata`：来源执行器的非敏感版本、任务 ID、范围和诊断信息。
 
 `sourceSkill`、来源 ID/URL、用户筛选和 `rawArtifacts` 组成非敏感恢复描述。缺少净化正文时，采集编排器据此让原始执行器从 raw 重新净化；raw 不足时再由同一执行器补采。不得保存恢复所需的凭据。
+
+公共互联网新会话默认启用发现门禁。`public-discover` 原子登记 query、category、候选分类和最多两轮的调用状态；`collect` 与 pending inventory 写入会按规范化 URL 解析候选并持久化 `discoveryCandidateId`。不在候选中的 URL、`weak`/`reject` 候选以及 Agent 手工补充的 URL 一律以 `SOURCE_NOT_AUTHORIZED_BY_DISCOVERY` 拒绝。旧会话缺少 `task.discoveryGate` 时保持只读兼容；一旦调用 `public-discover`，该会话即启用门禁。
 
 同一 `sourceSkill + sourceUrl` 视为同一来源记录；inventory 不得存在相同来源身份，并以最新采集操作为准。HTTP(S) URL 另按去 fragment、去末尾 `index.html`、统一尾斜杠及 query 参数排序后的值生成 `duplicateGroupKey`。同组的所有来源记录和 provenance 必须保留，第一条为 provenance 主记录，其余条目以 `duplicateOf` 指向主记录；canonical view 每个重复组仅输出按 inventory 顺序选出的首个已物化代表。
 

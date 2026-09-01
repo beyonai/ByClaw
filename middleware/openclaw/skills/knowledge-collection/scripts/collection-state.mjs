@@ -24,6 +24,7 @@ import {
   resolveCollectionInputFile,
 } from './session.mjs';
 import { deliveryCompleteForSession, summarizeCrawlDelivery } from './delivery-state.mjs';
+import { authorizePublicSource } from './discovery-authorization.mjs';
 import {
   CONTENT_GRANULARITIES,
   COVER_STATUSES,
@@ -37,6 +38,11 @@ const COLLECTION_STATUSES = new Set(['complete', 'partial', 'failed']);
 const MATERIALIZATION_STATUSES = new Set(['materialized', 'pending', 'failed']);
 const MARKDOWN_EXTENSIONS = new Set(['.md', '.markdown']);
 const SOURCE_SCOPE_ALIAS = { dws: 'dingtalk', fws: 'feishu', wecom: 'wecom', ima: 'ima' };
+
+function discoveryCandidateFor(session, source, sourceUrl) {
+  if ((SOURCE_SCOPE_ALIAS[source] || source) !== 'public-internet') return null;
+  return authorizePublicSource(session.task?.discoveryGate, sourceUrl);
+}
 
 function stableItemId(item) {
   const identity = [item.url, item.title, item.fileName].filter(Boolean).join('\n');
@@ -548,6 +554,7 @@ function markOneMaterialized(paths, session, metadata, collectionResult, update)
     if (!allowedSources.includes(SOURCE_SCOPE_ALIAS[source] || source)) {
       throw new Error(`sourceScope 不允许来源 ${source}`);
     }
+    const discoveryCandidate = discoveryCandidateFor(session, source, sourceUrl);
     if (!collectionResult.source) collectionResult.source = source;
     else if (collectionResult.source !== source) collectionResult.source = 'multi-source';
     if (!collectionResult.backend) collectionResult.backend = backend;
@@ -561,6 +568,7 @@ function markOneMaterialized(paths, session, metadata, collectionResult, update)
       sourceItemId: null,
       sourceSkill,
       backend,
+      ...(discoveryCandidate ? { discoveryCandidateId: discoveryCandidate.candidateId } : {}),
       collectionFilters: collectionResult.filters && typeof collectionResult.filters === 'object'
         ? clone(collectionResult.filters) : {},
       rawArtifacts: rawArtifacts ?? [],
@@ -572,6 +580,12 @@ function markOneMaterialized(paths, session, metadata, collectionResult, update)
     };
     metadata.collection.items.push(inventory);
   }
+
+  const effectiveSource = update.source || collectionResult.source;
+  const discoveryCandidate = effectiveSource
+    ? discoveryCandidateFor(session, effectiveSource, inventory.sourceUrl)
+    : null;
+  if (discoveryCandidate) inventory.discoveryCandidateId = discoveryCandidate.candidateId;
 
   const markdownPath = requireString(update.markdownPath, 'markdownPath');
   const sanitizedPath = requireString(update.sanitizedPath, 'sanitizedPath');
@@ -630,6 +644,7 @@ export function recordPendingCollectionItem(paths, update) {
     if (!allowedSources.includes(SOURCE_SCOPE_ALIAS[source] || source)) {
       throw new Error(`sourceScope 不允许来源 ${source}`);
     }
+    const discoveryCandidate = discoveryCandidateFor(loaded.session, source, sourceUrl);
 
     const duplicateIdentity = loaded.metadata.collection.items.find((item) =>
       item.itemId !== itemId && articleIdentity(item) === articleIdentity({ sourceSkill, sourceUrl }));
@@ -659,6 +674,7 @@ export function recordPendingCollectionItem(paths, update) {
         sourceItemId: null,
         sourceSkill,
         backend,
+        ...(discoveryCandidate ? { discoveryCandidateId: discoveryCandidate.candidateId } : {}),
         collectionFilters: loaded.collectionResult.filters
           && typeof loaded.collectionResult.filters === 'object'
           ? clone(loaded.collectionResult.filters) : {},

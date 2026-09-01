@@ -39,6 +39,7 @@ async function setupCollectedSession(root, { query = 'DeepSeek article', nested 
   const init = await runCli([
     'init', '--session-dir', sessionDir, '--query', query,
     '--source-scope', '["public-internet"]', '--materialization-target', 'selected',
+    '--direct-urls', '["https://example.com/deepseek","https://example.com/another","https://example.com/second"]',
   ]);
   assert.equal(init.code, 0, init.stderr || init.stdout);
 

@@ -4,8 +4,76 @@ import { chmod, mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, unlink,
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
+import test from 'node:test';
+import {
+  createDiscoveryAuthorization,
+  recordDiscoveryResult,
+  reserveDiscoveryAttempt,
+} from './discovery-authorization.mjs';
 
 const scriptPath = resolve(dirname(new URL(import.meta.url).pathname), 'knowledge-collection.mjs');
+
+test('collect rejects a public URL that was not authorized by discovery', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-collection-discovery-gate-'));
+  try {
+    const initialized = await runCli([
+      'init', '--session-dir', root, '--query', 'DeepSeek article',
+      '--source-scope', '["public-internet"]',
+    ]);
+    assert.equal(initialized.code, 0, initialized.stderr || initialized.stdout);
+    const sessionPath = join(root, 'session.json');
+    const session = JSON.parse(await readFile(sessionPath, 'utf8'));
+    session.task.discoveryGate = createDiscoveryAuthorization();
+    await writeFile(sessionPath, `${JSON.stringify(session, null, 2)}\n`);
+    await writeFile(join(root, 'markdown/deepseek.md'), '# DeepSeek\n');
+    await writeFile(join(root, 'sanitized/items/deepseek.md'), '# DeepSeek\n');
+    const payloadPath = join(root, '.collection-inputs/deepseek.json');
+    await writeFile(payloadPath, JSON.stringify({
+      schemaVersion: '1.0',
+      itemId: 'deepseek-r1',
+      source: 'public-internet',
+      sourceSkill: 'bycli',
+      backend: 'arxiv',
+      markdownPath: 'markdown/deepseek.md',
+      sanitizedPath: 'sanitized/items/deepseek.md',
+      contentGranularity: 'full-text',
+      canonicalItem: {
+        title: 'DeepSeek-R1',
+        url: 'https://arxiv.org/abs/2501.12948',
+        author: 'DeepSeek-AI',
+        publishTime: '',
+        markdown: 'sanitized/items/deepseek.md',
+        fileName: 'sanitized/items/deepseek.md',
+      },
+    }));
+
+    const collected = await runCli(['collect', '--session-dir', root, '--item-json-file', payloadPath]);
+    assert.equal(collected.code, 1);
+    assert.equal(collected.json.errorCode, 'SOURCE_NOT_AUTHORIZED_BY_DISCOVERY');
+    assert.match(collected.json.error, /SOURCE_NOT_AUTHORIZED_BY_DISCOVERY/);
+
+    reserveDiscoveryAttempt(session.task.discoveryGate, { query: 'DeepSeek-R1', category: 'science' });
+    const recorded = recordDiscoveryResult(session.task.discoveryGate, {
+      query: 'DeepSeek-R1',
+      category: 'science',
+      candidates: [{
+        url: 'https://arxiv.org/abs/2501.12948',
+        sourceUrls: ['https://arxiv.org/pdf/2501.12948'],
+        pageType: 'article',
+      }],
+    });
+    await writeFile(sessionPath, `${JSON.stringify(session, null, 2)}\n`);
+    const authorized = await runCli(['collect', '--session-dir', root, '--item-json-file', payloadPath]);
+    assert.equal(authorized.code, 0, authorized.stderr || authorized.stdout);
+    const persisted = JSON.parse(await readFile(sessionPath, 'utf8'));
+    assert.equal(
+      persisted.collection.collection.items[0].discoveryCandidateId,
+      recorded.articleCandidates[0].candidateId,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 function runCli(args) {
   return new Promise((resolveRun) => {
@@ -37,6 +105,7 @@ async function createCollectedSession() {
   const initialized = await runCli([
     'init', '--session-dir', root, '--query', 'collect example',
     '--collection-result-input-file', initial,
+    '--direct-urls', '["https://example.com/paper","https://example.com/paper-copy"]',
   ]);
   await unlink(initial);
   assert.equal(initialized.code, 0, initialized.stderr || initialized.stdout);
@@ -74,6 +143,7 @@ await (async () => {
     const initialized = await runCli([
       'init', '--session-dir', root, '--query', 'fresh collection',
       '--source-scope', '["public-internet"]', '--materialization-target', 'all',
+      '--direct-urls', '["https://example.com/fresh"]',
     ]);
     assert.equal(initialized.code, 0, initialized.stderr || initialized.stdout);
     await Promise.all([

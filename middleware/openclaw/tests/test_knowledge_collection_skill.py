@@ -112,6 +112,16 @@ def markdown_section(text, heading):
 
 
 class KnowledgeCollectionSkillContractTest(unittest.TestCase):
+    def test_public_discovery_cannot_be_bypassed_by_manual_source_search(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        contract = (SKILL_ROOT / "references" / "collection-contract.md").read_text(encoding="utf-8")
+        self.assertIn("--direct-urls", skill)
+        self.assertIn("SOURCE_NOT_AUTHORIZED_BY_DISCOVERY", skill)
+        self.assertIn("公共发现最多允许两轮", skill)
+        self.assertIn("用户明确提供的 URL", contract)
+        self.assertIn("discoveryCandidateId", contract)
+        self.assertIn("不得使用模型记忆中的 URL、DOI、论文 ID", skill)
+
     def test_knowledge_collection_upgrade_is_isolated_in_v031(self):
         self.assertTrue(V031_DML.is_file(), "knowledge collection migration must be versioned as V0.3.1")
         v030 = V030_DML.read_text(encoding="utf-8")
