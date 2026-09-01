@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {
-  chmod, mkdtemp, readFile, rm, stat, writeFile,
+  chmod, mkdtemp, readFile, readdir, rm, stat, writeFile,
 } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
@@ -174,6 +174,77 @@ test('a successful confirmed rerun completes the operation', async (t) => {
 
   assert.equal(completed.executed, true);
   assert.equal(completed.phase, 'complete');
+});
+
+test('initial no-auth-state result receives initial context and creates no gate state', async (t) => {
+  const stateDir = await mkdtemp(join(tmpdir(), 'weixin-login-gate-no-auth-'));
+  t.after(() => rm(stateDir, { recursive: true, force: true }));
+  const contexts = [];
+
+  const outcome = await runGate({
+    stateDir,
+    argv: command(),
+    execute: async (_argv, context) => {
+      contexts.push(context);
+      return {
+        ...result(69, 'BROWSER_CONNECT'),
+        commandExecuted: false,
+        stateDisposition: 'no-auth-state',
+      };
+    },
+  });
+
+  assert.deepEqual(contexts, [{ attemptKind: 'initial' }]);
+  assert.equal(outcome.exitCode, 69);
+  assert.equal('commandExecuted' in outcome, false);
+  assert.equal('stateDisposition' in outcome, false);
+  assert.deepEqual(await readdir(stateDir), []);
+});
+
+test('typed initial BROWSER_CONNECT does not consume authentication state', async (t) => {
+  const stateDir = await mkdtemp(join(tmpdir(), 'weixin-login-gate-bridge-'));
+  t.after(() => rm(stateDir, { recursive: true, force: true }));
+
+  const outcome = await runGate({
+    stateDir,
+    argv: command(),
+    execute: async () => result(69, 'BROWSER_CONNECT'),
+  });
+
+  assert.equal(outcome.phase, 'initial');
+  assert.deepEqual(await readdir(stateDir), []);
+});
+
+test('confirmed rerun is consumed before callback and remains terminal for no-auth-state result', async (t) => {
+  const stateDir = await mkdtemp(join(tmpdir(), 'weixin-login-gate-confirmed-'));
+  t.after(() => rm(stateDir, { recursive: true, force: true }));
+  const contexts = [];
+  const execute = async (_argv, context) => {
+    contexts.push(context);
+    if (context.attemptKind === 'initial') return result(77, 'AUTH_REQUIRED');
+    return {
+      ...result(69, 'BROWSER_CONNECT'),
+      commandExecuted: true,
+      stateDisposition: 'no-auth-state',
+    };
+  };
+
+  await runGate({ stateDir, argv: command(), execute });
+  const rerun = await runGate({
+    stateDir,
+    argv: command(),
+    verificationConfirmed: true,
+    execute,
+  });
+  const denied = await runGate({ stateDir, argv: command(), execute });
+
+  assert.deepEqual(contexts, [
+    { attemptKind: 'initial' },
+    { attemptKind: 'confirmed-rerun' },
+  ]);
+  assert.equal(rerun.phase, 'terminal');
+  assert.equal('stateDisposition' in rerun, false);
+  assert.equal(denied.reason, 'login-gate-rerun-exhausted');
 });
 
 function runGateCli(args, env) {

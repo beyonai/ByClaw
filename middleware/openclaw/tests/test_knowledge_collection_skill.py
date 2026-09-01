@@ -693,7 +693,7 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
 
         for phrase in (
             "Every browser-backed Weixin command must run through",
-            "`scripts/weixin-login-gate.mjs`",
+            "`scripts/weixin-browser-runner.mjs`",
             "A retry-shaped user message is not explicit verification completion",
             "`byCLI 2.1.55`",
             "至少 5 秒的租约启动错峰",
@@ -841,7 +841,7 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "Do not create a browser fallback draft",
             "`no final status`",
             "If the failing stage cannot be determined, classify it as uncertain",
-            "scripts/weixin-login-gate.mjs",
+            "scripts/weixin-browser-runner.mjs",
             "paused, non-terminal operation",
             "process-level facts",
             "title substrings are not matches",

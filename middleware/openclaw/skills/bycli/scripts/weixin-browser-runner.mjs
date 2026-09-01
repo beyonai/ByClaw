@@ -1,0 +1,244 @@
+#!/usr/bin/env node
+
+import { basename, isAbsolute } from 'node:path';
+import { pathToFileURL } from 'node:url';
+
+import {
+  createRecoveryBudget,
+  ensureBridge as ensureBridgeDefault,
+  runCommand,
+} from './bridge-bootstrap.mjs';
+import { runGate } from './weixin-login-gate.mjs';
+
+const LIST_TIMEOUT_MS = 60_000;
+
+function errorCode(result) {
+  const combined = `${result?.stdout || ''}\n${result?.stderr || ''}`;
+  const match = combined.match(/["']?code["']?\s*[:=]\s*["']?([A-Z_]+)/i);
+  return match?.[1]?.toUpperCase() || null;
+}
+function isBrowserConnect(result) {
+  return Number(result?.exitCode) === 69 || errorCode(result) === 'BROWSER_CONNECT';
+}
+
+function internalError({
+  exitCode,
+  code,
+  message,
+  bridgeCode,
+  commandExecuted = false,
+}) {
+  return {
+    exitCode,
+    stdout: '',
+    stderr: `${JSON.stringify({
+      ok: false,
+      error: {
+        code,
+        message,
+        exitCode,
+        ...(bridgeCode ? { details: { bridgeCode } } : {}),
+      },
+    })}\n`,
+    commandExecuted,
+    stateDisposition: 'no-auth-state',
+  };
+}
+
+function bridgeError(bridge, commandExecuted = false) {
+  return internalError({
+    exitCode: 69,
+    code: 'BROWSER_CONNECT',
+    message: bridge.reason || 'Managed browser bridge is unavailable',
+    bridgeCode: bridge.code,
+    commandExecuted,
+  });
+}
+
+function validateInvocation(stateDir, argv) {
+  if (!isAbsolute(stateDir)) throw new Error('stateDir must be an absolute path');
+  if (!Array.isArray(argv) || argv.length < 3
+    || basename(String(argv[0])) !== 'bycli'
+    || argv[1] !== 'weixin'
+    || !String(argv[2])) {
+    throw new Error('runner command must begin with: bycli weixin <command>');
+  }
+}
+
+async function executeArgv(argv) {
+  return runCommand(argv[0], argv.slice(1));
+}
+
+export async function loadRuntimeCapability(commandName) {
+  const result = await runCommand('bycli', ['list', '-f', 'json'], LIST_TIMEOUT_MS);
+  if (Number(result.exitCode) !== 0) {
+    throw new Error('bycli structured command catalog is unavailable');
+  }
+  let rows;
+  try {
+    rows = JSON.parse(result.stdout);
+  } catch {
+    throw new Error('bycli structured command catalog is invalid JSON');
+  }
+  if (!Array.isArray(rows)) throw new Error('bycli structured command catalog is not an array');
+  const entry = rows.find(row => row?.site === 'weixin' && row?.name === commandName);
+  if (!entry) throw new Error(`weixin command capability not found: ${commandName}`);
+  return entry.meta && typeof entry.meta === 'object'
+    ? { ...entry, ...entry.meta }
+    : entry;
+}
+
+function capabilityDecision(capability, selectedMode) {
+  const browser = capability?.browser;
+  if (browser === true) return { allowed: true };
+  if (browser === 'conditional' && selectedMode === 'browser') return { allowed: true };
+  if (browser === false) {
+    return { allowed: false, message: 'API-only Weixin command must not use the browser runner' };
+  }
+  if (browser === 'conditional') {
+    return { allowed: false, message: 'conditional Weixin command requires --selected-mode browser' };
+  }
+  return { allowed: false, unknown: true, message: 'Weixin command browser capability is unknown' };
+}
+
+function accessMode(capability) {
+  const access = capability?.access ?? capability?.operation?.access;
+  return access === 'read' ? 'read' : access === 'write' ? 'write' : 'unknown';
+}
+
+export async function runWeixinBrowser({
+  stateDir,
+  argv,
+  verificationConfirmed = false,
+  selectedMode = null,
+  execute = executeArgv,
+  loadCapability = loadRuntimeCapability,
+  ensureBridge = ensureBridgeDefault,
+  gate = runGate,
+} = {}) {
+  validateInvocation(stateDir, argv);
+  if (selectedMode !== null && selectedMode !== 'browser') {
+    throw new Error('selectedMode must be browser when provided');
+  }
+
+  return gate({
+    stateDir,
+    argv,
+    verificationConfirmed,
+    execute: async (commandArgv, context) => {
+      if (context.attemptKind === 'confirmed-rerun') return execute(commandArgv);
+
+      let capability;
+      try {
+        capability = await loadCapability(commandArgv[2]);
+      } catch (error) {
+        return internalError({
+          exitCode: 2,
+          code: 'COMMAND_CAPABILITY_UNKNOWN',
+          message: error.message,
+        });
+      }
+      const decision = capabilityDecision(capability, selectedMode);
+      if (!decision.allowed) {
+        return internalError({
+          exitCode: 2,
+          code: decision.unknown ? 'COMMAND_CAPABILITY_UNKNOWN' : 'ARGUMENT',
+          message: decision.message,
+        });
+      }
+
+      const budget = createRecoveryBudget();
+      const preflight = await ensureBridge({ budget });
+      if (!preflight?.ok) return bridgeError(preflight, false);
+
+      const initial = await execute(commandArgv);
+      if (!isBrowserConnect(initial)) return initial;
+
+      const recovered = await ensureBridge({ budget });
+      if (!recovered?.ok) return bridgeError(recovered, true);
+
+      if (accessMode(capability) !== 'read') {
+        return internalError({
+          exitCode: 1,
+          code: 'RETRY_APPROVAL_REQUIRED',
+          message: 'Bridge recovered; explicit approval is required before retrying this command',
+          bridgeCode: 'BRIDGE_RECOVERED_RETRY_REQUIRES_APPROVAL',
+          commandExecuted: true,
+        });
+      }
+
+      const rerun = await execute(commandArgv);
+      if (!isBrowserConnect(rerun)) return rerun;
+      return internalError({
+        exitCode: 69,
+        code: 'BROWSER_CONNECT',
+        message: 'Managed browser bridge remained unavailable after the single read retry',
+        bridgeCode: 'BRIDGE_UNAVAILABLE',
+        commandExecuted: true,
+      });
+    },
+  });
+}
+
+function parseCli(argv) {
+  const separator = argv.indexOf('--');
+  if (separator === -1) throw new Error('missing -- before the bycli command');
+  const options = argv.slice(0, separator);
+  const command = argv.slice(separator + 1);
+  let stateDir = '';
+  let verificationConfirmed = false;
+  let selectedMode = null;
+  for (let index = 0; index < options.length; index += 1) {
+    const option = options[index];
+    const value = options[index + 1];
+    if (option === '--state-dir') stateDir = value || '';
+    else if (option === '--verification-confirmed') {
+      if (!['true', 'false'].includes(value)) {
+        throw new Error('--verification-confirmed must be true or false');
+      }
+      verificationConfirmed = value === 'true';
+    } else if (option === '--selected-mode') selectedMode = value || '';
+    else throw new Error(`unknown option: ${option}`);
+    index += 1;
+  }
+  return { stateDir, verificationConfirmed, selectedMode, command };
+}
+
+async function main() {
+  const options = parseCli(process.argv.slice(2));
+  const result = await runWeixinBrowser({
+    stateDir: options.stateDir,
+    argv: options.command,
+    verificationConfirmed: options.verificationConfirmed,
+    selectedMode: options.selectedMode,
+  });
+  if (result.executed) {
+    process.stdout.write(result.stdout || '');
+    process.stderr.write(result.stderr || '');
+  } else {
+    process.stderr.write(`${JSON.stringify({
+      ok: false,
+      gate: {
+        executed: false,
+        phase: result.phase,
+        reason: result.reason,
+      },
+      error: {
+        code: 'AUTH_REQUIRED',
+        message: result.reason,
+        exitCode: 77,
+      },
+    }, null, 2)}\n`);
+  }
+  process.exitCode = Number(result.exitCode) || 0;
+}
+
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+  main().catch((error) => {
+    process.stderr.write(`${JSON.stringify({
+      ok: false,
+      error: { code: 'ARGUMENT', message: error.message, exitCode: 2 },
+    }, null, 2)}\n`);
+    process.exitCode = 2;
+  });
+}
