@@ -260,20 +260,6 @@ public class SandboxService {
     }
 
     /**
-     * 统一的“确保沙箱可用”入口。
-     * 登录预启动和会话重试都应通过这里进入，避免在调用侧各自拼接等待逻辑。
-     */
-    public SandboxLaunchData ensureSandboxReady(String userCode, Long resourceId, String targetAgentType) {
-        LOGGER.info("确保沙箱可用，用户编码：{}，资源ID：{}，targetAgentType：{}", userCode, resourceId, targetAgentType);
-        if (StringUtils.isBlank(targetAgentType)) {
-            return launchSandbox(userCode, resourceId);
-        }
-        SandboxLaunchData launchData = launchSandboxAwait(userCode, resourceId);
-        waitWorkerReadySync(targetAgentType);
-        return launchData;
-    }
-
-    /**
      * 保存用户首选 serviceKey 到 Redis
      *
      * @param userCode   用户工号
@@ -1076,8 +1062,15 @@ public class SandboxService {
      * @param resourceId 资源ID
      */
     public void removeSandbox(String userCode, Long resourceId) {
+        removeSandbox(userCode, resourceId, null);
+    }
+
+    /**
+     * 释放指定用户的沙箱；未指定资源时可按沙箱服务类型精确释放。
+     */
+    public void removeSandbox(String userCode, Long resourceId, String requestedSandboxType) {
         String releaseReason = manualReleaseReason(userCode);
-        String sandboxType = null;
+        String sandboxType = StringUtils.trimToNull(requestedSandboxType);
         List<Long> effectiveResourceIds = new ArrayList<>();
         if (resourceId != null) {
             SandboxLaunchRouting routing = sandboxLaunchContextFactory.resolveRouting(resourceId, userCode);
@@ -1087,11 +1080,13 @@ public class SandboxService {
         List<SsSandboxRecord> records = sandboxRecordMapper.selectRunningByUserAndResources(userCode,
             sandboxType, effectiveResourceIds);
         if (records == null || records.isEmpty()) {
-            LOGGER.warn("未找到运行中的沙箱记录，用户编码：{}，资源ID：{}", userCode, resourceId);
+            LOGGER.warn("未找到运行中的沙箱记录，用户编码：{}，资源ID：{}，沙箱类型：{}", userCode, resourceId,
+                sandboxType);
             return;
         }
-        LOGGER.info("开始手动释放沙箱，用户编码：{}，资源ID：{}，命中记录数：{}，记录：{}",
-            userCode, resourceId, records.size(), records.stream().map(this::sandboxRef).collect(Collectors.toList()));
+        LOGGER.info("开始手动释放沙箱，用户编码：{}，资源ID：{}，沙箱类型：{}，命中记录数：{}，记录：{}",
+            userCode, resourceId, sandboxType, records.size(),
+            records.stream().map(this::sandboxRef).collect(Collectors.toList()));
         for (SsSandboxRecord record : records) {
             doRemoveSandbox(record, releaseReason);
         }
