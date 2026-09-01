@@ -93,6 +93,7 @@ collection_filters:
 - `collection.items`：完整文章清单。每项使用稳定 `itemId`，并记录 `sourceSkill`、`backend`、`sourceItemId`、`sourceUrl`、用户筛选、`rawArtifacts` 及 `materialization`。公共发现条目还记录 `discoveryCandidateId`，它必须指向本会话 `task.discoveryGate.candidates` 中的 `article` 或用户明确提供的 URL。
 - `materialization.status`：`materialized`、`pending` 或 `failed`；已物化时记录准确的 `markdownPath` 与 `sanitizedPath`，文件删除或校验失败后相应路径必须置为 `null`。
 - `materialization.contentGranularity`：`full-text`、`excerpt`、`abstract` 或 `unknown`，表示正文内容粒度，与 `materialization.status`、`collection.status` 和 `deliveryComplete` 正交。旧会话或缺失字段一律按 `unknown`，不得默认 `full-text`；普通 `content`、`markdown` 或字数不能单独证明全文完整。
+- `fullTextEvidence`：公共来源声明 `full-text` 时必填，记录 `schemaVersion`、获准 `executor` 和位于 `raw/` 的结构化 `artifact`。回执必须确认相同来源 URL、相同执行器、`complete=true` 与 `contentGranularity=full-text`，并同时登记在 `rawArtifacts`。只有获准来源执行器或专用 materializer 可以生成并在 `session.task.fullTextEvidenceReceipts` 注册该回执及哈希，不得由 Agent 手写；缺少注册、内容变化或字段不匹配时 `collect` 拒绝全文声明。
 - `media`：文章媒体覆盖状态。`coverStatus` 为 `not-present`、`materialized`、`unavailable` 或 `unknown`，并记录 `coverCount`、`materializedCoverCount` 与非敏感 `reason`。`unavailable` 表示至少一个已知封面未能物化，允许 `materializedCoverCount` 小于 `coverCount` 以表达部分成功。旧会话缺失或含非法 media 状态时只读归一为 `unknown`，使用 `reason=legacy-media-state-unknown`；不得猜测为无封面或已物化。
 - `materialization.pendingArtifactCleanup`：仅用于重新物化时清除旧工作副本的内部队列，只允许包含 `markdown/` 或 `sanitized/items/` 下的 Markdown，不得包含共享 `raw/`，也不得用于交付后的清理。
 - `sourceMetadata`：来源执行器的非敏感版本、任务 ID、范围和诊断信息。
@@ -166,6 +167,8 @@ payload 文件必须位于当前会话的 `.collection-inputs/` 内，成功登�
 
 `rawArtifacts` 是可选的来源恢复证据列表。每个显式登记的文件必须位于 `raw/`、真实存在、非空、可读且不是符号链接；重复路径按首次出现顺序去重。`rawArtifacts` 省略时保留 inventory 中已有的列表，显式传入时替换当前列表，传入空数组表示明确清空当前来源证据。
 
+公共来源只有在执行器或专用 materializer 生成 `fullTextEvidence` 时才能把 `contentGranularity` 设为 `full-text`。证据对象不得由 Agent 手写，其 `artifact` 必须同时位于 `rawArtifacts`；否则使用 `unknown`、`excerpt` 或 `abstract` 的实际粒度。
+
 只有需要在建会话时预置包含 pending 条目的完整清单，才使用 `--metadata-input-file`。只有导入历史兼容视图时才需要 `--collection-result-input-file`；新会话的第一次 `collect` 不再要求预置它。除此之外一律通过 `collect` 登记。
 
 ## 微信下载结果物化
@@ -195,6 +198,7 @@ node scripts/knowledge-collection.mjs publish --session-dir <dir> --delivery-dir
 
 相对 `<path>` 必须补充 `--session-root <Session Root>`；绝对路径保持原位置。目标不存在或为空时直接成为
 `actualDirectory`。目标非空时，在其中创建 `<task-slug>-collection-<short-run-id>/`，不得覆盖或删除目标目录中已有的未知内容。
+`<task-slug>` 优先来自首个已物化代表条目的标题，并限制为简短稳定名称；不得直接截取整段用户问题。`deliveryComplete=true` 之前以及 `publish` 调用之前不得创建或写入用户交付目录。
 目标是 `/`、普通文件或符号链接时拒绝。发布内容只来自 `status.downstreamInput.files`，并且只复制 Markdown 引用的本地图片；
 `raw/`、`markdown/`、metadata、状态文件和未引用图片不会发布。
 

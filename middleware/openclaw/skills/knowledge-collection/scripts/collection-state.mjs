@@ -175,6 +175,84 @@ function validateRawArtifacts(root, rawArtifacts) {
   return [...new Set(validated)];
 }
 
+function fullTextEvidenceHash(paths, artifact) {
+  return `sha256:${crypto.createHash('sha256').update(fs.readFileSync(path.join(paths.root, artifact))).digest('hex')}`;
+}
+
+function validateFullTextEvidence(paths, session, evidence, { sourceSkill, sourceUrl, rawArtifacts }) {
+  if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) {
+    throw new Error('公共来源 full-text 必须提供获准执行器生成的 fullTextEvidence');
+  }
+  if (evidence.schemaVersion !== '1.0') {
+    throw new Error('fullTextEvidence.schemaVersion 必须是 1.0');
+  }
+  const executor = requireString(evidence.executor, 'fullTextEvidence.executor');
+  if (executor !== sourceSkill) {
+    throw new Error('fullTextEvidence.executor 必须与 sourceSkill 一致');
+  }
+  const artifact = requireString(evidence.artifact, 'fullTextEvidence.artifact');
+  validateRawArtifacts(paths.root, [artifact]);
+  if (!rawArtifacts.includes(artifact)) {
+    throw new Error('fullTextEvidence.artifact 必须同时登记在 rawArtifacts 中');
+  }
+  const receipt = readJson(path.join(paths.root, artifact), 'fullTextEvidence.artifact');
+  if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt)
+    || receipt.schemaVersion !== '1.0'
+    || receipt.executor !== executor
+    || receipt.sourceUrl !== sourceUrl
+    || receipt.complete !== true
+    || receipt.contentGranularity !== 'full-text') {
+    throw new Error('执行器全文证据必须确认相同来源、执行器和 full-text 完整性');
+  }
+  const artifactHash = fullTextEvidenceHash(paths, artifact);
+  const registered = session.task?.fullTextEvidenceReceipts?.some((entry) => (
+    entry?.schemaVersion === '1.0'
+      && entry.executor === executor
+      && entry.sourceUrl === sourceUrl
+      && entry.artifact === artifact
+      && entry.artifactHash === artifactHash
+  ));
+  if (!registered) {
+    throw new Error('fullTextEvidence 未由专用 materializer 注册或登记后已被修改');
+  }
+  return { schemaVersion: '1.0', executor, artifact };
+}
+
+export function registerFullTextEvidenceReceipt(paths, evidence) {
+  return withSessionLock(paths, 'register-full-text-evidence', () => {
+    const { session } = sessionLoad(paths, { persistMigration: true });
+    const executor = requireString(evidence?.executor, 'fullTextEvidence.executor');
+    const sourceUrl = requireString(evidence?.sourceUrl, 'fullTextEvidence.sourceUrl');
+    const artifact = requireString(evidence?.artifact, 'fullTextEvidence.artifact');
+    validateRawArtifacts(paths.root, [artifact]);
+    const receipt = readJson(path.join(paths.root, artifact), 'fullTextEvidence.artifact');
+    if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt)
+      || receipt.schemaVersion !== '1.0'
+      || receipt.executor !== executor
+      || receipt.sourceUrl !== sourceUrl
+      || receipt.complete !== true
+      || receipt.contentGranularity !== 'full-text') {
+      throw new Error('专用 materializer 只能登记已确认完整的执行器全文回执');
+    }
+    const registration = {
+      schemaVersion: '1.0',
+      executor,
+      sourceUrl,
+      artifact,
+      artifactHash: fullTextEvidenceHash(paths, artifact),
+    };
+    const previous = Array.isArray(session.task.fullTextEvidenceReceipts)
+      ? session.task.fullTextEvidenceReceipts : [];
+    session.task.fullTextEvidenceReceipts = [
+      ...previous.filter((entry) => !(entry?.executor === executor
+        && entry?.sourceUrl === sourceUrl && entry?.artifact === artifact)),
+      registration,
+    ];
+    persistCollection(paths, session, session.collection);
+    return registration;
+  });
+}
+
 function safeWorkCopy(paths, relativePath, directory, { requireExisting = false } = {}) {
   if (typeof relativePath !== 'string' || !relativePath.trim()) return false;
   if (!MARKDOWN_EXTENSIONS.has(path.extname(relativePath).toLowerCase())) return false;
@@ -304,6 +382,32 @@ function normalizeMaterializations(paths, metadata) {
     recovered = true;
   }
   return { recovered, warnings, invalidSanitizedPaths };
+}
+
+function normalizeFullTextEvidence(paths, session, metadata) {
+  let recovered = false;
+  const warnings = [];
+  const publicScope = Array.isArray(session.task?.sourceScope)
+    && session.task.sourceScope.includes('public-internet');
+  for (const item of metadata.collection.items) {
+    if (item.materialization.contentGranularity !== 'full-text') continue;
+    const isPublicItem = typeof item.discoveryCandidateId === 'string'
+      || (publicScope && /^https?:\/\//i.test(item.sourceUrl));
+    if (!isPublicItem) continue;
+    try {
+      item.fullTextEvidence = validateFullTextEvidence(paths, session, item.fullTextEvidence, {
+        sourceSkill: item.sourceSkill,
+        sourceUrl: item.sourceUrl,
+        rawArtifacts: item.rawArtifacts,
+      });
+    } catch (error) {
+      item.materialization.contentGranularity = 'unknown';
+      delete item.fullTextEvidence;
+      warnings.push(`inventory ${item.itemId || '<unknown>'} fullTextEvidence 无效，已降级为 unknown: ${error.message}`);
+      recovered = true;
+    }
+  }
+  return { recovered, warnings };
 }
 
 function validateMetadata(metadata) {
@@ -444,6 +548,7 @@ function loadCollectionSession(paths, { persistRecovery = false, skipCanonicalVa
   const normalized = normalizeMetadata(paths.root, rawMetadata, collectionResult);
   const metadata = normalized.metadata;
   const materializations = normalizeMaterializations(paths, metadata);
+  const fullTextEvidence = normalizeFullTextEvidence(paths, session, metadata);
   if (materializations.invalidSanitizedPaths.size) {
     collectionResult.items = collectionResult.items
       .filter((item) => !materializations.invalidSanitizedPaths.has(item.fileName));
@@ -453,7 +558,7 @@ function loadCollectionSession(paths, { persistRecovery = false, skipCanonicalVa
   if (!skipCanonicalValidation) validateCanonicalView(paths.root, collectionResult, metadata);
   const metadataChanged = JSON.stringify(metadata) !== JSON.stringify(rawMetadata) || migrated;
   if (persistRecovery && metadataChanged) persistCollection(paths, session, metadata);
-  if (persistRecovery && (collectionResultChanged || materializations.recovered)) {
+  if (persistRecovery && (collectionResultChanged || materializations.recovered || fullTextEvidence.recovered)) {
     atomicWriteJson(paths.collectionResult, collectionResult);
   }
   return {
@@ -463,7 +568,7 @@ function loadCollectionSession(paths, { persistRecovery = false, skipCanonicalVa
     metadataChanged,
     collectionResultChanged,
     materializationRecovered: materializations.recovered,
-    warnings: [...normalized.warnings, ...materializations.warnings],
+    warnings: [...normalized.warnings, ...materializations.warnings, ...fullTextEvidence.warnings],
   };
 }
 
@@ -602,6 +707,23 @@ function markOneMaterialized(paths, session, metadata, collectionResult, update)
       && value !== markdownPath && value !== sanitizedPath);
   inventory.title = update.canonicalItem.title;
   if (rawArtifacts !== undefined) inventory.rawArtifacts = rawArtifacts;
+  const contentGranularity = normalizeContentGranularity(update.contentGranularity, { strict: true });
+  const isPublicItem = effectiveSource === 'public-internet'
+    || typeof inventory.discoveryCandidateId === 'string';
+  if (isPublicItem && contentGranularity === 'full-text') {
+    inventory.fullTextEvidence = validateFullTextEvidence(
+      paths,
+      session,
+      update.fullTextEvidence ?? inventory.fullTextEvidence,
+      {
+        sourceSkill: inventory.sourceSkill,
+        sourceUrl: inventory.sourceUrl,
+        rawArtifacts: inventory.rawArtifacts,
+      },
+    );
+  } else {
+    delete inventory.fullTextEvidence;
+  }
   inventory.materialization = {
     status: 'materialized',
     markdownPath,
@@ -611,7 +733,7 @@ function markOneMaterialized(paths, session, metadata, collectionResult, update)
       ...oldPaths,
     ])],
     reason: null,
-    contentGranularity: normalizeContentGranularity(update.contentGranularity, { strict: true }),
+    contentGranularity,
   };
   inventory.media = update.media === undefined
     ? normalizeMediaState(inventory.media, { strict: true, coverUrls: inventory.coverUrls })

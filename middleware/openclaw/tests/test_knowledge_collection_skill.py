@@ -112,6 +112,29 @@ def markdown_section(text, heading):
 
 
 class KnowledgeCollectionSkillContractTest(unittest.TestCase):
+    def test_public_full_text_requires_executor_owned_evidence(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        contract = (SKILL_ROOT / "references" / "collection-contract.md").read_text(encoding="utf-8")
+
+        for phrase in (
+            "fullTextEvidence",
+            "只有获准来源执行器或专用 materializer",
+            "不得由 Agent 手写",
+        ):
+            self.assertIn(phrase, skill + contract)
+
+    def test_publish_completion_requires_first_response_delivery_input_echo(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        delivery = (SKILL_ROOT / "references" / "delivery.md").read_text(encoding="utf-8")
+
+        for phrase in (
+            "首次最终答复",
+            "原样回显 `deliveryInput`",
+            "不得只报告路径",
+            "publish 之前不得创建",
+        ):
+            self.assertIn(phrase, skill + delivery)
+
     def test_public_discovery_cannot_be_bypassed_by_manual_source_search(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
         contract = (SKILL_ROOT / "references" / "collection-contract.md").read_text(encoding="utf-8")

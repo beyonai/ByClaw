@@ -10,6 +10,8 @@ import {
   recordDiscoveryResult,
   reserveDiscoveryAttempt,
 } from './discovery-authorization.mjs';
+import { registerFullTextEvidenceReceipt } from './collection-state.mjs';
+import { sessionPaths } from './session.mjs';
 
 const scriptPath = resolve(dirname(new URL(import.meta.url).pathname), 'knowledge-collection.mjs');
 
@@ -63,6 +65,41 @@ test('collect rejects a public URL that was not authorized by discovery', async 
       }],
     });
     await writeFile(sessionPath, `${JSON.stringify(session, null, 2)}\n`);
+    const missingExecutorEvidence = await runCli([
+      'collect', '--session-dir', root, '--item-json-file', payloadPath,
+    ]);
+    assert.equal(missingExecutorEvidence.code, 1);
+    assert.match(missingExecutorEvidence.json.error, /fullTextEvidence|执行器.*全文证据/);
+
+    await mkdir(join(root, 'raw/bycli'), { recursive: true });
+    await writeFile(join(root, 'raw/bycli/deepseek-result.json'), `${JSON.stringify({
+      schemaVersion: '1.0',
+      executor: 'bycli',
+      sourceUrl: 'https://arxiv.org/abs/2501.12948',
+      complete: true,
+      contentGranularity: 'full-text',
+    }, null, 2)}\n`);
+    const payload = JSON.parse(await readFile(payloadPath, 'utf8'));
+    payload.rawArtifacts = ['raw/bycli/deepseek-result.json'];
+    payload.fullTextEvidence = {
+      schemaVersion: '1.0',
+      executor: 'bycli',
+      artifact: 'raw/bycli/deepseek-result.json',
+    };
+    await writeFile(payloadPath, `${JSON.stringify(payload, null, 2)}\n`);
+
+    const unregisteredEvidence = await runCli([
+      'collect', '--session-dir', root, '--item-json-file', payloadPath,
+    ]);
+    assert.equal(unregisteredEvidence.code, 1);
+    assert.match(unregisteredEvidence.json.error, /未由专用 materializer 注册/);
+
+    registerFullTextEvidenceReceipt(sessionPaths(root), {
+      executor: 'bycli',
+      sourceUrl: 'https://arxiv.org/abs/2501.12948',
+      artifact: 'raw/bycli/deepseek-result.json',
+    });
+
     const authorized = await runCli(['collect', '--session-dir', root, '--item-json-file', payloadPath]);
     assert.equal(authorized.code, 0, authorized.stderr || authorized.stdout);
     const persisted = JSON.parse(await readFile(sessionPath, 'utf8'));
@@ -70,6 +107,24 @@ test('collect rejects a public URL that was not authorized by discovery', async 
       persisted.collection.collection.items[0].discoveryCandidateId,
       recorded.articleCandidates[0].candidateId,
     );
+    assert.deepEqual(persisted.collection.collection.items[0].fullTextEvidence, {
+      schemaVersion: '1.0',
+      executor: 'bycli',
+      artifact: 'raw/bycli/deepseek-result.json',
+    });
+
+    await writeFile(join(root, 'raw/bycli/deepseek-result.json'), `${JSON.stringify({
+      schemaVersion: '1.0',
+      executor: 'bycli',
+      sourceUrl: 'https://arxiv.org/abs/2501.12948',
+      complete: false,
+      contentGranularity: 'unknown',
+    }, null, 2)}\n`);
+    const drifted = await runCli(['status', '--session-dir', root, '--full']);
+    assert.equal(drifted.code, 0, drifted.stderr || drifted.stdout);
+    assert.equal(drifted.json.collection.contentGranularity['full-text'], 0);
+    assert.equal(drifted.json.collection.contentGranularity.unknown, 1);
+    assert.ok(drifted.json.warnings.some((warning) => /fullTextEvidence.*unknown/.test(warning)));
   } finally {
     await rm(root, { recursive: true, force: true });
   }
