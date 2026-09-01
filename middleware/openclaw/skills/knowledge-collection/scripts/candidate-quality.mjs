@@ -1,5 +1,7 @@
 'use strict';
 
+import { assessCandidateTopic, isEligibleArticle } from './topic-relevance.mjs';
+
 const TYPE_ORDER = Object.freeze({ article: 0, weak: 1, reject: 2 });
 const LOGIN_URL = /(?:^|\/)(?:login|signin|passport|account|auth)(?:\/|$)/i;
 const LOGIN_TEXT = /(?:登录|注册|账号服务|通行证|sign\s*in|log\s*in)/i;
@@ -91,21 +93,37 @@ export function classifyCandidate(candidate) {
   return { pageType: 'weak', reasons: ['ambiguous-detail-page'] };
 }
 
-function annotateCandidate(candidate) {
+function annotateCandidate(candidate, topicContract = null) {
   const quality = classifyCandidate(candidate);
   return {
     ...candidate,
     pageType: quality.pageType,
     pageTypeReasons: quality.reasons,
+    topicRelevance: assessCandidateTopic(topicContract, candidate),
   };
 }
 
-export function classifyCandidates(candidates) {
-  const annotated = Array.isArray(candidates) ? candidates.map(annotateCandidate) : [];
+function qualitySummary(annotated) {
+  const relevance = { matched: 0, unmatched: 0, unknown: 0, notRequired: 0 };
+  for (const candidate of annotated) {
+    const key = candidate.topicRelevance.status === 'not-required'
+      ? 'notRequired' : candidate.topicRelevance.status;
+    relevance[key] += 1;
+  }
   return {
     article: annotated.filter((candidate) => candidate.pageType === 'article').length,
     weak: annotated.filter((candidate) => candidate.pageType === 'weak').length,
     reject: annotated.filter((candidate) => candidate.pageType === 'reject').length,
+    eligibleArticle: annotated.filter(isEligibleArticle).length,
+    topicRelevance: relevance,
+  };
+}
+
+export function classifyCandidates(candidates, topicContract = null) {
+  const annotated = Array.isArray(candidates)
+    ? candidates.map((candidate) => annotateCandidate(candidate, topicContract)) : [];
+  return {
+    ...qualitySummary(annotated),
     candidates: annotated,
   };
 }
@@ -120,31 +138,103 @@ export function countUniqueArticles(candidates) {
   return urls.size;
 }
 
-function annotateAndSort(candidates) {
+export function countUniqueEligibleArticles(candidates, topicContract = null) {
+  const urls = new Set();
+  const annotatedCandidates = annotateMergedCandidates({
+    groups: {
+      bothChannels: [],
+      searxngTop: Array.isArray(candidates) ? candidates : [],
+      agentReachTop: [],
+      hotBySource: {},
+      hotWithoutPopularity: [],
+      unverified: [],
+    },
+  }, topicContract).groups.searxngTop;
+  for (const annotated of annotatedCandidates) {
+    if (!isEligibleArticle(annotated)) continue;
+    const identity = normalizedIdentity(annotated?.url);
+    if (identity) urls.add(identity);
+  }
+  return urls.size;
+}
+
+function annotateAndSort(candidates, topicContract, mergedByIdentity = null) {
   return (Array.isArray(candidates) ? candidates : [])
-    .map((candidate, index) => ({ candidate: annotateCandidate(candidate), index }))
+    .map((candidate, index) => ({
+      candidate: mergedByIdentity?.get(normalizedIdentity(candidate?.url))
+        ? { ...candidate, ...mergedByIdentity.get(normalizedIdentity(candidate?.url)) }
+        : annotateCandidate(candidate, topicContract),
+      index,
+    }))
     .sort((left, right) => TYPE_ORDER[left.candidate.pageType] - TYPE_ORDER[right.candidate.pageType]
       || left.index - right.index)
     .map(({ candidate }) => candidate);
 }
 
-export function annotateMergedCandidates(document) {
+function mergedAnnotations(document, topicContract) {
+  const rawByIdentity = new Map();
+  for (const candidate of mergedCandidates(document)) {
+    const identity = normalizedIdentity(candidate?.url);
+    if (!identity) continue;
+    const aggregate = rawByIdentity.get(identity) || {
+      url: candidate.url,
+      titles: [],
+      contents: [],
+      searxngContents: [],
+      titleContexts: [],
+      qualities: [],
+    };
+    for (const [key, value] of [
+      ['titles', candidate?.title],
+      ['contents', candidate?.content],
+      ['searxngContents', candidate?.searxngContent],
+      ['titleContexts', candidate?.titleContext],
+    ]) {
+      const normalized = text(value);
+      if (normalized && !aggregate[key].includes(normalized)) aggregate[key].push(normalized);
+    }
+    aggregate.qualities.push(classifyCandidate(candidate));
+    rawByIdentity.set(identity, aggregate);
+  }
+  return new Map([...rawByIdentity].map(([identity, aggregate]) => {
+    const rejected = aggregate.qualities.filter((quality) => quality.pageType === 'reject');
+    const articles = aggregate.qualities.filter((quality) => quality.pageType === 'article');
+    const selected = rejected.length ? rejected : articles.length ? articles : aggregate.qualities;
+    const pageType = rejected.length ? 'reject' : articles.length ? 'article' : 'weak';
+    const pageTypeReasons = [...new Set(selected.flatMap((quality) => quality.reasons))];
+    const evidence = {
+      url: aggregate.url,
+      title: aggregate.titles.join('\n'),
+      content: aggregate.contents.join('\n'),
+      searxngContent: aggregate.searxngContents.join('\n'),
+      titleContext: aggregate.titleContexts.join('\n'),
+    };
+    return [identity, {
+      pageType,
+      pageTypeReasons,
+      topicRelevance: assessCandidateTopic(topicContract, evidence),
+    }];
+  }));
+}
+
+export function annotateMergedCandidates(document, topicContract = null) {
   const groups = document?.groups && typeof document.groups === 'object'
     ? document.groups : {};
+  const annotations = mergedAnnotations(document, topicContract);
   const hotBySource = groups.hotBySource && typeof groups.hotBySource === 'object'
     ? Object.fromEntries(Object.entries(groups.hotBySource)
-      .map(([source, candidates]) => [source, annotateAndSort(candidates)]))
+      .map(([source, candidates]) => [source, annotateAndSort(candidates, topicContract, annotations)]))
     : {};
   return {
     ...document,
     groups: {
       ...groups,
-      bothChannels: annotateAndSort(groups.bothChannels),
-      searxngTop: annotateAndSort(groups.searxngTop),
-      agentReachTop: annotateAndSort(groups.agentReachTop),
+      bothChannels: annotateAndSort(groups.bothChannels, topicContract, annotations),
+      searxngTop: annotateAndSort(groups.searxngTop, topicContract, annotations),
+      agentReachTop: annotateAndSort(groups.agentReachTop, topicContract, annotations),
       hotBySource,
-      hotWithoutPopularity: annotateAndSort(groups.hotWithoutPopularity),
-      unverified: annotateAndSort(groups.unverified),
+      hotWithoutPopularity: annotateAndSort(groups.hotWithoutPopularity, topicContract, annotations),
+      unverified: annotateAndSort(groups.unverified, topicContract, annotations),
     },
   };
 }
@@ -165,15 +255,14 @@ export function mergedCandidates(document) {
 export function summarizeMergedQuality(document) {
   const byUrl = new Map();
   for (const rawCandidate of mergedCandidates(document)) {
-    const candidate = rawCandidate?.pageType ? rawCandidate : annotateCandidate(rawCandidate);
+    const candidate = rawCandidate?.pageType && rawCandidate?.topicRelevance
+      ? rawCandidate : annotateCandidate(rawCandidate);
     const identity = normalizedIdentity(candidate?.url);
     if (!identity) continue;
     const previous = byUrl.get(identity);
-    if (!previous || TYPE_ORDER[candidate.pageType] < TYPE_ORDER[previous]) {
-      byUrl.set(identity, candidate.pageType);
+    if (!previous || TYPE_ORDER[candidate.pageType] < TYPE_ORDER[previous.pageType]) {
+      byUrl.set(identity, candidate);
     }
   }
-  const counts = { article: 0, weak: 0, reject: 0 };
-  for (const pageType of byUrl.values()) counts[pageType] += 1;
-  return counts;
+  return qualitySummary([...byUrl.values()]);
 }

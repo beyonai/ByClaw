@@ -334,7 +334,7 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         online_search = (SKILL_ROOT / "references" / "online-search.md").read_text(encoding="utf-8")
         contract = (SKILL_ROOT / "references" / "collection-contract.md").read_text(encoding="utf-8")
 
-        for phrase in ("可用文章候选", "candidateQuality", "`materialize-wechat`", "阶段耗时"):
+        for phrase in ("eligibleArticle", "candidateQuality", "`materialize-wechat`", "阶段耗时"):
             self.assertIn(phrase, skill)
         self.assertIn("`bycli weixin download --url <URL>`", routing)
         self.assertIn("自适应", online_search)

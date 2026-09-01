@@ -486,6 +486,9 @@ await (async () => {
   assert.equal(defaultScope.json.task.materializationTarget, 'selected');
   assert.equal(defaultScope.json.task.requiredContentGranularity, 'any');
   assert.equal(defaultScope.json.task.discoveryGate.attemptCount, 0);
+  assert.equal(defaultScope.json.task.discoveryGate.schemaVersion, '1.1');
+  assert.equal(defaultScope.json.task.discoveryGate.topicContract.required, false);
+  assert.equal(defaultScope.json.task.discoveryGate.topicContract.normalizedSubject, '公开资料');
   assert.deepEqual(defaultScope.json.task.discoveryGate.candidates, []);
 
   const directUrl = 'https://example.com/user-selected-article';
@@ -496,6 +499,7 @@ await (async () => {
   assert.equal(directScope.json.task.discoveryGate.candidates.length, 1);
   assert.equal(directScope.json.task.discoveryGate.candidates[0].origin, 'user-provided');
   assert.equal(directScope.json.task.discoveryGate.candidates[0].canonicalUrl, directUrl);
+  assert.equal(directScope.json.task.discoveryGate.candidates[0].topicRelevance.status, 'not-required');
 
   const explicitScope = await runCli([
     'init', '--session-dir', makeSessionDir(), '--query', '团队方案',

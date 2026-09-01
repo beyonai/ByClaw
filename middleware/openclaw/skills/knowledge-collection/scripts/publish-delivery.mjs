@@ -895,6 +895,16 @@ function deliveryInputFor(receipt) {
   };
 }
 
+function isLegacyPublicSession(session) {
+  const items = Array.isArray(session.collection?.collection?.items)
+    ? session.collection.collection.items : [];
+  const hasPublicItem = items.some((item) => [
+    'public-discover', 'user-provided', 'crawl-frontier',
+  ].includes(item.provenanceKind) || typeof item.discoveryCandidateId === 'string');
+  return hasPublicItem
+    && session.task?.discoveryGate?.schemaVersion !== '1.1';
+}
+
 export function inspectDelivery(paths) {
   const { session } = loadSession(paths, { persistMigration: false });
   const receipt = session.delivery;
@@ -947,6 +957,18 @@ export function cmdPublish(paths, args) {
     }
     if (collection.downstreamInput.files.length === 0) {
       throw new Error('没有可发布的 validated Markdown');
+    }
+
+    if (isLegacyPublicSession(session)) {
+      const previous = session.delivery?.schemaVersion === DELIVERY_SCHEMA_VERSION
+        && session.delivery.requestedDirectory === requestedDirectory
+        ? session.delivery : null;
+      if (previous?.status === 'published'
+        && targetMatchesReceipt(previous)
+        && sourceMatchesReceipt(paths, previous, collection.downstreamInput)) {
+        return publishResult(previous);
+      }
+      throw new Error('DISCOVERY_RELEVANCE_MIGRATION_REQUIRED: 旧公共发现会话只能复用完全幂等的既有发布；请新建内部 run');
     }
 
     return withDeliveryTargetLock(requestedDirectory, () => {

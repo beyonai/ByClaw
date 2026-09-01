@@ -590,7 +590,11 @@ export function cmdInit(args) {
       stopReason: null,
       status: 'initialized',
       ...(effectiveSourceScope.includes('public-internet')
-        ? { discoveryGate: createDiscoveryAuthorization({ directUrls: explicitDirectUrls }) }
+        ? { discoveryGate: createDiscoveryAuthorization({
+          directUrls: explicitDirectUrls,
+          query,
+          topicRequired: mode === 'collection',
+        }) }
         : {}),
     },
     research: { branches: [], learnings: [], citations: {}, context: [], visitedUrls: [], reportPath: null },
@@ -622,6 +626,8 @@ export function cmdInit(args) {
       .filter((url) => typeof url === 'string' && /^https?:\/\//i.test(url));
     session.task.discoveryGate = createDiscoveryAuthorization({
       directUrls: [...explicitDirectUrls, ...importedUrls],
+      query,
+      topicRequired: mode === 'collection',
     });
   }
   persistSession({ root, session: sessionFile }, session);

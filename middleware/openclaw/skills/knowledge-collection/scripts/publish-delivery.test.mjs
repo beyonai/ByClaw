@@ -140,6 +140,50 @@ test('publish delivers only validated Markdown and referenced local images to an
   }
 });
 
+test('legacy public sessions cannot publish for the first time but keep an unchanged published receipt idempotent', async () => {
+  const root = tempRoot();
+  try {
+    const first = await setupCollectedSession(root);
+    const firstSessionPath = join(first.sessionDir, 'session.json');
+    const legacy = JSON.parse(readFileSync(firstSessionPath, 'utf8'));
+    legacy.task.discoveryGate.schemaVersion = '1.0';
+    delete legacy.task.discoveryGate.topicContract;
+    for (const candidate of legacy.task.discoveryGate.candidates) delete candidate.topicRelevance;
+    writeFileSync(firstSessionPath, `${JSON.stringify(legacy, null, 2)}\n`);
+    const blockedTarget = join(root, 'legacy-first-publish');
+
+    const blocked = await runCli([
+      'publish', '--session-dir', first.sessionDir, '--delivery-dir', blockedTarget,
+    ]);
+    assert.equal(blocked.code, 1);
+    assert.match(blocked.json.error, /DISCOVERY_RELEVANCE_MIGRATION_REQUIRED/);
+    assert.equal(existsSync(blockedTarget), false);
+
+    const secondRoot = join(root, 'already-published');
+    mkdirSync(secondRoot);
+    const second = await setupCollectedSession(secondRoot);
+    const publishedTarget = join(root, 'legacy-existing-delivery');
+    const published = await runCli([
+      'publish', '--session-dir', second.sessionDir, '--delivery-dir', publishedTarget,
+    ]);
+    assert.equal(published.code, 0, published.stderr || published.stdout);
+    const secondSessionPath = join(second.sessionDir, 'session.json');
+    const publishedLegacy = JSON.parse(readFileSync(secondSessionPath, 'utf8'));
+    publishedLegacy.task.discoveryGate.schemaVersion = '1.0';
+    delete publishedLegacy.task.discoveryGate.topicContract;
+    for (const candidate of publishedLegacy.task.discoveryGate.candidates) delete candidate.topicRelevance;
+    writeFileSync(secondSessionPath, `${JSON.stringify(publishedLegacy, null, 2)}\n`);
+
+    const idempotent = await runCli([
+      'publish', '--session-dir', second.sessionDir, '--delivery-dir', publishedTarget,
+    ]);
+    assert.equal(idempotent.code, 0, idempotent.stderr || idempotent.stdout);
+    assert.equal(idempotent.json.delivery.actualDirectory, publishedTarget);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('nested index layout is flattened with a companion assets directory', async () => {
   const root = tempRoot();
   try {

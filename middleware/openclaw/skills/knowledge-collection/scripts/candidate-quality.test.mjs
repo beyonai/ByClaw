@@ -8,6 +8,7 @@ import {
   countUniqueArticles,
   summarizeMergedQuality,
 } from './candidate-quality.mjs';
+import { createTopicContract } from './topic-relevance.mjs';
 
 test('classifies explicit account and login pages as reject', () => {
   assert.deepEqual(
@@ -99,17 +100,23 @@ test('counts normalized article URLs without collapsing different same-host path
     { url: 'https://news.example.com/', title: '品牌首页' },
   ];
   assert.equal(countUniqueArticles(rows), 2);
-  assert.deepEqual(classifyCandidates(rows), {
+  const classified = classifyCandidates(rows);
+  assert.deepEqual({
+    article: classified.article,
+    weak: classified.weak,
+    reject: classified.reject,
+    eligibleArticle: classified.eligibleArticle,
+    topicRelevance: classified.topicRelevance,
+  }, {
     article: 3,
     weak: 1,
     reject: 0,
-    candidates: [
-      { ...rows[0], pageType: 'article', pageTypeReasons: ['detail-url', 'article-content-signal'] },
-      { ...rows[1], pageType: 'article', pageTypeReasons: ['detail-url', 'article-content-signal'] },
-      { ...rows[2], pageType: 'article', pageTypeReasons: ['detail-url', 'article-content-signal'] },
-      { ...rows[3], pageType: 'weak', pageTypeReasons: ['root-or-home-page'] },
-    ],
+    eligibleArticle: 3,
+    topicRelevance: { matched: 0, unmatched: 0, unknown: 0, notRequired: 4 },
   });
+  assert.deepEqual(classified.candidates.map((candidate) => candidate.topicRelevance.status), [
+    'not-required', 'not-required', 'not-required', 'not-required',
+  ]);
 });
 
 test('annotates and stably ranks every merged candidate group', () => {
@@ -157,5 +164,29 @@ test('summarizes merged quality without double-counting the same URL across grou
       unverified: [{ url: 'https://example.com/', title: '首页', pageType: 'weak', pageTypeReasons: ['root-or-home-page'] }],
     },
   };
-  assert.deepEqual(summarizeMergedQuality(merged), { article: 1, weak: 1, reject: 0 });
+  assert.deepEqual(summarizeMergedQuality(merged), {
+    article: 1,
+    weak: 1,
+    reject: 0,
+    eligibleArticle: 1,
+    topicRelevance: { matched: 0, unmatched: 0, unknown: 0, notRequired: 2 },
+  });
+});
+
+test('merges duplicate raw evidence before computing one relevance conclusion', () => {
+  const url = 'https://example.com/news/1';
+  const contract = createTopicContract('采集一篇关于 DeepSeek 的文章');
+  const annotated = annotateMergedCandidates({
+    groups: {
+      bothChannels: [],
+      searxngTop: [{ url, title: 'A reasoning-model report', content: '记者发布于今天' }],
+      agentReachTop: [{ url, title: 'DeepSeek benchmark analysis', content: '' }],
+      hotBySource: {},
+      hotWithoutPopularity: [],
+      unverified: [],
+    },
+  }, contract);
+
+  assert.equal(annotated.groups.searxngTop[0].topicRelevance.status, 'matched');
+  assert.equal(annotated.groups.agentReachTop[0].topicRelevance.status, 'matched');
 });

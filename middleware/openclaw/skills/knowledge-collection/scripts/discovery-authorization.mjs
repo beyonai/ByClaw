@@ -1,6 +1,12 @@
 import crypto from 'node:crypto';
+import {
+  assertDiscoveryQueryMatches,
+  assessCandidateTopic,
+  createTopicContract,
+  isEligibleArticle,
+} from './topic-relevance.mjs';
 
-const AUTHORIZATION_SCHEMA_VERSION = '1.0';
+export const AUTHORIZATION_SCHEMA_VERSION = '1.1';
 const MAX_DISCOVERY_ATTEMPTS = 2;
 
 function normalizedHttpUrl(raw) {
@@ -32,6 +38,7 @@ function directCandidate(rawUrl) {
     acquisitionUrls: [canonicalUrl],
     pageType: 'article',
     pageTypeReasons: ['user-provided-url'],
+    topicRelevance: assessCandidateTopic(null, null),
     origin: 'user-provided',
   };
 }
@@ -53,7 +60,7 @@ function arxivRepresentation(rawUrl) {
   return { normalized, paperId: versionlessId.toLowerCase(), representation: match[1].toLowerCase() };
 }
 
-export function createDiscoveryAuthorization({ directUrls = [] } = {}) {
+export function createDiscoveryAuthorization({ directUrls = [], query = '', topicRequired = true } = {}) {
   const candidates = [];
   const seen = new Set();
   for (const rawUrl of directUrls) {
@@ -68,15 +75,21 @@ export function createDiscoveryAuthorization({ directUrls = [] } = {}) {
     attemptCount: 0,
     exhausted: false,
     stopReason: null,
+    stopDetail: null,
     runs: [],
     candidates,
+    topicContract: createTopicContract(query, { required: topicRequired }),
   };
 }
 
 export function reserveDiscoveryAttempt(state, { query, category = 'general' }) {
   if (!state || state.schemaVersion !== AUTHORIZATION_SCHEMA_VERSION) {
+    if (state?.schemaVersion === '1.0') {
+      throw new Error('DISCOVERY_RELEVANCE_MIGRATION_REQUIRED: 旧公共发现会话必须新建内部 run');
+    }
     throw new Error('DISCOVERY_AUTHORIZATION_INVALID: discoveryAuthorization 状态无效');
   }
+  assertDiscoveryQueryMatches(state.topicContract, query);
   const previous = state.runs.at(-1);
   if (previous?.status === 'running') {
     throw new Error('DISCOVERY_IN_PROGRESS: 已有公共发现轮次正在运行');
@@ -94,11 +107,13 @@ export function reserveDiscoveryAttempt(state, { query, category = 'general' }) 
     status: 'running',
     candidateIds: [],
     articleCandidateIds: [],
+    structuralArticleCandidateIds: [],
   };
   state.attemptCount += 1;
   state.runs.push(run);
   state.exhausted = state.attemptCount >= state.maxAttempts;
   state.stopReason = null;
+  state.stopDetail = null;
   return run;
 }
 
@@ -115,8 +130,45 @@ function normalizedCandidate(rawCandidate) {
     acquisitionUrls,
     pageType: rawCandidate?.pageType || 'weak',
     pageTypeReasons: Array.isArray(rawCandidate?.pageTypeReasons) ? rawCandidate.pageTypeReasons : [],
+    topicRelevance: rawCandidate?.topicRelevance,
     origin: 'public-discover',
   };
+}
+
+function mergeRawCandidates(candidates) {
+  const byUrl = new Map();
+  const pageTypeRank = { reject: 0, article: 1, weak: 2 };
+  for (const rawCandidate of candidates) {
+    const canonicalUrl = normalizedHttpUrl(rawCandidate?.url);
+    const previous = byUrl.get(canonicalUrl);
+    if (!previous) {
+      byUrl.set(canonicalUrl, {
+        ...rawCandidate,
+        url: canonicalUrl,
+        sourceUrls: [...new Set(Array.isArray(rawCandidate?.sourceUrls) ? rawCandidate.sourceUrls : [])],
+      });
+      continue;
+    }
+    for (const field of ['title', 'content', 'searxngContent', 'titleContext']) {
+      const values = [previous[field], rawCandidate?.[field]]
+        .filter((value) => typeof value === 'string' && value.trim())
+        .flatMap((value) => value.split('\n'));
+      previous[field] = [...new Set(values)].join('\n');
+    }
+    previous.sourceUrls = [...new Set([
+      ...(previous.sourceUrls || []),
+      ...(Array.isArray(rawCandidate?.sourceUrls) ? rawCandidate.sourceUrls : []),
+    ])];
+    const incomingType = rawCandidate?.pageType || 'weak';
+    if (pageTypeRank[incomingType] < pageTypeRank[previous.pageType || 'weak']) {
+      previous.pageType = incomingType;
+    }
+    previous.pageTypeReasons = [...new Set([
+      ...(previous.pageTypeReasons || []),
+      ...(Array.isArray(rawCandidate?.pageTypeReasons) ? rawCandidate.pageTypeReasons : []),
+    ])];
+  }
+  return [...byUrl.values()];
 }
 
 export function recordDiscoveryResult(state, { query, category = 'general', candidates = [], error = null }) {
@@ -126,10 +178,18 @@ export function recordDiscoveryResult(state, { query, category = 'general', cand
   }
   const existingById = new Map(state.candidates.map((candidate) => [candidate.candidateId, candidate]));
   const recorded = [];
-  for (const rawCandidate of candidates) {
-    const candidate = normalizedCandidate(rawCandidate);
+  for (const rawCandidate of mergeRawCandidates(candidates)) {
+    const candidate = normalizedCandidate({
+      ...rawCandidate,
+      topicRelevance: assessCandidateTopic(state.topicContract, rawCandidate),
+    });
     const previous = existingById.get(candidate.candidateId);
-    if (!previous || (previous.pageType !== 'article' && candidate.pageType === 'article')) {
+    const replacesPrevious = !previous
+      || candidate.pageType === 'reject'
+      || (previous.pageType !== 'reject'
+        && ((!isEligibleArticle(previous) && isEligibleArticle(candidate))
+          || (previous.pageType === 'weak' && candidate.pageType === 'article')));
+    if (replacesPrevious) {
       existingById.set(candidate.candidateId, candidate);
     }
     recorded.push(existingById.get(candidate.candidateId));
@@ -138,16 +198,20 @@ export function recordDiscoveryResult(state, { query, category = 'general', cand
   run.status = error ? 'failed' : 'complete';
   run.error = error ? String(error) : null;
   run.candidateIds = [...new Set(recorded.map((candidate) => candidate.candidateId))];
-  const articleCandidates = recorded.filter((candidate) => candidate.pageType === 'article');
+  const structuralArticleCandidates = recorded.filter((candidate) => candidate.pageType === 'article');
+  const articleCandidates = recorded.filter(isEligibleArticle);
+  run.structuralArticleCandidateIds = structuralArticleCandidates.map((candidate) => candidate.candidateId);
   run.articleCandidateIds = articleCandidates.map((candidate) => candidate.candidateId);
   if (articleCandidates.length > 0) {
     state.exhausted = false;
     state.stopReason = null;
+    state.stopDetail = null;
   } else if (state.attemptCount >= state.maxAttempts) {
     state.exhausted = true;
     state.stopReason = 'no-article-candidates';
+    state.stopDetail = 'no-relevant-article-candidates';
   }
-  return { run, articleCandidates };
+  return { run, articleCandidates, structuralArticleCandidates };
 }
 
 export function authorizePublicSource(state, rawUrl) {
@@ -162,6 +226,10 @@ export function authorizePublicSource(state, rawUrl) {
   }
   if (candidate.pageType !== 'article') {
     throw new Error(`SOURCE_NOT_AUTHORIZED_BY_DISCOVERY: ${normalized} pageType=${candidate.pageType}`);
+  }
+  if (candidate.origin === 'public-discover'
+    && !['matched', 'not-required'].includes(candidate.topicRelevance?.status)) {
+    throw new Error(`SOURCE_NOT_RELEVANT_TO_TASK: ${normalized} topicRelevance=${candidate.topicRelevance?.status || 'missing'}`);
   }
   return candidate;
 }

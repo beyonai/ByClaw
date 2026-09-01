@@ -28,6 +28,7 @@ import {
   authorizeArxivAcquisitionVariant as authorizeArxivVariant,
   authorizePublicSource,
 } from './discovery-authorization.mjs';
+import { assessMaterializedTopic } from './topic-relevance.mjs';
 import {
   CONTENT_GRANULARITIES,
   COVER_STATUSES,
@@ -42,9 +43,57 @@ const MATERIALIZATION_STATUSES = new Set(['materialized', 'pending', 'failed']);
 const MARKDOWN_EXTENSIONS = new Set(['.md', '.markdown']);
 const SOURCE_SCOPE_ALIAS = { dws: 'dingtalk', fws: 'feishu', wecom: 'wecom', ima: 'ima' };
 
+function normalizedAuthorizationUrl(rawUrl) {
+  try {
+    const url = new URL(rawUrl);
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return null;
+    url.hash = '';
+    url.hostname = url.hostname.toLowerCase();
+    url.searchParams.sort();
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
 function discoveryCandidateFor(session, source, sourceUrl) {
   if ((SOURCE_SCOPE_ALIAS[source] || source) !== 'public-internet') return null;
-  return authorizePublicSource(session.task?.discoveryGate, sourceUrl);
+  const normalized = normalizedAuthorizationUrl(sourceUrl);
+  const gate = session.task?.discoveryGate;
+  if (gate?.schemaVersion !== '1.1') {
+    throw new Error('DISCOVERY_RELEVANCE_MIGRATION_REQUIRED: 旧公共发现会话必须新建内部 run');
+  }
+  const direct = gate?.candidates?.find((candidate) => candidate.origin === 'user-provided'
+    && (candidate.canonicalUrl === normalized || candidate.acquisitionUrls?.includes(normalized)));
+  if (direct) return { ...direct, authorizationKind: 'user-provided' };
+
+  const crawl = session.crawl;
+  const crawlEntry = Array.isArray(crawl?.entries)
+    ? crawl.entries.find((entry) => normalizedAuthorizationUrl(entry?.url) === normalized) : null;
+  if (crawlEntry?.status === 'fetched'
+    && (!crawl.scopePrefix || normalized?.startsWith(crawl.scopePrefix))) {
+    return {
+      origin: 'crawl-frontier',
+      authorizationKind: 'crawl-frontier',
+      canonicalUrl: normalized,
+      topicRelevance: { status: 'not-required' },
+    };
+  }
+
+  const candidate = authorizePublicSource(gate, sourceUrl);
+  return candidate ? { ...candidate, authorizationKind: 'public-discover' } : candidate;
+}
+
+function assertMaterializedTopic(session, authorization, canonicalItem, sanitizedAbsolute) {
+  if (authorization?.authorizationKind !== 'public-discover') return null;
+  const topicRelevance = assessMaterializedTopic(session.task.discoveryGate.topicContract, {
+    title: canonicalItem.title,
+    markdown: fs.readFileSync(sanitizedAbsolute, 'utf8'),
+  });
+  if (!['matched', 'not-required'].includes(topicRelevance.status)) {
+    throw new Error(`MATERIALIZED_CONTENT_NOT_RELEVANT: 实际正文与任务主题不匹配（${topicRelevance.status}）`);
+  }
+  return topicRelevance;
 }
 
 function stableItemId(item) {
@@ -690,7 +739,9 @@ function markOneMaterialized(paths, session, metadata, collectionResult, update)
       sourceItemId: null,
       sourceSkill,
       backend,
-      ...(discoveryCandidate ? { discoveryCandidateId: discoveryCandidate.candidateId } : {}),
+      ...(discoveryCandidate?.authorizationKind === 'public-discover'
+        ? { discoveryCandidateId: discoveryCandidate.candidateId } : {}),
+      ...(discoveryCandidate ? { provenanceKind: discoveryCandidate.authorizationKind } : {}),
       collectionFilters: collectionResult.filters && typeof collectionResult.filters === 'object'
         ? clone(collectionResult.filters) : {},
       rawArtifacts: rawArtifacts ?? [],
@@ -707,16 +758,24 @@ function markOneMaterialized(paths, session, metadata, collectionResult, update)
   const discoveryCandidate = effectiveSource
     ? discoveryCandidateFor(session, effectiveSource, inventory.sourceUrl)
     : null;
-  if (discoveryCandidate) inventory.discoveryCandidateId = discoveryCandidate.candidateId;
+  if (discoveryCandidate?.authorizationKind === 'public-discover') {
+    inventory.discoveryCandidateId = discoveryCandidate.candidateId;
+  }
+  if (discoveryCandidate) inventory.provenanceKind = discoveryCandidate.authorizationKind;
 
   const markdownPath = requireString(update.markdownPath, 'markdownPath');
   const sanitizedPath = requireString(update.sanitizedPath, 'sanitizedPath');
   validateMarkdownPath(paths.root, markdownPath, 'markdownPath', 'markdown');
-  validateMarkdownPath(paths.root, sanitizedPath, 'sanitizedPath', path.join('sanitized', 'items'));
+  const sanitizedAbsolute = validateMarkdownPath(
+    paths.root, sanitizedPath, 'sanitizedPath', path.join('sanitized', 'items'),
+  );
   validateCanonicalItem(update.canonicalItem, sanitizedPath);
   if (update.canonicalItem.url !== inventory.sourceUrl) {
     throw new Error('canonicalItem.url 必须与 inventory.sourceUrl 一致');
   }
+  const materializedTopicRelevance = assertMaterializedTopic(
+    session, discoveryCandidate, update.canonicalItem, sanitizedAbsolute,
+  );
 
   const previous = inventory.materialization || {};
   const oldPaths = [previous.markdownPath, previous.sanitizedPath]
@@ -752,6 +811,8 @@ function markOneMaterialized(paths, session, metadata, collectionResult, update)
     reason: null,
     contentGranularity,
   };
+  if (materializedTopicRelevance) inventory.materializedTopicRelevance = materializedTopicRelevance;
+  else delete inventory.materializedTopicRelevance;
   inventory.media = update.media === undefined
     ? normalizeMediaState(inventory.media, { strict: true, coverUrls: inventory.coverUrls })
     : normalizeMediaState(update.media, { strict: true, coverUrls: inventory.coverUrls });
@@ -813,7 +874,9 @@ export function recordPendingCollectionItem(paths, update) {
         sourceItemId: null,
         sourceSkill,
         backend,
-        ...(discoveryCandidate ? { discoveryCandidateId: discoveryCandidate.candidateId } : {}),
+        ...(discoveryCandidate?.authorizationKind === 'public-discover'
+          ? { discoveryCandidateId: discoveryCandidate.candidateId } : {}),
+        ...(discoveryCandidate ? { provenanceKind: discoveryCandidate.authorizationKind } : {}),
         collectionFilters: loaded.collectionResult.filters
           && typeof loaded.collectionResult.filters === 'object'
           ? clone(loaded.collectionResult.filters) : {},
@@ -943,12 +1006,15 @@ function metadataSummary(metadata) {
 
 function inspect(paths, args) {
   const loaded = loadCollectionSession(paths, { persistRecovery: false });
+  const relevance = evaluateStoredTopicRelevance(
+    paths, loaded.session, loaded.metadata, loaded.collectionResult,
+  );
   const full = args.full === true || args.full === 'true';
   return {
     ok: true,
     action: 'inspect',
     summary: metadataSummary(loaded.metadata),
-    warnings: loaded.warnings,
+    warnings: [...new Set([...loaded.warnings, ...relevance.warnings])],
     ...(full ? { metadata: loaded.metadata, collectionResult: loaded.collectionResult } : {}),
   };
 }
@@ -956,6 +1022,9 @@ function inspect(paths, args) {
 export function cmdExportViews(paths) {
   return withSessionLock(paths, 'export-views', () => {
     const loaded = loadCollectionSession(paths, { persistRecovery: true });
+    const relevance = evaluateStoredTopicRelevance(
+      paths, loaded.session, loaded.metadata, loaded.collectionResult,
+    );
     atomicWriteJson(paths.metadata, loaded.metadata);
     atomicWriteJson(paths.collectionResult, loaded.collectionResult);
     return {
@@ -963,7 +1032,7 @@ export function cmdExportViews(paths) {
       action: 'export-views',
       metadata: loaded.metadata,
       collectionResult: loaded.collectionResult,
-      warnings: loaded.warnings,
+      warnings: [...new Set([...loaded.warnings, ...relevance.warnings])],
     };
   });
 }
@@ -988,6 +1057,62 @@ export function buildDownstreamInput(paths, collectionResult) {
   return { schemaVersion: '1.0', directory, files };
 }
 
+function evaluateStoredTopicRelevance(paths, session, metadata, collectionResult) {
+  const warnings = [];
+  const gate = session.task?.discoveryGate;
+  const publicItems = metadata.collection.items.filter((item) => [
+    'public-discover', 'user-provided', 'crawl-frontier',
+  ].includes(item.provenanceKind) || typeof item.discoveryCandidateId === 'string');
+  if (!publicItems.length) return { valid: true, warnings };
+  if (gate?.schemaVersion === '1.0' || !gate) {
+    warnings.push('旧公共发现会话未包含主题相关性授权；状态保持只读，请新建内部 run 后再继续写入或首次发布');
+    return { valid: true, warnings, legacy: true };
+  }
+  if (gate.schemaVersion !== '1.1') {
+    return { valid: false, warnings: ['公共发现主题相关性授权状态无效'] };
+  }
+  const discoveredItems = publicItems.filter((item) => item.provenanceKind === 'public-discover'
+    || (typeof item.discoveryCandidateId === 'string'
+      && !['user-provided', 'crawl-frontier'].includes(item.provenanceKind)));
+  const canonicalByPath = new Map(collectionResult.items.map((item) => [item.fileName, item]));
+  let valid = true;
+  for (const item of discoveredItems) {
+    let candidate;
+    try {
+      candidate = authorizePublicSource(gate, item.sourceUrl);
+    } catch (error) {
+      valid = false;
+      warnings.push(`inventory ${item.itemId} 发现主题授权失效: ${error.message}`);
+      continue;
+    }
+    if (candidate?.candidateId !== item.discoveryCandidateId) {
+      valid = false;
+      warnings.push(`inventory ${item.itemId} discoveryCandidateId 与授权候选不一致`);
+      continue;
+    }
+    if (item.materialization?.status !== 'materialized') continue;
+    try {
+      const sanitizedPath = item.materialization.sanitizedPath;
+      const absolute = validateMarkdownPath(
+        paths.root, sanitizedPath, `inventory ${item.itemId} sanitizedPath`, path.join('sanitized', 'items'),
+      );
+      const canonical = canonicalByPath.get(sanitizedPath);
+      const assessment = assessMaterializedTopic(gate.topicContract, {
+        title: canonical?.title || item.title || '',
+        markdown: fs.readFileSync(absolute, 'utf8'),
+      });
+      if (!['matched', 'not-required'].includes(assessment.status)) {
+        valid = false;
+        warnings.push(`inventory ${item.itemId} 实际正文主题相关性失效（${assessment.status}）`);
+      }
+    } catch (error) {
+      valid = false;
+      warnings.push(`inventory ${item.itemId} 主题相关性复验失败: ${error.message}`);
+    }
+  }
+  return { valid, warnings };
+}
+
 export function collectionStatus(paths) {
   const loaded = loadCollectionSession(paths, { persistRecovery: false });
   const { session, metadata, collectionResult } = loaded;
@@ -1002,6 +1127,7 @@ export function collectionStatus(paths) {
     ? items.filter((item) => item.materialization.status === 'materialized'
       && item.materialization.contentGranularity !== 'full-text').length
     : 0;
+  const relevance = evaluateStoredTopicRelevance(paths, session, metadata, collectionResult);
   return {
     collectionStatus: metadata.collection.status,
     items: items.length,
@@ -1016,11 +1142,11 @@ export function collectionStatus(paths) {
     materializationTarget,
     requiredContentGranularity,
     unmetRequiredGranularity,
-    deliveryComplete: deliveryCompleteForSession(session),
+    deliveryComplete: deliveryCompleteForSession(session) && relevance.valid,
     crawl: summarizeCrawlDelivery(session),
     canonicalItems: collectionResult.items.length,
-    downstreamInput: buildDownstreamInput(paths, collectionResult),
-    warnings: loaded.warnings,
+    ...(relevance.valid ? { downstreamInput: buildDownstreamInput(paths, collectionResult) } : {}),
+    warnings: [...new Set([...loaded.warnings, ...relevance.warnings])],
   };
 }
 

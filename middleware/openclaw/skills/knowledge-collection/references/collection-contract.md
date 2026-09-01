@@ -5,11 +5,11 @@
 会话的权威状态是 `<session-dir>/session.json`（`schemaVersion: "2.0"`），由 `scripts/knowledge-collection.mjs` 统一读写。采集状态描述任务、研究过程、来源 inventory 与正文物化；可选的顶层 `delivery` 只记录本次用户文件交付的校验回执，不追踪下游业务动作。
 
 - `task.sourceScope`：本任务实际允许使用的来源，默认 `public-internet`；企业来源只能因用户点名或明确内部语境加入。
-- `task.requiredContentGranularity`：`any` 或 `full-text`。用户明确要求全文、完整正文或 PDF 全文时必须在 `init` 传入 `--required-content-granularity full-text`；其他任务默认 `any`。
 - `task.materializationTarget`：`candidates`、`selected` 或 `all`。
-- `task.discoveryGate`：公共来源授权状态，记录最多两轮发现、分类后的候选、耗尽状态与 `stopReason`。用户明确提供的 URL 由 `init --direct-urls` 登记为 `origin=user-provided`；Agent 自己发现或记忆的 URL 不得放入该参数。
+- `task.requiredContentGranularity`：`any` 或 `full-text`。用户明确要求全文、完整正文或 PDF 全文时必须在 `init` 传入 `--required-content-granularity full-text`；其他任务默认 `any`。
+- `task.discoveryGate`：公共来源授权状态。新会话使用 `schemaVersion: "1.1"`，保存从初始化任务派生且不可由第二轮 query 改写的 `topicContract`，并记录最多两轮发现、页面形态、主题证据、耗尽状态、兼容 `stopReason` 与诊断 `stopDetail`。用户明确提供的 URL 由 `init --direct-urls` 登记为 `origin=user-provided + topicRelevance.status=not-required`；Agent 自己发现或记忆的 URL 不得放入该参数。
 - `collection.collection.status`：`complete`、`partial` 或 `failed`。
-- `collection.collection.items`：完整文章清单，可以包含尚未物化的 pending/failed 条目。
+- `collection.collection.items`：完整文章清单，可以包含尚未物化的 pending/failed 条目。公共发现条目保存 `provenanceKind=public-discover`、`discoveryCandidateId` 与由 CLI 计算的 `materializedTopicRelevance`；用户直链与 crawl frontier 保存各自 provenance，但不要求正文主题门禁。
 - `research`：研究问题、分支、learnings、citations、context 与报告路径。
 
 `session.json` 只能由脚本命令修改，禁止手工编辑；任何层级出现敏感字段名（token、Cookie、secrets 等）时拒绝持久化。
@@ -101,7 +101,11 @@ collection_filters:
 
 `sourceSkill`、来源 ID/URL、用户筛选和 `rawArtifacts` 组成非敏感恢复描述。缺少净化正文时，采集编排器据此让原始执行器从 raw 重新净化；raw 不足时再由同一执行器补采。不得保存恢复所需的凭据。
 
-公共互联网新会话默认启用发现门禁。`public-discover` 原子登记 query、category、候选分类和最多两轮的调用状态；`collect` 与 pending inventory 写入会按规范化 URL 解析候选并持久化 `discoveryCandidateId`。不在候选中的 URL、`weak`/`reject` 候选以及 Agent 手工补充的 URL 一律以 `SOURCE_NOT_AUTHORIZED_BY_DISCOVERY` 拒绝。旧会话缺少 `task.discoveryGate` 时保持只读兼容；一旦调用 `public-discover`，该会话即启用门禁。
+公共互联网新会话默认启用发现门禁。`public-discover` 原子登记 query、category、页面分类、主题相关性和最多两轮的调用状态。结构型 `article` 只有同时满足 `topicRelevance.status=matched|not-required` 才进入 `articleCandidateIds`；`structuralArticleCandidateIds` 只用于诊断。`requested-count`、hot-discovery fallback、第二轮预算和后续授权都使用同一个 eligible article 语义。第二轮仍无相关候选时保留 `stopReason=no-article-candidates`，并写 `stopDetail=no-relevant-article-candidates`。
+
+首次登记公共 inventory 时按互斥顺序解析来源：用户原始直链、已 fetched 且仍在 scope 内的 crawl frontier、最后才是 public-discover eligible article。public-discover 条目在 `collect` 时还会针对 canonical title 与去除 frontmatter、URL、图片路径和纯元数据后的 sanitized Markdown 复验主题；只有 `matched`（无主题契约时为 `not-required`）才能物化。`status` 对新 1.1 会话只读复验候选与正文，失配时 `deliveryComplete=false` 且不返回 `downstreamInput`，`publish` 因而不能创建交付目录。
+
+不在候选中的 URL、`weak`/`reject`、`unmatched`/`unknown` 候选以及 Agent 手工补充的 URL 一律以 `SOURCE_NOT_AUTHORIZED_BY_DISCOVERY` 拒绝。旧 1.0 或缺少 gate 的公共会话保持 status/inspect/export 只读兼容并返回 warning；新的 `public-discover`、`collect`、`record-pending` 和首次 `publish` 返回 `DISCOVERY_RELEVANCE_MIGRATION_REQUIRED`，恢复方式是创建新内部 run。已经发布且来源、计划和目标完全未变化的历史回执仍可只读或幂等返回，不得原地推断、回填或篡改历史主题结论。enterprise 会话不受这项公共来源迁移规则影响。
 
 同一 `sourceSkill + sourceUrl` 视为同一来源记录；inventory 不得存在相同来源身份，并以最新采集操作为准。HTTP(S) URL 另按去 fragment、去末尾 `index.html`、统一尾斜杠及 query 参数排序后的值生成 `duplicateGroupKey`。同组的所有来源记录和 provenance 必须保留，第一条为 provenance 主记录，其余条目以 `duplicateOf` 指向主记录；canonical view 每个重复组仅输出按 inventory 顺序选出的首个已物化代表。
 
