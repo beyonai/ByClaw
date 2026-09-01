@@ -10,7 +10,7 @@ Collect traceable source materials and deliver validated, sanitized Markdown. Th
 ## 0. 默认落盘位置
 
 在创建任何采集目录或调用 `init` 前，先读取当前 Agent 上下文提供的 **Session Root**。在用户沙箱中，
-本次任务的采集文件默认落在 `/by/.sessions/<sessionId>/` 下；推荐使用
+本次任务的内部采集文件默认落在 `/by/.sessions/<sessionId>/` 下；没有显式保存路径时，推荐使用
 `/by/.sessions/<sessionId>/collections/<task-name>/` 作为唯一采集会话根。这里的 `<sessionId>` 是当前聊天会话 ID，
 必须来自 Agent 上下文中的 Session Root，不得使用登录 Cookie、`BAIYING_SESSION` 或其他认证会话值推断。
 `--session-dir`、`--parent-session-dir`、`--output-dir`、`--output-root` 与显式 `--report-path` 以 `/` 开头时按
@@ -20,6 +20,11 @@ Collect traceable source materials and deliver validated, sanitized Markdown. Th
 不得依赖进程当前目录解释相对路径。相对路径中的 `..` 或符号链接不得越出当前 Session Root。若相对路径调用的上下文
 没有提供 Session Root，不得猜测 sessionId，应先向上游取得当前会话目录。绝对路径不受 Session Root 成员关系限制，
 但会话内部的 `.collection-inputs/`、`raw/`、`markdown/` 和 `sanitized/items/` 布局仍必须遵守本 Skill 的目录契约。
+
+用户提供的保存路径是交付目录，不是采集会话目录。只要请求中出现明确的保存文件路径，就把该路径记为
+`requestedDeliveryDir`，并在当前 Session Root 的 `.collection-runs/<run-id>/` 中初始化独立的内部会话；不得把用户目录
+直接传给 `init`，也不得假定以后仍使用 `00-collection/`。相对保存路径按当前 Session Root 解析，绝对路径保持其绝对位置。
+采集和校验期间只写内部会话；最终通过 `publish` 非破坏性地发布正文与引用图片。
 
 ## 1. Decide whether to use this skill
 
@@ -55,7 +60,7 @@ Read only the reference that matches the chosen workflow, plus `collection-contr
 
 ## 3. Execute through validated commands
 
-1. Create or load a session before discovery. Before any source executor, browser preflight, or delegated acquisition command, complete that initialization. Use `init` with the derived `--source-scope` and `--materialization-target`. When the user already selected direct source URLs, initialize their inventory as `pending` before acquisition so a terminal source gate remains reportable.
+1. Create or load a session before discovery. Before any source executor, browser preflight, or delegated acquisition command, complete that initialization. Use `init` with the derived `--source-scope` and `--materialization-target`. When the user supplied a save path, use `<Session Root>/.collection-runs/<run-id>/` as `--session-dir` and retain the save path separately as `requestedDeliveryDir`. When the user already selected direct source URLs, initialize their inventory as `pending` before acquisition so a terminal source gate remains reportable.
 2. For public URL discovery that uses SearXNG, run `public-discover`. When the user explicitly requests a quantity (for example, “采集一篇”), pass that positive integer as `--requested-count`; this runs SearXNG first with the requested quantity as its result limit, classifies every candidate as `article`、`weak` or `reject`, and automatically falls back to the relocated `hot_discovery` channel when the number of unique 可用文章候选 is below the requested count. Read `candidateQuality` and the per-candidate `pageTypeReasons`; a login page, root home page, navigation page, or search-result page is never a successful article candidate. Without `--requested-count`, the command starts the relocated `online-search` and `hot_discovery` channels in parallel and reports unavailable coverage without suppressing successful results.
 
    中文品牌文章采集的首轮 query 应一次表达文章意图，例如 `<品牌> 报道 访谈 公众号`，而不是只传品牌名后逐轮碰运气。只有合并结果的 `candidateQuality.merged.article=0` 时才允许再换一次 query 调用 `public-discover`，并在最终报告中说明第二轮原因。不得脱离 `public-discover` 手工调用 `bycli <site> search` 补结果，因为那会绕过统一恢复与 provenance 路径。
@@ -71,8 +76,9 @@ Read only the reference that matches the chosen workflow, plus `collection-contr
 4. Register only actual artifacts through `collect`; excerpts and abstracts are valid typed artifacts only when their actual `contentGranularity` is recorded, but they must never be treated or described as full text. Do not hand-edit inventory metadata.
 5. For research mode, call `report` to generate the requested research report.
 6. Use `status` before delivery. It distinguishes source records, duplicate groups, materialized bodies, pending bodies, failed bodies, content granularity, media coverage, crawl coverage, and `collection.deliveryComplete`.
+7. When the user supplied a save path and `status.collection.deliveryComplete=true`, run `publish --session-dir <dir> --delivery-dir <path>` (and pass `--session-root <Session Root>` for a relative path). Do not publish before validation. Return the command's `delivery.actualDirectory` and exact `deliveryInput`; never claim success from an inferred path.
 
-Every artifact for one collection task must remain beneath that task's initialized session directory. If a delegated tool needs a staging path, use the session's `raw/` subtree; then register or materialize the result into `markdown/items/` and `sanitized/items/`. When an approved source record contains article media, preserve the source response as raw evidence. Only an approved source executor may create local media copies. Media failure is reported independently and must not turn a successfully materialized body into a failed article; Markdown may reference only media that actually reached the article's local `assets/` directory. Never insert remote or fictitious local links. Do not create a sibling delivery directory such as `<topic>-fulltext/` or `<topic>-articles/`. Duplicate records, partial materialization, or a delegated-tool failure do not waive this requirement: retain the raw evidence and mark the affected inventory item `pending` or `failed` in the same session.
+Before `publish`, every artifact for one collection task must remain beneath that task's initialized session directory. If a delegated tool needs a staging path, use the session's `raw/` subtree; then register or materialize the result into `markdown/items/` and `sanitized/items/`. When an approved source record contains article media, preserve the source response as raw evidence. Only an approved source executor may create local media copies. Media failure is reported independently and must not turn a successfully materialized body into a failed article; Markdown may reference only media that actually reached the article's local `assets/` directory. Never insert remote or fictitious local links. Do not manually create a sibling delivery directory such as `<topic>-fulltext/` or `<topic>-articles/`; an explicit user destination is handled only by `publish`. Duplicate records, partial materialization, or a delegated-tool failure do not waive this requirement: retain the raw evidence and mark the affected inventory item `pending` or `failed` in the same session.
 
 Use `node scripts/knowledge-collection.mjs command-schema` for the machine-readable collection command contract. For a command marked `delegated-command`, read the executor schema named in `delegatedTo.schemaCommand`; `command --help` is the readable companion.
 
@@ -87,7 +93,7 @@ Use `node scripts/knowledge-collection.mjs command-schema` for the machine-reada
 
 采集完成后停止。向主 Agent 或下游 Agent 返回有效来源范围、采集目录、来源记录数、重复组数、已物化/待处理/失败数量、来源链接、覆盖缺口，以及 `status.downstreamInput`。最终交付必须报告 `contentGranularity` 四态计数；必须报告 `mediaCovers` 四态计数；公共采集还必须报告发现调用次数与 query、候选类型计数、抓取次数、物化次数，以及发现、抓取、物化、collect/status、云盘 check/upload/list 和总阶段耗时。只要 `excerpt`、`abstract` 或 `unknown` 大于 0，对应记录不得称为完整文章正文，必须按实际粒度说明。
 
-下游 Agent 的输入只能是本次会话中已经校验、确实存在的 `sanitized/items/*.md` 文件；不得把 `raw/`、`markdown/`、摘要、候选元数据、缺失文件或会话状态文件作为下游正文输入。具体规则见 [delivery.md](references/delivery.md)。
+未指定保存路径时，下游 Agent 的输入只能是本次会话中已经校验、确实存在的 `sanitized/items/*.md` 文件。指定保存路径并成功发布后，下游输入改为 `publish` 返回的 `deliveryInput.files`；根 Agent 必须把原样的 `deliveryInput` 传给下游 Agent。不得把 `raw/`、`markdown/`、摘要、候选元数据、缺失文件或会话状态文件作为下游正文输入。具体规则见 [delivery.md](references/delivery.md)。
 
 采集流程不得主动询问 `入库 / 知识整理 / 跳过`。采集阶段交付完成后，由根 Agent 根据用户已经表达的意图决定是否调用 `project-cloud-knowledge`、`knowledge-organizer` 或其他下游 Skill，无需为了这三个选项再次询问用户。
 

@@ -446,6 +446,24 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         self.assertFalse((SKILL_ROOT / "references" / "post-processing.md").exists())
         self.assertFalse((SKILL_ROOT / "references" / "knowledge-ingest.md").exists())
 
+    def test_explicit_user_delivery_uses_internal_session_and_exact_handoff(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        contract = (SKILL_ROOT / "references" / "collection-contract.md").read_text(encoding="utf-8")
+        delivery = (SKILL_ROOT / "references" / "delivery.md").read_text(encoding="utf-8")
+        combined = f"{skill}\n{contract}\n{delivery}"
+
+        for phrase in (
+            "`.collection-runs/<run-id>/`",
+            "用户提供的保存路径是交付目录，不是采集会话目录",
+            "`status.collection.deliveryComplete=true`",
+            "`publish --session-dir <dir> --delivery-dir <path>`",
+            "不得覆盖或删除目标目录中已有的未知内容",
+            "`deliveryInput`",
+            "必须把原样的 `deliveryInput` 传给下游 Agent",
+            "不得扫描或猜测交付目录",
+        ):
+            self.assertIn(phrase, combined)
+
     def test_skill_main_entry_stops_after_delivery(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
 

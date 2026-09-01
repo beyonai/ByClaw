@@ -209,6 +209,11 @@ await (async () => {
   assert.equal(wechatMaterializeHelp.json.command, 'materialize-wechat');
   assert.match(wechatMaterializeHelp.json.args['--executor-result-file'], /raw\/.*JSON/);
 
+  const publishHelp = await runCli(['publish', '--help']);
+  assert.equal(publishHelp.code, 0);
+  assert.equal(publishHelp.json.command, 'publish');
+  assert.match(publishHelp.json.args['--delivery-dir'], /用户/);
+
   const schema = await runCli(['command-schema']);
   assert.equal(schema.code, 0, schema.stderr);
   assert.equal(schema.json.schemaVersion, '1.0');
@@ -232,6 +237,10 @@ await (async () => {
   assert.equal(schema.json.commands.report.properties['report-path'].format, 'sandbox-path');
   assert.equal(schema.json.commands.status.properties['session-root'].format, 'absolute-path');
   assert.equal(schema.json.commands.collect.properties['item-json-file'].format, 'collection-input-file');
+  assert.deepEqual(schema.json.commands.publish.required, ['session-dir', 'delivery-dir']);
+  assert.equal(schema.json.commands.publish.properties['session-dir'].format, 'sandbox-path');
+  assert.equal(schema.json.commands.publish.properties['delivery-dir'].format, 'sandbox-path');
+  assert.equal(schema.json.commands.publish.properties['session-root'].format, 'absolute-path');
   assert.equal(schema.json.commands['crawl-seed'].properties['max-pages'].type, 'integer');
   assert.equal(schema.json.commands['crawl-seed'].properties.depth.default, 1);
   assert.deepEqual(schema.json.commands['public-discover'].required, ['session-dir', 'query']);

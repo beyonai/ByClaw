@@ -2,7 +2,7 @@
 
 ## 单一状态文件 `session.json`
 
-会话的权威状态是 `<session-dir>/session.json`（`schemaVersion: "2.0"`），由 `scripts/knowledge-collection.mjs` 统一读写。采集状态只描述任务、研究过程、来源 inventory 与正文物化，不追踪交付后的动作。
+会话的权威状态是 `<session-dir>/session.json`（`schemaVersion: "2.0"`），由 `scripts/knowledge-collection.mjs` 统一读写。采集状态描述任务、研究过程、来源 inventory 与正文物化；可选的顶层 `delivery` 只记录本次用户文件交付的校验回执，不追踪下游业务动作。
 
 - `task.sourceScope`：本任务实际允许使用的来源，默认 `public-internet`；企业来源只能因用户点名或明确内部语境加入。
 - `task.materializationTarget`：`candidates`、`selected` 或 `all`。
@@ -72,8 +72,9 @@ collection_filters:
 
 ### 会话目录边界
 
-在用户沙箱中，推荐把采集会话根放在当前聊天会话的
-`/by/.sessions/<sessionId>/collections/<task-name>/`。`sessionId` 取自 Agent 上下文提供的 Session Root，不能从登录认证
+在用户沙箱中，没有显式保存路径时推荐把采集会话根放在当前聊天会话的
+`/by/.sessions/<sessionId>/collections/<task-name>/`。用户提供的保存路径是交付目录，不是采集会话目录；此时内部会话必须放在
+`<Session Root>/.collection-runs/<run-id>/`，保存路径只传给最终 `publish`。`sessionId` 取自 Agent 上下文提供的 Session Root，不能从登录认证
 环境变量或 Cookie 推导。对外路径参数以 `/` 开头时按绝对路径使用，可指向沙箱内任意可写位置；相对路径以可信的
 `--session-root /by/.sessions/<sessionId>` 为基准解析，不得依赖进程当前目录。相对路径规范化后的结果以及其真实祖先
 不得通过 `..` 或符号链接越出该 Session Root。绝对历史会话和绝对输出路径不要求属于当前 Session Root。
@@ -82,7 +83,7 @@ collection_filters:
 
 单一企业来源的 `enterprise search` 必须原位发布：`--output-dir` 必须等于 `--parent-session-dir`。禁止在 `raw/` 下创建第二个完整采集会话；`raw/ima/sanitized/items`、`raw/dingtalk/session.json` 等嵌套会话或交付结构均无效。旧调用若把 `--output-dir` 指向父会话的 `raw/` 子树，runner 会将其归一到父会话根，最终正文仍只能落在根级 `sanitized/items/`。
 
-出现重复 URL、部分下载失败或正文无法物化时，保留原始证据，并在同一会话 inventory 中登记为重复、`pending` 或 `failed`。这些情况不得触发旁路归档，也不得把会话外文件作为下游正文交付。
+出现重复 URL、部分下载失败或正文无法物化时，保留原始证据，并在同一会话 inventory 中登记为重复、`pending` 或 `failed`。这些情况不得触发旁路归档，也不得把未经 `publish` 交付校验的会话外文件作为下游正文交付。
 
 新写入的 `sanitized/metadata.json` 使用 `schemaVersion: "1.0"`，并包含：
 
@@ -183,4 +184,23 @@ node scripts/knowledge-collection.mjs materialize-wechat --session-dir <dir> \
 
 ## 交付
 
-运行 `status` 后，只交付 `status.downstreamInput.files` 列出的、已验证存在于 `sanitized/items/` 下的 Markdown。详细终止规则见 [delivery.md](delivery.md)。
+运行 `status` 后，只有 `status.collection.deliveryComplete=true` 才能执行用户文件发布：
+
+```bash
+node scripts/knowledge-collection.mjs publish --session-dir <dir> --delivery-dir <path>
+```
+
+相对 `<path>` 必须补充 `--session-root <Session Root>`；绝对路径保持原位置。目标不存在或为空时直接成为
+`actualDirectory`。目标非空时，在其中创建 `<task-slug>-collection-<short-run-id>/`，不得覆盖或删除目标目录中已有的未知内容。
+目标是 `/`、普通文件或符号链接时拒绝。发布内容只来自 `status.downstreamInput.files`，并且只复制 Markdown 引用的本地图片；
+`raw/`、`markdown/`、metadata、状态文件和未引用图片不会发布。
+
+发布使用临时目录和原子改名，并在 `session.delivery` 中记录 `schemaVersion: "1.0"`、`status`、`planHash`、请求/实际目录、
+正文与图片的 source/target/hash 计划和时间。`status` 为 `planned`、`published`、`stale` 或 `failed`；写入用户目录前先持久化
+`planned`，最终文件复验和状态落盘完成后才变为 `published`。来源变化时交付为 `stale`；目标内容被修改、增减未知文件或目录时
+为 `failed`，不得覆盖。发布器同时持有会话锁和按请求路径派生的目标锁；异常留下的 staging 只能按计划中记录的精确路径与所有权
+标记恢复或清理，不得通配删除。
+只有目标仍与上次回执完全一致时，才能在同一个 `actualDirectory` 重新发布。
+
+未指定保存路径时，只交付 `status.downstreamInput.files` 列出的内部 Markdown。指定保存路径且发布成功时，交付
+`publish.deliveryInput`；详细终止与跨 Agent 规则见 [delivery.md](delivery.md)。

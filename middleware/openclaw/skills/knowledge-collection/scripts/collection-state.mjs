@@ -18,6 +18,7 @@ import {
   loadSession as sessionLoad,
   persistCollection,
   withSessionLock,
+  markDeliveryStale,
   isProcessAlive,
   readLock,
   resolveCollectionInputFile,
@@ -704,6 +705,7 @@ export function recordPendingCollectionItem(paths, update) {
     reconcileCanonicalView(loaded.collectionResult, loaded.metadata);
     validateMetadata(loaded.metadata);
     validateCanonicalView(paths.root, loaded.collectionResult, loaded.metadata);
+    markDeliveryStale(loaded.session);
     persistCollection(paths, loaded.session, loaded.metadata);
     atomicWriteJson(paths.collectionResult, loaded.collectionResult);
     return {
@@ -732,6 +734,7 @@ export function cmdCollect(paths, args) {
     validateCanonicalView(paths.root, loaded.collectionResult, loaded.metadata);
     const dryRun = args['dry-run'] === true || args['dry-run'] === 'true';
     if (dryRun) return { ok: true, action: 'collect', dryRun: true, items: results };
+    markDeliveryStale(loaded.session);
     persistCollection(paths, loaded.session, loaded.metadata);
     atomicWriteJson(paths.collectionResult, loaded.collectionResult);
     const drained = drainPendingArtifactCleanup(paths, loaded.metadata);

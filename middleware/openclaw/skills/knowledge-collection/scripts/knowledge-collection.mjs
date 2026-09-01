@@ -134,6 +134,15 @@ const COMMAND_SPECS = {
     },
     example: 'knowledge-collection.mjs collect --session-dir /tmp/kc1 --item-json-file /tmp/kc1/.collection-inputs/items.json',
   }),
+  publish: defineCommand({
+    group: 'collection',
+    title: '把已校验正文及其引用的本地图片安全发布到用户交付目录',
+    args: {
+      '--session-dir': '必填。内部采集会话目录',
+      '--delivery-dir': '必填。用户指定的交付目录；相对路径基于当前 Session Root',
+    },
+    example: 'knowledge-collection.mjs publish --session-dir /tmp/kc1 --delivery-dir 00-collection --session-root /by/.sessions/20037048',
+  }),
   'materialize-wechat': defineCommand({
     group: 'collection',
     title: '校验 byCLI Weixin 下载结果，净化正文并生成 collect payload',
@@ -322,6 +331,13 @@ const COMMAND_SCHEMA_OVERRIDES = {
     },
   },
   collect: { required: ['session-dir', 'item-json-file'], properties: { 'session-dir': SCHEMA.sessionDir, 'item-json-file': SCHEMA.inputFile, 'dry-run': SCHEMA.boolean } },
+  publish: {
+    required: ['session-dir', 'delivery-dir'],
+    properties: {
+      'session-dir': SCHEMA.sessionDir,
+      'delivery-dir': SCHEMA.sessionDir,
+    },
+  },
   'materialize-wechat': {
     required: ['session-dir', 'executor-result-file', 'item-id'],
     properties: {
