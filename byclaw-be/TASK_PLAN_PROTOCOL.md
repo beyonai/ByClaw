@@ -46,6 +46,9 @@ OpenClaw 插件运行时注入可信的 `sessionId`、`messageId`、`sourceRunti
 `idempotencyKey`。数据库生成自增 `planId`；BE 按位置生成计划内 `taskId`（`"1"`、`"2"`……），
 第一项自动进入 `IN_PROGRESS`，其余项为 `PENDING`，初始 `version=1`。
 
+创建前，BE 会校验活动计划的任务明细；如果明细已经全部进入终态但计划汇总状态仍为 `ACTIVE`，
+先按明细修正计划终态并释放会话活动计划位，再创建新计划。
+
 同一会话已有活动计划时返回：
 
 ```json
@@ -176,8 +179,10 @@ OpenClaw 插件运行时注入可信的 `sessionId`、`messageId`、`sourceRunti
 ACTIVE → CANCELLING → CANCELLED
 ```
 
-进入 `CANCELLING` 后拒绝迟到的 Tool 推进；确认 Runtime、Tool 和数字员工停止后，把所有非终态任务
-改为 `CANCELLED`。历史消息查询仍返回 `CANCELLED` 快照，Runtime 的活动计划查询只返回 `ACTIVE`。
+进入 `CANCELLING` 后拒绝迟到的 Tool 推进。生产 `STOP_CHAT` 由 BE 统一编排：先请求计划取消，
+再停止 Runtime，最后由 BE 把所有非终态任务改为 `CANCELLED`；即使下游 Runtime 停止失败，BE 也会
+在本次停止请求中确认计划终态。历史消息查询仍返回 `CANCELLED` 快照，Runtime 的活动计划查询只返回
+`ACTIVE`。
 
 ## 8. API
 

@@ -1,5 +1,13 @@
 package com.iwhalecloud.byai.state.application.service.chat;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
 import com.iwhaleai.byai.framework.client.GatewayClient;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
@@ -14,14 +22,8 @@ import com.iwhalecloud.byai.state.domain.ws.service.TaskPlanWebSocketPublisher;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.test.util.ReflectionTestUtils;
-
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.inOrder;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 import org.mockito.InOrder;
+import org.springframework.test.util.ReflectionTestUtils;
 
 class AssistantChatApplicationServiceTest {
 
@@ -93,6 +95,28 @@ class AssistantChatApplicationServiceTest {
         order.verify(runningOutputStreamRegistry).release(10L, 20L);
         order.verify(runningChatSnapshotService).delete(10L, 20L);
         verify(taskPlanWebSocketPublisher).broadcast(1L, cancelling, null);
+        verify(taskPlanWebSocketPublisher).broadcast(1L, cancelled, null);
+    }
+
+    @Test
+    void stopChat_confirmsPlanCancellationWhenGatewayCancellationFails() {
+        StopChatDto stopChatDto = new StopChatDto();
+        stopChatDto.setAgentId(30L);
+        stopChatDto.setSessionId(10L);
+        stopChatDto.setMessageId(20L);
+        when(ssResourceService.findById(30L)).thenReturn(null);
+        TaskPlanSnapshot cancelled = new TaskPlanSnapshot();
+        cancelled.setStatus("CANCELLED");
+        when(taskPlanApplicationService.confirmCancellation(stopChatDto, "USER_STOPPED", "用户已停止执行"))
+            .thenReturn(cancelled);
+        doThrow(new IllegalStateException("gateway unavailable")).when(gatewayClient)
+            .cancelTask("20", "10", "user cancel task", "BYCLAW_EXE_u1", "u1", "force");
+
+        assertThatThrownBy(() -> assistantChatApplicationService.stopChat(stopChatDto))
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessage("gateway unavailable");
+
+        verify(taskPlanApplicationService).confirmCancellation(stopChatDto, "USER_STOPPED", "用户已停止执行");
         verify(taskPlanWebSocketPublisher).broadcast(1L, cancelled, null);
     }
 }

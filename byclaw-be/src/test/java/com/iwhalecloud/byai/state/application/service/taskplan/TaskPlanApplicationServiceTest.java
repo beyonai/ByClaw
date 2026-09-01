@@ -119,6 +119,25 @@ class TaskPlanApplicationServiceTest {
     }
 
     @Test
+    void create_reconcilesStaleActivePlanWhoseTasksAreAlreadyTerminal() {
+        ByaiAgentTaskPlan stale = plan("ACTIVE", 3, tasks("COMPLETED", "COMPLETED"));
+        when(planMapper.selectOne(any())).thenReturn(stale).thenReturn(null);
+        when(planMapper.update(any(), any(Wrapper.class))).thenReturn(1);
+        when(planMapper.insert(any())).thenAnswer(invocation -> {
+            ByaiAgentTaskPlan plan = invocation.getArgument(0);
+            plan.setPlanId(100L);
+            return 1;
+        });
+
+        TaskPlanSnapshot snapshot = service.update(createRequest());
+
+        assertThat(snapshot.getPlanId()).isEqualTo("100");
+        assertThat(snapshot.getStatus()).isEqualTo("ACTIVE");
+        verify(planMapper).update(any(), any(Wrapper.class));
+        verify(planMapper).insert(any(ByaiAgentTaskPlan.class));
+    }
+
+    @Test
     void completeCurrent_completesCurrentAndStartsNextAtomically() {
         ByaiAgentTaskPlan active = plan("ACTIVE", 1, tasks("IN_PROGRESS", "PENDING"));
         when(planMapper.selectOne(any())).thenReturn(active);

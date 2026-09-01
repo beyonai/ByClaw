@@ -133,13 +133,18 @@ public class AssistantChatApplicationService {
         String targetAgentType = targetAgentTypeResolver.resolve(workerAgentType, stopChatDto.getAgentId(), null,
             CurrentUserHolder.getCurrentUserCode());
 
-        gatewayClient.cancelTask(String.valueOf(stopChatDto.getMessageId()), String.valueOf(stopChatDto.getSessionId()),
-            "user cancel task", targetAgentType, CurrentUserHolder.getCurrentUserCode(), "force");
-
-        TaskPlanSnapshot cancelledPlan = taskPlanApplicationService.confirmCancellation(stopChatDto,
-            "USER_STOPPED", "用户已停止执行");
-        taskPlanWebSocketPublisher.broadcast(CurrentUserHolder.getCurrentUserId(), cancelledPlan,
-            stopChatDto.getClientRequestId());
+        try {
+            gatewayClient.cancelTask(String.valueOf(stopChatDto.getMessageId()),
+                String.valueOf(stopChatDto.getSessionId()), "user cancel task", targetAgentType,
+                CurrentUserHolder.getCurrentUserCode(), "force");
+        }
+        finally {
+            // 计划是 BE 的权威状态；即使下游取消失败，也必须在本次 STOP_CHAT 内收敛到终态。
+            TaskPlanSnapshot cancelledPlan = taskPlanApplicationService.confirmCancellation(stopChatDto,
+                "USER_STOPPED", "用户已停止执行");
+            taskPlanWebSocketPublisher.broadcast(CurrentUserHolder.getCurrentUserId(), cancelledPlan,
+                stopChatDto.getClientRequestId());
+        }
 
         runningOutputStreamRegistry.release(stopChatDto.getSessionId(), stopChatDto.getMessageId());
         runningChatSnapshotService.delete(stopChatDto.getSessionId(), stopChatDto.getMessageId());

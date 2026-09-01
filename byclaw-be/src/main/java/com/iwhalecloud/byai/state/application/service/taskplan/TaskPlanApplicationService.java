@@ -267,6 +267,9 @@ public class TaskPlanApplicationService {
         String idempotencyKey = requiredTextCommand(request.getIdempotencyKey(), "idempotencyKey", 128);
         String sourceRunId = requiredTextCommand(request.getSourceRunId(), "sourceRunId", 128);
         ByaiAgentTaskPlan existing = findActiveForSession(userId, sessionId, true);
+        if (existing != null && reconcileTerminalTaskSnapshot(existing, userId)) {
+            existing = findActiveForSession(userId, sessionId, true);
+        }
         if (existing != null) {
             if (Objects.equals(existing.getLastCommandId(), idempotencyKey)) {
                 return new TaskPlanWriteResult(snapshot(existing), false);
@@ -299,6 +302,35 @@ public class TaskPlanApplicationService {
             throw new IllegalStateException("Task plan insert did not return an auto-generated plan_id");
         }
         return new TaskPlanWriteResult(snapshot(plan, tasks), true);
+    }
+
+    /** 修复明细已全部终态、但汇总状态仍停留在 ACTIVE 的旧快照，释放会话级活动计划唯一位。 */
+    private boolean reconcileTerminalTaskSnapshot(ByaiAgentTaskPlan plan, Long userId) {
+        if (!"ACTIVE".equals(plan.getStatus())) {
+            return false;
+        }
+        List<TaskPlanSnapshot.TaskSnapshot> taskSnapshots = tasks(plan);
+        String nextStatus = derivePlanStatus(taskSnapshots);
+        if ("ACTIVE".equals(nextStatus)) {
+            return false;
+        }
+
+        PlanStatusReason reason = derivePlanStatusReason(taskSnapshots);
+        Date now = new Date();
+        int nextVersion = plan.getVersion() + 1;
+        planMapper.update(null, Wrappers.<ByaiAgentTaskPlan>lambdaUpdate()
+            .eq(ByaiAgentTaskPlan::getPlanId, plan.getPlanId())
+            .eq(ByaiAgentTaskPlan::getUserId, userId)
+            .eq(ByaiAgentTaskPlan::getSessionId, plan.getSessionId())
+            .eq(ByaiAgentTaskPlan::getVersion, plan.getVersion())
+            .eq(ByaiAgentTaskPlan::getStatus, "ACTIVE")
+            .set(ByaiAgentTaskPlan::getStatus, nextStatus)
+            .set(ByaiAgentTaskPlan::getStatusReasonCode, reason == null ? null : reason.code())
+            .set(ByaiAgentTaskPlan::getStatusReasonMessage, reason == null ? null : reason.message())
+            .set(ByaiAgentTaskPlan::getVersion, nextVersion)
+            .set(ByaiAgentTaskPlan::getUpdatedAt, now)
+            .set(ByaiAgentTaskPlan::getCompletedAt, now));
+        return true;
     }
 
     private TaskPlanWriteResult advanceCurrent(TaskPlanUpdateRequest request, Long userId, Long sessionId,
