@@ -9,6 +9,7 @@ import {
 } from './crawl-state.mjs';
 import { runPublicDiscover } from './public-discovery.mjs';
 import { runWechatMaterialize } from './wechat-materializer.mjs';
+import { runArxivMaterialize } from './arxiv-materializer.mjs';
 import { cmdPublish, inspectDelivery } from './publish-delivery.mjs';
 import { resolveSandboxPath, sessionPaths } from './session.mjs';
 
@@ -23,6 +24,7 @@ const RESEARCH_HANDLERS = {
 const SESSION_HANDLERS = {
   'public-discover': (paths, args) => runPublicDiscover(paths, args),
   'materialize-wechat': (paths, args) => runWechatMaterialize(paths, args),
+  'materialize-arxiv': (paths, args) => runArxivMaterialize(paths, args),
   collect: (paths, args) => cmdCollect(paths, args),
   inspect: (paths, args) => cmdInspect(paths, args),
   'crawl-seed': (paths, args) => cmdCrawlSeed(paths, args),
@@ -57,7 +59,7 @@ function status(paths, args) {
       downstreamInput,
       ...(published.deliveryInput ? { deliveryInput: published.deliveryInput } : {}),
       ...(crawl ? { crawl } : {}),
-      warnings: [...(research.warnings || []), ...(detail.warnings || []), ...published.warnings],
+      warnings: [...(research.warnings || []), ...collectionWarnings, ...(detail.warnings || []), ...published.warnings],
     };
   }
   return {

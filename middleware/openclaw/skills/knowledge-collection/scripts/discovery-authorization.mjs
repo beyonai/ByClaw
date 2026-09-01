@@ -36,6 +36,23 @@ function directCandidate(rawUrl) {
   };
 }
 
+function arxivRepresentation(rawUrl) {
+  const normalized = normalizedHttpUrl(rawUrl);
+  const url = new URL(normalized);
+  if (url.hostname !== 'arxiv.org' || url.search) {
+    throw new Error(`SOURCE_NOT_AUTHORIZED_BY_DISCOVERY: 不是可信 arXiv 表示: ${normalized}`);
+  }
+  const match = /^\/(abs|pdf|html)\/(.+?)(?:\.pdf)?\/?$/i.exec(url.pathname);
+  if (!match) {
+    throw new Error(`SOURCE_NOT_AUTHORIZED_BY_DISCOVERY: 不是可信 arXiv 论文路径: ${normalized}`);
+  }
+  const versionlessId = match[2].replace(/v\d+$/i, '');
+  if (!/^(?:\d{4}\.\d{4,5}|[a-z-]+(?:\.[A-Z]{2})?\/\d{7})$/i.test(versionlessId)) {
+    throw new Error(`SOURCE_NOT_AUTHORIZED_BY_DISCOVERY: arXiv 论文 ID 无效: ${normalized}`);
+  }
+  return { normalized, paperId: versionlessId.toLowerCase(), representation: match[1].toLowerCase() };
+}
+
 export function createDiscoveryAuthorization({ directUrls = [] } = {}) {
   const candidates = [];
   const seen = new Set();
@@ -145,6 +162,19 @@ export function authorizePublicSource(state, rawUrl) {
   }
   if (candidate.pageType !== 'article') {
     throw new Error(`SOURCE_NOT_AUTHORIZED_BY_DISCOVERY: ${normalized} pageType=${candidate.pageType}`);
+  }
+  return candidate;
+}
+
+export function authorizeArxivAcquisitionVariant(state, sourceUrl, acquisitionUrl) {
+  const candidate = authorizePublicSource(state, sourceUrl);
+  const source = arxivRepresentation(sourceUrl);
+  const acquisition = arxivRepresentation(acquisitionUrl);
+  if (source.paperId !== acquisition.paperId) {
+    throw new Error(`SOURCE_NOT_AUTHORIZED_BY_DISCOVERY: arXiv acquisition 论文 ID 不一致: ${acquisition.normalized}`);
+  }
+  if (!candidate.acquisitionUrls.includes(acquisition.normalized)) {
+    candidate.acquisitionUrls.push(acquisition.normalized);
   }
   return candidate;
 }

@@ -24,7 +24,10 @@ import {
   resolveCollectionInputFile,
 } from './session.mjs';
 import { deliveryCompleteForSession, summarizeCrawlDelivery } from './delivery-state.mjs';
-import { authorizePublicSource } from './discovery-authorization.mjs';
+import {
+  authorizeArxivAcquisitionVariant as authorizeArxivVariant,
+  authorizePublicSource,
+} from './discovery-authorization.mjs';
 import {
   CONTENT_GRANULARITIES,
   COVER_STATUSES,
@@ -250,6 +253,20 @@ export function registerFullTextEvidenceReceipt(paths, evidence) {
     ];
     persistCollection(paths, session, session.collection);
     return registration;
+  });
+}
+
+export function registerArxivAcquisitionVariant(paths, { sourceUrl, acquisitionUrl }) {
+  return withSessionLock(paths, 'register-arxiv-acquisition', () => {
+    const { session } = sessionLoad(paths, { persistMigration: true });
+    const candidate = authorizeArxivVariant(
+      session.task?.discoveryGate,
+      requireString(sourceUrl, 'sourceUrl'),
+      requireString(acquisitionUrl, 'acquisitionUrl'),
+    );
+    markDeliveryStale(session);
+    persistCollection(paths, session, session.collection);
+    return clone(candidate);
   });
 }
 
@@ -980,6 +997,11 @@ export function collectionStatus(paths) {
   const failed = count('failed');
   const groups = new Set(items.map((item) => item.duplicateGroupKey));
   const materializationTarget = session.task?.materializationTarget || 'selected';
+  const requiredContentGranularity = session.task?.requiredContentGranularity || 'any';
+  const unmetRequiredGranularity = requiredContentGranularity === 'full-text'
+    ? items.filter((item) => item.materialization.status === 'materialized'
+      && item.materialization.contentGranularity !== 'full-text').length
+    : 0;
   return {
     collectionStatus: metadata.collection.status,
     items: items.length,
@@ -992,6 +1014,8 @@ export function collectionStatus(paths) {
     uniqueContentGroups: groups.size,
     duplicates: items.length - groups.size,
     materializationTarget,
+    requiredContentGranularity,
+    unmetRequiredGranularity,
     deliveryComplete: deliveryCompleteForSession(session),
     crawl: summarizeCrawlDelivery(session),
     canonicalItems: collectionResult.items.length,

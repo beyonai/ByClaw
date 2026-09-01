@@ -5,6 +5,7 @@
 会话的权威状态是 `<session-dir>/session.json`（`schemaVersion: "2.0"`），由 `scripts/knowledge-collection.mjs` 统一读写。采集状态描述任务、研究过程、来源 inventory 与正文物化；可选的顶层 `delivery` 只记录本次用户文件交付的校验回执，不追踪下游业务动作。
 
 - `task.sourceScope`：本任务实际允许使用的来源，默认 `public-internet`；企业来源只能因用户点名或明确内部语境加入。
+- `task.requiredContentGranularity`：`any` 或 `full-text`。用户明确要求全文、完整正文或 PDF 全文时必须在 `init` 传入 `--required-content-granularity full-text`；其他任务默认 `any`。
 - `task.materializationTarget`：`candidates`、`selected` 或 `all`。
 - `task.discoveryGate`：公共来源授权状态，记录最多两轮发现、分类后的候选、耗尽状态与 `stopReason`。用户明确提供的 URL 由 `init --direct-urls` 登记为 `origin=user-provided`；Agent 自己发现或记忆的 URL 不得放入该参数。
 - `collection.collection.status`：`complete`、`partial` 或 `failed`。
@@ -92,7 +93,7 @@ collection_filters:
 - `collection.status`：采集状态 `complete`、`partial` 或 `failed`。
 - `collection.items`：完整文章清单。每项使用稳定 `itemId`，并记录 `sourceSkill`、`backend`、`sourceItemId`、`sourceUrl`、用户筛选、`rawArtifacts` 及 `materialization`。公共发现条目还记录 `discoveryCandidateId`，它必须指向本会话 `task.discoveryGate.candidates` 中的 `article` 或用户明确提供的 URL。
 - `materialization.status`：`materialized`、`pending` 或 `failed`；已物化时记录准确的 `markdownPath` 与 `sanitizedPath`，文件删除或校验失败后相应路径必须置为 `null`。
-- `materialization.contentGranularity`：`full-text`、`excerpt`、`abstract` 或 `unknown`，表示正文内容粒度，与 `materialization.status`、`collection.status` 和 `deliveryComplete` 正交。旧会话或缺失字段一律按 `unknown`，不得默认 `full-text`；普通 `content`、`markdown` 或字数不能单独证明全文完整。
+- `materialization.contentGranularity`：`full-text`、`excerpt`、`abstract` 或 `unknown`，表示正文内容粒度。`requiredContentGranularity=any` 时它不单独改变完成状态；显式要求 `full-text` 时则参与 `deliveryComplete` 判定，摘要或节选不能满足全文要求。旧会话或缺失字段一律按 `unknown`，不得默认 `full-text`；普通 `content`、`markdown` 或字数不能单独证明全文完整。
 - `fullTextEvidence`：公共来源声明 `full-text` 时必填，记录 `schemaVersion`、获准 `executor` 和位于 `raw/` 的结构化 `artifact`。回执必须确认相同来源 URL、相同执行器、`complete=true` 与 `contentGranularity=full-text`，并同时登记在 `rawArtifacts`。只有获准来源执行器或专用 materializer 可以生成并在 `session.task.fullTextEvidenceReceipts` 注册该回执及哈希，不得由 Agent 手写；缺少注册、内容变化或字段不匹配时 `collect` 拒绝全文声明。
 - `media`：文章媒体覆盖状态。`coverStatus` 为 `not-present`、`materialized`、`unavailable` 或 `unknown`，并记录 `coverCount`、`materializedCoverCount` 与非敏感 `reason`。`unavailable` 表示至少一个已知封面未能物化，允许 `materializedCoverCount` 小于 `coverCount` 以表达部分成功。旧会话缺失或含非法 media 状态时只读归一为 `unknown`，使用 `reason=legacy-media-state-unknown`；不得猜测为无封面或已物化。
 - `materialization.pendingArtifactCleanup`：仅用于重新物化时清除旧工作副本的内部队列，只允许包含 `markdown/` 或 `sanitized/items/` 下的 Markdown，不得包含共享 `raw/`，也不得用于交付后的清理。
@@ -169,6 +170,28 @@ payload 文件必须位于当前会话的 `.collection-inputs/` 内，成功登�
 
 公共来源只有在执行器或专用 materializer 生成 `fullTextEvidence` 时才能把 `contentGranularity` 设为 `full-text`。证据对象不得由 Agent 手写，其 `artifact` 必须同时位于 `rawArtifacts`；否则使用 `unknown`、`excerpt` 或 `abstract` 的实际粒度。
 
+## arXiv 全文物化
+
+用户明确提供 arXiv URL 时，原始 URL 作为规范来源 `sourceUrl`。若 PDF 表示不能直接读取，允许来源执行器读取同一论文 ID 的
+`https://arxiv.org/html/<paper-id>`，但必须把该实际地址登记为 `acquisitionUrl`；两者必须是 `arxiv.org` 官方 HTTPS 地址且具有
+相同论文 ID。不得用模型记忆、镜像、`curl`、`web_fetch`、`wget` 或 `requests` 取得替代内容。
+
+元数据 JSON 与 `bycli web read` 的 Markdown 均保存到本会话 `raw/` 后，运行：
+
+```bash
+node scripts/knowledge-collection.mjs materialize-arxiv --session-dir <dir> \
+  --metadata-file <dir>/raw/bycli/arxiv/<item-id>/metadata.json \
+  --fulltext-file <dir>/raw/bycli/arxiv/<item-id>/fulltext.md \
+  --source-url <用户原始 arXiv URL> \
+  --acquisition-url https://arxiv.org/html/<paper-id> \
+  --item-id <item-id>
+```
+
+`materialize-arxiv` 校验论文身份、标题、摘要、引言、参考文献、章节数量、截断标记和本地图片边界，并在 `raw/materialization/`
+生成含 `sourceUrl`、`acquisitionUrl` 的结构化回执。校验完整时返回 `.collection-inputs/` 下的 `collectPayloadPath` 并注册
+`fullTextEvidence`；只有返回非空 `collectPayloadPath` 时才能调用 `collect`。校验不足时保留 raw 证据，将条目维持为 pending，
+不得由 Agent 手写 Markdown 或证据将摘要、节选提升为完整正文。
+
 只有需要在建会话时预置包含 pending 条目的完整清单，才使用 `--metadata-input-file`。只有导入历史兼容视图时才需要 `--collection-result-input-file`；新会话的第一次 `collect` 不再要求预置它。除此之外一律通过 `collect` 登记。
 
 ## 微信下载结果物化
@@ -195,6 +218,9 @@ node scripts/knowledge-collection.mjs materialize-wechat --session-dir <dir> \
 ```bash
 node scripts/knowledge-collection.mjs publish --session-dir <dir> --delivery-dir <path>
 ```
+
+`selected` 和 `all` 至少包含一个条目，且不能有阻塞交付的 pending/failed 项；显式要求 `full-text` 时所有交付正文还必须为
+`full-text`。摘要或节选不能满足全文要求，空 inventory 也不能使这两种目标完成。条件不满足时不得执行 `publish`。
 
 相对 `<path>` 必须补充 `--session-root <Session Root>`；绝对路径保持原位置。目标不存在或为空时直接成为
 `actualDirectory`。目标非空时，在其中创建 `<task-slug>-collection-<short-run-id>/`，不得覆盖或删除目标目录中已有的未知内容。

@@ -64,6 +64,7 @@ const COMMAND_SPECS = {
       '--max-search-rounds': '可选。正整数;检索轮数上限',
       '--source-scope': 'JSON 数组;默认 ["public-internet"]. 可选 public-internet、dingtalk、feishu、wecom、ima',
       '--materialization-target': 'candidates | selected(默认) | all。all 表示所有请求正文必须物化或如实标记失败/待处理',
+      '--required-content-granularity': 'any(默认) | full-text。用户明确要求全文时必须设为 full-text',
       '--direct-urls': '可选。用户在原始请求中明确提供的公共 URL JSON 数组；这些 URL 以 user-provided 候选登记',
       '--started-at': '可选。ISO 时间;缺省为当前时间',
       '--collection-result-input-file': '可选。预置 canonical collection-result.json',
@@ -153,6 +154,19 @@ const COMMAND_SPECS = {
       '--item-id': '必填。小写字母、数字、下划线或连字符组成的稳定条目 ID',
     },
     example: 'knowledge-collection.mjs materialize-wechat --session-dir /tmp/kc1 --executor-result-file /tmp/kc1/raw/bycli/weixin/item/download-result.json --item-id item',
+  }),
+  'materialize-arxiv': defineCommand({
+    group: 'collection',
+    title: '校验同一 arXiv 论文的 byCLI 元数据与 HTML 全文，生成已注册的 full-text collect payload',
+    args: {
+      '--session-dir': '必填。已由 init 创建的会话目录',
+      '--metadata-file': '必填。位于会话 raw/ 下的 byCLI arXiv 元数据 JSON',
+      '--fulltext-file': '必填。位于会话 raw/ 下的 byCLI web read Markdown',
+      '--source-url': '必填。用户或发现阶段授权的 arXiv abs/pdf/html URL',
+      '--acquisition-url': '必填。byCLI 实际读取的同论文 arXiv HTML URL',
+      '--item-id': '必填。小写字母、数字、下划线或连字符组成的稳定条目 ID',
+    },
+    example: 'knowledge-collection.mjs materialize-arxiv --session-dir /tmp/kc1 --metadata-file /tmp/kc1/raw/bycli/arxiv/paper/metadata.json --fulltext-file /tmp/kc1/raw/bycli/arxiv/paper/executor-output.md --source-url https://arxiv.org/pdf/2501.12948 --acquisition-url https://arxiv.org/html/2501.12948 --item-id deepseek-r1',
   }),
   inspect: defineCommand({
     group: 'collection',
@@ -282,6 +296,7 @@ const COMMAND_SCHEMA_OVERRIDES = {
         items: { type: 'string', enum: ['public-internet', 'dingtalk', 'feishu', 'wecom', 'ima'] },
       },
       'materialization-target': { type: 'string', enum: ['candidates', 'selected', 'all'], default: 'selected' },
+      'required-content-granularity': { type: 'string', enum: ['any', 'full-text'], default: 'any' },
       'direct-urls': SCHEMA.jsonArray,
       'started-at': { type: 'string', format: 'date-time' },
       'collection-result-input-file': SCHEMA.file,
@@ -345,6 +360,17 @@ const COMMAND_SCHEMA_OVERRIDES = {
     properties: {
       'session-dir': SCHEMA.sessionDir,
       'executor-result-file': SCHEMA.file,
+      'item-id': { type: 'string', pattern: '^[a-z0-9][a-z0-9_-]{0,63}$' },
+    },
+  },
+  'materialize-arxiv': {
+    required: ['session-dir', 'metadata-file', 'fulltext-file', 'source-url', 'acquisition-url', 'item-id'],
+    properties: {
+      'session-dir': SCHEMA.sessionDir,
+      'metadata-file': SCHEMA.file,
+      'fulltext-file': SCHEMA.file,
+      'source-url': { type: 'string', format: 'http-url' },
+      'acquisition-url': { type: 'string', format: 'http-url' },
       'item-id': { type: 'string', pattern: '^[a-z0-9][a-z0-9_-]{0,63}$' },
     },
   },

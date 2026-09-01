@@ -212,6 +212,11 @@ await (async () => {
   assert.equal(wechatMaterializeHelp.json.command, 'materialize-wechat');
   assert.match(wechatMaterializeHelp.json.args['--executor-result-file'], /raw\/.*JSON/);
 
+  const arxivMaterializeHelp = await runCli(['materialize-arxiv', '--help']);
+  assert.equal(arxivMaterializeHelp.code, 0);
+  assert.equal(arxivMaterializeHelp.json.command, 'materialize-arxiv');
+  assert.match(arxivMaterializeHelp.json.args['--fulltext-file'], /raw\/.*Markdown/);
+
   const publishHelp = await runCli(['publish', '--help']);
   assert.equal(publishHelp.code, 0);
   assert.equal(publishHelp.json.command, 'publish');
@@ -255,6 +260,13 @@ await (async () => {
   ]);
   assert.equal(
     schema.json.commands['materialize-wechat'].properties['item-id'].pattern,
+    '^[a-z0-9][a-z0-9_-]{0,63}$',
+  );
+  assert.deepEqual(schema.json.commands['materialize-arxiv'].required, [
+    'session-dir', 'metadata-file', 'fulltext-file', 'source-url', 'acquisition-url', 'item-id',
+  ]);
+  assert.equal(
+    schema.json.commands['materialize-arxiv'].properties['item-id'].pattern,
     '^[a-z0-9][a-z0-9_-]{0,63}$',
   );
   for (const [name, contract] of Object.entries(schema.json.commands)) {
@@ -472,6 +484,7 @@ await (async () => {
   const defaultScope = await runCli(['init', '--session-dir', makeSessionDir(), '--query', '公开资料']);
   assert.deepEqual(defaultScope.json.task.sourceScope, ['public-internet']);
   assert.equal(defaultScope.json.task.materializationTarget, 'selected');
+  assert.equal(defaultScope.json.task.requiredContentGranularity, 'any');
   assert.equal(defaultScope.json.task.discoveryGate.attemptCount, 0);
   assert.deepEqual(defaultScope.json.task.discoveryGate.candidates, []);
 
@@ -488,9 +501,18 @@ await (async () => {
     'init', '--session-dir', makeSessionDir(), '--query', '团队方案',
     '--source-scope', '["public-internet","feishu"]',
     '--materialization-target', 'all',
+    '--required-content-granularity', 'full-text',
   ]);
   assert.deepEqual(explicitScope.json.task.sourceScope, ['public-internet', 'feishu']);
   assert.equal(explicitScope.json.task.materializationTarget, 'all');
+  assert.equal(explicitScope.json.task.requiredContentGranularity, 'full-text');
+
+  const invalidGranularity = await runCli([
+    'init', '--session-dir', makeSessionDir(), '--query', '无效粒度',
+    '--required-content-granularity', 'excerpt',
+  ]);
+  assert.equal(invalidGranularity.code, 1);
+  assert.match(invalidGranularity.json.error, /required-content-granularity/);
   console.log('PASS source scope and materialization target');
 })();
 

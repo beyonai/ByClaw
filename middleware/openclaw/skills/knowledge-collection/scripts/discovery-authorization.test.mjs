@@ -2,11 +2,50 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  authorizeArxivAcquisitionVariant,
   authorizePublicSource,
   createDiscoveryAuthorization,
   recordDiscoveryResult,
   reserveDiscoveryAttempt,
 } from './discovery-authorization.mjs';
+
+test('registers only official same-paper arXiv acquisition representations', () => {
+  const state = createDiscoveryAuthorization({
+    directUrls: ['https://arxiv.org/pdf/2501.12948'],
+  });
+
+  const candidate = authorizeArxivAcquisitionVariant(
+    state,
+    'https://arxiv.org/pdf/2501.12948',
+    'https://arxiv.org/html/2501.12948v2',
+  );
+  assert.equal(candidate.canonicalUrl, 'https://arxiv.org/pdf/2501.12948');
+  assert.deepEqual(candidate.acquisitionUrls, [
+    'https://arxiv.org/pdf/2501.12948',
+    'https://arxiv.org/html/2501.12948v2',
+  ]);
+  assert.equal(
+    authorizePublicSource(state, 'https://arxiv.org/html/2501.12948v2').candidateId,
+    candidate.candidateId,
+  );
+
+  for (const invalid of [
+    'https://arxiv.org/html/1706.03762',
+    'https://example.com/html/2501.12948',
+    'https://user:secret@arxiv.org/html/2501.12948',
+    'https://arxiv.org/search/2501.12948',
+  ]) {
+    assert.throws(
+      () => authorizeArxivAcquisitionVariant(
+        state,
+        'https://arxiv.org/pdf/2501.12948',
+        invalid,
+      ),
+      /SOURCE_NOT_AUTHORIZED_BY_DISCOVERY|arXiv/i,
+      invalid,
+    );
+  }
+});
 
 test('authorizes only article candidates emitted by public discovery', () => {
   const state = createDiscoveryAuthorization();

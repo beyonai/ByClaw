@@ -10,10 +10,36 @@ import {
   recordDiscoveryResult,
   reserveDiscoveryAttempt,
 } from './discovery-authorization.mjs';
-import { registerFullTextEvidenceReceipt } from './collection-state.mjs';
+import {
+  registerArxivAcquisitionVariant,
+  registerFullTextEvidenceReceipt,
+} from './collection-state.mjs';
 import { sessionPaths } from './session.mjs';
 
 const scriptPath = resolve(dirname(new URL(import.meta.url).pathname), 'knowledge-collection.mjs');
+
+test('persists a validated arXiv acquisition variant without changing the canonical candidate', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-collection-arxiv-variant-'));
+  try {
+    const initialized = await runCli([
+      'init', '--session-dir', root, '--query', 'DeepSeek-R1 full text',
+      '--direct-urls', '["https://arxiv.org/pdf/2501.12948"]',
+    ]);
+    assert.equal(initialized.code, 0, initialized.stderr || initialized.stdout);
+    const candidate = registerArxivAcquisitionVariant(sessionPaths(root), {
+      sourceUrl: 'https://arxiv.org/pdf/2501.12948',
+      acquisitionUrl: 'https://arxiv.org/html/2501.12948v2',
+    });
+    assert.equal(candidate.canonicalUrl, 'https://arxiv.org/pdf/2501.12948');
+    const persisted = JSON.parse(await readFile(join(root, 'session.json'), 'utf8'));
+    assert.deepEqual(persisted.task.discoveryGate.candidates[0].acquisitionUrls, [
+      'https://arxiv.org/pdf/2501.12948',
+      'https://arxiv.org/html/2501.12948v2',
+    ]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test('collect rejects a public URL that was not authorized by discovery', async () => {
   const root = await mkdtemp(join(tmpdir(), 'knowledge-collection-discovery-gate-'));

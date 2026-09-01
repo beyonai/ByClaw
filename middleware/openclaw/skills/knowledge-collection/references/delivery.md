@@ -27,7 +27,7 @@
 
 `directory` 始终指向当前会话的 `sanitized/items/`。`files` 只包含验证通过的 materialized Markdown；pending 或 failed 项不得进入该数组。没有有效正文时，`files` 是空数组，采集状态及失败原因仍需照常交付。
 
-`status.collection.deliveryComplete` 是唯一完成判定。collection 为 `partial`/`failed` 时始终为 `false`；`selected`/`all` 还要求正文没有 pending/failed，且已有 crawl 时没有 pending/failed 或 fetched-but-unmaterialized 页面；`all` 另外要求 `status.crawl.coverage.overCap` 为 0。`candidates` 可以交付空正文数组，但发现阶段本身不得失败。
+`status.collection.deliveryComplete` 是唯一完成判定。collection 为 `partial`/`failed` 时始终为 `false`；`selected` 和 `all` 至少包含一个条目，还要求正文没有 pending/failed，且已有 crawl 时没有 pending/failed 或 fetched-but-unmaterialized 页面；`all` 另外要求 `status.crawl.coverage.overCap` 为 0。`candidates` 可以交付空正文数组，但发现阶段本身不得失败。用户明确要求完整正文时，初始化必须使用 `--required-content-granularity full-text`，每个交付条目都必须为 `full-text`；摘要或节选不能满足全文要求。
 
 ## 用户指定目录的发布
 
@@ -39,6 +39,7 @@ node scripts/knowledge-collection.mjs publish --session-dir <dir> --delivery-dir
 ```
 
 publish 之前不得创建、写入或用临时文件探测用户交付目录。采集失败时只保留内部会话和审计证据，目标目录原本不存在就必须继续不存在。
+当 `status.collection.deliveryComplete=false` 时不得执行 `publish`；应报告空结果、未满足的全文粒度或其他覆盖缺口，不能把已存在的摘要、节选或内部文件当成交付成功。
 
 相对路径同时传 `--session-root <Session Root>`，绝对路径按原值使用。发布器只复制经验证的 Markdown 及其引用的本地图片，
 并按交付布局改写相对图片链接。根级 `post-01.md` 与 `post-01-images/` 保持伴随布局；

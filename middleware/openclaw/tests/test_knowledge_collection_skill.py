@@ -123,6 +123,37 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         ):
             self.assertIn(phrase, skill + contract)
 
+    def test_explicit_full_text_request_controls_init_and_delivery_completion(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        contract = (SKILL_ROOT / "references" / "collection-contract.md").read_text(encoding="utf-8")
+        delivery = (SKILL_ROOT / "references" / "delivery.md").read_text(encoding="utf-8")
+        combined = f"{skill}\n{contract}\n{delivery}"
+
+        for phrase in (
+            "--required-content-granularity full-text",
+            "完整正文",
+            "摘要或节选不能满足全文要求",
+            "selected` 和 `all` 至少包含一个条目",
+            "不得执行 `publish`",
+        ):
+            self.assertIn(phrase, combined)
+
+    def test_arxiv_full_text_materialization_records_actual_acquisition_url(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        routing = (SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8")
+        contract = (SKILL_ROOT / "references" / "collection-contract.md").read_text(encoding="utf-8")
+        combined = f"{skill}\n{routing}\n{contract}"
+
+        for phrase in (
+            "materialize-arxiv",
+            "https://arxiv.org/html/<paper-id>",
+            "acquisitionUrl",
+            "相同论文 ID",
+            "collectPayloadPath",
+            "不得使用 `curl`、`web_fetch`",
+        ):
+            self.assertIn(phrase, combined)
+
     def test_publish_completion_requires_first_response_delivery_input_echo(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
         delivery = (SKILL_ROOT / "references" / "delivery.md").read_text(encoding="utf-8")

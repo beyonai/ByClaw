@@ -43,9 +43,13 @@ export function deliveryCompleteForSession(session) {
   const collection = session?.collection?.collection;
   if (!collection || collection.status === 'failed' || collection.status === 'partial') return false;
   const target = session?.task?.materializationTarget || 'selected';
-  if (target === 'candidates') return true;
+  const requiredContentGranularity = session?.task?.requiredContentGranularity || 'any';
+  if (target === 'candidates') return requiredContentGranularity === 'any';
   const items = inventoryItems(session);
+  if (items.length === 0) return false;
   if (items.some((item) => item?.materialization?.status !== 'materialized')) return false;
+  if (requiredContentGranularity === 'full-text'
+    && items.some((item) => item?.materialization?.contentGranularity !== 'full-text')) return false;
   const crawl = summarizeCrawlDelivery(session);
   if (!crawl) return true;
   if (crawl.pending > 0 || crawl.failed > 0 || crawl.fetchedUnmaterialized > 0) return false;
