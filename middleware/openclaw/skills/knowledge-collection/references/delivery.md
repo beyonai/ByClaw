@@ -42,6 +42,17 @@ node scripts/knowledge-collection.mjs publish --session-dir <dir> --delivery-dir
 publish 之前不得创建、探测或操作用户交付目录，并将该路径视为 opaque 值：不得对其执行 `mkdir`、`ls`、`find`、写入、删除、清空、移动或复制，不得做存在性或空目录检查，也不得用临时文件探测或要求被委派 Agent 操作它。采集失败时只保留内部会话和审计证据，目标目录原本不存在就必须继续不存在。
 当 `status.collection.deliveryComplete=false` 时不得执行 `publish`；应报告空结果、未满足的全文粒度或其他覆盖缺口，不能把已存在的摘要、节选或内部文件当成交付成功。
 
+在正式调用 `publish` 之前，任何工具调用的参数或 shell 命令文本都不得包含 `requestedDeliveryDir`；第一次允许包含该路径的工具调用必须是正式的 `publish`。不得把该路径赋给 shell 变量，也不得 `echo`、记录或打印该路径。禁止用 `mkdir`、`ls`、`find`、`stat`、`test`、`realpath`、`readlink` 或任何等价命令访问它；“检查残留目录”、“确认目录不存在”和“只做只读检查”都不是例外。每次调用工具前先检查：如果参数或命令含有该路径且当前调用不是已经通过交付校验后的 `publish`，删除该路径并改为只操作内部 `session-dir`。当 `status.collection.deliveryComplete=false` 时，该路径不得出现在后续任何工具调用中，只能在最终答复中说明未发布。
+
+```bash
+# 错误：不可用变量保存交付路径后再做只读检查
+REQUESTED_DELIVERY_DIR=/by/example-output
+ls "$REQUESTED_DELIVERY_DIR"
+
+# 正确：交付路径第一次进入工具调用就是通过校验后的 publish
+node scripts/knowledge-collection.mjs publish --session-dir "$SESSION_DIR" --delivery-dir /by/example-output
+```
+
 相对路径同时传 `--session-root <Session Root>`，绝对路径按原值使用。发布器只复制经验证的 Markdown 及其引用的本地图片，
 并按交付布局改写相对图片链接。根级 `post-01.md` 与 `post-01-images/` 保持伴随布局；
 `<item>/index.md` 与 `<item>/assets/` 发布为 `<item>.md` 与 `<item>-assets/`。
