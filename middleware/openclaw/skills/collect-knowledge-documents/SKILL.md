@@ -1,17 +1,17 @@
 ---
 name: collect-knowledge-documents
-description: "使用内部已经整理好的知识实体及其引用资料回答问题和收集证据。当用户需要查询、核验、汇总或撰写基于内部知识实体的内容时使用；通过 by-knowledge-manager 优先检索 KnowledgeEntity，并按证据缺口扩大范围、读取或下载资料，全程不访问其他外部资源。"
+description: "使用内部已经整理好的知识实体及其引用资料回答问题和收集证据。当用户需要查询、核验、汇总或撰写基于内部知识实体的内容时使用；通过 project-cloud-knowledge 优先检索 KnowledgeEntity，并按证据缺口扩大范围、读取或下载资料，全程不访问其他外部资源。"
 ---
 
 # 收集知识资料
 
-只使用 `by-knowledge-manager` 提供的知识库检索、读取和下载能力。不得访问互联网、连接器、任意网址、本地其他语料或其他外部资源。
+只使用 `project-cloud-knowledge` 提供的知识库检索、读取和下载能力。不得访问互联网、连接器、任意网址、本地其他语料或其他外部资源。
 
-执行前加载并遵循 `by-knowledge-manager` skill。把该 skill 作为命令语法、运行环境、知识库范围和故障处理规则的唯一来源；不要在这里复制或自行推断它的实现。
+执行前加载并遵循 `project-cloud-knowledge` skill。把该 skill 作为命令语法、运行环境、知识库范围和故障处理规则的唯一来源；不要在这里复制或自行推断它的实现。
 
 ## 选择检索方法
 
-第一轮根据问题选择 `search`、`search-file` 或两者组合，并按照 `by-knowledge-manager` 的检索子 Skill 用 `where` 将 `filePath` 限定在 `/KnowledgeEntity/`。
+第一轮根据问题选择 `search`、`search-file` 或两者组合，并按照 `project-cloud-knowledge` 的检索子 Skill 用 `where` 将 `filePath` 限定在 `/KnowledgeEntity/`。
 
 根据问题选择方法：
 
@@ -23,7 +23,7 @@ description: "使用内部已经整理好的知识实体及其引用资料回答
 
 ## 读取或下载候选
 
-选定候选后，按以下情况调用 `by-knowledge-manager`：
+选定候选后，按以下情况调用 `project-cloud-knowledge`：
 
 - 命中包含可回答问题的文本与行号时，先使用 `read-file` 扩大命中行附近的阅读范围。
 - 需要通读文本但命中没有可靠行号时，从文件开头分段使用 `read-file`，直到证据足够或确认无关。

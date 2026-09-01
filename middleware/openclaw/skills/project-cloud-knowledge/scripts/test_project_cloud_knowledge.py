@@ -9,13 +9,14 @@ import sys
 import tempfile
 import types
 import unittest
+import zipfile
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
 
-SCRIPT = Path(__file__).with_name("by_knowledge_manager.py")
-SPEC = importlib.util.spec_from_file_location("by_knowledge_manager", SCRIPT)
+SCRIPT = Path(__file__).with_name("project_cloud_knowledge.py")
+SPEC = importlib.util.spec_from_file_location("project_cloud_knowledge", SCRIPT)
 assert SPEC and SPEC.loader
 manager_module = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(manager_module)
@@ -300,6 +301,123 @@ class KnowledgeManagerTests(unittest.TestCase):
         file = Path(self.temp_dir.name) / name
         file.write_text("# A\n", encoding="utf-8")
         return file
+
+    def make_zip(self, name: str, entries: dict[str, str]) -> Path:
+        archive = Path(self.temp_dir.name) / name
+        with zipfile.ZipFile(archive, "w") as output:
+            for path, content in entries.items():
+                output.writestr(path, content)
+        return archive
+
+    def test_writes_reject_reserved_knowledge_entity_targets_before_network(self) -> None:
+        file = self.make_file("entity.md")
+        commands = (
+            (
+                "mkdir",
+                "--resource-id",
+                "7",
+                "--directory-path",
+                "/",
+                "--directory-name",
+                "KnowledgeEntity",
+                "--dry-run",
+            ),
+            (
+                "mkdir",
+                "--resource-id",
+                "7",
+                "--directory-path",
+                "/KnowledgeEntity",
+                "--directory-name",
+                "子目录",
+                "--dry-run",
+            ),
+            (
+                "rename-dir",
+                "--resource-id",
+                "7",
+                "--directory-path",
+                "/docs",
+                "--directory-name",
+                "KnowledgeEntity",
+                "--dry-run",
+            ),
+            (
+                "upload",
+                "--resource-id",
+                "7",
+                "--directory-path",
+                "/KnowledgeEntity",
+                "--file-path",
+                str(file),
+                "--dry-run",
+            ),
+            (
+                "check-conflicts",
+                "--resource-id",
+                "7",
+                "--directory-path",
+                "/KnowledgeEntity",
+                "--file-name",
+                "entity.md",
+                "--dry-run",
+            ),
+            (
+                "update-file",
+                "--resource-id",
+                "7",
+                "--directory-path",
+                "/KnowledgeEntity",
+                "--file-path",
+                str(file),
+                "--dry-run",
+            ),
+        )
+        for argv in commands:
+            with self.subTest(command=argv[0]), self.assertRaisesRegex(
+                ValueError,
+                "只允许保存系统整理生成的知识实体文件",
+            ):
+                self.manager.execute(self.parse(*argv))
+        self.assertEqual(self.transport.calls, [])
+
+    def test_zip_upload_rejects_indirect_knowledge_entity_entries(self) -> None:
+        archive = self.make_zip(
+            "batch.zip",
+            {
+                "docs/a.md": "# A\n",
+                "KnowledgeEntity/manual.md": "# manual\n",
+            },
+        )
+        with self.assertRaisesRegex(ValueError, "禁止将目录或文件保存"):
+            self.manager.execute(
+                self.parse(
+                    "upload",
+                    "--resource-id",
+                    "7",
+                    "--directory-path",
+                    "/",
+                    "--file-path",
+                    str(archive),
+                    "--dry-run",
+                )
+            )
+        self.assertEqual(self.transport.calls, [])
+
+    def test_similarly_named_nested_directory_remains_writable(self) -> None:
+        result = self.manager.execute(
+            self.parse(
+                "mkdir",
+                "--resource-id",
+                "7",
+                "--directory-path",
+                "/docs",
+                "--directory-name",
+                "KnowledgeEntity",
+                "--dry-run",
+            )
+        )
+        self.assertTrue(result["dryRun"])
 
     def test_upload_allows_zip_and_builds_returned_items(self) -> None:
         archive = self.make_file("batch.zip")
@@ -595,7 +713,7 @@ class KnowledgeManagerTests(unittest.TestCase):
         with redirect_stdout(output):
             exit_code = manager_module.main([])
         self.assertEqual(exit_code, 0)
-        self.assertIn("by-knowledge-manager [-h] COMMAND", output.getvalue())
+        self.assertIn("project-cloud-knowledge [-h] COMMAND", output.getvalue())
 
     def test_main_passes_session_id_to_write_command_transport(self) -> None:
         captured: dict[str, str] = {}

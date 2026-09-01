@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Knowledge-base management CLI backed by ByClaw backend APIs."""
+"""Cloud-drive and knowledge-base management CLI backed by ByClaw APIs."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ import json
 import os
 import tempfile
 import threading
+import zipfile
 from contextlib import suppress
 from pathlib import Path, PurePosixPath
 from typing import Any, Protocol
@@ -20,6 +21,7 @@ BACKEND_SERVICE_ENV = "BE_DOMAINNAME"
 BACKEND_PATH_PREFIX = "/byaiService/datasetController"
 RESOURCE_ID_HEADER = "X-BYCLAW-RESOURCE-ID"
 SESSION_ID_HEADER = "X-CHAT-SESSION-ID"
+KNOWLEDGE_ENTITY_ROOT = "/KnowledgeEntity"
 SESSION_AWARE_COMMANDS = frozenset(
     {
         "mkdir",
@@ -487,6 +489,50 @@ def _normalize_session_id(value: Any) -> str:
     return session_id
 
 
+def _canonical_remote_path(value: str) -> str:
+    parts: list[str] = []
+    for part in str(value).replace("\\", "/").split("/"):
+        if part in {"", "."}:
+            continue
+        if part == "..":
+            if not parts:
+                raise ValueError("远端路径不能越过根目录")
+            parts.pop()
+            continue
+        parts.append(part)
+    return "/" + "/".join(parts)
+
+
+def _remote_child_path(directory_path: str, child_name: str) -> str:
+    parent = _canonical_remote_path(directory_path).rstrip("/")
+    return _canonical_remote_path(f"{parent}/{child_name}")
+
+
+def _ensure_not_knowledge_entity_path(path: str) -> None:
+    normalized = _canonical_remote_path(path)
+    if normalized == KNOWLEDGE_ENTITY_ROOT or normalized.startswith(
+        f"{KNOWLEDGE_ENTITY_ROOT}/"
+    ):
+        raise ValueError(
+            "禁止将目录或文件保存到 /KnowledgeEntity；"
+            "该目录只允许保存系统整理生成的知识实体文件"
+        )
+
+
+def _validate_upload_targets(directory_path: str, files: list[Path]) -> None:
+    for file in files:
+        _ensure_not_knowledge_entity_path(
+            _remote_child_path(directory_path, file.name)
+        )
+        if file.suffix.lower() != ".zip" or not zipfile.is_zipfile(file):
+            continue
+        with zipfile.ZipFile(file) as archive:
+            for member in archive.infolist():
+                _ensure_not_knowledge_entity_path(
+                    _remote_child_path(directory_path, member.filename)
+                )
+
+
 class BackendApi:
     """Map skill operations to the backend's resourceId-based interfaces."""
 
@@ -620,6 +666,10 @@ class KnowledgeManager:
         return {"resourceId": resource_id, "directoryPath": file_path}
 
     def _mkdir(self, args: argparse.Namespace) -> dict[str, Any]:
+        _ensure_not_knowledge_entity_path(args.directory_path)
+        _ensure_not_knowledge_entity_path(
+            _remote_child_path(args.directory_path, args.directory_name)
+        )
         payload = _compact(
             {
                 "resourceId": self._resource_id(args),
@@ -642,6 +692,11 @@ class KnowledgeManager:
         return {"ok": True, "action": "mkdir", "created": created}
 
     def _rename_dir(self, args: argparse.Namespace) -> dict[str, Any]:
+        source_path = _canonical_remote_path(args.directory_path)
+        _ensure_not_knowledge_entity_path(source_path)
+        _ensure_not_knowledge_entity_path(
+            _remote_child_path(str(PurePosixPath(source_path).parent), args.directory_name)
+        )
         payload = {
             "resourceId": self._resource_id(args),
             "directoryPath": args.directory_path,
@@ -675,6 +730,10 @@ class KnowledgeManager:
         return {"ok": True, "action": "list", "items": items}
 
     def _check_conflicts(self, args: argparse.Namespace) -> dict[str, Any]:
+        for file_name in args.file_name:
+            _ensure_not_knowledge_entity_path(
+                _remote_child_path(args.directory_path, file_name)
+            )
         payload = {
             "resourceId": self._resource_id(args),
             "directoryPath": args.directory_path,
@@ -750,6 +809,7 @@ class KnowledgeManager:
 
     def _upload(self, args: argparse.Namespace) -> dict[str, Any]:
         files = self._files(args)
+        _validate_upload_targets(args.directory_path, files)
         resource_id = self._resource_id(args)
         fields = self._upload_form(args, overwrite=False)
         if args.dry_run:
@@ -767,7 +827,8 @@ class KnowledgeManager:
     def _update_file(self, args: argparse.Namespace) -> dict[str, Any]:
         file = self._files(args, exactly_one=True)[0]
         resource_id = self._resource_id(args)
-        target_path = str(PurePosixPath(args.directory_path) / file.name)
+        target_path = _remote_child_path(args.directory_path, file.name)
+        _ensure_not_knowledge_entity_path(target_path)
         fields = {
             "resourceId": str(resource_id),
             "filePath": target_path,
@@ -1018,17 +1079,17 @@ def _add_command(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="by-knowledge-manager",
-        description="管理 ByClaw 知识库目录、文件、构建、实体处理任务和检索。",
+        prog="project-cloud-knowledge",
+        description="管理 ByClaw 知识库或项目云盘的目录、文件、构建、实体处理任务和检索。",
         epilog=(
             "示例：\n"
-            "  by-knowledge-manager list --resource-id 1001 --directory-path /\n"
-            "  by-knowledge-manager upload --resource-id 1001 --directory-path /docs "
+            "  project-cloud-knowledge list --resource-id 1001 --directory-path /\n"
+            "  project-cloud-knowledge upload --resource-id 1001 --directory-path /docs "
             "--file-path ./manual.pdf\n"
-            "  by-knowledge-manager entity-discovery --resource-id 1001 "
+            "  project-cloud-knowledge entity-discovery --resource-id 1001 "
             "--file-path /docs/manual.md\n"
-            "  by-knowledge-manager search --resource-id 1001 --query '退款规则'\n\n"
-            "查看子命令参数：by-knowledge-manager <command> --help"
+            "  project-cloud-knowledge search --resource-id 1001 --query '退款规则'\n\n"
+            "查看子命令参数：project-cloud-knowledge <command> --help"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )

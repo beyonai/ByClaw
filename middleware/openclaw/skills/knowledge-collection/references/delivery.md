@@ -45,4 +45,4 @@
 
 采集交付本身不得主动询问 `入库 / 知识整理 / 跳过`，也不得根据下游结果回写 run、清理会话、改写图片链接或改变保留策略。
 
-采集阶段结束后，由根 Agent 根据用户已经表达的意图决定是否调用 `by-knowledge-manager`、`knowledge-organizer` 或其他下游 Skill，无需为了这三个选项再次询问用户。根 Agent 可以把 `status.downstreamInput.files` 原样交给 B 子 Agent 或其他 Agent；后续 Agent 自行加载自己的 Skill、执行确认并维护自己的状态，不得要求采集编排器承担下游生命周期。
+采集阶段结束后，由根 Agent 根据用户已经表达的意图决定是否调用 `project-cloud-knowledge`、`knowledge-organizer` 或其他下游 Skill，无需为了这三个选项再次询问用户。根 Agent 可以把 `status.downstreamInput.files` 原样交给 B 子 Agent 或其他 Agent；后续 Agent 自行加载自己的 Skill、执行确认并维护自己的状态，不得要求采集编排器承担下游生命周期。

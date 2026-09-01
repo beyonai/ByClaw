@@ -1,6 +1,6 @@
 ---
-name: by-knowledge-manager-write
-description: "变更 ByClaw 知识库目录和文件。用于创建、重命名或删除目录，检查上传冲突，上传或更新文件与 ZIP，触发构建，以及删除知识库文件。"
+name: project-cloud-knowledge-write
+description: "变更 ByClaw 知识库或项目云盘目录和文件。用于创建、重命名或删除目录，检查上传冲突，上传或更新文件与 ZIP，触发构建，以及删除文件。"
 ---
 
 # 变更知识库内容
@@ -16,12 +16,18 @@ description: "变更 ByClaw 知识库目录和文件。用于创建、重命名�
 - 允许上传任意文件类型；不支持构建的格式仍可入库。
 - ZIP 上传表示后端批量导入，目标目录由 `--directory-path` 指定。
 
+## 保护系统实体目录
+
+禁止通过目录创建或重命名、文件上传或更新、ZIP 批量导入，把任何目录或文件保存到 `/KnowledgeEntity` 或其子目录。这个目录只存在系统整理出来的知识实体文件，普通资料和用户创建的目录不能混入。
+
+Python CLI 会在请求后端前强制校验最终路径和 ZIP 内部条目，`--dry-run` 也不能绕过。校验失败时更换目标目录；不得绕过 CLI 调用其他接口写入。
+
 ## 管理目录
 
 新建目录：
 
 ```bash
-python3 <by-knowledge-manager目录>/scripts/by_knowledge_manager.py mkdir \
+python3 <project-cloud-knowledge目录>/scripts/project_cloud_knowledge.py mkdir \
   --session-id SESSION_ID \
   --resource-id RESOURCE_ID \
   --directory-path / \
@@ -31,7 +37,7 @@ python3 <by-knowledge-manager目录>/scripts/by_knowledge_manager.py mkdir \
 重命名目录：
 
 ```bash
-python3 <by-knowledge-manager目录>/scripts/by_knowledge_manager.py rename-dir \
+python3 <project-cloud-knowledge目录>/scripts/project_cloud_knowledge.py rename-dir \
   --session-id SESSION_ID \
   --resource-id RESOURCE_ID \
   --directory-path /产品资料 \
@@ -41,7 +47,7 @@ python3 <by-knowledge-manager目录>/scripts/by_knowledge_manager.py rename-dir 
 删除目录：
 
 ```bash
-python3 <by-knowledge-manager目录>/scripts/by_knowledge_manager.py delete-dir \
+python3 <project-cloud-knowledge目录>/scripts/project_cloud_knowledge.py delete-dir \
   --session-id SESSION_ID \
   --resource-id RESOURCE_ID \
   --directory-path /产品手册
@@ -52,7 +58,7 @@ python3 <by-knowledge-manager目录>/scripts/by_knowledge_manager.py delete-dir 
 需要预检同名文件时：
 
 ```bash
-python3 <by-knowledge-manager目录>/scripts/by_knowledge_manager.py check-conflicts \
+python3 <project-cloud-knowledge目录>/scripts/project_cloud_knowledge.py check-conflicts \
   --session-id SESSION_ID \
   --resource-id RESOURCE_ID \
   --directory-path /产品资料 \
@@ -62,7 +68,7 @@ python3 <by-knowledge-manager目录>/scripts/by_knowledge_manager.py check-confl
 上传一个或多个文件时重复传入 `--file-path`：
 
 ```bash
-python3 <by-knowledge-manager目录>/scripts/by_knowledge_manager.py upload \
+python3 <project-cloud-knowledge目录>/scripts/project_cloud_knowledge.py upload \
   --session-id SESSION_ID \
   --resource-id RESOURCE_ID \
   --directory-path /产品资料 \
@@ -74,7 +80,7 @@ python3 <by-knowledge-manager目录>/scripts/by_knowledge_manager.py upload \
 上传 ZIP：
 
 ```bash
-python3 <by-knowledge-manager目录>/scripts/by_knowledge_manager.py upload \
+python3 <project-cloud-knowledge目录>/scripts/project_cloud_knowledge.py upload \
   --session-id SESSION_ID \
   --resource-id RESOURCE_ID \
   --directory-path /产品资料 \
@@ -88,7 +94,7 @@ python3 <by-knowledge-manager目录>/scripts/by_knowledge_manager.py upload \
 `update-file` 只接受一个本地文件。本地文件名必须与待更新的远端文件名一致：
 
 ```bash
-python3 <by-knowledge-manager目录>/scripts/by_knowledge_manager.py update-file \
+python3 <project-cloud-knowledge目录>/scripts/project_cloud_knowledge.py update-file \
   --session-id SESSION_ID \
   --resource-id RESOURCE_ID \
   --directory-path /产品资料 \
@@ -102,7 +108,7 @@ python3 <by-knowledge-manager目录>/scripts/by_knowledge_manager.py update-file
 触发构建：
 
 ```bash
-python3 <by-knowledge-manager目录>/scripts/by_knowledge_manager.py build \
+python3 <project-cloud-knowledge目录>/scripts/project_cloud_knowledge.py build \
   --session-id SESSION_ID \
   --resource-id RESOURCE_ID \
   --file-path /产品资料/a.md
@@ -111,7 +117,7 @@ python3 <by-knowledge-manager目录>/scripts/by_knowledge_manager.py build \
 删除文件：
 
 ```bash
-python3 <by-knowledge-manager目录>/scripts/by_knowledge_manager.py remove-file \
+python3 <project-cloud-knowledge目录>/scripts/project_cloud_knowledge.py remove-file \
   --session-id SESSION_ID \
   --resource-id RESOURCE_ID \
   --file-path /产品资料/a.md
