@@ -97,10 +97,20 @@ export interface TwinsProps {
   title?: string;
   resolveMarkdownImage?: MarkdownImageResolver;
   resolveHtmlResource?: MarkdownImageResolver;
+  onHtmlLinkClick?: (href: string) => void;
 }
 
 export const PreViewFile = React.memo((props: TwinsProps & { extra?: React.ReactNode; className?: string }) => {
-  const { data, type = 'txt', title, extra, className, resolveMarkdownImage, resolveHtmlResource } = props;
+  const {
+    data,
+    type = 'txt',
+    title,
+    extra,
+    className,
+    resolveMarkdownImage,
+    resolveHtmlResource,
+    onHtmlLinkClick,
+  } = props;
   const [tab, setTab] = useState<'source' | 'preview'>();
 
   /** 资源链接 - 用于预览 */
@@ -242,9 +252,10 @@ export const PreViewFile = React.memo((props: TwinsProps & { extra?: React.React
                 content={content?.[1]}
                 data={data instanceof Blob ? data : undefined}
                 resolveResource={resolveHtmlResource}
+                onLinkClick={onHtmlLinkClick}
               />
             ) : (
-              <HtmlRenderComponent href={uri} />
+              <HtmlRenderComponent href={uri} onLinkClick={onHtmlLinkClick} />
             )}
           </Suspense>
         </div>
@@ -281,7 +292,7 @@ export const PreViewFile = React.memo((props: TwinsProps & { extra?: React.React
 });
 
 export default function Twins(props: TwinsProps) {
-  const { data, type = 'txt', title, resolveMarkdownImage, resolveHtmlResource } = props;
+  const { data, type = 'txt', title, resolveMarkdownImage, resolveHtmlResource, onHtmlLinkClick } = props;
 
   /** 是否全屏 */
   const [fullscreen, setFullscreen] = useState(false);
@@ -297,6 +308,7 @@ export default function Twins(props: TwinsProps) {
       title={title}
       resolveMarkdownImage={resolveMarkdownImage}
       resolveHtmlResource={resolveHtmlResource}
+      onHtmlLinkClick={onHtmlLinkClick}
       extra={
         <span className={ss.icon}>
           <AntdIcon

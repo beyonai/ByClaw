@@ -14,9 +14,17 @@ import java.util.List;
 @Getter
 @Setter
 public class Data {
+
     public Data() {
         this.data = new ArrayList<>();
     }
 
     private List<DirOrFile> data;
+
+    private Integer pageNum = 1;
+
+    private Integer pageSize = 5;
+
+    private Long total = 0L;
+
 }

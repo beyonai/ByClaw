@@ -66,7 +66,10 @@ function collectPayload(itemId = 'item-test1', url = 'https://arxiv.org/abs/2608
 
 async function setupCollectedSession({ mode = 'collection' } = {}) {
   const root = makeSessionDir();
-  const init = await runCli(['init', '--session-dir', root, '--query', 'q', '--mode', mode]);
+  const init = await runCli([
+    'init', '--session-dir', root, '--query', 'q', '--mode', mode,
+    '--direct-urls', '["https://arxiv.org/abs/2608.04002"]',
+  ]);
   assert.equal(init.json.ok, true);
   writeExecutorOutputs(root);
   const payloadPath = join(root, '.collection-inputs/items.json');
@@ -328,6 +331,7 @@ process.stdout.write(JSON.stringify({
   const wechatInit = await runCli([
     'init', '--session-dir', wechatRoot, '--query', 'WeChat materializer CLI',
     '--source-scope', '["public-internet"]', '--materialization-target', 'selected',
+    '--direct-urls', '["https://mp.weixin.qq.com/s/cli-fixture"]',
   ]);
   assert.equal(wechatInit.code, 0, wechatInit.stderr);
   const rawWechatDir = join(wechatRoot, 'raw/bycli/weixin/cli-fixture');
@@ -468,6 +472,17 @@ await (async () => {
   const defaultScope = await runCli(['init', '--session-dir', makeSessionDir(), '--query', '公开资料']);
   assert.deepEqual(defaultScope.json.task.sourceScope, ['public-internet']);
   assert.equal(defaultScope.json.task.materializationTarget, 'selected');
+  assert.equal(defaultScope.json.task.discoveryGate.attemptCount, 0);
+  assert.deepEqual(defaultScope.json.task.discoveryGate.candidates, []);
+
+  const directUrl = 'https://example.com/user-selected-article';
+  const directScope = await runCli([
+    'init', '--session-dir', makeSessionDir(), '--query', '采集指定链接',
+    '--direct-urls', JSON.stringify([directUrl]),
+  ]);
+  assert.equal(directScope.json.task.discoveryGate.candidates.length, 1);
+  assert.equal(directScope.json.task.discoveryGate.candidates[0].origin, 'user-provided');
+  assert.equal(directScope.json.task.discoveryGate.candidates[0].canonicalUrl, directUrl);
 
   const explicitScope = await runCli([
     'init', '--session-dir', makeSessionDir(), '--query', '团队方案',
@@ -547,7 +562,11 @@ await (async () => {
 
 await (async () => {
   const root = makeSessionDir();
-  const r = await runCli(['init', '--session-dir', root, '--query', '数据本体论上周发展', '--mode', 'research', '--depth', '2', '--deadline-minutes', '60']);
+  const r = await runCli([
+    'init', '--session-dir', root, '--query', '数据本体论上周发展',
+    '--mode', 'research', '--depth', '2', '--deadline-minutes', '60',
+    '--direct-urls', '["https://arxiv.org/abs/2608.04002"]',
+  ]);
   assert.equal(r.json.ok, true);
   assert.ok(r.json.task.startedAt);
   writeExecutorOutputs(root);
