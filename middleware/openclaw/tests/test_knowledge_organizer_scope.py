@@ -62,6 +62,8 @@ class KnowledgeOrganizerScopeTests(unittest.TestCase):
 
         self.assertIn("`entity-discovery`", organize)
         self.assertIn("不能位于 `/KnowledgeEntity/`", organize)
+        self.assertIn("`--directory-path`", organize)
+        self.assertIn("递归处理该目录及其子目录", organize)
         self.assertNotIn("`entity-enrich`", organize)
 
         self.assertIn("`entity-enrich`", build)

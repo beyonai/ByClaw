@@ -968,6 +968,11 @@ class KnowledgeManager:
             {
                 "resourceId": self._resource_id(args),
                 "filePath": args.file_path.strip() if args.file_path else None,
+                "directoryPath": (
+                    args.directory_path.strip()
+                    if getattr(args, "directory_path", None)
+                    else None
+                ),
                 field_name: getattr(args, attribute_name),
                 "force": args.force,
                 "extraParams": args.extra_params_json,
@@ -1318,19 +1323,18 @@ def build_parser() -> argparse.ArgumentParser:
     for name in ("entity-discovery", "entity-enrich"):
         command = _add_command(subparsers, name, descriptions[name])
         _add_single_resource(command)
-        command.add_argument(
-            "--file-path",
-            metavar="PATH",
-            help=(
-                "知识库内文件路径；不传或传空白时处理整个知识库。"
-                + (
-                    "文件必须位于 /KnowledgeEntity"
-                    if name == "entity-enrich"
-                    else "文件必须是支持实体发现的原始文档"
-                )
-            ),
-        )
         if name == "entity-discovery":
+            scope = command.add_mutually_exclusive_group()
+            scope.add_argument(
+                "--file-path",
+                metavar="PATH",
+                help="知识库内单个原始文档路径；必须是支持实体发现的文件",
+            )
+            scope.add_argument(
+                "--directory-path",
+                metavar="PATH",
+                help="知识库内原始文档目录；递归处理该目录及其子目录",
+            )
             command.add_argument(
                 "--max-entities",
                 type=_integer_range(1, 12),
@@ -1339,6 +1343,14 @@ def build_parser() -> argparse.ArgumentParser:
                 help="单个文档最多发现的实体数，范围 1-12（默认 12）",
             )
         else:
+            command.add_argument(
+                "--file-path",
+                metavar="PATH",
+                help=(
+                    "知识库内文件路径；文件必须位于 /KnowledgeEntity；"
+                    "不传或传空白时处理全部合格实体文档"
+                ),
+            )
             command.add_argument(
                 "--top-k",
                 type=_integer_range(1, 100),

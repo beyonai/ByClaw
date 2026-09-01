@@ -587,6 +587,33 @@ class KnowledgeManagerTests(unittest.TestCase):
             },
         )
 
+    def test_entity_discovery_supports_recursive_directory_scope(self) -> None:
+        result = self.manager.execute(
+            self.parse(
+                "entity-discovery",
+                "--resource-id",
+                "7",
+                "--directory-path",
+                " /docs/manuals ",
+                "--dry-run",
+            )
+        )
+        self.assertEqual(
+            result,
+            {
+                "ok": True,
+                "action": "entity-discovery",
+                "dryRun": True,
+                "payload": {
+                    "resourceId": 7,
+                    "directoryPath": "/docs/manuals",
+                    "maxEntities": 12,
+                    "force": False,
+                },
+            },
+        )
+        self.assertEqual(self.transport.calls, [])
+
     def test_entity_enrich_supports_whole_kb_dry_run(self) -> None:
         result = self.manager.execute(
             self.parse(
@@ -663,6 +690,15 @@ class KnowledgeManagerTests(unittest.TestCase):
         parser = manager_module.build_parser()
         for argv in (
             ["entity-discovery", "--resource-id", "7", "--max-entities", "13"],
+            [
+                "entity-discovery",
+                "--resource-id",
+                "7",
+                "--file-path",
+                "/docs/a.md",
+                "--directory-path",
+                "/docs",
+            ],
             ["entity-enrich", "--resource-id", "7", "--top-k", "0"],
             [
                 "entity-discovery",
@@ -707,6 +743,14 @@ class KnowledgeManagerTests(unittest.TestCase):
         self.assertIn("--where-json JSON", search_help)
         self.assertIn("--metadata-field NAME", search_help)
         self.assertIn("--search-mode", search_help)
+
+        discovery_output = io.StringIO()
+        with redirect_stdout(discovery_output), self.assertRaises(SystemExit):
+            parser.parse_args(["entity-discovery", "--help"])
+        discovery_help = discovery_output.getvalue()
+        self.assertIn("--file-path PATH", discovery_help)
+        self.assertIn("--directory-path PATH", discovery_help)
+        self.assertIn("递归处理该目录及其子目录", discovery_help)
 
     def test_main_without_arguments_prints_help(self) -> None:
         output = io.StringIO()

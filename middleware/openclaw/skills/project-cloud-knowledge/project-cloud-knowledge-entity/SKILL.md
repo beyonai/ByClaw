@@ -1,6 +1,6 @@
 ---
 name: project-cloud-knowledge-entity
-description: "在 ByClaw 知识库或项目云盘中发起异步知识实体发现或补全。用于从原始文档生成 KnowledgeEntity 文档，或补全 KnowledgeEntity 文档中的实体信息、证据和关系。"
+description: "在 ByClaw 知识库或项目云盘中发起异步知识实体发现或补全。用于从单个原始文档、指定目录或整库生成 KnowledgeEntity 文档，或补全 KnowledgeEntity 文档中的实体信息、证据和关系。"
 ---
 
 # 处理知识实体
@@ -28,7 +28,23 @@ python3 <project-cloud-knowledge目录>/scripts/project_cloud_knowledge.py entit
   --extra-params-json '{"requestSource":"manual"}'
 ```
 
-省略 `--file-path` 时扫描整库中的合格原始文档。单文件支持 `.csv`、`.htm`、`.html`、`.markdown`、`.md` 和 `.txt`；不要把 `/KnowledgeEntity` 下的文件作为发现输入。
+实体发现支持三种范围：
+
+- 传 `--file-path` 时只处理指定的单个原始文档。文件支持 `.csv`、`.htm`、`.html`、`.markdown`、`.md` 和 `.txt`。
+- 传 `--directory-path` 时递归处理指定目录及其子目录中的合格原始文档。
+- 两者都省略时扫描整库中的合格原始文档。
+
+`--file-path` 与 `--directory-path` 不能同时传入。任何范围都不要把 `/KnowledgeEntity` 下的文件作为发现输入。
+
+指定目录示例：
+
+```bash
+python3 <project-cloud-knowledge目录>/scripts/project_cloud_knowledge.py entity-discovery \
+  --session-id SESSION_ID \
+  --resource-id RESOURCE_ID \
+  --directory-path /产品资料 \
+  --max-entities 12
+```
 
 ## 补全实体
 
