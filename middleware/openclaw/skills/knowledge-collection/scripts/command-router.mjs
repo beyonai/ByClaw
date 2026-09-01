@@ -10,6 +10,8 @@ import {
 import { runPublicDiscover } from './public-discovery.mjs';
 import { runWechatMaterialize } from './wechat-materializer.mjs';
 import { runArxivMaterialize } from './arxiv-materializer.mjs';
+import { runWebAcquire } from './web-acquirer.mjs';
+import { runWebMaterialize } from './web-materializer.mjs';
 import { cmdPublish, inspectDelivery } from './publish-delivery.mjs';
 import { resolveSandboxPath, sessionPaths } from './session.mjs';
 
@@ -23,6 +25,8 @@ const RESEARCH_HANDLERS = {
 
 const SESSION_HANDLERS = {
   'public-discover': (paths, args) => runPublicDiscover(paths, args),
+  'acquire-web': (paths, args) => runWebAcquire(paths, args),
+  'materialize-web': (paths, args) => runWebMaterialize(paths, args),
   'materialize-wechat': (paths, args) => runWechatMaterialize(paths, args),
   'materialize-arxiv': (paths, args) => runArxivMaterialize(paths, args),
   collect: (paths, args) => cmdCollect(paths, args),

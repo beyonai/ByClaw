@@ -14,6 +14,7 @@ import com.iwhalecloud.byai.state.common.dto.ChoiceDto;
 import com.iwhalecloud.byai.state.common.dto.DeltaDto;
 import com.iwhalecloud.byai.state.common.enums.AgentTypeEnum;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
+import com.iwhalecloud.byai.state.domain.chat.dto.SessionRuntimeState;
 import com.iwhalecloud.byai.state.domain.chat.enums.ChatTransport;
 import com.iwhalecloud.byai.state.domain.chat.enums.ChatUseageEnum;
 import com.iwhalecloud.byai.state.domain.chat.model.MessageContext;
@@ -68,6 +69,9 @@ public class SessionStreamEventRouter {
     @Autowired
     private ScopedSessionEventService scopedSessionEventService;
 
+    @Autowired
+    private SessionRuntimeStateService sessionRuntimeStateService;
+
     /**
      * Redis Stream 统一入口。HTTP SSE 投递到请求线程队列，WebSocket 直接推送到已登记的 Channel。
      */
@@ -75,6 +79,13 @@ public class SessionStreamEventRouter {
         String sessionId = dataJson == null ? null : dataJson.getString("session_id");
         if (StringUtils.isBlank(sessionId)) {
             return StreamDispatchResult.INTENTIONALLY_IGNORED;
+        }
+        if (sessionRuntimeStateService != null && sessionRuntimeStateService.isRuntimeEvent(dataJson)) {
+            SessionRuntimeState runtime = sessionRuntimeStateService.applyEvent(parseLong(sessionId), dataJson);
+            if (runtime != null) {
+                broadcastSessionRuntimeStatus(runtime);
+            }
+            return StreamDispatchResult.HANDLED;
         }
         try {
             if (scopedSessionEventService != null
@@ -514,6 +525,23 @@ public class SessionStreamEventRouter {
         wsMessage.put("type", "SESSION_STATUS");
         wsMessage.put("sessionId", String.valueOf(sessionId));
         wsMessage.put("data", parseSessionStatusPayload(statusValue));
+        multiDeviceBroadcastService.broadcastRawToUser(userId, wsMessage, null);
+    }
+
+    private void broadcastSessionRuntimeStatus(SessionRuntimeState runtime) {
+        if (runtime == null || runtime.getSessionId() == null) {
+            return;
+        }
+        ByaiSession session = sessionService.findById(runtime.getSessionId());
+        Long userId = session == null ? null : session.getCreatorId();
+        if (userId == null) {
+            return;
+        }
+        JSONObject wsMessage = new JSONObject();
+        wsMessage.put("type", "SESSION_RUNTIME_STATUS");
+        wsMessage.put("sessionId", String.valueOf(runtime.getSessionId()));
+        wsMessage.put("traceId", runtime.getTraceId());
+        wsMessage.put("data", JSON.toJSON(runtime));
         multiDeviceBroadcastService.broadcastRawToUser(userId, wsMessage, null);
     }
 

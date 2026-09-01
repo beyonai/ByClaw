@@ -103,6 +103,8 @@ collection_filters:
 
 公共互联网新会话默认启用发现门禁。`public-discover` 原子登记 query、category、页面分类、主题相关性和最多两轮的调用状态。结构型 `article` 只有同时满足 `topicRelevance.status=matched|not-required` 才进入 `articleCandidateIds`；`structuralArticleCandidateIds` 只用于诊断。`requested-count`、hot-discovery fallback、第二轮预算和后续授权都使用同一个 eligible article 语义。第二轮仍无相关候选时保留 `stopReason=no-article-candidates`，并写 `stopDetail=no-relevant-article-candidates`。
 
+中文文章发现使用 60 秒软预算、90 秒硬上限和单适配器 10 秒限制；软预算后不再调度新来源。公共发现最多允许两轮，任何一轮 `merged.article=0` 时不得使用 weak。确定候选后，通用网页必须通过 `acquire-web` 生成受控 executor-result，再由 `materialize-web` 校验哈希、授权、正文结构与本地资产并生成 `collectPayloadPath`。不得手工重定向 stdout，不得手工构造 collect payload，也不得手写 sanitized 正文或 full-text receipt。
+
 首次登记公共 inventory 时按互斥顺序解析来源：用户原始直链、已 fetched 且仍在 scope 内的 crawl frontier、最后才是 public-discover eligible article。public-discover 条目在 `collect` 时还会针对 canonical title 与去除 frontmatter、URL、图片路径和纯元数据后的 sanitized Markdown 复验主题；只有 `matched`（无主题契约时为 `not-required`）才能物化。`status` 对新 1.1 会话只读复验候选与正文，失配时 `deliveryComplete=false` 且不返回 `downstreamInput`，`publish` 因而不能创建交付目录。
 
 不在候选中的 URL、`weak`/`reject`、`unmatched`/`unknown` 候选以及 Agent 手工补充的 URL 一律以 `SOURCE_NOT_AUTHORIZED_BY_DISCOVERY` 拒绝。旧 1.0 或缺少 gate 的公共会话保持 status/inspect/export 只读兼容并返回 warning；新的 `public-discover`、`collect`、`record-pending` 和首次 `publish` 返回 `DISCOVERY_RELEVANCE_MIGRATION_REQUIRED`，恢复方式是创建新内部 run。已经发布且来源、计划和目标完全未变化的历史回执仍可只读或幂等返回，不得原地推断、回填或篡改历史主题结论。enterprise 会话不受这项公共来源迁移规则影响。
@@ -176,17 +178,19 @@ payload 文件必须位于当前会话的 `.collection-inputs/` 内，成功登�
 
 ## arXiv 全文物化
 
-用户明确提供 arXiv URL 时，原始 URL 作为规范来源 `sourceUrl`。若 PDF 表示不能直接读取，允许来源执行器读取同一论文 ID 的
+已授权并选中的 arXiv 候选无论来自 `--direct-urls` 或 `public-discover`，都以该候选 URL 作为规范来源 `sourceUrl`。若 PDF 表示不能直接读取，允许来源执行器读取同一论文 ID 的
 `https://arxiv.org/html/<paper-id>`，但必须把该实际地址登记为 `acquisitionUrl`；两者必须是 `arxiv.org` 官方 HTTPS 地址且具有
 相同论文 ID。不得用模型记忆、镜像、`curl`、`web_fetch`、`wget` 或 `requests` 取得替代内容。
 
-元数据 JSON 与 `bycli web read` 的 Markdown 均保存到本会话 `raw/` 后，运行：
+元数据 JSON 与 `bycli web read --url <URL> --output <session-dir>/raw/bycli/arxiv/<item-id>/` 生成的 Markdown、图片均原样保存在
+本会话 `raw/`。重试必须写入新的 `raw/bycli/arxiv/<item-id>-<attempt>/` 并保留既有输出；不得覆盖或手工改写 raw 证据，
+也不得手工下载、补抓图片；将 byCLI 实际生成的 Markdown 文件作为 `--fulltext-file` 后运行：
 
 ```bash
 node scripts/knowledge-collection.mjs materialize-arxiv --session-dir <dir> \
   --metadata-file <dir>/raw/bycli/arxiv/<item-id>/metadata.json \
   --fulltext-file <dir>/raw/bycli/arxiv/<item-id>/fulltext.md \
-  --source-url <用户原始 arXiv URL> \
+  --source-url <已授权候选 arXiv URL> \
   --acquisition-url https://arxiv.org/html/<paper-id> \
   --item-id <item-id>
 ```
@@ -210,6 +214,8 @@ node scripts/knowledge-collection.mjs materialize-wechat --session-dir <dir> \
 
 执行器结果 JSON 必须记录成功状态、`saved`、实际字节数、标题、作者、发布时间、`source_url` 和可信的
 `resolved_url=https://mp.weixin.qq.com/s...`。命令只删除确定的微信 UI、远程图片引用和纯推荐链接块，保留正文结语与作者免责声明；
+`source_url` 必须保持为用户直链或 `public-discover` 选中的原始授权 URL（包括 Sogou 微信中转链接），并作为 canonical source；
+`resolved_url` 只记录 byCLI 实际解析到的微信文章地址。物化诊断必须记录两者、受控输入/输出文件哈希和 transactionId。
 高置信度时写入 `markdown/items/<item-id>/index.md`、`sanitized/items/<item-id>/index.md` 并返回
 `.collection-inputs/` 下的 `collectPayloadPath`。低置信度、登录页或疑似截断内容不生成 payload，而是保留 raw 证据并登记
 `materialization.status=pending`、`contentGranularity=unknown`，原因固定为 `wechat-materialization-low-confidence`。

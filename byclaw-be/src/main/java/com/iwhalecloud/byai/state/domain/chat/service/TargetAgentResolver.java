@@ -25,6 +25,8 @@ public class TargetAgentResolver {
 
     private static final Logger logger = LoggerFactory.getLogger(TargetAgentResolver.class);
 
+    private static final String DSH_AGENT_PREFIX = "BYCLAW_DSH_";
+
     @Autowired
     private SsResourceService ssResourceService;
 
@@ -107,7 +109,8 @@ public class TargetAgentResolver {
 
     public boolean isUserSandboxAgentType(String targetAgentType, String userCode) {
         return StringUtils.equalsIgnoreCase(targetAgentType, buildUserAgentType(WorkerAgentType.BYCLAW_EXE, userCode))
-            || StringUtils.equalsIgnoreCase(targetAgentType, buildUserAgentType(WorkerAgentType.BYCLAW_CODE, userCode));
+            || StringUtils.equalsIgnoreCase(targetAgentType, buildUserAgentType(WorkerAgentType.BYCLAW_CODE, userCode))
+            || StringUtils.equalsIgnoreCase(targetAgentType, DSH_AGENT_PREFIX + userCode);
     }
 
     private String resolveUserSandboxAgentType(String targetAgentType, String userCode) {

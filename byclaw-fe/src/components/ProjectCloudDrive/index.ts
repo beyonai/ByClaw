@@ -8,6 +8,9 @@ export interface ProjectCloudDriveItem {
   fileId?: number;
   fileUrl?: string;
   size?: number;
+  updatedAt?: string;
+  createBy?: string | number | null;
+  createStaffName?: string | null;
 }
 
 /** 统一项目云盘接口记录到文件树所使用的路径语义。 */
@@ -44,6 +47,9 @@ export const normalizeProjectCloudDriveItem = (item: any, fallbackDirectoryPath 
     fileId: item?.fileId ?? item?.id,
     fileUrl: item?.fileUrl || '',
     size: item?.size,
+    updatedAt: item?.updatedAt,
+    createBy: item?.createBy,
+    createStaffName: item?.createStaffName,
   };
 };
 

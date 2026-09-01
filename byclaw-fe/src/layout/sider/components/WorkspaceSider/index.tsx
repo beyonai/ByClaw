@@ -229,8 +229,11 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
       .map((loadedSessionId) => {
         const isRunning = chatSessionRuntimeManager.isSessionRunning(loadedSessionId);
         const isWaitingForUserInput = chatSessionRuntimeManager.isSessionWaitingForUserInput(loadedSessionId);
+        const sessionRuntime = chatSessionRuntimeManager.getSessionRuntime(loadedSessionId);
         return isRunning || isWaitingForUserInput
-          ? `${loadedSessionId}:${isRunning ? 'running' : 'idle'}:${isWaitingForUserInput ? 'waiting' : 'active'}`
+          ? `${loadedSessionId}:${isRunning ? 'running' : 'idle'}:${isWaitingForUserInput ? 'waiting' : 'active'}:${
+            sessionRuntime?.status || ''
+          }:${sessionRuntime?.activeAgentCount || 0}`
           : '';
       })
       .filter(Boolean)
@@ -737,11 +740,21 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
               <span className={styles.sessionTime}>
                 {chatSessionRuntimeManager.isSessionWaitingForUserInput(`${session.sessionId}`) ? (
                   <Tag color="blue">{intl.formatMessage({ id: 'workspaceSider.sessionNeedsUserInput' })}</Tag>
-                ) : chatSessionRuntimeManager.isSessionRunning(`${session.sessionId}`) ? (
-                  <LoadingOutlined />
-                ) : (
-                  formatSessionTime(session.updateTime || session.createTime, intl)
-                )}
+                ) : Number(chatSessionRuntimeManager.getSessionRuntime(`${session.sessionId}`)?.activeAgentCount || 0) >
+                  0 ? (
+                    <Tag icon={<LoadingOutlined spin />} color="processing">
+                      {intl.formatMessage(
+                        { id: 'workspaceSider.sessionAgentsWorking' },
+                        {
+                          count: chatSessionRuntimeManager.getSessionRuntime(`${session.sessionId}`)?.activeAgentCount,
+                        }
+                      )}
+                    </Tag>
+                  ) : chatSessionRuntimeManager.isSessionRunning(`${session.sessionId}`) ? (
+                    <LoadingOutlined />
+                  ) : (
+                    formatSessionTime(session.updateTime || session.createTime, intl)
+                  )}
               </span>
             </button>
             <WorkspaceSessionActions

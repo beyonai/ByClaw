@@ -674,16 +674,13 @@ export class RunService {
   async cancelRun(
     runId: string,
     reason = "user requested cancellation",
-    beyondToken?: string,
   ): Promise<Run | undefined> {
     const run = await this.runs.get(runId);
     if (!run || TERMINAL_RUN_STATUSES.has(run.status)) {
       return run;
     }
     if (run.status === "QUEUED" || run.status === "CREATED") {
-      const cancelled = await this.#finishCancelled(run, reason);
-      await this.#cancelTaskPlan(run, reason, beyondToken);
-      return cancelled;
+      return await this.#finishCancelled(run, reason);
     }
 
     const cancelling = await this.#requestCancelling(run, reason);
@@ -699,9 +696,7 @@ export class RunService {
     if (delegationCancellation.status === "rejected") {
       throw delegationCancellation.reason;
     }
-    const cancelled = await this.#finishCancelled(cancelling, reason);
-    await this.#cancelTaskPlan(run, reason, beyondToken);
-    return cancelled;
+    return await this.#finishCancelled(cancelling, reason);
   }
 
   /** 与执行实例的状态推进竞争时重读后重试，避免合法取消因一次乐观锁冲突返回 500。 */
@@ -1552,27 +1547,6 @@ ${JSON.stringify(completedDelegations)}`;
       sourceRuntime: "BYCLAW_SUPER",
       sourceRunId: run.id,
     };
-  }
-
-  async #cancelTaskPlan(
-    run: Run,
-    reason: string,
-    beyondToken?: string,
-  ): Promise<void> {
-    if (!this.#taskPlans) {
-      return;
-    }
-    const metadata = {
-      ...(this.#ephemeralMetadata.get(run.id) ?? {}),
-      ...(beyondToken ? { "Beyond-Token": beyondToken } : {}),
-    };
-    const context = this.#taskPlanContext(run, metadata);
-    if (!context) {
-      return;
-    }
-    // 计划同步不能把已经成功的运行时取消反转成网关失败；标准 STOP_CHAT
-    // 仍会由 BE 在 Gateway 返回后执行权威的 confirmCancellation。
-    await this.#taskPlans.cancel({ context, reason }).catch(() => undefined);
   }
 
   /** Run 异常终止时把活动计划收敛到 FAILED，避免前端永久停留在执行中。 */

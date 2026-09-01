@@ -68,7 +68,7 @@ type TaskPlanSnapshot = {
 字段归属：
 
 - Leader 提交：`title`、`explanation`、任务内容和任务状态。
-- `byclaw-super` 管：可信的 `sessionId/messageId/traceId/sourceRunId`、调用凭证和幂等键；在委派、取消、异常时也会自动补任务状态。
+- `byclaw-super` 管：可信的 `sessionId/messageId/traceId/sourceRunId`、调用凭证和幂等键；Run 取消只收敛运行时自身，不再反向修改任务计划。
 - `byclaw-be` 管：持久化、`planId/taskId/version`、时间字段和计划总状态。
 
 ## 2. 状态
@@ -155,7 +155,7 @@ flowchart LR
 
 - `loadActive`：Run 开始或恢复时加载当前活动计划。
 - `update`：创建或整体替换计划；使用工具调用 ID 等作为幂等键。
-- `cancel`：Run 停止后通知 BE 把活动计划收口为取消状态。
+- `cancel`：BE 内部取消入口；生产 `STOP_CHAT` 由 BE 统一编排，不由 Super 的 Run 取消链路调用。
 
 任务计划不通过聊天 Redis DataStream 流转；聊天输出与任务计划快照是两条独立通道。
 
@@ -278,7 +278,8 @@ sequenceDiagram
 - 时间字段：`startedAt/completedAt` 只在首次状态迁移时写入，后续完整快照更新不会覆盖；任务内容和状态未变化时也不会刷新 `updatedAt`。
 - 顺序保护：任务进入终态后不能回退；后一步开始后，前面已开始的任务不能改名、删除或修改状态。
 - Run 异常：`IN_PROGRESS` 改为 `FAILED / RUN_FAILED`；未开始任务通常改为 `SKIPPED / RUN_ABORTED`，保证计划不会永久停留在执行中。
-- 用户停止：Super 中止 Leader 和委派，再调用 BE 的 cancel 接口；最终计划状态以 BE 返回为准。
+- 用户停止：BE 先把会话内活动计划置为 `CANCELLING`，调用 Super 中止 Leader 和委派，再由 BE
+  确认计划为 `CANCELLED`；Super 不再反向调用任务计划 cancel 接口。
 
 ## 7. 代码入口
 

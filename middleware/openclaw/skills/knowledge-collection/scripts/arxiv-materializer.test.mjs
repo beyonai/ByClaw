@@ -3,6 +3,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  realpath,
   rm,
   symlink,
   writeFile,
@@ -13,6 +14,7 @@ import test from 'node:test';
 
 import { runArxivMaterialize } from './arxiv-materializer.mjs';
 import { cmdCollect, collectionStatus } from './collection-state.mjs';
+import { cmdPublish } from './publish-delivery.mjs';
 import { cmdInit } from './research-state.mjs';
 import { sessionPaths } from './session.mjs';
 
@@ -20,12 +22,13 @@ const SOURCE_URL = 'https://arxiv.org/pdf/2501.12948';
 const ACQUISITION_URL = 'https://arxiv.org/html/2501.12948v2';
 const TITLE = 'DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning';
 
-function completeMarkdown(acquisitionUrl = ACQUISITION_URL) {
+function completeMarkdown(acquisitionUrl = ACQUISITION_URL, { autolink = false } = {}) {
   const body = 'The model learns reasoning behavior from reinforcement learning. '.repeat(45);
+  const sourceMarker = autolink ? `<${acquisitionUrl}>` : acquisitionUrl;
   return [
     `# ${TITLE}`,
     '',
-    `> 原文链接: ${acquisitionUrl}`,
+    `> 原文链接: ${sourceMarker}`,
     '',
     '## Abstract', body,
     '## 1 Introduction', body,
@@ -138,6 +141,74 @@ test('accepts a uniquely matching paper inside a byCLI result envelope', async (
     assert.equal(result.materialization.contentGranularity, 'full-text');
   } finally {
     await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test('accepts the balanced Markdown autolink emitted by byCLI web read', async () => {
+  const f = await fixture({ markdown: completeMarkdown(ACQUISITION_URL, { autolink: true }) });
+  try {
+    const result = await runArxivMaterialize(f.paths, args(f));
+    assert.equal(result.materialization.status, 'materialized');
+    assert.equal(result.materialization.contentGranularity, 'full-text');
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test('rejects malformed Markdown autolinks without weakening exact source matching', async () => {
+  for (const marker of [`<${ACQUISITION_URL}`, `${ACQUISITION_URL}>`]) {
+    const f = await fixture({
+      markdown: completeMarkdown().replace(ACQUISITION_URL, marker),
+    });
+    try {
+      const result = await runArxivMaterialize(f.paths, args(f));
+      assert.equal(result.materialization.status, 'pending');
+      const diagnostics = JSON.parse(await readFile(join(f.root, result.diagnostics), 'utf8'));
+      assert.ok(diagnostics.reasonCodes.includes('source-marker-mismatch'));
+      assert.equal(result.collectPayloadPath, null);
+    } finally {
+      await rm(f.root, { recursive: true, force: true });
+    }
+  }
+});
+
+test('a second executor artifact can close the arXiv flow without rewriting first raw evidence', async () => {
+  const f = await fixture({
+    markdown: completeMarkdown().replace(ACQUISITION_URL, `<${ACQUISITION_URL}`),
+  });
+  const deliveryDir = `${await realpath(f.root)}-delivery`;
+  try {
+    const first = await runArxivMaterialize(f.paths, args(f));
+    assert.equal(first.materialization.status, 'pending');
+    assert.equal(collectionStatus(f.paths).deliveryComplete, false);
+
+    const firstRaw = await readFile(f.fulltextFile, 'utf8');
+    const firstMetadata = await readFile(f.metadataFile, 'utf8');
+    const retryDir = join(f.root, 'raw/bycli/arxiv/deepseek-r1-attempt-2');
+    await mkdir(join(retryDir, 'images'), { recursive: true });
+    const retryMetadataFile = join(retryDir, 'metadata.json');
+    const retryFulltextFile = join(retryDir, 'executor-output.md');
+    await writeFile(retryMetadataFile, firstMetadata);
+    await writeFile(retryFulltextFile, completeMarkdown(ACQUISITION_URL, { autolink: true }));
+    await writeFile(join(retryDir, 'images/training.png'), 'png-fixture-attempt-2');
+
+    const corrected = await runArxivMaterialize(f.paths, {
+      ...args(f),
+      'metadata-file': retryMetadataFile,
+      'fulltext-file': retryFulltextFile,
+    });
+    assert.equal(await readFile(f.fulltextFile, 'utf8'), firstRaw);
+    assert.equal(await readFile(f.metadataFile, 'utf8'), firstMetadata);
+    assert.equal(corrected.materialization.status, 'materialized');
+    assert.equal(cmdCollect(f.paths, { 'item-json-file': corrected.collectPayloadPath }).ok, true);
+    assert.equal(collectionStatus(f.paths).deliveryComplete, true);
+
+    const published = cmdPublish(f.paths, { 'delivery-dir': deliveryDir });
+    assert.equal(published.delivery.actualDirectory, deliveryDir);
+    assert.deepEqual(published.deliveryInput.files, [join(deliveryDir, 'deepseek-r1-2501-12948.md')]);
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+    await rm(deliveryDir, { recursive: true, force: true });
   }
 });
 

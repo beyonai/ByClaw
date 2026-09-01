@@ -61,6 +61,28 @@ test('treats a trusted WeChat detail URL as an article without keyword-dependent
   );
 });
 
+test('treats a strict Sogou WeChat article redirect as an article', () => {
+  assert.deepEqual(
+    classifyCandidate({
+      url: 'https://weixin.sogou.com/link?url=opaque-article-token',
+      title: '外国玩家眼中的「米哈游发家史」',
+    }),
+    { pageType: 'article', reasons: ['trusted-wechat-redirect-url'] },
+  );
+  assert.equal(classifyCandidate({
+    url: 'http://weixin.sogou.com/link?url=opaque-article-token',
+    title: '米哈游文章',
+  }).pageType, 'weak');
+  assert.equal(classifyCandidate({
+    url: 'https://weixin.sogou.com/link',
+    title: '米哈游文章',
+  }).pageType, 'weak');
+  assert.equal(classifyCandidate({
+    url: 'https://weixin.sogou.com/weixin?query=米哈游',
+    title: '米哈游文章搜索结果',
+  }).pageType, 'reject');
+});
+
 test('recognizes Nature and arXiv publication detail URLs without language-specific title keywords', () => {
   assert.deepEqual(
     classifyCandidate({
@@ -76,6 +98,70 @@ test('recognizes Nature and arXiv publication detail URLs without language-speci
     }),
     { pageType: 'article', reasons: ['trusted-publication-url'] },
   );
+});
+
+test('promotes bounded structural detail routes only with article evidence', () => {
+  const articleContext = '这是一段超过二十个可见字符的详情摘要，用于确认候选页面承载的是独立正文内容。';
+  const fixtures = [
+    'https://example.com/1234567',
+    'https://example.com/a1b2c3d4',
+    'https://example.com/c/a1b2c3d4',
+    'https://example.com/features/company-update.shtml',
+    'https://example.com/2026/09/company-update',
+    'https://example.com/2026/09/01/company-update',
+  ];
+  for (const url of fixtures) {
+    assert.equal(classifyCandidate({
+      url,
+      title: 'Example 公司战略调整与业务进展',
+      content: articleContext,
+    }).pageType, 'article', url);
+  }
+
+  assert.equal(classifyCandidate({
+    url: 'https://example.com/a1b2c3d4',
+    title: 'Example 公司战略调整与业务进展',
+    publishTime: '2026-09-01',
+  }).pageType, 'article');
+});
+
+test('keeps undersized IDs, generic titles, index files, and channel routes weak', () => {
+  const longContext = '这是一段超过二十个可见字符的摘要，但路径或标题仍不足以证明它是独立文章详情页面。';
+  const fixtures = [
+    { url: 'https://example.com/123456', title: 'Example 公司动态' },
+    { url: 'https://example.com/a1b2c3d', title: 'Example 公司动态' },
+    { url: 'https://example.com/c/a1b2c3d', title: 'Example 公司动态' },
+    { url: 'https://example.com/index.html', title: 'Example 公司动态' },
+    { url: 'https://example.com/channel/technology', title: 'Example 公司动态' },
+    { url: 'https://example.com/category/technology', title: 'Example 公司动态' },
+    { url: 'https://example.com/tag/technology', title: 'Example 公司动态' },
+    { url: 'https://example.com/topic/technology', title: 'Example 公司动态' },
+    { url: 'https://example.com/1234567', title: '新闻详情' },
+  ];
+  for (const candidate of fixtures) {
+    assert.equal(classifyCandidate({ ...candidate, content: longContext }).pageType, 'weak', candidate.url);
+  }
+});
+
+test('requires article text, twenty visible context characters, or publication metadata', () => {
+  const base = {
+    url: 'https://example.com/7654321',
+    title: 'Example 公司战略调整与业务进展',
+  };
+  assert.equal(classifyCandidate({ ...base, content: '普通短摘要' }).pageType, 'weak');
+  assert.equal(classifyCandidate({ ...base, content: '记者发布了最新报道' }).pageType, 'article');
+  assert.equal(classifyCandidate({
+    ...base,
+    titleContext: '一二三四五六七八九十一二三四五六七八九十',
+  }).pageType, 'article');
+});
+
+test('explicit search and listing evidence retains reject precedence over detail structure', () => {
+  assert.equal(classifyCandidate({
+    url: 'https://example.com/1234567',
+    title: 'Example 新闻列表',
+    content: '搜索结果与全部文章',
+  }).pageType, 'reject');
 });
 
 test('reject precedence prevents login and search pages from being promoted by article words', () => {

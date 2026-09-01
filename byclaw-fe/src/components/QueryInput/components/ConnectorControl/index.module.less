@@ -114,6 +114,14 @@
   }
 }
 
+.inlineMoreActionButton {
+  display: none;
+
+  &:focus-visible {
+    display: inline-flex;
+  }
+}
+
 .connectorItem {
   display: flex;
   align-items: center;
@@ -124,6 +132,10 @@
 
   &:hover {
     background: #f7f9fc;
+
+    .inlineMoreActionButton {
+      display: inline-flex;
+    }
   }
 }
 

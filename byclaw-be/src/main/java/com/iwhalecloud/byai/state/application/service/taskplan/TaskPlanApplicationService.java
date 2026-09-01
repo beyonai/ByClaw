@@ -329,6 +329,9 @@ public class TaskPlanApplicationService {
         String sourceRuntime, String sourceRunId) {
         String idempotencyKey = requiredTextCommand(request.getIdempotencyKey(), "idempotencyKey", 128);
         ByaiAgentTaskPlan existing = findLatestActiveForSession(userId, sessionId, true);
+        if (existing != null && reconcileTerminalTaskSnapshot(existing, userId)) {
+            existing = findLatestActiveForSession(userId, sessionId, true);
+        }
         if (existing != null) {
             boolean ownedExecution = isExecutionOwner(existing, messageId, sourceRuntime, sourceRunId);
             if (ownedExecution && Objects.equals(existing.getLastCommandId(), idempotencyKey)) {
@@ -375,6 +378,40 @@ public class TaskPlanApplicationService {
             + "sourceRuntime={}, sourceRunId={}, idempotencyKey={}", plan.getPlanId(), plan.getVersion(), userId,
             sessionId, messageId, sourceRuntime, sourceRunId, idempotencyKey);
         return new TaskPlanWriteResult(snapshot(plan, tasks), true);
+    }
+
+    /** 修复明细已全部终态、但汇总状态仍停留在 ACTIVE 的旧快照，释放会话级活动计划唯一位。 */
+    private boolean reconcileTerminalTaskSnapshot(ByaiAgentTaskPlan plan, Long userId) {
+        if (!"ACTIVE".equals(plan.getStatus())) {
+            return false;
+        }
+        List<TaskPlanSnapshot.TaskSnapshot> taskSnapshots = tasks(plan);
+        String nextStatus = derivePlanStatus(taskSnapshots);
+        if ("ACTIVE".equals(nextStatus)) {
+            return false;
+        }
+
+        PlanStatusReason reason = derivePlanStatusReason(taskSnapshots);
+        Date now = new Date();
+        int nextVersion = plan.getVersion() + 1;
+        int changed = planMapper.update(null, Wrappers.<ByaiAgentTaskPlan>lambdaUpdate()
+            .eq(ByaiAgentTaskPlan::getPlanId, plan.getPlanId())
+            .eq(ByaiAgentTaskPlan::getUserId, userId)
+            .eq(ByaiAgentTaskPlan::getSessionId, plan.getSessionId())
+            .eq(ByaiAgentTaskPlan::getVersion, plan.getVersion())
+            .eq(ByaiAgentTaskPlan::getStatus, "ACTIVE")
+            .set(ByaiAgentTaskPlan::getStatus, nextStatus)
+            .set(ByaiAgentTaskPlan::getStatusReasonCode, reason == null ? null : reason.code())
+            .set(ByaiAgentTaskPlan::getStatusReasonMessage, reason == null ? null : reason.message())
+            .set(ByaiAgentTaskPlan::getVersion, nextVersion)
+            .set(ByaiAgentTaskPlan::getUpdatedAt, now)
+            .set(ByaiAgentTaskPlan::getCompletedAt, now));
+        if (changed == 1) {
+            log.info("[task-plan] reconciled terminal task snapshot planId={}, status={}->{}, version={}->{}, "
+                + "userId={}, sessionId={}", plan.getPlanId(), plan.getStatus(), nextStatus, plan.getVersion(),
+                nextVersion, userId, plan.getSessionId());
+        }
+        return true;
     }
 
     private TaskPlanWriteResult advanceCurrent(TaskPlanUpdateRequest request, Long userId, Long sessionId,

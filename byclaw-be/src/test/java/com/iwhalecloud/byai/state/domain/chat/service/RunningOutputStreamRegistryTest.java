@@ -6,6 +6,7 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.eq;
@@ -15,12 +16,15 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.iwhalecloud.byai.state.domain.chat.dto.ChatRuntimeState;
+import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatInfo;
+import com.iwhalecloud.byai.state.domain.chat.dto.SessionRuntimeState;
 
 class RunningOutputStreamRegistryTest {
 
     private RedisTemplate<String, Object> redisTemplate;
     private ValueOperations<String, Object> valueOperations;
     private ChatRuntimeStateService chatRuntimeStateService;
+    private SessionRuntimeStateService sessionRuntimeStateService;
     private RunningOutputStreamRegistry runningOutputStreamRegistry;
 
     @BeforeEach
@@ -28,11 +32,39 @@ class RunningOutputStreamRegistryTest {
         redisTemplate = mock(RedisTemplate.class);
         valueOperations = mock(ValueOperations.class);
         chatRuntimeStateService = mock(ChatRuntimeStateService.class);
+        sessionRuntimeStateService = mock(SessionRuntimeStateService.class);
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
 
         runningOutputStreamRegistry = new RunningOutputStreamRegistry();
         ReflectionTestUtils.setField(runningOutputStreamRegistry, "redisTemplate", redisTemplate);
         ReflectionTestUtils.setField(runningOutputStreamRegistry, "chatRuntimeStateService", chatRuntimeStateService);
+        ReflectionTestUtils.setField(runningOutputStreamRegistry, "sessionRuntimeStateService",
+            sessionRuntimeStateService);
+    }
+
+    @Test
+    void getRunningFallsBackToAuthoritativeSessionRuntimeWhenTheRequestMarkerIsNotYetVisible() {
+        when(valueOperations.get("byai:chat:running:10")).thenReturn(null);
+        SessionRuntimeState runtime = new SessionRuntimeState();
+        runtime.setSessionId(10L);
+        runtime.setTraceId("trace-runtime");
+        runtime.setStatus("running");
+        runtime.setActiveAgentCount(3L);
+        runtime.setActiveChildCount(2L);
+        runtime.setWaitingInteractionCount(0L);
+        runtime.setRevision(8L);
+        runtime.setChangedAt(1000L);
+        when(sessionRuntimeStateService.get(10L)).thenReturn(runtime);
+
+        RunningChatInfo info = runningOutputStreamRegistry.getRunning(10L);
+
+        assertThat(info.getRunning()).isTrue();
+        assertThat(info.getTraceId()).isEqualTo("trace-runtime");
+        assertThat(info.getClientRequestId()).isEqualTo("runtime:10:trace-runtime");
+        assertThat(info.getRuntimeStatus()).isEqualTo("running");
+        assertThat(info.getActiveAgentCount()).isEqualTo(3L);
+        assertThat(info.getActiveChildCount()).isEqualTo(2L);
+        assertThat(info.getRuntimeRevision()).isEqualTo(8L);
     }
 
     @Test

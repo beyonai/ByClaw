@@ -5,7 +5,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { recordPendingCollectionItem, registerFullTextEvidenceReceipt } from './collection-state.mjs';
-import { atomicWriteJson, isInside, readJson } from './session.mjs';
+import { authorizePublicSource } from './discovery-authorization.mjs';
+import { atomicWriteJson, isInside, loadSession, readJson } from './session.mjs';
 
 const ITEM_ID = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const SUCCESS_STATUSES = new Set(['saved', 'downloaded']);
@@ -32,6 +33,29 @@ function elapsedMilliseconds(start, end) {
 function requireText(value, label) {
   if (typeof value !== 'string' || !value.trim()) throw new Error(`${label} 必须是非空字符串`);
   return value.trim();
+}
+
+function sha256(content) {
+  return crypto.createHash('sha256').update(content).digest('hex');
+}
+
+function normalizedHttpUrl(value, label) {
+  const raw = requireText(value, label);
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error(`${label} 必须是 HTTP(S) URL`);
+  }
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) {
+    throw new Error(`${label} 必须是无凭据的 HTTP(S) URL`);
+  }
+  url.hash = '';
+  return url.toString();
+}
+
+function hashedArtifact(root, artifact) {
+  return { artifact, sha256: `sha256:${sha256(fs.readFileSync(path.join(root, artifact)))}` };
 }
 
 function toPosixRelative(root, absolute) {
@@ -216,6 +240,9 @@ export async function runWechatMaterialize(paths, args, options = {}) {
   }
   const resolvedUrl = trustedResolvedUrl(executorResult.resolved_url);
   if (!resolvedUrl) throw new Error('resolved_url 必须是可信 mp.weixin.qq.com/s 文章 URL');
+  const requestedUrl = normalizedHttpUrl(executorResult.source_url, 'source_url');
+  const { session } = loadSession(paths, { persistMigration: false });
+  authorizePublicSource(session.task?.discoveryGate, requestedUrl);
   const savedArtifact = resolveRawArtifact(paths, executorResult.saved, 'executorResult.saved');
   if (!Number.isInteger(executorResult.size) || executorResult.size <= 0
     || executorResult.size !== savedArtifact.size) {
@@ -233,9 +260,13 @@ export async function runWechatMaterialize(paths, args, options = {}) {
   const rawArtifacts = [executorArtifact.relative, savedArtifact.relative, diagnosticsRelative];
   const baseDiagnostics = {
     schemaVersion: '1.0',
+    action: 'materialize-wechat',
+    transactionId: crypto.randomUUID(),
     itemId,
     executor: 'bycli',
-    sourceUrl: resolvedUrl,
+    sourceUrl: requestedUrl,
+    requestedUrl,
+    resolvedUrl,
     complete: sanitized.confidence === 'high',
     contentGranularity: sanitized.confidence === 'high' ? 'full-text' : 'unknown',
     ruleVersion: 'wechat-v1',
@@ -245,22 +276,27 @@ export async function runWechatMaterialize(paths, args, options = {}) {
     inputParagraphs: sanitized.inputParagraphs,
     outputParagraphs: sanitized.outputParagraphs,
     remoteMediaRemoved: sanitized.remoteMediaRemoved,
+    inputFiles: [executorArtifact.relative, savedArtifact.relative]
+      .map((artifact) => hashedArtifact(paths.root, artifact)),
+    outputFiles: [],
   };
 
   const writeStartedAt = now();
   atomicWriteJson(diagnosticsPath, { ...baseDiagnostics, timing: null });
   let collectPayloadPath = null;
   let materialization;
+  let outputFiles = [];
   if (sanitized.confidence === 'high') {
     const markdownDir = ensureSafeDirectory(paths.root, ['markdown', 'items', itemId], 'Markdown 工作目录');
     const sanitizedDir = ensureSafeDirectory(paths.root, ['sanitized', 'items', itemId], '净化正文目录');
     const markdownAbsolute = path.join(markdownDir, 'index.md');
     const sanitizedAbsolute = path.join(sanitizedDir, 'index.md');
-    const rendered = `${frontmatter(executorResult, resolvedUrl)}${sanitized.markdown}`;
+    const rendered = `${frontmatter(executorResult, requestedUrl)}${sanitized.markdown}`;
     atomicWriteText(markdownAbsolute, rendered);
     atomicWriteText(sanitizedAbsolute, rendered);
     const markdownPath = toPosixRelative(paths.root, markdownAbsolute);
     const sanitizedPath = toPosixRelative(paths.root, sanitizedAbsolute);
+    outputFiles = [markdownPath, sanitizedPath].map((artifact) => hashedArtifact(paths.root, artifact));
     const payload = {
       schemaVersion: '1.0',
       itemId,
@@ -284,7 +320,7 @@ export async function runWechatMaterialize(paths, args, options = {}) {
       sanitizedPath,
       canonicalItem: {
         title: String(executorResult.title || ''),
-        url: resolvedUrl,
+        url: requestedUrl,
         author: String(executorResult.author || ''),
         publishTime: String(executorResult.publish_time || executorResult.publishTime || ''),
         markdown: sanitizedPath,
@@ -305,7 +341,7 @@ export async function runWechatMaterialize(paths, args, options = {}) {
       source: 'public-internet',
       sourceSkill: 'bycli',
       backend: 'bycli',
-      sourceUrl: resolvedUrl,
+      sourceUrl: requestedUrl,
       title: String(executorResult.title || ''),
       rawArtifacts,
       media: {
@@ -325,11 +361,11 @@ export async function runWechatMaterialize(paths, args, options = {}) {
     writeMs,
     totalMs: elapsedMilliseconds(totalStartedAt, now()),
   };
-  atomicWriteJson(diagnosticsPath, { ...baseDiagnostics, timing });
+  atomicWriteJson(diagnosticsPath, { ...baseDiagnostics, outputFiles, timing });
   if (collectPayloadPath) {
     registerFullTextEvidenceReceipt(paths, {
       executor: 'bycli',
-      sourceUrl: resolvedUrl,
+      sourceUrl: requestedUrl,
       artifact: diagnosticsRelative,
     });
   }

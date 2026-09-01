@@ -16,6 +16,7 @@ import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.state.domain.chat.dto.ChatRuntimeState;
 import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatInfo;
+import com.iwhalecloud.byai.state.domain.chat.dto.SessionRuntimeState;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -35,6 +36,9 @@ public class RunningOutputStreamRegistry {
 
     @Autowired
     private ChatRuntimeStateService chatRuntimeStateService;
+
+    @Autowired
+    private SessionRuntimeStateService sessionRuntimeStateService;
 
     public String getInstanceId() {
         return chatRuntimeInstance == null ? "unknown" : chatRuntimeInstance.getInstanceId();
@@ -211,10 +215,13 @@ public class RunningOutputStreamRegistry {
             return empty;
         }
 
+        SessionRuntimeState sessionRuntime = sessionRuntimeStateService == null
+            ? null : sessionRuntimeStateService.get(sessionId);
+
         String key = buildKey(sessionId);
         String value = (String) redisTemplate.opsForValue().get(key);
         if (StringUtils.isBlank(value)) {
-            return empty;
+            return applySessionRuntime(empty, sessionRuntime);
         }
 
         try {
@@ -236,12 +243,33 @@ public class RunningOutputStreamRegistry {
             info.setChatContent(running.getString("chatContent"));
             Long ttl = redisTemplate.getExpire(key, TimeUnit.SECONDS);
             info.setTtlSeconds(ttl == null ? null : ttl);
-            return info;
+            return applySessionRuntime(info, sessionRuntime);
         }
         catch (Exception e) {
             log.warn("解析运行中 OutputStream 标记失败, sessionId: {}", sessionId, e);
-            return empty;
+            return applySessionRuntime(empty, sessionRuntime);
         }
+    }
+
+    private RunningChatInfo applySessionRuntime(RunningChatInfo info, SessionRuntimeState runtime) {
+        if (runtime == null) {
+            return info;
+        }
+        info.setRuntimeStatus(runtime.getStatus());
+        info.setRuntimeSource(runtime.getSource());
+        info.setActiveAgentCount(runtime.getActiveAgentCount());
+        info.setActiveChildCount(runtime.getActiveChildCount());
+        info.setWaitingInteractionCount(runtime.getWaitingInteractionCount());
+        info.setRuntimeRevision(runtime.getRevision());
+        info.setRuntimeChangedAt(runtime.getChangedAt());
+        if (runtime.isActive()) {
+            info.setRunning(true);
+            info.setTraceId(StringUtils.defaultIfBlank(info.getTraceId(), runtime.getTraceId()));
+            if (StringUtils.isBlank(info.getClientRequestId())) {
+                info.setClientRequestId("runtime:" + info.getSessionId() + ":" + runtime.getTraceId());
+            }
+        }
+        return info;
     }
 
     public List<RunningChatInfo> batchGetRunning(Collection<Long> sessionIds) {

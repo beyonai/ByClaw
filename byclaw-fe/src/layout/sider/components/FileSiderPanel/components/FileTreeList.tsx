@@ -95,6 +95,28 @@ function toFileTreeData(
   });
 }
 
+const formatFileSize = (size?: number) => {
+  if (!size) return '0 B';
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+const formatFileUpdatedAt = (value?: string) => {
+  if (!value) return '';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? value
+    : date.toLocaleString('zh-CN', {
+      hour12: false,
+      ...(date.getFullYear() === new Date().getFullYear() ? {} : { year: 'numeric' }),
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+};
+
 const FileTreeList: React.FC<FileTreeListProps> = ({
   items,
   childrenByPath,
@@ -179,6 +201,18 @@ const FileTreeList: React.FC<FileTreeListProps> = ({
                           .join(' ')}
                       >
                         <span className={styles.treeTitleText}>{item.name}</span>
+                        {(item as any).updatedAt || (item as any).createStaffName || (item as any).size ? (
+                          <span className={styles.treeTitleMeta}>
+                            {!isDirectory(item) && (
+                              <>
+                                {formatFileSize((item as any).size)}
+                                <span>·</span>
+                              </>
+                            )}
+                            {(item as any).updatedAt && <span>{formatFileUpdatedAt((item as any).updatedAt)}</span>}
+                            <span className={styles.treeTitleMetaPerson}>{(item as any).createStaffName || '-'}</span>
+                          </span>
+                        ) : null}
                       </span>
                     </FilePathTooltip>
                     {showActions && (

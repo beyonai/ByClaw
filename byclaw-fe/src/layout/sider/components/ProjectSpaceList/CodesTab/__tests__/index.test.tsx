@@ -157,8 +157,10 @@ describe('CodesTab', () => {
   it('loads the workspace repository from its current session directory', async () => {
     render(<CodesTab projectId={203} resourceId="agent-9" sessionId="301" />);
 
-    await waitFor(() => expect(mockListAvailableProjectRepos).toHaveBeenCalledWith(203));
-    await waitFor(() => expect(mockListProjectRepoTree).toHaveBeenCalledWith({ projectId: 203, repoId: 1 }));
+    await waitFor(() => expect(mockListAvailableProjectRepos).toHaveBeenCalledWith(203, '301'));
+    await waitFor(() =>
+      expect(mockListProjectRepoTree).toHaveBeenCalledWith({ projectId: 203, repoId: 1, sessionId: '301' })
+    );
 
     expect(screen.getByTestId('repo-beyonai/ByClaw')).toHaveTextContent('/by/projects/203/');
     expect(screen.queryByTestId('repo-beyonai/byclaw-test')).toBeNull();
@@ -176,7 +178,7 @@ describe('CodesTab', () => {
       '/by/projects/203/beyonai/byclaw-test/'
     );
     await waitFor(() => {
-      expect(mockListProjectRepoTree).toHaveBeenCalledWith({ projectId: 203, repoId: 2 });
+      expect(mockListProjectRepoTree).toHaveBeenCalledWith({ projectId: 203, repoId: 2, sessionId: '301' });
       expect(mockGetTaskChanges).toHaveBeenCalledWith(301, 2);
     });
   });
@@ -197,12 +199,14 @@ describe('CodesTab', () => {
     mockListProjectRepoTree.mockClear();
 
     rerender(<CodesTab projectId={203} resourceId="agent-9" sessionId="301" refreshKey={1} />);
-    await waitFor(() => expect(mockListProjectRepoTree).toHaveBeenCalledWith({ projectId: 203, repoId: 1 }));
+    await waitFor(() =>
+      expect(mockListProjectRepoTree).toHaveBeenCalledWith({ projectId: 203, repoId: 1, sessionId: '301' })
+    );
 
     mockListProjectRepoTree.mockClear();
     fireEvent.click(screen.getByRole('button', { name: 'load-src-beyonai/ByClaw' }));
     await waitFor(() =>
-      expect(mockListProjectRepoTree).toHaveBeenCalledWith({ projectId: 203, repoId: 1, path: 'src' })
+      expect(mockListProjectRepoTree).toHaveBeenCalledWith({ projectId: 203, repoId: 1, path: 'src', sessionId: '301' })
     );
   });
 
@@ -216,7 +220,12 @@ describe('CodesTab', () => {
     fireEvent.keyDown(searchInput, { key: 'Enter', code: 'Enter' });
 
     await waitFor(() =>
-      expect(mockSearchProjectRepoTree).toHaveBeenCalledWith({ projectId: 203, repoId: 1, keyword: 'session token' })
+      expect(mockSearchProjectRepoTree).toHaveBeenCalledWith({
+        projectId: 203,
+        repoId: 1,
+        keyword: 'session token',
+        sessionId: '301',
+      })
     );
     expect(repoBlock).toHaveTextContent('matched.ts');
 
@@ -225,7 +234,9 @@ describe('CodesTab', () => {
     expect(clearButton).not.toBeNull();
     fireEvent.click(clearButton as Element);
 
-    await waitFor(() => expect(mockListProjectRepoTree).toHaveBeenCalledWith({ projectId: 203, repoId: 1 }));
+    await waitFor(() =>
+      expect(mockListProjectRepoTree).toHaveBeenCalledWith({ projectId: 203, repoId: 1, sessionId: '301' })
+    );
   });
 
   it('forwards repository file clicks to the project file preview handler', async () => {
@@ -330,7 +341,7 @@ describe('CodesTab', () => {
     rerender(<CodesTab projectId={203} resourceId="agent-9" sessionId="301" codeChangesEnabled refreshKey={1} />);
 
     await waitFor(() => {
-      expect(mockListProjectRepoTree).toHaveBeenCalledWith({ projectId: 203, repoId: 1 });
+      expect(mockListProjectRepoTree).toHaveBeenCalledWith({ projectId: 203, repoId: 1, sessionId: '301' });
       expect(mockGetTaskChanges).toHaveBeenCalledWith(301, 1);
     });
   });

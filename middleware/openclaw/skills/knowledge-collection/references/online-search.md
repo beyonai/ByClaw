@@ -16,7 +16,8 @@ node scripts/knowledge-collection.mjs public-discover --session-dir <会话目�
 
 不带 `--requested-count` 时，该命令在 SearXNG 检索时并行运行 `hot_discovery`，并把 SearXNG category 传为热度发现维度；
 `hot_discovery` 会额外补充 `general`。带 `--requested-count N` 时采用自适应路径：先运行 SearXNG，并按 URL、标题与摘要把候选确定性分类为
-`article`、`weak` 或 `reject`；只有唯一 `article` 数量少于 N 时才运行 `hot_discovery`。任一通道失败时保留另一通道的快照与候选，
+`article`、`weak` 或 `reject`。中文文章 profile 会并发启动 SearXNG 与限定来源的 `hot_discovery`，共享 60 秒软预算和 90 秒硬上限；
+停止阈值为 `max(N*3, 5)`，且至少尝试前三个运行时可用来源。其他 requested-count 请求保持先 SearXNG、候选不足再回退的兼容行为。任一通道失败时保留另一通道的快照与候选，
 只有两者均失败才判定本次发现失败。命令输出的 `candidateQuality`、`pageTypeReasons` 和 `timing` 是候选选择与阶段耗时的权威诊断。
 直接运行 `searxng-cli` 仅适用于独立调试，不会自动启动热度发现。
 
@@ -42,7 +43,7 @@ node scripts/knowledge-collection.mjs public-discover --session-dir <会话目�
 - **学术/标准**：优先 `online-search --category science`（不带 time-range）；
 - **英文技术/代码**：优先内置路由层的 Exa（擅长英文技术文档与代码上下文）与 `gh`（搜 GitHub）；
 - **通用发现**：使用 `public-discover`，它会并行运行两个信源并生成合并快照；
-- **取内容**：一律委派来源执行器，公共网页按 [agent-reach.md](agent-reach.md) → `bycli web read --url <URL> --stdout`。
+- **取内容**：一律委派来源执行器，通用公共网页按 [agent-reach.md](agent-reach.md) → `acquire-web` → `materialize-web`；不得手工重定向 stdout 或构造 payload。
 
 ## 实测引擎可用性（2026-08-15 直连探测）
 

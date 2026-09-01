@@ -128,16 +128,21 @@ function normalizeTitle(title) {
   return String(title || '').replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
+function sourceMarkerUrl(text) {
+  const match = /^>\s*原文链接:\s*(?:<(https:\/\/[^>\s]+)>|(https:\/\/\S+))\s*$/m.exec(text);
+  return match?.[1] || match?.[2] || null;
+}
+
 function analyzeFullText(markdown, metadata, acquisitionUrl) {
   const text = requireText(markdown, '--fulltext-file').replace(/\r\n?/g, '\n');
-  const sourceMarker = /^>\s*原文链接:\s*(https:\/\/\S+)\s*$/m.exec(text);
+  const sourceMarker = sourceMarkerUrl(text);
   const headingTitle = /^#\s+(.+)$/m.exec(text)?.[1]?.trim() || '';
   const headings = [...text.matchAll(/^#{2,6}\s+(.+)$/gm)].map((match) => match[1].trim());
   const hasAbstract = headings.some((heading) => /^abstract\b/i.test(heading));
   const hasIntroduction = headings.some((heading) => /^(?:\d+(?:\.\d+)*\s+)?introduction\b/i.test(heading));
   const hasReferences = headings.some((heading) => /^(?:\d+(?:\.\d+)*\s+)?references?\b/i.test(heading));
   const reasonCodes = [
-    ...(!sourceMarker || sourceMarker[1] !== acquisitionUrl ? ['source-marker-mismatch'] : []),
+    ...(sourceMarker !== acquisitionUrl ? ['source-marker-mismatch'] : []),
     ...(normalizeTitle(headingTitle) !== normalizeTitle(metadata.title) ? ['title-mismatch'] : []),
     ...(!hasAbstract ? ['missing-abstract'] : []),
     ...(!hasIntroduction ? ['missing-introduction'] : []),

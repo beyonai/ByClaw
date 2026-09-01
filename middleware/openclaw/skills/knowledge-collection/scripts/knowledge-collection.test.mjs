@@ -190,6 +190,8 @@ await (async () => {
   const h = await runCli(['help']);
   assert.equal(h.json.ok, true);
   assert.equal(h.json.version, '3.0.0');
+  assert.match(h.json.buildId, /^sha256:[a-f0-9]{64}$/);
+  assert.equal(h.json.buildIdSource, 'content-fingerprint');
   assert.ok(h.json.commandsByGroup.research.some((item) => item.name === 'init'));
   const rootEnterprise = h.json.commandsByGroup.platform.find((item) => item.name === 'enterprise');
   assert.match(rootEnterprise.title, /resume-resource/);
@@ -225,6 +227,14 @@ await (async () => {
   const schema = await runCli(['command-schema']);
   assert.equal(schema.code, 0, schema.stderr);
   assert.equal(schema.json.schemaVersion, '1.0');
+  assert.equal(schema.json.buildId, h.json.buildId);
+
+  const injectedVersion = await runCli(['version'], {
+    KNOWLEDGE_COLLECTION_BUILD_ID: 'commit:cc7ca601f',
+  });
+  assert.equal(injectedVersion.code, 0, injectedVersion.stderr);
+  assert.equal(injectedVersion.json.buildId, 'commit:cc7ca601f');
+  assert.equal(injectedVersion.json.buildIdSource, 'environment');
   assert.deepEqual(schema.json.commands.init.required, ['session-dir', 'query']);
   assert.equal(schema.json.commands.init.properties['session-dir'].format, 'sandbox-path');
   assert.equal(schema.json.commands.init.properties['session-root'].format, 'absolute-path');
@@ -267,6 +277,21 @@ await (async () => {
   ]);
   assert.equal(
     schema.json.commands['materialize-arxiv'].properties['item-id'].pattern,
+    '^[a-z0-9][a-z0-9_-]{0,63}$',
+  );
+  assert.deepEqual(schema.json.commands['acquire-web'].required, [
+    'session-dir', 'item-id', 'source-url',
+  ]);
+  assert.equal(schema.json.commands['acquire-web'].properties['source-url'].format, 'http-url');
+  assert.equal(
+    schema.json.commands['acquire-web'].properties['item-id'].pattern,
+    '^[a-z0-9][a-z0-9_-]{0,63}$',
+  );
+  assert.deepEqual(schema.json.commands['materialize-web'].required, [
+    'session-dir', 'item-id', 'executor-result-file',
+  ]);
+  assert.equal(
+    schema.json.commands['materialize-web'].properties['item-id'].pattern,
     '^[a-z0-9][a-z0-9_-]{0,63}$',
   );
   for (const [name, contract] of Object.entries(schema.json.commands)) {
@@ -343,7 +368,7 @@ process.stdout.write(JSON.stringify({
   const wechatInit = await runCli([
     'init', '--session-dir', wechatRoot, '--query', 'WeChat materializer CLI',
     '--source-scope', '["public-internet"]', '--materialization-target', 'selected',
-    '--direct-urls', '["https://mp.weixin.qq.com/s/cli-fixture"]',
+    '--direct-urls', '["https://weixin.sogou.com/link?url=cli-fixture"]',
   ]);
   assert.equal(wechatInit.code, 0, wechatInit.stderr);
   const rawWechatDir = join(wechatRoot, 'raw/bycli/weixin/cli-fixture');

@@ -28,6 +28,8 @@ async function initializedSession() {
     'source-scope': '["public-internet"]',
     'materialization-target': 'selected',
     'direct-urls': JSON.stringify([
+      'https://weixin.sogou.com/link?url=fixture',
+      'https://weixin.sogou.com/link?url=escape',
       'https://mp.weixin.qq.com/s/mihoyo',
       'https://mp.weixin.qq.com/s/ambiguous',
       'https://mp.weixin.qq.com/s/escape',
@@ -101,10 +103,17 @@ test('materializer writes deterministic artifacts and a full-text collect payloa
     for (const value of Object.values(first.timing)) assert.ok(Number.isInteger(value) && value >= 0);
 
     const diagnostics = JSON.parse(await readFile(join(root, 'raw/materialization/mihoyo.json'), 'utf8'));
+    assert.equal(diagnostics.action, 'materialize-wechat');
+    assert.match(diagnostics.transactionId, /^[0-9a-f-]{36}$/);
+    assert.equal(diagnostics.requestedUrl, 'https://weixin.sogou.com/link?url=fixture');
+    assert.equal(diagnostics.resolvedUrl, 'https://mp.weixin.qq.com/s/mihoyo');
+    assert.ok(diagnostics.inputFiles.every((file) => /^sha256:[a-f0-9]{64}$/.test(file.sha256)));
+    assert.ok(diagnostics.outputFiles.every((file) => /^sha256:[a-f0-9]{64}$/.test(file.sha256)));
     assert.equal(diagnostics.confidence, 'high');
     assert.ok(diagnostics.outputParagraphs >= 7);
 
     const payload = JSON.parse(await readFile(first.collectPayloadPath, 'utf8'));
+    assert.equal(payload.canonicalItem.url, 'https://weixin.sogou.com/link?url=fixture');
     assert.equal(payload.contentGranularity, 'full-text');
     assert.deepEqual(payload.fullTextEvidence, {
       schemaVersion: '1.0',

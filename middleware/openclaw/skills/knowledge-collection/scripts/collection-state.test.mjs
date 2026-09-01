@@ -11,12 +11,61 @@ import {
   reserveDiscoveryAttempt,
 } from './discovery-authorization.mjs';
 import {
+  recordFailedCollectionItem,
+  recordPendingCollectionItem,
   registerArxivAcquisitionVariant,
   registerFullTextEvidenceReceipt,
 } from './collection-state.mjs';
 import { sessionPaths } from './session.mjs';
 
 const scriptPath = resolve(dirname(new URL(import.meta.url).pathname), 'knowledge-collection.mjs');
+
+test('failed acquisition state preserves evidence and reconciles collection status', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-collection-failed-item-'));
+  try {
+    const firstUrl = 'https://example.com/article/1234567';
+    const secondUrl = 'https://example.com/article/7654321';
+    const initialized = await runCli([
+      'init', '--session-dir', root, '--query', '采集两篇关于 Example 的文章',
+      '--direct-urls', JSON.stringify([firstUrl, secondUrl]),
+    ]);
+    assert.equal(initialized.code, 0, initialized.stderr || initialized.stdout);
+    const paths = sessionPaths(root);
+    const base = {
+      source: 'public-internet',
+      sourceSkill: 'bycli',
+      backend: 'web',
+      rawArtifacts: [],
+    };
+    recordPendingCollectionItem(paths, {
+      ...base, itemId: 'first', sourceUrl: firstUrl, title: 'First', reason: 'acquiring',
+    });
+    recordPendingCollectionItem(paths, {
+      ...base, itemId: 'second', sourceUrl: secondUrl, title: 'Second', reason: 'acquiring',
+    });
+
+    const first = recordFailedCollectionItem(paths, {
+      ...base, itemId: 'first', sourceUrl: firstUrl, title: 'First', reason: 'acquisition-timeout',
+    });
+    assert.equal(first.materialization.status, 'failed');
+    assert.equal(first.materialization.contentGranularity, 'unknown');
+    let session = JSON.parse(await readFile(join(root, 'session.json'), 'utf8'));
+    assert.equal(session.collection.collection.status, 'partial');
+    assert.equal(session.collection.collection.items.length, 2);
+
+    recordFailedCollectionItem(paths, {
+      ...base, itemId: 'second', sourceUrl: secondUrl, title: 'Second', reason: 'bridge-unavailable',
+    });
+    session = JSON.parse(await readFile(join(root, 'session.json'), 'utf8'));
+    assert.equal(session.collection.collection.status, 'failed');
+    assert.deepEqual(
+      session.collection.collection.items.map((item) => item.materialization.status),
+      ['failed', 'failed'],
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test('collect and read-only status reject off-topic materialized public discovery content', async () => {
   const root = await mkdtemp(join(tmpdir(), 'knowledge-collection-topic-gate-'));

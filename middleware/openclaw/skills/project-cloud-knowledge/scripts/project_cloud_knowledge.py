@@ -600,6 +600,13 @@ class BackendApi:
     def search_file(self, payload: dict[str, Any]) -> Any:
         return self.transport.request(method="POST", path=self._path("knowledgeItems/searchFile"), payload=payload)
 
+    def metadata_search(self, payload: dict[str, Any]) -> Any:
+        return self.transport.request(
+            method="POST",
+            path=self._path("knowledgeItems/metadataSearch"),
+            payload=payload,
+        )
+
     def entity_discovery(
         self,
         payload: dict[str, Any],
@@ -923,6 +930,45 @@ class KnowledgeManager:
             "items": items,
         }
 
+    def _metadata_search(self, args: argparse.Namespace) -> dict[str, Any]:
+        if any(resource_id <= 0 for resource_id in args.resource_id):
+            raise ValueError("--resource-id 必须是正整数")
+        payload = _compact(
+            {
+                "resourceIdList": args.resource_id,
+                "where": args.where_json,
+                "metadataFieldList": args.metadata_field,
+                "topK": args.top_k,
+                "pageNum": args.page_num,
+                "pageSize": args.page_size,
+            }
+        )
+        value = self.api.metadata_search(payload)
+        value = value if isinstance(value, dict) else {}
+        raw_items = value.get("data") or []
+        items = [
+            _compact(
+                {
+                    "resourceId": _as_int(item.get("resourceId")),
+                    "filePath": item.get("filePath"),
+                    "metadata": item.get("metadata"),
+                }
+            )
+            for item in raw_items
+            if isinstance(item, dict)
+        ]
+        return {
+            "ok": True,
+            "action": "metadata-search",
+            "resourceIds": args.resource_id,
+            "where": args.where_json,
+            "metadataFields": args.metadata_field or [],
+            "total": _as_int(value.get("total")),
+            "pageNum": _as_int(value.get("pageNum")),
+            "pageSize": _as_int(value.get("pageSize")),
+            "items": items,
+        }
+
     @staticmethod
     def _entity_batch(value: Any, *, resource_id: int) -> dict[str, Any]:
         if not isinstance(value, dict) or not str(value.get("batchId") or "").strip():
@@ -1119,6 +1165,7 @@ def build_parser() -> argparse.ArgumentParser:
         "read-file": "按行读取知识库文件内容",
         "search": "检索知识库内容切片",
         "search-file": "检索知识库相关文件",
+        "metadata-search": "仅按元数据条件分页检索知识库文件",
         "entity-discovery": "异步发现原始文档中的知识实体",
         "entity-enrich": "异步补全 KnowledgeEntity 文档",
         "remove-file": "删除知识库文件",
@@ -1319,6 +1366,52 @@ def build_parser() -> argparse.ArgumentParser:
             default="mixedRecall",
             help="检索召回模式（默认 mixedRecall）",
         )
+
+    metadata_search = _add_command(
+        subparsers,
+        "metadata-search",
+        descriptions["metadata-search"],
+    )
+    metadata_search.add_argument(
+        "--resource-id",
+        action="append",
+        type=_positive_int,
+        required=True,
+        metavar="ID",
+        help="知识库资源 ID；检索多个知识库时重复传入",
+    )
+    metadata_search.add_argument(
+        "--where-json",
+        type=_agent_dsl,
+        required=True,
+        metavar="JSON",
+        help="必填的 Agent DSL where JSON 对象；完整规则见检索子 Skill",
+    )
+    metadata_search.add_argument(
+        "--metadata-field",
+        action="append",
+        metavar="NAME",
+        help="需要返回的元数据字段；多个字段时重复传入",
+    )
+    metadata_search.add_argument(
+        "--top-k",
+        type=_integer_range(1, 10000),
+        metavar="N",
+        help="未传 --page-size 时的每页条数（最大 10000）",
+    )
+    metadata_search.add_argument(
+        "--page-num",
+        type=_positive_int,
+        default=1,
+        metavar="N",
+        help="页码，从 1 开始（默认 1）",
+    )
+    metadata_search.add_argument(
+        "--page-size",
+        type=_integer_range(1, 10000),
+        metavar="N",
+        help="每页条数，优先于 --top-k（最大 10000）",
+    )
 
     for name in ("entity-discovery", "entity-enrich"):
         command = _add_command(subparsers, name, descriptions[name])

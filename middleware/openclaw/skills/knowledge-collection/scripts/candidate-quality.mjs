@@ -9,6 +9,13 @@ const SEARCH_URL = /(?:^|\/)(?:search|query|results?)(?:\/|$)/i;
 const LISTING_TEXT = /(?:搜索结果|站内搜索|全部文章|文章列表|新闻列表)/i;
 const ARTICLE_TEXT = /(?:报道|专访|访谈|深度|记者|新闻|观察|复盘|营收|发布于|作者)/i;
 const DETAIL_PATH = /\/(?:news|article|post|story|stories|p|s|\d{4})\//i;
+const ARTICLE_FILE = /\/(?!index(?:\.html?|\.shtml)$)[^/]+\.(?:html?|shtml)$/i;
+const GENERIC_PAGE_PATH = /(?:^|\/)(?:channel|category|tag|topic)(?:\/|$)|\/index\.(?:html?|shtml)$/i;
+const GENERIC_TITLE = /^(?:首页|主页|新闻|文章|新闻详情|文章详情|详情|列表|频道|专题|话题|标签|index|home)$/i;
+const NUMERIC_DETAIL_ID = /^\d{7,}$/;
+const MIXED_DETAIL_ID = /^(?=.{8,}$)(?=.*[a-z])(?=.*\d)[a-z0-9_-]+$/i;
+const DATE_DETAIL_PATH = /^\/\d{4}\/\d{1,2}(?:\/\d{1,2})?\/([^/]+)\/?$/;
+const MIN_VISIBLE_CONTEXT_CHARS = 20;
 
 function text(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -36,11 +43,54 @@ function isTrustedWechatArticle(url) {
     && /^\/s(?:\/|$)/i.test(url.pathname);
 }
 
+function isTrustedSogouWechatRedirect(url) {
+  return url.protocol === 'https:'
+    && url.hostname.toLowerCase() === 'weixin.sogou.com'
+    && /^\/link\/?$/i.test(url.pathname)
+    && Boolean(url.searchParams.get('url')?.trim());
+}
+
 function isTrustedPublicationDetail(url) {
   const hostname = url.hostname.toLowerCase();
   return (hostname === 'arxiv.org' && /^\/abs\/[^/]+\/?$/i.test(url.pathname))
     || ((hostname === 'nature.com' || hostname.endsWith('.nature.com'))
       && /^\/articles\/[^/]+\/?$/i.test(url.pathname));
+}
+
+function visibleLength(value) {
+  return text(value).replace(/\s+/g, '').length;
+}
+
+function hasPublicationMetadata(candidate) {
+  return ['publishTime', 'publishedAt', 'published', 'published_at', 'datePublished', 'pubDate']
+    .some((key) => text(candidate?.[key]));
+}
+
+function isOpaqueDetailId(value) {
+  return NUMERIC_DETAIL_ID.test(value) || MIXED_DETAIL_ID.test(value);
+}
+
+function structuralDetailSignal(url) {
+  const pathname = url.pathname;
+  if (GENERIC_PAGE_PATH.test(pathname)) return null;
+  if (ARTICLE_FILE.test(pathname)) return 'article-file';
+  const segments = pathname.split('/').filter(Boolean);
+  const leaf = segments.at(-1) || '';
+  if (isOpaqueDetailId(leaf)) {
+    return segments.at(-2)?.toLowerCase() === 'c' ? 'opaque-c-detail-id' : 'opaque-detail-id';
+  }
+  const dated = pathname.match(DATE_DETAIL_PATH);
+  if (dated && !/^(?:index|channel|category|tag|topic)$/i.test(dated[1])) {
+    return 'dated-detail-path';
+  }
+  return null;
+}
+
+function hasNewDetailEvidence(candidate, combinedText) {
+  if (ARTICLE_TEXT.test(combinedText)) return true;
+  if ([candidate?.content, candidate?.searxngContent, candidate?.titleContext]
+    .some((value) => visibleLength(value) >= MIN_VISIBLE_CONTEXT_CHARS)) return true;
+  return hasPublicationMetadata(candidate);
 }
 
 function normalizedIdentity(raw) {
@@ -68,7 +118,12 @@ export function classifyCandidate(candidate) {
   if (LISTING_TEXT.test(combinedText)) reasons.push('search-or-listing-title');
   if (reasons.length) return { pageType: 'reject', reasons };
 
+  if (GENERIC_PAGE_PATH.test(url.pathname)) {
+    return { pageType: 'weak', reasons: ['generic-index-or-channel-page'] };
+  }
+
   const trustedWechat = isTrustedWechatArticle(url);
+  const trustedWechatRedirect = isTrustedSogouWechatRedirect(url);
   const trustedPublication = isTrustedPublicationDetail(url);
   if (trustedPublication) {
     return { pageType: 'article', reasons: ['trusted-publication-url'] };
@@ -83,8 +138,17 @@ export function classifyCandidate(candidate) {
         : ['trusted-article-url'],
     };
   }
+  if (trustedWechatRedirect) {
+    return { pageType: 'article', reasons: ['trusted-wechat-redirect-url'] };
+  }
   if (detailUrl && contentSignal) {
     return { pageType: 'article', reasons: ['detail-url', 'article-content-signal'] };
+  }
+  const structuralSignal = structuralDetailSignal(url);
+  const title = text(candidate?.title);
+  if (structuralSignal && title && !GENERIC_TITLE.test(title)
+    && hasNewDetailEvidence(candidate, combinedText)) {
+    return { pageType: 'article', reasons: [structuralSignal, 'article-evidence'] };
   }
 
   if (url.pathname === '/' || url.pathname === '') {

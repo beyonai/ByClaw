@@ -22,6 +22,7 @@ import { useDispatch, useSelector } from '@umijs/max';
 
 import { subscribeChatStream } from '@/hooks/useSseSender/chatStream';
 import webSocketManager from '@/utils/websocket';
+import { chatSessionRuntimeManager } from '@/utils/chatSessionRuntimeManager';
 
 import useGlobalChatRuntime from '../useGlobalChatRuntime';
 
@@ -36,6 +37,7 @@ describe('hooks/useGlobalChatRuntime', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    chatSessionRuntimeManager.clear();
     jest.useFakeTimers();
     dispatch = jest.fn();
     state = {
@@ -50,6 +52,35 @@ describe('hooks/useGlobalChatRuntime', () => {
     };
     mockUseDispatch.mockReturnValue(dispatch);
     mockUseSelector.mockImplementation((selector: any) => selector(state));
+  });
+
+  it('applies generic session runtime messages from websocket', () => {
+    renderHook(() => useGlobalChatRuntime());
+
+    const onSessionRuntime = mockWebSocketManager.onMessage.mock.calls.find(
+      ([type]) => type === 'SESSION_RUNTIME_STATUS'
+    )![1];
+    act(() => {
+      onSessionRuntime({
+        type: 'SESSION_RUNTIME_STATUS',
+        sessionId: 's1',
+        traceId: 'trace-1',
+        data: {
+          sessionId: 's1',
+          traceId: 'trace-1',
+          source: 'integration-a',
+          status: 'running',
+          activeAgentCount: 2,
+          activeChildCount: 1,
+          waitingInteractionCount: 0,
+          revision: 1,
+          changedAt: 1000,
+        },
+      });
+    });
+
+    expect(chatSessionRuntimeManager.isSessionRunning('s1')).toBe(true);
+    expect(chatSessionRuntimeManager.getSessionRuntime('s1')?.activeAgentCount).toBe(2);
   });
 
   afterEach(() => {
