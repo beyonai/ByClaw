@@ -2,7 +2,7 @@
   "action_code": "get_account_operations_report_context",
   "action_name": "账号运营日报事实层",
   "action_type": "QUERY",
-  "action_desc": "按账号和数据截止日聚合账号粉丝、文章累计指标、每日增量、作品并集、渠道和发布时间事实，直接供 account-ops-v2 报告渲染",
+  "action_desc": "按账号和数据截止日聚合账号粉丝、文章累计指标、每日增量、近30天发布或今日变化作品、全部合集与文章级联清单、渠道和发布时间事实，直接供 account-ops-v2 报告渲染",
   "permission_roles": [
     "analyst",
     "ops",
@@ -102,8 +102,15 @@
     },
     {
       "paramCode": "works",
-      "paramName": "本月发布和今日变化作品并集",
+      "paramName": "近30天发布和今日变化作品并集",
       "type": "array",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "cascade_manifest",
+      "paramName": "账号全部合集与全部文章级联清单",
+      "type": "object",
       "isRequired": false,
       "direction": "output"
     },
