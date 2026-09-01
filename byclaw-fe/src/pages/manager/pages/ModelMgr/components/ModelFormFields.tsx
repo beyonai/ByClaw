@@ -18,10 +18,7 @@ import {
   getApiEndpointPlaceholder,
 } from './modelFormUtils';
 import styles from './ModelFormModal.module.less';
-import {
-  getImageGenerationProvider,
-  IMAGE_GENERATION_PROVIDER_OPTIONS,
-} from './imageGenerationProviders';
+import { getImageGenerationProvider, IMAGE_GENERATION_PROVIDER_OPTIONS } from './imageGenerationProviders';
 
 const { TextArea } = Input;
 
@@ -110,16 +107,21 @@ const ModelFormFields: React.FC<Props> = ({
   const intl = useIntl();
   const currentModelProtocol = Form.useWatch('modelProtocol', form);
   const currentModelType = Form.useWatch('modelType', form);
-  const currentProviderName = Form.useWatch('providerName', form);
   const reasoningConfig = Form.useWatch('reasoningConfig', form) || {};
   const apiEndpointPlaceholder = useMemo(() => getApiEndpointPlaceholder(currentModelProtocol), [currentModelProtocol]);
   const isLlmModel = `${currentModelType ?? 'LLM'}`.trim().toUpperCase() === 'LLM';
   const isImageGenerationModel = `${currentModelType ?? 'LLM'}`.trim().toUpperCase() === 'IMAGE_GENERATION';
-  const currentImageProvider = getImageGenerationProvider(currentProviderName);
   const modelProtocolOptions = isImageGenerationModel
-    ? currentImageProvider
-      ? [{ label: currentImageProvider.label, value: currentImageProvider.modelProtocol }]
-      : []
+    ? [
+      ...IMAGE_GENERATION_PROVIDER_OPTIONS.map((item) => {
+        const provider = getImageGenerationProvider(item.value);
+        return {
+          label: provider?.label || item.label,
+          value: provider?.modelProtocol || item.value,
+        };
+      }),
+      { label: 'Qwen', value: 'Qwen' },
+    ]
     : [...MODEL_PROTOCOL_OPTIONS].filter((item) => item.value !== 'MINIMAX_IMAGE');
   const defaultProviderOptions = useMemo(
     () => [
@@ -141,11 +143,10 @@ const ModelFormFields: React.FC<Props> = ({
   React.useEffect(() => {
     let cancelled = false;
     const modelType = `${currentModelType || 'LLM'}`.trim().toUpperCase();
-    const fallbackOptions = modelType === 'IMAGE_GENERATION' ? IMAGE_GENERATION_PROVIDER_OPTIONS : defaultProviderOptions;
+    const fallbackOptions =
+      modelType === 'IMAGE_GENERATION' ? IMAGE_GENERATION_PROVIDER_OPTIONS : defaultProviderOptions;
     const paramGroupCode =
-      modelType === 'IMAGE_GENERATION'
-        ? 'SYSTEM_MODEL_IMAGE_GENERATION_PROVIDER_NAME'
-        : 'SYSTEM_MODEL_PROVIDER_NAME';
+      modelType === 'IMAGE_GENERATION' ? 'SYSTEM_MODEL_IMAGE_GENERATION_PROVIDER_NAME' : 'SYSTEM_MODEL_PROVIDER_NAME';
     getByParamGroupCode({ paramGroupCode })
       .then((res: any) => {
         if (cancelled) return;
@@ -271,25 +272,19 @@ const ModelFormFields: React.FC<Props> = ({
             </Form.Item>
 
             <Form.Item
-              label={intl.formatMessage({
-                id: isImageGenerationModel ? 'modelMgr.modal.minimaxModel' : 'modelMgr.modal.modelCode',
-              })}
+              label={intl.formatMessage({ id: 'modelMgr.modal.modelCode' })}
               name="modelCode"
               rules={[
                 {
                   required: true,
-                  message: intl.formatMessage({
-                    id: isImageGenerationModel
-                      ? 'modelMgr.modal.minimaxModelRequired'
-                      : 'modelMgr.modal.modelCodePlaceholder',
-                  }),
+                  message: intl.formatMessage({ id: 'modelMgr.modal.modelCodePlaceholder' }),
                 },
               ]}
             >
               <Input
                 placeholder={
                   isImageGenerationModel
-                    ? intl.formatMessage({ id: 'modelMgr.modal.minimaxModelPlaceholder' })
+                    ? intl.formatMessage({ id: 'modelMgr.modal.modelCodePlaceholder' })
                     : 'gpt-4-turbo-preview'
                 }
                 maxLength={100}
@@ -316,7 +311,6 @@ const ModelFormFields: React.FC<Props> = ({
           <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.modelProtocol' })} name="modelProtocol">
             <Select
               allowClear
-              disabled={isImageGenerationModel}
               placeholder={intl.formatMessage({ id: 'modelMgr.modal.modelProtocolPlaceholder' })}
               options={modelProtocolOptions}
             />

@@ -8,6 +8,8 @@ import { resolveStateDir } from "./workspace-paths.js";
 const SKILLS_DIR_NAME = "skills";
 const PLUGIN_SKILLS_DIR_NAME = "plugin-skills";
 const SKILL_DOC_FILE_NAME = "SKILL.md";
+// 平台级只读能力由镜像统一提供在 /app/skills，不复制到各数字员工 workspace。
+const CORE_BUNDLED_SKILLS = ["project-context", "notice", "project-cloud-knowledge"];
 
 function normalizeSkillName(raw: unknown): string {
   return typeof raw === "string" ? raw.trim() : "";
@@ -275,7 +277,7 @@ export async function mergeWorkspaceSkillsIntoManagedAgents<T extends AgentWithS
     const baseSkills = resolveSkillNamesFromPluginRoot(agent.listEntry.skills ?? [], pluginSkills);
     const extraSkills = await scanWorkspaceSkillNamesByPaths(workspaceDir, agent.extraSkillPaths);
     const agentSkills = await scanWorkspaceSkillNames(workspaceDir);
-    const skills = mergeSkillNames(baseSkills, extraSkills, agentSkills, sharedSkills);
+    const skills = mergeSkillNames(CORE_BUNDLED_SKILLS, baseSkills, extraSkills, agentSkills, sharedSkills);
     out.push({
       ...agent,
       listEntry: {

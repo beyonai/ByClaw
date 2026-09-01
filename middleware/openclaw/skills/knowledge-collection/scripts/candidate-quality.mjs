@@ -34,6 +34,13 @@ function isTrustedWechatArticle(url) {
     && /^\/s(?:\/|$)/i.test(url.pathname);
 }
 
+function isTrustedPublicationDetail(url) {
+  const hostname = url.hostname.toLowerCase();
+  return (hostname === 'arxiv.org' && /^\/abs\/[^/]+\/?$/i.test(url.pathname))
+    || ((hostname === 'nature.com' || hostname.endsWith('.nature.com'))
+      && /^\/articles\/[^/]+\/?$/i.test(url.pathname));
+}
+
 function normalizedIdentity(raw) {
   const url = parseHttpUrl(raw);
   if (!url || url.username || url.password) return null;
@@ -60,6 +67,10 @@ export function classifyCandidate(candidate) {
   if (reasons.length) return { pageType: 'reject', reasons };
 
   const trustedWechat = isTrustedWechatArticle(url);
+  const trustedPublication = isTrustedPublicationDetail(url);
+  if (trustedPublication) {
+    return { pageType: 'article', reasons: ['trusted-publication-url'] };
+  }
   const detailUrl = trustedWechat || DETAIL_PATH.test(url.pathname);
   const contentSignal = ARTICLE_TEXT.test(combinedText);
   if (trustedWechat) {
@@ -138,7 +149,7 @@ export function annotateMergedCandidates(document) {
   };
 }
 
-function mergedCandidates(document) {
+export function mergedCandidates(document) {
   const groups = document?.groups && typeof document.groups === 'object' ? document.groups : {};
   return [
     ...(Array.isArray(groups.bothChannels) ? groups.bothChannels : []),

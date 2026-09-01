@@ -790,7 +790,7 @@ describe('ConnectorControl authorization states', () => {
     expect(container.querySelector('.ant-avatar-group')).not.toBeNull();
     expect(container.querySelectorAll('.ant-avatar')).toHaveLength(2);
 
-    fireEvent.click(screen.getByRole('button', { name: '查看已连接连接器' }));
+    fireEvent.click(screen.getByRole('button', { name: '查看连接器' }));
     expect(screen.getByRole('dialog', { name: '连接器设置' })).toBeInTheDocument();
   });
 
@@ -815,7 +815,7 @@ describe('ConnectorControl authorization states', () => {
     const { container } = render(<ConnectorControl canAuthorize outside />);
 
     await waitFor(() => expect(container.querySelector('.ant-avatar-group')).not.toBeNull());
-    expect(screen.queryByRole('button', { name: '查看已连接连接器' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '查看连接器' })).not.toBeInTheDocument();
     expect(screen.getByLabelText('已连接连接器')).toBeInTheDocument();
   });
 
@@ -871,7 +871,7 @@ describe('ConnectorControl authorization states', () => {
 
     render(<ConnectorControl canAuthorize />);
 
-    fireEvent.click(await screen.findByRole('button', { name: '查看已连接连接器' }));
+    fireEvent.click(await screen.findByRole('button', { name: '查看连接器' }));
     const dialog = screen.getByRole('dialog', { name: '连接器设置' });
 
     expect(await within(dialog).findByText('GitHub')).toBeInTheDocument();
@@ -1049,7 +1049,7 @@ describe('ConnectorControl authorization states', () => {
     expect(await screen.findByRole('heading', { name: '连接 钉钉 作为 AI 知识库' })).toBeInTheDocument();
   });
 
-  it('opens authorization directly from an enabled inline connector card', async () => {
+  it('shows the enabled state switch on an inline connector card', async () => {
     mockQueryConnectorList.mockResolvedValue({
       list: [
         {
@@ -1069,8 +1069,7 @@ describe('ConnectorControl authorization states', () => {
 
     render(<ConnectorControl canAuthorize inline />);
 
-    fireEvent.click(await screen.findByRole('button', { name: '连接' }));
-    expect(await screen.findByRole('heading', { name: '连接 钉钉 作为 AI 知识库' })).toBeInTheDocument();
+    expect(await screen.findByRole('switch', { name: '停用钉钉' })).toBeInTheDocument();
   });
 
   it('confirms and revokes an existing connector authorization', async () => {
@@ -1092,7 +1091,7 @@ describe('ConnectorControl authorization states', () => {
     });
 
     render(<ConnectorControl canAuthorize />);
-    fireEvent.click(await screen.findByRole('button', { name: '查看已连接连接器' }));
+    fireEvent.click(await screen.findByRole('button', { name: '查看连接器' }));
     fireEvent.click(await screen.findByRole('button', { name: '更多钉钉操作' }));
     fireEvent.click(await screen.findByText('取消授权'));
 

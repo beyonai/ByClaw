@@ -138,6 +138,29 @@ function blockedResult(operationFingerprintValue, phase, reason) {
   };
 }
 
+function callbackControls(result) {
+  const stateDisposition = result?.stateDisposition === 'no-auth-state'
+    ? 'no-auth-state' : 'classify';
+  return {
+    stateDisposition,
+    commandExecuted: result?.commandExecuted !== false,
+  };
+}
+
+function publicChildResult(result) {
+  if (!result || typeof result !== 'object') return result;
+  const {
+    commandExecuted: _commandExecuted,
+    stateDisposition: _stateDisposition,
+    ...publicResult
+  } = result;
+  return publicResult;
+}
+
+function isBridgeOnlyResult(result) {
+  return Number(result?.exitCode) === 69 && errorCode(result) === 'BROWSER_CONNECT';
+}
+
 export async function runGate({
   stateDir,
   argv,
@@ -185,7 +208,20 @@ export async function runGate({
       });
     }
 
-    const childResult = await execute(argv);
+    const attemptKind = isConfirmedRerun ? 'confirmed-rerun' : 'initial';
+    const childResult = await execute(argv, { attemptKind });
+    const controls = callbackControls(childResult);
+    const visibleChildResult = publicChildResult(childResult);
+    if (!isConfirmedRerun
+      && (controls.stateDisposition === 'no-auth-state' || isBridgeOnlyResult(childResult))) {
+      return {
+        ...visibleChildResult,
+        executed: true,
+        operationFingerprint: fingerprint,
+        phase: 'initial',
+        reason: null,
+      };
+    }
     const humanGate = isHumanGate(childResult);
     let phase = 'complete';
     if (humanGate) phase = isConfirmedRerun ? 'terminal' : 'waiting-confirmation';
@@ -197,7 +233,7 @@ export async function runGate({
       lastCode: errorCode(childResult),
     });
     return {
-      ...childResult,
+      ...visibleChildResult,
       executed: true,
       operationFingerprint: fingerprint,
       phase,

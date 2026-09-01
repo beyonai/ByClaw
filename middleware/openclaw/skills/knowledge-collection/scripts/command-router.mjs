@@ -9,6 +9,7 @@ import {
 } from './crawl-state.mjs';
 import { runPublicDiscover } from './public-discovery.mjs';
 import { runWechatMaterialize } from './wechat-materializer.mjs';
+import { cmdPublish, inspectDelivery } from './publish-delivery.mjs';
 import { resolveSandboxPath, sessionPaths } from './session.mjs';
 
 const RESEARCH_HANDLERS = {
@@ -30,6 +31,7 @@ const SESSION_HANDLERS = {
   'crawl-status': (paths) => cmdCrawlStatus(paths),
   'unlock-stale': (paths) => cmdUnlockStale(paths),
   'export-views': (paths) => cmdExportViews(paths),
+  publish: (paths, args) => cmdPublish(paths, args),
 };
 
 function status(paths, args) {
@@ -42,6 +44,7 @@ function status(paths, args) {
     ...collectionSummary
   } = collection;
   const full = args.full === true || args.full === 'true';
+  const published = inspectDelivery(paths);
   if (full) {
     const detail = cmdInspect(paths, { full: true });
     return {
@@ -52,8 +55,9 @@ function status(paths, args) {
       collection: { ...detail.metadata, ...collectionSummary },
       canonicalView: detail.collectionResult,
       downstreamInput,
+      ...(published.deliveryInput ? { deliveryInput: published.deliveryInput } : {}),
       ...(crawl ? { crawl } : {}),
-      warnings: [...(research.warnings || []), ...(detail.warnings || [])],
+      warnings: [...(research.warnings || []), ...(detail.warnings || []), ...published.warnings],
     };
   }
   return {
@@ -64,7 +68,8 @@ function status(paths, args) {
     collection: collectionSummary,
     ...(crawl ? { crawl } : {}),
     downstreamInput,
-    warnings: [...(research.warnings || []), ...collectionWarnings],
+    ...(published.deliveryInput ? { deliveryInput: published.deliveryInput } : {}),
+    warnings: [...(research.warnings || []), ...collectionWarnings, ...published.warnings],
   };
 }
 

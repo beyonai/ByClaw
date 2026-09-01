@@ -14,6 +14,7 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 import com.alibaba.fastjson.JSON;
+import com.iwhalecloud.byai.common.cache.ShareBfmUser;
 import com.iwhalecloud.byai.common.constants.resource.OwnerType;
 import com.iwhalecloud.byai.common.constants.resource.SystemCode;
 import com.iwhalecloud.byai.common.exception.BaseException;
@@ -58,6 +59,7 @@ import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeItemsMove
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeBuildResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.ProcessStatus;
 import com.iwhalecloud.byai.common.util.JsonUtil;
+import com.iwhalecloud.byai.common.util.MapParamUtil;
 import com.iwhalecloud.byai.common.util.RedisUtil;
 import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceBizTypeEnum;
@@ -99,6 +101,7 @@ import com.iwhalecloud.byai.manager.entity.resource.SsResExtDoc;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.manager.qo.resource.DirAndFileQo;
 import com.iwhalecloud.byai.manager.vo.resource.DirAndFileVo;
+import com.iwhalecloud.byai.state.common.share.helper.ShareCacheUtil;
 import com.iwhalecloud.byai.state.domain.resource.qo.DatasetQo;
 import com.iwhalecloud.byai.state.domain.resource.vo.DatasetDetailVo;
 import com.iwhalecloud.byai.state.domain.resource.vo.DatasetVo;
@@ -838,7 +841,7 @@ public class DatasetApplicationService {
      * 删除知识库文件。覆盖上传时复用该逻辑，保证手动删除和覆盖删除走同一套 QA 响应校验。
      */
     private void deleteKnowledgeFile(SsResource ssResource, String filePath, String operationName,
-                                   Map<String, String> headers) {
+                                     Map<String, String> headers) {
         KbFileDelete kbFileDelete = new KbFileDelete();
         kbFileDelete.setKnCode(ssResource.getResourceCode());
         kbFileDelete.setFilePath(filePath);
@@ -981,6 +984,7 @@ public class DatasetApplicationService {
 
         KbEntityDiscovery qaRequest = new KbEntityDiscovery();
         qaRequest.setKnCode(ssResource.getResourceCode());
+        qaRequest.setDirectoryPath(request.getDirectoryPath());
         qaRequest.setFilePath(normalizeOptionalKnowledgeFilePath(request.getFilePath()));
         qaRequest.setMaxEntities(request.getMaxEntities() == null ? 12 : request.getMaxEntities());
         qaRequest.setForce(Boolean.TRUE.equals(request.getForce()));
@@ -1135,10 +1139,45 @@ public class DatasetApplicationService {
             dirAndFileVo.setName(this.getLastSplitName(name));
             dirAndFileVo.setDirectoryPath(name);
             dirAndFileVo.setSize(dirOrFile.getSize());
+            dirAndFileVo.setUpdatedAt(dirOrFile.getUpdatedAt());
+            dirAndFileVo.setBuildStatus(dirOrFile.getBuildStatus());
+            dirAndFileVo.setBuildCurrentStep(dirOrFile.getBuildCurrentStep());
+
+            //获取创建用户信息
+            this.buildCreateUserInfo(dirAndFileVo, dirOrFile);
+
             resultList.add(dirAndFileVo);
         }
 
         return resultList;
+    }
+
+
+    /**
+     * 获取创建用户信息
+     *
+     * @param dirAndFileVo 文件返回对象
+     * @param dirOrFile    接口查询
+     */
+    private void buildCreateUserInfo(DirAndFileVo dirAndFileVo, DirOrFile dirOrFile) {
+        Map<String, Object> metadata = dirOrFile.getMetadata();
+        if (metadata == null) {
+            return;
+        }
+
+        Map<String, Object> owner = (Map<String, Object>) metadata.get("userCode");
+        if (owner == null) {
+            return;
+        }
+
+        String userCode = MapParamUtil.getStringValue(owner, "value");
+        ShareBfmUser shareBfmUser = ShareCacheUtil.getShareBfmUser(userCode);
+        if (shareBfmUser == null) {
+            return;
+        }
+
+        dirAndFileVo.setCreateBy(shareBfmUser.getUserId());
+        dirAndFileVo.setCreateStaffName(shareBfmUser.getUserName());
     }
 
     /**

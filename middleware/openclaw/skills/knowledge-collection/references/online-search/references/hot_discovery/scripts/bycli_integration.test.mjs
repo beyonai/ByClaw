@@ -6,8 +6,8 @@ import {
 } from './bycli_integration.mjs';
 
 const ok = (stdout = '') => ({ code: 0, stdout, stderr: '', timedOut: false, killed: false, rawErrorCode: null });
-const failed = (code, stderr = '') => ({ code, stdout: '', stderr, timedOut: false, killed: false, rawErrorCode: null });
-const healthyDaemon = 'Daemon: running\nExtension: connected\n';
+const failed = (code, stderr = '', stdout = '') => ({ code, stdout, stderr, timedOut: false, killed: false, rawErrorCode: null });
+const bridgeScript = '/test/bridge-bootstrap.mjs';
 
 function scriptedRunner(steps) {
   const calls = [];
@@ -27,27 +27,22 @@ function scriptedRunner(steps) {
   };
 }
 
-test('doctor is immediately followed by daemon status even when doctor fails', async () => {
+test('bridge readiness delegates to the shared bridge CLI exactly once', async () => {
   const runner = scriptedRunner([
-    { cmd: 'bycli', args: ['doctor'], result: failed(69) },
-    { cmd: 'bycli', args: ['daemon', 'status'], result: failed(1) },
-    { cmd: 'openclaw', args: ['browser', '--browser-profile', 'openclaw', 'status'], result: ok('running') },
-    { cmd: 'bycli', args: ['doctor'], result: failed(69) },
-    { cmd: 'bycli', args: ['daemon', 'status'], result: failed(1) },
-    { cmd: 'bycli', args: ['daemon', 'restart'], result: ok() },
-    { cmd: 'bycli', args: ['daemon', 'status'], result: failed(1) },
+    {
+      cmd: process.execPath,
+      args: [bridgeScript, '--format', 'json'],
+      result: ok(JSON.stringify({ ok: true, code: 'BRIDGE_READY', checks: 1 })),
+    },
   ]);
-  const bycli = createBycliIntegration({ run: runner.run, fileExists: async () => false });
+  const bycli = createBycliIntegration({ run: runner.run, bridgeScript });
 
   const outcome = await bycli.ensureBridge();
 
-  assert.equal(outcome.ok, false);
-  assert.equal(outcome.requiresUserAction.kind, 'bridge_unavailable');
-  assert.deepEqual(runner.calls.slice(0, 2), [
-    ['bycli', ['doctor']],
-    ['bycli', ['daemon', 'status']],
-  ]);
-  assert.deepEqual(runner.timeouts.slice(0, 2), [30_000, 30_000]);
+  assert.equal(outcome.ok, true);
+  assert.equal(outcome.bridge.code, 'BRIDGE_READY');
+  assert.deepEqual(runner.calls, [[process.execPath, [bridgeScript, '--format', 'json']]]);
+  assert.deepEqual(runner.timeouts, [60_000]);
 });
 
 test('runtime transport is independent from declared access tier', () => {
@@ -80,37 +75,44 @@ test('runtime catalog validation does not depend on a declared version baseline'
   assert.deepEqual(runner.timeouts, [30_000, 60_000]);
 });
 
-test('healthy bridge passes without recovery commands', async () => {
+test('bridge unavailable maps the shared result to the existing user-action contract', async () => {
   const runner = scriptedRunner([
-    { cmd: 'bycli', args: ['doctor'], result: ok('Everything looks good') },
-    { cmd: 'bycli', args: ['daemon', 'status'], result: ok(healthyDaemon) },
+    {
+      cmd: process.execPath,
+      args: [bridgeScript, '--format', 'json'],
+      result: failed(69, '', JSON.stringify({
+        ok: false,
+        code: 'BRIDGE_UNAVAILABLE',
+        reason: 'EXTENSION_DISCONNECTED',
+      })),
+    },
   ]);
-  const bycli = createBycliIntegration({ run: runner.run });
+  const bycli = createBycliIntegration({ run: runner.run, bridgeScript });
 
   const outcome = await bycli.ensureBridge();
 
-  assert.deepEqual(outcome, { ok: true, attempts: 1 });
-  assert.equal(runner.calls.length, 2);
+  assert.equal(outcome.ok, false);
+  assert.equal(outcome.requiresUserAction.kind, 'bridge_unavailable');
+  assert.equal(outcome.bridge.reason, 'EXTENSION_DISCONNECTED');
 });
 
-test('cold starts managed Chrome with the recovery script before daemon restart', async () => {
+test('bridge recovery busy remains distinct from final bridge unavailability', async () => {
   const runner = scriptedRunner([
-    { cmd: 'bycli', args: ['doctor'], result: failed(69, 'BROWSER_CONNECT') },
-    { cmd: 'bycli', args: ['daemon', 'status'], result: failed(1) },
     {
-      cmd: 'openclaw',
-      args: ['browser', '--browser-profile', 'openclaw', 'status'],
-      result: ok('stopped'),
+      cmd: process.execPath,
+      args: [bridgeScript, '--format', 'json'],
+      result: failed(69, '', JSON.stringify({
+        ok: false,
+        code: 'BRIDGE_RECOVERY_BUSY',
+        reason: 'RECOVERY_LOCK_TIMEOUT',
+      })),
     },
-    { cmd: '/usr/local/bin/start-chrome.sh', args: [], result: ok() },
-    { cmd: 'bycli', args: ['doctor'], result: ok('Everything looks good') },
-    { cmd: 'bycli', args: ['daemon', 'status'], result: ok(healthyDaemon) },
   ]);
-  const bycli = createBycliIntegration({ run: runner.run, fileExists: async () => true });
+  const bycli = createBycliIntegration({ run: runner.run, bridgeScript });
 
   const outcome = await bycli.ensureBridge();
 
-  assert.deepEqual(outcome, { ok: true, attempts: 2 });
-  assert.deepEqual(runner.calls[3], ['/usr/local/bin/start-chrome.sh', []]);
-  assert.equal(runner.calls.some(([cmd, args]) => cmd === 'bycli' && args[1] === 'restart'), false);
+  assert.equal(outcome.ok, false);
+  assert.equal(outcome.requiresUserAction.kind, 'bridge_recovery_busy');
+  assert.equal(outcome.bridge.code, 'BRIDGE_RECOVERY_BUSY');
 });

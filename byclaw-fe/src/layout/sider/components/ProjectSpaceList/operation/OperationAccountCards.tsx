@@ -1,7 +1,8 @@
 import type { KeyboardEvent } from 'react';
 import { Button, Dropdown, Modal, Tag } from 'antd';
-import { DeleteOutlined, EditOutlined, LoginOutlined, MoreOutlined } from '@ant-design/icons';
+import { DeleteOutlined, EditOutlined, LinkOutlined, LoginOutlined, MoreOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
+import AntdIcon from '@/components/AntdIcon';
 import type { OperationAccount, OperationIdentifier, OperationPlatformOption } from './types';
 import styles from './index.module.less';
 
@@ -41,6 +42,30 @@ const LOGIN_PLATFORM_CODES = new Set([
   'douyin',
   'CustomLink',
 ]);
+
+/**
+ * 平台标识优先使用平台图标，避免自定义链接和微信公众号都退化成一个汉字首字。
+ * 账号接口若返回头像则仍优先展示账号头像，平台图标作为无头像时的兜底。
+ */
+const renderAccountPlatformMark = (
+  account: OperationAccount,
+  platform: OperationPlatformOption | undefined,
+  platformLabel: string
+) => {
+  if (account.avatar) {
+    return <img src={account.avatar} alt="" />;
+  }
+
+  if (account.platformId === 'WeChatAccount' || account.platformId === 'wechat') {
+    return <AntdIcon type="icon-qiyeweixin" style={{ fontSize: 20, color: '#07c160' }} />;
+  }
+
+  if (account.platformId === 'CustomLink') {
+    return <LinkOutlined style={{ fontSize: 20, color: '#246bfe' }} />;
+  }
+
+  return platform?.mark || platformLabel.slice(0, 1);
+};
 
 const OperationAccountCards = ({
   accounts,
@@ -169,7 +194,9 @@ const OperationAccountCards = ({
             onKeyDown={(event) => handleAccountKeyDown(event, account)}
           >
             <div className={styles.accountCardHeader}>
-              <span className={styles.accountPlatformMark}>{platform?.mark || platformLabel.slice(0, 1)}</span>
+              <span className={styles.accountPlatformMark}>
+                {renderAccountPlatformMark(account, platform, platformLabel)}
+              </span>
               <div className={styles.accountCardIdentity}>
                 <strong title={accountName}>{accountName}</strong>
                 <span title={accountSubtitle}>{accountSubtitle}</span>

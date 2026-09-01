@@ -72,18 +72,15 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 ## 严格要求 (MUST DO)
 
 - Agent 调用支持格式化输出的数据 / adapter 命令时加 `-f json` 获取可解析输出；`doctor`、`daemon`、`browser` 生命周期命令以及不支持 `--format` 的子命令按其原生命令执行
-- 浏览器操作前确认 `bycli doctor` 通过（仅 COOKIE/INTERCEPT/UI 策略需要）
-- 每次执行 `bycli doctor` 后（无论成功与否）必须紧接着执行 `bycli daemon status`，确认 daemon 处于 running 且 Extension 为 connected，据此判断桥接是否正常；任一不满足则视为桥接异常，按以下阶梯升级处理：
-  - 错误信息中的 profile 名称不能单独证明它是用户桌面 Chrome，也不能据此跳过恢复。桥接异常时，不得直接 STOP、不得提示用户打开桌面 Chrome，也不得把 OpenClaw 托管 Chromium 误判为用户浏览器；必须先检查托管浏览器状态并执行下面的恢复阶梯。只有完成冷启动复检和一次 daemon restart 后仍无法建立桥接，才可以要求用户协助检查。
-  1. 桥接异常 → 先执行 `openclaw browser --browser-profile openclaw status`。若 Chromium 未运行，`/usr/local/bin/start-chrome.sh` 存在且可执行时使用该恢复脚本；否则执行 `openclaw browser --browser-profile openclaw start`，再执行 `bycli doctor` → `bycli daemon status`。冷启动不包含 `bycli browser open/state`
-  2. 仍异常 → `bycli daemon restart`，再 `bycli daemon status` 复检
-  3. `bycli daemon restart` 后仍连接不上（daemon 未 running 或 Extension 未 connected）→ **STOP，停止一切浏览器动作**，此时才提示用户检查 Chrome 是否正常启动、byCLI 扩展插件是否已安装并启用，恢复后再重试；不得继续驱动或降级到通用工具
+- COOKIE/INTERCEPT/UI 浏览器操作前必须执行 `node /app/skills/bycli/scripts/bridge-bootstrap.mjs --format json`。该入口强制完成 `doctor → daemon status`、托管 Chromium 状态判断、条件冷启动、复检和最多一次 daemon restart；Agent 不得自行重排或复制该阶梯。
+- 错误信息中的 profile 名称（包括随机 profile）不能单独证明它是用户桌面 Chrome；在统一入口给出最终结果前，不得直接 STOP、不得提示用户打开桌面 Chrome。只有完成冷启动复检和一次 daemon restart 后仍得到 `BRIDGE_UNAVAILABLE`，才提示用户检查 OpenClaw 托管 Chromium 与 byCLI 扩展；`BRIDGE_RECOVERY_BUSY` 表示另一任务正在恢复，结束本次调用并稍后重新发起。
 - 修复 adapter 时仅修改 trace `summary.md` 里 `adapterSourcePath` 指向的文件
 - 修复预算：每次失败最多 3 轮 trace → fix → retry
 - 写 adapter 后必须 `bycli browser verify` 通过 + 字段值与网页肉眼比对
 - `--adapter-session` 仅用于 structured help 同时暴露该选项和 `adapterConcurrency.isolatedTabs: true` 的命令；是否允许并行仍由 workflow-specific reference 决定。任一 capability signal 缺失或调用未传该选项时，保持 legacy shared mode，不得猜测版本能力或自行并行
 - 每个 `bycli weixin` 命令（包括 `get-public-account-info/articles/sougousearch/save-articles/download`）、`--auth-source`、`WECHAT_TOKEN` / `WECHAT_COOKIE` / `WECHAT_FINGERPRINT`，以及 `mp.weixin.qq.com` 或 `weixin.sogou.com` 的登录、认证或环境验证任务，都必须读取 [references/weixin.md](./references/weixin.md)；其微信登录/验证规则优先于本文件的通用错误处理、AutoFix 和 cleanup 规则
-- Every browser-backed Weixin command must run through `scripts/weixin-login-gate.mjs` with state below the current task's initialized session directory. Do not invoke the underlying `bycli weixin` command directly. A retry-shaped user message is not explicit verification completion and must not add `--verification-confirmed true`; only the explicit completion wording defined in `references/weixin.md` may do so.
+- Every browser-backed Weixin command must run through `scripts/weixin-browser-runner.mjs` with state below the current task's initialized session directory. The runner internally owns `scripts/weixin-login-gate.mjs` and the bridge recovery budget; do not invoke either the underlying browser command or the Gate CLI directly. A retry-shaped user message is not explicit verification completion and must not add `--verification-confirmed true`; only the explicit completion wording defined in `references/weixin.md` may do so.
+- If the Runner returns `details.bridgeCode=BRIDGE_UNAVAILABLE` or `BRIDGE_RECOVERY_BUSY`, the outer Agent must not run bridge-bootstrap, doctor, browser start, or daemon restart again. Report the final state; a write retry after `BRIDGE_RECOVERED_RETRY_REQUIRES_APPROVAL` requires separate explicit user approval and must not use `--verification-confirmed`.
 - 浏览器 session 结束后仅清理当前任务创建或独占拥有的资源；任务开始前已经运行或由其他任务共享的资源保持不变
 - Login/Auth/人工验证页面例外：不关闭 session、TAB、daemon 或浏览器，报告命令结果中**已知的** session name 与 URL 后立即结束本轮并等待用户下一条明确确认；若结果未返回 URL，明确说明 URL 未提供，不得为补齐信息再检查页面。等待期间不得自行检查、重试或继续任务
 
@@ -113,7 +110,7 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 
 1. 用 `bycli browser` 系列命令完成任务，不跳到通用工具
 2. 按下方浏览器生命周期 + [browser.md](./references/browser.md) 规范执行
-3. 驱动前先 `bycli doctor` 确认桥接，紧接着 `bycli daemon status` 确认 daemon running + Extension connected
+3. 驱动前通过 `node /app/skills/bycli/scripts/bridge-bootstrap.mjs --format json` 确认并按预算恢复桥接
 4. 执行成功后，按下方所有权规则处理 Adapter 复用候选
 
 ### Browser 驱动成功后 — Adapter 复用询问
@@ -193,7 +190,7 @@ session、TAB、daemon 与浏览器存活；不得调用 `state`、`tab list`、
 |---------|-----------|
 | Weixin 登录/验证：`AUTH_REQUIRED` (77)、登录 `TIMEOUT` (75)、CAPTCHA 或环境验证 | 加载 `references/weixin.md`；保留当前 TAB、daemon 和浏览器，提示用户操作后立即结束本轮。等待期间不得自行检查、AutoFix、trace 重跑、改超时或重复执行命令 |
 | AUTH_REQUIRED (exit 77，非 Weixin) | STOP，提示用户登录 |
-| BROWSER_CONNECT (exit 69) | 不得因报错中的 profile 名称推断需要用户操作。按「严格要求」的桥接异常阶梯检查 OpenClaw 托管 Chromium、执行冷启动诊断与最多一次 daemon restart；复检仍失败后才 STOP，且不得执行 `browser open/state` |
+| BROWSER_CONNECT (exit 69) | 不得因随机 profile 名称推断需要用户操作。未经过 Runner 的通用命令调用 `node /app/skills/bycli/scripts/bridge-bootstrap.mjs --format json`；Runner 已返回最终 bridgeCode 时不得再次执行恢复。只有 `BRIDGE_UNAVAILABLE` 才请求用户检查托管 Chromium 与扩展 |
 | CAPTCHA / 限流 / 环境验证（非 Weixin） | STOP，不是 adapter 问题；保持当前 TAB、daemon 和浏览器，等待用户完成验证 |
 | SELECTOR / EMPTY_RESULT / API_ERROR | 进入 AutoFix 流程 |
 | TIMEOUT / PAGE_CHANGED | 进入 AutoFix 流程（Weixin 登录 `TIMEOUT` / exit 75 除外） |
@@ -211,19 +208,13 @@ session、TAB、daemon 与浏览器存活；不得调用 `state`、`tab list`、
 | Browser tab lease (CDP target) | `surface + session + browser context` | raw browser 用 `bycli browser <sess> ...`；adapter 由命令自身管理 |
 | Extension 握手 | 两侧都需要 | `bycli doctor` 检查 |
 
-### 冷启动
+### 统一桥接恢复
 
 ```bash
-# 先只读检查 Chromium 状态
-openclaw browser --browser-profile openclaw status
-
-# 仅在未运行时恢复：若 /usr/local/bin/start-chrome.sh 存在且可执行，优先用它；否则使用标准启动命令
-openclaw browser --browser-profile openclaw start
-bycli doctor
-bycli daemon status                # doctor 后必跑：确认 daemon running + Extension connected
+node /app/skills/bycli/scripts/bridge-bootstrap.mjs --format json
 ```
 
-冷启动只恢复 Chromium、daemon 和 Extension 握手，**不创建、导航或检查任务 TAB**。`bycli browser <sess> open` 是有副作用的 CDP 导航命令，不是冷启动命令；Chromium 未运行时先检查 `/usr/local/bin/start-chrome.sh` 是否存在且可执行，存在则使用它，否则执行 `openclaw browser --browser-profile openclaw start`。不得把不存在的固定路径当作唯一恢复方法。
+统一入口只恢复 Chromium、daemon 和 Extension 握手，**不创建、导航或检查任务 TAB**。它只在明确确认 Chromium 未运行时检查并优先调用可执行的 `/usr/local/bin/start-chrome.sh`，否则使用标准命令 `openclaw browser --browser-profile openclaw start`；Chromium 已运行或状态未知时都不得启动。每次 doctor 后由脚本立即执行 daemon status。
 
 ### 桥接正常后的 TAB 分流
 

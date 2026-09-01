@@ -415,6 +415,36 @@ test('falls back to hot discovery when requested SearXNG result set is empty', a
   assert.equal(existsSync(result.snapshots.hotDiscovery), true);
 });
 
+test('persists two empty discovery attempts and rejects a third attempt before executors run', async () => {
+  const { paths } = makeInitializedSession();
+  let executorCalls = 0;
+  const options = {
+    runProcess: async (spec) => {
+      executorCalls += 1;
+      return spec.channel === 'searxng'
+        ? { code: 0, stdout: JSON.stringify({ query: 'DeepSeek', results: [] }), stderr: '' }
+        : { code: 0, stdout: JSON.stringify({ query: 'DeepSeek', candidates: [] }), stderr: '' };
+    },
+    merge: ({ sxDoc }) => ({ query: sxDoc.query, groups: {} }),
+  };
+
+  await runPublicDiscover(paths, { query: 'DeepSeek', 'requested-count': '1' }, options);
+  await runPublicDiscover(paths, {
+    query: 'DeepSeek-R1 paper', category: 'science', 'requested-count': '1',
+  }, options);
+
+  const session = JSON.parse(readFileSync(paths.session, 'utf8'));
+  assert.equal(session.task.discoveryGate.attemptCount, 2);
+  assert.equal(session.task.discoveryGate.exhausted, true);
+  assert.equal(session.task.discoveryGate.stopReason, 'no-article-candidates');
+  const callsBeforeRejectedAttempt = executorCalls;
+  await assert.rejects(
+    runPublicDiscover(paths, { query: '2501.12948', category: 'science' }, options),
+    /DISCOVERY_ATTEMPTS_EXHAUSTED/,
+  );
+  assert.equal(executorCalls, callsBeforeRejectedAttempt);
+});
+
 test('applies a custom outer timeout to both public discovery channels', async () => {
   const { paths } = makeInitializedSession();
   const calls = [];

@@ -286,7 +286,16 @@ export function registerUpdateTaskPlan(params: {
   api: OpenClawPluginApi;
   runtime: TaskPlanRuntimeBridge;
   logger?: LoggerLike;
+  enabled?: boolean;
 }): void {
+  if (params.enabled === false) {
+    params.api.registerTool(() => null, {
+      name: UPDATE_TASK_PLAN_TOOL_NAME,
+    });
+    params.logger?.info?.("baiying-enhance: updateTaskPlan is disabled");
+    return;
+  }
+
   registerTaskPlanRuntimeBridge(params.runtime);
   const factory = createUpdateTaskPlanToolFactory({
     runtime: params.runtime,

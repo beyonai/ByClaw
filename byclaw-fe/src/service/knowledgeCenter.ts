@@ -57,7 +57,10 @@ export const queryAuthDoc = (data: any) => POST<any>('/byaiService/api/v2/resour
 export const delShare = (data: any) => POST<any>('/byaiService/datasetController/delShare', data);
 
 // 新建文件夹
-export const createFolder = (data: any) => POST<any>('/byaiService/datasetController/createFolder', data);
+export const createFolder = (data: any, config?: ConfigType) =>
+  config
+    ? POST<any>('/byaiService/datasetController/createFolder', data, config)
+    : POST<any>('/byaiService/datasetController/createFolder', data);
 
 // 查询文件列表
 export const getDataList = (data: any) => POST<any>('/byaiService/datasetController/getDataList', data);
