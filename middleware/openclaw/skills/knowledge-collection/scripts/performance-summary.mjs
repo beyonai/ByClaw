@@ -29,6 +29,16 @@ function sha256(value) {
   return crypto.createHash('sha256').update(value).digest('hex');
 }
 
+function isTrustedWechatResolvedUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && url.hostname.toLowerCase() === 'mp.weixin.qq.com'
+      && /^\/s(?:\/|$)/i.test(url.pathname) && !url.username && !url.password;
+  } catch {
+    return false;
+  }
+}
+
 function isInside(root, candidate) {
   const relative = path.relative(root, candidate);
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
@@ -166,10 +176,15 @@ function deriveRun(batch, run, role, targetPaths) {
         );
         return file.sha256 === `sha256:${sha256(fs.readFileSync(artifactPath))}`;
       });
+    const controlledMaterializer = ['materialize-web', 'materialize-wechat']
+      .includes(diagnostics.action);
+    const resolvedUrlMatches = diagnostics.action === 'materialize-wechat'
+      ? isTrustedWechatResolvedUrl(diagnostics.resolvedUrl)
+      : diagnostics.resolvedUrl === selected.url;
     roleCorrect = selected.topicRelevance?.status === 'matched'
-      && diagnostics.action === 'materialize-web' && diagnostics.complete === true
+      && controlledMaterializer && diagnostics.complete === true
       && diagnostics.contentGranularity === 'full-text' && Boolean(diagnostics.transactionId)
-      && diagnostics.requestedUrl === selected.url && diagnostics.resolvedUrl === selected.url
+      && diagnostics.requestedUrl === selected.url && resolvedUrlMatches
       && hashesMatch(diagnostics.inputFiles, 'inputFiles')
       && hashesMatch(diagnostics.outputFiles, 'outputFiles')
       && output?.sha256 === `sha256:${finalSha256}`

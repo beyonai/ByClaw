@@ -27,6 +27,18 @@ test('does not strip words that belong to the extracted Chinese subject', () => 
   assert.deepEqual(contract.strongAnchors, ['文章推荐算法']);
 });
 
+test('extracts a Chinese brand before a trailing cloud-delivery clause', () => {
+  const contract = createTopicContract('采集一篇关于 米哈游 的文章并保存到云盘中');
+  assert.equal(contract.required, true);
+  assert.equal(contract.normalizedSubject, '米哈游');
+  assert.deepEqual(contract.strongAnchors, ['米哈游']);
+  assert.deepEqual(contract.supportingAnchors, []);
+  assert.doesNotThrow(() => assertDiscoveryQueryMatches(
+    contract,
+    '米哈游 报道 访谈 公众号',
+  ));
+});
+
 test('marks generic and multi-topic collection requests as not required', () => {
   const generic = createTopicContract('采集一篇文章并保存到 00-collection');
   assert.equal(generic.required, false);

@@ -15,6 +15,7 @@
 'use strict';
 
 import { executeLocalCommand } from './command-router.mjs';
+import { resolveBuildIdentity } from './build-identity.mjs';
 import { delegatePlatformCommand } from './platform-delegate.mjs';
 
 const VERSION = '3.0.0';
@@ -421,6 +422,7 @@ const COMMAND_SCHEMA_OVERRIDES = {
 };
 
 function commandSchema() {
+  const buildIdentity = resolveBuildIdentity();
   const commands = {};
   for (const [name, spec] of Object.entries(COMMAND_SPECS)) {
     if (spec.group === 'platform') {
@@ -458,6 +460,7 @@ function commandSchema() {
   return {
     ok: true,
     name: 'knowledge-collection',
+    ...buildIdentity,
     schemaVersion: '1.0',
     cli: { flagStyle: '--kebab-case', jsonArrayEncoding: 'JSON string array' },
     commands,
@@ -560,6 +563,7 @@ function commandHelp(command) {
 }
 
 function help() {
+  const buildIdentity = resolveBuildIdentity();
   const groups = {};
   for (const [name, spec] of Object.entries(COMMAND_SPECS)) {
     (groups[spec.group] ||= []).push({ name, title: spec.title, deprecated: Boolean(spec.deprecated) });
@@ -568,6 +572,7 @@ function help() {
     ok: true,
     name: 'knowledge-collection',
     version: VERSION,
+    ...buildIdentity,
     stateFile: '<session-dir>/session.json (schemaVersion 2.0, task+research+collection 一体化)',
     output: '默认缩进 JSON;--compact 输出单行 JSON',
     usage: 'knowledge-collection.mjs <command> [options]',
@@ -590,7 +595,12 @@ async function main() {
     return;
   }
   if (command === 'version' || args.version === true) {
-    render({ ok: true, name: 'knowledge-collection', version: VERSION }, compactRequested(args));
+    render({
+      ok: true,
+      name: 'knowledge-collection',
+      version: VERSION,
+      ...resolveBuildIdentity(),
+    }, compactRequested(args));
     return;
   }
   if (command === 'command-schema') {

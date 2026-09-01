@@ -61,6 +61,28 @@ test('treats a trusted WeChat detail URL as an article without keyword-dependent
   );
 });
 
+test('treats a strict Sogou WeChat article redirect as an article', () => {
+  assert.deepEqual(
+    classifyCandidate({
+      url: 'https://weixin.sogou.com/link?url=opaque-article-token',
+      title: '外国玩家眼中的「米哈游发家史」',
+    }),
+    { pageType: 'article', reasons: ['trusted-wechat-redirect-url'] },
+  );
+  assert.equal(classifyCandidate({
+    url: 'http://weixin.sogou.com/link?url=opaque-article-token',
+    title: '米哈游文章',
+  }).pageType, 'weak');
+  assert.equal(classifyCandidate({
+    url: 'https://weixin.sogou.com/link',
+    title: '米哈游文章',
+  }).pageType, 'weak');
+  assert.equal(classifyCandidate({
+    url: 'https://weixin.sogou.com/weixin?query=米哈游',
+    title: '米哈游文章搜索结果',
+  }).pageType, 'reject');
+});
+
 test('recognizes Nature and arXiv publication detail URLs without language-specific title keywords', () => {
   assert.deepEqual(
     classifyCandidate({

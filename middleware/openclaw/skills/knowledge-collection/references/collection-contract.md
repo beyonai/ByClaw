@@ -214,6 +214,8 @@ node scripts/knowledge-collection.mjs materialize-wechat --session-dir <dir> \
 
 执行器结果 JSON 必须记录成功状态、`saved`、实际字节数、标题、作者、发布时间、`source_url` 和可信的
 `resolved_url=https://mp.weixin.qq.com/s...`。命令只删除确定的微信 UI、远程图片引用和纯推荐链接块，保留正文结语与作者免责声明；
+`source_url` 必须保持为用户直链或 `public-discover` 选中的原始授权 URL（包括 Sogou 微信中转链接），并作为 canonical source；
+`resolved_url` 只记录 byCLI 实际解析到的微信文章地址。物化诊断必须记录两者、受控输入/输出文件哈希和 transactionId。
 高置信度时写入 `markdown/items/<item-id>/index.md`、`sanitized/items/<item-id>/index.md` 并返回
 `.collection-inputs/` 下的 `collectPayloadPath`。低置信度、登录页或疑似截断内容不生成 payload，而是保留 raw 证据并登记
 `materialization.status=pending`、`contentGranularity=unknown`，原因固定为 `wechat-materialization-low-confidence`。

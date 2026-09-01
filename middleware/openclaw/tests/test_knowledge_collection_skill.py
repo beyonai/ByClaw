@@ -129,6 +129,7 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "90 秒硬上限",
             "不得使用 weak",
             "STOP",
+            "buildId",
         ):
             self.assertIn(phrase, combined)
 

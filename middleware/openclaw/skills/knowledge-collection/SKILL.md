@@ -61,6 +61,10 @@ Read only the reference that matches the chosen workflow, plus `collection-contr
 
 ## 3. Execute through validated commands
 
+发布验证或性能测试开始前，先运行 `knowledge-collection.mjs version` 并记录 `version`、`buildId` 与
+`buildIdSource`。发布系统应通过 `KNOWLEDGE_COLLECTION_BUILD_ID` 注入 commit/build 标识；未注入时 CLI 返回
+运行时 Skill 文件的 `sha256:` 内容指纹，线上与本地指纹一致才可视为同一候选构建。
+
 1. Create or load a session before discovery. Before any source executor, browser preflight, or delegated acquisition command, complete that initialization. Use `init` with the derived `--source-scope` and `--materialization-target`. 用户明确要求“全文”“完整正文”或“PDF 全文”时，还必须传 `--required-content-granularity full-text`；否则使用默认的 `any`。 When the user supplied a save path, use `<Session Root>/.collection-runs/<run-id>/` as `--session-dir` and retain the save path separately as `requestedDeliveryDir`. When the user already selected direct source URLs, pass those exact URLs through `init --direct-urls '<JSON array>'` and initialize their inventory as `pending` before acquisition so a terminal source gate remains reportable. `--direct-urls` is only for URLs explicitly present in the user's request, never for URLs found or remembered by the Agent.
 2. For public URL discovery that uses SearXNG, run `public-discover`. When the user explicitly requests a quantity (for example, “采集一篇”), pass that positive integer as `--requested-count`; this runs SearXNG first with the requested quantity as its result limit and automatically falls back to the relocated `hot_discovery` channel when unique eligible articles are below the requested count. Read `candidateQuality.<channel>.eligibleArticle`、`candidateQuality.<channel>.topicRelevance` and each candidate's `pageTypeReasons` plus `topicRelevance`. `article` only describes page shape; a usable candidate also requires `topicRelevance.status=matched|not-required`. Login, home, navigation, search-result, and off-topic publication pages are not successful candidates. Without `--requested-count`, the command starts the relocated `online-search` and `hot_discovery` channels in parallel and reports unavailable coverage without suppressing successful results.
 

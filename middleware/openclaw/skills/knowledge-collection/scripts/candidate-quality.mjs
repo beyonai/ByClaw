@@ -43,6 +43,13 @@ function isTrustedWechatArticle(url) {
     && /^\/s(?:\/|$)/i.test(url.pathname);
 }
 
+function isTrustedSogouWechatRedirect(url) {
+  return url.protocol === 'https:'
+    && url.hostname.toLowerCase() === 'weixin.sogou.com'
+    && /^\/link\/?$/i.test(url.pathname)
+    && Boolean(url.searchParams.get('url')?.trim());
+}
+
 function isTrustedPublicationDetail(url) {
   const hostname = url.hostname.toLowerCase();
   return (hostname === 'arxiv.org' && /^\/abs\/[^/]+\/?$/i.test(url.pathname))
@@ -116,6 +123,7 @@ export function classifyCandidate(candidate) {
   }
 
   const trustedWechat = isTrustedWechatArticle(url);
+  const trustedWechatRedirect = isTrustedSogouWechatRedirect(url);
   const trustedPublication = isTrustedPublicationDetail(url);
   if (trustedPublication) {
     return { pageType: 'article', reasons: ['trusted-publication-url'] };
@@ -129,6 +137,9 @@ export function classifyCandidate(candidate) {
         ? ['trusted-article-url', 'article-content-signal']
         : ['trusted-article-url'],
     };
+  }
+  if (trustedWechatRedirect) {
+    return { pageType: 'article', reasons: ['trusted-wechat-redirect-url'] };
   }
   if (detailUrl && contentSignal) {
     return { pageType: 'article', reasons: ['detail-url', 'article-content-signal'] };

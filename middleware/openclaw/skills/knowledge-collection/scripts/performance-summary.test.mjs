@@ -139,6 +139,43 @@ test('returns non-comparable and null improvement when either role is below 5/5'
   }
 });
 
+test('accepts a candidate delivered through the controlled WeChat materializer', async () => {
+  const baseline = await batch('baseline', BRANDS.map(() => 500_000));
+  const candidate = await batch('candidate', BRANDS.map(() => 200_000));
+  try {
+    const evidence = candidate.document.runs[0].attempts[0].evidence;
+    const discoveryPath = join(candidate.root, evidence.discovery);
+    const rawPath = join(candidate.root, evidence.raw);
+    const diagnosticsPath = join(candidate.root, evidence.materializationDiagnostics);
+    const receiptPath = join(candidate.root, evidence.fullTextReceipt);
+    const sourceUrl = 'https://weixin.sogou.com/link?url=mihoyo-fixture';
+    const resolvedUrl = 'https://mp.weixin.qq.com/s/mihoyo-fixture';
+    const discovery = JSON.parse(await readFile(discoveryPath, 'utf8'));
+    discovery.selectedCandidate.url = sourceUrl;
+    await writeFile(discoveryPath, JSON.stringify(discovery));
+    await writeFile(rawPath, JSON.stringify({ sourceUrl, status: 'saved' }));
+    await writeFile(diagnosticsPath, JSON.stringify({
+      action: 'materialize-wechat', complete: true, contentGranularity: 'full-text',
+      transactionId: 'wechat-tx-1', requestedUrl: sourceUrl, resolvedUrl,
+      inputFiles: [{ artifact: evidence.raw, sha256: `sha256:${sha256(await readFile(rawPath))}` }],
+      outputFiles: [{
+        artifact: evidence.finalMarkdown,
+        sha256: `sha256:${sha256(await readFile(join(candidate.root, evidence.finalMarkdown)))}`,
+      }],
+    }));
+    await writeFile(receiptPath, JSON.stringify({
+      executor: 'bycli', sourceUrl, artifact: evidence.materializationDiagnostics,
+    }));
+
+    const result = evaluatePerformance({ baseline, candidate });
+    assert.equal(result.correctDelivery.candidate, '5/5');
+    assert.equal(result.passed, true);
+  } finally {
+    await rm(baseline.root, { recursive: true, force: true });
+    await rm(candidate.root, { recursive: true, force: true });
+  }
+});
+
 test('rejects v1, mismatched protocol, paired-attempt drift, absolute paths, and symlinks', async () => {
   const baseline = await batch('baseline', BRANDS.map(() => 500_000));
   const candidate = await batch('candidate', BRANDS.map(() => 200_000));
