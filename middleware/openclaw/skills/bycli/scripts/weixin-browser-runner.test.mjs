@@ -28,7 +28,18 @@ const unavailable = {
   ok: false,
   code: 'BRIDGE_UNAVAILABLE',
   reason: 'EXTENSION_DISCONNECTED',
-  budget: { browserStartsUsed: 0, daemonRestartsUsed: 1 },
+  browserState: 'stopped',
+  actions: ['browser_start_script', 'daemon_restart'],
+  daemonState: 'running',
+  extensionState: 'disconnected',
+  checks: 3,
+  budget: { browserStartsUsed: 1, daemonRestartsUsed: 1 },
+  diagnostics: {
+    browserStartFailed: false,
+    recoveryBudgetExhausted: false,
+    rawOutput: 'token=must-not-leak',
+  },
+  secret: 'must-not-leak',
 };
 
 async function stateDir(t, prefix = 'weixin-runner-') {
@@ -75,7 +86,21 @@ test('bridge failure does not execute Weixin command or create Gate state', asyn
   });
 
   assert.equal(outcome.exitCode, 69);
-  assert.match(outcome.stderr, /BRIDGE_UNAVAILABLE/);
+  const error = JSON.parse(outcome.stderr).error;
+  assert.deepEqual(error.details, {
+    bridgeCode: 'BRIDGE_UNAVAILABLE',
+    browserState: 'stopped',
+    actions: ['browser_start_script', 'daemon_restart'],
+    daemonState: 'running',
+    extensionState: 'disconnected',
+    checks: 3,
+    budget: { browserStartsUsed: 1, daemonRestartsUsed: 1 },
+    diagnostics: {
+      browserStartFailed: false,
+      recoveryBudgetExhausted: false,
+    },
+  });
+  assert.doesNotMatch(outcome.stderr, /must-not-leak/);
   assert.equal(commands, 0);
   assert.deepEqual(await readdir(directory), []);
 });
