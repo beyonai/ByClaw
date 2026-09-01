@@ -396,16 +396,20 @@ public class AssistantChatApplicationService {
         gatewayClient.cancelTask(executionId, String.valueOf(stopChatDto.getSessionId()),
             "user cancel task", targetAgentType, CurrentUserHolder.getCurrentUserCode(), "force");
         */
-        gatewayClient.cancelSession(String.valueOf(stopChatDto.getSessionId()), "user cancel task");
+        try {
+            gatewayClient.cancelSession(String.valueOf(stopChatDto.getSessionId()), "user cancel task");
+        }
+        finally {
+            // 计划是 BE 的权威状态；即使下游取消失败，也必须在本次 STOP_CHAT 内收敛到终态。
+            List<TaskPlanSnapshot> cancelledPlans = taskPlanApplicationService.confirmCancellation(stopChatDto,
+                "USER_STOPPED", "用户已停止执行");
+            if (cancelledPlans != null) {
+                cancelledPlans.forEach(plan -> taskPlanWebSocketPublisher.broadcast(
+                    CurrentUserHolder.getCurrentUserId(), plan, stopChatDto.getClientRequestId()));
+            }
+        }
 
         Long cleanupMessageId = resolveStopCleanupMessageId(stopChatDto);
-
-        List<TaskPlanSnapshot> cancelledPlans = taskPlanApplicationService.confirmCancellation(stopChatDto,
-            "USER_STOPPED", "用户已停止执行");
-        if (cancelledPlans != null) {
-            cancelledPlans.forEach(plan -> taskPlanWebSocketPublisher.broadcast(
-                CurrentUserHolder.getCurrentUserId(), plan, stopChatDto.getClientRequestId()));
-        }
 
         if (persistedBeforeStop) {
             runningOutputStreamRegistry.release(stopChatDto.getSessionId(), cleanupMessageId);

@@ -1,10 +1,12 @@
 package com.iwhalecloud.byai.state.application.service.chat;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -125,6 +127,27 @@ class AssistantChatApplicationServiceTest {
         verify(runningOutputStreamRegistry).release(10L, 20L);
         verify(runningChatSnapshotService).delete(10L, 20L);
         verify(taskPlanWebSocketPublisher).broadcast(1L, cancelling, null);
+        verify(taskPlanWebSocketPublisher).broadcast(1L, cancelled, null);
+    }
+
+    @Test
+    void stopChat_confirmsPlanCancellationWhenGatewayCancellationFails() {
+        StopChatDto stopChatDto = new StopChatDto();
+        stopChatDto.setSessionId(10L);
+        stopChatDto.setMessageId(20L);
+        TaskPlanSnapshot cancelled = new TaskPlanSnapshot();
+        cancelled.setStatus("CANCELLED");
+        when(taskPlanApplicationService.confirmCancellation(stopChatDto, "USER_STOPPED", "用户已停止执行"))
+            .thenReturn(List.of(cancelled));
+        when(scriptService.flushFromSnapshot(10L, 20L)).thenReturn(true);
+        doThrow(new IllegalStateException("gateway unavailable"))
+            .when(gatewayClient).cancelSession("10", "user cancel task");
+
+        assertThatThrownBy(() -> assistantChatApplicationService.stopChat(stopChatDto))
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessage("gateway unavailable");
+
+        verify(taskPlanApplicationService).confirmCancellation(stopChatDto, "USER_STOPPED", "用户已停止执行");
         verify(taskPlanWebSocketPublisher).broadcast(1L, cancelled, null);
     }
 

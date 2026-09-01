@@ -62,7 +62,6 @@ export function registerRunRoutes(
         const cancelled = await options.runService.cancelRun(
           run.id,
           "user requested cancellation",
-          auth.beyondToken,
         );
         return reply.code(202).send({
           runId: run.id,
