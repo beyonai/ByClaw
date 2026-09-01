@@ -258,7 +258,8 @@ public class ProjectController {
     @PostMapping("/repo/available-list")
     public ResponseUtil<List<Map<String, Object>>> listAvailableProjectRepos(@RequestBody Map<String, Object> params) {
         Long projectId = MapParamUtil.getLongValue(params, "projectId");
-        return ResponseUtil.successResponse(projectRepositoryService.listAvailableRepositories(projectId));
+        Long sessionId = MapParamUtil.getLongValue(params, "sessionId");
+        return ResponseUtil.successResponse(projectRepositoryService.listAvailableRepositories(projectId, sessionId));
     }
 
     /** 查询项目 workspace 仓库中指定会话对应的实际 worktree。 */
@@ -283,7 +284,7 @@ public class ProjectController {
         @RequestBody ProjectRepoTreeQueryDTO query) {
         return ResponseUtil.successResponse(projectRepositoryService.listTree(query == null ? null : query.getProjectId(),
             query == null ? null : query.getRepoId(), query == null ? null : query.getPath(),
-            query == null ? null : query.getRef()));
+            query == null ? null : query.getRef(), query == null ? null : query.getSessionId()));
     }
 
     /**
@@ -297,7 +298,8 @@ public class ProjectController {
         @RequestBody ProjectRepoTreeQueryDTO query) {
         return ResponseUtil.successResponse(projectRepositoryService.searchTree(
             query == null ? null : query.getProjectId(), query == null ? null : query.getRepoId(),
-            query == null ? null : query.getKeyword(), query == null ? null : query.getRef()));
+            query == null ? null : query.getKeyword(), query == null ? null : query.getRef(),
+            query == null ? null : query.getSessionId()));
     }
 
     /**

@@ -62,6 +62,10 @@ public class ProjectRepositoryService {
 
     /** 查询仓库指定目录的直接子节点；path 为空即查询仓库根目录。 */
     public List<ProjectRepoTreeNodeDTO> listTree(Long projectId, Long repoId, String path, String ref) {
+        return listTree(projectId, repoId, path, ref, null);
+    }
+
+    public List<ProjectRepoTreeNodeDTO> listTree(Long projectId, Long repoId, String path, String ref, Long sessionId) {
         requireProject(projectId);
         if (repoId == null) {
             throw new BaseException(50500, "project.repo.id.required");
@@ -73,7 +77,9 @@ public class ProjectRepositoryService {
         }
         String branch = resolveBranch(projectId, repo, ref);
         try {
-            Path localRepo = projectWorkspaceGitService.resolveRepository(repo).orElseThrow();
+            Path localRepo = (sessionId == null
+                ? projectWorkspaceGitService.resolveRepository(repo)
+                : projectWorkspaceGitService.resolveRepository(repo, sessionId)).orElseThrow();
             return listLocalTree(localRepo, normalizePath(path), branch);
         }
         catch (Exception e) {
@@ -86,6 +92,10 @@ public class ProjectRepositoryService {
 
     /** 按指定分支搜索仓库文件名和路径。 */
     public List<ProjectRepoTreeNodeDTO> searchTree(Long projectId, Long repoId, String keyword, String ref) {
+        return searchTree(projectId, repoId, keyword, ref, null);
+    }
+
+    public List<ProjectRepoTreeNodeDTO> searchTree(Long projectId, Long repoId, String keyword, String ref, Long sessionId) {
         requireProject(projectId);
         if (repoId == null) {
             throw new BaseException(50500, "project.repo.id.required");
@@ -100,7 +110,9 @@ public class ProjectRepositoryService {
         }
         String branch = resolveBranch(projectId, repo, ref);
         try {
-            Path localRepo = projectWorkspaceGitService.resolveRepository(repo).orElseThrow();
+            Path localRepo = (sessionId == null
+                ? projectWorkspaceGitService.resolveRepository(repo)
+                : projectWorkspaceGitService.resolveRepository(repo, sessionId)).orElseThrow();
             return searchLocalTree(localRepo, keyword.trim(), branch);
         }
         catch (Exception e) {
@@ -166,11 +178,17 @@ public class ProjectRepositoryService {
 
     /** 查询数据库配置与 workspace 实际 Git 仓库的交集，供项目代码仓库切换。 */
     public List<Map<String, Object>> listAvailableRepositories(Long projectId) {
+        return listAvailableRepositories(projectId, null);
+    }
+
+    public List<Map<String, Object>> listAvailableRepositories(Long projectId, Long sessionId) {
         requireProject(projectId);
         List<Map<String, Object>> repositories = new ArrayList<>();
         for (ProjectWorkspaceGitService.ResolvedRepository item
             : projectWorkspaceGitService.resolveRepositories(projectId)) {
-            String path = projectWorkspaceGitService.toSandboxPath(item.path()).orElse(null);
+            Path resolvedPath = sessionId == null ? item.path()
+                : projectWorkspaceGitService.resolveRepository(item.repo(), sessionId).orElse(item.path());
+            String path = projectWorkspaceGitService.toSandboxPath(resolvedPath).orElse(null);
             if (path == null) {
                 continue;
             }

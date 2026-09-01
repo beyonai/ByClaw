@@ -158,6 +158,7 @@ const CodesTab: React.FC<CodesTabProps> = ({
         const response = await listProjectRepoTree({
           projectId,
           repoId: repo.repoId,
+          sessionId,
         });
         if (requestSeq === repoRequestSeqRef.current[repoKey]) {
           setRepoFilesMap((current) => ({
@@ -205,7 +206,7 @@ const CodesTab: React.FC<CodesTabProps> = ({
     if (!projectId) return;
     setReposLoading(true);
     try {
-      const response = await listAvailableProjectRepos(projectId);
+      const response = await listAvailableProjectRepos(projectId, sessionId);
       const nextRepos = Array.isArray(response) ? response : [];
       setRepos(nextRepos);
       const nextSelectedRepo = nextRepos[0];
@@ -263,6 +264,7 @@ const CodesTab: React.FC<CodesTabProps> = ({
         const response = await listProjectRepoTree({
           projectId,
           repoId,
+          sessionId,
           path: relativePath || undefined,
         });
         setChildrenByPath((current) => ({
@@ -276,7 +278,7 @@ const CodesTab: React.FC<CodesTabProps> = ({
         setChildrenByPath((current) => ({ ...current, [directoryPath]: [] }));
       }
     },
-    [childrenByPath, projectId, selectedRepo]
+    [childrenByPath, projectId, selectedRepo, sessionId]
   );
 
   const openFilePreview = useCallback(
@@ -398,6 +400,7 @@ const CodesTab: React.FC<CodesTabProps> = ({
         const response = await searchProjectRepoTree({
           projectId,
           repoId,
+          sessionId,
           keyword: nextKeyword,
         });
         if (requestSeq === repoRequestSeqRef.current[repoKey]) {
@@ -423,7 +426,7 @@ const CodesTab: React.FC<CodesTabProps> = ({
         }
       }
     },
-    [fetchRepoFiles, projectId]
+    [fetchRepoFiles, projectId, sessionId]
   );
 
   const renderCodeChanges = () => {
