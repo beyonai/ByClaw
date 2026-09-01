@@ -1165,7 +1165,7 @@ public class DatasetApplicationService {
             return;
         }
 
-        Map<String, Object> owner = (Map<String, Object>) metadata.get("owner");
+        Map<String, Object> owner = (Map<String, Object>) metadata.get("userCode");
         if (owner == null) {
             return;
         }
