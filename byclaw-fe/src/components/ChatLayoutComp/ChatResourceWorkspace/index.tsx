@@ -1,5 +1,5 @@
 import React, { useContext, useMemo } from 'react';
-import { Button, Tabs } from 'antd';
+import { Button, Dropdown, Tabs } from 'antd';
 import { useIntl } from '@umijs/max';
 import { SiderContentContext, type DetailPanelOptions } from '@/layout/sider/siderContentContext';
 import ResourcePanel from './ResourcePanel';
@@ -18,6 +18,7 @@ interface ChatResourceWorkspaceProps {
   onOpenDetail: (panel: React.ReactNode, options?: DetailPanelOptions) => void;
   onActiveTabChange: (key: string) => void;
   onCloseTab: (key: string) => void;
+  onCloseTabs: (keys: string[]) => void;
 }
 
 const ChatResourceWorkspace: React.FC<ChatResourceWorkspaceProps> = ({
@@ -31,9 +32,11 @@ const ChatResourceWorkspace: React.FC<ChatResourceWorkspaceProps> = ({
   onOpenDetail,
   onActiveTabChange,
   onCloseTab,
+  onCloseTabs,
 }) => {
   const intl = useIntl();
   const outerContext = useContext(SiderContentContext);
+  const [contextTabKey, setContextTabKey] = React.useState<string>();
 
   // 资源组件依赖同一 Context；嵌套后只替换详情回调，引用、分享等左侧行为保持不变。
   const nestedContext = useMemo(
@@ -87,10 +90,42 @@ const ChatResourceWorkspace: React.FC<ChatResourceWorkspaceProps> = ({
                 onEdit={(targetKey, action) => {
                   if (action === 'remove') onCloseTab(`${targetKey}`);
                 }}
-                items={tabs.map((tab) => ({
-                  key: tab.key,
-                  label: tab.title,
-                }))}
+                items={tabs.map((tab, index) => {
+                  const hasOtherTabs = tabs.length > 1;
+                  const hasRightTabs = index < tabs.length - 1;
+                  return {
+                    key: tab.key,
+                    label: (
+                      <Dropdown
+                        trigger={['contextMenu']}
+                        open={contextTabKey === tab.key}
+                        onOpenChange={(open) => setContextTabKey(open ? tab.key : undefined)}
+                        menu={{
+                          items: [
+                            { key: 'close', label: intl.formatMessage({ id: 'chatResource.closeTab' }) },
+                            ...(hasOtherTabs
+                              ? [{ key: 'closeOthers', label: intl.formatMessage({ id: 'chatResource.closeOtherTabs' }) }]
+                              : []),
+                            ...(hasRightTabs
+                              ? [{ key: 'closeRight', label: intl.formatMessage({ id: 'chatResource.closeRightTabs' }) }]
+                              : []),
+                          ],
+                          onClick: ({ key }) => {
+                            if (key === 'close') onCloseTab(tab.key);
+                            if (key === 'closeOthers') {
+                              onCloseTabs(tabs.filter((item) => item.key !== tab.key).map((item) => item.key));
+                              onActiveTabChange(tab.key);
+                            }
+                            if (key === 'closeRight') onCloseTabs(tabs.slice(index + 1).map((item) => item.key));
+                            setContextTabKey(undefined);
+                          },
+                        }}
+                      >
+                        <span>{tab.title}</span>
+                      </Dropdown>
+                    ),
+                  };
+                })}
               />
             </div>
             <div className={styles.workspaceDetail}>
@@ -113,9 +148,9 @@ const ChatResourceWorkspace: React.FC<ChatResourceWorkspaceProps> = ({
           key="resource-list"
           className={
             hasDetailTabs
-              ? `${styles.floatingResourcePanel} ${
-                hasFilePreview ? styles.floatingResourcePanelHalf : ''
-              } ${listOpen ? '' : styles.floatingResourcePanelHidden}`
+              ? `${styles.floatingResourcePanel} ${hasFilePreview ? styles.floatingResourcePanelHalf : ''} ${
+                listOpen ? '' : styles.floatingResourcePanelHidden
+              }`
               : styles.dockedResourcePanel
           }
           aria-hidden={hasDetailTabs && !listOpen}

@@ -57,6 +57,15 @@
   :global {
     .@{antPrefix}-tabs-nav {
       margin: 0;
+      height: 38px;
+    }
+
+    .@{antPrefix}-tabs-nav::before {
+      border-bottom: 1px solid #d9dde5;
+    }
+
+    .@{antPrefix}-tabs-nav-list {
+      align-items: flex-end;
     }
 
     .@{antPrefix}-tabs-content-holder {
@@ -65,18 +74,34 @@
 
     .@{antPrefix}-tabs-tab {
       max-width: 180px;
-      height: 34px;
-      padding: 6px 10px !important;
-      border-radius: 6px 6px 0 0 !important;
+      height: 36px;
+      margin: 0 2px 0 0 !important;
+      padding: 7px 12px !important;
+      border: 0 !important;
+      border-radius: 12px 12px 0 0 !important;
+      background: #eef1f5;
       color: #667085;
+      transition: background-color 0.15s ease, color 0.15s ease;
     }
 
     .@{antPrefix}-tabs-tab:hover {
+      background: #e4e8ee;
       color: #344054;
     }
 
     .@{antPrefix}-tabs-tab-active {
+      background: #fff;
       color: #14161a;
+      box-shadow: 0 -1px 0 #d9dde5, 1px 0 0 #d9dde5, -1px 0 0 #d9dde5;
+    }
+
+    .@{antPrefix}-tabs-tab-remove {
+      margin-left: 10px;
+      color: #667085;
+    }
+
+    .@{antPrefix}-tabs-tab-remove:hover {
+      color: #1f2937;
     }
 
     .@{antPrefix}-tabs-tab-btn {
