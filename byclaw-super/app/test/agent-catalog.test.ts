@@ -48,7 +48,15 @@ describe("ByClaw BE Agent Catalog", () => {
         id: "10001912",
         code: "BYAI_DIG_EMPLOYEE_10001912",
         name: "企业微信助手",
-        description: "企业微信助手；个人助理；技能：dws、wecomcli",
+        description:
+          "企业微信助手；个人助理；技能：dws、wecomcli、project-context、notice、project-cloud-knowledge",
+        skills: [
+          "dws",
+          "wecomcli",
+          "project-context",
+          "notice",
+          "project-cloud-knowledge",
+        ],
         execution: {
           connectorId: "openclaw-by-framework",
           targetId: "10001912",

@@ -673,7 +673,7 @@ const Resources: React.FC<Props> = ({ resourceType, installedOnly = false, onIns
   const items: TabsProps['items'] = [
     {
       key: 'personal',
-      label: `${intl.formatMessage({ id: 'resource.personal' })}${resourceName}`,
+      label: `${intl.formatMessage({ id: 'resource.available' })}`,
     },
     {
       key: 'enterprise',
@@ -742,8 +742,7 @@ const Resources: React.FC<Props> = ({ resourceType, installedOnly = false, onIns
               }}
             >
               {intl.formatMessage({
-                id:
-                  enterpriseSkillKind === 'group' ? 'resource.enterpriseSkillGroup' : 'resource.enterpriseSkillSingle',
+                id: 'resource.official',
               })}
               <DownOutlined
                 className={styles.enterpriseSkillTabChevron}
@@ -753,7 +752,7 @@ const Resources: React.FC<Props> = ({ resourceType, installedOnly = false, onIns
             </span>
           </Dropdown>
         ) : (
-          `${intl.formatMessage({ id: 'resource.enterprise' })}${resourceName}`
+          `${intl.formatMessage({ id: 'resource.official' })}`
         ),
     },
   ];

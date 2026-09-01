@@ -214,6 +214,17 @@ public class AssistantManController {
         return ResponseUtil.successResponse(messageService.getMessages(messageQo));
     }
 
+    @PostMapping("/getMessageOutline")
+    @Operation(summary = "获取会话消息目录", description = "获取会话导航所需的轻量消息目录")
+    @ApiResponses({
+        @ApiResponse(responseCode = "0", description = "查询成功"),
+        @ApiResponse(responseCode = "400", description = "会话ID不能为空"),
+        @ApiResponse(responseCode = "500", description = "服务器内部错误")
+    })
+    public ResponseUtil getMessageOutline(@RequestBody MessageQo messageQo) {
+        return ResponseUtil.successResponse(messageService.getConversationOutline(messageQo));
+    }
+
     @GetMapping("/getForwardMessage/{messageId}")
     @Operation(summary = "获取会话消息列表", description = "根据消息ID获取转发消息列表")
     @ApiResponses({

@@ -319,7 +319,14 @@ implements ExecutionCredentialRepository {
   readonly #items = new Map<string, ExecutionCredential>();
 
   async save(credential: ExecutionCredential): Promise<void> {
-    this.#items.set(credential.runId, structuredClone(credential));
+    const existing = this.#items.get(credential.runId);
+    this.#items.set(
+      credential.runId,
+      structuredClone({
+        ...credential,
+        metadata: credential.metadata ?? existing?.metadata ?? {},
+      }),
+    );
   }
 
   async loadForLease(input: {

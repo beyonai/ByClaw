@@ -1,7 +1,6 @@
 package com.iwhalecloud.byai.manager.dto.digitemploy;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.iwhalecloud.byai.manager.dto.scheduletask.ScheduleTaskCreateRequest;
 import com.iwhalecloud.byai.manager.dto.template.MemoryConfigDTO;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtDigEmployee;
 import lombok.Getter;
@@ -116,11 +115,6 @@ public class DigitalEmployeeDTO extends SsResExtDigEmployee {
      */
     @JsonProperty("isFrontAccess")
     private boolean isFrontAccess = false;
-
-    /**
-     * 定时任务配置列表
-     */
-    private List<ScheduleTaskCreateRequest> scheduleTaskList;
 
     /**
      * 记忆配置列表（包含规则名称、规则内容、模版ID）

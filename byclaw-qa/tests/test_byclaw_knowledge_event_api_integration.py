@@ -63,6 +63,8 @@ async def test_native_resource_route_publishes_after_success_with_request_contex
     assert context[USER_CODE_HEADER] == "user-1"
     assert context[CHAT_SESSION_ID_HEADER] == "session-1"
     assert context[RESOURCE_ID_HEADER] == "42"
+    create_request = service.create_directory.await_args.args[0]
+    assert create_request.metadata == {"userCode": "user-1"}
 
 
 def test_resource_id_wrapper_routes_are_not_registered():

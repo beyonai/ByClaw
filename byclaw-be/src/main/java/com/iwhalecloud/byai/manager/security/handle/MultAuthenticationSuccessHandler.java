@@ -206,6 +206,7 @@ public class MultAuthenticationSuccessHandler implements AuthenticationSuccessHa
             try {
                 sandboxService.launchSandbox(sandboxUserCode, null);
                 authRedisSyncService.asyncSyncUserAuthToRedis(loginInfo.getUserId());
+                authRedisSyncService.asyncSyncUserManageAuthToRedis(loginInfo.getUserId());
                 tokenSaverProvisionService.provisionIfNeeded(loginInfo.getUserId(), sandboxUserCode);
             } catch (Exception e) {
                 logger.warn("登录后异步启动沙箱失败，用户编码：{}", sandboxUserCode, e);

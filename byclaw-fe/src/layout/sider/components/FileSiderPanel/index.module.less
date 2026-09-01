@@ -422,6 +422,59 @@
   vertical-align: bottom;
 }
 
+.filePathTooltip {
+  max-width: 320px;
+  padding: 2px 0;
+}
+
+.filePathTooltipOverlay {
+  :global {
+    .@{antPrefix}-popover-inner {
+      max-width: 340px;
+      padding: 8px 10px;
+    }
+  }
+}
+
+.filePathTooltipName {
+  max-width: 280px;
+  margin-bottom: 4px;
+  color: #fff;
+  font-weight: 500;
+  line-height: 20px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.filePathTooltipPathRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.filePathTooltipPath {
+  flex: 1;
+  min-width: 0;
+  color: rgba(255, 255, 255, 0.75);
+  line-height: 18px;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+.filePathTooltipCopy {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  color: rgba(255, 255, 255, 0.8);
+
+  &:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.12);
+  }
+}
+
 .previewableTreeTitle .treeTitleText {
   cursor: pointer;
 }
@@ -568,6 +621,15 @@
 
 .fileSpaceContentHidden {
   display: none;
+}
+
+// 仅在替代视图可见时承接剩余高度；隐藏时保持 display:none，避免 Changes 默认露出。
+.fileSpaceAlternateContentVisible {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 // 任务成果等抽屉场景使用剩余可用高度，文件树内部滚动以保留持续浏览体验。

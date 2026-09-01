@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Dropdown, Empty, Input, Modal, Tag, message } from 'antd';
+import { Button, Dropdown, Empty, Input, Modal, message } from 'antd';
 import {
   DeleteOutlined,
   EditOutlined,
@@ -10,7 +10,6 @@ import {
 } from '@ant-design/icons';
 import { useIntl, useLocation, useNavigate, useSelector } from '@umijs/max';
 import dayjs from 'dayjs';
-import classNames from 'classnames';
 import useGlobal from '@/hooks/useGlobal';
 import { setAgentCache } from '@/components/QueryInput/RichInput/agentCache';
 import getElementData from '@/components/QueryInput/RichInput/utils/getElementData';
@@ -34,7 +33,6 @@ import { useProjectList } from './hooks/useProjectList';
 import { useProjectScopeId } from './hooks/useProjectScopeId';
 import { useProjectTypeConfig } from './hooks/useProjectTypeConfig';
 import type { ProjectSession, ProjectSpace } from './types';
-import { getProjectTagMeta } from './utils';
 import styles from './index.module.less';
 
 const getProjectId = (value?: string | number) => `${value ?? ''}`.trim();
@@ -497,7 +495,6 @@ const ProjectSpacePage: React.FC = () => {
             {projects.map((project) => {
               const canManageCard = isProjectCreator(project, userInfo);
               const createTime = formatProjectCreateTime(project.createTime, intl);
-              const projectTag = getProjectTagMeta(project);
               return (
                 <div
                   key={getProjectId(project.projectId)}
@@ -520,12 +517,6 @@ const ProjectSpacePage: React.FC = () => {
                       <strong>
                         {project.projectName || intl.formatMessage({ id: 'projectSpace.unnamedProject' })}
                       </strong>
-                      <Tag
-                        bordered={false}
-                        className={classNames(styles.projectTypeTag, styles[`projectTypeTag${projectTag.classSuffix}`])}
-                      >
-                        {intl.formatMessage({ id: projectTag.messageId })}
-                      </Tag>
                     </span>
                     {createTime && <small>{createTime}</small>}
                   </span>
@@ -664,7 +655,7 @@ const ProjectSpacePage: React.FC = () => {
       >
         <Input
           autoFocus
-          maxLength={15}
+          maxLength={100}
           value={renameValue}
           onChange={(event) => setRenameValue(event.target.value)}
           onPressEnter={() => void handleRenameProject()}

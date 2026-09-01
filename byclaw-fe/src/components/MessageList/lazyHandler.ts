@@ -65,6 +65,8 @@ const compMap: Record<string, React.LazyExoticComponent<any>> = {
   [`${SSEMessageType.commonCard}`]: lazy(() => import('@/components/MessagesComp/Card')),
   [`${SSEMessageType.jsonBlock}`]: lazy(() => import('@/components/MessagesComp/JsonBlock')),
   [`${SSEMessageType.toolCall}`]: lazy(() => import('@/components/MessagesComp/ToolCall')),
+  [`${SSEMessageType.fileChanges}`]: lazy(() => import('@/components/MessagesComp/FileChanges')),
+  [`${SSEMessageType.editDiff}`]: lazy(() => import('@/components/MessagesComp/EditDiff')),
   [`${SSEMessageType.compaction}`]: lazy(() => import('@/components/MessagesComp/Compaction')),
 };
 

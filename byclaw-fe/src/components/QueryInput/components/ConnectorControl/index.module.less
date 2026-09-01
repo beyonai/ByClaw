@@ -57,6 +57,17 @@
   margin: 0 -8px;
 }
 
+.connectorListInline {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+
+  .connectorItem {
+    width: 100%;
+    box-sizing: border-box;
+  }
+}
+
 .emptyState {
   padding: 28px 12px;
   color: #7a8596;
@@ -196,13 +207,21 @@
 
 .authorizationModal,
 .qrModal,
-.imaCredentialModal {
+.credentialModal {
   :global(.ant-modal-content) {
     border-radius: 16px;
   }
 }
 
-.imaCredentialContent {
+.credentialModalWithHelp {
+  min-width: 640px;
+  max-width: 1250px;
+}
+
+.credentialContent {
+  max-height: calc(100vh - 96px);
+  padding: 0 4px;
+  overflow-y: auto;
   text-align: center;
 
   > .connectorIcon {
@@ -222,15 +241,46 @@
     color: #697586;
     line-height: 22px;
   }
-
-  > a {
-    color: #1677ff;
-  }
 }
 
-.imaCredentialForm {
+.credentialContentWithHelp {
+  display: flex;
+  flex-direction: column;
+  height: min(760px, calc(100vh - 96px));
+  overflow: hidden;
+}
+
+.credentialForm {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
   margin-top: 20px;
   text-align: left;
+}
+
+.credentialContentWithHelp .credentialForm {
+  margin-top: 0;
+}
+
+.credentialFormBody {
+  min-height: 0;
+  padding: 0 4px 4px;
+  overflow-y: auto;
+}
+
+.credentialHelpLink {
+  display: block;
+  margin: 14px 0 18px;
+  color: #1677ff;
+  text-align: center;
+}
+
+.credentialActions {
+  flex: 0 0 auto;
+  padding: 12px 4px 0;
+  background: #fff;
+  border-top: 1px solid #eef1f5;
 }
 
 .authorizationContent,
@@ -374,6 +424,10 @@
   cursor: pointer;
 }
 
+.selectionStatic {
+  cursor: default;
+}
+
 .selectionGroup {
   display: inline-flex;
   align-items: center;
@@ -432,6 +486,12 @@
   .connectorIcon {
     width: 42px;
     height: 42px;
+  }
+}
+
+@media (max-width: 672px) {
+  .credentialModalWithHelp {
+    min-width: 0;
   }
 }
 

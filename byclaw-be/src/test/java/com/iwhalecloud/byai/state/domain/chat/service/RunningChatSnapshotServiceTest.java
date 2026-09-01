@@ -18,6 +18,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
+import com.iwhalecloud.byai.state.domain.chat.dto.ChatRuntimeState;
 import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatSnapshotResponse;
 import com.iwhalecloud.byai.state.domain.chat.model.MessageContext;
 import com.iwhalecloud.byai.state.domain.message.enums.MsgStatus;
@@ -145,6 +146,34 @@ class RunningChatSnapshotServiceTest {
         assertThat(snapshot.getSnapshotStreamId()).isEqualTo("123-4");
         assertThat(snapshot.getRunning()).isTrue();
         assertThat(snapshot.getMsgStatus()).isEqualTo(MsgStatus.APPEND.getCode());
+    }
+
+    @Test
+    void hydrateMessageContextRestoresTerminalStateFromExternalChildSnapshot() {
+        RedisTemplate<String, Object> redisTemplate = mock(RedisTemplate.class);
+        ValueOperations<String, Object> valueOperations = mock(ValueOperations.class);
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        RunningChatSnapshotService service = new RunningChatSnapshotService();
+        ReflectionTestUtils.setField(service, "redisTemplate", redisTemplate);
+
+        RunningChatSnapshotResponse snapshot = new RunningChatSnapshotResponse();
+        snapshot.setSessionId(20L);
+        snapshot.setMessageId(21L);
+        snapshot.setModelAnswerMessageId(21L);
+        snapshot.setRunning(false);
+        snapshot.setMsgStatus(MsgStatus.FINISH.getCode());
+        when(valueOperations.get("byai:chat:running:snapshot:20:external-child-20"))
+            .thenReturn(JSONObject.toJSONString(snapshot));
+
+        ChatRuntimeState state = new ChatRuntimeState();
+        state.setSessionId(20L);
+        state.setTraceId("external-child-20");
+        state.setModelAnswerMessageId(21L);
+
+        MessageContext restored = service.hydrateMessageContext(state);
+
+        assertThat(restored).isNotNull();
+        assertThat(restored.getComplete()).isTrue();
     }
 
     @Test

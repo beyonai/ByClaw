@@ -108,7 +108,37 @@ class RequestHeaderTests(unittest.TestCase):
             {
                 "Beyond-Token": "token",
                 "X-User-Code": "user-code",
-                "X-CHAT-SESSION-ID": "session-001",
+            },
+        )
+
+        explicit_session_transport = (
+            manager_module.ByFrameworkDiscoveryTransport.__new__(
+                manager_module.ByFrameworkDiscoveryTransport
+            )
+        )
+        explicit_session_transport._supports_session = True
+        explicit_session_transport._session_id = "chat-session-001"
+        with (
+            patch.dict(sys.modules, modules),
+            patch.dict(
+                os.environ,
+                {
+                    "BE_DOMAINNAME": "byclaw-be",
+                    "USER_CODE": "user-code",
+                    "SESSION_ID": "login-session-001",
+                },
+                clear=True,
+            ),
+        ):
+            _, _, explicit_session_headers = manager_module.asyncio.run(
+                explicit_session_transport._runtime()
+            )
+        self.assertEqual(
+            explicit_session_headers,
+            {
+                "Beyond-Token": "token",
+                "X-User-Code": "user-code",
+                "X-CHAT-SESSION-ID": "chat-session-001",
             },
         )
 

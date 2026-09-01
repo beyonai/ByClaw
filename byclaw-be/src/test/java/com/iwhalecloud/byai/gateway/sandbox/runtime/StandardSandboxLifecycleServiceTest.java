@@ -148,6 +148,9 @@ class StandardSandboxLifecycleServiceTest {
     void launchSandbox_buildsRequestAndPersistsWhenCacheMiss() {
         String cacheKey = "byai:worker:sandbox:user001:openclaw";
         String lockKey = cacheKey + ":create-lock";
+        Map<String, String> launchEnvs = Map.of(
+            "BYAI_SERVICE_BASE_URL", "http://192.168.0.83:8086/byaiService"
+        );
 
         when(valueOperations.get(cacheKey)).thenReturn(null);
         when(valueOperations.setIfAbsent(any(), any(), any())).thenReturn(true);
@@ -160,7 +163,7 @@ class StandardSandboxLifecycleServiceTest {
             .env(Map.of("KEY", "VALUE"))
             .timeout(300)
             .build();
-        when(specProcessor.buildCreateRequest("user001", "openclaw", null, null, spec)).thenReturn(createRequest);
+        when(specProcessor.buildCreateRequest("user001", "openclaw", launchEnvs, null, spec)).thenReturn(createRequest);
         when(runtimeProvider.findReusable("user001", "openclaw")).thenReturn(java.util.Optional.empty());
         SandboxRuntimeInstance createdInstance = SandboxRuntimeInstance.builder()
             .sandboxId("sb-2")
@@ -175,12 +178,16 @@ class StandardSandboxLifecycleServiceTest {
         SandboxLaunchRequest request = new SandboxLaunchRequest();
         request.setUserCode("user001");
         request.setSandboxType("openclaw");
+        request.setEnvs(launchEnvs);
 
         var response = service.launchSandbox(request);
 
         assertThat(response.isSuccess()).isTrue();
         assertThat(response.getData().getEndpoint()).isEqualTo("http://created");
         assertThat(response.getData().getGatewayToken()).isEqualTo("persisted-token");
+        assertThat(createRequest.getEnv())
+            .containsEntry("KEY", "VALUE")
+            .containsEntry("BYAI_SERVICE_BASE_URL", "http://192.168.0.83:8086/byaiService");
         verify(runtimeProvider).create(any(), any(), any(), any(), any());
         verify(valueOperations).set(any(), any(), any(Long.class), any());
     }

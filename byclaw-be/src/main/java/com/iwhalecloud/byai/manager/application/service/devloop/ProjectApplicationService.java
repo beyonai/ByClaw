@@ -44,6 +44,7 @@ import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileQueryDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileRenameDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileSaveDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareTargetDTO;
+import com.iwhalecloud.byai.manager.dto.resource.DatasetDto;
 import com.iwhalecloud.byai.manager.dto.session.ByaiSessionDto;
 import com.iwhalecloud.byai.manager.entity.devloop.Project;
 import com.iwhalecloud.byai.manager.entity.devloop.ProjectMember;
@@ -52,9 +53,11 @@ import com.iwhalecloud.byai.manager.entity.devloop.ProjectResource;
 import com.iwhalecloud.byai.manager.entity.devloop.ScanRequireItem;
 import com.iwhalecloud.byai.manager.entity.devloop.ScanSource;
 import com.iwhalecloud.byai.manager.entity.file.Files;
+import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectRepoMapper;
 import com.iwhalecloud.byai.manager.qo.devloop.ProjectQo;
 import com.iwhalecloud.byai.manager.qo.devloop.ProjectSessionQo;
+import com.iwhalecloud.byai.state.application.service.dataset.DatasetApplicationService;
 import com.iwhalecloud.byai.state.domain.file.service.FileService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import lombok.extern.slf4j.Slf4j;
@@ -96,9 +99,9 @@ public class ProjectApplicationService {
     private static final String PROJECT_TYPE_DEFAULT = "default";
 
     /**
-     * 项目名称前后端统一限制为 15 个字符。
+     * 项目名称前后端统一限制为 100 个字符。
      */
-    private static final int PROJECT_NAME_MAX_LENGTH = 15;
+    private static final int PROJECT_NAME_MAX_LENGTH = 100;
 
     /**
      * 项目描述业务层统一限制为 500 个字符，数据库使用 TEXT 避免中文存储长度语义差异。
@@ -163,6 +166,9 @@ public class ProjectApplicationService {
     @Autowired
     private ProjectWorkspaceManifestService projectWorkspaceManifestService;
 
+    @Autowired
+    private DatasetApplicationService datasetApplicationService;
+
     /**
      * 分页查询用户可见项目
      *
@@ -189,18 +195,18 @@ public class ProjectApplicationService {
         if (projectService.existsProjectName(projectName, null)) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.name.duplicate");
         }
-        validateProjectDescription(dto.getDescription());
+        this.validateProjectDescription(dto.getDescription());
 
         Project project = new Project();
         project.setProjectId(sequenceService.nextVal());
         project.setProjectName(projectName);
         project.setDescription(dto.getDescription());
         project.setResourceId(dto.getResourceId());
-        String projectType = dto.getProjectType() != null ? dto.getProjectType() : "normal";
+        // 项目类型字段已废弃，所有新项目统一按普通项目处理。
+        String projectType = "normal";
         project.setProjectType(projectType);
         project.setIsShare(dto.getIsShare() != null ? dto.getIsShare() : Constants.NO_VALUE_N);
-        // 研发项目须先由架构数字员工初始化工作区,建成前禁止建需求/启动任务;普通项目直接就绪。
-        project.setInitStatus("develop".equals(projectType) ? "pending" : "ready");
+        project.setInitStatus("ready");
         project.setBuildIndex(Constants.NO_VALUE_N);
         project.setCreateBy(CurrentUserHolder.getCurrentUserId());
         project.setCreateTime(new Date());
@@ -217,11 +223,34 @@ public class ProjectApplicationService {
         projectMemberService.addMember(project.getProjectId(), CurrentUserHolder.getCurrentUserId(),
             MemberRole.OWNER);
 
+        // 创建云盘知识库并回写项目关联
+        SsResource cloudResource = this.createCloudResource(project);
+        project.setCloudResourceId(cloudResource.getResourceId());
+        projectService.update(project);
+
         // 工作目录属于项目创建结果的一部分，初始化失败时由事务回滚项目数据库记录。
         projectInitService.initProjectWorkspace(project.getProjectId());
         projectWorkspaceManifestService.syncProjectGitmodules(project.getProjectId());
 
         return project;
+    }
+
+
+    /**
+     * 为项目创建云盘知识库资源。
+     *
+     * @param project 项目实体
+     * @return 新建的云盘知识库资源
+     */
+    public SsResource createCloudResource(Project project) {
+        String projectName = project.getProjectName();
+        DatasetDto datasetDto = new DatasetDto();
+        datasetDto.setResourceName(I18nUtil.get("project.cloud.resource.name", projectName));
+        datasetDto.setResourceDesc(I18nUtil.get("project.cloud.resource.desc", projectName));
+        datasetDto.setSystemCode("BYAI");
+        datasetDto.setResourceBizType("KG_DOC");
+        datasetDto.setType("dataset");
+        return datasetApplicationService.createDataset(datasetDto);
     }
 
     /**
@@ -234,6 +263,12 @@ public class ProjectApplicationService {
         return projectInitService.initProjectWorkspace(projectId);
     }
 
+    /**
+     * 校验项目存在且未删除，否则抛出业务异常。
+     *
+     * @param projectId 项目 ID
+     * @return 项目实体
+     */
     private Project requireProject(Long projectId) {
         if (projectId == null) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.id.required");
@@ -246,17 +281,6 @@ public class ProjectApplicationService {
     }
 
     /**
-     * 查询当前用户可见的项目列表。
-     *
-     * @param projectQo 查询条件
-     * @return 项目列表
-     */
-    public List<ProjectListDto> listProjects(ProjectQo projectQo) {
-        projectQo.setCreateBy(CurrentUserHolder.getCurrentUserId());
-        return projectService.listProjects(projectQo);
-    }
-
-    /**
      * 更新项目基础信息，传入 repos 时整体替换仓库列表。
      *
      * @param dto 含 projectId 及待更新字段
@@ -266,6 +290,14 @@ public class ProjectApplicationService {
 
         if (project == null || DeleteFlag.DELETED.equals(project.getDeleteFlag())) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.not.found");
+        }
+
+
+        //如果没有初始化云盘，创建云盘知识库
+        Long cloudResourceId = project.getCloudResourceId();
+        if (cloudResourceId == null) {
+            SsResource cloudResource = this.createCloudResource(project);
+            project.setCloudResourceId(cloudResource.getResourceId());
         }
 
         if (dto.getProjectName() != null) {
@@ -284,19 +316,6 @@ public class ProjectApplicationService {
         }
         if (dto.getResourceId() != null) {
             project.setResourceId(dto.getResourceId());
-        }
-        if (dto.getProjectType() != null) {
-            if (PROJECT_TYPE_DEFAULT.equals(project.getProjectType())
-                && !PROJECT_TYPE_DEFAULT.equals(dto.getProjectType())) {
-                // 默认项目类型由系统维护，编辑时只能回显，不能被接口改成普通/研发项目。
-                throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.default.type.change.forbidden");
-            }
-            if (!PROJECT_TYPE_DEFAULT.equals(project.getProjectType())
-                && PROJECT_TYPE_DEFAULT.equals(dto.getProjectType())) {
-                // 默认项目不允许通过编辑接口手动创建，避免普通项目被改成系统内置分组。
-                throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.type.to.default.forbidden");
-            }
-            project.setProjectType(dto.getProjectType());
         }
         if (PROJECT_TYPE_DEFAULT.equals(project.getProjectType())) {
             if (dto.getIsShare() != null && !Constants.NO_VALUE_N.equalsIgnoreCase(dto.getIsShare())) {
@@ -327,6 +346,8 @@ public class ProjectApplicationService {
         } else if (dto.getShareTargets() != null) {
             this.saveOrUpdateProjectMember(project.getProjectId(), dto.getShareTargets());
         }
+
+
     }
 
     /**
@@ -596,6 +617,8 @@ public class ProjectApplicationService {
 
     /**
      * 解除项目成员与数字员工的绑定关系。
+     *
+     * @param params 含 memberId
      */
     public void unbindMemberAgent(Map<String, Object> params) {
         Long memberId = MapParamUtil.getLongValue(params, "memberId");
@@ -623,7 +646,6 @@ public class ProjectApplicationService {
         map.put("projectName", project.getProjectName());
         map.put("description", project.getDescription());
         map.put("resourceId", project.getResourceId());
-        map.put("projectType", project.getProjectType());
         map.put("isShare", project.getIsShare());
         // 研发项目初始化状态与配置:前端据此拦截建需求/启动任务并展示初始化中指示。
         map.put("initStatus", project.getInitStatus());
@@ -644,7 +666,7 @@ public class ProjectApplicationService {
      * 「查不到」和「调用失败」，前者可以继续走追问兜底，后者必须重试或报错。
      *
      * @param sessionId 会话 ID，必填
-     * @return 含 bound、projectId、projectName、projectType
+     * @return 含 bound、projectId、projectName
      */
     public Map<String, Object> resolveProjectBySession(Long sessionId) {
         if (sessionId == null) {
@@ -658,13 +680,11 @@ public class ProjectApplicationService {
             map.put("bound", false);
             map.put("projectId", null);
             map.put("projectName", null);
-            map.put("projectType", null);
             return map;
         }
         map.put("bound", true);
         map.put("projectId", project.getProjectId());
         map.put("projectName", project.getProjectName());
-        map.put("projectType", project.getProjectType());
         return map;
     }
 
@@ -689,6 +709,9 @@ public class ProjectApplicationService {
 
     /**
      * 查询项目绑定的知识库、数字员工和本体资源。
+     *
+     * @param projectId 项目 ID
+     * @return 绑定资源列表
      */
     public List<ProjectResource> listProjectResources(Long projectId) {
         requireProject(projectId);
@@ -697,6 +720,9 @@ public class ProjectApplicationService {
 
     /**
      * 全量覆盖项目资源绑定，传空数组表示解除全部绑定。
+     *
+     * @param projectId 项目 ID
+     * @param resources 待绑定资源列表
      */
     @Transactional
     public void saveProjectResources(Long projectId, List<ProjectResourceDTO> resources) {
@@ -745,7 +771,9 @@ public class ProjectApplicationService {
     }
 
     /**
-     * 开放接口未统一启用 @Valid，因此应用层也必须拦截超长项目描述。
+     * 校验项目描述长度，开放接口未统一启用 @Valid 时由应用层兜底。
+     *
+     * @param description 项目描述，可为空
      */
     private void validateProjectDescription(String description) {
         if (description == null) {
@@ -831,8 +859,11 @@ public class ProjectApplicationService {
 
     /**
      * 更新单个项目仓库。
+     * <p>
+     * 直接更新原记录，不采用删除后重建，避免需求、任务或扫描源中保存的 repoId 失效。
      *
-     * <p>编辑直接更新原记录，不采用删除后重建，避免需求、任务或扫描源中保存的 repoId 失效。</p>
+     * @param dto 含 repoId、projectId、仓库信息
+     * @return 更新后的仓库基本信息
      */
     @Transactional
     public Map<String, Object> updateProjectRepo(ProjectRepoDTO dto) {
@@ -871,7 +902,10 @@ public class ProjectApplicationService {
     }
 
     /**
-     * 仅接受受支持的代码平台,其余(含空)按 github 处理;与 clone 令牌注入约定保持一致。
+     * 规范化代码平台编码，仅接受 github/gitlab/gitea，其余按 github。
+     *
+     * @param provider 原始平台编码
+     * @return 规范化后的平台编码
      */
     private static String normalizeProvider(String provider) {
         if ("gitlab".equals(provider) || "gitea".equals(provider)) {
@@ -908,7 +942,11 @@ public class ProjectApplicationService {
     }
 
     /**
-     * 统计项目内明确关联该仓库的手工需求。仓库 ID 写在单条需求 JSON 中，不能只查项目共用 manual 扫描源。
+     * 统计项目内明确关联该仓库的手工需求数。
+     *
+     * @param projectId 项目 ID
+     * @param repoId    仓库 ID
+     * @return 关联的手工需求数量
      */
     private long countManualRequirementRepoBindings(Long projectId, Long repoId) {
         long count = 0;
@@ -926,7 +964,11 @@ public class ProjectApplicationService {
     }
 
     /**
-     * 仅识别带手工需求命名空间的 JSON，历史需求未保存 repoId 时返回 false，保持原有删除行为。
+     * 判断手工需求内容 JSON 是否绑定指定仓库。
+     *
+     * @param item   扫描需求项
+     * @param repoId 仓库 ID
+     * @return 已绑定返回 true；历史无 repoId 或非 JSON 返回 false
      */
     private boolean isManualRequirementBoundToRepo(ScanRequireItem item, Long repoId) {
         if (item == null || StringUtils.isBlank(item.getContent()) || repoId == null) {

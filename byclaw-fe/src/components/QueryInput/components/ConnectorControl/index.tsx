@@ -41,6 +41,7 @@ import {
 } from '@/service/connector';
 
 import styles from './index.module.less';
+import CredentialHelpCard from './CredentialHelpCard';
 import GlobalAccountSection from './GlobalAccountSection';
 
 dayjs.extend(customParseFormat);
@@ -122,12 +123,16 @@ export type Connector = {
   credentialForm?: ConnectorCredentialForm | null;
 };
 
-type ImaCredentialValues = Record<'clientId' | 'apiKey', string>;
-const IMA_OPENAPI_CONNECTOR_CODES = ['ima-openapi'] as const;
-const IMA_CREDENTIAL_FIELD_KEYS = ['clientId', 'apiKey'] as const;
+type CredentialValues = Record<string, string>;
+const CREDENTIAL_FIELD_KEY_PATTERN = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
 
 type ConnectorControlProps = {
   canAuthorize: boolean;
+  inline?: boolean;
+  userInfo?: any;
+
+  /** 输入框外部仅展示已连接连接器，不提供新增/管理入口。 */
+  outside?: boolean;
   // 兼容尚未同步升级的调用方；连接器状态只以后端全局开关为准。
   value?: Connector[];
   onChange?: (connectors: Connector[]) => void;
@@ -191,74 +196,139 @@ const isSafeAuthorizationUrl = (authorizationUrl: string) => {
   }
 };
 
-const hasValidImaCredentialForm = (
+const isSafeCredentialHelpUrl = (helpUrl: string) => {
+  try {
+    const url = new URL(helpUrl);
+    return url.protocol === 'https:' && !url.username && !url.password;
+  } catch {
+    return false;
+  }
+};
+
+const hasValidCredentialForm = (
   connector: Connector | undefined
 ): connector is Connector & {
   authMode: 'AK_SK';
   credentialForm: ConnectorCredentialForm;
 } => {
-  if (connector?.authMode !== 'AK_SK' || !IMA_OPENAPI_CONNECTOR_CODES.includes(connector.code as 'ima-openapi')) {
-    return false;
-  }
+  if (connector?.authMode !== 'AK_SK') return false;
 
   const credentialForm = connector.credentialForm;
   if (
     !credentialForm ||
     typeof credentialForm.helpUrl !== 'string' ||
-    !isSafeAuthorizationUrl(credentialForm.helpUrl) ||
+    !isSafeCredentialHelpUrl(credentialForm.helpUrl) ||
     !Array.isArray(credentialForm.fields)
   ) {
     return false;
   }
-  if (credentialForm.fields.length !== 2) return false;
+  if (credentialForm.fields.length < 1 || credentialForm.fields.length > 8) return false;
+  if (
+    credentialForm.helpText !== undefined &&
+    credentialForm.helpText !== null &&
+    (typeof credentialForm.helpText !== 'string' ||
+      credentialForm.helpText.trim().length === 0 ||
+      credentialForm.helpText.trim().length > 500)
+  ) {
+    return false;
+  }
+  if (
+    credentialForm.helpLinkText !== undefined &&
+    credentialForm.helpLinkText !== null &&
+    (typeof credentialForm.helpLinkText !== 'string' ||
+      credentialForm.helpLinkText.trim().length === 0 ||
+      credentialForm.helpLinkText.trim().length > 100)
+  ) {
+    return false;
+  }
 
-  const fieldsByKey = new Map(credentialForm.fields.map((field) => [field?.key, field]));
-  if (fieldsByKey.size !== 2 || !fieldsByKey.has('clientId') || !fieldsByKey.has('apiKey')) return false;
-
-  return IMA_CREDENTIAL_FIELD_KEYS.every((key) => {
-    const field = fieldsByKey.get(key);
-    return (
+  const keys = new Set<string>();
+  return credentialForm.fields.every((field) => {
+    const valid =
       field &&
+      typeof field.key === 'string' &&
+      CREDENTIAL_FIELD_KEY_PATTERN.test(field.key) &&
+      !keys.has(field.key) &&
       typeof field.label === 'string' &&
       field.label.trim().length > 0 &&
-      field.label.length <= 100 &&
+      field.label.trim().length <= 100 &&
       Number.isInteger(field.maxLength) &&
       field.maxLength > 0 &&
       field.maxLength <= 2048 &&
-      ((key === 'clientId' && field.inputType === 'text') || (key === 'apiKey' && field.inputType === 'password'))
-    );
+      (field.inputType === 'text' || field.inputType === 'password');
+    if (valid) keys.add(field.key);
+    return valid;
   });
+};
+
+const getCredentialAuthorizationError = (connector: Connector, errorCode?: string) => {
+  if (connector.code === 'weixin-official-api') {
+    if (errorCode === 'CONNECTOR_CREDENTIAL_INVALID') {
+      return 'AppID 或 AppSecret 无效，请检查后重试';
+    }
+    if (errorCode === 'WEIXIN_IP_NOT_ALLOWLISTED') {
+      return '请将 ByClaw 后端出口 IP 加入公众号 IP 白名单后重试';
+    }
+    if (errorCode === 'CONNECTOR_VERIFICATION_TIMEOUT' || errorCode === 'CONNECTOR_VERIFICATION_FAILED') {
+      return '微信接口暂时不可用，凭据未保存，请稍后重试';
+    }
+    return '微信公众号 API 凭据验证失败，请检查后重试';
+  }
+  return `${connector.name} 凭据验证失败，请检查后重试`;
 };
 
 const ConnectorIcon = ({ connector }: { connector: Connector }) => (
   <span className={styles.connectorIcon}>{connector.icon}</span>
 );
 
-const ConnectorSelection = ({ value, onOpen }: { value: Connector[]; onOpen: () => void }) => {
+const ConnectorSelection = ({
+  value,
+  onOpen,
+  interactive = true,
+}: {
+  value: Connector[];
+  onOpen?: () => void;
+  interactive?: boolean;
+}) => {
   if (!value.length) return null;
 
   // 工具栏空间有限，最多回显三个官方图标，其余连接器用数量汇总。
   const displayedConnectors = value.slice(0, 3);
   const remainingCount = value.length - displayedConnectors.length;
+  const avatarGroup = (
+    <Avatar.Group className={styles.selectionGroup} size={28}>
+      {displayedConnectors.map((connector) => (
+        <Avatar key={connector.id} className={styles.selectionAvatar} aria-label={connector.name}>
+          <ConnectorIcon connector={connector} />
+        </Avatar>
+      ))}
+      {remainingCount > 0 && <Avatar className={styles.selectionMoreAvatar}>+{remainingCount}</Avatar>}
+    </Avatar.Group>
+  );
 
   return (
-    <Tooltip title="查看已连接连接器">
-      <button className={styles.selection} type="button" aria-label="查看已连接连接器" onClick={onOpen}>
-        <Avatar.Group className={styles.selectionGroup} size={28}>
-          {displayedConnectors.map((connector) => (
-            <Avatar key={connector.id} className={styles.selectionAvatar} aria-label={connector.name}>
-              <ConnectorIcon connector={connector} />
-            </Avatar>
-          ))}
-          {remainingCount > 0 && <Avatar className={styles.selectionMoreAvatar}>+{remainingCount}</Avatar>}
-        </Avatar.Group>
-      </button>
+    <Tooltip title={interactive ? '查看已连接连接器' : undefined}>
+      {interactive ? (
+        <button className={styles.selection} type="button" aria-label="查看已连接连接器" onClick={onOpen}>
+          {avatarGroup}
+        </button>
+      ) : (
+        <span className={classNames(styles.selection, styles.selectionStatic)} aria-label="已连接连接器">
+          {avatarGroup}
+        </span>
+      )}
     </Tooltip>
   );
 };
 
-const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
-  const { userInfo } = useSelector((state: any) => state.user);
+const ConnectorControl = ({
+  canAuthorize,
+  inline = false,
+  outside = false,
+  userInfo: userInfoProp,
+}: ConnectorControlProps) => {
+  const storeUserInfo = useSelector((state: any) => state.user?.userInfo);
+  const userInfo = userInfoProp || storeUserInfo;
 
   // 分别控制设置列表、完整配置、授权说明和真实授权进度的显示状态。
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -273,9 +343,10 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
   const [loadingConnectors, setLoadingConnectors] = useState(false);
   const [updatingConnectorIds, setUpdatingConnectorIds] = useState<Set<ConnectorId>>(new Set());
   const [revokingConnectorIds, setRevokingConnectorIds] = useState<Set<ConnectorId>>(new Set());
+  const [revokeConfirmationOpen, setRevokeConfirmationOpen] = useState(false);
   const [startingAuthorization, setStartingAuthorization] = useState(false);
   const [checkingAuthorization, setCheckingAuthorization] = useState(false);
-  const [imaCredentialFormVersion, setImaCredentialFormVersion] = useState(0);
+  const [credentialFormVersion, setCredentialFormVersion] = useState(0);
   const activeAuthorizationIdRef = useRef<string | undefined>(undefined);
   const checkingAuthorizationIdRef = useRef<string | undefined>(undefined);
   const startAuthorizationGenerationRef = useRef(0);
@@ -284,11 +355,11 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
   const cancelledAuthorizationIdsRef = useRef<Set<string>>(new Set());
   const hasLoadedInitialConnectorsRef = useRef(false);
   const connectorLoadGenerationRef = useRef(0);
-  const imaCredentialVerificationInFlightRef = useRef(false);
-  const imaCredentialAbortControllerRef = useRef<AbortController | undefined>(undefined);
+  const credentialVerificationInFlightRef = useRef(false);
+  const credentialAbortControllerRef = useRef<AbortController | undefined>(undefined);
 
-  const clearImaCredentialValues = useCallback(() => {
-    setImaCredentialFormVersion((version) => version + 1);
+  const clearCredentialValues = useCallback(() => {
+    setCredentialFormVersion((version) => version + 1);
   }, []);
 
   const clearAuthorizationTimer = useCallback(() => {
@@ -297,13 +368,13 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
     authorizationTimerRef.current = undefined;
   }, []);
 
-  const abortImaCredentialVerification = useCallback(() => {
-    const controller = imaCredentialAbortControllerRef.current;
+  const abortCredentialVerification = useCallback(() => {
+    const controller = credentialAbortControllerRef.current;
     if (controller) {
       controller.abort();
-      imaCredentialAbortControllerRef.current = undefined;
+      credentialAbortControllerRef.current = undefined;
     }
-    imaCredentialVerificationInFlightRef.current = false;
+    credentialVerificationInFlightRef.current = false;
   }, []);
 
   const invalidateAuthorizationRequests = useCallback(() => {
@@ -314,16 +385,16 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
   }, [clearAuthorizationTimer]);
 
   const closeLocalAuthorization = useCallback(() => {
-    abortImaCredentialVerification();
+    abortCredentialVerification();
     invalidateAuthorizationRequests();
-    if (hasValidImaCredentialForm(authorizingConnector)) {
-      clearImaCredentialValues();
+    if (hasValidCredentialForm(authorizingConnector)) {
+      clearCredentialValues();
     }
     setStartingAuthorization(false);
     setCheckingAuthorization(false);
     setAuthorizationSession(undefined);
     setAuthorizingConnector(undefined);
-  }, [abortImaCredentialVerification, authorizingConnector, clearImaCredentialValues, invalidateAuthorizationRequests]);
+  }, [abortCredentialVerification, authorizingConnector, clearCredentialValues, invalidateAuthorizationRequests]);
 
   const cancelAuthorizationInBackground = useCallback((authorizationId: string, reportFailure = true) => {
     if (cancelledAuthorizationIdsRef.current.has(authorizationId)) return;
@@ -339,10 +410,10 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
 
   useEffect(
     () => () => {
-      abortImaCredentialVerification();
+      abortCredentialVerification();
       invalidateAuthorizationRequests();
     },
-    [abortImaCredentialVerification, invalidateAuthorizationRequests]
+    [abortCredentialVerification, invalidateAuthorizationRequests]
   );
 
   useEffect(() => {
@@ -350,11 +421,7 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
   }, [canAuthorize, closeLocalAuthorization]);
 
   useEffect(() => {
-    if (
-      IMA_OPENAPI_CONNECTOR_CODES.includes(authorizingConnector?.code as 'ima-openapi') &&
-      authorizingConnector?.authMode === 'AK_SK' &&
-      !hasValidImaCredentialForm(authorizingConnector)
-    ) {
+    if (authorizingConnector?.authMode === 'AK_SK' && !hasValidCredentialForm(authorizingConnector)) {
       closeLocalAuthorization();
     }
   }, [authorizingConnector, closeLocalAuthorization]);
@@ -365,8 +432,7 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
     if (
       latestConnector &&
       (latestConnector.code !== authorizingConnector.code ||
-        (IMA_OPENAPI_CONNECTOR_CODES.includes(authorizingConnector.code as 'ima-openapi') &&
-          !hasValidImaCredentialForm(latestConnector)))
+        (authorizingConnector.authMode === 'AK_SK' && !hasValidCredentialForm(latestConnector)))
     ) {
       closeLocalAuthorization();
     }
@@ -390,6 +456,7 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
         if (connectorLoadGenerationRef.current !== requestGeneration) return;
         const connectorList = list.map(mapConnectorListItem);
         setConnectors(connectorList);
+        return connectorList;
       } catch {
         if (connectorLoadGenerationRef.current !== requestGeneration) return;
         if (reportAuthorizationRefreshFailure) {
@@ -424,12 +491,12 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
       );
       setAuthorizationSession(undefined);
       setAuthorizingConnector(undefined);
-      imaCredentialVerificationInFlightRef.current = false;
-      clearImaCredentialValues();
+      credentialVerificationInFlightRef.current = false;
+      clearCredentialValues();
       message.success(`${connector.name} 已连接`);
       void loadAuthorizedConnectors(true);
     },
-    [clearAuthorizationTimer, clearImaCredentialValues, connectors, loadAuthorizedConnectors]
+    [clearAuthorizationTimer, clearCredentialValues, connectors, loadAuthorizedConnectors]
   );
 
   const tryOpenAuthorizationUrl = useCallback((authorization: ConnectorAuthorization, blockedMessage: string) => {
@@ -529,16 +596,22 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
   };
 
   const confirmRevokeAuthorization = (connector: Connector) => {
+    setRevokeConfirmationOpen(true);
     Modal.confirm({
       title: `取消${connector.name}授权？`,
       content:
-        IMA_OPENAPI_CONNECTOR_CODES.includes(connector.code as 'ima-openapi') && connector.authMode === 'AK_SK'
-          ? '仅移除 ByClaw 保存的凭据，IMA 网站上的 API Key 仍保持有效。'
-          : '当前 CLI 登录凭证将被清除，再次使用时需要重新授权。',
+        connector.code === 'weixin-official-api' && connector.authMode === 'AK_SK'
+          ? '仅移除 ByClaw 保存的凭据，微信公众平台上的 AppSecret 仍保持有效'
+          : connector.code === 'ima-openapi' && connector.authMode === 'AK_SK'
+            ? '仅移除 ByClaw 保存的凭据，IMA 网站上的 API Key 仍保持有效。'
+            : connector.authMode === 'AK_SK'
+              ? '仅移除 ByClaw 保存的凭据，第三方平台上的凭据仍保持有效。'
+              : '当前 CLI 登录凭证将被清除，再次使用时需要重新授权。',
       okText: '确认取消授权',
       okButtonProps: { danger: true },
       cancelText: '暂不取消',
       centered: true,
+      afterClose: () => setRevokeConfirmationOpen(false),
       onOk: async () => {
         setRevokingConnectorIds((ids) => new Set([...ids, connector.id]));
         try {
@@ -564,12 +637,26 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
     });
   };
 
-  const beginAuthorization = (connector: Connector) => {
+  const beginAuthorization = async (connector: Connector) => {
+    let connectorForAuthorization = connector;
+
+    if (connector.authMode === 'AK_SK' && !hasValidCredentialForm(connector)) {
+      const refreshedConnectors = await loadAuthorizedConnectors();
+      const refreshedConnector = refreshedConnectors?.find((item) => item.id === connector.id);
+
+      if (!hasValidCredentialForm(refreshedConnector)) {
+        message.error(`${connector.name} 连接配置暂不可用，请稍后重试`);
+        return;
+      }
+
+      connectorForAuthorization = refreshedConnector;
+    }
+
     // 先展示权限说明，再进入对应平台的授权步骤。
-    abortImaCredentialVerification();
+    abortCredentialVerification();
     invalidateAuthorizationRequests();
     setStartingAuthorization(false);
-    setAuthorizingConnector(connector);
+    setAuthorizingConnector(connectorForAuthorization);
     setAuthorizationSession(undefined);
   };
 
@@ -643,11 +730,11 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
     }
   };
 
-  const startImaCredentialAuthorization = async (values: ImaCredentialValues) => {
+  const startCredentialAuthorization = async (values: CredentialValues) => {
     if (
-      !hasValidImaCredentialForm(authorizingConnector) ||
+      !hasValidCredentialForm(authorizingConnector) ||
       startingAuthorization ||
-      imaCredentialVerificationInFlightRef.current
+      credentialVerificationInFlightRef.current
     ) {
       return;
     }
@@ -655,20 +742,24 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
     const requestGeneration = startAuthorizationGenerationRef.current + 1;
     startAuthorizationGenerationRef.current = requestGeneration;
     const cancelToken = new AbortController();
-    imaCredentialAbortControllerRef.current = cancelToken;
-    imaCredentialVerificationInFlightRef.current = true;
+    credentialAbortControllerRef.current = cancelToken;
+    credentialVerificationInFlightRef.current = true;
     setStartingAuthorization(true);
     // 仅让凭据停留在当前请求闭包中；提交后立即清空受控表单。
-    clearImaCredentialValues();
+    const credentials = Object.fromEntries(
+      authorizingConnector.credentialForm.fields.map(({ key }) => [key, values[key]])
+    );
+    clearCredentialValues();
     try {
       const authorizationRequest = startConnectorCredentialAuthorization({
         connectorId: authorizingConnector.id,
         redirectUrl: window.location.origin,
-        credentials: { clientId: values.clientId, apiKey: values.apiKey },
+        credentials,
         cancelToken,
       });
-      values.clientId = '';
-      values.apiKey = '';
+      Object.keys(values).forEach((key) => {
+        values[key] = '';
+      });
       const authorization = await authorizationRequest;
       if (cancelToken.signal.aborted || startAuthorizationGenerationRef.current !== requestGeneration) return;
 
@@ -676,17 +767,17 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
         completeAuthorization(authorization);
         return;
       }
-      // IMA 凭据验证是同步流程，异常的 pending/failed 响应不得进入 OAuth 轮询路径。
-      message.error('IMA 凭据验证失败，请检查后重试');
+      // 凭据验证是同步流程，异常的 pending/failed 响应不得进入 OAuth 轮询路径。
+      message.error(getCredentialAuthorizationError(authorizingConnector, authorization.errorCode));
     } catch {
       if (!cancelToken.signal.aborted && startAuthorizationGenerationRef.current === requestGeneration) {
         // 不展示后端原始错误，避免错误内容意外回显用户提交的凭据。
-        message.error('IMA 凭据验证失败，请检查后重试');
+        message.error(getCredentialAuthorizationError(authorizingConnector));
       }
     } finally {
-      if (imaCredentialAbortControllerRef.current === cancelToken) {
-        imaCredentialAbortControllerRef.current = undefined;
-        imaCredentialVerificationInFlightRef.current = false;
+      if (credentialAbortControllerRef.current === cancelToken) {
+        credentialAbortControllerRef.current = undefined;
+        credentialVerificationInFlightRef.current = false;
       }
       if (startAuthorizationGenerationRef.current === requestGeneration) {
         setStartingAuthorization(false);
@@ -703,10 +794,10 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
     cancelAuthorizationInBackground(authorizationId);
   };
 
-  // 未登录或功能开关关闭时，不在聊天框显示连接器入口。
-  if (!CONNECTOR_ENTRY_VISIBLE || !canAuthorize) return null;
+  // 未登录或功能开关关闭时，不在聊天框显示连接器入口；嵌入式列表仍保留可见的登录/配置反馈。
+  if (!CONNECTOR_ENTRY_VISIBLE || (!canAuthorize && !inline)) return null;
 
-  const imaCredentialSchema = hasValidImaCredentialForm(authorizingConnector)
+  const credentialSchema = hasValidCredentialForm(authorizingConnector)
     ? authorizingConnector.credentialForm
     : undefined;
 
@@ -716,6 +807,18 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
         <span aria-label={`${connector.name}状态刷新中`} className={styles.refreshingIcon} role="status">
           <LoadingOutlined />
         </span>
+      );
+    }
+    // 加号/@资源弹窗统一提供“连接”入口，避免同一连接器因授权状态字段不同而出现不同操作样式。
+    if (inline) {
+      return (
+        <Button
+          type="text"
+          onClick={() => void beginAuthorization(connector)}
+          style={{ color: 'var(--beyond-color-primary)' }}
+        >
+          连接
+        </Button>
       );
     }
     if (connector.enableFlag === 'Y' || connector.enableFlag === 'N') {
@@ -729,7 +832,7 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
                 { key: 'revoke', danger: true, icon: <DisconnectOutlined />, label: '取消授权' },
               ],
               onClick: ({ key }) => {
-                if (key === 'reauthorize') beginAuthorization(connector);
+                if (key === 'reauthorize') void beginAuthorization(connector);
                 if (key === 'revoke') confirmRevokeAuthorization(connector);
               },
             }}
@@ -762,7 +865,7 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
       return (
         <Button
           type="text"
-          onClick={() => beginAuthorization(connector)}
+          onClick={() => void beginAuthorization(connector)}
           style={{ color: 'var(--beyond-color-primary)' }}
         >
           连接
@@ -831,10 +934,33 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
 
   return (
     <>
-      {/* 未开启时显示入口；全局开启的连接器直接回显图标并打开同一设置面板。 */}
-      {enabledConnectors.length ? (
-        <ConnectorSelection value={enabledConnectors} onOpen={openSettings} />
-      ) : (
+      {/* 内嵌模式展示连接器卡片；授权弹窗和配置抽屉仍复用下面的统一渲染。 */}
+      {inline ? (
+        !canAuthorize ? (
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="登录后即可使用连接器" />
+        ) : (
+          <div className={classNames(styles.connectorList, styles.connectorListInline)}>
+            {loadingConnectors && <span>正在加载连接器…</span>}
+            {connectors.length
+              ? connectors.map((connector) => renderConnectorItem(connector))
+              : !loadingConnectors && (
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description={
+                    <Button type="link" onClick={openSettings}>
+                      管理连接器
+                    </Button>
+                  }
+                />
+              )}
+            <Button type="link" onClick={openSettings}>
+              打开连接器设置
+            </Button>
+          </div>
+        )
+      ) : enabledConnectors.length ? (
+        <ConnectorSelection value={enabledConnectors} onOpen={openSettings} interactive={!outside} />
+      ) : outside ? null : (
         <Tooltip title="连接器">
           <span aria-label="连接器设置" className={styles.trigger} role="button" onClick={openSettings}>
             <LinkOutlined />
@@ -892,7 +1018,7 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
         centered
         className={styles.authorizationModal}
         footer={null}
-        open={!!authorizingConnector && !authorizationSession && !imaCredentialSchema}
+        open={!!authorizingConnector && !authorizationSession && !credentialSchema}
         zIndex={1200}
         width={570}
         onCancel={() => void cancelAuthorization()}
@@ -935,55 +1061,70 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
 
       <Modal
         centered
-        className={styles.imaCredentialModal}
+        className={classNames(styles.credentialModal, credentialSchema?.helpText && styles.credentialModalWithHelp)}
         closable={!startingAuthorization}
         footer={null}
         keyboard={!startingAuthorization}
         maskClosable={!startingAuthorization}
-        open={!!authorizingConnector && !!imaCredentialSchema && !authorizationSession}
+        open={!!authorizingConnector && !!credentialSchema && !authorizationSession}
         zIndex={1200}
-        width={480}
+        width={credentialSchema?.helpText ? '80vw' : 480}
         onCancel={() => {
           if (!startingAuthorization) {
             void cancelAuthorization();
           }
         }}
       >
-        {authorizingConnector && imaCredentialSchema && (
-          <div className={styles.imaCredentialContent}>
+        {authorizingConnector && credentialSchema && (
+          <div
+            className={classNames(
+              styles.credentialContent,
+              credentialSchema.helpText && styles.credentialContentWithHelp
+            )}
+          >
             <ConnectorIcon connector={authorizingConnector} />
             <h2>连接 {authorizingConnector.name}</h2>
-            <p>请输入你的 IMA Client ID 与 API Key。验证通过后将加密保存，仅在连接器启用时供 IMA 使用。</p>
-            {isSafeAuthorizationUrl(imaCredentialSchema.helpUrl) && (
-              <a href={imaCredentialSchema.helpUrl} rel="noopener noreferrer" target="_blank">
-                前往 IMA 获取凭据
-              </a>
-            )}
-            <Form<ImaCredentialValues>
+            <p>请输入所需凭据。验证通过后将加密保存，仅在连接器启用时使用。</p>
+            <Form<CredentialValues>
               autoComplete="off"
-              className={styles.imaCredentialForm}
-              key={imaCredentialFormVersion}
+              className={styles.credentialForm}
+              key={credentialFormVersion}
               layout="vertical"
               preserve={false}
-              onFinish={(values) => void startImaCredentialAuthorization(values)}
+              onFinish={(values) => void startCredentialAuthorization(values)}
             >
-              {imaCredentialSchema.fields.map((field) => (
-                <Form.Item
-                  key={field.key}
-                  label={field.label}
-                  name={field.key}
-                  rules={[{ required: true, whitespace: true, message: `请输入${field.label}` }]}
-                >
-                  {field.inputType === 'password' ? (
-                    <Input.Password autoComplete="off" maxLength={field.maxLength} />
-                  ) : (
-                    <Input autoComplete="off" maxLength={field.maxLength} />
-                  )}
-                </Form.Item>
-              ))}
-              <Button block htmlType="submit" loading={startingAuthorization} size="large" type="primary">
-                保存并连接
-              </Button>
+              <div className={styles.credentialFormBody}>
+                {credentialSchema.helpText && <CredentialHelpCard helpText={credentialSchema.helpText} />}
+                {isSafeCredentialHelpUrl(credentialSchema.helpUrl) && (
+                  <a
+                    className={styles.credentialHelpLink}
+                    href={credentialSchema.helpUrl}
+                    rel="noopener noreferrer"
+                    target="_blank"
+                  >
+                    {credentialSchema.helpLinkText?.trim() || `前往${authorizingConnector.name}获取凭据`}
+                  </a>
+                )}
+                {credentialSchema.fields.map((field) => (
+                  <Form.Item
+                    key={field.key}
+                    label={field.label}
+                    name={field.key}
+                    rules={[{ required: true, whitespace: true, message: `请输入${field.label}` }]}
+                  >
+                    {field.inputType === 'password' ? (
+                      <Input.Password autoComplete="off" maxLength={field.maxLength} />
+                    ) : (
+                      <Input autoComplete="off" maxLength={field.maxLength} />
+                    )}
+                  </Form.Item>
+                ))}
+              </div>
+              <div className={styles.credentialActions}>
+                <Button block htmlType="submit" loading={startingAuthorization} size="large" type="primary">
+                  保存并连接
+                </Button>
+              </div>
             </Form>
           </div>
         )}
@@ -1049,6 +1190,7 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
         title="连接器配置"
         extra={accountToolbar}
         width={Math.min(980, window.innerWidth - 24)}
+        maskClosable={!revokeConfirmationOpen && revokingConnectorIds.size === 0}
         onClose={() => setConfigurationOpen(false)}
       >
         <Spin spinning={loadingConnectors}>

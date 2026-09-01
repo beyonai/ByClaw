@@ -14,10 +14,13 @@ export interface OperationAccountCardsProps {
   loginConfirming?: boolean;
   deletingAccountId?: OperationIdentifier | null;
   compact?: boolean;
+  drawerCompact?: boolean;
   onAccountClick?: (account: OperationAccount) => void;
   onEditAccount?: (account: OperationAccount) => void;
   onDeleteAccount?: (account: OperationAccount) => void | Promise<void>;
   onLogin?: (account: OperationAccount) => void | Promise<void>;
+  onConfirmLogin?: () => void | Promise<void>;
+  onCancelLogin?: () => void;
 }
 
 const ACCOUNT_STATUS_COLOR: Record<NonNullable<OperationAccount['loginStatus']>, string> = {
@@ -48,15 +51,19 @@ const OperationAccountCards = ({
   loginConfirming = false,
   deletingAccountId,
   compact = false,
+  drawerCompact = false,
   onAccountClick,
   onEditAccount,
   onDeleteAccount,
   onLogin,
+  onConfirmLogin,
+  onCancelLogin,
 }: OperationAccountCardsProps) => {
   const intl = useIntl();
   const platformOptionMap = new Map(platformOptions.map((option) => [option.value, option]));
   const t = (id: string, values?: Record<string, string | number>) =>
     intl.formatMessage({ id: `projectSpace.operation.account.${id}` }, values);
+  const loginT = (id: string) => intl.formatMessage({ id: `projectSpace.operation.accountLogin.${id}` });
 
   const handleAccountKeyDown = (event: KeyboardEvent<HTMLElement>, account: OperationAccount) => {
     if (event.target !== event.currentTarget || !onAccountClick || (event.key !== 'Enter' && event.key !== ' ')) {
@@ -88,15 +95,74 @@ const OperationAccountCards = ({
         const accountSubtitle =
           account.platformId === 'CustomLink' && account.customUrl ? account.customUrl : account.accountId;
         const status = account.loginStatus || 'unknown';
+        const isLoginTarget = !!loginTarget && String(loginTarget.id) === String(account.id);
         const canLogin = LOGIN_PLATFORM_CODES.has(account.platformId);
         const editable = canEditAccount(account);
+        const loginActions = (
+          <div className={styles.accountCardActions}>
+            {onLogin && canLogin && (
+              <Button
+                type="link"
+                size="small"
+                icon={<LoginOutlined />}
+                loading={`${loginPreparingAccountId ?? ''}` === `${account.id}`}
+                disabled={
+                  !!loginTarget ||
+                  loginConfirming ||
+                  (loginPreparingAccountId !== undefined &&
+                    loginPreparingAccountId !== null &&
+                    `${loginPreparingAccountId}` !== `${account.id}`)
+                }
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void Promise.resolve(onLogin(account)).catch(() => undefined);
+                }}
+              >
+                {t(status === 'logged_in' ? 'relogin' : 'login')}
+              </Button>
+            )}
+          </div>
+        );
+        const inlineLoginFooter = (
+          <div className={`${styles.accountCardFooter} ${styles.accountCardLoginFooter}`}>
+            <span className={styles.accountCardLoginHint} title={loginT('inlineHint')}>
+              {loginT('inlineHint')}
+            </span>
+            <div className={styles.accountCardLoginActions}>
+              <Button
+                size="small"
+                disabled={loginConfirming}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onCancelLogin?.();
+                }}
+              >
+                {loginT('cancel')}
+              </Button>
+              <Button
+                type="primary"
+                size="small"
+                loading={loginConfirming}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void Promise.resolve(onConfirmLogin?.()).catch(() => undefined);
+                }}
+              >
+                {loginT('inlineComplete')}
+              </Button>
+            </div>
+          </div>
+        );
 
         return (
           <article
             key={String(account.id)}
             className={`${styles.accountCard} ${compact ? styles.accountCardCompact : ''} ${
+              drawerCompact ? styles.accountCardDrawerCompact : ''
+            } ${isLoginTarget ? styles.accountCardLoginActive : ''} ${
               onAccountClick ? styles.accountCardClickable : ''
             }`}
+            aria-live={isLoginTarget ? 'polite' : undefined}
             role={onAccountClick ? 'button' : undefined}
             tabIndex={onAccountClick ? 0 : undefined}
             onClick={() => onAccountClick?.(account)}
@@ -108,64 +174,65 @@ const OperationAccountCards = ({
                 <strong title={accountName}>{accountName}</strong>
                 <span title={accountSubtitle}>{accountSubtitle}</span>
               </div>
-              <Tag className={styles.accountStatusTag} color={ACCOUNT_STATUS_COLOR[status]}>
-                {t(`status.${status}`)}
-              </Tag>
-            </div>
-            {editable && (
-              <Dropdown
-                trigger={['hover']}
-                menu={{
-                  items: [
-                    { key: 'edit', icon: <EditOutlined />, label: t('edit') },
-                    ...(onDeleteAccount
-                      ? [{ key: 'delete', danger: true, icon: <DeleteOutlined />, label: t('delete') }]
-                      : []),
-                  ],
-                  onClick: ({ key, domEvent }) => {
-                    domEvent.stopPropagation();
-                    if (key === 'edit') onEditAccount?.(account);
-                    if (key === 'delete') handleDeleteAccount(account);
-                  },
-                }}
-              >
-                <Button
-                  type="text"
-                  size="small"
-                  className={styles.accountCardMoreAction}
-                  icon={<MoreOutlined />}
-                  loading={`${deletingAccountId ?? ''}` === `${account.id}`}
-                  aria-label="账号操作"
-                  onClick={(event) => event.stopPropagation()}
-                />
-              </Dropdown>
-            )}
-            <div className={styles.accountPlatformName}>{platformLabel}</div>
-            <div className={styles.accountCardFooter}>
-              <div className={styles.accountCardActions}>
-                {onLogin && canLogin && (
-                  <Button
-                    type="link"
-                    size="small"
-                    icon={<LoginOutlined />}
-                    loading={`${loginPreparingAccountId ?? ''}` === `${account.id}`}
-                    disabled={
-                      !!loginTarget ||
-                      loginConfirming ||
-                      (loginPreparingAccountId !== undefined &&
-                        loginPreparingAccountId !== null &&
-                        `${loginPreparingAccountId}` !== `${account.id}`)
-                    }
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      void Promise.resolve(onLogin(account)).catch(() => undefined);
+              <div className={styles.accountCardHeaderActions}>
+                <Tag
+                  className={styles.accountStatusTag}
+                  color={isLoginTarget ? 'processing' : ACCOUNT_STATUS_COLOR[status]}
+                >
+                  {t(`status.${isLoginTarget ? 'logging_in' : status}`)}
+                </Tag>
+                {editable && (
+                  <Dropdown
+                    trigger={['hover']}
+                    menu={{
+                      items: [
+                        { key: 'edit', icon: <EditOutlined />, label: t('edit') },
+                        ...(onDeleteAccount
+                          ? [{ key: 'delete', danger: true, icon: <DeleteOutlined />, label: t('delete') }]
+                          : []),
+                      ],
+                      onClick: ({ key, domEvent }) => {
+                        domEvent.stopPropagation();
+                        if (key === 'edit') onEditAccount?.(account);
+                        if (key === 'delete') handleDeleteAccount(account);
+                      },
                     }}
                   >
-                    {t(status === 'logged_in' ? 'relogin' : 'login')}
-                  </Button>
+                    <Button
+                      type="text"
+                      size="small"
+                      className={`${styles.accountCardMoreAction} ${
+                        drawerCompact ? styles.accountCardMoreActionDrawer : ''
+                      }`}
+                      icon={<MoreOutlined />}
+                      loading={`${deletingAccountId ?? ''}` === `${account.id}`}
+                      aria-label="账号操作"
+                      onClick={(event) => event.stopPropagation()}
+                    />
+                  </Dropdown>
                 )}
               </div>
             </div>
+            {isLoginTarget ? (
+              drawerCompact ? (
+                inlineLoginFooter
+              ) : (
+                <>
+                  <div className={styles.accountPlatformName}>{platformLabel}</div>
+                  {inlineLoginFooter}
+                </>
+              )
+            ) : drawerCompact ? (
+              <div className={styles.accountCardFooter}>
+                <div className={styles.accountPlatformName}>{platformLabel}</div>
+                {loginActions}
+              </div>
+            ) : (
+              <>
+                <div className={styles.accountPlatformName}>{platformLabel}</div>
+                <div className={styles.accountCardFooter}>{loginActions}</div>
+              </>
+            )}
           </article>
         );
       })}

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Checkbox, DatePicker, Drawer, Empty, Segmented, Spin, Tag, message } from 'antd';
+import { Checkbox, DatePicker, Drawer, Empty, Input, Segmented, Spin, Tag, message } from 'antd';
+import { SearchOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import dayjs from 'dayjs';
 import { listOperationTasks, listTasks, type DevloopTaskItem } from '@/service/devloop';
@@ -28,6 +29,7 @@ type DatePreset = 'today' | 'week' | 'month' | 'custom';
 type BoardQueryState = {
   dateRange: TaskDateRange;
   onlyMine: boolean;
+  keyword: string;
 };
 type TaskColumnKey = 'pending' | 'running' | 'paused' | 'done';
 type BoardColumnState = {
@@ -129,9 +131,11 @@ const TaskBoardDrawer: React.FC<SessionOverviewDrawerProps> = ({
   const [dateRange, setDateRange] = useState<TaskDateRange>(() => getPresetRange('week'));
   const [datePreset, setDatePreset] = useState<DatePreset>(DEFAULT_PRESET);
   const [onlyMine, setOnlyMine] = useState(true);
+  const [searchKeyword, setSearchKeyword] = useState('');
   const queryRef = useRef<BoardQueryState>({
     dateRange: getPresetRange('week'),
     onlyMine: true,
+    keyword: '',
   });
   const requestVersionRef = useRef(0);
   const loadingRequestKeysRef = useRef(new Set<string>());
@@ -162,24 +166,26 @@ const TaskBoardDrawer: React.FC<SessionOverviewDrawerProps> = ({
         const createTimeEnd = queryState.dateRange?.[1]?.endOf('day').format('YYYY-MM-DD HH:mm:ss');
         const taskPage = operationProject
           ? await listOperationTasks({
-            projectId: numericProjectId,
-            createTimeStart,
-            createTimeEnd,
-            status: OPERATION_TASK_STATUS_BY_COLUMN[columnKey],
-            // 运营和研发任务看板共用“只看我的”，运营接口已支持按当前负责人筛选。
-            onlyMine: queryState.onlyMine || undefined,
-            pageNum,
-            pageSize: TASK_PAGE_SIZE,
-          })
+              projectId: numericProjectId,
+              createTimeStart,
+              createTimeEnd,
+              status: OPERATION_TASK_STATUS_BY_COLUMN[columnKey],
+              // 运营和研发任务看板共用“只看我的”，运营接口已支持按当前负责人筛选。
+              onlyMine: queryState.onlyMine || undefined,
+              keyword: queryState.keyword.trim() || undefined,
+              pageNum,
+              pageSize: TASK_PAGE_SIZE,
+            })
           : await listTasks({
-            projectId: numericProjectId,
-            createTimeStart,
-            createTimeEnd,
-            onlyMine: queryState.onlyMine || undefined,
-            status: TASK_STATUS_BY_COLUMN[columnKey],
-            pageNum,
-            pageSize: TASK_PAGE_SIZE,
-          });
+              projectId: numericProjectId,
+              createTimeStart,
+              createTimeEnd,
+              onlyMine: queryState.onlyMine || undefined,
+              taskName: queryState.keyword.trim() || undefined,
+              status: TASK_STATUS_BY_COLUMN[columnKey],
+              pageNum,
+              pageSize: TASK_PAGE_SIZE,
+            });
         if (requestVersion !== requestVersionRef.current) return;
 
         const nextTasks = Array.isArray(taskPage?.list) ? taskPage.list : [];
@@ -188,9 +194,9 @@ const TaskBoardDrawer: React.FC<SessionOverviewDrawerProps> = ({
           const previousColumn = previous[columnKey];
           const tasks = append
             ? [
-              ...previousColumn.tasks,
-              ...nextTasks.filter((task) => !previousColumn.tasks.some((item) => item.sessionId === task.sessionId)),
-            ]
+                ...previousColumn.tasks,
+                ...nextTasks.filter((task) => !previousColumn.tasks.some((item) => item.sessionId === task.sessionId)),
+              ]
             : nextTasks;
           return {
             ...previous,
@@ -227,6 +233,7 @@ const TaskBoardDrawer: React.FC<SessionOverviewDrawerProps> = ({
       queryRef.current = queryState;
       setDateRange(queryState.dateRange);
       setOnlyMine(queryState.onlyMine);
+      setSearchKeyword(queryState.keyword);
       loadFailedShownRef.current = false;
       const requestVersion = requestVersionRef.current + 1;
       requestVersionRef.current = requestVersion;
@@ -245,7 +252,7 @@ const TaskBoardDrawer: React.FC<SessionOverviewDrawerProps> = ({
     if (!open) return;
     // 每次打开重置为默认视图：运营和研发任务均默认只看当前登录用户负责的任务。
     setDatePreset(DEFAULT_PRESET);
-    reloadBoard({ dateRange: getPresetRange('week'), onlyMine: true });
+    reloadBoard({ dateRange: getPresetRange('week'), onlyMine: true, keyword: '' });
   }, [open, operationProject, reloadBoard]);
 
   const handlePresetChange = useCallback(
@@ -307,6 +314,19 @@ const TaskBoardDrawer: React.FC<SessionOverviewDrawerProps> = ({
         >
           {t('projectSpace.taskBoard.onlyMine')}
         </Checkbox>
+        <Input
+          allowClear
+          value={searchKeyword}
+          prefix={<SearchOutlined />}
+          placeholder={t('projectSpace.searchPlaceholder')}
+          className={styles.kanbanSearchInput}
+          onChange={(event) => {
+            const value = event.target.value;
+            setSearchKeyword(value);
+            if (!value) reloadBoard({ keyword: '' });
+          }}
+          onPressEnter={() => reloadBoard({ keyword: searchKeyword })}
+        />
       </div>
       <div className={styles.kanbanBoard}>
         {COLUMNS.map((column) => {
@@ -405,9 +425,9 @@ const TaskBoardDrawer: React.FC<SessionOverviewDrawerProps> = ({
         onViewSession={
           onViewSession
             ? (task) => {
-              onViewSession(task);
-              setDetailTask(null);
-            }
+                onViewSession(task);
+                setDetailTask(null);
+              }
             : undefined
         }
       />

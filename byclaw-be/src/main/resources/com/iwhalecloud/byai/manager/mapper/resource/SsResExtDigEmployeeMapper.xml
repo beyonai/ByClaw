@@ -36,6 +36,7 @@
         <result column="machine_channel" property="machineChannel" />
         <result column="core_persona_definition" property="corePersonaDefinition" />
         <result column="advanced_settings" property="advancedSettings" />
+        <result column="tts_model_id" property="ttsModelId" />
         <result column="target_content" property="targetContent" />
 
     </resultMap>
@@ -807,6 +808,7 @@
                b.machine_channel,
                b.core_persona_definition,
                b.advanced_settings,
+               b.tts_model_id,
                b.target_content
         from ss_resource a
              left join ss_res_ext_dig_employee b on a.resource_id = b.resource_id
@@ -1069,7 +1071,8 @@
                b.open_super_helper,
                b.machine_channel,
                b.core_persona_definition,
-               b.advanced_settings
+               b.advanced_settings,
+               b.tts_model_id
         from ss_resource a
              left join ss_res_ext_dig_employee b on a.resource_id = b.resource_id
         <where>

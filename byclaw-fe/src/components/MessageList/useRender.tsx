@@ -7,7 +7,7 @@ import { Space, Tooltip, Typography, Button } from 'antd';
 import classnames from 'classnames';
 import { get, isArray, isEmpty, noop, compact } from 'lodash';
 
-import EmployeesDrawer from '@/pages/employees/components/EmployeesDrawer';
+import { EmployeePreviewModal } from '@/pages/digitalEmployees';
 
 import DualBallLoading from '@/components/Loading/DualBallLoading';
 import WaveBallLoading from '@/components/Loading/WaveBallLoading';
@@ -43,7 +43,6 @@ import { IMessageState, SSEMessageType } from '@/constants/message';
 import type { IState as useEmployeesIState } from '@/models/useEmployees';
 import type { IFile } from '@/typescript/file';
 import type { IMessage, IExtParams } from '@/typescript/message';
-import type { IAgentCache } from '@/typescript/agent';
 
 import styles from './index.module.less';
 import getDisplayQuestion from '../QueryInput/getDisplayQuestion';
@@ -67,6 +66,7 @@ export default function useRender({
   previewInDetailPanel?: boolean;
 }) {
   const { ModalNode, setOpen, setMyContent, setMyTitle } = useModal({});
+  const [employeePreview, setEmployeePreview] = React.useState<any>(null);
 
   const { userInfo } = useSelector(({ user }) => ({ userInfo: user.userInfo }));
   const { employeesList, agentList }: useEmployeesIState = useSelector(
@@ -94,6 +94,15 @@ export default function useRender({
     },
     [EventEmitter]
   );
+
+  const openEmployeePreview = useCallback((agentInfo: ReturnType<typeof getResponseAgentInfoByMessage>) => {
+    if (!agentInfo?.agentId || agentInfo.isSuperAssistant) return;
+    setEmployeePreview({
+      ...agentInfo,
+      id: agentInfo.agentId,
+      resourceId: agentInfo.agentId,
+    });
+  }, []);
 
   const userQueryActions = useCallback(
     (msg: IMessage) => {
@@ -363,12 +372,21 @@ export default function useRender({
         msgId,
         createTime,
         usage,
+        agentId: messageAgentId,
+        agentCode,
+        agentName: messageAgentName,
+        agentType: messageAgentType,
       } = msg;
 
       const { showRelatedQuestions = false, hideAction } = param || {};
       const agentInfo = getResponseAgentInfoByMessage({ employeesList, agentList }, msg);
       const isLeftSide = fromBeyond || fromOtherUser;
       const isSuperAssistant = fromBeyond && !!agentInfo?.isSuperAssistant;
+      const isEmployeeGroup =
+        `${messageAgentType || ''}` === agentTypeMap.employeeGroup ||
+        `${agentInfo?.agentType || ''}` === agentTypeMap.employeeGroup;
+      const employeePreviewAgentId = agentInfo?.agentId || messageAgentId || agentCode;
+      const canOpenEmployeePreview = isLeftSide && !!employeePreviewAgentId && (!isSuperAssistant || isEmployeeGroup);
 
       let leftName: string;
       if (fromBeyond || isSuperAssistant) {
@@ -395,11 +413,25 @@ export default function useRender({
         const avatar = fromBeyond || isSuperAssistant ? agentInfo?.chatAvatar : '';
         return (
           <div className={styles.beyondLogo}>
-            <EmployeesDrawer agentInfo={agentInfo as Partial<IAgentCache>}>
-              <div className={styles.avatarWrapper}>
-                {getAgentChatAvatar(avatar || `${getPublicPath()}beyond/logo100.svg`)}
-              </div>
-            </EmployeesDrawer>
+            <div
+              className={classnames(styles.avatarWrapper, {
+                [styles.avatarWrapperClickable]: canOpenEmployeePreview,
+              })}
+              onClick={() => {
+                if (canOpenEmployeePreview) {
+                  openEmployeePreview({
+                    ...(agentInfo || {}),
+                    agentId: employeePreviewAgentId,
+                    name: agentInfo?.name || messageAgentName,
+                    agentType: isEmployeeGroup ? agentTypeMap.employeeGroup : agentInfo?.agentType,
+                  });
+                }
+              }}
+              role={canOpenEmployeePreview ? 'button' : undefined}
+              tabIndex={canOpenEmployeePreview ? 0 : undefined}
+            >
+              {getAgentChatAvatar(avatar || `${getPublicPath()}beyond/logo100.svg`)}
+            </div>
           </div>
         );
       })();
@@ -553,10 +585,20 @@ export default function useRender({
       insertAgentMention,
       relatedQuestionsRender,
       previewInDetailPanel,
+      openEmployeePreview,
     ]
   );
 
-  const extendsRender = <>{ModalNode}</>;
+  const extendsRender = (
+    <>
+      {ModalNode}
+      <EmployeePreviewModal
+        employee={employeePreview}
+        onClose={() => setEmployeePreview(null)}
+        onCreateTask={() => setEmployeePreview(null)}
+      />
+    </>
+  );
 
   return {
     renderMessage,

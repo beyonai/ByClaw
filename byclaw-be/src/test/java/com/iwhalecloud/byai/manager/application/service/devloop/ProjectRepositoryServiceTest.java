@@ -49,6 +49,51 @@ class ProjectRepositoryServiceTest {
     }
 
     @Test
+    void includesUntrackedFilesAndKeepsTheirDirectoryHierarchy() {
+        long projectId = 203L;
+        ProjectRepo repo = repository(projectId);
+        Path localRepo = tempDir.resolve("workspace");
+        Fixture fixture = fixture(projectId, repo);
+        when(fixture.workspaceGitService.resolveRepository(repo)).thenReturn(Optional.of(localRepo));
+        when(fixture.gitCommandExecutor.executeCommandBytesQuietly(localRepo, "git", "-c", "safe.directory=*",
+            "ls-tree", "-l", "-z", "main"))
+            .thenReturn(gitOutput("100644 blob 123456 12\tREADME.md"));
+        when(fixture.gitCommandExecutor.executeCommandBytesQuietly(localRepo, "git", "-c", "safe.directory=*",
+            "ls-files", "--others", "--exclude-standard", "-z"))
+            .thenReturn(gitOutput("scripts/setup.sh", "scripts/nested/run.sh"));
+
+        List<ProjectRepoTreeNodeDTO> nodes = fixture.service.listTree(projectId, repo.getRepoId(), null, null);
+
+        assertThat(nodes).extracting(ProjectRepoTreeNodeDTO::getPath)
+            .containsExactlyInAnyOrder("README.md", "scripts");
+        assertThat(nodes).filteredOn(node -> "scripts".equals(node.getName())).singleElement()
+            .satisfies(node -> assertThat(node.getHasChildren()).isTrue());
+    }
+
+    @Test
+    void keepsLocalUntrackedDirectoryWhenGitTreePathDoesNotExist() {
+        long projectId = 203L;
+        ProjectRepo repo = repository(projectId);
+        Path localRepo = tempDir.resolve("workspace");
+        Fixture fixture = fixture(projectId, repo);
+        when(fixture.workspaceGitService.resolveRepository(repo)).thenReturn(Optional.of(localRepo));
+        when(fixture.gitCommandExecutor.executeCommandBytesQuietly(localRepo, "git", "-c", "safe.directory=*",
+            "ls-tree", "-l", "-z", "main:scripts"))
+            .thenThrow(new IllegalStateException("path does not exist in tree"));
+        when(fixture.gitCommandExecutor.executeCommandBytesQuietly(localRepo, "git", "-c", "safe.directory=*",
+            "ls-files", "--others", "--exclude-standard", "-z"))
+            .thenReturn(gitOutput("scripts/setup.sh"));
+
+        List<ProjectRepoTreeNodeDTO> nodes = fixture.service.listTree(projectId, repo.getRepoId(), "scripts", null);
+
+        assertThat(nodes).singleElement().satisfies(node -> {
+            assertThat(node.getName()).isEqualTo("setup.sh");
+            assertThat(node.getPath()).isEqualTo("scripts/setup.sh");
+            assertThat(node.getType()).isEqualTo("file");
+        });
+    }
+
+    @Test
     void treatsGitSubmoduleEntryAsExpandableDirectory() {
         long projectId = 203L;
         ProjectRepo repo = repository(projectId);

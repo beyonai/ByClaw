@@ -313,7 +313,7 @@ public class WorkspaceInitService {
      * 读会话状态文件。UserFS 按用户隔离，故要先由会话创建人解析出 userCode，与 coder 任务读投影同一路径。
      *
      * <p>读不到一律返回 null 当「员工还没写」：reader 的 read() 在文件缺失时抛 IllegalStateException（不同于
-     * readIntegrationResult/readE2eStatus 那两个返回 null 的兄弟方法）。异常若冒到 sweep 的 catch，
+     * readE2eStatus 返回 null 的兄弟方法）。异常若冒到调用方的 catch，
      * recoverInitResult 里的超时判断就永远执行不到，项目会永久停在 initializing，前端跟着无限轮询详情接口。
      */
     private DevloopTaskStateDto readInitState(Long sessionId) {

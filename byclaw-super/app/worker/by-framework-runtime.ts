@@ -11,12 +11,12 @@ import {
   WorkerRunner,
 } from "@byclaw/by-framework";
 import {
-  ByClawSuperGatewayWorker,
   type RedisClient,
   type WorkerLogger,
   type WorkerRunIngress,
   type WorkerRunService,
-} from "./by-framework-worker.js";
+} from "./by-framework-worker-contracts.js";
+import { ByClawSuperGatewayWorker } from "./by-framework-worker.js";
 import { defaultWorkerId, delay, toError } from "./by-framework-protocol.js";
 
 export interface ByFrameworkWorkerRuntimeOptions {

@@ -478,6 +478,15 @@
   background: #fff;
   box-shadow: 0 8px 24px rgba(30, 41, 59, 0.06);
   display: flex;
+  flex-direction: row;
+  overflow: hidden;
+}
+
+.detailMain {
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  display: flex;
   flex-direction: column;
   overflow: hidden;
 }
@@ -623,19 +632,8 @@
   gap: 8px;
   justify-content: flex-end;
 
-  // 顶部搜索、刷新、新建及 Tab 操作按钮统一高度，避免同一行控件上下错位。
+  // 顶部仅保留新建会话入口。
   :global(.@{antPrefix}-btn) {
-    height: 32px;
-  }
-
-  :global(.@{antPrefix}-select-selector) {
-    height: 36px !important;
-    display: flex;
-    align-items: center;
-  }
-
-  :global(.@{antPrefix}-input-affix-wrapper) {
-    width: 240px;
     height: 32px;
   }
 }
@@ -687,7 +685,7 @@
 .detailBody {
   min-height: 0;
   flex: 1;
-  // 详情内容由页面主体统一承接纵向滚动，避免卡片列表被固定高度截断后无法继续浏览。
+  // 左侧任务区域独立滚动，右侧配置栏从详情顶部贯穿到底部。
   overflow-y: auto;
   overflow-x: hidden;
   padding: 20px;
@@ -720,6 +718,100 @@
   flex-direction: column;
 }
 
+// 任务看板占据详情主体，云盘、仓库和成员等辅助信息固定在右侧滚动栏。
+.detailSidebar {
+  position: relative;
+  flex: 0 0 360px;
+  width: 360px;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px 20px 20px 16px;
+  border-left: 1px solid #e5e7eb;
+}
+
+.detailSidebarTitle {
+  flex: none;
+  margin: 0 0 -4px !important;
+  color: #1f2937 !important;
+  font-size: 18px !important;
+  line-height: 26px !important;
+}
+
+.detailSidebarSection {
+  min-width: 0;
+  border-radius: 12px;
+  background: #fff;
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+
+  .resourceCategoryGrid {
+    height: auto;
+    min-height: 0;
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 10px;
+  }
+
+  .resourceCategoryCard {
+    min-height: 0;
+    height: auto;
+  }
+
+  .resourceCardHeader {
+    min-height: 48px;
+    padding: 10px 12px;
+  }
+}
+
+.detailSidebarSectionTitle {
+  display: block;
+  margin-bottom: 10px;
+  color: #1f2937;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 22px;
+}
+
+.detailSidebarSectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.detailSidebarSectionActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.detailResourcesSection {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+@media (max-width: 1100px) {
+  .detail {
+    flex-direction: column;
+  }
+
+  .detailMain {
+    flex: 1 1 auto;
+  }
+
+  .detailSidebar {
+    width: auto;
+    flex: 0 0 auto;
+    border-top: 1px solid #e5e7eb;
+    border-left: 0;
+    max-height: 520px;
+  }
+}
+
 // 大详情各 Tab 保留滚轮和触控滚动能力，仅隐藏纵向滚动条，减少多层滚动条造成的视觉干扰。
 .detailBody,
 .sessionListWrap,
@@ -730,6 +822,13 @@
 
   &::-webkit-scrollbar {
     display: none;
+  }
+}
+
+// 项目云盘复用文件树组件时由外层卡片承接高度，内容按实际高度撑开，不在卡片内部产生二次滚动条。
+.resourceCloudDriveCard {
+  .resourceCategoryBody {
+    overflow: hidden;
   }
 }
 
@@ -1314,6 +1413,61 @@
   padding-right: 44px;
 }
 
+.membersCompactCard {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-height: 58px;
+  padding: 2px 0;
+}
+
+.memberCompactTag {
+  min-width: 0;
+  max-width: 100%;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px 0 4px;
+  border-radius: 8px;
+  color: #1f2633;
+  background: #eef3f9;
+  font-size: 14px;
+}
+
+.memberCompactMore {
+  flex: none;
+  color: #98a2b3;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.memberCompactTag:hover .memberCompactMore,
+.memberCompactTag:focus-within .memberCompactMore {
+  opacity: 1;
+}
+
+.memberCompactAvatar {
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 26px;
+  border-radius: 5px;
+  color: #fff;
+  background: #4b8df8;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.memberCompactName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .memberUserAvatar {
   width: 32px;
   height: 32px;
@@ -1423,10 +1577,19 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border: 0;
+  border: 1px solid #e5e7eb;
   border-radius: 10px;
-  // 资源分栏本身使用浅底色区分页面，内部可操作资源项悬停时再加深一层。
-  background: #f7f9fc;
+  // 各资源类型保持独立卡片，但不再使用整块背景色填充。
+  background: transparent;
+}
+
+.resourceCategoryCardExpanded {
+  position: absolute;
+  z-index: 10;
+  inset: 0;
+  min-height: 0;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(30, 41, 59, 0.12);
 }
 
 .resourceCategoryGrid {
@@ -1452,6 +1615,79 @@
   border-bottom: 1px solid #e8edf4;
 }
 
+.resourceCardHeaderActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+
+.resourceCardExpandButton {
+  color: #667085;
+
+  &:hover {
+    color: #246bfe;
+    background: #f1f5fb;
+  }
+}
+
+.projectScheduleBody {
+  min-height: 120px;
+  flex: 1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: 12px;
+  overflow: auto;
+}
+
+.projectScheduleList {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.projectScheduleEmpty {
+  width: 100%;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.projectScheduleRow {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #f7f9fc;
+}
+
+.projectScheduleSwitch {
+  width: 36px !important;
+  min-width: 36px !important;
+  height: 20px;
+}
+
+.resourceCloudBreadcrumb {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 4px 14px 0;
+  color: #98a2b3;
+  white-space: normal;
+  overflow: visible;
+  word-break: break-all;
+
+  :global(.ant-btn-link) {
+    color: #98a2b3;
+  }
+}
+
 .resourceCardTitleBlock {
   min-width: 0;
   display: flex;
@@ -1460,7 +1696,7 @@
 
   h4 {
     margin: 0;
-    font-size: 12px;
+    font-size: 14px;
     font-weight: 500;
     // line-height: 22px;
   }
@@ -1511,6 +1747,22 @@
   }
 }
 
+.projectCloudDriveToolbar {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 8px 8px;
+  color: #7c8798;
+  font-size: 13px;
+}
+
+.projectCloudDriveTitle {
+  color: #1f2633;
+  font-size: 16px;
+  font-weight: 500;
+}
+
 .resourceObjectFilesBody {
   height: 100%;
   max-height: 100%;
@@ -1530,7 +1782,7 @@
   border: 0;
   border-radius: 8px;
   color: #98a2b3;
-  background: rgba(255, 255, 255, 0.62);
+  background: transparent;
   transition: background-color 0.2s ease;
 
   &:hover,
@@ -1549,13 +1801,13 @@
   padding: 8px;
   border: 0;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.62);
+  background: transparent;
   box-shadow: none;
   transition: none;
 
   &:hover,
   &:focus-visible {
-    background: rgba(255, 255, 255, 0.62);
+    background: #f5f7fa;
     box-shadow: none;
     cursor: default;
     transform: none;

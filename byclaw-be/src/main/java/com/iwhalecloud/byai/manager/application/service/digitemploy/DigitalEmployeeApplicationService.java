@@ -1782,6 +1782,8 @@ public class DigitalEmployeeApplicationService {
         ssResource.setUpdateBy(CurrentUserHolder.getCurrentUserId());
         ssResource.setUpdateTime(new Date());
         ssResourceService.updateResourceEntity(ssResource);
+        authApplicationService.invalidateResourceAuthorizationCachesAfterCommit(resourceId,
+            ssResource.getResourceBizType());
 
         // 该数字员工若被其它用户设为默认助理,回退他们的默认助理为自己的超级助手,避免出现“默认指向已注销资源”.
         resetDefaultForAffectedUsers(resourceId);

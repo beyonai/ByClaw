@@ -46,6 +46,7 @@ import { closeChatResourceTab, upsertChatResourceTab, type ChatResourceTab } fro
 import { isNotificationSession } from '@/utils/session';
 import { qryConversations } from '@/service/layout';
 import { isExternalChildSession } from '@/utils/scopedSession';
+import { useChatResourceProject } from './ChatResourceWorkspace/useChatResourceProject';
 
 type IProps = {
   sessionId: string;
@@ -132,6 +133,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
   const [selectedProject, setSelectedProject] = useState<{
     projectId: string;
     projectName: string;
+    cloudResourceId?: string | number;
   }>();
 
   // 工作区状态只属于当前聊天实例，路由刷新后不恢复详情页签，避免复用失效的 React 节点。
@@ -230,6 +232,9 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
       ? normalizedProjectId
       : undefined;
   }, [currentSession?.projectId, projectId]);
+  const { project: sessionProject } = useChatResourceProject(sessionProjectId);
+  const sessionCloudResourceId =
+    currentSession?.cloudResourceId || selectedProject?.cloudResourceId || sessionProject?.cloudResourceId;
 
   const notificationSession = isNotificationSession(currentSession);
   const externalChildSession = isExternalChildSession(currentSession);
@@ -368,6 +373,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
       <ChatResourceWorkspace
         sessionId={sessionId}
         projectId={sessionProjectId}
+        cloudResourceId={sessionCloudResourceId}
         listOpen={resourceListOpen}
         tabs={resourceTabs}
         activeTabKey={activeResourceTabKey}
@@ -390,6 +396,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     resourceWorkspaceVisible,
     resourceWorkspaceRefreshKey,
     sessionId,
+    sessionCloudResourceId,
     sessionProjectId,
     setDetailPanel,
     toggleResourceList,
@@ -696,6 +703,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
                   multiChoicesMsgId={multiChoicesMsgId}
                   setMultiChoicesMsgId={setMultiChoicesMsgId}
                   previewInDetailPanel
+                  enableConversationNavigator={isPC && !notificationSession && !isMultiChoices}
                 />
               </div>
             )}
@@ -718,7 +726,12 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
                   isBottom={isBottom}
                   cannotAt={cannotAt}
                   disableInputDraft={disableInputDraft}
-                  queryInputProps={{ ...queryInputProps, projectId: sessionProjectId, selectedProject }}
+                  queryInputProps={{
+                    ...queryInputProps,
+                    projectId: sessionProjectId,
+                    projectCloudResourceId: sessionCloudResourceId,
+                    selectedProject,
+                  }}
                   lastMsg={lastMsg}
                   sessionId={sessionId}
                   preserveInputOnSessionChange={preserveNewSessionView && !isBottom}

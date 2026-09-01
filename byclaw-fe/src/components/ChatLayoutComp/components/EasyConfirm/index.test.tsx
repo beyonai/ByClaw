@@ -6,6 +6,7 @@ import { collectEasyConfirmItems } from '@/components/MessagesComp/easyConfirm';
 import EasyConfirm from './index';
 
 const mockEventListeners = new Map<string, (payload: unknown) => void>();
+const mockMessageInfo = jest.fn();
 
 jest.mock('@/hooks/useGlobal', () => ({
   __esModule: true,
@@ -46,6 +47,9 @@ jest.mock('@umijs/max', () => ({
 }));
 
 jest.mock('antd', () => ({
+  message: {
+    info: (...args: unknown[]) => mockMessageInfo(...args),
+  },
   Pagination: () => null,
   theme: {
     useToken: () => ({ token: { boxShadowTertiary: '' } }),
@@ -76,6 +80,11 @@ const createPendingMessage = (): IMessage =>
   } as IMessage);
 
 describe('EasyConfirm', () => {
+  beforeEach(() => {
+    mockEventListeners.clear();
+    mockMessageInfo.mockClear();
+  });
+
   it('renders pending message data even when no component registration event was emitted', () => {
     const lastMsg = createPendingMessage();
 
@@ -143,5 +152,65 @@ describe('EasyConfirm', () => {
     });
 
     expect(screen.getByTestId('easy-confirm-answer-1')).toBeInTheDocument();
+  });
+
+  it('sends one browser notification when a new pending interaction arrives', () => {
+    const notifications: Array<{
+      title: string;
+      options?: NotificationOptions;
+      onclick: (() => void) | null;
+      close: jest.Mock;
+    }> = [];
+    class NotificationMock {
+      static permission: NotificationPermission = 'granted';
+      static requestPermission = jest.fn();
+
+      onclick: (() => void) | null = null;
+      close = jest.fn();
+
+      constructor(public title: string, public options?: NotificationOptions) {
+        notifications.push(this);
+      }
+    }
+    const originalNotification = window.Notification;
+    Object.defineProperty(window, 'Notification', { configurable: true, value: NotificationMock });
+    const focusSpy = jest.spyOn(window, 'focus').mockImplementation(() => undefined);
+
+    const emptyMessage = {
+      ...createPendingMessage(),
+      thinkList: [],
+    };
+    const props = {
+      disabledInput: false,
+      isBottom: true,
+      cannotAt: false,
+      disableInputDraft: true,
+      queryInputProps: {},
+      sessionId: 'session-1',
+      onSend: jest.fn(),
+      onCancel: jest.fn(),
+      myAgentType: 1 as any,
+      setMyAgentType: jest.fn(),
+      messageState: IMessageState.Answer,
+      updateMessage: (message: IMessage) => message,
+    };
+    const { rerender } = render(<EasyConfirm {...props} lastMsg={emptyMessage} />);
+
+    rerender(<EasyConfirm {...props} lastMsg={createPendingMessage()} />);
+    rerender(<EasyConfirm {...props} lastMsg={createPendingMessage()} />);
+
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0].title).toBe('easyConfirm.notification.title');
+    expect(notifications[0].options).toMatchObject({
+      body: 'easyConfirm.notification.body',
+      tag: 'easy-confirm-session-1-pending-1',
+    });
+
+    notifications[0].onclick?.();
+    expect(focusSpy).toHaveBeenCalledTimes(1);
+    expect(notifications[0].close).toHaveBeenCalledTimes(1);
+
+    focusSpy.mockRestore();
+    Object.defineProperty(window, 'Notification', { configurable: true, value: originalNotification });
   });
 });

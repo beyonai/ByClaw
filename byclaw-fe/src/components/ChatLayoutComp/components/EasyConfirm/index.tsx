@@ -26,6 +26,8 @@ import {
   isPendingEasyConfirmListItem,
 } from '@/components/MessagesComp/easyConfirm';
 import type { EasyConfirmDescriptor } from '@/components/MessagesComp/easyConfirm';
+import { notifyEasyConfirmInteraction } from '@/components/MessagesComp/withEasyConfirm';
+import { chatSessionRuntimeManager } from '@/utils/chatSessionRuntimeManager';
 
 const inputDraftMap = new Map<string, DefaultValueSchema>();
 
@@ -117,6 +119,10 @@ const EasyConfirm = (props: IProps) => {
     });
     return [...itemMap.values()];
   }, [eventList, getUUId, lastMsg, messageItems]);
+  const notificationStateRef = useRef({
+    sessionId,
+    itemKeys: new Set(list.map(getUUId).filter(Boolean)),
+  });
   const compProps = useMemo(() => list[page - 1], [page, list]);
   const Comp = useMemo(() => {
     const contentType = compProps?.messageListItem?.contentType || compProps?.thinkListItem?.contentType;
@@ -204,6 +210,37 @@ const EasyConfirm = (props: IProps) => {
   useEffect(() => {
     setEventList([]);
   }, [sessionId]);
+
+  useEffect(() => {
+    if (!sessionId) return;
+
+    // 用户提交交互内容后同步清除会话暂停标记，侧边栏随运行时状态立即恢复。
+    chatSessionRuntimeManager.setSessionWaitingForUserInput(sessionId, list.length > 0);
+  }, [list.length, sessionId]);
+
+  useEffect(() => {
+    const currentItemKeys = new Set(list.map(getUUId).filter(Boolean));
+    const notificationState = notificationStateRef.current;
+
+    // 切换会话时把已有待处理项作为基线，避免为历史消息发送通知。
+    if (notificationState.sessionId !== sessionId) {
+      notificationStateRef.current = { sessionId, itemKeys: currentItemKeys };
+      return;
+    }
+
+    list.forEach((item) => {
+      const itemKey = getUUId(item);
+      if (!itemKey || notificationState.itemKeys.has(itemKey)) return;
+
+      void notifyEasyConfirmInteraction({
+        title: formatMessage({ id: 'easyConfirm.notification.title' }),
+        body: formatMessage({ id: 'easyConfirm.notification.body' }),
+        permissionDenied: formatMessage({ id: 'easyConfirm.notification.permissionDenied' }),
+        tag: `easy-confirm-${sessionId}-${itemKey}`,
+      });
+    });
+    notificationStateRef.current = { sessionId, itemKeys: currentItemKeys };
+  }, [formatMessage, getUUId, list, sessionId]);
 
   useEffect(() => {
     if (page > list.length) {

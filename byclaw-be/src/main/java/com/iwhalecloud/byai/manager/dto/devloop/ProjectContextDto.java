@@ -42,6 +42,10 @@ public class ProjectContextDto {
         private String initStatus;
         private String buildIndex;
         private String indexSkills;
+        /**
+         * 项目云盘知识库资源 ID。
+         */
+        private Long cloudResourceId;
         private Long createBy;
 
         @JSONField(format = "yyyy-MM-dd HH:mm:ss")

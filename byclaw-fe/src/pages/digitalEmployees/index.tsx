@@ -253,7 +253,7 @@ const DigitalEmployeesPage: React.FC = () => {
       <EmployeePreviewModal
         employee={preview}
         onClose={() => setPreview(null)}
-        onCreateTask={() => {
+        onCreateTask={(question?: string) => {
           if (!preview) return;
           const employee = preview;
           setPreview(null);
@@ -262,6 +262,7 @@ const DigitalEmployeesPage: React.FC = () => {
               keepSiderActiveKey: 'agent',
               selectedAgentId: `${employee.agentId || employee.id || employee.resourceId}`,
               selectedEmployee: employee,
+              initialQuestion: question,
             },
           });
         }}
@@ -505,8 +506,20 @@ export function EmployeePreviewModal({ employee, onClose, onCreateTask }: any) {
             <div className={styles.exampleTitle}>试试这样问我</div>
             <div className={styles.exampleList}>
               {examples.length ? (
-                examples.slice(0, 6).map((item: string, index: number) => (
-                  <div className={styles.exampleItem} key={`${item}-${index}`}>
+                examples.slice(0, 3).map((item: string, index: number) => (
+                  <div
+                    className={styles.exampleItem}
+                    key={`${item}-${index}`}
+                    onClick={() => onCreateTask?.(item)}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        onCreateTask?.(item);
+                      }
+                    }}
+                  >
                     <span>{item}</span>
                     <span className={styles.exampleArrow}>→</span>
                   </div>

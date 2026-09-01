@@ -14,6 +14,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.multipart.MultipartFile;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.iwhalecloud.byai.common.storage.UserFS;
 import com.iwhalecloud.byai.state.application.service.session.ByClawSkillResourceApplicationService;
 import com.iwhalecloud.byai.state.domain.filebrowser.vo.FileBrowserItemVo;
 
@@ -28,7 +30,7 @@ class FileBrowserApplicationServiceCredentialPolicyTest {
         FileBrowserProviderFactory providerFactory = mock(FileBrowserProviderFactory.class);
         when(providerFactory.getProvider()).thenReturn(provider);
         service = new FileBrowserApplicationService(providerFactory,
-            mock(ByClawSkillResourceApplicationService.class));
+            mock(ByClawSkillResourceApplicationService.class), mock(UserFS.class), mock(ObjectMapper.class));
     }
 
     @Test
@@ -40,7 +42,7 @@ class FileBrowserApplicationServiceCredentialPolicyTest {
 
         assertThat(service.list("user", 10L, "/"))
             .extracting(FileBrowserItemVo::getPath)
-            .containsExactly("/.openclaw", "/README.md");
+            .containsExactly("/by/.openclaw", "/by/README.md");
     }
 
     @Test
@@ -78,6 +80,15 @@ class FileBrowserApplicationServiceCredentialPolicyTest {
         assertThat(service.list("user", 10L, "/.connector-auth-backup")).isEmpty();
 
         verify(provider).list("user", 10L, "/.connector-auth-backup");
+    }
+
+    @Test
+    void externalByPrefixIsRemovedBeforeProviderCall() {
+        when(provider.list("user", 10L, "/.sessions/20029790")).thenReturn(List.of());
+
+        assertThat(service.list("user", 10L, "/by/.sessions/20029790/")).isEmpty();
+
+        verify(provider).list("user", 10L, "/.sessions/20029790");
     }
 
     private FileBrowserItemVo item(String path, boolean directory) {

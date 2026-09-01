@@ -174,6 +174,24 @@ describe('WorkspaceSider', () => {
     });
 
     act(() => {
+      chatSessionRuntimeManager.setSessionWaitingForUserInput('2001', true);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('workspaceSider.sessionNeedsUserInput')).toBeInTheDocument();
+      expect(container.querySelector('.sessionTime .anticon-loading')).not.toBeInTheDocument();
+    });
+
+    act(() => {
+      chatSessionRuntimeManager.setSessionWaitingForUserInput('2001', false);
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText('workspaceSider.sessionNeedsUserInput')).not.toBeInTheDocument();
+      expect(container.querySelector('.sessionTime .anticon-loading')).toBeInTheDocument();
+    });
+
+    act(() => {
       chatSessionRuntimeManager.complete('request-2001');
     });
 

@@ -11,12 +11,15 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationProviderRegistry;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorAuthorizationProvider;
@@ -67,6 +70,28 @@ class ConnectorAuthorizationRevocationServiceTest {
         order.verify(provider).revoke(USER_ID, connector);
         order.verify(connectionStateService).revokeAuthorization(USER_ID, CONNECTOR_ID);
         verify(sessionRepository).releaseStartLock(USER_ID, CONNECTOR_ID, "lock-token");
+    }
+
+    @Test
+    void releasesOperationLockOnlyAfterTransactionCompletion() {
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            service.revoke(CONNECTOR_ID, USER_ID);
+
+            verify(sessionRepository, never()).releaseStartLock(USER_ID, CONNECTOR_ID, "lock-token");
+            TransactionSynchronizationManager.getSynchronizations()
+                .forEach(sync -> sync.afterCompletion(TransactionSynchronization.STATUS_COMMITTED));
+            verify(sessionRepository).releaseStartLock(USER_ID, CONNECTOR_ID, "lock-token");
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+    }
+
+    @Test
+    void keepsTheRevocationLockLongerThanTheProviderCallTimeout() {
+        service.revoke(CONNECTOR_ID, USER_ID);
+
+        verify(sessionRepository).tryAcquireStartLock(USER_ID, CONNECTOR_ID, Duration.ofMinutes(2));
     }
 
     @Test

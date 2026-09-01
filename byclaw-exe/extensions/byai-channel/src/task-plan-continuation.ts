@@ -1,6 +1,8 @@
 import {
+  clearTaskPlanExecutionContext,
   markTaskPlanContinuationPending,
   resolveTaskPlanRuntimeBridge,
+  resolveTaskPlanExecutionContext,
   type TaskPlanExecutionContext,
   type TaskPlanSnapshot,
 } from "../../shared/src/task-plan-runtime.js";
@@ -27,6 +29,17 @@ function buildExecutionContext(request: ActiveSdkRequest): TaskPlanExecutionCont
   const messageId = request.messageId?.trim();
   if (!messageId) {
     return undefined;
+  }
+  const remembered = resolveTaskPlanExecutionContext(request.sessionKey);
+  if (
+    remembered &&
+    remembered.sessionId === request.sessionId &&
+    remembered.messageId === messageId
+  ) {
+    return {
+      ...remembered,
+      ...(request.beyondToken ? { beyondToken: request.beyondToken } : {}),
+    };
   }
   const runIds = [...request.boundRunIds];
   const sourceRunId = runIds[runIds.length - 1] || request.traceId || request.sessionKey;
@@ -111,8 +124,19 @@ export async function continueActiveTaskPlan(params: {
 
   let activePlan: TaskPlanSnapshot | undefined;
   try {
+    params.logger?.info?.(
+      `[task-plan] continuation lookup sessionKey=${params.request.sessionKey}, ` +
+        `sessionId=${firstContext.sessionId}, messageId=${firstContext.messageId}, ` +
+        `traceId=${firstContext.traceId ?? "-"}, sourceRunId=${firstContext.sourceRunId}`,
+    );
     activePlan = await bridge.loadActive(firstContext, params.signal);
     if (activePlan?.status !== "ACTIVE") {
+      params.logger?.info?.(
+        `[task-plan] continuation stopped: no active owned plan sessionKey=${params.request.sessionKey}, ` +
+          `sessionId=${firstContext.sessionId}, messageId=${firstContext.messageId}, ` +
+          `sourceRunId=${firstContext.sourceRunId}`,
+      );
+      clearTaskPlanExecutionContext(params.request.sessionKey);
       markTaskPlanContinuationPending(params.request.sessionKey, false);
       return;
     }
@@ -132,7 +156,10 @@ export async function continueActiveTaskPlan(params: {
       }
 
       params.logger?.info?.(
-        `[byai-channel] task plan continuation: sessionKey=${params.request.sessionKey}, planId=${activePlan.planId}, version=${activePlan.version}, stalledAttempts=${stalledAttempts}`,
+        `[task-plan] continuation dispatch sessionKey=${params.request.sessionKey}, ` +
+          `sessionId=${firstContext.sessionId}, messageId=${firstContext.messageId}, ` +
+          `sourceRunId=${firstContext.sourceRunId}, ` +
+          `planId=${activePlan.planId}, version=${activePlan.version}, stalledAttempts=${stalledAttempts}`,
       );
       await params.dispatch(buildContinuationPrompt(params.language, activePlan));
       if (params.signal?.aborted) {
@@ -143,6 +170,7 @@ export async function continueActiveTaskPlan(params: {
       const context = buildExecutionContext(params.request) ?? firstContext;
       const latest = await bridge.loadActive(context, params.signal);
       if (latest?.status !== "ACTIVE") {
+        clearTaskPlanExecutionContext(params.request.sessionKey);
         markTaskPlanContinuationPending(params.request.sessionKey, false);
         return;
       }
@@ -174,6 +202,7 @@ export async function continueActiveTaskPlan(params: {
         },
         signal: params.signal,
       });
+      clearTaskPlanExecutionContext(params.request.sessionKey);
       markTaskPlanContinuationPending(params.request.sessionKey, false);
       if (!failure.ok && failure.currentPlan?.status === "ACTIVE") {
         throw new Error(

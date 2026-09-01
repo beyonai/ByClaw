@@ -113,6 +113,7 @@ class ProjectContextApplicationServiceTest {
 
         assertThat(result.getResolvedBy()).isEqualTo("projectId");
         assertThat(result.getProject().getProjectName()).isEqualTo("研发项目");
+        assertThat(result.getProject().getCloudResourceId()).isEqualTo(9001L);
         assertThat(result.getRepositories()).extracting(ProjectContextDto.RepositorySummary::getRepoFullName)
             .containsExactly("beyonai/byclaw-test");
         assertThat(result.getRepositories().getFirst().getRepoUrl())
@@ -165,6 +166,7 @@ class ProjectContextApplicationServiceTest {
         project.setProjectId(projectId);
         project.setProjectName("研发项目");
         project.setProjectType("develop");
+        project.setCloudResourceId(9001L);
         project.setCreateBy(createBy);
         project.setDeleteFlag("0");
         return project;

@@ -3,6 +3,7 @@ import { Button, Form, Input, InputNumber, Select, Slider, Space, Switch } from 
 import React, { useMemo } from 'react';
 import { trim } from 'lodash';
 import { useIntl } from '@umijs/max';
+import { getByParamGroupCode } from '@/pages/manager/service/System';
 import ModelFormSection from './ModelFormSection';
 import {
   tokenMarks,
@@ -120,9 +121,8 @@ const ModelFormFields: React.FC<Props> = ({
       ? [{ label: currentImageProvider.label, value: currentImageProvider.modelProtocol }]
       : []
     : [...MODEL_PROTOCOL_OPTIONS].filter((item) => item.value !== 'MINIMAX_IMAGE');
-  const providerOptions = isImageGenerationModel
-    ? IMAGE_GENERATION_PROVIDER_OPTIONS
-    : [
+  const defaultProviderOptions = useMemo(
+    () => [
       { label: 'OpenAI', value: 'OpenAI' },
       { label: 'Anthropic', value: 'Anthropic' },
       { label: 'Qwen', value: 'Qwen' },
@@ -130,7 +130,45 @@ const ModelFormFields: React.FC<Props> = ({
       { label: 'OpenRouter', value: 'OpenRouter' },
       { label: 'Together', value: 'Together' },
       { label: 'ZAI', value: 'ZAI' },
-    ];
+      { label: 'MINIMAX', value: 'MINIMAX' },
+      { label: 'APK', value: 'APK' },
+    ],
+    []
+  );
+  const [systemProviderOptions, setSystemProviderOptions] = React.useState<Option[]>(defaultProviderOptions);
+  const isEnglish = intl.locale?.toLowerCase().includes('en');
+
+  React.useEffect(() => {
+    let cancelled = false;
+    const modelType = `${currentModelType || 'LLM'}`.trim().toUpperCase();
+    const fallbackOptions = modelType === 'IMAGE_GENERATION' ? IMAGE_GENERATION_PROVIDER_OPTIONS : defaultProviderOptions;
+    const paramGroupCode =
+      modelType === 'IMAGE_GENERATION'
+        ? 'SYSTEM_MODEL_IMAGE_GENERATION_PROVIDER_NAME'
+        : 'SYSTEM_MODEL_PROVIDER_NAME';
+    getByParamGroupCode({ paramGroupCode })
+      .then((res: any) => {
+        if (cancelled) return;
+        const list = res?.data?.byaiSystemConfigLists;
+        const options = Array.isArray(list)
+          ? list
+            .map((item: any) => ({
+              label: isEnglish ? item.paramEnName || item.paramName : item.paramName || item.paramEnName,
+              value: item.paramValue,
+            }))
+            .filter((item: Option) => item.value)
+          : [];
+        setSystemProviderOptions(options.length ? options : fallbackOptions);
+      })
+      .catch(() => {
+        if (!cancelled) setSystemProviderOptions(fallbackOptions);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentModelType, defaultProviderOptions, isEnglish]);
+
+  const providerOptions = isImageGenerationModel ? IMAGE_GENERATION_PROVIDER_OPTIONS : systemProviderOptions;
   const reasoningEnabled = Boolean(reasoningConfig?.enabled);
   const reasoningCapability = `${reasoningConfig?.capability ?? 'unsupported'}`;
   const thinkingLevelOptions = THINKING_LEVEL_OPTIONS.map((value) => ({ label: value, value }));

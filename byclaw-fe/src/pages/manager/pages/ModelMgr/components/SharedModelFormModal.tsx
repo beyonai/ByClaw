@@ -75,6 +75,7 @@ const SharedModelFormModal: React.FC<Props> = ({
       { label: intl.formatMessage({ id: 'modelMgr.modal.modelTypeLLM' }), value: 'LLM' },
       { label: intl.formatMessage({ id: 'modelMgr.modal.modelTypeRERANK' }), value: 'RERANK' },
       { label: intl.formatMessage({ id: 'modelMgr.modal.modelTypeEMBEDDING' }), value: 'EMBEDDING' },
+      { label: intl.formatMessage({ id: 'modelMgr.modal.modelTypeTTS' }), value: 'TTS' },
       {
         label: intl.formatMessage({ id: 'modelMgr.modal.modelTypeIMAGE_GENERATION' }),
         value: 'IMAGE_GENERATION',

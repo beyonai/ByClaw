@@ -30,7 +30,7 @@ describe('useChatResourceProject', () => {
     const second = renderHook(() => useChatResourceProject(12));
 
     expect(second.result.current.loading).toBe(false);
-    expect(second.result.current.project).toMatchObject({ projectId: '12', projectType: 'operation' });
+    expect(second.result.current.project).toMatchObject({ projectId: '12', projectType: 'normal' });
     expect(mockGetProject).toHaveBeenCalledTimes(1);
   });
 
@@ -66,7 +66,7 @@ describe('useChatResourceProject', () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(mockGetProject).toHaveBeenCalledWith(12);
     expect(mockListProjects).not.toHaveBeenCalled();
-    expect(result.current.project).toMatchObject({ projectId: '12', projectType: 'develop' });
+    expect(result.current.project).toMatchObject({ projectId: '12', projectType: 'normal' });
   });
 
   it('falls back to the default project for a conversation without a project', async () => {
@@ -82,6 +82,6 @@ describe('useChatResourceProject', () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(mockGetProject).not.toHaveBeenCalled();
     expect(mockListProjects).toHaveBeenCalledWith({ pageNum: 1, pageSize: 200 });
-    expect(result.current.project).toMatchObject({ projectId: '2', projectType: 'default' });
+    expect(result.current.project).toMatchObject({ projectId: '2', projectType: 'normal' });
   });
 });

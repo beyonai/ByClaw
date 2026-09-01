@@ -1,5 +1,5 @@
 import { sessionHandler } from '@/utils/session';
-import type { ProjectSession, ProjectShareTarget, ProjectSpace, ProjectType } from './types';
+import type { ProjectSession, ProjectShareTarget } from './types';
 
 export type ProjectTagMeta = {
   classSuffix: 'Normal' | 'Development' | 'Operation';
@@ -10,16 +10,7 @@ export type ProjectTagMeta = {
  * 项目标签只表达项目类型：普通、研发、运营。
  * default 是系统内置项目、sharedFlag 是共享范围，均不再作为标签类型展示。
  */
-export const getProjectTagMeta = (
-  project?: Pick<ProjectSpace, 'projectType' | 'sharedFlag'> | ProjectType | string
-): ProjectTagMeta => {
-  const projectType = typeof project === 'string' ? project : project?.projectType;
-  if (projectType === 'develop' || projectType === 'development') {
-    return { classSuffix: 'Development', messageId: 'projectSpace.scene.development' };
-  }
-  if (projectType === 'operation') {
-    return { classSuffix: 'Operation', messageId: 'projectSpace.scene.operation' };
-  }
+export const getProjectTagMeta = (): ProjectTagMeta => {
   return { classSuffix: 'Normal', messageId: 'projectSpace.scene.normal' };
 };
 
@@ -86,8 +77,10 @@ export const normalizeProject = (item: any): ProjectSpace => ({
   projectName: item?.projectName || '',
   description: item?.description,
   resourceId: item?.resourceId,
+  cloudResourceId: item?.cloudResourceId,
   // 后端项目类型统一使用 normal/operation/develop，这里继续兼容旧前端 development 值，保证历史项目仍能进入对应详情页。
-  projectType: item?.projectType === 'development' ? 'develop' : item?.projectType || 'normal',
+  // 项目类型已统一按普通项目处理，兼容历史数据但不再向界面暴露类型差异。
+  projectType: 'normal',
   isShare: item?.isShare === 'Y' || item?.sharedFlag === true ? 'Y' : 'N',
   sharedFlag: item?.isShare === 'Y' || item?.sharedFlag === true,
   // 存量/普通项目无该字段时按 ready 处理,避免误拦截历史项目建需求/启动任务。

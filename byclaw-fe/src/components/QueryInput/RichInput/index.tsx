@@ -134,14 +134,26 @@ export { RichInputResourceList };
 
 // 主组件
 const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
-  const { style, chatMode, agentType, onChange, onSend, inAgentRoute, agentId, defaultPlaceholder, canSend, canQuote } =
-    props;
+  const {
+    style,
+    chatMode,
+    agentType,
+    onChange,
+    onSend,
+    inAgentRoute,
+    agentId,
+    defaultPlaceholder,
+    canSend,
+    canQuote,
+    mentionPopoverPlacement,
+  } = props;
   const intl = useIntl();
   const [mentionPopoverData, setMentionPopoverData] = useState<Partial<MentionTriggerInfo>>({});
   const mentionType = mentionPopoverData.type;
   const editor = useMemo<Editor>(() => withEditableNavigation(withMention(withHistory(withReact(createEditor())))), []);
   const isFirstAutoOnChange = useRef(true);
   const editorWrapRef = useRef<HTMLDivElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
   const lastChatModeRef = useRef(chatMode);
   const insertItemRef = useRef<RichInputRef['insertItem']>(() => undefined);
   const { EventEmitter } = useGlobal();
@@ -368,7 +380,8 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
 
   const handleCloseMention = useCallback(() => {
     setMentionPopoverData({});
-  }, []);
+    props.onResourcePopoverChange?.({ open: false });
+  }, [props]);
 
   // 这个onchange不仅仅包括输入，光标的变化也会触发
   const myOnChange = (value: Descendant[]) => {
@@ -383,7 +396,19 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
         if (triggerInfo.type === '#' && !checkIfCanQuote()) {
           return;
         }
-        setMentionPopoverData(triggerInfo);
+        // @ 面板只使用输入框宽度和统一 placement；# 面板仍使用光标定位。
+        if (triggerInfo.type === '@' && wrapRef.current) {
+          // RichInput 只包裹编辑区域，取外层 queryInputBase 才能覆盖完整的聊天输入框（含工具栏）。
+          const inputContainer = wrapRef.current.closest<HTMLElement>('#queryInputBase') || wrapRef.current;
+          const rect = inputContainer.getBoundingClientRect();
+          setMentionPopoverData({
+            ...triggerInfo,
+            position: { width: rect.width },
+          });
+          props.onResourcePopoverChange?.({ open: true, inputText: triggerInfo.inputText, width: rect.width });
+        } else {
+          setMentionPopoverData(triggerInfo);
+        }
       } else if (mentionType) {
         handleCloseMention();
       }
@@ -609,7 +634,7 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
   });
 
   return (
-    <div className={styles.wrap} style={style}>
+    <div className={styles.wrap} style={style} ref={wrapRef}>
       <Slate editor={editor} initialValue={value} onValueChange={setValue} onChange={myOnChange}>
         <div className={styles.editorWrap} ref={editorWrapRef}>
           <Editable
@@ -634,20 +659,27 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
           {agentPlaceholder}
         </div>
       </Slate>
-      <MentionPopover
-        key={agentId}
-        agentId={agentId}
-        type={mentionType as '@' | '#'}
-        onSelect={insertItem}
-        popoverPos={mentionPopoverData.position}
-        inputText={mentionPopoverData.inputText}
-        onClose={handleCloseMention}
-        chatMode={chatMode}
-        excludedAgentIds={getResourceList(value, true)
-          .filter((resource) => resource.resourceType === ResourceType.digitalEmployee)
-          .flatMap((resource) => [resource.resourceId, resource.resourceCode].filter(Boolean).map((item) => `${item}`))}
-        resourceAgentIds={props.resourceAgentIds}
-      />
+      {mentionType !== '@' && (
+        <MentionPopover
+          key={agentId}
+          agentId={agentId}
+          type={mentionType as '@' | '#'}
+          onSelect={insertItem}
+          popoverPos={mentionPopoverData.position}
+          inputText={mentionPopoverData.inputText}
+          onClose={handleCloseMention}
+          chatMode={chatMode}
+          excludedAgentIds={getResourceList(value, true)
+            .filter((resource) => resource.resourceType === ResourceType.digitalEmployee)
+            .flatMap((resource) =>
+              [resource.resourceId, resource.resourceCode].filter(Boolean).map((item) => `${item}`)
+            )}
+          resourceAgentIds={props.resourceAgentIds}
+          projectCloudResourceId={props.projectCloudResourceId}
+          projectId={props.projectId}
+          placement={mentionPopoverPlacement}
+        />
+      )}
     </div>
   );
 });

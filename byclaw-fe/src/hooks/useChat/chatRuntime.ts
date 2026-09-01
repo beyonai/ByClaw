@@ -2,6 +2,7 @@ import { get, isNil, set, unset } from 'lodash';
 
 import { compareStreamId, type ParsedChatStreamMessage } from '@/hooks/useSseSender/chatStream';
 import { IMessageState } from '@/constants/message';
+import { hasPendingEasyConfirmItem } from '@/components/MessagesComp/easyConfirm';
 import { chatSessionRuntimeManager, type RunningChatInfo } from '@/utils/chatSessionRuntimeManager';
 
 import type { IMessage, TaskPlanSnapshot } from '@/typescript/message';
@@ -421,6 +422,13 @@ const applyParsedStreamToContext = (parsed: ParsedChatStreamMessage, context: Ch
   const nextSessionId = context.answerMsg.sessionId || get(formattedPayload, 'sessionId');
   chatSessionRuntimeManager.bindSession(context.clientRequestId, nextSessionId ? `${nextSessionId}` : undefined);
   registerSessionChatContext(nextSessionId ? `${nextSessionId}` : undefined, context);
+  chatSessionRuntimeManager.setWaitingForUserInput(
+    context.clientRequestId,
+    hasPendingEasyConfirmItem(context.answerMsg, [
+      ...(context.answerMsg.thinkList || []),
+      ...(context.answerMsg.messageList || []),
+    ])
+  );
   if (nextSessionId && context.turnId) {
     const turnContexts = turnChatContexts.get(`${context.turnId}`);
     turnContexts?.forEach((turnContext) => {

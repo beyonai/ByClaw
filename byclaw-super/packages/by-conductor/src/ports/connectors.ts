@@ -9,7 +9,7 @@ import type {
   UserInteractionResponse,
 } from "../domain/types.js";
 
-/** 编排层传给 Connector 的完整执行上下文；metadata 只在当前 Run 内短暂使用。 */
+/** 编排层传给 Connector 的完整执行上下文；metadata 只在当前 Run 的受保护执行上下文中使用。 */
 export interface ConnectorRequest {
   userCode: string;
   userName?: string;

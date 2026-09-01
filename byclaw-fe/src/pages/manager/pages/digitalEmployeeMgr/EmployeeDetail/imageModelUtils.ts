@@ -20,10 +20,16 @@ export const getImageModelRows = (response?: ModelListByPageResponse): ModelList
 export const buildImageModelOptions = (
   models: ModelListItem[] = [],
   globalDefaultLabel: string,
-  includeGlobalDefault: boolean = true
+  includeGlobalDefault: boolean = true,
+  modelType: string = 'IMAGE_GENERATION'
 ): ImageModelOption[] => {
+  const normalizedModelType = modelType.trim().toUpperCase();
   const options = models
-    .filter((model) => model.modelType === 'IMAGE_GENERATION' && model.status === 'ENABLED')
+    .filter(
+      (model) =>
+        `${model.modelType || ''}`.trim().toUpperCase() === normalizedModelType &&
+        `${model.status || ''}`.trim().toUpperCase() === 'ENABLED'
+    )
     .map((model) => {
       const value = normalizeImageModelId(model.modelId ?? model.id);
       if (!value) return null;

@@ -88,12 +88,15 @@ public class ConnectorController {
     public ResponseEntity<String> handleAuthorizationCallback(
             @org.springframework.web.bind.annotation.PathVariable String providerCode,
             @RequestParam(value = "code", required = false) String code,
+            @RequestParam(value = "auth_code", required = false) String authCode,
             @RequestParam(value = "state", required = false) String state,
             @RequestParam(value = "error", required = false) String error,
             @RequestParam(value = "error_description", required = false) String errorDescription) {
         ConnectorAuthorizationDto authorization = connectorAuthorizationService.callback(
             providerCode,
-            new AuthorizationCallback(code, state, error, errorDescription),
+            new AuthorizationCallback(
+                "weixin-open-platform".equals(providerCode) && authCode != null ? authCode : code,
+                state, error, errorDescription),
             currentUserId()
         );
         boolean connected = "connected".equals(authorization.getStatus());

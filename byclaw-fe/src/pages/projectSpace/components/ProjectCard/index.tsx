@@ -1,9 +1,8 @@
-import { Card, Tag } from 'antd';
+import { Card } from 'antd';
 import { ShareAltOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import classNames from 'classnames';
 import type { ProjectSpace } from '../../types';
-import { getProjectTagMeta } from '../../utils';
 import styles from '../../index.module.less';
 
 interface Props {
@@ -14,7 +13,6 @@ interface Props {
 
 const ProjectCard: React.FC<Props> = ({ project, active, onSelect }) => {
   const intl = useIntl();
-  const projectTag = getProjectTagMeta(project);
 
   return (
     <Card
@@ -26,12 +24,6 @@ const ProjectCard: React.FC<Props> = ({ project, active, onSelect }) => {
         <span className={styles.projectIcon}>
           <ShareAltOutlined />
         </span>
-        <Tag
-          bordered={false}
-          className={classNames(styles.projectTypeTag, styles[`projectTypeTag${projectTag.classSuffix}`])}
-        >
-          {intl.formatMessage({ id: projectTag.messageId })}
-        </Tag>
       </div>
       <div className={styles.projectName}>{project.projectName}</div>
       <div className={styles.projectDesc}>

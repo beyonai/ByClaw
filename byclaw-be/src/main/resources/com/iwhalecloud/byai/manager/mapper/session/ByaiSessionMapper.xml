@@ -224,6 +224,8 @@
         <result column="update_time" property="updateTime" />
         <result column="state" property="state" />
         <result column="project_id" property="projectId" />
+        <result column="project_name" property="projectName" />
+        <result column="cloud_resource_id" property="cloudResourceId" />
         <result column="avatar" property="avatar" />
         <result column="match_type" property="matchType" />
         <result column="match_text" property="matchText" />
@@ -255,6 +257,7 @@
                a.state,
                a.project_id,
                b.project_name,
+               b.cloud_resource_id,
                r.avatar
         <choose>
             <when test="digitalEmployeeSearch">

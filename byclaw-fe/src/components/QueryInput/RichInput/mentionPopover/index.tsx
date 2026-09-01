@@ -7,6 +7,7 @@ import classNames from 'classnames';
 import React, { useEffect, useRef, useCallback, useMemo, useState } from 'react';
 import styles from './index.module.less';
 import ResourceTabs from './resourceTabsCompact';
+import ResourceToolMenu from '../../components/ResourceToolMenu';
 import { ResourceType } from '../utils/constants';
 import type { IResourceType } from '../types';
 import EmployeeList from '@/layout/sider/components/EmployeeList';
@@ -35,6 +36,8 @@ interface MentionPopoverProps {
   excludedAgentIds?: string[];
   children?: React.ReactNode;
   placement?: PopoverProps['placement'];
+  projectCloudResourceId?: string | number;
+  projectId?: number;
 }
 
 const MentionPopover: React.FC<MentionPopoverProps> = ({
@@ -50,21 +53,27 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
   excludedAgentIds,
   children,
   placement,
+  projectCloudResourceId,
+  projectId,
 }) => {
   const { trackerEmployeeClick } = useTracker();
   const intl = useIntl();
   const popoverRef = useRef<TooltipRef>(null);
   const open = !!popoverPos;
-  const { top, left } = popoverPos || {};
+  const { width } = popoverPos || {};
+  const isAtPopover = type === '@';
 
   const [currentAgent, setCurrentAgent] = useState<IAgentCache | null>(null);
   const { employeesList } = useSelector(({ employees }: { employees: UseEmployeesIState }) => employees);
+  const userInfo = useSelector((state: any) => state.user?.userInfo);
   const scopedAgentId = resourceAgentIds
     ?.split(',')
     .map((item) => item.trim())
     .find(Boolean);
   const resolvedAgentId = currentAgent?.agentId || scopedAgentId || agentId;
   const isExpertResourceOverlayOpen = chatMode === chatModeMap.expert && !!currentAgent;
+  const useInputWidth = isAtPopover && !isExpertResourceOverlayOpen && !!width;
+  const panelHeight = useInputWidth ? '40vh' : '65vh';
 
   useEffect(() => {
     if (open && popoverRef.current) {
@@ -72,7 +81,21 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
         popoverRef.current?.forceAlign();
       });
     }
-  }, [open, top, left, currentAgent]);
+  }, [open, currentAgent]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+
+    const handleDocumentMouseDown = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (target.closest(`.${styles.popover}`)) return;
+      onClose();
+    };
+
+    document.addEventListener('mousedown', handleDocumentMouseDown, true);
+    return () => document.removeEventListener('mousedown', handleDocumentMouseDown, true);
+  }, [onClose, open]);
 
   const onSelectAtMention = useCallback(
     (item: any) => {
@@ -175,23 +198,26 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
       children || (
         <div
           style={{
-            top,
-            left,
-            position: 'fixed',
-            width: 1,
+            position: 'absolute',
+            bottom: 0,
+            left: 0,
+            width: '100%',
             height: 1,
             opacity: 0,
           }}
         />
       )
     );
-  }, [children, top, left]);
+  }, [children]);
 
   return (
     <Popover
       open={open}
-      trigger="click"
-      placement={placement}
+      // 弹窗打开状态由两个入口各自的统一适配层控制，避免触发节点位置影响布局。
+      trigger={[]}
+      destroyOnHidden
+      placement={placement || (isAtPopover ? 'topLeft' : undefined)}
+      autoAdjustOverflow
       ref={popoverRef}
       arrow={false}
       onOpenChange={(v) => {
@@ -200,9 +226,11 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
         }
       }}
       styles={{
+        root: useInputWidth && width ? { width, minWidth: width, maxWidth: width } : undefined,
         body: {
-          height: '50vh',
+          height: panelHeight,
           minWidth: 320,
+          ...(useInputWidth ? { width } : {}),
           padding: 0,
         },
       }}
@@ -223,6 +251,11 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
             className={classNames(styles.contentViewport, {
               [styles.contentViewportWide]: isExpertResourceOverlayOpen,
             })}
+            style={{
+              height: panelHeight,
+              overflow: useInputWidth ? 'hidden' : undefined,
+              ...(useInputWidth && width ? { width, maxWidth: width } : {}),
+            }}
           >
             <div className={styles.contentInner}>
               {(() => {
@@ -236,10 +269,26 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
                         onSelect={onSelectAgentTool}
                         keyword={inputText}
                         agentIds={resourceAgentIds}
-                        showKnowledgeTab={!!currentAgent && currentAgent.knowledgeCount !== 0}
-                        showSkillTab={!!currentAgent && currentAgent.skillsCount !== 0}
+                        showKnowledgeTab={!currentAgent || currentAgent.knowledgeCount !== 0}
+                        showSkillTab={!currentAgent || currentAgent.skillsCount !== 0}
                       />
                     </div>
+                  );
+                }
+
+                if (type === '@') {
+                  return (
+                    <ResourceToolMenu
+                      keyword={inputText}
+                      sessionId={sessionId}
+                      projectId={projectId}
+                      projectCloudResourceId={projectCloudResourceId}
+                      userInfo={userInfo}
+                      agentId={resolvedAgentId}
+                      resourceAgentIds={resourceAgentIds}
+                      excludedAgentIds={excludedAgentIds}
+                      onSelect={onSelect}
+                    />
                   );
                 }
 
@@ -263,8 +312,8 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
                             sessionId={sessionId}
                             onSelect={onSelectAgentTool}
                             header={resourceHeader}
-                            showKnowledgeTab={!!currentAgent && currentAgent.knowledgeCount !== 0}
-                            showSkillTab={!!currentAgent && currentAgent.skillsCount !== 0}
+                            showKnowledgeTab={!currentAgent || currentAgent.knowledgeCount !== 0}
+                            showSkillTab={!currentAgent || currentAgent.skillsCount !== 0}
                           />
                         </div>
                       )}

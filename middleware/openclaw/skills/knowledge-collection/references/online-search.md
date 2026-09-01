@@ -14,8 +14,10 @@ node scripts/knowledge-collection.mjs public-discover --session-dir <会话目�
   [--tiers 1,2,3] [--limit N]
 ```
 
-该命令在 SearXNG 检索时无条件并行运行 `hot_discovery`，并把 SearXNG category 传为热度发现维度；
-`hot_discovery` 会额外补充 `general`。任一通道失败时保留另一通道的快照与候选，只有两者均失败才判定本次发现失败。
+不带 `--requested-count` 时，该命令在 SearXNG 检索时并行运行 `hot_discovery`，并把 SearXNG category 传为热度发现维度；
+`hot_discovery` 会额外补充 `general`。带 `--requested-count N` 时采用自适应路径：先运行 SearXNG，并按 URL、标题与摘要把候选确定性分类为
+`article`、`weak` 或 `reject`；只有唯一 `article` 数量少于 N 时才运行 `hot_discovery`。任一通道失败时保留另一通道的快照与候选，
+只有两者均失败才判定本次发现失败。命令输出的 `candidateQuality`、`pageTypeReasons` 和 `timing` 是候选选择与阶段耗时的权威诊断。
 直接运行 `searxng-cli` 仅适用于独立调试，不会自动启动热度发现。
 
 - 默认按 `--category` 使用内置直连白名单（`searxng_pack_settings.yml` 的 `cli.default_engines`，120 个直连可用引擎），避免超时拖累；

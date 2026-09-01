@@ -747,14 +747,16 @@ class ConnectorAuthorizationServiceTest {
         when(sessionRepository.findOwned(AUTHORIZATION_ID, USER_ID))
             .thenReturn(Optional.of(pending), Optional.of(connected));
         when(providerRegistry.get("lark-cli")).thenReturn(provider);
-        when(provider.queryStatus(any())).thenReturn(new AuthorizationStatusResult(
-            AuthorizationStatus.CONNECTED,
+        when(provider.queryStatus(any())).thenReturn(AuthorizationStatusResult.connected(
             "ou_account_42",
             "Lark User",
+            com.iwhalecloud.byai.manager.domain.connector.authorization.CredentialState.READY,
+            com.iwhalecloud.byai.manager.domain.connector.authorization.CredentialRenewalMode.REFRESH_TOKEN,
             futureExpiry(),
-            "workspace:lark-cli:user-1001",
             null,
-            null
+            new Date(),
+            "workspace:lark-cli:user-1001",
+            Map.of("username", "gh_account_42", "principalName", "Example Corp")
         ));
         when(sessionRepository.compareAndSetStatus(
             eq(AUTHORIZATION_ID), eq(AuthorizationStatus.PENDING), eq(4L), any())).thenReturn(true);
@@ -777,6 +779,7 @@ class ConnectorAuthorizationServiceTest {
         assertEnabledBinding(auth, "DEVICE_FLOW");
         assertThat(auth.getAuthId()).isEqualTo(501L);
         assertThat(auth.getAuthName()).isEqualTo("Lark User");
+        assertThat(auth.getExternalAccountId()).isEqualTo("ou_account_42");
         assertThat(auth.getExpireTime()).isNotNull();
         assertThat(auth.getLastSyncTime()).isNotNull();
         assertThat(auth.getAuthCredential()).doesNotContain("workspace:lark-cli:user-1001");
@@ -785,9 +788,12 @@ class ConnectorAuthorizationServiceTest {
             .containsEntry("authorizationId", AUTHORIZATION_ID)
             .containsEntry("credentialReference", "workspace:lark-cli:user-1001")
             .containsEntry("accountId", "ou_account_42")
-            .containsEntry("accountName", "Lark User");
+            .containsEntry("accountName", "Lark User")
+            .containsEntry("username", "gh_account_42")
+            .containsEntry("principalName", "Example Corp");
         assertThat(credential.keySet()).containsExactlyInAnyOrder(
-            "providerCode", "authorizationId", "credentialReference", "accountId", "accountName");
+            "providerCode", "authorizationId", "credentialReference", "accountId", "accountName",
+            "username", "principalName");
         verify(sequenceService).nextVal();
 
         ArgumentCaptor<RedisAuthorizationSession> finalSessionCaptor = ArgumentCaptor.forClass(RedisAuthorizationSession.class);

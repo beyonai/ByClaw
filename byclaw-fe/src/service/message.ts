@@ -10,6 +10,21 @@ export const getMessages = (payload: { sessionId: string; pageNum?: number; page
   POST<any>('/byaiService/assiman/getMessages', {
     ...payload,
   });
+
+export type ConversationOutlineItem = {
+  messageId: string;
+  role?: string;
+  usage: number;
+  content?: string;
+  displayContent?: string;
+  creatorName?: string;
+  createTime?: string;
+  position: number;
+  totalCount: number;
+};
+
+export const getMessageOutline = (sessionId: string) =>
+  POST<ConversationOutlineItem[]>('/byaiService/assiman/getMessageOutline', { sessionId });
 export const getMessageById = (payload: { messageId: string }) =>
   POST<any>('/byaiService/chat/getMessageById', {
     ...payload,

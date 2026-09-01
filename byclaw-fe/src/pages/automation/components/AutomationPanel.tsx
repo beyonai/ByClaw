@@ -31,6 +31,7 @@ import styles from '../index.module.less';
 interface PanelProps {
   active?: boolean;
   headerLeading?: ReactNode;
+  projectId?: string | number;
 }
 
 const normalizeRows = (response: any): AutomationSource[] => {
@@ -85,7 +86,7 @@ const sortAutomationSources = (rows: AutomationSource[], order: AutomationSortOr
     return 0;
   });
 
-const AutomationListPanel: React.FC<PanelProps> = ({ active = true, headerLeading }) => {
+const AutomationListPanel: React.FC<PanelProps> = ({ active = true, headerLeading, projectId }) => {
   const intl = useIntl();
   const userInfo = useSelector(({ user }: any) => user.userInfo);
   const employees = useSelector(({ employees: employeeState }: any) => [
@@ -118,7 +119,8 @@ const AutomationListPanel: React.FC<PanelProps> = ({ active = true, headerLeadin
       try {
         const response = await listScanSources({
           keyword: searchKeyword.trim() || undefined,
-          onlyMine: true,
+          projectId: projectId !== undefined && projectId !== null ? Number(projectId) : undefined,
+          onlyMine: projectId === undefined || projectId === null,
           pageNum: 1,
           pageSize: 100,
         });
@@ -130,7 +132,7 @@ const AutomationListPanel: React.FC<PanelProps> = ({ active = true, headerLeadin
         setLoading(false);
       }
     },
-    [intl, keyword]
+    [intl, keyword, projectId]
   );
 
   useEffect(() => {

@@ -74,6 +74,8 @@ export type TaskPlanExecutionContext = {
   beyondToken?: string;
 };
 
+export type TaskPlanExecutionIdentity = Omit<TaskPlanExecutionContext, "beyondToken">;
+
 export type TaskPlanCommand =
   | {
       action: "create";
@@ -116,10 +118,14 @@ const TASK_PLAN_RUNTIME_BRIDGE = Symbol.for("openclaw.byclaw.taskPlanRuntimeBrid
 const TASK_PLAN_CONTINUATION_PENDING = Symbol.for(
   "openclaw.byclaw.taskPlanContinuationPending",
 );
+const TASK_PLAN_EXECUTION_CONTEXTS = Symbol.for(
+  "openclaw.byclaw.taskPlanExecutionContexts",
+);
 
 type TaskPlanRuntimeGlobal = typeof globalThis & {
   [TASK_PLAN_RUNTIME_BRIDGE]?: TaskPlanRuntimeBridge;
   [TASK_PLAN_CONTINUATION_PENDING]?: Set<string>;
+  [TASK_PLAN_EXECUTION_CONTEXTS]?: Map<string, TaskPlanExecutionIdentity>;
 };
 
 function taskPlanContinuationPendingSet(): Set<string> {
@@ -130,12 +136,60 @@ function taskPlanContinuationPendingSet(): Set<string> {
   return taskPlanGlobal[TASK_PLAN_CONTINUATION_PENDING];
 }
 
+function taskPlanExecutionContextMap(): Map<string, TaskPlanExecutionIdentity> {
+  const taskPlanGlobal = globalThis as TaskPlanRuntimeGlobal;
+  if (!taskPlanGlobal[TASK_PLAN_EXECUTION_CONTEXTS]) {
+    taskPlanGlobal[TASK_PLAN_EXECUTION_CONTEXTS] = new Map<string, TaskPlanExecutionIdentity>();
+  }
+  return taskPlanGlobal[TASK_PLAN_EXECUTION_CONTEXTS];
+}
+
 export function registerTaskPlanRuntimeBridge(bridge: TaskPlanRuntimeBridge): void {
   (globalThis as TaskPlanRuntimeGlobal)[TASK_PLAN_RUNTIME_BRIDGE] = bridge;
 }
 
 export function resolveTaskPlanRuntimeBridge(): TaskPlanRuntimeBridge | undefined {
   return (globalThis as TaskPlanRuntimeGlobal)[TASK_PLAN_RUNTIME_BRIDGE];
+}
+
+/**
+ * Preserve the execution identity that owns an ACTIVE plan across automatic
+ * OpenClaw follow-up runs. A follow-up has a new runId, but backend ownership
+ * must continue to use the runId that created the plan.
+ *
+ * Authentication is intentionally excluded; callers merge the current
+ * request's beyond token when using the stored identity.
+ */
+export function rememberTaskPlanExecutionContext(context: TaskPlanExecutionContext): void {
+  const sessionKey = context.sessionKey.trim();
+  if (!sessionKey) {
+    return;
+  }
+  taskPlanExecutionContextMap().set(sessionKey, {
+    sessionKey,
+    sessionId: context.sessionId,
+    messageId: context.messageId,
+    ...(context.traceId ? { traceId: context.traceId } : {}),
+    ...(context.turnId ? { turnId: context.turnId } : {}),
+    ...(context.laneId ? { laneId: context.laneId } : {}),
+    sourceRuntime: context.sourceRuntime,
+    sourceRunId: context.sourceRunId,
+  });
+}
+
+export function resolveTaskPlanExecutionContext(
+  sessionKey: string | undefined,
+): TaskPlanExecutionIdentity | undefined {
+  const normalized = sessionKey?.trim();
+  const context = normalized ? taskPlanExecutionContextMap().get(normalized) : undefined;
+  return context ? { ...context } : undefined;
+}
+
+export function clearTaskPlanExecutionContext(sessionKey: string | undefined): void {
+  const normalized = sessionKey?.trim();
+  if (normalized) {
+    taskPlanExecutionContextMap().delete(normalized);
+  }
 }
 
 export function markTaskPlanContinuationPending(
