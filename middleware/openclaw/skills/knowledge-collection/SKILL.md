@@ -27,6 +27,17 @@ Collect traceable source materials and deliver validated, sanitized Markdown. Th
 `requestedDeliveryDir` 在发布前是不可探测的 opaque 值：采集和校验期间只写内部会话；最终通过 `publish`
 非破坏性地发布正文与引用图片。
 
+在正式调用 `publish` 之前，任何工具调用的参数或 shell 命令文本都不得包含 `requestedDeliveryDir`；第一次允许包含该路径的工具调用必须是正式的 `publish`。不得把该路径赋给 shell 变量，也不得 `echo`、记录或打印该路径。禁止用 `mkdir`、`ls`、`find`、`stat`、`test`、`realpath`、`readlink` 或任何等价命令访问它；“检查残留目录”、“确认目录不存在”和“只做只读检查”都不是例外。每次调用工具前先检查：如果参数或命令含有该路径且当前调用不是已经通过交付校验后的 `publish`，删除该路径并改为只操作内部 `session-dir`。当 `status.collection.deliveryComplete=false` 时，该路径不得出现在后续任何工具调用中，只能在最终答复中说明未发布。
+
+```bash
+# 错误：即使不创建目录，发布前的只读探测也违反契约
+REQUESTED_DELIVERY_DIR=/by/example-output
+ls "$REQUESTED_DELIVERY_DIR"
+
+# 正确：采集、校验命令只包含内部会话；交付路径首次出现在正式 publish 中
+node scripts/knowledge-collection.mjs publish --session-dir "$SESSION_DIR" --delivery-dir /by/example-output
+```
+
 ## 1. Decide whether to use this skill
 
 Use it only when the user explicitly asks to collect, crawl, batch-search, archive, or preserve source material. A normal question, a single fact lookup, opening one page, or login is not collection work unless the user explicitly asks for an explicit collection outcome.
