@@ -64,6 +64,7 @@ const COMMAND_SPECS = {
       '--max-search-rounds': '可选。正整数;检索轮数上限',
       '--source-scope': 'JSON 数组;默认 ["public-internet"]. 可选 public-internet、dingtalk、feishu、wecom、ima',
       '--materialization-target': 'candidates | selected(默认) | all。all 表示所有请求正文必须物化或如实标记失败/待处理',
+      '--direct-urls': '可选。用户在原始请求中明确提供的公共 URL JSON 数组；这些 URL 以 user-provided 候选登记',
       '--started-at': '可选。ISO 时间;缺省为当前时间',
       '--collection-result-input-file': '可选。预置 canonical collection-result.json',
       '--metadata-input-file': '可选。预置 collection metadata',
@@ -133,6 +134,15 @@ const COMMAND_SPECS = {
       '--dry-run': '可选。仅校验,不持久化',
     },
     example: 'knowledge-collection.mjs collect --session-dir /tmp/kc1 --item-json-file /tmp/kc1/.collection-inputs/items.json',
+  }),
+  publish: defineCommand({
+    group: 'collection',
+    title: '把已校验正文及其引用的本地图片安全发布到用户交付目录',
+    args: {
+      '--session-dir': '必填。内部采集会话目录',
+      '--delivery-dir': '必填。用户指定的交付目录；相对路径基于当前 Session Root',
+    },
+    example: 'knowledge-collection.mjs publish --session-dir /tmp/kc1 --delivery-dir 00-collection --session-root /by/.sessions/20037048',
   }),
   'materialize-wechat': defineCommand({
     group: 'collection',
@@ -272,6 +282,7 @@ const COMMAND_SCHEMA_OVERRIDES = {
         items: { type: 'string', enum: ['public-internet', 'dingtalk', 'feishu', 'wecom', 'ima'] },
       },
       'materialization-target': { type: 'string', enum: ['candidates', 'selected', 'all'], default: 'selected' },
+      'direct-urls': SCHEMA.jsonArray,
       'started-at': { type: 'string', format: 'date-time' },
       'collection-result-input-file': SCHEMA.file,
       'metadata-input-file': SCHEMA.file,
@@ -322,6 +333,13 @@ const COMMAND_SCHEMA_OVERRIDES = {
     },
   },
   collect: { required: ['session-dir', 'item-json-file'], properties: { 'session-dir': SCHEMA.sessionDir, 'item-json-file': SCHEMA.inputFile, 'dry-run': SCHEMA.boolean } },
+  publish: {
+    required: ['session-dir', 'delivery-dir'],
+    properties: {
+      'session-dir': SCHEMA.sessionDir,
+      'delivery-dir': SCHEMA.sessionDir,
+    },
+  },
   'materialize-wechat': {
     required: ['session-dir', 'executor-result-file', 'item-id'],
     properties: {
@@ -542,9 +560,12 @@ async function main() {
 }
 
 main().catch((error) => {
+  const message = error instanceof Error ? error.message : String(error);
+  const errorCode = /^([A-Z][A-Z0-9_]+):/.exec(message)?.[1];
   render({
     ok: false,
-    error: error instanceof Error ? error.message : String(error),
+    ...(errorCode ? { errorCode } : {}),
+    error: message,
   }, false);
   process.exitCode = 1;
 });

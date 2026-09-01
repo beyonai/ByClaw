@@ -791,6 +791,7 @@ CREATE TABLE IF NOT EXISTS byai.byai_artifact (
     access_key_hash    VARCHAR(64)    NOT NULL,
     warnings_json      TEXT,
     expires_at         TIMESTAMP      NOT NULL,
+    purge_at           TIMESTAMP      NOT NULL,
     create_time        TIMESTAMP      NOT NULL DEFAULT CURRENT_TIMESTAMP,
     update_time        TIMESTAMP      NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT pk_byai_artifact PRIMARY KEY (artifact_id)
@@ -800,11 +801,13 @@ CREATE INDEX IF NOT EXISTS idx_byai_artifact_owner
     ON byai.byai_artifact (owner_user_id, create_time DESC);
 
 CREATE INDEX IF NOT EXISTS idx_byai_artifact_cleanup
-    ON byai.byai_artifact (status, expires_at);
+    ON byai.byai_artifact (status, purge_at);
 
 COMMENT ON TABLE byai.byai_artifact IS 'Agent Harness发布的限时预览与下载Artifact元数据';
 COMMENT ON COLUMN byai.byai_artifact.access_key_hash IS '不记名访问密钥的SHA-256，仅上传响应返回原始密钥';
 COMMENT ON COLUMN byai.byai_artifact.storage_type IS '创建时实际使用的存储后端，切换默认后仍用于读取历史Artifact';
+COMMENT ON COLUMN byai.byai_artifact.expires_at IS '公开预览、下载与公开数据接口的失效时间';
+COMMENT ON COLUMN byai.byai_artifact.purge_at IS 'Artifact文件及其持久化数据的物理删除时间，有效访问可顺延';
 
 -- Add platform-managed general-purpose JSON records for published HTML Artifacts.
 CREATE TABLE IF NOT EXISTS byai.artifact_data_record (

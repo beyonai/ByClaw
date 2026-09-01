@@ -15,7 +15,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 /**
- * Claims expired artifacts with a conditional update before deleting shared storage content.
+ * Claims Artifacts past their physical deletion time before removing shared storage and persisted data.
  */
 @Slf4j
 @Service
@@ -41,15 +41,16 @@ public class ArtifactCleanupService {
     }
 
     @Scheduled(fixedDelayString = "${artifact.cleanup.fixed-delay-ms:3600000}")
-    public void cleanExpired() {
+    public void cleanPurgeable() {
         LocalDateTime now = LocalDateTime.now();
-        List<ArtifactRecord> expired = artifactMapper.selectList(new LambdaQueryWrapper<ArtifactRecord>()
+        List<ArtifactRecord> purgeable = artifactMapper.selectList(new LambdaQueryWrapper<ArtifactRecord>()
             .in(ArtifactRecord::getStatus, ArtifactStatus.READY.name(), ArtifactStatus.FAILED.name())
-            .le(ArtifactRecord::getExpiresAt, now));
-        for (ArtifactRecord record : expired) {
+            .le(ArtifactRecord::getPurgeAt, now));
+        for (ArtifactRecord record : purgeable) {
             int claimed = artifactMapper.update(null, new LambdaUpdateWrapper<ArtifactRecord>()
                 .eq(ArtifactRecord::getArtifactId, record.getArtifactId())
                 .eq(ArtifactRecord::getStatus, record.getStatus())
+                .le(ArtifactRecord::getPurgeAt, now)
                 .set(ArtifactRecord::getStatus, ArtifactStatus.DELETING.name())
                 .set(ArtifactRecord::getUpdateTime, now));
             if (claimed == 1) {

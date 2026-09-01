@@ -68,7 +68,7 @@ function normalizeBaseUrl(rawBaseUrl) {
   return trimmed.endsWith(DEFAULT_CONTEXT_PATH) ? trimmed : `${trimmed}${DEFAULT_CONTEXT_PATH}`;
 }
 
-// 服务发现与 by-knowledge-manager 一致，但不引 @byclaw/by-framework：
+// 服务发现与 project-cloud-knowledge 一致，但不引 @byclaw/by-framework：
 // 本技能只打两个固定接口，用环境变量组装即可，免掉 npm install 这一步。
 function backendBaseUrl() {
   const explicit = firstNonEmpty(process.env.BYAI_SERVICE_BASE_URL, process.env.KN_MANAGER_URL);

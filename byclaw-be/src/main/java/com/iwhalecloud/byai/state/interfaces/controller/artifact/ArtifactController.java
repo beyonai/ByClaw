@@ -1,10 +1,12 @@
 package com.iwhalecloud.byai.state.interfaces.controller.artifact;
 
+import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.state.domain.artifact.dto.ArtifactDataCreateRequest;
 import com.iwhalecloud.byai.state.domain.artifact.dto.ArtifactDataRecordDto;
 import com.iwhalecloud.byai.state.domain.artifact.dto.ArtifactDataUpdateRequest;
 import com.iwhalecloud.byai.state.domain.artifact.dto.ArtifactDto;
+import com.iwhalecloud.byai.state.domain.artifact.dto.ArtifactExpiryRenewRequest;
 import com.iwhalecloud.byai.state.domain.artifact.model.ArtifactPublishMode;
 import com.iwhalecloud.byai.state.domain.artifact.service.ArtifactApplicationService;
 import com.iwhalecloud.byai.state.domain.artifact.service.ArtifactDataRecordService;
@@ -61,6 +63,14 @@ public class ArtifactController {
         return ResponseUtil.successResponse(artifactApplicationService.getOwned(artifactId));
     }
 
+    @PutMapping("/{artifactId}/expiration")
+    @Operation(summary = "续约本人Artifact的公开访问有效期")
+    public ResponseUtil<ArtifactDto> renewExpiration(@PathVariable("artifactId") String artifactId,
+        @Valid @RequestBody ArtifactExpiryRenewRequest request) {
+        return ResponseUtil.successResponse(
+            artifactApplicationService.renewOwnedExpiration(artifactId, request.getExpiresInSeconds()));
+    }
+
     @DeleteMapping("/{artifactId}")
     @Operation(summary = "撤销并删除本人Artifact")
     public ResponseUtil<Void> delete(@PathVariable("artifactId") String artifactId) {
@@ -73,6 +83,17 @@ public class ArtifactController {
     public ResponseUtil<ArtifactDataRecordDto> createDataRecord(@PathVariable("artifactId") String artifactId,
         @Valid @RequestBody ArtifactDataCreateRequest request) {
         return ResponseUtil.successResponse(artifactDataRecordService.createOwned(artifactId, request));
+    }
+
+    @GetMapping("/{artifactId}/data-records")
+    @Operation(summary = "分页查询本人Artifact的JSON数据记录")
+    public ResponseUtil<PageInfo<ArtifactDataRecordDto>> listDataRecords(
+        @PathVariable("artifactId") String artifactId,
+        @RequestParam(value = "collectionName", required = false) String collectionName,
+        @RequestParam(value = "pageNum", defaultValue = "1") int pageNum,
+        @RequestParam(value = "pageSize", defaultValue = "20") int pageSize) {
+        return ResponseUtil.successResponse(
+            artifactDataRecordService.listOwned(artifactId, collectionName, pageNum, pageSize));
     }
 
     @GetMapping("/{artifactId}/data-records/{recordKey}")

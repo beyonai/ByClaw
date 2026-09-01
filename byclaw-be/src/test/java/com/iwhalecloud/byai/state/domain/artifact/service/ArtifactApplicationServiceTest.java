@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.state.domain.artifact.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
@@ -21,6 +22,8 @@ import com.iwhalecloud.byai.state.domain.artifact.storage.ArtifactStoragePort;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
@@ -57,6 +60,7 @@ class ArtifactApplicationServiceTest {
         ReflectionTestUtils.setField(properties, "downloadPathPrefix", "/artifact-download");
         ReflectionTestUtils.setField(properties, "defaultExpiresSeconds", 604800L);
         ReflectionTestUtils.setField(properties, "maxExpiresSeconds", 2592000L);
+        ReflectionTestUtils.setField(properties, "purgeRetentionSeconds", 2592000L);
         ReflectionTestUtils.setField(properties, "maxUploadBytes", 1024L * 1024L);
 
         mapper = mock(ArtifactMapper.class);
@@ -95,6 +99,7 @@ class ArtifactApplicationServiceTest {
         assertThat(result.getDownloadUrl()).startsWith("https://preview.test/byaiService/artifact-download/");
         assertThat(record.get().getStorageRoot()).isEqualTo("/sandbox-volume-root/byclaw-artifacts");
         assertThat(record.get().getAccessKeyHash()).hasSize(64).doesNotContain(accessKey);
+        assertThat(result.getPurgeAt()).isAfter(result.getExpiresAt().plusDays(29));
         assertThat(service.resolvePreview(result.getArtifactId(), accessKey, null)).isNotNull();
         assertThat(service.resolvePreview(result.getArtifactId(), "wrong-key", null)).isNull();
     }
@@ -122,6 +127,56 @@ class ArtifactApplicationServiceTest {
 
         assertThat(record.get().getStatus()).isEqualTo(ArtifactStatus.FAILED.name());
         verify(cleanupService).cleanStorage(record.get());
+    }
+
+    @Test
+    void renewsExpiredPublicAccessBeforePhysicalDeletion() {
+        MockMultipartFile file = new MockMultipartFile("file", "index.html", "text/html",
+            "<h1>preview</h1>".getBytes());
+        ArtifactDto published = service.publish(file, ArtifactPublishMode.AUTO, null,
+            true, null, null, null);
+        String accessKey = published.getPreviewUrl().split("/")[6];
+        record.get().setExpiresAt(LocalDateTime.now().minusMinutes(1));
+        record.get().setPurgeAt(LocalDateTime.now().plusDays(5));
+        when(mapper.renewExpiration(any(), any(), any(), any(), any())).thenReturn(1);
+
+        assertThat(service.resolvePreview(published.getArtifactId(), accessKey, null)).isNull();
+        assertThatCode(() -> service.requireOwnedDataAccessible(published.getArtifactId()))
+            .doesNotThrowAnyException();
+
+        ArtifactDto renewed = service.renewOwnedExpiration(published.getArtifactId(), 3600L);
+
+        assertThat(renewed.getExpiresAt()).isAfter(OffsetDateTime.now());
+        assertThat(renewed.getPurgeAt()).isAfter(renewed.getExpiresAt().plusDays(29));
+        assertThat(service.resolvePreview(published.getArtifactId(), accessKey, null)).isNotNull();
+    }
+
+    @Test
+    void rejectsRenewalAfterPhysicalRetentionWindow() {
+        MockMultipartFile file = new MockMultipartFile("file", "index.html", "text/html",
+            "<h1>preview</h1>".getBytes());
+        ArtifactDto published = service.publish(file, ArtifactPublishMode.AUTO, null,
+            true, null, null, null);
+        record.get().setExpiresAt(LocalDateTime.now().minusDays(2));
+        record.get().setPurgeAt(LocalDateTime.now().minusDays(1));
+
+        assertThatThrownBy(() -> service.renewOwnedExpiration(published.getArtifactId(), 3600L))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void extendsPhysicalRetentionAfterOwnerAccess() {
+        MockMultipartFile file = new MockMultipartFile("file", "index.html", "text/html",
+            "<h1>preview</h1>".getBytes());
+        ArtifactDto published = service.publish(file, ArtifactPublishMode.AUTO, null,
+            true, null, null, null);
+        LocalDateTime previousPurgeAt = LocalDateTime.now().plusDays(5);
+        record.get().setPurgeAt(previousPurgeAt);
+        when(mapper.renewPurgeAt(any(), any(), any())).thenReturn(1);
+
+        ArtifactDto accessed = service.getOwned(published.getArtifactId());
+
+        assertThat(accessed.getPurgeAt().toLocalDateTime()).isAfter(previousPurgeAt.plusDays(20));
     }
 
     private static final class InMemoryStorage implements ArtifactStoragePort {

@@ -273,6 +273,7 @@ public class SandboxController {
     public ResponseUtil removeSandbox(
         @Parameter(description = "请求参数，userCode和resourceId为必填") @RequestBody Map<String, Object> params) {
         String userCode = (String) params.get("userCode");
+        String sandboxType = params.get("sandboxType") != null ? params.get("sandboxType").toString().trim() : null;
         Object resourceIdObj = params.get("resourceId");
         Long resourceId = null;
 
@@ -290,7 +291,7 @@ public class SandboxController {
             }
         }
 
-        sandboxService.removeSandbox(userCode, resourceId);
+        sandboxService.removeSandbox(userCode, resourceId, sandboxType);
         return ResponseUtil.successResponse();
     }
 
@@ -759,6 +760,7 @@ public class SandboxController {
         String serviceKey = (String) params.get("serviceKey");
         String specJson = (String) params.get("specJson");
         String templateJson = (String) params.get("templateJson");
+        Integer enabled = parseEnabled(params.get("enabled"));
 
         if (serviceKey == null || serviceKey.trim().isEmpty()) {
             return ResponseUtil.fail("serviceKey is required");
@@ -775,13 +777,29 @@ public class SandboxController {
         SandboxServiceSpecEntity existing = sandboxServiceSpecEntityMapper.selectById(serviceKeyTrimmed);
         if (existing == null) {
             // 新增 - 使用自定义 SQL 处理 jsonb 类型
-            sandboxServiceSpecEntityMapper.insertSpec(serviceKeyTrimmed, specJsonTrimmed, templateJsonTrimmed);
+            sandboxServiceSpecEntityMapper.insertSpec(serviceKeyTrimmed, specJsonTrimmed, templateJsonTrimmed,
+                enabled);
         } else {
             // 更新 - 使用自定义 SQL 处理 jsonb 类型
-            sandboxServiceSpecEntityMapper.updateSpec(serviceKeyTrimmed, specJsonTrimmed, templateJsonTrimmed);
+            sandboxServiceSpecEntityMapper.updateSpec(serviceKeyTrimmed, specJsonTrimmed, templateJsonTrimmed,
+                enabled);
         }
 
         return ResponseUtil.successResponse();
+    }
+
+    private Integer parseEnabled(Object value) {
+        if (value == null) {
+            return 1;
+        }
+        if (value instanceof Boolean booleanValue) {
+            return booleanValue ? 1 : 0;
+        }
+        if (value instanceof Number numberValue) {
+            return numberValue.intValue() == 0 ? 0 : 1;
+        }
+        String stringValue = value.toString().trim();
+        return "0".equals(stringValue) || "false".equalsIgnoreCase(stringValue) ? 0 : 1;
     }
 
     /**

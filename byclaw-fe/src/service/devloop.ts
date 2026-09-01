@@ -286,8 +286,8 @@ export const listProjectRepos = (projectId: number) =>
 
 export type AvailableProjectRepo = DevloopProjectRepo & { path: string };
 
-export const listAvailableProjectRepos = (projectId: number) =>
-  POST<AvailableProjectRepo[]>('/byaiService/project/repo/available-list', { projectId });
+export const listAvailableProjectRepos = (projectId: number, sessionId?: string | number) =>
+  POST<AvailableProjectRepo[]>('/byaiService/project/repo/available-list', { projectId, sessionId });
 
 export type ProjectSessionWorktree = {
   found: boolean;
@@ -326,11 +326,21 @@ export type ProjectRepoFileContent = {
   downloadUrl?: string;
 };
 
-export const listProjectRepoTree = (data: { projectId: number; repoId: number; path?: string; ref?: string }) =>
-  POST<ProjectRepoTreeNode[]>('/byaiService/project/repo/tree', data);
+export const listProjectRepoTree = (data: {
+  projectId: number;
+  repoId: number;
+  path?: string;
+  ref?: string;
+  sessionId?: string | number;
+}) => POST<ProjectRepoTreeNode[]>('/byaiService/project/repo/tree', data);
 
-export const searchProjectRepoTree = (data: { projectId: number; repoId: number; keyword: string; ref?: string }) =>
-  POST<ProjectRepoTreeNode[]>('/byaiService/project/repo/tree/search', data);
+export const searchProjectRepoTree = (data: {
+  projectId: number;
+  repoId: number;
+  keyword: string;
+  ref?: string;
+  sessionId?: string | number;
+}) => POST<ProjectRepoTreeNode[]>('/byaiService/project/repo/tree/search', data);
 
 export const listProjectRepoBranches = (repoId: number) =>
   POST<ProjectRepoBranch[]>('/byaiService/project/repo/branch/list', { repoId });

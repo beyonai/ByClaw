@@ -105,6 +105,11 @@ test('materializer writes deterministic artifacts and a full-text collect payloa
 
     const payload = JSON.parse(await readFile(first.collectPayloadPath, 'utf8'));
     assert.equal(payload.contentGranularity, 'full-text');
+    assert.deepEqual(payload.fullTextEvidence, {
+      schemaVersion: '1.0',
+      executor: 'bycli',
+      artifact: 'raw/materialization/mihoyo.json',
+    });
     assert.equal(payload.markdownPath, 'markdown/items/mihoyo/index.md');
     assert.equal(payload.sanitizedPath, 'sanitized/items/mihoyo/index.md');
     assert.deepEqual(payload.rawArtifacts, [

@@ -6,6 +6,8 @@ import com.iwhalecloud.byai.manager.domain.devloop.service.GitSubmodulePathResol
 import com.iwhalecloud.byai.manager.domain.devloop.service.GitSubmodulePathResolver.ResolvedSubmodule;
 import com.iwhalecloud.byai.manager.entity.devloop.ProjectRepo;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectRepoMapper;
+import com.iwhalecloud.byai.manager.mapper.session.ByaiSessionMapper;
+import com.iwhalecloud.byai.manager.domain.devloop.service.SessionWorkspacePathResolver;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -29,6 +31,12 @@ public class ProjectWorkspaceGitService {
 
     @Autowired
     private ProjectInitService projectInitService;
+
+    @Autowired
+    private ByaiSessionMapper byaiSessionMapper;
+
+    @Autowired
+    private SessionWorkspacePathResolver sessionWorkspacePathResolver;
 
     /** 查询项目约定的 workspace 仓库。 */
     public Optional<ProjectRepo> findWorkspaceRepo(Long projectId) {
@@ -75,6 +83,21 @@ public class ProjectWorkspaceGitService {
         }
         return new GitSubmodulePathResolver().resolve(workspacePath.get(), repo)
             .filter(path -> Files.isDirectory(path) && Files.exists(path.resolve(".git")));
+    }
+
+    /** Resolve the selected repository inside a session worktree, falling back to the project repository. */
+    public Optional<Path> resolveRepository(ProjectRepo repo, Long sessionId) {
+        if (repo == null || sessionId == null) return resolveRepository(repo);
+        var session = byaiSessionMapper.selectById(sessionId);
+        if (session != null && session.getCreatorId() != null) {
+            String sessionDir = sessionWorkspacePathResolver.resolveSessionDir(session.getCreatorId(), sessionId);
+            if (sessionDir == null) return resolveRepository(repo);
+            Path sessionRoot = Path.of(sessionDir, ".worktree");
+            String name = repositoryName(repo);
+            Path candidate = "workspace".equalsIgnoreCase(repo.getRepoType()) ? sessionRoot : sessionRoot.resolve(name);
+            if (isGitRepository(candidate)) return Optional.of(candidate);
+        }
+        return resolveRepository(repo);
     }
 
     /**

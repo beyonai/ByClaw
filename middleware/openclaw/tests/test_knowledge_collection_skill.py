@@ -112,6 +112,39 @@ def markdown_section(text, heading):
 
 
 class KnowledgeCollectionSkillContractTest(unittest.TestCase):
+    def test_public_full_text_requires_executor_owned_evidence(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        contract = (SKILL_ROOT / "references" / "collection-contract.md").read_text(encoding="utf-8")
+
+        for phrase in (
+            "fullTextEvidence",
+            "只有获准来源执行器或专用 materializer",
+            "不得由 Agent 手写",
+        ):
+            self.assertIn(phrase, skill + contract)
+
+    def test_publish_completion_requires_first_response_delivery_input_echo(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        delivery = (SKILL_ROOT / "references" / "delivery.md").read_text(encoding="utf-8")
+
+        for phrase in (
+            "首次最终答复",
+            "原样回显 `deliveryInput`",
+            "不得只报告路径",
+            "publish 之前不得创建",
+        ):
+            self.assertIn(phrase, skill + delivery)
+
+    def test_public_discovery_cannot_be_bypassed_by_manual_source_search(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        contract = (SKILL_ROOT / "references" / "collection-contract.md").read_text(encoding="utf-8")
+        self.assertIn("--direct-urls", skill)
+        self.assertIn("SOURCE_NOT_AUTHORIZED_BY_DISCOVERY", skill)
+        self.assertIn("公共发现最多允许两轮", skill)
+        self.assertIn("用户明确提供的 URL", contract)
+        self.assertIn("discoveryCandidateId", contract)
+        self.assertIn("不得使用模型记忆中的 URL、DOI、论文 ID", skill)
+
     def test_knowledge_collection_upgrade_is_isolated_in_v031(self):
         self.assertTrue(V031_DML.is_file(), "knowledge collection migration must be versioned as V0.3.1")
         v030 = V030_DML.read_text(encoding="utf-8")
@@ -211,11 +244,11 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "`sanitized/items/*.md`",
             "采集流程不得主动询问 `入库 / 知识整理 / 跳过`",
             "由根 Agent 根据用户已经表达的意图决定是否调用",
-            "`by-knowledge-manager`、`knowledge-organizer` 或其他下游 Skill",
+            "`project-cloud-knowledge`、`knowledge-organizer` 或其他下游 Skill",
         ):
             self.assertIn(phrase, skill)
 
-        self.assertNotIn("不得调用 `by-knowledge-manager`", skill)
+        self.assertNotIn("不得调用 `project-cloud-knowledge`", skill)
         self.assertNotIn("不得调用 `knowledge-organizer`", skill)
 
         for forbidden in (
@@ -430,11 +463,11 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "下游 Agent",
             "不得主动询问 `入库 / 知识整理 / 跳过`",
             "根 Agent 根据用户已经表达的意图决定是否调用",
-            "`by-knowledge-manager`、`knowledge-organizer` 或其他下游 Skill",
+            "`project-cloud-knowledge`、`knowledge-organizer` 或其他下游 Skill",
         ):
             self.assertIn(phrase, f"{skill}\n{delivery}")
 
-        self.assertNotIn("不得调用 `by-knowledge-manager`", f"{skill}\n{delivery}")
+        self.assertNotIn("不得调用 `project-cloud-knowledge`", f"{skill}\n{delivery}")
         self.assertNotIn("不得调用 `knowledge-organizer`", f"{skill}\n{delivery}")
 
         indexed_paths = {
@@ -445,6 +478,24 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         self.assertNotIn("knowledge-ingest.md", indexed_paths)
         self.assertFalse((SKILL_ROOT / "references" / "post-processing.md").exists())
         self.assertFalse((SKILL_ROOT / "references" / "knowledge-ingest.md").exists())
+
+    def test_explicit_user_delivery_uses_internal_session_and_exact_handoff(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        contract = (SKILL_ROOT / "references" / "collection-contract.md").read_text(encoding="utf-8")
+        delivery = (SKILL_ROOT / "references" / "delivery.md").read_text(encoding="utf-8")
+        combined = f"{skill}\n{contract}\n{delivery}"
+
+        for phrase in (
+            "`.collection-runs/<run-id>/`",
+            "用户提供的保存路径是交付目录，不是采集会话目录",
+            "`status.collection.deliveryComplete=true`",
+            "`publish --session-dir <dir> --delivery-dir <path>`",
+            "不得覆盖或删除目标目录中已有的未知内容",
+            "`deliveryInput`",
+            "必须把原样的 `deliveryInput` 传给下游 Agent",
+            "不得扫描或猜测交付目录",
+        ):
+            self.assertIn(phrase, combined)
 
     def test_skill_main_entry_stops_after_delivery(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
@@ -693,7 +744,7 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
 
         for phrase in (
             "Every browser-backed Weixin command must run through",
-            "`scripts/weixin-login-gate.mjs`",
+            "`scripts/weixin-browser-runner.mjs`",
             "A retry-shaped user message is not explicit verification completion",
             "`byCLI 2.1.55`",
             "至少 5 秒的租约启动错峰",
@@ -841,7 +892,7 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "Do not create a browser fallback draft",
             "`no final status`",
             "If the failing stage cannot be determined, classify it as uncertain",
-            "scripts/weixin-login-gate.mjs",
+            "scripts/weixin-browser-runner.mjs",
             "paused, non-terminal operation",
             "process-level facts",
             "title substrings are not matches",

@@ -8,7 +8,7 @@
 
 **硬停止（不修改代码）：**
 - **AUTH_REQUIRED** (exit 77) — 提示用户登录
-- **BROWSER_CONNECT** (exit 69) — 提示用户运行 `bycli doctor` + `bycli daemon status` 诊断桥接
+- **BROWSER_CONNECT** (exit 69) — 不修改 adapter；先执行 `node /app/skills/bycli/scripts/bridge-bootstrap.mjs --format json`。仅当结果为 `BRIDGE_UNAVAILABLE` 时提示用户检查托管 Chromium 与扩展；`BRIDGE_RECOVERY_BUSY` 只结束本次调用并稍后重试
 - **CAPTCHA / 限流** — 不是 adapter 问题
 
 **作用域：**
@@ -180,7 +180,7 @@ gh issue create --repo sovovs/byCLI \
 
 | 类型 | 条件 | 行为 |
 |------|------|------|
-| 硬停止 | AUTH/BROWSER_CONNECT/CAPTCHA/限流 | 不修改，报告 |
+| 硬停止 | AUTH/CAPTCHA/限流，或 bridge-bootstrap 最终返回 `BRIDGE_UNAVAILABLE` | 不修改；只报告最终可操作状态 |
 | 软停止 | 3 轮耗尽 | 报告尝试了什么 |
 | 软停止 | 功能完全删除 | 数据不存在了 |
 | 软停止 | 大改版 | 转 adapter-author 流程 |

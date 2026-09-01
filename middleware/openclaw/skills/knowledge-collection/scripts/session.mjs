@@ -319,6 +319,18 @@ export function persistCollection(paths, session, collectionMetadata) {
   persistSession(paths, session);
 }
 
+export function markDeliveryStale(session, reason = 'collection-updated') {
+  if (session?.delivery?.schemaVersion === '1.0'
+    && session.delivery.status === 'published') {
+    session.delivery = {
+      ...session.delivery,
+      status: 'stale',
+      reason,
+      staleAt: new Date().toISOString(),
+    };
+  }
+}
+
 // ── 会话锁(pid/createdAt/ownerId/command) ──
 
 function assertLockShape(rawLock) {
@@ -375,7 +387,7 @@ function sameLock(left, right) {
     && left?.processStartTime === right?.processStartTime;
 }
 
-function linuxProcessStartTime(pid) {
+export function linuxProcessStartTime(pid) {
   try {
     const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
     const commEnd = stat.lastIndexOf(')');

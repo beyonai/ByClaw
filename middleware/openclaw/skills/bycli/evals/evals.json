@@ -70,7 +70,7 @@
     {
       "id": 15,
       "prompt": "bycli doctor 失败了，能直接 browser open 预热吗？",
-      "expected_output": "不能。每次 doctor 后紧接 daemon status；桥接异常时先检查 browser status，只有 /usr/local/bin/start-chrome.sh 存在且可执行才使用它，否则执行 openclaw browser --browser-profile openclaw start，再 doctor → daemon status 复检。不能用 browser open/state 做冷启动、健康检查或预热。",
+      "expected_output": "不能。调用 scripts/bridge-bootstrap.mjs 的统一桥接入口，由它强制每次 doctor 后紧接 daemon status；仅在明确确认 Chromium 未运行时才检查并使用可执行的 /usr/local/bin/start-chrome.sh，否则按安全状态决定是否使用标准启动命令。不能用 browser open/state 做冷启动、健康检查或预热。",
       "files": []
     },
     {
@@ -88,7 +88,7 @@
     {
       "id": 18,
       "prompt": "把 article.html 发布到公众号草稿箱。环境里可能配置了 WECHAT_APPID 和 WECHAT_APPSECRET；如果 API 发布失败也继续用浏览器创建草稿。",
-      "expected_output": "先只判断 WECHAT_APPID 与 WECHAT_APPSECRET 是否都存在且 trim 后非空，不读取、打印或记录其值。两者齐全时优先将其分别传给 --appid 和 --appsecret 走一次 API；任一缺失或为空时直接走浏览器。API 返回任何失败时保留原错误并自动回退浏览器模式一次，回退命令不得携带 --appid/--appsecret，且先完成 doctor 与 daemon status；浏览器成功时报告 draft saved，并附带 API 失败上下文。浏览器也失败时同时报告两个错误，不再重试或反向回退。",
+      "expected_output": "先只判断 WECHAT_APPID 与 WECHAT_APPSECRET 是否都存在且 trim 后非空，不读取、打印或记录其值。两者齐全时优先将其分别传给 --appid 和 --appsecret 走一次 API；任一缺失或为空时直接走浏览器。API 返回确认未写入的失败时保留原错误，并通过 weixin-browser-runner.mjs --selected-mode browser 自动回退一次，回退命令不得携带 --appid/--appsecret；Runner 自行完成 bridge bootstrap。浏览器成功时报告 draft saved，并附带 API 失败上下文。浏览器也失败时同时报告两个错误，不再重试或反向回退。",
       "files": []
     },
     {
@@ -113,6 +113,36 @@
       "id": 22,
       "prompt": "三路微信命名 Adapter session 并行时，一个 worker 返回 AUTH_REQUIRED，队列里还有任务。",
       "expected_output": "Treat the authentication result as the existing human gate: prevent queued commands from starting, preserve completed and already-running terminal outcomes, keep the affected Adapter tab available, do not inspect it with raw browser commands, and never automatically resume or replay cancelled queued writes.",
+      "files": []
+    },
+    {
+      "id": 23,
+      "prompt": "bycli weixin user-info 返回 BROWSER_CONNECT，错误里有随机 profile 9gvevbxy。是不是要让我打开桌面 Chrome？",
+      "expected_output": "不能根据随机 profile 推断桌面 Chrome。通过 weixin-browser-runner.mjs 让统一 bridge bootstrap 先检查 OpenClaw 托管 Chromium；只有 BRIDGE_UNAVAILABLE 才请求用户检查托管 Chromium 与扩展。",
+      "files": []
+    },
+    {
+      "id": 24,
+      "prompt": "微信浏览器命令预检时 Chromium 已运行，但 Extension disconnected。还要执行 start-chrome.sh 吗？",
+      "expected_output": "不要。Chromium 已运行时不得执行 start-chrome.sh 或标准 browser start；统一 bridge bootstrap 继续 doctor → daemon status 复检，并在共享预算允许时最多执行一次 daemon restart。",
+      "files": []
+    },
+    {
+      "id": 25,
+      "prompt": "微信登录 Gate 正在 waiting-confirmation，我只说普通“重试”。",
+      "expected_output": "不得把普通“重试”视为人工验证完成；Gate 直接返回需要明确确认，不得执行 structured help、bridge bootstrap、doctor、daemon、browser lifecycle 或底层微信命令。",
+      "files": []
+    },
+    {
+      "id": 26,
+      "prompt": "weixin-browser-runner 已返回 details.bridgeCode=BRIDGE_UNAVAILABLE，还要在外层再跑一次恢复吗？",
+      "expected_output": "不得再次执行 bridge-bootstrap、doctor、browser start 或 daemon restart。Runner 已拥有并消费本次恢复预算，应报告最终不可用状态并停止。",
+      "files": []
+    },
+    {
+      "id": 27,
+      "prompt": "weixin-browser-runner 返回 BRIDGE_RECOVERY_BUSY，是否马上启动另一套 Chromium 恢复？",
+      "expected_output": "不得再次执行恢复。BRIDGE_RECOVERY_BUSY 表示另一任务持有恢复锁，本次结束且不请求用户操作，稍后重新发起任务。",
       "files": []
     }
   ]

@@ -61,6 +61,19 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+
+  .viewAllInlineButton {
+    align-self: center;
+    margin-top: 8px;
+    color: #7a8596;
+
+    &:hover,
+    &:focus-visible {
+      color: #4f5b6b;
+    }
+  }
 
   .connectorItem {
     width: 100%;
@@ -152,6 +165,12 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+}
+
+.connectorDescription {
+  display: block;
+  max-width: 100%;
+  white-space: nowrap;
 }
 
 .credentialExpiration {

@@ -76,6 +76,7 @@ export const MODEL_PROTOCOL_OPTIONS = [
   { label: 'OpenAI', value: 'OpenAI' },
   { label: 'OpenAI Responses', value: 'OpenAI Responses' },
   { label: 'Anthropic', value: 'Anthropic' },
+  { label: 'Qwen', value: 'Qwen' },
   { label: 'MiniMax Image', value: 'MINIMAX_IMAGE' },
 ] as const;
 

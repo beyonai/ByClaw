@@ -1,6 +1,6 @@
 ---
-name: by-knowledge-manager-search
-description: "检索一个或多个 ByClaw 知识库。用于语义切片检索、文件级检索、选择全文/向量/混合召回模式，以及使用 Agent DSL 按系统文件属性或自定义元数据过滤结果。"
+name: project-cloud-knowledge-search
+description: "检索一个或多个 ByClaw 知识库或项目云盘。用于语义切片检索、文件级检索、选择全文/向量/混合召回模式，以及使用 Agent DSL 按系统文件属性或自定义元数据过滤结果。"
 ---
 
 # 检索知识库
@@ -18,7 +18,7 @@ description: "检索一个或多个 ByClaw 知识库。用于语义切片检索�
 ## 执行切片检索
 
 ```bash
-python3 <by-knowledge-manager目录>/scripts/by_knowledge_manager.py search \
+python3 <project-cloud-knowledge目录>/scripts/project_cloud_knowledge.py search \
   --resource-id RESOURCE_ID \
   --query "员工请假流程是什么" \
   --top-k 20
@@ -29,7 +29,7 @@ python3 <by-knowledge-manager目录>/scripts/by_knowledge_manager.py search \
 带 DSL 和元数据返回字段的检索：
 
 ```bash
-python3 <by-knowledge-manager目录>/scripts/by_knowledge_manager.py search \
+python3 <project-cloud-knowledge目录>/scripts/project_cloud_knowledge.py search \
   --resource-id RESOURCE_ID \
   --query "合同续签" \
   --where-json '{"and":[{"eq":{"fieldName":"status","value":"active"}},{"contains":{"fieldName":"tags","value":"contract"}}]}' \
@@ -44,7 +44,7 @@ python3 <by-knowledge-manager目录>/scripts/by_knowledge_manager.py search \
 ## 执行文件检索
 
 ```bash
-python3 <by-knowledge-manager目录>/scripts/by_knowledge_manager.py search-file \
+python3 <project-cloud-knowledge目录>/scripts/project_cloud_knowledge.py search-file \
   --resource-id RESOURCE_ID \
   --query "故障" \
   --where-json '{"prefix":{"fieldName":"fileName","value":"运维"}}' \

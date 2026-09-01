@@ -4,8 +4,131 @@ import { chmod, mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, unlink,
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
+import test from 'node:test';
+import {
+  createDiscoveryAuthorization,
+  recordDiscoveryResult,
+  reserveDiscoveryAttempt,
+} from './discovery-authorization.mjs';
+import { registerFullTextEvidenceReceipt } from './collection-state.mjs';
+import { sessionPaths } from './session.mjs';
 
 const scriptPath = resolve(dirname(new URL(import.meta.url).pathname), 'knowledge-collection.mjs');
+
+test('collect rejects a public URL that was not authorized by discovery', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-collection-discovery-gate-'));
+  try {
+    const initialized = await runCli([
+      'init', '--session-dir', root, '--query', 'DeepSeek article',
+      '--source-scope', '["public-internet"]',
+    ]);
+    assert.equal(initialized.code, 0, initialized.stderr || initialized.stdout);
+    const sessionPath = join(root, 'session.json');
+    const session = JSON.parse(await readFile(sessionPath, 'utf8'));
+    session.task.discoveryGate = createDiscoveryAuthorization();
+    await writeFile(sessionPath, `${JSON.stringify(session, null, 2)}\n`);
+    await writeFile(join(root, 'markdown/deepseek.md'), '# DeepSeek\n');
+    await writeFile(join(root, 'sanitized/items/deepseek.md'), '# DeepSeek\n');
+    const payloadPath = join(root, '.collection-inputs/deepseek.json');
+    await writeFile(payloadPath, JSON.stringify({
+      schemaVersion: '1.0',
+      itemId: 'deepseek-r1',
+      source: 'public-internet',
+      sourceSkill: 'bycli',
+      backend: 'arxiv',
+      markdownPath: 'markdown/deepseek.md',
+      sanitizedPath: 'sanitized/items/deepseek.md',
+      contentGranularity: 'full-text',
+      canonicalItem: {
+        title: 'DeepSeek-R1',
+        url: 'https://arxiv.org/abs/2501.12948',
+        author: 'DeepSeek-AI',
+        publishTime: '',
+        markdown: 'sanitized/items/deepseek.md',
+        fileName: 'sanitized/items/deepseek.md',
+      },
+    }));
+
+    const collected = await runCli(['collect', '--session-dir', root, '--item-json-file', payloadPath]);
+    assert.equal(collected.code, 1);
+    assert.equal(collected.json.errorCode, 'SOURCE_NOT_AUTHORIZED_BY_DISCOVERY');
+    assert.match(collected.json.error, /SOURCE_NOT_AUTHORIZED_BY_DISCOVERY/);
+
+    reserveDiscoveryAttempt(session.task.discoveryGate, { query: 'DeepSeek-R1', category: 'science' });
+    const recorded = recordDiscoveryResult(session.task.discoveryGate, {
+      query: 'DeepSeek-R1',
+      category: 'science',
+      candidates: [{
+        url: 'https://arxiv.org/abs/2501.12948',
+        sourceUrls: ['https://arxiv.org/pdf/2501.12948'],
+        pageType: 'article',
+      }],
+    });
+    await writeFile(sessionPath, `${JSON.stringify(session, null, 2)}\n`);
+    const missingExecutorEvidence = await runCli([
+      'collect', '--session-dir', root, '--item-json-file', payloadPath,
+    ]);
+    assert.equal(missingExecutorEvidence.code, 1);
+    assert.match(missingExecutorEvidence.json.error, /fullTextEvidence|执行器.*全文证据/);
+
+    await mkdir(join(root, 'raw/bycli'), { recursive: true });
+    await writeFile(join(root, 'raw/bycli/deepseek-result.json'), `${JSON.stringify({
+      schemaVersion: '1.0',
+      executor: 'bycli',
+      sourceUrl: 'https://arxiv.org/abs/2501.12948',
+      complete: true,
+      contentGranularity: 'full-text',
+    }, null, 2)}\n`);
+    const payload = JSON.parse(await readFile(payloadPath, 'utf8'));
+    payload.rawArtifacts = ['raw/bycli/deepseek-result.json'];
+    payload.fullTextEvidence = {
+      schemaVersion: '1.0',
+      executor: 'bycli',
+      artifact: 'raw/bycli/deepseek-result.json',
+    };
+    await writeFile(payloadPath, `${JSON.stringify(payload, null, 2)}\n`);
+
+    const unregisteredEvidence = await runCli([
+      'collect', '--session-dir', root, '--item-json-file', payloadPath,
+    ]);
+    assert.equal(unregisteredEvidence.code, 1);
+    assert.match(unregisteredEvidence.json.error, /未由专用 materializer 注册/);
+
+    registerFullTextEvidenceReceipt(sessionPaths(root), {
+      executor: 'bycli',
+      sourceUrl: 'https://arxiv.org/abs/2501.12948',
+      artifact: 'raw/bycli/deepseek-result.json',
+    });
+
+    const authorized = await runCli(['collect', '--session-dir', root, '--item-json-file', payloadPath]);
+    assert.equal(authorized.code, 0, authorized.stderr || authorized.stdout);
+    const persisted = JSON.parse(await readFile(sessionPath, 'utf8'));
+    assert.equal(
+      persisted.collection.collection.items[0].discoveryCandidateId,
+      recorded.articleCandidates[0].candidateId,
+    );
+    assert.deepEqual(persisted.collection.collection.items[0].fullTextEvidence, {
+      schemaVersion: '1.0',
+      executor: 'bycli',
+      artifact: 'raw/bycli/deepseek-result.json',
+    });
+
+    await writeFile(join(root, 'raw/bycli/deepseek-result.json'), `${JSON.stringify({
+      schemaVersion: '1.0',
+      executor: 'bycli',
+      sourceUrl: 'https://arxiv.org/abs/2501.12948',
+      complete: false,
+      contentGranularity: 'unknown',
+    }, null, 2)}\n`);
+    const drifted = await runCli(['status', '--session-dir', root, '--full']);
+    assert.equal(drifted.code, 0, drifted.stderr || drifted.stdout);
+    assert.equal(drifted.json.collection.contentGranularity['full-text'], 0);
+    assert.equal(drifted.json.collection.contentGranularity.unknown, 1);
+    assert.ok(drifted.json.warnings.some((warning) => /fullTextEvidence.*unknown/.test(warning)));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 function runCli(args) {
   return new Promise((resolveRun) => {
@@ -37,6 +160,7 @@ async function createCollectedSession() {
   const initialized = await runCli([
     'init', '--session-dir', root, '--query', 'collect example',
     '--collection-result-input-file', initial,
+    '--direct-urls', '["https://example.com/paper","https://example.com/paper-copy"]',
   ]);
   await unlink(initial);
   assert.equal(initialized.code, 0, initialized.stderr || initialized.stdout);
@@ -74,6 +198,7 @@ await (async () => {
     const initialized = await runCli([
       'init', '--session-dir', root, '--query', 'fresh collection',
       '--source-scope', '["public-internet"]', '--materialization-target', 'all',
+      '--direct-urls', '["https://example.com/fresh"]',
     ]);
     assert.equal(initialized.code, 0, initialized.stderr || initialized.stdout);
     await Promise.all([

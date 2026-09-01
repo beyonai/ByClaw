@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.manager.mapper.artifact;
 
 import com.iwhalecloud.byai.state.domain.artifact.model.ArtifactDataRecord;
 import java.time.LocalDateTime;
+import java.util.List;
 import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
@@ -37,6 +38,36 @@ public interface ArtifactDataRecordMapper {
         """)
     ArtifactDataRecord selectByRecordKey(@Param("artifactId") String artifactId,
         @Param("recordKey") String recordKey);
+
+    @Select("""
+        <script>
+        SELECT COUNT(*)
+        FROM artifact_data_record
+        WHERE artifact_id = #{artifactId}
+        <if test="collectionName != null">
+          AND collection_name = #{collectionName}
+        </if>
+        </script>
+        """)
+    long countByArtifact(@Param("artifactId") String artifactId,
+        @Param("collectionName") String collectionName);
+
+    @Select("""
+        <script>
+        SELECT id, artifact_id, collection_name, record_key, data_json::text AS data_json,
+               version, create_time, update_time
+        FROM artifact_data_record
+        WHERE artifact_id = #{artifactId}
+        <if test="collectionName != null">
+          AND collection_name = #{collectionName}
+        </if>
+        ORDER BY create_time DESC, id DESC
+        LIMIT #{pageSize} OFFSET #{offset}
+        </script>
+        """)
+    List<ArtifactDataRecord> selectPageByArtifact(@Param("artifactId") String artifactId,
+        @Param("collectionName") String collectionName, @Param("offset") long offset,
+        @Param("pageSize") int pageSize);
 
     @Update("""
         UPDATE artifact_data_record

@@ -116,6 +116,17 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
     this.selectedProject = project;
   };
 
+  /** 打开统一资源弹窗，并切换到指定资源分类。供输入框外部快捷入口复用。 */
+  openResourcePicker = (tabKey = 'expert') => {
+    this.setState({
+      toolsPopoverOpen: true,
+      toolsPopoverWidth: this.inputBlockRef.current?.getBoundingClientRect().width,
+      toolsPopoverKeyword: undefined,
+      activeToolMenuKey: tabKey,
+      visitedToolTabs: [tabKey],
+    });
+  };
+
   constructor(props: P & IProps) {
     super(props);
 
@@ -524,14 +535,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
                   className={styles.addToolButton}
                   aria-label="打开聊天工具"
                   icon={<AntdIcon type="icon-a-Plusjia" style={{ fontSize: 20 }} />}
-                  onClick={() =>
-                    this.setState({
-                      toolsPopoverOpen: true,
-                      toolsPopoverWidth: this.inputBlockRef.current?.getBoundingClientRect().width,
-                      toolsPopoverKeyword: undefined,
-                      visitedToolTabs: ['expert'],
-                    })
-                  }
+                  onClick={() => this.openResourcePicker('expert')}
                 />
               </Tooltip>
             </>
@@ -763,6 +767,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
               toolsPopoverOpen: open,
               toolsPopoverWidth: open ? width : undefined,
               toolsPopoverKeyword: open ? inputText : undefined,
+              ...(open ? { activeToolMenuKey: 'expert', visitedToolTabs: ['expert'] } : {}),
             })
           }
         />
@@ -835,6 +840,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
           resourceAgentIds={this.getResourceAgentIds()}
           excludedAgentIds={this.getInlineDigitalEmployeeList().map((item) => `${item.resourceId}`)}
           inputText={this.state.toolsPopoverKeyword}
+          activeTabKey={this.state.activeToolMenuKey}
           {...getResourcePopoverAdapter({
             open: this.state.toolsPopoverOpen === true,
             width: this.state.toolsPopoverWidth,

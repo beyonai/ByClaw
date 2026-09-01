@@ -104,6 +104,7 @@ export const getCredentialExpirationDisplay = (
 
 // 用于分批放开聊天框入口；接口不可用时不会模拟授权成功。
 export const CONNECTOR_ENTRY_VISIBLE = true;
+const CONNECTOR_STATE_CHANGED_EVENT = 'byclaw-connector-state-changed';
 
 export type Connector = {
   id: ConnectorId;
@@ -136,6 +137,9 @@ type ConnectorControlProps = {
   // 兼容尚未同步升级的调用方；连接器状态只以后端全局开关为准。
   value?: Connector[];
   onChange?: (connectors: Connector[]) => void;
+
+  /** 外部已选连接器点击时打开统一资源选择面板。 */
+  onOpenResourcePicker?: () => void;
 };
 
 // 已有官方图标的连接器按接口编码匹配，其余平台使用统一图标，列表内容完全以后端返回为准。
@@ -144,9 +148,19 @@ const connectorIconMap: Record<string, React.ReactNode> = {
   wecom: <AntdIcon type="icon-qiyeweixin" />,
   lark: <AntdIcon type="icon-feishu" />,
   github: <GithubOutlined />,
+  'ima-openapi': <FileTextOutlined />,
+  'weixin-official-api': <GlobalOutlined />,
+  'weixin-open-platform': <LinkOutlined />,
 };
 
-const getConnectorIcon = (connectorCode: string) => connectorIconMap[connectorCode] || <ApiOutlined />;
+const getConnectorIcon = (connectorCode: string, connectorName?: string) => {
+  if (connectorIconMap[connectorCode]) return connectorIconMap[connectorCode];
+  const name = connectorName || '';
+  if (name.includes('公众号')) return <GlobalOutlined />;
+  if (name.includes('开放平台')) return <LinkOutlined />;
+  if (name.toUpperCase().includes('IMA')) return <FileTextOutlined />;
+  return <ApiOutlined />;
+};
 
 // 不再过滤接口数据，所有连接器都保留后端的 ID、编码、名称和描述。
 const mapConnectorListItem = (item: ConnectorListItem): Connector => ({
@@ -155,7 +169,7 @@ const mapConnectorListItem = (item: ConnectorListItem): Connector => ({
   name: item.connectorName,
   description: item.description,
   authType: 'oauth',
-  icon: getConnectorIcon(item.connectorCode),
+  icon: getConnectorIcon(item.connectorCode, item.connectorName),
   enableFlag: item.enableFlag,
   credentialState: item.credentialState,
   renewalMode: item.renewalMode,
@@ -307,9 +321,9 @@ const ConnectorSelection = ({
   );
 
   return (
-    <Tooltip title={interactive ? '查看已连接连接器' : undefined}>
+    <Tooltip title={interactive ? '查看连接器' : undefined}>
       {interactive ? (
-        <button className={styles.selection} type="button" aria-label="查看已连接连接器" onClick={onOpen}>
+        <button className={styles.selection} type="button" aria-label="查看连接器" onClick={onOpen}>
           {avatarGroup}
         </button>
       ) : (
@@ -326,6 +340,7 @@ const ConnectorControl = ({
   inline = false,
   outside = false,
   userInfo: userInfoProp,
+  onOpenResourcePicker,
 }: ConnectorControlProps) => {
   const storeUserInfo = useSelector((state: any) => state.user?.userInfo);
   const userInfo = userInfoProp || storeUserInfo;
@@ -476,7 +491,7 @@ const ConnectorControl = ({
 
   const completeAuthorization = useCallback(
     (authorization: ConnectorAuthorization) => {
-      const connector = connectors.find((item) => item.id === authorization.connectorId);
+      const connector = connectors.find((item) => `${item.id}` === `${authorization.connectorId}`);
       if (!connector) return;
 
       // 后端确认 connected 后，本地立即回显为全局开启状态。
@@ -484,10 +499,15 @@ const ConnectorControl = ({
       activeAuthorizationIdRef.current = undefined;
       setConnectors((items) =>
         items.map((item) =>
-          item.id === authorization.connectorId
+          `${item.id}` === `${authorization.connectorId}`
             ? { ...item, enableFlag: 'Y' as const, credentialExpiresAt: undefined }
             : item
         )
+      );
+      window.dispatchEvent(
+        new CustomEvent(CONNECTOR_STATE_CHANGED_EVENT, {
+          detail: { connectorId: authorization.connectorId, enableFlag: 'Y' },
+        })
       );
       setAuthorizationSession(undefined);
       setAuthorizingConnector(undefined);
@@ -590,8 +610,27 @@ const ConnectorControl = ({
     void loadAuthorizedConnectors();
   }, [loadAuthorizedConnectors, userInfo?.userId]);
 
+  useEffect(() => {
+    const handleConnectorStateChanged = (event: Event) => {
+      const detail = (event as CustomEvent<{ connectorId?: ConnectorId; enableFlag?: ConnectorEnableFlag }>).detail;
+      if (detail?.connectorId === undefined || detail.enableFlag === undefined) return;
+      setConnectors((items) =>
+        items.map((item) =>
+          `${item.id}` === `${detail.connectorId}` ? { ...item, enableFlag: detail.enableFlag } : item
+        )
+      );
+    };
+    window.addEventListener(CONNECTOR_STATE_CHANGED_EVENT, handleConnectorStateChanged);
+    return () => window.removeEventListener(CONNECTOR_STATE_CHANGED_EVENT, handleConnectorStateChanged);
+  }, []);
+
   const openSettings = () => {
     setSettingsOpen(true);
+    void loadAuthorizedConnectors();
+  };
+
+  const openAllConnectors = () => {
+    setConfigurationOpen(true);
     void loadAuthorizedConnectors();
   };
 
@@ -666,6 +705,11 @@ const ConnectorControl = ({
       await updateConnectorEnable(connector.id, enabled);
       setConnectors((items) =>
         items.map((item) => (item.id === connector.id ? { ...item, enableFlag: enabled ? 'Y' : 'N' } : item))
+      );
+      window.dispatchEvent(
+        new CustomEvent(CONNECTOR_STATE_CHANGED_EVENT, {
+          detail: { connectorId: connector.id, enableFlag: enabled ? 'Y' : 'N' },
+        })
       );
     } catch {
       message.error('连接器启用状态更新失败，请稍后重试');
@@ -809,45 +853,35 @@ const ConnectorControl = ({
         </span>
       );
     }
-    // 加号/@资源弹窗统一提供“连接”入口，避免同一连接器因授权状态字段不同而出现不同操作样式。
-    if (inline) {
-      return (
-        <Button
-          type="text"
-          onClick={() => void beginAuthorization(connector)}
-          style={{ color: 'var(--beyond-color-primary)' }}
-        >
-          连接
-        </Button>
-      );
-    }
     if (connector.enableFlag === 'Y' || connector.enableFlag === 'N') {
       const switchLabel = connector.enableFlag === 'Y' ? `停用${connector.name}` : `启用${connector.name}`;
       return (
         <>
-          <Dropdown
-            menu={{
-              items: [
-                { key: 'reauthorize', icon: <ReloadOutlined />, label: '重新授权' },
-                { key: 'revoke', danger: true, icon: <DisconnectOutlined />, label: '取消授权' },
-              ],
-              onClick: ({ key }) => {
-                if (key === 'reauthorize') void beginAuthorization(connector);
-                if (key === 'revoke') confirmRevokeAuthorization(connector);
-              },
-            }}
-            placement="bottomRight"
-            trigger={['hover', 'click']}
-          >
-            <Button
-              aria-label={`更多${connector.name}操作`}
-              className={styles.moreActionButton}
-              disabled={revokingConnectorIds.has(connector.id)}
-              loading={revokingConnectorIds.has(connector.id)}
-              icon={<EllipsisOutlined />}
-              type="text"
-            />
-          </Dropdown>
+          {!inline && (
+            <Dropdown
+              menu={{
+                items: [
+                  { key: 'reauthorize', icon: <ReloadOutlined />, label: '重新授权' },
+                  { key: 'revoke', danger: true, icon: <DisconnectOutlined />, label: '取消授权' },
+                ],
+                onClick: ({ key }) => {
+                  if (key === 'reauthorize') void beginAuthorization(connector);
+                  if (key === 'revoke') confirmRevokeAuthorization(connector);
+                },
+              }}
+              placement="bottomRight"
+              trigger={['hover', 'click']}
+            >
+              <Button
+                aria-label={`更多${connector.name}操作`}
+                className={styles.moreActionButton}
+                disabled={revokingConnectorIds.has(connector.id)}
+                loading={revokingConnectorIds.has(connector.id)}
+                icon={<EllipsisOutlined />}
+                type="text"
+              />
+            </Dropdown>
+          )}
           {(connector.enableFlag === 'Y' || connector.enableFlag === 'N') && (
             <Switch
               checked={connector.enableFlag === 'Y'}
@@ -865,7 +899,14 @@ const ConnectorControl = ({
       return (
         <Button
           type="text"
-          onClick={() => void beginAuthorization(connector)}
+          onMouseDown={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          onClick={(event) => {
+            event.stopPropagation();
+            void beginAuthorization(connector);
+          }}
           style={{ color: 'var(--beyond-color-primary)' }}
         >
           连接
@@ -916,7 +957,9 @@ const ConnectorControl = ({
         <ConnectorIcon connector={connector} />
         <div className={styles.connectorContent}>
           <strong>{connector.name}</strong>
-          <span>{connector.description}</span>
+          <span className={styles.connectorDescription} title={connector.description}>
+            {connector.description}
+          </span>
           {credentialLifecycleText && (
             <span
               className={classNames(styles.credentialExpiration, {
@@ -953,13 +996,17 @@ const ConnectorControl = ({
                   }
                 />
               )}
-            <Button type="link" onClick={openSettings}>
-              打开连接器设置
+            <Button type="link" className={styles.viewAllInlineButton} onClick={openAllConnectors}>
+              查看全部连接器
             </Button>
           </div>
         )
       ) : enabledConnectors.length ? (
-        <ConnectorSelection value={enabledConnectors} onOpen={openSettings} interactive={!outside} />
+        <ConnectorSelection
+          value={enabledConnectors}
+          onOpen={outside && onOpenResourcePicker ? onOpenResourcePicker : openSettings}
+          interactive={!outside || !!onOpenResourcePicker}
+        />
       ) : outside ? null : (
         <Tooltip title="连接器">
           <span aria-label="连接器设置" className={styles.trigger} role="button" onClick={openSettings}>
@@ -1019,7 +1066,7 @@ const ConnectorControl = ({
         className={styles.authorizationModal}
         footer={null}
         open={!!authorizingConnector && !authorizationSession && !credentialSchema}
-        zIndex={1200}
+        zIndex={2000}
         width={570}
         onCancel={() => void cancelAuthorization()}
       >
@@ -1067,7 +1114,7 @@ const ConnectorControl = ({
         keyboard={!startingAuthorization}
         maskClosable={!startingAuthorization}
         open={!!authorizingConnector && !!credentialSchema && !authorizationSession}
-        zIndex={1200}
+        zIndex={2000}
         width={credentialSchema?.helpText ? '80vw' : 480}
         onCancel={() => {
           if (!startingAuthorization) {
@@ -1136,7 +1183,7 @@ const ConnectorControl = ({
         className={styles.qrModal}
         footer={null}
         open={!!authorizingConnector && !!authorizationSession}
-        zIndex={1200}
+        zIndex={2000}
         width={470}
         onCancel={() => void cancelAuthorization()}
       >

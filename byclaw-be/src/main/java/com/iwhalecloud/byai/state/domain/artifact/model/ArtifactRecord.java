@@ -56,6 +56,8 @@ public class ArtifactRecord {
 
     private LocalDateTime expiresAt;
 
+    private LocalDateTime purgeAt;
+
     private LocalDateTime createTime;
 
     private LocalDateTime updateTime;

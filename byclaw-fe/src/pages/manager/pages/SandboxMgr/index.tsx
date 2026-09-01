@@ -44,6 +44,7 @@ import ModalDrawer from '@/pages/manager/components/ModalDrawer';
 import JsonCodeEditor from '@/pages/manager/components/JsonCodeEditor';
 import { getPreferredServiceKey, removePreferredServiceKey } from '@/pages/manager/service/SandboxMgr';
 import { isAdminVip } from '@/pages/manager/utils/auth';
+import { buildServiceSpecPayload, isServiceSpecAutoStartEnabled, type ServiceSpecConfig } from './serviceSpecUtils';
 
 import styles from './index.module.less';
 
@@ -158,11 +159,7 @@ interface SsSandboxRecord {
   lastResizeError?: string;
 }
 
-interface ServiceSpecItem {
-  serviceKey: string;
-  specJson: string;
-  templateJson?: string;
-}
+type ServiceSpecItem = ServiceSpecConfig;
 
 interface ServiceProfileItem {
   id?: number;
@@ -244,6 +241,7 @@ const SandboxMgr = () => {
   const [editingSpec, setEditingSpec] = useState<ServiceSpecItem | null>(null);
   const [specForm] = Form.useForm();
   const [savingSpec, setSavingSpec] = useState(false);
+  const [updatingSpecKey, setUpdatingSpecKey] = useState<string | null>(null);
 
   // 沙箱弹性计算配置相关状态
   const [specDrawerTab, setSpecDrawerTab] = useState('spec');
@@ -734,7 +732,12 @@ const SandboxMgr = () => {
 
   const handleAddSpec = useCallback(() => {
     setEditingSpec(null);
-    specForm.resetFields();
+    specForm.setFieldsValue({
+      serviceKey: '',
+      specJson: '',
+      templateJson: '',
+      enabled: true,
+    });
     setSpecFormVisible(true);
   }, [specForm]);
 
@@ -745,6 +748,7 @@ const SandboxMgr = () => {
         serviceKey: record.serviceKey,
         specJson: record.specJson,
         templateJson: record.templateJson || '',
+        enabled: isServiceSpecAutoStartEnabled(record.enabled),
       });
       setSpecFormVisible(true);
     },
@@ -773,6 +777,7 @@ const SandboxMgr = () => {
           serviceKey: values.serviceKey,
           specJson: values.specJson,
           templateJson: values.templateJson,
+          enabled: values.enabled === false ? 0 : 1,
         },
         success: () => {
           setSavingSpec(false);
@@ -786,6 +791,34 @@ const SandboxMgr = () => {
       });
     });
   }, [dispatch, specForm, loadSpecList]);
+
+  const handleSpecAutoStartChange = useCallback(
+    (record: ServiceSpecItem, checked: boolean) => {
+      const previousEnabled = record.enabled;
+      setUpdatingSpecKey(record.serviceKey);
+      setSpecList((current) =>
+        current.map((item) => (item.serviceKey === record.serviceKey ? { ...item, enabled: checked ? 1 : 0 } : item))
+      );
+      dispatch({
+        type: 'sandboxMgr/saveServiceSpec',
+        payload: buildServiceSpecPayload(record, checked),
+        success: () => {
+          setUpdatingSpecKey(null);
+          message.success(intl.formatMessage({ id: 'sandboxMgr.config.autoStartSaveSuccess' }));
+        },
+        fail: () => {
+          setUpdatingSpecKey(null);
+          setSpecList((current) =>
+            current.map((item) =>
+              item.serviceKey === record.serviceKey ? { ...item, enabled: previousEnabled } : item
+            )
+          );
+          message.error(intl.formatMessage({ id: 'sandboxMgr.config.autoStartSaveFailed' }));
+        },
+      });
+    },
+    [dispatch, intl]
+  );
 
   const handleCancelSpecForm = useCallback(() => {
     setSpecFormVisible(false);
@@ -1872,6 +1905,23 @@ const SandboxMgr = () => {
                         ),
                       },
                       {
+                        title: intl.formatMessage({ id: 'sandboxMgr.config.autoStart' }),
+                        dataIndex: 'enabled',
+                        width: 100,
+                        align: 'center',
+                        render: (value: ServiceSpecItem['enabled'], record: ServiceSpecItem) => (
+                          <Tooltip title={intl.formatMessage({ id: 'sandboxMgr.config.autoStartTip' })}>
+                            <Switch
+                              size="small"
+                              checked={isServiceSpecAutoStartEnabled(value)}
+                              loading={updatingSpecKey === record.serviceKey}
+                              disabled={updatingSpecKey !== null}
+                              onChange={(checked) => handleSpecAutoStartChange(record, checked)}
+                            />
+                          </Tooltip>
+                        ),
+                      },
+                      {
                         title: intl.formatMessage({ id: 'sandboxMgr.table.action' }),
                         width: 150,
                         align: 'center',
@@ -2317,6 +2367,15 @@ const SandboxMgr = () => {
           </Form.Item>
 
           <Form.Item
+            label={intl.formatMessage({ id: 'sandboxMgr.config.autoStart' })}
+            name="enabled"
+            valuePropName="checked"
+            tooltip={intl.formatMessage({ id: 'sandboxMgr.config.autoStartTip' })}
+          >
+            <Switch />
+          </Form.Item>
+
+          <Form.Item
             label={
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                 {intl.formatMessage({ id: 'sandboxMgr.config.specJson' })}
@@ -2329,8 +2388,7 @@ const SandboxMgr = () => {
                       try {
                         specForm.setFieldsValue({ specJson: JSON.stringify(JSON.parse(val), null, 2) });
                       } catch {
-
-                        /* ignore */
+                        return;
                       }
                     }}
                   />
@@ -2407,8 +2465,7 @@ const SandboxMgr = () => {
                       try {
                         specForm.setFieldsValue({ templateJson: JSON.stringify(JSON.parse(val), null, 2) });
                       } catch {
-
-                        /* ignore */
+                        return;
                       }
                     }}
                   />
