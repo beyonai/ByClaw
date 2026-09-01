@@ -45,6 +45,14 @@ describe("by-framework child Resume contract", () => {
     );
   });
 
+  it("rejects a terminal child callback without sourceAgentType", () => {
+    const command = resumeCommand({ sourceAgentType: "" });
+
+    expect(() => parseChildAgentResume(command)).toThrow(
+      "ResumeCommand sourceAgentType is required for a child Agent callback",
+    );
+  });
+
   it("rejects a callback whose parentMessageId points to another request", () => {
     const command = resumeCommand({ parentMessageId: "delegation-2:request" });
 
@@ -78,10 +86,11 @@ function resumeCommand(options: {
   content?: unknown;
   status?: string;
   replyData?: unknown;
+  sourceAgentType?: string;
 } = {}): ResumeCommand {
   return new ResumeCommand(
     new MessageHeader(options.callbackMessageId ?? "callback-message", "11190807", "trace-1", {
-      sourceAgentType: "BYCLAW_CODE_0027032635",
+      sourceAgentType: options.sourceAgentType ?? "BYCLAW_CODE_0027032635",
       targetAgentType: "BY_SUPER",
       parentMessageId: options.parentMessageId ?? "delegation-1:request",
       metadata: options.metadata ?? { delegation_id: "delegation-1" },
