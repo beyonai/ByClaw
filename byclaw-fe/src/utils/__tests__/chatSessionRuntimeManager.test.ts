@@ -159,4 +159,71 @@ describe('utils/chatSessionRuntimeManager', () => {
     chatSessionRuntimeManager.setSessionWaitingForUserInput('s1', false);
     expect(chatSessionRuntimeManager.isSessionWaitingForUserInput('s1')).toBe(false);
   });
+
+  it('tracks a generic server-projected session runtime without a local request', () => {
+    chatSessionRuntimeManager.applySessionRuntime({
+      sessionId: 's1',
+      source: 'integration-a',
+      traceId: 'trace-1',
+      status: 'running',
+      activeAgentCount: 3,
+      activeChildCount: 2,
+      waitingInteractionCount: 0,
+      revision: 4,
+      changedAt: 1000,
+    });
+
+    expect(chatSessionRuntimeManager.isSessionRunning('s1')).toBe(true);
+    expect(chatSessionRuntimeManager.getSessionRuntime('s1')).toMatchObject({
+      status: 'running',
+      activeAgentCount: 3,
+      activeChildCount: 2,
+      revision: 4,
+    });
+
+    // Same source/trace cannot move backwards, even if a delayed terminal event arrives.
+    chatSessionRuntimeManager.applySessionRuntime({
+      sessionId: 's1',
+      source: 'integration-a',
+      traceId: 'trace-1',
+      status: 'idle',
+      activeAgentCount: 0,
+      activeChildCount: 0,
+      waitingInteractionCount: 0,
+      revision: 3,
+      changedAt: 2000,
+    });
+    expect(chatSessionRuntimeManager.isSessionRunning('s1')).toBe(true);
+
+    chatSessionRuntimeManager.applySessionRuntime({
+      sessionId: 's1',
+      source: 'integration-a',
+      traceId: 'trace-1',
+      status: 'idle',
+      activeAgentCount: 0,
+      activeChildCount: 0,
+      waitingInteractionCount: 0,
+      revision: 5,
+      changedAt: 3000,
+    });
+    expect(chatSessionRuntimeManager.isSessionRunning('s1')).toBe(false);
+  });
+
+  it('keeps local and server-projected runtime lifecycles independent', () => {
+    chatSessionRuntimeManager.register({ clientRequestId: 'local-1', sessionId: 's1' });
+    chatSessionRuntimeManager.applySessionRuntime({
+      sessionId: 's1',
+      traceId: 'trace-1',
+      status: 'idle',
+      activeAgentCount: 0,
+      activeChildCount: 0,
+      waitingInteractionCount: 0,
+      revision: 2,
+      changedAt: 2000,
+    });
+
+    expect(chatSessionRuntimeManager.isSessionRunning('s1')).toBe(true);
+    chatSessionRuntimeManager.complete('local-1');
+    expect(chatSessionRuntimeManager.isSessionRunning('s1')).toBe(false);
+  });
 });
