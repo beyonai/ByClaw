@@ -67,6 +67,24 @@ afterEach(() => {
 });
 
 describe("updateTaskPlan", () => {
+  it("registers an unavailable dynamic tool without hooks when disabled", () => {
+    const registerTool = vi.fn();
+    const on = vi.fn();
+    const api = { registerTool, on } as unknown as OpenClawPluginApi;
+    const runtime = {
+      loadActive: vi.fn(),
+      command: vi.fn(),
+      cancel: vi.fn(),
+    } as unknown as TaskPlanRuntimeBridge;
+
+    registerUpdateTaskPlan({ api, runtime, enabled: false });
+
+    expect(registerTool).toHaveBeenCalledTimes(1);
+    expect(registerTool.mock.calls[0]?.[0]({ sessionKey })).toBeNull();
+    expect(registerTool.mock.calls[0]?.[1]).toEqual({ name: "updateTaskPlan" });
+    expect(on).not.toHaveBeenCalled();
+  });
+
   it("does not expose task planning to an OpenClaw request delegated by another agent", () => {
     installChannelContext({ delegatedAgentCall: true });
     const runtime = {
