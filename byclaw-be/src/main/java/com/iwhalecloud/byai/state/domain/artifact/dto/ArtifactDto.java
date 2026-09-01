@@ -6,7 +6,7 @@ import lombok.Builder;
 import lombok.Getter;
 
 /**
- * Public artifact metadata returned by upload and owner-management endpoints.
+ * Artifact metadata returned by publication and owner-management endpoints.
  */
 @Getter
 @Builder
@@ -29,6 +29,11 @@ public class ArtifactDto {
     private String previewUrl;
 
     private String downloadUrl;
+
+    /**
+     * Management capability returned only by the initial publication response.
+     */
+    private String accessKey;
 
     private OffsetDateTime expiresAt;
 

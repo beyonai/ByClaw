@@ -60,9 +60,6 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
 
     private static final String ARTIFACT_UPLOAD_PATH = "/open/api/v1/artifacts";
 
-    private static final Pattern ARTIFACT_DATA_OWNER_PATH = Pattern.compile(
-        ".*/open/api/v1/artifacts/[^/]+/data-records(?:/[^/]+)?/?$");
-
     @Value("${artifact.preview.path-prefix:/artifact-preview}")
     private String artifactPreviewPathPrefix;
 
@@ -195,7 +192,7 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
                 }
                 return this.authenticateBeyondTokenOnlyRequest(request, "数字员工组运行时解析");
             }
-            // Artifact能力URL不依赖登录态；高熵accessKey、过期时间和撤销状态由业务服务校验。
+            // Artifact公开内容与数据接口不依赖登录态；有效期、记录级能力和管理密钥由业务服务校验。
             if (this.isArtifactCapabilityRequest(request)) {
                 return true;
             }
@@ -205,13 +202,6 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
                     return true;
                 }
                 return this.authenticateBeyondTokenOnlyRequest(request, "Artifact发布");
-            }
-            // Agent 访问 Artifact 持久化数据时只能使用沙箱注入的 Beyond-Token，不允许 Cookie 覆盖身份。
-            if (this.isArtifactDataOwnerRequest(request)) {
-                if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
-                    return true;
-                }
-                return this.authenticateBeyondTokenOnlyRequest(request, "Artifact数据访问");
             }
             if (this.checkUrlByRegex(url)) {
                 return true;
@@ -352,15 +342,6 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
     private boolean isArtifactUploadRequest(HttpServletRequest request) {
         return request != null && "POST".equalsIgnoreCase(request.getMethod())
             && endsWithConfiguredPath(request.getRequestURI(), ARTIFACT_UPLOAD_PATH);
-    }
-
-    private boolean isArtifactDataOwnerRequest(HttpServletRequest request) {
-        if (request == null || !("GET".equalsIgnoreCase(request.getMethod())
-            || "POST".equalsIgnoreCase(request.getMethod())
-            || "PUT".equalsIgnoreCase(request.getMethod()))) {
-            return false;
-        }
-        return ARTIFACT_DATA_OWNER_PATH.matcher(StringUtils.defaultString(request.getRequestURI())).matches();
     }
 
     private boolean isArtifactCapabilityRequest(HttpServletRequest request) {

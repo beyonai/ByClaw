@@ -347,7 +347,7 @@ class AccessTokenVerifyInterceptorTest {
         ReflectionTestUtils.setField(interceptor, "artifactPreviewPathPrefix", "/artifact-preview");
         ReflectionTestUtils.setField(interceptor, "artifactDownloadPathPrefix", "/artifact-download");
         MockHttpServletRequest request = new MockHttpServletRequest("GET",
-            "/byaiService/artifact-preview/artifact/key/index.html");
+            "/byaiService/artifact-preview/artifact/index.html");
         request.setContextPath("/byaiService");
 
         assertTrue(interceptor.preHandle(request, new MockHttpServletResponse(), new Object()));
@@ -358,35 +358,10 @@ class AccessTokenVerifyInterceptorTest {
         AccessTokenVerifyInterceptor interceptor = new AccessTokenVerifyInterceptor();
         ReflectionTestUtils.setField(interceptor, "artifactDataPathPrefix", "/artifact-data");
         MockHttpServletRequest request = new MockHttpServletRequest("GET",
-            "/byaiService/artifact-data/artifact/key/records/record-1");
+            "/byaiService/artifact-data/artifact/records/record-1");
         request.setContextPath("/byaiService");
 
         assertTrue(interceptor.preHandle(request, new MockHttpServletResponse(), new Object()));
     }
 
-    @Test
-    void artifactDataOwnerReadUsesBeyondTokenIdentity() {
-        AccessTokenVerifyInterceptor interceptor = new AccessTokenVerifyInterceptor();
-        JwtTokenFilter jwtTokenFilter = mock(JwtTokenFilter.class);
-        LoginApplicationService loginApplicationService = mock(LoginApplicationService.class);
-        ReflectionTestUtils.setField(interceptor, "jwtTokenFilter", jwtTokenFilter);
-        ReflectionTestUtils.setField(interceptor, "loginApplicationService", loginApplicationService);
-        LoginInfo tokenLoginInfo = new LoginInfo();
-        tokenLoginInfo.setUserId(100L);
-        tokenLoginInfo.setUserCode("artifact-user");
-        LoginInfo localLoginInfo = new LoginInfo();
-        localLoginInfo.setUserId(10L);
-        localLoginInfo.setUserCode("artifact-user");
-        when(jwtTokenFilter.doFilter(null, "artifact-token")).thenAnswer(invocation -> {
-            CurrentUserHolder.setLoginInfo(tokenLoginInfo);
-            return true;
-        });
-        when(loginApplicationService.getLoginInfo("artifact-user")).thenReturn(localLoginInfo);
-        MockHttpServletRequest request = new MockHttpServletRequest("GET",
-            "/byaiService/open/api/v1/artifacts/artifact-1/data-records/record-1");
-        request.addHeader("Beyond-Token", "artifact-token");
-
-        assertTrue(interceptor.preHandle(request, new MockHttpServletResponse(), new Object()));
-        assertThat(CurrentUserHolder.getCurrentUserId()).isEqualTo(10L);
-    }
 }

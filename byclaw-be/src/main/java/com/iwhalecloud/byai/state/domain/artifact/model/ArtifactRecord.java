@@ -50,6 +50,9 @@ public class ArtifactRecord {
 
     private String sha256;
 
+    /**
+     * SHA-256 of the management access key; the original key is returned only when publication succeeds.
+     */
     private String accessKeyHash;
 
     private String warningsJson;

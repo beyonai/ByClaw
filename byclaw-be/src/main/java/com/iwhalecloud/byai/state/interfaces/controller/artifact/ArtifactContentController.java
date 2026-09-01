@@ -36,17 +36,16 @@ public class ArtifactContentController {
     }
 
     @RequestMapping(value = {
-        "${artifact.preview.path-prefix:/artifact-preview}/{artifactId}/{accessKey}",
-        "${artifact.preview.path-prefix:/artifact-preview}/{artifactId}/{accessKey}/",
-        "${artifact.preview.path-prefix:/artifact-preview}/{artifactId}/{accessKey}/{*resourcePath}"
+        "${artifact.preview.path-prefix:/artifact-preview}/{artifactId}",
+        "${artifact.preview.path-prefix:/artifact-preview}/{artifactId}/",
+        "${artifact.preview.path-prefix:/artifact-preview}/{artifactId}/{*resourcePath}"
     }, method = {RequestMethod.GET, RequestMethod.HEAD})
     public ResponseEntity<StreamingResponseBody> preview(@PathVariable("artifactId") String artifactId,
-        @PathVariable("accessKey") String accessKey,
         @PathVariable(value = "resourcePath", required = false) String resourcePath,
         HttpServletRequest request) {
         ArtifactContent content;
         try {
-            content = artifactApplicationService.resolvePreview(artifactId, accessKey, resourcePath);
+            content = artifactApplicationService.resolvePreview(artifactId, resourcePath);
         }
         catch (IllegalArgumentException e) {
             content = null;
@@ -54,11 +53,11 @@ public class ArtifactContentController {
         return content == null ? notFound() : serve(content, request, false);
     }
 
-    @RequestMapping(value = "${artifact.download.path-prefix:/artifact-download}/{artifactId}/{accessKey}",
+    @RequestMapping(value = "${artifact.download.path-prefix:/artifact-download}/{artifactId}",
         method = {RequestMethod.GET, RequestMethod.HEAD})
     public ResponseEntity<StreamingResponseBody> download(@PathVariable("artifactId") String artifactId,
-        @PathVariable("accessKey") String accessKey, HttpServletRequest request) {
-        ArtifactContent content = artifactApplicationService.resolveDownload(artifactId, accessKey);
+        HttpServletRequest request) {
+        ArtifactContent content = artifactApplicationService.resolveDownload(artifactId);
         return content == null ? notFound() : serve(content, request, true);
     }
 

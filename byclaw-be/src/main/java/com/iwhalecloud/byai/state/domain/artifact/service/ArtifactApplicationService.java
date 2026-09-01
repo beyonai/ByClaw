@@ -63,7 +63,7 @@ public class ArtifactApplicationService {
         long ttlSeconds = validateExpiry(expiresInSeconds);
         String originalName = safeOriginalName(file.getOriginalFilename());
         String artifactId = UUID.randomUUID().toString();
-        String accessKey = generateAccessKey();
+        String accessKey = generateManagementAccessKey();
         String storageType = StringUtils.defaultIfBlank(properties.getStorageType(), StorageType.FILE);
         String storageRoot = StorageType.isLocalFilesystem(storageType)
             ? properties.getLocalRoot() : properties.getBucket();
@@ -171,22 +171,36 @@ public class ArtifactApplicationService {
         cleanupService.deleteAsync(record.getArtifactId());
     }
 
-    public void requireOwnedDataAccessible(String artifactId) {
-        ArtifactRecord record = requireOwned(artifactId);
-        requireRetainedHtmlDataAccessible(record);
-        renewPurgeAfterAccess(record);
-    }
-
-    public void requireCapabilityDataAccessible(String artifactId, String accessKey) {
-        ArtifactRecord record = resolveCapability(artifactId, accessKey);
+    public void requirePublicDataAccessible(String artifactId) {
+        ArtifactRecord record = resolvePublicAccess(artifactId);
         if (record == null) {
-            throw new IllegalArgumentException("Artifact不存在或访问凭证无效");
+            throw new IllegalArgumentException("Artifact不存在或已过期");
         }
         requireRetainedHtmlDataAccessible(record);
     }
 
-    public ArtifactContent resolvePreview(String artifactId, String accessKey, String requestedPath) {
-        ArtifactRecord record = resolveCapability(artifactId, accessKey);
+    /**
+     * Verifies the management key before allowing an unscoped read of retained Artifact data.
+     */
+    public void requireManagementDataAccessible(String artifactId, String accessKey) {
+        if (StringUtils.isAnyBlank(artifactId, accessKey)) {
+            throw new IllegalArgumentException("Artifact不存在或管理访问密钥无效");
+        }
+        ArtifactRecord record = artifactMapper.selectById(artifactId);
+        if (record == null || StringUtils.isBlank(record.getAccessKeyHash())) {
+            throw new IllegalArgumentException("Artifact不存在或管理访问密钥无效");
+        }
+        byte[] actual = sha256Hex(accessKey.getBytes(StandardCharsets.UTF_8)).getBytes(StandardCharsets.US_ASCII);
+        byte[] expected = record.getAccessKeyHash().getBytes(StandardCharsets.US_ASCII);
+        if (!MessageDigest.isEqual(actual, expected)) {
+            throw new IllegalArgumentException("Artifact不存在或管理访问密钥无效");
+        }
+        requireRetainedHtmlDataAccessible(record);
+        renewPurgeAfterAccess(record);
+    }
+
+    public ArtifactContent resolvePreview(String artifactId, String requestedPath) {
+        ArtifactRecord record = resolvePublicAccess(artifactId);
         if (record == null || ArtifactKind.DOWNLOAD_ONLY.name().equals(record.getKind())) {
             return null;
         }
@@ -214,8 +228,8 @@ public class ArtifactApplicationService {
         return new ArtifactContent(record, objectKey, fileName, metadata);
     }
 
-    public ArtifactContent resolveDownload(String artifactId, String accessKey) {
-        ArtifactRecord record = resolveCapability(artifactId, accessKey);
+    public ArtifactContent resolveDownload(String artifactId) {
+        ArtifactRecord record = resolvePublicAccess(artifactId);
         if (record == null
             || !storage.exists(record.getStorageType(), record.getStorageRoot(), record.getOriginalKey())) {
             return null;
@@ -263,19 +277,14 @@ public class ArtifactApplicationService {
         return new Publication(ArtifactKind.SITE, normalizedEntryPoint, extraction.expandedSize(), extraction.warnings());
     }
 
-    private ArtifactRecord resolveCapability(String artifactId, String accessKey) {
-        if (StringUtils.isAnyBlank(artifactId, accessKey)) {
+    private ArtifactRecord resolvePublicAccess(String artifactId) {
+        if (StringUtils.isBlank(artifactId)) {
             return null;
         }
         ArtifactRecord record = artifactMapper.selectById(artifactId);
         if (record == null || !ArtifactStatus.READY.name().equals(record.getStatus())
             || record.getExpiresAt() == null || !record.getExpiresAt().isAfter(LocalDateTime.now())
             || record.getPurgeAt() == null || !record.getPurgeAt().isAfter(LocalDateTime.now())) {
-            return null;
-        }
-        byte[] actual = sha256Hex(accessKey.getBytes(StandardCharsets.UTF_8)).getBytes(StandardCharsets.US_ASCII);
-        byte[] expected = record.getAccessKeyHash().getBytes(StandardCharsets.US_ASCII);
-        if (!MessageDigest.isEqual(actual, expected)) {
             return null;
         }
         renewPurgeAfterAccess(record);
@@ -329,13 +338,11 @@ public class ArtifactApplicationService {
     private ArtifactDto toDto(ArtifactRecord record, String accessKey, List<String> warnings) {
         String previewUrl = null;
         String downloadUrl = null;
-        if (StringUtils.isNotBlank(accessKey)) {
-            String capabilityPath = "/" + record.getArtifactId() + "/" + accessKey;
-            if (!ArtifactKind.DOWNLOAD_ONLY.name().equals(record.getKind())) {
-                previewUrl = buildPublicUrl(properties.getPreviewPathPrefix() + capabilityPath + "/");
-            }
-            downloadUrl = buildPublicUrl(properties.getDownloadPathPrefix() + capabilityPath);
+        String publicPath = "/" + record.getArtifactId();
+        if (!ArtifactKind.DOWNLOAD_ONLY.name().equals(record.getKind())) {
+            previewUrl = buildPublicUrl(properties.getPreviewPathPrefix() + publicPath + "/");
         }
+        downloadUrl = buildPublicUrl(properties.getDownloadPathPrefix() + publicPath);
         return ArtifactDto.builder()
             .artifactId(record.getArtifactId())
             .kind(record.getKind())
@@ -346,6 +353,7 @@ public class ArtifactApplicationService {
             .sha256(record.getSha256())
             .previewUrl(previewUrl)
             .downloadUrl(downloadUrl)
+            .accessKey(accessKey)
             .expiresAt(record.getExpiresAt() == null
                 ? null : record.getExpiresAt().atZone(ZoneId.systemDefault()).toOffsetDateTime())
             .purgeAt(record.getPurgeAt() == null
@@ -444,7 +452,7 @@ public class ArtifactApplicationService {
         }
     }
 
-    private String generateAccessKey() {
+    private String generateManagementAccessKey() {
         byte[] bytes = new byte[32];
         SECURE_RANDOM.nextBytes(bytes);
         return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);

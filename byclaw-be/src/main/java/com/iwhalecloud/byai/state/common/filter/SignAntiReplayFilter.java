@@ -3,7 +3,6 @@ package com.iwhalecloud.byai.state.common.filter;
 
 import java.io.IOException;
 import java.util.List;
-import java.util.regex.Pattern;
 
 import com.iwhalecloud.byai.common.constants.staticdata.RedisConfig;
 import com.iwhalecloud.byai.common.ecrypt.MD5Util;
@@ -55,9 +54,6 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
         "/internal/v1/orchestrators/resolve-runtime";
 
     private static final String ARTIFACT_UPLOAD_PATH = "/open/api/v1/artifacts";
-
-    private static final Pattern ARTIFACT_DATA_OWNER_PATH = Pattern.compile(
-        ".*/open/api/v1/artifacts/[^/]+/data-records(?:/[^/]+)?/?$");
 
     @org.springframework.beans.factory.annotation.Value("${artifact.preview.path-prefix:/artifact-preview}")
     private String artifactPreviewPathPrefix;
@@ -113,9 +109,8 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
             filterChain.doFilter(request, response);
             return;
         }
-        // 沙箱上传与数据访问使用Beyond-Token，匿名预览与数据访问使用能力URL，调用方都不持有门户签名盐。
-        if (this.isArtifactUpload(request) || this.isArtifactDataOwnerRequest(request)
-            || this.isArtifactCapabilityRequest(request)) {
+        // 沙箱上传使用 Beyond-Token；Artifact 公开内容与数据接口使用业务层访问约束，调用方均不持有门户签名盐。
+        if (this.isArtifactUpload(request) || this.isArtifactCapabilityRequest(request)) {
             filterChain.doFilter(request, response);
             return;
         }
@@ -233,15 +228,6 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
     private boolean isArtifactUpload(HttpServletRequest request) {
         return request != null && "POST".equalsIgnoreCase(request.getMethod())
             && endsWithPath(request.getRequestURI(), ARTIFACT_UPLOAD_PATH);
-    }
-
-    private boolean isArtifactDataOwnerRequest(HttpServletRequest request) {
-        if (request == null || !("GET".equalsIgnoreCase(request.getMethod())
-            || "POST".equalsIgnoreCase(request.getMethod())
-            || "PUT".equalsIgnoreCase(request.getMethod()))) {
-            return false;
-        }
-        return ARTIFACT_DATA_OWNER_PATH.matcher(StringUtils.defaultString(request.getRequestURI())).matches();
     }
 
     private boolean isArtifactCapabilityRequest(HttpServletRequest request) {
