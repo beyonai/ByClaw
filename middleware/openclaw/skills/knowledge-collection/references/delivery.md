@@ -38,7 +38,8 @@
 node scripts/knowledge-collection.mjs publish --session-dir <dir> --delivery-dir <path>
 ```
 
-publish 之前不得创建、写入或用临时文件探测用户交付目录。采集失败时只保留内部会话和审计证据，目标目录原本不存在就必须继续不存在。
+只有根 Agent 可以调用 `publish`。委派来源执行器时只传内部 `session-dir` 及其 `raw/` 子路径，不得把用户交付目录传给被委派 Agent。
+publish 之前不得创建、探测或操作用户交付目录，并将该路径视为 opaque 值：不得对其执行 `mkdir`、`ls`、`find`、写入、删除、清空、移动或复制，不得做存在性或空目录检查，也不得用临时文件探测或要求被委派 Agent 操作它。采集失败时只保留内部会话和审计证据，目标目录原本不存在就必须继续不存在。
 当 `status.collection.deliveryComplete=false` 时不得执行 `publish`；应报告空结果、未满足的全文粒度或其他覆盖缺口，不能把已存在的摘要、节选或内部文件当成交付成功。
 
 相对路径同时传 `--session-root <Session Root>`，绝对路径按原值使用。发布器只复制经验证的 Markdown 及其引用的本地图片，

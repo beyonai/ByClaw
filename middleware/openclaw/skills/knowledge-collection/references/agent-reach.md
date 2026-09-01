@@ -30,7 +30,7 @@ node scripts/knowledge-collection.mjs acquire-web --session-dir <dir> --item-id 
 | 目标 | 首选执行器 | 唯一允许的兜底 |
 | --- | --- | --- |
 | 已选中的 `mp.weixin.qq.com/s...` 或 `weixin.sogou.com/link?...` 文章 | `bycli weixin download --url <URL>` | 无 |
-| 用户明确提供的 arXiv 论文全文 | `bycli arxiv paper <paper-id>` + `bycli web read --url <URL> --stdout` | 同一论文 ID 的 `https://arxiv.org/html/<paper-id>` |
+| 用户明确提供的 arXiv 论文全文 | `bycli arxiv paper <paper-id>` + `bycli web read --url <URL> --output <session-dir>/raw/bycli/arxiv/<item-id>/` | 同一论文 ID 的 `https://arxiv.org/html/<paper-id>` |
 | 通用网页 / URL | `knowledge-collection acquire-web` → `materialize-web` | 已由 public-discover 或用户直链授权的 URL |
 | Twitter / X | `twitter-cli` | `bycli twitter search` |
 | Reddit | `rdt-cli` | `bycli reddit search` |
@@ -58,10 +58,13 @@ requires-user-action 都按 STOP 契约保留命令自有 TAB 并停止，微信
 ### arXiv 全文
 
 用户明确提供 arXiv URL 并要求完整正文时，先用 `bycli arxiv paper <paper-id>` 获取元数据，再用
-`bycli web read --url <用户提供的 URL> --stdout` 获取全文。若 PDF 表示无法读取，只允许改用 arXiv 官方同一论文 ID 的
+`bycli web read --url <URL> --output <session-dir>/raw/bycli/arxiv/<item-id>/` 获取全文并让 byCLI 在同一输出目录中落盘正文及图片。`<URL>`
+先使用用户提供的 URL；若 PDF 表示无法读取，只允许改用 arXiv 官方同一论文 ID 的
 `https://arxiv.org/html/<paper-id>`；不得切换论文、使用镜像或凭据参数。原始 URL 必须作为 `sourceUrl`，实际成功读取的
 HTML URL 必须作为 `acquisitionUrl` 持久化，然后交给 `materialize-arxiv` 验证结构完整性并生成全文证据。只有返回非空
-`collectPayloadPath` 时才能调用 `collect`。不得使用 `curl`、`web_fetch`、`wget`、`requests` 做诊断或兜底。
+`collectPayloadPath` 时才能调用 `collect`。保留 byCLI 的原始输出布局，把其实际生成的 Markdown 文件传给
+`materialize-arxiv --fulltext-file`；不得把 stdout 手工重定向成正文，不得手工改写 raw 证据，也不得手工下载或补抓图片。
+不得使用 `curl`、`web_fetch`、`wget`、`requests` 做诊断或兜底。
 
 ## 只读边界
 

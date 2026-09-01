@@ -182,7 +182,8 @@ payload 文件必须位于当前会话的 `.collection-inputs/` 内，成功登�
 `https://arxiv.org/html/<paper-id>`，但必须把该实际地址登记为 `acquisitionUrl`；两者必须是 `arxiv.org` 官方 HTTPS 地址且具有
 相同论文 ID。不得用模型记忆、镜像、`curl`、`web_fetch`、`wget` 或 `requests` 取得替代内容。
 
-元数据 JSON 与 `bycli web read` 的 Markdown 均保存到本会话 `raw/` 后，运行：
+元数据 JSON 与 `bycli web read --url <URL> --output <session-dir>/raw/bycli/arxiv/<item-id>/` 生成的 Markdown、图片均原样保存在
+本会话 `raw/`。不得手工改写 raw 证据或手工下载、补抓图片；将 byCLI 实际生成的 Markdown 文件作为 `--fulltext-file` 后运行：
 
 ```bash
 node scripts/knowledge-collection.mjs materialize-arxiv --session-dir <dir> \

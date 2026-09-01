@@ -170,9 +170,16 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "acquisitionUrl",
             "相同论文 ID",
             "collectPayloadPath",
+            "bycli web read --url <URL> --output <session-dir>/raw/bycli/arxiv/<item-id>/",
+            "不得手工下载或补抓图片",
             "不得使用 `curl`、`web_fetch`",
         ):
             self.assertIn(phrase, combined)
+
+        self.assertNotIn(
+            "bycli web read --url <用户提供的 URL> --stdout",
+            routing,
+        )
 
     def test_publish_completion_requires_first_response_delivery_input_echo(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
@@ -183,6 +190,10 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "原样回显 `deliveryInput`",
             "不得只报告路径",
             "publish 之前不得创建",
+            "不得对其执行 `mkdir`、`ls`、`find`",
+            "不得做存在性或空目录检查",
+            "委派来源执行器时只传内部 `session-dir`",
+            "只有根 Agent",
         ):
             self.assertIn(phrase, skill + delivery)
 
