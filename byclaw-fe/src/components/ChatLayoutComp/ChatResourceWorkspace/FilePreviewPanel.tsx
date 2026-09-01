@@ -88,6 +88,28 @@ const resolveMarkdownImagePath = (markdownPath: string, imagePath: string) => {
   return normalizeFilePath(`${directoryPath}${resourcePath}`);
 };
 
+// 会话目录中的 HTML 经常使用 ../../assets 这类相对路径；资源不应越过当前会话根目录。
+const resolveSessionResourcePath = (sourcePath: string, resourcePath: string) => {
+  const normalizedSourcePath = normalizeFilePath(sourcePath);
+  const sessionRootMatch = normalizedSourcePath.match(/^(\/by\/\.sessions\/[^/]+)\//);
+  const resolvedPath = resolveMarkdownImagePath(normalizedSourcePath, resourcePath);
+  if (!sessionRootMatch || !resourcePath.includes('..')) return resolvedPath;
+
+  const root = sessionRootMatch[1];
+  const relativePath = resourcePath.split(/[?#]/, 1)[0].replace(/^\/+/, '');
+  const baseSegments = normalizedSourcePath.slice(root.length).split('/').filter(Boolean).slice(0, -1);
+  const segments = [...baseSegments];
+  relativePath.split('/').forEach((segment) => {
+    if (!segment || segment === '.') return;
+    if (segment === '..') {
+      if (segments.length) segments.pop();
+      return;
+    }
+    segments.push(segment);
+  });
+  return normalizeFilePath(`${root}/${segments.join('/')}`);
+};
+
 const getFilePathFromUrl = (value?: string) => {
   if (!value) return undefined;
   try {
@@ -167,7 +189,15 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
         return await downloadFileBrowserFile(resourceId!, filePath);
       } catch (error) {
         if (!sessionId || !isSessionFilePath(filePath)) throw error;
-        return loadFromSessionArtifact();
+        try {
+          return await loadFromSessionArtifact();
+        } catch (artifactError) {
+          // 部分文件浏览接口返回的路径不带 /by 前缀，兼容同一会话下的相对资源文件。
+          if (filePath.startsWith('/by/')) {
+            return downloadFileBrowserFile(resourceId!, filePath.slice(3));
+          }
+          throw artifactError;
+        }
       }
     },
     [resourceId, sessionId]
@@ -179,7 +209,11 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
         return imagePath;
       }
 
-      const resolvedPath = sourcePath ? resolveMarkdownImagePath(sourcePath, imagePath) : imagePath;
+      const resolvedPath = sourcePath
+        ? source === 'fileBrowser' && isSessionFilePath(sourcePath)
+          ? resolveSessionResourcePath(sourcePath, imagePath)
+          : resolveMarkdownImagePath(sourcePath, imagePath)
+        : imagePath;
       const cacheKey = `${resourceId || previewFileUrl || ''}:${resolvedPath}`;
       const cached = markdownImageCacheRef.current.get(cacheKey);
       if (cached) return cached;

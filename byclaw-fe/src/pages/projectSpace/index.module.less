@@ -902,9 +902,13 @@
   margin-top: 12px;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
   color: #7c8798;
   font-size: 12px;
+}
+
+.resourceCardMetaPerson {
+  margin-left: 4px;
 }
 
 .sessionItem {
@@ -1570,6 +1574,16 @@
   }
 }
 
+.resourceCardMeta {
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 13px;
+}
+
 .resourceCategoryCard {
   min-width: 0;
   height: 100%;
@@ -1922,13 +1936,13 @@
 
 // 共享文件与个人知识库详情复用同一套扩展名图标，保持 PDF、Word、Excel 等类型识别一致。
 .resourceFileIcon {
-  width: 34px;
-  height: 34px;
+  width: 38px;
+  height: 38px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  flex: 0 0 34px;
-  font-size: 22px;
+  flex: 0 0 38px;
+  font-size: 25px;
 }
 
 .resourceRepoIcon {

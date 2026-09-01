@@ -326,6 +326,7 @@
     }
 
     .@{antPrefix}-tree-iconEle {
+      font-size: 26px;
       color: var(--beyond-color-primary, #1677ff);
       filter: drop-shadow(0 2px 4px rgba(22, 119, 255, 0.16));
     }
@@ -342,6 +343,10 @@
   }
 }
 
+.fileTree :global(.@{antPrefix}-tree-iconEle) {
+  font-size: 26px;
+}
+
 .treeTitleContent {
   position: relative;
   display: inline-flex;
@@ -351,7 +356,7 @@
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
-  padding-right: 24px;
+  padding-right: 0;
 
   &:hover {
     .treeActionTrigger {
@@ -378,7 +383,7 @@
 }
 
 .treeTitleContentCurrent {
-  padding: 0 28px 0 8px;
+  padding: 0 0 0 8px;
   border-radius: 10px;
   background: #f5f6f8;
   box-shadow: inset 0 0 0 1px rgba(31, 37, 51, 0.04);
@@ -420,6 +425,23 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   vertical-align: bottom;
+}
+
+.treeTitleMeta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  overflow: hidden;
+  color: #98a0aa;
+  font-size: 12px;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.treeTitleMetaPerson {
+  margin-left: 4px;
 }
 
 .filePathTooltip {

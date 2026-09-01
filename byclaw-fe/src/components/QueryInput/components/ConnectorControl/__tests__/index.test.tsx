@@ -991,7 +991,7 @@ describe('ConnectorControl authorization states', () => {
     render(<ConnectorControl canAuthorize />);
     fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
     fireEvent.click(await screen.findByRole('button', { name: '更多钉钉操作' }));
-    fireEvent.click(await screen.findByText('重新授权'));
+    fireEvent.click(await screen.findByText('重新连接'));
 
     expect(await screen.findByRole('heading', { name: '连接 钉钉 作为 AI 知识库' })).toBeInTheDocument();
   });

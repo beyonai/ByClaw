@@ -857,31 +857,6 @@ const ConnectorControl = ({
       const switchLabel = connector.enableFlag === 'Y' ? `停用${connector.name}` : `启用${connector.name}`;
       return (
         <>
-          {!inline && (
-            <Dropdown
-              menu={{
-                items: [
-                  { key: 'reauthorize', icon: <ReloadOutlined />, label: '重新授权' },
-                  { key: 'revoke', danger: true, icon: <DisconnectOutlined />, label: '取消授权' },
-                ],
-                onClick: ({ key }) => {
-                  if (key === 'reauthorize') void beginAuthorization(connector);
-                  if (key === 'revoke') confirmRevokeAuthorization(connector);
-                },
-              }}
-              placement="bottomRight"
-              trigger={['hover', 'click']}
-            >
-              <Button
-                aria-label={`更多${connector.name}操作`}
-                className={styles.moreActionButton}
-                disabled={revokingConnectorIds.has(connector.id)}
-                loading={revokingConnectorIds.has(connector.id)}
-                icon={<EllipsisOutlined />}
-                type="text"
-              />
-            </Dropdown>
-          )}
           {(connector.enableFlag === 'Y' || connector.enableFlag === 'N') && (
             <Switch
               checked={connector.enableFlag === 'Y'}
@@ -892,6 +867,29 @@ const ConnectorControl = ({
               // size="small"
             />
           )}
+          <Dropdown
+            menu={{
+              items: [
+                { key: 'reauthorize', icon: <ReloadOutlined />, label: '重新连接' },
+                ...(!inline ? [{ key: 'revoke', danger: true, icon: <DisconnectOutlined />, label: '取消授权' }] : []),
+              ],
+              onClick: ({ key }) => {
+                if (key === 'reauthorize') void beginAuthorization(connector);
+                if (key === 'revoke') confirmRevokeAuthorization(connector);
+              },
+            }}
+            placement="bottomRight"
+            trigger={['hover', 'click']}
+          >
+            <Button
+              aria-label={`更多${connector.name}操作`}
+              className={`${styles.moreActionButton} ${inline ? styles.inlineMoreActionButton : ''}`}
+              disabled={revokingConnectorIds.has(connector.id)}
+              loading={revokingConnectorIds.has(connector.id)}
+              icon={<EllipsisOutlined />}
+              type="text"
+            />
+          </Dropdown>
         </>
       );
     }

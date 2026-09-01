@@ -65,6 +65,9 @@ import { queryProjectCloudDrive } from '@/components/ProjectCloudDrive';
 type ProjectFileItem = FileBrowserItem & {
   fileId: number;
   fileUrl: string;
+  updatedAt?: string;
+  createBy?: string | number | null;
+  createStaffName?: string | null;
 };
 
 interface FileResourcePanelProps {
@@ -140,6 +143,21 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
       `${currentUserId}` === `${project.createBy}`
     );
   }, [project?.createBy, userInfo?.id, userInfo?.userId]);
+
+  const canDeleteProjectItem = useCallback(
+    (item: FileBrowserItem) => {
+      if (scope !== 'project' || isLocalSharedFiles) return true;
+      const creatorName = (item as ProjectFileItem).createStaffName?.trim();
+      if (!creatorName) return true;
+      const currentUserId = userInfo?.userId ?? userInfo?.id;
+      const creatorId = (item as ProjectFileItem).createBy;
+      if (creatorId !== null && creatorId !== undefined && currentUserId !== undefined) {
+        return `${creatorId}` === `${currentUserId}`;
+      }
+      return creatorName === `${userInfo?.userName || userInfo?.name || ''}`;
+    },
+    [isLocalSharedFiles, scope, userInfo?.id, userInfo?.name, userInfo?.userId, userInfo?.userName]
+  );
 
   const loadRoot = useCallback(async () => {
     if (scope === 'session' && (!resourceId || !sessionId)) {
@@ -488,10 +506,18 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
       return keys.map((key) => ({
         key,
         danger: key === 'delete',
-        label: <div className={employeeStyles.dropdownMenuItem}>{labels[key]}</div>,
+        disabled: key === 'delete' && !canDeleteProjectItem(item),
+        label:
+          key === 'delete' && !canDeleteProjectItem(item) ? (
+            <Tooltip title="当前文件由其他人员创建，暂不可删除">
+              <div className={employeeStyles.dropdownMenuItem}>{labels[key]}</div>
+            </Tooltip>
+          ) : (
+            <div className={employeeStyles.dropdownMenuItem}>{labels[key]}</div>
+          ),
       }));
     },
-    [canManageProjectFiles, intl, projectId, resourceId, scope, usesFileBrowser]
+    [canDeleteProjectItem, canManageProjectFiles, intl, projectId, resourceId, scope, usesFileBrowser]
   );
 
   const handleUpload = useCallback(
@@ -576,6 +602,10 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
       if (key === 'rename') setRenameTarget(item);
       if (key === 'saveToProject') void saveToProject(item);
       if (key === 'delete') {
+        if (!canDeleteProjectItem(item)) {
+          message.info('当前文件由其他人员创建，暂不可删除');
+          return;
+        }
         Modal.confirm({
           title: intl.formatMessage({ id: 'fileBrowser.delete.confirm' }),
           content: intl.formatMessage({ id: 'fileBrowser.delete.confirmName' }, { name: item.name }),
@@ -584,7 +614,17 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         });
       }
     },
-    [deleteResource, downloadResource, handleUpload, intl, openPreview, quoteFile, rootPath, saveToProject]
+    [
+      canDeleteProjectItem,
+      deleteResource,
+      downloadResource,
+      handleUpload,
+      intl,
+      openPreview,
+      quoteFile,
+      rootPath,
+      saveToProject,
+    ]
   );
 
   const handleRename = useCallback(
@@ -659,6 +699,26 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   );
 
   if (cardMode && scope === 'project') {
+    const formatFileSize = (size?: number) => {
+      if (!size) return '0 B';
+      if (size < 1024) return `${size} B`;
+      if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+      return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+    };
+    const formatUpdatedAt = (value?: string) => {
+      if (!value) return '-';
+      const date = new Date(value);
+      return Number.isNaN(date.getTime())
+        ? value
+        : date.toLocaleString('zh-CN', {
+          hour12: false,
+          ...(date.getFullYear() === new Date().getFullYear() ? {} : { year: 'numeric' }),
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+        });
+    };
     return (
       <>
         <div className={projectStyles.resourceCardGrid}>
@@ -695,7 +755,18 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
                     </button>
                   </Dropdown>
                 </div>
-                <Typography.Text type="secondary">{item.isDir ? '文件夹' : '文件'}</Typography.Text>
+                <Typography.Text type="secondary" className={projectStyles.resourceCardMeta}>
+                  {!item.isDir && (
+                    <>
+                      {formatFileSize((item as ProjectFileItem).size)}
+                      <span>·</span>
+                    </>
+                  )}
+                  <span>{formatUpdatedAt((item as ProjectFileItem).updatedAt)}</span>
+                  <span className={projectStyles.resourceCardMetaPerson}>
+                    {(item as ProjectFileItem).createStaffName || '-'}
+                  </span>
+                </Typography.Text>
               </article>
             ))
           ) : (
