@@ -57,6 +57,11 @@ export default {
   'sandboxMgr.config.serviceKey': 'Service Key',
   'sandboxMgr.config.specJson': 'Spec JSON',
   'sandboxMgr.config.templateJson': 'Template JSON',
+  'sandboxMgr.config.autoStart': 'Start on Login',
+  'sandboxMgr.config.autoStartTip':
+    'Start this sandbox service asynchronously after login. Disabled services remain available for manual or on-demand launch.',
+  'sandboxMgr.config.autoStartSaveSuccess': 'Auto-start setting saved',
+  'sandboxMgr.config.autoStartSaveFailed': 'Failed to save auto-start setting; the previous state was restored',
   'sandboxMgr.config.serviceKeyPlaceholder': 'Enter Service Key, e.g., python-sandbox',
   'sandboxMgr.config.specJsonPlaceholder': 'Enter Spec JSON',
   'sandboxMgr.config.templateJsonPlaceholder': 'Enter Template JSON (optional)',

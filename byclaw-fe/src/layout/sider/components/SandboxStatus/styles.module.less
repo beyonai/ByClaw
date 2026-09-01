@@ -32,6 +32,39 @@
   }
 }
 
+.serviceItem {
+  display: grid;
+  grid-template-columns: 8px minmax(96px, 1fr) auto auto;
+  gap: 10px;
+  align-items: center;
+  min-width: 320px;
+  padding: 4px 2px;
+}
+
+.serviceStatusDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.serviceName {
+  overflow: hidden;
+  color: rgba(0, 0, 0, 0.88);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.serviceState {
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+}
+
+.serviceAction {
+  color: var(--beyond-color-primary, #1677ff);
+  font-size: 12px;
+}
+
 // 绿色 - 运行中
 .running {
   background-color: #52c41a;
