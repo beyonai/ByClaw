@@ -10,6 +10,26 @@ import * as publicDiscovery from './public-discovery.mjs';
 
 const { runPublicDiscover } = publicDiscovery;
 
+test('selects the bounded Chinese article profile from deterministic task state', () => {
+  const session = newSession({
+    query: '采集一篇关于米哈游的文章',
+    mode: 'collection',
+    sourceScope: ['public-internet'],
+    discoveryGate: createDiscoveryAuthorization({ query: '采集一篇关于米哈游的文章' }),
+  });
+  assert.equal(publicDiscovery.isChineseArticleProfile(session, {
+    query: '米哈游 报道', category: 'general', language: 'zh-CN', 'requested-count': '1',
+  }), true);
+  assert.equal(publicDiscovery.isChineseArticleProfile(session, {
+    query: '米哈游', category: 'images', language: 'zh-CN', 'requested-count': '1',
+  }), false);
+  assert.equal(publicDiscovery.isChineseArticleProfile({
+    ...session, task: { ...session.task, query: '查找米哈游官网' },
+  }, {
+    query: '米哈游', category: 'general', language: 'zh-CN', 'requested-count': '1',
+  }), false);
+});
+
 test('uses the image-wide SearXNG CLI by default', () => {
   assert.deepEqual(
     publicDiscovery.resolveSearxngRuntime({}, {}),
@@ -280,6 +300,53 @@ test('uses only SearXNG when a requested article count is satisfied', async () =
   );
 });
 
+test('Chinese article profile starts SearXNG and bounded hot discovery concurrently', async () => {
+  const { paths } = makeInitializedSession(
+    ['public-internet'],
+    '采集一篇关于米哈游的文章',
+  );
+  const calls = [];
+  const releases = [];
+  let initialWaveReleased = false;
+  const outcome = (spec) => spec.channel === 'searxng'
+    ? { code: 0, stdout: JSON.stringify({ query: '米哈游 报道', results: [] }), stderr: '' }
+    : { code: 0, stdout: JSON.stringify({
+      query: '米哈游 报道', candidates: [], adapterStats: {},
+      dimensions: ['general', 'news', 'blogs'], effectiveDimensions: ['general', 'news', 'blogs'],
+    }), stderr: '' };
+  const promise = runPublicDiscover(paths, {
+    query: '米哈游 报道', category: 'general', language: 'zh-CN', 'requested-count': '1',
+  }, {
+    runProcess: (spec, options) => new Promise((resolve) => {
+      calls.push({ spec, options });
+      if (initialWaveReleased) resolve(outcome(spec));
+      else releases.push(() => resolve(outcome(spec)));
+    }),
+    merge: ({ sxDoc }) => ({
+      query: sxDoc.query,
+      groups: {
+        bothChannels: [], searxngTop: [], agentReachTop: [], hotBySource: {},
+        hotWithoutPopularity: [], unverified: [],
+      },
+    }),
+  });
+  for (let index = 0; index < 10 && calls.length < 2; index += 1) await Promise.resolve();
+  assert.deepEqual(calls.map(({ spec }) => spec.channel).sort(), ['hot-discovery', 'searxng']);
+  const hot = calls.find(({ spec }) => spec.channel === 'hot-discovery');
+  const arg = (name) => hot.spec.args[hot.spec.args.indexOf(name) + 1];
+  assert.equal(arg('--sources'), '36kr,weixin,sogou');
+  assert.equal(arg('--adapter-timeout-ms'), '10000');
+  assert.equal(arg('--minimum-attempts'), '3');
+  assert.ok(Number(arg('--total-budget-ms')) > 0 && Number(arg('--total-budget-ms')) <= 60_000);
+  assert.equal(arg('--dimensions'), 'general,news,blogs');
+  assert.ok(calls.every(({ options }) => options.timeoutMs <= 90_000));
+  initialWaveReleased = true;
+  for (const release of releases) release();
+  const result = await promise;
+  assert.equal(result.discoveryProfile.name, 'chinese-article');
+  assert.deepEqual(result.discoveryProfile.budget, { softMs: 60_000, hardMs: 90_000 });
+});
+
 test('an unrelated trusted publication does not satisfy requested count or receive authorization', async () => {
   const { paths } = makeInitializedSession(
     ['public-internet'],
@@ -319,7 +386,8 @@ test('an unrelated trusted publication does not satisfy requested count or recei
     }),
   });
 
-  assert.deepEqual(calls, ['searxng', 'hot-discovery']);
+  assert.equal(calls.filter((channel) => channel === 'searxng').length, 1);
+  assert.ok(calls.filter((channel) => channel === 'hot-discovery').length >= 1);
   assert.equal(result.candidateQuality.searxng.article, 1);
   assert.equal(result.candidateQuality.searxng.eligibleArticle, 0);
   assert.equal(result.candidateQuality.searxng.topicRelevance.unmatched, 1);

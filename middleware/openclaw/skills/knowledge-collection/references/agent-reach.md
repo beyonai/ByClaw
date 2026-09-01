@@ -16,7 +16,7 @@
 除下方明确列出的站点专用 byCLI 执行路径外，唯一的通用网页读取命令是：
 
 ```bash
-bycli web read --url <URL> --stdout
+node scripts/knowledge-collection.mjs acquire-web --session-dir <dir> --item-id <item-id> --source-url <URL>
 ```
 
 不得预读、探测，也不得回退到 fetcher、reader proxy、直连 HTTP 客户端、旧适配器、通用浏览器或其他网页工具；
@@ -31,7 +31,7 @@ bycli web read --url <URL> --stdout
 | --- | --- | --- |
 | 已选中的 `mp.weixin.qq.com/s...` 或 `weixin.sogou.com/link?...` 文章 | `bycli weixin download --url <URL>` | 无 |
 | 用户明确提供的 arXiv 论文全文 | `bycli arxiv paper <paper-id>` + `bycli web read --url <URL> --stdout` | 同一论文 ID 的 `https://arxiv.org/html/<paper-id>` |
-| 通用网页 / URL | `bycli web read --url <URL> --stdout` | 无 |
+| 通用网页 / URL | `knowledge-collection acquire-web` → `materialize-web` | 已由 public-discover 或用户直链授权的 URL |
 | Twitter / X | `twitter-cli` | `bycli twitter search` |
 | Reddit | `rdt-cli` | `bycli reddit search` |
 | Bilibili | `bili-cli` | `bycli bilibili search` |
@@ -51,8 +51,9 @@ bycli web read --url <URL> --stdout
 
 微信文章行仍然完全位于 byCLI 来源执行器边界内，不是直接 HTTP 例外。输出目录必须是当前采集会话的
 `raw/bycli/weixin/<item-id>/`；保留 `source_url`、`resolved_url`、`saved` Markdown、已下载图片和结构化结果。
-随后由采集编排器执行 `materialize-wechat`，再把其 `collectPayloadPath` 交给 `collect`。其他网页仍走
-`bycli web read --url <URL> --stdout`，微信专用命令失败时也不得回退到 `curl`、`wget`、`requests` 或通用浏览器。
+随后由采集编排器执行 `materialize-wechat`，再把其 `collectPayloadPath` 交给 `collect`。其他网页走
+`acquire-web` → `materialize-web`；不得手工重定向 stdout、不得手工构造 collect payload。任何登录、CAPTCHA、环境验证或
+requires-user-action 都按 STOP 契约保留命令自有 TAB 并停止，微信专用命令失败时也不得回退到 `curl`、`wget`、`requests` 或通用浏览器。
 
 ### arXiv 全文
 

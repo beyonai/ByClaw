@@ -28,6 +28,16 @@ function defineCommand(spec) {
 }
 
 const COMMAND_SPECS = {
+  'acquire-web': defineCommand({
+    group: 'collection',
+    title: '通过 byCLI 受控抓取已授权的通用网页候选',
+    args: {
+      '--session-dir': '必填。已由 init 创建的会话目录',
+      '--item-id': '必填。稳定条目 ID',
+      '--source-url': '必填。public-discover 已授权的 article URL',
+    },
+    example: 'knowledge-collection.mjs acquire-web --session-dir /tmp/kc1 --item-id report --source-url https://example.com/news/1234567',
+  }),
   'public-discover': defineCommand({
     group: 'discovery',
     title: '运行 SearXNG 与按需 hot-discovery，持久化并合并公共 URL 候选',
@@ -155,6 +165,16 @@ const COMMAND_SPECS = {
     },
     example: 'knowledge-collection.mjs materialize-wechat --session-dir /tmp/kc1 --executor-result-file /tmp/kc1/raw/bycli/weixin/item/download-result.json --item-id item',
   }),
+  'materialize-web': defineCommand({
+    group: 'collection',
+    title: '校验 acquire-web 受控产物，净化正文、复制本地资产并生成 collect payload',
+    args: {
+      '--session-dir': '必填。已由 init 创建的会话目录',
+      '--item-id': '必填。小写字母、数字、下划线或连字符组成的稳定条目 ID',
+      '--executor-result-file': '必填。位于该条目 raw/bycli/web/ 目录中的执行结果 JSON',
+    },
+    example: 'knowledge-collection.mjs materialize-web --session-dir /tmp/kc1 --item-id report --executor-result-file /tmp/kc1/raw/bycli/web/report/executor-result.json',
+  }),
   'materialize-arxiv': defineCommand({
     group: 'collection',
     title: '校验同一 arXiv 论文的 byCLI 元数据与 HTML 全文，生成已注册的 full-text collect payload',
@@ -260,6 +280,14 @@ const SCHEMA = {
 };
 
 const COMMAND_SCHEMA_OVERRIDES = {
+  'acquire-web': {
+    required: ['session-dir', 'item-id', 'source-url'],
+    properties: {
+      'session-dir': SCHEMA.sessionDir,
+      'item-id': { type: 'string', pattern: '^[a-z0-9][a-z0-9_-]{0,63}$' },
+      'source-url': { type: 'string', format: 'http-url' },
+    },
+  },
   'public-discover': {
     required: ['session-dir', 'query'],
     properties: {
@@ -361,6 +389,14 @@ const COMMAND_SCHEMA_OVERRIDES = {
       'session-dir': SCHEMA.sessionDir,
       'executor-result-file': SCHEMA.file,
       'item-id': { type: 'string', pattern: '^[a-z0-9][a-z0-9_-]{0,63}$' },
+    },
+  },
+  'materialize-web': {
+    required: ['session-dir', 'item-id', 'executor-result-file'],
+    properties: {
+      'session-dir': SCHEMA.sessionDir,
+      'item-id': { type: 'string', pattern: '^[a-z0-9][a-z0-9_-]{0,63}$' },
+      'executor-result-file': SCHEMA.file,
     },
   },
   'materialize-arxiv': {

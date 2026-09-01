@@ -103,6 +103,8 @@ collection_filters:
 
 公共互联网新会话默认启用发现门禁。`public-discover` 原子登记 query、category、页面分类、主题相关性和最多两轮的调用状态。结构型 `article` 只有同时满足 `topicRelevance.status=matched|not-required` 才进入 `articleCandidateIds`；`structuralArticleCandidateIds` 只用于诊断。`requested-count`、hot-discovery fallback、第二轮预算和后续授权都使用同一个 eligible article 语义。第二轮仍无相关候选时保留 `stopReason=no-article-candidates`，并写 `stopDetail=no-relevant-article-candidates`。
 
+中文文章发现使用 60 秒软预算、90 秒硬上限和单适配器 10 秒限制；软预算后不再调度新来源。公共发现最多允许两轮，任何一轮 `merged.article=0` 时不得使用 weak。确定候选后，通用网页必须通过 `acquire-web` 生成受控 executor-result，再由 `materialize-web` 校验哈希、授权、正文结构与本地资产并生成 `collectPayloadPath`。不得手工重定向 stdout，不得手工构造 collect payload，也不得手写 sanitized 正文或 full-text receipt。
+
 首次登记公共 inventory 时按互斥顺序解析来源：用户原始直链、已 fetched 且仍在 scope 内的 crawl frontier、最后才是 public-discover eligible article。public-discover 条目在 `collect` 时还会针对 canonical title 与去除 frontmatter、URL、图片路径和纯元数据后的 sanitized Markdown 复验主题；只有 `matched`（无主题契约时为 `not-required`）才能物化。`status` 对新 1.1 会话只读复验候选与正文，失配时 `deliveryComplete=false` 且不返回 `downstreamInput`，`publish` 因而不能创建交付目录。
 
 不在候选中的 URL、`weak`/`reject`、`unmatched`/`unknown` 候选以及 Agent 手工补充的 URL 一律以 `SOURCE_NOT_AUTHORIZED_BY_DISCOVERY` 拒绝。旧 1.0 或缺少 gate 的公共会话保持 status/inspect/export 只读兼容并返回 warning；新的 `public-discover`、`collect`、`record-pending` 和首次 `publish` 返回 `DISCOVERY_RELEVANCE_MIGRATION_REQUIRED`，恢复方式是创建新内部 run。已经发布且来源、计划和目标完全未变化的历史回执仍可只读或幂等返回，不得原地推断、回填或篡改历史主题结论。enterprise 会话不受这项公共来源迁移规则影响。

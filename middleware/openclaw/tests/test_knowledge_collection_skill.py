@@ -112,6 +112,26 @@ def markdown_section(text, heading):
 
 
 class KnowledgeCollectionSkillContractTest(unittest.TestCase):
+    def test_generic_web_collection_uses_controlled_commands_and_bounded_discovery(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        routing = (SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8")
+        contract = (SKILL_ROOT / "references" / "collection-contract.md").read_text(encoding="utf-8")
+        online = (SKILL_ROOT / "references" / "online-search.md").read_text(encoding="utf-8")
+        combined = f"{skill}\n{routing}\n{contract}\n{online}"
+
+        for phrase in (
+            "acquire-web",
+            "materialize-web",
+            "不得手工重定向 stdout",
+            "不得手工构造 collect payload",
+            "公共发现最多允许两轮",
+            "60 秒软预算",
+            "90 秒硬上限",
+            "不得使用 weak",
+            "STOP",
+        ):
+            self.assertIn(phrase, combined)
+
     def test_public_full_text_requires_executor_owned_evidence(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
         contract = (SKILL_ROOT / "references" / "collection-contract.md").read_text(encoding="utf-8")

@@ -825,8 +825,9 @@ function markOneMaterialized(paths, session, metadata, collectionResult, update)
   return { itemId, materialization: inventory.materialization, canonicalItem: canonicalViewItem(update.canonicalItem) };
 }
 
-export function recordPendingCollectionItem(paths, update) {
-  return withSessionLock(paths, 'record-pending', () => {
+function recordUnmaterializedCollectionItem(paths, update, targetStatus) {
+  const action = targetStatus === 'failed' ? 'record-failed' : 'record-pending';
+  return withSessionLock(paths, action, () => {
     const loaded = loadCollectionSession(paths, { skipCanonicalValidation: true });
     if (loaded.materializationRecovered) {
       throw new Error('检测到无效 materialization，已安全降级为 pending；请先由原始执行器重新物化');
@@ -856,7 +857,7 @@ export function recordPendingCollectionItem(paths, update) {
     if (inventory?.materialization?.status === 'materialized') {
       return {
         ok: true,
-        action: 'record-pending',
+        action,
         preservedMaterialized: true,
         itemId,
         materialization: clone(inventory.materialization),
@@ -883,7 +884,7 @@ export function recordPendingCollectionItem(paths, update) {
         rawArtifacts,
         media: normalizeMediaState(update.media, { strict: true }),
         materialization: {
-          status: 'pending',
+          status: targetStatus,
           markdownPath: null,
           sanitizedPath: null,
           pendingArtifactCleanup: [],
@@ -900,7 +901,7 @@ export function recordPendingCollectionItem(paths, update) {
         ? normalizeMediaState(inventory.media, { strict: true })
         : normalizeMediaState(update.media, { strict: true });
       inventory.materialization = {
-        status: 'pending',
+        status: targetStatus,
         markdownPath: null,
         sanitizedPath: null,
         pendingArtifactCleanup: Array.isArray(inventory.materialization?.pendingArtifactCleanup)
@@ -910,7 +911,11 @@ export function recordPendingCollectionItem(paths, update) {
       };
     }
 
-    loaded.metadata.collection.status = 'partial';
+    const materializationStatuses = loaded.metadata.collection.items
+      .map((item) => item.materialization?.status);
+    loaded.metadata.collection.status = materializationStatuses.length > 0
+      && materializationStatuses.every((status) => status === 'failed')
+      ? 'failed' : 'partial';
     if (!loaded.collectionResult.source) loaded.collectionResult.source = source;
     else if (loaded.collectionResult.source !== source) loaded.collectionResult.source = 'multi-source';
     if (!loaded.collectionResult.backend) loaded.collectionResult.backend = backend;
@@ -928,12 +933,32 @@ export function recordPendingCollectionItem(paths, update) {
     atomicWriteJson(paths.collectionResult, loaded.collectionResult);
     return {
       ok: true,
-      action: 'record-pending',
+      action,
       preservedMaterialized: false,
       itemId,
       materialization: clone(inventory.materialization),
     };
   });
+}
+
+function reconcileCollectionStatus(metadata) {
+  const statuses = metadata.collection.items.map((item) => item.materialization?.status);
+  if (statuses.length === 0) return;
+  if (statuses.every((status) => status === 'materialized')) {
+    metadata.collection.status = 'complete';
+  } else if (statuses.every((status) => status === 'failed')) {
+    metadata.collection.status = 'failed';
+  } else {
+    metadata.collection.status = 'partial';
+  }
+}
+
+export function recordPendingCollectionItem(paths, update) {
+  return recordUnmaterializedCollectionItem(paths, update, 'pending');
+}
+
+export function recordFailedCollectionItem(paths, update) {
+  return recordUnmaterializedCollectionItem(paths, update, 'failed');
 }
 
 export function cmdCollect(paths, args) {
@@ -948,6 +973,7 @@ export function cmdCollect(paths, args) {
     const results = items.map((item) => markOneMaterialized(
       paths, loaded.session, loaded.metadata, loaded.collectionResult, item,
     ));
+    reconcileCollectionStatus(loaded.metadata);
     validateMetadata(loaded.metadata);
     validateCanonicalView(paths.root, loaded.collectionResult, loaded.metadata);
     const dryRun = args['dry-run'] === true || args['dry-run'] === 'true';

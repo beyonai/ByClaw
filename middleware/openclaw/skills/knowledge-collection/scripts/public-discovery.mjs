@@ -31,6 +31,12 @@ const adaptersPath = join(onlineSearchRoot, 'references/hot_discovery/adapters.m
 const MAX_DIAGNOSTIC_STDERR_CHARS = 2_000;
 const DEFAULT_SEARXNG_PROCESS_TIMEOUT_SECONDS = 60;
 const SEARXNG_REQUEST_TIMEOUT_SECONDS = 10;
+export const SOFT_DISCOVERY_BUDGET_MS = 60_000;
+export const HARD_DISCOVERY_BUDGET_MS = 90_000;
+const CHINESE_ARTICLE_SOURCES = Object.freeze(['36kr', 'weixin', 'sogou', 'baidu', 'bing']);
+const ARTICLE_INTENT = /(?:文章|报道|访谈|专访)/u;
+const CJK_TEXT = /\p{Script=Han}/u;
+const PROFILE_CATEGORIES = new Set(['general', 'news', 'blogs']);
 
 function requireText(value, name) {
   if (typeof value !== 'string' || !value.trim()) {
@@ -46,6 +52,24 @@ function snapshotPath(inputDir, name) {
     throw new Error('发现快照必须位于会话 .collection-inputs 目录内');
   }
   return target;
+}
+
+export function isChineseArticleProfile(session, args = {}) {
+  const task = session?.task || {};
+  const requestedCount = args['requested-count'];
+  const category = typeof args.category === 'string' && args.category.trim()
+    ? args.category.trim() : 'general';
+  const language = typeof args.language === 'string' ? args.language.trim() : 'all';
+  const query = typeof args.query === 'string' ? args.query : '';
+  const topic = task.discoveryGate?.topicContract;
+  return task.mode === 'collection'
+    && Array.isArray(task.sourceScope) && task.sourceScope.includes('public-internet')
+    && requestedCount !== undefined && requestedCount !== null
+    && PROFILE_CATEGORIES.has(category)
+    && (/^zh(?:[-_]|$)/i.test(language) || CJK_TEXT.test(`${query}\n${task.query || ''}`))
+    && ARTICLE_INTENT.test(String(task.query || ''))
+    && topic?.required === true
+    && typeof topic.normalizedSubject === 'string' && Boolean(topic.normalizedSubject.trim());
 }
 
 export function resolveSearxngRuntime(options = {}, environment = process.env) {
@@ -134,7 +158,38 @@ async function defaultMerge({ hotDoc, sxDoc, warnings }) {
   });
 }
 
+function mergeHotWaves(documents, query) {
+  const valid = documents.filter((document) => document && typeof document === 'object');
+  if (!valid.length) return null;
+  return {
+    channel: 'hot_discovery',
+    query,
+    dimensions: [...new Set(valid.flatMap((document) => document.dimensions || []))],
+    effectiveDimensions: [...new Set(valid.flatMap((document) => document.effectiveDimensions || []))],
+    observedAt: valid[0].observedAt,
+    bycliVersion: valid.find((document) => document.bycliVersion)?.bycliVersion || null,
+    adaptersSelected: valid.reduce((total, document) => total + (document.adaptersSelected || 0), 0),
+    candidates: valid.flatMap((document) => Array.isArray(document.candidates) ? document.candidates : []),
+    adapterStats: Object.assign({}, ...valid.map((document) => document.adapterStats || {})),
+    warnings: valid.flatMap((document) => Array.isArray(document.warnings) ? document.warnings : []),
+    ...(valid.find((document) => document.requiresUserAction)?.requiresUserAction
+      ? { requiresUserAction: valid.find((document) => document.requiresUserAction).requiresUserAction }
+      : {}),
+  };
+}
+
+function attemptedAdapterCount(hotDoc) {
+  const skipped = new Set([
+    'not_in_declarations', 'not_in_catalog', 'unavailable', 'limit_flag_missing',
+    'skipped_after_sufficient_candidates', 'skipped_total_budget', 'skipped_user_action',
+  ]);
+  return Object.values(hotDoc?.adapterStats || {})
+    .filter((stats) => stats?.status && !skipped.has(stats.status)).length;
+}
+
 export async function runPublicDiscover(paths, args, options = {}) {
+  const now = options.now || (() => performance.now());
+  const totalStartedAt = now();
   const { session } = loadSession(paths, { persistMigration: false });
   const sourceScope = Array.isArray(session.task?.sourceScope) ? session.task.sourceScope : [];
   if (!sourceScope.includes('public-internet')) {
@@ -156,7 +211,10 @@ export async function runPublicDiscover(paths, args, options = {}) {
   const pageno = String(args?.pageno || '1');
   const maxResults = String(args?.['max-results'] || '20');
   const requestedCount = args?.['requested-count'] === undefined ? null : String(args['requested-count']);
-  const effectiveMaxResults = requestedCount || maxResults;
+  const profileEnabled = isChineseArticleProfile(session, args);
+  const profileStopAfter = requestedCount === null ? null
+    : Math.max(Number(requestedCount) * 3, 5);
+  const effectiveMaxResults = profileEnabled ? String(profileStopAfter) : (requestedCount || maxResults);
   const processTimeout = String(args?.timeout || DEFAULT_SEARXNG_PROCESS_TIMEOUT_SECONDS);
   const timeRange = typeof args?.['time-range'] === 'string' && args['time-range'].trim()
     ? args['time-range'].trim() : null;
@@ -170,8 +228,6 @@ export async function runPublicDiscover(paths, args, options = {}) {
   const searxngRuntime = resolveSearxngRuntime(options);
   const runSearxngProcess = options.runProcess || runPublicProcess;
   const runHotDiscoveryProcess = options.runProcess || runPublicProcess;
-  const now = options.now || (() => performance.now());
-  const totalStartedAt = now();
   const processTimeoutMs = Math.max(1, Math.ceil(Number(processTimeout) * 1_000));
 
   const searxngSpec = {
@@ -182,30 +238,81 @@ export async function runPublicDiscover(paths, args, options = {}) {
       '--timeout', String(SEARXNG_REQUEST_TIMEOUT_SECONDS),
       ...(timeRange ? ['--time-range', timeRange] : [])],
   };
-  const hotDiscoverySpec = {
+  const hotDiscoverySpec = (sources = null, minimumAttempts = null, totalBudgetMs = null) => ({
     channel: 'hot-discovery',
     executable: process.execPath,
     args: [hotDiscoveryScript, 'search', '--query', query, '--tiers', tiers,
-      '--limit', requestedCount || limit, '--dimensions', category],
-  };
+      '--limit', requestedCount || limit,
+      '--dimensions', profileEnabled ? 'general,news,blogs' : category,
+      ...(sources ? [
+        '--sources', sources.join(','),
+        '--adapter-timeout-ms', '10000',
+        ...(minimumAttempts ? ['--minimum-attempts', String(minimumAttempts)] : []),
+        ...(totalBudgetMs ? ['--total-budget-ms', String(totalBudgetMs)] : []),
+      ] : [])],
+  });
   let searxngOutcome;
   let hotOutcome;
   let searxngMs = 0;
   let hotDiscoveryMs = 0;
-  const runTimed = async (runner, spec) => {
+  const runTimed = async (runner, spec, timeoutMs = processTimeoutMs) => {
     const startedAt = now();
     let outcome;
     try {
-      outcome = await runner(spec, { timeoutMs: processTimeoutMs });
+      outcome = await runner(spec, { timeoutMs });
     } catch (error) {
       outcome = { code: 1, stdout: '', stderr: error.message };
     }
     return { outcome, durationMs: elapsedMilliseconds(startedAt, now()) };
   };
-  if (requestedCount === null) {
+  if (profileEnabled) {
+    const remainingHardMs = Math.max(
+      1,
+      HARD_DISCOVERY_BUDGET_MS - elapsedMilliseconds(totalStartedAt, now()),
+    );
+    const firstWaveSources = CHINESE_ARTICLE_SOURCES.slice(0, 3);
+    const firstWaveSpec = hotDiscoverySpec(
+      firstWaveSources,
+      3,
+      Math.max(1, SOFT_DISCOVERY_BUDGET_MS - elapsedMilliseconds(totalStartedAt, now())),
+    );
+    const [searxngRun, hotRun] = await Promise.all([
+      runTimed(runSearxngProcess, searxngSpec, remainingHardMs),
+      runTimed(runHotDiscoveryProcess, firstWaveSpec, remainingHardMs),
+    ]);
+    searxngOutcome = searxngRun.outcome;
+    searxngMs = searxngRun.durationMs;
+    hotDiscoveryMs = hotRun.durationMs;
+    const waveDocuments = [parseSuccess(hotRun.outcome)].filter(Boolean);
+    for (const source of CHINESE_ARTICLE_SOURCES.slice(3)) {
+      const combined = mergeHotWaves(waveDocuments, query);
+      if (combined?.requiresUserAction) break;
+      const candidates = [
+        ...(Array.isArray(parseSuccess(searxngOutcome)?.results) ? parseSuccess(searxngOutcome).results : []),
+        ...(Array.isArray(combined?.candidates) ? combined.candidates : []),
+      ];
+      if (attemptedAdapterCount(combined) >= 3
+        && countUniqueEligibleArticles(candidates, topicContract) >= profileStopAfter) break;
+      const elapsed = elapsedMilliseconds(totalStartedAt, now());
+      if (elapsed >= SOFT_DISCOVERY_BUDGET_MS) break;
+      const hardRemaining = Math.max(1, HARD_DISCOVERY_BUDGET_MS - elapsed);
+      const wave = await runTimed(
+        runHotDiscoveryProcess,
+        hotDiscoverySpec([source], 1, SOFT_DISCOVERY_BUDGET_MS - elapsed),
+        hardRemaining,
+      );
+      hotDiscoveryMs += wave.durationMs;
+      const document = parseSuccess(wave.outcome);
+      if (document) waveDocuments.push(document);
+    }
+    const combinedHot = mergeHotWaves(waveDocuments, query);
+    hotOutcome = combinedHot
+      ? { code: 0, stdout: JSON.stringify(combinedHot), stderr: '' }
+      : hotRun.outcome;
+  } else if (requestedCount === null) {
     const [searxngRun, hotRun] = await Promise.all([
       runTimed(runSearxngProcess, searxngSpec),
-      runTimed(runHotDiscoveryProcess, hotDiscoverySpec),
+      runTimed(runHotDiscoveryProcess, hotDiscoverySpec()),
     ]);
     searxngOutcome = searxngRun.outcome;
     searxngMs = searxngRun.durationMs;
@@ -220,7 +327,7 @@ export async function runPublicDiscover(paths, args, options = {}) {
     if (countUniqueEligibleArticles(requestedCandidates, topicContract) >= Number(requestedCount)) {
       hotOutcome = { skipped: true, skipReason: 'sufficient_article_candidates' };
     } else {
-      const hotRun = await runTimed(runHotDiscoveryProcess, hotDiscoverySpec);
+      const hotRun = await runTimed(runHotDiscoveryProcess, hotDiscoverySpec());
       hotOutcome = hotRun.outcome;
       hotDiscoveryMs = hotRun.durationMs;
     }
@@ -277,7 +384,22 @@ export async function runPublicDiscover(paths, args, options = {}) {
     persistSession(paths, current);
     return { state: current.task.discoveryGate, result };
   });
-  const merged = { ...annotatedMerged, channelDiagnostics, candidateQuality, timing };
+  const discoveryProfile = profileEnabled ? {
+    name: 'chinese-article',
+    sources: [...CHINESE_ARTICLE_SOURCES],
+    stopAfter: profileStopAfter,
+    minimumAttempts: 3,
+    budget: { softMs: SOFT_DISCOVERY_BUDGET_MS, hardMs: HARD_DISCOVERY_BUDGET_MS },
+  } : null;
+  const selectedCandidate = authorization.result.articleCandidates[0] || null;
+  const merged = {
+    ...annotatedMerged,
+    channelDiagnostics,
+    candidateQuality,
+    timing,
+    selectedCandidate,
+    ...(discoveryProfile ? { discoveryProfile } : {}),
+  };
   await writeFile(mergedSnapshot, `${JSON.stringify(merged, null, 2)}\n`, 'utf8');
 
     return {
@@ -302,7 +424,9 @@ export async function runPublicDiscover(paths, args, options = {}) {
       structuralArticleCandidateIds: authorization.result.structuralArticleCandidates
         .map((candidate) => candidate.candidateId),
     },
+    selectedCandidate,
     timing,
+    ...(discoveryProfile ? { discoveryProfile } : {}),
     snapshots: {
       searxng: sxDoc ? searxngSnapshot : null,
       hotDiscovery: hotDoc ? hotSnapshot : null,

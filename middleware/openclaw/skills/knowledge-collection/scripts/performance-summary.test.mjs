@@ -1,55 +1,102 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import crypto from 'node:crypto';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
-import { spawn } from 'node:child_process';
+import { dirname, join } from 'node:path';
 import test from 'node:test';
 
-import {
-  BRANDS,
-  evaluatePerformance,
-  median,
-} from './performance-summary.mjs';
+import { BRANDS, evaluatePerformance, median } from './performance-summary.mjs';
 
-const scriptPath = resolve(dirname(new URL(import.meta.url).pathname), 'performance-summary.mjs');
+const sha256 = (value) => crypto.createHash('sha256').update(value).digest('hex');
 
-function run(brand, totalMs, overrides = {}) {
-  return {
-    brand,
-    totalMs,
-    discoveryCalls: 1,
-    adHocCleanupScripts: 0,
-    deliveryComplete: true,
-    fullText: 1,
-    pending: 0,
-    failed: 0,
-    cloudVerified: true,
-    cloudBytes: 10_184,
-    selectedPageType: 'article',
-    evidence: {
-      raw: true,
-      sourceUrl: true,
-      classificationReasons: true,
-      sanitizationReport: true,
-      phaseTimings: true,
-    },
-    ...overrides,
-  };
+async function writeJson(root, relative, value) {
+  const target = join(root, relative);
+  await mkdir(dirname(target), { recursive: true });
+  await writeFile(target, `${JSON.stringify(value, null, 2)}\n`);
+  return relative;
 }
 
-function cli(args) {
-  return new Promise((resolveRun) => {
-    const child = spawn(process.execPath, [scriptPath, ...args], { stdio: ['ignore', 'pipe', 'pipe'] });
-    let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', (chunk) => { stdout += chunk; });
-    child.stderr.on('data', (chunk) => { stderr += chunk; });
-    child.on('close', (code) => {
-      let json;
-      try { json = JSON.parse(stdout); } catch { json = undefined; }
-      resolveRun({ code, stdout, stderr, json });
-    });
+async function batch(role, times) {
+  const root = await mkdtemp(join(tmpdir(), `performance-${role}-`));
+  const batchId = `${role}-batch-20260901`;
+  const cloudResourceId = 'cloud-20034261';
+  const preflight = await writeJson(root, 'preflight.json', {
+    ok: true, cloudResourceId, cloudList: { ok: true },
+    bycliDoctor: { connectivity: 'connected' }, version: `${role}-v2`,
+    ...(role === 'candidate' ? { genericWebPath: { ok: true, action: 'acquire-web' } } : {}),
   });
+  const runs = [];
+  for (const [index, brand] of BRANDS.entries()) {
+    const attemptId = 'attempt-1';
+    const dir = `runs/${index + 1}`;
+    const sourceUrl = `https://example.com/news/${index + 1}`;
+    const finalBody = `${brand} 的完整报道正文，包含足够内容用于验证。\n`;
+    const finalMarkdown = `${dir}/final.md`;
+    await mkdir(join(root, dir), { recursive: true });
+    await writeFile(join(root, finalMarkdown), finalBody);
+    const localSha256 = sha256(finalBody);
+    const startedAt = '2026-09-01T00:00:00.000Z';
+    const listFinishedAt = new Date(Date.parse(startedAt) + times[index]).toISOString();
+    const targetPath = `/validation/${batchId}/${role}/${brand}/${attemptId}.md`;
+    const evidence = {
+      status: await writeJson(root, `${dir}/status.json`, {
+        collection: { deliveryComplete: true, pending: 0, failed: 0, contentGranularity: { 'full-text': 1 } },
+      }),
+      discovery: await writeJson(root, `${dir}/discovery.json`, {
+        discoveryCalls: 1,
+        selectedCandidate: {
+          candidateId: `candidate-${index}`, url: sourceUrl, pageType: 'article',
+          topicRelevance: { status: 'matched' },
+        },
+      }),
+      phaseTimings: await writeJson(root, `${dir}/phases.json`, {
+        phases: Object.fromEntries([
+          'discovery', 'acquisition', 'materialization', 'collectStatus',
+          'cloudCheck', 'cloudUploadList',
+        ].map((name) => [name, { durationMs: 1 }])),
+      }),
+      raw: await writeJson(root, `${dir}/raw.json`, { sourceUrl, status: 'saved' }),
+      finalMarkdown,
+      cloudCheck: await writeJson(root, `${dir}/check.json`, {
+        ok: true, exists: false, cloudResourceId, targetPath,
+        finishedAt: '2026-09-01T00:00:01.000Z',
+      }),
+      cloudUpload: await writeJson(root, `${dir}/upload.json`, {
+        ok: true, cloudResourceId, targetPath, bytes: Buffer.byteLength(finalBody),
+        localSha256, resourceVersion: `rv-${index}`, finishedAt: '2026-09-01T00:00:02.000Z',
+      }),
+      cloudList: await writeJson(root, `${dir}/list.json`, {
+        ok: true, cloudResourceId, finishedAt: listFinishedAt,
+        items: [{ path: targetPath, size: Buffer.byteLength(finalBody), sha256: localSha256, resourceVersion: `rv-${index}` }],
+      }),
+    };
+    if (role === 'baseline') {
+      evidence.baselineAudit = await writeJson(root, `${dir}/audit.json`, {
+        schemaVersion: '1.0', status: 'passed', coverageRatio: 1, fidelityRatio: 1,
+        topicRelevant: true, sourceUrl,
+      });
+    } else {
+      const rawSha256 = sha256(await readFile(join(root, evidence.raw)));
+      evidence.materializationDiagnostics = await writeJson(root, `${dir}/diagnostics.json`, {
+        action: 'materialize-web', complete: true, contentGranularity: 'full-text',
+        transactionId: `tx-${index}`, requestedUrl: sourceUrl, resolvedUrl: sourceUrl,
+        inputFiles: [{ artifact: evidence.raw, sha256: `sha256:${rawSha256}` }],
+        outputFiles: [{ artifact: finalMarkdown, sha256: `sha256:${localSha256}` }],
+      });
+      evidence.fullTextReceipt = await writeJson(root, `${dir}/receipt.json`, {
+        executor: 'bycli', sourceUrl, artifact: evidence.materializationDiagnostics,
+      });
+    }
+    runs.push({ brand, measuredAttempt: 1, attempts: [{ attemptId, startedAt, evidence }] });
+  }
+  return {
+    root,
+    document: {
+      schemaVersion: '2.0', role, batchId, version: `${role}-v2`,
+      environmentId: 'project-cloud-runtime-fingerprint', protocolVersion: '2.0',
+      startedAt: '2026-09-01T00:00:00.000Z', preflight, runs,
+    },
+  };
 }
 
 test('median handles odd and even numeric samples', () => {
@@ -57,73 +104,61 @@ test('median handles odd and even numeric samples', () => {
   assert.equal(median([10, 4, 8, 2]), 6);
 });
 
-test('accepts a correct five-brand candidate with required time improvement', () => {
-  const baselineTimes = [540_000, 480_000, 600_000, 450_000, 510_000];
-  const candidateTimes = [180_000, 210_000, 240_000, 200_000, 220_000];
-  const result = evaluatePerformance({
-    baseline: BRANDS.map((brand, index) => run(brand, baselineTimes[index])),
-    candidate: BRANDS.map((brand, index) => run(brand, candidateTimes[index])),
-  });
-
-  assert.equal(result.passed, true);
-  assert.equal(result.metrics.baselineMedianMs, 510_000);
-  assert.equal(result.metrics.candidateMedianMs, 210_000);
-  assert.equal(result.metrics.candidateMaxMs, 240_000);
-  assert.ok(result.metrics.medianImprovementRatio >= 0.4);
-  assert.ok(Object.values(result.criteria).every((criterion) => criterion.passed));
-});
-
-test('reports correctness and evidence failures without rejecting valid input', () => {
-  const result = evaluatePerformance({
-    baseline: BRANDS.map((brand) => run(brand, 500_000)),
-    candidate: BRANDS.map((brand, index) => run(brand, 200_000, index === 0 ? {
-      selectedPageType: 'reject',
-      cloudVerified: false,
-      evidence: {
-        raw: true,
-        sourceUrl: true,
-        classificationReasons: false,
-        sanitizationReport: true,
-        phaseTimings: true,
-      },
-    } : {})),
-  });
-
-  assert.equal(result.passed, false);
-  assert.equal(result.criteria.articleSelection.passed, false);
-  assert.equal(result.criteria.cloudDelivery.passed, false);
-  assert.equal(result.criteria.evidenceComplete.passed, false);
-  assert.equal(result.criteria.medianTime.passed, true);
-});
-
-test('rejects missing or duplicate brand records', () => {
-  assert.throws(() => evaluatePerformance({
-    baseline: BRANDS.slice(0, 4).map((brand) => run(brand, 500_000)),
-    candidate: BRANDS.map((brand) => run(brand, 200_000)),
-  }), /baseline.*5|品牌/);
-  assert.throws(() => evaluatePerformance({
-    baseline: BRANDS.map((brand) => run(brand, 500_000)),
-    candidate: BRANDS.map((brand, index) => run(index === 4 ? BRANDS[0] : brand, 200_000)),
-  }), /candidate.*品牌|重复/);
-});
-
-test('CLI returns machine-readable passed false with exit zero', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'performance-summary-'));
+test('derives 5/5 correctness, cloud evidence, timings, and improvement from schema 2.0 files', async () => {
+  const baseline = await batch('baseline', [540_000, 480_000, 600_000, 450_000, 510_000]);
+  const candidate = await batch('candidate', [180_000, 210_000, 240_000, 200_000, 220_000]);
   try {
-    const baselinePath = join(root, 'baseline.json');
-    const candidatePath = join(root, 'candidate.json');
-    await writeFile(baselinePath, JSON.stringify({
-      runs: BRANDS.map((brand) => run(brand, 500_000)),
-    }));
-    await writeFile(candidatePath, JSON.stringify({
-      runs: BRANDS.map((brand) => run(brand, 400_000)),
-    }));
-    const result = await cli(['--baseline-file', baselinePath, '--candidate-file', candidatePath]);
-    assert.equal(result.code, 0, result.stderr || result.stdout);
-    assert.equal(result.json.ok, true);
-    assert.equal(result.json.action, 'performance-summary');
-    assert.equal(result.json.passed, false);
+    const result = evaluatePerformance({ baseline, candidate });
+    assert.equal(result.passed, true);
+    assert.equal(result.comparable, true);
+    assert.equal(result.correctDelivery.baseline, '5/5');
+    assert.equal(result.correctDelivery.candidate, '5/5');
+    assert.equal(result.metrics.baselineMedianMs, 510_000);
+    assert.equal(result.metrics.candidateMedianMs, 210_000);
+    assert.ok(result.metrics.medianImprovementRatio >= 0.4);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(baseline.root, { recursive: true, force: true });
+    await rm(candidate.root, { recursive: true, force: true });
+  }
+});
+
+test('returns non-comparable and null improvement when either role is below 5/5', async () => {
+  const baseline = await batch('baseline', BRANDS.map(() => 500_000));
+  const candidate = await batch('candidate', BRANDS.map(() => 200_000));
+  try {
+    const discoveryPath = join(candidate.root, candidate.document.runs[0].attempts[0].evidence.discovery);
+    await writeFile(discoveryPath, JSON.stringify({ discoveryCalls: 1, selectedCandidate: { pageType: 'weak' } }));
+    const result = evaluatePerformance({ baseline, candidate });
+    assert.equal(result.comparable, false);
+    assert.equal(result.passed, false);
+    assert.equal(result.correctDelivery.candidate, '4/5');
+    assert.equal(result.metrics.medianImprovementRatio, null);
+  } finally {
+    await rm(baseline.root, { recursive: true, force: true });
+    await rm(candidate.root, { recursive: true, force: true });
+  }
+});
+
+test('rejects v1, mismatched protocol, paired-attempt drift, absolute paths, and symlinks', async () => {
+  const baseline = await batch('baseline', BRANDS.map(() => 500_000));
+  const candidate = await batch('candidate', BRANDS.map(() => 200_000));
+  try {
+    assert.throws(() => evaluatePerformance({
+      baseline: { ...baseline, document: { runs: [] } }, candidate,
+    }), /PERFORMANCE_SCHEMA_MIGRATION_REQUIRED/);
+    candidate.document.protocolVersion = '3.0';
+    assert.throws(() => evaluatePerformance({ baseline, candidate }), /protocolVersion/);
+    candidate.document.protocolVersion = '2.0';
+    candidate.document.runs[0].measuredAttempt = 2;
+    assert.throws(() => evaluatePerformance({ baseline, candidate }), /measuredAttempt/);
+    candidate.document.runs[0].measuredAttempt = 1;
+    candidate.document.runs[0].attempts[0].evidence.raw = '/tmp/raw.json';
+    assert.throws(() => evaluatePerformance({ baseline, candidate }), /相对路径/);
+    candidate.document.runs[0].attempts[0].evidence.raw = 'runs/1/raw-link.json';
+    await symlink(join(candidate.root, 'runs/1/raw.json'), join(candidate.root, 'runs/1/raw-link.json'));
+    assert.throws(() => evaluatePerformance({ baseline, candidate }), /符号链接/);
+  } finally {
+    await rm(baseline.root, { recursive: true, force: true });
+    await rm(candidate.root, { recursive: true, force: true });
   }
 });

@@ -269,6 +269,21 @@ await (async () => {
     schema.json.commands['materialize-arxiv'].properties['item-id'].pattern,
     '^[a-z0-9][a-z0-9_-]{0,63}$',
   );
+  assert.deepEqual(schema.json.commands['acquire-web'].required, [
+    'session-dir', 'item-id', 'source-url',
+  ]);
+  assert.equal(schema.json.commands['acquire-web'].properties['source-url'].format, 'http-url');
+  assert.equal(
+    schema.json.commands['acquire-web'].properties['item-id'].pattern,
+    '^[a-z0-9][a-z0-9_-]{0,63}$',
+  );
+  assert.deepEqual(schema.json.commands['materialize-web'].required, [
+    'session-dir', 'item-id', 'executor-result-file',
+  ]);
+  assert.equal(
+    schema.json.commands['materialize-web'].properties['item-id'].pattern,
+    '^[a-z0-9][a-z0-9_-]{0,63}$',
+  );
   for (const [name, contract] of Object.entries(schema.json.commands)) {
     if (contract.type !== 'delegated-command') {
       assert.equal(contract.schemaComplete, true, `${name} schema must be explicit`);

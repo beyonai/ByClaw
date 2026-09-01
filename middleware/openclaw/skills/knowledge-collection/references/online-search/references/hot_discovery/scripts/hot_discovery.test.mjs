@@ -1129,6 +1129,176 @@ test('热度发现始终补充 general 维度并单独报告有效维度', async
   assert.equal(result.adapterStats['general-adapter'].status, 'ok_empty');
 });
 
+test('有界来源按 allowlist 顺序运行并在候选充足后跳过剩余来源', async () => {
+  const declarations = {
+    adapters: ['alpha', 'beta', 'gamma'].map((site) => ({
+      site, tier: 1, cmd: 'search', dimensions: ['general'],
+      urlColumn: 'url', titleColumn: 'title', metricColumns: [],
+    })),
+  };
+  const calls = [];
+  const catalog = new Map(declarations.adapters.map(({ site }) => [`${site}/search`, {
+    browser: false,
+    args: [{ name: 'limit', positional: false }],
+    columns: ['url', 'title'],
+  }]));
+  const result = await searchHotDiscovery({
+    query: '品牌文章', dimensions: 'general', tiers: '1', limit: '2',
+    sources: 'beta,alpha,gamma', 'adapter-timeout-ms': '2500', 'stop-after': '2',
+  }, {
+    declarations,
+    bycli: {
+      loadRuntime: async () => ({ catalog, version: 'test' }),
+      ensureBridge: async () => assert.fail('direct adapters do not need a bridge'),
+      invoke: async (_bin, args, timeoutMs) => {
+        calls.push({ site: args[0], timeoutMs });
+        return { code: 0, stdout: JSON.stringify([
+          { url: `https://example.com/${args[0]}/1`, title: `${args[0]} one` },
+          { url: `https://example.com/${args[0]}/2`, title: `${args[0]} two` },
+        ]), stderr: '' };
+      },
+    },
+  });
+
+  assert.deepEqual(calls, [{ site: 'beta', timeoutMs: 2500 }]);
+  assert.equal(result.adapterStats.beta.status, 'ok');
+  assert.equal(result.adapterStats.alpha.status, 'skipped_after_sufficient_candidates');
+  assert.equal(result.adapterStats.gamma.status, 'skipped_after_sufficient_candidates');
+});
+
+test('minimum-attempts guarantees the initial source wave before early stop', async () => {
+  const declarations = {
+    adapters: ['a', 'b', 'c', 'd'].map((site) => ({
+      site, tier: 1, cmd: 'search', dimensions: ['general'],
+      urlColumn: 'url', titleColumn: 'title', metricColumns: [],
+    })),
+  };
+  const calls = [];
+  const catalog = new Map(declarations.adapters.map(({ site }) => [`${site}/search`, {
+    browser: false, args: [{ name: 'limit', positional: false }], columns: ['url', 'title'],
+  }]));
+  const result = await searchHotDiscovery({
+    query: 'q', dimensions: 'general', tiers: '1', sources: 'a,b,c,d',
+    'stop-after': '1', 'minimum-attempts': '3',
+  }, {
+    declarations,
+    bycli: {
+      loadRuntime: async () => ({ catalog, version: 'test' }),
+      ensureBridge: async () => assert.fail('bridge not expected'),
+      invoke: async (_bin, args) => {
+        calls.push(args[0]);
+        return { code: 0, stdout: JSON.stringify([{ url: `https://e.test/${args[0]}`, title: args[0] }]), stderr: '' };
+      },
+    },
+  });
+  assert.deepEqual(calls, ['a', 'b', 'c']);
+  assert.equal(result.adapterStats.d.status, 'skipped_after_sufficient_candidates');
+});
+
+test('total adapter budget stops new scheduling and records skipped diagnostics', async () => {
+  const declarations = {
+    adapters: ['a', 'b'].map((site) => ({
+      site, tier: 1, cmd: 'search', dimensions: ['general'],
+      urlColumn: 'url', titleColumn: 'title', metricColumns: [],
+    })),
+  };
+  let clock = 0;
+  const calls = [];
+  const catalog = new Map(declarations.adapters.map(({ site }) => [`${site}/search`, {
+    browser: false, args: [{ name: 'limit', positional: false }], columns: ['url', 'title'],
+  }]));
+  const result = await searchHotDiscovery({
+    query: 'q', dimensions: 'general', tiers: '1', sources: 'a,b', 'total-budget-ms': '100',
+  }, {
+    now: () => clock,
+    declarations,
+    bycli: {
+      loadRuntime: async () => ({ catalog, version: 'test' }),
+      ensureBridge: async () => assert.fail('bridge not expected'),
+      invoke: async (_bin, args) => {
+        calls.push(args[0]);
+        clock = 101;
+        return { code: 0, stdout: '[]', stderr: '' };
+      },
+    },
+  });
+  assert.deepEqual(calls, ['a']);
+  assert.equal(result.adapterStats.b.status, 'skipped_total_budget');
+});
+
+test('bounded source mode preserves allowlist order across browser and direct transports', async () => {
+  const declarations = {
+    adapters: ['browser-first', 'direct-second'].map((site) => ({
+      site, tier: 1, cmd: 'search', dimensions: ['general'],
+      urlColumn: 'url', titleColumn: 'title', metricColumns: [],
+    })),
+  };
+  const calls = [];
+  const result = await searchHotDiscovery({
+    query: 'q', dimensions: 'general', tiers: '1', sources: 'browser-first,direct-second',
+  }, {
+    declarations,
+    bycli: {
+      loadRuntime: async () => ({
+        version: 'test',
+        catalog: new Map([
+          ['browser-first/search', { browser: true, args: [{ name: 'limit', positional: false }], columns: ['url', 'title'] }],
+          ['direct-second/search', { browser: false, args: [{ name: 'limit', positional: false }], columns: ['url', 'title'] }],
+        ]),
+      }),
+      ensureBridge: async () => { calls.push('bridge'); return { ok: true }; },
+      invoke: async (_bin, args) => { calls.push(args[0]); return { code: 0, stdout: '[]', stderr: '' }; },
+    },
+  });
+  assert.deepEqual(calls, ['bridge', 'browser-first', 'direct-second']);
+  assert.equal(result.adapterStats['browser-first'].status, 'ok_empty');
+});
+
+test('有界来源区分声明缺失、运行时缺失与适配器超时', async () => {
+  const declarations = {
+    adapters: [
+      {
+        site: 'wrong-dimension', tier: 1, cmd: 'search', dimensions: ['books'],
+        urlColumn: 'url', titleColumn: 'title', metricColumns: [],
+      },
+      {
+        site: 'runtime-missing', tier: 1, cmd: 'search', dimensions: ['general'],
+        urlColumn: 'url', titleColumn: 'title', metricColumns: [],
+      },
+      {
+        site: 'slow', tier: 1, cmd: 'search', dimensions: ['general'],
+        urlColumn: 'url', titleColumn: 'title', metricColumns: [],
+      },
+    ],
+  };
+  const result = await searchHotDiscovery({
+    query: '品牌文章', dimensions: 'general', tiers: '1',
+    sources: 'unknown,wrong-dimension,runtime-missing,slow',
+    'adapter-timeout-ms': '1500',
+  }, {
+    declarations,
+    bycli: {
+      loadRuntime: async () => ({
+        version: 'test',
+        catalog: new Map([['slow/search', {
+          browser: false,
+          args: [{ name: 'limit', positional: false }], columns: ['url', 'title'],
+        }]]),
+      }),
+      ensureBridge: async () => assert.fail('direct adapters do not need a bridge'),
+      invoke: async (_bin, _args, timeoutMs) => ({
+        code: 1, stdout: '', stderr: '', timedOut: true, killed: true, timeoutMs,
+      }),
+    },
+  });
+
+  assert.equal(result.adapterStats.unknown.status, 'not_in_declarations');
+  assert.equal(result.adapterStats['wrong-dimension'].status, 'unavailable');
+  assert.equal(result.adapterStats['runtime-missing'].status, 'not_in_catalog');
+  assert.equal(result.adapterStats.slow.status, 'timeout');
+  assert.equal(result.adapterStats.slow.killed, true);
+});
+
 test('全部已选适配器 ok_empty 时产生聚合无覆盖信号', () => {
   const selected = [{ site: 'a' }, { site: 'b' }];
   assert.equal(allSelectedAdaptersEmpty(selected, {
