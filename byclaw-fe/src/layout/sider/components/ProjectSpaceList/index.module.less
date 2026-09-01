@@ -2259,6 +2259,51 @@
   }
 }
 
+// 当前会话所在分支紧跟仓库标题展示；使用紧凑胶囊避免挤占搜索区和右侧操作按钮。
+.repoBranch {
+  min-width: 0;
+  max-width: 140px;
+  height: 22px;
+  padding: 0 7px;
+  border: 1px solid #dbe5f4;
+  border-radius: 6px;
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  color: #52627a;
+  background: #eef4ff;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 11px;
+  line-height: 20px;
+  white-space: nowrap;
+  text-decoration: none;
+
+  :global(.anticon) {
+    flex-shrink: 0;
+    color: #5875a1;
+    font-size: 12px;
+  }
+}
+
+.repoBranchName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.repoBranchLink {
+  cursor: pointer;
+
+  &:hover {
+    border-color: #b8cdfd;
+    color: #246bfe;
+    background: #eaf2ff;
+  }
+}
+
 .repoChangesCount {
   position: absolute;
   right: -5px;

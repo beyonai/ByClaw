@@ -304,6 +304,7 @@ describe('CodesTab', () => {
     render(<CodesTab projectId={203} resourceId="agent-9" sessionId="301" codeChangesEnabled />);
 
     const repoBlock = await screen.findByTestId('repo-beyonai/ByClaw');
+    await waitFor(() => expect(within(repoBlock).getByLabelText('feature/repos-tab')).toBeInTheDocument());
     const filesView = within(repoBlock).getByTestId('repo-files-beyonai/ByClaw');
     const changesView = within(repoBlock).getByTestId('repo-changes-beyonai/ByClaw');
     const searchInput = within(repoBlock).getByPlaceholderText('projectSpace.detail.repo.searchPlaceholder');

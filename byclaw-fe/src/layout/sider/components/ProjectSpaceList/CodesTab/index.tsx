@@ -648,6 +648,27 @@ const CodesTab: React.FC<CodesTabProps> = ({
     key: `${item.repoId}`,
     label: item.repoFullName,
   }));
+  const branchLabel = taskChanges?.headBranch?.trim() || '';
+  const branchBadge = branchLabel ? (
+    taskChanges?.compareUrl ? (
+      <a
+        className={`${styles.repoBranch} ${styles.repoBranchLink}`}
+        href={taskChanges.compareUrl}
+        target="_blank"
+        rel="noreferrer"
+        title={branchLabel}
+        aria-label={branchLabel}
+      >
+        <BranchesOutlined />
+        <span className={styles.repoBranchName}>{branchLabel}</span>
+      </a>
+    ) : (
+      <span className={styles.repoBranch} title={branchLabel} aria-label={branchLabel}>
+        <BranchesOutlined />
+        <span className={styles.repoBranchName}>{branchLabel}</span>
+      </span>
+    )
+  ) : null;
 
   return (
     <div className={styles.detailResourcePanel}>
@@ -657,6 +678,7 @@ const CodesTab: React.FC<CodesTabProps> = ({
         fillContainer
         headerExtra={
           <>
+            {branchBadge}
             {repos.length > 1 ? (
               <Dropdown
                 menu={{ items: repoMenuItems, onClick: ({ key }) => void switchRepository(Number(key)) }}
