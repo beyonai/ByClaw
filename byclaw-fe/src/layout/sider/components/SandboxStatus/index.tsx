@@ -3,7 +3,9 @@ import { Dropdown, Tooltip, message, Modal } from 'antd';
 import type { MenuProps } from 'antd';
 import { useIntl } from '@umijs/max';
 import classNames from 'classnames';
+import type { SandboxInfo } from '@/service/sandbox';
 import useSandboxStatus from './useSandboxStatus';
+import { getSandboxItemStatus, summarizeSandboxes, type SandboxAggregateStatus } from './statusUtils';
 import styles from './styles.module.less';
 
 interface SandboxStatusIndicatorProps {
@@ -14,16 +16,18 @@ interface SandboxStatusIndicatorProps {
 
 const SandboxStatusIndicator: React.FC<SandboxStatusIndicatorProps> = ({ userCode, className, style }) => {
   const intl = useIntl();
-  const { status, refetch, restartSandbox } = useSandboxStatus(userCode);
+  const { status, sandboxes, refetch, restartSandbox } = useSandboxStatus(userCode);
   const [isRestarting, setIsRestarting] = useState(false);
-  const [confirmModalVisible, setConfirmModalVisible] = useState(false);
+  const [restartTarget, setRestartTarget] = useState<SandboxInfo | null>(null);
+  const summary = summarizeSandboxes(sandboxes);
 
   const handleRestartConfirm = async () => {
+    if (!restartTarget) return;
     setIsRestarting(true);
     try {
-      await restartSandbox();
+      await restartSandbox(restartTarget);
       message.success(intl.formatMessage({ id: 'sandbox.restart.success' }));
-      setConfirmModalVisible(false);
+      setRestartTarget(null);
       refetch();
     } catch (error) {
       message.error(intl.formatMessage({ id: 'sandbox.restart.failed' }));
@@ -32,20 +36,54 @@ const SandboxStatusIndicator: React.FC<SandboxStatusIndicatorProps> = ({ userCod
     }
   };
 
-  const handleRestart = () => {
-    setConfirmModalVisible(true);
+  const handleRestart = (sandbox: SandboxInfo) => {
+    setRestartTarget(sandbox);
   };
 
-  const menuItems: MenuProps['items'] = [
-    {
-      key: 'restart',
-      label: intl.formatMessage({ id: 'sandbox.action.restart' }),
-      onClick: handleRestart,
-      disabled: isRestarting,
-    },
-  ];
+  const getItemStatusText = (itemStatus: SandboxAggregateStatus) =>
+    intl.formatMessage({ id: `sandbox.status.${itemStatus}` });
+
+  let menuItems: MenuProps['items'];
+  if (sandboxes.length) {
+    menuItems = sandboxes.map((sandbox) => {
+      const itemStatus = getSandboxItemStatus(sandbox);
+      return {
+        key: `${sandbox.sandboxType}-${sandbox.sandboxId}`,
+        label: (
+          <div className={styles.serviceItem}>
+            <span
+              className={classNames(styles.serviceStatusDot, {
+                [styles.running]: itemStatus === 'running',
+                [styles.transitioning]: itemStatus === 'transitioning',
+                [styles.stopped]: itemStatus === 'stopped',
+              })}
+            />
+            <span className={styles.serviceName}>{sandbox.sandboxType}</span>
+            <span className={styles.serviceState}>{getItemStatusText(itemStatus)}</span>
+            <span className={styles.serviceAction}>{intl.formatMessage({ id: 'sandbox.action.restart' })}</span>
+          </div>
+        ),
+        onClick: () => handleRestart(sandbox),
+        disabled: isRestarting || itemStatus === 'transitioning',
+      };
+    });
+  } else {
+    menuItems = [
+      {
+        key: 'empty',
+        label: intl.formatMessage({ id: 'sandbox.status.noServices' }),
+        disabled: true,
+      },
+    ];
+  }
 
   const getStatusText = () => {
+    if (summary.total > 1) {
+      return intl.formatMessage(
+        { id: 'sandbox.status.summary' },
+        { running: summary.running, transitioning: summary.transitioning, total: summary.total }
+      );
+    }
     switch (status) {
       case 'running':
         return intl.formatMessage({ id: 'sandbox.status.running' });
@@ -75,9 +113,9 @@ const SandboxStatusIndicator: React.FC<SandboxStatusIndicatorProps> = ({ userCod
       </Dropdown>
       <Modal
         title={intl.formatMessage({ id: 'sandbox.restart.confirm.title' })}
-        open={confirmModalVisible}
+        open={!!restartTarget}
         onOk={handleRestartConfirm}
-        onCancel={() => setConfirmModalVisible(false)}
+        onCancel={() => setRestartTarget(null)}
         okText={intl.formatMessage({ id: 'sandbox.restart.confirm.ok' })}
         cancelText={intl.formatMessage({ id: 'sandbox.restart.confirm.cancel' })}
         confirmLoading={isRestarting}
@@ -85,7 +123,10 @@ const SandboxStatusIndicator: React.FC<SandboxStatusIndicatorProps> = ({ userCod
         maskClosable={!isRestarting}
         closable={!isRestarting}
       >
-        {intl.formatMessage({ id: 'sandbox.restart.confirm.content' })}
+        {intl.formatMessage(
+          { id: 'sandbox.restart.confirm.content' },
+          { sandboxType: restartTarget?.sandboxType || '' }
+        )}
       </Modal>
     </>
   );
