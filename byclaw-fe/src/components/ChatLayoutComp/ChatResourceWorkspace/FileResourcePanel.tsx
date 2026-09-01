@@ -278,21 +278,29 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         return;
       }
 
-      // 预览是工作区内部页签，不调用全局抽屉，因而可以与其它资源同时打开。
-      onOpenDetail(
-        <FilePreviewPanel
-          fileName={item.name}
-          resourceId={resourceId}
-          path={item.path}
-          fileUrl={undefined}
-          sessionId={scope === 'session' ? sessionId : undefined}
-          source={scope === 'project' ? 'dataset' : 'fileBrowser'}
-        />,
-        {
-          tabKey: `${scope}-file:${isProjectFile(item) ? item.fileId : item.path}`,
-          title: item.name,
-        }
-      );
+      const openFileInTab = (fileName: string, filePath: string) => {
+        // 预览是工作区内部页签，不调用全局抽屉，因而可以与其它资源同时打开。
+        onOpenDetail(
+          <FilePreviewPanel
+            fileName={fileName}
+            resourceId={resourceId}
+            path={filePath}
+            fileUrl={undefined}
+            sessionId={scope === 'session' ? sessionId : undefined}
+            source={scope === 'project' ? 'dataset' : 'fileBrowser'}
+            onOpenRelativeFile={(relativePath) => {
+              const parentPath = getParentDirectoryPath(filePath);
+              const resolvedPath = normalizeFileBrowserPath(`${parentPath}/${relativePath}`);
+              openFileInTab(resolvedPath.split('/').pop() || relativePath, resolvedPath);
+            }}
+          />,
+          {
+            tabKey: `${scope}-file:${filePath}`,
+            title: fileName,
+          }
+        );
+      };
+      openFileInTab(item.name, item.path);
     },
     [intl, onOpenDetail, onPreviewFile, resourceId, scope, sessionId]
   );

@@ -341,6 +341,19 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     [activeResourceTabKey, resourceTabs]
   );
 
+  const closeResourceTabs = useCallback((keys: string[]) => {
+    if (!keys.length) return;
+    setResourceTabs((currentTabs) => {
+      const nextTabs = currentTabs.filter((tab) => !keys.includes(tab.key));
+      setActiveResourceTabKey((currentActiveKey) => {
+        if (nextTabs.some((tab) => tab.key === currentActiveKey)) return currentActiveKey;
+        return nextTabs[nextTabs.length - 1]?.key || '';
+      });
+      if (!nextTabs.length) setResourceListOpen(true);
+      return nextTabs;
+    });
+  }, []);
+
   const resourceWorkspaceVisible = isBottom && (resourceListOpen || resourceTabs.length > 0);
 
   // 预览页签栏的列表按钮只负责显示/隐藏资源列表，不能误关已经打开的文件预览。
@@ -381,6 +394,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
         onOpenDetail={openResourceDetailFromResourceList}
         onActiveTabChange={setActiveResourceTabKey}
         onCloseTab={closeResourceTab}
+        onCloseTabs={closeResourceTabs}
       />,
       {
         width: resourceTabs.length ? HALF_MAIN_CONTENT_DETAIL_PANEL_WIDTH : DEFAULT_DETAIL_PANEL_WIDTH,
@@ -390,6 +404,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     activeResourceTabKey,
     clearDetailPanel,
     closeResourceTab,
+    closeResourceTabs,
     openResourceDetailFromResourceList,
     resourceListOpen,
     resourceTabs,

@@ -32,6 +32,7 @@ interface FilePreviewPanelProps {
    * data 为 null 时保持 loading 占位状态，等调用方异步填入真实内容。
    */
   content?: { data: string | null; binary?: boolean };
+  onOpenRelativeFile?: (path: string) => void;
 }
 
 // 复用与下载分支相同的 Blob + mimeType 约定，让 Preview/Twins 对同一类文件走同一条渲染路径。
@@ -130,6 +131,7 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
   sessionId,
   source = 'dataset',
   content,
+  onOpenRelativeFile,
 }) => {
   const [blob, setBlob] = useState<Blob | null>(null);
   const [loading, setLoading] = useState(true);
@@ -309,6 +311,7 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
             title={fileName}
             resolveMarkdownImage={previewFileUrl || (resourceId && sourcePath) ? resolveRelativeResource : undefined}
             resolveHtmlResource={previewFileUrl || (resourceId && sourcePath) ? resolveRelativeResource : undefined}
+            onHtmlLinkClick={onOpenRelativeFile}
             className={fileSiderStyles.previewContent}
           />
         </React.Suspense>
