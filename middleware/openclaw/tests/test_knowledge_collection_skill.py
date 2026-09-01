@@ -166,6 +166,8 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
 
         for phrase in (
             "materialize-arxiv",
+            "已授权并选中的 arXiv 候选",
+            "`--direct-urls` 或 `public-discover`",
             "https://arxiv.org/html/<paper-id>",
             "acquisitionUrl",
             "相同论文 ID",
@@ -709,7 +711,7 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         self.assertFalse((bycli_root / "references" / "weixin" / "SKILL.md").exists())
         self.assertFalse((bycli_root / "references" / "knowledge-ingest.md").exists())
 
-    def test_weixin_reference_tracks_the_2_1_55_command_surface(self):
+    def test_weixin_reference_tracks_the_environment_installed_command_surface(self):
         bycli = (SKILLS_ROOT / "bycli" / "SKILL.md").read_text(encoding="utf-8")
         weixin = (SKILLS_ROOT / "bycli" / "references" / "weixin.md").read_text(encoding="utf-8")
         commands = markdown_section(weixin, "Command selection")
@@ -718,7 +720,8 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             re.findall(r"^\| `([a-z0-9-]+)(?: [^`]*)?` \|", commands, re.MULTILINE)
         )
         self.assertEqual(WEIXIN_COMMANDS, documented)
-        self.assertIn("`@sovovs/bycli` 2.1.55", weixin)
+        self.assertIn("environment's installed `@sovovs/bycli`", weixin)
+        self.assertNotIn("2.1.55", bycli + weixin)
         self.assertIn("Aliases: `overview`, `dashboard`, `fans`", commands)
         self.assertIn("Alias: `userInfo`", commands)
         self.assertIn("`get-public-account-info/articles", bycli)
@@ -808,7 +811,7 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "Every browser-backed Weixin command must run through",
             "`scripts/weixin-browser-runner.mjs`",
             "A retry-shaped user message is not explicit verification completion",
-            "`byCLI 2.1.55`",
+            "环境中的 byCLI",
             "至少 5 秒的租约启动错峰",
         ):
             self.assertIn(phrase, bycli)
@@ -830,7 +833,7 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         downloads = markdown_section(weixin, "Published-data spreadsheet downloads")
         login = markdown_section(weixin, "Login and verification gate")
 
-        self.assertIn("@sovovs/bycli` 2.1.55", weixin)
+        self.assertIn("environment's installed `@sovovs/bycli`", weixin)
         self.assertIn(
             "Explicit account identity or account-history intent starts with `get-public-account-info`",
             discovery,
@@ -918,8 +921,8 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "Only after `get-public-account-info` proves one unique nickname-to-`fakeid` binding",
             weixin,
         )
-        self.assertIn("Verified for byCLI 2.1.55", login)
-        self.assertNotIn("2.1.55 and later", login)
+        self.assertIn("For the environment's installed byCLI", login)
+        self.assertNotIn("2.1.55", login)
         self.assertIn("`create-draft` session failures return `AUTH_REQUIRED`", login)
         self.assertIn(
             "An authentication outcome from an already-consumed diagnostic rerun follows terminal priority 1",

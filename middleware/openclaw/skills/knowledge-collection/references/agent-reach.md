@@ -57,13 +57,14 @@ requires-user-action 都按 STOP 契约保留命令自有 TAB 并停止，微信
 
 ### arXiv 全文
 
-用户明确提供 arXiv URL 并要求完整正文时，先用 `bycli arxiv paper <paper-id>` 获取元数据，再用
+已授权并选中的 arXiv 候选要求完整正文时，无论候选来自用户通过 `--direct-urls` 提供的直链还是 `public-discover` 的 eligible article，先用 `bycli arxiv paper <paper-id>` 获取元数据，再用
 `bycli web read --url <URL> --output <session-dir>/raw/bycli/arxiv/<item-id>/` 获取全文并让 byCLI 在同一输出目录中落盘正文及图片。`<URL>`
-先使用用户提供的 URL；若 PDF 表示无法读取，只允许改用 arXiv 官方同一论文 ID 的
+先使用已授权候选 URL；若 PDF 表示无法读取，只允许改用 arXiv 官方同一论文 ID 的
 `https://arxiv.org/html/<paper-id>`；不得切换论文、使用镜像或凭据参数。原始 URL 必须作为 `sourceUrl`，实际成功读取的
 HTML URL 必须作为 `acquisitionUrl` 持久化，然后交给 `materialize-arxiv` 验证结构完整性并生成全文证据。只有返回非空
 `collectPayloadPath` 时才能调用 `collect`。保留 byCLI 的原始输出布局，把其实际生成的 Markdown 文件传给
-`materialize-arxiv --fulltext-file`；不得把 stdout 手工重定向成正文，不得手工改写 raw 证据，也不得手工下载或补抓图片。
+`materialize-arxiv --fulltext-file`；重试必须使用新的 `raw/bycli/arxiv/<item-id>-<attempt>/` 并保留首次及所有既有输出，
+不得把 stdout 手工重定向成正文，不得覆盖或手工改写 raw 证据，也不得手工下载或补抓图片。
 不得使用 `curl`、`web_fetch`、`wget`、`requests` 做诊断或兜底。
 
 ## 只读边界

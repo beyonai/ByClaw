@@ -172,7 +172,7 @@ test('rejects malformed Markdown autolinks without weakening exact source matchi
   }
 });
 
-test('a corrected arXiv retry can close materialize, collect, status, and publish', async () => {
+test('a second executor artifact can close the arXiv flow without rewriting first raw evidence', async () => {
   const f = await fixture({
     markdown: completeMarkdown().replace(ACQUISITION_URL, `<${ACQUISITION_URL}`),
   });
@@ -182,8 +182,23 @@ test('a corrected arXiv retry can close materialize, collect, status, and publis
     assert.equal(first.materialization.status, 'pending');
     assert.equal(collectionStatus(f.paths).deliveryComplete, false);
 
-    await writeFile(f.fulltextFile, completeMarkdown(ACQUISITION_URL, { autolink: true }));
-    const corrected = await runArxivMaterialize(f.paths, args(f));
+    const firstRaw = await readFile(f.fulltextFile, 'utf8');
+    const firstMetadata = await readFile(f.metadataFile, 'utf8');
+    const retryDir = join(f.root, 'raw/bycli/arxiv/deepseek-r1-attempt-2');
+    await mkdir(join(retryDir, 'images'), { recursive: true });
+    const retryMetadataFile = join(retryDir, 'metadata.json');
+    const retryFulltextFile = join(retryDir, 'executor-output.md');
+    await writeFile(retryMetadataFile, firstMetadata);
+    await writeFile(retryFulltextFile, completeMarkdown(ACQUISITION_URL, { autolink: true }));
+    await writeFile(join(retryDir, 'images/training.png'), 'png-fixture-attempt-2');
+
+    const corrected = await runArxivMaterialize(f.paths, {
+      ...args(f),
+      'metadata-file': retryMetadataFile,
+      'fulltext-file': retryFulltextFile,
+    });
+    assert.equal(await readFile(f.fulltextFile, 'utf8'), firstRaw);
+    assert.equal(await readFile(f.metadataFile, 'utf8'), firstMetadata);
     assert.equal(corrected.materialization.status, 'materialized');
     assert.equal(cmdCollect(f.paths, { 'item-json-file': corrected.collectPayloadPath }).ok, true);
     assert.equal(collectionStatus(f.paths).deliveryComplete, true);

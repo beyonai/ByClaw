@@ -178,18 +178,19 @@ payload 文件必须位于当前会话的 `.collection-inputs/` 内，成功登�
 
 ## arXiv 全文物化
 
-用户明确提供 arXiv URL 时，原始 URL 作为规范来源 `sourceUrl`。若 PDF 表示不能直接读取，允许来源执行器读取同一论文 ID 的
+已授权并选中的 arXiv 候选无论来自 `--direct-urls` 或 `public-discover`，都以该候选 URL 作为规范来源 `sourceUrl`。若 PDF 表示不能直接读取，允许来源执行器读取同一论文 ID 的
 `https://arxiv.org/html/<paper-id>`，但必须把该实际地址登记为 `acquisitionUrl`；两者必须是 `arxiv.org` 官方 HTTPS 地址且具有
 相同论文 ID。不得用模型记忆、镜像、`curl`、`web_fetch`、`wget` 或 `requests` 取得替代内容。
 
 元数据 JSON 与 `bycli web read --url <URL> --output <session-dir>/raw/bycli/arxiv/<item-id>/` 生成的 Markdown、图片均原样保存在
-本会话 `raw/`。不得手工改写 raw 证据或手工下载、补抓图片；将 byCLI 实际生成的 Markdown 文件作为 `--fulltext-file` 后运行：
+本会话 `raw/`。重试必须写入新的 `raw/bycli/arxiv/<item-id>-<attempt>/` 并保留既有输出；不得覆盖或手工改写 raw 证据，
+也不得手工下载、补抓图片；将 byCLI 实际生成的 Markdown 文件作为 `--fulltext-file` 后运行：
 
 ```bash
 node scripts/knowledge-collection.mjs materialize-arxiv --session-dir <dir> \
   --metadata-file <dir>/raw/bycli/arxiv/<item-id>/metadata.json \
   --fulltext-file <dir>/raw/bycli/arxiv/<item-id>/fulltext.md \
-  --source-url <用户原始 arXiv URL> \
+  --source-url <已授权候选 arXiv URL> \
   --acquisition-url https://arxiv.org/html/<paper-id> \
   --item-id <item-id>
 ```
