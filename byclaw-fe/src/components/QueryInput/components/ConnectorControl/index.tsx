@@ -957,7 +957,9 @@ const ConnectorControl = ({
         <ConnectorIcon connector={connector} />
         <div className={styles.connectorContent}>
           <strong>{connector.name}</strong>
-          <span>{connector.description}</span>
+          <span className={styles.connectorDescription} title={connector.description}>
+            {connector.description}
+          </span>
           {credentialLifecycleText && (
             <span
               className={classNames(styles.credentialExpiration, {
@@ -1064,7 +1066,7 @@ const ConnectorControl = ({
         className={styles.authorizationModal}
         footer={null}
         open={!!authorizingConnector && !authorizationSession && !credentialSchema}
-        zIndex={1200}
+        zIndex={2000}
         width={570}
         onCancel={() => void cancelAuthorization()}
       >
@@ -1112,7 +1114,7 @@ const ConnectorControl = ({
         keyboard={!startingAuthorization}
         maskClosable={!startingAuthorization}
         open={!!authorizingConnector && !!credentialSchema && !authorizationSession}
-        zIndex={1200}
+        zIndex={2000}
         width={credentialSchema?.helpText ? '80vw' : 480}
         onCancel={() => {
           if (!startingAuthorization) {
@@ -1181,7 +1183,7 @@ const ConnectorControl = ({
         className={styles.qrModal}
         footer={null}
         open={!!authorizingConnector && !!authorizationSession}
-        zIndex={1200}
+        zIndex={2000}
         width={470}
         onCancel={() => void cancelAuthorization()}
       >

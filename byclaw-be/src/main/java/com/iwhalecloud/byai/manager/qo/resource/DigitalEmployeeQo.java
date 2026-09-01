@@ -22,6 +22,11 @@ public class DigitalEmployeeQo extends AuthQo {
     private String agentType;
 
     /**
+     * 数字员工归属类型：enterprise 为企业员工；未传时个人员工组可同时查询个人和企业员工。
+     */
+    private String ownerType;
+
+    /**
      * all:全部,authorize-授权给我,owner-我创建的,manager-管理,managerExcludingOwner-授权我管理且非我创建,
      * manageable-我创建的或我能管理的
      */

@@ -2751,6 +2751,7 @@ const ConfigForm = (props) => {
                   onChange={setEmployeeGroupMembers}
                   disabled={isReadOnly}
                   agentTypeOptions={agentTypeOptions}
+                  ownerType={effectiveOwnerType}
                 />
               )}
               {/* 配置知识 */}
