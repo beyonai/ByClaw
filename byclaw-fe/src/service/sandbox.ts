@@ -45,7 +45,11 @@ export async function getSandboxInfo(params: { userCode?: string; sandboxType?: 
 /**
  * 释放沙箱
  */
-export async function removeSandbox(params: { userCode: string; resourceId?: number | null }): Promise<void> {
+export async function removeSandbox(params: {
+  userCode: string;
+  resourceId?: number | null;
+  sandboxType?: string;
+}): Promise<void> {
   return POST('/byaiService/sandbox/removeSandbox', params, silentErrorConfig);
 }
 

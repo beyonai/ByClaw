@@ -39,6 +39,7 @@ async function setupCollectedSession(root, { query = 'DeepSeek article', nested 
   const init = await runCli([
     'init', '--session-dir', sessionDir, '--query', query,
     '--source-scope', '["public-internet"]', '--materialization-target', 'selected',
+    '--direct-urls', '["https://example.com/deepseek","https://example.com/another","https://example.com/second"]',
   ]);
   assert.equal(init.code, 0, init.stderr || init.stdout);
 
@@ -193,12 +194,14 @@ test('nested index layout is flattened with a companion assets directory', async
 test('non-empty requested directories get a stable collision-safe child and never lose existing content', async () => {
   const root = tempRoot();
   try {
-    const { sessionDir } = await setupCollectedSession(root);
+    const { sessionDir } = await setupCollectedSession(root, {
+      query: '采集一篇关于 OpenClaw 的高质量文章，架构、使用、介绍、技术文档均可，输出到用户目录',
+    });
     const requested = join(root, 'by');
     mkdirSync(requested);
     writeFileSync(join(requested, 'keep.txt'), 'keep');
     const shortRunId = crypto.createHash('sha256').update(realpathSync(sessionDir)).digest('hex').slice(0, 8);
-    const occupiedName = `deepseek-article-collection-${shortRunId}`;
+    const occupiedName = `deepseek-collection-${shortRunId}`;
     mkdirSync(join(requested, occupiedName));
     writeFileSync(join(requested, occupiedName, 'unknown.txt'), 'unknown');
 
@@ -337,9 +340,11 @@ test('publish refuses sessions that have not passed collection delivery validati
     const sessionDir = join(root, 'session');
     const init = await runCli(['init', '--session-dir', sessionDir, '--query', 'not ready']);
     assert.equal(init.code, 0, init.stderr || init.stdout);
-    const result = await runCli(['publish', '--session-dir', sessionDir, '--delivery-dir', join(root, 'delivery')]);
+    const deliveryDir = join(root, 'delivery');
+    const result = await runCli(['publish', '--session-dir', sessionDir, '--delivery-dir', deliveryDir]);
     assert.equal(result.code, 1);
     assert.match(result.json.error, /deliveryComplete|validated Markdown/);
+    assert.equal(existsSync(deliveryDir), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

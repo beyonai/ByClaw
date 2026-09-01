@@ -13,10 +13,16 @@ import {
   annotateMergedCandidates,
   classifyCandidates,
   countUniqueArticles,
+  mergedCandidates,
   summarizeMergedQuality,
 } from './candidate-quality.mjs';
+import {
+  createDiscoveryAuthorization,
+  recordDiscoveryResult,
+  reserveDiscoveryAttempt,
+} from './discovery-authorization.mjs';
+import { loadSession, persistSession, withSessionLock } from './session.mjs';
 import { runCli } from './enterprise/shared/cli-runner.mjs';
-import { loadSession } from './session.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const onlineSearchRoot = resolve(scriptDir, '../references/online-search');
@@ -137,6 +143,15 @@ export async function runPublicDiscover(paths, args, options = {}) {
   }
   const query = requireText(args?.query, '--query');
   const category = typeof args?.category === 'string' && args.category.trim() ? args.category.trim() : 'general';
+  withSessionLock(paths, 'public-discover-reserve', () => {
+    const current = loadSession(paths, { persistMigration: false }).session;
+    if (!current.task.discoveryGate) {
+      current.task.discoveryGate = createDiscoveryAuthorization();
+    }
+    reserveDiscoveryAttempt(current.task.discoveryGate, { query, category });
+    persistSession(paths, current);
+  });
+  try {
   const language = typeof args?.language === 'string' && args.language.trim() ? args.language.trim() : 'all';
   const pageno = String(args?.pageno || '1');
   const maxResults = String(args?.['max-results'] || '20');
@@ -179,7 +194,12 @@ export async function runPublicDiscover(paths, args, options = {}) {
   let hotDiscoveryMs = 0;
   const runTimed = async (runner, spec) => {
     const startedAt = now();
-    const outcome = await runner(spec, { timeoutMs: processTimeoutMs });
+    let outcome;
+    try {
+      outcome = await runner(spec, { timeoutMs: processTimeoutMs });
+    } catch (error) {
+      outcome = { code: 1, stdout: '', stderr: error.message };
+    }
     return { outcome, durationMs: elapsedMilliseconds(startedAt, now()) };
   };
   if (requestedCount === null) {
@@ -209,8 +229,15 @@ export async function runPublicDiscover(paths, args, options = {}) {
   const sxDoc = parseSuccess(searxngOutcome);
   const hotDoc = parseSuccess(hotOutcome);
   if (!sxDoc && !hotDoc) {
-    if (hotOutcome?.skipped) throw new Error('SearXNG 未返回有效结果');
-    throw new Error('SearXNG 与 hot-discovery 均未返回有效结果');
+    const failure = hotOutcome?.skipped
+      ? 'SearXNG 未返回有效结果'
+      : 'SearXNG 与 hot-discovery 均未返回有效结果';
+    withSessionLock(paths, 'public-discover-failed', () => {
+      const current = loadSession(paths, { persistMigration: false }).session;
+      recordDiscoveryResult(current.task.discoveryGate, { query, category, candidates: [], error: failure });
+      persistSession(paths, current);
+    });
+    throw new Error(failure);
   }
 
   const channelDiagnostics = {
@@ -240,10 +267,20 @@ export async function runPublicDiscover(paths, args, options = {}) {
     mergeAndClassifyMs,
     totalMs: elapsedMilliseconds(totalStartedAt, now()),
   };
+  const authorization = withSessionLock(paths, 'public-discover-record', () => {
+    const current = loadSession(paths, { persistMigration: false }).session;
+    const result = recordDiscoveryResult(current.task.discoveryGate, {
+      query,
+      category,
+      candidates: mergedCandidates(annotatedMerged),
+    });
+    persistSession(paths, current);
+    return { state: current.task.discoveryGate, result };
+  });
   const merged = { ...annotatedMerged, channelDiagnostics, candidateQuality, timing };
   await writeFile(mergedSnapshot, `${JSON.stringify(merged, null, 2)}\n`, 'utf8');
 
-  return {
+    return {
     ok: true,
     action: 'public-discover',
     query,
@@ -255,6 +292,13 @@ export async function runPublicDiscover(paths, args, options = {}) {
     } : null,
     channels: channelDiagnostics,
     candidateQuality,
+    discoveryAuthorization: {
+      attemptCount: authorization.state.attemptCount,
+      maxAttempts: authorization.state.maxAttempts,
+      exhausted: authorization.state.exhausted,
+      stopReason: authorization.state.stopReason,
+      articleCandidateIds: authorization.result.articleCandidates.map((candidate) => candidate.candidateId),
+    },
     timing,
     snapshots: {
       searxng: sxDoc ? searxngSnapshot : null,
@@ -264,5 +308,21 @@ export async function runPublicDiscover(paths, args, options = {}) {
     merged,
     ...(merged.requiresUserAction ? { requiresUserAction: merged.requiresUserAction } : {}),
     warnings,
-  };
+    };
+  } catch (error) {
+    withSessionLock(paths, 'public-discover-error', () => {
+      const current = loadSession(paths, { persistMigration: false }).session;
+      const running = current.task.discoveryGate?.runs?.at(-1)?.status === 'running';
+      if (running) {
+        recordDiscoveryResult(current.task.discoveryGate, {
+          query,
+          category,
+          candidates: [],
+          error: error instanceof Error ? error.message : String(error),
+        });
+        persistSession(paths, current);
+      }
+    });
+    throw error;
+  }
 }

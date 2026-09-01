@@ -60,6 +60,23 @@ test('treats a trusted WeChat detail URL as an article without keyword-dependent
   );
 });
 
+test('recognizes Nature and arXiv publication detail URLs without language-specific title keywords', () => {
+  assert.deepEqual(
+    classifyCandidate({
+      url: 'https://www.nature.com/articles/s41586-025-09422-z',
+      title: 'DeepSeek-R1 incentivizes reasoning in LLMs through reinforcement learning',
+    }),
+    { pageType: 'article', reasons: ['trusted-publication-url'] },
+  );
+  assert.deepEqual(
+    classifyCandidate({
+      url: 'https://arxiv.org/abs/2501.12948',
+      title: 'DeepSeek-R1: Incentivizing Reasoning Capability in LLMs',
+    }),
+    { pageType: 'article', reasons: ['trusted-publication-url'] },
+  );
+});
+
 test('reject precedence prevents login and search pages from being promoted by article words', () => {
   assert.equal(classifyCandidate({
     url: 'https://example.com/login?next=/news/report',

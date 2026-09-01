@@ -418,7 +418,15 @@ knowledge-collection publish
   - 更新技能边界和可发现性断言。
 - 新增 `publish-delivery.test.mjs`，并更新统一 CLI 契约测试。
 
-不修改企业 adapters、来源发现器和现有下游技能。
+不修改企业 adapters 和现有下游技能。原发布设计不改变来源发现算法；线上验证暴露出的公共发现旁路问题按下述补充设计收口。
+
+## 公共发现授权补充设计
+
+公共主题采集不能只依靠 Skill 文字禁止旁路。新公共会话在 `task.discoveryGate` 中维护最多两轮发现、候选分类、规范 URL、获取 URL 变体和耗尽状态。`public-discover` 是唯一可以登记 `origin=public-discover` 候选的命令；用户原始请求明确给出的 URL 通过 `init --direct-urls` 登记为 `origin=user-provided`。Agent 记忆、手工站点搜索或独立搜索器得到的 URL 不得登记为用户输入。
+
+`collect` 和 pending inventory 写入必须按 URL 命中 `discoveryGate` 中的 `article` 候选，并把稳定的 `discoveryCandidateId` 写入 inventory；未知 URL、`weak`/`reject` 候选以 `SOURCE_NOT_AUTHORIZED_BY_DISCOVERY` 拒绝。首轮已有文章候选时禁止第二轮；首轮无文章时只允许再调用一次，第二轮仍无文章则写入 `stopReason=no-article-candidates` 并终止。旧会话缺少门禁字段时保持兼容，但调用 `public-discover` 后立即进入新门禁。
+
+这项补充不改变 `publish`、`deliveryInput` 或目标目录冲突策略，只收紧进入交付校验前的来源 provenance。Nature `/articles/...` 与 arXiv `/abs/...` 作为明确出版详情 URL 由分类器直接识别为文章，避免误判诱发旁路。
 
 ## 验证场景
 
@@ -455,6 +463,10 @@ knowledge-collection publish
     `deliveryInput` 并返回 warning。
 28. delivery 目标发生 drift 时，`status` 本身仍成功返回 collection 状态和 warning；`publish` 重试拒绝覆盖外部修改。
 29. stale delivery 的目标未发生 drift 时可原子替换并恢复同一路径；目标已修改时不创建第二个模糊交付目录。
+30. `public-discover` 产生的 `article` URL 可进入 `collect`，手工补充的 arXiv URL 被拒绝。
+31. 用户原始请求明确提供的 URL 通过 `--direct-urls` 登记后可采集，不需要公共发现。
+32. 首轮无文章时允许第二轮，第二轮仍无文章时记录耗尽状态，第三轮在调用任何执行器前被拒绝。
+33. `weak`/`reject` 候选不得进入 inventory，Nature 与 arXiv 明确出版详情 URL 不再误判为 `weak`。
 
 ## 验收标准
 

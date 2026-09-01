@@ -1002,9 +1002,6 @@ public class SuasSuperassistApplicationService {
         String description = jsonObject.getString("description");
         String isShare = jsonObject.getString("isShare");
 
-        JSONArray resources = jsonObject.getJSONArray("resources");
-
-
         //不存在则创建
         Project project = projectService.findByProjectName(projectName);
         if (project == null) {
@@ -1023,29 +1020,6 @@ public class SuasSuperassistApplicationService {
 
             projectService.save(project);
 
-            //初始化本体对象
-            List<String> objectCodes = this.initSubmitWorkspaceTemplate();
-            logger.info("初始化对象:{}", objectCodes);
-
-            for (int i = 0; resources != null && i < resources.size(); i++) {
-                JSONObject resourceJSONObject = resources.getJSONObject(i);
-
-                String resourceCode = resourceJSONObject.getString("resourceCode");
-
-                SsResource ssResource = ssResourceService.findByIdOrCode(null, resourceCode);
-
-                ProjectResource resource = new ProjectResource();
-                resource.setId(sequenceService.nextVal());
-                resource.setProjectId(project.getProjectId());
-                resource.setResourceType(ProjectResourceType.fromResourceBizType(ssResource.getResourceBizType()));
-                resource.setResourceId(ssResource.getResourceId());
-                resource.setResourceName(ssResource.getResourceName());
-                resource.setSortNo(i);
-                resource.setCreateBy(loginInfo.getUserId());
-                resource.setCreateTime(new Date());
-                resource.setDeleteFlag(DeleteFlag.NORMAL);
-                projectResourceService.save(resource);
-            }
         } else {
 
             // 初始化项目云盘

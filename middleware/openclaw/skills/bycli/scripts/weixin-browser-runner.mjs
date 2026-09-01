@@ -26,6 +26,7 @@ function internalError({
   code,
   message,
   bridgeCode,
+  details,
   commandExecuted = false,
 }) {
   return {
@@ -37,7 +38,7 @@ function internalError({
         code,
         message,
         exitCode,
-        ...(bridgeCode ? { details: { bridgeCode } } : {}),
+        ...(details ? { details } : bridgeCode ? { details: { bridgeCode } } : {}),
       },
     })}\n`,
     commandExecuted,
@@ -45,12 +46,58 @@ function internalError({
   };
 }
 
+function bridgeErrorDetails(bridge) {
+  const details = { bridgeCode: bridge.code };
+  if (['running', 'stopped', 'unknown'].includes(bridge.browserState)) {
+    details.browserState = bridge.browserState;
+  }
+  if (Array.isArray(bridge.actions)) {
+    details.actions = bridge.actions.filter(action => [
+      'browser_start_script',
+      'browser_start_openclaw',
+      'daemon_restart',
+    ].includes(action));
+  }
+  if (['running', 'stopped', 'unknown'].includes(bridge.daemonState)) {
+    details.daemonState = bridge.daemonState;
+  }
+  if (['connected', 'disconnected', 'unknown'].includes(bridge.extensionState)) {
+    details.extensionState = bridge.extensionState;
+  }
+  if (Number.isInteger(bridge.checks) && bridge.checks >= 0) details.checks = bridge.checks;
+  if (bridge.budget && typeof bridge.budget === 'object') {
+    details.budget = {
+      browserStartsUsed: Number.isInteger(bridge.budget.browserStartsUsed)
+        ? bridge.budget.browserStartsUsed : 0,
+      daemonRestartsUsed: Number.isInteger(bridge.budget.daemonRestartsUsed)
+        ? bridge.budget.daemonRestartsUsed : 0,
+    };
+  }
+  if (bridge.diagnostics && typeof bridge.diagnostics === 'object') {
+    const diagnostics = {};
+    if (['running', 'stopped', 'unknown'].includes(bridge.diagnostics.browserStatus)) {
+      diagnostics.browserStatus = bridge.diagnostics.browserStatus;
+    }
+    for (const field of [
+      'browserStartFailed',
+      'recoveryBudgetExhausted',
+      'lockTimeout',
+    ]) {
+      if (typeof bridge.diagnostics[field] === 'boolean') {
+        diagnostics[field] = bridge.diagnostics[field];
+      }
+    }
+    if (Object.keys(diagnostics).length > 0) details.diagnostics = diagnostics;
+  }
+  return details;
+}
+
 function bridgeError(bridge, commandExecuted = false) {
   return internalError({
     exitCode: 69,
     code: 'BROWSER_CONNECT',
     message: bridge.reason || 'Managed browser bridge is unavailable',
-    bridgeCode: bridge.code,
+    details: bridgeErrorDetails(bridge),
     commandExecuted,
   });
 }

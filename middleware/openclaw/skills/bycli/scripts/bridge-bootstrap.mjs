@@ -58,7 +58,8 @@ export function parseBrowserState(result) {
       // Older OpenClaw versions print text. Parse only explicit lifecycle phrases.
     }
   }
-  if (/\b(?:not[ -]?running|stopped)\b/i.test(output)) return 'stopped';
+  if (/\b(?:not[ -]?running|stopped)\b/i.test(output)
+    || /\brunning\s*[:=]?\s*(?:false|no)\b/i.test(output)) return 'stopped';
   if (/\brunning\s*[:=]?\s*(?:true|yes)\b/i.test(output)
     || /\bchromium\s+(?:is\s+)?running\b/i.test(output)) return 'running';
   return 'unknown';

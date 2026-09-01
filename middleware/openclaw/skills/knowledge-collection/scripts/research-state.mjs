@@ -30,6 +30,7 @@ import {
   resolveSandboxPath,
 } from './session.mjs';
 import { deliveryCompleteForSession } from './delivery-state.mjs';
+import { createDiscoveryAuthorization } from './discovery-authorization.mjs';
 
 export const DEFAULTS = {
   breadth: 3,
@@ -531,6 +532,10 @@ export function cmdInit(args) {
   const maxSearchRounds = optionalPositiveInt(args['max-search-rounds'], '--max-search-rounds', { max: 1000 });
   const effectiveSourceScope = sourceScope(args['source-scope']);
   const effectiveMaterializationTarget = materializationTarget(args['materialization-target']);
+  const explicitDirectUrls = nonEmptyStringList(
+    parseJsonArg(args['direct-urls'], []),
+    '--direct-urls',
+  );
   const startedAt = typeof args['started-at'] === 'string' && args['started-at'].trim()
     ? args['started-at'].trim()
     : new Date().toISOString();
@@ -569,6 +574,9 @@ export function cmdInit(args) {
       combinedQuery: null,
       stopReason: null,
       status: 'initialized',
+      ...(effectiveSourceScope.includes('public-internet')
+        ? { discoveryGate: createDiscoveryAuthorization({ directUrls: explicitDirectUrls }) }
+        : {}),
     },
     research: { branches: [], learnings: [], citations: {}, context: [], visitedUrls: [], reportPath: null },
     collection: {
@@ -592,6 +600,14 @@ export function cmdInit(args) {
     }
     assertNoSensitiveKeys(metadata, '--metadata-input-file');
     session.collection = metadata;
+  }
+  if (session.task.discoveryGate && (collectionResultInput || metadataInput)) {
+    const importedUrls = (session.collection.collection.items || [])
+      .map((item) => item?.sourceUrl)
+      .filter((url) => typeof url === 'string' && /^https?:\/\//i.test(url));
+    session.task.discoveryGate = createDiscoveryAuthorization({
+      directUrls: [...explicitDirectUrls, ...importedUrls],
+    });
   }
   persistSession({ root, session: sessionFile }, session);
   return {

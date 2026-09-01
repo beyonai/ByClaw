@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.gateway.sandbox.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.Date;
@@ -13,7 +14,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.gateway.sandbox.mapper.SandboxServiceSpecEntityMapper;
 import com.iwhalecloud.byai.gateway.sandbox.model.SandboxInfo;
+import com.iwhalecloud.byai.gateway.sandbox.persistence.SandboxServiceSpecEntity;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
 import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
@@ -112,5 +115,56 @@ class SandboxControllerTest {
         List<SsSandboxRecord> list = (List<SsSandboxRecord>) data.get("list");
         assertThat(list).hasSize(1);
         assertThat(list.get(0).getEndpoint()).isEqualTo("http://host/proxy/18789/chat?token=abc");
+    }
+
+    @Test
+    void saveServiceSpec_defaultsAutoStartToEnabledForLegacyClients() {
+        SandboxController controller = new SandboxController();
+        SandboxServiceSpecEntityMapper mapper = mock(SandboxServiceSpecEntityMapper.class);
+        ReflectionTestUtils.setField(controller, "sandboxServiceSpecEntityMapper", mapper);
+        when(mapper.selectById("openclaw")).thenReturn(null);
+
+        ResponseUtil response = controller.saveServiceSpec(Map.of(
+            "serviceKey", "openclaw",
+            "specJson", "{}",
+            "templateJson", "{}"
+        ));
+
+        assertThat(response.getCode()).isEqualTo(ResponseUtil.SUCCESS);
+        verify(mapper).insertSpec("openclaw", "{}", "{}", 1);
+    }
+
+    @Test
+    void saveServiceSpec_updatesExplicitAutoStartValue() {
+        SandboxController controller = new SandboxController();
+        SandboxServiceSpecEntityMapper mapper = mock(SandboxServiceSpecEntityMapper.class);
+        ReflectionTestUtils.setField(controller, "sandboxServiceSpecEntityMapper", mapper);
+        SandboxServiceSpecEntity existing = new SandboxServiceSpecEntity();
+        existing.setServiceKey("byclaw-dsh");
+        when(mapper.selectById("byclaw-dsh")).thenReturn(existing);
+
+        ResponseUtil response = controller.saveServiceSpec(Map.of(
+            "serviceKey", "byclaw-dsh",
+            "specJson", "{}",
+            "enabled", false
+        ));
+
+        assertThat(response.getCode()).isEqualTo(ResponseUtil.SUCCESS);
+        verify(mapper).updateSpec("byclaw-dsh", "{}", null, 0);
+    }
+
+    @Test
+    void removeSandbox_targetsOneServiceWhenSandboxTypeIsProvided() {
+        SandboxController controller = new SandboxController();
+        SandboxService sandboxService = mock(SandboxService.class);
+        ReflectionTestUtils.setField(controller, "sandboxService", sandboxService);
+
+        ResponseUtil response = controller.removeSandbox(Map.of(
+            "userCode", "user001",
+            "sandboxType", "byclaw-dsh"
+        ));
+
+        assertThat(response.getCode()).isEqualTo(ResponseUtil.SUCCESS);
+        verify(sandboxService).removeSandbox("user001", null, "byclaw-dsh");
     }
 }
