@@ -24,13 +24,6 @@
       "direction": "input"
     },
     {
-      "paramCode": "account_name",
-      "paramName": "公众号名称",
-      "type": "string",
-      "isRequired": true,
-      "direction": "input"
-    },
-    {
       "paramCode": "data_as_of",
       "paramName": "数据截止日（YYYY-MM-DD）",
       "type": "date",
@@ -101,6 +94,13 @@
       "direction": "output"
     },
     {
+      "paramCode": "trend_metric_modes",
+      "paramName": "趋势指标口径",
+      "type": "object",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
       "paramCode": "works",
       "paramName": "本月发布和今日变化作品并集",
       "type": "array",
@@ -131,6 +131,7 @@
   ],
   "object_references": [
     "wy93ovzs9p_article",
+    "wy93ovzs9p_article_collection",
     "wy93ovzs9p_article_channel_daily",
     "wy93ovzs9p_account_follower_daily"
   ]
