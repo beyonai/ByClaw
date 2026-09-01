@@ -57,6 +57,12 @@ describe("SUPER_ASSISTANT_SYSTEM_PROMPT", () => {
     );
   });
 
+  it("lists specialist file artifacts in the user-facing summary", () => {
+    expect(SUPER_ASSISTANT_SYSTEM_PROMPT).toContain(
+      "If a specialist returns any file artifacts, list those artifacts together with the specialist's result",
+    );
+  });
+
   it("forbids self-solving after a delegation failure", () => {
     expect(SUPER_ASSISTANT_SYSTEM_PROMPT).toContain(
       "directly explain the reason and what remains unresolved",
