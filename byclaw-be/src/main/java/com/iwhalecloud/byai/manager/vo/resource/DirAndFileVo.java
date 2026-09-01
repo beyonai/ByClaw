@@ -5,6 +5,8 @@ import lombok.Getter;
 import lombok.Setter;
 
 import java.util.Date;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * @author he.duming
@@ -17,29 +19,38 @@ public class DirAndFileVo {
 
     private Long id;
 
-    /** QA 知识库编码。 */
+    /**
+     * QA 知识库编码。
+     */
     private String knCode;
 
-    /** 门户知识库资源 ID。 */
+    /**
+     * 门户知识库资源 ID。
+     */
     private Long resourceId;
 
     private String name;
 
     private String type;
 
-    private Long fileId;
-
     private String fileName;
 
-    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "GMT+8")
-    private Date createTime;
+    private String directoryPath;
+
+
+    /**
+     * 文件大小
+     */
+    private Long size;
+
+    private String updatedAt;
+
+    private String buildStatus;
+
+    private String buildCurrentStep;
 
     private Long createBy;
 
     private String createStaffName;
-
-    private String directoryPath;
-
-    private Long size;
 
 }
