@@ -954,13 +954,24 @@ public class DigitalEmployeeApplicationService {
             // 默认个人助理始终按助手型运行,避免前端旧参数把 worker_agent_type 覆盖成编码型等其他类型.
             digitalEmployeeDTO.setAgentType(DigitalEmployType.AGENT_TYPE_ASSISTANT.getCode());
         }
+        // HARNESS is a deployment/runtime choice and is not derived from the legacy
+        // digital-employee agentType.  Keep it when editing an existing employee;
+        // otherwise a no-op/profile (including knowledge) save silently routes it
+        // back to BYCLAW_* based on agentType.
+        boolean harnessRuntime = StringUtils.equalsIgnoreCase(
+            StringUtils.trimToEmpty(ssResource.getWorkerAgentType()), "HARNESS");
         BeanUtil.copyProperties(digitalEmployeeDTO, ssResource);
         ssResource.setUpdateBy(CurrentUserHolder.getCurrentUserId());
         ssResource.setUpdateTime(new Date());
         ssResource.setResourceStatus(ResourceStatus.LIST.getNum());
         // 更新时允许前端同步调整资源归属类型,避免个人资源仍保留旧的 owner_type.
         ssResource.setOwnerType(StringUtils.trimToNull(digitalEmployeeDTO.getOwnerType()));
-        fillDigitalEmployeeImplInfo(ssResource, digitalEmployeeDTO.getAgentType());
+        if (harnessRuntime) {
+            ssResource.setImplType(ImplType.ASK_AGENT.getCode());
+            ssResource.setWorkerAgentType("HARNESS");
+        } else {
+            fillDigitalEmployeeImplInfo(ssResource, digitalEmployeeDTO.getAgentType());
+        }
         ssResourceService.updateResourceEntity(ssResource);
 
         // 更新扩展表

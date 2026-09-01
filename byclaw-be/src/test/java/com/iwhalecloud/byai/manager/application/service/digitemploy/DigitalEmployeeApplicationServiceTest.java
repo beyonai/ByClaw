@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.manager.application.service.digitemploy;
 
 import com.alibaba.fastjson2.JSON;
 import com.iwhalecloud.byai.common.constants.resource.DigitalEmployType;
+import com.iwhalecloud.byai.common.constants.resource.ImplType;
 import com.iwhalecloud.byai.common.constants.resource.OwnerType;
 import com.iwhalecloud.byai.common.constants.resource.WorkerAgentType;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
@@ -1600,6 +1601,35 @@ class DigitalEmployeeApplicationServiceTest {
         assertThat(resourceCaptor.getValue().getWorkerAgentType()).isEqualTo(WorkerAgentType.BYCLAW_EXE.getCode());
         assertThat(extCaptor.getValue().getAgentType()).isEqualTo(DigitalEmployType.AGENT_TYPE_ASSISTANT.getCode());
         verify(digitalEmployeeRuntimeRefreshService).scheduleDigitalEmployeeUpdateRefreshAfterCommit(100L, dto);
+    }
+
+    @Test
+    void updateDigitalEmployee_preservesHarnessRuntimeWhenEditingProfile() {
+        DigitalEmployeeDTO dto = new DigitalEmployeeDTO();
+        dto.setResourceId(100L);
+        dto.setResourceName("研发专家");
+        dto.setOwnerType(OwnerType.ENTERPRISE);
+        dto.setAgentType(DigitalEmployType.AGENT_TYPE_QA.getCode());
+
+        SsResource currentResource = buildDigitalEmployee(100L, OwnerType.ENTERPRISE, 1L);
+        currentResource.setComAcctId(201L);
+        currentResource.setWorkerAgentType("HARNESS");
+        SsResExtDigEmployee currentExt = buildDigitalEmployeeExt(100L, "研发专家");
+        currentExt.setAgentType(DigitalEmployType.AGENT_TYPE_QA.getCode());
+
+        when(ssResourceService.findById(100L)).thenReturn(currentResource);
+        when(skillGroupMapper.selectDigitalEmployeeForUpdate(100L, 201L)).thenReturn(currentResource);
+        when(ssResExtDigEmployeeService.findById(100L)).thenReturn(currentExt);
+        when(ssResourceRelDetailService.findByResourceId(100L)).thenReturn(List.of());
+        when(authApplicationService.hasResourceManagePermission(currentResource)).thenReturn(true);
+
+        SsResource result = service.updateDigitalEmployee(dto);
+
+        assertThat(result.getWorkerAgentType()).isEqualTo("HARNESS");
+        assertThat(result.getImplType()).isEqualTo(ImplType.ASK_AGENT.getCode());
+        ArgumentCaptor<SsResource> resourceCaptor = ArgumentCaptor.forClass(SsResource.class);
+        verify(ssResourceService).updateResourceEntity(resourceCaptor.capture());
+        assertThat(resourceCaptor.getValue().getWorkerAgentType()).isEqualTo("HARNESS");
     }
 
     @Test
