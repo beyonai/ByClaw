@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.interfaces.controller.artifact;
 
+import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.state.domain.artifact.dto.ArtifactDataCreateRequest;
 import com.iwhalecloud.byai.state.domain.artifact.dto.ArtifactDataRecordDto;
@@ -73,6 +74,17 @@ public class ArtifactController {
     public ResponseUtil<ArtifactDataRecordDto> createDataRecord(@PathVariable("artifactId") String artifactId,
         @Valid @RequestBody ArtifactDataCreateRequest request) {
         return ResponseUtil.successResponse(artifactDataRecordService.createOwned(artifactId, request));
+    }
+
+    @GetMapping("/{artifactId}/data-records")
+    @Operation(summary = "分页查询本人Artifact的JSON数据记录")
+    public ResponseUtil<PageInfo<ArtifactDataRecordDto>> listDataRecords(
+        @PathVariable("artifactId") String artifactId,
+        @RequestParam(value = "collectionName", required = false) String collectionName,
+        @RequestParam(value = "pageNum", defaultValue = "1") int pageNum,
+        @RequestParam(value = "pageSize", defaultValue = "20") int pageSize) {
+        return ResponseUtil.successResponse(
+            artifactDataRecordService.listOwned(artifactId, collectionName, pageNum, pageSize));
     }
 
     @GetMapping("/{artifactId}/data-records/{recordKey}")

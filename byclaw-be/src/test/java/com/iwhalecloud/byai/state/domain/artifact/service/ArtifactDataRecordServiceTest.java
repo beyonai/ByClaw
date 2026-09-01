@@ -8,12 +8,14 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.manager.mapper.artifact.ArtifactDataRecordMapper;
 import com.iwhalecloud.byai.state.domain.artifact.dto.ArtifactDataCreateRequest;
 import com.iwhalecloud.byai.state.domain.artifact.dto.ArtifactDataRecordDto;
 import com.iwhalecloud.byai.state.domain.artifact.dto.ArtifactDataUpdateRequest;
 import com.iwhalecloud.byai.state.domain.artifact.model.ArtifactDataRecord;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -62,6 +64,33 @@ class ArtifactDataRecordServiceTest {
         assertThat(result.getCollectionName()).isEqualTo("tasks");
         assertThat(result.getData()).containsEntry("title", "Plan trip");
         verify(artifactApplicationService).requireCapabilityDataAccessible("artifact-1", "access-key");
+    }
+
+    @Test
+    void listsOwnedRecordsByCollectionWithBoundedPagination() {
+        ArtifactDataRecord secondRecord = storedRecord();
+        secondRecord.setRecordKey("record-2");
+        secondRecord.setDataJson("{\"title\":\"Book hotel\"}");
+        when(mapper.countByArtifact("artifact-1", "tasks")).thenReturn(2L);
+        when(mapper.selectPageByArtifact("artifact-1", "tasks", 0L, 20))
+            .thenReturn(List.of(storedRecord(), secondRecord));
+
+        PageInfo<ArtifactDataRecordDto> result = service.listOwned("artifact-1", " tasks ", 1, 20);
+
+        assertThat(result.getPageNum()).isEqualTo(1);
+        assertThat(result.getPageSize()).isEqualTo(20);
+        assertThat(result.getTotal()).isEqualTo(2);
+        assertThat(result.getTotalPages()).isEqualTo(1);
+        assertThat(result.getList()).extracting(ArtifactDataRecordDto::getRecordKey)
+            .containsExactly("record-1", "record-2");
+        verify(artifactApplicationService).requireOwnedDataAccessible("artifact-1");
+    }
+
+    @Test
+    void rejectsOwnerListPageSizeAboveLimit() {
+        assertThatThrownBy(() -> service.listOwned("artifact-1", null, 1, 101))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessage("pageSize必须在1到100之间");
     }
 
     @Test
