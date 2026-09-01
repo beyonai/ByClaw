@@ -36,4 +36,18 @@ public class RunningChatInfo {
     private String agentType;
 
     private String chatContent;
+
+    private String runtimeStatus;
+
+    private String runtimeSource;
+
+    private Long activeAgentCount;
+
+    private Long activeChildCount;
+
+    private Long waitingInteractionCount;
+
+    private Long runtimeRevision;
+
+    private Long runtimeChangedAt;
 }
