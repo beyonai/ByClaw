@@ -10,7 +10,7 @@ REPO_ROOT = Path(__file__).parents[3]
 INITDB_DML = REPO_ROOT / "deploy" / "middleware" / "initdb" / "04_dml.sql"
 V030_DML = REPO_ROOT / "deploy" / "migrations" / "versions" / "V0.3.0" / "V0.3.0__dml.sql"
 V031_DML = REPO_ROOT / "deploy" / "migrations" / "versions" / "V0.3.1" / "V0.3.1__dml.sql"
-V051_DML = REPO_ROOT / "deploy" / "migrations" / "versions" / "V0.5.1" / "V0.5.1__dml.sql"
+V040_DML = REPO_ROOT / "deploy" / "migrations" / "versions" / "V0.4.0" / "V0.4.0__dml.sql"
 META_PROMPT_SERVICE = (
     REPO_ROOT
     / "byclaw-be"
@@ -574,9 +574,9 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         ):
             self.assertIn(phrase, skill)
 
-    def test_v051_updates_installed_collection_descriptions(self):
-        self.assertTrue(V051_DML.is_file())
-        upgrade = V051_DML.read_text(encoding="utf-8")
+    def test_v040_updates_installed_collection_descriptions(self):
+        self.assertTrue(V040_DML.is_file())
+        upgrade = V040_DML.read_text(encoding="utf-8")
         self.assertIn("SET search_path TO byai", upgrade)
         self.assertIn("resource_code = 'knowledge-collection'", upgrade)
         self.assertIn("规范化正文交付", upgrade)
