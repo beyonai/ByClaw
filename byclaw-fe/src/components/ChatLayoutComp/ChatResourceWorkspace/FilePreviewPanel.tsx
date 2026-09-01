@@ -137,7 +137,12 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
   const sourcePath = (() => {
     const rawPath = getFilePathFromUrl(path) || path;
     if (!rawPath) return rawPath;
-    const normalized = normalizeFilePath(rawPath);
+    const normalizedRawPath = normalizeFilePath(rawPath);
+    // 文件浏览器列表在部分接口响应中只返回相对当前会话目录的路径，补齐会话根路径后才能解析 HTML 内的相对图片。
+    const normalized =
+      source === 'fileBrowser' && sessionId && !isSessionFilePath(normalizedRawPath)
+        ? `/by/.sessions/${sessionId}/${normalizedRawPath.replace(/^\/+/, '')}`
+        : normalizedRawPath;
     const segments = normalized.split('/').filter(Boolean);
     if (segments.length >= 2 && segments.at(-1) === segments.at(-2)) segments.pop();
     return `${normalized.startsWith('/') ? '/' : ''}${segments.join('/')}`;
@@ -173,11 +178,6 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
       }
 
       const resolvedPath = sourcePath ? resolveMarkdownImagePath(sourcePath, imagePath) : imagePath;
-      const previewSourcePath = sourcePath || getFilePathFromUrl(previewFileUrl);
-      if (previewFileUrl && previewSourcePath && isSessionFilePath(previewSourcePath)) {
-        return getFilePreviewUrl(previewFileUrl, imagePath, previewSourcePath);
-      }
-
       const cacheKey = `${resourceId || previewFileUrl || ''}:${resolvedPath}`;
       const cached = markdownImageCacheRef.current.get(cacheKey);
       if (cached) return cached;

@@ -188,7 +188,16 @@ const ProjectResources: React.FC<Props> = ({
       setFiles(nextFiles);
     } catch (error: any) {
       setFiles([]);
-      message.error(error?.message || intl.formatMessage({ id: 'projectSpace.resources.loadFilesFailed' }));
+      const apiMessage =
+        error?.msg ||
+        error?.data?.msg ||
+        error?.response?.data?.msg ||
+        error?.response?.data?.message ||
+        error?.message;
+      message.error({
+        key: 'project-cloud-drive-load-error',
+        content: apiMessage || intl.formatMessage({ id: 'projectSpace.resources.loadFilesFailed' }),
+      });
     } finally {
       setLoadingFiles(false);
     }

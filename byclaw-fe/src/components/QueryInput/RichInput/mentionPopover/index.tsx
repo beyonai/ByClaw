@@ -38,6 +38,9 @@ interface MentionPopoverProps {
   placement?: PopoverProps['placement'];
   projectCloudResourceId?: string | number;
   projectId?: number;
+
+  /** 打开时默认展示的资源分类。 */
+  activeTabKey?: string;
 }
 
 const MentionPopover: React.FC<MentionPopoverProps> = ({
@@ -55,6 +58,7 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
   placement,
   projectCloudResourceId,
   projectId,
+  activeTabKey,
 }) => {
   const { trackerEmployeeClick } = useTracker();
   const intl = useIntl();
@@ -89,7 +93,13 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
     const handleDocumentMouseDown = (event: MouseEvent) => {
       const target = event.target;
       if (!(target instanceof Element)) return;
-      if (target.closest(`.${styles.popover}`)) return;
+      // 连接器授权、凭据配置等通过 Portal 渲染到 body，操作这些浮层时不能被资源弹窗的外部点击关闭逻辑卸载。
+      if (
+        target.closest(
+          `.${styles.popover}, [data-resource-tool-menu="true"], .ant-modal-root, .ant-drawer, .ant-dropdown, .ant-popover`
+        )
+      )
+        return;
       onClose();
     };
 
@@ -287,6 +297,7 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
                       agentId={resolvedAgentId}
                       resourceAgentIds={resourceAgentIds}
                       excludedAgentIds={excludedAgentIds}
+                      activeKey={activeTabKey}
                       onSelect={onSelect}
                     />
                   );

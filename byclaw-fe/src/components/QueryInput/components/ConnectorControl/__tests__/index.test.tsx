@@ -1049,7 +1049,7 @@ describe('ConnectorControl authorization states', () => {
     expect(await screen.findByRole('heading', { name: '连接 钉钉 作为 AI 知识库' })).toBeInTheDocument();
   });
 
-  it('opens authorization directly from an enabled inline connector card', async () => {
+  it('shows the enabled state switch on an inline connector card', async () => {
     mockQueryConnectorList.mockResolvedValue({
       list: [
         {
@@ -1069,8 +1069,7 @@ describe('ConnectorControl authorization states', () => {
 
     render(<ConnectorControl canAuthorize inline />);
 
-    fireEvent.click(await screen.findByRole('button', { name: '连接' }));
-    expect(await screen.findByRole('heading', { name: '连接 钉钉 作为 AI 知识库' })).toBeInTheDocument();
+    expect(await screen.findByRole('switch', { name: '停用钉钉' })).toBeInTheDocument();
   });
 
   it('confirms and revokes an existing connector authorization', async () => {

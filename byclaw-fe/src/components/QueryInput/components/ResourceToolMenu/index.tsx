@@ -1,7 +1,7 @@
 import { LinkOutlined } from '@ant-design/icons';
 import classNames from 'classnames';
 import { useIntl, useSelector } from '@umijs/max';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Empty } from 'antd';
 import AntdIcon from '@/components/AntdIcon';
 import EmployeeList from '@/layout/sider/components/EmployeeList';
@@ -21,6 +21,9 @@ interface Props {
   resourceAgentIds?: string;
   excludedAgentIds?: string[];
   userInfo?: any;
+
+  /** 打开资源面板时需要激活的分类。 */
+  activeKey?: string;
   onSelect: (item: any, type: any) => void;
 }
 
@@ -33,14 +36,24 @@ const ResourceToolMenu: React.FC<Props> = ({
   resourceAgentIds,
   excludedAgentIds,
   userInfo,
+  activeKey: activeKeyProp,
   onSelect,
 }) => {
   const intl = useIntl();
   const currentUserInfo = useSelector((state: any) => state.user?.userInfo);
   const [activeKey, setActiveKey] = useState('expert');
   const [visitedKeys, setVisitedKeys] = useState<string[]>(['expert']);
+  useEffect(() => {
+    if (!activeKeyProp) return;
+    setActiveKey(activeKeyProp);
+    setVisitedKeys((current) => (current.includes(activeKeyProp) ? current : [...current, activeKeyProp]));
+  }, [activeKeyProp]);
   const tabs = [
-    { key: 'expert', label: intl.formatMessage({ id: 'common.digitalEmployee' }), icon: 'icon-cebianlan-shuziyuangong' },
+    {
+      key: 'expert',
+      label: intl.formatMessage({ id: 'common.digitalEmployee' }),
+      icon: 'icon-cebianlan-shuziyuangong',
+    },
     { key: 'skill', label: '技能', icon: 'icon-chajian' },
     { key: 'connector', label: '连接器', icon: <LinkOutlined aria-hidden /> },
     { key: 'processFile', label: '过程文件', icon: 'icon-a-Data-fileshujuwenjian' },
@@ -53,7 +66,11 @@ const ResourceToolMenu: React.FC<Props> = ({
     setActiveKey(key);
     setVisitedKeys((current) => (current.includes(key) ? current : [...current, key]));
   };
-  const quoteAgentId = resourceAgentIds?.split(',').map((item) => item.trim()).find(Boolean) || agentId;
+  const quoteAgentId =
+    resourceAgentIds
+      ?.split(',')
+      .map((item) => item.trim())
+      .find(Boolean) || agentId;
   const renderContent = (key: string) => {
     if (key === 'expert') {
       return (
@@ -85,7 +102,12 @@ const ResourceToolMenu: React.FC<Props> = ({
     }
     if (key === 'projectCloud') {
       return projectCloudResourceId ? (
-        <FileResourcePanel scope="project" projectId={projectId} resourceId={projectCloudResourceId} onOpenDetail={() => undefined} />
+        <FileResourcePanel
+          scope="project"
+          projectId={projectId}
+          resourceId={projectCloudResourceId}
+          onOpenDetail={() => undefined}
+        />
       ) : (
         <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂未初始化项目知识库" />
       );
@@ -108,7 +130,7 @@ const ResourceToolMenu: React.FC<Props> = ({
     );
   };
   return (
-    <div className={styles.toolsMenu}>
+    <div className={styles.toolsMenu} data-resource-tool-menu="true">
       <div className={styles.toolsMenuNav}>
         {tabs.map((tab) => (
           <button
@@ -127,7 +149,13 @@ const ResourceToolMenu: React.FC<Props> = ({
       </div>
       <div className={styles.toolsMenuPanel}>
         {visitedKeys.map((key) => (
-          <div key={key} className={classNames(styles.toolsMenuPanelContent, activeKey === key && styles.toolsMenuPanelContentActive)}>
+          <div
+            key={key}
+            className={classNames(
+              styles.toolsMenuPanelContent,
+              activeKey === key && styles.toolsMenuPanelContentActive
+            )}
+          >
             {renderContent(key)}
           </div>
         ))}
