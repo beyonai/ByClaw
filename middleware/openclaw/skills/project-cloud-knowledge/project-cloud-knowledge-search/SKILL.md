@@ -68,7 +68,7 @@ python3 <project-cloud-knowledge目录>/scripts/project_cloud_knowledge.py metad
   --page-size 20
 ```
 
-多知识库检索时重复传入 `--resource-id`。未传 `--page-size` 时可用 `--top-k` 指定每页条数；同时传入时 `--page-size` 优先。结果包含 `total`、`pageNum`、`pageSize`，以及文件级 `resourceId`、`filePath` 和可选 `metadata`。
+多知识库检索时重复传入 `--resource-id`。`--page-num` 默认传 `1`，不要向后端发送空页码。未传 `--page-size` 时可用 `--top-k` 指定每页条数；同时传入时 `--page-size` 优先。结果包含 `total`、`pageNum`、`pageSize`，以及文件级 `resourceId`、`filePath` 和可选 `metadata`。
 
 ## 修正 DSL 错误
 

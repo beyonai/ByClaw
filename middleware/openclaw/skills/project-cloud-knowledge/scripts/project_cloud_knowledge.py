@@ -1402,8 +1402,9 @@ def build_parser() -> argparse.ArgumentParser:
     metadata_search.add_argument(
         "--page-num",
         type=_positive_int,
+        default=1,
         metavar="N",
-        help="页码，从 1 开始（默认由后端决定）",
+        help="页码，从 1 开始（默认 1）",
     )
     metadata_search.add_argument(
         "--page-size",

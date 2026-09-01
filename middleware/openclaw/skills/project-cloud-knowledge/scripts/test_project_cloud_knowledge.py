@@ -578,6 +578,42 @@ class KnowledgeManagerTests(unittest.TestCase):
         )
         self.assertNotIn("knCode", result["items"][0])
 
+    def test_metadata_search_defaults_page_num_to_one(self) -> None:
+        self.transport.responses = [{"data": [], "total": 0, "pageNum": 1, "pageSize": 100}]
+
+        self.manager.execute(
+            self.parse(
+                "metadata-search",
+                "--resource-id",
+                "7",
+                "--where-json",
+                '{"wildcard":{"fieldName":"fileName","value":"*Agent*"}}',
+                "--top-k",
+                "100",
+                "--page-size",
+                "100",
+                "--metadata-field",
+                "fileType",
+            )
+        )
+
+        self.assertEqual(
+            self.transport.calls[0]["payload"],
+            {
+                "resourceIdList": [7],
+                "where": {
+                    "wildcard": {
+                        "fieldName": "fileName",
+                        "value": "*Agent*",
+                    }
+                },
+                "metadataFieldList": ["fileType"],
+                "topK": 100,
+                "pageNum": 1,
+                "pageSize": 100,
+            },
+        )
+
     def test_metadata_search_requires_where_and_valid_pagination_ranges(self) -> None:
         parser = manager_module.build_parser()
         invalid_commands = (
