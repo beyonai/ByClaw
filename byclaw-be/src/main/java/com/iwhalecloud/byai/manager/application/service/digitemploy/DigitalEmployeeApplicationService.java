@@ -370,6 +370,10 @@ public class DigitalEmployeeApplicationService {
         return pageInfo;
     }
 
+    /**
+     * 查询数字员工组成员候选：企业组由 ownerType=enterprise 限定为企业员工，个人组不限制归属类型，
+     * 再结合本人创建、管理及 AVAILABLE_USE/FORCE_USE 使用授权筛选可用员工。
+     */
     public PageInfo<EmployeeGroupMemberDTO> queryEmployeeGroupMemberCandidates(DigitalEmployeeQo digitalEmployeeQo) {
         if (digitalEmployeeQo == null) {
             digitalEmployeeQo = new DigitalEmployeeQo();
