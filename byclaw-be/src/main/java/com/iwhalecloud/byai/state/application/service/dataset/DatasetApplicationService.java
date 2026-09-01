@@ -838,7 +838,7 @@ public class DatasetApplicationService {
      * 删除知识库文件。覆盖上传时复用该逻辑，保证手动删除和覆盖删除走同一套 QA 响应校验。
      */
     private void deleteKnowledgeFile(SsResource ssResource, String filePath, String operationName,
-                                   Map<String, String> headers) {
+                                     Map<String, String> headers) {
         KbFileDelete kbFileDelete = new KbFileDelete();
         kbFileDelete.setKnCode(ssResource.getResourceCode());
         kbFileDelete.setFilePath(filePath);
@@ -981,6 +981,7 @@ public class DatasetApplicationService {
 
         KbEntityDiscovery qaRequest = new KbEntityDiscovery();
         qaRequest.setKnCode(ssResource.getResourceCode());
+        qaRequest.setDirectoryPath(request.getDirectoryPath());
         qaRequest.setFilePath(normalizeOptionalKnowledgeFilePath(request.getFilePath()));
         qaRequest.setMaxEntities(request.getMaxEntities() == null ? 12 : request.getMaxEntities());
         qaRequest.setForce(Boolean.TRUE.equals(request.getForce()));
