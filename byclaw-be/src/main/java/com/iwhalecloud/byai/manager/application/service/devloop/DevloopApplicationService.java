@@ -3419,7 +3419,9 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
             }
             String baseBranch = selected.repo().getDefaultBranch() == null
                 || selected.repo().getDefaultBranch().isBlank() ? "main" : selected.repo().getDefaultBranch();
-            LocalGitChangeService.LocalChangeResult local = localGitChangeService.collectChanges(selected.path(),
+            Path selectedPath = projectWorkspaceGitService.resolveRepository(selected.repo(), sessionId)
+                .orElse(selected.path());
+            LocalGitChangeService.LocalChangeResult local = localGitChangeService.collectChanges(selectedPath,
                 baseBranch);
             if (local.getStatus() != LocalGitChangeService.LocalStatus.OK) {
                 return ResponseUtil.successResponse(emptyLocalChangesMap());
@@ -3474,7 +3476,9 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
             }
             String baseBranch = selected.repo().getDefaultBranch() == null
                 || selected.repo().getDefaultBranch().isBlank() ? "main" : selected.repo().getDefaultBranch();
-            LocalGitChangeService.FileDiffResult result = localGitChangeService.fileDiff(selected.path(), baseBranch,
+            Path selectedPath = projectWorkspaceGitService.resolveRepository(selected.repo(), sessionId)
+                .orElse(selected.path());
+            LocalGitChangeService.FileDiffResult result = localGitChangeService.fileDiff(selectedPath, baseBranch,
                 filePath);
             Map<String, Object> map = new HashMap<>();
             map.put("status", result.getStatus().name().toLowerCase());
