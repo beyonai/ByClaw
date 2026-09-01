@@ -805,8 +805,8 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "absent, unverified, mismatched, or ambiguous",
             "diagnostic retry budget has already been consumed",
             "diagnostic retry budget is unused",
-            "login-gate rerun has already been consumed",
-            "single post-confirmation login-gate rerun",
+            "The tenth post-confirmation login-gate rerun",
+            "fewer than ten confirmed reruns have been consumed",
             "`RATE_LIMITED`",
             "legacy `COMMAND_EXEC`",
             "`freq control` or `rate limited`",
@@ -838,8 +838,8 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             terminal.index("login `TIMEOUT` / exit code 75"),
         )
         self.assertLess(
-            terminal.index("login-gate rerun has already been consumed"),
-            terminal.index("login `TIMEOUT` / exit code 75"),
+            terminal.index("The tenth post-confirmation login-gate rerun"),
+            terminal.index("fewer than ten confirmed reruns have been consumed"),
         )
         self.assertLess(
             terminal.index("`RATE_LIMITED`"),

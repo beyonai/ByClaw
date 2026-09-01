@@ -134,7 +134,7 @@ test('waiting confirmation blocks before capability, bridge, or command work', a
   assert.deepEqual(events, []);
 });
 
-test('confirmed rerun skips capability and bridge and executes command once', async (t) => {
+test('every confirmed rerun skips capability and bridge', async (t) => {
   const directory = await stateDir(t);
   const events = [];
   const options = {
@@ -159,6 +159,12 @@ test('confirmed rerun skips capability and bridge and executes command once', as
   const outcome = await runWeixinBrowser({ ...options, verificationConfirmed: true });
 
   assert.equal(outcome.exitCode, 77);
+  assert.deepEqual(events, ['command']);
+
+  events.length = 0;
+  const secondOutcome = await runWeixinBrowser({ ...options, verificationConfirmed: true });
+
+  assert.equal(secondOutcome.exitCode, 77);
   assert.deepEqual(events, ['command']);
 });
 
