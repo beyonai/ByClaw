@@ -3,6 +3,7 @@ import unittest
 
 
 SKILL_ROOT = Path(__file__).parents[1] / "skills" / "knowledge-organizer"
+MANAGER_ROOT = Path(__file__).parents[1] / "skills" / "project-cloud-knowledge"
 
 
 class KnowledgeOrganizerScopeTests(unittest.TestCase):
@@ -10,7 +11,7 @@ class KnowledgeOrganizerScopeTests(unittest.TestCase):
         content = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
 
         self.assertIn("入库、导入、登记、附加", content)
-        self.assertIn("`by-knowledge-manager`", content)
+        self.assertIn("`project-cloud-knowledge`", content)
         self.assertIn("只执行资料入库", content)
         self.assertIn("不得追加实体发现或补全", content)
         self.assertIn("不会扩大操作范围", content)
@@ -25,12 +26,26 @@ class KnowledgeOrganizerScopeTests(unittest.TestCase):
         self.assertIn("同时明确要求", content)
         self.assertIn("逐项执行", content)
 
+    def test_project_cloud_entity_operations_require_costed_user_choice(self) -> None:
+        parent = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        entity = (
+            MANAGER_ROOT / "project-cloud-knowledge-entity" / "SKILL.md"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("项目云盘授权与成本提示", parent)
+        self.assertNotIn("../project-cloud-knowledge", parent)
+        self.assertIn("项目云盘支持实体发现和实体补全", entity)
+        self.assertIn("不得主动触发", entity)
+        self.assertIn("高 Token 消耗、高耗时", entity)
+        self.assertIn("用户未明确选择前", entity)
+        self.assertIn("任务完成后会推送通知到钉钉", entity)
+
     def test_ingest_child_stays_focused_on_ingestion(self) -> None:
         content = (SKILL_ROOT / "knowledge-organizer-ingest" / "SKILL.md").read_text(
             encoding="utf-8"
         )
 
-        self.assertIn("`by-knowledge-manager`", content)
+        self.assertIn("`project-cloud-knowledge`", content)
         self.assertIn("`upload`", content)
         self.assertIn("检查同名冲突", content)
         self.assertNotIn("entity-discovery", content)
@@ -47,6 +62,8 @@ class KnowledgeOrganizerScopeTests(unittest.TestCase):
 
         self.assertIn("`entity-discovery`", organize)
         self.assertIn("不能位于 `/KnowledgeEntity/`", organize)
+        self.assertIn("`--directory-path`", organize)
+        self.assertIn("递归处理该目录及其子目录", organize)
         self.assertNotIn("`entity-enrich`", organize)
 
         self.assertIn("`entity-enrich`", build)

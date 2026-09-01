@@ -10,7 +10,7 @@ const documents = [
 ];
 
 for (const document of documents) {
-  assert.doesNotMatch(document, /不得调用 `by-knowledge-manager`/);
+  assert.doesNotMatch(document, /不得调用 `project-cloud-knowledge`/);
   assert.doesNotMatch(document, /不得调用 `knowledge-organizer`/);
   assert.match(document, /不得主动询问 `入库 \/ 知识整理 \/ 跳过`/);
   assert.match(document, /根 Agent.*用户.*意图.*决定.*下游 Skill/);

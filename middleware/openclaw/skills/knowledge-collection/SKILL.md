@@ -89,6 +89,6 @@ Use `node scripts/knowledge-collection.mjs command-schema` for the machine-reada
 
 下游 Agent 的输入只能是本次会话中已经校验、确实存在的 `sanitized/items/*.md` 文件；不得把 `raw/`、`markdown/`、摘要、候选元数据、缺失文件或会话状态文件作为下游正文输入。具体规则见 [delivery.md](references/delivery.md)。
 
-采集流程不得主动询问 `入库 / 知识整理 / 跳过`。采集阶段交付完成后，由根 Agent 根据用户已经表达的意图决定是否调用 `by-knowledge-manager`、`knowledge-organizer` 或其他下游 Skill，无需为了这三个选项再次询问用户。
+采集流程不得主动询问 `入库 / 知识整理 / 跳过`。采集阶段交付完成后，由根 Agent 根据用户已经表达的意图决定是否调用 `project-cloud-knowledge`、`knowledge-organizer` 或其他下游 Skill，无需为了这三个选项再次询问用户。
 
 所有命令输出均为 JSON。失败时返回结构化错误和实际失败来源、权限限制或覆盖缺口，不得编造替代结果。交付上述信息后结束采集阶段，由根 Agent 继续编排已获用户授权的后续动作。

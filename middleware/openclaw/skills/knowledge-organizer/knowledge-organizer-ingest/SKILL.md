@@ -6,7 +6,7 @@ allowed-tools: read, exec
 
 # 登记源文件
 
-加载并遵循 `by-knowledge-manager` skill，使用它的上传能力执行本阶段。不得调用实体发现或补全。
+加载并遵循 `project-cloud-knowledge` skill，使用它的上传能力执行本阶段。不得调用实体发现或补全。
 
 ## 确定目标
 
@@ -17,10 +17,10 @@ allowed-tools: read, exec
 
 ## 执行
 
-- 按 `by-knowledge-manager` 的变更规则先检查同名冲突，再使用 `upload`。
+- 按 `project-cloud-knowledge` 的变更规则先检查同名冲突，再使用 `upload`。
 - 用户未授权覆盖时，不要把同名文件改为 `update-file`。
 - 上传成功会自动触发知识构建；异步构建受理不等于构建完成。
-- 用户关心检索或后续实体处理是否就绪时，按 `by-knowledge-manager` 查询 `build-status`。
+- 用户关心检索或后续实体处理是否就绪时，按 `project-cloud-knowledge` 查询 `build-status`。
 
 ## 完成标准
 

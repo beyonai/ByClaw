@@ -211,11 +211,11 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "`sanitized/items/*.md`",
             "采集流程不得主动询问 `入库 / 知识整理 / 跳过`",
             "由根 Agent 根据用户已经表达的意图决定是否调用",
-            "`by-knowledge-manager`、`knowledge-organizer` 或其他下游 Skill",
+            "`project-cloud-knowledge`、`knowledge-organizer` 或其他下游 Skill",
         ):
             self.assertIn(phrase, skill)
 
-        self.assertNotIn("不得调用 `by-knowledge-manager`", skill)
+        self.assertNotIn("不得调用 `project-cloud-knowledge`", skill)
         self.assertNotIn("不得调用 `knowledge-organizer`", skill)
 
         for forbidden in (
@@ -430,11 +430,11 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "下游 Agent",
             "不得主动询问 `入库 / 知识整理 / 跳过`",
             "根 Agent 根据用户已经表达的意图决定是否调用",
-            "`by-knowledge-manager`、`knowledge-organizer` 或其他下游 Skill",
+            "`project-cloud-knowledge`、`knowledge-organizer` 或其他下游 Skill",
         ):
             self.assertIn(phrase, f"{skill}\n{delivery}")
 
-        self.assertNotIn("不得调用 `by-knowledge-manager`", f"{skill}\n{delivery}")
+        self.assertNotIn("不得调用 `project-cloud-knowledge`", f"{skill}\n{delivery}")
         self.assertNotIn("不得调用 `knowledge-organizer`", f"{skill}\n{delivery}")
 
         indexed_paths = {

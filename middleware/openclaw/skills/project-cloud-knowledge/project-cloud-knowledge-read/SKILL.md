@@ -1,6 +1,6 @@
 ---
-name: by-knowledge-manager-read
-description: "只读浏览 ByClaw 知识库。用于列出目录、查询文件构建状态、下载文件或目录，以及按行读取知识库文件。"
+name: project-cloud-knowledge-read
+description: "只读浏览 ByClaw 知识库或项目云盘。用于列出目录、查询文件构建状态、下载文件或目录，以及按行读取文件。"
 ---
 
 # 读取知识库内容
@@ -12,7 +12,7 @@ description: "只读浏览 ByClaw 知识库。用于列出目录、查询文件�
 先列出目录，再决定需要读取、下载或变更的目标：
 
 ```bash
-python3 <by-knowledge-manager目录>/scripts/by_knowledge_manager.py list \
+python3 <project-cloud-knowledge目录>/scripts/project_cloud_knowledge.py list \
   --resource-id RESOURCE_ID \
   --directory-path /
 ```
@@ -22,7 +22,7 @@ python3 <by-knowledge-manager目录>/scripts/by_knowledge_manager.py list \
 ## 查询构建状态
 
 ```bash
-python3 <by-knowledge-manager目录>/scripts/by_knowledge_manager.py build-status \
+python3 <project-cloud-knowledge目录>/scripts/project_cloud_knowledge.py build-status \
   --resource-id RESOURCE_ID \
   --file-path /产品资料/a.md
 ```
@@ -34,7 +34,7 @@ python3 <by-knowledge-manager目录>/scripts/by_knowledge_manager.py build-statu
 下载单个文件：
 
 ```bash
-python3 <by-knowledge-manager目录>/scripts/by_knowledge_manager.py download \
+python3 <project-cloud-knowledge目录>/scripts/project_cloud_knowledge.py download \
   --resource-id RESOURCE_ID \
   --file-path /产品资料/a.md \
   --output /tmp/a.md
@@ -43,7 +43,7 @@ python3 <by-knowledge-manager目录>/scripts/by_knowledge_manager.py download \
 下载目录压缩包：
 
 ```bash
-python3 <by-knowledge-manager目录>/scripts/by_knowledge_manager.py download \
+python3 <project-cloud-knowledge目录>/scripts/project_cloud_knowledge.py download \
   --resource-id RESOURCE_ID \
   --directory-path /产品资料 \
   --output /tmp/产品资料.zip
@@ -54,7 +54,7 @@ python3 <by-knowledge-manager目录>/scripts/by_knowledge_manager.py download \
 ## 按行读取文件
 
 ```bash
-python3 <by-knowledge-manager目录>/scripts/by_knowledge_manager.py read-file \
+python3 <project-cloud-knowledge目录>/scripts/project_cloud_knowledge.py read-file \
   --resource-id RESOURCE_ID \
   --file-path /产品资料/a.md \
   --start-line 1 \
