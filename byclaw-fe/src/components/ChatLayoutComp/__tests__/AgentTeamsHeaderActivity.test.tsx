@@ -9,8 +9,15 @@ import AgentTeamsHeaderActivity from '../AgentTeamsHeaderActivity';
 
 const mockDispatch = jest.fn();
 const mockSetSessionId = jest.fn();
+const messages: Record<string, string> = {
+  'agentTeamsActivity.openPanel': '打开专家团活动面板',
+  'agentTeamsActivity.panelTitle': '专家团活动面板',
+};
 
-jest.mock('@umijs/max', () => ({ useDispatch: () => mockDispatch }));
+jest.mock('@umijs/max', () => ({
+  useDispatch: () => mockDispatch,
+  useIntl: () => ({ formatMessage: ({ id }: { id: string }) => messages[id] || id }),
+}));
 jest.mock('@/hooks/useGlobal', () => () => ({ setSessionId: mockSetSessionId }));
 jest.mock('antd', () => ({
   Drawer: ({ children, open, title }: any) =>
@@ -58,9 +65,10 @@ describe('AgentTeamsHeaderActivity', () => {
 
   it('renders in the title, paginates tasks by five, and opens a member child session', () => {
     render(<AgentTeamsHeaderActivity rootSessionId="100" currentSession={{ sessionId: '100' } as any} />);
-    fireEvent.click(screen.getByRole('button', { name: '打开团队活动面板' }));
+    fireEvent.click(screen.getByRole('button', { name: '打开专家团活动面板' }));
 
-    const panel = screen.getByRole('dialog', { name: 'AgentTeams 活动面板' });
+    const panel = screen.getByRole('dialog', { name: '专家团活动面板' });
+    expect(within(panel).queryByText(/DSH|TEAM RUNTIME/i)).not.toBeInTheDocument();
     expect(within(panel).getByText('待命')).toBeInTheDocument();
     expect(within(panel).getByText('进行中')).toBeInTheDocument();
     expect(within(panel).getByText('任务 1')).toBeInTheDocument();

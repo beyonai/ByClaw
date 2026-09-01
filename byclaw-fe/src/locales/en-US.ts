@@ -5,6 +5,8 @@ import personalModel from '@/pages/models/locales/en-US';
 export default {
   ...manager,
   ...personalModel,
+  'agentTeamsActivity.openPanel': 'Open expert team activity panel',
+  'agentTeamsActivity.panelTitle': 'Expert Team Activity',
   // Common Actions
   'common.add': 'Add',
   'menu.projectSpace': 'Project Space',

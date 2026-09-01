@@ -5,6 +5,8 @@ import personalModel from '@/pages/models/locales/zh-CN';
 export default {
   ...manager,
   ...personalModel,
+  'agentTeamsActivity.openPanel': '打开专家团活动面板',
+  'agentTeamsActivity.panelTitle': '专家团活动面板',
   // 通用操作
   'common.add': '新增',
   'menu.projectSpace': '项目空间',
