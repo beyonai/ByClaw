@@ -881,7 +881,7 @@ public class SuasSuperassistApplicationService {
                 Map<String, AgentPrologueDto.ModelInfo> modelInfoMap = new HashMap<String, AgentPrologueDto.ModelInfo>();
 
                 JSONArray expertTeams = jsonObject.getJSONArray("expertTeams");
-                for (int j = i; expertTeams != null && j < expertTeams.size(); j++) {
+                for (int j = 0; expertTeams != null && j < expertTeams.size(); j++) {
 
                     JSONObject expertTeamTemplate = expertTeams.getJSONObject(j);
 
