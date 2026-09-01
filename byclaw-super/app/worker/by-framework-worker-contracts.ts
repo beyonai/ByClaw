@@ -9,7 +9,7 @@ export type RedisClient = ReturnType<typeof createRedis>;
 /** Worker 处理消息时需要的 Run 业务能力。 */
 export type WorkerRunService = Pick<
   RunService,
-  "streamEvents" | "cancelRun" | "respondToInteraction" | "resumeDelegation"
+  "getRun" | "streamEvents" | "cancelRun" | "respondToInteraction" | "resumeDelegation"
 >;
 
 /** Worker 把外部消息转换为内部 Run 时需要的入口能力。 */

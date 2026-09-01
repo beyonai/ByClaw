@@ -3,8 +3,11 @@ import type { PiSessionCheckpoint } from "../pi-session-checkpoint.js";
 import type {
   CallerPrincipal,
   Delegation,
+  DelegationStatus,
   Run,
+  RunExecutionStage,
   RunEvent,
+  RunStatus,
   Session,
 } from "../domain/types.js";
 
@@ -151,6 +154,29 @@ export type CallbackTimeoutDelivery = CallbackTimeoutDeliveryResult &
       }
   );
 
+/**
+ * 持久化层对一次终态回调的原子裁决。
+ *
+ * 单一 outcome 同时表达是否写入、为何忽略以及是否已把 Run 放回队列，调用方无需再组合
+ * accepted/runId/wakeRun 三个可选状态。
+ */
+export type WaitingCallbackSettlementResult =
+  | { outcome: "delegation_not_found" }
+  | {
+      outcome: "delegation_already_settled";
+      runId: string;
+      delegationStatus: DelegationStatus;
+    }
+  | { outcome: "callback_expired"; runId: string }
+  | { outcome: "run_not_resumable"; runId: string; runStatus: RunStatus }
+  | {
+      outcome: "delegation_settled";
+      runId: string;
+      runStatus: RunStatus;
+      executionStage: RunExecutionStage;
+    }
+  | { outcome: "run_resumed"; runId: string };
+
 export interface RunExecutionQueue {
   /** 通知队列存在新工作；PostgreSQL 实现可使用 NOTIFY，本地实现直接入队。 */
   enqueue(run: Run): Promise<void>;
@@ -185,7 +211,7 @@ export interface RunExecutionQueue {
     finalAnswer: string;
     /** false 时忽略历史 callback_deadline_at，用于临时关闭回调超时。 */
     enforceDeadline?: boolean;
-  }): Promise<{ accepted: boolean; runId?: string; wakeRun?: boolean }>;
+  }): Promise<WaitingCallbackSettlementResult>;
   /** 领取已经到终态、但因没有 ResumeCommand 上下文而尚未对外投递的 Run。 */
   claimCallbackTimeoutDeliveries?(input: {
     instanceId: string;

@@ -34,14 +34,16 @@ import {
   delay,
   delegationFailureUserMessage,
   externalSessionBindingKey,
-  extractMessage,
   extractUserInput,
   orchestratorBindingSessionId,
   recordString,
   stringData,
   toError,
 } from "./by-framework-protocol.js";
-import { parseChildAgentResume } from "./by-framework-resume.js";
+import {
+  ByFrameworkResumeCommandHandler,
+  type FailureStreamInput,
+} from "./by-framework-resume-command-handler.js";
 import {
   ByFrameworkRunPresenter,
   type WorkerProtocolEmitter,
@@ -53,12 +55,6 @@ import type {
   WorkerRunService,
 } from "./by-framework-worker-contracts.js";
 
-const CHILD_RESUME_PROTOCOL_ERROR_CODE = "CHILD_RESUME_PROTOCOL_INVALID";
-const CHILD_RESUME_PROTOCOL_USER_MESSAGE =
-  "子 Agent 返回结果协议异常，本次调度已终止，请重试。";
-const CHILD_RESUME_NOT_RECOVERABLE_ERROR_CODE = "CHILD_RESUME_NOT_RECOVERABLE";
-const CHILD_RESUME_NOT_RECOVERABLE_USER_MESSAGE =
-  "未找到可恢复的子 Agent 调度，本次任务已终止，请重试。";
 const COMMAND_PROCESSING_ERROR_CODE = "COMMAND_PROCESSING_FAILED";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -116,28 +112,6 @@ interface RunForwardingScope {
   context: AgentContext;
   reasoningMessageId: string;
   summaryMessageId?: string;
-}
-
-interface FailureStreamInput {
-  errorCode: string;
-  userMessage: string;
-  errorSource?: string;
-  errorDetail?: string;
-  runId?: string;
-  delegationId?: string;
-  protocolError?: boolean;
-}
-
-interface ResumeCommandHandlerOptions {
-  runService: WorkerRunService;
-  runIngress: WorkerRunIngress;
-  finishFailureStream(context: AgentContext, input: FailureStreamInput): Promise<void>;
-  forwardRun(
-    authorized: AuthorizedRunContext,
-    context: AgentContext,
-    afterEventId: number,
-  ): Promise<AgentTaskResult>;
-  logger?: WorkerLogger;
 }
 
 interface AskCommandHandlerOptions {
@@ -206,245 +180,6 @@ class SuppressResumeStatePlugin extends Plugin {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ResumeCommand 用例
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * 负责 ResumeCommand 的完整恢复用例。
- *
- * Worker 只做命令路由；本类集中管理用户交互恢复、子 Agent 回调校验、Run 唤醒和
- * 恢复后事件转发，避免同一条链路分散在 GatewayWorker 的多个分支中。
- */
-class ByFrameworkResumeCommandHandler {
-  readonly #runService: WorkerRunService;
-  readonly #runIngress: WorkerRunIngress;
-  readonly #finishFailureStream: ResumeCommandHandlerOptions["finishFailureStream"];
-  readonly #forwardRun: ResumeCommandHandlerOptions["forwardRun"];
-  readonly #logger: WorkerLogger | undefined;
-
-  constructor(options: ResumeCommandHandlerOptions) {
-    this.#runService = options.runService;
-    this.#runIngress = options.runIngress;
-    this.#finishFailureStream = options.finishFailureStream;
-    this.#forwardRun = options.forwardRun;
-    this.#logger = options.logger;
-  }
-
-  /** 按固定步骤消费用户交互或子 Agent 终态回调，并恢复原 Run。 */
-  async handle(command: ResumeCommand, context: AgentContext): Promise<AgentTaskResult> {
-    this.#logReceivedCommand(command);
-    const runId = recordString(command.header.metadata, "parent_run_id");
-
-    // Step 1：用户交互 Resume 只补充既有 Run 的输入，不进入子 Agent 结算流程。
-    const interactionResult = await this.#resumeUserInteraction(command, context, runId);
-    if (interactionResult) {
-      return interactionResult;
-    }
-
-    // Step 2：严格校验子 Agent 回调与 Delegation 的关联字段，协议错误直接收口。
-    const parsed = await this.#parseChildResume(command, context, runId);
-    if ("failure" in parsed) {
-      return parsed.failure;
-    }
-    const childResume = parsed.childResume;
-
-    // Step 3：将合法终态写入持久化真相，并把 WAITING_AGENT Run 重新放回执行队列。
-    const resumed = childResume
-      ? await this.#runService.resumeDelegation({
-          delegationId: childResume.delegationId,
-          status: childResume.status,
-          finalAnswer: childResume.finalAnswer,
-        })
-      : { accepted: false };
-    this.#logSettlement(command, childResume, resumed);
-
-    // Step 4：关联不到 Delegation 的终态不能静默丢弃，需要给当前用户流明确失败结果。
-    if (childResume && !resumed.accepted && !resumed.runId) {
-      return await this.#rejectUnrecoverableResume(command, context, childResume.delegationId);
-    }
-
-    // Step 5：只有真正唤醒 Run 的回调才接管后续事件；重复或辅助回调在当前上下文结束。
-    if (resumed.accepted && resumed.runId && resumed.forwardEvents !== false) {
-      const { authorized } = await this.#authorizeResumeRun(command, resumed.runId);
-      return await this.#forwardRun(authorized, context, resumed.afterEventId ?? 0);
-    }
-    return this.#completeAuxiliaryResume(context);
-  }
-
-  async #resumeUserInteraction(
-    command: ResumeCommand,
-    context: AgentContext,
-    runId: string,
-  ): Promise<AgentTaskResult | undefined> {
-    const interactionId = recordString(command.header.metadata, "interaction_id");
-    if (!interactionId || !runId) {
-      return undefined;
-    }
-
-    const { authorized, beyondToken } = await this.#authorizeResumeRun(command, runId);
-    if (authorized.run.id !== runId) {
-      throw new Error(`Authorized Run does not match Resume target: ${runId}`);
-    }
-    await this.#runService.respondToInteraction(
-      runId,
-      interactionId,
-      {
-        action: "submit",
-        text: extractMessage(command.content),
-      },
-      beyondToken,
-    );
-
-    // 交互 Resume 不是新聊天终态，禁止框架提前关闭共享输出流。
-    context.setStreamFinished(true);
-    this.#logger?.info(
-      { ...commandLogFields(command), runId, interactionId },
-      "已恢复用户交互",
-    );
-    return this.#completedResult();
-  }
-
-  async #parseChildResume(
-    command: ResumeCommand,
-    context: AgentContext,
-    runId: string,
-  ): Promise<
-    | { childResume: ReturnType<typeof parseChildAgentResume> }
-    | { failure: AgentTaskResult }
-  > {
-    try {
-      return { childResume: parseChildAgentResume(command) };
-    } catch (error) {
-      // 协议错误不可重试：正常结束 Redis 消费，同时显式关闭当前用户流。
-      const delegationId = recordString(command.header.metadata, "delegation_id");
-      this.#logger?.warn(
-        {
-          ...commandLogFields(command),
-          status: command.status,
-          parentMessageId: command.header.parentMessageId,
-          delegationId,
-          error: toError(error).message,
-        },
-        "拒绝协议不完整的子 Agent Resume 回调",
-      );
-      await this.#finishFailureStream(context, {
-        errorCode: CHILD_RESUME_PROTOCOL_ERROR_CODE,
-        userMessage: CHILD_RESUME_PROTOCOL_USER_MESSAGE,
-        runId,
-        delegationId,
-        protocolError: true,
-      });
-      return {
-        failure: new AgentTaskResult({
-          status: AgentState.FAILED,
-          content: "",
-          replyData: null,
-          metadata: { error_code: CHILD_RESUME_PROTOCOL_ERROR_CODE },
-        }),
-      };
-    }
-  }
-
-  async #rejectUnrecoverableResume(
-    command: ResumeCommand,
-    context: AgentContext,
-    delegationId: string,
-  ): Promise<AgentTaskResult> {
-    this.#logger?.warn(
-      {
-        ...commandLogFields(command),
-        requestMessageId: command.header.parentMessageId,
-        delegationId,
-      },
-      "子 Agent Resume 未找到可恢复的 Delegation",
-    );
-    await this.#finishFailureStream(context, {
-      errorCode: CHILD_RESUME_NOT_RECOVERABLE_ERROR_CODE,
-      userMessage: CHILD_RESUME_NOT_RECOVERABLE_USER_MESSAGE,
-      delegationId,
-    });
-    return new AgentTaskResult({
-      status: AgentState.FAILED,
-      content: "",
-      replyData: null,
-      metadata: { error_code: CHILD_RESUME_NOT_RECOVERABLE_ERROR_CODE },
-    });
-  }
-
-  async #authorizeResumeRun(
-    command: ResumeCommand,
-    runId: string,
-  ): Promise<{ authorized: AuthorizedRunContext; beyondToken: string }> {
-    const beyondToken = this.#requireBeyondToken(command);
-    const systemCode = commandString(command, "System-Code");
-    const authorized = await this.#runIngress.authorizeRun(runId, {
-      beyondToken,
-      ...(systemCode ? { systemCode } : {}),
-    });
-    return { authorized, beyondToken };
-  }
-
-  #requireBeyondToken(command: ResumeCommand): string {
-    const beyondToken = commandString(command, "Beyond-Token");
-    if (!beyondToken) {
-      throw new BeyondTokenAuthError("Beyond-Token metadata is required");
-    }
-    return beyondToken;
-  }
-
-  #completeAuxiliaryResume(context: AgentContext): AgentTaskResult {
-    // 无人等待或重复回调只是辅助命令，不应关闭共享会话流。
-    context.setStreamFinished(true);
-    return this.#completedResult();
-  }
-
-  #completedResult(): AgentTaskResult {
-    return new AgentTaskResult({
-      status: AgentState.COMPLETED,
-      content: "",
-      replyData: null,
-    });
-  }
-
-  #logReceivedCommand(command: ResumeCommand): void {
-    this.#logger?.info(
-      {
-        ...commandLogFields(command),
-        status: command.status,
-        parentMessageId: command.header.parentMessageId,
-        delegationId: recordString(command.header.metadata, "delegation_id"),
-        contentType: Array.isArray(command.content) ? "array" : typeof command.content,
-        contentChars: typeof command.content === "string" ? command.content.length : undefined,
-        replyDataType: Array.isArray(command.replyData) ? "array" : typeof command.replyData,
-        replyDataChars:
-          typeof command.replyData === "string" ? command.replyData.length : undefined,
-      },
-      "收到 by-framework ResumeCommand",
-    );
-  }
-
-  #logSettlement(
-    command: ResumeCommand,
-    childResume: ReturnType<typeof parseChildAgentResume>,
-    resumed: Awaited<ReturnType<WorkerRunService["resumeDelegation"]>>,
-  ): void {
-    this.#logger?.info(
-      {
-        ...commandLogFields(command),
-        requestMessageId: childResume?.requestMessageId,
-        delegationId: childResume?.delegationId,
-        consumed: resumed.accepted,
-        resumedRunId: resumed.runId,
-        finalAnswerChars: childResume?.finalAnswer.length ?? 0,
-      },
-      resumed.accepted
-        ? "已持久化子 Agent Resume 回调并唤醒原 Run"
-        : "收到无可恢复 Run 的子 Agent Resume 回调",
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // AskAgentCommand 用例
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -462,6 +197,7 @@ class ByFrameworkAskCommandHandler {
   readonly #forwardRun: AskCommandHandlerOptions["forwardRun"];
   readonly #logger: WorkerLogger | undefined;
   readonly #activeRuns = new Map<string, string>();
+  readonly #activeRunsByTrace = new Map<string, Set<string>>();
   readonly #externalSessionBindings = new Map<string, string>();
 
   constructor(options: AskCommandHandlerOptions) {
@@ -514,13 +250,28 @@ class ByFrameworkAskCommandHandler {
     this.releaseRun(runId);
   }
 
-  /** 清理同一 Run 在 messageId 和 executionId 下的全部活动索引。 */
+  /** 清理同一 Run 在 messageId、executionId 和 trace 下的全部活动索引。 */
   releaseRun(runId: string): void {
     for (const [key, mappedRunId] of this.#activeRuns) {
       if (mappedRunId === runId) {
         this.#activeRuns.delete(key);
       }
     }
+    for (const [key, runIds] of this.#activeRunsByTrace) {
+      runIds.delete(runId);
+      if (runIds.size === 0) {
+        this.#activeRunsByTrace.delete(key);
+      }
+    }
+  }
+
+  /** metadata 丢失时只在同一 session + trace 唯一命中一个活动 Run 的情况下兜底。 */
+  resolveActiveRunId(sessionId: string, traceId: string): string | undefined {
+    const runIds = this.#activeRunsByTrace.get(this.#traceKey(sessionId, traceId));
+    if (runIds?.size !== 1) {
+      return undefined;
+    }
+    return runIds.values().next().value;
   }
 
   #parseCommand(command: AskAgentCommand): AskCommandData {
@@ -620,10 +371,18 @@ class ByFrameworkAskCommandHandler {
     if (context.executionId) {
       this.#activeRuns.set(context.executionId, run.id);
     }
+    const traceKey = this.#traceKey(command.header.sessionId, command.header.traceId);
+    const traceRunIds = this.#activeRunsByTrace.get(traceKey) ?? new Set<string>();
+    traceRunIds.add(run.id);
+    this.#activeRunsByTrace.set(traceKey, traceRunIds);
     this.#logger?.info(
       { ...commandLogFields(command), runId: run.id },
       "by-framework 入站任务已创建 Run",
     );
+  }
+
+  #traceKey(sessionId: string, traceId: string): string {
+    return JSON.stringify([sessionId, traceId]);
   }
 
   async #executeRun(
@@ -843,6 +602,11 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
     this.#resumeCommandHandler = new ByFrameworkResumeCommandHandler({
       runService: this.#runService,
       runIngress: options.runIngress,
+      resolveActiveRunId: (sessionId, traceId) =>
+        this.#askCommandHandler.resolveActiveRunId(sessionId, traceId),
+      releaseActiveRun: (runId) => this.#askCommandHandler.releaseRun(runId),
+      markOriginalExecutionFinished: (runId, status) =>
+        this.#markOriginalExecutionFinishedByRunId(runId, status),
       finishFailureStream: (context, input) => this.#finishFailureStream(context, input),
       forwardRun: (authorized, context, afterEventId) =>
         this.#forwardResumedRun(authorized, context, afterEventId),
@@ -1032,6 +796,17 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
       sessionId,
       status,
     );
+  }
+
+  async #markOriginalExecutionFinishedByRunId(
+    runId: string,
+    status: AgentState,
+  ): Promise<void> {
+    const run = await this.#runService.getRun(runId);
+    if (!run) {
+      return;
+    }
+    await this.#markOriginalExecutionFinished(run, status);
   }
 
   /** 订阅内部事件流，并只输出简化进度与 Leader 最终回答；终态时记录一条业务返回日志。 */

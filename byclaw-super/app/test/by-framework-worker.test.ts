@@ -258,7 +258,7 @@ describe("ByClawSuperGatewayWorker", () => {
   it("persists Resume and continues the original Run without creating another Run", async () => {
     const createSessionRun = vi.fn();
     const resumeDelegation = vi.fn(async () => ({
-      accepted: true,
+      outcome: "run_resumed" as const,
       runId: "run-1",
       afterEventId: 10,
     }));
@@ -395,6 +395,14 @@ describe("ByClawSuperGatewayWorker", () => {
       }),
       "收到 by-framework ResumeCommand",
     );
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        delegationId: "delegation-1",
+        resumeOutcome: "run_resumed",
+        resumedRunId: "run-1",
+      }),
+      "已持久化子 Agent Resume 回调并唤醒原 Run",
+    );
   });
 
   it("suppresses the framework RESUMED display state for ResumeCommand", async () => {
@@ -513,11 +521,100 @@ describe("ByClawSuperGatewayWorker", () => {
     );
   });
 
+  it("cancels the active Run and reports why when a Resume loses routing metadata", async () => {
+    const cancelRun = vi.fn(async () => undefined);
+    const resumeDelegation = vi.fn();
+    const emitProtocolChunk = vi.fn(async () => undefined);
+    const logger = loggerMock();
+    const worker = createWorker({
+      createSessionRun: vi.fn(async () => run("WAITING_AGENT")),
+      cancelRun,
+      resumeDelegation,
+      streamEvents: () => suspendedEvents(),
+      emitProtocolChunk,
+      logger,
+    });
+
+    const askResult = await worker.processCommand(askCommand(), contextMock());
+    expect(askResult.status).toBe(AgentState.WAITING_AGENT);
+    emitProtocolChunk.mockClear();
+
+    const command = new ResumeCommand(
+      new MessageHeader(
+        "16c6ee87-1a95-48d8-8465-069e6cb1c0ae:call_00_a5JRBD3qY8eZ0lRwDBx95936",
+        "session-1",
+        "trace-1",
+        {
+          sourceAgentType: "",
+          targetAgentType: "BY_SUPER",
+          parentMessageId: "-1",
+          metadata: {},
+        },
+      ),
+      [{ role: "user", content: { text: "用户选择 A" } }],
+      "",
+      {},
+    );
+    const setStreamFinished = vi.fn();
+
+    const result = await worker.processCommand(command, contextMock({ setStreamFinished }));
+
+    expect(result).toMatchObject({
+      status: AgentState.FAILED,
+      content: "",
+      replyData: null,
+      metadata: {
+        error_code: "RESUME_NOT_ROUTABLE",
+        error_detail: expect.stringContaining("replyDataType=object"),
+      },
+    });
+    expect(cancelRun).toHaveBeenCalledWith(
+      "run-1",
+      "by-framework Resume 缺少恢复原 Run 所需的路由信息",
+    );
+    expect(resumeDelegation).not.toHaveBeenCalled();
+    expect(emitProtocolChunk.mock.calls.map((call) => call[3]?.eventType)).toEqual([
+      EventType.ANSWER_DELTA,
+      EventType.FINAL_ANSWER,
+      EventType.APP_STREAM_RESPONSE,
+    ]);
+    expect(emitProtocolChunk.mock.calls[0]?.[2]).toMatchObject({
+      content:
+        "恢复回调协议不完整（sourceAgentType 为空；status 为空；交互路由 interaction_id 缺失；子 Agent 路由 delegation_id/parentMessageId(:request) 缺失；parent_run_id 缺失；replyDataType=object，无终态 status 时无法解释回调结果），无法恢复原任务。本次任务已终止，请重试。",
+      metadata: expect.objectContaining({
+        error_code: "RESUME_NOT_ROUTABLE",
+        error_detail: expect.stringContaining("replyDataType=object"),
+        protocol_error: true,
+        parent_run_id: "run-1",
+      }),
+    });
+    expect(setStreamFinished).toHaveBeenCalledWith(true);
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "",
+        parentMessageId: "-1",
+        delegationId: "",
+        runId: "run-1",
+        runCancelled: true,
+        routingIssues: [
+          "sourceAgentType 为空",
+          "status 为空",
+          "交互路由 interaction_id 缺失",
+          "子 Agent 路由 delegation_id/parentMessageId(:request) 缺失",
+          "parent_run_id 缺失",
+          "replyDataType=object，无终态 status 时无法解释回调结果",
+        ],
+      }),
+      "拒绝无法路由到原 Run 的 Resume 回调",
+    );
+  });
+
   it("recovers a child Resume delegation from parentMessageId when metadata lost it", async () => {
     const resumeDelegation = vi.fn(async () => ({
-      accepted: true,
+      outcome: "delegation_settled" as const,
       runId: "run-1",
-      forwardEvents: false,
+      runStatus: "WAITING_USER" as const,
+      executionStage: "USER_INTERACTION_WAITING" as const,
     }));
     const worker = createWorker({
       createSessionRun: vi.fn(),
@@ -551,13 +648,14 @@ describe("ByClawSuperGatewayWorker", () => {
 
   it("terminates a terminal child Resume whose Delegation no longer exists", async () => {
     const emitProtocolChunk = vi.fn(async () => undefined);
+    const logger = loggerMock();
     const worker = createWorker({
       createSessionRun: vi.fn(),
-      resumeDelegation: vi.fn(async () => ({ accepted: false })),
+      resumeDelegation: vi.fn(async () => ({ outcome: "delegation_not_found" as const })),
       cancelRun: vi.fn(),
       streamEvents: () => completedEvents(),
       emitProtocolChunk,
-      logger: loggerMock(),
+      logger,
     });
     const command = new ResumeCommand(
       new MessageHeader("callback-message", "session-1", "trace-1", {
@@ -585,6 +683,244 @@ describe("ByClawSuperGatewayWorker", () => {
       EventType.FINAL_ANSWER,
       EventType.APP_STREAM_RESPONSE,
     ]);
+    expect(emitProtocolChunk.mock.calls[0]?.[2]).toMatchObject({
+      content: "未找到可恢复的子 Agent 调度，本次任务已终止，请重试。",
+      metadata: expect.objectContaining({
+        error_code: "CHILD_RESUME_NOT_RECOVERABLE",
+        delegation_id: "missing-delegation",
+      }),
+    });
+    expect(setStreamFinished).toHaveBeenCalledWith(true);
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        delegationId: "missing-delegation",
+        resumeOutcome: "delegation_not_found",
+        resumedRunId: undefined,
+      }),
+      "子 Agent Resume 回调未找到对应 Delegation",
+    );
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        delegationId: "missing-delegation",
+        resumeOutcome: "delegation_not_found",
+        userFeedbackSent: true,
+      }),
+      "子 Agent Resume 无法继续，已向用户返回失败消息",
+    );
+  });
+
+  it.each([
+    {
+      title: "重复回调",
+      outcome: {
+        outcome: "delegation_already_settled" as const,
+        runId: "run-1",
+        delegationStatus: "COMPLETED" as const,
+      },
+      logLevel: "info" as const,
+      message: "检测到已结算 Delegation 的重复子 Agent Resume 回调",
+      errorCode: "CHILD_RESUME_ALREADY_SETTLED",
+      userMessage:
+        "该子 Agent 结果已经处理，当前恢复请求无法再次执行。请刷新会话；若任务仍在等待，请重试。",
+      cancelRun: false,
+    },
+    {
+      title: "超过截止时间",
+      outcome: { outcome: "callback_expired" as const, runId: "run-1" },
+      logLevel: "warn" as const,
+      message: "检测到已超过截止时间的子 Agent Resume 回调",
+      errorCode: "CHILD_RESUME_CALLBACK_EXPIRED",
+      userMessage: "子 Agent 返回结果已超过等待时间，本次任务已终止，请重试。",
+      cancelRun: true,
+    },
+    {
+      title: "Run 已不可恢复",
+      outcome: {
+        outcome: "run_not_resumable" as const,
+        runId: "run-1",
+        runStatus: "CANCELLED" as const,
+      },
+      logLevel: "info" as const,
+      message: "子 Agent Resume 回调对应的 Run 已不可恢复",
+      errorCode: "CHILD_RESUME_RUN_NOT_RESUMABLE",
+      userMessage: "原任务已经结束或正在取消，无法继续恢复。请重新发起任务。",
+      cancelRun: false,
+    },
+    {
+      title: "Run 不存在",
+      outcome: { outcome: "run_not_found" as const, runId: "run-1" },
+      logLevel: "warn" as const,
+      message: "子 Agent Resume 回调对应的 Run 不存在",
+      errorCode: "CHILD_RESUME_RUN_NOT_FOUND",
+      userMessage: "未找到子 Agent 回调对应的原任务，本次任务已终止，请重试。",
+      cancelRun: false,
+    },
+  ])(
+    "returns a terminal user-visible failure for $title",
+    async ({ outcome, logLevel, message, errorCode, userMessage, cancelRun: shouldCancel }) => {
+      const logger = loggerMock();
+      const authorizeRun = vi.fn();
+      const cancelRun = vi.fn(async () => undefined);
+      const markExecutionFinished = vi.fn(async () => undefined);
+      const emitProtocolChunk = vi.fn(async () => undefined);
+      const worker = createWorker({
+        createSessionRun: vi.fn(),
+        resumeDelegation: vi.fn(async () => outcome),
+        getRun: vi.fn(async () => ({
+          ...run("CANCELLED"),
+          ingressContext: {
+            externalSessionId: "session-1",
+            parentMessageId: "original-message",
+          },
+        })),
+        authorizeRun,
+        cancelRun,
+        streamEvents: () => completedEvents(),
+        emitProtocolChunk,
+        logger,
+        registry: {
+          getExecutionByMessageId: vi.fn(async () => ({ execution_id: "original-execution" })),
+          markExecutionFinished,
+        } as unknown as WorkerRegistry,
+      });
+      const command = childResumeCommand();
+      const setStreamFinished = vi.fn();
+
+      const result = await worker.processCommand(command, contextMock({ setStreamFinished }));
+
+      expect(result).toMatchObject({
+        status: AgentState.FAILED,
+        metadata: { error_code: errorCode },
+      });
+      expect(authorizeRun).not.toHaveBeenCalled();
+      expect(setStreamFinished).toHaveBeenCalledWith(true);
+      expect(emitProtocolChunk.mock.calls.map((call) => call[3]?.eventType)).toEqual([
+        EventType.ANSWER_DELTA,
+        EventType.FINAL_ANSWER,
+        EventType.APP_STREAM_RESPONSE,
+      ]);
+      expect(emitProtocolChunk.mock.calls[0]?.[2]).toMatchObject({
+        content: userMessage,
+        metadata: expect.objectContaining({
+          error_code: errorCode,
+          parent_run_id: "run-1",
+          delegation_id: "delegation-1",
+        }),
+      });
+      if (shouldCancel) {
+        expect(cancelRun).toHaveBeenCalledWith("run-1", userMessage);
+        expect(markExecutionFinished).toHaveBeenCalledWith(
+          "original-execution",
+          "session-1",
+          AgentState.FAILED,
+        );
+      } else {
+        expect(cancelRun).not.toHaveBeenCalled();
+        expect(markExecutionFinished).not.toHaveBeenCalled();
+      }
+      expect(logger[logLevel]).toHaveBeenCalledWith(
+        expect.objectContaining({
+          delegationId: "delegation-1",
+          resumeOutcome: outcome.outcome,
+          resumedRunId: "run-1",
+        }),
+        message,
+      );
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          delegationId: "delegation-1",
+          resumeOutcome: outcome.outcome,
+          userFeedbackSent: true,
+        }),
+        "子 Agent Resume 无法继续，已向用户返回失败消息",
+      );
+    },
+  );
+
+  it("still closes the user stream when cancelling an expired Run fails", async () => {
+    const emitProtocolChunk = vi.fn(async () => undefined);
+    const logger = loggerMock();
+    const markExecutionFinished = vi.fn(async () => undefined);
+    const worker = createWorker({
+      createSessionRun: vi.fn(),
+      resumeDelegation: vi.fn(async () => ({
+        outcome: "callback_expired" as const,
+        runId: "run-1",
+      })),
+      cancelRun: vi.fn(async () => {
+        throw new Error("cancel unavailable");
+      }),
+      getRun: vi.fn(async () => ({
+        ...run("WAITING_AGENT"),
+        ingressContext: {
+          externalSessionId: "session-1",
+          parentMessageId: "original-message",
+        },
+      })),
+      streamEvents: () => completedEvents(),
+      emitProtocolChunk,
+      logger,
+      registry: {
+        getExecutionByMessageId: vi.fn(async () => ({ execution_id: "original-execution" })),
+        markExecutionFinished,
+      } as unknown as WorkerRegistry,
+    });
+    const setStreamFinished = vi.fn();
+
+    const result = await worker.processCommand(
+      childResumeCommand(),
+      contextMock({ setStreamFinished }),
+    );
+
+    expect(result).toMatchObject({
+      status: AgentState.FAILED,
+      metadata: { error_code: "CHILD_RESUME_CALLBACK_EXPIRED" },
+    });
+    expect(emitProtocolChunk.mock.calls.map((call) => call[3]?.eventType)).toEqual([
+      EventType.ANSWER_DELTA,
+      EventType.FINAL_ANSWER,
+      EventType.APP_STREAM_RESPONSE,
+    ]);
+    expect(setStreamFinished).toHaveBeenCalledWith(true);
+    expect(markExecutionFinished).toHaveBeenCalledWith(
+      "original-execution",
+      "session-1",
+      AgentState.FAILED,
+    );
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resumeOutcome: "callback_expired",
+        runCancelled: false,
+        cancellationError: "cancel unavailable",
+        userFeedbackSent: true,
+      }),
+      "子 Agent Resume 无法继续，已向用户返回失败消息",
+    );
+  });
+
+  it("keeps a successfully settled callback auxiliary when its Run needs no wakeup", async () => {
+    const emitProtocolChunk = vi.fn(async () => undefined);
+    const worker = createWorker({
+      createSessionRun: vi.fn(),
+      resumeDelegation: vi.fn(async () => ({
+        outcome: "delegation_settled" as const,
+        runId: "run-1",
+        runStatus: "WAITING_USER" as const,
+        executionStage: "USER_INTERACTION_WAITING" as const,
+      })),
+      cancelRun: vi.fn(),
+      streamEvents: () => completedEvents(),
+      emitProtocolChunk,
+    });
+    const setStreamFinished = vi.fn();
+
+    const result = await worker.processCommand(
+      childResumeCommand(),
+      contextMock({ setStreamFinished }),
+    );
+
+    expect(result.status).toBe(AgentState.COMPLETED);
+    expect(emitProtocolChunk).not.toHaveBeenCalled();
     expect(setStreamFinished).toHaveBeenCalledWith(true);
   });
 
@@ -1262,6 +1598,7 @@ function createWorker(options: {
   authorizeRun?: ReturnType<typeof vi.fn>;
   respondToInteraction?: ReturnType<typeof vi.fn>;
   resumeDelegation?: ReturnType<typeof vi.fn>;
+  getRun?: ReturnType<typeof vi.fn>;
   cancelRun: ReturnType<typeof vi.fn>;
   streamEvents: () => AsyncIterable<RunEvent>;
   emitEvent?: ReturnType<typeof vi.fn>;
@@ -1298,11 +1635,13 @@ function createWorker(options: {
         })),
     },
     runService: {
+      getRun: options.getRun ?? vi.fn(async () => undefined),
       cancelRun: options.cancelRun,
       streamEvents: options.streamEvents,
       respondToInteraction: options.respondToInteraction ?? vi.fn(async () => undefined),
       resumeDelegation:
-        options.resumeDelegation ?? vi.fn(async () => ({ accepted: false })),
+        options.resumeDelegation ??
+        vi.fn(async () => ({ outcome: "delegation_not_found" as const })),
     },
     protocolEmitter: {
       emitEvent: options.emitEvent ?? vi.fn(async () => undefined),
@@ -1331,6 +1670,21 @@ function askCommand(
       ...(environment?.agentName ? { agent_name: environment.agentName } : {}),
       ...(orchestrator === undefined ? {} : { orchestrator }),
     },
+  );
+}
+
+/** 构造通过子 Agent 终态协议校验的 ResumeCommand。 */
+function childResumeCommand(): ResumeCommand {
+  return new ResumeCommand(
+    new MessageHeader("callback-message", "session-1", "trace-1", {
+      sourceAgentType: "BY_CHILD",
+      targetAgentType: "BY_SUPER",
+      parentMessageId: "delegation-1:request",
+      metadata: { delegation_id: "delegation-1", parent_run_id: "run-1" },
+    }),
+    "",
+    AgentState.COMPLETED,
+    "子 Agent 最终回答",
   );
 }
 

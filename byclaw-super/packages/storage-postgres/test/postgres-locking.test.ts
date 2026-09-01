@@ -48,7 +48,7 @@ describe("Postgres Run callback locking", () => {
         finalAnswer: "done",
         enforceDeadline: false,
       }),
-    ).resolves.toEqual({ accepted: true, runId: "run-1", wakeRun: true });
+    ).resolves.toEqual({ outcome: "run_resumed", runId: "run-1" });
 
     expect(
       statements.some(
@@ -90,7 +90,95 @@ describe("Postgres Run callback locking", () => {
         status: "COMPLETED",
         finalAnswer: "late",
       }),
-    ).resolves.toEqual({ accepted: false, runId: "run-1" });
+    ).resolves.toEqual({ outcome: "callback_expired", runId: "run-1" });
+  });
+
+  it("reports the terminal Run status that prevents callback recovery", async () => {
+    const client = fakeClient(async (sql) => {
+      if (sql.includes("SELECT run_id") && sql.includes("delegations")) {
+        return result([{ run_id: "run-1" }]);
+      }
+      if (sql.includes("FOR UPDATE OF d, r")) {
+        return result([
+          {
+            delegation_id: "delegation-1",
+            run_id: "run-1",
+            agent_id: "agent-1",
+            agent_name: "Agent 1",
+            delegation_status: "RUNNING",
+            run_status: "CANCELLED",
+            execution_stage: "SETTLED",
+            callback_expired: false,
+            settled_at: new Date("2026-08-22T04:00:00.000Z"),
+          },
+        ]);
+      }
+      return result([]);
+    });
+    const queue = new PostgresRunExecutionQueue(fakePool([client]), "byai");
+
+    await expect(
+      queue.settleWaitingCallback({
+        delegationId: "delegation-1",
+        status: "COMPLETED",
+        finalAnswer: "late",
+      }),
+    ).resolves.toEqual({
+      outcome: "run_not_resumable",
+      runId: "run-1",
+      runStatus: "CANCELLED",
+    });
+  });
+
+  it("distinguishes a persisted callback that does not need to wake its Run", async () => {
+    const settledAt = new Date("2026-08-22T04:00:00.000Z");
+    let nextEventId = 1;
+    const client = fakeClient(async (sql, params = []) => {
+      if (sql.includes("SELECT run_id") && sql.includes("delegations")) {
+        return result([{ run_id: "run-1" }]);
+      }
+      if (sql.includes("FOR UPDATE OF d, r")) {
+        return result([
+          {
+            delegation_id: "delegation-1",
+            run_id: "run-1",
+            agent_id: "agent-1",
+            agent_name: "Agent 1",
+            delegation_status: "RUNNING",
+            run_status: "WAITING_USER",
+            execution_stage: "USER_INTERACTION_WAITING",
+            callback_expired: false,
+            settled_at: settledAt,
+          },
+        ]);
+      }
+      if (sql.includes("INSERT INTO") && sql.includes("run_events")) {
+        return result([
+          {
+            run_id: params[0],
+            event_id: nextEventId++,
+            timestamp: params[1],
+            type: params[2],
+            data: JSON.parse(String(params[3])),
+          },
+        ]);
+      }
+      return result([]);
+    });
+    const queue = new PostgresRunExecutionQueue(fakePool([client]), "byai");
+
+    await expect(
+      queue.settleWaitingCallback({
+        delegationId: "delegation-1",
+        status: "COMPLETED",
+        finalAnswer: "done",
+      }),
+    ).resolves.toEqual({
+      outcome: "delegation_settled",
+      runId: "run-1",
+      runStatus: "WAITING_USER",
+      executionStage: "USER_INTERACTION_WAITING",
+    });
   });
 
   it("commits WAITING_AGENT and run.suspended under one event-first lock order", async () => {
@@ -163,7 +251,11 @@ describe("Postgres Run callback locking", () => {
         status: "COMPLETED",
         finalAnswer: "done",
       }),
-    ).resolves.toEqual({ accepted: false, runId: "run-1" });
+    ).resolves.toEqual({
+      outcome: "delegation_already_settled",
+      runId: "run-1",
+      delegationStatus: "COMPLETED",
+    });
 
     const eventLockIndex = statements.findIndex((sql) => sql.includes("pg_advisory_xact_lock"));
     const rowLockIndex = statements.findIndex((sql) => sql.includes("FOR UPDATE OF d, r"));
@@ -261,7 +353,11 @@ describe("Postgres Run callback locking", () => {
         status: "COMPLETED",
         finalAnswer: "done",
       }),
-    ).resolves.toEqual({ accepted: false, runId: "run-1" });
+    ).resolves.toEqual({
+      outcome: "delegation_already_settled",
+      runId: "run-1",
+      delegationStatus: "COMPLETED",
+    });
 
     expect(pool.connect).toHaveBeenCalledTimes(2);
     expect(first.query).toHaveBeenCalledWith("ROLLBACK");
