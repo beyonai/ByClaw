@@ -229,6 +229,7 @@ class BackendApiTests(unittest.TestCase):
         self.api.read_file({"resourceId": 1})
         self.api.search({"resourceIdList": [1]})
         self.api.search_file({"resourceIdList": [1]})
+        self.api.metadata_search({"resourceIdList": [1]})
         self.api.entity_discovery({"resourceId": 1})
         self.api.entity_enrich({"resourceId": 1})
         self.api.remove_file({"resourceId": 1})
@@ -243,6 +244,7 @@ class BackendApiTests(unittest.TestCase):
             "/byaiService/datasetController/readFile",
             "/byaiService/datasetController/knowledgeItems/search",
             "/byaiService/datasetController/knowledgeItems/searchFile",
+            "/byaiService/datasetController/knowledgeItems/metadataSearch",
             "/byaiService/datasetController/knowledgeItems/entityDiscovery",
             "/byaiService/datasetController/knowledgeItems/entityEnrich",
             "/byaiService/datasetController/removeFile",
@@ -505,6 +507,108 @@ class KnowledgeManagerTests(unittest.TestCase):
         self.assertEqual(result["metadataFields"], ["status", "filePath"])
         self.assertEqual(result["searchMode"], "fullTextRecall")
 
+    def test_metadata_search_uses_pure_metadata_endpoint_and_preserves_pagination(self) -> None:
+        self.transport.responses = [
+            {
+                "data": [
+                    {
+                        "knCode": "internal",
+                        "resourceId": 7,
+                        "filePath": "/contracts/a.md",
+                        "metadata": {
+                            "status": {"valueType": "string", "value": "active"}
+                        },
+                    }
+                ],
+                "total": 21,
+                "pageNum": 2,
+                "pageSize": 10,
+            }
+        ]
+        result = self.manager.execute(
+            self.parse(
+                "metadata-search",
+                "--resource-id",
+                "7",
+                "--resource-id",
+                "8",
+                "--where-json",
+                '{"eq":{"fieldName":"status","value":"active"}}',
+                "--metadata-field",
+                "status",
+                "--top-k",
+                "50",
+                "--page-num",
+                "2",
+                "--page-size",
+                "10",
+            )
+        )
+
+        self.assertEqual(
+            self.transport.calls[0],
+            {
+                "kind": "request",
+                "method": "POST",
+                "path": "/byaiService/datasetController/knowledgeItems/metadataSearch",
+                "payload": {
+                    "resourceIdList": [7, 8],
+                    "where": {"eq": {"fieldName": "status", "value": "active"}},
+                    "metadataFieldList": ["status"],
+                    "topK": 50,
+                    "pageNum": 2,
+                    "pageSize": 10,
+                },
+            },
+        )
+        self.assertEqual(result["total"], 21)
+        self.assertEqual(result["pageNum"], 2)
+        self.assertEqual(result["pageSize"], 10)
+        self.assertEqual(
+            result["items"],
+            [
+                {
+                    "resourceId": 7,
+                    "filePath": "/contracts/a.md",
+                    "metadata": {
+                        "status": {"valueType": "string", "value": "active"}
+                    },
+                }
+            ],
+        )
+        self.assertNotIn("knCode", result["items"][0])
+
+    def test_metadata_search_requires_where_and_valid_pagination_ranges(self) -> None:
+        parser = manager_module.build_parser()
+        invalid_commands = (
+            ["metadata-search", "--resource-id", "7"],
+            [
+                "metadata-search",
+                "--resource-id",
+                "7",
+                "--where-json",
+                '{"exists":{"fieldName":"status"}}',
+                "--page-num",
+                "0",
+            ],
+            [
+                "metadata-search",
+                "--resource-id",
+                "7",
+                "--where-json",
+                '{"exists":{"fieldName":"status"}}',
+                "--page-size",
+                "10001",
+            ],
+        )
+        for argv in invalid_commands:
+            with (
+                self.subTest(argv=argv),
+                redirect_stderr(io.StringIO()),
+                self.assertRaises(SystemExit),
+            ):
+                parser.parse_args(argv)
+
     def test_agent_dsl_validates_structure_and_complexity(self) -> None:
         valid = manager_module._agent_dsl(
             '{"and":['
@@ -743,6 +847,15 @@ class KnowledgeManagerTests(unittest.TestCase):
         self.assertIn("--where-json JSON", search_help)
         self.assertIn("--metadata-field NAME", search_help)
         self.assertIn("--search-mode", search_help)
+
+        metadata_output = io.StringIO()
+        with redirect_stdout(metadata_output), self.assertRaises(SystemExit):
+            parser.parse_args(["metadata-search", "--help"])
+        metadata_help = metadata_output.getvalue()
+        self.assertNotIn("--query", metadata_help)
+        self.assertIn("--where-json JSON", metadata_help)
+        self.assertIn("--page-num N", metadata_help)
+        self.assertIn("--page-size N", metadata_help)
 
         discovery_output = io.StringIO()
         with redirect_stdout(discovery_output), self.assertRaises(SystemExit):
