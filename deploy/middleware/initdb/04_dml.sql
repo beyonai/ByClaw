@@ -6228,7 +6228,7 @@ WHERE NOT EXISTS (
 );
 -- IMA OpenAPI 内置 Skill 注册结束
 
--- ========== V0.5.1 knowledge-collection 纯采集交付 ==========
+-- ========== V0.4.0 knowledge-collection 纯采集交付 ==========
 
 SET search_path TO byai;
 
