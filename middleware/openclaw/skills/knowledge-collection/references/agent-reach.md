@@ -13,7 +13,7 @@
 对**任何网站、网页或 URL** 的打开、读取、站内搜索、采集、抓取或操作，取内容前**必须无条件加载 `bycli` skill**。
 公开静态页、服务端渲染页、SPA、raw URL、Markdown、纯文本、无需登录的页面均无例外。
 
-唯一的通用网页读取命令是：
+除下方明确列出的站点专用 byCLI 执行路径外，唯一的通用网页读取命令是：
 
 ```bash
 bycli web read --url <URL> --stdout
@@ -29,6 +29,7 @@ bycli web read --url <URL> --stdout
 
 | 目标 | 首选执行器 | 唯一允许的兜底 |
 | --- | --- | --- |
+| 已选中的 `mp.weixin.qq.com/s...` 或 `weixin.sogou.com/link?...` 文章 | `bycli weixin download --url <URL>` | 无 |
 | 通用网页 / URL | `bycli web read --url <URL> --stdout` | 无 |
 | Twitter / X | `twitter-cli` | `bycli twitter search` |
 | Reddit | `rdt-cli` | `bycli reddit search` |
@@ -46,6 +47,11 @@ bycli web read --url <URL> --stdout
 该兜底再失败即停止并报告。不得替换为另一种 CLI 或通用网页机制。
 
 首选执行器与 byCLI 兜底的结果必须统一进入同一套 collection contract，不得按执行后端分叉产物协议。
+
+微信文章行仍然完全位于 byCLI 来源执行器边界内，不是直接 HTTP 例外。输出目录必须是当前采集会话的
+`raw/bycli/weixin/<item-id>/`；保留 `source_url`、`resolved_url`、`saved` Markdown、已下载图片和结构化结果。
+随后由采集编排器执行 `materialize-wechat`，再把其 `collectPayloadPath` 交给 `collect`。其他网页仍走
+`bycli web read --url <URL> --stdout`，微信专用命令失败时也不得回退到 `curl`、`wget`、`requests` 或通用浏览器。
 
 ## 只读边界
 

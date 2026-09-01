@@ -610,6 +610,112 @@ function markOneMaterialized(paths, session, metadata, collectionResult, update)
   return { itemId, materialization: inventory.materialization, canonicalItem: canonicalViewItem(update.canonicalItem) };
 }
 
+export function recordPendingCollectionItem(paths, update) {
+  return withSessionLock(paths, 'record-pending', () => {
+    const loaded = loadCollectionSession(paths, { skipCanonicalValidation: true });
+    if (loaded.materializationRecovered) {
+      throw new Error('检测到无效 materialization，已安全降级为 pending；请先由原始执行器重新物化');
+    }
+    const itemId = requireString(update?.itemId, 'itemId');
+    const source = requireString(update?.source, 'source');
+    const sourceSkill = requireString(update?.sourceSkill, 'sourceSkill');
+    const backend = requireString(update?.backend, 'backend');
+    const sourceUrl = requireString(update?.sourceUrl, 'sourceUrl');
+    const reason = requireString(update?.reason, 'reason');
+    const title = typeof update?.title === 'string' ? update.title : '';
+    const rawArtifacts = validateRawArtifacts(paths.root, update?.rawArtifacts || []);
+    const allowedSources = Array.isArray(loaded.session.task?.sourceScope)
+      ? loaded.session.task.sourceScope : [];
+    if (!allowedSources.includes(SOURCE_SCOPE_ALIAS[source] || source)) {
+      throw new Error(`sourceScope 不允许来源 ${source}`);
+    }
+
+    const duplicateIdentity = loaded.metadata.collection.items.find((item) =>
+      item.itemId !== itemId && articleIdentity(item) === articleIdentity({ sourceSkill, sourceUrl }));
+    if (duplicateIdentity) {
+      throw new Error(`inventory sourceSkill + sourceUrl 已由 ${duplicateIdentity.itemId} 登记`);
+    }
+
+    let inventory = loaded.metadata.collection.items.find((item) => item.itemId === itemId);
+    if (inventory?.materialization?.status === 'materialized') {
+      return {
+        ok: true,
+        action: 'record-pending',
+        preservedMaterialized: true,
+        itemId,
+        materialization: clone(inventory.materialization),
+      };
+    }
+    if (inventory && articleIdentity(inventory) !== articleIdentity({ sourceSkill, sourceUrl })) {
+      throw new Error(`inventory ${itemId} 的 sourceSkill + sourceUrl 不允许变更`);
+    }
+
+    if (!inventory) {
+      inventory = {
+        itemId,
+        title,
+        sourceUrl,
+        sourceItemId: null,
+        sourceSkill,
+        backend,
+        collectionFilters: loaded.collectionResult.filters
+          && typeof loaded.collectionResult.filters === 'object'
+          ? clone(loaded.collectionResult.filters) : {},
+        rawArtifacts,
+        media: normalizeMediaState(update.media, { strict: true }),
+        materialization: {
+          status: 'pending',
+          markdownPath: null,
+          sanitizedPath: null,
+          pendingArtifactCleanup: [],
+          reason,
+          contentGranularity: 'unknown',
+        },
+      };
+      loaded.metadata.collection.items.push(inventory);
+    } else {
+      inventory.title = title || inventory.title;
+      inventory.backend = backend;
+      inventory.rawArtifacts = rawArtifacts;
+      inventory.media = update.media === undefined
+        ? normalizeMediaState(inventory.media, { strict: true })
+        : normalizeMediaState(update.media, { strict: true });
+      inventory.materialization = {
+        status: 'pending',
+        markdownPath: null,
+        sanitizedPath: null,
+        pendingArtifactCleanup: Array.isArray(inventory.materialization?.pendingArtifactCleanup)
+          ? inventory.materialization.pendingArtifactCleanup : [],
+        reason,
+        contentGranularity: 'unknown',
+      };
+    }
+
+    loaded.metadata.collection.status = 'partial';
+    if (!loaded.collectionResult.source) loaded.collectionResult.source = source;
+    else if (loaded.collectionResult.source !== source) loaded.collectionResult.source = 'multi-source';
+    if (!loaded.collectionResult.backend) loaded.collectionResult.backend = backend;
+    else if (loaded.collectionResult.backend !== backend) loaded.collectionResult.backend = 'multi-backend';
+    if (!loaded.collectionResult.title) {
+      loaded.collectionResult.title = loaded.session.task?.query || 'Collection';
+    }
+    if (!loaded.collectionResult.url) loaded.collectionResult.url = sourceUrl;
+    normalizeDuplicateGroups(loaded.metadata);
+    reconcileCanonicalView(loaded.collectionResult, loaded.metadata);
+    validateMetadata(loaded.metadata);
+    validateCanonicalView(paths.root, loaded.collectionResult, loaded.metadata);
+    persistCollection(paths, loaded.session, loaded.metadata);
+    atomicWriteJson(paths.collectionResult, loaded.collectionResult);
+    return {
+      ok: true,
+      action: 'record-pending',
+      preservedMaterialized: false,
+      itemId,
+      materialization: clone(inventory.materialization),
+    };
+  });
+}
+
 export function cmdCollect(paths, args) {
   const { filePath, payload } = readPayload(paths, args['item-json-file'], '--item-json-file');
   const items = Array.isArray(payload.items) ? payload.items : [payload];

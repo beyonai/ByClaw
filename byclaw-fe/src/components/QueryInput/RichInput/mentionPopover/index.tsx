@@ -60,7 +60,7 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
   const intl = useIntl();
   const popoverRef = useRef<TooltipRef>(null);
   const open = !!popoverPos;
-  const { top, left, width } = popoverPos || {};
+  const { width } = popoverPos || {};
   const isAtPopover = type === '@';
 
   const [currentAgent, setCurrentAgent] = useState<IAgentCache | null>(null);
@@ -81,7 +81,21 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
         popoverRef.current?.forceAlign();
       });
     }
-  }, [open, top, left, currentAgent]);
+  }, [open, currentAgent]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+
+    const handleDocumentMouseDown = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (target.closest(`.${styles.popover}`)) return;
+      onClose();
+    };
+
+    document.addEventListener('mousedown', handleDocumentMouseDown, true);
+    return () => document.removeEventListener('mousedown', handleDocumentMouseDown, true);
+  }, [onClose, open]);
 
   const onSelectAtMention = useCallback(
     (item: any) => {
@@ -184,25 +198,26 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
       children || (
         <div
           style={{
-            top,
-            left,
-            position: 'fixed',
-            width: 1,
+            position: 'absolute',
+            bottom: 0,
+            left: 0,
+            width: '100%',
             height: 1,
             opacity: 0,
           }}
         />
       )
     );
-  }, [children, top, left]);
+  }, [children]);
 
   return (
     <Popover
       open={open}
-      trigger="click"
+      // 弹窗打开状态由两个入口各自的统一适配层控制，避免触发节点位置影响布局。
+      trigger={[]}
       destroyOnHidden
       placement={placement || (isAtPopover ? 'topLeft' : undefined)}
-      autoAdjustOverflow={false}
+      autoAdjustOverflow
       ref={popoverRef}
       arrow={false}
       onOpenChange={(v) => {

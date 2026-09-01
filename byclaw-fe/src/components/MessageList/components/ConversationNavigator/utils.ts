@@ -17,6 +17,23 @@ const SUMMARY_LENGTH = 160;
 
 export const MINIMUM_CONVERSATION_TURNS_FOR_NAVIGATOR = 3;
 
+export const CONVERSATION_NAVIGATOR_ACTIVATION_RATIO = 0.32;
+
+type ConversationNavigatorScrollMetrics = {
+  scrollTop: number;
+  scrollerTop: number;
+  scrollerHeight: number;
+  targetTop: number;
+};
+
+export const getConversationNavigatorScrollTop = ({
+  scrollTop,
+  scrollerTop,
+  scrollerHeight,
+  targetTop,
+}: ConversationNavigatorScrollMetrics) =>
+  Math.max(0, scrollTop + targetTop - scrollerTop - scrollerHeight * CONVERSATION_NAVIGATOR_ACTIVATION_RATIO);
+
 const DIGITAL_EMPLOYEE_PLACEHOLDER = /\{\{DIG_EMPLOYEE_[^}#]+(?:#[^}]*)?}}/;
 
 const extractObjectText = (value: unknown): string => {

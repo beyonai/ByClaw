@@ -36,7 +36,14 @@ const IMAGE_MODEL_QUERY = {
 const isSuccessfulResponse = (response?: ModelListByPageResponse) =>
   response?.code === undefined || response.code === 0;
 
-const ImageModelSelect = ({ value, onChange, disabled = false, modelType = 'IMAGE_GENERATION', label, configurationLabel }: ImageModelSelectProps) => {
+const ImageModelSelect = ({
+  value,
+  onChange,
+  disabled = false,
+  modelType = 'IMAGE_GENERATION',
+  label,
+  configurationLabel,
+}: ImageModelSelectProps) => {
   const intl = useIntl();
   const globalDefaultLabel = intl.formatMessage({ id: 'employeeDetail.imageModelGlobalDefault' });
   const displayLabel = label || intl.formatMessage({ id: 'employeeDetail.imageModel' });
@@ -57,7 +64,7 @@ const ImageModelSelect = ({ value, onChange, disabled = false, modelType = 'IMAG
   const loadModels = useCallback(() => {
     setLoading(true);
     setLoadFailed(false);
-    const query = { ...IMAGE_MODEL_QUERY, modelType };
+    const query = { ...IMAGE_MODEL_QUERY, modelType: `${modelType}`.trim().toUpperCase() };
     Promise.all([getPersonalModelList(query), getPublicModelList(query)])
       .then(([personalResponse, publicResponse]) => {
         if (!isSuccessfulResponse(personalResponse) || !isSuccessfulResponse(publicResponse)) {
@@ -65,8 +72,8 @@ const ImageModelSelect = ({ value, onChange, disabled = false, modelType = 'IMAG
         }
         if (!mountedRef.current) return;
         setModelGroups({
-          mine: buildImageModelOptions(getImageModelRows(personalResponse), globalDefaultLabel, false),
-          public: buildImageModelOptions(getImageModelRows(publicResponse), globalDefaultLabel, false),
+          mine: buildImageModelOptions(getImageModelRows(personalResponse), globalDefaultLabel, false, modelType),
+          public: buildImageModelOptions(getImageModelRows(publicResponse), globalDefaultLabel, false, modelType),
         });
       })
       .catch(() => {
@@ -93,7 +100,9 @@ const ImageModelSelect = ({ value, onChange, disabled = false, modelType = 'IMAG
 
   const popoverContent = (
     <div className={styles.modelPopover}>
-      <div className={styles.popoverTitle}>{configurationLabel || intl.formatMessage({ id: 'employeeDetail.imageModelConfiguration' })}</div>
+      <div className={styles.popoverTitle}>
+        {configurationLabel || intl.formatMessage({ id: 'employeeDetail.imageModelConfiguration' })}
+      </div>
       <Tabs
         activeKey={activeScope}
         className={styles.scopeTabs}
@@ -151,7 +160,11 @@ const ImageModelSelect = ({ value, onChange, disabled = false, modelType = 'IMAG
           title={selectedLabel}
           type="button"
         >
-          {modelType === 'TTS' ? <SoundOutlined className={styles.modelIcon} /> : <PictureOutlined className={styles.modelIcon} />}
+          {modelType === 'TTS' ? (
+            <SoundOutlined className={styles.modelIcon} />
+          ) : (
+            <PictureOutlined className={styles.modelIcon} />
+          )}
           <span className={styles.selectedModel}>{selectedLabel}</span>
           <DownOutlined className={styles.downIcon} />
         </button>

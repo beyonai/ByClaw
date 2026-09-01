@@ -25,6 +25,7 @@ type IType =
 
 const compMap: Record<string, React.LazyExoticComponent<any>> = {
   [`${SSEMessageType.text}`]: lazy(() => import('@/components/MessagesComp/Text')),
+  [`${SSEMessageType.editDiff}`]: lazy(() => import('@/components/MessagesComp/EditDiff')),
   [`${SSEMessageType.noticeTodo}`]: lazy(() => import('@/pages/notice/components/MessageComp/Todo')),
   [`${SSEMessageType.noticeApproval}`]: lazy(() => import('@/pages/notice/components/MessageComp/Approval')),
   [`${SSEMessageType.noticeShare}`]: lazy(() => import('@/pages/notice/components/MessageComp/Share')),

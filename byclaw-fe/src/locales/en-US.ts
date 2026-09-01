@@ -1036,6 +1036,7 @@ export default {
   'workspaceSider.retry': 'Retry',
   'workspaceSider.loadMore': 'View more',
   'workspaceSider.collapseSessions': 'Collapse',
+  'workspaceSider.sessionNeedsUserInput': 'User input required',
   'workspaceSider.time.justNow': 'Just now',
   'workspaceSider.time.minutesAgo': '{count} min ago',
   'workspaceSider.time.hoursAgo': '{count} hr ago',
@@ -3492,6 +3493,11 @@ export default {
   'fileChanges.diffLoadFailed': 'Failed to load file changes',
   'fileChanges.noDiff': 'The file has no net changes',
   'fileChanges.expandUnchanged': '{count} unchanged lines',
+  'editDiff.title': 'File edit',
+  'editDiff.phase.running': 'Editing',
+  'editDiff.phase.applied': 'Applied',
+  'editDiff.phase.failed': 'Failed',
+  'editDiff.binary': 'Binary file changed',
 
   ...secondEdition,
 };

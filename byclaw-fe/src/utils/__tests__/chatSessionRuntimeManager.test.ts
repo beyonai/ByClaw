@@ -143,4 +143,20 @@ describe('utils/chatSessionRuntimeManager', () => {
 
     expect(chatSessionRuntimeManager.isSessionRunning('s1')).toBe(false);
   });
+
+  it('tracks whether any active request in a session is waiting for user input', () => {
+    chatSessionRuntimeManager.register({
+      clientRequestId: 'q1_a1',
+      sessionId: 'pending_q1_a1',
+    });
+    chatSessionRuntimeManager.bindSession('q1_a1', 's1');
+
+    chatSessionRuntimeManager.setWaitingForUserInput('q1_a1', true);
+
+    expect(chatSessionRuntimeManager.isSessionWaitingForUserInput('pending_q1_a1')).toBe(true);
+    expect(chatSessionRuntimeManager.isSessionWaitingForUserInput('s1')).toBe(true);
+
+    chatSessionRuntimeManager.setSessionWaitingForUserInput('s1', false);
+    expect(chatSessionRuntimeManager.isSessionWaitingForUserInput('s1')).toBe(false);
+  });
 });

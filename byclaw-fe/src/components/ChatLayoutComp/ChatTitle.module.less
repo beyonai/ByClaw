@@ -226,6 +226,41 @@ nav.chatTitle {
   gap: 7px;
 }
 
+.teamActivityButton {
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid #d9e5fb;
+  border-radius: 9px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #315f9f;
+  background: #f5f8ff;
+  font-size: 12px;
+  cursor: pointer;
+
+  > span:last-child {
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 9px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    background: #3978dc;
+    font-size: 11px;
+  }
+
+  &:hover,
+  &:focus-visible {
+    color: #1557d5;
+    border-color: #9ebff2;
+    background: #edf4ff;
+    outline: none;
+  }
+}
+
 .childSessionSeparator {
   color: #c0c5cd;
   font-size: 16px;

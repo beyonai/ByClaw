@@ -340,9 +340,12 @@ public class StandardSandboxLifecycleService implements SandboxLifecycleFacade {
 
     /**
      * Merge system-level env vars from launchEnvs into the CreateSandboxRequest.
-     * System env vars (e.g. BYAI_WORKER_ID) are injected for all containers regardless of spec declarations.
+     * System env vars are injected for all containers regardless of spec declarations.
      */
-    private static final Set<String> SYSTEM_ENV_KEYS = java.util.Set.of("BYAI_WORKER_ID");
+    private static final Set<String> SYSTEM_ENV_KEYS = Set.of(
+        "BYAI_SERVICE_BASE_URL",
+        "BYAI_WORKER_ID"
+    );
 
     private static void mergeSystemEnvs(CreateSandboxRequest request, Map<String, String> launchEnvs) {
         if (request == null || launchEnvs == null || launchEnvs.isEmpty()) {

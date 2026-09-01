@@ -1049,7 +1049,7 @@ describe('ConnectorControl authorization states', () => {
     expect(await screen.findByRole('heading', { name: '连接 钉钉 作为 AI 知识库' })).toBeInTheDocument();
   });
 
-  it('opens reauthorization from an inline connector card', async () => {
+  it('opens authorization directly from an enabled inline connector card', async () => {
     mockQueryConnectorList.mockResolvedValue({
       list: [
         {
@@ -1069,8 +1069,7 @@ describe('ConnectorControl authorization states', () => {
 
     render(<ConnectorControl canAuthorize inline />);
 
-    fireEvent.click(await screen.findByRole('button', { name: '更多钉钉操作' }));
-    fireEvent.click(await screen.findByText('重新授权'));
+    fireEvent.click(await screen.findByRole('button', { name: '连接' }));
     expect(await screen.findByRole('heading', { name: '连接 钉钉 作为 AI 知识库' })).toBeInTheDocument();
   });
 

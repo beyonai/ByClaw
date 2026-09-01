@@ -44,6 +44,7 @@ export type IToolCallSubstance = {
 };
 
 export type IProps = {
+  message?: { sessionId?: string | number };
   messageListItemContent?: {
     substance?: IToolCallSubstance | string;
   };
@@ -142,7 +143,7 @@ function ToolCall(props: IProps) {
   };
 
   if (isAgentTeamsSnapshot(substance)) {
-    return <AgentTeamsActivity snapshot={substance} />;
+    return <AgentTeamsActivity snapshot={substance} rootSessionId={`${props.message?.sessionId || ''}`} />;
   }
 
   return (

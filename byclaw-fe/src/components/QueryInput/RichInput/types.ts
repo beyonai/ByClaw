@@ -73,6 +73,7 @@ export interface Props {
   projectCloudResourceId?: string | number;
   projectId?: number;
   mentionPopoverPlacement?: PopoverProps['placement'];
+  onResourcePopoverChange?: (state: { open: boolean; inputText?: string; width?: number }) => void;
 }
 
 export interface MentionTriggerInfo {

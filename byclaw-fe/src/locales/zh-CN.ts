@@ -1032,6 +1032,7 @@ export default {
   'workspaceSider.retry': '重试',
   'workspaceSider.loadMore': '查看更多',
   'workspaceSider.collapseSessions': '收起',
+  'workspaceSider.sessionNeedsUserInput': '需要用户输入',
   'workspaceSider.time.justNow': '刚刚',
   'workspaceSider.time.minutesAgo': '{count}分钟前',
   'workspaceSider.time.hoursAgo': '{count}小时前',
@@ -3426,6 +3427,11 @@ export default {
   'fileChanges.diffLoadFailed': '文件变更详情加载失败',
   'fileChanges.noDiff': '文件没有净变化',
   'fileChanges.expandUnchanged': '{count} 行未变更的内容',
+  'editDiff.title': '文件修改',
+  'editDiff.phase.running': '修改中',
+  'editDiff.phase.applied': '已应用',
+  'editDiff.phase.failed': '修改失败',
+  'editDiff.binary': '二进制文件已变更',
 
   ...secondEdition,
 };

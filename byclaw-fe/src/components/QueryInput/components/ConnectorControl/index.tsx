@@ -321,7 +321,12 @@ const ConnectorSelection = ({
   );
 };
 
-const ConnectorControl = ({ canAuthorize, inline = false, outside = false, userInfo: userInfoProp }: ConnectorControlProps) => {
+const ConnectorControl = ({
+  canAuthorize,
+  inline = false,
+  outside = false,
+  userInfo: userInfoProp,
+}: ConnectorControlProps) => {
   const storeUserInfo = useSelector((state: any) => state.user?.userInfo);
   const userInfo = userInfoProp || storeUserInfo;
 
@@ -802,6 +807,18 @@ const ConnectorControl = ({ canAuthorize, inline = false, outside = false, userI
         <span aria-label={`${connector.name}状态刷新中`} className={styles.refreshingIcon} role="status">
           <LoadingOutlined />
         </span>
+      );
+    }
+    // 加号/@资源弹窗统一提供“连接”入口，避免同一连接器因授权状态字段不同而出现不同操作样式。
+    if (inline) {
+      return (
+        <Button
+          type="text"
+          onClick={() => void beginAuthorization(connector)}
+          style={{ color: 'var(--beyond-color-primary)' }}
+        >
+          连接
+        </Button>
       );
     }
     if (connector.enableFlag === 'Y' || connector.enableFlag === 'N') {

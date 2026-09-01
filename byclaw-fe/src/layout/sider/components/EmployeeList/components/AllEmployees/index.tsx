@@ -288,9 +288,10 @@ const AllEmployees = (props: IProps, ref: ForwardedRef<IRef>) => {
                 </Divider>
               )
             }
-            scrollableTarget="allEmployeeListWrap"
+            scrollableTarget={props.compactCard ? undefined : 'allEmployeeListWrap'}
             inverse={false}
             scrollThreshold="50px"
+            // 紧凑弹窗与技能列表一致，由 InfiniteScroll 自身承载列表滚动。
             style={{ overflow: props.compactCard ? 'auto' : 'visible', paddingBottom: hasMore ? '20px' : 0 }}
           >
             <List

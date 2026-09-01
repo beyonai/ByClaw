@@ -12,6 +12,7 @@ const mergeObjectSubstance: MergeSubstance = (current, incoming) =>
 const inPlaceUpdateStrategies = new Map<string, MergeSubstance>([
   [`${SSEMessageType.thinkStatusTitle}`, replaceSubstance],
   [`${SSEMessageType.toolCall}`, mergeObjectSubstance],
+  [`${SSEMessageType.editDiff}`, replaceSubstance],
 ]);
 
 export const supportsInPlaceUpdate = (item?: Partial<IMessageListItem>) =>

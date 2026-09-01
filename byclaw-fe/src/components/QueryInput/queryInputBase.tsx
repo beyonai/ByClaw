@@ -24,7 +24,8 @@ import type { IAgentFileUploadConf } from '../../hooks/useAgentUploadFileConfig'
 import type { DefaultValueSchema } from './RichInput/types';
 import type { ContextUsed } from '@/hooks/useContextUsed';
 import { getLastMentionedDigitalEmployeeId } from './utils/mention';
-import ResourceToolMenu from './components/ResourceToolMenu';
+import MentionPopover from './RichInput/mentionPopover';
+import { getResourcePopoverAdapter } from './RichInput/mentionPopover/resourcePopoverAdapter';
 
 export type IProps = {
   getMessageList?: () => Array<IMessage>;
@@ -85,6 +86,7 @@ export type IState = {
   activeToolMenuKey?: string;
   moreToolsExpanded?: boolean;
   toolsPopoverWidth?: number;
+  toolsPopoverKeyword?: string;
   visitedToolTabs?: string[];
 };
 
@@ -127,6 +129,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
       activeToolMenuKey: 'expert',
       moreToolsExpanded: false,
       toolsPopoverWidth: undefined,
+      toolsPopoverKeyword: undefined,
       visitedToolTabs: ['expert'],
     } as S & IState;
   }
@@ -514,59 +517,24 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
           }}
         >
           {hasTools && (
-            <Popover
-              trigger="click"
-              placement={this.props.isBottom ? 'topLeft' : 'bottomLeft'}
-              autoAdjustOverflow={false}
-              align={{ offset: [-16, 0] }}
-              styles={{
-                root: this.state.toolsPopoverWidth
-                  ? {
-                    width: this.state.toolsPopoverWidth,
-                    minWidth: this.state.toolsPopoverWidth,
-                    maxWidth: this.state.toolsPopoverWidth,
-                  }
-                  : undefined,
-                body: {
-                  height: '40vh',
-                  maxHeight: 'calc(100vh - 32px)',
-                  padding: 0,
-                  overflow: 'hidden',
-                },
-              }}
-              open={this.state.toolsPopoverOpen}
-              onOpenChange={(open) => {
-                this.setState({
-                  toolsPopoverOpen: open,
-                  toolsPopoverWidth: open ? this.inputBlockRef.current?.getBoundingClientRect().width : undefined,
-                  visitedToolTabs: open ? ['expert'] : ['expert'],
-                });
-              }}
-              destroyOnHidden
-              arrow={false}
-              overlayClassName={styles.toolsPopover}
-              content={
-                <ResourceToolMenu
-                  sessionId={this.props.sessionId}
-                  projectId={this.props.projectId}
-                  projectCloudResourceId={this.props.projectCloudResourceId}
-                  agentId={this.getQuoteAgentId()}
-                  resourceAgentIds={this.getResourceAgentIds()}
-                  excludedAgentIds={this.getInlineDigitalEmployeeList().map((item) => `${item.resourceId}`)}
-                  userInfo={this.props.userInfo}
-                  onSelect={(item, type) => this.onSelectMentionPopoverItem(item, type)}
-                />
-              }
-            >
+            <>
               <Tooltip title="可添加数字员工、技能、连接器">
                 <Button
                   type="text"
                   className={styles.addToolButton}
                   aria-label="打开聊天工具"
                   icon={<AntdIcon type="icon-a-Plusjia" style={{ fontSize: 20 }} />}
+                  onClick={() =>
+                    this.setState({
+                      toolsPopoverOpen: true,
+                      toolsPopoverWidth: this.inputBlockRef.current?.getBoundingClientRect().width,
+                      toolsPopoverKeyword: undefined,
+                      visitedToolTabs: ['expert'],
+                    })
+                  }
                 />
               </Tooltip>
-            </Popover>
+            </>
           )}
           <div className={classNames(styles.outsideTools, hasTools && styles.outsideToolsWithTools)}>{bottomRight}</div>
         </ConfigProvider>
@@ -790,6 +758,13 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
           projectId={this.props.projectId}
           projectCloudResourceId={this.props.projectCloudResourceId}
           mentionPopoverPlacement={this.props.mentionPopoverPlacement}
+          onResourcePopoverChange={({ open, inputText, width }) =>
+            this.setState({
+              toolsPopoverOpen: open,
+              toolsPopoverWidth: open ? width : undefined,
+              toolsPopoverKeyword: open ? inputText : undefined,
+            })
+          }
         />
         {this.getAssitantTrigger()}
       </div>
@@ -849,6 +824,27 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
         </Popover>
         {this.inputUpper()}
         {this.renderInput()}
+        <MentionPopover
+          key={`resource-tools-${this.props.sessionId || 'new'}`}
+          type="@"
+          chatMode={this.props.chatMode}
+          sessionId={this.props.sessionId}
+          projectId={this.props.projectId}
+          projectCloudResourceId={this.props.projectCloudResourceId}
+          agentId={this.getQuoteAgentId()}
+          resourceAgentIds={this.getResourceAgentIds()}
+          excludedAgentIds={this.getInlineDigitalEmployeeList().map((item) => `${item.resourceId}`)}
+          inputText={this.state.toolsPopoverKeyword}
+          {...getResourcePopoverAdapter({
+            open: this.state.toolsPopoverOpen === true,
+            width: this.state.toolsPopoverWidth,
+            isInputAtBottom: this.props.isBottom,
+          })}
+          onClose={() =>
+            this.setState({ toolsPopoverOpen: false, toolsPopoverWidth: undefined, toolsPopoverKeyword: undefined })
+          }
+          onSelect={(item, type) => this.onSelectMentionPopoverItem(item, type)}
+        />
         {this.inputLower()}
         {this.extendRender()}
       </div>

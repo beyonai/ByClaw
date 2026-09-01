@@ -137,13 +137,13 @@ test('runs SearXNG and hot discovery for every SearXNG category', async () => {
   assert.equal(existsSync(result.snapshots.searxng), true);
   assert.equal(existsSync(result.snapshots.hotDiscovery), true);
   assert.equal(existsSync(result.snapshots.merged), true);
-  assert.deepEqual(JSON.parse(readFileSync(result.snapshots.merged, 'utf8')), {
-    query: 'DeepSeek Harness', effectiveDimensions: ['images', 'general'],
-    channelDiagnostics: {
-      searxng: { status: 'success', exitCode: 0 },
-      hotDiscovery: { status: 'success', exitCode: 0 },
-    },
-  });
+  const snapshot = JSON.parse(readFileSync(result.snapshots.merged, 'utf8'));
+  assert.equal(snapshot.query, 'DeepSeek Harness');
+  assert.deepEqual(snapshot.effectiveDimensions, ['images', 'general']);
+  assert.equal(snapshot.channelDiagnostics.searxng.status, 'success');
+  assert.equal(snapshot.channelDiagnostics.hotDiscovery.status, 'success');
+  assert.ok(Number.isInteger(snapshot.timing.totalMs));
+  assert.deepEqual(snapshot.candidateQuality.merged, { article: 0, weak: 0, reject: 0 });
 });
 
 test('default merge preserves the source hostname used for acquisition', async () => {
@@ -224,7 +224,7 @@ test('returns merged user action without discarding successful SearXNG discovery
   assert.match(mergedSnapshot.warnings.join('\n'), /禁止使用.*HTTP.*通用浏览器.*降级/);
 });
 
-test('uses only SearXNG when a requested result count is satisfied', async () => {
+test('uses only SearXNG when a requested article count is satisfied', async () => {
   const { paths } = makeInitializedSession();
   const calls = [];
   const result = await runPublicDiscover(paths, {
@@ -238,7 +238,11 @@ test('uses only SearXNG when a requested result count is satisfied', async () =>
         code: 0,
         stdout: JSON.stringify({
           query: 'DeepSeek',
-          results: [{ url: 'https://example.com/deepseek', title: 'DeepSeek', engine: 'google' }],
+          results: [{
+            url: 'https://example.com/news/deepseek-report',
+            title: 'DeepSeek 深度报道',
+            engine: 'google',
+          }],
         }),
         stderr: '',
       };
@@ -253,11 +257,118 @@ test('uses only SearXNG when a requested result count is satisfied', async () =>
   assert.deepEqual(searxngCall.options, { timeoutMs: 60_000 });
   assert.equal(result.hotDiscovery, null);
   assert.equal(result.snapshots.hotDiscovery, null);
-  assert.deepEqual(result.channels.hotDiscovery, { status: 'skipped' });
+  assert.equal(result.channels.hotDiscovery.status, 'skipped');
+  assert.equal(result.channels.hotDiscovery.skipReason, 'sufficient_article_candidates');
+  assert.equal(result.candidateQuality.searxng.article, 1);
   assert.ok(!result.warnings.some((warning) => warning.includes('hot-discovery')));
-  assert.deepEqual(JSON.parse(readFileSync(result.snapshots.merged, 'utf8')).channelDiagnostics.hotDiscovery, {
-    status: 'skipped',
+  assert.equal(
+    JSON.parse(readFileSync(result.snapshots.merged, 'utf8')).channelDiagnostics.hotDiscovery.skipReason,
+    'sufficient_article_candidates',
+  );
+});
+
+test('falls back when non-empty SearXNG results are login and home pages', async () => {
+  const { paths } = makeInitializedSession();
+  const calls = [];
+  const result = await runPublicDiscover(paths, {
+    query: '米哈游',
+    'requested-count': '1',
+  }, {
+    runProcess: async (spec) => {
+      calls.push(spec.channel);
+      return spec.channel === 'searxng'
+        ? {
+          code: 0,
+          stdout: JSON.stringify({
+            query: '米哈游',
+            results: [
+              { url: 'https://user.mihoyo.com/login', title: '米哈游通行证登录', engine: 'baidu' },
+              { url: 'https://www.mihoyo.com/', title: '米哈游', engine: 'bing' },
+            ],
+          }),
+          stderr: '',
+        }
+        : {
+          code: 0,
+          stdout: JSON.stringify({ query: '米哈游', candidates: [] }),
+          stderr: '',
+        };
+    },
+    merge: ({ sxDoc }) => ({
+      query: sxDoc.query,
+      groups: {
+        bothChannels: [],
+        searxngTop: sxDoc.results,
+        agentReachTop: [],
+        hotBySource: {},
+        hotWithoutPopularity: [],
+        unverified: [],
+      },
+    }),
   });
+
+  assert.deepEqual(calls, ['searxng', 'hot-discovery']);
+  assert.equal(result.candidateQuality.searxng.article, 0);
+  assert.equal(result.candidateQuality.searxng.weak, 1);
+  assert.equal(result.candidateQuality.searxng.reject, 1);
+});
+
+test('falls back when unique article count is below requested count', async () => {
+  const { paths } = makeInitializedSession();
+  const calls = [];
+  await runPublicDiscover(paths, {
+    query: '米哈游 报道',
+    'requested-count': '2',
+  }, {
+    runProcess: async (spec) => {
+      calls.push(spec.channel);
+      return spec.channel === 'searxng'
+        ? {
+          code: 0,
+          stdout: JSON.stringify({
+            query: '米哈游 报道',
+            results: [
+              { url: 'https://example.com/news/mihoyo', title: '米哈游深度报道', engine: 'baidu' },
+              { url: 'https://www.mihoyo.com/', title: '米哈游', engine: 'bing' },
+            ],
+          }),
+          stderr: '',
+        }
+        : { code: 0, stdout: JSON.stringify({ query: '米哈游 报道', candidates: [] }), stderr: '' };
+    },
+    merge: ({ sxDoc }) => ({ query: sxDoc.query, groups: {} }),
+  });
+
+  assert.deepEqual(calls, ['searxng', 'hot-discovery']);
+});
+
+test('records deterministic discovery phase timings', async () => {
+  const { paths } = makeInitializedSession();
+  const ticks = [0, 0, 20, 20, 30, 35];
+  const result = await runPublicDiscover(paths, {
+    query: '米哈游 报道',
+    'requested-count': '1',
+  }, {
+    now: () => ticks.shift(),
+    runProcess: async () => ({
+      code: 0,
+      stdout: JSON.stringify({
+        query: '米哈游 报道',
+        results: [{ url: 'https://example.com/news/mihoyo', title: '米哈游深度报道' }],
+      }),
+      stderr: '',
+    }),
+    merge: ({ sxDoc }) => ({ query: sxDoc.query, groups: {} }),
+  });
+
+  assert.deepEqual(result.timing, {
+    searxngMs: 20,
+    hotDiscoveryMs: 0,
+    mergeAndClassifyMs: 10,
+    totalMs: 35,
+  });
+  assert.equal(result.channels.searxng.durationMs, 20);
+  assert.equal(result.channels.hotDiscovery.durationMs, 0);
 });
 
 test('falls back to hot discovery when requested SearXNG result set is empty', async () => {
@@ -298,7 +409,9 @@ test('falls back to hot discovery when requested SearXNG result set is empty', a
     { timeoutMs: 25 },
   ]);
   assert.equal(result.merged.usedHotDiscovery, true);
-  assert.deepEqual(result.channels.hotDiscovery, { status: 'success', exitCode: 0 });
+  assert.equal(result.channels.hotDiscovery.status, 'success');
+  assert.equal(result.channels.hotDiscovery.exitCode, 0);
+  assert.ok(Number.isInteger(result.channels.hotDiscovery.durationMs));
   assert.equal(existsSync(result.snapshots.hotDiscovery), true);
 });
 
@@ -359,13 +472,14 @@ test('falls back to hot discovery when requested SearXNG output is invalid', asy
 
   assert.deepEqual(calls.map((spec) => spec.channel), ['searxng', 'hot-discovery']);
   assert.equal(result.merged.hasSearxng, false);
-  assert.deepEqual(result.channels.searxng, {
-    status: 'failed',
-    exitCode: 1,
-    timedOut: false,
-    stderr: 'invalid response',
-  });
-  assert.deepEqual(result.channels.hotDiscovery, { status: 'success', exitCode: 0 });
+  assert.equal(result.channels.searxng.status, 'failed');
+  assert.equal(result.channels.searxng.exitCode, 1);
+  assert.equal(result.channels.searxng.timedOut, false);
+  assert.equal(result.channels.searxng.stderr, 'invalid response');
+  assert.ok(Number.isInteger(result.channels.searxng.durationMs));
+  assert.equal(result.channels.hotDiscovery.status, 'success');
+  assert.equal(result.channels.hotDiscovery.exitCode, 0);
+  assert.ok(Number.isInteger(result.channels.hotDiscovery.durationMs));
   assert.match(result.warnings.join('\n'), /SearXNG 发现失败/);
 });
 
@@ -388,10 +502,14 @@ test('keeps SearXNG output when hot discovery fails', async () => {
   assert.equal(existsSync(result.snapshots.searxng), true);
   assert.equal(result.snapshots.hotDiscovery, null);
   assert.equal(existsSync(result.snapshots.merged), true);
-  assert.deepEqual(JSON.parse(readFileSync(result.snapshots.merged, 'utf8')).channelDiagnostics, {
-    searxng: { status: 'success', exitCode: 0 },
-    hotDiscovery: { status: 'failed', exitCode: 75, timedOut: false, stderr: 'RATE_LIMITED' },
-  });
+  const snapshotDiagnostics = JSON.parse(readFileSync(result.snapshots.merged, 'utf8')).channelDiagnostics;
+  assert.equal(snapshotDiagnostics.searxng.status, 'success');
+  assert.ok(Number.isInteger(snapshotDiagnostics.searxng.durationMs));
+  assert.equal(snapshotDiagnostics.hotDiscovery.status, 'failed');
+  assert.equal(snapshotDiagnostics.hotDiscovery.exitCode, 75);
+  assert.ok(Number.isInteger(snapshotDiagnostics.hotDiscovery.durationMs));
+  assert.equal(snapshotDiagnostics.hotDiscovery.timedOut, false);
+  assert.equal(snapshotDiagnostics.hotDiscovery.stderr, 'RATE_LIMITED');
 });
 
 test('records outer timeout diagnostics with bounded and redacted stderr', async () => {

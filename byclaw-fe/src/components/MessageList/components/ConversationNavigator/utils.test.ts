@@ -4,6 +4,7 @@ import { ResourceType } from '@/components/QueryInput/RichInput/utils/constants'
 import {
   buildConversationTurns,
   createLocalOutlineItems,
+  getConversationNavigatorScrollTop,
   mergeOutlineItems,
   normalizeConversationSummary,
   shouldShowConversationNavigator,
@@ -93,5 +94,27 @@ describe('ConversationNavigator utils', () => {
 
     expect(shouldShowConversationNavigator(turns.slice(0, 2))).toBe(false);
     expect(shouldShowConversationNavigator(turns)).toBe(true);
+  });
+
+  it('aligns a clicked turn with the navigator activation line', () => {
+    expect(
+      getConversationNavigatorScrollTop({
+        scrollTop: 400,
+        scrollerTop: 100,
+        scrollerHeight: 500,
+        targetTop: 460,
+      })
+    ).toBe(600);
+  });
+
+  it('does not scroll above the beginning of the conversation', () => {
+    expect(
+      getConversationNavigatorScrollTop({
+        scrollTop: 0,
+        scrollerTop: 100,
+        scrollerHeight: 500,
+        targetTop: 120,
+      })
+    ).toBe(0);
   });
 });

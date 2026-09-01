@@ -9,6 +9,12 @@ import {
   normalizeUrl,
   parseDeclarations,
 } from '../references/online-search/references/hot_discovery/scripts/hot_discovery.mjs';
+import {
+  annotateMergedCandidates,
+  classifyCandidates,
+  countUniqueArticles,
+  summarizeMergedQuality,
+} from './candidate-quality.mjs';
 import { runCli } from './enterprise/shared/cli-runner.mjs';
 import { loadSession } from './session.mjs';
 
@@ -83,11 +89,23 @@ function safeDiagnosticStderr(stderr) {
     .slice(0, MAX_DIAGNOSTIC_STDERR_CHARS);
 }
 
-function summarize(outcome, document) {
-  if (outcome?.skipped) return { status: 'skipped' };
+function elapsedMilliseconds(start, end) {
+  const value = Number(end) - Number(start);
+  return Number.isFinite(value) && value > 0 ? Math.round(value) : 0;
+}
+
+function summarize(outcome, document, durationMs = 0) {
+  if (outcome?.skipped) {
+    return {
+      status: 'skipped',
+      durationMs: 0,
+      ...(typeof outcome.skipReason === 'string' ? { skipReason: outcome.skipReason } : {}),
+    };
+  }
   const summary = {
     status: document ? 'success' : 'failed',
     exitCode: Number.isInteger(outcome?.code) ? outcome.code : 1,
+    durationMs,
   };
   if (!document) {
     summary.timedOut = Boolean(outcome?.timedOut);
@@ -137,6 +155,8 @@ export async function runPublicDiscover(paths, args, options = {}) {
   const searxngRuntime = resolveSearxngRuntime(options);
   const runSearxngProcess = options.runProcess || runPublicProcess;
   const runHotDiscoveryProcess = options.runProcess || runPublicProcess;
+  const now = options.now || (() => performance.now());
+  const totalStartedAt = now();
   const processTimeoutMs = Math.max(1, Math.ceil(Number(processTimeout) * 1_000));
 
   const searxngSpec = {
@@ -155,17 +175,35 @@ export async function runPublicDiscover(paths, args, options = {}) {
   };
   let searxngOutcome;
   let hotOutcome;
+  let searxngMs = 0;
+  let hotDiscoveryMs = 0;
+  const runTimed = async (runner, spec) => {
+    const startedAt = now();
+    const outcome = await runner(spec, { timeoutMs: processTimeoutMs });
+    return { outcome, durationMs: elapsedMilliseconds(startedAt, now()) };
+  };
   if (requestedCount === null) {
-    [searxngOutcome, hotOutcome] = await Promise.all([
-      runSearxngProcess(searxngSpec, { timeoutMs: processTimeoutMs }),
-      runHotDiscoveryProcess(hotDiscoverySpec, { timeoutMs: processTimeoutMs }),
+    const [searxngRun, hotRun] = await Promise.all([
+      runTimed(runSearxngProcess, searxngSpec),
+      runTimed(runHotDiscoveryProcess, hotDiscoverySpec),
     ]);
+    searxngOutcome = searxngRun.outcome;
+    searxngMs = searxngRun.durationMs;
+    hotOutcome = hotRun.outcome;
+    hotDiscoveryMs = hotRun.durationMs;
   } else {
-    searxngOutcome = await runSearxngProcess(searxngSpec, { timeoutMs: processTimeoutMs });
+    const searxngRun = await runTimed(runSearxngProcess, searxngSpec);
+    searxngOutcome = searxngRun.outcome;
+    searxngMs = searxngRun.durationMs;
     const requestedSxDoc = parseSuccess(searxngOutcome);
-    hotOutcome = requestedSxDoc && Array.isArray(requestedSxDoc.results) && requestedSxDoc.results.length > 0
-      ? { skipped: true }
-      : await runHotDiscoveryProcess(hotDiscoverySpec, { timeoutMs: processTimeoutMs });
+    const requestedCandidates = Array.isArray(requestedSxDoc?.results) ? requestedSxDoc.results : [];
+    if (countUniqueArticles(requestedCandidates) >= Number(requestedCount)) {
+      hotOutcome = { skipped: true, skipReason: 'sufficient_article_candidates' };
+    } else {
+      const hotRun = await runTimed(runHotDiscoveryProcess, hotDiscoverySpec);
+      hotOutcome = hotRun.outcome;
+      hotDiscoveryMs = hotRun.durationMs;
+    }
   }
 
   const sxDoc = parseSuccess(searxngOutcome);
@@ -176,8 +214,8 @@ export async function runPublicDiscover(paths, args, options = {}) {
   }
 
   const channelDiagnostics = {
-    searxng: summarize(searxngOutcome, sxDoc),
-    hotDiscovery: summarize(hotOutcome, hotDoc),
+    searxng: summarize(searxngOutcome, sxDoc, searxngMs),
+    hotDiscovery: summarize(hotOutcome, hotDoc, hotDiscoveryMs),
   };
   const warnings = [];
   if (!sxDoc) warnings.push(`SearXNG 发现失败（exit ${channelDiagnostics.searxng.exitCode}）`);
@@ -188,8 +226,21 @@ export async function runPublicDiscover(paths, args, options = {}) {
   if (hotDoc) await writeFile(hotSnapshot, `${JSON.stringify(hotDoc, null, 2)}\n`, 'utf8');
 
   const merge = options.merge || defaultMerge;
+  const mergeStartedAt = now();
   const mergedDocument = await merge({ hotDoc, sxDoc, warnings });
-  const merged = { ...mergedDocument, channelDiagnostics };
+  const annotatedMerged = annotateMergedCandidates(mergedDocument);
+  const candidateQuality = {
+    searxng: classifyCandidates(Array.isArray(sxDoc?.results) ? sxDoc.results : []),
+    merged: summarizeMergedQuality(annotatedMerged),
+  };
+  const mergeAndClassifyMs = elapsedMilliseconds(mergeStartedAt, now());
+  const timing = {
+    searxngMs,
+    hotDiscoveryMs,
+    mergeAndClassifyMs,
+    totalMs: elapsedMilliseconds(totalStartedAt, now()),
+  };
+  const merged = { ...annotatedMerged, channelDiagnostics, candidateQuality, timing };
   await writeFile(mergedSnapshot, `${JSON.stringify(merged, null, 2)}\n`, 'utf8');
 
   return {
@@ -203,6 +254,8 @@ export async function runPublicDiscover(paths, args, options = {}) {
       effectiveDimensions: Array.isArray(hotDoc.effectiveDimensions) ? hotDoc.effectiveDimensions : [category],
     } : null,
     channels: channelDiagnostics,
+    candidateQuality,
+    timing,
     snapshots: {
       searxng: sxDoc ? searxngSnapshot : null,
       hotDiscovery: hotDoc ? hotSnapshot : null,

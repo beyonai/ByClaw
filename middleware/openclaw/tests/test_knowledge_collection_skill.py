@@ -39,6 +39,29 @@ CHILD_SKILLS = {
     "fws/SKILL.md": "fws",
     "wecom/SKILL.md": "wecomcli",
 }
+WEIXIN_COMMANDS = {
+    "article-fetch",
+    "articles",
+    "collection-detail",
+    "collections",
+    "create-draft",
+    "create-newspic",
+    "download",
+    "download-publish-data",
+    "drafts",
+    "freepublish-get",
+    "freepublish-list",
+    "get-public-account-info",
+    "home-overview",
+    "open-platform-authorizer-info",
+    "published",
+    "published-articles",
+    "save-articles",
+    "sougousearch",
+    "user-attributes",
+    "user-growth",
+    "user-info",
+}
 
 
 def parse_frontmatter(path):
@@ -240,6 +263,21 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "`download-publish-data`",
         ):
             self.assertIn(phrase, f"{routing}\n{bycli}\n{weixin}")
+
+    def test_adaptive_discovery_and_wechat_materialization_are_documented(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        routing = (SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8")
+        online_search = (SKILL_ROOT / "references" / "online-search.md").read_text(encoding="utf-8")
+        contract = (SKILL_ROOT / "references" / "collection-contract.md").read_text(encoding="utf-8")
+
+        for phrase in ("可用文章候选", "candidateQuality", "`materialize-wechat`", "阶段耗时"):
+            self.assertIn(phrase, skill)
+        self.assertIn("`bycli weixin download --url <URL>`", routing)
+        self.assertIn("自适应", online_search)
+        self.assertIn("`contentGranularity=unknown`", contract)
+        self.assertIn("`wechat-materialization-low-confidence`", contract)
+        for forbidden_fallback in ("`curl`", "`wget`", "`requests`"):
+            self.assertIn(forbidden_fallback, routing)
 
     def test_skill_has_exact_openclaw_ui_metadata(self):
         metadata_text = (SKILL_ROOT / "agents" / "openai.yaml").read_text(encoding="utf-8")
@@ -558,6 +596,22 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         self.assertFalse((bycli_root / "references" / "weixin" / "SKILL.md").exists())
         self.assertFalse((bycli_root / "references" / "knowledge-ingest.md").exists())
 
+    def test_weixin_reference_tracks_the_2_1_55_command_surface(self):
+        bycli = (SKILLS_ROOT / "bycli" / "SKILL.md").read_text(encoding="utf-8")
+        weixin = (SKILLS_ROOT / "bycli" / "references" / "weixin.md").read_text(encoding="utf-8")
+        commands = markdown_section(weixin, "Command selection")
+
+        documented = set(
+            re.findall(r"^\| `([a-z0-9-]+)(?: [^`]*)?` \|", commands, re.MULTILINE)
+        )
+        self.assertEqual(WEIXIN_COMMANDS, documented)
+        self.assertIn("`@sovovs/bycli` 2.1.55", weixin)
+        self.assertIn("Aliases: `overview`, `dashboard`, `fans`", commands)
+        self.assertIn("Alias: `userInfo`", commands)
+        self.assertIn("`get-public-account-info/articles", bycli)
+        self.assertNotRegex(weixin, r"`(?:bycli weixin )?accounts(?:\s|`)")
+        self.assertNotIn("`accounts/", bycli)
+
     def test_weixin_reference_keeps_executor_and_security_rules_only(self):
         weixin = (SKILLS_ROOT / "bycli" / "references" / "weixin.md").read_text(encoding="utf-8")
 
@@ -641,7 +695,7 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "Every browser-backed Weixin command must run through",
             "`scripts/weixin-login-gate.mjs`",
             "A retry-shaped user message is not explicit verification completion",
-            "`byCLI 2.1.44`",
+            "`byCLI 2.1.55`",
             "至少 5 秒的租约启动错峰",
         ):
             self.assertIn(phrase, bycli)
@@ -663,8 +717,11 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         downloads = markdown_section(weixin, "Published-data spreadsheet downloads")
         login = markdown_section(weixin, "Login and verification gate")
 
-        self.assertIn("@sovovs/bycli` 2.1.44", weixin)
-        self.assertIn("Explicit account identity or account-history intent starts with `accounts`", discovery)
+        self.assertIn("@sovovs/bycli` 2.1.55", weixin)
+        self.assertIn(
+            "Explicit account identity or account-history intent starts with `get-public-account-info`",
+            discovery,
+        )
         self.assertIn("Article-title or topic intent starts with `sougousearch`", discovery)
         self.assertIn("reinterpret it as topic intent", discovery)
         self.assertIn(
@@ -677,7 +734,7 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "omit `--name` and keep the command backend-only",
             "ask for the exact nickname before offering public fallback",
             "must not be merged",
-            "Only an exact nickname from one unique `accounts` result",
+            "Only an exact nickname from one unique `get-public-account-info` result",
             "whose `fakeid` equals the selected `fakeid`",
             "A user-supplied nickname beside a direct `fakeid` is not identity proof",
         ):
@@ -745,11 +802,11 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         self.assertIn("including another top-level `TIMEOUT`, is terminal", downloads)
         self.assertIn("Backend-only examples omit `--name`", weixin)
         self.assertIn(
-            "Only after `accounts` proves one unique nickname-to-`fakeid` binding",
+            "Only after `get-public-account-info` proves one unique nickname-to-`fakeid` binding",
             weixin,
         )
-        self.assertIn("Verified for byCLI 2.1.44", login)
-        self.assertNotIn("2.1.44 and later", login)
+        self.assertIn("Verified for byCLI 2.1.55", login)
+        self.assertNotIn("2.1.55 and later", login)
         self.assertIn("`create-draft` session failures return `AUTH_REQUIRED`", login)
         self.assertIn(
             "An authentication outcome from an already-consumed diagnostic rerun follows terminal priority 1",
