@@ -6,6 +6,7 @@ import com.iwhalecloud.byai.state.domain.artifact.dto.ArtifactDataCreateRequest;
 import com.iwhalecloud.byai.state.domain.artifact.dto.ArtifactDataRecordDto;
 import com.iwhalecloud.byai.state.domain.artifact.dto.ArtifactDataUpdateRequest;
 import com.iwhalecloud.byai.state.domain.artifact.dto.ArtifactDto;
+import com.iwhalecloud.byai.state.domain.artifact.dto.ArtifactExpiryRenewRequest;
 import com.iwhalecloud.byai.state.domain.artifact.model.ArtifactPublishMode;
 import com.iwhalecloud.byai.state.domain.artifact.service.ArtifactApplicationService;
 import com.iwhalecloud.byai.state.domain.artifact.service.ArtifactDataRecordService;
@@ -60,6 +61,14 @@ public class ArtifactController {
     @Operation(summary = "查询本人Artifact元数据")
     public ResponseUtil<ArtifactDto> get(@PathVariable("artifactId") String artifactId) {
         return ResponseUtil.successResponse(artifactApplicationService.getOwned(artifactId));
+    }
+
+    @PutMapping("/{artifactId}/expiration")
+    @Operation(summary = "续约本人Artifact的公开访问有效期")
+    public ResponseUtil<ArtifactDto> renewExpiration(@PathVariable("artifactId") String artifactId,
+        @Valid @RequestBody ArtifactExpiryRenewRequest request) {
+        return ResponseUtil.successResponse(
+            artifactApplicationService.renewOwnedExpiration(artifactId, request.getExpiresInSeconds()));
     }
 
     @DeleteMapping("/{artifactId}")

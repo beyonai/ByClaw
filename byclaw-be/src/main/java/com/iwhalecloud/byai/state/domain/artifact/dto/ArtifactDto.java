@@ -32,5 +32,7 @@ public class ArtifactDto {
 
     private OffsetDateTime expiresAt;
 
+    private OffsetDateTime purgeAt;
+
     private List<String> warnings;
 }

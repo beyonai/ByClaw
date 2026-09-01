@@ -85,7 +85,9 @@ public class ArtifactApplicationService {
         record.setOriginalName(originalName);
         record.setDisplayName(StringUtils.defaultIfBlank(displayName, originalName));
         record.setFileSize(file.getSize());
-        record.setExpiresAt(now.plusSeconds(ttlSeconds));
+        LocalDateTime expiresAt = now.plusSeconds(ttlSeconds);
+        record.setExpiresAt(expiresAt);
+        record.setPurgeAt(expiresAt.plusSeconds(validatedPurgeRetentionSeconds()));
         record.setCreateTime(now);
         record.setUpdateTime(now);
         record.setAccessKeyHash(sha256Hex(accessKey.getBytes(StandardCharsets.UTF_8)));
@@ -128,6 +130,33 @@ public class ArtifactApplicationService {
 
     public ArtifactDto getOwned(String artifactId) {
         ArtifactRecord record = requireOwned(artifactId);
+        renewPurgeAfterAccess(record);
+        return toDto(record, null, parseWarnings(record.getWarningsJson()));
+    }
+
+    /**
+     * Restores or extends public access while the Artifact is still inside its physical retention window.
+     */
+    public ArtifactDto renewOwnedExpiration(String artifactId, Long expiresInSeconds) {
+        long ttlSeconds = validateExpiry(expiresInSeconds);
+        ArtifactRecord record = requireOwned(artifactId);
+        LocalDateTime now = LocalDateTime.now();
+        if (!ArtifactStatus.READY.name().equals(record.getStatus())
+            || record.getPurgeAt() == null || !record.getPurgeAt().isAfter(now)) {
+            throw new IllegalArgumentException("Artifact已超过物理保留期限或进入删除流程，无法续约");
+        }
+
+        LocalDateTime expiresAt = now.plusSeconds(ttlSeconds);
+        LocalDateTime purgeAt = latest(record.getPurgeAt(),
+            expiresAt.plusSeconds(validatedPurgeRetentionSeconds()), expiresAt);
+        int updated = artifactMapper.renewExpiration(
+            artifactId, record.getOwnerUserId(), expiresAt, purgeAt, now);
+        if (updated != 1) {
+            throw new IllegalArgumentException("Artifact已超过物理保留期限或进入删除流程，无法续约");
+        }
+        record.setExpiresAt(expiresAt);
+        record.setPurgeAt(purgeAt);
+        record.setUpdateTime(now);
         return toDto(record, null, parseWarnings(record.getWarningsJson()));
     }
 
@@ -143,7 +172,9 @@ public class ArtifactApplicationService {
     }
 
     public void requireOwnedDataAccessible(String artifactId) {
-        requireDataAccessible(requireOwned(artifactId));
+        ArtifactRecord record = requireOwned(artifactId);
+        requireRetainedHtmlDataAccessible(record);
+        renewPurgeAfterAccess(record);
     }
 
     public void requireCapabilityDataAccessible(String artifactId, String accessKey) {
@@ -151,7 +182,7 @@ public class ArtifactApplicationService {
         if (record == null) {
             throw new IllegalArgumentException("Artifact不存在或访问凭证无效");
         }
-        requireDataAccessible(record);
+        requireRetainedHtmlDataAccessible(record);
     }
 
     public ArtifactContent resolvePreview(String artifactId, String accessKey, String requestedPath) {
@@ -238,12 +269,17 @@ public class ArtifactApplicationService {
         }
         ArtifactRecord record = artifactMapper.selectById(artifactId);
         if (record == null || !ArtifactStatus.READY.name().equals(record.getStatus())
-            || record.getExpiresAt() == null || !record.getExpiresAt().isAfter(LocalDateTime.now())) {
+            || record.getExpiresAt() == null || !record.getExpiresAt().isAfter(LocalDateTime.now())
+            || record.getPurgeAt() == null || !record.getPurgeAt().isAfter(LocalDateTime.now())) {
             return null;
         }
         byte[] actual = sha256Hex(accessKey.getBytes(StandardCharsets.UTF_8)).getBytes(StandardCharsets.US_ASCII);
         byte[] expected = record.getAccessKeyHash().getBytes(StandardCharsets.US_ASCII);
-        return MessageDigest.isEqual(actual, expected) ? record : null;
+        if (!MessageDigest.isEqual(actual, expected)) {
+            return null;
+        }
+        renewPurgeAfterAccess(record);
+        return record;
     }
 
     private ArtifactRecord requireOwned(String artifactId) {
@@ -255,13 +291,38 @@ public class ArtifactApplicationService {
         return record;
     }
 
-    private void requireDataAccessible(ArtifactRecord record) {
+    private void requireRetainedHtmlDataAccessible(ArtifactRecord record) {
         boolean htmlArtifact = ArtifactKind.SITE.name().equals(record.getKind())
             || ArtifactMediaTypeResolver.isHtml(record.getOriginalName());
         if (!ArtifactStatus.READY.name().equals(record.getStatus())
-            || record.getExpiresAt() == null || !record.getExpiresAt().isAfter(LocalDateTime.now())
+            || record.getPurgeAt() == null || !record.getPurgeAt().isAfter(LocalDateTime.now())
             || !htmlArtifact) {
-            throw new IllegalArgumentException("Artifact不可写入数据");
+            throw new IllegalArgumentException("Artifact数据已不可访问");
+        }
+    }
+
+    /**
+     * Extends physical retention after a valid access. Day-boundary rounding limits metadata writes to once per day.
+     */
+    private void renewPurgeAfterAccess(ArtifactRecord record) {
+        if (!ArtifactStatus.READY.name().equals(record.getStatus()) || record.getPurgeAt() == null) {
+            return;
+        }
+        LocalDateTime now = LocalDateTime.now();
+        if (!record.getPurgeAt().isAfter(now)) {
+            return;
+        }
+        long retentionSeconds = validatedPurgeRetentionSeconds();
+        LocalDateTime retentionBase = record.getExpiresAt() != null && record.getExpiresAt().isAfter(now)
+            ? record.getExpiresAt() : now;
+        LocalDateTime target = roundUpToDay(retentionBase.plusSeconds(retentionSeconds));
+        if (!record.getPurgeAt().isBefore(target)) {
+            return;
+        }
+        int updated = artifactMapper.renewPurgeAt(record.getArtifactId(), target, now);
+        if (updated == 1) {
+            record.setPurgeAt(target);
+            record.setUpdateTime(now);
         }
     }
 
@@ -287,6 +348,8 @@ public class ArtifactApplicationService {
             .downloadUrl(downloadUrl)
             .expiresAt(record.getExpiresAt() == null
                 ? null : record.getExpiresAt().atZone(ZoneId.systemDefault()).toOffsetDateTime())
+            .purgeAt(record.getPurgeAt() == null
+                ? null : record.getPurgeAt().atZone(ZoneId.systemDefault()).toOffsetDateTime())
             .warnings(warnings)
             .build();
     }
@@ -312,6 +375,24 @@ public class ArtifactApplicationService {
             throw new IllegalArgumentException("expiresInSeconds必须大于0且不超过" + properties.getMaxExpiresSeconds());
         }
         return value;
+    }
+
+    private long validatedPurgeRetentionSeconds() {
+        long value = properties.getPurgeRetentionSeconds();
+        if (value <= 0) {
+            throw new IllegalStateException("artifact.lifecycle.purge-retention-seconds必须大于0");
+        }
+        return value;
+    }
+
+    private LocalDateTime latest(LocalDateTime first, LocalDateTime second, LocalDateTime third) {
+        LocalDateTime result = first.isAfter(second) ? first : second;
+        return result.isAfter(third) ? result : third;
+    }
+
+    private LocalDateTime roundUpToDay(LocalDateTime value) {
+        LocalDateTime startOfDay = value.toLocalDate().atStartOfDay();
+        return value.equals(startOfDay) ? value : startOfDay.plusDays(1);
     }
 
     private boolean isZip(MultipartFile file, String fileName) throws IOException {
