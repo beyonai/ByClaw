@@ -70,9 +70,28 @@ function isUsableRawMetadata(v: unknown): boolean {
   return true;
 }
 
+/** 用户交互恢复必须同时具备 Run 与 Interaction 路由，避免可解析但不完整的 metadata 抢占完整卡片 metadata。 */
+function hasUserInteractionResumeRoute(v: unknown): boolean {
+  let metadata = v;
+  if (typeof metadata === 'string') {
+    try {
+      metadata = JSON.parse(metadata);
+    } catch {
+      return false;
+    }
+  }
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return false;
+
+  const entries = Object.entries(metadata as Record<string, unknown>);
+  const hasNonEmptyString = (key: string) =>
+    entries.some(([candidate, value]) => candidate.toLowerCase() === key && typeof value === 'string' && value.trim());
+  return hasNonEmptyString('parent_run_id') && hasNonEmptyString('interaction_id');
+}
+
 /**
  * 原样透传、不做 JSON 解析。优先本条助手回答上的 metadata（含 LangGraph checkpoint 全量）；
- * 卡片级多为空串或片段，放后面且空串不占优。
+ * 但 askUserQuestion 恢复必须优先选择路由字段完整的候选，防止后发 reasoningLogEnd 的
+ * `{ parent_run_id }` 覆盖消息级 metadata 后挡住卡片上的完整 interaction metadata。
  */
 function pickRawResumeMetadata(
   messageInfo: IMessage | undefined,
@@ -83,6 +102,10 @@ function pickRawResumeMetadata(
     get(messageListItemContent, 'substance.metadata'),
     get(messageListItemContent, 'metadata'),
   ];
+  const routedMetadata = candidates.find(hasUserInteractionResumeRoute);
+  if (routedMetadata !== undefined) {
+    return routedMetadata;
+  }
   for (const v of candidates) {
     if (isUsableRawMetadata(v)) {
       return v;

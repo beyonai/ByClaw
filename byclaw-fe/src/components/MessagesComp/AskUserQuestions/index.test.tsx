@@ -469,6 +469,37 @@ describe('AskUserQuestions', () => {
     );
   }, 15000);
 
+  it('prefers complete card metadata when a later message event only keeps parent_run_id', async () => {
+    const partialMessageMetadata = JSON.stringify({ parent_run_id: 'run-1' });
+    const completeCardMetadata = JSON.stringify({
+      parent_run_id: 'run-1',
+      interaction_id: 'run-1:tool-1',
+      tool_name: 'AskUserQuestion',
+    });
+    renderQuestions(
+      {
+        metadata: completeCardMetadata,
+        substance: {
+          formStatus: IFormStatus.INIT,
+          questions: [questions[0]],
+        },
+      } as IMessageListItemContent,
+      jest.fn(),
+      { metadata: partialMessageMetadata }
+    );
+
+    fireEvent.click(screen.getByRole('radio', { name: /React/ }));
+    const confirmButton = screen.getByRole('button', { name: 'form.confirm' });
+    await waitFor(() => expect(confirmButton).toBeEnabled());
+    await act(async () => {
+      fireEvent.click(confirmButton);
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(mockEmit).toHaveBeenCalledWith('beyond-chat-on-send-msg', expect.any(Object)));
+    expect(mockEmit.mock.calls[0][1].sendProps.payload.metadata).toBe(completeCardMetadata);
+  }, 15000);
+
   it('keeps invalid resume metadata without writing agentId into the payload', async () => {
     const resumeMetadata = '{invalid-json';
     renderQuestions(
