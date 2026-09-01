@@ -1,4 +1,4 @@
-import { Button, Drawer, Dropdown, Empty, Input, Modal, Select, Spin, Switch, Typography, Upload, message } from 'antd';
+import { Button, Drawer, Dropdown, Empty, Modal, Select, Spin, Switch, Typography, message } from 'antd';
 import {
   ApartmentOutlined,
   BranchesOutlined,
@@ -15,7 +15,6 @@ import {
   ReloadOutlined,
   RightOutlined,
   RobotOutlined,
-  UploadOutlined,
 } from '@ant-design/icons';
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useIntl } from '@umijs/max';
@@ -52,7 +51,7 @@ import {
 } from '@/service/devloop';
 import { listResourceUseAuth } from '@/pages/manager/service/resources';
 import { listOntologyBases, pageOntologyResources } from '@/service/ontology';
-import { createFolder, deleteFolder, removeFile, uploadFiles as uploadKnowledgeFiles } from '@/service/knowledgeCenter';
+import { deleteFolder, removeFile } from '@/service/knowledgeCenter';
 import { ResourceTypeMap } from '@/constants/resource';
 import { useDigitalEmployeeOptions } from '../../hooks/useDigitalEmployeeOptions';
 import { getProjectResourceCategoryCount, supportsProjectRepositories } from '../../projectCapabilities';
@@ -115,9 +114,6 @@ const ProjectResources: React.FC<Props> = ({
   const [files, setFiles] = useState<DevloopProjectSpaceFile[]>([]);
   const [cloudPath, setCloudPath] = useState('/');
   const [expandedCard, setExpandedCard] = useState<string | null>(null);
-  const [createFolderOpen, setCreateFolderOpen] = useState(false);
-  const [folderName, setFolderName] = useState('');
-  const [fileUploading, setFileUploading] = useState(false);
   const [scheduleTasks, setScheduleTasks] = useState<any[]>([]);
   const [repos, setRepos] = useState<DevloopProjectRepo[]>([]);
   const [boundResources, setBoundResources] = useState<ProjectBoundResource[]>(
@@ -575,47 +571,10 @@ const ProjectResources: React.FC<Props> = ({
   const empty = (
     <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={intl.formatMessage({ id: 'chatResource.empty' })} />
   );
-  // 云盘展示统一由 FileResourcePanel 负责，保留旧数据加载逻辑供刷新状态使用。
+  // 云盘展示和操作统一由 FileResourcePanel 负责。
   void files;
 
   const cloudResourceId = project.cloudResourceId ? Number(project.cloudResourceId) : undefined;
-  const handleCreateFolder = async () => {
-    const name = folderName.trim();
-    if (!cloudResourceId || !name) return;
-    try {
-      await createFolder({
-        resourceId: cloudResourceId,
-        directoryPath: '/',
-        directoryName: name,
-        directoryDescription: '',
-      });
-      message.success('文件夹创建成功');
-      setCreateFolderOpen(false);
-      setFolderName('');
-      await loadFiles();
-    } catch (error: any) {
-      message.error(error?.message || '文件夹创建失败');
-    }
-  };
-
-  const handleUploadFiles = async (fileList: File[]) => {
-    if (!cloudResourceId || !fileList.length) return;
-    setFileUploading(true);
-    try {
-      const formData = new FormData();
-      fileList.forEach((file) => formData.append('files', file));
-      formData.append('resourceId', String(cloudResourceId));
-      formData.append('directoryPath', '/');
-      await uploadKnowledgeFiles(formData);
-      message.success('文件上传成功');
-      await loadFiles();
-    } catch (error: any) {
-      message.error(error?.message || '文件上传失败');
-    } finally {
-      setFileUploading(false);
-    }
-  };
-
   const renderCardHeader = (
     title: string,
     cardKey: string,
@@ -875,36 +834,7 @@ const ProjectResources: React.FC<Props> = ({
           {renderCardHeader(
             '项目云盘',
             'cloudDrive',
-            undefined,
-            cloudResourceId ? (
-              <>
-                <Button
-                  type="text"
-                  size="small"
-                  className={styles.resourceCardExpandButton}
-                  icon={<PlusOutlined />}
-                  aria-label="新建文件夹"
-                  onClick={() => setCreateFolderOpen(true)}
-                />
-                <Upload
-                  showUploadList={false}
-                  multiple
-                  beforeUpload={(_, fileList) => {
-                    void handleUploadFiles(fileList as unknown as File[]);
-                    return false;
-                  }}
-                >
-                  <Button
-                    type="text"
-                    size="small"
-                    className={styles.resourceCardExpandButton}
-                    icon={<UploadOutlined />}
-                    aria-label="上传文件"
-                    loading={fileUploading}
-                  />
-                </Upload>
-              </>
-            ) : undefined
+            undefined
           )}
           <FileResourcePanel
             scope="project"
@@ -1088,22 +1018,6 @@ const ProjectResources: React.FC<Props> = ({
           </section>
         )}
       </div>
-
-      <Modal
-        open={createFolderOpen}
-        title="新建文件夹"
-        onCancel={() => setCreateFolderOpen(false)}
-        onOk={() => void handleCreateFolder()}
-        okButtonProps={{ disabled: !folderName.trim() }}
-        destroyOnClose
-      >
-        <Input
-          value={folderName}
-          placeholder="请输入文件夹名称"
-          maxLength={100}
-          onChange={(event) => setFolderName(event.target.value)}
-        />
-      </Modal>
 
       {isOperationProject && (
         <Modal

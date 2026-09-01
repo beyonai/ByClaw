@@ -321,9 +321,9 @@ const ConnectorSelection = ({
   );
 
   return (
-    <Tooltip title={interactive ? '查看已连接连接器' : undefined}>
+    <Tooltip title={interactive ? '查看连接器' : undefined}>
       {interactive ? (
-        <button className={styles.selection} type="button" aria-label="查看已连接连接器" onClick={onOpen}>
+        <button className={styles.selection} type="button" aria-label="查看连接器" onClick={onOpen}>
           {avatarGroup}
         </button>
       ) : (
@@ -899,7 +899,10 @@ const ConnectorControl = ({
       return (
         <Button
           type="text"
-          onMouseDown={(event) => event.stopPropagation()}
+          onMouseDown={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
           onClick={(event) => {
             event.stopPropagation();
             void beginAuthorization(connector);

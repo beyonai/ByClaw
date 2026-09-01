@@ -96,7 +96,7 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
       // 连接器授权、凭据配置等通过 Portal 渲染到 body，操作这些浮层时不能被资源弹窗的外部点击关闭逻辑卸载。
       if (
         target.closest(
-          `.${styles.popover}, [data-resource-tool-menu="true"], .ant-modal-root, .ant-drawer, .ant-dropdown, .ant-popover`
+          `.${styles.popover}, [data-resource-tool-menu], .connectorItem, .connectorAction, .ant-modal-root, .ant-drawer, .ant-dropdown, .ant-popover`
         )
       )
         return;
@@ -225,7 +225,8 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
       open={open}
       // 弹窗打开状态由两个入口各自的统一适配层控制，避免触发节点位置影响布局。
       trigger={[]}
-      destroyOnHidden
+      // 连接器授权等子弹窗通过 Portal 打开时，资源面板仍需保持挂载，返回后继续保留当前分类和列表状态。
+      destroyOnHidden={false}
       placement={placement || (isAtPopover ? 'topLeft' : undefined)}
       autoAdjustOverflow
       ref={popoverRef}

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, type Key } from 'react';
-import { Button, Dropdown, Empty, Modal, Spin, Tree, Typography, Upload, message, type MenuProps } from 'antd';
+import { Button, Dropdown, Empty, Modal, Spin, Tooltip, Tree, Typography, Upload, message, type MenuProps } from 'antd';
 import { EllipsisOutlined, FolderAddOutlined, UploadOutlined } from '@ant-design/icons';
 import { getLocale, useIntl, useSelector } from '@umijs/max';
 import FileSpaceBlock from '@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock';
@@ -43,7 +43,15 @@ import {
   uploadFiles,
   type FileBrowserItem,
 } from '@/service/fileBrowser';
-import { deleteFolder, moveKnowledgeItems, removeFile, renameFolder } from '@/service/knowledgeCenter';
+import {
+  createFolder as createKnowledgeFolder,
+  deleteFolder,
+  moveKnowledgeItems,
+  removeFile,
+  renameFolder,
+  updateFileInfo,
+  uploadFiles as uploadKnowledgeFiles,
+} from '@/service/knowledgeCenter';
 import { downloadFile as downloadUrlFile } from '@/utils/file';
 import { downloadResourceFile } from '@/service/file';
 import type { DetailPanelOptions } from '@/layout/sider/siderContentContext';
@@ -70,6 +78,9 @@ interface FileResourcePanelProps {
   onPreviewFile?: (item: FileBrowserItem) => void;
   // 项目大详情使用卡片视图；会话资源继续复用原文件树交互。
   cardMode?: boolean;
+
+  /** 项目详情标题栏已有上传/新建入口时，隐藏文件树上方的重复工具栏。 */
+  hideProjectToolbar?: boolean;
 }
 
 // 项目共享文件接口没有 FileBrowserItem 的目录字段，转换后即可复用左侧文件树及操作菜单。
@@ -85,6 +96,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   onOpenDetail,
   onPreviewFile,
   cardMode = false,
+  hideProjectToolbar = false,
 }) => {
   const intl = useIntl();
   const language = getLocale();
@@ -101,6 +113,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   const [renameLoading, setRenameLoading] = useState(false);
   const [createFolderOpen, setCreateFolderOpen] = useState(false);
   const [createFolderName, setCreateFolderName] = useState('');
+  const [createFolderPath, setCreateFolderPath] = useState('/');
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [moveTarget, setMoveTarget] = useState<FileBrowserItem | null>(null);
@@ -328,16 +341,17 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   const deleteResource = useCallback(
     async (item: FileBrowserItem) => {
       try {
-        if (isProjectFile(item)) {
-          if (scope === 'project' && resourceId) {
-            if (item.isDir) {
-              await deleteFolder({ resourceId: Number(resourceId), directoryPath: item.path });
-            } else {
-              await removeFile({ resourceId: String(resourceId), directoryPath: item.path });
-            }
+        // 项目云盘统一使用知识库删除接口，不能依赖 fileId 类型判断；接口返回的
+        // fileId 可能是字符串，目录也可能没有 fileId。
+        if (scope === 'project' && !isLocalSharedFiles && resourceId) {
+          if (item.isDir) {
+            await deleteFolder({ resourceId: Number(resourceId), directoryPath: ensureDirectoryPath(item.path) });
           } else {
-            await deleteProjectSpaceFile({ projectId, fileId: item.fileId });
+            await removeFile({ resourceId: String(resourceId), directoryPath: item.path });
           }
+          await loadRoot();
+        } else if (isProjectFile(item)) {
+          await deleteProjectSpaceFile({ projectId, fileId: item.fileId });
           await loadRoot();
         } else if (resourceId) {
           await deleteFiles({ resourceId, paths: [item.path] });
@@ -442,14 +456,22 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         ...(resourceId ? ['quote'] : []),
         ...(canPreviewFile(item) ? ['preview'] : []),
         'download',
+        ...(resourceId && isDirectory(item) ? ['upload', 'createSibling', 'createChild'] : []),
         ...(scope === 'project' && !isLocalSharedFiles && resourceId ? ['move'] : []),
         ...(usesFileBrowser || canManageProjectFiles ? ['rename', 'delete'] : []),
+        // 项目云盘的重命名和删除由知识库接口执行，菜单始终展示，最终权限由后端校验。
+        ...(scope === 'project' && !isLocalSharedFiles && resourceId && !canManageProjectFiles
+          ? ['rename', 'delete']
+          : []),
         ...(scope === 'session' && !isDirectory(item) && projectId ? ['saveToProject'] : []),
       ];
       const labels: Record<string, string> = {
         quote: intl.formatMessage({ id: 'common.quote' }),
         preview: intl.formatMessage({ id: 'fileBrowser.action.preview' }),
         download: intl.formatMessage({ id: 'directoryManage.downloadFile' }),
+        upload: '上传文件',
+        createSibling: '新增同级文件夹',
+        createChild: '新增子文件夹',
         move: '移动',
         rename: intl.formatMessage({ id: 'fileBrowser.action.rename' }),
         delete: intl.formatMessage({ id: 'fileBrowser.action.delete' }),
@@ -465,11 +487,19 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   );
 
   const handleUpload = useCallback(
-    async (fileList: File[]) => {
+    async (fileList: File[], targetPath = rootPath) => {
       if (!resourceId || !fileList.length || uploading) return;
       setUploading(true);
       try {
-        await uploadFiles(resourceId, rootPath, fileList);
+        if (scope === 'project' && !isLocalSharedFiles) {
+          const formData = new FormData();
+          fileList.forEach((file) => formData.append('files', file));
+          formData.append('resourceId', String(resourceId));
+          formData.append('directoryPath', targetPath);
+          await uploadKnowledgeFiles(formData);
+        } else {
+          await uploadFiles(resourceId, targetPath, fileList);
+        }
         message.success(intl.formatMessage({ id: 'fileBrowser.upload.success' }));
         await loadRoot();
       } catch (error: any) {
@@ -486,17 +516,30 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
     if (!resourceId || !name) return;
     setCreatingFolder(true);
     try {
-      await createFolder({ resourceId, path: `${ensureDirectoryPath(rootPath)}${name}/` });
+      if (scope === 'project' && !isLocalSharedFiles) {
+        await createKnowledgeFolder(
+          {
+            resourceId: Number(resourceId),
+            directoryPath: ensureDirectoryPath(createFolderPath),
+            directoryName: name,
+            directoryDescription: '',
+          },
+          { responseCfg: { hideErrorTips: true } }
+        );
+      } else {
+        await createFolder({ resourceId, path: `${ensureDirectoryPath(createFolderPath)}${name}/` });
+      }
       message.success(intl.formatMessage({ id: 'fileBrowser.createFolder.success' }));
       setCreateFolderOpen(false);
       setCreateFolderName('');
       await loadRoot();
     } catch (error: any) {
-      message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.createFolder.failed' }));
+      const errorMessage = typeof error === 'string' ? error : error?.message || error?.msg;
+      message.error(errorMessage || intl.formatMessage({ id: 'fileBrowser.createFolder.failed' }));
     } finally {
       setCreatingFolder(false);
     }
-  }, [createFolderName, intl, loadRoot, resourceId, rootPath]);
+  }, [createFolderName, createFolderPath, intl, loadRoot, resourceId]);
 
   const handleAction = useCallback(
     (key: Key, item: FileBrowserItem) => {
@@ -506,6 +549,21 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
       if (key === 'move') {
         setMoveTargetDirectory(rootPath);
         setMoveTarget(item);
+      }
+      if (key === 'upload') {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.multiple = true;
+        input.onchange = () => {
+          const files = Array.from(input.files || []);
+          if (files.length) void handleUpload(files, ensureDirectoryPath(item.path));
+        };
+        input.click();
+      }
+      if (key === 'createSibling' || key === 'createChild') {
+        setCreateFolderPath(key === 'createChild' ? ensureDirectoryPath(item.path) : getParentDirectoryPath(item.path));
+        setCreateFolderName('');
+        setCreateFolderOpen(true);
       }
       if (key === 'rename') setRenameTarget(item);
       if (key === 'saveToProject') void saveToProject(item);
@@ -518,7 +576,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         });
       }
     },
-    [deleteResource, downloadResource, intl, openPreview, quoteFile, saveToProject]
+    [deleteResource, downloadResource, handleUpload, intl, openPreview, quoteFile, rootPath, saveToProject]
   );
 
   const handleRename = useCallback(
@@ -526,18 +584,21 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
       if (!renameTarget) return;
       setRenameLoading(true);
       try {
-        if (isProjectFile(renameTarget)) {
-          if (scope === 'project' && resourceId) {
+        // 项目云盘与知识库目录管理保持一致：文件夹调用 renameFolder，文件调用 updateFileInfo。
+        if (scope === 'project' && !isLocalSharedFiles && resourceId) {
+          if (renameTarget.isDir) {
             await renameFolder({
               resourceId: Number(resourceId),
               directoryName: newName,
-              directoryPath: renameTarget.path,
+              directoryPath: ensureDirectoryPath(renameTarget.path),
             });
-            await loadDirectory(getParentDirectoryPath(renameTarget.path));
           } else {
-            await renameProjectSpaceFile({ projectId, fileId: renameTarget.fileId, fileName: newName });
-            await loadRoot();
+            await updateFileInfo({ fileId: (renameTarget as any).fileId, fileName: newName });
           }
+          await loadDirectory(getParentDirectoryPath(renameTarget.path));
+        } else if (isProjectFile(renameTarget)) {
+          await renameProjectSpaceFile({ projectId, fileId: renameTarget.fileId, fileName: newName });
+          await loadRoot();
         } else if (resourceId) {
           const parentPath = getParentDirectoryPath(renameTarget.path);
           await renameFile({ resourceId, sourcePath: renameTarget.path, newName });
@@ -698,24 +759,38 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
           (scope === 'project' && !resourceId ? '暂未初始化项目知识库' : intl.formatMessage({ id: emptyTextId }))
         }
         contentBefore={
-          isLocalSharedFiles ? (
+          scope === 'project' && resourceId && !hideProjectToolbar ? (
             <div className={styles.localSharedToolbar}>
               <Upload
                 showUploadList={false}
                 multiple
                 disabled={uploading}
                 beforeUpload={(file, fileList) => {
-                  if (file === fileList[0]) void handleUpload(fileList as unknown as File[]);
+                  if (file === fileList[0]) void handleUpload(fileList as unknown as File[], rootPath);
                   return false;
                 }}
               >
-                <Button size="small" icon={<UploadOutlined />} loading={uploading}>
-                  {intl.formatMessage({ id: 'fileBrowser.toolbar.upload' })}
-                </Button>
+                <Tooltip title={intl.formatMessage({ id: 'fileBrowser.toolbar.upload' })}>
+                  <Button
+                    size="small"
+                    aria-label={intl.formatMessage({ id: 'fileBrowser.toolbar.upload' })}
+                    icon={<UploadOutlined />}
+                    loading={uploading}
+                  />
+                </Tooltip>
               </Upload>
-              <Button size="small" icon={<FolderAddOutlined />} onClick={() => setCreateFolderOpen(true)}>
-                {intl.formatMessage({ id: 'fileBrowser.toolbar.newFolder' })}
-              </Button>
+              <Tooltip title={intl.formatMessage({ id: 'fileBrowser.toolbar.newFolder' })}>
+                <Button
+                  size="small"
+                  aria-label={intl.formatMessage({ id: 'fileBrowser.toolbar.newFolder' })}
+                  icon={<FolderAddOutlined />}
+                  onClick={() => {
+                    setCreateFolderPath(rootPath);
+                    setCreateFolderName('');
+                    setCreateFolderOpen(true);
+                  }}
+                />
+              </Tooltip>
             </div>
           ) : null
         }
@@ -779,6 +854,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
           if (creatingFolder) return;
           setCreateFolderOpen(false);
           setCreateFolderName('');
+          setCreateFolderPath(rootPath);
         }}
       />
     </>

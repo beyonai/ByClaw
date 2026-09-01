@@ -790,7 +790,7 @@ describe('ConnectorControl authorization states', () => {
     expect(container.querySelector('.ant-avatar-group')).not.toBeNull();
     expect(container.querySelectorAll('.ant-avatar')).toHaveLength(2);
 
-    fireEvent.click(screen.getByRole('button', { name: '查看已连接连接器' }));
+    fireEvent.click(screen.getByRole('button', { name: '查看连接器' }));
     expect(screen.getByRole('dialog', { name: '连接器设置' })).toBeInTheDocument();
   });
 
@@ -815,7 +815,7 @@ describe('ConnectorControl authorization states', () => {
     const { container } = render(<ConnectorControl canAuthorize outside />);
 
     await waitFor(() => expect(container.querySelector('.ant-avatar-group')).not.toBeNull());
-    expect(screen.queryByRole('button', { name: '查看已连接连接器' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '查看连接器' })).not.toBeInTheDocument();
     expect(screen.getByLabelText('已连接连接器')).toBeInTheDocument();
   });
 
@@ -871,7 +871,7 @@ describe('ConnectorControl authorization states', () => {
 
     render(<ConnectorControl canAuthorize />);
 
-    fireEvent.click(await screen.findByRole('button', { name: '查看已连接连接器' }));
+    fireEvent.click(await screen.findByRole('button', { name: '查看连接器' }));
     const dialog = screen.getByRole('dialog', { name: '连接器设置' });
 
     expect(await within(dialog).findByText('GitHub')).toBeInTheDocument();
@@ -1091,7 +1091,7 @@ describe('ConnectorControl authorization states', () => {
     });
 
     render(<ConnectorControl canAuthorize />);
-    fireEvent.click(await screen.findByRole('button', { name: '查看已连接连接器' }));
+    fireEvent.click(await screen.findByRole('button', { name: '查看连接器' }));
     fireEvent.click(await screen.findByRole('button', { name: '更多钉钉操作' }));
     fireEvent.click(await screen.findByText('取消授权'));
 
