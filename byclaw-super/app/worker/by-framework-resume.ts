@@ -37,6 +37,11 @@ export function parseChildAgentResume(command: ResumeCommand): ChildAgentResume 
     return undefined;
   }
 
+  const sourceAgentType = command.header.sourceAgentType.trim();
+  if (!sourceAgentType) {
+    throw new Error("ResumeCommand sourceAgentType is required for a child Agent callback");
+  }
+
   const metadataDelegationId = recordString(command.header.metadata, "delegation_id");
   const requestMessageId = command.header.parentMessageId.trim();
   const parentDelegationId = delegationIdFromRequestMessageId(requestMessageId);

@@ -46,31 +46,15 @@ public class ArtifactDataRecordService {
     }
 
     @Transactional
-    public ArtifactDataRecordDto createOwned(String artifactId, ArtifactDataCreateRequest request) {
-        artifactApplicationService.requireOwnedDataAccessible(artifactId);
-        return create(artifactId, request);
-    }
-
-    @Transactional
-    public ArtifactDataRecordDto createPublic(String artifactId, String accessKey,
-        ArtifactDataCreateRequest request) {
-        artifactApplicationService.requireCapabilityDataAccessible(artifactId, accessKey);
+    public ArtifactDataRecordDto createPublic(String artifactId, ArtifactDataCreateRequest request) {
+        artifactApplicationService.requirePublicDataAccessible(artifactId);
         return create(artifactId, request);
     }
 
     @Transactional(readOnly = true)
-    public ArtifactDataRecordDto getOwned(String artifactId, String recordKey) {
-        artifactApplicationService.requireOwnedDataAccessible(artifactId);
-        return toDto(requireRecord(artifactId, recordKey));
-    }
-
-    /**
-     * Lists persisted records only after verifying that the current user owns the Artifact.
-     */
-    @Transactional(readOnly = true)
-    public PageInfo<ArtifactDataRecordDto> listOwned(String artifactId, String collectionName,
-        int pageNum, int pageSize) {
-        artifactApplicationService.requireOwnedDataAccessible(artifactId);
+    public PageInfo<ArtifactDataRecordDto> listPublic(String artifactId, String accessKey,
+        String collectionName, int pageNum, int pageSize) {
+        artifactApplicationService.requireManagementDataAccessible(artifactId, accessKey);
         validatePage(pageNum, pageSize);
         String normalizedCollection = normalizeCollectionName(collectionName);
 
@@ -97,22 +81,15 @@ public class ArtifactDataRecordService {
     }
 
     @Transactional(readOnly = true)
-    public ArtifactDataRecordDto getPublic(String artifactId, String accessKey, String recordKey) {
-        artifactApplicationService.requireCapabilityDataAccessible(artifactId, accessKey);
+    public ArtifactDataRecordDto getPublic(String artifactId, String recordKey) {
+        artifactApplicationService.requirePublicDataAccessible(artifactId);
         return toDto(requireRecord(artifactId, recordKey));
     }
 
     @Transactional
-    public ArtifactDataRecordDto updateOwned(String artifactId, String recordKey,
+    public ArtifactDataRecordDto updatePublic(String artifactId, String recordKey,
         ArtifactDataUpdateRequest request) {
-        artifactApplicationService.requireOwnedDataAccessible(artifactId);
-        return update(artifactId, recordKey, request);
-    }
-
-    @Transactional
-    public ArtifactDataRecordDto updatePublic(String artifactId, String accessKey, String recordKey,
-        ArtifactDataUpdateRequest request) {
-        artifactApplicationService.requireCapabilityDataAccessible(artifactId, accessKey);
+        artifactApplicationService.requirePublicDataAccessible(artifactId);
         return update(artifactId, recordKey, request);
     }
 

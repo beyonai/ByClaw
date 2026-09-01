@@ -13,6 +13,8 @@ const BYCLI_TIMEOUT_MS = 30_000;
 const BROWSER_START_TIMEOUT_MS = 60_000;
 const LOCK_TIMEOUT_MS = 60_000;
 const LOCK_POLL_INTERVAL_MS = 200;
+const HEALTH_WAIT_TIMEOUT_MS = 10_000;
+const HEALTH_POLL_INTERVAL_MS = 250;
 const START_CHROME_SCRIPT = '/usr/local/bin/start-chrome.sh';
 
 function exitCode(result) {
@@ -249,6 +251,8 @@ export async function ensureBridge({
   lockDir = join(process.env.BYCLI_CONFIG_DIR || '/by/.bycli', 'bridge-bootstrap.lock'),
   lockTimeoutMs = LOCK_TIMEOUT_MS,
   pollIntervalMs = LOCK_POLL_INTERVAL_MS,
+  healthWaitTimeoutMs = HEALTH_WAIT_TIMEOUT_MS,
+  healthPollIntervalMs = HEALTH_POLL_INTERVAL_MS,
   now = Date.now,
   wait = sleep,
   processAlive: isProcessAlive = processAlive,
@@ -265,6 +269,7 @@ export async function ensureBridge({
   let browserState = 'unknown';
   let status = null;
   let browserStartFailed = false;
+  let browserStartAttempted = false;
   let recoveryBudgetExhausted = false;
 
   const doctorAndStatus = async () => {
@@ -272,6 +277,16 @@ export async function ensureBridge({
     status = await run('bycli', ['daemon', 'status'], BYCLI_TIMEOUT_MS);
     checks += 1;
     return { doctor, status, healthy: exitCode(doctor) === 0 && isDaemonHealthy(status) };
+  };
+
+  const waitForHealthy = async ({ checkImmediately = true } = {}) => {
+    const deadline = now() + healthWaitTimeoutMs;
+    let health = checkImmediately ? await doctorAndStatus() : { healthy: false };
+    while (!health.healthy && now() < deadline) {
+      await wait(Math.min(healthPollIntervalMs, Math.max(0, deadline - now())));
+      health = await doctorAndStatus();
+    }
+    return health;
   };
 
   const initial = await doctorAndStatus();
@@ -336,6 +351,7 @@ export async function ensureBridge({
     if (browserState === 'stopped') {
       if (budget.browserStartsUsed < budget.maxBrowserStarts) {
         budget.browserStartsUsed += 1;
+        browserStartAttempted = true;
         let startResult;
         if (await fileExists(startChromeScript)) {
           actions.push('browser_start_script');
@@ -354,7 +370,9 @@ export async function ensureBridge({
       }
     }
 
-    const afterBrowser = await doctorAndStatus();
+    const afterBrowser = browserStartAttempted && !browserStartFailed
+      ? await waitForHealthy()
+      : await doctorAndStatus();
     if (afterBrowser.healthy) {
       return normalizedResult({
         ok: true,
@@ -374,6 +392,7 @@ export async function ensureBridge({
       actions.push('daemon_restart');
       await run('bycli', ['daemon', 'restart'], BYCLI_TIMEOUT_MS);
       status = await run('bycli', ['daemon', 'status'], BYCLI_TIMEOUT_MS);
+      if (!isDaemonHealthy(status)) await waitForHealthy({ checkImmediately: false });
     } else {
       recoveryBudgetExhausted = true;
     }

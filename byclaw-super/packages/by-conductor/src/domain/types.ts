@@ -150,6 +150,15 @@ export type DelegationStatus =
   | "CANCELLED"
   | "TIMED_OUT";
 
+/** 外部子 Agent 回调允许提交的终态；其余 Delegation 状态不能作为回调输入。 */
+export const DELEGATION_CALLBACK_STATUSES = ["COMPLETED", "FAILED", "CANCELLED"] as const;
+
+export type DelegationCallbackStatus = (typeof DELEGATION_CALLBACK_STATUSES)[number];
+
+export function isDelegationCallbackStatus(value: string): value is DelegationCallbackStatus {
+  return DELEGATION_CALLBACK_STATUSES.some((status) => status === value);
+}
+
 /**
  * 可序列化的外部执行引用；metadata 不得保存凭证，便于未来进程恢复。
  */

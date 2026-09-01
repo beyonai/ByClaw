@@ -9,6 +9,7 @@ import { basename, isAbsolute, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const SCHEMA_VERSION = '1.0';
+const MAX_CONFIRMED_RERUNS = 10;
 const EXCLUDED_OPTIONS = new Map([
   ['--output', true],
   ['--adapter-session', true],
@@ -118,12 +119,20 @@ async function writeState(path, state) {
     schemaVersion: SCHEMA_VERSION,
     phase: state.phase,
     initialAttempts: state.initialAttempts,
+    confirmedRerunCount: state.confirmedRerunCount,
     rerunConsumed: state.rerunConsumed,
     lastCode: state.lastCode,
     updatedAt: new Date().toISOString(),
   }, null, 2)}\n`;
   await writeFile(temporary, payload, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
   await rename(temporary, path);
+}
+
+function confirmedRerunCount(state) {
+  if (Number.isInteger(state?.confirmedRerunCount)) {
+    return Math.max(0, Math.min(MAX_CONFIRMED_RERUNS, state.confirmedRerunCount));
+  }
+  return state?.rerunConsumed === true ? 1 : 0;
 }
 
 function blockedResult(operationFingerprintValue, phase, reason) {
@@ -176,16 +185,27 @@ export async function runGate({
   await mkdir(lockPath, { mode: 0o700 });
   try {
     const state = await readState(statePath);
-    if (state?.phase === 'terminal' || state?.phase === 'rerun-consumed') {
-      if (state.phase === 'rerun-consumed') {
-        await writeState(statePath, {
-          ...state,
-          phase: 'terminal',
-          rerunConsumed: true,
-          lastCode: state.lastCode || 'INTERRUPTED_AFTER_RERUN_CONSUMPTION',
-        });
-      }
+    const consumedReruns = confirmedRerunCount(state);
+    if (state?.phase === 'terminal') {
       return blockedResult(fingerprint, 'terminal', 'login-gate-rerun-exhausted');
+    }
+    if (state?.phase === 'rerun-consumed') {
+      const phase = consumedReruns >= MAX_CONFIRMED_RERUNS
+        ? 'terminal' : 'waiting-confirmation';
+      await writeState(statePath, {
+        ...state,
+        phase,
+        confirmedRerunCount: consumedReruns,
+        rerunConsumed: consumedReruns > 0,
+        lastCode: state.lastCode || 'INTERRUPTED_AFTER_RERUN_CONSUMPTION',
+      });
+      return blockedResult(
+        fingerprint,
+        phase,
+        phase === 'terminal'
+          ? 'login-gate-rerun-exhausted'
+          : 'explicit-verification-confirmation-required',
+      );
     }
     if (state?.phase === 'complete') {
       return blockedResult(fingerprint, 'complete', 'operation-already-complete');
@@ -199,10 +219,22 @@ export async function runGate({
     }
 
     const isConfirmedRerun = state?.phase === 'waiting-confirmation';
+    if (isConfirmedRerun && consumedReruns >= MAX_CONFIRMED_RERUNS) {
+      await writeState(statePath, {
+        ...state,
+        phase: 'terminal',
+        confirmedRerunCount: consumedReruns,
+        rerunConsumed: true,
+      });
+      return blockedResult(fingerprint, 'terminal', 'login-gate-rerun-exhausted');
+    }
+    const nextConfirmedRerunCount = isConfirmedRerun
+      ? consumedReruns + 1 : consumedReruns;
     if (isConfirmedRerun) {
       await writeState(statePath, {
         ...state,
         phase: 'rerun-consumed',
+        confirmedRerunCount: nextConfirmedRerunCount,
         rerunConsumed: true,
         lastCode: state.lastCode,
       });
@@ -224,12 +256,16 @@ export async function runGate({
     }
     const humanGate = isHumanGate(childResult);
     let phase = 'complete';
-    if (humanGate) phase = isConfirmedRerun ? 'terminal' : 'waiting-confirmation';
+    if (humanGate) {
+      phase = isConfirmedRerun && nextConfirmedRerunCount >= MAX_CONFIRMED_RERUNS
+        ? 'terminal' : 'waiting-confirmation';
+    }
     else if (Number(childResult?.exitCode) !== 0) phase = 'terminal';
     await writeState(statePath, {
       phase,
       initialAttempts: state?.initialAttempts || 1,
-      rerunConsumed: isConfirmedRerun,
+      confirmedRerunCount: nextConfirmedRerunCount,
+      rerunConsumed: nextConfirmedRerunCount > 0,
       lastCode: errorCode(childResult),
     });
     return {

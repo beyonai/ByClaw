@@ -123,6 +123,43 @@ test('confirmed stopped Chromium uses executable start-chrome script', async (t)
   runner.done();
 });
 
+test('browser start waits for a delayed Extension handshake before restarting daemon', async (t) => {
+  let elapsed = 0;
+  let waits = 0;
+  const runner = scriptedRunner([
+    { command: 'bycli', args: ['doctor'], result: fail(69) },
+    { command: 'bycli', args: ['daemon', 'status'], result: disconnectedStatus },
+    { command: 'bycli', args: ['doctor'], result: fail(69) },
+    { command: 'bycli', args: ['daemon', 'status'], result: disconnectedStatus },
+    { command: 'openclaw', args: ['browser', '--browser-profile', 'openclaw', 'status'], result: ok('running: false') },
+    { command: '/usr/local/bin/start-chrome.sh', args: [], result: ok() },
+    { command: 'bycli', args: ['doctor'], result: fail(69) },
+    { command: 'bycli', args: ['daemon', 'status'], result: disconnectedStatus },
+    { command: 'bycli', args: ['doctor'], result: ok() },
+    { command: 'bycli', args: ['daemon', 'status'], result: healthyStatus },
+  ]);
+
+  const result = await ensureBridge({
+    run: runner.run,
+    fileExists: async () => true,
+    lockDir: await temporaryLock(t),
+    healthWaitTimeoutMs: 1_000,
+    healthPollIntervalMs: 100,
+    now: () => elapsed,
+    wait: async (ms) => {
+      waits += 1;
+      elapsed += ms;
+    },
+  });
+
+  assert.equal(result.code, 'BRIDGE_READY');
+  assert.deepEqual(result.actions, ['browser_start_script']);
+  assert.equal(result.budget.daemonRestartsUsed, 0);
+  assert.equal(result.checks, 4);
+  assert.equal(waits, 1);
+  runner.done();
+});
+
 test('confirmed stopped Chromium falls back to OpenClaw start when script is unavailable', async (t) => {
   const runner = scriptedRunner([
     { command: 'bycli', args: ['doctor'], result: fail(69) },
@@ -145,6 +182,43 @@ test('confirmed stopped Chromium falls back to OpenClaw start when script is una
   runner.done();
 });
 
+test('daemon restart waits for a delayed Extension handshake before failing recovery', async (t) => {
+  let elapsed = 0;
+  let waits = 0;
+  const runner = scriptedRunner([
+    { command: 'bycli', args: ['doctor'], result: fail(69) },
+    { command: 'bycli', args: ['daemon', 'status'], result: disconnectedStatus },
+    { command: 'bycli', args: ['doctor'], result: fail(69) },
+    { command: 'bycli', args: ['daemon', 'status'], result: disconnectedStatus },
+    { command: 'openclaw', args: ['browser', '--browser-profile', 'openclaw', 'status'], result: ok('running: true') },
+    { command: 'bycli', args: ['doctor'], result: fail(69) },
+    { command: 'bycli', args: ['daemon', 'status'], result: disconnectedStatus },
+    { command: 'bycli', args: ['daemon', 'restart'], result: ok() },
+    { command: 'bycli', args: ['daemon', 'status'], result: disconnectedStatus },
+    { command: 'bycli', args: ['doctor'], result: ok() },
+    { command: 'bycli', args: ['daemon', 'status'], result: healthyStatus },
+  ]);
+
+  const result = await ensureBridge({
+    run: runner.run,
+    lockDir: await temporaryLock(t),
+    healthWaitTimeoutMs: 1_000,
+    healthPollIntervalMs: 100,
+    now: () => elapsed,
+    wait: async (ms) => {
+      waits += 1;
+      elapsed += ms;
+    },
+  });
+
+  assert.equal(result.code, 'BRIDGE_READY');
+  assert.deepEqual(result.actions, ['daemon_restart']);
+  assert.equal(result.budget.daemonRestartsUsed, 1);
+  assert.equal(result.checks, 4);
+  assert.equal(waits, 1);
+  runner.done();
+});
+
 test('unknown browser status never starts Chromium', async (t) => {
   const runner = scriptedRunner([
     { command: 'bycli', args: ['doctor'], result: fail(69) },
@@ -164,6 +238,7 @@ test('unknown browser status never starts Chromium', async (t) => {
       assert.fail('fileExists must not be called for unknown browser state');
     },
     lockDir: await temporaryLock(t),
+    healthWaitTimeoutMs: 0,
   });
 
   assert.equal(result.code, 'BRIDGE_UNAVAILABLE');

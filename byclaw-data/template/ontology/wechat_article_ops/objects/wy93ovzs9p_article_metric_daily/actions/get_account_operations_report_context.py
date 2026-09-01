@@ -34,10 +34,9 @@ async def execute(params: dict) -> dict:
 
     project_id = str(params.get("projectId") or "").strip()
     account_code = str(params.get("account_code") or "").strip()
-    end = _to_date(params.get("data_as_of"))
-    report_date = _to_date(params.get("report_date")) or (
-        end + _timedelta(days=1) if end else None
-    )
+    requested_end = _to_date(params.get("data_as_of"))
+    end = requested_end
+    explicit_report_date = _to_date(params.get("report_date"))
     days = params.get("trend_days", 30)
     if not project_id:
         return _result({
@@ -108,6 +107,17 @@ async def execute(params: dict) -> dict:
     collection_by_id = {
         _get(collection, "id"): collection for collection in collections
     }
+
+    available_fact_dates = [
+        fact_date
+        for rows in (metrics, followers, channels)
+        for row in rows
+        for fact_date in [_to_date(_get(row, "stat_date"))]
+        if fact_date is not None and fact_date <= requested_end
+    ]
+    if available_fact_dates:
+        end = max(available_fact_dates)
+    report_date = explicit_report_date or end + _timedelta(days=1)
 
     account_names = [
         str(_get(row, "account_name") or "").strip()
@@ -311,7 +321,7 @@ async def execute(params: dict) -> dict:
         "follow": "daily_increment",
     }
 
-    month_start = end.replace(day=1)
+    recent_publish_start = end - _timedelta(days=29)
 
     def _article_daily_series(article_id):
         rows = metrics_by_article.get(article_id, [])
@@ -340,6 +350,7 @@ async def execute(params: dict) -> dict:
         return series
 
     works = []
+    cascade_articles = []
     for article_id, article in article_by_id.items():
         current = snapshots.get(article_id, {}).get(0)
         prior = snapshots.get(article_id, {}).get(1)
@@ -355,19 +366,20 @@ async def execute(params: dict) -> dict:
                 else current_value - prior_value
             )
         reasons = []
-        if published_date is not None and month_start <= published_date <= end:
-            reasons.append("本月发布作品")
+        if (
+            published_date is not None
+            and recent_publish_start <= published_date <= end
+        ):
+            reasons.append("近30天发布作品")
         if any(value not in (None, 0) for value in deltas.values()):
             reasons.append("今日有数据波动")
-        if not reasons:
-            continue
         collection_id = _get(article, "collection_id")
         collection = collection_by_id.get(collection_id)
         collection_name = _get(collection, "collection_name")
         if collection_name == "无合集":
             collection_id = None
             collection_name = None
-        works.append({
+        work = {
             "article_id": article_id,
             "title": _get(article, "title"),
             "url": _get(article, "url") or _get(article, "canonical_url"),
@@ -380,8 +392,28 @@ async def execute(params: dict) -> dict:
             "deltas_1d": deltas,
             "daily_series": _article_daily_series(article_id),
             "selection_reasons": reasons,
-        })
+        }
+        cascade_articles.append(work)
+        if reasons:
+            works.append(work)
     works.sort(key=lambda item: item["metrics"].get("read") or -1, reverse=True)
+
+    cascade_collections = []
+    for collection_id, collection in collection_by_id.items():
+        collection_name = _get(collection, "collection_name")
+        if not collection_name or collection_name == "无合集":
+            continue
+        cascade_collections.append({
+            "collection_id": collection_id,
+            "collection_name": collection_name,
+        })
+    cascade_collections.sort(
+        key=lambda item: (str(item["collection_name"]), str(item["collection_id"]))
+    )
+    cascade_manifest = {
+        "expected_collections": cascade_collections,
+        "expected_articles": cascade_articles,
+    }
 
     latest_channels = {}
     for row in channels:
@@ -397,16 +429,30 @@ async def execute(params: dict) -> dict:
         if previous is None or stat_date > previous[0]:
             latest_channels[key] = (stat_date, row)
     channel_totals = {}
+    channel_metric_mode = "cumulative"
     for (_article_id, channel), (_stat_date, row) in latest_channels.items():
         if channel == "全部":
             continue
         channel_totals[channel] = channel_totals.get(channel, 0) + (
             _get(row, "read_count") or 0
         )
+    if not channel_totals:
+        channel_metric_mode = "period_increment"
+        for row in channels:
+            if _get(row, "metric_mode") != "daily_increment":
+                continue
+            channel = _get(row, "channel")
+            stat_date = _to_date(_get(row, "stat_date"))
+            if not channel or channel == "全部" or stat_date is None:
+                continue
+            if start <= stat_date <= end:
+                channel_totals[channel] = channel_totals.get(channel, 0) + (
+                    _get(row, "read_count") or 0
+                )
     channel_sum = sum(channel_totals.values())
     channel_summary = (
         {
-            "metric_mode": "cumulative",
+            "metric_mode": channel_metric_mode,
             "data_as_of": str(end),
             "channels": [
                 {
@@ -447,6 +493,10 @@ async def execute(params: dict) -> dict:
         groups = [
             {
                 **group,
+                "display_label": (
+                    f"{('周一', '周二', '周三', '周四', '周五', '周六', '周日')[group['weekday']]} "
+                    f"{group['hour']:02d}:00"
+                ),
                 "average_read_count": (
                     group["total_read_count"] / group["article_count"]
                 ),
@@ -488,6 +538,7 @@ async def execute(params: dict) -> dict:
         "trend_series": trend_series,
         "trend_metric_modes": trend_metric_modes,
         "works": works,
+        "cascade_manifest": cascade_manifest,
         "channel_summary": channel_summary,
         "publish_time_summary": publish_time_summary,
         "missing_outputs": sorted(set(missing)),

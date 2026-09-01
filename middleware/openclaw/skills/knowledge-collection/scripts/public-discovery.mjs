@@ -12,12 +12,11 @@ import {
 import {
   annotateMergedCandidates,
   classifyCandidates,
-  countUniqueArticles,
+  countUniqueEligibleArticles,
   mergedCandidates,
   summarizeMergedQuality,
 } from './candidate-quality.mjs';
 import {
-  createDiscoveryAuthorization,
   recordDiscoveryResult,
   reserveDiscoveryAttempt,
 } from './discovery-authorization.mjs';
@@ -146,11 +145,12 @@ export async function runPublicDiscover(paths, args, options = {}) {
   withSessionLock(paths, 'public-discover-reserve', () => {
     const current = loadSession(paths, { persistMigration: false }).session;
     if (!current.task.discoveryGate) {
-      current.task.discoveryGate = createDiscoveryAuthorization();
+      throw new Error('DISCOVERY_RELEVANCE_MIGRATION_REQUIRED: 缺少公共发现 gate 的旧会话必须新建内部 run');
     }
     reserveDiscoveryAttempt(current.task.discoveryGate, { query, category });
     persistSession(paths, current);
   });
+  const topicContract = loadSession(paths, { persistMigration: false }).session.task.discoveryGate.topicContract;
   try {
   const language = typeof args?.language === 'string' && args.language.trim() ? args.language.trim() : 'all';
   const pageno = String(args?.pageno || '1');
@@ -217,7 +217,7 @@ export async function runPublicDiscover(paths, args, options = {}) {
     searxngMs = searxngRun.durationMs;
     const requestedSxDoc = parseSuccess(searxngOutcome);
     const requestedCandidates = Array.isArray(requestedSxDoc?.results) ? requestedSxDoc.results : [];
-    if (countUniqueArticles(requestedCandidates) >= Number(requestedCount)) {
+    if (countUniqueEligibleArticles(requestedCandidates, topicContract) >= Number(requestedCount)) {
       hotOutcome = { skipped: true, skipReason: 'sufficient_article_candidates' };
     } else {
       const hotRun = await runTimed(runHotDiscoveryProcess, hotDiscoverySpec);
@@ -255,9 +255,9 @@ export async function runPublicDiscover(paths, args, options = {}) {
   const merge = options.merge || defaultMerge;
   const mergeStartedAt = now();
   const mergedDocument = await merge({ hotDoc, sxDoc, warnings });
-  const annotatedMerged = annotateMergedCandidates(mergedDocument);
+  const annotatedMerged = annotateMergedCandidates(mergedDocument, topicContract);
   const candidateQuality = {
-    searxng: classifyCandidates(Array.isArray(sxDoc?.results) ? sxDoc.results : []),
+    searxng: classifyCandidates(Array.isArray(sxDoc?.results) ? sxDoc.results : [], topicContract),
     merged: summarizeMergedQuality(annotatedMerged),
   };
   const mergeAndClassifyMs = elapsedMilliseconds(mergeStartedAt, now());
@@ -297,7 +297,10 @@ export async function runPublicDiscover(paths, args, options = {}) {
       maxAttempts: authorization.state.maxAttempts,
       exhausted: authorization.state.exhausted,
       stopReason: authorization.state.stopReason,
+      stopDetail: authorization.state.stopDetail,
       articleCandidateIds: authorization.result.articleCandidates.map((candidate) => candidate.candidateId),
+      structuralArticleCandidateIds: authorization.result.structuralArticleCandidates
+        .map((candidate) => candidate.candidateId),
     },
     timing,
     snapshots: {

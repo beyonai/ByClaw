@@ -129,7 +129,7 @@ class SignAntiReplayFilterTest {
         ReflectionTestUtils.setField(filter, "artifactPreviewPathPrefix", "/artifact-preview");
         ReflectionTestUtils.setField(filter, "artifactDownloadPathPrefix", "/artifact-download");
         MockHttpServletRequest request = new MockHttpServletRequest("GET",
-            "/byaiService/artifact-preview/artifact/key/index.html");
+            "/byaiService/artifact-preview/artifact/index.html");
         request.setContextPath("/byaiService");
         MockFilterChain filterChain = new MockFilterChain();
 
@@ -143,20 +143,8 @@ class SignAntiReplayFilterTest {
         SignAntiReplayFilter filter = enabledFilter();
         ReflectionTestUtils.setField(filter, "artifactDataPathPrefix", "/artifact-data");
         MockHttpServletRequest request = new MockHttpServletRequest("GET",
-            "/byaiService/artifact-data/artifact/key/records/record-1");
+            "/byaiService/artifact-data/artifact/records/record-1");
         request.setContextPath("/byaiService");
-        MockFilterChain filterChain = new MockFilterChain();
-
-        filter.doFilter(request, new MockHttpServletResponse(), filterChain);
-
-        assertThat(filterChain.getRequest()).isSameAs(request);
-    }
-
-    @Test
-    void letsArtifactDataOwnerReadUseBeyondTokenWithoutRequestSignature() throws Exception {
-        SignAntiReplayFilter filter = enabledFilter();
-        MockHttpServletRequest request = new MockHttpServletRequest("GET",
-            "/byaiService/open/api/v1/artifacts/artifact-1/data-records/record-1");
         MockFilterChain filterChain = new MockFilterChain();
 
         filter.doFilter(request, new MockHttpServletResponse(), filterChain);

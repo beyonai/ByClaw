@@ -124,7 +124,7 @@ describe("DelegationService", () => {
         status: "COMPLETED",
         finalAnswer: "callback answer",
       }),
-    ).resolves.toMatchObject({ accepted: true, runId: "run-suspended" });
+    ).resolves.toMatchObject({ outcome: "delegation_settled", runId: "run-suspended" });
     expect(await delegations.get("delegation-suspended")).toMatchObject({
       status: "COMPLETED",
       result: { status: "completed", output: "callback answer" },
@@ -135,7 +135,11 @@ describe("DelegationService", () => {
         status: "COMPLETED",
         finalAnswer: "duplicate",
       }),
-    ).resolves.toMatchObject({ accepted: false, runId: "run-suspended" });
+    ).resolves.toMatchObject({
+      outcome: "delegation_already_settled",
+      runId: "run-suspended",
+      delegationStatus: "COMPLETED",
+    });
     expect((await delegations.get("delegation-suspended"))?.result?.output).toBe(
       "callback answer",
     );
@@ -1430,7 +1434,7 @@ describe("RunService", () => {
         status: "COMPLETED",
         finalAnswer: "42",
       }),
-    ).resolves.toMatchObject({ accepted: true, runId: waitingRun.id, afterEventId: 1 });
+    ).resolves.toMatchObject({ outcome: "run_resumed", runId: waitingRun.id, afterEventId: 1 });
     expect(await runs.get(waitingRun.id)).toMatchObject({
       status: "QUEUED",
       executionStage: "CONNECTOR_WAITING",
@@ -1443,7 +1447,11 @@ describe("RunService", () => {
         status: "COMPLETED",
         finalAnswer: "duplicate",
       }),
-    ).resolves.toMatchObject({ accepted: false, runId: waitingRun.id });
+    ).resolves.toMatchObject({
+      outcome: "delegation_already_settled",
+      runId: waitingRun.id,
+      delegationStatus: "COMPLETED",
+    });
     expect(enqueue).toHaveBeenCalledOnce();
   });
 
@@ -1503,7 +1511,7 @@ describe("RunService", () => {
     const events = new InMemoryRunEventStore();
     const expireWaitingCallbacks = vi.fn(async () => []);
     const settleWaitingCallback = vi.fn(async () => ({
-      accepted: false,
+      outcome: "callback_expired" as const,
       runId: "run-with-legacy-deadline",
     }));
     const service = new RunService(
@@ -2846,7 +2854,7 @@ describe("RunService task plan completion guard", () => {
         status: "FAILED",
         finalAnswer: "digital employee unavailable",
       }),
-    ).resolves.toMatchObject({ accepted: true, runId: run.id });
+    ).resolves.toMatchObject({ outcome: "run_resumed", runId: run.id });
     await waitFor(async () => (await service.getRun(run.id))?.status === "COMPLETED");
 
     expect(taskPlans.command).toHaveBeenCalledOnce();

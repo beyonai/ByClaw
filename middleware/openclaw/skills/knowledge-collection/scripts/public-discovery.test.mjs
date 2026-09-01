@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 
 import { ensureSessionSkeleton, newSession, sessionPaths } from './session.mjs';
+import { createDiscoveryAuthorization } from './discovery-authorization.mjs';
 import * as publicDiscovery from './public-discovery.mjs';
 
 const { runPublicDiscover } = publicDiscovery;
@@ -50,11 +51,16 @@ test('supports an explicit SearXNG script path for local development', () => {
   );
 });
 
-function makeInitializedSession(sourceScope = ['public-internet']) {
+function makeInitializedSession(sourceScope = ['public-internet'], query = '采集一篇文章') {
   const root = mkdtempSync(join(tmpdir(), 'public-discovery-test-'));
   ensureSessionSkeleton(root);
   writeFileSync(join(root, 'session.json'), `${JSON.stringify(newSession({
-    query: 'public discovery', sourceScope, materializationTarget: 'candidates',
+    query,
+    sourceScope,
+    materializationTarget: 'candidates',
+    ...(sourceScope.includes('public-internet') ? {
+      discoveryGate: createDiscoveryAuthorization({ query }),
+    } : {}),
   }))}\n`);
   return { root, paths: sessionPaths(root) };
 }
@@ -143,7 +149,13 @@ test('runs SearXNG and hot discovery for every SearXNG category', async () => {
   assert.equal(snapshot.channelDiagnostics.searxng.status, 'success');
   assert.equal(snapshot.channelDiagnostics.hotDiscovery.status, 'success');
   assert.ok(Number.isInteger(snapshot.timing.totalMs));
-  assert.deepEqual(snapshot.candidateQuality.merged, { article: 0, weak: 0, reject: 0 });
+  assert.deepEqual(snapshot.candidateQuality.merged, {
+    article: 0,
+    weak: 0,
+    reject: 0,
+    eligibleArticle: 0,
+    topicRelevance: { matched: 0, unmatched: 0, unknown: 0, notRequired: 0 },
+  });
 });
 
 test('default merge preserves the source hostname used for acquisition', async () => {
@@ -260,11 +272,133 @@ test('uses only SearXNG when a requested article count is satisfied', async () =
   assert.equal(result.channels.hotDiscovery.status, 'skipped');
   assert.equal(result.channels.hotDiscovery.skipReason, 'sufficient_article_candidates');
   assert.equal(result.candidateQuality.searxng.article, 1);
+  assert.equal(result.candidateQuality.searxng.eligibleArticle, 1);
   assert.ok(!result.warnings.some((warning) => warning.includes('hot-discovery')));
   assert.equal(
     JSON.parse(readFileSync(result.snapshots.merged, 'utf8')).channelDiagnostics.hotDiscovery.skipReason,
     'sufficient_article_candidates',
   );
+});
+
+test('an unrelated trusted publication does not satisfy requested count or receive authorization', async () => {
+  const { paths } = makeInitializedSession(
+    ['public-internet'],
+    '采集一篇关于 kc-no-source-20260901-xqvzt 的文章',
+  );
+  const calls = [];
+  const result = await runPublicDiscover(paths, {
+    query: 'kc-no-source-20260901-xqvzt article',
+    'requested-count': '1',
+  }, {
+    runProcess: async (spec) => {
+      calls.push(spec.channel);
+      return spec.channel === 'searxng'
+        ? {
+          code: 0,
+          stdout: JSON.stringify({
+            query: 'kc-no-source-20260901-xqvzt article',
+            results: [{
+              url: 'https://arxiv.org/abs/2103.05770v1',
+              title: 'Notebook articles: towards a transformative publishing experience',
+            }],
+          }),
+          stderr: '',
+        }
+        : { code: 0, stdout: JSON.stringify({ query: 'kc-no-source-20260901-xqvzt', candidates: [] }), stderr: '' };
+    },
+    merge: ({ sxDoc }) => ({
+      query: sxDoc.query,
+      groups: {
+        bothChannels: [],
+        searxngTop: sxDoc.results,
+        agentReachTop: [],
+        hotBySource: {},
+        hotWithoutPopularity: [],
+        unverified: [],
+      },
+    }),
+  });
+
+  assert.deepEqual(calls, ['searxng', 'hot-discovery']);
+  assert.equal(result.candidateQuality.searxng.article, 1);
+  assert.equal(result.candidateQuality.searxng.eligibleArticle, 0);
+  assert.equal(result.candidateQuality.searxng.topicRelevance.unmatched, 1);
+  assert.equal(result.discoveryAuthorization.articleCandidateIds.length, 0);
+  assert.equal(result.discoveryAuthorization.structuralArticleCandidateIds.length, 1);
+});
+
+test('query drift fails before reserving or invoking discovery executors', async () => {
+  const { paths } = makeInitializedSession(['public-internet'], '采集一篇关于 DeepSeek 的文章');
+  let executorCalls = 0;
+  await assert.rejects(
+    runPublicDiscover(paths, { query: 'Qwen paper' }, {
+      runProcess: async () => {
+        executorCalls += 1;
+        return { code: 0, stdout: '{}', stderr: '' };
+      },
+    }),
+    /DISCOVERY_QUERY_DRIFT/,
+  );
+  assert.equal(executorCalls, 0);
+  const session = JSON.parse(readFileSync(paths.session, 'utf8'));
+  assert.equal(session.task.discoveryGate.attemptCount, 0);
+});
+
+test('a public legacy session with a missing gate is not silently upgraded', async () => {
+  const { paths } = makeInitializedSession();
+  const session = JSON.parse(readFileSync(paths.session, 'utf8'));
+  delete session.task.discoveryGate;
+  writeFileSync(paths.session, `${JSON.stringify(session, null, 2)}\n`);
+  let executorCalls = 0;
+  await assert.rejects(
+    runPublicDiscover(paths, { query: 'article' }, {
+      runProcess: async () => {
+        executorCalls += 1;
+        return { code: 0, stdout: '{}', stderr: '' };
+      },
+    }),
+    /DISCOVERY_RELEVANCE_MIGRATION_REQUIRED/,
+  );
+  assert.equal(executorCalls, 0);
+  assert.equal(JSON.parse(readFileSync(paths.session, 'utf8')).task.discoveryGate, undefined);
+});
+
+test('requested count merges duplicate SearXNG evidence before deciding hot fallback', async () => {
+  const { paths } = makeInitializedSession(['public-internet'], 'neural scaling');
+  const calls = [];
+  const result = await runPublicDiscover(paths, {
+    query: 'neural scaling',
+    'requested-count': '1',
+  }, {
+    runProcess: async (spec) => {
+      calls.push(spec.channel);
+      return {
+        code: 0,
+        stdout: JSON.stringify({
+          query: 'neural scaling',
+          results: [
+            { url: 'https://example.com/news/report', title: 'Neural report', content: '记者报道' },
+            { url: 'https://example.com/news/report', title: 'Scaling analysis', content: '记者报道' },
+          ],
+        }),
+        stderr: '',
+      };
+    },
+    merge: ({ sxDoc }) => ({
+      query: sxDoc.query,
+      groups: {
+        bothChannels: [],
+        searxngTop: sxDoc.results,
+        agentReachTop: [],
+        hotBySource: {},
+        hotWithoutPopularity: [],
+        unverified: [],
+      },
+    }),
+  });
+
+  assert.deepEqual(calls, ['searxng']);
+  assert.equal(result.channels.hotDiscovery.skipReason, 'sufficient_article_candidates');
 });
 
 test('falls back when non-empty SearXNG results are login and home pages', async () => {
@@ -437,6 +571,7 @@ test('persists two empty discovery attempts and rejects a third attempt before e
   assert.equal(session.task.discoveryGate.attemptCount, 2);
   assert.equal(session.task.discoveryGate.exhausted, true);
   assert.equal(session.task.discoveryGate.stopReason, 'no-article-candidates');
+  assert.equal(session.task.discoveryGate.stopDetail, 'no-relevant-article-candidates');
   const callsBeforeRejectedAttempt = executorCalls;
   await assert.rejects(
     runPublicDiscover(paths, { query: '2501.12948', category: 'science' }, options),

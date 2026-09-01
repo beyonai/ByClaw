@@ -5,6 +5,8 @@ import personalModel from '@/pages/models/locales/zh-CN';
 export default {
   ...manager,
   ...personalModel,
+  'agentTeamsActivity.openPanel': '打开专家团活动面板',
+  'agentTeamsActivity.panelTitle': '专家团活动面板',
   // 通用操作
   'common.add': '新增',
   'menu.projectSpace': '项目空间',
@@ -499,6 +501,9 @@ export default {
   'chatTitle.saveAsTemplate': '保存为模板',
   'chatResource.title': '会话资源',
   'chatResource.close': '关闭资源列表',
+  'chatResource.closeTab': '关闭',
+  'chatResource.closeOtherTabs': '关闭其他标签页',
+  'chatResource.closeRightTabs': '关闭右侧标签页',
   'chatResource.toggleList': '打开或关闭资源列表',
   'chatResource.currentSession': '当前会话',
   'chatResource.currentEmployee': '当前员工',

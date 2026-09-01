@@ -48,20 +48,16 @@ function result(exitCode, code = null) {
   };
 }
 
-test('a retry-shaped message cannot reset the single confirmed rerun', async (t) => {
+test('human verification may be confirmed ten times before the operation becomes terminal', async (t) => {
   const stateDir = await mkdtemp(join(tmpdir(), 'weixin-login-gate-'));
   t.after(async () => {
     const { rm } = await import('node:fs/promises');
     await rm(stateDir, { recursive: true, force: true });
   });
   const executions = [];
-  const outcomes = [
-    result(77, 'AUTH_REQUIRED'),
-    result(77, 'AUTH_REQUIRED'),
-  ];
   const execute = async argv => {
     executions.push(argv);
-    return outcomes.shift();
+    return result(77, 'AUTH_REQUIRED');
   };
 
   const initial = await runGate({ stateDir, argv: command(), execute });
@@ -75,15 +71,31 @@ test('a retry-shaped message cannot reset the single confirmed rerun', async (t)
   assert.equal(plainRetry.reason, 'explicit-verification-confirmation-required');
   assert.equal(executions.length, 1);
 
-  const confirmedRerun = await runGate({
+  for (let rerun = 1; rerun <= 9; rerun += 1) {
+    const confirmedRerun = await runGate({
+      stateDir,
+      argv: command(),
+      verificationConfirmed: true,
+      execute,
+    });
+    assert.equal(confirmedRerun.executed, true);
+    assert.equal(confirmedRerun.phase, 'waiting-confirmation');
+    assert.equal(executions.length, rerun + 1);
+
+    const waiting = await runGate({ stateDir, argv: command(), execute });
+    assert.equal(waiting.executed, false);
+    assert.equal(waiting.reason, 'explicit-verification-confirmation-required');
+  }
+
+  const finalRerun = await runGate({
     stateDir,
     argv: command(),
     verificationConfirmed: true,
     execute,
   });
-  assert.equal(confirmedRerun.executed, true);
-  assert.equal(confirmedRerun.phase, 'terminal');
-  assert.equal(executions.length, 2);
+  assert.equal(finalRerun.executed, true);
+  assert.equal(finalRerun.phase, 'terminal');
+  assert.equal(executions.length, 11);
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const denied = await runGate({ stateDir, argv: command(), execute });
@@ -91,7 +103,7 @@ test('a retry-shaped message cannot reset the single confirmed rerun', async (t)
     assert.equal(denied.phase, 'terminal');
     assert.equal(denied.reason, 'login-gate-rerun-exhausted');
   }
-  assert.equal(executions.length, 2);
+  assert.equal(executions.length, 11);
 });
 
 test('lifecycle, output, and transient URL options do not create a new operation', () => {
@@ -117,12 +129,14 @@ test('a different article remains independent after another article is terminal'
   };
 
   await runGate({ stateDir, argv: command(), execute });
-  await runGate({
-    stateDir,
-    argv: command(),
-    verificationConfirmed: true,
-    execute,
-  });
+  for (let rerun = 0; rerun < 10; rerun += 1) {
+    await runGate({
+      stateDir,
+      argv: command(),
+      verificationConfirmed: true,
+      execute,
+    });
+  }
   const other = await runGate({
     stateDir,
     argv: command({ url: 'https://mp.weixin.qq.com/s/another-article' }),
@@ -131,7 +145,7 @@ test('a different article remains independent after another article is terminal'
 
   assert.equal(other.executed, true);
   assert.equal(other.phase, 'waiting-confirmation');
-  assert.equal(executions, 3);
+  assert.equal(executions, 12);
 });
 
 test('state files are private and contain no command, URL, or session secrets', async (t) => {
@@ -153,6 +167,7 @@ test('state files are private and contain no command, URL, or session secrets', 
   assert.doesNotMatch(persisted, /secret-ticket|secret-export|stable-biz|stable-sn/);
   assert.doesNotMatch(persisted, /batch-safe-worker|weixin-output|mp\.weixin\.qq\.com/);
   assert.equal(JSON.parse(persisted).phase, 'waiting-confirmation');
+  assert.equal(JSON.parse(persisted).confirmedRerunCount, 0);
 });
 
 test('a successful confirmed rerun completes the operation', async (t) => {
@@ -174,6 +189,24 @@ test('a successful confirmed rerun completes the operation', async (t) => {
 
   assert.equal(completed.executed, true);
   assert.equal(completed.phase, 'complete');
+});
+
+test('a non-verification error on a confirmed rerun remains terminal', async (t) => {
+  const stateDir = await mkdtemp(join(tmpdir(), 'weixin-login-gate-command-error-'));
+  t.after(() => rm(stateDir, { recursive: true, force: true }));
+  const outcomes = [result(77, 'AUTH_REQUIRED'), result(1, 'COMMAND_EXEC')];
+  const execute = async () => outcomes.shift();
+
+  await runGate({ stateDir, argv: command(), execute });
+  const failed = await runGate({
+    stateDir,
+    argv: command(),
+    verificationConfirmed: true,
+    execute,
+  });
+
+  assert.equal(failed.executed, true);
+  assert.equal(failed.phase, 'terminal');
 });
 
 test('initial no-auth-state result receives initial context and creates no gate state', async (t) => {
@@ -215,36 +248,104 @@ test('typed initial BROWSER_CONNECT does not consume authentication state', asyn
   assert.deepEqual(await readdir(stateDir), []);
 });
 
-test('confirmed rerun is consumed before callback and remains terminal for no-auth-state result', async (t) => {
+test('confirmed rerun count is persisted before callback', async (t) => {
   const stateDir = await mkdtemp(join(tmpdir(), 'weixin-login-gate-confirmed-'));
   t.after(() => rm(stateDir, { recursive: true, force: true }));
   const contexts = [];
+  let persistedDuringRerun;
+  const selectedCommand = command();
+  const statePath = join(stateDir, `${operationFingerprint(selectedCommand)}.json`);
   const execute = async (_argv, context) => {
     contexts.push(context);
     if (context.attemptKind === 'initial') return result(77, 'AUTH_REQUIRED');
-    return {
-      ...result(69, 'BROWSER_CONNECT'),
-      commandExecuted: true,
-      stateDisposition: 'no-auth-state',
-    };
+    persistedDuringRerun = JSON.parse(await readFile(statePath, 'utf8'));
+    return result(77, 'AUTH_REQUIRED');
   };
 
-  await runGate({ stateDir, argv: command(), execute });
+  await runGate({ stateDir, argv: selectedCommand, execute });
   const rerun = await runGate({
     stateDir,
-    argv: command(),
+    argv: selectedCommand,
     verificationConfirmed: true,
     execute,
   });
-  const denied = await runGate({ stateDir, argv: command(), execute });
 
   assert.deepEqual(contexts, [
     { attemptKind: 'initial' },
     { attemptKind: 'confirmed-rerun' },
   ]);
-  assert.equal(rerun.phase, 'terminal');
-  assert.equal('stateDisposition' in rerun, false);
-  assert.equal(denied.reason, 'login-gate-rerun-exhausted');
+  assert.equal(persistedDuringRerun.phase, 'rerun-consumed');
+  assert.equal(persistedDuringRerun.confirmedRerunCount, 1);
+  assert.equal(rerun.phase, 'waiting-confirmation');
+});
+
+test('legacy interrupted rerun consumes one attempt and waits for fresh confirmation', async (t) => {
+  const stateDir = await mkdtemp(join(tmpdir(), 'weixin-login-gate-legacy-'));
+  t.after(() => rm(stateDir, { recursive: true, force: true }));
+  const selectedCommand = command();
+  const statePath = join(stateDir, `${operationFingerprint(selectedCommand)}.json`);
+  await writeFile(statePath, `${JSON.stringify({
+    schemaVersion: '1.0',
+    phase: 'rerun-consumed',
+    initialAttempts: 1,
+    rerunConsumed: true,
+    lastCode: 'AUTH_REQUIRED',
+  })}\n`, { mode: 0o600 });
+  let executions = 0;
+  const execute = async () => {
+    executions += 1;
+    return result(77, 'AUTH_REQUIRED');
+  };
+
+  const recovered = await runGate({
+    stateDir,
+    argv: selectedCommand,
+    verificationConfirmed: true,
+    execute,
+  });
+  assert.equal(recovered.executed, false);
+  assert.equal(recovered.phase, 'waiting-confirmation');
+  assert.equal(executions, 0);
+
+  const rerun = await runGate({
+    stateDir,
+    argv: selectedCommand,
+    verificationConfirmed: true,
+    execute,
+  });
+  assert.equal(rerun.phase, 'waiting-confirmation');
+  assert.equal(executions, 1);
+  assert.equal(JSON.parse(await readFile(statePath, 'utf8')).confirmedRerunCount, 2);
+});
+
+test('an existing terminal state is not revived by the larger budget', async (t) => {
+  const stateDir = await mkdtemp(join(tmpdir(), 'weixin-login-gate-terminal-'));
+  t.after(() => rm(stateDir, { recursive: true, force: true }));
+  const selectedCommand = command();
+  const statePath = join(stateDir, `${operationFingerprint(selectedCommand)}.json`);
+  await writeFile(statePath, `${JSON.stringify({
+    schemaVersion: '1.0',
+    phase: 'terminal',
+    initialAttempts: 1,
+    rerunConsumed: true,
+    lastCode: 'AUTH_REQUIRED',
+  })}\n`, { mode: 0o600 });
+  let executions = 0;
+
+  const blocked = await runGate({
+    stateDir,
+    argv: selectedCommand,
+    verificationConfirmed: true,
+    execute: async () => {
+      executions += 1;
+      return result(0);
+    },
+  });
+
+  assert.equal(blocked.executed, false);
+  assert.equal(blocked.phase, 'terminal');
+  assert.equal(blocked.reason, 'login-gate-rerun-exhausted');
+  assert.equal(executions, 0);
 });
 
 function runGateCli(args, env) {
@@ -261,7 +362,7 @@ function runGateCli(args, env) {
   });
 }
 
-test('CLI replay executes only the initial attempt and one explicitly confirmed rerun', async (t) => {
+test('CLI replay executes the initial attempt and up to ten explicitly confirmed reruns', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'weixin-login-gate-cli-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const stateDir = join(root, 'state');
@@ -289,17 +390,19 @@ process.exit(77);
   assert.equal(plainRetry.code, 77);
   assert.match(plainRetry.stderr, /explicit-verification-confirmation-required/);
 
-  const confirmed = await runGateCli([
-    '--state-dir', stateDir, '--verification-confirmed', 'true',
-    ...commandArgs.slice(2),
-  ], env);
-  assert.equal(confirmed.code, 77);
-  assert.match(confirmed.stderr, /AUTH_REQUIRED/);
+  for (let rerun = 1; rerun <= 10; rerun += 1) {
+    const confirmed = await runGateCli([
+      '--state-dir', stateDir, '--verification-confirmed', 'true',
+      ...commandArgs.slice(2),
+    ], env);
+    assert.equal(confirmed.code, 77);
+    assert.match(confirmed.stderr, /AUTH_REQUIRED/);
+  }
 
   for (let retry = 0; retry < 4; retry += 1) {
     const terminal = await runGateCli(commandArgs, env);
     assert.equal(terminal.code, 77);
     assert.match(terminal.stderr, /login-gate-rerun-exhausted/);
   }
-  assert.equal((await readFile(counter, 'utf8')).trim().split('\n').length, 2);
+  assert.equal((await readFile(counter, 'utf8')).trim().split('\n').length, 11);
 });

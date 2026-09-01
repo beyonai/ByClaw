@@ -86,22 +86,29 @@ class ArtifactApplicationServiceTest {
     }
 
     @Test
-    void publishesSingleHtmlAndResolvesItsCapabilityUrl() {
+    void publishesSingleHtmlWithPublicUrlsAndManagementAccessKey() {
         MockMultipartFile file = new MockMultipartFile("file", "index.html", "text/plain",
             "<h1>preview</h1>".getBytes());
 
         ArtifactDto result = service.publish(file, ArtifactPublishMode.AUTO, null,
             true, null, null, null);
-        String accessKey = result.getPreviewUrl().split("/")[6];
+        String accessKey = result.getAccessKey();
 
         assertThat(result.getKind()).isEqualTo("FILE");
-        assertThat(result.getPreviewUrl()).startsWith("https://preview.test/byaiService/artifact-preview/");
-        assertThat(result.getDownloadUrl()).startsWith("https://preview.test/byaiService/artifact-download/");
+        assertThat(result.getPreviewUrl()).isEqualTo(
+            "https://preview.test/byaiService/artifact-preview/" + result.getArtifactId() + "/");
+        assertThat(result.getDownloadUrl()).isEqualTo(
+            "https://preview.test/byaiService/artifact-download/" + result.getArtifactId());
+        assertThat(accessKey).isNotBlank();
         assertThat(record.get().getStorageRoot()).isEqualTo("/sandbox-volume-root/byclaw-artifacts");
         assertThat(record.get().getAccessKeyHash()).hasSize(64).doesNotContain(accessKey);
         assertThat(result.getPurgeAt()).isAfter(result.getExpiresAt().plusDays(29));
-        assertThat(service.resolvePreview(result.getArtifactId(), accessKey, null)).isNotNull();
-        assertThat(service.resolvePreview(result.getArtifactId(), "wrong-key", null)).isNull();
+        assertThat(service.resolvePreview(result.getArtifactId(), null)).isNotNull();
+        assertThatCode(() -> service.requireManagementDataAccessible(result.getArtifactId(), accessKey))
+            .doesNotThrowAnyException();
+        assertThatThrownBy(() -> service.requireManagementDataAccessible(result.getArtifactId(), "wrong-key"))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessage("Artifact不存在或管理访问密钥无效");
     }
 
     @Test
@@ -135,20 +142,20 @@ class ArtifactApplicationServiceTest {
             "<h1>preview</h1>".getBytes());
         ArtifactDto published = service.publish(file, ArtifactPublishMode.AUTO, null,
             true, null, null, null);
-        String accessKey = published.getPreviewUrl().split("/")[6];
         record.get().setExpiresAt(LocalDateTime.now().minusMinutes(1));
         record.get().setPurgeAt(LocalDateTime.now().plusDays(5));
         when(mapper.renewExpiration(any(), any(), any(), any(), any())).thenReturn(1);
 
-        assertThat(service.resolvePreview(published.getArtifactId(), accessKey, null)).isNull();
-        assertThatCode(() -> service.requireOwnedDataAccessible(published.getArtifactId()))
+        assertThat(service.resolvePreview(published.getArtifactId(), null)).isNull();
+        assertThatCode(() -> service.requireManagementDataAccessible(
+            published.getArtifactId(), published.getAccessKey()))
             .doesNotThrowAnyException();
 
         ArtifactDto renewed = service.renewOwnedExpiration(published.getArtifactId(), 3600L);
 
         assertThat(renewed.getExpiresAt()).isAfter(OffsetDateTime.now());
         assertThat(renewed.getPurgeAt()).isAfter(renewed.getExpiresAt().plusDays(29));
-        assertThat(service.resolvePreview(published.getArtifactId(), accessKey, null)).isNotNull();
+        assertThat(service.resolvePreview(published.getArtifactId(), null)).isNotNull();
     }
 
     @Test

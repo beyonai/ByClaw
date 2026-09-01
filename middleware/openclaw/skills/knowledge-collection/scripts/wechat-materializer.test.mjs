@@ -14,24 +14,25 @@ import { dirname, join } from 'node:path';
 import test from 'node:test';
 
 import { cmdCollect, collectionStatus } from './collection-state.mjs';
-import {
-  atomicWriteJson,
-  ensureSessionSkeleton,
-  newSession,
-  sessionPaths,
-} from './session.mjs';
+import { cmdInit } from './research-state.mjs';
+import { sessionPaths } from './session.mjs';
 import { runWechatMaterialize, sanitizeWechatMarkdown } from './wechat-materializer.mjs';
 
 const fixtures = join(dirname(new URL(import.meta.url).pathname), 'fixtures');
 
 async function initializedSession() {
   const root = await mkdtemp(join(tmpdir(), 'wechat-materializer-'));
-  ensureSessionSkeleton(root);
-  atomicWriteJson(join(root, 'session.json'), newSession({
-    query: '微信文章采集',
-    sourceScope: ['public-internet'],
-    materializationTarget: 'selected',
-  }));
+  cmdInit({
+    'session-dir': root,
+    query: '采集一篇文章',
+    'source-scope': '["public-internet"]',
+    'materialization-target': 'selected',
+    'direct-urls': JSON.stringify([
+      'https://mp.weixin.qq.com/s/mihoyo',
+      'https://mp.weixin.qq.com/s/ambiguous',
+      'https://mp.weixin.qq.com/s/escape',
+    ]),
+  });
   return { root, paths: sessionPaths(root) };
 }
 

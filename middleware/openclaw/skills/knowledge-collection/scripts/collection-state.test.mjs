@@ -10,10 +10,249 @@ import {
   recordDiscoveryResult,
   reserveDiscoveryAttempt,
 } from './discovery-authorization.mjs';
-import { registerFullTextEvidenceReceipt } from './collection-state.mjs';
+import {
+  registerArxivAcquisitionVariant,
+  registerFullTextEvidenceReceipt,
+} from './collection-state.mjs';
 import { sessionPaths } from './session.mjs';
 
 const scriptPath = resolve(dirname(new URL(import.meta.url).pathname), 'knowledge-collection.mjs');
+
+test('collect and read-only status reject off-topic materialized public discovery content', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-collection-topic-gate-'));
+  try {
+    const initialized = await runCli([
+      'init', '--session-dir', root, '--query', '采集一篇关于 DeepSeek 的文章',
+      '--source-scope', '["public-internet"]',
+    ]);
+    assert.equal(initialized.code, 0, initialized.stderr || initialized.stdout);
+    const sessionPath = join(root, 'session.json');
+    const session = JSON.parse(await readFile(sessionPath, 'utf8'));
+    reserveDiscoveryAttempt(session.task.discoveryGate, { query: 'DeepSeek paper', category: 'science' });
+    recordDiscoveryResult(session.task.discoveryGate, {
+      query: 'DeepSeek paper',
+      category: 'science',
+      candidates: [{
+        url: 'https://arxiv.org/abs/2501.12948',
+        title: 'DeepSeek-R1: Incentivizing Reasoning Capability in LLMs',
+        pageType: 'article',
+      }],
+    });
+    await writeFile(sessionPath, `${JSON.stringify(session, null, 2)}\n`);
+    await writeFile(join(root, 'markdown/deepseek.md'), '# Unrelated paper\n\nUnrelated body.\n');
+    await writeFile(join(root, 'sanitized/items/deepseek.md'), '# Unrelated paper\n\nUnrelated body.\n');
+    const payloadPath = join(root, '.collection-inputs/deepseek-topic.json');
+    await writeFile(payloadPath, JSON.stringify({
+      schemaVersion: '1.0',
+      itemId: 'deepseek-topic',
+      source: 'public-internet',
+      sourceSkill: 'bycli',
+      backend: 'arxiv',
+      markdownPath: 'markdown/deepseek.md',
+      sanitizedPath: 'sanitized/items/deepseek.md',
+      canonicalItem: {
+        title: 'Unrelated paper',
+        url: 'https://arxiv.org/abs/2501.12948',
+        author: '',
+        publishTime: '',
+        markdown: 'sanitized/items/deepseek.md',
+        fileName: 'sanitized/items/deepseek.md',
+      },
+    }));
+
+    const rejected = await runCli(['collect', '--session-dir', root, '--item-json-file', payloadPath]);
+    assert.equal(rejected.code, 1);
+    assert.match(rejected.json.error, /MATERIALIZED_CONTENT_NOT_RELEVANT/);
+    assert.equal(JSON.parse(await readFile(sessionPath, 'utf8')).collection.collection.items.length, 0);
+
+    await writeFile(join(root, 'markdown/deepseek.md'), [
+      '# Reasoning model report', '', 'DeepSeek introduces a reinforcement-learning approach.', '',
+      'Benchmarks show how DeepSeek-R1 performs on reasoning tasks.', '',
+    ].join('\n'));
+    await writeFile(join(root, 'sanitized/items/deepseek.md'), [
+      '# Reasoning model report', '', 'DeepSeek introduces a reinforcement-learning approach.', '',
+      'Benchmarks show how DeepSeek-R1 performs on reasoning tasks.', '',
+    ].join('\n'));
+    const accepted = await runCli(['collect', '--session-dir', root, '--item-json-file', payloadPath]);
+    assert.equal(accepted.code, 0, accepted.stderr || accepted.stdout);
+    const collectedSession = JSON.parse(await readFile(sessionPath, 'utf8'));
+    assert.equal(
+      collectedSession.collection.collection.items[0].materializedTopicRelevance.status,
+      'matched',
+    );
+
+    const beforeDriftStatus = await readFile(sessionPath, 'utf8');
+    await writeFile(join(root, 'sanitized/items/deepseek.md'), '# Unrelated replacement\n\nNo matching subject.\n');
+    const drifted = await runCli(['status', '--session-dir', root]);
+    assert.equal(drifted.code, 0, drifted.stderr || drifted.stdout);
+    assert.equal(drifted.json.collection.deliveryComplete, false);
+    assert.equal(drifted.json.downstreamInput, undefined);
+    assert.ok(drifted.json.warnings.some((warning) => /主题相关性/.test(warning)));
+    assert.equal(await readFile(sessionPath, 'utf8'), beforeDriftStatus);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a fetched in-scope crawl frontier item remains exempt from the single-topic gate', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-collection-crawl-topic-exempt-'));
+  try {
+    const initialized = await runCli([
+      'init', '--session-dir', root, '--query', '采集一篇关于 DeepSeek 的文章',
+      '--source-scope', '["public-internet"]',
+    ]);
+    assert.equal(initialized.code, 0, initialized.stderr || initialized.stdout);
+    const sessionPath = join(root, 'session.json');
+    const session = JSON.parse(await readFile(sessionPath, 'utf8'));
+    session.crawl = {
+      schemaVersion: '1.0',
+      scopePrefix: 'https://docs.example.com/',
+      maxPages: 10,
+      maxDepth: 1,
+      seededAt: new Date().toISOString(),
+      coverage: { discovered: 1, duplicate: 0, outOfScope: 0, overCap: 0 },
+      overCapUrls: [],
+      entries: [{
+        url: 'https://docs.example.com/guide',
+        status: 'fetched',
+        depth: 0,
+        itemId: 'crawl-guide',
+        reason: null,
+      }],
+    };
+    await writeFile(sessionPath, `${JSON.stringify(session, null, 2)}\n`);
+    await writeFile(join(root, 'markdown/crawl-guide.md'), '# Installation guide\n\nGeneric body.\n');
+    await writeFile(join(root, 'sanitized/items/crawl-guide.md'), '# Installation guide\n\nGeneric body.\n');
+    const payloadPath = join(root, '.collection-inputs/crawl-guide.json');
+    await writeFile(payloadPath, JSON.stringify({
+      schemaVersion: '1.0',
+      itemId: 'crawl-guide',
+      source: 'public-internet',
+      sourceSkill: 'bycli',
+      backend: 'web',
+      markdownPath: 'markdown/crawl-guide.md',
+      sanitizedPath: 'sanitized/items/crawl-guide.md',
+      canonicalItem: {
+        title: 'Installation guide',
+        url: 'https://docs.example.com/guide',
+        author: '',
+        publishTime: '',
+        markdown: 'sanitized/items/crawl-guide.md',
+        fileName: 'sanitized/items/crawl-guide.md',
+      },
+    }));
+
+    const collected = await runCli(['collect', '--session-dir', root, '--item-json-file', payloadPath]);
+    assert.equal(collected.code, 0, collected.stderr || collected.stdout);
+    const persisted = JSON.parse(await readFile(sessionPath, 'utf8'));
+    assert.equal(persisted.collection.collection.items[0].provenanceKind, 'crawl-frontier');
+    assert.equal(persisted.collection.collection.items[0].discoveryCandidateId, undefined);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('collect blocks a legacy public session whose discovery gate is missing', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-collection-missing-topic-gate-'));
+  try {
+    const initialized = await runCli([
+      'init', '--session-dir', root, '--query', '采集一篇关于 DeepSeek 的文章',
+      '--source-scope', '["public-internet"]',
+    ]);
+    assert.equal(initialized.code, 0, initialized.stderr || initialized.stdout);
+    const sessionPath = join(root, 'session.json');
+    const session = JSON.parse(await readFile(sessionPath, 'utf8'));
+    delete session.task.discoveryGate;
+    await writeFile(sessionPath, `${JSON.stringify(session, null, 2)}\n`);
+    await writeFile(join(root, 'markdown/deepseek.md'), '# DeepSeek\n\nDeepSeek-R1 body.\n');
+    await writeFile(join(root, 'sanitized/items/deepseek.md'), '# DeepSeek\n\nDeepSeek-R1 body.\n');
+    const payloadPath = join(root, '.collection-inputs/missing-topic-gate.json');
+    await writeFile(payloadPath, JSON.stringify({
+      schemaVersion: '1.0',
+      itemId: 'deepseek-missing-gate',
+      source: 'public-internet',
+      sourceSkill: 'bycli',
+      backend: 'web',
+      markdownPath: 'markdown/deepseek.md',
+      sanitizedPath: 'sanitized/items/deepseek.md',
+      canonicalItem: {
+        title: 'DeepSeek',
+        url: 'https://example.com/deepseek',
+        author: '',
+        publishTime: '',
+        markdown: 'sanitized/items/deepseek.md',
+        fileName: 'sanitized/items/deepseek.md',
+      },
+    }));
+
+    const collected = await runCli(['collect', '--session-dir', root, '--item-json-file', payloadPath]);
+    assert.equal(collected.code, 1);
+    assert.match(collected.json.error, /DISCOVERY_RELEVANCE_MIGRATION_REQUIRED/);
+    assert.equal(JSON.parse(await readFile(sessionPath, 'utf8')).collection.collection.items.length, 0);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('legacy public inspect and export views surface the topic migration warning', async () => {
+  const root = await createCollectedSession();
+  try {
+    const sessionPath = join(root, 'session.json');
+    const session = JSON.parse(await readFile(sessionPath, 'utf8'));
+    session.task.discoveryGate.schemaVersion = '1.0';
+    delete session.task.discoveryGate.topicContract;
+    for (const candidate of session.task.discoveryGate.candidates) delete candidate.topicRelevance;
+    await writeFile(sessionPath, `${JSON.stringify(session, null, 2)}\n`);
+
+    const inspected = await runCli(['inspect', '--session-dir', root]);
+    assert.equal(inspected.code, 0, inspected.stderr || inspected.stdout);
+    assert.ok(inspected.json.warnings.some((warning) => /旧公共发现会话.*主题相关性授权/.test(warning)));
+
+    const exported = await runCli(['export-views', '--session-dir', root]);
+    assert.equal(exported.code, 0, exported.stderr || exported.stdout);
+    assert.ok(exported.json.warnings.some((warning) => /旧公共发现会话.*主题相关性授权/.test(warning)));
+
+    const payloadPath = join(root, '.collection-inputs/legacy-update.json');
+    await writeFile(payloadPath, JSON.stringify({
+      schemaVersion: '1.0', itemId: 'paper',
+      markdownPath: 'markdown/paper.md', sanitizedPath: 'sanitized/items/paper.md',
+      canonicalItem: {
+        title: 'Paper', url: 'https://example.com/paper', author: '', publishTime: '',
+        markdown: 'sanitized/items/paper.md', fileName: 'sanitized/items/paper.md',
+      },
+    }));
+    const mutated = await runCli(['collect', '--session-dir', root, '--item-json-file', payloadPath]);
+    assert.equal(mutated.code, 1);
+    assert.match(mutated.json.error, /DISCOVERY_RELEVANCE_MIGRATION_REQUIRED/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('persists a validated arXiv acquisition variant without changing the canonical candidate', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-collection-arxiv-variant-'));
+  try {
+    const initialized = await runCli([
+      'init', '--session-dir', root, '--query', 'DeepSeek-R1 full text',
+      '--direct-urls', '["https://arxiv.org/pdf/2501.12948"]',
+    ]);
+    assert.equal(initialized.code, 0, initialized.stderr || initialized.stdout);
+
+    const candidate = registerArxivAcquisitionVariant(sessionPaths(root), {
+      sourceUrl: 'https://arxiv.org/pdf/2501.12948',
+      acquisitionUrl: 'https://arxiv.org/html/2501.12948v2',
+    });
+    assert.equal(candidate.canonicalUrl, 'https://arxiv.org/pdf/2501.12948');
+
+    const persisted = JSON.parse(await readFile(join(root, 'session.json'), 'utf8'));
+    assert.deepEqual(persisted.task.discoveryGate.candidates[0].acquisitionUrls, [
+      'https://arxiv.org/pdf/2501.12948',
+      'https://arxiv.org/html/2501.12948v2',
+    ]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test('collect rejects a public URL that was not authorized by discovery', async () => {
   const root = await mkdtemp(join(tmpdir(), 'knowledge-collection-discovery-gate-'));

@@ -1,5 +1,5 @@
 import React from 'react';
-import { useDispatch } from '@umijs/max';
+import { useDispatch, useIntl } from '@umijs/max';
 import { Drawer, Pagination, Progress } from 'antd';
 import { ArrowRightOutlined, CheckCircleFilled, ClockCircleOutlined, TeamOutlined } from '@ant-design/icons';
 import classnames from 'classnames';
@@ -36,6 +36,7 @@ interface Props {
 
 function AgentTeamsHeaderActivity({ rootSessionId, currentSession }: Props) {
   const dispatch = useDispatch();
+  const intl = useIntl();
   const { setSessionId } = useGlobal();
   const snapshot = useAgentTeamsSnapshot(rootSessionId);
   const [open, setOpen] = React.useState(false);
@@ -77,7 +78,7 @@ function AgentTeamsHeaderActivity({ rootSessionId, currentSession }: Props) {
       <button
         type="button"
         className={styles.teamActivityButton}
-        aria-label="打开团队活动面板"
+        aria-label={intl.formatMessage({ id: 'agentTeamsActivity.openPanel' })}
         onClick={() => setOpen(true)}
       >
         <TeamOutlined />
@@ -88,12 +89,11 @@ function AgentTeamsHeaderActivity({ rootSessionId, currentSession }: Props) {
         open={open}
         width={440}
         placement="right"
-        title="AgentTeams 活动面板"
+        title={intl.formatMessage({ id: 'agentTeamsActivity.panelTitle' })}
         rootClassName={activityStyles.activityDrawer}
         onClose={() => setOpen(false)}
       >
         <div className={activityStyles.panelHero}>
-          <div className={activityStyles.heroEyebrow}>{snapshot.source || 'DSH'} · TEAM RUNTIME</div>
           <h2>{teamName}</h2>
           <p>{snapshot.team.description || '统一查看团队成员与任务进展'}</p>
           <div className={activityStyles.heroStats}>

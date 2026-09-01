@@ -5,6 +5,8 @@ import personalModel from '@/pages/models/locales/en-US';
 export default {
   ...manager,
   ...personalModel,
+  'agentTeamsActivity.openPanel': 'Open expert team activity panel',
+  'agentTeamsActivity.panelTitle': 'Expert Team Activity',
   // Common Actions
   'common.add': 'Add',
   'menu.projectSpace': 'Project Space',
@@ -495,6 +497,9 @@ export default {
   'chatTitle.saveAsTemplate': 'Save as Template',
   'chatResource.title': 'Conversation Resources',
   'chatResource.close': 'Close resource list',
+  'chatResource.closeTab': 'Close',
+  'chatResource.closeOtherTabs': 'Close other tabs',
+  'chatResource.closeRightTabs': 'Close tabs to the right',
   'chatResource.toggleList': 'Toggle resource list',
   'chatResource.currentSession': 'Conversation',
   'chatResource.currentEmployee': 'Employee',

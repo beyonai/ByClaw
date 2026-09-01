@@ -41,13 +41,13 @@ class ArtifactDataRecordServiceTest {
         when(mapper.insert(any())).thenReturn(1);
         ArtifactDataCreateRequest request = createRequest(Map.of("title", "Plan trip", "done", false));
 
-        ArtifactDataRecordDto result = service.createPublic("artifact-1", "access-key", request);
+        ArtifactDataRecordDto result = service.createPublic("artifact-1", request);
 
         assertThat(result.getRecordKey()).isNotBlank();
         assertThat(result.getCollectionName()).isEqualTo("tasks");
         assertThat(result.getData()).containsEntry("title", "Plan trip").containsEntry("done", false);
         assertThat(result.getVersion()).isEqualTo(1);
-        verify(artifactApplicationService).requireCapabilityDataAccessible("artifact-1", "access-key");
+        verify(artifactApplicationService).requirePublicDataAccessible("artifact-1");
         ArgumentCaptor<ArtifactDataRecord> captor = ArgumentCaptor.forClass(ArtifactDataRecord.class);
         verify(mapper).insert(captor.capture());
         assertThat(captor.getValue().getDataJson()).contains("\"title\":\"Plan trip\"")
@@ -58,16 +58,16 @@ class ArtifactDataRecordServiceTest {
     void queriesPublicRecordByRecordKey() {
         when(mapper.selectByRecordKey("artifact-1", "record-1")).thenReturn(storedRecord());
 
-        ArtifactDataRecordDto result = service.getPublic("artifact-1", "access-key", "record-1");
+        ArtifactDataRecordDto result = service.getPublic("artifact-1", "record-1");
 
         assertThat(result.getRecordKey()).isEqualTo("record-1");
         assertThat(result.getCollectionName()).isEqualTo("tasks");
         assertThat(result.getData()).containsEntry("title", "Plan trip");
-        verify(artifactApplicationService).requireCapabilityDataAccessible("artifact-1", "access-key");
+        verify(artifactApplicationService).requirePublicDataAccessible("artifact-1");
     }
 
     @Test
-    void listsOwnedRecordsByCollectionWithBoundedPagination() {
+    void listsRecordsByManagementAccessKeyWithBoundedPagination() {
         ArtifactDataRecord secondRecord = storedRecord();
         secondRecord.setRecordKey("record-2");
         secondRecord.setDataJson("{\"title\":\"Book hotel\"}");
@@ -75,7 +75,8 @@ class ArtifactDataRecordServiceTest {
         when(mapper.selectPageByArtifact("artifact-1", "tasks", 0L, 20))
             .thenReturn(List.of(storedRecord(), secondRecord));
 
-        PageInfo<ArtifactDataRecordDto> result = service.listOwned("artifact-1", " tasks ", 1, 20);
+        PageInfo<ArtifactDataRecordDto> result = service.listPublic(
+            "artifact-1", "management-key", " tasks ", 1, 20);
 
         assertThat(result.getPageNum()).isEqualTo(1);
         assertThat(result.getPageSize()).isEqualTo(20);
@@ -83,12 +84,12 @@ class ArtifactDataRecordServiceTest {
         assertThat(result.getTotalPages()).isEqualTo(1);
         assertThat(result.getList()).extracting(ArtifactDataRecordDto::getRecordKey)
             .containsExactly("record-1", "record-2");
-        verify(artifactApplicationService).requireOwnedDataAccessible("artifact-1");
+        verify(artifactApplicationService).requireManagementDataAccessible("artifact-1", "management-key");
     }
 
     @Test
-    void rejectsOwnerListPageSizeAboveLimit() {
-        assertThatThrownBy(() -> service.listOwned("artifact-1", null, 1, 101))
+    void rejectsManagementListPageSizeAboveLimit() {
+        assertThatThrownBy(() -> service.listPublic("artifact-1", "management-key", null, 1, 101))
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessage("pageSize必须在1到100之间");
     }
@@ -99,7 +100,7 @@ class ArtifactDataRecordServiceTest {
         when(mapper.updateData(any(), any(), any(), any(), any())).thenReturn(1);
 
         ArtifactDataRecordDto result = service.updatePublic(
-            "artifact-1", "access-key", "record-1", updateRequest(1));
+            "artifact-1", "record-1", updateRequest(1));
 
         assertThat(result.getVersion()).isEqualTo(2);
         assertThat(result.getData()).containsEntry("title", "Book hotel");
@@ -113,7 +114,7 @@ class ArtifactDataRecordServiceTest {
         ReflectionTestUtils.setField(service, "maxRecordBytes", 10);
         ArtifactDataCreateRequest request = createRequest(Map.of("message", "too long"));
 
-        assertThatThrownBy(() -> service.createOwned("artifact-1", request))
+        assertThatThrownBy(() -> service.createPublic("artifact-1", request))
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessage("Artifact数据超过单条大小限制");
     }
