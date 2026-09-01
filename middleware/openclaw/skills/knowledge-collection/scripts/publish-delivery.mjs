@@ -93,15 +93,25 @@ function directoryIsEmpty(directory) {
   return fs.readdirSync(directory).length === 0;
 }
 
-function taskSlug(query) {
-  const slug = String(query || 'collection')
+function slugify(value) {
+  const slug = String(value || 'collection')
     .normalize('NFKC')
     .toLowerCase()
     .replace(/[^\p{Letter}\p{Number}]+/gu, '-')
     .replace(/^-+|-+$/g, '')
-    .slice(0, 40)
+    .slice(0, 32)
     .replace(/-+$/g, '');
   return slug || 'collection';
+}
+
+function taskSlug(session) {
+  const materialized = session.collection?.collection?.items?.find((item) => (
+    item?.materialization?.status === 'materialized'
+      && item.duplicateOf === null
+      && typeof item.title === 'string'
+      && item.title.trim()
+  ));
+  return slugify(materialized?.title || session.task?.query);
 }
 
 function shortRunId(paths) {
@@ -109,7 +119,7 @@ function shortRunId(paths) {
 }
 
 function allocateChild(requested, session, paths) {
-  const base = `${taskSlug(session.task?.query)}-collection-${shortRunId(paths)}`;
+  const base = `${taskSlug(session)}-collection-${shortRunId(paths)}`;
   for (let index = 1; index <= 1000; index += 1) {
     const name = index === 1 ? base : `${base}-${index}`;
     const candidate = path.join(requested, name);

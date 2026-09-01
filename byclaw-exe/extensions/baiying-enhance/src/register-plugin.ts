@@ -132,6 +132,7 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
       logger: taskPlanLogger,
     }),
     logger: taskPlanLogger,
+    enabled: false,
   });
   warnIfConversationHooksBlocked(api);
   api.registerReload({

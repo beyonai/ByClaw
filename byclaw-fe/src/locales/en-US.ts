@@ -3415,10 +3415,12 @@ export default {
   'sandbox.status.running': 'Sandbox Running',
   'sandbox.status.transitioning': 'Sandbox Starting/Stopping',
   'sandbox.status.stopped': 'Sandbox Stopped',
+  'sandbox.status.noServices': 'No sandbox services',
+  'sandbox.status.summary': '{running}/{total} sandbox services running, {transitioning} transitioning',
   'sandbox.action.restart': 'Restart Sandbox',
   'sandbox.restart.confirm.title': 'Confirm Restart Sandbox',
   'sandbox.restart.confirm.content':
-    'Restarting the sandbox will interrupt currently running tasks. Are you sure you want to continue?',
+    'Restarting the {sandboxType} sandbox service will interrupt its running tasks. Are you sure you want to continue?',
   'sandbox.restart.confirm.ok': 'OK',
   'sandbox.restart.confirm.cancel': 'Cancel',
   'sandbox.restart.success': 'Sandbox restarted successfully',

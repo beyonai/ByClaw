@@ -275,6 +275,20 @@ test('browser state parser distinguishes running, stopped, and unknown without p
   assert.equal(parseBrowserState(fail(1, 'profile 9gvevbxy')), 'unknown');
 });
 
+test('browser state parser recognizes the deployed OpenClaw running false text format', () => {
+  const status = `profile: openclaw
+enabled: true
+running: false
+transport: cdp
+cdpPort: 9222
+browser: unknown
+detectedBrowser: custom
+detectedPath: /usr/bin/chromium
+headless: false (profile)`;
+
+  assert.equal(parseBrowserState(ok(status)), 'stopped');
+});
+
 test('CLI cold-start scenario executes configured start-chrome process and reaches ready state', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'bridge-cli-scenario-'));
   t.after(() => rm(root, { recursive: true, force: true }));

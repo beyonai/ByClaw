@@ -38,6 +38,8 @@
 node scripts/knowledge-collection.mjs publish --session-dir <dir> --delivery-dir <path>
 ```
 
+publish 之前不得创建、写入或用临时文件探测用户交付目录。采集失败时只保留内部会话和审计证据，目标目录原本不存在就必须继续不存在。
+
 相对路径同时传 `--session-root <Session Root>`，绝对路径按原值使用。发布器只复制经验证的 Markdown 及其引用的本地图片，
 并按交付布局改写相对图片链接。根级 `post-01.md` 与 `post-01-images/` 保持伴随布局；
 `<item>/index.md` 与 `<item>/assets/` 发布为 `<item>.md` 与 `<item>-assets/`。
@@ -60,6 +62,8 @@ node scripts/knowledge-collection.mjs publish --session-dir <dir> --delivery-dir
 当用户在同一个请求中还要求继续消费已保存文件时，根 Agent 必须把原样的 `deliveryInput` 传给下游 Agent，下游只能读取
 `deliveryInput.files`，图片从 Markdown 相对链接解析。不得扫描或猜测交付目录。独立启动且没有对话上下文的 Agent 若未收到
 `deliveryInput` 或内部 `session-dir`，无法可靠知道先前路径，必须向上游索取明确交接对象。
+
+成功执行 `publish` 后，首次最终答复必须同时报告 `delivery.actualDirectory`，并在 JSON 代码块中原样回显 `deliveryInput`；不得只报告路径、改写字段、遗漏 `files`，或等用户追问后再补交。
 
 ## 交付内容
 

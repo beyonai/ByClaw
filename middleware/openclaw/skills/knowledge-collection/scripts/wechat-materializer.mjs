@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { recordPendingCollectionItem } from './collection-state.mjs';
+import { recordPendingCollectionItem, registerFullTextEvidenceReceipt } from './collection-state.mjs';
 import { atomicWriteJson, isInside, readJson } from './session.mjs';
 
 const ITEM_ID = /^[a-z0-9][a-z0-9_-]{0,63}$/;
@@ -234,6 +234,10 @@ export async function runWechatMaterialize(paths, args, options = {}) {
   const baseDiagnostics = {
     schemaVersion: '1.0',
     itemId,
+    executor: 'bycli',
+    sourceUrl: resolvedUrl,
+    complete: sanitized.confidence === 'high',
+    contentGranularity: sanitized.confidence === 'high' ? 'full-text' : 'unknown',
     ruleVersion: 'wechat-v1',
     confidence: sanitized.confidence,
     reasonCodes: sanitized.reasonCodes,
@@ -265,6 +269,11 @@ export async function runWechatMaterialize(paths, args, options = {}) {
       backend: 'bycli',
       rawArtifacts,
       contentGranularity: 'full-text',
+      fullTextEvidence: {
+        schemaVersion: '1.0',
+        executor: 'bycli',
+        artifact: diagnosticsRelative,
+      },
       media: {
         coverStatus: 'unknown',
         coverCount: 0,
@@ -317,6 +326,13 @@ export async function runWechatMaterialize(paths, args, options = {}) {
     totalMs: elapsedMilliseconds(totalStartedAt, now()),
   };
   atomicWriteJson(diagnosticsPath, { ...baseDiagnostics, timing });
+  if (collectPayloadPath) {
+    registerFullTextEvidenceReceipt(paths, {
+      executor: 'bycli',
+      sourceUrl: resolvedUrl,
+      artifact: diagnosticsRelative,
+    });
+  }
   return {
     ok: true,
     action: 'materialize-wechat',
