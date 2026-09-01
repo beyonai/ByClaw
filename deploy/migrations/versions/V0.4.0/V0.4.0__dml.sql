@@ -988,3 +988,50 @@ INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_grou
 INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'SYSTEM_MODEL_IMAGE_GENERATION_PROVIDER_NAME', '文生图模型提供商(IMAGE_GENERATION)', 'Vydra', 'Vydra', 'VYDRA', 'Vydra', 10);
 INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'SYSTEM_MODEL_IMAGE_GENERATION_PROVIDER_NAME', '文生图模型提供商(IMAGE_GENERATION)', 'xAI', 'xAI', 'XAI', 'xAI', 11);
 INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'SYSTEM_MODEL_IMAGE_GENERATION_PROVIDER_NAME', '文生图模型提供商(IMAGE_GENERATION)', 'Volcengine Ark', 'Volcengine Ark', 'VOLCENGINE', 'Volcengine Ark', 12);
+
+/**更新技能描述以及添加技能**/
+update ss_resource set resource_desc ='将本地资料导入 ByClaw 知识库或项目云盘，并按需发现或补全 KnowledgeEntity。用于用户要求知识整理、资料入库、知识实体发现、知识丰富或知识构建时。' where resource_code in('knowledge-organizer');
+
+delete from byai.ss_resource where resource_id in(25);
+delete from byai.ss_res_ext_skill where resource_id in(25);
+INSERT INTO byai.ss_resource (resource_id, system_code, resource_source_pk_id, resource_biz_type, resource_type, resource_name, resource_desc, avatar, sample, tags, resource_version_id, host_type, catalog_id, man_org_id, man_user_id, index_list, create_by, create_time, update_by, update_time, com_acct_id, resource_status, resource_d_verid, resource_r_verid, resource_code, publish_time, shelf_time, unshelf_time, auth_status, publish_portal, parent_resource_id, publish_type, owner_type, impl_type, worker_agent_type) VALUES (25, 'BYAI', null, 'SKILL', 'ATOM', '知识库文档收集', '将本地资料导入 ByClaw 知识库或项目云盘，并按需发现或补全 KnowledgeEntity。用于用户要求知识整理、资料入库、知识实体发现、知识丰富或知识构建时。', null, null, null, '1.0', 'hosted', 10, -1, '10001', null, 10001, '2026-06-29 08:38:43.079632', 10001, '2026-06-29 08:38:43.079632', 1, 2, -1, -1, 'collect-knowledge-documents', '2026-06-29 08:38:43.079632', null, null, 'passed', 1, -1, 'publish', 'enterprise', 'SKILL', 'NONE');
+INSERT INTO byai.ss_res_ext_skill (resource_id, skill_type, source_type, version, skill_url, skill_package_format, skill_original_filename, skill_package_size, skill_package_hash, target_content, sync_status, sync_error, last_sync_time) VALUES (25, 'inner', 'SYSTEM_BUILTIN', 'v0.1', null, 'zip', null, null, null, '{"resourceId" : 23, "resourceCode" : "by-doc-to-markdown", "resourceName" : "文档转markdown", "resourceDesc" : "通过 by‑doc‑to‑markdown 命令行工具将文档转为 Markdown 文件。适用于智能体或用户需要把本地文档转换成 Markdown 的场景：支持 PDF、doc、docx、xls、xlsx、ppt、pptx 格式文件作为输入；借助服务发现调用后端 fileToMarkdown 接口，并将转换完成后的 Markdown 内容保存至本地文件。", "resourceBizType" : "SKILL", "resourceType" : "ATOM", "ownerType" : "enterprise", "sourceType" : "SYSTEM_BUILTIN", "skillType" : "inner", "skillUrl" : null, "version" : "v0.1", "skillPackageFormat" : "zip", "skillOriginalFilename" : null, "skillPackageSize" : null, "skillPackageHash" : null, "syncStatus" : "SUCCESS", "syncError" : null, "lastSyncTime" : "2026-07-20 09:08:24"}', 'SUCCESS', null, '2026-07-20 09:08:24.086339');
+
+UPDATE byai.ss_res_ext_skill e
+SET
+    skill_type = 'inner',
+    source_type = 'SYSTEM_BUILTIN',
+    version = COALESCE(NULLIF(e.version, ''), 'v0.1'),
+    skill_url = '',
+    skill_package_format = 'zip',
+    skill_original_filename = NULL,
+    skill_package_size = NULL,
+    skill_package_hash = NULL,
+    target_content = json_build_object(
+        'resourceId', r.resource_id,
+        'resourceCode', r.resource_code,
+        'resourceName', r.resource_name,
+        'resourceDesc', r.resource_desc,
+        'resourceBizType', r.resource_biz_type,
+        'resourceType', r.resource_type,
+        'ownerType', r.owner_type,
+        'sourceType', 'SYSTEM_BUILTIN',
+        'skillType', 'inner',
+        'skillUrl', '',
+        'version', COALESCE(NULLIF(e.version, ''), 'v0.1'),
+        'skillPackageFormat', 'zip',
+        'skillOriginalFilename', NULL,
+        'skillPackageSize', NULL,
+        'skillPackageHash', NULL,
+        'syncStatus', 'SUCCESS',
+        'syncError', NULL,
+        'lastSyncTime', to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')
+                     )::text,
+    sync_status = 'SUCCESS',
+    sync_error = NULL,
+    last_sync_time = CURRENT_TIMESTAMP
+FROM byai.ss_resource r
+WHERE e.resource_id = r.resource_id
+  AND r.resource_biz_type = 'SKILL'
+  AND r.owner_type = 'enterprise'
+  AND r.resource_code IN ('knowledge-organizer','collect-knowledge-documents');
