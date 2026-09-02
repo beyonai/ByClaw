@@ -963,3 +963,5 @@ VALUES (
     '',
     CURRENT_TIMESTAMP
 );
+COMMENT ON COLUMN byai.byai_connector_info.connector_type IS
+    '连接器类型：SYSTEM=系统内置，CUSTOM=自定义连接器，ACCOUNT_TEMPLATE=运营账号初始化模板';

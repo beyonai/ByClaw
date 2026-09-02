@@ -303,6 +303,24 @@ class ConnectorSchemaTest {
     }
 
     @Test
+    void v040SeedsWeixinOfficialWebAccountTemplate() throws Exception {
+        String ddl = read("deploy/migrations/versions/V0.4.0/V0.4.0__ddl.sql");
+        String dml = read("deploy/migrations/versions/V0.4.0/V0.4.0__dml.sql");
+
+        assertThat(ddl).contains("account_template");
+        assertThat(dml).contains(
+            "'weixin-official-web'",
+            "'微信公众号'",
+            "'account_template'",
+            "\"platformcode\":\"customlink\"",
+            "\"accountname\":\"微信公众号\"",
+            "\"accountcode\":\"\"",
+            "\"customurl\":\"https://mp.weixin.qq.com/\""
+        );
+        assertThat(dml).contains("where not exists");
+    }
+
+    @Test
     void enabledConnectorMetadataQueryUsesCredentialStateInsteadOfAccessExpiration() throws Exception {
         String sql = read("byclaw-be/src/main/java/com/iwhalecloud/byai/manager/mapper/connector/ConnectorAuthMapper.java");
 
