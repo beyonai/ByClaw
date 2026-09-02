@@ -5,6 +5,7 @@ import { head, last, size } from 'lodash';
 import React, { forwardRef, useCallback, useImperativeHandle } from 'react';
 
 import MessageInfiniteScroll from '@/components/MessageList/components/MessageInfiniteScroll';
+import ConversationNavigator from '@/components/MessageList/components/ConversationNavigator';
 import useToBottomBtn from '@/components/MessageList/hooks/useToBottomBtn';
 import useRender from './useRender';
 import DividerTips from '@/components/MessageList/components/DividerTips';
@@ -61,6 +62,7 @@ function MessageList(props: IProps, ref: any) {
     updateMessage,
     deleteMessage,
     sessionId,
+    hideAction,
   });
   const { toBottomBtnVisable, setToBottomBtnVisable } = useToBottomBtn({
     messageList,
@@ -154,6 +156,18 @@ function MessageList(props: IProps, ref: any) {
           </MessageInfiniteScroll>
         </div>
       </MessageListContext.Provider>
+      {sessionId && !hideAction && (
+        <ConversationNavigator
+          sessionId={sessionId}
+          messageList={messageList}
+          scrollContainerId={scrollMessageDomId.current}
+          onLoadedMessageClick={() => {
+            if (infiniteScrollRef.current) {
+              infiniteScrollRef.current.isLastScrollAtBottom = false;
+            }
+          }}
+        />
+      )}
       {toBottomBtnVisable && showToBottomBtn && (
         <div className={classnames(styles.toBottomBtn, 'pointer')}>
           <Button

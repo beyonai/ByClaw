@@ -7,6 +7,7 @@ import { copyWithMessage } from '@/utils/copy';
 import { getIntl } from '@umijs/max';
 
 import TextHighlight from './TextHighlight';
+import type { MarkdownImageResolver } from './Md';
 import styles from './Html.module.less';
 
 // loader.config({
@@ -15,8 +16,8 @@ import styles from './Html.module.less';
 //   },
 // });
 
+/* eslint-disable lines-around-comment */
 export interface HtmlPreviewProps {
-
   /** 资源链接 */
   // eslint-disable-next-line react/no-unused-prop-types
   href?: string;
@@ -27,61 +28,203 @@ export interface HtmlPreviewProps {
   /** 标题 */
   title?: string;
 }
+/* eslint-enable lines-around-comment */
 
-export const HtmlRender = React.memo((props: { content?: string; safe?: boolean; href?: string }) => {
-  const { content, href, safe = true } = props;
-  const [loading, setLoading] = useState<boolean>(false);
-  const ref = useRef<HTMLIFrameElement>(null);
+const isRelativeResourcePath = (path: string) =>
+  !path.startsWith('/') && !path.startsWith('#') && !path.startsWith('//') && !/^[a-z][a-z\d+.-]*:/i.test(path);
 
-  const onLoad = () => {
-    setLoading(false);
-  };
+const resolveHtmlResources = async (
+  content: string,
+  resolver: MarkdownImageResolver,
+  onLinkClick?: (href: string) => void
+) => {
+  const document = new DOMParser().parseFromString(content, 'text/html');
+  const resourceNodes = [
+    ...Array.from(document.querySelectorAll<HTMLElement>('img[src], source[src]')).map((element) => ({
+      element,
+      attribute: 'src',
+    })),
+    ...Array.from(document.querySelectorAll<HTMLElement>('video[poster]')).map((element) => ({
+      element,
+      attribute: 'poster',
+    })),
+    ...Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href]')).map((element) => ({
+      element,
+      attribute: 'href',
+    })),
+  ];
+  const objectUrls: string[] = [];
 
-  useEffect(() => {
-    let objectUrl: string | undefined;
+  await Promise.all(
+    resourceNodes.map(async ({ element, attribute }) => {
+      const resourcePath = element.getAttribute(attribute);
+      if (!resourcePath || !isRelativeResourcePath(resourcePath)) return;
 
-    // 如果存在资源链接，则使用资源链接
-    if (href && !content) {
-      if (ref.current) {
-        setLoading(true);
-        ref.current.src = href;
-      }
-    }
-
-    // 如果存在内容，则使用内容
-    if (content && !href) {
-      if (safe) {
-        const blob = new Blob([content], { type: 'text/html' });
-        if (ref.current) {
-          setLoading(true);
-          objectUrl = URL.createObjectURL(blob);
-          ref.current.src = objectUrl;
+      try {
+        const resolvedResource = await resolver(resourcePath);
+        if (resolvedResource instanceof Blob) {
+          const objectUrl = URL.createObjectURL(resolvedResource);
+          objectUrls.push(objectUrl);
+          element.setAttribute(attribute, objectUrl);
+        } else if (resolvedResource) {
+          element.setAttribute(attribute, resolvedResource);
         }
-      }
-      if (!safe) {
-        if (ref.current) {
-          setLoading(true);
-          ref.current.srcdoc = content;
+        if (element.tagName === 'A') {
+          element.setAttribute('data-preview-resource-path', resourcePath);
+          (element as HTMLAnchorElement).target =
+            onLinkClick && isRelativeResourcePath(resourcePath) ? '_self' : '_blank';
+          (element as HTMLAnchorElement).rel = 'noopener noreferrer';
+          if (onLinkClick && isRelativeResourcePath(resourcePath)) {
+            element.addEventListener('click', (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onLinkClick(resourcePath);
+            });
+          }
         }
+      } catch {
+        // 单个资源解析失败时保留原始地址，不影响 HTML 其它内容预览。
       }
-    }
-
-    return () => {
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [content, safe, href]);
-
-  return (
-    <section className={styles.html}>
-      {loading && (
-        <div className={styles.loader}>
-          <span />
-        </div>
-      )}
-      <iframe ref={ref} title={getIntl().formatMessage({ id: 'preview.htmlPreview' })} onLoad={onLoad} />
-    </section>
+    })
   );
-});
+
+  return { content: document.documentElement.outerHTML, objectUrls };
+};
+
+export const HtmlRender = React.memo(
+  (props: {
+    content?: string;
+    data?: Blob;
+    safe?: boolean;
+    href?: string;
+    resolveResource?: MarkdownImageResolver;
+    onLinkClick?: (href: string) => void;
+  }) => {
+    const { content, data, href, safe = true, resolveResource, onLinkClick } = props;
+    const [loading, setLoading] = useState<boolean>(false);
+    const [blobContent, setBlobContent] = useState<string>();
+    const ref = useRef<HTMLIFrameElement>(null);
+    const htmlContent = content !== undefined ? content : blobContent;
+
+    const onLoad = () => {
+      // HTML 在 iframe 中预览时，链接默认可能被当前 iframe 接管，导致点击后出现空白页。
+      // 统一改为新标签页打开，并保留安全的 opener 防护。
+      const document = ref.current?.contentDocument;
+      document?.querySelectorAll<HTMLAnchorElement>('a[href]').forEach((anchor) => {
+        const relativePath = anchor.getAttribute('data-preview-resource-path') || anchor.getAttribute('href') || '';
+        const isInternalLink = !!onLinkClick && isRelativeResourcePath(relativePath);
+        anchor.target = isInternalLink ? '_self' : '_blank';
+        anchor.rel = 'noopener noreferrer';
+        if (isInternalLink) {
+          anchor.onclick = (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onLinkClick(relativePath);
+            return false;
+          };
+        }
+      });
+      document?.addEventListener(
+        'click',
+        (event) => {
+          const target = event.target;
+          if (!(target instanceof Element)) return;
+          const anchor = target.closest<HTMLAnchorElement>('a[href]');
+          const link = anchor?.getAttribute('data-preview-resource-path') || anchor?.getAttribute('href');
+          if (!anchor || !link || !onLinkClick || !isRelativeResourcePath(link)) return;
+          event.preventDefault();
+          event.stopPropagation();
+          onLinkClick(link);
+        },
+        true
+      );
+      setLoading(false);
+    };
+
+    useEffect(() => {
+      let objectUrl: string | undefined;
+      let resourceObjectUrls: string[] = [];
+      let active = true;
+
+      const revokeResourceObjectUrls = () => {
+        resourceObjectUrls.forEach((url) => URL.revokeObjectURL(url));
+        resourceObjectUrls = [];
+      };
+
+      const renderContent = (resolvedContent: string, resolvedObjectUrls: string[] = []) => {
+        resourceObjectUrls = resolvedObjectUrls;
+        if (!active) {
+          revokeResourceObjectUrls();
+          return;
+        }
+
+        if (safe) {
+          const blob = new Blob([resolvedContent], { type: 'text/html' });
+          if (ref.current) {
+            objectUrl = URL.createObjectURL(blob);
+            ref.current.src = objectUrl;
+          }
+        } else if (ref.current) {
+          ref.current.srcdoc = resolvedContent;
+        }
+        setLoading(false);
+      };
+
+      // 如果存在资源链接，则使用资源链接
+      if (href && !content) {
+        if (ref.current) {
+          setLoading(true);
+          ref.current.src = href;
+        }
+      }
+
+      // 如果存在内容，则使用内容
+      if (htmlContent !== undefined && !href) {
+        setLoading(true);
+        if (resolveResource) {
+          void resolveHtmlResources(htmlContent, resolveResource, onLinkClick)
+            .then(({ content: resolvedContent, objectUrls }) => renderContent(resolvedContent, objectUrls))
+            .catch(() => renderContent(htmlContent));
+        } else {
+          renderContent(htmlContent);
+        }
+      }
+
+      return () => {
+        active = false;
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+        revokeResourceObjectUrls();
+      };
+    }, [htmlContent, href, onLinkClick, resolveResource, safe]);
+
+    useEffect(() => {
+      if (content !== undefined || !(data instanceof Blob)) {
+        setBlobContent(undefined);
+        return;
+      }
+
+      let active = true;
+      void data.text().then((text) => {
+        if (active) setBlobContent(text);
+      });
+
+      return () => {
+        active = false;
+      };
+    }, [content, data]);
+
+    return (
+      <section className={styles.html}>
+        {loading && (
+          <div className={styles.loader}>
+            <span />
+          </div>
+        )}
+        <iframe ref={ref} title={getIntl().formatMessage({ id: 'preview.htmlPreview' })} onLoad={onLoad} />
+      </section>
+    );
+  }
+);
 
 export default function HtmlPreview(props: HtmlPreviewProps) {
   const { data, title } = props;

@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import dayjs from 'dayjs';
-import { listTasks } from '@/service/devloop';
+import { listOperationTasks, listTasks } from '@/service/devloop';
 import SessionOverviewDrawer from '../SessionOverviewDrawer';
 
 // 单测只校验任务看板行为，避免加载 Umi 运行时及其 Node 环境依赖。
@@ -43,6 +43,7 @@ jest.mock('antd', () => {
 
 jest.mock('@/service/devloop', () => ({
   listTasks: jest.fn(),
+  listOperationTasks: jest.fn(),
 }));
 
 jest.mock(
@@ -61,6 +62,7 @@ jest.mock(
 );
 
 const mockListTasks = listTasks as jest.MockedFunction<typeof listTasks>;
+const mockListOperationTasks = listOperationTasks as jest.MockedFunction<typeof listOperationTasks>;
 
 describe('SessionOverviewDrawer', () => {
   beforeEach(() => {
@@ -189,5 +191,86 @@ describe('SessionOverviewDrawer', () => {
 
     fireEvent.click(enterSessionButton);
     expect(onEnterSession).toHaveBeenCalledWith(expect.objectContaining({ taskId: 1, sessionId: 1 }));
+  });
+
+  // 看板卡片右上角直接显示类型中文，未知类型不显示标签。
+  it('labels develop task cards with the task type and drops unknown types', async () => {
+    mockListTasks.mockImplementation(async (query) => ({
+      pageNum: query.pageNum || 1,
+      pageSize: 30,
+      total: query.status === 'pending' ? 2 : 0,
+      totalPages: 1,
+      list:
+        query.status === 'pending'
+          ? [
+              {
+                taskId: 1,
+                sessionId: 1,
+                projectId: 10000811,
+                title: '架构任务卡',
+                status: 'pending',
+                taskType: 'architect',
+              },
+              // 后端新增类型时前端不猜，没有对应图标就不显示，避免显示成错的那一类。
+              {
+                taskId: 2,
+                sessionId: 2,
+                projectId: 10000811,
+                title: '未知类型任务卡',
+                status: 'pending',
+                taskType: 'whatever',
+              },
+            ]
+          : [],
+    }));
+
+    render(<SessionOverviewDrawer open onClose={jest.fn()} projectId={10000811} />);
+
+    const architectHeader = (await screen.findByText('架构任务卡')).closest('.kanbanCardHeader') as HTMLElement;
+    const architectTag = architectHeader.querySelector('.kanbanCardTypeTagArchitect') as HTMLElement;
+    // useIntl 在本文件被 mock 成回 id，断言 key 即可确认取的是架构任务那条文案。
+    expect(architectTag).toHaveTextContent('projectSpace.detail.task.type.architect');
+
+    const unknownHeader = screen.getByText('未知类型任务卡').closest('.kanbanCardHeader') as HTMLElement;
+    expect(unknownHeader.querySelector('.kanbanCardTypeTag')).not.toBeInTheDocument();
+  });
+
+  // 运营任务接口回的是 operationType，共用这张卡时不能借研发任务的四角色标签。
+  it('skips the task-type tag for operation projects', async () => {
+    // 看板四列并行请求，按状态过滤避免同一任务出现在多列后断言拿到多个同名节点。
+    mockListOperationTasks.mockImplementation(async (query) => ({
+      pageNum: query.pageNum || 1,
+      pageSize: 30,
+      total: query.status === 'todo' ? 1 : 0,
+      totalPages: 1,
+      list:
+        query.status === 'todo'
+          ? [{ taskId: 3, sessionId: 3, projectId: 10000811, title: '运营采集任务', operationType: 'collect' }]
+          : [],
+    }));
+
+    render(<SessionOverviewDrawer open onClose={jest.fn()} projectId={10000811} operationProject />);
+
+    const operationHeader = (await screen.findByText('运营采集任务')).closest('.kanbanCardHeader') as HTMLElement;
+    expect(operationHeader.querySelector('.kanbanCardTypeTag')).not.toBeInTheDocument();
+  });
+
+  // 任务 Tab 的「视图」模式内嵌同一份看板：不能再套 Drawer，否则内容被塞进浮层。
+  it('renders the board without a drawer shell when embedded', async () => {
+    const { container } = render(<SessionOverviewDrawer embedded open projectId={10000811} />);
+
+    expect(await screen.findByText('当天待开始任务')).toBeInTheDocument();
+    expect(container.querySelector('.taskBoardEmbedded')).toBeInTheDocument();
+    expect(document.querySelector('.ant-drawer')).not.toBeInTheDocument();
+    // 内嵌与抽屉共用同一套查询：四个状态列照样各查一次。
+    expect(mockListTasks).toHaveBeenCalledTimes(4);
+  });
+
+  // 内嵌时 open=false 表示父级切回了列表模式，看板要整体消失且不再发请求。
+  it('renders nothing when embedded and closed', () => {
+    const { container } = render(<SessionOverviewDrawer embedded open={false} projectId={10000811} />);
+
+    expect(container.querySelector('.taskBoardEmbedded')).not.toBeInTheDocument();
+    expect(mockListTasks).not.toHaveBeenCalled();
   });
 });

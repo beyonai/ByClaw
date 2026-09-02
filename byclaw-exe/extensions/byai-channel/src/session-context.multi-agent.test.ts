@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { EventType, SseReasonMessageType } from "@byclaw/by-framework";
 
+vi.mock("openclaw/plugin-sdk/routing", () => ({
+  resolveAgentIdFromSessionKey: (sessionKey: string) => sessionKey.split(":")[1] || "test",
+}));
+
 vi.mock("./utils.js", () => ({
   generateRandomId: () => "mock-message-id",
 }));
@@ -16,6 +20,7 @@ import {
   markActiveSdkDispatchSettled,
   registerActiveSdkRequest,
   registerSdkEmitter,
+  resolveChannelRequestContextBySessionKey,
   resolveActiveSdkRequestBySessionKey,
   resolveActiveSdkRequestByTraceId,
 } from "./session-context.js";
@@ -32,6 +37,7 @@ function registerLaneRequest(params: {
     to: `test:${sessionId}:lane:${params.laneId}`,
     sessionId,
     traceId: `trace-${params.laneId}`,
+    parentMessageId: "caller-message",
     language: "zh_CN",
     languageProvided: true,
     laneMetadata: {
@@ -48,6 +54,46 @@ function registerLaneRequest(params: {
 }
 
 describe("session-context multi-agent lanes", () => {
+  it("keeps the delegated-agent marker on the active and shared request contexts", () => {
+    const request = registerActiveSdkRequest({
+      accountId: "acct-delegated",
+      sessionKey: "agent:test:direct:delegated-session",
+      to: "test:delegated-session",
+      sessionId: "delegated-session",
+      traceId: "trace-delegated",
+      delegatedAgentCall: true,
+      language: "zh_CN",
+      languageProvided: true,
+    });
+
+    expect(request.delegatedAgentCall).toBe(true);
+    expect(
+      resolveChannelRequestContextBySessionKey(request.sessionKey)?.fields.delegatedAgentCall,
+    ).toBe(true);
+
+    clearActiveSdkRequestRecord(request);
+  });
+
+  it("keeps connector authorization on the active and shared request contexts", () => {
+    const request = registerActiveSdkRequest({
+      accountId: "acct-connectors",
+      sessionKey: "agent:test:direct:connector-session",
+      to: "test:connector-session",
+      sessionId: "connector-session",
+      traceId: "trace-connectors",
+      language: "zh_CN",
+      languageProvided: true,
+      authConnectorList: { dws: true, fws: false },
+    });
+
+    expect(request.authConnectorList).toEqual({ dws: true, fws: false });
+    expect(
+      resolveChannelRequestContextBySessionKey(request.sessionKey)?.fields.authConnectorList,
+    ).toEqual({ dws: true, fws: false });
+
+    clearActiveSdkRequestRecord(request);
+  });
+
   it("clears one active lane without clearing another lane for the same ByClaw session", () => {
     const accountId = "acct-lane-lifecycle";
     const laneA = registerLaneRequest({ accountId, laneId: "a" });
@@ -94,6 +140,7 @@ describe("session-context multi-agent lanes", () => {
       },
       expect.objectContaining({
         eventType: EventType.APP_STREAM_RESPONSE,
+        parentMessageId: "caller-message",
         metadata: expect.objectContaining({
           laneId: "complete-a",
           traceId: laneA.traceId,
@@ -149,7 +196,7 @@ describe("session-context multi-agent lanes", () => {
       },
       expect.objectContaining({
         messageId: "message-1",
-        parentMessageId: "-1",
+        parentMessageId: "caller-message",
         eventType: EventType.REASONING_LOG_DELTA,
         contentType: SseReasonMessageType.think_text,
         metadata: expect.objectContaining({
@@ -157,6 +204,37 @@ describe("session-context multi-agent lanes", () => {
           laneId: "emit",
           traceId: request.traceId,
         }),
+      }),
+    );
+
+    clearActiveSdkRequestRecord(request);
+  });
+
+  it("preserves an explicit tool parent instead of replacing it with the command parent", async () => {
+    const request = registerLaneRequest({ accountId: "acct-tool-parent", laneId: "tool" });
+    const emitter = {
+      emitChunk: vi.fn().mockResolvedValue(undefined),
+    };
+
+    await emitSdkChunkTracked(request.sessionKey, {
+      emitter: emitter as any,
+      sessionId: request.sessionId,
+      traceId: request.traceId,
+      text: "tool detail",
+      options: {
+        messageId: "tool-detail",
+        parentMessageId: "tool-call-id",
+        eventType: EventType.REASONING_LOG_DELTA,
+      },
+    });
+
+    expect(emitter.emitChunk).toHaveBeenCalledWith(
+      request.sessionId,
+      request.traceId,
+      expect.anything(),
+      expect.objectContaining({
+        messageId: "tool-detail",
+        parentMessageId: "tool-call-id",
       }),
     );
 

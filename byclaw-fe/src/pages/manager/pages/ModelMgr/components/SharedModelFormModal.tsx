@@ -8,11 +8,15 @@ import ModelFormFields from './ModelFormFields';
 import {
   buildAutoDebugRequestText,
   buildDebugDefaults,
-  buildReasoningConfigPayload,
+  buildModelUpsertPayload,
   DEFAULT_CONTEXT_TOKENS,
   DEFAULT_MAX_TOKENS,
   formatReasoningEffortMapText,
   getDefaultFormValues,
+  getImageGenerationDefaultFormValues,
+  getImageProviderTransitionFormValues,
+  getModelTypeTransitionFormValues,
+  isExampleApiEndpointPlaceholder,
   normalizeModelType,
 } from './modelFormUtils';
 import useModelDebug from './useModelDebug';
@@ -71,6 +75,11 @@ const SharedModelFormModal: React.FC<Props> = ({
       { label: intl.formatMessage({ id: 'modelMgr.modal.modelTypeLLM' }), value: 'LLM' },
       { label: intl.formatMessage({ id: 'modelMgr.modal.modelTypeRERANK' }), value: 'RERANK' },
       { label: intl.formatMessage({ id: 'modelMgr.modal.modelTypeEMBEDDING' }), value: 'EMBEDDING' },
+      { label: intl.formatMessage({ id: 'modelMgr.modal.modelTypeTTS' }), value: 'TTS' },
+      {
+        label: intl.formatMessage({ id: 'modelMgr.modal.modelTypeIMAGE_GENERATION' }),
+        value: 'IMAGE_GENERATION',
+      },
     ],
     [intl]
   );
@@ -82,6 +91,7 @@ const SharedModelFormModal: React.FC<Props> = ({
   const [savedNewId, setSavedNewId] = useState<string | number | undefined>(undefined);
   const savedNewIdRef = useRef<string | number | undefined>(undefined);
   const lastApiEndpointForSyncRef = useRef<string | undefined>(undefined);
+  const lastModelTypeForSyncRef = useRef<string>('LLM');
 
   const currentModelType = Form.useWatch('modelType', form);
   const currentDisplayName = Form.useWatch('displayName', form);
@@ -120,6 +130,7 @@ const SharedModelFormModal: React.FC<Props> = ({
     intl,
     open,
     currentModelType,
+    currentProviderName,
     getCurrentModelId,
     allowRerankTable,
     formatDebugError,
@@ -145,7 +156,12 @@ const SharedModelFormModal: React.FC<Props> = ({
               value: item?.paramValue,
             }))
             .filter((item: any) => item.value);
-          setModelTypeOptions(opts);
+          const imageOption = fallbackModelTypeOptions.find((item) => item.value === 'IMAGE_GENERATION');
+          setModelTypeOptions(
+            imageOption && !opts.some((item: Option) => item.value === 'IMAGE_GENERATION')
+              ? [...opts, imageOption]
+              : opts
+          );
           return;
         }
         setModelTypeOptions(fallbackModelTypeOptions);
@@ -193,13 +209,17 @@ const SharedModelFormModal: React.FC<Props> = ({
               : `${detail.inparamTemplate}`;
           const hasTemplate = !!inparamTemplateStr.trim();
 
+          const modelType = normalizeModelType(detail.modelType);
+          const imageDefaults: Record<string, any> =
+            modelType === 'IMAGE_GENERATION' ? getImageGenerationDefaultFormValues() : {};
           const nextFormValues = {
+            ...imageDefaults,
             displayName: detail.displayName,
-            providerName: detail.providerName,
-            modelProtocol: detail.modelProtocol || 'OpenAI',
-            modelCode: detail.modelCode,
-            modelType: normalizeModelType(detail.modelType),
-            apiEndpoint: detail.apiEndpoint || 'https://api.example.com/v1',
+            providerName: detail.providerName || imageDefaults.providerName,
+            modelProtocol: detail.modelProtocol || imageDefaults.modelProtocol || 'OpenAI',
+            modelCode: detail.modelCode || imageDefaults.modelCode,
+            modelType,
+            apiEndpoint: detail.apiEndpoint || imageDefaults.apiEndpoint || '',
             apiToken: detail.apiToken || '',
             headers: Array.isArray(detail.headers) && detail.headers.length ? detail.headers : [{ key: '', value: '' }],
             connectTimeoutSec: detail.connectTimeoutSec ?? 32,
@@ -234,6 +254,7 @@ const SharedModelFormModal: React.FC<Props> = ({
             );
           }
           lastApiEndpointForSyncRef.current = nextFormValues.apiEndpoint ?? '';
+          lastModelTypeForSyncRef.current = nextFormValues.modelType;
           form.setFieldsValue(nextFormValues);
         })
         .catch(() => undefined);
@@ -252,6 +273,7 @@ const SharedModelFormModal: React.FC<Props> = ({
       })
     );
     lastApiEndpointForSyncRef.current = nextFormValues.apiEndpoint ?? '';
+    lastModelTypeForSyncRef.current = nextFormValues.modelType;
     applySavedModelId(undefined);
   }, [
     applySavedModelId,
@@ -275,18 +297,12 @@ const SharedModelFormModal: React.FC<Props> = ({
   }, [data, intl, type]);
 
   const buildUpsertPayload = (values: any) => {
-    const restValues = { ...(values || {}) };
-    delete restValues.reasoningEffortMapText;
-    return {
-      ...(type === 'edit' || type === 'debug'
-        ? { id: data?.id }
-        : type === 'add' && savedNewId !== null && savedNewId !== undefined
-          ? { id: savedNewId }
-          : {}),
-      ...restValues,
-      reasoningConfig: buildReasoningConfigPayload(values),
-      modelType: normalizeModelType(values?.modelType),
-    };
+    return buildModelUpsertPayload({
+      values,
+      type,
+      dataId: data?.id,
+      savedNewId,
+    });
   };
 
   const scrollToFirstError = (error: any) => {
@@ -361,16 +377,37 @@ const SharedModelFormModal: React.FC<Props> = ({
   };
 
   const handleValuesChange = (changedValues: any, allValues: any) => {
+    const changedKeys = Object.keys(changedValues || {});
+    let syncedValues = allValues;
+    if (changedKeys.includes('modelType')) {
+      const targetModelType = normalizeModelType(changedValues?.modelType);
+      const modelTypeDefaults = getModelTypeTransitionFormValues(lastModelTypeForSyncRef.current, targetModelType);
+      form.setFieldsValue(modelTypeDefaults);
+      syncedValues = { ...allValues, ...modelTypeDefaults };
+      lastModelTypeForSyncRef.current = targetModelType;
+    }
+
+    if (changedKeys.includes('providerName') && normalizeModelType(syncedValues?.modelType) === 'IMAGE_GENERATION') {
+      const providerDefaults = getImageProviderTransitionFormValues(changedValues?.providerName);
+      form.setFieldsValue(providerDefaults);
+      syncedValues = { ...syncedValues, ...providerDefaults };
+    }
+
+    // 协议切换只联动 placeholder；若当前仍是示例地址则清空，避免挡住新协议样例。
+    if (changedKeys.includes('modelProtocol') && isExampleApiEndpointPlaceholder(syncedValues?.apiEndpoint)) {
+      form.setFieldsValue({ apiEndpoint: '' });
+      syncedValues = { ...syncedValues, apiEndpoint: '' };
+    }
+
     if (debugInputMode !== 'auto') return;
 
-    const changedKeys = Object.keys(changedValues || {});
     const shouldSync = changedKeys.some((key) => !['systems', 'abilities', 'status'].includes(key));
     if (!shouldSync) return;
 
     const prevEndpoint = lastApiEndpointForSyncRef.current;
     setDebugInput((prev) =>
       buildAutoDebugRequestText({
-        formValues: allValues,
+        formValues: syncedValues,
         id: data?.id,
         prevText: prev,
         changedKeys,
@@ -378,7 +415,7 @@ const SharedModelFormModal: React.FC<Props> = ({
         ...debugDefaults,
       })
     );
-    lastApiEndpointForSyncRef.current = `${allValues?.apiEndpoint ?? ''}`.trim();
+    lastApiEndpointForSyncRef.current = `${syncedValues?.apiEndpoint ?? ''}`.trim();
   };
 
   const isSectionOpen = (key: string) => activeSections.includes(key);

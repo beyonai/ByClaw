@@ -20,7 +20,6 @@ import com.iwhalecloud.byai.manager.entity.resource.SsResourceCatalog;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.qo.organization.CatalogQo;
 import jakarta.validation.Valid;
-
 import java.util.List;
 import java.util.Map;
 import org.springframework.beans.factory.annotation.Autowired;

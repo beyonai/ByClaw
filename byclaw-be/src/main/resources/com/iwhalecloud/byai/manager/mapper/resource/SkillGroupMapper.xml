@@ -1,0 +1,483 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.resource.SkillGroupMapper">
+
+    <resultMap id="SkillGroupResultMap" type="com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupVo">
+        <id column="resource_id" property="resourceId" />
+        <result column="resource_name" property="resourceName" />
+        <result column="resource_desc" property="resourceDesc" />
+        <result column="avatar" property="avatar" />
+        <result column="catalog_id" property="catalogId" />
+        <result column="owner_type" property="ownerType" />
+        <result column="resource_status" property="resourceStatus" />
+        <result column="create_by" property="createBy" />
+        <result column="creator_name" property="creatorName" />
+        <result column="create_time" property="createTime" />
+        <result column="update_time" property="updateTime" />
+        <result column="member_count" property="memberCount" />
+    </resultMap>
+
+    <resultMap id="SkillGroupMemberResultMap"
+            type="com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupMemberVo">
+        <id column="resource_id" property="resourceId" />
+        <result column="resource_code" property="resourceCode" />
+        <result column="resource_name" property="resourceName" />
+        <result column="resource_desc" property="resourceDesc" />
+        <result column="avatar" property="avatar" />
+        <result column="resource_status" property="resourceStatus" />
+        <result column="owner_type" property="ownerType" />
+        <result column="create_by" property="createBy" />
+        <result column="skill_type" property="skillType" />
+        <result column="system_built_in" property="systemBuiltIn" />
+        <result column="creator_owned" property="creatorOwned" />
+        <result column="source_type" property="sourceType" />
+        <result column="version" property="version" />
+        <result column="skill_url" property="skillUrl" />
+        <result column="skill_package_format" property="skillPackageFormat" />
+        <result column="skill_original_filename" property="skillOriginalFilename" />
+        <result column="skill_package_size" property="skillPackageSize" />
+        <result column="skill_package_hash" property="skillPackageHash" />
+        <result column="target_content" property="targetContent" />
+        <result column="sync_status" property="syncStatus" />
+        <result column="sync_error" property="syncError" />
+        <result column="last_sync_time" property="lastSyncTime" />
+    </resultMap>
+
+    <resultMap id="ResourceRelationResultMap"
+            type="com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail">
+        <id column="resource_rel_detail_id" property="resourceRelDetailId" />
+        <result column="resource_id" property="resourceId" />
+        <result column="rel_resource_id" property="relResourceId" />
+        <result column="rel_resource_info" property="relResourceInfo" />
+        <result column="create_by" property="createBy" />
+        <result column="create_time" property="createTime" />
+        <result column="update_by" property="updateBy" />
+        <result column="update_time" property="updateTime" />
+        <result column="com_acct_id" property="comAcctId" />
+        <result column="rel_type_name" property="relTypeName" />
+        <result column="rel_status" property="relStatus" />
+    </resultMap>
+
+    <sql id="SkillGroupColumns">
+        group_resource.resource_id,
+        group_resource.resource_name,
+        group_resource.resource_desc,
+        group_resource.avatar,
+        group_resource.catalog_id,
+        group_resource.owner_type,
+        group_resource.resource_status,
+        group_resource.create_by,
+        COALESCE(NULLIF(TRIM(creator.user_name), ''), '-') AS creator_name,
+        group_resource.create_time,
+        group_resource.update_time,
+        (
+            SELECT COUNT(*)
+            FROM ss_resource_rel_detail member_rel
+            JOIN ss_resource member_count_resource
+              ON member_count_resource.resource_id = member_rel.rel_resource_id
+            WHERE member_rel.resource_id = group_resource.resource_id
+              AND member_rel.rel_type_name = 'SKILL_GROUP_MEMBER'
+              AND member_rel.rel_status = 1
+              AND member_count_resource.resource_biz_type = 'SKILL'
+        ) AS member_count
+    </sql>
+
+    <sql id="TenantVisibility">
+        <choose>
+            <when test="comAcctId != null">
+                group_resource.com_acct_id = #{comAcctId}
+            </when>
+            <otherwise>
+                group_resource.com_acct_id IS NULL
+            </otherwise>
+        </choose>
+        AND (
+            group_resource.owner_type IS NULL
+            OR group_resource.owner_type != 'personal'
+            OR group_resource.create_by = #{currentUserId}
+        )
+    </sql>
+
+    <sql id="ResourceRelationColumns">
+        relation.resource_rel_detail_id,
+        relation.resource_id,
+        relation.rel_resource_id,
+        relation.rel_resource_info,
+        relation.create_by,
+        relation.create_time,
+        relation.update_by,
+        relation.update_time,
+        relation.com_acct_id,
+        relation.rel_type_name,
+        relation.rel_status
+    </sql>
+
+    <select id="selectGroupForUpdate"
+            resultType="com.iwhalecloud.byai.manager.entity.resource.SsResource">
+        SELECT group_resource.*
+        FROM ss_resource group_resource
+        WHERE group_resource.resource_id = #{groupId}
+          AND group_resource.com_acct_id = #{comAcctId}
+          AND group_resource.resource_biz_type = 'SKILL_GROUP'
+        FOR UPDATE
+    </select>
+
+    <select id="selectDigitalEmployeeForUpdate"
+            resultType="com.iwhalecloud.byai.manager.entity.resource.SsResource">
+        SELECT digital_employee.*
+        FROM ss_resource digital_employee
+        WHERE digital_employee.resource_id = #{digitalEmployeeId}
+          AND digital_employee.com_acct_id = #{comAcctId}
+          AND digital_employee.resource_biz_type = 'DIG_EMPLOYEE'
+        FOR UPDATE
+    </select>
+
+    <select id="selectActiveSkillsForUpdate"
+            resultType="com.iwhalecloud.byai.manager.entity.resource.SsResource">
+        SELECT skill_resource.*
+        FROM ss_resource skill_resource
+        WHERE skill_resource.com_acct_id = #{comAcctId}
+          AND skill_resource.resource_biz_type = 'SKILL'
+          AND skill_resource.resource_status = 2
+        <choose>
+            <when test="skillIds != null and skillIds.size() > 0">
+                AND skill_resource.resource_id IN
+                <foreach collection="skillIds" item="skillId" open="(" separator="," close=")">
+                    #{skillId}
+                </foreach>
+            </when>
+            <otherwise>
+                AND 1 = 0
+            </otherwise>
+        </choose>
+        ORDER BY skill_resource.resource_id ASC
+        FOR UPDATE
+    </select>
+
+    <update id="updateGroupFields">
+        UPDATE ss_resource
+        SET resource_name = #{group.resourceName},
+            resource_desc = #{group.resourceDesc},
+            avatar = #{group.avatar},
+            catalog_id = #{group.catalogId},
+            update_by = #{group.updateBy},
+            update_time = #{group.updateTime}
+        WHERE resource_id = #{group.resourceId}
+          AND com_acct_id = #{comAcctId}
+          AND resource_biz_type = 'SKILL_GROUP'
+    </update>
+
+    <insert id="insertActiveMemberIfAbsent">
+        MERGE INTO ss_resource_rel_detail target
+        USING (
+            SELECT
+                #{relation.resourceRelDetailId} AS resource_rel_detail_id,
+                #{relation.resourceId} AS resource_id,
+                #{relation.relResourceId} AS rel_resource_id,
+                #{relation.relResourceInfo} AS rel_resource_info,
+                #{relation.createBy} AS create_by,
+                CAST(#{relation.createTime} AS TIMESTAMP WITH TIME ZONE) AS create_time,
+                #{relation.updateBy} AS update_by,
+                CAST(#{relation.updateTime} AS TIMESTAMP WITH TIME ZONE) AS update_time,
+                #{relation.comAcctId} AS com_acct_id,
+                #{relation.relTypeName} AS rel_type_name,
+                #{relation.relStatus} AS rel_status
+        ) source
+        ON (
+            target.resource_id = source.resource_id
+            AND target.rel_resource_id = source.rel_resource_id
+            AND target.rel_type_name = source.rel_type_name
+            AND target.rel_type_name = 'SKILL_GROUP_MEMBER'
+            AND target.rel_status = 1
+            AND source.rel_type_name = 'SKILL_GROUP_MEMBER'
+            AND source.rel_status = 1
+        )
+        WHEN NOT MATCHED THEN INSERT (
+            resource_rel_detail_id, resource_id, rel_resource_id, rel_resource_info,
+            create_by, create_time, update_by, update_time, com_acct_id, rel_type_name, rel_status
+        ) VALUES (
+            source.resource_rel_detail_id, source.resource_id, source.rel_resource_id, source.rel_resource_info,
+            source.create_by, source.create_time, source.update_by, source.update_time,
+            source.com_acct_id, source.rel_type_name, source.rel_status
+        )
+    </insert>
+
+    <select id="selectPage" resultMap="SkillGroupResultMap">
+        SELECT
+        <include refid="SkillGroupColumns" />
+        FROM ss_resource group_resource
+        LEFT JOIN po_users creator ON group_resource.create_by = creator.user_id
+        WHERE group_resource.resource_biz_type = 'SKILL_GROUP'
+          AND <include refid="TenantVisibility" />
+        <if test="qo.keyword != null and qo.keyword != ''">
+            AND group_resource.resource_name LIKE CONCAT('%', #{qo.keyword}, '%')
+        </if>
+        <if test="qo.ownerType != null and qo.ownerType != ''">
+            AND group_resource.owner_type = #{qo.ownerType}
+        </if>
+        <if test="qo.resourceStatus != null">
+            AND group_resource.resource_status = #{qo.resourceStatus}
+        </if>
+        <if test="qo.catalogId != null">
+            AND group_resource.catalog_id = #{qo.catalogId}
+        </if>
+        ORDER BY group_resource.update_time DESC NULLS LAST, group_resource.resource_id DESC
+    </select>
+
+    <select id="selectDetail" resultMap="SkillGroupResultMap">
+        SELECT
+        <include refid="SkillGroupColumns" />
+        FROM ss_resource group_resource
+        LEFT JOIN po_users creator ON group_resource.create_by = creator.user_id
+        WHERE group_resource.resource_id = #{groupId}
+          AND group_resource.resource_biz_type = 'SKILL_GROUP'
+          AND <include refid="TenantVisibility" />
+    </select>
+
+    <select id="selectActiveMembers" resultMap="SkillGroupMemberResultMap">
+        SELECT
+            member_resource.resource_id,
+            member_resource.resource_code,
+            member_resource.resource_name,
+            member_resource.resource_desc,
+            member_resource.avatar,
+            member_resource.resource_status,
+            member_resource.owner_type,
+            member_resource.create_by,
+            skill_ext.skill_type,
+            skill_ext.source_type,
+            skill_ext.version,
+            skill_ext.skill_url,
+            skill_ext.skill_package_format,
+            skill_ext.skill_original_filename,
+            skill_ext.skill_package_size,
+            skill_ext.skill_package_hash,
+            skill_ext.target_content,
+            skill_ext.sync_status,
+            skill_ext.sync_error,
+            skill_ext.last_sync_time
+        FROM ss_resource_rel_detail member_rel
+        JOIN ss_resource member_resource
+          ON member_resource.resource_id = member_rel.rel_resource_id
+        LEFT JOIN ss_res_ext_skill skill_ext
+          ON skill_ext.resource_id = member_resource.resource_id
+        WHERE member_rel.resource_id = #{groupId}
+          AND member_rel.rel_type_name = 'SKILL_GROUP_MEMBER'
+          AND member_rel.rel_status = 1
+          AND member_resource.resource_biz_type = 'SKILL'
+        ORDER BY member_rel.create_time, member_rel.resource_rel_detail_id
+    </select>
+
+    <select id="selectMemberCandidates" resultMap="SkillGroupMemberResultMap">
+        SELECT
+            skill_resource.resource_id,
+            skill_resource.resource_code,
+            skill_resource.resource_name,
+            skill_resource.resource_desc,
+            skill_resource.avatar,
+            skill_resource.resource_status,
+            skill_resource.owner_type,
+            skill_resource.create_by,
+            skill_ext.skill_type,
+            CASE
+                WHEN skill_resource.owner_type = 'enterprise'
+                 AND LOWER(skill_ext.skill_type) = 'inner'
+                THEN TRUE
+                ELSE FALSE
+            END AS system_built_in,
+            CASE WHEN skill_resource.create_by = #{creatorId} THEN TRUE ELSE FALSE END AS creator_owned,
+            skill_ext.source_type,
+            skill_ext.version,
+            skill_ext.skill_url,
+            skill_ext.skill_package_format,
+            skill_ext.skill_original_filename,
+            skill_ext.skill_package_size,
+            skill_ext.skill_package_hash,
+            skill_ext.target_content,
+            skill_ext.sync_status,
+            skill_ext.sync_error,
+            skill_ext.last_sync_time
+        FROM ss_resource skill_resource
+        LEFT JOIN ss_res_ext_skill skill_ext
+          ON skill_ext.resource_id = skill_resource.resource_id
+        WHERE skill_resource.com_acct_id = #{comAcctId}
+          AND skill_resource.resource_biz_type = 'SKILL'
+          AND skill_resource.resource_status = 2
+          AND (
+              (
+                  skill_resource.owner_type = 'enterprise'
+                  AND LOWER(skill_ext.skill_type) = 'inner'
+              )
+              OR (
+                  skill_resource.owner_type IN ('enterprise', 'personal')
+                  AND skill_resource.create_by = #{creatorId}
+              )
+          )
+        <if test="qo.keyword != null and qo.keyword != ''">
+            AND (
+                UPPER(skill_resource.resource_code) LIKE CONCAT('%', UPPER(#{qo.keyword}), '%')
+                OR UPPER(skill_resource.resource_name) LIKE CONCAT('%', UPPER(#{qo.keyword}), '%')
+            )
+        </if>
+        ORDER BY skill_resource.update_time DESC NULLS LAST, skill_resource.resource_id DESC
+    </select>
+
+    <select id="selectMemberRelations" resultMap="ResourceRelationResultMap">
+        SELECT
+        <include refid="ResourceRelationColumns" />
+        FROM ss_resource_rel_detail relation
+        WHERE relation.resource_id = #{groupId}
+          AND relation.rel_type_name = 'SKILL_GROUP_MEMBER'
+          AND relation.rel_status = 1
+        <if test="skillIds != null and skillIds.size() > 0">
+            AND relation.rel_resource_id IN
+            <foreach collection="skillIds" item="skillId" open="(" separator="," close=")">
+                #{skillId}
+            </foreach>
+        </if>
+        ORDER BY relation.create_time, relation.resource_rel_detail_id
+    </select>
+
+    <select id="selectMemberRelationsIncludingInactive" resultMap="ResourceRelationResultMap">
+        SELECT
+        <include refid="ResourceRelationColumns" />
+        FROM ss_resource_rel_detail relation
+        WHERE relation.resource_id = #{groupId}
+          AND relation.rel_type_name = 'SKILL_GROUP_MEMBER'
+        <choose>
+            <when test="skillIds != null and skillIds.size() > 0">
+                AND relation.rel_resource_id IN
+                <foreach collection="skillIds" item="skillId" open="(" separator="," close=")">
+                    #{skillId}
+                </foreach>
+            </when>
+            <otherwise>
+                AND 1 = 0
+            </otherwise>
+        </choose>
+        ORDER BY relation.rel_status DESC, relation.create_time, relation.resource_rel_detail_id
+    </select>
+
+    <select id="selectDigitalEmployeeSkillRelations" resultMap="ResourceRelationResultMap">
+        SELECT
+        <include refid="ResourceRelationColumns" />
+        FROM ss_resource_rel_detail relation
+        JOIN ss_resource skill_resource
+          ON skill_resource.resource_id = relation.rel_resource_id
+        WHERE relation.resource_id = #{digitalEmployeeId}
+          AND skill_resource.resource_biz_type = 'SKILL'
+          AND (relation.rel_type_name = 'DIG_EMPLOYEE_SKILL' OR relation.rel_type_name IS NULL)
+          AND (relation.rel_status = 1 OR relation.rel_status IS NULL)
+        <if test="skillIds != null and skillIds.size() > 0">
+            AND relation.rel_resource_id IN
+            <foreach collection="skillIds" item="skillId" open="(" separator="," close=")">
+                #{skillId}
+            </foreach>
+        </if>
+        ORDER BY relation.create_time, relation.resource_rel_detail_id
+    </select>
+
+    <select id="selectInstalledSkillIds" resultType="java.lang.Long">
+        SELECT DISTINCT relation.rel_resource_id
+        FROM ss_resource_rel_detail relation
+        JOIN ss_resource employee
+          ON employee.resource_id = relation.resource_id
+        JOIN ss_resource skill_resource
+          ON skill_resource.resource_id = relation.rel_resource_id
+        WHERE relation.resource_id = #{digitalEmployeeId}
+          AND employee.com_acct_id = #{tenantId}
+          AND employee.resource_biz_type = 'DIG_EMPLOYEE'
+          AND skill_resource.com_acct_id = #{tenantId}
+          AND skill_resource.resource_biz_type = 'SKILL'
+          AND (relation.rel_type_name = 'DIG_EMPLOYEE_SKILL' OR relation.rel_type_name IS NULL)
+          AND (relation.rel_status = 1 OR relation.rel_status IS NULL)
+        <choose>
+            <when test="skillIds != null and skillIds.size() > 0">
+                AND relation.rel_resource_id IN
+                <foreach collection="skillIds" item="skillId" open="(" separator="," close=")">
+                    #{skillId}
+                </foreach>
+            </when>
+            <otherwise>
+                AND 1 = 0
+            </otherwise>
+        </choose>
+    </select>
+
+    <select id="hasActiveDigitalEmployeeSkill" resultType="boolean">
+        SELECT CASE WHEN COUNT(*) &gt; 0 THEN TRUE ELSE FALSE END
+        FROM ss_resource_rel_detail relation
+        JOIN ss_resource employee
+          ON employee.resource_id = relation.resource_id
+        JOIN ss_resource skill_resource
+          ON skill_resource.resource_id = relation.rel_resource_id
+        WHERE relation.resource_id = #{digitalEmployeeId}
+          AND employee.com_acct_id = #{tenantId}
+          AND employee.resource_biz_type = 'DIG_EMPLOYEE'
+          AND employee.resource_status = 2
+          AND skill_resource.com_acct_id = #{tenantId}
+          AND skill_resource.resource_biz_type = 'SKILL'
+          AND skill_resource.resource_status = 2
+          AND skill_resource.resource_code = #{skillCode}
+          AND (relation.rel_type_name = 'DIG_EMPLOYEE_SKILL' OR relation.rel_type_name IS NULL)
+          AND (relation.rel_status = 1 OR relation.rel_status IS NULL)
+    </select>
+
+    <insert id="insertDigitalEmployeeSkillIfAbsent">
+        MERGE INTO ss_resource_rel_detail target
+        USING (
+            SELECT
+                #{relation.resourceRelDetailId} AS resource_rel_detail_id,
+                #{relation.resourceId} AS resource_id,
+                #{relation.relResourceId} AS rel_resource_id,
+                #{relation.relResourceInfo} AS rel_resource_info,
+                #{relation.createBy} AS create_by,
+                CAST(#{relation.createTime} AS TIMESTAMP WITH TIME ZONE) AS create_time,
+                #{relation.updateBy} AS update_by,
+                CAST(#{relation.updateTime} AS TIMESTAMP WITH TIME ZONE) AS update_time,
+                #{relation.comAcctId} AS com_acct_id,
+                #{relation.relTypeName} AS rel_type_name,
+                #{relation.relStatus} AS rel_status
+        ) source
+        ON (
+            target.resource_id = source.resource_id
+            AND target.rel_resource_id = source.rel_resource_id
+            AND (target.rel_type_name = 'DIG_EMPLOYEE_SKILL' OR target.rel_type_name IS NULL)
+            AND (target.rel_status = 1 OR target.rel_status IS NULL)
+            AND source.rel_type_name = 'DIG_EMPLOYEE_SKILL'
+            AND source.rel_status = 1
+        )
+        WHEN NOT MATCHED THEN INSERT (
+            resource_rel_detail_id, resource_id, rel_resource_id, rel_resource_info,
+            create_by, create_time, update_by, update_time, com_acct_id, rel_type_name, rel_status
+        ) VALUES (
+            source.resource_rel_detail_id, source.resource_id, source.rel_resource_id, source.rel_resource_info,
+            source.create_by, source.create_time, source.update_by, source.update_time,
+            source.com_acct_id, source.rel_type_name, source.rel_status
+        )
+    </insert>
+
+    <select id="selectSkillRelationsWithSourceInfo" resultMap="ResourceRelationResultMap">
+        SELECT
+        <include refid="ResourceRelationColumns" />
+        FROM ss_resource_rel_detail relation
+        WHERE relation.rel_type_name = 'DIG_EMPLOYEE_SKILL'
+          AND relation.rel_status = 1
+          AND relation.rel_resource_info IS NOT NULL
+    </select>
+
+    <select id="selectSkillRelationsWithSourceInfoByTenant" resultMap="ResourceRelationResultMap">
+        SELECT
+            relation.resource_rel_detail_id,
+            relation.rel_resource_info
+        FROM ss_resource_rel_detail relation
+        JOIN ss_resource employee
+          ON employee.resource_id = relation.resource_id
+        WHERE relation.rel_type_name = 'DIG_EMPLOYEE_SKILL'
+          AND relation.rel_status = 1
+          AND relation.rel_resource_info IS NOT NULL
+          AND employee.resource_biz_type = 'DIG_EMPLOYEE'
+          AND employee.com_acct_id = #{comAcctId}
+    </select>
+
+</mapper>

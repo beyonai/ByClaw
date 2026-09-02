@@ -28,6 +28,44 @@ export const formatSessionName = (item: ISession) => {
   return item.sessionName;
 };
 
+type DigitalEmployeeResource = {
+  resourceId?: string | number;
+  resourceCode?: string;
+  id?: string | number;
+  resourceName?: string;
+  agentName?: string;
+  name?: string;
+};
+
+const DIGITAL_EMPLOYEE_PLACEHOLDER = /\{\{DIG_EMPLOYEE_([^}#]+)(?:#[^}]*)?\}\}/g;
+
+/** 将临时会话标题中的数字员工占位符转换为本轮引用的员工名称。 */
+export const resolveDigitalEmployeePlaceholders = (
+  value: unknown,
+  resources: DigitalEmployeeResource[] = []
+): string => {
+  if (typeof value !== 'string' || !value.includes('{{DIG_EMPLOYEE_')) return typeof value === 'string' ? value : '';
+
+  const resourceNames = new Map<string, string>();
+  resources.forEach((resource) => {
+    const name = `${resource.resourceName || resource.agentName || resource.name || ''}`.trim();
+    if (!name) return;
+    [resource.resourceId, resource.resourceCode, resource.id].forEach((key) => {
+      if (key !== undefined && key !== null && `${key}`.trim()) {
+        resourceNames.set(`${key}`.trim(), name);
+      }
+    });
+  });
+
+  return value.replace(DIGITAL_EMPLOYEE_PLACEHOLDER, (placeholder, resourceKey: string) => {
+    return resourceNames.get(resourceKey.trim()) || placeholder;
+  });
+};
+
+/** 通知会话由通知中心负责展示，不应进入普通聊天交互。 */
+export const isNotificationSession = (session?: Pick<ISession, 'objectType'> | null) =>
+  `${session?.objectType || ''}`.toLowerCase() === 'notification';
+
 const SESSION_OBJECT_MAP: Record<string, { objectId: string; objectType: string }> = {};
 
 export const setSessionObjectTypeMap = (sessionId: string, objectId: number | string, objectType: string) => {
@@ -61,7 +99,7 @@ export const sessionHandler = (item: ISession, targetList?: ISession[]) => {
     sessionName: formatSessionName(item),
   };
 
-  if (item.objectType === 'Notification') {
+  if (isNotificationSession(item)) {
     Object.assign(payload, {
       ...item,
       avatar: 'beyond/noticeHead.png',
@@ -115,6 +153,9 @@ export const getSessionsCreatedDuringRequest = (
 
   return currentSessions.filter((session) => {
     const sessionId = `${session.sessionId}`;
-    return !initialSessionIds.has(sessionId) && !responseSessionIds.has(sessionId);
+    // 上传文件会先创建临时会话，随后发送消息可能触发列表查询；此时
+    // 请求开始前它已经在本地列表中，但后端列表仍可能暂时查不到。
+    // 标记为本地临时会话的记录也必须保留，避免短暂出现后又消失。
+    return !responseSessionIds.has(sessionId) && (session.isLocalSession || !initialSessionIds.has(sessionId));
   });
 };

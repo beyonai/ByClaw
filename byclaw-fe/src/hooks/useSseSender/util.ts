@@ -260,6 +260,50 @@ function thinkStatusTitleHandler(sseDataObj: any) {
   return payload;
 }
 
+function toolCallHandler(sseDataObj: any) {
+  const contentType = get(sseDataObj, 'contentType');
+  const content = get(sseDataObj, 'choices.0.delta.content', '');
+  let status = get(sseDataObj, 'status');
+  let substance: unknown = content;
+  try {
+    substance = JSON.parse(content);
+    ({ status } = substance as { status: string });
+  } catch (e) {
+    // A non-JSON terminal payload is still a useful tool output.
+    substance = { output: content };
+  }
+
+  return {
+    message: {
+      contentType,
+      content: { substance },
+      status,
+    },
+  };
+}
+
+function editDiffHandler(sseDataObj: any) {
+  const contentType = get(sseDataObj, 'contentType');
+  const content = get(sseDataObj, 'choices.0.delta.content', '');
+  let substance: unknown = content;
+  try {
+    substance = JSON.parse(content);
+  } catch (e) {
+    // Invalid diff payloads are rejected by the renderer without breaking the stream.
+  }
+  const phase = isPlainObject(substance) ? get(substance, 'phase') : undefined;
+  const fallbackStatus =
+    phase === 'running' ? SSEEventStatus.start : phase === 'failed' ? '_ERROR_' : SSEEventStatus.done;
+
+  return {
+    message: {
+      contentType,
+      content: { substance },
+      status: get(sseDataObj, 'status') || fallbackStatus,
+    },
+  };
+}
+
 // eslint-disable-next-line
 const sseTypeHandlerMap = new Map<string, (sseDataObj: any, msgEvent?: string) => any>([
   [`${SSEMessageType.text}`, textHandler],
@@ -274,6 +318,8 @@ const sseTypeHandlerMap = new Map<string, (sseDataObj: any, msgEvent?: string) =
   [`${SSEMessageType.thinkRewriteQuestion}`, thinkRewriteQuestionHandler],
   [`${SSEMessageType.jsonBlock}`, jsonBlockHandler],
   [`${SSEMessageType.thinkStatusTitle}`, thinkStatusTitleHandler],
+  [`${SSEMessageType.toolCall}`, toolCallHandler],
+  [`${SSEMessageType.editDiff}`, editDiffHandler],
 ]);
 
 const isResumeContentType = (contentType: SSEMessageType) => {
@@ -308,6 +354,10 @@ export const answerDeltaHandler = (sseDataObj: any, msgEvent?: string): { messag
     uuid: get(sseDataObj, 'id'),
     orginContent: get(sseDataObj, 'choices.0.delta.content', ''),
   });
+  const seq = get(sseDataObj, 'seq');
+  if (seq !== undefined && seq !== null) {
+    Object.assign(res.message, { seq, eventType: msgEvent });
+  }
 
   setOrderId(sseDataObj, res);
   setResumeMessageId(sseDataObj, res.message);
@@ -327,7 +377,7 @@ export const reasoningLogHandler = (sseDataObj: any, msgEvent?: string) => {
     set(mySseDataObj, 'contentType', `${SSEMessageType.thinkText}`);
   }
 
-  const payload = answerDeltaHandler(mySseDataObj);
+  const payload = answerDeltaHandler(mySseDataObj, msgEvent);
 
   switch (msgEvent) {
     case 'reasoningLogStart':

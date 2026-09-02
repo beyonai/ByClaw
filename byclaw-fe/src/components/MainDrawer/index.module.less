@@ -23,6 +23,9 @@
 }
 
 .myDrawer {
+  position: relative;
+  // 远程桌面需要显示在项目账号管理等覆盖式大面板上方，避免抽屉已打开但被覆盖层遮住。
+  z-index: 1001;
   width: auto;
   min-width: 0;
   height: 100%;
@@ -35,6 +38,20 @@
     margin-left: var(--layout-gap);
     // animation: drawer-open 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
     // border-right: 0.5px var(--beyond-color-border) solid;
+  }
+
+  // 账号登录等覆盖式场景只叠加在页面右侧，不占用主布局宽度。
+  &.overlay {
+    // 覆盖式远程桌面需要脱离页面局部 stacking context，显示在连接器弹窗及其遮罩层之上。
+    position: fixed;
+    z-index: 1300;
+    top: 8px;
+    right: 8px;
+    bottom: 8px;
+    height: auto;
+    margin-left: 0;
+    border-radius: 12px;
+    box-shadow: 0 6px 24px rgb(0 0 0 / 12%);
   }
 
   // &.closing {

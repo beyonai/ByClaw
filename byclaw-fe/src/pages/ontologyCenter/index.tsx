@@ -477,11 +477,13 @@ const OntologyCenter: React.FC = () => {
       }
       try {
         const res: any = await pageOntologyResources({
-          ownerType: activeTab,
+          // “我可用的”按当前用户创建及被授权的数据查询；官方推荐仍限定企业资源。
+          ownerType: activeTab === 'personal' ? undefined : activeTab,
           resourceBizTypeList: ['VIEW', 'OBJECT'],
           systemCode: ontologySystemCode,
           keyword,
-          catalogId,
+          // “全部分类”是前端占位值，不能把 -1 传给后端当作真实目录筛选，否则会返回空列表。
+          catalogId: catalogId === ALL_CATEGORY_ID ? undefined : catalogId,
           statusList: statusFilter === 'all' ? [0, 1, 2, 3, 4, 5] : statusFilter === 'offline' ? [3] : [2],
           permission: toResourceFilterPermission(permissionFilter),
           pageNum: nextPageNum,
@@ -1061,6 +1063,7 @@ const OntologyCenter: React.FC = () => {
   return (
     <div className={styles.container} onScroll={handleContainerScroll}>
       <CommonTabs
+        className={styles.secondaryTabs}
         activeKey={activeTab}
         onChange={(key) => {
           setActiveTab(key as OwnerTab);

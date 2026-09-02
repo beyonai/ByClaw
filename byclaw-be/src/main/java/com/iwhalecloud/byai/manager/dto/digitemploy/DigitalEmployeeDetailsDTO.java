@@ -17,6 +17,9 @@ import java.util.List;
 @Setter
 public class DigitalEmployeeDetailsDTO extends DigitalEmployeeDTO {
 
+    /** 当前在用的数字员工组配置版本；普通数字员工不返回。 */
+    private String configVersion;
+
     /**
      * 发布组织
      */
@@ -45,4 +48,3 @@ public class DigitalEmployeeDetailsDTO extends DigitalEmployeeDTO {
     private List<JSONObject> relOntology;
 
 }
-

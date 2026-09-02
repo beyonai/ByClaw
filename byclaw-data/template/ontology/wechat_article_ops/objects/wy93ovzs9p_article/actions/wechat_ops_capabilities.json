@@ -1,0 +1,29 @@
+{
+  "action_code": "wechat_ops_capabilities",
+  "action_name": "能力清单",
+  "action_type": "QUERY",
+  "action_desc": "返回本工作区的运行时能力：metric 粒度、article_metric_mode、profile_mode、account_follower_mode、channel_metric_modes、channels、report_types、account_report_template、metric_rule_version",
+  "params": [
+    {
+      "paramCode": "projectId",
+      "paramName": "项目ID",
+      "type": "string",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
+      "paramCode": "success",
+      "paramName": "是否成功",
+      "type": "boolean",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "capabilities",
+      "paramName": "能力清单",
+      "type": "object",
+      "isRequired": false,
+      "direction": "output"
+    }
+  ]
+}

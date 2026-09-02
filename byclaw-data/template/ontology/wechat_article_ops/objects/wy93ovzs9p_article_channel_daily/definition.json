@@ -1,0 +1,43 @@
+{
+  "entity_code": "wy93ovzs9p_article_channel_daily",
+  "entity_name": "文章每日渠道指标",
+  "entity_desc": "每篇文章每天各渠道阅读与分享人数；metric_mode 区分全量/增量，批次内同一 metric_mode",
+  "submitted_fields": [
+    {
+      "property_code": "projectId",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "account_code",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "account_name",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "article_id",
+      "data_type": "INTEGER"
+    },
+    {
+      "property_code": "stat_date",
+      "data_type": "DATE"
+    },
+    {
+      "property_code": "metric_mode",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "channel",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "read_count",
+      "data_type": "INTEGER"
+    },
+    {
+      "property_code": "share_count",
+      "data_type": "INTEGER"
+    }
+  ]
+}

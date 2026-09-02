@@ -15,7 +15,8 @@ import InfiniteScroll from '@/components/InfiniteScroll';
 import ResourceCard from '@/components/Resources/components/ResourceCard';
 import { IAgentCache } from '@/typescript/agent';
 import useGlobal from '@/hooks/useGlobal';
-import { getAgentChatAvatar, getAgentPath } from '@/utils/agent';
+import { getAgentChatAvatar } from '@/utils/agent';
+import { sortDefaultDigitalEmployeeFirst } from '@/pages/digitalEmployees/utils';
 import useTracker from '@/hooks/useTracker';
 import AuthListDrawer from '@/pages/manager/components/AuthListDrawer';
 import UseApplyAuditDrawer from '@/pages/manager/components/UseApplyAuditDrawer';
@@ -51,8 +52,10 @@ function EmployeeRelatedToMe(props: IProps, ref: any) {
   const { EventEmitter, setAgentId, setSessionId } = useGlobal();
   const { trackerEmployeeClick } = useTracker();
 
-  const { employeesTypeList } = useSelector(({ employees }) => ({
-    ...employees,
+  const { employeesTypeList, defaultDigEmployeeId, userInfo } = useSelector(({ employees, user }: any) => ({
+    employeesTypeList: employees?.employeesTypeList,
+    defaultDigEmployeeId: employees?.defaultDigEmployeeId,
+    userInfo: user?.userInfo,
   }));
 
   const [curActiveLink, setCurActiveLink] = useState<string>(() => searchParams.get('personalCatalogId') || '');
@@ -217,18 +220,29 @@ function EmployeeRelatedToMe(props: IProps, ref: any) {
       ApplyList?: string[];
       delIdList?: string[];
       updateList?: Partial<IAgentCache>[];
+      defaultResourceId?: string;
     }) => {
-      const { unApplyList = [], ApplyList = [], delIdList = [], updateList = [] } = param || {};
+      const { unApplyList = [], ApplyList = [], delIdList = [], updateList = [], defaultResourceId } = param || {};
       setList((prevList) => {
         return compact([
           ...prevList.map((item: IAgentCache) => {
-            if (ApplyList.includes(`${item.id}`)) {
+            const itemIdentity = `${item.resourceId ?? item.id ?? item.agentId ?? ''}`;
+            if (defaultResourceId) {
+              const isDefault = itemIdentity === `${defaultResourceId}`;
+              return {
+                ...item,
+                isDefault,
+                canSetDefault: isDefault ? false : item.canSetDefault,
+                ownerType: !isDefault && item.ownerType === 'personal_default' ? 'personal' : item.ownerType,
+              };
+            }
+            if (ApplyList.includes(itemIdentity)) {
               return {
                 ...item,
                 approveStatus: 'S',
               };
             }
-            if (unApplyList.includes(`${item.id}`)) {
+            if (unApplyList.includes(itemIdentity)) {
               return {
                 ...item,
                 approveStatus: '',
@@ -266,23 +280,38 @@ function EmployeeRelatedToMe(props: IProps, ref: any) {
     };
   }, [EventEmitter, curActiveLink, dropdownParam, getSearch, searchName]);
 
+  const defaultResourceId = defaultDigEmployeeId || userInfo?.defaultDigEmployeeId;
+  const visibleList = useMemo(
+    () => sortDefaultDigitalEmployeeFirst(list, defaultResourceId),
+    [defaultResourceId, list]
+  );
+
   const onClickEmployee = React.useCallback(
     (employee: IAgentCache) => {
       if (employee.agentId) {
-        trackerEmployeeClick(employee, 'marketAgentRedirect');
+        const normalizedEmployee = agentHandler(employee);
+        trackerEmployeeClick(normalizedEmployee, 'marketAgentRedirect');
         dispatch({
           type: 'employees/updateEmployee',
           payload: {
-            employee,
+            employee: normalizedEmployee,
           },
         });
-        setAgentId?.(`${employee.agentId}`);
+        setAgentId?.(`${normalizedEmployee.agentId}`);
         setSessionId?.('');
         const nextSearchParams = new URLSearchParams({
           tab: 'personal',
           personalCatalogId: curActiveLink,
         });
-        navigate(`${getAgentPath(employee)}?${nextSearchParams.toString()}`);
+        // 员工模块内统一打开员工详情，查询参数仅用于返回时恢复个人员工列表位置。
+        navigate(`/employees?${nextSearchParams.toString()}`, {
+          // 路由状态保留本次点击目标，避免返回列表后历史 agentId 覆盖新选择。
+          state: {
+            keepSiderActiveKey: 'agent',
+            selectedAgentId: `${normalizedEmployee.agentId}`,
+            selectedEmployee: normalizedEmployee,
+          },
+        });
         return;
       }
 
@@ -290,6 +319,25 @@ function EmployeeRelatedToMe(props: IProps, ref: any) {
       message.error(intl.formatMessage({ id: 'digitalEmployees.noPermission' }));
     },
     [curActiveLink, dispatch, intl, navigate, setAgentId, setSessionId, trackerEmployeeClick]
+  );
+
+  const onChatEmployee = React.useCallback(
+    (employee: IAgentCache) => {
+      const normalizedEmployee = agentHandler(employee);
+      const targetId = normalizedEmployee.agentId || normalizedEmployee.id || normalizedEmployee.resourceId;
+      if (!targetId) return;
+      dispatch({ type: 'employees/updateEmployee', payload: { employee: normalizedEmployee } });
+      setAgentId?.(`${targetId}`);
+      setSessionId?.('');
+      navigate(`/employees?tab=personal&personalCatalogId=${curActiveLink}`, {
+        state: {
+          keepSiderActiveKey: 'agent',
+          selectedAgentId: `${targetId}`,
+          selectedEmployee: normalizedEmployee,
+        },
+      });
+    },
+    [curActiveLink, dispatch, navigate, setAgentId, setSessionId]
   );
 
   const onEditEmployee = React.useCallback(
@@ -409,24 +457,27 @@ function EmployeeRelatedToMe(props: IProps, ref: any) {
               className={classnames(styles.messageRowWrap, { [styles.hasMore]: hasMore })}
               scrollThreshold="50px"
               hasChildren={list.length > 0}
-              topItemKey={head(list)?.agentId}
+              topItemKey={head(visibleList)?.agentId}
               style={{
                 overflow: 'visible',
               }}
             >
               <div className={styles.categorySection}>
                 <div className={styles.employeeList}>
-                  {list.map((employee: IAgentCache) => {
+                  {visibleList.map((employee: IAgentCache) => {
                     return (
                       <ResourceCard
                         key={employee.agentId}
                         resource={employee}
+                        resourceType="DIG_EMPLOYEE"
                         avatarNode={
                           <div className={styles.employeeAvatar}>{getAgentChatAvatar(employee.chatAvatar)}</div>
                         }
                         onCardClick={(resource) => onClickEmployee((resource as IAgentCache) || employee)}
+                        digitalEmployeeActionMode
                         actionConfig={{
                           scene: 'personal',
+                          onChat: () => onChatEmployee(employee),
                           onEdit: () => onEditEmployee(employee),
                           onAuth: (type: any) => onAuthEmployee(employee, type),
                           onApplyUse: () => onApplyEmployee(employee),

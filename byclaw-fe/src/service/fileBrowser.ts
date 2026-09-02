@@ -8,9 +8,34 @@ export interface FileBrowserItem {
   lastModified?: string;
 }
 
+export interface ChangedFileDiff {
+  version: number;
+  uuid: string;
+  sessionId: string;
+  filePath: string;
+  workspace: string;
+  absolutePath: string;
+  changeType: 'added' | 'deleted' | 'modified' | 'unchanged';
+  changed: boolean;
+  binary: boolean;
+  contentEncoding: 'utf-8' | 'base64';
+  originalExists: boolean;
+  modifiedExists: boolean;
+  originalMode: number | null;
+  modifiedMode: number | null;
+  originalSize: number;
+  modifiedSize: number;
+  originalContent: string | null;
+  modifiedContent: string | null;
+  additions: number;
+  deletions: number;
+  sources: string[];
+}
+
 export interface FileBrowserListParams {
   resourceId: string | number;
   path?: string;
+  language?: string;
 }
 
 export interface FileBrowserDeleteParams {
@@ -41,12 +66,30 @@ export interface FileBrowserCreateFolderParams {
   path: string;
 }
 
+export interface FileBrowserSaveToKnowledgeParams {
+  resourceId: string | number;
+  sourcePath: string;
+  sourceDir: boolean;
+  targetResourceId: string | number;
+  targetDirectoryPath: string;
+  processFrontMatter?: boolean;
+  overwrite?: boolean;
+}
+
 export function listFiles(params: FileBrowserListParams) {
   return POST<FileBrowserItem[]>('/byaiService/fileBrowser/list', params);
 }
 
 export function getDefaultPath(resourceId: string | number) {
   return GET<string>(`/byaiService/fileBrowser/defaultPath`, { resourceId });
+}
+
+export function getChangedFileDiff(sessionId: string, uuid: string) {
+  return GET<ChangedFileDiff>(
+    '/byaiService/fileBrowser/getChangedFileDiff',
+    { sessionId, uuid },
+    { responseCfg: { hideErrorTips: true } }
+  );
 }
 
 export function uploadFiles(
@@ -113,4 +156,8 @@ export function downloadFolder(resourceId: string | number, path: string) {
     { resourceId, path },
     { responseType: 'blob' }
   );
+}
+
+export function saveToKnowledge(params: FileBrowserSaveToKnowledgeParams) {
+  return POST('/byaiService/fileBrowser/saveToKnowledge', params);
 }

@@ -14,16 +14,19 @@ jest.mock('@/utils/messgae', () => ({
 }));
 
 import { getMessages, getMessageState } from '@/service/message';
+import { hasVisibleMessageContent } from '@/utils/messgae';
 import messageStoreModel, { fetchMessage } from '../useMessageStore';
 
 const mockGetMessages = getMessages as jest.MockedFunction<typeof getMessages>;
 const mockGetMessageState = getMessageState as jest.MockedFunction<typeof getMessageState>;
+const mockHasVisibleMessageContent = hasVisibleMessageContent as jest.MockedFunction<typeof hasVisibleMessageContent>;
 
 describe('models/useMessageStore', () => {
   const reducers = (messageStoreModel as any).reducers;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockHasVisibleMessageContent.mockReturnValue(true);
   });
 
   it('fetchMessage sorts, transforms and marks history messages', async () => {
@@ -63,6 +66,60 @@ describe('models/useMessageStore', () => {
     const result = await fetchMessage({ sessionId: 's1' });
 
     expect(result.list.map((item) => item.messageId)).toEqual([10007067, 2666782070, 10007074]);
+  });
+
+  it.each([
+    { total: 20, expected: false },
+    { total: 21, expected: true },
+  ])('fetchMessage combines the raw page size and total to calculate hasMore', async ({ total, expected }) => {
+    mockGetMessages.mockResolvedValue({
+      list: Array.from({ length: 20 }, (_, index) => ({ messageId: index + 1, text: `message-${index + 1}` })),
+      pageNum: 1,
+      pageSize: 20,
+      total,
+    } as any);
+
+    const result = await fetchMessage({ sessionId: 's1' });
+
+    expect(result.hasMore).toBe(expected);
+  });
+
+  it('getMoreSessionMessage preserves hasMore calculated from the raw response list', async () => {
+    mockHasVisibleMessageContent.mockImplementation((message) => message?.messageId !== 4);
+    mockGetMessages.mockResolvedValue({
+      list: [
+        { messageId: 3, text: 'visible' },
+        { messageId: 4, text: '' },
+      ],
+      pageNum: 2,
+      pageSize: 2,
+      total: 5,
+    } as any);
+
+    const cache = {
+      list: [{ messageId: 1 }, { messageId: 2 }],
+      pageNum: 1,
+      pageSize: 2,
+      total: 5,
+      pageRange: [1, 1],
+      hasMore: true,
+    };
+    const select = jest.fn(() => new Map([['s1', cache]]));
+    const put = jest.fn((action) => action);
+    const effect = (messageStoreModel as any).effects.getMoreSessionMessage(
+      { payload: { sessionId: 's1' } },
+      { put, select }
+    );
+
+    effect.next();
+    const fetchResult = effect.next(new Map([['s1', cache]])).value;
+    const response = await fetchResult;
+    const putEffect = effect.next(response).value;
+
+    expect(response.list).toHaveLength(1);
+    expect(response.hasMore).toBe(true);
+    expect(putEffect.payload.messageListInfo.hasMore).toBe(true);
+    effect.next(putEffect);
   });
 
   it('setSessionMessage stores message info by session id', () => {
@@ -113,6 +170,107 @@ describe('models/useMessageStore', () => {
 
     expect(second.sessionListMap.get('s1').list).toEqual([{ id: 1 }, { id: 2 }, { id: 3 }]);
     expect(second.sessionListMap.get('s1').total).toBe(3);
+  });
+
+  it('applyTaskPlanSnapshot updates the matching answer and ignores stale versions', () => {
+    const messageInfo = {
+      list: [{ messageId: 'm1', fromBeyond: true, taskPlan: { version: 2 } }],
+      pageNum: 1,
+      pageSize: 20,
+      total: 1,
+      pageRange: [1, 1],
+    };
+    const state = { sessionListMap: new Map([['s1', messageInfo]]) };
+    const latestPlan = {
+      planId: 'plan-1',
+      version: 3,
+      title: 'Plan',
+      status: 'ACTIVE',
+      sessionId: 's1',
+      messageId: 'm1',
+      tasks: [],
+    };
+
+    const updated = reducers.applyTaskPlanSnapshot(state as any, {
+      payload: { sessionId: 's1', messageId: 'm1', taskPlan: latestPlan },
+    });
+    const stale = reducers.applyTaskPlanSnapshot(updated, {
+      payload: { sessionId: 's1', messageId: 'm1', taskPlan: { ...latestPlan, version: 1 } },
+    });
+
+    expect(updated.sessionListMap.get('s1').list[0].taskPlan.version).toBe(3);
+    expect(stale).toBe(updated);
+  });
+
+  it('accepts a new plan whose version restarts from one', () => {
+    const state = {
+      sessionListMap: new Map([
+        [
+          's1',
+          {
+            list: [
+              {
+                messageId: 'm1',
+                fromBeyond: true,
+                taskPlan: { planId: 'plan-old', version: 3 },
+              },
+            ],
+            pageNum: 1,
+            pageSize: 20,
+            total: 1,
+            pageRange: [1, 1],
+          },
+        ],
+      ]),
+    };
+    const nextPlan = {
+      planId: 'plan-new',
+      version: 1,
+      title: 'New plan',
+      status: 'ACTIVE',
+      sessionId: 's1',
+      messageId: 'm1',
+      tasks: [],
+    };
+
+    const updated = reducers.applyTaskPlanSnapshot(state as any, {
+      payload: { sessionId: 's1', messageId: 'm1', taskPlan: nextPlan },
+    });
+
+    expect(updated.sessionListMap.get('s1').list[0].taskPlan.planId).toBe('plan-new');
+  });
+
+  it('reopens a completed child for a newer run and ignores a late terminal from the older run', () => {
+    const messageInfo = {
+      list: [{ messageId: 'm1', text: 'run one', messageState: 0 }],
+      pageNum: 1,
+      pageSize: 20,
+      total: 1,
+      pageRange: [1, 1],
+      childRun: { childRunId: 'child:1', childTurn: 1, lastStreamId: '10-0', running: false },
+    };
+    const state = { sessionListMap: new Map([['child-session', messageInfo]]) };
+
+    const reopened = reducers.applyScopedChildProjection(state as any, {
+      payload: {
+        sessionId: 'child-session',
+        message: { messageId: 'm1', text: 'run two', messageState: 2 },
+        childRun: { childRunId: 'child:2', childTurn: 2, lastStreamId: '11-0', running: true },
+      },
+    });
+    const stale = reducers.applyScopedChildProjection(reopened, {
+      payload: {
+        sessionId: 'child-session',
+        message: { messageId: 'm1', text: 'late run one', messageState: 0 },
+        childRun: { childRunId: 'child:1', childTurn: 1, lastStreamId: '12-0', running: false },
+      },
+    });
+
+    expect(reopened.sessionListMap.get('child-session')).toMatchObject({
+      list: [{ messageId: 'm1', text: 'run two', messageState: 2 }],
+      childRun: { childRunId: 'child:2', childTurn: 2, running: true },
+    });
+    expect(stale).toBe(reopened);
   });
 
   it('setInitialSessionDataToLocateMsg stores target message paging info', () => {

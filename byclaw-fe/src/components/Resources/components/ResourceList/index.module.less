@@ -1,4 +1,7 @@
 .spinningWrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   height: 100%;
   width: 100%;
 
@@ -30,6 +33,11 @@
   grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr));
   gap: 20px;
   margin: 0 6px;
+}
+
+// 知识与工具卡片扩大最小列宽，窄内容区自动减少列数，不再把卡片压得过窄。
+.wideResourceList {
+  grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr));
 }
 
 .skillPosterList {

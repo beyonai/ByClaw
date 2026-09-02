@@ -1,21 +1,9 @@
 package com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.cards;
 
-import com.aliyun.dingtalkcard_1_0.Client;
-import com.aliyun.dingtalkcard_1_0.models.CreateAndDeliverHeaders;
-import com.aliyun.dingtalkcard_1_0.models.CreateAndDeliverRequest;
-import com.aliyun.dingtalkcard_1_0.models.PrivateDataValue;
-import com.aliyun.dingtalkcard_1_0.models.StreamingUpdateHeaders;
-import com.aliyun.dingtalkcard_1_0.models.StreamingUpdateRequest;
-import com.aliyun.dingtalkcard_1_0.models.UpdateCardHeaders;
-import com.aliyun.dingtalkcard_1_0.models.UpdateCardRequest;
-import com.aliyun.tea.TeaException;
-import com.aliyun.tea.TeaConverter;
-import com.aliyun.tea.TeaPair;
-import com.aliyun.teaopenapi.models.Config;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkRobotConfigService;
-import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkTokenService;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.UUID;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,10 +12,22 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
-import java.util.Collections;
-import java.util.LinkedHashMap;
-import java.util.Map;
-import java.util.UUID;
+import com.aliyun.dingtalkcard_1_0.Client;
+import com.aliyun.dingtalkcard_1_0.models.CreateAndDeliverHeaders;
+import com.aliyun.dingtalkcard_1_0.models.CreateAndDeliverRequest;
+import com.aliyun.dingtalkcard_1_0.models.PrivateDataValue;
+import com.aliyun.dingtalkcard_1_0.models.StreamingUpdateHeaders;
+import com.aliyun.dingtalkcard_1_0.models.StreamingUpdateRequest;
+import com.aliyun.dingtalkcard_1_0.models.UpdateCardHeaders;
+import com.aliyun.dingtalkcard_1_0.models.UpdateCardRequest;
+import com.aliyun.tea.TeaConverter;
+import com.aliyun.tea.TeaException;
+import com.aliyun.tea.TeaPair;
+import com.aliyun.teaopenapi.models.Config;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkRobotConfigService;
+import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkTokenService;
 
 /**
  * 固定封装“智能体回复卡片”的发送逻辑。
@@ -82,10 +82,10 @@ public class DingtalkCardService {
             String agentName
     ) throws Exception {
         if (!StringUtils.hasText(senderStaffId)) {
-            throw new IllegalArgumentException("DingTalk senderStaffId is empty");
+            throw new IllegalArgumentException("createCardSession fail， DingTalk senderStaffId is empty");
         }
         if (!StringUtils.hasText(robotCode)) {
-            throw new IllegalArgumentException("DingTalk robotCode is empty");
+            throw new IllegalArgumentException("createCardSession fail， DingTalk robotCode is empty");
         }
         String cardTemplateId = resolveCardTemplateId(robotCode);
         if (!StringUtils.hasText(cardTemplateId)) {

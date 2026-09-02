@@ -360,7 +360,7 @@ wheels = [
 
 [[package]]
 name = "by-datacloud"
-version = "0.3.1"
+version = "0.4.0"
 source = { registry = "https://pypi.org/simple/" }
 dependencies = [
     { name = "aiochclient", extra = ["aiohttp"] },
@@ -397,9 +397,9 @@ dependencies = [
     { name = "uvicorn" },
     { name = "watchfiles" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/82/03/b952a72c1296d3400b89ec38d281fdbd341844dde9a2544b0208fdb3462e/by_datacloud-0.3.1.tar.gz", hash = "sha256:5d02b6c5649317efd5669a18033dfbc53b8e3584d651c9affddd575da6ba9bff", size = 8965797, upload-time = "2026-07-30T07:12:12.888Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/38/4d/407efffea9eca2f9c998bda4da9d1e4eb6bcee957de9c6163b47b15f61b2/by_datacloud-0.4.0.tar.gz", hash = "sha256:3012779e2cf81b98e21e0e40fd254adeb51339c9572961bb63a2223256656adb", size = 9227687, upload-time = "2026-09-02T06:30:39.727Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/2a/eb/64aab1e047a383a8311749df382b374b0f5916fd445ab6bda77c928e0977/by_datacloud-0.3.1-py3-none-any.whl", hash = "sha256:2c6d58a37b7ad3d348c1eb64bbf288b9305132f6d85c8041a8a4a2cd7c94762d", size = 1355936, upload-time = "2026-07-30T07:12:10.415Z" },
+    { url = "https://files.pythonhosted.org/packages/b3/65/7f0009bd21c3dbc6150176eb2c441914017efd5b46019ac3cad5dcf49076/by_datacloud-0.4.0-py3-none-any.whl", hash = "sha256:739df1b848de9376c98fff0d49f24ef9844dfcc7f4ecb045a202d4a6e91b116d", size = 1494564, upload-time = "2026-09-02T06:30:37.914Z" },
 ]
 
 [[package]]
@@ -484,7 +484,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "by-datacloud", specifier = "==0.3.1" },
+    { name = "by-datacloud", specifier = "==0.4.0" },
     { name = "by-framework", specifier = "==0.2.2.dev9" },
     { name = "by-framework-history-byclaw", specifier = "==0.0.3" },
     { name = "by-framework-langgraph", specifier = "==0.0.3.dev3" },

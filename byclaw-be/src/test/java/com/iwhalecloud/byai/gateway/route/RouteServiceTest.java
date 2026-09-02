@@ -3,6 +3,7 @@ package com.iwhalecloud.byai.gateway.route;
 import com.alibaba.fastjson.JSONObject;
 import com.alibaba.fastjson.JSONArray;
 import com.iwhaleai.byai.framework.client.GatewayClient;
+import com.iwhaleai.byai.framework.core.protocol.ActionType;
 import com.iwhaleai.byai.framework.core.protocol.ExecutionStatus;
 import com.iwhalecloud.byai.common.constants.resource.WorkerAgentType;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
@@ -10,6 +11,11 @@ import com.iwhalecloud.byai.common.jwt.JwtService;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
+import com.iwhalecloud.byai.manager.application.service.devloop.ProjectApplicationService;
+import com.iwhalecloud.byai.manager.application.service.user.UserBucketNamingService;
+import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectResourceService;
+import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectService;
+import com.iwhalecloud.byai.manager.entity.devloop.Project;
 import com.iwhalecloud.byai.state.common.enums.AgentTypeEnum;
 import com.iwhalecloud.byai.state.common.exception.BdpRuntimeException;
 import com.iwhalecloud.byai.state.domain.agent.enums.AgentMetaEnum;
@@ -19,6 +25,7 @@ import com.iwhalecloud.byai.state.domain.chat.service.ChatStreamRuntimeCoordinat
 import com.iwhalecloud.byai.state.domain.chat.service.ChatProcessContext;
 import com.iwhalecloud.byai.state.domain.chat.service.GatewayStreamEventProcessor;
 import com.iwhalecloud.byai.state.domain.chat.service.PythonSseService;
+import com.iwhalecloud.byai.state.domain.chat.service.SystemParamTargetAgentResolver;
 import com.iwhalecloud.byai.state.domain.chat.service.TargetAgentResolver;
 import com.iwhalecloud.byai.state.domain.chat.service.TraceIdCodec;
 import com.iwhalecloud.byai.state.domain.resource.dto.ResourceVo;
@@ -27,6 +34,9 @@ import com.iwhalecloud.byai.state.infrastructure.common.constants.SseResponseEve
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
+import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.springframework.context.support.StaticMessageSource;
@@ -35,26 +45,39 @@ import org.springframework.context.i18n.LocaleContextHolder;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.LinkedBlockingQueue;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
-
+@DisabledOnOs(OS.WINDOWS)
 class RouteServiceTest {
+
+    @TempDir
+    Path tempDir;
 
     private GatewayClient gatewayClient;
     private PythonSseService pythonSseService;
     private GatewayStreamEventProcessor gatewayStreamEventProcessor;
     private ChatStreamRuntimeCoordinator chatStreamRuntimeCoordinator;
     private SandboxService sandboxService;
+    private WorkerRouteReadinessService workerRouteReadinessService;
     private SequenceService sequenceService;
     private JwtService jwtService;
     private TargetAgentResolver targetAgentResolver;
+    private SystemParamTargetAgentResolver systemParamTargetAgentResolver;
+    private ProjectApplicationService projectApplicationService;
+    private ProjectService projectService;
+    private ProjectResourceService projectResourceService;
+    private UserBucketNamingService userBucketNamingService;
     private RouteService routeService;
     private StaticMessageSource messageSource;
 
@@ -65,9 +88,18 @@ class RouteServiceTest {
         gatewayStreamEventProcessor = new GatewayStreamEventProcessor();
         chatStreamRuntimeCoordinator = mock(ChatStreamRuntimeCoordinator.class);
         sandboxService = mock(SandboxService.class);
+        workerRouteReadinessService = mock(WorkerRouteReadinessService.class);
         sequenceService = mock(SequenceService.class);
         jwtService = mock(JwtService.class);
         targetAgentResolver = new TargetAgentResolver();
+        systemParamTargetAgentResolver = mock(SystemParamTargetAgentResolver.class);
+        ReflectionTestUtils.setField(targetAgentResolver, "systemParamTargetAgentResolver", systemParamTargetAgentResolver);
+        when(systemParamTargetAgentResolver.resolve(any(), nullable(Long.class), anyString()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        projectApplicationService = mock(ProjectApplicationService.class);
+        projectService = mock(ProjectService.class);
+        projectResourceService = mock(ProjectResourceService.class);
+        userBucketNamingService = mock(UserBucketNamingService.class);
         messageSource = new StaticMessageSource();
         messageSource.addMessage("sandbox.launch.progress.start", Locale.SIMPLIFIED_CHINESE, "个人助理正在启动中，请等待");
         messageSource.addMessage("sandbox.launch.progress.waiting", Locale.SIMPLIFIED_CHINESE, "个人助理仍在启动中，请稍等");
@@ -92,9 +124,15 @@ class RouteServiceTest {
         ReflectionTestUtils.setField(routeService, "gatewayStreamEventProcessor", gatewayStreamEventProcessor);
         ReflectionTestUtils.setField(routeService, "chatStreamRuntimeCoordinator", chatStreamRuntimeCoordinator);
         ReflectionTestUtils.setField(routeService, "sandboxService", sandboxService);
+        ReflectionTestUtils.setField(routeService, "workerRouteReadinessService", workerRouteReadinessService);
         ReflectionTestUtils.setField(routeService, "sequenceService", sequenceService);
         ReflectionTestUtils.setField(routeService, "jwtService", jwtService);
         ReflectionTestUtils.setField(routeService, "targetAgentResolver", targetAgentResolver);
+        ReflectionTestUtils.setField(routeService, "projectApplicationService", projectApplicationService);
+        ReflectionTestUtils.setField(routeService, "projectService", projectService);
+        ReflectionTestUtils.setField(routeService, "projectResourceService", projectResourceService);
+        ReflectionTestUtils.setField(routeService, "userBucketNamingService", userBucketNamingService);
+        ReflectionTestUtils.setField(routeService, "fileStorageLocalPath", tempDir.toString());
         ReflectionTestUtils.setField(I18nUtil.class, "messageSource", messageSource);
         LocaleContextHolder.setLocale(Locale.SIMPLIFIED_CHINESE);
 
@@ -103,6 +141,30 @@ class RouteServiceTest {
         loginInfo.setUserId(100L);
         loginInfo.setUserName("testUser");
         CurrentUserHolder.setLoginInfo(loginInfo);
+
+        Project project = new Project();
+        project.setProjectId(123L);
+        project.setProjectName("test-project");
+        when(projectService.findById(123L)).thenReturn(project);
+        when(userBucketNamingService.buildUserBucketName("u1")).thenReturn("byclaw-u1");
+    }
+
+    @Test
+    void routeChecksWorkerReadinessBeforeItsFirstGatewaySend() throws Exception {
+        ChatProcessContext ctx = buildContext();
+        when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any()))
+                .thenAnswer(invocation -> {
+                    ctx.gatewayEventQueue.offer(currentTraceDoneEvent(ctx));
+                    return successResponse();
+                });
+
+        routeService.route(ctx);
+
+        InOrder inOrder = inOrder(workerRouteReadinessService, gatewayClient);
+        inOrder.verify(workerRouteReadinessService).ensureReady(eq("u1"), isNull(), eq("BYCLAW_EXE_u1"), any());
+        inOrder.verify(gatewayClient).sendMessage(anyString(), anyString(), any(), anyString(), any(),
+            anyString(), anyString(), anyString(), anyString(), any(), any());
     }
 
     @AfterEach
@@ -253,6 +315,243 @@ class RouteServiceTest {
     }
 
     @Test
+    void route_sendsDefaultSuperAssistantToBySuperWithoutUserSuffix() throws Exception {
+        ChatProcessContext ctx = buildContext(WorkerAgentType.BY_SUPER.getCode(), 1001L);
+        when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any()))
+                .thenAnswer(invocation -> {
+                    ctx.gatewayEventQueue.offer(currentTraceDoneEvent(ctx));
+                    return successResponse();
+                });
+
+        routeService.route(ctx);
+
+        ArgumentCaptor<Map<String, Object>> paramsCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(gatewayClient).sendMessage(eq(WorkerAgentType.BY_SUPER.getCode()), eq("3"), eq("hello"),
+                eq("u1"), eq("testUser"), anyString(), eq("-1"), eq("2"), eq(ctx.getTraceId()),
+                paramsCaptor.capture(), any());
+        org.assertj.core.api.Assertions.assertThat(paramsCaptor.getValue())
+                .containsEntry("worker_agent_type", WorkerAgentType.BY_SUPER.getCode());
+        org.assertj.core.api.Assertions.assertThat(paramsCaptor.getValue().get("groupChat"))
+                .isEqualTo(Map.of(
+                        "schemaVersion", "byclaw.group-chat-ref/v1",
+                        "conversationKey", "3",
+                        "beforeMessageId", "1"));
+        verifyNoInteractions(sandboxService);
+    }
+
+    @Test
+    void route_sendsGroupChatReferenceToRegularAgent() throws Exception {
+        ChatProcessContext ctx = buildContext(WorkerAgentType.BYCLAW_CODE.getCode(), 123L);
+        when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any()))
+                .thenAnswer(invocation -> {
+                    ctx.gatewayEventQueue.offer(currentTraceDoneEvent(ctx));
+                    return successResponse();
+                });
+
+        routeService.route(ctx);
+
+        ArgumentCaptor<Map<String, Object>> paramsCaptor = ArgumentCaptor.forClass(Map.class);
+        ArgumentCaptor<Map<String, Object>> metadataCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(gatewayClient).sendMessage(eq("BYCLAW_CODE_u1"), eq("3"), eq("hello"),
+                eq("u1"), eq("testUser"), eq(ActionType.ASK_AGENT), eq("-1"), eq("2"),
+                eq(ctx.getTraceId()), paramsCaptor.capture(), metadataCaptor.capture());
+        org.assertj.core.api.Assertions.assertThat(paramsCaptor.getValue().get("groupChat"))
+                .isEqualTo(Map.of(
+                        "schemaVersion", "byclaw.group-chat-ref/v1",
+                        "conversationKey", "3",
+                        "beforeMessageId", "1"));
+        org.assertj.core.api.Assertions.assertThat(metadataCaptor.getValue())
+                .containsEntry("Beyond-Token", "test-beyond-token");
+    }
+
+    @Test
+    void route_sendsActualProjectWorkspaceRelativeToCurrentUserBucket() throws Exception {
+        ChatProcessContext ctx = buildContext();
+        ctx.getAssistantChatDto().setProjectId(123L);
+        Project project = mock(Project.class);
+        when(project.getProjectId()).thenReturn(123L);
+        when(project.getProjectName()).thenReturn("test-project");
+        when(projectService.findById(123L)).thenReturn(project);
+        when(projectApplicationService.getProjectWorkspacePath(123L))
+            .thenReturn(tempDir.resolve("byclaw-u1/by/projects/123"));
+        when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any()))
+            .thenAnswer(invocation -> {
+                ctx.gatewayEventQueue.offer(currentTraceDoneEvent(ctx));
+                return successResponse();
+            });
+
+        routeService.route(ctx);
+
+        ArgumentCaptor<Map<String, Object>> paramsCaptor = ArgumentCaptor.forClass(Map.class);
+        ArgumentCaptor<Map<String, Object>> metadataCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(gatewayClient).sendMessage(anyString(), anyString(), any(), anyString(), any(),
+            anyString(), anyString(), anyString(), anyString(), paramsCaptor.capture(), metadataCaptor.capture());
+        org.assertj.core.api.Assertions.assertThat(paramsCaptor.getValue())
+            .containsEntry("cwd", "/by/projects/123");
+        JSONObject projectInfo = (JSONObject) metadataCaptor.getValue().get("project_info");
+        org.assertj.core.api.Assertions.assertThat(projectInfo)
+            .containsEntry("project_id", 123L)
+            .containsEntry("workspace", "/by/projects/123");
+        verify(projectApplicationService).getProjectWorkspacePath(123L);
+    }
+
+    @Test
+    void route_sendsConversationWorkspaceWhenProjectIsMissing() throws Exception {
+        ChatProcessContext ctx = buildContext();
+        ctx.getParams().put("cwd", "/caller/supplied/path");
+        when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any()))
+            .thenAnswer(invocation -> {
+                ctx.gatewayEventQueue.offer(currentTraceDoneEvent(ctx));
+                return successResponse();
+            });
+
+        routeService.route(ctx);
+
+        ArgumentCaptor<Map<String, Object>> paramsCaptor = ArgumentCaptor.forClass(Map.class);
+        ArgumentCaptor<Map<String, Object>> metadataCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(gatewayClient).sendMessage(anyString(), eq("3"), any(), anyString(), any(),
+            anyString(), anyString(), anyString(), anyString(), paramsCaptor.capture(), metadataCaptor.capture());
+        org.assertj.core.api.Assertions.assertThat(paramsCaptor.getValue())
+            .containsEntry("cwd", "/by/.sessions/3");
+        org.assertj.core.api.Assertions.assertThat(metadataCaptor.getValue())
+            .doesNotContainKey("project_info");
+        org.assertj.core.api.Assertions.assertThat(Files.isDirectory(
+            tempDir.resolve("byclaw-u1/by/.sessions/3")))
+            .isTrue();
+        verifyNoInteractions(projectApplicationService);
+    }
+
+    @Test
+    void route_reusesExistingConversationWorkspace() throws Exception {
+        Path conversationWorkspace = tempDir.resolve("byclaw-u1/by/.sessions/3");
+        Files.createDirectories(conversationWorkspace);
+        Path existingFile = Files.writeString(conversationWorkspace.resolve("existing.txt"), "keep");
+        ChatProcessContext ctx = buildContext();
+        when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any()))
+            .thenAnswer(invocation -> {
+                ctx.gatewayEventQueue.offer(currentTraceDoneEvent(ctx));
+                return successResponse();
+            });
+
+        routeService.route(ctx);
+
+        org.assertj.core.api.Assertions.assertThat(Files.readString(existingFile))
+            .isEqualTo("keep");
+        verify(gatewayClient).sendMessage(anyString(), eq("3"), any(), anyString(), any(),
+            anyString(), anyString(), anyString(), anyString(),
+            argThat(params -> "/by/.sessions/3".equals(params.get("cwd"))), any());
+    }
+
+    @Test
+    void route_rejectsMessageWhenConversationWorkspaceCannotBeCreated() throws Exception {
+        Path conversationWorkspace = tempDir.resolve("byclaw-u1/by/.sessions/3");
+        Files.createDirectories(conversationWorkspace.getParent());
+        Files.createFile(conversationWorkspace);
+        ChatProcessContext ctx = buildContext();
+
+        assertThatThrownBy(() -> routeService.route(ctx))
+            .isInstanceOf(BdpRuntimeException.class)
+            .hasMessageContaining("会话工作目录初始化失败");
+
+        verifyNoInteractions(gatewayClient);
+    }
+
+    @Test
+    void route_rejectsMissingSessionIdWhenProjectIsMissing() {
+        ChatProcessContext ctx = buildContext();
+        ctx.setSessionId(null);
+        when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any()))
+            .thenAnswer(invocation -> {
+                ctx.gatewayEventQueue.offer(currentTraceDoneEvent(ctx));
+                return successResponse();
+            });
+
+        assertThatThrownBy(() -> routeService.route(ctx))
+            .isInstanceOf(BdpRuntimeException.class)
+            .hasMessage("会话工作目录解析失败：缺少会话 ID");
+
+        verifyNoInteractions(gatewayClient);
+    }
+
+    @Test
+    void route_keepsActualProjectWorkspaceWhenItIsOutsideCurrentUserBucket() throws Exception {
+        ChatProcessContext ctx = buildContext();
+        ctx.getAssistantChatDto().setProjectId(123L);
+        Project project = mock(Project.class);
+        when(project.getProjectId()).thenReturn(123L);
+        when(project.getProjectName()).thenReturn("test-project");
+        when(projectService.findById(123L)).thenReturn(project);
+        when(projectApplicationService.getProjectWorkspacePath(123L))
+            .thenReturn(Paths.get("/external/projects/123"));
+        when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any()))
+            .thenAnswer(invocation -> {
+                ctx.gatewayEventQueue.offer(currentTraceDoneEvent(ctx));
+                return successResponse();
+            });
+
+        routeService.route(ctx);
+
+        ArgumentCaptor<Map<String, Object>> metadataCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(gatewayClient).sendMessage(anyString(), anyString(), any(), anyString(), any(),
+            anyString(), anyString(), anyString(), anyString(), any(), metadataCaptor.capture());
+        JSONObject projectInfo = (JSONObject) metadataCaptor.getValue().get("project_info");
+        org.assertj.core.api.Assertions.assertThat(projectInfo)
+            .containsEntry("workspace", "/external/projects/123");
+    }
+
+    @Test
+    void route_doesNotSendGroupChatReferenceForControlAction() throws Exception {
+        ChatProcessContext ctx = buildContext(WorkerAgentType.BYCLAW_CODE.getCode(), 123L);
+        ctx.getAssistantChatDto().setActionType("CONTROL_ACTION");
+        when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any()))
+                .thenAnswer(invocation -> {
+                    ctx.gatewayEventQueue.offer(currentTraceDoneEvent(ctx));
+                    return successResponse();
+                });
+
+        routeService.route(ctx);
+
+        ArgumentCaptor<Map<String, Object>> paramsCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(gatewayClient).sendMessage(anyString(), anyString(), any(), anyString(), any(),
+                eq("CONTROL_ACTION"), anyString(), anyString(), anyString(), paramsCaptor.capture(), any());
+        org.assertj.core.api.Assertions.assertThat(paramsCaptor.getValue()).doesNotContainKey("groupChat");
+    }
+
+    @Test
+    void route_removesLeadingDigitalEmployeePlaceholderWhenSingleDigitalEmployeeAndAgentIdPresent() throws Exception {
+        ChatProcessContext ctx = buildContext(WorkerAgentType.BYCLAW_EXE.getCode(), 10000998L);
+        ctx.getAssistantChatDto().setChatContent("{{DIG_EMPLOYEE_10000998}}帮我处理这个任务");
+
+        ResourceVo agent = new ResourceVo();
+        agent.setResourceType(AgentMetaEnum.DIG_EMPLOYEE);
+        agent.setResourceId("10000998");
+        agent.setResourceName("liu0518");
+        ctx.getAssistantChatDto().setResourceList(Arrays.asList(agent));
+
+        when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any()))
+                .thenAnswer(invocation -> {
+                    ctx.gatewayEventQueue.offer(currentTraceDoneEvent(ctx));
+                    return successResponse();
+                });
+
+        routeService.route(ctx);
+
+        ArgumentCaptor<Object> contentCaptor = ArgumentCaptor.forClass(Object.class);
+        verify(gatewayClient).sendMessage(anyString(), anyString(), contentCaptor.capture(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any());
+        org.assertj.core.api.Assertions.assertThat(contentCaptor.getValue()).isEqualTo("帮我处理这个任务");
+    }
+
+    @Test
     void route_replacesCompositeSkillPlaceholderBeforeSendingToGateway() throws Exception {
         ChatProcessContext ctx = buildContext();
         ctx.getAssistantChatDto().setChatContent(
@@ -309,6 +608,60 @@ class RouteServiceTest {
         verify(gatewayClient).sendMessage(anyString(), anyString(), contentCaptor.capture(), anyString(), any(),
                 anyString(), anyString(), anyString(), anyString(), any(), any());
         org.assertj.core.api.Assertions.assertThat(contentCaptor.getValue()).isEqualTo("#persona-cfo 22");
+    }
+
+    @Test
+    void route_formatsCommonFilePlaceholderAsMarkdownLink() throws Exception {
+        ChatProcessContext ctx = buildContext();
+        ctx.getAssistantChatDto().setChatContent("{{COMMON_FILE_file-001}}请读取");
+
+        ResourceVo file = new ResourceVo();
+        file.setResourceType(AgentMetaEnum.COMMON_FILE);
+        file.setResourceId("file-001");
+        file.setResourceName("合同.pdf");
+        ctx.getAssistantChatDto().setResourceList(Arrays.asList(file));
+
+        when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any()))
+                .thenAnswer(invocation -> {
+                    ctx.gatewayEventQueue.offer(currentTraceDoneEvent(ctx));
+                    return successResponse();
+                });
+
+        routeService.route(ctx);
+
+        ArgumentCaptor<Object> contentCaptor = ArgumentCaptor.forClass(Object.class);
+        verify(gatewayClient).sendMessage(anyString(), anyString(), contentCaptor.capture(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any());
+        org.assertj.core.api.Assertions.assertThat(contentCaptor.getValue())
+                .isEqualTo("[合同.pdf](file-001) 请读取");
+    }
+
+    @Test
+    void route_formatsCommonFolderPlaceholderAsMarkdownLink() throws Exception {
+        ChatProcessContext ctx = buildContext();
+        ctx.getAssistantChatDto().setChatContent("{{COMMON_FOLDER_folder-001}}请列出文件");
+
+        ResourceVo folder = new ResourceVo();
+        folder.setResourceType(AgentMetaEnum.COMMON_FOLDER);
+        folder.setResourceId("folder-001");
+        folder.setResourceName("项目资料");
+        ctx.getAssistantChatDto().setResourceList(Arrays.asList(folder));
+
+        when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any()))
+                .thenAnswer(invocation -> {
+                    ctx.gatewayEventQueue.offer(currentTraceDoneEvent(ctx));
+                    return successResponse();
+                });
+
+        routeService.route(ctx);
+
+        ArgumentCaptor<Object> contentCaptor = ArgumentCaptor.forClass(Object.class);
+        verify(gatewayClient).sendMessage(anyString(), anyString(), contentCaptor.capture(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any());
+        org.assertj.core.api.Assertions.assertThat(contentCaptor.getValue())
+                .isEqualTo("[项目资料](folder-001) 请列出文件");
     }
 
     @Test
@@ -373,6 +726,11 @@ class RouteServiceTest {
         org.assertj.core.api.Assertions.assertThat(traceIdCaptor.getValue())
                 .isEqualTo(TraceIdCodec.encode(ctx.getUserMessageId(), ctx.getModelAnswerMessageId()));
         Map<String, Object> params = paramsCaptor.getValue();
+        org.assertj.core.api.Assertions.assertThat(params.get("groupChat"))
+                .isEqualTo(Map.of(
+                        "schemaVersion", "byclaw.group-chat-ref/v1",
+                        "conversationKey", "3",
+                        "beforeMessageId", "1"));
         JSONObject batchPayload = (JSONObject) params.get("multi_agent");
         org.assertj.core.api.Assertions.assertThat(batchPayload)
                 .containsEntry("turnId", "turn-1")

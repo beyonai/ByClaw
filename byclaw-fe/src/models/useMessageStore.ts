@@ -4,7 +4,8 @@ import { createMessage, fetchMessageHandler, hasVisibleMessageContent } from '@/
 
 import { getMessages, getMessageState } from '@/service/message';
 
-import { IMessage } from '@/typescript/message';
+import type { IMessage, TaskPlanSnapshot } from '@/typescript/message';
+import { shouldApplyScopedChildRun, type ScopedChildRunState } from '@/utils/scopedSession';
 
 const _INIT_PAGESIZE_ = 20;
 
@@ -115,8 +116,8 @@ export const fetchMessage = async (param: {
     pageNum: Number(pageNum),
     pageSize: Number(pageSize),
     total: Number(total),
-    // ⚠️ 需要用接口查询出来的list长度来判断，因为cacheList经过了filter
-    hasMore: size(list) >= Number(pageSize),
+    // 使用接口原始列表判断是否满页，cacheList 经过过滤，不能代表后端分页进度。
+    hasMore: size(list) >= Number(pageSize) && Number(pageNum) * Number(pageSize) < Number(total),
   };
 };
 
@@ -128,6 +129,7 @@ export type IMessageInfo = {
   targetMessageId?: string;
   pageRange: [number, number];
   hasMore?: boolean;
+  childRun?: ScopedChildRunState;
 };
 
 export type MessageListUpdater = IMessage[] | ((messageList: IMessage[]) => IMessage[]);
@@ -240,7 +242,8 @@ export default {
 
         cache = {
           ...res,
-          hasMore: isPrev ? undefined : size(res.list) >= cache.pageSize,
+          // fetchMessage 已根据接口原始列表和总数判断，避免再用过滤后的 res.list 覆盖。
+          hasMore: isPrev ? undefined : res.hasMore,
           list: sortMessagesByTimeline(
             uniqBy(isPrev ? [...cache.list, ...res.list] : [...res.list, ...cache.list], 'messageId')
           ),
@@ -353,12 +356,9 @@ export default {
 
       if (oldMessageInfo) {
         newSessionListMap.set(`${sessionId}`, {
+          ...oldMessageInfo,
           list: messageList,
-          pageSize: oldMessageInfo.pageSize,
-          pageNum: oldMessageInfo.pageNum,
           total: oldMessageInfo.total + (size(messageList) - size(oldMessageInfo.list)),
-          pageRange: oldMessageInfo.pageRange,
-          hasMore: oldMessageInfo.hasMore,
         });
       } else if (allowCreateSession) {
         newSessionListMap.set(`${sessionId}`, {
@@ -375,6 +375,66 @@ export default {
         ...state,
         sessionListMap: newSessionListMap,
       };
+    },
+    applyScopedChildProjection(
+      state: IState,
+      action: {
+        payload: { sessionId: string; message: IMessage; childRun: ScopedChildRunState };
+      }
+    ) {
+      const { sessionId, message, childRun } = action.payload;
+      const sessionListMap = new Map(state.sessionListMap);
+      const messageInfo = sessionListMap.get(`${sessionId}`);
+      if (!messageInfo || !shouldApplyScopedChildRun(messageInfo.childRun, childRun)) return state;
+
+      const list = [...(messageInfo.list || [])];
+      const messageIndex = list.findIndex((item) => {
+        if (item.messageId && message.messageId) return `${item.messageId}` === `${message.messageId}`;
+        return Boolean(item.msgId && message.msgId && `${item.msgId}` === `${message.msgId}`);
+      });
+      if (messageIndex >= 0) list[messageIndex] = message;
+      else list.push(message);
+
+      sessionListMap.set(`${sessionId}`, {
+        ...messageInfo,
+        list,
+        total: messageInfo.total + (messageIndex >= 0 ? 0 : 1),
+        childRun,
+      });
+      return { ...state, sessionListMap };
+    },
+    applyTaskPlanSnapshot(
+      state: IState,
+      action: { payload: { sessionId: string; messageId?: string; taskPlan: TaskPlanSnapshot } }
+    ) {
+      const { sessionId, messageId, taskPlan } = action.payload;
+      const sessionListMap = new Map(state.sessionListMap);
+      const messageInfo = sessionListMap.get(`${sessionId}`);
+      if (!messageInfo?.list?.length) return state;
+
+      let changed = false;
+      const list = messageInfo.list.map((message) => {
+        const matchesMessageId = messageId && `${message.messageId || ''}` === `${messageId}`;
+        const matchesTraceId = taskPlan.traceId && `${message.traceId || ''}` === `${taskPlan.traceId}`;
+        if (!message.fromBeyond || (!matchesMessageId && !matchesTraceId)) return message;
+
+        const currentPlan = message.taskPlan;
+        const currentVersion = Number(message.taskPlan?.version || 0);
+        const nextVersion = Number(taskPlan.version || 0);
+        if (currentPlan?.planId === taskPlan.planId && currentVersion >= nextVersion) return message;
+        if (currentPlan?.planId && currentPlan.planId !== taskPlan.planId) {
+          const currentTime = Date.parse(`${currentPlan.updatedAt || currentPlan.createdAt || ''}`);
+          const nextTime = Date.parse(`${taskPlan.updatedAt || taskPlan.createdAt || ''}`);
+          if (Number.isFinite(currentTime) && Number.isFinite(nextTime) && nextTime < currentTime) return message;
+        }
+
+        changed = true;
+        return { ...message, taskPlan };
+      });
+
+      if (!changed) return state;
+      sessionListMap.set(`${sessionId}`, { ...messageInfo, list });
+      return { ...state, sessionListMap };
     },
     setInitialSessionDataToLocateMsg(
       state: IState,

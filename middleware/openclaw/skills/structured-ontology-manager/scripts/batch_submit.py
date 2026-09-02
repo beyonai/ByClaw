@@ -6,6 +6,8 @@ I/O 协议：stdin JSON → stdout JSON
 入参（stdin JSON）:
     {
         "workspace_name": "travel_reimbursement",   # 必填
+        "owner_type": "personal",                    # 可选；缺失或空值时为 personal
+        "tenant_id": "tenant-a",                     # 企业可选；通过 X-Tenant-Id 发送
         "only": ["travel_application", "v_travel_full"]  # 可选，指定只提交部分
     }
 
@@ -53,12 +55,30 @@ def main() -> None:
         sys.exit(1)
 
     payload: dict = {"workspace_name": workspace_name}
+    owner_type = str(params.get("owner_type") or "personal").strip().lower()
+    if owner_type not in {"personal", "enterprise"}:
+        stdout_json({"ok": False, "error": "owner_type 必须为 personal 或 enterprise"})
+        sys.exit(1)
+    payload["owner_type"] = owner_type
+    if params.get("base_id"):
+        payload["base_id"] = params["base_id"]
     if params.get("only"):
         payload["only"] = params["only"]
     if params.get("confirm_drop_columns"):
         payload["confirm_drop_columns"] = True
+    if params.get("confirm_scope_conversion"):
+        payload["confirm_scope_conversion"] = True
+    if params.get("confirm_drop_target_tables"):
+        payload["confirm_drop_target_tables"] = True
+    if params.get("publish_id"):
+        payload["publish_id"] = params["publish_id"]
 
-    result = post_ontology_api("/workspace/batch-submit", payload)
+    tenant_id = str(params.get("tenant_id", "")).strip() or None
+    result = post_ontology_api(
+        "/workspace/batch-submit",
+        payload,
+        tenant_id=tenant_id if owner_type == "enterprise" else None,
+    )
     stdout_json(result)
 
 

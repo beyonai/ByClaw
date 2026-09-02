@@ -94,6 +94,8 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
   const fetchListRequestSeqRef = useRef(0);
   const searchRequestSeqRef = useRef(0);
   const isSearchingRef = useRef(false);
+  const childCacheInvalidVersionRef = useRef<Partial<Record<FileCategoryKey, number>>>({});
+  const childCacheLoadedVersionRef = useRef<Partial<Record<FileCategoryKey, Record<string, number>>>>({});
   const categorySwitchRequestRef = useRef<{ key: FileCategoryKey; path: string } | null>(null);
   const [currentPath, setCurrentPath] = useState('');
   const [activeCategoryKey, setActiveCategoryKey] = useState<FileCategoryKey | undefined>('root');
@@ -105,6 +107,9 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
   const [isSearching, setIsSearching] = useState(false);
   const [childrenByPath, setChildrenByPath] = useState<Record<string, FileBrowserItem[]>>({});
   const [expandedTreeKeys, setExpandedTreeKeys] = useState<React.Key[]>([]);
+  // 受控接管 rc-tree 的 loadedKeys：它默认把展开过的目录永久标记为已加载并跳过 loadData，
+  // 刷新后再展开就不会重新请求。目录数据失效时必须把对应 key 摘掉。
+  const [loadedTreeKeys, setLoadedTreeKeys] = useState<React.Key[]>([]);
   const [uploadConfirmOpen, setUploadConfirmOpen] = useState(false);
   const [pendingUploadFiles, setPendingUploadFiles] = useState<File[]>([]);
   const [pendingUploadPath, setPendingUploadPath] = useState('');
@@ -153,6 +158,49 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
     []
   );
 
+  // 清空子目录数据时必须连带清掉 rc-tree 的 loadedKeys，否则它仍认为目录已加载完，
+  // 展开时不再触发 loadData，树上就永远是空的。
+  const clearChildDirectoryState = useCallback(() => {
+    setChildrenByPath({});
+    setLoadedTreeKeys([]);
+  }, []);
+
+  const resetChildDirectoryCacheVersion = useCallback((categoryKey: FileCategoryKey | undefined) => {
+    if (!categoryKey) return;
+    delete childCacheInvalidVersionRef.current[categoryKey];
+    delete childCacheLoadedVersionRef.current[categoryKey];
+    setLoadedTreeKeys([]);
+  }, []);
+
+  const markChildDirectoryCacheStale = useCallback((categoryKey: FileCategoryKey | undefined) => {
+    if (!categoryKey) return;
+    childCacheInvalidVersionRef.current[categoryKey] = (childCacheInvalidVersionRef.current[categoryKey] || 0) + 1;
+    // 数据作废的同时必须摘掉 rc-tree 的 loadedKeys，否则它认为目录已加载过，
+    // 用户再展开时不会触发 loadData，永远看不到新文件。摘掉后 rc-tree 可能对已展开节点
+    // 补一次 loadData，与调用方自己的重查重复；同接口同目录，结果一致，刷新是低频动作，不额外去重。
+    setLoadedTreeKeys([]);
+  }, []);
+
+  const markChildDirectoriesFresh = useCallback((categoryKey: FileCategoryKey | undefined, paths: string[]) => {
+    if (!categoryKey || !paths.length) return;
+    const loadedVersionMap = childCacheLoadedVersionRef.current[categoryKey] || {};
+    const currentVersion = childCacheInvalidVersionRef.current[categoryKey] || 0;
+    const normalizedPaths = paths.map((path) => ensureDirectoryPath(normalizeFileBrowserPath(path)));
+    normalizedPaths.forEach((path) => {
+      loadedVersionMap[path] = currentVersion;
+    });
+    childCacheLoadedVersionRef.current[categoryKey] = loadedVersionMap;
+    setLoadedTreeKeys((prev) => Array.from(new Set([...prev, ...normalizedPaths])));
+  }, []);
+
+  const isChildDirectoryCacheStale = useCallback((categoryKey: FileCategoryKey | undefined, path: string) => {
+    if (!categoryKey) return false;
+    const currentVersion = childCacheInvalidVersionRef.current[categoryKey] || 0;
+    const loadedVersion =
+      childCacheLoadedVersionRef.current[categoryKey]?.[ensureDirectoryPath(normalizeFileBrowserPath(path))] || 0;
+    return loadedVersion < currentVersion;
+  }, []);
+
   const fetchList = useCallback(
     async (path: string, options: { force?: boolean; categoryKey?: FileCategoryKey | undefined } = {}) => {
       const cacheKey = options.categoryKey ?? activeCategoryKey;
@@ -180,6 +228,9 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
         const data = res?.data ?? res ?? [];
         const nextItems = Array.isArray(data) ? data : [];
         const nextChildrenByPath = options.force ? {} : cached?.childrenByPath || {};
+        if (options.force) {
+          resetChildDirectoryCacheVersion(cacheKey);
+        }
         updateCategoryCache(cacheKey, {
           path: requestPath,
           items: nextItems,
@@ -202,7 +253,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
         }
       }
     },
-    [activeCategoryKey, intl, resourceId, updateCategoryCache]
+    [activeCategoryKey, intl, resetChildDirectoryCacheVersion, resourceId, updateCategoryCache]
   );
 
   const expandCurrentSessionDirectory = useCallback(
@@ -215,6 +266,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
         await ensureFolder({ resourceId, path: sessionPath });
         const res: any = await listFiles({ resourceId, path: sessionPath });
         const sessionChildren = unwrapListResponse<FileBrowserItem>(res);
+        markChildDirectoriesFresh('session', [sessionPath]);
 
         setChildrenByPath((prev) => {
           const nextChildrenByPath = {
@@ -235,7 +287,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
         message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.error.loadFailed' }));
       }
     },
-    [activeSessionId, intl, isSearching, items, resourceId, updateCategoryCache]
+    [activeSessionId, intl, isSearching, items, markChildDirectoriesFresh, resourceId, updateCategoryCache]
   );
 
   const refreshExpandedDirectories = useCallback(
@@ -247,6 +299,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
 
       const categoryKey = activeCategoryKeyRef.current;
       if (!categoryKey) return;
+      markChildDirectoryCacheStale(categoryKey);
 
       const categoryRootPath = getCategoryRootPath(categoryKey);
       const normalizedCurrentPath = ensureDirectoryPath(normalizeFileBrowserPath(currentPathRef.current));
@@ -276,10 +329,11 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
           },
           {}
         );
-        const nextChildrenByPath = {
-          ...(categoryCacheRef.current[categoryKey]?.childrenByPath || {}),
-          ...refreshedChildrenByPath,
-        };
+        // The category cache was marked stale above. Keeping old children here would
+        // make rc-tree skip loadData on a collapsed directory because it already has
+        // a `children` array, leaving that directory permanently stale after refresh.
+        const nextChildrenByPath = refreshedChildrenByPath;
+        markChildDirectoriesFresh(categoryKey, expandedDirectoryPaths);
 
         updateCategoryCache(categoryKey, {
           path: requestPath,
@@ -301,7 +355,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
         setLoading(false);
       }
     },
-    [expandedTreeKeys, intl, resourceId, updateCategoryCache]
+    [expandedTreeKeys, intl, markChildDirectoriesFresh, markChildDirectoryCacheStale, resourceId, updateCategoryCache]
   );
 
   useEffect(() => {
@@ -330,6 +384,8 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       defaultCategoryKey === 'session' && activeSessionId ? [getSessionFilePath(activeSessionId)] : [];
     setPathInitialized(false);
     categoryCacheRef.current = {};
+    childCacheInvalidVersionRef.current = {};
+    childCacheLoadedVersionRef.current = {};
     activeCategoryKeyRef.current = defaultCategoryKey;
     currentPathRef.current = defaultCategoryPath;
     setActiveCategoryKey(defaultCategoryKey);
@@ -338,11 +394,11 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
     setSearchItems([]);
     setSearchValue('');
     setIsSearching(false);
-    setChildrenByPath({});
+    clearChildDirectoryState();
     setExpandedTreeKeys(defaultExpandedKeys);
     if (!resourceId) return;
     setPathInitialized(true);
-  }, [activeSessionId, fileCategories, resourceId]);
+  }, [activeSessionId, clearChildDirectoryState, fileCategories, resourceId]);
 
   useEffect(() => {
     if (resourceId && pathInitialized && activeCategoryKey && currentPath) {
@@ -392,7 +448,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
         setIsSearching(false);
         setSearchItems([]);
         setItems([]);
-        setChildrenByPath({});
+        clearChildDirectoryState();
         setExpandedTreeKeys([]);
         return;
       }
@@ -407,13 +463,14 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       // Clear cache so switching tabs always reloads the data.
       const cached = categoryCacheRef.current[nextCategory.key];
       delete categoryCacheRef.current[nextCategory.key];
+      resetChildDirectoryCacheVersion(nextCategory.key);
 
       setActiveCategoryKey(nextCategory.key);
       setSearchValue('');
       setIsSearching(false);
       setSearchItems([]);
       setItems([]);
-      setChildrenByPath({});
+      clearChildDirectoryState();
       setExpandedTreeKeys(
         nextCategory.key === 'session' && activeSessionId ? [getSessionFilePath(activeSessionId)] : []
       );
@@ -433,7 +490,16 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
         await expandCurrentSessionDirectory(activeSessionId);
       }
     },
-    [activeSessionId, expandCurrentSessionDirectory, fetchList, fileCategories, intl, resourceId]
+    [
+      activeSessionId,
+      clearChildDirectoryState,
+      expandCurrentSessionDirectory,
+      fetchList,
+      fileCategories,
+      intl,
+      resetChildDirectoryCacheVersion,
+      resourceId,
+    ]
   );
 
   // 回答完成后刷新一次文件列表（含已展开目录），避免流式过程中频繁刷新
@@ -517,14 +583,14 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
         searchRequestSeqRef.current += 1;
         setIsSearching(false);
         setSearchItems([]);
-        setChildrenByPath({});
+        clearChildDirectoryState();
         await fetchList(currentPath, { force: true });
         return;
       }
       const requestSeq = ++searchRequestSeqRef.current;
       fetchListRequestSeqRef.current += 1;
       setIsSearching(true);
-      setChildrenByPath({});
+      clearChildDirectoryState();
       setLoading(true);
       try {
         const visitedDirectories = new Set<string>();
@@ -564,7 +630,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
         }
       }
     },
-    [currentPath, fetchList, intl, resourceId]
+    [clearChildDirectoryState, currentPath, fetchList, intl, resourceId]
   );
 
   const clearClickTimer = useCallback(() => {
@@ -700,11 +766,11 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       if (isPathIn(currentPath, BYKC_FILE_PATH)) {
         setSearchValue('');
         setIsSearching(false);
-        setChildrenByPath({});
+        clearChildDirectoryState();
         await fetchList(currentPath, { force: true });
       }
     },
-    [currentPath, fetchList, intl, resolveKnowledgeUploadTarget]
+    [clearChildDirectoryState, currentPath, fetchList, intl, resolveKnowledgeUploadTarget]
   );
 
   const executeUpload = useCallback(
@@ -730,11 +796,12 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
         if (uploadPath === ensureDirectoryPath(currentPath)) {
           setSearchValue('');
           setIsSearching(false);
-          setChildrenByPath({});
+          clearChildDirectoryState();
           await fetchList(currentPath, { force: true });
           return;
         }
         const res: any = await listFiles({ resourceId, path: uploadPath });
+        markChildDirectoriesFresh(activeCategoryKey, [uploadPath]);
         setChildrenByPath((prev) => {
           const nextChildrenByPath = {
             ...prev,
@@ -757,12 +824,14 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
     },
     [
       activeCategoryKey,
+      clearChildDirectoryState,
       currentPath,
       executeKnowledgeDirectoryUpload,
       fetchList,
       intl,
       isSearching,
       items,
+      markChildDirectoriesFresh,
       pendingUploadConflicts.length,
       pendingUploadKnowledgeTarget,
       resourceId,
@@ -776,6 +845,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       const normalizedPath = ensureDirectoryPath(directoryPath || ROOT_FILE_PATH);
       if (isPathIn(normalizedPath, SHARED_FILE_PATH)) {
         delete categoryCacheRef.current.shared;
+        resetChildDirectoryCacheVersion('shared');
       }
       if (normalizedPath === ensureDirectoryPath(currentPath)) {
         setSearchValue('');
@@ -786,6 +856,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       }
       const res: any = await listFiles({ resourceId, path: normalizedPath });
       const directoryChildren = unwrapListResponse<FileBrowserItem>(res);
+      markChildDirectoriesFresh(activeCategoryKey, [normalizedPath]);
       setChildrenByPath((prev) => {
         const nextChildrenByPath = {
           ...prev,
@@ -801,7 +872,17 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
         return nextChildrenByPath;
       });
     },
-    [activeCategoryKey, currentPath, isSearching, items, refreshExpandedDirectories, resourceId, updateCategoryCache]
+    [
+      activeCategoryKey,
+      currentPath,
+      isSearching,
+      items,
+      markChildDirectoriesFresh,
+      refreshExpandedDirectories,
+      resetChildDirectoryCacheVersion,
+      resourceId,
+      updateCategoryCache,
+    ]
   );
 
   const handleDeleteFileBrowserItem = useCallback(
@@ -927,22 +1008,24 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
         if (category.key !== 'root') {
           await ensureFolder({ resourceId, path: categoryPath });
         }
-        // Clear cache to match the result of collapsing and reopening the tab.
-        delete categoryCacheRef.current[category.key];
-        // Clear all child-folder cache data.
-        setChildrenByPath({});
-        setExpandedTreeKeys(category.key === 'session' && activeSessionId ? [getSessionFilePath(activeSessionId)] : []);
-        // Clear the current list before fetching again.
-        setItems([]);
-        await fetchList(categoryPath, { force: true, categoryKey: category.key });
-        if (category.key === 'session') {
-          await expandCurrentSessionDirectory(activeSessionId);
+        if (category.key !== activeCategoryKeyRef.current) {
+          // 刷新非当前分类没有展开态可保留，按整分类重建最简单。
+          delete categoryCacheRef.current[category.key];
+          resetChildDirectoryCacheVersion(category.key);
+          await fetchList(categoryPath, { force: true, categoryKey: category.key });
+          return;
         }
+        // 保留展开态并逐个重查已展开目录。清空 expandedTreeKeys/childrenByPath 会把
+        // 已展开的子目录折叠回去且丢掉子级数据，用户看到的就是「刷新刷不出新文件」，
+        // 必须手动再点一次三角箭头。
+        setSearchValue('');
+        setIsSearching(false);
+        await refreshExpandedDirectories();
       } catch (error: any) {
         message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.error.loadFailed' }));
       }
     },
-    [activeSessionId, expandCurrentSessionDirectory, fetchList, intl, resourceId]
+    [activeSessionId, fetchList, intl, refreshExpandedDirectories, resetChildDirectoryCacheVersion, resourceId]
   );
 
   useEffect(() => {
@@ -970,6 +1053,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
         }
         setLoading(true);
         delete categoryCacheRef.current[category.key];
+        resetChildDirectoryCacheVersion(category.key);
         setActiveCategoryKey(category.key);
         activeCategoryKeyRef.current = category.key;
         currentPathRef.current = categoryPath;
@@ -978,7 +1062,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
         setIsSearching(false);
         setSearchItems([]);
         setItems([]);
-        setChildrenByPath({});
+        clearChildDirectoryState();
         const expandedPathChain = buildDirectoryPathChain(categoryPath);
         const defaultExpandedKeys =
           category.key === 'session' && activeSessionId ? [getSessionFilePath(activeSessionId)] : [];
@@ -996,6 +1080,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
           acc[item] = unwrapListResponse<FileBrowserItem>(parentResponses[index]);
           return acc;
         }, {});
+        markChildDirectoriesFresh(category.key, parentPaths);
         updateCategoryCache(category.key, {
           path: categoryPath,
           items: nextItems,
@@ -1012,7 +1097,16 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
         setLoading(false);
       }
     },
-    [activeSessionId, expandCurrentSessionDirectory, intl, resourceId, updateCategoryCache]
+    [
+      activeSessionId,
+      clearChildDirectoryState,
+      expandCurrentSessionDirectory,
+      intl,
+      markChildDirectoriesFresh,
+      resetChildDirectoryCacheVersion,
+      resourceId,
+      updateCategoryCache,
+    ]
   );
 
   const openCreateFolder = useCallback((parentPath: string) => {
@@ -1078,9 +1172,10 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       const path = ensureDirectoryPath(node.path);
       const activeRootPath = getCategoryRootPath(activeCategoryKey);
       if (activeCategoryKey !== 'root' && !isPathIn(path, activeRootPath)) return;
-      if (childrenByPath[path]) return;
+      if (childrenByPath[path] && !isChildDirectoryCacheStale(activeCategoryKey, path)) return;
       try {
         const res: any = await listFiles({ resourceId, path });
+        markChildDirectoriesFresh(activeCategoryKey, [path]);
         setChildrenByPath((prev) => {
           const nextChildrenByPath = {
             ...prev,
@@ -1099,7 +1194,18 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
         message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.error.loadFailed' }));
       }
     },
-    [activeCategoryKey, childrenByPath, currentPath, intl, isSearching, items, resourceId, updateCategoryCache]
+    [
+      activeCategoryKey,
+      childrenByPath,
+      currentPath,
+      intl,
+      isChildDirectoryCacheStale,
+      isSearching,
+      items,
+      markChildDirectoriesFresh,
+      resourceId,
+      updateCategoryCache,
+    ]
   );
 
   const handleTreeNodeClick = useCallback(
@@ -1356,6 +1462,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       items={items}
       childrenByPath={childrenByPath}
       expandedKeys={expandedTreeKeys}
+      loadedKeys={loadedTreeKeys}
       currentPath={currentPath}
       loading={loading}
       emptyText={intl.formatMessage({ id: 'fileBrowser.empty' })}

@@ -30,6 +30,39 @@
   font-weight: 500;
 }
 
+.routerSplit {
+  position: relative;
+  justify-content: space-between;
+
+  .routerMain {
+    margin-left: auto;
+  }
+
+  // 右侧小面板中箭头和资源图标分别贴合两端，中心文案始终按整行宽度居中。
+  .middle {
+    position: absolute;
+    left: 50%;
+    max-width: calc(100% - 72px);
+    overflow: hidden;
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    transform: translateX(-50%);
+  }
+}
+
+.routerMain {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.routerBackIcon {
+  flex: none;
+  font-size: 16px;
+}
+
 .middle {
   font-size: 13px;
 }

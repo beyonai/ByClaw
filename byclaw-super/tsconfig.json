@@ -1,0 +1,21 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "app",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/.tsbuildinfo"
+  },
+  "include": ["app/**/*.ts"],
+  "exclude": ["app/test", "app/dist", "dist", "node_modules"],
+  "references": [
+    { "path": "packages/by-conductor" },
+    { "path": "packages/connectors/by-framework-common" },
+    { "path": "packages/connectors/openclaw-by-framework" },
+    { "path": "packages/connectors/code-by-framework" },
+    { "path": "packages/connectors/third-party-common" },
+    { "path": "packages/connectors/third-party-interface-sse" },
+    { "path": "packages/connectors/third-party-a2a" },
+    { "path": "packages/connectors/third-party-page" },
+    { "path": "packages/storage-postgres" }
+  ]
+}

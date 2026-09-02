@@ -5,6 +5,12 @@ import { Props, Resource } from './types';
 import { ResourceType } from './utils/constants';
 import useGlobal from '@/hooks/useGlobal';
 
+const normalizePastedText = (text: string) =>
+  // 部分浏览器复制 Markdown 链接时会在查询参数前插入换行，拼接 URL 但保留普通文本换行。
+  text
+    .replace(/(https?:\/\/[^\s\n]+)\s*\n\s*(?=[A-Za-z0-9_])/g, '$1')
+    .replace(/([?&=])\s*\n\s*(?=[A-Za-z0-9_])/g, '$1');
+
 export default function useOnPasteFiles(params: {
   editor: Editor;
   agentId?: string;
@@ -26,9 +32,10 @@ export default function useOnPasteFiles(params: {
           text: string;
           resourceList: Resource[];
         } = JSON.parse(json);
+        const normalizedText = normalizePastedText(text);
         let nodes = getDescendantValueByDefaultValue(
           {
-            text,
+            text: normalizedText,
             resourceList,
           },
           chatMode
@@ -45,9 +52,9 @@ export default function useOnPasteFiles(params: {
             resourceList: Resource[];
           };
         } = {
-          queryQuestion: text,
+          queryQuestion: normalizedText,
           inputSchema: {
-            text,
+            text: normalizedText,
             resourceList,
           },
         };
@@ -79,6 +86,18 @@ export default function useOnPasteFiles(params: {
     (e: ClipboardEvent<HTMLDivElement>) => {
       const items = e.clipboardData?.items;
       if (typeof onPasteFiles === 'function' && items) {
+        // 浏览器从网页复制链接时会优先提供 HTML。Slate 对超长 href 的默认
+        // 反序列化可能把链接属性内容插入编辑器，导致输入框显示编码后的长串。
+        // 优先使用纯文本，保证普通文字和 URL 粘贴都按用户看到的内容插入。
+        const plainText = e.clipboardData.getData('text/plain');
+        const hasFile = Array.from(items).some((item) => item.kind === 'file');
+        const hasSlatePayload = Array.from(items).some((item) => item.type === 'application/x-byai-slate');
+        if (plainText && !hasFile && !hasSlatePayload) {
+          e.preventDefault();
+          Transforms.insertText(editor, normalizePastedText(plainText));
+          return;
+        }
+
         const files: File[] = [];
         Array.from(items).forEach((item) => {
           console.log(item.kind, item.type);

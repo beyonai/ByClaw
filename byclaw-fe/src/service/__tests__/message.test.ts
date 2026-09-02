@@ -1,5 +1,6 @@
 import {
   getMessages,
+  getMessageOutline,
   updateMesFeedback as likeOrDislike,
   delMessage,
   getContentFeedbackType,
@@ -50,6 +51,16 @@ describe('Message Service', () => {
       getMessages(payload);
 
       expect(mockPOST).toHaveBeenCalledWith('/byaiService/assiman/getMessages', payload);
+    });
+  });
+
+  describe('getMessageOutline', () => {
+    it('should query the lightweight session outline', () => {
+      getMessageOutline('session123');
+
+      expect(mockPOST).toHaveBeenCalledWith('/byaiService/assiman/getMessageOutline', {
+        sessionId: 'session123',
+      });
     });
   });
 

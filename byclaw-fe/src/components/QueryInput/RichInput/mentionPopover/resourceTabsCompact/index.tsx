@@ -34,6 +34,9 @@ interface Props {
   showSpaceTab?: boolean;
   showSkillTab?: boolean;
   agentIds?: string;
+  onlyTab?: string;
+  hideTabBar?: boolean;
+  hideBorder?: boolean;
 }
 
 /** 「工具」Tab：不含对象类型 */
@@ -50,8 +53,12 @@ const ResourceTabsCompact: React.FC<Props> = ({
   showKnowledgeTab,
   showSkillTab,
   agentIds,
+  onlyTab,
+  hideTabBar = false,
+  hideBorder = false,
 }) => {
   const [activeTab, setActiveTab] = useState<string>();
+  const userSelectedTabRef = useRef(false);
   const [visibleKeys, setVisibleKeys] = useState<string[]>(defaultVisibleKeys);
   const initialKeyword = useMemo(() => trim(keyword || ''), [keyword]);
   const [searchValue, setSearchValue] = useState(initialKeyword);
@@ -408,18 +415,33 @@ const ResourceTabsCompact: React.FC<Props> = ({
     [sharedResources]
   );
 
+  const handleTabChange = useCallback((key: string) => {
+    userSelectedTabRef.current = true;
+    setActiveTab(key);
+  }, []);
+
   useEffect(() => {
-    const visible: string[] = ['space'];
+    if (!isPanelOpen) {
+      userSelectedTabRef.current = false;
+      return;
+    }
+
+    const visible: string[] = isOpenSource ? ['skill'] : [];
     if (visibleKeys.includes('knowledge')) visible.push('knowledge');
     if (visibleKeys.includes('tool')) visible.push('tool');
     if (visibleKeys.includes('view')) visible.push('view');
     if (visibleKeys.includes('object')) visible.push('object');
+    visible.push('space');
     if (isOpenSource) visible.push('file');
-    if (isOpenSource) visible.push('skill');
     if (!visible.length) return;
-    const newActiveTabValue = activeTab && visible.includes(activeTab) ? activeTab : visible[0];
-    setActiveTab(newActiveTabValue);
-  }, [activeTab, showKnowledgeTab, showSkillTab, agentIds, visibleKeys, isOpenSource]);
+    setActiveTab((current) => {
+      if (onlyTab && visible.includes(onlyTab)) return current === onlyTab ? current : onlyTab;
+      if (userSelectedTabRef.current && current && visible.includes(current)) {
+        return current;
+      }
+      return current === visible[0] ? current : visible[0];
+    });
+  }, [isPanelOpen, showKnowledgeTab, showSkillTab, agentIds, visibleKeys, isOpenSource, onlyTab]);
 
   const tabItems = useMemo(() => {
     const items: {
@@ -608,7 +630,11 @@ const ResourceTabsCompact: React.FC<Props> = ({
         ),
       });
     }
-    return items;
+    const tabOrder = isOpenSource
+      ? ['skill', 'knowledge', 'tool', 'view', 'object', 'space', 'file']
+      : ['knowledge', 'tool', 'view', 'object', 'space'];
+    const ordered = tabOrder.map((key) => items.find((item) => item.key === key)).filter(Boolean) as typeof items;
+    return onlyTab ? ordered.filter((item) => item.key === onlyTab) : ordered;
   }, [
     intl,
     onSelect,
@@ -626,6 +652,7 @@ const ResourceTabsCompact: React.FC<Props> = ({
     sharedLoading,
     getSharedTabResources,
     resolvedSessionId,
+    onlyTab,
     fileList,
     fileLoading,
     pathHistory,
@@ -682,19 +709,25 @@ const ResourceTabsCompact: React.FC<Props> = ({
       return visibleKeys.includes(tab.key);
     });
 
-    return [...baseTabs, ...filteredConditionalTabs, ...(isOpenSource ? [skillTab, fileTab] : [])];
-  }, [agentType, intl, visibleKeys, isOpenSource]);
+    const tabs = [
+      ...(isOpenSource ? [skillTab] : []),
+      ...filteredConditionalTabs,
+      baseTabs[0],
+      ...(isOpenSource ? [fileTab] : []),
+    ];
+    return onlyTab ? tabs.filter((tab) => tab.key === onlyTab) : tabs;
+  }, [agentType, intl, visibleKeys, isOpenSource, onlyTab]);
 
   if (!hasAnyTab) {
     return (
-      <div className={styles.wrap}>
+      <div className={classNames(styles.wrap, { [styles.noBorder]: hideBorder })}>
         <Empty />
       </div>
     );
   }
 
   return (
-    <div className={styles.wrap}>
+    <div className={classNames(styles.wrap, { [styles.noBorder]: hideBorder })}>
       {header}
       <div className={styles.searchRow}>
         <Input
@@ -742,21 +775,23 @@ const ResourceTabsCompact: React.FC<Props> = ({
           </Upload>
         )}
       </div>
-      <div className={styles.tabBar}>
-        {visibleTabs.map((tab) => (
-          <div
-            key={tab.key}
-            className={classNames(styles.typeItem, { [styles.active]: activeTab === tab.key })}
-            onClick={() => setActiveTab(tab.key)}
-          >
-            {tab.label}
-          </div>
-        ))}
-      </div>
+      {!hideTabBar && (
+        <div className={styles.tabBar}>
+          {visibleTabs.map((tab) => (
+            <div
+              key={tab.key}
+              className={classNames(styles.typeItem, { [styles.active]: activeTab === tab.key })}
+              onClick={() => handleTabChange(tab.key)}
+            >
+              {tab.label}
+            </div>
+          ))}
+        </div>
+      )}
       <div className={styles.tabsWrap}>
         <Tabs
           activeKey={activeTab}
-          onChange={setActiveTab}
+          onChange={handleTabChange}
           destroyInactiveTabPane
           tabBarStyle={{ display: 'none' }}
           items={tabItems.map(({ key, label, children }) => ({ key, label, children }))}

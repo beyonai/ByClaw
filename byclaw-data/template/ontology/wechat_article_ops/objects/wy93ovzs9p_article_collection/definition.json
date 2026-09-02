@@ -1,0 +1,61 @@
+{
+  "entity_code": "wy93ovzs9p_article_collection",
+  "entity_name": "文章合集",
+  "entity_desc": "按 account_code 隔离的公众号专题、专栏、月度或季度合集；是同账号 article.collection_id 的父对象",
+  "term_sync": {
+    "enabled": true,
+    "term_name_field": "collection_name",
+    "term_code_field": "id",
+    "sync_on": [
+      "insert",
+      "update",
+      "delete"
+    ]
+  },
+  "submitted_fields": [
+    {
+      "property_code": "projectId",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "account_code",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "account_name",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "collection_name",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "collection_type",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "start_date",
+      "data_type": "DATE"
+    },
+    {
+      "property_code": "end_date",
+      "data_type": "DATE"
+    },
+    {
+      "property_code": "category",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "target",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "description",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "status",
+      "data_type": "STRING"
+    }
+  ]
+}

@@ -25,6 +25,7 @@ import com.iwhalecloud.byai.manager.entity.users.Users;
 import com.iwhalecloud.byai.state.domain.resource.dto.ObjectZipImportItem;
 import com.iwhalecloud.byai.state.domain.resource.dto.ObjectZipImportResult;
 import com.iwhalecloud.byai.state.domain.resource.service.ResourceArtifactStorageService;
+import com.iwhalecloud.byai.state.domain.resource.vo.SkillMarketplaceDigitalEmployeeVo;
 import com.iwhalecloud.byai.state.domain.session.dto.ByClawSkillDto;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import java.io.ByteArrayOutputStream;
@@ -34,6 +35,7 @@ import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URI;
 import java.net.URL;
+import java.nio.charset.CharacterCodingException;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -93,6 +95,10 @@ public class ByClawSkillResourceApplicationService {
 
     private static final String SKILL_DOC_FILE_NAME = "SKILL.md";
 
+    private static final String ZIP_ENTRY_NAME_PRIMARY_ENCODING = "GBK";
+
+    private static final String ZIP_ENTRY_NAME_FALLBACK_ENCODING = StandardCharsets.UTF_8.name();
+
     private static final int THIRD_PARTY_DOWNLOAD_TIMEOUT_MILLIS = 15_000;
 
     private static final int THIRD_PARTY_SKILL_MAX_BYTES = 50 * 1024 * 1024;
@@ -149,6 +155,24 @@ public class ByClawSkillResourceApplicationService {
     public void assertWorkspaceSkillManagePermission(Long digitalEmployeeResourceId) {
         Long resolvedDigitalEmployeeId = resolveDigitalEmployeeId(digitalEmployeeResourceId);
         digitalEmployeeApplicationService.assertSkillUninstallPermission(resolvedDigitalEmployeeId);
+    }
+
+    /**
+     * 技能超市安装时，查询当前用户可管理的数字员工。
+     *
+     * <p>必须复用资源管理权限的统一口径，避免列表中可选、安装时却被拒绝，或列表漏掉组织管理员、
+     * 显式管理授权等可管理数字员工。</p>
+     */
+    public List<SkillMarketplaceDigitalEmployeeVo> listSkillMarketplaceManageableDigitalEmployees() {
+        return ssResourceService.listActiveDigitalEmployees().stream()
+            .filter(authApplicationService::hasResourceManagePermission)
+            .map(resource -> {
+                SkillMarketplaceDigitalEmployeeVo item = new SkillMarketplaceDigitalEmployeeVo();
+                item.setDigId(resource.getResourceId());
+                item.setDigName(resource.getResourceName());
+                return item;
+            })
+            .collect(Collectors.toList());
     }
 
     /**
@@ -1242,8 +1266,34 @@ public class ByClawSkillResourceApplicationService {
     }
 
     private List<ZipEntryInfo> readZipEntries(byte[] bytes) {
+        List<ZipEntryInfo> entries;
+        try {
+            entries = readZipEntries(bytes, ZIP_ENTRY_NAME_PRIMARY_ENCODING);
+        }
+        catch (CharacterCodingException primaryException) {
+            logger.debug("Skill 资源包 entry 名无法按 {} 解码，使用 {} 重试",
+                ZIP_ENTRY_NAME_PRIMARY_ENCODING, ZIP_ENTRY_NAME_FALLBACK_ENCODING);
+            try {
+                entries = readZipEntries(bytes, ZIP_ENTRY_NAME_FALLBACK_ENCODING);
+            }
+            catch (IOException fallbackException) {
+                fallbackException.addSuppressed(primaryException);
+                throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.read.failed"), fallbackException);
+            }
+        }
+        catch (IOException e) {
+            throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.read.failed"), e);
+        }
+        if (entries.isEmpty()) {
+            throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.empty"));
+        }
+        return entries;
+    }
+
+    private List<ZipEntryInfo> readZipEntries(byte[] bytes, String encoding) throws IOException {
         List<ZipEntryInfo> entries = new ArrayList<>();
-        try (ZipArchiveInputStream zin = new ZipArchiveInputStream(new ByteArrayInputStream(bytes), "GBK", true, true)) {
+        try (ZipArchiveInputStream zin =
+            new ZipArchiveInputStream(new ByteArrayInputStream(bytes), encoding, true, true)) {
             ArchiveEntry entry;
             while ((entry = zin.getNextEntry()) != null) {
                 if (entry.isDirectory()) {
@@ -1255,12 +1305,6 @@ public class ByClawSkillResourceApplicationService {
                 }
                 entries.add(new ZipEntryInfo(normalized, zin.readAllBytes()));
             }
-        }
-        catch (IOException e) {
-            throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.read.failed"), e);
-        }
-        if (entries.isEmpty()) {
-            throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.empty"));
         }
         return entries;
     }

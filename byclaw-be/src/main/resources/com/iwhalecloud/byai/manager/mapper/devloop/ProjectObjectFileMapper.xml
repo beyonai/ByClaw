@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.devloop.ProjectObjectFileMapper">
+
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.devloop.ProjectObjectFile">
+        <id column="id" property="id"/>
+        <result column="session_id" property="sessionId"/>
+        <result column="object_name" property="objectName"/>
+        <result column="object_code" property="objectCode"/>
+        <result column="file_name" property="fileName"/>
+        <result column="file_path" property="filePath"/>
+        <result column="version" property="version"/>
+        <result column="status_cd" property="statusCd"/>
+        <result column="ext_content" property="extContent"/>
+        <result column="create_by" property="createBy"/>
+        <result column="create_time" property="createTime"/>
+        <result column="update_time" property="updateTime"/>
+    </resultMap>
+
+    <select id="listProjectObjectFiles" resultMap="BaseResultMap">
+        SELECT a.id,
+               a.session_id,
+               a.object_type,
+               a.object_name,
+               a.object_code,
+               a.file_name,
+               a.file_path,
+               a.version,
+               a.status_cd,
+               a.ext_content,
+               a.create_by,
+               a.create_time,
+               a.update_time
+        FROM byai_project_object_file a
+              LEFT JOIN byai_session b ON a.session_id = b.session_id
+        <where>
+            <if test="projectId != null">
+                AND b.project_id = #{projectId}
+            </if>
+            <if test="sessionId != null">
+                AND a.session_id = #{sessionId}
+            </if>
+            <choose>
+                <when test="objectType !=null and objectType !=''">
+                    AND a.object_type = #{objectType}
+                </when>
+                <otherwise>
+                    AND a.object_type = 'object'
+                </otherwise>
+            </choose>
+        </where>
+    </select>
+
+</mapper>

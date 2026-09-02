@@ -18,6 +18,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -76,6 +77,7 @@ import com.iwhalecloud.byai.state.domain.resource.service.ResourceImageGeneratio
 import com.iwhalecloud.byai.state.domain.resource.service.ToolManService;
 import com.iwhalecloud.byai.state.domain.resource.vo.GeneratedResourceImageVo;
 import com.iwhalecloud.byai.state.domain.resource.vo.ResourceDetailVo;
+import com.iwhalecloud.byai.state.domain.resource.vo.SkillMarketplaceDigitalEmployeeVo;
 import com.iwhalecloud.byai.state.domain.session.dto.ByClawFileDto;
 import com.iwhalecloud.byai.state.domain.session.dto.ByClawPersonalAgentArchiveDto;
 import com.iwhalecloud.byai.state.domain.session.dto.ByClawSkillDto;
@@ -543,6 +545,26 @@ public class ToolManController {
                 userCode, digId, requestBody, requestContext, downloadUrlHash, elapsedMillis(startNanos), e);
             return ResponseUtil.fail(e.getMessage() != null ? e.getMessage()
                 : I18nUtil.get("byclaw.third.party.skill.install.failed"));
+        }
+    }
+
+    /**
+     * 第三方技能超市：查询当前 Beyond-Token 用户可管理、可选择安装技能的数字员工。
+     */
+    @GetMapping("/queryThirdPartySkillManageableDigitalEmployees")
+    public ResponseUtil<List<SkillMarketplaceDigitalEmployeeVo>> queryThirdPartySkillManageableDigitalEmployees() {
+        String userCode = CurrentUserHolder.getCurrentUserCode();
+        try {
+            List<SkillMarketplaceDigitalEmployeeVo> employees =
+                byClawSkillResourceApplicationService.listSkillMarketplaceManageableDigitalEmployees();
+            logger.info("第三方技能超市可管理数字员工查询成功，userCode={}, count={}", userCode, employees.size());
+            return ResponseUtil.successResponse(I18nUtil.get("byclaw.third.party.skill.manageable.digemployee.query.success"),
+                employees);
+        }
+        catch (Exception e) {
+            logger.error("第三方技能超市可管理数字员工查询失败，userCode={}", userCode, e);
+            return ResponseUtil.fail(e.getMessage() != null ? e.getMessage()
+                : I18nUtil.get("byclaw.third.party.skill.manageable.digemployee.query.failed"));
         }
     }
 

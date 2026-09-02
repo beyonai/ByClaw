@@ -1,0 +1,4 @@
+interface:
+  display_name: "Super Skill Manager"
+  short_description: "Safely find and manage OpenClaw agent skills"
+  default_prompt: "Use $super-skill-manager to route this skill discovery or lifecycle request safely."

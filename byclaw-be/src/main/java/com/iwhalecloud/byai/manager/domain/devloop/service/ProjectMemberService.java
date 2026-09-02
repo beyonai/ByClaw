@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.devloop.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.iwhalecloud.byai.common.constants.devloop.MemberRole;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberListDto;
 import com.iwhalecloud.byai.manager.entity.devloop.ProjectMember;
@@ -191,5 +192,12 @@ public class ProjectMemberService {
         member.setMemberId(memberId);
         member.setAgentId(agentId);
         memberMapper.updateById(member);
+    }
+
+    /** 清空成员绑定的数字员工；使用显式 set null，避免 MyBatis-Plus 默认忽略空字段。 */
+    public void unbindAgent(Long memberId) {
+        memberMapper.update(null, new LambdaUpdateWrapper<ProjectMember>()
+            .eq(ProjectMember::getMemberId, memberId)
+            .set(ProjectMember::getAgentId, null));
     }
 }

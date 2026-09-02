@@ -2,8 +2,11 @@ package com.iwhalecloud.byai.manager.domain.devloop.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.iwhalecloud.byai.manager.entity.devloop.ScanLogItem;
+import com.iwhalecloud.byai.manager.entity.devloop.ScanRequireItem;
 import com.iwhalecloud.byai.manager.entity.devloop.ScanSource;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatus;
+import com.iwhalecloud.byai.manager.domain.connector.provider.dingtalk.DwsDingtalkAuthorizationProvider;
+import com.iwhalecloud.byai.manager.domain.connector.service.ConnectorInfoService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -40,14 +43,20 @@ public class DingtalkScanService {
     @Autowired
     private DwsAuthService dwsAuthService;
 
+    @Autowired
+    private DwsDingtalkAuthorizationProvider dwsAuthorizationProvider;
+
+    @Autowired
+    private ConnectorInfoService connectorInfoService;
+
     /** 执行一次钉钉消息扫描，返回本次新增的条目列表；授权失败返回 null */
-    public List<ScanLogItem> scan(ScanSource source) {
-        List<ScanLogItem> items = new ArrayList<>();
+    public List<ScanRequireItem> scan(ScanSource source) {
+        List<ScanRequireItem> items = new ArrayList<>();
         Long logId = null;
 
         try {
             // 确保 dws 已认证
-            if (!dwsAuthService.ensureAuthenticated(source.getCreateBy())) {
+            if (!isAuthenticated(source.getCreateBy())) {
                 log.error("[DingtalkScan] DWS未授权，无法扫描。sourceId={}", source.getSourceId());
                 return null;
             }
@@ -165,7 +174,7 @@ public class DingtalkScanService {
                 if (scanLogService.isDuplicate(source.getSourceId(), msgId)) {
                     continue;
                 }
-                ScanLogItem item = scanLogService.createItem(logId,
+                ScanRequireItem item = scanLogService.createItem(logId,
                     source.getSourceId(), displayTitle,
                     content, msgId, null, "created");
                 items.add(item);
@@ -186,5 +195,16 @@ public class DingtalkScanService {
             }
         }
         return items;
+    }
+
+    private boolean isAuthenticated(String userId) {
+        try {
+            return dwsAuthorizationProvider.verify(
+                Long.valueOf(userId), connectorInfoService.findByCode("dingtalk")
+            ).status() == AuthorizationStatus.CONNECTED;
+        } catch (RuntimeException e) {
+            log.warn("[DingtalkScan] 无法校验 DWS 授权，userId={}", userId, e);
+            return false;
+        }
     }
 }

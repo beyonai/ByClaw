@@ -3,22 +3,21 @@ import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import classNames from 'classnames';
 
 // @ts-ignore
-import { Outlet, useLocation, useSelector, useSearchParams } from '@umijs/max';
-import { Layout } from 'antd';
+import { Outlet, useIntl, useLocation, useSelector, useSearchParams } from '@umijs/max';
+import { Layout, Tooltip } from 'antd';
 
 import { EventEmitter$Cls } from '@/utils/eventEmitter';
+import ResourcePanelToggleIcon from '@/components/ChatLayoutComp/ChatResourceWorkspace/ResourcePanelToggleIcon';
 import Auth from '../auth';
 import AntdProvider from '../components/provider/antd';
 import Header from '../header';
-import Sider from '../sider';
 import {
   SiderContentContext,
   DEFAULT_SIDER_CONTENT_WIDTH,
   HALF_MAIN_CONTENT_DETAIL_PANEL_WIDTH,
-  SIDER_BAR_WIDTH,
   type DetailPanelOptions,
 } from '../sider/siderContentContext';
-import { tabItems } from '../sider/components/SiderContent';
+import WorkspaceSider from '../sider/components/WorkspaceSider';
 
 import PasswordModal from '@/pages/settings/components/PasswordModal';
 
@@ -50,9 +49,7 @@ const pcUnShowLayoutRoute: Record<string, boolean> = {
   '/digitalEmployeesCreate': true,
 };
 
-const pcHideSiderContentRoute: Record<string, boolean> = {
-  '/settings': true,
-};
+const pcHideSiderContentRoute: Record<string, boolean> = {};
 
 function isPcUnShowLayoutRoute(pathname: string) {
   let path = pathname;
@@ -83,9 +80,13 @@ if (process.env.NODE_ENV === 'development' && typeof window !== 'undefined') {
 }
 
 const PCLayout = () => {
+  const intl = useIntl();
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
   const { pathname } = location;
+  const preserveDetailPanel = Boolean(
+    (location.state as { preserveDetailPanel?: boolean } | null)?.preserveDetailPanel
+  );
 
   // 检查当前路由是否需要隐藏侧边栏
   const [siderContentWidth, setSiderContentWidth] = React.useState(DEFAULT_SIDER_CONTENT_WIDTH);
@@ -104,21 +105,17 @@ const PCLayout = () => {
   }, []);
 
   React.useEffect(() => {
-    clearDetailPanel();
-    // 参考 sider 组件的逻辑，检查当前路径是否需要隐藏侧边栏
-    const currentTab = tabItems.find((item) => item.navigatePath === pathname);
-
-    // 检查 tabItems 中的 hideSider 属性
-    if (currentTab?.hideSider || isPcHideSiderContentRoute(pathname)) {
-      setSiderContentWidth(0);
+    // 从右侧资源入口进入中心页时，主内容切换但保留当前资源工作区。
+    if (!preserveDetailPanel) {
+      clearDetailPanel();
     }
-    // 检查特定路由是否需要隐藏侧边栏
-    else if (pathname === '/knowledgeDetail') {
+    // 新侧栏是全局工作区导航，资源中心和设置页都保留它；只有明确配置的页面才隐藏侧栏。
+    if (isPcHideSiderContentRoute(pathname)) {
       setSiderContentWidth(0);
     } else {
       setSiderContentWidth(DEFAULT_SIDER_CONTENT_WIDTH);
     }
-  }, [clearDetailPanel, pathname]);
+  }, [clearDetailPanel, pathname, preserveDetailPanel]);
 
   React.useEffect(() => {
     const handleMainDriverOpen = (payload: any) => {
@@ -134,11 +131,19 @@ const PCLayout = () => {
     };
   }, [clearDetailPanel]);
 
-  const { setLoginModalOpen } = useAppStore();
+  const { isSiderCollapsed, setLoginModalOpen, setSiderCollapsed } = useAppStore();
   useVersionNotification(myEventEmitter);
 
   const [isClose, setIsClose] = useState(false);
   const [sessionId, setSessionId] = useState<string>('');
+
+  React.useEffect(() => {
+    if (pathname !== '/chat' || !sessionId) return;
+
+    // 会话切换可能发生在资源中心路由，通知聊天组件重新注册右侧资源工作区。
+    myEventEmitter.emit('chat-session-changed', { sessionId }, { waitForListeners: true });
+  }, [pathname, sessionId]);
+
   const [agentId, setAgentId] = useState<string>('');
   // 仅用于左侧资源联动，与实际聊天 agentId 分离。
   const [siderAgentId, setSiderAgentId] = useState<string>('');
@@ -148,16 +153,21 @@ const PCLayout = () => {
   const dragFileEventHandlerRef = useRef<DragFileEventHandler>(null);
   const layoutRef = useRef<HTMLElement>(null);
   const [layoutWidth, setLayoutWidth] = useState(0);
+  const visibleSiderContentWidth = isSiderCollapsed ? 0 : siderContentWidth;
   const mainContentHalfWidth =
-    layoutWidth > 0 ? Math.max(280, Math.floor((layoutWidth - SIDER_BAR_WIDTH - siderContentWidth - 16) / 2)) : 450;
-  const detailPanelBasis =
-    detailPanelWidth === undefined
-      ? undefined
-      : typeof detailPanelWidth === 'number'
-        ? `${detailPanelWidth}px`
-        : detailPanelWidth === HALF_MAIN_CONTENT_DETAIL_PANEL_WIDTH
-          ? `${mainContentHalfWidth}px`
-          : detailPanelWidth;
+    layoutWidth > 0 ? Math.max(280, Math.floor((layoutWidth - visibleSiderContentWidth) / 2)) : 450;
+  const detailPanelBasis = (() => {
+    if (detailPanelWidth === undefined) return undefined;
+    if (typeof detailPanelWidth === 'number') return `${detailPanelWidth}px`;
+    if (detailPanelWidth === HALF_MAIN_CONTENT_DETAIL_PANEL_WIDTH) return `${mainContentHalfWidth}px`;
+    return detailPanelWidth;
+  })();
+  const detailPanelStyle = detailPanelBasis
+    ? {
+      flex: '0 0 auto',
+      width: detailPanelBasis,
+    }
+    : undefined;
 
   React.useEffect(() => {
     if (process.env.NODE_ENV !== 'development' || typeof window === 'undefined') return;
@@ -203,7 +213,12 @@ const PCLayout = () => {
 
   const curAgentInfo = React.useMemo(() => {
     return [...(agentList || []), ...(employeesList || [])].find(
-      (item) => `${item.id}` === `${agentId}` || `${item.resourceCode}` === `${agentId}`
+      // 不同员工接口分别返回 id、resourceId、resourceCode 或 agentId，详情页需统一兼容。
+      (item) =>
+        `${item.agentId}` === `${agentId}` ||
+        `${item.resourceId}` === `${agentId}` ||
+        `${item.id}` === `${agentId}` ||
+        `${item.resourceCode}` === `${agentId}`
     );
   }, [agentList, employeesList, agentId]);
 
@@ -337,7 +352,7 @@ const PCLayout = () => {
                 style={
                   {
                     '--user-fill-color': '#F2F6FA',
-                    '--layout-gap': '8px',
+                    '--layout-gap': '0px',
                   } as React.CSSProperties
                 }
               >
@@ -347,30 +362,42 @@ const PCLayout = () => {
                   className={classNames('full-width full-height ub-f1', styles.layout)}
                   style={
                     {
-                      // 用gap实现起来很难搞，因为在没有展开drawer的情况下，也占了8px的位置，因此采用了--layout-gap这种方式来做一个margin处理
-                      padding: userInfo ? '8px 8px 8px 0' : 0,
-                      '--sider-content-width': `${siderContentWidth}px`,
+                      padding: 0,
+                      '--sider-content-width': `${visibleSiderContentWidth}px`,
+                      '--layout-gap': '8px',
                     } as React.CSSProperties
                   }
                   ref={layoutRef}
                 >
                   <SiderContentContext.Provider
                     value={{
-                      siderContentWidth,
+                      siderContentWidth: visibleSiderContentWidth,
                       setSiderContentWidth,
                       setDetailPanel: openDetailPanel,
                       clearDetailPanel,
                     }}
                   >
-                    <Sider />
+                    {userInfo && siderContentWidth > 0 && !isSiderCollapsed && <WorkspaceSider />}
+                    {userInfo && siderContentWidth > 0 && isSiderCollapsed && (
+                      <Tooltip title={intl.formatMessage({ id: 'workspaceSider.expandSidebar' })} placement="bottom">
+                        <button
+                          type="button"
+                          className={styles.workspaceSiderExpandButton}
+                          aria-label={intl.formatMessage({ id: 'workspaceSider.expandSidebar' })}
+                          onClick={() => setSiderCollapsed(false)}
+                        >
+                          <ResourcePanelToggleIcon className={styles.workspaceSiderExpandIcon} />
+                        </button>
+                      </Tooltip>
+                    )}
                     <MinorDrawer />
                     <Content
                       id={pcLayoutContentId}
                       className={classNames(styles.content, {
                         [styles.opening]: !isClose,
                         [styles.closing]: isClose,
+                        [styles.siderCollapsedContent]: isSiderCollapsed,
                       })}
-                      style={{ marginLeft: userInfo ? 'var(--layout-gap)' : 0 }}
                     >
                       <Outlet />
                     </Content>
@@ -380,18 +407,8 @@ const PCLayout = () => {
                           {detailPanel}
                         </aside>
                       ) : (
-                        <Resizable left limit={{ minWidth: 360, maxWidth: '70vw' }}>
-                          <aside
-                            className={styles.detailPanel}
-                            style={
-                              detailPanelBasis
-                                ? {
-                                  flex: '0 0 auto',
-                                  width: detailPanelBasis,
-                                }
-                                : undefined
-                            }
-                          >
+                        <Resizable left limit={{ minWidth: DEFAULT_SIDER_CONTENT_WIDTH, maxWidth: '70vw' }}>
+                          <aside className={styles.detailPanel} style={detailPanelStyle}>
                             {detailPanel}
                           </aside>
                         </Resizable>

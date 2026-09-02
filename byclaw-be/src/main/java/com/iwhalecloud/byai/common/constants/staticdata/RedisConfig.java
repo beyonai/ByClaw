@@ -34,4 +34,16 @@ public final class RedisConfig {
      * redis中存储的重放攻击
      */
     public static final String SECURITYSIGN_CACHE_PREFIX = "byai:securitysign:";
+
+    /**
+     * Git 命令超时配置参数编码
+     *
+     * 配置项（通过 ByaiSystemConfig 表存储，Redis 缓存）:
+     * - GIT_TIMEOUT_DEFAULT: 默认超时时间（秒，默认: 300 = 5分钟）
+     * - GIT_TIMEOUT_SUBMODULE: 子模块操作超时时间（秒，默认: 600 = 10分钟）
+     * - GIT_TIMEOUT_CLONE: 克隆操作超时时间（秒，默认: 900 = 15分钟）
+     */
+    public static final String GIT_TIMEOUT_DEFAULT_PARAM_CODE = "GIT_TIMEOUT_DEFAULT";
+    public static final String GIT_TIMEOUT_SUBMODULE_PARAM_CODE = "GIT_TIMEOUT_SUBMODULE";
+    public static final String GIT_TIMEOUT_CLONE_PARAM_CODE = "GIT_TIMEOUT_CLONE";
 }

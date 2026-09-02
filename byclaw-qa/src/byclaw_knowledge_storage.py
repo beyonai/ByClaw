@@ -15,7 +15,7 @@ from byclaw_userfs_storage import (
     _ensure_json_success,
     _normalize_location,
     _path_from_location,
-    build_byclaw_userfs_headers,
+    build_byclaw_userfs_headers_async,
     get_byclaw_resource_id,
 )
 
@@ -41,7 +41,7 @@ class ByClawKnowledgeStorageProvider(ByClawUserFsKnowledgeStorageProvider):
             )
         content = await self._download_bytes(
             path=f"{_BASE_PATH}/files/get",
-            headers=build_byclaw_userfs_headers(),
+            headers=await build_byclaw_userfs_headers_async(),
             params={
                 "spaceType": _RESOURCE_SPACE_TYPE,
                 "resourceId": normalized_resource_id,
@@ -92,7 +92,7 @@ class ByClawKnowledgeStorageProvider(ByClawUserFsKnowledgeStorageProvider):
         response = await self._request(
             method="POST",
             path=f"{_BASE_PATH}/files/put",
-            headers=build_byclaw_userfs_headers(),
+            headers=await build_byclaw_userfs_headers_async(),
             data={
                 "spaceType": _RESOURCE_SPACE_TYPE,
                 "resourceId": resource_id,
@@ -116,7 +116,7 @@ class ByClawKnowledgeStorageProvider(ByClawUserFsKnowledgeStorageProvider):
         resource_id, file_path = target
         return await self._download_bytes(
             path=f"{_BASE_PATH}/files/get",
-            headers=build_byclaw_userfs_headers(),
+            headers=await build_byclaw_userfs_headers_async(),
             params={
                 "spaceType": _RESOURCE_SPACE_TYPE,
                 "resourceId": resource_id,
@@ -133,7 +133,7 @@ class ByClawKnowledgeStorageProvider(ByClawUserFsKnowledgeStorageProvider):
         response = await self._request(
             method="POST",
             path=f"{_BASE_PATH}/files/delete",
-            headers=build_byclaw_userfs_headers(),
+            headers=await build_byclaw_userfs_headers_async(),
             json={
                 "spaceType": _RESOURCE_SPACE_TYPE,
                 "resourceId": resource_id,
@@ -161,7 +161,7 @@ class ByClawKnowledgeStorageProvider(ByClawUserFsKnowledgeStorageProvider):
         response = await self._request(
             method="POST",
             path=f"{_BASE_PATH}/files/rename",
-            headers=build_byclaw_userfs_headers(),
+            headers=await build_byclaw_userfs_headers_async(),
             json={
                 "spaceType": _RESOURCE_SPACE_TYPE,
                 "resourceId": resource_id,

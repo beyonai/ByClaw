@@ -30,8 +30,7 @@ const compMap: Record<string, React.LazyExoticComponent<any>> = {
   [`${SSEMessageType.employee}`]: lazy(() => import('@/components/MessagesComp/Employee')),
   [`${SSEMessageType.iframe}`]: lazy(() => import('@/components/MessagesComp/Iframe')),
   [`${SSEMessageType.approvalForm}`]: lazy(() => import('@/components/MessagesComp/ApprovalForm')),
-  [`${SSEMessageType.taskOutline}`]: lazy(() => import('@/components/MessagesComp/TaskOutline')),
-  [`${SSEMessageType.slientHandler}`]: lazy(() => import('@/components/MessagesComp/SlientHandler')),
+  [`${SSEMessageType.taskOutline}`]: lazy(() => import('@/components/MessagesComp/TaskPlanUpdate')),
   [`${SSEMessageType.application}`]: lazy(() => import('@/components/MessagesComp/Application')),
   [`${SSEMessageType.forward}`]: lazy(() => import('@/components/MessagesComp/Forward')),
   [`${SSEMessageType.asr}`]: lazy(() => import('@/components/MessagesComp/Asr')),
@@ -65,6 +64,9 @@ const compMap: Record<string, React.LazyExoticComponent<any>> = {
   [`${SSEMessageType.dataCloudLogin}`]: lazy(() => import('@/components/MessagesComp/DataCloud/login')),
   [`${SSEMessageType.commonCard}`]: lazy(() => import('@/components/MessagesComp/Card')),
   [`${SSEMessageType.jsonBlock}`]: lazy(() => import('@/components/MessagesComp/JsonBlock')),
+  [`${SSEMessageType.toolCall}`]: lazy(() => import('@/components/MessagesComp/ToolCall')),
+  [`${SSEMessageType.fileChanges}`]: lazy(() => import('@/components/MessagesComp/FileChanges')),
+  [`${SSEMessageType.editDiff}`]: lazy(() => import('@/components/MessagesComp/EditDiff')),
   [`${SSEMessageType.compaction}`]: lazy(() => import('@/components/MessagesComp/Compaction')),
 };
 

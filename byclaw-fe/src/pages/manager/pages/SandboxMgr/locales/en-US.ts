@@ -19,6 +19,9 @@ export default {
   'sandboxMgr.table.endpoint': 'Endpoint',
   'sandboxMgr.table.chatId': 'Chat ID',
   'sandboxMgr.table.status': 'Status',
+  'sandboxMgr.table.workerStatus': 'Worker Status',
+  'sandboxMgr.table.workerLastSeen': 'Worker Last Seen',
+  'sandboxMgr.table.workerLeaseTtl': 'Worker Lease TTL',
   'sandboxMgr.table.autoRelease': 'Auto Release',
   'sandboxMgr.table.leasePolicy': 'Lease Policy',
   'sandboxMgr.table.timeoutSeconds': 'Timeout (s)',
@@ -32,6 +35,9 @@ export default {
   'sandboxMgr.table.createTime': 'Create Time',
   'sandboxMgr.table.updateTime': 'Update Time',
   'sandboxMgr.table.action': 'Action',
+  'sandboxMgr.worker.online': 'Online',
+  'sandboxMgr.worker.offline': 'Offline',
+  'sandboxMgr.worker.unknown': 'Not reported',
 
   // Actions
   'sandboxMgr.action.view': 'View',
@@ -57,6 +63,11 @@ export default {
   'sandboxMgr.config.serviceKey': 'Service Key',
   'sandboxMgr.config.specJson': 'Spec JSON',
   'sandboxMgr.config.templateJson': 'Template JSON',
+  'sandboxMgr.config.autoStart': 'Start on Login',
+  'sandboxMgr.config.autoStartTip':
+    'Start this sandbox service asynchronously after login. Disabled services remain available for manual or on-demand launch.',
+  'sandboxMgr.config.autoStartSaveSuccess': 'Auto-start setting saved',
+  'sandboxMgr.config.autoStartSaveFailed': 'Failed to save auto-start setting; the previous state was restored',
   'sandboxMgr.config.serviceKeyPlaceholder': 'Enter Service Key, e.g., python-sandbox',
   'sandboxMgr.config.specJsonPlaceholder': 'Enter Spec JSON',
   'sandboxMgr.config.templateJsonPlaceholder': 'Enter Template JSON (optional)',

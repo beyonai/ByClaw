@@ -1,12 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Card, Descriptions, List, Progress, Spin, Tag } from 'antd';
-import { useIntl, useLocation, useNavigate, useSelector } from '@umijs/max';
+import { useIntl, useNavigate, useSelector } from '@umijs/max';
 import AntdIcon from '@/components/AntdIcon';
 import ActiveSiderAgentBar, { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentBar';
+import useResourceCenterRouter from '@/layout/sider/components/useResourceCenterRouter';
 import useGlobal from '@/hooks/useGlobal';
 import { getMyModels, getMyQuota } from '@/pages/models/service';
 import { getCompositeAppInfo } from '@/service/digitalEmployees';
 import { getModelDetail } from '@/pages/manager/service/ModelMgr';
+import chromeStyles from '@/layout/sider/components/ResourceSiderPanel/index.module.less';
 import styles from './index.module.less';
 
 function unwrapData(res: any) {
@@ -52,13 +54,18 @@ function sortModelList(list: any[], currentModelInfo?: any) {
   });
 }
 
-const ModelSiderPanel: React.FC = () => {
+interface ModelSiderPanelProps {
+  embedded?: boolean;
+  // 嵌入右侧资源面板时仅展示模型中心入口，不重复展示当前数字员工栏。
+  showRouter?: boolean;
+}
+
+const ModelSiderPanel: React.FC<ModelSiderPanelProps> = ({ embedded = false, showRouter = false }) => {
   const intl = useIntl();
   const navigate = useNavigate();
-  const { pathname } = useLocation();
   const { EventEmitter } = useGlobal();
   const activeSiderAgent = useActiveSiderAgent();
-  const isModelsPage = pathname.startsWith('/models');
+  const { isCenterPage: isModelsPage, toggleCenter } = useResourceCenterRouter('/models', 'model', showRouter);
   const { defaultDigEmployeeId, userInfo } = useSelector(({ employees, user }: any) => ({
     defaultDigEmployeeId: employees?.defaultDigEmployeeId,
     userInfo: user?.userInfo,
@@ -174,23 +181,32 @@ const ModelSiderPanel: React.FC = () => {
 
   return (
     <div className={styles.container}>
-      <ActiveSiderAgentBar agent={activeSiderAgent} />
-      <div
-        className={styles.router}
-        onClick={() =>
-          navigate(
-            isModelsPage ? { pathname: '/chat' } : '/models',
-            isModelsPage ? { state: { keepSiderActiveKey: 'model' } } : undefined
-          )
-        }
-      >
-        <AntdIcon type="icon-a-Braindanao" />
-        <span className={styles.middle}>{intl.formatMessage({ id: 'personalModel.title' })}</span>
-        <AntdIcon
-          type={isModelsPage ? 'icon-a-Leftzuo' : 'icon-a-Rightyou'}
-          style={{ fontSize: 16, marginLeft: 'auto' }}
-        />
-      </div>
+      {(!embedded || showRouter) && (
+        <>
+          {!embedded && <ActiveSiderAgentBar agent={activeSiderAgent} />}
+          <div
+            className={[chromeStyles.router, showRouter ? chromeStyles.routerSplit : ''].filter(Boolean).join(' ')}
+            onClick={toggleCenter}
+          >
+            {showRouter && (
+              <AntdIcon
+                type={isModelsPage ? 'icon-a-Rightyou' : 'icon-a-Leftzuo'}
+                className={chromeStyles.routerBackIcon}
+              />
+            )}
+            <div className={chromeStyles.routerMain}>
+              <span className={chromeStyles.middle}>{intl.formatMessage({ id: 'personalModel.title' })}</span>
+              <AntdIcon type="icon-a-Braindanao" />
+            </div>
+            {!showRouter && (
+              <AntdIcon
+                type={isModelsPage ? 'icon-a-Leftzuo' : 'icon-a-Rightyou'}
+                className={chromeStyles.routerIcon}
+              />
+            )}
+          </div>
+        </>
+      )}
 
       <div className={styles.content}>
         <Spin spinning={loading || agentDetailLoading}>
@@ -255,6 +271,8 @@ const ModelSiderPanel: React.FC = () => {
             locale={{ emptyText: intl.formatMessage({ id: 'personalModel.empty' }) }}
             renderItem={(item: any) => {
               const current = isCurrentModel(item, modelInfo);
+              const statusLabelId =
+                item.status === 'ENABLED' ? 'personalModel.action.enable' : 'personalModel.action.disable';
               return (
                 <div className={styles.modelItem} onClick={() => openModelEdit(item)}>
                   <div className={styles.modelHeader}>
@@ -265,12 +283,7 @@ const ModelSiderPanel: React.FC = () => {
                     <Tag className={current || item.status === 'ENABLED' ? styles.currentModelTag : undefined}>
                       {current
                         ? intl.formatMessage({ id: 'fileBrowserEntry.debug.currentModel' })
-                        : intl.formatMessage({
-                          id:
-                              item.status === 'ENABLED'
-                                ? 'personalModel.action.enable'
-                                : 'personalModel.action.disable',
-                        })}
+                        : intl.formatMessage({ id: statusLabelId })}
                     </Tag>
                   </div>
                   <div className={styles.modelCode}>{item.modelCode || '-'}</div>

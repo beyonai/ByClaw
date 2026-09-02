@@ -85,6 +85,8 @@ public class TransactionAdviceConfig {
         // 否则内部同步异常即使被捕获，也会在方法返回时触发 rollback-only 提交异常。
         txMap.put("synOpenClawWorkSpace", notSurpportedTx);
         txMap.put("syncResourceJsonByBizType", notSurpportedTx);
+        // 资源 JSON 存在性检查会捕获底层文件不存在异常并用目录枚举兜底；不能让底层存储代理将外层事务标记为 rollback-only。
+        txMap.put("existsResourceJsonByBizType", notSurpportedTx);
         txMap.put("upsertStandardJsonArtifact", notSurpportedTx);
         txMap.put("prewarmDueCronSandboxes", notSurpportedTx);
         txMap.put("callAsUser", notSurpportedTx);
@@ -92,6 +94,12 @@ public class TransactionAdviceConfig {
         // 技能 ZIP 下载包含对象存储检查与 StreamingResponseBody 输出，不应占用数据库事务；
         // 流式读取异常不能把请求事务标记为 rollback-only，避免最终提交阶段抛 UnexpectedRollbackException。
         txMap.put("downloadSkillZip", notSurpportedTx);
+        // stopChat 会先尝试补写运行快照，再调用远端取消并清理 Redis 运行态。各数据库写入由下层服务
+        // 独立提交，外层不能持有 REQUIRED 事务，否则补写异常即使被捕获也会将停止流程标记为 rollback-only。
+        txMap.put("stopChat", notSurpportedTx);
+        txMap.put("flushOnStop", notSurpportedTx);
+        txMap.put("flushFromSnapshot", notSurpportedTx);
+        txMap.put("persistAsyncGatewayContext", notSurpportedTx);
         // 资源包存在性检查和流式读取走对象存储，不涉及数据库事务；异常不能在事务提交阶段才暴露。
         txMap.put("existsWithinResourceRoot", notSurpportedTx);
         txMap.put("readWithinResourceRoot", notSurpportedTx);

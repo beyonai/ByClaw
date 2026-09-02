@@ -1,0 +1,145 @@
+.taskPlan {
+  box-sizing: border-box;
+  width: 100%;
+  overflow: hidden;
+  border: 1px solid rgba(23, 43, 77, 0.1);
+  border-radius: 12px;
+  color: var(--beyond-color-text);
+  background: #f7f9fc;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 38px;
+  padding: 6px 12px;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  background: transparent;
+  cursor: pointer;
+
+  &:hover {
+    background: rgba(36, 107, 254, 0.035);
+  }
+
+  &:focus-visible {
+    outline: 2px solid rgba(36, 107, 254, 0.35);
+    outline-offset: -2px;
+  }
+}
+
+.headerTitle {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  color: #344054;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 24px;
+}
+
+.headerIcon {
+  color: #7a8596;
+  font-size: 14px;
+}
+
+.progress {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: #8a94a4;
+  font-size: 12px;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chevron {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  color: #8a94a4;
+  font-size: 10px;
+}
+
+.taskList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 180px;
+  margin: 0;
+  padding: 0 12px 10px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.taskItem {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  min-height: 24px;
+  color: #5f6b7c;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.statusIcon {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  font-size: 14px;
+}
+
+.pendingGlyph {
+  box-sizing: border-box;
+  width: 13px;
+  height: 13px;
+  border: 1px dashed currentcolor;
+  border-radius: 50%;
+}
+
+.statusCOMPLETED {
+  color: #20a779;
+}
+
+.statusIN_PROGRESS {
+  color: #246bfe;
+}
+
+.statusFAILED {
+  color: #e5484d;
+}
+
+.statusSKIPPED,
+.statusCANCELLED,
+.statusPENDING {
+  color: #9aa4b2;
+}
+
+.taskContent {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.taskTitle {
+  color: #526071;
+  font-weight: 500;
+}
+
+.taskDescription {
+  color: #8b95a5;
+}
+
+.taskReason {
+  color: #d14343;
+}

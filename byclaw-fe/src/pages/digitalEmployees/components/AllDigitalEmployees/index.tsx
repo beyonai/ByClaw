@@ -11,7 +11,11 @@ import { compact, head, isEmpty, size } from 'lodash';
 import { getRuntimeActualUrl } from '@/utils';
 import { getTopLevelCatalogs } from '@/utils/catalog';
 import { agentHandler } from '@/utils/agent';
-import { deleteDigitalEmployee, getAllDigitalEmployeesV2 } from '@/service/digitalEmployees';
+import {
+  deleteDigitalEmployee,
+  getAllDigitalEmployeesV2,
+  queryMyCreatedAndSubscribedAgentsV2,
+} from '@/service/digitalEmployees';
 import Empty from '@/components/Empty';
 import InfiniteScroll from '@/components/InfiniteScroll';
 import { getDefaultPagination, paginationReducer } from '@/utils/pageInfo';
@@ -20,13 +24,14 @@ import ResourceCard from '@/components/Resources/components/ResourceCard';
 import { IAgentCache, IAgent } from '@/typescript/agent';
 import styles from './index.module.less';
 import useGlobal from '@/hooks/useGlobal';
-import { getAgentChatAvatar, getAgentPath } from '@/utils/agent';
+import { getAgentChatAvatar } from '@/utils/agent';
 import useTracker from '@/hooks/useTracker';
 import AuthListDrawer from '@/pages/manager/components/AuthListDrawer';
 import UseApplyAuditDrawer from '@/pages/manager/components/UseApplyAuditDrawer';
 import { applyResourceUse } from '@/pages/manager/service/resources';
 import type { IOnOkParams } from '@/components/Resources/components/ResourceFilter';
 import { getDcSystemConfig } from '@/pages/manager/service/session';
+import { sortDigitalEmployeeByRecent, sortDefaultDigitalEmployeeFirst } from '@/pages/digitalEmployees/utils';
 
 type DisableActionList = Array<'delete' | 'apply' | 'unapply' | 'edit'>;
 
@@ -67,10 +72,32 @@ function AllDigitalEmployees(
     searchName?: string;
     dropdownParam?: IOnOkParams;
     buildFilterParam?: (activeTab: string, filterParam?: IOnOkParams) => Record<string, any>;
+    mode?: 'employee' | 'group';
+    source?: 'official' | 'available';
+    onEmployeeClick?: (employee: IAgentCache) => void;
+    onChatEmployee?: (employee: IAgentCache) => void;
+    hideCategories?: boolean;
+    compactLayout?: boolean;
+    scrollableTarget?: string;
   },
   ref: any
 ) {
-  const { searchName, dropdownParam, buildFilterParam } = props;
+  const {
+    searchName,
+    dropdownParam,
+    buildFilterParam,
+    mode = 'employee',
+    source = 'official',
+    onEmployeeClick,
+    onChatEmployee: onChatEmployeeProp,
+    hideCategories = false,
+    compactLayout = false,
+    scrollableTarget,
+  } = props;
+  const isEmployeeGroup = mode === 'group';
+  const listTabKey = isEmployeeGroup ? 'group' : 'enterprise';
+  const catalogSearchParamKey = isEmployeeGroup ? 'groupCatalogId' : 'enterpriseCatalogId';
+  const scrollerId = isEmployeeGroup ? 'allDigitalEmployeeGroupsScroller' : 'allDigitalEmployeesScroller';
 
   const dispatch = useDispatch();
   const navigate = useNavigate();
@@ -83,9 +110,13 @@ function AllDigitalEmployees(
   const infiniteScrollRef = React.useRef(null);
   const abortControllerRef = React.useRef<AbortController>(null);
 
-  const { employeesTypeList } = useSelector((state: any) => state.employees);
+  const { employeesTypeList, defaultDigEmployeeId, userInfo } = useSelector((state: any) => ({
+    employeesTypeList: state.employees?.employeesTypeList,
+    defaultDigEmployeeId: state.employees?.defaultDigEmployeeId,
+    userInfo: state.user?.userInfo,
+  }));
 
-  const [curActiveLink, setCurActiveLink] = useState<string>(() => searchParams.get('enterpriseCatalogId') || '');
+  const [curActiveLink, setCurActiveLink] = useState<string>(() => searchParams.get(catalogSearchParamKey) || '');
   const [list, setList] = useState<IAgentCache[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [authDrawerOpen, setAuthDrawerOpen] = useState(false);
@@ -147,8 +178,9 @@ function AllDigitalEmployees(
         pageNum,
         pageSize: paginationInfo.pageSize,
         keyword,
-        ...(buildFilterParam?.('enterprise', filterParam) || {}),
-        ownerType: 'enterprise',
+        ...(buildFilterParam?.(listTabKey, filterParam) || {}),
+        ...(source === 'official' ? { ownerType: 'enterprise' } : {}),
+        ...(isEmployeeGroup ? { agentType: '017' } : {}),
         orderField: 'updateTime',
         orderBy: 'desc',
       };
@@ -157,7 +189,17 @@ function AllDigitalEmployees(
         params.catalogId = catalogId;
       }
 
-      return getAllDigitalEmployeesV2(params, abortControllerRef.current)
+      let request;
+      if (source === 'available') {
+        request = queryMyCreatedAndSubscribedAgentsV2(
+          { ...params, agentType: isEmployeeGroup ? '017' : undefined, excludeEmployeeGroup: !isEmployeeGroup },
+          abortControllerRef.current
+        );
+      } else {
+        request = getAllDigitalEmployeesV2(params, abortControllerRef.current);
+      }
+
+      return request
         .then((res) => {
           const { list: responseList, ...rest } = res || {};
           const mappedList = responseList?.map?.((item: IAgent) => agentHandler(item)) || [];
@@ -181,7 +223,7 @@ function AllDigitalEmployees(
           console.error(e);
         });
     },
-    [buildFilterParam, paginationInfo.pageSize]
+    [buildFilterParam, isEmployeeGroup, listTabKey, paginationInfo.pageSize, source]
   );
 
   const getSearch = React.useCallback(
@@ -214,7 +256,7 @@ function AllDigitalEmployees(
     const firstEmployeesType = myEmployeesTypeList[0];
     if (!firstEmployeesType) return;
 
-    const catalogIdFromUrl = searchParams.get('enterpriseCatalogId');
+    const catalogIdFromUrl = searchParams.get(catalogSearchParamKey);
     const catalogIds = myEmployeesTypeList.map((item) => `${item.catalogId}`);
     const validCatalogIdFromUrl = catalogIdFromUrl && catalogIds.includes(catalogIdFromUrl) ? catalogIdFromUrl : '';
     const validCurActiveLink = curActiveLink && catalogIds.includes(curActiveLink) ? curActiveLink : '';
@@ -225,17 +267,17 @@ function AllDigitalEmployees(
       getSearch(searchName || '', dropdownParam, 1, nextCatalogId);
       hasInitializedRef.current = true;
     }
-  }, [curActiveLink, dropdownParam, getSearch, myEmployeesTypeList, searchName, searchParams]);
+  }, [catalogSearchParamKey, curActiveLink, dropdownParam, getSearch, myEmployeesTypeList, searchName, searchParams]);
 
   useEffect(() => {
     if (!curActiveLink) return;
     if (!myEmployeesTypeList.some((item) => `${item.catalogId}` === curActiveLink)) return;
     const nextSearchParams = new URLSearchParams(searchParams);
-    if (nextSearchParams.get('enterpriseCatalogId') !== curActiveLink) {
-      nextSearchParams.set('enterpriseCatalogId', curActiveLink);
+    if (nextSearchParams.get(catalogSearchParamKey) !== curActiveLink) {
+      nextSearchParams.set(catalogSearchParamKey, curActiveLink);
       setSearchParams(nextSearchParams);
     }
-  }, [curActiveLink, myEmployeesTypeList, searchParams, setSearchParams]);
+  }, [catalogSearchParamKey, curActiveLink, myEmployeesTypeList, searchParams, setSearchParams]);
 
   React.useImperativeHandle(
     ref,
@@ -261,19 +303,30 @@ function AllDigitalEmployees(
       ApplyList?: string[];
       delIdList?: string[];
       updateList?: Partial<IAgentCache>[];
+      defaultResourceId?: string;
     }) => {
-      const { unApplyList = [], ApplyList = [], delIdList = [], updateList = [] } = param || {};
+      const { unApplyList = [], ApplyList = [], delIdList = [], updateList = [], defaultResourceId } = param || {};
 
       setList((prevList) => {
         return compact([
           ...prevList.map((item: IAgentCache) => {
-            if (ApplyList.includes(`${item.id}`)) {
+            const itemIdentity = `${item.resourceId ?? item.id ?? item.agentId ?? ''}`;
+            if (defaultResourceId) {
+              const isDefault = itemIdentity === `${defaultResourceId}`;
+              return {
+                ...item,
+                isDefault,
+                canSetDefault: isDefault ? false : item.canSetDefault,
+                ownerType: !isDefault && item.ownerType === 'personal_default' ? 'personal' : item.ownerType,
+              };
+            }
+            if (ApplyList.includes(itemIdentity)) {
               return {
                 ...item,
                 approveStatus: 'S',
               };
             }
-            if (unApplyList.includes(`${item.id}`)) {
+            if (unApplyList.includes(itemIdentity)) {
               return {
                 ...item,
                 approveStatus: '',
@@ -311,6 +364,12 @@ function AllDigitalEmployees(
     };
   }, [EventEmitter, curActiveLink, dropdownParam, getSearch, searchName]);
 
+  const defaultResourceId = defaultDigEmployeeId || userInfo?.defaultDigEmployeeId;
+  const visibleList = useMemo(() => {
+    const sortedList = sortDefaultDigitalEmployeeFirst(list, defaultResourceId);
+    return source === 'available' ? sortDigitalEmployeeByRecent(sortedList) : sortedList;
+  }, [defaultResourceId, list, source]);
+
   const showNoUsePermissionWarning = React.useCallback(() => {
     message.destroy();
     message.warning(intl.formatMessage({ id: 'digitalEmployees.noUsePermissionApplyFirst' }));
@@ -318,26 +377,39 @@ function AllDigitalEmployees(
 
   const onClickEmployee = React.useCallback(
     (employee: IAgentCache) => {
+      if (onEmployeeClick) {
+        onEmployeeClick(employee);
+        return;
+      }
       if (employee.canApplyUse) {
         showNoUsePermissionWarning();
         return;
       }
 
       if (employee.agentId) {
-        trackerEmployeeClick(employee, 'marketAgentRedirect');
+        const normalizedEmployee = agentHandler(employee);
+        trackerEmployeeClick(normalizedEmployee, 'marketAgentRedirect');
         dispatch({
           type: 'employees/updateEmployee',
           payload: {
-            employee,
+            employee: normalizedEmployee,
           },
         });
-        setAgentId?.(`${employee.agentId}`);
+        setAgentId?.(`${normalizedEmployee.agentId}`);
         setSessionId?.('');
         const nextSearchParams = new URLSearchParams({
-          tab: 'enterprise',
-          enterpriseCatalogId: curActiveLink,
+          tab: listTabKey,
+          [catalogSearchParamKey]: curActiveLink,
         });
-        navigate(`${getAgentPath(employee)}?${nextSearchParams.toString()}`);
+        // 员工模块内统一打开员工详情，查询参数仅用于返回时恢复企业员工列表位置。
+        navigate(`/employees?${nextSearchParams.toString()}`, {
+          // 路由状态保留本次点击目标，避免返回列表后历史 agentId 覆盖新选择。
+          state: {
+            keepSiderActiveKey: 'agent',
+            selectedAgentId: `${normalizedEmployee.agentId}`,
+            selectedEmployee: normalizedEmployee,
+          },
+        });
         return;
       }
 
@@ -346,6 +418,7 @@ function AllDigitalEmployees(
     },
     [
       curActiveLink,
+      catalogSearchParamKey,
       dispatch,
       intl,
       navigate,
@@ -353,8 +426,51 @@ function AllDigitalEmployees(
       setSessionId,
       showNoUsePermissionWarning,
       trackerEmployeeClick,
+      listTabKey,
+      onEmployeeClick,
     ]
   );
+
+  const onChatEmployee = React.useCallback(
+    (employee: IAgentCache) => {
+      const normalizedEmployee = agentHandler(employee);
+      const targetId = normalizedEmployee.agentId || normalizedEmployee.id || normalizedEmployee.resourceId;
+      if (!targetId) {
+        message.error(intl.formatMessage({ id: 'digitalEmployees.noPermission' }));
+        return;
+      }
+      trackerEmployeeClick(normalizedEmployee, 'marketAgentRedirect');
+      dispatch({
+        type: 'employees/updateEmployee',
+        payload: { employee: normalizedEmployee },
+      });
+      setAgentId?.(`${targetId}`);
+      setSessionId?.('');
+      const nextSearchParams = new URLSearchParams({
+        tab: listTabKey,
+        [catalogSearchParamKey]: curActiveLink,
+      });
+      navigate(`/employees?${nextSearchParams.toString()}`, {
+        state: {
+          keepSiderActiveKey: 'agent',
+          selectedAgentId: `${targetId}`,
+          selectedEmployee: normalizedEmployee,
+        },
+      });
+    },
+    [
+      catalogSearchParamKey,
+      curActiveLink,
+      dispatch,
+      intl,
+      listTabKey,
+      navigate,
+      setAgentId,
+      setSessionId,
+      trackerEmployeeClick,
+    ]
+  );
+  const chatEmployee = onChatEmployeeProp || onChatEmployee;
 
   const onEditEmployee = React.useCallback(
     (employee: IAgentCache) => {
@@ -363,12 +479,12 @@ function AllDigitalEmployees(
       const nextSearchParams = new URLSearchParams({
         digitalType: employee?.createType || 'FROM_MANUALLY',
         appId: `${resourceId}`,
-        tab: 'enterprise',
-        enterpriseCatalogId: curActiveLink,
+        tab: listTabKey,
+        [catalogSearchParamKey]: curActiveLink,
       });
       navigate(`/digitalEmployeesCreate?${nextSearchParams.toString()}`);
     },
-    [curActiveLink, navigate]
+    [catalogSearchParamKey, curActiveLink, listTabKey, navigate]
   );
 
   const onDeleteEmployee = React.useCallback(
@@ -417,52 +533,57 @@ function AllDigitalEmployees(
         EventEmitter.emit('beyond-update-employee', {
           ApplyList: [resourceId],
         });
-
-        getSearch(searchName || '', dropdownParam, 1, curActiveLink);
       } catch (error: any) {
         message.error(error?.message || error || intl.formatMessage({ id: 'common.operateFailed' }));
       }
     },
-    [applyResourceUse, EventEmitter, intl, searchName, dropdownParam, curActiveLink]
+    [EventEmitter, intl]
   );
 
   return (
-    <div className="full-width full-height ub ub-ver">
+    <div
+      className={classnames('full-width ub ub-ver', {
+        'full-height': !compactLayout,
+        [styles.compactLayout]: compactLayout,
+      })}
+    >
       {bannerLoaded && bannerUrl && (
         <div className="mb-16">
           <img className={styles.marketBg} src={bannerUrl} alt="poster" />
         </div>
       )}
+      {!hideCategories && (
+        <div
+          id="guideStep2-5"
+          className={classnames('ub ub-ac gap8', styles.body)}
+          style={{ marginBottom: '16px', minHeight: '35px' }}
+        >
+          <Tabs
+            className={classnames('ub-f1', styles.tabs)}
+            activeKey={curActiveLink}
+            items={myEmployeesTypeList.map((_) => {
+              return {
+                label: _.dirName,
+                key: `${_.catalogId}`,
+              };
+            })}
+            onChange={(activeKey) => {
+              const nextActiveKey = `${activeKey}`;
+              const nextSearchParams = new URLSearchParams(searchParams);
+              nextSearchParams.set(catalogSearchParamKey, nextActiveKey);
+              setCurActiveLink(nextActiveKey);
+              setSearchParams(nextSearchParams);
+              getSearch(searchName || '', dropdownParam, 1, activeKey);
+            }}
+          />
+        </div>
+      )}
       <div
-        id="guideStep2-5"
-        className={classnames('ub ub-ac gap8', styles.body)}
-        style={{ marginBottom: '16px', minHeight: '35px' }}
+        className={classnames('ub ub-ver overflow-auto hideThumb', { 'ub-f1': !compactLayout })}
+        style={{ position: 'relative', maxHeight: compactLayout ? 'none' : undefined }}
+        id={scrollableTarget ? undefined : scrollerId}
       >
-        <Tabs
-          className={classnames('ub-f1', styles.tabs)}
-          activeKey={curActiveLink}
-          items={myEmployeesTypeList.map((_) => {
-            return {
-              label: _.dirName,
-              key: `${_.catalogId}`,
-            };
-          })}
-          onChange={(activeKey) => {
-            const nextActiveKey = `${activeKey}`;
-            const nextSearchParams = new URLSearchParams(searchParams);
-            nextSearchParams.set('enterpriseCatalogId', nextActiveKey);
-            setCurActiveLink(nextActiveKey);
-            setSearchParams(nextSearchParams);
-            getSearch(searchName || '', dropdownParam, 1, activeKey);
-          }}
-        />
-      </div>
-      <div
-        className="ub ub-f1 ub-ver overflow-auto hideThumb"
-        style={{ position: 'relative' }}
-        id="allDigitalEmployeesScroller"
-      >
-        <div className={classnames(styles.sectionsContainer, 'ub-f1')}>
+        <div className={classnames(styles.sectionsContainer, { 'ub-f1': !compactLayout })}>
           <Spin
             wrapperClassName={styles.spinningWrapper}
             tip={intl.formatMessage({ id: 'common.loading' })}
@@ -490,29 +611,30 @@ function AllDigitalEmployees(
                   </div>
                 }
                 dataLength={list.length}
-                scrollableTarget="allDigitalEmployeesScroller"
+                scrollableTarget={scrollableTarget || scrollerId}
                 className={classnames(styles.messageRowWrap, { [styles.hasMore]: hasMore })}
                 scrollThreshold="50px"
                 hasChildren={list.length > 0}
-                topItemKey={head(list)?.agentId}
+                topItemKey={head(visibleList)?.agentId}
                 style={{
                   overflow: 'visible',
                 }}
               >
                 <div className={styles.employeeList}>
-                  {list.map((employee: IAgentCache) => {
+                  {visibleList.map((employee: IAgentCache) => {
                     return (
                       <ResourceCard
                         key={employee.agentId}
                         resource={employee}
+                        resourceType="DIG_EMPLOYEE"
                         avatarNode={
                           <div className={styles.employeeAvatar}>{getAgentChatAvatar(employee.chatAvatar)}</div>
                         }
                         onCardClick={(resource) => onClickEmployee((resource as IAgentCache) || employee)}
-                        cardClickDisabled={(resource) => !!resource.canApplyUse}
-                        onCardClickDisabled={showNoUsePermissionWarning}
+                        digitalEmployeeActionMode
                         actionConfig={{
                           scene: 'enterprise',
+                          onChat: () => chatEmployee(employee),
                           onEdit: () => onEditEmployee(employee),
                           onAuth: (type: any) => onAuthEmployee(employee, type),
                           onApplyUse: () => onApplyEmployee(employee),

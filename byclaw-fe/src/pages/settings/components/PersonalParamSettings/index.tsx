@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import {
   Button,
   Card,
+  Dropdown,
   Empty,
   Form,
   Input,
@@ -16,7 +17,9 @@ import {
   Typography,
   message,
 } from 'antd';
+import { DownOutlined } from '@ant-design/icons';
 import type { ColumnsType, TableProps } from 'antd/es/table';
+import type { MenuProps } from 'antd';
 import dayjs from 'dayjs';
 // @ts-ignore
 import { useIntl } from '@umijs/max';
@@ -35,6 +38,14 @@ const { Text } = Typography;
 
 const KEY_PATTERN = /^[A-Z_][A-Z0-9_]{0,127}$/;
 const DEFAULT_PAGE_SIZE = 10;
+
+// 平台约定的常用变量,供新增时一键填充 key(避免拼错)。descriptionId 为空则不覆盖用户已填描述。
+// 目前后端仅识别 GH_TOKEN(研发项目 clone/push 私有仓库);新增约定变量只需在此追加。
+const COMMON_PARAM_KEYS: { key: string; descriptionId: string }[] = [
+  { key: 'GH_TOKEN', descriptionId: 'settings.params.common.ghToken.desc' },
+  { key: 'GL_TOKEN', descriptionId: 'settings.params.common.glToken.desc' },
+  { key: 'GITEA_TOKEN', descriptionId: 'settings.params.common.giteaToken.desc' },
+];
 
 const PersonalParamSettings: React.FC = () => {
   const intl = useIntl();
@@ -76,12 +87,38 @@ const PersonalParamSettings: React.FC = () => {
     loadParams();
   }, []);
 
+  useEffect(() => {
+    if (!modalOpen) return undefined;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [modalOpen]);
+
   const openCreateModal = () => {
     setEditingParam(null);
     form.resetFields();
     form.setFieldsValue({ enabled: true });
     setModalOpen(true);
   };
+
+  // 选中常用变量:填 key,并在描述为空时补默认描述,不覆盖用户已输入的描述。
+  const handlePickCommonKey = (key: string) => {
+    const preset = COMMON_PARAM_KEYS.find((item) => item.key === key);
+    const nextValues: { key: string; description?: string } = { key };
+    if (preset && !form.getFieldValue('description')?.trim()) {
+      nextValues.description = intl.formatMessage({ id: preset.descriptionId });
+    }
+    form.setFieldsValue(nextValues);
+    form.validateFields(['key']);
+  };
+
+  const commonKeyMenuItems: MenuProps['items'] = COMMON_PARAM_KEYS.map((item) => ({
+    key: item.key,
+    label: item.key,
+  }));
 
   const openEditModal = (record: PersonalParam) => {
     setEditingParam(record);
@@ -196,6 +233,19 @@ const PersonalParamSettings: React.FC = () => {
       render: (description) => description || '-',
     },
     {
+      title: intl.formatMessage({ id: 'settings.params.source' }),
+      dataIndex: 'source',
+      width: 120,
+      render: (_, record) => {
+        const managed = record.managed ?? record.source === 'CONNECTOR';
+        return managed ? (
+          <Tag color="blue">{intl.formatMessage({ id: 'settings.params.source.connector' })}</Tag>
+        ) : (
+          <Tag>{intl.formatMessage({ id: 'settings.params.source.user' })}</Tag>
+        );
+      },
+    },
+    {
       title: intl.formatMessage({ id: 'settings.params.status' }),
       dataIndex: 'status',
       width: 120,
@@ -212,10 +262,7 @@ const PersonalParamSettings: React.FC = () => {
       width: 150,
       render: (_, record) =>
         record.hasValue ? (
-          <Tag color="green">
-            {intl.formatMessage({ id: 'settings.params.configured' })}
-            {record.valueLast4 ? ` ****${record.valueLast4}` : ''}
-          </Tag>
+          <Tag color="green">{intl.formatMessage({ id: 'settings.params.configured' })}</Tag>
         ) : (
           <Tag>{intl.formatMessage({ id: 'settings.params.notConfigured' })}</Tag>
         ),
@@ -235,22 +282,32 @@ const PersonalParamSettings: React.FC = () => {
       fixed: 'right',
       render: (_, record) => {
         const enabled = record.enabled ?? record.status === 'NORMAL';
+        const managed = record.managed ?? record.source === 'CONNECTOR';
+        if (managed) {
+          return '-';
+        }
         return (
           <Space>
-            <Button type="link" size="small" onClick={() => handleEnable(record, !enabled)}>
-              {intl.formatMessage({ id: enabled ? 'settings.params.disable' : 'settings.params.enable' })}
-            </Button>
-            <Button type="link" size="small" onClick={() => openEditModal(record)}>
-              {intl.formatMessage({ id: 'common.edit' })}
-            </Button>
-            <Popconfirm
-              title={intl.formatMessage({ id: 'settings.params.confirmDelete' })}
-              onConfirm={() => handleDelete(record)}
-            >
-              <Button type="link" size="small" danger>
-                {intl.formatMessage({ id: 'common.delete' })}
+            {record.enableable !== false && (
+              <Button type="link" size="small" onClick={() => handleEnable(record, !enabled)}>
+                {intl.formatMessage({ id: enabled ? 'settings.params.disable' : 'settings.params.enable' })}
               </Button>
-            </Popconfirm>
+            )}
+            {record.editable !== false && (
+              <Button type="link" size="small" onClick={() => openEditModal(record)}>
+                {intl.formatMessage({ id: 'common.edit' })}
+              </Button>
+            )}
+            {record.deletable !== false && (
+              <Popconfirm
+                title={intl.formatMessage({ id: 'settings.params.confirmDelete' })}
+                onConfirm={() => handleDelete(record)}
+              >
+                <Button type="link" size="small" danger>
+                  {intl.formatMessage({ id: 'common.delete' })}
+                </Button>
+              </Popconfirm>
+            )}
           </Space>
         );
       },
@@ -303,7 +360,7 @@ const PersonalParamSettings: React.FC = () => {
             showTotal: (count) => intl.formatMessage({ id: 'settings.params.paginationTotal' }, { total: count }),
           }}
           onChange={handleTableChange}
-          scroll={{ x: 1080 }}
+          scroll={{ x: 1200 }}
           locale={{ emptyText: <Empty description={intl.formatMessage({ id: 'settings.params.empty' })} /> }}
         />
       </Card>
@@ -321,6 +378,8 @@ const PersonalParamSettings: React.FC = () => {
         okText={intl.formatMessage({ id: 'common.confirm' })}
         cancelText={intl.formatMessage({ id: 'common.cancel' })}
         width={640}
+        className={styles.paramModal}
+        wrapClassName={styles.paramModalWrap}
         destroyOnHidden
       >
         <Form form={form} layout="vertical" preserve={false}>
@@ -337,7 +396,25 @@ const PersonalParamSettings: React.FC = () => {
                 },
               ]}
             >
-              <Input disabled={!!editingParam} placeholder="API_TOKEN" maxLength={128} />
+              <Input
+                disabled={!!editingParam}
+                placeholder="API_TOKEN"
+                maxLength={128}
+                // 新增时提供常用变量快捷选择,避免手输拼错(如 GH_TOKEN);编辑态 key 不可改,不显示。
+                addonAfter={
+                  editingParam ? undefined : (
+                    <Dropdown
+                      trigger={['click']}
+                      menu={{ items: commonKeyMenuItems, onClick: ({ key }) => handlePickCommonKey(key) }}
+                    >
+                      <span className={styles.commonKeyTrigger}>
+                        {intl.formatMessage({ id: 'settings.params.common.pick' })}
+                        <DownOutlined />
+                      </span>
+                    </Dropdown>
+                  )
+                }
+              />
             </Form.Item>
             <Form.Item
               label={intl.formatMessage({ id: 'settings.params.enabled' })}

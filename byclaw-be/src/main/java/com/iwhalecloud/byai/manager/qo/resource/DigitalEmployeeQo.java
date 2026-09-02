@@ -4,6 +4,7 @@ import com.iwhalecloud.byai.manager.qo.auth.AuthQo;
 import com.iwhalecloud.byai.manager.qo.index.OrgFilterQo;
 import lombok.Getter;
 import lombok.Setter;
+import java.util.Collection;
 import java.util.List;
 
 /**
@@ -16,7 +17,18 @@ import java.util.List;
 public class DigitalEmployeeQo extends AuthQo {
 
     /**
-     * all:全部,authorize-授权给我,owner-我创建的,manager-管理
+     * 数字员工类型。017 表示数字员工组；未传时保持历史接口语义并排除 017。
+     */
+    private String agentType;
+
+    /**
+     * 数字员工归属类型：enterprise 为企业员工；未传时个人员工组可同时查询个人和企业员工。
+     */
+    private String ownerType;
+
+    /**
+     * all:全部,authorize-授权给我,owner-我创建的,manager-管理,managerExcludingOwner-授权我管理且非我创建,
+     * manageable-我创建的或我能管理的
      */
     private String type;
 
@@ -74,5 +86,20 @@ public class DigitalEmployeeQo extends AuthQo {
      * 数字员工当前复用资源表 resource_status 做状态过滤；当前端不传时默认值为 0。
      */
     private Integer publishStatus;
+
+    /** 当前数字员工组成员候选查询所属企业。 */
+    private Long memberCandidateEnterpriseId;
+
+    /** 当前用户是否拥有全局资源管理权限。 */
+    private Boolean memberCandidateGlobalManager;
+
+    /** 允许加入数字员工组的数字员工类型。 */
+    private Collection<String> memberCandidateAgentTypes;
+
+    /** 允许加入数字员工组的第三方接入类型。 */
+    private Collection<String> memberCandidateIntegrationTypes;
+
+    /** 当前用户驻地及其上级驻地，用于批量判断管理授权。 */
+    private Collection<Long> memberCandidateStationIds;
 
 }

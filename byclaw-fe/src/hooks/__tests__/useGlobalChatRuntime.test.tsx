@@ -7,10 +7,6 @@ jest.mock('@/hooks/useSseSender/chatStream', () => ({
   subscribeChatStream: jest.fn(() => jest.fn()),
 }));
 
-jest.mock('@/service/message', () => ({
-  getChatRunningStatus: jest.fn(() => Promise.resolve([])),
-}));
-
 jest.mock('@/utils/websocket', () => ({
   __esModule: true,
   default: {
@@ -21,19 +17,18 @@ jest.mock('@/utils/websocket', () => ({
   },
 }));
 
-import { renderHook, act } from '@testing-library/react';
+import { act, renderHook } from '@testing-library/react';
 import { useDispatch, useSelector } from '@umijs/max';
 
 import { subscribeChatStream } from '@/hooks/useSseSender/chatStream';
-import { getChatRunningStatus } from '@/service/message';
 import webSocketManager from '@/utils/websocket';
+import { chatSessionRuntimeManager } from '@/utils/chatSessionRuntimeManager';
 
 import useGlobalChatRuntime from '../useGlobalChatRuntime';
 
 const mockUseDispatch = useDispatch as jest.Mock;
 const mockUseSelector = useSelector as jest.Mock;
 const mockSubscribeChatStream = subscribeChatStream as jest.Mock;
-const mockGetChatRunningStatus = getChatRunningStatus as jest.Mock;
 const mockWebSocketManager = webSocketManager as unknown as Record<string, jest.Mock>;
 
 describe('hooks/useGlobalChatRuntime', () => {
@@ -42,6 +37,7 @@ describe('hooks/useGlobalChatRuntime', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    chatSessionRuntimeManager.clear();
     jest.useFakeTimers();
     dispatch = jest.fn();
     state = {
@@ -58,11 +54,43 @@ describe('hooks/useGlobalChatRuntime', () => {
     mockUseSelector.mockImplementation((selector: any) => selector(state));
   });
 
+  it('applies generic session runtime messages from websocket', () => {
+    renderHook(() => useGlobalChatRuntime());
+
+    const onSessionRuntime = mockWebSocketManager.onMessage.mock.calls.find(
+      ([type]) => type === 'SESSION_RUNTIME_STATUS'
+    )![1];
+    act(() => {
+      onSessionRuntime({
+        type: 'SESSION_RUNTIME_STATUS',
+        sessionId: 's1',
+        traceId: 'trace-1',
+        data: {
+          sessionId: 's1',
+          traceId: 'trace-1',
+          source: 'integration-a',
+          status: 'running',
+          activeAgentCount: 2,
+          activeChildCount: 1,
+          waitingInteractionCount: 0,
+          rootActive: false,
+          acceptingInput: true,
+          revision: 1,
+          changedAt: 1000,
+        },
+      });
+    });
+
+    expect(chatSessionRuntimeManager.isSessionRunning('s1')).toBe(true);
+    expect(chatSessionRuntimeManager.getSessionRuntime('s1')?.activeAgentCount).toBe(2);
+    expect(chatSessionRuntimeManager.canAcceptInput('s1')).toBe(true);
+  });
+
   afterEach(() => {
     jest.useRealTimers();
   });
 
-  it('initializes websocket and running status after login', async () => {
+  it('initializes websocket stream handling after login', () => {
     renderHook(() => useGlobalChatRuntime());
 
     expect(mockWebSocketManager.init).toHaveBeenCalled();
@@ -74,12 +102,31 @@ describe('hooks/useGlobalChatRuntime', () => {
     );
     expect(mockWebSocketManager.onMessage).toHaveBeenCalledWith('ERROR', expect.any(Function));
     expect(mockWebSocketManager.onMessage).toHaveBeenCalledWith('NOTIFICATION', expect.any(Function));
+    expect(mockWebSocketManager.onMessage).toHaveBeenCalledWith('TASK_PLAN_SNAPSHOT', expect.any(Function));
+  });
 
-    await act(async () => {
-      await Promise.resolve();
+  it('stores task plan snapshots from websocket messages', () => {
+    renderHook(() => useGlobalChatRuntime());
+
+    const onTaskPlan = mockWebSocketManager.onMessage.mock.calls.find(([type]) => type === 'TASK_PLAN_SNAPSHOT')![1];
+    const taskPlan = {
+      planId: 'plan-1',
+      version: 1,
+      title: 'Plan',
+      status: 'ACTIVE',
+      sessionId: 's1',
+      messageId: 'm1',
+      tasks: [],
+    };
+
+    act(() => {
+      onTaskPlan({ type: 'TASK_PLAN_SNAPSHOT', sessionId: 's1', messageId: 'm1', data: taskPlan });
     });
 
-    expect(mockGetChatRunningStatus).toHaveBeenCalledWith({ sessionIds: ['s1'] });
+    expect(dispatch).toHaveBeenCalledWith({
+      type: 'messageStore/applyTaskPlanSnapshot',
+      payload: { sessionId: 's1', messageId: 'm1', taskPlan },
+    });
   });
 
   it('dispatches notification sessions only for the current user', () => {

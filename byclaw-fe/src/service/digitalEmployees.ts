@@ -13,6 +13,9 @@ export const getResourceListByPage = (data: any, cancelToken?: any) =>
 export const queryMyCreated = (data: any, cancelToken?: any) =>
   POST<any>('/byaiService/auth/privilegeGrant/queryPersonalDigitalEmployeeList', data, { cancelToken });
 
+export const queryManagedEnterpriseEmployees = (data: any, cancelToken?: any) =>
+  POST<any>('/byaiService/digitalEmployeeController/selectDigitalEmployeeByQo', data, { cancelToken });
+
 // 发现数字员工
 export const getAllDigitalEmployees = (payload = {}) =>
   POST<any>('/byaiService/api/v1/digitEmploy/discover', {

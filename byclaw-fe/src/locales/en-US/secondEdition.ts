@@ -149,6 +149,10 @@ export default {
   'settings.params.status': 'Status',
   'settings.params.enabled': 'Enabled',
   'settings.params.disabled': 'Disabled',
+  'settings.params.managed': 'System Managed',
+  'settings.params.source': 'Source',
+  'settings.params.source.user': 'User Configured',
+  'settings.params.source.connector': 'System Managed',
   'settings.params.enable': 'Enable',
   'settings.params.disable': 'Disable',
   'settings.params.valueStatus': 'Value Status',
@@ -163,6 +167,13 @@ export default {
   'settings.params.empty': 'No personal parameters',
   'settings.params.keyRequired': 'Please enter parameter name',
   'settings.params.keyInvalid': 'Use environment variable format, such as API_TOKEN',
+  'settings.params.common.pick': 'Common variables',
+  'settings.params.common.ghToken.desc':
+    'GitHub access token, used by develop projects to clone and push private repositories',
+  'settings.params.common.glToken.desc':
+    'GitLab access token, used by develop projects to clone and push private GitLab repositories',
+  'settings.params.common.giteaToken.desc':
+    'Gitea access token, used by develop projects to clone and push private Gitea repositories',
   'settings.params.valueRequired': 'Please enter parameter value',
   'settings.params.valueTip': 'The value will be encrypted and never displayed in plain text.',
   'settings.params.valueKeepTip': 'Value is configured. Leave it empty to keep the existing value.',
@@ -346,4 +357,8 @@ export default {
     'You do not have management permission for knowledge bases under the current digital employee.',
   'context.used.format': '{percent}% context used, {usedTokens} / {contextTokens}',
   'easyConfirm.pagination.title': 'Please select the operation step',
+  'easyConfirm.notification.title': 'Task requires your attention',
+  'easyConfirm.notification.body': 'A new task requires your confirmation or input. Return to the page to continue.',
+  'easyConfirm.notification.permissionDenied':
+    'Browser notifications are turned off. To avoid missing tasks that require your confirmation or input, allow notifications in your browser site settings.',
 };

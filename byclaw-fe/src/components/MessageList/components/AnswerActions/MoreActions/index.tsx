@@ -22,8 +22,9 @@ function MoreActions(porps: {
   msg: IMessage;
   disabledList?: string[];
   showTroubleshoot?: boolean;
+  afterActions?: React.ReactNode;
 }) {
-  const { deleteMessage, msg, disabledList, showTroubleshoot = false } = porps;
+  const { deleteMessage, msg, disabledList, showTroubleshoot = false, afterActions } = porps;
   const { messageId, traceId } = msg;
   const [troubleshootActionLoading, setTroubleshootActionLoading] = React.useState(false);
   const [traceDrawerOpen, setTraceDrawerOpen] = React.useState(false);
@@ -34,6 +35,7 @@ function MoreActions(porps: {
     placeholder: troubleshootDrawerHolder,
     open: openTroubleshootDrawer,
     loading: troubleshootLoading,
+    available: troubleshootAvailable,
   } = useTroubleshootDrawer();
 
   // Lazy-load /langfuse/config so we know whether to show the "Trace" button.
@@ -154,8 +156,10 @@ function MoreActions(porps: {
 
   const canDelete = messageId && !disabledList?.includes('delete');
   // 所有数字员工回答均可发起运维排查，用户自己发送的提问不展示。
-  const canShowTroubleshoot = showTroubleshoot && msg.fromBeyond;
+  const canShowTroubleshoot = showTroubleshoot && msg.fromBeyond && troubleshootAvailable;
   const canShowTrace = langfuseEnabled && !disabledList?.includes('trace');
+  // 用户提问的操作区只保留调用链图标，数字员工回答才显示国际化文案，避免提问操作区过宽。
+  const showTraceLabel = msg.fromBeyond;
 
   const handleOpenTraceDrawer = React.useCallback(() => {
     // Always seed with the latest known traceId; if the message carried no traceId
@@ -183,7 +187,9 @@ function MoreActions(porps: {
               icon={<LinkOutlined className={btnStyles.icon} />}
               onClick={handleOpenTraceDrawer}
             >
-              <span className={btnStyles.actionsBarText}>{intl.formatMessage({ id: 'messageList.viewTrace' })}</span>
+              {showTraceLabel ? (
+                <span className={btnStyles.actionsBarText}>{intl.formatMessage({ id: 'messageList.viewTrace' })}</span>
+              ) : null}
             </Button>
           </Tooltip>
         </div>
@@ -203,6 +209,7 @@ function MoreActions(porps: {
           </Tooltip>
         </div>
       ) : null}
+      {afterActions}
       {canDelete ? (
         <div className={btnStyles.actionsBarItem} role="presentation">
           <Popconfirm title={intl.formatMessage({ id: 'messageList.deleteMessageConfirm' })} onConfirm={myDeleteMsg}>

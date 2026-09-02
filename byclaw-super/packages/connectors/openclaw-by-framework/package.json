@@ -1,0 +1,24 @@
+{
+  "name": "@byclaw/connector-openclaw-by-framework",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "OpenClaw connector transported by @byclaw/by-framework",
+  "files": ["dist"],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "dependencies": {
+    "@byclaw/connector-by-framework-common": "workspace:*"
+  }
+}

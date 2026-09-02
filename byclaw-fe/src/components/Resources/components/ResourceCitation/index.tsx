@@ -128,6 +128,7 @@ const ResourceList = (props: Props) => {
     disableClick,
     ownerType,
     agentId,
+    agentIds,
     resources,
     loadingOverride,
     layout = 'grid',
@@ -136,9 +137,11 @@ const ResourceList = (props: Props) => {
   const { EventEmitter, sessionId } = useGlobal();
 
   const normalizedAgentId = useMemo(() => {
-    if (!agentId) return agentId;
-    return agentId.split('_').pop() || agentId;
-  }, [agentId]);
+    // # 引用场景优先使用当前 @ 的员工 ID，避免回退到当前会话员工后查询出全部技能。
+    const scopedAgentId = `${agentIds || ''}`.split(',').map(trim).find(Boolean) || agentId;
+    if (!scopedAgentId) return scopedAgentId;
+    return scopedAgentId.split('_').pop() || scopedAgentId;
+  }, [agentId, agentIds]);
 
   const searchValue = useRef('');
   const [loading, setLoading] = useState(false);
@@ -360,7 +363,7 @@ const ResourceList = (props: Props) => {
       return;
     }
     loadResources(true);
-  }, [lockBizTypes, resourceBizTypeList?.join(','), sessionId, resources]);
+  }, [lockBizTypes, normalizedAgentId, resourceBizTypeList?.join(','), sessionId, resources]);
 
   useEffect(() => {
     if (!resources) {

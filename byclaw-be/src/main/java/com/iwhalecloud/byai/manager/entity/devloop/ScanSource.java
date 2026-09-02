@@ -20,6 +20,9 @@ public class ScanSource {
 
     private String sourceName;
 
+    /** 需求或渠道描述；运营需求使用该字段保存需求描述，研发渠道可为空。 */
+    private String sourceDescription;
+
     private String sourceType;
 
     private String config;
@@ -36,6 +39,12 @@ public class ScanSource {
 
     /** score模式下自动派生的最低综合分，默认70 */
     private Integer scoreThreshold;
+
+    /** 运营需求负责人用户 ID，研发扫描源为空。 */
+    private Long assignee;
+
+    /** 运营需求完成时间，研发扫描源为空。 */
+    private Date dueTime;
 
     private Date lastScanTime;
 

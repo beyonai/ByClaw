@@ -7,8 +7,10 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -88,6 +90,21 @@ public class OrganizationService {
      */
     public Organization findById(Long orgId) {
         return organizationMapper.selectById(orgId);
+    }
+
+    /**
+     * 查询指定组织自身及其全部下级组织的 ID 集合（按 path_code 前缀匹配）。
+     * 用于组织管理员权限的向下穿透判断（管理父组织即管理其所有子组织）。
+     *
+     * @param orgId 组织标识
+     * @return 组织自身及下级组织 ID 集合；组织不存在或无 path_code 时返回空集合
+     */
+    public java.util.List<Long> findSelfAndDescendantOrgIds(Long orgId) {
+        Organization organization = findById(orgId);
+        if (organization == null || organization.getPathCode() == null) {
+            return java.util.Collections.emptyList();
+        }
+        return organizationMapper.selectUnderlingList(organization.getPathCode());
     }
 
     /***
@@ -286,6 +303,36 @@ public class OrganizationService {
      */
     public List<Organization> findOrganizationByUserId(Long userId) {
         return organizationMapper.findOrganizationByUserId(userId);
+    }
+
+    /**
+     * 查询用户有效组织范围，包括用户直接所属组织及其全部上级组织。
+     *
+     * @param userId 用户标识
+     * @return 有效组织标识集合
+     */
+    public Set<Long> findEffectiveOrganizationIdsByUserId(Long userId) {
+        if (userId == null) {
+            return Collections.emptySet();
+        }
+        Set<Long> organizationIds = new LinkedHashSet<>();
+        List<Organization> organizations = findOrganizationByUserId(userId);
+        if (organizations == null) {
+            return organizationIds;
+        }
+        for (Organization organization : organizations) {
+            if (organization == null) {
+                continue;
+            }
+            if (organization.getOrgId() != null) {
+                organizationIds.add(organization.getOrgId());
+            }
+            if (StringUtils.isBlank(organization.getPathCode())) {
+                continue;
+            }
+            organizationIds.addAll(StringUtil.splitLong(organization.getPathCode(), "\\."));
+        }
+        return organizationIds;
     }
 
     /**

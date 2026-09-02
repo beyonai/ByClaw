@@ -155,6 +155,29 @@
   }
 }
 
+.agentMentionTooltipContent {
+  max-width: 360px;
+}
+
+.agentMentionTooltipDivider {
+  margin: 8px 0;
+  border-top: 1px dashed rgb(255 255 255 / 45%);
+}
+
+.agentMentionTooltipDescription {
+  color: rgb(255 255 255 / 85%);
+  font-size: 12px;
+  line-height: 20px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.agentMentionTooltip {
+  :global(.@{antPrefix}-tooltip-inner) {
+    max-width: 360px;
+  }
+}
+
 .moreActions {
   column-gap: 2px;
 }
@@ -251,6 +274,10 @@
   .avatarWrapper {
     width: 40px;
     height: 40px;
+  }
+
+  .avatarWrapperClickable {
+    cursor: pointer;
   }
 }
 

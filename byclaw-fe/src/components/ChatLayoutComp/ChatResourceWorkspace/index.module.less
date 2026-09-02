@@ -1,0 +1,544 @@
+.workspace,
+.resourcePanel {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: #fff;
+}
+
+.workspace {
+  display: flex;
+  flex-direction: column;
+}
+
+.workspaceHeader {
+  display: flex;
+  align-items: flex-start;
+  flex: none;
+  height: 42px;
+  padding: 4px 8px 0;
+  border-bottom: 1px solid #eef0f3;
+}
+
+.resourceToggle {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  margin-right: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.resourceToggleActive {
+  color: #14161a;
+  background: #f1f2f4;
+  border-radius: 10px;
+
+  &:hover,
+  &:focus-visible {
+    color: #14161a;
+    background: #e9ebee;
+  }
+}
+
+.resourceToggleIcon {
+  width: 20px;
+  height: 20px;
+}
+
+.workspaceTabs {
+  flex: 1;
+  min-width: 0;
+
+  :global {
+    .@{antPrefix}-tabs-nav {
+      margin: 0;
+      height: 38px;
+    }
+
+    .@{antPrefix}-tabs-nav::before {
+      border-bottom: 1px solid #d9dde5;
+    }
+
+    .@{antPrefix}-tabs-nav-list {
+      align-items: flex-end;
+      // 首个预览标签使用负向左侧阴影绘制边框，给列表预留 1px 避免被 nav 容器裁切。
+      padding-left: 1px;
+    }
+
+    .@{antPrefix}-tabs-content-holder {
+      display: none;
+    }
+
+    .@{antPrefix}-tabs-tab {
+      max-width: 180px;
+      height: 36px;
+      margin: 0 2px 0 0 !important;
+      padding: 7px 12px !important;
+      border: 0 !important;
+      border-radius: 12px 12px 0 0 !important;
+      background: #eef1f5;
+      color: #667085;
+      transition: background-color 0.15s ease, color 0.15s ease;
+    }
+
+    .@{antPrefix}-tabs-tab:hover {
+      background: #e4e8ee;
+      color: #344054;
+    }
+
+    .@{antPrefix}-tabs-tab-active {
+      background: #fff;
+      color: #14161a;
+      box-shadow: 0 -1px 0 #d9dde5, 1px 0 0 #d9dde5, -1px 0 0 #d9dde5;
+    }
+
+    .@{antPrefix}-tabs-tab-remove {
+      margin-left: 10px;
+      color: #667085;
+    }
+
+    .@{antPrefix}-tabs-tab-remove:hover {
+      color: #1f2937;
+    }
+
+    .@{antPrefix}-tabs-tab-btn {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+  }
+}
+
+.workspaceDetail {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: #fff;
+}
+
+.workspaceTabPane {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.workspaceTabPaneHidden {
+  display: none;
+}
+
+.floatingResourcePanel {
+  position: absolute;
+  z-index: 20;
+  top: 42px;
+  bottom: 0;
+  left: 0;
+  // 与全局左侧 WorkspaceSider 保持同宽，切换列表和详情时不产生宽度跳变。
+  width: 280px;
+  border-right: 1px solid #e5e8ed;
+  box-shadow: 8px 8px 20px rgba(25, 35, 55, 0.12);
+}
+
+// 文件预览页打开后，资源列表以半高浮窗覆盖在预览区，不再挤压或遮满整个预览页面。
+.floatingResourcePanelHalf {
+  top: 50px;
+  bottom: auto;
+  left: 8px;
+  height: 50%;
+  overflow: hidden;
+  border: 1px solid #e5e8ed;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 10px 28px rgba(25, 35, 55, 0.16);
+}
+
+.floatingResourcePanelHidden {
+  display: none;
+}
+
+.dockedResourcePanel {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.resourcePanel {
+  display: flex;
+  flex-direction: column;
+}
+
+.resourceSection {
+  min-height: 0;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.primaryTabs {
+  flex: none;
+  padding: 0 10px;
+
+  :global {
+    .@{antPrefix}-tabs-nav {
+      margin: 0;
+    }
+
+    .@{antPrefix}-tabs-nav::before {
+      display: none;
+    }
+
+    .@{antPrefix}-tabs-nav-list {
+      width: 100%;
+    }
+
+    .@{antPrefix}-tabs-tab {
+      min-width: 0;
+      justify-content: center;
+      flex: 1;
+      padding: 12px 4px 10px;
+      margin: 0 !important;
+      color: #14161a;
+      font-size: 14px;
+      font-weight: 400;
+    }
+
+    .@{antPrefix}-tabs-tab-active {
+      font-weight: 500;
+    }
+
+    .@{antPrefix}-tabs-tab-btn {
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .@{antPrefix}-tabs-content-holder {
+      display: none;
+    }
+  }
+}
+
+.resourceBody {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.primaryTabs {
+  :global {
+    .@{antPrefix}-tabs-nav-list {
+      width: auto;
+      gap: 20px;
+    }
+
+    .@{antPrefix}-tabs-tab {
+      flex: none;
+      justify-content: flex-start;
+    }
+
+    .@{antPrefix}-tabs-ink-bar {
+      display: none;
+    }
+
+    .@{antPrefix}-tabs-tab-btn {
+      padding-bottom: 7px;
+      border-bottom: 2px solid transparent;
+    }
+
+    .@{antPrefix}-tabs-tab-active .@{antPrefix}-tabs-tab-btn {
+      border-bottom-color: #14161a;
+    }
+  }
+}
+
+.secondaryTabs {
+  display: flex;
+  flex: 1;
+  width: auto;
+  height: auto;
+  min-height: 0;
+  justify-content: center;
+  align-self: stretch;
+  box-sizing: border-box;
+  padding-right: 8px;
+
+  :global {
+    .@{antPrefix}-tabs-nav {
+      width: 100%;
+      height: 100%;
+      min-width: 0;
+      margin: 0;
+      align-items: center;
+    }
+
+    .@{antPrefix}-tabs-nav-wrap {
+      width: 100%;
+      min-width: 0;
+      align-items: center;
+    }
+
+    .@{antPrefix}-tabs-nav-list {
+      width: 100%;
+      min-width: 0;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .@{antPrefix}-tabs-tab {
+      flex: none;
+      width: 100%;
+      min-height: 84px;
+      box-sizing: border-box;
+      justify-content: center;
+      align-items: center;
+      padding: 0;
+      margin: 0 !important;
+      border: 0;
+      border-radius: 0;
+      color: rgba(112, 118, 128, 1);
+      background: #f5f5f5;
+      font-size: 13px;
+      font-weight: 400;
+      line-height: 16px;
+
+      &:hover {
+        color: var(--beyond-color-primary);
+      }
+    }
+
+    .@{antPrefix}-tabs-tab-active {
+      color: var(--beyond-color-primary);
+      background: rgba(22, 93, 255, 0.1);
+      font-weight: 400;
+    }
+
+    .@{antPrefix}-tabs-tab-active .@{antPrefix}-tabs-tab-btn {
+      color: var(--beyond-color-primary);
+      background: transparent;
+    }
+
+    .@{antPrefix}-tabs-tab-btn {
+      display: flex;
+      flex: 1 1 auto;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      max-width: 100%;
+      min-width: 100%;
+      align-self: stretch;
+      height: 100%;
+      min-height: 84px;
+      box-sizing: border-box;
+      padding: 0;
+      overflow: visible;
+      font-size: 13px;
+      border-radius: 0 20px 20px 0;
+      background: transparent;
+      text-align: center;
+      text-overflow: clip;
+      white-space: normal;
+      word-break: break-all;
+    }
+
+    .@{antPrefix}-tabs-ink-bar,
+    .@{antPrefix}-tabs-content-holder {
+      display: none;
+    }
+  }
+}
+
+.secondaryTabsEnglish {
+  :global {
+    .@{antPrefix}-tabs-tab {
+      min-height: 128px;
+    }
+
+    .@{antPrefix}-tabs-tab-btn {
+      min-height: 128px;
+      width: max-content;
+      max-width: none;
+      white-space: nowrap;
+      word-break: normal;
+      transform: rotate(90deg);
+    }
+  }
+}
+
+.secondaryNav {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: center;
+  width: 36px;
+  min-height: 0;
+  padding: 0;
+  border-left: 1px solid #eef0f3;
+  overflow: hidden;
+}
+
+.secondaryNavActions {
+  display: flex;
+  flex: none;
+  justify-content: center;
+  height: 24px;
+  width: 100%;
+  box-sizing: border-box;
+  padding-right: 8px;
+  margin-bottom: 8px;
+}
+
+.resourceRefreshButton {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  color: #7b8799;
+
+  &:hover,
+  &:focus-visible {
+    color: #344054;
+    background: #eef0f3;
+  }
+}
+
+.resourceSpin,
+.detailSpin {
+  flex: 1;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+
+  :global {
+    .@{antPrefix}-spin-container {
+      height: 100%;
+      min-height: 0;
+    }
+  }
+}
+
+.resourceContent {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+
+  & > :global(.@{antPrefix}-empty) {
+    margin-top: 64px;
+  }
+}
+
+.codeList {
+  height: 100%;
+  padding: 8px;
+  overflow: auto;
+}
+
+.codeItem {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 8px !important;
+  cursor: pointer;
+
+  &:hover {
+    background: #f5f7fa;
+  }
+
+  :global(.@{antPrefix}-tag) {
+    flex: none;
+    margin: 0;
+  }
+}
+
+.codeFileName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.codeStats {
+  flex: none;
+  color: #707680;
+  font-size: 12px;
+}
+
+// 项目详情代码资源使用卡片网格；会话右侧资源仍保留原紧凑行列表。
+.codeCardList {
+  :global(.@{antPrefix}-list-items) {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    align-content: start;
+    gap: 10px;
+  }
+}
+
+.codeCardItem {
+  min-width: 0;
+  min-height: 74px;
+  padding: 12px !important;
+  border: 1px solid #e8edf4;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 3px 12px rgba(31, 45, 77, 0.04);
+  flex-wrap: wrap;
+
+  &:hover {
+    border-color: #c9d8f5;
+    background: #fff;
+    box-shadow: 0 8px 18px rgba(31, 45, 77, 0.08);
+  }
+
+  .codeFileName {
+    flex-basis: calc(100% - 28px);
+  }
+}
+
+.resourceLoadMoreSentinel {
+  min-height: 20px;
+}
+
+.localSharedToolbar {
+  display: flex;
+  flex: none;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #eef0f3;
+}
+
+.diffContent {
+  height: 100%;
+  margin: 0;
+  padding: 16px;
+  overflow: auto;
+  color: #24292f;
+  background: #f7f8fa;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 20px;
+  white-space: pre;
+}
+
+.diffAdded {
+  display: inline-block;
+  width: 100%;
+  color: #116329;
+  background: #dafbe1;
+}
+
+.diffRemoved {
+  display: inline-block;
+  width: 100%;
+  color: #82071e;
+  background: #ffebe9;
+}

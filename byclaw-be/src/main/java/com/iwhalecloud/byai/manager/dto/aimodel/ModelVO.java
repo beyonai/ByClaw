@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.dto.aimodel;
 
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import com.iwhalecloud.byai.common.util.LongToStringSerializer;
 import java.io.Serializable;
 import java.util.List;
 import java.util.Map;
@@ -16,6 +18,7 @@ public class ModelVO implements Serializable {
     private static final long serialVersionUID = 1L;
 
     /** 模型 ID */
+    @JsonSerialize(using = LongToStringSerializer.class)
     private Long id;
 
     /** 模型名称（前端标题） */

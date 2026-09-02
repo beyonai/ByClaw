@@ -56,6 +56,8 @@
 }
 
 .employeesList {
+  padding-top: 2px;
+
   :global {
     .@{antPrefix}-list-item {
       padding: 8px;
@@ -73,8 +75,10 @@
       }
 
       &:hover {
-        border: 0.5px dashed #6aa1ff;
+        border-color: #6aa1ff;
         background-color: #fff;
+        // 使用内描边补足顶部边线，避免列表容器 overflow 裁剪掉 hover 边框。
+        box-shadow: inset 0 0 0 1px #6aa1ff;
         :global {
           .@{antPrefix}-list-item-action {
             display: block;
@@ -153,6 +157,9 @@
   .defaultTag {
     .tag;
 
+    width: max-content;
+    min-width: max-content;
+    white-space: nowrap;
     padding: 3px 5px;
     background: linear-gradient(90deg, #315dff 0%, #bf5cff 100%);
 
@@ -201,9 +208,93 @@
     margin: 0;
   }
 }
+
+.employeeListScrollWrap {
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.compactCard {
+  // 与资源 Tab（技能、工具、知识、本体）的内容容器统一内边距，切换分类时保持位置稳定。
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 8px;
+  overflow: hidden;
+
+  :global(#guideStep2-3) {
+    flex: 1 1 auto;
+    height: 0;
+    min-height: 0;
+    overflow: hidden;
+
+    .@{antPrefix}-tabs {
+      height: 100%;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .@{antPrefix}-tabs-content-holder {
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    .@{antPrefix}-tabs-content,
+    .@{antPrefix}-tabs-tabpane {
+      height: 100%;
+      min-height: 0;
+    }
+
+    .@{antPrefix}-tabs-content {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .@{antPrefix}-tabs-tabpane {
+      display: flex;
+      flex-direction: column;
+    }
+  }
+
+  :global(#allEmployeeListWrap) {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    flex: 1;
+    // 弹窗内容高度由 viewport 控制，使用明确高度避免多层 100% 导致滚动容器高度为 auto。
+    height: calc(40vh - 70px) !important;
+    max-height: calc(40vh - 70px);
+    overflow: hidden;
+    overflow-x: hidden;
+
+    > div {
+      flex: 1;
+      min-height: 0;
+    }
+  }
+
+  .employeesList {
+    :global {
+      .@{antPrefix}-list-item {
+        // 与 ResourceCitation 的紧凑列表保持一致，避免切换数字员工/技能时行高跳变。
+        padding: 8px;
+      }
+    }
+  }
+}
+
 .list {
   flex: 1 1 auto;
   overflow: auto;
+}
+
+.compactCard.list {
+  overflow: hidden;
 }
 
 .book {

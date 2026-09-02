@@ -254,20 +254,16 @@ public class AssistantChatController {
 
         Long currentUserId = CurrentUserHolder.getCurrentUserId();
         Set<Long> allowedSessionIds = sessionService.findBatchByIds(sessionIds).stream()
-            .filter(session -> isCurrentUserSession(session, currentUserId))
-            .map(ByaiSession::getSessionId)
+            .filter(session -> isCurrentUserSession(session, currentUserId)).map(ByaiSession::getSessionId)
             .collect(Collectors.toSet());
 
-        List<RunningChatInfo> list = sessionIds.stream()
-            .filter(allowedSessionIds::contains)
-            .map(runningOutputStreamRegistry::getRunning)
-            .collect(Collectors.toList());
+        List<RunningChatInfo> list = sessionIds.stream().filter(allowedSessionIds::contains)
+            .map(runningOutputStreamRegistry::getRunning).collect(Collectors.toList());
         return ResponseUtil.successResponse(list);
     }
 
     @PostMapping(value = "/runningSnapshot")
-    public ResponseUtil<RunningChatSnapshotResponse> runningSnapshot(
-        @RequestBody RunningChatSnapshotRequest request) {
+    public ResponseUtil<RunningChatSnapshotResponse> runningSnapshot(@RequestBody RunningChatSnapshotRequest request) {
         if (request == null || request.getSessionId() == null) {
             return ResponseUtil.successResponse(null);
         }
@@ -301,10 +297,11 @@ public class AssistantChatController {
         @Parameter(description = "会话ID，可选") @RequestParam(value = "sessionId", required = false) Long sessionId,
         @Parameter(description = "会话类型，可选") @RequestParam(value = "sessionType", required = false,
             defaultValue = SessionType.SUPER_AGENT) String sessionType,
-        @Parameter(description = "数字员工，可选") @RequestParam(value = "agentId", required = false) Long agentId) {
+        @Parameter(description = "数字员工，可选") @RequestParam(value = "agentId", required = false) Long agentId,
+        @Parameter(description = "项目，可选") @RequestParam(value = "projectId", required = false) Long projectId) {
         try {
             UploadResult uploadResult = assistantChatApplicationService.uploadFiles(files, sessionId, sessionType,
-                agentId);
+                agentId, projectId);
             return ResponseUtil.success(uploadResult);
         }
         catch (Exception e) {

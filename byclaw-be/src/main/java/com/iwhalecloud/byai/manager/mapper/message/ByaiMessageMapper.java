@@ -3,6 +3,7 @@ package com.iwhalecloud.byai.manager.mapper.message;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessageHotDto;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessage;
+import com.iwhalecloud.byai.common.message.entity.ConversationOutlineItem;
 import com.iwhalecloud.byai.common.message.qo.MessageHotDelQo;
 import com.iwhalecloud.byai.common.message.qo.MessageHotPageQo;
 import com.iwhalecloud.byai.common.message.qo.MessageHotQo;
@@ -92,6 +93,18 @@ public interface ByaiMessageMapper extends BaseMapper<ByaiMessage> {
      */
     List<ByaiMessage> selectByQo(@Param("qo") MessageHotQo qo);
 
+    /**
+     * 查询严格早于当前用户消息的最近可见群聊消息，按时间倒序返回。
+     */
+    List<ByaiMessage> selectVisibleBeforeMessageId(@Param("sessionId") Long sessionId,
+        @Param("beforeMessageId") Long beforeMessageId, @Param("limit") Integer limit);
+
+    /**
+     * 统计严格早于当前用户消息的可见群聊消息，供截断信息使用。
+     */
+    Long countVisibleBeforeMessageId(@Param("sessionId") Long sessionId,
+        @Param("beforeMessageId") Long beforeMessageId);
+
 
     /**
      * 根据查询条件删除消息
@@ -117,5 +130,12 @@ public interface ByaiMessageMapper extends BaseMapper<ByaiMessage> {
      * @return 消息数量
      */
     Long countPositionInSession(@Param("sessionId") Long sessionId, @Param("messageId") Long messageId);
-}
 
+    /**
+     * Query the lightweight message outline used by the conversation navigator.
+     *
+     * @param sessionId session identifier
+     * @return visible user and assistant messages in chronological order
+     */
+    List<ConversationOutlineItem> selectConversationOutline(@Param("sessionId") Long sessionId);
+}

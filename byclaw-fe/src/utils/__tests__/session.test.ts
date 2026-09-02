@@ -137,4 +137,14 @@ describe('utils/session', () => {
 
     expect(createdSessions).toEqual([]);
   });
+
+  it('keeps a locally created upload session when the server response is temporarily stale', () => {
+    const createdSessions = getSessionsCreatedDuringRequest(
+      [{ sessionId: 'upload-session', isLocalSession: true }] as any,
+      [{ sessionId: 'upload-session', isLocalSession: true }, { sessionId: 'old' }] as any,
+      [{ sessionId: 'old' }] as any
+    );
+
+    expect(createdSessions).toEqual([{ sessionId: 'upload-session', isLocalSession: true }]);
+  });
 });

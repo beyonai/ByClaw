@@ -1,0 +1,126 @@
+{
+  "action_code": "get_collection_context",
+  "action_name": "合集上下文",
+  "action_type": "QUERY",
+  "action_desc": "按 collection_id 返回合集信息、文章列表、汇总、渠道、画像与账号基准；可选 stat_date",
+  "permission_roles": [
+    "analyst",
+    "ops",
+    "admin"
+  ],
+  "params": [
+    {
+      "paramCode": "projectId",
+      "paramName": "项目ID",
+      "type": "string",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
+      "paramCode": "account_code",
+      "paramName": "公众号编码",
+      "type": "string",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
+      "paramCode": "collection_id",
+      "paramName": "合集ID",
+      "type": "integer",
+      "isRequired": true,
+      "direction": "input",
+      "term_type_code": "wy93ovzs9p_article_collection_collection_name",
+      "term_data_type": "LIST_TERM"
+    },
+    {
+      "paramCode": "stat_date",
+      "paramName": "指标日期（YYYY-MM-DD）",
+      "type": "date",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "success",
+      "paramName": "是否成功",
+      "type": "boolean",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "collection",
+      "paramName": "合集信息",
+      "type": "object",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "actual_stat_date",
+      "paramName": "实际指标日期（YYYY-MM-DD）",
+      "type": "date",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "summary",
+      "paramName": "汇总",
+      "type": "object",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "articles",
+      "paramName": "文章列表",
+      "type": "array",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "channel_summary",
+      "paramName": "渠道汇总",
+      "type": "object",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "profile_summary",
+      "paramName": "画像汇总",
+      "type": "object",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "account_benchmarks",
+      "paramName": "账号基准",
+      "type": "object",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "missing_fields",
+      "paramName": "缺失字段列表",
+      "type": "array",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "error",
+      "paramName": "错误描述",
+      "type": "string",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "code",
+      "paramName": "错误码",
+      "type": "string",
+      "isRequired": false,
+      "direction": "output"
+    }
+  ],
+  "object_references": [
+    "wy93ovzs9p_article",
+    "wy93ovzs9p_article_metric_daily",
+    "wy93ovzs9p_article_channel_daily",
+    "wy93ovzs9p_article_user_profile_daily"
+  ]
+}

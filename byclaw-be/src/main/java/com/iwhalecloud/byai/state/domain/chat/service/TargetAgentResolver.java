@@ -4,6 +4,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import com.iwhalecloud.byai.common.constants.Constants;
@@ -24,8 +25,16 @@ public class TargetAgentResolver {
 
     private static final Logger logger = LoggerFactory.getLogger(TargetAgentResolver.class);
 
+    private static final String HARNESS_RUNTIME_AGENT_TYPE = "BYCLAW_DSH";
+
     @Autowired
     private SsResourceService ssResourceService;
+
+    @Autowired
+    private SystemParamTargetAgentResolver systemParamTargetAgentResolver;
+
+    @Value("${byclaw.route-by-super-to-user-sandbox:false}")
+    private boolean routeBySuperToUserSandbox;
 
     /**
      * 根据基础 workerAgentType、agentId、sourceAgentType 与 userCode 计算最终 targetAgentType。
@@ -39,19 +48,30 @@ public class TargetAgentResolver {
     public String resolveAgentType(String workerAgentType, Long agentId, String resumeAgentType, String userCode) {
         String targetAgentType = workerAgentType;
 
-        if (StringUtils.isNotBlank(targetAgentType) && targetAgentType.startsWith(WorkerAgentType.DEBUG.getCode())) {
+        if (routeBySuperToUserSandbox && agentId != null
+                && WorkerAgentType.BY_SUPER.getCode().equalsIgnoreCase(targetAgentType)) {
+            targetAgentType = buildUserAgentType(WorkerAgentType.BYCLAW_EXE, userCode);
+        }
+        else if (agentId == null && WorkerAgentType.BY_SUPER.getCode().equalsIgnoreCase(targetAgentType)) {
+            // agentId 为空代表公共超级助手入口；不能被旧会话透传的 BYCLAW_EXE sourceAgentType 覆盖。
+            targetAgentType = WorkerAgentType.BY_SUPER.getCode();
+        }
+        else if (StringUtils.isNotBlank(targetAgentType)
+                && targetAgentType.startsWith(WorkerAgentType.DEBUG.getCode())) {
             targetAgentType = WorkerAgentType.DEBUG.getCode() + "_" + agentId;
         }
 
+        targetAgentType = resolveUserSandboxAgentType(targetAgentType, userCode);
         if (StringUtils.isNotBlank(resumeAgentType)) {
-            targetAgentType = resumeAgentType;
+            return resumeAgentType;
         }
-
-        return resolveUserSandboxAgentType(targetAgentType, userCode);
+        targetAgentType = systemParamTargetAgentResolver.resolve(targetAgentType, agentId, userCode);
+        return resolveRuntimeAgentType(targetAgentType, userCode);
     }
 
     /**
-     * 根据对话入参解析最终 agentId。默认超级助手沿用 Gateway main 路由，返回 null。
+     * 根据对话入参解析最终 agentId。BY_SUPER 默认超级助手保留资源 ID，
+     * 尚未迁移的默认超级助手继续沿用 Gateway main 路由。
      *
      * @param assistantChatDto 对话请求参数
      * @return 最终 agentId
@@ -64,7 +84,8 @@ public class TargetAgentResolver {
     }
 
     /**
-     * 根据 agentId 解析最终 agentId。默认超级助手沿用 Gateway main 路由，返回 null。
+     * 根据 agentId 解析最终 agentId。已迁移到 BY_SUPER 的默认超级助手保留真实资源 ID；
+     * 尚未迁移的默认超级助手继续沿用 Gateway main 路由并返回 null。
      *
      * @param agentId 数字员工标识
      * @return 最终 agentId
@@ -79,7 +100,9 @@ public class TargetAgentResolver {
         }
         boolean isDigitalEmployee = Constants.ResourceBizType.DIG_EMPLOYEE.equals(ssResource.getResourceBizType());
         boolean isDefaultSuperAssistant = StringUtils.endsWith(ssResource.getResourceCode(), "main");
-        if (isDigitalEmployee && isDefaultSuperAssistant) {
+        boolean routesToSuperWorker =
+            WorkerAgentType.BY_SUPER.getCode().equalsIgnoreCase(ssResource.getWorkerAgentType());
+        if (isDigitalEmployee && isDefaultSuperAssistant && !routesToSuperWorker) {
             logger.info("识别到默认超级助手，清空agentId以沿用main路由, userId={}, agentId={}, resourceCode={}",
                 CurrentUserHolder.getCurrentUserId(), agentId, ssResource.getResourceCode());
             return null;
@@ -89,7 +112,9 @@ public class TargetAgentResolver {
 
     public boolean isUserSandboxAgentType(String targetAgentType, String userCode) {
         return StringUtils.equalsIgnoreCase(targetAgentType, buildUserAgentType(WorkerAgentType.BYCLAW_EXE, userCode))
-            || StringUtils.equalsIgnoreCase(targetAgentType, buildUserAgentType(WorkerAgentType.BYCLAW_CODE, userCode));
+            || StringUtils.equalsIgnoreCase(targetAgentType, buildUserAgentType(WorkerAgentType.BYCLAW_CODE, userCode))
+            || StringUtils.equalsIgnoreCase(targetAgentType, buildUserAgentType(WorkerAgentType.HARNESS, userCode))
+            || StringUtils.equalsIgnoreCase(targetAgentType, buildUserAgentTypeCode(HARNESS_RUNTIME_AGENT_TYPE, userCode));
     }
 
     private String resolveUserSandboxAgentType(String targetAgentType, String userCode) {
@@ -102,10 +127,25 @@ public class TargetAgentResolver {
         if (targetAgentType.startsWith(WorkerAgentType.BYCLAW_CODE.getCode())) {
             return buildUserAgentType(WorkerAgentType.BYCLAW_CODE, userCode);
         }
+        if (targetAgentType.startsWith(WorkerAgentType.HARNESS.getCode())) {
+            return buildUserAgentType(WorkerAgentType.HARNESS, userCode);
+        }
+        return targetAgentType;
+    }
+
+    private String resolveRuntimeAgentType(String targetAgentType, String userCode) {
+        // HARNESS 是数据库中的稳定逻辑类型；当前运行时使用 DeepSeek Harness（DSH），后续可替换为其他实现。
+        if (StringUtils.startsWith(targetAgentType, WorkerAgentType.HARNESS.getCode())) {
+            return buildUserAgentTypeCode(HARNESS_RUNTIME_AGENT_TYPE, userCode);
+        }
         return targetAgentType;
     }
 
     private String buildUserAgentType(WorkerAgentType workerAgentType, String userCode) {
         return workerAgentType.getCode() + "_" + userCode;
+    }
+
+    private String buildUserAgentTypeCode(String workerAgentType, String userCode) {
+        return workerAgentType + "_" + userCode;
     }
 }

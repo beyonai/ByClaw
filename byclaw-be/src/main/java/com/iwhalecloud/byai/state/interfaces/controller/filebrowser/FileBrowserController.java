@@ -23,13 +23,17 @@ import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBo
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.state.application.service.filebrowser.FileBrowserApplicationService;
+import com.iwhalecloud.byai.state.application.service.filebrowser.FileBrowserKnowledgeTransferApplicationService;
 import com.iwhalecloud.byai.state.domain.filebrowser.dto.FileBrowserCopyRequest;
 import com.iwhalecloud.byai.state.domain.filebrowser.dto.FileBrowserDeleteRequest;
 import com.iwhalecloud.byai.state.domain.filebrowser.dto.FileBrowserListRequest;
 import com.iwhalecloud.byai.state.domain.filebrowser.dto.FileBrowserMoveRequest;
 import com.iwhalecloud.byai.state.domain.filebrowser.dto.FileBrowserRenameRequest;
+import com.iwhalecloud.byai.state.domain.filebrowser.dto.FileBrowserSaveToKnowledgeRequest;
 import com.iwhalecloud.byai.state.domain.filebrowser.dto.FileBrowserSearchRequest;
+import com.iwhalecloud.byai.state.domain.filebrowser.vo.ChangedFileDiffVo;
 import com.iwhalecloud.byai.state.domain.filebrowser.vo.FileBrowserItemVo;
+import com.iwhalecloud.byai.state.domain.filebrowser.vo.FileBrowserSaveToKnowledgeVo;
 
 /**
  * 文件浏览器控制器
@@ -45,6 +49,9 @@ public class FileBrowserController {
 
     @Autowired
     private FileBrowserApplicationService fileBrowserService;
+
+    @Autowired
+    private FileBrowserKnowledgeTransferApplicationService knowledgeTransferApplicationService;
 
     /**
      * 获取指定目录下的文件和文件夹列表
@@ -117,6 +124,29 @@ public class FileBrowserController {
     }
 
     /**
+     * 保存文件或文件夹到知识库。文件夹会递归创建知识库目录并上传子级文件。
+     *
+     * @param request 源文件模块路径与目标知识库目录
+     * @return 保存结果
+     */
+    @PostMapping("/saveToKnowledge")
+    public ResponseUtil<FileBrowserSaveToKnowledgeVo> saveToKnowledge(
+        @RequestBody FileBrowserSaveToKnowledgeRequest request) {
+        String userCode = CurrentUserHolder.getCurrentUserCode();
+        if (StringUtils.isBlank(userCode)) {
+            return ResponseUtil.fail("用户未登录");
+        }
+        try {
+            FileBrowserSaveToKnowledgeVo result =
+                knowledgeTransferApplicationService.saveToKnowledge(userCode, request);
+            return ResponseUtil.successResponse("已保存到知识库", result);
+        }
+        catch (Exception e) {
+            return ResponseUtil.fail("保存到知识库失败: " + e.getMessage());
+        }
+    }
+
+    /**
      * 下载单个文件
      *
      * @param resourceId 资源ID
@@ -142,6 +172,35 @@ public class FileBrowserController {
                 .body(new InputStreamResource(inputStream));
         } catch (Exception e) {
             return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    /**
+     * 获取当前用户指定会话中的文件变更详情。
+     *
+     * @param sessionId 会话ID
+     * @param uuid 文件稳定标识
+     * @return 文件变更快照
+     */
+    @GetMapping("/getChangedFileDiff")
+    public ResponseUtil<ChangedFileDiffVo> getChangedFileDiff(
+        @RequestParam("sessionId") String sessionId,
+        @RequestParam("uuid") String uuid) {
+        String userCode = CurrentUserHolder.getCurrentUserCode();
+        if (StringUtils.isBlank(userCode)) {
+            return ResponseUtil.fail("用户未登录");
+        }
+        if (StringUtils.isBlank(sessionId)) {
+            return ResponseUtil.fail("sessionId is required");
+        }
+        if (StringUtils.isBlank(uuid)) {
+            return ResponseUtil.fail("uuid is required");
+        }
+        try {
+            return ResponseUtil.successResponse(fileBrowserService.getChangedFileDiff(sessionId, uuid));
+        }
+        catch (Exception e) {
+            return ResponseUtil.fail("获取文件变更详情失败: " + e.getMessage());
         }
     }
 
@@ -360,7 +419,8 @@ public class FileBrowserController {
 
             return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename*=UTF-8''" + encodedFileName)
-                .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                .header(HttpHeaders.CACHE_CONTROL, "no-store")
+                .contentType(MediaType.parseMediaType("application/zip"))
                 .body(body);
         } catch (Exception e) {
             return ResponseEntity.internalServerError().build();

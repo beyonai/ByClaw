@@ -56,4 +56,3 @@ if __name__ == "__main__":
     except Exception as exc:
         stdout_json({"ok": False, "error": str(exc)})
         sys.exit(1)
-

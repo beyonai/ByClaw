@@ -100,6 +100,11 @@ public class AuthDigitEmployVo {
     private Long creatorId;
 
     /**
+     * 创建人名称
+     */
+    private String creatorName;
+
+    /**
      * 是否我创建的
      */
     private boolean myCreate;
@@ -130,6 +135,12 @@ public class AuthDigitEmployVo {
      */
     @JSONField(format = "yyyy-MM-dd HH:mm:ss")
     private Date latestGrantTime;
+
+    /**
+     * 资源最近更新时间，用于“我可用的”列表按最近编辑时间排序。
+     */
+    @JSONField(format = "yyyy-MM-dd HH:mm:ss")
+    private Date updateTime;
 
     /**
      * 是否置顶：1-是，0-否。

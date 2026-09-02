@@ -14,6 +14,7 @@ import {
 
 // @ts-ignore
 import { getLocale, useIntl } from '@umijs/max';
+import { FileSearchOutlined } from '@ant-design/icons';
 import classNames from 'classnames';
 import { App, Modal, Spin, Tooltip } from 'antd';
 import AntdIcon from '@/components/AntdIcon';
@@ -22,7 +23,7 @@ import InfiniteScrollTable from '@/components/InfiniteScrollTable';
 import KnowledgeBreadcrumb from '@/components/KnowledgeBreadcrumb';
 import useShowModal from '@/hooks/useShowModal';
 import useKnowledgeStore from '@/models/useKnowledgeStore';
-import { HALF_MAIN_CONTENT_DETAIL_PANEL_WIDTH, SiderContentContext } from '@/layout/sider/siderContentContext';
+import { SiderContentContext } from '@/layout/sider/siderContentContext';
 import { downloadResourceFile } from '@/service/file';
 import {
   buildDataset,
@@ -42,6 +43,7 @@ import {
   isPreviewable,
 } from '@/components/QueryInput/components/FileBrowserEntry/components/FileBrowserPanel/constants';
 import DirectoryEmpty from '../components/DirectoryEmpty';
+import BuildResultPanel from './BuildResultPanel';
 import MoveModal from '../components/MoveModal';
 import RenameModal from '../components/RenameModal';
 import { collapseNestedMoveSources, type MoveSource } from './moveUtils';
@@ -94,7 +96,7 @@ type IFileBuildStatus = {
 };
 
 interface FilePreviewPanelProps {
-  blob: Blob | null;
+  data: string | Blob | null;
   fileName: string;
   fileType: string;
   loading: boolean;
@@ -164,7 +166,7 @@ function isBuildNotStartedRecord(record: any) {
 //   return `${record?.fileUploadState ?? ''}` === '2';
 // }
 
-const FilePreviewPanel = ({ blob, fileName, fileType, loading, onClose }: FilePreviewPanelProps) => (
+const FilePreviewPanel = ({ data, fileName, fileType, loading, onClose }: FilePreviewPanelProps) => (
   <div className={styles.previewPanel}>
     <div className={styles.previewHeader}>
       <span className={styles.previewTitle}>{fileName}</span>
@@ -174,9 +176,9 @@ const FilePreviewPanel = ({ blob, fileName, fileType, loading, onClose }: FilePr
     </div>
     <div className={styles.previewBody}>
       <Spin spinning={loading} wrapperClassName={styles.previewSpin}>
-        {blob && (
+        {data && (
           <Suspense fallback={null}>
-            <PreViewFile data={blob} type={fileType} title={fileName} className={styles.previewContent} />
+            <PreViewFile data={data} type={fileType} title={fileName} className={styles.previewContent} />
           </Suspense>
         )}
       </Spin>
@@ -541,7 +543,12 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
 
   const isTerminalBuildStatus = useCallback((status?: string) => {
     const normalizedStatus = `${status || ''}`;
-    return !normalizedStatus || normalizedStatus === 'complete' || normalizedStatus === 'failed';
+    return (
+      !normalizedStatus ||
+      normalizedStatus === 'complete' ||
+      normalizedStatus === 'failed' ||
+      normalizedStatus === 'unsupported'
+    );
   }, []);
 
   const isFailedBuildStatus = useCallback((statusInfo?: Partial<IFileBuildStatus> | null) => {
@@ -1101,17 +1108,17 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
   );
 
   const renderPreviewPanel = useCallback(
-    (record: any, options: { blob?: Blob | null; loading: boolean }) => {
+    (record: any, options: { data?: string | Blob | null; fileType?: string; loading: boolean }) => {
       const fileName = getDirectoryRowName(record);
       setDetailPanel?.(
         <FilePreviewPanel
-          blob={options.blob ?? null}
+          data={options.data ?? null}
           fileName={fileName}
-          fileType={getFileType(fileName)}
+          fileType={options.fileType || getFileType(fileName)}
           loading={options.loading}
           onClose={() => clearDetailPanel?.()}
         />,
-        { width: HALF_MAIN_CONTENT_DETAIL_PANEL_WIDTH }
+        { overlay: true }
       );
     },
     [clearDetailPanel, setDetailPanel]
@@ -1141,13 +1148,34 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
         const rawBlob = getRawBlob(res);
         const mimeType = getMimeType(fileName);
         const blob = mimeType ? new Blob([rawBlob], { type: mimeType }) : rawBlob;
-        renderPreviewPanel(record, { blob, loading: false });
+        renderPreviewPanel(record, { data: blob, loading: false });
       } catch (error: any) {
         message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.preview.failed' }));
         clearDetailPanel?.();
       }
     },
     [baseInfo?.resourceId, clearDetailPanel, getBuildDirectoryPath, intl, message, renderPreviewPanel]
+  );
+
+  const handleBuildResult = useCallback(
+    (record: any) => {
+      const filePath = getBuildDirectoryPath(record);
+      const rid = baseInfo?.resourceId;
+      if (!filePath || rid === null || rid === undefined || rid === '') {
+        message.error(intl.formatMessage({ id: 'directoryManage.resolveFilePathFailed' }));
+        return;
+      }
+      setDetailPanel?.(
+        <BuildResultPanel
+          resourceId={rid}
+          filePath={filePath}
+          fileName={getDirectoryRowName(record)}
+          onClose={() => clearDetailPanel?.()}
+        />,
+        { overlay: true }
+      );
+    },
+    [baseInfo?.resourceId, clearDetailPanel, getBuildDirectoryPath, intl, message, setDetailPanel]
   );
 
   const checkDirectoryHasChildren = useCallback(async (resourceId: number, directoryPath: string) => {
@@ -1171,6 +1199,16 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
       case 'preview':
         void handlePreviewFile(record);
         break;
+      case 'buildResult': {
+        const rowKey = getFileRowKey(record);
+        const status = fileBuildStatusMap[rowKey]?.status;
+        if (!status || status === 'running' || buildingFileIds.includes(rowKey)) {
+          message.info(intl.formatMessage({ id: 'buildResult.notReady' }));
+          break;
+        }
+        handleBuildResult(record);
+        break;
+      }
       case 'download': {
         const directoryPath = getBuildDirectoryPath(record);
         const rid = baseInfo?.resourceId;
@@ -1319,6 +1357,8 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
         });
       } else {
         const isBuilding = buildingFileIds.includes(getFileRowKey(record));
+        const buildStatus = fileBuildStatusMap[getFileRowKey(record)]?.status;
+        const buildResultDisabled = !buildStatus || buildStatus === 'running' || isBuilding;
         const fileActions: ActionItem[] = [];
 
         if (canManage) {
@@ -1333,6 +1373,21 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
             ),
           });
         }
+
+        fileActions.push({
+          label: intl.formatMessage({ id: 'buildResult.action' }),
+          key: 'buildResult',
+          disabled: buildResultDisabled,
+          icon: (
+            <Tooltip
+              title={intl.formatMessage({
+                id: buildResultDisabled ? 'buildResult.notReady' : 'buildResult.action',
+              })}
+            >
+              <FileSearchOutlined />
+            </Tooltip>
+          ),
+        });
 
         if (canPreviewRecord(record)) {
           fileActions.push({
@@ -1361,7 +1416,7 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
 
       return actionList;
     },
-    [buildingFileIds, canManage, getFileRowKey, intl]
+    [buildingFileIds, canManage, fileBuildStatusMap, getFileRowKey, intl]
   );
 
   const getFileRowRef = useCallback(
@@ -1527,23 +1582,20 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
     ]
   );
 
-  const rowSelection = useMemo(
-    () =>
-      canManage
-        ? {
-          type: 'checkbox' as const,
-          selectedRowKeys,
-          onChange: (keys: React.Key[]) => {
-            setSelectedRowKeys(keys);
-          },
-          // 目录与文件都可勾选（用于批量移动/删除）；仅搜索态下的合成父目录节点不可选。
-          getCheckboxProps: (record: any) => ({
-            disabled: Boolean(record?.__synthetic),
-          }),
-        }
-        : undefined,
-    [canManage, selectedRowKeys]
-  );
+  const rowSelection = useMemo(() => {
+    if (!canManage) return undefined;
+    return {
+      type: 'checkbox' as const,
+      selectedRowKeys,
+      onChange: (keys: React.Key[]) => {
+        setSelectedRowKeys(keys);
+      },
+      // 目录与文件都可勾选（用于批量移动/删除）；仅搜索态下的合成父目录节点不可选。
+      getCheckboxProps: (record: any) => ({
+        disabled: Boolean(record?.__synthetic),
+      }),
+    };
+  }, [canManage, selectedRowKeys]);
 
   const handleBreadcrumbClick = (index: number) => {
     setFolderPath(folderPath.slice(0, index + 1));

@@ -10,6 +10,7 @@ import {
   markActiveSdkCompactionRetryPending,
   markActiveSdkRootLifecycleFinished,
   markActiveSdkRootLifecycleStarted,
+  recordActiveSdkRootStreamAnswer,
   resolveActiveSdkRequestBySessionKey,
   resolveActiveSdkRunBinding,
   resolveSdkEmitter,
@@ -17,12 +18,12 @@ import {
   registerAgentRunEndPromise,
 } from "./session-context";
 import { appendByclawAssistantContextDelta } from "./chat-context-store.js";
-import { registerPendingMessageToolSend } from "./pending-message-tool.js";
 import {
   cancelActiveSdkCompletionCheck,
   scheduleActiveSdkCompletionCheck,
 } from "./sdk-session-completion.js";
 import { isOpenClawContextOverflowDispatchError } from "./dispatch-error.js";
+import { reportNativeChildRunTerminal } from "./native-child-run.js";
 import {
   resolveAssistantDisplayStream,
   resolveAssistantEventKind,
@@ -38,9 +39,11 @@ import {
   emitIncrementalText,
   generateRandomId,
   getAgentNameById,
+  getIncrementalTextSnapshot,
   normalizeReasoningPreviewText,
   rememberIncrementalTextSnapshot,
 } from "./utils";
+import { recordStreamedAnswerSegment } from "./answer-text-ledger.js";
 import {
   buildCompactionNoticeText,
   buildThinkingEndText,
@@ -48,6 +51,8 @@ import {
   buildToolStartTitle as buildLocalizedToolStartTitle,
 } from "./i18n.js";
 import { DELEGATED_TASK_STATUS } from "../../shared/src/delegated-tool-details.js"; 
+import { getToolCallUIDescription } from "./toolCallUIDescription.js";
+import { shouldEmitToolCard } from "./tool-card-visibility.js";
 
 type AgentStreamState = {
   seq: number;
@@ -92,12 +97,13 @@ async function emitChunkGenByBaiyingCallTool(event: AgentEvent, request: ActiveS
   toBeEmittedChunkAfterBaiyingCallTool = undefined;
 }
 
+/** 返回是否真的推给了前端，供答案账本判断该段是否已可见（见 answer-text-ledger.ts）。 */
 async function emitSdkChunk(
   request: ActiveSdkRequest,
   text: string,
   options?: EmitOptions,
-): Promise<void> {
-  await emitSdkChunkTracked(request.sessionKey, {
+): Promise<boolean> {
+  return await emitSdkChunkTracked(request.sessionKey, {
     emitter: resolveSdkEmitter(request.accountId),
     sessionId: request.sessionId,
     traceId: request.traceId,
@@ -150,42 +156,59 @@ async function handleToolEvent(
   event: AgentEvent,
   resolvedSessionKey: string | undefined,
 ) {
+  const data = event.data as ToolEventData;
+  if (!shouldEmitToolCard(data?.name)) {
+    return;
+  }
   const sdkEmitter = resolveSdkEmitter(request.accountId);
   if (!sdkEmitter) {
     return;
   }
-  const data = event.data as ToolEventData;
   const phase = data?.phase ?? "";
   const toolCallId = data?.toolCallId ?? "";
 
   const thinkDetailMessageId = `${toolCallId}-${phase}`;
 
+  const renderAsToolCallUI = data.name !== "baiying_call";
+  // 暂时还没在 by-framework 定义该 contentType，前端已经实现(SSEMessageType.toolCall)。后续在 by-framework 定义好了，可以直接切换。
+  const toolCallContentType = "3015";
+
   if (phase === "start") {
+    const args = extractToolStartArgs(data) || "{}";
+
+    if (renderAsToolCallUI) {
+      const toolCallDesc = getToolCallUIDescription(data);
+      // sessions_spawn 继续沿用 派生子agent 这种描述
+      const displayToolName = data.name === "sessions_spawn" ? buildToolStartTitle(request, data) : data.name;
+      await emitSdkChunk(request, JSON.stringify({
+        title: displayToolName,
+        description: toolCallDesc,
+        input: args,
+      }), {
+        messageId: toolCallId,
+        parentMessageId: request.parentMessageId,
+        eventType: EventType.REASONING_LOG_DELTA,
+        contentType: toolCallContentType,
+        objectType: "tool_call",
+      });
+      return;
+    }
     if (toolCallId && data?.args && typeof data.args === "object") {
       toolStartArgsByCallId.set(toolCallId, data.args);
-    }
-    // message 工具的 action=send 是唯一"无 assistant 流、必须靠 outbound.sendText 投递"的
-    // 可见内容。登记一条待投递，sendText 命中即 emit、未命中即抑制（agent 回复回声）。
-    if (data?.name === "message") {
-      const sendText = extractMessageToolSendText(data?.args);
-      if (sendText) {
-        registerPendingMessageToolSend(request.sessionKey, { toolCallId, text: sendText });
-      }
     }
     const title = buildToolStartTitle(request, data);
     await emitSdkChunk(request, title, {
       // 必须以toolCallId作为messageId，这个toolCallId可能会作为parentMessageId发送到其他worker(在baiying-enhance的实现)
       messageId: toolCallId,
-      parentMessageId: "-1",
+      parentMessageId: request.parentMessageId,
       eventType: EventType.REASONING_LOG_DELTA,
       contentType: SseReasonMessageType.think_status_title,
       objectType: "tool_call",
       status: "_START_",
     });
-    const args = extractToolStartArgs(data);
     await emitSdkChunk(request, JSON.stringify({
       title: "Input",
-      json: args || "{}",
+      json: args,
     }), {
       messageId: thinkDetailMessageId,
       parentMessageId: toolCallId,
@@ -193,22 +216,37 @@ async function handleToolEvent(
       contentType: SseReasonMessageType.json_block,
     });
   } else if (phase === "result") {
-    const result = extractToolResultText(data?.result);
+    const result = extractToolResultText(data?.result) || "{}";
+    const status = data.isError ? "_ERROR_" : "_DONE_";
+
+    if (renderAsToolCallUI) {
+      await emitSdkChunk(request, JSON.stringify({
+        output: result,
+        status,
+      }), {
+        messageId: toolCallId,
+        parentMessageId: request.parentMessageId,
+        eventType: EventType.REASONING_LOG_DELTA,
+        contentType: toolCallContentType,
+        objectType: "tool_call",
+      });
+      return;
+    }
     const title = buildToolResultTitle(request, data);
     if (toolCallId) {
       toolStartArgsByCallId.delete(toolCallId);
     }
     await emitSdkChunk(request, title, {
       messageId: toolCallId,
-      parentMessageId: "-1",
+      parentMessageId: request.parentMessageId,
       eventType: EventType.REASONING_LOG_DELTA,
       contentType: SseReasonMessageType.think_status_title,
       objectType: "tool_call",
-      status: data.isError ? "_ERROR_" : "_DONE_",
+      status,
     });
     await emitSdkChunk(request, JSON.stringify({
       title: "Output",
-      json: result || "{}"
+      json: result,
     }), {
       messageId: thinkDetailMessageId,
       parentMessageId: toolCallId,
@@ -271,7 +309,7 @@ async function handleAssistantEvent(
   }
   const previousEmit = getLastSdkEmitChunk(request.sessionKey);
   const answerOptions: EmitOptions = {
-    parentMessageId: "-1",
+    parentMessageId: request.parentMessageId,
     eventType: isChildSession ? EventType.REASONING_LOG_DELTA : EventType.ANSWER_DELTA,
     // 不是连续回复时，新增一个 messageId分组，用于前端区分显示不同段落
     messageId: streamContext.isContinuingAnswer && previousEmit?.messageId
@@ -279,6 +317,11 @@ async function handleAssistantEvent(
       : generateRandomId(),
   };
   const answerStreamKey = `${event.runId}:assistant:answer`;
+  if (!streamContext.isContinuingAnswer) {
+    // A tool/reasoning transition starts a new assistant message. finalAnswer
+    // keeps only this run's last assistant message, not earlier process chatter.
+    clearIncrementalTextSnapshot(answerStreamKey);
+  }
   const explicitDelta = stringValue(event.data?.delta);
   const cumulativeText = stringValue(event.data?.text);
   const isReplacement = event.data?.replace === true;
@@ -290,7 +333,26 @@ async function handleAssistantEvent(
       agentId: request.laneMetadata?.agentId ?? event.agentId,
       agentName: request.laneMetadata?.agentName,
     });
-    await emitSdkChunk(request, answerDelta, answerOptions);
+    const emitted = await emitSdkChunk(request, answerDelta, answerOptions);
+    // 已推给前端的段落才记账（见 answer-text-ledger.ts），子会话也记：它的文本走
+    // REASONING_LOG_DELTA 落在思考通道，位置不同但已经可见，core 事后经 sendText 重投同一
+    // 份原文就是重复。没推成（缺 emitter）则不记，否则会抑制一段从未到达客户端的文本。
+    // 记的是流式缓冲的当前段落全文，段落切换时缓冲已被替换，天然对齐 core 只投最后一段。
+    if (emitted) {
+      recordStreamedAnswerSegment({
+        sessionKey: request.sessionKey,
+        runId: event.runId,
+        segmentText: getIncrementalTextSnapshot(answerStreamKey),
+        isChildSession,
+      });
+    }
+    if (!isChildSession) {
+      recordActiveSdkRootStreamAnswer({
+        request,
+        runId: event.runId,
+        answer: getIncrementalTextSnapshot(answerStreamKey),
+      });
+    }
   };
   if (explicitDelta && !isReplacement) {
     if (cumulativeText) {
@@ -307,8 +369,8 @@ async function handleAssistantEvent(
     await emitAnswerDelta(explicitDelta);
     return;
   }
-  // assistant 流是权威可见源，按 runId 做简单前缀增量即可（sendText 的去重改由
-  // message tool 事件驱动，不再和 assistant 流抢同一缓冲）。
+  // assistant 流是权威可见源，按 runId 做简单前缀增量即可（sendText 的去重由答案账本
+  // 承担，见 answer-text-ledger.ts，不和 assistant 流抢同一缓冲）。
   await emitIncrementalText({
     key: answerStreamKey,
     rawText: text,
@@ -360,7 +422,19 @@ async function handleLifecycleEvent(
 ) {
   const { data } = event;
   const phase = typeof data?.phase === "string" ? data.phase : undefined;
-  if (!isRootSessionKey(sessionKey) || !phase) {
+  if (!phase) {
+    return;
+  }
+  if (!isRootSessionKey(sessionKey)) {
+    // child run 的终态只喂 native subagent 台账，不碰 root 的 lifecycle 投影与流式收尾。
+    // 这是 announce 之前就能拿到的终态事实，缺了它就只能等 core 推迟发出的 subagent_ended。
+    if (phase === "end" || phase === "error") {
+      reportNativeChildRunTerminal(api, {
+        childRunId: event.runId,
+        childSessionKey: sessionKey,
+        source: "child_lifecycle",
+      });
+    }
     return;
   }
   if (phase === "fallback_step") {
@@ -432,7 +506,7 @@ async function handleCompactionEvent(
       phase: "start",
     }), {
       messageId: `${event.runId || activeSessionKey}:compaction:start`,
-      parentMessageId: "-1",
+      parentMessageId: request.parentMessageId,
       eventType: EventType.REASONING_LOG_DELTA,
       contentType: SseReasonMessageType.think_status_title,
       objectType: "compaction",
@@ -454,7 +528,7 @@ async function handleCompactionEvent(
       willRetry,
     }), {
       messageId: `${event.runId || activeSessionKey}:compaction:end`,
-      parentMessageId: "-1",
+      parentMessageId: request.parentMessageId,
       eventType: EventType.REASONING_LOG_DELTA,
       contentType: SseReasonMessageType.think_status_title,
       objectType: "compaction",
@@ -495,7 +569,7 @@ async function emitReasoningText(
     options.parentMessageId = previousEmit?.parentMessageId;
   } else {
     options.messageId = generateRandomId();
-    options.parentMessageId = "-1";
+    options.parentMessageId = request.parentMessageId;
     await emitSdkChunk(request, "", {
       ...options,
       eventType: EventType.REASONING_LOG_START,
@@ -579,22 +653,6 @@ function extractToolStartArgs(data: {
     return "";
   }
   return JSON.stringify(data.args, null, 2);
-}
-
-// 从 message 工具 args 提取要发送给用户的可见文本。字段优先级对齐 core message-tool
-// 的清洗顺序（text/content/message/caption）。
-function extractMessageToolSendText(args: unknown): string {
-  if (!args || typeof args !== "object") {
-    return "";
-  }
-  const record = args as Record<string, unknown>;
-  for (const field of ["text", "content", "message", "caption"]) {
-    const value = stringValue(record[field]);
-    if (value.trim()) {
-      return value;
-    }
-  }
-  return "";
 }
 
 function extractToolResultText(result: unknown): string {

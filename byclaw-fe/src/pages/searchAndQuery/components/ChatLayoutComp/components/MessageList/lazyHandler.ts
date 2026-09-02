@@ -25,6 +25,7 @@ type IType =
 
 const compMap: Record<string, React.LazyExoticComponent<any>> = {
   [`${SSEMessageType.text}`]: lazy(() => import('@/components/MessagesComp/Text')),
+  [`${SSEMessageType.editDiff}`]: lazy(() => import('@/components/MessagesComp/EditDiff')),
 };
 
 class LazyHandler {

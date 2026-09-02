@@ -1,0 +1,156 @@
+.modal {
+  :global {
+    .ant-modal-body {
+      padding-top: 16px;
+    }
+  }
+}
+
+.form {
+  margin-bottom: -8px;
+}
+
+.content {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.8fr);
+  gap: 32px;
+}
+
+.infoColumn,
+.coverColumn {
+  min-width: 0;
+}
+
+.skillTabsHeader {
+  padding: 0 12px;
+  border-bottom: 1px solid #f0f0f0;
+
+  :global {
+    .ant-tabs-nav {
+      margin: 0;
+    }
+
+    .ant-tabs-tab {
+      padding: 12px 0 10px;
+    }
+
+    .ant-tabs-content-holder {
+      display: none;
+    }
+  }
+}
+
+.skillTabCount {
+  margin-left: 6px;
+  color: #8c8c8c;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.skillFieldRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.skillSelectorItem {
+  flex: 1;
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.uploadPersonalSkillButton {
+  flex: none;
+}
+
+.skillMenu {
+  overflow: hidden;
+
+  :global(.ant-select-item-empty) {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    padding: 20px 12px;
+  }
+}
+
+.coverUploader {
+  :global {
+    .ant-upload {
+      height: 380px;
+      min-height: 380px;
+    }
+
+    .ant-upload-drag-container {
+      height: 100%;
+    }
+  }
+}
+
+.coverPlaceholder,
+.coverPreview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 380px;
+  min-height: 380px;
+}
+
+.coverPlaceholder {
+  flex-direction: column;
+  gap: 14px;
+  color: #5f6b7a;
+  font-size: 14px;
+
+  :global(.anticon) {
+    color: #1677ff;
+    font-size: 36px;
+  }
+}
+
+.coverPreview {
+  position: relative;
+  overflow: hidden;
+  background: #f6f8fb;
+
+  img {
+    width: auto;
+    max-width: 100%;
+    height: auto;
+    max-height: 100%;
+    object-fit: contain;
+  }
+
+  span {
+    position: absolute;
+    right: 12px;
+    bottom: 12px;
+    padding: 6px 10px;
+    color: #fff;
+    font-size: 12px;
+    background: rgb(0 0 0 / 55%);
+    border-radius: 4px;
+  }
+}
+
+@media screen and (max-width: 760px) {
+  .content {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  .coverUploader {
+    :global(.ant-upload) {
+      height: 220px;
+      min-height: 220px;
+    }
+  }
+
+  .coverPlaceholder,
+  .coverPreview {
+    height: 220px;
+    min-height: 220px;
+  }
+}

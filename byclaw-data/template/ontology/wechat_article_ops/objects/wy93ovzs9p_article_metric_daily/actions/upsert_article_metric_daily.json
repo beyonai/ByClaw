@@ -1,0 +1,210 @@
+{
+  "action_code": "upsert_article_metric_daily",
+  "action_name": "写入或更新文章每日指标",
+  "action_type": "OPERATION",
+  "action_desc": "按 (article_id,stat_date) 业务键写入/更新每日全量指标；按 §5 公式在保存前重新计算并覆盖 open_rate/share_rate/follow_rate/virality_factor",
+  "permission_roles": [
+    "ops",
+    "admin"
+  ],
+  "params": [
+    {
+      "paramCode": "projectId",
+      "paramName": "项目ID",
+      "type": "string",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
+      "paramCode": "account_code",
+      "paramName": "公众号编码",
+      "type": "string",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
+      "paramCode": "account_name",
+      "paramName": "公众号名称",
+      "type": "string",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
+      "paramCode": "article_id",
+      "paramName": "文章ID",
+      "type": "integer",
+      "isRequired": true,
+      "direction": "input",
+      "term_type_code": "wy93ovzs9p_article_title",
+      "term_data_type": "LIST_TERM"
+    },
+    {
+      "paramCode": "stat_date",
+      "paramName": "统计日期（YYYY-MM-DD）",
+      "type": "date",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
+      "paramCode": "read_count",
+      "paramName": "阅读人数",
+      "type": "integer",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "avg_stay_sec",
+      "paramName": "平均停留秒数",
+      "type": "integer",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "finish_rate",
+      "paramName": "完读率",
+      "type": "number",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "new_follow_count",
+      "paramName": "新增关注人数",
+      "type": "integer",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "share_count",
+      "paramName": "分享人数",
+      "type": "integer",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "wow_count",
+      "paramName": "在看人数",
+      "type": "integer",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "like_count",
+      "paramName": "点赞人数",
+      "type": "integer",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "favorite_count",
+      "paramName": "收藏人数",
+      "type": "integer",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "comment_count",
+      "paramName": "留言数",
+      "type": "integer",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "deliver_count",
+      "paramName": "消息送达人数",
+      "type": "integer",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "msg_read_count",
+      "paramName": "直接阅读人数",
+      "type": "integer",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "share_driven_read",
+      "paramName": "分享带来的阅读人数",
+      "type": "integer",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "source_batch_id",
+      "paramName": "数据导入批次ID",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "metric_rule_version",
+      "paramName": "指标规则版本",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "success",
+      "paramName": "是否成功",
+      "type": "boolean",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "operation",
+      "paramName": "操作类型",
+      "type": "string",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "id",
+      "paramName": "记录ID",
+      "type": "integer",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "open_rate",
+      "paramName": "打开率（计算后）",
+      "type": "number",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "share_rate",
+      "paramName": "分享率（计算后）",
+      "type": "number",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "follow_rate",
+      "paramName": "涨粉率（计算后）",
+      "type": "number",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "virality_factor",
+      "paramName": "裂变系数（计算后）",
+      "type": "number",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "error",
+      "paramName": "错误描述",
+      "type": "string",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "code",
+      "paramName": "错误码",
+      "type": "string",
+      "isRequired": false,
+      "direction": "output"
+    }
+  ]
+}

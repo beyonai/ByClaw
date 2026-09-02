@@ -213,6 +213,7 @@ public class IndexApplicationServiceV2 {
             case AGENT_TYPE_QA -> "digemployee.tag.agent.qa";
             case AGENT_TYPE_DEBUG -> "digemployee.tag.agent.debug";
             case AGENT_TYPE_CODE -> "digemployee.tag.agent.code";
+            case AGENT_TYPE_GROUP -> "digemployee.tag.agent.group";
         };
     }
 
@@ -339,18 +340,58 @@ public class IndexApplicationServiceV2 {
      * @return 数字员工分页信息
      */
     public PageInfo<DigitEmployMarketVo> discover(DiscoverQo discoverQo) {
+        prepareDiscoverQo(discoverQo);
 
+        Page<DigitEmployMarketVo> page = PageHelper.startPage(discoverQo.getPageNum(), discoverQo.getPageSize());
+        List<DigitEmployMarketExtVo> discoverList = indexService.discover(discoverQo);
+
+        enrichDiscoverList(discoverList);
+
+        return PageHelperUtil.toPageInfo(page);
+    }
+
+    /**
+     * 查询当前账号下可用的数字员工列表（我创建的 或 红名单授权给我的），不分页，全量返回。
+     * <p>
+     * 复用 discover 的查询/回填逻辑，仅通过 mineOnly 标志收敛可见范围，且不调用 PageHelper，原发现页接口行为不受影响。
+     * </p>
+     *
+     * @param discoverQo 发现页查询条件
+     * @return 数字员工列表（全量）
+     */
+    public List<DigitEmployMarketVo> discoverMine(DiscoverQo discoverQo) {
+        // 仅查询当前账号下可用的数字员工：我创建的 或 红名单授权给我的
+        discoverQo.setMineOnly(Boolean.TRUE);
+        prepareDiscoverQo(discoverQo);
+
+        // 不分页：不调用 PageHelper.startPage，直接全量查询
+        List<DigitEmployMarketExtVo> discoverList = indexService.discover(discoverQo);
+        enrichDiscoverList(discoverList);
+
+        return new ArrayList<DigitEmployMarketVo>(discoverList);
+    }
+
+    /**
+     * discover 系列查询的公共前置准备：发布组织范围、目录展开、当前用户授权上下文。
+     *
+     * @param discoverQo 发现页查询条件
+     */
+    private void prepareDiscoverQo(DiscoverQo discoverQo) {
         // 设置过滤的组织发布范围
         discoverQo.setPublishOrgIds(this.getPublishOrgIds(discoverQo.getOrgFilters()));
         fillCatalogIds(discoverQo);
 
         // 设置用户信息
         resourceAuthContextService.setCurrentUserAuthQo(discoverQo);
+    }
 
-        Page<DigitEmployMarketVo> page = PageHelper.startPage(discoverQo.getPageNum(), discoverQo.getPageSize());
-        List<DigitEmployMarketExtVo> discoverList = indexService.discover(discoverQo);
-
-        Map<Long, DigitEmployMarketVo> digitEmployMarketVoMap = new HashMap<>(10);
+    /**
+     * 对 discover 查询结果统一回填权限状态、运行时标签、统计信息和管理者信息。
+     *
+     * @param discoverList 发现页查询结果
+     */
+    private void enrichDiscoverList(List<DigitEmployMarketExtVo> discoverList) {
+        Map<Long, DigitEmployMarketVo> digitEmployMarketVoMap = new HashMap<>(discoverList.size());
 
         for (DigitEmployMarketExtVo digitEmployMarketVo : discoverList) {
             // 设置权限状态
@@ -378,9 +419,6 @@ public class IndexApplicationServiceV2 {
             this.setManPriv(digitEmployMarketVo, manPrivVos);
 
         }
-
-        return PageHelperUtil.toPageInfo(page);
-
     }
 
     private void fillCatalogIds(DiscoverQo discoverQo) {

@@ -1,5 +1,6 @@
 import type { z } from "zod";
 import type { ByaiChannelConfigSchema, ByaiSdkConfigSchema } from "./config-schema.js";
+import type { ConnectorAuthorizationMap } from "./connector-authorization.js";
 
 export type ByaiChannelConfig = z.infer<typeof ByaiChannelConfigSchema>;
 export type ByaiSdkConfig = z.infer<typeof ByaiSdkConfigSchema>;
@@ -49,6 +50,10 @@ export interface ByaiLaneMetadata {
 /** SDK 模式入站消息（来自 Redis） */
 export interface ByaiSdkInboundMessage {
   messageId: string;
+  /** Parent command message id used to preserve cross-worker callAgent nesting. */
+  parentMessageId?: string;
+  /** True when this request was delegated by another agent rather than started by the user. */
+  delegatedAgentCall?: boolean;
   sessionId: string;
   userId: string;
   text: string;
@@ -64,6 +69,8 @@ export interface ByaiSdkInboundMessage {
   languageProvided: boolean;
   /** Optional `metadata.channelExtension` from gateway (object or string). */
   channelExtension?: Record<string, unknown> | string;
+  /** Per-conversation connector skill authorization from `metadata.authConnectorList`. */
+  authConnectorList?: ConnectorAuthorizationMap;
   beyondToken?: string;
   laneMetadata?: ByaiLaneMetadata;
 }

@@ -105,6 +105,10 @@ export function backendInstanceBaseUrl(instance: BackendServiceInstance): string
 }
 
 export async function discoverBackendBaseUrl(params: { logger?: LoggerLike } = {}): Promise<string> {
+  const execEnvBaseUrl = process.env.BYAI_SERVICE_BASE_URL?.trim();
+  if (execEnvBaseUrl) {
+    return execEnvBaseUrl.replace(/\/+$/g, "");
+  }
   const explicit = process.env.BAIYING_WORKSPACE_ARCHIVE_BASE_URL?.trim();
   if (explicit) {
     return explicit.replace(/\/+$/g, "");
@@ -141,4 +145,11 @@ export async function discoverBackendBaseUrl(params: { logger?: LoggerLike } = {
   } finally {
     await redis.quit().catch(() => undefined);
   }
+}
+
+export async function resolveBackendServiceExecEnv(
+  params: { logger?: LoggerLike } = {},
+): Promise<Record<string, string>> {
+  const baseUrl = await discoverBackendBaseUrl(params);
+  return baseUrl ? { BYAI_SERVICE_BASE_URL: baseUrl } : {};
 }

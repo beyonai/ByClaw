@@ -4,13 +4,14 @@ The first reader of this CLI is an agent, not a human. Every subcommand returns 
 
 This reference is for **driving a live browser** to accomplish an agent task. If you are building a reusable adapter under `~/.bycli/clis/<site>/` see [adapter-author.md](./adapter-author.md) instead.
 
-> **浏览器生命周期（冷启动 / 资源所有权 / 关闭 / Login 例外）** 已在 [SKILL.md](../SKILL.md) 主文件中详述，此处不重复。本文件聚焦命令参考和操作细节。
+> **浏览器生命周期（冷启动 / 关闭 / Login 例外 / Kill-all-Chrome）** 已在 [SKILL.md](../SKILL.md) 主文件中详述，此处不重复。本文件聚焦命令参考和操作细节。
 
 ---
 
 ## Session 补充说明
 
 - `bycli browser *` commands require a `<session>` positional immediately after `browser`. Use the same session name for a multi-step flow; use a different name to isolate parallel browser work.
+- This guidance applies only to the raw browser surface. The Adapter surface uses the separate `--adapter-session` contract when structured command help explicitly supports it. A raw browser session with the same text name cannot inspect, focus, navigate, or close an Adapter-managed tab.
 - Owned browser sessions keep a tab lease alive between calls. Release it with `bycli browser <session> close` or let the idle timeout expire.
 - `bycli browser <session> bind` binds the Chrome tab you already have open to that session. Use this for logged-in pages, SSO flows, or pages you manually positioned before handing control to the agent.
 - `--window foreground|background` chooses whether byCLI creates/focuses a foreground browser window or uses a background one.
@@ -270,7 +271,7 @@ bycli browser hn open "https://news.ycombinator.com" \
 
 ## Recipes
 
-> **冷启动 / 资源所有权 / 关闭流程** 见 [SKILL.md](../SKILL.md) "浏览器生命周期" 章节。
+> **冷启动 / 关闭 / Kill-all-Chrome 流程** 见 [SKILL.md](../SKILL.md) "浏览器生命周期" 章节。
 
 ### Fill a login form
 
@@ -283,9 +284,7 @@ bycli browser login get value 4                    # verify (autocomplete can ea
 bycli browser login click 6                        # submit
 bycli browser login wait selector "[data-testid=account-menu]" --timeout 15000
 bycli browser login state                          # fresh refs on logged-in page
-# If still on login/SSO/MFA, CAPTCHA, anti-bot, or verification page:
-# stop immediately, keep session/TAB/daemon/browser alive, do not inspect or retry,
-# and follow ../SKILL.md "认证、人工验证和 STOP".
+# If still on login page (MFA), keep session alive — don't close.
 ```
 
 ### Pick from a long native dropdown
@@ -354,7 +353,7 @@ bycli browser checkout eval "(() => document.querySelector('input[name=cardnumbe
 
 ## Pitfalls
 
-> **生命周期相关的 pitfalls**（close 不停 daemon 或 Chromium、永不主动停止 Chrome、cold-start 行为、Login 例外）见 [SKILL.md](../SKILL.md) "浏览器生命周期" 章节。
+> **生命周期相关的 pitfalls**（close 不停 daemon、daemon stop 不停 Chromium、cold-start 行为、Login 例外）见 [SKILL.md](../SKILL.md) "浏览器生命周期" 章节。
 
 - **Do not submit forms via `eval "document.forms[0].submit()"`.** Modern sites intercept with JS handlers and silently drop. Use `click` on the submit button.
 - **Do not reuse refs across a page transition.** `wait` for new state, then re-`state`. Old refs will 404 or `reidentify` onto a wrong element.
@@ -370,7 +369,7 @@ bycli browser checkout eval "(() => document.querySelector('input[name=cardnumbe
 
 | symptom | fix |
 |---------|-----|
-| `bycli doctor` red: "Browser not connected" | 见 SKILL.md 冷启动流程：先执行 `openclaw browser --browser-profile openclaw status`；仅明确未运行时启动，优先使用存在且可执行的 `/usr/local/bin/start-chrome.sh`，否则回退 `openclaw browser --browser-profile openclaw start` |
+| `bycli doctor` red: "Browser not connected" | 见 SKILL.md 冷启动流程：`openclaw browser --browser-profile openclaw start` |
 | `Browser profile "<id>" is not connected` | 同上，Chromium 未运行 |
 | `Extension: connected` but `Connectivity: failed` | Race during cold start. Re-run `bycli doctor` after a few seconds; if persistent, `bycli daemon restart`. |
 | `attach failed: chrome-extension://...` | Disable 1Password / other CDP-hungry extensions temporarily. |
@@ -380,6 +379,7 @@ bycli browser checkout eval "(() => document.querySelector('input[name=cardnumbe
 | `type` appears to finish but value is wrong | Autocomplete, masked input, or React controlled re-render. `get value` + re-type or `keys Enter`. |
 | Giant `get html` output | Pass `--selector` + `--as json --depth 3 --children-max 20 --text-max 200`. |
 | Network cache seems stale | Bump `--ttl` down, or let expire. Cache at `~/.bycli/cache/browser-network/`. |
+| `daemon stop` slow / hangs | Daemon waiting for extension to release CDP socket. Close byCLI-owned tab first (`browser <session> close`), then retry. |
 
 ---
 

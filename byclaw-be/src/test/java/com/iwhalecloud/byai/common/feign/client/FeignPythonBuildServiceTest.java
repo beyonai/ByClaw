@@ -3,10 +3,7 @@ package com.iwhalecloud.byai.common.feign.client;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.common.exception.BaseException;
-import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileDownload;
-import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileToMarkdownIndex;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -34,50 +31,33 @@ class FeignPythonBuildServiceTest {
         FeignPythonBuildService service = new FeignPythonBuildService();
 
         Map<String, String> resourceHeaders = ReflectionTestUtils.invokeMethod(service, "buildHeaders", 10001L);
+        Map<String, String> uploadHeaders = ReflectionTestUtils.invokeMethod(service, "buildUploadHeaders",
+            Map.of(FeignPythonBuildService.RESOURCE_ID_HEADER, "10001"));
         Map<String, String> legacyHeaders = ReflectionTestUtils.invokeMethod(service, "buildHeaders");
 
         assertThat(resourceHeaders).containsEntry(FeignPythonBuildService.RESOURCE_ID_HEADER, "10001");
+        assertThat(uploadHeaders).containsEntry(FeignPythonBuildService.RESOURCE_ID_HEADER, "10001");
         assertThat(legacyHeaders).doesNotContainKey(FeignPythonBuildService.RESOURCE_ID_HEADER);
     }
 
     @Test
-    void localKnowledgeBuild_usesResourceEndpointAndResourcePayload() {
-        FeignPythonBuildService service = new FeignPythonBuildService();
-        KbFileToMarkdownIndex request = new KbFileToMarkdownIndex();
-        request.setKnCode("KB001");
-        request.setFilePath("/docs/a.pdf");
-
-        String path = ReflectionTestUtils.invokeMethod(service, "resolveLocalRequestPath",
-            KnowledgeServiceOperation.KNOWLEDGE_BUILD, 10001L, "/api/v1/fileToMarkdownIndex");
-        Object payload = ReflectionTestUtils.invokeMethod(service, "buildLocalPayload",
-            KnowledgeServiceOperation.KNOWLEDGE_BUILD, 10001L, request);
-
-        assertThat(path).isEqualTo("/api/v1/fileToMarkdownIndexByResourceId");
-        assertThat(payload).isInstanceOf(JSONObject.class);
-        assertThat((JSONObject) payload)
-            .containsEntry("resourceId", 10001L)
-            .containsEntry("filePath", "/docs/a.pdf")
-            .doesNotContainKey("knCode");
-    }
-
-    @Test
-    void localKnowledgeDownload_usesResourceEndpointAndResourcePayload() {
-        FeignPythonBuildService service = new FeignPythonBuildService();
-        KbFileDownload request = new KbFileDownload();
-        request.setKnCode("155");
-        request.setFilePath("/门户设计/api.md");
-
-        String path = ReflectionTestUtils.invokeMethod(service, "resolveLocalRequestPath",
-            KnowledgeServiceOperation.DOWNLOAD_FILE, 11029731L, "/api/v1/downloadFile");
-        Object payload = ReflectionTestUtils.invokeMethod(service, "buildLocalPayload",
-            KnowledgeServiceOperation.DOWNLOAD_FILE, 11029731L, request);
-
-        assertThat(path).isEqualTo("/api/v1/downloadFileByResourceId");
-        assertThat(payload).isInstanceOf(JSONObject.class);
-        assertThat((JSONObject) payload)
-            .containsEntry("resourceId", 11029731L)
-            .containsEntry("filePath", "/门户设计/api.md")
-            .doesNotContainKey("knCode");
+    void resourceCalls_useCanonicalKnowledgeServicePaths() {
+        assertThat(KnowledgeServiceOperation.UPLOAD_FILE.getLocalPath())
+            .isEqualTo("/api/v1/knowledgeItems/import");
+        assertThat(KnowledgeServiceOperation.KNOWLEDGE_BUILD.getLocalPath())
+            .isEqualTo("/api/v1/fileToMarkdownIndex");
+        assertThat(KnowledgeServiceOperation.CREATE_DIR.getLocalPath())
+            .isEqualTo("/api/v1/directories/create");
+        assertThat(KnowledgeServiceOperation.EDIT_DIR.getLocalPath())
+            .isEqualTo("/api/v1/directories/update");
+        assertThat(KnowledgeServiceOperation.DELETE_DIR.getLocalPath())
+            .isEqualTo("/api/v1/directories/delete");
+        assertThat(KnowledgeServiceOperation.LIST_DIR.getLocalPath()).isEqualTo("/api/v1/listDir");
+        assertThat(KnowledgeServiceOperation.READ_FILE.getLocalPath()).isEqualTo("/api/v1/readFile");
+        assertThat(KnowledgeServiceOperation.BUILD_RESULT.getLocalPath()).isEqualTo("/api/v1/buildResult");
+        assertThat(KnowledgeServiceOperation.DOWNLOAD_FILE.getLocalPath()).isEqualTo("/api/v1/downloadFile");
+        assertThat(KnowledgeServiceOperation.KNOWLEDGE_METADATA_SEARCH.getLocalPath())
+            .isEqualTo("/api/v1/knowledgeItems/metadataSearch");
     }
 
     @Test

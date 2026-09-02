@@ -1,27 +1,59 @@
 .layout {
   position: relative;
   flex-direction: row;
-  & > * {
-    border-radius: 12px;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  background: #f7f8fa;
+}
+
+.workspaceSiderExpandButton {
+  position: absolute;
+  z-index: 20;
+  top: 16px;
+  left: 16px;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #000;
+  font-size: 16px;
+  cursor: pointer;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(31, 41, 55, 0.08);
+
+  &:hover {
+    background: #ececeb;
   }
 }
 
+.workspaceSiderExpandIcon {
+  width: 18px;
+  height: 18px;
+  color: #000;
+  transform: rotate(180deg);
+}
+
 .siderBox {
-  background-color: #f4f5fa;
+  background-color: #fff;
 }
 
 .content {
   flex: 1;
-  // margin-left: var(--layout-gap);
   background: #fff;
-  // height: 100vh;
   position: relative;
   overflow: hidden;
-  // width: auto;
   min-width: 0;
-  height: 100%;
+  height: auto;
+  margin: var(--layout-gap);
+  border: 0;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(31, 41, 55, 0.06);
   opacity: 1;
-  // border-right: 0.5px var(--beyond-color-border) solid;
 
   // 默认无动画
   &.opening {
@@ -30,32 +62,39 @@
 
   &.closing {
     animation: drawerClose 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
-    margin-left: 0 !important;
+    margin-left: var(--layout-gap) !important;
+  }
+}
+
+.siderCollapsedContent {
+  &.closing {
+    margin-left: var(--layout-gap) !important;
   }
 }
 
 .detailPanel {
   flex: 1;
   min-width: 0;
-  height: 100%;
-  margin-left: var(--layout-gap);
+  height: auto;
+  margin: var(--layout-gap) var(--layout-gap) var(--layout-gap) 0;
   overflow: hidden;
+  border: 0;
+  border-radius: 12px;
   background: #fff;
+  box-shadow: 0 1px 3px rgba(31, 41, 55, 0.06);
 }
 
 .detailPanelOverlay {
   position: absolute;
   // 覆盖聊天输入框等底部浮层，保证项目渠道配置面板真正盖住右侧会话区。
   z-index: 1000;
-  top: 8px;
-  right: 8px;
-  bottom: 8px;
-  left: calc(56px + var(--sider-content-width) + var(--layout-gap));
-  margin-left: 0;
+  top: var(--layout-gap);
+  right: var(--layout-gap);
+  bottom: var(--layout-gap);
+  left: calc(var(--sider-content-width) + var(--layout-gap));
+  margin: 0;
   width: auto;
   height: auto;
-  border-radius: 12px;
-  box-shadow: 0 8px 24px rgba(28, 48, 90, 0.12);
 }
 
 .dragBox {

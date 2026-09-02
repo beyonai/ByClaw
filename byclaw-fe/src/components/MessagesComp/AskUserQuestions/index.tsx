@@ -4,9 +4,16 @@ import useGlobal from '@/hooks/useGlobal';
 import classnames from 'classnames';
 import { get } from 'lodash';
 import { useIntl } from '@umijs/max';
-import { Button, Checkbox, Input, Radio, Tabs } from 'antd';
+import { Button, Checkbox, Input, Radio } from 'antd';
 import type { InputRef } from 'antd';
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
+import {
+  CheckCircleOutlined,
+  EditOutlined,
+  LeftOutlined,
+  QuestionCircleOutlined,
+  RightOutlined,
+} from '@ant-design/icons';
 import { LayoutMode } from '@/constants/system';
 import withEasyConfirm from '@/components/MessagesComp/withEasyConfirm';
 import Md from '@/components/Preview/Md';
@@ -51,6 +58,7 @@ export type IProps = {
   messageListItemContent: IMessageListItemContent;
   messageListItem?: IMessageListItem;
   thinkListItem?: IMessageListItem;
+  presentation?: 'dock' | 'transcript';
 };
 
 /** 是否视为「有有效 metadata」：空串不应挡住助手消息上的完整 JSON */
@@ -62,9 +70,28 @@ function isUsableRawMetadata(v: unknown): boolean {
   return true;
 }
 
+/** 用户交互恢复必须同时具备 Run 与 Interaction 路由，避免可解析但不完整的 metadata 抢占完整卡片 metadata。 */
+function hasUserInteractionResumeRoute(v: unknown): boolean {
+  let metadata = v;
+  if (typeof metadata === 'string') {
+    try {
+      metadata = JSON.parse(metadata);
+    } catch {
+      return false;
+    }
+  }
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return false;
+
+  const entries = Object.entries(metadata as Record<string, unknown>);
+  const hasNonEmptyString = (key: string) =>
+    entries.some(([candidate, value]) => candidate.toLowerCase() === key && typeof value === 'string' && value.trim());
+  return hasNonEmptyString('parent_run_id') && hasNonEmptyString('interaction_id');
+}
+
 /**
  * 原样透传、不做 JSON 解析。优先本条助手回答上的 metadata（含 LangGraph checkpoint 全量）；
- * 卡片级多为空串或片段，放后面且空串不占优。
+ * 但 askUserQuestion 恢复必须优先选择路由字段完整的候选，防止后发 reasoningLogEnd 的
+ * `{ parent_run_id }` 覆盖消息级 metadata 后挡住卡片上的完整 interaction metadata。
  */
 function pickRawResumeMetadata(
   messageInfo: IMessage | undefined,
@@ -75,11 +102,31 @@ function pickRawResumeMetadata(
     get(messageListItemContent, 'substance.metadata'),
     get(messageListItemContent, 'metadata'),
   ];
+  const routedMetadata = candidates.find(hasUserInteractionResumeRoute);
+  if (routedMetadata !== undefined) {
+    return routedMetadata;
+  }
   for (const v of candidates) {
     if (isUsableRawMetadata(v)) {
       return v;
     }
   }
+  return undefined;
+}
+
+/** 仅解析 JSON 对象，解析失败时保持原有恢复提交链路不受影响。 */
+function parseResumeMetadata(resumeMetadata: unknown): Record<string, unknown> | undefined {
+  if (typeof resumeMetadata !== 'string') return undefined;
+
+  try {
+    const parsedMetadata = JSON.parse(resumeMetadata);
+    if (parsedMetadata && typeof parsedMetadata === 'object' && !Array.isArray(parsedMetadata)) {
+      return parsedMetadata;
+    }
+  } catch {
+    return undefined;
+  }
+
   return undefined;
 }
 
@@ -145,8 +192,14 @@ export function AskUserQuestions(props: IProps) {
   const { updateMessageListItemContent, messageListItemContent, message: messageInfo } = props;
 
   const { sourceAgentType, submitting, formStatus } = messageListItemContent || {};
-  const { questions = [], answers: savedAnswers } = get(messageListItemContent, 'substance') || {};
+  const {
+    questions = [],
+    answers: savedAnswers,
+    formStatus: substanceFormStatus,
+  } = get(messageListItemContent, 'substance') || {};
   const answers = normalizeAnswers(questions, savedAnswers);
+  const effectiveFormStatus = formStatus ?? substanceFormStatus;
+  const isFinished = effectiveFormStatus === IFormStatus.FINISH;
   const isAskUserQuestion = questions.length > 0;
   const allQuestionsAnswered =
     isAskUserQuestion && answers.every((answer) => getEffectiveSelectedOptions(answer).length > 0);
@@ -156,11 +209,39 @@ export function AskUserQuestions(props: IProps) {
   const intl = useIntl();
   const { EventEmitter, layoutMode } = useGlobal();
   const otherInputRefs = useRef<Record<number, InputRef | null>>({});
+  const getQuestionKey = (question: IAskUserQuestion, index: number) => `${question.header}-${index}`;
+  const [activeQuestionKey, setActiveQuestionKey] = useState(() =>
+    questions[0] ? getQuestionKey(questions[0], 0) : undefined
+  );
+  const activeQuestionIndex = Math.max(
+    questions.findIndex((question, index) => getQuestionKey(question, index) === activeQuestionKey),
+    0
+  );
 
   const isPreviewMode = layoutMode === LayoutMode.preview;
   const isThinkingProcess = !!props.thinkListItem;
   const updateField = isThinkingProcess ? 'inferLog' : 'messageStruct';
-  const isDisabled = formStatus === IFormStatus.FINISH || isPreviewMode || submitting;
+  const isDisabled = messageInfo.isHistoryMsg || isFinished || isPreviewMode || submitting;
+
+  if (props.presentation !== 'dock') {
+    if (!isFinished) return null;
+
+    return (
+      <section className={styles.answerSummary} aria-label={intl.formatMessage({ id: 'messageList.askUser.answered' })}>
+        <span className={styles.summaryIcon} aria-hidden="true">
+          <CheckCircleOutlined />
+        </span>
+        <div className={styles.summaryBody}>
+          {questions.map((question, index) => (
+            <div className={styles.summaryRow} key={getQuestionKey(question, index)}>
+              <span className={styles.summaryQuestion}>{question.question}</span>
+              <span className={styles.summaryAnswer}>{getEffectiveSelectedOptions(answers[index]).join('、')}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+    );
+  }
 
   const updateAnswer = (questionIndex: number, answerPatch: Partial<IAskUserQuestionAnswer>) => {
     const nextAnswers = answers.map((answer, index) => {
@@ -194,17 +275,24 @@ export function AskUserQuestions(props: IProps) {
 
     return (
       <div className={styles.optionList}>
-        {question.options.map((option) => {
+        {question.options.map((option, optionIndex) => {
+          const isSelected = selectedOptions.includes(option.label);
           const optionContent = (
             <div className={styles.optionContent}>
-              <div className={styles.optionLabel}>{option.label}</div>
+              <div className={styles.optionHeading}>
+                <span className={styles.optionIndex}>{optionIndex + 1}</span>
+                <span className={styles.optionLabel}>{option.label}</span>
+              </div>
               {option.description ? <div className={styles.optionDescription}>{option.description}</div> : null}
             </div>
           );
 
           if (question.multiSelect) {
             return (
-              <label className={styles.optionItem} key={option.label}>
+              <label
+                className={classnames(styles.optionItem, { [styles.optionSelected]: isSelected })}
+                key={option.label}
+              >
                 <Checkbox
                   checked={selectedOptions.includes(option.label)}
                   disabled={isDisabled}
@@ -221,7 +309,10 @@ export function AskUserQuestions(props: IProps) {
           }
 
           return (
-            <label className={styles.optionItem} key={option.label}>
+            <label
+              className={classnames(styles.optionItem, { [styles.optionSelected]: isSelected })}
+              key={option.label}
+            >
               <Radio
                 checked={selectedOptions[0] === option.label}
                 disabled={isDisabled}
@@ -230,6 +321,10 @@ export function AskUserQuestions(props: IProps) {
                     selectedOptions: [option.label],
                     otherSelected: false,
                   });
+                  const nextQuestion = questions[questionIndex + 1];
+                  if (nextQuestion) {
+                    setActiveQuestionKey(getQuestionKey(nextQuestion, questionIndex + 1));
+                  }
                 }}
               />
               {optionContent}
@@ -237,7 +332,9 @@ export function AskUserQuestions(props: IProps) {
           );
         })}
         <div
-          className={classnames(styles.optionItem, styles.otherOption)}
+          className={classnames(styles.optionItem, styles.otherOption, {
+            [styles.optionSelected]: otherSelected,
+          })}
           role="button"
           tabIndex={isDisabled ? -1 : 0}
           onClick={selectOther}
@@ -271,7 +368,12 @@ export function AskUserQuestions(props: IProps) {
             />
           )}
           <div className={styles.optionContent}>
-            <div className={styles.optionLabel}>{intl.formatMessage({ id: 'resource.other' })}</div>
+            <div className={styles.optionHeading}>
+              <span className={classnames(styles.optionIndex, styles.otherIndex)}>
+                <EditOutlined />
+              </span>
+              <span className={styles.optionLabel}>{intl.formatMessage({ id: 'resource.other' })}</span>
+            </div>
             <Input
               ref={(input) => {
                 otherInputRefs.current[questionIndex] = input;
@@ -294,43 +396,67 @@ export function AskUserQuestions(props: IProps) {
     );
   };
 
-  let questionContent = null;
-  if (questions.length > 1) {
-    questionContent = (
-      <Tabs
-        items={questions.map((question, index) => ({
-          key: `${question.header}-${index}`,
-          label: (
-            <div className={styles.questionMarkdown}>
-              <Md content={question.question} />
-            </div>
-          ),
-          children: renderQuestionOptions(question, index),
-        }))}
-      />
-    );
-  } else if (questions[0]) {
-    questionContent = (
-      <div className={styles.singleQuestion}>
-        <div className={classnames(styles.questionTitle, styles.questionMarkdown)}>
-          <Md content={questions[0].question} />
-        </div>
-        {renderQuestionOptions(questions[0], 0)}
-      </div>
-    );
-  }
+  const activeQuestion = questions[activeQuestionIndex];
+  const activeAnswer = answers[activeQuestionIndex];
+  const activeQuestionAnswered = activeAnswer && getEffectiveSelectedOptions(activeAnswer).length > 0;
 
   return (
-    <div className={classnames(styles.thinkTaskUserInput, 'ub ub-ac')}>
-      <div className={classnames('ub-f1', styles.questionForm)}>
-        {questionContent}
-        <div className="ub ub-pe ub-ac">
+    <section className={styles.questionDock} aria-label={intl.formatMessage({ id: 'messageList.askUser.title' })}>
+      <header className={styles.dockHeader}>
+        <span className={styles.eyebrow}>
+          <QuestionCircleOutlined />
+          {intl.formatMessage({ id: 'messageList.askUser.title' })}
+        </span>
+        {questions.length > 1 ? (
+          <span className={styles.questionProgress}>
+            {activeQuestionIndex + 1} / {questions.length}
+          </span>
+        ) : null}
+      </header>
+      <div className={styles.questionForm}>
+        {activeQuestion ? (
+          <div className={styles.singleQuestion}>
+            <div className={classnames(styles.questionTitle, styles.questionMarkdown)}>
+              <Md content={activeQuestion.question} />
+            </div>
+            {renderQuestionOptions(activeQuestion, activeQuestionIndex)}
+          </div>
+        ) : null}
+        <footer className={styles.formFooter}>
+          <div className={styles.questionNav}>
+            {questions.length > 1 ? (
+              <>
+                <Button
+                  type="text"
+                  icon={<LeftOutlined />}
+                  aria-label={intl.formatMessage({ id: 'messageList.askUser.previous' })}
+                  disabled={activeQuestionIndex === 0}
+                  onClick={() => {
+                    const previousIndex = activeQuestionIndex - 1;
+                    setActiveQuestionKey(getQuestionKey(questions[previousIndex], previousIndex));
+                  }}
+                />
+                <Button
+                  type="text"
+                  icon={<RightOutlined />}
+                  aria-label={intl.formatMessage({ id: 'messageList.askUser.next' })}
+                  disabled={activeQuestionIndex === questions.length - 1 || !activeQuestionAnswered}
+                  onClick={() => {
+                    const nextIndex = activeQuestionIndex + 1;
+                    setActiveQuestionKey(getQuestionKey(questions[nextIndex], nextIndex));
+                  }}
+                />
+              </>
+            ) : null}
+          </div>
           <Button
             type="primary"
+            className={styles.confirmButton}
             loading={submitting}
             disabled={isDisabled || (isAskUserQuestion && !allQuestionsAnswered)}
             onClick={async () => {
               const resumeMetadata = pickRawResumeMetadata(messageInfo, messageListItemContent);
+              const parsedResumeMetadata = parseResumeMetadata(resumeMetadata);
               const submittedAnswers = prepareAnswersForSubmit(answers);
               const finishedContent: IMessageListItemContent = {
                 ...messageListItemContent,
@@ -369,6 +495,9 @@ export function AskUserQuestions(props: IProps) {
               };
               if (resumeMetadata !== undefined) {
                 payload.metadata = resumeMetadata;
+              }
+              if (parsedResumeMetadata && Object.prototype.hasOwnProperty.call(parsedResumeMetadata, 'agentId')) {
+                payload.agentId = parsedResumeMetadata.agentId;
               }
 
               try {
@@ -410,13 +539,11 @@ export function AskUserQuestions(props: IProps) {
               }
             }}
           >
-            {formStatus === IFormStatus.FINISH
-              ? intl.formatMessage({ id: 'form.completed' })
-              : intl.formatMessage({ id: 'form.confirm' })}
+            {isFinished ? intl.formatMessage({ id: 'form.completed' }) : intl.formatMessage({ id: 'form.confirm' })}
           </Button>
-        </div>
+        </footer>
       </div>
-    </div>
+    </section>
   );
 }
 

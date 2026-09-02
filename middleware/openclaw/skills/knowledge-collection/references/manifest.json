@@ -1,0 +1,38 @@
+{
+  "name": "knowledge-collection-references",
+  "description": "knowledge-collection 的按需加载工作流、来源桥接、采集契约与交付边界索引。",
+  "skills": [
+    {
+      "name": "site-crawl",
+      "path": "site-crawl/SKILL.md",
+      "description": "站点文档爬取与产品解读报告。sitemap/llms.txt 发现 URL + frontier 维护覆盖面,取内容仍委派 bycli。嵌在深化研究的抓取环节。"
+    }
+  ],
+  "references": [
+    {
+      "name": "agent-reach",
+      "path": "agent-reach.md",
+      "description": "公共互联网来源路由表与 bycli 网页铁律。取内容前必读。"
+    },
+    {
+      "name": "research-methodology",
+      "path": "research-methodology.md",
+      "description": "递归树状深化研究方法论(默认模式)。"
+    },
+    {
+      "name": "collection-contract",
+      "path": "collection-contract.md",
+      "description": "session.json 采集状态契约与可照抄的 init/collect payload。"
+    },
+    {
+      "name": "delivery",
+      "path": "delivery.md",
+      "description": "只交付已验证 sanitized/items Markdown 的终止边界。"
+    },
+    {
+      "name": "online-search",
+      "path": "online-search.md",
+      "description": "腾讯 WSA 主用、SearXNG 通道级故障降级的公共网页 URL 发现。"
+    }
+  ]
+}

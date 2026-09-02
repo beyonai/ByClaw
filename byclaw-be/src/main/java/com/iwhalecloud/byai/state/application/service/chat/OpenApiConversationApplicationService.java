@@ -18,6 +18,7 @@ import com.iwhalecloud.byai.state.domain.session.qo.ConversationAppendTxtQo;
 import com.iwhalecloud.byai.state.domain.session.qo.ConversationReadQo;
 import com.iwhalecloud.byai.state.domain.session.qo.ConversationWriteTxtQo;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
+import com.iwhalecloud.byai.state.domain.session.service.SessionTitleService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.state.domain.template.enums.DebugModeEnum;
 import org.apache.commons.lang3.StringUtils;
@@ -53,6 +54,9 @@ public class OpenApiConversationApplicationService {
 
     @Autowired
     private SessionService sessionService;
+
+    @Autowired
+    private SessionTitleService sessionTitleService;
 
     @Autowired
     private SequenceService sequenceService;
@@ -293,6 +297,9 @@ public class OpenApiConversationApplicationService {
      * @return ByaiSession
      */
     public ByaiSession updateSession(ByaiSession updateSession) {
+        if (StringUtils.isNotBlank(updateSession.getSessionName())) {
+            sessionTitleService.cancelInitialTitle(updateSession.getSessionId());
+        }
         ByaiSession session = sessionService.findById(updateSession.getSessionId());
         session.setUpdateTime(new Date());
         session.setUpdateBy(CurrentUserHolder.getCurrentUserId());

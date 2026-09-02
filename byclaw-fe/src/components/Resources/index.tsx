@@ -1,8 +1,17 @@
 import React, { useCallback, useContext, useState, useEffect, useRef } from 'react';
-import { UploadOutlined, SearchOutlined, PlusOutlined, FullscreenOutlined } from '@ant-design/icons';
-import { useIntl, useSelector, useNavigate, useSearchParams } from '@umijs/max';
+import {
+  CheckOutlined,
+  DownloadOutlined,
+  DownOutlined,
+  FullscreenOutlined,
+  LeftOutlined,
+  PlusOutlined,
+  SearchOutlined,
+  UploadOutlined,
+} from '@ant-design/icons';
+import { useIntl, useLocation, useSelector, useNavigate, useSearchParams } from '@umijs/max';
 import type { TabsProps } from 'antd';
-import { Button, Empty, Input, Space, Spin, Tooltip, message, Tabs } from 'antd';
+import { Button, Dropdown, Empty, Input, Space, Spin, Tooltip, message, Tabs } from 'antd';
 import classnames from 'classnames';
 import AntdIcon from '@/components/AntdIcon';
 import useModuleEvent from '@/hooks/useModuleEvent';
@@ -17,9 +26,11 @@ import {
   queryResourceOperationPermissions,
   type FixedEntryOperationCapability,
 } from '@/pages/manager/service/resources';
+import type { SkillGroup } from '@/pages/manager/service/resources';
 import { getDcSystemConfig } from '@/pages/manager/service/session';
 import ResourceEdit from './components/ResourceEdit';
 import ResourceImport from './components/ResourceImport';
+import SkillGroupCreateModal from './components/SkillGroupCreateModal';
 import ResourceDetail from './components/ResourceDetail';
 import AuthListDrawer from '@/pages/manager/components/AuthListDrawer';
 import UseApplyAuditDrawer from '@/pages/manager/components/UseApplyAuditDrawer';
@@ -29,11 +40,13 @@ import { useSkillDetailDrawer } from '@/pages/manager/components/SkillDetailDraw
 import ResourceFilter from './components/ResourceFilter';
 import { getDefaultParams } from './components/ResourceFilter';
 import ResourceList from './components/ResourceList';
+import SkillGroupList from './components/SkillGroupList';
 import { saveTool } from '@/pages/manager/service/DigitalEmployeeMgr';
 import { resourceBizTypeMap } from '@/constants/knowledge';
 import { SiderContentContext } from '@/layout/sider/siderContentContext';
 import useGlobal from '@/hooks/useGlobal';
-import { getToken } from '@/utils/auth';
+import type { IState as IEmployeesState } from '@/models/useEmployees';
+import { getToken, isAdminVip } from '@/utils/auth';
 import { get, trim, intersection, isEmpty } from 'lodash';
 import { buildSkillMarketplaceUrl, isSkillMarketplaceInstalledMessage } from './utils';
 import styles from './index.module.less';
@@ -69,10 +82,13 @@ interface IResourceItem {
   syncStatus?: string;
   syncError?: string;
   lastSyncTime?: string;
+  ownerType?: string;
 }
 
 interface Props {
   resourceType: string; // 对应资源类型
+  installedOnly?: boolean;
+  onInstalledOnlyChange?: (installedOnly: boolean) => void;
 }
 
 const getBannerUrl = (bannerList: any[], labels: string | string[]) => {
@@ -98,7 +114,7 @@ const parseBannerList = (value: any) => {
   }
 };
 
-const Resources: React.FC<Props> = ({ resourceType }) => {
+const Resources: React.FC<Props> = ({ resourceType, installedOnly = false, onInstalledOnlyChange }) => {
   const intl = useIntl();
   const { EventEmitter, agentId, agentInfo } = useGlobal();
 
@@ -115,22 +131,29 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
   const knowledgeCapabilityDisabledTip = intl.formatMessage({ id: 'resource.thirdPartyKnowledgeBaseMode' });
   const noPermissionDisabledTip = intl.formatMessage({ id: 'common.noPermissionOperation' });
   const navigate = useNavigate();
+  const location = useLocation();
   const { placeholder: skillDetailDrawerHolder, show: showSkillDetailDrawer } = useSkillDetailDrawer();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [importModalOpen, setImportModalOpen] = useState(false);
+  const [skillGroupCreateModalOpen, setSkillGroupCreateModalOpen] = useState(false);
+  const [skillGroupEditing, setSkillGroupEditing] = useState<SkillGroup | null>(null);
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [detailPanelOpen, setDetailPanelOpen] = useState(false);
   const [currentItem, setCurrentItem] = useState<IResourceItem | null>(null);
   const [catalogId, setCatalogId] = useState<string>('');
   const [searchValue, setSearchValue] = useState('');
   const [debouncedSearchValue, setDebouncedSearchValue] = useState('');
+  const [enterpriseSkillDropdownOpen, setEnterpriseSkillDropdownOpen] = useState(false);
   const [catalogList, setCatalogList] = useState<
     Array<{ catalogId: string | number; catalogName: string; pcatalogId?: string | number }>
   >([]);
 
-  type ResourceTab = 'personal' | 'enterprise' | 'marketplace';
+  type ResourceTab = 'personal' | 'enterprise' | 'marketplace' | 'installed';
   const defaultTab = (): ResourceTab => {
+    if (installedOnly) {
+      return 'installed';
+    }
     const tabFromUrl = searchParams.get('tab');
     if (
       tabFromUrl === 'enterprise' ||
@@ -143,6 +166,9 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
   };
 
   const [activeTab, setActiveTab] = useState<ResourceTab>(defaultTab());
+  const enterpriseSkillKind = searchParams.get('kind') === 'group' ? 'group' : 'skill';
+  const isEnterpriseSkillGroupMode =
+    resourceType === 'SKILL' && activeTab === 'enterprise' && enterpriseSkillKind === 'group';
   const marketplaceRef = useRef<HTMLDivElement>(null);
   const marketplaceIframeRef = useRef<HTMLIFrameElement>(null);
   const [skillMarketplaceBaseUrl, setSkillMarketplaceBaseUrl] = useState('');
@@ -150,6 +176,12 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
   const { setDetailPanel, clearDetailPanel } = useContext(SiderContentContext);
 
   useEffect(() => {
+    if (installedOnly) {
+      if (activeTab !== 'installed') {
+        setActiveTab('installed');
+      }
+      return;
+    }
     const tabFromUrl = searchParams.get('tab');
     if (
       (tabFromUrl === 'enterprise' ||
@@ -159,21 +191,38 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
     ) {
       setActiveTab(tabFromUrl);
     }
-  }, [activeTab, searchParams]);
+  }, [activeTab, installedOnly, resourceType, searchParams]);
+
+  useEffect(() => {
+    if (!installedOnly && activeTab === 'installed') {
+      const tabFromUrl = searchParams.get('tab');
+      setActiveTab(
+        tabFromUrl === 'enterprise' ||
+          tabFromUrl === 'personal' ||
+          (resourceType === 'SKILL' && tabFromUrl === 'marketplace')
+          ? tabFromUrl
+          : 'personal'
+      );
+    }
+  }, [activeTab, installedOnly, resourceType, searchParams]);
 
   const { logoutModuleEvent } = useModuleEvent('KNOWLEDGE_CENTER');
 
-  const { userInfo, defaultDigEmployeeId } = useSelector(({ user, employees }: any) => ({
-    userInfo: user?.userInfo,
-    defaultDigEmployeeId: employees?.defaultDigEmployeeId,
-  }));
+  const { userInfo, defaultDigEmployeeId } = useSelector(
+    ({ user, employees }: { user: any; employees: IEmployeesState }) => ({
+      userInfo: user?.userInfo,
+      defaultDigEmployeeId: employees.defaultDigEmployeeId,
+    })
+  );
+  // 企业技能组浏览需要当前生效的数字员工，取值顺序与 ResourceList/ResourceCard 保持一致，
+  // 否则同一页面内技能组与技能列表会落到不同员工。
   const activeDigitalEmployeeId =
     agentId || agentInfo?.agentId || defaultDigEmployeeId || userInfo?.defaultDigEmployeeId;
   const portalOrigin = typeof window === 'undefined' ? undefined : window.location.origin;
   const beyondToken = getToken();
   const skillMarketplaceUrl = React.useMemo(
-    () => buildSkillMarketplaceUrl(skillMarketplaceBaseUrl, activeDigitalEmployeeId, beyondToken, portalOrigin),
-    [activeDigitalEmployeeId, beyondToken, portalOrigin, skillMarketplaceBaseUrl]
+    () => buildSkillMarketplaceUrl(skillMarketplaceBaseUrl, beyondToken, portalOrigin),
+    [beyondToken, portalOrigin, skillMarketplaceBaseUrl]
   );
   const usersOrganizations = get(userInfo, 'usersOrganizations') || [];
   const userTypeList = usersOrganizations.map((item: any) => item.userType);
@@ -214,7 +263,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
       if (event.origin !== marketplaceOrigin || event.source !== marketplaceIframeRef.current?.contentWindow) {
         return;
       }
-      if (!isSkillMarketplaceInstalledMessage(event.data, activeDigitalEmployeeId)) {
+      if (!isSkillMarketplaceInstalledMessage(event.data)) {
         return;
       }
       notifySiderResourceListReload();
@@ -224,7 +273,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
     return () => {
       window.removeEventListener('message', handleSkillMarketplaceMessage);
     };
-  }, [activeDigitalEmployeeId, notifySiderResourceListReload, resourceType, skillMarketplaceUrl]);
+  }, [notifySiderResourceListReload, resourceType, skillMarketplaceUrl]);
 
   useEffect(() => {
     if (resourceType !== 'SKILL') {
@@ -280,7 +329,8 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
         setDebouncedSearchValue('');
         setDropdownParam(getDefaultParams());
         setActiveTab('personal');
-        setSearchParams(nextSearchParams);
+        // 中心页内部筛选只更新查询参数，需保留从右侧资源面板带来的返回位置和面板保持状态。
+        setSearchParams(nextSearchParams, { state: location.state });
       }
       refreshList();
     };
@@ -289,7 +339,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
     return () => {
       EventEmitter.off('beyond-resourceList-resourceType-reload', handleResourceTypeReload);
     };
-  }, [EventEmitter, refreshList, resourceType, searchParams, setSearchParams]);
+  }, [EventEmitter, location.state, refreshList, resourceType, searchParams, setSearchParams]);
 
   // 防抖定时器
   const debounceTimer = useRef<NodeJS.Timeout | null>(null);
@@ -454,7 +504,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
         if (resourceSourcePkId) {
           params.set('resourceSourcePkId', resourceSourcePkId);
         }
-        params.set('fromTab', activeTab);
+        params.set('fromTab', item.ownerType || activeTab);
         navigate(`/knowledgeDetail?${params.toString()}`);
         return;
       }
@@ -507,17 +557,30 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
     setUseApplyAuditOpen(true);
   };
 
+  const handleEnterpriseSkillKindChange = (kind: 'skill' | 'group') => {
+    const nextSearchParams = new URLSearchParams(searchParams);
+    nextSearchParams.set('tab', 'enterprise');
+    nextSearchParams.set('kind', kind);
+    setActiveTab('enterprise');
+    setCatalogId('');
+    setSearchValue('');
+    setDebouncedSearchValue('');
+    setDropdownParam(getDefaultParams());
+    setSearchParams(nextSearchParams, { state: location.state });
+  };
   const tabBarExtraContent = (
     <Space>
-      <ResourceFilter
-        resourceType={resourceType}
-        onOk={(param: any) => {
-          setDropdownParam(param);
-          // 刷新逻辑由ResourceList组件内部处理
-        }}
-        defaultParam={dropdownParam}
-        activeTab={activeTab}
-      />
+      {!isEnterpriseSkillGroupMode && (
+        <ResourceFilter
+          resourceType={resourceType}
+          onOk={(param: any) => {
+            setDropdownParam(param);
+            // 刷新逻辑由ResourceList组件内部处理
+          }}
+          defaultParam={dropdownParam}
+          activeTab={activeTab}
+        />
+      )}
       <Input
         className={styles.searchInput}
         placeholder={intl.formatMessage({ id: 'common.inputKeyword' })}
@@ -540,7 +603,10 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
         }}
       />
 
-      {brandVersion === 'openSource' && resourceType === 'KG_DOC' && (activeTab === 'personal' || isAdmin) && (
+      {!installedOnly &&
+        brandVersion === 'openSource' &&
+        resourceType === 'KG_DOC' &&
+        (activeTab === 'personal' || isAdmin) && (
         <Tooltip title={!knowledgeCapability?.allowKnowledgeBaseCreate ? knowledgeCapabilityDisabledTip : undefined}>
           <span>
             <Button
@@ -561,7 +627,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
         </Tooltip>
       )}
 
-      {brandVersion === 'openSource' && (
+      {!installedOnly && brandVersion === 'openSource' && (!isEnterpriseSkillGroupMode || isAdminVip(userInfo)) && (
         <Tooltip
           title={
             !canImportCurrentEnterpriseResource
@@ -578,7 +644,12 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
                 if (!canImportCurrentEnterpriseResource) {
                   return;
                 }
-                setImportModalOpen(true);
+                if (isEnterpriseSkillGroupMode) {
+                  setSkillGroupEditing(null);
+                  setSkillGroupCreateModalOpen(true);
+                } else {
+                  setImportModalOpen(true);
+                }
               }}
             >
               {intl.formatMessage({ id: 'common.import' })}
@@ -586,17 +657,103 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
           </span>
         </Tooltip>
       )}
+      {!installedOnly && onInstalledOnlyChange && (
+        <Button
+          className={styles.installedButton}
+          icon={<DownloadOutlined />}
+          type={installedOnly ? 'primary' : 'default'}
+          onClick={() => onInstalledOnlyChange(!installedOnly)}
+        >
+          {intl.formatMessage({ id: 'resourceCenter.myInstalled' })}
+        </Button>
+      )}
     </Space>
   );
 
   const items: TabsProps['items'] = [
     {
       key: 'personal',
-      label: `${intl.formatMessage({ id: 'resource.personal' })}${resourceName}`,
+      label: `${intl.formatMessage({ id: 'resource.available' })}`,
     },
     {
       key: 'enterprise',
-      label: `${intl.formatMessage({ id: 'resource.enterprise' })}${resourceName}`,
+      label:
+        resourceType === 'SKILL' ? (
+          <Dropdown
+            trigger={['hover']}
+            open={enterpriseSkillDropdownOpen}
+            onOpenChange={setEnterpriseSkillDropdownOpen}
+            mouseEnterDelay={0.12}
+            mouseLeaveDelay={0.1}
+            transitionName="enterprise-skill-dropdown-motion"
+            placement="bottomLeft"
+            align={{ offset: [0, 5] }}
+            overlayClassName={styles.enterpriseSkillDropdown}
+            menu={{
+              selectedKeys: [enterpriseSkillKind],
+              items: [
+                {
+                  key: 'skill',
+                  label: (
+                    <span className={styles.enterpriseSkillMenuItem}>
+                      {intl.formatMessage({ id: 'resource.skillSingle' })}
+                      {enterpriseSkillKind === 'skill' ? (
+                        <CheckOutlined className={styles.enterpriseSkillMenuCheck} aria-hidden />
+                      ) : null}
+                    </span>
+                  ),
+                },
+                {
+                  key: 'group',
+                  label: (
+                    <span className={styles.enterpriseSkillMenuItem}>
+                      {intl.formatMessage({ id: 'resource.skillGroup' })}
+                      {enterpriseSkillKind === 'group' ? (
+                        <CheckOutlined className={styles.enterpriseSkillMenuCheck} aria-hidden />
+                      ) : null}
+                    </span>
+                  ),
+                },
+              ],
+              onClick: ({ key, domEvent }) => {
+                domEvent.stopPropagation();
+                if (key === 'skill' || key === 'group') {
+                  setEnterpriseSkillDropdownOpen(false);
+                  handleEnterpriseSkillKindChange(key);
+                }
+              },
+            }}
+          >
+            <span
+              className={classnames(styles.enterpriseSkillTabLabel, {
+                [styles.enterpriseSkillTabLabelOpen]: enterpriseSkillDropdownOpen,
+              })}
+              data-testid="enterprise-skill-tab-trigger"
+              tabIndex={0}
+              role="button"
+              aria-haspopup="menu"
+              aria-expanded={enterpriseSkillDropdownOpen}
+              onKeyDown={(event) => {
+                if (event.key === 'ArrowDown' || event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setEnterpriseSkillDropdownOpen(true);
+                }
+              }}
+            >
+              {intl.formatMessage({
+                id: 'resource.official',
+              })}
+              <DownOutlined
+                className={styles.enterpriseSkillTabChevron}
+                data-testid="enterprise-skill-dropdown-chevron"
+                aria-hidden
+              />
+            </span>
+          </Dropdown>
+        ) : (
+          `${intl.formatMessage({ id: 'resource.official' })}`
+        ),
     },
   ];
   if (resourceType === 'SKILL') {
@@ -666,19 +823,41 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
   return (
     <div className={styles.fileManagerContainer}>
       <CommonTabs
+        className={classnames(styles.secondaryTabs, { [styles.installedTabs]: installedOnly })}
         activeKey={activeTab}
-        tabBarExtraContent={activeTab === 'marketplace' ? undefined : tabBarExtraContent}
-        items={items}
+        tabBarExtraContent={
+          activeTab === 'marketplace'
+            ? undefined
+            : installedOnly
+              ? {
+                left: (
+                  <Button
+                    type="text"
+                    className={styles.installedBackButton}
+                    icon={<LeftOutlined />}
+                    onClick={() => onInstalledOnlyChange?.(false)}
+                  >
+                    {intl.formatMessage({ id: 'resourceCenter.backToAll' })}
+                  </Button>
+                ),
+                right: tabBarExtraContent,
+              }
+              : tabBarExtraContent
+        }
+        items={installedOnly ? [] : items}
         onChange={(key: string) => {
           const nextTab = key as ResourceTab;
           const nextSearchParams = new URLSearchParams(searchParams);
           nextSearchParams.set('tab', nextTab);
+          if (nextTab !== 'enterprise') {
+            nextSearchParams.delete('kind');
+          }
           setCatalogId('');
           setSearchValue('');
           setDebouncedSearchValue('');
           setDropdownParam(getDefaultParams());
           setActiveTab(nextTab);
-          setSearchParams(nextSearchParams);
+          setSearchParams(nextSearchParams, { state: location.state });
         }}
       />
       {resourceType === 'SKILL' && activeTab === 'marketplace' ? (
@@ -704,49 +883,64 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
         </div>
       ) : (
         <div className={classnames('full-width ub ub-ver ub-f1', styles.wrapper)}>
-          {bannerLoaded && bannerUrl && (
+          {!installedOnly && bannerLoaded && bannerUrl && (
             <div className="mb-16">
               <img className={styles.marketBg} src={bannerUrl} alt="poster" />
             </div>
           )}
-          <div className={classnames('ub ub-ac gap8', styles.filterBar)}>
-            <Tabs
-              className={classnames('ub-f1', styles.tabs)}
-              activeKey={catalogId}
-              items={[
-                { label: intl.formatMessage({ id: 'digitalEmployees.skillSquare.allCategory' }), key: '' },
-                ...topLevelCatalogList.map((item) => ({
-                  label: item.catalogName,
-                  key: `${item?.catalogId}`,
-                })),
-              ]}
-              onChange={(activeKey) => {
-                setCatalogId(`${activeKey}`);
-                // 重置搜索值
-                setSearchValue('');
-                setDebouncedSearchValue('');
-                // 刷新逻辑由ResourceList组件内部处理
+          {!isEnterpriseSkillGroupMode && (
+            <div className={classnames('ub ub-ac gap8', styles.filterBar)}>
+              <Tabs
+                className={classnames('ub-f1', styles.tabs)}
+                activeKey={catalogId}
+                items={[
+                  { label: intl.formatMessage({ id: 'digitalEmployees.skillSquare.allCategory' }), key: '' },
+                  ...topLevelCatalogList.map((item) => ({
+                    label: item.catalogName,
+                    key: `${item?.catalogId}`,
+                  })),
+                ]}
+                onChange={(activeKey) => {
+                  setCatalogId(`${activeKey}`);
+                  setSearchValue('');
+                  setDebouncedSearchValue('');
+                }}
+              />
+            </div>
+          )}
+          {isEnterpriseSkillGroupMode ? (
+            <SkillGroupList
+              key={refreshKey}
+              keyword={debouncedSearchValue}
+              activeDigitalEmployeeId={`${activeDigitalEmployeeId || ''}`}
+              ownerType="enterprise"
+              resourceStatus={2}
+              canDeleteSkillGroup={isAdminVip(userInfo)}
+              onEditSkillGroup={(group) => {
+                setSkillGroupEditing(group);
+                setSkillGroupCreateModalOpen(true);
               }}
             />
-          </div>
-          <ResourceList
-            key={refreshKey}
-            resourceType={resourceType}
-            activeTab={activeTab}
-            searchValue={debouncedSearchValue}
-            catalogId={catalogId}
-            dropdownParam={dropdownParam}
-            resourceName={resourceName}
-            knowledgeCapability={knowledgeCapability}
-            knowledgeCapabilityDisabledTip={knowledgeCapabilityDisabledTip}
-            onDetail={handleDetail}
-            onEdit={handleEditItem}
-            onAuth={handleAuth}
-            onApplyUse={handleApplyUse}
-            onAuditUse={handleAuditUse}
-            onRefresh={refreshList}
-            skillCardViewMode="new"
-          />
+          ) : (
+            <ResourceList
+              key={refreshKey}
+              resourceType={resourceType}
+              activeTab={activeTab}
+              searchValue={debouncedSearchValue}
+              catalogId={catalogId}
+              dropdownParam={dropdownParam}
+              resourceName={resourceName}
+              knowledgeCapability={knowledgeCapability}
+              knowledgeCapabilityDisabledTip={knowledgeCapabilityDisabledTip}
+              onDetail={handleDetail}
+              onEdit={handleEditItem}
+              onAuth={handleAuth}
+              onApplyUse={handleApplyUse}
+              onAuditUse={handleAuditUse}
+              onRefresh={refreshList}
+              skillCardViewMode="new"
+            />
+          )}
         </div>
       )}
       <ResourceImport
@@ -762,6 +956,17 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
         }}
         onSuccess={() => {
           setImportModalOpen(false);
+          refreshList();
+          notifySiderResourceListReload();
+        }}
+      />
+      <SkillGroupCreateModal
+        visible={skillGroupCreateModalOpen}
+        group={skillGroupEditing}
+        onCancel={() => setSkillGroupCreateModalOpen(false)}
+        onSuccess={() => {
+          setSkillGroupCreateModalOpen(false);
+          setSkillGroupEditing(null);
           refreshList();
           notifySiderResourceListReload();
         }}
@@ -844,7 +1049,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
             setDetailPanelOpen(false);
             refreshList();
           }}
-          ownerType={activeTab as 'personal' | 'enterprise'}
+          ownerType={(currentItem?.ownerType || activeTab) as 'personal' | 'enterprise'}
           mode={currentItem?.resourceId ? 'edit' : 'create'}
           info={currentItem}
           createType={currentItem?.resourceId ? 'import' : 'create'}

@@ -7,6 +7,7 @@ import com.iwhalecloud.byai.common.util.PageHelperUtil;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessage;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessageHotDto;
+import com.iwhalecloud.byai.common.message.entity.ConversationOutlineItem;
 import com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper;
 import com.github.pagehelper.PageHelper;
 import com.iwhalecloud.byai.common.message.qo.MessageHotDelQo;
@@ -14,6 +15,7 @@ import com.iwhalecloud.byai.common.message.qo.MessageHotPageQo;
 import com.iwhalecloud.byai.common.message.qo.MessageHotQo;
 import com.iwhalecloud.byai.state.domain.message.qo.MessageQo;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -106,7 +108,12 @@ public class ByaiMessageHotService {
         if (existing == null) {
             ByaiMessage byaiMessage = new ByaiMessage();
             BeanUtils.copyProperties(byaiMessageHotDto, byaiMessage);
-            byaiMessage.setUpdateTime(new Date());
+            Date now = new Date();
+            byaiMessage.setId(sequenceService.nextVal());
+            if (byaiMessage.getCreateTime() == null) {
+                byaiMessage.setCreateTime(now);
+            }
+            byaiMessage.setUpdateTime(now);
             log.info("updateSelective: 消息不存在, 执行插入, messageId={}", byaiMessageHotDto.getMessageId());
             int rows = byaiMessageMapper.insertBatch(List.of(byaiMessage));
             if (rows != 1) {
@@ -207,6 +214,16 @@ public class ByaiMessageHotService {
             return 0L;
         }
         return byaiMessageMapper.countPositionInSession(sessionId, messageId);
+    }
+
+    /**
+     * Query the lightweight outline for a session without loading full message payloads.
+     */
+    public List<ConversationOutlineItem> selectConversationOutline(Long sessionId) {
+        if (sessionId == null) {
+            return Collections.emptyList();
+        }
+        return byaiMessageMapper.selectConversationOutline(sessionId);
     }
 
     /**

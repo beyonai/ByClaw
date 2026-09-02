@@ -10,7 +10,10 @@ import {
   resetManagerMenuConfigCache,
 } from '../menuConfig';
 
-const mockGetDcSystemConfig = getDcSystemConfig as jest.MockedFunction<typeof getDcSystemConfig>;
+// 源服务文件关闭了类型检查，测试按实际接口响应结构声明 mock，避免被推断成 Promise<undefined>。
+const mockGetDcSystemConfig = getDcSystemConfig as unknown as jest.MockedFunction<
+  (params: any) => Promise<{ data?: { paramValue?: string } }>
+>;
 
 describe('manager/layout/sider/menuConfig', () => {
   beforeEach(() => {
@@ -74,6 +77,9 @@ describe('manager/layout/sider/menuConfig', () => {
         localeId: 'menu.systemFeedback',
       },
     ]);
+    const fallbackSandboxMenu = fallbackMenuConfig.find((item) => item.path === '/manager/systemParams/sandbox');
+    expect(fallbackSandboxMenu).toBeDefined();
+    expect(fallbackSandboxMenu).not.toHaveProperty('adminVipOnly');
     expect(fallbackMenuConfig).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

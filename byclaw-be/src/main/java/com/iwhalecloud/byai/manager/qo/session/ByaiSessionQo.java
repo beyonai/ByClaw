@@ -21,6 +21,16 @@ public class ByaiSessionQo {
     private String searchKeyword;
 
     /**
+     * 精确查询一个会话（包括子会话）。
+     */
+    private Long sessionId;
+
+    /**
+     * 查询指定父会话的直接子会话；为空时默认仅查询根会话。
+     */
+    private Long parentSessionId;
+
+    /**
      * 创建人
      */
     private Long creatorId;

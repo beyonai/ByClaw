@@ -1,7 +1,7 @@
 import React, { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { Breadcrumb, Button, Dropdown, Empty, Input, message, Modal } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
-import { useIntl, useLocation, useNavigate, useSelector } from '@umijs/max';
+import { useIntl, useSelector } from '@umijs/max';
 import { trim } from 'lodash';
 import AntdIcon from '@/components/AntdIcon';
 import { DragType, type IDragType } from '@/components/QueryInput/withDrag';
@@ -13,17 +13,16 @@ import {
   deleteSkill,
   queryDigEmployeeRelResourceAuth,
   queryResourceMembers,
-  queryWorkspaceSkillList,
   uploadSkillZip,
 } from '@/pages/manager/service/resources';
 import SkillDetailDrawer from '@/pages/manager/components/SkillDetailDrawer/SkillDetailDrawer';
 import AddAuthModal from '@/pages/manager/components/AuthListDrawer/AddAuthModal';
 import {
   isWorkspaceSkill,
-  mapWorkspaceSkillRows,
   SKILL_DISPLAY_SOURCE_USER_DEVELOPED,
   type WorkspaceSkillItem,
 } from '@/components/Resources/workspaceSkill/utils';
+import { queryDigitalEmployeeSkillResources } from '@/components/Resources/workspaceSkill/queryDigitalEmployeeSkillResources';
 import { useWorkspaceSkillActions } from '@/components/Resources/workspaceSkill/useWorkspaceSkillActions';
 import { useDigitalEmployeeManagePermission } from '@/components/Resources/workspaceSkill/useDigitalEmployeeManagePermission';
 import { batchHandleAuth, listAuthDetail } from '@/pages/manager/service/DigitalResourceMgr';
@@ -32,12 +31,12 @@ import { ResourceTypeMap } from '@/constants/resource';
 import { resourceBizTypeMap } from '@/constants/knowledge';
 import useGlobal from '@/hooks/useGlobal';
 import ActiveSiderAgentBar, { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentBar';
+import useResourceCenterRouter from '@/layout/sider/components/useResourceCenterRouter';
 import { SiderContentContext } from '@/layout/sider/siderContentContext';
 import { getManagerMenuConfig, normalizeMenuUrl } from '@/pages/manager/layout/sider/menuConfig';
 import { getRuntimeActualUrl } from '@/utils';
 import { getToken } from '@/utils/auth';
 import ResourceSiderListItem, {
-  getResourceImageUrl,
   PROPERTY_RESOURCE_TYPE,
   type ResourceItem,
   type ResourceSiderType,
@@ -47,6 +46,9 @@ const PAGE_SIZE = 30;
 
 interface Props {
   resourceType: ResourceSiderType;
+  embedded?: boolean;
+  // 嵌入右侧资源面板时仅展示资源中心入口，不重复展示当前数字员工栏。
+  showRouter?: boolean;
 }
 
 const resourceConfigMap: Record<
@@ -126,17 +128,6 @@ const dedupeResourceList = (items: ResourceItem[]) => {
   });
 };
 
-const mapBoundSkillRows = (rows: ResourceItem[], resourceType: ResourceSiderType) => {
-  if (resourceType !== 'SKILL') {
-    return rows;
-  }
-  return rows.map((item) => ({
-    ...item,
-    resourceLogoUrl: getResourceImageUrl(item),
-    resourceBacked: true,
-  }));
-};
-
 const getGrantItem = (item: any) => ({
   ...item,
   id: `${String(item.grantToObjType).toLowerCase()}_${item.grantToObjId}`,
@@ -166,10 +157,8 @@ interface AuthSaveResponse {
   msg?: string;
 }
 
-const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
+const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, showRouter = false }) => {
   const intl = useIntl();
-  const navigate = useNavigate();
-  const { pathname } = useLocation();
   const { EventEmitter } = useGlobal();
   const { userInfo } = useSelector(({ user }: any) => ({
     userInfo: user.userInfo,
@@ -333,7 +322,11 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
    * 判断是否在下钻状态
    */
   const activeSiderAgent = useActiveSiderAgent();
-  const isResourceCenterPage = pathname.startsWith(config.navigatePath);
+  const { isCenterPage: isResourceCenterPage, toggleCenter } = useResourceCenterRouter(
+    config.navigatePath,
+    config.siderKey,
+    showRouter
+  );
   const placeholder = intl.formatMessage(
     { id: 'form.inputPlaceholder' },
     {
@@ -363,33 +356,40 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
       listFetchRef.current = true;
       setLoading(true);
       try {
-        const response = await queryDigEmployeeRelResourceAuth({
-          pageNum,
-          pageSize: PAGE_SIZE,
-          keyword: trim(queryKeyword),
-          resourceId: activeSiderAgent.resourceId,
-          resourceBizTypeList: config.resourceBizTypeList,
-        });
-        const rows = mapBoundSkillRows(getArrayData(response), resourceType);
-        let workspaceSkillRows: ResourceItem[] = [];
-        if (resourceType === 'SKILL' && reset && breadcrumbRef.current.length === 0) {
-          try {
-            const workspaceSkillResponse = await queryWorkspaceSkillList({
-              keyword: trim(queryKeyword),
-              resourceId: activeSiderAgent.resourceId,
-              userCode: userInfo?.userCode,
-            });
-            workspaceSkillRows = mapWorkspaceSkillRows(getArrayData(workspaceSkillResponse)) as ResourceItem[];
-          } catch (error) {
-            console.warn('query workspace skills failed', error);
-          }
+        let rows: ResourceItem[] = [];
+        let nextRows: ResourceItem[] = [];
+        let responsePageNum = pageNum;
+        let responseTotal = 0;
+
+        if (resourceType === 'SKILL') {
+          const skillResult = await queryDigitalEmployeeSkillResources({
+            pageNum,
+            pageSize: PAGE_SIZE,
+            keyword: trim(queryKeyword),
+            resourceId: activeSiderAgent.resourceId,
+            userCode: userInfo?.userCode,
+            includeWorkspace: reset && breadcrumbRef.current.length === 0,
+          });
+          rows = skillResult.boundRows as ResourceItem[];
+          nextRows = skillResult.rows as ResourceItem[];
+          responsePageNum = skillResult.pageNum;
+          responseTotal = skillResult.total;
+        } else {
+          const response = await queryDigEmployeeRelResourceAuth({
+            pageNum,
+            pageSize: PAGE_SIZE,
+            keyword: trim(queryKeyword),
+            resourceId: activeSiderAgent.resourceId,
+            resourceBizTypeList: config.resourceBizTypeList,
+          });
+          rows = getArrayData(response);
+          nextRows = rows;
+          responsePageNum = Number(response?.pageNum) || pageNum;
+          responseTotal = Number(response?.total) || 0;
         }
-        const responsePageNum = Number(response?.pageNum) || pageNum;
-        const responseTotal = Number(response?.total) || 0;
 
         const previousList = reset ? [] : resourceListRef.current;
-        const nextRows = reset ? [...rows, ...workspaceSkillRows] : rows;
-        const nextList = reset ? dedupeResourceList(nextRows) : dedupeResourceList([...previousList, ...nextRows]);
+        const nextList = reset ? dedupeResourceList(nextRows) : dedupeResourceList([...previousList, ...rows]);
         const boundLoadedCount = reset
           ? rows.length
           : previousList.filter((item) => !isWorkspaceSkill(item)).length + rows.length;
@@ -617,6 +617,8 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
     }
   };
 
+  // 技能开发入口暂时隐藏，保留处理逻辑供后续恢复。
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleComplexSkillDevelop = () => {
     message.info(intl.formatMessage({ id: 'resourceTabs.skillUpload.codeAgentDeveloping' }));
   };
@@ -640,6 +642,8 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
     return false;
   };
 
+  // 技能开发入口暂时隐藏，保留处理逻辑供后续恢复。
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handlePageSkillDevelop = async () => {
     try {
       const menus = await getManagerMenuConfig();
@@ -738,7 +742,11 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
     const closeDetailPanel = () => clearDetailPanel?.();
 
     if (resourceBizType === PROPERTY_RESOURCE_TYPE) {
-      setDetailPanel?.(<PropertyDetail item={item} onClose={closeDetailPanel} />, { width: 350 });
+      setDetailPanel?.(<PropertyDetail item={item} onClose={closeDetailPanel} />, {
+        width: 350,
+        tabKey: `property:${resourceId}`,
+        title: item.resourceName,
+      });
       return;
     }
 
@@ -756,7 +764,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
             panel
             onClose={closeDetailPanel}
           />,
-          { width: 350 }
+          { width: 350, tabKey: `skill:${resourceId}`, title: item.resourceName }
         );
       }
       return;
@@ -788,7 +796,11 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
             open
             panel
             onClose={closeDetailPanel}
-          />
+          />,
+          {
+            tabKey: `resource:${resourceBizType}:${resourceId}`,
+            title: item.resourceName,
+          }
         );
       }
       return;
@@ -804,7 +816,11 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
         onCancel={closeDetailPanel}
         onEdit={() => {}}
       />,
-      { width: 350 }
+      {
+        width: 350,
+        tabKey: `resource:${item.resourceBizType}:${item.resourceId}`,
+        title: item.resourceName,
+      }
     );
   };
 
@@ -919,8 +935,27 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
   /**
    * 渲染资源详情下拉菜单
    */
+  const getQuoteType = (): IDragType => {
+    if (resourceType === 'TOOL') return DragType.tool;
+    if (resourceType === 'SKILL') return DragType.SKILL;
+    return DragType.OBJECT;
+  };
+
+  const handleQuoteResource = (item: ResourceItem) => {
+    EventEmitter.emit('queryInput-insert-item', {
+      item: { ...item, isFromResourceModule: true },
+      type: getQuoteType(),
+    });
+  };
+
   const renderDetailDropdown = (item: ResourceItem) => {
     const menuItems: { key: string; label: React.ReactNode }[] = [];
+    if (!item.quoteDisabled) {
+      menuItems.push({
+        key: 'quote',
+        label: <div className={employeeStyles.dropdownMenuItem}>{intl.formatMessage({ id: 'common.quote' })}</div>,
+      });
+    }
     menuItems.push({
       key: 'detail',
       label: <div className={employeeStyles.dropdownMenuItem}>{intl.formatMessage({ id: 'common.detail' })}</div>,
@@ -950,6 +985,10 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
           onClick: ({ key, domEvent }) => {
             domEvent.preventDefault();
             domEvent.stopPropagation();
+            if (key === 'quote') {
+              handleQuoteResource(item);
+              return;
+            }
             if (key === 'share') {
               void handleShare(item);
               return;
@@ -972,19 +1011,6 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
         </span>
       </Dropdown>
     );
-  };
-
-  const getQuoteType = (): IDragType => {
-    if (resourceType === 'TOOL') return DragType.tool;
-    if (resourceType === 'SKILL') return DragType.SKILL;
-    return DragType.OBJECT;
-  };
-
-  const handleQuoteResource = (item: ResourceItem) => {
-    EventEmitter.emit('queryInput-insert-item', {
-      item: { ...item, isFromResourceModule: true },
-      type: getQuoteType(),
-    });
   };
 
   const clearItemClickTimer = useCallback(() => {
@@ -1021,17 +1047,34 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
     return clearItemClickTimer;
   }, [clearItemClickTimer]);
 
-  const navigatePath = isResourceCenterPage ? { pathname: '/chat' } : config.navigatePath;
-  const navigateState = isResourceCenterPage ? { state: { keepSiderActiveKey: config.siderKey } } : undefined;
-
   return (
     <div className={styles.container}>
-      <ActiveSiderAgentBar agent={activeSiderAgent} />
-      <div className={styles.router} onClick={() => navigate(navigatePath, navigateState)}>
-        <AntdIcon type={config.icon} />
-        <span className={styles.middle}>{intl.formatMessage({ id: config.centerLabelId })}</span>
-        <AntdIcon type={isResourceCenterPage ? 'icon-a-Leftzuo' : 'icon-a-Rightyou'} className={styles.routerIcon} />
-      </div>
+      {(!embedded || showRouter) && (
+        <>
+          {!embedded && <ActiveSiderAgentBar agent={activeSiderAgent} />}
+          <div
+            className={[styles.router, showRouter ? styles.routerSplit : ''].filter(Boolean).join(' ')}
+            onClick={toggleCenter}
+          >
+            {showRouter && (
+              <AntdIcon
+                type={isResourceCenterPage ? 'icon-a-Rightyou' : 'icon-a-Leftzuo'}
+                className={styles.routerBackIcon}
+              />
+            )}
+            <div className={styles.routerMain}>
+              <span className={styles.middle}>{intl.formatMessage({ id: config.centerLabelId })}</span>
+              <AntdIcon type={config.icon} />
+            </div>
+            {!showRouter && (
+              <AntdIcon
+                type={isResourceCenterPage ? 'icon-a-Leftzuo' : 'icon-a-Rightyou'}
+                className={styles.routerIcon}
+              />
+            )}
+          </div>
+        </>
+      )}
       {isInDrillDown() && (
         <Breadcrumb className={styles.breadcrumb}>
           <Breadcrumb.Item key="-1">
@@ -1088,6 +1131,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
             multiple
             onChange={handleSkillImportChange}
           />
+          {/* 暂时隐藏复杂技能开发和界面技能开发入口，保留原代码便于后续恢复。
           <div className={styles.skillActionBar}>
             <Button
               size="small"
@@ -1106,6 +1150,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
               {intl.formatMessage({ id: 'resourceTabs.skillUpload.pageSkillDevelop' })}
             </Button>
           </div>
+          */}
         </>
       )}
       <div className={styles.listContainer}>

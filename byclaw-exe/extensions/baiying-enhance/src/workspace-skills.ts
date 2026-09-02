@@ -8,6 +8,8 @@ import { resolveStateDir } from "./workspace-paths.js";
 const SKILLS_DIR_NAME = "skills";
 const PLUGIN_SKILLS_DIR_NAME = "plugin-skills";
 const SKILL_DOC_FILE_NAME = "SKILL.md";
+// 平台级只读能力由镜像统一提供在 /app/skills，不复制到各数字员工 workspace。
+const CORE_BUNDLED_SKILLS = ["project-context", "notice", "project-cloud-knowledge"];
 
 function normalizeSkillName(raw: unknown): string {
   return typeof raw === "string" ? raw.trim() : "";
@@ -217,8 +219,19 @@ function skillNamesFromScanned(skills: ScannedSkill[]): string[] {
   return mergeSkillNames(skills.map((skill) => skill.skillName));
 }
 
+export async function scanSkillRootNames(skillsDir: string): Promise<string[]> {
+  const directName = await readSkillNameFromSkillFile(
+    path.join(skillsDir, SKILL_DOC_FILE_NAME),
+    path.basename(skillsDir),
+  );
+  if (directName) {
+    return [directName];
+  }
+  return skillNamesFromScanned(await scanSkillRoot(skillsDir));
+}
+
 export async function scanWorkspaceSkillNames(workspaceDir: string): Promise<string[]> {
-  return skillNamesFromScanned(await scanSkillRoot(path.join(workspaceDir, SKILLS_DIR_NAME)));
+  return scanSkillRootNames(path.join(workspaceDir, SKILLS_DIR_NAME));
 }
 
 function resolvePluginSkillsDir(): string {
@@ -226,7 +239,7 @@ function resolvePluginSkillsDir(): string {
 }
 
 export async function scanPluginSkillNames(): Promise<string[]> {
-  return skillNamesFromScanned(await scanSkillRoot(resolvePluginSkillsDir()));
+  return scanSkillRootNames(resolvePluginSkillsDir());
 }
 
 function resolveSkillNamesFromPluginRoot(rawSkills: unknown[], pluginSkills: ScannedSkill[]): string[] {
@@ -264,7 +277,7 @@ export async function mergeWorkspaceSkillsIntoManagedAgents<T extends AgentWithS
     const baseSkills = resolveSkillNamesFromPluginRoot(agent.listEntry.skills ?? [], pluginSkills);
     const extraSkills = await scanWorkspaceSkillNamesByPaths(workspaceDir, agent.extraSkillPaths);
     const agentSkills = await scanWorkspaceSkillNames(workspaceDir);
-    const skills = mergeSkillNames(baseSkills, extraSkills, agentSkills, sharedSkills);
+    const skills = mergeSkillNames(CORE_BUNDLED_SKILLS, baseSkills, extraSkills, agentSkills, sharedSkills);
     out.push({
       ...agent,
       listEntry: {

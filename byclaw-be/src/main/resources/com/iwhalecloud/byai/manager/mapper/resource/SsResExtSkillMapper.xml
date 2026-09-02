@@ -76,7 +76,7 @@
                b.last_sync_time
         FROM ss_resource a
         INNER JOIN ss_res_ext_skill b ON a.resource_id = b.resource_id
-        WHERE a.resource_biz_type = 'SKILL' and b.skill_type ='inner'
+        WHERE a.resource_biz_type = 'SKILL' and b.skill_type in('inner','hub')
           AND a.resource_code IN
         <foreach collection="skillCodes" item="item" open="(" separator="," close=")">
             #{item}

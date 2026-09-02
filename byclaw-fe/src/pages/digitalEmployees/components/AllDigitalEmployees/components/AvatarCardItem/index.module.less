@@ -49,6 +49,14 @@
   font-weight: 500;
 }
 
+// 右上角标签为绝对定位，名称区域需要预留空间，避免长名称被标签覆盖。
+.employeeCardWithTag {
+  .employeeInfoHeader {
+    // 标签位于卡片右上角，标题至少预留标签宽度及间距，避免文字压到标签后才截断。
+    padding-right: 220px;
+  }
+}
+
 .avatarContainer {
   // margin-right: 12px;
 }
@@ -60,6 +68,11 @@
 
 .employeeInfo {
   flex: 1;
+  min-width: 0;
+}
+
+.employeeInfoHeader {
+  width: 100%;
   min-width: 0;
 }
 
@@ -92,9 +105,17 @@
 }
 
 .employeeName {
+  min-width: 0;
+  // 使用内容自适应的 flex 基准，避免 width: 0 与全局 ub-f1 叠加后过早触发省略号。
+  width: auto;
+  flex: 1 1 auto;
   font-size: 16px;
   font-weight: 500;
   margin-bottom: 0 !important;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .employeeDescription {

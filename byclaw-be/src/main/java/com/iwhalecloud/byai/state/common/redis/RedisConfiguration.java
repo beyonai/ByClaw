@@ -34,6 +34,8 @@ import com.iwhalecloud.byai.common.i18n.I18nUtil;
 public class RedisConfiguration {
     private static Logger logger = LoggerFactory.getLogger(RedisConfiguration.class);
 
+    static final int DEFAULT_READ_TIMEOUT_MILLIS = 5000;
+
     @Autowired
     private RedisProperties redisProperties;
 
@@ -41,7 +43,7 @@ public class RedisConfiguration {
     @Value("${spring.redis.timeout:2000}")
     private int timeout;
 
-    @Value("${spring.redis.read-timeout:2000}")
+    @Value("${spring.redis.read-timeout:" + DEFAULT_READ_TIMEOUT_MILLIS + "}")
     private int readTimeout;
 
     @Value("${spring.redis.ssl:false}")

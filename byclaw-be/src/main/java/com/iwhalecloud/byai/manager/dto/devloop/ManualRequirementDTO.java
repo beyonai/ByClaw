@@ -21,6 +21,13 @@ public class ManualRequirementDTO {
     /** 可选的关联项目仓库 ID；仅归属当前需求，不能写入项目共用的内部手工来源。 */
     private Long repoId;
 
+    /**
+     * 可选的外部稳定标识（钉钉 taskId、GitHub issue 号等）。
+     * 采集重复执行时用它命中同一条需求并原样返回，避免同一诉求刷出多行；
+     * 为空则生成一次性 UUID，等同于每次都是新需求。
+     */
+    private String originId;
+
     /** 必填的需求标题，后续复用为任务初始标题。 */
     private String title;
 

@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.gateway.channels.service.robot;
 
 import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkRobotRegistryService;
+import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkRobotConfigValidationException;
 import com.iwhalecloud.byai.gateway.channels.service.feishu.FeishuRobotRegistryService;
 import com.iwhalecloud.byai.gateway.channels.service.wecom.stream.lifecycle.WecomRobotRegistryService;
 import org.slf4j.Logger;
@@ -62,6 +63,8 @@ public class RobotChannelRegistryCoordinator {
     private void runQuietly(String action, Long resourceId, Runnable runnable) {
         try {
             runnable.run();
+        } catch (DingtalkRobotConfigValidationException e) {
+            throw e;
         } catch (Exception e) {
             logger.warn("{} failed. resourceId={}", action, resourceId, e);
         }

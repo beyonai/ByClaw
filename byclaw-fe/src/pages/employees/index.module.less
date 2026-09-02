@@ -113,3 +113,13 @@
     }
   }
 }
+
+.employeeQueryInputWrapper {
+  // 保留新建任务页输入框外层的灰色承托区域，仅将实际输入面板覆盖为白色。
+  background: #f5f5f5 !important;
+  margin-bottom: 16px !important;
+
+  :global(#queryInputBase) {
+    background: #fff;
+  }
+}

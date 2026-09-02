@@ -80,6 +80,16 @@ const PersonalEmailSettings: React.FC = () => {
     loadAccounts();
   }, []);
 
+  useEffect(() => {
+    if (!modalOpen) return undefined;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [modalOpen]);
+
   const openCreateModal = () => {
     setEditingAccount(null);
     form.resetFields();
@@ -264,6 +274,8 @@ const PersonalEmailSettings: React.FC = () => {
         onOk={handleSave}
         onCancel={() => setModalOpen(false)}
         width={720}
+        className={styles.emailModal}
+        wrapClassName={styles.emailModalWrap}
         destroyOnClose
       >
         <Form form={form} layout="vertical" preserve={false}>

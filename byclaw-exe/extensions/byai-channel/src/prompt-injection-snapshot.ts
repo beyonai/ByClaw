@@ -6,6 +6,7 @@ import {
   buildChannelExtensionPrompt,
   buildLanguagePrompt,
   buildSessionFilesPrompt,
+  buildSkillInstallPrompt,
   buildUserMdReloadPrompt,
   isEnglishLanguage,
 } from "./i18n.js";
@@ -19,10 +20,15 @@ import {
   type ByclawChatContextSnapshot,
   resolveByclawChatContext,
 } from "./chat-context-store.js";
+import {
+  formatGroupChatContextForPrompt,
+  type GroupChatContextV1,
+} from "./group-chat-context.js";
+import { buildDisabledConnectorPrompt } from "./connector-authorization.js";
 
 export type PromptInjectionSnapshot = {
-  appendSystemContext: string;
-  createdAt: number;
+    appendSystemContext: string;
+    createdAt: number;
 };
 
 const SNAPSHOT_STATE = Symbol.for("openclaw.byaiChannel.promptInjectionSnapshot");
@@ -31,18 +37,18 @@ const MAX_CHAT_ROOM_METADATA_LANES = 12;
 const MAX_CHAT_ROOM_LANE_PREVIEW_CHARS = 180;
 
 function getSnapshotStore(): Map<string, PromptInjectionSnapshot> {
-  const globalState = globalThis as typeof globalThis & {
-    [SNAPSHOT_STATE]?: Map<string, PromptInjectionSnapshot>;
-  };
-  if (!globalState[SNAPSHOT_STATE]) {
-    globalState[SNAPSHOT_STATE] = new Map<string, PromptInjectionSnapshot>();
-  }
-  return globalState[SNAPSHOT_STATE];
+    const globalState = globalThis as typeof globalThis & {
+        [SNAPSHOT_STATE]?: Map<string, PromptInjectionSnapshot>;
+    };
+    if (!globalState[SNAPSHOT_STATE]) {
+        globalState[SNAPSHOT_STATE] = new Map<string, PromptInjectionSnapshot>();
+    }
+    return globalState[SNAPSHOT_STATE];
 }
 
 function normalizeSessionKey(sessionKey: string | undefined): string | null {
-  const trimmed = sessionKey?.trim();
-  return trimmed ? trimmed : null;
+    const trimmed = sessionKey?.trim();
+    return trimmed ? trimmed : null;
 }
 
 function collectKnownAgentRefs(sessionId: string): string[] {
@@ -227,6 +233,7 @@ function buildEnhancedChannelExtension(
 export function buildPromptInjectionSnapshot(params: {
   request: ActiveSdkRequest;
   currentUserText?: string;
+  groupChatContext?: GroupChatContextV1;
   workspaceDir?: string;
   includeUserMdReloadHint?: boolean;
 }): PromptInjectionSnapshot {
@@ -237,14 +244,22 @@ export function buildPromptInjectionSnapshot(params: {
   }
   if (params.request.sessionId) {
     sections.push(buildSessionFilesPrompt(params.request.sessionId, params.request.language));
-    sections.push(buildByclawChatContextToolPrompt(params.request.language, {
-      crossAgentHint: detectByclawChatContextCrossAgentHint({
-        text: params.currentUserText,
-        laneMetadata: params.request.laneMetadata,
-        knownAgentRefs: collectKnownAgentRefs(params.request.sessionId),
-      }),
-    }));
+    if (params.groupChatContext) {
+      sections.push(formatGroupChatContextForPrompt(
+        params.groupChatContext,
+        params.request.language,
+      ));
+    } else {
+      sections.push(buildByclawChatContextToolPrompt(params.request.language, {
+        crossAgentHint: detectByclawChatContextCrossAgentHint({
+          text: params.currentUserText,
+          laneMetadata: params.request.laneMetadata,
+          knownAgentRefs: collectKnownAgentRefs(params.request.sessionId),
+        }),
+      }));
+    }
   }
+  sections.push(buildSkillInstallPrompt(normalizedWorkspace, params.request.language));
   if (params.request.languageProvided) {
     sections.push(buildLanguagePrompt(params.request.language));
   }
@@ -264,6 +279,13 @@ export function buildPromptInjectionSnapshot(params: {
   if (channelExtPrompt) {
     sections.push(channelExtPrompt);
   }
+  const connectorPrompt = buildDisabledConnectorPrompt(
+    params.request.language,
+    params.request.authConnectorList,
+  );
+  if (connectorPrompt) {
+    sections.push(connectorPrompt);
+  }
   return {
     appendSystemContext: sections.join("\n\n"),
     createdAt: Date.now(),
@@ -271,37 +293,37 @@ export function buildPromptInjectionSnapshot(params: {
 }
 
 export function setPromptInjectionSnapshot(
-  sessionKey: string,
-  snapshot: PromptInjectionSnapshot,
+    sessionKey: string,
+    snapshot: PromptInjectionSnapshot,
 ): void {
-  const normalized = normalizeSessionKey(sessionKey);
-  if (!normalized) {
-    return;
-  }
-  getSnapshotStore().set(normalized, snapshot);
+    const normalized = normalizeSessionKey(sessionKey);
+    if (!normalized) {
+        return;
+    }
+    getSnapshotStore().set(normalized, snapshot);
 }
 
 export function takePromptInjectionSnapshot(
-  sessionKey: string | undefined,
+    sessionKey: string | undefined,
 ): PromptInjectionSnapshot | undefined {
-  const normalized = normalizeSessionKey(sessionKey);
-  if (!normalized) {
-    return undefined;
-  }
-  return getSnapshotStore().get(normalized);
+    const normalized = normalizeSessionKey(sessionKey);
+    if (!normalized) {
+        return undefined;
+    }
+    return getSnapshotStore().get(normalized);
 }
 
 export function clearPromptInjectionSnapshot(sessionKey: string | undefined): void {
-  const normalized = normalizeSessionKey(sessionKey);
-  if (!normalized) {
-    return;
-  }
-  getSnapshotStore().delete(normalized);
+    const normalized = normalizeSessionKey(sessionKey);
+    if (!normalized) {
+        return;
+    }
+    getSnapshotStore().delete(normalized);
 }
 
 /** @internal test helper */
 export function resetPromptInjectionSnapshotsForTest(): void {
-  getSnapshotStore().clear();
+    getSnapshotStore().clear();
 }
 
 /** Exported for hooks fallback parity */

@@ -14,7 +14,6 @@ import { ResourceTypeMap } from '@/constants/resource';
 
 import UploadFile from '../components/UploadFile';
 import ConnectorControl from '../components/ConnectorControl';
-import type { Connector } from '../components/ConnectorControl';
 
 import type { UserInfo } from '@/models/common/user';
 import type { IFile } from '@/typescript/file';
@@ -33,8 +32,6 @@ type IState = {
 
   beyondSmartModePopoverOpen: boolean;
   selectedResourceAgentIds: string;
-  // 当前输入会话已连接的连接器，发送消息时转换为后端所需的 ID 列表。
-  connectors: Connector[];
 } & pIState;
 
 type IProps = {
@@ -64,8 +61,6 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
       resourceList: [],
       beyondSmartModePopoverOpen: false,
       selectedResourceAgentIds: '',
-      // 连接器属于当前聊天输入状态，切换会话组件时不沿用旧选择。
-      connectors: [],
     };
   }
 
@@ -104,7 +99,7 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
   // @ts-ignore
   getSendPayload = () => {
     const currentInputPayload = this.getCurrentInputPayload();
-    const { fileList, deepThink, chatSettings, connectNet, connectors } = this.state;
+    const { fileList, deepThink, chatSettings, connectNet } = this.state;
     const inputValue = currentInputPayload?.text ?? this.state.inputValue;
     const resourceList = currentInputPayload?.resourceList ?? this.state.resourceList;
     const { userInfo, chatMode, myAgentType } = this.props;
@@ -133,8 +128,6 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
         files: [],
         extParams: {
           files: [],
-          // 后端约定：当前轮次启用的连接器 ID 列表。
-          connectors: connectors.map((connector) => connector.id),
         },
         mode,
         agentType: myAgentType,
@@ -316,19 +309,26 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
 
     return (
       <>
-        <Space size="large" className={styles.bottomRight}>
-          {/* 连接器控制组件只负责选择，实际状态仍由聊天输入统一维护。 */}
-          <ConnectorControl
-            canAuthorize={!!this.props.userInfo}
-            value={this.state.connectors}
-            onChange={(connectors) => this.setState((prevState) => ({ ...prevState, connectors }))}
-          />
+        <Space size={14} className={styles.bottomRight}>
+          {/* 连接器控制组件直接管理用户级全局开关，消息 payload 不再携带连接器 ID。 */}
+          <span className="byclaw-connector-outside-tool">
+            <ConnectorControl
+              canAuthorize={!!this.props.userInfo}
+              outside
+              onOpenResourcePicker={() => this.openResourcePicker('connector')}
+            />
+          </span>
           {/* 多员工模式下 @ 入口始终保留，用于继续追加数字员工。 */}
           <MentionPopover
             type="@"
             chatMode={chatModeMap.expert}
             agentId={agentId}
             sessionId={sessionId}
+            excludedAgentIds={(this.state.resourceList || [])
+              .filter((resource) => `${resource.resourceType}` === `${ResourceTypeMap.digitalEmployee}`)
+              .flatMap((resource) =>
+                [resource.resourceId, resource.resourceCode].filter(Boolean).map((item) => `${item}`)
+              )}
             onSelect={this.onSelectMentionPopoverItem}
             popoverPos={showMentionPopoverType === '@' ? staticEmptyObject : undefined}
             onClose={() => this.setState((prev) => ({ ...prev, showMentionPopoverType: '' }))}
@@ -350,25 +350,26 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
               </span>
             </Tooltip>
           </MentionPopover>
-          {this.checkCanQuote() && (
-            <MentionPopover
-              type="#"
-              chatMode={chatMode}
-              agentId={quoteAgentId}
-              sessionId={sessionId}
-              resourceAgentIds={this.getResourceAgentIds()}
-              onSelect={this.onSelectMentionPopoverItem}
-              popoverPos={showMentionPopoverType === '#' ? staticEmptyObject : undefined}
-              onClose={() => this.setState((prev) => ({ ...prev, showMentionPopoverType: '' }))}
-            >
+          <MentionPopover
+            type="#"
+            chatMode={chatMode}
+            agentId={quoteAgentId}
+            sessionId={sessionId}
+            resourceAgentIds={this.getResourceAgentIds()}
+            onSelect={this.onSelectMentionPopoverItem}
+            popoverPos={showMentionPopoverType === '#' ? staticEmptyObject : undefined}
+            onClose={() => this.setState((prev) => ({ ...prev, showMentionPopoverType: '' }))}
+          >
+            <Tooltip title="选择技能">
               <span
+                aria-label="技能"
                 className={styles.attachment}
                 onClick={() => this.setState((prev) => ({ ...prev, showMentionPopoverType: '#' }))}
               >
                 #
               </span>
-            </MentionPopover>
-          )}
+            </Tooltip>
+          </MentionPopover>
           {this.checkCanUploadFile() && (
             <UploadFile
               ref={this.uploadFileRef}
@@ -378,6 +379,8 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
                 agentId,
                 sessionType: 'AGENT',
                 sessionId,
+                // 新建任务上传文件会提前创建会话，创建时就传入当前选择的项目，避免先落到默认项目。
+                projectId: this.props.selectedProject?.projectId || this.props.projectId,
               }}
               onCreate={(fileItem: IFile) => {
                 return this.onCreateFile({
@@ -386,16 +389,39 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
               }}
               onUpdate={this.onUpdateFile}
               onRemove={this.onRemoveFile}
-              setSessionId={(mySessionId: string, file: any) => {
+              setSessionId={(mySessionId: string, sessionName?: string) => {
                 if (`${mySessionId}` === `${sessionId}`) return;
+                this.props.onFileUploadSessionCreated?.(mySessionId);
                 setSessionId?.(mySessionId);
                 dispatch({
                   type: 'session/addSession',
                   payload: {
                     sessionId: mySessionId,
-                    sessionName: file?.name,
+                    sessionName,
+                    isLocalSession: true,
+                    projectName: this.props.selectedProject?.projectName,
+                    projectId: this.props.projectId ?? this.props.selectedProject?.projectId,
+                    objectId: agentId,
+                    objectType: agentId ? 'DigEmployee' : undefined,
+                    agentType: this.props.myAgentType,
                   },
                 });
+                const projectId = this.props.projectId ?? this.props.selectedProject?.projectId;
+                if (projectId !== undefined && projectId !== null) {
+                  this.props.globalContext.EventEmitter.emit('projectSpace-session-refresh', {
+                    projectId,
+                    projectName: this.props.selectedProject?.projectName,
+                    session: {
+                      sessionId: mySessionId,
+                      sessionName,
+                      projectId,
+                      projectName: this.props.selectedProject?.projectName,
+                      updateTime: new Date().toISOString(),
+                      createTime: new Date().toISOString(),
+                      isLocalSession: true,
+                    },
+                  });
+                }
               }}
             />
           )}

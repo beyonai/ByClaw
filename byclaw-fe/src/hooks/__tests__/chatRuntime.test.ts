@@ -7,7 +7,7 @@ jest.mock('@/hooks/useSseSender/chatStream', () => ({
   },
 }));
 
-import { IMessageState } from '@/constants/message';
+import { IMessageState, SSEMessageType } from '@/constants/message';
 import { chatSessionRuntimeManager } from '@/utils/chatSessionRuntimeManager';
 
 import {
@@ -16,6 +16,8 @@ import {
   getRestoredStreamKey,
   handleChatStreamError,
   handleParsedChatStream,
+  handleSessionRuntimeState,
+  handleTaskPlanSnapshot,
   registerPendingChatContext,
   registerSessionChatContext,
   startRestoringChatStream,
@@ -56,6 +58,7 @@ describe('hooks/useChat/chatRuntime', () => {
   });
 
   it('keeps a pending context alive and applies stream payloads', () => {
+    jest.useFakeTimers();
     const queryMsg: any = { msgId: 'q1', sessionId: 's1' };
     const answerMsg: any = { msgId: 'c1', sessionId: 's1', messageState: IMessageState.Query };
     const updateMessage = jest.fn((msg) => msg);
@@ -77,11 +80,55 @@ describe('hooks/useChat/chatRuntime', () => {
     });
 
     handleParsedChatStream(createParsed());
+    jest.advanceTimersByTime(30);
 
     expect(flowHandler).toHaveBeenCalled();
-    expect(updateMessage).toHaveBeenCalledWith(queryMsg);
+    expect(updateMessage).toHaveBeenCalledTimes(1);
     expect(updateMessage).toHaveBeenCalledWith(answerMsg, { isAssign: undefined });
     expect(answerMsg.messageList).toHaveLength(1);
+    jest.useRealTimers();
+  });
+
+  it('marks a running session when a stream message requires user input', () => {
+    jest.useFakeTimers();
+    const queryMsg: any = { msgId: 'q1', sessionId: 's1' };
+    const answerMsg: any = { msgId: 'c1', sessionId: 's1', messageState: IMessageState.Query };
+    const updateMessage = jest.fn((msg) => msg);
+    const flowHandler = jest.fn(({ newAnswerMsg, sseRes }) => {
+      newAnswerMsg.messageState = IMessageState.Answer;
+      newAnswerMsg.messageList = [sseRes.message];
+    });
+
+    registerPendingChatContext({
+      clientRequestId: 'c1',
+      queryMsg,
+      answerMsg,
+      getMessageList: () => [queryMsg, answerMsg],
+      flowHandler,
+      updateMessage,
+    });
+    chatSessionRuntimeManager.register({
+      clientRequestId: 'c1',
+      sessionId: 's1',
+    });
+
+    handleParsedChatStream(
+      createParsed({
+        formattedPayload: {
+          sessionId: 's1',
+          message: {
+            uuid: 'pending-1',
+            contentType: SSEMessageType.askUserQuestions,
+            content: { substance: { questions: [] } },
+            status: '_DONE_',
+          },
+        },
+      })
+    );
+
+    expect(chatSessionRuntimeManager.isSessionWaitingForUserInput('s1')).toBe(true);
+    jest.runOnlyPendingTimers();
+    jest.useRealTimers();
   });
 
   it('does not create message cache when no context exists', () => {
@@ -243,7 +290,10 @@ describe('hooks/useChat/chatRuntime', () => {
     const queryMsg: any = { msgId: 'q1', sessionId: 's1' };
     const answerA: any = { msgId: 'a1', sessionId: 's1', messageState: IMessageState.Query };
     const answerB: any = { msgId: 'a2', sessionId: 's1', messageState: IMessageState.Query };
-    const flowHandler = jest.fn();
+    const flowHandler = jest.fn(({ newAnswerMsg }) => {
+      newAnswerMsg.messageState = IMessageState.Answer;
+      newAnswerMsg.thinkDone = false;
+    });
     const updateMessage = jest.fn((msg) => msg);
 
     registerSessionChatContext('s1', {
@@ -302,6 +352,125 @@ describe('hooks/useChat/chatRuntime', () => {
     expect(answerMsg.messageState).toBe(IMessageState.Error);
     expect(answerMsg.messageTip).toBe('failed');
     expect(updateMessage).toHaveBeenCalledWith(answerMsg);
+  });
+
+  it('marks the parent answer idle while child agents continue after the captain turn pauses', () => {
+    const queryMsg: any = { msgId: 'q1', sessionId: 's1' };
+    const answerMsg: any = {
+      msgId: 'c1',
+      sessionId: 's1',
+      traceId: 'trace-1',
+      messageState: IMessageState.Answer,
+      thinkDone: false,
+    };
+    const updateMessage = jest.fn((msg) => msg);
+    const flowHandler = jest.fn(({ newAnswerMsg }) => {
+      newAnswerMsg.messageState = IMessageState.Answer;
+      newAnswerMsg.thinkDone = false;
+    });
+
+    registerPendingChatContext({
+      clientRequestId: 'c1',
+      queryMsg,
+      answerMsg,
+      getMessageList: () => [queryMsg, answerMsg],
+      flowHandler,
+      updateMessage,
+    });
+    registerSessionChatContext('s1', {
+      clientRequestId: 'c1',
+      queryMsg,
+      answerMsg,
+      getMessageList: () => [queryMsg, answerMsg],
+      flowHandler,
+      updateMessage,
+    });
+    chatSessionRuntimeManager.register({ clientRequestId: 'c1', sessionId: 's1', traceId: 'trace-1' });
+
+    expect(
+      handleSessionRuntimeState({
+        sessionId: 's1',
+        traceId: 'trace-1',
+        source: 'dsh',
+        status: 'running',
+        activeAgentCount: 4,
+        activeChildCount: 4,
+        waitingInteractionCount: 0,
+        rootActive: false,
+        acceptingInput: true,
+        revision: 2,
+        changedAt: 2000,
+      })
+    ).toBe(true);
+
+    expect(answerMsg.messageState).toBe(IMessageState.Done);
+    expect(answerMsg.thinkDone).toBe(true);
+    expect(updateMessage).toHaveBeenCalledWith(answerMsg);
+    expect(chatSessionRuntimeManager.isSessionRunning('s1')).toBe(true);
+    expect(chatSessionRuntimeManager.canAcceptInput('s1')).toBe(true);
+
+    handleParsedChatStream(createParsed());
+    expect(flowHandler).toHaveBeenCalledTimes(1);
+    expect(answerMsg.messageState).toBe(IMessageState.Done);
+    expect(answerMsg.thinkDone).toBe(true);
+
+    expect(
+      handleSessionRuntimeState({
+        sessionId: 's1',
+        traceId: 'trace-1',
+        source: 'dsh',
+        status: 'idle',
+        activeAgentCount: 0,
+        activeChildCount: 0,
+        waitingInteractionCount: 0,
+        rootActive: false,
+        acceptingInput: true,
+        revision: 3,
+        changedAt: 3000,
+      })
+    ).toBe(true);
+
+    expect(answerMsg.messageState).toBe(IMessageState.Done);
+    expect(answerMsg.thinkDone).toBe(true);
+  });
+
+  it('applies only the latest task plan snapshot to the active answer', () => {
+    const queryMsg: any = { msgId: 'q1', sessionId: 's1' };
+    const answerMsg: any = { msgId: 'c1', messageId: 'm1', sessionId: 's1', messageState: IMessageState.Answer };
+    const updateMessage = jest.fn((msg) => msg);
+
+    registerPendingChatContext({
+      clientRequestId: 'c1',
+      queryMsg,
+      answerMsg,
+      getMessageList: () => [queryMsg, answerMsg],
+      flowHandler: jest.fn(),
+      updateMessage,
+    });
+
+    const createSnapshot = (version: number, status: string) => ({
+      type: 'TASK_PLAN_SNAPSHOT',
+      sessionId: 's1',
+      messageId: 'm1',
+      traceId: 'trace-1',
+      data: {
+        planId: 'plan-1',
+        version,
+        title: 'Plan',
+        status: 'ACTIVE',
+        sessionId: 's1',
+        messageId: 'm1',
+        traceId: 'trace-1',
+        tasks: [{ taskId: 'task-1', position: 1, title: 'Step 1', status }],
+      },
+    });
+
+    expect(handleTaskPlanSnapshot(createSnapshot(2, 'COMPLETED'))).toBe(true);
+    expect(handleTaskPlanSnapshot(createSnapshot(1, 'IN_PROGRESS'))).toBe(true);
+
+    expect(answerMsg.taskPlan.version).toBe(2);
+    expect(answerMsg.taskPlan.tasks[0].status).toBe('COMPLETED');
+    expect(updateMessage).toHaveBeenCalledTimes(1);
   });
 
   it('buffers restored stream messages while snapshot is loading and replays by streamId', () => {

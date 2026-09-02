@@ -26,4 +26,10 @@ public class Volume {
     private String subPath;
 
     private String scope;
+
+    private Integer uid;
+
+    private Integer gid;
+
+    private String mode;
 }

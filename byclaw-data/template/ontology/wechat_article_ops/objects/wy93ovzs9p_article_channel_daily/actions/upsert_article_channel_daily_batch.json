@@ -1,0 +1,124 @@
+{
+  "action_code": "upsert_article_channel_daily_batch",
+  "action_name": "批量写入或更新文章每日渠道指标",
+  "action_type": "OPERATION",
+  "action_desc": "按 (article_id,stat_date,channel) 业务键批量写入/更新渠道指标；批次内共享 metric_mode；返回每行 success/operation 与汇总 inserted/updated/failed",
+  "permission_roles": [
+    "ops",
+    "admin"
+  ],
+  "params": [
+    {
+      "paramCode": "projectId",
+      "paramName": "项目ID",
+      "type": "string",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
+      "paramCode": "account_code",
+      "paramName": "公众号编码",
+      "type": "string",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
+      "paramCode": "account_name",
+      "paramName": "公众号名称",
+      "type": "string",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
+      "paramCode": "article_id",
+      "paramName": "文章ID",
+      "type": "integer",
+      "isRequired": true,
+      "direction": "input",
+      "term_type_code": "wy93ovzs9p_article_title",
+      "term_data_type": "LIST_TERM"
+    },
+    {
+      "paramCode": "stat_date",
+      "paramName": "统计日期（YYYY-MM-DD）",
+      "type": "date",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
+      "paramCode": "metric_mode",
+      "paramName": "指标口径",
+      "type": "string",
+      "isRequired": true,
+      "direction": "input",
+      "term_type_code": "wy93ovzs9p_article_channel_daily_metric_mode",
+      "term_data_type": "DICT_TERM"
+    },
+    {
+      "paramCode": "items",
+      "paramName": "渠道指标JSON数组字符串（兼容对象列表）。每项对象字段：channel（string，必填，枚举：全部、公众号消息、公众号会话、聊天会话、朋友圈、公众号主页、推荐、搜一搜、其他）；read_count（integer，可选，大于等于0）；share_count（integer，可选，大于等于0）。示例对象字段值：channel=\"推荐\"，read_count=48，share_count=0",
+      "paramType": "STRING",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
+      "paramCode": "success",
+      "paramName": "是否成功",
+      "type": "boolean",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "operation",
+      "paramName": "操作类型",
+      "type": "string",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "id",
+      "paramName": "记录ID",
+      "type": "integer",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "channel",
+      "paramName": "渠道",
+      "type": "string",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "metric_mode_out",
+      "paramName": "指标口径(回显)",
+      "type": "string",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "index",
+      "paramName": "批次内序号",
+      "type": "integer",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "error",
+      "paramName": "错误描述",
+      "type": "string",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "code",
+      "paramName": "错误码",
+      "type": "string",
+      "isRequired": false,
+      "direction": "output"
+    }
+  ],
+  "object_references": [
+    "wy93ovzs9p_article"
+  ]
+}

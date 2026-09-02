@@ -1,8 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 import { LeftOutlined } from '@ant-design/icons';
 // @ts-ignore
-import { useSelector, history, useNavigate, useSearchParams, useIntl, useDispatch } from '@umijs/max';
+import { history, useLocation, useNavigate, useSearchParams, useIntl, useDispatch } from '@umijs/max';
 import { Space, Typography, Spin, message } from 'antd';
 import classnames from 'classnames';
 import { isEmpty, set, get } from 'lodash';
@@ -17,7 +17,6 @@ import { queryResourceOperationPermissions } from '@/pages/manager/service/resou
 import { IAgentCache } from '@/typescript/agent';
 import { getAgentChatAvatar, agentHandler, isSandboxAgent } from '@/utils/agent';
 import { AgentInfo } from '@/pages/digitalEmployees/components/AllDigitalEmployees/components/AvatarCardItem';
-// import useAppStore from '@/models/common/useAppStore';
 import { getAllDigitalEmployeesV2 } from '@/service/digitalEmployees';
 import { getStoredProjectScopeId } from '@/pages/projectSpace/constants';
 
@@ -25,8 +24,6 @@ import RenderRightTop from '../digitalEmployees/components/AllDigitalEmployees/R
 import RenderRightBottom from '../digitalEmployees/components/AllDigitalEmployees/RenderRightBottom';
 import AgentIframe from './components/AgentIframe';
 import { canShowEmployeeChat, type EmployeeUsePermission } from './chatPermission';
-// import ScheduleTaskModal from './components/ScheduleTaskModal';
-// import ScheduleTaskList from './components/ScheduleTaskList';
 
 import styles from './index.module.less';
 
@@ -47,20 +44,16 @@ const getStoredProjectChatContext = (): ProjectChatContext => {
 };
 
 const Employees = () => {
-  // const { ENV } = useAppStore();
-  // const isScheduleTaskEnabled = !ENV?.includes?.('scheduleTask');
-
   const intl = useIntl();
   const dispatch = useDispatch();
+  const location = useLocation();
   const navigate = useNavigate();
   const globalContext = useGlobal();
-  const { sessionId, agentId, EventEmitter, setAgentId, agentInfo } = globalContext;
+  const { sessionId, agentId, EventEmitter, setAgentId, setSessionId, agentInfo } = globalContext;
 
-  const [searchParams, setSearchParams] = useSearchParams();
-
-  const { employeesList } = useSelector(({ employees }) => ({
-    employeesList: employees.employeesList,
-  }));
+  const [searchParams] = useSearchParams();
+  const routeAgentIdRef = useRef('');
+  const syncedRouteAgentIdRef = useRef('');
 
   const [isBottom, setIsBottom] = useState(!!sessionId);
   const [isLoading, setIsLoading] = useState(true);
@@ -71,35 +64,45 @@ const Employees = () => {
   const [coreCompetencies, setCoreCompetencies] = useState<any[]>([]);
   const [employeeUsePermission, setEmployeeUsePermission] = useState<EmployeeUsePermission | null>(null);
 
-  // const [scheduleTaskVisible, setScheduleTaskVisible] = useState(false);
-  // const [editTask, setEditTask] = useState<any>(null);
-  // const [taskListRefreshKey, setTaskListRefreshKey] = useState(0);
+  const searchParamAgentId = searchParams.get('agentId') || '';
+  const routeState = location.state as {
+    selectedAgentId?: string;
+    selectedEmployee?: IAgentCache;
+    keepSiderActiveKey?: string;
+    initialQuestion?: string;
+  } | null;
+  const routeStateAgentId = `${routeState?.selectedAgentId || ''}`;
+  const routeStateEmployee = routeState?.selectedEmployee;
+  const initialQuestion = `${routeState?.initialQuestion || ''}`.trim();
+  const initialQuestionSentRef = useRef(false);
+  const previousRouteSelectionRef = useRef('');
+  const staleEmployeeSessionIdRef = useRef('');
+  const fileUploadSessionIdRef = useRef('');
+  if (routeStateAgentId && previousRouteSelectionRef.current !== routeStateAgentId) {
+    previousRouteSelectionRef.current = routeStateAgentId;
+    // 从右侧列表打开新员工时，当前 sessionId 可能由浏览器历史恢复自上一员工，先标记为待隔离旧会话。
+    staleEmployeeSessionIdRef.current = sessionId || '';
+  }
+  const employeeSessionId =
+    staleEmployeeSessionIdRef.current && sessionId === staleEmployeeSessionIdRef.current ? '' : sessionId;
+  if (searchParamAgentId) routeAgentIdRef.current = searchParamAgentId;
+  // 卡片点击路由状态优先于浏览器历史中的全局 agentId，避免返回列表后旧员工覆盖本次新选择。
+  const myAgentId = searchParamAgentId || routeStateAgentId || agentId || routeAgentIdRef.current;
+  const detailAgentInfo = useMemo(() => {
+    const selectedEmployee = routeStateEmployee || agentInfo;
+    if (!selectedEmployee) {
+      return selectedEmployee;
+    }
 
-  const myAgentId = agentId || searchParams.get('agentId');
+    // 左侧小列表只返回员工摘要；将资源详情的创建者补回，保证两个入口展示一致。
+    return {
+      ...selectedEmployee,
+      creatorName: selectedEmployee.creatorName || appInfo?.creatorName || appInfo?.createUserName,
+      createUserName: selectedEmployee.createUserName || appInfo?.createUserName || appInfo?.creatorName,
+    };
+  }, [agentInfo, appInfo?.createUserName, appInfo?.creatorName, routeStateEmployee]);
   const employeeTab = searchParams.get('tab');
-  const employeeResourceId = `${agentInfo?.resourceId || agentInfo?.id || ''}`;
-
-  // const handleScheduleTaskOk = (values: any) => {
-  //   // 创建/更新成功后刷新任务列表
-  //   console.log('定时任务操作成功:', values);
-  //   setTaskListRefreshKey((prev) => prev + 1);
-  //   setEditTask(null); // 清空编辑任务
-  // };
-
-  // const handleRefreshTaskList = () => {
-  //   // 刷新任务列表的回调
-  //   setTaskListRefreshKey((prev) => prev + 1);
-  // };
-
-  // const handleEditTask = (task: any) => {
-  //   setEditTask(task);
-  //   setScheduleTaskVisible(true);
-  // };
-
-  // const handleAddTask = () => {
-  //   setEditTask(null); // 清空编辑任务
-  //   setScheduleTaskVisible(true);
-  // };
+  const employeeResourceId = `${detailAgentInfo?.resourceId || detailAgentInfo?.id || ''}`;
 
   const { descText, sampleQuestionList, prologueText } = useMemo(() => {
     const payload = {
@@ -128,55 +131,84 @@ const Employees = () => {
     return canShowEmployeeChat(employeeTab, employeeResourceId, employeeUsePermission);
   }, [employeeResourceId, employeeTab, employeeUsePermission]);
 
+  useEffect(() => {
+    initialQuestionSentRef.current = false;
+  }, [initialQuestion, myAgentId]);
+
+  useEffect(() => {
+    if (!initialQuestion || !canChat || initialQuestionSentRef.current || !detailAgentInfo) return;
+    // 等输入组件挂载后回填推荐问题，避免路由切换时事件早于 QueryInput 监听器注册。
+    const timer = window.setTimeout(() => {
+      if (initialQuestionSentRef.current) return;
+      initialQuestionSentRef.current = true;
+      EventEmitter.emit('queryInput-set-value', initialQuestion);
+    }, 1000);
+    return () => window.clearTimeout(timer);
+  }, [EventEmitter, canChat, detailAgentInfo, initialQuestion]);
+
   const disableActionList = React.useMemo(() => {
     const list: ('delete' | 'apply' | 'unapply')[] = [];
 
     return list;
   }, []);
 
-  const myQueryResourceDetail = React.useCallback((payload: { resourceCode?: string; resourceId?: string }) => {
-    // 普通数字员工
-    return queryResourceDetail(payload)
-      .then((res: any) => {
-        if (!res) return;
+  const myQueryResourceDetail = React.useCallback(
+    (payload: { resourceCode?: string; resourceId?: string }) => {
+      // 普通数字员工
+      return queryResourceDetail(payload)
+        .then((res: any) => {
+          if (!res) return;
 
-        setAppInfo(res);
+          setAppInfo(res);
 
-        // 解析 coreCompetencies
-        try {
-          const coreCompetenciesStr = res?.param?.coreCompetencies;
-          if (coreCompetenciesStr) {
-            const parsed = JSON.parse(coreCompetenciesStr);
-            setCoreCompetencies(Array.isArray(parsed) ? parsed : []);
-          } else {
+          // 解析 coreCompetencies
+          try {
+            const coreCompetenciesStr = res?.param?.coreCompetencies;
+            if (coreCompetenciesStr) {
+              const parsed = JSON.parse(coreCompetenciesStr);
+              setCoreCompetencies(Array.isArray(parsed) ? parsed : []);
+            } else {
+              setCoreCompetencies([]);
+            }
+            if (res?.param?.agentHomeUrl) {
+              if (isSandboxAgent(res?.param)) {
+                dispatch({
+                  type: 'employees/updateEmployee',
+                  payload: {
+                    employee: {
+                      agentId: res?.param?.resourceId,
+                      agentHomeUrl: res?.param?.agentHomeUrl,
+                    },
+                  },
+                });
+              }
+            }
+          } catch (error) {
+            console.error('解析 coreCompetencies 失败:', error);
             setCoreCompetencies([]);
           }
-          if (res?.param?.agentHomeUrl) {
-            if (isSandboxAgent(res?.param)) {
-              dispatch({
-                type: 'employees/updateEmployee',
-                payload: {
-                  employee: {
-                    agentId: res?.param?.resourceId,
-                    agentHomeUrl: res?.param?.agentHomeUrl,
-                  },
-                },
-              });
-            }
-          }
-        } catch (error) {
-          console.error('解析 coreCompetencies 失败:', error);
-          setCoreCompetencies([]);
-        }
-      })
-      .catch((e) => {
-        console.error(e);
-      });
-  }, []);
+        })
+        .catch((e) => {
+          console.error(e);
+        });
+    },
+    [dispatch]
+  );
 
   useEffect(() => {
-    setIsBottom(!!sessionId);
-  }, [sessionId]);
+    // 同一路由连续切换数字员工时重置为详情展示态，不能复用上一员工已经进入的会话态。
+    if (fileUploadSessionIdRef.current) {
+      if (`${employeeSessionId || ''}` === fileUploadSessionIdRef.current) return;
+      fileUploadSessionIdRef.current = '';
+    }
+    setIsBottom(!!employeeSessionId);
+  }, [employeeSessionId, myAgentId]);
+
+  useEffect(() => {
+    if (!routeStateAgentId || !sessionId || sessionId !== staleEmployeeSessionIdRef.current) return;
+    // 清除上一员工的旧会话；后续当前员工发送首条消息生成的新 sessionId 不会被拦截。
+    setSessionId?.('');
+  }, [routeStateAgentId, sessionId, setSessionId]);
 
   useEffect(() => {
     const handleActiveProjectChange = (payload: { projectId?: string | number; projectName?: string }) => {
@@ -200,11 +232,11 @@ const Employees = () => {
 
   const projectChatExtraParams = useMemo(() => {
     // 已存在会话不应因左侧项目切换而改变归属，仅新会话首条消息携带项目。
-    if (sessionId || !projectChatContext.projectId) {
+    if (employeeSessionId || !projectChatContext.projectId) {
       return {};
     }
     return projectChatContext;
-  }, [projectChatContext, sessionId]);
+  }, [employeeSessionId, projectChatContext]);
 
   useEffect(() => {
     if (employeeTab !== 'enterprise' || !employeeResourceId) {
@@ -239,33 +271,34 @@ const Employees = () => {
   }, [employeeResourceId, employeeTab]);
 
   useEffect(() => {
-    // 当redirectUrl中带有agentId，pclayout中的searchParams获取不到agentId
-    const newSearchParams = new URLSearchParams(window.location.search);
-    const searchParamAgentId = newSearchParams.get('agentId');
-
-    if (searchParamAgentId) {
+    if (!searchParamAgentId || syncedRouteAgentIdRef.current === searchParamAgentId) return;
+    // 仅兼容外部直达链接并同步一次，不能持续用 URL 覆盖详情页内部的员工状态。
+    syncedRouteAgentIdRef.current = searchParamAgentId;
+    if (searchParamAgentId !== agentId) {
       setAgentId?.(searchParamAgentId);
-
-      newSearchParams.delete('agentId');
-      setSearchParams(newSearchParams);
     }
-  }, [setAgentId]);
+  }, [agentId, searchParamAgentId, setAgentId]);
+
+  useEffect(() => {
+    if (!routeStateAgentId || routeStateAgentId === agentId) return;
+    // 浏览器返回可能恢复上一条 history.state，这里以当前卡片显式传入的员工为准重新同步全局状态。
+    setAgentId?.(routeStateAgentId);
+  }, [agentId, routeStateAgentId, setAgentId]);
 
   useEffect(() => {
     if (!myAgentId) {
       setIsLoading(false);
-      if (!sessionId) {
-        navigate('/chat', {
+      if (!employeeSessionId) {
+        navigate('/digitalEmployees', {
           replace: true,
+          state: { keepSiderActiveKey: 'agent' },
         });
       }
 
       return;
     }
 
-    if (agentInfo || isEmpty(employeesList)) {
-      return;
-    }
+    if (detailAgentInfo) return;
 
     setIsLoading(true);
 
@@ -284,8 +317,9 @@ const Employees = () => {
         } else {
           message.error('The digital employee does not exist!');
           setAgentId?.('');
-          navigate('/chat', {
+          navigate('/digitalEmployees', {
             replace: true,
+            state: { keepSiderActiveKey: 'agent' },
           });
         }
       })
@@ -295,31 +329,31 @@ const Employees = () => {
       .finally(() => {
         setIsLoading(false);
       });
-  }, [myAgentId, agentInfo, employeesList]);
+  }, [detailAgentInfo, dispatch, employeeSessionId, intl, myAgentId, navigate, setAgentId]);
+
+  const agentResourceCode = detailAgentInfo?.resourceCode;
+  const agentResourceId = detailAgentInfo?.resourceId || detailAgentInfo?.id;
 
   useEffect(() => {
-    if (isEmpty(agentInfo)) return;
+    if (!agentResourceCode && !agentResourceId) return;
 
-    if (agentInfo?.resourceCode) {
-      setAppInfo({});
+    setAppInfo({});
 
-      const payload = {
-        resourceCode: agentInfo.resourceCode,
-      };
+    setIsLoading(true);
+    myQueryResourceDetail(
+      agentResourceCode ? { resourceCode: agentResourceCode } : { resourceId: `${agentResourceId}` }
+    ).finally(() => {
+      setIsLoading(false);
+    });
+    // 只在员工业务标识变化时刷新详情；列表轮询产生的新对象不能让详情页反复进入 loading。
+  }, [agentResourceCode, agentResourceId, myQueryResourceDetail]);
 
-      setIsLoading(true);
-      myQueryResourceDetail(payload).finally(() => {
-        setIsLoading(false);
-      });
-    }
-  }, [agentInfo]);
-
-  if (isLoading && !sessionId) {
+  if (isLoading && !employeeSessionId) {
     return <Spin spinning className={classnames(styles.spinningWrapper, 'ub ub-ac ub-pc')} />;
   }
 
-  if (agentInfo?.agentHomeUrl) {
-    return <AgentIframe agent={agentInfo as IAgentCache} />;
+  if (detailAgentInfo?.agentHomeUrl) {
+    return <AgentIframe agent={detailAgentInfo as IAgentCache} />;
   }
 
   return (
@@ -329,7 +363,7 @@ const Employees = () => {
           className={classnames(styles.homePage, 'ub ub-ver overflow-hidden ub-f1 minW550')}
           data-isbottom={isBottom}
         >
-          {!sessionId && (
+          {!employeeSessionId && (
             <div className="ub ub-ac" style={{ padding: '12px 16px', justifyContent: 'space-between' }}>
               <LeftOutlined
                 className="pointer"
@@ -339,26 +373,19 @@ const Employees = () => {
                   history.back();
                 }}
               />
-              {/* {isScheduleTaskEnabled && canChat && (
-                <ScheduleTaskList
-                  agentInfo={agentInfo as IAgentCache}
-                  onAddTask={handleAddTask}
-                  onEditTask={handleEditTask}
-                  onRefresh={handleRefreshTaskList}
-                  refreshKey={taskListRefreshKey}
-                />
-              )} */}
             </div>
           )}
           {!isBottom && (
             <div className="ub-f2 overflow-auto">
               <div className={classnames(styles.agentCard, 'mW800')}>
                 <div className={classnames(styles.agentCardHeader, 'ub')}>
-                  <EmployeesDrawer coreCompetencies={coreCompetencies} agentInfo={agentInfo}>
-                    <div className={classnames(styles.agentAvatar)}>{getAgentChatAvatar(agentInfo?.chatAvatar)}</div>
+                  <EmployeesDrawer coreCompetencies={coreCompetencies} agentInfo={detailAgentInfo}>
+                    <div className={classnames(styles.agentAvatar)}>
+                      {getAgentChatAvatar(detailAgentInfo?.chatAvatar)}
+                    </div>
                   </EmployeesDrawer>
                   <div className="ub ub-ver ub-pj ub-f1">
-                    <div className={styles.agentName}>{agentInfo?.name}</div>
+                    <div className={styles.agentName}>{detailAgentInfo?.name}</div>
                     <Paragraph
                       className={styles.agentDescription}
                       ellipsis={{
@@ -370,12 +397,15 @@ const Employees = () => {
                       {descText}
                     </Paragraph>
                     <div className={styles.agentDescriptionMore}>
-                      <AgentInfo employee={agentInfo as IAgentCache} className={styles.agentInfo} />
+                      <AgentInfo employee={detailAgentInfo as IAgentCache} className={styles.agentInfo} />
                     </div>
                     <div className={styles.agentAction}>
                       <Space>
-                        <RenderRightTop employee={agentInfo as IAgentCache} size={undefined} />
-                        <RenderRightBottom employee={agentInfo as IAgentCache} disableActionList={disableActionList} />
+                        <RenderRightTop employee={detailAgentInfo as IAgentCache} size={undefined} />
+                        <RenderRightBottom
+                          employee={detailAgentInfo as IAgentCache}
+                          disableActionList={disableActionList}
+                        />
                       </Space>
                     </div>
                   </div>
@@ -405,32 +435,41 @@ const Employees = () => {
           {canChat && (
             <div className={classnames({ 'ub-f1': isBottom })}>
               <ChatLayoutComp
-                sessionId={sessionId || ''}
+                // 员工变化时重建聊天实例，清理上一员工遗留的消息与输入布局状态。
+                key={`employee-chat-${myAgentId || 'empty'}`}
+                sessionId={employeeSessionId || ''}
                 getContainer={() => document.getElementById('employees_wrapper')}
-                agentType={agentInfo?.agentType || agentTypeMap.agent}
+                agentType={detailAgentInfo?.agentType || agentTypeMap.agent}
                 queryInputProps={{
                   placeholder: '',
+                  onMounted: () => {
+                    if (!initialQuestion || initialQuestionSentRef.current) return;
+                    initialQuestionSentRef.current = true;
+                    EventEmitter.emit('queryInput-set-value', initialQuestion);
+                  },
+                  onFileUploadSessionCreated: (newSessionId: string) => {
+                    // 员工详情上传文件会提前创建会话，但仍保持员工介绍页，发送消息后再进入聊天态。
+                    if (employeeSessionId) return;
+                    fileUploadSessionIdRef.current = `${newSessionId}`;
+                    setIsBottom(false);
+                  },
                 }}
+                // 员工详情页进入聊天态后仍保持与新建任务一致的白色输入区域，避免回退成数字员工输入框的灰色样式。
+                queryInputWrapperClassName={styles.employeeQueryInputWrapper}
+                // 员工详情固定与当前数字员工聊天，不显示 @ 入口，也不恢复任何历史输入草稿。
+                cannotAt
+                disableInputDraft
                 isBottom={isBottom}
                 setIsBottom={setIsBottom}
+                // 打开或切换员工时保持详情态；只有当前员工发送成功后才进入聊天态。
+                autoEnterBottomOnMessage={false}
                 sendExtraParams={projectChatExtraParams}
+                preserveNewSessionView
               />
             </div>
           )}
         </div>
       </div>
-
-      {/* 添加/编辑定时任务弹窗 */}
-      {/* <ScheduleTaskModal
-        open={scheduleTaskVisible}
-        onClose={() => {
-          setScheduleTaskVisible(false);
-          setEditTask(null); // 关闭时清空编辑任务
-        }}
-        agentInfo={agentInfo as IAgentCache}
-        onOk={handleScheduleTaskOk}
-        editTask={editTask}
-      /> */}
     </>
   );
 };

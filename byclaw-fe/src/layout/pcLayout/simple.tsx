@@ -87,7 +87,12 @@ const SimpleLayout = () => {
 
   const curAgentInfo = React.useMemo(() => {
     return [...(agentList || []), ...(employeesList || [])].find(
-      (item) => `${item.id}` === `${agentId}` || `${item.resourceCode}` === `${agentId}`
+      // 不同员工接口分别返回 id、resourceId、resourceCode 或 agentId，详情页需统一兼容。
+      (item) =>
+        `${item.agentId}` === `${agentId}` ||
+        `${item.resourceId}` === `${agentId}` ||
+        `${item.id}` === `${agentId}` ||
+        `${item.resourceCode}` === `${agentId}`
     );
   }, [agentList, employeesList, agentId]);
 

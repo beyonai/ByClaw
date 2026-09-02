@@ -23,6 +23,9 @@ public class ModelListRequest implements Serializable {
     /** 状态过滤：ENABLED/DISABLED/TESTING */
     private String status;
 
+    /** 模型类型过滤：LLM/EMBEDDING/IMAGE_GENERATION */
+    private String modelType;
+
     /** 能力过滤：VISION/FUNCTION_CALL/STREAM 等 */
     private Long ability;
 

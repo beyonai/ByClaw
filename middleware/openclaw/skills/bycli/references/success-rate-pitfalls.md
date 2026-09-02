@@ -130,7 +130,7 @@
 
 **防御**：
 - 邻居 adapter 的 `requestTimeoutMs` / `browser.wait` 配置**不能盲抄**。每个 adapter 应该结合自己的接口特性设一个
-- 真实接口延迟：Step 5 endpoint 验证时用 `time curl`（或 `performance.now()` 包 fetch）量一下 p50 / p95，timeout 设 p95 × 2 比较安全
+- 真实接口延迟：Step 5 endpoint 验证时，用 byCLI browser-context 的 `performance.now()` 包住请求来量 p50 / p95，timeout 设 p95 × 2 比较安全
 - 出现偶发 timeout 别 retry 掩盖；记到 `notes.md`，下次就知道这接口 p95 偏高
 
 ---

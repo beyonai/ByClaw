@@ -24,7 +24,12 @@ import { agentHandler } from '@/utils/agent';
 import { getDefaultPagination, paginationReducer } from '@/utils/pageInfo';
 import useGlobal from '@/hooks/useGlobal';
 import EmptyTips from '@/components/EmptyTips';
-import { EmployeeListProps, EmployeeListContext, isInputMode } from '@/layout/sider/components/EmployeeList';
+import {
+  EmployeeListProps,
+  EmployeeListContext,
+  isExcludedEmployee,
+  isInputMode,
+} from '@/layout/sider/components/EmployeeList';
 import { Platform } from '@/layout/components/provider/global';
 import { agentTypeMap } from '@/constants/agent';
 import { sortBySuperHelperFirst } from '@/layout/sider/components/EmployeeList/util';
@@ -255,7 +260,7 @@ const AllEmployees = (props: IProps, ref: ForwardedRef<IRef>) => {
       {!isLoading && (
         <div
           id="allEmployeeListWrap"
-          className={classNames('full-height overflow-auto', {
+          className={classNames('full-height overflow-auto', pStyles.employeeListScrollWrap, {
             hideThumb: !isInput,
           })}
         >
@@ -269,6 +274,7 @@ const AllEmployees = (props: IProps, ref: ForwardedRef<IRef>) => {
             hasMore={hasMore}
             dataLength={employeesList.length}
             hasChildren={employeesList.length > 0}
+            height={props.compactCard ? '100%' : undefined}
             loader={
               <Skeleton avatar={{ size: 'default', shape: 'circle' }} paragraph={false} active style={{ padding: 8 }} />
             }
@@ -282,14 +288,15 @@ const AllEmployees = (props: IProps, ref: ForwardedRef<IRef>) => {
                 </Divider>
               )
             }
-            scrollableTarget="allEmployeeListWrap"
+            scrollableTarget={props.compactCard ? undefined : 'allEmployeeListWrap'}
             inverse={false}
             scrollThreshold="50px"
-            style={{ overflow: 'visible', paddingBottom: hasMore ? '20px' : 0 }}
+            // 紧凑弹窗与技能列表一致，由 InfiniteScroll 自身承载列表滚动。
+            style={{ overflow: props.compactCard ? 'auto' : 'visible', paddingBottom: hasMore ? '20px' : 0 }}
           >
             <List
               className={pStyles.employeesList}
-              dataSource={employeesList}
+              dataSource={employeesList.filter((employee) => !isExcludedEmployee(employee, props.excludedAgentIds))}
               split={false}
               renderItem={(item) => {
                 const canDrag = true;

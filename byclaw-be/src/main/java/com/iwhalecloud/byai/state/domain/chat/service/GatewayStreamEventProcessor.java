@@ -150,9 +150,25 @@ public class GatewayStreamEventProcessor {
         String eventType = dataJson.getString("event_type");
         String sourceAgentType = dataJson.getString("source_agent_type");
         if (!isTargetAgentType(ctx, sourceAgentType) && SseResponseEventEnum.answerDelta.equals(eventType)) {
-            return SseResponseEventEnum.reasoningLogDelta;
+            boolean visibleProjection = isExplicitVisibleProjection(dataJson);
+            if (!visibleProjection) {
+                return SseResponseEventEnum.reasoningLogDelta;
+            }
         }
         return eventType;
+    }
+
+    private boolean isExplicitVisibleProjection(JSONObject dataJson) {
+        if (dataJson == null) {
+            return false;
+        }
+        JSONObject metadata = dataJson.getJSONObject("metadata");
+        if (metadata == null) {
+            return false;
+        }
+        String sessionScope = metadata.getString("session_scope");
+        String eventKind = metadata.getString("event_kind");
+        return StringUtils.isNotBlank(sessionScope) && StringUtils.isNotBlank(eventKind);
     }
 
     public boolean shouldIgnoreEvent(ChatProcessContext ctx, String eventType, JSONObject dataJson) {

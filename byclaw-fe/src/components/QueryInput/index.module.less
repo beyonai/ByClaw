@@ -141,6 +141,224 @@
   .toolsRight {
     margin-left: auto;
   }
+
+  .addToolButton {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    color: var(--beyond-color-text-secondary);
+    background: var(--beyond-color-fill-quaternary);
+    border-radius: 50%;
+
+    &:hover {
+      color: var(--beyond-color-primary);
+      background: var(--beyond-color-fill-tertiary);
+    }
+  }
+}
+
+.toolsPopover {
+  :global {
+    .@{antPrefix}-popover-inner {
+      padding: 0;
+      border: 1px solid var(--beyond-color-border-secondary);
+      border-radius: 14px;
+      box-shadow: 0 8px 24px rgb(0 0 0 / 12%);
+    }
+  }
+}
+
+.outsideTools {
+  display: flex;
+  align-items: center;
+
+  &.outsideToolsWithTools {
+    margin-left: 12px;
+  }
+
+  :global(.byclaw-connector-outside-tool:empty) {
+    display: none;
+  }
+
+  :global {
+    .@{antPrefix}-space:has(> .@{antPrefix}-space-item:nth-child(4)) {
+      > .@{antPrefix}-space-item:nth-child(-n + 3) {
+        display: none;
+      }
+
+      // + 菜单收纳 @/# 等入口，但已启用连接器仍需保留在输入框底部。
+      > .@{antPrefix}-space-item:has(.byclaw-connector-outside-tool) {
+        display: flex;
+      }
+    }
+  }
+}
+
+.toolsMenu {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  height: 100%;
+  min-height: 0;
+  max-height: calc(100vh - 32px);
+  box-sizing: border-box;
+  padding: 4px;
+  overflow: hidden;
+
+  .toolsMenuNav {
+    width: 180px;
+    padding: 4px 6px 4px 4px;
+    border-right: 1px solid var(--beyond-color-border-secondary);
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+
+  .toolsMenuNavItem {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    height: 42px;
+    gap: 9px;
+    padding: 0 10px;
+    color: var(--beyond-color-text);
+    font-size: 14px;
+    text-align: left;
+    background: transparent;
+    border: 0;
+    border-radius: 12px;
+    cursor: pointer;
+
+    :global(.anticon:last-child) {
+      margin-left: auto;
+      font-size: 14px;
+    }
+
+    &:hover,
+    &:focus-visible {
+      background: var(--beyond-color-fill-tertiary);
+      outline: none;
+    }
+  }
+
+  .toolsMenuNavItemActive {
+    background: var(--beyond-color-fill-tertiary);
+  }
+
+  .toolsMenuNavDivider {
+    margin: 6px 10px;
+  }
+
+  .toolsMenuPanel {
+    flex: 1;
+    min-width: 0;
+    height: auto;
+    min-height: 0;
+    box-sizing: border-box;
+    overflow: hidden;
+    padding: 2px 4px;
+  }
+
+  .toolsMenuPanelFileResource {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+
+    .toolsMenuPanelContentActive {
+      display: flex;
+      flex: 1;
+      flex-direction: column;
+      min-height: 0;
+    }
+
+    .toolsMenuSection {
+      display: flex;
+      flex: 1;
+      align-items: stretch;
+      min-height: 0;
+      overflow: hidden;
+    }
+  }
+
+  .toolsMenuPanelContent {
+    display: none;
+    height: 100%;
+    min-height: 0;
+  }
+
+  .toolsMenuPanelContentActive {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+
+    > * {
+      min-height: 0;
+    }
+
+    :global(.connectorList) {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+    }
+  }
+
+  .toolsMenuPanel-expert,
+  .toolsMenuPanel-skill,
+  .toolsMenuPanel-connector,
+  .toolsMenuPanel-file {
+    :global {
+      .@{antPrefix}-space-item {
+        display: none;
+      }
+    }
+  }
+
+  .toolsMenuPanel-expert {
+    :global(.@{antPrefix}-space-item:nth-child(2)) {
+      display: flex;
+    }
+  }
+
+  .toolsMenuPanel-skill {
+    :global(.@{antPrefix}-space-item:nth-child(3)) {
+      display: flex;
+    }
+  }
+
+  .toolsMenuPanel-connector {
+    :global(.@{antPrefix}-space-item:nth-child(1)) {
+      display: flex;
+    }
+  }
+
+  .toolsMenuPanel-file {
+    :global(.@{antPrefix}-space-item:nth-child(4)) {
+      display: flex;
+    }
+  }
+
+  .toolsMenuSection {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+
+    :global {
+      .@{antPrefix}-space {
+        flex-wrap: wrap;
+        gap: 8px 12px !important;
+      }
+
+      .@{antPrefix}-btn {
+        min-height: 32px;
+      }
+    }
+  }
+
+  .toolsMenuDivider {
+    margin: 10px 0;
+  }
 }
 
 .inputUpperBlock {

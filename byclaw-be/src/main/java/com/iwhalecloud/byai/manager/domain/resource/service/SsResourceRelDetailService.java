@@ -3,6 +3,7 @@ package com.iwhalecloud.byai.manager.domain.resource.service;
 import com.baomidou.mybatisplus.extension.service.IService;
 import com.iwhalecloud.byai.manager.dto.resource.SsResourceRelDetailDTO;
 import com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail;
+
 import java.util.List;
 
 /**
@@ -23,7 +24,7 @@ public interface SsResourceRelDetailService extends IService<SsResourceRelDetail
      */
     List<SsResourceRelDetailDTO> querySkillsForOpenApi(Long resourceId);
 
-        List<SsResourceRelDetail> find(Long resourceId, Long relResourceId);
+    List<SsResourceRelDetail> find(Long resourceId, Long relResourceId);
 
     /**
      * 统计某资源被多少条关系明细引用（跨所有数字员工），用于虚拟资源孤儿判断。
@@ -32,4 +33,16 @@ public interface SsResourceRelDetailService extends IService<SsResourceRelDetail
      * @return 引用条数
      */
     long countByRelResourceId(Long relResourceId);
+
+
+    /**
+     * 保存数据员工组关系
+     *
+     * @param resourceId    资源标识
+     * @param relResourceId 关联数字员工
+     * @param teamRole      角色
+     * @param sortOrder     排序
+     */
+    SsResourceRelDetail saveDigEmployeeGroupRelDetail(Long resourceId, Long relResourceId, String teamRole, Integer sortOrder);
+
 }

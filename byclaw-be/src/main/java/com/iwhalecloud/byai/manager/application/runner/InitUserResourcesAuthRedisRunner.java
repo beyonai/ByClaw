@@ -19,8 +19,10 @@ import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -122,6 +124,8 @@ public class InitUserResourcesAuthRedisRunner implements ApplicationRunner {
                     try {
                         // 逐用户构建权限（包含USER直接授权 + ORG/POST/STATION继承授权）
                         Map<Long, Map<String, String>> batchResult = new HashMap<>();
+                        Map<Long, Map<String, String>> manageBatchResult = new HashMap<>();
+                        Set<Long> globalManagerUserIds = new HashSet<>();
                         for (Long userId : userIds) {
                             try {
                                 batchResult.put(userId, authApplicationService.buildUserAuthResources(userId));
@@ -129,10 +133,21 @@ public class InitUserResourcesAuthRedisRunner implements ApplicationRunner {
                                 logger.error("构建用户{}权限失败：{}", userId, e.getMessage(), e);
                                 batchResult.put(userId, new HashMap<>());
                             }
+                            try {
+                                manageBatchResult.put(userId, authApplicationService.buildUserManageResources(userId));
+                                if (authApplicationService.isGlobalResourceManagerByUserId(userId)) {
+                                    globalManagerUserIds.add(userId);
+                                }
+                            } catch (Exception e) {
+                                logger.error("构建用户{}管理权限失败：{}", userId, e.getMessage(), e);
+                                manageBatchResult.put(userId, new HashMap<>());
+                            }
                         }
 
                         // Pipeline批量写入Redis
                         authRedisApplicationService.pipelineBatchWriteUserAuth(batchResult);
+                        authRedisApplicationService.pipelineBatchWriteUserManageAuth(manageBatchResult,
+                            globalManagerUserIds);
 
                         totalUsers += userIds.size();
                     } catch (Exception e) {

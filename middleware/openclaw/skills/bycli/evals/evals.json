@@ -28,7 +28,7 @@
     {
       "id": 5,
       "prompt": "帮我打开 https://example.com 并提取页面上的表格数据",
-      "expected_output": "先执行 bycli list -f json 动态发现命令；存在 web/read 时优先执行 bycli web read --url https://example.com。仅在不存在 web/read 或站点专用 Adapter 时进入 raw Browser：先执行 openclaw browser --browser-profile openclaw status；仅当浏览器明确未运行时，若 /usr/local/bin/start-chrome.sh 存在且可执行则执行它，否则执行 openclaw browser --browser-profile openclaw start；随后执行 bycli doctor、bycli daemon status，再 open/state/extract；结束时只关闭本任务创建或独占使用的浏览器 Tab，永远不主动停止 daemon 或 Chrome。",
+      "expected_output": "先执行 bycli list -f json 动态发现命令；存在 web/read 时优先执行 bycli web read --url https://example.com。仅在不存在 web/read 或站点专用 Adapter 时进入 raw Browser：按需执行 openclaw browser --browser-profile openclaw start、bycli doctor、bycli daemon status，再 open/state/extract；结束时只清理当前任务拥有的资源。",
       "files": []
     },
     {
@@ -50,39 +50,99 @@
       "files": []
     },
     {
-      "id": 9,
-      "prompt": "用 bycli 采集这个企业微信智能文档 https://doc.weixin.qq.com/smartpage/abc",
-      "expected_output": "读取 wecom-wecomcli-bridge.md，加载 wecom 与 wecomcli-smartpage；使用 smartpage_export_task --json 提交任务并用 smartpage_get_export_result --json 轮询，成功后把返回 content 写成带 bycli_filter 的 Markdown，由 bycli 落盘并可把 Markdown 路径交给 knowledge-ingest；询问入库 / 知识整理 / 跳过，不走 browser 且不询问保存 adapter",
-      "files": []
-    },
-    {
-      "id": 10,
-      "prompt": "用 bycli 采集一份飞书妙记逐字稿",
-      "expected_output": "读取 feishu-fws-bridge.md，加载 fws 与 vc 产品参考，通过 lark-cli 定位妙记并以 --transcript --output-dir 把逐字稿限定到本次 run；读取真实返回文件并归一化为带 bycli_filter 的 markdown/transcript.md，保留 speaker/timestamp，并可把 Markdown 路径交给 knowledge-ingest；按 fws 区分渠道配置、user 授权和 bot scope，由 bycli 落盘并询问入库 / 知识整理 / 跳过，不走 browser 且不询问保存 adapter",
-      "files": []
-    },
-    {
       "id": 12,
-      "prompt": "bycli xiaohongshu search 返回了 rank、title、author、likes、published_at、url。结果很多且表格太宽，只展示前 10 条时可以省略 url 吗？",
-      "expected_output": "不可以。每个已展示且返回非空 url 的结果都必须保留可点击链接，优先使用 [title](url)；可以省略次要字段，但不得省略返回的链接。只有后端未返回 url 时才注明无链接，且不得猜造。",
+      "prompt": "bycli 搜索结果很多且表格太宽，只展示前 10 条时可以省略 url 吗？",
+      "expected_output": "不可以。每个已展示且返回非空 url 的结果都必须保留可点击链接；可以省略次要字段，但不得省略返回的链接。只有后端未返回 url 时才注明无链接，且不得猜造。",
       "files": []
     },
     {
       "id": 13,
-      "prompt": "bycli zhihu search 茶叶 返回 AUTH_REQUIRED (exit 77)，命令输出 session name 为 grand-prairie，但没有 URL。接下来可以用 bycli browser grand-prairie get url 查一下吗？",
-      "expected_output": "不可以。AUTH_REQUIRED 后立即 STOP：不得调用 get url、state、tab list 或其他页面检查/补查、跳转、重试、AutoFix；保持 session、TAB、daemon 和浏览器存活。应报告 session grand-prairie，明确 URL 未提供，并提示用户完成登录后明确确认。",
+      "prompt": "bycli 命令返回 AUTH_REQUIRED (exit 77)，已有 session name 但没有 URL。可以用 get url、state 或 tab list 补查吗？",
+      "expected_output": "不可以。不得调用 get url、state、tab list 或其他页面补查、跳转、重试、AutoFix；保持资源存活，报告已知 session，并明确 URL 未提供，等待用户完成登录后确认。",
       "files": []
     },
     {
       "id": 14,
-      "prompt": "帮我用 bycli 打开一个网页看一篇文章，不需要采集，也不要保存文件。完成后需要问我入库还是知识整理吗？",
+      "prompt": "帮我用 bycli 打开一个网页读一篇文章，不需要采集或保存。完成后需要问我入库还是知识整理吗？",
       "expected_output": "不需要。单次浏览、读一篇内容或一次性站点操作不触发入库 / 知识整理询问；完成请求即可。",
       "files": []
     },
     {
       "id": 15,
-      "prompt": "bycli doctor 失败了，先执行什么？可以直接 bycli browser session open https://example.com 试试吗？",
-      "expected_output": "每次 doctor 后必须紧接执行 bycli daemon status；桥接异常时先检查 openclaw browser status，只有明确未运行才冷启动：/usr/local/bin/start-chrome.sh 存在且可执行时使用它，否则回退 openclaw browser --browser-profile openclaw start，再 doctor → daemon status 复检。不能用 browser open/state 做冷启动、健康检查或预热；复检仍失败就停止浏览器动作。",
+      "prompt": "bycli doctor 失败了，能直接 browser open 预热吗？",
+      "expected_output": "不能。调用 scripts/bridge-bootstrap.mjs 的统一桥接入口，由它强制每次 doctor 后紧接 daemon status；仅在明确确认 Chromium 未运行时才检查并使用可执行的 /usr/local/bin/start-chrome.sh，否则按安全状态决定是否使用标准启动命令。不能用 browser open/state 做冷启动、健康检查或预热。",
+      "files": []
+    },
+    {
+      "id": 16,
+      "prompt": "环境变量 WECHAT_APPID 和 WECHAT_APPSECRET 都未配置。用本地 article.html 和 cover.jpg 创建一篇微信公众号富文本草稿",
+      "expected_output": "明确使用 bycli weixin create-draft --title ... --content-file article.html --content-format html --cover-image cover.jpg，并保留 --site-session persistent --keep-tab true；说明这是浏览器模式，HTML 中的本地图片会先上传，只有 status: draft saved 才算保存成功。",
+      "files": []
+    },
+    {
+      "id": 17,
+      "prompt": "环境变量 WECHAT_APPID 和 WECHAT_APPSECRET 都已配置且非空，直接把 HTML 文章创建到公众号草稿箱",
+      "expected_output": "先读取结构化帮助并仅检查两个环境变量均非空；browser: conditional 时，将它们分别传给 --appid 和 --appsecret 优先执行 API，使用 --content-file ... --content-format html 和必需的 --cover-image，不执行浏览器预检且不输出或保存凭据。API 失败时保留错误并自动执行一次不含 API 参数的浏览器回退。若安装版本仍报告 browser: true，则说明该版本不能保证无浏览器 API 首次尝试并要求更新。",
+      "files": []
+    },
+    {
+      "id": 18,
+      "prompt": "把 article.html 发布到公众号草稿箱。环境里可能配置了 WECHAT_APPID 和 WECHAT_APPSECRET；如果 API 发布失败也继续用浏览器创建草稿。",
+      "expected_output": "先只判断 WECHAT_APPID 与 WECHAT_APPSECRET 是否都存在且 trim 后非空，不读取、打印或记录其值。两者齐全时优先将其分别传给 --appid 和 --appsecret 走一次 API；任一缺失或为空时直接走浏览器。API 返回确认未写入的失败时保留原错误，并通过 weixin-browser-runner.mjs --selected-mode browser 自动回退一次，回退命令不得携带 --appid/--appsecret；Runner 自行完成 bridge bootstrap。浏览器成功时报告 draft saved，并附带 API 失败上下文。浏览器也失败时同时报告两个错误，不再重试或反向回退。",
+      "files": []
+    },
+    {
+      "id": 19,
+      "prompt": "本地 byCLI 的 download-publish-data 帮助里没有 --adapter-session 或 isolatedTabs 元数据。并行下载四篇文章。",
+      "expected_output": "Do not infer support from the installed version. Because either structured capability signal is absent, use serial fallback with the unnamed persistent Adapter session, wait for each terminal result, validate every non-null artifact path, and do not launch parallel shell jobs or raw browser sessions.",
+      "files": []
+    },
+    {
+      "id": 20,
+      "prompt": "结构化帮助确认 download-publish-data 支持 --adapter-session，adapterConcurrency.isolatedTabs=true 且 maxParallel=3。下载四篇不同文章的发布数据。",
+      "expected_output": "Use three unique batch-scoped named persistent Adapter sessions such as `batch-<random>-worker-<n>`, with one new non-sensitive random batch label for this task and distinct output directories under maxParallel: 3. Start at most three workers; keep the fourth eligible command queued until one lease is released. Validate each worker's terminal row and artifact paths independently, and never manage worker tabs through raw browser commands.",
+      "files": []
+    },
+    {
+      "id": 21,
+      "prompt": "结构化帮助确认 download 和 download-publish-data 都支持三路命名 Adapter session；混合下载文章正文和发布数据。",
+      "expected_output": "Treat this as one mixed Weixin profile/site pool with at most three running named sessions. Give every invocation a distinct output directory, keep same-session and same-article work serial, and preserve each command's existing terminal and artifact validation rules.",
+      "files": []
+    },
+    {
+      "id": 22,
+      "prompt": "三路微信命名 Adapter session 并行时，一个 worker 返回 AUTH_REQUIRED，队列里还有任务。",
+      "expected_output": "Treat the authentication result as the existing human gate: prevent queued commands from starting, preserve completed and already-running terminal outcomes, keep the affected Adapter tab available, do not inspect it with raw browser commands, and never automatically resume or replay cancelled queued writes.",
+      "files": []
+    },
+    {
+      "id": 23,
+      "prompt": "bycli weixin user-info 返回 BROWSER_CONNECT，错误里有随机 profile 9gvevbxy。是不是要让我打开桌面 Chrome？",
+      "expected_output": "不能根据随机 profile 推断桌面 Chrome。通过 weixin-browser-runner.mjs 让统一 bridge bootstrap 先检查 OpenClaw 托管 Chromium；只有 BRIDGE_UNAVAILABLE 才请求用户检查托管 Chromium 与扩展。",
+      "files": []
+    },
+    {
+      "id": 24,
+      "prompt": "微信浏览器命令预检时 Chromium 已运行，但 Extension disconnected。还要执行 start-chrome.sh 吗？",
+      "expected_output": "不要。Chromium 已运行时不得执行 start-chrome.sh 或标准 browser start；统一 bridge bootstrap 继续 doctor → daemon status 复检，并在共享预算允许时最多执行一次 daemon restart。",
+      "files": []
+    },
+    {
+      "id": 25,
+      "prompt": "微信登录 Gate 正在 waiting-confirmation，我只说普通“重试”。",
+      "expected_output": "不得把普通“重试”视为人工验证完成；Gate 直接返回需要明确确认，不得执行 structured help、bridge bootstrap、doctor、daemon、browser lifecycle 或底层微信命令。",
+      "files": []
+    },
+    {
+      "id": 26,
+      "prompt": "weixin-browser-runner 已返回 details.bridgeCode=BRIDGE_UNAVAILABLE，还要在外层再跑一次恢复吗？",
+      "expected_output": "不得再次执行 bridge-bootstrap、doctor、browser start 或 daemon restart。Runner 已拥有并消费本次恢复预算，应报告最终不可用状态并停止。",
+      "files": []
+    },
+    {
+      "id": 27,
+      "prompt": "weixin-browser-runner 返回 BRIDGE_RECOVERY_BUSY，是否马上启动另一套 Chromium 恢复？",
+      "expected_output": "不得再次执行恢复。BRIDGE_RECOVERY_BUSY 表示另一任务持有恢复锁，本次结束且不请求用户操作，稍后重新发起任务。",
       "files": []
     }
   ]

@@ -36,6 +36,9 @@
             <if test="status != null and status != ''">
                 AND a.status = #{status}
             </if>
+            <if test="modelType != null and modelType.trim() != ''">
+                AND a.model_type = #{modelType}
+            </if>
             <if test="modelId != null">
                 AND a.model_id = #{modelId}
             </if>

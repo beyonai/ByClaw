@@ -3,23 +3,33 @@ package com.iwhalecloud.byai.state.interfaces.controller.dataset;
 import java.nio.charset.StandardCharsets;
 import java.net.URLEncoder;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryCreate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryUpdate;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeMetadataSearch;
+import com.iwhalecloud.byai.common.feign.response.PythonBuildResponse;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.FileToMarkdownResult;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.feign.request.knowledge.FolderDelete;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.ProcessStatus;
+import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetBuild;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetDto;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetIdDto;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeReadFileRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeBuildResultRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileMetadataRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeEntityDiscoveryRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeEntityEnrichRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeGlobRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeItemReferencesRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileSearchRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeMetadataSearchRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeItemsMoveRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeSearchRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeUploadConflictCheckRequest;
@@ -37,13 +47,17 @@ import com.iwhalecloud.byai.state.domain.resource.vo.DatasetDetailVo;
 import com.iwhalecloud.byai.state.domain.resource.vo.DatasetVo;
 import com.iwhalecloud.byai.state.domain.resource.vo.KnowledgeCapabilityVo;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileReadResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeBuildResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileUpdateResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileMetadataResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileSearchResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeMetadataSearchResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeItemReferencesResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeEntityBatchResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeSearchResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeItemsMoveResult;
 import com.iwhalecloud.byai.common.feign.request.knowledge.Folder;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -164,8 +178,10 @@ public class DatasetController {
      * @return ResponseUtil
      */
     @PostMapping("/createFolder")
-    public ResponseUtil<KbDirectoryCreate> createFolder(@RequestBody Folder folder) {
-        KbDirectoryCreate kbDirectoryCreate = datasetApplicationService.createFolder(folder);
+    public ResponseUtil<KbDirectoryCreate> createFolder(HttpServletRequest httpServletRequest,
+                                                        @RequestBody Folder folder) {
+        Map<String, String> headers = this.parseHeadersFromRequest(httpServletRequest);
+        KbDirectoryCreate kbDirectoryCreate = datasetApplicationService.createFolder(folder, headers);
         return ResponseUtil.successResponse(I18nUtil.get("dataset.folder.create.success"), kbDirectoryCreate);
     }
 
@@ -176,8 +192,10 @@ public class DatasetController {
      * @return ResponseUtil
      */
     @PostMapping("/renameFolder")
-    public ResponseUtil<KbDirectoryUpdate> renameFolder(@RequestBody Folder folder) {
-        KbDirectoryUpdate kbDirectoryUpdate = datasetApplicationService.renameFolder(folder);
+    public ResponseUtil<KbDirectoryUpdate> renameFolder(HttpServletRequest httpServletRequest,
+                                                        @RequestBody Folder folder) {
+        Map<String, String> headers = this.parseHeadersFromRequest(httpServletRequest);
+        KbDirectoryUpdate kbDirectoryUpdate = datasetApplicationService.renameFolder(folder, headers);
         return ResponseUtil.successResponse(I18nUtil.get("dataset.folder.rename.success"), kbDirectoryUpdate);
     }
 
@@ -188,8 +206,10 @@ public class DatasetController {
      * @return ResponseUtil
      */
     @PostMapping("/deleteFolder")
-    public ResponseUtil<SsResource> deleteFolder(@RequestBody FolderDelete folderDelete) {
-        datasetApplicationService.deleteFolder(folderDelete);
+    public ResponseUtil<SsResource> deleteFolder(HttpServletRequest httpServletRequest,
+                                                 @RequestBody FolderDelete folderDelete) {
+        Map<String, String> headers = this.parseHeadersFromRequest(httpServletRequest);
+        datasetApplicationService.deleteFolder(folderDelete, headers);
         return ResponseUtil.success(I18nUtil.get("dataset.folder.delete.success"));
     }
 
@@ -197,13 +217,16 @@ public class DatasetController {
      * 批量移动知识库文件或目录。
      */
     @PostMapping("/moveKnowledgeItems")
-    public ResponseUtil<KnowledgeItemsMoveResult> moveKnowledgeItems(
-        @Valid @RequestBody KnowledgeItemsMoveRequest request) {
+    public ResponseUtil<KnowledgeItemsMoveResult> moveKnowledgeItems(HttpServletRequest httpServletRequest,
+                                                                     @Valid @RequestBody KnowledgeItemsMoveRequest request) {
+        Map<String, String> headers = this.parseHeadersFromRequest(httpServletRequest);
         return ResponseUtil.successResponse(I18nUtil.get("dataset.items.move.success"),
-            datasetApplicationService.moveKnowledgeItems(request));
+            datasetApplicationService.moveKnowledgeItems(request, headers));
     }
 
-    /** 查询 Markdown 文件的入站、出站引用关系。 */
+    /**
+     * 查询 Markdown 文件的入站、出站引用关系。
+     */
     @PostMapping("/knowledgeItems/references")
     public ResponseUtil<KnowledgeItemReferencesResult> knowledgeItemReferences(
         @Valid @RequestBody KnowledgeItemReferencesRequest request) {
@@ -211,7 +234,63 @@ public class DatasetController {
             datasetApplicationService.knowledgeItemReferences(request));
     }
 
-    /** 按 QA glob 单层通配规则匹配文件或目录。 */
+    /**
+     * 异步发现知识库原始文档中的实体，并创建对应 KnowledgeEntity 文件任务。
+     */
+    @PostMapping("/knowledgeItems/entityDiscovery")
+    public ResponseUtil<KnowledgeEntityBatchResult> entityDiscovery(HttpServletRequest httpServletRequest, @Valid @RequestBody KnowledgeEntityDiscoveryRequest requestParam) {
+
+        Map<String, String> headers = this.parseHeadersFromRequest(httpServletRequest);
+
+        KnowledgeEntityBatchResult knowledgeEntityBatchResult = datasetApplicationService.entityDiscovery(requestParam, headers);
+        return ResponseUtil.successResponse("知识实体发现任务已受理", knowledgeEntityBatchResult);
+    }
+
+
+    /**
+     * 异步补全 KnowledgeEntity 文件中的实体信息、证据和语义关系。
+     */
+    @PostMapping("/knowledgeItems/entityEnrich")
+    public ResponseUtil<KnowledgeEntityBatchResult> entityEnrich(HttpServletRequest httpServletRequest,
+                                                                 @Valid @RequestBody KnowledgeEntityEnrichRequest requestParam) {
+        Map<String, String> headers = this.parseHeadersFromRequest(httpServletRequest);
+
+        KnowledgeEntityBatchResult responseResult = datasetApplicationService.entityEnrich(requestParam, headers);
+
+        return ResponseUtil.successResponse("知识实体补全任务已受理", responseResult);
+    }
+
+    /**
+     * 从请求头中获取信息透传
+     *
+     * @param httpServletRequest 请求信息
+     * @return Map
+     */
+    private Map<String, String> parseHeadersFromRequest(HttpServletRequest httpServletRequest) {
+
+        String userCode = httpServletRequest.getHeader("X-USER-CODE");
+        String sessionId = httpServletRequest.getHeader("X-CHAT-SESSION-ID");
+
+        if (StringUtil.isEmpty(userCode)) {
+            userCode = CurrentUserHolder.getCurrentUserCode();
+        }
+
+        // 传递请求头信息
+        Map<String, String> headers = new HashMap<String, String>();
+        if (StringUtil.isNotEmpty(userCode)) {
+            headers.put("X-USER-CODE", userCode);
+        }
+
+        if (StringUtil.isNotEmpty(sessionId)) {
+            headers.put("X-CHAT-SESSION-ID", sessionId);
+        }
+
+        return headers;
+    }
+
+    /**
+     * 按 QA glob 单层通配规则匹配文件或目录。
+     */
     @PostMapping("/glob")
     public ResponseUtil<List<DirAndFileVo>> globKnowledgeItems(@Valid @RequestBody KnowledgeGlobRequest request) {
         return ResponseUtil.successResponse(I18nUtil.get("dataset.dir.file.query.success"),
@@ -264,19 +343,21 @@ public class DatasetController {
      * @return ResponseUtil
      */
     @PostMapping(value = "/uploadFiles", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ResponseUtil<UploadResult> uploadFiles(@RequestPart("files") MultipartFile[] files,
-        @RequestPart("resourceId") Long resourceId, @RequestPart(value = "directoryPath") String directoryPath,
-        @RequestPart(value = "fileDescription", required = false) String fileDescription,
-        @RequestPart(value = "processFrontMatter", required = false) String processFrontMatter,
-        @RequestPart(value = "overwrite", required = false) String overwrite) {
+    public ResponseUtil<UploadResult> uploadFiles(HttpServletRequest httpServletRequest,
+                                                  @RequestPart("files") MultipartFile[] files,
+                                                  @RequestPart("resourceId") Long resourceId, @RequestPart(value = "directoryPath") String directoryPath,
+                                                  @RequestPart(value = "fileDescription", required = false) String fileDescription,
+                                                  @RequestPart(value = "processFrontMatter", required = false) String processFrontMatter,
+                                                  @RequestPart(value = "overwrite", required = false) String overwrite,
+                                                  @RequestPart(value = "skipIfDuplicate", required = false) String skipIfDuplicate) {
         try {
-
+            Map<String, String> headers = this.parseHeadersFromRequest(httpServletRequest);
             directoryPath = new String(directoryPath.getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8);
             UploadResult uploadResult = datasetApplicationService.uploadFiles(files, resourceId, directoryPath,
-                fileDescription, parseOptionalBoolean(processFrontMatter), Boolean.valueOf(overwrite));
+                fileDescription, parseOptionalBoolean(processFrontMatter), Boolean.parseBoolean(overwrite),
+                Boolean.parseBoolean(skipIfDuplicate), headers);
             return ResponseUtil.successResponse(I18nUtil.get("dataset.file.upload.success"), uploadResult);
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             logger.error(e.getMessage(), e);
             return ResponseUtil.fail(e.getMessage());
         }
@@ -289,8 +370,9 @@ public class DatasetController {
      * @return ResponseUtil
      */
     @PostMapping(value = "/build")
-    public ResponseUtil<Void> build(@RequestBody DatasetBuild datasetBuild) {
-        datasetApplicationService.build(datasetBuild);
+    public ResponseUtil<Void> build(HttpServletRequest httpServletRequest, @RequestBody DatasetBuild datasetBuild) {
+        Map<String, String> headers = this.parseHeadersFromRequest(httpServletRequest);
+        datasetApplicationService.build(datasetBuild, headers);
         return ResponseUtil.success(I18nUtil.get("dataset.build.success"));
     }
 
@@ -305,12 +387,9 @@ public class DatasetController {
         try {
             FileToMarkdownResult result = datasetApplicationService.fileToMarkdown(fileContent);
             StreamingResponseBody responseBody = outputStream -> outputStream.write(result.getContent());
-            return ResponseEntity.ok()
-                .contentType(MediaType.parseMediaType(result.getContentType()))
-                .header("Content-Disposition", buildContentDisposition(result.getFileName()))
-                .body(responseBody);
-        }
-        catch (Exception e) {
+            return ResponseEntity.ok().contentType(MediaType.parseMediaType(result.getContentType()))
+                .header("Content-Disposition", buildContentDisposition(result.getFileName())).body(responseBody);
+        } catch (Exception e) {
             logger.error("文件转Markdown失败", e);
             String errorMessage = e.getMessage() == null ? "文件转Markdown失败" : e.getMessage();
             return ResponseEntity.badRequest().contentType(MediaType.parseMediaType("text/plain; charset=UTF-8"))
@@ -321,24 +400,22 @@ public class DatasetController {
     /**
      * 接收 OpenClaw 生成的 Markdown 文档，上传到知识库并立即触发构建。
      *
-     * @param resourceId 知识库资源标识
+     * @param resourceId    知识库资源标识
      * @param directoryPath 知识库目录路径，默认根目录 /
-     * @param docName 文档文件名，未传时自动生成
-     * @param doc OpenClaw 生成的 Markdown 文档内容
-     * @param language 预留语言参数，默认 zh-CN
+     * @param docName       文档文件名，未传时自动生成
+     * @param doc           OpenClaw 生成的 Markdown 文档内容
+     * @param language      预留语言参数，默认 zh-CN
      * @return 构建结果
      */
     @GetMapping(value = "/buildKnowledgeFromDoc", produces = MediaType.TEXT_PLAIN_VALUE)
     public ResponseEntity<String> buildKnowledgeFromDoc(@RequestParam("resourceId") Long resourceId,
-        @RequestParam(value = "directoryPath", required = false, defaultValue = "/") String directoryPath,
-        @RequestParam(value = "docName", required = false) String docName, @RequestParam("doc") String doc,
-        @RequestParam(value = "language", required = false, defaultValue = "zh-CN") String language) {
+                                                        @RequestParam(value = "directoryPath", required = false, defaultValue = "/") String directoryPath,
+                                                        @RequestParam(value = "docName", required = false) String docName, @RequestParam("doc") String doc,
+                                                        @RequestParam(value = "language", required = false, defaultValue = "zh-CN") String language) {
         try {
-            return ResponseEntity.ok(
-                openClawKnowledgeDocumentService.buildKnowledgeFromDoc(resourceId, directoryPath, docName, doc,
-                    language));
-        }
-        catch (Exception e) {
+            return ResponseEntity.ok(openClawKnowledgeDocumentService.buildKnowledgeFromDoc(resourceId, directoryPath,
+                docName, doc, language));
+        } catch (Exception e) {
             logger.error("OpenClaw文档构建知识库失败", e);
             return ResponseEntity.badRequest().body(e.getMessage());
         }
@@ -347,12 +424,12 @@ public class DatasetController {
     /**
      * 文件下载
      *
-     * @param resourceId 资源标识
+     * @param resourceId    资源标识
      * @param directoryPath 文件目录路径
      */
     @GetMapping(value = "/download")
     public void download(@RequestParam("resourceId") Long resourceId,
-        @RequestParam("directoryPath") String directoryPath, HttpServletResponse response) {
+                         @RequestParam("directoryPath") String directoryPath, HttpServletResponse response) {
         datasetApplicationService.download(resourceId, directoryPath, response);
     }
 
@@ -366,6 +443,15 @@ public class DatasetController {
     public ResponseUtil<KbFileReadResult> readFile(@RequestBody KnowledgeReadFileRequest request) {
         return ResponseUtil.successResponse(I18nUtil.get("dataset.dir.file.query.success"),
             datasetApplicationService.readFile(request));
+    }
+
+    /**
+     * 查询知识库文件的构建结果，包括 Markdown、分块和向量检索摘要。
+     */
+    @PostMapping(value = "/buildResult")
+    public ResponseUtil<KnowledgeBuildResult> buildResult(@RequestBody KnowledgeBuildResultRequest request) {
+        return ResponseUtil.successResponse(I18nUtil.get("dataset.dir.file.query.success"),
+            datasetApplicationService.buildResult(request));
     }
 
     /**
@@ -402,17 +488,37 @@ public class DatasetController {
     }
 
     /**
+     * Agent DSL 纯元数据检索，只返回文件级结果。
+     */
+    @PostMapping(value = "/knowledgeItems/metadataSearch")
+    public ResponseUtil<KnowledgeMetadataSearchResult> searchKnowledgeMetadata(
+        @RequestBody @Valid KnowledgeMetadataSearchRequest request) {
+        return ResponseUtil.successResponse(I18nUtil.get("dataset.file.search.success"),
+            datasetApplicationService.searchKnowledgeMetadata(request));
+    }
+
+    /**
+     * 面向 ByClaw-datacloud 的 QA 原始协议透传接口，直接接收并返回 knCode 体系数据。
+     */
+    @PostMapping(value = "/knowledgeItems/metadataSearchByKnCode")
+    public PythonBuildResponse<Object> searchKnowledgeMetadataByKnCode(@RequestBody KbKnowledgeMetadataSearch request) {
+        return datasetApplicationService.searchKnowledgeMetadataByKnCode(request);
+    }
+
+    /**
      * 更新已存在知识库文件的内容。该操作不会自动触发知识构建。
      */
     @PostMapping(value = "/knowledgeItems/update", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ResponseUtil<KbFileUpdateResult> updateKnowledgeItem(@RequestPart("resourceId") Long resourceId,
-        @RequestPart("filePath") String filePath,
-        @RequestPart(value = "fileDescription", required = false) String fileDescription,
-        @RequestPart(value = "processFrontMatter", required = false) String processFrontMatter,
-        @RequestPart("fileContent") MultipartFile fileContent) {
+    public ResponseUtil<KbFileUpdateResult> updateKnowledgeItem(HttpServletRequest httpServletRequest,
+                                                                @RequestPart("resourceId") Long resourceId,
+                                                                @RequestPart("filePath") String filePath,
+                                                                @RequestPart(value = "fileDescription", required = false) String fileDescription,
+                                                                @RequestPart(value = "processFrontMatter", required = false) String processFrontMatter,
+                                                                @RequestPart("fileContent") MultipartFile fileContent) {
+        Map<String, String> headers = this.parseHeadersFromRequest(httpServletRequest);
         String normalizedFilePath = new String(filePath.getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8);
         KbFileUpdateResult result = datasetApplicationService.updateKnowledgeFile(resourceId, normalizedFilePath,
-            fileDescription, parseOptionalBoolean(processFrontMatter), fileContent);
+            fileDescription, parseOptionalBoolean(processFrontMatter), fileContent, headers);
         return ResponseUtil.successResponse(I18nUtil.get("dataset.file.update.success"), result);
     }
 
@@ -422,8 +528,10 @@ public class DatasetController {
      * @param removeFileDto 删除文件信息
      */
     @PostMapping(value = "/removeFile")
-    public ResponseUtil<String> removeFile(@RequestBody RemoveFileDto removeFileDto) {
-        datasetApplicationService.removeFile(removeFileDto);
+    public ResponseUtil<String> removeFile(HttpServletRequest httpServletRequest,
+                                           @RequestBody RemoveFileDto removeFileDto) {
+        Map<String, String> headers = this.parseHeadersFromRequest(httpServletRequest);
+        datasetApplicationService.removeFile(removeFileDto, headers);
         return ResponseUtil.success(I18nUtil.get("dataset.file.remove.success"));
     }
 
@@ -431,13 +539,14 @@ public class DatasetController {
      * 知识库JSON导入
      *
      * @param ownerType 资源归属类型：enterprise-企业，personal-个人
-     * @param file 知识库JSON文件
+     * @param file      知识库JSON文件
      * @return resourceId
      */
     @PostMapping(value = "/importDatasetJson", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseUtil<ObjectZipImportResult> importDatasetJson(
         @RequestParam(value = "ownerType", required = false) String ownerType,
-        @RequestParam(value = "catalogId", required = false) Long catalogId, @RequestPart("file") MultipartFile[] file) {
+        @RequestParam(value = "catalogId", required = false) Long catalogId,
+        @RequestPart("file") MultipartFile[] file) {
         if (file != null && file.length > 1) {
             return ResponseUtil.successResponse(I18nUtil.get("dataset.import.success"),
                 importDatasetJsonBatch(ownerType, catalogId, file));
@@ -446,11 +555,9 @@ public class DatasetController {
             Long resourceId = datasetApplicationService.importDatasetJson(ownerType, catalogId, file[0]);
             return ResponseUtil.successResponse(I18nUtil.get("dataset.import.success"),
                 buildDatasetImportSuccessResult(file[0], resourceId));
-        }
-        catch (IllegalArgumentException e) {
+        } catch (IllegalArgumentException e) {
             return ResponseUtil.fail(e.getMessage());
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             logger.error("知识库JSON导入异常", e);
             return ResponseUtil.fail(I18nUtil.get("dataset.import.failed",
                 e.getMessage() != null ? e.getMessage() : I18nUtil.get("system.internal.error")));
@@ -467,8 +574,7 @@ public class DatasetController {
             try {
                 Long resourceId = datasetApplicationService.importDatasetJson(ownerType, catalogId, multipartFile);
                 result.getItems().add(buildDatasetImportSuccessItem(multipartFile, resourceId));
-            }
-            catch (Exception e) {
+            } catch (Exception e) {
                 result.getItems().add(buildDatasetImportFailedItem(multipartFile, e));
             }
         }
@@ -534,13 +640,13 @@ public class DatasetController {
     /**
      * 文件状态查询
      *
-     * @param resourceId 资源标识
+     * @param resourceId    资源标识
      * @param directoryPath 文件路径
      * @return ResponseUtil
      */
     @GetMapping(value = "/fileBuildStatus")
     public ResponseUtil<ProcessStatus> fileBuildStatus(@RequestParam(value = "resourceId") Long resourceId,
-        @RequestParam(value = "directoryPath") String directoryPath) {
+                                                       @RequestParam(value = "directoryPath") String directoryPath) {
         ProcessStatus processStatus = datasetApplicationService.fileBuildStatus(resourceId, directoryPath);
         return ResponseUtil.successResponse(I18nUtil.get("dataset.file.build.status.query.success"), processStatus);
     }

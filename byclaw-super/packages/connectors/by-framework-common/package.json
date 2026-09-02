@@ -1,0 +1,25 @@
+{
+  "name": "@byclaw/connector-by-framework-common",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared Gateway, Redis stream and lifecycle transport for by-framework connectors",
+  "files": ["dist"],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "dependencies": {
+    "@byclaw/by-conductor": "workspace:*",
+    "@byclaw/by-framework": "1.5.1"
+  }
+}

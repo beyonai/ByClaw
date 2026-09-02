@@ -3,6 +3,7 @@ import {
   releaseCancelledSessionDispatch,
   resetSessionDispatchGateForTest,
   runSessionDispatchExclusive,
+  runSessionDispatchExclusiveLeased,
   sessionDispatchQueueDepth,
 } from "./session-dispatch-gate.js";
 
@@ -88,5 +89,46 @@ describe("session-dispatch-gate", () => {
     await first;
     expect(order).toEqual(["first-start", "second-start", "second-end", "first-end"]);
     expect(sessionDispatchQueueDepth(sessionKey)).toBe(0);
+  });
+
+  it("holds a leased session until terminal side effects explicitly release it", async () => {
+    resetSessionDispatchGateForTest();
+    const sessionKey = "agent:main:direct:leased";
+    const order: string[] = [];
+
+    const first = await runSessionDispatchExclusiveLeased(sessionKey, async () => {
+      order.push("first-prepared");
+      return "first";
+    });
+    const second = runSessionDispatchExclusive(sessionKey, async () => {
+      order.push("second-start");
+      return "second";
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(order).toEqual(["first-prepared"]);
+    expect(sessionDispatchQueueDepth(sessionKey)).toBe(2);
+    first.release();
+    first.release();
+
+    await expect(second).resolves.toMatchObject({ result: "second" });
+    expect(order).toEqual(["first-prepared", "second-start"]);
+    expect(sessionDispatchQueueDepth(sessionKey)).toBe(0);
+  });
+
+  it("releases a leased session automatically when preparation fails", async () => {
+    resetSessionDispatchGateForTest();
+    const sessionKey = "agent:main:direct:leased-error";
+
+    await expect(
+      runSessionDispatchExclusiveLeased(sessionKey, async () => {
+        throw new Error("prepare failed");
+      }),
+    ).rejects.toThrow("prepare failed");
+
+    expect(sessionDispatchQueueDepth(sessionKey)).toBe(0);
+    await expect(
+      runSessionDispatchExclusive(sessionKey, async () => "next"),
+    ).resolves.toMatchObject({ result: "next" });
   });
 });

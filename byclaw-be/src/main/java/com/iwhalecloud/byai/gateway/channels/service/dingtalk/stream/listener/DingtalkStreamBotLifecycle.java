@@ -6,6 +6,9 @@ import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.scheduling.annotation.Scheduled;
+
+import java.util.concurrent.TimeUnit;
 
 @Component
 public class DingtalkStreamBotLifecycle {
@@ -33,6 +36,21 @@ public class DingtalkStreamBotLifecycle {
             dingtalkRobotRegistryService.initializeRobotClients();
         } catch (Exception e) {
             logger.error("Failed to initialize DingTalk robot clients during application startup", e);
+        }
+    }
+
+    @Scheduled(
+            fixedDelayString = "${channel.stream.lifecycle.reconciliation-delay-seconds:60}",
+            timeUnit = TimeUnit.SECONDS
+    )
+    public void reconcile() {
+        if (!properties.isEnabled()) {
+            return;
+        }
+        try {
+            dingtalkRobotRegistryService.reconcileRobotClients();
+        } catch (Exception e) {
+            logger.error("Failed to reconcile DingTalk robot clients", e);
         }
     }
 }

@@ -3,6 +3,7 @@ import { get, pick, reverse, slice, set, concat, omit, compact, size, last } fro
 import { getModelState } from '@/utils';
 import { answerDeltaHandler, reasoningLogHandler } from '@/hooks/useSseSender/util';
 import { substanceHandler } from '@/hooks/useChat/util';
+import { supportsInPlaceUpdate, updateExistingMessage } from '@/utils/messageItemUpdate';
 
 import { IMessage, IMessageListItem } from '@/typescript/message';
 import { IMessageState, SSEMessageType, SSEEventStatus } from '@/constants/message';
@@ -47,6 +48,7 @@ export const hasVisibleMessageContent = (message?: Partial<IMessage>) => {
     Boolean(message.thinkList?.some(hasVisibleMessageListItem)) ||
     Boolean(message.fileList?.length || message.imageList?.length || message.resourceFrom?.length) ||
     Boolean(message.resComIds?.length || message.relatedQuestions?.length) ||
+    Boolean(message.taskPlan?.tasks?.length) ||
     hasSubstance(message.messageTip)
   );
 };
@@ -154,6 +156,7 @@ export const fetchMessageHandler = (item: any) => {
     createTime,
     collectIds,
     sessionId,
+    taskPlan,
   } = item;
 
   // usage： 1-用户 2-大模型 3-追问 4-转发消息 5-交互消息
@@ -161,6 +164,13 @@ export const fetchMessageHandler = (item: any) => {
   const fromOtherUser = `${creatorId}` !== `${userId}` && ['1', '4'].includes(`${usage}`);
   const isSystemMessage = ['5', '3'].includes(`${usage}`);
   const fromBeyond = !isMyMessage && !fromOtherUser;
+  let isV2Message = false;
+  try {
+    const metadataObject = typeof metadata === 'string' ? JSON.parse(metadata || '{}') : metadata || {};
+    isV2Message = metadataObject.messageRenderVersion === 'v2';
+  } catch (e) {
+    // Invalid metadata remains on the legacy history parsing path.
+  }
 
   const myMessage: IMessage & { text: string } = {
     creatorId,
@@ -181,6 +191,7 @@ export const fetchMessageHandler = (item: any) => {
     thinkList: [],
     fileList: [],
     imageList: [],
+    taskPlan: taskPlan || undefined,
   };
 
   // 用户消息
@@ -220,8 +231,20 @@ export const fetchMessageHandler = (item: any) => {
         const res = get(reasoningLogHandler(item), 'message');
         if (!res) return;
 
+        if (isV2Message && supportsInPlaceUpdate(res)) {
+          if (!updateExistingMessage(list as IMessageListItem[], res as IMessageListItem)) list.push(res);
+          return;
+        }
+
         if (isTextContentType(`${res?.contentType}`)) {
           if (!res?.content?.substance) return;
+
+          // v2 inferLog entries are already coalesced backend segments. Merging them again
+          // would erase the answer boundary represented by the cross-channel seq values.
+          if (isV2Message) {
+            list.push(res);
+            return;
+          }
 
           const lastMessageItem = last(list);
 
@@ -250,10 +273,18 @@ export const fetchMessageHandler = (item: any) => {
     try {
       const messageStructObj = JSON.parse(messageStruct);
       const list = concat([], messageStructObj);
+      const renderedList: IMessageListItem[] = [];
       list.forEach((item) => {
         const message = get(answerDeltaHandler(item), 'message');
 
         if (message) {
+          if (
+            isV2Message &&
+            supportsInPlaceUpdate(message) &&
+            updateExistingMessage(renderedList, message as IMessageListItem)
+          ) {
+            return;
+          }
           const { contentType } = message;
 
           switch (`${contentType}`) {
@@ -261,16 +292,17 @@ export const fetchMessageHandler = (item: any) => {
             case `${SSEMessageType.thinkText}`: {
               const substance = get(message, 'content.substance');
               if (substance) {
-                myMessage.messageList?.push?.(message as IMessageListItem);
+                renderedList.push(message as IMessageListItem);
               }
               break;
             }
             default:
-              myMessage.messageList?.push?.(message as IMessageListItem);
+              renderedList.push(message as IMessageListItem);
               break;
           }
         }
       });
+      myMessage.messageList = renderedList;
     } catch (e) {
       console.error(e);
     }

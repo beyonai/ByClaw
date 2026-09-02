@@ -59,6 +59,8 @@ import { updateMessageStructById } from '@/service/message';
 
 import { AskUserQuestions, buildQueryQuestion, type IMessageListItemContent } from './index';
 
+jest.setTimeout(15000);
+
 const updateMessageStructByIdMock = updateMessageStructById as jest.MockedFunction<typeof updateMessageStructById>;
 
 const questions = [
@@ -81,7 +83,12 @@ const questions = [
   },
 ];
 
-function renderQuestions(initialContent: IMessageListItemContent, onUpdate = jest.fn()) {
+function renderQuestions(
+  initialContent: IMessageListItemContent,
+  onUpdate = jest.fn(),
+  messageOverrides: Record<string, unknown> = {},
+  presentation: 'dock' | 'transcript' = 'dock'
+) {
   function Harness() {
     const [content, setContent] = useState(initialContent);
 
@@ -93,6 +100,7 @@ function renderQuestions(initialContent: IMessageListItemContent, onUpdate = jes
             msgId: 'message-1',
             sessionId: 'session-1',
             traceId: 'trace-1',
+            ...messageOverrides,
           } as any
         }
         messageListItem={
@@ -103,6 +111,7 @@ function renderQuestions(initialContent: IMessageListItemContent, onUpdate = jes
           } as any
         }
         messageListItemContent={content}
+        presentation={presentation}
         updateMessageListItemContent={(nextContent) => {
           onUpdate(nextContent);
           setContent(nextContent);
@@ -121,6 +130,52 @@ beforeEach(() => {
 });
 
 describe('AskUserQuestions', () => {
+  it('hides a pending question in the transcript so the active dock is the only interactive surface', () => {
+    renderQuestions(
+      {
+        substance: {
+          formStatus: IFormStatus.INIT,
+          questions: [questions[0]],
+        },
+      },
+      jest.fn(),
+      {},
+      'transcript'
+    );
+
+    expect(screen.queryByRole('radio')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'form.confirm' })).not.toBeInTheDocument();
+  });
+
+  it('renders a compact answered summary in the transcript after completion', () => {
+    renderQuestions(
+      {
+        formStatus: IFormStatus.FINISH,
+        substance: {
+          formStatus: IFormStatus.FINISH,
+          questions: [questions[0]],
+          answers: [
+            {
+              question: 'Which framework?',
+              header: 'framework',
+              selectedOptions: ['React'],
+              otherSelected: false,
+              otherText: '',
+            },
+          ],
+        },
+      },
+      jest.fn(),
+      {},
+      'transcript'
+    );
+
+    expect(screen.getByText('Which framework?')).toBeInTheDocument();
+    expect(screen.getByText('React')).toBeInTheDocument();
+    expect(screen.queryByRole('radio')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'form.confirm' })).not.toBeInTheDocument();
+  });
+
   it('converts structured answers into natural language for the LLM', () => {
     expect(
       buildQueryQuestion([
@@ -179,6 +234,31 @@ describe('AskUserQuestions', () => {
     );
   });
 
+  it('disables the form for a historical message', () => {
+    renderQuestions(
+      {
+        substance: {
+          formStatus: IFormStatus.INIT,
+          questions: [questions[0]],
+          answers: [
+            {
+              question: 'Which framework?',
+              header: 'framework',
+              selectedOptions: ['React'],
+              otherSelected: false,
+              otherText: '',
+            },
+          ],
+        },
+      },
+      jest.fn(),
+      { isHistoryMsg: true }
+    );
+
+    expect(screen.getByRole('radio', { name: /React/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'form.confirm' })).toBeDisabled();
+  });
+
   it('requires free text when the other option is selected in single-select mode', () => {
     renderQuestions({
       substance: {
@@ -199,7 +279,7 @@ describe('AskUserQuestions', () => {
     expect(screen.getByRole('button', { name: 'form.confirm' })).toBeEnabled();
   });
 
-  it('renders single and tab question titles as markdown', () => {
+  it('renders single and paged question titles as markdown', () => {
     const markdownQuestions = [
       { ...questions[0], question: 'Choose **one framework**' },
       { ...questions[1], question: 'Choose *capabilities*' },
@@ -221,8 +301,9 @@ describe('AskUserQuestions', () => {
       },
     });
 
-    expect(screen.getByRole('tab', { name: 'Choose one framework' }).querySelector('strong')).not.toBeNull();
-    expect(screen.getByRole('tab', { name: 'Choose capabilities' }).querySelector('em')).not.toBeNull();
+    expect(screen.getByText('one framework').tagName).toBe('STRONG');
+    fireEvent.click(screen.getByRole('radio', { name: /React/ }));
+    expect(screen.getByText('capabilities').tagName).toBe('EM');
   });
 
   // Ant Design 选项交互与异步持久化在双 worker 钩子中可能超过默认 5 秒。
@@ -259,7 +340,7 @@ describe('AskUserQuestions', () => {
     );
   }, 15000);
 
-  it('uses tabs for multiple questions and requires every question to be answered', () => {
+  it('pages through multiple questions and requires every question to be answered', () => {
     renderQuestions({
       substance: {
         formStatus: IFormStatus.INIT,
@@ -267,13 +348,14 @@ describe('AskUserQuestions', () => {
       },
     });
 
-    expect(screen.getByRole('tab', { name: 'Which framework?' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Which capabilities?' })).toBeInTheDocument();
+    expect(screen.getByText('Which framework?')).toBeInTheDocument();
+    expect(screen.getByText('1 / 2')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('radio', { name: /React/ }));
+    expect(screen.getByText('Which capabilities?')).toBeInTheDocument();
+    expect(screen.getByText('2 / 2')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'form.confirm' })).toBeDisabled();
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Which capabilities?' }));
     fireEvent.click(screen.getByRole('checkbox', { name: /Testing/ }));
     fireEvent.click(screen.getByRole('checkbox', { name: /Linting/ }));
 
@@ -350,7 +432,100 @@ describe('AskUserQuestions', () => {
     expect(onUpdate).toHaveBeenLastCalledWith(
       expect.objectContaining({ substance: expect.objectContaining({ formStatus: IFormStatus.FINISH }) })
     );
-  });
+  }, 15000);
+
+  it('writes agentId from valid resume metadata into the payload', async () => {
+    const resumeMetadata = JSON.stringify({ agentId: 'agent-42', checkpointId: 'checkpoint-1' });
+    renderQuestions(
+      {
+        substance: {
+          formStatus: IFormStatus.INIT,
+          questions: [questions[0]],
+        },
+      },
+      jest.fn(),
+      { metadata: resumeMetadata }
+    );
+
+    fireEvent.click(screen.getByRole('radio', { name: /React/ }));
+    const confirmButton = screen.getByRole('button', { name: 'form.confirm' });
+    await waitFor(() => expect(confirmButton).toBeEnabled());
+    await act(async () => {
+      fireEvent.click(confirmButton);
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(mockEmit).toHaveBeenCalledWith('beyond-chat-on-send-msg', expect.any(Object)));
+    expect(mockEmit).toHaveBeenCalledWith(
+      'beyond-chat-on-send-msg',
+      expect.objectContaining({
+        sendProps: expect.objectContaining({
+          payload: expect.objectContaining({
+            metadata: resumeMetadata,
+            agentId: 'agent-42',
+          }),
+        }),
+      })
+    );
+  }, 15000);
+
+  it('prefers complete card metadata when a later message event only keeps parent_run_id', async () => {
+    const partialMessageMetadata = JSON.stringify({ parent_run_id: 'run-1' });
+    const completeCardMetadata = JSON.stringify({
+      parent_run_id: 'run-1',
+      interaction_id: 'run-1:tool-1',
+      tool_name: 'AskUserQuestion',
+    });
+    renderQuestions(
+      {
+        metadata: completeCardMetadata,
+        substance: {
+          formStatus: IFormStatus.INIT,
+          questions: [questions[0]],
+        },
+      } as IMessageListItemContent,
+      jest.fn(),
+      { metadata: partialMessageMetadata }
+    );
+
+    fireEvent.click(screen.getByRole('radio', { name: /React/ }));
+    const confirmButton = screen.getByRole('button', { name: 'form.confirm' });
+    await waitFor(() => expect(confirmButton).toBeEnabled());
+    await act(async () => {
+      fireEvent.click(confirmButton);
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(mockEmit).toHaveBeenCalledWith('beyond-chat-on-send-msg', expect.any(Object)));
+    expect(mockEmit.mock.calls[0][1].sendProps.payload.metadata).toBe(completeCardMetadata);
+  }, 15000);
+
+  it('keeps invalid resume metadata without writing agentId into the payload', async () => {
+    const resumeMetadata = '{invalid-json';
+    renderQuestions(
+      {
+        substance: {
+          formStatus: IFormStatus.INIT,
+          questions: [questions[0]],
+        },
+      },
+      jest.fn(),
+      { metadata: resumeMetadata }
+    );
+
+    fireEvent.click(screen.getByRole('radio', { name: /Vue/ }));
+    const confirmButton = screen.getByRole('button', { name: 'form.confirm' });
+    await waitFor(() => expect(confirmButton).toBeEnabled());
+    await act(async () => {
+      fireEvent.click(confirmButton);
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(mockEmit).toHaveBeenCalledWith('beyond-chat-on-send-msg', expect.any(Object)));
+    const emittedPayload = mockEmit.mock.calls[0][1].sendProps.payload;
+    expect(emittedPayload).toEqual(expect.objectContaining({ metadata: resumeMetadata }));
+    expect(emittedPayload).not.toHaveProperty('agentId');
+  }, 15000);
 
   // 全量测试以双 worker 运行时，Ant Design 状态更新可能超过 Jest 默认的 5 秒超时。
   it('does not finish or emit when persistence fails', async () => {

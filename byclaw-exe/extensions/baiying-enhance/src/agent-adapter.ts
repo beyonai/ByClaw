@@ -35,9 +35,8 @@ type NativeAgentJson = {
     allowSpawnFrom?: string[];
 };
 
-const CODE_TO_WIKI_EMPLOYEE_NAME = "百应平台赋能助手";
-const CODE_TO_WIKI_TOOL_NAME = "code_to_wiki";
 const BYCLAW_CHAT_CONTEXT_TOOL_NAME = "byclaw_chat_context";
+const UPDATE_TASK_PLAN_TOOL_NAME = "updateTaskPlan";
 
 function isSkillRelResource(raw: Record<string, unknown>): boolean {
     const t = String(raw.resourceBizType ?? raw.resourceType ?? "").trim().toUpperCase();
@@ -71,6 +70,8 @@ export type ProviderBundle = {
     baseUrl: string;
     apiKey: unknown;
     api: AimodelProviderApi;
+    /** OpenClaw provider request/LLM idle timeout in seconds. */
+    timeoutSeconds?: number;
     modelId: string;
     modelName?: string;
     contextWindow?: number;
@@ -106,6 +107,8 @@ export type AdaptedManagedAgent = {
     sourceJson?: unknown;
     /** Baiying `prologue.modelId`, used to resolve model transport details from Redis. */
     baiyingModelId?: string;
+    /** Snapshot of the employee's image model selection; runtime calls re-read Redis. */
+    imageModelId?: string;
     /** SSE endpoint for INTERFACE-type agents. */
     agentSseUrl?: string;
     /** Home URL for PAGE-type / home-page based backend agents. */
@@ -332,17 +335,27 @@ function normalizeAgentListTools(
     raw: Record<string, unknown>,
 ): NonNullable<AgentListEntry["tools"]> {
     const allow = normalizeStringList(raw.relTools);
-    const extraTools =
-        nonEmpty(raw.resourceName) === CODE_TO_WIKI_EMPLOYEE_NAME ||
-        nonEmpty(raw.name) === CODE_TO_WIKI_EMPLOYEE_NAME
-            ? [CODE_TO_WIKI_TOOL_NAME]
-            : [];
     return allow.length > 0
         ? {
-              allow: Array.from(new Set([...allow, "baiying_call", BYCLAW_CHAT_CONTEXT_TOOL_NAME, ...extraTools])),
+              allow: Array.from(
+                  new Set([
+                      ...allow,
+                      "baiying_call",
+                      "image_generate",
+                      BYCLAW_CHAT_CONTEXT_TOOL_NAME,
+                      UPDATE_TASK_PLAN_TOOL_NAME,
+                  ]),
+              ),
           }
         : {
-              alsoAllow: Array.from(new Set(["baiying_call", BYCLAW_CHAT_CONTEXT_TOOL_NAME, ...extraTools])),
+              alsoAllow: Array.from(
+                  new Set([
+                      "baiying_call",
+                      "image_generate",
+                      BYCLAW_CHAT_CONTEXT_TOOL_NAME,
+                      UPDATE_TASK_PLAN_TOOL_NAME,
+                  ]),
+              ),
           };
 }
 
@@ -454,6 +467,7 @@ function adaptRawBaiyingDetail(params: {
         listEntry,
         systemPrompt: instructions,
         baiyingModelId: extractBaiyingPrologueModelId(detail),
+        imageModelId: normalizeModelId(detail.imageModelId),
         integrationType,
         agentSseUrl,
         agentHomeUrl,
@@ -521,6 +535,7 @@ export function adaptAgentJson(params: {
             identity: { name },
             experimental: MANAGED_AGENT_EXPERIMENTAL,
             skills: normalizeAgentListSkills(asRecord),
+            tools: normalizeAgentListTools(asRecord),
         };
         const hubSkills = normalizeHubSkillRefs(asRecord.relSkills);
         const extraSkillPaths = normalizeExtraSkillPaths(asRecord.relSkills, asRecord.extraSkills);
@@ -568,6 +583,7 @@ export function adaptAgentJson(params: {
         },
         experimental: MANAGED_AGENT_EXPERIMENTAL,
         skills: normalizeAgentListSkills(asRecord),
+        tools: normalizeAgentListTools(asRecord),
     };
     const hubSkills = normalizeHubSkillRefs(asRecord.relSkills);
     const extraSkillPaths = normalizeExtraSkillPaths(asRecord.relSkills, asRecord.extraSkills);

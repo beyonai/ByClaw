@@ -1,0 +1,471 @@
+[
+  {
+    "property_code": "projectId",
+    "property_name": "项目ID",
+    "data_type": "STRING",
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "category"
+      }
+    },
+    "required": true,
+    "max_length": 100
+  },
+  {
+    "property_code": "account_code",
+    "property_name": "公众号编码",
+    "data_type": "STRING",
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "category"
+      }
+    },
+    "required": true,
+    "max_length": 100
+  },
+  {
+    "property_code": "account_name",
+    "property_name": "公众号名称",
+    "data_type": "STRING",
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "name"
+      }
+    },
+    "required": true,
+    "max_length": 200
+  },
+  {
+    "property_code": "analysis_type",
+    "property_name": "分析类型",
+    "data_type": "STRING",
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "category"
+      }
+    },
+    "required": true,
+    "max_length": 20,
+    "term_values": [
+      "single",
+      "weekly",
+      "collection"
+    ]
+  },
+  {
+    "property_code": "analysis_stage",
+    "property_name": "分析阶段",
+    "data_type": "STRING",
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "category"
+      }
+    },
+    "required": false,
+    "default_value": "post_publish",
+    "max_length": 20,
+    "term_values": [
+      "pre_publish",
+      "post_publish"
+    ]
+  },
+  {
+    "property_code": "source_run_id",
+    "property_name": "关联发布前运行ID",
+    "data_type": "STRING",
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "category"
+      }
+    },
+    "required": false,
+    "max_length": 64
+  },
+  {
+    "property_code": "platform",
+    "property_name": "发布平台",
+    "data_type": "STRING",
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "category"
+      }
+    },
+    "required": false,
+    "max_length": 50
+  },
+  {
+    "property_code": "content_role",
+    "property_name": "内容角色",
+    "data_type": "STRING",
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "category"
+      }
+    },
+    "required": false,
+    "max_length": 50
+  },
+  {
+    "property_code": "topic",
+    "property_name": "内容主题",
+    "data_type": "STRING",
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "description"
+      }
+    },
+    "required": false,
+    "max_length": 300
+  },
+  {
+    "property_code": "target_audience",
+    "property_name": "目标人群",
+    "data_type": "STRING",
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "description"
+      }
+    },
+    "required": false,
+    "max_length": 300
+  },
+  {
+    "property_code": "audience_fit_analysis",
+    "property_name": "目标人群匹配分析",
+    "data_type": "STRING",
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "description"
+      }
+    },
+    "required": false
+  },
+  {
+    "property_code": "recommended_publish_time",
+    "property_name": "推荐发布时间",
+    "data_type": "STRING",
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "category"
+      }
+    },
+    "required": false,
+    "max_length": 100
+  },
+  {
+    "property_code": "recommended_keywords",
+    "property_name": "推荐关键词及位置",
+    "data_type": "STRING",
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "description"
+      }
+    },
+    "required": false
+  },
+  {
+    "property_code": "publishing_execution_card",
+    "property_name": "发布执行卡",
+    "data_type": "STRING",
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "description"
+      }
+    },
+    "required": false
+  },
+  {
+    "property_code": "desired_action",
+    "property_name": "期望用户动作",
+    "data_type": "STRING",
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "category"
+      }
+    },
+    "required": false,
+    "max_length": 100
+  },
+  {
+    "property_code": "tested_element",
+    "property_name": "实验元素",
+    "data_type": "STRING",
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "category"
+      }
+    },
+    "required": false,
+    "max_length": 50
+  },
+  {
+    "property_code": "learning_outcome",
+    "property_name": "经验验证结果",
+    "data_type": "STRING",
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "status"
+      }
+    },
+    "required": false,
+    "max_length": 30,
+    "term_values": [
+      "supported",
+      "not_supported",
+      "conditional",
+      "inconclusive"
+    ]
+  },
+  {
+    "property_code": "article_id",
+    "property_name": "文章ID",
+    "data_type": "INTEGER",
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "link"
+      }
+    },
+    "required": false,
+    "term_type_code": "wy93ovzs9p_article_title",
+    "rel_term_codeorname": "code"
+  },
+  {
+    "property_code": "collection_id",
+    "property_name": "合集ID",
+    "data_type": "INTEGER",
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "link"
+      }
+    },
+    "required": false,
+    "term_type_code": "wy93ovzs9p_article_collection_collection_name",
+    "rel_term_codeorname": "code"
+  },
+  {
+    "property_code": "period_start",
+    "property_name": "周报开始",
+    "data_type": "DATE",
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "date"
+      }
+    },
+    "required": false
+  },
+  {
+    "property_code": "period_end",
+    "property_name": "周报结束",
+    "data_type": "DATE",
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "date"
+      }
+    },
+    "required": false
+  },
+  {
+    "property_code": "stat_date",
+    "property_name": "报告指标日期",
+    "data_type": "DATE",
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "date"
+      }
+    },
+    "required": false
+  },
+  {
+    "property_code": "rating",
+    "property_name": "综合评级",
+    "data_type": "STRING",
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "status"
+      }
+    },
+    "required": false,
+    "max_length": 20,
+    "term_values": [
+      "爆款",
+      "优秀",
+      "达标",
+      "低效",
+      "数据不足"
+    ]
+  },
+  {
+    "property_code": "structured_result",
+    "property_name": "结构化分析结果",
+    "data_type": "STRING",
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "description"
+      }
+    },
+    "required": true
+  },
+  {
+    "property_code": "external_benchmarks",
+    "property_name": "外部对标数组",
+    "data_type": "STRING",
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "description"
+      }
+    },
+    "required": true,
+    "default_value": "[]"
+  },
+  {
+    "property_code": "report_html",
+    "property_name": "自包含HTML报告",
+    "data_type": "STRING",
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "description"
+      }
+    },
+    "required": true
+  },
+  {
+    "property_code": "report_format",
+    "property_name": "报告格式",
+    "data_type": "STRING",
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "category"
+      }
+    },
+    "required": true,
+    "default_value": "html",
+    "max_length": 10,
+    "term_values": [
+      "html"
+    ]
+  },
+  {
+    "property_code": "run_id",
+    "property_name": "幂等运行ID",
+    "data_type": "STRING",
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "category"
+      }
+    },
+    "required": true,
+    "max_length": 64
+  },
+  {
+    "property_code": "agent_version",
+    "property_name": "Agent 版本",
+    "data_type": "STRING",
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "category"
+      }
+    },
+    "required": false,
+    "max_length": 50
+  },
+  {
+    "property_code": "prompt_version",
+    "property_name": "提示词版本",
+    "data_type": "STRING",
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "category"
+      }
+    },
+    "required": false,
+    "max_length": 50
+  },
+  {
+    "property_code": "metric_rule_version",
+    "property_name": "指标规则版本",
+    "data_type": "STRING",
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "category"
+      }
+    },
+    "required": false,
+    "max_length": 50
+  },
+  {
+    "property_code": "input_fingerprint",
+    "property_name": "输入数据指纹",
+    "data_type": "STRING",
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "category"
+      }
+    },
+    "required": false,
+    "max_length": 100
+  },
+  {
+    "property_code": "review_result",
+    "property_name": "Reviewer 结果",
+    "data_type": "STRING",
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "description"
+      }
+    },
+    "required": false
+  },
+  {
+    "property_code": "status",
+    "property_name": "报告状态",
+    "data_type": "STRING",
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "status"
+      }
+    },
+    "required": true,
+    "default_value": "draft",
+    "max_length": 20,
+    "term_values": [
+      "draft",
+      "approved",
+      "rejected",
+      "superseded"
+    ]
+  }
+]

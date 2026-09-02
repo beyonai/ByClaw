@@ -11,7 +11,7 @@
 -   文件：上传、更新、删除、读取、查看元数据、移动、引用关系、下载、格式转换、构建、构建状态。
 -   检索：分块检索和文件级检索。
 
-此外，`byclaw-qa/src/api.py` 还提供 **9 个按 `resourceId` 调用的包装接口**，面向 Agent/技能等需要直接以门户资源 ID 操作知识库的调用方。当前门户常规请求不直接使用其中的大多数接口：它将 `resourceId` 转为 QA 可识别的 `knCode`，并透传 `X-Byclaw-Resource-Id` 请求头；仅“知识构建”会改调专用的 `fileToMarkdownIndexByResourceId`。
+`byclaw-qa` 不再提供按 `resourceId` 调用的包装接口。门户统一将 `resourceId` 转为 QA 可识别的 `knCode`，并在单资源操作中透传 `X-Byclaw-Resource-Id` 请求头。
 
 本文不包含以下内容：
 
@@ -111,7 +111,7 @@ flowchart LR
 | `knowledgeSearch`         | `/api/v1/knowledgeItems/search`     | `POST /datasetController/knowledgeItems/search`                                    | 多资源检索：将 `resourceIdList` 转为 `knCodeList`，不附加单个资源 ID 请求头；结果反向映射。                     |
 | `knowledgeFileSearch`     | `/api/v1/knowledgeItems/searchFile` | `POST /datasetController/knowledgeItems/searchFile`                                | 与分块检索相同，按多个资源做权限校验和标识转换。                                                                |
 | `fileToMarkdown`          | `/api/v1/fileToMarkdown`            | `POST /datasetController/fileToMarkdown`                                           | 仅转换文件流，不绑定知识库；无 `knCode` 和资源 ID 请求头。                                                      |
-| `knowledgeBuild`          | `/api/v1/fileToMarkdownIndex`       | `POST /datasetController/build`；`buildKnowledgeFromDoc` 内部构建                  | 有 `resourceId` 时实际改调 `/api/v1/fileToMarkdownIndexByResourceId`，请求体移除 `knCode` 并加入 `resourceId`。 |
+| `knowledgeBuild`          | `/api/v1/fileToMarkdownIndex`       | `POST /datasetController/build`；`buildKnowledgeFromDoc` 内部构建                  | `resourceId -> knCode`，并通过请求头携带资源 ID，以便后台任务继承资源上下文。                                   |
 | `downloadFile`            | `/api/v1/downloadFile`              | `GET /datasetController/download`（门户对外 GET，向 QA 仍为 POST）                 | 单文件下载携带资源 ID 请求头；目录下载先列目录，再逐文件下载。                                                  |
 | `fileBuildStatus`         | `/api/v1/fileBuildStatus`           | `GET /datasetController/fileBuildStatus`（门户对外 GET，向 QA 仍为 POST）          | `resourceId -> knCode`，携带资源 ID 请求头。                                                                    |
 
@@ -238,7 +238,7 @@ curl -X POST "$PORTAL_BASE/datasetController/knowledgeItems/update" \
 | QA 路径               | QA 请求字段                  | 门户入口与约束                                                              |
 | --------------------- | ---------------------------- | --------------------------------------------------------------------------- |
 | `fileToMarkdown`      | multipart 字段 `fileContent` | 只做同步格式转换并回传 Markdown 文件流；不上传、不建索引、不切片。          |
-| `fileToMarkdownIndex` | `knCode`、`filePath`         | 门户携带资源上下文时会重写为 `fileToMarkdownIndexByResourceId`，见第 6 节。 |
+| `fileToMarkdownIndex` | `knCode`、`filePath`         | 门户通过 `X-Byclaw-Resource-Id` 请求头传递资源上下文。                      |
 | `fileBuildStatus`     | `knCode`、`filePath`         | 查询单文件异步构建状态。                                                    |
 
 `buildKnowledgeFromDoc` 是门户的编排入口：将 OpenClaw 生成的 Markdown 先通过 `knowledgeItems/import` 上传，再调用构建接口。它不是 QA 的独立原生接口。
@@ -295,23 +295,9 @@ curl -X POST "$PORTAL_BASE/datasetController/knowledgeItems/searchFile" \
   }'
 ```
 
-## 6. byclaw-qa 的 resourceId 包装接口
+## 6. resourceId 调用约定
 
-`byclaw-qa/src/api.py` 为不方便自行完成 `resourceId -> knCode` 转换的调用方提供以下接口。它通过 Redis 中的 `KG_DOC_{resourceId}` 查找知识库编码，并把部分响应中的 `knCode` 改写回 `resourceId`。
-
-| QA 路径                                     | 请求核心字段                            | 当前门户是否直接调用 | 说明                                                                                 |
-| ------------------------------------------- | --------------------------------------- | -------------------- | ------------------------------------------------------------------------------------ |
-| `/api/v1/knowledgeItems/importByResourceId` | `resourceId`、`filePath`、`fileContent` | 否                   | 按资源上传，multipart。另有兼容别名 `/api/v1/knowledge-items/importByResourceId`。   |
-| `/api/v1/fileToMarkdownIndexByResourceId`   | `resourceId`、`filePath`                | 是                   | 门户 `build` 在有资源 ID 时的实际下游路径；QA 在后台任务中保留调用令牌和资源上下文。 |
-| `/api/v1/knowledgeItems/searchByResourceId` | `resourceIdList` 与原生检索字段         | 否                   | 按资源 ID 多库检索。另有兼容别名 `/api/v1/knowledge-items/searchByResourceId`。      |
-| `/api/v1/directories/createByResourceId`    | `resourceId`、目录字段                  | 否                   | 创建目录。                                                                           |
-| `/api/v1/directories/updateByResourceId`    | `resourceId`、目录字段                  | 否                   | 更新目录。                                                                           |
-| `/api/v1/directories/deleteByResourceId`    | `resourceId`、目录字段                  | 否                   | 删除目录。                                                                           |
-| `/api/v1/listDirByResourceId`               | `resourceId`、`directoryPath`           | 否                   | 获取目录内容。                                                                       |
-| `/api/v1/readFileByResourceId`              | `resourceId`、`filePath`、行范围        | 否                   | 读取文件内容。                                                                       |
-| `/api/v1/downloadFileByResourceId`          | `resourceId`、`filePath`                | 否                   | 下载原始文件。                                                                       |
-
-注意：这些包装接口解决的是**标识转换和资源存储上下文**，不是门户权限校验的替代品。门户入口仍应作为外部调用的首选，因为它会根据当前用户进行读、写、管理权限判断。
+原 `*ByResourceId` 包装接口已经移除。外部调用应通过门户完成权限校验及 `resourceId -> knCode` 转换；可信服务网络内直接调用 QA 原生接口时，请求体使用 `knCode`，单资源操作同时携带 `X-Byclaw-Resource-Id`。
 
 ## 7. 原生 QA 调试 curl
 
@@ -400,12 +386,6 @@ qa_json "/api/v1/knowledgeItems/search" "{\"query\":\"年假制度\",\"knCodeLis
 qa_json "/api/v1/knowledgeItems/searchFile" "{\"query\":\"年假制度\",\"knCodeList\":[\"$KN_CODE\"],\"topK\":5,\"searchMode\":\"mixedRecall\",\"metadataFieldList\":[]}"
 ```
 
-资源 ID 构建包装接口示例：
-
-```bash
-qa_json "/api/v1/fileToMarkdownIndexByResourceId" "{\"resourceId\":$RESOURCE_ID,\"filePath\":\"/归档/员工手册.md\"}"
-```
-
 ## 8. 权限、异常与排查
 
 ### 8.1 权限边界
@@ -415,7 +395,6 @@ qa_json "/api/v1/fileToMarkdownIndexByResourceId" "{\"resourceId\":$RESOURCE_ID,
 | 查看目录、读取文件、查看文件元数据、下载、检索 | 先校验知识资源的可读权限。多库检索会逐个校验 `resourceIdList`。              |
 | 上传、建目录、重命名、删除、移动、触发构建 | 校验资源的管理权限。                                                             |
 | 创建知识库                                 | 按门户资源创建规则校验归属、目录等元数据，并在 QA 创建成功后落门户资源记录。     |
-| QA `*ByResourceId` 直连接口                | 负责 `resourceId -> knCode` 和资源存储上下文；不应被视为替代门户鉴权的公网接口。 |
 
 ### 8.2 常见问题
 
@@ -423,13 +402,13 @@ qa_json "/api/v1/fileToMarkdownIndexByResourceId" "{\"resourceId\":$RESOURCE_ID,
 | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | QA 返回“知识库不存在”            | 确认 `ss_resource.resource_code` 与 QA 的 `knCode` 一致，检查资源是否被删除或迁移。                                    |
 | 请求到了错误的本地/第三方服务    | 检查 `dataset.system`，以及资源 `target_content.domainName`、`domainURL` 与 `resourceService` 中对应 `operationId`。   |
-| 带资源 ID 的构建失败             | 检查最终是否调用 `/api/v1/fileToMarkdownIndexByResourceId`，请求体应含 `resourceId` 和 `filePath`，不应保留 `knCode`。 |
+| 带资源 ID 的构建失败             | 检查最终是否调用 `/api/v1/fileToMarkdownIndex`，请求体应含 `knCode` 和 `filePath`，请求头应含 `X-Byclaw-Resource-Id`。 |
 | 技能调用返回无权限或无数据       | 先确认调用的是门户封装接口；检查当前用户是否拥有资源可读权限、`resourceIdList` 是否包含无权限资源。                    |
 | 文件元数据为空或缺字段           | 确认文件已经入库/构建，`filePath` 是知识库内完整路径；传入 `metadataFieldList` 时检查字段名称是否准确。                 |
 | 上传成功但无法检索               | 上传只完成文件写入；需调用构建并轮询 `fileBuildStatus` 至完成后再检索。                                                |
 | 修改或注销后门户与 QA 状态不一致 | 检查 `updateDataset`、`deleteDataset` 的 QA 调用日志和 `resultCode`；这两个流程当前未对 QA 非零响应执行成功断言。      |
 | 下载获得 JSON 文本而非文件       | 查看 QA 返回的 `resultCode`、认证头、文件路径；门户会将小型 JSON 错误响应识别为失败。                                  |
-| 路径 404                         | 原生路径使用 `knowledgeItems`，不是 `knowledge-items`；后者仅在两个 `ByResourceId` 兼容别名中存在。                    |
+| 路径 404                         | 确认使用 QA 原生路径；`*ByResourceId` 路径及其 `knowledge-items` 兼容别名已经移除。                                  |
 
 ## 9. 代码事实来源
 
@@ -437,5 +416,5 @@ qa_json "/api/v1/fileToMarkdownIndexByResourceId" "{\"resourceId\":$RESOURCE_ID,
 -   门户 QA 客户端、请求头、资源构建重写与重试：[FeignPythonBuildService.java](../../byclaw-be/src/main/java/com/iwhalecloud/byai/common/feign/client/FeignPythonBuildService.java)
 -   门户 Controller 入口：[DatasetController.java](../../byclaw-be/src/main/java/com/iwhalecloud/byai/state/interfaces/controller/dataset/DatasetController.java)
 -   门户资源映射、权限与编排：[DatasetApplicationService.java](../../byclaw-be/src/main/java/com/iwhalecloud/byai/state/application/service/dataset/DatasetApplicationService.java)
--   QA resourceId 包装路由：[api.py](../../byclaw-qa/src/api.py)
+-   QA 应用入口与资源上下文中间件：[api.py](../../byclaw-qa/src/api.py)
 -   QA 原生请求/响应契约：[知识模块接口说明](./api.md)

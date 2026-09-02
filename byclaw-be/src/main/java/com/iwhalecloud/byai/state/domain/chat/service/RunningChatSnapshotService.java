@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.state.domain.chat.service;
 
 import java.util.Date;
+import java.util.ArrayList;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.List;
@@ -9,7 +10,10 @@ import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.Cursor;
+import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.BeanUtils;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
@@ -22,6 +26,7 @@ import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatSnapshotResponse;
 import com.iwhalecloud.byai.state.domain.chat.enums.ChatUseageEnum;
 import com.iwhalecloud.byai.state.domain.chat.model.MessageContext;
 import com.iwhalecloud.byai.state.domain.chat.model.MessageResourceDto;
+import com.iwhalecloud.byai.state.domain.message.dto.ByaiMessageHotDtoDto;
 import com.iwhalecloud.byai.state.domain.message.enums.MsgStatus;
 
 import lombok.extern.slf4j.Slf4j;
@@ -33,6 +38,10 @@ public class RunningChatSnapshotService {
     private static final String KEY_PREFIX = "byai:chat:running:snapshot:";
 
     private static final long SNAPSHOT_TTL_SECONDS = 30 * 60L;
+
+    private static final String EXTERNAL_CHILD_TRACE_PREFIX = "external-child-";
+
+    private static final String SCOPED_PERSISTED_PREFIX = "byai:chat:scoped:persisted:";
 
     @Autowired
     private RedisTemplate<String, Object> redisTemplate;
@@ -60,6 +69,98 @@ public class RunningChatSnapshotService {
         catch (Exception e) {
             log.warn("保存运行中会话快照失败, sessionId: {}, traceId: {}", ctx.sessionId, snapshotTraceId, e);
         }
+    }
+
+    /**
+     * Save the newest complete external child-message projection before its WebSocket broadcast.
+     *
+     * <p>The snapshot is the reconnect baseline while the database write-behind queue may still be flushing.</p>
+     */
+    public boolean saveExternalChild(ByaiMessageHotDtoDto message, String streamId, boolean terminal) {
+        if (message == null || message.getSessionId() == null || message.getMessageId() == null) {
+            return false;
+        }
+        String traceId = externalChildTraceId(message.getSessionId());
+        try {
+            RunningChatSnapshotResponse snapshot = new RunningChatSnapshotResponse();
+            BeanUtils.copyProperties(message, snapshot);
+            snapshot.setRunning(!terminal);
+            snapshot.setTraceId(traceId);
+            snapshot.setModelAnswerMessageId(message.getMessageId());
+            snapshot.setSnapshotStreamId(streamId);
+            snapshot.setMsgStatus(terminal ? MsgStatus.FINISH.getCode() : MsgStatus.APPEND.getCode());
+            JSONObject metadata = JSON.parseObject(StringUtils.defaultString(message.getMetadata(), "{}"));
+            snapshot.setChildRunId(StringUtils.trimToNull(metadata.getString("child_run_id")));
+            snapshot.setChildTurn(metadata.getLong("child_turn"));
+            redisTemplate.opsForValue().set(buildKey(message.getSessionId(), traceId, message.getMessageId()),
+                JSON.toJSONString(snapshot), SNAPSHOT_TTL_SECONDS, TimeUnit.SECONDS);
+            return true;
+        }
+        catch (Exception e) {
+            log.warn("保存外部子会话快照失败, sessionId: {}, messageId: {}", message.getSessionId(),
+                message.getMessageId(), e);
+            return false;
+        }
+    }
+
+    /** Load unpersisted external child projections once at startup so write-behind work can be retried. */
+    public List<RunningChatSnapshotResponse> findExternalChildSnapshots() {
+        List<RunningChatSnapshotResponse> snapshots = new ArrayList<>();
+        ScanOptions options = ScanOptions.scanOptions()
+            .match(KEY_PREFIX + "*:" + EXTERNAL_CHILD_TRACE_PREFIX + "*")
+            .count(100)
+            .build();
+        try (Cursor<String> keys = redisTemplate.scan(options)) {
+            while (keys.hasNext()) {
+                String key = keys.next();
+                String value = (String) redisTemplate.opsForValue().get(key);
+                if (StringUtils.isNotBlank(value)) {
+                    RunningChatSnapshotResponse snapshot = JSON.parseObject(value, RunningChatSnapshotResponse.class);
+                    String persistedStreamId = (String) redisTemplate.opsForValue().get(
+                        scopedPersistedKey(snapshot.getSessionId(), snapshot.getMessageId()));
+                    if (!StreamIdUtil.isProcessedByWatermark(snapshot.getSnapshotStreamId(), persistedStreamId)) {
+                        snapshots.add(snapshot);
+                    }
+                }
+            }
+        }
+        catch (Exception e) {
+            log.warn("恢复外部子会话持久化快照失败", e);
+        }
+        return snapshots;
+    }
+
+    public void markExternalChildPersisted(ByaiMessageHotDtoDto message) {
+        if (message == null || message.getSessionId() == null || message.getMessageId() == null) {
+            return;
+        }
+        try {
+            JSONObject metadata = JSON.parseObject(StringUtils.defaultString(message.getMetadata(), "{}"));
+            String streamId = metadata.getString("event_stream_id");
+            if (StringUtils.isNotBlank(streamId)) {
+                redisTemplate.opsForValue().set(scopedPersistedKey(message.getSessionId(), message.getMessageId()),
+                    streamId, SNAPSHOT_TTL_SECONDS, TimeUnit.SECONDS);
+            }
+        }
+        catch (Exception e) {
+            log.warn("记录外部子会话已落库水位失败, sessionId: {}, messageId: {}", message.getSessionId(),
+                message.getMessageId(), e);
+        }
+    }
+
+    public static String externalChildTraceId(Long sessionId) {
+        return EXTERNAL_CHILD_TRACE_PREFIX + sessionId;
+    }
+
+    public RunningChatSnapshotResponse getExternalChildSnapshot(Long sessionId, Long messageId) {
+        if (sessionId == null) {
+            return null;
+        }
+        return get(sessionId, externalChildTraceId(sessionId), messageId);
+    }
+
+    private String scopedPersistedKey(Long sessionId, Long messageId) {
+        return SCOPED_PERSISTED_PREFIX + sessionId + ":" + messageId;
     }
 
     public RunningChatSnapshotResponse get(Long sessionId, String traceId, Long modelAnswerMessageId) {
@@ -122,6 +223,8 @@ public class RunningChatSnapshotService {
             messageContext.setAnswerText(new StringBuilder(StringUtils.defaultString(snapshot.getMessageContent())));
             messageContext.setResComIds(snapshot.getResComIds());
             messageContext.setMsgStatus(snapshot.getMsgStatus());
+            messageContext.setComplete(Boolean.FALSE.equals(snapshot.getRunning())
+                || MsgStatus.FINISH.getCode().equals(snapshot.getMsgStatus()));
             if (StringUtils.isNotBlank(snapshot.getMessageStruct())) {
                 messageContext.setAnswerMessageList(JSON.parseArray(snapshot.getMessageStruct(), AnswerDelta.class));
                 if (CollectionUtils.isNotEmpty(messageContext.getAnswerMessageList())) {
@@ -138,6 +241,7 @@ public class RunningChatSnapshotService {
                     messageContext.setReasonList(textList);
                 }
             }
+            messageContext.restoreSegmentCursor();
             if (StringUtils.isNotBlank(snapshot.getRelatedResources())) {
                 MessageResourceDto resourceDto = JSON.parseObject(snapshot.getRelatedResources(),
                     new TypeReference<MessageResourceDto>() {});
@@ -169,8 +273,17 @@ public class RunningChatSnapshotService {
         redisTemplate.delete(buildKey(ctx.sessionId, ctx.traceId, ctx.modelAnswerMessageId));
     }
 
+    /**
+     * 按本轮回答归属删除快照。
+     * <p>
+     * 快照承载恢复时重建已聚合内容的能力，因此 {@code modelAnswerMessageId} 为空（调用方无法识别
+     * 具体是哪一轮回答）时不做任何删除，避免把仍待恢复的会话内容一并清空。
+     *
+     * @param sessionId 会话 ID
+     * @param modelAnswerMessageId 本次停止对应的回答消息 ID，为空表示归属未知
+     */
     public void delete(Long sessionId, Long modelAnswerMessageId) {
-        if (sessionId == null) {
+        if (sessionId == null || modelAnswerMessageId == null) {
             return;
         }
         deleteBySession(sessionId, modelAnswerMessageId);
@@ -269,7 +382,8 @@ public class RunningChatSnapshotService {
     private RunningChatSnapshotResponse buildSnapshot(ChatProcessContext ctx, String traceId,
         MessageContext messageContext, Long modelAnswerMessageId, String clientRequestId) {
         RunningChatSnapshotResponse snapshot = new RunningChatSnapshotResponse();
-        snapshot.setRunning(true);
+        boolean complete = Boolean.TRUE.equals(messageContext.getComplete());
+        snapshot.setRunning(!complete);
         snapshot.setTraceId(traceId);
         snapshot.setClientRequestId(clientRequestId);
         snapshot.setModelAnswerMessageId(modelAnswerMessageId);
@@ -281,12 +395,15 @@ public class RunningChatSnapshotService {
         snapshot.setTaskId(ctx.taskId);
         snapshot.setUsage(ChatUseageEnum.SYSTEM_RESPONSE.getCode());
         snapshot.setCreatorId(ctx.userId);
-        snapshot.setMetadata(ctx.assistantChatDto == null ? null : ctx.assistantChatDto.getMetadata());
+        snapshot.setMetadata(messageContext.getAnswerMessageList().stream().anyMatch(item -> item.getSeq() != null)
+            || messageContext.getReasonMessageList().stream().anyMatch(item -> item.getSeq() != null)
+                ? withV2RenderMetadata(ctx.assistantChatDto == null ? null : ctx.assistantChatDto.getMetadata())
+                : ctx.assistantChatDto == null ? null : ctx.assistantChatDto.getMetadata());
         snapshot.setCreateTime(
             messageContext.getFirstResponseTime() == null ? new Date() : messageContext.getFirstResponseTime());
         snapshot.setMessageContent(messageContext.returnAnswerText());
         snapshot.setResComIds(messageContext.getResComIds());
-        snapshot.setMsgStatus(MsgStatus.APPEND.getCode());
+        snapshot.setMsgStatus(complete ? MsgStatus.FINISH.getCode() : MsgStatus.APPEND.getCode());
         snapshot.setAccessTerminal(ctx.assistantChatDto == null ? null : ctx.assistantChatDto.getAccessTerminal());
 
         if (CollectionUtils.isNotEmpty(messageContext.getAnswerMessageList())) {
@@ -300,6 +417,18 @@ public class RunningChatSnapshotService {
         messageResourceDto.setResources(messageContext.getChatRelatedResource());
         snapshot.setRelatedResources(JSON.toJSONString(messageResourceDto));
         return snapshot;
+    }
+
+    private String withV2RenderMetadata(String metadata) {
+        JSONObject value;
+        try {
+            value = StringUtils.isBlank(metadata) ? new JSONObject() : JSON.parseObject(metadata);
+        }
+        catch (Exception e) {
+            value = new JSONObject();
+        }
+        value.put("messageRenderVersion", "v2");
+        return value.toJSONString();
     }
 
     private Long resolveSnapshotMessageId(ChatProcessContext ctx, String traceId, MessageContext messageContext) {
@@ -353,10 +482,6 @@ public class RunningChatSnapshotService {
         try {
             Set<String> keys = redisTemplate.keys(pattern);
             if (keys == null || keys.isEmpty()) {
-                return;
-            }
-            if (modelAnswerMessageId == null) {
-                redisTemplate.delete(keys);
                 return;
             }
             keys.stream()

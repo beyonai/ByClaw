@@ -1,0 +1,5 @@
+{
+  "capabilities": [
+    { "id": "openclaw", "command": ["openclaw", "skills", "search"] }
+  ]
+}

@@ -145,6 +145,9 @@ describe("workspace-skills", () => {
       {
         listEntry: {
           skills: [
+            "project-context",
+            "notice",
+            "project-cloud-knowledge",
             "json-skill",
             "extra-filter-name",
             "missing-extra",
@@ -201,9 +204,37 @@ describe("workspace-skills", () => {
     ).resolves.toMatchObject([
       {
         listEntry: {
-          skills: ["inner-filter-name"],
+          skills: ["project-context", "notice", "project-cloud-knowledge", "inner-filter-name"],
         },
       },
     ]);
+  });
+
+  it("enables core bundled skills without copying them into agent workspace", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "baiying-core-skills-workspace-"));
+    const api = {
+      runtime: {
+        config: {
+          loadConfig: () => ({ agents: { list: [{ id: "baiying-agent-1", workspace }] } }),
+        },
+      },
+    } as any;
+
+    await expect(
+      mergeWorkspaceSkillsIntoManagedAgents({
+        api,
+        managed: [{ agentId: "baiying-agent-1", listEntry: { id: "baiying-agent-1", skills: [] } }],
+        includeMainShared: false,
+        mainParentAgentId: "main",
+      }),
+    ).resolves.toMatchObject([
+      {
+        listEntry: {
+          skills: ["project-context", "notice", "project-cloud-knowledge"],
+        },
+      },
+    ]);
+
+    await expect(fs.access(path.join(workspace, "skills"))).rejects.toMatchObject({ code: "ENOENT" });
   });
 });

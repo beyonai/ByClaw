@@ -1,7 +1,6 @@
 package com.iwhalecloud.byai.manager.dto.digitemploy;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.iwhalecloud.byai.manager.dto.scheduletask.ScheduleTaskCreateRequest;
 import com.iwhalecloud.byai.manager.dto.template.MemoryConfigDTO;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtDigEmployee;
 import lombok.Getter;
@@ -71,6 +70,11 @@ public class DigitalEmployeeDTO extends SsResExtDigEmployee {
      */
     private String resourceVersionId;
 
+    /** 数字员工组草稿/在用配置快照标识。 */
+    private Long resourceDVerid;
+
+    private Long resourceRVerid;
+
     /**
      * 服务模式:hosted:远程，local:本地
      */
@@ -113,11 +117,6 @@ public class DigitalEmployeeDTO extends SsResExtDigEmployee {
     private boolean isFrontAccess = false;
 
     /**
-     * 定时任务配置列表
-     */
-    private List<ScheduleTaskCreateRequest> scheduleTaskList;
-
-    /**
      * 记忆配置列表（包含规则名称、规则内容、模版ID）
      */
     private List<MemoryConfigDTO> memoryConfigList;
@@ -141,10 +140,21 @@ public class DigitalEmployeeDTO extends SsResExtDigEmployee {
     private List<String> relTools;
 
     /**
+     * 文生图模型标识（运行期字段，不新增 DB 独立列）。保存时写入标准 JSON 与 target_content，详情查询时再从 target_content 回填。
+     * 使用字符串避免超出 JavaScript 安全整数范围的模型标识发生精度损失。
+     */
+    private String imageModelId;
+
+    /**
      * 提示词文本（运行期字段，不入 DB 独立列）：取自前端入参 corePersonaDefinition， 在 doSyncOpenClawWorkSpace 阶段被透传到标准 JSON 与 target_content；
      * findDetailsById 回显时也从 target_content 反序列化拿回，保证保存→编辑→保存的循环不丢数据。 注意：corePersonaDefinition 仍按既有逻辑落
      * ss_res_ext_dig_employee.core_persona_definition 列， relPrompt 只是它在 JSON 视角下的别名节点，避免 DB 列与 JSON 节点的命名漂移。
      */
     private String relPrompt;
+
+    /**
+     * agentType=017 时的组成员配置，顺序即调度展示顺序。
+     */
+    private List<EmployeeGroupMemberDTO> employeeGroupMembers = new ArrayList<>();
 
 }

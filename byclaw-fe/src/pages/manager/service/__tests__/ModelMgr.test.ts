@@ -21,6 +21,7 @@ jest.mock('@/service/common/request', () => ({
 }));
 
 import {
+  debugModelImageGeneration,
   debugModelStream,
   deleteModel,
   getModelDetail,
@@ -97,6 +98,32 @@ describe('manager/service/ModelMgr', () => {
         customHandle: true,
       },
     });
+  });
+
+  it('debugModelImageGeneration posts to the image debug endpoint with customHandle config', () => {
+    const controller = new AbortController();
+    const payload = {
+      id: 'image-model-1',
+      input: '{"prompt":"whale"}',
+      signal: controller.signal,
+      onDelta: jest.fn(),
+    };
+
+    debugModelImageGeneration(payload);
+
+    expect(mockPOST).toHaveBeenCalledWith(
+      '/byaiService/new/model/debugModelImageGeneration',
+      { id: 'image-model-1', input: '{"prompt":"whale"}' },
+      {
+        cancelToken: { signal: controller.signal },
+        responseCfg: { customHandle: true },
+        timeout: 125000,
+      }
+    );
+
+    controller.abort();
+    expect(controller.signal.aborted).toBe(true);
+    expect((mockPOST.mock.calls[0][2] as any).cancelToken.signal.aborted).toBe(true);
   });
 
   it('debugModelStream sends signed fetch request and returns json for non-stream response', async () => {

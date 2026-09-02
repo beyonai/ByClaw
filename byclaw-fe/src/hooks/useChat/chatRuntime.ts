@@ -2,9 +2,14 @@ import { get, isNil, set, unset } from 'lodash';
 
 import { compareStreamId, type ParsedChatStreamMessage } from '@/hooks/useSseSender/chatStream';
 import { IMessageState } from '@/constants/message';
-import { chatSessionRuntimeManager, type RunningChatInfo } from '@/utils/chatSessionRuntimeManager';
+import { hasPendingEasyConfirmItem } from '@/components/MessagesComp/easyConfirm';
+import {
+  chatSessionRuntimeManager,
+  type RunningChatInfo,
+  type SessionRuntimeState,
+} from '@/utils/chatSessionRuntimeManager';
 
-import type { IMessage } from '@/typescript/message';
+import type { IMessage, TaskPlanSnapshot } from '@/typescript/message';
 
 type UpdateMessage = (msg: IMessage, opt?: { isAssign?: boolean }) => IMessage;
 
@@ -19,6 +24,8 @@ export type ChatStreamRuntimeContext = {
   getMessageList: () => IMessage[];
   flowHandler: (props: any) => any;
   updateMessage: UpdateMessage;
+  answerFlushTimer?: ReturnType<typeof setTimeout>;
+  answerFlushQueued?: boolean;
 };
 
 const pendingChatContexts = new Map<string, ChatStreamRuntimeContext>();
@@ -26,9 +33,11 @@ const laneChatContexts = new Map<string, ChatStreamRuntimeContext>();
 const traceChatContexts = new Map<string, ChatStreamRuntimeContext>();
 const turnChatContexts = new Map<string, Map<string, ChatStreamRuntimeContext>>();
 const sessionChatContexts = new Map<string, Map<string, ChatStreamRuntimeContext>>();
+const queuedAnswerContexts = new Set<ChatStreamRuntimeContext>();
 const restoringStreamKeys = new Set<string>();
 const restoredStreamBuffer = new Map<string, ParsedChatStreamMessage[]>();
 const MAX_BUFFERED_STREAM_SIZE = 200;
+const ANSWER_FLUSH_INTERVAL_MS = 30;
 
 const safeParseMetadata = (metadata: unknown): Record<string, unknown> => {
   if (!metadata) return {};
@@ -64,6 +73,43 @@ const getScopedKey = (sessionId?: string | number, value?: string | number) => `
 
 const getSessionContexts = (sessionId?: string | number) =>
   sessionId ? sessionChatContexts.get(`${sessionId}`) : undefined;
+
+const clearAnswerFlush = (context: ChatStreamRuntimeContext) => {
+  if (context.answerFlushTimer) {
+    clearTimeout(context.answerFlushTimer);
+    context.answerFlushTimer = undefined;
+  }
+  context.answerFlushQueued = false;
+  queuedAnswerContexts.delete(context);
+};
+
+const flushAnswerMessage = (context: ChatStreamRuntimeContext) => {
+  clearAnswerFlush(context);
+  context.answerMsg = context.updateMessage(context.answerMsg, { isAssign: context.restored });
+};
+
+const flushQueuedAnswers = () => {
+  Array.from(queuedAnswerContexts).forEach((context) => flushAnswerMessage(context));
+};
+
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      flushQueuedAnswers();
+    }
+  });
+}
+
+const scheduleAnswerFlush = (context: ChatStreamRuntimeContext) => {
+  queuedAnswerContexts.add(context);
+  if (context.answerFlushQueued) return;
+
+  context.answerFlushQueued = true;
+  context.answerFlushTimer = setTimeout(() => {
+    context.answerFlushTimer = undefined;
+    flushAnswerMessage(context);
+  }, ANSWER_FLUSH_INTERVAL_MS);
+};
 
 export const getChatStreamClientRequestId = (message: any, res?: any) =>
   getMessageValue(message, res, ['clientRequestId', 'data.clientRequestId', 'metadata.clientRequestId']);
@@ -115,6 +161,12 @@ export const registerPendingChatContext = (context: ChatStreamRuntimeContext) =>
 export const unregisterPendingChatContext = (clientRequestId?: string) => {
   if (!clientRequestId) return;
   const context = pendingChatContexts.get(`${clientRequestId}`);
+  // A context can be unregistered by cancellation or disconnect recovery before
+  // a coalesced UI update's timer fires. Flush that latest state first so the
+  // trailing stream delta is not lost and no timer can update after cleanup.
+  if (context?.answerFlushQueued) {
+    flushAnswerMessage(context);
+  }
   pendingChatContexts.delete(`${clientRequestId}`);
   if (context?.laneId) {
     laneChatContexts.delete(`${context.laneId}`);
@@ -320,6 +372,7 @@ const markParsedStreamApplied = (context: ChatStreamRuntimeContext, parsed: Pars
 };
 
 const completeChatStreamContext = (context: ChatStreamRuntimeContext, messageState: IMessageState) => {
+  clearAnswerFlush(context);
   if (context.answerMsg.messageState !== IMessageState.Cancel) {
     set(context.answerMsg, 'messageState', messageState);
   }
@@ -329,6 +382,21 @@ const completeChatStreamContext = (context: ChatStreamRuntimeContext, messageSta
     unregisterSessionChatContext(`${context.answerMsg.sessionId}`, context.clientRequestId);
   }
   chatSessionRuntimeManager.complete(context.clientRequestId);
+};
+
+const applyProjectedRootState = (context: ChatStreamRuntimeContext, runtime?: SessionRuntimeState) => {
+  if (runtime?.rootActive === undefined || context.answerMsg.messageState === IMessageState.Cancel) return;
+  const traceId = context.answerMsg.traceId || get(context.answerMsg, 'traceId');
+  if (!traceId || `${runtime.traceId}` !== `${traceId}`) return;
+
+  let messageState = IMessageState.Done;
+  if (runtime.status === 'failed') {
+    messageState = IMessageState.Error;
+  } else if (runtime.rootActive) {
+    messageState = IMessageState.Answer;
+  }
+  set(context.answerMsg, 'messageState', messageState);
+  set(context.answerMsg, 'thinkDone', !runtime.rootActive || runtime.status === 'failed');
 };
 
 const applyParsedStreamToContext = (parsed: ParsedChatStreamMessage, context: ChatStreamRuntimeContext) => {
@@ -373,6 +441,14 @@ const applyParsedStreamToContext = (parsed: ParsedChatStreamMessage, context: Ch
   const nextSessionId = context.answerMsg.sessionId || get(formattedPayload, 'sessionId');
   chatSessionRuntimeManager.bindSession(context.clientRequestId, nextSessionId ? `${nextSessionId}` : undefined);
   registerSessionChatContext(nextSessionId ? `${nextSessionId}` : undefined, context);
+  applyProjectedRootState(context, chatSessionRuntimeManager.getSessionRuntime(nextSessionId));
+  chatSessionRuntimeManager.setWaitingForUserInput(
+    context.clientRequestId,
+    hasPendingEasyConfirmItem(context.answerMsg, [
+      ...(context.answerMsg.thinkList || []),
+      ...(context.answerMsg.messageList || []),
+    ])
+  );
   if (nextSessionId && context.turnId) {
     const turnContexts = turnChatContexts.get(`${context.turnId}`);
     turnContexts?.forEach((turnContext) => {
@@ -395,10 +471,13 @@ const applyParsedStreamToContext = (parsed: ParsedChatStreamMessage, context: Ch
     completeChatStreamContext(context, IMessageState.Done);
   }
 
-  if (!context.onlyQuery) {
-    context.queryMsg = context.updateMessage(context.queryMsg);
+  if (['error', 'appStreamResponse'].includes(eventName)) {
+    // Terminal events must be visible immediately before the runtime context
+    // is removed, while intermediate deltas are coalesced below.
+    flushAnswerMessage(context);
+  } else {
+    scheduleAnswerFlush(context);
   }
-  context.answerMsg = context.updateMessage(context.answerMsg, { isAssign: context.restored });
   markParsedStreamApplied(context, parsed);
 };
 
@@ -422,6 +501,50 @@ export const handleParsedChatStream = (parsed: ParsedChatStreamMessage) => {
   }
 
   applyParsedStreamToContext(parsed, context);
+};
+
+export const handleTaskPlanSnapshot = (message: any) => {
+  const taskPlan = get(message, 'data') as TaskPlanSnapshot | undefined;
+  if (!taskPlan?.planId || !taskPlan?.messageId) return false;
+
+  const context = findChatStreamContext(message, taskPlan);
+  if (!context) return false;
+
+  const currentVersion = Number(context.answerMsg.taskPlan?.version || 0);
+  const nextVersion = Number(taskPlan.version || 0);
+  const currentPlan = context.answerMsg.taskPlan;
+  if (currentPlan?.planId === taskPlan.planId && currentVersion >= nextVersion) return true;
+
+  // version is scoped to a plan. A new turn may start again at version 1.
+  // Only reject a different plan when its timestamp is explicitly older.
+  if (currentPlan?.planId && currentPlan.planId !== taskPlan.planId) {
+    const currentTime = Date.parse(`${currentPlan.updatedAt || currentPlan.createdAt || ''}`);
+    const nextTime = Date.parse(`${taskPlan.updatedAt || taskPlan.createdAt || ''}`);
+    if (Number.isFinite(currentTime) && Number.isFinite(nextTime) && nextTime < currentTime) return true;
+  }
+
+  context.answerMsg.taskPlan = taskPlan;
+  context.answerMsg.messageId = `${taskPlan.messageId}`;
+  context.answerMsg.sessionId = `${taskPlan.sessionId}`;
+  if (taskPlan.traceId) context.answerMsg.traceId = taskPlan.traceId;
+  context.answerMsg = context.updateMessage(context.answerMsg);
+  return true;
+};
+
+export const handleSessionRuntimeState = (runtime: SessionRuntimeState) => {
+  if (!chatSessionRuntimeManager.applySessionRuntime(runtime)) return false;
+  if (runtime.rootActive === undefined) return true;
+
+  const context = findChatStreamContext(
+    { sessionId: runtime.sessionId, traceId: runtime.traceId },
+    { sessionId: runtime.sessionId, traceId: runtime.traceId }
+  );
+  if (!context || context.answerMsg.messageState === IMessageState.Cancel) return true;
+
+  clearAnswerFlush(context);
+  applyProjectedRootState(context, runtime);
+  context.answerMsg = context.updateMessage(context.answerMsg);
+  return true;
 };
 
 export const flushRestoredChatStreamBuffer = (restoreKey: string) => {
@@ -463,6 +586,7 @@ export const hydrateRunningSessions = (runningInfoList: RunningChatInfo[] = []) 
 };
 
 export const clearChatRuntime = () => {
+  Array.from(queuedAnswerContexts).forEach(clearAnswerFlush);
   pendingChatContexts.clear();
   laneChatContexts.clear();
   traceChatContexts.clear();

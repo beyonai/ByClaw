@@ -17,9 +17,7 @@ const mockGetDcSystemConfigListByStandType = getDcSystemConfigListByStandType as
   typeof getDcSystemConfigListByStandType
 >;
 const mockGetDcSystemConfig = getDcSystemConfig as jest.MockedFunction<typeof getDcSystemConfig>;
-const defaultVisibleKeysWithoutProject = getVisibleMenuKeysFromConfig(DEFAULT_MENU_CONFIG).filter(
-  (key) => key !== 'projectSpace'
-);
+const defaultVisibleKeys = getVisibleMenuKeysFromConfig(DEFAULT_MENU_CONFIG);
 
 describe('useVisibleMenuKeys', () => {
   beforeEach(() => {
@@ -48,7 +46,7 @@ describe('useVisibleMenuKeys', () => {
     });
 
     await waitFor(() => {
-      expect(result.current).toEqual(['sessions', 'skill', 'file', 'model', 'ontology']);
+      expect(result.current).toEqual(['sessions', 'automation', 'projectSpace', 'skill', 'file', 'model', 'ontology']);
     });
   });
 
@@ -63,7 +61,7 @@ describe('useVisibleMenuKeys', () => {
     const { result } = renderHook(() => useVisibleMenuKeys({ userId: 1 }));
 
     await waitFor(() => {
-      expect(result.current).toEqual(['sessions', 'file', 'model', 'ontology']);
+      expect(result.current).toEqual(['sessions', 'automation', 'projectSpace', 'file', 'model', 'ontology']);
     });
   });
 
@@ -80,7 +78,7 @@ describe('useVisibleMenuKeys', () => {
     const { result } = renderHook(() => useVisibleMenuKeys({ userId: 1 }));
 
     await waitFor(() => {
-      expect(result.current).toEqual(['sessions', 'ontology', 'skill', 'file', 'model']);
+      expect(result.current).toEqual(['sessions', 'ontology', 'automation', 'projectSpace', 'skill', 'file', 'model']);
     });
   });
 
@@ -92,7 +90,7 @@ describe('useVisibleMenuKeys', () => {
     expect(result.current).toEqual([]);
 
     await waitFor(() => {
-      expect(result.current).toEqual(defaultVisibleKeysWithoutProject);
+      expect(result.current).toEqual(defaultVisibleKeys);
     });
   });
 
@@ -104,7 +102,7 @@ describe('useVisibleMenuKeys', () => {
     expect(result.current).toEqual([]);
 
     await waitFor(() => {
-      expect(result.current).toEqual(defaultVisibleKeysWithoutProject);
+      expect(result.current).toEqual(defaultVisibleKeys);
     });
   });
 });

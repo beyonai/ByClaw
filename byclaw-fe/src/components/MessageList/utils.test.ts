@@ -62,6 +62,7 @@ describe('MessageList utils', () => {
             resourceId: '102',
             resourceName: 'Agent B',
             resourceCode: 'agent-b',
+            resourceDesc: 'Creates product plans and code reviews',
           },
         ],
       }
@@ -72,6 +73,7 @@ describe('MessageList utils', () => {
       name: 'Agent B',
       chatAvatar: 'agent-b.png',
       resourceCode: 'agent-b',
+      resourceDesc: 'Creates product plans and code reviews',
     });
   });
 });

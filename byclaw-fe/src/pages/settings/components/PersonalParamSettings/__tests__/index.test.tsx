@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 import PersonalParamSettings from '..';
 import { queryPersonalParams, savePersonalParam } from '@/service/personalParam';
@@ -64,7 +64,7 @@ describe('PersonalParamSettings', () => {
       expect(mockQueryPersonalParams).toHaveBeenCalled();
     });
     expect(await screen.findByText('VOLCENGINE_TTS_API_KEY', {}, { timeout: 10000 })).toBeInTheDocument();
-    expect(screen.getByText((content) => content.includes('****8838'))).toBeInTheDocument();
+    expect(screen.queryByText((content) => content.includes('****8838'))).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'common.edit' }));
     expect(await screen.findByText('Current value: ****8838')).toBeInTheDocument();
@@ -85,5 +85,43 @@ describe('PersonalParamSettings', () => {
         })
       );
     });
+  });
+
+  it('marks connector environment parameters as managed and hides user operations', async () => {
+    mockQueryPersonalParams.mockResolvedValueOnce({
+      list: [
+        {
+          paramId: 10002,
+          key: 'LARK_HOME',
+          description: 'Lark CLI home',
+          status: 'NORMAL',
+          enabled: true,
+          hasValue: true,
+          valueLast4: 'TAIL',
+          source: 'CONNECTOR',
+          sourceRef: 'lark',
+          managed: true,
+          editable: false,
+          deletable: false,
+          enableable: false,
+        },
+      ],
+      total: 1,
+      pageNum: 1,
+      pageSize: 10,
+    });
+
+    render(<PersonalParamSettings />);
+
+    const key = await screen.findByText('LARK_HOME');
+    expect(screen.getAllByText('settings.params.source')).not.toHaveLength(0);
+    const row = key.closest('tr');
+    expect(row).not.toBeNull();
+    expect(within(row as HTMLTableRowElement).getByText('settings.params.source.connector')).toBeInTheDocument();
+    expect(within(row as HTMLTableRowElement).getByText(/settings.params.configured/)).toBeInTheDocument();
+    expect(within(row as HTMLTableRowElement).queryByText(/TAIL/)).not.toBeInTheDocument();
+    const cells = within(row as HTMLTableRowElement).getAllByRole('cell');
+    expect(cells.at(-1)).toHaveTextContent('-');
+    expect(within(row as HTMLTableRowElement).queryByRole('button')).not.toBeInTheDocument();
   });
 });

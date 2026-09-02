@@ -86,7 +86,10 @@ allowed-tools: execute, read_file
    - 若是，向用户收集每条关系的以下信息，允许添加多条：
      - `relation_code`：关系编码（英文下划线，如 `has_participant`）
      - `relation_name`：关系名称（如 `参会人`）
-     - `target_class`：目标对象编码（目标对象必须已在本体库中存在，可先通过"查看本体对象列表"确认）
+     - `target_object_code`：目标对象在 collect 后返回并实际落库的最终编码（目标对象必须已在本体库中存在）
+       - collect 可能在入参对象编码后追加随机数，因此不得使用 collect 入参中的原始对象编码
+       - 优先使用目标对象 collect 响应返回的最终编码；无法从当前上下文确认时，必须先通过“查看本体对象列表”查询，并使用库中记录的对象编码
+       - 例：collect 入参为 `Product`，但响应或对象列表中的实际编码为 `Product_8472`，则必须填写 `Product_8472`
      - `relation_type`：关系基数，从以下选项中选择：
        - `ONE_TO_ONE`：一对一
        - `ONE_TO_MANY`：一对多
@@ -95,6 +98,11 @@ allowed-tools: execute, read_file
      - `join_keys`：连接键，指定本对象的哪个属性与目标对象的哪个属性关联，格式为：
        `[{"sourceField": "<本对象属性编码>", "targetField": "<目标对象属性编码>"}]`
        例：本对象有 `employee_code` 字段，目标对象 `by_employee` 有 `code` 字段，则填 `[{"sourceField": "employee_code", "targetField": "code"}]`
+     - 继续询问：“删除目标对象实例时，是否需要展示当前对象关联的文件，让用户选择是否一起删除？”
+       - 是：设置 `cascade_delete: true`。当前对象固定为 Dependent，目标对象固定为 Owner。
+       - 否：省略 `cascade_delete` 或设置为 `false`。
+     - `cascade_delete: true` 只允许 `MANY_TO_ONE` 或 `ONE_TO_ONE`，且本对象的 join key 必须允许清空。
+     - 用户描述“Owner 拥有 Dependent”时也必须规范化为一条“Dependent 属于 Owner”的关系，不能同时创建反向关系。
    - 若否，`relations` 传空数组 `[]`
 
 确认以上信息无误后，再执行收集阶段脚本。
@@ -111,7 +119,7 @@ allowed-tools: execute, read_file
 | 查看/列出 + 对象         | `/usr/local/bin/python3 scripts/list_resources.py '{}'`                                                                                                                                                                                                                                                                                                                          |
 | 查看知识库列表            | `/usr/local/bin/python3 scripts/list_knowledge_bases.py '{}'`                                                                                                                                                                                                                                                                                                                    |
 | 查看知识库目录            | `/usr/local/bin/python3 scripts/list_kb_directories.py '{"kb_id":"<kb_id>"}'`                                                                                                                                                                                                                                                                                                    |
-| 创建/新建 + 对象（收集阶段）   | `/usr/local/bin/python3 scripts/create_object.py '{"action":"collect","entity_code":"<code>","entity_name":"<name>","entity_desc":"<entity_desc>","use_domain":"<ods_or_ads>","kb_resource_id":"<resourceId>","kb_id":"<resourceCode>","kb_directory":"<dir>","fields":[],"relations":[{"relation_code":"<rel_code>","relation_name":"<rel_name>","target_class":"<target_code>","relation_type":"<ONE_TO_ONE |ONE_TO_MANY|MANY_TO_ONE|MANY_TO_MANY>","join_keys":[{"sourceField":"<本对象属性编码>","targetField":"<目标对象属性编码>"}]}],"session_id":"<sid>","template_file_path":"<path_or_empty>","rules_file_path":"<path_or_empty>"}'` |
+| 创建/新建 + 对象（收集阶段）   | `/usr/local/bin/python3 scripts/create_object.py '{"action":"collect","entity_code":"<code>","entity_name":"<name>","entity_desc":"<entity_desc>","use_domain":"<ods_or_ads>","kb_resource_id":"<resourceId>","kb_id":"<resourceCode>","kb_directory":"<dir>","fields":[],"relations":[{"relation_code":"<rel_code>","relation_name":"<rel_name>","target_object_code":"<target_code>","relation_type":"<ONE_TO_ONE |ONE_TO_MANY|MANY_TO_ONE|MANY_TO_MANY>","join_keys":[{"sourceField":"<本对象属性编码>","targetField":"<目标对象属性编码>"}],"cascade_delete":true}],"session_id":"<sid>","template_file_path":"<path_or_empty>","rules_file_path":"<path_or_empty>"}'` |
 | 确认提交               | `/usr/local/bin/python3 scripts/create_object.py '{"action":"submit","entity_code":"<code>","session_id":"<sid>"}'`                                                                                                                                                                                                                                                              |
 | 删除 + 对象            | `/usr/local/bin/python3 scripts/delete_object.py '{"entity_code":"<code>"}'`                                                                                                                                                                                                                                                                                                     |
 | 挂载/添加到助理/数字员工      | `/usr/local/bin/python3 scripts/mount_resource.py '{"agent_id":<id>,"resource_code":"<code>"}'`                                                                                                                                                                                                                                                                                  |
@@ -141,9 +149,10 @@ allowed-tools: execute, read_file
 - `relations`：可选，对象间关联关系数组；每条关系包含以下五个字段：
   - `relation_code`：关系编码（英文下划线，如 `has_participant`）
   - `relation_name`：关系名称（如 `参会人`）
-  - `target_class`：目标对象编码，**目标对象必须已在本体库中存在**，可先通过查看对象列表确认
+  - `target_object_code`：目标对象在 collect 后返回并实际落库的最终编码，**目标对象必须已在本体库中存在**。collect 可能在入参编码后追加随机数，因此不得使用 collect 入参中的原始对象编码；应优先使用 collect 响应返回的编码，无法确认时先查看对象列表并采用库中记录的编码。例如入参为 `Product`、落库为 `Product_8472` 时，应填写 `Product_8472`
   - `relation_type`：关系基数，可选值 `ONE_TO_ONE` / `ONE_TO_MANY` / `MANY_TO_ONE` / `MANY_TO_MANY`
   - `join_keys`：连接键数组，指定本对象与目标对象通过哪对属性关联，格式 `[{"sourceField": "<本对象属性编码>", "targetField": "<目标对象属性编码>"}]`；有 `join_keys` 的关联字段系统会自动绑定 `term_type_code`，无需手动填写
+  - `cascade_delete`：可选 boolean。为 `true` 时表示删除目标 Owner 会展示当前 Dependent 的关联文件供用户选择；取消勾选会保留文件、清空 source join key 并解除关系，不提供重新关联。删除 Dependent 不删除 Owner。
 - `fields[].term_type_code`：可选，绑定已有术语类型（如 `user_name`、`dept_name`），与 `term_values` 互斥；可通过 `list_term_types.py` 查询可用类型
 - `fields[].rel_term_codeorname`：可选，术语匹配方式，`code`（字段值是编码）或 `name`（字段值是名称），默认 `code`；与 `term_type_code` 配合使用
 - `fields[].term_values`：可选，自定义枚举字符串列表，格式 `["值1", "值2", "值3"]`，与 `term_type_code` 互斥

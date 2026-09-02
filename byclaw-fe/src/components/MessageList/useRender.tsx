@@ -2,17 +2,18 @@
 import React, { Suspense, useCallback } from 'react';
 import { ArrowRightOutlined, InfoCircleOutlined } from '@ant-design/icons';
 // @ts-ignore
-import { useIntl, useSelector } from '@umijs/max';
+import { useDispatch, useIntl, useNavigate, useSelector } from '@umijs/max';
 import { Space, Tooltip, Typography, Button } from 'antd';
 import classnames from 'classnames';
 import { get, isArray, isEmpty, noop, compact } from 'lodash';
 
-import EmployeesDrawer from '@/pages/employees/components/EmployeesDrawer';
+import { EmployeePreviewModal } from '@/pages/digitalEmployees';
 
 import DualBallLoading from '@/components/Loading/DualBallLoading';
 import WaveBallLoading from '@/components/Loading/WaveBallLoading';
 import CiteRender from '@/components/MessageList/components/CiteRender';
 import FileRender from '@/components/MessageList/components/FileRender';
+import ReplyFileArtifacts from '@/components/MessageList/components/ReplyFileArtifacts';
 import NotSupport from '@/components/NotSupport';
 
 import ThumbUpContent from './components/AnswerActions/ThumbUp/content';
@@ -20,6 +21,8 @@ import CopyComp from './components/AnswerActions/Copy';
 import MoreActions from './components/AnswerActions/MoreActions';
 import ThumbUp from './components/AnswerActions/ThumbUp';
 import MsgRenderer from './components/MsgRenderer';
+import MsgRendererV2 from './components/MsgRendererV2';
+import { isV2Message } from './components/MsgRendererV2/ordered';
 import UserInfoModal from '@/components/OrgUserSelector/components/UserInfoModal';
 // import Memory from './components/Memory';
 
@@ -33,6 +36,7 @@ import { agentTypeMap } from '@/constants/agent';
 import { getPublicPath } from '@/utils';
 
 import { getAgentChatAvatar } from '@/utils/agent';
+import { navigateToEmployeeChat } from '@/utils/employeeChat';
 import { ResourceType } from '@/components/QueryInput/RichInput/utils/constants';
 
 import { IMessageState, SSEMessageType } from '@/constants/message';
@@ -40,7 +44,6 @@ import { IMessageState, SSEMessageType } from '@/constants/message';
 import type { IState as useEmployeesIState } from '@/models/useEmployees';
 import type { IFile } from '@/typescript/file';
 import type { IMessage, IExtParams } from '@/typescript/message';
-import type { IAgentCache } from '@/typescript/agent';
 
 import styles from './index.module.less';
 import getDisplayQuestion from '../QueryInput/getDisplayQuestion';
@@ -56,12 +59,15 @@ export default function useRender({
   updateMessage,
   deleteMessage,
   sessionId,
+  previewInDetailPanel,
 }: {
   updateMessage: (message: IMessage) => IMessage;
   deleteMessage: (message: IMessage) => void;
   sessionId?: string;
+  previewInDetailPanel?: boolean;
 }) {
   const { ModalNode, setOpen, setMyContent, setMyTitle } = useModal({});
+  const [employeePreview, setEmployeePreview] = React.useState<any>(null);
 
   const { userInfo } = useSelector(({ user }) => ({ userInfo: user.userInfo }));
   const { employeesList, agentList }: useEmployeesIState = useSelector(
@@ -71,7 +77,9 @@ export default function useRender({
   );
 
   const intl = useIntl();
-  const { EventEmitter } = useGlobal();
+  const navigate = useNavigate();
+  const dispatch = useDispatch();
+  const { EventEmitter, setAgentId, setSessionId } = useGlobal();
 
   const { canRefrence } = useCanRefrence();
 
@@ -88,6 +96,29 @@ export default function useRender({
       });
     },
     [EventEmitter]
+  );
+
+  const openEmployeePreview = useCallback((agentInfo: ReturnType<typeof getResponseAgentInfoByMessage>) => {
+    if (!agentInfo?.agentId || agentInfo.isSuperAssistant) return;
+    setEmployeePreview({
+      ...agentInfo,
+      id: agentInfo.agentId,
+      resourceId: agentInfo.agentId,
+    });
+  }, []);
+
+  // 会话详情中的员工弹窗沿用员工卡片进入会话的初始化流程，确保点击“新建任务”后直接进入目标员工会话。
+  const handleEmployeeChat = useCallback(
+    (employee: any) => {
+      navigateToEmployeeChat({
+        employee,
+        dispatch,
+        navigate,
+        setAgentId,
+        setSessionId,
+      });
+    },
+    [dispatch, navigate, setAgentId, setSessionId]
   );
 
   const userQueryActions = useCallback(
@@ -195,10 +226,12 @@ export default function useRender({
                 deleteMessage={deleteMessage}
                 msg={msg}
                 showTroubleshoot
+                afterActions={
+                  [IMessageState.Done, IMessageState.Cancel].includes(messageState) ? (
+                    <ThumbUp updateMessage={updateMessage} msg={msg} />
+                  ) : null
+                }
               />
-              {[IMessageState.Done, IMessageState.Cancel].includes(messageState) && (
-                <ThumbUp updateMessage={updateMessage} msg={msg} />
-              )}
             </Space>
           </div>
           <ThumbUpContent msg={msg} updateMessage={updateMessage} />
@@ -208,17 +241,32 @@ export default function useRender({
     [deleteMessage, updateMessage, canRefrence]
   );
 
-  const uploadFileRender = useCallback((fileList?: IFile[], msg?: IMessage) => {
-    if (!fileList || isEmpty(fileList)) return null;
+  const uploadFileRender = useCallback(
+    (fileList?: IFile[], msg?: IMessage, canQuote = true) => {
+      if (!fileList || isEmpty(fileList)) return null;
 
-    return (
-      <div className={classnames(styles.fileList, 'ub ub-wrap full-width gap8')} style={{ justifyContent: 'inherit' }}>
-        {fileList.map((fileItem) => {
-          return <FileRender fileItem={fileItem} key={fileItem.uid} message={msg} canQuote canCollect />;
-        })}
-      </div>
-    );
-  }, []);
+      return (
+        <div
+          className={classnames(styles.fileList, 'ub ub-wrap full-width gap8')}
+          style={{ justifyContent: 'inherit' }}
+        >
+          {fileList.map((fileItem) => {
+            return (
+              <FileRender
+                fileItem={fileItem}
+                key={fileItem.uid}
+                message={msg}
+                canQuote={canQuote}
+                canCollect
+                previewInDetailPanel={previewInDetailPanel}
+              />
+            );
+          })}
+        </div>
+      );
+    },
+    [previewInDetailPanel]
+  );
   const citeMsgRender = useCallback(
     (citeMsgList?: IMessage[]) => {
       if (!citeMsgList || isEmpty(citeMsgList)) return null;
@@ -295,14 +343,14 @@ export default function useRender({
   }, []);
 
   const attachmentListRender = useCallback(
-    (msg: IMessage) => {
+    (msg: IMessage, canInteract = true) => {
       const { fromBeyond, fromOtherUser, imageList, fileList, citeMsgList, extParams } = msg;
 
       const isLeftSide = fromBeyond || fromOtherUser;
 
       const renderList = compact([
-        uploadFileRender(imageList, msg),
-        uploadFileRender(fileList, msg),
+        uploadFileRender(imageList, msg, canInteract),
+        uploadFileRender(fileList, msg, canInteract),
         citeMsgRender(citeMsgList),
         extParamsRender(extParams, msg),
       ]);
@@ -324,7 +372,7 @@ export default function useRender({
         </div>
       );
     },
-    [citeMsgRender]
+    [citeMsgRender, extParamsRender, uploadFileRender]
   );
 
   const renderMessage = useCallback(
@@ -347,12 +395,21 @@ export default function useRender({
         msgId,
         createTime,
         usage,
+        agentId: messageAgentId,
+        agentCode,
+        agentName: messageAgentName,
+        agentType: messageAgentType,
       } = msg;
 
       const { showRelatedQuestions = false, hideAction } = param || {};
       const agentInfo = getResponseAgentInfoByMessage({ employeesList, agentList }, msg);
       const isLeftSide = fromBeyond || fromOtherUser;
       const isSuperAssistant = fromBeyond && !!agentInfo?.isSuperAssistant;
+      const isEmployeeGroup =
+        `${messageAgentType || ''}` === agentTypeMap.employeeGroup ||
+        `${agentInfo?.agentType || ''}` === agentTypeMap.employeeGroup;
+      const employeePreviewAgentId = agentInfo?.agentId || messageAgentId || agentCode;
+      const canOpenEmployeePreview = isLeftSide && !!employeePreviewAgentId && (!isSuperAssistant || isEmployeeGroup);
 
       let leftName: string;
       if (fromBeyond || isSuperAssistant) {
@@ -379,11 +436,25 @@ export default function useRender({
         const avatar = fromBeyond || isSuperAssistant ? agentInfo?.chatAvatar : '';
         return (
           <div className={styles.beyondLogo}>
-            <EmployeesDrawer agentInfo={agentInfo as Partial<IAgentCache>}>
-              <div className={styles.avatarWrapper}>
-                {getAgentChatAvatar(avatar || `${getPublicPath()}beyond/logo100.svg`)}
-              </div>
-            </EmployeesDrawer>
+            <div
+              className={classnames(styles.avatarWrapper, {
+                [styles.avatarWrapperClickable]: canOpenEmployeePreview,
+              })}
+              onClick={() => {
+                if (canOpenEmployeePreview) {
+                  openEmployeePreview({
+                    ...(agentInfo || {}),
+                    agentId: employeePreviewAgentId,
+                    name: agentInfo?.name || messageAgentName,
+                    agentType: isEmployeeGroup ? agentTypeMap.employeeGroup : agentInfo?.agentType,
+                  });
+                }
+              }}
+              role={canOpenEmployeePreview ? 'button' : undefined}
+              tabIndex={canOpenEmployeePreview ? 0 : undefined}
+            >
+              {getAgentChatAvatar(avatar || `${getPublicPath()}beyond/logo100.svg`)}
+            </div>
           </div>
         );
       })();
@@ -399,8 +470,20 @@ export default function useRender({
       const mentionLeftAgentTitle = canMentionLeftAgent
         ? intl.formatMessage({ id: 'messageList.mentionDigitalEmployee' }, { name: leftName })
         : '';
+      const agentResourceDesc = agentInfo?.resourceDesc?.trim();
+      const mentionLeftAgentTooltip = canMentionLeftAgent ? (
+        <div className={styles.agentMentionTooltipContent}>
+          <div>{mentionLeftAgentTitle}</div>
+          {agentResourceDesc ? (
+            <>
+              <div className={styles.agentMentionTooltipDivider} />
+              <div className={styles.agentMentionTooltipDescription}>{agentResourceDesc}</div>
+            </>
+          ) : null}
+        </div>
+      ) : null;
       const leftNameNode = canMentionLeftAgent ? (
-        <Tooltip title={mentionLeftAgentTitle}>
+        <Tooltip title={mentionLeftAgentTooltip} overlayClassName={styles.agentMentionTooltip}>
           <button
             type="button"
             className={styles.agentMentionTrigger}
@@ -456,7 +539,11 @@ export default function useRender({
                 [styles.pureText]: fromOtherUser && usage !== '4',
               })}
             >
-              <MsgRenderer msg={msg} updateMessage={updateMessage} hideThinking={param?.hideThinking} />
+              {isV2Message(msg) ? (
+                <MsgRendererV2 msg={msg} updateMessage={updateMessage} hideThinking={param?.hideThinking} />
+              ) : (
+                <MsgRenderer msg={msg} updateMessage={updateMessage} hideThinking={param?.hideThinking} />
+              )}
               {messageState === IMessageState.Query && <DualBallLoading style={{ width: 32, height: 32 }} />}
             </div>
             {fromBeyond && messageState === IMessageState.Error && (
@@ -496,7 +583,8 @@ export default function useRender({
               <WaveBallLoading style={{ width: 20, height: 20, opacity: 0.6 }} />
             </div>
           )}
-          {attachmentListRender(msg)}
+          <ReplyFileArtifacts message={msg} sessionId={sessionId} previewInDetailPanel={previewInDetailPanel} />
+          {attachmentListRender(msg, !hideAction)}
           {!hideAction && [IMessageState.Done, IMessageState.Cancel, IMessageState.Error].includes(messageState) && (
             <div className={styles.actionsBar}>
               {isLeftSide && beyondAnswerActions(msg)}
@@ -519,10 +607,25 @@ export default function useRender({
       userQueryActions,
       insertAgentMention,
       relatedQuestionsRender,
+      previewInDetailPanel,
+      openEmployeePreview,
     ]
   );
 
-  const extendsRender = <>{ModalNode}</>;
+  const extendsRender = (
+    <>
+      {ModalNode}
+      <EmployeePreviewModal
+        employee={employeePreview}
+        onClose={() => setEmployeePreview(null)}
+        onCreateTask={() => {
+          if (!employeePreview) return;
+          setEmployeePreview(null);
+          handleEmployeeChat(employeePreview);
+        }}
+      />
+    </>
+  );
 
   return {
     renderMessage,

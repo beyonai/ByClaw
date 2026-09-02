@@ -17,6 +17,7 @@ export default function Employee() {
   const chat = useRef<IChatLayoutCompRef>(null);
 
   const [agentType, setAgentType] = useState<IAgentType | null>(null);
+  const [debugResource, setDebugResource] = useState<{ id: string; isEmployeeGroup: boolean } | null>(null);
 
   const refresh = async (resourceId: string) => {
     const data = await getDebugSession({ agentId: resourceId });
@@ -30,6 +31,8 @@ export default function Employee() {
     const res = await queryResourceDetail({ resourceId });
 
     if (res?.resourceId) {
+      const isEmployeeGroup = `${res.param?.agentType || ''}` === '017';
+      setDebugResource({ id: `${res.resourceId}`, isEmployeeGroup });
       if (res.param?.agentType) {
         setAgentType(res.param.agentType);
       } else {
@@ -94,6 +97,8 @@ export default function Employee() {
 
   useEffect(() => {
     if (agentId) {
+      setAgentType(null);
+      setDebugResource(null);
       refresh(agentId).then(() => {
         refreshAgent(agentId);
       });
@@ -105,7 +110,7 @@ export default function Employee() {
     };
   }, [agentId]);
 
-  if (!agentType) return null;
+  if (!agentType || !debugResource) return null;
 
   return (
     <section className="full-width full-height ub" id="employees_wrapper2">
@@ -117,6 +122,19 @@ export default function Employee() {
         hideChatTitle
         agentType={agentType}
         sessionId={sessionId}
+        fixedAgentId={debugResource.id}
+        sendExtraParams={{
+          isDebug: 1,
+          ...(debugResource.isEmployeeGroup
+            ? {
+              orchestrator: {
+                schemaVersion: 'byclaw.orchestrator-ref/v1',
+                kind: 'EXPERT_TEAM',
+                id: debugResource.id,
+              },
+            }
+            : {}),
+        }}
         chatUrl="/byaiService/digitalEmployeeController/debugChat"
       />
     </section>

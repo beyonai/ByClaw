@@ -157,6 +157,9 @@ public class ChatProcessContext {
      */
     public String hydratedStreamId;
 
+    /** 已完成 terminal 事件的 Stream ID，用于 ACK 失败后的终止事件重投幂等。 */
+    public String terminalStreamId;
+
     /**
      * 消息发往 gateway 的targetAgentType
      */

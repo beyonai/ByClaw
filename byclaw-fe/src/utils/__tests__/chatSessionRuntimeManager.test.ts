@@ -143,4 +143,142 @@ describe('utils/chatSessionRuntimeManager', () => {
 
     expect(chatSessionRuntimeManager.isSessionRunning('s1')).toBe(false);
   });
+
+  it('tracks whether any active request in a session is waiting for user input', () => {
+    chatSessionRuntimeManager.register({
+      clientRequestId: 'q1_a1',
+      sessionId: 'pending_q1_a1',
+    });
+    chatSessionRuntimeManager.bindSession('q1_a1', 's1');
+
+    chatSessionRuntimeManager.setWaitingForUserInput('q1_a1', true);
+
+    expect(chatSessionRuntimeManager.isSessionWaitingForUserInput('pending_q1_a1')).toBe(true);
+    expect(chatSessionRuntimeManager.isSessionWaitingForUserInput('s1')).toBe(true);
+
+    chatSessionRuntimeManager.setSessionWaitingForUserInput('s1', false);
+    expect(chatSessionRuntimeManager.isSessionWaitingForUserInput('s1')).toBe(false);
+  });
+
+  it('tracks a generic server-projected session runtime without a local request', () => {
+    chatSessionRuntimeManager.applySessionRuntime({
+      sessionId: 's1',
+      source: 'integration-a',
+      traceId: 'trace-1',
+      status: 'running',
+      activeAgentCount: 3,
+      activeChildCount: 2,
+      waitingInteractionCount: 0,
+      revision: 4,
+      changedAt: 1000,
+    });
+
+    expect(chatSessionRuntimeManager.isSessionRunning('s1')).toBe(true);
+    expect(chatSessionRuntimeManager.getSessionRuntime('s1')).toMatchObject({
+      status: 'running',
+      activeAgentCount: 3,
+      activeChildCount: 2,
+      revision: 4,
+    });
+
+    // Same source/trace cannot move backwards, even if a delayed terminal event arrives.
+    chatSessionRuntimeManager.applySessionRuntime({
+      sessionId: 's1',
+      source: 'integration-a',
+      traceId: 'trace-1',
+      status: 'idle',
+      activeAgentCount: 0,
+      activeChildCount: 0,
+      waitingInteractionCount: 0,
+      revision: 3,
+      changedAt: 2000,
+    });
+    expect(chatSessionRuntimeManager.isSessionRunning('s1')).toBe(true);
+
+    chatSessionRuntimeManager.applySessionRuntime({
+      sessionId: 's1',
+      source: 'integration-a',
+      traceId: 'trace-1',
+      status: 'idle',
+      activeAgentCount: 0,
+      activeChildCount: 0,
+      waitingInteractionCount: 0,
+      revision: 5,
+      changedAt: 3000,
+    });
+    expect(chatSessionRuntimeManager.isSessionRunning('s1')).toBe(false);
+  });
+
+  it('keeps aggregate team activity running while the captain can accept input', () => {
+    chatSessionRuntimeManager.register({ clientRequestId: 'local-1', sessionId: 's1', traceId: 'trace-1' });
+    chatSessionRuntimeManager.applySessionRuntime({
+      sessionId: 's1',
+      traceId: 'trace-1',
+      status: 'running',
+      activeAgentCount: 2,
+      activeChildCount: 2,
+      waitingInteractionCount: 0,
+      rootActive: false,
+      acceptingInput: true,
+      revision: 2,
+      changedAt: 2000,
+    });
+
+    expect(chatSessionRuntimeManager.isSessionRunning('s1')).toBe(true);
+    expect(chatSessionRuntimeManager.getByClientRequest('local-1')).toBeDefined();
+    expect(chatSessionRuntimeManager.canAcceptInput('s1')).toBe(true);
+    chatSessionRuntimeManager.complete('local-1');
+    expect(chatSessionRuntimeManager.isSessionRunning('s1')).toBe(true);
+  });
+
+  it('does not let an older trace hide a newer local turn', () => {
+    chatSessionRuntimeManager.register({ clientRequestId: 'local-2', sessionId: 's1', traceId: 'trace-new' });
+    chatSessionRuntimeManager.applySessionRuntime({
+      sessionId: 's1',
+      traceId: 'trace-old',
+      status: 'idle',
+      activeAgentCount: 0,
+      activeChildCount: 0,
+      waitingInteractionCount: 0,
+      rootActive: false,
+      acceptingInput: true,
+      revision: 2,
+      changedAt: 2000,
+    });
+
+    expect(chatSessionRuntimeManager.isSessionRunning('s1')).toBe(true);
+  });
+
+  it('uses explicit parent input readiness without hiding active child work', () => {
+    chatSessionRuntimeManager.applySessionRuntime({
+      sessionId: 's1',
+      traceId: 'trace-1',
+      status: 'running',
+      activeAgentCount: 1,
+      activeChildCount: 1,
+      waitingInteractionCount: 0,
+      acceptingInput: true,
+      revision: 1,
+      changedAt: 1000,
+    });
+
+    expect(chatSessionRuntimeManager.isSessionRunning('s1')).toBe(true);
+    expect(chatSessionRuntimeManager.canAcceptInput('s1')).toBe(true);
+  });
+
+  it('falls back to the legacy running guard when input readiness is absent', () => {
+    chatSessionRuntimeManager.applySessionRuntime({
+      sessionId: 's1',
+      traceId: 'trace-1',
+      status: 'running',
+      activeAgentCount: 1,
+      activeChildCount: 0,
+      waitingInteractionCount: 0,
+      revision: 1,
+      changedAt: 1000,
+    });
+
+    expect(chatSessionRuntimeManager.canAcceptInput('s1')).toBe(false);
+    expect(chatSessionRuntimeManager.canAcceptInput('s2')).toBe(true);
+  });
 });

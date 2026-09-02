@@ -1,0 +1,300 @@
+{
+  "action_code": "save_analysis",
+  "action_name": "保存或更新分析结果",
+  "action_type": "OPERATION",
+  "action_desc": "按 run_id 幂等写入分析结果；R-05 三选一约束 + R-09 HTML 自包含校验 + review_result 校验",
+  "permission_roles": [
+    "analyst",
+    "ops",
+    "admin"
+  ],
+  "params": [
+    {
+      "paramCode": "projectId",
+      "paramName": "项目ID",
+      "type": "string",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
+      "paramCode": "account_code",
+      "paramName": "公众号编码",
+      "type": "string",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
+      "paramCode": "account_name",
+      "paramName": "公众号名称",
+      "type": "string",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
+      "paramCode": "run_id",
+      "paramName": "幂等运行ID(UUID)",
+      "type": "string",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
+      "paramCode": "analysis_type",
+      "paramName": "分析类型",
+      "type": "string",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
+      "paramCode": "analysis_stage",
+      "paramName": "分析阶段",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "source_run_id",
+      "paramName": "关联发布前运行ID",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "platform",
+      "paramName": "发布平台",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "content_role",
+      "paramName": "内容角色",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "topic",
+      "paramName": "内容主题",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "target_audience",
+      "paramName": "目标人群",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "audience_fit_analysis",
+      "paramName": "目标人群匹配分析(JSON字符串)",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "recommended_publish_time",
+      "paramName": "推荐发布时间",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "recommended_keywords",
+      "paramName": "推荐关键词及位置(JSON字符串)",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "publishing_execution_card",
+      "paramName": "发布执行卡(JSON字符串)",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "desired_action",
+      "paramName": "期望用户动作",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "tested_element",
+      "paramName": "实验元素",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "learning_outcome",
+      "paramName": "经验验证结果",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "article_id",
+      "paramName": "文章ID(single)",
+      "type": "integer",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "collection_id",
+      "paramName": "合集ID(collection)",
+      "type": "integer",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "period_start",
+      "paramName": "周报开始(weekly，YYYY-MM-DD)",
+      "type": "date",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "period_end",
+      "paramName": "周报结束(weekly，YYYY-MM-DD)",
+      "type": "date",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "stat_date",
+      "paramName": "指标日期（YYYY-MM-DD）",
+      "type": "date",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "rating",
+      "paramName": "综合评级",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "structured_result",
+      "paramName": "结构化分析结果(JSON字符串)",
+      "type": "string",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
+      "paramCode": "external_benchmarks",
+      "paramName": "外部对标数组(JSON字符串)",
+      "type": "string",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
+      "paramCode": "report_html",
+      "paramName": "自包含HTML报告",
+      "type": "string",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
+      "paramCode": "report_format",
+      "paramName": "报告格式",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "agent_version",
+      "paramName": "Agent 版本",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "prompt_version",
+      "paramName": "提示词版本",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "metric_rule_version",
+      "paramName": "指标规则版本",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "input_fingerprint",
+      "paramName": "输入数据指纹",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "review_result",
+      "paramName": "Reviewer 结果(保持原类型)",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "status",
+      "paramName": "报告状态",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "success",
+      "paramName": "是否成功",
+      "type": "boolean",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "operation",
+      "paramName": "操作类型",
+      "type": "string",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "id",
+      "paramName": "记录ID",
+      "type": "integer",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "run_id_out",
+      "paramName": "run_id",
+      "type": "string",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "status_out",
+      "paramName": "status",
+      "type": "string",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "error",
+      "paramName": "错误描述",
+      "type": "string",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "code",
+      "paramName": "错误码",
+      "type": "string",
+      "isRequired": false,
+      "direction": "output"
+    }
+  ]
+}

@@ -39,7 +39,30 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
 
     private static final String FEISHU_BOT_EVENT_CALLBACK_PATH = "/feishu/bot/events";
 
+    private static final String WEIXIN_OPEN_PLATFORM_EVENT_CALLBACK_PATH =
+        "/connector/authorization/callback/weixin-open-platform/events";
+
     private static final String THIRD_PARTY_SKILL_INSTALL_PATH = "/tool/installThirdPartySkill";
+
+    private static final String THIRD_PARTY_SKILL_MANAGEABLE_DIGITAL_EMPLOYEE_PATH =
+        "/tool/queryThirdPartySkillManageableDigitalEmployees";
+
+    private static final String CONNECTOR_SKILL_COMPLETE_PATH =
+        "/connector/authorization/skill-complete";
+
+    private static final String ORCHESTRATOR_RUNTIME_PATH =
+        "/internal/v1/orchestrators/resolve-runtime";
+
+    private static final String ARTIFACT_UPLOAD_PATH = "/open/api/v1/artifacts";
+
+    @org.springframework.beans.factory.annotation.Value("${artifact.preview.path-prefix:/artifact-preview}")
+    private String artifactPreviewPathPrefix;
+
+    @org.springframework.beans.factory.annotation.Value("${artifact.download.path-prefix:/artifact-download}")
+    private String artifactDownloadPathPrefix;
+
+    @org.springframework.beans.factory.annotation.Value("${artifact.data.path-prefix:/artifact-data}")
+    private String artifactDataPathPrefix;
 
 
     public static final String HEADER_SIGNATURE = "x-signature-value";
@@ -62,15 +85,32 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
             filterChain.doFilter(request, response);
             return;
         }
-        // 飞书开放平台回调由 Controller 内部校验 verificationToken/encryptKey，
+        // 飞书/微信开放平台事件回调由各自的 Controller/Service 校验平台签名与加密内容，
         // 外部平台不会携带系统签名头，必须在签名防重放过滤器中直接放行。
-        if (this.isFeishuBotEventCallback(request)) {
+        if (this.isFeishuBotEventCallback(request) || this.isWeixinOpenPlatformEventCallback(request)) {
             filterChain.doFilter(request, response);
             return;
         }
-        // 技能超市安装接口使用现有 Beyond-Token 完成用户认证；对端不持有门户通用请求签名密钥，
+        // 技能超市安装与可管理数字员工查询接口使用现有 Beyond-Token 完成用户认证；对端不持有门户通用请求签名密钥，
         // 因此仅跳过通用签名防重放校验，登录鉴权仍由 AccessTokenVerifyInterceptor 执行。
-        if (this.isThirdPartySkillInstall(request)) {
+        if (this.isThirdPartySkillMarketplaceRequest(request)) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+        // OpenClaw connector Skills authenticate with the current user's Beyond-Token and do not
+        // possess the portal's generic request-signing secret. Login authentication remains mandatory.
+        if (this.isConnectorSkillComplete(request)) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+        // Super 仅持有当前用户 Beyond-Token，不持有门户通用请求签名密钥。
+        // 此处只跳过通用签名防重放，登录与资源权限仍由 AccessTokenVerifyInterceptor 强制校验。
+        if (this.isOrchestratorRuntime(request)) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+        // 沙箱上传使用 Beyond-Token；Artifact 公开内容与数据接口使用业务层访问约束，调用方均不持有门户签名盐。
+        if (this.isArtifactUpload(request) || this.isArtifactCapabilityRequest(request)) {
             filterChain.doFilter(request, response);
             return;
         }
@@ -145,9 +185,73 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
     }
 
     private boolean isThirdPartySkillInstall(HttpServletRequest request) {
-        return endsWithPath(request.getRequestURI(), THIRD_PARTY_SKILL_INSTALL_PATH)
-            || endsWithPath(request.getServletPath(), THIRD_PARTY_SKILL_INSTALL_PATH)
-            || endsWithPath(request.getPathInfo(), THIRD_PARTY_SKILL_INSTALL_PATH);
+        return isRequestPath(request, THIRD_PARTY_SKILL_INSTALL_PATH);
+    }
+
+    private boolean isWeixinOpenPlatformEventCallback(HttpServletRequest request) {
+        return isExactPostRequestPath(request, WEIXIN_OPEN_PLATFORM_EVENT_CALLBACK_PATH);
+    }
+
+    private boolean isExactPostRequestPath(HttpServletRequest request, String expectedPath) {
+        if (request == null || !"POST".equalsIgnoreCase(request.getMethod())) {
+            return false;
+        }
+        String requestUri = StringUtils.defaultString(request.getRequestURI());
+        String expectedUri = StringUtils.defaultString(request.getContextPath()) + expectedPath;
+        String normalizedUri = requestUri.endsWith("/") ? requestUri.substring(0, requestUri.length() - 1) : requestUri;
+        return normalizedUri.equals(expectedUri);
+    }
+
+    private boolean isThirdPartySkillMarketplaceRequest(HttpServletRequest request) {
+        return isThirdPartySkillInstall(request)
+            || isRequestPath(request, THIRD_PARTY_SKILL_MANAGEABLE_DIGITAL_EMPLOYEE_PATH);
+    }
+
+    private boolean isRequestPath(HttpServletRequest request, String expectedPath) {
+        return endsWithPath(request.getRequestURI(), expectedPath)
+            || endsWithPath(request.getServletPath(), expectedPath)
+            || endsWithPath(request.getPathInfo(), expectedPath);
+    }
+
+    private boolean isConnectorSkillComplete(HttpServletRequest request) {
+        return endsWithPath(request.getRequestURI(), CONNECTOR_SKILL_COMPLETE_PATH)
+            || endsWithPath(request.getServletPath(), CONNECTOR_SKILL_COMPLETE_PATH)
+            || endsWithPath(request.getPathInfo(), CONNECTOR_SKILL_COMPLETE_PATH);
+    }
+
+    private boolean isOrchestratorRuntime(HttpServletRequest request) {
+        return endsWithPath(request.getRequestURI(), ORCHESTRATOR_RUNTIME_PATH)
+            || endsWithPath(request.getServletPath(), ORCHESTRATOR_RUNTIME_PATH)
+            || endsWithPath(request.getPathInfo(), ORCHESTRATOR_RUNTIME_PATH);
+    }
+
+    private boolean isArtifactUpload(HttpServletRequest request) {
+        return request != null && "POST".equalsIgnoreCase(request.getMethod())
+            && endsWithPath(request.getRequestURI(), ARTIFACT_UPLOAD_PATH);
+    }
+
+    private boolean isArtifactCapabilityRequest(HttpServletRequest request) {
+        if (request == null) {
+            return false;
+        }
+        if (("GET".equalsIgnoreCase(request.getMethod()) || "POST".equalsIgnoreCase(request.getMethod())
+            || "PUT".equalsIgnoreCase(request.getMethod()))
+            && matchesConfiguredPrefix(request, artifactDataPathPrefix)) {
+            return true;
+        }
+        return ("GET".equalsIgnoreCase(request.getMethod()) || "HEAD".equalsIgnoreCase(request.getMethod()))
+            && (matchesConfiguredPrefix(request, artifactPreviewPathPrefix)
+                || matchesConfiguredPrefix(request, artifactDownloadPathPrefix));
+    }
+
+    private boolean matchesConfiguredPrefix(HttpServletRequest request, String prefix) {
+        if (request == null || StringUtils.isAnyBlank(request.getRequestURI(), prefix)) {
+            return false;
+        }
+        String normalizedPrefix = prefix.startsWith("/") ? prefix : "/" + prefix;
+        String endpointPrefix = StringUtils.defaultString(request.getContextPath()) + normalizedPrefix;
+        return request.getRequestURI().equals(endpointPrefix)
+            || request.getRequestURI().startsWith(endpointPrefix + "/");
     }
 
     private boolean endsWithFeishuBotEventPath(String path) {

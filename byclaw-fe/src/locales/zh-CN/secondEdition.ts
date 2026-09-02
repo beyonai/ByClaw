@@ -150,6 +150,10 @@ export default {
   'settings.params.status': '状态',
   'settings.params.enabled': '启用',
   'settings.params.disabled': '停用',
+  'settings.params.managed': '系统托管',
+  'settings.params.source': '来源',
+  'settings.params.source.user': '用户配置',
+  'settings.params.source.connector': '系统托管',
   'settings.params.enable': '启用',
   'settings.params.disable': '停用',
   'settings.params.valueStatus': '值状态',
@@ -164,6 +168,10 @@ export default {
   'settings.params.empty': '暂无个人参数',
   'settings.params.keyRequired': '请输入参数名',
   'settings.params.keyInvalid': '参数名需符合环境变量格式，如 API_TOKEN',
+  'settings.params.common.pick': '常用变量',
+  'settings.params.common.ghToken.desc': 'GitHub 访问令牌，研发项目克隆和推送私有仓库时使用',
+  'settings.params.common.glToken.desc': 'GitLab 访问令牌，研发项目克隆和推送 GitLab 私有仓库时使用',
+  'settings.params.common.giteaToken.desc': 'Gitea 访问令牌，研发项目克隆和推送 Gitea 私有仓库时使用',
   'settings.params.valueRequired': '请输入参数值',
   'settings.params.valueTip': '参数值将加密保存，页面不会回显明文。',
   'settings.params.valueKeepTip': '已配置参数值；留空则保持原值不变。',
@@ -343,4 +351,8 @@ export default {
 
   'context.used.format': '上下文已使用{percent}%，{usedTokens} / {contextTokens}',
   'easyConfirm.pagination.title': '请选择要操作的步骤',
+  'easyConfirm.notification.title': '任务需要您的处理',
+  'easyConfirm.notification.body': '有新的任务需要您确认或输入，请返回页面处理。',
+  'easyConfirm.notification.permissionDenied':
+    '浏览器通知权限已关闭。为避免错过需要您确认或输入的任务，请在浏览器的网站设置中允许通知。',
 };

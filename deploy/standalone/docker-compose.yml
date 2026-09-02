@@ -34,9 +34,43 @@ services:
       - ./logs/be:/app/logs
       # dws 登录态（file-DEK 加密），持久化后重启无需重新钉钉授权。
       - byclaw-dws-auth:/home/appuser/.dws
+      # Artifact 存储在该共享根下的 byclaw-artifacts 目录；沙箱仍只挂载各自的用户子目录。
       - ${BYCLAW_SANDBOX_FILE_VOLUME_ROOT:-/mnt/byclaw-file}:${BYCLAW_SANDBOX_FILE_VOLUME_ROOT:-/mnt/byclaw-file}
     networks:
       - byclaw-network
+    restart: unless-stopped
+
+  super:
+    image: ${IMAGE_SUPER:-ghcr.io/beyonai/byclaw/byclaw-super:main}
+    container_name: byclaw-super-${CONTAINER_SUFFIX:-standalone}
+    user: "1001:1001"
+    ports:
+      - "${BYCLAW_SUPER_PORT:-3000}:3000"
+    env_file:
+      - ../../.env
+    environment:
+      - HOST=0.0.0.0
+      - PORT=3000
+      - DB_SSL=${BYCLAW_SUPER_DB_SSL:-false}
+      - DB_EVENT_LISTEN_ENABLED=${BYCLAW_SUPER_DB_EVENT_LISTEN_ENABLED:-false}
+      - DB_MIGRATE_ON_START=false
+      - BYCLAW_BE_BASE_URL=${BYCLAW_SUPER_BE_BASE_URL:-http://be:8086}
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+    networks:
+      - byclaw-network
+    depends_on:
+      - be
     restart: unless-stopped
 
   qa-manager:

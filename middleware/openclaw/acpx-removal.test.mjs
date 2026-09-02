@@ -5,7 +5,6 @@ import test from 'node:test';
 const targetFiles = [
   'Dockerfile',
   'Dockerfile.byclaw',
-  'Dockerfile.byclaw-wiki',
   'runtime-bootstrap.sh',
 ];
 

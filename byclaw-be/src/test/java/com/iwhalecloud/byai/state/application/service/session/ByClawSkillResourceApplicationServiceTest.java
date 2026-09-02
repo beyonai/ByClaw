@@ -20,6 +20,7 @@ import com.iwhalecloud.byai.manager.entity.resource.SsResExtSkill;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail;
 import com.iwhalecloud.byai.state.domain.resource.service.ResourceArtifactStorageService;
+import com.iwhalecloud.byai.state.domain.resource.vo.SkillMarketplaceDigitalEmployeeVo;
 import com.iwhalecloud.byai.state.domain.session.dto.ByClawSkillDto;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import java.io.ByteArrayOutputStream;
@@ -29,6 +30,8 @@ import java.util.List;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 import org.apache.commons.codec.digest.DigestUtils;
+import org.apache.commons.compress.archivers.zip.ZipArchiveEntry;
+import org.apache.commons.compress.archivers.zip.ZipArchiveOutputStream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -163,6 +166,26 @@ class ByClawSkillResourceApplicationServiceTest {
         verify(digitalEmployeeApplicationService).rebuildAndSaveDigitalEmployeeRelSkills(9001L);
         verify(digitalEmployeeRuntimeRefreshService).scheduleSkillRuntimeRefreshAfterCommit(
             org.mockito.ArgumentMatchers.argThat(ids -> ids.size() == 1 && ids.contains(9001L)));
+    }
+
+    @Test
+    void listSkillMarketplaceManageableDigitalEmployees_returnsOnlyManageableEmployees() {
+        SsResource manageable = new SsResource();
+        manageable.setResourceId(9001L);
+        manageable.setResourceName("可管理数字员工");
+        SsResource useOnly = new SsResource();
+        useOnly.setResourceId(9002L);
+        useOnly.setResourceName("仅可使用数字员工");
+        when(ssResourceService.listActiveDigitalEmployees()).thenReturn(List.of(manageable, useOnly));
+        when(authApplicationService.hasResourceManagePermission(manageable)).thenReturn(true);
+        when(authApplicationService.hasResourceManagePermission(useOnly)).thenReturn(false);
+
+        List<SkillMarketplaceDigitalEmployeeVo> result = service.listSkillMarketplaceManageableDigitalEmployees();
+
+        assertThat(result).singleElement().satisfies(item -> {
+            assertThat(item.getDigId()).isEqualTo(9001L);
+            assertThat(item.getDigName()).isEqualTo("可管理数字员工");
+        });
     }
 
     @Test
@@ -884,6 +907,19 @@ class ByClawSkillResourceApplicationServiceTest {
         }
     }
 
+    @Test
+    void inspectSkillPackage_acceptsUtf8ChineseEntryNamesWithoutLanguageEncodingFlag() {
+        MockMultipartFile uploadFile = new MockMultipartFile("file", "ppt-master-0.1.zip", "application/zip",
+            utf8UnflaggedSkillZipBytes());
+
+        ByClawSkillResourceApplicationService.SkillPackageMetadata metadata =
+            service.inspectSkillPackage(uploadFile);
+
+        assertThat(metadata.skillName()).isEqualTo("ppt-master");
+        assertThat(metadata.skillCode()).isEqualTo("ppt-master");
+        assertThat(metadata.skillDesc()).isEqualTo("AI 驱动的演示文稿生成技能");
+    }
+
     private byte[] skillZipBytes(String skillName) {
         try {
             ByteArrayOutputStream out = new ByteArrayOutputStream();
@@ -891,6 +927,33 @@ class ByClawSkillResourceApplicationServiceTest {
                 zip.putNextEntry(new ZipEntry(skillName + "/SKILL.md"));
                 zip.write(("## " + skillName + "\n用于测试的技能描述").getBytes(java.nio.charset.StandardCharsets.UTF_8));
                 zip.closeEntry();
+            }
+            return out.toByteArray();
+        }
+        catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private byte[] utf8UnflaggedSkillZipBytes() {
+        try {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            try (ZipArchiveOutputStream zip = new ZipArchiveOutputStream(out)) {
+                zip.setEncoding(StandardCharsets.UTF_8.name());
+                zip.setUseLanguageEncodingFlag(false);
+                zip.setCreateUnicodeExtraFields(ZipArchiveOutputStream.UnicodeExtraFieldPolicy.NEVER);
+
+                ZipArchiveEntry skillDoc = new ZipArchiveEntry("ppt-master/SKILL.md");
+                zip.putArchiveEntry(skillDoc);
+                zip.write(("---\nname: ppt-master\ndescription: >\n  AI 驱动的演示文稿生成技能\n---\n")
+                    .getBytes(StandardCharsets.UTF_8));
+                zip.closeArchiveEntry();
+
+                ZipArchiveEntry chineseEntry =
+                    new ZipArchiveEntry("ppt-master/templates/brands/中汽研/design_spec.md");
+                zip.putArchiveEntry(chineseEntry);
+                zip.write("template".getBytes(StandardCharsets.UTF_8));
+                zip.closeArchiveEntry();
             }
             return out.toByteArray();
         }

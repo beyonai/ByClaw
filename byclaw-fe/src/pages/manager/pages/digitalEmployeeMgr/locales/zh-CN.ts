@@ -205,6 +205,7 @@ export default {
 
   // EmployeeDetail
   'employeeDetail.digitalEmployee': '数字员工',
+  'employeeDetail.digitalEmployeeGroup': '数字员工组',
   'employeeDetail.inputPlaceholder': '请输入你想了解的问题',
   'employeeDetail.quickCreateTooltip': '请先输入名称以及描述哦',
   'employeeDetail.config': '配置',
@@ -251,6 +252,9 @@ export default {
   'employeeDetail.digitalEmployeeDesc': '数字员工描述',
   'employeeDetail.digitalEmployeeDescRequired': '请输入数字员工描述',
   'employeeDetail.digitalEmployeeDescPlaceholder': '请输入数字员工描述',
+  'employeeDetail.digitalEmployeeGroupDesc': '数字员工组描述',
+  'employeeDetail.digitalEmployeeGroupDescRequired': '请输入数字员工组描述',
+  'employeeDetail.digitalEmployeeGroupDescPlaceholder': '请输入数字员工组描述',
   'employeeDetail.fieldMaxLength': '{field}不能超过{max}个字符，当前为{current}个字符',
   'employeeDetail.coreAbility': '岗位职责',
   'employeeDetail.example': '样例',
@@ -326,6 +330,7 @@ export default {
   'employeeDetail.personalAssistant': '个人助理',
   'employeeDetail.thirdParty': '第三方',
   'employeeDetail.employeeType': '数字员工类型',
+  'employeeDetail.employeeGroupType': '数字员工组类型',
   'employeeDetail.advancedSettings.title': '高级配置',
   'employeeDetail.advancedSettings.settingNamePlaceholder': '请输入设置名称',
   'employeeDetail.advancedSettings.settingDescPlaceholder': '请输入设置描述',

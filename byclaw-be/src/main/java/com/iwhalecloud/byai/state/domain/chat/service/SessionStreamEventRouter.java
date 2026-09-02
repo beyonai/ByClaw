@@ -14,6 +14,7 @@ import com.iwhalecloud.byai.state.common.dto.ChoiceDto;
 import com.iwhalecloud.byai.state.common.dto.DeltaDto;
 import com.iwhalecloud.byai.state.common.enums.AgentTypeEnum;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
+import com.iwhalecloud.byai.state.domain.chat.dto.SessionRuntimeState;
 import com.iwhalecloud.byai.state.domain.chat.enums.ChatTransport;
 import com.iwhalecloud.byai.state.domain.chat.enums.ChatUseageEnum;
 import com.iwhalecloud.byai.state.domain.chat.model.MessageContext;
@@ -39,13 +40,10 @@ public class SessionStreamEventRouter {
     private PythonSseService pythonSseService;
 
     @Autowired
-    private ScriptService scriptService;
-
-    @Autowired
     private MultiDeviceBroadcastService multiDeviceBroadcastService;
 
     @Autowired
-    private RunningChatSnapshotService runningChatSnapshotService;
+    private RunningChatSnapshotWriteBehind runningChatSnapshotWriteBehind;
 
     @Autowired
     private GatewayStreamEventProcessor gatewayStreamEventProcessor;
@@ -65,6 +63,15 @@ public class SessionStreamEventRouter {
     @Autowired
     private ChatContextRecoveryService chatContextRecoveryService;
 
+    @Autowired
+    private TerminalPersistMarkerService terminalPersistMarkerService;
+
+    @Autowired
+    private ScopedSessionEventService scopedSessionEventService;
+
+    @Autowired
+    private SessionRuntimeStateService sessionRuntimeStateService;
+
     /**
      * Redis Stream 统一入口。HTTP SSE 投递到请求线程队列，WebSocket 直接推送到已登记的 Channel。
      */
@@ -72,6 +79,23 @@ public class SessionStreamEventRouter {
         String sessionId = dataJson == null ? null : dataJson.getString("session_id");
         if (StringUtils.isBlank(sessionId)) {
             return StreamDispatchResult.INTENTIONALLY_IGNORED;
+        }
+        if (sessionRuntimeStateService != null && sessionRuntimeStateService.isRuntimeEvent(dataJson)) {
+            SessionRuntimeState runtime = sessionRuntimeStateService.applyEvent(parseLong(sessionId), dataJson);
+            if (runtime != null) {
+                broadcastSessionRuntimeStatus(runtime);
+            }
+            return StreamDispatchResult.HANDLED;
+        }
+        try {
+            if (scopedSessionEventService != null
+                && scopedSessionEventService.handleIfNecessary(parseLong(sessionId), dataJson)) {
+                return StreamDispatchResult.HANDLED;
+            }
+        }
+        catch (Exception e) {
+            log.warn("处理外部子会话事件失败, sessionId: {}, dataJson: {}", sessionId, dataJson, e);
+            return StreamDispatchResult.ERROR;
         }
         if (isBackgroundAnswerMessageEvent(dataJson.getString("event_type"))) {
             try {
@@ -94,27 +118,40 @@ public class SessionStreamEventRouter {
         ctx.currentStreamId = dataJson.getString("stream_id");
 
         if (!ChatTransport.WEBSOCKET.equals(ctx.transport)) {
-            broadcastToOtherDevices(ctx, dataJson);
             if (ctx.gatewayEventQueue != null) {
-                ctx.gatewayEventQueue.offer(dataJson);
+                try {
+                    // 有界队列已满时阻塞 Redis listener，背压传递到 Redis Stream，
+                    // 避免 JVM 内存无界增长，也不能在未入队时返回 HANDLED 后误 ACK。
+                    ctx.gatewayEventQueue.put(dataJson);
+                }
+                catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    log.warn("等待 HTTP SSE 事件队列容量时被中断，消息保留 pending, sessionId: {}", sessionId);
+                    return StreamDispatchResult.ERROR;
+                }
             }
+            broadcastToOtherDevices(ctx, dataJson);
             return StreamDispatchResult.HANDLED;
         }
 
-        if (routeWebSocketEvent(ctx, dataJson)) {
+        WebSocketRouteResult routeResult = routeWebSocketEvent(ctx, dataJson);
+        if (routeResult.shouldBroadcast) {
             broadcastToOtherDevices(ctx, dataJson);
         }
-        return StreamDispatchResult.HANDLED;
+        return routeResult.dispatchResult;
     }
 
-    private boolean routeWebSocketEvent(ChatProcessContext ctx, JSONObject dataJson) {
+    private WebSocketRouteResult routeWebSocketEvent(ChatProcessContext ctx, JSONObject dataJson) {
         if (gatewayStreamEventProcessor.handleHistoryEventIfNecessary(ctx, dataJson)) {
-            return false;
+            return WebSocketRouteResult.ignored();
         }
 
         String eventType = gatewayStreamEventProcessor.normalizeEventType(ctx, dataJson);
         if (gatewayStreamEventProcessor.shouldIgnoreEvent(ctx, eventType, dataJson)) {
-            return false;
+            return WebSocketRouteResult.ignored();
+        }
+        if (StreamIdUtil.isProcessedByWatermark(ctx.currentStreamId, ctx.hydratedStreamId)) {
+            return handleWatermarkedReplay(ctx, eventType);
         }
         JSONObject metadata = dataJson.getJSONObject("metadata");
         if (metadata == null) {
@@ -122,8 +159,11 @@ public class SessionStreamEventRouter {
         }
 
         if (SseResponseEventEnum.error.equals(eventType)) {
-            handleWebSocketError(ctx, dataJson, metadata);
-            return true;
+            boolean terminal = handleWebSocketError(ctx, dataJson, metadata);
+            if (terminal) {
+                ctx.terminalStreamId = ctx.currentStreamId;
+            }
+            return terminal ? WebSocketRouteResult.terminal(ctx) : WebSocketRouteResult.broadcasting();
         }
 
         String eventData = gatewayStreamEventProcessor.buildEventData(ctx, dataJson, metadata);
@@ -142,39 +182,82 @@ public class SessionStreamEventRouter {
                 log.info("恢复事件已计入快照，跳过续聚合, sessionId: {}, traceId: {}, streamId: {}", ctx.sessionId,
                     ctx.traceId, ctx.currentStreamId);
             }
-            // 推进内存水位线，保证单调不退：避免重新投递的旧 pending 把快照水位线拉低，
-            // 导致下次重启时已聚合区间被重复 append。
-            ctx.hydratedStreamId = StreamIdUtil.max(ctx.hydratedStreamId, ctx.currentStreamId, ctx.hydratedStreamId);
-            runningChatSnapshotService.save(ctx, receivedTraceId, messageContext);
         }
         else {
             pythonSseService.getContentFromPythonStreamV3(lineJson.toJSONString(), ctx.res,
                 messageContext, ctx.getAgentIds(), ctx);
-            runningChatSnapshotService.save(ctx, receivedTraceId, messageContext);
+        }
+        boolean terminalResponse = SseResponseEventEnum.appStreamResponse.equals(eventType);
+        if (terminalResponse && messageContext != null) {
+            // 快照是断线重连的对账依据，必须先写入 complete，再保存终态快照。
+            messageContext.setComplete(true);
+        }
+        // 推进内存水位线，保证 live 和 recovery 重投递都不会重复推送或重复聚合。
+        ctx.hydratedStreamId = StreamIdUtil.max(ctx.hydratedStreamId, ctx.currentStreamId, ctx.hydratedStreamId);
+        String snapshotKey = runningSnapshotKey(ctx, receivedTraceId, messageContext);
+        if (terminalResponse) {
+            runningChatSnapshotWriteBehind.flushNow(snapshotKey, ctx, receivedTraceId, messageContext);
+        }
+        else {
+            runningChatSnapshotWriteBehind.enqueue(snapshotKey, ctx, receivedTraceId, messageContext);
         }
 
-        if (SseResponseEventEnum.appStreamResponse.equals(eventType)) {
-            if (messageContext != null) {
-                messageContext.setComplete(true);
-            }
+        if (terminalResponse) {
             if (ctx.markTraceComplete(receivedTraceId)) {
                 if (ctx.messageContext != null) {
                     ctx.messageContext.setComplete(true);
                 }
-                scriptService.completeAsyncGatewayContext(ctx);
-                runningChatSnapshotService.delete(ctx);
+                ctx.terminalStreamId = ctx.currentStreamId;
+                return WebSocketRouteResult.terminal(ctx);
             }
         }
-        return true;
+        return WebSocketRouteResult.broadcasting();
     }
 
-    private void handleWebSocketError(ChatProcessContext ctx, JSONObject dataJson, JSONObject metadata) {
+    private String runningSnapshotKey(ChatProcessContext ctx, String traceId, MessageContext messageContext) {
+        Long messageId = messageContext == null ? null : messageContext.getMessageId();
+        return String.valueOf(ctx == null ? null : ctx.sessionId) + ":"
+            + StringUtils.defaultString(traceId) + ":" + String.valueOf(messageId);
+    }
+
+    /**
+     * 处理已被水位线覆盖的重投事件：内容不再推送，但仍要判断是否需要重新收尾。
+     * <p>
+     * 水位线会随快照恢复，而 {@code terminalStreamId} 是内存字段，进程重启后为 null。
+     * 因此不能只依赖内存字段判断 terminal，否则重启后重投的终止事件会被当作普通重复事件
+     * ACK 掉，落库再也不会发生。这里按事件类型重新判定，并用持久标记区分
+     * 「已落库」与「落库尚未完成」两种情况。
+     */
+    private WebSocketRouteResult handleWatermarkedReplay(ChatProcessContext ctx, String eventType) {
+        boolean terminalEventType = SseResponseEventEnum.appStreamResponse.equals(eventType)
+            || SseResponseEventEnum.error.equals(eventType);
+        if (!terminalEventType) {
+            log.debug("Stream 增量事件已处理，跳过重复推送, sessionId: {}, traceId: {}, streamId: {}", ctx.sessionId,
+                ctx.traceId, ctx.currentStreamId);
+            return WebSocketRouteResult.ignored();
+        }
+
+        boolean persistedInThisProcess = ctx.currentStreamId != null
+            && ctx.currentStreamId.equals(ctx.terminalStreamId);
+        if (persistedInThisProcess || terminalPersistMarkerService.isPersisted(ctx.sessionId, ctx.currentStreamId)) {
+            // 落库已完成，仅需重新走一次 ACK 与收尾；processor 会跳过重复落库。
+            log.info("Stream 终止事件已落库，跳过重复落库并重新收尾, sessionId: {}, traceId: {}, streamId: {}",
+                ctx.sessionId, ctx.traceId, ctx.currentStreamId);
+            return WebSocketRouteResult.terminalPersisted(ctx);
+        }
+
+        // 水位线覆盖但落库未完成：上次在「保存快照」与「落库成功」之间中断，必须重新落库。
+        log.warn("Stream 终止事件已计入快照但未完成落库，重新执行收尾, sessionId: {}, traceId: {}, streamId: {}",
+            ctx.sessionId, ctx.traceId, ctx.currentStreamId);
+        ctx.terminalStreamId = ctx.currentStreamId;
+        return WebSocketRouteResult.terminal(ctx);
+    }
+
+    private boolean handleWebSocketError(ChatProcessContext ctx, JSONObject dataJson, JSONObject metadata) {
         String errorMsg = metadata != null ? metadata.getString("error") : "unknown gateway error";
         if (ctx.recoveryOnly) {
             ctx.gatewayError = true;
-            scriptService.completeAsyncGatewayContext(ctx);
-            runningChatSnapshotService.delete(ctx);
-            return;
+            return true;
         }
         JSONObject errorPayload = new JSONObject();
         errorPayload.put("message", errorMsg);
@@ -184,9 +267,33 @@ public class SessionStreamEventRouter {
         CompletionsUtils.responseWrite(ctx.res, SseResponseEventEnum.error, errorPayload.toJSONString(),
             ctx.sessionId);
         ctx.gatewayError = !ctx.isMultiAgentRequest() || ctx.getMultiAgentTraceIds().size() == 1;
-        if (ctx.markTraceComplete(dataJson == null ? null : dataJson.getString("trace_id"))) {
-            scriptService.completeAsyncGatewayContext(ctx);
-            runningChatSnapshotService.delete(ctx);
+        return ctx.markTraceComplete(dataJson == null ? null : dataJson.getString("trace_id"));
+    }
+
+    private static final class WebSocketRouteResult {
+        private final StreamDispatchResult dispatchResult;
+        private final boolean shouldBroadcast;
+
+        private WebSocketRouteResult(StreamDispatchResult dispatchResult, boolean shouldBroadcast) {
+            this.dispatchResult = dispatchResult;
+            this.shouldBroadcast = shouldBroadcast;
+        }
+
+        private static WebSocketRouteResult ignored() {
+            return new WebSocketRouteResult(StreamDispatchResult.HANDLED, false);
+        }
+
+        private static WebSocketRouteResult broadcasting() {
+            return new WebSocketRouteResult(StreamDispatchResult.HANDLED, true);
+        }
+
+        private static WebSocketRouteResult terminal(ChatProcessContext context) {
+            return new WebSocketRouteResult(StreamDispatchResult.terminalHandled(context), true);
+        }
+
+        /** 已落库的终止事件重投：需要 ACK 和收尾，但不重复落库，也不再次广播。 */
+        private static WebSocketRouteResult terminalPersisted(ChatProcessContext context) {
+            return new WebSocketRouteResult(StreamDispatchResult.terminalAlreadyPersisted(context), false);
         }
     }
 
@@ -210,6 +317,10 @@ public class SessionStreamEventRouter {
         if (metadata == null) {
             metadata = new JSONObject();
         }
+        // 多端广播必须与当前 WebSocket 路由使用同一套事件类型归一化规则。
+        // 否则非目标 agent 的 answerDelta 会在入库时按 reasoningLogDelta 处理，
+        // 但其他设备仍收到原始 answerDelta，导致不同 WebSocket 客户端表现不一致。
+        broadcastJson.put("event_type", gatewayStreamEventProcessor.normalizeEventType(ctx, dataJson));
         broadcastJson.put("data", gatewayStreamEventProcessor.buildEventData(ctx, dataJson, metadata));
         return broadcastJson;
     }
@@ -418,6 +529,23 @@ public class SessionStreamEventRouter {
         wsMessage.put("type", "SESSION_STATUS");
         wsMessage.put("sessionId", String.valueOf(sessionId));
         wsMessage.put("data", parseSessionStatusPayload(statusValue));
+        multiDeviceBroadcastService.broadcastRawToUser(userId, wsMessage, null);
+    }
+
+    private void broadcastSessionRuntimeStatus(SessionRuntimeState runtime) {
+        if (runtime == null || runtime.getSessionId() == null) {
+            return;
+        }
+        ByaiSession session = sessionService.findById(runtime.getSessionId());
+        Long userId = session == null ? null : session.getCreatorId();
+        if (userId == null) {
+            return;
+        }
+        JSONObject wsMessage = new JSONObject();
+        wsMessage.put("type", "SESSION_RUNTIME_STATUS");
+        wsMessage.put("sessionId", String.valueOf(runtime.getSessionId()));
+        wsMessage.put("traceId", runtime.getTraceId());
+        wsMessage.put("data", JSON.toJSON(runtime));
         multiDeviceBroadcastService.broadcastRawToUser(userId, wsMessage, null);
     }
 

@@ -2,6 +2,8 @@
 
 OpenClaw 的 Web Channel 插件，支持流式输出配置。
 
+维护该模块前请先阅读 [`MAINTAINER_GUIDE.md`](./MAINTAINER_GUIDE.md)，其中说明 SDK 入站、agent events、hooks、native subagent、delegated work 和业务会话完成判定之间的关系。本 README 主要保留部署、配置和外部接入说明。
+
 ## 打包为 dist
 
 和 `baiying-enhance` 一样，`byai-channel` 通过 esbuild 产出可分发的 `dist/index.js`：
@@ -128,6 +130,14 @@ npm run build
 - `historyMessages`
 - `tools`
 - `sizes`
+
+## Hook 文件目录约定
+
+`before_prompt_build` 会注入文件路由规则，兼容用户在聊天中的目录说法：
+
+- `会话目录`、`session`、`.session`、`.sessions` 统一指当前会话的 `/.sessions/<sessionId>/`；在沙箱绝对路径中对应 `/by/.sessions/<sessionId>/`。
+- `共享目录`、`shared`、`.shared` 统一指 `/.shared/`；在沙箱绝对路径中对应 `/by/.shared/`。
+- `.session` 是兼容别名，BE 实际目录名为 `.sessions`。插件会强制禁止误用 `/session`、`/.session`、`/shared` 等平行目录，并要求文件写入后按完整绝对路径复核。
 
 ### 与配置热重载协作
 

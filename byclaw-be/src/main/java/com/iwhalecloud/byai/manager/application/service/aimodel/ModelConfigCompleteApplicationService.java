@@ -65,7 +65,8 @@ public class ModelConfigCompleteApplicationService {
 
     @Transactional(rollbackFor = Exception.class)
     public ModelConfigCompleteResponse completeAllModelConfig() {
-        List<ByaiAimodel> models = byaiAimodelMapper.selectByCondition(null, null, null, null, null, null, null, null);
+        List<ByaiAimodel> models = byaiAimodelMapper.selectByCondition(null, null, null, null, null, null, null, null,
+            null);
         Map<String, Suggestion> llmSuggestions = loadDefaultLlmSuggestions(models);
 
         ModelConfigCompleteResponse response = new ModelConfigCompleteResponse();

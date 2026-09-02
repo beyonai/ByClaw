@@ -1,0 +1,149 @@
+[
+  {
+    "property_code": "projectId",
+    "property_name": "项目ID",
+    "data_type": "STRING",
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "category"
+      }
+    },
+    "required": true,
+    "max_length": 100
+  },
+  {
+    "property_code": "account_code",
+    "property_name": "公众号编码",
+    "data_type": "STRING",
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "category"
+      }
+    },
+    "required": true,
+    "max_length": 100
+  },
+  {
+    "property_code": "account_name",
+    "property_name": "公众号名称",
+    "data_type": "STRING",
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "name"
+      }
+    },
+    "required": true,
+    "max_length": 200
+  },
+  {
+    "property_code": "title",
+    "property_name": "文章标题",
+    "data_type": "STRING",
+    "required": true,
+    "max_length": 500
+  },
+  {
+    "property_code": "publish_time",
+    "property_name": "发布时间",
+    "data_type": "STRING",
+    "required": true,
+    "max_length": 50,
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "date"
+      }
+    }
+  },
+  {
+    "property_code": "url",
+    "property_name": "原链接",
+    "data_type": "STRING",
+    "required": false,
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "link"
+      }
+    }
+  },
+  {
+    "property_code": "canonical_url",
+    "property_name": "规范化唯一链接",
+    "data_type": "STRING",
+    "required": false,
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "link"
+      }
+    }
+  },
+  {
+    "property_code": "content_text",
+    "property_name": "正文",
+    "data_type": "STRING",
+    "required": false
+  },
+  {
+    "property_code": "content_hash",
+    "property_name": "正文哈希",
+    "data_type": "STRING",
+    "required": false,
+    "max_length": 64
+  },
+  {
+    "property_code": "category",
+    "property_name": "分类",
+    "data_type": "STRING",
+    "required": false,
+    "max_length": 100
+  },
+  {
+    "property_code": "tags",
+    "property_name": "标签",
+    "data_type": "STRING",
+    "required": true
+  },
+  {
+    "property_code": "word_count",
+    "property_name": "字数",
+    "data_type": "INTEGER",
+    "required": false
+  },
+  {
+    "property_code": "has_video",
+    "property_name": "是否包含视频",
+    "data_type": "BOOLEAN",
+    "required": true
+  },
+  {
+    "property_code": "has_audio",
+    "property_name": "是否包含音频",
+    "data_type": "BOOLEAN",
+    "required": true
+  },
+  {
+    "property_code": "collection_id",
+    "property_name": "归属合集",
+    "data_type": "INTEGER",
+    "required": false
+  },
+  {
+    "property_code": "author",
+    "property_name": "作者",
+    "data_type": "STRING",
+    "required": false,
+    "max_length": 100
+  },
+  {
+    "property_code": "summary",
+    "property_name": "摘要",
+    "data_type": "STRING",
+    "required": false,
+    "max_length": 2000
+  }
+]

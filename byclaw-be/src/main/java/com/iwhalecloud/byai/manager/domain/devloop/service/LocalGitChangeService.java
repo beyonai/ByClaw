@@ -112,7 +112,7 @@ public class LocalGitChangeService {
             }
 
             String headBranch = runGit(dir, "rev-parse", "--abbrev-ref", "HEAD").trim();
-            // 基线以本地实际存在的为准:优先 origin/{base},回退本地 {base};都没有则对空树 diff,至少能列出全部文件。
+            // worktree 比较基线按约定依次取上游、reflog 起点和 main，保证未配置远端跟踪的临时分支也能展示改动。
             String baseRef = resolveBaseRef(dir, baseBranch);
 
             // 已 commit:base...HEAD 的累计增删行;未 commit:工作区相对 HEAD 的改动。两者按文件名合并,未提交优先。
@@ -120,7 +120,7 @@ public class LocalGitChangeService {
             collectNumstat(dir, baseRef, merged);
             collectWorkingTree(dir, merged);
 
-            return LocalChangeResult.ok(baseBranch, headBranch, new ArrayList<>(merged.values()));
+            return LocalChangeResult.ok(baseRef, headBranch, new ArrayList<>(merged.values()));
         }
         catch (Exception e) {
             log.warn("[Devloop] 本地 git 变更采集失败 dir={}", workspaceDir, e);
@@ -165,6 +165,12 @@ public class LocalGitChangeService {
                     I18nUtil.get("devloop.git.workspace.not.repository"));
             }
             String baseRef = resolveBaseRef(dir, baseBranch);
+            // git diff 不会为未跟踪文件生成内容；Changes 列表虽已列出 A 文件，预览时需要与空文件比较。
+            String workingStatus = runGit(dir, "status", "--porcelain", "-uall", "--", filePath);
+            if (isAddedStatus(workingStatus)) {
+                String diff = runGitAllowExitCode(dir, 1, "diff", "--no-index", "--", "/dev/null", filePath);
+                return new FileDiffResult(LocalStatus.OK, filePath, diff, null);
+            }
             // 单文件 diff:范围与列表一致,-- 后限定文件路径。已提交 + 未提交改动都会体现在 base..HEAD 与工作区叠加中,
             // 这里用 base 到工作区(不加 ...HEAD)一次性覆盖:git diff {base} -- {file} 比较基线与当前工作区。
             String diff = runGit(dir, "diff", baseRef, "--", filePath);
@@ -181,16 +187,70 @@ public class LocalGitChangeService {
         }
     }
 
-    /** 基线引用解析:优先远程跟踪 origin/{base},其次本地 {base};都无则用 git 空树哈希(列全部文件为新增)。 */
-    private String resolveBaseRef(File dir, String baseBranch) {
-        String candidate = "origin/" + baseBranch;
-        if (refExists(dir, candidate)) {
-            return candidate;
+    private boolean isAddedStatus(String status) {
+        for (String line : status.split("\\R")) {
+            if (line.startsWith("??") || line.startsWith("A ") || line.startsWith(" A")) {
+                return true;
+            }
         }
-        if (refExists(dir, baseBranch)) {
-            return baseBranch;
+        return false;
+    }
+
+    /** 基线引用解析:优先当前分支上游，其次 reflog 创建起点，最后回退 main。 */
+    private String resolveBaseRef(File dir, String baseBranch) {
+        String upstream = resolveUpstream(dir);
+        if (upstream != null) {
+            return upstream;
+        }
+
+        String reflogBase = resolveReflogBase(dir);
+        if (reflogBase != null) {
+            return reflogBase;
+        }
+
+        String fallbackBranch = baseBranch == null || baseBranch.isBlank() ? "main" : baseBranch;
+        String remoteMain = "origin/" + fallbackBranch;
+        if (refExists(dir, remoteMain)) {
+            return remoteMain;
+        }
+        if (refExists(dir, fallbackBranch)) {
+            return fallbackBranch;
         }
         return EMPTY_TREE_HASH;
+    }
+
+    private String resolveUpstream(File dir) {
+        if (!refExists(dir, "@{upstream}")) {
+            return null;
+        }
+        try {
+            String upstream = runGit(dir, "rev-parse", "--abbrev-ref", "--symbolic-full-name",
+                "@{upstream}").trim();
+            return upstream.isEmpty() ? null : upstream;
+        }
+        catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** reflog 的最早提交通常就是 worktree 分支创建点；只有它与当前 HEAD 不同时才作为有效基线。 */
+    private String resolveReflogBase(File dir) {
+        try {
+            String head = runGit(dir, "rev-parse", "HEAD").trim();
+            String reflog = runGit(dir, "reflog", "show", "--format=%H", "HEAD");
+            String oldestDistinct = null;
+            for (String line : reflog.split("\\R")) {
+                String candidate = line.trim();
+                if (!candidate.isEmpty() && !candidate.equals(head)) {
+                    oldestDistinct = candidate;
+                }
+            }
+            return oldestDistinct;
+        }
+        catch (Exception e) {
+            log.debug("[Devloop] worktree reflog 基线不可用 dir={}", dir, e);
+        }
+        return null;
     }
 
     /**
@@ -289,7 +349,8 @@ public class LocalGitChangeService {
 
     /** git status --porcelain:补充未 commit 的工作区改动(新增/修改/删除/重命名),覆盖已 commit 的同名项。 */
     private void collectWorkingTree(File dir, Map<String, LocalFileChange> out) throws Exception {
-        String output = runGit(dir, "status", "--porcelain");
+        // -uall 禁止 Git 将未跟踪目录折叠成单行 ?? directory/，确保前端能看到目录下每个新增文件。
+        String output = runGit(dir, "status", "--porcelain", "-uall");
         for (String line : output.split("\n")) {
             if (line.trim().isEmpty() || line.length() < 3) {
                 continue;
@@ -363,6 +424,11 @@ public class LocalGitChangeService {
      * stderr 单独读取、不混入 stdout(否则 git 的 fatal 提示会被当成变更行解析);退出码非 0 时抛异常带上 stderr。
      */
     private String runGit(File dir, String... args) throws Exception {
+        return runGitAllowExitCode(dir, 0, args);
+    }
+
+    /** 执行允许额外退出码的 git 命令；git diff --no-index 对有差异时约定返回 1。 */
+    private String runGitAllowExitCode(File dir, int allowedExitCode, String... args) throws Exception {
         Process process = newGit(dir, args).start();
         // stdout 与 stderr 分开读:stdout 才是可解析数据,stderr 仅用于报错。
         StringBuilder stdout = new StringBuilder();
@@ -384,7 +450,7 @@ public class LocalGitChangeService {
             process.destroyForcibly();
             throw new IllegalStateException(I18nUtil.get("devloop.git.command.timeout", String.join(" ", args)));
         }
-        if (process.exitValue() != 0) {
+        if (process.exitValue() != 0 && process.exitValue() != allowedExitCode) {
             // 非 0 退出(如 dubious ownership、非法 ref):抛异常带 stderr,由上层收敛为 GIT_ERROR,不把错误文本当数据。
             throw new IllegalStateException(I18nUtil.get("devloop.git.command.failed",
                 "git " + String.join(" ", args) + ": " + stderr.toString().trim()));

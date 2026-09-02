@@ -2,6 +2,8 @@
 cd "$(dirname "$0")"
 . ../compose-detect.sh
 
+mkdir -p redisdata
+
 echo "Starting Redis..."
 $COMPOSE $COMPOSE_ENV_FLAG up -d --force-recreate redis
 echo ""

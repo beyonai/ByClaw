@@ -10,7 +10,7 @@
  * If already cloned, does `git pull` to update. Use --force to re-clone.
  */
 
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { existsSync, rmSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -40,15 +40,35 @@ function fail(message) {
   process.exit(1);
 }
 
+if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo) || repo.includes("..")) {
+  fail("Invalid GitHub repository name");
+}
+if (!branch || branch.startsWith("-") || branch.includes("..") || /[\x00-\x20~^:?*[\\]/.test(branch)) {
+  fail("Invalid Git branch name");
+}
+
 const repoName = repo.split("/").pop();
 const cloneDir = path.join(CACHE_DIR, repoName);
-const cloneUrl = `https://${token}@github.com/${repo}.git`;
+const cloneUrl = `https://github.com/${repo}.git`;
+const askPass = path.join(__dirname, "git-askpass.sh");
+const gitEnvironment = {
+  ...process.env,
+  BYCLAW_GITHUB_TOKEN: token,
+  GIT_ASKPASS: askPass,
+  GIT_TERMINAL_PROMPT: "0",
+};
 
-function run(cmd, cwd) {
+function run(args, cwd) {
   try {
-    return execSync(cmd, { cwd, encoding: "utf-8", timeout: 120000, stdio: ["pipe", "pipe", "pipe"] }).trim();
+    return execFileSync("git", args, {
+      cwd,
+      env: gitEnvironment,
+      encoding: "utf-8",
+      timeout: 120000,
+      stdio: ["pipe", "pipe", "pipe"],
+    }).trim();
   } catch (err) {
-    fail(`Command failed: ${cmd}\n${err.stderr || err.message}`);
+    fail(`Git command failed\n${err.stderr || err.message}`);
   }
 }
 
@@ -60,17 +80,17 @@ if (force && existsSync(cloneDir)) {
 
 let action;
 if (existsSync(path.join(cloneDir, ".git"))) {
-  run(`git fetch origin ${branch}`, cloneDir);
-  run(`git checkout ${branch}`, cloneDir);
-  run(`git reset --hard origin/${branch}`, cloneDir);
+  run(["fetch", "origin", branch], cloneDir);
+  run(["checkout", branch], cloneDir);
+  run(["reset", "--hard", `origin/${branch}`], cloneDir);
   action = "updated";
 } else {
-  run(`git clone --depth 1 --branch ${branch} --single-branch ${cloneUrl} ${cloneDir}`);
+  run(["clone", "--depth", "1", "--branch", branch, "--single-branch", cloneUrl, cloneDir]);
   action = "cloned";
 }
 
-const commitHash = run("git rev-parse --short HEAD", cloneDir);
-const commitMsg = run("git log -1 --format=%s", cloneDir);
+const commitHash = run(["rev-parse", "--short", "HEAD"], cloneDir);
+const commitMsg = run(["log", "-1", "--format=%s"], cloneDir);
 
 console.log(JSON.stringify({
   ok: true,

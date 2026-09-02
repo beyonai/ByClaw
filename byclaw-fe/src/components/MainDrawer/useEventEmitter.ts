@@ -17,6 +17,7 @@ export const INIT_DRAWER_CFG = {
   title: '',
   canFullScreen: false,
   canClose: false,
+  overlay: false,
   width: '25vw' as const,
   minWidth: '25vw' as const,
   maxWidth: '50vw' as const,

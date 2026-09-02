@@ -15,11 +15,14 @@ import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.manager.qo.session.ByaiSessionQo;
 import com.iwhalecloud.byai.state.domain.session.service.SessionExtService;
 import com.iwhalecloud.byai.state.domain.session.service.SessionMemberService;
+import com.iwhalecloud.byai.state.domain.session.service.SessionTitleService;
 import com.iwhalecloud.byai.state.domain.template.enums.DebugModeEnum;
+import com.iwhalecloud.byai.state.application.service.taskplan.TaskPlanApplicationService;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import com.iwhalecloud.byai.state.domain.agent.service.SsSuperassistSubAgentService;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import com.iwhalecloud.byai.state.domain.message.model.SessionOpeartorDto;
@@ -63,6 +66,9 @@ public class SessionApplicationService {
     private ScanLogService scanLogService;
 
     @Autowired
+    private SessionTitleService sessionTitleService;
+
+    @Autowired
     private SessionExtService sessionExtService;
 
     @Autowired
@@ -73,6 +79,9 @@ public class SessionApplicationService {
 
     @Autowired
     private SsSuperassistSubAgentService ssSuperassistSubAgentService;
+
+    @Autowired
+    private TaskPlanApplicationService taskPlanApplicationService;
 
     /**
      * 初始化会话管理线程池 该线程池用于处理会话相关的异步操作，如异步更新会话内容等。 线程池配置说明： - 核心线程数：默认10个，保持常驻的线程数量 - 最大线程数：默认20个，当队列满时最多创建的线程数量 -
@@ -174,6 +183,10 @@ public class SessionApplicationService {
      */
     public ByaiSession updateConversation(SessionOpeartorDto sessionOpeartorDto) {
 
+        if (StringUtils.isNotBlank(sessionOpeartorDto.getSessionName())) {
+            sessionTitleService.cancelInitialTitle(sessionOpeartorDto.getSessionId());
+        }
+
         // 创建会话对象用于更新
         ByaiSession byaiSession = new ByaiSession();
         // 设置会话ID，这是更新的唯一标识
@@ -222,7 +235,11 @@ public class SessionApplicationService {
      *
      * @param sessionId 会话标识
      */
+    @Transactional
     public void removeConversation(Long sessionId) {
+
+        // 删除任务计划，步骤和事件由数据库外键级联删除
+        taskPlanApplicationService.deleteBySessionId(sessionId);
 
         // 删除会话
         sessionService.delete(sessionId);

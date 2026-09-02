@@ -5,7 +5,7 @@ import { employeeApply, employeeUnApply, getAllDigitalEmployeesV2, queryCatalogT
 import { deleteResource } from '@/pages/manager/service/resources';
 import { getDefaultByaiAgent } from '@/service/layout';
 import { IAgent, IAgentCache } from '@/typescript/agent';
-import { specialAgentType } from '@/constants/agent';
+import { agentTypeMap, specialAgentType } from '@/constants/agent';
 import { agentHandler } from '@/utils/agent';
 
 export type IState = {
@@ -124,9 +124,9 @@ export default {
       return agentList;
     },
     // 获取所有数字员工
-    *getAllDigitalEmployees(_: any, { call, put, select }: any): any {
+    *getAllDigitalEmployees(_: any, { call, put, select, all }: any): any {
       try {
-        const resp = yield call(getAllDigitalEmployeesV2, {
+        const baseParams = {
           terminals: ['ALL', 'PC', 'APP'],
           pageNum: 1,
           pageSize: 9999,
@@ -135,7 +135,14 @@ export default {
           orgFilters: [{ type: 'ALL' }],
           orderField: 'updateTime',
           orderBy: 'desc',
-        });
+        };
+        // discover 接口不传 agentType 时后端显式排掉 017(IndexMapper.xml 的 otherwise 分支)，
+        // 员工组只能单独再查一次。employeesList 是全站按 id 查员工的唯一查找表(输入框
+        // useDefaultAgentElement、DialogueCard、pcLayout 都查它)，缺了组就会兜底成「AI 助手」。
+        const [resp, groupResp] = yield all([
+          call(getAllDigitalEmployeesV2, baseParams),
+          call(getAllDigitalEmployeesV2, { ...baseParams, agentType: agentTypeMap.employeeGroup }),
+        ]);
         const { list } = resp || {};
 
         const cacheEmployeesList = yield select((state: any) => state.employees.employeesList);
@@ -143,7 +150,7 @@ export default {
         const employeesList: IAgentCache[] = [];
         const myAgentList: IAgentCache[] = [];
 
-        list.forEach((item: IAgent) => {
+        [...(list || []), ...(groupResp?.list || [])].forEach((item: IAgent) => {
           const { catalogId } = item;
 
           const res: any = agentHandler(item);

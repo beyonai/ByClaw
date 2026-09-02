@@ -139,6 +139,7 @@ describe("multi-agent lane metadata", () => {
       accountId: "default",
       language: "zh_CN",
       languageProvided: false,
+      authConnectorList: { dws: true, fws: false },
       extraPayload: { multi_agent: { ignored: true } },
     };
 
@@ -155,6 +156,10 @@ describe("multi-agent lane metadata", () => {
     expect(messages.map((message) => message.text)).toEqual([
       "自然派活",
       "自然派活",
+    ]);
+    expect(messages.map((message) => message.authConnectorList)).toEqual([
+      { dws: true, fws: false },
+      { dws: true, fws: false },
     ]);
     expect(messages[0].extraPayload).toMatchObject({
       agent_id: "100",

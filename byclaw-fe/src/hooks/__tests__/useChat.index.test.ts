@@ -15,12 +15,40 @@ jest.mock('@umijs/max', () => ({
   })),
 }));
 
-const mockSend = jest.fn((_text?: string, _payload?: any) => ({
-  promise: Promise.resolve({}),
-  cancel: jest.fn(),
-}));
+const mockSend = jest.fn((text?: string, payload?: any) => {
+  void text;
+  void payload;
+  return {
+    promise: Promise.resolve({}),
+    cancel: jest.fn(),
+  };
+});
 const mockUpdateMessage = jest.fn((msg: any) => msg);
 const mockWaitForSessionMessageLoaded = jest.fn(() => Promise.resolve());
+const mockReloadLatestMessageList = jest.fn(() => Promise.resolve());
+let mockMessageList: any[] = [];
+let mockReconnectHandler: (() => void) | undefined;
+let mockExtParamsBySessionId: Record<string, unknown> = {};
+let mockSessionList: any[] = [];
+let mockMessageLoadState = 'idle';
+const mockRetrySessionMessageLoad = jest.fn(() => Promise.resolve());
+
+jest.mock('@/utils/websocket', () => ({
+  __esModule: true,
+  default: {
+    onReconnect: (handler: () => void) => {
+      mockReconnectHandler = handler;
+      return () => {
+        if (mockReconnectHandler === handler) {
+          mockReconnectHandler = undefined;
+        }
+      };
+    },
+    onMessage: jest.fn(),
+    offMessage: jest.fn(),
+    sendMessageWhenReady: jest.fn(() => Promise.resolve()),
+  },
+}));
 
 jest.mock('../usePersistFn', () => ({
   __esModule: true,
@@ -38,15 +66,17 @@ jest.mock('../useSseSender/useSend', () => ({
 jest.mock('../useChat/useMessage', () => ({
   __esModule: true,
   default: jest.fn(() => ({
-    messageList: [],
+    messageList: mockMessageList,
     hasMore: false,
     deleteMessage: jest.fn(),
     setSessionId: jest.fn(),
     getMoreSessionMessage: jest.fn(),
     setMessageList: jest.fn(),
     updateMessage: mockUpdateMessage,
-    reloadLatestMessageList: jest.fn(),
+    reloadLatestMessageList: mockReloadLatestMessageList,
     waitForSessionMessageLoaded: mockWaitForSessionMessageLoaded,
+    getSessionMessageLoadState: jest.fn(() => mockMessageLoadState),
+    retrySessionMessageLoad: mockRetrySessionMessageLoad,
   })),
 }));
 
@@ -67,6 +97,7 @@ jest.mock('../useGlobal', () => ({
   __esModule: true,
   default: jest.fn(() => ({
     agentId: 'agent-1',
+    EventEmitter: { emit: jest.fn() },
   })),
 }));
 
@@ -86,6 +117,7 @@ import { useDispatch, useSelector } from '@umijs/max';
 import useAppStore from '@/models/common/useAppStore';
 import { getChatRunningSnapshot, getChatRunningStatus } from '@/service/message';
 import { chatSessionRuntimeManager } from '@/utils/chatSessionRuntimeManager';
+import { IMessageState, SSEMessageType } from '@/constants/message';
 import { clearChatRuntime } from '../useChat/chatRuntime';
 
 import useChat from '../useChat';
@@ -107,6 +139,12 @@ describe('hooks/useChat/index', () => {
     });
     mockUpdateMessage.mockImplementation((msg: any) => msg);
     mockWaitForSessionMessageLoaded.mockResolvedValue(undefined);
+    mockReloadLatestMessageList.mockResolvedValue(undefined);
+    mockMessageList = [];
+    mockReconnectHandler = undefined;
+    mockExtParamsBySessionId = {};
+    mockSessionList = [];
+    mockMessageLoadState = 'idle';
     mockGetChatRunningStatus.mockResolvedValue([]);
     mockGetChatRunningSnapshot.mockResolvedValue(null);
     mockUseDispatch.mockReturnValue(jest.fn());
@@ -119,7 +157,8 @@ describe('hooks/useChat/index', () => {
           },
         },
         session: {
-          extParamsBySessionId: {},
+          extParamsBySessionId: mockExtParamsBySessionId,
+          sessionList: mockSessionList,
         },
         employees: {
           defaultDigEmployeeId: '',
@@ -181,6 +220,239 @@ describe('hooks/useChat/index', () => {
       }),
       { isAssign: true }
     );
+  });
+
+  it('exposes the current session message loading state and retry action', async () => {
+    mockMessageLoadState = 'error';
+    const { result } = renderHook(() => useChat({ sessionId: 'child-1', addSession: jest.fn() } as any));
+
+    expect(result.current.sessionMessageLoadState).toBe('error');
+    await result.current.retrySessionMessageLoad();
+    expect(mockRetrySessionMessageLoad).toHaveBeenCalledWith('child-1');
+  });
+
+  it('clears a restored session when reconnect reconciliation finds no backend runtime', async () => {
+    chatSessionRuntimeManager.register({
+      clientRequestId: 'client-1',
+      sessionId: 's1',
+      traceId: 'trace-1',
+      restored: true,
+    });
+    mockGetChatRunningStatus.mockResolvedValue([]);
+
+    renderHook(() => useChat({ sessionId: 's1', addSession: jest.fn() } as any));
+
+    await act(async () => {
+      mockReconnectHandler?.();
+      await Promise.resolve();
+    });
+
+    expect(chatSessionRuntimeManager.isSessionRunning('s1')).toBe(false);
+    expect(mockReloadLatestMessageList).toHaveBeenCalled();
+  });
+
+  it('finishes loading from a terminal snapshot during reconnect reconciliation', async () => {
+    const answerMessage = {
+      messageId: 'answer-1',
+      msgId: 'answer_client-1',
+      messageState: IMessageState.Answer,
+      sessionId: 's1',
+    } as any;
+    mockMessageList = [answerMessage];
+    chatSessionRuntimeManager.register({
+      clientRequestId: 'client-1',
+      sessionId: 's1',
+      traceId: 'trace-1',
+      restored: true,
+    });
+    mockGetChatRunningStatus.mockResolvedValue([
+      {
+        sessionId: 's1',
+        running: true,
+        traceId: 'trace-1',
+        clientRequestId: 'client-1',
+        modelAnswerMessageId: 'answer-1',
+      },
+    ] as any);
+    mockGetChatRunningSnapshot.mockResolvedValue({
+      sessionId: 's1',
+      messageId: 'answer-1',
+      traceId: 'trace-1',
+      messageContent: 'finished answer',
+      running: false,
+      snapshotStreamId: '100-0',
+    } as any);
+
+    renderHook(() => useChat({ sessionId: 's1', addSession: jest.fn() } as any));
+
+    await act(async () => {
+      mockReconnectHandler?.();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(answerMessage.messageState).toBe(IMessageState.Done);
+    expect(chatSessionRuntimeManager.isSessionRunning('s1')).toBe(false);
+  });
+
+  it('restores a v2 running snapshot with its active thinking block open', async () => {
+    mockGetChatRunningStatus.mockResolvedValue([
+      {
+        sessionId: 's1',
+        running: true,
+        traceId: 'trace-1',
+        clientRequestId: 'client-1',
+        modelAnswerMessageId: 'answer-1',
+        userMessageId: 'query-1',
+      },
+    ] as any);
+    mockGetChatRunningSnapshot.mockResolvedValue({
+      sessionId: 's1',
+      messageId: 'answer-1',
+      traceId: 'trace-1',
+      metadata: JSON.stringify({ messageRenderVersion: 'v2' }),
+      inferLog: JSON.stringify([
+        {
+          seq: 3,
+          contentType: SSEMessageType.thinkText,
+          orderId: 'reasoning',
+          parentOrderId: '-1',
+          choices: [{ delta: { content: '思考中' } }],
+        },
+      ]),
+      messageStruct: JSON.stringify([]),
+      snapshotStreamId: '3-0',
+    } as any);
+
+    renderHook(() => useChat({ sessionId: 's1', addSession: jest.fn() } as any));
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockUpdateMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messageId: 'answer-1',
+        messageState: IMessageState.Answer,
+        thinkDone: false,
+        _v2NextSeq: 4,
+        _v2LastChannel: 'thinkList',
+      }),
+      { isAssign: true }
+    );
+  });
+
+  it('restores an external child projection without waiting for the parent chat runtime registry', async () => {
+    mockSessionList = [
+      {
+        sessionId: 'child',
+        parentSessionId: 100,
+        sessionExts: [{ extParamCode: 'external_session_id', extParamValue: 'worker-child-1' }],
+      },
+    ];
+    mockGetChatRunningSnapshot.mockResolvedValue({
+      sessionId: 'child',
+      messageId: 'answer-1',
+      messageContent: 'child result',
+      msgStatus: 0,
+      running: false,
+      snapshotStreamId: '200-0',
+    } as any);
+
+    renderHook(() => useChat({ sessionId: 'child', addSession: jest.fn() } as any));
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockGetChatRunningStatus).not.toHaveBeenCalled();
+    expect(mockGetChatRunningSnapshot).toHaveBeenCalledWith({
+      sessionId: 'child',
+      traceId: 'external-child-child',
+    });
+    expect(mockUpdateMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messageId: 'answer-1',
+        sessionId: 'child',
+        messageState: IMessageState.Done,
+        snapshotStreamId: '200-0',
+      }),
+      { isAssign: true, allowCreateSession: false }
+    );
+  });
+
+  it('does not let an older reconnect snapshot overwrite a newer external child projection', async () => {
+    mockSessionList = [
+      {
+        sessionId: 'child',
+        parentSessionId: 100,
+        sessionExts: [{ extParamCode: 'external_session_id', extParamValue: 'worker-child-1' }],
+      },
+    ];
+    mockGetChatRunningSnapshot
+      .mockResolvedValueOnce({
+        sessionId: 'child',
+        messageId: 'answer-1',
+        messageContent: 'newer',
+        msgStatus: 1,
+        running: true,
+        snapshotStreamId: '200-1',
+      } as any)
+      .mockResolvedValueOnce({
+        sessionId: 'child',
+        messageId: 'answer-1',
+        messageContent: 'older',
+        msgStatus: 1,
+        running: true,
+        snapshotStreamId: '200-0',
+      } as any);
+
+    renderHook(() => useChat({ sessionId: 'child', addSession: jest.fn() } as any));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      mockReconnectHandler?.();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockGetChatRunningSnapshot).toHaveBeenCalledTimes(2);
+    expect(mockUpdateMessage).toHaveBeenCalledTimes(1);
+    expect(mockUpdateMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ messageId: 'answer-1', snapshotStreamId: '200-1' }),
+      { isAssign: true, allowCreateSession: false }
+    );
+  });
+
+  it('reloads persisted child history when the reconnect snapshot is absent', async () => {
+    mockSessionList = [
+      {
+        sessionId: 'child',
+        parentSessionId: 100,
+        sessionExts: [{ extParamCode: 'external_session_id', extParamValue: 'worker-child-1' }],
+      },
+    ];
+    mockGetChatRunningSnapshot.mockResolvedValue(null);
+
+    renderHook(() => useChat({ sessionId: 'child', addSession: jest.fn() } as any));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockReloadLatestMessageList).toHaveBeenCalled();
+    expect(mockGetChatRunningStatus).not.toHaveBeenCalled();
   });
 
   it('opens the login modal and aborts when user is not logged in', async () => {
@@ -248,6 +520,50 @@ describe('hooks/useChat/index', () => {
 
     await expect(result.current.sendQuery({ queryQuestion: 'hello' })).resolves.toBe(false);
     expect(setUserCollectModalOpen).toHaveBeenCalledWith(true);
+  });
+
+  it('allows parent input while child work remains active when runtime explicitly permits it', async () => {
+    chatSessionRuntimeManager.applySessionRuntime({
+      sessionId: 's1',
+      traceId: 'trace-1',
+      status: 'running',
+      activeAgentCount: 1,
+      activeChildCount: 1,
+      waitingInteractionCount: 0,
+      rootActive: false,
+      acceptingInput: true,
+      revision: 1,
+      changedAt: 1000,
+    });
+    const { result } = renderHook(() => useChat({ sessionId: 's1', addSession: jest.fn() } as any));
+
+    expect(result.current.isSessionRunning).toBe(true);
+    expect(result.current.canAcceptInput).toBe(true);
+
+    await act(async () => {
+      await result.current.sendQuery({ queryQuestion: 'next task' });
+    });
+
+    expect(mockSend).toHaveBeenCalledTimes(1);
+  });
+
+  it('blocks parent input while the root runtime is active', async () => {
+    chatSessionRuntimeManager.applySessionRuntime({
+      sessionId: 's1',
+      traceId: 'trace-1',
+      status: 'running',
+      activeAgentCount: 1,
+      activeChildCount: 0,
+      waitingInteractionCount: 0,
+      rootActive: true,
+      acceptingInput: false,
+      revision: 1,
+      changedAt: 1000,
+    });
+    const { result } = renderHook(() => useChat({ sessionId: 's1', addSession: jest.fn() } as any));
+
+    await expect(result.current.sendQuery({ queryQuestion: 'blocked' })).resolves.toBe(false);
+    expect(mockSend).not.toHaveBeenCalled();
   });
 
   it('sends multi-agent lane metadata and creates one answer placeholder per lane', async () => {
@@ -370,6 +686,26 @@ describe('hooks/useChat/index', () => {
       agentId: '102',
       agentCode: 'agent-b',
       agentName: 'Agent B',
+    });
+  });
+
+  it('keeps the fixed debug employee instead of falling back to the global agent', async () => {
+    const { result } = renderHook(() =>
+      useChat({
+        sessionId: '',
+        fixedAgentId: '90001',
+        addSession: jest.fn(),
+      } as any)
+    );
+
+    await act(async () => {
+      await result.current.sendQuery({ queryQuestion: '调试数字员工组' });
+    });
+
+    expect(mockSend).toHaveBeenCalledTimes(1);
+    expect(mockSend.mock.calls[0]?.[1]).toMatchObject({
+      agentId: '90001',
+      agentCode: null,
     });
   });
 });

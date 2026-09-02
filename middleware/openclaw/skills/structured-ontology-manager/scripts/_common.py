@@ -108,7 +108,7 @@ async def _post_via_discovery(
     return body
 
 
-def _build_ontology_headers() -> dict[str, str]:
+def _build_ontology_headers(tenant_id: str | None = None) -> dict[str, str]:
     token = os.environ.get("BEYOND_TOKEN", "").strip()
     user_code = os.environ.get("USER_CODE", "").strip()
     headers: dict[str, str] = {"Content-Type": "application/json"}
@@ -116,6 +116,8 @@ def _build_ontology_headers() -> dict[str, str]:
         headers["Beyond-Token"] = token
     if user_code:
         headers["X-User-Code"] = user_code
+    if tenant_id and tenant_id.strip():
+        headers["X-Tenant-Id"] = tenant_id.strip()
     return headers
 
 
@@ -149,21 +151,25 @@ def get_ontology_api(path: str) -> Any:
     )
 
 
-async def _post_ontology_api_async(path: str, payload: dict[str, Any]) -> Any:
+async def _post_ontology_api_async(
+    path: str, payload: dict[str, Any], tenant_id: str | None = None
+) -> Any:
     api_path = f"/api/v1/ontology-manager{path}"
     return await _post_via_discovery(
-        _ontology_service_name(), api_path, payload, _build_ontology_headers()
+        _ontology_service_name(), api_path, payload, _build_ontology_headers(tenant_id)
     )
 
 
-def post_ontology_api(path: str, payload: dict[str, Any]) -> Any:
+def post_ontology_api(
+    path: str, payload: dict[str, Any], tenant_id: str | None = None
+) -> Any:
     """调用 ontology-manager POST 接口，自动注入 base_id。
 
     Args:
         path: API 路径（不含 /api/v1/ontology-manager 前缀），如 "/workspace/object/collect"
         payload: 请求体
     """
-    return _run_async_in_thread(_post_ontology_api_async(path, payload))
+    return _run_async_in_thread(_post_ontology_api_async(path, payload, tenant_id))
 
 
 def _run_async_in_thread(coro: Any) -> Any:
@@ -192,4 +198,3 @@ def _run_async_in_thread(coro: Any) -> Any:
 def stdout_json(data: Any) -> None:
     """向 stdout 输出 JSON 并 flush。"""
     print(json.dumps(data, ensure_ascii=False), flush=True)
-

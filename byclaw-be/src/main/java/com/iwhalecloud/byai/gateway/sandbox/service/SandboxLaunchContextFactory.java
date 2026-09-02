@@ -16,12 +16,16 @@ import org.springframework.stereotype.Service;
 import com.alibaba.fastjson.JSON;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.constants.resource.WorkerAgentType;
+import com.iwhalecloud.byai.common.discovery.ApplicationServiceEndpoint;
 import com.iwhalecloud.byai.common.feign.response.knowledge.ModelDto;
 import com.iwhalecloud.byai.common.jwt.JwtService;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.util.StringUtil;
+import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpec;
+import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpecRepository;
 import com.iwhalecloud.byai.manager.application.service.aimodel.ModelManagementApplicationService;
 import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
+import com.iwhalecloud.byai.manager.application.service.devloop.GitHubCredentialResolver;
 import com.iwhalecloud.byai.manager.application.service.user.UserPrivateParamApplicationService;
 import com.iwhalecloud.byai.manager.domain.aimodel.service.AiModelService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDigEmployeeService;
@@ -42,10 +46,15 @@ public class SandboxLaunchContextFactory {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(SandboxLaunchContextFactory.class);
 
+    private static final String BYCLAW_DSH_SANDBOX_TYPE = "byclaw-dsh";
+
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     @Value("${sandbox.model_provider_name:iwhalecloud}")
     private String modelProviderName;
+
+    @Autowired
+    private ApplicationServiceEndpoint applicationServiceEndpoint;
 
     @Lazy
     @Autowired
@@ -58,6 +67,10 @@ public class SandboxLaunchContextFactory {
     @Lazy
     @Autowired
     private ByaiSystemConfigService byaiSystemConfigService;
+
+    @Lazy
+    @Autowired
+    private SandboxServiceSpecRepository sandboxServiceSpecRepository;
 
     @Lazy
     @Autowired
@@ -86,6 +99,10 @@ public class SandboxLaunchContextFactory {
     @Lazy
     @Autowired
     private StringRedisTemplate stringRedisTemplate;
+
+    @Lazy
+    @Autowired
+    private GitHubCredentialResolver githubCredentialResolver;
 
     /**
      * 根据 resourceId 解析沙箱路由。
@@ -125,6 +142,11 @@ public class SandboxLaunchContextFactory {
                 return new SandboxLaunchRouting(SandboxLaunchRouting.BYCLAW_CODE_AGENT_SANDBOX_TYPE,
                     SandboxLaunchRouting.DEFAULT_CODE_AGENT_RESOURCE_ID);
             }
+            if (StringUtils.startsWith(workerAgentType, WorkerAgentType.HARNESS.getCode())) {
+                LOGGER.info("资源ID：{} workerAgentType 为 HARNESS，使用 byclaw-dsh 沙箱", resourceId);
+                return new SandboxLaunchRouting(BYCLAW_DSH_SANDBOX_TYPE,
+                    SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+            }
         }
         catch (Exception e) {
             LOGGER.warn("查询资源 workerAgentType 异常，降级为默认沙箱类型，资源ID：{}，原因：{}", resourceId, e.getMessage());
@@ -135,8 +157,13 @@ public class SandboxLaunchContextFactory {
     }
 
     public SandboxLaunchContext buildContext(String userCode, Long resourceId, String sandboxType) {
+        return buildContext(userCode, resourceId, sandboxType, null);
+    }
+
+    public SandboxLaunchContext buildContext(String userCode, Long resourceId, String sandboxType, String profileKey) {
         String gatewayToken = generateGatewayToken();
-        Map<String, String> envs = buildSandboxEnvs(userCode, queryDigEmployee(resourceId), resourceId, gatewayToken);
+        Map<String, String> envs = buildSandboxEnvs(userCode, queryDigEmployee(resourceId), resourceId, sandboxType,
+            profileKey, gatewayToken);
         applySandboxAgentTypeEnv(envs, sandboxType, userCode);
         return new SandboxLaunchContext(sandboxType, envs, sandboxUserInfoFactory.build(userCode), gatewayToken);
     }
@@ -204,16 +231,26 @@ public class SandboxLaunchContextFactory {
     }
 
     private Map<String, String> buildSandboxEnvs(String userCode, SsResExtDigEmployee digEmployee, Long resourceId,
-        String gatewayToken) {
+        String sandboxType, String profileKey, String gatewayToken) {
         Map<String, String> envs = new HashMap<>(8);
 
         loadEnvFile(envs);
 
+        // 系统配置只对 SandboxServiceSpec.env 中声明的 key 生效，避免把整张配置表注入容器。
+        loadSandboxSystemConfigEnvs(envs, sandboxType, profileKey);
+
         // 加载个人设置的 env（优先级高于系统环境变量）
         loadPersonalEnvSettings(envs, userCode);
 
+        // GitHub 连接器是首选凭据来源；解析器内部仍保留旧 GH_TOKEN 个人参数回退。
+        // GH_TOKEN 这里只作为 SandboxServiceSpec 模板上下文，最终是否以 GH_TOKEN 或 BY_GH_TOKEN 注入
+        // 由不同 sandbox profile 的 spec.env 决定。
+        loadGitHubCredential(envs, userCode);
+
         envs.put("gateway_token", gatewayToken);
         envs.put("OPENCLAW_GATEWAY_TOKEN", gatewayToken);
+        // 协议、Host 和端口取自当前注册实例，上下文路径由统一端点组件补充，不写入注册信息。
+        envs.put("BYAI_SERVICE_BASE_URL", applicationServiceEndpoint.getBaseUrl());
         applyCurrentUserAuthEnv(envs, userCode);
 
         if (digEmployee == null || StringUtils.isBlank(digEmployee.getPrologue())) {
@@ -264,6 +301,32 @@ public class SandboxLaunchContextFactory {
         }
 
         return envs;
+    }
+
+    private void loadSandboxSystemConfigEnvs(Map<String, String> envs, String sandboxType, String profileKey) {
+        if (envs == null || StringUtils.isBlank(sandboxType) || sandboxServiceSpecRepository == null
+            || byaiSystemConfigService == null) {
+            return;
+        }
+
+        try {
+            SandboxServiceSpec spec = StringUtils.isNotBlank(profileKey)
+                ? sandboxServiceSpecRepository.findByServiceKeyAndProfile(sandboxType, profileKey).orElse(null)
+                : sandboxServiceSpecRepository.findByServiceKey(sandboxType).orElse(null);
+            if (spec == null || spec.getEnv() == null || spec.getEnv().isEmpty()) {
+                return;
+            }
+
+            Map<String, String> configValues = byaiSystemConfigService
+                .getDcSystemConfigValuesByCodes(spec.getEnv().keySet());
+            configValues.forEach(envs::put);
+            LOGGER.info("从 byai_system_config 加载沙箱环境变量完成，sandboxType={}，profileKey={}，envCount={}，envKeys={}",
+                sandboxType, profileKey, configValues.size(), spec.getEnv().keySet());
+        }
+        catch (Exception e) {
+            LOGGER.warn("加载沙箱系统环境变量异常，sandboxType={}，profileKey={}，原因：{}", sandboxType, profileKey,
+                e.getMessage());
+        }
     }
 
     /**
@@ -332,6 +395,21 @@ public class SandboxLaunchContextFactory {
         }
     }
 
+    private void loadGitHubCredential(Map<String, String> envs, String userCode) {
+        if (githubCredentialResolver == null || StringUtils.isBlank(userCode)) {
+            return;
+        }
+        try {
+            String token = githubCredentialResolver.resolveByUserCode(userCode);
+            if (StringUtils.isNotBlank(token)) {
+                envs.put("GH_TOKEN", token);
+            }
+        }
+        catch (RuntimeException e) {
+            LOGGER.warn("解析用户 GitHub 连接器凭据异常，userCode={}，原因：{}", userCode, e.getMessage());
+        }
+    }
+
     private void loadEnvFile(Map<String, String> envs) {
         System.getenv().forEach((key, value) -> {
             if (StringUtils.isNotBlank(value)) {
@@ -345,7 +423,8 @@ public class SandboxLaunchContextFactory {
                 envs.put(k, v);
             }
         });
-        LOGGER.debug("从环境变量和系统属性加载了沙箱环境变量：{}", envs);
+        LOGGER.debug("从环境变量和系统属性加载沙箱环境变量完成，envCount={}，envKeys={}",
+            envs.size(), envs.keySet());
     }
 
     private Long extractModelId(PrologueDto prologueDto) {

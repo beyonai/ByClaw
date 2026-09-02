@@ -1,6 +1,6 @@
-import React, { useCallback, useEffect } from 'react';
+import React, { useCallback, useEffect, useMemo } from 'react';
 // @ts-ignore
-import { DownOutlined, UpOutlined } from '@ant-design/icons';
+import { DownOutlined, RightOutlined } from '@ant-design/icons';
 // @ts-ignore
 import ThinkNewRootTitle from '@/components/MessagesComp/Think/ThinkRootTitle/components/ThinkNewRootTitle';
 import { IMessageState } from '@/constants/message';
@@ -28,11 +28,13 @@ function ThinkingProcessRender(props: IProps) {
   const { EventEmitter } = useGlobal();
 
   const [myThinkCollapse, setMyThinkCollapse] = React.useState(thinkCollapse);
-  const [transformedList, setTransformedList] = React.useState<TreeNode[]>([]);
-
-  const transformedListRef = React.useRef<string>('');
-
   const isThinkDone = ![IMessageState.Answer, IMessageState.Query].includes(messageState) || isHistoryMsg;
+  const transformedList = useMemo(() => {
+    if (!thinkList || isEmpty(thinkList)) {
+      return [];
+    }
+    return transformList(thinkList, !!isThinkDone, messageId, msg);
+  }, [thinkList, isThinkDone, messageId, msg]);
 
   const updateMessageList = useCallback(
     (path: string, val: any) => {
@@ -49,26 +51,6 @@ function ThinkingProcessRender(props: IProps) {
     },
     [updateMessageList]
   );
-
-  useEffect(() => {
-    if (!thinkList || isEmpty(thinkList)) {
-      return; // 返回空数组或其他默认值
-    }
-
-    const l = transformList(thinkList, !!isThinkDone, messageId);
-
-    let lStr = '';
-    try {
-      lStr = JSON.stringify(l);
-    } catch (e) {
-      console.error(e);
-    }
-
-    if (lStr !== transformedListRef.current) {
-      transformedListRef.current = lStr;
-      setTransformedList(l);
-    }
-  }, [JSON.stringify(thinkList), isThinkDone, messageId]);
 
   useEffect(() => {
     setMyThinkCollapse(isThinkDone);
@@ -97,12 +79,12 @@ function ThinkingProcessRender(props: IProps) {
               {intl.formatMessage({ id: 'thinkingProcess.done' })}
             </span>
             {!myThinkCollapse && (
-              <UpOutlined
+              <DownOutlined
                 style={{ fontSize: '12px', marginLeft: '12px', color: 'var(--beyond-color-text-tertiary)' }}
               />
             )}
             {myThinkCollapse && (
-              <DownOutlined
+              <RightOutlined
                 style={{ fontSize: '12px', marginLeft: '12px', color: 'var(--beyond-color-text-tertiary)' }}
               />
             )}

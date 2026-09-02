@@ -1,13 +1,21 @@
 import {
   buildAutoDebugRequestText,
+  buildDebugPayload,
+  dispatchModelActionWithResult,
   buildLlmHeaders,
+  buildModelUpsertPayload,
   buildReasoningConfigPayload,
   buildRerankHeaders,
   extractModelId,
   getDefaultFormValues,
   getDefaultLlmDebugSuffix,
+  getModelDebugDispatchTimeoutMs,
   getApiEndpointPlaceholder,
+  getModelTypeSwitchFormValues,
+  getModelTypeTransitionFormValues,
+  hasImageGenerationPrompt,
   headersListToObject,
+  isExampleApiEndpointPlaceholder,
   joinUrl,
   normalizeModelType,
 } from '../modelFormUtils';
@@ -21,8 +29,165 @@ describe('manager/pages/ModelMgr/components/modelFormUtils', () => {
 
     it('trims custom string values and falls back to LLM', () => {
       expect(normalizeModelType(' EMBEDDING ')).toBe('EMBEDDING');
+      expect(normalizeModelType(' IMAGE_GENERATION ')).toBe('IMAGE_GENERATION');
       expect(normalizeModelType('')).toBe('LLM');
       expect(normalizeModelType(null)).toBe('LLM');
+    });
+  });
+
+  describe('buildDebugPayload', () => {
+    it('builds the MiniMax image generation debug contract with safe defaults', () => {
+      expect(
+        buildDebugPayload({
+          modelType: 'IMAGE_GENERATION',
+          modelCode: 'image-01',
+          prompt: 'whale',
+          apiToken: 'test-api-token',
+        })
+      ).toEqual({
+        input: {
+          providerName: 'MINIMAX',
+          modelProtocol: 'MINIMAX_IMAGE',
+          url: 'https://api.minimaxi.com/v1/image_generation',
+          headers: { Authorization: 'Bearer test-api-token' },
+          param: {
+            model: 'image-01',
+            prompt: 'whale',
+            aspect_ratio: '1:1',
+            response_format: 'url',
+            n: 1,
+          },
+        },
+      });
+    });
+
+    it('keeps supported image options in the provider payload', () => {
+      expect(
+        buildDebugPayload({
+          modelType: 'IMAGE_GENERATION',
+          modelCode: 'image-01',
+          prompt: 'blue whale',
+          aspectRatio: '16:9',
+          imageCount: 2,
+          responseFormat: 'base64',
+          promptOptimizer: false,
+          seed: 42,
+        }).input.param
+      ).toEqual({
+        model: 'image-01',
+        prompt: 'blue whale',
+        aspect_ratio: '16:9',
+        response_format: 'base64',
+        n: 2,
+        prompt_optimizer: false,
+        seed: 42,
+      });
+    });
+  });
+
+  describe('buildModelUpsertPayload', () => {
+    it('removes transient image debug fields before saving model metadata', () => {
+      expect(
+        buildModelUpsertPayload({
+          values: {
+            displayName: 'MiniMax image',
+            modelType: 'IMAGE_GENERATION',
+            modelCode: 'image-01',
+            prompt: 'whale',
+            aspectRatio: '1:1',
+            imageCount: 1,
+            responseFormat: 'url',
+            promptOptimizer: true,
+            seed: 42,
+          },
+          type: 'edit',
+          dataId: 'image-model-1',
+        })
+      ).toEqual({
+        id: 'image-model-1',
+        displayName: 'MiniMax image',
+        modelType: 'IMAGE_GENERATION',
+        modelCode: 'image-01',
+        reasoningConfig: {
+          enabled: false,
+          defaultLevel: 'off',
+          capability: 'unsupported',
+          compatFormat: 'auto',
+        },
+      });
+    });
+  });
+
+  describe('getModelTypeSwitchFormValues', () => {
+    it.each(['LLM', 'RERANK', 'EMBEDDING'])('clears MiniMax-only values when switching to %s', (modelType) => {
+      const values = getModelTypeSwitchFormValues(modelType);
+
+      expect(values).toMatchObject({ modelType, modelCode: '' });
+      expect(values.providerName).not.toBe('MINIMAX');
+      expect(values.modelProtocol).not.toBe('MINIMAX_IMAGE');
+      expect(values.apiEndpoint).not.toBe('https://api.minimaxi.com/v1/image_generation');
+      expect(values.prompt).toBeUndefined();
+      expect(values.apiToken).toBe('');
+      expect(values.headers).toEqual([{ key: '', value: '' }]);
+    });
+
+    it('restores MiniMax defaults when switching back to image generation', () => {
+      expect(getModelTypeSwitchFormValues('IMAGE_GENERATION')).toMatchObject({
+        modelType: 'IMAGE_GENERATION',
+        providerName: 'MINIMAX',
+        modelProtocol: 'MINIMAX_IMAGE',
+        apiEndpoint: 'https://api.minimaxi.com/v1/image_generation',
+        modelCode: 'image-01',
+        apiToken: '',
+        headers: [{ key: '', value: '' }],
+      });
+    });
+  });
+
+  describe('getModelTypeTransitionFormValues', () => {
+    it('preserves existing configuration between non-image model types', () => {
+      expect(getModelTypeTransitionFormValues('LLM', 'RERANK')).toEqual({ modelType: 'RERANK' });
+    });
+
+    it('clears image-only configuration when leaving image generation', () => {
+      expect(getModelTypeTransitionFormValues('IMAGE_GENERATION', 'LLM')).toEqual(getModelTypeSwitchFormValues('LLM'));
+    });
+
+    it('applies MiniMax defaults when entering image generation', () => {
+      expect(getModelTypeTransitionFormValues('EMBEDDING', 'IMAGE_GENERATION')).toEqual(
+        getModelTypeSwitchFormValues('IMAGE_GENERATION')
+      );
+    });
+  });
+
+  describe('hasImageGenerationPrompt', () => {
+    it('accepts only a non-blank prompt in the image debug JSON contract', () => {
+      expect(hasImageGenerationPrompt('{"param":{"prompt":" whale "}}')).toBe(true);
+      expect(hasImageGenerationPrompt('{"param":{"prompt":"   "}}')).toBe(false);
+      expect(hasImageGenerationPrompt('{"param":{}}')).toBe(false);
+      expect(hasImageGenerationPrompt('not-json')).toBe(false);
+    });
+  });
+
+  describe('image debug dispatch timeout', () => {
+    beforeEach(() => {
+      jest.useFakeTimers();
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it('waits longer than the backend 120 second timeout before rejecting', async () => {
+      const dispatch = jest.fn();
+      const timeoutMs = getModelDebugDispatchTimeoutMs('IMAGE_GENERATION');
+      const result = dispatchModelActionWithResult(dispatch, 'modelMgr/debugModelImageGeneration', {}, timeoutMs);
+      const rejection = expect(result).rejects.toThrow('dispatch timeout');
+
+      expect(timeoutMs).toBe(130000);
+      jest.advanceTimersByTime(130000);
+
+      await rejection;
     });
   });
 
@@ -121,6 +286,10 @@ describe('manager/pages/ModelMgr/components/modelFormUtils', () => {
     it('defaults modelProtocol to OpenAI', () => {
       expect(getDefaultFormValues().modelProtocol).toBe('OpenAI');
     });
+
+    it('leaves apiEndpoint empty so protocol placeholder can show', () => {
+      expect(getDefaultFormValues().apiEndpoint).toBe('');
+    });
   });
 
   describe('getDefaultLlmDebugSuffix', () => {
@@ -143,9 +312,56 @@ describe('manager/pages/ModelMgr/components/modelFormUtils', () => {
       expect(getApiEndpointPlaceholder('OpenAI')).toBe('https://api.example.com/v1');
       expect(getApiEndpointPlaceholder(undefined)).toBe('https://api.example.com/v1');
     });
+
+    it('returns the MiniMax image generation endpoint for the image protocol', () => {
+      expect(getApiEndpointPlaceholder('MINIMAX_IMAGE')).toBe('https://api.minimaxi.com/v1/image_generation');
+    });
+  });
+
+  describe('isExampleApiEndpointPlaceholder', () => {
+    it('treats blank and protocol sample urls as placeholders', () => {
+      expect(isExampleApiEndpointPlaceholder('')).toBe(true);
+      expect(isExampleApiEndpointPlaceholder('https://api.example.com/v1')).toBe(true);
+      expect(isExampleApiEndpointPlaceholder('https://api.example.com/v1/')).toBe(true);
+      expect(isExampleApiEndpointPlaceholder('https://api.example.com/anthropic')).toBe(true);
+      expect(isExampleApiEndpointPlaceholder('https://api.anthropic.com')).toBe(false);
+    });
   });
 
   describe('buildAutoDebugRequestText', () => {
+    it('serializes the MiniMax image generation input consumed by the backend debug route', () => {
+      expect(
+        JSON.parse(
+          buildAutoDebugRequestText({
+            formValues: {
+              modelType: 'IMAGE_GENERATION',
+              providerName: 'MINIMAX',
+              modelProtocol: 'MINIMAX_IMAGE',
+              apiEndpoint: 'https://api.minimaxi.com/v1/image_generation',
+              apiToken: 'test-api-token',
+              modelCode: 'image-01',
+              prompt: 'whale',
+              aspectRatio: '1:1',
+              imageCount: 1,
+              responseFormat: 'url',
+            },
+          })
+        )
+      ).toEqual({
+        providerName: 'MINIMAX',
+        modelProtocol: 'MINIMAX_IMAGE',
+        url: 'https://api.minimaxi.com/v1/image_generation',
+        headers: { Authorization: 'Bearer test-api-token' },
+        param: {
+          model: 'image-01',
+          prompt: 'whale',
+          aspect_ratio: '1:1',
+          response_format: 'url',
+          n: 1,
+        },
+      });
+    });
+
     it('builds default LLM debug payload', () => {
       const result = JSON.parse(
         buildAutoDebugRequestText({
@@ -155,6 +371,7 @@ describe('manager/pages/ModelMgr/components/modelFormUtils', () => {
             apiToken: 'token-1',
             modelCode: 'gpt-4o',
             headers: [{ key: 'X-App', value: 'manager' }],
+            maxTokens: 65536,
           },
           defaultUserMessage: 'hello',
         })
@@ -167,12 +384,32 @@ describe('manager/pages/ModelMgr/components/modelFormUtils', () => {
           Authorization: 'Bearer token-1',
         },
         model: 'gpt-4o',
+        max_tokens: 65536,
         messages: [{ role: 'user', content: 'hello' }],
         temperature: 0.1,
         stream: true,
         enable_thinking: false,
         chat_template_kwargs: { enable_thinking: false },
       });
+    });
+
+    it('maps form maxTokens into LLM debug max_tokens', () => {
+      const result = JSON.parse(
+        buildAutoDebugRequestText({
+          formValues: {
+            modelType: 'LLM',
+            modelProtocol: 'Anthropic',
+            apiEndpoint: 'https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic',
+            modelCode: 'glm-5.2',
+            headers: [],
+            maxTokens: 1024,
+          },
+          defaultUserMessage: '今天天气如何',
+        })
+      );
+
+      expect(result.max_tokens).toBe(1024);
+      expect(result.url).toBe('https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic/v1/messages');
     });
 
     it('preserves previous llm suffix, messages and extra keys when not switching type', () => {
@@ -184,6 +421,7 @@ describe('manager/pages/ModelMgr/components/modelFormUtils', () => {
             apiToken: '',
             modelCode: 'gpt-4o-mini',
             headers: [],
+            maxTokens: 65536,
           },
           prevText: JSON.stringify({
             url: 'https://api.example.com/v2/responses',
@@ -191,6 +429,7 @@ describe('manager/pages/ModelMgr/components/modelFormUtils', () => {
             messages: [{ role: 'assistant', content: 'cached' }],
             temperature: 0.5,
             stream: false,
+            max_tokens: 2048,
             customFlag: true,
           }),
           changedKeys: ['apiEndpoint'],
@@ -203,6 +442,45 @@ describe('manager/pages/ModelMgr/components/modelFormUtils', () => {
       expect(result.messages).toEqual([{ role: 'assistant', content: 'cached' }]);
       expect(result.temperature).toBe(0.5);
       expect(result.stream).toBe(false);
+      expect(result.max_tokens).toBe(2048);
+    });
+
+    it('refreshes max_tokens when form maxTokens changes', () => {
+      const result = JSON.parse(
+        buildAutoDebugRequestText({
+          formValues: {
+            modelType: 'LLM',
+            apiEndpoint: 'https://api.example.com/v1',
+            modelCode: 'gpt-4o',
+            headers: [],
+            maxTokens: 4096,
+          },
+          prevText: JSON.stringify({
+            url: 'https://api.example.com/v1/chat/completions',
+            max_tokens: 1024,
+            messages: [{ role: 'user', content: 'hello' }],
+          }),
+          changedKeys: ['maxTokens'],
+        })
+      );
+
+      expect(result.max_tokens).toBe(4096);
+    });
+
+    it('omits max_tokens when Max Tokens is unset', () => {
+      const result = JSON.parse(
+        buildAutoDebugRequestText({
+          formValues: {
+            modelType: 'LLM',
+            apiEndpoint: 'https://api.example.com/v1',
+            modelCode: 'gpt-4o',
+            headers: [],
+          },
+          defaultUserMessage: 'hello',
+        })
+      );
+
+      expect(result.max_tokens).toBeUndefined();
     });
 
     it('uses anthropic suffix when modelProtocol is Anthropic', () => {
@@ -214,12 +492,14 @@ describe('manager/pages/ModelMgr/components/modelFormUtils', () => {
             apiEndpoint: 'https://api.anthropic.com',
             modelCode: 'claude-3-5-sonnet',
             headers: [],
+            maxTokens: 1024,
           },
           defaultUserMessage: 'hello',
         })
       );
 
       expect(result.url).toBe('https://api.anthropic.com/v1/messages');
+      expect(result.max_tokens).toBe(1024);
     });
 
     it('adds reasoning effort when DeepSeek thinking is enabled', () => {

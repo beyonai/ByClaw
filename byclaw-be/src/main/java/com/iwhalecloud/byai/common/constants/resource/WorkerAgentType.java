@@ -13,10 +13,12 @@ import lombok.RequiredArgsConstructor;
 @Getter
 public enum WorkerAgentType {
 
+    BY_SUPER("BY_SUPER", "超级助手"),
     BYCLAW_EXE("BYCLAW_EXE", "openclaw"),
     BYCLAW_DATA("BYCLAW_DATA", "datacloud"),
     BYCLAW_QA("BYCLAW_QA", "搜问"),
     BYCLAW_CODE("BYCLAW_CODE", "编码"),
+    HARNESS("HARNESS", "Harness"),
     DEBUG("DEBUG", "调试的woker"),
     NONE("NONE", "API、SSE等直接调用的worker");
 

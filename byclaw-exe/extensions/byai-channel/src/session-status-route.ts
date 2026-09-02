@@ -9,7 +9,7 @@ import {
   resolveByaiAgentIdFromSessionKey,
   resolveByaiSessionKey,
   resolveSdkTargetAgentId,
-} from "./session-key.js";
+} from "../../shared/src/session-key.js";
 
 const ROUTE_PATH = "/plugins/byai-channel/session-status";
 

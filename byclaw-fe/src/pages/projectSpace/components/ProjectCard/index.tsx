@@ -1,7 +1,7 @@
-import { Card, Tag } from 'antd';
-import { FolderOpenOutlined } from '@ant-design/icons';
+import { Card } from 'antd';
+import { ShareAltOutlined } from '@ant-design/icons';
+import { useIntl } from '@umijs/max';
 import classNames from 'classnames';
-import { PROJECT_TYPE_LABEL } from '../../constants';
 import type { ProjectSpace } from '../../types';
 import styles from '../../index.module.less';
 
@@ -12,6 +12,8 @@ interface Props {
 }
 
 const ProjectCard: React.FC<Props> = ({ project, active, onSelect }) => {
+  const intl = useIntl();
+
   return (
     <Card
       hoverable
@@ -20,18 +22,23 @@ const ProjectCard: React.FC<Props> = ({ project, active, onSelect }) => {
     >
       <div className={styles.projectCardHeader}>
         <span className={styles.projectIcon}>
-          <FolderOpenOutlined />
+          <ShareAltOutlined />
         </span>
-        <Tag bordered={false} color={project.projectType === 'develop' ? 'purple' : 'blue'}>
-          {PROJECT_TYPE_LABEL[project.projectType]}
-        </Tag>
       </div>
       <div className={styles.projectName}>{project.projectName}</div>
-      <div className={styles.projectDesc}>{project.description || '暂无项目描述'}</div>
+      <div className={styles.projectDesc}>
+        {project.description || intl.formatMessage({ id: 'projectSpace.projectCard.emptyDescription' })}
+      </div>
       <div className={styles.projectMeta}>
-        <span>{project.sessionCount || 0} 会话</span>
-        <span>{project.taskCount || 0} 任务</span>
-        <span>{project.fileCount || 0} 文件</span>
+        <span>
+          {intl.formatMessage({ id: 'projectSpace.projectCard.sessionCount' }, { count: project.sessionCount || 0 })}
+        </span>
+        <span>
+          {intl.formatMessage({ id: 'projectSpace.projectCard.taskCount' }, { count: project.taskCount || 0 })}
+        </span>
+        <span>
+          {intl.formatMessage({ id: 'projectSpace.projectCard.fileCount' }, { count: project.fileCount || 0 })}
+        </span>
       </div>
     </Card>
   );

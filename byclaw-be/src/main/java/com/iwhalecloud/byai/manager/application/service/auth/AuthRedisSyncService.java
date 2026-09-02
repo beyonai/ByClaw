@@ -7,6 +7,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
+
+import com.iwhalecloud.byai.manager.domain.event.user.UserOrganizationChangedEvent;
 
 import java.util.Collection;
 import java.util.Map;
@@ -23,6 +27,8 @@ import java.util.Set;
 public class AuthRedisSyncService {
 
     private static final Logger logger = LoggerFactory.getLogger(AuthRedisSyncService.class);
+
+    private static final String USER_ORGANIZATION_CHANGED_HINT = "USER_ORGANIZATION_CHANGED";
 
 
     @Autowired
@@ -113,6 +119,79 @@ public class AuthRedisSyncService {
         } catch (Exception e) {
             logger.error("授权变更用户权限异步同步失败，变更类型：{}，错误：{}", hint, e.getMessage());
         }
+    }
+
+    /**
+     * 用户组织关系变化后重新计算其继承得到的资源权限。
+     */
+    @Async(AuthRedisSyncAsyncConfig.AUTH_REDIS_SYNC_EXECUTOR)
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
+    public void handleUserOrganizationChanged(UserOrganizationChangedEvent event) {
+        if (event == null || event.getUserIds().isEmpty()) {
+            return;
+        }
+        asyncSyncAuthChangedUsers(event.getUserIds(), USER_ORGANIZATION_CHANGED_HINT);
+        asyncSyncManageAuthChangedUsers(event.getUserIds(), USER_ORGANIZATION_CHANGED_HINT);
+    }
+
+    // -------------------------------------------------------------------------
+    // 管理权限 Redis 异步同步（与使用权同步完全对称）
+    // -------------------------------------------------------------------------
+
+    /**
+     * 异步同步单个用户的管理权限到 Redis。
+     * 同时根据全局管理角色判断写入/清除 USER:IS_GLOBAL_RESOURCE_MANAGER:{userId} 标记 key。
+     */
+    @Async(AuthRedisSyncAsyncConfig.AUTH_REDIS_SYNC_EXECUTOR)
+    public void asyncSyncUserManageAuthToRedis(Long userId) {
+        if (userId == null) {
+            return;
+        }
+        try {
+            Map<String, String> manageMap = authApplicationService.buildUserManageResources(userId);
+            authRedisApplicationService.writeUserManageAuth(userId, manageMap);
+            if (authApplicationService.isGlobalResourceManagerByUserId(userId)) {
+                authRedisApplicationService.markGlobalResourceManager(userId);
+            }
+            else {
+                authRedisApplicationService.clearGlobalResourceManagerMark(userId);
+            }
+            logger.debug("同步用户{}管理权限到Redis完成，资源数量：{}", userId, manageMap.size());
+        }
+        catch (Exception e) {
+            logger.error("同步用户{}管理权限到Redis失败：{}", userId, e.getMessage());
+        }
+    }
+
+    /**
+     * 异步批量同步涉及授权变更的用户管理权限。
+     * 与 asyncSyncAuthChangedUsers 对称，在授权写入/组织关系变更后紧随其后调用。
+     *
+     * @param userIds 用户 ID 集合
+     * @param hint    变更提示信息
+     */
+    @Async(AuthRedisSyncAsyncConfig.AUTH_REDIS_SYNC_EXECUTOR)
+    public void asyncSyncManageAuthChangedUsers(Set<Long> userIds, String hint) {
+        if (userIds == null || userIds.isEmpty()) {
+            return;
+        }
+        logger.info("开始异步同步管理权限变更用户，变更类型：{}，涉及用户数：{}", hint, userIds.size());
+        long startTime = System.currentTimeMillis();
+        int successCount = 0;
+        int failCount = 0;
+        for (Long userId : userIds) {
+            try {
+                asyncSyncUserManageAuthToRedis(userId);
+                successCount++;
+            }
+            catch (Exception e) {
+                failCount++;
+                logger.error("异步同步用户{}管理权限到Redis失败：{}", userId, e.getMessage());
+            }
+        }
+        long costTime = System.currentTimeMillis() - startTime;
+        logger.info("管理权限变更同步完成，变更类型：{}，总数：{}，成功：{}，失败：{}，耗时：{}ms",
+            hint, userIds.size(), successCount, failCount, costTime);
     }
 
 }

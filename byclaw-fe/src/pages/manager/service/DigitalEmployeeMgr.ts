@@ -24,6 +24,14 @@ export async function selectDigitalEmployeeByQo(params: any) {
   return POST('/byaiService/digitalEmployeeController/selectDigitalEmployeeByQo', { ...params });
 }
 
+export async function queryEmployeeGroupMemberCandidates(params: any, cancelToken?: AbortController) {
+  return POST(
+    '/byaiService/digitalEmployeeController/queryEmployeeGroupMemberCandidates',
+    { ...params },
+    { cancelToken }
+  );
+}
+
 export async function createDigitalEmployee(params: any) {
   return POST('/byaiService/digitalEmployeeController/createDigitalEmployee', withResourceImplDefaults(params));
 }

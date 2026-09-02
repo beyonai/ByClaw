@@ -1,4 +1,4 @@
-import { uploadImage, uploadFiles, downloadResourceFile } from '../file';
+import { downloadResourceFile, uploadFiles, uploadImage } from '../file';
 
 // Mock the request module
 jest.mock('@/service/common/request', () => ({

@@ -3,6 +3,7 @@ import { message } from 'antd';
 import { getIntl } from '@umijs/max';
 import {
   debugModelEmbedding,
+  debugModelImageGeneration,
   debugModelNonStream,
   debugModelStream,
   completeAllModelConfig,
@@ -27,6 +28,16 @@ export const getErrorText = (error) => {
   if (typeof error === 'string') return error;
   return error?.msg || error?.message || getIntl().formatMessage({ id: 'modelMgr.error.requestFail' });
 };
+
+export const isRequestCanceled = (error, signal) =>
+  Boolean(
+    signal?.aborted ||
+      error?.code === 'ERR_CANCELED' ||
+      error?.code === 'ABORT_ERR' ||
+      error?.name === 'CanceledError' ||
+      error?.name === 'AbortError' ||
+      error?.__CANCEL__
+  );
 
 export default {
   namespace: 'modelMgr',
@@ -192,6 +203,30 @@ export default {
       } catch (error) {
         const err = { msg: getErrorText(error) };
         message.error(err.msg);
+        fail?.(err);
+      }
+    },
+    *debugModelImageGeneration({ payload, success, fail }, { call }) {
+      try {
+        const response = unwrapResponse(yield call(debugModelImageGeneration, payload));
+        if (response.code === 0) {
+          const result = response.data ?? response;
+          success?.({
+            output: typeof result === 'string' ? result : JSON.stringify(result, null, 2),
+          });
+        } else {
+          if (!payload?.signal?.aborted) {
+            message.error(
+              response?.msg || getIntl().formatMessage({ id: 'modelMgr.error.debugModelImageGenerationFail' })
+            );
+          }
+          fail?.(response || {});
+        }
+      } catch (error) {
+        const err = { msg: getErrorText(error) };
+        if (!isRequestCanceled(error, payload?.signal)) {
+          message.error(err.msg);
+        }
         fail?.(err);
       }
     },

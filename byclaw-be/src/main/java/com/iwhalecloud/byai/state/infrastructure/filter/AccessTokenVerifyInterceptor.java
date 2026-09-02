@@ -44,7 +44,30 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
 
     private static final String FEISHU_BOT_EVENT_CALLBACK_PATH = "/feishu/bot/events";
 
+    private static final String WEIXIN_OPEN_PLATFORM_EVENT_CALLBACK_PATH =
+        "/connector/authorization/callback/weixin-open-platform/events";
+
     private static final String THIRD_PARTY_SKILL_INSTALL_PATH = "/tool/installThirdPartySkill";
+
+    private static final String THIRD_PARTY_SKILL_MANAGEABLE_DIGITAL_EMPLOYEE_PATH =
+        "/tool/queryThirdPartySkillManageableDigitalEmployees";
+
+    private static final String CONNECTOR_SKILL_COMPLETE_PATH =
+        "/connector/authorization/skill-complete";
+
+    private static final String ORCHESTRATOR_RUNTIME_PATH =
+        "/internal/v1/orchestrators/resolve-runtime";
+
+    private static final String ARTIFACT_UPLOAD_PATH = "/open/api/v1/artifacts";
+
+    @Value("${artifact.preview.path-prefix:/artifact-preview}")
+    private String artifactPreviewPathPrefix;
+
+    @Value("${artifact.download.path-prefix:/artifact-download}")
+    private String artifactDownloadPathPrefix;
+
+    @Value("${artifact.data.path-prefix:/artifact-data}")
+    private String artifactDataPathPrefix;
 
     @Value("${byai.access.urlpatterns:}")
     private String urlPattenrs;
@@ -145,16 +168,40 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
 
             // 例外的地址
             String url = request.getRequestURL().toString();
-            // 飞书开放平台回调从外部匿名推送，不会携带系统登录态。
+            // 飞书/微信开放平台事件回调从外部匿名推送，不会携带系统登录态。
             // 这里使用 servlet 原始路径做后缀判断，兼容 /byaiService 等 context-path/代理前缀。
-            if (this.isFeishuBotEventCallback(request)) {
+            if (this.isFeishuBotEventCallback(request) || this.isWeixinOpenPlatformEventCallback(request)) {
                 return true;
             }
-            if (this.isThirdPartySkillInstallRequest(request)) {
+            if (this.isThirdPartySkillMarketplaceRequest(request)) {
                 if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
                     return true;
                 }
-                return this.authenticateThirdPartySkillInstall(request);
+                return this.authenticateBeyondTokenOnlyRequest(request,
+                    this.isThirdPartySkillInstallRequest(request) ? "第三方技能安装" : "第三方技能可管理数字员工查询");
+            }
+            if (this.isConnectorSkillCompleteRequest(request)) {
+                if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
+                    return true;
+                }
+                return this.authenticateBeyondTokenOnlyRequest(request, "连接器技能授权同步");
+            }
+            if (this.isOrchestratorRuntimeRequest(request)) {
+                if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
+                    return true;
+                }
+                return this.authenticateBeyondTokenOnlyRequest(request, "数字员工组运行时解析");
+            }
+            // Artifact公开内容与数据接口不依赖登录态；有效期、记录级能力和管理密钥由业务服务校验。
+            if (this.isArtifactCapabilityRequest(request)) {
+                return true;
+            }
+            // 沙箱只持有当前用户Beyond-Token，上传时不允许Cookie覆盖Token身份。
+            if (this.isArtifactUploadRequest(request)) {
+                if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
+                    return true;
+                }
+                return this.authenticateBeyondTokenOnlyRequest(request, "Artifact发布");
             }
             if (this.checkUrlByRegex(url)) {
                 return true;
@@ -203,6 +250,9 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
         }
         catch (Exception e) {
             logger.error(e.getMessage(), e);
+            if (this.isOrchestratorRuntimeRequest(request)) {
+                response.setStatus(HttpStatus.UNAUTHORIZED.value());
+            }
             this.setLoginError(response, e.getMessage());
             return false;
         }
@@ -212,15 +262,15 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
      * 技能超市安装必须以调用方显式传入的 Beyond-Token 作为当前用户身份。
      * 即使请求同时携带门户 Cookie，也不能使用 Cookie/Session 覆盖 Token 中的用户。
      */
-    private boolean authenticateThirdPartySkillInstall(HttpServletRequest request) {
+    private boolean authenticateBeyondTokenOnlyRequest(HttpServletRequest request, String operationName) {
         String systemCode = request.getHeader("system-code");
         String beyondToken = request.getHeader("Beyond-Token");
         if (StringUtils.isBlank(beyondToken)) {
-            throw new RuntimeException("第三方技能安装接口必须通过 Beyond-Token 鉴权");
+            throw new RuntimeException(operationName + "接口必须通过 Beyond-Token 鉴权");
         }
         logger.info(
-            "第三方技能安装接口强制Beyond-Token鉴权，requestUri={}, systemCode={}, beyondToken={}",
-            request.getRequestURI(), systemCode, beyondToken);
+            "{}接口强制Beyond-Token鉴权，requestUri={}, systemCode={}",
+            operationName, request.getRequestURI(), systemCode);
         boolean authenticated = jwtTokenFilter.doFilter(systemCode, beyondToken);
         if (!authenticated) {
             return false;
@@ -241,17 +291,89 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
         }
         CurrentUserHolder.setLoginInfo(localLoginInfo);
         logger.info(
-            "第三方技能安装用户身份归一化完成，tokenUserId={}, tokenUserCode={}, localUserId={}, "
+            "{}用户身份归一化完成，tokenUserId={}, tokenUserCode={}, localUserId={}, "
                 + "localUserCode={}, userName={}",
-            tokenUserId, tokenUserCode, localLoginInfo.getUserId(), localLoginInfo.getUserCode(),
+            operationName, tokenUserId, tokenUserCode, localLoginInfo.getUserId(), localLoginInfo.getUserCode(),
             localLoginInfo.getUserName());
         return true;
     }
 
     private boolean isThirdPartySkillInstallRequest(HttpServletRequest request) {
+        return isRequestPath(request, THIRD_PARTY_SKILL_INSTALL_PATH);
+    }
+
+    private boolean isWeixinOpenPlatformEventCallback(HttpServletRequest request) {
+        return isExactPostRequestPath(request, WEIXIN_OPEN_PLATFORM_EVENT_CALLBACK_PATH);
+    }
+
+    private boolean isExactPostRequestPath(HttpServletRequest request, String expectedPath) {
+        if (request == null || !"POST".equalsIgnoreCase(request.getMethod())) {
+            return false;
+        }
+        String requestUri = StringUtils.defaultString(request.getRequestURI());
+        String expectedUri = StringUtils.defaultString(request.getContextPath()) + expectedPath;
+        String normalizedUri = requestUri.endsWith("/") ? requestUri.substring(0, requestUri.length() - 1) : requestUri;
+        return normalizedUri.equals(expectedUri);
+    }
+
+    private boolean isThirdPartySkillMarketplaceRequest(HttpServletRequest request) {
+        return isThirdPartySkillInstallRequest(request)
+            || isRequestPath(request, THIRD_PARTY_SKILL_MANAGEABLE_DIGITAL_EMPLOYEE_PATH);
+    }
+
+    private boolean isRequestPath(HttpServletRequest request, String expectedPath) {
         String requestUri = request == null ? null : request.getRequestURI();
-        return StringUtils.endsWith(requestUri, THIRD_PARTY_SKILL_INSTALL_PATH)
-            || StringUtils.endsWith(requestUri, THIRD_PARTY_SKILL_INSTALL_PATH + "/");
+        return StringUtils.endsWith(requestUri, expectedPath)
+            || StringUtils.endsWith(requestUri, expectedPath + "/");
+    }
+
+    private boolean isConnectorSkillCompleteRequest(HttpServletRequest request) {
+        String requestUri = request == null ? null : request.getRequestURI();
+        return StringUtils.endsWith(requestUri, CONNECTOR_SKILL_COMPLETE_PATH)
+            || StringUtils.endsWith(requestUri, CONNECTOR_SKILL_COMPLETE_PATH + "/");
+    }
+
+    private boolean isOrchestratorRuntimeRequest(HttpServletRequest request) {
+        String requestUri = request == null ? null : request.getRequestURI();
+        return StringUtils.endsWith(requestUri, ORCHESTRATOR_RUNTIME_PATH)
+            || StringUtils.endsWith(requestUri, ORCHESTRATOR_RUNTIME_PATH + "/");
+    }
+
+    private boolean isArtifactUploadRequest(HttpServletRequest request) {
+        return request != null && "POST".equalsIgnoreCase(request.getMethod())
+            && endsWithConfiguredPath(request.getRequestURI(), ARTIFACT_UPLOAD_PATH);
+    }
+
+    private boolean isArtifactCapabilityRequest(HttpServletRequest request) {
+        if (request == null) {
+            return false;
+        }
+        if (("GET".equalsIgnoreCase(request.getMethod()) || "POST".equalsIgnoreCase(request.getMethod())
+            || "PUT".equalsIgnoreCase(request.getMethod()))
+            && matchesConfiguredPrefix(request, artifactDataPathPrefix)) {
+            return true;
+        }
+        return ("GET".equalsIgnoreCase(request.getMethod()) || "HEAD".equalsIgnoreCase(request.getMethod()))
+            && (matchesConfiguredPrefix(request, artifactPreviewPathPrefix)
+                || matchesConfiguredPrefix(request, artifactDownloadPathPrefix));
+    }
+
+    private boolean endsWithConfiguredPath(String path, String expectedPath) {
+        if (StringUtils.isBlank(path)) {
+            return false;
+        }
+        String normalized = path.endsWith("/") ? path.substring(0, path.length() - 1) : path;
+        return normalized.endsWith(expectedPath);
+    }
+
+    private boolean matchesConfiguredPrefix(HttpServletRequest request, String prefix) {
+        if (request == null || StringUtils.isAnyBlank(request.getRequestURI(), prefix)) {
+            return false;
+        }
+        String normalizedPrefix = prefix.startsWith("/") ? prefix : "/" + prefix;
+        String endpointPrefix = StringUtils.defaultString(request.getContextPath()) + normalizedPrefix;
+        return request.getRequestURI().equals(endpointPrefix)
+            || request.getRequestURI().startsWith(endpointPrefix + "/");
     }
 
     /**

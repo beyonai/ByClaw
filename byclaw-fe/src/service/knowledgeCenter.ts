@@ -57,7 +57,10 @@ export const queryAuthDoc = (data: any) => POST<any>('/byaiService/api/v2/resour
 export const delShare = (data: any) => POST<any>('/byaiService/datasetController/delShare', data);
 
 // 新建文件夹
-export const createFolder = (data: any) => POST<any>('/byaiService/datasetController/createFolder', data);
+export const createFolder = (data: any, config?: ConfigType) =>
+  config
+    ? POST<any>('/byaiService/datasetController/createFolder', data, config)
+    : POST<any>('/byaiService/datasetController/createFolder', data);
 
 // 查询文件列表
 export const getDataList = (data: any) => POST<any>('/byaiService/datasetController/getDataList', data);
@@ -221,6 +224,80 @@ export interface FileBuildStatusParams {
 export const getFileBuildStatus = (data: FileBuildStatusParams) =>
   GET<any>('/byaiService/datasetController/fileBuildStatus', data);
 
+export interface KnowledgeBuildResultParams {
+  resourceId: string | number;
+  filePath: string;
+  chunkPage?: number;
+  chunkPageSize?: number;
+  includeMarkdown?: boolean;
+}
+
+export interface KnowledgeBuildChunk {
+  chunkNo: number;
+  startLine: number;
+  endLine: number;
+  content: string;
+  characterCount: number;
+  hasEmbedding: boolean;
+  retrievalIndexed: boolean;
+}
+
+export interface KnowledgeBuildResult {
+  knCode: string;
+  filePath: string;
+  fileName: string;
+  fileType: string;
+  fileSize: number;
+  mimeType?: string;
+  build: {
+    status?: string;
+    currentStep?: string;
+    errorMessage?: string;
+    startedAt?: string;
+    finishedAt?: string;
+    durationMs?: number;
+    statusDict?: IBuildResultDictItem[];
+    stepDict?: IBuildResultDictItem[];
+  };
+  markdown: {
+    available: boolean;
+    data?: string | null;
+    lineCount: number;
+    characterCount?: number | null;
+    byteCount?: number | null;
+  };
+  chunks: {
+    data: KnowledgeBuildChunk[];
+    page: number;
+    pageSize: number;
+    total: number;
+    reachedEof: boolean;
+  };
+  embedding: {
+    dimension?: number | null;
+    embeddedChunkCount: number;
+    coverageRate: number;
+  };
+  retrieval: {
+    indexedChunkCount: number;
+    coverageRate: number;
+  };
+}
+
+export interface IBuildResultDictItem {
+  standCode?: string;
+  standDisplayValue?: string;
+  standDisplayValueEn?: string;
+}
+
+// 查询文件构建结果：Markdown、分块、向量与检索索引摘要
+export const getKnowledgeBuildResult = (data: KnowledgeBuildResultParams) =>
+  POST<KnowledgeBuildResult>('/byaiService/datasetController/buildResult', data, {
+    responseCfg: {
+      hideErrorTips: true,
+    },
+  });
+
 export interface KnowledgeUploadItem {
   fileName?: string;
   filePath?: string;
@@ -243,11 +320,13 @@ export interface KnowledgeUploadResult {
 }
 
 // 上传文件
-export const uploadFiles = (data: FormData) =>
+export const uploadFiles = (data: FormData, config?: ConfigType) =>
   POST<KnowledgeUploadResult>('/byaiService/datasetController/uploadFiles', data, {
     timeout: 8 * 60 * 1000,
+    ...config,
     headers: {
       'Content-Type': 'multipart/form-data; charset=utf-8',
+      ...(config?.headers || {}),
     },
   });
 
@@ -263,8 +342,8 @@ export interface CheckUploadFileConflictsResult {
 }
 
 // 上传前检查同路径同名文件，供前端做覆盖确认
-export const checkUploadFileConflicts = (data: CheckUploadFileConflictsPayload) =>
-  POST<CheckUploadFileConflictsResult>('/byaiService/datasetController/checkUploadFileConflicts', data);
+export const checkUploadFileConflicts = (data: CheckUploadFileConflictsPayload, config?: ConfigType) =>
+  POST<CheckUploadFileConflictsResult>('/byaiService/datasetController/checkUploadFileConflicts', data, config);
 
 // 删除文件
 export const removeFile = (data: RemoveFilePayload, config?: ConfigType) =>

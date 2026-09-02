@@ -62,6 +62,7 @@ const MyDrawer = (props: IMyDrawerProps) => {
       className={classnames(styles.myDrawer, {
         [styles.opening]: open,
         [styles.closing]: !open,
+        [styles.overlay]: drawerCfg?.overlay,
       })}
     >
       <div className="ub ub-ver full-height">
@@ -92,6 +93,8 @@ const MyDrawer = (props: IMyDrawerProps) => {
       </div>
     </div>
   );
+  // 覆盖式抽屉不参与 Flex 布局，避免账号登录时挤压左侧项目列表和露出后面的会话页。
+  if (drawerCfg?.overlay) return drawer;
   return (
     <Resizable left limit={{ minWidth: drawerCfg.minWidth, maxWidth: drawerCfg.maxWidth }}>
       {drawer}

@@ -15,7 +15,10 @@ SPEC.loader.exec_module(doctor)
 
 
 class CapabilityDoctorTest(unittest.TestCase):
-    def test_agent_reach_maps_channel_statuses(self):
+    def test_ima_capability_check_is_available(self):
+        self.assertTrue(hasattr(doctor, "check_ima"))
+
+    def test_by_reach_maps_channel_statuses(self):
         payload = {
             "github": {"status": "ok", "active_backend": "gh", "message": "available"},
             "twitter": {"status": "warn", "message": "limited"},
@@ -23,7 +26,7 @@ class CapabilityDoctorTest(unittest.TestCase):
             "rss": {"status": "error", "message": "broken"},
         }
 
-        result = doctor.check_agent_reach(
+        result = doctor.check_by_reach(
             lambda argv, timeout: doctor.CommandResult(0, json.dumps(payload), ""),
             1.0,
         )
@@ -35,41 +38,60 @@ class CapabilityDoctorTest(unittest.TestCase):
         self.assertEqual("unavailable", result["channels"]["rss"]["status"])
         self.assertEqual("gh", result["channels"]["github"]["activeBackend"])
 
-    def test_agent_reach_separates_diagnostic_and_effective_backends(self):
+    def test_by_reach_separates_diagnostic_and_effective_backends(self):
         payload = {
-            "web": {"status": "ok", "active_backend": "Jina Reader"},
-            "xiaohongshu": {"status": "ok", "active_backend": "OpenCLI"},
-            "reddit": {"status": "off", "backends": ["OpenCLI", "rdt-cli"]},
+            "web": {"status": "ok", "backends": ["bycli"], "active_backend": "bycli"},
+            "xiaohongshu": {"status": "ok", "active_backend": "bycli"},
+            "reddit": {"status": "off", "backends": ["rdt-cli", "bycli"]},
             "github": {"status": "ok", "active_backend": "gh"},
         }
 
-        result = doctor.check_agent_reach(
+        result = doctor.check_by_reach(
             lambda argv, timeout: doctor.CommandResult(0, json.dumps(payload), ""),
             1.0,
         )
 
         web = result["channels"]["web"]
-        self.assertEqual("Jina Reader", web["diagnosticBackend"])
+        self.assertEqual("bycli", web["diagnosticBackend"])
+        self.assertEqual(["bycli"], web["backends"])
         self.assertEqual("bycli", web["effectiveBackend"])
         self.assertEqual("bycli", web["activeBackend"])
 
         xiaohongshu = result["channels"]["xiaohongshu"]
-        self.assertEqual("OpenCLI", xiaohongshu["diagnosticBackend"])
+        self.assertEqual("bycli", xiaohongshu["diagnosticBackend"])
         self.assertEqual("bycli", xiaohongshu["effectiveBackend"])
         self.assertEqual("bycli", xiaohongshu["activeBackend"])
 
         reddit = result["channels"]["reddit"]
         self.assertNotIn("diagnosticBackend", reddit)
-        self.assertEqual("bycli", reddit["effectiveBackend"])
-        self.assertEqual("bycli", reddit["activeBackend"])
+        self.assertNotIn("effectiveBackend", reddit)
+        self.assertNotIn("activeBackend", reddit)
 
         github = result["channels"]["github"]
         self.assertEqual("gh", github["diagnosticBackend"])
         self.assertEqual("gh", github["effectiveBackend"])
         self.assertEqual("gh", github["activeBackend"])
 
-    def test_agent_reach_invalid_json_is_isolated(self):
-        result = doctor.check_agent_reach(
+    def test_by_reach_preserves_the_web_executor_reported_by_v2(self):
+        payload = {
+            "web": {"status": "ok", "backends": ["bycli"], "active_backend": "bycli"},
+            "github": {"status": "ok", "active_backend": "gh"},
+        }
+
+        result = doctor.check_by_reach(
+            lambda argv, timeout: doctor.CommandResult(0, json.dumps(payload), ""),
+            1.0,
+        )
+
+        web = result["channels"]["web"]
+        self.assertEqual("bycli", web["diagnosticBackend"])
+        self.assertEqual(["bycli"], web["backends"])
+        self.assertEqual("bycli", web["effectiveBackend"])
+        self.assertEqual("bycli", web["activeBackend"])
+        self.assertEqual("gh", result["channels"]["github"]["effectiveBackend"])
+
+    def test_by_reach_invalid_json_is_isolated(self):
+        result = doctor.check_by_reach(
             lambda argv, timeout: doctor.CommandResult(0, "not-json", ""),
             1.0,
         )
@@ -77,17 +99,17 @@ class CapabilityDoctorTest(unittest.TestCase):
         self.assertEqual("unavailable", result["status"])
         self.assertEqual("invalid_probe_output", result["error"]["code"])
 
-    def test_agent_reach_timeout_is_isolated(self):
+    def test_by_reach_timeout_is_isolated(self):
         def timeout(argv, timeout):
             raise subprocess.TimeoutExpired(argv, timeout)
 
-        result = doctor.check_agent_reach(timeout, 1.0)
+        result = doctor.check_by_reach(timeout, 1.0)
 
         self.assertEqual("unavailable", result["status"])
         self.assertEqual("check_timeout", result["error"]["code"])
 
-    def test_agent_reach_nonzero_exit_is_isolated(self):
-        result = doctor.check_agent_reach(
+    def test_by_reach_nonzero_exit_is_isolated(self):
+        result = doctor.check_by_reach(
             lambda argv, timeout: doctor.CommandResult(1, "", "failed"),
             1.0,
         )
@@ -95,14 +117,14 @@ class CapabilityDoctorTest(unittest.TestCase):
         self.assertEqual("unavailable", result["status"])
         self.assertEqual("doctor_failed", result["error"]["code"])
 
-    def test_optional_unconfigured_channels_do_not_degrade_agent_reach(self):
+    def test_optional_unconfigured_channels_do_not_degrade_by_reach(self):
         payload = {
             "web": {"status": "ok", "tier": 0, "message": "available"},
             "github": {"status": "ok", "tier": 0, "message": "available"},
             "reddit": {"status": "off", "tier": 2, "message": "not configured"},
         }
 
-        result = doctor.check_agent_reach(
+        result = doctor.check_by_reach(
             lambda argv, timeout: doctor.CommandResult(0, json.dumps(payload), ""),
             1.0,
         )
@@ -115,6 +137,7 @@ class CapabilityDoctorTest(unittest.TestCase):
             {"status": "ready", "daemon": "running"},
             {"status": "installed"},
             {"status": "authorization_required"},
+            {"status": "ready"},
             {"status": "ready"},
         )
         self.assertEqual("available", report["overallStatus"])
@@ -513,6 +536,195 @@ class CapabilityDoctorTest(unittest.TestCase):
         self.assertNotIn("token details", json.dumps(result))
         self.assertNotIn("login required", json.dumps(result))
 
+    def test_ima_missing_binary_is_unavailable(self):
+        commands = []
+
+        def missing(argv, timeout):
+            commands.append(argv)
+            raise FileNotFoundError("ima")
+
+        result = doctor.check_ima(missing, 1.0)
+
+        self.assertEqual([["ima", "--version"]], commands)
+        self.assertEqual("unavailable", result["status"])
+        self.assertEqual("binary_missing", result["error"]["code"])
+
+    def test_ima_missing_credentials_requires_authorization_without_auth_probe(self):
+        for environment in (
+            {},
+            {"IMA_OPENAPI_CLIENTID": "client-secret"},
+            {"IMA_OPENAPI_APIKEY": "api-secret"},
+        ):
+            with self.subTest(environment=environment):
+                commands = []
+
+                def run_command(argv, timeout):
+                    commands.append(argv)
+                    return doctor.CommandResult(0, "0.1.3", "")
+
+                with patch.dict(doctor.os.environ, environment, clear=True):
+                    result = doctor.check_ima(run_command, 1.0)
+
+                self.assertEqual([["ima", "--version"]], commands)
+                self.assertEqual("authorization_required", result["status"])
+                self.assertEqual("ready", result["installation"])
+                self.assertEqual("required", result["authorization"])
+                serialized = json.dumps(result)
+                self.assertNotIn("client-secret", serialized)
+                self.assertNotIn("api-secret", serialized)
+
+    def test_ima_blank_or_none_credentials_block_config_file_fallback_without_auth_probe(self):
+        for environment in (
+            {"IMA_OPENAPI_CLIENTID": "   ", "IMA_OPENAPI_APIKEY": "api-key"},
+            {"IMA_OPENAPI_CLIENTID": "client-id", "IMA_OPENAPI_APIKEY": "\t"},
+            {"IMA_OPENAPI_CLIENTID": None, "IMA_OPENAPI_APIKEY": "api-key"},
+            {"IMA_OPENAPI_CLIENTID": "client-id", "IMA_OPENAPI_APIKEY": None},
+        ):
+            with self.subTest(environment=environment):
+                commands = []
+
+                def run_command(argv, timeout):
+                    commands.append(argv)
+                    if argv == ["ima", "--version"]:
+                        return doctor.CommandResult(0, "0.1.3", "")
+                    return doctor.CommandResult(
+                        0,
+                        '{"status":"ok","checks":{"client_id_present":true,"api_key_present":true,"token_fetch":true}}',
+                        "",
+                    )
+
+                with patch.object(
+                    doctor.os,
+                    "environ",
+                    {**environment, "IMA_OPENAPI_CONFIG": "credential-file-fallback"},
+                ):
+                    result = doctor.check_ima(run_command, 1.0)
+
+                self.assertEqual([["ima", "--version"]], commands)
+                self.assertEqual("authorization_required", result["status"])
+                self.assertEqual("required", result["authorization"])
+                self.assertNotIn("credential-file-fallback", json.dumps(result))
+
+    def test_ima_reports_ready_only_for_the_strict_success_payload(self):
+        commands = []
+
+        def run_command(argv, timeout):
+            commands.append(argv)
+            if argv == ["ima", "--version"]:
+                return doctor.CommandResult(0, "0.1.3", "")
+            return doctor.CommandResult(
+                0,
+                json.dumps(
+                    {
+                        "status": "ok",
+                        "checks": {
+                            "client_id_present": True,
+                            "api_key_present": True,
+                            "token_fetch": True,
+                        },
+                        "access_token": "secret-token",
+                    }
+                ),
+                "secret-stderr",
+            )
+
+        with patch.dict(
+            doctor.os.environ,
+            {"IMA_OPENAPI_CLIENTID": "secret-client", "IMA_OPENAPI_APIKEY": "secret-key"},
+            clear=True,
+        ):
+            result = doctor.check_ima(run_command, 1.0)
+
+        self.assertEqual(
+            [["ima", "--version"], ["ima", "auth", "check", "--test", "--json"]],
+            commands,
+        )
+        self.assertEqual("ready", result["status"])
+        self.assertEqual("ready", result["installation"])
+        self.assertEqual("ready", result["authorization"])
+        serialized = json.dumps(result)
+        self.assertNotIn("secret-client", serialized)
+        self.assertNotIn("secret-key", serialized)
+        self.assertNotIn("secret-token", serialized)
+        self.assertNotIn("secret-stderr", serialized)
+
+    def test_ima_auth_timeout_is_degraded_without_raw_output(self):
+        def run_command(argv, timeout):
+            if argv == ["ima", "--version"]:
+                return doctor.CommandResult(0, "0.1.3", "")
+            raise subprocess.TimeoutExpired(argv, timeout, output="secret-output", stderr="secret-error")
+
+        with patch.dict(
+            doctor.os.environ,
+            {"IMA_OPENAPI_CLIENTID": "secret-client", "IMA_OPENAPI_APIKEY": "secret-key"},
+            clear=True,
+        ):
+            result = doctor.check_ima(run_command, 1.0)
+
+        self.assertEqual("degraded", result["status"])
+        self.assertEqual("check_timeout", result["error"]["code"])
+        self.assertNotIn("secret-output", json.dumps(result))
+        self.assertNotIn("secret-error", json.dumps(result))
+
+    def test_ima_network_or_api_nonzero_auth_status_is_degraded_without_raw_output(self):
+        for stdout, stderr in (("network unreachable", "secret-error"), ("api unavailable", "secret-error")):
+            with self.subTest(stdout=stdout):
+                def run_command(argv, timeout):
+                    if argv == ["ima", "--version"]:
+                        return doctor.CommandResult(0, "0.1.3", "")
+                    return doctor.CommandResult(1, stdout, stderr)
+
+                with patch.dict(
+                    doctor.os.environ,
+                    {"IMA_OPENAPI_CLIENTID": "secret-client", "IMA_OPENAPI_APIKEY": "secret-key"},
+                    clear=True,
+                ):
+                    result = doctor.check_ima(run_command, 1.0)
+
+                self.assertEqual("degraded", result["status"])
+                self.assertEqual("unknown", result["authorization"])
+                self.assertEqual("authorization_check_failed", result["error"]["code"])
+                self.assertNotIn(stdout, json.dumps(result))
+                self.assertNotIn(stderr, json.dumps(result))
+
+    def test_ima_rejects_malformed_or_unsuccessful_probe_payloads(self):
+        invalid_payloads = (
+            "{",
+            json.dumps(
+                {"status": "error", "checks": {"client_id_present": True, "api_key_present": True, "token_fetch": True}}
+            ),
+            json.dumps(
+                {"status": "ok", "checks": {"client_id_present": False, "api_key_present": True, "token_fetch": True}}
+            ),
+            json.dumps(
+                {"status": "ok", "checks": {"client_id_present": True, "api_key_present": False, "token_fetch": True}}
+            ),
+            json.dumps(
+                {"status": "ok", "checks": {"client_id_present": True, "api_key_present": True, "token_fetch": False}}
+            ),
+        )
+
+        for payload in invalid_payloads:
+            with self.subTest(payload=payload):
+                def run_command(argv, timeout):
+                    if argv == ["ima", "--version"]:
+                        return doctor.CommandResult(0, "0.1.3", "")
+                    return doctor.CommandResult(0, payload, "secret-stderr")
+
+                with patch.dict(
+                    doctor.os.environ,
+                    {"IMA_OPENAPI_CLIENTID": "secret-client", "IMA_OPENAPI_APIKEY": "secret-key"},
+                    clear=True,
+                ):
+                    result = doctor.check_ima(run_command, 1.0)
+
+                self.assertEqual("degraded", result["status"])
+                self.assertEqual("invalid_probe_output", result["error"]["code"])
+                serialized = json.dumps(result)
+                self.assertNotIn("secret-client", serialized)
+                self.assertNotIn("secret-key", serialized)
+                self.assertNotIn("secret-stderr", serialized)
+
     def test_dws_reports_ready_from_sanitized_auth_status(self):
         commands = []
 
@@ -562,7 +774,7 @@ class CapabilityDoctorTest(unittest.TestCase):
         self.assertEqual("required", result["authorization"])
 
     def test_provider_checks_run_in_parallel(self):
-        barrier = threading.Barrier(5)
+        barrier = threading.Barrier(6)
 
         def agent_check():
             barrier.wait(timeout=0.5)
@@ -584,7 +796,11 @@ class CapabilityDoctorTest(unittest.TestCase):
             barrier.wait(timeout=0.5)
             return {"status": "ready", "installation": "ready"}
 
-        report = doctor.collect_report(agent_check, bycli_check, wecom_check, lark_check, dws_check)
+        def ima_check():
+            barrier.wait(timeout=0.5)
+            return {"status": "ready", "installation": "ready"}
+
+        report = doctor.collect_report(agent_check, bycli_check, wecom_check, lark_check, dws_check, ima_check)
 
         self.assertEqual("available", report["overallStatus"])
 
@@ -598,10 +814,11 @@ class CapabilityDoctorTest(unittest.TestCase):
             lambda: {"status": "installed", "installation": "ready"},
             lambda: {"status": "authorization_required", "installation": "ready"},
             lambda: {"status": "ready", "installation": "ready"},
+            lambda: {"status": "ready", "installation": "ready"},
         )
 
         self.assertEqual("degraded", report["overallStatus"])
-        self.assertEqual("internal_check_failed", report["providers"]["agentReach"]["error"]["code"])
+        self.assertEqual("internal_check_failed", report["providers"]["byReach"]["error"]["code"])
         self.assertEqual("ready", report["providers"]["bycli"]["status"])
 
     def test_report_includes_enterprise_probes_without_changing_overall_status(self):
@@ -611,18 +828,37 @@ class CapabilityDoctorTest(unittest.TestCase):
             {"status": "installed", "installation": "ready"},
             {"status": "authorization_required", "installation": "ready"},
             {"status": "ready", "installation": "ready"},
+            {"status": "ready", "installation": "ready"},
         )
 
         self.assertEqual("available", result["overallStatus"])
+        self.assertEqual(2, result["schemaVersion"])
+        self.assertIn("byReach", result["providers"])
+        self.assertNotIn("agentReach", result["providers"])
         self.assertEqual("installed", result["providers"]["wecom"]["status"])
         self.assertEqual("authorization_required", result["providers"]["lark"]["status"])
         self.assertEqual("ready", result["providers"]["dws"]["status"])
+        self.assertEqual("ready", result["providers"]["ima"]["status"])
+
+    def test_legacy_five_argument_report_defaults_ima_without_changing_overall_status(self):
+        result = doctor.build_report(
+            {"status": "ready", "channels": {}},
+            {"status": "available_on_demand", "daemon": "running"},
+            {"status": "installed", "installation": "ready"},
+            {"status": "authorization_required", "installation": "ready"},
+            {"status": "ready", "installation": "ready"},
+        )
+
+        self.assertEqual("available", result["overallStatus"])
+        self.assertEqual("authorization_required", result["providers"]["ima"]["status"])
+        self.assertEqual("required", result["providers"]["ima"]["authorization"])
 
     def test_report_is_unavailable_when_both_providers_are_unavailable(self):
         result = doctor.build_report(
             {"status": "unavailable"},
             {"status": "unavailable"},
             {"status": "installed"},
+            {"status": "ready"},
             {"status": "ready"},
             {"status": "ready"},
         )

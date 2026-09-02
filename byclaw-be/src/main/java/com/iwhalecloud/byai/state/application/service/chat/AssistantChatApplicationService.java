@@ -5,7 +5,6 @@ import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.iwhaleai.byai.framework.client.GatewayClient;
 import com.iwhalecloud.byai.common.constants.chat.ConversationObjectType;
-import com.iwhalecloud.byai.common.constants.resource.WorkerAgentType;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
@@ -14,21 +13,16 @@ import com.iwhalecloud.byai.common.message.entity.ByaiMessageRelObjDto;
 import com.iwhalecloud.byai.common.message.service.ByaiMessageHotService;
 import com.iwhalecloud.byai.common.message.service.ByaiMessageRelObjService;
 import com.iwhalecloud.byai.common.storage.model.StorageLocation;
-import com.iwhalecloud.byai.common.util.DateUtils;
-import com.iwhalecloud.byai.common.util.OkHttpUtil;
 import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxEndpointService;
 import com.iwhalecloud.byai.manager.domain.customer.service.FilesService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDigEmployeeService;
-import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.dto.resource.ResourceExtDigEmployeeDto;
 import com.iwhalecloud.byai.manager.dto.resource.UploadItem;
 import com.iwhalecloud.byai.manager.dto.session.SessionUploadResult;
 import com.iwhalecloud.byai.manager.entity.file.Files;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtDigEmployee;
-import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
-import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.qo.resource.DigEmployeeExtQo;
 import com.iwhalecloud.byai.state.common.dto.AnswerDelta;
 import com.iwhalecloud.byai.state.common.dto.MessageStructDto;
@@ -41,6 +35,9 @@ import com.iwhalecloud.byai.state.domain.chat.dto.StopChatDto;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatProcessContext;
 import com.iwhalecloud.byai.state.domain.chat.service.OutputStreamManager;
 import com.iwhalecloud.byai.state.domain.chat.service.RunningChatSnapshotService;
+import com.iwhalecloud.byai.state.application.service.taskplan.TaskPlanApplicationService;
+import com.iwhalecloud.byai.state.domain.taskplan.dto.TaskPlanSnapshot;
+import com.iwhalecloud.byai.state.domain.ws.service.TaskPlanWebSocketPublisher;
 import com.iwhalecloud.byai.state.domain.chat.service.RunningOutputStreamRegistry;
 import com.iwhalecloud.byai.state.domain.chat.service.ScriptService;
 import com.iwhalecloud.byai.state.domain.chat.service.SessionStreamManager;
@@ -50,6 +47,7 @@ import com.iwhalecloud.byai.state.domain.file.service.ConversationFileStorage;
 import com.iwhalecloud.byai.state.domain.file.service.ConversationStoragePathResolver;
 import com.iwhalecloud.byai.state.domain.session.enums.SessionType;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
+import com.iwhalecloud.byai.state.domain.session.service.SessionTitleService;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import com.iwhalecloud.byai.state.domain.template.enums.DebugModeEnum;
 import com.iwhalecloud.byai.state.domain.chat.service.TargetAgentResolver;
@@ -61,14 +59,14 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
+import okhttp3.Request;
+import okhttp3.Response;
+import okhttp3.ResponseBody;
 
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
-import java.util.Date;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 /**
  * @author he.duming
@@ -86,10 +84,10 @@ public class AssistantChatApplicationService {
     private SessionService sessionService;
 
     @Autowired
-    private FilesService filesService;
+    private SessionTitleService sessionTitleService;
 
     @Autowired
-    private SsResourceService ssResourceService;
+    private FilesService filesService;
 
     @Autowired
     private ConversationStoragePathResolver conversationStoragePathResolver;
@@ -119,6 +117,12 @@ public class AssistantChatApplicationService {
     private RunningChatSnapshotService runningChatSnapshotService;
 
     @Autowired
+    private TaskPlanApplicationService taskPlanApplicationService;
+
+    @Autowired
+    private TaskPlanWebSocketPublisher taskPlanWebSocketPublisher;
+
+    @Autowired
     private OutputStreamManager outputStreamManager;
 
     // 使用 @Lazy 打破依赖环：ScriptService 经由 paramService → ... → dingtalk 链路最终又依赖本类。
@@ -135,31 +139,204 @@ public class AssistantChatApplicationService {
     @Autowired
     private RedisTemplate<String, Object> redisTemplate;
 
+    @Autowired
+    private SandboxEndpointService sandboxEndpointService;
+
     AssistantChatApplicationService(GatewayClient<?> gatewayClient) {
         this.gatewayClient = gatewayClient;
     }
 
+    /**
+     * 查询会话上下文使用量。
+     * <p>
+     * 状态优先从 Redis 读取；Redis 未命中时再按会话关联对象和默认主助手字段回退，
+     * 最后从用户沙箱实时查询并回写缓存。这样既能减少沙箱请求，也能兼容历史会话或
+     * agentId 表示不一致导致的缓存未命中场景。
+     *
+     * @param sessionId 会话 ID
+     * @param agentId   当前请求使用的数字员工 ID，可为空
+     * @return 会话状态，所有来源均不可用时返回结构化的不可用状态
+     */
     public JSONObject getSessionStatus(String sessionId, Long agentId) throws IOException {
         if (StringUtils.isBlank(sessionId)) {
             throw new BdpRuntimeException(I18nUtil.get("assistant.chat.session.id.not.empty"));
         }
+
         Long resolveAgentId = targetAgentResolver.resolveAgentId(agentId);
-        String statusValue = readSessionStatusValue(sessionId, resolveAgentId);
-        if (StringUtils.isBlank(statusValue)) {
-            return new JSONObject();
+
+        // 1. Redis 精确查询：优先按当前请求解析后的 agentId 获取状态。
+        JSONObject status = parseSessionStatus(readSessionStatusValue(sessionId, resolveAgentId));
+        if (status != null) {
+            return status;
         }
-        try {
-            return JSON.parseObject(statusValue);
+
+        // 2. 安全字段回退：尝试会话实际关联对象、main，以及唯一的 Hash 记录。
+        status = readFallbackSessionStatus(sessionId, resolveAgentId);
+        if (status != null) {
+            return status;
         }
-        catch (Exception e) {
-            throw new BdpRuntimeException("session status is not valid json", e);
+
+        // 3. Redis 没有缓存时，回源到当前用户沙箱中的 OpenClaw session store，并回写缓存。
+        status = querySandboxSessionStatus(sessionId, resolveAgentId);
+        if (status != null) {
+            cacheSessionStatus(sessionId, status, resolveStatusField(status, resolveAgentId));
+            return status;
         }
+
+        // 4. 没有任何可用来源时返回结构化状态，避免前端只能收到 data={}。
+        return buildUnavailableSessionStatus(sessionId, resolveAgentId);
     }
 
+    /**
+     * 按指定 agentId 精确读取 Redis Hash 中的会话状态。
+     */
     private String readSessionStatusValue(String sessionId, Long agentId) {
         Object value = redisTemplate.opsForHash()
             .get(buildSessionStatusKey(sessionId), resolveSessionStatusField(agentId));
         return value == null ? null : String.valueOf(value);
+    }
+
+    /**
+     * 处理状态字段不一致的兼容查询。
+     * <p>
+     * 依次尝试请求 agentId、会话表中的 objectId 和 main；只有 Hash 中恰好只有一条
+     * 状态记录时，才使用该唯一记录，避免多个数字员工共用会话时串用其他员工状态。
+     */
+    private JSONObject readFallbackSessionStatus(String sessionId, Long resolveAgentId) {
+        String statusKey = buildSessionStatusKey(sessionId);
+        Set<String> triedFields = new LinkedHashSet<>();
+        addStatusField(triedFields, resolveSessionStatusField(resolveAgentId));
+
+        try {
+            ByaiSession session = sessionService.findById(Long.valueOf(sessionId));
+            if (session != null) {
+                Long sessionAgentId = targetAgentResolver.resolveAgentId(session.getObjectId());
+                addStatusField(triedFields, resolveSessionStatusField(sessionAgentId));
+            }
+        } catch (Exception e) {
+            log.warn("查询会话关联数字员工失败, sessionId: {}", sessionId, e);
+        }
+
+        addStatusField(triedFields, SessionStreamManager.DEFAULT_SESSION_STATUS_FIELD);
+        for (String field : triedFields) {
+            JSONObject status = parseSessionStatus(readSessionStatusValue(statusKey, field));
+            if (status != null) {
+                return status;
+            }
+        }
+
+        Map<Object, Object> entries = redisTemplate.opsForHash().entries(statusKey);
+        if (entries.size() == 1) {
+            Object onlyValue = entries.values().iterator().next();
+            return parseSessionStatus(onlyValue == null ? null : String.valueOf(onlyValue));
+        }
+        return null;
+    }
+
+    /**
+     * 按 Redis Key 和 Hash field 读取原始状态值。
+     */
+    private String readSessionStatusValue(String statusKey, String field) {
+        Object value = redisTemplate.opsForHash().get(statusKey, field);
+        return value == null ? null : String.valueOf(value);
+    }
+
+    /**
+     * 添加待尝试的状态字段，并利用 Set 去重空值和重复字段。
+     */
+    private void addStatusField(Set<String> fields, String field) {
+        if (StringUtils.isNotBlank(field)) {
+            fields.add(field);
+        }
+    }
+
+    /**
+     * 解析并校验状态 JSON；空值、非法 JSON 或明确的 ok=false 都视为未命中。
+     */
+    private JSONObject parseSessionStatus(String statusValue) {
+        if (StringUtils.isBlank(statusValue)) {
+            return null;
+        }
+        try {
+            JSONObject status = JSON.parseObject(statusValue);
+            return Boolean.FALSE.equals(status.getBoolean("ok")) ? null : status;
+        } catch (Exception e) {
+            log.warn("Session status 缓存不是有效 JSON", e);
+            return null;
+        }
+    }
+
+    /**
+     * Redis 无状态时，从当前用户的 OpenClaw 沙箱 session store 实时获取状态。
+     * 该方法只负责回源查询，不在这里缓存，缓存由调用方统一处理。
+     */
+    private JSONObject querySandboxSessionStatus(String sessionId, Long agentId) {
+        String userCode = CurrentUserHolder.getCurrentUserCode();
+        Map<String, String> searchQuery = new LinkedHashMap<>();
+        searchQuery.put("sessionId", sessionId);
+        if (agentId != null) {
+            searchQuery.put("agentId", agentId.toString());
+        }
+
+        Request.Builder requestBuilder = sandboxEndpointService.newAuthorizedRequestBuilder(
+            userCode, null, "/plugins/byai-channel/session-status", searchQuery);
+        if (requestBuilder == null) {
+            return null;
+        }
+
+        try (Response response = com.iwhalecloud.byai.common.util.OkHttpUtil.getHttpClient()
+            .newCall(requestBuilder.get().build()).execute()) {
+            ResponseBody body = response.body();
+            String responseBody = body == null ? null : body.string();
+            if (!response.isSuccessful()) {
+                log.warn("查询沙箱 Session status 失败, sessionId: {}, httpStatus: {}", sessionId, response.code());
+                return null;
+            }
+            return parseSessionStatus(responseBody);
+        } catch (Exception e) {
+            log.warn("查询沙箱 Session status 异常, sessionId: {}", sessionId, e);
+            return null;
+        }
+    }
+
+    /**
+     * 将回源得到的有效状态按返回的 agentId 写入对应 Hash field；没有 agentId 时使用
+     * 当前查询字段或 main，保证下一次查询可以优先命中 Redis。
+     */
+    private void cacheSessionStatus(String sessionId, JSONObject status, String fallbackField) {
+        if (status == null) {
+            return;
+        }
+        String field = StringUtils.defaultIfBlank(status.getString("agentId"), fallbackField);
+        if (StringUtils.isBlank(field)) {
+            field = SessionStreamManager.DEFAULT_SESSION_STATUS_FIELD;
+        }
+        redisTemplate.opsForHash().put(buildSessionStatusKey(sessionId), field, status.toJSONString());
+    }
+
+    /**
+     * 确定回源状态应该写入的 Redis Hash field。
+     */
+    private String resolveStatusField(JSONObject status, Long agentId) {
+        return StringUtils.defaultIfBlank(status.getString("agentId"), resolveSessionStatusField(agentId));
+    }
+
+    /**
+     * 构造统一的无可用状态结果，避免接口成功时返回空 data 对象，便于前端区分暂无数据。
+     */
+    private JSONObject buildUnavailableSessionStatus(String sessionId, Long agentId) {
+        JSONObject status = new JSONObject();
+        status.put("ok", true);
+        status.put("exists", false);
+        status.put("sessionId", sessionId);
+        status.put("agentId", agentId == null
+            ? SessionStreamManager.DEFAULT_SESSION_STATUS_FIELD : String.valueOf(agentId));
+        status.put("fresh", false);
+        status.put("usedTokens", null);
+        status.put("contextTokens", null);
+        status.put("percent", null);
+        status.put("source", "unavailable");
+        return status;
     }
 
     private String buildSessionStatusKey(String sessionId) {
@@ -177,12 +354,11 @@ public class AssistantChatApplicationService {
      * @param stopChatDto 入参
      */
     public void stopChat(StopChatDto stopChatDto) {
-        // 停止前将已堆积的消息落库，避免本轮回答内容丢失。
-        flushAccumulatedMessage(stopChatDto);
-
         if (stopChatDto == null || stopChatDto.getSessionId() == null) {
             return;
         }
+        // 停止前将已堆积的消息落库，避免本轮回答内容丢失。
+        boolean persistedBeforeStop = flushAccumulatedMessage(stopChatDto);
         RunningChatInfo runningInfo = runningOutputStreamRegistry.getRunning(stopChatDto.getSessionId());
         Long runningMessageId = runningInfo == null ? null : runningInfo.getModelAnswerMessageId();
         if (runningMessageId == null && chatRuntimeStateService != null) {
@@ -195,6 +371,14 @@ public class AssistantChatApplicationService {
             stopChatDto.setMessageId(runningMessageId);
         }
 
+        List<TaskPlanSnapshot> cancellingPlans = taskPlanApplicationService.requestCancellation(stopChatDto,
+            "USER_STOPPED", "用户请求停止");
+        if (cancellingPlans != null) {
+            cancellingPlans.forEach(plan -> taskPlanWebSocketPublisher.broadcast(
+                CurrentUserHolder.getCurrentUserId(), plan, stopChatDto.getClientRequestId()));
+        }
+
+        /*
         SsResource ssResource = ssResourceService.findById(stopChatDto.getAgentId());
         String workerAgentType = null;
         if (ssResource == null) {
@@ -208,20 +392,48 @@ public class AssistantChatApplicationService {
             CurrentUserHolder.getCurrentUserCode());
 
         String executionId = resolveStopExecutionId(stopChatDto);
-        Long cleanupMessageId = resolveStopCleanupMessageId(stopChatDto);
 
         gatewayClient.cancelTask(executionId, String.valueOf(stopChatDto.getSessionId()),
             "user cancel task", targetAgentType, CurrentUserHolder.getCurrentUserCode(), "force");
+        */
+        try {
+            gatewayClient.cancelSession(String.valueOf(stopChatDto.getSessionId()), "user cancel task");
+        }
+        finally {
+            // 计划是 BE 的权威状态；即使下游取消失败，也必须在本次 STOP_CHAT 内收敛到终态。
+            List<TaskPlanSnapshot> cancelledPlans = taskPlanApplicationService.confirmCancellation(stopChatDto,
+                "USER_STOPPED", "用户已停止执行");
+            if (cancelledPlans != null) {
+                cancelledPlans.forEach(plan -> taskPlanWebSocketPublisher.broadcast(
+                    CurrentUserHolder.getCurrentUserId(), plan, stopChatDto.getClientRequestId()));
+            }
+        }
 
-        runningOutputStreamRegistry.release(stopChatDto.getSessionId(), cleanupMessageId);
-        runningChatSnapshotService.delete(stopChatDto.getSessionId(), cleanupMessageId);
+        Long cleanupMessageId = resolveStopCleanupMessageId(stopChatDto);
+
+        if (persistedBeforeStop) {
+            runningOutputStreamRegistry.release(stopChatDto.getSessionId(), cleanupMessageId);
+            runningChatSnapshotService.delete(stopChatDto.getSessionId(), cleanupMessageId);
+        } else {
+            log.warn("stopChat 未确认已堆积消息落库，保留运行态与快照供恢复重试, sessionId: {}, messageId: {}",
+                stopChatDto.getSessionId(), cleanupMessageId);
+        }
     }
 
     private String resolveStopExecutionId(StopChatDto stopChatDto) {
-        if (StringUtils.isNotBlank(stopChatDto.getTraceId())) {
-            return stopChatDto.getTraceId();
+        if (stopChatDto.getMessageId() != null) {
+            return String.valueOf(stopChatDto.getMessageId());
         }
-        return stopChatDto.getMessageId() == null ? null : String.valueOf(stopChatDto.getMessageId());
+        if (StringUtils.isBlank(stopChatDto.getTraceId())) {
+            return null;
+        }
+        try {
+            Long modelAnswerMessageId = TraceIdCodec.decode(stopChatDto.getTraceId()).getModelAnswerMessageId();
+            return modelAnswerMessageId == null ? null : String.valueOf(modelAnswerMessageId);
+        } catch (Exception e) {
+            log.warn("stopChat traceId 无法解析为 Gateway messageId, traceId={}", stopChatDto.getTraceId());
+            return null;
+        }
     }
 
     private Long resolveStopCleanupMessageId(StopChatDto stopChatDto) {
@@ -233,8 +445,7 @@ public class AssistantChatApplicationService {
         }
         try {
             return TraceIdCodec.decode(stopChatDto.getTraceId()).getModelAnswerMessageId();
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             return null;
         }
     }
@@ -253,10 +464,10 @@ public class AssistantChatApplicationService {
      *
      * @param stopChatDto 停止入参
      */
-    private void flushAccumulatedMessage(StopChatDto stopChatDto) {
+    private boolean flushAccumulatedMessage(StopChatDto stopChatDto) {
         Long sessionId = stopChatDto.getSessionId();
         if (sessionId == null) {
-            return;
+            return false;
         }
         Long cleanupMessageId = resolveStopCleanupMessageId(stopChatDto);
         try {
@@ -267,13 +478,19 @@ public class AssistantChatApplicationService {
                     JSONObject sentinel = new JSONObject();
                     sentinel.put("event_type", ChatProcessContext.STOP_SENTINEL_EVENT);
                     sentinel.put("session_id", String.valueOf(sessionId));
-                    ctx.getGatewayEventQueue().offer(sentinel);
-                }
-                else {
+                    try {
+                        // 队列有界后必须等待已有事件被请求线程消费，确保停止哨兵不会静默丢失。
+                        ctx.getGatewayEventQueue().put(sentinel);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        throw e;
+                    }
+                    // HTTP 请求线程消费停止哨兵后负责落库与清理，当前线程不能提前删除恢复数据。
+                    return false;
+                } else {
                     // 同 pod 但无队列（如 WebSocket）：直接落库收尾。
-                    scriptService.flushOnStop(ctx);
+                    return scriptService.flushOnStop(ctx);
                 }
-                return;
             }
             // 跨 pod：本 pod 无上下文，从 Redis 快照落库。
             boolean flushed = scriptService.flushFromSnapshot(sessionId, cleanupMessageId);
@@ -281,56 +498,98 @@ public class AssistantChatApplicationService {
                 log.info("stopChat 无可落库内容（本 pod 无上下文且无快照）, sessionId: {}, messageId: {}", sessionId,
                     cleanupMessageId);
             }
-        }
-        catch (Exception e) {
+            return flushed;
+        } catch (Exception e) {
             log.error("stopChat 落库已堆积消息失败, sessionId: {}, messageId: {}", sessionId,
                 cleanupMessageId, e);
         }
-        if (sessionStreamManager != null) {
-            sessionStreamManager.stopSessionListener(String.valueOf(stopChatDto.getSessionId()));
+        // 只在本 pod 确实持有该 session 的 listener 时才停止。重启后前端补发的 STOP_CHAT 会落到
+        // 没有任何上下文的新 pod 上，此时停止动作既无对象也会连带触发运行态清理，
+        // 反而破坏重启恢复扫描赖以接管会话的运行态。
+        if (sessionStreamManager != null && sessionStreamManager.isSessionListenerActive(String.valueOf(sessionId))) {
+            sessionStreamManager.stopSessionListener(String.valueOf(sessionId));
         }
+        return false;
     }
 
     /**
      * 文件上传
      *
      * @param multipartFiles 上传的文件
-     * @param sessionId 会话
-     * @param sessionType 会话类型
-     * @param agentId 数字员工标志
+     * @param sessionId      会话
+     * @param sessionType    会话类型
+     * @param agentId        数字员工标志
      * @return UploadResult
      */
     public SessionUploadResult uploadFiles(MultipartFile[] multipartFiles, Long sessionId, String sessionType,
-        Long agentId) throws Exception {
+                                           Long agentId) throws Exception {
+        return uploadFiles(multipartFiles, sessionId, sessionType, agentId, null);
+    }
+
+    /**
+     * 文件上传并按项目创建临时会话。
+     *
+     * @param multipartFiles 上传的文件
+     * @param sessionId      已有会话标识；为空时创建新会话
+     * @param sessionType    会话类型
+     * @param agentId        数字员工标识
+     * @param projectId      新会话所属项目
+     * @return UploadResult
+     */
+    public SessionUploadResult uploadFiles(MultipartFile[] multipartFiles, Long sessionId, String sessionType,
+                                           Long agentId, Long projectId) throws Exception {
 
         // 检查文件是否合法
         this.checkUploadInfo(multipartFiles, agentId);
 
         // 创建会话
+        ByaiSession session;
         if (sessionId == null || sessionId <= 0) {
-            String sessionName = "File Upload " + DateUtils.getFormatedDate(new Date());
+            String sessionName = sessionTitleService.buildFileUploadTitle(new Date());
 
             String objectType = agentId == null ? ConversationObjectType.SUPER_ASSISTANT
                 : ConversationObjectType.DIGITAL_EMPLOYEES;
 
-            ByaiSession byaiSession = sessionService.createSession(sessionName, SessionType.H_AS.getCode(), agentId,
-                objectType, DebugModeEnum.DEBUG_0.getNum());
+            session = sessionService.createSession(sessionName, SessionType.H_AS.getCode(), agentId,
+                objectType, DebugModeEnum.DEBUG_0.getNum(), projectId);
 
-            sessionId = byaiSession.getSessionId();
+            sessionId = session.getSessionId();
+            sessionTitleService.markInitialTitlePending(sessionId);
+        } else {
+            session = sessionService.findById(sessionId);
         }
 
         // 封装参数返回
         SessionUploadResult sessionUploadResult = new SessionUploadResult();
         sessionUploadResult.setSessionId(sessionId);
+        if (session != null) {
+            sessionUploadResult.setSessionName(session.getSessionName());
+        }
+
+        Map<String, Long> fileNameCountMap = new HashMap<String, Long>();
 
         for (MultipartFile multipartFile : multipartFiles) {
 
             // 创建文件上传
             String originalFilename = multipartFile.getOriginalFilename();
+            String convertFileName = multipartFile.getOriginalFilename();
+
+
+            long uploadCount = fileNameCountMap.getOrDefault(originalFilename, 0L);
+            long dbCount = filesService.countSessionFile(sessionId, originalFilename);
+
+            // 统计次数，如果已经上传过一次，防止同名覆盖，a.jpg将变成a(1).jpg
+            long duplicateCount = uploadCount + dbCount;
+            if (duplicateCount >= 1) {
+                convertFileName = this.renameDuplicateFileName(originalFilename, duplicateCount);
+            }
+
+            //上传次数加1
+            fileNameCountMap.put(originalFilename, uploadCount + 1);
 
             String userCode = CurrentUserHolder.getCurrentUserCode();
             StorageLocation location = conversationStoragePathResolver.conversationFile(userCode,
-                String.valueOf(sessionId), originalFilename);
+                String.valueOf(sessionId), convertFileName);
 
             byte[] bytes = multipartFile.getBytes();
             String contentType = multipartFile.getContentType();
@@ -342,12 +601,12 @@ public class AssistantChatApplicationService {
                 location.getPath());
 
             // 记录文件信息
-            Files byaiFiles = filesService.createUploadFile(originalFilename, contentType, null, -1L, sessionId,
+            Files byaiFiles = filesService.createUploadFile(originalFilename, convertFileName, contentType, null, -1L, sessionId,
                 fileUrl);
 
             UploadItem uploadItem = new UploadItem();
             uploadItem.setFileId(byaiFiles.getFileId());
-            uploadItem.setFileName(byaiFiles.getFileName());
+            uploadItem.setFileName(byaiFiles.getConvertFileName());
             uploadItem.setFilePath(conversationStoragePathResolver.normalizeDisplayFilePath(location.getPath()));
             uploadItem.setFileUrl(fileUrl);
             sessionUploadResult.getUploadItems().add(uploadItem);
@@ -357,9 +616,42 @@ public class AssistantChatApplicationService {
     }
 
     /**
+     * 根据原始文件名和计数器，生成重命名后的文件名
+     *
+     * @param fileName       原始文件名 例：demo.txt
+     * @param duplicateCount 计数器，0=不追加；1生成demo(1).txt；2生成demo(2).txt
+     * @return 拼接完成的文件名
+     */
+    public String renameDuplicateFileName(String fileName, Long duplicateCount) {
+
+        if (StringUtil.isEmpty(fileName)) {
+            return "default";
+        }
+
+        if (duplicateCount <= 0) {
+            return fileName;
+        }
+
+        int dotIndex = fileName.lastIndexOf('.');
+
+        String baseName;
+        String suffix;
+
+        if (dotIndex > 0) {
+            baseName = fileName.substring(0, dotIndex);
+            suffix = fileName.substring(dotIndex);
+        } else {
+            baseName = fileName;
+            suffix = "";
+        }
+        return String.format("%s(%d)%s", baseName, duplicateCount, suffix);
+    }
+
+
+    /**
      * 检查文件是否合规
      *
-     * @param files 文件信息
+     * @param files   文件信息
      * @param agentId 智能体标识
      */
     @SuppressWarnings("PMD.UnusedPrivateMethod")
@@ -441,8 +733,7 @@ public class AssistantChatApplicationService {
         if ("inferLog".equalsIgnoreCase(messageStructDto.getUpdateField())) {
             String inferLog = byaiMessage.getInferLog();
             byaiMessage.setInferLog(this.replaceContent(inferLog, messageStructDto));
-        }
-        else {
+        } else {
             String messageStruct = byaiMessage.getMessageStruct();
             byaiMessage.setMessageStruct(this.replaceContent(messageStruct, messageStructDto));
         }
@@ -469,8 +760,7 @@ public class AssistantChatApplicationService {
 
         if ("inferLog".equalsIgnoreCase(messageStructDto.getUpdateField())) {
             snapshot.setInferLog(this.replaceContent(snapshot.getInferLog(), messageStructDto));
-        }
-        else {
+        } else {
             snapshot.setMessageStruct(this.replaceContent(snapshot.getMessageStruct(), messageStructDto));
         }
 
@@ -495,8 +785,7 @@ public class AssistantChatApplicationService {
         }
         if ("inferLog".equalsIgnoreCase(messageStructDto.getUpdateField())) {
             snapshot.setInferLog(this.replaceContent(snapshot.getInferLog(), messageStructDto));
-        }
-        else {
+        } else {
             snapshot.setMessageStruct(this.replaceContent(snapshot.getMessageStruct(), messageStructDto));
         }
         runningChatSnapshotService.updateSnapshot(snapshot);
@@ -554,7 +843,7 @@ public class AssistantChatApplicationService {
     /**
      * 替换数组结构
      *
-     * @param messageStruct 消息结构
+     * @param messageStruct    消息结构
      * @param messageStructDto 消息更新入参
      * @return String
      */

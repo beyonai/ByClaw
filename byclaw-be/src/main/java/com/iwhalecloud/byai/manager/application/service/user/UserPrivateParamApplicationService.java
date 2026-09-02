@@ -6,6 +6,7 @@ import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -14,6 +15,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.ecrypt.Sm4Util;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.manager.domain.event.devloop.GitHubTokenConfiguredEvent;
 import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.dto.users.UserPrivateParamDTO;
 import com.iwhalecloud.byai.manager.entity.users.UserPrivateParam;
@@ -26,10 +28,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
  * 用户个人参数配置管理。
@@ -45,13 +50,20 @@ public class UserPrivateParamApplicationService {
 
     private static final String REDIS_KEY_PREFIX = "byai:user:private_params:";
 
-    private static final String NORMAL = "NORMAL";
+    /** 参数启用态。写库的服务都要用它，别再写字面量 "1"（会被 buildActiveParamMap 当停用跳过）。 */
+    public static final String STATUS_NORMAL = "NORMAL";
+
+    private static final String NORMAL = STATUS_NORMAL;
 
     private static final String DISABLED = "DISABLED";
 
     private static final String DELETE_FLAG_NORMAL = "0";
 
     private static final String DELETE_FLAG_DELETED = "1";
+
+    private static final String PARAM_SOURCE_USER = "USER";
+
+    private static final String PARAM_SOURCE_CONNECTOR = "CONNECTOR";
 
     private static final Pattern PARAM_KEY_PATTERN = Pattern.compile("[A-Z_][A-Z0-9_]{0,127}");
 
@@ -69,6 +81,9 @@ public class UserPrivateParamApplicationService {
 
     @Autowired
     private UserService userService;
+
+    @Autowired
+    private ApplicationEventPublisher eventPublisher;
 
     @Value("${load.to.redis.batchSize:1000}")
     private Integer syncBatchSize;
@@ -91,11 +106,17 @@ public class UserPrivateParamApplicationService {
 
     @Transactional(rollbackFor = Exception.class)
     public UserPrivateParamVO save(UserPrivateParamDTO request) {
-        validateSaveRequest(request);
+        if (request == null) {
+            throw new IllegalArgumentException("个人参数配置不能为空");
+        }
         Long userId = currentUserId();
         Date now = new Date();
         boolean create = request.getParamId() == null;
         UserPrivateParam entity = create ? new UserPrivateParam() : getOwnedParam(userId, request.getParamId());
+        if (!create) {
+            assertUserManaged(entity);
+        }
+        validateSaveRequest(request);
         String nextKey = normalizeKey(request.getKey());
         ensureKeyUnique(userId, nextKey, create ? null : entity.getParamId());
 
@@ -105,6 +126,8 @@ public class UserPrivateParamApplicationService {
             entity.setCreateBy(userId);
             entity.setCreateTime(now);
             entity.setDeleteFlag(DELETE_FLAG_NORMAL);
+            entity.setParamSource(PARAM_SOURCE_USER);
+            entity.setSourceRef(null);
         }
 
         entity.setParamKey(nextKey);
@@ -128,7 +151,10 @@ public class UserPrivateParamApplicationService {
         else {
             userPrivateParamMapper.updateById(entity);
         }
-        refreshPrivateParamCache(userId, currentUserCode());
+        refreshPrivateParamCacheAfterCommit(userId, currentUserCode());
+        if ("GH_TOKEN".equals(nextKey)) {
+            eventPublisher.publishEvent(new GitHubTokenConfiguredEvent(this, userId));
+        }
         return toVo(entity);
     }
 
@@ -140,6 +166,7 @@ public class UserPrivateParamApplicationService {
         }
         Long userId = currentUserId();
         UserPrivateParam param = getOwnedParam(userId, paramId);
+        assertUserManaged(param);
         Date now = new Date();
         UserPrivateParam update = new UserPrivateParam();
         update.setParamId(param.getParamId());
@@ -148,7 +175,7 @@ public class UserPrivateParamApplicationService {
         update.setUpdateBy(userId);
         update.setUpdateTime(now);
         userPrivateParamMapper.updateById(update);
-        refreshPrivateParamCache(userId, currentUserCode());
+        refreshPrivateParamCacheAfterCommit(userId, currentUserCode());
         return Boolean.TRUE;
     }
 
@@ -160,6 +187,7 @@ public class UserPrivateParamApplicationService {
         }
         Long userId = currentUserId();
         UserPrivateParam param = getOwnedParam(userId, paramId);
+        assertUserManaged(param);
         Date now = new Date();
         String nextStatus = Boolean.FALSE.equals(request.getEnabled()) ? DISABLED : NORMAL;
         UserPrivateParam update = new UserPrivateParam();
@@ -170,7 +198,10 @@ public class UserPrivateParamApplicationService {
         userPrivateParamMapper.updateById(update);
         param.setStatus(nextStatus);
         param.setUpdateTime(now);
-        refreshPrivateParamCache(userId, currentUserCode());
+        refreshPrivateParamCacheAfterCommit(userId, currentUserCode());
+        if ("GH_TOKEN".equals(param.getParamKey()) && NORMAL.equals(nextStatus)) {
+            eventPublisher.publishEvent(new GitHubTokenConfiguredEvent(this, userId));
+        }
         return toVo(param);
     }
 
@@ -335,7 +366,21 @@ public class UserPrivateParamApplicationService {
         vo.setHasValue(StringUtils.isNotBlank(param.getParamValueCipher()));
         vo.setValueLast4(param.getParamValueLast4());
         vo.setUpdateTime(param.getUpdateTime());
+        String source = StringUtils.defaultIfBlank(param.getParamSource(), PARAM_SOURCE_USER);
+        boolean managed = PARAM_SOURCE_CONNECTOR.equals(source);
+        vo.setSource(source);
+        vo.setSourceRef(param.getSourceRef());
+        vo.setManaged(managed);
+        vo.setEditable(!managed);
+        vo.setDeletable(!managed);
+        vo.setEnableable(!managed);
         return vo;
+    }
+
+    private void assertUserManaged(UserPrivateParam param) {
+        if (param != null && PARAM_SOURCE_CONNECTOR.equals(param.getParamSource())) {
+            throw new IllegalArgumentException("系统托管连接器参数不允许用户修改");
+        }
     }
 
     private Long currentUserId() {
@@ -355,21 +400,76 @@ public class UserPrivateParamApplicationService {
     }
 
     private void refreshPrivateParamCache(Long userId, String userCode) {
-        refreshPrivateParamCache(userId, userCode, listParams(userId));
+        refreshPrivateParamCacheNow(userId, userCode, sequenceService.nextVal());
     }
 
-    private void refreshPrivateParamCache(Long userId, String userCode, List<UserPrivateParam> params) {
+    /** Rebuilds one user's runtime parameter cache from the current database snapshot. */
+    public boolean refreshPrivateParamCacheNow(Long userId, String userCode) {
+        return refreshPrivateParamCacheNow(userId, userCode, sequenceService.nextVal());
+    }
+
+    /** Fully replaces Redis with the current database snapshot. */
+    public boolean refreshPrivateParamCacheNow(Long userId, String userCode, Long stateVersion) {
+        if (stateVersion == null || stateVersion <= 0) {
+            throw new IllegalArgumentException("Cache state version must be positive");
+        }
+        return refreshPrivateParamCache(userId, userCode, listParams(userId), stateVersion);
+    }
+
+    /** Rebuilds all connector-managed user caches from authoritative database state in bounded pages. */
+    public int reconcileConnectorManagedCaches(int batchSize) {
+        int effectiveBatchSize = Math.max(1, batchSize);
+        long cursorUserId = 0L;
+        int refreshed = 0;
+        while (true) {
+            List<Users> users = userPrivateParamMapper.selectConnectorManagedUsersAfter(
+                cursorUserId, effectiveBatchSize
+            );
+            if (users == null || users.isEmpty()) {
+                return refreshed;
+            }
+            for (Users user : users) {
+                if (refreshPrivateParamCacheNow(user.getUserId(), user.getUserCode())) {
+                    refreshed++;
+                }
+            }
+            cursorUserId = users.getLast().getUserId();
+            if (users.size() < effectiveBatchSize) {
+                return refreshed;
+            }
+        }
+    }
+
+    /** 在当前数据库事务提交后刷新缓存；无事务调用时立即刷新。 */
+    public void refreshPrivateParamCacheAfterCommit(Long userId, String userCode) {
+        if (TransactionSynchronizationManager.isActualTransactionActive()
+                && TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    refreshPrivateParamCache(userId, userCode);
+                }
+            });
+            return;
+        }
+        refreshPrivateParamCache(userId, userCode);
+    }
+
+    private boolean refreshPrivateParamCache(
+            Long userId,
+            String userCode,
+            List<UserPrivateParam> params,
+            Long stateVersion) {
         try {
             Map<String, String> activeParams = buildActiveParamMap(params);
             String redisKey = buildPrivateParamRedisKey(userCode);
-            if (activeParams.isEmpty()) {
-                stringRedisTemplate.delete(redisKey);
-                return;
-            }
-            stringRedisTemplate.opsForValue().set(redisKey, buildPrivateParamCacheJson(activeParams));
+            String payload = buildPrivateParamCacheJson(activeParams, stateVersion);
+            stringRedisTemplate.opsForValue().set(redisKey, payload);
+            return true;
         }
         catch (Exception ex) {
             log.warn("同步用户个人参数配置到Redis失败，userId={}，userCode={}，reason={}", userId, userCode, ex.getMessage(), ex);
+            return false;
         }
     }
 
@@ -387,9 +487,10 @@ public class UserPrivateParamApplicationService {
         return activeParams;
     }
 
-    private String buildPrivateParamCacheJson(Map<String, String> params) throws JsonProcessingException {
+    private String buildPrivateParamCacheJson(Map<String, String> params, Long stateVersion)
+            throws JsonProcessingException {
         Map<String, Object> root = new LinkedHashMap<>();
-        root.put("version", System.currentTimeMillis());
+        root.put("version", stateVersion);
         root.put("updated_at", OffsetDateTime.now().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME));
         root.put("params", params);
         return objectMapper.writeValueAsString(root);

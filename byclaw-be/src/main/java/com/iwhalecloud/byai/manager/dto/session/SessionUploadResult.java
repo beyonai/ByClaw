@@ -14,4 +14,6 @@ import lombok.Setter;
 public class SessionUploadResult extends UploadResult {
 
     private Long sessionId;
+
+    private String sessionName;
 }

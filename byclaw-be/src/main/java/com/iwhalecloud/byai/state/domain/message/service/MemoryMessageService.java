@@ -113,6 +113,17 @@ public class MemoryMessageService {
     }
 
     /**
+     * 保存可重放的消息。相同 messageId 已存在时执行选择性更新，避免恢复或重投产生重复记录。
+     */
+    public ByaiMessageHotDtoDto saveOrUpdate(Long sessionId, Integer usage, MessageContext messageStruct,
+        AssistantChatDto assistantChatDto) {
+        ByaiMessageHotDtoDto byaiMessageHotDto = this.generateMessage(sessionId, usage, messageStruct,
+            assistantChatDto);
+        byaiMessageHotService.updateSelective(byaiMessageHotDto);
+        return byaiMessageHotDto;
+    }
+
+    /**
      * 生成消息对象
      *
      * @param sessionId 会话ID
@@ -139,6 +150,9 @@ public class MemoryMessageService {
         }
         else {
             byaiMessageHotDto.setMetadata(assistantChatDto.getMetadata());
+        }
+        if (hasOrderedSegments(messageStruct)) {
+            byaiMessageHotDto.setMetadata(withV2RenderMetadata(byaiMessageHotDto.getMetadata()));
         }
         byaiMessageHotDto.setCreateTime(
             messageStruct.getFirstResponseTime() == null ? new Date() : messageStruct.getFirstResponseTime());
@@ -231,6 +245,9 @@ public class MemoryMessageService {
 
             byaiMessageHotDto.setMessageStruct(JSON.toJSONString(messageStructList));
             byaiMessageHotDto.setInferLog(JSON.toJSONString(inferLogList));
+            if (hasOrderedSegments(messageStruct)) {
+                byaiMessageHotDto.setMetadata(withV2RenderMetadata(byaiMessageHotDto.getMetadata()));
+            }
 
             // 设置完整的最终答案
             StringBuilder content = new StringBuilder();
@@ -251,6 +268,28 @@ public class MemoryMessageService {
         catch (Exception e) {
             throw MemoryRuntimeException.messageRuntimeException(e);
         }
+    }
+
+    private String withV2RenderMetadata(String metadata) {
+        JSONObject metadataObject;
+        try {
+            metadataObject = StringUtils.isBlank(metadata) ? new JSONObject() : JSON.parseObject(metadata);
+        }
+        catch (Exception e) {
+            metadataObject = new JSONObject();
+        }
+        metadataObject.put("messageRenderVersion", "v2");
+        return metadataObject.toJSONString();
+    }
+
+    private boolean hasOrderedSegments(MessageContext messageContext) {
+        return hasOrderedSegments(messageContext.getAnswerMessageList())
+            || hasOrderedSegments(messageContext.getReasonMessageList());
+    }
+
+    private boolean hasOrderedSegments(List<AnswerDelta> segments) {
+        return CollectionUtils.isNotEmpty(segments)
+            && segments.stream().anyMatch(segment -> segment != null && segment.getSeq() != null);
     }
 
     /**

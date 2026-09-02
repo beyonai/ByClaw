@@ -12,11 +12,13 @@
         <result column="agent_home_url" property="agentHomeUrl" />
         <result column="avatar" property="avatar" />
         <result column="create_by" property="creatorId" />
+        <result column="creator_name" property="creatorName" />
         <result column="chat_avatar" property="chatAvatar" />
         <result column="is_top" property="isTop" />
         <result column="top_time" property="topTime" />
         <result column="grantType" property="grantType" />
         <result column="latest_grant_time" property="latestGrantTime" />
+        <result column="update_time" property="updateTime" />
         <result column="prologue" property="prologue" />
         <result column="integration_type" property="integrationType" />
         <result column="agent_dev_type" property="agentDevType" />
@@ -113,6 +115,8 @@
                a.owner_type,
                a.avatar,
                a.create_by,
+               a.update_time,
+               creator.user_name as creator_name,
                b.agent_type,
                b.agent_home_url,
                b.prologue,
@@ -134,6 +138,8 @@
         from ss_resource a
                  left join ss_res_ext_dig_employee b
                      on a.resource_id = b.resource_id
+                 left join po_users creator
+                     on a.create_by = creator.user_id
                  <!-- 当前用户超级助手下的子智能体置顶信息 -->
                  left join (
                      select suas.is_top,
@@ -243,6 +249,13 @@
                     and (k.red_count &gt; 0 or a.create_by = #{userId})
                 </otherwise>
             </choose>
+            <!-- 可选数字员工类型过滤：017 为数字员工组；为空时保持历史行为 -->
+            <if test="agentType != null and agentType != ''">
+                and b.agent_type = #{agentType}
+            </if>
+            <if test="excludeEmployeeGroup == true">
+                and (b.agent_type is null or b.agent_type != '017')
+            </if>
             <!-- 关键字搜索 -->
             <if test="keyword != null and keyword != ''">
                 and UPPER(a.resource_name) like concat('%', UPPER(#{keyword}), '%')
@@ -259,11 +272,12 @@
                 and b.machine_channel like concat('%', #{machineChannel}, '%')
             </if>
         </where>
-        <!-- 按置顶和最新授权时间倒序排序 -->
-        order by COALESCE(c.is_top, 0) desc,
+        <!-- 按最近编辑时间倒序，确保新建或刚修改的资源优先展示 -->
+        order by COALESCE(a.update_time, a.create_time, '1970-01-01 00:00:00') desc,
+                 a.create_time desc,
+                 COALESCE(c.is_top, 0) desc,
                  COALESCE(c.top_time, '1970-01-01 00:00:00') desc,
                  COALESCE(d.total, 0) desc,
-                 a.create_time desc,
                  COALESCE(k.latest_grant_time, '1970-01-01 00:00:00') desc
     </select>
 
@@ -496,6 +510,7 @@
             <!-- 基础过滤条件 -->
             and a.resource_biz_type = 'DIG_EMPLOYEE'
             and a.resource_status = 2
+            and coalesce(b.agent_type, '') != '017'
             <if test="userId !=null">
                 and a.create_by = #{userId}
             </if>
@@ -631,6 +646,14 @@
             <!-- 基础过滤条件 -->
             and a.resource_biz_type = 'DIG_EMPLOYEE'
             <choose>
+                <when test="agentType != null and agentType != ''">
+                    and b.agent_type = #{agentType}
+                </when>
+                <otherwise>
+                    and coalesce(b.agent_type, '') != '017'
+                </otherwise>
+            </choose>
+            <choose>
                 <when test="resourceStatus != null">
                     and a.resource_status = #{resourceStatus}
                 </when>
@@ -668,6 +691,10 @@
             <!-- 黑名单排除：通过聚合结果直接过滤 -->
             <if test="(userOrgIds != null and userOrgIds.size() > 0) or userId != null">
                 and (k.black_count = 0 or k.black_count is null)
+            </if>
+            <!-- 仅当前账号下可用：我创建的 或 红名单授权给我的（discoverMine 接口使用，原 discover 不传 mineOnly，不受影响） -->
+            <if test="mineOnly == true">
+                and (k.red_count &gt; 0 or a.create_by = #{userId})
             </if>
             <!-- 发布组织过滤 -->
             <if test="publishOrgIds != null and publishOrgIds.size() > 0">

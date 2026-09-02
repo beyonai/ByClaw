@@ -52,7 +52,7 @@ class SessionStreamRecoveryClaimTest {
         when(redisTemplate.opsForStream()).thenReturn(streamOps);
 
         sessionStreamManager = mockField("sessionStreamManager", SessionStreamManager.class);
-        mockField("sessionStreamEventRouter", SessionStreamEventRouter.class);
+        mockField("streamRecordProcessor", StreamRecordProcessor.class);
         ReflectionTestUtils.setField(recoveryService, "redisTemplate", redisTemplate);
         mockField("chatRuntimeStateService", ChatRuntimeStateService.class);
         mockField("chatContextRecoveryService", ChatContextRecoveryService.class);
@@ -61,7 +61,7 @@ class SessionStreamRecoveryClaimTest {
         mockField("chatRuntimeInstance", ChatRuntimeInstance.class);
 
         when(sessionStreamManager.buildStreamKey("10")).thenReturn("byai_gateway:session:10:data_stream");
-        when(sessionStreamManager.buildConsumerName("10")).thenReturn("byai_conversation_consumer:10");
+        when(sessionStreamManager.buildConsumerName("10")).thenReturn("byai_conversation_consumer:instance-a:10");
         // claim 后返回空列表即可（dispatch 路径已在别处覆盖），这里只验证 claim 调用与分页行为。
         when(streamOps.claim(any(), any(), any(), any(RedisStreamCommands.XClaimOptions.class)))
             .thenReturn(Collections.emptyList());

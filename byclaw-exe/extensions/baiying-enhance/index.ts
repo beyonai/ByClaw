@@ -3,15 +3,12 @@ import { registerBaiyingEnhancePlugin } from "./src/register-plugin.js";
 
 export { resolveConfigSyncHotPrefixes, resolveDigEmployeePubSub } from "./src/plugin-config.js";
 
-console.log("============Baiying Enhance module imported============");
-
 const plugin = {
   id: "baiying-enhance",
   name: "Baiying Enhance",
   description:
-    "Sync authorized Baiying digital employee JSON from Redis into OpenClaw config; sub-agents via sessions_spawn.",
+    "Sync authorized Baiying digital employees from Redis and expose Baiying resource tools.",
   register(api: OpenClawPluginApi) {
-    console.log("============Baiying Enhance register============");
     const registerStarted = performance.now();
     registerBaiyingEnhancePlugin(api);
     api.logger.info(

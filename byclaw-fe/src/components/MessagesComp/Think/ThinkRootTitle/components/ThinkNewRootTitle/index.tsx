@@ -1,6 +1,6 @@
 import React, { useRef, useState, useMemo, Suspense } from 'react';
 
-import { CheckCircleFilled, DownOutlined, InfoCircleFilled, UpOutlined } from '@ant-design/icons';
+import { CheckCircleFilled, DownOutlined, InfoCircleFilled, RightOutlined } from '@ant-design/icons';
 import classnames from 'classnames';
 import { get, isBoolean, isEmpty, size } from 'lodash';
 import { SSEMessageType } from '@/constants/message';
@@ -8,7 +8,7 @@ import { SSEMessageType } from '@/constants/message';
 import lazyHandler from '@/components/MessageList/lazyHandler';
 import ThinkingProcessItemRender from '@/components/MessageList/components/ThinkingProcessRender/components/ThinkingProcessItemRender/index';
 
-import type { IMessage, NewIMessageListItem } from '@/typescript/message';
+import type { IMessage } from '@/typescript/message';
 import type { TreeNode } from '@/components/MessageList/components/ThinkingProcessRender/typescript';
 
 import { isTextContentType } from '@/utils/messgae';
@@ -28,7 +28,7 @@ interface CollapsibleSectionProps {
   updateMessageListItemNewContent: (path: string, val: any) => IMessage;
 }
 interface CollapsibleItemProps {
-  item: NewIMessageListItem;
+  item: TreeNode;
   parentTreeNode?: TreeNode;
   message: IMessage;
   updateMessageListItemNewContent: (path: string, val: any) => IMessage;
@@ -36,11 +36,12 @@ interface CollapsibleItemProps {
 
 const CollapsibleSection: React.FC<CollapsibleSectionProps> = React.memo(
   ({ children, treeNode, message, updateMessageListItemNewContent }) => {
-    const { isCollapsed = false, messageLoadingStatus = 2, contentType, messageIdx } = treeNode;
+    const { isCollapsed = false, messageLoadingStatus = 2, contentType, messageIdx, shouldOpen = false } = treeNode;
     const title = get(treeNode, 'content.substance', '');
 
-    const [isParentCollapsed, setIsParentCollapsed] = React.useState(isCollapsed);
+    const [isParentCollapsed, setIsParentCollapsed] = React.useState(shouldOpen ? false : isCollapsed);
     const isManualChangeRef = React.useRef(false);
+    const effectiveParentCollapsed = shouldOpen ? false : isParentCollapsed;
 
     const hasChildren = !!children && Array.isArray(children) && size(children) > 0;
 
@@ -82,15 +83,21 @@ const CollapsibleSection: React.FC<CollapsibleSectionProps> = React.memo(
     }, [contentType, thinkRootTitleHeaderComp, message, messageIdx, treeNode]);
 
     React.useEffect(() => {
+      if (shouldOpen) {
+        isManualChangeRef.current = false;
+        setIsParentCollapsed(false);
+        return;
+      }
       if (isManualChangeRef.current) return;
       setIsParentCollapsed(isCollapsed);
-    }, [isCollapsed]);
+    }, [isCollapsed, shouldOpen]);
 
     return (
       <div style={{ width: '100%' }}>
         <div
           className={classnames(styles.thinkingTitle, 'ub gap4 pointer')}
           onClick={() => {
+            if (shouldOpen) return;
             isManualChangeRef.current = true;
             setIsParentCollapsed(!isParentCollapsed);
           }}
@@ -98,19 +105,19 @@ const CollapsibleSection: React.FC<CollapsibleSectionProps> = React.memo(
           {HeaderComp}
           {hasChildren && (
             <div className={classnames(styles.collapseIcon, 'ub ub-ac ub-pc')}>
-              {isParentCollapsed ? <DownOutlined /> : <UpOutlined />}
+              {effectiveParentCollapsed ? <RightOutlined /> : <DownOutlined />}
             </div>
           )}
         </div>
 
-        {!isParentCollapsed && <div className={styles.sectionContent}>{children}</div>}
+        {!effectiveParentCollapsed && <div className={styles.sectionContent}>{children}</div>}
       </div>
     );
   }
 );
 
 const CollapsibleItem: React.FC<CollapsibleItemProps> = React.memo(
-  ({ item, message, parentTreeNode = {}, updateMessageListItemNewContent }) => {
+  ({ item, message, parentTreeNode, updateMessageListItemNewContent }) => {
     // 在组件内部添加状态和ref
     const itemChildHeaderRef = useRef<HTMLDivElement>(null);
 
@@ -119,7 +126,8 @@ const CollapsibleItem: React.FC<CollapsibleItemProps> = React.memo(
     const isFinishedRef = React.useRef(false);
 
     const [needsGradient, setNeedsGradient] = useState(false);
-    const [isCollapsed, setIsCollapsed] = useState(item.isCollapsed ?? false);
+    const [isCollapsed, setIsCollapsed] = useState(item.shouldOpen ? false : item.isCollapsed ?? false);
+    const effectiveCollapsed = item.shouldOpen ? false : isCollapsed;
 
     const hasChildren = item.children && item.children.length > 0;
     const isBigSmartOffice = `${parentTreeNode?.contentType}` === `${SSEMessageType.thinkRootTitle}`;
@@ -129,40 +137,51 @@ const CollapsibleItem: React.FC<CollapsibleItemProps> = React.memo(
     }, [item.children]);
 
     React.useEffect(() => {
+      if (item.shouldOpen) {
+        isManualChangeRef.current = false;
+        setIsCollapsed(false);
+        return;
+      }
       if (!isBoolean(item.isCollapsed)) return;
 
       isFinishedRef.current = item.isCollapsed;
 
       if (isManualChangeRef.current) return;
       setIsCollapsed(item.isCollapsed);
-    }, [item.isCollapsed]);
+    }, [item.isCollapsed, item.shouldOpen]);
 
     React.useEffect(() => {
-      if (!hasTextChild) return;
+      if (!hasTextChild || effectiveCollapsed || !itemChildHeaderRef.current) return undefined;
 
+      let frameId: number | undefined;
       const autoScroll = () => {
-        if (!itemChildHeaderRef.current || isFinishedRef.current) return false;
+        if (!itemChildHeaderRef.current || isFinishedRef.current || isMouseOverRef.current) return;
 
         const element = itemChildHeaderRef.current;
         const hasOverflow = element.scrollHeight > element.clientHeight;
         setNeedsGradient(hasOverflow);
         element.scrollTop = element.scrollHeight;
-
-        return true;
       };
-
-      const scrollChecker = () => {
-        window.requestIdleCallback(() => {
-          if (isMouseOverRef.current) return;
-
-          if (autoScroll()) {
-            scrollChecker();
-          }
+      const scheduleScroll = () => {
+        if (frameId !== undefined) return;
+        frameId = window.requestAnimationFrame(() => {
+          frameId = undefined;
+          autoScroll();
         });
       };
 
-      scrollChecker();
-    }, [hasTextChild]);
+      scheduleScroll();
+      const element = itemChildHeaderRef.current;
+      const resizeObserver = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(scheduleScroll) : null;
+      resizeObserver?.observe(element);
+
+      return () => {
+        if (frameId !== undefined) {
+          window.cancelAnimationFrame(frameId);
+        }
+        resizeObserver?.disconnect();
+      };
+    }, [hasTextChild, item.children, effectiveCollapsed]);
 
     return (
       <div
@@ -176,7 +195,7 @@ const CollapsibleItem: React.FC<CollapsibleItemProps> = React.memo(
             [styles.collapsible]: hasChildren,
           })}
           onClick={() => {
-            if (!hasChildren) return;
+            if (!hasChildren || item.shouldOpen) return;
             isManualChangeRef.current = true;
             setIsCollapsed(!isCollapsed);
           }}
@@ -192,15 +211,15 @@ const CollapsibleItem: React.FC<CollapsibleItemProps> = React.memo(
             }}
           />
           {hasChildren && (
-            <div className={styles.itemCollapseIcon}>{isCollapsed ? <DownOutlined /> : <UpOutlined />}</div>
+            <div className={styles.itemCollapseIcon}>{effectiveCollapsed ? <RightOutlined /> : <DownOutlined />}</div>
           )}
         </div>
         {needsGradient && (
           <div style={{ position: 'relative' }}>
             <div
               className={classnames(styles.topGradient, {
-                [styles.close]: isCollapsed,
-                [styles.open]: !isCollapsed,
+                [styles.close]: effectiveCollapsed,
+                [styles.open]: !effectiveCollapsed,
               })}
             />
           </div>
@@ -209,25 +228,26 @@ const CollapsibleItem: React.FC<CollapsibleItemProps> = React.memo(
           {hasChildren && (
             <div
               className={classnames(styles.itemChildHeader, {
-                [styles.close]: isCollapsed,
-                [styles.open]: !isCollapsed,
+                [styles.close]: effectiveCollapsed,
+                [styles.open]: !effectiveCollapsed,
               })}
               ref={itemChildHeaderRef}
               onMouseEnter={() => {
                 isMouseOverRef.current = true;
               }}
             >
-              {item.children?.map((child, index) => (
-                <ThinkingProcessItemRender
-                  key={`${message?.msgId}_message_${index}`}
-                  thinkListItem={child}
-                  compKey={`${message?.msgId}_message_${index}`}
-                  message={message}
-                  messageIdx={child.messageIdx}
-                  updateMessageListItem={(path: string, val: any) => {
-                    return updateMessageListItemNewContent(`${child.messageIdx}.${path}`, val);
-                  }}
-                />
+              {item.children?.map((child: TreeNode, index: number) => (
+                <div
+                  key={`${message?.msgId}_message_${child.content?.orderId || index}`}
+                  className={classnames(styles.childItem, 'overflow-hidden full-width')}
+                >
+                  <CollapsibleItem
+                    item={child}
+                    message={message}
+                    parentTreeNode={item}
+                    updateMessageListItemNewContent={updateMessageListItemNewContent}
+                  />
+                </div>
               ))}
             </div>
           )}
@@ -236,8 +256,8 @@ const CollapsibleItem: React.FC<CollapsibleItemProps> = React.memo(
           <div style={{ position: 'relative' }}>
             <div
               className={classnames(styles.bottomGradient, {
-                [styles.close]: isCollapsed,
-                [styles.open]: !isCollapsed,
+                [styles.close]: effectiveCollapsed,
+                [styles.open]: !effectiveCollapsed,
               })}
             />
           </div>
@@ -268,7 +288,7 @@ function ThinkNewRootTitle(props: IProps) {
           message={message}
           updateMessageListItemNewContent={updateMessageListItemContent}
         >
-          {treeNode?.children?.map?.((item: NewIMessageListItem, index: number) => {
+          {treeNode?.children?.map?.((item: TreeNode, index: number) => {
             if (
               [
                 `${SSEMessageType.thinkTaskExecute}`,

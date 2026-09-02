@@ -2,10 +2,28 @@ services:
   redis-node-1:
     image: ${IMAGE_REDIS:-ghcr.io/beyonai/byclaw/byclaw-redis:main}
     container_name: byclaw-redis-node-1-${CONTAINER_SUFFIX:-middleware}
-    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --requirepass ${REDIS_PASSWORD} --masterauth ${REDIS_PASSWORD} --cluster-announce-ip ${HOST} --cluster-announce-port ${REDIS_CLUSTER_PORT_1:-6371} --cluster-announce-bus-port ${REDIS_CLUSTER_BUS_PORT_1:-16371}
+    command: >
+      redis-server
+      --port 6379
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout 5000
+      --appendonly yes
+      --appendfsync everysec
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+      --dir /data
+      --requirepass ${REDIS_PASSWORD}
+      --masterauth ${REDIS_PASSWORD}
+      --cluster-announce-ip ${HOST}
+      --cluster-announce-port ${REDIS_CLUSTER_PORT_1:-6371}
+      --cluster-announce-bus-port ${REDIS_CLUSTER_BUS_PORT_1:-16371}
     ports:
       - "${REDIS_CLUSTER_PORT_1:-6371}:6379"
       - "${REDIS_CLUSTER_BUS_PORT_1:-16371}:16379"
+    volumes:
+      - ./redisdata/node-1:/data
     networks:
       - byclaw-network
     restart: unless-stopped
@@ -13,10 +31,28 @@ services:
   redis-node-2:
     image: ${IMAGE_REDIS:-ghcr.io/beyonai/byclaw/byclaw-redis:main}
     container_name: byclaw-redis-node-2-${CONTAINER_SUFFIX:-middleware}
-    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --requirepass ${REDIS_PASSWORD} --masterauth ${REDIS_PASSWORD} --cluster-announce-ip ${HOST} --cluster-announce-port ${REDIS_CLUSTER_PORT_2:-6372} --cluster-announce-bus-port ${REDIS_CLUSTER_BUS_PORT_2:-16372}
+    command: >
+      redis-server
+      --port 6379
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout 5000
+      --appendonly yes
+      --appendfsync everysec
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+      --dir /data
+      --requirepass ${REDIS_PASSWORD}
+      --masterauth ${REDIS_PASSWORD}
+      --cluster-announce-ip ${HOST}
+      --cluster-announce-port ${REDIS_CLUSTER_PORT_2:-6372}
+      --cluster-announce-bus-port ${REDIS_CLUSTER_BUS_PORT_2:-16372}
     ports:
       - "${REDIS_CLUSTER_PORT_2:-6372}:6379"
       - "${REDIS_CLUSTER_BUS_PORT_2:-16372}:16379"
+    volumes:
+      - ./redisdata/node-2:/data
     networks:
       - byclaw-network
     restart: unless-stopped
@@ -24,10 +60,28 @@ services:
   redis-node-3:
     image: ${IMAGE_REDIS:-ghcr.io/beyonai/byclaw/byclaw-redis:main}
     container_name: byclaw-redis-node-3-${CONTAINER_SUFFIX:-middleware}
-    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --requirepass ${REDIS_PASSWORD} --masterauth ${REDIS_PASSWORD} --cluster-announce-ip ${HOST} --cluster-announce-port ${REDIS_CLUSTER_PORT_3:-6373} --cluster-announce-bus-port ${REDIS_CLUSTER_BUS_PORT_3:-16373}
+    command: >
+      redis-server
+      --port 6379
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout 5000
+      --appendonly yes
+      --appendfsync everysec
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+      --dir /data
+      --requirepass ${REDIS_PASSWORD}
+      --masterauth ${REDIS_PASSWORD}
+      --cluster-announce-ip ${HOST}
+      --cluster-announce-port ${REDIS_CLUSTER_PORT_3:-6373}
+      --cluster-announce-bus-port ${REDIS_CLUSTER_BUS_PORT_3:-16373}
     ports:
       - "${REDIS_CLUSTER_PORT_3:-6373}:6379"
       - "${REDIS_CLUSTER_BUS_PORT_3:-16373}:16379"
+    volumes:
+      - ./redisdata/node-3:/data
     networks:
       - byclaw-network
     restart: unless-stopped
@@ -35,10 +89,28 @@ services:
   redis-node-4:
     image: ${IMAGE_REDIS:-ghcr.io/beyonai/byclaw/byclaw-redis:main}
     container_name: byclaw-redis-node-4-${CONTAINER_SUFFIX:-middleware}
-    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --requirepass ${REDIS_PASSWORD} --masterauth ${REDIS_PASSWORD} --cluster-announce-ip ${HOST} --cluster-announce-port ${REDIS_CLUSTER_PORT_4:-6374} --cluster-announce-bus-port ${REDIS_CLUSTER_BUS_PORT_4:-16374}
+    command: >
+      redis-server
+      --port 6379
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout 5000
+      --appendonly yes
+      --appendfsync everysec
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+      --dir /data
+      --requirepass ${REDIS_PASSWORD}
+      --masterauth ${REDIS_PASSWORD}
+      --cluster-announce-ip ${HOST}
+      --cluster-announce-port ${REDIS_CLUSTER_PORT_4:-6374}
+      --cluster-announce-bus-port ${REDIS_CLUSTER_BUS_PORT_4:-16374}
     ports:
       - "${REDIS_CLUSTER_PORT_4:-6374}:6379"
       - "${REDIS_CLUSTER_BUS_PORT_4:-16374}:16379"
+    volumes:
+      - ./redisdata/node-4:/data
     networks:
       - byclaw-network
     restart: unless-stopped
@@ -46,10 +118,28 @@ services:
   redis-node-5:
     image: ${IMAGE_REDIS:-ghcr.io/beyonai/byclaw/byclaw-redis:main}
     container_name: byclaw-redis-node-5-${CONTAINER_SUFFIX:-middleware}
-    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --requirepass ${REDIS_PASSWORD} --masterauth ${REDIS_PASSWORD} --cluster-announce-ip ${HOST} --cluster-announce-port ${REDIS_CLUSTER_PORT_5:-6375} --cluster-announce-bus-port ${REDIS_CLUSTER_BUS_PORT_5:-16375}
+    command: >
+      redis-server
+      --port 6379
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout 5000
+      --appendonly yes
+      --appendfsync everysec
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+      --dir /data
+      --requirepass ${REDIS_PASSWORD}
+      --masterauth ${REDIS_PASSWORD}
+      --cluster-announce-ip ${HOST}
+      --cluster-announce-port ${REDIS_CLUSTER_PORT_5:-6375}
+      --cluster-announce-bus-port ${REDIS_CLUSTER_BUS_PORT_5:-16375}
     ports:
       - "${REDIS_CLUSTER_PORT_5:-6375}:6379"
       - "${REDIS_CLUSTER_BUS_PORT_5:-16375}:16379"
+    volumes:
+      - ./redisdata/node-5:/data
     networks:
       - byclaw-network
     restart: unless-stopped
@@ -57,10 +147,28 @@ services:
   redis-node-6:
     image: ${IMAGE_REDIS:-ghcr.io/beyonai/byclaw/byclaw-redis:main}
     container_name: byclaw-redis-node-6-${CONTAINER_SUFFIX:-middleware}
-    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --requirepass ${REDIS_PASSWORD} --masterauth ${REDIS_PASSWORD} --cluster-announce-ip ${HOST} --cluster-announce-port ${REDIS_CLUSTER_PORT_6:-6376} --cluster-announce-bus-port ${REDIS_CLUSTER_BUS_PORT_6:-16376}
+    command: >
+      redis-server
+      --port 6379
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout 5000
+      --appendonly yes
+      --appendfsync everysec
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+      --dir /data
+      --requirepass ${REDIS_PASSWORD}
+      --masterauth ${REDIS_PASSWORD}
+      --cluster-announce-ip ${HOST}
+      --cluster-announce-port ${REDIS_CLUSTER_PORT_6:-6376}
+      --cluster-announce-bus-port ${REDIS_CLUSTER_BUS_PORT_6:-16376}
     ports:
       - "${REDIS_CLUSTER_PORT_6:-6376}:6379"
       - "${REDIS_CLUSTER_BUS_PORT_6:-16376}:16379"
+    volumes:
+      - ./redisdata/node-6:/data
     networks:
       - byclaw-network
     restart: unless-stopped

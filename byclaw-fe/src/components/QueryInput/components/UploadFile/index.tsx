@@ -18,7 +18,7 @@ type IProps = {
   onCreate: (fileItem: IFile) => boolean;
   onUpdate: (fileItem: IFile) => void;
   onRemove: (fileItem: IFile) => void;
-  setSessionId: (sessionId: string, file: any) => void;
+  setSessionId: (sessionId: string, sessionName?: string) => void;
   beforeUpload?: (files: File[]) => boolean;
 
   accept?: string;
@@ -91,17 +91,17 @@ const UploadFile = forwardRef<UploadFileRef, IProps>((props, ref) => {
     try {
       const data: {
         sessionId?: string;
+        sessionName?: string;
         sessionDatasetid?: string;
         rebuildFileList?: IQueryFile[];
         uploadItems?: Partial<IQueryFile>[];
       } = await uploadFiles(formData);
 
-      const { rebuildFileList = [], uploadItems: responseUploadItems = [], sessionId } = data || {};
+      const { rebuildFileList = [], uploadItems: responseUploadItems = [], sessionId, sessionName } = data || {};
       const uploadedFileList = !isEmpty(rebuildFileList) ? rebuildFileList : responseUploadItems;
 
-      const firstUploadedFile = uploadItems[0]?.file;
-      if (sessionId && firstUploadedFile && setSessionId) {
-        setSessionId(sessionId, firstUploadedFile);
+      if (sessionId && setSessionId) {
+        setSessionId(sessionId, sessionName);
       }
 
       if (!isEmpty(uploadedFileList)) {
@@ -198,7 +198,7 @@ const UploadFile = forwardRef<UploadFileRef, IProps>((props, ref) => {
               event.currentTarget.click();
             }}
           >
-            <AntdIcon type="icon-shouye-icon-wrapper" />
+            <AntdIcon type="icon-shouye-icon-wrapper" style={{ fontSize: '18px' }} />
           </span>
         </Tooltip>
       )}

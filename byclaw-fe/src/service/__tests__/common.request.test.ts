@@ -239,6 +239,27 @@ describe('Service Common Request', () => {
     expect(showRequestErrorModal).toHaveBeenCalledWith('boom');
   });
 
+  it('suppresses the global error modal for an opted-in credential verification failure', async () => {
+    mockRequest.mockResolvedValue({
+      data: {
+        code: 500,
+        msg: 'fake-api-key-must-not-be-shown',
+      },
+      config: {
+        url: '/byaiService/connector/authorization/start',
+      },
+    });
+
+    await expect(
+      POST(
+        '/byaiService/connector/authorization/start',
+        { connectorId: 9, credentials: { clientId: 'client-id', apiKey: 'fake-api-key' } },
+        { responseCfg: { hideErrorTips: true } }
+      )
+    ).rejects.toBe('fake-api-key-must-not-be-shown');
+    expect(showRequestErrorModal).not.toHaveBeenCalled();
+  });
+
   it('preserves an opted-in HTTP 409 error response for a caller to handle', async () => {
     const error = {
       status: 409,

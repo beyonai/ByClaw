@@ -2,9 +2,19 @@ services:
   redis:
     image: ${IMAGE_REDIS:-ghcr.io/beyonai/byclaw/byclaw-redis:main}
     container_name: byclaw-redis-${CONTAINER_SUFFIX:-middleware}
-    command: redis-server --requirepass ${REDIS_PASSWORD}
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD}
+      --appendonly yes
+      --appendfsync everysec
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+      --dir /data
     ports:
       - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - ./redisdata:/data
     networks:
       - byclaw-network
     restart: unless-stopped

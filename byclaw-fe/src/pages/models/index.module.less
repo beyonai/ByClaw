@@ -1,3 +1,5 @@
+@antPrefix: ant;
+
 .container {
   height: 100%;
   padding: 24px;
@@ -12,12 +14,36 @@
   margin-bottom: 20px;
 }
 
-.tabs {
+.secondaryTabs {
   flex-shrink: 0;
 
-  :global(.ant-tabs-nav),
-  :global(.beyond-tabs-nav) {
-    margin-bottom: 0;
+  :global {
+    .@{antPrefix}-tabs-nav {
+      margin-bottom: 0;
+
+      .@{antPrefix}-tabs-tab {
+        margin: 0;
+        padding: 6px 0;
+        font-size: 16px;
+        line-height: 22px;
+
+        + .@{antPrefix}-tabs-tab {
+          margin-left: 24px;
+        }
+      }
+
+      .@{antPrefix}-tabs-tab-btn {
+        color: var(--beyond-color-text) !important;
+        font-size: 16px;
+        line-height: 22px;
+        text-shadow: none !important;
+      }
+
+      .@{antPrefix}-tabs-ink-bar {
+        height: 3px;
+        background-color: var(--beyond-color-text);
+      }
+    }
   }
 }
 
@@ -49,7 +75,14 @@
 }
 
 .grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 360px), 1fr));
+  gap: 16px;
   margin-bottom: 20px;
+
+  > div {
+    min-width: 0;
+  }
 }
 
 .pagination {

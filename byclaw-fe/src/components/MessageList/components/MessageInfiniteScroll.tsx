@@ -74,6 +74,8 @@ export default class MessageInfiniteScroll extends Component<Props, State> {
 
   private scrollBottomRaf: number | null = null;
 
+  private mounted = false;
+
   constructor(props: Props) {
     super(props);
 
@@ -88,6 +90,7 @@ export default class MessageInfiniteScroll extends Component<Props, State> {
   }
 
   componentDidMount() {
+    this.mounted = true;
     if (typeof this.props.dataLength === 'undefined') {
       throw new Error(
         'mandatory prop "dataLength" is missing. The prop is needed' +
@@ -163,6 +166,7 @@ export default class MessageInfiniteScroll extends Component<Props, State> {
   }
 
   componentWillUnmount() {
+    this.mounted = false;
     if (this.el) {
       this.el.removeEventListener('scroll', this.bindScroll as EventListenerOrEventListenerObject);
     }
@@ -270,6 +274,22 @@ export default class MessageInfiniteScroll extends Component<Props, State> {
     );
   };
 
+  releaseLoadingWhenRequestSettles = (request: any, requestedDataLength: number) => {
+    const release = () => {
+      if (!this.mounted || this.props.dataLength !== requestedDataLength) return;
+
+      // 返回页全部被过滤或去重时数量不变，仍需释放加载锁以允许继续翻页。
+      this.loading = false;
+      this.actionTriggered = false;
+      this.setState({
+        showLoader: false,
+        showOppositeDirLoader: false,
+      });
+    };
+
+    Promise.resolve(request).then(release, release);
+  };
+
   onScrollListener = (event: MouseEvent, direction?: 'down' | 'up') => {
     let target: HTMLElement;
     if (this.props.height || this._scrollableNode) {
@@ -316,12 +336,16 @@ export default class MessageInfiniteScroll extends Component<Props, State> {
       this.actionTriggered = true;
       this.setState({ showLoader: true });
       if (this.props.next) {
-        this.props.next();
+        const requestedDataLength = this.props.dataLength;
+        const request = this.props.next();
+        this.releaseLoadingWhenRequestSettles(request, requestedDataLength);
       }
     } else if (atTop && !this.loading && !this.state.showLoader) {
       if (typeof this.props.lowestPageNum === 'number' && this.props.lowestPageNum > 1 && scrollDirection === 'up') {
         this.setState({ showOppositeDirLoader: true });
-        this.props?.next(true);
+        const requestedDataLength = this.props.dataLength;
+        const request = this.props?.next(true);
+        this.releaseLoadingWhenRequestSettles(request, requestedDataLength);
       }
     }
   };

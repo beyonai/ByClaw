@@ -51,7 +51,12 @@ describe("byclaw_chat_context tool", () => {
     const result = await tool.execute("call-1", { current_lane_only: false });
 
     expect(result.details.sessionId).toBe("s-1");
+    expect(result.details).toMatchObject({
+      source: "process_observation_cache",
+      authoritative: false,
+    });
     expect(result.details.messages).toHaveLength(2);
+    expect(result.content[0].text).toContain("process-local observation cache");
     expect(result.content[0].text).toContain("HANDOFF_BUNDLE H-1");
     expect(result.content[0].text).toContain("ByClaw coder");
   });

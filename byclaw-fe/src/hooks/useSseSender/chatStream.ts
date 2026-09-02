@@ -65,6 +65,7 @@ export function formatStreamPayload(eventName: string, res: any) {
 
   switch (eventName) {
     case 'createSession':
+    case 'sessionTitleUpdated':
     case 'initMessage':
     case 'initialization': {
       Object.assign(payload, { ...res });
@@ -75,6 +76,7 @@ export function formatStreamPayload(eventName: string, res: any) {
     case 'answerEnd': {
       Object.assign(payload, answerDeltaHandler(res, eventName));
       Object.assign(payload, pick(res, ['messageId', 'queryMessageId', 'metadata', 'traceId']));
+      Object.assign(payload, pick(res, ['seq', 'messageRenderVersion']));
       Object.assign(payload, streamContextFields);
       break;
     }
@@ -83,6 +85,7 @@ export function formatStreamPayload(eventName: string, res: any) {
     case 'reasoningLogEnd': {
       Object.assign(payload, reasoningLogHandler(res, eventName));
       Object.assign(payload, pick(res, ['messageId', 'queryMessageId', 'metadata', 'traceId']));
+      Object.assign(payload, pick(res, ['seq', 'messageRenderVersion']));
       Object.assign(payload, streamContextFields);
       break;
     }

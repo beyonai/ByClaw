@@ -36,7 +36,23 @@ export interface EmployeeListProps {
   onSelect?: (employee: any) => void;
   keyword?: string;
   renderActionIcon?: (employee: IAgentCache) => React.ReactNode;
+
+  /** 输入框中已 @ 的数字员工标识，候选列表不再重复展示。 */
+  excludedAgentIds?: string[];
+
+  /** 隐藏全部/常用/最近分类，仅展示搜索框和员工列表。 */
+  hideCategoryTabs?: boolean;
+
+  /** 紧凑员工卡片内容间距，供输入框资源选择面板使用。 */
+  compactCard?: boolean;
 }
+
+export const isExcludedEmployee = (employee: IAgentCache, excludedAgentIds: string[] = []) => {
+  const excludedIds = new Set(excludedAgentIds.filter(Boolean).map((item) => `${item}`));
+  return [employee.agentId, employee.resourceId, employee.resourceCode, employee.id]
+    .filter(Boolean)
+    .some((item) => excludedIds.has(`${item}`));
+};
 
 const getSelectItems = (intl: ReturnType<typeof useIntl>) => [
   {
@@ -57,7 +73,7 @@ const getSelectItems = (intl: ReturnType<typeof useIntl>) => [
 ];
 
 const EmployeeList: React.FC<EmployeeListProps> = (props) => {
-  const { chatMode, style, keyword } = props;
+  const { chatMode, style, keyword, hideCategoryTabs = false, compactCard = false } = props;
 
   const intl = useIntl();
   const navigate = useNavigate();
@@ -107,7 +123,10 @@ const EmployeeList: React.FC<EmployeeListProps> = (props) => {
   }, [keyword, selectedKeys]);
 
   return (
-    <div className={classNames(styles.employeesSider, styles.list)} style={style}>
+    <div
+      className={classNames(styles.employeesSider, styles.list, { [styles.compactCard]: compactCard })}
+      style={style}
+    >
       {!isInput && (
         <div className="ub ub-ac gap12">
           <div
@@ -158,21 +177,23 @@ const EmployeeList: React.FC<EmployeeListProps> = (props) => {
           onPressEnter={() => getSearch()}
         />
       </div>
-      <div className="ub-ac gap8 mb-8" style={{ display: 'flex' }}>
-        {SelectItems.map((item) => {
-          return (
-            <div
-              className={classNames(styles.typeItem, {
-                [styles.active]: selectedKeys === item.value,
-              })}
-              onClick={() => setSelectedKeys(item.value)}
-              key={item.value}
-            >
-              {item.label}
-            </div>
-          );
-        })}
-      </div>
+      {!hideCategoryTabs && !isInput && (
+        <div className="ub-ac gap8 mb-8" style={{ display: 'flex' }}>
+          {SelectItems.map((item) => {
+            return (
+              <div
+                className={classNames(styles.typeItem, {
+                  [styles.active]: selectedKeys === item.value,
+                })}
+                onClick={() => setSelectedKeys(item.value)}
+                key={item.value}
+              >
+                {item.label}
+              </div>
+            );
+          })}
+        </div>
+      )}
       <div id="guideStep2-3" className="ub-f1 ub ub-ver">
         <EmployeeListContext.Provider value={{ chatMode }}>
           <Tabs activeKey={selectedKeys} tabBarStyle={{ display: 'none' }} className={classNames('full-height')}>

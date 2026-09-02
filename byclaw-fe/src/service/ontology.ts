@@ -209,7 +209,8 @@ export function pageOntologyResources(params: {
 }) {
   const keyword = params.keyword?.trim();
   return ontologyPost('/byaiService/ontology/resource/page', {
-    ownerType: normalizeOwnerType(params.ownerType),
+    // 未传 ownerType 时由后端按当前用户可见范围返回（创建+授权）；指定 enterprise 时保留官方推荐口径。
+    ...(params.ownerType ? { ownerType: params.ownerType } : {}),
     resourceBizType: params.resourceBizType,
     resourceBizTypeList: params.resourceBizTypeList,
     systemCode: normalizeSystemCode(params.systemCode),

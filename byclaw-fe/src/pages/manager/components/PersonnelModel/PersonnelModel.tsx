@@ -188,15 +188,17 @@ const PersonnelModel = (props) => {
         return (
           <div>
             <div className={styles.groupTitle}>{groupTitle}</div>
-            {checkboxList?.slice(0, searchAllEachSize)?.map((item) => (
-              <CheckboxRender
-                key={item[itemKey]}
-                item={item}
-                itemKey={itemKey}
-                isSearch
-                disabled={disabledIds.includes(item[itemKey])}
-              />
-            ))}
+            <div className={styles.groupItems}>
+              {checkboxList?.slice(0, searchAllEachSize)?.map((item) => (
+                <CheckboxRender
+                  key={item[itemKey]}
+                  item={item}
+                  itemKey={itemKey}
+                  isSearch
+                  disabled={disabledIds.includes(item[itemKey])}
+                />
+              ))}
+            </div>
             {checkboxList.length > searchAllEachSize && (
               <Button type="link" size="small" onClick={() => handleSearch(type)}>
                 {intl.formatMessage({ id: 'personnelModel.viewMore' })}

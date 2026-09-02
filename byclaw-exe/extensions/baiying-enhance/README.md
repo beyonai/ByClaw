@@ -143,6 +143,8 @@ Redis Pub/Sub 默认启用；如需关闭，可设置 `digEmployeeChangeSubscrib
 
 生产注册路径不会从 `DIG_EMPLOYEE_{resourceId}` 读取或写出模型密钥。插件优先解析数字员工 JSON 中的 `prologue.modelId`，再从 Redis Hash `byai:aimodel:config`（可用 `aimodelConfigRedisKey` 覆盖）按 field `<modelId>` 读取模型详情。若数字员工没有配置 `modelId`，则读取 Redis Hash `byai:aimodel:typelist`（可用 `aimodelTypeListRedisKey` 覆盖）的 `LLM` field，选择可用默认 LLM，并同时写入 `agents.defaults.model.primary` 供 main agent 使用。
 
+动态写入的 `models.providers.baiying-m-*` 会自动设置 `timeoutSeconds`，默认 `600` 秒；如果网关进程环境中存在非空的 `BYCLAW_LLM_IDLE_TIME`，则使用其正整数值覆盖默认值。该 Provider 超时用于模型请求/LLM idle watchdog，不会设置 Agent Run 的总时长；后者仍由 `agents.defaults.timeoutSeconds` 控制。
+
 模型详情映射到托管 `models.providers.baiying-m-*`：
 
 - `url` → `baseUrl`
@@ -175,6 +177,14 @@ Redis Pub/Sub 默认启用；如需关闭，可设置 `digEmployeeChangeSubscrib
 - 在提示词中展开知识库、toolkit、MCP、AGENT 等能力
 - 由插件内置的 **TypeScript 执行器**（`src/executor/`，按资源类型拆分为 `toolkit.ts` / `tool.ts` / `agent.ts` / `mcp.ts` / `doc.ts` 等）在进程内统一执行并做参数校验/回填；历史上的 `~/.openclaw/skills/baiying/executor.py` 已废弃不再调用
 
+托管数字员工会启用 OpenClaw 原生 `image_generate`，插件不再实现自己的文生图工具或
+MiniMax HTTP 客户端。`baiying-redis-image` provider 在每次原生工具调用时重新读取 Redis 中的
+`DIG_EMPLOYEE_{resourceId}`：员工存在非空 `imageModelId` 时只使用
+`byai:aimodel:config` 中对应模型；未配置 `imageModelId` 时才读取
+`byai:aimodel:typelist` 的 `IMAGE_GENERATION` 全局默认。显式选择缺失、停用或类型错误时会直接报错，不会静默回退全局默认，因此管理端改动可在下一次调用热生效且不会掩盖错误配置。
+
+动态层把 `providerName` / `modelProtocol` / `modelCode` 映射到 OpenClaw 已注册的原生 image-generation provider，当前覆盖 MiniMax、OpenAI/ChatGPT、Google/Gemini、OpenRouter、LiteLLM、FAL、DeepInfra、xAI、Microsoft Foundry、Comfy 和 Vydra。Qwen 若暴露 OpenAI-compatible image API 可用 `QWEN + OPENAI_IMAGE`；其他 DashScope 专用协议应通过 OpenRouter/LiteLLM，或先为 OpenClaw 安装对应 provider，不能回退到自定义工具。`authToken` 复用现有 AI 模型 SM4 解密逻辑，只注入单次调用的内存配置，不持久化到 `openclaw.json`，也不会进入工具结果或错误消息。图片保存、后台任务、编辑、格式和 provider 能力归一化均由 OpenClaw 原生 `image_generate` 处理。
+
 如需完整运行态说明、架构与流程图，请优先阅读：
 
 - [docs/PLUGIN_OVERVIEW.zh-CN.md](docs/PLUGIN_OVERVIEW.zh-CN.md)
@@ -206,6 +216,14 @@ Redis Pub/Sub 默认启用；如需关闭，可设置 `digEmployeeChangeSubscrib
 对百应详情 / 数字员工格式，插件会读取 JSON **根**上的 **`relTools`**（字符串数组）并写入托管 agent 的 **`agents.list[].tools.allow`**；元素会 `trim`，空串丢弃。配置 `["*"]` 表示允许全部 OpenClaw tools。
 
 该格式的托管 agent 仍会保留 **`baiying_call`**，用于调用百应关联资源桥接工具：当 `relTools` 非空时合并进 `tools.allow`，否则写为 `tools.alsoAllow`。数字员工 JSON 内容变化后，Redis Pub/Sub 或显式 flush 触发重新扫描时，`relTools` 变更会随配置同步写回；插件同时写入一个禁用的内部 `skills.entries.__baiying_enhance_reload` 标记，让 OpenClaw 刷新 skills/tools 快照，无需重启网关。
+
+### Zread 默认模型同步
+
+插件默认将 Redis `byai:aimodel:typelist` Hash 的 `LLM` 字段中 `isDefault=1` 的平台默认模型同步到运行用户的 Zread 配置。同步复用 OpenClaw 已有的默认模型解析与解密缓存，只支持 OpenAI-compatible provider；Anthropic provider 会保留现有 Zread 配置并输出告警。
+
+插件通过 `zread config --stdio` 的 JSON-line 协议写入 `llm_provider=custom`、BaseURL、模型名和 API Key，不把密钥放入命令行或日志。首次启动会同步一次，之后 main agent 每次检查 Redis 默认模型时会按模型配置签名去重并在变化后重新同步。可通过 `zreadModelSyncEnabled=false` 禁用，或用 `zreadCommand`、`zreadConfigTimeoutMs` 调整命令及超时。
+
+同步成功后，agent 可以在已经准备好的本地仓库根目录直接运行 `zread generate --stdio -y --draft resume --skip-failed`；生成内容由 Zread 写入该仓库的 `.zread/wiki/`，stdout JSON 事件可直接作为生成进度消费。运行时镜像内置 `zread-wiki` skill，只提供该直接调用约定与“不得重复克隆”的边界，不包装或代理 CLI。
 
 ## HTTP
 

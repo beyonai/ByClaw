@@ -4,57 +4,78 @@
   height: 100%;
   min-height: 0;
   padding: 20px 24px;
-  gap: 16px;
-}
-
-.header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.title {
-  margin: 0 !important;
-}
-
-.filterCard {
-  flex: none;
+  gap: 14px;
 }
 
 .filterForm {
   display: grid;
-  grid-template-columns: minmax(200px, 0.9fr) minmax(220px, 1fr) minmax(440px, 2fr) auto;
-  align-items: end;
-  gap: 16px;
+  grid-template-columns: 180px 180px minmax(280px, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+  flex: none;
 
   :global(.ant-form-item) {
     min-width: 0;
     margin-bottom: 0;
   }
+
+  :global(.ant-select),
+  :global(.ant-input-affix-wrapper) {
+    width: 100%;
+    font-size: 14px;
+  }
+
+  :global(.ant-select-selector),
+  :global(.ant-input-affix-wrapper),
+  :global(.ant-btn) {
+    height: 36px;
+  }
+
+  :global(.ant-select-selector) {
+    display: flex;
+    align-items: center;
+  }
 }
 
 .filterType,
-.filterTitle,
-.filterContent {
+.filterStatus,
+.filterKeyword {
   min-width: 0;
 }
 
 .filterActions {
   display: flex;
-  align-self: end;
+  align-items: flex-start;
+  align-self: start;
   flex: 0 0 auto;
   justify-content: flex-end;
   gap: 8px;
   white-space: nowrap;
 }
 
-.tableCard {
+.tableSection {
   flex: 1;
   min-height: 0;
+  overflow: hidden;
+  border-top: 1px solid #eef0f3;
 
-  :global(.ant-card-body) {
+  :global(.ant-table-wrapper) {
     height: 100%;
-    padding: 0;
+  }
+
+  :global(.ant-table-thead > tr > th),
+  :global(.ant-table-tbody > tr > td),
+  :global(.ant-table-cell .ant-typography),
+  :global(.ant-table-cell .ant-btn) {
+    font-size: 14px;
+  }
+
+  :global(.ant-table-thead > tr > th) {
+    padding-block: 14px;
+  }
+
+  :global(.ant-table-tbody > tr > td) {
+    padding-block: 13px;
   }
 }
 
@@ -71,6 +92,68 @@
   max-width: 100%;
 }
 
+.titleLink {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: hidden;
+  padding: 0;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.typeTag {
+  border-radius: 10px;
+  background: #fff;
+}
+
+.typeBug {
+  border-color: #ffccc7;
+  color: #cf1322;
+}
+
+.typeSuggestion {
+  border-color: #91caff;
+  color: #1677ff;
+}
+
+.typeInquiry {
+  border-color: #d3adf7;
+  color: #722ed1;
+}
+
+.typeOther {
+  border-color: #d9d9d9;
+  color: #595959;
+}
+
+.statusTag {
+  border: 0;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.statusPending {
+  color: #d46b08;
+  background: #fff7e6;
+}
+
+.statusProcessing {
+  color: #0958d9;
+  background: #e6f4ff;
+}
+
+.statusResolved {
+  color: #389e0d;
+  background: #f6ffed;
+}
+
+.statusClosed {
+  color: #595959;
+  background: #f0f0f0;
+}
+
 .detailSection {
   margin-top: 20px;
 }
@@ -79,6 +162,45 @@
   margin-bottom: 12px;
   font-size: 15px;
   font-weight: 600;
+}
+
+.detailDescriptions {
+  :global(.ant-descriptions-item-label) {
+    width: 120px !important;
+    min-width: 120px !important;
+    word-break: keep-all !important;
+    white-space: nowrap !important;
+  }
+}
+
+.statusAction {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 14px;
+  border-radius: 8px;
+  background: #f7f8fa;
+}
+
+.statusSegmented {
+  align-self: flex-start;
+  width: auto;
+
+  :global(.ant-segmented-item-label) {
+    min-width: 88px;
+    padding-inline: 18px;
+  }
+}
+
+.statusActionFooter {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.processCommentField {
+  // TextArea 的字数统计位于输入框下方，需要单独预留空间，避免与操作按钮重叠。
+  padding-bottom: 18px;
 }
 
 .screenshot {
@@ -154,13 +276,13 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .filterContent,
-  .filterActions {
+  .filterKeyword {
     grid-column: 1 / -1;
   }
 
   .filterActions {
-    justify-content: flex-end;
+    grid-column: 1 / -1;
+    grid-row: auto;
   }
 }
 
@@ -174,6 +296,8 @@
   }
 
   .filterActions {
+    grid-column: 1 / -1;
+    grid-row: auto;
     width: 100%;
     justify-content: flex-end;
   }

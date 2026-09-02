@@ -1,7 +1,8 @@
 import React from 'react';
 
 import { getIntl } from '@umijs/max';
-import { Button, ConfigProvider, Divider, message, Popover, Progress, Space } from 'antd';
+import { Button, ConfigProvider, message, Popover, Progress, Space, Tooltip } from 'antd';
+import type { PopoverProps } from 'antd';
 import { get, isBoolean, isEmpty, isNil, pullAllBy, set, trim, compact, omit } from 'lodash';
 import classNames from 'classnames';
 import { agentTypeMap } from '@/constants/agent';
@@ -23,6 +24,8 @@ import type { IAgentFileUploadConf } from '../../hooks/useAgentUploadFileConfig'
 import type { DefaultValueSchema } from './RichInput/types';
 import type { ContextUsed } from '@/hooks/useContextUsed';
 import { getLastMentionedDigitalEmployeeId } from './utils/mention';
+import MentionPopover from './RichInput/mentionPopover';
+import { getResourcePopoverAdapter } from './RichInput/mentionPopover/resourcePopoverAdapter';
 
 export type IProps = {
   getMessageList?: () => Array<IMessage>;
@@ -53,6 +56,22 @@ export type IProps = {
   inputDraft?: DefaultValueSchema;
   onInputDraftChange?: (draft: DefaultValueSchema) => void;
   contextUsed?: ContextUsed;
+
+  /** 当前会话所属项目。 */
+  projectId?: number;
+
+  /** 当前会话所属项目的知识库 ID，用于项目云盘浏览。 */
+  projectCloudResourceId?: string | number;
+  mentionPopoverPlacement?: PopoverProps['placement'];
+
+  /** 控制新会话项目选择入口，避免通知等复用输入框误展示。 */
+  enableTaskTemplate?: boolean;
+
+  /** 输入框外部项目选择器当前选中的项目。 */
+  selectedProject?: { projectId: string; projectName: string; cloudResourceId?: string | number };
+
+  /** 新建任务上传文件生成会话后，由外层决定是否暂时保持新建任务视图。 */
+  onFileUploadSessionCreated?: (sessionId: string) => void;
 };
 
 export type IState = {
@@ -63,6 +82,12 @@ export type IState = {
   resourceList: RichInputResourceList;
   connectNet?: boolean;
   connectNetAgentId?: string;
+  toolsPopoverOpen?: boolean;
+  activeToolMenuKey?: string;
+  moreToolsExpanded?: boolean;
+  toolsPopoverWidth?: number;
+  toolsPopoverKeyword?: string;
+  visitedToolTabs?: string[];
 };
 
 const AUTOSEND_TIMEOUT = 5000;
@@ -83,6 +108,25 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
 
   uploadFileRef = React.createRef<UploadFileRef>();
 
+  inputBlockRef = React.createRef<HTMLDivElement>();
+
+  selectedProject?: { projectId: string; projectName: string };
+
+  handleProjectChange = (project: { projectId: string; projectName: string }) => {
+    this.selectedProject = project;
+  };
+
+  /** 打开统一资源弹窗，并切换到指定资源分类。供输入框外部快捷入口复用。 */
+  openResourcePicker = (tabKey = 'expert') => {
+    this.setState({
+      toolsPopoverOpen: true,
+      toolsPopoverWidth: this.inputBlockRef.current?.getBoundingClientRect().width,
+      toolsPopoverKeyword: undefined,
+      activeToolMenuKey: tabKey,
+      visitedToolTabs: [tabKey],
+    });
+  };
+
   constructor(props: P & IProps) {
     super(props);
 
@@ -92,6 +136,12 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
       fileList: [],
       singleChatTargetRealHumanFlag: true,
       connectNet: false,
+      toolsPopoverOpen: false,
+      activeToolMenuKey: 'expert',
+      moreToolsExpanded: false,
+      toolsPopoverWidth: undefined,
+      toolsPopoverKeyword: undefined,
+      visitedToolTabs: ['expert'],
     } as S & IState;
   }
 
@@ -115,6 +165,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
     const { EventEmitter } = this.props.globalContext;
     EventEmitter.on('queryInput-push-fileList', this.pushFileList);
     EventEmitter.on('queryInput-set-value', this.setInputValue);
+    EventEmitter.on('queryInput-set-value-and-send', this.setInputValueAndSend);
     EventEmitter.on('queryInput-set-schema-imme', this.setCommonStateBySchema);
     EventEmitter.on('queryInput-paste-files', this.onPasteFiles);
     EventEmitter.emit('pcLayout-contains-chatLayout', true, { waitForListeners: true });
@@ -133,6 +184,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
     const { EventEmitter } = this.props.globalContext;
     EventEmitter.off('queryInput-push-fileList', this.pushFileList);
     EventEmitter.off('queryInput-set-value', this.setInputValue);
+    EventEmitter.off('queryInput-set-value-and-send', this.setInputValueAndSend);
     EventEmitter.off('queryInput-set-schema-imme', this.setCommonStateBySchema);
     EventEmitter.off('queryInput-paste-files', this.onPasteFiles);
     EventEmitter.emit('pcLayout-contains-chatLayout', false);
@@ -140,7 +192,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
 
   onSelectMentionPopoverItem: RichInputRef['insertItem'] = (item, type) => {
     this.richInputRef.current?.insertItem(item, type);
-    this.setState((prev) => ({ ...prev, showMentionPopoverType: '' }));
+    this.setState((prev) => ({ ...prev, showMentionPopoverType: '', toolsPopoverOpen: false }));
   };
 
   restoreInputDraft = () => {
@@ -362,6 +414,16 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
     });
   };
 
+  // 外部任务模板入口使用该事件将生成内容写入输入框并直接发送。
+  setInputValueAndSend = (text: string) => {
+    if (!text?.trim()) return;
+    this.richInputRef.current?.setText(text);
+    this.setState({ inputValue: text }, () => {
+      this.onSendQuery();
+      this.richInputRef.current?.clearAfterSend();
+    });
+  };
+
   getSendPayload = () => {
     const currentInputPayload = this.getCurrentInputPayload();
     const inputValue = currentInputPayload?.text ?? this.state.inputValue;
@@ -382,8 +444,28 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
 
   // 所有子类的onSend都从父类这里触发，这里需要额外加一些公共的参数
   finallySendQuery = (data: any) => {
-    let { resourceList = [] } = this.state;
+    // Chat、Employees 等输入框会覆盖 getSendPayload，项目选择必须在公共发送出口统一补入。
+    const selectedProject = this.props.selectedProject || this.selectedProject;
     const currentInputPayload = this.getCurrentInputPayload();
+    if (currentInputPayload?.displayText) {
+      // 发送给后端的 text 需要保留 {{DIG_EMPLOYEE_xxx}}，临时会话标题使用用户可见的员工名称。
+      set(data, 'displayText', currentInputPayload.displayText);
+    }
+    // 上传附件会提前生成 sessionId，但当前页面仍属于新建任务；此时必须优先使用用户选择的项目，
+    // 不能因为 sessionId 已存在就误走历史会话分支，回退到默认项目。
+    // 文件上传会提前创建临时 sessionId；此时仍应优先使用输入框选择的项目，避免项目归属丢失。
+    if (
+      selectedProject &&
+      (!this.props.sessionId || this.props.isBottom === false || this.props.projectId === undefined)
+    ) {
+      set(data, 'payload.selectedProjectId', selectedProject.projectId);
+      set(data, 'payload.selectedProjectName', selectedProject.projectName);
+    } else if (this.props.sessionId && this.props.projectId !== undefined) {
+      // 历史会话没有项目选择器，继续聊天时直接沿用当前会话所属项目。
+      set(data, 'payload.projectId', this.props.projectId);
+    }
+
+    let { resourceList = [] } = this.state;
     if (currentInputPayload?.resourceList) {
       resourceList = currentInputPayload.resourceList;
     }
@@ -430,10 +512,10 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
 
   inputLower = () => {
     const { onCancel, cannotSend } = this.props;
-
-    const BottomRightRender = this.bottomRightRender();
     const canSend = this.checkCanSend();
-
+    const bottomLeft = this.bottomLeftRender();
+    const bottomRight = this.bottomRightRender();
+    const hasTools = !!bottomLeft || !!bottomRight;
     return (
       <div className={styles.tools}>
         <ConfigProvider
@@ -445,14 +527,24 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
             },
           }}
         >
-          <Space>{this.bottomLeftRender()}</Space>
+          {hasTools && (
+            <>
+              <Tooltip title="可添加数字员工、技能、连接器">
+                <Button
+                  type="text"
+                  className={styles.addToolButton}
+                  aria-label="打开聊天工具"
+                  icon={<AntdIcon type="icon-a-Plusjia" style={{ fontSize: 20 }} />}
+                  onClick={() => this.openResourcePicker('expert')}
+                />
+              </Tooltip>
+            </>
+          )}
+          <div className={classNames(styles.outsideTools, hasTools && styles.outsideToolsWithTools)}>{bottomRight}</div>
         </ConfigProvider>
         <Space className={styles.toolsRight}>
-          {BottomRightRender}
-
           {!cannotSend && (
             <>
-              {BottomRightRender && <Divider type="vertical" />}
               {!this.checkIsSending() ? (
                 <Button
                   icon={<AntdIcon type="icon-fasong-tingzhi" style={{ fontSize: 24 }} />}
@@ -592,9 +684,11 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
 
   checkCanQuote = () => {
     const { employeesList } = this.props;
-    const quoteAgentId = this.getQuoteAgentId();
+    const inlineAgentIds = this.getInlineDigitalEmployeeList().map((item) => `${item.resourceId}`);
+    const quoteAgentId = inlineAgentIds.length === 1 ? inlineAgentIds[0] : undefined;
 
-    if (!quoteAgentId || !employeesList) return false;
+    // # 资源入口始终可用：未 @ 员工时展示全部资源，已 @ 员工时再按员工范围过滤。
+    if (!quoteAgentId || !employeesList) return true;
     // 页面集成类型的数字员工，不允许#技能
     const integrationType = employeesList?.find(
       (item) =>
@@ -610,7 +704,9 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
   chechCannotAt = () => this.props.cannotAt;
 
   getResourceAgentIds = (): string | undefined => {
-    return this.getQuoteAgentId();
+    // 仅使用输入框内显式 @ 的员工作为资源过滤条件；会话默认员工不应限制 # 的全量列表。
+    const inlineAgentIds = Array.from(new Set(this.getInlineDigitalEmployeeList().map((item) => `${item.resourceId}`)));
+    return inlineAgentIds.length ? inlineAgentIds.join(',') : undefined;
   };
 
   renderInput() {
@@ -642,14 +738,15 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
               : { text, resourceList };
             this.props.onInputDraftChange?.(draft);
             this.syncSiderAgent(resourceList);
-            if (!cannotAt && agentId !== currentAgentId) {
+            if (!cannotAt && `${agentId || ''}` !== `${currentAgentId || ''}`) {
               let nextAgentType = agentType;
               if (!currentAgentId && agentId) {
                 // agentId从有到无，意味着，用户在输入框内，主动删除了输入框最左侧的agent数字员工，这个时候，agentType直接转为common
                 nextAgentType = agentTypeMap.common;
               }
               setMyAgentType?.(nextAgentType as IAgentType);
-              setAgentId?.(currentAgentId || '');
+              // 全局会话员工 ID 统一使用字符串，避免 number/string 来回切换触发默认 @ 节点重建。
+              setAgentId?.(currentAgentId ? `${currentAgentId}` : '');
             }
           }}
           onSend={() => {
@@ -662,6 +759,17 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
           }}
           canQuote={this.checkCanQuote()}
           resourceAgentIds={this.getResourceAgentIds()}
+          projectId={this.props.projectId}
+          projectCloudResourceId={this.props.projectCloudResourceId}
+          mentionPopoverPlacement={this.props.mentionPopoverPlacement}
+          onResourcePopoverChange={({ open, inputText, width }) =>
+            this.setState({
+              toolsPopoverOpen: open,
+              toolsPopoverWidth: open ? width : undefined,
+              toolsPopoverKeyword: open ? inputText : undefined,
+              ...(open ? { activeToolMenuKey: 'expert', visitedToolTabs: ['expert'] } : {}),
+            })
+          }
         />
         {this.getAssitantTrigger()}
       </div>
@@ -670,7 +778,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
 
   renderContextUsed() {
     const { contextUsed } = this.props;
-    if (!contextUsed || !contextUsed.percent) return null;
+    if (!contextUsed || contextUsed.percent === null || contextUsed.percent === undefined) return null;
 
     return (
       <div>
@@ -696,6 +804,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
           [styles.expert]: myAgentType === agentTypeMap.common && chatMode === chatModeMap.expert,
         })}
         id="queryInputBase"
+        ref={this.inputBlockRef}
       >
         <OperatePopup />
         <Popover
@@ -720,6 +829,28 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
         </Popover>
         {this.inputUpper()}
         {this.renderInput()}
+        <MentionPopover
+          key={`resource-tools-${this.props.sessionId || 'new'}`}
+          type="@"
+          chatMode={this.props.chatMode}
+          sessionId={this.props.sessionId}
+          projectId={this.props.projectId}
+          projectCloudResourceId={this.props.projectCloudResourceId}
+          agentId={this.getQuoteAgentId()}
+          resourceAgentIds={this.getResourceAgentIds()}
+          excludedAgentIds={this.getInlineDigitalEmployeeList().map((item) => `${item.resourceId}`)}
+          inputText={this.state.toolsPopoverKeyword}
+          activeTabKey={this.state.activeToolMenuKey}
+          {...getResourcePopoverAdapter({
+            open: this.state.toolsPopoverOpen === true,
+            width: this.state.toolsPopoverWidth,
+            isInputAtBottom: this.props.isBottom,
+          })}
+          onClose={() =>
+            this.setState({ toolsPopoverOpen: false, toolsPopoverWidth: undefined, toolsPopoverKeyword: undefined })
+          }
+          onSelect={(item, type) => this.onSelectMentionPopoverItem(item, type)}
+        />
         {this.inputLower()}
         {this.extendRender()}
       </div>

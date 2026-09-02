@@ -16,6 +16,7 @@ import com.iwhalecloud.byai.manager.domain.auth.enums.GrantType;
 import com.iwhalecloud.byai.manager.domain.auth.enums.GrantTypeRangeMapping;
 import com.iwhalecloud.byai.manager.domain.auth.enums.OperType;
 import com.iwhalecloud.byai.manager.domain.auth.enums.ResourceTypeValueMapping;
+import com.iwhalecloud.byai.manager.domain.auth.model.UseApplyOutcome;
 import com.iwhalecloud.byai.manager.domain.auth.service.PrivilegeGrantService;
 import com.iwhalecloud.byai.manager.domain.organization.service.OrganizationService;
 import com.iwhalecloud.byai.manager.domain.position.service.PositionService;
@@ -28,6 +29,7 @@ import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtToolKitServi
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtToolService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtViewService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SuperassistSubAgentService;
+import com.iwhalecloud.byai.manager.domain.superassist.service.SuasSuperassistService;
 import com.iwhalecloud.byai.manager.domain.station.service.StationService;
 import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.dto.auth.AuthDTO;
@@ -42,7 +44,9 @@ import com.iwhalecloud.byai.manager.entity.position.Position;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtSkill;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.station.Station;
+import com.iwhalecloud.byai.manager.entity.superassist.SuasSuperassist;
 import com.iwhalecloud.byai.manager.entity.users.Users;
+import com.iwhalecloud.byai.manager.entity.users.UsersOrganization;
 import com.iwhalecloud.byai.manager.mapper.auth.PrivilegeGrantMapper;
 import com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper;
 import com.iwhalecloud.byai.manager.qo.auth.AuthDetailQo;
@@ -75,6 +79,7 @@ import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.common.login.bean.UserStation;
 import com.iwhalecloud.byai.manager.mapper.users.UsersMapper;
+import com.iwhalecloud.byai.manager.mapper.users.UsersOrganizationMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import com.iwhalecloud.byai.manager.vo.auth.AuthVo;
@@ -124,6 +129,8 @@ public class AuthApplicationService {
 
     private static final String ADMIN_VIP_USER_CODE = "adminvip";
 
+    private static final String RESOURCE_REMOVED_AUTH_SYNC_HINT = "RESOURCE_REMOVED";
+
     private static final Set<String> MANAGE_USE_INHERIT_TARGET_TYPES = Set.of(GrantToObjType.USER, GrantToObjType.ORG,
         GrantToObjType.POST, GrantToObjType.STATION);
 
@@ -132,6 +139,9 @@ public class AuthApplicationService {
 
     @Autowired
     private PrivilegeGrantMapper privilegeGrantMapper;
+
+    @Autowired
+    private UsersOrganizationMapper usersOrganizationMapper;
 
     @Autowired
     private PrivilegeGrantService privilegeGrantService;
@@ -150,6 +160,9 @@ public class AuthApplicationService {
 
     @Autowired
     private SuperassistSubAgentService superassistSubAgentService;
+
+    @Autowired
+    private SuasSuperassistService suasSuperassistService;
 
     @Autowired
     private SsResourceMapper ssResourceMapper;
@@ -206,6 +219,7 @@ public class AuthApplicationService {
         // 查询用户所有来源的授权（USER直接授权 + ORG组织授权 + POST岗位授权 + STATION驻地授权）
         List<String> grantTypes = Arrays.asList(GrantType.AVAILABLE_USE, GrantType.FORCE_USE);
         List<PrivilegeGrant> authList = listAuthPrivilegeGrant(null, null, GrantToObjType.USER, userId, grantTypes);
+        authList = filterEffectiveResourceGrants(authList);
 
         if (CollectionUtils.isEmpty(authList)) {
             return new HashMap<>();
@@ -244,6 +258,205 @@ public class AuthApplicationService {
         logger.debug("AuthApplicationService buildUserAuthResources cost time:{}", endTime - startTime);
 
         return result;
+    }
+
+    /**
+     * 计算指定用户对各资源的管理权限映射，用于写入 Redis 管理权限 Hash（USER:RESOURCES:MANAGE:{userId}）。
+     * <p>
+     * 覆盖三个维度，与后台运行时 hasResourceManagePermission/hasResourceMemberSettingPermission 保持一致：
+     * <ol>
+     *   <li>显式 ALLOW_MANAGE RED 授权（含 USER/ORG/POST/STATION 维度继承），通过 {@link #listAuthPrivilegeGrant} 计算。</li>
+     *   <li>资源创建人（ss_resource.create_by == userId）。对于资源创建时已自动补授权（ensureCreatorDefaultPrivileges）
+     *       的场景维度 1 已覆盖；此处兜底处理个人助理等未补授权的场景。</li>
+     *   <li>组织管理员对其所管理组织（含下级）的 man_org_id 资源。此维度不产生 au_privilege_grant 记录，
+     *       须按组织归属关系实时计算。</li>
+     * </ol>
+     * 全局管理角色（PLAT_MAN 等）不在此处处理，由调用方（AuthRedisSyncService）单独写入全局角色标记 key。
+     *
+     * @param userId 用户标识
+     * @return 资源管理权限映射，key 为 resourceId（String），value 为 resourceBizType
+     */
+    public Map<String, String> buildUserManageResources(Long userId) {
+        if (userId == null) {
+            return new HashMap<>();
+        }
+        Map<String, String> result = new HashMap<>();
+
+        // --- 维度 1：显式 ALLOW_MANAGE 授权（USER/ORG/POST/STATION 继承，RED/BLACK 过滤） ---
+        List<PrivilegeGrant> authList = listAuthPrivilegeGrant(GrantType.ALLOW_MANAGE, null,
+            GrantToObjType.USER, userId, null);
+        authList = filterEffectiveResourceGrants(authList);
+        if (!CollectionUtils.isEmpty(authList)) {
+            Map<Long, List<PrivilegeGrant>> authByResource = authList.stream()
+                .filter(item -> item.getGrantObjId() != null)
+                .collect(Collectors.groupingBy(PrivilegeGrant::getGrantObjId));
+            for (Map.Entry<Long, List<PrivilegeGrant>> entry : authByResource.entrySet()) {
+                Long resourceId = entry.getKey();
+                List<PrivilegeGrant> resourceAuths = entry.getValue();
+                boolean hasRedAuth = resourceAuths.stream()
+                    .anyMatch(auth -> Color.RED.equals(auth.getGrantToType()));
+                boolean hasBlackAuth = resourceAuths.stream()
+                    .anyMatch(auth -> Color.BLACK.equals(auth.getGrantToType()));
+                if (hasRedAuth && !hasBlackAuth) {
+                    String resourceType = resourceAuths.stream()
+                        .filter(auth -> Color.RED.equals(auth.getGrantToType()))
+                        .findFirst()
+                        .map(PrivilegeGrant::getGrantObjType)
+                        .orElse(null);
+                    if (resourceType != null) {
+                        result.put(String.valueOf(resourceId), resourceType);
+                    }
+                }
+            }
+        }
+
+        // --- 维度 2：资源创建人 ---
+        {
+            com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.iwhalecloud.byai.manager.entity.resource.SsResource> qw =
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
+            qw.eq(com.iwhalecloud.byai.manager.entity.resource.SsResource::getCreateBy, userId)
+              .ne(com.iwhalecloud.byai.manager.entity.resource.SsResource::getResourceStatus,
+                  com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus.REMOVED.getNum());
+            List<com.iwhalecloud.byai.manager.entity.resource.SsResource> createdResources =
+                ssResourceMapper.selectList(qw);
+            if (!CollectionUtils.isEmpty(createdResources)) {
+                for (com.iwhalecloud.byai.manager.entity.resource.SsResource resource : createdResources) {
+                    if (resource.getResourceId() != null && resource.getResourceBizType() != null) {
+                        result.put(String.valueOf(resource.getResourceId()), resource.getResourceBizType());
+                    }
+                }
+            }
+        }
+
+        // --- 维度 3：组织管理员（对其管理组织及所有下级组织名下的 man_org_id 资源） ---
+        {
+            com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.iwhalecloud.byai.manager.entity.users.UsersOrganization> uoqw =
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
+            uoqw.eq(com.iwhalecloud.byai.manager.entity.users.UsersOrganization::getUserId, userId)
+                .eq(com.iwhalecloud.byai.manager.entity.users.UsersOrganization::getUserType,
+                    com.iwhalecloud.byai.common.constants.users.UserType.ORG_MAN);
+            List<com.iwhalecloud.byai.manager.entity.users.UsersOrganization> orgManagerRecords =
+                usersOrganizationMapper.selectList(uoqw);
+            if (!CollectionUtils.isEmpty(orgManagerRecords)) {
+                Set<Long> managedOrgIds = new HashSet<>();
+                for (com.iwhalecloud.byai.manager.entity.users.UsersOrganization uo : orgManagerRecords) {
+                    if (uo.getOrgId() != null) {
+                        List<Long> selfAndDescendants =
+                            organizationService.findSelfAndDescendantOrgIds(uo.getOrgId());
+                        managedOrgIds.addAll(selfAndDescendants);
+                    }
+                }
+                if (!managedOrgIds.isEmpty()) {
+                    com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.iwhalecloud.byai.manager.entity.resource.SsResource> rqw =
+                        new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
+                    rqw.in(com.iwhalecloud.byai.manager.entity.resource.SsResource::getManOrgId, managedOrgIds)
+                       .ne(com.iwhalecloud.byai.manager.entity.resource.SsResource::getResourceStatus,
+                           com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus.REMOVED.getNum());
+                    List<com.iwhalecloud.byai.manager.entity.resource.SsResource> orgResources =
+                        ssResourceMapper.selectList(rqw);
+                    if (!CollectionUtils.isEmpty(orgResources)) {
+                        for (com.iwhalecloud.byai.manager.entity.resource.SsResource resource : orgResources) {
+                            if (resource.getResourceId() != null && resource.getResourceBizType() != null) {
+                                result.put(String.valueOf(resource.getResourceId()),
+                                    resource.getResourceBizType());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * 有效授权缓存只保留仍存在且未注销的资源。授权表保留历史记录，资源重新上架后可按原授权重新生效。
+     */
+    private List<PrivilegeGrant> filterEffectiveResourceGrants(List<PrivilegeGrant> authList) {
+        if (CollectionUtils.isEmpty(authList)) {
+            return Collections.emptyList();
+        }
+        Set<Long> resourceIds = authList.stream().map(PrivilegeGrant::getGrantObjId).filter(Objects::nonNull)
+            .collect(Collectors.toSet());
+        if (CollectionUtils.isEmpty(resourceIds)) {
+            return Collections.emptyList();
+        }
+        List<SsResource> resources = ssResourceService.findByIdList(resourceIds);
+        if (CollectionUtils.isEmpty(resources)) {
+            return Collections.emptyList();
+        }
+        Set<Long> effectiveResourceIds = resources.stream()
+            .filter(Objects::nonNull)
+            .filter(resource -> !Objects.equals(resource.getResourceStatus(), ResourceStatus.REMOVED.getNum()))
+            .map(SsResource::getResourceId)
+            .filter(Objects::nonNull)
+            .collect(Collectors.toSet());
+        return authList.stream().filter(grant -> effectiveResourceIds.contains(grant.getGrantObjId()))
+            .collect(Collectors.toList());
+    }
+
+    /**
+     * 资源注销后清除所有直接或继承用户的有效授权缓存，并在事务提交后重新构建完整缓存。
+     * 数据库授权记录继续保留，用于审计以及资源重新上架后的授权恢复。
+     */
+    public void invalidateResourceAuthorizationCachesAfterCommit(Long resourceId, String resourceBizType) {
+        if (resourceId == null || StringUtils.isBlank(resourceBizType)) {
+            return;
+        }
+        List<PrivilegeGrant> grants = privilegeGrantService.listActiveRedGrantsForGrantObject(resourceId,
+            resourceBizType);
+        if (CollectionUtils.isEmpty(grants)) {
+            return;
+        }
+
+        Set<Long> userIds = new HashSet<>();
+        Set<Long> orgIds = new HashSet<>();
+        Set<Long> postIds = new HashSet<>();
+        Set<Long> stationIds = new HashSet<>();
+        for (PrivilegeGrant grant : grants) {
+            if (grant == null || grant.getGrantToObjId() == null) {
+                continue;
+            }
+            String targetType = grant.getGrantToObjType();
+            if (GrantToObjType.USER.equalsIgnoreCase(targetType)) {
+                userIds.add(grant.getGrantToObjId());
+            }
+            else if (GrantToObjType.ORG.equalsIgnoreCase(targetType)) {
+                orgIds.add(grant.getGrantToObjId());
+            }
+            else if (GrantToObjType.POST.equalsIgnoreCase(targetType)) {
+                postIds.add(grant.getGrantToObjId());
+            }
+            else if (GrantToObjType.STATION.equalsIgnoreCase(targetType)) {
+                stationIds.add(grant.getGrantToObjId());
+            }
+        }
+        expandTargetUserIds(userIds, orgIds, postIds, stationIds);
+        if (CollectionUtils.isEmpty(userIds)) {
+            return;
+        }
+
+        Set<Long> affectedUserIds = new HashSet<>(userIds);
+        Set<String> removedResourceIds = Set.of(String.valueOf(resourceId));
+        Runnable task = () -> {
+            for (Long userId : affectedUserIds) {
+                authRedisApplicationService.removeUserAuthByResourceIds(userId, removedResourceIds);
+                authRedisApplicationService.removeUserManageAuthByResourceIds(userId, removedResourceIds);
+            }
+            authRedisSyncService.asyncSyncAuthChangedUsers(affectedUserIds, RESOURCE_REMOVED_AUTH_SYNC_HINT);
+            authRedisSyncService.asyncSyncManageAuthChangedUsers(affectedUserIds, RESOURCE_REMOVED_AUTH_SYNC_HINT);
+        };
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    task.run();
+                }
+            });
+        }
+        else {
+            task.run();
+        }
     }
 
     /**
@@ -487,6 +700,40 @@ public class AuthApplicationService {
     }
 
     /**
+     * Idempotently submits a use application for the current user.
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public UseApplyOutcome applyUseIfNeeded(Long resourceId) {
+        SsResource ssResource = getRequiredResourceForUpdate(resourceId);
+        Long currentUserId = CurrentUserHolder.getCurrentUserId();
+        if (currentUserId == null) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("user.not.login"));
+        }
+        if (getPendingUseApplyPrivilege(ssResource, currentUserId) != null) {
+            return UseApplyOutcome.PENDING;
+        }
+        if (isPersonalResourceUseApplyUnsupported(ssResource)
+            || Objects.equals(ssResource.getResourceStatus(), ResourceStatus.REMOVED.getNum())
+            || !checkCanApplyUse(ssResource)) {
+            return UseApplyOutcome.UNAVAILABLE;
+        }
+        ResourceUseApplyQo qo = new ResourceUseApplyQo();
+        qo.setResourceId(resourceId);
+        applyUse(qo);
+        return UseApplyOutcome.CREATED;
+    }
+
+    private SsResource getRequiredResourceForUpdate(Long resourceId) {
+        LambdaQueryWrapper<SsResource> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(SsResource::getResourceId, resourceId).last("FOR UPDATE");
+        SsResource ssResource = ssResourceMapper.selectOne(queryWrapper);
+        if (ssResource == null) {
+            throw new BaseException(I18nUtil.get("resource.not.found"));
+        }
+        return ssResource;
+    }
+
+    /**
      * 查询资源待审核使用申请列表。
      * 仅资源管理人可查看。
      * @author qin.guoquan
@@ -497,7 +744,10 @@ public class AuthApplicationService {
         validateResourceUseApplyAuditAllowed(ssResource);
         validateResourceUseSettingPermission(ssResource);
 
-        List<PrivilegeGrant> pendingApplyList = listPendingUseApplyPrivileges(ssResource);
+        boolean history = Boolean.TRUE.equals(qo.getHistory());
+        List<PrivilegeGrant> pendingApplyList = history
+            ? listHistoryUseApplyPrivileges(ssResource)
+            : listPendingUseApplyPrivileges(ssResource);
         if (CollectionUtils.isEmpty(pendingApplyList)) {
             return Collections.emptyList();
         }
@@ -514,9 +764,34 @@ public class AuthApplicationService {
             vo.setUserId(item.getGrantToObjId());
             vo.setUserName(getUserDisplayName(userMap.get(item.getGrantToObjId())));
             vo.setApplyTime(item.getCreateDate());
-            vo.setApplyStatus(I18nUtil.get(USE_APPLY_PENDING_LABEL_KEY));
+            vo.setApplyStatus(history ? getUseApplyStatusLabel(item.getStatusCd())
+                : I18nUtil.get(USE_APPLY_PENDING_LABEL_KEY));
             return vo;
         }).collect(Collectors.toList());
+    }
+
+    private List<PrivilegeGrant> listHistoryUseApplyPrivileges(SsResource ssResource) {
+        LambdaQueryWrapper<PrivilegeGrant> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(PrivilegeGrant::getGrantObjId, ssResource.getResourceId());
+        queryWrapper.eq(PrivilegeGrant::getGrantObjType, ssResource.getResourceBizType());
+        queryWrapper.eq(PrivilegeGrant::getGrantType, GrantType.AVAILABLE_USE);
+        queryWrapper.eq(PrivilegeGrant::getGrantToObjType, GrantToObjType.USER);
+        queryWrapper.eq(PrivilegeGrant::getGrantToType, Color.RED);
+        queryWrapper.eq(PrivilegeGrant::getOperType, OperType.READ);
+        queryWrapper.in(PrivilegeGrant::getStatusCd, "X", "R");
+        queryWrapper.orderByDesc(PrivilegeGrant::getCreateDate);
+        queryWrapper.orderByDesc(PrivilegeGrant::getPrivilegeGrantId);
+        return privilegeGrantMapper.selectList(queryWrapper);
+    }
+
+    private String getUseApplyStatusLabel(String statusCd) {
+        if ("X".equalsIgnoreCase(statusCd)) {
+            return "审核通过";
+        }
+        if ("R".equalsIgnoreCase(statusCd)) {
+            return "已驳回";
+        }
+        return statusCd;
     }
 
     /**
@@ -806,13 +1081,9 @@ public class AuthApplicationService {
      */
     private boolean hasResourceMemberSettingPermission(SsResource ssResource) {
         Long currentUserId = CurrentUserHolder.getCurrentUserId();
-        boolean hasGlobalAdminRole = CurrentUserHolder.getUsersOrganizations().stream()
-            .anyMatch(item -> StringUtils.equalsAny(item.getUserType(), UserType.PLAT_MAN, UserType.PLAT_DEVOPS,
-                UserType.BUSINESS_MAN));
 
         // 平台管理/运维、业务管理员和超级管理员拥有全局管理权限。
-        if (hasGlobalAdminRole
-            || ADMIN_VIP_USER_CODE.equalsIgnoreCase(CurrentUserHolder.getCurrentUserCode())) {
+        if (isCurrentUserGlobalResourceManager()) {
             return true;
         }
 
@@ -832,6 +1103,44 @@ public class AuthApplicationService {
     }
 
     /**
+     * 判断当前用户是否拥有不受单资源授权限制的全局资源管理权限。
+     */
+    public boolean isCurrentUserGlobalResourceManager() {
+        boolean hasGlobalAdminRole = CurrentUserHolder.getUsersOrganizations().stream()
+            .anyMatch(item -> StringUtils.equalsAny(item.getUserType(), UserType.PLAT_MAN, UserType.PLAT_DEVOPS,
+                UserType.BUSINESS_MAN));
+        return hasGlobalAdminRole
+            || ADMIN_VIP_USER_CODE.equalsIgnoreCase(CurrentUserHolder.getCurrentUserCode());
+    }
+
+    /**
+     * 判断指定用户（非当前登录用户）是否拥有不受单资源授权限制的全局资源管理权限。
+     * <p>
+     * {@link #isCurrentUserGlobalResourceManager()} 依赖 {@link CurrentUserHolder} 线程本地上下文，
+     * 只能判断当前请求的登录用户；异步同步场景（如 Redis 管理权限刷新）需要按 userId 查库判断，故单独提供本方法。
+     *
+     * @param userId 用户标识
+     * @return 是否为全局资源管理角色
+     */
+    public boolean isGlobalResourceManagerByUserId(Long userId) {
+        if (userId == null) {
+            return false;
+        }
+        Users user = userService.findById(userId);
+        if (user != null && ADMIN_VIP_USER_CODE.equalsIgnoreCase(user.getUserCode())) {
+            return true;
+        }
+        LambdaQueryWrapper<UsersOrganization> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(UsersOrganization::getUserId, userId);
+        List<UsersOrganization> userOrgs = usersOrganizationMapper.selectList(queryWrapper);
+        if (CollectionUtils.isEmpty(userOrgs)) {
+            return false;
+        }
+        return userOrgs.stream().anyMatch(item -> StringUtils.equalsAny(item.getUserType(), UserType.PLAT_MAN,
+            UserType.PLAT_DEVOPS, UserType.BUSINESS_MAN));
+    }
+
+    /**
      * 判断当前登录用户是否具备指定资源的管理权限。
      * 该能力可供导入更新、资源维护等场景复用，统一管理权限判定口径。
      * @author qin.guoquan
@@ -846,29 +1155,51 @@ public class AuthApplicationService {
 
     /**
      * 判断当前登录用户是否具备指定资源的使用权限。
-     * 管理权限不在这里隐式算作使用权限，调用方如果允许“管理或使用”访问，请使用
-     * {@link #hasResourceAccessPermission(SsResource)}。
+     * 有效的显式 ALLOW_MANAGE 授权同时具备使用权限；平台管理员、组织管理员等角色兜底能力不在这里隐式算作使用权限。
      */
     public boolean hasResourceUsePermission(SsResource ssResource) {
+        return hasResourceUsePermission(ssResource, CurrentUserHolder.getCurrentUserId());
+    }
+
+    /**
+     * 判断指定用户是否具备资源使用权限，不修改当前登录用户上下文。
+     */
+    public boolean hasResourceUsePermission(SsResource ssResource, Long userId) {
         if (ssResource == null || ssResource.getResourceId() == null
             || StringUtils.isBlank(ssResource.getResourceBizType())
-            || Objects.equals(ssResource.getResourceStatus(), ResourceStatus.REMOVED.getNum())) {
+            || Objects.equals(ssResource.getResourceStatus(), ResourceStatus.REMOVED.getNum()) || userId == null) {
             return false;
         }
-        Long currentUserId = CurrentUserHolder.getCurrentUserId();
-        if (currentUserId == null) {
-            return false;
-        }
-        if (currentUserId.equals(ssResource.getCreateBy()) || isCurrentUserBoundDefaultPersonalResource(ssResource)) {
+        if (userId.equals(ssResource.getCreateBy())
+            || (userId.equals(CurrentUserHolder.getCurrentUserId())
+                && isCurrentUserBoundDefaultPersonalResource(ssResource))) {
             return true;
         }
-
-        List<Long> resourceIds = List.of(ssResource.getResourceId());
-        List<String> resourceBizTypes = List.of(ssResource.getResourceBizType());
-        if (queryCurrentUserUseBlacklistedResourceIds(resourceIds, resourceBizTypes).contains(ssResource.getResourceId())) {
+        List<PrivilegeGrant> privilegeGrants = listAuthPrivilegeGrant(null,
+            List.of(ssResource.getResourceBizType()), GrantToObjType.USER, userId,
+            List.of(GrantType.ALLOW_MANAGE, GrantType.AVAILABLE_USE, GrantType.FORCE_USE));
+        if (CollectionUtils.isEmpty(privilegeGrants)) {
             return false;
         }
-        return queryCurrentUserUsePermittedResourceIds(resourceIds, resourceBizTypes).contains(ssResource.getResourceId());
+        List<PrivilegeGrant> matchingGrants = privilegeGrants.stream()
+            .filter(item -> Objects.equals(ssResource.getResourceId(), item.getGrantObjId()))
+            .filter(item -> "A".equalsIgnoreCase(item.getStatusCd()))
+            .collect(Collectors.toList());
+        boolean hasManageBlackGrant = matchingGrants.stream()
+            .filter(item -> GrantType.ALLOW_MANAGE.equals(item.getGrantType()))
+            .anyMatch(item -> Color.BLACK.equalsIgnoreCase(item.getGrantToType()));
+        boolean hasManageRedGrant = matchingGrants.stream()
+            .filter(item -> GrantType.ALLOW_MANAGE.equals(item.getGrantType()))
+            .anyMatch(item -> Color.RED.equalsIgnoreCase(item.getGrantToType()));
+        boolean hasUseBlackGrant = matchingGrants.stream()
+            .filter(item -> GrantType.AVAILABLE_USE.equals(item.getGrantType())
+                || GrantType.FORCE_USE.equals(item.getGrantType()))
+            .anyMatch(item -> Color.BLACK.equalsIgnoreCase(item.getGrantToType()));
+        boolean hasUseRedGrant = matchingGrants.stream()
+            .filter(item -> GrantType.AVAILABLE_USE.equals(item.getGrantType())
+                || GrantType.FORCE_USE.equals(item.getGrantType()))
+            .anyMatch(item -> Color.RED.equalsIgnoreCase(item.getGrantToType()));
+        return (hasManageRedGrant && !hasManageBlackGrant) || (hasUseRedGrant && !hasUseBlackGrant);
     }
 
     /**
@@ -985,6 +1316,7 @@ public class AuthApplicationService {
         queryWrapper.eq(PrivilegeGrant::getOperType, OperType.READ);
         queryWrapper.eq(PrivilegeGrant::getStatusCd, USE_APPLY_PENDING_STATUS);
         queryWrapper.orderByDesc(PrivilegeGrant::getCreateDate);
+        queryWrapper.orderByDesc(PrivilegeGrant::getPrivilegeGrantId);
         return privilegeGrantMapper.selectList(queryWrapper);
     }
 
@@ -1409,46 +1741,41 @@ public class AuthApplicationService {
         privilegeGrantQo.setGrantObjTypes(grantObjTypes);
         privilegeGrantQo.setGrantToObjType(grantToObjType);
         privilegeGrantQo.setGrantToObjId(grantToObjId);
-        List<PrivilegeGrant> authPrivilegeGrantList = privilegeGrantService.findPrivilegeByQo(privilegeGrantQo);
+        List<PrivilegeGrant> authPrivilegeGrantList =
+            new ArrayList<>(privilegeGrantService.findPrivilegeByQo(privilegeGrantQo));
 
         // 如果是用户类型授权，还要查询用户所在的组织和岗位授权信息
         if (GrantToObjType.USER.equalsIgnoreCase(grantToObjType)) {
 
-            // 添加用户组织授权信息
-            List<Organization> organizationList = organizationService.findOrganizationByUserId(grantToObjId);
+            // 添加用户直接所属组织及其全部上级组织的授权信息
+            Set<Long> orgIdList = organizationService.findEffectiveOrganizationIdsByUserId(grantToObjId);
 
-            // 用户所在组织的上下级关系，也一并查询
-            Set<Long> orgIdList = new HashSet<>(100);
-            for (Organization organization : organizationList) {
-                String pathCode = organization.getPathCode();
-                if (StringUtil.isEmpty(pathCode)) {
-                    continue;
-                }
-                for (String orgIdStr : pathCode.split("\\.")) {
-                    orgIdList.add(Long.parseLong(orgIdStr));
-                }
+            if (CollectionUtils.isNotEmpty(orgIdList)) {
+                PrivilegeGrantQo organizationGrantQo = new PrivilegeGrantQo();
+                organizationGrantQo.setGrantType(grantType);
+                organizationGrantQo.setGrantObjTypes(grantObjTypes);
+                organizationGrantQo.setGrantToObjType(GrantToObjType.ORG);
+                organizationGrantQo.setGrantToObjIds(orgIdList);
+                organizationGrantQo.setGrantTypes(grantTypes);
+                List<PrivilegeGrant> organizationGrantList =
+                    privilegeGrantService.findPrivilegeByQo(organizationGrantQo);
+                authPrivilegeGrantList.addAll(organizationGrantList);
             }
-
-            PrivilegeGrantQo organizationGrantQo = new PrivilegeGrantQo();
-            organizationGrantQo.setGrantType(grantType);
-            organizationGrantQo.setGrantObjTypes(grantObjTypes);
-            organizationGrantQo.setGrantToObjType(GrantToObjType.ORG);
-            organizationGrantQo.setGrantToObjIds(orgIdList);
-            organizationGrantQo.setGrantTypes(grantTypes);
-            List<PrivilegeGrant> organizationGrantList = privilegeGrantService.findPrivilegeByQo(organizationGrantQo);
-            authPrivilegeGrantList.addAll(organizationGrantList);
 
             // 添加用户岗位授权信息
             List<PositionDTO> positionList = positionService.findPositionByUserId(grantToObjId);
-            PrivilegeGrantQo positionGrantQo = new PrivilegeGrantQo();
-            positionGrantQo.setGrantType(grantType);
-            positionGrantQo.setGrantObjTypes(grantObjTypes);
-            positionGrantQo.setGrantToObjType(GrantToObjType.POST);
-            positionGrantQo.setGrantTypes(grantTypes);
-            positionGrantQo
-                .setGrantToObjIds(positionList.stream().map(PositionDTO::getPositionId).collect(Collectors.toList()));
-            List<PrivilegeGrant> positionGrantList = privilegeGrantService.findPrivilegeByQo(positionGrantQo);
-            authPrivilegeGrantList.addAll(positionGrantList);
+            List<Long> positionIds = positionList.stream().map(PositionDTO::getPositionId)
+                .filter(Objects::nonNull).collect(Collectors.toList());
+            if (CollectionUtils.isNotEmpty(positionIds)) {
+                PrivilegeGrantQo positionGrantQo = new PrivilegeGrantQo();
+                positionGrantQo.setGrantType(grantType);
+                positionGrantQo.setGrantObjTypes(grantObjTypes);
+                positionGrantQo.setGrantToObjType(GrantToObjType.POST);
+                positionGrantQo.setGrantTypes(grantTypes);
+                positionGrantQo.setGrantToObjIds(positionIds);
+                List<PrivilegeGrant> positionGrantList = privilegeGrantService.findPrivilegeByQo(positionGrantQo);
+                authPrivilegeGrantList.addAll(positionGrantList);
+            }
 
             // 添加用户驻地授权信息
             Station station = stationService.getStationByUserId(grantToObjId);
@@ -1456,14 +1783,16 @@ public class AuthApplicationService {
                 UserStation userStation = new UserStation();
                 BeanUtils.copyProperties(station, userStation);
                 List<Long> stationIds = CompletionsUtils.getStationIds(userStation);
-                PrivilegeGrantQo stationGrantQo = new PrivilegeGrantQo();
-                stationGrantQo.setGrantType(grantType);
-                stationGrantQo.setGrantObjTypes(grantObjTypes);
-                stationGrantQo.setGrantToObjType(GrantToObjType.STATION);
-                stationGrantQo.setGrantToObjIds(stationIds);
-                stationGrantQo.setGrantTypes(grantTypes);
-                List<PrivilegeGrant> stationGrantList = privilegeGrantService.findPrivilegeByQo(stationGrantQo);
-                authPrivilegeGrantList.addAll(stationGrantList);
+                if (CollectionUtils.isNotEmpty(stationIds)) {
+                    PrivilegeGrantQo stationGrantQo = new PrivilegeGrantQo();
+                    stationGrantQo.setGrantType(grantType);
+                    stationGrantQo.setGrantObjTypes(grantObjTypes);
+                    stationGrantQo.setGrantToObjType(GrantToObjType.STATION);
+                    stationGrantQo.setGrantToObjIds(stationIds);
+                    stationGrantQo.setGrantTypes(grantTypes);
+                    List<PrivilegeGrant> stationGrantList = privilegeGrantService.findPrivilegeByQo(stationGrantQo);
+                    authPrivilegeGrantList.addAll(stationGrantList);
+                }
             }
 
         }
@@ -1591,6 +1920,7 @@ public class AuthApplicationService {
         Runnable task = () -> {
             logger.info("授权变更涉及用户数：{}，开始同步权限到Redis", syncUserIds.size());
             this.authRedisSyncService.asyncSyncAuthChangedUsers(syncUserIds, grantType);
+            this.authRedisSyncService.asyncSyncManageAuthChangedUsers(syncUserIds, grantType);
         };
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
@@ -2774,6 +3104,10 @@ public class AuthApplicationService {
         Set<Long> useBlacklistedIds = queryCurrentUserUseBlacklistedResourceIds(existingResourceIds, resourceBizTypes);
         Set<Long> usePermittedIds = queryCurrentUserUsePermittedResourceIds(existingResourceIds, resourceBizTypes);
         Set<Long> pendingUseApplyIds = queryCurrentUserPendingUseApplyResourceIds(existingResourceIds, resourceBizTypes);
+        boolean containsDigitalEmployee = resources.stream()
+            .anyMatch(resource -> resource != null
+                && ResourceBizTypeEnum.DIG_EMPLOYEE.name().equals(resource.getResourceBizType()));
+        Long defaultDigitalEmployeeId = containsDigitalEmployee ? resolveCurrentUserDefaultDigitalEmployeeId() : null;
         Map<Long, Boolean> organizationManageCache = new HashMap<>();
 
         Map<Long, ResourceOperationPermissionsVo> result = new LinkedHashMap<>();
@@ -2782,14 +3116,15 @@ public class AuthApplicationService {
                 return;
             }
             result.put(resource.getResourceId(), buildResourceOperationPermissions(resource, currentUserId,
-                managePrivilegeIds, useBlacklistedIds, usePermittedIds, pendingUseApplyIds, organizationManageCache));
+                managePrivilegeIds, useBlacklistedIds, usePermittedIds, pendingUseApplyIds, organizationManageCache,
+                defaultDigitalEmployeeId));
         });
         return result;
     }
 
     private ResourceOperationPermissionsVo buildResourceOperationPermissions(SsResource ssResource,
         Long currentUserId, Set<Long> managePrivilegeIds, Set<Long> useBlacklistedIds, Set<Long> usePermittedIds,
-        Set<Long> pendingUseApplyIds, Map<Long, Boolean> organizationManageCache) {
+        Set<Long> pendingUseApplyIds, Map<Long, Boolean> organizationManageCache, Long defaultDigitalEmployeeId) {
         ResourceOperationPermissionsVo vo = new ResourceOperationPermissionsVo();
         Long resourceId = ssResource.getResourceId();
         vo.setResourceId(resourceId);
@@ -2801,8 +3136,11 @@ public class AuthApplicationService {
             hasResourceMemberSettingPermission(ssResource, currentUserId, managePrivilegeIds, organizationManageCache);
         boolean hasUsePermission =
             hasResourceUsePermission(ssResource, currentUserId, useBlacklistedIds, usePermittedIds);
+        boolean useApplyPending = !hasUsePermission && pendingUseApplyIds != null
+            && pendingUseApplyIds.contains(resourceId);
         vo.setHasManagePermission(canManage);
         vo.setHasUsePermission(hasUsePermission);
+        vo.setUseApplyPending(useApplyPending);
         vo.setCanViewDetail(!isResourceRemoved && (canManage || hasUsePermission));
 
         if (isResourceRemoved) {
@@ -2838,8 +3176,35 @@ public class AuthApplicationService {
         vo.setCanAuditUse(canSetUse && !isPersonalResourceUseApplyUnsupported);
         vo.setCanApplyUse(!isPersonalResourceUseApplyUnsupported
             && checkCanApplyUse(ssResource, currentUserId, useBlacklistedIds, usePermittedIds, pendingUseApplyIds));
-        vo.setCanSetDefault(false);
+        vo.setCanSetDefault(canSetDefaultDigitalEmployee(ssResource,
+            canManage || isCurrentUserGlobalResourceManager(), hasUsePermission,
+            defaultDigitalEmployeeId));
         return vo;
+    }
+
+    private boolean canSetDefaultDigitalEmployee(SsResource ssResource, boolean canManage, boolean hasUsePermission,
+        Long defaultDigitalEmployeeId) {
+        return ssResource != null
+            && ResourceBizTypeEnum.DIG_EMPLOYEE.name().equals(ssResource.getResourceBizType())
+            && !Objects.equals(ssResource.getResourceStatus(), ResourceStatus.REMOVED.getNum())
+            && !Objects.equals(ssResource.getResourceId(), defaultDigitalEmployeeId)
+            && (canManage || hasUsePermission);
+    }
+
+    private Long resolveCurrentUserDefaultDigitalEmployeeId() {
+        Long defaultDigitalEmployeeId = CurrentUserHolder.getDefaultDigEmployeeId();
+        if (defaultDigitalEmployeeId != null) {
+            return defaultDigitalEmployeeId;
+        }
+        Long assistantId = CurrentUserHolder.getAssistantId();
+        if (assistantId == null || assistantId <= 0) {
+            assistantId = CurrentUserHolder.getCurrentUserId();
+        }
+        if (assistantId == null || assistantId <= 0) {
+            return null;
+        }
+        SuasSuperassist superassist = suasSuperassistService.findById(assistantId);
+        return superassist == null ? null : superassist.getDefaultDigEmployeeId();
     }
 
     private boolean hasResourceMemberSettingPermission(SsResource ssResource, Long currentUserId,
@@ -2929,9 +3294,7 @@ public class AuthApplicationService {
     }
 
     /**
-     * 查询当前登录用户对指定资源的 6 项操作权限。
-     * canSetDefault 已统一迁移到左侧“全部列表项”接口计算，这里固定返回 false，避免资源卡片继续出现旧入口。
-     * 与列表查询返回的 canEdit/canManageAuth/... 字段语义保持一致。
+     * 查询当前登录用户对指定资源的操作权限。
      *
      * @param resourceId 资源 ID
      * @return 操作权限 VO
@@ -2956,8 +3319,14 @@ public class AuthApplicationService {
         boolean isResourceRemoved = Objects.equals(ssResource.getResourceStatus(), ResourceStatus.REMOVED.getNum());
         boolean canManage = hasResourceManagePermission(ssResource);
         boolean hasUsePermission = hasResourceUsePermission(ssResource);
+        Set<Long> pendingUseApplyIds = queryCurrentUserPendingUseApplyResourceIds(List.of(resourceId),
+            StringUtils.isBlank(ssResource.getResourceBizType())
+                ? Collections.emptyList()
+                : List.of(ssResource.getResourceBizType()));
+        boolean useApplyPending = !hasUsePermission && pendingUseApplyIds.contains(resourceId);
         vo.setHasManagePermission(canManage);
         vo.setHasUsePermission(hasUsePermission);
+        vo.setUseApplyPending(useApplyPending);
         vo.setCanViewDetail(!isResourceRemoved && (canManage || hasUsePermission));
 
         // 如果资源已注销，只允许恢复操作，其他操作全部禁用
@@ -2999,9 +3368,9 @@ public class AuthApplicationService {
         vo.setCanAuditUse(canSetUse && !isPersonalResourceUseApplyUnsupported); // 移除 !isDefaultSuperAssistantResource
         vo.setCanApplyUse(!isPersonalResourceUseApplyUnsupported
             && checkCanApplyUse(ssResource)); // 移除 !isDefaultSuperAssistantResource
-
-        // “设为默认”入口统一收敛到左侧“全部列表项”，个人/企业资源卡片不再展示该操作。
-        vo.setCanSetDefault(false);
+        Long defaultDigitalEmployeeId = isDigitalEmployee ? resolveCurrentUserDefaultDigitalEmployeeId() : null;
+        vo.setCanSetDefault(canSetDefaultDigitalEmployee(ssResource, canManage, hasUsePermission,
+            defaultDigitalEmployeeId));
         return vo;
     }
 

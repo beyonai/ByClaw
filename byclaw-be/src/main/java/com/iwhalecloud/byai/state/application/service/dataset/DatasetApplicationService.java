@@ -5,13 +5,16 @@ import java.io.InputStream;
 import java.net.URLEncoder;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
+
 import com.alibaba.fastjson.JSON;
+import com.iwhalecloud.byai.common.cache.ShareBfmUser;
 import com.iwhalecloud.byai.common.constants.resource.OwnerType;
 import com.iwhalecloud.byai.common.constants.resource.SystemCode;
 import com.iwhalecloud.byai.common.exception.BaseException;
@@ -21,16 +24,20 @@ import com.iwhalecloud.byai.common.feign.response.pythonbuild.Data;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.DirOrFile;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.FileBuildStatus;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbBuildResult;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbGlob;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryCreate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryDelete;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryUpdate;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbEntityDiscovery;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbEntityEnrich;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileDownload;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileMetadataGet;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileRead;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileToMarkdownIndex;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileUpdate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeFileSearch;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeMetadataSearch;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeItemReferences;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeSearch;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeItemsMove;
@@ -43,11 +50,16 @@ import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileMetadataResu
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeSearchItem;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileSearchItem;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileSearchResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeMetadataSearchItem;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeMetadataSearchResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeItemReferencesResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeEntityBatchResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeSearchResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeItemsMoveResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeBuildResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.ProcessStatus;
 import com.iwhalecloud.byai.common.util.JsonUtil;
+import com.iwhalecloud.byai.common.util.MapParamUtil;
 import com.iwhalecloud.byai.common.util.RedisUtil;
 import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceBizTypeEnum;
@@ -62,17 +74,23 @@ import com.iwhalecloud.byai.manager.domain.resource.util.DigEmployeeRedisKeys;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetBuild;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetDto;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeReadFileRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeBuildResultRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileMetadataRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeEntityDiscoveryRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeEntityEnrichRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeGlobRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeItemReferencesRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeItemsMoveRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileSearchRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeMetadataSearchRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeSearchRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeUploadConflictCheckRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeUploadConflictCheckResponse;
+
 import java.nio.charset.StandardCharsets;
 import java.util.HashSet;
 import java.util.Set;
+
 import com.alibaba.fastjson.JSONObject;
 import com.alibaba.fastjson.parser.Feature;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetImportDto;
@@ -83,6 +101,7 @@ import com.iwhalecloud.byai.manager.entity.resource.SsResExtDoc;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.manager.qo.resource.DirAndFileQo;
 import com.iwhalecloud.byai.manager.vo.resource.DirAndFileVo;
+import com.iwhalecloud.byai.state.common.share.helper.ShareCacheUtil;
 import com.iwhalecloud.byai.state.domain.resource.qo.DatasetQo;
 import com.iwhalecloud.byai.state.domain.resource.vo.DatasetDetailVo;
 import com.iwhalecloud.byai.state.domain.resource.vo.DatasetVo;
@@ -246,8 +265,7 @@ public class DatasetApplicationService {
         if (isLocalDatasetType(type)) {
             extDoc = ssResExtDocService.createSsResExtDoc(myResource.getResourceId(), type,
                 myResource.getResourceCode(), resourceName, resourceDesc, ownerType);
-        }
-        else {
+        } else {
             extDoc = ssResExtDocService.createSsResExtDoc(myResource.getResourceId(), type);
         }
         // 页面新增知识库后，也按知识库导入的同一套规则把 targetContent 同步到开放资源目录。
@@ -261,7 +279,7 @@ public class DatasetApplicationService {
     /**
      * 创建默认个人知识库，资源保存仍复用 createDataset 主链路。
      *
-     * @param userId 用户ID
+     * @param userId   用户ID
      * @param userCode 用户编码
      * @param userName 用户名称
      * @return 默认个人知识库资源
@@ -285,7 +303,7 @@ public class DatasetApplicationService {
     /**
      * 创建知识库
      *
-     * @param knName 知识库名称
+     * @param knName        知识库名称
      * @param knDescription 描述
      * @return KnowledgeBaseInfo
      */
@@ -371,7 +389,7 @@ public class DatasetApplicationService {
      * 页面知识库保存后的 JSON 同步属于增强动作，不应阻断主流程。
      */
     private void syncDatasetTargetContentSafely(String targetContent, String resourceBizType, Long resourceId,
-        String scene) {
+                                                String scene) {
         try {
             resourceArtifactStorageService.syncResourceJsonByBizType(targetContent, resourceBizType, resourceId);
             ssResourceArtifactService.upsertStandardJsonArtifact(resourceId, resourceBizType, scene);
@@ -380,8 +398,7 @@ public class DatasetApplicationService {
             // 同步Redis
             String redisKey = DigEmployeeRedisKeys.resourceConfigJsonKey(resourceBizType, resourceId);
             RedisUtil.setString(redisKey, targetContent);
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             logger.error("页面知识库JSON同步失败但不影响主流程, scene={}, resourceBizType={}, resourceId={}", scene, resourceBizType,
                 resourceId, e);
         }
@@ -511,16 +528,60 @@ public class DatasetApplicationService {
      * @param resourceId 资源标识
      * @param directoryPath 文件目录路径
      * @param fileDescription 文件描述
+     * @param processFrontMatter 是否解析 Markdown 文件中的 YAML front matter
+     * @param overwrite 同路径同名文件存在时是否先删除旧文件再上传
+     * @param skipIfDuplicate 同路径同名文件存在时是否跳过
+     * @param headers 透传到 ByKC 的请求头
      * @throws IOException 异常信息
      */
     public UploadResult uploadFiles(MultipartFile[] files, Long resourceId, String directoryPath,
-        String fileDescription) throws IOException {
-        return uploadFiles(files, resourceId, directoryPath, fileDescription, null);
-    }
+                                    String fileDescription, Boolean processFrontMatter, Boolean overwrite,
+                                    boolean skipIfDuplicate, Map<String, String> headers) throws IOException {
 
-    public UploadResult uploadFiles(MultipartFile[] files, Long resourceId, String directoryPath,
-        String fileDescription, Boolean processFrontMatter) throws IOException {
-        return uploadFiles(files, resourceId, directoryPath, fileDescription, processFrontMatter, Boolean.FALSE);
+        SsResource ssResource = loadDatasetResource(resourceId);
+        validateDatasetManagePermission(ssResource);
+        Map<String, String> forwardedHeaders = forwardKnowledgeHeaders(headers, resourceId);
+
+        UploadResult uploadResult = new UploadResult();
+        uploadResult.setResourceId(resourceId);
+        uploadResult.setResourceCode(ssResource.getResourceCode());
+        uploadResult.setResourceName(ssResource.getResourceName());
+
+        List<String> uploadFileNames = Arrays.stream(files).filter(file -> !isZipUpload(file))
+            .map(MultipartFile::getOriginalFilename).toList();
+        Set<String> existingFilePaths = Boolean.TRUE.equals(overwrite)
+            ? new HashSet<>(findExistingKnowledgeFilePaths(ssResource, directoryPath, uploadFileNames))
+            : new HashSet<>();
+
+        for (MultipartFile multipartFile : files) {
+
+            // 上传文件到知识库
+            KbFileImport kbFileImport = new KbFileImport();
+            kbFileImport.setKnCode(ssResource.getResourceCode());
+            kbFileImport.setSkipIfDuplicate(skipIfDuplicate);
+
+            boolean zipUpload = isZipUpload(multipartFile);
+            String filePath = zipUpload ? normalizeKnowledgeDirectoryPath(directoryPath)
+                : buildKnowledgeFilePath(directoryPath, multipartFile.getOriginalFilename());
+            if (!zipUpload && existingFilePaths.contains(filePath)) {
+                // QA 暂不支持原子覆盖，BE 只能在用户确认 overwrite=true 后先删旧文件再导入新文件。
+                deleteKnowledgeFile(ssResource, filePath, "覆盖上传前删除知识库旧文件", forwardedHeaders);
+            }
+            kbFileImport.setFilePath(filePath);
+            kbFileImport
+                .setFileDescription(fileDescription != null ? fileDescription : multipartFile.getOriginalFilename());
+            // 为空时不发送该表单字段，由 QA 按最新接口默认值 true 处理。
+            kbFileImport.setProcessFrontMatter(processFrontMatter);
+            kbFileImport.setMultipartFile(multipartFile);
+            PythonBuildResponse<KbImportResult> importRet = feignPythonBuildService.importKnowledgeItem(kbFileImport,
+                forwardedHeaders);
+            logger.info("导入文件:{}", JSON.toJSONString(importRet));
+            assertPythonBuildSuccess(importRet, "上传知识库文件");
+
+            appendImportResult(uploadResult, importRet.getResultObject(), multipartFile, kbFileImport.getFilePath());
+        }
+
+        return uploadResult;
     }
 
     /**
@@ -544,70 +605,12 @@ public class DatasetApplicationService {
         return response;
     }
 
-    /***
-     * 上传文件到知识库
-     *
-     * @param files 文件信息
-     * @param resourceId 资源标识
-     * @param directoryPath 文件目录路径
-     * @param fileDescription 文件描述
-     * @param processFrontMatter 是否解析 Markdown 文件中的 YAML front matter
-     * @param overwrite 同路径同名文件存在时是否先删除旧文件再上传
-     * @throws IOException 异常信息
-     */
-    public UploadResult uploadFiles(MultipartFile[] files, Long resourceId, String directoryPath,
-        String fileDescription, Boolean processFrontMatter, Boolean overwrite) throws IOException {
-
-        SsResource ssResource = loadDatasetResource(resourceId);
-        validateDatasetManagePermission(ssResource);
-
-        UploadResult uploadResult = new UploadResult();
-        uploadResult.setResourceId(resourceId);
-        uploadResult.setResourceCode(ssResource.getResourceCode());
-        uploadResult.setResourceName(ssResource.getResourceName());
-
-        List<String> uploadFileNames = Arrays.stream(files).filter(file -> !isZipUpload(file))
-            .map(MultipartFile::getOriginalFilename).toList();
-        Set<String> existingFilePaths = Boolean.TRUE.equals(overwrite)
-            ? new HashSet<>(findExistingKnowledgeFilePaths(ssResource, directoryPath, uploadFileNames))
-            : new HashSet<>();
-
-        for (MultipartFile multipartFile : files) {
-
-            // 上传文件到知识库
-            KbFileImport kbFileImport = new KbFileImport();
-            kbFileImport.setKnCode(ssResource.getResourceCode());
-
-            boolean zipUpload = isZipUpload(multipartFile);
-            String filePath = zipUpload ? normalizeKnowledgeDirectoryPath(directoryPath)
-                : buildKnowledgeFilePath(directoryPath, multipartFile.getOriginalFilename());
-            if (!zipUpload && existingFilePaths.contains(filePath)) {
-                // QA 暂不支持原子覆盖，BE 只能在用户确认 overwrite=true 后先删旧文件再导入新文件。
-                deleteKnowledgeFile(ssResource, filePath, "覆盖上传前删除知识库旧文件");
-            }
-            kbFileImport.setFilePath(filePath);
-            kbFileImport
-                .setFileDescription(fileDescription != null ? fileDescription : multipartFile.getOriginalFilename());
-            // 为空时不发送该表单字段，由 QA 按最新接口默认值 true 处理。
-            kbFileImport.setProcessFrontMatter(processFrontMatter);
-            kbFileImport.setMultipartFile(multipartFile);
-            PythonBuildResponse<KbImportResult> importRet =
-                feignPythonBuildService.importKnowledgeItem(kbFileImport, resourceId);
-            logger.info("导入文件:{}", JSON.toJSONString(importRet));
-            assertPythonBuildSuccess(importRet, "上传知识库文件");
-
-            appendImportResult(uploadResult, importRet.getResultObject(), multipartFile, kbFileImport.getFilePath());
-        }
-
-        return uploadResult;
-    }
-
     private boolean isZipUpload(MultipartFile multipartFile) {
         return multipartFile != null && StringUtils.endsWithIgnoreCase(multipartFile.getOriginalFilename(), ".zip");
     }
 
-    private void appendImportResult(UploadResult uploadResult, KbImportResult importResult,
-        MultipartFile multipartFile, String fallbackPath) {
+    private void appendImportResult(UploadResult uploadResult, KbImportResult importResult, MultipartFile multipartFile,
+                                    String fallbackPath) {
         if (importResult != null && importResult.getPostProcessErrors() != null) {
             uploadResult.getPostProcessErrors().addAll(importResult.getPostProcessErrors());
         }
@@ -629,8 +632,7 @@ public class DatasetApplicationService {
                 resultItem.getError());
             if (success) {
                 uploadResult.getUploadItems().add(uploadItem);
-            }
-            else {
+            } else {
                 uploadResult.getFailedItems().add(uploadItem);
             }
             incrementUploadSummary(uploadResult, success);
@@ -651,8 +653,7 @@ public class DatasetApplicationService {
         summary.setTotal(summary.getTotal() + 1);
         if (success) {
             summary.setSucceeded(summary.getSucceeded() + 1);
-        }
-        else {
+        } else {
             summary.setFailed(summary.getFailed() + 1);
         }
     }
@@ -662,10 +663,11 @@ public class DatasetApplicationService {
      *
      * @param datasetBuild 构建对象
      */
-    public void build(DatasetBuild datasetBuild) {
+    public void build(DatasetBuild datasetBuild, Map<String, String> headers) {
 
         SsResource ssResource = loadDatasetResource(datasetBuild.getResourceId());
         validateDatasetManagePermission(ssResource);
+        Map<String, String> forwardedHeaders = forwardKnowledgeHeaders(headers, datasetBuild.getResourceId());
 
         // 构建知识文件
         KbFileToMarkdownIndex kbFileToMarkdownIndex = new KbFileToMarkdownIndex();
@@ -673,8 +675,8 @@ public class DatasetApplicationService {
         kbFileToMarkdownIndex.setFilePath(datasetBuild.getDirectoryPath());
 
         logger.info("知识构建入参是:{}", JSON.toJSONString(kbFileToMarkdownIndex));
-        PythonBuildResponse<Void> buildRet =
-            feignPythonBuildService.fileToMarkdownIndex(kbFileToMarkdownIndex, datasetBuild.getResourceId());
+        PythonBuildResponse<Void> buildRet = feignPythonBuildService.fileToMarkdownIndex(kbFileToMarkdownIndex,
+            forwardedHeaders);
         logger.info("构建结果是:{}", JSON.toJSONString(buildRet));
         assertPythonBuildSuccess(buildRet, "构建知识库文件");
 
@@ -693,9 +695,9 @@ public class DatasetApplicationService {
     /**
      * 下载文件
      *
-     * @param resourceId 资源标识
+     * @param resourceId    资源标识
      * @param directoryPath 文件路径，/百应AI设计方案-智能体集成.docx
-     * @param response 响应流
+     * @param response      响应流
      */
     public void download(Long resourceId, String directoryPath, HttpServletResponse response) {
 
@@ -724,8 +726,7 @@ public class DatasetApplicationService {
             String contentDisposition = "attachment;filename=" + URLEncoder.encode(fileName, StandardCharsets.UTF_8);
             response.setHeader("Content-Disposition", contentDisposition);
             IOUtils.copy(inputStream, response.getOutputStream());
-        }
-        catch (IOException e) {
+        } catch (IOException e) {
             throw new BaseException("下载知识库文件失败：" + e.getMessage(), e);
         }
     }
@@ -734,7 +735,7 @@ public class DatasetApplicationService {
      * 目录下载按 zip 包输出，和文件管理里的文件夹下载体验保持一致。
      */
     private void downloadKnowledgeDirectoryZip(SsResource ssResource, String directoryPath,
-        HttpServletResponse response) {
+                                               HttpServletResponse response) {
         String normalizedDirectoryPath = normalizeKnowledgeDirectoryPath(directoryPath);
         String directoryName = getLastSplitName(normalizedDirectoryPath);
         String zipFileName = StringUtils.defaultIfBlank(directoryName,
@@ -748,14 +749,13 @@ public class DatasetApplicationService {
             ZipOutputStream zipOutputStream = new ZipOutputStream(response.getOutputStream(), StandardCharsets.UTF_8)) {
             addKnowledgeDirectoryToZip(ssResource.getResourceId(), ssResource.getResourceCode(),
                 normalizedDirectoryPath, "", zipOutputStream);
-        }
-        catch (IOException e) {
+        } catch (IOException e) {
             throw new BaseException("下载知识库目录失败：" + e.getMessage(), e);
         }
     }
 
-    private void addKnowledgeDirectoryToZip(Long resourceId, String knCode, String directoryPath,
-        String relativePrefix, ZipOutputStream zipOutputStream) throws IOException {
+    private void addKnowledgeDirectoryToZip(Long resourceId, String knCode, String directoryPath, String relativePrefix,
+                                            ZipOutputStream zipOutputStream) throws IOException {
         List<DirAndFileVo> children = listKnowledgeDir(resourceId, knCode, directoryPath);
         for (DirAndFileVo child : children) {
             String entryName = sanitizeZipEntryName(child.getName());
@@ -793,11 +793,12 @@ public class DatasetApplicationService {
      *
      * @param removeFileDto 删除文件信息
      */
-    public void removeFile(RemoveFileDto removeFileDto) {
+    public void removeFile(RemoveFileDto removeFileDto, Map<String, String> headers) {
 
         SsResource ssResource = loadDatasetResource(removeFileDto.getResourceId());
         validateDatasetManagePermission(ssResource);
-        deleteKnowledgeFile(ssResource, removeFileDto.getDirectoryPath(), "删除知识库文件");
+        deleteKnowledgeFile(ssResource, removeFileDto.getDirectoryPath(), "删除知识库文件",
+            forwardKnowledgeHeaders(headers, removeFileDto.getResourceId()));
 
     }
 
@@ -805,9 +806,11 @@ public class DatasetApplicationService {
      * 更新已存在知识库文件。更新后不会自动触发 Markdown 转换、切片或向量化。
      */
     public KbFileUpdateResult updateKnowledgeFile(Long resourceId, String filePath, String fileDescription,
-        Boolean processFrontMatter, MultipartFile fileContent) {
+                                                  Boolean processFrontMatter, MultipartFile fileContent,
+                                                  Map<String, String> headers) {
         SsResource ssResource = loadDatasetResource(resourceId);
         validateDatasetManagePermission(ssResource);
+        Map<String, String> forwardedHeaders = forwardKnowledgeHeaders(headers, resourceId);
 
         KbFileUpdate kbFileUpdate = new KbFileUpdate();
         kbFileUpdate.setKnCode(ssResource.getResourceCode());
@@ -816,8 +819,8 @@ public class DatasetApplicationService {
         kbFileUpdate.setProcessFrontMatter(processFrontMatter);
         kbFileUpdate.setMultipartFile(fileContent);
 
-        PythonBuildResponse<KbFileUpdateResult> response =
-            feignPythonBuildService.updateKnowledgeItem(kbFileUpdate, resourceId);
+        PythonBuildResponse<KbFileUpdateResult> response = feignPythonBuildService.updateKnowledgeItem(kbFileUpdate,
+            forwardedHeaders);
         assertPythonBuildSuccess(response, "更新知识库文件");
 
         KbFileUpdateResult result = response.getResultObject();
@@ -827,7 +830,7 @@ public class DatasetApplicationService {
         if (result.getData() != null) {
             for (KbFileUpdateResult.Item item : result.getData()) {
                 if (item != null) {
-                    item.setKnCode(String.valueOf(resourceId));
+                    item.setResourceId(resourceId);
                 }
             }
         }
@@ -837,13 +840,14 @@ public class DatasetApplicationService {
     /**
      * 删除知识库文件。覆盖上传时复用该逻辑，保证手动删除和覆盖删除走同一套 QA 响应校验。
      */
-    private void deleteKnowledgeFile(SsResource ssResource, String filePath, String operationName) {
+    private void deleteKnowledgeFile(SsResource ssResource, String filePath, String operationName,
+                                     Map<String, String> headers) {
         KbFileDelete kbFileDelete = new KbFileDelete();
         kbFileDelete.setKnCode(ssResource.getResourceCode());
         kbFileDelete.setFilePath(filePath);
         logger.info("删除文件入参:{}", JSON.toJSONString(kbFileDelete));
-        PythonBuildResponse<Void> removeResponse =
-            feignPythonBuildService.deleteKnowledgeItem(kbFileDelete, ssResource.getResourceId());
+        PythonBuildResponse<Void> removeResponse = feignPythonBuildService.deleteKnowledgeItem(kbFileDelete,
+            forwardKnowledgeHeaders(headers, ssResource.getResourceId()));
         logger.info("删除文件返回:{}", JSON.toJSONString(removeResponse));
         assertPythonBuildSuccess(removeResponse, operationName);
 
@@ -854,7 +858,7 @@ public class DatasetApplicationService {
      *
      * @param folder 知识库
      */
-    public KbDirectoryCreate createFolder(Folder folder) {
+    public KbDirectoryCreate createFolder(Folder folder, Map<String, String> headers) {
 
         Long resourceId = folder.getResourceId();
         String directoryName = folder.getDirectoryName();
@@ -862,6 +866,7 @@ public class DatasetApplicationService {
         // 查询知识库
         SsResource ssResource = loadDatasetResource(resourceId);
         validateDatasetManagePermission(ssResource);
+        Map<String, String> forwardedHeaders = forwardKnowledgeHeaders(headers, resourceId);
 
         KbDirectoryCreate kbDirectoryCreate = new KbDirectoryCreate();
         kbDirectoryCreate.setKnCode(ssResource.getResourceCode());
@@ -870,7 +875,7 @@ public class DatasetApplicationService {
         kbDirectoryCreate.setDirectoryPath(buildKnowledgeFilePath(directoryPath, directoryName));
         kbDirectoryCreate.setDirectoryDescription(folder.getDirectoryDescription());
 
-        PythonBuildResponse<Void> ret = feignPythonBuildService.createDirectory(kbDirectoryCreate, resourceId);
+        PythonBuildResponse<Void> ret = feignPythonBuildService.createDirectory(kbDirectoryCreate, forwardedHeaders);
         logger.info("创建目录:{}", JsonUtil.toJSONString(ret));
         assertPythonBuildSuccess(ret, "创建知识库目录");
 
@@ -882,18 +887,18 @@ public class DatasetApplicationService {
      *
      * @param folder 目录
      */
-    public KbDirectoryUpdate renameFolder(Folder folder) {
+    public KbDirectoryUpdate renameFolder(Folder folder, Map<String, String> headers) {
 
         SsResource ssResource = loadDatasetResource(folder.getResourceId());
         validateDatasetManagePermission(ssResource);
+        Map<String, String> forwardedHeaders = forwardKnowledgeHeaders(headers, folder.getResourceId());
 
         KbDirectoryUpdate kbDirectoryUpdate = new KbDirectoryUpdate();
         kbDirectoryUpdate.setKnCode(ssResource.getResourceCode());
         kbDirectoryUpdate.setDirectoryPath(folder.getDirectoryPath());
         kbDirectoryUpdate.setDirectoryName(folder.getDirectoryName());
 
-        PythonBuildResponse<Void> ret =
-            feignPythonBuildService.updateDirectory(kbDirectoryUpdate, folder.getResourceId());
+        PythonBuildResponse<Void> ret = feignPythonBuildService.updateDirectory(kbDirectoryUpdate, forwardedHeaders);
         logger.info("修改目录:{}", JsonUtil.toJSONString(ret));
         assertPythonBuildSuccess(ret, "重命名知识库目录");
 
@@ -905,17 +910,17 @@ public class DatasetApplicationService {
      *
      * @param folderDelete 删除目录参数
      */
-    public void deleteFolder(FolderDelete folderDelete) {
+    public void deleteFolder(FolderDelete folderDelete, Map<String, String> headers) {
 
         SsResource ssResource = loadDatasetResource(folderDelete.getResourceId());
         validateDatasetManagePermission(ssResource);
+        Map<String, String> forwardedHeaders = forwardKnowledgeHeaders(headers, folderDelete.getResourceId());
 
         KbDirectoryDelete kbDirectoryDelete = new KbDirectoryDelete();
         kbDirectoryDelete.setKnCode(ssResource.getResourceCode());
         kbDirectoryDelete.setDirectoryPath(folderDelete.getDirectoryPath());
 
-        PythonBuildResponse<Void> ret =
-            feignPythonBuildService.deleteDirectory(kbDirectoryDelete, folderDelete.getResourceId());
+        PythonBuildResponse<Void> ret = feignPythonBuildService.deleteDirectory(kbDirectoryDelete, forwardedHeaders);
         logger.info("删除目录:{}", JsonUtil.toJSONString(ret));
         assertPythonBuildSuccess(ret, "删除知识库目录");
 
@@ -924,9 +929,10 @@ public class DatasetApplicationService {
     /**
      * 批量移动知识库文件或目录。门户使用 resourceId，转发 QA 前转换为 knCode。
      */
-    public KnowledgeItemsMoveResult moveKnowledgeItems(KnowledgeItemsMoveRequest request) {
+    public KnowledgeItemsMoveResult moveKnowledgeItems(KnowledgeItemsMoveRequest request, Map<String, String> headers) {
         SsResource ssResource = loadDatasetResource(request.getResourceId());
         validateDatasetManagePermission(ssResource);
+        Map<String, String> forwardedHeaders = forwardKnowledgeHeaders(headers, request.getResourceId());
 
         boolean hasTargetDirectory = StringUtils.isNotBlank(request.getTargetDirectoryPath());
         boolean hasTargetFile = StringUtils.isNotBlank(request.getTargetFilePath());
@@ -944,8 +950,8 @@ public class DatasetApplicationService {
         qaRequest.setTargetFilePath(request.getTargetFilePath());
         qaRequest.setOverwrite(Boolean.FALSE);
 
-        PythonBuildResponse<KnowledgeItemsMoveResult> response =
-            feignPythonBuildService.moveKnowledgeItems(qaRequest, request.getResourceId());
+        PythonBuildResponse<KnowledgeItemsMoveResult> response = feignPythonBuildService.moveKnowledgeItems(qaRequest,
+            forwardedHeaders);
         logger.info("移动知识库文件或目录:{}", JsonUtil.toJSONString(response));
         assertPythonBuildSuccess(response, "移动知识库文件或目录");
         return response.getResultObject() == null ? new KnowledgeItemsMoveResult() : response.getResultObject();
@@ -970,6 +976,54 @@ public class DatasetApplicationService {
     }
 
     /**
+     * 异步发现原始文档中的实体。门户使用 resourceId 校验知识库管理权限，转发 QA 时转换为 knCode。
+     */
+    public KnowledgeEntityBatchResult entityDiscovery(KnowledgeEntityDiscoveryRequest request, Map<String, String> headers) {
+        SsResource ssResource = loadDatasetResource(request.getResourceId());
+        validateDatasetManagePermission(ssResource);
+
+        KbEntityDiscovery qaRequest = new KbEntityDiscovery();
+        qaRequest.setKnCode(ssResource.getResourceCode());
+        qaRequest.setDirectoryPath(request.getDirectoryPath());
+        qaRequest.setFilePath(normalizeOptionalKnowledgeFilePath(request.getFilePath()));
+        qaRequest.setMaxEntities(request.getMaxEntities() == null ? 12 : request.getMaxEntities());
+        qaRequest.setForce(Boolean.TRUE.equals(request.getForce()));
+        qaRequest.setExtraParams(
+            request.getExtraParams() == null ? Collections.emptyMap() : request.getExtraParams());
+
+        Map<String, String> forwardedHeaders = forwardKnowledgeHeaders(headers, request.getResourceId());
+
+        PythonBuildResponse<KnowledgeEntityBatchResult> response = feignPythonBuildService.entityDiscovery(qaRequest,
+            forwardedHeaders);
+        assertPythonBuildSuccess(response, "发起知识实体发现");
+        return attachEntityBatchResourceId(response.getResultObject(), request.getResourceId());
+    }
+
+    /**
+     * 异步补全 KnowledgeEntity 文档。门户使用 resourceId 校验知识库管理权限，转发 QA 时转换为 knCode。
+     */
+    public KnowledgeEntityBatchResult entityEnrich(KnowledgeEntityEnrichRequest request, Map<String, String> headers) {
+        SsResource ssResource = loadDatasetResource(request.getResourceId());
+        validateDatasetManagePermission(ssResource);
+
+        KbEntityEnrich qaRequest = new KbEntityEnrich();
+        qaRequest.setKnCode(ssResource.getResourceCode());
+        qaRequest.setFilePath(normalizeOptionalKnowledgeFilePath(request.getFilePath()));
+        qaRequest.setTopK(request.getTopK() == null ? 20 : request.getTopK());
+        qaRequest.setForce(Boolean.TRUE.equals(request.getForce()));
+        qaRequest.setExtraParams(
+            request.getExtraParams() == null ? Collections.emptyMap() : request.getExtraParams());
+
+
+        Map<String, String> forwardedHeaders = forwardKnowledgeHeaders(headers, request.getResourceId());
+
+        PythonBuildResponse<KnowledgeEntityBatchResult> response = feignPythonBuildService.entityEnrich(qaRequest,
+            forwardedHeaders);
+        assertPythonBuildSuccess(response, "发起知识实体补全");
+        return attachEntityBatchResourceId(response.getResultObject(), request.getResourceId());
+    }
+
+    /**
      * 按 QA glob 单层通配规则匹配知识库文件或目录。
      */
     public List<DirAndFileVo> globKnowledgeItems(KnowledgeGlobRequest request) {
@@ -982,7 +1036,7 @@ public class DatasetApplicationService {
 
         PythonBuildResponse<Data> response = feignPythonBuildService.glob(qaRequest, request.getResourceId());
         assertPythonBuildSuccess(response, "按路径匹配知识库文件或目录");
-        return mapKnowledgeDirItems(response.getResultObject());
+        return mapKnowledgeDirItems(response.getResultObject(), request.getResourceId());
     }
 
     /**
@@ -998,8 +1052,7 @@ public class DatasetApplicationService {
             SsResource ssResource = loadDatasetResource(dirAndFileQo.getResourceId());
             validateDatasetReadablePermission(ssResource);
             knCode = resolveKnowledgeCode(dirAndFileQo, ssResource);
-        }
-        else {
+        } else {
             // openApi接口查询不做校验
             knCode = dirAndFileQo.getResourceCode();
         }
@@ -1036,7 +1089,7 @@ public class DatasetApplicationService {
     }
 
     private void searchKnowledgeDir(Long resourceId, String knCode, String directoryPath, String keyword, int depth,
-        List<DirAndFileVo> resultList) {
+                                    List<DirAndFileVo> resultList) {
         if (depth > KNOWLEDGE_DIR_SEARCH_MAX_DEPTH || resultList.size() >= KNOWLEDGE_DIR_SEARCH_MAX_RESULT_SIZE) {
             return;
         }
@@ -1062,10 +1115,10 @@ public class DatasetApplicationService {
         kbListDir.setDirectoryPath(normalizeKnowledgeDirectoryPath(directoryPath));
         PythonBuildResponse<Data> response = feignPythonBuildService.listDir(kbListDir, resourceId);
         assertPythonBuildSuccess(response, "查询知识库目录");
-        return mapKnowledgeDirItems(response.getResultObject());
+        return mapKnowledgeDirItems(response.getResultObject(), resourceId);
     }
 
-    private List<DirAndFileVo> mapKnowledgeDirItems(Data resultObject) {
+    private List<DirAndFileVo> mapKnowledgeDirItems(Data resultObject, Long resourceId) {
         List<DirAndFileVo> resultList = new ArrayList<>();
         if (resultObject == null || resultObject.getData() == null) {
             return resultList;
@@ -1075,6 +1128,8 @@ public class DatasetApplicationService {
                 continue;
             }
             DirAndFileVo dirAndFileVo = new DirAndFileVo();
+            dirAndFileVo.setKnCode(dirOrFile.getKnCode());
+            dirAndFileVo.setResourceId(resourceId);
             String type = dirOrFile.getType();
             String name = dirOrFile.getName();
             dirAndFileVo.setType(type);
@@ -1084,17 +1139,52 @@ public class DatasetApplicationService {
             dirAndFileVo.setName(this.getLastSplitName(name));
             dirAndFileVo.setDirectoryPath(name);
             dirAndFileVo.setSize(dirOrFile.getSize());
+            dirAndFileVo.setUpdatedAt(dirOrFile.getUpdatedAt());
+            dirAndFileVo.setBuildStatus(dirOrFile.getBuildStatus());
+            dirAndFileVo.setBuildCurrentStep(dirOrFile.getBuildCurrentStep());
+
+            //获取创建用户信息
+            this.buildCreateUserInfo(dirAndFileVo, dirOrFile);
+
             resultList.add(dirAndFileVo);
         }
 
         return resultList;
     }
 
+
+    /**
+     * 获取创建用户信息
+     *
+     * @param dirAndFileVo 文件返回对象
+     * @param dirOrFile    接口查询
+     */
+    private void buildCreateUserInfo(DirAndFileVo dirAndFileVo, DirOrFile dirOrFile) {
+        Map<String, Object> metadata = dirOrFile.getMetadata();
+        if (metadata == null) {
+            return;
+        }
+
+        Map<String, Object> owner = (Map<String, Object>) metadata.get("userCode");
+        if (owner == null) {
+            return;
+        }
+
+        String userCode = MapParamUtil.getStringValue(owner, "value");
+        ShareBfmUser shareBfmUser = ShareCacheUtil.getShareBfmUser(userCode);
+        if (shareBfmUser == null) {
+            return;
+        }
+
+        dirAndFileVo.setCreateBy(shareBfmUser.getUserId());
+        dirAndFileVo.setCreateStaffName(shareBfmUser.getUserName());
+    }
+
     /**
      * 查询指定目录下已存在的同名文件，返回完整文件路径。QA 的 import 暂不支持覆盖，所以覆盖上传前必须先找出旧文件。
      */
     private List<String> findExistingKnowledgeFilePaths(SsResource ssResource, String directoryPath,
-        List<String> fileNames) {
+                                                        List<String> fileNames) {
         if (fileNames == null || fileNames.isEmpty()) {
             return new ArrayList<>();
         }
@@ -1110,11 +1200,24 @@ public class DatasetApplicationService {
             return new ArrayList<>();
         }
 
+        String normalizedDirectoryPath = normalizeKnowledgeDirectoryPath(directoryPath);
         KbListDir kbListDir = new KbListDir();
         kbListDir.setKnCode(ssResource.getResourceCode());
-        kbListDir.setDirectoryPath(normalizeKnowledgeDirectoryPath(directoryPath));
-        PythonBuildResponse<Data> response =
-            feignPythonBuildService.listDir(kbListDir, ssResource.getResourceId());
+        kbListDir.setDirectoryPath(normalizedDirectoryPath);
+        PythonBuildResponse<Data> response;
+        try {
+            response = feignPythonBuildService.listDir(kbListDir, ssResource.getResourceId());
+        } catch (BaseException e) {
+            if (isKnowledgeDirectoryNotFound(e)) {
+                logger.info("检查知识库同名文件时目录不存在，按无冲突处理 directoryPath={}", normalizedDirectoryPath);
+                return new ArrayList<>();
+            }
+            throw e;
+        }
+        if (isKnowledgeDirectoryNotFound(response)) {
+            logger.info("检查知识库同名文件时目录不存在，按无冲突处理 directoryPath={}", normalizedDirectoryPath);
+            return new ArrayList<>();
+        }
         assertPythonBuildSuccess(response, "检查知识库同名文件");
 
         List<String> existingFilePaths = new ArrayList<>();
@@ -1137,6 +1240,23 @@ public class DatasetApplicationService {
         return existingFilePaths;
     }
 
+    private boolean isKnowledgeDirectoryNotFound(PythonBuildResponse<?> response) {
+        if (response == null || PythonBuildResponse.RESPONSE_SUCCESS
+            .equalsIgnoreCase(StringUtils.trimToEmpty(response.getResultCode()))) {
+            return false;
+        }
+        return isKnowledgeDirectoryNotFound(response.getResultMsg());
+    }
+
+    private boolean isKnowledgeDirectoryNotFound(Throwable throwable) {
+        return throwable != null && isKnowledgeDirectoryNotFound(throwable.getMessage());
+    }
+
+    private boolean isKnowledgeDirectoryNotFound(String message) {
+        String resultMsg = StringUtils.defaultString(message).toLowerCase();
+        return resultMsg.contains("directory not found") || resultMsg.contains("目录不存在");
+    }
+
     /**
      * 获取最后一级作为文件名
      *
@@ -1147,8 +1267,7 @@ public class DatasetApplicationService {
         if (directoryPath != null && directoryPath.contains("/")) {
             String[] splitStr = directoryPath.split("/");
             return splitStr[splitStr.length - 1];
-        }
-        else {
+        } else {
             return directoryPath;
         }
     }
@@ -1157,7 +1276,7 @@ public class DatasetApplicationService {
      * 知识库JSON导入（新增或更新）。
      *
      * @param ownerType 资源归属类型：enterprise-企业，personal-个人
-     * @param file 上传的JSON文件
+     * @param file      上传的JSON文件
      * @return resourceId
      */
     @Transactional(rollbackFor = Exception.class)
@@ -1174,8 +1293,7 @@ public class DatasetApplicationService {
             dto.getResourceCode());
         if (existing == null) {
             return createDatasetFromImport(dto, rawJson, ownerType);
-        }
-        else {
+        } else {
             ResourceImportOwnerTypeValidator.validate(existing, ownerType, dto.getResourceCode(), dto.getResourceName(),
                 dto.getResourceBizType(), dto.getSystemCode());
             validateDatasetImportUpdatePermission(existing, dto.getResourceCode());
@@ -1191,8 +1309,7 @@ public class DatasetApplicationService {
         }
         try {
             return new String(file.getBytes(), StandardCharsets.UTF_8);
-        }
-        catch (IOException e) {
+        } catch (IOException e) {
             throw new IllegalArgumentException(I18nUtil.get("dataset.import.file.read.failed"));
         }
     }
@@ -1354,8 +1471,7 @@ public class DatasetApplicationService {
             extDoc.setResourceId(resourceId);
             fillExtDoc(extDoc, dto, rawJson, resourceId);
             ssResExtDocService.save(extDoc);
-        }
-        else {
+        } else {
             fillExtDoc(extDoc, dto, rawJson, resourceId);
             ssResExtDocService.update(extDoc);
         }
@@ -1389,8 +1505,7 @@ public class DatasetApplicationService {
     private void validateResourceCodeCanMapToAgentId(String resourceCode) {
         try {
             Long.valueOf(resourceCode);
-        }
-        catch (NumberFormatException e) {
+        } catch (NumberFormatException e) {
             throw new IllegalArgumentException(I18nUtil.get("dataset.import.resource.code.numeric.required"));
         }
     }
@@ -1404,7 +1519,7 @@ public class DatasetApplicationService {
     /**
      * 文件状态查询
      *
-     * @param resourceId 资源标识
+     * @param resourceId    资源标识
      * @param directoryPath 文件路径
      * @return ProcessStatus
      */
@@ -1416,8 +1531,7 @@ public class DatasetApplicationService {
         FileBuildStatus fileBuildStatus = new FileBuildStatus();
         fileBuildStatus.setKnCode(ssResource.getResourceCode());
         fileBuildStatus.setFilePath(directoryPath);
-        PythonBuildResponse<ProcessStatus> ret =
-            feignPythonBuildService.fileBuildStatus(fileBuildStatus, resourceId);
+        PythonBuildResponse<ProcessStatus> ret = feignPythonBuildService.fileBuildStatus(fileBuildStatus, resourceId);
         assertPythonBuildSuccess(ret, "查询知识库文件构建状态");
         return ret.getResultObject();
 
@@ -1440,13 +1554,42 @@ public class DatasetApplicationService {
         kbFileRead.setStartLine(request.getStartLine());
         kbFileRead.setEndLine(request.getEndLine());
 
-        PythonBuildResponse<KbFileReadResult> ret =
-            feignPythonBuildService.readFile(kbFileRead, request.getResourceId());
+        PythonBuildResponse<KbFileReadResult> ret = feignPythonBuildService.readFile(kbFileRead,
+            request.getResourceId());
         assertPythonBuildSuccess(ret, "读取知识库文件内容");
 
         KbFileReadResult result = ret.getResultObject();
         if (result != null) {
-            result.setKnCode(String.valueOf(request.getResourceId()));
+            result.setResourceId(request.getResourceId());
+        }
+        return result;
+    }
+
+    /**
+     * 查询知识库文件完整构建结果。对外使用 resourceId，内部转为 QA knCode。
+     */
+    public KnowledgeBuildResult buildResult(KnowledgeBuildResultRequest request) {
+        if (request == null || request.getResourceId() == null) {
+            throw new BaseException("知识库资源标识不能为空");
+        }
+
+        SsResource ssResource = loadDatasetResource(request.getResourceId());
+        validateDatasetReadablePermission(ssResource);
+
+        KbBuildResult qaRequest = new KbBuildResult();
+        qaRequest.setKnCode(ssResource.getResourceCode());
+        qaRequest.setFilePath(normalizeKnowledgeFilePath(request.getFilePath()));
+        qaRequest.setChunkPage(request.getChunkPage() == null ? 1 : request.getChunkPage());
+        qaRequest.setChunkPageSize(request.getChunkPageSize() == null ? 20 : request.getChunkPageSize());
+        qaRequest.setIncludeMarkdown(request.getIncludeMarkdown() == null || request.getIncludeMarkdown());
+
+        PythonBuildResponse<KnowledgeBuildResult> ret = feignPythonBuildService.buildResult(qaRequest,
+            request.getResourceId());
+        assertPythonBuildSuccess(ret, "查询知识库文件构建结果");
+
+        KnowledgeBuildResult result = ret.getResultObject();
+        if (result != null) {
+            result.setResourceId(request.getResourceId());
         }
         return result;
     }
@@ -1463,8 +1606,8 @@ public class DatasetApplicationService {
         qaRequest.setFilePath(normalizeKnowledgeFilePath(request.getFilePath()));
         qaRequest.setMetadataFieldList(request.getMetadataFieldList());
 
-        PythonBuildResponse<KbFileMetadataResult> response =
-            feignPythonBuildService.getKnowledgeFileMetadata(qaRequest, request.getResourceId());
+        PythonBuildResponse<KbFileMetadataResult> response = feignPythonBuildService.getKnowledgeFileMetadata(qaRequest,
+            request.getResourceId());
         assertPythonBuildSuccess(response, "查询知识库文件元数据");
         return response.getResultObject() == null ? new KbFileMetadataResult() : response.getResultObject();
     }
@@ -1478,7 +1621,7 @@ public class DatasetApplicationService {
         }
 
         List<String> knCodeList = new ArrayList<>();
-        Map<String, String> codeToResourceId = new HashMap<>();
+        Map<String, Long> codeToResourceId = new HashMap<>();
         for (Long resourceId : request.getResourceIdList()) {
             if (resourceId == null) {
                 throw new BaseException("知识库资源标识不能为空");
@@ -1486,7 +1629,7 @@ public class DatasetApplicationService {
             SsResource ssResource = loadDatasetResource(resourceId);
             validateDatasetReadablePermission(ssResource);
             knCodeList.add(ssResource.getResourceCode());
-            codeToResourceId.put(ssResource.getResourceCode(), String.valueOf(resourceId));
+            codeToResourceId.put(ssResource.getResourceCode(), resourceId);
         }
 
         KbKnowledgeSearch kbKnowledgeSearch = new KbKnowledgeSearch();
@@ -1511,9 +1654,9 @@ public class DatasetApplicationService {
                 if (item == null) {
                     continue;
                 }
-                String resourceId = codeToResourceId.get(item.getKnCode());
+                Long resourceId = codeToResourceId.get(item.getKnCode());
                 if (resourceId != null) {
-                    item.setKnCode(resourceId);
+                    item.setResourceId(resourceId);
                 }
             }
         }
@@ -1529,7 +1672,7 @@ public class DatasetApplicationService {
         }
 
         List<String> knCodeList = new ArrayList<>();
-        Map<String, String> codeToResourceId = new HashMap<>();
+        Map<String, Long> codeToResourceId = new HashMap<>();
         for (Long resourceId : request.getResourceIdList()) {
             if (resourceId == null) {
                 throw new BaseException("知识库资源标识不能为空");
@@ -1537,7 +1680,7 @@ public class DatasetApplicationService {
             SsResource ssResource = loadDatasetResource(resourceId);
             validateDatasetReadablePermission(ssResource);
             knCodeList.add(ssResource.getResourceCode());
-            codeToResourceId.put(ssResource.getResourceCode(), String.valueOf(resourceId));
+            codeToResourceId.put(ssResource.getResourceCode(), resourceId);
         }
 
         KbKnowledgeFileSearch kbKnowledgeFileSearch = new KbKnowledgeFileSearch();
@@ -1561,13 +1704,70 @@ public class DatasetApplicationService {
                 if (item == null) {
                     continue;
                 }
-                String resourceId = codeToResourceId.get(item.getKnCode());
+                Long resourceId = codeToResourceId.get(item.getKnCode());
                 if (resourceId != null) {
-                    item.setKnCode(resourceId);
+                    item.setResourceId(resourceId);
                 }
             }
         }
         return result;
+    }
+
+    /**
+     * 执行 Agent DSL 纯元数据检索。门户校验 resourceIdList 的访问权限并转换为 QA knCodeList， 响应中保留 QA knCode，并补充回映后的 resourceId。
+     */
+    public KnowledgeMetadataSearchResult searchKnowledgeMetadata(KnowledgeMetadataSearchRequest request) {
+        if (request == null || request.getResourceIdList() == null || request.getResourceIdList().isEmpty()) {
+            throw new BaseException(I18nUtil.get("dataset.metadata.search.resource.id.list.notempty"));
+        }
+
+        List<String> knCodeList = new ArrayList<>();
+        Map<String, Long> codeToResourceId = new HashMap<>();
+        for (Long resourceId : request.getResourceIdList()) {
+            if (resourceId == null) {
+                throw new BaseException(I18nUtil.get("dataset.metadata.search.resource.id.notnull"));
+            }
+            SsResource ssResource = loadDatasetResource(resourceId);
+            validateDatasetReadablePermission(ssResource);
+            knCodeList.add(ssResource.getResourceCode());
+            codeToResourceId.put(ssResource.getResourceCode(), resourceId);
+        }
+
+        KbKnowledgeMetadataSearch qaRequest = new KbKnowledgeMetadataSearch();
+        qaRequest.setKnCodeList(knCodeList);
+        qaRequest.setWhere(request.getWhere());
+        qaRequest.setMetadataFieldList(request.getMetadataFieldList());
+        qaRequest.setTopK(request.getTopK());
+        qaRequest.setPageNum(request.getPageNum());
+        qaRequest.setPageSize(request.getPageSize());
+
+        PythonBuildResponse<KnowledgeMetadataSearchResult> ret = feignPythonBuildService
+            .searchKnowledgeMetadata(qaRequest);
+        assertPythonBuildSuccess(ret, I18nUtil.get("dataset.metadata.search.operation"));
+
+        KnowledgeMetadataSearchResult result = ret.getResultObject();
+        if (result == null) {
+            return new KnowledgeMetadataSearchResult();
+        }
+        if (result.getData() != null) {
+            for (KnowledgeMetadataSearchItem item : result.getData()) {
+                if (item == null) {
+                    continue;
+                }
+                Long resourceId = codeToResourceId.get(item.getKnCode());
+                if (resourceId != null) {
+                    item.setResourceId(resourceId);
+                }
+            }
+        }
+        return result;
+    }
+
+    /**
+     * 面向 ByClaw-datacloud 的 QA 原始协议透传入口，不转换 knCode，也不改写 QA 响应信封。
+     */
+    public PythonBuildResponse<Object> searchKnowledgeMetadataByKnCode(KbKnowledgeMetadataSearch request) {
+        return feignPythonBuildService.searchKnowledgeMetadataRaw(request);
     }
 
     /**
@@ -1602,6 +1802,17 @@ public class DatasetApplicationService {
         return normalizedPath;
     }
 
+    private String normalizeOptionalKnowledgeFilePath(String filePath) {
+        return StringUtils.isBlank(filePath) ? null : normalizeKnowledgeFilePath(filePath);
+    }
+
+    private KnowledgeEntityBatchResult attachEntityBatchResourceId(KnowledgeEntityBatchResult result,
+                                                                   Long resourceId) {
+        KnowledgeEntityBatchResult resolved = result == null ? new KnowledgeEntityBatchResult() : result;
+        resolved.setResourceId(resourceId);
+        return resolved;
+    }
+
     private String normalizeKnowledgeGlobRule(String pathRule) {
         String normalizedRule = normalizeKnowledgeFilePath(pathRule);
         if (normalizedRule.contains("**")) {
@@ -1631,17 +1842,31 @@ public class DatasetApplicationService {
     }
 
     /**
+     * 合并门户透传请求头与知识库资源上下文，转发到 ByKC。
+     * <p>
+     * 调用方无透传头时可传 {@link Collections#emptyMap()}；本方法始终通过
+     * {@code new HashMap<>(headers)} 拷贝入参，不会直接复用不可变 map，因此后续 {@code put} 安全。
+     */
+    private Map<String, String> forwardKnowledgeHeaders(Map<String, String> headers, Long resourceId) {
+        Map<String, String> forwardedHeaders = headers == null ? new HashMap<>() : new HashMap<>(headers);
+        if (resourceId != null) {
+            forwardedHeaders.put(FeignPythonBuildService.RESOURCE_ID_HEADER, String.valueOf(resourceId));
+        }
+        return forwardedHeaders;
+    }
+
+    /**
      * QA 知识库接口业务失败时必须向前端抛错，避免出现“后端提示成功但文件没有落库/不可见”的假成功。
      */
     private void assertPythonBuildSuccess(PythonBuildResponse<?> response, String operationName) {
         if (response == null) {
-            throw new BaseException(operationName + "失败：知识库服务响应为空");
+            throw new BaseException(I18nUtil.get("dataset.pythonbuild.operation.response.empty", operationName));
         }
         if (PythonBuildResponse.RESPONSE_SUCCESS.equalsIgnoreCase(StringUtils.trimToEmpty(response.getResultCode()))) {
             return;
         }
         String resultMsg = StringUtils.defaultIfBlank(response.getResultMsg(), response.getResultCode());
-        throw new BaseException(operationName + "失败：" + resultMsg);
+        throw new BaseException(I18nUtil.get("dataset.pythonbuild.operation.failed", operationName, resultMsg));
     }
 
 }

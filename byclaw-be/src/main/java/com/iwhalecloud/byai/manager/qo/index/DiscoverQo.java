@@ -18,6 +18,11 @@ import lombok.Setter;
 public class DiscoverQo extends AuthQo {
 
     /**
+     * 数字员工类型。017 表示数字员工组；未传时保持历史接口语义并排除 017。
+     */
+    private String agentType;
+
+    /**
      * 目录id
      */
     private Long catalogId;
@@ -78,5 +83,13 @@ public class DiscoverQo extends AuthQo {
      * 是否查询全部资源状态。true 时不再附加 a.resource_status 过滤，覆盖筛选"全部"语义。
      */
     private Boolean includeAllResourceStatus;
+
+    /**
+     * 仅查询当前账号下可用的数字员工（我创建的 或 红名单授权给我的）。
+     * <p>
+     * 仅供新增的 discoverMine 接口使用，原 discover 接口不传该字段，默认为 null，行为不变。
+     * </p>
+     */
+    private Boolean mineOnly;
 
 }

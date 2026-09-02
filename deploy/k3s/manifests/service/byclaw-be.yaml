@@ -53,6 +53,10 @@ spec:
               value: "/mnt/byclaw-workspace"
             - name: FILE_STORAGE_LOCAL_PATH
               value: "/mnt/byclaw-workspace"
+            - name: ARTIFACT_STORAGE_TYPE
+              value: "file"
+            - name: ARTIFACT_PUBLIC_BASE_URL
+              value: ""
             - name: BYCLAW_SANDBOX_FILE_VOLUME_TYPE
               value: "bind"
             - name: DB_HOST

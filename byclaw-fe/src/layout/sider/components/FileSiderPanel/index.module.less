@@ -276,7 +276,16 @@
   line-height: 22px;
 
   :global {
+    .@{antPrefix}-tree-treenode {
+      width: 100%;
+      align-items: center;
+    }
+
     .@{antPrefix}-tree-title {
+      display: block;
+      flex: 1;
+      min-width: 0;
+      width: 100%;
       color: inherit;
       font-size: inherit;
       font-weight: inherit;
@@ -289,11 +298,23 @@
 
     .@{antPrefix}-tree-switcher {
       width: 18px;
+      align-self: center;
+    }
+
+    .@{antPrefix}-tree-iconEle {
+      align-self: center;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+      transform: translateY(-4px);
     }
 
     .@{antPrefix}-tree-node-content-wrapper {
       min-width: 0;
       flex: 1;
+      // 文件树操作按钮由本组件固定在行尾，右侧间距交给标题内容自身预留。
+      padding-right: 0;
       transition: background 0.18s ease, box-shadow 0.18s ease, color 0.18s ease;
     }
   }
@@ -316,6 +337,7 @@
     }
 
     .@{antPrefix}-tree-iconEle {
+      font-size: 26px;
       color: var(--beyond-color-primary, #1677ff);
       filter: drop-shadow(0 2px 4px rgba(22, 119, 255, 0.16));
     }
@@ -332,12 +354,70 @@
   }
 }
 
+.fileTree :global(.@{antPrefix}-tree-iconEle) {
+  font-size: 26px;
+}
+
+// 过程文件隐藏元信息后，单行标题的图标与名称保持垂直居中。
+.fileTreeNoMeta {
+  .treeTitleName {
+    flex-direction: row;
+    align-items: center;
+  }
+
+  :global {
+    .@{antPrefix}-tree-treenode {
+      align-items: center;
+    }
+
+    .@{antPrefix}-tree-switcher,
+    .@{antPrefix}-tree-iconEle {
+      align-self: center;
+    }
+
+    .@{antPrefix}-tree-iconEle {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      height: 22px;
+      line-height: 1;
+      vertical-align: middle;
+    }
+
+    .@{antPrefix}-tree-node-content-wrapper {
+      display: flex;
+      align-items: center;
+      line-height: 22px;
+    }
+  }
+}
+
 .treeTitleContent {
+  position: relative;
   display: inline-flex;
   align-items: center;
+  gap: 4px;
   min-width: 0;
   width: 100%;
   max-width: 100%;
+  box-sizing: border-box;
+  padding-right: 0;
+
+  &:hover {
+    .treeActionTrigger {
+      opacity: 1;
+    }
+
+    .treeTitleName {
+      padding-right: 32px;
+    }
+  }
+}
+
+.treeTitleContentActionVisible {
+  .treeActionTrigger {
+    opacity: 1;
+  }
 }
 
 .treeTitleContentExpanded {
@@ -352,7 +432,7 @@
 }
 
 .treeTitleContentCurrent {
-  padding: 0 8px;
+  padding: 0 0 0 8px;
   border-radius: 10px;
   background: #f5f6f8;
   box-shadow: inset 0 0 0 1px rgba(31, 37, 51, 0.04);
@@ -370,8 +450,12 @@
 .treeTitleName {
   display: inline-flex;
   flex-direction: column;
+  // 让 Tooltip 触发节点占满文件名区域，鼠标经过文件名文本和省略号区域都能显示完整名称。
+  flex: 1 1 auto;
   min-width: 0;
   max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
 .previewableTreeTitle {
@@ -379,8 +463,10 @@
 }
 
 .treeTitleText {
-  display: inline-block;
-  max-width: 100%;
+  display: block;
+  position: relative;
+  z-index: 1;
+  width: 100%;
   color: #4a5058;
   font-size: 14px;
   font-weight: 400;
@@ -389,6 +475,91 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   vertical-align: bottom;
+}
+
+.treeTitleMeta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  overflow: hidden;
+  color: #98a0aa;
+  font-size: 12px;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.treeTitleMetaPerson {
+  margin-left: 4px;
+}
+
+.filePathTooltip {
+  max-width: 320px;
+  padding: 2px 0;
+}
+
+.filePathTooltipOverlay {
+  margin-left: -40px !important;
+  transform: translateX(-40px) !important;
+
+  :global {
+    .@{antPrefix}-popover-inner {
+      max-width: 340px;
+      padding: 8px 10px;
+      color: #fff;
+      background: #1f2329;
+    }
+  }
+}
+
+.filePathTooltipName {
+  max-width: 520px;
+  margin-bottom: 4px;
+  color: #fff;
+  font-weight: 500;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.filePathTooltipPathRow {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.filePathTooltipPath {
+  flex: 1;
+  min-width: 0;
+  color: rgba(255, 255, 255, 0.75);
+  line-height: 18px;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+.filePathTooltipCopy {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  color: rgba(255, 255, 255, 0.85) !important;
+  pointer-events: auto;
+  border-radius: 4px;
+
+  &:hover {
+    color: #fff !important;
+    background: rgba(255, 255, 255, 0.2) !important;
+  }
+
+  &:focus-visible {
+    color: #fff !important;
+    background: rgba(255, 255, 255, 0.2) !important;
+    outline: 1px solid rgba(255, 255, 255, 0.75);
+  }
 }
 
 .previewableTreeTitle .treeTitleText {
@@ -526,12 +697,41 @@
   background: #fff;
 }
 
+// 主文件树与替代视图始终保留节点，只切换可见性，避免返回文件树时丢失展开和输入状态。
+.fileSpacePrimaryContent {
+  display: contents;
+}
+
+.fileSpaceAlternateContent {
+  display: block;
+}
+
+.fileSpaceContentHidden {
+  display: none;
+}
+
+// 仅在替代视图可见时承接剩余高度；隐藏时保持 display:none，避免 Changes 默认露出。
+.fileSpaceAlternateContentVisible {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
 // 任务成果等抽屉场景使用剩余可用高度，文件树内部滚动以保留持续浏览体验。
 .fileSpaceBlockFill {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
+
+  // 项目资源的“全部会话”会渲染多个分组，列表在统一内容区内滚动而不撑破详情页。
+  .fileSpaceGroupList {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
 
   .fileSpaceTreeWrap {
     flex: 1;
@@ -592,6 +792,28 @@
         margin: 0;
       }
     }
+  }
+}
+
+.fileSpaceBlockResourceCompact {
+  .fileSpaceTreeWrap {
+    :global {
+      .@{antPrefix}-empty {
+        min-height: 72px;
+        padding: 8px;
+      }
+
+      .@{antPrefix}-empty-image {
+        margin-bottom: 4px;
+        transform: scale(0.72);
+        transform-origin: center bottom;
+      }
+    }
+  }
+
+  .fileSpaceEmpty {
+    min-height: 72px;
+    padding: 8px;
   }
 }
 
@@ -812,12 +1034,29 @@
 }
 
 .treeActionTrigger {
+  // 文件树操作按钮固定在当前行最右侧，避免跟随文件名长度移动。
+  position: absolute;
+  top: 50%;
+  right: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: transparent;
+  box-shadow: none;
+  transform: translateY(-50%);
+  opacity: 0;
+  z-index: 2;
+  transition: opacity 0.12s ease, background 0.12s ease, color 0.12s ease;
   cursor: pointer;
+
+  &:hover,
+  &:global(.ant-dropdown-open),
+  &:global(.@{antPrefix}-dropdown-open) {
+    opacity: 1;
+  }
 }
 
 .fileItem {
@@ -899,7 +1138,10 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  padding: 0;
+  border: 0;
   border-radius: 4px;
+  background: transparent;
   color: #707680;
   cursor: pointer;
 

@@ -1,5 +1,214 @@
 import { GET, POST } from '@/service/common/request';
 
+export interface SkillGroupMember {
+  resourceId: string;
+  resourceCode: string;
+  resourceName: string;
+  resourceDesc: string;
+  avatar: string;
+  resourceStatus: number;
+  ownerType: string;
+  createBy: string;
+  skillType: string;
+  systemBuiltIn?: boolean;
+  creatorOwned?: boolean;
+  sourceType: string;
+  version: string;
+  skillUrl: string;
+  skillPackageFormat: string;
+  skillOriginalFilename: string;
+  skillPackageSize: number;
+  skillPackageHash: string;
+  targetContent: string;
+  syncStatus: string;
+  syncError: string;
+  lastSyncTime: string;
+  memberStatus?: SkillGroupMemberStatus;
+  statusReason?: string;
+  installed?: boolean;
+  hasUsePermission?: boolean;
+}
+
+export type SkillGroupMemberStatus =
+  | 'INSTALLED'
+  | 'INSTALLABLE'
+  | 'APPLY_REQUIRED'
+  | 'APPLY_PENDING'
+  | 'APPLY_UNAVAILABLE';
+
+export interface SkillGroupMemberStatusSummary {
+  members: SkillGroupMember[];
+  installed: number;
+  installable: number;
+  applyRequired: number;
+  applyPending: number;
+  unavailable: number;
+  total?: number;
+  hasPermissionBarrier?: boolean;
+}
+
+export interface SkillGroup {
+  resourceId: string;
+  resourceName: string;
+  resourceDesc: string;
+  avatar: string;
+  catalogId: string;
+  ownerType: string;
+  resourceStatus: number;
+  createBy: string;
+  createTime: string;
+  updateTime: string;
+  memberCount: number;
+  installedByGroup?: boolean;
+  members: SkillGroupMember[];
+}
+
+export interface SkillGroupUninstallSkill {
+  resourceId: string;
+  resourceName?: string;
+  manualSource: boolean;
+  otherGroupIds: string[];
+  otherGroupNames: string[];
+}
+
+export interface SkillGroupUninstallPreview {
+  installedByGroup: boolean;
+  previewToken: string;
+  exclusiveSkills: SkillGroupUninstallSkill[];
+  sharedSkills: SkillGroupUninstallSkill[];
+  affectedCount: number;
+}
+
+export type SkillGroupVo = SkillGroup;
+
+export interface SkillGroupInstallResult {
+  confirmationRequired?: boolean;
+  installedByGroup?: boolean;
+  uninstallPreview?: SkillGroupUninstallPreview;
+  affectedOtherGroupIds?: string[];
+  installedSkillIds: string[];
+  existingSkillIds: string[];
+  removedSkillIds: string[];
+  retainedSkillIds: string[];
+  totalSkillIds: string[];
+  appliedSkillIds?: string[];
+  pendingSkillIds?: string[];
+  unavailableSkillIds?: string[];
+  summary?: SkillGroupMemberStatusSummary;
+}
+
+export interface SkillGroupPageResult {
+  pageNum: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+  list: SkillGroup[];
+}
+
+export interface SkillGroupPageParams {
+  pageNum: number;
+  pageSize: number;
+  keyword?: string;
+  ownerType?: string;
+  resourceStatus?: number | string;
+  catalogId?: string;
+}
+
+export interface SkillGroupCandidatePageParams {
+  groupId?: string;
+  pageNum: number;
+  pageSize: number;
+  keyword?: string;
+}
+
+export interface SkillGroupMemberPageResult {
+  pageNum: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+  list: SkillGroupMember[];
+}
+
+export interface SkillGroupCreateParams {
+  resourceName: string;
+  resourceDesc?: string;
+  avatar?: string;
+  catalogId?: string | number;
+  ownerType: string;
+}
+
+export interface SkillGroupMemberChangeParams {
+  groupId: string;
+  skillIds: string[];
+}
+
+export interface SkillGroupUpdateParams {
+  groupId: string;
+  resourceName: string;
+  resourceDesc?: string;
+  avatar?: string;
+  catalogId?: string | number;
+}
+
+export const pageSkillGroups = (params: SkillGroupPageParams) =>
+  POST<SkillGroupPageResult>('/byaiService/skillGroup/page', params);
+
+export interface SkillGroupInstallParams {
+  groupId: string;
+  digitalEmployeeId: string;
+}
+
+export type SkillGroupUninstallMode = 'PRESERVE_SHARED' | 'REMOVE_ALL';
+
+export interface SkillGroupUninstallParams extends SkillGroupInstallParams {
+  mode?: SkillGroupUninstallMode;
+  previewToken?: string;
+}
+
+export const getSkillGroupDetail = (params: { groupId: string; digitalEmployeeId?: string }) =>
+  POST<SkillGroup>('/byaiService/skillGroup/detail', params);
+
+export const refreshSkillGroupDetail = (params: { groupId: string; digitalEmployeeId?: string }) =>
+  POST<SkillGroup>('/byaiService/skillGroup/detail', params, {
+    responseCfg: { hideErrorTips: true },
+  });
+
+export const pageSkillGroupMemberCandidates = (params: SkillGroupCandidatePageParams) =>
+  POST<SkillGroupMemberPageResult>('/byaiService/skillGroup/member/candidates', params);
+
+export const installSkillGroup = (params: SkillGroupInstallParams) =>
+  POST<SkillGroupInstallResult>('/byaiService/skillGroup/install', params);
+
+export const preflightInstallSkillGroup = (params: SkillGroupInstallParams) =>
+  POST<SkillGroupMemberStatusSummary>('/byaiService/skillGroup/install/preflight', params);
+
+export const executeInstallSkillGroup = (params: SkillGroupInstallParams) =>
+  POST<SkillGroupInstallResult>('/byaiService/skillGroup/install/execute', params);
+
+export const preflightUninstallSkillGroup = (params: SkillGroupInstallParams) =>
+  POST<SkillGroupUninstallPreview>('/byaiService/skillGroup/uninstall/preflight', params, {
+    responseCfg: { hideErrorTips: true },
+  });
+
+export const uninstallSkillGroup = (params: SkillGroupUninstallParams) =>
+  POST<SkillGroupInstallResult>('/byaiService/skillGroup/uninstall', params, {
+    responseCfg: { hideErrorTips: true },
+  });
+
+export const createSkillGroup = (params: SkillGroupCreateParams) =>
+  POST<SkillGroup>('/byaiService/skillGroup/create', params);
+
+export const deleteSkillGroup = (params: { groupId: string }) => POST<void>('/byaiService/skillGroup/delete', params);
+
+export const addSkillGroupMembers = (params: SkillGroupMemberChangeParams) =>
+  POST<void>('/byaiService/skillGroup/member/add', params);
+
+export const updateSkillGroup = (params: SkillGroupUpdateParams) =>
+  POST<SkillGroup>('/byaiService/skillGroup/update', params);
+
+export const removeSkillGroupMembers = (params: SkillGroupMemberChangeParams) =>
+  POST<void>('/byaiService/skillGroup/member/remove', params);
+
 /**
  * 固定入口操作能力接口返回数据类型
  * 用于判断当前用户是否具备导入企业知识库、工具包、视图、对象等资源的能力
@@ -66,6 +275,7 @@ export interface ResourceImportResult {
  */
 export interface ResourceUseApplyParams {
   resourceId: string | number; // 资源ID
+  history?: boolean; // 是否查询已处理的历史申请
 }
 
 /**
@@ -279,7 +489,7 @@ export const queryCallMCPToolRequest = (params: {
     destination: string;
   };
 }) => {
-  return POST<any>('/byaiService//tool/mcp/callToolRequest', params);
+  return POST<any>('/byaiService/tool/mcp/callToolRequest', params);
 };
 
 /**
@@ -388,6 +598,7 @@ export interface ResourceOperationPermissions {
   canAuditUse: boolean; // 是否有审核权限
   canSetDefault: boolean; // 是否有设为默认权限
   canRestore: boolean; // 是否有恢复权限
+  useApplyPending?: boolean; // 使用申请是否待审核
 }
 
 /**
@@ -555,5 +766,9 @@ export const downloadSkillZip = (params: {
  * @returns Promise 删除结果
  */
 export const deleteSkill = (params: { skillPath: string; resourceId?: string | number; userCode?: string }) => {
-  return POST<any>('/byaiService/tool/deleteSkill', params);
+  return POST<any>('/byaiService/tool/deleteSkill', params, {
+    responseCfg: {
+      hideErrorTips: true,
+    },
+  });
 };

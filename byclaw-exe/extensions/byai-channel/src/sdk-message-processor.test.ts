@@ -1,4 +1,32 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("openclaw/plugin-sdk/media-runtime", () => ({
+  detectMime: vi.fn(async () => "application/octet-stream"),
+  fetchRemoteMedia: vi.fn(),
+  resolveChannelMediaMaxBytes: vi.fn(() => 10_000_000),
+  saveMediaBuffer: vi.fn(),
+}));
+
+vi.mock("./utils.js", () => ({
+  generateRandomId: vi.fn(() => "generated-id"),
+  getAgentNameById: vi.fn(() => undefined),
+}));
+
+vi.mock("./diagnostics.js", () => ({
+  createByaiSdkDiagnosticTrace: vi.fn(() => ({
+    trace: {
+      traceId: "00000000000000000000000000000001",
+      spanId: "0000000000000001",
+      traceFlags: "01",
+    },
+  })),
+  emitByaiSdkDispatchCompleted: vi.fn(),
+  emitByaiSdkDispatchStarted: vi.fn(() => Date.now()),
+  emitByaiSdkMessageReceived: vi.fn(() => Date.now()),
+  runWithByaiSdkDiagnosticTrace: vi.fn(
+    (_trace: unknown, callback: () => unknown) => callback(),
+  ),
+}));
 // 头部原有SDK会话溢出媒体处理导入
 import type { GatewayDataEmitter } from "@byclaw/by-framework";
 import { deliverReplyToAgentViaSdk } from "./sdk-message-processor.js";
@@ -33,6 +61,7 @@ describe("deliverReplyToAgentViaSdk overflow continuation media handling", () =>
       session: {},
     } as never;
     const contexts: Array<Record<string, unknown>> = [];
+    const skillFilters: Array<string[] | undefined> = [];
     let dispatchCount = 0;
 
     setByaiRuntime({
@@ -40,6 +69,13 @@ describe("deliverReplyToAgentViaSdk overflow continuation media handling", () =>
         resolveAgentWorkspaceDir: () => "/tmp/byai-channel-test-workspace",
       },
       channel: {
+        inbound: {
+          runPreparedReply: async ({
+            runDispatch,
+          }: {
+            runDispatch: () => Promise<unknown>;
+          }) => ({ dispatchResult: await runDispatch() }),
+        },
         routing: {
           resolveAgentRoute: () => ({
             sessionKey: "agent:test-agent:direct:acct-media:user-media",
@@ -64,9 +100,11 @@ describe("deliverReplyToAgentViaSdk overflow continuation media handling", () =>
             ctx: Record<string, unknown>;
             replyOptions: {
               onAgentRunStart?: (runId: string) => Promise<void>;
+              skillFilter?: string[];
             };
           }) => {
             contexts.push(ctx);
+            skillFilters.push(replyOptions.skillFilter);
             dispatchCount += 1;
             const runId = `run-media-${dispatchCount}`;
             await replyOptions.onAgentRunStart?.(runId);
@@ -79,22 +117,30 @@ describe("deliverReplyToAgentViaSdk overflow continuation media handling", () =>
               });
               markActiveSdkOverflowContinuePending(String(ctx.SessionKey), true);
             }
-            markActiveSdkRootLifecycleFinished(String(ctx.SessionKey), "end");
+            markActiveSdkRootLifecycleFinished(String(ctx.SessionKey), "end", runId);
             return { queuedFinal: false, counts: {} };
           },
+        },
+        session: {
+          recordInboundSession: vi.fn(),
+          resolveStorePath: vi.fn(() => "/tmp/byai-channel-test-sessions.json"),
         },
       },
     } as never);
 
-    const emittedStates: string[] = [];
+    const emittedStates: Array<{ state?: string }> = [];
     registerSdkEmitter(account.accountId, {
       emitChunk: async () => {},
-      emitState: async (_sessionId: string, _traceId: string, event: string) => {
+      emitState: async (
+        _sessionId: string,
+        _traceId: string,
+        event: { state?: string },
+      ) => {
         emittedStates.push(event);
       },
     } as unknown as GatewayDataEmitter);
 
-    await deliverReplyToAgentViaSdk({
+    const result = await deliverReplyToAgentViaSdk({
       account,
       cfg,
       message: {
@@ -109,17 +155,20 @@ describe("deliverReplyToAgentViaSdk overflow continuation media handling", () =>
         accountId: account.accountId,
         language: "zh_CN",
         languageProvided: true,
+        authConnectorList: { dws: true, fws: false },
       },
       onReply: async () => {},
     });
+    await result.finalize();
 
     expect(contexts).toHaveLength(2);
-    expect(contexts[0]?.MediaPath).toBe("/by/.sessions/user-media/report.png");
-    expect(contexts[0]?.MediaPaths).toEqual(["/by/.sessions/user-media/report.png"]);
+    expect(contexts[0]?.MediaPath).toBe("/by/report.png");
+    expect(contexts[0]?.MediaPaths).toEqual(["/by/report.png"]);
     expect(contexts[1]?.RawBody).toContain("上一轮回答因对话达到上下文窗口上限而被截断");
     expect(contexts[1]).not.toHaveProperty("MediaPath");
     expect(contexts[1]).not.toHaveProperty("MediaPaths");
-    expect(emittedStates).toContain("");
+    expect(skillFilters).toEqual([undefined, undefined]);
+    expect(emittedStates).toContainEqual(expect.objectContaining({ state: "" }));
 
     clearActiveSdkRequestByTarget(account.accountId, "test-agent:user-media");
   });

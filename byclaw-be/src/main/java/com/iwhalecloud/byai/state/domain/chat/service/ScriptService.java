@@ -31,6 +31,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.manager.entity.men.MenTask;
+import com.iwhalecloud.byai.manager.domain.connector.service.ConnectorAuthService;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSessionExt;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSessionMember;
 import com.iwhalecloud.byai.common.constants.Constants;
@@ -99,6 +100,9 @@ public class ScriptService extends AbstractChatProcess {
     private MemoryMessageService memoryMessageService;
 
     @Autowired
+    private ScopedMessageWriteBehind scopedMessageWriteBehind;
+
+    @Autowired
     private SequenceService sequenceService;
 
     @Autowired
@@ -130,6 +134,9 @@ public class ScriptService extends AbstractChatProcess {
 
     @Autowired
     private com.iwhalecloud.byai.common.message.service.ByaiMessageHotService byaiMessageHotService;
+
+    @Autowired
+    private ConnectorAuthService connectorAuthService;
 
     /**
      * 参数准备：生成消息ID、组装请求参数、初始化上下文等。
@@ -248,9 +255,34 @@ public class ScriptService extends AbstractChatProcess {
 
         ctx.messageContext = new MessageContext(AgentTypeEnum.getNameCode(ctx.assistantChatDto.getAgentType()),
             ctx.modelAnswerMessageId, ctx.taskId);
+        restoreTaskSegmentCursor(ctx);
 
         // 请求python参数
         ctx.params = paramService.getParams(ctx);
+    }
+
+    private void restoreTaskSegmentCursor(ChatProcessContext ctx) {
+        if (TaskOperateTypeEnum.UPDATE.equals(ctx.assistantChatDto.getTaskOperateType())
+            || CollectionUtils.isEmpty(ctx.taskHistoryMessages) || ctx.taskHistoryMessages.size() < 2) {
+            return;
+        }
+        ByaiMessageHotDto historyMessage = ctx.taskHistoryMessages.get(1);
+        List<AnswerDelta> reasonMessages = parseSegments(historyMessage.getInferLog());
+        List<AnswerDelta> answerMessages = parseSegments(historyMessage.getMessageStruct());
+        ctx.messageContext.restoreSegmentCursor(reasonMessages, answerMessages);
+    }
+
+    private List<AnswerDelta> parseSegments(String value) {
+        if (StringUtils.isBlank(value)) {
+            return List.of();
+        }
+        try {
+            return JSON.parseArray(value, AnswerDelta.class);
+        }
+        catch (Exception e) {
+            log.warn("恢复任务消息渲染序号失败，历史结构无法解析", e);
+            return List.of();
+        }
     }
 
     /**
@@ -326,7 +358,14 @@ public class ScriptService extends AbstractChatProcess {
         userContext.setAnswerText(new StringBuilder(ctx.assistantChatDto.getChatContent()));
         // userContext.setAnswerText(dealContent(ctx.assistantChatDto));
         userContext.setTaskId(ctx.taskId);
-        memoryMessageService.save(ctx.sessionId, USER_INPUT.getCode(), userContext, ctx.assistantChatDto);
+        ByaiMessageHotDtoDto message = memoryMessageService.generateMessage(ctx.sessionId, USER_INPUT.getCode(),
+            userContext, ctx.assistantChatDto);
+        scopedMessageWriteBehind.enqueue(
+            "root:user:" + ctx.sessionId + ":" + ctx.userMessageId,
+            ctx.sessionId,
+            message,
+            true
+        );
     }
 
     /**
@@ -600,6 +639,7 @@ public class ScriptService extends AbstractChatProcess {
             .append(String.valueOf(userId));
         metadata.put(Constants.MSG_ROLE, stringBuilder.toString());
         metadata.put("agentId", agentId);
+        metadata.put("authConnectorList", connectorAuthService.findConnectorEnableStates(userId));
         // 放在外面，一定会写的
         metadata.put("mode", assistantChatDto.getMode());
         // 增加智能体，聊天消息等标题，头像信息
@@ -646,23 +686,30 @@ public class ScriptService extends AbstractChatProcess {
     /**
      * WebSocket Gateway 异步模式在 Redis 流结束后由事件路由服务回调完成落库和收尾。
      */
-    public void completeAsyncGatewayContext(ChatProcessContext ctx) {
+    public boolean persistAsyncGatewayContext(ChatProcessContext ctx) {
         try {
             if (ctx.loginInfo != null) {
                 CurrentUserHolder.setLoginInfo(ctx.loginInfo);
             }
             storeMessage(ctx);
             afterProcess(ctx);
+            return true;
         }
         catch (Exception e) {
             log.error("WebSocket 异步会话收尾失败, sessionId: {}, traceId: {}", ctx.sessionId, ctx.traceId, e);
+            return false;
         }
         finally {
             CurrentUserHolder.clearLoginInfo();
-            if (ctx.sessionId != null) {
-                sessionStreamManager.stopSessionListener(String.valueOf(ctx.sessionId));
-            }
         }
+    }
+
+    public boolean completeAsyncGatewayContext(ChatProcessContext ctx) {
+        boolean persisted = persistAsyncGatewayContext(ctx);
+        if (persisted && ctx != null && ctx.sessionId != null) {
+            sessionStreamManager.stopSessionListener(String.valueOf(ctx.sessionId));
+        }
+        return persisted;
     }
 
     /**
@@ -674,14 +721,14 @@ public class ScriptService extends AbstractChatProcess {
      *
      * @param ctx 运行中的聊天上下文
      */
-    public void flushOnStop(ChatProcessContext ctx) {
+    public boolean flushOnStop(ChatProcessContext ctx) {
         if (ctx == null) {
-            return;
+            return false;
         }
         if (ctx.messageContext != null) {
             ctx.messageContext.setComplete(true);
         }
-        completeAsyncGatewayContext(ctx);
+        return completeAsyncGatewayContext(ctx);
     }
 
     /**
@@ -935,8 +982,9 @@ public class ScriptService extends AbstractChatProcess {
             Optional.ofNullable(assistantChatDto).map(AssistantChatDto::getExtParams)
                 .filter(params -> params.containsKey("beyondTaskId"))
                 .ifPresent(params -> messageContext.setTaskId(MapParamUtil.getLongValue(params, "beyondTaskId"))); // 保存LLM应答的信息
-            systemReponse = memoryMessageService.save(sessionId, SYSTEM_RESPONSE.getCode(), messageContext,
-                assistantChatDto);
+            systemReponse = ctx.recoveryOnly
+                ? memoryMessageService.saveOrUpdate(sessionId, SYSTEM_RESPONSE.getCode(), messageContext, assistantChatDto)
+                : memoryMessageService.save(sessionId, SYSTEM_RESPONSE.getCode(), messageContext, assistantChatDto);
         }
 
         BeanUtils.copyProperties(systemReponse, resMsg);

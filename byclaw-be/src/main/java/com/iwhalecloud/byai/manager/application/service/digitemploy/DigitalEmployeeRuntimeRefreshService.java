@@ -10,7 +10,6 @@ import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -33,8 +32,7 @@ public class DigitalEmployeeRuntimeRefreshService {
     private static final String SOURCE_MANAGER_API = "manager-api";
 
     @Autowired
-    @Lazy
-    private DigitalEmployeeApplicationService digitalEmployeeApplicationService;
+    private DigitalEmployeePostCommitRefreshExecutor postCommitRefreshExecutor;
 
     @Autowired
     private DigEmployeeChangeEventPublisher digEmployeeChangeEventPublisher;
@@ -90,9 +88,7 @@ public class DigitalEmployeeRuntimeRefreshService {
     private void refreshNow(RuntimeRefreshRequest request) {
         Long digitalEmployeeId = request.digitalEmployeeId();
         try {
-            boolean redisSyncSucceeded = request.inputDto() == null
-                ? digitalEmployeeApplicationService.synOpenClawWorkSpace(digitalEmployeeId)
-                : digitalEmployeeApplicationService.synOpenClawWorkSpace(digitalEmployeeId, request.inputDto());
+            boolean redisSyncSucceeded = postCommitRefreshExecutor.refresh(digitalEmployeeId, request.inputDto());
             if (!redisSyncSucceeded) {
                 if (request.eventType() == DigEmployeeChangeEventType.DIG_EMPLOYEE_SKILLS_SYNCED) {
                     logger.warn("数字员工技能运行态刷新未完成，跳过技能变更通知, digitalEmployeeId={}", digitalEmployeeId);

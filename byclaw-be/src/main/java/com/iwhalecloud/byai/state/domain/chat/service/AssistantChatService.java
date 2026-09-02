@@ -1,8 +1,13 @@
 package com.iwhalecloud.byai.state.domain.chat.service;
 
+import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.manager.application.service.superassist.SuasSuperassistApplicationService;
+import com.iwhalecloud.byai.manager.domain.aimodel.service.AIService;
+import com.iwhalecloud.byai.manager.domain.aimodel.service.AiPromptService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
+import com.iwhalecloud.byai.manager.entity.aimodel.AiPrompt;
 import jakarta.servlet.ServletOutputStream;
+
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.ArrayList;
@@ -15,6 +20,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.security.SecureRandom;
+import java.util.concurrent.TimeUnit;
+
 import com.iwhalecloud.byai.manager.entity.men.MenResCom;
 import com.iwhalecloud.byai.manager.entity.men.MenTask;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
@@ -31,12 +38,16 @@ import org.apache.commons.collections.MapUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.common.constants.Constants;
 import com.iwhalecloud.byai.common.util.SpanUtil;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
+import com.iwhalecloud.byai.state.domain.chat.spi.PendingTaskConfirmHook;
 import com.iwhalecloud.byai.state.domain.chat.dto.MessageTaskDto;
 import com.iwhalecloud.byai.state.domain.chat.enums.ChatUseageEnum;
 import com.iwhalecloud.byai.state.domain.chat.model.ChatInitializationDto;
@@ -53,9 +64,9 @@ import com.iwhalecloud.byai.state.domain.session.enums.MemObjType;
 import com.iwhalecloud.byai.state.domain.session.enums.SessionType;
 import com.iwhalecloud.byai.state.domain.session.enums.UserRole;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
+import com.iwhalecloud.byai.state.domain.session.service.SessionTitleService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.state.infrastructure.common.constants.SseResponseEventEnum;
-import com.iwhalecloud.byai.state.infrastructure.utils.ChatUtils;
 import com.iwhalecloud.byai.state.infrastructure.utils.CompletionsUtils;
 import com.iwhalecloud.byai.common.constants.chat.ConversationObjectType;
 import com.iwhalecloud.byai.state.common.dto.AnswerDelta;
@@ -75,11 +86,16 @@ public class AssistantChatService {
 
     private static final Logger logger = LoggerFactory.getLogger(AssistantChatService.class);
 
+    private static final long CALL_ACP_AGENT_DELEGATION_TTL_SECONDS = 7 * 24 * 60 * 60L;
+
     @Autowired
     private ScriptService scriptService;
 
     @Autowired
     private SessionService sessionService;
+
+    @Autowired
+    private SessionTitleService sessionTitleService;
 
     @Autowired
     private SequenceService sequenceService;
@@ -109,11 +125,31 @@ public class AssistantChatService {
     private TargetAgentResolver targetAgentResolver;
 
     /**
+     * 研发派发待接单放行钩子;manager 侧实现,未装配时聊天链路不受影响。
+     * 必须延迟取:实现方 DevloopApplicationService 反过来依赖本类下发提示词,直接注入会构成 bean 环
+     * (Boot 3 默认禁止循环引用,启动即 refresh 失败)。ObjectProvider 同时保留"可缺失"语义,
+     * 换成 @Lazy + required=false 会注入一个非 null 代理,缺实现时每条消息都抛。
+     */
+    @Autowired
+    private ObjectProvider<PendingTaskConfirmHook> pendingTaskConfirmHookProvider;
+
+    @Autowired
+    private RedisTemplate<String, Object> redisTemplate;
+
+
+    @Autowired
+    private AIService aiService;
+
+    @Autowired
+    private AiPromptService aiPromptService;
+
+
+    /**
      * 对话处理方法（带首词响应开始时间）
      *
      * @param assistantChatDto 对话请求参数
-     * @param outputStream 输出流
-     * @param userInfo 用户信息
+     * @param outputStream     输出流
+     * @param userInfo         用户信息
      * @throws IOException IO异常
      */
     @WithSpan(value = "chat", inheritContext = false)
@@ -151,24 +187,25 @@ public class AssistantChatService {
             // 处理sessionId相关逻辑,校验消息发送权限
             handleSessionLogic(outputStream, assistantChatDto);
 
+            // 研发派发的会话在等承接人接单:命中确认词才把完整任务提示词换上去下发,不命中原样放行。
+            applyPendingTaskConfirm(assistantChatDto);
+
             long time02 = System.currentTimeMillis();
             logger.info("chat time01:{}", time02 - time01);
 
             if (assistantChatDto != null) {
                 assistantChatDto.setAgentId(targetAgentResolver.resolveAgentId(assistantChatDto));
+                applyCallAcpAgentDelegation(assistantChatDto);
             }
 
             // 执行聊天处理：Gateway 模式下 handleGatewayMode() 内部阻塞等待 Redis 监听器完成，
             // 返回后即可安全执行 storeMessage/afterProcess，最终由 finally 关闭流
             executeChat(assistantChatDto, outputStream, firstTextStartTime);
-        }
-        catch (BdpRuntimeException e) {
+        } catch (BdpRuntimeException e) {
             handleBdpRuntimeException(e, assistantChatDto, outputStream);
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             handleGeneralException(e, outputStream);
-        }
-        finally {
+        } finally {
             cleanupResources(userInfo, outputStream);
         }
     }
@@ -177,7 +214,7 @@ public class AssistantChatService {
      * 处理固化记
      *
      * @param assistantChatDto 会话入参
-     * @param outputStream 注
+     * @param outputStream     注
      */
     private void handleFixMemory(AssistantChatDto assistantChatDto, OutputStream outputStream) {
 
@@ -327,8 +364,8 @@ public class AssistantChatService {
      * 保存数据库任务
      *
      * @param assistantChatDto 助手聊天信息
-     * @param newTaskId 新建任务标识
-     * @param newResComId 新建卡片标识
+     * @param newTaskId        新建任务标识
+     * @param newResComId      新建卡片标识
      * @return MessageTaskDto
      */
     private MessageTaskDto saveMessageTask(AssistantChatDto assistantChatDto, Long newTaskId, Long newResComId) {
@@ -393,10 +430,74 @@ public class AssistantChatService {
     }
 
     /**
+     * 待接单会话放行:承接人回确认词时,把本次要发给数字员工的内容换成完整任务提示词。
+     * 必须换内容而不是补一条:RouteService#route 只把当次 chatContent 发给 openclaw,
+     * 库里那条待接单提示不在沙箱的会话历史里,数字员工只会看到"开始"两个字。
+     * 钩子未装配或返回 null 时什么都不做,普通会话零影响。
+     */
+    private void applyPendingTaskConfirm(AssistantChatDto assistantChatDto) {
+        if (assistantChatDto == null || assistantChatDto.getSessionId() == null) {
+            return;
+        }
+        PendingTaskConfirmHook hook = pendingTaskConfirmHookProvider.getIfAvailable();
+        if (hook == null) {
+            return;
+        }
+        try {
+            String prompt = hook.resolveConfirmedPrompt(assistantChatDto.getSessionId(),
+                assistantChatDto.getChatContent());
+            if (StringUtils.isNotBlank(prompt)) {
+                assistantChatDto.setChatContent(prompt);
+            }
+        } catch (Exception e) {
+            // 放行判定失败不能挡住正常聊天:退回原内容,承接人可再回一次或走前端确认入口。
+            logger.warn("待接单确认判定失败, sessionId: {}", assistantChatDto.getSessionId(), e);
+        }
+    }
+
+    /**
+     * 将已委派到外部 ACP agent 的会话继续路由到该 agent，并在每次命中时续期委派记录。
+     */
+    private void applyCallAcpAgentDelegation(AssistantChatDto assistantChatDto) {
+        if (assistantChatDto.getAgentId() == null || assistantChatDto.getSessionId() == null) {
+            return;
+        }
+
+        // Key 格式必须与 TypeScript call-acp-agent-tool.ts 中的 buildCallAcpAgentDelegationRedisKey 保持一致。
+        String key = buildCallAcpAgentDelegationRedisKey(assistantChatDto.getAgentId(), assistantChatDto.getSessionId());
+        try {
+            String delegationValue = (String) redisTemplate.opsForValue().get(key);
+            if (StringUtils.isBlank(delegationValue)) {
+                return;
+            }
+
+            JSONObject delegation = JSON.parseObject(delegationValue);
+            String targetAgentType = delegation.getString("targetAgentType");
+            if (StringUtils.isBlank(targetAgentType)) {
+                logger.warn("call_acp_agent 委派记录缺少 targetAgentType, key: {}", key);
+                return;
+            }
+
+            assistantChatDto.setSourceAgentType(targetAgentType);
+            redisTemplate.expire(key, CALL_ACP_AGENT_DELEGATION_TTL_SECONDS, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            // 委派缓存不可用时沿用原有路由，避免缓存异常阻断正常聊天。
+            logger.warn("读取 call_acp_agent 委派记录失败, key: {}", key, e);
+        }
+    }
+
+    /**
+     * 构造外部 ACP 会话委派记录的 Redis key。
+     */
+    private String buildCallAcpAgentDelegationRedisKey(Long agentId, Long sessionId) {
+        return "byai:call_acp_agent:delegation:" + agentId + ":" + sessionId;
+    }
+
+    /**
      * 处理BdpRuntimeException异常
      */
     private void handleBdpRuntimeException(BdpRuntimeException e, AssistantChatDto assistantChatDto,
-        OutputStream outputStream) {
+                                           OutputStream outputStream) {
         logger.error(e.toString(), e);
 
         // 特殊处理用户被移除群聊的情况
@@ -434,8 +535,7 @@ public class AssistantChatService {
         if (outputStream instanceof ServletOutputStream) {
             try {
                 outputStream.close();
-            }
-            catch (IOException e) {
+            } catch (IOException e) {
                 logger.error("Failed to close output stream", e);
             }
         }
@@ -454,10 +554,15 @@ public class AssistantChatService {
             SessionMembersDto membersDto = createGroupChatSession(assistantChatDto);
             CompletionsUtils.responseWrite(outputStream, SseResponseEventEnum.createSession,
                 JSON.toJSONString(membersDto));
-        }
-        else {
+        } else {
             // sessionId不为空时，检查当前用户是否在群成员列表中
             checkUserMembershipInGroup(assistantChatDto.getSessionId(), currentUserId, assistantChatDto);
+            ByaiSession updatedSession = sessionTitleService.resolveInitialTitle(assistantChatDto.getSessionId(),
+                assistantChatDto.getChatContent());
+            if (updatedSession != null) {
+                CompletionsUtils.responseWrite(outputStream, SseResponseEventEnum.sessionTitleUpdated,
+                    JSON.toJSONString(updatedSession), updatedSession.getSessionId());
+            }
         }
     }
 
@@ -497,8 +602,7 @@ public class AssistantChatService {
         sessionMembersDto.setObjectId(assistantChatDto.getAgentId());
 
         String chatContent = assistantChatDto.getChatContent();
-        sessionMembersDto
-            .setSessionName(ChatUtils.truncateString(chatContent.replaceAll("\\{\\{[^}]*+\\}\\}", ""), 10));
+        sessionMembersDto.setSessionName(this.summaryChatContent(chatContent));
         sessionMembersDto.setCreatorId(CurrentUserHolder.getCurrentUserId());
         sessionMembersDto.setEnterpriseId(CurrentUserHolder.getEnterpriseId());
         sessionMembersDto.setSessionType(SessionType.H_AS.getCode());
@@ -534,10 +638,45 @@ public class AssistantChatService {
     }
 
     /**
+     * 总结会话内容，如果有异常，原来格式截取返回
+     *
+     * @param chatContent 会话内容
+     * @return 会话内容总结
+     */
+    private String summaryChatContent(String chatContent) {
+
+        AiPrompt aiPrompt = aiPromptService.findFirst("SUMMARY_CHAT_CONTENT");
+        if (aiPrompt == null) {
+            // 任务启动链路只需要截断会话标题，使用已有通用工具避免引入聊天基础设施类加载依赖。
+            return StringUtils.substring(chatContent.replaceAll("\\{\\{[^}]*+\\}\\}", ""), 0, 10);
+        }
+
+        String promptTemplate = aiPrompt.getPromptZhTemplate();
+
+
+        String language = CurrentUserHolder.getLanguage();
+        if (I18nUtil.ENGLISH.equalsIgnoreCase(language)) {
+            promptTemplate = aiPrompt.getPromptEnTemplate();
+        }
+
+        // 生成提示描述信息
+        String prompt = promptTemplate.replace("${chatContent}", chatContent);
+        try {
+            String promptResult = aiService.generateText(prompt, aiPrompt.getModelCode());
+            // 还是要做超长处理
+            return StringUtils.substring(promptResult, 0, 255);
+        } catch (Exception e) {
+            logger.error(e.getMessage(), e);
+            // 兜底策略
+            return StringUtils.substring(chatContent.replaceAll("\\{\\{[^}]*+\\}\\}", ""), 0, 10);
+        }
+    }
+
+    /**
      * 创建数字助理的成员对象
      *
      * @param sessionId 会话ID
-     * @param agentId 数字助理ID
+     * @param agentId   数字助理ID
      * @return SessionMemberDto
      */
     private ByaiSessionMember createAgentMember(Long sessionId, Long agentId) {
@@ -568,8 +707,8 @@ public class AssistantChatService {
     /**
      * 检查用户是否在群成员列表中 增强版本：先判断sessionType，只有群聊类型(hs_as)才需要检查群成员关系
      *
-     * @param sessionId 会话ID
-     * @param userId 用户ID
+     * @param sessionId        会话ID
+     * @param userId           用户ID
      * @param assistantChatDto 对话请求参数，可能包含sessionType
      */
     private void checkUserMembershipInGroup(Long sessionId, Long userId, AssistantChatDto assistantChatDto) {
@@ -581,8 +720,7 @@ public class AssistantChatService {
             if (StringUtils.isBlank(sessionType)) {
                 logger.debug("请求参数中没有sessionType，通过feign调用获取 - sessionId: {}", sessionId);
                 sessionType = getSessionType(sessionId);
-            }
-            else {
+            } else {
                 logger.debug("使用请求参数中的sessionType: {} - sessionId: {}", sessionType, sessionId);
             }
 
@@ -605,12 +743,10 @@ public class AssistantChatService {
 
             logger.debug("用户 {} 在会话 {} 中的群成员检查通过", userId, sessionId);
 
-        }
-        catch (BdpRuntimeException e) {
+        } catch (BdpRuntimeException e) {
             logger.error("检查用户群成员关系失败 - sessionId: {}, userId: {}", sessionId, userId, e);
             throw e;
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             logger.error("检查用户群成员关系失败 - sessionId: {}, userId: {}", sessionId, userId, e);
             throw new BdpRuntimeException(I18nUtil.get("chat.check.group.member.failed"), e);
         }
@@ -638,8 +774,8 @@ public class AssistantChatService {
      * 处理用户被移除群聊的逻辑 通过输出流返回友好提示信息
      *
      * @param outputStream 输出流
-     * @param sessionId 会话ID
-     * @param userId 用户ID
+     * @param sessionId    会话ID
+     * @param userId       用户ID
      */
     private void handleUserRemovedFromGroup(OutputStream outputStream, Long sessionId, Long userId) {
         try {
@@ -653,8 +789,7 @@ public class AssistantChatService {
 
             logger.info("已向用户 {} 发送群聊权限提示信息", userId);
 
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             logger.error("发送用户群聊权限提示失败 - sessionId: {}, userId: {}", sessionId, userId, e);
         }
     }
@@ -668,8 +803,7 @@ public class AssistantChatService {
             // 转换为无符号 32 位整数（0 ~ 2^32-1）
             long unsigned = randomInt & 0xFFFFFFFFL;
             return Long.toString(unsigned);
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             // 降级方案：时间戳反转取前 10 位
             String timestamp = Long.toString(System.currentTimeMillis());
             String reversed = new StringBuilder(timestamp).reverse().toString();

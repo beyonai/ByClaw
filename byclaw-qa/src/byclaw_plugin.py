@@ -23,6 +23,7 @@ class RetrievalOperationType(Enum):
     UPLOAD_FILE = "uploadFile"
     DELETE_FILE = "deleteFile"
     READ_FILE = "readFile"
+    BUILD_RESULT = "buildResult"
     KNOWLEDGE_SEARCH = "knowledgeSearch"
     LIST_DIR = "listDir"
     GLOB = "glob"

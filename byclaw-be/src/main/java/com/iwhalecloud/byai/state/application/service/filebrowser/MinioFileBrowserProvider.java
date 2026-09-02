@@ -5,8 +5,6 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipOutputStream;
 
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
@@ -52,6 +50,7 @@ public class MinioFileBrowserProvider implements FileBrowserProvider {
             FileBrowserItemVo vo = new FileBrowserItemVo();
             boolean isDir = item.isDir() || objectName.endsWith("/");
             vo.setDir(isDir);
+            vo.setLastModified(item.getLastModified());
             if (isDir) {
                 vo.setName(extractDirName(objectName, prefix));
                 vo.setPath(toRelativePath(objectName));
@@ -219,27 +218,26 @@ public class MinioFileBrowserProvider implements FileBrowserProvider {
 
         List<StorageObject> items = objectStorage.list(buildPrefix(bucket, prefix, true), null);
 
-        try (ZipOutputStream zos = new ZipOutputStream(outputStream)) {
+        FileBrowserZipSupport.writeArchive(outputStream, zos -> {
             byte[] buffer = new byte[8192];
             for (StorageObject item : items) {
                 if (item.isDir()) {
                     continue;
                 }
                 String objectName = item.getPath();
+                if (objectName == null || !objectName.startsWith(prefix)) {
+                    LOGGER.warn("文件夹下载跳过路径异常的对象: prefix={}, objectName={}", prefix, objectName);
+                    continue;
+                }
                 String entryName = objectName.substring(prefix.length());
                 if (entryName.isEmpty()) {
                     continue;
                 }
-                zos.putNextEntry(new ZipEntry(entryName));
                 try (InputStream in = objectStorage.get(buildLocation(bucket, objectName))) {
-                    int len;
-                    while ((len = in.read(buffer)) > 0) {
-                        zos.write(buffer, 0, len);
-                    }
+                    FileBrowserZipSupport.writeEntry(zos, entryName, in, buffer, item.getSize());
                 }
-                zos.closeEntry();
             }
-        }
+        });
     }
 
     private String resolveBucket(String userCode) {

@@ -1,0 +1,427 @@
+package com.iwhalecloud.byai.manager.domain.connector.manifest;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.entry;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorManifestCommandResolver;
+import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
+
+@DisabledOnOs(OS.WINDOWS)
+class ConnectorManifestCanonicalizerTest {
+
+    @Test
+    void acceptsOAuth2ManifestWithoutCliCommandsOrNativeHome() {
+        ConnectorInfo connector = new ConnectorInfo();
+        connector.setConnectorCode("github");
+        connector.setSkillCode("github");
+        String manifest = """
+            {"schemaVersion":"1.0","id":"github","version":"1.0.0",
+             "runtime":{"type":"oauth2","authorizeIn":"be-auth-job"},
+             "authStorage":{"mode":"credential-reference","owner":"be-auth-job",
+                 "runtimeMutation":"provider-refresh-only","environment":{}},
+             "skill":{"code":"github","source":"system-builtin","installScope":"user","grantScope":"agent"}}
+            """;
+
+        String canonical = new ConnectorManifestCanonicalizer(new ObjectMapper()).canonicalize(connector, manifest);
+
+        assertThat(canonical).contains("\"type\":\"oauth2\"", "\"mode\":\"credential-reference\"");
+    }
+
+    @Test
+    void acceptsOAuth2SharedVolumeCredentialProjection() {
+        ConnectorInfo connector = new ConnectorInfo();
+        connector.setConnectorCode("github");
+        connector.setSkillCode("github");
+        String manifest = """
+            {"schemaVersion":"1.0","id":"github","version":"1.0.0",
+             "runtime":{"type":"oauth2","authorizeIn":"be-auth-job"},
+             "authStorage":{"mode":"credential-reference","owner":"be-auth-job",
+                 "runtimeMutation":"shared-volume-projection",
+                 "projectionPath":"/by/.connector-auth/.github/credential.json","environment":{}},
+             "skill":{"code":"github","source":"system-builtin","installScope":"user","grantScope":"agent"}}
+            """;
+
+        ConnectorManifestCanonicalizer canonicalizer = new ConnectorManifestCanonicalizer(new ObjectMapper());
+        String canonical = canonicalizer.canonicalize(connector, manifest);
+
+        assertThat(canonical).contains("\"runtimeMutation\":\"shared-volume-projection\"",
+            "\"projectionPath\":\"/by/.connector-auth/.github/credential.json\"");
+        assertThat(canonicalizer.extractCredentialProjection(connector, manifest))
+            .hasValueSatisfying(projection -> assertThat(projection.projectionPath())
+                .isEqualTo("/by/.connector-auth/.github/credential.json"));
+    }
+
+    @Test
+    void sharedVolumeProjectionRequiresPrivateConnectorAuthPath() {
+        ConnectorInfo connector = new ConnectorInfo();
+        connector.setConnectorCode("github");
+        connector.setSkillCode("github");
+        String manifest = """
+            {"schemaVersion":"1.0","id":"github","version":"1.0.0",
+             "runtime":{"type":"oauth2","authorizeIn":"be-auth-job"},
+             "authStorage":{"mode":"credential-reference","owner":"be-auth-job",
+                 "runtimeMutation":"shared-volume-projection",
+                 "projectionPath":"/tmp/credential.json","environment":{}},
+             "skill":{"code":"github","source":"system-builtin","installScope":"user","grantScope":"agent"}}
+            """;
+
+        assertThatThrownBy(() -> new ConnectorManifestCanonicalizer(new ObjectMapper())
+            .canonicalize(connector, manifest))
+            .isInstanceOf(InvalidConnectorManifestException.class)
+            .hasMessageContaining("under /by/.connector-auth/");
+    }
+
+    @Test
+    void acceptsCliManagedEnvironmentManifestAndExtractsItsAllowlist() {
+        ConnectorInfo connector = connector("ima-openapi");
+        connector.setSkillCode("ima-skill");
+        String manifest = managedEnvironmentManifest("cli", "[\"IMA_OPENAPI_CLIENTID\",\"IMA_OPENAPI_APIKEY\"]");
+
+        String canonical = canonicalizer.canonicalize(connector, manifest);
+
+        assertThat(canonical).contains("\"mode\":\"managed-environment\"");
+        assertThat(canonicalizer.extractManagedEnvironmentKeys(connector, manifest))
+            .containsExactly("IMA_OPENAPI_APIKEY", "IMA_OPENAPI_CLIENTID");
+    }
+
+    @Test
+    void rejectsInvalidManagedEnvironmentManifests() {
+        ConnectorInfo connector = connector("ima-openapi");
+        connector.setSkillCode("ima-skill");
+
+        assertThatThrownBy(() -> canonicalizer.canonicalize(
+            connector,
+            managedEnvironmentManifest("cli", "[]")))
+            .isInstanceOf(InvalidConnectorManifestException.class)
+            .hasMessageContaining("managedEnvironmentKeys");
+        assertThatThrownBy(() -> canonicalizer.canonicalize(
+            connector,
+            managedEnvironmentManifest("cli", "[\"lower-case\"]")))
+            .isInstanceOf(InvalidConnectorManifestException.class)
+            .hasMessageContaining("managedEnvironmentKeys");
+        assertThatThrownBy(() -> canonicalizer.canonicalize(
+            connector,
+            managedEnvironmentManifest("cli", "[\"IMA_OPENAPI_CLIENTID\",\"IMA_OPENAPI_CLIENTID\"]")))
+            .isInstanceOf(InvalidConnectorManifestException.class)
+            .hasMessageContaining("duplicate");
+        assertThatThrownBy(() -> canonicalizer.canonicalize(
+            connector,
+            managedEnvironmentManifest("cli", "[\"IMA_OPENAPI_CLIENTID\"]")
+                .replace("\"environment\":{}", "\"nativePath\":\"/by/.connector-auth/.ima\",\"environment\":{}")))
+            .isInstanceOf(InvalidConnectorManifestException.class)
+            .hasMessageContaining("nativePath");
+        assertThatThrownBy(() -> canonicalizer.canonicalize(
+            connector,
+            managedEnvironmentManifest("oauth2", "[\"IMA_OPENAPI_CLIENTID\"]")))
+            .isInstanceOf(InvalidConnectorManifestException.class)
+            .hasMessageContaining("incompatible");
+    }
+
+    @Test
+    void rejectsManagedEnvironmentWithStaticEnvironmentValues() {
+        ConnectorInfo connector = connector("ima-openapi");
+        connector.setSkillCode("ima-skill");
+
+        assertThatThrownBy(() -> canonicalizer.canonicalize(
+            connector,
+            managedEnvironmentManifest("cli", "[\"IMA_OPENAPI_CLIENTID\"]")
+                .replace("\"environment\":{}", "\"environment\":{\"IMA_OPENAPI_CLIENTID\":\"value\"}")))
+            .isInstanceOf(InvalidConnectorManifestException.class)
+            .hasMessageContaining("static environment");
+    }
+
+    @Test
+    void managedEnvironmentRequiresBeAuthJobAuthorization() {
+        ConnectorInfo connector = connector("ima-openapi");
+        connector.setSkillCode("ima-skill");
+
+        assertThatThrownBy(() -> canonicalizer.canonicalize(
+            connector,
+            managedEnvironmentManifest("cli", "[\"IMA_OPENAPI_CLIENTID\"]")
+                .replace(",\"authorizeIn\":\"be-auth-job\"", "")))
+            .isInstanceOf(InvalidConnectorManifestException.class)
+            .hasMessageContaining("authorizeIn");
+        assertThatThrownBy(() -> canonicalizer.canonicalize(
+            connector,
+            managedEnvironmentManifest("cli", "[\"IMA_OPENAPI_CLIENTID\"]")
+                .replace("\"authorizeIn\":\"be-auth-job\"", "\"authorizeIn\":\"user-sandbox\"")))
+            .isInstanceOf(InvalidConnectorManifestException.class)
+            .hasMessageContaining("authorizeIn");
+    }
+
+    @Test
+    void canonicalizesManagedEnvironmentKeysIndependentlyOfTheirInputOrder() {
+        ConnectorInfo connector = connector("ima-openapi");
+        connector.setSkillCode("ima-skill");
+        String first = managedEnvironmentManifest("cli", "[\"IMA_OPENAPI_CLIENTID\",\"IMA_OPENAPI_APIKEY\"]");
+        String second = managedEnvironmentManifest("cli", "[\"IMA_OPENAPI_APIKEY\",\"IMA_OPENAPI_CLIENTID\"]");
+        ConnectorManifestCommandResolver resolver = new ConnectorManifestCommandResolver(new ObjectMapper(), canonicalizer);
+
+        assertThat(canonicalizer.canonicalize(connector, first))
+            .isEqualTo(canonicalizer.canonicalize(connector, second));
+        connector.setRuntimeManifest(first);
+        String firstDigest = resolver.resolve(connector).digest();
+        connector.setRuntimeManifest(second);
+        assertThat(resolver.resolve(connector).digest()).isEqualTo(firstDigest);
+    }
+
+    @Test
+    void sortsManagedEnvironmentKeysOnlyAtTheRootAuthStoragePath() throws Exception {
+        ConnectorInfo connector = connector("ima-openapi");
+        connector.setSkillCode("ima-skill");
+        String manifest = managedEnvironmentManifest("cli", "[\"IMA_OPENAPI_CLIENTID\",\"IMA_OPENAPI_APIKEY\"]")
+            .replace(",\"authorizeIn\":\"be-auth-job\"", """
+                ,"extension":{"mode":"managed-environment","managedEnvironmentKeys":["Z_KEY","A_KEY"]},
+                "metadata":{"mode":"managed-environment","managedEnvironmentKeys":"not-an-array"},
+                "authorizeIn":"be-auth-job"
+                """);
+
+        JsonNode canonical = new ObjectMapper().readTree(canonicalizer.canonicalize(connector, manifest));
+
+        assertThat(canonical.path("authStorage").path("managedEnvironmentKeys"))
+            .extracting(JsonNode::asText)
+            .containsExactly("IMA_OPENAPI_APIKEY", "IMA_OPENAPI_CLIENTID");
+        assertThat(canonical.path("runtime").path("extension").path("managedEnvironmentKeys"))
+            .extracting(JsonNode::asText)
+            .containsExactly("Z_KEY", "A_KEY");
+        assertThat(canonical.path("runtime").path("metadata").path("managedEnvironmentKeys").asText())
+            .isEqualTo("not-an-array");
+    }
+
+    private ConnectorManifestCanonicalizer canonicalizer;
+
+    @BeforeEach
+    void setUp() {
+        canonicalizer = new ConnectorManifestCanonicalizer(new ObjectMapper());
+    }
+
+    @Test
+    void canonicalizeIgnoresObjectOrderAndWhitespaceButPreservesCommandArrayOrder() {
+        ConnectorInfo connector = connector("dingtalk");
+        String first = """
+            {
+              "version":"1.0.52",
+              "id":"dingtalk",
+              "schemaVersion":"1.0",
+              "runtime":{"commands":{"status":[["dws","auth","status"]]},"type":"cli"},
+              "authStorage":{"nativePath":"/by/.connector-auth/.dws","mode":"native-home",
+                "environment":{"HOME":"/by/.connector-auth/.dws"}},
+              "skill":{"code":"dws","source":"system-builtin","installScope":"user","grantScope":"agent"}
+            }
+            """;
+        String second = """
+            {"schemaVersion":"1.0","id":"dingtalk","version":"1.0.52",
+             "skill":{"grantScope":"agent","installScope":"user","source":"system-builtin","code":"dws"},
+             "authStorage":{"environment":{"HOME":"/by/.connector-auth/.dws"},"mode":"native-home",
+               "nativePath":"/by/.connector-auth/.dws"},
+             "runtime":{"type":"cli","commands":{"status":[["dws","auth","status"]]}}}
+            """;
+        String reorderedCommand = second.replace(
+            "[[\"dws\",\"auth\",\"status\"]]",
+            "[[\"auth\",\"dws\",\"status\"]]");
+
+        assertThat(canonicalizer.canonicalize(connector, first))
+            .isEqualTo(canonicalizer.canonicalize(connector, second));
+        assertThat(canonicalizer.canonicalize(connector, reorderedCommand))
+            .isNotEqualTo(canonicalizer.canonicalize(connector, second));
+    }
+
+    @Test
+    void canonicalizeRejectsConnectorIdMismatch() {
+        assertThatThrownBy(() -> canonicalizer.canonicalize(connector("dingtalk"), manifest(
+            "lark",
+            "/by/.connector-auth/.dws",
+            "{\"status\":[[\"dws\",\"auth\",\"status\"]]}")))
+            .isInstanceOf(InvalidConnectorManifestException.class)
+            .hasMessageContaining("id");
+    }
+
+    @Test
+    void canonicalizeRejectsSkillCodeMismatch() {
+        ConnectorInfo connector = connector("dingtalk");
+        connector.setSkillCode("fws");
+
+        assertThatThrownBy(() -> canonicalizer.canonicalize(connector, manifest(
+            "dingtalk",
+            "/by/.connector-auth/.dws",
+            "{\"status\":[[\"dws\",\"auth\",\"status\"]]}")))
+            .isInstanceOf(InvalidConnectorManifestException.class)
+            .hasMessageContaining("skill.code");
+    }
+
+    @Test
+    void canonicalizeRejectsCredentialPathOutsideConnectorAuthRoot() {
+        assertThatThrownBy(() -> canonicalizer.canonicalize(connector("dingtalk"), manifest(
+            "dingtalk",
+            "/tmp/shared-home",
+            "{\"status\":[[\"dws\",\"auth\",\"status\"]]}")))
+            .isInstanceOf(InvalidConnectorManifestException.class)
+            .hasMessageContaining("nativePath");
+    }
+
+    @Test
+    void canonicalizeRejectsShellStringCommandsAndSensitiveFields() {
+        assertThatThrownBy(() -> canonicalizer.canonicalize(connector("dingtalk"), manifest(
+            "dingtalk",
+            "/by/.connector-auth/.dws",
+            "{\"status\":\"dws auth status\"}")))
+            .isInstanceOf(InvalidConnectorManifestException.class)
+            .hasMessageContaining("commands");
+
+        String withSecret = manifest(
+            "dingtalk",
+            "/by/.connector-auth/.dws",
+            "{\"status\":[[\"dws\",\"auth\",\"status\"]]}")
+            .replace("\"skill\":", "\"appSecret\":\"secret-value\",\"skill\":");
+        assertThatThrownBy(() -> canonicalizer.canonicalize(connector("dingtalk"), withSecret))
+            .isInstanceOf(InvalidConnectorManifestException.class)
+            .hasMessageContaining("sensitive");
+    }
+
+    @Test
+    void canonicalizeAcceptsUserSandboxAuthorizationOwnership() {
+        ConnectorInfo connector = connector("dingtalk");
+        String manifest = manifest("dingtalk", "/by/.connector-auth/.dws",
+            "{\"status\":[[\"dws\",\"auth\",\"status\"]]}")
+            .replace("\"runtime\":{\"type\":\"cli\"",
+                "\"runtime\":{\"authorizeIn\":\"user-sandbox\",\"type\":\"cli\"")
+            .replace("\"authStorage\":{\"mode\":\"native-home\"",
+                "\"authStorage\":{\"owner\":\"user-sandbox-auth-job\","
+                    + "\"runtimeMutation\":\"sandbox-native\",\"mode\":\"native-home\"");
+
+        assertThat(canonicalizer.canonicalize(connector, manifest))
+            .contains("user-sandbox", "user-sandbox-auth-job", "sandbox-native");
+    }
+
+    @Test
+    void canonicalizeRejectsOversizedManifest() {
+        String oversized = manifest(
+            "dingtalk",
+            "/by/.connector-auth/.dws",
+            "{\"status\":[[\"dws\",\"auth\",\"status\"]]}")
+            .replace("\"version\":\"1.0.0\"", "\"version\":\"" + "x".repeat(66_000) + "\"");
+
+        assertThatThrownBy(() -> canonicalizer.canonicalize(connector("dingtalk"), oversized))
+            .isInstanceOf(InvalidConnectorManifestException.class)
+            .hasMessageContaining("64 KiB");
+    }
+
+    @Test
+    void canonicalizeRejectsOneDimensionalAndEmptyCommandGroups() {
+        assertThatThrownBy(() -> canonicalizer.canonicalize(connector("dingtalk"), manifest(
+            "dingtalk",
+            "/by/.connector-auth/.dws",
+            "{\"status\":[\"dws\",\"auth\",\"status\"]}")))
+            .isInstanceOf(InvalidConnectorManifestException.class)
+            .hasMessageContaining("two-dimensional");
+
+        assertThatThrownBy(() -> canonicalizer.canonicalize(connector("dingtalk"), manifest(
+            "dingtalk",
+            "/by/.connector-auth/.dws",
+            "{\"status\":[]}")))
+            .isInstanceOf(InvalidConnectorManifestException.class)
+            .hasMessageContaining("command group");
+
+        assertThatThrownBy(() -> canonicalizer.canonicalize(connector("dingtalk"), manifest(
+            "dingtalk",
+            "/by/.connector-auth/.dws",
+            "{\"status\":[[]]}")))
+            .isInstanceOf(InvalidConnectorManifestException.class)
+            .hasMessageContaining("argv");
+    }
+
+    @Test
+    void extractEnvironmentReturnsValidatedCanonicalOrder() {
+        ConnectorInfo connector = connector("dingtalk");
+        String manifest = manifestWithEnvironment("""
+            {
+              "DWS_HOME":"/by/.connector-auth/.dws",
+              "DWS_DISABLE_KEYCHAIN":"1",
+              "DWS_CONFIG_DIR":"/by/.connector-auth/.dws/config"
+            }
+            """);
+
+        assertThat(canonicalizer.extractEnvironment(connector, manifest))
+            .containsExactly(
+                entry("DWS_CONFIG_DIR", "/by/.connector-auth/.dws/config"),
+                entry("DWS_DISABLE_KEYCHAIN", "1"),
+                entry("DWS_HOME", "/by/.connector-auth/.dws"));
+    }
+
+    @Test
+    void canonicalizeRejectsInvalidEnvironmentVariableNames() {
+        assertThatThrownBy(() -> canonicalizer.canonicalize(
+            connector("dingtalk"),
+            manifestWithEnvironment("{\"lower-case\":\"value\"}")))
+            .isInstanceOf(InvalidConnectorManifestException.class)
+            .hasMessageContaining("environment key");
+
+        assertThatThrownBy(() -> canonicalizer.canonicalize(
+            connector("dingtalk"),
+            manifestWithEnvironment("{\"1INVALID\":\"value\"}")))
+            .isInstanceOf(InvalidConnectorManifestException.class)
+            .hasMessageContaining("environment key");
+
+        String oversizedKey = "A".repeat(129);
+        assertThatThrownBy(() -> canonicalizer.canonicalize(
+            connector("dingtalk"),
+            manifestWithEnvironment("{\"" + oversizedKey + "\":\"value\"}")))
+            .isInstanceOf(InvalidConnectorManifestException.class)
+            .hasMessageContaining("environment key");
+    }
+
+    private ConnectorInfo connector(String connectorCode) {
+        ConnectorInfo connector = new ConnectorInfo();
+        connector.setConnectorCode(connectorCode);
+        return connector;
+    }
+
+    private String manifest(String id, String nativePath, String commands) {
+        return """
+            {
+              "schemaVersion":"1.0",
+              "id":"%s",
+              "version":"1.0.0",
+              "runtime":{"type":"cli","commands":%s},
+              "authStorage":{"mode":"native-home","nativePath":"%s","environment":{"HOME":"%s"}},
+              "skill":{"code":"dws","source":"system-builtin","installScope":"user","grantScope":"agent"}
+            }
+            """.formatted(id, commands, nativePath, nativePath);
+    }
+
+    private String manifestWithEnvironment(String environment) {
+        return """
+            {
+              "schemaVersion":"1.0",
+              "id":"dingtalk",
+              "version":"1.0.52",
+              "runtime":{"type":"cli","commands":{"status":[["dws","auth","status"]]}},
+              "authStorage":{"mode":"native-home","nativePath":"/by/.connector-auth/.dws",
+                "environment":%s},
+              "skill":{"code":"dws","source":"system-builtin","installScope":"user","grantScope":"agent"}
+            }
+            """.formatted(environment);
+    }
+
+    private String managedEnvironmentManifest(String runtimeType, String managedEnvironmentKeys) {
+        String commands = "cli".equals(runtimeType) ? ",\"commands\":{\"version\":[[\"ima\",\"--version\"]]}" : "";
+        return """
+            {
+              "schemaVersion":"1.0",
+              "id":"ima-openapi",
+              "version":"1.0.0",
+              "runtime":{"type":"%s"%s,"authorizeIn":"be-auth-job"},
+              "authStorage":{"mode":"managed-environment","owner":"be-auth-job",
+                "runtimeMutation":"provider-refresh-only","managedEnvironmentKeys":%s,"environment":{}},
+              "skill":{"code":"ima-skill","source":"system-builtin","installScope":"user","grantScope":"agent"}
+            }
+            """.formatted(runtimeType, commands, managedEnvironmentKeys);
+    }
+}

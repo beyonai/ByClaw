@@ -1,0 +1,85 @@
+{
+  "entity_code": "wy93ovzs9p_article",
+  "entity_name": "文章",
+  "entity_desc": "多公众号文章元数据；account_code 与 canonical_url 共同构成业务唯一键，author 仅表示作者",
+  "term_sync": {
+    "enabled": true,
+    "term_name_field": "title",
+    "term_code_field": "id",
+    "sync_on": [
+      "insert",
+      "update",
+      "delete"
+    ]
+  },
+  "submitted_fields": [
+    {
+      "property_code": "projectId",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "account_code",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "account_name",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "title",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "publish_time",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "url",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "canonical_url",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "content_text",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "content_hash",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "category",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "tags",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "word_count",
+      "data_type": "INTEGER"
+    },
+    {
+      "property_code": "has_video",
+      "data_type": "BOOLEAN"
+    },
+    {
+      "property_code": "has_audio",
+      "data_type": "BOOLEAN"
+    },
+    {
+      "property_code": "collection_id",
+      "data_type": "INTEGER"
+    },
+    {
+      "property_code": "author",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "summary",
+      "data_type": "STRING"
+    }
+  ]
+}

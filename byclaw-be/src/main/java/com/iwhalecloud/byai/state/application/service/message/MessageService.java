@@ -12,6 +12,7 @@ import com.iwhalecloud.byai.state.domain.message.dto.ByaiMessageHotDtoDto;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessage;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessageHotDto;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessageRelObjDto;
+import com.iwhalecloud.byai.common.message.entity.ConversationOutlineItem;
 import com.iwhalecloud.byai.common.message.qo.MessageHotPageQo;
 import com.iwhalecloud.byai.common.message.qo.MessageHotQo;
 import com.iwhalecloud.byai.common.message.qo.MessageRelObjQo;
@@ -57,6 +58,7 @@ import org.springframework.stereotype.Service;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.state.application.service.session.SessionApplicationService;
+import com.iwhalecloud.byai.state.application.service.taskplan.TaskPlanApplicationService;
 import com.iwhalecloud.byai.state.domain.session.service.SessionExtService;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
@@ -81,8 +83,10 @@ import com.iwhalecloud.byai.state.common.exception.BdpRuntimeException;
 import com.iwhalecloud.byai.state.domain.session.dto.MessageDto;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
+import com.iwhalecloud.byai.state.domain.taskplan.dto.TaskPlanSnapshot;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * <br>
@@ -118,6 +122,9 @@ public class MessageService {
     private ByaiMessageHotService byaiMessageHotService;
 
     @Autowired
+    private ConversationOutlineDisplayService conversationOutlineDisplayService;
+
+    @Autowired
     private ByaiMessageRelObjService byaiMessageRelObjService;
 
     @Autowired
@@ -125,6 +132,9 @@ public class MessageService {
 
     @Autowired
     private SessionService sessionService;
+
+    @Autowired
+    private TaskPlanApplicationService taskPlanApplicationService;
 
     /**
      * 转发历史记录
@@ -251,11 +261,27 @@ public class MessageService {
             }
         }
 
-        // 补充收藏信息
-        pageInfo.setList(this.appendCollectInfo(byaiMessageHotDtos, messageQo.getSessionId()));
+        // 补充收藏信息和回答关联的任务计划快照
+        List<ByaiMessageHotDtoDto> messages = this.appendCollectInfo(byaiMessageHotDtos, messageQo.getSessionId());
+        this.appendTaskPlanInfo(messages, messageQo.getSessionId());
+        pageInfo.setList(messages);
 
         return pageInfo;
 
+    }
+
+    /**
+     * Get the lightweight message outline for the conversation navigator.
+     *
+     * @param messageQo message query containing the session identifier
+     * @return visible user and assistant message summaries
+     */
+    public List<ConversationOutlineItem> getConversationOutline(MessageQo messageQo) {
+        if (messageQo == null || messageQo.getSessionId() == null || messageQo.getSessionId() <= 0) {
+            throw new BdpRuntimeException(I18nUtil.get("assistant.man.session.id.not.empty"));
+        }
+        return conversationOutlineDisplayService.enrich(
+            byaiMessageHotService.selectConversationOutline(messageQo.getSessionId()));
     }
 
     private List<ByaiMessageHotDtoDto> appendCollectInfo(List<ByaiMessageHotDto> byaiMessageHots, Long sessionId) {
@@ -296,6 +322,20 @@ public class MessageService {
         });
 
         return byaiMessageHotDtoDtos;
+    }
+
+    private void appendTaskPlanInfo(List<ByaiMessageHotDtoDto> messages, Long sessionId) {
+        if (ListUtil.isEmpty(messages) || sessionId == null) {
+            return;
+        }
+        List<Long> messageIds = messages.stream().map(ByaiMessageHotDtoDto::getMessageId)
+            .filter(Objects::nonNull).distinct().toList();
+        Map<Long, TaskPlanSnapshot> taskPlans = taskPlanApplicationService.findLatestByMessageIds(sessionId,
+            messageIds);
+        if (taskPlans.isEmpty()) {
+            return;
+        }
+        messages.forEach(message -> message.setTaskPlan(taskPlans.get(message.getMessageId())));
     }
 
     /**
@@ -620,8 +660,11 @@ public class MessageService {
      *
      * @param messageId 消息ID
      */
+    @Transactional
     public void deleteMessage(String messageId) {
-        byaiMessageHotService.deleteById(Long.parseLong(messageId));
+        Long parsedMessageId = Long.parseLong(messageId);
+        taskPlanApplicationService.deleteByMessageId(parsedMessageId);
+        byaiMessageHotService.deleteById(parsedMessageId);
     }
 
     /**
