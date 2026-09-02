@@ -317,6 +317,10 @@ public class SessionStreamEventRouter {
         if (metadata == null) {
             metadata = new JSONObject();
         }
+        // 多端广播必须与当前 WebSocket 路由使用同一套事件类型归一化规则。
+        // 否则非目标 agent 的 answerDelta 会在入库时按 reasoningLogDelta 处理，
+        // 但其他设备仍收到原始 answerDelta，导致不同 WebSocket 客户端表现不一致。
+        broadcastJson.put("event_type", gatewayStreamEventProcessor.normalizeEventType(ctx, dataJson));
         broadcastJson.put("data", gatewayStreamEventProcessor.buildEventData(ctx, dataJson, metadata));
         return broadcastJson;
     }
