@@ -55,16 +55,30 @@ test('normalizes WSA Pages JSON strings into public discovery candidates', () =>
   assert.equal(response.provider, 'tencent-wsa');
   assert.equal(response.requestId, 'request-1');
   assert.equal(response.providerVersion, 'flagship');
-  assert.deepEqual(response.results, [{
+  assert.equal(response.results.length, 1);
+  const [result] = response.results;
+  assert.deepEqual({ ...result, discoveredAt: '<dynamic>' }, {
     url: 'https://example.com/news/1234567',
     title: '人工智能深度报道',
+    passage: '标准摘要',
     content: '动态摘要',
+    summarySource: 'dynamic-content',
     engine: 'tencent-wsa',
+    provider: 'tencent-wsa',
+    evidenceLevel: 'search-summary',
+    verificationRequired: true,
+    requestId: 'request-1',
+    providerVersion: 'flagship',
     score: 0.8,
     publishedAt: '2026/09/01 08:00:00',
     site: '示例站点',
     authorityLevel: 4,
-  }]);
+    discoveredAt: '<dynamic>',
+  });
+  assert.match(result.discoveredAt, /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal('fullText' in result, false);
+  assert.equal('bodyComplete' in result, false);
+  assert.equal('pageVerification' in result, false);
 });
 
 test('treats an empty Pages array as a successful empty search', () => {
@@ -86,6 +100,8 @@ test('keeps valid Pages while warning about malformed or unsafe entries', () => 
 
   assert.equal(response.results.length, 1);
   assert.equal(response.results[0].content, '摘要正文');
+  assert.equal(response.results[0].passage, '摘要正文');
+  assert.equal(response.results[0].summarySource, 'standard-passage');
   assert.equal(response.warnings.length, 2);
   assert.match(response.warnings[0], /Pages\[0\]/);
   assert.match(response.warnings[1], /Pages\[1\]/);

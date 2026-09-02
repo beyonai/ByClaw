@@ -23,9 +23,9 @@ import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import com.iwhalecloud.byai.state.domain.chat.model.MessageContext;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatStreamRuntimeCoordinator;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatProcessContext;
-import com.iwhalecloud.byai.state.domain.chat.service.SystemParamTargetAgentResolver;
 import com.iwhalecloud.byai.state.domain.chat.service.GatewayStreamEventProcessor;
 import com.iwhalecloud.byai.state.domain.chat.service.PythonSseService;
+import com.iwhalecloud.byai.state.domain.chat.service.SystemParamTargetAgentResolver;
 import com.iwhalecloud.byai.state.domain.chat.service.TargetAgentResolver;
 import com.iwhalecloud.byai.state.domain.chat.service.TraceIdCodec;
 import com.iwhalecloud.byai.state.domain.resource.dto.ResourceVo;
@@ -91,6 +91,9 @@ class RouteServiceTest {
         jwtService = mock(JwtService.class);
         targetAgentResolver = new TargetAgentResolver();
         systemParamTargetAgentResolver = mock(SystemParamTargetAgentResolver.class);
+        ReflectionTestUtils.setField(targetAgentResolver, "systemParamTargetAgentResolver", systemParamTargetAgentResolver);
+        when(systemParamTargetAgentResolver.resolve(any(), nullable(Long.class), anyString()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
         projectApplicationService = mock(ProjectApplicationService.class);
         projectService = mock(ProjectService.class);
         projectResourceService = mock(ProjectResourceService.class);
@@ -112,10 +115,6 @@ class RouteServiceTest {
         messageSource.addMessage("sandbox.launch.model.config.required", Locale.US,
                 "Sandbox startup failed because model parameters are incomplete. Please contact the administrator.");
         when(jwtService.createJwt(any())).thenReturn("test-beyond-token");
-        when(systemParamTargetAgentResolver.resolve(any(), anyString()))
-                .thenAnswer(invocation -> invocation.getArgument(0));
-        when(systemParamTargetAgentResolver.resolve(any(), nullable(Long.class), anyString()))
-                .thenAnswer(invocation -> invocation.getArgument(0));
 
         routeService = new RouteService();
         ReflectionTestUtils.setField(routeService, "gatewayClient", gatewayClient);
@@ -126,7 +125,6 @@ class RouteServiceTest {
         ReflectionTestUtils.setField(routeService, "sequenceService", sequenceService);
         ReflectionTestUtils.setField(routeService, "jwtService", jwtService);
         ReflectionTestUtils.setField(routeService, "targetAgentResolver", targetAgentResolver);
-        ReflectionTestUtils.setField(routeService, "systemParamTargetAgentResolver", systemParamTargetAgentResolver);
         ReflectionTestUtils.setField(routeService, "projectApplicationService", projectApplicationService);
         ReflectionTestUtils.setField(routeService, "projectService", projectService);
         ReflectionTestUtils.setField(routeService, "projectResourceService", projectResourceService);
