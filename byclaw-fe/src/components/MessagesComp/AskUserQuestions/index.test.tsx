@@ -63,6 +63,11 @@ jest.setTimeout(15000);
 
 const updateMessageStructByIdMock = updateMessageStructById as jest.MockedFunction<typeof updateMessageStructById>;
 
+const defaultResumeMetadata = JSON.stringify({
+  parent_run_id: 'run-default',
+  interaction_id: 'run-default:tool-default',
+});
+
 const questions = [
   {
     question: 'Which framework?',
@@ -100,6 +105,7 @@ function renderQuestions(
             msgId: 'message-1',
             sessionId: 'session-1',
             traceId: 'trace-1',
+            metadata: defaultResumeMetadata,
             ...messageOverrides,
           } as any
         }
@@ -127,6 +133,10 @@ beforeEach(() => {
   mockEmit.mockClear();
   updateMessageStructByIdMock.mockReset();
   updateMessageStructByIdMock.mockResolvedValue({} as any);
+});
+
+afterEach(() => {
+  jest.restoreAllMocks();
 });
 
 describe('AskUserQuestions', () => {
@@ -435,7 +445,12 @@ describe('AskUserQuestions', () => {
   }, 15000);
 
   it('writes agentId from valid resume metadata into the payload', async () => {
-    const resumeMetadata = JSON.stringify({ agentId: 'agent-42', checkpointId: 'checkpoint-1' });
+    const resumeMetadata = JSON.stringify({
+      agentId: 'agent-42',
+      checkpointId: 'checkpoint-1',
+      parent_run_id: 'run-1',
+      interaction_id: 'run-1:tool-1',
+    });
     renderQuestions(
       {
         substance: {
@@ -500,8 +515,57 @@ describe('AskUserQuestions', () => {
     expect(mockEmit.mock.calls[0][1].sendProps.payload.metadata).toBe(completeCardMetadata);
   }, 15000);
 
+  it('logs incomplete resume routing metadata without changing the existing submit behavior', async () => {
+    const partialMetadata = JSON.stringify({ parent_run_id: 'run-1' });
+    const consoleError = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    renderQuestions(
+      {
+        substance: {
+          formStatus: IFormStatus.INIT,
+          questions: [questions[0]],
+        },
+      },
+      jest.fn(),
+      { metadata: partialMetadata }
+    );
+
+    fireEvent.click(screen.getByRole('radio', { name: /React/ }));
+    const confirmButton = screen.getByRole('button', { name: 'form.confirm' });
+    await waitFor(() => expect(confirmButton).toBeEnabled());
+    await act(async () => {
+      fireEvent.click(confirmButton);
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(mockEmit).toHaveBeenCalledWith('beyond-chat-on-send-msg', expect.any(Object)));
+    expect(mockEmit.mock.calls[0][1].sendProps.payload.metadata).toBe(partialMetadata);
+    expect(consoleError).toHaveBeenCalledWith(
+      '[ASK_USER_QUESTION_RESUME_TRACE] FE_SUBMIT_UNROUTABLE',
+      expect.objectContaining({
+        traceId: 'trace-1',
+        sessionId: 'session-1',
+        messageId: 'message-1',
+        resumeMessageId: 'resume-1',
+        missingRouteFields: ['interaction_id'],
+        resumeRoute: {
+          interaction_id: undefined,
+          parent_run_id: 'run-1',
+        },
+        metadataCandidateRoutes: {
+          message: {
+            interactionId: undefined,
+            parentRunId: 'run-1',
+          },
+          substance: {},
+          card: {},
+        },
+      })
+    );
+  }, 15000);
+
   it('keeps invalid resume metadata without writing agentId into the payload', async () => {
     const resumeMetadata = '{invalid-json';
+    const consoleError = jest.spyOn(console, 'error').mockImplementation(() => undefined);
     renderQuestions(
       {
         substance: {
@@ -525,6 +589,21 @@ describe('AskUserQuestions', () => {
     const emittedPayload = mockEmit.mock.calls[0][1].sendProps.payload;
     expect(emittedPayload).toEqual(expect.objectContaining({ metadata: resumeMetadata }));
     expect(emittedPayload).not.toHaveProperty('agentId');
+    expect(consoleError).toHaveBeenCalledWith(
+      '[ASK_USER_QUESTION_RESUME_TRACE] FE_SUBMIT_UNROUTABLE',
+      expect.objectContaining({
+        traceId: 'trace-1',
+        sessionId: 'session-1',
+        messageId: 'message-1',
+        resumeMessageId: 'resume-1',
+        missingRouteFields: ['interaction_id', 'parent_run_id'],
+        metadataCandidateRoutes: {
+          message: {},
+          substance: {},
+          card: {},
+        },
+      })
+    );
   }, 15000);
 
   // 全量测试以双 worker 运行时，Ant Design 状态更新可能超过 Jest 默认的 5 秒超时。
