@@ -57,9 +57,33 @@ describe("SUPER_ASSISTANT_SYSTEM_PROMPT", () => {
     );
   });
 
-  it("lists specialist file artifacts in the user-facing summary", () => {
+  it("makes the final response self-contained when delegated output is collapsed", () => {
     expect(SUPER_ASSISTANT_SYSTEM_PROMPT).toContain(
-      "If a specialist returns any file artifacts, list those artifacts together with the specialist's result",
+      "Sub-agent activity and raw output may be hidden or collapsed",
+    );
+    expect(SUPER_ASSISTANT_SYSTEM_PROMPT).toContain(
+      "produce your own user-facing response that stands on its own",
+    );
+    expect(SUPER_ASSISTANT_SYSTEM_PROMPT).toContain(
+      "Treat that response as the primary delivery of the result",
+    );
+    expect(SUPER_ASSISTANT_SYSTEM_PROMPT).toContain(
+      "material findings, conclusions, completed actions, and unresolved issues",
+    );
+    expect(SUPER_ASSISTANT_SYSTEM_PROMPT).toContain(
+      "Do not respond only with an acknowledgement, a completion status",
+    );
+  });
+
+  it("delivers specialist file artifacts in the same user-facing response", () => {
+    expect(SUPER_ASSISTANT_SYSTEM_PROMPT).toContain(
+      "include every returned artifact in the same user-facing response",
+    );
+    expect(SUPER_ASSISTANT_SYSTEM_PROMPT).toContain(
+      "Use the artifact name and URI or link exactly as returned when available",
+    );
+    expect(SUPER_ASSISTANT_SYSTEM_PROMPT).toContain(
+      "leave it solely in the sub-agent output",
     );
   });
 
