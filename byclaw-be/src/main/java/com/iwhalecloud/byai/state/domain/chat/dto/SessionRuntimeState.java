@@ -20,6 +20,10 @@ public class SessionRuntimeState {
 
     private String status;
 
+    private Boolean rootActive;
+
+    private Boolean acceptingInput;
+
     private Long activeAgentCount;
 
     private Long activeChildCount;

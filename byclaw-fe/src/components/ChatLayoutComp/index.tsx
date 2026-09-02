@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState, useMemo, ForwardedRef } from 'react';
 import { useDispatch, useIntl, useSelector } from '@umijs/max';
 import { isEmpty, last, size } from 'lodash';
-import { notification } from 'antd';
+import { notification, Spin } from 'antd';
 import { ArrowLeftOutlined, LockOutlined } from '@ant-design/icons';
 
 import MessageList from '@/components/MessageList';
@@ -27,8 +27,8 @@ import useEventEmitterHooks from './hooks/useEventEmitterHooks';
 import ChatTitle from './ChatTitle';
 import MultiChoices from './components/MultiChoices';
 import EasyConfirm from './components/EasyConfirm';
-import TaskExecutionPlan from '@/components/MessageList/components/TaskExecutionPlan';
 import { selectLatestTaskPlan } from '@/components/MessageList/components/TaskExecutionPlan/projection';
+import ChatTaskPlanDock from './ChatTaskPlanDock';
 
 import type { IState as UseEmployeesIState } from '@/models/useEmployees.ts';
 
@@ -235,9 +235,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
   const { project: sessionProject } = useChatResourceProject(sessionProjectId);
   // 新会话项目下拉会把 cloudResourceId 放在输入框上下文中；同时读取该值，避免项目选择器状态尚未
   // 回写到资源面板状态时，加号弹窗拿不到项目云盘知识库 ID。
-  const inputSelectedProject = queryInputProps.selectedProject as
-    | { cloudResourceId?: string | number }
-    | undefined;
+  const inputSelectedProject = queryInputProps.selectedProject as { cloudResourceId?: string | number } | undefined;
   const sessionCloudResourceId =
     currentSession?.cloudResourceId ||
     selectedProject?.cloudResourceId ||
@@ -513,7 +511,10 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     updateMessage,
     deleteMessage,
     isSessionRunning,
+    canAcceptInput,
     cancelCurrentSession,
+    sessionMessageLoadState,
+    retrySessionMessageLoad,
   } = useChat({
     chatUrl,
     sessionId,
@@ -675,11 +676,11 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
   }));
 
   const messageState = React.useMemo(() => {
-    if (isSessionRunning) {
+    if (isSessionRunning && !canAcceptInput) {
       return IMessageState.Answer;
     }
     return lastMsg?.messageState;
-  }, [isSessionRunning, lastMsg?.messageState]);
+  }, [canAcceptInput, isSessionRunning, lastMsg?.messageState]);
 
   const showNewSessionProjectSelector = Boolean(
     userInfo && queryInputProps.enableTaskTemplate !== false && (!sessionId || (preserveNewSessionView && !isBottom))
@@ -713,6 +714,20 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
             )}
             {isBottom && (
               <div className={classnames(styles.messageList, 'ub-f1 overflow-hidden')}>
+                {sessionMessageLoadState === 'loading' && (
+                  <div className={styles.sessionMessageLoadNotice} role="status">
+                    <Spin size="small" /> 正在同步会话消息…
+                  </div>
+                )}
+                {sessionMessageLoadState === 'error' && (
+                  <button
+                    type="button"
+                    className={styles.sessionMessageLoadError}
+                    onClick={() => void retrySessionMessageLoad()}
+                  >
+                    会话消息加载失败，点击重试
+                  </button>
+                )}
                 <MessageList
                   ref={messageListCompRef}
                   onNext={onNext}
@@ -730,6 +745,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
                 />
               </div>
             )}
+            {latestTaskPlan ? <ChatTaskPlanDock taskPlan={latestTaskPlan} /> : null}
             {!effectiveReadOnly && (
               <div
                 className={classnames(styles.queryInputWrapper, queryInputWrapperClassName, {
@@ -738,11 +754,6 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
                 })}
                 id="queryInputWrapper"
               >
-                {latestTaskPlan ? (
-                  <div className={styles.taskPlanDock}>
-                    <TaskExecutionPlan taskPlan={latestTaskPlan} />
-                  </div>
-                ) : null}
                 <EasyConfirm
                   messageState={messageState}
                   disabledInput={disabledInput}

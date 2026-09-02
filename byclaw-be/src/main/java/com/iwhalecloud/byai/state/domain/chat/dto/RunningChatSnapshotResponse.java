@@ -18,4 +18,10 @@ public class RunningChatSnapshotResponse extends ByaiMessageHotDtoDto {
     private Long modelAnswerMessageId;
 
     private String snapshotStreamId;
+
+    /** Stable worker-side identifier for one execution of a reused child session. */
+    private String childRunId;
+
+    /** Monotonic, one-based execution number supplied by the worker. */
+    private Long childTurn;
 }

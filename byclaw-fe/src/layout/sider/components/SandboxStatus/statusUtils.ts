@@ -1,11 +1,18 @@
 import type { SandboxInfo } from '@/service/sandbox';
 
 export type SandboxAggregateStatus = 'running' | 'transitioning' | 'stopped';
+export type WorkerLivenessStatus = 'online' | 'offline' | 'unknown';
 
 export const getSandboxItemStatus = (sandbox: SandboxInfo): SandboxAggregateStatus => {
   if (['STARTING', 'RELEASING'].includes(sandbox.status || '')) return 'transitioning';
   if (sandbox.status === 'RUNNING') return 'running';
   return 'stopped';
+};
+
+export const getWorkerLivenessStatus = (sandbox: SandboxInfo): WorkerLivenessStatus => {
+  if (sandbox.workerOnline === true) return 'online';
+  if (sandbox.workerOnline === false) return 'offline';
+  return 'unknown';
 };
 
 export const calculateSandboxStatus = (sandboxes: SandboxInfo[]): SandboxAggregateStatus => {

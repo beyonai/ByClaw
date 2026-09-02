@@ -19,6 +19,9 @@ export default {
   'sandboxMgr.table.endpoint': '访问地址',
   'sandboxMgr.table.chatId': '会话ID',
   'sandboxMgr.table.status': '状态',
+  'sandboxMgr.table.workerStatus': 'Worker 状态',
+  'sandboxMgr.table.workerLastSeen': 'Worker 最近心跳',
+  'sandboxMgr.table.workerLeaseTtl': 'Worker 租约剩余',
   'sandboxMgr.table.autoRelease': '自动释放',
   'sandboxMgr.table.leasePolicy': '租约策略',
   'sandboxMgr.table.timeoutSeconds': '超时时间(秒)',
@@ -32,6 +35,9 @@ export default {
   'sandboxMgr.table.createTime': '创建时间',
   'sandboxMgr.table.updateTime': '更新时间',
   'sandboxMgr.table.action': '操作',
+  'sandboxMgr.worker.online': '在线',
+  'sandboxMgr.worker.offline': '离线',
+  'sandboxMgr.worker.unknown': '未上报',
 
   // 操作
   'sandboxMgr.action.view': '查看',

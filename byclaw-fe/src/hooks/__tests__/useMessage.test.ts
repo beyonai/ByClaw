@@ -142,7 +142,7 @@ describe('hooks/useChat/useMessage', () => {
       EventEmitter: eventEmitter,
     } as any);
     mockGetSessionObjectTypeMap.mockReturnValue(undefined as any);
-    (globalThis as any).requestIdleCallback = (cb: Function) => {
+    (globalThis as any).requestIdleCallback = (cb: () => void) => {
       cb();
       return 1;
     };
@@ -179,6 +179,56 @@ describe('hooks/useChat/useMessage', () => {
       sessionId: 's1',
       targetMessageId: 'm2',
     });
+  });
+
+  it('exposes a deduplicated loading state until the target session messages are ready', async () => {
+    let resolveLoad!: (value: any) => void;
+    const loadPromise = new Promise((resolve) => {
+      resolveLoad = resolve;
+    });
+    dispatch.mockImplementation((action: any) => {
+      if (action.type === 'messageStore/getSessionMessage') return loadPromise;
+      return Promise.resolve(undefined);
+    });
+
+    const { result } = renderHook(() => useMessage({ sessionId: 'child-1' }));
+
+    expect(result.current.getSessionMessageLoadState('child-1')).toBe('loading');
+    await act(async () => {
+      void result.current.retrySessionMessageLoad('child-1');
+      await Promise.resolve();
+    });
+    expect(dispatch.mock.calls.filter(([action]) => action.type === 'messageStore/getSessionMessage')).toHaveLength(1);
+
+    await act(async () => {
+      resolveLoad({ list: [], pageNum: 1, pageSize: 20, total: 0, pageRange: [1, 1] });
+      await loadPromise;
+    });
+
+    expect(result.current.getSessionMessageLoadState('child-1')).toBe('ready');
+  });
+
+  it('moves a failed session load to error and allows an explicit retry', async () => {
+    let attempts = 0;
+    dispatch.mockImplementation((action: any) => {
+      if (action.type !== 'messageStore/getSessionMessage') return Promise.resolve(undefined);
+      attempts += 1;
+      if (attempts === 1) return Promise.reject(new Error('load failed'));
+      return Promise.resolve({ list: [], pageNum: 1, pageSize: 20, total: 0, pageRange: [1, 1] });
+    });
+
+    const { result } = renderHook(() => useMessage({ sessionId: 'child-1' }));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(result.current.getSessionMessageLoadState('child-1')).toBe('error');
+
+    await act(async () => {
+      await result.current.retrySessionMessageLoad('child-1');
+    });
+    expect(result.current.getSessionMessageLoadState('child-1')).toBe('ready');
+    expect(attempts).toBe(2);
   });
 
   it('updateMessage merges current session messages and adds updateKey', async () => {

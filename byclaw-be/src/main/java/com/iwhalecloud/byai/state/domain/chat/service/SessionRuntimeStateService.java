@@ -81,6 +81,8 @@ public class SessionRuntimeStateService {
         state.setTraceId(dataJson.getString("trace_id"));
         state.setSource(metadata.getString("event_source"));
         state.setStatus(metadata.getString("session_status"));
+        state.setRootActive(metadata.getBoolean("root_active"));
+        state.setAcceptingInput(metadata.getBoolean("accepting_input"));
         state.setActiveAgentCount(metadata.getLong("active_agent_count"));
         state.setActiveChildCount(metadata.getLong("active_child_count"));
         state.setWaitingInteractionCount(metadata.getLong("waiting_interaction_count"));

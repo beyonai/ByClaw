@@ -16,6 +16,9 @@ export interface AgentTeamsMember {
   total?: number;
   currentTask?: string;
   unread?: number;
+  childRunId?: string;
+  childTurn?: number;
+  lastStreamId?: string;
 }
 
 export interface AgentTeamsTask {

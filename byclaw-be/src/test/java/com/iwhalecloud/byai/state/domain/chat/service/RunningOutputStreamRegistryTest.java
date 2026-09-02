@@ -49,6 +49,8 @@ class RunningOutputStreamRegistryTest {
         runtime.setSessionId(10L);
         runtime.setTraceId("trace-runtime");
         runtime.setStatus("running");
+        runtime.setRootActive(false);
+        runtime.setAcceptingInput(true);
         runtime.setActiveAgentCount(3L);
         runtime.setActiveChildCount(2L);
         runtime.setWaitingInteractionCount(0L);
@@ -62,6 +64,8 @@ class RunningOutputStreamRegistryTest {
         assertThat(info.getTraceId()).isEqualTo("trace-runtime");
         assertThat(info.getClientRequestId()).isEqualTo("runtime:10:trace-runtime");
         assertThat(info.getRuntimeStatus()).isEqualTo("running");
+        assertThat(info.getRootActive()).isFalse();
+        assertThat(info.getAcceptingInput()).isTrue();
         assertThat(info.getActiveAgentCount()).isEqualTo(3L);
         assertThat(info.getActiveChildCount()).isEqualTo(2L);
         assertThat(info.getRuntimeRevision()).isEqualTo(8L);

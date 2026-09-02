@@ -5,10 +5,14 @@ import { ArrowRightOutlined, CheckCircleFilled, ClockCircleOutlined, TeamOutline
 import classnames from 'classnames';
 
 import type { AgentTeamsMember, AgentTeamsTask } from '@/components/MessagesComp/ToolCall/AgentTeamsActivity';
-import { useAgentTeamsSnapshot } from '@/components/MessagesComp/ToolCall/agentTeamsStore';
+import {
+  applyAgentTeamsChildProjection,
+  useAgentTeamsSnapshot,
+} from '@/components/MessagesComp/ToolCall/agentTeamsStore';
 import activityStyles from '@/components/MessagesComp/ToolCall/AgentTeamsActivity.module.less';
 import useGlobal from '@/hooks/useGlobal';
 import type { ISession } from '@/typescript/session';
+import webSocketManager from '@/utils/websocket';
 
 import styles from './ChatTitle.module.less';
 
@@ -43,6 +47,15 @@ function AgentTeamsHeaderActivity({ rootSessionId, currentSession }: Props) {
   const [taskPage, setTaskPage] = React.useState(1);
 
   React.useEffect(() => setTaskPage(1), [snapshot?.capturedAt, snapshot?.team.teamId]);
+  React.useEffect(() => {
+    if (!rootSessionId) return undefined;
+    const handleNewMessage = (message: any) => {
+      const projection = message?.data || message;
+      applyAgentTeamsChildProjection(rootSessionId, projection, message?.streamId);
+    };
+    webSocketManager.onMessage('NEW_MESSAGE', handleNewMessage);
+    return () => webSocketManager.offMessage('NEW_MESSAGE', handleNewMessage);
+  }, [rootSessionId]);
   if (!snapshot) return null;
 
   const members = snapshot.team.members || [];

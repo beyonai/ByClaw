@@ -96,4 +96,23 @@ describe('stateful message item updates', () => {
     });
     expect(list[0].status).toBe(SSEEventStatus.done);
   });
+
+  it('replaces a streamed task-plan snapshot instead of concatenating JSON payloads', () => {
+    const first = {
+      seq: 1,
+      contentType: SSEMessageType.taskOutline,
+      content: { orderId: 'child-message:plan', substance: '{"planId":"v1"}' },
+    } as IMessageListItem;
+    const list = [first];
+    const next = {
+      seq: 2,
+      contentType: SSEMessageType.taskOutline,
+      content: { orderId: 'child-message:plan', substance: '{"planId":"v2"}' },
+    } as IMessageListItem;
+
+    expect(updateExistingMessage(list, next)).toBe(true);
+    expect(list).toHaveLength(1);
+    expect(list[0].seq).toBe(1);
+    expect(list[0].content.substance).toBe('{"planId":"v2"}');
+  });
 });
