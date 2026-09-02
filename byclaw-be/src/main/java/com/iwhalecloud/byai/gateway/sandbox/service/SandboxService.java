@@ -7,6 +7,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -29,6 +30,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.BeanUtils;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
@@ -51,6 +53,7 @@ import com.iwhalecloud.byai.gateway.sandbox.client.OpenSandboxClient;
 import com.iwhalecloud.byai.gateway.sandbox.client.model.SandboxDetail;
 import com.iwhalecloud.byai.gateway.sandbox.model.SandboxInfo;
 import com.iwhalecloud.byai.gateway.sandbox.model.SandboxLeasePolicy;
+import com.iwhalecloud.byai.gateway.sandbox.model.SandboxRecordView;
 import com.iwhalecloud.byai.gateway.sandbox.runtime.SandboxRuntimeInstance;
 import com.iwhalecloud.byai.gateway.sandbox.runtime.SandboxRuntimePage;
 import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpec;
@@ -872,34 +875,23 @@ public class SandboxService {
         }
     }
 
-    /**
-     * 沙箱心跳：更新当前用户所有运行中沙箱的最后访问时间。
-     * 页面心跳不区分沙箱类型，因此按用户维度刷新，避免同一用户的其他沙箱类型被空闲回收。
-     *
-     * @param resourceId 资源ID
-     * @return true-心跳成功，false-未找到运行中的沙箱
-     */
+    /** 沙箱心跳：只更新 resource 路由解析出的运行中沙箱。 */
     public boolean heartbeat(Long resourceId) {
         String userCode = CurrentUserHolder.getCurrentUserCode();
         if (StringUtils.isBlank(userCode)) {
             LOGGER.warn("心跳失败：无法获取当前用户编码，资源ID：{}", resourceId);
             return false;
         }
-        return heartbeatRunningSandboxesByUser(userCode, resourceId);
+        return heartbeatResolvedSandbox(userCode, resourceId);
     }
 
-    /**
-     * 沙箱心跳：更新指定用户所有运行中沙箱的最后访问时间。
-     *
-     * @param resourceId 资源ID
-     * @return true-心跳成功，false-未找到运行中的沙箱
-     */
+    /** 沙箱心跳：只更新指定用户 resource 路由解析出的运行中沙箱。 */
     public boolean heartbeat(String userCode, Long resourceId) {
         if (StringUtils.isBlank(userCode)) {
             LOGGER.warn("心跳失败：无法获取当前用户编码，资源ID：{}", resourceId);
             return false;
         }
-        return heartbeatRunningSandboxesByUser(userCode, resourceId);
+        return heartbeatResolvedSandbox(userCode, resourceId);
     }
 
     /**
@@ -941,35 +933,80 @@ public class SandboxService {
         return true;
     }
 
-    private boolean heartbeatRunningSandboxesByUser(String userCode, Long resourceId) {
-        List<SsSandboxRecord> records = sandboxRecordMapper.selectRunningByUser(userCode);
-        if (records == null || records.isEmpty()) {
-            LOGGER.warn("心跳失败：未找到运行中的沙箱记录，用户编码：{}，资源ID：{}", userCode, resourceId);
+    private boolean heartbeatResolvedSandbox(String userCode, Long resourceId) {
+        SandboxLaunchRouting routing = sandboxLaunchContextFactory.resolveRouting(resourceId, userCode);
+        SsSandboxRecord record = sandboxRecordMapper.selectRunningByUserAndResource(userCode,
+            routing.getSandboxType(), routing.getEffectiveResourceId());
+        if (record == null) {
+            LOGGER.warn("心跳失败：未找到精确路由的运行中沙箱，用户编码：{}，资源ID：{}，沙箱类型：{}，effectiveResourceId：{}",
+                userCode, resourceId, routing.getSandboxType(), routing.getEffectiveResourceId());
             return false;
         }
         Date now = new Date();
-        int updatedCount = 0;
-        List<String> skippedRecords = new ArrayList<>();
-        for (SsSandboxRecord record : records) {
-            SsSandboxRecord updatedRecord = refreshLastAccessTime(record, now);
-            if (updatedRecord == null) {
-                skippedRecords.add(sandboxRef(record));
-                continue;
-            }
-            sandboxMetadataCache.put(toSandboxInfo(updatedRecord));
-            sandboxHealthWatchService.touch(userCode, resolveHealthServiceType(updatedRecord));
-            updatedCount++;
-        }
-        if (!skippedRecords.isEmpty()) {
-            LOGGER.warn("沙箱心跳部分记录跳过，用户编码：{}，资源ID：{}，跳过记录：{}", userCode, resourceId, skippedRecords);
-        }
-        if (updatedCount == 0) {
-            LOGGER.warn("沙箱心跳失败：运行中记录均未更新，用户编码：{}，资源ID：{}", userCode, resourceId);
+        SsSandboxRecord updatedRecord = refreshLastAccessTime(record, now);
+        if (updatedRecord == null) {
+            LOGGER.warn("沙箱心跳失败：精确路由记录未更新，用户编码：{}，资源ID：{}，记录：{}",
+                userCode, resourceId, sandboxRef(record));
             return false;
         }
-        LOGGER.debug("沙箱心跳成功，用户编码：{}，资源ID：{}，命中记录数：{}，更新记录数：{}，lastAccessTime：{}",
-            userCode, resourceId, records.size(), updatedCount, now);
+        sandboxMetadataCache.put(toSandboxInfo(updatedRecord));
+        sandboxHealthWatchService.touch(userCode, resolveHealthServiceType(updatedRecord));
+        LOGGER.debug("沙箱心跳成功，用户编码：{}，资源ID：{}，沙箱类型：{}，记录ID：{}，lastAccessTime：{}",
+            userCode, resourceId, routing.getSandboxType(), record.getId(), now);
         return true;
+    }
+
+    public SandboxRecordView buildRecordView(SsSandboxRecord record) {
+        if (record == null) {
+            return null;
+        }
+        SandboxRecordView view = new SandboxRecordView();
+        BeanUtils.copyProperties(record, view);
+        String workerId = buildSandboxWorkerId(record.getUserCode(), record.getSandboxType());
+        view.setWorkerId(workerId);
+        if (StringUtils.isBlank(workerId)) {
+            return view;
+        }
+
+        try {
+            Map<String, Object> worker = gatewayWorkerRegistry.getWorker(workerId);
+            view.setWorkerOnline(worker != null);
+            if (worker != null) {
+                view.setWorkerLastSeen(toLong(worker.get("last_seen")));
+                Object agentTypes = worker.get("agent_types");
+                if (agentTypes instanceof Collection<?> values) {
+                    view.setWorkerAgentTypes(values.stream().map(String::valueOf).collect(Collectors.toList()));
+                }
+            }
+        }
+        catch (Exception exception) {
+            LOGGER.warn("读取沙箱 worker lease 失败，workerId={}，recordId={}", workerId, record.getId(), exception);
+        }
+        try (Jedis jedis = redisClient.getResource()) {
+            long ttl = jedis.ttl(Constants.RegistryKeys.workerOnlineLease(workerId));
+            if (ttl >= 0) {
+                view.setWorkerLeaseTtlSeconds(ttl);
+            }
+            else if (ttl == -2L && Boolean.FALSE.equals(view.getWorkerOnline())) {
+                view.setWorkerLeaseTtlSeconds(0L);
+            }
+        }
+        catch (Exception exception) {
+            LOGGER.warn("读取沙箱 worker lease TTL 失败，workerId={}，recordId={}", workerId, record.getId(), exception);
+        }
+        return view;
+    }
+
+    private Long toLong(Object value) {
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        try {
+            return value == null ? null : Long.valueOf(String.valueOf(value));
+        }
+        catch (NumberFormatException ignored) {
+            return null;
+        }
     }
 
     private String resolveHealthServiceType(SsSandboxRecord record) {

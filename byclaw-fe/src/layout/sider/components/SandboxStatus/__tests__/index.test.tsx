@@ -50,8 +50,20 @@ describe('SandboxStatusIndicator', () => {
     (useSandboxStatus as jest.Mock).mockReturnValue({
       status: 'running',
       sandboxes: [
-        { userCode: 'user001', sandboxType: 'openclaw', sandboxId: 'sandbox-1', status: 'RUNNING' },
-        { userCode: 'user001', sandboxType: 'byclaw-dsh', sandboxId: 'sandbox-2', status: 'STARTING' },
+        {
+          userCode: 'user001',
+          sandboxType: 'openclaw',
+          sandboxId: 'sandbox-1',
+          status: 'RUNNING',
+          workerOnline: true,
+        },
+        {
+          userCode: 'user001',
+          sandboxType: 'byclaw-dsh',
+          sandboxId: 'sandbox-2',
+          status: 'STARTING',
+          workerOnline: false,
+        },
       ],
       refetch: jest.fn(),
       restartSandbox: mockRestartSandbox.mockResolvedValue(undefined),
@@ -63,6 +75,8 @@ describe('SandboxStatusIndicator', () => {
 
     expect(screen.getByText('openclaw')).toBeInTheDocument();
     expect(screen.getByText('byclaw-dsh')).toBeInTheDocument();
+    expect(screen.getByText('sandbox.worker.online')).toBeInTheDocument();
+    expect(screen.getByText('sandbox.worker.offline')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /openclaw/ }));
     expect(screen.getByText('sandbox.restart.confirm.content:openclaw')).toBeInTheDocument();

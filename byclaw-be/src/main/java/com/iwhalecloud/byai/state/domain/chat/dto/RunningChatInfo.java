@@ -41,6 +41,10 @@ public class RunningChatInfo {
 
     private String runtimeSource;
 
+    private Boolean rootActive;
+
+    private Boolean acceptingInput;
+
     private Long activeAgentCount;
 
     private Long activeChildCount;

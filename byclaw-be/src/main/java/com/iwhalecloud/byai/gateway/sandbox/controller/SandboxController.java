@@ -27,6 +27,7 @@ import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.gateway.sandbox.mapper.SandboxServiceProfileEntityMapper;
 import com.iwhalecloud.byai.gateway.sandbox.mapper.SandboxServiceSpecEntityMapper;
 import com.iwhalecloud.byai.gateway.sandbox.model.SandboxInfo;
+import com.iwhalecloud.byai.gateway.sandbox.model.SandboxRecordView;
 import com.iwhalecloud.byai.gateway.sandbox.persistence.SandboxServiceProfileEntity;
 import com.iwhalecloud.byai.gateway.sandbox.persistence.SandboxServiceSpecEntity;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxHealthConfigService;
@@ -229,6 +230,12 @@ public class SandboxController {
                 result.put("instanceEndpoints", sandbox.getInstanceEndpoints());
                 result.put("token", sandbox.getGatewayToken());
                 result.put("status", record != null ? record.getStatus() : "UNKNOWN");
+                SandboxRecordView workerView = record == null ? null : sandboxService.buildRecordView(record);
+                result.put("workerId", workerView == null ? null : workerView.getWorkerId());
+                result.put("workerOnline", workerView == null ? null : workerView.getWorkerOnline());
+                result.put("workerLastSeen", workerView == null ? null : workerView.getWorkerLastSeen());
+                result.put("workerLeaseTtlSeconds",
+                    workerView == null ? null : workerView.getWorkerLeaseTtlSeconds());
                 data.add(result);
             }
         }
@@ -380,7 +387,9 @@ public class SandboxController {
         }
 
         int offset = (pageIndex - 1) * pageSize;
-        List<SsSandboxRecord> list = sandboxRecordMapper.selectByPage(keyword, status, offset, pageSize);
+        List<SandboxRecordView> list = sandboxRecordMapper.selectByPage(keyword, status, offset, pageSize).stream()
+            .map(sandboxService::buildRecordView)
+            .collect(Collectors.toList());
         // 动态端口的 openclaw 控制台外网不可达；配置了 WEB_BASE_URL 时改写为经网关整页代理的对外地址，
         // 未配置则保持原始 endpoint（原逻辑）。
         String webBaseUrl = byaiSystemConfigService.getDcSystemConfigValueByCode(Constants.WEB_BASE_URL);

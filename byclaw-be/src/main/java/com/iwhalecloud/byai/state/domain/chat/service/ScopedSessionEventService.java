@@ -3,6 +3,7 @@ package com.iwhalecloud.byai.state.domain.chat.service;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -15,6 +16,7 @@ import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.state.common.enums.AgentTypeEnum;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import com.iwhalecloud.byai.state.domain.chat.dto.ChatRuntimeState;
+import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatSnapshotResponse;
 import com.iwhalecloud.byai.state.domain.chat.enums.ChatUseageEnum;
 import com.iwhalecloud.byai.state.domain.chat.model.ExternalChildSessionBinding;
 import com.iwhalecloud.byai.state.domain.chat.model.MessageContext;
@@ -100,8 +102,22 @@ public class ScopedSessionEventService {
     private void persistChildEvent(Long parentSessionId, JSONObject dataJson, JSONObject metadata) {
         ExternalChildSessionBinding binding = childSessionService.ensureBinding(parentSessionId, metadata);
         String contextKey = parentSessionId + ":" + binding.externalSessionId();
-        MessageContext messageContext = childMessageContexts.computeIfAbsent(contextKey,
-            ignored -> restoreMessageContext(contextKey, binding));
+        RunningChatSnapshotResponse currentSnapshot = runningChatSnapshotService.getExternalChildSnapshot(
+            binding.session().getSessionId(), binding.messageId());
+        ChildRunDisposition runDisposition = compareChildRun(currentSnapshot, metadata);
+        if (runDisposition == ChildRunDisposition.STALE) {
+            return;
+        }
+        MessageContext messageContext;
+        if (runDisposition == ChildRunDisposition.NEWER) {
+            messageContext = new MessageContext(AgentTypeEnum.AGENT, binding.messageId());
+            childMessageContexts.put(contextKey, messageContext);
+            childStreamWatermarks.remove(contextKey);
+        }
+        else {
+            messageContext = childMessageContexts.computeIfAbsent(contextKey,
+                ignored -> restoreMessageContext(contextKey, binding));
+        }
         String streamId = dataJson.getString("stream_id");
         if (StreamIdUtil.isProcessedByWatermark(streamId, childStreamWatermarks.get(contextKey))) {
             return;
@@ -160,6 +176,38 @@ public class ScopedSessionEventService {
                 CurrentUserHolder.setLoginInfo(previousLoginInfo);
             }
         }
+    }
+
+    private ChildRunDisposition compareChildRun(RunningChatSnapshotResponse snapshot, JSONObject metadata) {
+        if (snapshot == null) {
+            return ChildRunDisposition.SAME_OR_LEGACY;
+        }
+        String currentRunId = StringUtils.trimToNull(snapshot.getChildRunId());
+        Long currentTurn = snapshot.getChildTurn();
+        String incomingRunId = metadata == null ? null : StringUtils.trimToNull(metadata.getString("child_run_id"));
+        Long incomingTurn = metadata == null ? null : metadata.getLong("child_turn");
+
+        // An old worker has no run identity. Keep the legacy terminal-lock behavior because a safe order
+        // cannot be inferred across protocols.
+        if (currentRunId == null || currentTurn == null || incomingRunId == null || incomingTurn == null) {
+            return ChildRunDisposition.SAME_OR_LEGACY;
+        }
+        int turnOrder = Long.compare(incomingTurn, currentTurn);
+        if (turnOrder > 0) {
+            return ChildRunDisposition.NEWER;
+        }
+        if (turnOrder < 0) {
+            return ChildRunDisposition.STALE;
+        }
+        return Objects.equals(incomingRunId, currentRunId)
+            ? ChildRunDisposition.SAME_OR_LEGACY
+            : ChildRunDisposition.STALE;
+    }
+
+    private enum ChildRunDisposition {
+        SAME_OR_LEGACY,
+        NEWER,
+        STALE
     }
 
     private MessageContext restoreMessageContext(String contextKey, ExternalChildSessionBinding binding) {

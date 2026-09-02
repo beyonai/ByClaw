@@ -15,10 +15,14 @@ jest.mock('@umijs/max', () => ({
   })),
 }));
 
-const mockSend = jest.fn((_text?: string, _payload?: any) => ({
-  promise: Promise.resolve({}),
-  cancel: jest.fn(),
-}));
+const mockSend = jest.fn((text?: string, payload?: any) => {
+  void text;
+  void payload;
+  return {
+    promise: Promise.resolve({}),
+    cancel: jest.fn(),
+  };
+});
 const mockUpdateMessage = jest.fn((msg: any) => msg);
 const mockWaitForSessionMessageLoaded = jest.fn(() => Promise.resolve());
 const mockReloadLatestMessageList = jest.fn(() => Promise.resolve());
@@ -26,6 +30,8 @@ let mockMessageList: any[] = [];
 let mockReconnectHandler: (() => void) | undefined;
 let mockExtParamsBySessionId: Record<string, unknown> = {};
 let mockSessionList: any[] = [];
+let mockMessageLoadState = 'idle';
+const mockRetrySessionMessageLoad = jest.fn(() => Promise.resolve());
 
 jest.mock('@/utils/websocket', () => ({
   __esModule: true,
@@ -69,6 +75,8 @@ jest.mock('../useChat/useMessage', () => ({
     updateMessage: mockUpdateMessage,
     reloadLatestMessageList: mockReloadLatestMessageList,
     waitForSessionMessageLoaded: mockWaitForSessionMessageLoaded,
+    getSessionMessageLoadState: jest.fn(() => mockMessageLoadState),
+    retrySessionMessageLoad: mockRetrySessionMessageLoad,
   })),
 }));
 
@@ -136,6 +144,7 @@ describe('hooks/useChat/index', () => {
     mockReconnectHandler = undefined;
     mockExtParamsBySessionId = {};
     mockSessionList = [];
+    mockMessageLoadState = 'idle';
     mockGetChatRunningStatus.mockResolvedValue([]);
     mockGetChatRunningSnapshot.mockResolvedValue(null);
     mockUseDispatch.mockReturnValue(jest.fn());
@@ -211,6 +220,15 @@ describe('hooks/useChat/index', () => {
       }),
       { isAssign: true }
     );
+  });
+
+  it('exposes the current session message loading state and retry action', async () => {
+    mockMessageLoadState = 'error';
+    const { result } = renderHook(() => useChat({ sessionId: 'child-1', addSession: jest.fn() } as any));
+
+    expect(result.current.sessionMessageLoadState).toBe('error');
+    await result.current.retrySessionMessageLoad();
+    expect(mockRetrySessionMessageLoad).toHaveBeenCalledWith('child-1');
   });
 
   it('clears a restored session when reconnect reconciliation finds no backend runtime', async () => {
@@ -502,6 +520,50 @@ describe('hooks/useChat/index', () => {
 
     await expect(result.current.sendQuery({ queryQuestion: 'hello' })).resolves.toBe(false);
     expect(setUserCollectModalOpen).toHaveBeenCalledWith(true);
+  });
+
+  it('allows parent input while child work remains active when runtime explicitly permits it', async () => {
+    chatSessionRuntimeManager.applySessionRuntime({
+      sessionId: 's1',
+      traceId: 'trace-1',
+      status: 'running',
+      activeAgentCount: 1,
+      activeChildCount: 1,
+      waitingInteractionCount: 0,
+      rootActive: false,
+      acceptingInput: true,
+      revision: 1,
+      changedAt: 1000,
+    });
+    const { result } = renderHook(() => useChat({ sessionId: 's1', addSession: jest.fn() } as any));
+
+    expect(result.current.isSessionRunning).toBe(true);
+    expect(result.current.canAcceptInput).toBe(true);
+
+    await act(async () => {
+      await result.current.sendQuery({ queryQuestion: 'next task' });
+    });
+
+    expect(mockSend).toHaveBeenCalledTimes(1);
+  });
+
+  it('blocks parent input while the root runtime is active', async () => {
+    chatSessionRuntimeManager.applySessionRuntime({
+      sessionId: 's1',
+      traceId: 'trace-1',
+      status: 'running',
+      activeAgentCount: 1,
+      activeChildCount: 0,
+      waitingInteractionCount: 0,
+      rootActive: true,
+      acceptingInput: false,
+      revision: 1,
+      changedAt: 1000,
+    });
+    const { result } = renderHook(() => useChat({ sessionId: 's1', addSession: jest.fn() } as any));
+
+    await expect(result.current.sendQuery({ queryQuestion: 'blocked' })).resolves.toBe(false);
+    expect(mockSend).not.toHaveBeenCalled();
   });
 
   it('sends multi-agent lane metadata and creates one answer placeholder per lane', async () => {

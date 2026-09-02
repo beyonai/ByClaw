@@ -5,7 +5,12 @@ import { useIntl } from '@umijs/max';
 import classNames from 'classnames';
 import type { SandboxInfo } from '@/service/sandbox';
 import useSandboxStatus from './useSandboxStatus';
-import { getSandboxItemStatus, summarizeSandboxes, type SandboxAggregateStatus } from './statusUtils';
+import {
+  getSandboxItemStatus,
+  getWorkerLivenessStatus,
+  summarizeSandboxes,
+  type SandboxAggregateStatus,
+} from './statusUtils';
 import styles from './styles.module.less';
 
 interface SandboxStatusIndicatorProps {
@@ -47,6 +52,7 @@ const SandboxStatusIndicator: React.FC<SandboxStatusIndicatorProps> = ({ userCod
   if (sandboxes.length) {
     menuItems = sandboxes.map((sandbox) => {
       const itemStatus = getSandboxItemStatus(sandbox);
+      const workerStatus = getWorkerLivenessStatus(sandbox);
       return {
         key: `${sandbox.sandboxType}-${sandbox.sandboxId}`,
         label: (
@@ -60,6 +66,7 @@ const SandboxStatusIndicator: React.FC<SandboxStatusIndicatorProps> = ({ userCod
             />
             <span className={styles.serviceName}>{sandbox.sandboxType}</span>
             <span className={styles.serviceState}>{getItemStatusText(itemStatus)}</span>
+            <span className={styles.workerState}>{intl.formatMessage({ id: `sandbox.worker.${workerStatus}` })}</span>
             <span className={styles.serviceAction}>{intl.formatMessage({ id: 'sandbox.action.restart' })}</span>
           </div>
         ),

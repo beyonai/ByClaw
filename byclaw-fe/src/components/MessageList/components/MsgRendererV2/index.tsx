@@ -49,20 +49,22 @@ export default function MsgRendererV2({ msg, updateMessage, hideThinking }: Prop
             />
           );
         }
-        return group.items.map((messageListItem: IMessageListItem) => {
-          const Comp = lazyHandler.lazyComp(`${messageListItem.contentType}`) as React.ComponentType<any> | null;
-          if (!Comp) return <NotSupport key={`${msg.msgId}_${messageListItem.seq}`} />;
+        return group.items.map((item: IMessageListItem) => {
+          const Comp = lazyHandler.lazyComp(`${item.contentType}`) as React.ComponentType<any> | null;
+          if (!Comp) return <NotSupport key={`${msg.msgId}_${item.seq}`} />;
+          const sourceList = group.channel === 'event' ? 'thinkList' : 'messageList';
           return (
-            <Suspense key={`${msg.msgId}_${messageListItem.seq}`}>
+            <Suspense key={`${msg.msgId}_${item.seq}`}>
               <Comp
                 message={msg}
-                messageListItem={messageListItem}
-                messageListItemContent={messageListItem.content}
+                messageListItem={item}
+                thinkListItem={item}
+                messageListItemContent={item.content}
                 updateMessageListItemContent={(content: IMessageListItem['content']) => {
-                  const index = msg.messageList?.findIndex((item) => item.seq === messageListItem.seq) ?? -1;
+                  const index = msg[sourceList]?.findIndex((sourceItem) => sourceItem.seq === item.seq) ?? -1;
                   if (index < 0) return msg;
                   const next = { ...msg };
-                  set(next, `messageList.${index}.content`, content);
+                  set(next, `${sourceList}.${index}.content`, content);
                   updateMessage(next);
                   return next;
                 }}

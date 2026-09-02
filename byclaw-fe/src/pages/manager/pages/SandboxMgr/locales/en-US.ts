@@ -19,6 +19,9 @@ export default {
   'sandboxMgr.table.endpoint': 'Endpoint',
   'sandboxMgr.table.chatId': 'Chat ID',
   'sandboxMgr.table.status': 'Status',
+  'sandboxMgr.table.workerStatus': 'Worker Status',
+  'sandboxMgr.table.workerLastSeen': 'Worker Last Seen',
+  'sandboxMgr.table.workerLeaseTtl': 'Worker Lease TTL',
   'sandboxMgr.table.autoRelease': 'Auto Release',
   'sandboxMgr.table.leasePolicy': 'Lease Policy',
   'sandboxMgr.table.timeoutSeconds': 'Timeout (s)',
@@ -32,6 +35,9 @@ export default {
   'sandboxMgr.table.createTime': 'Create Time',
   'sandboxMgr.table.updateTime': 'Update Time',
   'sandboxMgr.table.action': 'Action',
+  'sandboxMgr.worker.online': 'Online',
+  'sandboxMgr.worker.offline': 'Offline',
+  'sandboxMgr.worker.unknown': 'Not reported',
 
   // Actions
   'sandboxMgr.action.view': 'View',

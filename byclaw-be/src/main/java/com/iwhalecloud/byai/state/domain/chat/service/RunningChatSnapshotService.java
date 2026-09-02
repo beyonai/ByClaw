@@ -89,6 +89,9 @@ public class RunningChatSnapshotService {
             snapshot.setModelAnswerMessageId(message.getMessageId());
             snapshot.setSnapshotStreamId(streamId);
             snapshot.setMsgStatus(terminal ? MsgStatus.FINISH.getCode() : MsgStatus.APPEND.getCode());
+            JSONObject metadata = JSON.parseObject(StringUtils.defaultString(message.getMetadata(), "{}"));
+            snapshot.setChildRunId(StringUtils.trimToNull(metadata.getString("child_run_id")));
+            snapshot.setChildTurn(metadata.getLong("child_turn"));
             redisTemplate.opsForValue().set(buildKey(message.getSessionId(), traceId, message.getMessageId()),
                 JSON.toJSONString(snapshot), SNAPSHOT_TTL_SECONDS, TimeUnit.SECONDS);
             return true;
@@ -147,6 +150,13 @@ public class RunningChatSnapshotService {
 
     public static String externalChildTraceId(Long sessionId) {
         return EXTERNAL_CHILD_TRACE_PREFIX + sessionId;
+    }
+
+    public RunningChatSnapshotResponse getExternalChildSnapshot(Long sessionId, Long messageId) {
+        if (sessionId == null) {
+            return null;
+        }
+        return get(sessionId, externalChildTraceId(sessionId), messageId);
     }
 
     private String scopedPersistedKey(Long sessionId, Long messageId) {

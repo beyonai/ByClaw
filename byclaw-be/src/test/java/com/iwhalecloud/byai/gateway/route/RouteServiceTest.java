@@ -69,6 +69,7 @@ class RouteServiceTest {
     private GatewayStreamEventProcessor gatewayStreamEventProcessor;
     private ChatStreamRuntimeCoordinator chatStreamRuntimeCoordinator;
     private SandboxService sandboxService;
+    private WorkerRouteReadinessService workerRouteReadinessService;
     private SequenceService sequenceService;
     private JwtService jwtService;
     private TargetAgentResolver targetAgentResolver;
@@ -87,6 +88,7 @@ class RouteServiceTest {
         gatewayStreamEventProcessor = new GatewayStreamEventProcessor();
         chatStreamRuntimeCoordinator = mock(ChatStreamRuntimeCoordinator.class);
         sandboxService = mock(SandboxService.class);
+        workerRouteReadinessService = mock(WorkerRouteReadinessService.class);
         sequenceService = mock(SequenceService.class);
         jwtService = mock(JwtService.class);
         targetAgentResolver = new TargetAgentResolver();
@@ -115,13 +117,13 @@ class RouteServiceTest {
         messageSource.addMessage("sandbox.launch.model.config.required", Locale.US,
                 "Sandbox startup failed because model parameters are incomplete. Please contact the administrator.");
         when(jwtService.createJwt(any())).thenReturn("test-beyond-token");
-
         routeService = new RouteService();
         ReflectionTestUtils.setField(routeService, "gatewayClient", gatewayClient);
         ReflectionTestUtils.setField(routeService, "pythonSseService", pythonSseService);
         ReflectionTestUtils.setField(routeService, "gatewayStreamEventProcessor", gatewayStreamEventProcessor);
         ReflectionTestUtils.setField(routeService, "chatStreamRuntimeCoordinator", chatStreamRuntimeCoordinator);
         ReflectionTestUtils.setField(routeService, "sandboxService", sandboxService);
+        ReflectionTestUtils.setField(routeService, "workerRouteReadinessService", workerRouteReadinessService);
         ReflectionTestUtils.setField(routeService, "sequenceService", sequenceService);
         ReflectionTestUtils.setField(routeService, "jwtService", jwtService);
         ReflectionTestUtils.setField(routeService, "targetAgentResolver", targetAgentResolver);
@@ -144,6 +146,24 @@ class RouteServiceTest {
         project.setProjectName("test-project");
         when(projectService.findById(123L)).thenReturn(project);
         when(userBucketNamingService.buildUserBucketName("u1")).thenReturn("byclaw-u1");
+    }
+
+    @Test
+    void routeChecksWorkerReadinessBeforeItsFirstGatewaySend() throws Exception {
+        ChatProcessContext ctx = buildContext();
+        when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any()))
+                .thenAnswer(invocation -> {
+                    ctx.gatewayEventQueue.offer(currentTraceDoneEvent(ctx));
+                    return successResponse();
+                });
+
+        routeService.route(ctx);
+
+        InOrder inOrder = inOrder(workerRouteReadinessService, gatewayClient);
+        inOrder.verify(workerRouteReadinessService).ensureReady(eq("u1"), isNull(), eq("BYCLAW_EXE_u1"), any());
+        inOrder.verify(gatewayClient).sendMessage(anyString(), anyString(), any(), anyString(), any(),
+            anyString(), anyString(), anyString(), anyString(), any(), any());
     }
 
     @AfterEach

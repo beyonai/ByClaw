@@ -37,10 +37,14 @@ class SessionRuntimeStateServiceTest {
     @Test
     void appliesNewerRuntimeRevisionAndPersistsTheAuthoritativeSnapshot() {
         JSONObject event = runtimeEvent("integration-a", "trace-1", "running", 3L, 2L, 1L, 0L, 1000L);
+        event.getJSONObject("metadata").put("root_active", false);
+        event.getJSONObject("metadata").put("accepting_input", true);
         SessionRuntimeState state = service.applyEvent(10L, event);
         assertThat(state).isNotNull();
         assertThat(state.getSource()).isEqualTo("integration-a");
         assertThat(state.getActiveAgentCount()).isEqualTo(2L);
+        assertThat(state.getRootActive()).isFalse();
+        assertThat(state.getAcceptingInput()).isTrue();
         assertThat(state.isActive()).isTrue();
         verify(valueOperations).set(eq("byai:chat:session-runtime:10"), anyString(), eq(24L * 60L * 60L),
             eq(TimeUnit.SECONDS));
@@ -73,6 +77,15 @@ class SessionRuntimeStateServiceTest {
         JSONObject child = runtimeEvent("integration-b", "trace-1", "running", 1L, 1L, 0L, 0L, 1L);
         child.getJSONObject("metadata").put("session_scope", "child");
         assertThat(service.isRuntimeEvent(child)).isFalse();
+    }
+
+    @Test
+    void leavesParentReadinessNullForLegacyRuntimeEvents() {
+        SessionRuntimeState state = service.applyEvent(10L,
+            runtimeEvent("openclaw", "trace-legacy", "running", 1L, 1L, 0L, 0L, 100L));
+
+        assertThat(state.getRootActive()).isNull();
+        assertThat(state.getAcceptingInput()).isNull();
     }
 
     private SessionRuntimeState state(String source, String traceId, String status, Long revision, Long changedAt) {

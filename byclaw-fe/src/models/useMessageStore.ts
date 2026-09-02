@@ -5,6 +5,7 @@ import { createMessage, fetchMessageHandler, hasVisibleMessageContent } from '@/
 import { getMessages, getMessageState } from '@/service/message';
 
 import type { IMessage, TaskPlanSnapshot } from '@/typescript/message';
+import { shouldApplyScopedChildRun, type ScopedChildRunState } from '@/utils/scopedSession';
 
 const _INIT_PAGESIZE_ = 20;
 
@@ -128,6 +129,7 @@ export type IMessageInfo = {
   targetMessageId?: string;
   pageRange: [number, number];
   hasMore?: boolean;
+  childRun?: ScopedChildRunState;
 };
 
 export type MessageListUpdater = IMessage[] | ((messageList: IMessage[]) => IMessage[]);
@@ -354,12 +356,9 @@ export default {
 
       if (oldMessageInfo) {
         newSessionListMap.set(`${sessionId}`, {
+          ...oldMessageInfo,
           list: messageList,
-          pageSize: oldMessageInfo.pageSize,
-          pageNum: oldMessageInfo.pageNum,
           total: oldMessageInfo.total + (size(messageList) - size(oldMessageInfo.list)),
-          pageRange: oldMessageInfo.pageRange,
-          hasMore: oldMessageInfo.hasMore,
         });
       } else if (allowCreateSession) {
         newSessionListMap.set(`${sessionId}`, {
@@ -376,6 +375,33 @@ export default {
         ...state,
         sessionListMap: newSessionListMap,
       };
+    },
+    applyScopedChildProjection(
+      state: IState,
+      action: {
+        payload: { sessionId: string; message: IMessage; childRun: ScopedChildRunState };
+      }
+    ) {
+      const { sessionId, message, childRun } = action.payload;
+      const sessionListMap = new Map(state.sessionListMap);
+      const messageInfo = sessionListMap.get(`${sessionId}`);
+      if (!messageInfo || !shouldApplyScopedChildRun(messageInfo.childRun, childRun)) return state;
+
+      const list = [...(messageInfo.list || [])];
+      const messageIndex = list.findIndex((item) => {
+        if (item.messageId && message.messageId) return `${item.messageId}` === `${message.messageId}`;
+        return Boolean(item.msgId && message.msgId && `${item.msgId}` === `${message.msgId}`);
+      });
+      if (messageIndex >= 0) list[messageIndex] = message;
+      else list.push(message);
+
+      sessionListMap.set(`${sessionId}`, {
+        ...messageInfo,
+        list,
+        total: messageInfo.total + (messageIndex >= 0 ? 0 : 1),
+        childRun,
+      });
+      return { ...state, sessionListMap };
     },
     applyTaskPlanSnapshot(
       state: IState,

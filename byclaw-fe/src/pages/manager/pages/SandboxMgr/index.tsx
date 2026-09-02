@@ -45,6 +45,7 @@ import JsonCodeEditor from '@/pages/manager/components/JsonCodeEditor';
 import { getPreferredServiceKey, removePreferredServiceKey } from '@/pages/manager/service/SandboxMgr';
 import { isAdminVip } from '@/pages/manager/utils/auth';
 import { buildServiceSpecPayload, isServiceSpecAutoStartEnabled, type ServiceSpecConfig } from './serviceSpecUtils';
+import { formatWorkerLeaseTtl, getWorkerLivenessStatus } from './sandboxLivenessUtils';
 
 import styles from './index.module.less';
 
@@ -145,6 +146,11 @@ interface SsSandboxRecord {
   version?: number;
   createTime?: string | number;
   updateTime?: string | number;
+  workerId?: string;
+  workerOnline?: boolean;
+  workerLastSeen?: number;
+  workerLeaseTtlSeconds?: number;
+  workerAgentTypes?: string[];
   serviceType?: string;
   profileKey?: string;
   resourceRequests?: string;
@@ -1326,6 +1332,33 @@ const SandboxMgr = () => {
         }
         return <Tag>{value}</Tag>;
       },
+    },
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.table.workerStatus' }),
+      dataIndex: 'workerOnline',
+      align: 'center' as const,
+      width: 130,
+      render: (_value: boolean | undefined, record: SsSandboxRecord) => {
+        const workerStatus = getWorkerLivenessStatus(record);
+        const colors = { online: 'green', offline: 'red', unknown: 'default' } as const;
+        return (
+          <Tag color={colors[workerStatus]}>{intl.formatMessage({ id: `sandboxMgr.worker.${workerStatus}` })}</Tag>
+        );
+      },
+    },
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.table.workerLastSeen' }),
+      dataIndex: 'workerLastSeen',
+      align: 'center' as const,
+      width: 170,
+      render: (value: number) => formatTimestamp(value),
+    },
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.table.workerLeaseTtl' }),
+      dataIndex: 'workerLeaseTtlSeconds',
+      align: 'center' as const,
+      width: 140,
+      render: (value: number) => formatWorkerLeaseTtl(value),
     },
     {
       title: intl.formatMessage({ id: 'sandboxMgr.table.autoRelease' }),
