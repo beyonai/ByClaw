@@ -87,6 +87,9 @@ interface FileResourcePanelProps {
 
   /** 项目详情标题栏已有上传/新建入口时，隐藏文件树上方的重复工具栏。 */
   hideProjectToolbar?: boolean;
+
+  /** 项目详情右侧空态使用紧凑高度。 */
+  compactResourceEmpty?: boolean;
 }
 
 // 项目共享文件接口没有 FileBrowserItem 的目录字段，转换后即可复用左侧文件树及操作菜单。
@@ -104,6 +107,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   onPreviewFile,
   cardMode = false,
   hideProjectToolbar = false,
+  compactResourceEmpty = false,
 }) => {
   const intl = useIntl();
   const language = getLocale();
@@ -145,9 +149,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   // 默认项目(-1)没有项目知识库时才使用 .shared 文件浏览接口；如果项目下拉已返回
   // cloudResourceId，即使 projectId 仍是旧的 -1，也必须按项目云盘接口查询。
   const isLocalSharedFiles =
-    scope === 'project' &&
-    Number(resolvedProject?.projectId ?? projectId) === -1 &&
-    !projectCloudResourceIdProp;
+    scope === 'project' && Number(resolvedProject?.projectId ?? projectId) === -1 && !projectCloudResourceIdProp;
   const usesFileBrowser = scope === 'session' || isLocalSharedFiles;
   const rootPath =
     scope === 'project' && !isLocalSharedFiles
@@ -738,10 +740,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
     [quoteFile]
   );
 
-  const emptyTextId =
-    scope === 'project'
-      ? 'projectSpace.detail.resource.emptySharedFiles'
-      : 'projectSpace.detail.resource.emptySessionFiles';
+  const emptyTextId = scope === 'project' ? 'common.noData' : 'projectSpace.detail.resource.emptySessionFiles';
   const visibleProjectItems = items.slice(0, visibleProjectItemCount);
   const hasMoreProjectItems = cardMode && scope === 'project' && visibleProjectItemCount < items.length;
   const projectCardSentinelRef = useInfiniteScroll(
@@ -884,6 +883,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         items={items}
         currentPath={rootPath}
         resourceEmptyStyle
+        compactResourceEmpty={compactResourceEmpty}
         showItemMeta
         emptyText={
           loadError ||

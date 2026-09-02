@@ -507,36 +507,36 @@ const ProjectMembers: React.FC<Props> = ({
                         items: [
                           ...(canOperate
                             ? [
-                                {
-                                  key: 'bind-agent',
-                                  icon: <RobotOutlined />,
-                                  label: intl.formatMessage({
-                                    id: member.agentId
-                                      ? 'projectSpace.members.changeAgent'
-                                      : 'projectSpace.members.bindAgent',
-                                  }),
-                                },
-                                ...(member.agentId
-                                  ? [
-                                      {
-                                        key: 'unbind-agent',
-                                        danger: true,
-                                        icon: <DisconnectOutlined />,
-                                        label: intl.formatMessage({ id: 'projectSpace.members.unbindAgent' }),
-                                      },
-                                    ]
-                                  : []),
-                                ...(isProjectCreator && !isOwner
-                                  ? [
-                                      {
-                                        key: 'remove-member',
-                                        danger: true,
-                                        icon: <DeleteOutlined />,
-                                        label: intl.formatMessage({ id: 'projectSpace.members.removeMember' }),
-                                      },
-                                    ]
-                                  : []),
-                              ]
+                              {
+                                key: 'bind-agent',
+                                icon: <RobotOutlined />,
+                                label: intl.formatMessage({
+                                  id: member.agentId
+                                    ? 'projectSpace.members.changeAgent'
+                                    : 'projectSpace.members.bindAgent',
+                                }),
+                              },
+                              ...(member.agentId
+                                ? [
+                                  {
+                                    key: 'unbind-agent',
+                                    danger: true,
+                                    icon: <DisconnectOutlined />,
+                                    label: intl.formatMessage({ id: 'projectSpace.members.unbindAgent' }),
+                                  },
+                                ]
+                                : []),
+                              ...(isProjectCreator && !isOwner
+                                ? [
+                                  {
+                                    key: 'remove-member',
+                                    danger: true,
+                                    icon: <DeleteOutlined />,
+                                    label: intl.formatMessage({ id: 'projectSpace.members.removeMember' }),
+                                  },
+                                ]
+                                : []),
+                            ]
                             : []),
                         ],
                         onClick: ({ key }) => {
@@ -592,8 +592,8 @@ const ProjectMembers: React.FC<Props> = ({
                         {isOwner
                           ? intl.formatMessage({ id: 'projectSpace.members.owner' })
                           : isCurrentUser
-                          ? intl.formatMessage({ id: 'projectSpace.members.currentUser' })
-                          : intl.formatMessage({ id: 'projectSpace.members.member' })}
+                            ? intl.formatMessage({ id: 'projectSpace.members.currentUser' })
+                            : intl.formatMessage({ id: 'projectSpace.members.member' })}
                       </Tag>
                       <div className={styles.memberCardMeta}>
                         <Typography.Text className={styles.memberCardAgent} type="secondary" ellipsis>
@@ -623,23 +623,23 @@ const ProjectMembers: React.FC<Props> = ({
                               },
                               ...(member.agentId
                                 ? [
-                                    {
-                                      key: 'unbind-agent',
-                                      danger: true,
-                                      icon: <DisconnectOutlined />,
-                                      label: intl.formatMessage({ id: 'projectSpace.members.unbindAgent' }),
-                                    },
-                                  ]
+                                  {
+                                    key: 'unbind-agent',
+                                    danger: true,
+                                    icon: <DisconnectOutlined />,
+                                    label: intl.formatMessage({ id: 'projectSpace.members.unbindAgent' }),
+                                  },
+                                ]
                                 : []),
                               ...(isProjectCreator && !isOwner
                                 ? [
-                                    {
-                                      key: 'remove-member',
-                                      danger: true,
-                                      icon: <DeleteOutlined />,
-                                      label: intl.formatMessage({ id: 'projectSpace.members.removeMember' }),
-                                    },
-                                  ]
+                                  {
+                                    key: 'remove-member',
+                                    danger: true,
+                                    icon: <DeleteOutlined />,
+                                    label: intl.formatMessage({ id: 'projectSpace.members.removeMember' }),
+                                  },
+                                ]
                                 : []),
                             ],
                             onClick: ({ key }) => {
@@ -664,8 +664,9 @@ const ProjectMembers: React.FC<Props> = ({
           ) : (
             !loading && (
               <Empty
+                className={styles.membersEmpty}
                 image={Empty.PRESENTED_IMAGE_SIMPLE}
-                description={intl.formatMessage({ id: 'projectSpace.members.empty' })}
+                description={intl.formatMessage({ id: 'common.noData' })}
               />
             )
           )}
@@ -717,7 +718,7 @@ const ProjectMembers: React.FC<Props> = ({
         <Spin spinning={agentLoading}>
           <div className={smallDetailStyles.agentList} onScroll={handleAgentListScroll}>
             {agentOptions.length === 0 ? (
-              <Empty description={intl.formatMessage({ id: 'projectSpace.members.emptyAgents' })} />
+              <Empty description={intl.formatMessage({ id: 'common.noData' })} />
             ) : (
               <List
                 dataSource={agentOptions}

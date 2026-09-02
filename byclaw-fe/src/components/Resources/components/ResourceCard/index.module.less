@@ -6,8 +6,9 @@
   // min-width: 200px;
   display: flex;
   border-radius: 16px;
-  border: var(~'--@{antPrefix}-line-width') solid var(~'--@{antPrefix}-color-border');
-  transition: all 0.3s;
+  // 固定卡片边框宽度，避免资源 Tab 切换时主题 token 过渡导致边框短暂变粗。
+  border: 1px solid var(~'--@{antPrefix}-color-border');
+  transition: box-shadow 0.3s;
   position: relative;
 
   .renderContent {

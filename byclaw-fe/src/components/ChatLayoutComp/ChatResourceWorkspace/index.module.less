@@ -66,6 +66,8 @@
 
     .@{antPrefix}-tabs-nav-list {
       align-items: flex-end;
+      // 首个预览标签使用负向左侧阴影绘制边框，给列表预留 1px 避免被 nav 容器裁切。
+      padding-left: 1px;
     }
 
     .@{antPrefix}-tabs-content-holder {

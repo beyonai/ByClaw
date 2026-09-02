@@ -1113,6 +1113,7 @@ export default {
   'automation.workspace': '项目空间',
   'automation.optional': '（可选）',
   'automation.workspacePlaceholder': '选择项目空间',
+  'automation.workspaceRequired': '请选择项目空间',
   'automation.frequency': '执行频率',
   'automation.frequencyHint': '（建议避开高峰时段，高峰期容易排队等待）',
   'automation.scheduleRequired': '请完善执行频率',

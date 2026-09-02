@@ -49,6 +49,14 @@
   font-weight: 500;
 }
 
+// 右上角标签为绝对定位，名称区域需要预留空间，避免长名称被标签覆盖。
+.employeeCardWithTag {
+  .employeeInfoHeader {
+    // 标签位于卡片右上角，标题至少预留标签宽度及间距，避免文字压到标签后才截断。
+    padding-right: 220px;
+  }
+}
+
 .avatarContainer {
   // margin-right: 12px;
 }
@@ -104,6 +112,10 @@
   font-size: 16px;
   font-weight: 500;
   margin-bottom: 0 !important;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .employeeDescription {

@@ -1,8 +1,9 @@
-import { Button, Empty, Input, message, Spin, Tabs } from 'antd';
+import { Button, Empty, Input, message, Spin } from 'antd';
 import { PlusOutlined, SearchOutlined } from '@ant-design/icons';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useIntl, useLocation, useSelector } from '@umijs/max';
 import useGlobal from '@/hooks/useGlobal';
+import CommonTabs from '@/components/CommonTabs';
 import InfiniteScroll from 'react-infinite-scroll-component';
 import { getCompositeAppInfo } from '@/service/digitalEmployees';
 import useShowModal from '@/pages/manager/hooks/useShowModal';
@@ -303,14 +304,14 @@ const ModelsPage: React.FC = () => {
       <QuotaCard quota={quota} />
 
       <div className={styles.headerBar}>
-        <Tabs
+        <CommonTabs
           activeKey={activeTab}
           onChange={setActiveTab}
           items={[
             { key: 'mine', label: intl.formatMessage({ id: 'personalModel.tab.mine' }) },
             { key: 'public', label: intl.formatMessage({ id: 'personalModel.tab.public' }) },
           ]}
-          className={styles.tabs}
+          className={styles.secondaryTabs}
         />
         <div className={styles.toolbar}>
           {activeTab === 'mine' ? (

@@ -41,6 +41,7 @@ interface FileSpaceBlockProps {
   compactTreePadding?: boolean;
   fillContainer?: boolean;
   resourceEmptyStyle?: boolean;
+  compactResourceEmpty?: boolean;
   defaultGroupsCollapsed?: boolean;
   accordionGroups?: boolean;
   groupCollapseResetKey?: Key;
@@ -84,6 +85,7 @@ const FileSpaceBlock: React.FC<FileSpaceBlockProps> = ({
   compactTreePadding = false,
   fillContainer = false,
   resourceEmptyStyle = false,
+  compactResourceEmpty = false,
   defaultGroupsCollapsed = false,
   accordionGroups = false,
   groupCollapseResetKey,
@@ -179,6 +181,7 @@ const FileSpaceBlock: React.FC<FileSpaceBlockProps> = ({
         fillContainer ? styles.fileSpaceBlockPlain : '',
         // 资源 Tab 的文件空间空态需要和代码变更卡片使用相同的高度与居中方式。
         resourceEmptyStyle ? styles.fileSpaceBlockResource : '',
+        compactResourceEmpty ? styles.fileSpaceBlockResourceCompact : '',
       ]
         .filter(Boolean)
         .join(' ')}

@@ -172,6 +172,22 @@
   }
 }
 
+// 本体的资源归属二级 Tab 与资源中心其他模块保持一致。
+.secondaryTabs {
+  :global {
+    .@{antPrefix}-tabs-nav {
+      .@{antPrefix}-tabs-tab {
+        font-size: 16px;
+        line-height: 22px;
+      }
+
+      .@{antPrefix}-tabs-tab-btn {
+        font-size: 16px;
+      }
+    }
+  }
+}
+
 .cardGrid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));

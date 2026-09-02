@@ -221,7 +221,7 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
       if (!previewFileUrl && (!resourceId || !sourcePath)) return imagePath;
 
       const loadFromFileUrl = async () => {
-        const response = await fetch(getFilePreviewUrl(previewFileUrl!, imagePath, sourcePath));
+        const response = await fetch(getFilePreviewUrl(previewFileUrl!, imagePath, sourcePath), { cache: 'no-store' });
         if (!response.ok) throw new Error(response.statusText);
         const file = await response.blob();
         if (!file.size) throw new Error('Empty relative resource');
@@ -272,7 +272,7 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
         return contentToBlob(content.data, content.binary, fileName);
       }
       if (fileUrl) {
-        const response = await fetch(getFileUrl(fileUrl));
+        const response = await fetch(getFileUrl(fileUrl), { cache: 'no-store' });
         if (!response.ok) throw new Error(response.statusText);
         return response.blob();
       }
@@ -289,7 +289,7 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
               });
         } catch (error) {
           if (!previewFileUrl) throw error;
-          const previewResponse = await fetch(previewFileUrl);
+          const previewResponse = await fetch(previewFileUrl, { cache: 'no-store' });
           if (!previewResponse.ok) throw error;
           return previewResponse.blob();
         }
@@ -298,7 +298,7 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
         return mimeType ? new Blob([rawBlob], { type: mimeType }) : rawBlob;
       }
       if (previewFileUrl) {
-        const response = await fetch(previewFileUrl);
+        const response = await fetch(previewFileUrl, { cache: 'no-store' });
         if (!response.ok) throw new Error(response.statusText);
         return response.blob();
       }
