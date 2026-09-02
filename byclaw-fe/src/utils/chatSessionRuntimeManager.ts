@@ -36,6 +36,8 @@ export type RunningChatInfo = {
   activeAgentCount?: number;
   activeChildCount?: number;
   waitingInteractionCount?: number;
+  rootActive?: boolean;
+  acceptingInput?: boolean;
   runtimeRevision?: number;
   runtimeChangedAt?: number;
 };
@@ -50,6 +52,8 @@ export type SessionRuntimeState = {
   activeAgentCount: number;
   activeChildCount: number;
   waitingInteractionCount: number;
+  rootActive?: boolean;
+  acceptingInput?: boolean;
   revision: number;
   changedAt: number;
 };
@@ -113,6 +117,8 @@ class ChatSessionRuntimeManager {
         activeAgentCount: Number(info.activeAgentCount || 0),
         activeChildCount: Number(info.activeChildCount || 0),
         waitingInteractionCount: Number(info.waitingInteractionCount || 0),
+        rootActive: info.rootActive,
+        acceptingInput: info.acceptingInput,
         revision: Number(info.runtimeRevision),
         changedAt: Number(info.runtimeChangedAt),
       });
@@ -231,6 +237,14 @@ class ChatSessionRuntimeManager {
       Boolean(this.activeClientRequestIdsBySessionId.get(`${sessionId}`)?.size) ||
       this.isProjectedRuntimeActive(this.sessionRuntimeBySessionId.get(`${sessionId}`))
     );
+  }
+
+  canAcceptInput(sessionId?: string): boolean {
+    const runtime = this.getSessionRuntime(sessionId);
+    if (runtime?.acceptingInput !== undefined) {
+      return runtime.acceptingInput;
+    }
+    return !this.isSessionRunning(sessionId);
   }
 
   isSessionWaitingForUserInput(sessionId?: string | number): boolean {

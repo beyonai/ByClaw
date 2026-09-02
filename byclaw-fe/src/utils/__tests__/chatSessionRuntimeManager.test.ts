@@ -226,4 +226,37 @@ describe('utils/chatSessionRuntimeManager', () => {
     chatSessionRuntimeManager.complete('local-1');
     expect(chatSessionRuntimeManager.isSessionRunning('s1')).toBe(false);
   });
+
+  it('uses explicit parent input readiness without hiding active child work', () => {
+    chatSessionRuntimeManager.applySessionRuntime({
+      sessionId: 's1',
+      traceId: 'trace-1',
+      status: 'running',
+      activeAgentCount: 1,
+      activeChildCount: 1,
+      waitingInteractionCount: 0,
+      acceptingInput: true,
+      revision: 1,
+      changedAt: 1000,
+    });
+
+    expect(chatSessionRuntimeManager.isSessionRunning('s1')).toBe(true);
+    expect(chatSessionRuntimeManager.canAcceptInput('s1')).toBe(true);
+  });
+
+  it('falls back to the legacy running guard when input readiness is absent', () => {
+    chatSessionRuntimeManager.applySessionRuntime({
+      sessionId: 's1',
+      traceId: 'trace-1',
+      status: 'running',
+      activeAgentCount: 1,
+      activeChildCount: 0,
+      waitingInteractionCount: 0,
+      revision: 1,
+      changedAt: 1000,
+    });
+
+    expect(chatSessionRuntimeManager.canAcceptInput('s1')).toBe(false);
+    expect(chatSessionRuntimeManager.canAcceptInput('s2')).toBe(true);
+  });
 });

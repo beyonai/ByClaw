@@ -73,6 +73,8 @@ describe('hooks/useGlobalChatRuntime', () => {
           activeAgentCount: 2,
           activeChildCount: 1,
           waitingInteractionCount: 0,
+          rootActive: false,
+          acceptingInput: true,
           revision: 1,
           changedAt: 1000,
         },
@@ -81,6 +83,7 @@ describe('hooks/useGlobalChatRuntime', () => {
 
     expect(chatSessionRuntimeManager.isSessionRunning('s1')).toBe(true);
     expect(chatSessionRuntimeManager.getSessionRuntime('s1')?.activeAgentCount).toBe(2);
+    expect(chatSessionRuntimeManager.canAcceptInput('s1')).toBe(true);
   });
 
   afterEach(() => {

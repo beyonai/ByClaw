@@ -504,6 +504,47 @@ describe('hooks/useChat/index', () => {
     expect(setUserCollectModalOpen).toHaveBeenCalledWith(true);
   });
 
+  it('allows parent input while child work remains active when runtime explicitly permits it', async () => {
+    chatSessionRuntimeManager.applySessionRuntime({
+      sessionId: 's1',
+      traceId: 'trace-1',
+      status: 'running',
+      activeAgentCount: 1,
+      activeChildCount: 1,
+      waitingInteractionCount: 0,
+      rootActive: false,
+      acceptingInput: true,
+      revision: 1,
+      changedAt: 1000,
+    });
+    const { result } = renderHook(() => useChat({ sessionId: 's1', addSession: jest.fn() } as any));
+
+    await act(async () => {
+      await result.current.sendQuery({ queryQuestion: 'next task' });
+    });
+
+    expect(mockSend).toHaveBeenCalledTimes(1);
+  });
+
+  it('blocks parent input while the root runtime is active', async () => {
+    chatSessionRuntimeManager.applySessionRuntime({
+      sessionId: 's1',
+      traceId: 'trace-1',
+      status: 'running',
+      activeAgentCount: 1,
+      activeChildCount: 0,
+      waitingInteractionCount: 0,
+      rootActive: true,
+      acceptingInput: false,
+      revision: 1,
+      changedAt: 1000,
+    });
+    const { result } = renderHook(() => useChat({ sessionId: 's1', addSession: jest.fn() } as any));
+
+    await expect(result.current.sendQuery({ queryQuestion: 'blocked' })).resolves.toBe(false);
+    expect(mockSend).not.toHaveBeenCalled();
+  });
+
   it('sends multi-agent lane metadata and creates one answer placeholder per lane', async () => {
     const { result } = renderHook(() =>
       useChat({

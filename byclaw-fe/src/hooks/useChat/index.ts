@@ -901,7 +901,11 @@ function useChat(props: IProps) {
     let isContinuingRunningTrace = false;
     // 不要用 isSessionRunning，因为 isSessionRunning 是异步的，这里需要同步判断
     if (chatSessionRuntimeManager.isSessionRunning(sessionId)) {
-      if (!isResumeChat && preliminaryDigitalEmployeeResources.length <= 1) {
+      if (
+        !isResumeChat &&
+        preliminaryDigitalEmployeeResources.length <= 1 &&
+        !chatSessionRuntimeManager.canAcceptInput(sessionId)
+      ) {
         return false;
       }
       if (isResumeChat) {
