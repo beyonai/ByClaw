@@ -18,6 +18,7 @@ public enum WorkerAgentType {
     BYCLAW_DATA("BYCLAW_DATA", "datacloud"),
     BYCLAW_QA("BYCLAW_QA", "搜问"),
     BYCLAW_CODE("BYCLAW_CODE", "编码"),
+    HARNESS("HARNESS", "Harness"),
     DEBUG("DEBUG", "调试的woker"),
     NONE("NONE", "API、SSE等直接调用的worker");
 

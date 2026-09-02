@@ -104,6 +104,7 @@ import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupInstallResultVo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupUninstallPreviewVo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupUninstallSkillVo;
 import com.iwhalecloud.byai.common.constants.Constants;
+import com.iwhalecloud.byai.common.constants.resource.WorkerAgentType;
 import com.iwhalecloud.byai.common.util.RedisUtil;
 import jakarta.servlet.http.HttpSession;
 
@@ -959,7 +960,7 @@ public class DigitalEmployeeApplicationService {
         // otherwise a no-op/profile (including knowledge) save silently routes it
         // back to BYCLAW_* based on agentType.
         boolean harnessRuntime = StringUtils.equalsIgnoreCase(
-            StringUtils.trimToEmpty(ssResource.getWorkerAgentType()), "HARNESS");
+            StringUtils.trimToEmpty(ssResource.getWorkerAgentType()), WorkerAgentType.HARNESS.getCode());
         BeanUtil.copyProperties(digitalEmployeeDTO, ssResource);
         ssResource.setUpdateBy(CurrentUserHolder.getCurrentUserId());
         ssResource.setUpdateTime(new Date());
@@ -968,7 +969,7 @@ public class DigitalEmployeeApplicationService {
         ssResource.setOwnerType(StringUtils.trimToNull(digitalEmployeeDTO.getOwnerType()));
         if (harnessRuntime) {
             ssResource.setImplType(ImplType.ASK_AGENT.getCode());
-            ssResource.setWorkerAgentType("HARNESS");
+            ssResource.setWorkerAgentType(WorkerAgentType.HARNESS.getCode());
         } else {
             fillDigitalEmployeeImplInfo(ssResource, digitalEmployeeDTO.getAgentType());
         }

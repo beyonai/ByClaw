@@ -46,7 +46,6 @@ public class SandboxLaunchContextFactory {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(SandboxLaunchContextFactory.class);
 
-    private static final String HARNESS_WORKER_AGENT_TYPE = "HARNESS";
     private static final String BYCLAW_DSH_SANDBOX_TYPE = "byclaw-dsh";
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
@@ -143,7 +142,7 @@ public class SandboxLaunchContextFactory {
                 return new SandboxLaunchRouting(SandboxLaunchRouting.BYCLAW_CODE_AGENT_SANDBOX_TYPE,
                     SandboxLaunchRouting.DEFAULT_CODE_AGENT_RESOURCE_ID);
             }
-            if (StringUtils.equalsIgnoreCase(workerAgentType, HARNESS_WORKER_AGENT_TYPE)) {
+            if (StringUtils.startsWith(workerAgentType, WorkerAgentType.HARNESS.getCode())) {
                 LOGGER.info("资源ID：{} workerAgentType 为 HARNESS，使用 byclaw-dsh 沙箱", resourceId);
                 return new SandboxLaunchRouting(BYCLAW_DSH_SANDBOX_TYPE,
                     SandboxLaunchRouting.DEFAULT_RESOURCE_ID);

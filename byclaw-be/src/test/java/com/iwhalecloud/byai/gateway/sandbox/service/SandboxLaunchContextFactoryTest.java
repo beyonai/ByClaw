@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.gateway.sandbox.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
 import java.util.Map;
@@ -16,11 +17,14 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 
 import com.iwhalecloud.byai.common.discovery.ApplicationServiceEndpoint;
+import com.iwhalecloud.byai.common.constants.resource.WorkerAgentType;
 import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpec;
 import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpecRepository;
 import com.iwhalecloud.byai.manager.application.service.devloop.GitHubCredentialResolver;
 import com.iwhalecloud.byai.manager.application.service.user.UserPrivateParamApplicationService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDigEmployeeService;
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
+import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 
 @ExtendWith(MockitoExtension.class)
@@ -53,10 +57,13 @@ class SandboxLaunchContextFactoryTest {
     @Mock
     private ApplicationServiceEndpoint applicationServiceEndpoint;
 
+    @Mock
+    private SsResourceService ssResourceService;
+
     @BeforeEach
     void setUp() {
-        when(stringRedisTemplate.opsForValue()).thenReturn(valueOperations);
-        when(applicationServiceEndpoint.getBaseUrl()).thenReturn("http://192.168.0.83:8086/byaiService");
+        lenient().when(stringRedisTemplate.opsForValue()).thenReturn(valueOperations);
+        lenient().when(applicationServiceEndpoint.getBaseUrl()).thenReturn("http://192.168.0.83:8086/byaiService");
     }
 
     @Test
@@ -120,5 +127,14 @@ class SandboxLaunchContextFactoryTest {
             SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE);
 
         assertThat(context.getEnvs()).containsEntry("GH_TOKEN", "legacy-token");
+    }
+
+    @Test
+    void resolveRoutingRoutesHarnessWorkerAgentTypeByPrefix() {
+        SsResource resource = new SsResource();
+        resource.setWorkerAgentType(WorkerAgentType.HARNESS.getCode() + "_user001");
+        when(ssResourceService.findById(105L)).thenReturn(resource);
+
+        assertThat(factory.resolveRouting(105L).getSandboxType()).isEqualTo("byclaw-dsh");
     }
 }
