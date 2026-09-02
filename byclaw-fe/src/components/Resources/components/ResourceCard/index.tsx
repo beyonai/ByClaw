@@ -214,9 +214,9 @@ const ConfirmMenuLabel = ({
     >
       <div
         className={styles.confirmMenuTrigger}
-        onClick={(event) => {
+        onMouseDown={(event) => {
+          // 防止按下菜单项时触发卡片点击，但保留 click 事件给 antd Menu/Popconfirm 处理。
           event.stopPropagation();
-          event.preventDefault();
         }}
       >
         {children}

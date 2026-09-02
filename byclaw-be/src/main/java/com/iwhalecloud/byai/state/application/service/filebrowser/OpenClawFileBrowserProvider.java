@@ -283,9 +283,16 @@ public class OpenClawFileBrowserProvider implements FileBrowserProvider {
                 vo.setName(name.asText());
                 vo.setPath(path.asText());
                 vo.setDir(isDir.asBoolean());
+                JsonNode modified = node.get("modified");
+                if (modified != null && modified.isNumber()) {
+                    vo.setLastModified(
+                        Instant.ofEpochMilli(modified.asLong())
+                            .atOffset(ZoneOffset.UTC)
+                            .format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
+                    );
+                }
                 if (!vo.isDir()) {
                     JsonNode size = node.get("size");
-                    JsonNode modified = node.get("modified");
                     if (size == null || modified == null) {
                         throw new IllegalStateException("OpenClaw文件项缺少大小或修改时间");
                     }

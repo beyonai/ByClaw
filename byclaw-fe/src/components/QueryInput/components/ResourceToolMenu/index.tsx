@@ -105,6 +105,8 @@ const ResourceToolMenu: React.FC<Props> = ({
         <FileResourcePanel
           scope="session"
           sessionId={sessionId}
+          projectId={projectId}
+          projectCloudResourceId={projectCloudResourceId}
           resourceId={quoteAgentId}
           onOpenDetail={() => undefined}
         />
@@ -116,7 +118,9 @@ const ResourceToolMenu: React.FC<Props> = ({
       return projectCloudResourceId ? (
         <FileResourcePanel
           scope="project"
+          sessionId={sessionId || ''}
           projectId={projectId}
+          projectCloudResourceId={projectCloudResourceId}
           resourceId={projectCloudResourceId}
           onOpenDetail={() => undefined}
         />
