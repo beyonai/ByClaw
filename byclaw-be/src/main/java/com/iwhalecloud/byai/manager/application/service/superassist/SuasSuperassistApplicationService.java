@@ -266,8 +266,9 @@ public class SuasSuperassistApplicationService {
 
             String resourceCode = jsonObject.getString("resourceCode");
             String modelProtocol = jsonObject.getString("modelProtocol");
-            String relSkillCodes = jsonObject.getString("relSkillCodes");
             String relToolCodes = jsonObject.getString("relToolCodes");
+            String relOntologyCodes = jsonObject.getString("relOntologyCodes");
+            String relSkillCodes = jsonObject.getString("relSkillCodes");
             String isRelDefaultDataset = jsonObject.getString("isRelDefaultDataset");
 
             // 先从当前map获取，没有再查或者创建，不用重复查询
@@ -303,8 +304,11 @@ public class SuasSuperassistApplicationService {
                 digitalEmployeeDTO.setPrologue(this.buildPrologue(prologue, modelInfo, null));
             }
 
-            // 关联工具agent|tool|view
-            this.handleRelToolCodes(digitalEmployeeDTO, relToolCodes, userId);
+            // 关联工具agent|tool|view|object
+            this.handleRelResourceCodes(digitalEmployeeDTO, relToolCodes, userId);
+
+            // 关联对象
+            this.handleRelResourceCodes(digitalEmployeeDTO, relOntologyCodes, userId);
 
             // 处理关联技能
             this.handleRelSkillCodes(digitalEmployeeDTO, relSkillCodes, userId);
@@ -487,12 +491,12 @@ public class SuasSuperassistApplicationService {
      * 解析并关联工具编码到数字员工。
      *
      * @param digitalEmployeeDTO 数字员工新增对象
-     * @param relToolCodes       工具编码，逗号分隔
+     * @param relResourceCodes   资源编码,关联工具agent|tool|view|object
      * @param userId             用户标识
      */
-    private void handleRelToolCodes(DigitalEmployeeDTO digitalEmployeeDTO, String relToolCodes, Long userId) {
+    private void handleRelResourceCodes(DigitalEmployeeDTO digitalEmployeeDTO, String relResourceCodes, Long userId) {
 
-        List<String> splitToolCodes = StringUtil.splitStr(relToolCodes, ",");
+        List<String> splitToolCodes = StringUtil.splitStr(relResourceCodes, ",");
         if (ListUtil.isEmpty(splitToolCodes)) {
             return;
         }
@@ -936,8 +940,9 @@ public class SuasSuperassistApplicationService {
 
         String resourceCode = jsonObject.getString("resourceCode");
         String modelProtocol = jsonObject.getString("modelProtocol");
-        String relSkillCodes = jsonObject.getString("relSkillCodes");
         String relToolCodes = jsonObject.getString("relToolCodes");
+        String relOntologyCodes = jsonObject.getString("relOntologyCodes");
+        String relSkillCodes = jsonObject.getString("relSkillCodes");
         String isRelDefaultDataset = jsonObject.getString("isRelDefaultDataset");
 
         // 先从当前map获取，没有再查或者创建，不用重复查询
@@ -973,8 +978,12 @@ public class SuasSuperassistApplicationService {
             digitalEmployeeDTO.setPrologue(this.buildPrologue(prologue, modelInfo, null));
         }
 
-        // 关联工具agent|tool|view
-        this.handleRelToolCodes(digitalEmployeeDTO, relToolCodes, userId);
+        // 关联工具agent|tool|view|object
+        this.handleRelResourceCodes(digitalEmployeeDTO, relToolCodes, userId);
+
+
+        this.handleRelResourceCodes(digitalEmployeeDTO, relOntologyCodes, userId);
+
 
         // 处理关联技能
         this.handleRelSkillCodes(digitalEmployeeDTO, relSkillCodes, userId);
