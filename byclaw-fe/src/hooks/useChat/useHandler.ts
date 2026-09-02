@@ -546,7 +546,7 @@ function useHandler(props: IProps) {
         if ('command' in body && typeof body?.command === 'string') {
           return body?.command?.startsWith('bycli');
         }
-        if ('read' in body && typeof body?.path === 'string') {
+        if ('path' in body && typeof body?.path === 'string') {
           return body?.path?.toLocaleLowerCase()?.includes('/bycli/skill.md');
         }
         return false;
