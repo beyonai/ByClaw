@@ -12,7 +12,6 @@ import { normalizeBaseUrl, postByClawBeJson, type FetchLike } from "./byclaw-be-
 
 const ACTIVE_PATH = "/byaiService/internal/api/v1/task-plan/active";
 const UPDATE_PATH = "/byaiService/internal/api/v1/task-plan/update";
-const CANCEL_PATH = "/byaiService/internal/api/v1/task-plan/cancel";
 const PLAN_STATUSES = new Set<TaskPlanStatus>([
   "ACTIVE",
   "CANCELLING",
@@ -106,25 +105,6 @@ export class ByClawBeTaskPlanGateway implements TaskPlanGateway {
     return result.currentPlan && !isOwnedByContext(result.currentPlan, context)
       ? { ok: false, error: result.error }
       : result;
-  }
-
-  async cancel(
-    input: Parameters<TaskPlanGateway["cancel"]>[0],
-  ): Promise<TaskPlanSnapshot | undefined> {
-    const { context } = input;
-    const data = await this.#post(CANCEL_PATH, context, {
-      sessionId: context.sessionId,
-      messageId: context.messageId,
-      ...(context.traceId ? { traceId: context.traceId } : {}),
-      sourceRuntime: context.sourceRuntime,
-      sourceRunId: context.sourceRunId,
-      reason: input.reason,
-    });
-    if (data === null) {
-      return undefined;
-    }
-    const snapshot = parseTaskPlanSnapshot(data);
-    return isOwnedByContext(snapshot, context) ? snapshot : undefined;
   }
 
   async #post(

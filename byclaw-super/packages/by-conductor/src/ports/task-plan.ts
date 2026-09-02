@@ -24,10 +24,4 @@ export interface TaskPlanGateway {
     idempotencyKey: string;
     command: TaskPlanCommand;
   }): Promise<TaskPlanCommandResult>;
-
-  /** 运行时已经停止后，把同一执行上的活动计划收敛为 CANCELLED。 */
-  cancel(input: {
-    context: TaskPlanExecutionContext;
-    reason: string;
-  }): Promise<TaskPlanSnapshot | undefined>;
 }

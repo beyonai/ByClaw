@@ -2545,7 +2545,6 @@ describe("RunService task plan completion guard", () => {
     const taskPlans: TaskPlanGateway = {
       loadActive: vi.fn(async () => active),
       command: vi.fn(async () => ({ ok: true, plan: completedPlan })),
-      cancel: vi.fn(async () => undefined),
     };
     const messages: string[] = [];
     const { events, service } = createTaskPlanService(async (input) => {
@@ -2585,7 +2584,6 @@ describe("RunService task plan completion guard", () => {
         throw new Error("BE unavailable");
       }),
       command: vi.fn(async () => ({ ok: true, plan: taskPlanSnapshot("FAILED", 2) })),
-      cancel: vi.fn(async () => undefined),
     };
     const leaderRun = vi.fn(async () => ({ text: "不应执行" }));
     const { service } = createTaskPlanService(leaderRun, taskPlans);
@@ -2630,7 +2628,6 @@ describe("RunService task plan completion guard", () => {
         };
         return { ok: true, plan: currentPlan };
       }),
-      cancel: vi.fn(async () => undefined),
     };
     const connector = fakeConnector(async function* () {
       yield completed("任务完成");
@@ -2671,7 +2668,6 @@ describe("RunService task plan completion guard", () => {
     const taskPlans: TaskPlanGateway = {
       loadActive: vi.fn(async () => taskPlanSnapshot("ACTIVE")),
       command: vi.fn(async () => ({ ok: true, plan: taskPlanSnapshot("FAILED", 2) })),
-      cancel: vi.fn(async () => undefined),
     };
     const leaderRun = vi.fn(async () => ({ text: "仍然过早结束" }));
     const { events, service } = createTaskPlanService(leaderRun, taskPlans);
@@ -2724,7 +2720,6 @@ describe("RunService task plan completion guard", () => {
         };
         return { ok: true, plan: currentPlan };
       }),
-      cancel: vi.fn(async () => undefined),
     };
     const connector = fakeConnector(async function* () {
       yield {
@@ -2808,7 +2803,6 @@ describe("RunService task plan completion guard", () => {
         };
         return { ok: true, plan: currentPlan };
       }),
-      cancel: vi.fn(async () => undefined),
     };
     let leaderAttempt = 0;
     const { service } = createTaskPlanService(async (input) => {

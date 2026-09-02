@@ -357,6 +357,14 @@ public class AssistantChatApplicationService {
         if (stopChatDto == null || stopChatDto.getSessionId() == null) {
             return;
         }
+        // STOP_CHAT 到达 BE 后，第一件事就是把仍为 ACTIVE 的计划直接落为 CANCELLED。
+        List<TaskPlanSnapshot> cancelledPlans = taskPlanApplicationService.cancel(stopChatDto,
+            "USER_STOPPED", "用户已停止执行");
+        if (cancelledPlans != null) {
+            cancelledPlans.forEach(plan -> taskPlanWebSocketPublisher.broadcast(
+                CurrentUserHolder.getCurrentUserId(), plan, stopChatDto.getClientRequestId()));
+        }
+
         // 停止前将已堆积的消息落库，避免本轮回答内容丢失。
         boolean persistedBeforeStop = flushAccumulatedMessage(stopChatDto);
         RunningChatInfo runningInfo = runningOutputStreamRegistry.getRunning(stopChatDto.getSessionId());
@@ -369,13 +377,6 @@ public class AssistantChatApplicationService {
         }
         if (stopChatDto.getMessageId() == null) {
             stopChatDto.setMessageId(runningMessageId);
-        }
-
-        List<TaskPlanSnapshot> cancellingPlans = taskPlanApplicationService.requestCancellation(stopChatDto,
-            "USER_STOPPED", "用户请求停止");
-        if (cancellingPlans != null) {
-            cancellingPlans.forEach(plan -> taskPlanWebSocketPublisher.broadcast(
-                CurrentUserHolder.getCurrentUserId(), plan, stopChatDto.getClientRequestId()));
         }
 
         /*
@@ -399,14 +400,9 @@ public class AssistantChatApplicationService {
         try {
             gatewayClient.cancelSession(String.valueOf(stopChatDto.getSessionId()), "user cancel task");
         }
-        finally {
-            // 计划是 BE 的权威状态；即使下游取消失败，也必须在本次 STOP_CHAT 内收敛到终态。
-            List<TaskPlanSnapshot> cancelledPlans = taskPlanApplicationService.confirmCancellation(stopChatDto,
-                "USER_STOPPED", "用户已停止执行");
-            if (cancelledPlans != null) {
-                cancelledPlans.forEach(plan -> taskPlanWebSocketPublisher.broadcast(
-                    CurrentUserHolder.getCurrentUserId(), plan, stopChatDto.getClientRequestId()));
-            }
+        catch (Exception e) {
+            log.warn("stopChat 下游取消失败，计划已由 BE 更新为 CANCELLED, sessionId: {}",
+                stopChatDto.getSessionId(), e);
         }
 
         Long cleanupMessageId = resolveStopCleanupMessageId(stopChatDto);
