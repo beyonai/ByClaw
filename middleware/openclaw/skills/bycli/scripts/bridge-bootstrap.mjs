@@ -4,9 +4,9 @@ import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { constants } from 'node:fs';
 import {
-  access, chmod, mkdir, readFile, rename, rm, writeFile,
+  access, chmod, mkdir, readFile, readdir, rename, rm, writeFile,
 } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const BYCLI_TIMEOUT_MS = 30_000;
@@ -65,6 +65,61 @@ export function parseBrowserState(result) {
   if (/\brunning\s*[:=]?\s*(?:true|yes)\b/i.test(output)
     || /\bchromium\s+(?:is\s+)?running\b/i.test(output)) return 'running';
   return 'unknown';
+}
+
+async function managedBrowserUserDataDir() {
+  const stateDir = process.env.OPENCLAW_STATE_DIR || '/by/.openclaw';
+  const configFile = process.env.OPENCLAW_CONFIG_FILE || join(stateDir, 'openclaw.json');
+  let browser = {};
+  try {
+    const config = JSON.parse(await readFile(configFile, 'utf8'));
+    browser = config.browser || config.tools?.browser || {};
+  } catch {
+    // The managed runtime defaults remain authoritative when config is absent or invalid.
+  }
+  const profile = browser.defaultProfile || browser.profile
+    || process.env.OPENCLAW_BROWSER_PROFILE || 'openclaw';
+  const entry = browser.profiles?.[profile];
+  return entry?.userDataDir || process.env.OPENCLAW_BROWSER_USER_DATA_DIR
+    || join(stateDir, 'browser', profile, 'user-data');
+}
+
+function isBrowserExecutable(command) {
+  return /^(?:google-chrome(?:-stable)?|chromium(?:-browser)?)$/i.test(basename(command));
+}
+
+export async function detectManagedBrowserState({
+  procRoot = '/proc',
+  userDataDir,
+} = {}) {
+  let entries;
+  try {
+    entries = await readdir(procRoot, { withFileTypes: true });
+  } catch {
+    return 'unknown';
+  }
+
+  const expectedUserDataDir = userDataDir || await managedBrowserUserDataDir();
+  let readableProcesses = 0;
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !/^\d+$/.test(entry.name)) continue;
+    try {
+      const [stat, cmdline] = await Promise.all([
+        readFile(join(procRoot, entry.name, 'stat'), 'utf8'),
+        readFile(join(procRoot, entry.name, 'cmdline')),
+      ]);
+      readableProcesses += 1;
+      const closeParen = stat.lastIndexOf(')');
+      if (closeParen >= 0 && stat.slice(closeParen + 2, closeParen + 3) === 'Z') continue;
+      const argv = cmdline.toString('utf8').split('\0').filter(Boolean);
+      if (argv.length > 0
+        && isBrowserExecutable(argv[0])
+        && argv.includes(`--user-data-dir=${expectedUserDataDir}`)) return 'running';
+    } catch {
+      // Processes may exit while /proc is scanned; other readable entries still prove the scan works.
+    }
+  }
+  return readableProcesses > 0 ? 'stopped' : 'unknown';
 }
 
 function parseDaemonState(result) {
@@ -257,6 +312,7 @@ export async function ensureBridge({
   wait = sleep,
   processAlive: isProcessAlive = processAlive,
   getProcessStartIdentity = processStartIdentity,
+  detectLocalBrowserState = detectManagedBrowserState,
   startChromeScript = process.env.BYCLI_BROWSER_RECOVERY_COMMAND || START_CHROME_SCRIPT,
   writeLockOwner = (path, owner) => writeFile(path, `${JSON.stringify(owner)}\n`, {
     encoding: 'utf8',
@@ -348,6 +404,7 @@ export async function ensureBridge({
       BYCLI_TIMEOUT_MS,
     );
     browserState = parseBrowserState(browserStatus);
+    if (browserState === 'unknown') browserState = await detectLocalBrowserState();
     if (browserState === 'stopped') {
       if (budget.browserStartsUsed < budget.maxBrowserStarts) {
         budget.browserStartsUsed += 1;

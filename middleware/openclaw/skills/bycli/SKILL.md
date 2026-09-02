@@ -214,7 +214,9 @@ session、TAB、daemon 与浏览器存活；不得调用 `state`、`tab list`、
 node /app/skills/bycli/scripts/bridge-bootstrap.mjs --format json
 ```
 
-统一入口只恢复 Chromium、daemon 和 Extension 握手，**不创建、导航或检查任务 TAB**。它只在明确确认 Chromium 未运行时检查并优先调用可执行的 `/usr/local/bin/start-chrome.sh`，否则使用标准命令 `openclaw browser --browser-profile openclaw start`；Chromium 已运行或状态未知时都不得启动。每次 doctor 后由脚本立即执行 daemon status。
+统一入口只恢复 Chromium、daemon 和 Extension 握手，**不创建、导航或检查任务 TAB**。它先读取 `openclaw browser status`；当 Gateway 使该状态不可判定时，只扫描当前 OpenClaw profile 的精确 `user-data-dir` 对应的非僵尸 Chrome/Chromium 进程。两种证据任一确认运行即不得启动；本地进程扫描明确可用且确认没有该托管进程时才视为 stopped，并优先调用可执行的 `/usr/local/bin/start-chrome.sh`，否则使用标准命令 `openclaw browser --browser-profile openclaw start`。Gateway 与本地进程证据都不可判定时保持 unknown，不得启动。每次 doctor 后由脚本立即执行 daemon status。
+
+结构化结果中的 `actions` 是统一入口在本次调用中**已经执行的恢复动作**，不是建议或待执行动作；`budget.*Used` 是当前恢复调用（或显式共享同一 budget 的 Runner 调用链）的实际消耗次数，不代表后续独立调用的预算。`browserState` 记录恢复动作之前用于决策的观测状态，因此成功冷启动后仍可能为 `stopped`。最终是否可继续浏览器任务只以 `code=BRIDGE_READY` 且 `extensionState=connected` 为准；此时不得在入口之外再次执行 Chrome 启动、daemon restart 或 doctor。
 
 ### 桥接正常后的 TAB 分流
 

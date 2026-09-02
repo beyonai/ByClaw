@@ -219,7 +219,60 @@ test('daemon restart waits for a delayed Extension handshake before failing reco
   runner.done();
 });
 
-test('unknown browser status never starts Chromium', async (t) => {
+test('unknown gateway status starts Chromium when local evidence confirms it is stopped', async (t) => {
+  const runner = scriptedRunner([
+    { command: 'bycli', args: ['doctor'], result: fail(69) },
+    { command: 'bycli', args: ['daemon', 'status'], result: disconnectedStatus },
+    { command: 'bycli', args: ['doctor'], result: fail(69) },
+    { command: 'bycli', args: ['daemon', 'status'], result: disconnectedStatus },
+    { command: 'openclaw', args: ['browser', '--browser-profile', 'openclaw', 'status'], result: fail(1, 'gateway unavailable') },
+    { command: '/usr/local/bin/start-chrome.sh', args: [], result: ok() },
+    { command: 'bycli', args: ['doctor'], result: ok() },
+    { command: 'bycli', args: ['daemon', 'status'], result: healthyStatus },
+  ]);
+
+  const result = await ensureBridge({
+    run: runner.run,
+    fileExists: async () => true,
+    detectLocalBrowserState: async () => 'stopped',
+    lockDir: await temporaryLock(t),
+  });
+
+  assert.equal(result.code, 'BRIDGE_READY');
+  assert.equal(result.browserState, 'stopped');
+  assert.deepEqual(result.actions, ['browser_start_script']);
+  runner.done();
+});
+
+test('unknown gateway status does not start a locally running Chromium', async (t) => {
+  const runner = scriptedRunner([
+    { command: 'bycli', args: ['doctor'], result: fail(69) },
+    { command: 'bycli', args: ['daemon', 'status'], result: disconnectedStatus },
+    { command: 'bycli', args: ['doctor'], result: fail(69) },
+    { command: 'bycli', args: ['daemon', 'status'], result: disconnectedStatus },
+    { command: 'openclaw', args: ['browser', '--browser-profile', 'openclaw', 'status'], result: fail(1, 'gateway unavailable') },
+    { command: 'bycli', args: ['doctor'], result: fail(69) },
+    { command: 'bycli', args: ['daemon', 'status'], result: disconnectedStatus },
+    { command: 'bycli', args: ['daemon', 'restart'], result: ok() },
+    { command: 'bycli', args: ['daemon', 'status'], result: healthyStatus },
+  ]);
+
+  const result = await ensureBridge({
+    run: runner.run,
+    detectLocalBrowserState: async () => 'running',
+    fileExists: async () => {
+      assert.fail('fileExists must not be called for a locally running browser');
+    },
+    lockDir: await temporaryLock(t),
+  });
+
+  assert.equal(result.code, 'BRIDGE_READY');
+  assert.equal(result.browserState, 'running');
+  assert.deepEqual(result.actions, ['daemon_restart']);
+  runner.done();
+});
+
+test('unknown gateway and local browser status never starts Chromium', async (t) => {
   const runner = scriptedRunner([
     { command: 'bycli', args: ['doctor'], result: fail(69) },
     { command: 'bycli', args: ['daemon', 'status'], result: disconnectedStatus },
@@ -234,6 +287,7 @@ test('unknown browser status never starts Chromium', async (t) => {
 
   const result = await ensureBridge({
     run: runner.run,
+    detectLocalBrowserState: async () => 'unknown',
     fileExists: async () => {
       assert.fail('fileExists must not be called for unknown browser state');
     },

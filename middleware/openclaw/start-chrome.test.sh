@@ -14,12 +14,29 @@ touch "${extension_dir}/manifest.json"
 cat > "${fake_bin}/chromium" <<'EOF'
 #!/bin/sh
 printf '%s\n' "$@" > "${START_CHROME_TEST_ARGS}"
+if (: >&9) 2>/dev/null; then
+  printf 'inherited\n' > "${START_CHROME_TEST_CHROME_LOCK_FD}"
+else
+  printf 'closed\n' > "${START_CHROME_TEST_CHROME_LOCK_FD}"
+fi
 EOF
 cat > "${fake_bin}/Xvfb" <<'EOF'
 #!/bin/sh
 exit 0
 EOF
-chmod +x "${fake_bin}/chromium" "${fake_bin}/Xvfb"
+cat > "${fake_bin}/python3" <<'EOF'
+#!/bin/sh
+if [ "${4:-}" = openclaw-chrome-port-proxy ]; then
+  if (: >&9) 2>/dev/null; then
+    printf 'inherited\n' > "${START_CHROME_TEST_PROXY_LOCK_FD}"
+  else
+    printf 'closed\n' > "${START_CHROME_TEST_PROXY_LOCK_FD}"
+  fi
+  exit 0
+fi
+exit 1
+EOF
+chmod +x "${fake_bin}/chromium" "${fake_bin}/Xvfb" "${fake_bin}/python3"
 
 ln -s "$(hostname)-999999" "${user_data_dir}/SingletonLock"
 ln -s stale-cookie "${user_data_dir}/SingletonCookie"
@@ -27,9 +44,11 @@ ln -s "${test_root}/stale-socket" "${user_data_dir}/SingletonSocket"
 
 PATH="${fake_bin}:${PATH}" \
 START_CHROME_TEST_ARGS="${test_root}/chromium.args" \
+START_CHROME_TEST_CHROME_LOCK_FD="${test_root}/chromium.lock-fd" \
+START_CHROME_TEST_PROXY_LOCK_FD="${test_root}/proxy.lock-fd" \
 OPENCLAW_STATE_DIR="${state_dir}" \
 OPENCLAW_BROWSER_USER_DATA_DIR="${user_data_dir}" \
-OPENCLAW_CHROME_REMOTE_DEBUGGING_ADDRESS=127.0.0.1 \
+OPENCLAW_CHROME_REMOTE_DEBUGGING_ADDRESS=0.0.0.0 \
 OPENCLAW_XVFB_SCREEN=1600x960x24 \
 OPENCLI_EXTENSION_DIR="${extension_dir}" \
 OPENCLAW_ENABLE_CHROME=true \
@@ -48,9 +67,12 @@ test -z "$(find "${user_data_dir}" -maxdepth 1 -name SingletonSocket -print)"
 grep -Fx -- "--load-extension=${extension_dir}" "${test_root}/chromium.args"
 grep -Fx -- "--window-size=1600,960" "${test_root}/chromium.args"
 grep -Fx -- "--window-position=0,0" "${test_root}/chromium.args"
+grep -Fx -- closed "${test_root}/chromium.lock-fd"
+grep -Fx -- closed "${test_root}/proxy.lock-fd"
 
 PATH="${fake_bin}:${PATH}" \
 START_CHROME_TEST_ARGS="${test_root}/chromium-override.args" \
+START_CHROME_TEST_CHROME_LOCK_FD="${test_root}/chromium-override.lock-fd" \
 OPENCLAW_STATE_DIR="${state_dir}" \
 OPENCLAW_BROWSER_USER_DATA_DIR="${user_data_dir}" \
 OPENCLAW_CHROME_REMOTE_DEBUGGING_ADDRESS=127.0.0.1 \
