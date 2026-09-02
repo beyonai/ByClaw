@@ -259,18 +259,13 @@ public class SuasSuperassistApplicationService {
             JSONObject jsonObject = initTemplates.getJSONObject(i);
 
             String resourceCode = jsonObject.getString("resourceCode");
+            String modelName = jsonObject.getString("modelName");
             String modelProtocol = jsonObject.getString("modelProtocol");
             String relToolCodes = jsonObject.getString("relToolCodes");
             String relOntologyCodes = jsonObject.getString("relOntologyCodes");
             String relSkillCodes = jsonObject.getString("relSkillCodes");
             String isRelDefaultDataset = jsonObject.getString("isRelDefaultDataset");
 
-            // 先从当前map获取，没有再查或者创建，不用重复查询
-            AgentPrologueDto.ModelInfo modelInfo = modelInfoMap.get(modelProtocol);
-            if (modelInfo == null) {
-                modelInfo = this.buildDefaultModelInfo(modelProtocol);
-                modelInfoMap.put(modelProtocol, modelInfo);
-            }
 
             // 如果已经存在了，不再进行初始化
             SsResource ssResource = ssResourceService.findByIdOrCode(null, resourceCode);
@@ -288,6 +283,9 @@ public class SuasSuperassistApplicationService {
 
             // 其他类型数字员工设置默认模型
             String prologue = digitalEmployeeDTO.getPrologue();
+
+            //获取模型信息
+            AgentPrologueDto.ModelInfo modelInfo = this.getModelInfo(modelInfoMap, modelName, modelProtocol);
 
             // 是否关联默认知识库
             if (Constants.YES_VALUE_Y.equalsIgnoreCase(isRelDefaultDataset)) {
@@ -323,6 +321,43 @@ public class SuasSuperassistApplicationService {
         }
 
         return defaultDigEmployeeId;
+    }
+
+
+    /**
+     * 获取模型信息，协根据名称先获取，然后再根据协议获取
+     *
+     * @param modelInfoMap  模型收集器
+     * @param modelName     模型名称
+     * @param modelProtocol 模型协议
+     * @return AgentPrologueDto
+     */
+    private AgentPrologueDto.ModelInfo getModelInfo(Map<String, AgentPrologueDto.ModelInfo> modelInfoMap, String modelName, String modelProtocol) {
+
+        if (StringUtil.isNotEmpty(modelName)) {
+            FindAiModelQo findAiModelQo = new FindAiModelQo();
+            findAiModelQo.setStatus(Constants.STATUS_ENABLED);
+            findAiModelQo.setModelName(modelName);
+            List<ByaiAimodel> tokenSaverModels = byaiAimodelService.findAiModelByQo(findAiModelQo);
+            if (ListUtil.isNotEmpty(tokenSaverModels)) {
+                ByaiAimodel byaiAimodel = tokenSaverModels.getFirst();
+                AgentPrologueDto.ModelInfo modelInfo = new AgentPrologueDto.ModelInfo();
+                modelInfo.setMaxToken(byaiAimodel.getMaxContentToken());
+                modelInfo.setModelId(byaiAimodel.getModelId());
+                modelInfo.setModel(byaiAimodel.getModelName());
+                modelInfo.setHistory(10);
+                return modelInfo;
+            }
+        }
+
+        // 先从当前map获取，没有再查或者创建，不用重复查询
+        AgentPrologueDto.ModelInfo modelInfo = modelInfoMap.get(modelProtocol);
+        if (modelInfo == null) {
+            modelInfo = this.getByModelProtocol(modelProtocol);
+            modelInfoMap.put(modelProtocol, modelInfo);
+        }
+
+        return modelInfo;
     }
 
     /**
@@ -689,7 +724,7 @@ public class SuasSuperassistApplicationService {
      * @param modelProtocol 模型协议
      * @return 模型信息，默认模型不存在时返回 null
      */
-    private AgentPrologueDto.ModelInfo buildDefaultModelInfo(String modelProtocol) {
+    private AgentPrologueDto.ModelInfo getByModelProtocol(String modelProtocol) {
 
         String modelQuotaJson = byaiSystemConfigService.findByParamCode("MODEL_QUOTA");
 
@@ -978,6 +1013,7 @@ public class SuasSuperassistApplicationService {
         Long defaultDatasetId = loginInfo.getSessionDatasetId();
 
         String resourceCode = jsonObject.getString("resourceCode");
+        String modelName = jsonObject.getString("modelName");
         String modelProtocol = jsonObject.getString("modelProtocol");
         String relToolCodes = jsonObject.getString("relToolCodes");
         String relOntologyCodes = jsonObject.getString("relOntologyCodes");
@@ -987,7 +1023,7 @@ public class SuasSuperassistApplicationService {
         // 先从当前map获取，没有再查或者创建，不用重复查询
         AgentPrologueDto.ModelInfo modelInfo = modelInfoMap.get(modelProtocol);
         if (modelInfo == null) {
-            modelInfo = this.buildDefaultModelInfo(modelProtocol);
+            modelInfo = this.getModelInfo(modelInfoMap, modelName, modelProtocol);
             modelInfoMap.put(modelProtocol, modelInfo);
         }
 

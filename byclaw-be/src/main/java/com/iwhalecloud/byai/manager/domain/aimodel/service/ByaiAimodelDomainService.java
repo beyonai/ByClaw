@@ -22,12 +22,14 @@ import com.iwhalecloud.byai.common.util.RedisUtil;
 import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.common.feign.response.knowledge.ModelDto;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -77,8 +79,7 @@ public class ByaiAimodelDomainService {
         if (StringUtil.isNotEmpty(request.getModelId())) {
             try {
                 modelIdLong = Long.parseLong(request.getModelId());
-            }
-            catch (NumberFormatException e) {
+            } catch (NumberFormatException e) {
                 log.warn("modelId parse fail, modelId={}", request.getModelId());
             }
         }
@@ -94,7 +95,7 @@ public class ByaiAimodelDomainService {
     /**
      * 判断模型名称是否已被占用：新增时 excludeModelId 传 null（存在同名即占用）；修改时传当前 id（存在其他记录同名即占用）
      *
-     * @param modelName 模型名称（displayName 对应 model_name），建议调用方先 trim
+     * @param modelName      模型名称（displayName 对应 model_name），建议调用方先 trim
      * @param excludeModelId 排除的模型 ID，为 null 时统计所有同名
      * @return true 表示名称已被占用，不允许保存
      */
@@ -128,14 +129,12 @@ public class ByaiAimodelDomainService {
         if (entity.getModelId() == null) {
             entity.setModelId(SequenceService.nextVal());
             byaiAimodelMapper.insert(entity);
-        }
-        else {
+        } else {
             byaiAimodelMapper.updateById(entity);
         }
         if (ModelStatusEnum.isEnabledDb(entity.getStatus())) {
             syncToRedis(entity);
-        }
-        else {
+        } else {
             removeFromRedis(entity.getModelId());
         }
         return entity.getModelId();
@@ -157,7 +156,7 @@ public class ByaiAimodelDomainService {
     /**
      * 设置状态；启用时写入 Redis，停用时从 Redis 移除
      *
-     * @param modelId 模型 ID
+     * @param modelId   模型 ID
      * @param apiStatus API 状态（ENABLED/DISABLED/TESTING）
      */
     public void setStatus(Long modelId, String apiStatus) {
@@ -176,8 +175,7 @@ public class ByaiAimodelDomainService {
         byaiAimodelMapper.updateById(entity);
         if (ModelStatusEnum.isEnabledDb(dbCode)) {
             syncToRedis(entity);
-        }
-        else {
+        } else {
             removeFromRedis(modelId);
         }
     }
@@ -233,8 +231,7 @@ public class ByaiAimodelDomainService {
                 }
                 RedisUtil.hmPutAll(RedisConfig.AI_MODEL_TYPE_KEY, entries);
             }
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             log.error("rebuildTypeList fail", e);
         }
     }
@@ -258,8 +255,7 @@ public class ByaiAimodelDomainService {
             try {
                 JSONObject jo = JSONObject.parseObject(entity.getInParams());
                 dto.setInstanceParam(jo != null ? jo : new HashMap<>());
-            }
-            catch (Exception e) {
+            } catch (Exception e) {
                 log.debug("inParams parse to map fail, inParams={}", entity.getInParams());
                 dto.setInstanceParam(new HashMap<>());
             }
@@ -309,8 +305,7 @@ public class ByaiAimodelDomainService {
         }
         try {
             return Sm4Util.decrypt(encrypted);
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             log.debug("aimodel token decrypt fail, use original");
             return encrypted;
         }
@@ -341,9 +336,6 @@ public class ByaiAimodelDomainService {
      * @return 匹配的模型，不存在返回 null
      */
     public List<ByaiAimodel> findAiModelByQo(FindAiModelQo findAiModelQo) {
-        if (findAiModelQo == null) {
-            return null;
-        }
         LambdaQueryWrapper<ByaiAimodel> queryWrapper = new LambdaQueryWrapper<>();
         if (findAiModelQo.getModelId() != null) {
             queryWrapper.eq(ByaiAimodel::getModelId, findAiModelQo.getModelId());
@@ -351,6 +343,11 @@ public class ByaiAimodelDomainService {
         if (StringUtil.isNotEmpty(findAiModelQo.getModelType())) {
             queryWrapper.eq(ByaiAimodel::getModelType, findAiModelQo.getModelType());
         }
+        
+        if (StringUtil.isNotEmpty(findAiModelQo.getModelName())) {
+            queryWrapper.eq(ByaiAimodel::getModelName, findAiModelQo.getModelName());
+        }
+
         if (StringUtil.isNotEmpty(findAiModelQo.getModelNo())) {
             queryWrapper.eq(ByaiAimodel::getModelNo, findAiModelQo.getModelNo());
         }
