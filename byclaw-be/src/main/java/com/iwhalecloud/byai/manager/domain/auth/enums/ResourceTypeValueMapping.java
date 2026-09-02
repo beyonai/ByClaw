@@ -25,6 +25,10 @@ public enum ResourceTypeValueMapping {
     // 数据库知识库资源
     KG_DB(ResourceBizTypeEnum.KG_DB.name(), "KG_DB"),
 
+
+    // 云盘知识库
+    KG_CLOUD(ResourceBizTypeEnum.KG_CLOUD.name(), "KG_CLOUD"),
+
     // 智能体资源
     AGENT(ResourceBizTypeEnum.AGENT.name(), "AGENT"),
 

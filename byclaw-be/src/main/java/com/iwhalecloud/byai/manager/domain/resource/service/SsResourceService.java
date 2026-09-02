@@ -889,4 +889,18 @@ public class SsResourceService {
         queryWrapper.orderByAsc(SsResource::getResourceId);
         return ssResourceMapper.selectList(queryWrapper);
     }
+
+
+    /**
+     * 根据编码统计资源数量
+     *
+     * @param resourceCodes 资源编码
+     * @return long
+     */
+    public long countByResourceCodes(List<String> resourceCodes) {
+        LambdaQueryWrapper<SsResource> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.in(SsResource::getResourceCode, resourceCodes);
+        Long count = ssResourceMapper.selectCount(queryWrapper);
+        return count != null ? count : 0L;
+    }
 }
