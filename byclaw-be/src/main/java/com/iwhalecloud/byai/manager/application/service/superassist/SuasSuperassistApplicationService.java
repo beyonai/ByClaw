@@ -336,9 +336,35 @@ public class SuasSuperassistApplicationService {
 
         try {
             String resourceDesc = jsonObject.getString("resourceDesc");
+
+            boolean changeEmploy = false;
             if (StringUtil.isNotEmpty(resourceDesc) && StringUtil.isEmpty(ssResource.getResourceDesc())) {
+                changeEmploy = true;
+                ssResource.setResourceDesc(resourceDesc);
+            }
+
+            String avatar = jsonObject.getString("avatar");
+            if (StringUtil.isNotEmpty(avatar) && StringUtil.isEmpty(ssResource.getAvatar())) {
+                changeEmploy = true;
+                ssResource.setAvatar(avatar);
+            }
+
+            String implType = jsonObject.getString("implType");
+            if (StringUtil.isNotEmpty(implType) && StringUtil.isEmpty(ssResource.getImplType())) {
+                changeEmploy = true;
+                ssResource.setImplType(implType);
+            }
+
+            String workerAgentType = jsonObject.getString("workerAgentType");
+            if (StringUtil.isNotEmpty(workerAgentType) && StringUtil.isEmpty(ssResource.getWorkerAgentType())) {
+                changeEmploy = true;
+                ssResource.setWorkerAgentType(workerAgentType);
+            }
+
+            if (changeEmploy) {
                 ssResourceService.update(ssResource);
             }
+
 
             SsResExtDigEmployee ssResExtDigEmployee = ssResExtDigEmployeeService.findById(ssResource.getResourceId());
             // 如果不为空，则更新
@@ -1039,7 +1065,7 @@ public class SuasSuperassistApplicationService {
             project.setCreateBy(loginInfo.getUserId());
 
             //初始化云盘
-            SsResource cloudResource = projectApplicationService.createCloudResource(project);
+            SsResource cloudResource = projectApplicationService.createCloudResource(project, true);
             project.setCloudResourceId(cloudResource.getResourceId());
 
             projectService.save(project);
@@ -1049,7 +1075,7 @@ public class SuasSuperassistApplicationService {
             // 初始化项目云盘
             Long cloudResourceId = project.getCloudResourceId();
             if (cloudResourceId == null) {
-                SsResource cloudResource = projectApplicationService.createCloudResource(project);
+                SsResource cloudResource = projectApplicationService.createCloudResource(project, true);
                 project.setCloudResourceId(cloudResource.getResourceId());
                 projectService.update(project);
             }
