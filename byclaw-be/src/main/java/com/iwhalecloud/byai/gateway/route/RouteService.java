@@ -90,6 +90,9 @@ public class RouteService {
     private SandboxService sandboxService;
 
     @Autowired
+    private WorkerRouteReadinessService workerRouteReadinessService;
+
+    @Autowired
     private SequenceService sequenceService;
 
     @Autowired
@@ -215,6 +218,7 @@ public class RouteService {
 
         boolean runtimeStarted = chatStreamRuntimeCoordinator.startIfNecessary(ctx);
         try {
+            ensureWorkerReadyBeforeFirstSend(ctx, userCode, agentId, targetAgentType);
             if (laneRoutes.isEmpty()) {
                 GatewayClient.SendResponse response = sendMessageWithWorkerRetry(
                     userCode,
@@ -353,6 +357,29 @@ public class RouteService {
         } finally {
             // 无论正常/超时/异常，当前请求如果启动了监听，则负责停止并清理上下文。
             chatStreamRuntimeCoordinator.stopIfStarted(sessionId, runtimeStarted);
+        }
+    }
+
+    private void ensureWorkerReadyBeforeFirstSend(ChatProcessContext ctx, String userCode, Long agentId,
+            String targetAgentType) {
+        try {
+            workerRouteReadinessService.ensureReady(userCode, agentId, targetAgentType, phase -> {
+                switch (phase) {
+                    case STARTING -> sendSandboxProgressMessage(ctx, SseResponseEventEnum.reasoningLogStart,
+                        I18nUtil.get("sandbox.launch.progress.start"));
+                    case WAITING -> sendSandboxProgressMessage(ctx, SseResponseEventEnum.reasoningLogDelta,
+                        I18nUtil.get("sandbox.launch.progress.waiting"));
+                    case READY -> sendSandboxProgressMessage(ctx, SseResponseEventEnum.reasoningLogEnd,
+                        I18nUtil.get("sandbox.launch.progress.ready"));
+                    default -> {
+                    }
+                }
+            });
+        }
+        catch (RuntimeException exception) {
+            String failureMessage = resolveSandboxLaunchFailureMessage(exception);
+            sendSandboxProgressMessage(ctx, SseResponseEventEnum.reasoningLogEnd, failureMessage);
+            throw exception;
         }
     }
 
