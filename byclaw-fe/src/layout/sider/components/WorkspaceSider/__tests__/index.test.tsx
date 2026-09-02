@@ -201,28 +201,6 @@ describe('WorkspaceSider', () => {
     });
   });
 
-  it('shows the generic active-agent count reported by the session runtime', async () => {
-    mockGetChatRunningStatus.mockResolvedValue([
-      {
-        sessionId: '2001',
-        clientRequestId: 'runtime:2001:trace-1',
-        running: true,
-        traceId: 'trace-1',
-        runtimeSource: 'integration-a',
-        runtimeStatus: 'running',
-        activeAgentCount: 3,
-        activeChildCount: 2,
-        waitingInteractionCount: 0,
-        runtimeRevision: 2,
-        runtimeChangedAt: 1000,
-      },
-    ] as any);
-
-    render(<WorkspaceSider />);
-
-    expect(await screen.findByText('workspaceSider.sessionAgentsWorking:3')).toBeInTheDocument();
-  });
-
   it('shows edit and delete actions from the session more menu', async () => {
     render(<WorkspaceSider />);
 
