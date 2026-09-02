@@ -2036,9 +2036,6 @@ public class DigitalEmployeeApplicationService {
      * @param inputDto   前端 save/update 时传入的原始 DTO;为 null 时退化为纯 DB 拼装
      */
     public boolean synOpenClawWorkSpace(Long resourceId, DigitalEmployeeDTO inputDto) {
-        if (digitalEmployeeGroupApplicationService.isGroup(resourceId)) {
-            return true;
-        }
         try {
             return doSyncOpenClawWorkSpace(resourceId, inputDto);
         } catch (Exception e) {
