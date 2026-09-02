@@ -1,0 +1,8 @@
+{
+  "name": "@byclaw/knowledge-collection-scripts",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "tencentcloud-sdk-nodejs": "4.1.304"
+  }
+}

@@ -1,18 +1,26 @@
 ---
 name: online-search
-description: 镜像内置的 SearXNG 元搜索 CLI，一次调用聚合 40+ 搜索引擎结果并输出结构化 JSON。适合需要真实网页搜索结果、多引擎交叉验证、时间窗过滤（最近一天/周/月/年）、学术类别（arxiv/crossref/pubmed/openalex）或中文搜索（baidu/sogou/360search）的场景。无需常驻服务。
+description: 公共网页 URL 发现通道，腾讯 WSA 主用且仅在通道级故障时降级到镜像内置 SearXNG；与 hot-discovery 协同但不负责正文抓取。
 ---
 
-# Online Search（SearXNG 元搜索 CLI）
+# Online Search（腾讯 WSA 主用、SearXNG 故障降级）
+
+> `knowledge-collection public-discover` 必须通过统一 online-search provider 调用本能力。WSA 凭据齐全且未显式
+> 关闭时优先使用 WSA；只有 WSA 通道级故障才使用 SearXNG。WSA 合法空结果或候选不足不触发 SearXNG，
+> 而是继续既有 hot-discovery 判断。直接运行 `searxng-cli` 仅用于独立调试。
 
 > **入口与使用前提（必读）**：被调用时，若本会话尚未读过本文件，**必须先打开完整通读本文**
 > （含参数表、输出格式、实测引擎可用性），再按其中命令面执行；禁止把技能名当作平台工具名调用
 > （如直接调 `online-search` 工具会报 "Tool not found"），禁止凭名称猜测 CLI 用法。
 > 本技能只负责**发现 URL**，取内容一律委派来源执行器（公共网页 `bycli`）。通过
-> `knowledge-collection` 采集公共 URL 时，必须使用 `public-discover`，该命令会与 SearXNG
-> 并行运行 `hot_discovery`；直接运行本 CLI 仅用于独立调试。
+> `knowledge-collection` 采集公共 URL 时，必须使用 `public-discover`，该命令会让统一
+> online-search provider（WSA 主用、SearXNG 故障降级）与 `hot_discovery` 并行运行；
+> 直接运行 `searxng-cli` 仅用于独立调试降级通道。
 
-基于 SearXNG（249 引擎元搜索内核）的**进程内搜索 CLI**：每次调用起一个进程，完成搜索后向 stdout 输出单个 JSON 对象并退出。**不启动 Web 服务、不监听端口、不写缓存**。
+统一 online-search provider 的主通道是腾讯 WSA。仅当 WSA 未启用、凭据缺失、超时、鉴权失败、
+限流或响应无效等通道级故障时，才调用基于 SearXNG（249 引擎元搜索内核）的进程内 CLI。
+SearXNG 每次调用起一个进程，完成搜索后向 stdout 输出单个 JSON 对象并退出；**不启动 Web 服务、
+不监听端口、不写缓存**。
 
 ## 目录结构
 
@@ -118,14 +126,14 @@ stdout 输出**单个 JSON 对象**（`ensure_ascii=False`，中文原样保留�
 
 ## 子技能：hot_discovery（热度发现通道）
 
-searxng 给的是**相关性**排序，拿不到平台原生热度。需要「相关 **且** 高热」时，
+online-search provider 给的是**相关性**排序，拿不到平台原生热度。需要「相关 **且** 高热」时，
 与本技能**并行**调用子技能 [references/hot_discovery/SKILL.md](references/hot_discovery/SKILL.md)——
 它经 bycli 适配器按关键词检索，取平台原生热度字段（`citations` / `downloads` / `stars` / `score` …），
 再由其 `merge` 子命令归并两个通道的结果。
 
 **两个通道的分工**：
 
-| | searxng（本技能） | hot_discovery（子技能） |
+| | online-search provider（本技能） | hot_discovery（子技能） |
 | --- | --- | --- |
 | 排序依据 | 多引擎相关性 | 平台原生热度字段 |
 | 覆盖面 | 249 引擎，几乎所有类别 | 33 个适配器，热度集中在 packages/science/it |
@@ -151,7 +159,7 @@ node scripts/knowledge-collection.mjs public-discover \
 手工调试命令如下：
 
 ```bash
-# 通道 1（本技能）
+# 通道 1（仅独立调试 SearXNG 降级通道）
 searxng-cli "AI agent framework" --category it --max-results 20 > /tmp/sx.json
 
 # 通道 2（子技能，同时跑）

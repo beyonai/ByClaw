@@ -45,6 +45,48 @@ test('bridge readiness delegates to the shared bridge CLI exactly once', async (
   assert.deepEqual(runner.timeouts, [60_000]);
 });
 
+test('bridge readiness keeps the container script when it exists', async () => {
+  const containerBridgeScript = '/app/skills/bycli/scripts/bridge-bootstrap.mjs';
+  const runner = scriptedRunner([{
+    cmd: process.execPath,
+    args: [containerBridgeScript, '--format', 'json'],
+    result: ok(JSON.stringify({ ok: true, code: 'BRIDGE_READY', checks: 1 })),
+  }]);
+  const bycli = createBycliIntegration({
+    run: runner.run,
+    environment: {},
+    fileExists: (candidate) => candidate === containerBridgeScript,
+    containerBridgeScript,
+    localBridgeScript: '/repo/skills/bycli/scripts/bridge-bootstrap.mjs',
+  });
+
+  const outcome = await bycli.ensureBridge();
+
+  assert.equal(outcome.ok, true);
+  assert.deepEqual(runner.calls, [[process.execPath, [containerBridgeScript, '--format', 'json']]]);
+});
+
+test('bridge readiness falls back to the repository script when the container script is absent', async () => {
+  const localBridgeScript = '/repo/skills/bycli/scripts/bridge-bootstrap.mjs';
+  const runner = scriptedRunner([{
+    cmd: process.execPath,
+    args: [localBridgeScript, '--format', 'json'],
+    result: ok(JSON.stringify({ ok: true, code: 'BRIDGE_READY', checks: 1 })),
+  }]);
+  const bycli = createBycliIntegration({
+    run: runner.run,
+    environment: {},
+    fileExists: () => false,
+    containerBridgeScript: '/app/skills/bycli/scripts/bridge-bootstrap.mjs',
+    localBridgeScript,
+  });
+
+  const outcome = await bycli.ensureBridge();
+
+  assert.equal(outcome.ok, true);
+  assert.deepEqual(runner.calls, [[process.execPath, [localBridgeScript, '--format', 'json']]]);
+});
+
 test('runtime transport is independent from declared access tier', () => {
   assert.deepEqual(deriveExecutionProfile({ strategy: 'public', browser: false }), {
     needsBrowser: false,

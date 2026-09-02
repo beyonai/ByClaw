@@ -3,12 +3,14 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import { runWebAcquire } from './web-acquirer.mjs';
 import { cmdInit } from './research-state.mjs';
 import { sessionPaths } from './session.mjs';
 
 const SOURCE_URL = 'https://example.com/news/1234567';
+const LOCAL_BRIDGE_SCRIPT = fileURLToPath(new URL('../../bycli/scripts/bridge-bootstrap.mjs', import.meta.url));
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'web-acquirer-'));
@@ -80,6 +82,21 @@ test('acquires contiguous browser chunks and leaves the item pending for materia
   }
 });
 
+test('uses the repository byCLI bridge when the container bridge path is unavailable', async () => {
+  const f = await fixture();
+  const calls = [];
+  try {
+    const result = await runWebAcquire(f.paths, {
+      'item-id': 'local-bridge', 'source-url': SOURCE_URL,
+    }, { runProcess: successfulRunner(calls) });
+
+    assert.equal(result.status, 'saved');
+    assert.equal(calls[0][0], LOCAL_BRIDGE_SCRIPT);
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
 test('rejects an unauthorized resolved URL and records a failed item', async () => {
   const f = await fixture();
   const calls = [];
@@ -131,6 +148,37 @@ test('keeps challenge pages pending and does not close the owned browser session
     assert.equal(calls.some((args) => args.includes('close')), false);
     const session = JSON.parse(await readFile(join(f.root, 'session.json'), 'utf8'));
     assert.equal(session.collection.collection.items[0].materialization.status, 'pending');
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test('does not treat incidental login navigation in a normal article as a challenge', async () => {
+  const f = await fixture();
+  const calls = [];
+  const runner = successfulRunner(calls);
+  const article = `首页 登录\n${'这是正常文章正文。'.repeat(120)}`;
+  try {
+    const result = await runWebAcquire(f.paths, {
+      'item-id': 'login-navigation', 'source-url': SOURCE_URL,
+    }, {
+      runProcess: async (bin, args, options) => {
+        if (args.includes('extract')) {
+          return {
+            exitCode: 0,
+            stdout: JSON.stringify({
+              url: SOURCE_URL, title: 'Example industry report', total_chars: article.length,
+              start: 0, end: article.length, next_start_char: null, content: article,
+            }),
+            stderr: '',
+          };
+        }
+        return runner(bin, args, options);
+      },
+    });
+
+    assert.equal(result.status, 'saved');
+    assert.ok(calls.some((args) => args.includes('close')));
   } finally {
     await rm(f.root, { recursive: true, force: true });
   }

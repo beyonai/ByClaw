@@ -1,9 +1,11 @@
 'use strict';
 
-const CHALLENGE_MARKER = /(?:登录|验证码|安全验证|环境验证|访问过于频繁|captcha|verify\s+you)/i;
+const STRONG_CHALLENGE_MARKER = /(?:验证码|安全验证|环境验证|访问过于频繁|captcha|verify\s+you)/i;
+const LOGIN_MARKER = /(?:登录|log\s*in|sign\s*in)/i;
+const MAX_LOGIN_PAGE_CHARS = 800;
 const ERROR_MARKER = /(?:404\s+not\s+found|500\s+internal\s+server\s+error|页面不存在|内容已删除)/i;
 const NAVIGATION_MARKER = /(?:首页\s*[|｜>]\s*新闻|网站导航|全部频道|热门推荐\s+更多)/i;
-const REMOTE_IMAGE = /!\[([^\]]*)\]\(\s*(https?:\/\/[^)\s]+)(?:\s+['"][^'"]*['"])?\s*\)/gi;
+const REMOTE_IMAGE = /!\[([^\]]*)\]\(\s*((?:https?:\/\/|\/\/|\/)[^)\s]+)(?:\s+['"][^'"]*['"])?\s*\)/gi;
 const LOCAL_IMAGE = /!\[([^\]]*)\]\(\s*([^):\s][^)]*?)\s*\)/gi;
 
 function paragraphCount(markdown) {
@@ -12,6 +14,12 @@ function paragraphCount(markdown) {
     .filter((paragraph) => paragraph && !/^#{1,6}\s/.test(paragraph) && !/^!\[/.test(paragraph))
     .filter((paragraph) => paragraph.replace(/\s+/g, '').length >= 15)
     .length;
+}
+
+function isChallengePage(title, markdown) {
+  if (STRONG_CHALLENGE_MARKER.test(`${title}\n${markdown}`)) return true;
+  if (LOGIN_MARKER.test(title)) return true;
+  return markdown.trim().length <= MAX_LOGIN_PAGE_CHARS && LOGIN_MARKER.test(markdown);
 }
 
 export function analyzeWebMarkdown(markdown, executorResult = {}) {
@@ -29,7 +37,7 @@ export function analyzeWebMarkdown(markdown, executorResult = {}) {
   }
   const normalized = `${withoutRemote.replace(/\n{3,}/g, '\n\n').trim()}\n`;
   const title = typeof executorResult.title === 'string' ? executorResult.title.trim() : '';
-  const hasChallenge = CHALLENGE_MARKER.test(input);
+  const hasChallenge = isChallengePage(title, input);
   const hasError = ERROR_MARKER.test(input);
   const hasNavigation = NAVIGATION_MARKER.test(input);
   const substantiveParagraphs = paragraphCount(normalized);
