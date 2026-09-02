@@ -303,6 +303,28 @@ test('nonzero business stdout containing AUTH_REQUIRED is not an authentication 
   assert.equal(outcome.exitCode, 1);
 });
 
+test('an unclassified initial process failure does not create terminal gate state', async (t) => {
+  const stateDir = await mkdtemp(join(tmpdir(), 'weixin-login-gate-unclassified-'));
+  t.after(() => rm(stateDir, { recursive: true, force: true }));
+
+  const outcome = await runGate({
+    stateDir,
+    argv: command(),
+    execute: async () => ({
+      exitCode: 1,
+      stdout: '',
+      stderr: '',
+      timedOut: true,
+      signal: 'SIGTERM',
+    }),
+  });
+
+  assert.equal(outcome.executed, true);
+  assert.equal(outcome.phase, 'initial');
+  assert.equal(outcome.exitCode, 1);
+  assert.deepEqual(await readdir(stateDir), []);
+});
+
 test('a non-verification error on a confirmed rerun remains terminal', async (t) => {
   const stateDir = await mkdtemp(join(tmpdir(), 'weixin-login-gate-command-error-'));
   t.after(() => rm(stateDir, { recursive: true, force: true }));

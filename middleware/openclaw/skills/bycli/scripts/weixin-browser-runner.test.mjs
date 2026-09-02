@@ -5,7 +5,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { runWeixinBrowser } from './weixin-browser-runner.mjs';
+import {
+  commandExecutionTimeoutMs,
+  normalizeCommandResult,
+  runWeixinBrowser,
+} from './weixin-browser-runner.mjs';
 
 const command = (name = 'user-info') => [
   'bycli', 'weixin', name,
@@ -47,6 +51,64 @@ async function stateDir(t, prefix = 'weixin-runner-') {
   t.after(() => rm(path, { recursive: true, force: true }));
   return path;
 }
+
+test('command execution timeout includes the command timeout plus a safety margin', () => {
+  assert.equal(commandExecutionTimeoutMs(command()), 30_000);
+  assert.equal(commandExecutionTimeoutMs([...command(), '--timeout', '60']), 90_000);
+  assert.equal(commandExecutionTimeoutMs([...command(), '--timeout=180']), 210_000);
+  assert.equal(commandExecutionTimeoutMs([...command(), '--timeout', 'invalid']), 30_000);
+});
+
+test('timeout without structured output becomes a diagnosable non-authentication result', async (t) => {
+  const directory = await stateDir(t, 'weixin-runner-timeout-');
+  const processResult = normalizeCommandResult({
+    exitCode: 1,
+    stdout: '',
+    stderr: '',
+    timedOut: true,
+    signal: 'SIGTERM',
+    durationMs: 30_012,
+  });
+
+  const outcome = await runWeixinBrowser({
+    stateDir: directory,
+    argv: command('download-publish-data'),
+    loadCapability: async () => ({ browser: true, access: 'write' }),
+    ensureBridge: async () => ready,
+    execute: async () => processResult,
+  });
+
+  assert.equal(outcome.exitCode, 1);
+  assert.equal(outcome.phase, 'initial');
+  assert.equal(outcome.commandExecuted, true);
+  assert.deepEqual(await readdir(directory), []);
+  const error = JSON.parse(outcome.stderr).error;
+  assert.equal(error.code, 'COMMAND_TIMEOUT_UNCERTAIN');
+  assert.equal(error.commandExecuted, true);
+  assert.deepEqual(error.details, {
+    timedOut: true,
+    signal: 'SIGTERM',
+    durationMs: 30_012,
+    stdoutLength: 0,
+    stderrLength: 0,
+  });
+});
+
+test('empty unknown process failure becomes a diagnosable non-authentication result', () => {
+  const outcome = normalizeCommandResult({
+    exitCode: 1,
+    stdout: '',
+    stderr: '',
+    timedOut: false,
+    signal: null,
+    durationMs: 321,
+  });
+
+  const error = JSON.parse(outcome.stderr).error;
+  assert.equal(error.code, 'COMMAND_EXEC_UNCERTAIN');
+  assert.equal(outcome.stateDisposition, 'no-auth-state');
+  assert.equal(error.details.durationMs, 321);
+});
 
 test('initial browser command runs capability check, bridge, then command', async (t) => {
   const events = [];

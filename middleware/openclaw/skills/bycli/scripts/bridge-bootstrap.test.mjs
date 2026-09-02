@@ -9,6 +9,7 @@ import {
   createRecoveryBudget,
   ensureBridge,
   parseBrowserState,
+  runCommand,
 } from './bridge-bootstrap.mjs';
 
 const ok = (stdout = '') => ({ exitCode: 0, stdout, stderr: '' });
@@ -34,6 +35,21 @@ function scriptedRunner(steps) {
     },
   };
 }
+
+test('runCommand preserves timeout diagnostics', async () => {
+  const result = await runCommand(
+    process.execPath,
+    ['-e', 'setTimeout(() => {}, 1_000)'],
+    20,
+  );
+
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.timedOut, true);
+  assert.equal(typeof result.durationMs, 'number');
+  assert.ok(result.durationMs >= 0);
+  assert.equal(result.stdout, '');
+  assert.equal(result.stderr, '');
+});
 
 async function temporaryLock(t, prefix = 'bridge-bootstrap-') {
   const root = await mkdtemp(join(tmpdir(), prefix));

@@ -15,6 +15,8 @@ import {
 } from './weixin-login-gate.mjs';
 
 const LIST_TIMEOUT_MS = 60_000;
+const DEFAULT_COMMAND_TIMEOUT_MS = 30_000;
+const COMMAND_TIMEOUT_GRACE_MS = 30_000;
 
 function isBrowserConnect(result) {
   const exitCode = Number(result?.exitCode);
@@ -113,8 +115,57 @@ function validateInvocation(stateDir, argv) {
   }
 }
 
+function optionValue(argv, name) {
+  for (let index = 3; index < argv.length; index += 1) {
+    const value = String(argv[index]);
+    if (value === name) return argv[index + 1];
+    if (value.startsWith(`${name}=`)) return value.slice(name.length + 1);
+  }
+  return null;
+}
+
+export function commandExecutionTimeoutMs(argv) {
+  const commandTimeoutSeconds = Number(optionValue(argv, '--timeout'));
+  if (!Number.isFinite(commandTimeoutSeconds) || commandTimeoutSeconds <= 0) {
+    return DEFAULT_COMMAND_TIMEOUT_MS;
+  }
+  return Math.max(
+    DEFAULT_COMMAND_TIMEOUT_MS,
+    Math.ceil(commandTimeoutSeconds * 1_000) + COMMAND_TIMEOUT_GRACE_MS,
+  );
+}
+
+export function normalizeCommandResult(result) {
+  const exitCode = Number(result?.exitCode);
+  const stdout = String(result?.stdout || '');
+  const stderr = String(result?.stderr || '');
+  if (exitCode === 0 || (!result?.timedOut && (stdout.trim() || stderr.trim()))) return result;
+
+  const timedOut = result?.timedOut === true;
+  return internalError({
+    exitCode: Number.isFinite(exitCode) && exitCode !== 0 ? exitCode : 1,
+    code: timedOut ? 'COMMAND_TIMEOUT_UNCERTAIN' : 'COMMAND_EXEC_UNCERTAIN',
+    message: timedOut
+      ? 'Weixin command timed out without a final structured result'
+      : 'Weixin command failed without a structured result',
+    details: {
+      timedOut,
+      signal: result?.signal || null,
+      durationMs: Number.isFinite(result?.durationMs) ? result.durationMs : null,
+      stdoutLength: Buffer.byteLength(stdout),
+      stderrLength: Buffer.byteLength(stderr),
+    },
+    commandExecuted: result?.commandExecuted !== false,
+  });
+}
+
 async function executeArgv(argv) {
-  return runCommand(argv[0], argv.slice(1));
+  const result = await runCommand(
+    argv[0],
+    argv.slice(1),
+    commandExecutionTimeoutMs(argv),
+  );
+  return normalizeCommandResult(result);
 }
 
 export async function loadRuntimeCapability(commandName) {
