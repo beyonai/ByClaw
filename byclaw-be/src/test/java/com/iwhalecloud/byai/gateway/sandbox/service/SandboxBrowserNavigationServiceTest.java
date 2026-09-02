@@ -12,6 +12,7 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -137,5 +138,35 @@ class SandboxBrowserNavigationServiceTest {
             .contains("target=https://example.com/login", "endpoint=http://127.0.0.1:")
             .contains("statusCode=200", "ok=true", "operationId=operation_account_")
             .doesNotContain("secret-token", "ticket=private");
+    }
+
+    @Test
+    void navigate_usesHttp11WithoutH2cUpgrade() throws IOException {
+        AtomicReference<String> protocol = new AtomicReference<>();
+        AtomicReference<String> upgradeHeader = new AtomicReference<>();
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/", exchange -> {
+            protocol.set(exchange.getProtocol());
+            upgradeHeader.set(exchange.getRequestHeaders().getFirst("Upgrade"));
+            byte[] response = "{\"id\":\"daemon-1\",\"ok\":true}".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+
+        String endpoint = "http://127.0.0.1:" + server.getAddress().getPort();
+        when(sandboxService.sandboxInfo(USER_CODE)).thenReturn(List.of(SandboxInfo.builder()
+            .sandboxId(SANDBOX_ID)
+            .instanceEndpoints(Map.of("bycli", endpoint))
+            .build()));
+        SandboxIngressRuntimeSupport runtimeSupport = mock(SandboxIngressRuntimeSupport.class);
+        when(runtimeResolver.resolve()).thenReturn(runtimeSupport);
+        when(runtimeSupport.buildTargetUrl(endpoint, "/command", null)).thenCallRealMethod();
+
+        navigationService.navigate(USER_CODE, SANDBOX_ID, "https://example.com/login", SESSION_KEY);
+
+        assertThat(protocol.get()).isEqualTo("HTTP/1.1");
+        assertThat(upgradeHeader.get()).isNull();
     }
 }
