@@ -13,7 +13,7 @@ describe('notifyEasyConfirmInteraction', () => {
     mockMessageInfo.mockClear();
   });
 
-  it('requests permission and defers the denied hint until the browser window becomes active', async () => {
+  it('requests permission without showing a hint when permission is denied', async () => {
     class NotificationMock {
       static permission: NotificationPermission = 'default';
       static requestPermission = jest.fn().mockResolvedValue('denied');
@@ -36,9 +36,7 @@ describe('notifyEasyConfirmInteraction', () => {
 
       hasFocus = true;
       window.dispatchEvent(new Event('focus'));
-      expect(mockMessageInfo).toHaveBeenCalledWith(
-        expect.objectContaining({ content: 'easyConfirm.notification.permissionDenied' })
-      );
+      expect(mockMessageInfo).not.toHaveBeenCalled();
     } finally {
       hasFocusSpy.mockRestore();
       Object.defineProperty(window, 'Notification', { configurable: true, value: originalNotification });

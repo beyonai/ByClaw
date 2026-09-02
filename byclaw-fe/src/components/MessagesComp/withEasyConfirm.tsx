@@ -1,7 +1,7 @@
 import useGlobal from '@/hooks/useGlobal';
 import { IMessageState } from '@/constants/message';
 import type { IMessage, IMessageListItem } from '@/typescript/message';
-import { message as antMessage } from 'antd';
+// import { message as antMessage } from 'antd';
 import React, { useCallback, useEffect } from 'react';
 import { isPendingEasyConfirmListItem } from './easyConfirm';
 
@@ -13,6 +13,8 @@ export type EasyConfirmNotificationContent = {
 };
 
 let notificationPermissionRequest: Promise<NotificationPermission> | null = null;
+
+/*
 let pendingPermissionDeniedMessage = '';
 let permissionReminderListening = false;
 
@@ -45,6 +47,7 @@ const remindNotificationPermissionDenied = (content: string) => {
   document.addEventListener('visibilitychange', showPendingPermissionDeniedMessage);
   permissionReminderListening = true;
 };
+*/
 
 const requestNotificationPermission = () => {
   if (!notificationPermissionRequest) {
@@ -78,10 +81,12 @@ export const notifyEasyConfirmInteraction = async (content: EasyConfirmNotificat
     }
   }
 
+  /*
   if (permission === 'denied') {
     remindNotificationPermissionDenied(content.permissionDenied);
     return;
   }
+  */
   if (permission !== 'granted') return;
 
   try {
