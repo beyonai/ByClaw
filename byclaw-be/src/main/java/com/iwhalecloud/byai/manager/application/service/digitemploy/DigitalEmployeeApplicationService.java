@@ -686,7 +686,8 @@ public class DigitalEmployeeApplicationService {
         String resourceName = digitalEmployeeDTO.getResourceName();
         long count = ssResourceService.countResource(resourceName, ResourceBizTypeEnum.DIG_EMPLOYEE.name(), null);
         if (count > 0) {
-            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("digemployee.name.duplicate"));
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
+                I18nUtil.get("digemployee.name.duplicate", resourceName));
         }
 
         // 保存资源表
@@ -714,7 +715,12 @@ public class DigitalEmployeeApplicationService {
         ssResource.setOwnerType(StringUtils.trimToNull(digitalEmployeeDTO.getOwnerType()));
         ssResource.setResourceDVerid(1L);
         ssResource.setResourceRVerid(0L);
-        fillDigitalEmployeeImplInfo(ssResource, digitalEmployeeDTO.getAgentType());
+        if (StringUtil.isNotEmpty(digitalEmployeeDTO.getImplType()) && StringUtil.isNotEmpty(digitalEmployeeDTO.getWorkerAgentType())) {
+            ssResource.setImplType(digitalEmployeeDTO.getImplType());
+            ssResource.setWorkerAgentType(digitalEmployeeDTO.getWorkerAgentType());
+        } else {
+            fillDigitalEmployeeImplInfo(ssResource, digitalEmployeeDTO.getAgentType());
+        }
         ssResourceService.saveResource(ssResource);
 
         // 保存扩展表
@@ -938,7 +944,8 @@ public class DigitalEmployeeApplicationService {
         String resourceName = digitalEmployeeDTO.getResourceName();
         long count = ssResourceService.countResource(resourceName, ResourceBizTypeEnum.DIG_EMPLOYEE.name(), resourceId);
         if (count > 0) {
-            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("digemployee.name.duplicate"));
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
+                I18nUtil.get("digemployee.name.duplicate", resourceName));
         }
 
         // 全量编辑可能改变技能关系，必须与技能组快照安装/卸载串行化。
@@ -2029,9 +2036,6 @@ public class DigitalEmployeeApplicationService {
      * @param inputDto   前端 save/update 时传入的原始 DTO;为 null 时退化为纯 DB 拼装
      */
     public boolean synOpenClawWorkSpace(Long resourceId, DigitalEmployeeDTO inputDto) {
-        if (digitalEmployeeGroupApplicationService.isGroup(resourceId)) {
-            return true;
-        }
         try {
             return doSyncOpenClawWorkSpace(resourceId, inputDto);
         } catch (Exception e) {
