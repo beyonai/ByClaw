@@ -309,6 +309,13 @@ export function loadSession(paths, { persistMigration = true } = {}) {
 
 /** 权威写入: 校验敏感字段后原子落盘 session.json。 */
 export function persistSession(paths, session) {
+  const activeRunId = session?.task?.activeOrchestrationRunId;
+  if (activeRunId) {
+    const run = session.task?.publicCollectRun;
+    if (run?.runId !== activeRunId || Number(run?.actionLease?.pid) !== process.pid) {
+      throw new Error(`ORCHESTRATION_IN_PROGRESS: run=${activeRunId}`);
+    }
+  }
   assertNoSensitiveKeys(session);
   atomicWriteJson(paths.session, session);
 }

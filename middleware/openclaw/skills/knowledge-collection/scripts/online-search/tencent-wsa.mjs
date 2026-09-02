@@ -51,16 +51,26 @@ function optionalText(value) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
-function normalizePage(page) {
+function normalizePage(page, evidence = {}) {
   const url = safeHttpUrl(page?.url);
   const title = optionalText(page?.title);
   if (!url || !title) return null;
+  const passage = optionalText(page.passage) || '';
+  const dynamicContent = optionalText(page.content);
   const candidate = {
     url,
     title,
-    content: optionalText(page.content) || optionalText(page.passage) || '',
+    passage,
+    content: dynamicContent || passage,
+    summarySource: dynamicContent ? 'dynamic-content' : (passage ? 'standard-passage' : 'none'),
     engine: 'tencent-wsa',
+    provider: 'tencent-wsa',
+    evidenceLevel: 'search-summary',
+    verificationRequired: true,
+    discoveredAt: evidence.discoveredAt,
   };
+  if (evidence.requestId) candidate.requestId = evidence.requestId;
+  if (evidence.providerVersion) candidate.providerVersion = evidence.providerVersion;
   if (Number.isFinite(page.score)) candidate.score = page.score;
   const publishedAt = optionalText(page.date);
   if (publishedAt) candidate.publishedAt = publishedAt;
@@ -86,10 +96,17 @@ export function normalizeSearchResponse(rawResponse, fallbackQuery = '') {
 
   const warnings = [];
   const results = [];
+  const requestId = optionalText(response.RequestId);
+  const providerVersion = optionalText(response.Version);
+  const evidence = {
+    requestId,
+    providerVersion,
+    discoveredAt: new Date().toISOString(),
+  };
   response.Pages.forEach((encoded, index) => {
     try {
       const page = typeof encoded === 'string' ? JSON.parse(encoded) : encoded;
-      const candidate = normalizePage(page);
+      const candidate = normalizePage(page, evidence);
       if (!candidate) throw new Error('missing a safe URL or title');
       results.push(candidate);
     } catch (error) {
@@ -107,9 +124,7 @@ export function normalizeSearchResponse(rawResponse, fallbackQuery = '') {
     results,
     warnings,
   };
-  const requestId = optionalText(response.RequestId);
   if (requestId) document.requestId = requestId;
-  const providerVersion = optionalText(response.Version);
   if (providerVersion) document.providerVersion = providerVersion;
   const message = optionalText(response.Msg);
   if (message) document.message = message.slice(0, MAX_WARNING_CHARS);

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { runWebAcquire } from './web-acquirer.mjs';
+import { acquireWebProbe, runWebAcquire } from './web-acquirer.mjs';
 import { recordDiscoveryResult, reserveDiscoveryAttempt } from './discovery-authorization.mjs';
 import { cmdInit } from './research-state.mjs';
 import { sessionPaths } from './session.mjs';
@@ -109,7 +109,37 @@ test('acquires contiguous browser chunks and leaves the item pending for materia
   }
 });
 
-test('acquires a discovered weak candidate through byCLI without promoting discovery eligibility', async () => {
+test('probe acquisition returns controlled body without creating collection inventory', async () => {
+  const f = await fixture();
+  const calls = [];
+  try {
+    const before = await readFile(join(f.root, 'session.json'), 'utf8');
+    const result = await acquireWebProbe({
+      canonicalUrl: SOURCE_URL,
+      acquisitionUrls: [SOURCE_URL],
+    }, { runProcess: successfulRunner(calls), probeId: 'fixture-probe' });
+    assert.equal(result.status, 'saved');
+    assert.equal(result.markdown, 'first body\nsecond body');
+    assert.equal(result.executor, 'bycli');
+    assert.equal(await readFile(join(f.root, 'session.json'), 'utf8'), before);
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test('probe acquisition reports bridge failure as infrastructure-blocked', async () => {
+  const result = await acquireWebProbe({
+    canonicalUrl: SOURCE_URL,
+    acquisitionUrls: [SOURCE_URL],
+  }, {
+    probeId: 'fixture-infra',
+    runProcess: async () => ({ exitCode: 1, stdout: '', stderr: 'bridge down' }),
+  });
+  assert.equal(result.status, 'infrastructure-blocked');
+  assert.equal(result.reasonCode, 'BRIDGE_UNAVAILABLE');
+});
+
+test('acquires a discovery candidate without treating discovery evidence as verified body', async () => {
   const f = await weakDiscoveryFixture();
   const calls = [];
   try {
@@ -120,8 +150,9 @@ test('acquires a discovered weak candidate through byCLI without promoting disco
     assert.equal(result.status, 'saved');
     assert.ok(calls.some((args) => args.includes('extract')));
     const session = JSON.parse(await readFile(join(f.root, 'session.json'), 'utf8'));
-    assert.equal(session.task.discoveryGate.runs[0].articleCandidateIds.length, 0);
-    assert.equal(session.task.discoveryGate.candidates[0].pageType, 'weak');
+    assert.equal(session.task.discoveryGate.candidates[0].discoveryDisposition, 'probe');
+    assert.equal(session.task.discoveryGate.candidates[0].verificationRequired, true);
+    assert.equal(Object.hasOwn(session.task.discoveryGate.candidates[0], 'verifiedBody'), false);
   } finally {
     await rm(f.root, { recursive: true, force: true });
   }

@@ -8,12 +8,16 @@ import {
   cmdCrawlSeed, cmdCrawlNext, cmdCrawlMark, cmdCrawlStatus,
 } from './crawl-state.mjs';
 import { runPublicDiscover } from './public-discovery.mjs';
+import { runPublicCollect } from './public-collect.mjs';
 import { runWechatMaterialize } from './wechat-materializer.mjs';
 import { runArxivMaterialize } from './arxiv-materializer.mjs';
 import { runWebAcquire } from './web-acquirer.mjs';
 import { runWebMaterialize } from './web-materializer.mjs';
 import { cmdPublish, inspectDelivery } from './publish-delivery.mjs';
+import { assertExternalSessionWriteAllowed } from './probe-state.mjs';
 import { resolveSandboxPath, sessionPaths } from './session.mjs';
+
+const READ_ONLY_SESSION_COMMANDS = new Set(['status', 'inspect', 'crawl-status']);
 
 const RESEARCH_HANDLERS = {
   init: (args) => cmdInit(args),
@@ -25,6 +29,7 @@ const RESEARCH_HANDLERS = {
 
 const SESSION_HANDLERS = {
   'public-discover': (paths, args) => runPublicDiscover(paths, args),
+  'public-collect': (paths, args) => runPublicCollect(paths, args),
   'acquire-web': (paths, args) => runWebAcquire(paths, args),
   'materialize-web': (paths, args) => runWebMaterialize(paths, args),
   'materialize-wechat': (paths, args) => runWechatMaterialize(paths, args),
@@ -96,6 +101,9 @@ export function executeLocalCommand(command, args) {
   }
   const sessionHandler = SESSION_HANDLERS[command];
   if (sessionHandler) {
+    if (!READ_ONLY_SESSION_COMMANDS.has(command) && command !== 'public-collect') {
+      assertExternalSessionWriteAllowed(paths, command);
+    }
     return sessionHandler(paths, normalizedArgs);
   }
   throw new Error(`未知命令: ${command}`);
