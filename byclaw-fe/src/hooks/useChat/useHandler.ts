@@ -544,7 +544,13 @@ function useHandler(props: IProps) {
           body = inputBody as Record<string, unknown>;
         }
         if ('command' in body && typeof body?.command === 'string') {
-          return body?.command?.startsWith('bycli');
+          return (
+            body?.command?.startsWith('bycli') ||
+            body?.command?.includes('web-acquirer.mjs') ||
+            body?.command?.includes('ima.mjs') ||
+            body?.command?.includes('bycli_integration.mjs') ||
+            body?.command?.includes('public-discovery.mjs')
+          );
         }
         if ('path' in body && typeof body?.path === 'string') {
           return body?.path?.toLocaleLowerCase()?.includes('/bycli/skill.md');
