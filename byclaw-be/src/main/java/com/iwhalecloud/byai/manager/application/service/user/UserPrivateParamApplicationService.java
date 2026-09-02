@@ -3,7 +3,6 @@ package com.iwhalecloud.byai.manager.application.service.user;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Date;
-import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -31,7 +30,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -68,18 +66,6 @@ public class UserPrivateParamApplicationService {
     private static final String PARAM_SOURCE_CONNECTOR = "CONNECTOR";
 
     private static final Pattern PARAM_KEY_PATTERN = Pattern.compile("[A-Z_][A-Z0-9_]{0,127}");
-
-    private static final DefaultRedisScript<Long> VERSIONED_CACHE_WRITE_SCRIPT = new DefaultRedisScript<>("""
-        local current = redis.call('GET', KEYS[1])
-        if current then
-            local decodedOk, decoded = pcall(cjson.decode, current)
-            if decodedOk and decoded['version'] and tonumber(decoded['version']) > tonumber(ARGV[1]) then
-                return 0
-            end
-        end
-        redis.call('SET', KEYS[1], ARGV[2])
-        return 1
-        """, Long.class);
 
     @Autowired
     private UserPrivateParamMapper userPrivateParamMapper;
@@ -422,7 +408,7 @@ public class UserPrivateParamApplicationService {
         return refreshPrivateParamCacheNow(userId, userCode, sequenceService.nextVal());
     }
 
-    /** Writes the current database snapshot unless Redis already contains a newer state version. */
+    /** Fully replaces Redis with the current database snapshot. */
     public boolean refreshPrivateParamCacheNow(Long userId, String userCode, Long stateVersion) {
         if (stateVersion == null || stateVersion <= 0) {
             throw new IllegalArgumentException("Cache state version must be positive");
@@ -478,13 +464,8 @@ public class UserPrivateParamApplicationService {
             Map<String, String> activeParams = buildActiveParamMap(params);
             String redisKey = buildPrivateParamRedisKey(userCode);
             String payload = buildPrivateParamCacheJson(activeParams, stateVersion);
-            Long writeResult = stringRedisTemplate.execute(
-                VERSIONED_CACHE_WRITE_SCRIPT,
-                Collections.singletonList(redisKey),
-                String.valueOf(stateVersion),
-                payload
-            );
-            return writeResult != null;
+            stringRedisTemplate.opsForValue().set(redisKey, payload);
+            return true;
         }
         catch (Exception ex) {
             log.warn("同步用户个人参数配置到Redis失败，userId={}，userCode={}，reason={}", userId, userCode, ex.getMessage(), ex);
