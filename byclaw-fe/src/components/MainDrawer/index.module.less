@@ -42,7 +42,9 @@
 
   // 账号登录等覆盖式场景只叠加在页面右侧，不占用主布局宽度。
   &.overlay {
-    position: absolute;
+    // 覆盖式远程桌面需要脱离页面局部 stacking context，显示在连接器弹窗及其遮罩层之上。
+    position: fixed;
+    z-index: 1300;
     top: 8px;
     right: 8px;
     bottom: 8px;

@@ -512,7 +512,16 @@ export const handleTaskPlanSnapshot = (message: any) => {
 
   const currentVersion = Number(context.answerMsg.taskPlan?.version || 0);
   const nextVersion = Number(taskPlan.version || 0);
-  if (currentVersion >= nextVersion) return true;
+  const currentPlan = context.answerMsg.taskPlan;
+  if (currentPlan?.planId === taskPlan.planId && currentVersion >= nextVersion) return true;
+
+  // version is scoped to a plan. A new turn may start again at version 1.
+  // Only reject a different plan when its timestamp is explicitly older.
+  if (currentPlan?.planId && currentPlan.planId !== taskPlan.planId) {
+    const currentTime = Date.parse(`${currentPlan.updatedAt || currentPlan.createdAt || ''}`);
+    const nextTime = Date.parse(`${taskPlan.updatedAt || taskPlan.createdAt || ''}`);
+    if (Number.isFinite(currentTime) && Number.isFinite(nextTime) && nextTime < currentTime) return true;
+  }
 
   context.answerMsg.taskPlan = taskPlan;
   context.answerMsg.messageId = `${taskPlan.messageId}`;

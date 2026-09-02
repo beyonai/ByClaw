@@ -22,6 +22,7 @@ type LegacyPlanStep = {
 
 type LegacyPlanPayload = {
   planId?: string;
+  createdAt?: string;
   updatedAt?: string;
   task_description?: string;
   status?: string | number;
@@ -69,10 +70,21 @@ const parsePlanPayload = (substance: unknown): LegacyPlanPayload | undefined => 
   }
 };
 
+const parseTime = (value?: string | number): number | undefined => {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  const text = `${value}`;
+  const numeric = Number(text);
+  if (Number.isFinite(numeric)) return numeric;
+  const parsed = Date.parse(text);
+  if (Number.isFinite(parsed)) return parsed;
+  const normalized = Date.parse(text.replace(/-/g, '/'));
+  return Number.isFinite(normalized) ? normalized : undefined;
+};
+
 const updatedAtMillis = (plan: TaskPlanSnapshot | undefined): number | undefined => {
-  if (!plan?.updatedAt) return undefined;
-  const value = Date.parse(plan.updatedAt);
-  return Number.isNaN(value) ? undefined : value;
+  if (!plan) return undefined;
+  return parseTime(plan.updatedAt || plan.createdAt);
 };
 
 const selectMessagePlan = (
@@ -121,6 +133,7 @@ export const normalizeTaskPlanItem = (
     sessionId: `${message.sessionId || ''}`,
     messageId: `${message.messageId || message.msgId}`,
     tasks,
+    createdAt: payload.createdAt,
     updatedAt: payload.updatedAt,
   };
 };
@@ -131,9 +144,14 @@ export const selectLatestTaskPlan = (
   selectedSessionId?: string
 ): TaskPlanSnapshot | undefined => {
   let latest: TaskPlanSnapshot | undefined;
+  let latestMessageTime: number | undefined;
+  let latestMessageOrder = -1;
+  let messageOrder = 0;
   let version = 0;
 
   messages.forEach((message) => {
+    const currentMessageOrder = messageOrder;
+    messageOrder += 1;
     const messageSessionId = `${message.sessionId || ''}`;
     if (selectedSessionId && messageSessionId && messageSessionId !== `${selectedSessionId}`) return;
 
@@ -150,7 +168,21 @@ export const selectLatestTaskPlan = (
       (!selectedSessionId || !message.taskPlan.sessionId || `${message.taskPlan.sessionId}` === `${selectedSessionId}`)
         ? message.taskPlan
         : undefined;
-    latest = selectMessagePlan(reconnectBaseline, streamedPlan) || latest;
+    const messagePlan = selectMessagePlan(reconnectBaseline, streamedPlan);
+    if (!messagePlan) return;
+
+    // The answer message time identifies the conversation turn. Plan version
+    // is only meaningful inside one plan and must not decide between turns.
+    const messageTime = parseTime(message.createTime);
+    const isNewerMessage =
+      !latest ||
+      (messageTime !== undefined && (latestMessageTime === undefined || messageTime >= latestMessageTime)) ||
+      (messageTime === undefined && latestMessageTime === undefined && currentMessageOrder >= latestMessageOrder);
+    if (isNewerMessage) {
+      latest = messagePlan;
+      latestMessageTime = messageTime;
+      latestMessageOrder = currentMessageOrder;
+    }
   });
 
   return latest;
