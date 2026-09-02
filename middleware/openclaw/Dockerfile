@@ -267,6 +267,7 @@ RUN set -eux; \
 # venv.  The settings file is still mounted as an override so ByClaw can
 # customize engine whitelists/proxies without repackaging the wheel.
 COPY middleware/openclaw/searxng-cli/searxng_pack_settings.yml /opt/searxng-cli/searxng_pack_settings.yml
+COPY middleware/openclaw/searxng-cli-constraints.txt /tmp/searxng-cli-constraints.txt
 ENV SEARXNG_CLI_SETTINGS=/opt/searxng-cli/searxng_pack_settings.yml
 
 RUN set -eux; \
@@ -274,6 +275,7 @@ RUN set -eux; \
     /opt/searxng-cli-venv/bin/python -m pip install --no-cache-dir \
         --index-url https://pypi.tuna.tsinghua.edu.cn/simple \
         --extra-index-url https://pypi.org/simple \
+        --constraint /tmp/searxng-cli-constraints.txt \
         "searxng-cli==${SEARXNG_CLI_VERSION}"; \
     /opt/searxng-cli-venv/bin/python -c 'import searxng_cli, flask, httpx, lxml, msgspec, yaml'; \
     ln -sf /opt/searxng-cli-venv/bin/searxng-cli /usr/local/bin/searxng-cli; \
