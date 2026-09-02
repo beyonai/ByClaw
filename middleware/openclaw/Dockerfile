@@ -384,9 +384,6 @@ RUN ln -sf /usr/local/bin/bun /usr/local/bin/bunx
 ENV BUN_INSTALL=/usr/local \
     PATH="/usr/local/bin:$PATH"
 
-# add gbrain（官方原版）— BUN_INSTALL=/usr/local 使 gbrain 安装到 /usr/local/bin
-RUN bun install -g github:garrytan/gbrain
-
 # rm
 RUN rm -fr /root/.agents/skills
 
