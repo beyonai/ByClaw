@@ -9,6 +9,7 @@ import java.util.stream.Collectors;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.constants.Constants;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
+import com.iwhalecloud.byai.common.log.util.RequestContextUtil;
 import com.iwhalecloud.byai.gateway.sandbox.service.ingress.openclaw.OpenClawUiProxyPaths;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import org.apache.commons.lang3.StringUtils;
@@ -49,6 +50,7 @@ import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * 沙箱管理控制器
@@ -57,6 +59,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 @RestController
 @RequestMapping("/sandbox")
 @Tag(name = "沙箱管理", description = "提供沙箱心跳保活、状态查询等功能")
+@Slf4j
 public class SandboxController {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -248,20 +251,44 @@ public class SandboxController {
     @PostMapping("/browser/navigate")
     public ResponseUtil navigateBrowser(@RequestBody Map<String, Object> params) {
         String userCode = CurrentUserHolder.getCurrentUserCode();
+        String sandboxId = stringValue(params.get("sandboxId"));
+        String targetUrl = stringValue(params.get("targetUrl"));
+        String sessionKey = stringValue(params.get("sessionKey"));
+        Long requestId = RequestContextUtil.getRequestId();
+        log.info("[SandboxBrowser] stage=CONTROLLER_INGRESS requestId={} userCode={} sandboxId={} "
+                + "sessionKey={} target={}",
+            requestId, userCode, sandboxId, sessionKey, SandboxBrowserNavigationService.safeUri(targetUrl));
         if (StringUtils.isBlank(userCode)) {
+            log.warn("[SandboxBrowser] stage=CONTROLLER_REJECTED requestId={} reason=MISSING_USER "
+                    + "sandboxId={} sessionKey={} target={}",
+                requestId, sandboxId, sessionKey, SandboxBrowserNavigationService.safeUri(targetUrl));
             return ResponseUtil.fail(I18nUtil.get("sandbox.browser.user.required"));
         }
         try {
-            sandboxBrowserNavigationService.navigate(userCode,
-                params.get("sandboxId") == null ? null : params.get("sandboxId").toString(),
-                params.get("targetUrl") == null ? null : params.get("targetUrl").toString(),
-                params.get("sessionKey") == null ? null : params.get("sessionKey").toString());
+            sandboxBrowserNavigationService.navigate(userCode, sandboxId, targetUrl, sessionKey);
+            log.info("[SandboxBrowser] stage=CONTROLLER_SUCCESS requestId={} userCode={} sandboxId={} "
+                    + "sessionKey={}",
+                requestId, userCode, sandboxId, sessionKey);
             return ResponseUtil.successResponse();
         } catch (IllegalArgumentException exception) {
+            log.warn("[SandboxBrowser] stage=CONTROLLER_REJECTED requestId={} userCode={} sandboxId={} "
+                + "sessionKey={} target={} exceptionType={} error={}",
+                requestId, userCode, sandboxId, sessionKey, SandboxBrowserNavigationService.safeUri(targetUrl),
+                exception.getClass().getSimpleName(), SandboxBrowserNavigationService.safeLogValue(
+                    exception.getMessage()));
             return ResponseUtil.fail(I18nUtil.get("sandbox.browser.navigate.failed"));
         } catch (Exception exception) {
+            log.error("[SandboxBrowser] stage=CONTROLLER_FAILURE requestId={} userCode={} sandboxId={} "
+                    + "sessionKey={} target={} exceptionType={} error={} stackTrace={}",
+                requestId, userCode, sandboxId, sessionKey, SandboxBrowserNavigationService.safeUri(targetUrl),
+                exception.getClass().getSimpleName(), SandboxBrowserNavigationService.safeLogValue(
+                    exception.getMessage()), SandboxBrowserNavigationService.safeStackTrace(exception));
             return ResponseUtil.fail(I18nUtil.get("sandbox.browser.navigate.failed"));
         }
+    }
+
+    private String stringValue(Object value) {
+        return value == null ? null : value.toString();
     }
 
     /**

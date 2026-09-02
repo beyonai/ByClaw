@@ -50,7 +50,7 @@
                 ON a.project_id = b.project_id
         WHERE (
             <if test="defaultCount == null or defaultCount &lt; 2">
-                a.project_type = 'default' or
+               ( a.project_type = 'default' and a.project_id &lt; 0 ) or
             </if>
             a.project_id IN (SELECT project_id FROM byai_project_member WHERE user_id = #{createBy})
         )

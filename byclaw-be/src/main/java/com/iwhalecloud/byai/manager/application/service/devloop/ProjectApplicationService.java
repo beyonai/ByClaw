@@ -235,7 +235,7 @@ public class ProjectApplicationService {
             MemberRole.OWNER);
 
         // 创建云盘知识库并回写项目关联
-        SsResource cloudResource = this.createCloudResource(project);
+        SsResource cloudResource = this.createCloudResource(project, false);
         project.setCloudResourceId(cloudResource.getResourceId());
         projectService.update(project);
 
@@ -253,7 +253,7 @@ public class ProjectApplicationService {
      * @param project 项目实体
      * @return 新建的云盘知识库资源
      */
-    public SsResource createCloudResource(Project project) {
+    public SsResource createCloudResource(Project project, boolean isInitDirTemplate) {
         String projectName = project.getProjectName();
         DatasetDto datasetDto = new DatasetDto();
         datasetDto.setResourceName(I18nUtil.get("project.cloud.resource.name", projectName));
@@ -262,7 +262,9 @@ public class ProjectApplicationService {
         datasetDto.setResourceBizType("KG_CLOUD");
         datasetDto.setType("dataset");
         SsResource ssResource = datasetApplicationService.createDataset(datasetDto);
-        uploadKnowledgeDirTemplate(ssResource.getResourceId());
+        if (isInitDirTemplate) {
+            this.uploadKnowledgeDirTemplate(ssResource.getResourceId());
+        }
         return ssResource;
     }
 
@@ -339,7 +341,7 @@ public class ProjectApplicationService {
         //如果没有初始化云盘，创建云盘知识库
         Long cloudResourceId = project.getCloudResourceId();
         if (cloudResourceId == null) {
-            SsResource cloudResource = this.createCloudResource(project);
+            SsResource cloudResource = this.createCloudResource(project, false);
             project.setCloudResourceId(cloudResource.getResourceId());
         }
 
