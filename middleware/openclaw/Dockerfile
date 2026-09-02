@@ -99,6 +99,7 @@ ARG ZREAD_CLI_VERSION=0.2.13
 ARG IMA_OPENAPI_CLI_VERSION=0.1.3
 ARG IMA_OPENAPI_CLI_INTEGRITY=sha512-ckur/WWHugygFu130u/Zmn2IU9w7Ghc2cmPPxS6lFWvETSz7Rl3lqQGjMLmhSbTY2eCIR8DvqOzozOf5rWRbHg==
 ARG INSTALL_BROWSER_STACK=true
+ARG SEARXNG_CLI_VERSION=0.1.0
 
 RUN chown root:root /app
 
@@ -262,19 +263,28 @@ RUN set -eux; \
     ln -sf /usr/local/bin/websockify /usr/bin/websockify; \
     websockify --help >/dev/null
 
-COPY middleware/openclaw/searxng-cli/requirements.txt /tmp/searxng-cli-requirements.txt
-RUN python3 -m venv /opt/searxng-cli-venv \
-    && /opt/searxng-cli-venv/bin/python -m pip install --no-cache-dir \
-        --requirement /tmp/searxng-cli-requirements.txt \
-    && /opt/searxng-cli-venv/bin/python -c 'import flask, httpx, lxml, msgspec, typer, yaml'
+# searxng-cli is installed from the published PyPI wheel into an isolated
+# venv.  The settings file is still mounted as an override so ByClaw can
+# customize engine whitelists/proxies without repackaging the wheel.
+COPY middleware/openclaw/searxng-cli/searxng_pack_settings.yml /opt/searxng-cli/searxng_pack_settings.yml
+ENV SEARXNG_CLI_SETTINGS=/opt/searxng-cli/searxng_pack_settings.yml
 
-COPY middleware/openclaw/searxng-cli/ /opt/searxng-cli/
 RUN set -eux; \
-    printf '%s\n' '#!/bin/sh' \
-        'exec /opt/searxng-cli-venv/bin/python /opt/searxng-cli/searxng_cli.py "$@"' \
-        > /usr/local/bin/searxng-cli; \
-    chmod 755 /usr/local/bin/searxng-cli; \
-    searxng-cli --list-engines >/dev/null
+    python3 -m venv /opt/searxng-cli-venv; \
+    /opt/searxng-cli-venv/bin/python -m pip install --no-cache-dir \
+        --index-url https://pypi.tuna.tsinghua.edu.cn/simple \
+        --extra-index-url https://pypi.org/simple \
+        "searxng-cli==${SEARXNG_CLI_VERSION}"; \
+    /opt/searxng-cli-venv/bin/python -c 'import searxng_cli, flask, httpx, lxml, msgspec, yaml'; \
+    ln -sf /opt/searxng-cli-venv/bin/searxng-cli /usr/local/bin/searxng-cli; \
+    mkdir -p /opt/searxng-cli; \
+    printf '%s\n' \
+        '#!/usr/bin/env python3' \
+        'from searxng_cli.cli import main' \
+        'raise SystemExit(main())' \
+        > /opt/searxng-cli/searxng_cli.py; \
+    chmod 755 /opt/searxng-cli/searxng_cli.py; \
+    searxng-cli --list-engines >/dev/null 2>&1
 
 COPY middleware/openclaw/verify-runtime-toolchain.sh /usr/local/bin/verify-runtime-toolchain
 RUN chmod +x /usr/local/bin/verify-runtime-toolchain \

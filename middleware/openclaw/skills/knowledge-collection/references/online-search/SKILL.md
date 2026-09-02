@@ -38,14 +38,14 @@ online-search/
 
 ## 运行
 
-OpenClaw 镜像在构建时已将 SearXNG 核心、锁定 Python 依赖和启动器安装为全局命令；无需在 skill 目录创建 venv。直接调用：
+OpenClaw 镜像在构建时通过 PyPI 包 `searxng-cli` 将 SearXNG 核心、Python 3.12 依赖和 console script 安装到独立 venv，并把命令链接为全局 `searxng-cli`；无需在 skill 目录创建 venv。直接调用：
 
 ```bash
 searxng-cli "查询词" [参数...]
 ```
 
-仅在运维或开发需要显式指定解释器时设置 `ONLINE_SEARCH_PYTHON`；镜像内默认使用
-`/opt/searxng-cli/searxng_cli.py`，本地开发可同时设置 `ONLINE_SEARCH_SCRIPT` 指向仓库中的入口脚本。
+仅在运维或开发需要显式指定解释器时设置 `ONLINE_SEARCH_PYTHON` 和 `ONLINE_SEARCH_SCRIPT`。
+镜像内默认命令是 `/usr/local/bin/searxng-cli`（Python 环境位于 `/opt/searxng-cli-venv`）。
 
 ## 参数
 
@@ -190,7 +190,7 @@ node references/hot_discovery/scripts/hot_discovery.mjs merge \
 
 - **默认直连，内置白名单**：上游引擎请求直连互联网，默认按类别使用 120 个实测直连可用引擎（配置见 `/opt/searxng-cli/searxng_pack_settings.yml` 的 `cli.default_engines` 段）；海外引擎（google、duckduckgo、wikipedia、brave 等）在无代理环境会超时/被拒，属预期行为，其余引擎自动降级不影响结果
 - **可选代理**：如需访问被墙的海外引擎，在构建镜像前修改 `middleware/openclaw/searxng-cli/searxng_pack_settings.yml`，在 `outgoing:` 下加入 `proxies: {all://: [http://127.0.0.1:7890]}` 后重新构建；SearXNG 使用自定义网络层，**不读取系统环境变量代理**
-- **运行环境**：镜像构建时安装 Python 3.12 依赖到独立 venv；运行时只需 `searxng-cli`
+- **运行环境**：镜像构建时从 PyPI 安装 `searxng-cli` 到 `/opt/searxng-cli-venv`，并把 console script 链接到 `/usr/local/bin/searxng-cli`；运行时只需 `searxng-cli`
 - 本 CLI 不启动 Flask 服务、不监听端口、不写缓存（valkey/redis 已禁用为内存模式）
 - 首次启动约 1.5s（加载全部引擎）；搜索本身耗时见 `elapsed_sec`，上限受 `--timeout` 约束
 
