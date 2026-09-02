@@ -209,6 +209,12 @@ await (async () => {
   assert.match(publicDiscoverHelp.json.args['--requested-count'], /可用文章候选不足.*hot-discovery/);
   assert.match(publicDiscoverHelp.json.args['--timeout'], /online-search 与 hot-discovery/);
 
+  const publicCollectHelp = await runCli(['public-collect', '--help']);
+  assert.equal(publicCollectHelp.code, 0);
+  assert.match(publicCollectHelp.json.title, /指定数量/);
+  assert.match(publicCollectHelp.json.args['--fallback-query'], /第二轮/);
+  assert.match(publicCollectHelp.json.args['--resume'], /--skip/);
+
   const wechatMaterializeHelp = await runCli(['materialize-wechat', '--help']);
   assert.equal(wechatMaterializeHelp.code, 0);
   assert.equal(wechatMaterializeHelp.json.command, 'materialize-wechat');
@@ -256,6 +262,8 @@ await (async () => {
   assert.equal(schema.json.commands.status.properties['session-root'].format, 'absolute-path');
   assert.equal(schema.json.commands.collect.properties['item-json-file'].format, 'collection-input-file');
   assert.deepEqual(schema.json.commands.publish.required, ['session-dir', 'delivery-dir']);
+  assert.equal(schema.json.commands['public-collect'].properties['requested-count'].maximum, 20);
+  assert.equal(schema.json.commands['public-collect'].oneOf.length, 3);
   assert.equal(schema.json.commands.publish.properties['session-dir'].format, 'sandbox-path');
   assert.equal(schema.json.commands.publish.properties['delivery-dir'].format, 'sandbox-path');
   assert.equal(schema.json.commands.publish.properties['session-root'].format, 'absolute-path');
@@ -511,7 +519,8 @@ await (async () => {
   assert.equal(defaultScope.json.task.materializationTarget, 'selected');
   assert.equal(defaultScope.json.task.requiredContentGranularity, 'any');
   assert.equal(defaultScope.json.task.discoveryGate.attemptCount, 0);
-  assert.equal(defaultScope.json.task.discoveryGate.schemaVersion, '1.1');
+  assert.equal(defaultScope.json.task.discoveryGate.schemaVersion, '2.0');
+  assert.deepEqual(defaultScope.json.task.discoveryGate.observations, []);
   assert.equal(defaultScope.json.task.discoveryGate.topicContract.required, false);
   assert.equal(defaultScope.json.task.discoveryGate.topicContract.normalizedSubject, '公开资料');
   assert.deepEqual(defaultScope.json.task.discoveryGate.candidates, []);

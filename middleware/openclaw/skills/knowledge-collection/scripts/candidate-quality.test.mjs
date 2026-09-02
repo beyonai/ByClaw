@@ -10,63 +10,83 @@ import {
 } from './candidate-quality.mjs';
 import { createTopicContract } from './topic-relevance.mjs';
 
+function compatibilityShape(result) {
+  return { pageType: result.pageType, reasons: result.reasons };
+}
+
 test('classifies explicit account and login pages as reject', () => {
   assert.deepEqual(
-    classifyCandidate({
+    compatibilityShape(classifyCandidate({
       url: 'https://user.mihoyo.com/login',
       title: '米哈游通行证登录',
       content: '登录账号',
-    }),
+    })),
     { pageType: 'reject', reasons: ['login-or-account-url', 'login-or-account-title'] },
   );
 });
 
+test('malformed percent escapes cannot crash deterministic classification', () => {
+  assert.doesNotThrow(() => classifyCandidate({
+    url: 'https://example.com/%E0%A4%A',
+    title: 'Malformed URL article',
+    content: 'A descriptive article passage with useful structural evidence.',
+  }));
+});
+
+test('negated login wording in an article title is not an exact login page', () => {
+  assert.notEqual(classifyCandidate({
+    url: 'https://example.com/article/reading-guide',
+    title: '无需登录即可阅读：DeepSeek 工程指南',
+    content: '这是一篇包含完整工程背景与实现说明的文章摘要。',
+  }).pageType, 'reject');
+});
+
 test('classifies root and company introduction pages as weak', () => {
   assert.deepEqual(
-    classifyCandidate({ url: 'https://www.mihoyo.com/', title: '米哈游', content: '公司官网' }),
+    compatibilityShape(classifyCandidate({ url: 'https://www.mihoyo.com/', title: '米哈游', content: '公司官网' })),
     { pageType: 'weak', reasons: ['root-or-home-page'] },
   );
   assert.deepEqual(
-    classifyCandidate({ url: 'https://www.mihoyo.com/company/about', title: '公司介绍' }),
+    compatibilityShape(classifyCandidate({ url: 'https://www.mihoyo.com/company/about', title: '公司介绍' })),
     { pageType: 'weak', reasons: ['ambiguous-detail-page'] },
   );
 });
 
 test('classifies article-shaped reports as article', () => {
   assert.deepEqual(
-    classifyCandidate({
+    compatibilityShape(classifyCandidate({
       url: 'https://example.com/news/2026/mihoyo-report',
       title: '米哈游的新一轮探索：深度报道',
       content: '记者采访了公司团队。',
-    }),
+    })),
     { pageType: 'article', reasons: ['detail-url', 'article-content-signal'] },
   );
   assert.deepEqual(
-    classifyCandidate({
+    compatibilityShape(classifyCandidate({
       url: 'https://mp.weixin.qq.com/s/fixture',
       title: '米哈游营收观察',
       content: '',
-    }),
+    })),
     { pageType: 'article', reasons: ['trusted-article-url', 'article-content-signal'] },
   );
 });
 
 test('treats a trusted WeChat detail URL as an article without keyword-dependent titles', () => {
   assert.deepEqual(
-    classifyCandidate({
+    compatibilityShape(classifyCandidate({
       url: 'https://mp.weixin.qq.com/s/opaque-token',
       title: '在上海重新出发',
-    }),
+    })),
     { pageType: 'article', reasons: ['trusted-article-url'] },
   );
 });
 
 test('treats a strict Sogou WeChat article redirect as an article', () => {
   assert.deepEqual(
-    classifyCandidate({
+    compatibilityShape(classifyCandidate({
       url: 'https://weixin.sogou.com/link?url=opaque-article-token',
       title: '外国玩家眼中的「米哈游发家史」',
-    }),
+    })),
     { pageType: 'article', reasons: ['trusted-wechat-redirect-url'] },
   );
   assert.equal(classifyCandidate({
@@ -85,23 +105,23 @@ test('treats a strict Sogou WeChat article redirect as an article', () => {
 
 test('recognizes Nature and arXiv publication detail URLs without language-specific title keywords', () => {
   assert.deepEqual(
-    classifyCandidate({
+    compatibilityShape(classifyCandidate({
       url: 'https://www.nature.com/articles/s41586-025-09422-z',
       title: 'DeepSeek-R1 incentivizes reasoning in LLMs through reinforcement learning',
-    }),
+    })),
     { pageType: 'article', reasons: ['trusted-publication-url'] },
   );
   assert.deepEqual(
-    classifyCandidate({
+    compatibilityShape(classifyCandidate({
       url: 'https://arxiv.org/abs/2501.12948',
       title: 'DeepSeek-R1: Incentivizing Reasoning Capability in LLMs',
-    }),
+    })),
     { pageType: 'article', reasons: ['trusted-publication-url'] },
   );
 });
 
 test('promotes bounded structural detail routes only with article evidence', () => {
-  const articleContext = '这是一段超过二十个可见字符的详情摘要，用于确认候选页面承载的是独立正文内容。';
+  const articleContext = '这是一段用于确认候选页面承载独立正文内容的有效详情摘要。'.repeat(5);
   const fixtures = [
     'https://example.com/1234567',
     'https://example.com/a1b2c3d4',
@@ -128,7 +148,7 @@ test('promotes bounded structural detail routes only with article evidence', () 
 test('keeps undersized IDs, generic titles, index files, and channel routes weak', () => {
   const longContext = '这是一段超过二十个可见字符的摘要，但路径或标题仍不足以证明它是独立文章详情页面。';
   const fixtures = [
-    { url: 'https://example.com/123456', title: 'Example 公司动态' },
+    { url: 'https://example.com/1234', title: 'Example 公司动态' },
     { url: 'https://example.com/a1b2c3d', title: 'Example 公司动态' },
     { url: 'https://example.com/c/a1b2c3d', title: 'Example 公司动态' },
     { url: 'https://example.com/index.html', title: 'Example 公司动态' },
@@ -152,7 +172,7 @@ test('requires article text, twenty visible context characters, or publication m
   assert.equal(classifyCandidate({ ...base, content: '记者发布了最新报道' }).pageType, 'article');
   assert.equal(classifyCandidate({
     ...base,
-    titleContext: '一二三四五六七八九十一二三四五六七八九十',
+    titleContext: '这是一段用于判断详情页的上下文。'.repeat(8),
   }).pageType, 'article');
 });
 
@@ -169,13 +189,73 @@ test('reject precedence prevents login and search pages from being promoted by a
     url: 'https://example.com/login?next=/news/report',
     title: '登录后阅读报道',
   }).pageType, 'reject');
-  assert.deepEqual(classifyCandidate({
+  assert.deepEqual(compatibilityShape(classifyCandidate({
     url: 'https://example.com/search?q=米哈游',
     title: '米哈游报道搜索结果',
-  }), {
+  })), {
     pageType: 'reject',
-    reasons: ['search-or-listing-url', 'search-or-listing-title'],
+    reasons: ['search-or-listing-url'],
   });
+});
+
+test('summary login shell text warns but cannot reject an article-shaped WSA candidate', () => {
+  const result = classifyCandidate({
+    url: 'https://news.example.com/a/1062887467_362225',
+    title: 'DeepSeek Harness 深度解析',
+    passage: `登录 注册 ${'本文分析 DeepSeek Harness 的架构、运行机制与工程实践。'.repeat(8)}`,
+    provider: 'tencent-wsa',
+    evidenceLevel: 'search-summary',
+  });
+
+  assert.equal(result.discoveryDisposition, 'probe');
+  assert.equal(result.probePriority, 'high');
+  assert.equal(result.pageType, 'article');
+  assert.equal(result.verificationRequired, true);
+  assert.ok(result.warnings.includes('login-shell-text'));
+  assert.equal(result.reasons.includes('login-or-account-title'), false);
+});
+
+test('generic detail routes and stable query IDs produce explainable probe evidence', () => {
+  const candidates = [
+    {
+      url: 'https://example.com/commonDetail/759632',
+      title: 'DeepSeek Harness 工程实践',
+      passage: '本文完整介绍系统设计、执行流程、状态管理以及落地经验。'.repeat(5),
+    },
+    {
+      url: 'https://example.com/content/detail.php?pk=759632',
+      title: 'DeepSeek Harness 工程实践',
+      publishedAt: '2026-09-01',
+    },
+  ];
+  for (const candidate of candidates) {
+    const result = classifyCandidate(candidate);
+    assert.equal(result.discoveryDisposition, 'probe', candidate.url);
+    assert.equal(result.probePriority, 'high', candidate.url);
+    assert.ok(result.evidence.length > 0, candidate.url);
+    assert.equal(result.classifierRuleVersion, '2.0');
+  }
+});
+
+test('topic unknown is normal-tail while topic unmatched is not probe-authorized', () => {
+  const contract = createTopicContract('采集一篇关于 DeepSeek Harness 的文章');
+  const unknown = classifyCandidates([{
+    url: 'https://example.com/',
+  }], contract).candidates[0];
+  assert.equal(unknown.topicRelevance.status, 'unknown');
+  assert.equal(unknown.discoveryDisposition, 'probe');
+  assert.equal(unknown.probePriority, 'normal');
+  assert.ok(unknown.pageTypeWarnings.includes('topic-unverified'));
+
+  const unmatched = classifyCandidates([{
+    url: 'https://example.com/commonDetail/759632',
+    title: '米哈游游戏业务工程实践',
+    passage: '本文讨论米哈游游戏业务、产品发布、玩家社区和商业化运营。'.repeat(6),
+  }], contract).candidates[0];
+  assert.equal(unmatched.topicRelevance.status, 'unmatched');
+  assert.equal(unmatched.discoveryDisposition, 'reject');
+  assert.equal(unmatched.probePriority, null);
+  assert.ok(unmatched.pageTypeReasons.includes('topic-unmatched'));
 });
 
 test('counts normalized article URLs without collapsing different same-host paths', () => {

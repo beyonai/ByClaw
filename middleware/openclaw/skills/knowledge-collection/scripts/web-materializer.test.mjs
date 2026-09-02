@@ -151,7 +151,7 @@ test('materializes controlled web output with duplicated safe assets and registe
   }
 });
 
-test('materializes and collects a complete discovered weak candidate without promoting discovery', async () => {
+test('materializes a discovery candidate while keeping body verification separate from discovery evidence', async () => {
   const f = await fixture(completeArticle(), { discoveryPageType: 'weak' });
   try {
     const result = await runWebMaterialize(f.paths, {
@@ -164,8 +164,9 @@ test('materializes and collects a complete discovered weak candidate without pro
     const status = collectionStatus(f.paths);
     assert.equal(status.deliveryComplete, true, JSON.stringify(status, null, 2));
     const session = JSON.parse(await readFile(join(f.root, 'session.json'), 'utf8'));
-    assert.equal(session.task.discoveryGate.runs[0].articleCandidateIds.length, 0);
-    assert.equal(session.task.discoveryGate.candidates[0].pageType, 'weak');
+    assert.equal(session.task.discoveryGate.candidates[0].discoveryDisposition, 'probe');
+    assert.equal(session.task.discoveryGate.candidates[0].verificationRequired, true);
+    assert.equal(Object.hasOwn(session.task.discoveryGate.candidates[0], 'verifiedBody'), false);
   } finally {
     await rm(f.root, { recursive: true, force: true });
   }
