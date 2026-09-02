@@ -135,6 +135,7 @@ class RunningChatSnapshotServiceTest {
         message.setSessionId(20L);
         message.setMessageId(21L);
         message.setMessageContent("latest child output");
+        message.setMetadata("{\"child_run_id\":\"worker-child-1:2\",\"child_turn\":2}");
 
         service.saveExternalChild(message, "123-4", false);
 
@@ -146,6 +147,8 @@ class RunningChatSnapshotServiceTest {
         assertThat(snapshot.getSnapshotStreamId()).isEqualTo("123-4");
         assertThat(snapshot.getRunning()).isTrue();
         assertThat(snapshot.getMsgStatus()).isEqualTo(MsgStatus.APPEND.getCode());
+        assertThat(snapshot.getChildRunId()).isEqualTo("worker-child-1:2");
+        assertThat(snapshot.getChildTurn()).isEqualTo(2L);
     }
 
     @Test
