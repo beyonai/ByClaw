@@ -278,6 +278,7 @@
   :global {
     .@{antPrefix}-tree-treenode {
       width: 100%;
+      align-items: center;
     }
 
     .@{antPrefix}-tree-title {
@@ -297,6 +298,16 @@
 
     .@{antPrefix}-tree-switcher {
       width: 18px;
+      align-self: center;
+    }
+
+    .@{antPrefix}-tree-iconEle {
+      align-self: center;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+      transform: translateY(-4px);
     }
 
     .@{antPrefix}-tree-node-content-wrapper {
@@ -347,6 +358,40 @@
   font-size: 26px;
 }
 
+// 过程文件隐藏元信息后，单行标题的图标与名称保持垂直居中。
+.fileTreeNoMeta {
+  .treeTitleName {
+    flex-direction: row;
+    align-items: center;
+  }
+
+  :global {
+    .@{antPrefix}-tree-treenode {
+      align-items: center;
+    }
+
+    .@{antPrefix}-tree-switcher,
+    .@{antPrefix}-tree-iconEle {
+      align-self: center;
+    }
+
+    .@{antPrefix}-tree-iconEle {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      height: 22px;
+      line-height: 1;
+      vertical-align: middle;
+    }
+
+    .@{antPrefix}-tree-node-content-wrapper {
+      display: flex;
+      align-items: center;
+      line-height: 22px;
+    }
+  }
+}
+
 .treeTitleContent {
   position: relative;
   display: inline-flex;
@@ -361,6 +406,10 @@
   &:hover {
     .treeActionTrigger {
       opacity: 1;
+    }
+
+    .treeTitleName {
+      padding-right: 32px;
     }
   }
 }
@@ -405,6 +454,7 @@
   flex: 1 1 auto;
   min-width: 0;
   max-width: 100%;
+  box-sizing: border-box;
   overflow: hidden;
 }
 
@@ -450,6 +500,9 @@
 }
 
 .filePathTooltipOverlay {
+  margin-left: -40px !important;
+  transform: translateX(-40px) !important;
+
   :global {
     .@{antPrefix}-popover-inner {
       max-width: 340px;
@@ -962,12 +1015,15 @@
   // 文件树操作按钮固定在当前行最右侧，避免跟随文件名长度移动。
   position: absolute;
   top: 50%;
-  right: 2px;
+  right: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: transparent;
+  box-shadow: none;
   transform: translateY(-50%);
   opacity: 0;
   z-index: 2;

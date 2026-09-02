@@ -30,6 +30,7 @@ interface FileTreeListProps {
   emptyText: React.ReactNode;
   // 项目资源等只读场景复用文件树时关闭三点操作，文件模块默认仍展示。
   showActions?: boolean;
+  showItemMeta?: boolean;
   onExpand: (keys: Key[]) => void;
   onLoadData: (node: FileTreeItem) => Promise<void>;
   onNodeClick: (event: React.MouseEvent, node: FileTreeItem) => void;
@@ -48,6 +49,7 @@ export const FilePathTooltip: React.FC<{ item: FileBrowserItem; children: React.
   return (
     <Popover
       placement="right"
+      align={{ offset: [50, 0] }}
       trigger="hover"
       overlayClassName={styles.filePathTooltipOverlay}
       content={
@@ -126,6 +128,7 @@ const FileTreeList: React.FC<FileTreeListProps> = ({
   loading,
   emptyText,
   showActions = true,
+  showItemMeta = true,
   onExpand,
   onLoadData,
   onNodeClick,
@@ -170,11 +173,19 @@ const FileTreeList: React.FC<FileTreeListProps> = ({
                   </FilePathTooltip>
                 );
               }}
-              className={`${commonStyles.tree} ${styles.fileTree}`}
+              className={`${commonStyles.tree} ${styles.fileTree} ${!showItemMeta ? styles.fileTreeNoMeta : ''}`}
               onClick={onNodeClick as any}
               onDoubleClick={(_, node) => onNodeDoubleClick(node as unknown as FileTreeItem)}
               titleRender={(item) => {
                 const treeItem = item as FileTreeItem;
+                const hasItemMeta =
+                  showItemMeta &&
+                  Boolean(
+                    (item as any).updatedAt ||
+                      (item as any).lastModified ||
+                      (item as any).createStaffName ||
+                      (item as any).size
+                  );
                 const previewable = canPreviewFile(treeItem);
                 const directoryExpanded =
                   isDirectory(treeItem) &&
@@ -201,7 +212,7 @@ const FileTreeList: React.FC<FileTreeListProps> = ({
                           .join(' ')}
                       >
                         <span className={styles.treeTitleText}>{item.name}</span>
-                        {(item as any).updatedAt || (item as any).createStaffName || (item as any).size ? (
+                        {hasItemMeta ? (
                           <span className={styles.treeTitleMeta}>
                             {!isDirectory(item) && (
                               <>
@@ -209,7 +220,9 @@ const FileTreeList: React.FC<FileTreeListProps> = ({
                                 <span>·</span>
                               </>
                             )}
-                            {(item as any).updatedAt && <span>{formatFileUpdatedAt((item as any).updatedAt)}</span>}
+                            {((item as any).updatedAt || (item as any).lastModified) && (
+                              <span>{formatFileUpdatedAt((item as any).updatedAt || (item as any).lastModified)}</span>
+                            )}
                             <span className={styles.treeTitleMetaPerson}>{(item as any).createStaffName || '-'}</span>
                           </span>
                         ) : null}

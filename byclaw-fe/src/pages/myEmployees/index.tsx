@@ -7,7 +7,7 @@ import dayjs from 'dayjs';
 import ResourceCard from '@/components/Resources/components/ResourceCard';
 import { getAgentChatAvatar, agentHandler } from '@/utils/agent';
 import { IAgentCache } from '@/typescript/agent';
-import { queryManagedEnterpriseEmployees, queryMyCreated } from '@/service/digitalEmployees';
+import { deleteDigitalEmployee, queryManagedEnterpriseEmployees, queryMyCreated } from '@/service/digitalEmployees';
 import {
   approveUseApply,
   applyResourceUse,
@@ -17,6 +17,7 @@ import {
 } from '@/pages/manager/service/resources';
 import styles from './index.module.less';
 import { EmployeePreviewModal } from '@/pages/digitalEmployees';
+import AuthListDrawer from '@/pages/manager/components/AuthListDrawer';
 
 type OwnerTab = 'personal' | 'enterprise' | 'audit';
 type ResourceFilter = 'all' | 'employee' | 'group';
@@ -64,6 +65,9 @@ const MyEmployeesPage: React.FC = () => {
   const [auditFilter, setAuditFilter] = useState<AuditFilter>('pending');
   const [actionKey, setActionKey] = useState('');
   const [preview, setPreview] = useState<IAgentCache | null>(null);
+  const [authDrawerOpen, setAuthDrawerOpen] = useState(false);
+  const [authRecord, setAuthRecord] = useState<IAgentCache | null>(null);
+  const [authType, setAuthType] = useState<'useAuth' | 'mgrAuth'>('useAuth');
 
   const agentType = resourceFilter === 'group' ? '017' : undefined;
 
@@ -241,6 +245,43 @@ const MyEmployeesPage: React.FC = () => {
     [loadEmployees]
   );
 
+  const handleEdit = useCallback(
+    (employee: IAgentCache) => {
+      const resourceId = employee.resourceId ?? employee.id ?? employee.agentId;
+      if (!resourceId) return;
+      sessionStorage.setItem('EmployeeDetail_prevRoute', `${window.location.pathname}${window.location.search}`);
+      navigate(
+        `/digitalEmployeesCreate?${new URLSearchParams({
+          digitalType: employee.createType || 'FROM_MANUALLY',
+          appId: `${resourceId}`,
+          tab: activeTab,
+        }).toString()}`
+      );
+    },
+    [activeTab, navigate]
+  );
+
+  const handleAuth = useCallback((employee: IAgentCache, type: 'useAuth' | 'mgrAuth') => {
+    setAuthRecord(employee);
+    setAuthType(type);
+    setAuthDrawerOpen(true);
+  }, []);
+
+  const handleDelete = useCallback(
+    async (employee: IAgentCache) => {
+      const resourceId = employee.resourceId ?? employee.id;
+      if (!resourceId) return;
+      try {
+        await deleteDigitalEmployee({ resourceId: String(resourceId) });
+        message.success('注销成功');
+        await loadEmployees();
+      } catch (error: any) {
+        message.error(error?.message || '注销失败');
+      }
+    },
+    [loadEmployees]
+  );
+
   const auditColumns: ColumnsType<AuditRow> = [
     {
       title: '数字员工名称',
@@ -374,6 +415,9 @@ const MyEmployeesPage: React.FC = () => {
                       scene: activeTab,
                       onChat: () => handleChat(employee),
                       onApplyUse: () => handleApplyUse(employee),
+                      onEdit: () => handleEdit(employee),
+                      onAuth: (type) => handleAuth(employee, type),
+                      onDelete: () => handleDelete(employee),
                     }}
                   />
                 ))}
@@ -427,6 +471,29 @@ const MyEmployeesPage: React.FC = () => {
           handleChat(employee, question);
         }}
       />
+      {authDrawerOpen && authRecord && (
+        <AuthListDrawer
+          authType={authType}
+          record={authRecord}
+          authApiPath={`/byaiService/auth/privilegeGrant/${
+            authType === 'useAuth' ? 'setResourceUsers' : 'setResourceManagers'
+          }`}
+          onCancel={() => {
+            setAuthDrawerOpen(false);
+            setAuthRecord(null);
+          }}
+          onSuccess={() => {
+            setAuthDrawerOpen(false);
+            setAuthRecord(null);
+            loadEmployees();
+          }}
+          headerInfo={{
+            title: authRecord.resourceName || authRecord.name,
+            content: authRecord.resourceDesc,
+            icon: <div className={styles.avatar}>{getAgentChatAvatar(authRecord.chatAvatar)}</div>,
+          }}
+        />
+      )}
     </div>
   );
 };

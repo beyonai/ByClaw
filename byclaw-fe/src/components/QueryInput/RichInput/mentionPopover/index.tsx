@@ -204,12 +204,13 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
   }, [type, currentAgent]);
 
   const trigger = useMemo(() => {
+    const isBottomPlacement = `${placement || ''}`.startsWith('bottom');
     return (
       children || (
         <div
           style={{
             position: 'absolute',
-            bottom: 0,
+            ...(isBottomPlacement ? { bottom: 0 } : { top: 0 }),
             left: 0,
             width: '100%',
             height: 1,
@@ -218,7 +219,7 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
         />
       )
     );
-  }, [children]);
+  }, [children, placement]);
 
   return (
     <Popover
@@ -228,7 +229,9 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
       // 连接器授权等子弹窗通过 Portal 打开时，资源面板仍需保持挂载，返回后继续保留当前分类和列表状态。
       destroyOnHidden={false}
       placement={placement || (isAtPopover ? 'topLeft' : undefined)}
-      autoAdjustOverflow
+      // 位置由输入框所在区域统一决定：历史会话固定显示在输入框上方，新会话固定显示在下方。
+      // 禁止 antd 根据可视区域自动翻转，否则历史会话可能被错误翻到输入框下方并遮挡输入框。
+      autoAdjustOverflow={false}
       ref={popoverRef}
       arrow={false}
       onOpenChange={(v) => {

@@ -660,6 +660,12 @@ const ConnectorControl = ({
               item.id === connector.id ? { ...item, enableFlag: null, credentialExpiresAt: undefined } : item
             )
           );
+          // 同步聊天框外部入口的已选连接器，撤销授权后立即移除对应图标。
+          window.dispatchEvent(
+            new CustomEvent(CONNECTOR_STATE_CHANGED_EVENT, {
+              detail: { connectorId: connector.id, enableFlag: null },
+            })
+          );
           message.success(`${connector.name}授权已取消`);
           await loadAuthorizedConnectors();
         } catch {
@@ -870,8 +876,8 @@ const ConnectorControl = ({
           <Dropdown
             menu={{
               items: [
-                { key: 'reauthorize', icon: <ReloadOutlined />, label: '重新连接' },
-                ...(!inline ? [{ key: 'revoke', danger: true, icon: <DisconnectOutlined />, label: '取消授权' }] : []),
+                { key: 'reauthorize', icon: <ReloadOutlined />, label: '重新授权' },
+                { key: 'revoke', danger: true, icon: <DisconnectOutlined />, label: '取消授权' },
               ],
               onClick: ({ key }) => {
                 if (key === 'reauthorize') void beginAuthorization(connector);
@@ -981,19 +987,23 @@ const ConnectorControl = ({
           <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="登录后即可使用连接器" />
         ) : (
           <div className={classNames(styles.connectorList, styles.connectorListInline)}>
-            {loadingConnectors && <span>正在加载连接器…</span>}
-            {connectors.length
-              ? connectors.map((connector) => renderConnectorItem(connector))
-              : !loadingConnectors && (
-                <Empty
-                  image={Empty.PRESENTED_IMAGE_SIMPLE}
-                  description={
-                    <Button type="link" onClick={openSettings}>
-                      管理连接器
-                    </Button>
-                  }
-                />
-              )}
+            {loadingConnectors ? (
+              <div className={styles.connectorLoading}>
+                <Spin size="small" />
+                <span>正在加载连接器…</span>
+              </div>
+            ) : connectors.length ? (
+              connectors.map((connector) => renderConnectorItem(connector))
+            ) : (
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description={
+                  <Button type="link" onClick={openSettings}>
+                    管理连接器
+                  </Button>
+                }
+              />
+            )}
             <Button type="link" className={styles.viewAllInlineButton} onClick={openAllConnectors}>
               查看全部连接器
             </Button>

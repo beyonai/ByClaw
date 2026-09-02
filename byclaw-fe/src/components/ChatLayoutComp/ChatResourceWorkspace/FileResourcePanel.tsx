@@ -31,7 +31,6 @@ import {
   listProjectRepos,
   type DevloopProjectRepo,
   renameProjectSpaceFile,
-  saveProjectFileToSpace,
 } from '@/service/devloop';
 import {
   deleteFiles,
@@ -61,6 +60,7 @@ import { useInfiniteScroll } from '@/pages/projectSpace/hooks/useInfiniteScroll'
 import { filterSessionRootItems } from './sessionResourceUtils';
 import styles from './index.module.less';
 import { queryProjectCloudDrive } from '@/components/ProjectCloudDrive';
+import { useChatResourceProject } from './useChatResourceProject';
 
 type ProjectFileItem = FileBrowserItem & {
   fileId: number;
@@ -75,6 +75,9 @@ interface FileResourcePanelProps {
   sessionId: string;
   projectId?: number;
   project?: ProjectSpace;
+
+  /** 过程文件保存到项目云盘时使用的目标知识库 ID。 */
+  projectCloudResourceId?: string | number;
   resourceId?: string;
   refreshKey?: number;
   onOpenDetail: (panel: React.ReactNode, options: DetailPanelOptions) => void;
@@ -94,6 +97,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   sessionId,
   projectId: projectIdProp,
   project,
+  projectCloudResourceId: projectCloudResourceIdProp,
   resourceId,
   refreshKey = 0,
   onOpenDetail,
@@ -103,6 +107,8 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
 }) => {
   const intl = useIntl();
   const language = getLocale();
+  const { project: loadedProject } = useChatResourceProject(!project && projectIdProp ? projectIdProp : undefined);
+  const resolvedProject = project || loadedProject;
   const { EventEmitter } = useGlobal();
   const userInfo = useSelector((state: any) => state.user.userInfo);
   const [items, setItems] = useState<FileBrowserItem[]>([]);
@@ -124,11 +130,24 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   const [moving, setMoving] = useState(false);
   const [moveTreeData, setMoveTreeData] = useState<any[]>([]);
   const [moveTreeLoading, setMoveTreeLoading] = useState(false);
+  const [saveProjectTarget, setSaveProjectTarget] = useState<FileBrowserItem | null>(null);
+  const [saveProjectTargetPath, setSaveProjectTargetPath] = useState('/');
+  const [saveProjectTreeData, setSaveProjectTreeData] = useState<any[]>([]);
+  const [saveProjectExpandedKeys, setSaveProjectExpandedKeys] = useState<Key[]>(['/']);
+  const [saveProjectTreeLoading, setSaveProjectTreeLoading] = useState(false);
+  const [savingToProject, setSavingToProject] = useState(false);
   const [visibleProjectItemCount, setVisibleProjectItemCount] = useState(20);
   const clickTimerRef = useRef<number | null>(null);
   // 项目详情异步加载期间也使用外部项目 ID，确保首次会话文件请求即可过滤仓库目录。
-  const projectId = projectIdProp ?? Number(project?.projectId);
-  const isLocalSharedFiles = scope === 'project' && Number(project?.projectId ?? projectId) === -1;
+  const projectId = projectIdProp ?? Number(resolvedProject?.projectId);
+  const projectCloudResourceId =
+    projectCloudResourceIdProp || resolvedProject?.cloudResourceId || resolvedProject?.resourceId;
+  // 默认项目(-1)没有项目知识库时才使用 .shared 文件浏览接口；如果项目下拉已返回
+  // cloudResourceId，即使 projectId 仍是旧的 -1，也必须按项目云盘接口查询。
+  const isLocalSharedFiles =
+    scope === 'project' &&
+    Number(resolvedProject?.projectId ?? projectId) === -1 &&
+    !projectCloudResourceIdProp;
   const usesFileBrowser = scope === 'session' || isLocalSharedFiles;
   const rootPath =
     scope === 'project' && !isLocalSharedFiles
@@ -164,7 +183,9 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
       setItems([]);
       return;
     }
-    if (scope === 'project' && !projectId) {
+    // 项目云盘查询只依赖知识库 resourceId；新会话通过项目选择器进入时，projectId
+    // 可能尚未同步，但只要已有 cloudResourceId 就应允许加载云盘内容。
+    if (scope === 'project' && !projectId && !resourceId) {
       setItems([]);
       return;
     }
@@ -393,35 +414,64 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
     [intl, loadDirectory, loadRoot, projectId, resourceId, rootPath]
   );
 
+  const loadSaveProjectDirectories = useCallback(
+    async (path: string) => {
+      if (!projectCloudResourceId) return [];
+      const rows = await queryProjectCloudDrive(projectCloudResourceId, path, language);
+      return rows
+        .filter((item) => item.isDir)
+        .map((item) => ({ title: item.name, key: ensureDirectoryPath(item.path), isLeaf: false }));
+    },
+    [language, projectCloudResourceId]
+  );
+
   const saveToProject = useCallback(
     async (item: FileBrowserItem) => {
-      if (!projectId) return;
-      const messageKey = `chat-resource-save-${item.path}`;
-      message.loading({
-        key: messageKey,
-        content: intl.formatMessage({ id: 'projectSpace.detail.resource.savingToSpace' }),
-        duration: 0,
-      });
+      if (!projectCloudResourceId) {
+        message.error('项目云盘未初始化');
+        return;
+      }
+      setSaveProjectTarget(item);
+      setSaveProjectTargetPath('/');
+      setSaveProjectExpandedKeys(['/']);
+      setSaveProjectTreeLoading(true);
       try {
-        await saveProjectFileToSpace({
-          projectId,
-          sessionId: Number(sessionId),
-          filePath: item.path,
-          fileName: item.name,
-        });
-        message.success({
-          key: messageKey,
-          content: intl.formatMessage({ id: 'projectSpace.detail.resource.savedToSpace' }),
-        });
+        const children = await loadSaveProjectDirectories('/');
+        setSaveProjectTreeData([{ title: '根目录', key: '/', children, isLeaf: !children.length }]);
+        // 目录数据加载完成后再展开根节点，确保 rc-tree 能正确应用展开状态。
+        setSaveProjectExpandedKeys(['/']);
       } catch (error: any) {
-        message.error({
-          key: messageKey,
-          content: error?.message || intl.formatMessage({ id: 'projectSpace.detail.resource.saveToSpaceFailed' }),
-        });
+        setSaveProjectTreeData([{ title: '根目录', key: '/', isLeaf: true }]);
+        message.error(error?.message || '项目云盘目录加载失败');
+      } finally {
+        setSaveProjectTreeLoading(false);
       }
     },
-    [intl, projectId, sessionId]
+    [loadSaveProjectDirectories, projectCloudResourceId]
   );
+
+  const confirmSaveToProject = useCallback(async () => {
+    if (!saveProjectTarget || !resourceId || !projectCloudResourceId) return;
+    setSavingToProject(true);
+    try {
+      const response: any = await downloadFile(resourceId, saveProjectTarget.path);
+      const downloadedFile = response?.file instanceof Blob ? response.file : response;
+      if (!(downloadedFile instanceof Blob)) throw new Error('过程文件下载失败');
+      const formData = new FormData();
+      formData.append('resourceId', String(projectCloudResourceId));
+      formData.append('directoryPath', ensureDirectoryPath(saveProjectTargetPath));
+      formData.append('files', downloadedFile, response?.fileName || saveProjectTarget.name);
+      await uploadKnowledgeFiles(formData, { responseCfg: { hideErrorTips: true } });
+      message.success('已保存到项目云盘');
+      setSaveProjectTarget(null);
+    } catch (error: any) {
+      const errorMessage =
+        error?.response?.data?.msg || error?.data?.msg || error?.msg || error?.message || `${error || ''}`;
+      message.error(errorMessage ? `保存到项目云盘失败：${errorMessage}` : '保存到项目云盘失败');
+    } finally {
+      setSavingToProject(false);
+    }
+  }, [projectCloudResourceId, resourceId, saveProjectTarget, saveProjectTargetPath]);
 
   const moveResource = useCallback(async () => {
     if (!moveTarget || !resourceId) return;
@@ -484,12 +534,13 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         'download',
         ...(resourceId && isDirectory(item) ? ['upload', 'createSibling', 'createChild'] : []),
         ...(scope === 'project' && !isLocalSharedFiles && resourceId ? ['move'] : []),
-        ...(usesFileBrowser || canManageProjectFiles ? ['rename', 'delete'] : []),
+        ...(usesFileBrowser || canManageProjectFiles ? ['rename'] : []),
         // 项目云盘的重命名和删除由知识库接口执行，菜单始终展示，最终权限由后端校验。
         ...(scope === 'project' && !isLocalSharedFiles && resourceId && !canManageProjectFiles
           ? ['rename', 'delete']
           : []),
         ...(scope === 'session' && !isDirectory(item) && projectId ? ['saveToProject'] : []),
+        ...(usesFileBrowser || canManageProjectFiles ? ['delete'] : []),
       ];
       const labels: Record<string, string> = {
         quote: intl.formatMessage({ id: 'common.quote' }),
@@ -501,7 +552,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         move: '移动',
         rename: intl.formatMessage({ id: 'fileBrowser.action.rename' }),
         delete: intl.formatMessage({ id: 'fileBrowser.action.delete' }),
-        saveToProject: intl.formatMessage({ id: 'projectSpace.detail.resource.saveToSpace' }),
+        saveToProject: '保存到项目云盘',
       };
       return keys.map((key) => ({
         key,
@@ -833,6 +884,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         items={items}
         currentPath={rootPath}
         resourceEmptyStyle
+        showItemMeta
         emptyText={
           loadError ||
           (scope === 'project' && !resourceId ? '暂未初始化项目知识库' : intl.formatMessage({ id: emptyTextId }))
@@ -894,6 +946,42 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
           if (!renameLoading) setRenameTarget(null);
         }}
       />
+      <Modal
+        open={!!saveProjectTarget}
+        title="保存到项目云盘"
+        okText="保存"
+        cancelText={intl.formatMessage({ id: 'common.cancel' })}
+        confirmLoading={savingToProject}
+        onOk={() => void confirmSaveToProject()}
+        onCancel={() => {
+          if (!savingToProject) setSaveProjectTarget(null);
+        }}
+        destroyOnClose
+      >
+        <Spin spinning={saveProjectTreeLoading}>
+          <Tree
+            treeData={saveProjectTreeData}
+            expandedKeys={saveProjectExpandedKeys}
+            selectedKeys={[saveProjectTargetPath]}
+            onExpand={(keys) => setSaveProjectExpandedKeys(keys)}
+            onSelect={(keys) => {
+              if (keys.length) setSaveProjectTargetPath(String(keys[0]));
+            }}
+            loadData={async (node: any) => {
+              if (node.children?.length) return;
+              setSaveProjectTreeLoading(true);
+              try {
+                node.children = await loadSaveProjectDirectories(String(node.key));
+                setSaveProjectTreeData((current) => [...current]);
+              } finally {
+                setSaveProjectTreeLoading(false);
+              }
+            }}
+            blockNode
+            showIcon
+          />
+        </Spin>
+      </Modal>
       <Modal
         open={!!moveTarget}
         title="移动到"

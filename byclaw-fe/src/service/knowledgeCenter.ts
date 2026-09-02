@@ -320,11 +320,13 @@ export interface KnowledgeUploadResult {
 }
 
 // 上传文件
-export const uploadFiles = (data: FormData) =>
+export const uploadFiles = (data: FormData, config?: ConfigType) =>
   POST<KnowledgeUploadResult>('/byaiService/datasetController/uploadFiles', data, {
     timeout: 8 * 60 * 1000,
+    ...config,
     headers: {
       'Content-Type': 'multipart/form-data; charset=utf-8',
+      ...(config?.headers || {}),
     },
   });
 
