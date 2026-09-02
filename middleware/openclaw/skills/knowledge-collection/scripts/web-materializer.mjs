@@ -66,6 +66,18 @@ function rewriteLocalAssets(markdown, assets) {
   return rewritten;
 }
 
+function removeLocalAssets(markdown, assets) {
+  let cleaned = markdown;
+  for (const asset of assets) {
+    const escaped = asset.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    cleaned = cleaned.replace(new RegExp(
+      `\\!\\[[^\\]]*\\]\\(\\s*<?${escaped}>?(?:\\s+['"][^'"]*['"])?\\s*\\)`,
+      'g',
+    ), '');
+  }
+  return cleaned;
+}
+
 function frontmatter(title, sourceUrl) {
   return [
     '---',
@@ -214,15 +226,27 @@ export async function runWebMaterialize(paths, args, options = {}) {
   }
 
   const rawItemDir = path.dirname(savedAbsolute);
-  const localAssets = analysis.localAssets.map((relative) => {
+  const localAssets = [];
+  const unavailableLocalAssets = [];
+  for (const relative of analysis.localAssets) {
     if (path.isAbsolute(relative) || relative.split(/[\\/]/).includes('..')) {
       throw new Error(`本地图片路径越界: ${relative}`);
     }
-    const absolute = assertSafeFile(rawItemDir, path.resolve(rawItemDir, relative), `本地图片 ${relative}`);
-    return { relative: relative.split(path.sep).join('/'), absolute };
-  });
+    const candidate = path.resolve(rawItemDir, relative);
+    if (!isInside(path.resolve(rawItemDir), candidate)) {
+      throw new Error(`本地图片路径越界: ${relative}`);
+    }
+    if (!fs.existsSync(candidate)) {
+      unavailableLocalAssets.push(relative);
+      continue;
+    }
+    const absolute = assertSafeFile(rawItemDir, candidate, `本地图片 ${relative}`);
+    localAssets.push({ relative: relative.split(path.sep).join('/'), absolute });
+  }
+  baseDiagnostics.unavailableLocalMediaRemoved = unavailableLocalAssets.length;
+  const cleanedMarkdown = removeLocalAssets(analysis.markdown, unavailableLocalAssets);
   const rendered = `${frontmatter(analysis.title, executorResult.resolvedUrl)}${rewriteLocalAssets(
-    analysis.markdown,
+    cleanedMarkdown,
     localAssets.map((asset) => asset.relative),
   )}`;
   const transactionRoot = path.join(paths.root, '.collection-tmp', `materialize-${baseDiagnostics.transactionId}`);

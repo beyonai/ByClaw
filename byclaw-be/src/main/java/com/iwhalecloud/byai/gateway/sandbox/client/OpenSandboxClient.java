@@ -7,6 +7,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.StringJoiner;
+import java.util.TreeSet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -82,7 +83,7 @@ public class OpenSandboxClient {
     public CreateSandboxResponse createSandbox(CreateSandboxRequest request, String idempotencyKey) {
         String url = baseUrl + "/v1/sandboxes";
         String body = toJson(request);
-        log.debug("OpenSandbox沙箱 POST {} body={}", url, body);
+        log.debug("OpenSandbox沙箱 POST {} {}", url, createSandboxLogSummary(request));
         Request.Builder rb = newRequestBuilder(url)
                 .post(RequestBody.create(body, JSON_MEDIA_TYPE));
         if (idempotencyKey != null
@@ -91,6 +92,17 @@ public class OpenSandboxClient {
             rb.header("Idempotency-Key", idempotencyKey.trim());
         }
         return execute(rb.build(), CreateSandboxResponse.class);
+    }
+
+    private static String createSandboxLogSummary(CreateSandboxRequest request) {
+        if (request == null) {
+            return "request=null";
+        }
+        return "timeout=" + request.getTimeout()
+            + " envKeys=" + (request.getEnv() == null
+                ? Collections.emptySet() : new TreeSet<>(request.getEnv().keySet()))
+            + " metadataKeys=" + (request.getMetadata() == null
+                ? Collections.emptySet() : new TreeSet<>(request.getMetadata().keySet()));
     }
 
     /**

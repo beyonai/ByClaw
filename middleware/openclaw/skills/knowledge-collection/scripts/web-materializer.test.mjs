@@ -74,6 +74,24 @@ test('analyzer removes remote media but keeps a complete article high confidence
   assert.match(result.markdown, /images\/chart\.png/);
 });
 
+test('analyzer removes site-root images instead of treating them as local assets', () => {
+  const markdown = `${completeArticle()}![site logo](/images/site-logo.png)\n`;
+  const result = analyzeWebMarkdown(markdown, { title: 'Example 深度报道' });
+  assert.equal(result.confidence, 'high');
+  assert.equal(result.remoteMediaRemoved, 2);
+  assert.doesNotMatch(result.markdown, /site-logo\.png/);
+  assert.deepEqual(result.localAssets, ['images/chart.png']);
+});
+
+test('analyzer does not treat incidental login navigation in a long article as a challenge', () => {
+  const paragraphs = Array.from({ length: 6 }, (_, index) =>
+    `第${index + 1}部分介绍人工智能产业发展情况、应用进展与行业观察。`.repeat(8));
+  const markdown = `登录\n\n${paragraphs.join('\n\n')}\n`;
+  const result = analyzeWebMarkdown(markdown, { title: '人工智能产业发展调查' });
+  assert.equal(result.confidence, 'high');
+  assert.doesNotMatch(result.reasonCodes.join(','), /challenge-or-login-marker/);
+});
+
 test('materializes controlled web output with duplicated safe assets and registered receipt', async () => {
   const f = await fixture();
   try {
@@ -108,6 +126,22 @@ test('materializes controlled web output with duplicated safe assets and registe
     assert.equal(cmdCollect(f.paths, { 'item-json-file': result.collectPayloadPath }).ok, true);
     const status = collectionStatus(f.paths);
     assert.equal(status.deliveryComplete, true, JSON.stringify(status, null, 2));
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test('materializer drops referenced relative images that were not downloaded', async () => {
+  const f = await fixture(`${completeArticle()}![missing](./missing-photo.jpg)\n`);
+  try {
+    const result = await runWebMaterialize(f.paths, {
+      'item-id': 'example-report', 'executor-result-file': f.executorResultPath,
+    });
+    assert.equal(result.materialization.status, 'materialized');
+    const sanitized = await readFile(join(
+      f.root, 'sanitized/items/example-report/index.md',
+    ), 'utf8');
+    assert.doesNotMatch(sanitized, /missing-photo\.jpg/);
   } finally {
     await rm(f.root, { recursive: true, force: true });
   }

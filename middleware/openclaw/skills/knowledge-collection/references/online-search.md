@@ -1,8 +1,12 @@
-# Online Search 检索信源（SearXNG 元搜索）
+# Online Search 检索信源（腾讯 WSA 主用、SearXNG 故障降级）
 
-`online-search` 是知识采集技能的第二检索信源（与内置路由层 [agent-reach.md](agent-reach.md) 并列），封装 SearXNG 249 引擎元搜索内核。
-技能本体位于 `knowledge-collection/references/online-search/`，运行时由 OpenClaw 镜像内置的 `searxng-cli` 提供，
-一次调用聚合多引擎结果并输出单个 JSON。**只负责发现 URL，不得直接抓取网页；取内容一律委派来源执行器（公共网页 `bycli`）。**
+`online-search` 是知识采集技能的公共网页检索通道（与内置路由层 [agent-reach.md](agent-reach.md) 并列）。
+它优先调用腾讯联网搜索 API（WSA）；只有 WSA 未配置、被显式关闭、鉴权/限流/超时、服务错误或响应损坏等
+通道级故障时，才降级到 OpenClaw 镜像内置的 `searxng-cli`。WSA 合法返回空结果或合格候选不足时不调用
+SearXNG，后续仍由既有 hot-discovery 逻辑补充候选。**本通道只负责发现 URL，不得直接抓取网页；取内容一律委派来源执行器（公共网页 `bycli`）。**
+
+WSA 从运行环境读取 `TENCENTCLOUD_SECRET_ID` 和 `TENCENTCLOUD_SECRET_KEY`；两者齐全时自动启用，
+`TENCENT_WSA_ENABLED=false` 可强制使用 SearXNG。凭据不得出现在命令参数、快照、会话状态或日志中。
 
 
 
@@ -14,11 +18,11 @@ node scripts/knowledge-collection.mjs public-discover --session-dir <会话目�
   [--tiers 1,2,3] [--limit N]
 ```
 
-不带 `--requested-count` 时，该命令在 SearXNG 检索时并行运行 `hot_discovery`，并把 SearXNG category 传为热度发现维度；
-`hot_discovery` 会额外补充 `general`。带 `--requested-count N` 时采用自适应路径：先运行 SearXNG，并按 URL、标题与摘要把候选确定性分类为
-`article`、`weak` 或 `reject`。中文文章 profile 会并发启动 SearXNG 与限定来源的 `hot_discovery`，共享 60 秒软预算和 90 秒硬上限；
-停止阈值为 `max(N*3, 5)`，且至少尝试前三个运行时可用来源。其他 requested-count 请求保持先 SearXNG、候选不足再回退的兼容行为。任一通道失败时保留另一通道的快照与候选，
-只有两者均失败才判定本次发现失败。命令输出的 `candidateQuality`、`pageTypeReasons` 和 `timing` 是候选选择与阶段耗时的权威诊断。
+不带 `--requested-count` 时，该命令在 online-search 检索时并行运行 `hot_discovery`，并把 category 传为热度发现维度；
+`hot_discovery` 会额外补充 `general`。带 `--requested-count N` 时采用自适应路径：先运行 online-search，并按 URL、标题与摘要把候选确定性分类为
+`article`、`weak` 或 `reject`。中文文章 profile 会并发启动 online-search 与限定来源的 `hot_discovery`，共享 60 秒软预算和 90 秒硬上限；
+停止阈值为 `max(N*3, 5)`，且至少尝试前三个运行时可用来源。其他 requested-count 请求保持先 online-search、候选不足再运行 hot-discovery 的兼容行为。任一逻辑通道失败时保留另一通道的快照与候选，
+只有 online-search 与 hot-discovery 均失败才判定本次发现失败。命令输出的 `candidateQuality`、`pageTypeReasons` 和 `timing` 是候选选择与阶段耗时的权威诊断。
 直接运行 `searxng-cli` 仅适用于独立调试，不会自动启动热度发现。
 
 - 默认按 `--category` 使用内置直连白名单（`searxng_pack_settings.yml` 的 `cli.default_engines`，120 个直连可用引擎），避免超时拖累；
@@ -42,7 +46,7 @@ node scripts/knowledge-collection.mjs public-discover --session-dir <会话目�
 - **时间敏感**（周报/新闻/最新动态）：优先 `online-search --category news|general --time-range week|day`；
 - **学术/标准**：优先 `online-search --category science`（不带 time-range）；
 - **英文技术/代码**：优先内置路由层的 Exa（擅长英文技术文档与代码上下文）与 `gh`（搜 GitHub）；
-- **通用发现**：使用 `public-discover`，它会并行运行两个信源并生成合并快照；
+- **通用发现**：使用 `public-discover`，它会并行运行 online-search 与 hot-discovery 并生成合并快照；
 - **取内容**：一律委派来源执行器，通用公共网页按 [agent-reach.md](agent-reach.md) → `acquire-web` → `materialize-web`；不得手工重定向 stdout 或构造 payload。
 
 ## 实测引擎可用性（2026-08-15 直连探测）

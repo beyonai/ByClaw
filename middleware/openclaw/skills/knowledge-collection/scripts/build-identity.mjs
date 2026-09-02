@@ -15,6 +15,7 @@ function runtimeFiles(directory = SKILL_ROOT, relativeRoot = '') {
     .sort((left, right) => left.name.localeCompare(right.name))) {
     const relative = path.posix.join(relativeRoot, entry.name);
     const absolute = path.join(directory, entry.name);
+    if (entry.isDirectory() && entry.name === 'node_modules') continue;
     if (entry.isSymbolicLink()) throw new Error(`Skill 运行时文件不能是符号链接: ${relative}`);
     if (entry.isDirectory()) {
       if (entry.name === 'fixtures') continue;

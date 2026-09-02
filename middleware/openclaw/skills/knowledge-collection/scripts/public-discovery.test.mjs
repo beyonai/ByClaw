@@ -71,6 +71,127 @@ test('supports an explicit SearXNG script path for local development', () => {
   );
 });
 
+test('uses the unified online-search runner and exposes compatible provider aliases', async () => {
+  const { paths } = makeInitializedSession(['public-internet'], '人工智能');
+  let onlineSearchCalls = 0;
+  const result = await runPublicDiscover(paths, {
+    query: '人工智能 报道',
+    category: 'general',
+    language: 'zh-CN',
+    'requested-count': '1',
+  }, {
+    runOnlineSearch: async (args) => {
+      onlineSearchCalls += 1;
+      return {
+        ok: true,
+        durationMs: 12,
+        document: {
+          query: args.query,
+          provider: 'tencent-wsa',
+          fallbackUsed: false,
+          providerDiagnostics: {
+            tencentWsa: { status: 'success', durationMs: 12, resultCount: 1, requestId: 'request-1' },
+            searxng: { status: 'skipped', durationMs: 0, skipReason: 'primary_provider_succeeded' },
+          },
+          results: [{
+            url: 'https://example.com/news/1234567',
+            title: '人工智能深度报道',
+            content: '人工智能产业发展深度报道',
+            engine: 'tencent-wsa',
+          }],
+        },
+      };
+    },
+    runProcess: async (spec) => {
+      if (spec.channel === 'searxng') {
+        return {
+          code: 0,
+          stdout: JSON.stringify({ query: '人工智能 报道', results: [] }),
+          stderr: '',
+        };
+      }
+      return { code: 0, stdout: JSON.stringify({ query: '人工智能 报道', candidates: [] }), stderr: '' };
+    },
+  });
+
+  assert.equal(onlineSearchCalls, 1);
+  assert.equal(result.channels.onlineSearch.provider, 'tencent-wsa');
+  assert.equal(result.channels.onlineSearch.fallbackUsed, false);
+  assert.deepEqual(result.channels.searxng, result.channels.onlineSearch);
+  assert.deepEqual(result.candidateQuality.searxng, result.candidateQuality.onlineSearch);
+  assert.equal(result.timing.searxngMs, result.timing.onlineSearchMs);
+  assert.equal(result.snapshots.searxng, result.snapshots.onlineSearch);
+  assert.equal(result.channels.hotDiscovery.status, 'skipped');
+});
+
+test('keeps hot-discovery fallback when WSA returns a valid empty result', async () => {
+  const { paths } = makeInitializedSession(['public-internet'], '人工智能');
+  const calls = [];
+  const result = await runPublicDiscover(paths, {
+    query: '人工智能 报道',
+    category: 'general',
+    language: 'zh-CN',
+    'requested-count': '1',
+  }, {
+    runOnlineSearch: async () => ({
+      ok: true,
+      document: {
+        query: '人工智能 报道',
+        provider: 'tencent-wsa',
+        fallbackUsed: false,
+        providerDiagnostics: {
+          tencentWsa: { status: 'success', durationMs: 5, resultCount: 0 },
+          searxng: { status: 'skipped', durationMs: 0, skipReason: 'primary_provider_succeeded' },
+        },
+        results: [],
+      },
+    }),
+    runProcess: async (spec) => {
+      calls.push(spec.channel);
+      return {
+        code: 0,
+        stdout: JSON.stringify({ query: '人工智能 报道', candidates: [] }),
+        stderr: '',
+      };
+    },
+  });
+
+  assert.deepEqual(calls, ['hot-discovery']);
+  assert.equal(result.channels.onlineSearch.status, 'success');
+  assert.equal(result.channels.onlineSearch.provider, 'tencent-wsa');
+  assert.equal(result.channels.hotDiscovery.status, 'success');
+});
+
+test('preserves provider diagnostics when online-search fails and hot-discovery succeeds', async () => {
+  const { paths } = makeInitializedSession(['public-internet'], '人工智能');
+  const result = await runPublicDiscover(paths, {
+    query: '人工智能 报道',
+    category: 'general',
+    'requested-count': '1',
+  }, {
+    runOnlineSearch: async () => ({
+      ok: false,
+      error: { category: 'provider', code: 'ONLINE_SEARCH_FAILED', message: 'both failed' },
+      provider: 'searxng',
+      fallbackUsed: true,
+      providerDiagnostics: {
+        tencentWsa: { status: 'failed', code: 'WSA_DISABLED', category: 'unavailable' },
+        searxng: { status: 'failed', code: 'SEARXNG_FAILED', category: 'provider' },
+      },
+    }),
+    runProcess: async () => ({
+      code: 0,
+      stdout: JSON.stringify({ query: '人工智能 报道', candidates: [] }),
+      stderr: '',
+    }),
+  });
+
+  assert.equal(result.channels.onlineSearch.provider, 'searxng');
+  assert.equal(result.channels.onlineSearch.fallbackUsed, true);
+  assert.equal(result.channels.onlineSearch.providerDiagnostics.tencentWsa.code, 'WSA_DISABLED');
+  assert.equal(result.channels.onlineSearch.providerDiagnostics.searxng.code, 'SEARXNG_FAILED');
+});
+
 function makeInitializedSession(sourceScope = ['public-internet'], query = '采集一篇文章') {
   const root = mkdtempSync(join(tmpdir(), 'public-discovery-test-'));
   ensureSessionSkeleton(root);
@@ -119,7 +240,7 @@ test('public channel runner converts a bound failure into an isolated channel fa
   assert.match(outcome.stderr, /timeout after 25ms/);
 });
 
-test('runs SearXNG and hot discovery for every SearXNG category', async () => {
+test('runs online search and hot discovery for every online-search category', async () => {
   const { paths } = makeInitializedSession();
   const calls = [];
 
@@ -157,7 +278,7 @@ test('runs SearXNG and hot discovery for every SearXNG category', async () => {
   assert.ok(searxngCall.spec.args.includes('--time-range'));
   assert.ok(searxngCall.spec.args.includes('week'));
   assert.equal(searxngCall.spec.args[searxngCall.spec.args.indexOf('--timeout') + 1], '10');
-  assert.deepEqual(searxngCall.options, { timeoutMs: 60_000 });
+  assert.ok(searxngCall.options.timeoutMs > 0 && searxngCall.options.timeoutMs <= 60_000);
   assert.equal(result.ok, true);
   assert.deepEqual(result.hotDiscovery.effectiveDimensions, ['images', 'general']);
   assert.equal(existsSync(result.snapshots.searxng), true);
@@ -565,6 +686,7 @@ test('records deterministic discovery phase timings', async () => {
 
   assert.deepEqual(result.timing, {
     searxngMs: 20,
+    onlineSearchMs: 20,
     hotDiscoveryMs: 0,
     mergeAndClassifyMs: 10,
     totalMs: 35,

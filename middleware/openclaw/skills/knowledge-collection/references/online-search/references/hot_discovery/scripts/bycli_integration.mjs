@@ -1,9 +1,15 @@
 import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 const BYCLI_TIMEOUT_MS = 30_000;
 const LIST_TIMEOUT_MS = 60_000;
 const BRIDGE_TIMEOUT_MS = 60_000;
 const DEFAULT_BRIDGE_SCRIPT = '/app/skills/bycli/scripts/bridge-bootstrap.mjs';
+const LOCAL_BRIDGE_SCRIPT = fileURLToPath(new URL(
+  '../../../../../../bycli/scripts/bridge-bootstrap.mjs',
+  import.meta.url,
+));
 
 export function runCommand(cmd, args, timeoutMs = BYCLI_TIMEOUT_MS) {
   return new Promise((resolve) => {
@@ -34,7 +40,12 @@ function userAction(kind, message) {
 
 export function createBycliIntegration({
   run = runCommand,
-  bridgeScript = process.env.BYCLI_BRIDGE_BOOTSTRAP_SCRIPT || DEFAULT_BRIDGE_SCRIPT,
+  environment = process.env,
+  fileExists = existsSync,
+  containerBridgeScript = DEFAULT_BRIDGE_SCRIPT,
+  localBridgeScript = LOCAL_BRIDGE_SCRIPT,
+  bridgeScript = environment.BYCLI_BRIDGE_BOOTSTRAP_SCRIPT
+    || (fileExists(containerBridgeScript) ? containerBridgeScript : localBridgeScript),
 } = {}) {
   const invoke = (cmd, args, timeoutMs) => run(cmd, args, timeoutMs);
 

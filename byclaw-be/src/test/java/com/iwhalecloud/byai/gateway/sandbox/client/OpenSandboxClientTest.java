@@ -12,11 +12,31 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
 
-import com.iwhalecloud.byai.gateway.sandbox.config.SandboxProperties;
+import com.iwhalecloud.byai.gateway.sandbox.client.model.CreateSandboxRequest;
 import com.iwhalecloud.byai.gateway.sandbox.command.SandboxCommandResult;
+import com.iwhalecloud.byai.gateway.sandbox.config.SandboxProperties;
 import com.sun.net.httpserver.HttpServer;
 
 class OpenSandboxClientTest {
+
+    @Test
+    void sandboxCreateLogSummaryDoesNotContainEnvironmentValues() throws Exception {
+        CreateSandboxRequest request = CreateSandboxRequest.builder()
+            .env(Map.of(
+                "TENCENTCLOUD_SECRET_ID", "sensitive-id-value",
+                "TENCENTCLOUD_SECRET_KEY", "sensitive-key-value"))
+            .metadata(Map.of("serviceKey", "openclaw"))
+            .build();
+        Method summaryMethod = OpenSandboxClient.class.getDeclaredMethod(
+            "createSandboxLogSummary", CreateSandboxRequest.class);
+        summaryMethod.setAccessible(true);
+
+        String summary = (String) summaryMethod.invoke(null, request);
+
+        assertThat(summary)
+            .contains("TENCENTCLOUD_SECRET_ID", "TENCENTCLOUD_SECRET_KEY", "serviceKey")
+            .doesNotContain("sensitive-id-value", "sensitive-key-value");
+    }
 
     @Test
     void readsBackgroundCommandIdFromNdjsonInitText() throws Exception {

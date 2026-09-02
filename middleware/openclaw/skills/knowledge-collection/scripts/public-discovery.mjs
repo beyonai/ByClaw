@@ -22,15 +22,16 @@ import {
 } from './discovery-authorization.mjs';
 import { loadSession, persistSession, withSessionLock } from './session.mjs';
 import { runCli } from './enterprise/shared/cli-runner.mjs';
+import { runOnlineSearch as defaultRunOnlineSearch } from './online-search/provider.mjs';
+
+export { resolveSearxngRuntime } from './online-search/searxng.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const onlineSearchRoot = resolve(scriptDir, '../references/online-search');
-const searxngRuntimeScript = '/opt/searxng-cli/searxng_cli.py';
 const hotDiscoveryScript = join(onlineSearchRoot, 'references/hot_discovery/scripts/hot_discovery.mjs');
 const adaptersPath = join(onlineSearchRoot, 'references/hot_discovery/adapters.md');
 const MAX_DIAGNOSTIC_STDERR_CHARS = 2_000;
 const DEFAULT_SEARXNG_PROCESS_TIMEOUT_SECONDS = 60;
-const SEARXNG_REQUEST_TIMEOUT_SECONDS = 10;
 export const SOFT_DISCOVERY_BUDGET_MS = 60_000;
 export const HARD_DISCOVERY_BUDGET_MS = 90_000;
 const CHINESE_ARTICLE_SOURCES = Object.freeze(['36kr', 'weixin', 'sogou', 'baidu', 'bing']);
@@ -70,15 +71,6 @@ export function isChineseArticleProfile(session, args = {}) {
     && ARTICLE_INTENT.test(String(task.query || ''))
     && topic?.required === true
     && typeof topic.normalizedSubject === 'string' && Boolean(topic.normalizedSubject.trim());
-}
-
-export function resolveSearxngRuntime(options = {}, environment = process.env) {
-  const pythonExecutable = options.pythonExecutable || environment.ONLINE_SEARCH_PYTHON;
-  if (pythonExecutable) {
-    const script = options.searxngScript || environment.ONLINE_SEARCH_SCRIPT || searxngRuntimeScript;
-    return { executable: pythonExecutable, argsPrefix: [script] };
-  }
-  return { executable: 'searxng-cli', argsPrefix: [] };
 }
 
 export async function runBoundedProcess({ bin, executable, args }, options = {}) {
@@ -140,6 +132,11 @@ function summarize(outcome, document, durationMs = 0) {
     summary.timedOut = Boolean(outcome?.timedOut);
     const stderr = safeDiagnosticStderr(outcome?.stderr);
     if (stderr) summary.stderr = stderr;
+  }
+  if (typeof outcome?.provider === 'string') summary.provider = outcome.provider;
+  if (typeof outcome?.fallbackUsed === 'boolean') summary.fallbackUsed = outcome.fallbackUsed;
+  if (outcome?.providerDiagnostics && typeof outcome.providerDiagnostics === 'object') {
+    summary.providerDiagnostics = outcome.providerDiagnostics;
   }
   return summary;
 }
@@ -225,19 +222,42 @@ export async function runPublicDiscover(paths, args, options = {}) {
   const searxngSnapshot = snapshotPath(inputDir, `${prefix}-searxng.json`);
   const hotSnapshot = snapshotPath(inputDir, `${prefix}-hot-discovery.json`);
   const mergedSnapshot = snapshotPath(inputDir, `${prefix}-merged.json`);
-  const searxngRuntime = resolveSearxngRuntime(options);
-  const runSearxngProcess = options.runProcess || runPublicProcess;
+  const runOnlineSearch = options.runOnlineSearch || defaultRunOnlineSearch;
   const runHotDiscoveryProcess = options.runProcess || runPublicProcess;
   const processTimeoutMs = Math.max(1, Math.ceil(Number(processTimeout) * 1_000));
 
-  const searxngSpec = {
-    channel: 'searxng',
-    executable: searxngRuntime.executable,
-    args: [...searxngRuntime.argsPrefix, query, '--category', category, '--language', language,
-      '--pageno', pageno, '--max-results', effectiveMaxResults,
-      '--timeout', String(SEARXNG_REQUEST_TIMEOUT_SECONDS),
-      ...(timeRange ? ['--time-range', timeRange] : [])],
+  const onlineSearchArgs = {
+    query,
+    category,
+    language,
+    pageno,
+    'max-results': effectiveMaxResults,
+    ...(requestedCount ? { 'requested-count': requestedCount } : {}),
+    ...(timeRange ? { 'time-range': timeRange } : {}),
   };
+  const runOnlineSearchChannel = async (_spec, { timeoutMs }) => {
+    const result = await runOnlineSearch(onlineSearchArgs, {
+      timeoutMs,
+      environment: options.environment || process.env,
+      runProcess: options.runProcess || runPublicProcess,
+      pythonExecutable: options.pythonExecutable,
+      searxngScript: options.searxngScript,
+      wsaClient: options.wsaClient,
+      wsaCapabilities: options.wsaCapabilities,
+    });
+    return result?.ok && result.document
+      ? { code: 0, stdout: JSON.stringify(result.document), stderr: '' }
+      : {
+        code: 1,
+        stdout: '',
+        stderr: result?.providerDiagnostics?.searxng?.message
+          || JSON.stringify(result?.error || { code: 'ONLINE_SEARCH_FAILED' }),
+        provider: result?.provider,
+        fallbackUsed: result?.fallbackUsed,
+        providerDiagnostics: result?.providerDiagnostics,
+      };
+  };
+  const onlineSearchSpec = { channel: 'online-search' };
   const hotDiscoverySpec = (sources = null, minimumAttempts = null, totalBudgetMs = null) => ({
     channel: 'hot-discovery',
     executable: process.execPath,
@@ -277,7 +297,7 @@ export async function runPublicDiscover(paths, args, options = {}) {
       Math.max(1, SOFT_DISCOVERY_BUDGET_MS - elapsedMilliseconds(totalStartedAt, now())),
     );
     const [searxngRun, hotRun] = await Promise.all([
-      runTimed(runSearxngProcess, searxngSpec, remainingHardMs),
+      runTimed(runOnlineSearchChannel, onlineSearchSpec, remainingHardMs),
       runTimed(runHotDiscoveryProcess, firstWaveSpec, remainingHardMs),
     ]);
     searxngOutcome = searxngRun.outcome;
@@ -311,7 +331,7 @@ export async function runPublicDiscover(paths, args, options = {}) {
       : hotRun.outcome;
   } else if (requestedCount === null) {
     const [searxngRun, hotRun] = await Promise.all([
-      runTimed(runSearxngProcess, searxngSpec),
+      runTimed(runOnlineSearchChannel, onlineSearchSpec),
       runTimed(runHotDiscoveryProcess, hotDiscoverySpec()),
     ]);
     searxngOutcome = searxngRun.outcome;
@@ -319,7 +339,7 @@ export async function runPublicDiscover(paths, args, options = {}) {
     hotOutcome = hotRun.outcome;
     hotDiscoveryMs = hotRun.durationMs;
   } else {
-    const searxngRun = await runTimed(runSearxngProcess, searxngSpec);
+    const searxngRun = await runTimed(runOnlineSearchChannel, onlineSearchSpec);
     searxngOutcome = searxngRun.outcome;
     searxngMs = searxngRun.durationMs;
     const requestedSxDoc = parseSuccess(searxngOutcome);
@@ -347,8 +367,15 @@ export async function runPublicDiscover(paths, args, options = {}) {
     throw new Error(failure);
   }
 
+  const onlineSearchDiagnostic = {
+    ...summarize(searxngOutcome, sxDoc, searxngMs),
+    ...(sxDoc?.provider ? { provider: sxDoc.provider } : {}),
+    ...(typeof sxDoc?.fallbackUsed === 'boolean' ? { fallbackUsed: sxDoc.fallbackUsed } : {}),
+    ...(sxDoc?.providerDiagnostics ? { providerDiagnostics: sxDoc.providerDiagnostics } : {}),
+  };
   const channelDiagnostics = {
-    searxng: summarize(searxngOutcome, sxDoc, searxngMs),
+    searxng: onlineSearchDiagnostic,
+    onlineSearch: onlineSearchDiagnostic,
     hotDiscovery: summarize(hotOutcome, hotDoc, hotDiscoveryMs),
   };
   const warnings = [];
@@ -367,9 +394,11 @@ export async function runPublicDiscover(paths, args, options = {}) {
     searxng: classifyCandidates(Array.isArray(sxDoc?.results) ? sxDoc.results : [], topicContract),
     merged: summarizeMergedQuality(annotatedMerged),
   };
+  candidateQuality.onlineSearch = candidateQuality.searxng;
   const mergeAndClassifyMs = elapsedMilliseconds(mergeStartedAt, now());
   const timing = {
     searxngMs,
+    onlineSearchMs: searxngMs,
     hotDiscoveryMs,
     mergeAndClassifyMs,
     totalMs: elapsedMilliseconds(totalStartedAt, now()),
@@ -429,6 +458,7 @@ export async function runPublicDiscover(paths, args, options = {}) {
     ...(discoveryProfile ? { discoveryProfile } : {}),
     snapshots: {
       searxng: sxDoc ? searxngSnapshot : null,
+      onlineSearch: sxDoc ? searxngSnapshot : null,
       hotDiscovery: hotDoc ? hotSnapshot : null,
       merged: mergedSnapshot,
     },

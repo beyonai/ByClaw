@@ -3,6 +3,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import {
   recordFailedCollectionItem,
@@ -16,9 +17,12 @@ export const ACQUIRE_WEB_TIMEOUT_MS = 45_000;
 export const MAX_WEB_ARTICLE_BYTES = 10 * 1024 * 1024;
 const EXTRACT_CHUNK_SIZE = 256 * 1024;
 const ITEM_ID = /^[a-z0-9][a-z0-9_-]{0,63}$/;
-const CHALLENGE_MARKER = /(?:登录|验证码|安全验证|环境验证|访问过于频繁|captcha|verify\s+you)/i;
+const STRONG_CHALLENGE_MARKER = /(?:验证码|安全验证|环境验证|访问过于频繁|captcha|verify\s+you)/i;
+const LOGIN_MARKER = /(?:登录|log\s*in|sign\s*in)/i;
+const MAX_LOGIN_PAGE_CHARS = 800;
 const SENSITIVE_DIAGNOSTIC = /((?:authorization|cookie|credential|password|secret|token)\s*(?:=|:)\s*)(?:Bearer\s+)?[^\s,;]+/gi;
 const DEFAULT_BRIDGE_SCRIPT = '/app/skills/bycli/scripts/bridge-bootstrap.mjs';
+const LOCAL_BRIDGE_SCRIPT = fileURLToPath(new URL('../../bycli/scripts/bridge-bootstrap.mjs', import.meta.url));
 
 function requireText(value, label) {
   if (typeof value !== 'string' || !value.trim()) throw new Error(`${label} 必须是非空字符串`);
@@ -45,6 +49,12 @@ function parseJson(value) {
   } catch {
     return null;
   }
+}
+
+function isChallengePage(title, article) {
+  if (STRONG_CHALLENGE_MARKER.test(`${title}\n${article}`)) return true;
+  if (LOGIN_MARKER.test(title)) return true;
+  return article.trim().length <= MAX_LOGIN_PAGE_CHARS && LOGIN_MARKER.test(article);
 }
 
 function outputErrorCode(outcome) {
@@ -160,7 +170,8 @@ export async function runWebAcquire(paths, args, options = {}) {
     if (remaining() <= 1) throw new Error(`CLI timeout after ${ACQUIRE_WEB_TIMEOUT_MS}ms`);
     return runProcess(bin, commandArgs, { timeoutMs: remaining(), maxOutputBytes });
   };
-  const bridgeScript = options.bridgeScript || DEFAULT_BRIDGE_SCRIPT;
+  const bridgeScript = options.bridgeScript || (fs.existsSync(DEFAULT_BRIDGE_SCRIPT)
+    ? DEFAULT_BRIDGE_SCRIPT : LOCAL_BRIDGE_SCRIPT);
 
   const finish = (partial, article = null, state = 'failed') => {
     const finishedAtMs = now();
@@ -287,7 +298,7 @@ export async function runWebAcquire(paths, args, options = {}) {
       expectedStart = chunk.next_start_char;
     }
 
-    if (CHALLENGE_MARKER.test(`${title}\n${article}`)) {
+    if (isChallengePage(title, article)) {
       return finish({
         status: 'requires-user-action', exitCode: 0, errorCode: 'AUTH_OR_CHALLENGE', resolvedUrl, title,
       }, null, 'pending');

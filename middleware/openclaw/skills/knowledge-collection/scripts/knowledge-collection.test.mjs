@@ -207,7 +207,7 @@ await (async () => {
   assert.match(publicDiscoverHelp.json.args['--category'], /general/);
   assert.match(publicDiscoverHelp.json.args['--requested-count'], /明确指定/);
   assert.match(publicDiscoverHelp.json.args['--requested-count'], /可用文章候选不足.*hot-discovery/);
-  assert.match(publicDiscoverHelp.json.args['--timeout'], /SearXNG 与 hot-discovery/);
+  assert.match(publicDiscoverHelp.json.args['--timeout'], /online-search 与 hot-discovery/);
 
   const wechatMaterializeHelp = await runCli(['materialize-wechat', '--help']);
   assert.equal(wechatMaterializeHelp.code, 0);

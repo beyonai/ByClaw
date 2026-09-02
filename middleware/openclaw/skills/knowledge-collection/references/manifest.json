@@ -32,7 +32,7 @@
     {
       "name": "online-search",
       "path": "online-search.md",
-      "description": "SearXNG 元搜索(中文引擎、时间窗、学术类别)。"
+      "description": "腾讯 WSA 主用、SearXNG 通道级故障降级的公共网页 URL 发现。"
     }
   ]
 }
