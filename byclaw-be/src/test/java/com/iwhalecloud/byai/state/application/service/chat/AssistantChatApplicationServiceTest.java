@@ -1,12 +1,12 @@
 package com.iwhalecloud.byai.state.application.service.chat;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -45,6 +45,7 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -111,44 +112,42 @@ class AssistantChatApplicationServiceTest {
         stopChatDto.setAgentId(30L);
         stopChatDto.setSessionId(10L);
         stopChatDto.setMessageId(20L);
-        TaskPlanSnapshot cancelling = new TaskPlanSnapshot();
-        cancelling.setStatus("CANCELLING");
         TaskPlanSnapshot cancelled = new TaskPlanSnapshot();
         cancelled.setStatus("CANCELLED");
-        when(taskPlanApplicationService.requestCancellation(stopChatDto, "USER_STOPPED", "用户请求停止"))
-            .thenReturn(List.of(cancelling));
-        when(taskPlanApplicationService.confirmCancellation(stopChatDto, "USER_STOPPED", "用户已停止执行"))
+        when(taskPlanApplicationService.cancel(stopChatDto, "USER_STOPPED", "用户已停止执行"))
             .thenReturn(List.of(cancelled));
         when(scriptService.flushFromSnapshot(10L, 20L)).thenReturn(true);
 
         assistantChatApplicationService.stopChat(stopChatDto);
 
-        verify(gatewayClient).cancelSession(eq("10"), eq("user cancel task"));
+        InOrder stopOrder = inOrder(taskPlanApplicationService, scriptService, gatewayClient);
+        stopOrder.verify(taskPlanApplicationService).cancel(stopChatDto, "USER_STOPPED", "用户已停止执行");
+        stopOrder.verify(scriptService).flushFromSnapshot(10L, 20L);
+        stopOrder.verify(gatewayClient).cancelSession(eq("10"), eq("user cancel task"));
         verify(runningOutputStreamRegistry).release(10L, 20L);
         verify(runningChatSnapshotService).delete(10L, 20L);
-        verify(taskPlanWebSocketPublisher).broadcast(1L, cancelling, null);
         verify(taskPlanWebSocketPublisher).broadcast(1L, cancelled, null);
     }
 
     @Test
-    void stopChat_confirmsPlanCancellationWhenGatewayCancellationFails() {
+    void stopChat_keepsPlanCancelledAndCleansUpWhenGatewayCancellationFails() {
         StopChatDto stopChatDto = new StopChatDto();
         stopChatDto.setSessionId(10L);
         stopChatDto.setMessageId(20L);
         TaskPlanSnapshot cancelled = new TaskPlanSnapshot();
         cancelled.setStatus("CANCELLED");
-        when(taskPlanApplicationService.confirmCancellation(stopChatDto, "USER_STOPPED", "用户已停止执行"))
+        when(taskPlanApplicationService.cancel(stopChatDto, "USER_STOPPED", "用户已停止执行"))
             .thenReturn(List.of(cancelled));
         when(scriptService.flushFromSnapshot(10L, 20L)).thenReturn(true);
         doThrow(new IllegalStateException("gateway unavailable"))
             .when(gatewayClient).cancelSession("10", "user cancel task");
 
-        assertThatThrownBy(() -> assistantChatApplicationService.stopChat(stopChatDto))
-            .isInstanceOf(IllegalStateException.class)
-            .hasMessage("gateway unavailable");
+        assistantChatApplicationService.stopChat(stopChatDto);
 
-        verify(taskPlanApplicationService).confirmCancellation(stopChatDto, "USER_STOPPED", "用户已停止执行");
+        verify(taskPlanApplicationService).cancel(stopChatDto, "USER_STOPPED", "用户已停止执行");
         verify(taskPlanWebSocketPublisher).broadcast(1L, cancelled, null);
+        verify(runningOutputStreamRegistry).release(10L, 20L);
+        verify(runningChatSnapshotService).delete(10L, 20L);
     }
 
     @Test

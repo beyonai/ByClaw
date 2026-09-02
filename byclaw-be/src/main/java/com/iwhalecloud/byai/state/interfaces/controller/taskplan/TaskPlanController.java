@@ -67,14 +67,12 @@ public class TaskPlanController {
         return ResponseUtil.successResponse(taskPlanService.findActive(request));
     }
 
-    /** byclaw-super 的直接取消入口；生产 STOP_CHAT 仍由聊天应用服务统一编排。 */
+    /** 直接将指定执行的活动计划取消；计划状态统一由 BE 维护。 */
     @PostMapping("/cancel")
     public ResponseUtil<TaskPlanSnapshot> cancel(@RequestBody TaskPlanLookupRequest request) {
         String message = StringUtils.defaultIfBlank(request == null ? null : request.getReason(), "用户已停止执行");
-        TaskPlanSnapshot cancelling = taskPlanService.requestCancellation(request, "USER_STOPPED", message);
-        publisher.broadcast(CurrentUserHolder.getCurrentUserId(), cancelling, null);
-        TaskPlanSnapshot cancelled = taskPlanService.confirmCancellation(request, "USER_STOPPED", message);
+        TaskPlanSnapshot cancelled = taskPlanService.cancel(request, "USER_STOPPED", message);
         publisher.broadcast(CurrentUserHolder.getCurrentUserId(), cancelled, null);
-        return ResponseUtil.successResponse(cancelled == null ? cancelling : cancelled);
+        return ResponseUtil.successResponse(cancelled);
     }
 }

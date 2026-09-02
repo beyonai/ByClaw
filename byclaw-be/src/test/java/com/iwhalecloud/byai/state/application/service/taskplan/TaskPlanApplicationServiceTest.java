@@ -204,7 +204,7 @@ class TaskPlanApplicationServiceTest {
     }
 
     @Test
-    void requestCancellationAcceptsOpaqueMessageId() {
+    void cancellationAcceptsOpaqueMessageIdAndImmediatelyCancelsPlan() {
         when(planMapper.selectOne(any())).thenReturn(plan("ACTIVE", 1, tasks("IN_PROGRESS", "PENDING")));
         when(planMapper.update(any(), any(Wrapper.class))).thenReturn(1);
         TaskPlanLookupRequest request = new TaskPlanLookupRequest();
@@ -213,9 +213,9 @@ class TaskPlanApplicationServiceTest {
         request.setSourceRuntime("BYCLAW_SUPER");
         request.setSourceRunId("run-1");
 
-        TaskPlanSnapshot snapshot = service.requestCancellation(request, "USER_STOPPED", "用户请求停止");
+        TaskPlanSnapshot snapshot = service.cancel(request, "USER_STOPPED", "用户已停止执行");
 
-        assertThat(snapshot.getStatus()).isEqualTo("CANCELLING");
+        assertThat(snapshot.getStatus()).isEqualTo("CANCELLED");
     }
 
     @Test
@@ -291,16 +291,14 @@ class TaskPlanApplicationServiceTest {
         stop.setSessionId(11L);
         stop.setMessageId(999L);
 
-        List<TaskPlanSnapshot> cancelling = service.requestCancellation(stop, "USER_STOPPED", "用户请求停止");
-        List<TaskPlanSnapshot> cancelled = service.confirmCancellation(stop, "USER_STOPPED", "用户已停止执行");
+        List<TaskPlanSnapshot> cancelled = service.cancel(stop, "USER_STOPPED", "用户已停止执行");
 
-        assertThat(cancelling).hasSize(2).allMatch(plan -> "CANCELLING".equals(plan.getStatus()));
         assertThat(cancelled).hasSize(2).allMatch(plan -> "CANCELLED".equals(plan.getStatus()));
         assertThat(cancelled.get(0).getTasks()).extracting(TaskPlanSnapshot.TaskSnapshot::getStatus)
             .containsExactly("COMPLETED", "CANCELLED");
         assertThat(cancelled.get(1).getTasks()).extracting(TaskPlanSnapshot.TaskSnapshot::getStatus)
             .containsExactly("CANCELLED", "CANCELLED");
-        verify(planMapper, times(4)).update(any(), any(Wrapper.class));
+        verify(planMapper, times(2)).update(any(), any(Wrapper.class));
     }
 
     @Test
