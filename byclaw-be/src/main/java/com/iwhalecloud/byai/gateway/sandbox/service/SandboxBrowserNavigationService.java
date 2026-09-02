@@ -53,6 +53,7 @@ public class SandboxBrowserNavigationService {
         this.sandboxService = sandboxService;
         this.runtimeResolver = runtimeResolver;
         this.httpClient = HttpClient.newBuilder()
+            .version(HttpClient.Version.HTTP_1_1)
             .connectTimeout(Duration.ofMillis(REQUEST_TIMEOUT_MS))
             .build();
         this.objectMapper = new ObjectMapper();
