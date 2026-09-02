@@ -615,6 +615,61 @@ CREATE INDEX IF NOT EXISTS idx_ss_resource_rel_skill_source_candidate
     ON byai.ss_resource_rel_detail (resource_id, rel_type_name, rel_status)
     WHERE rel_resource_info IS NOT NULL;
 
+-- 项目初始化审计日志表
+CREATE TABLE IF NOT EXISTS project_init_audit_log (
+    id BIGSERIAL PRIMARY KEY,
+    request_id VARCHAR(64) NOT NULL,
+    user_id VARCHAR(64) NOT NULL,
+    username VARCHAR(128),
+    ip_address VARCHAR(45),
+    repo_path VARCHAR(512) NOT NULL,
+    skill_package VARCHAR(64),
+    branch VARCHAR(255),
+    submodule_count INTEGER DEFAULT 0,
+    status VARCHAR(32) NOT NULL,
+    duration_ms BIGINT,
+    error_message TEXT,
+    commit_hash VARCHAR(64),
+    pushed BOOLEAN DEFAULT FALSE,
+    changes TEXT,
+    start_time TIMESTAMP NOT NULL,
+    end_time TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 创建索引
+CREATE INDEX IF NOT EXISTS idx_project_init_audit_request_id ON project_init_audit_log (request_id);
+CREATE INDEX IF NOT EXISTS idx_project_init_audit_user_id ON project_init_audit_log (user_id);
+CREATE INDEX IF NOT EXISTS idx_project_init_audit_repo_path ON project_init_audit_log (repo_path);
+CREATE INDEX IF NOT EXISTS idx_project_init_audit_status ON project_init_audit_log (status);
+CREATE INDEX IF NOT EXISTS idx_project_init_audit_start_time ON project_init_audit_log (start_time);
+CREATE INDEX IF NOT EXISTS idx_project_init_audit_created_at ON project_init_audit_log (created_at);
+
+-- 添加表注释
+COMMENT ON TABLE project_init_audit_log IS '项目初始化审计日志表 - 记录所有项目初始化操作的审计轨迹';
+
+-- 添加列注释
+COMMENT ON COLUMN project_init_audit_log.id IS '主键ID';
+COMMENT ON COLUMN project_init_audit_log.request_id IS '请求追踪ID(UUID) - 用于关联整个请求链路';
+COMMENT ON COLUMN project_init_audit_log.user_id IS '操作用户ID - 标识执行操作的用户';
+COMMENT ON COLUMN project_init_audit_log.username IS '操作用户名 - 用户可读名称';
+COMMENT ON COLUMN project_init_audit_log.ip_address IS '客户端IP地址 - 用于安全审计';
+COMMENT ON COLUMN project_init_audit_log.repo_path IS '仓库路径 - 操作的目标仓库';
+COMMENT ON COLUMN project_init_audit_log.skill_package IS '技能包类型 - trellis/superpower';
+COMMENT ON COLUMN project_init_audit_log.branch IS '分支名称 - 操作的目标分支';
+COMMENT ON COLUMN project_init_audit_log.submodule_count IS '子模块数量 - 本次操作添加的子模块数';
+COMMENT ON COLUMN project_init_audit_log.status IS '操作状态 - SUCCESS/FAILED/TIMEOUT/CANCELLED';
+COMMENT ON COLUMN project_init_audit_log.duration_ms IS '执行耗时(毫秒) - 用于性能分析';
+COMMENT ON COLUMN project_init_audit_log.error_message IS '错误信息 - 失败时的详细错误';
+COMMENT ON COLUMN project_init_audit_log.commit_hash IS '提交哈希值 - Git commit hash';
+COMMENT ON COLUMN project_init_audit_log.pushed IS '是否推送到远程 - 标识是否执行了git push';
+COMMENT ON COLUMN project_init_audit_log.changes IS '变更详情(JSON格式) - 记录具体的文件变更';
+COMMENT ON COLUMN project_init_audit_log.start_time IS '开始时间 - 操作开始时间';
+COMMENT ON COLUMN project_init_audit_log.end_time IS '结束时间 - 操作结束时间';
+COMMENT ON COLUMN project_init_audit_log.created_at IS '创建时间 - 数据库记录创建时间';
+COMMENT ON COLUMN project_init_audit_log.updated_at IS '更新时间 - 数据库记录更新时间';
+
 /**项目关联本体对象文件**/
 create table byai_project_object_file
 (
@@ -829,3 +884,69 @@ CREATE INDEX IF NOT EXISTS idx_agent_task_plan_trace
 CREATE INDEX IF NOT EXISTS idx_agent_task_plan_run
     ON byai_agent_task_plan
        (user_id, source_runtime, source_run_id, updated_at DESC);
+
+-- ByClaw Super：D0.3.2（schema v9）升级至 develop（schema v12）
+
+-- v10: delegation_last_activity
+ALTER TABLE byai.byai_super_delegations
+  ADD COLUMN last_activity_at timestamptz NULL;
+
+UPDATE byai.byai_super_delegations
+   SET last_activity_at = updated_at
+ WHERE started_at IS NOT NULL;
+
+INSERT INTO byai.byai_super_schema_migrations(version, name)
+SELECT 10, 'delegation_last_activity'
+WHERE NOT EXISTS (
+  SELECT 1
+    FROM byai.byai_super_schema_migrations
+   WHERE version = 10
+);
+
+-- v11: delegation_callback_deadline
+ALTER TABLE byai.byai_super_delegations
+  ADD COLUMN callback_deadline_at timestamptz NULL;
+
+CREATE INDEX delegations_callback_deadline_idx
+  ON byai.byai_super_delegations(callback_deadline_at)
+  WHERE status = 'RUNNING'
+    AND callback_deadline_at IS NOT NULL;
+
+CREATE TABLE byai.byai_super_callback_timeout_outbox (
+  run_id uuid PRIMARY KEY
+    REFERENCES byai.byai_super_runs(id) ON DELETE CASCADE,
+  claimed_by text NULL,
+  claim_expires_at timestamptz NULL,
+  delivered_at timestamptz NULL,
+  attempt_count integer NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL,
+  updated_at timestamptz NOT NULL
+);
+
+CREATE INDEX callback_timeout_outbox_pending_idx
+  ON byai.byai_super_callback_timeout_outbox(claim_expires_at, created_at)
+  WHERE delivered_at IS NULL;
+
+INSERT INTO byai.byai_super_schema_migrations(version, name)
+SELECT 11, 'delegation_callback_deadline'
+WHERE NOT EXISTS (
+  SELECT 1
+    FROM byai.byai_super_schema_migrations
+   WHERE version = 11
+);
+
+-- v12: delegation_task_position
+ALTER TABLE byai.byai_super_delegations
+  ADD COLUMN task_position integer NULL;
+
+ALTER TABLE byai.byai_super_delegations
+  ADD CONSTRAINT delegations_task_position_positive
+  CHECK (task_position IS NULL OR task_position > 0);
+
+INSERT INTO byai.byai_super_schema_migrations(version, name)
+SELECT 12, 'delegation_task_position'
+WHERE NOT EXISTS (
+  SELECT 1
+    FROM byai.byai_super_schema_migrations
+   WHERE version = 12
+);
