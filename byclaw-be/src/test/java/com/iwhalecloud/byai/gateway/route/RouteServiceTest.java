@@ -117,6 +117,7 @@ class RouteServiceTest {
         messageSource.addMessage("sandbox.launch.model.config.required", Locale.US,
                 "Sandbox startup failed because model parameters are incomplete. Please contact the administrator.");
         when(jwtService.createJwt(any())).thenReturn("test-beyond-token");
+
         routeService = new RouteService();
         ReflectionTestUtils.setField(routeService, "gatewayClient", gatewayClient);
         ReflectionTestUtils.setField(routeService, "pythonSseService", pythonSseService);

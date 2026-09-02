@@ -259,6 +259,12 @@ function isBridgeOnlyResult(result) {
   return Number(result?.exitCode) === 69 && errorCode(result) === 'BROWSER_CONNECT';
 }
 
+function isUnclassifiedProcessFailure(result) {
+  if (Number(result?.exitCode) === 0 || errorCode(result)) return false;
+  return result?.timedOut === true
+    || (!String(result?.stdout || '').trim() && !String(result?.stderr || '').trim());
+}
+
 export async function runGate({
   stateDir,
   argv,
@@ -349,7 +355,9 @@ export async function runGate({
     const controls = callbackControls(childResult);
     const visibleChildResult = publicChildResult(childResult);
     if (!isConfirmedRerun
-      && (controls.stateDisposition === 'no-auth-state' || isBridgeOnlyResult(childResult))) {
+      && (controls.stateDisposition === 'no-auth-state'
+        || isBridgeOnlyResult(childResult)
+        || isUnclassifiedProcessFailure(childResult))) {
       return {
         ...visibleChildResult,
         executed: true,

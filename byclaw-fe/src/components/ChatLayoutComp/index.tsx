@@ -235,9 +235,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
   const { project: sessionProject } = useChatResourceProject(sessionProjectId);
   // 新会话项目下拉会把 cloudResourceId 放在输入框上下文中；同时读取该值，避免项目选择器状态尚未
   // 回写到资源面板状态时，加号弹窗拿不到项目云盘知识库 ID。
-  const inputSelectedProject = queryInputProps.selectedProject as
-    | { cloudResourceId?: string | number }
-    | undefined;
+  const inputSelectedProject = queryInputProps.selectedProject as { cloudResourceId?: string | number } | undefined;
   const sessionCloudResourceId =
     currentSession?.cloudResourceId ||
     selectedProject?.cloudResourceId ||

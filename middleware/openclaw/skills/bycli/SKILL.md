@@ -190,6 +190,7 @@ session、TAB、daemon 与浏览器存活；不得调用 `state`、`tab list`、
 |---------|-----------|
 | Weixin 登录/验证：`AUTH_REQUIRED` (77)、登录 `TIMEOUT` (75)、CAPTCHA 或环境验证 | 加载 `references/weixin.md`；保留当前 TAB、daemon 和浏览器，提示用户操作后立即结束本轮。等待期间不得自行检查、AutoFix、trace 重跑、改超时或重复执行命令 |
 | Weixin `AUTH_RETRY_EXHAUSTED` | 验证确认预算已耗尽；这是不可重试终态，不得再次提示登录、添加 `--verification-confirmed`、修改参数或创建新 fingerprint |
+| Weixin `COMMAND_TIMEOUT_UNCERTAIN` / `COMMAND_EXEC_UNCERTAIN` | Runner 未取得最终结构化结果；这不是登录状态，不得添加 `--verification-confirmed`。先检查返回的进程诊断和已有本地产物；`download-publish-data` 仅按 `references/weixin.md` 的单次诊断重试规则请求独立授权 |
 | Weixin `OPERATION_ALREADY_FINALIZED` | 同一逻辑操作此前已终结，本次未执行底层命令；读取首次执行时保存的结果或产物，禁止解释成登录失败、修改 `--limit`/日期/输出路径绕过 gate，或声称前次业务结果一定成功 |
 | AUTH_REQUIRED (exit 77，非 Weixin) | STOP，提示用户登录 |
 | BROWSER_CONNECT (exit 69) | 不得因随机 profile 名称推断需要用户操作。未经过 Runner 的通用命令调用 `node /app/skills/bycli/scripts/bridge-bootstrap.mjs --format json`；Runner 已返回最终 bridgeCode 时不得再次执行恢复。只有 `BRIDGE_UNAVAILABLE` 才请求用户检查托管 Chromium 与扩展 |

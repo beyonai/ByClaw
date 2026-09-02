@@ -143,6 +143,7 @@ export function isDaemonHealthy(result) {
 }
 
 export function runCommand(command, args, timeoutMs = BYCLI_TIMEOUT_MS) {
+  const startedAt = Date.now();
   return new Promise((resolve) => {
     execFile(command, args, {
       timeout: timeoutMs,
@@ -155,6 +156,7 @@ export function runCommand(command, args, timeoutMs = BYCLI_TIMEOUT_MS) {
         stderr: stderr || '',
         timedOut: Boolean(error && (error.killed || error.code === 'ETIMEDOUT')),
         signal: error?.signal || null,
+        durationMs: Date.now() - startedAt,
       });
     });
   });

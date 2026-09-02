@@ -58,6 +58,18 @@ class BycliBridgeContractTest(unittest.TestCase):
         self.assertIn("details.bridgeCode=BRIDGE_UNAVAILABLE", self.skill)
         self.assertIn("不得再", self.skill)
 
+    def test_uncertain_runner_process_failures_are_not_documented_as_authentication(self):
+        for required in (
+            "COMMAND_TIMEOUT_UNCERTAIN",
+            "COMMAND_EXEC_UNCERTAIN",
+            "不得添加 `--verification-confirmed`",
+        ):
+            self.assertIn(required, self.skill)
+            self.assertIn(required, self.weixin)
+
+    def test_runner_timeout_margin_is_documented(self):
+        self.assertIn("30 秒安全余量", self.weixin)
+
 
 if __name__ == "__main__":
     unittest.main()
