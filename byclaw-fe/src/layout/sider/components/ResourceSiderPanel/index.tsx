@@ -617,6 +617,8 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
     }
   };
 
+  // 技能开发入口暂时隐藏，保留处理逻辑供后续恢复。
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleComplexSkillDevelop = () => {
     message.info(intl.formatMessage({ id: 'resourceTabs.skillUpload.codeAgentDeveloping' }));
   };
@@ -640,6 +642,8 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
     return false;
   };
 
+  // 技能开发入口暂时隐藏，保留处理逻辑供后续恢复。
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handlePageSkillDevelop = async () => {
     try {
       const menus = await getManagerMenuConfig();
@@ -1127,6 +1131,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
             multiple
             onChange={handleSkillImportChange}
           />
+          {/* 暂时隐藏复杂技能开发和界面技能开发入口，保留原代码便于后续恢复。
           <div className={styles.skillActionBar}>
             <Button
               size="small"
@@ -1145,6 +1150,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
               {intl.formatMessage({ id: 'resourceTabs.skillUpload.pageSkillDevelop' })}
             </Button>
           </div>
+          */}
         </>
       )}
       <div className={styles.listContainer}>

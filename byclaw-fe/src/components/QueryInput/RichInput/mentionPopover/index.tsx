@@ -78,6 +78,7 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
   const isExpertResourceOverlayOpen = chatMode === chatModeMap.expert && !!currentAgent;
   const useInputWidth = isAtPopover && !isExpertResourceOverlayOpen && !!width;
   const panelHeight = useInputWidth ? '40vh' : '65vh';
+  const panelWidth = useInputWidth && width ? width : 'min(calc(100vw - 24px), 485px)';
 
   useEffect(() => {
     if (open && popoverRef.current) {
@@ -231,7 +232,8 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
       placement={placement || (isAtPopover ? 'topLeft' : undefined)}
       // 位置由输入框所在区域统一决定：历史会话固定显示在输入框上方，新会话固定显示在下方。
       // 禁止 antd 根据可视区域自动翻转，否则历史会话可能被错误翻到输入框下方并遮挡输入框。
-      autoAdjustOverflow={false}
+      // # 面板需要兼容窄屏，允许 antd 自动水平偏移；@ 面板仍保持输入框上下定位规则。
+      autoAdjustOverflow={!isAtPopover}
       ref={popoverRef}
       arrow={false}
       onOpenChange={(v) => {
@@ -240,11 +242,11 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
         }
       }}
       styles={{
-        root: useInputWidth && width ? { width, minWidth: width, maxWidth: width } : undefined,
+        root: { width: panelWidth, minWidth: panelWidth, maxWidth: panelWidth },
         body: {
           height: panelHeight,
-          minWidth: 320,
-          ...(useInputWidth ? { width } : {}),
+          width: panelWidth,
+          minWidth: panelWidth,
           padding: 0,
         },
       }}
@@ -268,7 +270,8 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
             style={{
               height: panelHeight,
               overflow: useInputWidth ? 'hidden' : undefined,
-              ...(useInputWidth && width ? { width, maxWidth: width } : {}),
+              width: panelWidth,
+              maxWidth: panelWidth,
             }}
           >
             <div className={styles.contentInner}>

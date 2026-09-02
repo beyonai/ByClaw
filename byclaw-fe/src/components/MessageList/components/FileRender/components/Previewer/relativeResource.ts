@@ -2,8 +2,6 @@ import { getMimeType } from '@/components/QueryInput/components/FileBrowserEntry
 import type { MarkdownImageResolver } from '@/components/Preview/Md';
 import { getFileUrl } from '@/utils/file';
 
-const relativeResourceCache = new Map<string, Promise<Blob>>();
-
 const isExternalResourcePath = (path: string) =>
   path.startsWith('/') || path.startsWith('#') || path.startsWith('//') || /^[a-z][a-z\d+.-]*:/i.test(path);
 
@@ -74,21 +72,16 @@ export const createRelativeResourceResolver = (fileUrl?: string): MarkdownImageR
     if (isExternalResourcePath(resourcePath)) return resourcePath;
 
     const resourceUrl = getRelativeResourceUrl(fileUrl, resourcePath);
-    const cached = relativeResourceCache.get(resourceUrl);
-    if (cached) return cached;
+    // 预览文件可能在会话过程中被覆盖，禁止复用旧的相对资源 Blob。
+    const requestUrl = new URL(resourceUrl, window.location.origin);
+    requestUrl.searchParams.set('_previewTime', `${Date.now()}`);
 
-    const request = fetch(resourceUrl)
-      .then(async (response) => {
-        if (!response.ok) throw new Error(response.statusText);
-        const blob = await response.blob();
-        return normalizeResourceBlob(blob, resourcePath);
-      })
-      .catch((error) => {
-        relativeResourceCache.delete(resourceUrl);
-        throw error;
-      });
+    const request = fetch(requestUrl.toString(), { cache: 'no-store' }).then(async (response) => {
+      if (!response.ok) throw new Error(response.statusText);
+      const blob = await response.blob();
+      return normalizeResourceBlob(blob, resourcePath);
+    });
 
-    relativeResourceCache.set(resourceUrl, request);
     return request;
   };
 };

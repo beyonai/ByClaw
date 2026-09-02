@@ -1063,6 +1063,7 @@ const OntologyCenter: React.FC = () => {
   return (
     <div className={styles.container} onScroll={handleContainerScroll}>
       <CommonTabs
+        className={styles.secondaryTabs}
         activeKey={activeTab}
         onChange={(key) => {
           setActiveTab(key as OwnerTab);

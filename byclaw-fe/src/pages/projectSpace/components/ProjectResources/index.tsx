@@ -190,10 +190,10 @@ const ProjectResources: React.FC<Props> = ({
         error?.response?.data?.msg ||
         error?.response?.data?.message ||
         error?.message;
-      message.error({
-        key: 'project-cloud-drive-load-error',
-        content: apiMessage || intl.formatMessage({ id: 'projectSpace.resources.loadFilesFailed' }),
-      });
+      // 接口未返回具体错误时不弹出笼统的“共享文件加载失败”提示，避免遮挡项目详情。
+      if (apiMessage) {
+        message.error({ key: 'project-cloud-drive-load-error', content: apiMessage });
+      }
     } finally {
       setLoadingFiles(false);
     }
@@ -569,7 +569,11 @@ const ProjectResources: React.FC<Props> = ({
   );
 
   const empty = (
-    <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={intl.formatMessage({ id: 'chatResource.empty' })} />
+    <Empty
+      className={styles.projectResourceEmpty}
+      image={Empty.PRESENTED_IMAGE_SIMPLE}
+      description={intl.formatMessage({ id: 'chatResource.empty' })}
+    />
   );
   // 云盘展示和操作统一由 FileResourcePanel 负责。
   void files;
@@ -828,14 +832,10 @@ const ProjectResources: React.FC<Props> = ({
       >
         <section
           className={`${styles.resourceCategoryCard} ${styles.resourceCloudDriveCard} ${
-            expandedCard === 'cloudDrive' ? styles.resourceCategoryCardExpanded : ''
-          }`}
+            !cloudResourceId || (!loadingFiles && !files.length) ? styles.resourceCategoryCardEmpty : ''
+          } ${expandedCard === 'cloudDrive' ? styles.resourceCategoryCardExpanded : ''}`}
         >
-          {renderCardHeader(
-            '项目云盘',
-            'cloudDrive',
-            undefined
-          )}
+          {renderCardHeader('项目云盘', 'cloudDrive', undefined)}
           <FileResourcePanel
             scope="project"
             sessionId=""
@@ -843,6 +843,7 @@ const ProjectResources: React.FC<Props> = ({
             project={project}
             resourceId={cloudResourceId ? String(cloudResourceId) : undefined}
             fillContainer
+            compactResourceEmpty
             onOpenDetail={(panel, options) => siderContentContext.setDetailPanel?.(panel, options)}
             onPreviewFile={(item) => {
               setPreviewFile({
@@ -856,27 +857,8 @@ const ProjectResources: React.FC<Props> = ({
           />
         </section>
 
-        {repositoryProject && (
-          <section
-            className={`${styles.resourceCategoryCard} ${
-              expandedCard === 'code' ? styles.resourceCategoryCardExpanded : ''
-            }`}
-          >
-            {renderCardHeader(
-              intl.formatMessage({ id: 'projectSpace.resources.sharedCode' }),
-              'code',
-              onOpenRepositoryManager ? () => onOpenRepositoryManager() : undefined,
-              undefined,
-              true
-            )}
-            <Spin spinning={loadingRepos} className={styles.resourceCategoryBody}>
-              {repos.length ? repos.map(renderRepository) : !loadingRepos && empty}
-            </Spin>
-          </section>
-        )}
-
         <section
-          className={`${styles.resourceCategoryCard} ${
+          className={`${styles.resourceCategoryCard} ${!scheduleTasks.length ? styles.resourceCategoryCardEmpty : ''} ${
             expandedCard === 'schedule' ? styles.resourceCategoryCardExpanded : ''
           }`}
         >
@@ -961,17 +943,44 @@ const ProjectResources: React.FC<Props> = ({
               </div>
             ) : (
               <div className={styles.projectScheduleEmpty}>
-                <Empty
-                  image={Empty.PRESENTED_IMAGE_SIMPLE}
-                  description={intl.formatMessage({
-                    id: 'employees.scheduleTaskList.empty',
-                    defaultMessage: '暂无定时任务',
-                  })}
-                />
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={intl.formatMessage({ id: 'common.noData' })} />
               </div>
             )}
           </div>
         </section>
+
+        {repositoryProject && (
+          <section
+            className={`${styles.resourceCategoryCard} ${
+              !loadingRepos && !repos.length ? styles.resourceCategoryCardEmpty : ''
+            } ${expandedCard === 'code' ? styles.resourceCategoryCardExpanded : ''}`}
+          >
+            {renderCardHeader(
+              intl.formatMessage({ id: 'projectSpace.resources.sharedCode' }),
+              'code',
+              onOpenRepositoryManager ? () => onOpenRepositoryManager() : undefined,
+              undefined,
+              true
+            )}
+            {loadingRepos ? (
+              <Spin spinning className={styles.resourceCategoryBody} />
+            ) : repos.length ? (
+              <Spin spinning={false} className={styles.resourceCategoryBody}>
+                {repos.map(renderRepository)}
+              </Spin>
+            ) : (
+              <div className={styles.projectScheduleBody}>
+                <div className={styles.projectScheduleEmpty}>
+                  <Empty
+                    className={styles.projectResourceEmpty}
+                    image={Empty.PRESENTED_IMAGE_SIMPLE}
+                    description={intl.formatMessage({ id: 'common.noData' })}
+                  />
+                </div>
+              </div>
+            )}
+          </section>
+        )}
 
         {isOperationProject && (
           <section

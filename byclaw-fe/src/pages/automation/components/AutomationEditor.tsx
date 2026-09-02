@@ -4,6 +4,7 @@ import { useIntl } from '@umijs/max';
 import QueryInput from '@/components/QueryInput';
 import { createScanSource, updateScanSource } from '@/service/devloop';
 import { useProjectList } from '@/pages/projectSpace/hooks/useProjectList';
+import { useProjectScopeId } from '@/pages/projectSpace/hooks/useProjectScopeId';
 import {
   ALL_WEEKDAYS,
   buildAutomationCron,
@@ -48,8 +49,12 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({
   });
   const [promptDraftVersion, setPromptDraftVersion] = useState(0);
   const { projects, loading: projectsLoading } = useProjectList();
+  // 新建入口可能未通过路由传入项目 ID（例如从聊天框进入），此时复用聊天框项目选择器
+  // 写入的全局项目作用域，确保“项目空间”在页面初始化时自动回填。
+  const [scopedProjectId] = useProjectScopeId();
+  const resolvedProjectId = projectId ?? scopedProjectId;
   const selectedProjectId = Form.useWatch('projectId', form);
-  const currentProjectId = projectId ?? selectedProjectId;
+  const currentProjectId = selectedProjectId ?? resolvedProjectId;
   const currentProject = projects.find((item) => `${item.projectId}` === `${currentProjectId}`);
   useEffect(() => {
     onResourceReferenceChange?.((resource) => {
@@ -117,12 +122,12 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({
       const config = parseAutomationConfig(source?.config);
       setPromptDraft({ text: config.chatContent, resourceList: config.resourceList });
     }
-    if (!source && projectId !== undefined && projectId !== null) {
-      initialValues.projectId = String(projectId);
+    if (!source && resolvedProjectId !== undefined && resolvedProjectId !== null) {
+      initialValues.projectId = String(resolvedProjectId);
     }
     setPromptDraftVersion((version) => version + 1);
     form.setFieldsValue(initialValues);
-  }, [form, projectId, source, template]);
+  }, [form, resolvedProjectId, source, template]);
 
   const handleSave = async () => {
     try {
@@ -202,7 +207,11 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({
           form={form}
           layout="vertical"
           className={styles.editorForm}
-          initialValues={projectId !== undefined && projectId !== null ? { projectId: String(projectId) } : undefined}
+          initialValues={
+            resolvedProjectId !== undefined && resolvedProjectId !== null
+              ? { projectId: String(resolvedProjectId) }
+              : undefined
+          }
         >
           <Form.Item
             name="sourceName"
@@ -219,12 +228,16 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({
           </Form.Item>
           <Form.Item
             name="projectId"
-            label={
-              <span>
-                {intl.formatMessage({ id: 'automation.workspace' })}
-                <small className={styles.optionalLabel}>{intl.formatMessage({ id: 'automation.optional' })}</small>
-              </span>
-            }
+            label={intl.formatMessage({ id: 'automation.workspace' })}
+            rules={[
+              {
+                required: true,
+                message: intl.formatMessage({
+                  id: 'automation.workspaceRequired',
+                  defaultMessage: '请选择项目空间',
+                }),
+              },
+            ]}
           >
             <Select
               allowClear
@@ -257,7 +270,7 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({
               minRows={6}
               maxRows={12}
               enableTaskTemplate={false}
-              mentionPopoverPlacement="bottomLeft"
+              mentionPopoverPlacement="bottomRight"
               cannotSend
               inputDraft={promptDraft}
               onInputDraftChange={(draft) =>

@@ -77,7 +77,8 @@ const ProjectDetail: React.FC<Props> = ({
   )?.value;
   // 研发需求入口已迁到应用级「自动化」页，运营项目大详情也不再展示需求页签。
   const showRequirementsSection = false;
-  const showMembersSection = true;
+  // 默认项目(-1)没有独立成员，右侧不展示项目成员模块。
+  const showMembersSection = Number(project?.projectId) !== -1;
 
   const updateSectionToolbar = useCallback((section: ProjectDetailSection, toolbar: React.ReactNode) => {
     setSectionToolbarMap((current) => (current[section] === toolbar ? current : { ...current, [section]: toolbar }));
@@ -351,30 +352,32 @@ const ProjectDetail: React.FC<Props> = ({
         </div>
       </div>
       <aside className={styles.detailSidebar}>
+        {showMembersSection && (
+          <div
+            className={`${styles.detailSidebarSection} ${styles.detailMembersSection} ${
+              membersExpanded ? styles.resourceCategoryCardExpanded : ''
+            }`}
+          >
+            <div className={styles.detailSidebarSectionHeader}>
+              <Typography.Text className={styles.detailSidebarSectionTitle}>
+                {intl.formatMessage({ id: 'projectSpace.members.title', defaultMessage: '项目成员' })}
+              </Typography.Text>
+              <div className={styles.detailSidebarSectionActions}>
+                {sectionToolbarMap.members}
+                <Button
+                  type="text"
+                  size="small"
+                  className={styles.resourceCardExpandButton}
+                  icon={membersExpanded ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
+                  onClick={() => setMembersExpanded((expanded) => !expanded)}
+                />
+              </div>
+            </div>
+            {renderSectionContent('members')}
+          </div>
+        )}
         <div className={`${styles.detailSidebarSection} ${styles.detailResourcesSection}`}>
           {renderSectionContent('resources')}
-        </div>
-        <div
-          className={`${styles.detailSidebarSection} ${styles.detailMembersSection} ${
-            membersExpanded ? styles.resourceCategoryCardExpanded : ''
-          }`}
-        >
-          <div className={styles.detailSidebarSectionHeader}>
-            <Typography.Text className={styles.detailSidebarSectionTitle}>
-              {intl.formatMessage({ id: 'projectSpace.members.title', defaultMessage: '项目成员' })}
-            </Typography.Text>
-            <div className={styles.detailSidebarSectionActions}>
-              {sectionToolbarMap.members}
-              <Button
-                type="text"
-                size="small"
-                className={styles.resourceCardExpandButton}
-                icon={membersExpanded ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
-                onClick={() => setMembersExpanded((expanded) => !expanded)}
-              />
-            </div>
-          </div>
-          {renderSectionContent('members')}
         </div>
       </aside>
       <OperationTaskFormModal

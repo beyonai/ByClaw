@@ -1116,6 +1116,7 @@ export default {
   'automation.workspace': 'Project space',
   'automation.optional': ' (optional)',
   'automation.workspacePlaceholder': 'Select a project space',
+  'automation.workspaceRequired': 'Please select a project space',
   'automation.frequency': 'Run frequency',
   'automation.frequencyHint': ' (off-peak hours are recommended)',
   'automation.scheduleRequired': 'Complete the run frequency',

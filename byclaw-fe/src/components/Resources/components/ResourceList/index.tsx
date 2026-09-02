@@ -349,7 +349,8 @@ const ResourceList: React.FC<ResourceListProps> = ({
           </div>
         )}
 
-        {list.length > 0 && (
+        {/* 切换资源一级 Tab 时先隐藏旧列表，避免旧卡片套用新 resourceType 样式产生瞬间变形；仅展示 loading。 */}
+        {list.length > 0 && !loading && (
           <InfiniteScroll
             next={loadMore}
             hasMore={hasMore}
