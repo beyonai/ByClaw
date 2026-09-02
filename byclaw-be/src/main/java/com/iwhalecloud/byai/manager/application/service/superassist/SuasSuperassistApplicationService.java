@@ -1021,11 +1021,7 @@ public class SuasSuperassistApplicationService {
         String isRelDefaultDataset = jsonObject.getString("isRelDefaultDataset");
 
         // 先从当前map获取，没有再查或者创建，不用重复查询
-        AgentPrologueDto.ModelInfo modelInfo = modelInfoMap.get(modelProtocol);
-        if (modelInfo == null) {
-            modelInfo = this.getModelInfo(modelInfoMap, modelName, modelProtocol);
-            modelInfoMap.put(modelProtocol, modelInfo);
-        }
+        AgentPrologueDto.ModelInfo modelInfo = this.getModelInfo(modelInfoMap, modelName, modelProtocol);
 
 
         // 如果已经存在了，不再进行初始化
