@@ -3,7 +3,11 @@ import { get, isNil, set, unset } from 'lodash';
 import { compareStreamId, type ParsedChatStreamMessage } from '@/hooks/useSseSender/chatStream';
 import { IMessageState } from '@/constants/message';
 import { hasPendingEasyConfirmItem } from '@/components/MessagesComp/easyConfirm';
-import { chatSessionRuntimeManager, type RunningChatInfo } from '@/utils/chatSessionRuntimeManager';
+import {
+  chatSessionRuntimeManager,
+  type RunningChatInfo,
+  type SessionRuntimeState,
+} from '@/utils/chatSessionRuntimeManager';
 
 import type { IMessage, TaskPlanSnapshot } from '@/typescript/message';
 
@@ -380,6 +384,21 @@ const completeChatStreamContext = (context: ChatStreamRuntimeContext, messageSta
   chatSessionRuntimeManager.complete(context.clientRequestId);
 };
 
+const applyProjectedRootState = (context: ChatStreamRuntimeContext, runtime?: SessionRuntimeState) => {
+  if (runtime?.rootActive === undefined || context.answerMsg.messageState === IMessageState.Cancel) return;
+  const traceId = context.answerMsg.traceId || get(context.answerMsg, 'traceId');
+  if (!traceId || `${runtime.traceId}` !== `${traceId}`) return;
+
+  let messageState = IMessageState.Done;
+  if (runtime.status === 'failed') {
+    messageState = IMessageState.Error;
+  } else if (runtime.rootActive) {
+    messageState = IMessageState.Answer;
+  }
+  set(context.answerMsg, 'messageState', messageState);
+  set(context.answerMsg, 'thinkDone', !runtime.rootActive || runtime.status === 'failed');
+};
+
 const applyParsedStreamToContext = (parsed: ParsedChatStreamMessage, context: ChatStreamRuntimeContext) => {
   const { eventName, formattedPayload, rawMessage, sseMsg, streamId } = parsed;
   if (streamId) {
@@ -422,6 +441,7 @@ const applyParsedStreamToContext = (parsed: ParsedChatStreamMessage, context: Ch
   const nextSessionId = context.answerMsg.sessionId || get(formattedPayload, 'sessionId');
   chatSessionRuntimeManager.bindSession(context.clientRequestId, nextSessionId ? `${nextSessionId}` : undefined);
   registerSessionChatContext(nextSessionId ? `${nextSessionId}` : undefined, context);
+  applyProjectedRootState(context, chatSessionRuntimeManager.getSessionRuntime(nextSessionId));
   chatSessionRuntimeManager.setWaitingForUserInput(
     context.clientRequestId,
     hasPendingEasyConfirmItem(context.answerMsg, [
@@ -498,6 +518,22 @@ export const handleTaskPlanSnapshot = (message: any) => {
   context.answerMsg.messageId = `${taskPlan.messageId}`;
   context.answerMsg.sessionId = `${taskPlan.sessionId}`;
   if (taskPlan.traceId) context.answerMsg.traceId = taskPlan.traceId;
+  context.answerMsg = context.updateMessage(context.answerMsg);
+  return true;
+};
+
+export const handleSessionRuntimeState = (runtime: SessionRuntimeState) => {
+  if (!chatSessionRuntimeManager.applySessionRuntime(runtime)) return false;
+  if (runtime.rootActive === undefined) return true;
+
+  const context = findChatStreamContext(
+    { sessionId: runtime.sessionId, traceId: runtime.traceId },
+    { sessionId: runtime.sessionId, traceId: runtime.traceId }
+  );
+  if (!context || context.answerMsg.messageState === IMessageState.Cancel) return true;
+
+  clearAnswerFlush(context);
+  applyProjectedRootState(context, runtime);
   context.answerMsg = context.updateMessage(context.answerMsg);
   return true;
 };

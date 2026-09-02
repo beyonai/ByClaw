@@ -209,22 +209,44 @@ describe('utils/chatSessionRuntimeManager', () => {
     expect(chatSessionRuntimeManager.isSessionRunning('s1')).toBe(false);
   });
 
-  it('keeps local and server-projected runtime lifecycles independent', () => {
-    chatSessionRuntimeManager.register({ clientRequestId: 'local-1', sessionId: 's1' });
+  it('keeps aggregate team activity running while the captain can accept input', () => {
+    chatSessionRuntimeManager.register({ clientRequestId: 'local-1', sessionId: 's1', traceId: 'trace-1' });
     chatSessionRuntimeManager.applySessionRuntime({
       sessionId: 's1',
       traceId: 'trace-1',
-      status: 'idle',
-      activeAgentCount: 0,
-      activeChildCount: 0,
+      status: 'running',
+      activeAgentCount: 2,
+      activeChildCount: 2,
       waitingInteractionCount: 0,
+      rootActive: false,
+      acceptingInput: true,
       revision: 2,
       changedAt: 2000,
     });
 
     expect(chatSessionRuntimeManager.isSessionRunning('s1')).toBe(true);
+    expect(chatSessionRuntimeManager.getByClientRequest('local-1')).toBeDefined();
+    expect(chatSessionRuntimeManager.canAcceptInput('s1')).toBe(true);
     chatSessionRuntimeManager.complete('local-1');
-    expect(chatSessionRuntimeManager.isSessionRunning('s1')).toBe(false);
+    expect(chatSessionRuntimeManager.isSessionRunning('s1')).toBe(true);
+  });
+
+  it('does not let an older trace hide a newer local turn', () => {
+    chatSessionRuntimeManager.register({ clientRequestId: 'local-2', sessionId: 's1', traceId: 'trace-new' });
+    chatSessionRuntimeManager.applySessionRuntime({
+      sessionId: 's1',
+      traceId: 'trace-old',
+      status: 'idle',
+      activeAgentCount: 0,
+      activeChildCount: 0,
+      waitingInteractionCount: 0,
+      rootActive: false,
+      acceptingInput: true,
+      revision: 2,
+      changedAt: 2000,
+    });
+
+    expect(chatSessionRuntimeManager.isSessionRunning('s1')).toBe(true);
   });
 
   it('uses explicit parent input readiness without hiding active child work', () => {

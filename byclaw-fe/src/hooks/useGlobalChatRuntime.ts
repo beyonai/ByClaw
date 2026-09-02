@@ -7,10 +7,11 @@ import {
   clearChatRuntime,
   handleChatStreamError,
   handleParsedChatStream,
+  handleSessionRuntimeState,
   handleTaskPlanSnapshot,
 } from '@/hooks/useChat/chatRuntime';
 import webSocketManager from '@/utils/websocket';
-import { chatSessionRuntimeManager, type SessionRuntimeState } from '@/utils/chatSessionRuntimeManager';
+import type { SessionRuntimeState } from '@/utils/chatSessionRuntimeManager';
 
 import type { ISession } from '@/typescript/session';
 import type { TaskPlanSnapshot } from '@/typescript/message';
@@ -104,7 +105,7 @@ export default function useGlobalChatRuntime() {
       try {
         const payload = typeof message.data === 'string' ? JSON.parse(message.data) : message.data;
         if (!payload) return;
-        chatSessionRuntimeManager.applySessionRuntime({
+        handleSessionRuntimeState({
           ...payload,
           sessionId: `${payload.sessionId || message.sessionId || ''}`,
           traceId: `${payload.traceId || message.traceId || ''}`,

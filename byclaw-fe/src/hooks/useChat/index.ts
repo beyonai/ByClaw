@@ -397,6 +397,10 @@ function useChat(props: IProps) {
     return chatSessionRuntimeManager.isSessionRunning(sessionId);
   }, [sessionId, runtimeVersion]);
 
+  const canAcceptInput = useMemo(() => {
+    return chatSessionRuntimeManager.canAcceptInput(sessionId);
+  }, [sessionId, runtimeVersion]);
+
   const syncCurrentSessionRunningState = usePersistFn(async () => {
     if (!sessionId || !chatSessionRuntimeManager.isSessionRunning(sessionId)) {
       return;
@@ -1319,6 +1323,7 @@ function useChat(props: IProps) {
     updateMessage, // 更新消息的方法
     deleteMessage, // 删除消息的方法
     isSessionRunning,
+    canAcceptInput,
     cancelCurrentSession,
 
     getMessageList,

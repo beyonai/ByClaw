@@ -505,6 +505,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     updateMessage,
     deleteMessage,
     isSessionRunning,
+    canAcceptInput,
     cancelCurrentSession,
     sessionMessageLoadState,
     retrySessionMessageLoad,
@@ -669,11 +670,11 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
   }));
 
   const messageState = React.useMemo(() => {
-    if (isSessionRunning) {
+    if (isSessionRunning && !canAcceptInput) {
       return IMessageState.Answer;
     }
     return lastMsg?.messageState;
-  }, [isSessionRunning, lastMsg?.messageState]);
+  }, [canAcceptInput, isSessionRunning, lastMsg?.messageState]);
 
   const showNewSessionProjectSelector = Boolean(
     userInfo && queryInputProps.enableTaskTemplate !== false && (!sessionId || (preserveNewSessionView && !isBottom))

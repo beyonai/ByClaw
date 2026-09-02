@@ -537,6 +537,9 @@ describe('hooks/useChat/index', () => {
     });
     const { result } = renderHook(() => useChat({ sessionId: 's1', addSession: jest.fn() } as any));
 
+    expect(result.current.isSessionRunning).toBe(true);
+    expect(result.current.canAcceptInput).toBe(true);
+
     await act(async () => {
       await result.current.sendQuery({ queryQuestion: 'next task' });
     });
