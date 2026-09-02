@@ -34,6 +34,20 @@ const HUMAN_GATE_CODES = new Set([
   'MFA_REQUIRED',
 ]);
 const HUMAN_GATE_TEXT = /auth_required|captcha|mfa_required|environment[_ -]verification|login|环境异常|去验证|验证码|安全验证/i;
+const LEGACY_TYPED_ERROR_CODES = [
+  'ARGUMENT',
+  'EMPTY_RESULT',
+  'COMMAND_EXEC',
+  'AUTH_REQUIRED',
+  'TIMEOUT',
+  'CAPTCHA',
+  'ENVIRONMENT_VALIDATION',
+  'MFA_REQUIRED',
+  'RATE_LIMITED',
+  'BROWSER_CONNECT',
+  'RETRY_APPROVAL_REQUIRED',
+];
+const LEGACY_TYPED_ERROR_PATTERN = new RegExp(`\\b(${LEGACY_TYPED_ERROR_CODES.join('|')})\\b`, 'i');
 
 function normalizeUrl(value) {
   try {
@@ -87,9 +101,31 @@ export function operationFingerprint(argv) {
     .digest('hex');
 }
 
-function errorCode(result) {
-  const combined = `${result?.stdout || ''}\n${result?.stderr || ''}`;
-  const codeMatch = combined.match(/["']?code["']?\s*[:=]\s*["']?([A-Z_]+)/i);
+function parseJson(value) {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function structuredErrorCode(value) {
+  const parsed = parseJson(value);
+  const code = parsed?.error?.code;
+  return typeof code === 'string' && code.trim() ? code.trim().toUpperCase() : null;
+}
+
+export function errorCode(result) {
+  const stderrCode = structuredErrorCode(result?.stderr);
+  if (stderrCode) return stderrCode;
+  const exitCode = Number(result?.exitCode);
+  if (exitCode !== 0) {
+    const stdoutCode = structuredErrorCode(result?.stdout);
+    if (stdoutCode) return stdoutCode;
+  }
+  const legacyOutput = String(result?.stderr || '');
+  const codeMatch = legacyOutput.match(LEGACY_TYPED_ERROR_PATTERN);
   return codeMatch?.[1]?.toUpperCase() || null;
 }
 
@@ -122,6 +158,7 @@ async function writeState(path, state) {
     confirmedRerunCount: state.confirmedRerunCount,
     rerunConsumed: state.rerunConsumed,
     lastCode: state.lastCode,
+    lastOutcome: state.lastOutcome,
     updatedAt: new Date().toISOString(),
   }, null, 2)}\n`;
   await writeFile(temporary, payload, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
@@ -135,15 +172,25 @@ function confirmedRerunCount(state) {
   return state?.rerunConsumed === true ? 1 : 0;
 }
 
-function blockedResult(operationFingerprintValue, phase, reason) {
+function blockedResult(operationFingerprintValue, phase, reason, previousOutcome = 'unknown') {
+  const waitingForUser = reason === 'explicit-verification-confirmation-required';
+  const authExhausted = reason === 'login-gate-rerun-exhausted';
+  const code = waitingForUser
+    ? 'AUTH_REQUIRED'
+    : authExhausted ? 'AUTH_RETRY_EXHAUSTED' : 'OPERATION_ALREADY_FINALIZED';
   return {
     executed: false,
-    exitCode: 77,
+    commandExecuted: false,
+    exitCode: waitingForUser ? 77 : 1,
+    code,
     stdout: '',
     stderr: '',
     operationFingerprint: operationFingerprintValue,
     phase,
     reason,
+    retryable: waitingForUser,
+    requiresUserAction: waitingForUser,
+    ...(code === 'OPERATION_ALREADY_FINALIZED' ? { previousOutcome } : {}),
   };
 }
 
@@ -159,11 +206,53 @@ function callbackControls(result) {
 function publicChildResult(result) {
   if (!result || typeof result !== 'object') return result;
   const {
-    commandExecuted: _commandExecuted,
     stateDisposition: _stateDisposition,
     ...publicResult
   } = result;
   return publicResult;
+}
+
+function resultRows(payload) {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.data)) return payload.data;
+  if (Array.isArray(payload?.data?.list)) return payload.data.list;
+  return [];
+}
+
+function resultOutcome(result) {
+  if (Number(result?.exitCode) !== 0) return 'failed';
+  const payload = parseJson(result?.stdout);
+  const directStatus = payload?.status ?? payload?.data?.status;
+  if (directStatus === 'partial') return 'partial';
+  if (directStatus === 'failed' || payload?.ok === false) return 'failed';
+  const rows = resultRows(payload);
+  const statuses = rows.map(row => row?.status).filter(status => typeof status === 'string');
+  const failedCount = statuses.filter(status => status === 'failed').length;
+  if (statuses.includes('partial') || (failedCount > 0 && failedCount < statuses.length)) {
+    return 'partial';
+  }
+  if (failedCount > 0) return 'failed';
+  return 'succeeded';
+}
+
+export function blockedCliPayload(result) {
+  return {
+    ok: false,
+    gate: {
+      executed: false,
+      commandExecuted: false,
+      phase: result.phase,
+      reason: result.reason,
+    },
+    error: {
+      code: result.code,
+      message: result.reason,
+      exitCode: result.exitCode,
+      retryable: result.retryable,
+      requiresUserAction: result.requiresUserAction,
+      ...(result.previousOutcome ? { previousOutcome: result.previousOutcome } : {}),
+    },
+  };
 }
 
 function isBridgeOnlyResult(result) {
@@ -187,7 +276,17 @@ export async function runGate({
     const state = await readState(statePath);
     const consumedReruns = confirmedRerunCount(state);
     if (state?.phase === 'terminal') {
-      return blockedResult(fingerprint, 'terminal', 'login-gate-rerun-exhausted');
+      const terminalAuthCode = HUMAN_GATE_CODES.has(state.lastCode) || state.lastCode === 'TIMEOUT';
+      const legacyTerminalAuthState = !Number.isInteger(state.confirmedRerunCount)
+        && state.rerunConsumed === true;
+      const authRetriesExhausted = terminalAuthCode
+        && (consumedReruns >= MAX_CONFIRMED_RERUNS || legacyTerminalAuthState);
+      return blockedResult(
+        fingerprint,
+        'terminal',
+        authRetriesExhausted ? 'login-gate-rerun-exhausted' : 'operation-already-finalized',
+        state.lastOutcome || 'unknown',
+      );
     }
     if (state?.phase === 'rerun-consumed') {
       const phase = consumedReruns >= MAX_CONFIRMED_RERUNS
@@ -208,7 +307,12 @@ export async function runGate({
       );
     }
     if (state?.phase === 'complete') {
-      return blockedResult(fingerprint, 'complete', 'operation-already-complete');
+      return blockedResult(
+        fingerprint,
+        'complete',
+        'operation-already-finalized',
+        state.lastOutcome || 'unknown',
+      );
     }
     if (state?.phase === 'waiting-confirmation' && verificationConfirmed !== true) {
       return blockedResult(
@@ -249,6 +353,7 @@ export async function runGate({
       return {
         ...visibleChildResult,
         executed: true,
+        commandExecuted: controls.commandExecuted,
         operationFingerprint: fingerprint,
         phase: 'initial',
         reason: null,
@@ -267,10 +372,12 @@ export async function runGate({
       confirmedRerunCount: nextConfirmedRerunCount,
       rerunConsumed: nextConfirmedRerunCount > 0,
       lastCode: errorCode(childResult),
+      lastOutcome: resultOutcome(childResult),
     });
     return {
       ...visibleChildResult,
       executed: true,
+      commandExecuted: controls.commandExecuted,
       operationFingerprint: fingerprint,
       phase,
       reason: null,
@@ -333,19 +440,7 @@ async function main() {
     process.stdout.write(result.stdout || '');
     process.stderr.write(result.stderr || '');
   } else {
-    process.stderr.write(`${JSON.stringify({
-      ok: false,
-      gate: {
-        executed: false,
-        phase: result.phase,
-        reason: result.reason,
-      },
-      error: {
-        code: 'AUTH_REQUIRED',
-        message: result.reason,
-        exitCode: 77,
-      },
-    }, null, 2)}\n`);
+    process.stderr.write(`${JSON.stringify(blockedCliPayload(result), null, 2)}\n`);
   }
   process.exitCode = Number(result.exitCode) || 0;
 }

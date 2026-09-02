@@ -102,6 +102,10 @@ test('human verification may be confirmed ten times before the operation becomes
     assert.equal(denied.executed, false);
     assert.equal(denied.phase, 'terminal');
     assert.equal(denied.reason, 'login-gate-rerun-exhausted');
+    assert.equal(denied.code, 'AUTH_RETRY_EXHAUSTED');
+    assert.equal(denied.exitCode, 1);
+    assert.equal(denied.retryable, false);
+    assert.equal(denied.requiresUserAction, false);
   }
   assert.equal(executions.length, 11);
 });
@@ -191,6 +195,114 @@ test('a successful confirmed rerun completes the operation', async (t) => {
   assert.equal(completed.phase, 'complete');
 });
 
+test('a finalized operation is not reported as an authentication requirement', async (t) => {
+  const stateDir = await mkdtemp(join(tmpdir(), 'weixin-login-gate-finalized-'));
+  t.after(() => rm(stateDir, { recursive: true, force: true }));
+  let executions = 0;
+  const options = {
+    stateDir,
+    argv: command(),
+    execute: async () => {
+      executions += 1;
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify({ ok: true, records: [{ title: 'saved' }] }),
+        stderr: '',
+      };
+    },
+  };
+
+  const initial = await runGate(options);
+  const replay = await runGate(options);
+
+  assert.equal(initial.phase, 'complete');
+  assert.equal(replay.executed, false);
+  assert.equal(replay.commandExecuted, false);
+  assert.equal(replay.exitCode, 1);
+  assert.equal(replay.code, 'OPERATION_ALREADY_FINALIZED');
+  assert.equal(replay.reason, 'operation-already-finalized');
+  assert.equal(replay.previousOutcome, 'succeeded');
+  assert.equal(replay.retryable, false);
+  assert.equal(replay.requiresUserAction, false);
+  assert.equal(executions, 1);
+});
+
+test('a finalized partial result preserves its non-success outcome', async (t) => {
+  const stateDir = await mkdtemp(join(tmpdir(), 'weixin-login-gate-partial-'));
+  t.after(() => rm(stateDir, { recursive: true, force: true }));
+  const options = {
+    stateDir,
+    argv: command(),
+    execute: async () => ({
+      exitCode: 0,
+      stdout: JSON.stringify([{ status: 'partial', markdownPath: '/tmp/article.md' }]),
+      stderr: '',
+    }),
+  };
+
+  await runGate(options);
+  const replay = await runGate(options);
+
+  assert.equal(replay.code, 'OPERATION_ALREADY_FINALIZED');
+  assert.equal(replay.previousOutcome, 'partial');
+});
+
+test('a finalized failed result in a data array preserves its failure outcome', async (t) => {
+  const stateDir = await mkdtemp(join(tmpdir(), 'weixin-login-gate-failed-array-'));
+  t.after(() => rm(stateDir, { recursive: true, force: true }));
+  const options = {
+    stateDir,
+    argv: command(),
+    execute: async () => ({
+      exitCode: 0,
+      stdout: JSON.stringify({ ok: true, data: [{ status: 'failed', error: 'download missing' }] }),
+      stderr: '',
+    }),
+  };
+
+  await runGate(options);
+  const replay = await runGate(options);
+
+  assert.equal(replay.code, 'OPERATION_ALREADY_FINALIZED');
+  assert.equal(replay.previousOutcome, 'failed');
+});
+
+test('successful business data containing an AUTH_REQUIRED code is not a human gate', async (t) => {
+  const stateDir = await mkdtemp(join(tmpdir(), 'weixin-login-gate-business-code-'));
+  t.after(() => rm(stateDir, { recursive: true, force: true }));
+
+  const outcome = await runGate({
+    stateDir,
+    argv: command(),
+    execute: async () => ({
+      exitCode: 0,
+      stdout: JSON.stringify({ ok: true, records: [{ code: 'AUTH_REQUIRED' }] }),
+      stderr: '',
+    }),
+  });
+
+  assert.equal(outcome.phase, 'complete');
+  assert.equal(outcome.exitCode, 0);
+});
+
+test('nonzero business stdout containing AUTH_REQUIRED is not an authentication gate', async (t) => {
+  const stateDir = await mkdtemp(join(tmpdir(), 'weixin-login-gate-nonzero-business-code-'));
+  t.after(() => rm(stateDir, { recursive: true, force: true }));
+
+  const outcome = await runGate({
+    stateDir,
+    argv: command(),
+    execute: async () => ({
+      exitCode: 1,
+      stdout: JSON.stringify({ records: [{ code: 'AUTH_REQUIRED' }] }),
+      stderr: '',
+    }),
+  });
+
+  assert.equal(outcome.phase, 'terminal');
+  assert.equal(outcome.exitCode, 1);
+});
+
 test('a non-verification error on a confirmed rerun remains terminal', async (t) => {
   const stateDir = await mkdtemp(join(tmpdir(), 'weixin-login-gate-command-error-'));
   t.after(() => rm(stateDir, { recursive: true, force: true }));
@@ -207,6 +319,12 @@ test('a non-verification error on a confirmed rerun remains terminal', async (t)
 
   assert.equal(failed.executed, true);
   assert.equal(failed.phase, 'terminal');
+
+  const replay = await runGate({ stateDir, argv: command(), execute });
+  assert.equal(replay.executed, false);
+  assert.equal(replay.code, 'OPERATION_ALREADY_FINALIZED');
+  assert.equal(replay.reason, 'operation-already-finalized');
+  assert.equal(replay.previousOutcome, 'failed');
 });
 
 test('initial no-auth-state result receives initial context and creates no gate state', async (t) => {
@@ -229,7 +347,7 @@ test('initial no-auth-state result receives initial context and creates no gate 
 
   assert.deepEqual(contexts, [{ attemptKind: 'initial' }]);
   assert.equal(outcome.exitCode, 69);
-  assert.equal('commandExecuted' in outcome, false);
+  assert.equal(outcome.commandExecuted, false);
   assert.equal('stateDisposition' in outcome, false);
   assert.deepEqual(await readdir(stateDir), []);
 });
@@ -401,8 +519,38 @@ process.exit(77);
 
   for (let retry = 0; retry < 4; retry += 1) {
     const terminal = await runGateCli(commandArgs, env);
-    assert.equal(terminal.code, 77);
-    assert.match(terminal.stderr, /login-gate-rerun-exhausted/);
+    assert.equal(terminal.code, 1);
+    const payload = JSON.parse(terminal.stderr);
+    assert.equal(payload.error.code, 'AUTH_RETRY_EXHAUSTED');
+    assert.equal(payload.error.retryable, false);
+    assert.equal(payload.error.requiresUserAction, false);
   }
   assert.equal((await readFile(counter, 'utf8')).trim().split('\n').length, 11);
+});
+
+test('CLI finalized replay reports a distinct non-authentication error', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'weixin-login-gate-cli-finalized-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const stateDir = join(root, 'state');
+  const fakeBycli = join(root, 'bycli');
+  await writeFile(fakeBycli, `#!/usr/bin/env node
+process.stdout.write(JSON.stringify({ ok: true, records: [] }) + '\\n');
+`);
+  await chmod(fakeBycli, 0o700);
+  const args = [
+    '--state-dir', stateDir, '--', fakeBycli, 'weixin', 'published',
+    '--limit', '20', '-f', 'json',
+  ];
+
+  const initial = await runGateCli(args, {});
+  const replay = await runGateCli(args, {});
+
+  assert.equal(initial.code, 0);
+  assert.equal(replay.code, 1);
+  const payload = JSON.parse(replay.stderr);
+  assert.equal(payload.error.code, 'OPERATION_ALREADY_FINALIZED');
+  assert.equal(payload.error.previousOutcome, 'succeeded');
+  assert.equal(payload.error.retryable, false);
+  assert.equal(payload.error.requiresUserAction, false);
+  assert.doesNotMatch(replay.stderr, /AUTH_REQUIRED/);
 });

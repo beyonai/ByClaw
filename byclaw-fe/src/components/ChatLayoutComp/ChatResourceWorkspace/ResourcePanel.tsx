@@ -10,6 +10,7 @@ import { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentB
 import type { DetailPanelOptions } from '@/layout/sider/siderContentContext';
 import FileResourcePanel from './FileResourcePanel';
 import CodesTab from '@/layout/sider/components/ProjectSpaceList/CodesTab';
+import { listAvailableProjectRepos } from '@/service/devloop';
 import { useChatResourceProject } from './useChatResourceProject';
 import styles from './index.module.less';
 
@@ -36,6 +37,7 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
   const [upperScopeKey, setUpperScopeKey] = useState<UpperScopeKey>('session');
   const [secondaryState, setSecondaryState] = useState<SecondaryState>(EMPTY_SECONDARY_STATE);
   const [sessionResourceRefreshKey, setSessionResourceRefreshKey] = useState(0);
+  const [availableRepoCount, setAvailableRepoCount] = useState<number | null>(null);
   const resourceId = activeEmployee.resourceId || (project?.resourceId ? `${project.resourceId}` : undefined);
   // 项目云盘必须优先使用项目知识库 ID；详情接口缺少 cloudResourceId 时兼容项目 resourceId，不能回退到当前员工资源。
   const projectCloudResourceId = cloudResourceId
@@ -46,8 +48,31 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
         ? `${project.resourceId}`
         : undefined;
 
-  // 项目类型已废弃，所有项目和会话统一展示项目代码模块。
-  const showCode = true;
+  // 只有当前会话实际可访问到至少一个仓库时才展示项目代码。
+  // null 表示仍在查询，避免先显示再隐藏造成菜单闪烁。
+  const showCode = Boolean(sessionId && availableRepoCount !== null && availableRepoCount > 0);
+
+  useEffect(() => {
+    let disposed = false;
+    setAvailableRepoCount(null);
+    if (!projectId || !sessionId) {
+      return () => {
+        disposed = true;
+      };
+    }
+    void listAvailableProjectRepos(projectId, sessionId)
+      .then((repos) => {
+        if (!disposed) setAvailableRepoCount(Array.isArray(repos) ? repos.length : 0);
+      })
+      .catch(() => {
+        // 仓库可用性查询失败时不展示入口，避免打开后必然得到空代码页。
+        if (!disposed) setAvailableRepoCount(0);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [projectId, sessionId, sessionResourceRefreshKey]);
+
   useEffect(() => {
     if (!showCode && secondaryState.session === 'code') {
       setSecondaryState((current) => ({ ...current, session: 'file' }));

@@ -18,7 +18,7 @@ public enum ResourceBizTypeEnum {
     /**
      * 文档库
      */
-    KG_DOC, KG_DB, KG_QA, KG_TERM,
+    KG_DOC, KG_DB, KG_QA, KG_TERM, KG_CLOUD,
     /**
      * 插件
      */

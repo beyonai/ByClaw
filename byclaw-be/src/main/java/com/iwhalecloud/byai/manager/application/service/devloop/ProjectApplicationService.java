@@ -58,6 +58,7 @@ import com.iwhalecloud.byai.manager.mapper.devloop.ProjectRepoMapper;
 import com.iwhalecloud.byai.manager.qo.devloop.ProjectQo;
 import com.iwhalecloud.byai.manager.qo.devloop.ProjectSessionQo;
 import com.iwhalecloud.byai.state.application.service.dataset.DatasetApplicationService;
+import com.iwhalecloud.byai.state.common.util.MultipartFileUtil;
 import com.iwhalecloud.byai.state.domain.file.service.FileService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import lombok.extern.slf4j.Slf4j;
@@ -65,12 +66,15 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.http.MediaType;
 import org.springframework.http.MediaTypeFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.util.UriComponentsBuilder;
 
+import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -112,6 +116,13 @@ public class ProjectApplicationService {
      * 手工需求复用的内部扫描源类型，仓库关联实际保存于单条需求 JSON。
      */
     private static final String MANUAL_SOURCE_TYPE = "manual";
+
+    /**
+     * 项目云盘知识库初始化目录模板（zip 原包上传，不解压）。
+     */
+    private static final String KNOWLEDGE_DIR_TEMPLATE_PATH = "templates/knowledgeDirTemplate.zip";
+
+    private static final String KNOWLEDGE_DIR_TEMPLATE_FILENAME = "knowledgeDirTemplate.zip";
 
     /**
      * 手工需求内容 JSON 的命名空间，与需求创建和编辑链路保持一致。
@@ -248,9 +259,41 @@ public class ProjectApplicationService {
         datasetDto.setResourceName(I18nUtil.get("project.cloud.resource.name", projectName));
         datasetDto.setResourceDesc(I18nUtil.get("project.cloud.resource.desc", projectName));
         datasetDto.setSystemCode("BYAI");
-        datasetDto.setResourceBizType("KG_DOC");
+        datasetDto.setResourceBizType("KG_CLOUD");
         datasetDto.setType("dataset");
-        return datasetApplicationService.createDataset(datasetDto);
+        SsResource ssResource = datasetApplicationService.createDataset(datasetDto);
+        uploadKnowledgeDirTemplate(ssResource.getResourceId());
+        return ssResource;
+    }
+
+    /**
+     * 读取 classpath 中的知识库目录模板 zip 二进制，直接上传到知识库根目录（由 QA 侧解压）。
+     *
+     * @param resourceId 知识库资源 ID
+     */
+    private void uploadKnowledgeDirTemplate(Long resourceId) {
+        ClassPathResource template = new ClassPathResource(KNOWLEDGE_DIR_TEMPLATE_PATH);
+        if (!template.exists()) {
+            log.error("项目云盘知识库目录模板不存在");
+        }
+
+        try (InputStream inputStream = template.getInputStream()) {
+
+            // 传递请求头信息
+            Map<String, String> headers = new HashMap<String, String>();
+            headers.put("X-USER-CODE", CurrentUserHolder.getCurrentUserCode());
+
+            MultipartFile multipartFile = new MultipartFileUtil("files", KNOWLEDGE_DIR_TEMPLATE_FILENAME,
+                "application/zip", inputStream);
+
+            datasetApplicationService.uploadFiles(new MultipartFile[]{
+                multipartFile
+
+            }, resourceId, "/", "init", false, false, true, headers);
+
+        } catch (IOException e) {
+            log.error("上传项目云盘知识库目录模板失败, resourceId={}", resourceId, e);
+        }
     }
 
     /**

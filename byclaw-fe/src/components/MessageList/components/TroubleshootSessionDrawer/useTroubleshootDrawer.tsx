@@ -34,7 +34,8 @@ function getTroubleshootAgentId() {
 
   troubleshootAgentIdRequest = getDcSystemConfig({ paramCode: TROUBLE_SHOOT_EMPLOYEE_PARAM_CODE })
     .then((res) => {
-      const agentId = `${(res as any)?.paramValue || ''}`.trim();
+      const response = res as any;
+      const agentId = `${response?.paramValue || response?.data?.paramValue || response?.value || ''}`.trim();
       // 成功后把结果落到模块级缓存，后续点击直接命中。
       cachedTroubleshootAgentId = agentId;
       hasLoadedTroubleshootAgentId = true;
@@ -50,7 +51,22 @@ function getTroubleshootAgentId() {
 export default function useTroubleshootDrawer() {
   const intl = useIntl();
   const [loading, setLoading] = React.useState(false);
+  const [available, setAvailable] = React.useState(false);
   const [payload, setPayload] = React.useState<DrawerPayload | null>(null);
+
+  React.useEffect(() => {
+    let active = true;
+    void getTroubleshootAgentId()
+      .then((agentId) => {
+        if (active) setAvailable(Boolean(agentId));
+      })
+      .catch(() => {
+        if (active) setAvailable(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const open = React.useCallback(
     async ({ messageId, sessionId, traceId }: { messageId?: string; sessionId?: string; traceId?: string } = {}) => {
@@ -101,6 +117,7 @@ export default function useTroubleshootDrawer() {
 
   return {
     loading,
+    available,
     open,
     placeholder,
   };

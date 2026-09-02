@@ -1,3 +1,5 @@
+@antPrefix: ant;
+
 .container {
   height: 100%;
   padding: 24px;
@@ -12,33 +14,32 @@
   margin-bottom: 20px;
 }
 
-.tabs {
+.secondaryTabs {
   flex-shrink: 0;
 
   :global {
-    .ant-tabs-nav,
-    .beyond-tabs-nav {
+    .@{antPrefix}-tabs-nav {
       margin-bottom: 0;
 
-      .ant-tabs-tab {
+      .@{antPrefix}-tabs-tab {
+        margin: 0;
         padding: 6px 0;
-        font-size: 18px;
-        line-height: 26px;
+        font-size: 16px;
+        line-height: 22px;
 
-        + .ant-tabs-tab {
+        + .@{antPrefix}-tabs-tab {
           margin-left: 24px;
         }
       }
 
-      .ant-tabs-tab-btn {
+      .@{antPrefix}-tabs-tab-btn {
         color: var(--beyond-color-text) !important;
-        font-size: 18px;
-        font-weight: 500;
-        line-height: 26px;
+        font-size: 16px;
+        line-height: 22px;
         text-shadow: none !important;
       }
 
-      .ant-tabs-ink-bar {
+      .@{antPrefix}-tabs-ink-bar {
         height: 3px;
         background-color: var(--beyond-color-text);
       }

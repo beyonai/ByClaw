@@ -301,7 +301,10 @@ public class SuasSuperassistApplicationService {
             // 关联工具agent|tool|view|object
             this.handleRelResourceCodes(digitalEmployeeDTO, relToolCodes, userId);
 
-            // 关联对象
+            // 联本体对象
+            this.initSubmitWorkspaceTemplate(relOntologyCodes);
+
+            // 关联本体对象
             this.handleRelResourceCodes(digitalEmployeeDTO, relOntologyCodes, userId);
 
             // 处理关联技能
@@ -991,9 +994,11 @@ public class SuasSuperassistApplicationService {
         // 关联工具agent|tool|view|object
         this.handleRelResourceCodes(digitalEmployeeDTO, relToolCodes, userId);
 
+        // 初始化本体
+        this.initSubmitWorkspaceTemplate(relOntologyCodes);
 
+        // 关联本体对象
         this.handleRelResourceCodes(digitalEmployeeDTO, relOntologyCodes, userId);
-
 
         // 处理关联技能
         this.handleRelSkillCodes(digitalEmployeeDTO, relSkillCodes, userId);
@@ -1065,7 +1070,19 @@ public class SuasSuperassistApplicationService {
      *
      * @return 首个模板提交结果中的对象编码列表，无结果时返回空列表
      */
-    private List<String> initSubmitWorkspaceTemplate() {
+    private List<String> initSubmitWorkspaceTemplate(String relOntologyCodes) {
+
+        List<String> splitOntologyCodes = StringUtil.splitStr(relOntologyCodes, ",");
+        if (ListUtil.isEmpty(splitOntologyCodes)) {
+            return splitOntologyCodes;
+        }
+
+        //统计资源，如果已经存在，则不再进行初始化调用
+        long count = ssResourceService.countByResourceCodes(splitOntologyCodes);
+        if (count >= splitOntologyCodes.size()) {
+            return splitOntologyCodes;
+        }
+
 
         Users users = userService.findByUserCode("adminvip");
 

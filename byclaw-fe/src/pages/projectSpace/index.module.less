@@ -1606,6 +1606,36 @@
   box-shadow: 0 8px 24px rgba(30, 41, 59, 0.12);
 }
 
+.resourceCategoryCardEmpty:not(.resourceCategoryCardExpanded) {
+  min-height: 0;
+  height: auto;
+
+  .projectScheduleBody,
+  .resourceCategoryBody {
+    // 与项目云盘 compactResourceEmpty 空态保持一致，避免不同模块的图标和文案大小不一。
+    min-height: 100px;
+    height: 100px;
+    flex: 0 0 100px;
+    box-sizing: border-box;
+
+    :global(.@{antPrefix}-empty-image) {
+      margin-bottom: 4px;
+      transform: scale(0.72);
+      transform-origin: center bottom;
+    }
+
+    :global(.@{antPrefix}-empty-description) {
+      font-size: 13px;
+      line-height: 20px;
+    }
+
+    :global(.@{antPrefix}-empty) {
+      min-height: 0;
+      margin: 0;
+    }
+  }
+}
+
 .resourceCategoryGrid {
   min-height: 0;
   height: 100%;
@@ -1614,8 +1644,20 @@
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
   align-content: stretch;
-  align-items: stretch;
+  align-items: start;
   overflow: visible;
+}
+
+.membersEmpty {
+  min-height: 72px;
+  margin: 0;
+  padding: 8px;
+
+  :global(.@{antPrefix}-empty-image) {
+    margin-bottom: 4px;
+    transform: scale(0.72);
+    transform-origin: center bottom;
+  }
 }
 
 .resourceCardHeader {
@@ -1668,6 +1710,43 @@
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.projectResourceEmpty {
+  min-height: 0;
+  margin: 0;
+  color: #8a96a8;
+
+  :global(.@{antPrefix}-empty-image) {
+    margin-bottom: 4px;
+    transform: scale(0.72);
+    transform-origin: center bottom;
+  }
+
+  :global(.@{antPrefix}-empty-description) {
+    font-size: 13px;
+    line-height: 20px;
+  }
+}
+
+.projectCodeEmptyBody {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  box-sizing: border-box;
+  overflow: hidden;
+  height: 200px;
+  min-height: 200px;
+  flex: 0 0 200px;
+
+  :global(.@{antPrefix}-spin-container) {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
 }
 
 .projectScheduleRow {
