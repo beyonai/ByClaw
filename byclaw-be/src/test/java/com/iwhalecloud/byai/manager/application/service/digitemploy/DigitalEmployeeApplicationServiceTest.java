@@ -286,7 +286,7 @@ class DigitalEmployeeApplicationServiceTest {
     @Test
     void saveDefaultSuperAssistant_setsPersonalOwnerTypeAndDoesNotPersistTagName() {
         when(sequenceService.nextVal()).thenReturn(300L);
-        when(ssResourceService.countResource("digemployee.default.super.assistant.resource.name", ResourceBizTypeEnum.DIG_EMPLOYEE.name(), null))
+        when(ssResourceService.countResource("digemployee.default.super.assistant.resource.name", ResourceBizTypeEnum.DIG_EMPLOYEE.name(), OwnerType.PERSONAL, null))
             .thenReturn(0L);
         when(ssResourceService.saveResource(any(SsResource.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -325,18 +325,18 @@ class DigitalEmployeeApplicationServiceTest {
         when(mockMessageSource.getMessage(eq("digemployee.default.super.assistant.opening.question.summary"), any(), any(Locale.class)))
             .thenReturn("localized-summary");
         when(mockMessageSource.getMessage(org.mockito.ArgumentMatchers.argThat(key ->
-            !"digemployee.default.super.assistant.resource.name".equals(key)
-                && !"digemployee.default.super.assistant.ability".equals(key)
-                && !"digemployee.default.super.assistant.constraints".equals(key)
-                && !"digemployee.default.super.assistant.faqs".equals(key)
-                && !"digemployee.default.super.assistant.opening.question.intro".equals(key)
-                && !"digemployee.default.super.assistant.opening.question.summary".equals(key)),
+                !"digemployee.default.super.assistant.resource.name".equals(key)
+                    && !"digemployee.default.super.assistant.ability".equals(key)
+                    && !"digemployee.default.super.assistant.constraints".equals(key)
+                    && !"digemployee.default.super.assistant.faqs".equals(key)
+                    && !"digemployee.default.super.assistant.opening.question.intro".equals(key)
+                    && !"digemployee.default.super.assistant.opening.question.summary".equals(key)),
             any(), any(Locale.class))).thenAnswer(invocation -> invocation.getArgument(0));
         ReflectionTestUtils.setField(I18nUtil.class, "messageSource", mockMessageSource);
 
         when(sequenceService.nextVal()).thenReturn(302L);
         when(ssResourceService.countResource("digemployee.default.super.assistant.resource.name:张三",
-            ResourceBizTypeEnum.DIG_EMPLOYEE.name(), null)).thenReturn(0L);
+            ResourceBizTypeEnum.DIG_EMPLOYEE.name(), OwnerType.PERSONAL, null)).thenReturn(0L);
         when(ssResourceService.saveResource(any(SsResource.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.saveDefaultSuperAssistant(1L, "zhangsan", "张三", null);
@@ -366,7 +366,7 @@ class DigitalEmployeeApplicationServiceTest {
         dto.setSkills("[\"1\",\"2\",\"3\"]");
 
         when(sequenceService.nextVal()).thenReturn(301L);
-        when(ssResourceService.countResource("我的个人助理", ResourceBizTypeEnum.DIG_EMPLOYEE.name(), null)).thenReturn(0L);
+        when(ssResourceService.countResource("我的个人助理", ResourceBizTypeEnum.DIG_EMPLOYEE.name(), OwnerType.PERSONAL, null)).thenReturn(0L);
         when(ssResourceService.saveResource(any(SsResource.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.saveDigitalEmployee(dto);
@@ -388,7 +388,7 @@ class DigitalEmployeeApplicationServiceTest {
         when(ssResourceService.saveResource(any(SsResource.class))).thenAnswer(invocation -> invocation.getArgument(0));
         for (DigitalEmployType type : types) {
             String resourceName = "企业数字员工-" + type.getCode();
-            when(ssResourceService.countResource(resourceName, ResourceBizTypeEnum.DIG_EMPLOYEE.name(), null))
+            when(ssResourceService.countResource(resourceName, ResourceBizTypeEnum.DIG_EMPLOYEE.name(), OwnerType.PERSONAL, null))
                 .thenReturn(0L);
 
             DigitalEmployeeDTO dto = new DigitalEmployeeDTO();
@@ -1170,8 +1170,7 @@ class DigitalEmployeeApplicationServiceTest {
             SsResourceRelDetail relation = invocation.getArgument(0);
             if (relation.getRelResourceId().equals(301L)) {
                 createdSkill[0] = relation;
-            }
-            else if (relation.getRelResourceId().equals(401L)) {
+            } else if (relation.getRelResourceId().equals(401L)) {
                 createdObject[0] = relation;
             }
             return true;
@@ -2082,7 +2081,7 @@ class DigitalEmployeeApplicationServiceTest {
     }
 
     private void prepareFullUpdate(SsResource employee, List<SsResourceRelDetail> allRelations,
-        List<SsResourceRelDetail> skillRelations) {
+                                   List<SsResourceRelDetail> skillRelations) {
         employee.setComAcctId(201L);
         when(ssResourceService.findById(100L)).thenReturn(employee);
         when(skillGroupMapper.selectDigitalEmployeeForUpdate(100L, 201L)).thenReturn(employee);

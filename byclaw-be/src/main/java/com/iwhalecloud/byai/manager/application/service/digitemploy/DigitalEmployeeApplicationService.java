@@ -684,7 +684,8 @@ public class DigitalEmployeeApplicationService {
         // 商业版本(dataset.system=WHALE_AGENT)下,企业 tab 不允许创建编码型(011)/ 调试型(010)数字员工
         validateCommercialEditionDigitalEmployeeCreation(digitalEmployeeDTO);
         String resourceName = digitalEmployeeDTO.getResourceName();
-        long count = ssResourceService.countResource(resourceName, ResourceBizTypeEnum.DIG_EMPLOYEE.name(), null);
+        String ownerType = digitalEmployeeDTO.getOwnerType();
+        long count = ssResourceService.countResource(resourceName, ResourceBizTypeEnum.DIG_EMPLOYEE.name(), ownerType, null);
         if (count > 0) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
                 I18nUtil.get("digemployee.name.duplicate", resourceName));
@@ -942,7 +943,8 @@ public class DigitalEmployeeApplicationService {
 
         Long resourceId = digitalEmployeeDTO.getResourceId();
         String resourceName = digitalEmployeeDTO.getResourceName();
-        long count = ssResourceService.countResource(resourceName, ResourceBizTypeEnum.DIG_EMPLOYEE.name(), resourceId);
+        String ownerType = digitalEmployeeDTO.getOwnerType();
+        long count = ssResourceService.countResource(resourceName, ResourceBizTypeEnum.DIG_EMPLOYEE.name(), ownerType, resourceId);
         if (count > 0) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
                 I18nUtil.get("digemployee.name.duplicate", resourceName));

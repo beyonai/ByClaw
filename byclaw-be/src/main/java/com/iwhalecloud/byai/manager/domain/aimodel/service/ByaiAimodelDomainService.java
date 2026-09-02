@@ -343,7 +343,7 @@ public class ByaiAimodelDomainService {
         if (StringUtil.isNotEmpty(findAiModelQo.getModelType())) {
             queryWrapper.eq(ByaiAimodel::getModelType, findAiModelQo.getModelType());
         }
-        
+
         if (StringUtil.isNotEmpty(findAiModelQo.getModelName())) {
             queryWrapper.eq(ByaiAimodel::getModelName, findAiModelQo.getModelName());
         }
