@@ -15,12 +15,17 @@ import com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.gateway.sandbox.model.SandboxInfo;
+import com.iwhalecloud.byai.gateway.sandbox.model.SandboxRecordView;
 import com.iwhalecloud.byai.gateway.sandbox.runtime.SandboxRuntimeInstance;
 import com.iwhalecloud.byai.gateway.sandbox.runtime.SandboxRuntimePage;
 import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
 import com.iwhalecloud.byai.manager.entity.sandbox.SandboxReconcileGroup;
 import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord;
 import com.iwhalecloud.byai.manager.mapper.sandbox.SsSandboxRecordMapper;
+import com.iwhaleai.byai.framework.common.Constants;
+import com.iwhaleai.byai.framework.common.RedisClient;
+import com.iwhaleai.byai.framework.core.WorkerRegistry;
+import redis.clients.jedis.Jedis;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -206,14 +211,16 @@ class SandboxServiceTest {
     }
 
     @Test
-    void heartbeat_refreshesAllRunningSandboxesForCurrentUser() {
+    void heartbeatRefreshesOnlyTheSandboxResolvedForTheRequestedResource() {
         SandboxMetadataCache sandboxMetadataCache = mock(SandboxMetadataCache.class);
         SsSandboxRecordMapper sandboxRecordMapper = mock(SsSandboxRecordMapper.class);
         SandboxHealthWatchService sandboxHealthWatchService = mock(SandboxHealthWatchService.class);
+        SandboxLaunchContextFactory sandboxLaunchContextFactory = mock(SandboxLaunchContextFactory.class);
         SandboxService sandboxService = new SandboxService();
         ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", sandboxRecordMapper);
         ReflectionTestUtils.setField(sandboxService, "sandboxMetadataCache", sandboxMetadataCache);
         ReflectionTestUtils.setField(sandboxService, "sandboxHealthWatchService", sandboxHealthWatchService);
+        ReflectionTestUtils.setField(sandboxService, "sandboxLaunchContextFactory", sandboxLaunchContextFactory);
 
         LoginInfo loginInfo = new LoginInfo();
         loginInfo.setUserCode("user001");
@@ -239,22 +246,75 @@ class SandboxServiceTest {
         codeAgentRecord.setLockVersion(7);
         codeAgentRecord.setVersion(2);
 
-        when(sandboxRecordMapper.selectRunningByUser("user001"))
-            .thenReturn(List.of(openclawRecord, codeAgentRecord));
-        when(sandboxRecordMapper.updateLastAccessTime(eq(1L), any(Date.class), eq(3))).thenReturn(1);
+        SandboxLaunchRouting routing = new SandboxLaunchRouting("byclaw-code-agent",
+            SandboxLaunchRouting.DEFAULT_CODE_AGENT_RESOURCE_ID);
+        when(sandboxLaunchContextFactory.resolveRouting(123L, "user001")).thenReturn(routing);
+        when(sandboxRecordMapper.selectRunningByUserAndResource("user001", "byclaw-code-agent",
+            SandboxLaunchRouting.DEFAULT_CODE_AGENT_RESOURCE_ID)).thenReturn(codeAgentRecord);
         when(sandboxRecordMapper.updateLastAccessTime(eq(2L), any(Date.class), eq(7))).thenReturn(1);
 
-        boolean result = sandboxService.heartbeat(SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+        boolean result = sandboxService.heartbeat(123L);
 
         assertThat(result).isTrue();
-        assertThat(openclawRecord.getLastAccessTime()).isNotNull();
+        assertThat(openclawRecord.getLastAccessTime()).isNull();
         assertThat(codeAgentRecord.getLastAccessTime()).isNotNull();
-        verify(sandboxRecordMapper).selectRunningByUser("user001");
-        verify(sandboxRecordMapper).updateLastAccessTime(eq(1L), any(Date.class), eq(3));
+        verify(sandboxRecordMapper).selectRunningByUserAndResource("user001", "byclaw-code-agent",
+            SandboxLaunchRouting.DEFAULT_CODE_AGENT_RESOURCE_ID);
+        verify(sandboxRecordMapper, never()).selectRunningByUser("user001");
+        verify(sandboxRecordMapper, never()).updateLastAccessTime(eq(1L), any(Date.class), eq(3));
         verify(sandboxRecordMapper).updateLastAccessTime(eq(2L), any(Date.class), eq(7));
-        verify(sandboxMetadataCache, times(2)).put(any(SandboxInfo.class));
-        verify(sandboxHealthWatchService).touch("user001", "openclaw");
+        verify(sandboxMetadataCache).put(any(SandboxInfo.class));
         verify(sandboxHealthWatchService).touch("user001", "byclaw-code-agent");
+    }
+
+    @Test
+    void heartbeatDoesNotFallBackToAnotherSandboxWhenTheExactRouteIsMissing() {
+        SandboxLaunchContextFactory sandboxLaunchContextFactory = mock(SandboxLaunchContextFactory.class);
+        SsSandboxRecordMapper sandboxRecordMapper = mock(SsSandboxRecordMapper.class);
+        SandboxService sandboxService = new SandboxService();
+        ReflectionTestUtils.setField(sandboxService, "sandboxLaunchContextFactory", sandboxLaunchContextFactory);
+        ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", sandboxRecordMapper);
+        SandboxLaunchRouting routing = new SandboxLaunchRouting("byclaw-dsh",
+            SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+        when(sandboxLaunchContextFactory.resolveRouting(20010819L, "user001")).thenReturn(routing);
+        when(sandboxRecordMapper.selectRunningByUserAndResource("user001", "byclaw-dsh",
+            SandboxLaunchRouting.DEFAULT_RESOURCE_ID)).thenReturn(null);
+
+        boolean result = sandboxService.heartbeat("user001", 20010819L);
+
+        assertThat(result).isFalse();
+        verify(sandboxRecordMapper, never()).selectRunningByUser("user001");
+        verify(sandboxRecordMapper, never()).updateLastAccessTime(any(), any(), any());
+    }
+
+    @Test
+    void buildRecordViewReadsWorkerLeaseWithoutInventingSandboxLifecycleFields() {
+        WorkerRegistry workerRegistry = mock(WorkerRegistry.class);
+        RedisClient redisClient = mock(RedisClient.class);
+        Jedis jedis = mock(Jedis.class);
+        SandboxService sandboxService = new SandboxService();
+        ReflectionTestUtils.setField(sandboxService, "gatewayWorkerRegistry", workerRegistry);
+        ReflectionTestUtils.setField(sandboxService, "redisClient", redisClient);
+        SsSandboxRecord record = new SsSandboxRecord();
+        record.setId(9L);
+        record.setUserCode("user001");
+        record.setSandboxType("byclaw-dsh");
+        record.setStatus("RUNNING");
+        Date lastAccess = new Date(1_000L);
+        record.setLastAccessTime(lastAccess);
+        when(workerRegistry.getWorker("byclaw-dsh-user001"))
+            .thenReturn(Map.of("last_seen", 2_000L, "agent_types", List.of("BYCLAW_EXE_user001")));
+        when(redisClient.getResource()).thenReturn(jedis);
+        when(jedis.ttl(Constants.RegistryKeys.workerOnlineLease("byclaw-dsh-user001"))).thenReturn(13L);
+
+        SandboxRecordView view = sandboxService.buildRecordView(record);
+
+        assertThat(view.getStatus()).isEqualTo("RUNNING");
+        assertThat(view.getLastAccessTime()).isEqualTo(lastAccess);
+        assertThat(view.getWorkerId()).isEqualTo("byclaw-dsh-user001");
+        assertThat(view.getWorkerOnline()).isTrue();
+        assertThat(view.getWorkerLastSeen()).isEqualTo(2_000L);
+        assertThat(view.getWorkerLeaseTtlSeconds()).isEqualTo(13L);
     }
 
     @Test

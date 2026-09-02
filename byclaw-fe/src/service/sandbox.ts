@@ -8,6 +8,10 @@ export interface SandboxInfo {
   instanceEndpoints?: Record<string, string>;
   token?: string;
   status?: string;
+  workerId?: string;
+  workerOnline?: boolean;
+  workerLastSeen?: number;
+  workerLeaseTtlSeconds?: number;
 }
 
 export interface LaunchSandboxResult {

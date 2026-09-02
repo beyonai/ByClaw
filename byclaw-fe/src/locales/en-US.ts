@@ -3423,6 +3423,9 @@ export default {
   'sandbox.status.stopped': 'Sandbox Stopped',
   'sandbox.status.noServices': 'No sandbox services',
   'sandbox.status.summary': '{running}/{total} sandbox services running, {transitioning} transitioning',
+  'sandbox.worker.online': 'Worker online',
+  'sandbox.worker.offline': 'Worker offline',
+  'sandbox.worker.unknown': 'Worker not reported',
   'sandbox.action.restart': 'Restart Sandbox',
   'sandbox.restart.confirm.title': 'Confirm Restart Sandbox',
   'sandbox.restart.confirm.content':

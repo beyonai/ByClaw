@@ -16,6 +16,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.gateway.sandbox.mapper.SandboxServiceSpecEntityMapper;
 import com.iwhalecloud.byai.gateway.sandbox.model.SandboxInfo;
+import com.iwhalecloud.byai.gateway.sandbox.model.SandboxRecordView;
 import com.iwhalecloud.byai.gateway.sandbox.persistence.SandboxServiceSpecEntity;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
 import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord;
@@ -92,8 +93,10 @@ class SandboxControllerTest {
     @Test
     void listRecords_returnsOpenclawEndpointForJsonStorage() {
         SandboxController controller = new SandboxController();
+        SandboxService sandboxService = mock(SandboxService.class);
         SsSandboxRecordMapper sandboxRecordMapper = mock(SsSandboxRecordMapper.class);
         ByaiSystemConfigService byaiSystemConfigService = mock(ByaiSystemConfigService.class);
+        ReflectionTestUtils.setField(controller, "sandboxService", sandboxService);
         ReflectionTestUtils.setField(controller, "sandboxRecordMapper", sandboxRecordMapper);
         ReflectionTestUtils.setField(controller, "byaiSystemConfigService", byaiSystemConfigService);
 
@@ -103,6 +106,11 @@ class SandboxControllerTest {
             "{\"openclaw\":\"http://host/proxy/18789/chat?token=abc\",\"ui\":\"http://host/proxy/3000?token=abc\"}");
         record.setCreateTime(new Date());
         when(sandboxRecordMapper.selectByPage(null, null, 0, 20)).thenReturn(List.of(record));
+        SandboxRecordView view = new SandboxRecordView();
+        view.setId(1L);
+        view.setEndpoint(record.getEndpoint());
+        view.setWorkerOnline(false);
+        when(sandboxService.buildRecordView(record)).thenReturn(view);
         when(sandboxRecordMapper.countByCondition(null, null)).thenReturn(1);
         when(byaiSystemConfigService.getDcSystemConfigValueByCode("WEB_BASE_URL")).thenReturn("");
 
@@ -112,9 +120,10 @@ class SandboxControllerTest {
         @SuppressWarnings("unchecked")
         Map<String, Object> data = (Map<String, Object>) response.getData();
         @SuppressWarnings("unchecked")
-        List<SsSandboxRecord> list = (List<SsSandboxRecord>) data.get("list");
+        List<SandboxRecordView> list = (List<SandboxRecordView>) data.get("list");
         assertThat(list).hasSize(1);
         assertThat(list.get(0).getEndpoint()).isEqualTo("http://host/proxy/18789/chat?token=abc");
+        assertThat(list.get(0).getWorkerOnline()).isFalse();
     }
 
     @Test
