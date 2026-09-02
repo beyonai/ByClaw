@@ -114,6 +114,8 @@ class RouteServiceTest {
         when(jwtService.createJwt(any())).thenReturn("test-beyond-token");
         when(systemParamTargetAgentResolver.resolve(any(), anyString()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
+        when(systemParamTargetAgentResolver.resolve(any(), nullable(Long.class), anyString()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
 
         routeService = new RouteService();
         ReflectionTestUtils.setField(routeService, "gatewayClient", gatewayClient);
