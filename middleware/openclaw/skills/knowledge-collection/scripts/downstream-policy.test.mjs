@@ -28,3 +28,19 @@ for (const document of documents) {
     /`status\.collection\.deliveryComplete=false`.*该路径不得出现在后续任何工具调用中/,
   );
 }
+
+const skill = documents[0];
+
+assert.match(
+  skill,
+  /`eligibleArticle=0`.*`status\.task\.discoveryGate\.attemptCount < maxAttempts`.*必须执行第二轮 `public-discover`/s,
+);
+assert.match(skill, /不得因主题看似不存在、首轮结果明显无关或预计第二轮仍会失败而跳过第二轮/);
+assert.match(
+  skill,
+  /只有 `exhausted=true`、`stopReason=no-article-candidates` 和 `stopDetail=no-relevant-article-candidates` 同时成立，才能把公共发现报告为已耗尽并停止/s,
+);
+assert.match(
+  skill,
+  /最终答复前.*重新运行 `status`.*原样核对并报告 `attemptCount`、`maxAttempts`、`exhausted`、`stopReason` 和 `stopDetail`/s,
+);
