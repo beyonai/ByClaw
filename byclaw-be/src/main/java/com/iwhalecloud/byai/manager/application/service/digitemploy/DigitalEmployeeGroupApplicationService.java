@@ -63,7 +63,7 @@ public class DigitalEmployeeGroupApplicationService {
     private static final String REQUEST_SCHEMA = "byclaw.orchestrator-runtime-request/v1";
     private static final String RUNTIME_SCHEMA = "byclaw.orchestrator-runtime/v1";
     private static final String SNAPSHOT_SCHEMA = "byclaw.digital-employee-group-runtime/v1";
-    private static final String MEMBER_SCHEMA = "byclaw.digital-employee-group-member/v1";
+    public static final String MEMBER_SCHEMA = "byclaw.digital-employee-group-member/v1";
     private static final String CONTEXT_PROFILE = "EXPERT_TEAM_MINIMAL_V1";
     private static final int MAX_MEMBER_COUNT = 20;
     private static final int MAX_TEAM_ROLE_LENGTH = 100;
