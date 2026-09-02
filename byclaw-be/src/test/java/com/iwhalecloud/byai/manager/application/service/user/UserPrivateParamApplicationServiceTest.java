@@ -3,7 +3,6 @@ package com.iwhalecloud.byai.manager.application.service.user;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -28,7 +27,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.core.script.RedisScript;
+import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -130,76 +129,58 @@ class UserPrivateParamApplicationServiceTest {
     }
 
     @Test
-    @SuppressWarnings({ "rawtypes", "unchecked" })
-    void versionedRefreshAtomicallyRejectsOlderRedisWrites() {
+    @SuppressWarnings("unchecked")
+    void refreshFullyReplacesRedisSnapshot() throws Exception {
         StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
+        ValueOperations<String, String> valueOperations = mock(ValueOperations.class);
         ReflectionTestUtils.setField(service, "stringRedisTemplate", redisTemplate);
         ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
-        when(mapper.selectList(any())).thenReturn(List.of());
-        when(redisTemplate.execute(
-            any(RedisScript.class),
-            org.mockito.ArgumentMatchers.<List<String>>any(),
-            any(Object.class),
-            any(Object.class)
-        )).thenReturn(1L);
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(mapper.selectList(any())).thenReturn(List.of(credential("API_KEY", "new-value")));
 
         assertThat(service.refreshPrivateParamCacheNow(1001L, "tester", 9001L)).isTrue();
 
-        ArgumentCaptor<RedisScript> script = ArgumentCaptor.forClass(RedisScript.class);
-        verify(redisTemplate).execute(
-            script.capture(),
-            eq(List.of("byai:user:private_params:tester")),
-            eq("9001"),
-            contains("\"version\":9001")
-        );
-        assertThat(script.getValue().getScriptAsString())
-            .contains("tonumber(decoded['version']) > tonumber(ARGV[1])");
+        ArgumentCaptor<String> payload = ArgumentCaptor.forClass(String.class);
+        verify(valueOperations).set(eq("byai:user:private_params:tester"), payload.capture());
+        assertThat(new ObjectMapper().readTree(payload.getValue()).path("params").path("API_KEY").textValue())
+            .isEqualTo("new-value");
     }
 
     @Test
-    @SuppressWarnings({ "rawtypes", "unchecked" })
+    @SuppressWarnings("unchecked")
     void privateParamCacheIncludesImaConnectorCredentialsForSandboxInjection() {
         StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
+        ValueOperations<String, String> valueOperations = mock(ValueOperations.class);
         ReflectionTestUtils.setField(service, "stringRedisTemplate", redisTemplate);
         ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
         when(mapper.selectList(any())).thenReturn(List.of(
             credential("IMA_OPENAPI_CLIENTID", "client-id"),
             credential("IMA_OPENAPI_APIKEY", "api-key"),
             credential("OTHER_VALUE", "kept")
         ));
-        when(redisTemplate.execute(
-            any(RedisScript.class),
-            org.mockito.ArgumentMatchers.<List<String>>any(),
-            any(Object.class),
-            any(Object.class)
-        )).thenReturn(1L);
 
         assertThat(service.refreshPrivateParamCacheNow(1001L, "tester", 9001L)).isTrue();
 
-        ArgumentCaptor<Object> payload = ArgumentCaptor.forClass(Object.class);
-        verify(redisTemplate).execute(any(RedisScript.class), org.mockito.ArgumentMatchers.<List<String>>any(),
-            any(Object.class), payload.capture());
-        assertThat(String.valueOf(payload.getValue()))
+        ArgumentCaptor<String> payload = ArgumentCaptor.forClass(String.class);
+        verify(valueOperations).set(eq("byai:user:private_params:tester"), payload.capture());
+        assertThat(payload.getValue())
             .contains("OTHER_VALUE", "kept", "IMA_OPENAPI_CLIENTID", "IMA_OPENAPI_APIKEY", "client-id", "api-key");
     }
 
     @Test
-    @SuppressWarnings({ "rawtypes", "unchecked" })
+    @SuppressWarnings("unchecked")
     void reconciliationScansConnectorManagedUsersInBatchesAndRebuildsCurrentSnapshots() {
         StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
+        ValueOperations<String, String> valueOperations = mock(ValueOperations.class);
         ReflectionTestUtils.setField(service, "stringRedisTemplate", redisTemplate);
         ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
         Users first = user(1001L, "first");
         Users second = user(1002L, "second");
         when(mapper.selectConnectorManagedUsersAfter(0L, 2)).thenReturn(List.of(first, second));
         when(mapper.selectConnectorManagedUsersAfter(1002L, 2)).thenReturn(List.of());
         when(mapper.selectList(any())).thenReturn(List.of());
-        when(redisTemplate.execute(
-            any(RedisScript.class),
-            org.mockito.ArgumentMatchers.<List<String>>any(),
-            any(Object.class),
-            any(Object.class)
-        )).thenReturn(1L);
 
         assertThat(service.reconcileConnectorManagedCaches(2)).isEqualTo(2);
 
