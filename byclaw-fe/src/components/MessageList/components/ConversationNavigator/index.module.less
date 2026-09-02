@@ -48,7 +48,7 @@
   &.near {
     .marker {
       width: 32px;
-      background: var(--beyond-color-text-secondary);
+      background: var(--beyond-color-text-tertiary, #86909c);
     }
   }
 
@@ -56,7 +56,7 @@
   &:focus-visible {
     .marker {
       width: 48px;
-      background: var(--beyond-color-text-secondary);
+      background: var(--beyond-color-text-tertiary, #86909c);
     }
   }
 
@@ -67,24 +67,7 @@
 
   &.active {
     .marker {
-      width: 28px;
-      height: 4px;
       background: var(--beyond-color-primary);
-      border-radius: 2px;
-    }
-
-    &.near {
-      .marker {
-        width: 36px;
-      }
-    }
-
-    &.hovered,
-    &:focus-visible {
-      .marker {
-        width: 48px;
-        background: var(--beyond-color-primary);
-      }
     }
   }
 }
@@ -93,7 +76,7 @@
   display: block;
   width: 10px;
   height: 3px;
-  background: var(--beyond-color-text-tertiary, #86909c);
+  background: var(--beyond-color-text-quaternary, #a5abb4);
   border-radius: 1px;
   transition: width 0.16s ease, height 0.16s ease, background-color 0.16s ease;
 }
