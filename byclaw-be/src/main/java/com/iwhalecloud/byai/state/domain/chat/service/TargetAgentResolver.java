@@ -25,10 +25,13 @@ public class TargetAgentResolver {
 
     private static final Logger logger = LoggerFactory.getLogger(TargetAgentResolver.class);
 
-    private static final String DSH_AGENT_PREFIX = "BYCLAW_DSH_";
+    private static final String HARNESS_RUNTIME_AGENT_TYPE = "BYCLAW_DSH";
 
     @Autowired
     private SsResourceService ssResourceService;
+
+    @Autowired
+    private SystemParamTargetAgentResolver systemParamTargetAgentResolver;
 
     @Value("${byclaw.route-by-super-to-user-sandbox:false}")
     private boolean routeBySuperToUserSandbox;
@@ -47,23 +50,23 @@ public class TargetAgentResolver {
 
         if (routeBySuperToUserSandbox && agentId != null
                 && WorkerAgentType.BY_SUPER.getCode().equalsIgnoreCase(targetAgentType)) {
-            return buildUserAgentType(WorkerAgentType.BYCLAW_EXE, userCode);
+            targetAgentType = buildUserAgentType(WorkerAgentType.BYCLAW_EXE, userCode);
         }
-
-        // agentId 为空代表公共超级助手入口；不能被旧会话透传的 BYCLAW_EXE sourceAgentType 覆盖。
-        if (agentId == null && WorkerAgentType.BY_SUPER.getCode().equalsIgnoreCase(targetAgentType)) {
-            return WorkerAgentType.BY_SUPER.getCode();
+        else if (agentId == null && WorkerAgentType.BY_SUPER.getCode().equalsIgnoreCase(targetAgentType)) {
+            // agentId 为空代表公共超级助手入口；不能被旧会话透传的 BYCLAW_EXE sourceAgentType 覆盖。
+            targetAgentType = WorkerAgentType.BY_SUPER.getCode();
         }
-
-        if (StringUtils.isNotBlank(targetAgentType) && targetAgentType.startsWith(WorkerAgentType.DEBUG.getCode())) {
+        else if (StringUtils.isNotBlank(targetAgentType)
+                && targetAgentType.startsWith(WorkerAgentType.DEBUG.getCode())) {
             targetAgentType = WorkerAgentType.DEBUG.getCode() + "_" + agentId;
         }
 
+        targetAgentType = resolveUserSandboxAgentType(targetAgentType, userCode);
         if (StringUtils.isNotBlank(resumeAgentType)) {
-            targetAgentType = resumeAgentType;
+            return resumeAgentType;
         }
-
-        return resolveUserSandboxAgentType(targetAgentType, userCode);
+        targetAgentType = systemParamTargetAgentResolver.resolve(targetAgentType, agentId, userCode);
+        return resolveRuntimeAgentType(targetAgentType, userCode);
     }
 
     /**
@@ -110,7 +113,8 @@ public class TargetAgentResolver {
     public boolean isUserSandboxAgentType(String targetAgentType, String userCode) {
         return StringUtils.equalsIgnoreCase(targetAgentType, buildUserAgentType(WorkerAgentType.BYCLAW_EXE, userCode))
             || StringUtils.equalsIgnoreCase(targetAgentType, buildUserAgentType(WorkerAgentType.BYCLAW_CODE, userCode))
-            || StringUtils.equalsIgnoreCase(targetAgentType, DSH_AGENT_PREFIX + userCode);
+            || StringUtils.equalsIgnoreCase(targetAgentType, buildUserAgentType(WorkerAgentType.HARNESS, userCode))
+            || StringUtils.equalsIgnoreCase(targetAgentType, buildUserAgentTypeCode(HARNESS_RUNTIME_AGENT_TYPE, userCode));
     }
 
     private String resolveUserSandboxAgentType(String targetAgentType, String userCode) {
@@ -123,10 +127,25 @@ public class TargetAgentResolver {
         if (targetAgentType.startsWith(WorkerAgentType.BYCLAW_CODE.getCode())) {
             return buildUserAgentType(WorkerAgentType.BYCLAW_CODE, userCode);
         }
+        if (targetAgentType.startsWith(WorkerAgentType.HARNESS.getCode())) {
+            return buildUserAgentType(WorkerAgentType.HARNESS, userCode);
+        }
+        return targetAgentType;
+    }
+
+    private String resolveRuntimeAgentType(String targetAgentType, String userCode) {
+        // HARNESS 是数据库中的稳定逻辑类型；当前运行时使用 DeepSeek Harness（DSH），后续可替换为其他实现。
+        if (StringUtils.startsWith(targetAgentType, WorkerAgentType.HARNESS.getCode())) {
+            return buildUserAgentTypeCode(HARNESS_RUNTIME_AGENT_TYPE, userCode);
+        }
         return targetAgentType;
     }
 
     private String buildUserAgentType(WorkerAgentType workerAgentType, String userCode) {
         return workerAgentType.getCode() + "_" + userCode;
+    }
+
+    private String buildUserAgentTypeCode(String workerAgentType, String userCode) {
+        return workerAgentType + "_" + userCode;
     }
 }

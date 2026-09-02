@@ -23,7 +23,9 @@ node scripts/knowledge-collection.mjs acquire-web --session-dir <dir> --item-id 
 不得使用 `web_fetch`、`curl`、`wget`、`requests`。**byCLI 无法完成时必须停止并报告，不得回退到其他网页获取工具。**
 已经用直连拿到内容时该结果作废，按规范流程重新采集。
 
-`knowledge-collection public-discover` 自己负责公共发现的回退、桥接恢复、候选授权和证据落盘。SearXNG 无候选或输出无效时，不得脱离 `public-discover` 手工执行 `bycli <site> search`、使用模型记忆中的 URL/DOI/论文 ID，或调用独立搜索器补结果；应由命令内置的 `hot_discovery` 回退进入统一恢复链路。公共发现最多允许两轮，第二轮仍无 article 时必须停止。其他经路由的 byCLI 命令出现 `BROWSER_CONNECT` 时，必须按已加载的 `bycli` skill 执行托管浏览器状态检查、`/usr/local/bin/start-chrome.sh` 冷启动或标准启动回退、复检与最多一次 daemon restart，不得直接要求用户连接桌面 Chrome。
+`knowledge-collection public-discover` 只负责公共发现、候选授权和证据落盘。WSA 的 passage/content 是搜索摘要级发现证据，不保证目标 URL 是正文页，也不保证不会返回登录、注册、验证、错误或导航页面。明确要求数量的文章任务必须改用 `knowledge-collection public-collect`，由它独占两轮发现、正文探测、验证、去重、晋升与数量闭环；不得手工串联原子命令模拟。SearXNG 无候选或输出无效时，不得手工执行 `bycli <site> search`、使用模型记忆中的 URL/DOI/论文 ID，或调用独立搜索器补结果。
+
+`public-collect` 的自动正文 probe 支持三类来源：普通 HTTP(S) 文章页、微信文章和 arXiv 论文。微信候选进入专用正文净化与结构验证，arXiv 候选只使用已登记的同论文官方 HTML 表示并执行论文结构验证；视频、社交平台和 RSS 等尚无专用 verifier 的候选会明确记为 `unsupported`，不会计入 requested count。每个 query 必须先运行 online-search 并验证其候选，仍缺正文时才运行同一 query 的 hot-discovery；阻塞恢复必须回到原 query 和原 channel。遇到真实登录、MFA 或 CAPTCHA 时按 run ID 恢复或跳过；不得创建平行会话继续写入。
 
 ## 路由表
 

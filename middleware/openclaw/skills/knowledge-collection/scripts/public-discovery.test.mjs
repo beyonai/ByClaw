@@ -4,8 +4,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { ensureSessionSkeleton, newSession, sessionPaths } from './session.mjs';
+import { ensureSessionSkeleton, loadSession, newSession, sessionPaths } from './session.mjs';
 import { createDiscoveryAuthorization } from './discovery-authorization.mjs';
+import {
+  createProbeRun, recordProbeDiscoveryRound, setProbeDiscoveryReservation,
+} from './probe-state.mjs';
 import * as publicDiscovery from './public-discovery.mjs';
 
 const { runPublicDiscover } = publicDiscovery;
@@ -206,6 +209,73 @@ function makeInitializedSession(sourceScope = ['public-internet'], query = '采�
   return { root, paths: sessionPaths(root) };
 }
 
+test('owned online and hot channels share one gate attempt and fallback uses the second', async () => {
+  const { paths } = makeInitializedSession(['public-internet'], 'DeepSeek Harness 文章');
+  const session = loadSession(paths).session;
+  session.task.materializationTarget = 'selected';
+  session.task.requiredContentGranularity = 'full-text';
+  writeFileSync(join(paths.root, 'session.json'), `${JSON.stringify(session)}\n`);
+  const run = createProbeRun(paths, {
+    query: 'DeepSeek Harness 文章', fallbackQuery: 'DeepSeek Harness 工程实践',
+    requestedCount: 1, category: 'general', language: 'zh-CN', manualPolicy: 'pause',
+  });
+  const runOnlineSearch = async (args) => ({
+    ok: true,
+    document: { query: args.query, results: [] },
+  });
+  const runProcess = async () => ({ code: 0, stdout: JSON.stringify({ candidates: [] }), stderr: '' });
+
+  setProbeDiscoveryReservation(paths, run.runId, { query: run.input.query, channel: 'online' });
+  await runPublicDiscover(paths, { query: run.input.query, category: 'general', 'requested-count': '1' }, {
+    orchestrationRunId: run.runId, channelMode: 'online', runOnlineSearch, runProcess,
+  });
+  assert.equal(loadSession(paths).session.task.discoveryGate.attemptCount, 1);
+  assert.equal(loadSession(paths).session.task.discoveryGate.runs[0].status, 'running');
+
+  setProbeDiscoveryReservation(paths, run.runId, { query: run.input.query, channel: 'hot' });
+  await runPublicDiscover(paths, { query: run.input.query, category: 'general', 'requested-count': '1' }, {
+    orchestrationRunId: run.runId, channelMode: 'hot', runOnlineSearch, runProcess,
+  });
+  assert.equal(loadSession(paths).session.task.discoveryGate.attemptCount, 1);
+  assert.equal(loadSession(paths).session.task.discoveryGate.runs[0].status, 'complete');
+  recordProbeDiscoveryRound(paths, run.runId, {
+    query: run.input.query, status: 'complete', candidateCount: 0,
+  });
+
+  setProbeDiscoveryReservation(paths, run.runId, { query: run.input.fallbackQuery, channel: 'online' });
+  await runPublicDiscover(paths, {
+    query: run.input.fallbackQuery, category: 'general', 'requested-count': '1',
+  }, { orchestrationRunId: run.runId, channelMode: 'online', runOnlineSearch, runProcess });
+  assert.equal(loadSession(paths).session.task.discoveryGate.attemptCount, 2);
+});
+
+test('owned online channel failure retries the same open gate attempt', async () => {
+  const { paths } = makeInitializedSession(['public-internet'], 'DeepSeek Harness 文章');
+  const session = loadSession(paths).session;
+  session.task.materializationTarget = 'selected';
+  session.task.requiredContentGranularity = 'full-text';
+  writeFileSync(join(paths.root, 'session.json'), `${JSON.stringify(session)}\n`);
+  const run = createProbeRun(paths, {
+    query: 'DeepSeek Harness 文章', fallbackQuery: 'DeepSeek Harness 工程实践',
+    requestedCount: 1, category: 'general', language: 'zh-CN', manualPolicy: 'pause',
+  });
+  setProbeDiscoveryReservation(paths, run.runId, { query: run.input.query, channel: 'online' });
+  const argumentsValue = { query: run.input.query, category: 'general', 'requested-count': '1' };
+  await assert.rejects(runPublicDiscover(paths, argumentsValue, {
+    orchestrationRunId: run.runId,
+    channelMode: 'online',
+    runOnlineSearch: async () => ({ ok: false, error: { code: 'FIXTURE_FAILURE' } }),
+  }));
+  assert.equal(loadSession(paths).session.task.discoveryGate.attemptCount, 1);
+  await runPublicDiscover(paths, argumentsValue, {
+    orchestrationRunId: run.runId,
+    channelMode: 'online',
+    runOnlineSearch: async (args) => ({ ok: true, document: { query: args.query, results: [] } }),
+  });
+  assert.equal(loadSession(paths).session.task.discoveryGate.attemptCount, 1);
+  assert.equal(loadSession(paths).session.task.discoveryGate.runs[0].status, 'running');
+});
+
 test('public discovery requires public-internet in the parent source scope', async () => {
   const { paths } = makeInitializedSession(['ima']);
   let called = false;
@@ -400,20 +470,41 @@ test('uses only SearXNG when a requested article count is satisfied', async () =
         stderr: '',
       };
     },
-    merge: ({ hotDoc, sxDoc }) => ({ query: sxDoc.query, hotDoc }),
+    merge: ({ hotDoc, sxDoc }) => ({
+      query: sxDoc.query,
+      hotDoc,
+      groups: {
+        bothChannels: [],
+        searxngTop: sxDoc.results,
+        agentReachTop: [],
+        hotBySource: {},
+        hotWithoutPopularity: [],
+        unverified: [],
+      },
+    }),
   });
 
   assert.deepEqual(calls.map(({ spec }) => spec.channel), ['searxng']);
   const searxngCall = calls[0];
   assert.equal(searxngCall.spec.args[searxngCall.spec.args.indexOf('--max-results') + 1], '1');
   assert.equal(searxngCall.spec.args[searxngCall.spec.args.indexOf('--timeout') + 1], '10');
-  assert.deepEqual(searxngCall.options, { timeoutMs: 60_000 });
+  assert.ok(searxngCall.options.timeoutMs > 0 && searxngCall.options.timeoutMs <= 60_000);
   assert.equal(result.hotDiscovery, null);
   assert.equal(result.snapshots.hotDiscovery, null);
   assert.equal(result.channels.hotDiscovery.status, 'skipped');
   assert.equal(result.channels.hotDiscovery.skipReason, 'sufficient_article_candidates');
   assert.equal(result.candidateQuality.searxng.article, 1);
   assert.equal(result.candidateQuality.searxng.eligibleArticle, 1);
+  assert.equal(result.discoveryAuthorization.probeCandidateIds.length, 1);
+  assert.equal(result.discoveryAuthorization.probeCandidateCount, 1);
+  assert.equal(result.discoveryAuthorization.verificationRequired, true);
+  assert.equal(result.merged.groups.searxngTop[0].discoveryDisposition, 'probe');
+  assert.equal(result.merged.groups.searxngTop[0].probePriority, 'high');
+  assert.equal(result.merged.groups.searxngTop[0].verificationRequired, true);
+  const persisted = JSON.parse(readFileSync(paths.session, 'utf8'));
+  assert.equal(persisted.task.discoveryGate.observations.length, 1);
+  assert.equal(persisted.task.discoveryGate.candidates[0].candidateVersion, 1);
+  assert.match(persisted.task.discoveryGate.candidates[0].evidenceHash, /^[a-f0-9]{64}$/);
   assert.ok(!result.warnings.some((warning) => warning.includes('hot-discovery')));
   assert.equal(
     JSON.parse(readFileSync(result.snapshots.merged, 'utf8')).channelDiagnostics.hotDiscovery.skipReason,

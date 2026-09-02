@@ -8,17 +8,17 @@ import {
   ensureBridge as ensureBridgeDefault,
   runCommand,
 } from './bridge-bootstrap.mjs';
-import { runGate } from './weixin-login-gate.mjs';
+import {
+  blockedCliPayload,
+  errorCode,
+  runGate,
+} from './weixin-login-gate.mjs';
 
 const LIST_TIMEOUT_MS = 60_000;
 
-function errorCode(result) {
-  const combined = `${result?.stdout || ''}\n${result?.stderr || ''}`;
-  const match = combined.match(/["']?code["']?\s*[:=]\s*["']?([A-Z_]+)/i);
-  return match?.[1]?.toUpperCase() || null;
-}
 function isBrowserConnect(result) {
-  return Number(result?.exitCode) === 69 || errorCode(result) === 'BROWSER_CONNECT';
+  const exitCode = Number(result?.exitCode);
+  return exitCode === 69 || (exitCode !== 0 && errorCode(result) === 'BROWSER_CONNECT');
 }
 
 function internalError({
@@ -38,6 +38,7 @@ function internalError({
         code,
         message,
         exitCode,
+        commandExecuted,
         ...(details ? { details } : bridgeCode ? { details: { bridgeCode } } : {}),
       },
     })}\n`,
@@ -263,19 +264,7 @@ async function main() {
     process.stdout.write(result.stdout || '');
     process.stderr.write(result.stderr || '');
   } else {
-    process.stderr.write(`${JSON.stringify({
-      ok: false,
-      gate: {
-        executed: false,
-        phase: result.phase,
-        reason: result.reason,
-      },
-      error: {
-        code: 'AUTH_REQUIRED',
-        message: result.reason,
-        exitCode: 77,
-      },
-    }, null, 2)}\n`);
+    process.stderr.write(`${JSON.stringify(blockedCliPayload(result), null, 2)}\n`);
   }
   process.exitCode = Number(result.exitCode) || 0;
 }

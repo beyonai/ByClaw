@@ -47,7 +47,7 @@ test('registers only official same-paper arXiv acquisition representations', () 
   }
 });
 
-test('authorizes article and weak candidates emitted by public discovery without promoting weak', () => {
+test('authorizes persisted probe dispositions and ignores provider pageType claims', () => {
   const state = createDiscoveryAuthorization();
   reserveDiscoveryAttempt(state, { query: 'DeepSeek-R1', category: 'science' });
   const recorded = recordDiscoveryResult(state, {
@@ -73,7 +73,7 @@ test('authorizes article and weak candidates emitted by public discovery without
     ],
   });
 
-  assert.equal(recorded.articleCandidates.length, 1);
+  assert.equal(recorded.articleCandidates.length, 2);
   assert.equal(
     authorizePublicSource(state, 'https://arxiv.org/abs/2501.12948').origin,
     'public-discover',
@@ -84,7 +84,7 @@ test('authorizes article and weak candidates emitted by public discovery without
   );
   assert.equal(
     authorizePublicSource(state, 'https://www.nature.com/articles/example').pageType,
-    'weak',
+    'article',
   );
   assert.throws(
     () => authorizePublicSource(state, 'https://example.com/search?q=deepseek'),
@@ -107,9 +107,9 @@ test('explicit user URLs are authorized without public discovery', () => {
   assert.equal(candidate.topicRelevance.status, 'not-required');
 });
 
-test('authorizes only topic-matched structural articles for schema 1.1 sessions', () => {
+test('authorizes only topic-matched structural articles for schema 2.0 sessions', () => {
   const state = createDiscoveryAuthorization({ query: '采集一篇关于 DeepSeek 的文章' });
-  assert.equal(state.schemaVersion, '1.1');
+  assert.equal(state.schemaVersion, '2.0');
   assert.equal(state.topicContract.normalizedSubject, 'deepseek');
   reserveDiscoveryAttempt(state, { query: 'DeepSeek paper', category: 'science' });
   const recorded = recordDiscoveryResult(state, {
@@ -158,14 +158,14 @@ test('authorization recomputes relevance after merging duplicate channel evidenc
   assert.equal(state.candidates[0].topicRelevance.status, 'matched');
 });
 
-test('a later structural article upgrade is retained even when it remains topic-ineligible', () => {
+test('a later structural upgrade retains immutable topic evidence from earlier observations', () => {
   const state = createDiscoveryAuthorization({ query: '采集一篇关于 DeepSeek 的文章' });
   reserveDiscoveryAttempt(state, { query: 'DeepSeek paper', category: 'science' });
   recordDiscoveryResult(state, {
     query: 'DeepSeek paper',
     category: 'science',
     candidates: [{
-      url: 'https://example.com/reports/entry', title: 'DeepSeek navigation', pageType: 'weak',
+      url: 'https://example.com/commonDetail/entry', title: 'DeepSeek navigation', pageType: 'weak',
     }],
   });
   reserveDiscoveryAttempt(state, { query: 'DeepSeek report', category: 'science' });
@@ -173,14 +173,100 @@ test('a later structural article upgrade is retained even when it remains topic-
     query: 'DeepSeek report',
     category: 'science',
     candidates: [{
-      url: 'https://example.com/reports/entry', title: 'Unrelated report', pageType: 'article',
+      url: 'https://example.com/commonDetail/entry',
+      title: 'Unrelated report',
+      passage: 'This publication discusses an unrelated product and its market operations. '.repeat(4),
+      publishedAt: '2026-09-01',
+      pageType: 'article',
     }],
   });
 
-  assert.equal(second.articleCandidates.length, 0);
+  assert.equal(second.articleCandidates.length, 1);
   assert.equal(second.structuralArticleCandidates.length, 1);
   assert.equal(state.candidates[0].pageType, 'article');
-  assert.equal(state.candidates[0].topicRelevance.status, 'unmatched');
+  assert.equal(state.candidates[0].topicRelevance.status, 'matched');
+  assert.equal(state.candidates[0].candidateVersion, 2);
+});
+
+test('records bounded immutable observations and a versioned candidate view', () => {
+  const state = createDiscoveryAuthorization({ query: 'DeepSeek Harness' });
+  reserveDiscoveryAttempt(state, { query: 'DeepSeek Harness', category: 'science' });
+  const recorded = recordDiscoveryResult(state, {
+    query: 'DeepSeek Harness',
+    category: 'science',
+    candidates: [{
+      url: 'https://example.com/commonDetail/759632',
+      title: 'DeepSeek Harness 工程实践',
+      passage: '这篇文章介绍 DeepSeek Harness 的架构设计、执行流程和工程落地。'.repeat(6),
+      provider: 'tencent-wsa',
+      requestId: 'request-1',
+      discoveredAt: '2026-09-02T00:00:00.000Z',
+      score: 0.8,
+      authorityLevel: 4,
+      authorization: 'Bearer must-not-persist',
+      pageType: 'reject',
+    }],
+  });
+
+  assert.equal(state.observations.length, 1);
+  assert.deepEqual(Object.keys(state.observations[0]).sort(), [
+    'authorityLevel', 'channel', 'content', 'evidenceLevel', 'observationId',
+    'observationTruncated', 'observedAt', 'passage', 'provider', 'providerVersion',
+    'publishedAt', 'query', 'rank', 'requestId', 'score', 'site', 'sourceUrls', 'title', 'url',
+  ]);
+  assert.doesNotMatch(JSON.stringify(state), /must-not-persist|authorization/i);
+  assert.equal(recorded.probeCandidates.length, 1);
+  assert.equal(state.candidates[0].discoveryDisposition, 'probe');
+  assert.equal(state.candidates[0].probePriority, 'high');
+  assert.equal(state.candidates[0].candidateVersion, 1);
+  assert.match(state.candidates[0].evidenceHash, /^[a-f0-9]{64}$/);
+  assert.equal(state.candidates[0].verificationRequired, true);
+});
+
+test('observation cap never leaves an unbacked candidate in the probe queue', () => {
+  const state = createDiscoveryAuthorization();
+  reserveDiscoveryAttempt(state, { query: 'bounded candidates' });
+  const candidates = Array.from({ length: 201 }, (_, index) => ({
+    url: `https://example.com/article/${index}`,
+    title: `Bounded article ${index}`,
+    content: 'A sufficiently descriptive article summary for deterministic probing.',
+  }));
+  const result = recordDiscoveryResult(state, { query: 'bounded candidates', candidates });
+  assert.equal(state.observations.length, 200);
+  assert.equal(state.observationDiagnostics.overCap, 1);
+  assert.equal(state.candidates.length, 200);
+  assert.equal(result.probeCandidates.length, 200);
+});
+
+test('replayed mutable sourceUrls cannot rewrite immutable acquisition authorization', () => {
+  const state = createDiscoveryAuthorization();
+  reserveDiscoveryAttempt(state, { query: 'immutable acquisition' });
+  const base = {
+    url: 'https://example.com/article/immutable', title: 'Immutable acquisition article',
+    content: 'A sufficiently descriptive article summary for probing.', provider: 'fixture',
+    requestId: 'same-request', discoveredAt: '2026-09-02T00:00:00.000Z',
+  };
+  recordDiscoveryResult(state, {
+    query: 'immutable acquisition',
+    candidates: [{ ...base, sourceUrls: ['https://example.com/read/a'] }],
+  });
+  const before = JSON.parse(JSON.stringify(state.candidates[0]));
+  reserveDiscoveryAttempt(state, { query: 'immutable acquisition', allowCandidateRetry: true });
+  recordDiscoveryResult(state, {
+    query: 'immutable acquisition',
+    candidates: [{ ...base, sourceUrls: ['https://evil.example/read/b'] }],
+  });
+  const after = state.candidates[0];
+  assert.deepEqual(after.acquisitionUrls, before.acquisitionUrls);
+  assert.equal(after.evidenceHash, before.evidenceHash);
+  assert.equal(after.candidateVersion, before.candidateVersion);
+});
+
+test('keeps schema 1.1 authorization readable for legacy atomic commands', () => {
+  const state = createDiscoveryAuthorization({ directUrls: ['https://example.com/article/12345'] });
+  state.schemaVersion = '1.1';
+  const candidate = authorizePublicSource(state, 'https://example.com/article/12345');
+  assert.equal(candidate.origin, 'user-provided');
 });
 
 test('discovery authorization rejects a third public discovery attempt', () => {
@@ -212,6 +298,23 @@ test('a second discovery attempt is allowed only when the first produced no arti
     () => reserveDiscoveryAttempt(state, { query: 'unnecessary retry', category: 'science' }),
     /DISCOVERY_RETRY_NOT_ALLOWED/,
   );
+});
+
+test('owned public-collect may use its fallback round after candidates fail verification', () => {
+  const state = createDiscoveryAuthorization({ query: 'DeepSeek Harness 文章' });
+  reserveDiscoveryAttempt(state, { query: 'DeepSeek Harness 文章' });
+  recordDiscoveryResult(state, {
+    query: 'DeepSeek Harness 文章',
+    candidates: [{
+      url: 'https://example.com/article/123456',
+      title: 'DeepSeek Harness 工程实践',
+      content: 'DeepSeek Harness 的完整工程实践与架构分析正文摘要。',
+    }],
+  });
+  assert.doesNotThrow(() => reserveDiscoveryAttempt(state, {
+    query: 'DeepSeek Harness 工程实践',
+    allowCandidateRetry: true,
+  }));
 });
 
 test('does not reserve another discovery attempt while one is running', () => {

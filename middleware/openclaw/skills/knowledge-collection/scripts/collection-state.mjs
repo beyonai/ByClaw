@@ -23,7 +23,10 @@ import {
   readLock,
   resolveCollectionInputFile,
 } from './session.mjs';
-import { deliveryCompleteForSession, summarizeCrawlDelivery } from './delivery-state.mjs';
+import {
+  deliveryCompleteForSession, summarizeCrawlDelivery, summarizePromotedDelivery,
+} from './delivery-state.mjs';
+import { summarizeProbeRun } from './probe-state.mjs';
 import {
   authorizeArxivAcquisitionVariant as authorizeArxivVariant,
   authorizePublicSource,
@@ -60,7 +63,7 @@ function discoveryCandidateFor(session, source, sourceUrl) {
   if ((SOURCE_SCOPE_ALIAS[source] || source) !== 'public-internet') return null;
   const normalized = normalizedAuthorizationUrl(sourceUrl);
   const gate = session.task?.discoveryGate;
-  if (gate?.schemaVersion !== '1.1') {
+  if (!['1.1', '2.0'].includes(gate?.schemaVersion)) {
     throw new Error('DISCOVERY_RELEVANCE_MIGRATION_REQUIRED: 旧公共发现会话必须新建内部 run');
   }
   const direct = gate?.candidates?.find((candidate) => candidate.origin === 'user-provided'
@@ -993,6 +996,117 @@ export function cmdCollect(paths, args) {
   });
 }
 
+/**
+ * Atomically promotes a verified public probe into the collection inventory and
+ * completes its orchestration attempt. Probe artifacts must already have been
+ * written; this transaction is the sole point where they become deliverable.
+ */
+export function promoteProbeMaterialization(paths, promotion) {
+  return withSessionLock(paths, 'public-collect-promote', () => {
+    const loaded = loadCollectionSession(paths, { skipCanonicalValidation: true });
+    if (loaded.materializationRecovered) {
+      throw new Error('检测到无效 materialization，已安全降级为 pending；请先由原始执行器重新物化');
+    }
+    const runId = requireString(promotion?.runId, 'runId');
+    const attemptId = requireString(promotion?.attemptId, 'attemptId');
+    const promotionId = requireString(promotion?.promotionId, 'promotionId');
+    const contentFingerprint = requireString(promotion?.contentFingerprint, 'contentFingerprint');
+    const run = loaded.session.task?.publicCollectRun;
+    if (!run || run.runId !== runId
+      || loaded.session.task.activeOrchestrationRunId !== runId
+      || loaded.session.task.orchestrationEpoch !== run.orchestrationEpoch) {
+      throw new Error(`ORCHESTRATION_OWNER_MISMATCH: ${runId}`);
+    }
+    const attempt = run.attempts?.find((entry) => entry.attemptId === attemptId);
+    if (!attempt || attempt.attemptState !== 'acquiring') {
+      throw new Error(`PROBE_ATTEMPT_NOT_ACTIVE: ${attemptId}`);
+    }
+    if (loaded.metadata.collection.items.some((item) => item.promotionId === promotionId)) {
+      return { promotionStatus: 'promoted', promotionId, itemId: promotion.item.itemId };
+    }
+
+    const evidence = promotion.item?.fullTextEvidence;
+    const artifact = requireString(evidence?.artifact, 'fullTextEvidence.artifact');
+    const executor = requireString(evidence?.executor, 'fullTextEvidence.executor');
+    const sourceUrl = requireString(promotion.item?.canonicalItem?.url, 'canonicalItem.url');
+    validateRawArtifacts(paths.root, [artifact]);
+    const receipt = readJson(path.join(paths.root, artifact), 'fullTextEvidence.artifact');
+    if (receipt?.schemaVersion !== '1.0' || receipt.executor !== executor
+      || receipt.sourceUrl !== sourceUrl || receipt.complete !== true
+      || receipt.contentGranularity !== 'full-text') {
+      throw new Error('专用 materializer 只能登记已确认完整的执行器全文回执');
+    }
+    const registration = {
+      schemaVersion: '1.0', executor, sourceUrl, artifact,
+      artifactHash: fullTextEvidenceHash(paths, artifact),
+    };
+    const registrations = Array.isArray(loaded.session.task.fullTextEvidenceReceipts)
+      ? loaded.session.task.fullTextEvidenceReceipts : [];
+    loaded.session.task.fullTextEvidenceReceipts = [
+      ...registrations.filter((entry) => !(entry?.executor === executor
+        && entry?.sourceUrl === sourceUrl && entry?.artifact === artifact)),
+      registration,
+    ];
+
+    const materialized = markOneMaterialized(
+      paths, loaded.session, loaded.metadata, loaded.collectionResult, promotion.item,
+    );
+    const inventory = loaded.metadata.collection.items.find(
+      (entry) => entry.itemId === materialized.itemId,
+    );
+    Object.assign(inventory, {
+      probeRunId: runId,
+      probeAttemptId: attemptId,
+      probeCandidateId: attempt.candidateId,
+      promotionId,
+      contentFingerprint,
+      duplicateGroup: promotion.duplicateGroup || contentFingerprint,
+      pageVerification: clone(promotion.pageVerification),
+      verifiedTopicStatus: promotion.verifiedTopicStatus,
+      verificationReceipt: clone(promotion.verificationReceipt),
+    });
+    Object.assign(attempt, {
+      attemptState: 'terminal',
+      acquisitionOutcome: 'saved',
+      pageVerification: 'verified-article',
+      verifiedTopicStatus: promotion.verifiedTopicStatus,
+      promotionStatus: 'promoted',
+      reasonCode: 'PROMOTED',
+      promotionId,
+      itemId: materialized.itemId,
+      contentFingerprint,
+      finishedAt: new Date().toISOString(),
+    });
+    run.ownedSessionCleanupPending = (run.ownedSessionCleanupPending || [])
+      .filter((entry) => entry?.attemptId !== attemptId);
+    run.cursor += 1;
+    run.pause = null;
+    run.status = 'running';
+    run.deliverableItemIds = [...new Set([...(run.deliverableItemIds || []), materialized.itemId])];
+    run.duplicateGroups = [...new Set([...(run.duplicateGroups || []), promotion.duplicateGroup || contentFingerprint])];
+    run.stateRevision += 1;
+    run.updatedAt = new Date().toISOString();
+    loaded.session.task.stateRevision = run.stateRevision;
+
+    reconcileCollectionStatus(loaded.metadata);
+    validateMetadata(loaded.metadata);
+    validateCanonicalView(paths.root, loaded.collectionResult, loaded.metadata);
+    markDeliveryStale(loaded.session);
+    persistCollection(paths, loaded.session, loaded.metadata);
+    atomicWriteJson(paths.collectionResult, loaded.collectionResult);
+    return {
+      attemptState: 'terminal',
+      acquisitionOutcome: 'saved',
+      pageVerification: 'verified-article',
+      verifiedTopicStatus: promotion.verifiedTopicStatus,
+      promotionStatus: 'promoted',
+      reasonCode: 'PROMOTED',
+      promotionId,
+      itemId: materialized.itemId,
+    };
+  });
+}
+
 function contentGranularityCounts(items) {
   const counts = { 'full-text': 0, excerpt: 0, abstract: 0, unknown: 0 };
   for (const item of items) {
@@ -1094,7 +1208,7 @@ function evaluateStoredTopicRelevance(paths, session, metadata, collectionResult
     warnings.push('旧公共发现会话未包含主题相关性授权；状态保持只读，请新建内部 run 后再继续写入或首次发布');
     return { valid: true, warnings, legacy: true };
   }
-  if (gate.schemaVersion !== '1.1') {
+  if (!['1.1', '2.0'].includes(gate.schemaVersion)) {
     return { valid: false, warnings: ['公共发现主题相关性授权状态无效'] };
   }
   const discoveredItems = publicItems.filter((item) => item.provenanceKind === 'public-discover'
@@ -1139,9 +1253,123 @@ function evaluateStoredTopicRelevance(paths, session, metadata, collectionResult
   return { valid, warnings };
 }
 
+function promotionContentFingerprint(markdown) {
+  const normalized = String(markdown || '')
+    .replace(/^---\n[\s\S]*?\n---\n/u, '')
+    .replace(/^#{1,6}\s+.*$/gmu, '')
+    .replace(/^!\[[^\]]*\]\([^)]*\)\s*$/gmu, '')
+    .normalize('NFKC')
+    .toLocaleLowerCase('und')
+    .replace(/[\p{P}\p{S}\s]+/gu, ' ')
+    .trim();
+  return `sha256:${crypto.createHash('sha256').update(normalized).digest('hex')}`;
+}
+
+function validatePromotionEvidence(paths, session) {
+  const eligible = summarizePromotedDelivery(session);
+  const inventory = new Map(session.collection.collection.items.map((item) => [item.itemId, item]));
+  const validItemIds = [];
+  const warnings = [];
+  for (const itemId of eligible.deliverableItemIds) {
+    const item = inventory.get(itemId);
+    try {
+      const receiptPath = requireString(item?.verificationReceipt, `inventory ${itemId} verificationReceipt`);
+      const absolute = validateRelativePath(paths.root, receiptPath, `inventory ${itemId} verificationReceipt`);
+      validatePathPrefix(paths.root, receiptPath, 'raw', `inventory ${itemId} verificationReceipt`);
+      if (!item.rawArtifacts?.includes(receiptPath)) {
+        throw new Error('verificationReceipt 必须登记在 rawArtifacts 中');
+      }
+      const sanitizedPath = requireString(
+        item?.materialization?.sanitizedPath,
+        `inventory ${itemId} sanitizedPath`,
+      );
+      const sanitizedAbsolute = validateMarkdownPath(
+        paths.root, sanitizedPath, `inventory ${itemId} sanitizedPath`, 'sanitized',
+      );
+      const sanitizedMarkdown = fs.readFileSync(sanitizedAbsolute, 'utf8');
+      const receipt = readJson(absolute, `inventory ${itemId} verificationReceipt`);
+      if (receipt?.schemaVersion !== '1.0'
+        || receipt.runId !== item.probeRunId
+        || receipt.attemptId !== item.probeAttemptId
+        || receipt.candidateId !== item.probeCandidateId
+        || receipt.contentFingerprint !== item.contentFingerprint
+        || receipt.pageVerification !== 'verified-article'
+        || receipt.verifiedTopicStatus !== item.verifiedTopicStatus) {
+        throw new Error('verificationReceipt 与晋升 inventory 不匹配');
+      }
+      const sanitizedHash = `sha256:${crypto.createHash('sha256').update(sanitizedMarkdown).digest('hex')}`;
+      if (receipt.artifacts?.sanitized?.path !== sanitizedPath
+        || receipt.artifacts.sanitized.sha256 !== sanitizedHash
+        || promotionContentFingerprint(sanitizedMarkdown) !== item.contentFingerprint) {
+        throw new Error('sanitized 正文哈希或内容指纹与晋升回执不匹配');
+      }
+      const topic = assessMaterializedTopic(session.task.discoveryGate.topicContract, {
+        title: receipt.analysis?.title || item.canonicalItem?.title || '',
+        markdown: sanitizedMarkdown,
+      });
+      if (!['matched', 'not-required'].includes(topic.status)
+        || topic.status !== item.verifiedTopicStatus) {
+        throw new Error(`sanitized 正文主题复验失败: ${topic.status}`);
+      }
+      validItemIds.push(itemId);
+    } catch (error) {
+      warnings.push(`inventory ${itemId} 正文验证回执失效: ${error.message}`);
+    }
+  }
+  return {
+    requestedItemCount: eligible.requestedItemCount,
+    deliverableArticleCount: validItemIds.length,
+    remainingCount: Math.max(0, eligible.requestedItemCount - validItemIds.length),
+    validItemIds,
+    warnings,
+  };
+}
+
+export function finalizeVerifiedProbeRun(paths, runId, desiredStatus, detail = {}) {
+  if (!['complete', 'partial', 'failed'].includes(desiredStatus)) {
+    throw new Error(`ORCHESTRATION_TERMINAL_STATUS_INVALID: ${desiredStatus}`);
+  }
+  return withSessionLock(paths, 'public-collect-finalize-verified', () => {
+    const { session, metadata } = loadCollectionSession(paths, { persistRecovery: false });
+    session.collection = metadata;
+    const run = session.task?.publicCollectRun;
+    if (!run || run.runId !== runId || session.task.activeOrchestrationRunId !== runId
+      || session.task.orchestrationEpoch !== run.orchestrationEpoch) {
+      throw new Error(`ORCHESTRATION_OWNER_MISMATCH: ${runId}`);
+    }
+    if ((run.ownedSessionCleanupPending || []).length > 0) {
+      throw new Error('ORCHESTRATION_CLEANUP_PENDING: 仍有命令自有 session/TAB 未清理');
+    }
+    const evidence = validatePromotionEvidence(paths, session);
+    const status = evidence.remainingCount === 0
+      ? 'complete' : (evidence.deliverableArticleCount > 0 ? 'partial' : 'failed');
+    if (status !== desiredStatus) {
+      throw new Error(`ORCHESTRATION_FINAL_RECONCILIATION_CONFLICT: expected=${desiredStatus} actual=${status}`);
+    }
+    run.deliverableItemIds = evidence.validItemIds;
+    run.status = status;
+    run.finishedAt = new Date().toISOString();
+    run.updatedAt = run.finishedAt;
+    run.stateRevision += 1;
+    session.task.stateRevision = run.stateRevision;
+    run.terminalReason = String(detail.reasonCode
+      || (status === 'complete' ? 'REQUESTED_COUNT_REACHED' : 'CANDIDATES_EXHAUSTED'));
+    run.pause = null;
+    run.actionLease = null;
+    delete session.task.activeOrchestrationRunId;
+    delete session.task.orchestrationEpoch;
+    persistCollection(paths, session, metadata);
+    return JSON.parse(JSON.stringify(run));
+  });
+}
+
 export function collectionStatus(paths) {
   const loaded = loadCollectionSession(paths, { persistRecovery: false });
   const { session, metadata, collectionResult } = loaded;
+  // All derived completion checks must use the read-time revalidated view. Do
+  // not persist it from this read-only command, but never consult stale raw
+  // materialization state after normalization has detected artifact damage.
+  session.collection = metadata;
   const items = metadata.collection.items;
   const count = (status) => items.filter((item) => item.materialization.status === status).length;
   const pending = count('pending');
@@ -1154,6 +1382,15 @@ export function collectionStatus(paths) {
       && item.materialization.contentGranularity !== 'full-text').length
     : 0;
   const relevance = evaluateStoredTopicRelevance(paths, session, metadata, collectionResult);
+  const promotionEvidence = validatePromotionEvidence(paths, session);
+  const baseProbeSummary = summarizeProbeRun(session);
+  const probeSummary = baseProbeSummary ? {
+    ...baseProbeSummary,
+    deliverableArticleCount: promotionEvidence.deliverableArticleCount,
+    remainingCount: promotionEvidence.remainingCount,
+    effectiveStatus: promotionEvidence.warnings.length > 0
+      ? 'invalidated' : baseProbeSummary.effectiveStatus,
+  } : null;
   return {
     collectionStatus: metadata.collection.status,
     items: items.length,
@@ -1168,11 +1405,15 @@ export function collectionStatus(paths) {
     materializationTarget,
     requiredContentGranularity,
     unmetRequiredGranularity,
-    deliveryComplete: deliveryCompleteForSession(session) && relevance.valid,
+    deliveryComplete: deliveryCompleteForSession(session) && relevance.valid
+      && promotionEvidence.remainingCount === 0,
+    publicCollectRun: probeSummary,
     crawl: summarizeCrawlDelivery(session),
     canonicalItems: collectionResult.items.length,
     ...(relevance.valid ? { downstreamInput: buildDownstreamInput(paths, collectionResult) } : {}),
-    warnings: [...new Set([...loaded.warnings, ...relevance.warnings])],
+    warnings: [...new Set([
+      ...loaded.warnings, ...relevance.warnings, ...promotionEvidence.warnings,
+    ])],
   };
 }
 

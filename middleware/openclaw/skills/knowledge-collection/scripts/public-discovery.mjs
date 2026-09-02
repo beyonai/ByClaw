@@ -19,6 +19,7 @@ import {
 import {
   recordDiscoveryResult,
   reserveDiscoveryAttempt,
+  finalizeOpenDiscoveryAttempt,
 } from './discovery-authorization.mjs';
 import { loadSession, persistSession, withSessionLock } from './session.mjs';
 import { runCli } from './enterprise/shared/cli-runner.mjs';
@@ -199,7 +200,23 @@ export async function runPublicDiscover(paths, args, options = {}) {
     if (!current.task.discoveryGate) {
       throw new Error('DISCOVERY_RELEVANCE_MIGRATION_REQUIRED: 缺少公共发现 gate 的旧会话必须新建内部 run');
     }
-    reserveDiscoveryAttempt(current.task.discoveryGate, { query, category });
+    const ownedOrchestration = options.orchestrationRunId !== undefined;
+    if (ownedOrchestration && (current.task.activeOrchestrationRunId !== options.orchestrationRunId
+      || current.task.publicCollectRun?.runId !== options.orchestrationRunId
+      || current.task.discoveryGate.schemaVersion !== '2.0')) {
+      throw new Error(`ORCHESTRATION_OWNER_MISMATCH: ${options.orchestrationRunId}`);
+    }
+    const openAttempt = current.task.discoveryGate.runs?.at(-1);
+    const reservation = current.task.publicCollectRun?.discoveryReservation;
+    const continueOwnedChannel = ownedOrchestration
+      && openAttempt?.status === 'running' && openAttempt.query === query
+      && openAttempt.category === category && reservation?.query === query
+      && reservation?.channel === options.channelMode;
+    if (!continueOwnedChannel) {
+      reserveDiscoveryAttempt(current.task.discoveryGate, {
+        query, category, allowCandidateRetry: ownedOrchestration,
+      });
+    }
     persistSession(paths, current);
   });
   const topicContract = loadSession(paths, { persistMigration: false }).session.task.discoveryGate.topicContract;
@@ -211,7 +228,8 @@ export async function runPublicDiscover(paths, args, options = {}) {
   const profileEnabled = isChineseArticleProfile(session, args);
   const profileStopAfter = requestedCount === null ? null
     : Math.max(Number(requestedCount) * 3, 5);
-  const effectiveMaxResults = profileEnabled ? String(profileStopAfter) : (requestedCount || maxResults);
+  const effectiveMaxResults = profileEnabled ? String(profileStopAfter)
+    : (options.orchestrationRunId !== undefined ? maxResults : (requestedCount || maxResults));
   const processTimeout = String(args?.timeout || DEFAULT_SEARXNG_PROCESS_TIMEOUT_SECONDS);
   const timeRange = typeof args?.['time-range'] === 'string' && args['time-range'].trim()
     ? args['time-range'].trim() : null;
@@ -232,7 +250,8 @@ export async function runPublicDiscover(paths, args, options = {}) {
     language,
     pageno,
     'max-results': effectiveMaxResults,
-    ...(requestedCount ? { 'requested-count': requestedCount } : {}),
+    ...(requestedCount && options.orchestrationRunId === undefined
+      ? { 'requested-count': requestedCount } : {}),
     ...(timeRange ? { 'time-range': timeRange } : {}),
   };
   const runOnlineSearchChannel = async (_spec, { timeoutMs }) => {
@@ -275,6 +294,7 @@ export async function runPublicDiscover(paths, args, options = {}) {
   let hotOutcome;
   let searxngMs = 0;
   let hotDiscoveryMs = 0;
+  const channelMode = options.channelMode || 'all';
   const runTimed = async (runner, spec, timeoutMs = processTimeoutMs) => {
     const startedAt = now();
     let outcome;
@@ -285,7 +305,17 @@ export async function runPublicDiscover(paths, args, options = {}) {
     }
     return { outcome, durationMs: elapsedMilliseconds(startedAt, now()) };
   };
-  if (profileEnabled) {
+  if (channelMode === 'online') {
+    const onlineRun = await runTimed(runOnlineSearchChannel, onlineSearchSpec);
+    searxngOutcome = onlineRun.outcome;
+    searxngMs = onlineRun.durationMs;
+    hotOutcome = { skipped: true, skipReason: 'channel_mode_online' };
+  } else if (channelMode === 'hot') {
+    searxngOutcome = { skipped: true, skipReason: 'channel_mode_hot' };
+    const hotRun = await runTimed(runHotDiscoveryProcess, hotDiscoverySpec());
+    hotOutcome = hotRun.outcome;
+    hotDiscoveryMs = hotRun.durationMs;
+  } else if (profileEnabled) {
     const remainingHardMs = Math.max(
       1,
       HARD_DISCOVERY_BUDGET_MS - elapsedMilliseconds(totalStartedAt, now()),
@@ -344,7 +374,8 @@ export async function runPublicDiscover(paths, args, options = {}) {
     searxngMs = searxngRun.durationMs;
     const requestedSxDoc = parseSuccess(searxngOutcome);
     const requestedCandidates = Array.isArray(requestedSxDoc?.results) ? requestedSxDoc.results : [];
-    if (countUniqueEligibleArticles(requestedCandidates, topicContract) >= Number(requestedCount)) {
+    if (!options.forceHotDiscovery
+      && countUniqueEligibleArticles(requestedCandidates, topicContract) >= Number(requestedCount)) {
       hotOutcome = { skipped: true, skipReason: 'sufficient_article_candidates' };
     } else {
       const hotRun = await runTimed(runHotDiscoveryProcess, hotDiscoverySpec());
@@ -359,11 +390,13 @@ export async function runPublicDiscover(paths, args, options = {}) {
     const failure = hotOutcome?.skipped
       ? 'SearXNG 未返回有效结果'
       : 'SearXNG 与 hot-discovery 均未返回有效结果';
-    withSessionLock(paths, 'public-discover-failed', () => {
-      const current = loadSession(paths, { persistMigration: false }).session;
-      recordDiscoveryResult(current.task.discoveryGate, { query, category, candidates: [], error: failure });
-      persistSession(paths, current);
-    });
+    if (options.orchestrationRunId === undefined) {
+      withSessionLock(paths, 'public-discover-failed', () => {
+        const current = loadSession(paths, { persistMigration: false }).session;
+        recordDiscoveryResult(current.task.discoveryGate, { query, category, candidates: [], error: failure });
+        persistSession(paths, current);
+      });
+    }
     throw new Error(failure);
   }
 
@@ -409,6 +442,7 @@ export async function runPublicDiscover(paths, args, options = {}) {
       query,
       category,
       candidates: mergedCandidates(annotatedMerged),
+      keepOpen: options.orchestrationRunId !== undefined && options.channelMode === 'online',
     });
     persistSession(paths, current);
     return { state: current.task.discoveryGate, result };
@@ -449,6 +483,9 @@ export async function runPublicDiscover(paths, args, options = {}) {
       exhausted: authorization.state.exhausted,
       stopReason: authorization.state.stopReason,
       stopDetail: authorization.state.stopDetail,
+      probeCandidateIds: authorization.result.probeCandidates.map((candidate) => candidate.candidateId),
+      probeCandidateCount: authorization.result.probeCandidates.length,
+      verificationRequired: true,
       articleCandidateIds: authorization.result.articleCandidates.map((candidate) => candidate.candidateId),
       structuralArticleCandidateIds: authorization.result.structuralArticleCandidates
         .map((candidate) => candidate.candidateId),
@@ -470,7 +507,7 @@ export async function runPublicDiscover(paths, args, options = {}) {
     withSessionLock(paths, 'public-discover-error', () => {
       const current = loadSession(paths, { persistMigration: false }).session;
       const running = current.task.discoveryGate?.runs?.at(-1)?.status === 'running';
-      if (running) {
+      if (running && options.orchestrationRunId === undefined) {
         recordDiscoveryResult(current.task.discoveryGate, {
           query,
           category,
@@ -482,4 +519,19 @@ export async function runPublicDiscover(paths, args, options = {}) {
     });
     throw error;
   }
+}
+
+export function finalizePublicDiscoveryRound(paths, { orchestrationRunId, query, category }) {
+  return withSessionLock(paths, 'public-discover-finalize-round', () => {
+    const current = loadSession(paths, { persistMigration: false }).session;
+    if (current.task.activeOrchestrationRunId !== orchestrationRunId) {
+      throw new Error(`ORCHESTRATION_OWNER_MISMATCH: ${orchestrationRunId}`);
+    }
+    const last = current.task.discoveryGate?.runs?.at(-1);
+    const result = last?.status === 'complete' && last.query === String(query)
+      && last.category === String(category)
+      ? last : finalizeOpenDiscoveryAttempt(current.task.discoveryGate, { query, category });
+    persistSession(paths, current);
+    return result;
+  });
 }

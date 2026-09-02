@@ -68,6 +68,7 @@ test('initial browser command runs capability check, bridge, then command', asyn
   });
 
   assert.equal(outcome.exitCode, 0);
+  assert.equal(outcome.commandExecuted, true);
   assert.deepEqual(events, ['help:user-info', 'bridge:0', 'command:user-info']);
 });
 
@@ -86,7 +87,9 @@ test('bridge failure does not execute Weixin command or create Gate state', asyn
   });
 
   assert.equal(outcome.exitCode, 69);
+  assert.equal(outcome.commandExecuted, false);
   const error = JSON.parse(outcome.stderr).error;
+  assert.equal(error.commandExecuted, false);
   assert.deepEqual(error.details, {
     bridgeCode: 'BRIDGE_UNAVAILABLE',
     browserState: 'stopped',
@@ -191,6 +194,29 @@ test('read command reuses one budget for bridge recovery and retries command onc
   assert.equal(budgets[0], budgets[1]);
 });
 
+test('successful business data containing BROWSER_CONNECT does not trigger bridge recovery', async (t) => {
+  let bridgeChecks = 0;
+  let executions = 0;
+  const outcome = await runWeixinBrowser({
+    stateDir: await stateDir(t),
+    argv: command(),
+    loadCapability: async () => ({ browser: true, access: 'read' }),
+    ensureBridge: async () => {
+      bridgeChecks += 1;
+      return ready;
+    },
+    execute: async () => {
+      executions += 1;
+      return success(JSON.stringify({ ok: true, records: [{ code: 'BROWSER_CONNECT' }] }));
+    },
+  });
+
+  assert.equal(outcome.exitCode, 0);
+  assert.equal(outcome.phase, 'complete');
+  assert.equal(bridgeChecks, 1);
+  assert.equal(executions, 1);
+});
+
 test('write command recovers bridge but requires approval instead of automatic retry', async (t) => {
   let executions = 0;
   const outcome = await runWeixinBrowser({
@@ -205,8 +231,10 @@ test('write command recovers bridge but requires approval instead of automatic r
   });
 
   assert.equal(outcome.exitCode, 1);
-  assert.match(outcome.stderr, /RETRY_APPROVAL_REQUIRED/);
-  assert.match(outcome.stderr, /BRIDGE_RECOVERED_RETRY_REQUIRES_APPROVAL/);
+  const error = JSON.parse(outcome.stderr).error;
+  assert.equal(error.code, 'RETRY_APPROVAL_REQUIRED');
+  assert.equal(error.commandExecuted, true);
+  assert.equal(error.details.bridgeCode, 'BRIDGE_RECOVERED_RETRY_REQUIRES_APPROVAL');
   assert.equal(executions, 1);
 });
 

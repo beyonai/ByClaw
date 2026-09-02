@@ -49,7 +49,6 @@ import com.iwhalecloud.byai.state.domain.chat.model.MessageContext;
 import com.iwhalecloud.byai.state.domain.chat.model.MessageFileDto;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatProcessContext;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatStreamRuntimeCoordinator;
-import com.iwhalecloud.byai.state.domain.chat.service.SystemParamTargetAgentResolver;
 import com.iwhalecloud.byai.state.domain.chat.service.GatewayStreamEventProcessor;
 import com.iwhalecloud.byai.state.domain.chat.service.PythonSseService;
 import com.iwhalecloud.byai.state.domain.chat.service.TargetAgentResolver;
@@ -97,9 +96,6 @@ public class RouteService {
 
     @Autowired
     private TargetAgentResolver targetAgentResolver;
-
-    @Autowired
-    private SystemParamTargetAgentResolver systemParamTargetAgentResolver;
 
     @Autowired
     private InterfaceRouteService interfaceRouteService;
@@ -194,7 +190,6 @@ public class RouteService {
 
         String targetAgentType = targetAgentResolver.resolveAgentType(workerAgentType, agentId,
             chatDto.getSourceAgentType(), userCode);
-        targetAgentType = systemParamTargetAgentResolver.resolve(targetAgentType, agentId, userCode);
         ctx.targetAgentType = targetAgentType;
 
         // 处理 content 中的资源占位符替换，如 {{DIG_EMPLOYEE_10812779}} 替换为 @xxxxx
@@ -495,8 +490,6 @@ public class RouteService {
             String laneTraceId = resolveLaneTraceId(lane, fallbackTraceId);
             String laneTargetAgentType = targetAgentResolver.resolveAgentType(workerAgentType,
                 laneAgentInfo.agentId, ctx.getAssistantChatDto().getSourceAgentType(), userCode);
-            laneTargetAgentType = systemParamTargetAgentResolver.resolve(laneTargetAgentType,
-                laneAgentInfo.agentId, userCode);
             Map<String, Object> laneParams = buildLaneParams(ctx.getParams(), multiAgentMetadata, lane,
                 laneAgentInfo, laneTraceId);
             JSONObject laneMetadata = multiAgentMetadata.buildLanePayload(lane, laneTraceId);
