@@ -740,21 +740,11 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
               <span className={styles.sessionTime}>
                 {chatSessionRuntimeManager.isSessionWaitingForUserInput(`${session.sessionId}`) ? (
                   <Tag color="blue">{intl.formatMessage({ id: 'workspaceSider.sessionNeedsUserInput' })}</Tag>
-                ) : Number(chatSessionRuntimeManager.getSessionRuntime(`${session.sessionId}`)?.activeAgentCount || 0) >
-                  0 ? (
-                    <Tag icon={<LoadingOutlined spin />} color="processing">
-                      {intl.formatMessage(
-                        { id: 'workspaceSider.sessionAgentsWorking' },
-                        {
-                          count: chatSessionRuntimeManager.getSessionRuntime(`${session.sessionId}`)?.activeAgentCount,
-                        }
-                      )}
-                    </Tag>
-                  ) : chatSessionRuntimeManager.isSessionRunning(`${session.sessionId}`) ? (
-                    <LoadingOutlined />
-                  ) : (
-                    formatSessionTime(session.updateTime || session.createTime, intl)
-                  )}
+                ) : chatSessionRuntimeManager.isSessionRunning(`${session.sessionId}`) ? (
+                  <LoadingOutlined />
+                ) : (
+                  formatSessionTime(session.updateTime || session.createTime, intl)
+                )}
               </span>
             </button>
             <WorkspaceSessionActions
