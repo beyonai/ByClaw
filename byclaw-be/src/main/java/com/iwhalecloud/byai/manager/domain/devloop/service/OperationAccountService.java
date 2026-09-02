@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.devloop.service;
 
+import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.iwhalecloud.byai.manager.entity.devloop.OperationAccount;
 import com.iwhalecloud.byai.manager.mapper.devloop.OperationAccountMapper;
@@ -85,5 +87,23 @@ public class OperationAccountService {
         wrapper.eq(OperationAccount::getCreateBy, userId).eq(OperationAccount::getStatusCd, "00A")
             .orderByDesc(OperationAccount::getCreateTime);
         return operationAccountMapper.selectList(wrapper);
+    }
+
+    /** 查询用户级模板账号的全部历史记录，软删除记录也用于阻止默认账号重建。 */
+    public boolean hasGlobalTemplateHistory(Long userId, String connectorCode) {
+        if (userId == null || connectorCode == null || connectorCode.isBlank()) {
+            return false;
+        }
+        LambdaQueryWrapper<OperationAccount> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(OperationAccount::getCreateBy, userId)
+            .isNull(OperationAccount::getProjectId);
+        return operationAccountMapper.selectList(wrapper).stream().anyMatch(account -> {
+            try {
+                JSONObject config = JSON.parseObject(account.getConfig());
+                return config != null && connectorCode.equals(config.getString("connectorCode"));
+            } catch (RuntimeException ignored) {
+                return false;
+            }
+        });
     }
 }

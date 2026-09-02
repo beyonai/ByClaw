@@ -60,6 +60,20 @@ WHERE NOT EXISTS (
     SELECT 1 FROM byai.byai_connector_info WHERE connector_code = 'weixin-open-platform'
 );
 
+-- 微信公众号网页登录账号模板。仅用于初始化用户级运营账号，不作为普通连接器展示或授权。
+INSERT INTO byai.byai_connector_info (
+    connector_id, connector_code, connector_name, description, connector_type,
+    provider_code, skill_code, auth_mode, auth_config, request_config, runtime_manifest, sort
+)
+SELECT nextval('byai.seq_any_table'), 'weixin-official-web', '微信公众号',
+       '登录微信公众平台网页后台', 'ACCOUNT_TEMPLATE',
+       NULL, 'wechat-api', 'NONE', '{}',
+       '{"operationAccount":{"platformCode":"CustomLink","accountName":"微信公众号","accountCode":"","customUrl":"https://mp.weixin.qq.com/"}}',
+       NULL, 57
+WHERE NOT EXISTS (
+    SELECT 1 FROM byai.byai_connector_info WHERE connector_code = 'weixin-official-web'
+);
+
 -- IMA OpenAPI 内置 Skill 注册
 -- CLI 与 skill 文件随 OpenClaw 镜像提供；数据库仅注册目录、运行期快照和可发现权限。
 UPDATE byai.byai_system_config c
@@ -1780,4 +1794,3 @@ INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_nam
   ],
   "en_US": []
 }', '初始化项目专家组数字员工模板');
-

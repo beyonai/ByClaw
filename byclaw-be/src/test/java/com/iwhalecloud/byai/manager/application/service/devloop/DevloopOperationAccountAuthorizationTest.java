@@ -34,6 +34,7 @@ import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.manager.domain.devloop.service.OperationAccountAccessService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.OperationAccountService;
+import com.iwhalecloud.byai.manager.domain.devloop.service.OperationAccountTemplateService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectMemberService;
 import com.iwhalecloud.byai.manager.dto.devloop.OperationAccountDTO;
 import com.iwhalecloud.byai.manager.entity.devloop.OperationAccount;
@@ -61,6 +62,9 @@ class DevloopOperationAccountAuthorizationTest {
 
     @Mock
     private OperationAccountAccessService operationAccountAccessService;
+
+    @Mock
+    private OperationAccountTemplateService operationAccountTemplateService;
 
     @Mock
     private SsSandboxRecordMapper sandboxRecordMapper;
@@ -96,6 +100,7 @@ class DevloopOperationAccountAuthorizationTest {
         ReflectionTestUtils.setField(service, "projectMemberService", projectMemberService);
         ReflectionTestUtils.setField(service, "operationAccountService", operationAccountService);
         ReflectionTestUtils.setField(service, "operationAccountAccessService", operationAccountAccessService);
+        ReflectionTestUtils.setField(service, "operationAccountTemplateService", operationAccountTemplateService);
         ReflectionTestUtils.setField(service, "sandboxRecordMapper", sandboxRecordMapper);
     }
 
@@ -153,7 +158,9 @@ class DevloopOperationAccountAuthorizationTest {
 
         assertThat(response.getCode()).isEqualTo(ResponseUtil.SUCCESS);
         assertThat(response.getData()).extracting(item -> item.get("accountId")).containsExactly(1L);
-        verify(operationAccountService).listGlobalByUserId(CURRENT_USER_ID);
+        InOrder ordered = inOrder(operationAccountTemplateService, operationAccountService);
+        ordered.verify(operationAccountTemplateService).ensureWechatOfficialWebAccount(CURRENT_USER_ID);
+        ordered.verify(operationAccountService).listGlobalByUserId(CURRENT_USER_ID);
         verify(projectMapper, never()).selectById(any());
     }
 

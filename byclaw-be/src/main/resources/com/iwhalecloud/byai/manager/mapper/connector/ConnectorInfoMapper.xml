@@ -66,6 +66,7 @@
                             WHERE row_num = 1) b
                            ON a.connector_id = b.connector_id
         WHERE a.status_cd = '00A'
+          AND a.connector_type &lt;&gt; 'ACCOUNT_TEMPLATE'
         <if test="qo.keyword != null and qo.keyword != ''">
             AND a.connector_name LIKE CONCAT('%', #{qo.keyword}, '%')
         </if>
@@ -77,6 +78,14 @@
         FROM byai_connector_info
         WHERE connector_code = #{connectorCode}
           AND status_cd = '00A'
+    </select>
+
+    <select id="selectByConnectorCodeForUpdate" resultType="com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo">
+        SELECT *
+        FROM byai_connector_info
+        WHERE connector_code = #{connectorCode}
+          AND status_cd = '00A'
+        FOR UPDATE
     </select>
 
     <select id="selectConnectionsByUserId" resultType="com.iwhalecloud.byai.manager.dto.connector.ConnectorConnectionDto">
@@ -118,6 +127,7 @@
                     ON a.connector_id = i.connector_id
                        AND a.row_num = 1
         WHERE i.status_cd = '00A'
+          AND i.connector_type &lt;&gt; 'ACCOUNT_TEMPLATE'
         UNION ALL
         SELECT i.connector_code AS connector_id,
                'connected' AS status,
@@ -129,6 +139,7 @@
                NULL AS last_verified_at
         FROM byai_connector_info i
         WHERE i.status_cd = '00A'
+          AND i.connector_type &lt;&gt; 'ACCOUNT_TEMPLATE'
           AND i.auth_mode = 'NONE'
           AND NOT EXISTS (
               SELECT 1
