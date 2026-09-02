@@ -224,7 +224,7 @@ export function authorizePublicSource(state, rawUrl) {
   if (!candidate) {
     throw new Error(`SOURCE_NOT_AUTHORIZED_BY_DISCOVERY: ${normalized} 不在本次授权候选中`);
   }
-  if (candidate.pageType !== 'article') {
+  if (!['article', 'weak'].includes(candidate.pageType)) {
     throw new Error(`SOURCE_NOT_AUTHORIZED_BY_DISCOVERY: ${normalized} pageType=${candidate.pageType}`);
   }
   if (candidate.origin === 'public-discover'

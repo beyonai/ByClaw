@@ -47,7 +47,7 @@ test('registers only official same-paper arXiv acquisition representations', () 
   }
 });
 
-test('authorizes only article candidates emitted by public discovery', () => {
+test('authorizes article and weak candidates emitted by public discovery without promoting weak', () => {
   const state = createDiscoveryAuthorization();
   reserveDiscoveryAttempt(state, { query: 'DeepSeek-R1', category: 'science' });
   const recorded = recordDiscoveryResult(state, {
@@ -66,6 +66,10 @@ test('authorizes only article candidates emitted by public discovery', () => {
         url: 'https://www.nature.com/articles/example',
         pageType: 'weak',
       },
+      {
+        url: 'https://example.com/search?q=deepseek',
+        pageType: 'reject',
+      },
     ],
   });
 
@@ -78,9 +82,13 @@ test('authorizes only article candidates emitted by public discovery', () => {
     authorizePublicSource(state, 'https://arxiv.org/pdf/2501.12948').canonicalUrl,
     'https://arxiv.org/abs/2501.12948',
   );
+  assert.equal(
+    authorizePublicSource(state, 'https://www.nature.com/articles/example').pageType,
+    'weak',
+  );
   assert.throws(
-    () => authorizePublicSource(state, 'https://www.nature.com/articles/example'),
-    /SOURCE_NOT_AUTHORIZED_BY_DISCOVERY.*pageType=weak/,
+    () => authorizePublicSource(state, 'https://example.com/search?q=deepseek'),
+    /SOURCE_NOT_AUTHORIZED_BY_DISCOVERY.*pageType=reject/,
   );
   assert.throws(
     () => authorizePublicSource(state, 'https://arxiv.org/abs/9999.99999'),

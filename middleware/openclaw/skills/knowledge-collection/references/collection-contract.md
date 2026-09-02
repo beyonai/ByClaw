@@ -91,7 +91,7 @@ collection_filters:
 
 - `storage.fallback`：是否使用工作区回退目录。
 - `collection.status`：采集状态 `complete`、`partial` 或 `failed`。
-- `collection.items`：完整文章清单。每项使用稳定 `itemId`，并记录 `sourceSkill`、`backend`、`sourceItemId`、`sourceUrl`、用户筛选、`rawArtifacts` 及 `materialization`。公共发现条目还记录 `discoveryCandidateId`，它必须指向本会话 `task.discoveryGate.candidates` 中的 `article` 或用户明确提供的 URL。
+- `collection.items`：完整文章清单。每项使用稳定 `itemId`，并记录 `sourceSkill`、`backend`、`sourceItemId`、`sourceUrl`、用户筛选、`rawArtifacts` 及 `materialization`。公共发现条目还记录 `discoveryCandidateId`，它必须指向本会话 `task.discoveryGate.candidates` 中主题匹配的 `article`/`weak`，或用户明确提供的 URL。
 - `materialization.status`：`materialized`、`pending` 或 `failed`；已物化时记录准确的 `markdownPath` 与 `sanitizedPath`，文件删除或校验失败后相应路径必须置为 `null`。
 - `materialization.contentGranularity`：`full-text`、`excerpt`、`abstract` 或 `unknown`，表示正文内容粒度。`requiredContentGranularity=any` 时它不单独改变完成状态；显式要求 `full-text` 时则参与 `deliveryComplete` 判定，摘要或节选不能满足全文要求。旧会话或缺失字段一律按 `unknown`，不得默认 `full-text`；普通 `content`、`markdown` 或字数不能单独证明全文完整。
 - `fullTextEvidence`：公共来源声明 `full-text` 时必填，记录 `schemaVersion`、获准 `executor` 和位于 `raw/` 的结构化 `artifact`。回执必须确认相同来源 URL、相同执行器、`complete=true` 与 `contentGranularity=full-text`，并同时登记在 `rawArtifacts`。只有获准来源执行器或专用 materializer 可以生成并在 `session.task.fullTextEvidenceReceipts` 注册该回执及哈希，不得由 Agent 手写；缺少注册、内容变化或字段不匹配时 `collect` 拒绝全文声明。
@@ -101,13 +101,13 @@ collection_filters:
 
 `sourceSkill`、来源 ID/URL、用户筛选和 `rawArtifacts` 组成非敏感恢复描述。缺少净化正文时，采集编排器据此让原始执行器从 raw 重新净化；raw 不足时再由同一执行器补采。不得保存恢复所需的凭据。
 
-公共互联网新会话默认启用发现门禁。`public-discover` 原子登记 query、category、页面分类、主题相关性和最多两轮的调用状态。结构型 `article` 只有同时满足 `topicRelevance.status=matched|not-required` 才进入 `articleCandidateIds`；`structuralArticleCandidateIds` 只用于诊断。`requested-count`、hot-discovery fallback、第二轮预算和后续授权都使用同一个 eligible article 语义。第二轮仍无相关候选时保留 `stopReason=no-article-candidates`，并写 `stopDetail=no-relevant-article-candidates`。
+公共互联网新会话默认启用发现门禁。`public-discover` 原子登记 query、category、页面分类、主题相关性和最多两轮的调用状态。结构型 `article` 只有同时满足 `topicRelevance.status=matched|not-required` 才进入 `articleCandidateIds`；`structuralArticleCandidateIds` 只用于诊断。`requested-count`、hot-discovery fallback 和第二轮预算使用同一个 eligible article 语义；来源抓取授权额外允许已登记且主题匹配的 weak 候选。第二轮仍无相关候选时保留 `stopReason=no-article-candidates`，并写 `stopDetail=no-relevant-article-candidates`。
 
-中文文章发现使用 60 秒软预算、90 秒硬上限和单适配器 10 秒限制；软预算后不再调度新来源。公共发现最多允许两轮，任何一轮 `merged.article=0` 时不得使用 weak。确定候选后，通用网页必须通过 `acquire-web` 生成受控 executor-result，再由 `materialize-web` 校验哈希、授权、正文结构与本地资产并生成 `collectPayloadPath`。不得手工重定向 stdout，不得手工构造 collect payload，也不得手写 sanitized 正文或 full-text receipt。
+中文文章发现使用 60 秒软预算、90 秒硬上限和单适配器 10 秒限制；软预算后不再调度新来源。公共发现最多允许两轮；weak 候选不进入自动选文或 `articleCandidateIds`，但已登记且主题匹配的 weak 候选允许进入受控的 `acquire-web`。通用网页必须通过 `acquire-web` 生成受控 executor-result，再由 `materialize-web` 校验哈希、授权、正文结构与本地资产并生成 `collectPayloadPath`。weak 只有成功物化并通过正文主题复验后才能收录。不得手工重定向 stdout，不得手工构造 collect payload，也不得手写 sanitized 正文或 full-text receipt。
 
-首次登记公共 inventory 时按互斥顺序解析来源：用户原始直链、已 fetched 且仍在 scope 内的 crawl frontier、最后才是 public-discover eligible article。public-discover 条目在 `collect` 时还会针对 canonical title 与去除 frontmatter、URL、图片路径和纯元数据后的 sanitized Markdown 复验主题；只有 `matched`（无主题契约时为 `not-required`）才能物化。`status` 对新 1.1 会话只读复验候选与正文，失配时 `deliveryComplete=false` 且不返回 `downstreamInput`，`publish` 因而不能创建交付目录。
+首次登记公共 inventory 时按互斥顺序解析来源：用户原始直链、已 fetched 且仍在 scope 内的 crawl frontier、最后才是 public-discover 已授权的 article 或 weak 候选。public-discover 条目在 `collect` 时还会针对 canonical title 与去除 frontmatter、URL、图片路径和纯元数据后的 sanitized Markdown 复验主题；只有 `matched`（无主题契约时为 `not-required`）才能物化。`status` 对新 1.1 会话只读复验候选与正文，失配时 `deliveryComplete=false` 且不返回 `downstreamInput`，`publish` 因而不能创建交付目录。
 
-不在候选中的 URL、`weak`/`reject`、`unmatched`/`unknown` 候选以及 Agent 手工补充的 URL 一律以 `SOURCE_NOT_AUTHORIZED_BY_DISCOVERY` 拒绝。旧 1.0 或缺少 gate 的公共会话保持 status/inspect/export 只读兼容并返回 warning；新的 `public-discover`、`collect`、`record-pending` 和首次 `publish` 返回 `DISCOVERY_RELEVANCE_MIGRATION_REQUIRED`，恢复方式是创建新内部 run。已经发布且来源、计划和目标完全未变化的历史回执仍可只读或幂等返回，不得原地推断、回填或篡改历史主题结论。enterprise 会话不受这项公共来源迁移规则影响。
+不在候选中的 URL、`reject` 候选、`unmatched`/`unknown` 候选以及 Agent 手工补充的 URL 仍拒绝；来源门禁返回 `SOURCE_NOT_AUTHORIZED_BY_DISCOVERY`，主题门禁返回对应的主题错误。`pageType=weak` 只表示页面结构尚不确定，可以进入受控抓取和物化，但不能人工提升为 article，也不能绕过 materializer 或正文主题复验。旧 1.0 或缺少 gate 的公共会话保持 status/inspect/export 只读兼容并返回 warning；新的 `public-discover`、`collect`、`record-pending` 和首次 `publish` 返回 `DISCOVERY_RELEVANCE_MIGRATION_REQUIRED`，恢复方式是创建新内部 run。已经发布且来源、计划和目标完全未变化的历史回执仍可只读或幂等返回，不得原地推断、回填或篡改历史主题结论。enterprise 会话不受这项公共来源迁移规则影响。
 
 同一 `sourceSkill + sourceUrl` 视为同一来源记录；inventory 不得存在相同来源身份，并以最新采集操作为准。HTTP(S) URL 另按去 fragment、去末尾 `index.html`、统一尾斜杠及 query 参数排序后的值生成 `duplicateGroupKey`。同组的所有来源记录和 provenance 必须保留，第一条为 provenance 主记录，其余条目以 `duplicateOf` 指向主记录；canonical view 每个重复组仅输出按 inventory 顺序选出的首个已物化代表。
 

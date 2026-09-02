@@ -67,7 +67,7 @@ test('failed acquisition state preserves evidence and reconciles collection stat
   }
 });
 
-test('collect and read-only status reject off-topic materialized public discovery content', async () => {
+test('collect and read-only status apply topic checks to weak public discovery content', async () => {
   const root = await mkdtemp(join(tmpdir(), 'knowledge-collection-topic-gate-'));
   try {
     const initialized = await runCli([
@@ -84,7 +84,7 @@ test('collect and read-only status reject off-topic materialized public discover
       candidates: [{
         url: 'https://arxiv.org/abs/2501.12948',
         title: 'DeepSeek-R1: Incentivizing Reasoning Capability in LLMs',
-        pageType: 'article',
+        pageType: 'weak',
       }],
     });
     await writeFile(sessionPath, `${JSON.stringify(session, null, 2)}\n`);

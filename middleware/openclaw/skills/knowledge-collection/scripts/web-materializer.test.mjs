@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 
 import { cmdCollect, collectionStatus, recordPendingCollectionItem } from './collection-state.mjs';
+import { recordDiscoveryResult, reserveDiscoveryAttempt } from './discovery-authorization.mjs';
 import { cmdInit } from './research-state.mjs';
 import { sessionPaths } from './session.mjs';
 import { analyzeWebMarkdown } from './web-content-analysis.mjs';
@@ -31,14 +32,33 @@ function completeArticle() {
   ].join('\n');
 }
 
-async function fixture(markdown = completeArticle()) {
+async function fixture(markdown = completeArticle(), { discoveryPageType = null } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'web-materializer-'));
-  cmdInit({
+  const initArgs = {
     'session-dir': root,
     query: '采集一篇关于 Example 的文章',
-    'direct-urls': JSON.stringify([SOURCE_URL]),
     'required-content-granularity': 'full-text',
-  });
+  };
+  if (!discoveryPageType) initArgs['direct-urls'] = JSON.stringify([SOURCE_URL]);
+  cmdInit(initArgs);
+  if (discoveryPageType) {
+    const sessionPath = join(root, 'session.json');
+    const session = JSON.parse(await readFile(sessionPath, 'utf8'));
+    reserveDiscoveryAttempt(session.task.discoveryGate, {
+      query: 'Example 深度文章',
+      category: 'general',
+    });
+    recordDiscoveryResult(session.task.discoveryGate, {
+      query: 'Example 深度文章',
+      category: 'general',
+      candidates: [{
+        url: SOURCE_URL,
+        title: 'Example 深度报道',
+        pageType: discoveryPageType,
+      }],
+    });
+    await writeFile(sessionPath, `${JSON.stringify(session, null, 2)}\n`);
+  }
   const paths = sessionPaths(root);
   const rawDir = join(root, 'raw/bycli/web/example-report');
   await mkdir(join(rawDir, 'images'), { recursive: true });
@@ -126,6 +146,26 @@ test('materializes controlled web output with duplicated safe assets and registe
     assert.equal(cmdCollect(f.paths, { 'item-json-file': result.collectPayloadPath }).ok, true);
     const status = collectionStatus(f.paths);
     assert.equal(status.deliveryComplete, true, JSON.stringify(status, null, 2));
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test('materializes and collects a complete discovered weak candidate without promoting discovery', async () => {
+  const f = await fixture(completeArticle(), { discoveryPageType: 'weak' });
+  try {
+    const result = await runWebMaterialize(f.paths, {
+      'item-id': 'example-report', 'executor-result-file': f.executorResultPath,
+    });
+
+    assert.equal(result.materialization.status, 'materialized');
+    assert.ok(result.collectPayloadPath);
+    assert.equal(cmdCollect(f.paths, { 'item-json-file': result.collectPayloadPath }).ok, true);
+    const status = collectionStatus(f.paths);
+    assert.equal(status.deliveryComplete, true, JSON.stringify(status, null, 2));
+    const session = JSON.parse(await readFile(join(f.root, 'session.json'), 'utf8'));
+    assert.equal(session.task.discoveryGate.runs[0].articleCandidateIds.length, 0);
+    assert.equal(session.task.discoveryGate.candidates[0].pageType, 'weak');
   } finally {
     await rm(f.root, { recursive: true, force: true });
   }

@@ -127,7 +127,10 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "公共发现最多允许两轮",
             "60 秒软预算",
             "90 秒硬上限",
-            "不得使用 weak",
+            "weak 候选不进入自动选文",
+            "允许进入受控的 `acquire-web`",
+            "`reject` 候选仍拒绝",
+            "成功物化并通过正文主题复验",
             "STOP",
             "buildId",
         ):

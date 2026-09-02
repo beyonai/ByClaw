@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { runWebAcquire } from './web-acquirer.mjs';
+import { recordDiscoveryResult, reserveDiscoveryAttempt } from './discovery-authorization.mjs';
 import { cmdInit } from './research-state.mjs';
 import { sessionPaths } from './session.mjs';
 
@@ -20,6 +21,32 @@ async function fixture() {
     'direct-urls': JSON.stringify([SOURCE_URL]),
     'required-content-granularity': 'full-text',
   });
+  return { root, paths: sessionPaths(root) };
+}
+
+async function weakDiscoveryFixture() {
+  const root = await mkdtemp(join(tmpdir(), 'web-acquirer-weak-'));
+  cmdInit({
+    'session-dir': root,
+    query: '采集一篇关于 Example 的文章',
+    'required-content-granularity': 'full-text',
+  });
+  const sessionPath = join(root, 'session.json');
+  const session = JSON.parse(await readFile(sessionPath, 'utf8'));
+  reserveDiscoveryAttempt(session.task.discoveryGate, {
+    query: 'Example 深度文章',
+    category: 'general',
+  });
+  recordDiscoveryResult(session.task.discoveryGate, {
+    query: 'Example 深度文章',
+    category: 'general',
+    candidates: [{
+      url: SOURCE_URL,
+      title: 'Example 深度文章',
+      pageType: 'weak',
+    }],
+  });
+  await writeFile(sessionPath, `${JSON.stringify(session, null, 2)}\n`);
   return { root, paths: sessionPaths(root) };
 }
 
@@ -77,6 +104,24 @@ test('acquires contiguous browser chunks and leaves the item pending for materia
       'raw/bycli/web/example-report/article.md',
       'raw/bycli/web/example-report/executor-result.json',
     ]);
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test('acquires a discovered weak candidate through byCLI without promoting discovery eligibility', async () => {
+  const f = await weakDiscoveryFixture();
+  const calls = [];
+  try {
+    const result = await runWebAcquire(f.paths, {
+      'item-id': 'weak-report', 'source-url': SOURCE_URL,
+    }, { runProcess: successfulRunner(calls) });
+
+    assert.equal(result.status, 'saved');
+    assert.ok(calls.some((args) => args.includes('extract')));
+    const session = JSON.parse(await readFile(join(f.root, 'session.json'), 'utf8'));
+    assert.equal(session.task.discoveryGate.runs[0].articleCandidateIds.length, 0);
+    assert.equal(session.task.discoveryGate.candidates[0].pageType, 'weak');
   } finally {
     await rm(f.root, { recursive: true, force: true });
   }
