@@ -44,3 +44,28 @@ assert.match(
   skill,
   /最终答复前.*重新运行 `status`.*原样核对并报告 `attemptCount`、`maxAttempts`、`exhausted`、`stopReason` 和 `stopDetail`/s,
 );
+assert.match(skill, /STOP before all collection tools: require Session Root/);
+assert.match(
+  skill,
+  /没有完整绝对 Session Root.*下一步必须直接向上游请求该值并结束本轮.*不得为了寻找 Session Root 再调用 `exec`、`read`、`session_status`/s,
+);
+assert.match(skill, /不得用 `ls`、`find`、glob 枚举 `\/by\/\.sessions\/`/);
+assert.match(skill, /`init` 命令不得包含 `--delivery-dir`/);
+assert.match(
+  skill,
+  /`eligibleArticle>0`.*按 `articleCandidateIds` 的确定性顺序选择候选并继续授权的抓取、物化与 `collect`/s,
+);
+assert.match(skill, /STOP before browser-backed byCLI commands: one recovery owner/);
+assert.match(
+  skill,
+  /must never run `bycli doctor`, `bycli daemon status`, `bycli daemon restart`, `\/usr\/local\/bin\/start-chrome\.sh`, `openclaw browser`/,
+);
+assert.match(
+  skill,
+  /invoke exactly `node \/app\/skills\/bycli\/scripts\/bridge-bootstrap\.mjs --format json` once/,
+);
+assert.match(
+  skill,
+  /`BRIDGE_UNAVAILABLE` or `BRIDGE_RECOVERY_BUSY`.*run collection `status`.*stop.*do not inspect, repair, or retry the bridge/s,
+);
+assert.match(skill, /Only its structured `actions` may be used to claim that one of those actions ran/);
