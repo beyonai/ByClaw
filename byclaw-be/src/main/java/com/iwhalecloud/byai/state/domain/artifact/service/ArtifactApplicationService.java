@@ -6,6 +6,7 @@ import com.iwhalecloud.byai.common.storage.constants.StorageType;
 import com.iwhalecloud.byai.common.storage.model.FileMetadata;
 import com.iwhalecloud.byai.manager.mapper.artifact.ArtifactMapper;
 import com.iwhalecloud.byai.state.domain.artifact.config.ArtifactProperties;
+import com.iwhalecloud.byai.state.domain.artifact.dto.ArtifactContentUpdateDto;
 import com.iwhalecloud.byai.state.domain.artifact.dto.ArtifactDto;
 import com.iwhalecloud.byai.state.domain.artifact.model.ArtifactKind;
 import com.iwhalecloud.byai.state.domain.artifact.model.ArtifactPublishMode;
@@ -28,6 +29,7 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -36,6 +38,7 @@ import org.springframework.web.multipart.MultipartFile;
  * Orchestrates authenticated publication, capability access, and owner lifecycle operations.
  */
 @Service
+@Slf4j
 public class ArtifactApplicationService {
 
     private static final DateTimeFormatter STORAGE_DATE = DateTimeFormatter.ofPattern("yyyy/MM/dd");
@@ -132,6 +135,85 @@ public class ArtifactApplicationService {
         ArtifactRecord record = requireOwned(artifactId);
         renewPurgeAfterAccess(record);
         return toDto(record, null, parseWarnings(record.getWarningsJson()));
+    }
+
+    /**
+     * Replaces the published bytes while preserving the Artifact identity, access key, data, and lifecycle.
+     */
+    public ArtifactContentUpdateDto replaceOwnedContent(String artifactId, MultipartFile file,
+        ArtifactPublishMode publishMode, String entryPoint, boolean stripTopLevelDirectory, String displayName,
+        String expectedSha256) {
+        validateUpload(file);
+        ArtifactPublishMode mode = publishMode == null ? ArtifactPublishMode.AUTO : publishMode;
+        ArtifactRecord current = requireOwned(artifactId);
+        LocalDateTime now = LocalDateTime.now();
+        if (!ArtifactStatus.READY.name().equals(current.getStatus())
+            || current.getPurgeAt() == null || !current.getPurgeAt().isAfter(now)) {
+            throw new IllegalArgumentException("Artifact已进入删除流程或超过物理保留期限，无法更新");
+        }
+
+        String originalName = safeOriginalName(file.getOriginalFilename());
+        String replacementPrefix = join(current.getStoragePrefix(), "updates/" + UUID.randomUUID());
+        String originalKey = replacementPrefix + "/original/" + storageFileName(originalName);
+        String contentPrefix = replacementPrefix + "/content";
+        ArtifactRecord replacement = new ArtifactRecord();
+        replacement.setArtifactId(current.getArtifactId());
+        replacement.setOriginalKey(originalKey);
+        replacement.setContentPrefix(contentPrefix);
+        replacement.setOriginalName(originalName);
+        replacement.setDisplayName(StringUtils.defaultIfBlank(displayName, current.getDisplayName()));
+        replacement.setFileSize(file.getSize());
+
+        boolean activated = false;
+        try {
+            storage.initialize(current.getStorageType(), current.getStorageRoot());
+            String calculatedSha256 = calculateSha256(file);
+            if (StringUtils.isNotBlank(expectedSha256)
+                && !calculatedSha256.equalsIgnoreCase(expectedSha256.trim())) {
+                throw new IllegalArgumentException("上传文件SHA-256校验失败");
+            }
+            replacement.setSha256(calculatedSha256);
+            replacement.setContentType(ArtifactMediaTypeResolver.resolve(originalName, readPrefix(file, 512)));
+            try (InputStream input = file.getInputStream()) {
+                storage.put(current.getStorageType(), current.getStorageRoot(), originalKey, input, file.getSize(),
+                    replacement.getContentType());
+            }
+
+            replacement.setStorageType(current.getStorageType());
+            replacement.setStorageRoot(current.getStorageRoot());
+            Publication publication = publishContent(replacement, file, mode, entryPoint, stripTopLevelDirectory);
+            replacement.setKind(publication.kind().name());
+            replacement.setEntryPoint(publication.entryPoint());
+            replacement.setExpandedSize(publication.expandedSize());
+            replacement.setWarningsJson(JSON.toJSONString(publication.warnings()));
+            replacement.setUpdateTime(now);
+
+            String previousOriginalKey = current.getOriginalKey();
+            String previousContentPrefix = current.getContentPrefix();
+            int updated = artifactMapper.replaceContent(replacement, current.getOwnerUserId(), previousOriginalKey,
+                previousContentPrefix, now);
+            if (updated != 1) {
+                throw new IllegalArgumentException("Artifact已被更新或当前不可修改，请重新获取后重试");
+            }
+            activated = true;
+            applyContentMetadata(current, replacement);
+            cleanReplacedContent(current, previousOriginalKey, previousContentPrefix);
+            return ArtifactContentUpdateDto.builder()
+                .ok(true)
+                .operation("updated")
+                .status(current.getStatus())
+                .build();
+        }
+        catch (Exception e) {
+            if (!activated) {
+                cleanPrefixQuietly(current.getStorageType(), current.getStorageRoot(), replacementPrefix,
+                    "清理Artifact更新临时目录失败");
+            }
+            if (e instanceof RuntimeException runtimeException) {
+                throw runtimeException;
+            }
+            throw new IllegalStateException("Artifact更新失败", e);
+        }
     }
 
     /**
@@ -360,6 +442,37 @@ public class ArtifactApplicationService {
                 ? null : record.getPurgeAt().atZone(ZoneId.systemDefault()).toOffsetDateTime())
             .warnings(warnings)
             .build();
+    }
+
+    private void applyContentMetadata(ArtifactRecord current, ArtifactRecord replacement) {
+        current.setKind(replacement.getKind());
+        current.setOriginalKey(replacement.getOriginalKey());
+        current.setContentPrefix(replacement.getContentPrefix());
+        current.setOriginalName(replacement.getOriginalName());
+        current.setDisplayName(replacement.getDisplayName());
+        current.setEntryPoint(replacement.getEntryPoint());
+        current.setContentType(replacement.getContentType());
+        current.setFileSize(replacement.getFileSize());
+        current.setExpandedSize(replacement.getExpandedSize());
+        current.setSha256(replacement.getSha256());
+        current.setWarningsJson(replacement.getWarningsJson());
+        current.setUpdateTime(replacement.getUpdateTime());
+    }
+
+    private void cleanReplacedContent(ArtifactRecord current, String originalKey, String contentPrefix) {
+        cleanPrefixQuietly(current.getStorageType(), current.getStorageRoot(), contentPrefix,
+            "清理Artifact旧站点内容失败");
+        cleanPrefixQuietly(current.getStorageType(), current.getStorageRoot(), originalKey,
+            "清理Artifact旧原始文件失败");
+    }
+
+    private void cleanPrefixQuietly(String storageType, String storageRoot, String prefix, String message) {
+        try {
+            storage.deletePrefix(storageType, storageRoot, prefix);
+        }
+        catch (Exception e) {
+            log.warn("{}, prefix={}", message, prefix, e);
+        }
     }
 
     private String buildPublicUrl(String path) {
