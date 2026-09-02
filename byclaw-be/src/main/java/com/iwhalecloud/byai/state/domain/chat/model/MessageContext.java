@@ -29,6 +29,8 @@ public class MessageContext {
 
     private static final String TOOL_CALL_CONTENT_TYPE = "3015";
 
+    private static final String TASK_PLAN_CONTENT_TYPE = "2008";
+
     /**
      * 智能体类型
      */
@@ -375,11 +377,12 @@ public class MessageContext {
     }
 
     private boolean supportsInPlaceUpdate(String contentType) {
-        return TOOL_CALL_CONTENT_TYPE.equals(contentType) || THINK_STATUS_TITLE_CONTENT_TYPE.equals(contentType);
+        return TOOL_CALL_CONTENT_TYPE.equals(contentType) || THINK_STATUS_TITLE_CONTENT_TYPE.equals(contentType)
+            || TASK_PLAN_CONTENT_TYPE.equals(contentType);
     }
 
     private String mergeSegmentContent(String contentType, String existingContent, String incomingContent) {
-        if (THINK_STATUS_TITLE_CONTENT_TYPE.equals(contentType)) {
+        if (THINK_STATUS_TITLE_CONTENT_TYPE.equals(contentType) || TASK_PLAN_CONTENT_TYPE.equals(contentType)) {
             return incomingContent;
         }
         try {

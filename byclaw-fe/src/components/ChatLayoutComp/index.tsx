@@ -27,8 +27,8 @@ import useEventEmitterHooks from './hooks/useEventEmitterHooks';
 import ChatTitle from './ChatTitle';
 import MultiChoices from './components/MultiChoices';
 import EasyConfirm from './components/EasyConfirm';
-import TaskExecutionPlan from '@/components/MessageList/components/TaskExecutionPlan';
 import { selectLatestTaskPlan } from '@/components/MessageList/components/TaskExecutionPlan/projection';
+import ChatTaskPlanDock from './ChatTaskPlanDock';
 
 import type { IState as UseEmployeesIState } from '@/models/useEmployees.ts';
 
@@ -738,6 +738,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
                 />
               </div>
             )}
+            {latestTaskPlan ? <ChatTaskPlanDock taskPlan={latestTaskPlan} /> : null}
             {!effectiveReadOnly && (
               <div
                 className={classnames(styles.queryInputWrapper, queryInputWrapperClassName, {
@@ -746,11 +747,6 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
                 })}
                 id="queryInputWrapper"
               >
-                {latestTaskPlan ? (
-                  <div className={styles.taskPlanDock}>
-                    <TaskExecutionPlan taskPlan={latestTaskPlan} />
-                  </div>
-                ) : null}
                 <EasyConfirm
                   messageState={messageState}
                   disabledInput={disabledInput}

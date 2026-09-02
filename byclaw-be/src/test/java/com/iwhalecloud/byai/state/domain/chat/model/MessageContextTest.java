@@ -80,6 +80,19 @@ class MessageContextTest {
     }
 
     @Test
+    void recordAnswerStruct_replacesTaskPlanSnapshotInsteadOfConcatenatingJson() {
+        MessageContext context = new MessageContext();
+
+        context.recordAnswerStruct(answerDelta("{\"status\":\"ACTIVE\"}", "plan-A", "2008"));
+        String completed = context.recordAnswerStruct(
+            answerDelta("{\"status\":\"COMPLETED\"}", "plan-A", "2008"));
+
+        assertThat(context.getAnswerMessageList()).hasSize(1);
+        assertThat(contentAt(context.getAnswerMessageList(), 0)).isEqualTo("{\"status\":\"COMPLETED\"}");
+        assertThat(JSON.parseObject(completed).getLong("seq")).isEqualTo(1L);
+    }
+
+    @Test
     void recordStruct_keepsSameOrderToolCallsSeparateAcrossChannels() {
         MessageContext context = new MessageContext();
 
