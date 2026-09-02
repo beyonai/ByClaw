@@ -7,7 +7,7 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -111,7 +111,7 @@ class ProjectApplicationServiceCreateTest {
         verify(projectInitService).initProjectWorkspace(1001L);
         verify(projectWorkspaceManifestService).syncProjectGitmodules(1001L);
         verify(datasetApplicationService).createDataset(any());
-        verify(datasetApplicationService).uploadFiles(any(MultipartFile[].class), anyLong(), anyString(), isNull(),
+        verify(datasetApplicationService).uploadFiles(any(MultipartFile[].class), anyLong(), anyString(), eq("init"),
             anyBoolean(), anyBoolean(), anyBoolean(), anyMap());
     }
 
@@ -158,7 +158,7 @@ class ProjectApplicationServiceCreateTest {
         SsResource cloudResource = new SsResource();
         cloudResource.setResourceId(9001L);
         when(datasetApplicationService.createDataset(any())).thenReturn(cloudResource);
-        when(datasetApplicationService.uploadFiles(any(MultipartFile[].class), anyLong(), anyString(), isNull(),
+        when(datasetApplicationService.uploadFiles(any(MultipartFile[].class), anyLong(), anyString(), eq("init"),
             anyBoolean(), anyBoolean(), anyBoolean(), anyMap())).thenReturn(null);
     }
 
