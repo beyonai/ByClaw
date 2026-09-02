@@ -96,6 +96,7 @@ ARG NPM_REGISTRY=https://registry.npmmirror.com
 ARG WECOM_CLI_VERSION=0.1.9
 ARG LARKSUITE_CLI_VERSION=1.0.85
 ARG ZREAD_CLI_VERSION=0.2.13
+ARG CHATLAB_CLI_VERSION=0.37.0
 ARG IMA_OPENAPI_CLI_VERSION=0.1.3
 ARG IMA_OPENAPI_CLI_INTEGRITY=sha512-ckur/WWHugygFu130u/Zmn2IU9w7Ghc2cmPPxS6lFWvETSz7Rl3lqQGjMLmhSbTY2eCIR8DvqOzozOf5rWRbHg==
 ARG INSTALL_BROWSER_STACK=true
@@ -138,6 +139,7 @@ RUN npm config set registry "${NPM_REGISTRY}" --global \
         "@remotion/cli@${REMOTION_VERSION}" \
         "@byclaw/by-framework@${BY_FRAMEWORK_TS_VERSION}" \
         "zread_cli@${ZREAD_CLI_VERSION}" \
+        "chatlab-cli@${CHATLAB_CLI_VERSION}" \
         "/tmp/ima-openapi-cli-${IMA_OPENAPI_CLI_VERSION}.tgz" \
     && test "$(ima --version)" = "${IMA_OPENAPI_CLI_VERSION}" \
     && ima auth --help >/dev/null \
@@ -252,7 +254,8 @@ RUN set -eux; \
         redis \
         websockify \
         "by-framework==${BY_FRAMEWORK_PY_VERSION}" \
-        "patchright==${PATCHRIGHT_VERSION}"; \
+        "patchright==${PATCHRIGHT_VERSION}" \
+        jieba; \
     patchright install chromium; \
     python3 -m pip install --no-cache-dir \
         -c /tmp/by-reach/constraints.txt \
