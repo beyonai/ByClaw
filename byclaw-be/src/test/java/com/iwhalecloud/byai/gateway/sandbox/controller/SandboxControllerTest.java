@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.doThrow;
 
 import java.util.Date;
 import java.util.List;
@@ -11,18 +12,27 @@ import java.util.Map;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
+import org.springframework.context.MessageSource;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.gateway.sandbox.mapper.SandboxServiceSpecEntityMapper;
 import com.iwhalecloud.byai.gateway.sandbox.model.SandboxInfo;
 import com.iwhalecloud.byai.gateway.sandbox.model.SandboxRecordView;
 import com.iwhalecloud.byai.gateway.sandbox.persistence.SandboxServiceSpecEntity;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
+import com.iwhalecloud.byai.gateway.sandbox.service.SandboxBrowserNavigationService;
 import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.mapper.sandbox.SsSandboxRecordMapper;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
+
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 
 class SandboxControllerTest {
 
@@ -175,5 +185,48 @@ class SandboxControllerTest {
 
         assertThat(response.getCode()).isEqualTo(ResponseUtil.SUCCESS);
         verify(sandboxService).removeSandbox("user001", null, "byclaw-dsh");
+    }
+
+    @Test
+    void navigateBrowser_logsUnexpectedFailureWithRequestContextAndStackTrace() {
+        SandboxController controller = new SandboxController();
+        SandboxBrowserNavigationService navigationService = mock(SandboxBrowserNavigationService.class);
+        ReflectionTestUtils.setField(controller, "sandboxBrowserNavigationService", navigationService);
+        LoginInfo loginInfo = new LoginInfo();
+        loginInfo.setUserCode("user001");
+        CurrentUserHolder.setLoginInfo(loginInfo);
+        doThrow(new IllegalStateException("daemon failed https://example.com?ticket=secret-error"))
+            .when(navigationService)
+            .navigate("user001", "sandbox-1", "https://example.com/login?ticket=private", "operation-account-1");
+        MessageSource messageSource = mock(MessageSource.class);
+        when(messageSource.getMessage(org.mockito.ArgumentMatchers.anyString(),
+            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(java.util.Locale.class)))
+            .thenReturn("navigation failed");
+        ReflectionTestUtils.setField(I18nUtil.class, "messageSource", messageSource);
+
+        Logger logger = (Logger)LoggerFactory.getLogger(SandboxController.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        logger.addAppender(appender);
+        appender.start();
+        try {
+            controller.navigateBrowser(Map.of(
+                "sandboxId", "sandbox-1",
+                "targetUrl", "https://example.com/login?ticket=private",
+                "sessionKey", "operation-account-1"
+            ));
+
+            assertThat(appender.list).anySatisfy(event -> {
+                assertThat(event.getFormattedMessage())
+                    .contains("stage=CONTROLLER_FAILURE", "userCode=user001", "sandboxId=sandbox-1")
+                    .contains("sessionKey=operation-account-1", "target=https://example.com/login")
+                    .contains("stackTrace=java.lang.IllegalStateException")
+                    .doesNotContain("ticket=private", "secret-error");
+                assertThat(event.getThrowableProxy()).isNull();
+            });
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+            ReflectionTestUtils.setField(I18nUtil.class, "messageSource", null);
+        }
     }
 }
