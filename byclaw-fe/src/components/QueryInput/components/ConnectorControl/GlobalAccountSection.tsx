@@ -69,13 +69,15 @@ const GlobalAccountSection = ({ onToolbarChange }: GlobalAccountSectionProps) =>
           // 新增账号保存成功后，沿用账号卡片的登录链路，自动打开右侧远程桌面。
           const createdAccountId = result?.accountId ?? result?.data?.accountId ?? result?.id ?? result?.data?.id;
           if (createdAccountId !== undefined && createdAccountId !== null) {
-            await handleLogin({
+            // Login preparation opens the remote desktop and may wait on sandbox
+            // initialization. Do not block the account refresh on that UI flow.
+            void handleLogin({
               id: createdAccountId,
               platformId: values.platformId,
               accountName: values.accountName,
               accountId: values.accountId,
               customUrl: values.customUrl,
-            });
+            }).catch(() => undefined);
           }
         }
         await loadAccounts();

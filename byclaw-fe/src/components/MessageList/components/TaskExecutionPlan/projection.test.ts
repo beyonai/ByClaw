@@ -48,6 +48,37 @@ describe('selectLatestTaskPlan', () => {
     expect(selectLatestTaskPlan([first, latest])?.title).toBe('Latest plan');
   });
 
+  it('selects the plan from the newest answer even when its version restarts', () => {
+    const first = createAssistantMessage({
+      createTime: '2026-08-21T10:00:00+08:00',
+      taskPlan: {
+        planId: 'plan-old',
+        version: 3,
+        title: 'Old plan',
+        status: 'ACTIVE',
+        sessionId: 'session-1',
+        messageId: 'message-1',
+        tasks: [{ taskId: 'task-1', position: 1, title: 'Old task', status: 'IN_PROGRESS' }],
+      },
+    });
+    const second = createAssistantMessage({
+      msgId: 'message-2',
+      messageId: 'message-2',
+      createTime: '2026-08-21T10:05:00+08:00',
+      taskPlan: {
+        planId: 'plan-new',
+        version: 1,
+        title: 'New plan',
+        status: 'ACTIVE',
+        sessionId: 'session-1',
+        messageId: 'message-2',
+        tasks: [{ taskId: 'task-2', position: 1, title: 'New task', status: 'PENDING' }],
+      },
+    });
+
+    expect(selectLatestTaskPlan([first, second])?.planId).toBe('plan-new');
+  });
+
   it('normalizes the latest generic 2008 plan event into a task plan snapshot', () => {
     const message = createAssistantMessage({
       thinkList: [

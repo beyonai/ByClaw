@@ -202,6 +202,44 @@ describe('models/useMessageStore', () => {
     expect(stale).toBe(updated);
   });
 
+  it('accepts a new plan whose version restarts from one', () => {
+    const state = {
+      sessionListMap: new Map([
+        [
+          's1',
+          {
+            list: [
+              {
+                messageId: 'm1',
+                fromBeyond: true,
+                taskPlan: { planId: 'plan-old', version: 3 },
+              },
+            ],
+            pageNum: 1,
+            pageSize: 20,
+            total: 1,
+            pageRange: [1, 1],
+          },
+        ],
+      ]),
+    };
+    const nextPlan = {
+      planId: 'plan-new',
+      version: 1,
+      title: 'New plan',
+      status: 'ACTIVE',
+      sessionId: 's1',
+      messageId: 'm1',
+      tasks: [],
+    };
+
+    const updated = reducers.applyTaskPlanSnapshot(state as any, {
+      payload: { sessionId: 's1', messageId: 'm1', taskPlan: nextPlan },
+    });
+
+    expect(updated.sessionListMap.get('s1').list[0].taskPlan.planId).toBe('plan-new');
+  });
+
   it('reopens a completed child for a newer run and ignores a late terminal from the older run', () => {
     const messageInfo = {
       list: [{ messageId: 'm1', text: 'run one', messageState: 0 }],

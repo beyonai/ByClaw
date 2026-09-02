@@ -418,9 +418,15 @@ export default {
         const matchesTraceId = taskPlan.traceId && `${message.traceId || ''}` === `${taskPlan.traceId}`;
         if (!message.fromBeyond || (!matchesMessageId && !matchesTraceId)) return message;
 
+        const currentPlan = message.taskPlan;
         const currentVersion = Number(message.taskPlan?.version || 0);
         const nextVersion = Number(taskPlan.version || 0);
-        if (currentVersion >= nextVersion) return message;
+        if (currentPlan?.planId === taskPlan.planId && currentVersion >= nextVersion) return message;
+        if (currentPlan?.planId && currentPlan.planId !== taskPlan.planId) {
+          const currentTime = Date.parse(`${currentPlan.updatedAt || currentPlan.createdAt || ''}`);
+          const nextTime = Date.parse(`${taskPlan.updatedAt || taskPlan.createdAt || ''}`);
+          if (Number.isFinite(currentTime) && Number.isFinite(nextTime) && nextTime < currentTime) return message;
+        }
 
         changed = true;
         return { ...message, taskPlan };
