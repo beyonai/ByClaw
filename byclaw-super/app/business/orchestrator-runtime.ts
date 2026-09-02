@@ -19,7 +19,7 @@ import type { ByClawBeEndpointResolver } from "./endpoint-resolver.js";
 import { resolveLeaderModelSelection } from "./resource-model-binding.js";
 
 const ORCHESTRATOR_RUNTIME_PATH =
-  "/internal/v1/orchestrators/resolve-runtime";
+  "/byaiService/internal/v1/orchestrators/resolve-runtime";
 
 export interface ResolvedExpertTeamRuntime {
   orchestrator: ExpertTeamRuntimeSnapshotV1;
