@@ -214,7 +214,7 @@ public class SsResourceService {
         if (StringUtil.isNotEmpty(resourceCode)) {
             queryWrapper.eq(SsResource::getResourceCode, resourceCode);
         }
-        return ssResourceMapper.selectOne(queryWrapper);
+        return ssResourceMapper.selectOne(queryWrapper, false);
     }
 
     /**
