@@ -257,9 +257,14 @@ public class DigitalEmployeeGroupApplicationService {
         if (group == null || input == null || !isGroup(input.getAgentType())) {
             throw invalidConfig("数字员工组类型必须为 017");
         }
-        if (!WorkerAgentType.BY_SUPER.getCode().equals(group.getWorkerAgentType())) {
-            throw invalidConfig("数字员工组运行类型必须为 BY_SUPER");
+        if (!isSupportedGroupWorkerAgentType(group.getWorkerAgentType())) {
+            throw invalidConfig("数字员工组运行类型必须为 BY_SUPER 或 HARNESS");
         }
+    }
+
+    private boolean isSupportedGroupWorkerAgentType(String workerAgentType) {
+        return StringUtils.equalsAnyIgnoreCase(StringUtils.trimToEmpty(workerAgentType),
+            WorkerAgentType.BY_SUPER.getCode(), WorkerAgentType.HARNESS.getCode());
     }
 
     private List<EmployeeGroupMemberDTO> normalizeMembers(List<EmployeeGroupMemberDTO> input) {
