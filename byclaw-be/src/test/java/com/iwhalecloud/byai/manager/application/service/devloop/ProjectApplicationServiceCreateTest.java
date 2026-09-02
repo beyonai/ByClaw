@@ -3,20 +3,12 @@ package com.iwhalecloud.byai.manager.application.service.devloop;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyBoolean;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.anyMap;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import java.io.IOException;
 import java.lang.reflect.Method;
 import java.nio.file.Path;
 import java.util.Locale;
-
-import org.springframework.web.multipart.MultipartFile;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -96,7 +88,7 @@ class ProjectApplicationServiceCreateTest {
     }
 
     @Test
-    void initializesWorkspaceAfterCreatingProject() throws IOException {
+    void initializesWorkspaceAfterCreatingProject() {
         ProjectApplicationService service = service();
         Project persistedProject = new Project();
         persistedProject.setProjectId(1001L);
@@ -111,12 +103,10 @@ class ProjectApplicationServiceCreateTest {
         verify(projectInitService).initProjectWorkspace(1001L);
         verify(projectWorkspaceManifestService).syncProjectGitmodules(1001L);
         verify(datasetApplicationService).createDataset(any());
-        verify(datasetApplicationService).uploadFiles(any(MultipartFile[].class), anyLong(), anyString(), eq("init"),
-            anyBoolean(), anyBoolean(), anyBoolean(), anyMap());
     }
 
     @Test
-    void propagatesWorkspaceInitializationFailure() throws IOException {
+    void propagatesWorkspaceInitializationFailure() {
         ProjectApplicationService service = service();
         Project persistedProject = new Project();
         persistedProject.setProjectId(1001L);
@@ -154,12 +144,10 @@ class ProjectApplicationServiceCreateTest {
         verify(projectInitService).initProjectWorkspace(1001L);
     }
 
-    private void stubCreateCloudResource() throws IOException {
+    private void stubCreateCloudResource() {
         SsResource cloudResource = new SsResource();
         cloudResource.setResourceId(9001L);
         when(datasetApplicationService.createDataset(any())).thenReturn(cloudResource);
-        when(datasetApplicationService.uploadFiles(any(MultipartFile[].class), anyLong(), anyString(), eq("init"),
-            anyBoolean(), anyBoolean(), anyBoolean(), anyMap())).thenReturn(null);
     }
 
     private ProjectApplicationService service() {
