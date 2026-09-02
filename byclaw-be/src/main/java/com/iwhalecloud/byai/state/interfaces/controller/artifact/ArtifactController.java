@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.state.interfaces.controller.artifact;
 
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
+import com.iwhalecloud.byai.state.domain.artifact.dto.ArtifactContentUpdateDto;
 import com.iwhalecloud.byai.state.domain.artifact.dto.ArtifactDto;
 import com.iwhalecloud.byai.state.domain.artifact.dto.ArtifactExpiryRenewRequest;
 import com.iwhalecloud.byai.state.domain.artifact.model.ArtifactPublishMode;
@@ -47,6 +48,20 @@ public class ArtifactController {
         ArtifactDto result = artifactApplicationService.publish(file, publishMode, entryPoint,
             stripTopLevelDirectory, expiresInSeconds, displayName, sha256);
         return ResponseUtil.successResponse(result);
+    }
+
+    @PutMapping(value = "/{artifactId}/content", consumes = MediaType.MULTIPART_FORM_DATA_VALUE,
+        produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(summary = "替换本人Artifact内容")
+    public ArtifactContentUpdateDto replaceContent(@PathVariable("artifactId") String artifactId,
+        @RequestPart("file") MultipartFile file,
+        @RequestParam(value = "publishMode", defaultValue = "AUTO") ArtifactPublishMode publishMode,
+        @RequestParam(value = "entryPoint", required = false) String entryPoint,
+        @RequestParam(value = "stripTopLevelDirectory", defaultValue = "true") boolean stripTopLevelDirectory,
+        @RequestParam(value = "displayName", required = false) String displayName,
+        @RequestParam(value = "sha256", required = false) String sha256) {
+        return artifactApplicationService.replaceOwnedContent(artifactId, file, publishMode, entryPoint,
+            stripTopLevelDirectory, displayName, sha256);
     }
 
     @GetMapping("/{artifactId}")

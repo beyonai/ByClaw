@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -14,6 +16,7 @@ import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.storage.model.FileMetadata;
 import com.iwhalecloud.byai.manager.mapper.artifact.ArtifactMapper;
 import com.iwhalecloud.byai.state.domain.artifact.config.ArtifactProperties;
+import com.iwhalecloud.byai.state.domain.artifact.dto.ArtifactContentUpdateDto;
 import com.iwhalecloud.byai.state.domain.artifact.dto.ArtifactDto;
 import com.iwhalecloud.byai.state.domain.artifact.model.ArtifactPublishMode;
 import com.iwhalecloud.byai.state.domain.artifact.model.ArtifactRecord;
@@ -73,6 +76,8 @@ class ArtifactApplicationServiceTest {
             record.set(invocation.getArgument(0));
             return 1;
         }).when(mapper).updateById(any(ArtifactRecord.class));
+        when(mapper.replaceContent(any(ArtifactRecord.class), anyLong(), anyString(), anyString(), any()))
+            .thenReturn(1);
         when(mapper.selectById(any())).thenAnswer(invocation -> record.get());
         storage = new InMemoryStorage();
         cleanupService = mock(ArtifactCleanupService.class);
@@ -134,6 +139,79 @@ class ArtifactApplicationServiceTest {
 
         assertThat(record.get().getStatus()).isEqualTo(ArtifactStatus.FAILED.name());
         verify(cleanupService).cleanStorage(record.get());
+    }
+
+    @Test
+    void replacesContentWithoutChangingIdentityAccessOrLifecycle() throws IOException {
+        MockMultipartFile original = new MockMultipartFile("file", "index.html", "text/html",
+            "<h1>before</h1>".getBytes());
+        ArtifactDto published = service.publish(original, ArtifactPublishMode.AUTO, null,
+            true, null, "Original", null);
+        String artifactId = published.getArtifactId();
+        String accessKey = published.getAccessKey();
+        String accessKeyHash = record.get().getAccessKeyHash();
+        String previousOriginalKey = record.get().getOriginalKey();
+
+        MockMultipartFile replacement = new MockMultipartFile("file", "index.html", "text/html",
+            "<h1>after</h1>".getBytes());
+        ArtifactContentUpdateDto updated = service.replaceOwnedContent(artifactId, replacement, ArtifactPublishMode.AUTO,
+            null, true, "Fixed", null);
+
+        assertThat(updated.isOk()).isTrue();
+        assertThat(updated.getOperation()).isEqualTo("updated");
+        assertThat(updated.getStatus()).isEqualTo(ArtifactStatus.READY.name());
+        assertThat(record.get().getArtifactId()).isEqualTo(artifactId);
+        assertThat(record.get().getExpiresAt()).isEqualTo(published.getExpiresAt().toLocalDateTime());
+        assertThat(record.get().getPurgeAt()).isEqualTo(published.getPurgeAt().toLocalDateTime());
+        assertThat(record.get().getAccessKeyHash()).isEqualTo(accessKeyHash);
+        assertThat(record.get().getOriginalKey()).isNotEqualTo(previousOriginalKey);
+        assertThatCode(() -> service.requireManagementDataAccessible(artifactId, accessKey)).doesNotThrowAnyException();
+
+        ArtifactApplicationService.ArtifactContent content = service.resolvePreview(artifactId, null);
+        assertThat(new String(service.open(content).readAllBytes())).isEqualTo("<h1>after</h1>");
+        assertThat(storage.objects).hasSize(1).doesNotContainKey(previousOriginalKey);
+    }
+
+    @Test
+    void keepsCurrentContentWhenReplacementValidationFails() throws IOException {
+        MockMultipartFile original = new MockMultipartFile("file", "index.html", "text/html",
+            "<h1>before</h1>".getBytes());
+        ArtifactDto published = service.publish(original, ArtifactPublishMode.AUTO, null,
+            true, null, null, null);
+        String previousOriginalKey = record.get().getOriginalKey();
+        MockMultipartFile replacement = new MockMultipartFile("file", "index.html", "text/html",
+            "<h1>broken</h1>".getBytes());
+
+        assertThatThrownBy(() -> service.replaceOwnedContent(published.getArtifactId(), replacement,
+            ArtifactPublishMode.AUTO, null, true, null, "deadbeef"))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("SHA-256");
+
+        ArtifactApplicationService.ArtifactContent content = service.resolvePreview(published.getArtifactId(), null);
+        assertThat(new String(service.open(content).readAllBytes())).isEqualTo("<h1>before</h1>");
+        assertThat(storage.objects).hasSize(1).containsKey(previousOriginalKey);
+    }
+
+    @Test
+    void keepsCurrentContentWhenAnotherReplacementWinsThePointerSwap() throws IOException {
+        MockMultipartFile original = new MockMultipartFile("file", "index.html", "text/html",
+            "<h1>before</h1>".getBytes());
+        ArtifactDto published = service.publish(original, ArtifactPublishMode.AUTO, null,
+            true, null, null, null);
+        String previousOriginalKey = record.get().getOriginalKey();
+        when(mapper.replaceContent(any(ArtifactRecord.class), anyLong(), anyString(), anyString(), any()))
+            .thenReturn(0);
+        MockMultipartFile replacement = new MockMultipartFile("file", "index.html", "text/html",
+            "<h1>after</h1>".getBytes());
+
+        assertThatThrownBy(() -> service.replaceOwnedContent(published.getArtifactId(), replacement,
+            ArtifactPublishMode.AUTO, null, true, null, null))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("已被更新");
+
+        ArtifactApplicationService.ArtifactContent content = service.resolvePreview(published.getArtifactId(), null);
+        assertThat(new String(service.open(content).readAllBytes())).isEqualTo("<h1>before</h1>");
+        assertThat(storage.objects).hasSize(1).containsKey(previousOriginalKey);
     }
 
     @Test
