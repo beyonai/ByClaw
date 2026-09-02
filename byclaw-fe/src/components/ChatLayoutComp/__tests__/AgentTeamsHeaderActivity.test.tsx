@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 
 import {
   clearAgentTeamsSnapshots,
@@ -9,6 +9,7 @@ import AgentTeamsHeaderActivity from '../AgentTeamsHeaderActivity';
 
 const mockDispatch = jest.fn();
 const mockSetSessionId = jest.fn();
+let newMessageHandler: ((message: any) => void) | undefined;
 const messages: Record<string, string> = {
   'agentTeamsActivity.openPanel': '打开专家团活动面板',
   'agentTeamsActivity.panelTitle': '专家团活动面板',
@@ -19,6 +20,15 @@ jest.mock('@umijs/max', () => ({
   useIntl: () => ({ formatMessage: ({ id }: { id: string }) => messages[id] || id }),
 }));
 jest.mock('@/hooks/useGlobal', () => () => ({ setSessionId: mockSetSessionId }));
+jest.mock('@/utils/websocket', () => ({
+  __esModule: true,
+  default: {
+    onMessage: jest.fn((_type: string, handler: (message: any) => void) => {
+      newMessageHandler = handler;
+    }),
+    offMessage: jest.fn(),
+  },
+}));
 jest.mock('antd', () => ({
   Drawer: ({ children, open, title }: any) =>
     open ? (
@@ -60,6 +70,7 @@ describe('AgentTeamsHeaderActivity', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     clearAgentTeamsSnapshots();
+    newMessageHandler = undefined;
     publishAgentTeamsSnapshot('100', snapshot as any);
   });
 
@@ -79,5 +90,68 @@ describe('AgentTeamsHeaderActivity', () => {
     fireEvent.click(within(panel).getByRole('button', { name: '打开架构舵手子会话' }));
     expect(mockSetSessionId).toHaveBeenCalledWith('201');
     expect(mockDispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'session/addSession' }));
+  });
+
+  it('reopens member activity for a newer child run and ignores an older late terminal', () => {
+    publishAgentTeamsSnapshot('100', {
+      ...snapshot,
+      capturedAt: '2026-08-31T08:01:00Z',
+      team: {
+        ...snapshot.team,
+        members: [
+          {
+            id: 'member-1',
+            byclawSessionId: '201',
+            name: '架构舵手',
+            activity: 'idle',
+            status: 'completed',
+            childRunId: 'member-1:1',
+            childTurn: 1,
+          },
+        ],
+      },
+    } as any);
+    render(<AgentTeamsHeaderActivity rootSessionId="100" currentSession={{ sessionId: '100' } as any} />);
+    fireEvent.click(screen.getByRole('button', { name: '打开专家团活动面板' }));
+
+    act(() => {
+      newMessageHandler?.({
+        sessionId: '201',
+        streamId: '20-0',
+        data: {
+          sessionId: '201',
+          running: true,
+          metadata: JSON.stringify({
+            session_scope: 'child',
+            external_parent_session_id: '100',
+            external_session_id: 'member-1',
+            session_status: 'running',
+            child_run_id: 'member-1:2',
+            child_turn: 2,
+          }),
+        },
+      });
+    });
+    expect(screen.getByText('执行中')).toBeInTheDocument();
+
+    act(() => {
+      newMessageHandler?.({
+        sessionId: '201',
+        streamId: '21-0',
+        data: {
+          sessionId: '201',
+          running: false,
+          metadata: JSON.stringify({
+            session_scope: 'child',
+            external_parent_session_id: '100',
+            external_session_id: 'member-1',
+            session_status: 'completed',
+            child_run_id: 'member-1:1',
+            child_turn: 1,
+          }),
+        },
+      });
+    });
+    expect(screen.getByText('执行中')).toBeInTheDocument();
   });
 });

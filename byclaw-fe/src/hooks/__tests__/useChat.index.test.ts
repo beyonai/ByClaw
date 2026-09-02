@@ -26,6 +26,8 @@ let mockMessageList: any[] = [];
 let mockReconnectHandler: (() => void) | undefined;
 let mockExtParamsBySessionId: Record<string, unknown> = {};
 let mockSessionList: any[] = [];
+let mockMessageLoadState = 'idle';
+const mockRetrySessionMessageLoad = jest.fn(() => Promise.resolve());
 
 jest.mock('@/utils/websocket', () => ({
   __esModule: true,
@@ -69,6 +71,8 @@ jest.mock('../useChat/useMessage', () => ({
     updateMessage: mockUpdateMessage,
     reloadLatestMessageList: mockReloadLatestMessageList,
     waitForSessionMessageLoaded: mockWaitForSessionMessageLoaded,
+    getSessionMessageLoadState: jest.fn(() => mockMessageLoadState),
+    retrySessionMessageLoad: mockRetrySessionMessageLoad,
   })),
 }));
 
@@ -136,6 +140,7 @@ describe('hooks/useChat/index', () => {
     mockReconnectHandler = undefined;
     mockExtParamsBySessionId = {};
     mockSessionList = [];
+    mockMessageLoadState = 'idle';
     mockGetChatRunningStatus.mockResolvedValue([]);
     mockGetChatRunningSnapshot.mockResolvedValue(null);
     mockUseDispatch.mockReturnValue(jest.fn());
@@ -211,6 +216,15 @@ describe('hooks/useChat/index', () => {
       }),
       { isAssign: true }
     );
+  });
+
+  it('exposes the current session message loading state and retry action', async () => {
+    mockMessageLoadState = 'error';
+    const { result } = renderHook(() => useChat({ sessionId: 'child-1', addSession: jest.fn() } as any));
+
+    expect(result.current.sessionMessageLoadState).toBe('error');
+    await result.current.retrySessionMessageLoad();
+    expect(mockRetrySessionMessageLoad).toHaveBeenCalledWith('child-1');
   });
 
   it('clears a restored session when reconnect reconciliation finds no backend runtime', async () => {

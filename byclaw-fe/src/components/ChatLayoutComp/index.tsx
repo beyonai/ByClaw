@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState, useMemo, ForwardedRef } from 'react';
 import { useDispatch, useIntl, useSelector } from '@umijs/max';
 import { isEmpty, last, size } from 'lodash';
-import { notification } from 'antd';
+import { notification, Spin } from 'antd';
 import { ArrowLeftOutlined, LockOutlined } from '@ant-design/icons';
 
 import MessageList from '@/components/MessageList';
@@ -506,6 +506,8 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     deleteMessage,
     isSessionRunning,
     cancelCurrentSession,
+    sessionMessageLoadState,
+    retrySessionMessageLoad,
   } = useChat({
     chatUrl,
     sessionId,
@@ -705,6 +707,20 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
             )}
             {isBottom && (
               <div className={classnames(styles.messageList, 'ub-f1 overflow-hidden')}>
+                {sessionMessageLoadState === 'loading' && (
+                  <div className={styles.sessionMessageLoadNotice} role="status">
+                    <Spin size="small" /> 正在同步会话消息…
+                  </div>
+                )}
+                {sessionMessageLoadState === 'error' && (
+                  <button
+                    type="button"
+                    className={styles.sessionMessageLoadError}
+                    onClick={() => void retrySessionMessageLoad()}
+                  >
+                    会话消息加载失败，点击重试
+                  </button>
+                )}
                 <MessageList
                   ref={messageListCompRef}
                   onNext={onNext}

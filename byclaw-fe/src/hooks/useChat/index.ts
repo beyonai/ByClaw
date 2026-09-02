@@ -25,6 +25,7 @@ import { hydrateV2RuntimeState } from '@/utils/messageV2Runtime';
 import { getFileTypeByName } from '@/utils/file';
 import {
   commitScopedStream,
+  getScopedChildRunState,
   isExternalChildExtParams,
   isExternalChildSession,
   isScopedChildProjection,
@@ -247,6 +248,9 @@ function useChat(props: IProps) {
     updateMessage,
     reloadLatestMessageList,
     waitForSessionMessageLoaded = () => Promise.resolve(),
+    getSessionMessageLoadState = () => 'idle' as const,
+    retrySessionMessageLoad = () => Promise.resolve(),
+    applyScopedChildProjectionMessage,
   } = useMessage({
     sessionId,
   });
@@ -544,7 +548,12 @@ function useChat(props: IProps) {
 
     await waitForSessionMessageLoaded(projectionSessionId);
     const streamId = projection?.snapshotStreamId || projection?.streamId || envelopeStreamId;
-    if (!isScopedStreamNewer(scopedChildWatermarksRef.current, projectionSessionId, streamId)) return true;
+    if (
+      !applyScopedChildProjectionMessage &&
+      !isScopedStreamNewer(scopedChildWatermarksRef.current, projectionSessionId, streamId)
+    ) {
+      return true;
+    }
 
     const message = fetchMessageHandler({
       ...projection,
@@ -556,8 +565,12 @@ function useChat(props: IProps) {
     set(message, 'snapshotStreamId', streamId);
     set(message, 'streamId', streamId);
     hydrateV2RuntimeState(message);
-    updateMessage(message, { isAssign: true, allowCreateSession: false });
-    commitScopedStream(scopedChildWatermarksRef.current, projectionSessionId, streamId);
+    if (applyScopedChildProjectionMessage) {
+      applyScopedChildProjectionMessage(projectionSessionId, message, getScopedChildRunState(projection, streamId));
+    } else {
+      updateMessage(message, { isAssign: true, allowCreateSession: false });
+      commitScopedStream(scopedChildWatermarksRef.current, projectionSessionId, streamId);
+    }
     return true;
   });
 
@@ -1310,6 +1323,8 @@ function useChat(props: IProps) {
 
     getMessageList,
     setMessageList,
+    sessionMessageLoadState: getSessionMessageLoadState(sessionId),
+    retrySessionMessageLoad: () => retrySessionMessageLoad(sessionId),
   };
 }
 
