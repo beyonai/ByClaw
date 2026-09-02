@@ -2,7 +2,7 @@
 import React, { Suspense, useCallback } from 'react';
 import { ArrowRightOutlined, InfoCircleOutlined } from '@ant-design/icons';
 // @ts-ignore
-import { useIntl, useSelector } from '@umijs/max';
+import { useDispatch, useIntl, useNavigate, useSelector } from '@umijs/max';
 import { Space, Tooltip, Typography, Button } from 'antd';
 import classnames from 'classnames';
 import { get, isArray, isEmpty, noop, compact } from 'lodash';
@@ -36,6 +36,7 @@ import { agentTypeMap } from '@/constants/agent';
 import { getPublicPath } from '@/utils';
 
 import { getAgentChatAvatar } from '@/utils/agent';
+import { navigateToEmployeeChat } from '@/utils/employeeChat';
 import { ResourceType } from '@/components/QueryInput/RichInput/utils/constants';
 
 import { IMessageState, SSEMessageType } from '@/constants/message';
@@ -76,7 +77,9 @@ export default function useRender({
   );
 
   const intl = useIntl();
-  const { EventEmitter } = useGlobal();
+  const navigate = useNavigate();
+  const dispatch = useDispatch();
+  const { EventEmitter, setAgentId, setSessionId } = useGlobal();
 
   const { canRefrence } = useCanRefrence();
 
@@ -103,6 +106,20 @@ export default function useRender({
       resourceId: agentInfo.agentId,
     });
   }, []);
+
+  // 会话详情中的员工弹窗沿用员工卡片进入会话的初始化流程，确保点击“新建任务”后直接进入目标员工会话。
+  const handleEmployeeChat = useCallback(
+    (employee: any) => {
+      navigateToEmployeeChat({
+        employee,
+        dispatch,
+        navigate,
+        setAgentId,
+        setSessionId,
+      });
+    },
+    [dispatch, navigate, setAgentId, setSessionId]
+  );
 
   const userQueryActions = useCallback(
     (msg: IMessage) => {
@@ -601,7 +618,11 @@ export default function useRender({
       <EmployeePreviewModal
         employee={employeePreview}
         onClose={() => setEmployeePreview(null)}
-        onCreateTask={() => setEmployeePreview(null)}
+        onCreateTask={() => {
+          if (!employeePreview) return;
+          setEmployeePreview(null);
+          handleEmployeeChat(employeePreview);
+        }}
       />
     </>
   );

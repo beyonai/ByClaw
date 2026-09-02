@@ -75,6 +75,7 @@ function AllDigitalEmployees(
     mode?: 'employee' | 'group';
     source?: 'official' | 'available';
     onEmployeeClick?: (employee: IAgentCache) => void;
+    onChatEmployee?: (employee: IAgentCache) => void;
     hideCategories?: boolean;
     compactLayout?: boolean;
     scrollableTarget?: string;
@@ -88,6 +89,7 @@ function AllDigitalEmployees(
     mode = 'employee',
     source = 'official',
     onEmployeeClick,
+    onChatEmployee: onChatEmployeeProp,
     hideCategories = false,
     compactLayout = false,
     scrollableTarget,
@@ -468,6 +470,7 @@ function AllDigitalEmployees(
       trackerEmployeeClick,
     ]
   );
+  const chatEmployee = onChatEmployeeProp || onChatEmployee;
 
   const onEditEmployee = React.useCallback(
     (employee: IAgentCache) => {
@@ -631,7 +634,7 @@ function AllDigitalEmployees(
                         digitalEmployeeActionMode
                         actionConfig={{
                           scene: 'enterprise',
-                          onChat: () => onChatEmployee(employee),
+                          onChat: () => chatEmployee(employee),
                           onEdit: () => onEditEmployee(employee),
                           onAuth: (type: any) => onAuthEmployee(employee, type),
                           onApplyUse: () => onApplyEmployee(employee),
