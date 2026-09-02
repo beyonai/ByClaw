@@ -66,6 +66,15 @@ function outputErrorCode(outcome) {
   return match ? match[1].toUpperCase() : 'COMMAND_EXEC';
 }
 
+function probeFailure(reasonCode) {
+  const code = String(reasonCode || 'COMMAND_EXEC');
+  return {
+    status: ['BROWSER_CONNECT', 'TIMEOUT', 'COMMAND_EXEC', 'BRIDGE_UNAVAILABLE', 'BRIDGE_RECOVERY_BUSY']
+      .includes(code) ? 'infrastructure-blocked' : 'unavailable',
+    reasonCode: code,
+  };
+}
+
 function normalizedHttpUrl(rawUrl, label) {
   let url;
   try {
@@ -145,6 +154,153 @@ function publishArtifacts(paths, itemId, result, article = null) {
     throw error;
   }
   return toPosixRelative(paths.root, path.join(target, 'executor-result.json'));
+}
+
+export async function acquireWebProbe(candidate, options = {}) {
+  const requestedUrl = normalizedHttpUrl(
+    candidate?.acquisitionUrls?.[0] || candidate?.canonicalUrl,
+    'candidate acquisition URL',
+  );
+  const allowedUrls = new Set([candidate?.canonicalUrl, ...(candidate?.acquisitionUrls || [])]
+    .map((url) => normalizedHttpUrl(url, 'candidate acquisition URL')));
+  const requested = new URL(requestedUrl);
+  const unsupportedHost = /(^|\.)(?:youtube\.com|youtu\.be|bilibili\.com|douyin\.com|x\.com|twitter\.com|reddit\.com|redd\.it|facebook\.com|instagram\.com|linkedin\.com|xiaohongshu\.com|xueqiu\.com)$/iu;
+  const specializedFeed = /(?:^|\/)(?:feed|rss|atom)(?:[/.]|$)/iu.test(requested.pathname)
+    || /\.(?:rss|atom|xml)$/iu.test(requested.pathname);
+  if (unsupportedHost.test(requested.hostname) || specializedFeed) {
+    return { status: 'unsupported', reasonCode: 'SOURCE_REQUIRES_SPECIALIZED_VERIFIER' };
+  }
+  const runProcess = options.runProcess || runCli;
+  const now = options.now || Date.now;
+  const startedAt = now();
+  const totalTimeoutMs = Math.max(1, Math.min(
+    ACQUIRE_WEB_TIMEOUT_MS,
+    Number.isFinite(Number(options.remainingBudgetMs)) ? Number(options.remainingBudgetMs) : ACQUIRE_WEB_TIMEOUT_MS,
+  ));
+  const browserSession = `kc-probe-${String(options.probeId || crypto.randomUUID())
+    .replace(/[^a-z0-9_-]/gi, '-').slice(0, 48)}`;
+  const remaining = () => Math.max(1, totalTimeoutMs - (now() - startedAt));
+  const execute = async (bin, commandArgs, maxOutputBytes = MAX_WEB_ARTICLE_BYTES) => {
+    if (remaining() <= 1) throw new Error(`CLI timeout after ${totalTimeoutMs}ms`);
+    return runProcess(bin, commandArgs, { timeoutMs: remaining(), maxOutputBytes });
+  };
+  const bridgeScript = options.bridgeScript || (fs.existsSync(DEFAULT_BRIDGE_SCRIPT)
+    ? DEFAULT_BRIDGE_SCRIPT : LOCAL_BRIDGE_SCRIPT);
+  let browserOpened = false;
+  let keepForUserAction = false;
+  try {
+    const bridge = await execute(process.execPath, [bridgeScript, '--format', 'json'], 256 * 1024);
+    if (bridge.exitCode !== 0 || parseJson(bridge.stdout)?.ok !== true) {
+      return { status: 'infrastructure-blocked', reasonCode: 'BRIDGE_UNAVAILABLE' };
+    }
+    const open = await execute('bycli', ['browser', browserSession, 'open', requestedUrl], 256 * 1024);
+    if (open.exitCode !== 0) {
+      return probeFailure(outputErrorCode(open));
+    }
+    browserOpened = true;
+    const currentUrl = await execute('bycli', ['browser', browserSession, 'get', 'url'], 256 * 1024);
+    if (currentUrl.exitCode !== 0) {
+      return probeFailure(outputErrorCode(currentUrl));
+    }
+    const resolvedUrl = resolvedUrlFromOutput(currentUrl.stdout);
+    const resolved = resolvedUrl ? new URL(resolvedUrl) : null;
+    const trustedWechatRedirect = requested.hostname === 'weixin.sogou.com'
+      && resolved?.hostname === 'mp.weixin.qq.com' && /^\/s(?:\/|$)/u.test(resolved.pathname);
+    if (!resolvedUrl || (!allowedUrls.has(resolvedUrl) && !trustedWechatRedirect)) {
+      return { status: 'unavailable', reasonCode: 'SOURCE_NOT_AUTHORIZED_BY_DISCOVERY' };
+    }
+
+    let expectedStart = 0;
+    let totalChars = null;
+    let title = '';
+    let markdown = '';
+    while (true) {
+      const extracted = await execute('bycli', [
+        'browser', browserSession, 'extract', '--chunk-size', String(EXTRACT_CHUNK_SIZE),
+        '--start', String(expectedStart),
+      ]);
+      if (extracted.exitCode !== 0) {
+        return probeFailure(outputErrorCode(extracted));
+      }
+      const chunk = parseJson(extracted.stdout);
+      if (!chunk || normalizedHttpUrl(chunk.url, 'extract.url') !== resolvedUrl
+        || chunk.start !== expectedStart || !Number.isInteger(chunk.end) || chunk.end < chunk.start
+        || !Number.isInteger(chunk.total_chars) || (totalChars !== null && totalChars !== chunk.total_chars)
+        || typeof chunk.content !== 'string') {
+        return { status: 'unavailable', reasonCode: 'EXECUTOR_CHUNK_INVALID' };
+      }
+      totalChars ??= chunk.total_chars;
+      const chunkTitle = typeof chunk.title === 'string' ? chunk.title.trim() : '';
+      if (title && chunkTitle && title !== chunkTitle) {
+        return { status: 'unavailable', reasonCode: 'EXECUTOR_CHUNK_INVALID' };
+      }
+      title ||= chunkTitle;
+      markdown += chunk.content;
+      if (Buffer.byteLength(markdown) > MAX_WEB_ARTICLE_BYTES) {
+        return { status: 'unavailable', reasonCode: 'EXECUTOR_OUTPUT_TRUNCATED' };
+      }
+      if (chunk.next_start_char === null) {
+        if (chunk.end !== totalChars) {
+          return { status: 'unavailable', reasonCode: 'EXECUTOR_CHUNK_INVALID' };
+        }
+        break;
+      }
+      if (!Number.isInteger(chunk.next_start_char) || chunk.next_start_char !== chunk.end
+        || chunk.next_start_char <= expectedStart) {
+        return { status: 'unavailable', reasonCode: 'EXECUTOR_CHUNK_INVALID' };
+      }
+      expectedStart = chunk.next_start_char;
+    }
+    if (isChallengePage(title, markdown)) {
+      keepForUserAction = true;
+      return {
+        status: 'requires-user-action', reasonCode: 'AUTH_OR_CHALLENGE',
+        requestedUrl, resolvedUrl, title, browserSession,
+      };
+    }
+    if (!markdown.trim()) return { status: 'unavailable', reasonCode: 'EXECUTOR_EMPTY_RESULT' };
+    return { status: 'saved', requestedUrl, resolvedUrl, title, markdown, executor: 'bycli' };
+  } catch (error) {
+    return {
+      status: 'infrastructure-blocked',
+      reasonCode: /timeout after \d+ms/i.test(error.message) ? 'TIMEOUT' : 'COMMAND_EXEC',
+    };
+  } finally {
+    if (browserOpened && !keepForUserAction) {
+      try { await execute('bycli', ['browser', browserSession, 'close'], 256 * 1024); } catch {}
+    }
+  }
+}
+
+export function acquireWechatProbe(candidate, options = {}) {
+  const hostname = new URL(candidate?.canonicalUrl).hostname;
+  if (!['mp.weixin.qq.com', 'weixin.sogou.com'].includes(hostname)) {
+    throw new Error('WECHAT_PROBE_SOURCE_INVALID');
+  }
+  return acquireWebProbe(candidate, { ...options, sourceFamily: 'wechat' });
+}
+
+export function acquireArxivProbe(candidate, options = {}) {
+  const hostname = new URL(candidate?.canonicalUrl).hostname;
+  const html = candidate?.acquisitionUrls?.find((url) => /^https:\/\/arxiv\.org\/html\//iu.test(url));
+  if (hostname !== 'arxiv.org' || !html) throw new Error('ARXIV_HTML_PROBE_SOURCE_INVALID');
+  return acquireWebProbe({
+    ...candidate,
+    acquisitionUrls: [html, ...candidate.acquisitionUrls.filter((url) => url !== html)],
+  }, { ...options, sourceFamily: 'arxiv' });
+}
+
+export async function cleanupProbeSession(sessionId, options = {}) {
+  if (!/^kc-probe-[a-z0-9_-]{1,64}$/iu.test(String(sessionId || ''))) {
+    throw new Error('PROBE_BROWSER_SESSION_INVALID');
+  }
+  const runProcess = options.runProcess || runCli;
+  const outcome = await runProcess('bycli', ['browser', sessionId, 'close'], {
+    timeoutMs: 10_000,
+    maxOutputBytes: 256 * 1024,
+  });
+  if (outcome.exitCode !== 0) throw new Error(`PROBE_BROWSER_CLEANUP_FAILED: ${outputErrorCode(outcome)}`);
+  return { ok: true, sessionId };
 }
 
 export async function runWebAcquire(paths, args, options = {}) {

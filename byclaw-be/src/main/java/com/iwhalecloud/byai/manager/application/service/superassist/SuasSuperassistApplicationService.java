@@ -5,9 +5,7 @@ import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
 import com.iwhalecloud.byai.common.constants.Constants;
-import com.iwhalecloud.byai.common.constants.devloop.DeleteFlag;
 import com.iwhalecloud.byai.common.constants.devloop.MemberRole;
-import com.iwhalecloud.byai.common.constants.devloop.ProjectResourceType;
 import com.iwhalecloud.byai.common.constants.resource.ResourceBizType;
 import com.iwhalecloud.byai.common.ecrypt.Sm4Util;
 import com.iwhalecloud.byai.common.feign.client.FeignDataCloudService;
@@ -43,7 +41,6 @@ import com.iwhalecloud.byai.manager.domain.auth.enums.GrantType;
 import com.iwhalecloud.byai.manager.domain.auth.enums.OperType;
 import com.iwhalecloud.byai.manager.domain.auth.service.PrivilegeGrantService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectMemberService;
-import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectResourceService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDigEmployeeService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtSkillService;
@@ -61,7 +58,6 @@ import com.iwhalecloud.byai.manager.dto.resource.SsResExtSkillDto;
 import com.iwhalecloud.byai.manager.entity.aimodel.ByaiAimodel;
 import com.iwhalecloud.byai.manager.entity.auth.PrivilegeGrant;
 import com.iwhalecloud.byai.manager.entity.devloop.Project;
-import com.iwhalecloud.byai.manager.entity.devloop.ProjectResource;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtDigEmployee;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtSkill;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
@@ -134,8 +130,6 @@ public class SuasSuperassistApplicationService {
     @Autowired
     private ProjectMemberService projectMemberService;
 
-    @Autowired
-    private ProjectResourceService projectResourceService;
 
     @Autowired
     private FeignDataCloudService feignDataCloudService;
@@ -282,7 +276,7 @@ public class SuasSuperassistApplicationService {
             SsResource ssResource = ssResourceService.findByIdOrCode(null, resourceCode);
             if (ssResource != null) {
                 // 对技能进行对比
-                this.compareDigEmployee(ssResource, jsonObject, loginInfo);
+                this.compareDigEmployee(ssResource, jsonObject, loginInfo, Collections.emptyList());
 
                 continue;
             }
@@ -335,7 +329,7 @@ public class SuasSuperassistApplicationService {
      * @param jsonObject 模板资源配置
      * @param loginInfo  登陆信息
      */
-    private ResourceExtDigEmployeeDto compareDigEmployee(SsResource ssResource, JSONObject jsonObject, LoginInfo loginInfo) {
+    private ResourceExtDigEmployeeDto compareDigEmployee(SsResource ssResource, JSONObject jsonObject, LoginInfo loginInfo, List<EmployeeGroupMemberDTO> employeeGroupMembers) {
 
         try {
             String resourceDesc = jsonObject.getString("resourceDesc");
@@ -363,8 +357,20 @@ public class SuasSuperassistApplicationService {
                 ssResExtDigEmployeeService.save(ssResExtDigEmployee);
             }
 
-            digitalEmployeeApplicationService.syncExistingDigEmployeeConfigToRedisQuietly(ssResource.getResourceId());
+            // 关联数据员工组,每次更新时对比
+            for (int i = 0; employeeGroupMembers != null && i < employeeGroupMembers.size(); i++) {
+                EmployeeGroupMemberDTO employeeGroupMemberDTO = employeeGroupMembers.get(i);
+                List<SsResourceRelDetail> ssResourceRelDetails = ssResourceRelDetailService.find(ssResource.getResourceId(), employeeGroupMemberDTO.getResourceId());
+                if (ListUtil.isEmpty(ssResourceRelDetails)) {
+                    Long resourceId = ssResource.getResourceId();
+                    Long relResourceId = employeeGroupMemberDTO.getResourceId();
+                    String teamRole = employeeGroupMemberDTO.getTeamRole();
+                    Integer sortOrder = employeeGroupMemberDTO.getSortOrder();
+                    ssResourceRelDetailService.saveDigEmployeeGroupRelDetail(resourceId, relResourceId, teamRole, sortOrder);
+                }
+            }
 
+            digitalEmployeeApplicationService.syncExistingDigEmployeeConfigToRedisQuietly(ssResource.getResourceId());
 
             ResourceExtDigEmployeeDto resourceExtDigEmployeeDto = new ResourceExtDigEmployeeDto();
             BeanUtil.copyProperties(ssResource, resourceExtDigEmployeeDto);
@@ -923,7 +929,7 @@ public class SuasSuperassistApplicationService {
 
                 }
             }
-        } catch (Exception e) {
+        } catch (Throwable e) {
             logger.error(e.getMessage(), e);
         }
     }
@@ -961,7 +967,7 @@ public class SuasSuperassistApplicationService {
         SsResource ssResource = ssResourceService.findByIdOrCode(null, resourceCode);
         if (ssResource != null) {
             // 对技能进行对比
-            return this.compareDigEmployee(ssResource, jsonObject, loginInfo);
+            return this.compareDigEmployee(ssResource, jsonObject, loginInfo, employeeGroupMembers);
         }
 
         DigitalEmployeeDTO digitalEmployeeDTO = new DigitalEmployeeDTO();

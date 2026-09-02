@@ -33,16 +33,15 @@ const skill = documents[0];
 
 assert.match(
   skill,
-  /`eligibleArticle=0`.*`status\.task\.discoveryGate\.attemptCount < maxAttempts`.*必须执行第二轮 `public-discover`/s,
-);
-assert.match(skill, /不得因主题看似不存在、首轮结果明显无关或预计第二轮仍会失败而跳过第二轮/);
-assert.match(
-  skill,
-  /只有 `exhausted=true`、`stopReason=no-article-candidates` 和 `stopDetail=no-relevant-article-candidates` 同时成立，才能把公共发现报告为已耗尽并停止/s,
+  /WSA.*搜索摘要.*发现证据.*不是.*正文/s,
 );
 assert.match(
   skill,
-  /最终答复前.*重新运行 `status`.*原样核对并报告 `attemptCount`、`maxAttempts`、`exhausted`、`stopReason` 和 `stopDetail`/s,
+  /明确要求.*数量.*必须使用 `public-collect`/s,
+);
+assert.match(
+  skill,
+  /`public-discover`.*`acquire-web`.*`materialize-web`.*`collect`.*不能.*复现.*闭环/s,
 );
 assert.match(skill, /STOP before all collection tools: require Session Root/);
 assert.match(
@@ -53,7 +52,7 @@ assert.match(skill, /不得用 `ls`、`find`、glob 枚举 `\/by\/\.sessions\/`/
 assert.match(skill, /`init` 命令不得包含 `--delivery-dir`/);
 assert.match(
   skill,
-  /`eligibleArticle>0`.*按 `articleCandidateIds` 的确定性顺序选择候选并继续授权的抓取、物化与 `collect`/s,
+  /只有.*晋升.*已验证正文.*才能计入.*requestedItemCount/s,
 );
 assert.match(skill, /STOP before browser-backed byCLI commands: one recovery owner/);
 assert.match(

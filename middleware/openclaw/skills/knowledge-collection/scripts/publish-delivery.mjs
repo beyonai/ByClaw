@@ -902,7 +902,7 @@ function isLegacyPublicSession(session) {
     'public-discover', 'user-provided', 'crawl-frontier',
   ].includes(item.provenanceKind) || typeof item.discoveryCandidateId === 'string');
   return hasPublicItem
-    && session.task?.discoveryGate?.schemaVersion !== '1.1';
+    && !['1.1', '2.0'].includes(session.task?.discoveryGate?.schemaVersion);
 }
 
 export function inspectDelivery(paths) {

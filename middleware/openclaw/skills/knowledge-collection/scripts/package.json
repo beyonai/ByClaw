@@ -2,6 +2,9 @@
   "name": "@byclaw/knowledge-collection-scripts",
   "private": true,
   "type": "module",
+  "scripts": {
+    "test": "node --test *.test.mjs"
+  },
   "dependencies": {
     "tencentcloud-sdk-nodejs": "4.1.304"
   }
