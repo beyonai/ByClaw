@@ -48,7 +48,12 @@
                             where creator_id = #{createBy}
                             GROUP BY project_id) b
                 ON a.project_id = b.project_id
-        WHERE (a.project_type = 'default' or a.project_id IN (SELECT project_id FROM byai_project_member WHERE user_id = #{createBy}))
+        WHERE (
+            <if test="defaultCount == null or defaultCount &lt; 2">
+                a.project_type = 'default' or
+            </if>
+            a.project_id IN (SELECT project_id FROM byai_project_member WHERE user_id = #{createBy})
+        )
         <!-- 软删除项目不再返回；历史空值按未删除兼容，避免老数据被误隐藏。 -->
         AND (a.delete_flag IS NULL OR a.delete_flag != '1')
         <if test="keyword != null and keyword != ''">
@@ -70,6 +75,14 @@
                                 FROM byai_project_member
                                 WHERE user_id = #{userId}))
         ORDER BY a.project_id
+    </select>
+
+    <select id="countDefaultProject" resultType="java.lang.Long">
+        SELECT COUNT(1)
+        FROM byai_project a
+        WHERE (a.project_id &lt; 0 OR a.create_by = #{createBy})
+          AND a.project_type IN ('default')
+          AND (a.delete_flag IS NULL OR a.delete_flag != '1')
     </select>
 
 </mapper>

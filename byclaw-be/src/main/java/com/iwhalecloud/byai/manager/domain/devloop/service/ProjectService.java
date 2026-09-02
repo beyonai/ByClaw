@@ -74,20 +74,14 @@ public class ProjectService {
      * @return PageInfo<ProjectListDto>
      */
     public PageInfo<ProjectListDto> selectProjectsByQo(ProjectQo projectQo) {
+        Long defaultCount = projectMapper.countDefaultProject(projectQo.getCreateBy());
+        projectQo.setDefaultCount(defaultCount == null ? 0L : defaultCount);
+
         Page<ProjectListDto> page = PageHelper.startPage(projectQo.getPageNum(), projectQo.getPageSize());
         projectMapper.selectProjectsByQo(projectQo);
         return PageHelperUtil.toPageInfo(page);
     }
 
-    /**
-     * 查询当前用户可见的项目列表。
-     *
-     * @param projectQo 查询条件
-     * @return 项目列表
-     */
-    public List<ProjectListDto> listProjects(ProjectQo projectQo) {
-        return projectMapper.selectProjectsByQo(projectQo);
-    }
 
     /**
      * 判断项目名称是否已存在。
