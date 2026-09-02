@@ -31,8 +31,8 @@
     },
     {
       "paramCode": "items",
-      "paramName": "每日粉丝数据数组",
-      "type": "array",
+      "paramName": "每日粉丝数据 JSON 数组字符串",
+      "type": "string",
       "isRequired": true,
       "direction": "input"
     },
