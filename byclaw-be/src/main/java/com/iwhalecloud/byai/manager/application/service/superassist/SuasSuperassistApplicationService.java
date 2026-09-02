@@ -414,6 +414,8 @@ public class SuasSuperassistApplicationService {
 
         String prologue = jsonObject.getString("prologue");
         String relToolCodes = jsonObject.getString("relToolCodes");
+        String relOntologyCodes = jsonObject.getString("relOntologyCodes");
+
         String coreCompetencies = jsonObject.getString("coreCompetencies");
         String corePersonaDefinition = jsonObject.getString("corePersonaDefinition");
 
@@ -463,12 +465,14 @@ public class SuasSuperassistApplicationService {
         // 设置关联技能的json信息
         ssResExtDigEmployee.setSkills(this.buildJsonBySkillDto(ssResExtSkillDtos));
 
-        // 关联工具
-        List<String> splitToolCodes = StringUtil.splitStr(relToolCodes, ",");
-        for (String toolCode : splitToolCodes) {
-            SsResourceDTO ssResourceDTO = relResourceMap.get(toolCode);
+        // 关联资源
+        List<String> resourceCodes = new ArrayList<>();
+        resourceCodes.addAll(StringUtil.splitStr(relToolCodes, ","));
+        resourceCodes.addAll(StringUtil.splitStr(relOntologyCodes, ","));
+        for (String resourceCode : resourceCodes) {
+            SsResourceDTO ssResourceDTO = relResourceMap.get(resourceCode);
             if (ssResourceDTO == null) {
-                SsResource relSsResource = ssResourceService.findByIdOrCode(null, toolCode);
+                SsResource relSsResource = ssResourceService.findByIdOrCode(null, resourceCode);
 
                 if (relSsResource == null) {
                     continue;
