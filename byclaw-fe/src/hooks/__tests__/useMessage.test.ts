@@ -142,7 +142,7 @@ describe('hooks/useChat/useMessage', () => {
       EventEmitter: eventEmitter,
     } as any);
     mockGetSessionObjectTypeMap.mockReturnValue(undefined as any);
-    (globalThis as any).requestIdleCallback = (cb: Function) => {
+    (globalThis as any).requestIdleCallback = (cb: () => void) => {
       cb();
       return 1;
     };

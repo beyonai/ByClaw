@@ -15,10 +15,14 @@ jest.mock('@umijs/max', () => ({
   })),
 }));
 
-const mockSend = jest.fn((_text?: string, _payload?: any) => ({
-  promise: Promise.resolve({}),
-  cancel: jest.fn(),
-}));
+const mockSend = jest.fn((text?: string, payload?: any) => {
+  void text;
+  void payload;
+  return {
+    promise: Promise.resolve({}),
+    cancel: jest.fn(),
+  };
+});
 const mockUpdateMessage = jest.fn((msg: any) => msg);
 const mockWaitForSessionMessageLoaded = jest.fn(() => Promise.resolve());
 const mockReloadLatestMessageList = jest.fn(() => Promise.resolve());
