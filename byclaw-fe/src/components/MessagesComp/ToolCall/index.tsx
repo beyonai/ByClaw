@@ -17,6 +17,10 @@ import { copyTextToClipboard } from '@/utils/copy';
 
 import AgentTeamsActivity, { isAgentTeamsSnapshot, type AgentTeamsSnapshot } from './AgentTeamsActivity';
 import styles from './index.module.less';
+import type {
+  ThinkingPreviewGetter,
+  ThinkingPreviewProps,
+} from '@/components/MessageList/components/MsgRendererV2/thinkingPreviewHandler';
 
 /** 工具调用状态。'_ERROR_' 由算法侧在调用失败时下发，与其他 think 类组件的口径一致 */
 export type IToolCallStatus = '_START_' | '_QUERY_' | '_DONE_' | '_ERROR_';
@@ -71,7 +75,11 @@ const formatDetail = (value: unknown): string => {
  *
  * 结果尚未到达时（status 仍是 _START_ / _QUERY_）展示运行中图标，只渲染入参。
  */
-function ToolCall(props: IProps) {
+type ToolCallComponent = React.FC<IProps> & {
+  getThinkingPreview?: ThinkingPreviewGetter;
+};
+
+const ToolCall: ToolCallComponent = (props) => {
   const intl = useIntl();
 
   const substance = get(props, 'messageListItemContent.substance');
@@ -184,6 +192,19 @@ function ToolCall(props: IProps) {
       )}
     </div>
   );
-}
+};
+
+/** 折叠思考过程时复用工具标题与描述的展示语义。 */
+ToolCall.getThinkingPreview = ({ messageListItemContent }: ThinkingPreviewProps) => {
+  const substance = messageListItemContent.substance;
+  let previewSubstance: IToolCallSubstance = {};
+  if (typeof substance === 'string') {
+    previewSubstance = { title: substance };
+  } else if (substance && typeof substance === 'object') {
+    previewSubstance = substance as IToolCallSubstance;
+  }
+  const { title, description } = previewSubstance;
+  return [title, description].filter(Boolean).join(' ');
+};
 
 export default ToolCall;
