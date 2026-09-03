@@ -49,7 +49,8 @@ When active_task_plan exists, never create a second plan. Report only the curren
 After creation, task definitions are immutable. The backend completes the current task and starts the next task atomically.
 The runtime owns session identity, plan identity, versions, task IDs, and task selection. Never invent or request those identifiers.
 If an update fails, read error.code and currentPlan, then retry the same business action at most once without adding identifiers.
-An active plan prevents the Run from completing. Before the final user answer, report the current task outcome until the plan reaches a terminal status.
+Keep the task plan synchronized with actual work. Plan status does not restrict progress messages or user questions.
+If the plan remains active after your response, the runtime may continue execution up to three times, then close the plan and finish the Run.
 </task_plan_policy>`,
   };
 }

@@ -2551,8 +2551,8 @@ describe("RunService task plan completion guard", () => {
     const { events, service } = createTaskPlanService(async (input) => {
       messages.push(input.message);
       if (messages.length === 1) {
-        await input.onDelta("不应提前展示");
-        return { text: "过早结束" };
+        await input.onDelta("正在执行任务");
+        return { text: "当前进度" };
       }
       await input.updateTaskPlan!({
         toolCallId: "finish-plan",
@@ -2575,11 +2575,11 @@ describe("RunService task plan completion guard", () => {
       (await events.list(run.id))
         .filter(({ type }) => type === "leader.delta")
         .map(({ data }) => data),
-    ).toEqual([{ text: "最终回答" }]);
+    ).toEqual([{ text: "正在执行任务" }, { text: "最终回答" }]);
     await service.dispose();
   });
 
-  it("fails closed when the authoritative task plan cannot be loaded", async () => {
+  it("continues without task-plan tools when the authoritative task plan cannot be loaded", async () => {
     const taskPlans: TaskPlanGateway = {
       loadActive: vi.fn(async () => {
         throw new Error("BE unavailable");
@@ -2587,16 +2587,28 @@ describe("RunService task plan completion guard", () => {
       command: vi.fn(async () => ({ ok: true, plan: taskPlanSnapshot("FAILED", 2) })),
       cancel: vi.fn(async () => undefined),
     };
-    const leaderRun = vi.fn(async () => ({ text: "不应执行" }));
-    const { service } = createTaskPlanService(leaderRun, taskPlans);
+    const leaderRun = vi.fn(async (input: LeaderRunInput) => {
+      expect(input.activeTaskPlan).toBeUndefined();
+      expect(input.updateTaskPlan).toBeUndefined();
+      await input.onDelta("正常回答");
+      return { text: "任务已经完成" };
+    });
+    const { events, service } = createTaskPlanService(leaderRun, taskPlans);
 
     const run = await createTaskPlanRun(service);
-    await waitFor(async () => (await service.getRun(run.id))?.status === "FAILED");
+    await waitFor(async () => (await service.getRun(run.id))?.status === "COMPLETED");
 
-    expect(leaderRun).not.toHaveBeenCalled();
-    expect((await service.getRun(run.id))?.error).toContain(
-      "Unable to load the authoritative task plan",
-    );
+    expect(leaderRun).toHaveBeenCalledOnce();
+    expect(taskPlans.loadActive).toHaveBeenCalledOnce();
+    expect(taskPlans.command).not.toHaveBeenCalled();
+    expect(taskPlans.cancel).not.toHaveBeenCalled();
+    expect((await service.getRun(run.id))?.finalAnswer).toBe("任务已经完成");
+    expect((await service.getRun(run.id))?.error).toBeUndefined();
+    expect(
+      (await events.list(run.id))
+        .filter(({ type }) => type === "leader.delta")
+        .map(({ data }) => data),
+    ).toEqual([{ text: "正常回答" }]);
     await service.dispose();
   });
 
@@ -2667,29 +2679,143 @@ describe("RunService task plan completion guard", () => {
     await service.dispose();
   });
 
-  it("fails instead of reporting success when the Leader repeatedly ignores an active plan", async () => {
+  it.each([false, true])("caps continuations at three and completes remaining tasks (progress=%s)", async (progress) => {
+    let currentPlan: TaskPlanSnapshot = {
+      ...taskPlanSnapshot("ACTIVE"),
+      tasks: Array.from({ length: 5 }, (_, index) => ({
+        taskId: `task-${index + 1}`,
+        position: index + 1,
+        title: `步骤 ${index + 1}`,
+        status: index === 0 ? "IN_PROGRESS" : "PENDING",
+      })),
+    };
     const taskPlans: TaskPlanGateway = {
-      loadActive: vi.fn(async () => taskPlanSnapshot("ACTIVE")),
-      command: vi.fn(async () => ({ ok: true, plan: taskPlanSnapshot("FAILED", 2) })),
+      loadActive: vi.fn(async () => currentPlan),
+      command: vi.fn(async ({ command }) => {
+        expect(command.action).toBe("complete_current");
+        const tasks = structuredClone(currentPlan.tasks);
+        const current = tasks.find(({ status }) => status === "IN_PROGRESS")!;
+        current.status = "COMPLETED";
+        const next = tasks.find(({ status }) => status === "PENDING");
+        if (next) {
+          next.status = "IN_PROGRESS";
+        }
+        currentPlan = {
+          ...currentPlan,
+          version: currentPlan.version + 1,
+          status: next ? "ACTIVE" : "COMPLETED",
+          tasks,
+        };
+        return { ok: true, plan: currentPlan };
+      }),
       cancel: vi.fn(async () => undefined),
     };
-    const leaderRun = vi.fn(async () => ({ text: "仍然过早结束" }));
+    let attempts = 0;
+    const leaderRun = vi.fn(async (input: LeaderRunInput) => {
+      attempts += 1;
+      expect(attempts).toBeLessThanOrEqual(4);
+      if (progress && attempts > 1) {
+        await input.updateTaskPlan!({
+          toolCallId: `leader-step-${attempts}`,
+          command: { action: "complete_current" },
+        });
+      }
+      // 没有新正文的续跑不应丢失前一轮回答。
+      return { text: progress || attempts === 1 ? `回答 ${attempts}` : "" };
+    });
     const { events, service } = createTaskPlanService(leaderRun, taskPlans);
 
     const run = await createTaskPlanRun(service);
-    await waitFor(async () => (await service.getRun(run.id))?.status === "FAILED");
+    await waitFor(async () => (await service.getRun(run.id))?.status === "COMPLETED");
 
     expect(leaderRun).toHaveBeenCalledTimes(4);
-    expect((await service.getRun(run.id))?.status).toBe("FAILED");
+    expect((await service.getRun(run.id))?.finalAnswer).toBe(progress ? "回答 4" : "回答 1");
+    expect(currentPlan.status).toBe("COMPLETED");
+    expect(currentPlan.tasks.every(({ status }) => status === "COMPLETED")).toBe(true);
+    expect(taskPlans.command).toHaveBeenCalledTimes(5);
+    const completionCalls = vi.mocked(taskPlans.command).mock.calls
+      .map(([input]) => input)
+      .filter(({ idempotencyKey }) => idempotencyKey.startsWith("run-completed:"));
+    expect(completionCalls).toHaveLength(progress ? 2 : 5);
+    expect(new Set(completionCalls.map(({ idempotencyKey }) => idempotencyKey)).size)
+      .toBe(completionCalls.length);
     expect(taskPlans.command).toHaveBeenCalledWith(
       expect.objectContaining({
         command: expect.objectContaining({
-          action: "fail_current",
-          statusReason: expect.objectContaining({ code: "RUN_FAILED" }),
+          action: "complete_current",
+          statusReason: expect.objectContaining({ code: "CONTINUATION_LIMIT_REACHED" }),
         }),
       }),
     );
-    expect((await events.list(run.id)).some(({ type }) => type === "run.completed")).toBe(false);
+    expect((await events.list(run.id)).some(({ type }) => type === "run.failed")).toBe(false);
+    await service.dispose();
+  });
+
+  it.each(["throw", "reject", "unchanged"])("finishes the Run when forced plan completion returns %s", async (failure) => {
+    const active = taskPlanSnapshot("ACTIVE");
+    const taskPlans: TaskPlanGateway = {
+      loadActive: vi.fn(async () => active),
+      command: vi.fn(async () => {
+        if (failure === "throw") {
+          throw new Error("BE unavailable");
+        }
+        if (failure === "reject") {
+          return { ok: false, error: { code: "CONFLICT", message: "conflict" }, currentPlan: active };
+        }
+        return { ok: true, plan: active };
+      }),
+      cancel: vi.fn(async () => undefined),
+    };
+    const leaderRun = vi.fn(async () => ({ text: failure === "unchanged" ? "" : "本轮结果" }));
+    const { events, service } = createTaskPlanService(leaderRun, taskPlans);
+
+    const run = await createTaskPlanRun(service);
+    await waitFor(async () => (await service.getRun(run.id))?.status === "COMPLETED");
+
+    expect(leaderRun).toHaveBeenCalledTimes(4);
+    expect(taskPlans.command).toHaveBeenCalledOnce();
+    expect((await service.getRun(run.id))?.error).toBeUndefined();
+    expect((await service.getRun(run.id))?.finalAnswer).toBe(
+      failure === "unchanged" ? "本轮执行已结束，未生成最终答复。" : "本轮结果",
+    );
+    expect((await events.list(run.id)).some(({ type }) => type === "run.failed")).toBe(false);
+    await service.dispose();
+  });
+
+  it.each(["COMPLETED", "FAILED", "CANCELLED", "CANCELLING"] as const)("allows user questions when the plan is %s", async (status) => {
+    const taskPlans: TaskPlanGateway = {
+      loadActive: vi.fn(async () => taskPlanSnapshot(status)),
+      command: vi.fn(async () => ({ ok: true, plan: taskPlanSnapshot(status) })),
+      cancel: vi.fn(async () => undefined),
+    };
+    const { events, service } = createTaskPlanService(async (input) => {
+      const response = await input.askUser({
+        toolCallId: "follow-up-question",
+        questions: [{
+          header: "后续处理",
+          question: "下一步采用哪种方案？",
+          options: [
+            { label: "方案 A", description: "第一种方案" },
+            { label: "方案 B", description: "第二种方案" },
+          ],
+        }],
+      });
+      return { text: response.text ?? "已收到回复" };
+    }, taskPlans);
+
+    const run = await createTaskPlanRun(service);
+    await waitFor(async () => (await service.getRun(run.id))?.status === "WAITING_USER");
+    await waitFor(async () =>
+      (await events.list(run.id)).some(({ type }) => type === "interaction.requested"),
+    );
+    await service.respondToInteraction(run.id, `${run.id}:follow-up-question`, {
+      action: "submit",
+      text: "方案 B",
+    });
+    await waitFor(async () => (await service.getRun(run.id))?.status === "COMPLETED");
+
+    expect((await service.getRun(run.id))?.finalAnswer).toBe("方案 B");
+    expect(taskPlans.command).not.toHaveBeenCalled();
     await service.dispose();
   });
 
