@@ -149,7 +149,7 @@ RUN npm config set registry "${NPM_REGISTRY}" --global \
     && rm -f "/tmp/ima-openapi-cli-${IMA_OPENAPI_CLI_VERSION}.tgz"
 
 ARG OPENCLI_VERSION=2.1.56
-ARG OPENCLI_EXTENSION_VERSION=2.1.21
+ARG OPENCLI_EXTENSION_VERSION=2.1.22
 RUN set -eux; \
     if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
         sed -i 's|http://deb.debian.org/debian|https://mirrors.tuna.tsinghua.edu.cn/debian|g' /etc/apt/sources.list.d/debian.sources; \
