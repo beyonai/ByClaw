@@ -6,6 +6,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.iwhalecloud.byai.common.constants.Constants;
 import com.iwhalecloud.byai.common.constants.devloop.DeleteFlag;
 import com.iwhalecloud.byai.common.constants.devloop.MemberRole;
+import com.iwhalecloud.byai.common.constants.devloop.ProjectResourceType;
+import com.iwhalecloud.byai.common.constants.devloop.ProjectType;
 import com.iwhalecloud.byai.common.constants.errorcode.CommonErrorCode;
 import com.iwhalecloud.byai.common.constants.files.FileStatus;
 import com.iwhalecloud.byai.common.exception.BaseException;
@@ -14,10 +16,7 @@ import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.common.storage.model.FileMetadata;
 import com.iwhalecloud.byai.common.storage.model.StorageLocation;
-import com.iwhalecloud.byai.common.util.ListUtil;
-import com.iwhalecloud.byai.common.util.MapParamUtil;
-import com.iwhalecloud.byai.common.util.PageHelperUtil;
-import com.iwhalecloud.byai.common.util.StringUtil;
+import com.iwhalecloud.byai.common.util.*;
 import com.iwhalecloud.byai.manager.application.service.files.FilesApplicationService;
 import com.iwhalecloud.byai.manager.application.service.project.ProjectInitService;
 import com.iwhalecloud.byai.manager.application.service.project.ProjectWorkspaceManifestService;
@@ -77,17 +76,7 @@ import org.springframework.web.util.UriComponentsBuilder;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Set;
+import java.util.*;
 
 /**
  * 项目管理应用服务。
@@ -210,12 +199,12 @@ public class ProjectApplicationService {
 
         Project project = new Project();
         project.setProjectId(sequenceService.nextVal());
+        project.setProjectCode(UUID.randomUUID().toString());
         project.setProjectName(projectName);
         project.setDescription(dto.getDescription());
         project.setResourceId(dto.getResourceId());
         // 项目类型字段已废弃，所有新项目统一按普通项目处理。
-        String projectType = "normal";
-        project.setProjectType(projectType);
+        project.setProjectType(ProjectType.NORMAL);
         project.setIsShare(dto.getIsShare() != null ? dto.getIsShare() : Constants.NO_VALUE_N);
         project.setInitStatus("ready");
         project.setBuildIndex(Constants.NO_VALUE_N);
@@ -235,7 +224,7 @@ public class ProjectApplicationService {
             MemberRole.OWNER);
 
         // 创建云盘知识库并回写项目关联
-        SsResource cloudResource = this.createCloudResource(project, false);
+        SsResource cloudResource = this.createCloudResource(project);
         project.setCloudResourceId(cloudResource.getResourceId());
         projectService.update(project);
 
@@ -253,18 +242,21 @@ public class ProjectApplicationService {
      * @param project 项目实体
      * @return 新建的云盘知识库资源
      */
-    public SsResource createCloudResource(Project project, boolean isInitDirTemplate) {
+    public SsResource createCloudResource(Project project) {
+
         String projectName = project.getProjectName();
         DatasetDto datasetDto = new DatasetDto();
-        datasetDto.setResourceName(I18nUtil.get("project.cloud.resource.name", projectName));
+        datasetDto.setResourceName(I18nUtil.get("project.cloud.resource.name", projectName) + DateUtils.getFormatedDate(new Date()));
         datasetDto.setResourceDesc(I18nUtil.get("project.cloud.resource.desc", projectName));
         datasetDto.setSystemCode("BYAI");
         datasetDto.setResourceBizType("KG_CLOUD");
         datasetDto.setType("dataset");
         SsResource ssResource = datasetApplicationService.createDataset(datasetDto);
-        if (isInitDirTemplate) {
+
+        if (ProjectType.OPERATION.equalsIgnoreCase(project.getProjectType())) {
             this.uploadKnowledgeDirTemplate(ssResource.getResourceId());
         }
+
         return ssResource;
     }
 
@@ -341,7 +333,7 @@ public class ProjectApplicationService {
         //如果没有初始化云盘，创建云盘知识库
         Long cloudResourceId = project.getCloudResourceId();
         if (cloudResourceId == null) {
-            SsResource cloudResource = this.createCloudResource(project, false);
+            SsResource cloudResource = this.createCloudResource(project);
             project.setCloudResourceId(cloudResource.getResourceId());
         }
 
