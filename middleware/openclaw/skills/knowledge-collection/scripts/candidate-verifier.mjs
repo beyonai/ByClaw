@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { promoteProbeMaterialization } from './collection-state.mjs';
+import { promoteProbeMaterialization, registerControlledAcquisitionEvidence } from './collection-state.mjs';
 import { commitProbeAttempt, pauseProbeRun, readProbeRun } from './probe-state.mjs';
 import { loadSession } from './session.mjs';
 import { assessMaterializedTopic } from './topic-relevance.mjs';
@@ -11,9 +11,12 @@ import {
   acquireArxivProbe,
   acquireWechatProbe,
   acquireWebProbe,
+} from './web-acquirer.mjs';
+import {
   authorizationAllowsHttpRedirect,
   authorizationEquivalentHttpUrl,
-} from './web-acquirer.mjs';
+  diagnosticHttpUrl,
+} from './url-authorization.mjs';
 import { sanitizeWechatMarkdown } from './wechat-materializer.mjs';
 
 function sha256(value) {
@@ -230,13 +233,6 @@ function validateAcquiredUrl(candidate, acquired) {
   const isAllowed = (value) => {
     try { return allowed.some((url) => authorizationEquivalentHttpUrl(url, value)); } catch { return false; }
   };
-  let trustedWechatRedirect = false;
-  try {
-    const requested = new URL(acquired.requestedUrl);
-    const resolved = new URL(acquired.resolvedUrl);
-    trustedWechatRedirect = requested.hostname === 'weixin.sogou.com'
-      && resolved.hostname === 'mp.weixin.qq.com' && /^\/s(?:\/|$)/u.test(resolved.pathname);
-  } catch {}
   let allowedRedirect = false;
   try {
     allowedRedirect = authorizationAllowsHttpRedirect(
@@ -245,9 +241,10 @@ function validateAcquiredUrl(candidate, acquired) {
       allowed,
     );
   } catch {}
-  if (!isAllowed(acquired.requestedUrl)
-    || (!allowedRedirect && !trustedWechatRedirect)) {
-    throw new Error(`PROBE_ACQUISITION_URL_NOT_AUTHORIZED: ${acquired.resolvedUrl || acquired.requestedUrl}`);
+  if (!isAllowed(acquired.requestedUrl) || !allowedRedirect) {
+    throw new Error(
+      `PROBE_ACQUISITION_URL_NOT_AUTHORIZED: ${diagnosticHttpUrl(acquired.resolvedUrl || acquired.requestedUrl)}`,
+    );
   }
 }
 
@@ -324,6 +321,13 @@ export async function verifyCandidate(paths, { runId, attemptId }, options = {})
     persistAcquisition(paths.root, evidenceBase, acquired);
     if (options.afterPersistAcquisition) await options.afterPersistAcquisition();
   }
+  registerControlledAcquisitionEvidence(paths, {
+    candidateId: candidate.candidateId,
+    requestedUrl: acquired.requestedUrl,
+    resolvedUrl: acquired.resolvedUrl,
+    executor: String(acquired.executor || 'web'),
+    evidenceArtifact: `${evidenceBase}/acquisition/executor-result.json`,
+  }, { internal: true });
   const kind = sourceKind(candidate);
   const wechat = kind === 'wechat' ? sanitizeWechatMarkdown(acquired.markdown, acquired) : null;
   const analysis = analyzeWebMarkdown(wechat?.markdown || acquired.markdown, acquired);

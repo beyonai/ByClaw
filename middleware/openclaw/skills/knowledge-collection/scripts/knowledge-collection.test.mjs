@@ -303,6 +303,7 @@ await (async () => {
   assert.deepEqual(schema.json.commands.init.properties['source-scope'].default, ['public-internet']);
   assert.deepEqual(schema.json.commands.init.properties['materialization-target'].enum, ['candidates', 'selected', 'all']);
   assert.equal(schema.json.commands.init.properties['materialization-target'].default, 'selected');
+  assert.deepEqual(schema.json.commands.init.properties.workflow.enum, ['public-collect']);
   assert.equal(schema.json.commands.init.properties['delivery-requested'].type, 'boolean');
   assert.equal(schema.json.commands.init.properties['delivery-requested'].default, false);
   assert.deepEqual(schema.json.commands.plan.required, ['session-dir', 'initial-search', 'channels']);
@@ -539,6 +540,52 @@ console.log(JSON.stringify({ ok: true }));
     rmSync(fixtureRoot, { recursive: true, force: true });
   }
   console.log('PASS cli help and platform dispatch');
+})();
+
+await (async () => {
+  const validRoot = makeSessionDir();
+  const valid = await runCli([
+    'init', '--session-dir', validRoot, '--query', '采集这篇文章',
+    '--workflow', 'public-collect', '--source-scope', '["public-internet"]',
+    '--materialization-target', 'selected', '--required-content-granularity', 'full-text',
+    '--direct-urls', '["https://example.com/article/1"]',
+  ]);
+  assert.equal(valid.code, 0, valid.stderr || valid.stdout);
+  assert.equal(valid.json.task.workflow, 'public-collect');
+
+  const parent = makeSessionDir();
+  const seededCollection = join(parent, 'seeded-collection.json');
+  const seededMetadata = join(parent, 'seeded-metadata.json');
+  writeFileSync(seededCollection, '{}\n');
+  writeFileSync(seededMetadata, '{}\n');
+  const invalidCases = [
+    ['mode', ['--mode', 'research', '--source-scope', '["public-internet"]',
+      '--materialization-target', 'selected', '--required-content-granularity', 'full-text']],
+    ['scope', ['--source-scope', '["public-internet","dingtalk"]',
+      '--materialization-target', 'selected', '--required-content-granularity', 'full-text']],
+    ['target', ['--source-scope', '["public-internet"]',
+      '--materialization-target', 'candidates', '--required-content-granularity', 'full-text']],
+    ['granularity', ['--source-scope', '["public-internet"]',
+      '--materialization-target', 'selected', '--required-content-granularity', 'any']],
+    ['seeded-collection', ['--source-scope', '["public-internet"]',
+      '--materialization-target', 'selected', '--required-content-granularity', 'full-text',
+      '--collection-result-input-file', seededCollection]],
+    ['seeded-metadata', ['--source-scope', '["public-internet"]',
+      '--materialization-target', 'selected', '--required-content-granularity', 'full-text',
+      '--metadata-input-file', seededMetadata]],
+  ];
+  for (const [name, extra] of invalidCases) {
+    const target = join(parent, name);
+    const rejected = await runCli([
+      'init', '--session-dir', target, '--query', '采集这篇文章',
+      '--workflow', 'public-collect', ...extra,
+    ]);
+    assert.equal(rejected.code, 1, `${name}: ${rejected.stderr || rejected.stdout}`);
+    assert.match(rejected.json.error, /public-collect/);
+    assert.equal(existsSync(target), false, `${name} must fail before creating the session skeleton`);
+  }
+  rmSync(validRoot, { recursive: true, force: true });
+  rmSync(parent, { recursive: true, force: true });
 })();
 
 // ── 参数校验与未知参数拒绝 ──

@@ -19,6 +19,10 @@ const FAILURE_DIAGNOSTIC_STAGES = new Set(['resolved-url-authorization', 'extrac
 const FAILURE_DIAGNOSTIC_KINDS = new Set([
   'redirect-not-authorized', 'resolved-url-unavailable', 'extract-url-changed',
 ]);
+const PUBLIC_COLLECT_BLOCKED_EXTERNAL_COMMANDS = new Set([
+  'public-discover', 'acquire-web', 'materialize-web', 'materialize-wechat',
+  'materialize-arxiv', 'collect', 'crawl-seed', 'crawl-next', 'crawl-mark',
+]);
 
 function inputValue(input) {
   const requestedCount = Number(input?.requestedCount);
@@ -123,6 +127,7 @@ export function createProbeRun(paths, rawInput) {
     if (session.task.activeOrchestrationRunId) {
       throw new Error(`ORCHESTRATION_IN_PROGRESS: run=${session.task.activeOrchestrationRunId}`);
     }
+    session.task.workflow = 'public-collect';
     const now = new Date().toISOString();
     const runId = `public-collect-${crypto.randomUUID()}`;
     const orchestrationEpoch = crypto.randomUUID();
@@ -466,10 +471,18 @@ export function finishProbeRun(paths, runId, status, detail = {}) {
 }
 
 export function assertExternalSessionWriteAllowed(paths, command) {
-  if (command === 'status') return;
   const session = loadSession(paths, { persistMigration: false }).session;
+  assertSessionWorkflowAllowsCommand(session, command);
+  if (['status', 'inspect', 'crawl-status'].includes(command)) return;
   if (session.task?.activeOrchestrationRunId) {
     throw new Error(`ORCHESTRATION_IN_PROGRESS: run=${session.task.activeOrchestrationRunId}`);
+  }
+}
+
+export function assertSessionWorkflowAllowsCommand(session, command) {
+  if (session?.task?.workflow === 'public-collect'
+    && PUBLIC_COLLECT_BLOCKED_EXTERNAL_COMMANDS.has(command)) {
+    throw new Error(`SESSION_OWNED_BY_PUBLIC_COLLECT: command=${command}`);
   }
 }
 

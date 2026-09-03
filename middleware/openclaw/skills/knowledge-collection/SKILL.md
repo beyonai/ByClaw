@@ -100,11 +100,15 @@ Read only the reference that matches the chosen workflow, plus `collection-contr
 运行时 Skill 文件的 `sha256:` 内容指纹，线上与本地指纹一致才可视为同一候选构建。
 
 1. Create or load a session before discovery. Before any source executor, browser preflight, or delegated acquisition command, complete that initialization. Use `init` with the derived `--source-scope` and `--materialization-target`. 用户明确要求“全文”“完整正文”或“PDF 全文”，或者要求采集明确数量的文章并将执行 `public-collect` 时，首次 `init` 必须传 `--materialization-target selected` 和 `--required-content-granularity full-text`；只有不走 `public-collect` 且未要求全文的其他工作流才使用默认的 `any`。没有显式保存路径时，必须把 `<Session Root>/collections/<task-name>/` 传给 `--session-dir`，不得使用 `.collection-runs/`。 When the user supplied a save path, use `<Session Root>/.collection-runs/<run-id>/` as `--session-dir`, pass `--delivery-requested true`, and retain the save path separately as `requestedDeliveryDir`. `init` 命令不得包含 `--delivery-dir`；该路径只保留为编排状态中的 opaque 值，不得传给 `init`，也不得借助 shell 变量或临时文件绕过发布前禁用规则。 When the user already selected direct source URLs, pass those exact URLs through `init --direct-urls '<JSON array>'` and initialize their inventory as `pending` before acquisition so a terminal source gate remains reportable. `--direct-urls` is only for URLs explicitly present in the user's request, never for URLs found or remembered by the Agent.
-2. For candidate-only public URL discovery, run `public-discover`. Its `online-search` channel uses Tencent WSA when credentials are available and WSA is not explicitly disabled; only a channel-level WSA failure falls back to SearXNG. WSA 返回的 passage/content 搜索摘要只是发现证据，不是文章正文，也不保证目标页不会是登录、注册、验证、错误或导航页面。`pageType`、`weak`、`articleCandidateIds` 都只是兼容性分类，不代表正文已经验证；是否可尝试读取由持久化的 `discoveryDisposition=probe` 决定。
+当选择 `public-collect` 时，首次 `init` 还必须传 `--workflow public-collect`。
+
+2. For candidate-only public URL discovery, run `public-discover`. 路由先看交付物：用户明确只要候选链接时，即使用户指定了链接数量，也使用 `public-discover`；用户要求文章、正文、全文或落盘内容时使用 `public-collect`，其中“文章”按完整正文处理，除非用户明确只要链接或摘要。Its `online-search` channel uses Tencent WSA when credentials are available and WSA is not explicitly disabled; only a channel-level WSA failure falls back to SearXNG. WSA 返回的 passage/content 搜索摘要只是发现证据，不是文章正文，也不保证目标页不会是登录、注册、验证、错误或导航页面。`pageType`、`weak`、`articleCandidateIds` 都只是兼容性分类，不代表正文已经验证；是否可尝试读取由持久化的 `discoveryDisposition=probe` 决定。
 
    `public-discover` 输出的 `candidateQuality`（包括 `eligibleArticle`）仅用于候选诊断和排序；`reject` 候选仍拒绝。公共发现最多允许两轮，任何未由用户明确提供或发现状态持久化授权的 URL 都必须以 `SOURCE_NOT_AUTHORIZED_BY_DISCOVERY` 拒绝。不得使用模型记忆中的 URL、DOI、论文 ID 绕过发现授权。
 
    当用户明确要求一篇或多篇等数量结果时，必须使用 `public-collect`，并传入 `--query`、`--fallback-query` 与 `--requested-count`。在调用它之前，唯一会话必须已经由首次 `init` 以 `selected + full-text` 初始化；不得先用 `any` 初始化，也不得为修正粒度新建带 `-v2`、`-fulltext` 或其他后缀的替代会话。该命令拥有两轮发现、high/normal 候选排序、逐条正文获取、页面验证、主题复验、正文去重、原子晋升、暂停恢复和数量收敛的完整状态机。手工串联 `public-discover`、`acquire-web`、`materialize-web`、`collect` 不能复现这一闭环，也不得用这些原子命令绕过 `public-collect` 的单写者所有权。
+
+   直链任务没有独立检索主题时，`--query` 与 `--fallback-query` 都复用首次 `init` 的原始任务描述，允许两者相同；仅当直链候选不足以满足数量时才进入发现。
 
    用户已经提供直链且要求一篇全文时，首次初始化必须直接采用如下参数形状（替换占位值，不得拆成多次调用或预建目录）：
 
@@ -116,6 +120,7 @@ Read only the reference that matches the chosen workflow, plus `collection-contr
      --source-scope '["public-internet"]' \
      --materialization-target selected \
      --required-content-granularity full-text \
+     --workflow public-collect \
      --direct-urls '["<用户提供的 URL>"]'
    ```
 
@@ -124,14 +129,16 @@ Read only the reference that matches the chosen workflow, plus `collection-contr
    只有通过原子晋升的已验证正文才能计入 `requestedItemCount`：条目必须为 materialized full-text，持有匹配的 fullTextEvidence 与 verification receipt，正文主题为 matched/not-required，并按正文指纹去重。搜索摘要、失败 probe、非文章页、未知或不匹配正文、重复镜像、pending 文件和手工登记 inventory 都不计数。最终答复前必须运行 `status`，核对 `publicCollectRun.persistedStatus`、`effectiveStatus`、`requestedItemCount`、`deliverableArticleCount` 与 `remainingCount`；只有 remainingCount 为 0 且 `deliveryComplete=true` 才能报告指定数量已完成。
 
    Public discovery keeps normalized deduplication separate from acquisition URLs. The verifier may use only the persisted canonical/acquisition URL variants and must never reconstruct an acquisition URL from a duplicate key or persist a variant containing credentials or sensitive parameters.
+
+   下方原子来源命令仅适用于未由 `public-collect` 持有的 operator 会话。`public-collect` 持有的会话只能调用编排器内部 verifier，不得由根 Agent 或来源 Agent 手工执行 `public-discover`、`acquire-web`、`materialize-web`、`materialize-wechat`、`materialize-arxiv`、`collect` 或 crawl 编排命令。即使 run 已终止，也不得用这些命令接管该会话。
 3. Delegate retrieval to the selected source executor. Do not use `web_fetch`, `curl`, `wget`, `requests`, or another direct HTTP client to bypass it. 委派来源执行器时只传内部 `session-dir` 及其 `raw/` 子路径，不得向被委派 Agent 或执行器传递、描述或要求其操作
    `requestedDeliveryDir`。
 
-   已选候选是 `https://mp.weixin.qq.com/s...` 或 `https://weixin.sogou.com/link?...` 时，按 [agent-reach.md](references/agent-reach.md) 委派 `bycli weixin download --url <URL>`，把输出目录和结构化结果都保存在本会话 `raw/bycli/weixin/<item-id>/`。确认返回的 `saved` 文件可读后，运行 `materialize-wechat`，参数为 `--executor-result-file <raw-result.json> --item-id <item-id>`；只有命令返回非空 `collectPayloadPath` 时才把它交给 `collect`。低置信度结果由该命令保留为 pending/unknown，不得手写脚本将其提升为全文。
+   已选候选是 `https://mp.weixin.qq.com/s...` 或 `https://weixin.sogou.com/link?...` 时，按 [agent-reach.md](references/agent-reach.md) 委派 `bycli weixin download --url <URL>`，把输出目录和结构化结果都保存在本会话 `raw/bycli/weixin/<item-id>/`。确认返回的 `saved` 文件可读后，运行 `materialize-wechat`，参数为 `--executor-result-file <raw-result.json> --item-id <item-id>`；只有命令返回非空 `collectPayloadPath` 时才把它交给 `collect`。低置信度结果由该命令保留为 pending/unknown，不得手写脚本将其提升为全文。本段命令仅适用于 operator 会话；`public-collect` 持有的会话必须使用编排器内部 verifier，不得手工执行本段命令。
 
-   其他通用网页必须先运行 `acquire-web --item-id <item-id> --source-url <已授权 URL>`，再把命令返回的 `executorResult` 交给 `materialize-web --item-id <item-id> --executor-result-file <path>`。不得手工重定向 stdout 到 raw，不得手工构造 collect payload；只有 `materialize-web` 返回非空 `collectPayloadPath` 时才能调用 `collect`。执行器返回登录、CAPTCHA、环境验证或其他 requires-user-action 时遵守 byCLI **STOP** 契约：保留 pending/raw 与命令自有 TAB，停止且不降级、不清理、不自动重试。
+   其他通用网页必须先运行 `acquire-web --item-id <item-id> --source-url <已授权 URL>`，再把命令返回的 `executorResult` 交给 `materialize-web --item-id <item-id> --executor-result-file <path>`。不得手工重定向 stdout 到 raw，不得手工构造 collect payload；只有 `materialize-web` 返回非空 `collectPayloadPath` 时才能调用 `collect`。执行器返回登录、CAPTCHA、环境验证或其他 requires-user-action 时遵守 byCLI **STOP** 契约：保留 pending/raw 与命令自有 TAB，停止且不降级、不清理、不自动重试。本段命令仅适用于 operator 会话；`public-collect` 持有的会话必须使用编排器内部 verifier，不得手工执行本段命令。
 
-   已授权并选中的 arXiv 候选要求完整正文时，无论候选来自用户通过 `--direct-urls` 提供的直链还是 `public-discover` 的 eligible article，都按 [agent-reach.md](references/agent-reach.md) 获取元数据与全文。全文读取必须使用 `bycli web read --url <URL> --output <session-dir>/raw/bycli/arxiv/<item-id>/`，由 byCLI 同时落盘正文和图片。若原始 PDF URL 不能由 `bycli web read` 物化，可仅改用同一官方论文的 `https://arxiv.org/html/<paper-id>`，并保留已授权候选 URL 为 `sourceUrl`、实际读取 URL 为 `acquisitionUrl`；两者必须具有相同论文 ID。把两份执行器原始输出原样保留在 `raw/` 后运行 `materialize-arxiv`。只有该命令返回非空 `collectPayloadPath` 时才交给 `collect`；结构不完整时保持 pending，摘要或节选不能满足全文要求。重试必须写入新的 `raw/bycli/arxiv/<item-id>-<attempt>/`，不得覆盖首次或任何既有执行器输出。不得手工改写 raw 证据，不得手工下载或补抓图片，不得使用 `curl`、`web_fetch`、`wget` 或 `requests` 探测、补抓或转换。
+   已授权并选中的 arXiv 候选要求完整正文时，无论候选来自用户通过 `--direct-urls` 提供的直链还是 `public-discover` 的 eligible article，都按 [agent-reach.md](references/agent-reach.md) 获取元数据与全文。全文读取必须使用 `bycli web read --url <URL> --output <session-dir>/raw/bycli/arxiv/<item-id>/`，由 byCLI 同时落盘正文和图片。若原始 PDF URL 不能由 `bycli web read` 物化，可仅改用同一官方论文的 `https://arxiv.org/html/<paper-id>`，并保留已授权候选 URL 为 `sourceUrl`、实际读取 URL 为 `acquisitionUrl`；两者必须具有相同论文 ID。把两份执行器原始输出原样保留在 `raw/` 后运行 `materialize-arxiv`。只有该命令返回非空 `collectPayloadPath` 时才交给 `collect`；结构不完整时保持 pending，摘要或节选不能满足全文要求。重试必须写入新的 `raw/bycli/arxiv/<item-id>-<attempt>/`，不得覆盖首次或任何既有执行器输出。不得手工改写 raw 证据，不得手工下载或补抓图片，不得使用 `curl`、`web_fetch`、`wget` 或 `requests` 探测、补抓或转换。本段命令仅适用于 operator 会话；`public-collect` 持有的会话必须使用编排器内部 verifier，不得手工执行本段命令。
 
    当选用的执行器是 `bycli` 时，初次 `BROWSER_CONNECT` 是桥接恢复信号，不是要求用户操作桌面浏览器的证据。`public-discover` 返回最终 `bridge_unavailable` 表示其内部 Runner 已消费统一 `bridge-bootstrap` 恢复链路；外层 Agent 不得再次直接执行 `start-chrome.sh`，也不得重复运行 `doctor`、daemon restart 或另一套自定义恢复命令。对于未经过该 Runner 的普通 byCLI 命令，若首次返回 `BROWSER_CONNECT`，也只能调用统一 `bridge-bootstrap` 一次，不得直接调用 `start-chrome.sh`；是否执行启动脚本由 bootstrap 根据托管 Chromium 的结构化状态决定。只有结构化桥接诊断明确列出 `browser_start_script` 时，才能声称执行过 `start-chrome.sh`；诊断未列出该 action 时，只能如实报告最终 `bridge_unavailable`，不得猜测启动脚本已执行或未执行。采集编排器不得直接要求用户打开 Chrome，也不得将这次首次失败归类为认证问题。只有最终 `bridge_unavailable`，或明确的登录、MFA、CAPTCHA、认证结果，才可作为需要用户处理的事项对外说明。
 

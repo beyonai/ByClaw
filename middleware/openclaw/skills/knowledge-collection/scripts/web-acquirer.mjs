@@ -4,7 +4,6 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { getDomain } from 'tldts';
 
 import {
   recordFailedCollectionItem,
@@ -13,6 +12,14 @@ import {
 import { authorizePublicSource } from './discovery-authorization.mjs';
 import { runCli } from './enterprise/shared/cli-runner.mjs';
 import { loadSession } from './session.mjs';
+import {
+  authorizationAllowsHttpRedirect,
+  authorizationEquivalentHttpUrl,
+  diagnosticHttpUrl,
+  normalizeAuthorizationUrl,
+} from './url-authorization.mjs';
+
+export { authorizationAllowsHttpRedirect, authorizationEquivalentHttpUrl } from './url-authorization.mjs';
 
 export const ACQUIRE_WEB_TIMEOUT_MS = 45_000;
 export const MAX_WEB_ARTICLE_BYTES = 10 * 1024 * 1024;
@@ -22,7 +29,6 @@ const STRONG_CHALLENGE_MARKER = /(?:验证码|安全验证|环境验证|访问�
 const LOGIN_MARKER = /(?:登录|log\s*in|sign\s*in)/i;
 const MAX_LOGIN_PAGE_CHARS = 800;
 const SENSITIVE_DIAGNOSTIC = /((?:authorization|cookie|credential|password|secret|token)\s*(?:=|:)\s*)(?:Bearer\s+)?[^\s,;]+/gi;
-const MAX_DIAGNOSTIC_URL_CHARS = 2_000;
 const DEFAULT_BRIDGE_SCRIPT = '/app/skills/bycli/scripts/bridge-bootstrap.mjs';
 const LOCAL_BRIDGE_SCRIPT = fileURLToPath(new URL('../../bycli/scripts/bridge-bootstrap.mjs', import.meta.url));
 
@@ -77,52 +83,10 @@ function probeFailure(reasonCode) {
   };
 }
 
-function normalizedHttpUrl(rawUrl, label) {
-  let url;
-  try {
-    url = new URL(requireText(rawUrl, label));
-  } catch {
-    throw new Error(`${label} 必须是有效 HTTP URL`);
-  }
-  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) {
-    throw new Error(`${label} 必须是安全 HTTP URL`);
-  }
-  url.hash = '';
-  url.hostname = url.hostname.toLowerCase();
-  url.searchParams.sort();
-  return url.toString();
-}
-
-function authorizationComparableUrl(rawUrl, label) {
-  const normalized = normalizedHttpUrl(rawUrl, label);
-  const url = new URL(normalized);
-  if (url.pathname.length > 1 && url.pathname.endsWith('/')) {
-    url.pathname = url.pathname.slice(0, -1);
-  }
-  return url.toString();
-}
-
-export function authorizationEquivalentHttpUrl(left, right) {
-  return authorizationComparableUrl(left, 'authorized URL')
-    === authorizationComparableUrl(right, 'resolved URL');
-}
-
-function registrableDomain(url) {
-  return getDomain(url.hostname, { allowPrivateDomains: true });
-}
-
-export function authorizationAllowsHttpRedirect(requestedUrl, resolvedUrl, authorizedUrls = []) {
-  const requested = new URL(normalizedHttpUrl(requestedUrl, 'requested URL'));
-  const resolved = new URL(normalizedHttpUrl(resolvedUrl, 'resolved URL'));
-  if (requested.protocol === 'https:' && resolved.protocol !== 'https:') return false;
-  if (authorizedUrls.some((url) => authorizationEquivalentHttpUrl(url, resolved.toString()))) return true;
-  const requestedDomain = registrableDomain(requested);
-  return Boolean(requestedDomain && requestedDomain === registrableDomain(resolved));
-}
+const normalizedHttpUrl = normalizeAuthorizationUrl;
 
 function diagnosticUrl(value) {
-  if (typeof value !== 'string') return null;
-  return [...value].slice(0, MAX_DIAGNOSTIC_URL_CHARS).join('');
+  return diagnosticHttpUrl(value);
 }
 
 function failureDiagnostic(stage, mismatchKind, requestedUrl, resolvedUrl) {
@@ -157,6 +121,13 @@ function baseInventoryUpdate(itemId, sourceUrl, title = '') {
   };
 }
 
+function reportableAcquisitionResult(result) {
+  return {
+    ...result,
+    resolvedUrl: diagnosticHttpUrl(result?.resolvedUrl),
+  };
+}
+
 function existingResult(paths, itemId, requestedUrl) {
   const targetDir = path.join(paths.root, 'raw', 'bycli', 'web', itemId);
   if (!fs.existsSync(targetDir)) return null;
@@ -173,7 +144,11 @@ function existingResult(paths, itemId, requestedUrl) {
     if (fs.existsSync(saved) && fs.statSync(saved).isFile()
       && fs.statSync(saved).size === result.size
       && sha256(fs.readFileSync(saved)) === result.sha256) {
-      return { ...result, executorResult: toPosixRelative(paths.root, resultPath), idempotent: true };
+      return reportableAcquisitionResult({
+        ...result,
+        executorResult: toPosixRelative(paths.root, resultPath),
+        idempotent: true,
+      });
     }
   }
   throw new Error(`ACQUISITION_CONFLICT: ${itemId} 已存在不可覆盖的抓取证据`);
@@ -205,7 +180,7 @@ export async function acquireWebProbe(candidate, options = {}) {
     'candidate acquisition URL',
   );
   const allowedUrls = new Set([candidate?.canonicalUrl, ...(candidate?.acquisitionUrls || [])]
-    .map((url) => authorizationComparableUrl(url, 'candidate acquisition URL')));
+    .map((url) => normalizedHttpUrl(url, 'candidate acquisition URL')));
   const requested = new URL(requestedUrl);
   const unsupportedHost = /(^|\.)(?:youtube\.com|youtu\.be|bilibili\.com|douyin\.com|x\.com|twitter\.com|reddit\.com|redd\.it|facebook\.com|instagram\.com|linkedin\.com|xiaohongshu\.com|xueqiu\.com)$/iu;
   const specializedFeed = /(?:^|\/)(?:feed|rss|atom)(?:[/.]|$)/iu.test(requested.pathname)
@@ -246,11 +221,7 @@ export async function acquireWebProbe(candidate, options = {}) {
       return probeFailure(outputErrorCode(currentUrl));
     }
     const resolvedUrl = resolvedUrlFromOutput(currentUrl.stdout);
-    const resolved = resolvedUrl ? new URL(resolvedUrl) : null;
-    const trustedWechatRedirect = requested.hostname === 'weixin.sogou.com'
-      && resolved?.hostname === 'mp.weixin.qq.com' && /^\/s(?:\/|$)/u.test(resolved.pathname);
-    if (!resolvedUrl || (!authorizationAllowsHttpRedirect(requestedUrl, resolvedUrl, [...allowedUrls])
-      && !trustedWechatRedirect)) {
+    if (!resolvedUrl || !authorizationAllowsHttpRedirect(requestedUrl, resolvedUrl, [...allowedUrls])) {
       return {
         status: 'unavailable',
         reasonCode: 'SOURCE_NOT_AUTHORIZED_BY_DISCOVERY',
@@ -376,7 +347,7 @@ export async function runWebAcquire(paths, args, options = {}) {
   const previous = existingResult(paths, itemId, requestedUrl);
   if (previous) return { ok: true, action: 'acquire-web', ...previous };
 
-  recordPendingCollectionItem(paths, baseInventoryUpdate(itemId, requestedUrl));
+  recordPendingCollectionItem(paths, baseInventoryUpdate(itemId, requestedUrl), 'acquire-web');
   const runProcess = options.runProcess || runCli;
   const now = options.now || Date.now;
   const startedAtMs = now();
@@ -423,9 +394,9 @@ export async function runWebAcquire(paths, args, options = {}) {
       rawArtifacts,
       reason: partial.errorCode || (state === 'pending' ? 'awaiting-materialization' : 'acquisition-failed'),
     };
-    if (state === 'failed') recordFailedCollectionItem(paths, update);
-    else recordPendingCollectionItem(paths, update);
-    return { ok: true, action: 'acquire-web', ...result, executorResult };
+    if (state === 'failed') recordFailedCollectionItem(paths, update, 'acquire-web');
+    else recordPendingCollectionItem(paths, update, 'acquire-web');
+    return reportableAcquisitionResult({ ok: true, action: 'acquire-web', ...result, executorResult });
   };
 
   try {
@@ -458,15 +429,11 @@ export async function runWebAcquire(paths, args, options = {}) {
       return finish({ status: 'failed', exitCode: 1, errorCode: 'EXECUTOR_RESOLVED_URL_UNAVAILABLE' });
     }
     try {
-      const requestedHost = new URL(requestedUrl).hostname;
-      const resolved = new URL(resolvedUrl);
-      const trustedWechatRedirect = requestedHost === 'weixin.sogou.com'
-        && resolved.hostname === 'mp.weixin.qq.com' && /^\/s(?:\/|$)/u.test(resolved.pathname);
       if (!authorizationAllowsHttpRedirect(
         requestedUrl,
         resolvedUrl,
         requestedAuthorization.acquisitionUrls || [],
-      ) && !trustedWechatRedirect) {
+      )) {
         throw new Error('SOURCE_NOT_AUTHORIZED_BY_DISCOVERY');
       }
     } catch (error) {

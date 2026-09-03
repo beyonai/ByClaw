@@ -16,6 +16,7 @@ import {
   atomicWriteJson,
   isInside,
   loadSession as sessionLoad,
+  persistSession,
   persistCollection,
   withSessionLock,
   markDeliveryStale,
@@ -26,11 +27,14 @@ import {
 import {
   deliveryCompleteForSession, summarizeCrawlDelivery, summarizePromotedDelivery,
 } from './delivery-state.mjs';
-import { summarizeProbeRun } from './probe-state.mjs';
+import { assertSessionWorkflowAllowsCommand, summarizeProbeRun } from './probe-state.mjs';
 import {
+  authorizeAcceptedAcquisitionEvidence,
   authorizeArxivAcquisitionVariant as authorizeArxivVariant,
   authorizePublicSource,
+  registerAcceptedAcquisitionEvidence,
 } from './discovery-authorization.mjs';
+import { authorizationEquivalentHttpUrl } from './url-authorization.mjs';
 import { assessMaterializedTopic } from './topic-relevance.mjs';
 import {
   CONTENT_GRANULARITIES,
@@ -83,8 +87,60 @@ function discoveryCandidateFor(session, source, sourceUrl) {
     };
   }
 
-  const candidate = authorizePublicSource(gate, sourceUrl);
-  return candidate ? { ...candidate, authorizationKind: 'public-discover' } : candidate;
+  try {
+    const candidate = authorizePublicSource(gate, sourceUrl);
+    const authorizationKind = candidate?.origin === 'user-provided'
+      ? 'user-provided' : 'public-discover';
+    return candidate ? { ...candidate, authorizationKind } : candidate;
+  } catch (error) {
+    const matches = (session.task?.acquisitionEvidence || []).filter((entry) => {
+      try {
+        return entry?.status === 'accepted' && entry.scope === 'resolved-only'
+          && authorizationEquivalentHttpUrl(entry.resolvedUrl, sourceUrl);
+      } catch {
+        return false;
+      }
+    });
+    const candidateIds = [...new Set(matches.map((entry) => entry.candidateId))];
+    if (candidateIds.length !== 1) throw error;
+    const candidate = authorizeAcceptedAcquisitionEvidence(session, candidateIds[0], sourceUrl);
+    return {
+      ...candidate,
+      authorizationKind: candidate.origin === 'user-provided' ? 'user-provided' : 'public-discover',
+    };
+  }
+}
+
+export function registerControlledAcquisitionEvidence(paths, evidence, options = {}) {
+  return withSessionLock(paths, 'register-acquisition-evidence', () => {
+    const loaded = loadCollectionSession(paths, { skipCanonicalValidation: true });
+    if (!options.internal) {
+      assertSessionWorkflowAllowsCommand(loaded.session, options.command || 'materialize-web');
+    }
+    validateRawArtifacts(paths.root, [evidence?.evidenceArtifact]);
+    const registered = registerAcceptedAcquisitionEvidence(loaded.session, {
+      ...evidence,
+      evidenceArtifactHash: fullTextEvidenceHash(paths, evidence.evidenceArtifact),
+    });
+    if (options.itemId) {
+      const inventory = loaded.metadata.collection.items.find((item) => item.itemId === options.itemId);
+      if (!inventory) throw new Error(`ACQUISITION_EVIDENCE_ITEM_NOT_FOUND: ${options.itemId}`);
+      if (!authorizationEquivalentHttpUrl(inventory.sourceUrl, registered.requestedUrl)
+        && !authorizationEquivalentHttpUrl(inventory.sourceUrl, registered.resolvedUrl)) {
+        throw new Error(`ACQUISITION_EVIDENCE_ITEM_CONFLICT: ${options.itemId}`);
+      }
+      inventory.discoveryCandidateId = registered.candidateId;
+      const candidate = loaded.session.task.discoveryGate.candidates.find(
+        (entry) => entry.candidateId === registered.candidateId,
+      );
+      inventory.provenanceKind = candidate?.origin === 'user-provided'
+        ? 'user-provided' : 'public-discover';
+      loaded.session.collection = loaded.metadata;
+      markDeliveryStale(loaded.session);
+    }
+    persistSession(paths, loaded.session);
+    return clone(registered);
+  });
 }
 
 function assertMaterializedTopic(session, authorization, canonicalItem, sanitizedAbsolute) {
@@ -273,9 +329,10 @@ function validateFullTextEvidence(paths, session, evidence, { sourceSkill, sourc
   return { schemaVersion: '1.0', executor, artifact };
 }
 
-export function registerFullTextEvidenceReceipt(paths, evidence) {
+export function registerFullTextEvidenceReceipt(paths, evidence, command) {
   return withSessionLock(paths, 'register-full-text-evidence', () => {
     const { session } = sessionLoad(paths, { persistMigration: true });
+    if (command) assertSessionWorkflowAllowsCommand(session, command);
     const executor = requireString(evidence?.executor, 'fullTextEvidence.executor');
     const sourceUrl = requireString(evidence?.sourceUrl, 'fullTextEvidence.sourceUrl');
     const artifact = requireString(evidence?.artifact, 'fullTextEvidence.artifact');
@@ -308,9 +365,10 @@ export function registerFullTextEvidenceReceipt(paths, evidence) {
   });
 }
 
-export function registerArxivAcquisitionVariant(paths, { sourceUrl, acquisitionUrl }) {
+export function registerArxivAcquisitionVariant(paths, { sourceUrl, acquisitionUrl }, command) {
   return withSessionLock(paths, 'register-arxiv-acquisition', () => {
     const { session } = sessionLoad(paths, { persistMigration: true });
+    if (command) assertSessionWorkflowAllowsCommand(session, command);
     const candidate = authorizeArxivVariant(
       session.task?.discoveryGate,
       requireString(sourceUrl, 'sourceUrl'),
@@ -828,10 +886,11 @@ function markOneMaterialized(paths, session, metadata, collectionResult, update)
   return { itemId, materialization: inventory.materialization, canonicalItem: canonicalViewItem(update.canonicalItem) };
 }
 
-function recordUnmaterializedCollectionItem(paths, update, targetStatus) {
+function recordUnmaterializedCollectionItem(paths, update, targetStatus, command) {
   const action = targetStatus === 'failed' ? 'record-failed' : 'record-pending';
   return withSessionLock(paths, action, () => {
     const loaded = loadCollectionSession(paths, { skipCanonicalValidation: true });
+    if (command) assertSessionWorkflowAllowsCommand(loaded.session, command);
     if (loaded.materializationRecovered) {
       throw new Error('检测到无效 materialization，已安全降级为 pending；请先由原始执行器重新物化');
     }
@@ -956,12 +1015,12 @@ function reconcileCollectionStatus(metadata) {
   }
 }
 
-export function recordPendingCollectionItem(paths, update) {
-  return recordUnmaterializedCollectionItem(paths, update, 'pending');
+export function recordPendingCollectionItem(paths, update, command) {
+  return recordUnmaterializedCollectionItem(paths, update, 'pending', command);
 }
 
-export function recordFailedCollectionItem(paths, update) {
-  return recordUnmaterializedCollectionItem(paths, update, 'failed');
+export function recordFailedCollectionItem(paths, update, command) {
+  return recordUnmaterializedCollectionItem(paths, update, 'failed', command);
 }
 
 export function cmdCollect(paths, args) {
@@ -970,6 +1029,7 @@ export function cmdCollect(paths, args) {
   if (!items.length) throw new Error('--item-json-file 未提供任何条目');
   return withSessionLock(paths, 'collect', () => {
     const loaded = loadCollectionSession(paths, { skipCanonicalValidation: true });
+    assertSessionWorkflowAllowsCommand(loaded.session, 'collect');
     if (loaded.materializationRecovered) {
       throw new Error('检测到无效 materialization，已安全降级为 pending；请先由原始执行器重新物化');
     }
@@ -1211,19 +1271,35 @@ function evaluateStoredTopicRelevance(paths, session, metadata, collectionResult
   if (!['1.1', '2.0'].includes(gate.schemaVersion)) {
     return { valid: false, warnings: ['公共发现主题相关性授权状态无效'] };
   }
+  let valid = true;
+  for (const item of publicItems) {
+    try {
+      validateStoredAcquisitionEvidence(paths, session, item);
+    } catch (error) {
+      valid = false;
+      warnings.push(`inventory ${item.itemId} 采集授权证据失效: ${error.message}`);
+    }
+  }
   const discoveredItems = publicItems.filter((item) => item.provenanceKind === 'public-discover'
     || (typeof item.discoveryCandidateId === 'string'
       && !['user-provided', 'crawl-frontier'].includes(item.provenanceKind)));
   const canonicalByPath = new Map(collectionResult.items.map((item) => [item.fileName, item]));
-  let valid = true;
   for (const item of discoveredItems) {
     let candidate;
     try {
       candidate = authorizePublicSource(gate, item.sourceUrl);
-    } catch (error) {
-      valid = false;
-      warnings.push(`inventory ${item.itemId} 发现主题授权失效: ${error.message}`);
-      continue;
+    } catch (initialAuthorizationError) {
+      try {
+        candidate = authorizeAcceptedAcquisitionEvidence(
+          session, item.discoveryCandidateId, item.sourceUrl,
+        );
+      } catch {
+        valid = false;
+        warnings.push(
+          `inventory ${item.itemId} 发现主题授权失效: ${initialAuthorizationError.message}`,
+        );
+        continue;
+      }
     }
     if (candidate?.candidateId !== item.discoveryCandidateId) {
       valid = false;
@@ -1251,6 +1327,55 @@ function evaluateStoredTopicRelevance(paths, session, metadata, collectionResult
     }
   }
   return { valid, warnings };
+}
+
+function validateStoredAcquisitionEvidence(paths, session, item) {
+  if (typeof item.discoveryCandidateId !== 'string') return;
+  const entries = (session.task?.acquisitionEvidence || []).filter((entry) => {
+    try {
+      return entry?.schemaVersion === '1.0' && entry.status === 'accepted'
+        && entry.scope === 'resolved-only'
+        && entry.candidateId === item.discoveryCandidateId
+        && (authorizationEquivalentHttpUrl(entry.requestedUrl, item.sourceUrl)
+          || authorizationEquivalentHttpUrl(entry.resolvedUrl, item.sourceUrl));
+    } catch {
+      return false;
+    }
+  });
+  // Sessions created before controlled acquisition evidence was introduced stay
+  // readable. Once a ledger row exists, however, its bound raw artifact is part
+  // of the authorization decision and must remain intact.
+  if (!entries.length) return;
+  const accepted = entries.some((entry) => {
+    try {
+      if (!item.rawArtifacts?.includes(entry.evidenceArtifact)) {
+        throw new Error('证据文件未登记在 inventory rawArtifacts 中');
+      }
+      validateRawArtifacts(paths.root, [entry.evidenceArtifact]);
+      if (entry.evidenceArtifactHash
+        && fullTextEvidenceHash(paths, entry.evidenceArtifact) !== entry.evidenceArtifactHash) {
+        throw new Error('证据文件哈希已变化');
+      }
+      const receipt = readJson(
+        path.join(paths.root, entry.evidenceArtifact),
+        `inventory ${item.itemId} acquisition evidence`,
+      );
+      const result = receipt?.executorResult && typeof receipt.executorResult === 'object'
+        ? receipt.executorResult : receipt;
+      const requestedUrl = result?.requestedUrl ?? result?.source_url;
+      const resolvedUrl = result?.resolvedUrl ?? result?.resolved_url;
+      if (!authorizationEquivalentHttpUrl(requestedUrl, entry.requestedUrl)
+        || !authorizationEquivalentHttpUrl(resolvedUrl, entry.resolvedUrl)
+        || (result?.executor !== undefined && result.executor !== entry.executor)) {
+        throw new Error('证据文件与授权账本不匹配');
+      }
+      authorizeAcceptedAcquisitionEvidence(session, entry.candidateId, entry.resolvedUrl);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+  if (!accepted) throw new Error('没有可验证的原始采集证据');
 }
 
 function promotionContentFingerprint(markdown) {
