@@ -49,6 +49,14 @@ test('marks generic and multi-topic collection requests as not required', () => 
   assert.equal(multi.notAppliedReason, 'unsupported-multi-topic');
 });
 
+test('does not turn direct URL delivery and full-text wording into a topic', () => {
+  const contract = createTopicContract(
+    '请采集并落盘头条文章 https://www.toutiao.com/article/7666345282908488234 的完整全文',
+  );
+  assert.equal(contract.required, false);
+  assert.equal(contract.notAppliedReason, 'no-specific-topic');
+});
+
 test('candidate relevance is independent from structural article classification', () => {
   const contract = createTopicContract('采集一篇关于 DeepSeek 的文章');
   const irrelevant = {

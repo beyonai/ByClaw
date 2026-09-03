@@ -155,34 +155,32 @@ test('probe authorizes trailing-slash canonicalization and validates equivalent 
   assert.equal(result.markdown, 'first body\nsecond body');
 });
 
-test('probe rejects a different redirect path with structured authorization diagnostics', async () => {
+test('probe authorizes a same-site redirect across subdomains and paths', async () => {
   const calls = [];
   const runner = successfulRunner(calls);
-  const resolvedUrl = 'https://example.com/news/7654321';
+  const resolvedUrl = 'https://www.example.com/articles/7654321?from=mobile';
   const result = await acquireWebProbe({
-    canonicalUrl: SOURCE_URL,
-    acquisitionUrls: [SOURCE_URL],
+    canonicalUrl: 'https://m.example.com/news/1234567',
+    acquisitionUrls: ['https://m.example.com/news/1234567'],
   }, {
-    probeId: 'fixture-bad-redirect',
+    probeId: 'fixture-same-site-redirect',
     runProcess: async (bin, args, options) => {
       if (args.includes('get') && args.includes('url')) {
         return { exitCode: 0, stdout: `${resolvedUrl}\n`, stderr: '' };
+      }
+      if (args.includes('extract')) {
+        const outcome = await runner(bin, args, options);
+        return { ...outcome, stdout: JSON.stringify({ ...JSON.parse(outcome.stdout), url: resolvedUrl }) };
       }
       return runner(bin, args, options);
     },
   });
 
-  assert.equal(result.status, 'unavailable');
-  assert.equal(result.reasonCode, 'SOURCE_NOT_AUTHORIZED_BY_DISCOVERY');
-  assert.deepEqual(result.failureDiagnostic, {
-    stage: 'resolved-url-authorization',
-    mismatchKind: 'redirect-not-authorized',
-    requestedUrl: SOURCE_URL,
-    resolvedUrl,
-  });
+  assert.equal(result.status, 'saved');
+  assert.equal(result.resolvedUrl, resolvedUrl);
 });
 
-test('probe keeps query changes outside trailing-slash authorization equivalence', async () => {
+test('probe authorizes query changes on the same site', async () => {
   const calls = [];
   const runner = successfulRunner(calls);
   const resolvedUrl = `${SOURCE_URL}/?tracking=1`;
@@ -195,13 +193,67 @@ test('probe keeps query changes outside trailing-slash authorization equivalence
       if (args.includes('get') && args.includes('url')) {
         return { exitCode: 0, stdout: `${resolvedUrl}\n`, stderr: '' };
       }
+      if (args.includes('extract')) {
+        const outcome = await runner(bin, args, options);
+        return { ...outcome, stdout: JSON.stringify({ ...JSON.parse(outcome.stdout), url: resolvedUrl }) };
+      }
+      return runner(bin, args, options);
+    },
+  });
+
+  assert.equal(result.status, 'saved');
+  assert.equal(result.resolvedUrl, resolvedUrl);
+});
+
+test('probe rejects an unpersisted cross-site redirect', async () => {
+  const calls = [];
+  const runner = successfulRunner(calls);
+  const resolvedUrl = 'https://unrelated.example.net/articles/7654321';
+  const result = await acquireWebProbe({
+    canonicalUrl: SOURCE_URL,
+    acquisitionUrls: [SOURCE_URL],
+  }, {
+    probeId: 'fixture-cross-site-redirect',
+    runProcess: async (bin, args, options) => {
+      if (args.includes('get') && args.includes('url')) {
+        return { exitCode: 0, stdout: `${resolvedUrl}\n`, stderr: '' };
+      }
       return runner(bin, args, options);
     },
   });
 
   assert.equal(result.status, 'unavailable');
+  assert.equal(result.reasonCode, 'SOURCE_NOT_AUTHORIZED_BY_DISCOVERY');
   assert.equal(result.failureDiagnostic.mismatchKind, 'redirect-not-authorized');
-  assert.equal(result.failureDiagnostic.resolvedUrl, resolvedUrl);
+});
+
+test('probe allows HTTP to HTTPS on the same site but rejects HTTPS downgrade', async () => {
+  const run = async (requestedUrl, resolvedUrl, probeId) => {
+    const calls = [];
+    const runner = successfulRunner(calls);
+    return acquireWebProbe({ canonicalUrl: requestedUrl, acquisitionUrls: [requestedUrl] }, {
+      probeId,
+      runProcess: async (bin, args, options) => {
+        if (args.includes('get') && args.includes('url')) {
+          return { exitCode: 0, stdout: `${resolvedUrl}\n`, stderr: '' };
+        }
+        if (args.includes('extract')) {
+          const outcome = await runner(bin, args, options);
+          return { ...outcome, stdout: JSON.stringify({ ...JSON.parse(outcome.stdout), url: resolvedUrl }) };
+        }
+        return runner(bin, args, options);
+      },
+    });
+  };
+
+  assert.equal((await run(
+    'http://m.example.com/old', 'https://www.example.com/new', 'fixture-http-upgrade',
+  )).status, 'saved');
+  const downgrade = await run(
+    'https://m.example.com/old', 'http://www.example.com/new', 'fixture-https-downgrade',
+  );
+  assert.equal(downgrade.status, 'unavailable');
+  assert.equal(downgrade.failureDiagnostic.mismatchKind, 'redirect-not-authorized');
 });
 
 test('probe diagnoses an extracted chunk that changes to another URL', async () => {
@@ -278,7 +330,7 @@ test('uses the repository byCLI bridge when the container bridge path is unavail
   }
 });
 
-test('rejects an unauthorized resolved URL and records a failed item', async () => {
+test('rejects an unauthorized cross-site resolved URL and records a failed item', async () => {
   const f = await fixture();
   const calls = [];
   const runner = successfulRunner(calls);
@@ -288,7 +340,7 @@ test('rejects an unauthorized resolved URL and records a failed item', async () 
     }, {
       runProcess: async (bin, args, options) => {
         if (args.includes('get') && args.includes('url')) {
-          return { exitCode: 0, stdout: 'https://example.com/\n', stderr: '' };
+          return { exitCode: 0, stdout: 'https://unrelated.example.net/\n', stderr: '' };
         }
         return runner(bin, args, options);
       },
@@ -299,7 +351,7 @@ test('rejects an unauthorized resolved URL and records a failed item', async () 
       stage: 'resolved-url-authorization',
       mismatchKind: 'redirect-not-authorized',
       requestedUrl: SOURCE_URL,
-      resolvedUrl: 'https://example.com/',
+      resolvedUrl: 'https://unrelated.example.net/',
     });
     const persisted = JSON.parse(await readFile(join(f.root, result.executorResult), 'utf8'));
     assert.deepEqual(persisted.failureDiagnostic, result.failureDiagnostic);

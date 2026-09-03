@@ -20,6 +20,8 @@ const ORCHESTRATION = [
   /(?:请|帮我|帮忙|需要|我要|我想)?(?:采集|收集|抓取|获取|保存|下载|整理)/giu,
   /(?:一|两|三|四|五|六|七|八|九|十|\d+)\s*(?:篇|个|条|份)/giu,
   /(?:最终|完成后|采集完成|并把|并将|然后|文件|正文|本地图片|图片文件夹|当前会话(?:下空间)?|根目录)/giu,
+  /(?:并)?(?:落盘|完整全文|完整正文|全文|原文)/giu,
+  /(?:这|该|指定|上述)?(?:一)?篇?(?:头条)?文章/giu,
   /\b(?:collect|fetch|download|save|gather|find|please|final|file|files|markdown|local|images?)\b/giu,
 ];
 

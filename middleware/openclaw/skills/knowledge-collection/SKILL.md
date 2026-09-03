@@ -38,6 +38,11 @@ Agent workspace 和其中的历史 `collections/` 都不是 Session Root。不�
 唯一会话目录及其骨架。`init` 因未知参数或其他参数校验失败时尚未取得该目录的所有权，参数校验失败后不得删除、清空或复用
 目标目录；修正参数后应让 `init` 自行拒绝已存在或非空的路径。
 
+首次 `init` 必须一次性提供完整参数，包括 `--query`、`--session-dir`、`--session-root`、来源范围、物化目标、正文粒度和用户直链；
+禁止执行 `mkdir` 预建采集目录，也禁止执行 `rm`、`rm -rf` 或 `rmdir` 删除或清空任何会话/采集目录。初始化命令失败后，
+禁止改用其他目录名或追加后缀，禁止重新初始化第二个会话；若目标目录已经存在或非空，必须对原目录输出 `status` 并停止，
+如实报告初始化失败，不得通过删除现场继续执行。
+
 用户提供的保存路径是交付目录，不是采集会话目录。只要请求中出现明确的保存文件路径，就把该路径记为
 `requestedDeliveryDir`，并在当前 Session Root 的 `.collection-runs/<run-id>/` 中初始化独立的内部会话；不得把用户目录
 直接传给 `init`，并且必须为 `init` 传 `--delivery-requested true`；没有显式保存路径时不得传该参数，也不得使用
@@ -100,6 +105,19 @@ Read only the reference that matches the chosen workflow, plus `collection-contr
    `public-discover` 输出的 `candidateQuality`（包括 `eligibleArticle`）仅用于候选诊断和排序；`reject` 候选仍拒绝。公共发现最多允许两轮，任何未由用户明确提供或发现状态持久化授权的 URL 都必须以 `SOURCE_NOT_AUTHORIZED_BY_DISCOVERY` 拒绝。不得使用模型记忆中的 URL、DOI、论文 ID 绕过发现授权。
 
    当用户明确要求一篇或多篇等数量结果时，必须使用 `public-collect`，并传入 `--query`、`--fallback-query` 与 `--requested-count`。在调用它之前，唯一会话必须已经由首次 `init` 以 `selected + full-text` 初始化；不得先用 `any` 初始化，也不得为修正粒度新建带 `-v2`、`-fulltext` 或其他后缀的替代会话。该命令拥有两轮发现、high/normal 候选排序、逐条正文获取、页面验证、主题复验、正文去重、原子晋升、暂停恢复和数量收敛的完整状态机。手工串联 `public-discover`、`acquire-web`、`materialize-web`、`collect` 不能复现这一闭环，也不得用这些原子命令绕过 `public-collect` 的单写者所有权。
+
+   用户已经提供直链且要求一篇全文时，首次初始化必须直接采用如下参数形状（替换占位值，不得拆成多次调用或预建目录）：
+
+   ```bash
+   node /app/skills/knowledge-collection/scripts/knowledge-collection.mjs init \
+     --session-dir <Session Root>/collections/<task-name> \
+     --session-root <Session Root> \
+     --query "<用户原始采集要求>" \
+     --source-scope '["public-internet"]' \
+     --materialization-target selected \
+     --required-content-granularity full-text \
+     --direct-urls '["<用户提供的 URL>"]'
+   ```
 
    `public-collect` 最多执行两轮发现、100 次正文探测，并受持久化总时间预算约束。每轮先运行 online-search 并验证其候选，验证正文仍不足时才运行同一 query 的 hot-discovery；首轮完整耗尽后才使用调用者提供的 fallback query。每轮 query 都必须保留初始化时锁定的主题锚点，发现基础设施失败后恢复原 query 与原 channel。普通网页、微信文章和 arXiv 论文分别执行对应的正文净化与结构验证；尚无专用 verifier 的视频、社交平台和 RSS 候选明确记为 unsupported。遇到登录、MFA 或 CAPTCHA 且 manual policy 为 pause 时，只能按返回的 run ID 使用 `--resume` 或 `--skip`，不得另启写会话或手工修改 attempt。WSA 摘要含“登录/注册”只产生警告；只有真实读取到的登录/验证页才暂停或终止该 probe。
 

@@ -11,6 +11,7 @@ import {
   acquireArxivProbe,
   acquireWechatProbe,
   acquireWebProbe,
+  authorizationAllowsHttpRedirect,
   authorizationEquivalentHttpUrl,
 } from './web-acquirer.mjs';
 import { sanitizeWechatMarkdown } from './wechat-materializer.mjs';
@@ -236,8 +237,16 @@ function validateAcquiredUrl(candidate, acquired) {
     trustedWechatRedirect = requested.hostname === 'weixin.sogou.com'
       && resolved.hostname === 'mp.weixin.qq.com' && /^\/s(?:\/|$)/u.test(resolved.pathname);
   } catch {}
+  let allowedRedirect = false;
+  try {
+    allowedRedirect = authorizationAllowsHttpRedirect(
+      acquired.requestedUrl,
+      acquired.resolvedUrl,
+      allowed,
+    );
+  } catch {}
   if (!isAllowed(acquired.requestedUrl)
-    || (!isAllowed(acquired.resolvedUrl) && !trustedWechatRedirect)) {
+    || (!allowedRedirect && !trustedWechatRedirect)) {
     throw new Error(`PROBE_ACQUISITION_URL_NOT_AUTHORIZED: ${acquired.resolvedUrl || acquired.requestedUrl}`);
   }
 }

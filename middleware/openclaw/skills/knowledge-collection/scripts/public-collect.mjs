@@ -201,6 +201,34 @@ export async function runPublicCollect(paths, rawInput, options = {}) {
     }
   }
 
+  if (!continuation) {
+    while (true) {
+      run = readProbeRun(paths, run.runId);
+      const session = loadSession(paths, { persistMigration: false }).session;
+      const deliveryNow = summarizePromotedDelivery(session);
+      if (deliveryNow.remainingCount === 0) break;
+      if (run.attempts.length >= maxProbes || remainingBudgetMs() <= 0) {
+        lastFailure = 'TOTAL_BUDGET_EXHAUSTED';
+        break;
+      }
+      const direct = unattemptedCandidates(session, run)
+        .find((candidate) => candidate.origin === 'user-provided');
+      if (!direct) break;
+      const next = prepareCandidate(paths, direct);
+      const attempt = reserveProbeAttempt(paths, run.runId, next, {
+        expectedRevision: readProbeRun(paths, run.runId).stateRevision,
+      });
+      const outcome = await executeVerification(attempt.attemptId);
+      if (['paused-user-action', 'infrastructure-blocked'].includes(outcome?.attemptState)) {
+        return resultFor(paths);
+      }
+      if (outcome?.reasonCode === 'REQUIRES_USER_ACTION_UNATTENDED') {
+        lastFailure = outcome.reasonCode;
+        break;
+      }
+    }
+  }
+
   while (readProbeRun(paths, run.runId).discoveryRounds.length < MAX_DISCOVERY_ROUNDS) {
     run = readProbeRun(paths, run.runId);
     const delivery = summarizePromotedDelivery(loadSession(paths).session);

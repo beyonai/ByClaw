@@ -26,6 +26,24 @@ function setup() {
   return sessionPaths(root);
 }
 
+function setupDirect() {
+  const root = mkdtempSync(join(tmpdir(), 'public-collect-direct-test-'));
+  ensureSessionSkeleton(root);
+  const directUrl = 'https://m.example.com/article/123';
+  const session = newSession({
+    query: '采集并落盘这篇文章的完整全文',
+    sourceScope: ['public-internet'],
+    materializationTarget: 'selected',
+    requiredContentGranularity: 'full-text',
+    discoveryGate: createDiscoveryAuthorization({
+      directUrls: [directUrl],
+      query: '采集并落盘这篇文章的完整全文',
+    }),
+  });
+  writeFileSync(join(root, 'session.json'), `${JSON.stringify(session, null, 2)}\n`);
+  return { paths: sessionPaths(root), directUrl };
+}
+
 function candidate(id, priority = 'normal') {
   const url = `https://example.com/article/${id}`;
   return {
@@ -73,6 +91,34 @@ const input = {
   language: 'zh-CN',
   manualPolicy: 'pause',
 };
+
+test('probes an authorized user URL before running public discovery', async () => {
+  const { paths, directUrl } = setupDirect();
+  let discoveryCalls = 0;
+  const result = await runPublicCollect(paths, {
+    query: '文章全文',
+    fallbackQuery: '公开文章全文',
+    requestedCount: 1,
+    category: 'general',
+    language: 'zh-CN',
+    manualPolicy: 'pause',
+  }, {
+    discover: async () => {
+      discoveryCalls += 1;
+      throw new Error('discovery must not run before the direct candidate');
+    },
+    verify: async (targetPaths, attempt) => verifyCandidate(targetPaths, attempt, {
+      acquire: async () => ({
+        status: 'saved', requestedUrl: directUrl, resolvedUrl: directUrl,
+        title: 'Direct article', markdown: body('direct'), executor: 'fixture-web',
+      }),
+    }),
+  });
+
+  assert.equal(discoveryCalls, 0);
+  assert.equal(result.status, 'complete');
+  assert.equal(result.deliverableArticleCount, 1);
+});
 
 test('probes high priority before normal and stops at requested unique count', async () => {
   const paths = setup();

@@ -140,6 +140,28 @@ test('candidate verification accepts a resolved URL that only adds a trailing sl
   assert.equal(loadSession(paths).session.collection.collection.items.length, 1);
 });
 
+test('candidate verification accepts an acquired same-site URL with a changed host and path', async () => {
+  const { paths, run } = setup();
+  const url = 'https://m.example.com/article/deepseek-harness';
+  const resolvedUrl = 'https://www.example.com/news/deepseek-harness?from=mobile';
+  const candidate = addCandidate(paths, 'candidate-same-site', url);
+  const attempt = reserveProbeAttempt(paths, run.runId, candidate, { expectedRevision: 1 });
+
+  const result = await verifyCandidate(paths, { runId: run.runId, attemptId: attempt.attemptId }, {
+    acquire: async () => ({
+      status: 'saved',
+      requestedUrl: url,
+      resolvedUrl,
+      title: 'DeepSeek Harness 工程实践',
+      markdown: articleMarkdown(),
+      executor: 'fixture-web',
+    }),
+  });
+
+  assert.equal(result.promotionStatus, 'promoted');
+  assert.equal(loadSession(paths).session.collection.collection.items.length, 1);
+});
+
 test('WeChat candidates use dedicated sanitization before promotion', async () => {
   const { paths, run } = setup();
   const url = 'https://mp.weixin.qq.com/s/deepseek-harness-fixture';
