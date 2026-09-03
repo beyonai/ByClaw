@@ -2,6 +2,9 @@ package com.iwhalecloud.byai.state.domain.chat.service;
 
 import java.io.OutputStream;
 import java.util.Objects;
+import java.util.List;
+import java.util.Map;
+import java.util.LinkedHashMap;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -25,7 +28,7 @@ public class OutputStreamManager {
     /**
      * 缓存 ChatProcessContext，key 为 sessionId（字符串形式），供 Redis 监听器在异步 Gateway 模式下 完成 storeMessage / afterProcess 延迟步骤时使用
      */
-    private final ConcurrentHashMap<String, ChatProcessContext> contextMap = new ConcurrentHashMap<>();
+    private final Map<String, Map<String, ChatProcessContext>> contextMap = new LinkedHashMap<>();
 
     /**
      * 缓存 OutputStream
@@ -76,8 +79,8 @@ public class OutputStreamManager {
      * @param sessionId 会话标识（Long 转 String）
      * @param context 聊天流程上下文
      */
-    public void putContext(String sessionId, ChatProcessContext context) {
-        contextMap.put(sessionId, context);
+    public synchronized void putContext(String sessionId, ChatProcessContext context) {
+        contextMap.computeIfAbsent(sessionId, key -> new LinkedHashMap<>()).put(context.traceId, context);
         logger.info("ChatProcessContext 已缓存, sessionId: {}", sessionId);
     }
 
@@ -87,8 +90,24 @@ public class OutputStreamManager {
      * @param sessionId 会话标识
      * @return ChatProcessContext，不存在则返回 null
      */
-    public ChatProcessContext getContext(String sessionId) {
-        return contextMap.get(sessionId);
+    public synchronized ChatProcessContext getContext(String sessionId) {
+        return getContexts(sessionId).stream().findFirst().orElse(null);
+    }
+
+    public synchronized ChatProcessContext getContext(String sessionId, String traceId) {
+        return getContexts(sessionId).stream().filter(ctx -> ctx.isCurrentTrace(traceId)).findFirst().orElse(null);
+    }
+
+    public synchronized List<ChatProcessContext> getContexts(String sessionId) {
+        Map<String, ChatProcessContext> contexts = contextMap.get(sessionId);
+        return contexts == null ? List.of() : List.copyOf(contexts.values());
+    }
+
+    public synchronized void removeContext(String sessionId, ChatProcessContext expected) {
+        Map<String, ChatProcessContext> contexts = contextMap.get(sessionId);
+        if (contexts == null) return;
+        contexts.remove(expected.traceId, expected);
+        if (contexts.isEmpty()) contextMap.remove(sessionId);
     }
 
     /**
@@ -97,8 +116,9 @@ public class OutputStreamManager {
      * @param sessionId 会话标识
      * @return 被移除的 ChatProcessContext
      */
-    public ChatProcessContext removeContext(String sessionId) {
-        ChatProcessContext ctx = contextMap.remove(sessionId);
+    public synchronized ChatProcessContext removeContext(String sessionId) {
+        ChatProcessContext ctx = getContext(sessionId);
+        contextMap.remove(sessionId);
         if (ctx != null) {
             logger.info("ChatProcessContext 已移除, sessionId: {}", sessionId);
         }
@@ -110,8 +130,9 @@ public class OutputStreamManager {
      *
      * @return 所有非空 Gateway 事件队列的长度总和
      */
-    public long getTotalGatewayEventQueueSize() {
+    public synchronized long getTotalGatewayEventQueueSize() {
         return contextMap.values().stream()
+            .flatMap(contexts -> contexts.values().stream())
             .map(ChatProcessContext::getGatewayEventQueue)
             .filter(Objects::nonNull)
             .mapToLong(BlockingQueue::size)
@@ -123,8 +144,9 @@ public class OutputStreamManager {
      *
      * @return 最大队列长度；不存在 HTTP SSE 队列时返回 0
      */
-    public long getMaxGatewayEventQueueSize() {
+    public synchronized long getMaxGatewayEventQueueSize() {
         return contextMap.values().stream()
+            .flatMap(contexts -> contexts.values().stream())
             .map(ChatProcessContext::getGatewayEventQueue)
             .filter(Objects::nonNull)
             .mapToLong(BlockingQueue::size)

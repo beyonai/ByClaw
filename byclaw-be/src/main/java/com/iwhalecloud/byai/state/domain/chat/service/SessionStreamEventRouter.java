@@ -108,10 +108,12 @@ public class SessionStreamEventRouter {
             return StreamDispatchResult.HANDLED;
         }
 
-        ChatProcessContext ctx = outputStreamManager.getContext(sessionId);
+        ChatProcessContext ctx = outputStreamManager.getContext(sessionId, dataJson.getString("trace_id"));
         if (ctx == null) {
             ctx = chatContextRecoveryService.recoverIfNecessary(dataJson);
         }
+        // Truly historical traces still use the existing history accumulator.
+        if (ctx == null) ctx = outputStreamManager.getContext(sessionId);
         if (ctx == null) {
             return StreamDispatchResult.MISSING_CONTEXT;
         }

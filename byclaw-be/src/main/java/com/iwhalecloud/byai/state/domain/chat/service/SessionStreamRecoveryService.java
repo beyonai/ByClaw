@@ -179,18 +179,24 @@ public class SessionStreamRecoveryService implements ApplicationListener<Applica
         if (state == null || state.getSessionId() == null || !chatRuntimeStateService.tryAcquireRecoveryLock(state.getSessionId())) {
             return;
         }
+        // Recover the original owner first even when the scan encountered a foreground trace first.
+        ChatRuntimeState primary = chatRuntimeStateService.get(state.getSessionId());
+        ChatProcessContext owner = primary == null ? null : chatContextRecoveryService.recover(primary);
         ChatProcessContext ctx = chatContextRecoveryService.recover(state);
         if (ctx == null) {
             log.warn("恢复 Session Stream 上下文失败, sessionId: {}, traceId: {}", state.getSessionId(), state.getTraceId());
             return;
         }
         String sessionId = String.valueOf(state.getSessionId());
-        if (!sessionStreamManager.startSessionListener(sessionId, ctx)) {
-            outputStreamManager.removeContext(sessionId);
+        if (sessionStreamManager.isSessionListenerActive(sessionId)) return;
+        ChatProcessContext listenerOwner = owner == null ? ctx : owner;
+        if (!sessionStreamManager.startSessionListener(sessionId, listenerOwner)) {
+            outputStreamManager.removeContext(sessionId, ctx);
+            if (owner != null) outputStreamManager.removeContext(sessionId, owner);
             log.info("跳过接管 Session Stream，listener lease 仍由其他实例持有, sessionId: {}", sessionId);
             return;
         }
-        runningOutputStreamRegistry.markRunning(ctx);
+        runningOutputStreamRegistry.markRunning(listenerOwner);
         // 处理 PEL 中已投递未 ACK 的消息（走共享 processor + 水位线去重）；processor 的 session lock
         // 串行化 claim 与 listener callback，避免同一 session 并发 dispatch。
         claimPendingMessages(sessionId, gracefulHandoff ? 0L : PENDING_MIN_IDLE_MILLIS);

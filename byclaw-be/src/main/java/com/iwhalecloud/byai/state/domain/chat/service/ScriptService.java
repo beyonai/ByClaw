@@ -312,6 +312,12 @@ public class ScriptService extends AbstractChatProcess {
 
         String requestTraceId = ctx.assistantChatDto.getTraceId();
         String runningTraceId = runningInfo.getTraceId();
+        if (StringUtils.isBlank(requestTraceId)
+            && Boolean.FALSE.equals(runningInfo.getRootActive())
+            && Boolean.TRUE.equals(runningInfo.getAcceptingInput())) {
+            ctx.concurrentGatewayTurn = true;
+            return;
+        }
         if (StringUtils.isBlank(requestTraceId) || !requestTraceId.equals(runningTraceId)) {
             throw new BdpRuntimeException("当前会话仍在运行中，请等待完成或停止后再发送");
         }
@@ -432,6 +438,7 @@ public class ScriptService extends AbstractChatProcess {
         }
         else if (ctx.recoveryOnly || ctx.res == null) {
             ctx.chatResponse = resolveMemory(ctx, ctx.assistantChatDto, ctx.sessionId, ctx.messageContext, ctx.resMsg);
+            broadcastAppStreamResponse(ctx);
         }
         else {
             // 原始路径：持久化 + 向前端写 appStreamResponse
@@ -707,7 +714,7 @@ public class ScriptService extends AbstractChatProcess {
     public boolean completeAsyncGatewayContext(ChatProcessContext ctx) {
         boolean persisted = persistAsyncGatewayContext(ctx);
         if (persisted && ctx != null && ctx.sessionId != null) {
-            sessionStreamManager.stopSessionListener(String.valueOf(ctx.sessionId));
+            sessionStreamManager.completeSessionTurn(ctx);
         }
         return persisted;
     }

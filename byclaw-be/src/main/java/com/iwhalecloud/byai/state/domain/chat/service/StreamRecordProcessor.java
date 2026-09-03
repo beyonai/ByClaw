@@ -164,10 +164,11 @@ public class StreamRecordProcessor {
                 runningChatSnapshotService.delete(ctx);
                 if (ctx.sessionId != null) {
                     String sessionId = String.valueOf(ctx.sessionId);
-                    sessionStreamManager.stopSessionListener(sessionId);
-                    sessionStreamManager.trimCompletedStream(sessionId);
-                    // ACK 已成功且收尾完成，重投窗口关闭，标记不再需要。
-                    terminalPersistMarkerService.clear(ctx.sessionId);
+                    if (sessionStreamManager.completeSessionTurn(ctx)) {
+                        sessionStreamManager.trimCompletedStream(sessionId);
+                        // All traces have settled; no other terminal ACK can still need these markers.
+                        terminalPersistMarkerService.clear(ctx.sessionId);
+                    }
                 }
             }
             catch (Exception e) {

@@ -87,6 +87,27 @@ class ScriptServiceTest {
     }
 
     @Test
+    void recoveredTurnBroadcastsItsPersistedCompletionWithoutAnOriginalConnection() {
+        ScriptService recoveredService = org.mockito.Mockito.spy(service);
+        com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService broadcast =
+            mock(com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService.class);
+        ReflectionTestUtils.setField(recoveredService, "multiDeviceBroadcastService", broadcast);
+        ChatProcessContext ctx = new ChatProcessContext(null, new AssistantChatDto());
+        ctx.sessionId = 20L;
+        ctx.userId = 1001L;
+        ctx.recoveryOnly = true;
+        com.iwhalecloud.byai.state.domain.chat.model.ChatResponse response =
+            new com.iwhalecloud.byai.state.domain.chat.model.ChatResponse();
+        org.mockito.Mockito.doReturn(response).when(recoveredService)
+            .resolveMemory(ctx, ctx.assistantChatDto, ctx.sessionId, ctx.messageContext, ctx.resMsg);
+        recoveredService.storeMessage(ctx);
+        verify(broadcast).broadcastToUserDevices(org.mockito.ArgumentMatchers.eq(1001L),
+            org.mockito.ArgumentMatchers.eq(20L), org.mockito.ArgumentMatchers.eq("appStreamResponse"),
+            org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.isNull());
+        assertThat(ctx.chatResponse).isSameAs(response);
+    }
+
+    @Test
     void flushFromSnapshotPersistsBothCompletionSignals() {
         RunningChatSnapshotService snapshotService = mock(RunningChatSnapshotService.class);
         ByaiMessageHotService messageHotService = mock(ByaiMessageHotService.class);

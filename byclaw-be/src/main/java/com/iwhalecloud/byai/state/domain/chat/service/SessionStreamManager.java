@@ -263,13 +263,42 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
     }
 
     /**
-     * 停止并清理指定 session 的监听器。
-     * <p>
-     * 应在收到 appStreamResponse 或 error 事件后由 ScriptService 调用。
-     * 此方法同时负责从 OutputStreamManager 中移除对应的 ChatProcessContext。
-     *
-     * @param sessionId 会话 ID
+     * 完成一轮消息的清理；同会话其他轮次仍在运行时继续共享监听。
+     * @return 当前实例已完成最后一轮并停止监听时返回 true。
      */
+    public boolean completeSessionTurn(ChatProcessContext completed) {
+        if (completed == null || completed.sessionId == null) return false;
+        String sessionId = String.valueOf(completed.sessionId);
+        synchronized (outputStreamManager) {
+            // Only the listener owner may promote another turn or stop shared consumption.
+            if (!isSessionListenerActive(sessionId)) {
+                outputStreamManager.removeContext(sessionId, completed);
+                chatRuntimeStateService.delete(completed);
+                applicationContext.getBean(RunningOutputStreamRegistry.class).releaseIfOwner(completed);
+                return false;
+            }
+            ChatProcessContext owner = outputStreamManager.getContext(sessionId);
+            // A delayed cleanup belongs only to the completed trace, not a subsequent user request.
+            outputStreamManager.removeContext(sessionId, completed);
+            chatRuntimeStateService.delete(completed);
+            for (var state : chatRuntimeStateService.getSessionTurns(completed.sessionId)) {
+                if (outputStreamManager.getContext(sessionId, state.getTraceId()) == null) {
+                    applicationContext.getBean(ChatContextRecoveryService.class).recover(state);
+                }
+            }
+            ChatProcessContext remaining = outputStreamManager.getContext(sessionId);
+            if (remaining != null) {
+                if (remaining != owner) {
+                    applicationContext.getBean(RunningOutputStreamRegistry.class).markRunning(remaining);
+                }
+                return false;
+            }
+            stopSessionListener(sessionId);
+            applicationContext.getBean(RunningOutputStreamRegistry.class).releaseIfOwner(completed);
+            return true;
+        }
+    }
+
     public void stopSessionListener(String sessionId) {
         StreamMessageListenerContainer<String, MapRecord<String, String, String>> container =
             containers.remove(sessionId);
@@ -320,9 +349,10 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
         containers.clear();
         sessionStreamMetrics.updateActiveListeners(0L);
         for (String sessionId : activeSessionIds) {
-            ChatProcessContext ctx = outputStreamManager.getContext(sessionId);
-            if (chatRuntimeStateService.requestHandoff(ctx)) {
-                log.info("已将聊天运行态标记为可接管, sessionId: {}", sessionId);
+            for (ChatProcessContext ctx : outputStreamManager.getContexts(sessionId)) {
+                if (chatRuntimeStateService.requestHandoff(ctx)) {
+                    log.info("已将聊天运行态标记为可接管, sessionId: {}, traceId: {}", sessionId, ctx.traceId);
+                }
             }
         }
         streamLeaseTasks.values().forEach(task -> task.cancel(false));
@@ -368,8 +398,18 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
             applicationContext.getBean(RunningChatSnapshotService.class);
         ScheduledFuture<?> future = keepAliveExecutor.scheduleAtFixedRate(() -> {
             try {
-                runningOutputStreamRegistry.touchRunning(ctx);
-                runningChatSnapshotService.touch(ctx);
+                for (ChatProcessContext current : outputStreamManager.getContexts(sessionId)) {
+                    if (current.concurrentGatewayTurn) {
+                        if (!chatRuntimeStateService.isRegistered(current)) {
+                            // A remote sender may have failed after this listener recovered its registration.
+                            completeSessionTurn(current);
+                            continue;
+                        }
+                        chatRuntimeStateService.touch(current);
+                    }
+                    runningOutputStreamRegistry.touchRunning(current);
+                    runningChatSnapshotService.touch(current);
+                }
             }
             catch (Exception e) {
                 log.warn("刷新 running 标记续租失败, sessionId: {}", sessionId, e);
