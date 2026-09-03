@@ -403,9 +403,30 @@ async def execute(params: dict) -> dict:
         collection_name = _get(collection, "collection_name")
         if not collection_name or collection_name == "无合集":
             continue
+        members = [
+            item for item in cascade_articles
+            if item.get("collection_id") == collection_id
+        ]
+        collection_series = {"dates": [day.strftime("%m-%d") for day in dates]}
+        for code in metric_fields:
+            values = []
+            for index in range(len(dates)):
+                member_values = [
+                    item["daily_series"].get(code, [])[index]
+                    for item in members
+                    if index < len(item["daily_series"].get(code, []))
+                ]
+                values.append(
+                    None
+                    if not any(value is not None for value in member_values)
+                    else sum(value or 0 for value in member_values)
+                )
+            collection_series[code] = values
         cascade_collections.append({
             "collection_id": collection_id,
             "collection_name": collection_name,
+            "article_ids": [item["article_id"] for item in members],
+            "daily_series": collection_series,
         })
     cascade_collections.sort(
         key=lambda item: (str(item["collection_name"]), str(item["collection_id"]))
