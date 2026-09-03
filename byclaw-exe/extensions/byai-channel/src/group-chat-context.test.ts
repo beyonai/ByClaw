@@ -266,6 +266,30 @@ describe("ByClaw BE group chat context", () => {
     expect(log).not.toContain("请分析问题");
   });
 
+  it("does not swallow task cancellation as an optional-context failure", async () => {
+    const controller = new AbortController();
+    const provider: GroupChatContextProvider = {
+      load: vi.fn(() => new Promise<never>(() => {})),
+    };
+    const pending = loadGroupChatContextForAgent({
+      extraPayload: {
+        groupChat: {
+          schemaVersion: "byclaw.group-chat-ref/v1",
+          conversationKey: "100",
+          beforeMessageId: "20",
+        },
+      },
+      sessionId: "100",
+      beyondToken: "secret-token",
+      signal: controller.signal,
+      provider,
+    });
+
+    controller.abort(new Error("group context cancelled"));
+
+    await expect(pending).rejects.toThrow("group context cancelled");
+  });
+
   it("loads and filters an authoritative snapshot before prompt construction", async () => {
     const provider: GroupChatContextProvider = {
       load: vi.fn(async () => parseGroupChatContext(contextResponse())),

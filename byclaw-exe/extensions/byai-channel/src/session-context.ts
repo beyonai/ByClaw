@@ -267,6 +267,37 @@ interface AgentEndResult {
     error?: string;
 }
 
+const AGENT_END_RESULT_TIMEOUT_MS = 10_000;
+
+async function waitForAgentEndResult(
+    promise: Promise<AgentEndResult> | undefined,
+    signal?: AbortSignal,
+): Promise<AgentEndResult | undefined> {
+    if (!promise || signal?.aborted) {
+        return undefined;
+    }
+
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    let abortWait: (() => void) | undefined;
+    const timeoutPromise = new Promise<AgentEndResult>((_resolve, reject) => {
+        timeout = setTimeout(() => {
+            reject(new Error("waiting for agent end result timeout"));
+        }, AGENT_END_RESULT_TIMEOUT_MS);
+    });
+    const abortPromise = new Promise<undefined>((resolve) => {
+        if (!signal) return;
+        abortWait = () => resolve(undefined);
+        signal.addEventListener("abort", abortWait, { once: true });
+    });
+
+    try {
+        return await Promise.race([promise, timeoutPromise, abortPromise]);
+    } finally {
+        if (timeout) clearTimeout(timeout);
+        if (abortWait) signal?.removeEventListener("abort", abortWait);
+    }
+}
+
 interface SessionContextStore {
     webhookContexts: Map<string, ByaiInboundMessage>;
     sdkEmitters: Map<string, GatewayDataEmitter>;
@@ -1435,6 +1466,9 @@ export async function completeActiveSdkRequest(
     if (!latest || latest !== request) {
         return false;
     }
+    if (latest.abortController?.signal.aborted) {
+        return false;
+    }
     if (!shouldCompleteActiveSdkRequest(latest)) {
         return false;
     }
@@ -1449,12 +1483,13 @@ export async function completeActiveSdkRequest(
         .find((runId) => agentEndResultByRun.has(runId));
     if (terminalRunId && agentEndResultByRun.has(terminalRunId)) {
         try {
-            const result = await Promise.race([
+            const result = await waitForAgentEndResult(
                 agentEndResultByRun.get(terminalRunId)?.promise,
-                new Promise<AgentEndResult>((resolve, reject) => setTimeout(() => {
-                    reject(new Error("waiting for agent end result timeout"));
-                }, 10000)),
-            ]);
+                latest.abortController?.signal,
+            );
+            if (latest.abortController?.signal.aborted) {
+                return false;
+            }
             if (result?.error) {
                 const errorText = mapAgentEndErrorForSdk(latest, result.error);
                 const errorOptions = withActiveSdkRequestEmitMetadata(latest, {
@@ -1471,6 +1506,9 @@ export async function completeActiveSdkRequest(
         } catch (error) {
             console.error("Error waiting for agent end result:", error);
         }
+    }
+    if (latest.abortController?.signal.aborted) {
+        return false;
     }
     latest.frameworkFinalAnswer = resolveFrameworkFinalAnswer(
         latest.frameworkFinalAnswerLedger,
@@ -1502,7 +1540,11 @@ export async function completeActiveSdkRequest(
 export async function finalizePreparedActiveSdkRequest(
     request: ActiveSdkRequest | undefined,
 ): Promise<boolean> {
-    if (!request || !request.frameworkCompletionPrepared) {
+    if (
+        !request ||
+        !request.frameworkCompletionPrepared ||
+        request.abortController?.signal.aborted
+    ) {
         return false;
     }
     const latest = resolveActiveSdkRequestBySessionKey(request.sessionKey);

@@ -37,6 +37,7 @@ export async function executeMcp(params: {
   session?: string;
   timeoutMs?: number;
   logger?: BaiyingEnhanceLogger;
+  signal?: AbortSignal;
 }): Promise<ExecutorResponse> {
   const { capability } = params;
   const resourceType = String(capability.resource_type ?? "").trim().toUpperCase();
@@ -45,6 +46,7 @@ export async function executeMcp(params: {
       capability,
       parameters: params.parameters,
       logger: params.logger,
+      signal: params.signal,
     });
   }
 
@@ -130,6 +132,7 @@ export async function executeMcp(params: {
     payload,
     headers,
     timeoutMs: params.timeoutMs ?? 30_000,
+    signal: params.signal,
   });
   if ("error" in data) {
     const errorDetail = {
@@ -183,6 +186,7 @@ async function callMcpJsonRpc(params: {
   payload: Dict;
   headers: Record<string, string>;
   timeoutMs: number;
+  signal?: AbortSignal;
 }): Promise<Dict | { error: ExecutorFailure }> {
   if (params.transferType === "sse") {
     try {
@@ -190,6 +194,7 @@ async function callMcpJsonRpc(params: {
         sseUrl: params.serverUrl,
         headers: params.headers,
         timeoutMs: params.timeoutMs,
+        signal: params.signal,
         requests: [
           {
             payload: {
@@ -240,6 +245,7 @@ async function callMcpJsonRpc(params: {
     payload: params.payload,
     headers: params.headers,
     timeoutMs: params.timeoutMs,
+    signal: params.signal,
   });
   if ("error" in result) return {
     error: makeError("MCP_CALL_FAILED", `MCP call failed: ${result.error.error}`, {
@@ -274,6 +280,7 @@ async function executeOntologyResourceViaCallAgent(input: {
   capability: Capability;
   parameters: Dict;
   logger?: BaiyingEnhanceLogger;
+  signal?: AbortSignal;
 }): Promise<ExecutorResponse> {
   const resourceType = String(input.capability.resource_type ?? "").trim().toUpperCase();
   const resourceId = String(input.capability.metadata?.resource_id ?? input.capability.name ?? "");
@@ -351,6 +358,7 @@ async function executeOntologyResourceViaCallAgent(input: {
     logger: input.logger,
     parentMessageId: toolCallId,
     resourceContext,
+    signal: input.signal,
   });
 }
 

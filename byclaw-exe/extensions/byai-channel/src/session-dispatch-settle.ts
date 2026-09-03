@@ -1,6 +1,5 @@
 import {
   completeActiveSdkRequest,
-  hasPendingNativeChildRun,
   markActiveSdkDispatchSettled,
   resolveActiveSdkRequestBySessionKey,
   shouldCompleteActiveSdkRequest,
@@ -11,8 +10,17 @@ import { clearPromptInjectionSnapshot } from "./prompt-injection-snapshot.js";
 const DEFAULT_SETTLE_POLL_MS = 1000;
 const DEFAULT_SETTLE_TIMEOUT_MS = 30 * 60 * 1000;
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const timer = setTimeout(finish, ms);
+    function finish() {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", finish);
+      resolve();
+    }
+    signal?.addEventListener("abort", finish, { once: true });
+  });
 }
 
 function isRequestSettled(request: ActiveSdkRequest | undefined): boolean {
@@ -23,22 +31,10 @@ function isRequestSettled(request: ActiveSdkRequest | undefined): boolean {
 }
 
 function isAbortSettled(
-  request: ActiveSdkRequest | undefined,
+  _request: ActiveSdkRequest | undefined,
   abortSignal?: AbortSignal,
 ): boolean {
-  if (!abortSignal?.aborted) {
-    return false;
-  }
-  if (!request) {
-    return true;
-  }
-  return (
-    request.boundRunIds.size === 0 &&
-    !hasPendingNativeChildRun(request) &&
-    request.pendingOutboundCount === 0 &&
-    !request.awaitingFollowup &&
-    !request.followupRunStarted
-  );
+  return abortSignal?.aborted === true;
 }
 
 export type SdkSessionDispatchSettleResult = {
@@ -116,6 +112,6 @@ export async function waitForSdkSessionDispatchSettled(
       };
     }
 
-    await sleep(pollMs);
+    await sleep(pollMs, options?.abortSignal);
   }
 }
