@@ -703,7 +703,8 @@ public class DatasetApplicationService {
 
         // 获取知识库信息
         SsResource ssResource = loadDatasetResource(resourceId);
-        validateDatasetReadablePermission(ssResource);
+
+        //validateDatasetReadablePermission(ssResource);
 
         boolean directoryDownload = StringUtils.endsWith(StringUtils.trimToEmpty(directoryPath).replace('\\', '/'),
             "/");
@@ -1050,7 +1051,7 @@ public class DatasetApplicationService {
         String knCode = null;
         if (dirAndFileQo.getResourceId() != null) {
             SsResource ssResource = loadDatasetResource(dirAndFileQo.getResourceId());
-            validateDatasetReadablePermission(ssResource);
+            // validateDatasetReadablePermission(ssResource);
             knCode = resolveKnowledgeCode(dirAndFileQo, ssResource);
         } else {
             // openApi接口查询不做校验
