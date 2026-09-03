@@ -11,14 +11,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.net.URI;
-import java.util.Map;
+import java.util.List;
 
 /** 根据连接器账号模板初始化用户级运营账号。 */
 @Slf4j
 @Service
 public class OperationAccountTemplateService {
-
-    static final String WEIXIN_OFFICIAL_WEB = "weixin-official-web";
 
     @Autowired
     private ConnectorInfoService connectorInfoService;
@@ -26,17 +24,26 @@ public class OperationAccountTemplateService {
     @Autowired
     private OperationAccountService operationAccountService;
 
-    /** 首次访问时创建微信公众号网页登录账号，已有或已删除的历史账号均不重建。 */
+    /** 首次访问时创建所有缺失的用户级模板账号，已有或已删除的历史账号均不重建。 */
     @Transactional(rollbackFor = Exception.class)
-    public void ensureWechatOfficialWebAccount(Long userId) {
-        if (userId == null
-            || operationAccountService.hasGlobalTemplateHistory(userId, WEIXIN_OFFICIAL_WEB)) {
+    public void ensureDefaultAccounts(Long userId) {
+        if (userId == null) {
             return;
         }
-        ConnectorInfo template = connectorInfoService.findByCodeForUpdate(WEIXIN_OFFICIAL_WEB);
+        List<ConnectorInfo> templates = connectorInfoService.listAccountTemplatesForUpdate();
+        if (templates == null) {
+            return;
+        }
+        for (ConnectorInfo template : templates) {
+            createIfMissing(userId, template);
+        }
+    }
+
+    private void createIfMissing(Long userId, ConnectorInfo template) {
         AccountTemplate values = parseTemplate(template);
-        if (values == null
-            || operationAccountService.hasGlobalTemplateHistory(userId, WEIXIN_OFFICIAL_WEB)) {
+        String connectorCode = template == null ? null : trim(template.getConnectorCode());
+        if (values == null || connectorCode == null
+            || operationAccountService.hasGlobalTemplateHistory(userId, connectorCode)) {
             return;
         }
         OperationAccount account = new OperationAccount();
@@ -45,7 +52,7 @@ public class OperationAccountTemplateService {
         account.setAccountName(values.accountName());
         account.setAccountCode(values.accountCode());
         account.setCustomUrl(values.customUrl());
-        account.setConfig(JSON.toJSONString(Map.of("connectorCode", WEIXIN_OFFICIAL_WEB)));
+        account.setTemplateConnectorCode(connectorCode);
         account.setCreateBy(userId);
         operationAccountService.create(account);
     }
@@ -58,23 +65,36 @@ public class OperationAccountTemplateService {
             JSONObject root = JSON.parseObject(template.getRequestConfig());
             JSONObject config = root == null ? null : root.getJSONObject("operationAccount");
             if (config == null) {
-                log.warn("运营账号模板配置缺少 operationAccount，connectorCode={}", WEIXIN_OFFICIAL_WEB);
+                log.warn("运营账号模板配置缺少 operationAccount，connectorCode={}", template.getConnectorCode());
                 return null;
             }
             String platformCode = trim(config.getString("platformCode"));
             String accountName = trim(config.getString("accountName"));
             String accountCode = trim(config.getString("accountCode"));
             String customUrl = trim(config.getString("customUrl"));
-            if (!"CustomLink".equals(platformCode) || accountName == null || accountName.isEmpty() || accountCode == null
-                || !accountCode.isEmpty() || !isSafeWebUrl(customUrl)) {
-                log.warn("运营账号模板配置无效，connectorCode={}", WEIXIN_OFFICIAL_WEB);
+            if (!isValidTemplateAccount(platformCode, accountName, accountCode, customUrl)) {
+                log.warn("运营账号模板配置无效，connectorCode={}", template.getConnectorCode());
                 return null;
             }
             return new AccountTemplate(platformCode, accountName, accountCode, customUrl);
         } catch (RuntimeException e) {
-            log.warn("运营账号模板配置解析失败，connectorCode={}", WEIXIN_OFFICIAL_WEB);
+            log.warn("运营账号模板配置解析失败，connectorCode={}", template.getConnectorCode());
             return null;
         }
+    }
+
+    private static boolean isValidTemplateAccount(
+            String platformCode, String accountName, String accountCode, String customUrl) {
+        if (platformCode == null || platformCode.isEmpty() || platformCode.length() > 20
+            || accountName == null || accountName.isEmpty() || accountName.length() > 100) {
+            return false;
+        }
+        if ("CustomLink".equals(platformCode)) {
+            return accountCode != null && accountCode.isEmpty()
+                && customUrl != null && customUrl.length() <= 500 && isSafeWebUrl(customUrl);
+        }
+        return accountCode != null && !accountCode.isEmpty() && accountCode.length() <= 100
+            && (customUrl == null || customUrl.isEmpty());
     }
 
     private static String trim(String value) {

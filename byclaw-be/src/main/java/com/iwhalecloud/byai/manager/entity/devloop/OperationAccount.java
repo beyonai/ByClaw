@@ -34,6 +34,9 @@ public class OperationAccount {
     /** 自定义链接平台的登录URL，仅当 platformCode = "CustomLink" 时使用。 */
     private String customUrl;
 
+    /** 初始化该用户级账号的 ACCOUNT_TEMPLATE 连接器编码；手工创建账号为空。 */
+    private String templateConnectorCode;
+
     private String config;
 
     private String metrics;

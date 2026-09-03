@@ -1,7 +1,5 @@
 package com.iwhalecloud.byai.manager.domain.devloop.service;
 
-import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.iwhalecloud.byai.manager.entity.devloop.OperationAccount;
 import com.iwhalecloud.byai.manager.mapper.devloop.OperationAccountMapper;
@@ -96,14 +94,8 @@ public class OperationAccountService {
         }
         LambdaQueryWrapper<OperationAccount> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(OperationAccount::getCreateBy, userId)
-            .isNull(OperationAccount::getProjectId);
-        return operationAccountMapper.selectList(wrapper).stream().anyMatch(account -> {
-            try {
-                JSONObject config = JSON.parseObject(account.getConfig());
-                return config != null && connectorCode.equals(config.getString("connectorCode"));
-            } catch (RuntimeException ignored) {
-                return false;
-            }
-        });
+            .isNull(OperationAccount::getProjectId)
+            .eq(OperationAccount::getTemplateConnectorCode, connectorCode);
+        return operationAccountMapper.selectCount(wrapper) > 0;
     }
 }

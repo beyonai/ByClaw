@@ -30,11 +30,17 @@ class ConnectorStatusQueryTest {
     }
 
     @Test
-    void connectorTemplateCanBeLockedByCode() throws Exception {
+    void activeAccountTemplatesCanBeLockedInStableOrder() throws Exception {
         String sql = read(
             "byclaw-be/src/main/resources/com/iwhalecloud/byai/manager/mapper/connector/ConnectorInfoMapper.xml");
 
-        assertThat(sql).contains("selectbyconnectorcodeforupdate", "for update");
+        assertThat(sql).contains(
+            "selectaccounttemplatesforupdate",
+            "connector_type = 'account_template'",
+            "status_cd = '00a'",
+            "order by sort asc, connector_id asc",
+            "for update"
+        );
     }
 
     private String read(String relativePath) throws Exception {

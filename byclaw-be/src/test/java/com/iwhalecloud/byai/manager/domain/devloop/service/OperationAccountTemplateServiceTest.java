@@ -1,6 +1,5 @@
 package com.iwhalecloud.byai.manager.domain.devloop.service;
 
-import com.alibaba.fastjson.JSON;
 import com.iwhalecloud.byai.manager.domain.connector.service.ConnectorInfoService;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 import com.iwhalecloud.byai.manager.entity.devloop.OperationAccount;
@@ -12,6 +11,8 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -33,67 +34,69 @@ class OperationAccountTemplateServiceTest {
     private OperationAccountTemplateService service;
 
     @Test
-    void createsWechatAccountFromLockedTemplateOnFirstUse() {
-        when(operationAccountService.hasGlobalTemplateHistory(10L, "weixin-official-web"))
-            .thenReturn(false, false);
-        when(connectorInfoService.findByCodeForUpdate("weixin-official-web"))
-            .thenReturn(template(validRequestConfig()));
+    void createsEveryMissingAccountTemplate() {
+        when(connectorInfoService.listAccountTemplatesForUpdate())
+            .thenReturn(List.of(
+                template("weixin-official-web", validRequestConfig()),
+                template("xiaohongshu-account", platformRequestConfig(
+                    "Xiaohongshu", "小红书", "default-xiaohongshu"))));
+        when(operationAccountService.hasGlobalTemplateHistory(10L, "weixin-official-web")).thenReturn(false);
+        when(operationAccountService.hasGlobalTemplateHistory(10L, "xiaohongshu-account")).thenReturn(false);
 
-        service.ensureWechatOfficialWebAccount(10L);
+        service.ensureDefaultAccounts(10L);
 
         ArgumentCaptor<OperationAccount> captor = ArgumentCaptor.forClass(OperationAccount.class);
-        verify(operationAccountService).create(captor.capture());
-        OperationAccount account = captor.getValue();
-        assertThat(account.getProjectId()).isNull();
-        assertThat(account.getCreateBy()).isEqualTo(10L);
-        assertThat(account.getPlatformCode()).isEqualTo("CustomLink");
-        assertThat(account.getAccountName()).isEqualTo("微信公众号");
-        assertThat(account.getAccountCode()).isEmpty();
-        assertThat(account.getCustomUrl()).isEqualTo("https://mp.weixin.qq.com/");
-        assertThat(JSON.parseObject(account.getConfig()).getString("connectorCode"))
-            .isEqualTo("weixin-official-web");
+        verify(operationAccountService, org.mockito.Mockito.times(2)).create(captor.capture());
+        assertThat(captor.getAllValues())
+            .extracting(OperationAccount::getTemplateConnectorCode)
+            .containsExactly("weixin-official-web", "xiaohongshu-account");
+        OperationAccount customLink = captor.getAllValues().get(0);
+        assertThat(customLink.getProjectId()).isNull();
+        assertThat(customLink.getCreateBy()).isEqualTo(10L);
+        assertThat(customLink.getPlatformCode()).isEqualTo("CustomLink");
+        assertThat(customLink.getCustomUrl()).isEqualTo("https://mp.weixin.qq.com/");
+        OperationAccount platformAccount = captor.getAllValues().get(1);
+        assertThat(platformAccount.getPlatformCode()).isEqualTo("Xiaohongshu");
+        assertThat(platformAccount.getAccountName()).isEqualTo("小红书");
+        assertThat(platformAccount.getAccountCode()).isEqualTo("default-xiaohongshu");
+        assertThat(platformAccount.getCustomUrl()).isNull();
     }
 
     @Test
-    void skipsLockAndCreateWhenTemplateHistoryAlreadyExists() {
-        when(operationAccountService.hasGlobalTemplateHistory(10L, "weixin-official-web")).thenReturn(true);
-
-        service.ensureWechatOfficialWebAccount(10L);
-
-        verifyNoInteractions(connectorInfoService);
-        verify(operationAccountService, never()).create(any());
-    }
-
-    @Test
-    void skipsCreateWhenLockedRecheckFindsConcurrentInsert() {
+    void skipsCreateWhenLockedTemplateHistoryAlreadyExists() {
+        when(connectorInfoService.listAccountTemplatesForUpdate())
+            .thenReturn(List.of(template("weixin-official-web", validRequestConfig())));
         when(operationAccountService.hasGlobalTemplateHistory(10L, "weixin-official-web"))
-            .thenReturn(false, true);
-        when(connectorInfoService.findByCodeForUpdate("weixin-official-web"))
-            .thenReturn(template(validRequestConfig()));
+            .thenReturn(true);
 
-        service.ensureWechatOfficialWebAccount(10L);
+        service.ensureDefaultAccounts(10L);
 
         verify(operationAccountService, never()).create(any());
     }
 
     @Test
-    void skipsMissingTemplate() {
-        when(operationAccountService.hasGlobalTemplateHistory(10L, "weixin-official-web")).thenReturn(false);
-        when(connectorInfoService.findByCodeForUpdate("weixin-official-web")).thenReturn(null);
+    void skipsTemplateLookupForMissingUser() {
+        service.ensureDefaultAccounts(null);
 
-        service.ensureWechatOfficialWebAccount(10L);
+        verifyNoInteractions(connectorInfoService, operationAccountService);
+    }
+
+    @Test
+    void skipsCreateWhenNoActiveTemplateExists() {
+        when(connectorInfoService.listAccountTemplatesForUpdate()).thenReturn(List.of());
+
+        service.ensureDefaultAccounts(10L);
 
         verify(operationAccountService, never()).create(any());
     }
 
     @Test
     void skipsConnectorThatIsNotAnAccountTemplate() {
-        when(operationAccountService.hasGlobalTemplateHistory(10L, "weixin-official-web")).thenReturn(false);
-        ConnectorInfo connector = template(validRequestConfig());
+        ConnectorInfo connector = template("weixin-official-web", validRequestConfig());
         connector.setConnectorType("SYSTEM");
-        when(connectorInfoService.findByCodeForUpdate("weixin-official-web")).thenReturn(connector);
+        when(connectorInfoService.listAccountTemplatesForUpdate()).thenReturn(List.of(connector));
 
-        service.ensureWechatOfficialWebAccount(10L);
+        service.ensureDefaultAccounts(10L);
 
         verify(operationAccountService, never()).create(any());
     }
@@ -107,27 +110,36 @@ class OperationAccountTemplateServiceTest {
         "{\"operationAccount\":{\"platformCode\":\"CustomLink\",\"accountName\":\"微信公众号\",\"accountCode\":\"\",\"customUrl\":\"javascript:alert(1)\"}}"
     })
     void skipsInvalidTemplateConfig(String requestConfig) {
-        when(operationAccountService.hasGlobalTemplateHistory(10L, "weixin-official-web")).thenReturn(false);
-        when(connectorInfoService.findByCodeForUpdate("weixin-official-web"))
-            .thenReturn(template(requestConfig));
+        when(connectorInfoService.listAccountTemplatesForUpdate())
+            .thenReturn(List.of(template("weixin-official-web", requestConfig)));
 
-        service.ensureWechatOfficialWebAccount(10L);
+        service.ensureDefaultAccounts(10L);
 
         verify(operationAccountService, never()).create(any());
     }
 
-    private static ConnectorInfo template(String requestConfig) {
+    private static ConnectorInfo template(String connectorCode, String requestConfig) {
         ConnectorInfo template = new ConnectorInfo();
-        template.setConnectorCode("weixin-official-web");
+        template.setConnectorCode(connectorCode);
         template.setConnectorType("ACCOUNT_TEMPLATE");
         template.setRequestConfig(requestConfig);
         return template;
     }
 
     private static String validRequestConfig() {
+        return validRequestConfig("微信公众号", "https://mp.weixin.qq.com/");
+    }
+
+    private static String validRequestConfig(String accountName, String customUrl) {
         return """
-            {"operationAccount":{"platformCode":"CustomLink","accountName":"微信公众号",
-             "accountCode":"","customUrl":"https://mp.weixin.qq.com/"}}
-            """;
+            {"operationAccount":{"platformCode":"CustomLink","accountName":"%s",
+             "accountCode":"","customUrl":"%s"}}
+            """.formatted(accountName, customUrl);
+    }
+
+    private static String platformRequestConfig(String platformCode, String accountName, String accountCode) {
+        return """
+            {"operationAccount":{"platformCode":"%s","accountName":"%s","accountCode":"%s"}}
+            """.formatted(platformCode, accountName, accountCode);
     }
 }

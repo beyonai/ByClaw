@@ -159,7 +159,7 @@ class DevloopOperationAccountAuthorizationTest {
         assertThat(response.getCode()).isEqualTo(ResponseUtil.SUCCESS);
         assertThat(response.getData()).extracting(item -> item.get("accountId")).containsExactly(1L);
         InOrder ordered = inOrder(operationAccountTemplateService, operationAccountService);
-        ordered.verify(operationAccountTemplateService).ensureWechatOfficialWebAccount(CURRENT_USER_ID);
+        ordered.verify(operationAccountTemplateService).ensureDefaultAccounts(CURRENT_USER_ID);
         ordered.verify(operationAccountService).listGlobalByUserId(CURRENT_USER_ID);
         verify(projectMapper, never()).selectById(any());
     }

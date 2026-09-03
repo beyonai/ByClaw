@@ -92,26 +92,24 @@ class OperationAccountServiceVisibilityTest {
 
     @Test
     void findsUserLevelTemplateHistoryIncludingSoftDeletedRows() {
-        OperationAccount deleted = new OperationAccount();
-        deleted.setConfig("{\"connectorCode\":\"weixin-official-web\"}");
-        deleted.setStatusCd("00X");
-        when(operationAccountMapper.selectList(any())).thenReturn(List.of(deleted));
+        when(operationAccountMapper.selectCount(any())).thenReturn(1L);
 
         assertThat(service.hasGlobalTemplateHistory(10L, "weixin-official-web")).isTrue();
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Wrapper<OperationAccount>> captor = ArgumentCaptor.forClass(Wrapper.class);
-        verify(operationAccountMapper).selectList(captor.capture());
+        verify(operationAccountMapper).selectCount(captor.capture());
         LambdaQueryWrapper<OperationAccount> query = (LambdaQueryWrapper<OperationAccount>) captor.getValue();
-        assertThat(query.getSqlSegment()).contains("create_by =", "project_id IS NULL").doesNotContain("status_cd");
+        assertThat(query.getSqlSegment())
+            .contains("create_by =", "project_id IS NULL", "template_connector_code =")
+            .doesNotContain("status_cd", "config");
+        assertThat(query.getParamNameValuePairs().values())
+            .containsExactlyInAnyOrder(10L, "weixin-official-web");
     }
 
     @Test
     void ignoresOrdinaryCustomLinksWhenFindingTemplateHistory() {
-        OperationAccount ordinary = new OperationAccount();
-        ordinary.setConfig("{}");
-        ordinary.setCustomUrl("https://mp.weixin.qq.com/");
-        when(operationAccountMapper.selectList(any())).thenReturn(List.of(ordinary));
+        when(operationAccountMapper.selectCount(any())).thenReturn(0L);
 
         assertThat(service.hasGlobalTemplateHistory(10L, "weixin-official-web")).isFalse();
     }
