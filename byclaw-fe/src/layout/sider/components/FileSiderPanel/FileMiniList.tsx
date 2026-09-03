@@ -72,6 +72,9 @@ interface FileMiniListProps {
   resourceId: string;
 }
 
+// 过程文件列表统一使用后端排序，展开目录和刷新请求也必须保持同一规则。
+const PROCESS_FILE_LIST_SORT = 'DIRECTORY_FIRST_NAME_ASC' as const;
+
 interface BykcKnowledgeUploadTarget {
   knowledgeBase: IKnowledgeBaseItem;
   directoryPath: string;
@@ -224,7 +227,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       const requestSeq = ++fetchListRequestSeqRef.current;
       setLoading(true);
       try {
-        const res: any = await listFiles({ resourceId, path: requestPath });
+        const res: any = await listFiles({ resourceId, path: requestPath, sort: PROCESS_FILE_LIST_SORT });
         const data = res?.data ?? res ?? [];
         const nextItems = Array.isArray(data) ? data : [];
         const nextChildrenByPath = options.force ? {} : cached?.childrenByPath || {};
@@ -264,7 +267,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       const sessionPath = getSessionFilePath(normalizedSessionId);
       try {
         await ensureFolder({ resourceId, path: sessionPath });
-        const res: any = await listFiles({ resourceId, path: sessionPath });
+        const res: any = await listFiles({ resourceId, path: sessionPath, sort: PROCESS_FILE_LIST_SORT });
         const sessionChildren = unwrapListResponse<FileBrowserItem>(res);
         markChildDirectoriesFresh('session', [sessionPath]);
 
@@ -318,8 +321,8 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       setLoading(true);
       try {
         const [rootResponse, ...expandedResponses] = await Promise.all([
-          listFiles({ resourceId, path: requestPath }),
-          ...expandedDirectoryPaths.map((path) => listFiles({ resourceId, path })),
+          listFiles({ resourceId, path: requestPath, sort: PROCESS_FILE_LIST_SORT }),
+          ...expandedDirectoryPaths.map((path) => listFiles({ resourceId, path, sort: PROCESS_FILE_LIST_SORT })),
         ]);
         const nextItems = unwrapListResponse<FileBrowserItem>(rootResponse);
         const refreshedChildrenByPath = expandedDirectoryPaths.reduce<Record<string, FileBrowserItem[]>>(
@@ -563,7 +566,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       const normalizedPath = ensureDirectoryPath(directoryPath || '/');
       setUploadDirectoryLoading(true);
       try {
-        const response = await listFiles({ resourceId, path: normalizedPath });
+        const response = await listFiles({ resourceId, path: normalizedPath, sort: PROCESS_FILE_LIST_SORT });
         setUploadDirectoryFolders(unwrapListResponse<FileBrowserItem>(response).filter((item) => isDirectory(item)));
         setUploadDirectoryPath(normalizedPath);
       } catch (error: any) {
@@ -800,7 +803,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
           await fetchList(currentPath, { force: true });
           return;
         }
-        const res: any = await listFiles({ resourceId, path: uploadPath });
+        const res: any = await listFiles({ resourceId, path: uploadPath, sort: PROCESS_FILE_LIST_SORT });
         markChildDirectoriesFresh(activeCategoryKey, [uploadPath]);
         setChildrenByPath((prev) => {
           const nextChildrenByPath = {
@@ -1072,8 +1075,8 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
           .filter((item) => item !== categoryPath)
           .filter((item) => category.key === 'root' || isPathIn(item, categoryRootPath));
         const [targetResponse, ...parentResponses] = await Promise.all([
-          listFiles({ resourceId, path: categoryPath }),
-          ...parentPaths.map((item) => listFiles({ resourceId, path: item })),
+          listFiles({ resourceId, path: categoryPath, sort: PROCESS_FILE_LIST_SORT }),
+          ...parentPaths.map((item) => listFiles({ resourceId, path: item, sort: PROCESS_FILE_LIST_SORT })),
         ]);
         const nextItems = unwrapListResponse<FileBrowserItem>(targetResponse);
         const nextChildrenByPath = parentPaths.reduce<Record<string, FileBrowserItem[]>>((acc, item, index) => {
@@ -1132,7 +1135,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
     setCreatingFolder(true);
     try {
       await ensureFolder({ resourceId, path: parentPath });
-      const siblingRes = await listFiles({ resourceId, path: parentPath });
+      const siblingRes = await listFiles({ resourceId, path: parentPath, sort: PROCESS_FILE_LIST_SORT });
       const hasDuplicateFolder = unwrapListResponse<FileBrowserItem>(siblingRes).some(
         (item) => isDirectory(item) && `${item.name || ''}`.trim() === folderName
       );
@@ -1174,7 +1177,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       if (activeCategoryKey !== 'root' && !isPathIn(path, activeRootPath)) return;
       if (childrenByPath[path] && !isChildDirectoryCacheStale(activeCategoryKey, path)) return;
       try {
-        const res: any = await listFiles({ resourceId, path });
+        const res: any = await listFiles({ resourceId, path, sort: PROCESS_FILE_LIST_SORT });
         markChildDirectoriesFresh(activeCategoryKey, [path]);
         setChildrenByPath((prev) => {
           const nextChildrenByPath = {

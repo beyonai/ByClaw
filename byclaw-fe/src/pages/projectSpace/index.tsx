@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Dropdown, Empty, Input, Modal, message } from 'antd';
+import { Button, Dropdown, Empty, Input, Modal, Spin, message } from 'antd';
 import {
   DeleteOutlined,
   EditOutlined,
+  LoadingOutlined,
   MoreOutlined,
   PlusOutlined,
   SearchOutlined,
@@ -469,16 +470,9 @@ const ProjectSpacePage: React.FC = () => {
           />
         </div>
         {projectsLoading && !projects.length ? (
-          <div className={styles.projectCardGrid} aria-busy="true">
-            {Array.from({ length: 9 }, (_, index) => (
-              <div key={index} className={styles.projectSkeletonCard} aria-hidden="true">
-                <span className={styles.projectSkeletonIcon} />
-                <span className={styles.projectSkeletonBody}>
-                  <span className={styles.projectSkeletonTitle} />
-                  <span className={styles.projectSkeletonDescription} />
-                </span>
-              </div>
-            ))}
+          <div className={styles.projectListLoading} aria-busy="true">
+            {/* 项目大列表统一使用 loading 图，避免骨架屏造成卡片布局跳变。 */}
+            <Spin indicator={<LoadingOutlined spin />} />
           </div>
         ) : !projects.length ? (
           <div className={styles.projectListFeedback}>

@@ -287,6 +287,7 @@ export interface ResourceUseApplyAuditItem {
   userId: string; // 用户ID
   userName: string; // 用户名称
   applyTime: string; // 申请时间
+  auditTime?: string; // 审核通过或驳回的处理时间
   applyStatus: string; // 申请状态（如：pending/approved/rejected）
 }
 
@@ -424,6 +425,15 @@ export function queryUseApplyList(params: ResourceUseApplyParams) {
     responseCfg: {
       customHandle: true,
     },
+  });
+}
+
+/**
+ * 聚合查询数字员工审核数据；false 或不传返回待审核，true 返回历史审核。
+ */
+export function queryDigitalEmployeeUseApplyAudit(params: { history?: boolean } = {}) {
+  return POST<any[]>('/byaiService/auth/privilegeGrant/queryDigitalEmployeeUseApplyAudit', params, {
+    responseCfg: { customHandle: true },
   });
 }
 

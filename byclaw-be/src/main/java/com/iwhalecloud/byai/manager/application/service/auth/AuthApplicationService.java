@@ -86,6 +86,7 @@ import com.iwhalecloud.byai.manager.vo.auth.AuthVo;
 import com.iwhalecloud.byai.manager.vo.auth.CompareVo;
 import com.iwhalecloud.byai.manager.vo.auth.FixedEntryOperationCapabilityVo;
 import com.iwhalecloud.byai.manager.vo.auth.ResourceUseApplyItemVo;
+import com.iwhalecloud.byai.manager.vo.auth.DigitalEmployeeUseApplyAuditVo;
 import com.iwhalecloud.byai.manager.vo.auth.ResourceMemberItemVo;
 import com.iwhalecloud.byai.manager.vo.auth.ResourceMemberQueryResultVo;
 import com.iwhalecloud.byai.common.constants.Constants;
@@ -768,6 +769,37 @@ public class AuthApplicationService {
                 : I18nUtil.get(USE_APPLY_PENDING_LABEL_KEY));
             return vo;
         }).collect(Collectors.toList());
+    }
+
+    /**
+     * 审核中心聚合查询。一次返回当前用户可审核的个人/企业数字员工及员工组申请，
+     * 避免前端先查资源再按资源逐个查询申请记录。
+     */
+    public List<DigitalEmployeeUseApplyAuditVo> queryDigitalEmployeeUseApplyAudit(Boolean history) {
+        // 先一次联表查询真正存在申请的记录，避免遍历全部数字员工并逐个查询申请、用户和扩展信息。
+        List<DigitalEmployeeUseApplyAuditVo> candidates = privilegeGrantMapper
+            .queryDigitalEmployeeUseApplyAudit(Boolean.TRUE.equals(history));
+        if (CollectionUtils.isEmpty(candidates)) {
+            return Collections.emptyList();
+        }
+
+        List<Long> resourceIds = candidates.stream().map(DigitalEmployeeUseApplyAuditVo::getResourceId)
+            .filter(Objects::nonNull).distinct().collect(Collectors.toList());
+        Map<Long, SsResource> resourceMap = ssResourceMapper.selectBatchIds(resourceIds).stream()
+            .collect(Collectors.toMap(SsResource::getResourceId, item -> item, (left, right) -> left));
+        Set<Long> auditableResourceIds = new HashSet<>();
+        // 每个有申请的资源只校验一次权限，不再为同一资源的多条申请重复校验。
+        for (SsResource resource : resourceMap.values()) {
+            try {
+                validateResourceUseApplyAuditAllowed(resource);
+                validateResourceUseSettingPermission(resource);
+                auditableResourceIds.add(resource.getResourceId());
+            } catch (RuntimeException ignored) {
+                // 无审核权限的资源跳过，继续处理其他可审核资源。
+            }
+        }
+        return candidates.stream().filter(item -> auditableResourceIds.contains(item.getResourceId()))
+            .collect(Collectors.toList());
     }
 
     private List<PrivilegeGrant> listHistoryUseApplyPrivileges(SsResource ssResource) {

@@ -38,9 +38,137 @@
 }
 
 .content {
+  display: flex;
+  flex-direction: column;
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
+
+  :global([class*='spin-nested-loading']),
+  :global([class*='spin-container']) {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+  }
+}
+
+.modelList {
+  flex: 1;
+  min-height: 0;
+  max-height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.modelSpin {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+
+  :global([class*='spin-nested-loading']),
+  :global([class*='spin-container']) {
+    flex: 1 1 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+}
+
+.modelSearch {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  width: 100%;
+  margin-bottom: 8px;
+  background: #fff;
+}
+
+.modelDetailValue {
+  display: block;
+  max-width: 100%;
+  color: #1f2533;
+  font-size: 13px;
+  line-height: 20px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.modelDetailDrawer {
+  :global(.ant-drawer-body),
+  :global(.beyond-drawer-body) {
+    padding: 16px;
+    background: #f7f9fc;
+  }
+
+  :global(.ant-drawer-header),
+  :global(.beyond-drawer-header) {
+    padding: 16px 20px;
+  }
+}
+
+.modelDetailSection {
+  margin-bottom: 12px;
+  border: 1px solid #e8edf5;
+  border-radius: 10px;
+  box-shadow: 0 2px 8px rgba(31, 37, 51, 0.04);
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+
+  :global(.ant-card-head),
+  :global(.beyond-card-head) {
+    min-height: 42px;
+    padding: 0 14px;
+    border-bottom-color: #eef2f7;
+  }
+
+  :global(.ant-card-head-title),
+  :global(.beyond-card-head-title) {
+    color: #1f2533;
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  :global(.ant-card-body),
+  :global(.beyond-card-body) {
+    padding: 0;
+  }
+
+  :global(.ant-descriptions-view),
+  :global(.beyond-descriptions-view) {
+    border: 0;
+    border-radius: 0 0 10px 10px;
+    overflow: hidden;
+  }
+
+  :global(.ant-descriptions-row > th),
+  :global(.ant-descriptions-row > td),
+  :global(.beyond-descriptions-row > th),
+  :global(.beyond-descriptions-row > td) {
+    padding: 10px 12px;
+    border-color: #eef2f7;
+  }
+
+  :global(.ant-descriptions-item-label),
+  :global(.beyond-descriptions-item-label) {
+    width: 112px;
+    color: #707987;
+    background: #fbfcfe;
+    font-size: 12px;
+  }
+
+  :global(.ant-descriptions-item-content),
+  :global(.beyond-descriptions-item-content) {
+    color: #1f2533;
+    background: #fff;
+    font-size: 13px;
+  }
 }
 
 .quotaCard {
@@ -74,11 +202,7 @@
   background: #fff;
   box-shadow: 0 4px 12px rgba(20, 22, 26, 0.04);
   cursor: pointer;
-  transition:
-    background 0.2s,
-    border-color 0.2s,
-    box-shadow 0.2s,
-    transform 0.2s;
+  transition: background 0.2s, border-color 0.2s, box-shadow 0.2s, transform 0.2s;
 
   &:hover {
     border-color: #d6e7ff;
@@ -103,6 +227,34 @@
     line-height: 20px;
     flex-shrink: 0;
   }
+}
+
+.modelActions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+
+.modelEnableButton {
+  display: inline-flex;
+  padding: 0 4px;
+  font-size: 12px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+.modelItem:hover .modelEnableButton {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.modelCodeLine {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
 }
 
 .modelTitleLine {
@@ -135,7 +287,6 @@
 }
 
 .modelCode {
-  margin-top: 4px;
   color: #8f98a6;
   font-size: 12px;
   line-height: 18px;

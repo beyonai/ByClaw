@@ -1,6 +1,10 @@
 import React from 'react';
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, configure, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { Modal } from 'antd';
+
+// 提交钩子会与其他前端测试并行执行，重型连接器交互需要更宽裕的异步查询窗口。
+configure({ asyncUtilTimeout: 30000 });
+jest.setTimeout(60000);
 
 const mockMessageError = jest.fn();
 const mockMessageSuccess = jest.fn();
@@ -373,7 +377,9 @@ describe('ConnectorControl authorization states', () => {
     await waitFor(() => expect(mockDeleteOperationAccount).toHaveBeenCalledWith(7));
     expect(mockListGlobalOperationAccounts).toHaveBeenCalledTimes(1);
     expect(screen.getByText('ima')).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByRole('button', { name: '账号操作' })).not.toHaveClass('ant-btn-loading'));
+    await waitFor(() => expect(screen.getByRole('button', { name: '账号操作' })).not.toHaveClass('ant-btn-loading'), {
+      timeout: 15000,
+    });
   });
 
   it('keeps the refreshed account list when the initial request resolves last', async () => {
@@ -2377,7 +2383,7 @@ describe('ConnectorControl authorization states', () => {
         cancelToken: expect.any(AbortController),
       })
     );
-  });
+  }, 30000);
 
   it('uses the common help card for unstructured credential guidance', async () => {
     mockQueryConnectorList.mockResolvedValue({

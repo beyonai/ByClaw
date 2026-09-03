@@ -39,10 +39,10 @@ describe("TaskPlanProcessor", () => {
     expect(compiled.systemPrompt).not.toContain('"taskId":"task-1"');
     expect(compiled.systemPrompt).toContain("After creation, task definitions are immutable");
     expect(compiled.systemPrompt).toContain(
-      "Before the final user answer, report the current task outcome",
+      "Plan status does not restrict progress messages or user questions",
     );
     expect(compiled.systemPrompt).toContain(
-      "An active plan prevents the Run from completing",
+      "the runtime may continue execution up to three times, then close the plan and finish the Run",
     );
     expect(compiled.systemPrompt).toContain(
       "create the task plan before calling askUserQuestion",

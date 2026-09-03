@@ -140,6 +140,46 @@
         <result column="allow_manage_count" property="allowManageCount"/>
     </resultMap>
 
+    <!-- 审核中心一次联表取回申请人、资源和员工类型，替代按全部数字员工逐条查询。 -->
+    <select id="queryDigitalEmployeeUseApplyAudit"
+            resultType="com.iwhalecloud.byai.manager.vo.auth.DigitalEmployeeUseApplyAuditVo">
+        select pg.privilege_grant_id as privilegeGrantId,
+               pg.grant_to_obj_id as userId,
+               coalesce(u.user_name, cast(pg.grant_to_obj_id as varchar)) as userName,
+               pg.create_date as applyTime,
+               pg.update_date as auditTime,
+               case
+                   when pg.status_cd = 'X' then '审核通过'
+                   when pg.status_cd = 'R' then '已驳回'
+                   else '待审核'
+               end as applyStatus,
+               r.resource_id as resourceId,
+               r.resource_name as resourceName,
+               r.resource_biz_type as resourceBizType,
+               e.agent_type as agentType,
+               r.avatar as avatar
+          from au_privilege_grant pg
+          join ss_resource r
+            on r.resource_id = pg.grant_obj_id
+           and r.resource_biz_type = pg.grant_obj_type
+          left join ss_res_ext_dig_employee e on e.resource_id = r.resource_id
+          left join po_users u on u.user_id = pg.grant_to_obj_id
+         where r.resource_biz_type = 'DIG_EMPLOYEE'
+           and pg.grant_type = 'AVAILABLE_USE'
+           and pg.grant_to_obj_type = 'USER'
+           and pg.grant_to_type = 'RED'
+           and pg.oper_type = 'READ'
+           <choose>
+               <when test="history">
+                   and pg.status_cd in ('X', 'R')
+               </when>
+               <otherwise>
+                   and pg.status_cd = 'P'
+               </otherwise>
+           </choose>
+         order by pg.create_date desc, pg.privilege_grant_id desc
+    </select>
+
 
     <resultMap id="privilegeGrantAuditVoResultMap" type="com.iwhalecloud.byai.manager.vo.auth.PrivilegeGrantAuditVo">
         <result column="grant_obj_id" property="grantObjId" />

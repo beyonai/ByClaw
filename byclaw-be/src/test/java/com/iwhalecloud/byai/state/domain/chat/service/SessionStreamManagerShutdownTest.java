@@ -37,7 +37,7 @@ class SessionStreamManagerShutdownTest {
             .put("10", container);
         ((Map<String, SessionStreamLeaseService.Lease>) ReflectionTestUtils.getField(manager, "streamLeases"))
             .put("10", lease);
-        when(outputStreamManager.getContext("10")).thenReturn(ctx);
+        when(outputStreamManager.getContexts("10")).thenReturn(java.util.List.of(ctx));
         when(runtimeStateService.requestHandoff(ctx)).thenReturn(true);
 
         manager.onApplicationEvent(mock(ContextClosedEvent.class));

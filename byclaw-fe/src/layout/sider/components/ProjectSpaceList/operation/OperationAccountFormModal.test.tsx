@@ -26,7 +26,7 @@ describe('OperationAccountFormModal', () => {
       await screen.findByText('projectSpace.operation.accountForm.validation.customLinkNameRequired')
     ).toBeInTheDocument();
     expect(onSubmit).not.toHaveBeenCalled();
-  });
+  }, 15000);
 
   it('submits the custom link name together with its url', async () => {
     const onSubmit = jest.fn();

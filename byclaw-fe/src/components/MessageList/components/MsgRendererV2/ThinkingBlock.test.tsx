@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { IMessageState, SSEMessageType } from '@/constants/message';
 import { IFormStatus } from '@/hooks/useSseSender/agent/typescript';
 import type { IMessage, IMessageListItem } from '@/typescript/message';
@@ -128,6 +128,40 @@ describe('ThinkingBlock', () => {
       />
     );
     expect(screen.getByRole('button', { name: /thinkingProcess.done/ })).toHaveTextContent('先检查上下文');
+  });
+
+  it('loads the tool call preview from the message component on demand', async () => {
+    const item = {
+      uuid: 'tool-call-item',
+      contentType: SSEMessageType.toolCall,
+      content: {
+        substance: {
+          title: 'Bash',
+          description: '检查工作区状态',
+        },
+      },
+      status: '_START_',
+      orginContent: '',
+    } as IMessageListItem;
+
+    render(
+      <ThinkingBlock
+        blockId="think-tool-call"
+        items={[item]}
+        message={createMessage(item)}
+        ended={false}
+        updateMessage={(message) => message}
+      />
+    );
+
+    await waitFor(
+      () => {
+        expect(screen.getByRole('button', { name: /thinkingProcess.thinking/ })).toHaveTextContent(
+          'Bash 检查工作区状态'
+        );
+      },
+      { timeout: 10000 }
+    );
   });
 
   it('allows an ended block to collapse after the interaction is completed', () => {

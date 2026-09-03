@@ -251,7 +251,7 @@ public class RouteService {
                     laneRoutes.size(), response.getMessageId(), response.getTargetWorkerId(), sessionId);
             }
         } catch (Exception e) {
-            chatStreamRuntimeCoordinator.stopIfStarted(sessionId, runtimeStarted);
+            chatStreamRuntimeCoordinator.stopIfStarted(ctx, runtimeStarted);
             throw e;
         }
 
@@ -284,7 +284,7 @@ public class RouteService {
                         ctx.messageContext.setComplete(true);
                     }
                     log.info("收到停止哨兵，退出事件循环并落库已堆积消息, sessionId: {}", sessionId);
-                    chatStreamRuntimeCoordinator.stopIfStarted(sessionId, runtimeStarted);
+                    chatStreamRuntimeCoordinator.stopIfStarted(ctx, runtimeStarted);
                     break;
                 }
 
@@ -317,7 +317,7 @@ public class RouteService {
                     log.error("收到 Gateway error 事件, sessionId: {}, traceId: {}", sessionId,
                         dataJson.getString("trace_id"));
                     if (ctx.markTraceComplete(dataJson.getString("trace_id"))) {
-                        chatStreamRuntimeCoordinator.stopIfStarted(sessionId, runtimeStarted);
+                        chatStreamRuntimeCoordinator.stopIfStarted(ctx, runtimeStarted);
                         break;
                     }
                     continue;
@@ -345,14 +345,14 @@ public class RouteService {
                             ctx.messageContext.setComplete(true);
                         }
                         log.info("收到 appStreamResponse，退出事件循环, sessionId: {}", sessionId);
-                        chatStreamRuntimeCoordinator.stopIfStarted(sessionId, runtimeStarted);
+                        chatStreamRuntimeCoordinator.stopIfStarted(ctx, runtimeStarted);
                         break;
                     }
                 }
             }
         } finally {
             // 无论正常/超时/异常，当前请求如果启动了监听，则负责停止并清理上下文。
-            chatStreamRuntimeCoordinator.stopIfStarted(sessionId, runtimeStarted);
+            chatStreamRuntimeCoordinator.stopIfStarted(ctx, runtimeStarted);
         }
     }
 
