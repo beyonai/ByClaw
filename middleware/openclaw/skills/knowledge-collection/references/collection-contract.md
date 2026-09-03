@@ -74,12 +74,16 @@ collection_filters:
 
 ### 会话目录边界
 
-在用户沙箱中，没有显式保存路径时推荐把采集会话根放在当前聊天会话的
+在用户沙箱中，没有显式保存路径时必须把采集会话根放在当前聊天会话的
 `/by/.sessions/<sessionId>/collections/<task-name>/`。用户提供的保存路径是交付目录，不是采集会话目录；此时内部会话必须放在
-`<Session Root>/.collection-runs/<run-id>/`，保存路径只传给最终 `publish`。`sessionId` 取自 Agent 上下文提供的 Session Root，不能从登录认证
+`<Session Root>/.collection-runs/<run-id>/`，并在 `init` 传 `--delivery-requested true`；保存路径只传给最终 `publish`。
+两种目录布局互斥，没有显式保存路径时不得使用 `.collection-runs/` 或传 `--delivery-requested true`。`sessionId` 取自 Agent 上下文提供的 Session Root，不能从登录认证
 环境变量或 Cookie 推导。对外路径参数以 `/` 开头时按绝对路径使用，可指向沙箱内任意可写位置；相对路径以可信的
 `--session-root /by/.sessions/<sessionId>` 为基准解析，不得依赖进程当前目录。相对路径规范化后的结果以及其真实祖先
 不得通过 `..` 或符号链接越出该 Session Root。绝对历史会话和绝对输出路径不要求属于当前 Session Root。
+
+不得预先 `mkdir`、探测或枚举 Session Root 来测试可写性；`init` 负责创建会话根与固定骨架。参数校验失败后不得删除、清空
+或复用目标目录，因为失败调用尚未取得该路径的所有权；修正参数后应由 `init` 检查路径是否不存在或为空。
 
 同一采集任务只能有一个初始化后的会话根目录。来源执行器或人工补采工具产生的下载目录、图片和原始 Markdown 必须位于该会话的 `raw/` 子树；由此生成的工作副本必须位于 `markdown/items/`，最终正文必须位于 `sanitized/items/`。当原始来源响应已保存文章图片 URL 时，无需在 `raw/` 重复下载图片；只有获准来源执行器取得的交付副本才能写入 `sanitized/items/<article-name>-<item-id>/assets/`。不得绕过来源执行器直接 HTTP 补抓、不得保留远程图片链接，也不得伪造本地资源路径。封面与正文在同一条目中处理，但媒体状态与正文物化状态相互独立：封面失败只登记媒体缺口，不得把已经成功取得的正文标记为失败；Markdown 只能引用实际成功落盘的本地封面。不得在会话根目录旁创建 `*-fulltext/`、`*-articles/` 或其他自定义交付目录。
 

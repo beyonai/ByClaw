@@ -15,6 +15,10 @@ const ACQUISITION_OUTCOMES = new Set(['saved', 'unavailable', 'unsupported', 'sk
 const PAGE_VERIFICATIONS = new Set(['verified-article', 'verified-non-article', 'not-evaluated']);
 const TOPIC_STATUSES = new Set(['matched', 'not-required', 'unmatched', 'unknown', 'not-evaluated']);
 const PROMOTION_STATUSES = new Set(['not-eligible', 'eligible', 'promoted', 'duplicate']);
+const FAILURE_DIAGNOSTIC_STAGES = new Set(['resolved-url-authorization', 'extract-url-continuity']);
+const FAILURE_DIAGNOSTIC_KINDS = new Set([
+  'redirect-not-authorized', 'resolved-url-unavailable', 'extract-url-changed',
+]);
 
 function inputValue(input) {
   const requestedCount = Number(input?.requestedCount);
@@ -403,6 +407,17 @@ function validateAttemptResult(result) {
     || typeof result?.reasonCode !== 'string' || !result.reasonCode) {
     throw new Error('PROBE_RESULT_INVALID: terminal probe result 不完整');
   }
+  const diagnostic = result.failureDiagnostic;
+  if (diagnostic !== undefined && (
+    !diagnostic || typeof diagnostic !== 'object' || Array.isArray(diagnostic)
+    || !FAILURE_DIAGNOSTIC_STAGES.has(diagnostic.stage)
+    || !FAILURE_DIAGNOSTIC_KINDS.has(diagnostic.mismatchKind)
+    || typeof diagnostic.requestedUrl !== 'string' || diagnostic.requestedUrl.length > 2_000
+    || (diagnostic.resolvedUrl !== null
+      && (typeof diagnostic.resolvedUrl !== 'string' || diagnostic.resolvedUrl.length > 2_000))
+  )) {
+    throw new Error('PROBE_RESULT_INVALID: failureDiagnostic 无效');
+  }
 }
 
 export function commitProbeAttempt(paths, runId, attemptId, result) {
@@ -463,6 +478,7 @@ export function summarizeProbeRun(session) {
   if (!run) return null;
   const delivery = summarizePromotedDelivery(session);
   const attempts = Array.isArray(run.attempts) ? run.attempts : [];
+  const reservation = run.discoveryReservation;
   return {
     runId: run.runId,
     persistedStatus: run.status,
@@ -477,5 +493,13 @@ export function summarizeProbeRun(session) {
       paused: attempts.filter((attempt) => attempt.attemptState === 'paused-user-action').length,
       blocked: attempts.filter((attempt) => attempt.attemptState === 'infrastructure-blocked').length,
     },
+    ...(reservation ? {
+      discoveryReservation: {
+        round: reservation.round,
+        query: reservation.query,
+        channel: reservation.channel,
+        phase: reservation.phase,
+      },
+    } : {}),
   };
 }

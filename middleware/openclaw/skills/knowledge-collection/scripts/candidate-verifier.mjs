@@ -7,7 +7,12 @@ import { commitProbeAttempt, pauseProbeRun, readProbeRun } from './probe-state.m
 import { loadSession } from './session.mjs';
 import { assessMaterializedTopic } from './topic-relevance.mjs';
 import { analyzeWebMarkdown } from './web-content-analysis.mjs';
-import { acquireArxivProbe, acquireWechatProbe, acquireWebProbe } from './web-acquirer.mjs';
+import {
+  acquireArxivProbe,
+  acquireWechatProbe,
+  acquireWebProbe,
+  authorizationEquivalentHttpUrl,
+} from './web-acquirer.mjs';
 import { sanitizeWechatMarkdown } from './wechat-materializer.mjs';
 
 function sha256(value) {
@@ -38,6 +43,7 @@ function terminal(paths, runId, attemptId, result) {
     reasonCode: result.reasonCode,
     ...(result.contentFingerprint ? { contentFingerprint: result.contentFingerprint } : {}),
     ...(result.duplicateOf ? { duplicateOf: result.duplicateOf } : {}),
+    ...(result.failureDiagnostic ? { failureDiagnostic: result.failureDiagnostic } : {}),
   });
 }
 
@@ -219,8 +225,10 @@ function candidateAndAttempt(paths, runId, attemptId) {
 }
 
 function validateAcquiredUrl(candidate, acquired) {
-  const allowed = new Set(candidate.acquisitionUrls || []);
-  allowed.add(candidate.canonicalUrl);
+  const allowed = [...new Set([candidate.canonicalUrl, ...(candidate.acquisitionUrls || [])])];
+  const isAllowed = (value) => {
+    try { return allowed.some((url) => authorizationEquivalentHttpUrl(url, value)); } catch { return false; }
+  };
   let trustedWechatRedirect = false;
   try {
     const requested = new URL(acquired.requestedUrl);
@@ -228,8 +236,8 @@ function validateAcquiredUrl(candidate, acquired) {
     trustedWechatRedirect = requested.hostname === 'weixin.sogou.com'
       && resolved.hostname === 'mp.weixin.qq.com' && /^\/s(?:\/|$)/u.test(resolved.pathname);
   } catch {}
-  if (!allowed.has(acquired.requestedUrl)
-    || (!allowed.has(acquired.resolvedUrl) && !trustedWechatRedirect)) {
+  if (!isAllowed(acquired.requestedUrl)
+    || (!isAllowed(acquired.resolvedUrl) && !trustedWechatRedirect)) {
     throw new Error(`PROBE_ACQUISITION_URL_NOT_AUTHORIZED: ${acquired.resolvedUrl || acquired.requestedUrl}`);
   }
 }
@@ -298,6 +306,7 @@ export async function verifyCandidate(paths, { runId, attemptId }, options = {})
     return terminal(paths, runId, attemptId, {
       acquisitionOutcome: acquired?.status === 'unsupported' ? 'unsupported' : 'unavailable',
       reasonCode: acquired?.reasonCode || 'ACQUISITION_UNAVAILABLE',
+      ...(acquired?.failureDiagnostic ? { failureDiagnostic: acquired.failureDiagnostic } : {}),
     });
   }
 

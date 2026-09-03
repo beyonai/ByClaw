@@ -20,7 +20,7 @@ This orchestration-specific ownership rule overrides any generic byCLI recovery 
 ## 0. 默认落盘位置
 
 在创建任何采集目录或调用 `init` 前，先读取当前 Agent 上下文提供的 **Session Root**。在用户沙箱中，
-本次任务的内部采集文件默认落在 `/by/.sessions/<sessionId>/` 下；没有显式保存路径时，推荐使用
+本次任务的内部采集文件默认落在 `/by/.sessions/<sessionId>/` 下；没有显式保存路径时必须使用
 `/by/.sessions/<sessionId>/collections/<task-name>/` 作为唯一采集会话根。这里的 `<sessionId>` 是当前聊天会话 ID，
 必须来自 Agent 上下文中的 Session Root，不得使用登录 Cookie、`BAIYING_SESSION` 或其他认证会话值推断。
 Agent workspace 和其中的历史 `collections/` 都不是 Session Root。不得扫描、读取或复用 Agent workspace 中的历史采集会话来推断本次 `session-dir`；也不得用 `ls`、`find`、glob 枚举 `/by/.sessions/`，不得读取其他会话的 `session.json`，不得从 `ps`、`/proc`、被截断的 `session_status` 或历史目录名称猜测当前 sessionId。只有上下文明确给出的完整绝对 Session Root 才可使用；当前上下文没有提供时，必须在 `init` 前停止并向上游取得，不得自行选择一个已有或新造的 `/by/.sessions/<value>`。
@@ -33,9 +33,15 @@ Agent workspace 和其中的历史 `collections/` 都不是 Session Root。不�
 没有提供 Session Root，不得猜测 sessionId，应先向上游取得当前会话目录。绝对路径不受 Session Root 成员关系限制，
 但会话内部的 `.collection-inputs/`、`raw/`、`markdown/` 和 `sanitized/items/` 布局仍必须遵守本 Skill 的目录契约。
 
+`collections/<task-name>/` 与 `.collection-runs/<run-id>/` 两种目录布局互斥。前者只用于没有显式保存路径的普通采集，
+后者只用于用户已经明确提供保存路径的交付暂存。不得预先 `mkdir`、探测或枚举 Session Root 来测试可写性；`init` 负责创建
+唯一会话目录及其骨架。`init` 因未知参数或其他参数校验失败时尚未取得该目录的所有权，参数校验失败后不得删除、清空或复用
+目标目录；修正参数后应让 `init` 自行拒绝已存在或非空的路径。
+
 用户提供的保存路径是交付目录，不是采集会话目录。只要请求中出现明确的保存文件路径，就把该路径记为
 `requestedDeliveryDir`，并在当前 Session Root 的 `.collection-runs/<run-id>/` 中初始化独立的内部会话；不得把用户目录
-直接传给 `init`，也不得假定以后仍使用 `00-collection/`。相对保存路径按当前 Session Root 解析，绝对路径保持其绝对位置。
+直接传给 `init`，并且必须为 `init` 传 `--delivery-requested true`；没有显式保存路径时不得传该参数，也不得使用
+`.collection-runs/`。不得假定以后仍使用 `00-collection/`。相对保存路径按当前 Session Root 解析，绝对路径保持其绝对位置。
 `requestedDeliveryDir` 在发布前是不可探测的 opaque 值：采集和校验期间只写内部会话；最终通过 `publish`
 非破坏性地发布正文与引用图片。
 
@@ -88,8 +94,10 @@ Read only the reference that matches the chosen workflow, plus `collection-contr
 `buildIdSource`。发布系统应通过 `KNOWLEDGE_COLLECTION_BUILD_ID` 注入 commit/build 标识；未注入时 CLI 返回
 运行时 Skill 文件的 `sha256:` 内容指纹，线上与本地指纹一致才可视为同一候选构建。
 
-1. Create or load a session before discovery. Before any source executor, browser preflight, or delegated acquisition command, complete that initialization. Use `init` with the derived `--source-scope` and `--materialization-target`. 用户明确要求“全文”“完整正文”或“PDF 全文”时，还必须传 `--required-content-granularity full-text`；否则使用默认的 `any`。 When the user supplied a save path, use `<Session Root>/.collection-runs/<run-id>/` as `--session-dir` and retain the save path separately as `requestedDeliveryDir`. `init` 命令不得包含 `--delivery-dir`；该路径只保留为编排状态中的 opaque 值，不得传给 `init`，也不得借助 shell 变量或临时文件绕过发布前禁用规则。 When the user already selected direct source URLs, pass those exact URLs through `init --direct-urls '<JSON array>'` and initialize their inventory as `pending` before acquisition so a terminal source gate remains reportable. `--direct-urls` is only for URLs explicitly present in the user's request, never for URLs found or remembered by the Agent.
+1. Create or load a session before discovery. Before any source executor, browser preflight, or delegated acquisition command, complete that initialization. Use `init` with the derived `--source-scope` and `--materialization-target`. 用户明确要求“全文”“完整正文”或“PDF 全文”时，还必须传 `--required-content-granularity full-text`；否则使用默认的 `any`。没有显式保存路径时，必须把 `<Session Root>/collections/<task-name>/` 传给 `--session-dir`，不得使用 `.collection-runs/`。 When the user supplied a save path, use `<Session Root>/.collection-runs/<run-id>/` as `--session-dir`, pass `--delivery-requested true`, and retain the save path separately as `requestedDeliveryDir`. `init` 命令不得包含 `--delivery-dir`；该路径只保留为编排状态中的 opaque 值，不得传给 `init`，也不得借助 shell 变量或临时文件绕过发布前禁用规则。 When the user already selected direct source URLs, pass those exact URLs through `init --direct-urls '<JSON array>'` and initialize their inventory as `pending` before acquisition so a terminal source gate remains reportable. `--direct-urls` is only for URLs explicitly present in the user's request, never for URLs found or remembered by the Agent.
 2. For candidate-only public URL discovery, run `public-discover`. Its `online-search` channel uses Tencent WSA when credentials are available and WSA is not explicitly disabled; only a channel-level WSA failure falls back to SearXNG. WSA 返回的 passage/content 搜索摘要只是发现证据，不是文章正文，也不保证目标页不会是登录、注册、验证、错误或导航页面。`pageType`、`weak`、`articleCandidateIds` 都只是兼容性分类，不代表正文已经验证；是否可尝试读取由持久化的 `discoveryDisposition=probe` 决定。
+
+   `public-discover` 输出的 `candidateQuality`（包括 `eligibleArticle`）仅用于候选诊断和排序；`reject` 候选仍拒绝。公共发现最多允许两轮，任何未由用户明确提供或发现状态持久化授权的 URL 都必须以 `SOURCE_NOT_AUTHORIZED_BY_DISCOVERY` 拒绝。不得使用模型记忆中的 URL、DOI、论文 ID 绕过发现授权。
 
    当用户明确要求一篇或多篇等数量结果时，必须使用 `public-collect`，并传入 `--query`、`--fallback-query` 与 `--requested-count`。该命令拥有两轮发现、high/normal 候选排序、逐条正文获取、页面验证、主题复验、正文去重、原子晋升、暂停恢复和数量收敛的完整状态机。手工串联 `public-discover`、`acquire-web`、`materialize-web`、`collect` 不能复现这一闭环，也不得用这些原子命令绕过 `public-collect` 的单写者所有权。
 

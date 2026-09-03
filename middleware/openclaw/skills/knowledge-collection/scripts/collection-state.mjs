@@ -1393,6 +1393,7 @@ export function collectionStatus(paths) {
   } : null;
   return {
     collectionStatus: metadata.collection.status,
+    operationalStatus: probeSummary?.effectiveStatus || metadata.collection.status,
     items: items.length,
     sourceRecords: items.length,
     materialized: count('materialized'),

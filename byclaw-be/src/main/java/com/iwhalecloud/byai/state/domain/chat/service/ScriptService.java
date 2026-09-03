@@ -760,6 +760,7 @@ public class ScriptService extends AbstractChatProcess {
         }
         // 按正常完成状态落库，保持与同 pod 路径一致。
         snapshot.setMsgStatus(com.iwhalecloud.byai.state.domain.message.enums.MsgStatus.FINISH.getCode());
+        snapshot.setComplete(true);
         byaiMessageHotService.updateSelective(snapshot);
         log.info("stopChat 跨 pod 从快照落库完成, sessionId: {}, messageId: {}", sessionId, snapshot.getMessageId());
         return true;

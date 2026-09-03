@@ -556,6 +556,11 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         for phrase in (
             "`.collection-runs/<run-id>/`",
             "用户提供的保存路径是交付目录，不是采集会话目录",
+            "没有显式保存路径时必须",
+            "两种目录布局互斥",
+            "`--delivery-requested true`",
+            "不得预先 `mkdir`",
+            "参数校验失败后不得删除",
             "`status.collection.deliveryComplete=true`",
             "`publish --session-dir <dir> --delivery-dir <path>`",
             "不得覆盖或删除目标目录中已有的未知内容",

@@ -15,6 +15,7 @@ import {
 } from './session.mjs';
 import {
   assertExternalSessionWriteAllowed,
+  blockProbeRun,
   commitProbeAttempt,
   createProbeRun,
   finishProbeRun,
@@ -22,6 +23,7 @@ import {
   readProbeRun,
   reserveProbeAttempt,
   resumeProbeRun,
+  setProbeDiscoveryReservation,
   summarizeProbeRun,
   updateProbeBudget,
 } from './probe-state.mjs';
@@ -166,4 +168,40 @@ test('remaining orchestration budget is persisted and can only decrease', () => 
   assert.equal(reduced.remainingBudgetMs, run.totalBudgetMs - 1234);
   const unchanged = updateProbeBudget(paths, run.runId, run.totalBudgetMs);
   assert.equal(unchanged.remainingBudgetMs, reduced.remainingBudgetMs);
+});
+
+test('blocked collection status exposes the effective state and resumable discovery reservation', () => {
+  const { paths } = initializedSession();
+  const run = createProbeRun(paths, input);
+  setProbeDiscoveryReservation(paths, run.runId, {
+    query: input.query,
+    channel: 'hot',
+    phase: 'reserved',
+  });
+  blockProbeRun(paths, run.runId, {
+    reasonCode: 'DISCOVERY_INFRASTRUCTURE_FAILED',
+    remainingBudgetMs: 0,
+  });
+
+  const stored = loadSession(paths).session;
+  stored.task.discoveryGate.runs.push({
+    runId: 'discovery-1',
+    query: input.query,
+    category: input.category,
+    status: 'running',
+  });
+  persistSession(paths, stored);
+
+  const summary = summarizeProbeRun(loadSession(paths).session);
+  assert.equal(summary.effectiveStatus, 'infrastructure-blocked');
+  assert.deepEqual(summary.discoveryReservation, {
+    round: 1,
+    query: input.query,
+    channel: 'hot',
+    phase: 'reserved',
+  });
+
+  const status = executeLocalCommand('status', { 'session-dir': paths.root });
+  assert.equal(status.collection.operationalStatus, 'infrastructure-blocked');
+  assert.equal(status.task.discoveryGate.runs[0].status, 'running');
 });
