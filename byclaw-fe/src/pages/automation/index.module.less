@@ -368,18 +368,12 @@
   font-size: 16px;
 }
 
-.automationSkeleton {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
-
-  :global(.@{antPrefix}-skeleton) {
-    min-height: 144px;
-    padding: 16px 20px;
-    border: 1px solid #e5e5e5;
-    border-radius: 16px;
-    box-sizing: border-box;
-  }
+.automationLoading {
+  min-height: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #165dff;
 }
 
 .runContent {
@@ -755,10 +749,6 @@
 
 @media (max-width: 760px) {
   .automationList {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .automationSkeleton {
     grid-template-columns: minmax(0, 1fr);
   }
 

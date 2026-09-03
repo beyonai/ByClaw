@@ -1,4 +1,4 @@
-import { Button, Empty, Input, Modal, Skeleton, Tooltip, message } from 'antd';
+import { Button, Empty, Input, Modal, Spin, Tooltip, message } from 'antd';
 import {
   CheckOutlined,
   DownOutlined,
@@ -258,10 +258,9 @@ const AutomationRunPanel: React.FC<AutomationRunPanelProps> = ({ headerLeading }
       </div>
       <div className={styles.runContent} onScroll={handleScroll}>
         {loading && !runs.length ? (
-          <div className={styles.automationSkeleton}>
-            {Array.from({ length: 8 }, (_, index) => (
-              <Skeleton key={index} active title={false} paragraph={{ rows: 1, width: '100%' }} />
-            ))}
+          // 运行记录与定时任务共用同一加载表现，切换页签时保持视觉一致。
+          <div className={styles.automationLoading}>
+            <Spin indicator={<LoadingOutlined spin />} />
           </div>
         ) : !runGroups.length ? (
           <Empty
