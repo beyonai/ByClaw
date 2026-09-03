@@ -570,6 +570,19 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         ):
             self.assertIn(phrase, combined)
 
+    def test_public_collect_uses_full_text_on_the_first_init(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+
+        for phrase in (
+            "明确数量的文章",
+            "首次 `init`",
+            "`--materialization-target selected`",
+            "`--required-content-granularity full-text`",
+            "不得先用 `any` 初始化",
+            "不得为修正粒度新建",
+        ):
+            self.assertIn(phrase, skill)
+
     def test_skill_main_entry_stops_after_delivery(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
 
