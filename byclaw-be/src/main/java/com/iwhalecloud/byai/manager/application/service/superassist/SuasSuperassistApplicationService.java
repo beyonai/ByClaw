@@ -1080,12 +1080,13 @@ public class SuasSuperassistApplicationService {
     private Project initProject(JSONObject jsonObject, LoginInfo loginInfo) {
 
         String projectName = jsonObject.getString("projectName");
+        String projectCode = jsonObject.getString("projectCode");
         String projectType = jsonObject.getString("projectType");
         String description = jsonObject.getString("description");
         String isShare = jsonObject.getString("isShare");
 
         //不存在则创建
-        Project project = projectService.findByProjectName(projectName);
+        Project project = projectService.findByProjectCode(projectCode);
         if (project == null) {
             project = new Project();
             project.setProjectId(sequenceService.nextVal());
@@ -1097,7 +1098,7 @@ public class SuasSuperassistApplicationService {
             project.setCreateBy(loginInfo.getUserId());
 
             //初始化云盘
-            SsResource cloudResource = projectApplicationService.createCloudResource(project, true);
+            SsResource cloudResource = projectApplicationService.createCloudResource(project);
             project.setCloudResourceId(cloudResource.getResourceId());
 
             projectService.save(project);
@@ -1107,7 +1108,7 @@ public class SuasSuperassistApplicationService {
             // 初始化项目云盘
             Long cloudResourceId = project.getCloudResourceId();
             if (cloudResourceId == null) {
-                SsResource cloudResource = projectApplicationService.createCloudResource(project, true);
+                SsResource cloudResource = projectApplicationService.createCloudResource(project);
                 project.setCloudResourceId(cloudResource.getResourceId());
                 projectService.update(project);
             }

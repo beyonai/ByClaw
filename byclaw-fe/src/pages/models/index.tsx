@@ -43,31 +43,43 @@ function normalizeModelValue(value: any) {
   return `${value ?? ''}`.trim();
 }
 
-function isCurrentModel(record: any, currentModelInfo?: CurrentModelInfo | null) {
+function isCurrentModel(record: any, currentModelInfo?: CurrentModelInfo | null, allRecords: any[] = []) {
   if (!record || !currentModelInfo) return false;
   const currentModelId = normalizeModelValue(currentModelInfo.modelId);
-  if (currentModelId && normalizeModelValue(record.id) === currentModelId) return true;
+  // 新配置以唯一模型 ID 为准，避免同名模型被重复标记。
+  if (currentModelId) return normalizeModelValue(record.id) === currentModelId;
 
-  const currentValues = [currentModelInfo.modelCode, currentModelInfo.modelNo, currentModelInfo.model]
-    .map(normalizeModelValue)
-    .filter(Boolean);
-  if (!currentValues.length) return false;
+  // 历史配置优先按展示名称匹配；模型编码可能被不同提供商复用。
+  const displayName = normalizeModelValue(
+    currentModelInfo.model || currentModelInfo.modelName || currentModelInfo.displayName
+  );
+  const recordDisplayName = normalizeModelValue(record.displayName || record.modelName);
+  if (displayName) {
+    const displayMatches = allRecords.filter(
+      (item) => normalizeModelValue(item.displayName || item.modelName) === displayName
+    );
+    if (displayMatches.length > 0) return displayMatches.length === 1 && recordDisplayName === displayName;
+  }
 
-  return [record.modelCode, record.modelNo, record.displayName, record.modelName]
-    .map(normalizeModelValue)
-    .some((value) => value && currentValues.includes(value));
+  // 仅当编码在全部模型中唯一时才使用编码兜底。
+  const currentCodes = [currentModelInfo.modelCode, currentModelInfo.modelNo].map(normalizeModelValue).filter(Boolean);
+  if (!currentCodes.length) return false;
+  const codeMatches = allRecords.filter((item) =>
+    currentCodes.includes(normalizeModelValue(item.modelCode || item.modelNo))
+  );
+  return codeMatches.length === 1 && codeMatches[0] === record;
 }
 
-function getModelSortWeight(record: any, currentModelInfo?: CurrentModelInfo | null) {
-  if (isCurrentModel(record, currentModelInfo)) return 0;
+function getModelSortWeight(record: any, currentModelInfo?: CurrentModelInfo | null, allRecords: any[] = []) {
+  if (isCurrentModel(record, currentModelInfo, allRecords)) return 0;
   if (record?.status === 'ENABLED') return 1;
   return 2;
 }
 
-function sortModelList(list: any[], currentModelInfo?: CurrentModelInfo | null) {
+function sortModelList(list: any[], currentModelInfo?: CurrentModelInfo | null, allRecords: any[] = list) {
   return [...list].sort((prev, next) => {
-    const prevWeight = getModelSortWeight(prev, currentModelInfo);
-    const nextWeight = getModelSortWeight(next, currentModelInfo);
+    const prevWeight = getModelSortWeight(prev, currentModelInfo, allRecords);
+    const nextWeight = getModelSortWeight(next, currentModelInfo, allRecords);
     return prevWeight - nextWeight;
   });
 }

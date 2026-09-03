@@ -71,7 +71,11 @@ function AllDigitalEmployees(
   props: {
     searchName?: string;
     dropdownParam?: IOnOkParams;
-    buildFilterParam?: (activeTab: string, filterParam?: IOnOkParams) => Record<string, any>;
+    buildFilterParam?: (
+      activeTab: string,
+      filterParam?: IOnOkParams,
+      source?: 'official' | 'available'
+    ) => Record<string, any>;
     mode?: 'employee' | 'group';
     source?: 'official' | 'available';
     onEmployeeClick?: (employee: IAgentCache) => void;
@@ -178,7 +182,7 @@ function AllDigitalEmployees(
         pageNum,
         pageSize: paginationInfo.pageSize,
         keyword,
-        ...(buildFilterParam?.(listTabKey, filterParam) || {}),
+        ...(buildFilterParam?.(listTabKey, filterParam, source) || {}),
         ...(source === 'official' ? { ownerType: 'enterprise' } : {}),
         ...(isEmployeeGroup ? { agentType: '017' } : {}),
         orderField: 'updateTime',

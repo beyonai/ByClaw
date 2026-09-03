@@ -210,6 +210,55 @@ class ChatRuntimeStateServiceTest {
         verify(setOperations, never()).remove(anyString(), any(Object.class));
     }
 
+    @Test
+    @SuppressWarnings("unchecked")
+    void concurrentTurnRemainsDiscoverableAndRecoverableAlongsideItsBackgroundOwner() {
+        RedisTemplate<String, Object> redis = mock(RedisTemplate.class);
+        ValueOperations<String, Object> values = mock(ValueOperations.class);
+        SetOperations<String, Object> sets = mock(SetOperations.class);
+        ChatRuntimeInstance instance = mock(ChatRuntimeInstance.class);
+        when(redis.opsForValue()).thenReturn(values);
+        when(redis.opsForSet()).thenReturn(sets);
+        when(instance.getInstanceId()).thenReturn("backend-a");
+        ReflectionTestUtils.setField(service, "redisTemplate", redis);
+        ReflectionTestUtils.setField(service, "chatRuntimeInstance", instance);
+        java.util.Map<String, Object> records = new java.util.HashMap<>();
+        java.util.Map<String, Set<Object>> indexes = new java.util.HashMap<>();
+        org.mockito.Mockito.doAnswer(call -> {
+            records.put(call.getArgument(0), call.getArgument(1));
+            return null;
+        }).when(values).set(anyString(), any(), any(Long.class), any(TimeUnit.class));
+        when(values.get(anyString())).thenAnswer(call -> records.get(call.getArgument(0)));
+        when(sets.add(anyString(), any(Object.class))).thenAnswer(call -> {
+            indexes.computeIfAbsent(call.getArgument(0), key -> new LinkedHashSet<>()).add(call.getArgument(1));
+            return 1L;
+        });
+        when(sets.members(anyString())).thenAnswer(call -> indexes.get(call.getArgument(0)));
+
+        ChatProcessContext owner = new ChatProcessContext(null, assistantChatDto());
+        owner.sessionId = 10L;
+        owner.traceId = "background";
+        owner.modelAnswerMessageId = 101L;
+        service.save(owner, "owner-token");
+        ChatProcessContext followup = new ChatProcessContext(null, assistantChatDto());
+        followup.sessionId = 10L;
+        followup.traceId = "followup";
+        followup.userMessageId = 102L;
+        followup.modelAnswerMessageId = 103L;
+        followup.concurrentGatewayTurn = true;
+        service.saveConcurrent(followup);
+
+        assertEquals("background", service.get(10L).getTraceId());
+        ChatRuntimeState savedFollowup = service.get("10", "followup");
+        assertEquals(103L, savedFollowup.getModelAnswerMessageId());
+        assertEquals(2, service.getSessionTurns(10L).size());
+        assertEquals(2, service.listRunningStates().size());
+        ChatProcessContext recovered = service.buildRecoveryContext(savedFollowup, snapshotService);
+        org.junit.jupiter.api.Assertions.assertTrue(recovered.concurrentGatewayTurn);
+        assertEquals(followup.runningOutputStreamToken, recovered.runningOutputStreamToken);
+        assertEquals("followup", recovered.traceId);
+    }
+
     private ChatRuntimeState runtimeState(ByaiMessageHotDtoDto askMsg) {
         ChatRuntimeState state = new ChatRuntimeState();
         state.setSessionId(10L);

@@ -733,7 +733,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   );
 
   const emptyTextId = {
-    project: 'common.noData',
+    project: 'projectSpace.detail.resource.emptySharedFiles',
     shared: 'projectSpace.detail.resource.emptySharedFiles',
     session: 'projectSpace.detail.resource.emptySessionFiles',
   }[scope];

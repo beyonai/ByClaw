@@ -6,6 +6,7 @@ import { trim, debounce } from 'lodash';
 import useGlobal from '@/hooks/useGlobal';
 import AllDigitalEmployees from './components/AllDigitalEmployees';
 import ResourceFilter, { IOnOkParams, getDefaultParams } from '@/components/Resources/components/ResourceFilter';
+import { PERMISSION_AUTHORIZED_TO_ME_VALUE, PERMISSION_CREATED_BY_ME_VALUE } from '@/components/Resources/constants';
 import { getCompositeAppInfo } from '@/service/digitalEmployees';
 import { getAgentChatAvatar } from '@/utils/agent';
 import { navigateToEmployeeChat } from '@/utils/employeeChat';
@@ -20,13 +21,31 @@ import classnames from 'classnames';
 
 import styles from './index.module.less';
 
-const buildDigitalEmployeeFilterParam = (_activeTab: string, filterParam?: IOnOkParams) => ({
-  ...(filterParam?.resourceStatus === '' ? { includeAllResourceStatus: true } : {}),
-  ...(filterParam?.resourceStatus !== undefined && filterParam?.resourceStatus !== ''
-    ? { resourceStatus: filterParam.resourceStatus }
-    : {}),
-  ...(filterParam?.permission ? { permission: filterParam.permission } : {}),
-});
+const buildDigitalEmployeeFilterParam = (
+  _activeTab: string,
+  filterParam?: IOnOkParams,
+  source: 'official' | 'available' = 'available'
+) => {
+  const permission = filterParam?.permission;
+  let type: string | undefined;
+  if (source === 'available') {
+    if (permission === PERMISSION_CREATED_BY_ME_VALUE) {
+      type = 'owner';
+    } else if (permission === PERMISSION_AUTHORIZED_TO_ME_VALUE) {
+      type = 'authorize';
+    }
+  }
+
+  return {
+    ...(filterParam?.resourceStatus === '' ? { includeAllResourceStatus: true } : {}),
+    ...(filterParam?.resourceStatus !== undefined && filterParam?.resourceStatus !== ''
+      ? { resourceStatus: filterParam.resourceStatus }
+      : {}),
+    // 我可用接口使用 type=owner/authorize；官方推荐 discover 接口使用通用 permission 枚举。
+    ...(source === 'official' && permission ? { permission } : {}),
+    ...(type ? { type } : {}),
+  };
+};
 
 const DigitalEmployeesPage: React.FC = () => {
   const intl = useIntl();

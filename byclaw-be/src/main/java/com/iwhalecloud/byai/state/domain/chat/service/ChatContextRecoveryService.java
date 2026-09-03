@@ -28,17 +28,17 @@ public class ChatContextRecoveryService {
             return null;
         }
 
-        ChatProcessContext existing = outputStreamManager.getContext(sessionId);
+        String traceId = dataJson.getString("trace_id");
+        ChatProcessContext existing = outputStreamManager.getContext(sessionId, traceId);
         if (existing != null) {
             return existing;
         }
 
-        ChatRuntimeState state = chatRuntimeStateService.get(sessionId);
+        ChatRuntimeState state = chatRuntimeStateService.get(sessionId, traceId);
         if (state == null || !ChatRuntimeState.STATUS_RUNNING.equals(state.getStatus())) {
             return null;
         }
 
-        String traceId = dataJson.getString("trace_id");
         if (StringUtils.isNotBlank(traceId) && StringUtils.isNotBlank(state.getTraceId())
             && !traceId.equals(state.getTraceId())) {
             return null;
@@ -58,7 +58,7 @@ public class ChatContextRecoveryService {
             return null;
         }
         String sessionId = String.valueOf(state.getSessionId());
-        ChatProcessContext existing = outputStreamManager.getContext(sessionId);
+        ChatProcessContext existing = outputStreamManager.getContext(sessionId, state.getTraceId());
         if (existing != null) {
             return existing;
         }

@@ -24,6 +24,9 @@ public class ChatStreamRuntimeCoordinator {
     @Autowired
     private RunningOutputStreamRegistry runningOutputStreamRegistry;
 
+    @Autowired
+    private ChatRuntimeStateService chatRuntimeStateService;
+
     /** 单个 HTTP SSE 会话允许在 JVM 中暂存的最大 Redis Stream 事件数。 */
     @Value("${byclaw.session-stream.http-queue-capacity:1024}")
     private int gatewayEventQueueCapacity;
@@ -31,15 +34,22 @@ public class ChatStreamRuntimeCoordinator {
     /**
      * 准备当前 session 的 Redis Stream 运行态。
      *
-     * @return true 表示本次请求新建了 listener/running 标记；false 表示复用已有运行态，只需发送 Gateway 消息。
+     * @return true 表示本次请求登记了独立轮次；false 表示继续已有轮次，只需发送 Gateway 消息。
      */
     public boolean startIfNecessary(ChatProcessContext ctx) {
+        synchronized (outputStreamManager) {
+            return registerTurn(ctx);
+        }
+    }
+
+    private boolean registerTurn(ChatProcessContext ctx) {
         if (ctx == null || ctx.sessionId == null) {
             return false;
         }
         String sessionId = String.valueOf(ctx.sessionId);
 
-        if (ctx.sendByFrameworkMsgOnly || isSessionAlreadyRunning(ctx.sessionId)) {
+        boolean alreadyRunning = isSessionAlreadyRunning(ctx.sessionId);
+        if (ctx.sendByFrameworkMsgOnly || (alreadyRunning && !ctx.concurrentGatewayTurn)) {
             ctx.sendByFrameworkMsgOnly = true;
             log.info("会话已有运行态，本次只发送 Gateway 消息, sessionId: {}, traceId: {}", sessionId, ctx.traceId);
             return false;
@@ -50,6 +60,18 @@ public class ChatStreamRuntimeCoordinator {
             ctx.gatewayEventQueue = new ArrayBlockingQueue<>(gatewayEventQueueCapacity);
         }
 
+        if (alreadyRunning && ctx.concurrentGatewayTurn) {
+            boolean localListener = sessionStreamManager.isSessionListenerActive(sessionId);
+            if (!localListener && !ChatTransport.WEBSOCKET.equals(ctx.transport)) {
+                throw new com.iwhalecloud.byai.state.common.exception.BdpRuntimeException(
+                    "当前连接无法接收此会话的新回复，请重新连接后再试");
+            }
+            // Persist before sending: the listener may be owned by another backend instance.
+            chatRuntimeStateService.saveConcurrent(ctx);
+            if (localListener) outputStreamManager.putContext(sessionId, ctx);
+            return true;
+        }
+
         // 缓存上下文，供 Redis 监听器查找。
         outputStreamManager.putContext(sessionId, ctx);
 
@@ -58,7 +80,7 @@ public class ChatStreamRuntimeCoordinator {
             ctx.sendByFrameworkMsgOnly = true;
             log.info("会话 listener 已由其他实例持有，本次只发送 Gateway 消息, sessionId: {}, traceId: {}",
                 sessionId, ctx.traceId);
-            outputStreamManager.removeContext(sessionId);
+            outputStreamManager.removeContext(sessionId, ctx);
             return false;
         }
 
@@ -72,6 +94,10 @@ public class ChatStreamRuntimeCoordinator {
             return;
         }
         sessionStreamManager.stopSessionListener(sessionId);
+    }
+
+    public void stopIfStarted(ChatProcessContext ctx, boolean registeredByCurrentRequest) {
+        if (registeredByCurrentRequest && ctx != null) sessionStreamManager.completeSessionTurn(ctx);
     }
 
     private boolean isSessionAlreadyRunning(Long sessionId) {

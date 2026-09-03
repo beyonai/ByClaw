@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import { DownOutlined, RightOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import classnames from 'classnames';
@@ -10,6 +10,7 @@ import { transformList } from '@/components/MessageList/components/ThinkingProce
 import type { TreeNode } from '@/components/MessageList/components/ThinkingProcessRender/typescript';
 import { hasPendingEasyConfirmItem } from '@/components/MessagesComp/easyConfirm';
 import styles from '@/components/MessageList/components/ThinkingProcessRender/index.module.less';
+import { loadThinkingPreviewGetter } from './thinkingPreviewHandler';
 
 type Props = {
   blockId: string;
@@ -19,7 +20,7 @@ type Props = {
   updateMessage: (message: IMessage) => IMessage | void;
 };
 
-const getThinkingPreview = (items: IMessageListItem[], ended: boolean) => {
+const getThinkingPreview = (items: IMessageListItem[], ended: boolean): ReactNode => {
   const lines = items
     .map((item) => item.content?.substance)
     .filter((substance): substance is string => typeof substance === 'string')
@@ -28,6 +29,13 @@ const getThinkingPreview = (items: IMessageListItem[], ended: boolean) => {
     .filter(Boolean);
   const preview = (ended ? lines[0] : lines[lines.length - 1]) || '';
   return preview.length > 120 ? `${preview.slice(0, 120)}…` : preview;
+};
+
+const getPreviewItem = (items: IMessageListItem[], ended: boolean) => {
+  const previewableItems = items.filter(
+    ({ content }) => content?.substance !== null && content?.substance !== undefined
+  );
+  return ended ? previewableItems[0] : previewableItems[previewableItems.length - 1];
 };
 
 export default function ThinkingBlock({ blockId, items, message, ended, updateMessage }: Props) {
@@ -39,7 +47,31 @@ export default function ThinkingBlock({ blockId, items, message, ended, updateMe
   );
   const hasPendingInteraction = hasPendingEasyConfirmItem(message, items);
   const effectiveCollapsed = collapsed && !hasPendingInteraction;
-  const preview = useMemo(() => getThinkingPreview(items, ended), [ended, items]);
+  const defaultPreview = useMemo(() => getThinkingPreview(items, ended), [ended, items]);
+  const previewItem = useMemo(() => getPreviewItem(items, ended), [ended, items]);
+  const [preview, setPreview] = useState<ReactNode>(defaultPreview);
+  const hasPreview = preview !== null && preview !== undefined && preview !== '';
+
+  useEffect(() => {
+    let active = true;
+    setPreview(defaultPreview);
+
+    if (!previewItem) return () => undefined;
+
+    loadThinkingPreviewGetter(previewItem.contentType).then((getPreview) => {
+      if (!active || !getPreview) return;
+      const customPreview = getPreview({
+        message,
+        messageListItemContent: previewItem.content,
+        thinkListItem: previewItem,
+      });
+      if (customPreview !== null && customPreview !== undefined) setPreview(customPreview);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [defaultPreview, message, previewItem]);
 
   useEffect(() => {
     setCollapsed(!hasPendingInteraction);
@@ -78,8 +110,8 @@ export default function ThinkingBlock({ blockId, items, message, ended, updateMe
         >
           {intl.formatMessage({ id: ended ? 'thinkingProcess.done' : 'thinkingProcess.thinking' })}
         </span>
-        {preview && (
-          <span className={styles.thinkingPreview} title={preview}>
+        {hasPreview && (
+          <span className={styles.thinkingPreview} title={typeof preview === 'string' ? preview : undefined}>
             {preview}
           </span>
         )}

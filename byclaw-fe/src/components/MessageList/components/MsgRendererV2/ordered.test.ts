@@ -36,7 +36,7 @@ describe('ordered message helpers', () => {
     expect(groups.map((group) => `${group.channel}:${group.items.length}`)).toEqual(['think:1', 'answer:1', 'think:1']);
   });
 
-  it('keeps structured tool and status events visible on the chronological timeline', () => {
+  it('keeps structured tool and status events inside the chronological thinking block', () => {
     const groups = groupOrderedItems(
       mergeOrderedItems(
         [
@@ -50,8 +50,7 @@ describe('ordered message helpers', () => {
     );
 
     expect(groups.map((group) => `${group.channel}:${group.items.map(({ seq }) => seq).join(',')}`)).toEqual([
-      'think:1',
-      'event:2,3',
+      'think:1,2,3',
       'answer:4',
       'think:5',
     ]);

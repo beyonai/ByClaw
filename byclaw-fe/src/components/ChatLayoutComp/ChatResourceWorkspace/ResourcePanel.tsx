@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Button, Empty, Spin, Tabs } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
+import { getAgentChatAvatar } from '@/utils/agent';
 import Knowledge from '@/layout/sider/components/Knowledge';
 import ModelSiderPanel from '@/layout/sider/components/ModelSiderPanel';
 import OntologySiderPanel from '@/layout/sider/components/OntologySiderPanel';
@@ -210,9 +211,19 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
           ]}
         />
         <div className={styles.resourceBody}>
-          <Spin spinning={projectLoading} wrapperClassName={styles.resourceSpin}>
-            <div className={styles.resourceContent}>{upperContent}</div>
-          </Spin>
+          <div className={styles.resourceMain}>
+            {upperScopeKey === 'employee' && activeEmployee.resourceId ? (
+              <div className={styles.currentEmployeeRow}>
+                <span className={styles.currentEmployeeAvatar}>{getAgentChatAvatar(activeEmployee.avatar)}</span>
+                <span className={styles.currentEmployeeName} title={activeEmployee.name}>
+                  {activeEmployee.name}
+                </span>
+              </div>
+            ) : null}
+            <Spin spinning={projectLoading} wrapperClassName={styles.resourceSpin}>
+              <div className={styles.resourceContent}>{upperContent}</div>
+            </Spin>
+          </div>
           <aside
             className={styles.secondaryNav}
             aria-label={intl.formatMessage({

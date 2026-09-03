@@ -231,6 +231,55 @@
   overflow: hidden;
 }
 
+.resourceMain {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.currentEmployeeRow {
+  min-width: 0;
+  min-height: 36px;
+  padding: 4px 8px;
+  margin: 0 8px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid rgba(22, 93, 255, 0.16);
+  border-radius: 10px;
+  background: linear-gradient(90deg, rgba(22, 93, 255, 0.12), rgba(22, 93, 255, 0.04));
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.4);
+}
+
+.currentEmployeeAvatar {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  overflow: hidden;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  :global(.anticon) {
+    font-size: 20px;
+  }
+}
+
+.currentEmployeeName {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--beyond-color-text);
+  font-size: 13px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .primaryTabs {
   :global {
     .@{antPrefix}-tabs-nav-list {
