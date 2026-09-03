@@ -119,6 +119,18 @@ Pi 的 `before_agent_start` 钩子负责调用编译器。稳定规则始终位�
 服务端授权。附件属于用户本轮提供的输入，安全摘要只包含 id、name、mediaType 和 size，并
 附加到本轮 user message，不进入 system prompt；url、path 和 datasetId 不会暴露给模型。
 
+项目会话由 BE 在 `metadata.project_info` 中传入 `project_id`、`project_name`、
+`project_resources`（资源 ID、名称、编码、类型）和 `workspace`。入口只提取这些业务字段，
+保存为本轮 `Run.ingressContext.projectContext` 快照；超级助手和专家团团长都通过
+`ProjectContextProcessor` 获得项目上下文，实例接管和恢复执行继续使用同一快照。
+每次 `delegateAgent` 调用都会自动把项目上下文附加到子 Agent 的任务正文，并通过
+`metadata.project_info` 继续传递。项目信息（含 `workspace`）只作为背景，由子 Agent
+根据任务和用户要求决定正式成果的保存位置；Super 不用项目目录覆盖子请求的 `cwd`。
+超级助手、专家团团长及 by-framework 子请求均明确：临时产物、临时文件和中间结果保存到
+`/by/.sessions/{externalSessionId}/` 会话目录。返回用户的文件路径采用子 Agent 实际给出的路径。
+项目绑定资源仅提供背景信息，
+不会扩展 Agent 授权。缺少或无法解析项目信息的请求保持原有行为，后续 Run 不沿用上一轮的项目快照。
+
 Session 上下文使用独立的 `SessionContextV1` 保存，不与 Pi transcript 的
 `contextRevision` 混用。当前版本只接受可选的 BCP 47 `locale` 和 IANA `timezone`，且仅在
 创建 Session 时写入；它不保存访问令牌、用户消息或长期记忆。当前本地日期时间在每次 Run

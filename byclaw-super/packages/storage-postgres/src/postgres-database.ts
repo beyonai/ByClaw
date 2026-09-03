@@ -4,6 +4,7 @@ import {
   isThinkingLevel,
   LEADER_CHECKPOINT_TOOL_NAMES,
   parseSessionContext,
+  parseProjectContext,
   parseGroupChatContext,
   parseExpertTeamRuntimeSnapshot,
   validatePiSessionCheckpoint,
@@ -2378,6 +2379,10 @@ function readIngressContext(raw: unknown): RunIngressContextV1 | undefined {
   if (record.agentCatalogError !== undefined && !agentCatalogError) {
     throw new Error("Invalid persisted Run agent catalog error");
   }
+  const projectContext = parseProjectContext(record.projectContext);
+  if (record.projectContext !== undefined && !projectContext) {
+    throw new Error("Invalid persisted Run project context");
+  }
   const leaderModel = readLeaderModelSelection(record.leaderModel);
   const orchestrator =
     record.orchestrator === undefined
@@ -2388,6 +2393,7 @@ function readIngressContext(raw: unknown): RunIngressContextV1 | undefined {
       parentMessageId ||
       traceId ||
       agentCatalogError ||
+      projectContext ||
       leaderModel ||
       orchestrator
       ? {
@@ -2397,6 +2403,7 @@ function readIngressContext(raw: unknown): RunIngressContextV1 | undefined {
           ...(agentCatalogError ? { agentCatalogError } : {}),
           ...(leaderModel ? { leaderModel } : {}),
           ...(orchestrator ? { orchestrator } : {}),
+          ...(projectContext ? { projectContext } : {}),
         }
       : undefined;
   }
@@ -2417,6 +2424,7 @@ function readIngressContext(raw: unknown): RunIngressContextV1 | undefined {
     ...(agentCatalogError ? { agentCatalogError } : {}),
     ...(leaderModel ? { leaderModel } : {}),
     ...(orchestrator ? { orchestrator } : {}),
+    ...(projectContext ? { projectContext } : {}),
   };
 }
 
