@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { getDomain } from 'tldts';
 
 import {
   recordFailedCollectionItem,
@@ -104,6 +105,19 @@ function authorizationComparableUrl(rawUrl, label) {
 export function authorizationEquivalentHttpUrl(left, right) {
   return authorizationComparableUrl(left, 'authorized URL')
     === authorizationComparableUrl(right, 'resolved URL');
+}
+
+function registrableDomain(url) {
+  return getDomain(url.hostname, { allowPrivateDomains: true });
+}
+
+export function authorizationAllowsHttpRedirect(requestedUrl, resolvedUrl, authorizedUrls = []) {
+  const requested = new URL(normalizedHttpUrl(requestedUrl, 'requested URL'));
+  const resolved = new URL(normalizedHttpUrl(resolvedUrl, 'resolved URL'));
+  if (requested.protocol === 'https:' && resolved.protocol !== 'https:') return false;
+  if (authorizedUrls.some((url) => authorizationEquivalentHttpUrl(url, resolved.toString()))) return true;
+  const requestedDomain = registrableDomain(requested);
+  return Boolean(requestedDomain && requestedDomain === registrableDomain(resolved));
 }
 
 function diagnosticUrl(value) {
@@ -235,7 +249,7 @@ export async function acquireWebProbe(candidate, options = {}) {
     const resolved = resolvedUrl ? new URL(resolvedUrl) : null;
     const trustedWechatRedirect = requested.hostname === 'weixin.sogou.com'
       && resolved?.hostname === 'mp.weixin.qq.com' && /^\/s(?:\/|$)/u.test(resolved.pathname);
-    if (!resolvedUrl || (!allowedUrls.has(authorizationComparableUrl(resolvedUrl, 'resolved URL'))
+    if (!resolvedUrl || (!authorizationAllowsHttpRedirect(requestedUrl, resolvedUrl, [...allowedUrls])
       && !trustedWechatRedirect)) {
       return {
         status: 'unavailable',
@@ -444,11 +458,16 @@ export async function runWebAcquire(paths, args, options = {}) {
       return finish({ status: 'failed', exitCode: 1, errorCode: 'EXECUTOR_RESOLVED_URL_UNAVAILABLE' });
     }
     try {
-      if (!authorizationEquivalentHttpUrl(requestedUrl, resolvedUrl)) {
-        const resolvedAuthorization = authorizePublicSource(session.task?.discoveryGate, resolvedUrl);
-        if (resolvedAuthorization.candidateId !== requestedAuthorization.candidateId) {
-          throw new Error('SOURCE_NOT_AUTHORIZED_BY_DISCOVERY');
-        }
+      const requestedHost = new URL(requestedUrl).hostname;
+      const resolved = new URL(resolvedUrl);
+      const trustedWechatRedirect = requestedHost === 'weixin.sogou.com'
+        && resolved.hostname === 'mp.weixin.qq.com' && /^\/s(?:\/|$)/u.test(resolved.pathname);
+      if (!authorizationAllowsHttpRedirect(
+        requestedUrl,
+        resolvedUrl,
+        requestedAuthorization.acquisitionUrls || [],
+      ) && !trustedWechatRedirect) {
+        throw new Error('SOURCE_NOT_AUTHORIZED_BY_DISCOVERY');
       }
     } catch (error) {
       return finish({

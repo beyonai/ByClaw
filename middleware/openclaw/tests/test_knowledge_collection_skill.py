@@ -583,6 +583,18 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         ):
             self.assertIn(phrase, skill)
 
+    def test_init_failure_preserves_the_only_session_directory(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+
+        for phrase in (
+            "首次 `init` 必须一次性提供完整参数",
+            "禁止执行 `mkdir`",
+            "禁止执行 `rm`、`rm -rf` 或 `rmdir`",
+            "禁止改用其他目录名或追加后缀",
+            "输出 `status` 并停止",
+        ):
+            self.assertIn(phrase, skill)
+
     def test_skill_main_entry_stops_after_delivery(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
 
