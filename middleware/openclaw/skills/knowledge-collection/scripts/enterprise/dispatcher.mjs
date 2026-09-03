@@ -1,4 +1,4 @@
-import { isAbsolute, join } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 import { createDingtalkAdapter } from './adapters/dingtalk.mjs';
 import { createFwsAdapter } from './adapters/fws.mjs';
 import { createWecomAdapter } from './adapters/wecom.mjs';
@@ -129,10 +129,15 @@ export function parseMaterializeRequest(values) {
   if (!itemIds.length || new Set(itemIds).size !== itemIds.length) {
     throw new Error('--item-ids must be a comma-separated list of distinct candidate IDs');
   }
+  const sessionDir = absoluteSessionDir(values);
+  const outputDir = absoluteOutputDir(values);
+  if (source === 'ima' && resolve(sessionDir) !== resolve(outputDir)) {
+    throw new Error('IMA materialization must use the same discovery session for --session-dir and --output-dir');
+  }
   return {
     source,
-    sessionDir: absoluteSessionDir(values),
-    outputDir: absoluteOutputDir(values),
+    sessionDir,
+    outputDir,
     itemIds,
     concurrency: parseInteger(values, 'concurrency', 4, 1, 16),
   };

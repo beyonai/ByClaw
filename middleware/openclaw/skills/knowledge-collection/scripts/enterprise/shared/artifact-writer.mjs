@@ -305,7 +305,7 @@ async function createPrivateRoot(normalizedRoot) {
   }
 }
 
-async function openInitializedSessionRoot(normalizedRoot) {
+async function openInitializedSessionRoot(normalizedRoot, { allowCollected = false } = {}) {
   let rootEntry;
   try {
     rootEntry = await lstat(normalizedRoot);
@@ -322,10 +322,15 @@ async function openInitializedSessionRoot(normalizedRoot) {
   } catch {
     throw rejectExisting();
   }
-  if (session.task?.status !== 'initialized'
-    || session.task?.publicationStatus
-    || !Array.isArray(session.collection?.collection?.items)
-    || session.collection.collection.items.length !== 0) {
+  const emptyInitialized = session.task?.status === 'initialized'
+    && !session.task?.publicationStatus
+    && Array.isArray(session.collection?.collection?.items)
+    && session.collection.collection.items.length === 0;
+  const committedCollection = allowCollected
+    && session.task?.status === 'collected'
+    && session.task?.publicationStatus === 'committed'
+    && Array.isArray(session.collection?.collection?.items);
+  if (!emptyInitialized && !committedCollection) {
     throw rejectExisting();
   }
   for (const relativePath of REQUIRED_DIRECTORIES) {
@@ -618,12 +623,14 @@ async function writePersistedJson(root, rootIdentity, relativePath, value) {
   );
 }
 
-export async function createArtifactWriter(root) {
+export async function createArtifactWriter(root, { allowExistingSession = false } = {}) {
   if (!isAbsolute(root)) {
     throw new TypeError('output root must be an absolute path');
   }
   const normalizedRoot = resolve(root);
-  const initializedRoot = await openInitializedSessionRoot(normalizedRoot);
+  const initializedRoot = await openInitializedSessionRoot(normalizedRoot, {
+    allowCollected: allowExistingSession,
+  });
   const rootIdentity = initializedRoot?.rootIdentity || await createPrivateRoot(normalizedRoot);
   const ownsRoot = !initializedRoot;
   let publicationState = 'open';

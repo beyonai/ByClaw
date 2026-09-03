@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, unlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, symlink, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -132,6 +132,68 @@ await (async () => {
     await rm(root, { recursive: true, force: true });
   }
   console.log('PASS search-all aggregate is a canonical statusable session');
+})();
+
+await (async () => {
+  const { createArtifactWriter } = await import('./enterprise/shared/artifact-writer.mjs');
+  const root = await mkdtemp(join(tmpdir(), 'enterprise-search-all-assets-'));
+  const outputRoot = join(root, 'output');
+  try {
+    const aggregateWriter = await createArtifactWriter(outputRoot);
+    const sourceDir = join(outputRoot, 'ima');
+    const sourceWriter = await createArtifactWriter(sourceDir);
+    const markdown = '# IMA item\n\n![cover](assets/cover.png)\n';
+    await sourceWriter.writeText('markdown/item/index.md', markdown);
+    await sourceWriter.writeText('sanitized/items/item/index.md', markdown);
+    await sourceWriter.writeBytes('sanitized/items/item/assets/cover.png', Buffer.from('ima-cover'));
+    await sourceWriter.writeCollectionBundle({
+      title: 'IMA body', source: 'ima', backend: 'ima', url: 'ima://item/1', filters: {},
+      inventory: [{
+        itemId: 'item-1', title: 'Item', sourceUrl: 'ima://item/1', sourceItemId: '1',
+        sourceSkill: 'bycli', backend: 'ima', collectionFilters: {}, rawArtifacts: [],
+        materialization: {
+          status: 'materialized', markdownPath: 'markdown/item/index.md',
+          sanitizedPath: 'sanitized/items/item/index.md', pendingArtifactCleanup: [], reason: null,
+        },
+      }],
+      canonicalItems: [{
+        title: 'Item', url: 'ima://item/1', author: '', publishTime: '',
+        markdown: 'sanitized/items/item/index.md', fileName: 'sanitized/items/item/index.md',
+      }],
+      sourceMetadata: {},
+    });
+
+    await enterpriseCollection.writeSearchAllAggregate({
+      aggregateWriter, outputRoot, query: 'item', sources: ['ima'], metadataOnly: false,
+      outcomes: [{ source: 'ima', sessionDir: sourceDir, outcome: { status: 'complete' } }],
+    });
+
+    assert.equal(
+      (await readFile(join(outputRoot, 'sanitized/items/ima/item/assets/cover.png'))).toString(),
+      'ima-cover',
+    );
+    assert.equal(
+      (await readFile(join(outputRoot, 'markdown/ima/item/assets/cover.png'))).toString(),
+      'ima-cover',
+    );
+    const status = await run(process.execPath, [collectionScriptPath, 'status', '--session-dir', outputRoot]);
+    assert.equal(status.code, 0, status.stderr || status.stdout);
+    const downstreamFiles = JSON.parse(status.stdout).downstreamInput.files;
+    assert.equal(downstreamFiles.length, 1);
+    assert.match(downstreamFiles[0], /sanitized\/items\/ima\/item\/index\.md$/);
+    const deliveryDir = join(await realpath(root), 'delivery');
+    const published = await run(process.execPath, [
+      collectionScriptPath, 'publish', '--session-dir', outputRoot, '--delivery-dir', deliveryDir,
+    ]);
+    assert.equal(published.code, 0, published.stderr || published.stdout);
+    const deliveredFiles = await readdir(deliveryDir, { recursive: true });
+    const deliveredCover = deliveredFiles.find((file) => file.endsWith('cover.png'));
+    assert.ok(deliveredCover);
+    assert.equal((await readFile(join(deliveryDir, deliveredCover))).toString(), 'ima-cover');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+  console.log('PASS materialized search-all aggregate preserves referenced local images');
 })();
 
 await (async () => {

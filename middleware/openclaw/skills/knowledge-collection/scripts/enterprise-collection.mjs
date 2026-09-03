@@ -5,8 +5,8 @@ import { createWecomAdapter } from './enterprise/adapters/wecom.mjs';
 import { dispatchEnterprise, dispatchEnterpriseBatch, parseSearchBatchRequests } from './enterprise/dispatcher.mjs';
 import { createArtifactWriter } from './enterprise/shared/artifact-writer.mjs';
 import { loadSession, resolveSandboxPath, sessionPaths } from './session.mjs';
-import { lstat, readFile, realpath } from 'node:fs/promises';
-import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { lstat, readFile, readdir, realpath } from 'node:fs/promises';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 export function parseArgs(argv) {
   const [command, ...rest] = argv;
@@ -127,6 +127,83 @@ async function readChildFile(sessionDir, relativePath, label) {
   return readFile(target, 'utf8');
 }
 
+async function readChildBytes(sessionDir, relativePath, label) {
+  const rootEntry = await lstat(sessionDir);
+  if (!rootEntry.isDirectory() || rootEntry.isSymbolicLink()) {
+    throw new Error(`${label} source session must be a regular directory`);
+  }
+  const target = relativeChildPath(sessionDir, relativePath, label);
+  const entry = await lstat(target);
+  if (!entry.isFile() || entry.isSymbolicLink()) {
+    throw new Error(`${label} must not be a symbolic link`);
+  }
+  const canonicalRoot = await realpath(sessionDir);
+  const canonicalTarget = await realpath(target);
+  const fromRoot = relative(canonicalRoot, canonicalTarget);
+  if (!fromRoot || fromRoot === '..' || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) {
+    throw new Error(`${label} is outside source session`);
+  }
+  return readFile(target);
+}
+
+async function childAssetFiles(sessionDir, assetRootRelative) {
+  const root = resolve(sessionDir, assetRootRelative);
+  let rootEntry;
+  try {
+    rootEntry = await lstat(root);
+  } catch (error) {
+    if (error.code === 'ENOENT') return [];
+    throw error;
+  }
+  if (!rootEntry.isDirectory() || rootEntry.isSymbolicLink()) {
+    throw new Error('aggregate item assets must be a regular directory');
+  }
+  const canonicalSession = await realpath(sessionDir);
+  const canonicalRoot = await realpath(root);
+  const fromSession = relative(canonicalSession, canonicalRoot);
+  if (!fromSession || fromSession === '..' || fromSession.startsWith(`..${sep}`) || isAbsolute(fromSession)) {
+    throw new Error('aggregate item assets are outside source session');
+  }
+  const files = [];
+  async function visit(directory, relativeDirectory) {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      if (entry.isSymbolicLink()) throw new Error('aggregate item assets must not contain symbolic links');
+      const relativePath = join(relativeDirectory, entry.name);
+      const absolutePath = join(directory, entry.name);
+      if (entry.isDirectory()) await visit(absolutePath, relativePath);
+      else if (entry.isFile()) files.push(relativePath);
+      else throw new Error('aggregate item assets must contain only regular files and directories');
+    }
+  }
+  await visit(root, '');
+  return files;
+}
+
+async function copyAggregateAssets({
+  aggregateWriter, sessionDir, sourceSanitizedPath, sanitizedRelative, markdownRelative,
+}) {
+  const sourceMarkdown = resolve(sessionDir, sourceSanitizedPath);
+  const sourceFromSanitizedItems = relative(resolve(sessionDir, 'sanitized/items'), sourceMarkdown);
+  if (!sourceFromSanitizedItems
+    || sourceFromSanitizedItems === '..'
+    || sourceFromSanitizedItems.startsWith(`..${sep}`)
+    || isAbsolute(sourceFromSanitizedItems)) {
+    throw new Error('aggregate item assets must belong to sanitized/items');
+  }
+  const assetRootRelative = join(dirname(sourceSanitizedPath), 'assets');
+  for (const assetRelative of await childAssetFiles(sessionDir, assetRootRelative)) {
+    const sourceRelative = join(assetRootRelative, assetRelative).split(sep).join('/');
+    const itemRelative = join('assets', assetRelative);
+    const bytes = await readChildBytes(sessionDir, sourceRelative, 'aggregate item asset');
+    await aggregateWriter.writeBytes(
+      join(dirname(sanitizedRelative), itemRelative).split(sep).join('/'), bytes,
+    );
+    await aggregateWriter.writeBytes(
+      join(dirname(markdownRelative), itemRelative).split(sep).join('/'), bytes,
+    );
+  }
+}
+
 export async function writeSearchAllAggregate({
   aggregateWriter, query, sources, metadataOnly, outcomes,
 }) {
@@ -156,12 +233,21 @@ export async function writeSearchAllAggregate({
       if (materialization.status === 'materialized') {
         const markdownRelative = `markdown/${prefix}/${materialization.markdownPath.replace(/^markdown\//, '')}`;
         const sanitizedRelative = `sanitized/items/${prefix}/${materialization.sanitizedPath.replace(/^sanitized\/items\//, '')}`;
-        await aggregateWriter.writeText(markdownRelative, await readChildFile(
+        const workMarkdown = await readChildFile(
           result.sessionDir, materialization.markdownPath, 'markdownPath',
-        ));
-        await aggregateWriter.writeText(sanitizedRelative, await readChildFile(
+        );
+        const sanitizedMarkdown = await readChildFile(
           result.sessionDir, materialization.sanitizedPath, 'sanitizedPath',
-        ));
+        );
+        await aggregateWriter.writeText(markdownRelative, workMarkdown);
+        await aggregateWriter.writeText(sanitizedRelative, sanitizedMarkdown);
+        await copyAggregateAssets({
+          aggregateWriter,
+          sessionDir: result.sessionDir,
+          sourceSanitizedPath: materialization.sanitizedPath,
+          sanitizedRelative,
+          markdownRelative,
+        });
         const canonical = canonicalByPath.get(materialization.sanitizedPath);
         if (!canonical) throw new Error(`来源 ${result.source} 的 materialized 条目缺少 canonical item`);
         canonicalItems.push({ ...canonical, markdown: sanitizedRelative, fileName: sanitizedRelative });
@@ -213,7 +299,7 @@ function help() {
     commands: {
       search: '--session-root </by/.sessions/sessionId> --parent-session-dir <sandbox-path> --source dingtalk|feishu|wecom|ima --query <query> --output-dir <sandbox-path; same resolved path as parent-session-dir> [--limit 1..500] [--concurrency 1..16] [--cursor <cursor>] [--metadata-only [true|false]] [--source-options <json>]',
       searchAll: '--session-root </by/.sessions/sessionId> --parent-session-dir <sandbox-path> [--sources dingtalk,feishu,wecom,ima] --query <query> --output-root <sandbox-path> [--limit 1..500] [--concurrency 1..16] [--metadata-only [true|false]]; defaults to all sources and metadata-only; continues after a connector auth failure',
-      materialize: '--session-root </by/.sessions/sessionId> --source dingtalk|feishu|ima --session-dir <sandbox-path> --item-ids <id[,id...]> --output-dir <sandbox-path> [--concurrency 1..16]',
+      materialize: '--session-root </by/.sessions/sessionId> --source dingtalk|feishu|ima --session-dir <sandbox-path> --item-ids <id[,id...]> --output-dir <sandbox-path; for ima, same resolved path as session-dir> [--concurrency 1..16]',
       resource: '--session-root </by/.sessions/sessionId> --parent-session-dir <sandbox-path> --source dingtalk|feishu|wecom|ima --url <http(s)-url> --output-dir <sandbox-path> [--minute-token <token> for feishu]',
       resumeResource: '--session-root </by/.sessions/sessionId> --source wecom --session-dir <sandbox-path> --output-dir <sandbox-path>',
       legacy: 'wecom-smartpage and feishu-minutes remain supported and require --parent-session-dir',

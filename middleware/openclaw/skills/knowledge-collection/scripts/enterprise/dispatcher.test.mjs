@@ -101,16 +101,24 @@ test('parseResourceRequest enforces source-specific resource fields', () => {
   }));
 });
 
-test('parseMaterializeRequest requires a new output session and explicit candidate IDs', () => {
+test('parseMaterializeRequest requires explicit candidate IDs and keeps IMA in its discovery session', () => {
   assert.deepEqual(parseMaterializeRequest({
     source: 'dingtalk', 'session-dir': '/tmp/discovery', 'output-dir': '/tmp/materialized', 'item-ids': 'dws-a,dws-b', concurrency: '2',
   }), {
     source: 'dingtalk', sessionDir: '/tmp/discovery', outputDir: '/tmp/materialized', itemIds: ['dws-a', 'dws-b'], concurrency: 2,
   });
+  assert.deepEqual(parseMaterializeRequest({
+    source: 'ima', 'session-dir': '/tmp/ima-discovery', 'output-dir': '/tmp/ima-discovery',
+    'item-ids': 'ima-a', concurrency: '2',
+  }), {
+    source: 'ima', sessionDir: '/tmp/ima-discovery', outputDir: '/tmp/ima-discovery',
+    itemIds: ['ima-a'], concurrency: 2,
+  });
   for (const values of [
     { source: 'dingtalk', 'session-dir': '/tmp/discovery', 'output-dir': '/tmp/materialized', 'item-ids': '' },
     { source: 'dingtalk', 'session-dir': 'relative', 'output-dir': '/tmp/materialized', 'item-ids': 'dws-a' },
     { source: 'wecom', 'session-dir': '/tmp/discovery', 'output-dir': '/tmp/materialized', 'item-ids': 'wecom-a' },
+    { source: 'ima', 'session-dir': '/tmp/discovery', 'output-dir': '/tmp/materialized', 'item-ids': 'ima-a' },
   ]) assert.throws(() => parseMaterializeRequest(values));
 });
 

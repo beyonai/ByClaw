@@ -1,6 +1,6 @@
 # IMA 采集桥接
 
-IMA 采集意图由 `knowledge-collection` 统一编排，所有 IMA 数据读取统一通过浏览器支持的 byCLI IMA adapter 完成。指定知识库时执行 `bycli ima knowledge <knowledgeBase> -f json`；未指定知识库时先执行 `bycli ima knowledge-list -f json`，再对返回的知识库逐库执行 `bycli ima knowledge <knowledgeBase> -f json`。不得调用独立 IMA OpenAPI 命令、curl、wget、任意手写 HTTP 或直接调用上游 API 获取 IMA 数据。
+IMA 采集意图由 `knowledge-collection` 统一编排，所有 IMA 数据读取统一通过浏览器支持的 byCLI IMA adapter 完成。指定知识库时执行 `bycli ima knowledge <knowledgeBase> -f json`；未指定知识库时先执行 `bycli ima knowledge-list -f json`，再对返回的知识库按 `--concurrency` 上限执行 `bycli ima knowledge <knowledgeBase> -f json`。不得调用独立 IMA OpenAPI 命令、curl、wget、任意手写 HTTP 或直接调用上游 API 获取 IMA 数据。
 
 IMA adapter 返回可信的 `https://mp.weixin.qq.com/s...` 文章 URL 时，正文继续交给 `bycli weixin download`；这是对已发现原文 URL 的来源执行。另一个窄化例外是 adapter 内置的受控 HTTP(S) 下载器：它只能下载 `bycli ima knowledge` 原始响应中的 `coverUrls`，用于把封面与正文一起物化，不能用于发现、正文采集或任意 URL 下载。
 
@@ -16,12 +16,12 @@ IMA adapter 返回可信的 `https://mp.weixin.qq.com/s...` 文章 URL 时，正
 ## 执行、筛选与认证
 
 1. `bycli ima` 是浏览器支持的 adapter，遵循主 Skill 的 bridge bootstrap 单一恢复所有者规则。根 Agent 不得直接运行 browser、doctor、daemon status、restart 或其他诊断/恢复命令；collection Runner 返回最终 bridge 状态后也不得再次恢复或重试。
-2. 指定知识库时，把用户提供的知识库完整名称或 ID 原样传给 `knowledge`。未指定知识库时，从 `knowledge-list` 中优先读取稳定 ID，缺少 ID 时才使用完整名称，然后逐库读取。
+2. 指定知识库时，把用户提供的知识库完整名称或 ID 原样传给 `knowledge`。未指定知识库时，从 `knowledge-list` 中优先读取稳定 ID，缺少 ID 时才使用完整名称，然后使用 `--concurrency`（1..16，默认 4）控制的工作池读取；条目物化复用同一并发上限。并发完成顺序不得改变知识库顺序、来源排名或最终 inventory 顺序。
 3. 未指定知识库时必须在本地筛选：规范化查询词后，对标题、文件夹路径、摘要、导语、标签、来源路径和 URL 做不区分大小写的匹配；跨库合并后按来源条目和 `sourceUrl` 去重，最后应用 `limit`。不得把查询词拼入网页脚本或改写知识库选择器。
-4. 单个知识库读取失败时记录非敏感失败原因并继续其他知识库；只要至少一个知识库读取成功，就保留成功结果并在 discovery metadata 中报告部分失败。全部知识库都失败时返回失败；登录或授权失效映射为 `auth_required`，提示用户在 IMA 网页完成登录，不得读取或展示认证数据。
+4. 单个知识库读取失败时记录非敏感失败原因并继续其他知识库；只要至少一个知识库读取成功，就保留成功结果并在 discovery metadata 中报告部分失败。全部知识库都失败时返回失败；登录或授权失效映射为 `auth_required`，提示用户在 IMA 网页完成登录，不得读取或展示认证数据。bridge 不可用时必须写出 `collection.status=failed` 的完整失败 bundle，并返回 `status=bridge_unavailable`、`reasonCode=BRIDGE_UNAVAILABLE`；已有其他任务持有 bridge 恢复权时返回 `status=bridge_recovery_busy`、`reasonCode=BRIDGE_RECOVERY_BUSY`。Runner 到此停止，不得把异常降级为普通 stderr 或留下仅 initialized 的会话。
 5. 指定知识库的 `knowledge` 调用失败或返回无效 JSON 时直接失败，不切换到其他 IMA 获取方式。有效空列表是成功结果，不得伪造记录。
 6. IMA 桥接只允许搜索、读取和采集知识库条目；URL 导入等写入能力不属于本技能。
-7. 单一 IMA 采集会话中，`enterprise search` 的 `--output-dir` 必须等于 `--parent-session-dir`。禁止把 `raw/ima/` 初始化成第二个会话，也不得交付 `raw/ima/sanitized/items`；最终正文只能位于会话根级 `sanitized/items/`。
+7. 单一 IMA 采集会话中，`enterprise search` 的 `--output-dir` 必须等于 `--parent-session-dir`。metadata-only 候选的 `enterprise materialize` 也必须令 `--session-dir` 与 `--output-dir` 指向同一个发现会话；dispatcher 和 adapter 都拒绝为 IMA 指定新输出会话。这样原 `query`、`sourceScope`、`materializationTarget`、`requiredContentGranularity` 与 `deliveryRequested` 会继续由同一 `session.json` 持有。禁止把 `raw/ima/` 初始化成第二个会话，也不得交付 `raw/ima/sanitized/items`；最终正文只能位于会话根级 `sanitized/items/`。
 
 ## 规范化产物
 
@@ -46,7 +46,7 @@ sanitized/items/<article-name>-<item-id>/
 
 记录带有可信微信公众号原文 URL 时，IMA adapter 必须优先执行 `bycli weixin download`，读取其成功结果中的 `saved` Markdown，把正文内图片复制到该条目的本地 `assets/article-images/` 并重写相对链接；确认文件可读且非空后才登记 `full-text`。该下载失败时不得切换到其他 IMA 获取方式，但原始记录已有 `abstract` 或 `introduction` 时可以降级物化为 `abstract` 或 `excerpt`。非微信公众号 URL 或无 URL 的条目只能使用 adapter 已返回的摘要或导语；没有可用内容时登记物化失败。所有降级仍使用 `<article-name>-<item-id>` 目录和受控封面下载器。不得手工复制 Markdown、不得改用 `ima-<item-id>` 平铺目录、不得跳过封面下载，也不得把失败库存条目改写成已物化。
 
-每个 materialized IMA 条目必须写入 `materialization.contentGranularity`：明确的完整性证据才允许 `full-text`；存在导语时标记为 `excerpt`；仅摘要为 `abstract`；其他已有内容字段或无法证明完整度时为 `unknown`。旧会话缺失字段一律按 `unknown`，不得默认 `full-text`。该字段不改变 `complete`、`deliveryComplete` 或 `materialized` 的流程语义。
+每个 materialized IMA 条目必须写入 `materialization.contentGranularity`：明确的完整性证据才允许 `full-text`；存在导语时标记为 `excerpt`；仅摘要为 `abstract`；其他已有内容字段或无法证明完整度时为 `unknown`。旧会话缺失字段一律按 `unknown`，不得默认 `full-text`。该字段不改变条目的 `materialized` 状态或 collection 的 `complete` 状态；当原会话要求 `requiredContentGranularity=full-text` 时，它必须参与下游 `deliveryComplete` 判定，摘要、节选和 `unknown` 均不能满足全文交付。
 
 旧会话缺失或含非法 media 状态时，读取结果按 `media.coverStatus=unknown`、`reason=legacy-media-state-unknown` 报告；只读 `status` 不得因此修改原会话文件。
 
@@ -54,6 +54,6 @@ sanitized/items/<article-name>-<item-id>/
 
 `collection-result.json` 的 `source` 和 `backend` 都写 `ima`，inventory 的 `sourceSkill` 写 `bycli`。新物化条目的 `markdown/items/` 与 `sanitized/items/` 必须使用相同目录名：清洗后的文章标题前 5 个 Unicode 可见字符加稳定 `itemId`；完整标题仍保留在正文元数据和 inventory 中。旧会话路径不迁移。
 
-metadata-only 会话恢复物化时保留每条 inventory 自身的知识库名称；全部条目来自同一知识库时把名称写入 `collection-result.json.filters.kb` 和 `sourceMetadata.kb`，来自多个知识库时不写会话级 `kb`，不得丢失或覆盖条目级 `kb`。
+metadata-only 会话恢复物化时，执行 `enterprise materialize --source ima --session-dir <ima-session> --output-dir <ima-session> --item-ids <id[,id...]> [--concurrency 1..16]`。物化结果原地替换该会话的候选视图，同时保留每条 inventory 自身的知识库名称；全部条目来自同一知识库时把名称写入 `collection-result.json.filters.kb` 和 `sourceMetadata.kb`，来自多个知识库时不写会话级 `kb`，不得丢失或覆盖条目级 `kb`。
 
-执行企业 `search`、`search-all` 或 `resource` 时必须传入已授权 IMA 的 `--parent-session-dir`；metadata-only 输出会直接带有 `sourceScope=["ima"]`、`materializationTarget=candidates` 的完整 `session.json`。采集完成后只交付已验证的 `sanitized/items/<article-name>-<item-id>/index.md`，然后停止。
+执行企业 `search`、`search-all` 或 `resource` 时必须传入已授权 IMA 的 `--parent-session-dir`；metadata-only 输出会直接带有完整 `session.json`。单来源 `search` 的候选直接在该会话原地物化。`search-all` 的 IMA 候选位于 `<output-root>/ima` 子会话：选中 IMA 条目时必须把该子会话同时作为 `--session-dir` 和 `--output-dir`，后续 `status`、交付与发布也从该 IMA 子会话继续，不得把尚未刷新的 discovery aggregate 当作已物化结果。`search-all --metadata-only false` 聚合已物化结果时，聚合器必须复制每个条目内的 `assets/` 文件到聚合会话并保持相对布局；越界、非常规文件或符号链接资源必须使聚合失败，正文引用缺失资源则由统一 publish 校验拒绝。采集完成后只交付 `status.downstreamInput.files` 列出的已验证 Markdown 及其本地引用资源，然后停止。
