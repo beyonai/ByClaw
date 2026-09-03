@@ -1,3 +1,4 @@
+import { applyAgentTeamsStreamSnapshot } from '@/components/MessagesComp/ToolCall/agentTeamsStore';
 import { get, isNil, set, unset } from 'lodash';
 
 import { compareStreamId, type ParsedChatStreamMessage } from '@/hooks/useSseSender/chatStream';
@@ -483,6 +484,7 @@ const applyParsedStreamToContext = (parsed: ParsedChatStreamMessage, context: Ch
 
 export const handleParsedChatStream = (parsed: ParsedChatStreamMessage) => {
   if (!shouldApplyParsedStream(parsed)) return;
+  applyAgentTeamsStreamSnapshot(parsed.rawMessage);
 
   const restoredKey = getRestoredKeyByParsed(parsed);
   if (restoringStreamKeys.has(restoredKey)) {

@@ -3,6 +3,8 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 
 import {
   clearAgentTeamsSnapshots,
+  applyAgentTeamsChildProjection,
+  getAgentTeamsSnapshot,
   publishAgentTeamsSnapshot,
 } from '@/components/MessagesComp/ToolCall/agentTeamsStore';
 import AgentTeamsHeaderActivity from '../AgentTeamsHeaderActivity';
@@ -72,6 +74,39 @@ describe('AgentTeamsHeaderActivity', () => {
     clearAgentTeamsSnapshots();
     newMessageHandler = undefined;
     publishAgentTeamsSnapshot('100', snapshot as any);
+  });
+
+  it('keeps stopped members terminal until a new team snapshot reopens them', () => {
+    const stopped = {
+      ...snapshot,
+      team: {
+        ...snapshot.team,
+        members: [{ id: 'member-1', name: '架构舵手', activity: 'idle', status: 'cancelled' }],
+      },
+    } as any;
+    publishAgentTeamsSnapshot('100', stopped);
+    const projection = (status: string) => ({
+      sessionId: '201',
+      running: status === 'running',
+      metadata: {
+        session_scope: 'child',
+        external_parent_session_id: '100',
+        external_session_id: 'member-1',
+        session_status: status,
+        child_run_id: 'member-1:2',
+        child_turn: 2,
+      },
+    });
+    expect(applyAgentTeamsChildProjection('100', projection('idle'), '20-0')).toBe(false);
+    expect(applyAgentTeamsChildProjection('100', projection('running'), '21-0')).toBe(false);
+    expect(getAgentTeamsSnapshot('100')?.team.members?.[0].status).toBe('cancelled');
+    publishAgentTeamsSnapshot('100', {
+      ...stopped,
+      capturedAt: '2026-08-31T08:01:00Z',
+      team: { ...stopped.team, members: [{ ...stopped.team.members[0], status: 'idle' }] },
+    });
+    expect(applyAgentTeamsChildProjection('100', projection('running'), '22-0')).toBe(true);
+    expect(getAgentTeamsSnapshot('100')?.team.members?.[0].activity).toBe('working');
   });
 
   it('renders in the title, paginates tasks by five, and opens a member child session', () => {

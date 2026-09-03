@@ -525,7 +525,7 @@ function useChat(props: IProps) {
     if (answerMsg.messageState === IMessageState.Cancel) return Promise.resolve();
     set(answerMsg, 'messageState', IMessageState.Cancel);
     updateMessage(answerMsg);
-    chatSessionRuntimeManager.complete(runningInfo.clientRequestId);
+    chatSessionRuntimeManager.cancel(runningInfo.clientRequestId, answerMsg.sessionId || sessionId);
 
     return webSocketManager
       .sendMessageWhenReady({
@@ -1244,7 +1244,7 @@ function useChat(props: IProps) {
 
         updateMessage(entry.answerMsg);
 
-        chatSessionRuntimeManager.complete(entry.lane.clientRequestId);
+        chatSessionRuntimeManager.cancel(entry.lane.clientRequestId, entry.answerMsg.sessionId || sessionId);
         unregisterPendingChatContext(entry.lane.clientRequestId);
         unregisterSessionChatContext(entry.answerMsg.sessionId || sessionId, entry.lane.clientRequestId);
 

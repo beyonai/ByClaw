@@ -5,6 +5,56 @@ describe('utils/chatSessionRuntimeManager', () => {
     chatSessionRuntimeManager.clear();
   });
 
+  it('does not revive a cancelled trace when delayed runtime frames arrive', () => {
+    const stopped = {
+      sessionId: 's1',
+      traceId: 'trace-1',
+      source: 'test-engine',
+      status: 'cancelled',
+      rootActive: false,
+      acceptingInput: true,
+      activeAgentCount: 0,
+      activeChildCount: 0,
+      waitingInteractionCount: 0,
+      revision: 2,
+      changedAt: 2000,
+    };
+    chatSessionRuntimeManager.register({ clientRequestId: 'req', sessionId: 's1', traceId: 'trace-1' });
+    chatSessionRuntimeManager.applySessionRuntime({
+      ...stopped,
+      status: 'running',
+      rootActive: true,
+      acceptingInput: false,
+    });
+    chatSessionRuntimeManager.cancel('req');
+    expect(chatSessionRuntimeManager.isSessionRunning('s1')).toBe(false);
+    expect(
+      chatSessionRuntimeManager.applySessionRuntime({
+        ...stopped,
+        status: 'running',
+        rootActive: true,
+        acceptingInput: false,
+        activeAgentCount: 5,
+        activeChildCount: 4,
+        revision: 99,
+        changedAt: 3000,
+      })
+    ).toBe(false);
+    expect(chatSessionRuntimeManager.canAcceptInput('s1')).toBe(true);
+    expect(
+      chatSessionRuntimeManager.applySessionRuntime({
+        ...stopped,
+        traceId: 'trace-2',
+        status: 'running',
+        rootActive: true,
+        acceptingInput: false,
+        activeAgentCount: 1,
+        revision: 1,
+        changedAt: Date.now() + 1000,
+      })
+    ).toBe(true);
+  });
+
   it('tracks running state by request and session', () => {
     chatSessionRuntimeManager.register({
       clientRequestId: 'client-req-1',

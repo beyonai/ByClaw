@@ -74,6 +74,25 @@ public class SessionRuntimeStateService {
         }
     }
 
+    /** Stop is terminal for this trace, including runtime events already queued in Redis. */
+    public synchronized SessionRuntimeState cancel(Long sessionId) {
+        SessionRuntimeState state = get(sessionId);
+        if (state == null || "cancelled".equals(state.getStatus())) {
+            return state;
+        }
+        state.setStatus("cancelled");
+        state.setRootActive(false);
+        state.setAcceptingInput(true);
+        state.setActiveAgentCount(0L);
+        state.setActiveChildCount(0L);
+        state.setWaitingInteractionCount(0L);
+        state.setRevision(state.getRevision() == null ? 1L : state.getRevision() + 1L);
+        state.setChangedAt(System.currentTimeMillis());
+        redisTemplate.opsForValue().set(buildKey(sessionId), JSON.toJSONString(state),
+            RUNTIME_TTL_SECONDS, TimeUnit.SECONDS);
+        return state;
+    }
+
     private SessionRuntimeState fromEvent(Long sessionId, JSONObject dataJson) {
         JSONObject metadata = dataJson.getJSONObject("metadata");
         SessionRuntimeState state = new SessionRuntimeState();
@@ -100,6 +119,10 @@ public class SessionRuntimeStateService {
     private boolean shouldReplace(SessionRuntimeState current, SessionRuntimeState incoming) {
         if (current == null) {
             return true;
+        }
+        if ("cancelled".equals(current.getStatus())
+            && Objects.equals(current.getTraceId(), incoming.getTraceId())) {
+            return false;
         }
         if (Objects.equals(current.getSource(), incoming.getSource())
             && Objects.equals(current.getTraceId(), incoming.getTraceId())) {

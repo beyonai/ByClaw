@@ -32,6 +32,9 @@ import com.iwhalecloud.byai.state.domain.chat.dto.PrologueDto;
 import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatInfo;
 import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatSnapshotResponse;
 import com.iwhalecloud.byai.state.domain.chat.dto.StopChatDto;
+import com.iwhalecloud.byai.state.domain.chat.dto.SessionRuntimeState;
+import com.iwhalecloud.byai.state.domain.chat.service.SessionRuntimeStateService;
+import com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatProcessContext;
 import com.iwhalecloud.byai.state.domain.chat.service.OutputStreamManager;
 import com.iwhalecloud.byai.state.domain.chat.service.RunningChatSnapshotService;
@@ -135,6 +138,12 @@ public class AssistantChatApplicationService {
 
     @Autowired
     private ChatRuntimeStateService chatRuntimeStateService;
+
+    @Autowired
+    private SessionRuntimeStateService sessionRuntimeStateService;
+
+    @Autowired
+    private MultiDeviceBroadcastService multiDeviceBroadcastService;
 
     @Autowired
     private RedisTemplate<String, Object> redisTemplate;
@@ -357,8 +366,13 @@ public class AssistantChatApplicationService {
         if (stopChatDto == null || stopChatDto.getSessionId() == null) {
             return;
         }
-        // 停止前将已堆积的消息落库，避免本轮回答内容丢失。
-        boolean persistedBeforeStop = flushAccumulatedMessage(stopChatDto);
+        // A runtime-backed execution completes cancellation asynchronously. Keep
+        // its stream until the terminal event so final state and snapshots arrive.
+        SessionRuntimeState projectedRuntime = sessionRuntimeStateService.get(stopChatDto.getSessionId());
+        boolean waitForRuntimeCancellation = projectedRuntime != null
+            && sessionStreamManager != null
+            && sessionStreamManager.isSessionListenerActive(String.valueOf(stopChatDto.getSessionId()));
+        boolean persistedBeforeStop = !waitForRuntimeCancellation && flushAccumulatedMessage(stopChatDto);
         RunningChatInfo runningInfo = runningOutputStreamRegistry.getRunning(stopChatDto.getSessionId());
         Long runningMessageId = runningInfo == null ? null : runningInfo.getModelAnswerMessageId();
         if (runningMessageId == null && chatRuntimeStateService != null) {
@@ -398,6 +412,15 @@ public class AssistantChatApplicationService {
         */
         try {
             gatewayClient.cancelSession(String.valueOf(stopChatDto.getSessionId()), "user cancel task");
+            SessionRuntimeState cancelledRuntime = sessionRuntimeStateService.cancel(stopChatDto.getSessionId());
+            if (cancelledRuntime != null) {
+                JSONObject event = new JSONObject();
+                event.put("type", "SESSION_RUNTIME_STATUS");
+                event.put("sessionId", String.valueOf(cancelledRuntime.getSessionId()));
+                event.put("traceId", cancelledRuntime.getTraceId());
+                event.put("data", JSON.toJSON(cancelledRuntime));
+                multiDeviceBroadcastService.broadcastRawToUser(CurrentUserHolder.getCurrentUserId(), event, null);
+            }
         }
         finally {
             // 计划是 BE 的权威状态；即使下游取消失败，也必须在本次 STOP_CHAT 内收敛到终态。
@@ -414,7 +437,7 @@ public class AssistantChatApplicationService {
         if (persistedBeforeStop) {
             runningOutputStreamRegistry.release(stopChatDto.getSessionId(), cleanupMessageId);
             runningChatSnapshotService.delete(stopChatDto.getSessionId(), cleanupMessageId);
-        } else {
+        } else if (!waitForRuntimeCancellation) {
             log.warn("stopChat 未确认已堆积消息落库，保留运行态与快照供恢复重试, sessionId: {}, messageId: {}",
                 stopChatDto.getSessionId(), cleanupMessageId);
         }

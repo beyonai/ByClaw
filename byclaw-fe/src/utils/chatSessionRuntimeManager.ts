@@ -215,6 +215,25 @@ class ChatSessionRuntimeManager {
     this.emitChange();
   }
 
+  cancel(clientRequestId: string, sessionId?: string | number): void {
+    const info = this.getByClientRequest(clientRequestId);
+    const runtime = this.getSessionRuntime(sessionId || info?.sessionId);
+    if (runtime && (!info?.traceId || info.traceId === runtime.traceId)) {
+      this.applySessionRuntime({
+        ...runtime,
+        status: 'cancelled',
+        rootActive: false,
+        acceptingInput: true,
+        activeAgentCount: 0,
+        activeChildCount: 0,
+        waitingInteractionCount: 0,
+        revision: runtime.revision + 1,
+        changedAt: Date.now(),
+      });
+    }
+    this.complete(clientRequestId);
+  }
+
   completeBySession(sessionId?: string | number): void {
     if (!sessionId) return;
     const clientRequestIds = Array.from(this.activeClientRequestIdsBySessionId.get(`${sessionId}`) || []);
@@ -273,6 +292,7 @@ class ChatSessionRuntimeManager {
 
     const current = this.sessionRuntimeBySessionId.get(normalized.sessionId);
     if (current) {
+      if (current.status === 'cancelled' && current.traceId === normalized.traceId) return false;
       const sameTurn = current.source === normalized.source && current.traceId === normalized.traceId;
       if (
         (sameTurn && normalized.revision <= current.revision) ||

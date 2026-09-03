@@ -88,6 +88,16 @@ class SessionRuntimeStateServiceTest {
         assertThat(state.getAcceptingInput()).isNull();
     }
 
+    @Test
+    void cancelledTraceCannotBecomeRunningAgainButANewTraceCanStart() {
+        SessionRuntimeState cancelled = state("test-engine", "trace-1", "cancelled", 3L, 2000L);
+        when(valueOperations.get("byai:chat:session-runtime:10")).thenReturn(JSON.toJSONString(cancelled));
+        assertThat(service.applyEvent(10L,
+            runtimeEvent("test-engine", "trace-1", "running", 99L, 5L, 4L, 0L, 3000L))).isNull();
+        assertThat(service.applyEvent(10L,
+            runtimeEvent("test-engine", "trace-2", "running", 1L, 1L, 0L, 0L, 4000L))).isNotNull();
+    }
+
     private SessionRuntimeState state(String source, String traceId, String status, Long revision, Long changedAt) {
         SessionRuntimeState state = new SessionRuntimeState();
         state.setSessionId(10L);
