@@ -307,7 +307,12 @@ class ConnectorSchemaTest {
         String ddl = read("deploy/migrations/versions/V0.4.0/V0.4.0__ddl.sql");
         String dml = read("deploy/migrations/versions/V0.4.0/V0.4.0__dml.sql");
 
-        assertThat(ddl).contains("account_template");
+        assertThat(ddl).contains(
+            "account_template",
+            "template_connector_code varchar(64)",
+            "uk_project_account_user_template",
+            "(create_by, template_connector_code)"
+        );
         assertThat(dml).contains(
             "'weixin-official-web'",
             "'微信公众号'",
@@ -316,7 +321,8 @@ class ConnectorSchemaTest {
             "\"platformcode\":\"customlink\"",
             "\"accountname\":\"微信公众号\"",
             "\"accountcode\":\"\"",
-            "\"customurl\":\"https://mp.weixin.qq.com/\""
+            "\"customurl\":\"https://mp.weixin.qq.com/\"",
+            "set template_connector_code = 'weixin-official-web'"
         );
         assertThat(dml).contains("where not exists");
     }

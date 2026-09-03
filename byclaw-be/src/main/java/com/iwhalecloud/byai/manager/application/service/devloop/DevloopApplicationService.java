@@ -5368,7 +5368,7 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
     /** 查询当前用户创建的全部有效账号，包括项目账号和用户级账号。 */
     public ResponseUtil<List<Map<String, Object>>> listGlobalOperationAccounts() {
         Long userId = CurrentUserHolder.getCurrentUserId();
-        operationAccountTemplateService.ensureWechatOfficialWebAccount(userId);
+        operationAccountTemplateService.ensureDefaultAccounts(userId);
         List<Map<String, Object>> result = new ArrayList<>();
         for (OperationAccount account : operationAccountService.listGlobalByUserId(userId)) {
             result.add(toOperationAccountMap(account));

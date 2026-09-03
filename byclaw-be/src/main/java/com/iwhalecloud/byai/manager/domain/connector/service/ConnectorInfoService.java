@@ -63,8 +63,8 @@ public class ConnectorInfoService {
         return connectorInfoMapper.selectByConnectorCode(connectorCode);
     }
 
-    public ConnectorInfo findByCodeForUpdate(String connectorCode) {
-        return connectorInfoMapper.selectByConnectorCodeForUpdate(connectorCode);
+    public java.util.List<ConnectorInfo> listAccountTemplatesForUpdate() {
+        return connectorInfoMapper.selectAccountTemplatesForUpdate();
     }
 
     public java.util.List<ConnectorConnectionDto> listConnections(String userId) {

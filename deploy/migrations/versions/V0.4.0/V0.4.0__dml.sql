@@ -74,6 +74,13 @@ WHERE NOT EXISTS (
     SELECT 1 FROM byai.byai_connector_info WHERE connector_code = 'weixin-official-web'
 );
 
+-- 将旧版通过 config 标记的模板账号迁移到专用来源字段；软删除历史同样回填，以阻止再次初始化。
+UPDATE byai.byai_project_account
+SET template_connector_code = 'weixin-official-web'
+WHERE project_id IS NULL
+  AND template_connector_code IS NULL
+  AND config LIKE '%"connectorCode":"weixin-official-web"%';
+
 -- IMA OpenAPI 内置 Skill 注册
 -- CLI 与 skill 文件随 OpenClaw 镜像提供；数据库仅注册目录、运行期快照和可发现权限。
 UPDATE byai.byai_system_config c

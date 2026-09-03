@@ -27,7 +27,7 @@ public interface ConnectorInfoMapper extends BaseMapper<ConnectorInfo> {
 
     ConnectorInfo selectByConnectorCode(@Param("connectorCode") String connectorCode);
 
-    ConnectorInfo selectByConnectorCodeForUpdate(@Param("connectorCode") String connectorCode);
+    List<ConnectorInfo> selectAccountTemplatesForUpdate();
 
     List<ConnectorConnectionDto> selectConnectionsByUserId(@Param("userId") String userId);
 }

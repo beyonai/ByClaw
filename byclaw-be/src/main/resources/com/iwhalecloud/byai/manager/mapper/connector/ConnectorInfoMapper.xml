@@ -80,11 +80,12 @@
           AND status_cd = '00A'
     </select>
 
-    <select id="selectByConnectorCodeForUpdate" resultType="com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo">
+    <select id="selectAccountTemplatesForUpdate" resultType="com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo">
         SELECT *
         FROM byai_connector_info
-        WHERE connector_code = #{connectorCode}
+        WHERE connector_type = 'ACCOUNT_TEMPLATE'
           AND status_cd = '00A'
+        ORDER BY sort ASC, connector_id ASC
         FOR UPDATE
     </select>
 

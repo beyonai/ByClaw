@@ -285,6 +285,7 @@ CREATE TABLE byai_project_account
     status        VARCHAR(20) NOT NULL DEFAULT 'connected',
     login_status  VARCHAR(20),
     custom_url    VARCHAR(500),
+    template_connector_code VARCHAR(64),
     config        TEXT,
     metrics       TEXT,
     create_by     BIGINT,
@@ -305,6 +306,7 @@ COMMENT ON COLUMN byai_project_account.account_name IS '账号名称（如 Beyon
 COMMENT ON COLUMN byai_project_account.status IS '连接状态：connected-已连接 / disconnected-未连接';
 COMMENT ON COLUMN byai_project_account.login_status IS '登录状态：online-已登录 / offline-未登录';
 COMMENT ON COLUMN byai_project_account.custom_url IS '自定义链接平台的登录URL，仅当 platform_code = CustomLink 时使用';
+COMMENT ON COLUMN byai_project_account.template_connector_code IS '初始化该用户级账号的 ACCOUNT_TEMPLATE 连接器编码；手工创建账号为空';
 COMMENT ON COLUMN byai_project_account.config IS '账号配置，TEXT 存 JSON 字符串（粉丝数、作品数等静态概要）';
 COMMENT ON COLUMN byai_project_account.metrics IS '运营指标，TEXT 存 JSON 字符串：{"followers":"12.8万","works":"286","reads":"34.6万","growth":"+8.4%"}';
 COMMENT ON COLUMN byai_project_account.create_by IS '创建人';
@@ -315,6 +317,10 @@ COMMENT ON COLUMN byai_project_account.status_cd IS '状态：00A-有效 / 00X-�
 
 -- 为自定义链接平台添加复合索引，提高查询性能
 CREATE INDEX idx_project_account_platform_custom ON byai_project_account(platform_code, custom_url);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_project_account_user_template
+    ON byai.byai_project_account (create_by, template_connector_code)
+    WHERE project_id IS NULL AND template_connector_code IS NOT NULL;
 
 
 /**账号-发布作品明细表**/
