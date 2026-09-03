@@ -38,6 +38,7 @@ import useGlobal from '@/hooks/useGlobal';
 import webSocketManager from '@/utils/websocket';
 import { chatSessionRuntimeManager, type RunningChatInfo } from '@/utils/chatSessionRuntimeManager';
 import {
+  applyProjectedRootState,
   flushRestoredChatStreamBuffer,
   getRestoredStreamKey,
   registerPendingChatContext,
@@ -521,11 +522,20 @@ function useChat(props: IProps) {
     return answerMsg;
   });
 
+  const restoreAnswerState = (answerMsg: IMessage, terminal = false) => {
+    set(answerMsg, 'messageState', terminal ? IMessageState.Done : IMessageState.Answer);
+    set(answerMsg, 'thinkDone', terminal);
+    if (!terminal) {
+      // 团队仍在运行不代表主 Agent 正在回答；恢复和实时事件使用同一份主会话状态。
+      applyProjectedRootState({ answerMsg }, chatSessionRuntimeManager.getSessionRuntime(answerMsg.sessionId));
+    }
+  };
+
   const stopRestoredRunningSession = usePersistFn((answerMsg: IMessage, runningInfo: RunningChatInfo) => {
     if (answerMsg.messageState === IMessageState.Cancel) return Promise.resolve();
     set(answerMsg, 'messageState', IMessageState.Cancel);
     updateMessage(answerMsg);
-    chatSessionRuntimeManager.complete(runningInfo.clientRequestId);
+    chatSessionRuntimeManager.cancel(runningInfo.clientRequestId, answerMsg.sessionId || sessionId);
 
     return webSocketManager
       .sendMessageWhenReady({
@@ -659,7 +669,7 @@ function useChat(props: IProps) {
         const snapshotAnswerMessage = createRestoredAnswerMessageFromSnapshot(snapshot, runningInfo);
         assign(answerMessage, snapshotAnswerMessage);
         const snapshotTerminal = snapshot.running === false;
-        set(answerMessage, 'messageState', snapshotTerminal ? IMessageState.Done : IMessageState.Answer);
+        restoreAnswerState(answerMessage, snapshotTerminal);
         updateMessage(answerMessage, { isAssign: true });
         if (snapshotTerminal) {
           // Redis 终态可能早于数据库落库完成，先用终态快照结束 loading 并保留完整回答。
@@ -791,9 +801,9 @@ function useChat(props: IProps) {
             answerMsg = createRestoredAnswerMessage(runningInfo, sessionId);
           }
           answerMsg.cancelSSE = debounce(() => stopRestoredRunningSession(answerMsg!, runningInfo), 100);
-          set(answerMsg, 'messageState', IMessageState.Answer);
-          answerMsg = updateMessage(answerMsg, { isAssign: true });
           chatSessionRuntimeManager.hydrateRunning(runningInfo, () => answerMsg?.cancelSSE?.());
+          restoreAnswerState(answerMsg);
+          answerMsg = updateMessage(answerMsg, { isAssign: true });
 
           const runtimeInfo =
             chatSessionRuntimeManager.getByClientRequest(runningInfo.clientRequestId) ||
@@ -856,7 +866,7 @@ function useChat(props: IProps) {
               answerMsg.cancelSSE = snapshotTerminal
                 ? undefined
                 : debounce(() => stopRestoredRunningSession(answerMsg!, runningInfo), 100);
-              set(answerMsg, 'messageState', snapshotTerminal ? IMessageState.Done : IMessageState.Answer);
+              restoreAnswerState(answerMsg, snapshotTerminal);
               answerMsg = updateMessage(answerMsg, { isAssign: true });
               if (snapshotTerminal) {
                 chatSessionRuntimeManager.complete(latestRuntimeInfo?.clientRequestId || runningInfo.clientRequestId);
@@ -1244,7 +1254,7 @@ function useChat(props: IProps) {
 
         updateMessage(entry.answerMsg);
 
-        chatSessionRuntimeManager.complete(entry.lane.clientRequestId);
+        chatSessionRuntimeManager.cancel(entry.lane.clientRequestId, entry.answerMsg.sessionId || sessionId);
         unregisterPendingChatContext(entry.lane.clientRequestId);
         unregisterSessionChatContext(entry.answerMsg.sessionId || sessionId, entry.lane.clientRequestId);
 

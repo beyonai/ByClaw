@@ -20,16 +20,17 @@ const TASK_PAGE_SIZE = 5;
 
 const activityLabel = (member: AgentTeamsMember) => {
   if (member.activity === 'working') return '执行中';
+  if (member.status === 'cancelled') return '已停止';
   if (member.status === 'completed') return '已完成';
   return '待命';
 };
 
 const taskStateLabel = (task: AgentTeamsTask) => {
+  if (task.status === 'cancelled') return '已取消';
+  if (task.status === 'failed') return '失败';
   if (task.state === 'completed' || task.status === 'completed') return '已完成';
   if (task.state === 'running' || task.status === 'in_progress' || task.status === 'claimed') return '进行中';
   if (task.state === 'blocked') return '阻塞';
-  if (task.status === 'failed') return '失败';
-  if (task.status === 'cancelled') return '已取消';
   return '待处理';
 };
 

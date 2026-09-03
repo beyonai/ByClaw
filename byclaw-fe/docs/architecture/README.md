@@ -70,6 +70,16 @@ src/
 
 ## 状态管理
 
+### 外部 Agent 团队会话
+
+`runningStatus.running` 表示整个会话仍有工作，包括后台子 Agent。主回答的 loading 由同一 trace 的 `rootActive` 决定，输入是否可用由 `acceptingInput` 决定。切换会话或断线重连时，`useChat` 恢复消息快照后使用与实时事件相同的 `applyProjectedRootState` 校正消息状态。主 Agent 暂时空闲时保留流上下文，后续异步唤醒仍可继续更新原回答。
+
+子会话导航优先使用 `agentTeamsStore` 中与团队活动面板共享的成员状态。没有团队快照时，通过 `NEW_MESSAGE` 的子会话投影更新已有成员，并按 `child_run_id`、`child_turn` 和 Stream ID 拒绝旧状态。运行、完成、等待、失败和待命分别显示中文状态标签。
+
+### 会话收尾与连续发送
+
+运行态 `idle` 表示 Agent 本身空闲；只要上一轮输出流仍未收到终态，就继续等待流收尾，避免把下一位数字员工的请求提前发送。流终态完成后恢复发送。团队子会话仍在后台执行、主 Agent 空闲时，继续按 `rootActive` 与 `acceptingInput` 控制输入，不把后台团队活动误判为主 Agent 正在回答。
+
 项目采用双状态管理方案：
 
 ### Zustand（推荐）

@@ -215,6 +215,25 @@ class ChatSessionRuntimeManager {
     this.emitChange();
   }
 
+  cancel(clientRequestId: string, sessionId?: string | number): void {
+    const info = this.getByClientRequest(clientRequestId);
+    const runtime = this.getSessionRuntime(sessionId || info?.sessionId);
+    if (runtime && (!info?.traceId || info.traceId === runtime.traceId)) {
+      this.applySessionRuntime({
+        ...runtime,
+        status: 'cancelled',
+        rootActive: false,
+        acceptingInput: true,
+        activeAgentCount: 0,
+        activeChildCount: 0,
+        waitingInteractionCount: 0,
+        revision: runtime.revision + 1,
+        changedAt: Date.now(),
+      });
+    }
+    this.complete(clientRequestId);
+  }
+
   completeBySession(sessionId?: string | number): void {
     if (!sessionId) return;
     const clientRequestIds = Array.from(this.activeClientRequestIdsBySessionId.get(`${sessionId}`) || []);
@@ -240,11 +259,18 @@ class ChatSessionRuntimeManager {
   }
 
   canAcceptInput(sessionId?: string): boolean {
+    if (this.isSessionFinishing(sessionId)) return false;
     const runtime = this.getSessionRuntime(sessionId);
     if (runtime?.acceptingInput !== undefined) {
       return runtime.acceptingInput;
     }
     return !this.isSessionRunning(sessionId);
+  }
+
+  /** An idle Agent may still be flushing the previous Gateway response. */
+  isSessionFinishing(sessionId?: string): boolean {
+    const runtime = this.getSessionRuntime(sessionId);
+    return runtime?.status === 'idle' && this.getAllBySession(sessionId).length > 0;
   }
 
   isSessionWaitingForUserInput(sessionId?: string | number): boolean {
@@ -273,6 +299,7 @@ class ChatSessionRuntimeManager {
 
     const current = this.sessionRuntimeBySessionId.get(normalized.sessionId);
     if (current) {
+      if (current.status === 'cancelled' && current.traceId === normalized.traceId) return false;
       const sameTurn = current.source === normalized.source && current.traceId === normalized.traceId;
       if (
         (sameTurn && normalized.revision <= current.revision) ||

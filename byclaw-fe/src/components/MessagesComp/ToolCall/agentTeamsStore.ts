@@ -23,6 +23,20 @@ export const publishAgentTeamsSnapshot = (rootSessionId: string, snapshot: Agent
   return true;
 };
 
+/** Team shutdown snapshots outlive the cancelled message's stream context. */
+export const applyAgentTeamsStreamSnapshot = (message: any): boolean => {
+  try {
+    const data = typeof message?.data === 'string' ? JSON.parse(message.data) : message?.data;
+    const content = data?.choices?.[0]?.delta?.content;
+    const snapshot = typeof content === 'string' ? JSON.parse(content) : content;
+    if (snapshot?.schemaVersion !== 2 || snapshot?.eventKind !== 'agent-teams/snapshot' || !snapshot.team) return false;
+    const rootSessionId = message?.sessionId || data?.sessionId;
+    return Boolean(rootSessionId) && publishAgentTeamsSnapshot(`${rootSessionId}`, snapshot);
+  } catch {
+    return false;
+  }
+};
+
 export const applyAgentTeamsChildProjection = (
   rootSessionId: string,
   projection: Record<string, any>,
@@ -51,6 +65,9 @@ export const applyAgentTeamsChildProjection = (
   if (memberIndex < 0) return false;
 
   const member = members[memberIndex];
+  // Shutdown snapshots are authoritative over delayed child projections. A new
+  // explicit turn reopens the member through its next full team snapshot.
+  if (member.status === 'cancelled') return false;
   const childRun = getScopedChildRunState(projection, envelopeStreamId);
   const currentRun = member.childRunId
     ? {

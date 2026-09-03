@@ -86,6 +86,7 @@ const ResourceToolMenu: React.FC<Props> = ({
           keyword={keyword}
           hideCategoryTabs
           compactCard
+          includeEmployeeGroups
           excludedAgentIds={excludedAgentIds}
           onSelect={(item) => onSelect(item, ResourceType.digitalEmployee)}
         />

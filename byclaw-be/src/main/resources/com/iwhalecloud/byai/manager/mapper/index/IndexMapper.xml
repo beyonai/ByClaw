@@ -272,12 +272,12 @@
                 and b.machine_channel like concat('%', #{machineChannel}, '%')
             </if>
         </where>
-        <!-- 按最近编辑时间倒序，确保新建或刚修改的资源优先展示 -->
-        order by COALESCE(a.update_time, a.create_time, '1970-01-01 00:00:00') desc,
+        <!-- 先按当前用户近90天使用次数倒序，次数相同再按最近修改时间倒序。 -->
+        order by COALESCE(d.total, 0) desc,
+                 COALESCE(a.update_time, a.create_time, '1970-01-01 00:00:00') desc,
                  a.create_time desc,
                  COALESCE(c.is_top, 0) desc,
                  COALESCE(c.top_time, '1970-01-01 00:00:00') desc,
-                 COALESCE(d.total, 0) desc,
                  COALESCE(k.latest_grant_time, '1970-01-01 00:00:00') desc
     </select>
 

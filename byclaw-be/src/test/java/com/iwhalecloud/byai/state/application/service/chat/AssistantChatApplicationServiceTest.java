@@ -69,6 +69,8 @@ class AssistantChatApplicationServiceTest {
 
     @BeforeEach
     void setUp() {
+        sessionRuntimeStateService = mock(com.iwhalecloud.byai.state.domain.chat.service.SessionRuntimeStateService.class);
+        multiDeviceBroadcastService = mock(com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService.class);
         gatewayClient = mock(GatewayClient.class);
         runningOutputStreamRegistry = mock(RunningOutputStreamRegistry.class);
         runningChatSnapshotService = mock(RunningChatSnapshotService.class);
@@ -81,6 +83,8 @@ class AssistantChatApplicationServiceTest {
         byaiSystemConfigService = mock(ByaiSystemConfigService.class);
 
         assistantChatApplicationService = new AssistantChatApplicationService(gatewayClient);
+        ReflectionTestUtils.setField(assistantChatApplicationService, "sessionRuntimeStateService", sessionRuntimeStateService);
+        ReflectionTestUtils.setField(assistantChatApplicationService, "multiDeviceBroadcastService", multiDeviceBroadcastService);
         ReflectionTestUtils.setField(assistantChatApplicationService, "runningOutputStreamRegistry",
             runningOutputStreamRegistry);
         ReflectionTestUtils.setField(assistantChatApplicationService, "runningChatSnapshotService",
@@ -106,6 +110,10 @@ class AssistantChatApplicationServiceTest {
         CurrentUserHolder.clearLoginInfo();
     }
 
+    private com.iwhalecloud.byai.state.domain.chat.service.SessionRuntimeStateService sessionRuntimeStateService;
+
+    private com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService multiDeviceBroadcastService;
+
     @Test
     void stopChat_clearsRunningStateAfterCancelSession() {
         StopChatDto stopChatDto = new StopChatDto();
@@ -127,6 +135,32 @@ class AssistantChatApplicationServiceTest {
         verify(runningOutputStreamRegistry).release(10L, 20L);
         verify(runningChatSnapshotService).delete(10L, 20L);
         verify(taskPlanWebSocketPublisher).broadcast(1L, cancelled, null);
+    }
+
+    @Test
+    void stopChatKeepsRuntimeListenerForMemberShutdownAndBroadcastsCancelledRuntime() {
+        StopChatDto dto = new StopChatDto();
+        dto.setSessionId(10L);
+        var runtime = new com.iwhalecloud.byai.state.domain.chat.dto.SessionRuntimeState();
+        runtime.setSessionId(10L);
+        runtime.setSource("test-engine");
+        runtime.setTraceId("trace-1");
+        runtime.setStatus("cancelled");
+        when(sessionRuntimeStateService.get(10L)).thenReturn(runtime);
+        when(sessionRuntimeStateService.cancel(10L)).thenReturn(runtime);
+        SessionStreamManager streams = mock(SessionStreamManager.class);
+        ReflectionTestUtils.setField(assistantChatApplicationService, "sessionStreamManager", streams);
+        when(streams.isSessionListenerActive("10")).thenReturn(true);
+
+        assistantChatApplicationService.stopChat(dto);
+
+        verify(gatewayClient).cancelSession("10", "user cancel task");
+        verify(scriptService, never()).flushFromSnapshot(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        verify(streams, never()).stopSessionListener(anyString());
+        verify(multiDeviceBroadcastService).broadcastRawToUser(eq(1L),
+            org.mockito.ArgumentMatchers.argThat(event -> "SESSION_RUNTIME_STATUS".equals(event.getString("type"))
+                && "cancelled".equals(event.getJSONObject("data").getString("status"))),
+            org.mockito.ArgumentMatchers.isNull());
     }
 
     @Test

@@ -7,6 +7,7 @@ jest.mock('@/hooks/useSseSender/chatStream', () => ({
   },
 }));
 
+import { getAgentTeamsSnapshot, clearAgentTeamsSnapshots } from '@/components/MessagesComp/ToolCall/agentTeamsStore';
 import { IMessageState, SSEMessageType } from '@/constants/message';
 import { chatSessionRuntimeManager } from '@/utils/chatSessionRuntimeManager';
 
@@ -55,6 +56,29 @@ const createParsed = (overrides: Record<string, any> = {}) =>
 describe('hooks/useChat/chatRuntime', () => {
   beforeEach(() => {
     clearChatRuntime();
+    clearAgentTeamsSnapshots();
+  });
+
+  it('receives the final team snapshot after Stop removed the chat context', () => {
+    const snapshot = {
+      schemaVersion: 2,
+      eventKind: 'agent-teams/snapshot',
+      capturedAt: '2026-09-03T03:00:00Z',
+      team: { teamId: 'team', captainSessionId: 's1', members: [], tasks: [{ id: 't1', status: 'cancelled' }] },
+    };
+    handleParsedChatStream(
+      createParsed({
+        rawMessage: {
+          type: 'CHAT_STREAM',
+          sessionId: 's1',
+          data: {
+            choices: [{ delta: { content: JSON.stringify(snapshot) } }],
+          },
+        },
+      })
+    );
+    expect(getAgentTeamsSnapshot('s1')?.team.tasks?.[0].status).toBe('cancelled');
+    expect(chatSessionRuntimeManager.isSessionRunning('s1')).toBe(false);
   });
 
   it('keeps a pending context alive and applies stream payloads', () => {
@@ -430,8 +454,12 @@ describe('hooks/useChat/chatRuntime', () => {
       })
     ).toBe(true);
 
-    expect(answerMsg.messageState).toBe(IMessageState.Done);
+    expect(answerMsg.messageState).toBe(IMessageState.Answer);
     expect(answerMsg.thinkDone).toBe(true);
+    expect(chatSessionRuntimeManager.canAcceptInput('s1')).toBe(false);
+    handleParsedChatStream(createParsed({ eventName: 'appStreamResponse', isDone: true }));
+    expect(answerMsg.messageState).toBe(IMessageState.Done);
+    expect(chatSessionRuntimeManager.canAcceptInput('s1')).toBe(true);
   });
 
   it('applies only the latest task plan snapshot to the active answer', () => {
