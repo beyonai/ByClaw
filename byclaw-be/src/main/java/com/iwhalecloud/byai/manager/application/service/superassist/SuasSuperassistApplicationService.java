@@ -1090,6 +1090,7 @@ public class SuasSuperassistApplicationService {
         if (project == null) {
             project = new Project();
             project.setProjectId(sequenceService.nextVal());
+            project.setProjectCode(projectCode);
             project.setProjectName(projectName);
             project.setProjectType(projectType);
             project.setDescription(description);
