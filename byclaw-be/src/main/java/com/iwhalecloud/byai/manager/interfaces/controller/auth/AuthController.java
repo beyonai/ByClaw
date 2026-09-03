@@ -44,7 +44,9 @@ import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.vo.auth.FixedEntryOperationCapabilityVo;
 import com.iwhalecloud.byai.manager.vo.auth.ResourceOperationPermissionsVo;
 import com.iwhalecloud.byai.manager.qo.auth.ResourceOperationPermissionsQo;
+import com.iwhalecloud.byai.manager.qo.auth.ResourceUseApplyHistoryQo;
 import com.iwhalecloud.byai.manager.vo.auth.ResourceUseApplyItemVo;
+import com.iwhalecloud.byai.manager.vo.auth.DigitalEmployeeUseApplyAuditVo;
 import com.iwhalecloud.byai.manager.vo.resource.DigitalEmployeeVo;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeApplicationService;
 import com.iwhalecloud.byai.manager.vo.auth.ResourceMemberQueryResultVo;
@@ -207,6 +209,14 @@ public class AuthController {
     public ResponseUtil<List<ResourceUseApplyItemVo>> queryUseApplyList(@Validated @RequestBody ResourceUseApplyQo qo) {
         return ResponseUtil.successResponse(I18nUtil.get("auth.use.apply.list.query.success"),
             authApplicationService.queryUseApplyList(qo));
+    }
+
+    /** 审核中心聚合查询个人及企业数字员工使用申请。 */
+    @PostMapping("/queryDigitalEmployeeUseApplyAudit")
+    public ResponseUtil<List<DigitalEmployeeUseApplyAuditVo>> queryDigitalEmployeeUseApplyAudit(
+        @RequestBody ResourceUseApplyHistoryQo qo) {
+        return ResponseUtil.successResponse(I18nUtil.get("auth.use.apply.list.query.success"),
+            authApplicationService.queryDigitalEmployeeUseApplyAudit(qo == null ? null : qo.getHistory()));
     }
 
     /**

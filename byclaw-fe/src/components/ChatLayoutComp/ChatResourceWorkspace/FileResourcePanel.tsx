@@ -71,7 +71,7 @@ type ProjectFileItem = FileBrowserItem & {
 };
 
 interface FileResourcePanelProps {
-  scope: 'session' | 'project';
+  scope: 'session' | 'shared' | 'project';
   sessionId: string;
   projectId?: number;
   project?: ProjectSpace;
@@ -144,17 +144,13 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   const clickTimerRef = useRef<number | null>(null);
   // 项目详情异步加载期间也使用外部项目 ID，确保首次会话文件请求即可过滤仓库目录。
   const projectId = projectIdProp ?? Number(resolvedProject?.projectId);
-  const projectCloudResourceId =
-    projectCloudResourceIdProp || resolvedProject?.cloudResourceId || resolvedProject?.resourceId;
-  // 默认项目(-1)没有项目知识库时才使用 .shared 文件浏览接口；如果项目下拉已返回
-  // cloudResourceId，即使 projectId 仍是旧的 -1，也必须按项目云盘接口查询。
-  const isLocalSharedFiles =
-    scope === 'project' && Number(resolvedProject?.projectId ?? projectId) === -1 && !projectCloudResourceIdProp;
-  const usesFileBrowser = scope === 'session' || isLocalSharedFiles;
+  const projectCloudResourceId = projectCloudResourceIdProp || resolvedProject?.cloudResourceId;
+  // 三类文件使用显式作用域，避免再根据项目 ID 推断本地共享文件和项目云盘的数据源。
+  const usesFileBrowser = scope !== 'project';
   const rootPath =
-    scope === 'project' && !isLocalSharedFiles
+    scope === 'project'
       ? '/'
-      : `${DISPLAY_FILE_PATH_PREFIX}${isLocalSharedFiles ? SHARED_FILE_PATH : getSessionFilePath(sessionId)}`;
+      : `${DISPLAY_FILE_PATH_PREFIX}${scope === 'shared' ? SHARED_FILE_PATH : getSessionFilePath(sessionId)}`;
   const canManageProjectFiles = useMemo(() => {
     const currentUserId = userInfo?.userId ?? userInfo?.id;
     return (
@@ -167,7 +163,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
 
   const canDeleteProjectItem = useCallback(
     (item: FileBrowserItem) => {
-      if (scope !== 'project' || isLocalSharedFiles) return true;
+      if (scope !== 'project') return true;
       const creatorName = (item as ProjectFileItem).createStaffName?.trim();
       if (!creatorName) return true;
       const currentUserId = userInfo?.userId ?? userInfo?.id;
@@ -177,7 +173,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
       }
       return creatorName === `${userInfo?.userName || userInfo?.name || ''}`;
     },
-    [isLocalSharedFiles, scope, userInfo?.id, userInfo?.name, userInfo?.userId, userInfo?.userName]
+    [scope, userInfo?.id, userInfo?.name, userInfo?.userId, userInfo?.userName]
   );
 
   const loadRoot = useCallback(async () => {
@@ -187,10 +183,6 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
     }
     // 项目云盘查询只依赖知识库 resourceId；新会话通过项目选择器进入时，projectId
     // 可能尚未同步，但只要已有 cloudResourceId 就应允许加载云盘内容。
-    if (scope === 'project' && !projectId && !resourceId) {
-      setItems([]);
-      return;
-    }
     if (scope === 'project' && !resourceId) {
       setItems([]);
       return;
@@ -207,7 +199,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
     setLoading(true);
     setLoadError(undefined);
     try {
-      if (isLocalSharedFiles) {
+      if (scope === 'shared') {
         const response = await listFiles({ resourceId: resourceId!, path: rootPath, language });
         setItems(sortFileBrowserItems(unwrapListResponse<FileBrowserItem>(response)));
       } else if (scope === 'project') {
@@ -233,14 +225,16 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
     } catch (error) {
       console.error('Failed to load conversation resource files:', error);
       const responseError = error as { msg?: string; message?: string };
+      const fallbackErrorMessage =
+        scope === 'project' ? '项目云盘加载失败' : scope === 'shared' ? '本地共享文件加载失败' : '过程文件加载失败';
       const errorMessage =
-        typeof error === 'string' ? error : responseError?.msg || responseError?.message || '项目云盘加载失败';
+        typeof error === 'string' ? error : responseError?.msg || responseError?.message || fallbackErrorMessage;
       setLoadError(errorMessage);
       setItems([]);
     } finally {
       setLoading(false);
     }
-  }, [isLocalSharedFiles, language, projectId, resourceId, rootPath, scope, sessionId, usesFileBrowser]);
+  }, [language, projectId, resourceId, rootPath, scope, sessionId, usesFileBrowser]);
 
   useEffect(() => {
     setChildrenByPath({});
@@ -392,7 +386,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
       try {
         // 项目云盘统一使用知识库删除接口，不能依赖 fileId 类型判断；接口返回的
         // fileId 可能是字符串，目录也可能没有 fileId。
-        if (scope === 'project' && !isLocalSharedFiles && resourceId) {
+        if (scope === 'project' && resourceId) {
           if (item.isDir) {
             await deleteFolder({ resourceId: Number(resourceId), directoryPath: ensureDirectoryPath(item.path) });
           } else {
@@ -479,7 +473,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
     if (!moveTarget || !resourceId) return;
     setMoving(true);
     try {
-      if (scope === 'project' && !usesFileBrowser) {
+      if (scope === 'project') {
         await moveKnowledgeItems({
           resourceId: Number(resourceId),
           sourcePath: [moveTarget.path],
@@ -505,7 +499,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   const loadMoveDirectories = useCallback(
     async (path: string) => {
       const rows =
-        scope === 'project' && !usesFileBrowser
+        scope === 'project'
           ? await queryProjectCloudDrive(Number(resourceId), path, language)
           : await listFiles({ resourceId: resourceId!, path, language });
       return (rows || [])
@@ -535,12 +529,10 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         ...(canPreviewFile(item) ? ['preview'] : []),
         'download',
         ...(resourceId && isDirectory(item) ? ['upload', 'createSibling', 'createChild'] : []),
-        ...(scope === 'project' && !isLocalSharedFiles && resourceId ? ['move'] : []),
+        ...(scope === 'project' && resourceId ? ['move'] : []),
         ...(usesFileBrowser || canManageProjectFiles ? ['rename'] : []),
         // 项目云盘的重命名和删除由知识库接口执行，菜单始终展示，最终权限由后端校验。
-        ...(scope === 'project' && !isLocalSharedFiles && resourceId && !canManageProjectFiles
-          ? ['rename', 'delete']
-          : []),
+        ...(scope === 'project' && resourceId && !canManageProjectFiles ? ['rename', 'delete'] : []),
         ...(scope === 'session' && !isDirectory(item) && projectId ? ['saveToProject'] : []),
         ...(usesFileBrowser || canManageProjectFiles ? ['delete'] : []),
       ];
@@ -578,7 +570,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
       if (!resourceId || !fileList.length || uploading) return;
       setUploading(true);
       try {
-        if (scope === 'project' && !isLocalSharedFiles) {
+        if (scope === 'project') {
           const formData = new FormData();
           fileList.forEach((file) => formData.append('files', file));
           formData.append('resourceId', String(resourceId));
@@ -603,7 +595,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
     if (!resourceId || !name) return;
     setCreatingFolder(true);
     try {
-      if (scope === 'project' && !isLocalSharedFiles) {
+      if (scope === 'project') {
         await createKnowledgeFolder(
           {
             resourceId: Number(resourceId),
@@ -686,7 +678,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
       setRenameLoading(true);
       try {
         // 项目云盘与知识库目录管理保持一致：文件夹调用 renameFolder，文件调用 updateFileInfo。
-        if (scope === 'project' && !isLocalSharedFiles && resourceId) {
+        if (scope === 'project' && resourceId) {
           if (renameTarget.isDir) {
             await renameFolder({
               resourceId: Number(resourceId),
@@ -740,7 +732,11 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
     [quoteFile]
   );
 
-  const emptyTextId = scope === 'project' ? 'common.noData' : 'projectSpace.detail.resource.emptySessionFiles';
+  const emptyTextId = {
+    project: 'common.noData',
+    shared: 'projectSpace.detail.resource.emptySharedFiles',
+    session: 'projectSpace.detail.resource.emptySessionFiles',
+  }[scope];
   const visibleProjectItems = items.slice(0, visibleProjectItemCount);
   const hasMoreProjectItems = cardMode && scope === 'project' && visibleProjectItemCount < items.length;
   const projectCardSentinelRef = useInfiniteScroll(
@@ -758,16 +754,15 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
     const formatUpdatedAt = (value?: string) => {
       if (!value) return '-';
       const date = new Date(value);
-      return Number.isNaN(date.getTime())
-        ? value
-        : date.toLocaleString('zh-CN', {
-          hour12: false,
-          ...(date.getFullYear() === new Date().getFullYear() ? {} : { year: 'numeric' }),
-          month: '2-digit',
-          day: '2-digit',
-          hour: '2-digit',
-          minute: '2-digit',
-        });
+      const options: Intl.DateTimeFormatOptions = {
+        hour12: false,
+        ...(date.getFullYear() === new Date().getFullYear() ? {} : { year: 'numeric' }),
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      };
+      return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', options);
     };
     return (
       <>
@@ -890,7 +885,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
           (scope === 'project' && !resourceId ? '暂未初始化项目知识库' : intl.formatMessage({ id: emptyTextId }))
         }
         contentBefore={
-          scope === 'project' && resourceId && !hideProjectToolbar ? (
+          scope !== 'session' && resourceId && !hideProjectToolbar ? (
             <div className={styles.localSharedToolbar}>
               <Upload
                 showUploadList={false}

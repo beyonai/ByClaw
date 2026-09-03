@@ -1,19 +1,19 @@
 import { LeftOutlined } from '@ant-design/icons';
-import { useNavigate } from '@umijs/max';
+import { useLocation, useNavigate } from '@umijs/max';
 import { Badge, Button, Empty, Pagination, Popconfirm, Segmented, Space, Spin, Table, Tabs, Tag, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import dayjs from 'dayjs';
 import ResourceCard from '@/components/Resources/components/ResourceCard';
 import { getAgentChatAvatar, agentHandler } from '@/utils/agent';
-import { IAgentCache } from '@/typescript/agent';
+import type { IAgentCache } from '@/typescript/agent';
 import { deleteDigitalEmployee, queryManagedEnterpriseEmployees, queryMyCreated } from '@/service/digitalEmployees';
 import {
   approveUseApply,
   applyResourceUse,
-  queryUseApplyList,
+  queryDigitalEmployeeUseApplyAudit,
   rejectUseApply,
-  ResourceUseApplyAuditItem,
+  type ResourceUseApplyAuditItem,
 } from '@/pages/manager/service/resources';
 import styles from './index.module.less';
 import { EmployeePreviewModal } from '@/pages/digitalEmployees';
@@ -46,28 +46,66 @@ const formatAuditStatus = (status: unknown, history: boolean) => {
   return '待审核';
 };
 
+const isProcessedAuditStatus = (status: unknown) => {
+  const normalized = `${status ?? ''}`.trim().toUpperCase();
+  return ['X', 'R', 'APPROVED', 'PASS', 'REJECTED', 'REJECT', '审核通过', '已驳回', '通过', '驳回'].includes(
+    normalized
+  );
+};
+
 const PAGE_SIZE = 20;
 
 const normalizeList = (value: any) => (value?.list || value?.data?.list || []).map((item: any) => agentHandler(item));
 
+const normalizeAuditRows = (response: any, history: boolean): AuditRow[] => {
+  const auditItems = response?.data || response || [];
+  return (Array.isArray(auditItems) ? auditItems : auditItems.list || [])
+    .map((item: any) => ({
+      ...item,
+      resourceName: item.resourceName,
+      employeeType: `${item.agentType}` === '017' ? '数字员工组' : '数字员工',
+      avatar: item.avatar,
+      chatAvatar: item.avatar,
+    }))
+    .filter((row: AuditRow) => !history || isProcessedAuditStatus(row.applyStatus))
+    .map((row: AuditRow) => ({
+      ...row,
+      applyStatus: formatAuditStatus(row.applyStatus, history),
+    }))
+    .sort((left: AuditRow, right: AuditRow) => {
+      const leftTime = left.applyTime ? new Date(left.applyTime).getTime() : 0;
+      const rightTime = right.applyTime ? new Date(right.applyTime).getTime() : 0;
+      return rightTime - leftTime;
+    });
+};
+
+const getAuditRowKey = (row: AuditRow) => `${row.privilegeGrantId || ''}-${row.resourceId || ''}-${row.userId || ''}`;
+
 const MyEmployeesPage: React.FC = () => {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<OwnerTab>('personal');
+  const location = useLocation();
   const [resourceFilter, setResourceFilter] = useState<ResourceFilter>('all');
   const [enterpriseScope, setEnterpriseScope] = useState<EnterpriseScope>('created');
   const [loading, setLoading] = useState(false);
-  const [auditLoading, setAuditLoading] = useState(false);
+  const [historyAuditLoading, setHistoryAuditLoading] = useState(false);
   const [list, setList] = useState<IAgentCache[]>([]);
   const [pageNum, setPageNum] = useState(1);
   const [total, setTotal] = useState(0);
-  const [auditRows, setAuditRows] = useState<AuditRow[]>([]);
-  const [auditPendingCount, setAuditPendingCount] = useState(0);
+  const [pendingAuditRows, setPendingAuditRows] = useState<AuditRow[]>(() => {
+    // 待审核数据由数字员工首页通过路由状态传入，避免进入“我的员工”后再次请求。
+    const routeState = location.state as { pendingAuditRows?: ResourceUseApplyAuditItem[] } | null;
+    return normalizeAuditRows(routeState?.pendingAuditRows || [], false);
+  });
+  const [historyAuditRows, setHistoryAuditRows] = useState<AuditRow[]>([]);
+  const [historyAuditLoaded, setHistoryAuditLoaded] = useState(false);
   const [auditFilter, setAuditFilter] = useState<AuditFilter>('pending');
   const [actionKey, setActionKey] = useState('');
   const [preview, setPreview] = useState<IAgentCache | null>(null);
   const [authDrawerOpen, setAuthDrawerOpen] = useState(false);
   const [authRecord, setAuthRecord] = useState<IAgentCache | null>(null);
   const [authType, setAuthType] = useState<'useAuth' | 'mgrAuth'>('useAuth');
+  const historyAuditRequestedRef = useRef(false);
 
   const agentType = resourceFilter === 'group' ? '017' : undefined;
 
@@ -99,101 +137,36 @@ const MyEmployeesPage: React.FC = () => {
     }
   }, [activeTab, agentType, enterpriseScope, pageNum, resourceFilter]);
 
-  const loadAudit = useCallback(async () => {
-    setAuditLoading(true);
-    try {
-      const queryResources = async (
-        request: typeof queryMyCreated,
-        agentTypeValue?: string,
-        pending = auditFilter === 'pending'
-      ) => {
-        const res = await request({
-          pageNum: 1,
-          pageSize: 200,
-          ...(pending ? { permission: 'PENDING_MY_APPROVAL' } : { type: 'manageable', resourceStatus: 2 }),
-          agentType: agentTypeValue,
-        });
-        return normalizeList(res);
-      };
-      const pendingResources = (
-        await Promise.all([
-          queryResources(queryMyCreated, undefined, true),
-          queryResources(queryMyCreated, '017', true),
-          queryResources(queryManagedEnterpriseEmployees, undefined, true),
-          queryResources(queryManagedEnterpriseEmployees, '017', true),
-        ])
-      ).flat();
-      const pendingResourceMap = new Map(
-        pendingResources.map((item: any) => [`${item.resourceId || item.id || item.agentId}`, item])
-      );
-      if (auditFilter === 'pending') {
-        setAuditPendingCount(pendingResourceMap.size);
-      }
-      let resources = pendingResources;
-      if (auditFilter === 'history') {
-        resources = (
-          await Promise.all([
-            queryResources(queryMyCreated),
-            queryResources(queryMyCreated, '017'),
-            queryResources(queryManagedEnterpriseEmployees),
-            queryResources(queryManagedEnterpriseEmployees, '017'),
-          ])
-        ).flat();
-      }
-      const uniqueResources = Array.from(
-        new Map(resources.map((item: any) => [`${item.resourceId || item.id || item.agentId}`, item])).values()
-      );
-      const rows = await Promise.all(
-        uniqueResources.map(async (resource: any) => {
-          const resourceId = `${resource.resourceId || resource.id || resource.agentId}`;
-          const applies: any = await queryUseApplyList({ resourceId, history: auditFilter === 'history' });
-          return (applies?.data || applies || []).map((item: ResourceUseApplyAuditItem) => ({
-            ...item,
-            resourceId,
-            resourceName: resource.resourceName || resource.name,
-            employeeType: `${resource.agentType}` === '017' ? '数字员工组' : '数字员工',
-            avatar: resource.avatar,
-            chatAvatar: resource.chatAvatar,
-          }));
-        })
-      );
-      const sortedRows = rows
-        .flat()
-        // 历史审核只展示已处理记录，兼容后端旧版本偶尔返回的待审核数据。
-        .filter(
-          (row) => auditFilter !== 'history' || !['P', 'PENDING', '待审核'].includes(`${row.applyStatus}`.toUpperCase())
-        )
-        .map((row) => ({ ...row, applyStatus: formatAuditStatus(row.applyStatus, auditFilter === 'history') }))
-        .sort((left, right) => {
-          const leftTime = left.applyTime ? new Date(left.applyTime).getTime() : 0;
-          const rightTime = right.applyTime ? new Date(right.applyTime).getTime() : 0;
-          return rightTime - leftTime;
-        });
-      setAuditRows(sortedRows);
-      if (auditFilter === 'pending') {
-        setAuditPendingCount(sortedRows.length);
-      } else {
-        const pendingResourceIds = Array.from(pendingResourceMap.keys());
-        const pendingApplyRows = await Promise.all(
-          pendingResourceIds.map(async (resourceId) => {
-            const applies: any = await queryUseApplyList({ resourceId });
-            return applies?.data || applies || [];
-          })
-        );
-        setAuditPendingCount(pendingApplyRows.reduce((count, applies) => count + applies.length, 0));
-      }
-    } finally {
-      setAuditLoading(false);
-    }
-  }, [auditFilter]);
-
   useEffect(() => {
     loadEmployees();
   }, [loadEmployees]);
 
+  const loadHistoryAudit = useCallback(async () => {
+    // 历史审核仅在首次切换到对应页签时请求，后续切换复用本地缓存。
+    if (historyAuditRequestedRef.current) return;
+    historyAuditRequestedRef.current = true;
+    setHistoryAuditLoading(true);
+    try {
+      const response: any = await queryDigitalEmployeeUseApplyAudit({ history: true });
+      setHistoryAuditRows(normalizeAuditRows(response, true));
+      setHistoryAuditLoaded(true);
+    } catch {
+      // 加载失败后允许用户重新切换页签再次请求。
+      historyAuditRequestedRef.current = false;
+    } finally {
+      setHistoryAuditLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
-    loadAudit();
-  }, [loadAudit, activeTab]);
+    if (auditFilter === 'history' && !historyAuditLoaded) {
+      loadHistoryAudit();
+    }
+  }, [auditFilter, historyAuditLoaded, loadHistoryAudit]);
+
+  const auditRows = auditFilter === 'pending' ? pendingAuditRows : historyAuditRows;
+  const auditPendingCount = pendingAuditRows.length;
+  const auditLoading = auditFilter === 'history' && historyAuditLoading;
 
   const handleAudit = async (row: AuditRow, action: 'approve' | 'reject') => {
     const key = `${action}-${row.resourceId}-${row.userId}`;
@@ -207,7 +180,20 @@ const MyEmployeesPage: React.FC = () => {
         await rejectUseApply(params);
         message.success('已驳回');
       }
-      await loadAudit();
+      // 审核成功后直接从待审核缓存剔除当前记录，无需重新请求整个审核列表。
+      setPendingAuditRows((rows) => rows.filter((item) => getAuditRowKey(item) !== getAuditRowKey(row)));
+      if (historyAuditLoaded) {
+        const historyRow = {
+          ...row,
+          applyStatus: action === 'approve' ? '审核通过' : '已驳回',
+          // 本地同步历史列表时记录处理时间，避免审核后重新查询整个列表。
+          auditTime: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+        };
+        setHistoryAuditRows((rows) => [
+          historyRow,
+          ...rows.filter((item) => getAuditRowKey(item) !== getAuditRowKey(historyRow)),
+        ]);
+      }
     } finally {
       setActionKey('');
     }
@@ -301,6 +287,14 @@ const MyEmployeesPage: React.FC = () => {
       render: (value) => (value && dayjs(value).isValid() ? dayjs(value).format('YYYY-MM-DD HH:mm') : value || '-'),
     },
   ];
+
+  if (auditFilter === 'history') {
+    auditColumns.push({
+      title: '处理时间',
+      dataIndex: 'auditTime',
+      render: (value) => (value && dayjs(value).isValid() ? dayjs(value).format('YYYY-MM-DD HH:mm') : value || '-'),
+    });
+  }
 
   if (auditFilter === 'pending') {
     auditColumns.push({

@@ -34,7 +34,7 @@ const DigitalEmployeesPage: React.FC = () => {
   const dispatch = useDispatch();
   const { EventEmitter, setAgentId, setSessionId } = useGlobal();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { count: auditCount } = useDigitalEmployeeAuditCount();
+  const { count: auditCount, rows: auditRows } = useDigitalEmployeeAuditCount();
 
   const [isLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<string>(() => {
@@ -183,7 +183,15 @@ const DigitalEmployeesPage: React.FC = () => {
         </Button>
       </Dropdown>
       <Badge count={auditCount} size="small" offset={[-2, 2]}>
-        <Button icon={<UnorderedListOutlined />} onClick={() => navigate('/myEmployees')}>
+        <Button
+          icon={<UnorderedListOutlined />}
+          onClick={() => {
+            // 复用首页已加载的审核数据，进入“我的员工”后不再重复请求待审核接口。
+            navigate('/myEmployees', {
+              state: { pendingAuditRows: auditRows },
+            });
+          }}
+        >
           我的员工
         </Button>
       </Badge>

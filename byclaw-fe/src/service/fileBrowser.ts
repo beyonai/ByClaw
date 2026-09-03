@@ -36,6 +36,9 @@ export interface FileBrowserListParams {
   resourceId: string | number;
   path?: string;
   language?: string;
+
+  /** 列表排序：文件夹优先，同类型按名称升序。 */
+  sort?: 'DIRECTORY_FIRST_NAME_ASC' | string;
 }
 
 export interface FileBrowserDeleteParams {

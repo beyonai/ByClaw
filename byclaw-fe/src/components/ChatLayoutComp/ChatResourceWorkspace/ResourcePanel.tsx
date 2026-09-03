@@ -12,10 +12,17 @@ import FileResourcePanel from './FileResourcePanel';
 import CodesTab from '@/layout/sider/components/ProjectSpaceList/CodesTab';
 import { listAvailableProjectRepos } from '@/service/devloop';
 import { useChatResourceProject } from './useChatResourceProject';
+import { getSessionFileTabKeys, type SessionFileTabKey } from './resourceTabUtils';
 import styles from './index.module.less';
 
 type UpperScopeKey = 'session' | 'employee';
 type SecondaryState = Record<UpperScopeKey, string>;
+
+const SESSION_FILE_TAB_LABEL_IDS: Record<SessionFileTabKey, string> = {
+  file: 'chatResource.processFile',
+  sharedFile: 'chatResource.localSharedFile',
+  projectFile: 'chatResource.projectCloudDrive',
+};
 
 interface ResourcePanelProps {
   sessionId: string;
@@ -39,14 +46,12 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
   const [sessionResourceRefreshKey, setSessionResourceRefreshKey] = useState(0);
   const [availableRepoCount, setAvailableRepoCount] = useState<number | null>(null);
   const resourceId = activeEmployee.resourceId || (project?.resourceId ? `${project.resourceId}` : undefined);
-  // 项目云盘必须优先使用项目知识库 ID；详情接口缺少 cloudResourceId 时兼容项目 resourceId，不能回退到当前员工资源。
-  const projectCloudResourceId = cloudResourceId
-    ? `${cloudResourceId}`
-    : project?.cloudResourceId
-      ? `${project.cloudResourceId}`
-      : project?.resourceId
-        ? `${project.resourceId}`
-        : undefined;
+  const resolvedProjectId = Number(project?.projectId ?? projectId);
+  const sessionFileTabKeys = useMemo(() => getSessionFileTabKeys(resolvedProjectId), [resolvedProjectId]);
+  const showProjectCloudDrive = sessionFileTabKeys.includes('projectFile');
+  // 项目云盘只能使用项目知识库 ID；未初始化知识库时保留空值并展示对应空态。
+  const rawProjectCloudResourceId = cloudResourceId ?? project?.cloudResourceId;
+  const projectCloudResourceId = rawProjectCloudResourceId ? `${rawProjectCloudResourceId}` : undefined;
 
   // 只有当前会话实际可访问到至少一个仓库时才展示项目代码。
   // null 表示仍在查询，避免先显示再隐藏造成菜单闪烁。
@@ -79,6 +84,12 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
     }
   }, [secondaryState.session, showCode]);
 
+  useEffect(() => {
+    if (!showProjectCloudDrive && secondaryState.session === 'projectFile') {
+      setSecondaryState((current) => ({ ...current, session: 'sharedFile' }));
+    }
+  }, [secondaryState.session, showProjectCloudDrive]);
+
   const upperSecondaryItems = useMemo(() => {
     const label = (id: string) => intl.formatMessage({ id });
     if (upperScopeKey === 'employee') {
@@ -89,18 +100,15 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
         { key: 'model', label: label('chatResource.model') },
       ];
     }
-    const projectFileLabelId =
-      Number(project?.projectId ?? projectId) === -1
-        ? 'chatResource.localSharedFile'
-        : 'chatResource.projectCloudDrive';
     return [
-      { key: 'file', label: label('chatResource.processFile') },
-      { key: 'projectFile', label: label(projectFileLabelId) },
+      ...sessionFileTabKeys.map((key) => ({ key, label: label(SESSION_FILE_TAB_LABEL_IDS[key]) })),
       ...(showCode ? [{ key: 'code', label: label('chatResource.projectCode') }] : []),
     ];
-  }, [intl, project?.projectId, projectId, showCode, upperScopeKey]);
+  }, [intl, sessionFileTabKeys, showCode, upperScopeKey]);
 
   const upperSecondaryKey = secondaryState[upperScopeKey];
+  const showSecondaryRefresh =
+    upperScopeKey === 'session' && ['file', 'sharedFile', 'projectFile', 'code'].includes(upperSecondaryKey);
   const empty = (
     <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={intl.formatMessage({ id: 'chatResource.empty' })} />
   );
@@ -126,9 +134,23 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
           <FileResourcePanel
             scope="project"
             sessionId={sessionId}
-            projectId={project?.projectId ? Number(project.projectId) : projectId}
+            projectId={resolvedProjectId}
             project={project}
             resourceId={projectCloudResourceId}
+            refreshKey={sessionResourceRefreshKey}
+            onOpenDetail={onOpenDetail}
+          />
+        );
+      }
+      if (upperSecondaryKey === 'sharedFile') {
+        return (
+          <FileResourcePanel
+            scope="shared"
+            sessionId={sessionId}
+            projectId={resolvedProjectId}
+            project={project}
+            projectCloudResourceId={projectCloudResourceId}
+            resourceId={resourceId}
             refreshKey={sessionResourceRefreshKey}
             onOpenDetail={onOpenDetail}
           />
@@ -163,7 +185,9 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
     empty,
     onOpenDetail,
     project,
+    projectCloudResourceId,
     projectId,
+    resolvedProjectId,
     resourceId,
     sessionResourceRefreshKey,
     sessionId,
@@ -195,7 +219,7 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
               id: upperScopeKey === 'session' ? 'chatResource.currentSession' : 'chatResource.currentEmployee',
             })}
           >
-            {upperScopeKey === 'session' && ['file', 'projectFile', 'code'].includes(upperSecondaryKey) ? (
+            {showSecondaryRefresh ? (
               <div className={styles.secondaryNavActions}>
                 <Button
                   type="text"
