@@ -196,6 +196,7 @@ function getModelDetailSections(model: any) {
       title: '模型参数',
       keys: new Set([
         'contextTokens',
+        'maxContentToken',
         'maxTokens',
         'temperature',
         'topP',
@@ -217,7 +218,18 @@ function getModelDetailSections(model: any) {
   if (advanced) advanced.keys = new Set([...advanced.keys, ...extraItems.map((item) => item.key)]);
 
   return groups
-    .map((group) => ({ ...group, items: items.filter((item) => group.keys.has(item.key)) }))
+    .map((group) => {
+      const groupItems = items.filter((item) => group.keys.has(item.key));
+      if (group.key === 'advanced') {
+        // 更新时间作为详情摘要的收尾信息，始终固定在该卡片最后。
+        const updatedAt = groupItems.find((item) => item.key === 'updatedAt');
+        return {
+          ...group,
+          items: [...groupItems.filter((item) => item.key !== 'updatedAt'), ...(updatedAt ? [updatedAt] : [])],
+        };
+      }
+      return { ...group, items: groupItems };
+    })
     .filter((group) => group.items.length > 0);
 }
 
@@ -558,7 +570,14 @@ const ModelSiderPanel: React.FC<ModelSiderPanelProps> = ({ embedded = false, sho
               renderItem={(item: any) => {
                 const current = isCurrentModel(item, modelInfo, sortedModels);
                 return (
-                  <div className={styles.modelItem} onClick={() => void openModelDetail(item)}>
+                  <div
+                    className={styles.modelItem}
+                    onClick={(event) => {
+                      // 操作区只处理启用确认，不能继续触发卡片的详情抽屉。
+                      if ((event.target as HTMLElement).closest('[data-model-action]')) return;
+                      void openModelDetail(item);
+                    }}
+                  >
                     <div className={styles.modelHeader}>
                       <div className={styles.modelTitleLine}>
                         <div className={styles.modelName}>{item.displayName}</div>
@@ -570,23 +589,29 @@ const ModelSiderPanel: React.FC<ModelSiderPanelProps> = ({ embedded = false, sho
                           </Tag>
                         ) : null}
                         {isEmployeeModelPanel && canEditEmployee && !current ? (
-                          <Popconfirm
-                            title={intl.formatMessage({
-                              id: 'personalModel.confirmEnable',
-                              defaultMessage: '确认启用该模型吗？',
-                            })}
-                            onConfirm={() => void activateModel(item)}
-                          >
-                            <Button
-                              type="link"
-                              className={styles.modelEnableButton}
-                              size="small"
-                              loading={`${activatingModelId ?? ''}` === `${item.id}`}
-                              onClick={(event) => event.stopPropagation()}
+                          <div data-model-action onClick={(event) => event.stopPropagation()}>
+                            <Popconfirm
+                              title={intl.formatMessage({
+                                id: 'personalModel.confirmEnable',
+                                defaultMessage: '确认启用该模型吗？',
+                              })}
+                              onConfirm={(event) => {
+                                event?.stopPropagation();
+                                void activateModel(item);
+                              }}
+                              onCancel={(event) => event?.stopPropagation()}
                             >
-                              启用
-                            </Button>
-                          </Popconfirm>
+                              <Button
+                                type="link"
+                                className={styles.modelEnableButton}
+                                size="small"
+                                loading={`${activatingModelId ?? ''}` === `${item.id}`}
+                                onClick={(event) => event.stopPropagation()}
+                              >
+                                启用
+                              </Button>
+                            </Popconfirm>
+                          </div>
                         ) : null}
                       </div>
                     </div>
