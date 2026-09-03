@@ -158,10 +158,10 @@ export interface CreateSessionRunInput extends CreateSessionInput {
 
 type QueueEntry = { runId: string; metadata: Record<string, unknown> };
 
-const MAX_TASK_PLAN_STALL_ATTEMPTS = 3;
-const TASK_PLAN_CONTINUATION_MESSAGE = `The trusted runtime task plan is still active, so this Run cannot finish yet.
-Continue the unfinished steps now. Do not repeat completed work. Call updateTaskPlan whenever progress changes,
-and only provide the final user answer after every task has reached a terminal status.`;
+const MAX_TASK_PLAN_CONTINUATIONS = 3;
+const TASK_PLAN_CONTINUATION_MESSAGE = `The trusted runtime task plan is still active.
+Continue the unfinished steps now. Do not repeat completed work. Call updateTaskPlan whenever progress changes.
+You may communicate progress and ask the user questions as needed. Report the actual outcome of this attempt.`;
 type SessionQueue = { running: boolean; entries: QueueEntry[] };
 type ActiveRun = { controller: AbortController; leader: LeaderSession };
 type PendingLeaderInteraction = {
@@ -1075,9 +1075,14 @@ ${JSON.stringify(completedDelegations)}`;
           activeTaskPlan = await this.#taskPlans.loadActive(taskPlanContext);
           taskPlanReady = true;
         } catch (error) {
-          throw new Error("Unable to load the authoritative task plan for this Run", {
-            cause: error,
-          });
+          // 无法确认已有计划时，本次执行不启用计划工具，避免重复创建；业务继续执行。
+          this.runtime.logger?.warn(
+            {
+              runId: current.id,
+              error: error instanceof Error ? error.message : String(error),
+            },
+            "任务计划加载失败，本次执行不启用计划工具并继续运行",
+          );
         }
       }
       let leaderOutputPausedForDelegation = false;
@@ -1116,8 +1121,7 @@ ${JSON.stringify(completedDelegations)}`;
         signal: runController.signal,
         // Leader 的可见回答与思考增量被规范化为 Run 事件，供对外流协议消费。
         onDelta: async (text) => {
-          // ACTIVE 计划尚未收口时抑制可见回答，避免过早回答在内部续跑前泄漏给用户。
-          if (leaderOutputPausedForDelegation || activeTaskPlan?.status === "ACTIVE") {
+          if (leaderOutputPausedForDelegation) {
             return;
           }
           const event = {
@@ -1227,11 +1231,6 @@ ${JSON.stringify(completedDelegations)}`;
           return delegated;
         },
         askUser: async ({ toolCallId, questions, signal }) => {
-          if (activeTaskPlan && activeTaskPlan.status !== "ACTIVE") {
-            throw new Error(
-              `Task plan is ${activeTaskPlan.status}; no further user interaction is allowed`,
-            );
-          }
           validateInteractionQuestions(questions);
           const interactionId = `${current.id}:${toolCallId}`;
           const requestedAt = this.now();
@@ -1407,25 +1406,41 @@ ${JSON.stringify(completedDelegations)}`;
           : {}),
       };
       let result = await leader.run(leaderInput);
-      let taskPlanStallAttempts = 0;
-      while (activeTaskPlan?.status === "ACTIVE") {
+      for (
+        let attempt = 0;
+        attempt < MAX_TASK_PLAN_CONTINUATIONS && activeTaskPlan?.status === "ACTIVE";
+        attempt += 1
+      ) {
         runController.signal.throwIfAborted();
-        if (taskPlanStallAttempts >= MAX_TASK_PLAN_STALL_ATTEMPTS) {
-          throw new Error(
-            `Leader made no task plan progress after ${MAX_TASK_PLAN_STALL_ATTEMPTS} continuation attempts`,
-          );
-        }
-        const previousPlanVersion = activeTaskPlan.version;
-        taskPlanStallAttempts += 1;
-        result = await leader.run({
+        const continuationResult = await leader.run({
           ...leaderInput,
           message: TASK_PLAN_CONTINUATION_MESSAGE,
           activeTaskPlan,
           currentTime: this.now(),
         });
-        if (activeTaskPlan?.version !== previousPlanVersion) {
-          taskPlanStallAttempts = 0;
+        // 续跑只更新计划、没有新正文时，保留前一次回答。
+        if (continuationResult.text.trim()) {
+          result = continuationResult;
         }
+      }
+      if (activeTaskPlan?.status === "ACTIVE" && taskPlanContext) {
+        if (!result.text.trim()) {
+          result = { ...result, text: "本轮执行已结束，未生成最终答复。" };
+        }
+        await this.#completeTaskPlanAfterContinuationLimit(
+          current,
+          taskPlanContext,
+          activeTaskPlan,
+          runController.signal,
+        ).catch((error: unknown) => {
+          this.runtime.logger?.warn(
+            {
+              runId: current.id,
+              error: error instanceof Error ? error.message : String(error),
+            },
+            "达到续跑上限后的任务计划完成同步失败，Run 继续正常结束",
+          );
+        });
       }
 
       if (runController.signal.aborted) {
@@ -1547,6 +1562,43 @@ ${JSON.stringify(completedDelegations)}`;
       sourceRuntime: "BYCLAW_SUPER",
       sourceRunId: run.id,
     };
+  }
+
+  /** 达到续跑上限后，通过现有逐步完成接口关闭计划，不再调用 Leader。 */
+  async #completeTaskPlanAfterContinuationLimit(
+    run: Run,
+    context: TaskPlanExecutionContext,
+    snapshot: TaskPlanSnapshot,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const remainingTasks = snapshot.tasks.filter(
+      ({ status }) => status === "PENDING" || status === "IN_PROGRESS",
+    ).length;
+    for (let index = 0; index < remainingTasks && snapshot.status === "ACTIVE"; index += 1) {
+      signal.throwIfAborted();
+      const currentTask = snapshot.tasks.find(({ status }) => status === "IN_PROGRESS");
+      if (!currentTask) {
+        throw new Error("Active task plan has no current task to complete");
+      }
+      const result = await this.#taskPlans!.command({
+        context,
+        idempotencyKey: `run-completed:${run.id}:${snapshot.planId}:${currentTask.taskId}`,
+        command: {
+          action: "complete_current",
+          statusReason: {
+            code: "CONTINUATION_LIMIT_REACHED",
+            message: `已达到 ${MAX_TASK_PLAN_CONTINUATIONS} 次续跑上限，运行时自动结束计划`,
+          },
+        },
+      });
+      if (!result.ok) {
+        throw new Error(`${result.error.code}: ${result.error.message}`);
+      }
+      snapshot = result.plan;
+    }
+    if (snapshot.status === "ACTIVE") {
+      throw new Error("Task plan remained active after completion updates");
+    }
   }
 
   /** Run 异常终止时把活动计划收敛到 FAILED，避免前端永久停留在执行中。 */
