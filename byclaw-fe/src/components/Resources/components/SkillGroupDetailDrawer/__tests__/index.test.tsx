@@ -151,7 +151,9 @@ describe('SkillGroupDetailDrawer', () => {
     mockUninstallSkillGroup.mockResolvedValue({ removedSkillIds: ['1'], retainedSkillIds: [] });
 
     render(<SkillGroupDetailDrawer groupId="101" digitalEmployeeId="201" />);
-    fireEvent.click(await screen.findByRole('button', { name: 'resource.skillGroup.uninstall' }));
+    const uninstallButton = await screen.findByRole('button', { name: 'resource.skillGroup.uninstall' });
+    await waitFor(() => expect(uninstallButton).toBeEnabled());
+    fireEvent.click(uninstallButton);
     expect(await screen.findByText('resource.skillGroup.uninstallSharedDescription')).toBeInTheDocument();
     expect(screen.getByText('resource.skillGroup.manualSource', { exact: false })).toBeInTheDocument();
     expect(screen.getByTestId('uninstall-preserve-tooltip-icon')).toBeInTheDocument();

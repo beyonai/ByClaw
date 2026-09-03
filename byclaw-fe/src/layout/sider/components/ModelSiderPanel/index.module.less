@@ -98,6 +98,29 @@
   word-break: break-word;
 }
 
+.modelDetailValueRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.modelDetailValueRow .modelDetailValue {
+  flex: 1;
+  min-width: 0;
+}
+
+.modelDetailCopy {
+  flex: none;
+  margin-top: -4px;
+  color: #707987;
+
+  &:hover {
+    color: #165dff;
+    background: #e8f3ff;
+  }
+}
+
 .modelDetailDrawer {
   :global(.ant-drawer-body),
   :global(.beyond-drawer-body) {
@@ -157,10 +180,12 @@
 
   :global(.ant-descriptions-item-label),
   :global(.beyond-descriptions-item-label) {
-    width: 112px;
+    width: 140px;
+    min-width: 140px;
     color: #707987;
     background: #fbfcfe;
     font-size: 12px;
+    white-space: nowrap;
   }
 
   :global(.ant-descriptions-item-content),
