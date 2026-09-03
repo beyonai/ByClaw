@@ -85,38 +85,55 @@ const AllEmployees = (props: IProps, ref: ForwardedRef<IRef>) => {
       const abortController = new AbortController();
       abortControllerRef.current = abortController;
 
-      return queryMyCreatedAndSubscribedAgentsV2(
-        {
-          pageNum: pageIndex,
-          pageSize,
-          keyword: searchName,
-        },
-        abortController
-      )
+      const requestPayload = {
+        pageNum: pageIndex,
+        pageSize,
+        keyword: searchName,
+      };
+      // 加号弹窗需要员工和员工组按同一后端排序整体返回，不能拆成两次请求后再拼接。
+      const requests = [
+        queryMyCreatedAndSubscribedAgentsV2(
+          props.includeEmployeeGroups ? { ...requestPayload, excludeEmployeeGroup: false } : requestPayload,
+          abortController
+        ),
+      ];
+
+      return Promise.all(requests)
+        .then((responses) => {
+          const first = responses[0];
+          if (!first) return;
+          const mergedList = responses.flatMap((response) => response?.list || []);
+          const mergedResponse = { ...first, list: mergedList };
+          return mergedResponse;
+        })
         .then((res) => {
-          if (res) {
-            const { list, ...pageInfo } = res;
-            // 联网搜索数字员工不能被手动@出来，只能通过点击按钮切换
-            const employeeList = (list || [])
-              .map(agentHandler)
-              .filter((item: IAgent) => item.agentType !== agentTypeMap.networkSearch);
+          if (!res) return;
+          const { list, ...pageInfo } = res;
+          // 联网搜索数字员工不能被手动@出来，只能通过点击按钮切换
+          const employeeList = (list || [])
+            .map(agentHandler)
+            // 接口偶尔会返回空占位记录，过滤后避免资源弹窗底部出现一行空白卡片。
+            .filter((item: IAgent) => item.agentId || item.resourceId || item.id)
+            .filter((item: IAgent) => item.agentType !== agentTypeMap.networkSearch);
 
-            if (pageIndex === 1) {
-              setEmployeesList(sortBySuperHelperFirst(employeeList));
-            } else {
-              setEmployeesList((prev) => [...prev, ...employeeList]);
-            }
-            // 更换hasMore计算方式，通过pageSize和响应列表长度比较得出
-            setHasMore(size(list) >= pageSize);
-
-            paginationDispatch({
-              type: 'change',
-              item: {
-                pageIndex: pageInfo.pageNum,
-                total: pageInfo.total,
-              },
+          if (pageIndex === 1) {
+            setEmployeesList(props.includeEmployeeGroups ? employeeList : sortBySuperHelperFirst(employeeList));
+          } else {
+            setEmployeesList((prev) => {
+              const merged = [...prev, ...employeeList];
+              return props.includeEmployeeGroups ? merged : sortBySuperHelperFirst(merged);
             });
           }
+          // 更换hasMore计算方式，通过pageSize和响应列表长度比较得出
+          setHasMore(size(list) >= pageSize);
+
+          paginationDispatch({
+            type: 'change',
+            item: {
+              pageIndex: pageInfo.pageNum,
+              total: pageInfo.total,
+            },
+          });
         })
         .catch((error) => {
           if (isCanceledError(error)) {
@@ -130,7 +147,7 @@ const AllEmployees = (props: IProps, ref: ForwardedRef<IRef>) => {
           }
         });
     },
-    [isMobile]
+    [isMobile, pageSize, props.includeEmployeeGroups]
   );
 
   const getSearch = React.useCallback((searchKey: string | undefined) => {
@@ -279,6 +296,7 @@ const AllEmployees = (props: IProps, ref: ForwardedRef<IRef>) => {
               <Skeleton avatar={{ size: 'default', shape: 'circle' }} paragraph={false} active style={{ padding: 8 }} />
             }
             endMessage={
+              !props.compactCard &&
               employeesList.length > 0 && (
                 <Divider plain>
                   {intl.formatMessage({ id: 'common.endMessage' })}{' '}

@@ -45,6 +45,9 @@ export interface EmployeeListProps {
 
   /** 紧凑员工卡片内容间距，供输入框资源选择面板使用。 */
   compactCard?: boolean;
+
+  /** 在资源选择面板中同时展示数字员工组。 */
+  includeEmployeeGroups?: boolean;
 }
 
 export const isExcludedEmployee = (employee: IAgentCache, excludedAgentIds: string[] = []) => {
@@ -152,9 +155,10 @@ const EmployeeList: React.FC<EmployeeListProps> = (props) => {
           </div>
         </div>
       )}
-      <div className="ub-ac gap8 mb-8" style={{ display: keyword ? 'none' : 'flex' }}>
+      <div className="ub-ac gap8 mb-8" style={{ display: 'flex' }}>
         <Input
           value={searchName[selectedKeys]}
+          disabled={keyword !== undefined}
           suffix={<SearchOutlined onClick={() => getSearch()} />}
           placeholder={intl.formatMessage(
             {
