@@ -59,6 +59,10 @@ export type DocPollResult = {
   text: string;
   matched_stream_id?: string;
   stream_name: string;
+  /** Partial answer accumulated before the caller cancelled the poll. */
+  partial_text?: string;
+  /** Abort reason supplied by the caller, when available. */
+  abort_reason?: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -199,12 +203,27 @@ export async function pollDocResult(params: {
     }
   }
 
-  const xread = (readBlockMs: number) =>
-    (params.redis as unknown as {
+  const abortedRead = Symbol("aborted-read");
+  const xread = async (readBlockMs: number): Promise<unknown | typeof abortedRead> => {
+    const read = (params.redis as unknown as {
       xread(...args: Array<string | number>): Promise<unknown>;
     })
       .xread("BLOCK", readBlockMs, "COUNT", 500, "STREAMS", streamName, lastId)
       .catch(() => null);
+    if (!params.signal) return read;
+    if (params.signal.aborted) return abortedRead;
+
+    let abortRead: (() => void) | undefined;
+    const abort = new Promise<typeof abortedRead>((resolve) => {
+      abortRead = () => resolve(abortedRead);
+      params.signal?.addEventListener("abort", abortRead, { once: true });
+    });
+    try {
+      return await Promise.race([read, abort]);
+    } finally {
+      if (abortRead) params.signal?.removeEventListener("abort", abortRead);
+    }
+  };
 
   while (true) {
     if (params.signal?.aborted) break;
@@ -217,6 +236,7 @@ export async function pollDocResult(params: {
       : blockMs;
 
     const reply = await xread(readBlockMs);
+    if (reply === abortedRead) break;
     if (!reply) {
       // No new events within BLOCK. If draining after terminal, we're done.
       if (terminalSeen) break;
@@ -269,10 +289,22 @@ export async function pollDocResult(params: {
 
   const delta = deltaParts.join("");
 
+  if (params.signal?.aborted) {
+    const abortReason = getAbortReason(params.signal);
+    return {
+      success: false,
+      event_type: "aborted",
+      text: abortReason,
+      stream_name: streamName,
+      partial_text: delta || undefined,
+      abort_reason: abortReason,
+    };
+  }
+
   if (!terminalSeen) {
     return {
       success: false,
-      event_type: params.signal?.aborted ? "aborted" : "timeout",
+      event_type: "timeout",
       text: delta || `轮询超时，${params.timeoutSec}s 内未收到 final/error 事件`,
       stream_name: streamName,
     };
@@ -294,6 +326,13 @@ export async function pollDocResult(params: {
     matched_stream_id: terminalStreamId,
     stream_name: streamName,
   };
+}
+
+function getAbortReason(signal: AbortSignal): string {
+  const reason = signal.reason;
+  if (reason instanceof Error && reason.message) return reason.message;
+  if (typeof reason === "string" && reason.trim()) return reason;
+  return "调用已取消";
 }
 
 /** Mirror of `_diagnose_trace_in_session_streams`. */

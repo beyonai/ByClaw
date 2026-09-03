@@ -25,11 +25,22 @@ export async function runLegacySseJsonRpcSequence(params: {
   headers: Record<string, string>;
   requests: Array<{ payload: Dict; expectResponse: boolean }>;
   timeoutMs: number;
+  signal?: AbortSignal;
   fetchImpl?: FetchLike;
 }): Promise<{ responses: Dict[]; endpointUrl: string }> {
   const fetchFn = params.fetchImpl ?? fetch;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(new Error("legacy sse timeout")), params.timeoutMs);
+  const abortFromCaller = () => controller.abort(params.signal?.reason);
+  if (params.signal?.aborted) {
+    abortFromCaller();
+  } else {
+    params.signal?.addEventListener("abort", abortFromCaller, { once: true });
+  }
+  const cleanup = () => {
+    clearTimeout(timer);
+    params.signal?.removeEventListener("abort", abortFromCaller);
+  };
   const pending = new Map<string, Pending>();
   const inbox = new Map<string, Dict>();
   let endpointUrl = "";
@@ -60,16 +71,22 @@ export async function runLegacySseJsonRpcSequence(params: {
     inbox.set(id, msg);
   };
 
-  const sseRes = await fetchFn(params.sseUrl, {
-    method: "GET",
-    headers: {
-      ...params.headers,
-      Accept: "text/event-stream",
-    },
-    signal: controller.signal,
-  });
+  let sseRes: Response;
+  try {
+    sseRes = await fetchFn(params.sseUrl, {
+      method: "GET",
+      headers: {
+        ...params.headers,
+        Accept: "text/event-stream",
+      },
+      signal: controller.signal,
+    });
+  } catch (err) {
+    cleanup();
+    throw err;
+  }
   if (!sseRes.ok || !sseRes.body) {
-    clearTimeout(timer);
+    cleanup();
     throw new Error(`legacy sse connect failed: HTTP ${sseRes.status}`);
   }
 
@@ -140,6 +157,9 @@ export async function runLegacySseJsonRpcSequence(params: {
       throw new Error("legacy sse endpoint event not received");
     }
   })();
+  // Reject endpoint waiters immediately when cancellation closes the stream
+  // before the MCP server has emitted its endpoint event.
+  void streamTask.catch(failAll);
 
   try {
     const endpoint = await endpointReady;
@@ -175,10 +195,8 @@ export async function runLegacySseJsonRpcSequence(params: {
     return { responses, endpointUrl: endpoint };
   } finally {
     controller.abort();
-    await streamTask.catch((err) => {
-      failAll(err);
-    });
-    clearTimeout(timer);
+    await streamTask.catch(() => undefined);
+    cleanup();
     reader.releaseLock();
   }
 }

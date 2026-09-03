@@ -113,7 +113,7 @@ export class BaiyingExecutor {
      * partial answer chunks can be pushed to the chat UI as they arrive.
      */
     onDelta?: DocDeltaCallback;
-    /** Cancellation signal for long-running DOC polls. */
+    /** Cancellation signal propagated to the selected resource executor. */
     signal?: AbortSignal;
     /** Host logger; request logs go through OpenClaw's plugin logger when available. */
     logger?: BaiyingEnhanceLogger;
@@ -174,6 +174,7 @@ export class BaiyingExecutor {
         session: this.session,
         logger: params.logger,
         privateParams,
+        signal: params.signal,
       });
     }
     if (resType === "tool") {
@@ -184,6 +185,7 @@ export class BaiyingExecutor {
         session: this.session,
         logger: params.logger,
         privateParams,
+        signal: params.signal,
       });
     }
     if (resType === "mcp" || resType === "object" || resType === "view") {
@@ -197,6 +199,7 @@ export class BaiyingExecutor {
         session: this.session,
         logger: params.logger,
         privateParams,
+        signal: params.signal,
       });
     }
     if (resType === "doc") {
