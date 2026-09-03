@@ -103,6 +103,12 @@ public class SessionStreamRecoveryService implements ApplicationListener<Applica
         long now = System.currentTimeMillis();
         String localInstanceId = chatRuntimeInstance.getInstanceId();
         for (ChatRuntimeState state : states) {
+            // 本地调试实例只恢复由自身创建的会话，避免连接共享 Redis 时接管其他 BE 的会话。
+            if (chatRuntimeInstance.isDevelopment() && !localInstanceId.equals(state.getOwnerInstanceId())) {
+                log.debug("本地调试实例跳过其他 BE 的 Session Stream, sessionId: {}, ownerInstanceId: {}",
+                    state.getSessionId(), state.getOwnerInstanceId());
+                continue;
+            }
             if (ChatRuntimeState.STATUS_HANDOFF_REQUESTED.equals(state.getStatus())) {
                 recoverState(state, true);
                 continue;

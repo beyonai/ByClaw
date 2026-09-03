@@ -53,6 +53,7 @@ class SessionStreamRecoveryLocalOwnerTest {
         ReflectionTestUtils.setField(recoveryService, "streamAckFailureRegistry", streamAckFailureRegistry);
 
         when(chatRuntimeInstance.getInstanceId()).thenReturn(LOCAL_INSTANCE);
+        when(chatRuntimeInstance.isDevelopment()).thenReturn(false);
         when(sessionStreamManager.buildStreamKey(anyString())).thenReturn("stream:10");
         when(sessionStreamManager.buildConsumerName(anyString())).thenReturn("consumer:10");
         // PEL 查询返回空，claim 逻辑走空转即可，本用例只关心是否被调用与是否重复接管。
@@ -178,6 +179,49 @@ class SessionStreamRecoveryLocalOwnerTest {
         state.setLastHeartbeatAt(now);
         when(chatRuntimeStateService.listRunningStates()).thenReturn(Collections.singletonList(state));
         when(chatRuntimeStateService.tryAcquireRecoveryLock(eq(10L))).thenReturn(false);
+
+        scan();
+
+        verify(chatRuntimeStateService).tryAcquireRecoveryLock(10L);
+    }
+
+    @Test
+    void developmentSkipsStaleSessionOwnedByOtherInstance() {
+        long now = System.currentTimeMillis();
+        ChatRuntimeState state = localState(now);
+        state.setOwnerInstanceId("host:other");
+        when(chatRuntimeInstance.isDevelopment()).thenReturn(true);
+        when(chatRuntimeStateService.listRunningStates()).thenReturn(Collections.singletonList(state));
+
+        scan();
+
+        verify(chatRuntimeStateService, never()).tryAcquireRecoveryLock(any());
+        verify(sessionStreamManager, never()).startSessionListener(any(), any());
+    }
+
+    @Test
+    void developmentSkipsHandoffRequestedByOtherInstance() {
+        long now = System.currentTimeMillis();
+        ChatRuntimeState state = localState(now);
+        state.setOwnerInstanceId("host:other");
+        state.setStatus(ChatRuntimeState.STATUS_HANDOFF_REQUESTED);
+        when(chatRuntimeInstance.isDevelopment()).thenReturn(true);
+        when(chatRuntimeStateService.listRunningStates()).thenReturn(Collections.singletonList(state));
+
+        scan();
+
+        verify(chatRuntimeStateService, never()).tryAcquireRecoveryLock(any());
+        verify(sessionStreamManager, never()).startSessionListener(any(), any());
+    }
+
+    @Test
+    void developmentRecoversSessionOwnedBySameStableInstance() {
+        long now = System.currentTimeMillis();
+        ChatRuntimeState state = localState(now);
+        when(chatRuntimeInstance.isDevelopment()).thenReturn(true);
+        when(chatRuntimeStateService.listRunningStates()).thenReturn(Collections.singletonList(state));
+        when(outputStreamManager.getContext("10")).thenReturn(null);
+        when(chatRuntimeStateService.tryAcquireRecoveryLock(10L)).thenReturn(false);
 
         scan();
 
