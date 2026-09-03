@@ -45,6 +45,7 @@ const TASK_MODES = new Set(['research', 'collection']);
 const SOURCE_SCOPES = new Set(['public-internet', 'dingtalk', 'feishu', 'wecom', 'ima']);
 const MATERIALIZATION_TARGETS = new Set(['candidates', 'selected', 'all']);
 const REQUIRED_CONTENT_GRANULARITIES = new Set(['any', 'full-text']);
+const WORKFLOWS = new Set(['public-collect']);
 const REQUIRED_REPORT_HEADINGS = ['采集范围', '采集成果', '来源与追溯', '覆盖缺口与局限'];
 
 function parseJsonArg(value, fallback) {
@@ -177,6 +178,15 @@ function requiredContentGranularity(value) {
     throw new Error(`--required-content-granularity 必须是 ${[...REQUIRED_CONTENT_GRANULARITIES].join(' | ')}`);
   }
   return required;
+}
+
+function workflow(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const normalized = typeof value === 'string' ? value.trim() : '';
+  if (!WORKFLOWS.has(normalized)) {
+    throw new Error(`--workflow 仅支持 ${[...WORKFLOWS].join(' | ')}`);
+  }
+  return normalized;
 }
 
 function validateReportSections(reportPath) {
@@ -570,6 +580,7 @@ export function cmdInit(args) {
   const effectiveRequiredContentGranularity = requiredContentGranularity(
     args['required-content-granularity'],
   );
+  const effectiveWorkflow = workflow(args.workflow);
   const deliveryRequested = asBool(args['delivery-requested'], '--delivery-requested');
   validateSessionDirectoryIntent(root, args['session-root'], deliveryRequested);
   const explicitDirectUrls = nonEmptyStringList(
@@ -581,6 +592,16 @@ export function cmdInit(args) {
     : new Date().toISOString();
   if (!Number.isFinite(Date.parse(startedAt))) {
     throw new Error('--started-at 必须是合法时间字符串');
+  }
+  if (effectiveWorkflow === 'public-collect') {
+    const publicOnly = effectiveSourceScope.length === 1
+      && effectiveSourceScope[0] === 'public-internet';
+    if (mode !== 'collection' || !publicOnly
+      || effectiveMaterializationTarget !== 'selected'
+      || effectiveRequiredContentGranularity !== 'full-text'
+      || args['collection-result-input-file'] || args['metadata-input-file']) {
+      throw new Error('public-collect workflow 要求 collection、仅 public-internet、selected + full-text 且无预置业务产物');
+    }
   }
 
   const sessionFile = path.join(root, 'session.json');
@@ -609,6 +630,7 @@ export function cmdInit(args) {
       sourceScope: effectiveSourceScope,
       materializationTarget: effectiveMaterializationTarget,
       requiredContentGranularity: effectiveRequiredContentGranularity,
+      ...(effectiveWorkflow ? { workflow: effectiveWorkflow } : {}),
       deliveryRequested,
       startedAt,
       initialSearch: [],
@@ -942,8 +964,9 @@ export function cmdResearchStatus(args) {
       }
     }
   }
+  const { acquisitionEvidence: _internalAcquisitionEvidence, ...reportableTask } = session.task;
   return {
-    task: session.task,
+    task: reportableTask,
     research: {
       branches: session.research.branches.length,
       learnings: session.research.learnings.length,

@@ -27,13 +27,17 @@ node scripts/knowledge-collection.mjs acquire-web --session-dir <dir> --item-id 
 
 `public-collect` 的自动正文 probe 支持三类来源：普通 HTTP(S) 文章页、微信文章和 arXiv 论文。微信候选进入专用正文净化与结构验证，arXiv 候选只使用已登记的同论文官方 HTML 表示并执行论文结构验证；视频、社交平台和 RSS 等尚无专用 verifier 的候选会明确记为 `unsupported`，不会计入 requested count。每个 query 必须先运行 online-search 并验证其候选，仍缺正文时才运行同一 query 的 hot-discovery；阻塞恢复必须回到原 query 和原 channel。遇到真实登录、MFA 或 CAPTCHA 时按 run ID 恢复或跳过；不得创建平行会话继续写入。
 
+本文件下列原子来源命令仅适用于未由 `public-collect` 持有的 operator 会话。`public-collect` 持有的会话只能调用编排器内部 verifier；根 Agent、路由层和来源执行器均不得对该会话手工执行表格或后文中的 `acquire-web`、`materialize-*`、`collect`、`crawl-*` 命令。
+
+用户明确只要候选链接时，即使用户指定了链接数量，也使用 `public-discover`。用户要求文章、正文或全文时，“文章”按完整正文处理，改用 `public-collect`，并在首次 `init` 传 `--workflow public-collect`。直链无独立检索主题时，`--query` 与 `--fallback-query` 都复用首次 `init` 的原始任务描述。
+
 ## 路由表
 
 | 目标 | 首选执行器 | 唯一允许的兜底 |
 | --- | --- | --- |
-| 已选中的 `mp.weixin.qq.com/s...` 或 `weixin.sogou.com/link?...` 文章 | `bycli weixin download --url <URL>` | 无 |
-| 用户明确提供的 arXiv 论文全文 | `bycli arxiv paper <paper-id>` + `bycli web read --url <URL> --output <session-dir>/raw/bycli/arxiv/<item-id>/` | 同一论文 ID 的 `https://arxiv.org/html/<paper-id>` |
-| 通用网页 / URL | `knowledge-collection acquire-web` → `materialize-web` | 已由 public-discover 或用户直链授权的 URL |
+| 已选中的 `mp.weixin.qq.com/s...` 或 `weixin.sogou.com/link?...` 文章（仅限 operator；`public-collect` 使用内部 verifier） | `bycli weixin download --url <URL>` | 无 |
+| 用户明确提供的 arXiv 论文全文（仅限 operator；`public-collect` 使用内部 verifier） | `bycli arxiv paper <paper-id>` + `bycli web read --url <URL> --output <session-dir>/raw/bycli/arxiv/<item-id>/` | 同一论文 ID 的 `https://arxiv.org/html/<paper-id>` |
+| 通用网页 / URL（仅限 operator；`public-collect` 使用内部 verifier） | `knowledge-collection acquire-web` → `materialize-web` | 已由 public-discover 或用户直链授权的 URL |
 | Twitter / X | `twitter-cli` | `bycli twitter search` |
 | Reddit | `rdt-cli` | `bycli reddit search` |
 | Bilibili | `bili-cli` | `bycli bilibili search` |

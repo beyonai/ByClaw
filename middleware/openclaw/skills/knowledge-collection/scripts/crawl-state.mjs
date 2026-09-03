@@ -23,6 +23,7 @@ import {
   loadSession, persistSession, withSessionLock, requireString, readStandaloneJson,
   resolveCollectionInputFile, isInside,
 } from './session.mjs';
+import { assertSessionWorkflowAllowsCommand } from './probe-state.mjs';
 
 export const CRAWL_SCHEMA_VERSION = '1.0';
 const STATUSES = new Set(['pending', 'fetched', 'failed', 'skipped']);
@@ -173,6 +174,7 @@ export function cmdCrawlSeed(paths, args) {
 
   return withSessionLock(paths, 'crawl-seed', () => {
     const { session } = loadSession(paths);
+    assertSessionWorkflowAllowsCommand(session, 'crawl-seed');
     const crawl = ensureCrawl(session);
     if (scopePrefix) crawl.scopePrefix = scopePrefix;
     if (maxPages) crawl.maxPages = maxPages;
@@ -271,6 +273,7 @@ export function cmdCrawlMark(paths, args) {
 
   return withSessionLock(paths, 'crawl-mark', () => {
     const { session } = loadSession(paths);
+    assertSessionWorkflowAllowsCommand(session, 'crawl-mark');
     const crawl = ensureCrawl(session);
     const index = new Map(crawl.entries.map((entry) => [entry.url, entry]));
     const applied = [];

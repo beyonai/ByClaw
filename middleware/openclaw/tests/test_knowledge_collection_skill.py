@@ -583,6 +583,58 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         ):
             self.assertIn(phrase, skill)
 
+    def test_public_routing_is_selected_by_deliverable_without_count_ambiguity(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        routing = (SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8")
+        combined = f"{skill}\n{routing}"
+
+        for phrase in (
+            "只要候选链接",
+            "即使用户指定了链接数量",
+            "使用 `public-discover`",
+            "“文章”按完整正文处理",
+            "`--workflow public-collect`",
+            "`--query` 与 `--fallback-query`",
+            "都复用首次 `init` 的原始任务描述",
+        ):
+            self.assertIn(phrase, combined)
+
+    def test_public_collect_owned_sessions_do_not_advertise_external_atomic_paths(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        routing = (SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8")
+        contract = (SKILL_ROOT / "references" / "collection-contract.md").read_text(encoding="utf-8")
+        combined = f"{skill}\n{routing}\n{contract}"
+
+        for phrase in (
+            "原子来源命令仅适用于未由 `public-collect` 持有的 operator 会话",
+            "`public-collect` 持有的会话只能调用编排器内部 verifier",
+            "`crawl-next` 虽不写入状态，但会返回外部待执行批次",
+            "因此在 `public-collect` 持有的会话中也必须拒绝",
+        ):
+            self.assertIn(phrase, combined)
+
+    def test_each_public_source_path_keeps_its_ownership_boundary_adjacent(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        routing = (SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8")
+
+        for marker in (
+            "已选候选是 `https://mp.weixin.qq.com/s...`",
+            "其他通用网页必须先运行 `acquire-web",
+            "已授权并选中的 arXiv 候选要求完整正文时",
+        ):
+            paragraph = next(part for part in skill.split("\n\n") if marker in part)
+            self.assertIn("operator 会话", paragraph)
+            self.assertIn("内部 verifier", paragraph)
+
+        for marker in (
+            "`mp.weixin.qq.com/s...`",
+            "用户明确提供的 arXiv 论文全文",
+            "通用网页 / URL",
+        ):
+            row = next(line for line in routing.splitlines() if marker in line)
+            self.assertIn("operator", row)
+            self.assertIn("内部 verifier", row)
+
     def test_init_failure_preserves_the_only_session_directory(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
 

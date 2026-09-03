@@ -124,6 +124,40 @@ test('acquires contiguous browser chunks and leaves the item pending for materia
   }
 });
 
+test('atomic acquisition keeps exact redirect URLs in raw evidence but redacts command responses', async () => {
+  const f = await fixture();
+  const calls = [];
+  const baseRunner = successfulRunner(calls);
+  const resolvedUrl = `${SOURCE_URL}?signature=super-secret&source=redirect`;
+  const runner = async (bin, args, options) => {
+    if (args.includes('get') && args.includes('url')) {
+      return { exitCode: 0, stdout: `${resolvedUrl}\n`, stderr: '' };
+    }
+    if (args.includes('extract')) {
+      const outcome = await baseRunner(bin, args, options);
+      return { ...outcome, stdout: JSON.stringify({ ...JSON.parse(outcome.stdout), url: resolvedUrl }) };
+    }
+    return baseRunner(bin, args, options);
+  };
+  try {
+    const first = await runWebAcquire(f.paths, {
+      'item-id': 'signed-redirect', 'source-url': SOURCE_URL,
+    }, { runProcess: runner });
+    assert.equal(JSON.stringify(first).includes('super-secret'), false);
+    assert.match(first.resolvedUrl, /REDACTED/);
+    const raw = JSON.parse(await readFile(join(f.root, first.executorResult), 'utf8'));
+    assert.equal(raw.resolvedUrl, resolvedUrl);
+
+    const replay = await runWebAcquire(f.paths, {
+      'item-id': 'signed-redirect', 'source-url': SOURCE_URL,
+    }, { runProcess: async () => { throw new Error('idempotent replay must not execute'); } });
+    assert.equal(JSON.stringify(replay).includes('super-secret'), false);
+    assert.match(replay.resolvedUrl, /REDACTED/);
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
 test('probe acquisition returns controlled body without creating collection inventory', async () => {
   const f = await fixture();
   const calls = [];

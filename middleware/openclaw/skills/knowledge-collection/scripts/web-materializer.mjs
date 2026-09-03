@@ -6,6 +6,7 @@ import path from 'node:path';
 
 import {
   recordPendingCollectionItem,
+  registerControlledAcquisitionEvidence,
   registerFullTextEvidenceReceipt,
 } from './collection-state.mjs';
 import { authorizePublicSource } from './discovery-authorization.mjs';
@@ -172,8 +173,14 @@ export async function runWebMaterialize(paths, args, options = {}) {
 
   const { session } = loadSession(paths, { persistMigration: false });
   const requested = authorizePublicSource(session.task?.discoveryGate, executorResult.requestedUrl);
-  const resolved = authorizePublicSource(session.task?.discoveryGate, executorResult.resolvedUrl);
-  if (requested.candidateId !== resolved.candidateId) throw new Error('resolvedUrl 与 requestedUrl 授权身份不一致');
+  const sourceUrl = executorResult.requestedUrl;
+  registerControlledAcquisitionEvidence(paths, {
+    candidateId: requested.candidateId,
+    requestedUrl: executorResult.requestedUrl,
+    resolvedUrl: executorResult.resolvedUrl,
+    executor: executorResult.executor,
+    evidenceArtifact: executorArtifact.relative,
+  }, { command: 'materialize-web', itemId });
 
   const analysis = analyzeWebMarkdown(rawMarkdown, executorResult);
   const diagnosticsDir = path.join(paths.root, 'raw', 'materialization');
@@ -188,7 +195,7 @@ export async function runWebMaterialize(paths, args, options = {}) {
     itemId,
     requestedUrl: executorResult.requestedUrl,
     resolvedUrl: executorResult.resolvedUrl,
-    sourceUrl: executorResult.resolvedUrl,
+    sourceUrl,
     complete: analysis.confidence === 'high',
     contentGranularity: analysis.confidence === 'high' ? 'full-text' : 'unknown',
     confidence: analysis.confidence,
@@ -209,11 +216,11 @@ export async function runWebMaterialize(paths, args, options = {}) {
       source: 'public-internet',
       sourceSkill: 'bycli',
       backend: 'web',
-      sourceUrl: executorResult.resolvedUrl,
+      sourceUrl,
       title: analysis.title,
       rawArtifacts: [...acquisitionArtifacts, diagnosticsRelative],
       reason: 'web-materialization-low-confidence',
-    });
+    }, 'materialize-web');
     return {
       ok: true,
       action: 'materialize-web',
@@ -245,7 +252,7 @@ export async function runWebMaterialize(paths, args, options = {}) {
   }
   baseDiagnostics.unavailableLocalMediaRemoved = unavailableLocalAssets.length;
   const cleanedMarkdown = removeLocalAssets(analysis.markdown, unavailableLocalAssets);
-  const rendered = `${frontmatter(analysis.title, executorResult.resolvedUrl)}${rewriteLocalAssets(
+  const rendered = `${frontmatter(analysis.title, sourceUrl)}${rewriteLocalAssets(
     cleanedMarkdown,
     localAssets.map((asset) => asset.relative),
   )}`;
@@ -309,7 +316,7 @@ export async function runWebMaterialize(paths, args, options = {}) {
     sanitizedPath: sanitizedRelative,
     canonicalItem: {
       title: analysis.title,
-      url: executorResult.resolvedUrl,
+      url: sourceUrl,
       author: '',
       publishTime: '',
       markdown: sanitizedRelative,
@@ -336,8 +343,8 @@ export async function runWebMaterialize(paths, args, options = {}) {
     atomicWriteJson(payloadAbsolute, payload);
     created.push(payloadAbsolute);
     const receipt = registerFullTextEvidenceReceipt(paths, {
-      executor: 'bycli', sourceUrl: executorResult.resolvedUrl, artifact: diagnosticsRelative,
-    });
+      executor: 'bycli', sourceUrl, artifact: diagnosticsRelative,
+    }, 'materialize-web');
     fs.rmSync(transactionRoot, { recursive: true, force: true });
     return {
       ok: true,

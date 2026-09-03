@@ -28,7 +28,7 @@ import {
   updateProbeBudget,
 } from './probe-state.mjs';
 
-function initializedSession() {
+function initializedSession({ workflow } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'probe-state-test-'));
   ensureSessionSkeleton(root);
   const session = newSession({
@@ -36,6 +36,7 @@ function initializedSession() {
     sourceScope: ['public-internet'],
     materializationTarget: 'selected',
     requiredContentGranularity: 'full-text',
+    ...(workflow ? { workflow } : {}),
     discoveryGate: createDiscoveryAuthorization({
       query: '采集一篇关于 DeepSeek Harness 的文章',
     }),
@@ -62,16 +63,17 @@ test('creates one fresh-session run and owns all external writes', () => {
   assert.equal(created.status, 'running');
   assert.equal(created.stateRevision, 1);
   assert.equal(loadSession(paths).session.task.requestedItemCount, 1);
+  assert.equal(loadSession(paths).session.task.workflow, 'public-collect');
   assert.throws(
     () => assertExternalSessionWriteAllowed(paths, 'collect'),
-    /ORCHESTRATION_IN_PROGRESS/,
+    /SESSION_OWNED_BY_PUBLIC_COLLECT/,
   );
   assert.throws(
     () => executeLocalCommand('collect', {
       'session-dir': paths.root,
       'item-json-file': join(paths.root, '.collection-inputs', 'missing.json'),
     }),
-    /ORCHESTRATION_IN_PROGRESS/,
+    /SESSION_OWNED_BY_PUBLIC_COLLECT/,
   );
   assert.doesNotThrow(() => assertExternalSessionWriteAllowed(paths, 'status'));
   assert.throws(
@@ -140,12 +142,15 @@ test('reserves snapshots with revision CAS and pause does not advance cursor', (
   assert.equal(readProbeRun(paths, run.runId).cursor, 1);
 });
 
-test('terminal same-input replay is idempotent and cleanup releases the owner', () => {
+test('terminal same-input replay is idempotent and retains workflow ownership', () => {
   const { paths } = initializedSession();
   const run = createProbeRun(paths, input);
   const finished = finishProbeRun(paths, run.runId, 'failed');
   assert.equal(finished.status, 'failed');
-  assert.doesNotThrow(() => assertExternalSessionWriteAllowed(paths, 'collect'));
+  assert.throws(
+    () => assertExternalSessionWriteAllowed(paths, 'collect'),
+    /SESSION_OWNED_BY_PUBLIC_COLLECT/,
+  );
 
   const replay = createProbeRun(paths, input);
   assert.equal(replay.runId, run.runId);
@@ -159,6 +164,27 @@ test('terminal same-input replay is idempotent and cleanup releases the owner', 
     remainingCount: 1,
     attempts: { total: 0, terminal: 0, paused: 0, blocked: 0 },
   });
+});
+
+test('public-collect workflow blocks every external collection mutation before a run', () => {
+  const { paths } = initializedSession({ workflow: 'public-collect' });
+  const blocked = [
+    'public-discover', 'acquire-web', 'materialize-web', 'materialize-wechat',
+    'materialize-arxiv', 'collect', 'crawl-seed', 'crawl-next', 'crawl-mark',
+  ];
+  for (const command of blocked) {
+    assert.throws(
+      () => assertExternalSessionWriteAllowed(paths, command),
+      /SESSION_OWNED_BY_PUBLIC_COLLECT/,
+      command,
+    );
+  }
+  for (const command of ['status', 'inspect', 'crawl-status', 'unlock-stale', 'export-views', 'publish']) {
+    assert.doesNotThrow(() => assertExternalSessionWriteAllowed(paths, command), command);
+  }
+  const stored = loadSession(paths).session;
+  assert.deepEqual(stored.collection.collection.items, []);
+  assert.equal(stored.crawl, undefined);
 });
 
 test('remaining orchestration budget is persisted and can only decrease', () => {

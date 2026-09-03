@@ -271,10 +271,21 @@ export async function runArxivMaterialize(paths, args) {
   const rawMarkdown = fs.readFileSync(fulltextArtifact.absolute, 'utf8');
   const analysis = analyzeFullText(rawMarkdown, metadata, acquisition.url);
 
+  recordPendingCollectionItem(paths, {
+    itemId,
+    source: 'public-internet',
+    sourceSkill: 'bycli',
+    backend: 'bycli',
+    sourceUrl: source.url,
+    title: String(metadata.title || ''),
+    rawArtifacts: [metadataArtifact.relative, fulltextArtifact.relative],
+    media: { coverStatus: 'not-present', coverCount: 0, materializedCoverCount: 0, reason: null },
+    reason: 'awaiting-arxiv-materialization',
+  }, 'materialize-arxiv');
   registerArxivAcquisitionVariant(paths, {
     sourceUrl: source.url,
     acquisitionUrl: acquisition.url,
-  });
+  }, 'materialize-arxiv');
   const rawMaterializationDir = ensureSafeDirectory(paths.root, ['raw', 'materialization'], '物化诊断目录');
   const diagnosticsPath = path.join(rawMaterializationDir, `${itemId}.json`);
   const diagnosticsRelative = toPosixRelative(paths.root, diagnosticsPath);
@@ -308,7 +319,7 @@ export async function runArxivMaterialize(paths, args) {
       rawArtifacts: baseArtifacts,
       media: { coverStatus: 'not-present', coverCount: 0, materializedCoverCount: 0, reason: null },
       reason: 'arxiv-fulltext-incomplete',
-    });
+    }, 'materialize-arxiv');
     return {
       ok: true,
       action: 'materialize-arxiv',
@@ -356,7 +367,7 @@ export async function runArxivMaterialize(paths, args) {
     executor: 'bycli',
     sourceUrl: source.url,
     artifact: diagnosticsRelative,
-  });
+  }, 'materialize-arxiv');
   return {
     ok: true,
     action: 'materialize-arxiv',

@@ -22,6 +22,7 @@ import {
   finalizeOpenDiscoveryAttempt,
 } from './discovery-authorization.mjs';
 import { loadSession, persistSession, withSessionLock } from './session.mjs';
+import { assertSessionWorkflowAllowsCommand } from './probe-state.mjs';
 import { runCli } from './enterprise/shared/cli-runner.mjs';
 import { runOnlineSearch as defaultRunOnlineSearch } from './online-search/provider.mjs';
 
@@ -201,6 +202,7 @@ export async function runPublicDiscover(paths, args, options = {}) {
       throw new Error('DISCOVERY_RELEVANCE_MIGRATION_REQUIRED: 缺少公共发现 gate 的旧会话必须新建内部 run');
     }
     const ownedOrchestration = options.orchestrationRunId !== undefined;
+    if (!ownedOrchestration) assertSessionWorkflowAllowsCommand(current, 'public-discover');
     if (ownedOrchestration && (current.task.activeOrchestrationRunId !== options.orchestrationRunId
       || current.task.publicCollectRun?.runId !== options.orchestrationRunId
       || current.task.discoveryGate.schemaVersion !== '2.0')) {

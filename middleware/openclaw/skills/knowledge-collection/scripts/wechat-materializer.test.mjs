@@ -14,6 +14,7 @@ import { dirname, join } from 'node:path';
 import test from 'node:test';
 
 import { cmdCollect, collectionStatus } from './collection-state.mjs';
+import { createProbeRun } from './probe-state.mjs';
 import { cmdInit } from './research-state.mjs';
 import { sessionPaths } from './session.mjs';
 import { runWechatMaterialize, sanitizeWechatMarkdown } from './wechat-materializer.mjs';
@@ -27,12 +28,10 @@ async function initializedSession() {
     query: '采集一篇文章',
     'source-scope': '["public-internet"]',
     'materialization-target': 'selected',
+    'required-content-granularity': 'full-text',
     'direct-urls': JSON.stringify([
       'https://weixin.sogou.com/link?url=fixture',
       'https://weixin.sogou.com/link?url=escape',
-      'https://mp.weixin.qq.com/s/mihoyo',
-      'https://mp.weixin.qq.com/s/ambiguous',
-      'https://mp.weixin.qq.com/s/escape',
     ]),
   });
   return { root, paths: sessionPaths(root) };
@@ -58,6 +57,13 @@ async function writeExecutorFixture(root, itemId, fixtureName, overrides = {}) {
   const resultPath = join(rawDir, 'download-result.json');
   await writeFile(resultPath, `${JSON.stringify(result, null, 2)}\n`);
   return resultPath;
+}
+
+async function markPublicCollectOwned(root) {
+  const sessionPath = join(root, 'session.json');
+  const session = JSON.parse(await readFile(sessionPath, 'utf8'));
+  session.task.workflow = 'public-collect';
+  await writeFile(sessionPath, `${JSON.stringify(session, null, 2)}\n`);
 }
 
 test('sanitizer preserves article content and removes only known WeChat noise', async () => {
@@ -91,6 +97,12 @@ test('materializer writes deterministic artifacts and a full-text collect payloa
     const args = { 'executor-result-file': resultPath, 'item-id': 'mihoyo' };
     const first = await runWechatMaterialize(paths, args);
     const firstMarkdown = await readFile(join(root, 'sanitized/items/mihoyo/index.md'), 'utf8');
+    assert.throws(() => createProbeRun(paths, {
+      query: '采集一篇文章', fallbackQuery: '采集一篇文章', requestedCount: 1,
+      category: 'general', language: 'zh-CN', manualPolicy: 'pause',
+    }), /SESSION_NOT_FRESH/);
+    const externallyOwnedSession = JSON.parse(await readFile(join(root, 'session.json'), 'utf8'));
+    assert.equal(externallyOwnedSession.task.workflow, undefined);
     const second = await runWechatMaterialize(paths, args);
     const secondMarkdown = await readFile(join(root, 'sanitized/items/mihoyo/index.md'), 'utf8');
 
@@ -111,6 +123,12 @@ test('materializer writes deterministic artifacts and a full-text collect payloa
     assert.ok(diagnostics.outputFiles.every((file) => /^sha256:[a-f0-9]{64}$/.test(file.sha256)));
     assert.equal(diagnostics.confidence, 'high');
     assert.ok(diagnostics.outputParagraphs >= 7);
+    const afterMaterialize = JSON.parse(await readFile(join(root, 'session.json'), 'utf8'));
+    assert.equal(afterMaterialize.task.acquisitionEvidence.length, 1);
+    assert.equal(afterMaterialize.task.acquisitionEvidence[0].requestedUrl,
+      'https://weixin.sogou.com/link?url=fixture');
+    assert.equal(afterMaterialize.task.acquisitionEvidence[0].resolvedUrl,
+      'https://mp.weixin.qq.com/s/mihoyo');
 
     const payload = JSON.parse(await readFile(first.collectPayloadPath, 'utf8'));
     assert.equal(payload.canonicalItem.url, 'https://weixin.sogou.com/link?url=fixture');
@@ -133,6 +151,24 @@ test('materializer writes deterministic artifacts and a full-text collect payloa
     const status = collectionStatus(paths);
     assert.equal(status.deliveryComplete, true);
     assert.equal(status.contentGranularity['full-text'], 1);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('direct WeChat materialization cannot write into a public-collect-owned session', async () => {
+  const { root, paths } = await initializedSession();
+  try {
+    const resultPath = await writeExecutorFixture(root, 'mihoyo', 'wechat-complete.md');
+    await markPublicCollectOwned(root);
+    await assert.rejects(runWechatMaterialize(paths, {
+      'executor-result-file': resultPath,
+      'item-id': 'mihoyo',
+    }), /SESSION_OWNED_BY_PUBLIC_COLLECT/);
+    await assert.rejects(stat(join(root, 'raw/materialization/mihoyo.json')), { code: 'ENOENT' });
+    await assert.rejects(stat(join(root, 'sanitized/items/mihoyo/index.md')), { code: 'ENOENT' });
+    const session = JSON.parse(await readFile(join(root, 'session.json'), 'utf8'));
+    assert.deepEqual(session.collection.collection.items, []);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

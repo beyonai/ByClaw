@@ -8,6 +8,8 @@ import {
   recordDiscoveryResult,
   reserveDiscoveryAttempt,
 } from './discovery-authorization.mjs';
+import * as authorizationModule from './discovery-authorization.mjs';
+import { newSession } from './session.mjs';
 
 test('registers only official same-paper arXiv acquisition representations', () => {
   const state = createDiscoveryAuthorization({
@@ -262,6 +264,53 @@ test('replayed mutable sourceUrls cannot rewrite immutable acquisition authoriza
   assert.equal(after.candidateVersion, before.candidateVersion);
 });
 
+test('a later discovery round cannot rewrite accepted acquisition evidence or its candidate', () => {
+  const requestedUrl = 'https://m.example.com/article/123';
+  const resolvedUrl = 'https://www.example.com/article/123?source=redirect';
+  const state = createDiscoveryAuthorization({ query: 'Example article' });
+  reserveDiscoveryAttempt(state, { query: 'Example article' });
+  recordDiscoveryResult(state, {
+    query: 'Example article',
+    candidates: [{
+      url: requestedUrl,
+      title: 'Example article analysis',
+      content: 'Example article analysis with sufficient discovery evidence for probing.',
+      pageType: 'article',
+    }],
+  });
+  const candidate = authorizePublicSource(state, requestedUrl);
+  const session = newSession({ discoveryGate: state });
+  authorizationModule.registerAcceptedAcquisitionEvidence(session, {
+    candidateId: candidate.candidateId,
+    requestedUrl,
+    resolvedUrl,
+    executor: 'bycli',
+    evidenceArtifact: 'raw/bycli/web/article/executor-result.json',
+  });
+  const evidenceBefore = JSON.parse(JSON.stringify(session.task.acquisitionEvidence));
+  const candidateBefore = JSON.parse(JSON.stringify(candidate));
+
+  reserveDiscoveryAttempt(state, { query: 'Example article followup', allowCandidateRetry: true });
+  recordDiscoveryResult(state, {
+    query: 'Example article followup',
+    candidates: [{
+      url: 'https://example.com/article/other',
+      title: 'Example article followup',
+      content: 'A different Example article discovered during the bounded fallback round.',
+      pageType: 'article',
+    }],
+  });
+
+  assert.deepEqual(session.task.acquisitionEvidence, evidenceBefore);
+  assert.deepEqual(state.candidates.find((entry) => entry.candidateId === candidate.candidateId), candidateBefore);
+  assert.equal(
+    authorizationModule.authorizeAcceptedAcquisitionEvidence(
+      session, candidate.candidateId, resolvedUrl,
+    ).candidateId,
+    candidate.candidateId,
+  );
+});
+
 test('keeps schema 1.1 authorization readable for legacy atomic commands', () => {
   const state = createDiscoveryAuthorization({ directUrls: ['https://example.com/article/12345'] });
   state.schemaVersion = '1.1';
@@ -324,4 +373,188 @@ test('does not reserve another discovery attempt while one is running', () => {
     () => reserveDiscoveryAttempt(state, { query: 'concurrent', category: 'science' }),
     /DISCOVERY_IN_PROGRESS/,
   );
+});
+
+test('stores controlled redirects outside discovery evidence and keeps initial authorization exact', () => {
+  const requestedUrl = 'https://m.example.com/article/123';
+  const resolvedUrl = 'https://www.example.com/article/123?source=redirect';
+  const gate = createDiscoveryAuthorization({ directUrls: [requestedUrl] });
+  const candidate = authorizePublicSource(gate, requestedUrl);
+  const session = newSession({ discoveryGate: gate });
+  const before = JSON.parse(JSON.stringify(candidate));
+
+  const first = authorizationModule.registerAcceptedAcquisitionEvidence(session, {
+    candidateId: candidate.candidateId,
+    requestedUrl,
+    resolvedUrl,
+    executor: 'bycli',
+    evidenceArtifact: 'raw/bycli/web/article/executor-result.json',
+  });
+  const replay = authorizationModule.registerAcceptedAcquisitionEvidence(session, {
+    candidateId: candidate.candidateId,
+    requestedUrl,
+    resolvedUrl,
+    executor: 'bycli',
+    evidenceArtifact: 'raw/bycli/web/article/executor-result.json',
+  });
+
+  assert.deepEqual(first, replay);
+  assert.equal(first.redirectChainObserved, false);
+  assert.equal(session.task.acquisitionEvidence.length, 1);
+  assert.deepEqual(gate.candidates[0], before);
+  assert.equal(
+    authorizationModule.authorizeAcceptedAcquisitionEvidence(
+      session, candidate.candidateId, resolvedUrl,
+    ).candidateId,
+    candidate.candidateId,
+  );
+  assert.throws(() => authorizePublicSource(gate, resolvedUrl), /SOURCE_NOT_AUTHORIZED/);
+});
+
+test('runtime redirect evidence rejects cross-candidate binding and is bounded', () => {
+  const firstUrl = 'https://example.com/article/1';
+  const secondUrl = 'https://example.com/article/2';
+  const gate = createDiscoveryAuthorization({ directUrls: [firstUrl, secondUrl] });
+  const first = authorizePublicSource(gate, firstUrl);
+  const second = authorizePublicSource(gate, secondUrl);
+  const session = newSession({ discoveryGate: gate });
+
+  assert.throws(() => authorizationModule.registerAcceptedAcquisitionEvidence(session, {
+    candidateId: first.candidateId,
+    requestedUrl: firstUrl,
+    resolvedUrl: secondUrl,
+    executor: 'bycli',
+    evidenceArtifact: 'raw/bycli/web/one/executor-result.json',
+  }), /ACQUISITION_EVIDENCE_CANDIDATE_CONFLICT/);
+  assert.throws(
+    () => authorizationModule.authorizeAcceptedAcquisitionEvidence(
+      session, second.candidateId, 'https://www.example.com/article/1',
+    ),
+    /SOURCE_NOT_AUTHORIZED/,
+  );
+
+  session.task.acquisitionEvidence = Array.from({ length: 200 }, (_, index) => ({
+    schemaVersion: '1.0', candidateId: `existing-${index}`, status: 'accepted',
+  }));
+  assert.throws(() => authorizationModule.registerAcceptedAcquisitionEvidence(session, {
+    candidateId: first.candidateId,
+    requestedUrl: firstUrl,
+    resolvedUrl: 'https://www.example.com/article/1',
+    executor: 'bycli',
+    evidenceArtifact: 'raw/bycli/web/one/executor-result.json',
+  }), /ACQUISITION_EVIDENCE_LIMIT_REACHED/);
+});
+
+test('multiple controlled artifacts for one redirect retain candidate authorization', () => {
+  const requestedUrl = 'https://m.example.com/article/1';
+  const resolvedUrl = 'https://www.example.com/article/1';
+  const gate = createDiscoveryAuthorization({ directUrls: [requestedUrl] });
+  const candidate = authorizePublicSource(gate, requestedUrl);
+  const session = newSession({ discoveryGate: gate });
+  for (const evidenceArtifact of [
+    'raw/bycli/web/one/executor-result.json',
+    'raw/bycli/web/one-attempt-2/executor-result.json',
+  ]) {
+    authorizationModule.registerAcceptedAcquisitionEvidence(session, {
+      candidateId: candidate.candidateId,
+      requestedUrl,
+      resolvedUrl,
+      executor: 'bycli',
+      evidenceArtifact,
+    });
+  }
+
+  assert.equal(session.task.acquisitionEvidence.length, 2);
+  assert.equal(
+    authorizationModule.authorizeAcceptedAcquisitionEvidence(
+      session, candidate.candidateId, resolvedUrl,
+    ).candidateId,
+    candidate.candidateId,
+  );
+});
+
+test('one runtime resolved URL cannot be accepted for two candidate identities', () => {
+  const firstUrl = 'https://m.example.com/article/1';
+  const secondUrl = 'https://m.example.com/article/2';
+  const resolvedUrl = 'https://www.example.com/article/final';
+  const gate = createDiscoveryAuthorization({ directUrls: [firstUrl, secondUrl] });
+  const first = authorizePublicSource(gate, firstUrl);
+  const second = authorizePublicSource(gate, secondUrl);
+  const session = newSession({ discoveryGate: gate });
+
+  authorizationModule.registerAcceptedAcquisitionEvidence(session, {
+    candidateId: first.candidateId,
+    requestedUrl: firstUrl,
+    resolvedUrl,
+    executor: 'bycli',
+    evidenceArtifact: 'raw/bycli/web/one/executor-result.json',
+  });
+  assert.throws(() => authorizationModule.registerAcceptedAcquisitionEvidence(session, {
+    candidateId: second.candidateId,
+    requestedUrl: secondUrl,
+    resolvedUrl,
+    executor: 'bycli',
+    evidenceArtifact: 'raw/bycli/web/two/executor-result.json',
+  }), /ACQUISITION_EVIDENCE_CANDIDATE_CONFLICT/);
+  assert.equal(session.task.acquisitionEvidence.length, 1);
+});
+
+test('runtime evidence rejects a resolved URL shared by two candidate variants', () => {
+  const firstUrl = 'https://example.com/article/1';
+  const secondUrl = 'https://example.com/article/2';
+  const gate = createDiscoveryAuthorization({ directUrls: [firstUrl, secondUrl] });
+  const first = authorizePublicSource(gate, firstUrl);
+  const second = authorizePublicSource(gate, secondUrl);
+  first.acquisitionUrls.push(secondUrl);
+  const session = newSession({ discoveryGate: gate });
+
+  assert.throws(() => authorizationModule.registerAcceptedAcquisitionEvidence(session, {
+    candidateId: first.candidateId,
+    requestedUrl: firstUrl,
+    resolvedUrl: secondUrl,
+    executor: 'bycli',
+    evidenceArtifact: 'raw/bycli/web/one/executor-result.json',
+  }), /ACQUISITION_EVIDENCE_CANDIDATE_CONFLICT/);
+});
+
+test('runtime redirect reauthorization rejects a corrupted requested identity', () => {
+  const requestedUrl = 'https://m.example.com/article/1';
+  const resolvedUrl = 'https://www.example.com/article/1';
+  const gate = createDiscoveryAuthorization({ directUrls: [requestedUrl] });
+  const candidate = authorizePublicSource(gate, requestedUrl);
+  const session = newSession({ discoveryGate: gate });
+  authorizationModule.registerAcceptedAcquisitionEvidence(session, {
+    candidateId: candidate.candidateId,
+    requestedUrl,
+    resolvedUrl,
+    executor: 'bycli',
+    evidenceArtifact: 'raw/bycli/web/one/executor-result.json',
+  });
+  session.task.acquisitionEvidence[0].requestedUrl = 'https://evil.example.net/article/1';
+
+  assert.throws(
+    () => authorizationModule.authorizeAcceptedAcquisitionEvidence(
+      session, candidate.candidateId, resolvedUrl,
+    ),
+    /SOURCE_NOT_AUTHORIZED/,
+  );
+});
+
+test('runtime redirect authorization errors redact sensitive query values', () => {
+  const requestedUrl = 'https://example.com/article/1';
+  const gate = createDiscoveryAuthorization({ directUrls: [requestedUrl] });
+  const candidate = authorizePublicSource(gate, requestedUrl);
+  const session = newSession({ discoveryGate: gate });
+  assert.throws(() => authorizationModule.registerAcceptedAcquisitionEvidence(session, {
+    candidateId: candidate.candidateId,
+    requestedUrl,
+    resolvedUrl: 'https://evil.example.net/login?token=super-secret',
+    executor: 'bycli',
+    evidenceArtifact: 'raw/bycli/web/one/executor-result.json',
+  }), (error) => {
+    assert.match(error.message, /SOURCE_NOT_AUTHORIZED/);
+    assert.equal(error.message.includes('super-secret'), false);
+    assert.match(error.message, /REDACTED/);
+    return true;
+  });
 });
