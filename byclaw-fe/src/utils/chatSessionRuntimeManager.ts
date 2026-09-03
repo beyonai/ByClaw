@@ -259,11 +259,18 @@ class ChatSessionRuntimeManager {
   }
 
   canAcceptInput(sessionId?: string): boolean {
+    if (this.isSessionFinishing(sessionId)) return false;
     const runtime = this.getSessionRuntime(sessionId);
     if (runtime?.acceptingInput !== undefined) {
       return runtime.acceptingInput;
     }
     return !this.isSessionRunning(sessionId);
+  }
+
+  /** An idle Agent may still be flushing the previous Gateway response. */
+  isSessionFinishing(sessionId?: string): boolean {
+    const runtime = this.getSessionRuntime(sessionId);
+    return runtime?.status === 'idle' && this.getAllBySession(sessionId).length > 0;
   }
 
   isSessionWaitingForUserInput(sessionId?: string | number): boolean {

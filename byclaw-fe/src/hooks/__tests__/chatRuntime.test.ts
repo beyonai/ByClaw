@@ -454,8 +454,12 @@ describe('hooks/useChat/chatRuntime', () => {
       })
     ).toBe(true);
 
-    expect(answerMsg.messageState).toBe(IMessageState.Done);
+    expect(answerMsg.messageState).toBe(IMessageState.Answer);
     expect(answerMsg.thinkDone).toBe(true);
+    expect(chatSessionRuntimeManager.canAcceptInput('s1')).toBe(false);
+    handleParsedChatStream(createParsed({ eventName: 'appStreamResponse', isDone: true }));
+    expect(answerMsg.messageState).toBe(IMessageState.Done);
+    expect(chatSessionRuntimeManager.canAcceptInput('s1')).toBe(true);
   });
 
   it('applies only the latest task plan snapshot to the active answer', () => {

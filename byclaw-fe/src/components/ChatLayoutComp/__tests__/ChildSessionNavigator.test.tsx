@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import { qryConversations } from '@/service/layout';
 import {
@@ -213,6 +213,39 @@ describe('ChildSessionNavigator', () => {
     expect(mockQryConversations).toHaveBeenCalledTimes(2);
   });
 
+  it('updates an existing child from working to completed without reloading the hierarchy', async () => {
+    const root = session('root-1', '主会话');
+    mockQryConversations.mockResolvedValue({ list: [session('child-1', '架构舵手', 'root-1')] } as any);
+    render(<ChildSessionNavigator sessionId="root-1" currentSession={root} />);
+    fireEvent.click(await screen.findByRole('button', { name: '打开子会话列表' }));
+    const emitStatus = async (status: string, streamId: string) => {
+      await act(async () => {
+        await newMessageHandler?.({
+          streamId,
+          data: {
+            sessionId: 'child-1',
+            running: status === 'running',
+            metadata: JSON.stringify({
+              session_scope: 'child',
+              external_parent_session_id: 'root-1',
+              external_session_id: 'member-1',
+              session_status: status,
+              child_run_id: 'member-1:1',
+              child_turn: 1,
+            }),
+          },
+        });
+      });
+    };
+    await emitStatus('running', '1000-1');
+    expect(await screen.findByText('执行中')).toBeInTheDocument();
+    await emitStatus('completed', '1000-2');
+    expect(await screen.findByText('已完成')).toBeInTheDocument();
+    await emitStatus('running', '1000-1');
+    expect(screen.queryByText('执行中')).not.toBeInTheDocument();
+    expect(mockQryConversations).toHaveBeenCalledTimes(1);
+  });
+
   it('shows exactly one child per member when a team snapshot is present', async () => {
     const root = session('root-1', '主会话');
     mockQryConversations.mockResolvedValue({
@@ -225,11 +258,43 @@ describe('ChildSessionNavigator', () => {
       team: {
         teamId: 'team-1',
         captainSessionId: 'dsh-root',
-        members: [{ id: 'member-1', byclawSessionId: 'child-1', name: '架构舵手' }],
+        members: [
+          { id: 'member-1', byclawSessionId: 'child-1', name: '架构舵手', status: 'ready', activity: 'working' },
+        ],
       },
     });
 
     render(<ChildSessionNavigator sessionId="root-1" currentSession={root} />);
     expect(await screen.findByRole('button', { name: '打开子会话列表' })).toHaveTextContent('1 个子代理');
+    fireEvent.click(screen.getByRole('button', { name: '打开子会话列表' }));
+    expect(await screen.findByText('执行中')).toBeInTheDocument();
+  });
+
+  it('uses the fetched status after reconnect when no newer child event arrives during the request', async () => {
+    const child = session('child-1', '架构舵手', 'root-1');
+    mockQryConversations.mockResolvedValueOnce({ list: [child] } as any).mockResolvedValueOnce({
+      list: [{ ...child, sessionExts: [{ extParamCode: 'external_session_status', extParamValue: 'completed' }] }],
+    } as any);
+    render(<ChildSessionNavigator sessionId="root-1" currentSession={session('root-1', '主会话')} />);
+    fireEvent.click(await screen.findByRole('button', { name: '打开子会话列表' }));
+    await act(async () => {
+      await newMessageHandler?.({
+        streamId: '1000-1',
+        data: {
+          sessionId: 'child-1',
+          metadata: JSON.stringify({
+            session_scope: 'child',
+            external_session_id: 'member-1',
+            external_parent_session_id: 'root-1',
+            session_status: 'running',
+          }),
+        },
+      });
+    });
+    expect(await screen.findByText('执行中')).toBeInTheDocument();
+    await act(async () => {
+      reconnectHandler?.();
+    });
+    expect(await screen.findByText('已完成')).toBeInTheDocument();
   });
 });

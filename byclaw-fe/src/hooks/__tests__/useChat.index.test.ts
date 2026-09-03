@@ -222,6 +222,66 @@ describe('hooks/useChat/index', () => {
     );
   });
 
+  it('restores an idle parent without loading while children work and resumes on a later root event', async () => {
+    mockGetChatRunningStatus.mockResolvedValue([
+      {
+        sessionId: 's1',
+        running: true,
+        traceId: 'trace-1',
+        clientRequestId: 'query_answer',
+        modelAnswerMessageId: 'answer-1',
+        userMessageId: 'query-1',
+        runtimeSource: 'test-engine',
+        runtimeStatus: 'running',
+        rootActive: false,
+        acceptingInput: true,
+        activeAgentCount: 1,
+        activeChildCount: 1,
+        runtimeRevision: 2,
+        runtimeChangedAt: 1000,
+      },
+    ] as any);
+    mockGetChatRunningSnapshot.mockResolvedValue({
+      messageId: 'answer-1',
+      sessionId: 's1',
+      traceId: 'trace-1',
+      running: true,
+      msgContent: '团队已经开始工作',
+      msgStatus: '1',
+      snapshotStreamId: '1000-1',
+    } as any);
+
+    const { result } = renderHook(() => useChat({ sessionId: 's1', addSession: jest.fn() } as any));
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const answer = mockUpdateMessage.mock.calls.at(-1)?.[0];
+    expect(answer.messageState).toBe(IMessageState.Done);
+    expect(answer.thinkDone).toBe(true);
+    expect(result.current.canAcceptInput).toBe(true);
+    expect(chatSessionRuntimeManager.isSessionRunning('s1')).toBe(true);
+
+    const { handleSessionRuntimeState } = await import('../useChat/chatRuntime');
+    await act(async () => {
+      handleSessionRuntimeState({
+        sessionId: 's1',
+        traceId: 'trace-1',
+        source: 'test-engine',
+        status: 'running',
+        rootActive: true,
+        acceptingInput: false,
+        activeAgentCount: 1,
+        activeChildCount: 0,
+        waitingInteractionCount: 0,
+        revision: 3,
+        changedAt: 2000,
+      });
+    });
+    expect(answer.messageState).toBe(IMessageState.Answer);
+    expect(result.current.canAcceptInput).toBe(false);
+  });
+
   it('exposes the current session message loading state and retry action', async () => {
     mockMessageLoadState = 'error';
     const { result } = renderHook(() => useChat({ sessionId: 'child-1', addSession: jest.fn() } as any));

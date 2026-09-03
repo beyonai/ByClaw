@@ -281,6 +281,26 @@ describe('utils/chatSessionRuntimeManager', () => {
     expect(chatSessionRuntimeManager.isSessionRunning('s1')).toBe(true);
   });
 
+  it('waits for the stream terminal before accepting the next employee turn', () => {
+    chatSessionRuntimeManager.register({ clientRequestId: 'finishing', sessionId: 's1', traceId: 'trace-1' });
+    chatSessionRuntimeManager.applySessionRuntime({
+      sessionId: 's1',
+      traceId: 'trace-1',
+      source: 'test-engine',
+      status: 'idle',
+      activeAgentCount: 0,
+      activeChildCount: 0,
+      waitingInteractionCount: 0,
+      rootActive: false,
+      acceptingInput: true,
+      revision: 2,
+      changedAt: 2000,
+    });
+    expect(chatSessionRuntimeManager.canAcceptInput('s1')).toBe(false);
+    chatSessionRuntimeManager.complete('finishing');
+    expect(chatSessionRuntimeManager.canAcceptInput('s1')).toBe(true);
+  });
+
   it('does not let an older trace hide a newer local turn', () => {
     chatSessionRuntimeManager.register({ clientRequestId: 'local-2', sessionId: 's1', traceId: 'trace-new' });
     chatSessionRuntimeManager.applySessionRuntime({
@@ -297,6 +317,7 @@ describe('utils/chatSessionRuntimeManager', () => {
     });
 
     expect(chatSessionRuntimeManager.isSessionRunning('s1')).toBe(true);
+    expect(chatSessionRuntimeManager.canAcceptInput('s1')).toBe(false);
   });
 
   it('uses explicit parent input readiness without hiding active child work', () => {

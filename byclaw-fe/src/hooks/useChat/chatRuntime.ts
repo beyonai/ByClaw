@@ -385,7 +385,10 @@ const completeChatStreamContext = (context: ChatStreamRuntimeContext, messageSta
   chatSessionRuntimeManager.complete(context.clientRequestId);
 };
 
-const applyProjectedRootState = (context: ChatStreamRuntimeContext, runtime?: SessionRuntimeState) => {
+export const applyProjectedRootState = (
+  context: Pick<ChatStreamRuntimeContext, 'answerMsg'>,
+  runtime?: SessionRuntimeState
+) => {
   if (runtime?.rootActive === undefined || context.answerMsg.messageState === IMessageState.Cancel) return;
   const traceId = context.answerMsg.traceId || get(context.answerMsg, 'traceId');
   if (!traceId || `${runtime.traceId}` !== `${traceId}`) return;
@@ -393,7 +396,7 @@ const applyProjectedRootState = (context: ChatStreamRuntimeContext, runtime?: Se
   let messageState = IMessageState.Done;
   if (runtime.status === 'failed') {
     messageState = IMessageState.Error;
-  } else if (runtime.rootActive) {
+  } else if (runtime.rootActive || chatSessionRuntimeManager.isSessionFinishing(runtime.sessionId)) {
     messageState = IMessageState.Answer;
   }
   set(context.answerMsg, 'messageState', messageState);
