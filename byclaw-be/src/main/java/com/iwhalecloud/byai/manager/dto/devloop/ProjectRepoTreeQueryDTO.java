@@ -13,6 +13,9 @@ public class ProjectRepoTreeQueryDTO {
 
     private Long repoId;
 
+    /** 当前会话；存在时优先读取该会话的 .worktree。 */
+    private Long sessionId;
+
     /** 目录路径，使用仓库内的正斜杠分隔；根目录为空。 */
     private String path;
 

@@ -351,4 +351,8 @@ export default {
 
   'context.used.format': '上下文已使用{percent}%，{usedTokens} / {contextTokens}',
   'easyConfirm.pagination.title': '请选择要操作的步骤',
+  'easyConfirm.notification.title': '任务需要您的处理',
+  'easyConfirm.notification.body': '有新的任务需要您确认或输入，请返回页面处理。',
+  'easyConfirm.notification.permissionDenied':
+    '浏览器通知权限已关闭。为避免错过需要您确认或输入的任务，请在浏览器的网站设置中允许通知。',
 };

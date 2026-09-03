@@ -312,7 +312,11 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
         <Space size={14} className={styles.bottomRight}>
           {/* 连接器控制组件直接管理用户级全局开关，消息 payload 不再携带连接器 ID。 */}
           <span className="byclaw-connector-outside-tool">
-            <ConnectorControl canAuthorize={!!this.props.userInfo} />
+            <ConnectorControl
+              canAuthorize={!!this.props.userInfo}
+              outside
+              onOpenResourcePicker={() => this.openResourcePicker('connector')}
+            />
           </span>
           {/* 多员工模式下 @ 入口始终保留，用于继续追加数字员工。 */}
           <MentionPopover
@@ -394,11 +398,30 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
                   payload: {
                     sessionId: mySessionId,
                     sessionName,
+                    isLocalSession: true,
+                    projectName: this.props.selectedProject?.projectName,
+                    projectId: this.props.projectId ?? this.props.selectedProject?.projectId,
                     objectId: agentId,
                     objectType: agentId ? 'DigEmployee' : undefined,
                     agentType: this.props.myAgentType,
                   },
                 });
+                const projectId = this.props.projectId ?? this.props.selectedProject?.projectId;
+                if (projectId !== undefined && projectId !== null) {
+                  this.props.globalContext.EventEmitter.emit('projectSpace-session-refresh', {
+                    projectId,
+                    projectName: this.props.selectedProject?.projectName,
+                    session: {
+                      sessionId: mySessionId,
+                      sessionName,
+                      projectId,
+                      projectName: this.props.selectedProject?.projectName,
+                      updateTime: new Date().toISOString(),
+                      createTime: new Date().toISOString(),
+                      isLocalSession: true,
+                    },
+                  });
+                }
               }}
             />
           )}

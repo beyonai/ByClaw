@@ -37,9 +37,12 @@ import type {
   AgentProfile,
   CallerPrincipal,
   Delegation,
+  DelegationCallbackStatus,
+  DelegationStatus,
   JsonValue,
   Run,
   RunAttachment,
+  RunExecutionStage,
   RunEvent,
   RunStatus,
   Session,
@@ -48,6 +51,7 @@ import type {
   UserInteractionResponse,
 } from "../domain/types.js";
 import {
+  isDelegationCallbackStatus,
   TERMINAL_DELEGATION_STATUSES,
   TERMINAL_RUN_STATUSES,
 } from "../domain/types.js";
@@ -60,6 +64,70 @@ import {
 export interface CreateSessionInput {
   owner: CallerPrincipal;
   context?: SessionContextInput;
+}
+
+export interface DelegationResumeInput {
+  delegationId: string;
+  status: string;
+  finalAnswer: string;
+}
+
+interface NormalizedDelegationResumeInput extends Omit<DelegationResumeInput, "status"> {
+  status: DelegationCallbackStatus;
+}
+
+type WaitingCallbackSettler = NonNullable<RunExecutionQueue["settleWaitingCallback"]>;
+
+/**
+ * 子 Agent 回调恢复的完整业务结果。
+ *
+ * outcome 是唯一判别字段：调用方不需要组合 accepted、runId 和 forwardEvents 来猜测原因。
+ */
+export type DelegationResumeResult =
+  | { outcome: "delegation_not_found" }
+  | {
+      outcome: "delegation_already_settled";
+      runId: string;
+      delegationStatus: DelegationStatus;
+      afterEventId?: number;
+    }
+  | { outcome: "callback_expired"; runId: string; afterEventId?: number }
+  | {
+      outcome: "run_not_resumable";
+      runId: string;
+      runStatus: RunStatus;
+      afterEventId?: number;
+    }
+  | { outcome: "run_not_found"; runId: string; afterEventId?: number }
+  | {
+      outcome: "delegation_settled";
+      runId: string;
+      runStatus: RunStatus;
+      executionStage: RunExecutionStage;
+      afterEventId?: number;
+    }
+  | { outcome: "run_resumed"; runId: string; afterEventId?: number };
+
+type RoutedDelegationResumeResult = Exclude<
+  DelegationResumeResult,
+  { outcome: "delegation_not_found" }
+>;
+
+function normalizeDelegationResumeInput(
+  input: DelegationResumeInput,
+): NormalizedDelegationResumeInput {
+  const status = input.status.trim().toUpperCase();
+  if (!isDelegationCallbackStatus(status)) {
+    throw new Error(`Unsupported delegation callback status: ${status || "<empty>"}`);
+  }
+  return { ...input, status };
+}
+
+function withResumeBoundary(
+  result: RoutedDelegationResumeResult,
+  afterEventId: number | undefined,
+): RoutedDelegationResumeResult {
+  return afterEventId === undefined ? result : { ...result, afterEventId };
 }
 
 export interface CreateRunInput {
@@ -348,6 +416,7 @@ export class RunService {
       ? {
           runId: run.id,
           secret: input.executionCredential.secret,
+          metadata: persistedExecutionMetadata(input.metadata),
           createdAt: now,
         }
       : undefined;
@@ -415,6 +484,7 @@ export class RunService {
       ? {
           runId: run.id,
           secret: input.executionCredential.secret,
+          metadata: persistedExecutionMetadata(input.metadata),
           createdAt: now,
         }
       : undefined;
@@ -486,112 +556,115 @@ export class RunService {
    * 消费子 Agent 的独立终态回调，并把原 Run 从 WAITING_AGENT 重新放回执行队列。
    * 返回的 afterEventId 供 by-framework Resume 上下文只转发暂停后的增量，避免重放旧消息。
    */
-  async resumeDelegation(input: {
-    delegationId: string;
-    status: string;
-    finalAnswer: string;
-  }): Promise<{
-    accepted: boolean;
-    runId?: string;
-    afterEventId?: number;
-    forwardEvents?: boolean;
-  }> {
-    const normalizedStatus = input.status.trim().toUpperCase();
-    if (
-      normalizedStatus !== "COMPLETED" &&
-      normalizedStatus !== "FAILED" &&
-      normalizedStatus !== "CANCELLED"
-    ) {
-      return { accepted: false };
+  async resumeDelegation(input: DelegationResumeInput): Promise<DelegationResumeResult> {
+    const normalized = normalizeDelegationResumeInput(input);
+    const executionQueue = this.runtime.executionQueue;
+    const atomicSettlement = executionQueue?.settleWaitingCallback;
+    if (!atomicSettlement) {
+      return this.#resumeDelegationWithRepository(normalized);
     }
-    const atomicSettlement = this.runtime.executionQueue?.settleWaitingCallback;
-    if (atomicSettlement) {
-      const settled = await atomicSettlement.call(this.runtime.executionQueue, {
-        delegationId: input.delegationId,
-        status: normalizedStatus,
-        finalAnswer: input.finalAnswer,
-        enforceDeadline: this.runtime.callbackTimeoutEnabled !== false,
-      });
-      if (!settled.runId) {
-        return { accepted: false };
-      }
-      const history = await this.events.list(settled.runId);
-      const suspendedEvent = history
-        .slice()
-        .reverse()
-        .find((event) => event.type === "run.suspended");
-      // 回调可能早于旧执行提交 run.suspended。delegation.started 同样是可靠的
-      // 恢复边界，避免 Resume 上下文从事件 0 重放 Super 的历史输出。
-      const resumeBoundary =
-        suspendedEvent ??
-        history
-          .slice()
-          .reverse()
-          .find(
-            (event) =>
-              event.type === "delegation.started" &&
-              event.data.delegationId === input.delegationId,
-          );
-      if (!settled.accepted) {
-        return {
-          accepted: false,
-          runId: settled.runId,
-          ...(resumeBoundary ? { afterEventId: resumeBoundary.eventId } : {}),
-        };
-      }
-      if (!settled.wakeRun) {
-        return {
-          accepted: true,
-          runId: settled.runId,
-          forwardEvents: false,
-          ...(resumeBoundary ? { afterEventId: resumeBoundary.eventId } : {}),
-        };
-      }
-      const queued = await this.runs.get(settled.runId);
-      if (queued?.status === "QUEUED") {
-        await this.#scheduleRun(queued, undefined);
-      }
-      return {
-        accepted: true,
-        runId: settled.runId,
-        forwardEvents: true,
-        ...(resumeBoundary ? { afterEventId: resumeBoundary.eventId } : {}),
-      };
+    const settle: WaitingCallbackSettler = (callback) =>
+      atomicSettlement.call(executionQueue, callback);
+    return this.#resumeDelegationAtomically(normalized, settle);
+  }
+
+  async #resumeDelegationAtomically(
+    input: NormalizedDelegationResumeInput,
+    settle: WaitingCallbackSettler,
+  ): Promise<DelegationResumeResult> {
+    const settled = await settle({
+      ...input,
+      enforceDeadline: this.runtime.callbackTimeoutEnabled !== false,
+    });
+    if (settled.outcome === "delegation_not_found") {
+      return settled;
     }
+
+    const afterEventId = await this.#resumeBoundaryEventId(settled.runId, input.delegationId);
+    const result = withResumeBoundary(settled, afterEventId);
+    if (settled.outcome === "run_resumed") {
+      await this.#scheduleQueuedRun(settled.runId);
+    }
+    return result;
+  }
+
+  async #resumeDelegationWithRepository(
+    input: NormalizedDelegationResumeInput,
+  ): Promise<DelegationResumeResult> {
     const completed = await this.delegationService.completeFromExternalCallback(input);
-    if (!completed.runId) {
-      return { accepted: false };
+    if (completed.outcome === "delegation_not_found") {
+      return completed;
     }
-    const history = await this.events.list(completed.runId);
-    const suspendedEvent = history
-      .slice()
-      .reverse()
-      .find((event) => event.type === "run.suspended");
-    if (!completed.accepted) {
-      return {
-        accepted: false,
-        runId: completed.runId,
-        ...(suspendedEvent ? { afterEventId: suspendedEvent.eventId } : {}),
-      };
+
+    const afterEventId = await this.#resumeBoundaryEventId(
+      completed.runId,
+      input.delegationId,
+    );
+    if (completed.outcome === "delegation_already_settled") {
+      return withResumeBoundary(
+        {
+          outcome: completed.outcome,
+          runId: completed.runId,
+          delegationStatus: completed.delegationStatus,
+        },
+        afterEventId,
+      );
     }
+
     const run = await this.runs.get(completed.runId);
-    if (!run || TERMINAL_RUN_STATUSES.has(run.status) || run.status === "CANCELLING") {
-      return {
-        accepted: false,
-        runId: completed.runId,
-        ...(suspendedEvent ? { afterEventId: suspendedEvent.eventId } : {}),
-      };
+    if (!run) {
+      return withResumeBoundary(
+        {
+          outcome: "run_not_found",
+          runId: completed.runId,
+        },
+        afterEventId,
+      );
     }
+    if (TERMINAL_RUN_STATUSES.has(run.status) || run.status === "CANCELLING") {
+      return withResumeBoundary(
+        {
+          outcome: "run_not_resumable",
+          runId: completed.runId,
+          runStatus: run.status,
+        },
+        afterEventId,
+      );
+    }
+
     const queued = await this.#setStatus(run, "QUEUED", {
       delegationId: input.delegationId,
       resumed: true,
     });
     await this.#scheduleRun(queued, undefined);
-    return {
-      accepted: true,
-      runId: queued.id,
-      ...(suspendedEvent ? { afterEventId: suspendedEvent.eventId } : {}),
-    };
+    return withResumeBoundary(
+      {
+        outcome: "run_resumed",
+        runId: queued.id,
+      },
+      afterEventId,
+    );
+  }
+
+  async #resumeBoundaryEventId(runId: string, delegationId: string): Promise<number | undefined> {
+    const history = await this.events.list(runId);
+    const reversed = history.slice().reverse();
+    // 回调可能早于旧执行提交 run.suspended。delegation.started 同样是可靠恢复边界，
+    // 可避免 Resume 上下文从事件 0 重放 Super 的历史输出。
+    return (
+      reversed.find((event) => event.type === "run.suspended") ??
+      reversed.find(
+        (event) =>
+          event.type === "delegation.started" && event.data.delegationId === delegationId,
+      )
+    )?.eventId;
+  }
+
+  async #scheduleQueuedRun(runId: string): Promise<void> {
+    const queued = await this.runs.get(runId);
+    if (queued?.status === "QUEUED") {
+      await this.#scheduleRun(queued, undefined);
+    }
   }
 
   /**
@@ -601,16 +674,13 @@ export class RunService {
   async cancelRun(
     runId: string,
     reason = "user requested cancellation",
-    beyondToken?: string,
   ): Promise<Run | undefined> {
     const run = await this.runs.get(runId);
     if (!run || TERMINAL_RUN_STATUSES.has(run.status)) {
       return run;
     }
     if (run.status === "QUEUED" || run.status === "CREATED") {
-      const cancelled = await this.#finishCancelled(run, reason);
-      await this.#cancelTaskPlan(run, reason, beyondToken);
-      return cancelled;
+      return await this.#finishCancelled(run, reason);
     }
 
     const cancelling = await this.#requestCancelling(run, reason);
@@ -626,9 +696,7 @@ export class RunService {
     if (delegationCancellation.status === "rejected") {
       throw delegationCancellation.reason;
     }
-    const cancelled = await this.#finishCancelled(cancelling, reason);
-    await this.#cancelTaskPlan(run, reason, beyondToken);
-    return cancelled;
+    return await this.#finishCancelled(cancelling, reason);
   }
 
   /** 与执行实例的状态推进竞争时重读后重试，避免合法取消因一次乐观锁冲突返回 500。 */
@@ -733,6 +801,9 @@ export class RunService {
     this.#callbackSweep = queue
       .expireWaitingCallbacks({ limit: 100 })
       .then((expired) => {
+        for (const item of expired) {
+          this.#ephemeralMetadata.delete(item.runId);
+        }
         if (expired.length > 0) {
           this.runtime.logger?.warn(
             {
@@ -794,6 +865,7 @@ export class RunService {
     if (!queue) {
       return;
     }
+    let retainEphemeralMetadata = false;
     try {
       const run = await this.runs.get(claim.runId);
       if (!run || TERMINAL_RUN_STATUSES.has(run.status)) {
@@ -819,6 +891,7 @@ export class RunService {
           return;
         }
         metadata = {
+          ...(credential.metadata ?? {}),
           ...metadata,
           "Beyond-Token": credential.secret,
         };
@@ -839,11 +912,19 @@ export class RunService {
         );
       }
       await this.#execute(run, metadata, claim);
+      const latest = await this.runs.get(claim.runId);
+      retainEphemeralMetadata = Boolean(
+        latest && !TERMINAL_RUN_STATUSES.has(latest.status),
+      );
     } finally {
       if (this.#executionClaims.get(claim.runId) === claim) {
         this.#executionClaims.delete(claim.runId);
       }
-      this.#ephemeralMetadata.delete(claim.runId);
+      // callback/用户交互恢复会把同一个非终态 Run 再次入队，且不会重新携带入口
+      // metadata。单实例内需保留这份执行上下文，直到 Run 真正终结。
+      if (!retainEphemeralMetadata) {
+        this.#ephemeralMetadata.delete(claim.runId);
+      }
       await queue.release(claim).catch(() => undefined);
     }
   }
@@ -1386,6 +1467,7 @@ ${JSON.stringify(completedDelegations)}`;
         await this.#saveRunWithEvent(finished, completionEvent);
       }
       dirtyLeader = false;
+      this.#ephemeralMetadata.delete(finished.id);
       this.events.close(finished.id);
     } catch (error) {
       if (error instanceof LeaderRunSuspendedError) {
@@ -1465,27 +1547,6 @@ ${JSON.stringify(completedDelegations)}`;
       sourceRuntime: "BYCLAW_SUPER",
       sourceRunId: run.id,
     };
-  }
-
-  async #cancelTaskPlan(
-    run: Run,
-    reason: string,
-    beyondToken?: string,
-  ): Promise<void> {
-    if (!this.#taskPlans) {
-      return;
-    }
-    const metadata = {
-      ...(this.#ephemeralMetadata.get(run.id) ?? {}),
-      ...(beyondToken ? { "Beyond-Token": beyondToken } : {}),
-    };
-    const context = this.#taskPlanContext(run, metadata);
-    if (!context) {
-      return;
-    }
-    // 计划同步不能把已经成功的运行时取消反转成网关失败；标准 STOP_CHAT
-    // 仍会由 BE 在 Gateway 返回后执行权威的 confirmCancellation。
-    await this.#taskPlans.cancel({ context, reason }).catch(() => undefined);
   }
 
   /** Run 异常终止时把活动计划收敛到 FAILED，避免前端永久停留在执行中。 */
@@ -1578,6 +1639,7 @@ ${JSON.stringify(completedDelegations)}`;
     for (let attempt = 0; attempt < 5; attempt += 1) {
       const latest = (await this.runs.get(run.id)) ?? run;
       if (TERMINAL_RUN_STATUSES.has(latest.status)) {
+        this.#ephemeralMetadata.delete(latest.id);
         this.events.close(latest.id);
         return latest;
       }
@@ -1605,6 +1667,7 @@ ${JSON.stringify(completedDelegations)}`;
           data: { status: "CANCELLED", reason },
         });
         await this.runtime.credentials?.delete(finished.id).catch(() => undefined);
+        this.#ephemeralMetadata.delete(finished.id);
         this.events.close(finished.id);
         return finished;
       } catch (error) {
@@ -1621,6 +1684,7 @@ ${JSON.stringify(completedDelegations)}`;
   async #finishFailed(run: Run, error: string): Promise<Run> {
     const latest = await this.runs.get(run.id);
     if (latest && TERMINAL_RUN_STATUSES.has(latest.status)) {
+      this.#ephemeralMetadata.delete(latest.id);
       return latest;
     }
     const runToFail = latest ?? run;
@@ -1667,12 +1731,14 @@ ${JSON.stringify(completedDelegations)}`;
     } catch (saveError) {
       const concurrent = await this.runs.get(finished.id);
       if (concurrent && TERMINAL_RUN_STATUSES.has(concurrent.status)) {
+        this.#ephemeralMetadata.delete(concurrent.id);
         this.events.close(concurrent.id);
         return concurrent;
       }
       throw saveError;
     }
     await this.runtime.credentials?.delete(finished.id).catch(() => undefined);
+    this.#ephemeralMetadata.delete(finished.id);
     this.events.close(finished.id);
     return finished;
   }
@@ -1754,7 +1820,10 @@ ${JSON.stringify(completedDelegations)}`;
     if (!credential) {
       throw new Error("EXECUTION_CREDENTIAL_MISSING");
     }
-    metadata["Beyond-Token"] = credential.secret;
+    const currentMetadata = { ...metadata };
+    Object.assign(metadata, credential.metadata ?? {}, currentMetadata, {
+      "Beyond-Token": credential.secret,
+    });
   }
 }
 
@@ -1847,4 +1916,13 @@ function taskPlanCommandForRunFailure(snapshot: TaskPlanSnapshot): TaskPlanComma
 function readBeyondToken(metadata: Record<string, unknown>): string {
   const value = metadata["Beyond-Token"];
   return typeof value === "string" ? value.trim() : "";
+}
+
+/** 凭证单独保存 Beyond-Token，其他入口 metadata 随 lease 受保护地持久化。 */
+function persistedExecutionMetadata(
+  metadata: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  const persisted = structuredClone(metadata ?? {});
+  delete persisted["Beyond-Token"];
+  return persisted;
 }

@@ -172,6 +172,14 @@
   display: flex;
   align-items: center;
 
+  &.outsideToolsWithTools {
+    margin-left: 12px;
+  }
+
+  :global(.byclaw-connector-outside-tool:empty) {
+    display: none;
+  }
+
   :global {
     .@{antPrefix}-space:has(> .@{antPrefix}-space-item:nth-child(4)) {
       > .@{antPrefix}-space-item:nth-child(-n + 3) {
@@ -188,15 +196,22 @@
 
 .toolsMenu {
   display: flex;
-  min-width: 500px;
-  max-width: min(760px, calc(100vw - 32px));
-  min-height: 280px;
-  padding: 8px;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  height: 100%;
+  min-height: 0;
+  max-height: calc(100vh - 32px);
+  box-sizing: border-box;
+  padding: 4px;
+  overflow: hidden;
 
   .toolsMenuNav {
     width: 180px;
     padding: 4px 6px 4px 4px;
     border-right: 1px solid var(--beyond-color-border-secondary);
+    overflow-y: auto;
+    overflow-x: hidden;
   }
 
   .toolsMenuNavItem {
@@ -236,25 +251,56 @@
 
   .toolsMenuPanel {
     flex: 1;
-    min-width: 260px;
-    max-height: 320px;
-    overflow: auto;
-    padding: 12px 14px;
+    min-width: 0;
+    height: auto;
+    min-height: 0;
+    box-sizing: border-box;
+    overflow: hidden;
+    padding: 2px 4px;
+  }
+
+  .toolsMenuPanelFileResource {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+
+    .toolsMenuPanelContentActive {
+      display: flex;
+      flex: 1;
+      flex-direction: column;
+      min-height: 0;
+    }
+
+    .toolsMenuSection {
+      display: flex;
+      flex: 1;
+      align-items: stretch;
+      min-height: 0;
+      overflow: hidden;
+    }
   }
 
   .toolsMenuPanelContent {
     display: none;
+    height: 100%;
+    min-height: 0;
   }
 
   .toolsMenuPanelContentActive {
-    display: block;
-  }
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
 
-  .toolsMenuPanelTitle {
-    margin-bottom: 12px;
-    color: var(--beyond-color-text);
-    font-size: 16px;
-    font-weight: 600;
+    > * {
+      min-height: 0;
+    }
+
+    :global(.connectorList) {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+    }
   }
 
   .toolsMenuPanel-expert,

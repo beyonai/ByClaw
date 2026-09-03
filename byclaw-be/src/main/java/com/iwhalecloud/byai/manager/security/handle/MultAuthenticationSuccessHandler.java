@@ -10,7 +10,7 @@ import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationSe
 import com.iwhalecloud.byai.manager.application.service.superassist.SuasSuperassistApplicationService;
 import com.iwhalecloud.byai.manager.domain.superassist.service.SuasSuperassistService;
 import com.iwhalecloud.byai.manager.application.service.user.UserApplicationService;
-import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
+import com.iwhalecloud.byai.gateway.sandbox.service.SandboxLoginAutoStartService;
 import com.iwhalecloud.byai.common.storage.UserFS;
 import com.iwhalecloud.byai.manager.domain.staticdata.service.SystemConfigService;
 import com.iwhalecloud.byai.manager.domain.users.service.UserService;
@@ -77,7 +77,7 @@ public class MultAuthenticationSuccessHandler implements AuthenticationSuccessHa
     private UserService userService;
 
     @Autowired
-    private SandboxService sandboxService;
+    private SandboxLoginAutoStartService sandboxLoginAutoStartService;
 
     @Autowired
     private SsoTokenService ssoTokenService;
@@ -200,17 +200,39 @@ public class MultAuthenticationSuccessHandler implements AuthenticationSuccessHa
         // 保存日志
         loginLogApplicationService.saveSuccessLog(request, users.getUserId(), loginInfo.getLoginType());
 
-        // 异步启动用户沙箱（不阻塞登录响应）
+        // 登录后任务各自异步分发并隔离失败，不阻塞登录响应。
         String sandboxUserCode = loginInfo.getUserCode();
-        executor.execute(() -> {
-            try {
-                sandboxService.launchSandbox(sandboxUserCode, null);
-                authRedisSyncService.asyncSyncUserAuthToRedis(loginInfo.getUserId());
-                tokenSaverProvisionService.provisionIfNeeded(loginInfo.getUserId(), sandboxUserCode);
-            } catch (Exception e) {
-                logger.warn("登录后异步启动沙箱失败，用户编码：{}", sandboxUserCode, e);
-            }
-        });
+        try {
+            sandboxLoginAutoStartService.trigger(sandboxUserCode);
+        }
+        catch (Exception e) {
+            logger.error("提交登录沙箱自启动任务失败，用户编码：{}", sandboxUserCode, e);
+        }
+        try {
+            authRedisSyncService.asyncSyncUserAuthToRedis(loginInfo.getUserId());
+        }
+        catch (Exception e) {
+            logger.error("提交登录用户权限同步任务失败，用户ID：{}", loginInfo.getUserId(), e);
+        }
+        try {
+            authRedisSyncService.asyncSyncUserManageAuthToRedis(loginInfo.getUserId());
+        }
+        catch (Exception e) {
+            logger.error("提交登录用户管理权限同步任务失败，用户ID：{}", loginInfo.getUserId(), e);
+        }
+        try {
+            executor.execute(() -> {
+                try {
+                    tokenSaverProvisionService.provisionIfNeeded(loginInfo.getUserId(), sandboxUserCode);
+                }
+                catch (Exception e) {
+                    logger.error("登录后初始化 Token Saver 失败，用户编码：{}", sandboxUserCode, e);
+                }
+            });
+        }
+        catch (Exception e) {
+            logger.error("提交 Token Saver 初始化任务失败，用户编码：{}", sandboxUserCode, e);
+        }
 
         // 放置用户授权信息
         this.putLoginAuth(loginResponse);

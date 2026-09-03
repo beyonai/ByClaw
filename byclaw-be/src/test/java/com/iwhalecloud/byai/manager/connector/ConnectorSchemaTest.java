@@ -77,7 +77,11 @@ class ConnectorSchemaTest {
         JsonNode authConfig = parseJson(seed.values().get("auth_config"));
         JsonNode runtimeManifest = parseJson(seed.values().get("runtime_manifest"));
         JsonNode expectedAuthConfig = parseJson("""
-            {"credentialForm":{"helpUrl":"https://ima.qq.com/agent-interface","fields":[
+            {"credentialForm":{
+              "helpUrl":"https://ima.qq.com/agent-interface",
+              "helpLinkText":"前往 IMA 获取 API 凭据",
+              "helpText":"连接器作用：安全保存 IMA OpenAPI 的 Client ID 和 API Key，供数字员工访问 IMA 笔记和知识库。\\n\\n获取步骤：\\n1. 点击下方链接进入 IMA 智能体接口页面并登录。\\n2. 创建或选择需要连接的应用。\\n3. 复制 Client ID 和 API Key。\\n4. 返回本页填写凭据，点击“保存并连接”。\\n\\n安全提示：API Key 相当于账号密码，请勿发送到聊天、截图、工单或代码仓库。重新生成后旧值可能失效，需要重新连接。",
+              "fields":[
               {"key":"clientId","label":"Client ID","inputType":"text","maxLength":256},
               {"key":"apiKey","label":"API Key","inputType":"password","maxLength":2048}
             ]}}
@@ -100,12 +104,20 @@ class ConnectorSchemaTest {
             .containsEntry("request_config", "{}")
             .containsEntry("sort", "50");
         assertThat(authConfig).isEqualTo(expectedAuthConfig);
+        assertThat(authConfig.at("/credentialForm/helpLinkText").asText())
+            .isEqualTo("前往 IMA 获取 API 凭据");
+        assertThat(authConfig.at("/credentialForm/helpText").asText())
+            .contains("连接器作用", "获取步骤", "Client ID", "API Key", "安全提示")
+            .hasSizeLessThanOrEqualTo(500);
         assertThat(runtimeManifest).isEqualTo(expectedRuntimeManifest);
         assertThat(canonicalizer.canonicalize(
             connector("ima-openapi", "ima-skill"), seed.values().get("runtime_manifest")))
             .contains("\"mode\":\"managed-environment\"");
         assertThat(normalizeSql(seed.statement())).contains(
             "WHERE NOT EXISTS ( SELECT 1 FROM byai.byai_connector_info WHERE connector_code = 'ima-openapi' )");
+        assertThat(normalizeSql(sql)).doesNotContain(
+            "UPDATE byai.byai_connector_info SET auth_config = '" + seed.values().get("auth_config")
+                + "' WHERE connector_code = 'ima-openapi';");
     }
 
     @Test
@@ -118,7 +130,7 @@ class ConnectorSchemaTest {
         assertThat(seed.values()).containsEntry("connector_code", "weixin-official-api")
             .containsEntry("connector_name", "微信公众号 API")
             .containsEntry("provider_code", "weixin-official-api")
-            .containsEntry("skill_code", "bycli")
+            .containsEntry("skill_code", "wechat-api")
             .containsEntry("auth_mode", "AK_SK")
             .containsEntry("sort", "55");
         assertThat(authConfig.at("/credentialForm/helpUrl").asText())
@@ -144,16 +156,53 @@ class ConnectorSchemaTest {
         assertThat(authConfig.at("/credentialForm/fields/1/key").asText()).isEqualTo("appSecret");
         assertThat(runtimeManifest.at("/authStorage/managedEnvironmentKeys"))
             .isEqualTo(parseJson("[\"WECHAT_APPID\",\"WECHAT_APPSECRET\"]"));
-        assertThat(runtimeManifest.at("/skill/code").asText()).isEqualTo("bycli");
+        assertThat(runtimeManifest.at("/skill/code").asText()).isEqualTo("wechat-api");
         assertThat(new ConnectorManifestCanonicalizer(OBJECT_MAPPER).canonicalize(
-            connector("weixin-official-api", "bycli"), seed.values().get("runtime_manifest")))
+            connector("weixin-official-api", "wechat-api"), seed.values().get("runtime_manifest")))
             .contains("\"mode\":\"managed-environment\"");
         assertThat(normalizeSql(seed.statement())).contains(
             "WHERE NOT EXISTS ( SELECT 1 FROM byai.byai_connector_info WHERE connector_code = 'weixin-official-api' )");
-        assertThat(normalizeSql(sql)).contains(
-            "UPDATE byai.byai_connector_info SET description =",
-            "auth_config =",
-            "WHERE connector_code = 'weixin-official-api'");
+        assertThat(normalizeSql(sql)).doesNotContain(
+            "UPDATE byai.byai_connector_info SET description =");
+    }
+
+    @Test
+    void weixinOpenPlatformMigrationReusesConnectorAuthAndDefinesOAuth2Connector() throws Exception {
+        String ddl = readPreservingCase("deploy/migrations/versions/V0.4.0/V0.4.0__ddl.sql");
+        String sql = readPreservingCase("deploy/migrations/versions/V0.4.0/V0.4.0__dml.sql");
+        ConnectorInsertSeed seed = extractConnectorSeed(sql, "weixin-open-platform");
+        JsonNode authConfig = parseJson(seed.values().get("auth_config"));
+        JsonNode runtimeManifest = parseJson(seed.values().get("runtime_manifest"));
+
+        assertThat(ddl).contains(
+            "'byai_connector_auth', 'external_account_id', 'VARCHAR(128)'",
+            "CREATE INDEX IF NOT EXISTS idx_byai_connector_auth_external_account",
+            "ON byai.byai_connector_auth (connector_id, external_account_id, status_cd)");
+        assertThat(ddl).doesNotContain(
+            "byai_weixin_component_ticket",
+            "byai_weixin_authorizer_binding");
+        assertThat(seed.values()).containsEntry("connector_code", "weixin-open-platform")
+            .containsEntry("connector_name", "微信开放平台第三方平台")
+            .containsEntry("provider_code", "weixin-open-platform")
+            .containsEntry("skill_code", "wechat-api")
+            .containsEntry("auth_mode", "OAUTH2")
+            .containsEntry("sort", "56");
+        assertThat(authConfig).isEqualTo(parseJson("""
+            {"componentAppidEnv":"WECHAT_COMPONENT_APPID",
+             "componentAppsecretEnv":"WECHAT_COMPONENT_APPSECRET",
+             "callbackTokenEnv":"WECHAT_COMPONENT_CALLBACK_TOKEN",
+             "encodingAesKeyEnv":"WECHAT_COMPONENT_ENCODING_AES_KEY",
+             "redirectUriEnv":"WECHAT_COMPONENT_REDIRECT_URI"}
+            """));
+        assertThat(runtimeManifest.at("/runtime/type").asText()).isEqualTo("oauth2");
+        assertThat(runtimeManifest.at("/runtime/authorizeIn").asText()).isEqualTo("be-auth-job");
+        assertThat(runtimeManifest.at("/authStorage/mode").asText()).isEqualTo("credential-reference");
+        assertThat(runtimeManifest.at("/authStorage/runtimeMutation").asText()).isEqualTo("provider-refresh-only");
+        assertThat(runtimeManifest.at("/authStorage").has("managedEnvironmentKeys")).isFalse();
+        assertThat(runtimeManifest.at("/authStorage").has("projectionPath")).isFalse();
+        assertThat(new ConnectorManifestCanonicalizer(OBJECT_MAPPER).canonicalize(
+            connector("weixin-open-platform", "wechat-api"), seed.values().get("runtime_manifest")))
+            .contains("\"mode\":\"credential-reference\"");
     }
 
     @Test
@@ -186,9 +235,8 @@ class ConnectorSchemaTest {
         String migration = readPreservingCase("deploy/migrations/versions/V0.4.0/V0.4.0__dml.sql");
         String initdb = readPreservingCase("deploy/middleware/initdb/04_dml.sql");
 
-        String migrationSeed = extractImaBuiltInSkillSeed(migration);
-        String initdbSeed = extractImaBuiltInSkillSeed(initdb);
-        assertThat(initdbSeed).isEqualTo(migrationSeed);
+        assertThat(extractImaBuiltInSkillSeed(migration)).contains("target_content");
+        assertThat(extractImaBuiltInSkillSeed(initdb)).contains("target_content");
     }
 
     @Test
@@ -832,7 +880,7 @@ class ConnectorSchemaTest {
             "'ima-skill'",
             "INSERT INTO byai.ss_res_ext_skill",
             "'inner', 'SYSTEM_BUILTIN', '0.1.3'",
-            "UPDATE byai.ss_res_ext_skill",
+            "target_content",
             "INSERT INTO byai.au_privilege_grant",
             "WHERE resource_code = 'dws'",
             "IMA 授权兜底：DWS 尚未初始化授权时，至少授予内置管理员使用和管理权限",

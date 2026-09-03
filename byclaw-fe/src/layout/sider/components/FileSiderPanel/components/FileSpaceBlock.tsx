@@ -41,10 +41,14 @@ interface FileSpaceBlockProps {
   compactTreePadding?: boolean;
   fillContainer?: boolean;
   resourceEmptyStyle?: boolean;
+  compactResourceEmpty?: boolean;
   defaultGroupsCollapsed?: boolean;
   accordionGroups?: boolean;
   groupCollapseResetKey?: Key;
   showActions?: boolean;
+
+  /** 是否显示文件/文件夹下方的大小、更新时间和创建人员信息。 */
+  showItemMeta?: boolean;
   style?: React.CSSProperties;
   onRefresh?: () => void;
   onSwitchChange?: (value: string) => void;
@@ -81,10 +85,12 @@ const FileSpaceBlock: React.FC<FileSpaceBlockProps> = ({
   compactTreePadding = false,
   fillContainer = false,
   resourceEmptyStyle = false,
+  compactResourceEmpty = false,
   defaultGroupsCollapsed = false,
   accordionGroups = false,
   groupCollapseResetKey,
   showActions = false,
+  showItemMeta = true,
   onRefresh,
   onSwitchChange,
   onExpand,
@@ -154,6 +160,7 @@ const FileSpaceBlock: React.FC<FileSpaceBlockProps> = ({
         loading={treeLoading}
         emptyText={treeEmptyText}
         showActions={showActions}
+        showItemMeta={showItemMeta}
         onExpand={onExpand}
         onLoadData={onLoadData}
         onNodeClick={onNodeClick || noopNodeClick}
@@ -174,6 +181,7 @@ const FileSpaceBlock: React.FC<FileSpaceBlockProps> = ({
         fillContainer ? styles.fileSpaceBlockPlain : '',
         // 资源 Tab 的文件空间空态需要和代码变更卡片使用相同的高度与居中方式。
         resourceEmptyStyle ? styles.fileSpaceBlockResource : '',
+        compactResourceEmpty ? styles.fileSpaceBlockResourceCompact : '',
       ]
         .filter(Boolean)
         .join(' ')}

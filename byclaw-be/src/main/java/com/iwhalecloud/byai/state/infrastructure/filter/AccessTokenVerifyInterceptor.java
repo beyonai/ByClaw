@@ -44,6 +44,9 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
 
     private static final String FEISHU_BOT_EVENT_CALLBACK_PATH = "/feishu/bot/events";
 
+    private static final String WEIXIN_OPEN_PLATFORM_EVENT_CALLBACK_PATH =
+        "/connector/authorization/callback/weixin-open-platform/events";
+
     private static final String THIRD_PARTY_SKILL_INSTALL_PATH = "/tool/installThirdPartySkill";
 
     private static final String THIRD_PARTY_SKILL_MANAGEABLE_DIGITAL_EMPLOYEE_PATH =
@@ -56,9 +59,6 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
         "/internal/v1/orchestrators/resolve-runtime";
 
     private static final String ARTIFACT_UPLOAD_PATH = "/open/api/v1/artifacts";
-
-    private static final Pattern ARTIFACT_DATA_OWNER_PATH = Pattern.compile(
-        ".*/open/api/v1/artifacts/[^/]+/data-records(?:/[^/]+)?/?$");
 
     @Value("${artifact.preview.path-prefix:/artifact-preview}")
     private String artifactPreviewPathPrefix;
@@ -168,9 +168,9 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
 
             // 例外的地址
             String url = request.getRequestURL().toString();
-            // 飞书开放平台回调从外部匿名推送，不会携带系统登录态。
+            // 飞书/微信开放平台事件回调从外部匿名推送，不会携带系统登录态。
             // 这里使用 servlet 原始路径做后缀判断，兼容 /byaiService 等 context-path/代理前缀。
-            if (this.isFeishuBotEventCallback(request)) {
+            if (this.isFeishuBotEventCallback(request) || this.isWeixinOpenPlatformEventCallback(request)) {
                 return true;
             }
             if (this.isThirdPartySkillMarketplaceRequest(request)) {
@@ -192,7 +192,7 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
                 }
                 return this.authenticateBeyondTokenOnlyRequest(request, "数字员工组运行时解析");
             }
-            // Artifact能力URL不依赖登录态；高熵accessKey、过期时间和撤销状态由业务服务校验。
+            // Artifact公开内容与数据接口不依赖登录态；有效期、记录级能力和管理密钥由业务服务校验。
             if (this.isArtifactCapabilityRequest(request)) {
                 return true;
             }
@@ -202,13 +202,6 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
                     return true;
                 }
                 return this.authenticateBeyondTokenOnlyRequest(request, "Artifact发布");
-            }
-            // Agent 访问 Artifact 持久化数据时只能使用沙箱注入的 Beyond-Token，不允许 Cookie 覆盖身份。
-            if (this.isArtifactDataOwnerRequest(request)) {
-                if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
-                    return true;
-                }
-                return this.authenticateBeyondTokenOnlyRequest(request, "Artifact数据访问");
             }
             if (this.checkUrlByRegex(url)) {
                 return true;
@@ -309,6 +302,20 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
         return isRequestPath(request, THIRD_PARTY_SKILL_INSTALL_PATH);
     }
 
+    private boolean isWeixinOpenPlatformEventCallback(HttpServletRequest request) {
+        return isExactPostRequestPath(request, WEIXIN_OPEN_PLATFORM_EVENT_CALLBACK_PATH);
+    }
+
+    private boolean isExactPostRequestPath(HttpServletRequest request, String expectedPath) {
+        if (request == null || !"POST".equalsIgnoreCase(request.getMethod())) {
+            return false;
+        }
+        String requestUri = StringUtils.defaultString(request.getRequestURI());
+        String expectedUri = StringUtils.defaultString(request.getContextPath()) + expectedPath;
+        String normalizedUri = requestUri.endsWith("/") ? requestUri.substring(0, requestUri.length() - 1) : requestUri;
+        return normalizedUri.equals(expectedUri);
+    }
+
     private boolean isThirdPartySkillMarketplaceRequest(HttpServletRequest request) {
         return isThirdPartySkillInstallRequest(request)
             || isRequestPath(request, THIRD_PARTY_SKILL_MANAGEABLE_DIGITAL_EMPLOYEE_PATH);
@@ -335,15 +342,6 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
     private boolean isArtifactUploadRequest(HttpServletRequest request) {
         return request != null && "POST".equalsIgnoreCase(request.getMethod())
             && endsWithConfiguredPath(request.getRequestURI(), ARTIFACT_UPLOAD_PATH);
-    }
-
-    private boolean isArtifactDataOwnerRequest(HttpServletRequest request) {
-        if (request == null || !("GET".equalsIgnoreCase(request.getMethod())
-            || "POST".equalsIgnoreCase(request.getMethod())
-            || "PUT".equalsIgnoreCase(request.getMethod()))) {
-            return false;
-        }
-        return ARTIFACT_DATA_OWNER_PATH.matcher(StringUtils.defaultString(request.getRequestURI())).matches();
     }
 
     private boolean isArtifactCapabilityRequest(HttpServletRequest request) {

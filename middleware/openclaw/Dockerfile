@@ -96,9 +96,11 @@ ARG NPM_REGISTRY=https://registry.npmmirror.com
 ARG WECOM_CLI_VERSION=0.1.9
 ARG LARKSUITE_CLI_VERSION=1.0.85
 ARG ZREAD_CLI_VERSION=0.2.13
+ARG CHATLAB_CLI_VERSION=0.37.0
 ARG IMA_OPENAPI_CLI_VERSION=0.1.3
 ARG IMA_OPENAPI_CLI_INTEGRITY=sha512-ckur/WWHugygFu130u/Zmn2IU9w7Ghc2cmPPxS6lFWvETSz7Rl3lqQGjMLmhSbTY2eCIR8DvqOzozOf5rWRbHg==
 ARG INSTALL_BROWSER_STACK=true
+ARG SEARXNG_CLI_VERSION=0.1.0
 
 RUN chown root:root /app
 
@@ -137,6 +139,7 @@ RUN npm config set registry "${NPM_REGISTRY}" --global \
         "@remotion/cli@${REMOTION_VERSION}" \
         "@byclaw/by-framework@${BY_FRAMEWORK_TS_VERSION}" \
         "zread_cli@${ZREAD_CLI_VERSION}" \
+        "chatlab-cli@${CHATLAB_CLI_VERSION}" \
         "/tmp/ima-openapi-cli-${IMA_OPENAPI_CLI_VERSION}.tgz" \
     && test "$(ima --version)" = "${IMA_OPENAPI_CLI_VERSION}" \
     && ima auth --help >/dev/null \
@@ -145,7 +148,7 @@ RUN npm config set registry "${NPM_REGISTRY}" --global \
     && zread version --stdio | grep -F "\"version\":\"${ZREAD_CLI_VERSION}\"" >/dev/null \
     && rm -f "/tmp/ima-openapi-cli-${IMA_OPENAPI_CLI_VERSION}.tgz"
 
-ARG OPENCLI_VERSION=2.1.49
+ARG OPENCLI_VERSION=2.1.56
 ARG OPENCLI_EXTENSION_VERSION=2.1.21
 RUN set -eux; \
     if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
@@ -251,7 +254,8 @@ RUN set -eux; \
         redis \
         websockify \
         "by-framework==${BY_FRAMEWORK_PY_VERSION}" \
-        "patchright==${PATCHRIGHT_VERSION}"; \
+        "patchright==${PATCHRIGHT_VERSION}" \
+        jieba; \
     patchright install chromium; \
     python3 -m pip install --no-cache-dir \
         -c /tmp/by-reach/constraints.txt \
@@ -262,19 +266,30 @@ RUN set -eux; \
     ln -sf /usr/local/bin/websockify /usr/bin/websockify; \
     websockify --help >/dev/null
 
-COPY middleware/openclaw/searxng-cli/requirements.txt /tmp/searxng-cli-requirements.txt
-RUN python3 -m venv /opt/searxng-cli-venv \
-    && /opt/searxng-cli-venv/bin/python -m pip install --no-cache-dir \
-        --requirement /tmp/searxng-cli-requirements.txt \
-    && /opt/searxng-cli-venv/bin/python -c 'import flask, httpx, lxml, msgspec, typer, yaml'
+# searxng-cli is installed from the published PyPI wheel into an isolated
+# venv.  The settings file is still mounted as an override so ByClaw can
+# customize engine whitelists/proxies without repackaging the wheel.
+COPY middleware/openclaw/searxng-cli/searxng_pack_settings.yml /opt/searxng-cli/searxng_pack_settings.yml
+COPY middleware/openclaw/searxng-cli-constraints.txt /tmp/searxng-cli-constraints.txt
+ENV SEARXNG_CLI_SETTINGS=/opt/searxng-cli/searxng_pack_settings.yml
 
-COPY middleware/openclaw/searxng-cli/ /opt/searxng-cli/
 RUN set -eux; \
-    printf '%s\n' '#!/bin/sh' \
-        'exec /opt/searxng-cli-venv/bin/python /opt/searxng-cli/searxng_cli.py "$@"' \
-        > /usr/local/bin/searxng-cli; \
-    chmod 755 /usr/local/bin/searxng-cli; \
-    searxng-cli --list-engines >/dev/null
+    python3 -m venv /opt/searxng-cli-venv; \
+    /opt/searxng-cli-venv/bin/python -m pip install --no-cache-dir \
+        --index-url https://pypi.tuna.tsinghua.edu.cn/simple \
+        --extra-index-url https://pypi.org/simple \
+        --constraint /tmp/searxng-cli-constraints.txt \
+        "searxng-cli==${SEARXNG_CLI_VERSION}"; \
+    /opt/searxng-cli-venv/bin/python -c 'import searxng_cli, flask, httpx, lxml, msgspec, yaml'; \
+    ln -sf /opt/searxng-cli-venv/bin/searxng-cli /usr/local/bin/searxng-cli; \
+    mkdir -p /opt/searxng-cli; \
+    printf '%s\n' \
+        '#!/usr/bin/env python3' \
+        'from searxng_cli.cli import main' \
+        'raise SystemExit(main())' \
+        > /opt/searxng-cli/searxng_cli.py; \
+    chmod 755 /opt/searxng-cli/searxng_cli.py; \
+    searxng-cli --list-engines >/dev/null 2>&1
 
 COPY middleware/openclaw/verify-runtime-toolchain.sh /usr/local/bin/verify-runtime-toolchain
 RUN chmod +x /usr/local/bin/verify-runtime-toolchain \
@@ -301,6 +316,9 @@ RUN ln -s /app /app/node_modules/openclaw
 
 COPY middleware/openclaw/skills/ /app/skills/
 COPY middleware/openclaw/runtime-tools/ /usr/local/lib/byclaw/runtime-tools/
+
+RUN cd /app/skills/knowledge-collection/scripts \
+    && npm ci --omit=dev --prefer-offline
 
 # 复用镜像全局 by-framework，确保文档转换脚本能按本地 node_modules 路径解析依赖。
 RUN rm -rf /app/skills/by-doc-to-markdown/scripts/node_modules/@byclaw/by-framework \
@@ -365,9 +383,6 @@ COPY --from=oven/bun:1-debian /usr/local/bin/bun /usr/local/bin/bun
 RUN ln -sf /usr/local/bin/bun /usr/local/bin/bunx
 ENV BUN_INSTALL=/usr/local \
     PATH="/usr/local/bin:$PATH"
-
-# add gbrain（官方原版）— BUN_INSTALL=/usr/local 使 gbrain 安装到 /usr/local/bin
-RUN bun install -g github:garrytan/gbrain
 
 # rm
 RUN rm -fr /root/.agents/skills

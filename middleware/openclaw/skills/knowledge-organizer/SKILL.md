@@ -1,12 +1,12 @@
 ---
 name: knowledge-organizer
-description: 将本地资料导入 ByClaw 知识库，并按需发现或补全 KnowledgeEntity。用于用户要求知识整理、资料入库、知识实体发现、知识丰富或知识构建时。
+description: 将本地资料导入 ByClaw 知识库或项目云盘，并按需发现或补全 KnowledgeEntity。用于用户要求知识整理、资料入库、知识实体发现、知识丰富或知识构建时。
 allowed-tools: read, exec
 ---
 
 # 整理知识
 
-加载并遵循 `by-knowledge-manager` skill，通过它执行知识库上传、构建、实体发现和实体补全。本 Skill 只负责判断阶段、控制范围和编排顺序，不自行实现知识库操作。
+加载并遵循 `project-cloud-knowledge` skill，通过它执行知识库上传、构建、实体发现和实体补全。本 Skill 只负责判断阶段、控制范围和编排顺序，不自行实现知识库操作。
 
 ## 锁定本轮操作范围
 
@@ -40,17 +40,18 @@ allowed-tools: read, exec
 
 - 确定目标知识库 `resourceId`；缺少或存在多个合理候选时询问用户，不要猜测。
 - 完整链路的所有阶段始终使用同一个 `resourceId`。
-- 当前任务上下文有会话 ID 时，实体发现或补全按 `by-knowledge-manager` 的规则显式传入；不要自行猜测。
+- 当前任务上下文有会话 ID 时，实体发现或补全按 `project-cloud-knowledge` 的规则显式传入；不要自行猜测。
 - 用户指定文件、目录或 KnowledgeEntity 范围时严格遵守；不得因进入后续阶段自动扩大范围。
 
 ## 控制交互
 
 - 交互任务缺少关键输入，或多个合理选择会显著改变结果时，及时询问用户。
+- 目标是项目云盘且用户只提出“知识整理”等概括目标时，读取并遵守 `project-cloud-knowledge-entity` 的项目云盘授权与成本提示；不得据此主动提交实体发现或补全。
 - 后台任务不要为每个文件频繁询问；在已锁定的知识库和文件范围内推进，确实无法处理时跳过或停止，最后一次性汇报。
-- 安全默认值不包括追加未要求的阶段、切换知识库、扩大文件范围或绕过 `by-knowledge-manager`。
+- 安全默认值不包括追加未要求的阶段、切换知识库、扩大文件范围或绕过 `project-cloud-knowledge`。
 
 ## 汇报结果
 
 说明完成了哪些上传或提交操作，并列出知识库资源 ID、文件路径、批次 ID、任务 ID 和失败项。异步操作只能表述为**已受理/已提交**，不能表述为**已完成**。
 
-`by-knowledge-manager` 执行失败时，如实报告错误并停止当前阶段。不得切换知识库或绕过该 skill 补救。
+`project-cloud-knowledge` 执行失败时，如实报告错误并停止当前阶段。不得切换知识库或绕过该 skill 补救。

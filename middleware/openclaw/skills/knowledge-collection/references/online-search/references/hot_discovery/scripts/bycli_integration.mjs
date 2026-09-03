@@ -1,10 +1,15 @@
-import { access } from 'node:fs/promises';
-import { constants } from 'node:fs';
 import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 const BYCLI_TIMEOUT_MS = 30_000;
 const LIST_TIMEOUT_MS = 60_000;
-const START_CHROME_SCRIPT = '/usr/local/bin/start-chrome.sh';
+const BRIDGE_TIMEOUT_MS = 60_000;
+const DEFAULT_BRIDGE_SCRIPT = '/app/skills/bycli/scripts/bridge-bootstrap.mjs';
+const LOCAL_BRIDGE_SCRIPT = fileURLToPath(new URL(
+  '../../../../../../bycli/scripts/bridge-bootstrap.mjs',
+  import.meta.url,
+));
 
 export function runCommand(cmd, args, timeoutMs = BYCLI_TIMEOUT_MS) {
   return new Promise((resolve) => {
@@ -23,40 +28,26 @@ export function runCommand(cmd, args, timeoutMs = BYCLI_TIMEOUT_MS) {
   });
 }
 
-async function defaultFileExists(path) {
-  try {
-    await access(path, constants.X_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 export function deriveExecutionProfile(meta = {}) {
   const needsBrowser = meta.browser !== false
     || ['cookie', 'intercept', 'ui'].includes(String(meta.strategy || '').toLowerCase());
   return { needsBrowser, transport: needsBrowser ? 'browser' : 'direct' };
 }
 
-export function isDaemonHealthy(result) {
-  if (!result || result.code !== 0) return false;
-  const output = `${result.stdout || ''}\n${result.stderr || ''}`;
-  return /daemon\s*[:=]?\s*running/i.test(output)
-    && /extension\s*[:=]?\s*connected/i.test(output);
-}
-
 function userAction(kind, message) {
   return { kind, message };
 }
 
-export function createBycliIntegration({ run = runCommand, fileExists = defaultFileExists } = {}) {
+export function createBycliIntegration({
+  run = runCommand,
+  environment = process.env,
+  fileExists = existsSync,
+  containerBridgeScript = DEFAULT_BRIDGE_SCRIPT,
+  localBridgeScript = LOCAL_BRIDGE_SCRIPT,
+  bridgeScript = environment.BYCLI_BRIDGE_BOOTSTRAP_SCRIPT
+    || (fileExists(containerBridgeScript) ? containerBridgeScript : localBridgeScript),
+} = {}) {
   const invoke = (cmd, args, timeoutMs) => run(cmd, args, timeoutMs);
-  const doctorAndStatus = async () => {
-    const doctor = await invoke('bycli', ['doctor'], BYCLI_TIMEOUT_MS);
-    // byCLI 生命周期契约：无论 doctor 成败，紧接着读取 daemon 状态。
-    const status = await invoke('bycli', ['daemon', 'status'], BYCLI_TIMEOUT_MS);
-    return { doctor, status, healthy: doctor.code === 0 && isDaemonHealthy(status) };
-  };
 
   return {
     async loadRuntime() {
@@ -81,36 +72,35 @@ export function createBycliIntegration({ run = runCommand, fileExists = defaultF
     },
 
     async ensureBridge() {
-      const initial = await doctorAndStatus();
-      if (initial.healthy) return { ok: true, attempts: 1 };
-
-      const browserStatus = await invoke(
-        'openclaw', ['browser', '--browser-profile', 'openclaw', 'status'], BYCLI_TIMEOUT_MS,
+      const result = await invoke(
+        process.execPath,
+        [bridgeScript, '--format', 'json'],
+        BRIDGE_TIMEOUT_MS,
       );
-      const browserOutput = `${browserStatus.stdout || ''}\n${browserStatus.stderr || ''}`;
-      if (browserStatus.code !== 0 || /not running|stopped|not found/i.test(browserOutput)) {
-        if (await fileExists(START_CHROME_SCRIPT)) {
-          await invoke(START_CHROME_SCRIPT, [], BYCLI_TIMEOUT_MS);
-        } else {
-          await invoke('openclaw', ['browser', '--browser-profile', 'openclaw', 'start'], BYCLI_TIMEOUT_MS);
-        }
+      let bridge;
+      try {
+        bridge = JSON.parse(result.stdout || '');
+      } catch {
+        bridge = {
+          ok: false,
+          code: 'BRIDGE_UNAVAILABLE',
+          reason: result.timedOut ? 'BRIDGE_COMMAND_TIMEOUT' : 'BRIDGE_OUTPUT_INVALID',
+        };
       }
-
-      const afterColdStart = await doctorAndStatus();
-      if (afterColdStart.healthy) return { ok: true, attempts: 2 };
-
-      await invoke('bycli', ['daemon', 'restart'], BYCLI_TIMEOUT_MS);
-      const afterRestart = await invoke('bycli', ['daemon', 'status'], BYCLI_TIMEOUT_MS);
-      if (isDaemonHealthy(afterRestart)) return { ok: true, attempts: 3 };
-
+      if (bridge?.ok === true && bridge.code === 'BRIDGE_READY') {
+        return { ok: true, attempts: bridge.checks || 1, bridge };
+      }
+      const busy = bridge?.code === 'BRIDGE_RECOVERY_BUSY';
       return {
         ok: false,
-        attempts: 3,
+        attempts: bridge?.checks || 0,
         requiresUserAction: userAction(
-          'bridge_unavailable',
-          'byCLI daemon 或 Chrome Extension 未连接；请检查 Chrome 与 byCLI 扩展后重试。',
+          busy ? 'bridge_recovery_busy' : 'bridge_unavailable',
+          busy
+            ? '另一任务正在恢复 byCLI 浏览器桥接；请稍后重新发起。'
+            : 'byCLI daemon 或 Chrome Extension 未连接；请检查托管 Chrome 与 byCLI 扩展后重试。',
         ),
-        lastResult: afterRestart,
+        bridge,
       };
     },
 

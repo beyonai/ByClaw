@@ -14,13 +14,5 @@ describe('getProjectTagMeta', () => {
       classSuffix: 'Normal',
       messageId: 'projectSpace.scene.normal',
     });
-    expect(getProjectTagMeta('develop')).toEqual({
-      classSuffix: 'Development',
-      messageId: 'projectSpace.scene.development',
-    });
-    expect(getProjectTagMeta('operation')).toEqual({
-      classSuffix: 'Operation',
-      messageId: 'projectSpace.scene.operation',
-    });
   });
 });

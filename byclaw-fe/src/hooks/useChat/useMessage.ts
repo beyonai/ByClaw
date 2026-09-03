@@ -13,6 +13,7 @@ import type { SetStateAction } from 'react';
 
 import type { IMessageInfo } from '@/models/useMessageStore';
 import type { IMessage } from '@/typescript/message';
+import { shouldApplyScopedChildRun, type ScopedChildRunState } from '@/utils/scopedSession';
 import { getMsgId, hasVisibleMessageContent } from '@/utils/messgae';
 import { getSessionObjectTypeMap } from '@/utils/session';
 import { IMessageState } from '@/constants/message';
@@ -26,6 +27,7 @@ const curSessionId = {
 
 export const DRAFT_SESSION_ID = '__message_store_draft_session__';
 export const EMPTY_ARRAY = [];
+export type SessionMessageLoadState = 'idle' | 'loading' | 'ready' | 'error';
 
 const shouldDropCompletedEmptyAnswer = (message: IMessage) =>
   Boolean(
@@ -47,8 +49,10 @@ export default function useMessage({ sessionId }: { sessionId?: string }) {
   const { EventEmitter } = useGlobal();
 
   const [optimisticSessionId, setOptimisticSessionId] = useState('');
+  const [sessionMessageLoadStates, setSessionMessageLoadStates] = useState<Record<string, SessionMessageLoadState>>({});
   const pendingDraftCleanupRef = useRef(false);
   const sessionMessageLoadPromiseRef = useRef<Record<string, Promise<IMessageInfo | undefined>>>({});
+  const sessionChildRunRef = useRef(new Map<string, ScopedChildRunState>());
 
   const activeSessionId = String(sessionId || optimisticSessionId || DRAFT_SESSION_ID);
   const messageInfo = sessionListMap.get(activeSessionId) as (IMessageInfo & { hasMore?: boolean }) | undefined;
@@ -230,12 +234,125 @@ export default function useMessage({ sessionId }: { sessionId?: string }) {
           sessionId: curSessionId.current,
         },
       }).then((listInfo?: IMessageInfo) => {
-        if (!listInfo) return;
+        if (!listInfo) {
+          resolve();
+          return;
+        }
         // 再套一个requestIdleCallback，等待视图更新后，再resolve
         requestIdleCallback(() => resolve());
       });
     });
   }, [dispatch]);
+
+  const getSessionMessageLoadState = useCallback(
+    (targetSessionId = activeSessionId): SessionMessageLoadState =>
+      sessionMessageLoadStates[`${targetSessionId}`] || 'idle',
+    [activeSessionId, sessionMessageLoadStates]
+  );
+
+  const setSessionMessageLoadState = useCallback((targetSessionId: string, state: SessionMessageLoadState) => {
+    setSessionMessageLoadStates((current) =>
+      current[targetSessionId] === state ? current : { ...current, [targetSessionId]: state }
+    );
+  }, []);
+
+  const applyLoadedSessionMessages = useCallback(
+    (targetSessionId: string, listInfo: IMessageInfo) => {
+      if (`${targetSessionId}` !== `${curSessionId.current}`) return;
+      const { list, targetMessageId } = listInfo || {};
+
+      dispatch({
+        type: 'session/myBatchReadMessages',
+        payload: {
+          sessionId: targetSessionId,
+          messageIds: (list || []).map((item) => item.messageId),
+        },
+      });
+
+      if (list?.length) {
+        for (let i = list.length - 1; i >= 0; i -= 1) {
+          const msg = list[i];
+          if (msg.fromBeyond) {
+            const queryMessage = msg.queryMsgId
+              ? list.find(
+                (item) =>
+                  !item.fromBeyond && [`${item.msgId || ''}`, `${item.messageId || ''}`].includes(`${msg.queryMsgId}`)
+              )
+              : undefined;
+            EventEmitter.emit(
+              'RECEIVE_SESSION_RECORDS_LAST_METADATA',
+              getSessionLastAnsMsgMetadata(targetSessionId, msg, queryMessage)
+            );
+            break;
+          }
+        }
+      }
+
+      EventEmitter.emit('scrollToMsgOnSessionChanged', {
+        sessionId: targetSessionId,
+        targetMessageId,
+      });
+    },
+    [dispatch, EventEmitter]
+  );
+
+  const startSessionMessageLoad = useCallback(
+    (targetSessionId: string) => {
+      const key = `${targetSessionId}`;
+      const existing = sessionMessageLoadPromiseRef.current[key];
+      if (existing) return existing;
+
+      setSessionMessageLoadState(key, 'loading');
+      const loadPromise = Promise.resolve(
+        dispatch({
+          type: 'messageStore/getSessionMessage',
+          payload: { sessionId: key },
+        })
+      )
+        .then((listInfo?: IMessageInfo) => {
+          if (!listInfo) throw new Error(`Session messages unavailable: ${key}`);
+          applyLoadedSessionMessages(key, listInfo);
+          setSessionMessageLoadState(key, 'ready');
+          return listInfo;
+        })
+        .catch((error) => {
+          setSessionMessageLoadState(key, 'error');
+          throw error;
+        })
+        .finally(() => {
+          if (sessionMessageLoadPromiseRef.current[key] === loadPromise) {
+            delete sessionMessageLoadPromiseRef.current[key];
+          }
+        });
+      sessionMessageLoadPromiseRef.current[key] = loadPromise;
+      return loadPromise;
+    },
+    [applyLoadedSessionMessages, dispatch, setSessionMessageLoadState]
+  );
+
+  const retrySessionMessageLoad = useCallback(
+    (targetSessionId = activeSessionId) =>
+      startSessionMessageLoad(`${targetSessionId}`).then(
+        () => undefined,
+        () => undefined
+      ),
+    [activeSessionId, startSessionMessageLoad]
+  );
+
+  const applyScopedChildProjectionMessage = useCallback(
+    (targetSessionId: string, message: IMessage, childRun: ScopedChildRunState) => {
+      const key = `${targetSessionId}`;
+      const cachedRun = sessionChildRunRef.current.get(key) || sessionListMap.get(key)?.childRun;
+      if (!shouldApplyScopedChildRun(cachedRun, childRun)) return false;
+      sessionChildRunRef.current.set(key, childRun);
+      dispatch({
+        type: 'messageStore/applyScopedChildProjection',
+        payload: { sessionId: key, message, childRun },
+      });
+      return true;
+    },
+    [dispatch, sessionListMap]
+  );
 
   const waitForSessionMessageLoaded = useCallback(
     (targetSessionId = activeSessionId) => {
@@ -278,68 +395,8 @@ export default function useMessage({ sessionId }: { sessionId?: string }) {
       return;
     }
 
-    // 从存储中获取会话消息并更新状态
-    const loadPromise = Promise.resolve(
-      dispatch({
-        type: 'messageStore/getSessionMessage',
-        payload: {
-          sessionId,
-        },
-      })
-    ).then((listInfo: IMessageInfo) => {
-      // 只接受最新的session的数据
-      if (`${sessionId}` !== `${curSessionId.current}`) return listInfo;
-      const { list, targetMessageId } = listInfo || {};
-
-      dispatch({
-        type: 'session/myBatchReadMessages',
-        payload: {
-          sessionId,
-          messageIds: (list || []).map((item) => item.messageId),
-        },
-      });
-
-      if (list?.length) {
-        for (let i = list.length - 1; i >= 0; i -= 1) {
-          const msg = list[i];
-          if (msg.fromBeyond) {
-            const queryMessage = msg.queryMsgId
-              ? list.find(
-                (item) =>
-                  !item.fromBeyond && [`${item.msgId || ''}`, `${item.messageId || ''}`].includes(`${msg.queryMsgId}`)
-              )
-              : undefined;
-            // 在这里写是因为，只需要每次切换会话查询聊天记录后，找到最后一条fromBeyond的记录
-            EventEmitter.emit(
-              'RECEIVE_SESSION_RECORDS_LAST_METADATA',
-              getSessionLastAnsMsgMetadata(sessionId, msg, queryMessage)
-            );
-            break;
-          }
-        }
-      }
-
-      EventEmitter.emit('scrollToMsgOnSessionChanged', {
-        sessionId,
-        targetMessageId,
-      });
-
-      return listInfo;
-    });
-    sessionMessageLoadPromiseRef.current[`${sessionId}`] = loadPromise;
-    loadPromise.then(
-      () => {
-        if (sessionMessageLoadPromiseRef.current[`${sessionId}`] === loadPromise) {
-          delete sessionMessageLoadPromiseRef.current[`${sessionId}`];
-        }
-      },
-      () => {
-        if (sessionMessageLoadPromiseRef.current[`${sessionId}`] === loadPromise) {
-          delete sessionMessageLoadPromiseRef.current[`${sessionId}`];
-        }
-      }
-    );
-  }, [optimisticSessionId, sessionId, dispatch, EventEmitter]);
+    void startSessionMessageLoad(sessionId).catch(() => undefined);
+  }, [optimisticSessionId, sessionId, dispatch, startSessionMessageLoad]);
 
   useEffect(() => {
     if (!sessionId) return;
@@ -405,6 +462,9 @@ export default function useMessage({ sessionId }: { sessionId?: string }) {
     getMoreSessionMessage,
     reloadLatestMessageList,
     waitForSessionMessageLoaded,
+    getSessionMessageLoadState,
+    retrySessionMessageLoad,
+    applyScopedChildProjectionMessage,
     updateMessage, // 更新单条消息的方法
   };
 }

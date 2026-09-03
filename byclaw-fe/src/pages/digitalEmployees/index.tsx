@@ -8,6 +8,7 @@ import AllDigitalEmployees from './components/AllDigitalEmployees';
 import ResourceFilter, { IOnOkParams, getDefaultParams } from '@/components/Resources/components/ResourceFilter';
 import { getCompositeAppInfo } from '@/service/digitalEmployees';
 import { getAgentChatAvatar } from '@/utils/agent';
+import { navigateToEmployeeChat } from '@/utils/employeeChat';
 import AntdIcon from '@/components/AntdIcon';
 import { getFileUrl } from '@/utils/file';
 import useDigitalEmployeeAuditCount from '@/hooks/useDigitalEmployeeAuditCount';
@@ -31,7 +32,7 @@ const DigitalEmployeesPage: React.FC = () => {
   const intl = useIntl();
   const navigate = useNavigate();
   const dispatch = useDispatch();
-  const { EventEmitter } = useGlobal();
+  const { EventEmitter, setAgentId, setSessionId } = useGlobal();
   const [searchParams, setSearchParams] = useSearchParams();
   const { count: auditCount } = useDigitalEmployeeAuditCount();
 
@@ -48,6 +49,20 @@ const DigitalEmployeesPage: React.FC = () => {
   const OfficialEmployeeRef = React.useRef<any>(null);
   const [preview, setPreview] = useState<any>(null);
   const [enterpriseCreateOpen, setEnterpriseCreateOpen] = useState(false);
+
+  const handleEmployeeChat = React.useCallback(
+    (employee: any, question?: string) => {
+      navigateToEmployeeChat({
+        employee,
+        dispatch,
+        navigate,
+        setAgentId,
+        setSessionId,
+        initialQuestion: question,
+      });
+    },
+    [dispatch, navigate, setAgentId, setSessionId]
+  );
 
   // 监听引导模式事件
   useEffect(() => {
@@ -203,6 +218,7 @@ const DigitalEmployeesPage: React.FC = () => {
                 source="available"
                 ref={AvailableGroupRef}
                 onEmployeeClick={setPreview}
+                onChatEmployee={handleEmployeeChat}
                 hideCategories
                 buildFilterParam={buildDigitalEmployeeFilterParam}
                 compactLayout
@@ -214,6 +230,7 @@ const DigitalEmployeesPage: React.FC = () => {
                 source="available"
                 ref={AvailableEmployeeRef}
                 onEmployeeClick={setPreview}
+                onChatEmployee={handleEmployeeChat}
                 hideCategories
                 buildFilterParam={buildDigitalEmployeeFilterParam}
                 compactLayout
@@ -229,6 +246,7 @@ const DigitalEmployeesPage: React.FC = () => {
                 source="official"
                 ref={OfficialGroupRef}
                 onEmployeeClick={setPreview}
+                onChatEmployee={handleEmployeeChat}
                 hideCategories
                 buildFilterParam={buildDigitalEmployeeFilterParam}
                 compactLayout
@@ -240,6 +258,7 @@ const DigitalEmployeesPage: React.FC = () => {
                 source="official"
                 ref={OfficialEmployeeRef}
                 onEmployeeClick={setPreview}
+                onChatEmployee={handleEmployeeChat}
                 hideCategories
                 buildFilterParam={buildDigitalEmployeeFilterParam}
                 compactLayout
@@ -253,17 +272,11 @@ const DigitalEmployeesPage: React.FC = () => {
       <EmployeePreviewModal
         employee={preview}
         onClose={() => setPreview(null)}
-        onCreateTask={() => {
+        onCreateTask={(question?: string) => {
           if (!preview) return;
-          const employee = preview;
           setPreview(null);
-          navigate(`/employees?agentId=${employee.agentId || employee.id || employee.resourceId}`, {
-            state: {
-              keepSiderActiveKey: 'agent',
-              selectedAgentId: `${employee.agentId || employee.id || employee.resourceId}`,
-              selectedEmployee: employee,
-            },
-          });
+          // 弹窗与卡片统一复用同一个进入会话方法，避免两套路由初始化逻辑产生差异。
+          handleEmployeeChat(preview, question);
         }}
       />
       <EmployFormModal open={enterpriseCreateOpen} type="add" onCancel={() => setEnterpriseCreateOpen(false)} />
@@ -478,7 +491,7 @@ export function EmployeePreviewModal({ employee, onClose, onCreateTask }: any) {
                   <span className={styles.employeePreviewTag}>{employeeTypeLabel}</span>
                 </div>
                 {hasUsePermission ? (
-                  <Button type="primary" icon={<PlusOutlined />} onClick={onCreateTask}>
+                  <Button type="primary" icon={<PlusOutlined />} onClick={() => onCreateTask?.()}>
                     新建任务
                   </Button>
                 ) : (
@@ -505,8 +518,20 @@ export function EmployeePreviewModal({ employee, onClose, onCreateTask }: any) {
             <div className={styles.exampleTitle}>试试这样问我</div>
             <div className={styles.exampleList}>
               {examples.length ? (
-                examples.slice(0, 6).map((item: string, index: number) => (
-                  <div className={styles.exampleItem} key={`${item}-${index}`}>
+                examples.slice(0, 3).map((item: string, index: number) => (
+                  <div
+                    className={styles.exampleItem}
+                    key={`${item}-${index}`}
+                    onClick={() => onCreateTask?.(item)}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        onCreateTask?.(item);
+                      }
+                    }}
+                  >
                     <span>{item}</span>
                     <span className={styles.exampleArrow}>→</span>
                   </div>

@@ -56,7 +56,10 @@ export interface CreateSessionRunRequest extends AuthenticatedIngressRequest {
   context?: SessionContextInput;
   /** 已规范化的附件（由各入口在调用前 normalize）；缺省为空数组。 */
   attachments?: RunAttachment[];
-  /** by-framework 入站 metadata；仅在当前 Run 执行链路中透传，不写入 Run 持久化记录。 */
+  /**
+   * by-framework 入站 metadata；不写入 Run 业务快照，但会随临时执行凭证保存，
+   * 供 lease 接管实例继续透传。
+   */
   metadata?: Record<string, unknown>;
   /**
    * 当前入口 Agent ID（仅 by-framework Worker 入口提供，用于排除超级助手自身）。

@@ -28,9 +28,8 @@ const requestProject = (projectId?: number) => {
 
     // 会话没有项目归属时，沿用项目空间的默认项目作为资源容器。
     const response = await listProjects({ pageNum: 1, pageSize: 200 });
-    return getArrayData(response)
-      .map(normalizeProject)
-      .find((item) => item.projectType === 'default');
+    const defaultProject = getArrayData(response).find((item) => item?.projectType === 'default');
+    return defaultProject ? normalizeProject(defaultProject) : undefined;
   })();
 
   projectRequestCache.set(cacheKey, request);

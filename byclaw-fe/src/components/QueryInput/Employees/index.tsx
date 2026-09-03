@@ -215,7 +215,11 @@ class EmployeesInputChat extends QueryInputBase<IProps, IState> {
         <Space size={14} className={styles.bottomRight}>
           {/* 连接器控制组件直接管理用户级全局开关，消息 payload 不再携带连接器 ID。 */}
           <span className="byclaw-connector-outside-tool">
-            <ConnectorControl canAuthorize={!!this.props.userInfo} />
+            <ConnectorControl
+              canAuthorize={!!this.props.userInfo}
+              outside
+              onOpenResourcePicker={() => this.openResourcePicker('connector')}
+            />
           </span>
           {/* 员工详情已固定当前聊天对象，不展示追加 @ 数字员工入口。 */}
           {!cannotAt && (
@@ -280,6 +284,8 @@ class EmployeesInputChat extends QueryInputBase<IProps, IState> {
                 agentId,
                 sessionType: 'AGENT',
                 sessionId,
+                // 上传接口会提前创建临时会话，必须同步带上当前选择的项目，避免会话落到默认项目。
+                projectId: this.props.projectId ?? this.props.selectedProject?.projectId,
               }}
               onCreate={(fileItem: IFile) => {
                 return this.onEmployeeCreateFile({
@@ -297,11 +303,30 @@ class EmployeesInputChat extends QueryInputBase<IProps, IState> {
                   payload: {
                     sessionId: mySessionId,
                     sessionName,
+                    isLocalSession: true,
+                    projectName: this.props.selectedProject?.projectName,
+                    projectId: this.props.projectId ?? this.props.selectedProject?.projectId,
                     objectId: agentId,
                     objectType: agentId ? 'DigEmployee' : undefined,
                     agentType: this.props.myAgentType,
                   },
                 });
+                const projectId = this.props.projectId ?? this.props.selectedProject?.projectId;
+                if (projectId !== undefined && projectId !== null) {
+                  this.props.globalContext.EventEmitter.emit('projectSpace-session-refresh', {
+                    projectId,
+                    projectName: this.props.selectedProject?.projectName,
+                    session: {
+                      sessionId: mySessionId,
+                      sessionName,
+                      projectId,
+                      projectName: this.props.selectedProject?.projectName,
+                      updateTime: new Date().toISOString(),
+                      createTime: new Date().toISOString(),
+                      isLocalSession: true,
+                    },
+                  });
+                }
               }}
             />
           )}

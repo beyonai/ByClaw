@@ -8,7 +8,7 @@ import {
   isTextPreviewFile,
 } from '@/layout/sider/components/FileSiderPanel/utils';
 import { downloadChatFileArtifact } from '@/service/chatFileArtifact';
-import { downloadResourceFileForPreview } from '@/service/file';
+import { downloadResourceFile } from '@/service/file';
 import { downloadFile as downloadFileBrowserFile } from '@/service/fileBrowser';
 import { getFileUrl } from '@/utils/file';
 import type { MarkdownImageResolver } from '@/components/Preview/Md';
@@ -32,6 +32,7 @@ interface FilePreviewPanelProps {
    * data 为 null 时保持 loading 占位状态，等调用方异步填入真实内容。
    */
   content?: { data: string | null; binary?: boolean };
+  onOpenRelativeFile?: (path: string) => void;
 }
 
 // 复用与下载分支相同的 Blob + mimeType 约定，让 Preview/Twins 对同一类文件走同一条渲染路径。
@@ -87,6 +88,28 @@ const resolveMarkdownImagePath = (markdownPath: string, imagePath: string) => {
   return normalizeFilePath(`${directoryPath}${resourcePath}`);
 };
 
+// 会话目录中的 HTML 经常使用 ../../assets 这类相对路径；资源不应越过当前会话根目录。
+const resolveSessionResourcePath = (sourcePath: string, resourcePath: string) => {
+  const normalizedSourcePath = normalizeFilePath(sourcePath);
+  const sessionRootMatch = normalizedSourcePath.match(/^(\/by\/\.sessions\/[^/]+)\//);
+  const resolvedPath = resolveMarkdownImagePath(normalizedSourcePath, resourcePath);
+  if (!sessionRootMatch || !resourcePath.includes('..')) return resolvedPath;
+
+  const root = sessionRootMatch[1];
+  const relativePath = resourcePath.split(/[?#]/, 1)[0].replace(/^\/+/, '');
+  const baseSegments = normalizedSourcePath.slice(root.length).split('/').filter(Boolean).slice(0, -1);
+  const segments = [...baseSegments];
+  relativePath.split('/').forEach((segment) => {
+    if (!segment || segment === '.') return;
+    if (segment === '..') {
+      if (segments.length) segments.pop();
+      return;
+    }
+    segments.push(segment);
+  });
+  return normalizeFilePath(`${root}/${segments.join('/')}`);
+};
+
 const getFilePathFromUrl = (value?: string) => {
   if (!value) return undefined;
   try {
@@ -130,11 +153,24 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
   sessionId,
   source = 'dataset',
   content,
+  onOpenRelativeFile,
 }) => {
   const [blob, setBlob] = useState<Blob | null>(null);
   const [loading, setLoading] = useState(true);
   const markdownImageCacheRef = useRef<Map<string, Promise<Blob>>>(new Map());
-  const sourcePath = getFilePathFromUrl(path) || path;
+  const sourcePath = (() => {
+    const rawPath = getFilePathFromUrl(path) || path;
+    if (!rawPath) return rawPath;
+    const normalizedRawPath = normalizeFilePath(rawPath);
+    // 文件浏览器列表在部分接口响应中只返回相对当前会话目录的路径，补齐会话根路径后才能解析 HTML 内的相对图片。
+    const normalized =
+      source === 'fileBrowser' && sessionId && !isSessionFilePath(normalizedRawPath)
+        ? `/by/.sessions/${sessionId}/${normalizedRawPath.replace(/^\/+/, '')}`
+        : normalizedRawPath;
+    const segments = normalized.split('/').filter(Boolean);
+    if (segments.length >= 2 && segments.at(-1) === segments.at(-2)) segments.pop();
+    return `${normalized.startsWith('/') ? '/' : ''}${segments.join('/')}`;
+  })();
   const previewFileUrl =
     fileUrl || (source === 'fileBrowser' && sourcePath ? getCommonFilePreviewUrl(sourcePath) : undefined);
   const previewType = getPreviewFileType(fileName);
@@ -153,7 +189,15 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
         return await downloadFileBrowserFile(resourceId!, filePath);
       } catch (error) {
         if (!sessionId || !isSessionFilePath(filePath)) throw error;
-        return loadFromSessionArtifact();
+        try {
+          return await loadFromSessionArtifact();
+        } catch (artifactError) {
+          // 部分文件浏览接口返回的路径不带 /by 前缀，兼容同一会话下的相对资源文件。
+          if (filePath.startsWith('/by/')) {
+            return downloadFileBrowserFile(resourceId!, filePath.slice(3));
+          }
+          throw artifactError;
+        }
       }
     },
     [resourceId, sessionId]
@@ -165,12 +209,11 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
         return imagePath;
       }
 
-      const resolvedPath = sourcePath ? resolveMarkdownImagePath(sourcePath, imagePath) : imagePath;
-      const previewSourcePath = sourcePath || getFilePathFromUrl(previewFileUrl);
-      if (previewFileUrl && previewSourcePath && isSessionFilePath(previewSourcePath)) {
-        return getFilePreviewUrl(previewFileUrl, imagePath, previewSourcePath);
-      }
-
+      const resolvedPath = sourcePath
+        ? source === 'fileBrowser' && isSessionFilePath(sourcePath)
+          ? resolveSessionResourcePath(sourcePath, imagePath)
+          : resolveMarkdownImagePath(sourcePath, imagePath)
+        : imagePath;
       const cacheKey = `${resourceId || previewFileUrl || ''}:${resolvedPath}`;
       const cached = markdownImageCacheRef.current.get(cacheKey);
       if (cached) return cached;
@@ -178,7 +221,7 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
       if (!previewFileUrl && (!resourceId || !sourcePath)) return imagePath;
 
       const loadFromFileUrl = async () => {
-        const response = await fetch(getFilePreviewUrl(previewFileUrl!, imagePath, sourcePath));
+        const response = await fetch(getFilePreviewUrl(previewFileUrl!, imagePath, sourcePath), { cache: 'no-store' });
         if (!response.ok) throw new Error(response.statusText);
         const file = await response.blob();
         if (!file.size) throw new Error('Empty relative resource');
@@ -187,10 +230,9 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
       const loadFromSourcePath = () =>
         source === 'fileBrowser'
           ? loadFileBrowserFile(resolvedPath)
-          : downloadResourceFileForPreview({
+          : downloadResourceFile({
             resourceId: resourceId!,
             directoryPath: resolvedPath,
-            language: 'zh-CN',
           });
       const request = (
         previewFileUrl
@@ -230,7 +272,7 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
         return contentToBlob(content.data, content.binary, fileName);
       }
       if (fileUrl) {
-        const response = await fetch(getFileUrl(fileUrl));
+        const response = await fetch(getFileUrl(fileUrl), { cache: 'no-store' });
         if (!response.ok) throw new Error(response.statusText);
         return response.blob();
       }
@@ -241,14 +283,13 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
           response =
             source === 'fileBrowser'
               ? await loadFileBrowserFile(sourcePath)
-              : await downloadResourceFileForPreview({
+              : await downloadResourceFile({
                 resourceId,
                 directoryPath: sourcePath,
-                language: 'zh-CN',
               });
         } catch (error) {
           if (!previewFileUrl) throw error;
-          const previewResponse = await fetch(previewFileUrl);
+          const previewResponse = await fetch(previewFileUrl, { cache: 'no-store' });
           if (!previewResponse.ok) throw error;
           return previewResponse.blob();
         }
@@ -257,7 +298,7 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
         return mimeType ? new Blob([rawBlob], { type: mimeType }) : rawBlob;
       }
       if (previewFileUrl) {
-        const response = await fetch(previewFileUrl);
+        const response = await fetch(previewFileUrl, { cache: 'no-store' });
         if (!response.ok) throw new Error(response.statusText);
         return response.blob();
       }
@@ -304,6 +345,7 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
             title={fileName}
             resolveMarkdownImage={previewFileUrl || (resourceId && sourcePath) ? resolveRelativeResource : undefined}
             resolveHtmlResource={previewFileUrl || (resourceId && sourcePath) ? resolveRelativeResource : undefined}
+            onHtmlLinkClick={onOpenRelativeFile}
             className={fileSiderStyles.previewContent}
           />
         </React.Suspense>

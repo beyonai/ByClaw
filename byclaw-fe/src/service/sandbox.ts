@@ -8,6 +8,10 @@ export interface SandboxInfo {
   instanceEndpoints?: Record<string, string>;
   token?: string;
   status?: string;
+  workerId?: string;
+  workerOnline?: boolean;
+  workerLastSeen?: number;
+  workerLeaseTtlSeconds?: number;
 }
 
 export interface LaunchSandboxResult {
@@ -45,7 +49,11 @@ export async function getSandboxInfo(params: { userCode?: string; sandboxType?: 
 /**
  * 释放沙箱
  */
-export async function removeSandbox(params: { userCode: string; resourceId?: number | null }): Promise<void> {
+export async function removeSandbox(params: {
+  userCode: string;
+  resourceId?: number | null;
+  sandboxType?: string;
+}): Promise<void> {
   return POST('/byaiService/sandbox/removeSandbox', params, silentErrorConfig);
 }
 

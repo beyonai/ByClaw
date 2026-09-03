@@ -36,6 +36,27 @@ describe('ordered message helpers', () => {
     expect(groups.map((group) => `${group.channel}:${group.items.length}`)).toEqual(['think:1', 'answer:1', 'think:1']);
   });
 
+  it('keeps structured tool and status events visible on the chronological timeline', () => {
+    const groups = groupOrderedItems(
+      mergeOrderedItems(
+        [
+          item(1, SSEMessageType.thinkText, 'reasoning'),
+          item(2, SSEMessageType.toolCall, 'read_file'),
+          item(3, SSEMessageType.thinkStatusTitle, 'worker completed'),
+          item(5, SSEMessageType.thinkText, 'summary reasoning'),
+        ],
+        [item(4, SSEMessageType.text, 'answer')]
+      )
+    );
+
+    expect(groups.map((group) => `${group.channel}:${group.items.map(({ seq }) => seq).join(',')}`)).toEqual([
+      'think:1',
+      'event:2,3',
+      'answer:4',
+      'think:5',
+    ]);
+  });
+
   it('keeps consecutive thinking segments in one block regardless of segment metadata', () => {
     const groups = groupOrderedItems(
       mergeOrderedItems(

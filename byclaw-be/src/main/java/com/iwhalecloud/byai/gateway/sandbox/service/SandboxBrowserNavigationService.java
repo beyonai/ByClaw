@@ -6,16 +6,20 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.iwhalecloud.byai.common.log.util.RequestContextUtil;
 import com.iwhalecloud.byai.gateway.sandbox.model.SandboxInfo;
 import com.iwhalecloud.byai.gateway.sandbox.service.ingress.SandboxIngressRuntimeResolver;
 
@@ -31,6 +35,9 @@ public class SandboxBrowserNavigationService {
 
     private static final String BYCLI_HEADER = "X-byCLI";
     private static final int REQUEST_TIMEOUT_MS = 10_000;
+    private static final int MAX_LOG_VALUE_LENGTH = 500;
+    private static final Pattern SENSITIVE_PARAMETER_PATTERN = Pattern.compile(
+        "(?i)(token|authorization|cookie|secret|password|ticket)=([^\\s&,}]+)");
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
     };
 
@@ -46,6 +53,7 @@ public class SandboxBrowserNavigationService {
         this.sandboxService = sandboxService;
         this.runtimeResolver = runtimeResolver;
         this.httpClient = HttpClient.newBuilder()
+            .version(HttpClient.Version.HTTP_1_1)
             .connectTimeout(Duration.ofMillis(REQUEST_TIMEOUT_MS))
             .build();
         this.objectMapper = new ObjectMapper();
@@ -56,8 +64,9 @@ public class SandboxBrowserNavigationService {
         validateRequest(userCode, sandboxId, targetUrl, sessionKey);
         SandboxInfo sandbox = findOwnedSandbox(userCode, sandboxId);
         URI commandEndpoint = buildEndpoint(sandbox, "/command");
+        String operationId = "operation_account_" + UUID.randomUUID().toString().replace("-", "");
         Map<String, Object> command = new LinkedHashMap<>();
-        command.put("id", "operation_account_" + UUID.randomUUID().toString().replace("-", ""));
+        command.put("id", operationId);
         command.put("action", "tabs");
         command.put("op", "new");
         command.put("url", targetUrl);
@@ -65,13 +74,26 @@ public class SandboxBrowserNavigationService {
         command.put("surface", "browser");
         command.put("windowMode", "foreground");
 
+        Long requestId = RequestContextUtil.getRequestId();
+        log.info("[SandboxBrowser] stage=NAVIGATION_START requestId={} operationId={} userCode={} sandboxId={} "
+                + "sessionKey={} target={} endpoint={}",
+            requestId, operationId, userCode, sandboxId, sessionKey, safeUri(targetUrl), safeUri(commandEndpoint));
+
         DaemonResponse response = post(commandEndpoint, command);
+        logResponse("INITIAL_COMMAND", 1, requestId, operationId, userCode, sandboxId, response);
         if (isSuccessful(response)) {
+            logSuccess(requestId, operationId, userCode, sandboxId, sessionKey, 1, response);
             return;
         }
 
         // 采集流程在扩展断开时会先恢复浏览器，账号登录沿用同样的恢复动作。
-        post(buildEndpoint(sandbox, "/v1/browser/recover"), Map.of());
+        URI recoverEndpoint = buildEndpoint(sandbox, "/v1/browser/recover");
+        log.warn("[SandboxBrowser] stage=RECOVERY_START requestId={} operationId={} userCode={} sandboxId={} "
+                + "triggerStatusCode={} triggerErrorCode={} triggerError={} endpoint={}",
+            requestId, operationId, userCode, sandboxId, response.statusCode(), response.errorCode(),
+            response.error(), safeUri(recoverEndpoint));
+        DaemonResponse recoverResponse = post(recoverEndpoint, Map.of());
+        logResponse("BROWSER_RECOVER", 1, requestId, operationId, userCode, sandboxId, recoverResponse);
         // 浏览器启动需要时间（约10-15秒），首次启动需要等待浏览器进程启动和扩展连接
         try {
             Thread.sleep(3000);
@@ -80,14 +102,21 @@ public class SandboxBrowserNavigationService {
         }
         for (int attempt = 0; attempt < 20; attempt++) {
             response = post(commandEndpoint, command);
+            int totalAttempt = attempt + 2;
+            logResponse("RETRY_COMMAND", totalAttempt, requestId, operationId, userCode, sandboxId, response);
             if (isSuccessful(response)) {
+                logSuccess(requestId, operationId, userCode, sandboxId, sessionKey, totalAttempt, response);
                 return;
             }
             waitForRetry();
         }
-        log.warn("[SandboxBrowser] 浏览器导航失败，userCode={}，sandboxId={}，statusCode={}，error={}", userCode,
-            sandboxId, response.statusCode(), response.body().get("error"));
-        throw new IllegalStateException(StringUtils.defaultIfBlank(stringValue(response.body().get("error")),
+        log.error("[SandboxBrowser] stage=NAVIGATION_FAILURE requestId={} operationId={} userCode={} sandboxId={} "
+                + "sessionKey={} attempts={} statusCode={} ok={} errorCode={} error={} responseKeys={} "
+                + "responseLength={} durationMs={} transportFailureType={} transportFailure={}",
+            requestId, operationId, userCode, sandboxId, sessionKey, 21, response.statusCode(), response.ok(),
+            response.errorCode(), response.error(), response.bodyKeys(), response.responseLength(),
+            response.durationMs(), response.failureType(), response.failureMessage());
+        throw new IllegalStateException(StringUtils.defaultIfBlank(response.error(),
             "sandbox browser navigation failed"));
     }
 
@@ -137,6 +166,7 @@ public class SandboxBrowserNavigationService {
     }
 
     private DaemonResponse post(URI endpoint, Map<String, Object> body) {
+        long startedAt = System.nanoTime();
         try {
             HttpRequest request = HttpRequest.newBuilder(endpoint)
                 .timeout(Duration.ofMillis(REQUEST_TIMEOUT_MS))
@@ -145,17 +175,53 @@ public class SandboxBrowserNavigationService {
                 .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)))
                 .build();
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            Map<String, Object> responseBody = response.body() == null || response.body().isBlank()
-                ? Map.of()
-                : objectMapper.readValue(response.body(), MAP_TYPE);
-            return new DaemonResponse(response.statusCode(), responseBody);
+            String rawBody = response.body();
+            int responseLength = rawBody == null ? 0 : rawBody.length();
+            String contentType = response.headers().firstValue("Content-Type").orElse(null);
+            try {
+                Map<String, Object> responseBody = rawBody == null || rawBody.isBlank()
+                    ? Map.of()
+                    : objectMapper.readValue(rawBody, MAP_TYPE);
+                return new DaemonResponse(response.statusCode(), responseBody, elapsedMillis(startedAt),
+                    responseLength, contentType, null, null);
+            } catch (IOException parseException) {
+                return new DaemonResponse(response.statusCode(), Map.of("error", "invalid daemon response"),
+                    elapsedMillis(startedAt), responseLength, contentType, parseException.getClass().getSimpleName(),
+                    safeLogValue(parseException.getMessage()));
+            }
         } catch (IOException | InterruptedException exception) {
             if (exception instanceof InterruptedException) {
                 Thread.currentThread().interrupt();
             }
-            return new DaemonResponse(503,
-                Map.of("error", StringUtils.defaultIfBlank(exception.getMessage(), "sandbox browser request failed")));
+            String error = safeLogValue(StringUtils.defaultIfBlank(exception.getMessage(),
+                "sandbox browser request failed"));
+            return new DaemonResponse(503, Map.of("error", error), elapsedMillis(startedAt), 0, null,
+                exception.getClass().getSimpleName(), error);
         }
+    }
+
+    private void logResponse(String phase, int attempt, Long requestId, String operationId, String userCode,
+                             String sandboxId, DaemonResponse response) {
+        String message = "[SandboxBrowser] stage=COMMAND_RESULT phase={} attempt={} requestId={} operationId={} "
+            + "userCode={} sandboxId={} statusCode={} ok={} responseId={} errorCode={} error={} responseKeys={} "
+            + "responseLength={} contentType={} durationMs={} transportFailureType={} transportFailure={}";
+        Object[] arguments = { phase, attempt, requestId, operationId, userCode, sandboxId, response.statusCode(),
+            response.ok(), response.responseId(), response.errorCode(), response.error(), response.bodyKeys(),
+            response.responseLength(), response.contentType(), response.durationMs(), response.failureType(),
+            response.failureMessage() };
+        if (isSuccessful(response)) {
+            log.info(message, arguments);
+        } else {
+            log.warn(message, arguments);
+        }
+    }
+
+    private void logSuccess(Long requestId, String operationId, String userCode, String sandboxId,
+                            String sessionKey, int attempts, DaemonResponse response) {
+        log.info("[SandboxBrowser] stage=NAVIGATION_SUCCESS requestId={} operationId={} userCode={} sandboxId={} "
+                + "sessionKey={} attempts={} statusCode={} durationMs={}",
+            requestId, operationId, userCode, sandboxId, sessionKey, attempts, response.statusCode(),
+            response.durationMs());
     }
 
     private boolean isSuccessful(DaemonResponse response) {
@@ -171,10 +237,94 @@ public class SandboxBrowserNavigationService {
         }
     }
 
-    private String stringValue(Object value) {
-        return value == null ? null : String.valueOf(value);
+    private static long elapsedMillis(long startedAt) {
+        return Duration.ofNanos(System.nanoTime() - startedAt).toMillis();
     }
 
-    private record DaemonResponse(int statusCode, Map<String, Object> body) {
+    public static String safeUri(String value) {
+        if (StringUtils.isBlank(value)) {
+            return value;
+        }
+        try {
+            return safeUri(URI.create(value));
+        } catch (IllegalArgumentException exception) {
+            return "<invalid-uri>";
+        }
+    }
+
+    private static String safeUri(URI uri) {
+        if (uri == null) {
+            return null;
+        }
+        String host = uri.getHost();
+        if (host == null) {
+            return uri.getScheme() == null ? "<relative-uri>" : uri.getScheme() + ":<invalid-host>";
+        }
+        String displayHost = host.contains(":") ? "[" + host + "]" : host;
+        String port = uri.getPort() < 0 ? "" : ":" + uri.getPort();
+        String path = StringUtils.defaultIfBlank(uri.getRawPath(), "/");
+        return uri.getScheme() + "://" + displayHost + port + path;
+    }
+
+    public static String safeLogValue(String value) {
+        if (value == null) {
+            return null;
+        }
+        String sanitized = SENSITIVE_PARAMETER_PATTERN.matcher(value).replaceAll("$1=<redacted>")
+            .replace('\n', ' ')
+            .replace('\r', ' ');
+        return StringUtils.abbreviate(sanitized, MAX_LOG_VALUE_LENGTH);
+    }
+
+    public static String safeStackTrace(Throwable throwable) {
+        if (throwable == null) {
+            return null;
+        }
+        StringBuilder summary = new StringBuilder();
+        Throwable current = throwable;
+        int causeCount = 0;
+        while (current != null && causeCount < 3) {
+            if (causeCount > 0) {
+                summary.append(" causedBy=");
+            }
+            summary.append(current.getClass().getName());
+            StackTraceElement[] frames = current.getStackTrace();
+            int frameCount = Math.min(frames.length, 12);
+            for (int index = 0; index < frameCount; index++) {
+                summary.append(" at ").append(frames[index]);
+            }
+            current = current.getCause();
+            causeCount++;
+        }
+        return StringUtils.abbreviate(summary.toString(), 4000);
+    }
+
+    private record DaemonResponse(int statusCode, Map<String, Object> body, long durationMs, int responseLength,
+                                  String contentType, String failureType, String failureMessage) {
+
+        private Object ok() {
+            return body == null ? null : body.get("ok");
+        }
+
+        private String responseId() {
+            return safeLogValue(value("id"));
+        }
+
+        private String errorCode() {
+            return safeLogValue(value("errorCode"));
+        }
+
+        private String error() {
+            return safeLogValue(value("error"));
+        }
+
+        private Set<String> bodyKeys() {
+            return body == null ? Collections.emptySet() : body.keySet();
+        }
+
+        private String value(String key) {
+            Object value = body == null ? null : body.get(key);
+            return value == null ? null : String.valueOf(value);
+        }
     }
 }

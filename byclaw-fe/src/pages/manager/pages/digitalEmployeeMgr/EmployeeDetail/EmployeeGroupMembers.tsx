@@ -56,7 +56,13 @@ const mergeCandidates = (previous, next) => {
 const isCancelledRequest = (error) =>
   error?.name === 'CanceledError' || error?.name === 'AbortError' || error?.code === 'ERR_CANCELED';
 
-export default function EmployeeGroupMembers({ value = [], onChange, disabled = false, agentTypeOptions = [] }) {
+export default function EmployeeGroupMembers({
+  value = [],
+  onChange,
+  disabled = false,
+  agentTypeOptions = [],
+  ownerType = 'personal',
+}) {
   const intl = useIntl();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -76,7 +82,9 @@ export default function EmployeeGroupMembers({ value = [], onChange, disabled = 
   useEffect(() => {
     if (!open) return;
     requestRef.current?.abort();
-    const cacheKey = `${pageNum}:${CANDIDATE_PAGE_SIZE}:${keyword}`;
+    // 企业组只查询企业员工；个人组不限制归属类型，由后端按当前用户的使用权限返回个人和企业员工。
+    const candidateOwnerType = ownerType === 'enterprise' ? 'enterprise' : '';
+    const cacheKey = `${candidateOwnerType}:${pageNum}:${CANDIDATE_PAGE_SIZE}:${keyword}`;
     const cached = candidateCacheRef.current.get(cacheKey);
     if (cached && Date.now() - cached.cachedAt < CANDIDATE_CACHE_TTL) {
       setCandidates((previous) => {
@@ -99,7 +107,7 @@ export default function EmployeeGroupMembers({ value = [], onChange, disabled = 
         pageNum,
         pageSize: CANDIDATE_PAGE_SIZE,
         keyword,
-        ownerType: 'enterprise',
+        ...(candidateOwnerType ? { ownerType: candidateOwnerType } : {}),
         resourceStatus: 2,
       },
       requestController
@@ -136,7 +144,7 @@ export default function EmployeeGroupMembers({ value = [], onChange, disabled = 
     return () => {
       requestController.abort();
     };
-  }, [intl, keyword, open, pageNum]);
+  }, [intl, keyword, open, ownerType, pageNum]);
 
   const loadMoreCandidates = useCallback(() => {
     if (!open || loadingRef.current || !hasMore) return;

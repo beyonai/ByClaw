@@ -153,6 +153,8 @@ const ResourceList: React.FC<ResourceListProps> = ({
       const filterParam = params?.dropdownParam ?? dropdownParam;
       setLoading(true);
       try {
+        // “我可用的”包含当前用户创建及被授权的全部资源，不限定 owner_type；
+        // “官方推荐”沿用企业资源口径。
         const ownerTypes = activeTab === 'installed' ? ['personal', 'enterprise'] : [activeTab];
         const responses = await Promise.all(
           ownerTypes.map(async (ownerType) => {
@@ -161,7 +163,7 @@ const ResourceList: React.FC<ResourceListProps> = ({
               keyword,
               pageNum,
               pageSize,
-              ownerType,
+              ...(activeTab === 'personal' ? {} : { ownerType }),
               catalogId: selectedCatalogId || undefined,
               ...ownerFilterParam,
               resourceBizTypeList: ownerFilterParam.resourceBizTypeList?.length
@@ -347,7 +349,8 @@ const ResourceList: React.FC<ResourceListProps> = ({
           </div>
         )}
 
-        {list.length > 0 && (
+        {/* 切换资源一级 Tab 时先隐藏旧列表，避免旧卡片套用新 resourceType 样式产生瞬间变形；仅展示 loading。 */}
+        {list.length > 0 && !loading && (
           <InfiniteScroll
             next={loadMore}
             hasMore={hasMore}

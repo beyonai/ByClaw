@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.state.domain.chat.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
 import com.iwhalecloud.byai.common.constants.Constants;
@@ -23,10 +24,17 @@ class TargetAgentResolverTest {
     @Mock
     private SsResourceService ssResourceService;
 
+    @Mock
+    private SystemParamTargetAgentResolver systemParamTargetAgentResolver;
+
     @BeforeEach
     void setUp() {
         targetAgentResolver = new TargetAgentResolver();
         ReflectionTestUtils.setField(targetAgentResolver, "ssResourceService", ssResourceService);
+        ReflectionTestUtils.setField(targetAgentResolver, "systemParamTargetAgentResolver", systemParamTargetAgentResolver);
+        lenient().when(systemParamTargetAgentResolver.resolve(org.mockito.ArgumentMatchers.anyString(),
+            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString()))
+            .thenAnswer(invocation -> invocation.getArgument(0));
     }
 
     /**
@@ -84,11 +92,11 @@ class TargetAgentResolverTest {
     }
 
     @Test
-    void resolveAgentType_routesNullAgentIdToBySuperDespiteLegacyResumeAgentType() {
+    void resolveAgentType_keepsResumeAgentTypeAsFinalOverride() {
         String targetAgentType = targetAgentResolver.resolveAgentType(
             WorkerAgentType.BY_SUPER.getCode(), null, "BYCLAW_EXE_user001", "user001");
 
-        assertThat(targetAgentType).isEqualTo(WorkerAgentType.BY_SUPER.getCode());
+        assertThat(targetAgentType).isEqualTo("BYCLAW_EXE_user001");
     }
 
     @Test
@@ -100,4 +108,13 @@ class TargetAgentResolverTest {
 
         assertThat(targetAgentType).isEqualTo("BYCLAW_EXE_0027024710");
     }
+
+    @Test
+    void resolveAgentType_mapsHarnessToRuntimeDshType() {
+        String targetAgentType = targetAgentResolver.resolveAgentType(
+            WorkerAgentType.HARNESS.getCode(), 100L, null, "user001");
+
+        assertThat(targetAgentType).isEqualTo("BYCLAW_DSH_user001");
+    }
+
 }

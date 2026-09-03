@@ -11,6 +11,7 @@ import {
 import { useDispatch, useIntl, useLocation, useNavigate } from '@umijs/max';
 import classNames from 'classnames';
 import dayjs from 'dayjs';
+import { Tag } from 'antd';
 import AntdIcon from '@/components/AntdIcon';
 import { clearEasyConfirmInputDraft } from '@/components/ChatLayoutComp/components/EasyConfirm';
 import { hydrateRunningSessions } from '@/hooks/useChat/chatRuntime';
@@ -20,7 +21,7 @@ import useAppStore from '@/models/common/useAppStore';
 import { useProjectList } from '@/pages/projectSpace/hooks/useProjectList';
 import { useProjectScopeId } from '@/pages/projectSpace/hooks/useProjectScopeId';
 import type { ProjectSession, ProjectSpace } from '@/pages/projectSpace/types';
-import { getArrayData, getPageTotal, getProjectTagMeta, normalizeProjectSession } from '@/pages/projectSpace/utils';
+import { getArrayData, getPageTotal, normalizeProjectSession } from '@/pages/projectSpace/utils';
 import { listProjectSessionsByQo } from '@/service/devloop';
 import { getChatRunningStatus } from '@/service/message';
 import { chatSessionRuntimeManager, type RunningChatInfo } from '@/utils/chatSessionRuntimeManager';
@@ -182,7 +183,7 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
   const sessionStateMapRef = useRef(sessionStateMap);
   const sessionLoadingProjectIdsRef = useRef<Set<string>>(new Set());
   const hasStoredExpandedProjectIdsRef = useRef(hasStoredExpandedProjectIds());
-  const runningSessionIdsKeyRef = useRef('');
+  const displayedSessionRuntimeKeyRef = useRef('');
 
   useEffect(() => {
     expandedProjectIdsRef.current = expandedProjectIds;
@@ -220,27 +221,38 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
     }
   }, [loadedSessionIdsKey]);
 
-  const updateDisplayedRunningSessions = useCallback(() => {
-    const nextRunningSessionIdsKey = Object.values(sessionStateMapRef.current)
+  const updateDisplayedSessionRuntime = useCallback(() => {
+    const nextDisplayedSessionRuntimeKey = Object.values(sessionStateMapRef.current)
       .flatMap((sessionState) => sessionState.sessions)
       .map((session) => `${session.sessionId || ''}`.trim())
-      .filter((loadedSessionId) => loadedSessionId && chatSessionRuntimeManager.isSessionRunning(loadedSessionId))
+      .filter(Boolean)
+      .map((loadedSessionId) => {
+        const isRunning = chatSessionRuntimeManager.isSessionRunning(loadedSessionId);
+        const isWaitingForUserInput = chatSessionRuntimeManager.isSessionWaitingForUserInput(loadedSessionId);
+        const sessionRuntime = chatSessionRuntimeManager.getSessionRuntime(loadedSessionId);
+        return isRunning || isWaitingForUserInput
+          ? `${loadedSessionId}:${isRunning ? 'running' : 'idle'}:${isWaitingForUserInput ? 'waiting' : 'active'}:${
+            sessionRuntime?.status || ''
+          }:${sessionRuntime?.activeAgentCount || 0}`
+          : '';
+      })
+      .filter(Boolean)
       .sort()
       .join(',');
-    if (nextRunningSessionIdsKey === runningSessionIdsKeyRef.current) return;
+    if (nextDisplayedSessionRuntimeKey === displayedSessionRuntimeKeyRef.current) return;
 
-    runningSessionIdsKeyRef.current = nextRunningSessionIdsKey;
+    displayedSessionRuntimeKeyRef.current = nextDisplayedSessionRuntimeKey;
     setRuntimeVersion((version) => version + 1);
   }, []);
 
   useEffect(() => {
-    // 流式游标也会触发 manager 通知，仅在可见会话的 running 集合变化时刷新侧边栏。
-    return chatSessionRuntimeManager.subscribe(updateDisplayedRunningSessions);
-  }, [updateDisplayedRunningSessions]);
+    // 流式游标也会触发 manager 通知，仅在可见会话的运行或等待输入状态变化时刷新侧边栏。
+    return chatSessionRuntimeManager.subscribe(updateDisplayedSessionRuntime);
+  }, [updateDisplayedSessionRuntime]);
 
   useEffect(() => {
-    updateDisplayedRunningSessions();
-  }, [sessionStateMap, updateDisplayedRunningSessions]);
+    updateDisplayedSessionRuntime();
+  }, [sessionStateMap, updateDisplayedSessionRuntime]);
 
   useEffect(() => {
     void syncRunningStatus();
@@ -676,7 +688,6 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
 
   const renderProjectSessions = (project: ProjectSpace) => {
     const projectId = normalizeProjectId(project.projectId);
-    const projectTag = getProjectTagMeta(project);
     const sessionState = sessionStateMap[projectId] || createEmptySessionState();
     const hasMoreSessions = sessionState.loaded && sessionState.total > sessionState.sessions.length;
     const canCollapseSessions =
@@ -710,16 +721,6 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
 
         {sessionState.loaded && !sessionState.sessions.length && !sessionState.error && (
           <div className={styles.sessionListAction}>
-            <span
-              className={classNames(
-                styles.projectTypeTag,
-                styles.sessionProjectTypeSpacer,
-                styles[`projectTypeTag${projectTag.classSuffix}`]
-              )}
-              aria-hidden="true"
-            >
-              {intl.formatMessage({ id: projectTag.messageId })}
-            </span>
             <div className={styles.sessionEmpty}>{intl.formatMessage({ id: 'workspaceSider.emptySessions' })}</div>
           </div>
         )}
@@ -733,21 +734,13 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
             )}
           >
             <button type="button" className={styles.sessionItem} onClick={() => handleOpenSession(project, session)}>
-              <span
-                className={classNames(
-                  styles.projectTypeTag,
-                  styles.sessionProjectTypeSpacer,
-                  styles[`projectTypeTag${projectTag.classSuffix}`]
-                )}
-                aria-hidden="true"
-              >
-                {intl.formatMessage({ id: projectTag.messageId })}
-              </span>
               <span className={styles.sessionName}>
                 {session.sessionName || intl.formatMessage({ id: 'workspaceSider.newSession' })}
               </span>
               <span className={styles.sessionTime}>
-                {chatSessionRuntimeManager.isSessionRunning(`${session.sessionId}`) ? (
+                {chatSessionRuntimeManager.isSessionWaitingForUserInput(`${session.sessionId}`) ? (
+                  <Tag color="blue">{intl.formatMessage({ id: 'workspaceSider.sessionNeedsUserInput' })}</Tag>
+                ) : chatSessionRuntimeManager.isSessionRunning(`${session.sessionId}`) ? (
                   <LoadingOutlined />
                 ) : (
                   formatSessionTime(session.updateTime || session.createTime, intl)
@@ -764,16 +757,6 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
 
         {hasMoreSessions && (
           <div className={styles.sessionListAction}>
-            <span
-              className={classNames(
-                styles.projectTypeTag,
-                styles.sessionProjectTypeSpacer,
-                styles[`projectTypeTag${projectTag.classSuffix}`]
-              )}
-              aria-hidden="true"
-            >
-              {intl.formatMessage({ id: projectTag.messageId })}
-            </span>
             <button
               type="button"
               className={styles.loadMoreSessions}
@@ -788,16 +771,6 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
 
         {canCollapseSessions && (
           <div className={styles.sessionListAction}>
-            <span
-              className={classNames(
-                styles.projectTypeTag,
-                styles.sessionProjectTypeSpacer,
-                styles[`projectTypeTag${projectTag.classSuffix}`]
-              )}
-              aria-hidden="true"
-            >
-              {intl.formatMessage({ id: projectTag.messageId })}
-            </span>
             <button type="button" className={styles.loadMoreSessions} onClick={handleCollapseSessions}>
               {intl.formatMessage({ id: 'workspaceSider.collapseSessions' })}
             </button>
@@ -886,16 +859,11 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
           {projects.map((project) => {
             const projectId = normalizeProjectId(project.projectId);
             const isExpanded = expandedProjectIds.has(projectId);
-            const projectTag = getProjectTagMeta(project);
             return (
               <div key={projectId} className={styles.projectItem} role="treeitem" aria-expanded={isExpanded}>
                 <div className={styles.projectRow}>
                   <button type="button" className={styles.projectButton} onClick={() => handleProjectClick(project)}>
-                    <span
-                      className={classNames(styles.projectTypeTag, styles[`projectTypeTag${projectTag.classSuffix}`])}
-                    >
-                      {intl.formatMessage({ id: projectTag.messageId })}
-                    </span>
+                    <ShareAltOutlined className={styles.projectIcon} aria-hidden="true" />
                     <span className={styles.projectName} title={project.projectName}>
                       {project.projectName || intl.formatMessage({ id: 'projectSpace.unnamedProject' })}
                     </span>

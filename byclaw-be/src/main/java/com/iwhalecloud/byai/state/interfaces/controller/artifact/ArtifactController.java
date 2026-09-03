@@ -1,13 +1,11 @@
 package com.iwhalecloud.byai.state.interfaces.controller.artifact;
 
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
-import com.iwhalecloud.byai.state.domain.artifact.dto.ArtifactDataCreateRequest;
-import com.iwhalecloud.byai.state.domain.artifact.dto.ArtifactDataRecordDto;
-import com.iwhalecloud.byai.state.domain.artifact.dto.ArtifactDataUpdateRequest;
+import com.iwhalecloud.byai.state.domain.artifact.dto.ArtifactContentUpdateDto;
 import com.iwhalecloud.byai.state.domain.artifact.dto.ArtifactDto;
+import com.iwhalecloud.byai.state.domain.artifact.dto.ArtifactExpiryRenewRequest;
 import com.iwhalecloud.byai.state.domain.artifact.model.ArtifactPublishMode;
 import com.iwhalecloud.byai.state.domain.artifact.service.ArtifactApplicationService;
-import com.iwhalecloud.byai.state.domain.artifact.service.ArtifactDataRecordService;
 import jakarta.validation.Valid;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -33,12 +31,9 @@ import org.springframework.web.multipart.MultipartFile;
 public class ArtifactController {
 
     private final ArtifactApplicationService artifactApplicationService;
-    private final ArtifactDataRecordService artifactDataRecordService;
 
-    public ArtifactController(ArtifactApplicationService artifactApplicationService,
-        ArtifactDataRecordService artifactDataRecordService) {
+    public ArtifactController(ArtifactApplicationService artifactApplicationService) {
         this.artifactApplicationService = artifactApplicationService;
-        this.artifactDataRecordService = artifactDataRecordService;
     }
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
@@ -55,10 +50,32 @@ public class ArtifactController {
         return ResponseUtil.successResponse(result);
     }
 
+    @PutMapping(value = "/{artifactId}/content", consumes = MediaType.MULTIPART_FORM_DATA_VALUE,
+        produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(summary = "替换本人Artifact内容")
+    public ArtifactContentUpdateDto replaceContent(@PathVariable("artifactId") String artifactId,
+        @RequestPart("file") MultipartFile file,
+        @RequestParam(value = "publishMode", defaultValue = "AUTO") ArtifactPublishMode publishMode,
+        @RequestParam(value = "entryPoint", required = false) String entryPoint,
+        @RequestParam(value = "stripTopLevelDirectory", defaultValue = "true") boolean stripTopLevelDirectory,
+        @RequestParam(value = "displayName", required = false) String displayName,
+        @RequestParam(value = "sha256", required = false) String sha256) {
+        return artifactApplicationService.replaceOwnedContent(artifactId, file, publishMode, entryPoint,
+            stripTopLevelDirectory, displayName, sha256);
+    }
+
     @GetMapping("/{artifactId}")
     @Operation(summary = "查询本人Artifact元数据")
     public ResponseUtil<ArtifactDto> get(@PathVariable("artifactId") String artifactId) {
         return ResponseUtil.successResponse(artifactApplicationService.getOwned(artifactId));
+    }
+
+    @PutMapping("/{artifactId}/expiration")
+    @Operation(summary = "续约本人Artifact的公开访问有效期")
+    public ResponseUtil<ArtifactDto> renewExpiration(@PathVariable("artifactId") String artifactId,
+        @Valid @RequestBody ArtifactExpiryRenewRequest request) {
+        return ResponseUtil.successResponse(
+            artifactApplicationService.renewOwnedExpiration(artifactId, request.getExpiresInSeconds()));
     }
 
     @DeleteMapping("/{artifactId}")
@@ -68,24 +85,4 @@ public class ArtifactController {
         return ResponseUtil.successResponse();
     }
 
-    @PostMapping("/{artifactId}/data-records")
-    @Operation(summary = "为本人Artifact创建JSON数据记录")
-    public ResponseUtil<ArtifactDataRecordDto> createDataRecord(@PathVariable("artifactId") String artifactId,
-        @Valid @RequestBody ArtifactDataCreateRequest request) {
-        return ResponseUtil.successResponse(artifactDataRecordService.createOwned(artifactId, request));
-    }
-
-    @GetMapping("/{artifactId}/data-records/{recordKey}")
-    @Operation(summary = "按recordKey查询本人Artifact数据记录")
-    public ResponseUtil<ArtifactDataRecordDto> getDataRecord(@PathVariable("artifactId") String artifactId,
-        @PathVariable("recordKey") String recordKey) {
-        return ResponseUtil.successResponse(artifactDataRecordService.getOwned(artifactId, recordKey));
-    }
-
-    @PutMapping("/{artifactId}/data-records/{recordKey}")
-    @Operation(summary = "按recordKey更新本人Artifact数据记录")
-    public ResponseUtil<ArtifactDataRecordDto> updateDataRecord(@PathVariable("artifactId") String artifactId,
-        @PathVariable("recordKey") String recordKey, @Valid @RequestBody ArtifactDataUpdateRequest request) {
-        return ResponseUtil.successResponse(artifactDataRecordService.updateOwned(artifactId, recordKey, request));
-    }
 }

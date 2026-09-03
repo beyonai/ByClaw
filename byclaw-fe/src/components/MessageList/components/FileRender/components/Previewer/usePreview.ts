@@ -7,8 +7,6 @@ import { downloadResourceFile, getDatasetDownloadParamsFromQueryFile, downloadMi
 import { getFileUrl } from '@/utils/file';
 import { getCommonFilePreviewUrl, isSessionFilePath } from './relativeResource';
 
-const caches: Record<string, Blob> = {};
-
 const usePreview = () => {
   const intl = useIntl();
 
@@ -71,43 +69,36 @@ const usePreview = () => {
           url = `${downloadMinIOFileURL}?${q.toString()}`;
         }
 
-        if (!caches[url]) {
-          setPreviewing(true);
-          setPreviewInfo({
-            open: true,
-            blob: null,
-            loading: true,
-            resourceUrl: url,
-            resolvePreviewResource: undefined,
+        setPreviewing(true);
+        setPreviewInfo({
+          open: true,
+          blob: null,
+          loading: true,
+          resourceUrl: url,
+          resolvePreviewResource: undefined,
+        });
+        const requestUrl = new URL(url, window.location.origin);
+        requestUrl.searchParams.set('_previewTime', `${Date.now()}`);
+        fetch(requestUrl.toString(), { cache: 'no-store' })
+          .then(async (res) => {
+            if (!res.ok) throw new Error(res.statusText);
+            const blob = await res.blob();
+            setPreviewInfo((prev) => ({
+              ...prev,
+              blob,
+              loading: false,
+              resourceUrl: url,
+              resolvePreviewResource: undefined,
+            }));
+          })
+          .catch((error) => {
+            console.error(error);
+            setPreviewInfo((prev) => ({ ...prev, blob: null, loading: false }));
+            AntdMessage.warning(intl.formatMessage({ id: 'fileRender.previewUnavailable' }));
+          })
+          .finally(() => {
+            setPreviewing(false);
           });
-          fetch(url)
-            .then((res) => {
-              res
-                .clone()
-                .blob()
-                .then((blob) => {
-                  caches[url] = blob;
-                  setPreviewInfo((prev) => ({
-                    ...prev,
-                    blob,
-                    loading: false,
-                    resourceUrl: url,
-                    resolvePreviewResource: undefined,
-                  }));
-                });
-            })
-            .finally(() => {
-              setPreviewing(false);
-            });
-        } else {
-          setPreviewInfo({
-            open: true,
-            blob: caches[url],
-            loading: false,
-            resourceUrl: url,
-            resolvePreviewResource: undefined,
-          });
-        }
       } else {
         const dp = getDatasetDownloadParamsFromQueryFile(queryFile);
         if (dp) {

@@ -1,8 +1,8 @@
 import React from 'react';
 
 import { getIntl } from '@umijs/max';
-import { LinkOutlined } from '@ant-design/icons';
-import { Button, ConfigProvider, Divider, message, Popover, Progress, Space } from 'antd';
+import { Button, ConfigProvider, message, Popover, Progress, Space, Tooltip } from 'antd';
+import type { PopoverProps } from 'antd';
 import { get, isBoolean, isEmpty, isNil, pullAllBy, set, trim, compact, omit } from 'lodash';
 import classNames from 'classnames';
 import { agentTypeMap } from '@/constants/agent';
@@ -24,11 +24,8 @@ import type { IAgentFileUploadConf } from '../../hooks/useAgentUploadFileConfig'
 import type { DefaultValueSchema } from './RichInput/types';
 import type { ContextUsed } from '@/hooks/useContextUsed';
 import { getLastMentionedDigitalEmployeeId } from './utils/mention';
-import EmployeeList from '@/layout/sider/components/EmployeeList';
-import ResourceTabs from './RichInput/mentionPopover/resourceTabsCompact';
-import { ResourceType } from './RichInput/utils/constants';
-import ConnectorControl from './components/ConnectorControl';
-import FileResourcePanel from '@/components/ChatLayoutComp/ChatResourceWorkspace/FileResourcePanel';
+import MentionPopover from './RichInput/mentionPopover';
+import { getResourcePopoverAdapter } from './RichInput/mentionPopover/resourcePopoverAdapter';
 
 export type IProps = {
   getMessageList?: () => Array<IMessage>;
@@ -63,11 +60,15 @@ export type IProps = {
   /** 当前会话所属项目。 */
   projectId?: number;
 
+  /** 当前会话所属项目的知识库 ID，用于项目云盘浏览。 */
+  projectCloudResourceId?: string | number;
+  mentionPopoverPlacement?: PopoverProps['placement'];
+
   /** 控制新会话项目选择入口，避免通知等复用输入框误展示。 */
   enableTaskTemplate?: boolean;
 
   /** 输入框外部项目选择器当前选中的项目。 */
-  selectedProject?: { projectId: string; projectName: string };
+  selectedProject?: { projectId: string; projectName: string; cloudResourceId?: string | number };
 
   /** 新建任务上传文件生成会话后，由外层决定是否暂时保持新建任务视图。 */
   onFileUploadSessionCreated?: (sessionId: string) => void;
@@ -84,6 +85,9 @@ export type IState = {
   toolsPopoverOpen?: boolean;
   activeToolMenuKey?: string;
   moreToolsExpanded?: boolean;
+  toolsPopoverWidth?: number;
+  toolsPopoverKeyword?: string;
+  visitedToolTabs?: string[];
 };
 
 const AUTOSEND_TIMEOUT = 5000;
@@ -104,10 +108,23 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
 
   uploadFileRef = React.createRef<UploadFileRef>();
 
+  inputBlockRef = React.createRef<HTMLDivElement>();
+
   selectedProject?: { projectId: string; projectName: string };
 
   handleProjectChange = (project: { projectId: string; projectName: string }) => {
     this.selectedProject = project;
+  };
+
+  /** 打开统一资源弹窗，并切换到指定资源分类。供输入框外部快捷入口复用。 */
+  openResourcePicker = (tabKey = 'expert') => {
+    this.setState({
+      toolsPopoverOpen: true,
+      toolsPopoverWidth: this.inputBlockRef.current?.getBoundingClientRect().width,
+      toolsPopoverKeyword: undefined,
+      activeToolMenuKey: tabKey,
+      visitedToolTabs: [tabKey],
+    });
   };
 
   constructor(props: P & IProps) {
@@ -122,6 +139,9 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
       toolsPopoverOpen: false,
       activeToolMenuKey: 'expert',
       moreToolsExpanded: false,
+      toolsPopoverWidth: undefined,
+      toolsPopoverKeyword: undefined,
+      visitedToolTabs: ['expert'],
     } as S & IState;
   }
 
@@ -172,7 +192,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
 
   onSelectMentionPopoverItem: RichInputRef['insertItem'] = (item, type) => {
     this.richInputRef.current?.insertItem(item, type);
-    this.setState((prev) => ({ ...prev, showMentionPopoverType: '' }));
+    this.setState((prev) => ({ ...prev, showMentionPopoverType: '', toolsPopoverOpen: false }));
   };
 
   restoreInputDraft = () => {
@@ -289,61 +309,6 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
   getQuoteAgentId = (): string | undefined => {
     const agentIds = this.getQuoteAgentIds();
     return agentIds.length === 1 ? agentIds[0] : undefined;
-  };
-
-  renderDirectToolContent = (key: string, fallback: React.ReactNode) => {
-    if (key === 'expert') {
-      return (
-        <EmployeeList
-          chatMode={chatModeMap.expert}
-          onSelect={(item) => this.onSelectMentionPopoverItem(item, ResourceType.digitalEmployee)}
-          excludedAgentIds={this.getInlineDigitalEmployeeList().map((item) => `${item.resourceId}`)}
-        />
-      );
-    }
-    if (key === 'skill') {
-      return (
-        <ResourceTabs
-          open
-          agentId={this.getQuoteAgentId()}
-          sessionId={this.props.sessionId}
-          agentIds={this.getResourceAgentIds()}
-          showKnowledgeTab
-          showSkillTab
-          onlyTab="skill"
-          onSelect={(item, type) => this.onSelectMentionPopoverItem(item, type)}
-        />
-      );
-    }
-    if (key === 'connector') {
-      return <ConnectorControl canAuthorize={!!this.props.userInfo} inline />;
-    }
-    if (['knowledge', 'tool', 'space', 'file', 'object'].includes(key)) {
-      return (
-        <ResourceTabs
-          open
-          agentId={this.getQuoteAgentId()}
-          sessionId={this.props.sessionId}
-          agentIds={this.getResourceAgentIds()}
-          onlyTab={key}
-          showKnowledgeTab
-          showSkillTab
-          onSelect={(item, type) => this.onSelectMentionPopoverItem(item, type)}
-        />
-      );
-    }
-    if (key === 'processFile' || key === 'projectCloud') {
-      return (
-        <FileResourcePanel
-          scope={key === 'processFile' ? 'session' : 'project'}
-          sessionId={`${this.props.sessionId || ''}`}
-          projectId={this.props.projectId}
-          resourceId={this.props.globalContext.agentId}
-          onOpenDetail={() => undefined}
-        />
-      );
-    }
-    return fallback;
   };
 
   autoSend = () => {
@@ -488,7 +453,11 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
     }
     // 上传附件会提前生成 sessionId，但当前页面仍属于新建任务；此时必须优先使用用户选择的项目，
     // 不能因为 sessionId 已存在就误走历史会话分支，回退到默认项目。
-    if (selectedProject && (!this.props.sessionId || this.props.isBottom === false)) {
+    // 文件上传会提前创建临时 sessionId；此时仍应优先使用输入框选择的项目，避免项目归属丢失。
+    if (
+      selectedProject &&
+      (!this.props.sessionId || this.props.isBottom === false || this.props.projectId === undefined)
+    ) {
       set(data, 'payload.selectedProjectId', selectedProject.projectId);
       set(data, 'payload.selectedProjectName', selectedProject.projectName);
     } else if (this.props.sessionId && this.props.projectId !== undefined) {
@@ -547,62 +516,6 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
     const bottomLeft = this.bottomLeftRender();
     const bottomRight = this.bottomRightRender();
     const hasTools = !!bottomLeft || !!bottomRight;
-    const moreMenuItems = [
-      {
-        key: 'knowledge',
-        label: '知识',
-        icon: 'icon-zhishi',
-        content: this.renderDirectToolContent('knowledge', bottomRight),
-      },
-      {
-        key: 'object',
-        label: '本体',
-        icon: 'icon-tongxun',
-        content: this.renderDirectToolContent('object', bottomRight),
-      },
-      {
-        key: 'tool',
-        label: '工具',
-        icon: 'icon-a-Database-networkshujukuwangluo',
-        content: this.renderDirectToolContent('tool', bottomRight),
-      },
-    ];
-    const topMenuItems = [
-      {
-        key: 'expert',
-        label: getIntl().formatMessage({ id: 'common.digitalEmployee' }),
-        icon: 'icon-cebianlan-shuziyuangong',
-        content: this.renderDirectToolContent('expert', bottomRight),
-      },
-      {
-        key: 'skill',
-        label: '技能',
-        icon: 'icon-chajian',
-        content: this.renderDirectToolContent('skill', bottomRight),
-      },
-      {
-        key: 'connector',
-        label: '连接器',
-        icon: <LinkOutlined aria-hidden />,
-        content: this.renderDirectToolContent('connector', bottomRight),
-      },
-      {
-        key: 'processFile',
-        label: '过程文件',
-        icon: 'icon-a-Data-fileshujuwenjian',
-        content: this.renderDirectToolContent('processFile', null),
-      },
-      {
-        key: 'projectCloud',
-        label: '项目云盘',
-        icon: 'icon-a-Folder-openwenjianjia-kai',
-        content: this.renderDirectToolContent('projectCloud', bottomRight),
-      },
-    ];
-    const panelItems = [...topMenuItems, ...moreMenuItems];
-    const visibleMenuItems = this.state.moreToolsExpanded ? panelItems : topMenuItems;
-    const activeMenu = panelItems.find((item) => item.key === this.state.activeToolMenuKey) || topMenuItems[0];
-
     return (
       <div className={styles.tools}>
         <ConfigProvider
@@ -615,79 +528,19 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
           }}
         >
           {hasTools && (
-            <Popover
-              trigger="click"
-              placement="topLeft"
-              open={this.state.toolsPopoverOpen}
-              onOpenChange={(open) => this.setState({ toolsPopoverOpen: open })}
-              destroyOnHidden
-              arrow={false}
-              overlayClassName={styles.toolsPopover}
-              content={
-                <div className={styles.toolsMenu} onMouseLeave={() => undefined}>
-                  <div className={styles.toolsMenuNav}>
-                    {visibleMenuItems.map((item, index) => (
-                      <React.Fragment key={item.key}>
-                        {index === 3 && <Divider className={styles.toolsMenuNavDivider} />}
-                        <button
-                          type="button"
-                          className={classNames(styles.toolsMenuNavItem, {
-                            [styles.toolsMenuNavItemActive]: activeMenu.key === item.key,
-                          })}
-                          onMouseEnter={() => this.setState({ activeToolMenuKey: item.key })}
-                          onFocus={() => this.setState({ activeToolMenuKey: item.key })}
-                          onClick={() => this.setState({ activeToolMenuKey: item.key })}
-                        >
-                          {typeof item.icon === 'string' ? <AntdIcon type={item.icon} /> : item.icon}
-                          <span>{item.label}</span>
-                          <AntdIcon type="icon-a-Arrow-rightjiantouyou" />
-                        </button>
-                      </React.Fragment>
-                    ))}
-                    <button
-                      type="button"
-                      className={styles.toolsMenuNavItem}
-                      aria-expanded={this.state.moreToolsExpanded}
-                      onClick={() => {
-                        const moreToolsExpanded = !this.state.moreToolsExpanded;
-                        this.setState({
-                          moreToolsExpanded,
-                          ...(moreToolsExpanded || topMenuItems.some((item) => item.key === activeMenu.key)
-                            ? {}
-                            : { activeToolMenuKey: topMenuItems[0].key }),
-                        });
-                      }}
-                    >
-                      <AntdIcon type="icon-a-Moregengduo" />
-                      <span>{this.state.moreToolsExpanded ? '收起' : '更多'}</span>
-                      <AntdIcon type={this.state.moreToolsExpanded ? 'icon-a-Upshang' : 'icon-a-Downxia'} />
-                    </button>
-                  </div>
-                  <div className={styles.toolsMenuPanel}>
-                    {panelItems.map((item) => (
-                      <div
-                        key={item.key}
-                        className={classNames(styles.toolsMenuPanelContent, {
-                          [styles.toolsMenuPanelContentActive]: activeMenu.key === item.key,
-                        })}
-                      >
-                        <div className={styles.toolsMenuPanelTitle}>{item.label}</div>
-                        {!!item.content && <div className={styles.toolsMenuSection}>{item.content}</div>}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              }
-            >
-              <Button
-                type="text"
-                className={styles.addToolButton}
-                aria-label="打开聊天工具"
-                icon={<AntdIcon type="icon-a-Plusjia" style={{ fontSize: 20 }} />}
-              />
-            </Popover>
+            <>
+              <Tooltip title="可添加数字员工、技能、连接器">
+                <Button
+                  type="text"
+                  className={styles.addToolButton}
+                  aria-label="打开聊天工具"
+                  icon={<AntdIcon type="icon-a-Plusjia" style={{ fontSize: 20 }} />}
+                  onClick={() => this.openResourcePicker('expert')}
+                />
+              </Tooltip>
+            </>
           )}
-          <div className={styles.outsideTools}>{bottomRight}</div>
+          <div className={classNames(styles.outsideTools, hasTools && styles.outsideToolsWithTools)}>{bottomRight}</div>
         </ConfigProvider>
         <Space className={styles.toolsRight}>
           {!cannotSend && (
@@ -831,9 +684,11 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
 
   checkCanQuote = () => {
     const { employeesList } = this.props;
-    const quoteAgentId = this.getQuoteAgentId();
+    const inlineAgentIds = this.getInlineDigitalEmployeeList().map((item) => `${item.resourceId}`);
+    const quoteAgentId = inlineAgentIds.length === 1 ? inlineAgentIds[0] : undefined;
 
-    if (!quoteAgentId || !employeesList) return false;
+    // # 资源入口始终可用：未 @ 员工时展示全部资源，已 @ 员工时再按员工范围过滤。
+    if (!quoteAgentId || !employeesList) return true;
     // 页面集成类型的数字员工，不允许#技能
     const integrationType = employeesList?.find(
       (item) =>
@@ -849,7 +704,9 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
   chechCannotAt = () => this.props.cannotAt;
 
   getResourceAgentIds = (): string | undefined => {
-    return this.getQuoteAgentId();
+    // 仅使用输入框内显式 @ 的员工作为资源过滤条件；会话默认员工不应限制 # 的全量列表。
+    const inlineAgentIds = Array.from(new Set(this.getInlineDigitalEmployeeList().map((item) => `${item.resourceId}`)));
+    return inlineAgentIds.length ? inlineAgentIds.join(',') : undefined;
   };
 
   renderInput() {
@@ -902,6 +759,17 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
           }}
           canQuote={this.checkCanQuote()}
           resourceAgentIds={this.getResourceAgentIds()}
+          projectId={this.props.projectId}
+          projectCloudResourceId={this.props.projectCloudResourceId}
+          mentionPopoverPlacement={this.props.mentionPopoverPlacement}
+          onResourcePopoverChange={({ open, inputText, width }) =>
+            this.setState({
+              toolsPopoverOpen: open,
+              toolsPopoverWidth: open ? width : undefined,
+              toolsPopoverKeyword: open ? inputText : undefined,
+              ...(open ? { activeToolMenuKey: 'expert', visitedToolTabs: ['expert'] } : {}),
+            })
+          }
         />
         {this.getAssitantTrigger()}
       </div>
@@ -936,6 +804,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
           [styles.expert]: myAgentType === agentTypeMap.common && chatMode === chatModeMap.expert,
         })}
         id="queryInputBase"
+        ref={this.inputBlockRef}
       >
         <OperatePopup />
         <Popover
@@ -960,6 +829,28 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
         </Popover>
         {this.inputUpper()}
         {this.renderInput()}
+        <MentionPopover
+          key={`resource-tools-${this.props.sessionId || 'new'}`}
+          type="@"
+          chatMode={this.props.chatMode}
+          sessionId={this.props.sessionId}
+          projectId={this.props.projectId}
+          projectCloudResourceId={this.props.projectCloudResourceId}
+          agentId={this.getQuoteAgentId()}
+          resourceAgentIds={this.getResourceAgentIds()}
+          excludedAgentIds={this.getInlineDigitalEmployeeList().map((item) => `${item.resourceId}`)}
+          inputText={this.state.toolsPopoverKeyword}
+          activeTabKey={this.state.activeToolMenuKey}
+          {...getResourcePopoverAdapter({
+            open: this.state.toolsPopoverOpen === true,
+            width: this.state.toolsPopoverWidth,
+            isInputAtBottom: this.props.isBottom,
+          })}
+          onClose={() =>
+            this.setState({ toolsPopoverOpen: false, toolsPopoverWidth: undefined, toolsPopoverKeyword: undefined })
+          }
+          onSelect={(item, type) => this.onSelectMentionPopoverItem(item, type)}
+        />
         {this.inputLower()}
         {this.extendRender()}
       </div>

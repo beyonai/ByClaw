@@ -170,6 +170,7 @@ function AvatarCardItem(props: IProps) {
       key={employee.id}
       className={classnames(styles.employeeCard, {
         pointer: true,
+        [styles.employeeCardWithTag]: !!topRightTagText,
       })}
       ref={avatarCardItemRef}
     >

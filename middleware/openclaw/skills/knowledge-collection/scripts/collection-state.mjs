@@ -18,11 +18,20 @@ import {
   loadSession as sessionLoad,
   persistCollection,
   withSessionLock,
+  markDeliveryStale,
   isProcessAlive,
   readLock,
   resolveCollectionInputFile,
 } from './session.mjs';
-import { deliveryCompleteForSession, summarizeCrawlDelivery } from './delivery-state.mjs';
+import {
+  deliveryCompleteForSession, summarizeCrawlDelivery, summarizePromotedDelivery,
+} from './delivery-state.mjs';
+import { summarizeProbeRun } from './probe-state.mjs';
+import {
+  authorizeArxivAcquisitionVariant as authorizeArxivVariant,
+  authorizePublicSource,
+} from './discovery-authorization.mjs';
+import { assessMaterializedTopic } from './topic-relevance.mjs';
 import {
   CONTENT_GRANULARITIES,
   COVER_STATUSES,
@@ -36,6 +45,59 @@ const COLLECTION_STATUSES = new Set(['complete', 'partial', 'failed']);
 const MATERIALIZATION_STATUSES = new Set(['materialized', 'pending', 'failed']);
 const MARKDOWN_EXTENSIONS = new Set(['.md', '.markdown']);
 const SOURCE_SCOPE_ALIAS = { dws: 'dingtalk', fws: 'feishu', wecom: 'wecom', ima: 'ima' };
+
+function normalizedAuthorizationUrl(rawUrl) {
+  try {
+    const url = new URL(rawUrl);
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return null;
+    url.hash = '';
+    url.hostname = url.hostname.toLowerCase();
+    url.searchParams.sort();
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function discoveryCandidateFor(session, source, sourceUrl) {
+  if ((SOURCE_SCOPE_ALIAS[source] || source) !== 'public-internet') return null;
+  const normalized = normalizedAuthorizationUrl(sourceUrl);
+  const gate = session.task?.discoveryGate;
+  if (!['1.1', '2.0'].includes(gate?.schemaVersion)) {
+    throw new Error('DISCOVERY_RELEVANCE_MIGRATION_REQUIRED: 旧公共发现会话必须新建内部 run');
+  }
+  const direct = gate?.candidates?.find((candidate) => candidate.origin === 'user-provided'
+    && (candidate.canonicalUrl === normalized || candidate.acquisitionUrls?.includes(normalized)));
+  if (direct) return { ...direct, authorizationKind: 'user-provided' };
+
+  const crawl = session.crawl;
+  const crawlEntry = Array.isArray(crawl?.entries)
+    ? crawl.entries.find((entry) => normalizedAuthorizationUrl(entry?.url) === normalized) : null;
+  if (crawlEntry?.status === 'fetched'
+    && (!crawl.scopePrefix || normalized?.startsWith(crawl.scopePrefix))) {
+    return {
+      origin: 'crawl-frontier',
+      authorizationKind: 'crawl-frontier',
+      canonicalUrl: normalized,
+      topicRelevance: { status: 'not-required' },
+    };
+  }
+
+  const candidate = authorizePublicSource(gate, sourceUrl);
+  return candidate ? { ...candidate, authorizationKind: 'public-discover' } : candidate;
+}
+
+function assertMaterializedTopic(session, authorization, canonicalItem, sanitizedAbsolute) {
+  if (authorization?.authorizationKind !== 'public-discover') return null;
+  const topicRelevance = assessMaterializedTopic(session.task.discoveryGate.topicContract, {
+    title: canonicalItem.title,
+    markdown: fs.readFileSync(sanitizedAbsolute, 'utf8'),
+  });
+  if (!['matched', 'not-required'].includes(topicRelevance.status)) {
+    throw new Error(`MATERIALIZED_CONTENT_NOT_RELEVANT: 实际正文与任务主题不匹配（${topicRelevance.status}）`);
+  }
+  return topicRelevance;
+}
 
 function stableItemId(item) {
   const identity = [item.url, item.title, item.fileName].filter(Boolean).join('\n');
@@ -168,6 +230,98 @@ function validateRawArtifacts(root, rawArtifacts) {
   return [...new Set(validated)];
 }
 
+function fullTextEvidenceHash(paths, artifact) {
+  return `sha256:${crypto.createHash('sha256').update(fs.readFileSync(path.join(paths.root, artifact))).digest('hex')}`;
+}
+
+function validateFullTextEvidence(paths, session, evidence, { sourceSkill, sourceUrl, rawArtifacts }) {
+  if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) {
+    throw new Error('公共来源 full-text 必须提供获准执行器生成的 fullTextEvidence');
+  }
+  if (evidence.schemaVersion !== '1.0') {
+    throw new Error('fullTextEvidence.schemaVersion 必须是 1.0');
+  }
+  const executor = requireString(evidence.executor, 'fullTextEvidence.executor');
+  if (executor !== sourceSkill) {
+    throw new Error('fullTextEvidence.executor 必须与 sourceSkill 一致');
+  }
+  const artifact = requireString(evidence.artifact, 'fullTextEvidence.artifact');
+  validateRawArtifacts(paths.root, [artifact]);
+  if (!rawArtifacts.includes(artifact)) {
+    throw new Error('fullTextEvidence.artifact 必须同时登记在 rawArtifacts 中');
+  }
+  const receipt = readJson(path.join(paths.root, artifact), 'fullTextEvidence.artifact');
+  if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt)
+    || receipt.schemaVersion !== '1.0'
+    || receipt.executor !== executor
+    || receipt.sourceUrl !== sourceUrl
+    || receipt.complete !== true
+    || receipt.contentGranularity !== 'full-text') {
+    throw new Error('执行器全文证据必须确认相同来源、执行器和 full-text 完整性');
+  }
+  const artifactHash = fullTextEvidenceHash(paths, artifact);
+  const registered = session.task?.fullTextEvidenceReceipts?.some((entry) => (
+    entry?.schemaVersion === '1.0'
+      && entry.executor === executor
+      && entry.sourceUrl === sourceUrl
+      && entry.artifact === artifact
+      && entry.artifactHash === artifactHash
+  ));
+  if (!registered) {
+    throw new Error('fullTextEvidence 未由专用 materializer 注册或登记后已被修改');
+  }
+  return { schemaVersion: '1.0', executor, artifact };
+}
+
+export function registerFullTextEvidenceReceipt(paths, evidence) {
+  return withSessionLock(paths, 'register-full-text-evidence', () => {
+    const { session } = sessionLoad(paths, { persistMigration: true });
+    const executor = requireString(evidence?.executor, 'fullTextEvidence.executor');
+    const sourceUrl = requireString(evidence?.sourceUrl, 'fullTextEvidence.sourceUrl');
+    const artifact = requireString(evidence?.artifact, 'fullTextEvidence.artifact');
+    validateRawArtifacts(paths.root, [artifact]);
+    const receipt = readJson(path.join(paths.root, artifact), 'fullTextEvidence.artifact');
+    if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt)
+      || receipt.schemaVersion !== '1.0'
+      || receipt.executor !== executor
+      || receipt.sourceUrl !== sourceUrl
+      || receipt.complete !== true
+      || receipt.contentGranularity !== 'full-text') {
+      throw new Error('专用 materializer 只能登记已确认完整的执行器全文回执');
+    }
+    const registration = {
+      schemaVersion: '1.0',
+      executor,
+      sourceUrl,
+      artifact,
+      artifactHash: fullTextEvidenceHash(paths, artifact),
+    };
+    const previous = Array.isArray(session.task.fullTextEvidenceReceipts)
+      ? session.task.fullTextEvidenceReceipts : [];
+    session.task.fullTextEvidenceReceipts = [
+      ...previous.filter((entry) => !(entry?.executor === executor
+        && entry?.sourceUrl === sourceUrl && entry?.artifact === artifact)),
+      registration,
+    ];
+    persistCollection(paths, session, session.collection);
+    return registration;
+  });
+}
+
+export function registerArxivAcquisitionVariant(paths, { sourceUrl, acquisitionUrl }) {
+  return withSessionLock(paths, 'register-arxiv-acquisition', () => {
+    const { session } = sessionLoad(paths, { persistMigration: true });
+    const candidate = authorizeArxivVariant(
+      session.task?.discoveryGate,
+      requireString(sourceUrl, 'sourceUrl'),
+      requireString(acquisitionUrl, 'acquisitionUrl'),
+    );
+    markDeliveryStale(session);
+    persistCollection(paths, session, session.collection);
+    return clone(candidate);
+  });
+}
+
 function safeWorkCopy(paths, relativePath, directory, { requireExisting = false } = {}) {
   if (typeof relativePath !== 'string' || !relativePath.trim()) return false;
   if (!MARKDOWN_EXTENSIONS.has(path.extname(relativePath).toLowerCase())) return false;
@@ -297,6 +451,32 @@ function normalizeMaterializations(paths, metadata) {
     recovered = true;
   }
   return { recovered, warnings, invalidSanitizedPaths };
+}
+
+function normalizeFullTextEvidence(paths, session, metadata) {
+  let recovered = false;
+  const warnings = [];
+  const publicScope = Array.isArray(session.task?.sourceScope)
+    && session.task.sourceScope.includes('public-internet');
+  for (const item of metadata.collection.items) {
+    if (item.materialization.contentGranularity !== 'full-text') continue;
+    const isPublicItem = typeof item.discoveryCandidateId === 'string'
+      || (publicScope && /^https?:\/\//i.test(item.sourceUrl));
+    if (!isPublicItem) continue;
+    try {
+      item.fullTextEvidence = validateFullTextEvidence(paths, session, item.fullTextEvidence, {
+        sourceSkill: item.sourceSkill,
+        sourceUrl: item.sourceUrl,
+        rawArtifacts: item.rawArtifacts,
+      });
+    } catch (error) {
+      item.materialization.contentGranularity = 'unknown';
+      delete item.fullTextEvidence;
+      warnings.push(`inventory ${item.itemId || '<unknown>'} fullTextEvidence 无效，已降级为 unknown: ${error.message}`);
+      recovered = true;
+    }
+  }
+  return { recovered, warnings };
 }
 
 function validateMetadata(metadata) {
@@ -437,6 +617,7 @@ function loadCollectionSession(paths, { persistRecovery = false, skipCanonicalVa
   const normalized = normalizeMetadata(paths.root, rawMetadata, collectionResult);
   const metadata = normalized.metadata;
   const materializations = normalizeMaterializations(paths, metadata);
+  const fullTextEvidence = normalizeFullTextEvidence(paths, session, metadata);
   if (materializations.invalidSanitizedPaths.size) {
     collectionResult.items = collectionResult.items
       .filter((item) => !materializations.invalidSanitizedPaths.has(item.fileName));
@@ -446,7 +627,7 @@ function loadCollectionSession(paths, { persistRecovery = false, skipCanonicalVa
   if (!skipCanonicalValidation) validateCanonicalView(paths.root, collectionResult, metadata);
   const metadataChanged = JSON.stringify(metadata) !== JSON.stringify(rawMetadata) || migrated;
   if (persistRecovery && metadataChanged) persistCollection(paths, session, metadata);
-  if (persistRecovery && (collectionResultChanged || materializations.recovered)) {
+  if (persistRecovery && (collectionResultChanged || materializations.recovered || fullTextEvidence.recovered)) {
     atomicWriteJson(paths.collectionResult, collectionResult);
   }
   return {
@@ -456,7 +637,7 @@ function loadCollectionSession(paths, { persistRecovery = false, skipCanonicalVa
     metadataChanged,
     collectionResultChanged,
     materializationRecovered: materializations.recovered,
-    warnings: [...normalized.warnings, ...materializations.warnings],
+    warnings: [...normalized.warnings, ...materializations.warnings, ...fullTextEvidence.warnings],
   };
 }
 
@@ -547,6 +728,7 @@ function markOneMaterialized(paths, session, metadata, collectionResult, update)
     if (!allowedSources.includes(SOURCE_SCOPE_ALIAS[source] || source)) {
       throw new Error(`sourceScope 不允许来源 ${source}`);
     }
+    const discoveryCandidate = discoveryCandidateFor(session, source, sourceUrl);
     if (!collectionResult.source) collectionResult.source = source;
     else if (collectionResult.source !== source) collectionResult.source = 'multi-source';
     if (!collectionResult.backend) collectionResult.backend = backend;
@@ -560,6 +742,9 @@ function markOneMaterialized(paths, session, metadata, collectionResult, update)
       sourceItemId: null,
       sourceSkill,
       backend,
+      ...(discoveryCandidate?.authorizationKind === 'public-discover'
+        ? { discoveryCandidateId: discoveryCandidate.candidateId } : {}),
+      ...(discoveryCandidate ? { provenanceKind: discoveryCandidate.authorizationKind } : {}),
       collectionFilters: collectionResult.filters && typeof collectionResult.filters === 'object'
         ? clone(collectionResult.filters) : {},
       rawArtifacts: rawArtifacts ?? [],
@@ -572,14 +757,28 @@ function markOneMaterialized(paths, session, metadata, collectionResult, update)
     metadata.collection.items.push(inventory);
   }
 
+  const effectiveSource = update.source || collectionResult.source;
+  const discoveryCandidate = effectiveSource
+    ? discoveryCandidateFor(session, effectiveSource, inventory.sourceUrl)
+    : null;
+  if (discoveryCandidate?.authorizationKind === 'public-discover') {
+    inventory.discoveryCandidateId = discoveryCandidate.candidateId;
+  }
+  if (discoveryCandidate) inventory.provenanceKind = discoveryCandidate.authorizationKind;
+
   const markdownPath = requireString(update.markdownPath, 'markdownPath');
   const sanitizedPath = requireString(update.sanitizedPath, 'sanitizedPath');
   validateMarkdownPath(paths.root, markdownPath, 'markdownPath', 'markdown');
-  validateMarkdownPath(paths.root, sanitizedPath, 'sanitizedPath', path.join('sanitized', 'items'));
+  const sanitizedAbsolute = validateMarkdownPath(
+    paths.root, sanitizedPath, 'sanitizedPath', path.join('sanitized', 'items'),
+  );
   validateCanonicalItem(update.canonicalItem, sanitizedPath);
   if (update.canonicalItem.url !== inventory.sourceUrl) {
     throw new Error('canonicalItem.url 必须与 inventory.sourceUrl 一致');
   }
+  const materializedTopicRelevance = assertMaterializedTopic(
+    session, discoveryCandidate, update.canonicalItem, sanitizedAbsolute,
+  );
 
   const previous = inventory.materialization || {};
   const oldPaths = [previous.markdownPath, previous.sanitizedPath]
@@ -587,6 +786,23 @@ function markOneMaterialized(paths, session, metadata, collectionResult, update)
       && value !== markdownPath && value !== sanitizedPath);
   inventory.title = update.canonicalItem.title;
   if (rawArtifacts !== undefined) inventory.rawArtifacts = rawArtifacts;
+  const contentGranularity = normalizeContentGranularity(update.contentGranularity, { strict: true });
+  const isPublicItem = effectiveSource === 'public-internet'
+    || typeof inventory.discoveryCandidateId === 'string';
+  if (isPublicItem && contentGranularity === 'full-text') {
+    inventory.fullTextEvidence = validateFullTextEvidence(
+      paths,
+      session,
+      update.fullTextEvidence ?? inventory.fullTextEvidence,
+      {
+        sourceSkill: inventory.sourceSkill,
+        sourceUrl: inventory.sourceUrl,
+        rawArtifacts: inventory.rawArtifacts,
+      },
+    );
+  } else {
+    delete inventory.fullTextEvidence;
+  }
   inventory.materialization = {
     status: 'materialized',
     markdownPath,
@@ -596,8 +812,10 @@ function markOneMaterialized(paths, session, metadata, collectionResult, update)
       ...oldPaths,
     ])],
     reason: null,
-    contentGranularity: normalizeContentGranularity(update.contentGranularity, { strict: true }),
+    contentGranularity,
   };
+  if (materializedTopicRelevance) inventory.materializedTopicRelevance = materializedTopicRelevance;
+  else delete inventory.materializedTopicRelevance;
   inventory.media = update.media === undefined
     ? normalizeMediaState(inventory.media, { strict: true, coverUrls: inventory.coverUrls })
     : normalizeMediaState(update.media, { strict: true, coverUrls: inventory.coverUrls });
@@ -608,6 +826,142 @@ function markOneMaterialized(paths, session, metadata, collectionResult, update)
   normalizeDuplicateGroups(metadata);
   reconcileCanonicalView(collectionResult, metadata);
   return { itemId, materialization: inventory.materialization, canonicalItem: canonicalViewItem(update.canonicalItem) };
+}
+
+function recordUnmaterializedCollectionItem(paths, update, targetStatus) {
+  const action = targetStatus === 'failed' ? 'record-failed' : 'record-pending';
+  return withSessionLock(paths, action, () => {
+    const loaded = loadCollectionSession(paths, { skipCanonicalValidation: true });
+    if (loaded.materializationRecovered) {
+      throw new Error('检测到无效 materialization，已安全降级为 pending；请先由原始执行器重新物化');
+    }
+    const itemId = requireString(update?.itemId, 'itemId');
+    const source = requireString(update?.source, 'source');
+    const sourceSkill = requireString(update?.sourceSkill, 'sourceSkill');
+    const backend = requireString(update?.backend, 'backend');
+    const sourceUrl = requireString(update?.sourceUrl, 'sourceUrl');
+    const reason = requireString(update?.reason, 'reason');
+    const title = typeof update?.title === 'string' ? update.title : '';
+    const rawArtifacts = validateRawArtifacts(paths.root, update?.rawArtifacts || []);
+    const allowedSources = Array.isArray(loaded.session.task?.sourceScope)
+      ? loaded.session.task.sourceScope : [];
+    if (!allowedSources.includes(SOURCE_SCOPE_ALIAS[source] || source)) {
+      throw new Error(`sourceScope 不允许来源 ${source}`);
+    }
+    const discoveryCandidate = discoveryCandidateFor(loaded.session, source, sourceUrl);
+
+    const duplicateIdentity = loaded.metadata.collection.items.find((item) =>
+      item.itemId !== itemId && articleIdentity(item) === articleIdentity({ sourceSkill, sourceUrl }));
+    if (duplicateIdentity) {
+      throw new Error(`inventory sourceSkill + sourceUrl 已由 ${duplicateIdentity.itemId} 登记`);
+    }
+
+    let inventory = loaded.metadata.collection.items.find((item) => item.itemId === itemId);
+    if (inventory?.materialization?.status === 'materialized') {
+      return {
+        ok: true,
+        action,
+        preservedMaterialized: true,
+        itemId,
+        materialization: clone(inventory.materialization),
+      };
+    }
+    if (inventory && articleIdentity(inventory) !== articleIdentity({ sourceSkill, sourceUrl })) {
+      throw new Error(`inventory ${itemId} 的 sourceSkill + sourceUrl 不允许变更`);
+    }
+
+    if (!inventory) {
+      inventory = {
+        itemId,
+        title,
+        sourceUrl,
+        sourceItemId: null,
+        sourceSkill,
+        backend,
+        ...(discoveryCandidate?.authorizationKind === 'public-discover'
+          ? { discoveryCandidateId: discoveryCandidate.candidateId } : {}),
+        ...(discoveryCandidate ? { provenanceKind: discoveryCandidate.authorizationKind } : {}),
+        collectionFilters: loaded.collectionResult.filters
+          && typeof loaded.collectionResult.filters === 'object'
+          ? clone(loaded.collectionResult.filters) : {},
+        rawArtifacts,
+        media: normalizeMediaState(update.media, { strict: true }),
+        materialization: {
+          status: targetStatus,
+          markdownPath: null,
+          sanitizedPath: null,
+          pendingArtifactCleanup: [],
+          reason,
+          contentGranularity: 'unknown',
+        },
+      };
+      loaded.metadata.collection.items.push(inventory);
+    } else {
+      inventory.title = title || inventory.title;
+      inventory.backend = backend;
+      inventory.rawArtifacts = rawArtifacts;
+      inventory.media = update.media === undefined
+        ? normalizeMediaState(inventory.media, { strict: true })
+        : normalizeMediaState(update.media, { strict: true });
+      inventory.materialization = {
+        status: targetStatus,
+        markdownPath: null,
+        sanitizedPath: null,
+        pendingArtifactCleanup: Array.isArray(inventory.materialization?.pendingArtifactCleanup)
+          ? inventory.materialization.pendingArtifactCleanup : [],
+        reason,
+        contentGranularity: 'unknown',
+      };
+    }
+
+    const materializationStatuses = loaded.metadata.collection.items
+      .map((item) => item.materialization?.status);
+    loaded.metadata.collection.status = materializationStatuses.length > 0
+      && materializationStatuses.every((status) => status === 'failed')
+      ? 'failed' : 'partial';
+    if (!loaded.collectionResult.source) loaded.collectionResult.source = source;
+    else if (loaded.collectionResult.source !== source) loaded.collectionResult.source = 'multi-source';
+    if (!loaded.collectionResult.backend) loaded.collectionResult.backend = backend;
+    else if (loaded.collectionResult.backend !== backend) loaded.collectionResult.backend = 'multi-backend';
+    if (!loaded.collectionResult.title) {
+      loaded.collectionResult.title = loaded.session.task?.query || 'Collection';
+    }
+    if (!loaded.collectionResult.url) loaded.collectionResult.url = sourceUrl;
+    normalizeDuplicateGroups(loaded.metadata);
+    reconcileCanonicalView(loaded.collectionResult, loaded.metadata);
+    validateMetadata(loaded.metadata);
+    validateCanonicalView(paths.root, loaded.collectionResult, loaded.metadata);
+    markDeliveryStale(loaded.session);
+    persistCollection(paths, loaded.session, loaded.metadata);
+    atomicWriteJson(paths.collectionResult, loaded.collectionResult);
+    return {
+      ok: true,
+      action,
+      preservedMaterialized: false,
+      itemId,
+      materialization: clone(inventory.materialization),
+    };
+  });
+}
+
+function reconcileCollectionStatus(metadata) {
+  const statuses = metadata.collection.items.map((item) => item.materialization?.status);
+  if (statuses.length === 0) return;
+  if (statuses.every((status) => status === 'materialized')) {
+    metadata.collection.status = 'complete';
+  } else if (statuses.every((status) => status === 'failed')) {
+    metadata.collection.status = 'failed';
+  } else {
+    metadata.collection.status = 'partial';
+  }
+}
+
+export function recordPendingCollectionItem(paths, update) {
+  return recordUnmaterializedCollectionItem(paths, update, 'pending');
+}
+
+export function recordFailedCollectionItem(paths, update) {
+  return recordUnmaterializedCollectionItem(paths, update, 'failed');
 }
 
 export function cmdCollect(paths, args) {
@@ -622,10 +976,12 @@ export function cmdCollect(paths, args) {
     const results = items.map((item) => markOneMaterialized(
       paths, loaded.session, loaded.metadata, loaded.collectionResult, item,
     ));
+    reconcileCollectionStatus(loaded.metadata);
     validateMetadata(loaded.metadata);
     validateCanonicalView(paths.root, loaded.collectionResult, loaded.metadata);
     const dryRun = args['dry-run'] === true || args['dry-run'] === 'true';
     if (dryRun) return { ok: true, action: 'collect', dryRun: true, items: results };
+    markDeliveryStale(loaded.session);
     persistCollection(paths, loaded.session, loaded.metadata);
     atomicWriteJson(paths.collectionResult, loaded.collectionResult);
     const drained = drainPendingArtifactCleanup(paths, loaded.metadata);
@@ -636,6 +992,117 @@ export function cmdCollect(paths, args) {
       action: 'collect',
       items: results,
       warnings: [...drained.warnings, ...(deleteWarning ? [deleteWarning] : [])],
+    };
+  });
+}
+
+/**
+ * Atomically promotes a verified public probe into the collection inventory and
+ * completes its orchestration attempt. Probe artifacts must already have been
+ * written; this transaction is the sole point where they become deliverable.
+ */
+export function promoteProbeMaterialization(paths, promotion) {
+  return withSessionLock(paths, 'public-collect-promote', () => {
+    const loaded = loadCollectionSession(paths, { skipCanonicalValidation: true });
+    if (loaded.materializationRecovered) {
+      throw new Error('检测到无效 materialization，已安全降级为 pending；请先由原始执行器重新物化');
+    }
+    const runId = requireString(promotion?.runId, 'runId');
+    const attemptId = requireString(promotion?.attemptId, 'attemptId');
+    const promotionId = requireString(promotion?.promotionId, 'promotionId');
+    const contentFingerprint = requireString(promotion?.contentFingerprint, 'contentFingerprint');
+    const run = loaded.session.task?.publicCollectRun;
+    if (!run || run.runId !== runId
+      || loaded.session.task.activeOrchestrationRunId !== runId
+      || loaded.session.task.orchestrationEpoch !== run.orchestrationEpoch) {
+      throw new Error(`ORCHESTRATION_OWNER_MISMATCH: ${runId}`);
+    }
+    const attempt = run.attempts?.find((entry) => entry.attemptId === attemptId);
+    if (!attempt || attempt.attemptState !== 'acquiring') {
+      throw new Error(`PROBE_ATTEMPT_NOT_ACTIVE: ${attemptId}`);
+    }
+    if (loaded.metadata.collection.items.some((item) => item.promotionId === promotionId)) {
+      return { promotionStatus: 'promoted', promotionId, itemId: promotion.item.itemId };
+    }
+
+    const evidence = promotion.item?.fullTextEvidence;
+    const artifact = requireString(evidence?.artifact, 'fullTextEvidence.artifact');
+    const executor = requireString(evidence?.executor, 'fullTextEvidence.executor');
+    const sourceUrl = requireString(promotion.item?.canonicalItem?.url, 'canonicalItem.url');
+    validateRawArtifacts(paths.root, [artifact]);
+    const receipt = readJson(path.join(paths.root, artifact), 'fullTextEvidence.artifact');
+    if (receipt?.schemaVersion !== '1.0' || receipt.executor !== executor
+      || receipt.sourceUrl !== sourceUrl || receipt.complete !== true
+      || receipt.contentGranularity !== 'full-text') {
+      throw new Error('专用 materializer 只能登记已确认完整的执行器全文回执');
+    }
+    const registration = {
+      schemaVersion: '1.0', executor, sourceUrl, artifact,
+      artifactHash: fullTextEvidenceHash(paths, artifact),
+    };
+    const registrations = Array.isArray(loaded.session.task.fullTextEvidenceReceipts)
+      ? loaded.session.task.fullTextEvidenceReceipts : [];
+    loaded.session.task.fullTextEvidenceReceipts = [
+      ...registrations.filter((entry) => !(entry?.executor === executor
+        && entry?.sourceUrl === sourceUrl && entry?.artifact === artifact)),
+      registration,
+    ];
+
+    const materialized = markOneMaterialized(
+      paths, loaded.session, loaded.metadata, loaded.collectionResult, promotion.item,
+    );
+    const inventory = loaded.metadata.collection.items.find(
+      (entry) => entry.itemId === materialized.itemId,
+    );
+    Object.assign(inventory, {
+      probeRunId: runId,
+      probeAttemptId: attemptId,
+      probeCandidateId: attempt.candidateId,
+      promotionId,
+      contentFingerprint,
+      duplicateGroup: promotion.duplicateGroup || contentFingerprint,
+      pageVerification: clone(promotion.pageVerification),
+      verifiedTopicStatus: promotion.verifiedTopicStatus,
+      verificationReceipt: clone(promotion.verificationReceipt),
+    });
+    Object.assign(attempt, {
+      attemptState: 'terminal',
+      acquisitionOutcome: 'saved',
+      pageVerification: 'verified-article',
+      verifiedTopicStatus: promotion.verifiedTopicStatus,
+      promotionStatus: 'promoted',
+      reasonCode: 'PROMOTED',
+      promotionId,
+      itemId: materialized.itemId,
+      contentFingerprint,
+      finishedAt: new Date().toISOString(),
+    });
+    run.ownedSessionCleanupPending = (run.ownedSessionCleanupPending || [])
+      .filter((entry) => entry?.attemptId !== attemptId);
+    run.cursor += 1;
+    run.pause = null;
+    run.status = 'running';
+    run.deliverableItemIds = [...new Set([...(run.deliverableItemIds || []), materialized.itemId])];
+    run.duplicateGroups = [...new Set([...(run.duplicateGroups || []), promotion.duplicateGroup || contentFingerprint])];
+    run.stateRevision += 1;
+    run.updatedAt = new Date().toISOString();
+    loaded.session.task.stateRevision = run.stateRevision;
+
+    reconcileCollectionStatus(loaded.metadata);
+    validateMetadata(loaded.metadata);
+    validateCanonicalView(paths.root, loaded.collectionResult, loaded.metadata);
+    markDeliveryStale(loaded.session);
+    persistCollection(paths, loaded.session, loaded.metadata);
+    atomicWriteJson(paths.collectionResult, loaded.collectionResult);
+    return {
+      attemptState: 'terminal',
+      acquisitionOutcome: 'saved',
+      pageVerification: 'verified-article',
+      verifiedTopicStatus: promotion.verifiedTopicStatus,
+      promotionStatus: 'promoted',
+      reasonCode: 'PROMOTED',
+      promotionId,
+      itemId: materialized.itemId,
     };
   });
 }
@@ -679,12 +1146,15 @@ function metadataSummary(metadata) {
 
 function inspect(paths, args) {
   const loaded = loadCollectionSession(paths, { persistRecovery: false });
+  const relevance = evaluateStoredTopicRelevance(
+    paths, loaded.session, loaded.metadata, loaded.collectionResult,
+  );
   const full = args.full === true || args.full === 'true';
   return {
     ok: true,
     action: 'inspect',
     summary: metadataSummary(loaded.metadata),
-    warnings: loaded.warnings,
+    warnings: [...new Set([...loaded.warnings, ...relevance.warnings])],
     ...(full ? { metadata: loaded.metadata, collectionResult: loaded.collectionResult } : {}),
   };
 }
@@ -692,6 +1162,9 @@ function inspect(paths, args) {
 export function cmdExportViews(paths) {
   return withSessionLock(paths, 'export-views', () => {
     const loaded = loadCollectionSession(paths, { persistRecovery: true });
+    const relevance = evaluateStoredTopicRelevance(
+      paths, loaded.session, loaded.metadata, loaded.collectionResult,
+    );
     atomicWriteJson(paths.metadata, loaded.metadata);
     atomicWriteJson(paths.collectionResult, loaded.collectionResult);
     return {
@@ -699,7 +1172,7 @@ export function cmdExportViews(paths) {
       action: 'export-views',
       metadata: loaded.metadata,
       collectionResult: loaded.collectionResult,
-      warnings: loaded.warnings,
+      warnings: [...new Set([...loaded.warnings, ...relevance.warnings])],
     };
   });
 }
@@ -724,15 +1197,200 @@ export function buildDownstreamInput(paths, collectionResult) {
   return { schemaVersion: '1.0', directory, files };
 }
 
+function evaluateStoredTopicRelevance(paths, session, metadata, collectionResult) {
+  const warnings = [];
+  const gate = session.task?.discoveryGate;
+  const publicItems = metadata.collection.items.filter((item) => [
+    'public-discover', 'user-provided', 'crawl-frontier',
+  ].includes(item.provenanceKind) || typeof item.discoveryCandidateId === 'string');
+  if (!publicItems.length) return { valid: true, warnings };
+  if (gate?.schemaVersion === '1.0' || !gate) {
+    warnings.push('旧公共发现会话未包含主题相关性授权；状态保持只读，请新建内部 run 后再继续写入或首次发布');
+    return { valid: true, warnings, legacy: true };
+  }
+  if (!['1.1', '2.0'].includes(gate.schemaVersion)) {
+    return { valid: false, warnings: ['公共发现主题相关性授权状态无效'] };
+  }
+  const discoveredItems = publicItems.filter((item) => item.provenanceKind === 'public-discover'
+    || (typeof item.discoveryCandidateId === 'string'
+      && !['user-provided', 'crawl-frontier'].includes(item.provenanceKind)));
+  const canonicalByPath = new Map(collectionResult.items.map((item) => [item.fileName, item]));
+  let valid = true;
+  for (const item of discoveredItems) {
+    let candidate;
+    try {
+      candidate = authorizePublicSource(gate, item.sourceUrl);
+    } catch (error) {
+      valid = false;
+      warnings.push(`inventory ${item.itemId} 发现主题授权失效: ${error.message}`);
+      continue;
+    }
+    if (candidate?.candidateId !== item.discoveryCandidateId) {
+      valid = false;
+      warnings.push(`inventory ${item.itemId} discoveryCandidateId 与授权候选不一致`);
+      continue;
+    }
+    if (item.materialization?.status !== 'materialized') continue;
+    try {
+      const sanitizedPath = item.materialization.sanitizedPath;
+      const absolute = validateMarkdownPath(
+        paths.root, sanitizedPath, `inventory ${item.itemId} sanitizedPath`, path.join('sanitized', 'items'),
+      );
+      const canonical = canonicalByPath.get(sanitizedPath);
+      const assessment = assessMaterializedTopic(gate.topicContract, {
+        title: canonical?.title || item.title || '',
+        markdown: fs.readFileSync(absolute, 'utf8'),
+      });
+      if (!['matched', 'not-required'].includes(assessment.status)) {
+        valid = false;
+        warnings.push(`inventory ${item.itemId} 实际正文主题相关性失效（${assessment.status}）`);
+      }
+    } catch (error) {
+      valid = false;
+      warnings.push(`inventory ${item.itemId} 主题相关性复验失败: ${error.message}`);
+    }
+  }
+  return { valid, warnings };
+}
+
+function promotionContentFingerprint(markdown) {
+  const normalized = String(markdown || '')
+    .replace(/^---\n[\s\S]*?\n---\n/u, '')
+    .replace(/^#{1,6}\s+.*$/gmu, '')
+    .replace(/^!\[[^\]]*\]\([^)]*\)\s*$/gmu, '')
+    .normalize('NFKC')
+    .toLocaleLowerCase('und')
+    .replace(/[\p{P}\p{S}\s]+/gu, ' ')
+    .trim();
+  return `sha256:${crypto.createHash('sha256').update(normalized).digest('hex')}`;
+}
+
+function validatePromotionEvidence(paths, session) {
+  const eligible = summarizePromotedDelivery(session);
+  const inventory = new Map(session.collection.collection.items.map((item) => [item.itemId, item]));
+  const validItemIds = [];
+  const warnings = [];
+  for (const itemId of eligible.deliverableItemIds) {
+    const item = inventory.get(itemId);
+    try {
+      const receiptPath = requireString(item?.verificationReceipt, `inventory ${itemId} verificationReceipt`);
+      const absolute = validateRelativePath(paths.root, receiptPath, `inventory ${itemId} verificationReceipt`);
+      validatePathPrefix(paths.root, receiptPath, 'raw', `inventory ${itemId} verificationReceipt`);
+      if (!item.rawArtifacts?.includes(receiptPath)) {
+        throw new Error('verificationReceipt 必须登记在 rawArtifacts 中');
+      }
+      const sanitizedPath = requireString(
+        item?.materialization?.sanitizedPath,
+        `inventory ${itemId} sanitizedPath`,
+      );
+      const sanitizedAbsolute = validateMarkdownPath(
+        paths.root, sanitizedPath, `inventory ${itemId} sanitizedPath`, 'sanitized',
+      );
+      const sanitizedMarkdown = fs.readFileSync(sanitizedAbsolute, 'utf8');
+      const receipt = readJson(absolute, `inventory ${itemId} verificationReceipt`);
+      if (receipt?.schemaVersion !== '1.0'
+        || receipt.runId !== item.probeRunId
+        || receipt.attemptId !== item.probeAttemptId
+        || receipt.candidateId !== item.probeCandidateId
+        || receipt.contentFingerprint !== item.contentFingerprint
+        || receipt.pageVerification !== 'verified-article'
+        || receipt.verifiedTopicStatus !== item.verifiedTopicStatus) {
+        throw new Error('verificationReceipt 与晋升 inventory 不匹配');
+      }
+      const sanitizedHash = `sha256:${crypto.createHash('sha256').update(sanitizedMarkdown).digest('hex')}`;
+      if (receipt.artifacts?.sanitized?.path !== sanitizedPath
+        || receipt.artifacts.sanitized.sha256 !== sanitizedHash
+        || promotionContentFingerprint(sanitizedMarkdown) !== item.contentFingerprint) {
+        throw new Error('sanitized 正文哈希或内容指纹与晋升回执不匹配');
+      }
+      const topic = assessMaterializedTopic(session.task.discoveryGate.topicContract, {
+        title: receipt.analysis?.title || item.canonicalItem?.title || '',
+        markdown: sanitizedMarkdown,
+      });
+      if (!['matched', 'not-required'].includes(topic.status)
+        || topic.status !== item.verifiedTopicStatus) {
+        throw new Error(`sanitized 正文主题复验失败: ${topic.status}`);
+      }
+      validItemIds.push(itemId);
+    } catch (error) {
+      warnings.push(`inventory ${itemId} 正文验证回执失效: ${error.message}`);
+    }
+  }
+  return {
+    requestedItemCount: eligible.requestedItemCount,
+    deliverableArticleCount: validItemIds.length,
+    remainingCount: Math.max(0, eligible.requestedItemCount - validItemIds.length),
+    validItemIds,
+    warnings,
+  };
+}
+
+export function finalizeVerifiedProbeRun(paths, runId, desiredStatus, detail = {}) {
+  if (!['complete', 'partial', 'failed'].includes(desiredStatus)) {
+    throw new Error(`ORCHESTRATION_TERMINAL_STATUS_INVALID: ${desiredStatus}`);
+  }
+  return withSessionLock(paths, 'public-collect-finalize-verified', () => {
+    const { session, metadata } = loadCollectionSession(paths, { persistRecovery: false });
+    session.collection = metadata;
+    const run = session.task?.publicCollectRun;
+    if (!run || run.runId !== runId || session.task.activeOrchestrationRunId !== runId
+      || session.task.orchestrationEpoch !== run.orchestrationEpoch) {
+      throw new Error(`ORCHESTRATION_OWNER_MISMATCH: ${runId}`);
+    }
+    if ((run.ownedSessionCleanupPending || []).length > 0) {
+      throw new Error('ORCHESTRATION_CLEANUP_PENDING: 仍有命令自有 session/TAB 未清理');
+    }
+    const evidence = validatePromotionEvidence(paths, session);
+    const status = evidence.remainingCount === 0
+      ? 'complete' : (evidence.deliverableArticleCount > 0 ? 'partial' : 'failed');
+    if (status !== desiredStatus) {
+      throw new Error(`ORCHESTRATION_FINAL_RECONCILIATION_CONFLICT: expected=${desiredStatus} actual=${status}`);
+    }
+    run.deliverableItemIds = evidence.validItemIds;
+    run.status = status;
+    run.finishedAt = new Date().toISOString();
+    run.updatedAt = run.finishedAt;
+    run.stateRevision += 1;
+    session.task.stateRevision = run.stateRevision;
+    run.terminalReason = String(detail.reasonCode
+      || (status === 'complete' ? 'REQUESTED_COUNT_REACHED' : 'CANDIDATES_EXHAUSTED'));
+    run.pause = null;
+    run.actionLease = null;
+    delete session.task.activeOrchestrationRunId;
+    delete session.task.orchestrationEpoch;
+    persistCollection(paths, session, metadata);
+    return JSON.parse(JSON.stringify(run));
+  });
+}
+
 export function collectionStatus(paths) {
   const loaded = loadCollectionSession(paths, { persistRecovery: false });
   const { session, metadata, collectionResult } = loaded;
+  // All derived completion checks must use the read-time revalidated view. Do
+  // not persist it from this read-only command, but never consult stale raw
+  // materialization state after normalization has detected artifact damage.
+  session.collection = metadata;
   const items = metadata.collection.items;
   const count = (status) => items.filter((item) => item.materialization.status === status).length;
   const pending = count('pending');
   const failed = count('failed');
   const groups = new Set(items.map((item) => item.duplicateGroupKey));
   const materializationTarget = session.task?.materializationTarget || 'selected';
+  const requiredContentGranularity = session.task?.requiredContentGranularity || 'any';
+  const unmetRequiredGranularity = requiredContentGranularity === 'full-text'
+    ? items.filter((item) => item.materialization.status === 'materialized'
+      && item.materialization.contentGranularity !== 'full-text').length
+    : 0;
+  const relevance = evaluateStoredTopicRelevance(paths, session, metadata, collectionResult);
+  const promotionEvidence = validatePromotionEvidence(paths, session);
+  const baseProbeSummary = summarizeProbeRun(session);
+  const probeSummary = baseProbeSummary ? {
+    ...baseProbeSummary,
+    deliverableArticleCount: promotionEvidence.deliverableArticleCount,
+    remainingCount: promotionEvidence.remainingCount,
+    effectiveStatus: promotionEvidence.warnings.length > 0
+      ? 'invalidated' : baseProbeSummary.effectiveStatus,
+  } : null;
   return {
     collectionStatus: metadata.collection.status,
     items: items.length,
@@ -745,11 +1403,17 @@ export function collectionStatus(paths) {
     uniqueContentGroups: groups.size,
     duplicates: items.length - groups.size,
     materializationTarget,
-    deliveryComplete: deliveryCompleteForSession(session),
+    requiredContentGranularity,
+    unmetRequiredGranularity,
+    deliveryComplete: deliveryCompleteForSession(session) && relevance.valid
+      && promotionEvidence.remainingCount === 0,
+    publicCollectRun: probeSummary,
     crawl: summarizeCrawlDelivery(session),
     canonicalItems: collectionResult.items.length,
-    downstreamInput: buildDownstreamInput(paths, collectionResult),
-    warnings: loaded.warnings,
+    ...(relevance.valid ? { downstreamInput: buildDownstreamInput(paths, collectionResult) } : {}),
+    warnings: [...new Set([
+      ...loaded.warnings, ...relevance.warnings, ...promotionEvidence.warnings,
+    ])],
   };
 }
 

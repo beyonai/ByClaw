@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.common.message.entity;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
 import java.util.Date;
@@ -20,6 +21,11 @@ public class ConversationOutlineItem {
     private Integer usage;
 
     private String content;
+
+    private String displayContent;
+
+    @JsonIgnore
+    private String relatedResources;
 
     private String creatorName;
 

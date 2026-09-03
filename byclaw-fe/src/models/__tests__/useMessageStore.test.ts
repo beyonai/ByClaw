@@ -202,6 +202,77 @@ describe('models/useMessageStore', () => {
     expect(stale).toBe(updated);
   });
 
+  it('accepts a new plan whose version restarts from one', () => {
+    const state = {
+      sessionListMap: new Map([
+        [
+          's1',
+          {
+            list: [
+              {
+                messageId: 'm1',
+                fromBeyond: true,
+                taskPlan: { planId: 'plan-old', version: 3 },
+              },
+            ],
+            pageNum: 1,
+            pageSize: 20,
+            total: 1,
+            pageRange: [1, 1],
+          },
+        ],
+      ]),
+    };
+    const nextPlan = {
+      planId: 'plan-new',
+      version: 1,
+      title: 'New plan',
+      status: 'ACTIVE',
+      sessionId: 's1',
+      messageId: 'm1',
+      tasks: [],
+    };
+
+    const updated = reducers.applyTaskPlanSnapshot(state as any, {
+      payload: { sessionId: 's1', messageId: 'm1', taskPlan: nextPlan },
+    });
+
+    expect(updated.sessionListMap.get('s1').list[0].taskPlan.planId).toBe('plan-new');
+  });
+
+  it('reopens a completed child for a newer run and ignores a late terminal from the older run', () => {
+    const messageInfo = {
+      list: [{ messageId: 'm1', text: 'run one', messageState: 0 }],
+      pageNum: 1,
+      pageSize: 20,
+      total: 1,
+      pageRange: [1, 1],
+      childRun: { childRunId: 'child:1', childTurn: 1, lastStreamId: '10-0', running: false },
+    };
+    const state = { sessionListMap: new Map([['child-session', messageInfo]]) };
+
+    const reopened = reducers.applyScopedChildProjection(state as any, {
+      payload: {
+        sessionId: 'child-session',
+        message: { messageId: 'm1', text: 'run two', messageState: 2 },
+        childRun: { childRunId: 'child:2', childTurn: 2, lastStreamId: '11-0', running: true },
+      },
+    });
+    const stale = reducers.applyScopedChildProjection(reopened, {
+      payload: {
+        sessionId: 'child-session',
+        message: { messageId: 'm1', text: 'late run one', messageState: 0 },
+        childRun: { childRunId: 'child:1', childTurn: 1, lastStreamId: '12-0', running: false },
+      },
+    });
+
+    expect(reopened.sessionListMap.get('child-session')).toMatchObject({
+      list: [{ messageId: 'm1', text: 'run two', messageState: 2 }],
+      childRun: { childRunId: 'child:2', childTurn: 2, running: true },
+    });
+    expect(stale).toBe(reopened);
+  });
+
   it('setInitialSessionDataToLocateMsg stores target message paging info', () => {
     const map = new Map();
     const next = reducers.setInitialSessionDataToLocateMsg({ sessionListMap: map } as any, {

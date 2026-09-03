@@ -36,6 +36,7 @@
         <result column="machine_channel" property="machineChannel" />
         <result column="core_persona_definition" property="corePersonaDefinition" />
         <result column="advanced_settings" property="advancedSettings" />
+        <result column="tts_model_id" property="ttsModelId" />
         <result column="target_content" property="targetContent" />
 
     </resultMap>
@@ -371,8 +372,20 @@
           join ss_res_ext_dig_employee e
             on e.resource_id = a.resource_id
          where a.resource_biz_type = 'DIG_EMPLOYEE'
-           and a.owner_type = 'enterprise'
-           and a.com_acct_id = #{memberCandidateEnterpriseId}
+           <choose>
+               <!-- 企业数字员工组仅允许选择当前企业的企业数字员工。 -->
+               <when test="ownerType != null and ownerType == 'enterprise'">
+                   and a.owner_type = 'enterprise'
+                   and a.com_acct_id = #{memberCandidateEnterpriseId}
+               </when>
+               <!-- 个人数字员工组可同时选择本人可使用的个人员工和当前企业员工。 -->
+               <otherwise>
+                   and (
+                       (a.owner_type = 'enterprise' and a.com_acct_id = #{memberCandidateEnterpriseId})
+                       or a.owner_type = 'personal'
+                   )
+               </otherwise>
+           </choose>
            and a.resource_status = 2
            and e.agent_type in
                <foreach collection="memberCandidateAgentTypes" item="agentType" open="(" separator="," close=")">
@@ -486,6 +499,42 @@
                                     or (manage_black.grant_to_obj_type = 'STATION' and manage_black.grant_to_obj_id in
                                         <foreach collection="memberCandidateStationIds" item="stationId"
                                                  open="(" separator="," close=")">
+                                            #{stationId}
+                                        </foreach>
+                                    )
+                                </if>
+                           )
+                    )
+                )
+                or (
+                    exists (
+                        select 1
+                          from au_privilege_grant use_red
+                         where use_red.grant_obj_id = a.resource_id
+                           and use_red.grant_obj_type = 'DIG_EMPLOYEE'
+                           and use_red.grant_type in ('AVAILABLE_USE', 'FORCE_USE')
+                           and use_red.grant_to_type = 'RED'
+                           and use_red.status_cd = 'A'
+                           and (
+                                (use_red.grant_to_obj_type = 'USER'
+                                    and use_red.grant_to_obj_id = #{userId})
+                                <if test="userOrgIds != null and userOrgIds.size() > 0">
+                                    or (use_red.grant_to_obj_type = 'ORG' and use_red.grant_to_obj_id in
+                                        <foreach collection="userOrgIds" item="orgId" open="(" separator="," close=")">
+                                            #{orgId}
+                                        </foreach>
+                                    )
+                                </if>
+                                <if test="userPositionIds != null and userPositionIds.size() > 0">
+                                    or (use_red.grant_to_obj_type = 'POST' and use_red.grant_to_obj_id in
+                                        <foreach collection="userPositionIds" item="positionId" open="(" separator="," close=")">
+                                            #{positionId}
+                                        </foreach>
+                                    )
+                                </if>
+                                <if test="memberCandidateStationIds != null and memberCandidateStationIds.size() > 0">
+                                    or (use_red.grant_to_obj_type = 'STATION' and use_red.grant_to_obj_id in
+                                        <foreach collection="memberCandidateStationIds" item="stationId" open="(" separator="," close=")">
                                             #{stationId}
                                         </foreach>
                                     )
@@ -807,6 +856,7 @@
                b.machine_channel,
                b.core_persona_definition,
                b.advanced_settings,
+               b.tts_model_id,
                b.target_content
         from ss_resource a
              left join ss_res_ext_dig_employee b on a.resource_id = b.resource_id
@@ -1069,7 +1119,8 @@
                b.open_super_helper,
                b.machine_channel,
                b.core_persona_definition,
-               b.advanced_settings
+               b.advanced_settings,
+               b.tts_model_id
         from ss_resource a
              left join ss_res_ext_dig_employee b on a.resource_id = b.resource_id
         <where>

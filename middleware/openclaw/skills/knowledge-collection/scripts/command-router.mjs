@@ -8,7 +8,16 @@ import {
   cmdCrawlSeed, cmdCrawlNext, cmdCrawlMark, cmdCrawlStatus,
 } from './crawl-state.mjs';
 import { runPublicDiscover } from './public-discovery.mjs';
+import { runPublicCollect } from './public-collect.mjs';
+import { runWechatMaterialize } from './wechat-materializer.mjs';
+import { runArxivMaterialize } from './arxiv-materializer.mjs';
+import { runWebAcquire } from './web-acquirer.mjs';
+import { runWebMaterialize } from './web-materializer.mjs';
+import { cmdPublish, inspectDelivery } from './publish-delivery.mjs';
+import { assertExternalSessionWriteAllowed } from './probe-state.mjs';
 import { resolveSandboxPath, sessionPaths } from './session.mjs';
+
+const READ_ONLY_SESSION_COMMANDS = new Set(['status', 'inspect', 'crawl-status']);
 
 const RESEARCH_HANDLERS = {
   init: (args) => cmdInit(args),
@@ -20,6 +29,11 @@ const RESEARCH_HANDLERS = {
 
 const SESSION_HANDLERS = {
   'public-discover': (paths, args) => runPublicDiscover(paths, args),
+  'public-collect': (paths, args) => runPublicCollect(paths, args),
+  'acquire-web': (paths, args) => runWebAcquire(paths, args),
+  'materialize-web': (paths, args) => runWebMaterialize(paths, args),
+  'materialize-wechat': (paths, args) => runWechatMaterialize(paths, args),
+  'materialize-arxiv': (paths, args) => runArxivMaterialize(paths, args),
   collect: (paths, args) => cmdCollect(paths, args),
   inspect: (paths, args) => cmdInspect(paths, args),
   'crawl-seed': (paths, args) => cmdCrawlSeed(paths, args),
@@ -28,6 +42,7 @@ const SESSION_HANDLERS = {
   'crawl-status': (paths) => cmdCrawlStatus(paths),
   'unlock-stale': (paths) => cmdUnlockStale(paths),
   'export-views': (paths) => cmdExportViews(paths),
+  publish: (paths, args) => cmdPublish(paths, args),
 };
 
 function status(paths, args) {
@@ -40,6 +55,7 @@ function status(paths, args) {
     ...collectionSummary
   } = collection;
   const full = args.full === true || args.full === 'true';
+  const published = inspectDelivery(paths);
   if (full) {
     const detail = cmdInspect(paths, { full: true });
     return {
@@ -50,8 +66,9 @@ function status(paths, args) {
       collection: { ...detail.metadata, ...collectionSummary },
       canonicalView: detail.collectionResult,
       downstreamInput,
+      ...(published.deliveryInput ? { deliveryInput: published.deliveryInput } : {}),
       ...(crawl ? { crawl } : {}),
-      warnings: [...(research.warnings || []), ...(detail.warnings || [])],
+      warnings: [...(research.warnings || []), ...collectionWarnings, ...(detail.warnings || []), ...published.warnings],
     };
   }
   return {
@@ -62,7 +79,8 @@ function status(paths, args) {
     collection: collectionSummary,
     ...(crawl ? { crawl } : {}),
     downstreamInput,
-    warnings: [...(research.warnings || []), ...collectionWarnings],
+    ...(published.deliveryInput ? { deliveryInput: published.deliveryInput } : {}),
+    warnings: [...(research.warnings || []), ...collectionWarnings, ...published.warnings],
   };
 }
 
@@ -83,6 +101,9 @@ export function executeLocalCommand(command, args) {
   }
   const sessionHandler = SESSION_HANDLERS[command];
   if (sessionHandler) {
+    if (!READ_ONLY_SESSION_COMMANDS.has(command) && command !== 'public-collect') {
+      assertExternalSessionWriteAllowed(paths, command);
+    }
     return sessionHandler(paths, normalizedArgs);
   }
   throw new Error(`未知命令: ${command}`);

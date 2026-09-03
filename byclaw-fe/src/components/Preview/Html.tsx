@@ -16,8 +16,8 @@ import styles from './Html.module.less';
 //   },
 // });
 
+/* eslint-disable lines-around-comment */
 export interface HtmlPreviewProps {
-
   /** 资源链接 */
   // eslint-disable-next-line react/no-unused-prop-types
   href?: string;
@@ -28,11 +28,16 @@ export interface HtmlPreviewProps {
   /** 标题 */
   title?: string;
 }
+/* eslint-enable lines-around-comment */
 
 const isRelativeResourcePath = (path: string) =>
   !path.startsWith('/') && !path.startsWith('#') && !path.startsWith('//') && !/^[a-z][a-z\d+.-]*:/i.test(path);
 
-const resolveHtmlResources = async (content: string, resolver: MarkdownImageResolver) => {
+const resolveHtmlResources = async (
+  content: string,
+  resolver: MarkdownImageResolver,
+  onLinkClick?: (href: string) => void
+) => {
   const document = new DOMParser().parseFromString(content, 'text/html');
   const resourceNodes = [
     ...Array.from(document.querySelectorAll<HTMLElement>('img[src], source[src]')).map((element) => ({
@@ -42,6 +47,10 @@ const resolveHtmlResources = async (content: string, resolver: MarkdownImageReso
     ...Array.from(document.querySelectorAll<HTMLElement>('video[poster]')).map((element) => ({
       element,
       attribute: 'poster',
+    })),
+    ...Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href]')).map((element) => ({
+      element,
+      attribute: 'href',
     })),
   ];
   const objectUrls: string[] = [];
@@ -60,6 +69,19 @@ const resolveHtmlResources = async (content: string, resolver: MarkdownImageReso
         } else if (resolvedResource) {
           element.setAttribute(attribute, resolvedResource);
         }
+        if (element.tagName === 'A') {
+          element.setAttribute('data-preview-resource-path', resourcePath);
+          (element as HTMLAnchorElement).target =
+            onLinkClick && isRelativeResourcePath(resourcePath) ? '_self' : '_blank';
+          (element as HTMLAnchorElement).rel = 'noopener noreferrer';
+          if (onLinkClick && isRelativeResourcePath(resourcePath)) {
+            element.addEventListener('click', (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onLinkClick(resourcePath);
+            });
+          }
+        }
       } catch {
         // 单个资源解析失败时保留原始地址，不影响 HTML 其它内容预览。
       }
@@ -76,14 +98,46 @@ export const HtmlRender = React.memo(
     safe?: boolean;
     href?: string;
     resolveResource?: MarkdownImageResolver;
+    onLinkClick?: (href: string) => void;
   }) => {
-    const { content, data, href, safe = true, resolveResource } = props;
+    const { content, data, href, safe = true, resolveResource, onLinkClick } = props;
     const [loading, setLoading] = useState<boolean>(false);
     const [blobContent, setBlobContent] = useState<string>();
     const ref = useRef<HTMLIFrameElement>(null);
     const htmlContent = content !== undefined ? content : blobContent;
 
     const onLoad = () => {
+      // HTML 在 iframe 中预览时，链接默认可能被当前 iframe 接管，导致点击后出现空白页。
+      // 统一改为新标签页打开，并保留安全的 opener 防护。
+      const document = ref.current?.contentDocument;
+      document?.querySelectorAll<HTMLAnchorElement>('a[href]').forEach((anchor) => {
+        const relativePath = anchor.getAttribute('data-preview-resource-path') || anchor.getAttribute('href') || '';
+        const isInternalLink = !!onLinkClick && isRelativeResourcePath(relativePath);
+        anchor.target = isInternalLink ? '_self' : '_blank';
+        anchor.rel = 'noopener noreferrer';
+        if (isInternalLink) {
+          anchor.onclick = (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onLinkClick(relativePath);
+            return false;
+          };
+        }
+      });
+      document?.addEventListener(
+        'click',
+        (event) => {
+          const target = event.target;
+          if (!(target instanceof Element)) return;
+          const anchor = target.closest<HTMLAnchorElement>('a[href]');
+          const link = anchor?.getAttribute('data-preview-resource-path') || anchor?.getAttribute('href');
+          if (!anchor || !link || !onLinkClick || !isRelativeResourcePath(link)) return;
+          event.preventDefault();
+          event.stopPropagation();
+          onLinkClick(link);
+        },
+        true
+      );
       setLoading(false);
     };
 
@@ -128,7 +182,7 @@ export const HtmlRender = React.memo(
       if (htmlContent !== undefined && !href) {
         setLoading(true);
         if (resolveResource) {
-          void resolveHtmlResources(htmlContent, resolveResource)
+          void resolveHtmlResources(htmlContent, resolveResource, onLinkClick)
             .then(({ content: resolvedContent, objectUrls }) => renderContent(resolvedContent, objectUrls))
             .catch(() => renderContent(htmlContent));
         } else {
@@ -141,7 +195,7 @@ export const HtmlRender = React.memo(
         if (objectUrl) URL.revokeObjectURL(objectUrl);
         revokeResourceObjectUrls();
       };
-    }, [htmlContent, href, resolveResource, safe]);
+    }, [htmlContent, href, onLinkClick, resolveResource, safe]);
 
     useEffect(() => {
       if (content !== undefined || !(data instanceof Blob)) {

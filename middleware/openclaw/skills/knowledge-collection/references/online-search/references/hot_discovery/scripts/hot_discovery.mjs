@@ -375,6 +375,16 @@ export function parseTiers(raw) {
   return new Set(values);
 }
 
+function parseSources(raw) {
+  if (raw === undefined) return null;
+  if (typeof raw !== 'string') throw new Error('sources 必须是不重复的逗号分隔来源列表');
+  const values = raw.split(',').map((value) => value.trim()).filter(Boolean);
+  if (!values.length || new Set(values).size !== values.length) {
+    throw new Error('sources 必须是不重复的逗号分隔来源列表');
+  }
+  return values;
+}
+
 export function selectAdaptersForDimensions(adapters, dimensions, tiers) {
   const selected = adapters.filter(
     (adapter) => tiers.has(adapter.tier)
@@ -397,6 +407,8 @@ export function allSelectedAdaptersEmpty(selected, adapterStats) {
 // ──────────────────────────── search 子命令 ────────────────────────────
 
 export async function searchHotDiscovery(argv, options = {}) {
+  const now = options.now || (() => performance.now());
+  const schedulingStartedAt = now();
   const query = argv.query;
   if (!query) fail('search 需要 --query');
   const requestedDims = (argv.dimensions || '').split(',').map((s) => s.trim()).filter(Boolean);
@@ -405,15 +417,47 @@ export async function searchHotDiscovery(argv, options = {}) {
   const dims = [...new Set([...requestedDims, 'general'])];
   const limit = parseBoundedInteger(argv.limit, 'limit', 20, 1, 100);
   const tiers = parseTiers(argv.tiers);
+  const requestedSources = parseSources(argv.sources);
+  const adapterTimeoutMs = parseBoundedInteger(
+    argv['adapter-timeout-ms'], 'adapter-timeout-ms', 30_000, 1, 90_000,
+  );
+  const stopAfter = argv['stop-after'] === undefined ? null
+    : parseBoundedInteger(argv['stop-after'], 'stop-after', null, 1, 10_000);
+  const minimumAttempts = argv['minimum-attempts'] === undefined ? 0
+    : parseBoundedInteger(argv['minimum-attempts'], 'minimum-attempts', null, 1, 100);
+  const totalBudgetMs = argv['total-budget-ms'] === undefined ? null
+    : parseBoundedInteger(argv['total-budget-ms'], 'total-budget-ms', null, 1, 90_000);
 
   const decl = options.declarations || parseDeclarations(await readFile(ADAPTERS_MD, 'utf8'));
   const bycli = options.bycli || createBycliIntegration();
 
   // 维度取并集：各维度适配器的召回集本就不重叠（openalex 出论文、SO 出技术问答、
   // 虎扑出讨论帖），择一等于人为砍掉召回。
-  const { selected, warnings } = selectAdaptersForDimensions(decl.adapters, dims, tiers);
-
   const adapterStats = {};
+  const selection = selectAdaptersForDimensions(decl.adapters, dims, tiers);
+  const warnings = [...selection.warnings];
+  let selected = selection.selected;
+  if (requestedSources) {
+    const declaredBySite = new Map(decl.adapters.map((adapter) => [adapter.site, adapter]));
+    const selectedBySite = new Map(selected.map((adapter) => [adapter.site, adapter]));
+    selected = [];
+    for (const source of requestedSources) {
+      if (!declaredBySite.has(source)) {
+        adapterStats[source] = { status: 'not_in_declarations' };
+        continue;
+      }
+      const adapter = selectedBySite.get(source);
+      if (!adapter) {
+        adapterStats[source] = {
+          tier: declaredBySite.get(source).tier,
+          status: 'unavailable',
+        };
+        continue;
+      }
+      selected.push(adapter);
+    }
+  }
+
   const candidates = [];
   if (!selected.length) {
     return {
@@ -478,6 +522,7 @@ export async function searchHotDiscovery(argv, options = {}) {
   };
 
   let requiresUserAction = null;
+  let attemptedAdapters = 0;
   const markSkippedForUserAction = (a) => {
     if (!adapterStats[a.site]) {
       adapterStats[a.site] = { tier: a.tier, transport: a.execution.transport, status: 'skipped_user_action' };
@@ -488,7 +533,25 @@ export async function searchHotDiscovery(argv, options = {}) {
       markSkippedForUserAction(a);
       return;
     }
-    const r = await bycli.invoke('bycli', buildArgs(a), 30_000);
+    if (totalBudgetMs !== null && now() - schedulingStartedAt >= totalBudgetMs) {
+      adapterStats[a.site] = {
+        tier: a.tier,
+        transport: a.execution.transport,
+        status: 'skipped_total_budget',
+      };
+      return;
+    }
+    if (stopAfter !== null && candidates.length >= stopAfter
+      && attemptedAdapters >= minimumAttempts) {
+      adapterStats[a.site] = {
+        tier: a.tier,
+        transport: a.execution.transport,
+        status: 'skipped_after_sufficient_candidates',
+      };
+      return;
+    }
+    attemptedAdapters += 1;
+    const r = await bycli.invoke('bycli', buildArgs(a), adapterTimeoutMs);
     const st = { tier: a.tier, transport: a.execution.transport, exitCode: r.code };
     if (a.driftedColumns.length) st.driftedColumns = a.driftedColumns;
 
@@ -585,19 +648,36 @@ export async function searchHotDiscovery(argv, options = {}) {
   // 直接传输档按声明顺序执行，确保认证/限流一旦出现就不会再启动后续 adapter。
   const direct = runnable.filter((a) => !a.execution.needsBrowser);
   const browser = runnable.filter((a) => a.execution.needsBrowser);
-  for (const a of direct) await invoke(a);
-
-  if (!requiresUserAction && browser.length) {
-    const bridge = await bycli.ensureBridge();
-    if (!bridge.ok) {
-      requiresUserAction = bridge.requiresUserAction;
-      for (const a of browser) markSkippedForUserAction(a);
-      warnings.push('byCLI 浏览器桥接不可用；已停止浏览器适配器并等待人工恢复。');
-    } else {
-      for (const a of browser) await invoke(a); // TAB 租约串行，认证失败后不再启动后续 adapter
+  if (minimumAttempts > runnable.length) {
+    warnings.push(`insufficient-profile-coverage: 仅 ${runnable.length} 个运行时可用来源，少于 minimum-attempts=${minimumAttempts}`);
+  }
+  if (requestedSources) {
+    let bridgeReady = false;
+    for (const adapter of runnable) {
+      if (adapter.execution.needsBrowser && !bridgeReady && !requiresUserAction) {
+        const bridge = await bycli.ensureBridge();
+        if (!bridge.ok) {
+          requiresUserAction = bridge.requiresUserAction;
+          warnings.push('byCLI 浏览器桥接不可用；已停止未启动的适配器并等待人工恢复。');
+        } else bridgeReady = true;
+      }
+      await invoke(adapter);
     }
-  } else if (requiresUserAction) {
-    for (const a of browser) markSkippedForUserAction(a);
+  } else {
+    for (const a of direct) await invoke(a);
+
+    if (!requiresUserAction && browser.length) {
+      const bridge = await bycli.ensureBridge();
+      if (!bridge.ok) {
+        requiresUserAction = bridge.requiresUserAction;
+        for (const a of browser) markSkippedForUserAction(a);
+        warnings.push('byCLI 浏览器桥接不可用；已停止浏览器适配器并等待人工恢复。');
+      } else {
+        for (const a of browser) await invoke(a); // TAB 租约串行，认证失败后不再启动后续 adapter
+      }
+    } else if (requiresUserAction) {
+      for (const a of browser) markSkippedForUserAction(a);
+    }
   }
   if (allSelectedAdaptersEmpty(selected, adapterStats)) {
     warnings.push('热度通道无覆盖 —— 所有已选适配器均返回 0 行');

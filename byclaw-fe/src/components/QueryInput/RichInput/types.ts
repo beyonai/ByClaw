@@ -7,6 +7,7 @@ import { MentionElementType } from './elements/mention';
 import { ResourceElementType } from './elements/resource';
 import { EditableElementType } from './elements/editable';
 import { ResourceType } from './utils/constants';
+import type { PopoverProps } from 'antd';
 
 export type IResourceType = (typeof ResourceType)[keyof typeof ResourceType];
 
@@ -69,6 +70,10 @@ export interface Props {
   canSend?: (payload: { text: string }) => boolean;
   canQuote: boolean;
   resourceAgentIds?: string;
+  projectCloudResourceId?: string | number;
+  projectId?: number;
+  mentionPopoverPlacement?: PopoverProps['placement'];
+  onResourcePopoverChange?: (state: { open: boolean; inputText?: string; width?: number }) => void;
 }
 
 export interface MentionTriggerInfo {
@@ -77,5 +82,6 @@ export interface MentionTriggerInfo {
   position: {
     left: number;
     top: number;
+    width?: number;
   };
 }

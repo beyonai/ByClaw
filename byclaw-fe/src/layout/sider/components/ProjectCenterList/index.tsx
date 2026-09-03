@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Button, Empty, Input, Spin, Tag, Tooltip, message } from 'antd';
-import { PlusOutlined, SearchOutlined } from '@ant-design/icons';
+import { Button, Empty, Input, Spin, Tooltip, message } from 'antd';
+import { PlusOutlined, SearchOutlined, ShareAltOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import classNames from 'classnames';
 import useGlobal from '@/hooks/useGlobal';
@@ -11,7 +11,6 @@ import { useProjectList } from '@/pages/projectSpace/hooks/useProjectList';
 import { useProjectScopeId } from '@/pages/projectSpace/hooks/useProjectScopeId';
 import { useProjectTypeConfig } from '@/pages/projectSpace/hooks/useProjectTypeConfig';
 import type { ProjectSpace } from '@/pages/projectSpace/types';
-import { getProjectTagMeta } from '@/pages/projectSpace/utils';
 import styles from './index.module.less';
 
 const getProjectIdFromResponse = (response: any) =>
@@ -163,7 +162,6 @@ const ProjectCenterList: React.FC = () => {
             projects.map((project) => {
               const projectId = `${project.projectId}`;
               const isActive = projectId === projectScopeId;
-              const projectTag = getProjectTagMeta(project);
               return (
                 <button
                   type="button"
@@ -173,12 +171,7 @@ const ProjectCenterList: React.FC = () => {
                 >
                   <span className={styles.projectMain}>
                     <span className={styles.projectTitleRow}>
-                      <Tag
-                        bordered={false}
-                        className={classNames(styles.projectTag, styles[`projectTag${projectTag.classSuffix}`])}
-                      >
-                        {intl.formatMessage({ id: projectTag.messageId })}
-                      </Tag>
+                      <ShareAltOutlined className={styles.projectIcon} />
                       <strong>{project.projectName}</strong>
                     </span>
                     <small>{project.description || '-'}</small>

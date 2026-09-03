@@ -8,11 +8,9 @@ import OntologySiderPanel from '@/layout/sider/components/OntologySiderPanel';
 import ResourceSiderPanel from '@/layout/sider/components/ResourceSiderPanel';
 import { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentBar';
 import type { DetailPanelOptions } from '@/layout/sider/siderContentContext';
-import { useProjectTypeConfig } from '@/pages/projectSpace/hooks/useProjectTypeConfig';
-import { supportsProjectRepositories } from '@/pages/projectSpace/projectCapabilities';
 import FileResourcePanel from './FileResourcePanel';
-import ObjectFilesPanel from './ObjectFilesPanel';
 import CodesTab from '@/layout/sider/components/ProjectSpaceList/CodesTab';
+import { listAvailableProjectRepos } from '@/service/devloop';
 import { useChatResourceProject } from './useChatResourceProject';
 import styles from './index.module.less';
 
@@ -22,6 +20,7 @@ type SecondaryState = Record<UpperScopeKey, string>;
 interface ResourcePanelProps {
   sessionId: string;
   projectId?: number;
+  cloudResourceId?: string | number;
   onOpenDetail: (panel: React.ReactNode, options: DetailPanelOptions) => void;
 }
 
@@ -30,33 +29,55 @@ const EMPTY_SECONDARY_STATE: SecondaryState = {
   employee: 'knowledge',
 };
 
-const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onOpenDetail }) => {
+const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, cloudResourceId, onOpenDetail }) => {
   const intl = useIntl();
   const isEnglish = intl.locale.toLowerCase().startsWith('en');
   const activeEmployee = useActiveSiderAgent();
   const { project, loading: projectLoading } = useChatResourceProject(projectId);
-  const { isDevelopProjectEnabled, isOperationProjectEnabled } = useProjectTypeConfig();
   const [upperScopeKey, setUpperScopeKey] = useState<UpperScopeKey>('session');
   const [secondaryState, setSecondaryState] = useState<SecondaryState>(EMPTY_SECONDARY_STATE);
   const [sessionResourceRefreshKey, setSessionResourceRefreshKey] = useState(0);
+  const [availableRepoCount, setAvailableRepoCount] = useState<number | null>(null);
   const resourceId = activeEmployee.resourceId || (project?.resourceId ? `${project.resourceId}` : undefined);
+  // 项目云盘必须优先使用项目知识库 ID；详情接口缺少 cloudResourceId 时兼容项目 resourceId，不能回退到当前员工资源。
+  const projectCloudResourceId = cloudResourceId
+    ? `${cloudResourceId}`
+    : project?.cloudResourceId
+      ? `${project.cloudResourceId}`
+      : project?.resourceId
+        ? `${project.resourceId}`
+        : undefined;
 
-  // 项目代码对已启用对应能力的研发、运营项目开放；未明确的数据项按约定保留空态。
-  const repositoryProjectEnabled =
-    (project?.projectType === 'develop' && isDevelopProjectEnabled) ||
-    (project?.projectType === 'operation' && isOperationProjectEnabled);
-  const showCode = repositoryProjectEnabled && supportsProjectRepositories(project?.projectType);
-  // 研发项目的知识由代码/研发流程承载，当前会话不展示“项目知识”；普通项目和运营项目保留该入口。
-  const showSessionKnowledge = project?.projectType !== 'develop';
+  // 只有当前会话实际可访问到至少一个仓库时才展示项目代码。
+  // null 表示仍在查询，避免先显示再隐藏造成菜单闪烁。
+  const showCode = Boolean(sessionId && availableRepoCount !== null && availableRepoCount > 0);
 
   useEffect(() => {
-    if (
-      (!showSessionKnowledge && secondaryState.session === 'knowledge') ||
-      (!showCode && secondaryState.session === 'code')
-    ) {
+    let disposed = false;
+    setAvailableRepoCount(null);
+    if (!projectId || !sessionId) {
+      return () => {
+        disposed = true;
+      };
+    }
+    void listAvailableProjectRepos(projectId, sessionId)
+      .then((repos) => {
+        if (!disposed) setAvailableRepoCount(Array.isArray(repos) ? repos.length : 0);
+      })
+      .catch(() => {
+        // 仓库可用性查询失败时不展示入口，避免打开后必然得到空代码页。
+        if (!disposed) setAvailableRepoCount(0);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [projectId, sessionId, sessionResourceRefreshKey]);
+
+  useEffect(() => {
+    if (!showCode && secondaryState.session === 'code') {
       setSecondaryState((current) => ({ ...current, session: 'file' }));
     }
-  }, [secondaryState.session, showCode, showSessionKnowledge]);
+  }, [secondaryState.session, showCode]);
 
   const upperSecondaryItems = useMemo(() => {
     const label = (id: string) => intl.formatMessage({ id });
@@ -75,10 +96,9 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
     return [
       { key: 'file', label: label('chatResource.processFile') },
       { key: 'projectFile', label: label(projectFileLabelId) },
-      ...(showSessionKnowledge ? [{ key: 'knowledge', label: label('chatResource.projectKnowledge') }] : []),
       ...(showCode ? [{ key: 'code', label: label('chatResource.projectCode') }] : []),
     ];
-  }, [intl, project?.projectId, projectId, showCode, showSessionKnowledge, upperScopeKey]);
+  }, [intl, project?.projectId, projectId, showCode, upperScopeKey]);
 
   const upperSecondaryKey = secondaryState[upperScopeKey];
   const empty = (
@@ -94,6 +114,7 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
             sessionId={sessionId}
             projectId={projectId}
             project={project}
+            projectCloudResourceId={projectCloudResourceId}
             resourceId={resourceId}
             refreshKey={sessionResourceRefreshKey}
             onOpenDetail={onOpenDetail}
@@ -107,19 +128,8 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
             sessionId={sessionId}
             projectId={project?.projectId ? Number(project.projectId) : projectId}
             project={project}
-            resourceId={resourceId}
+            resourceId={projectCloudResourceId}
             refreshKey={sessionResourceRefreshKey}
-            onOpenDetail={onOpenDetail}
-          />
-        );
-      }
-      if (upperSecondaryKey === 'knowledge' && showSessionKnowledge) {
-        return (
-          <ObjectFilesPanel
-            objectType="knowledge"
-            projectId={project?.projectId || projectId}
-            sessionId={sessionId}
-            refreshToken={sessionResourceRefreshKey}
             onOpenDetail={onOpenDetail}
           />
         );
@@ -158,7 +168,6 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
     sessionResourceRefreshKey,
     sessionId,
     showCode,
-    showSessionKnowledge,
     upperScopeKey,
     upperSecondaryKey,
   ]);
@@ -186,7 +195,7 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
               id: upperScopeKey === 'session' ? 'chatResource.currentSession' : 'chatResource.currentEmployee',
             })}
           >
-            {upperScopeKey === 'session' && ['file', 'projectFile', 'knowledge', 'code'].includes(upperSecondaryKey) ? (
+            {upperScopeKey === 'session' && ['file', 'projectFile', 'code'].includes(upperSecondaryKey) ? (
               <div className={styles.secondaryNavActions}>
                 <Button
                   type="text"

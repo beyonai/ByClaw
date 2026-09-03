@@ -18,6 +18,7 @@
         <result column="top_time" property="topTime" />
         <result column="grantType" property="grantType" />
         <result column="latest_grant_time" property="latestGrantTime" />
+        <result column="update_time" property="updateTime" />
         <result column="prologue" property="prologue" />
         <result column="integration_type" property="integrationType" />
         <result column="agent_dev_type" property="agentDevType" />
@@ -114,6 +115,7 @@
                a.owner_type,
                a.avatar,
                a.create_by,
+               a.update_time,
                creator.user_name as creator_name,
                b.agent_type,
                b.agent_home_url,
@@ -270,11 +272,12 @@
                 and b.machine_channel like concat('%', #{machineChannel}, '%')
             </if>
         </where>
-        <!-- 按置顶和最新授权时间倒序排序 -->
-        order by COALESCE(c.is_top, 0) desc,
+        <!-- 按最近编辑时间倒序，确保新建或刚修改的资源优先展示 -->
+        order by COALESCE(a.update_time, a.create_time, '1970-01-01 00:00:00') desc,
+                 a.create_time desc,
+                 COALESCE(c.is_top, 0) desc,
                  COALESCE(c.top_time, '1970-01-01 00:00:00') desc,
                  COALESCE(d.total, 0) desc,
-                 a.create_time desc,
                  COALESCE(k.latest_grant_time, '1970-01-01 00:00:00') desc
     </select>
 

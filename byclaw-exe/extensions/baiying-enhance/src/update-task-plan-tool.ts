@@ -80,6 +80,11 @@ function taskPlanIdempotencyKey(toolCallId: string): string {
   return `openclaw:${toolCallId.trim() || "update-task-plan"}`.slice(0, 128);
 }
 
+function currentOpenClawRunId(ctx: unknown): string {
+  const record = ctx && typeof ctx === "object" ? (ctx as Record<string, unknown>) : {};
+  return normalizeText(record.runId) || normalizeText(record.RunId);
+}
+
 function renderTaskPlanSystemContext(activePlan: unknown): string {
   return `<task_plan_usage_policy>
 ${PLAN_USAGE_INSTRUCTION}
@@ -192,14 +197,38 @@ export function createUpdateTaskPlanToolFactory(params: {
                 : {}),
             };
 
+        const runtimeRunId = currentOpenClawRunId(ctx);
+        const identityMode = runtimeRunId
+          ? runtimeRunId === executionContext.sourceRunId
+            ? "current_run"
+            : "remembered_run"
+          : executionContext.sourceRunId === executionContext.traceId
+            ? "trace_fallback"
+            : "session_fallback";
+        const idempotencyKey = taskPlanIdempotencyKey(toolCallId);
+        params.logger?.info?.(
+          `[task-plan] command start action=${action}, toolCallId=${toolCallId}, idempotencyKey=${idempotencyKey}, ` +
+            `identityMode=${identityMode}, sessionKey=${executionContext.sessionKey}, ` +
+            `sessionId=${executionContext.sessionId}, messageId=${executionContext.messageId}, ` +
+            `traceId=${executionContext.traceId ?? "-"}, sourceRuntime=${executionContext.sourceRuntime}, ` +
+            `sourceRunId=${executionContext.sourceRunId}, runtimeRunId=${runtimeRunId || "-"}`,
+        );
+
         try {
           const result = await params.runtime.command({
             context: executionContext,
-            idempotencyKey: taskPlanIdempotencyKey(toolCallId),
+            idempotencyKey,
             command,
             signal,
           });
           const currentPlan = result.ok ? result.plan : result.currentPlan;
+          params.logger?.info?.(
+            `[task-plan] command result action=${action}, toolCallId=${toolCallId}, ok=${result.ok}, ` +
+              `sessionId=${executionContext.sessionId}, messageId=${executionContext.messageId}, ` +
+              `sourceRunId=${executionContext.sourceRunId}, planId=${currentPlan?.planId ?? "-"}, ` +
+              `version=${currentPlan?.version ?? "-"}, status=${currentPlan?.status ?? "-"}, ` +
+              `errorCode=${result.ok ? "-" : result.error.code}`,
+          );
           if (currentPlan?.status === "ACTIVE") {
             rememberTaskPlanExecutionContext(executionContext);
             markTaskPlanContinuationPending(executionContext.sessionKey, true);
@@ -257,7 +286,16 @@ export function registerUpdateTaskPlan(params: {
   api: OpenClawPluginApi;
   runtime: TaskPlanRuntimeBridge;
   logger?: LoggerLike;
+  enabled?: boolean;
 }): void {
+  if (params.enabled === false) {
+    params.api.registerTool(() => null, {
+      name: UPDATE_TASK_PLAN_TOOL_NAME,
+    });
+    params.logger?.info?.("baiying-enhance: updateTaskPlan is disabled");
+    return;
+  }
+
   registerTaskPlanRuntimeBridge(params.runtime);
   const factory = createUpdateTaskPlanToolFactory({
     runtime: params.runtime,

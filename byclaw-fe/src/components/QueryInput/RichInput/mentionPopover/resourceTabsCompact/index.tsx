@@ -35,6 +35,8 @@ interface Props {
   showSkillTab?: boolean;
   agentIds?: string;
   onlyTab?: string;
+  hideTabBar?: boolean;
+  hideBorder?: boolean;
 }
 
 /** 「工具」Tab：不含对象类型 */
@@ -52,6 +54,8 @@ const ResourceTabsCompact: React.FC<Props> = ({
   showSkillTab,
   agentIds,
   onlyTab,
+  hideTabBar = false,
+  hideBorder = false,
 }) => {
   const [activeTab, setActiveTab] = useState<string>();
   const userSelectedTabRef = useRef(false);
@@ -716,14 +720,14 @@ const ResourceTabsCompact: React.FC<Props> = ({
 
   if (!hasAnyTab) {
     return (
-      <div className={styles.wrap}>
+      <div className={classNames(styles.wrap, { [styles.noBorder]: hideBorder })}>
         <Empty />
       </div>
     );
   }
 
   return (
-    <div className={styles.wrap}>
+    <div className={classNames(styles.wrap, { [styles.noBorder]: hideBorder })}>
       {header}
       <div className={styles.searchRow}>
         <Input
@@ -771,17 +775,19 @@ const ResourceTabsCompact: React.FC<Props> = ({
           </Upload>
         )}
       </div>
-      <div className={styles.tabBar}>
-        {visibleTabs.map((tab) => (
-          <div
-            key={tab.key}
-            className={classNames(styles.typeItem, { [styles.active]: activeTab === tab.key })}
-            onClick={() => handleTabChange(tab.key)}
-          >
-            {tab.label}
-          </div>
-        ))}
-      </div>
+      {!hideTabBar && (
+        <div className={styles.tabBar}>
+          {visibleTabs.map((tab) => (
+            <div
+              key={tab.key}
+              className={classNames(styles.typeItem, { [styles.active]: activeTab === tab.key })}
+              onClick={() => handleTabChange(tab.key)}
+            >
+              {tab.label}
+            </div>
+          ))}
+        </div>
+      )}
       <div className={styles.tabsWrap}>
         <Tabs
           activeKey={activeTab}

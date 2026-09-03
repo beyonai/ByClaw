@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.Instant;
 import java.util.Date;
+import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 
@@ -53,5 +54,23 @@ class AuthorizationStatusResultTest {
         assertThat(result.refreshExpiresAt()).isEqualTo(refreshExpiresAt);
         assertThat(result.lastVerifiedAt()).isEqualTo(lastVerifiedAt);
         assertThat(result.credentialExpiresAt()).isEqualTo(accessExpiresAt);
+    }
+
+    @Test
+    void connectedResultPreservesSanitizedAccountAttributes() {
+        AuthorizationStatusResult result = AuthorizationStatusResult.connected(
+            "wx-authorizer",
+            "笙歌数智录",
+            CredentialState.READY,
+            CredentialRenewalMode.REFRESH_TOKEN,
+            null,
+            null,
+            new Date(),
+            "credential-ref",
+            Map.of("username", "gh_x", "principalName", "XXX公司")
+        );
+
+        assertThat(result.accountAttributes()).containsExactlyInAnyOrderEntriesOf(
+            Map.of("username", "gh_x", "principalName", "XXX公司"));
     }
 }

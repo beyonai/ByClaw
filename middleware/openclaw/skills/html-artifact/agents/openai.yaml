@@ -1,4 +1,0 @@
-interface:
-  display_name: "创作 HTML Artifact"
-  short_description: "创建可发布且支持平台托管数据保存的 HTML 应用"
-  default_prompt: "使用 $html-artifact 创建并发布这个 HTML 应用。"

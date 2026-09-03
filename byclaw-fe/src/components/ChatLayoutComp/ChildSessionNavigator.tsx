@@ -8,6 +8,7 @@ import { qryConversations } from '@/service/layout';
 import type { ISession } from '@/typescript/session';
 import { getExternalSessionExt, isScopedChildProjection } from '@/utils/scopedSession';
 import webSocketManager from '@/utils/websocket';
+import { useAgentTeamsSnapshot } from '@/components/MessagesComp/ToolCall/agentTeamsStore';
 
 import styles from './ChatTitle.module.less';
 
@@ -26,6 +27,7 @@ function ChildSessionNavigator({ sessionId, currentSession }: ChildSessionNaviga
   const currentSessionRef = React.useRef(currentSession);
   const isChild = Boolean(currentSession?.parentSessionId);
   const rootSessionId = isChild ? `${currentSession?.parentSessionId || ''}` : `${sessionId || ''}`;
+  const teamSnapshot = useAgentTeamsSnapshot(rootSessionId);
 
   React.useEffect(() => {
     currentSessionRef.current = currentSession;
@@ -154,9 +156,16 @@ function ChildSessionNavigator({ sessionId, currentSession }: ChildSessionNaviga
     setSessionId?.(`${target.sessionId}`);
   };
 
-  if (!isChild && children.length === 0) return null;
+  const teamChildIds = new Set(
+    (teamSnapshot?.team.members || []).flatMap((member) =>
+      member.byclawSessionId ? [`${member.byclawSessionId}`] : []
+    )
+  );
+  const visibleChildren = teamSnapshot ? children.filter((child) => teamChildIds.has(`${child.sessionId}`)) : children;
 
-  const menuItems = children.map((child) => ({
+  if (!isChild && visibleChildren.length === 0) return null;
+
+  const menuItems = visibleChildren.map((child) => ({
     key: `${child.sessionId}`,
     label: (
       <span className={styles.childSessionMenuItem}>
@@ -184,14 +193,14 @@ function ChildSessionNavigator({ sessionId, currentSession }: ChildSessionNaviga
           items: menuItems,
           selectedKeys: isChild ? [`${sessionId}`] : [],
           onClick: ({ key }) => {
-            const target = children.find((child) => `${child.sessionId}` === `${key}`);
+            const target = visibleChildren.find((child) => `${child.sessionId}` === `${key}`);
             if (target) navigateTo(target);
           },
         }}
       >
         <button type="button" className={styles.childSessionsButton} aria-label="打开子会话列表">
           <TeamOutlined />
-          {children.length} 个子代理
+          {visibleChildren.length} 个子代理
           <DownOutlined />
         </button>
       </Dropdown>

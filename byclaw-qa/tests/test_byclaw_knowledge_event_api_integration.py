@@ -88,8 +88,17 @@ def test_resource_id_wrapper_routes_are_not_registered():
 
 
 @pytest.mark.asyncio
-async def test_semantic_routes_reject_removed_extra_params(client):
+async def test_semantic_routes_accept_deprecated_extra_params_without_overriding_context(
+    client,
+):
     service = AsyncMock()
+    captured_context = {}
+
+    async def discover_knowledge_entities(_request):
+        captured_context.update(get_byclaw_userfs_header_context())
+        return {"batchId": "batch-1"}
+
+    service.discover_knowledge_entities.side_effect = discover_knowledge_entities
     with patch(
         "by_qa.main._get_or_build_knowledge_entity_processing_service",
         new_callable=AsyncMock,
@@ -110,6 +119,10 @@ async def test_semantic_routes_reject_removed_extra_params(client):
         )
 
     assert response.status_code == 200
-    assert response.json()["resultCode"] == "-1"
-    assert response.json()["resultMsg"] == "request validation failed"
-    service.discover_knowledge_entities.assert_not_awaited()
+    assert response.json()["resultCode"] == "0"
+    assert response.json()["resultMsg"] == "accepted"
+    request = service.discover_knowledge_entities.await_args.args[0]
+    assert request.model_dump()["extra_params"] == {"userCode": "spoofed"}
+    assert captured_context[USER_CODE_HEADER] == "user-1"
+    assert captured_context[CHAT_SESSION_ID_HEADER] == "session-1"
+    assert captured_context[RESOURCE_ID_HEADER] == "42"

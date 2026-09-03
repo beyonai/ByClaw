@@ -43,7 +43,10 @@ describe('relativeResource', () => {
 
     await expect(resolver?.('assets/01-asset-cover.png')).resolves.toBeInstanceOf(Blob);
     expect(fetchMock).toHaveBeenCalledWith(
-      `${window.location.origin}/byaiService/commonFile/preview?filePath=${encodeURIComponent(firstSessionImagePath)}`
+      expect.stringContaining(
+        `${window.location.origin}/byaiService/commonFile/preview?filePath=${encodeURIComponent(firstSessionImagePath)}`
+      ),
+      { cache: 'no-store' }
     );
     fetchMock.mockRestore();
   });
@@ -61,7 +64,10 @@ describe('relativeResource', () => {
 
     await expect(resolver?.('assets/01-asset-cover.png')).resolves.toBeInstanceOf(Blob);
     expect(fetchMock).toHaveBeenCalledWith(
-      `${window.location.origin}/byaiService/commonFile/preview?filePath=${encodeURIComponent(sessionImagePath)}`
+      expect.stringContaining(
+        `${window.location.origin}/byaiService/commonFile/preview?filePath=${encodeURIComponent(sessionImagePath)}`
+      ),
+      { cache: 'no-store' }
     );
     fetchMock.mockRestore();
   });

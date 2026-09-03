@@ -1,4 +1,5 @@
 import dayjs, { type Dayjs } from 'dayjs';
+import { ResourceTypeMap } from '@/constants/resource';
 import type {
   AutomationChatConfig,
   AutomationFormValues,
@@ -19,16 +20,70 @@ const getDigitalEmployeeName = (employee: any) =>
 export const resolveAutomationPromptDisplayText = (prompt: string, resourceList: any[] = [], employees: any[] = []) => {
   if (!prompt) return '';
 
-  const employeesById = new Map<string, string>();
-  [...resourceList, ...employees].forEach((employee) => {
-    const name = getDigitalEmployeeName(employee);
+  const resourcesById = new Map<string, string>();
+  const employeeIds = new Set<string>();
+  const employeeNames = new Set<string>();
+  const addResource = (resource: any) => {
+    const name = getDigitalEmployeeName(resource) || resource?.resourceName || resource?.name;
     if (!name) return;
-    getDigitalEmployeeIdentity(employee).forEach((identity) => employeesById.set(identity, `${name}`));
+    const resourceId = resource?.resourceId ?? resource?.id;
+    const resourceType = resource?.resourceType || resource?.resourceBizType;
+    if (resourceType === ResourceTypeMap.digitalEmployee) {
+      employeeNames.add(`${name}`);
+      [resource?.id, resourceId]
+        .filter((identity) => identity !== undefined && identity !== null && `${identity}` !== '')
+        .forEach((identity) => employeeIds.add(`${identity}`));
+    }
+    [resource?.id, resourceId, resourceType && `${resourceType}_${resourceId}`]
+      .filter((identity) => identity !== undefined && identity !== null && `${identity}` !== '')
+      .forEach((identity) => resourcesById.set(`${identity}`, `${name}`));
+  };
+
+  [...resourceList, ...employees].forEach((employee) => {
+    addResource(employee);
+    getDigitalEmployeeIdentity(employee).forEach((identity) => {
+      const name = getDigitalEmployeeName(employee);
+      if (name) {
+        employeeIds.add(identity);
+        employeeIds.add(`DIG_EMPLOYEE_${identity}`);
+        employeeNames.add(name);
+        resourcesById.set(identity, `${name}`);
+        resourcesById.set(`DIG_EMPLOYEE_${identity}`, `${name}`);
+      }
+    });
   });
 
-  return prompt.replace(/\{\{DIG_EMPLOYEE_([^}]+)\}\}/g, (placeholder, employeeId: string) => {
-    return employeesById.get(employeeId) || placeholder;
+  const displayText = prompt.replace(/\{\{([^}]+)\}\}/g, (placeholder, identity: string) => {
+    // 编辑器会分别保存员工节点和技能节点；卡片展示时恢复为“@员工 #技能”的可读格式。
+    if (identity.includes('#')) {
+      const [employeeIdentity, skillIdentity] = identity.split('#');
+      const employeeName = resourcesById.get(employeeIdentity);
+      const skillName = skillIdentity ? resourcesById.get(skillIdentity) : undefined;
+      if (skillName) {
+        return employeeIds.has(employeeIdentity) && employeeName
+          ? `#${skillName} `
+          : `@${employeeName || employeeIdentity} #${skillName} `;
+      }
+    }
+    const directName = resourcesById.get(identity);
+    if (directName) {
+      return employeeIds.has(identity) ? `@${directName} ` : `#${directName} `;
+    }
+
+    // 数字员工技能引用格式为 DIG_EMPLOYEE_x#SKILL_y，展示为员工名#技能名。
+    if (identity.startsWith('DIG_EMPLOYEE_')) {
+      const [employeeIdentity, skillIdentity] = identity.split('#');
+      const employeeName = resourcesById.get(employeeIdentity);
+      const skillName = skillIdentity ? resourcesById.get(skillIdentity) : undefined;
+      if (employeeName && skillName) return `@${employeeName} #${skillName} `;
+      if (employeeName) return `@${employeeName} `;
+    }
+    return placeholder;
   });
+
+  return Array.from(employeeNames)
+    .reduce((text, name) => text.replaceAll(`@${name} @${name} #`, `@${name} #`), displayText)
+    .trimEnd();
 };
 
 export const ALL_WEEKDAYS = [1, 2, 3, 4, 5, 6, 7];

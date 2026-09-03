@@ -58,6 +58,7 @@ import com.iwhalecloud.byai.manager.mapper.devloop.ProjectRepoMapper;
 import com.iwhalecloud.byai.manager.qo.devloop.ProjectQo;
 import com.iwhalecloud.byai.manager.qo.devloop.ProjectSessionQo;
 import com.iwhalecloud.byai.state.application.service.dataset.DatasetApplicationService;
+import com.iwhalecloud.byai.state.common.util.MultipartFileUtil;
 import com.iwhalecloud.byai.state.domain.file.service.FileService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import lombok.extern.slf4j.Slf4j;
@@ -65,12 +66,15 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.http.MediaType;
 import org.springframework.http.MediaTypeFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.util.UriComponentsBuilder;
 
+import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -99,9 +103,9 @@ public class ProjectApplicationService {
     private static final String PROJECT_TYPE_DEFAULT = "default";
 
     /**
-     * 项目名称前后端统一限制为 15 个字符。
+     * 项目名称前后端统一限制为 100 个字符。
      */
-    private static final int PROJECT_NAME_MAX_LENGTH = 15;
+    private static final int PROJECT_NAME_MAX_LENGTH = 100;
 
     /**
      * 项目描述业务层统一限制为 500 个字符，数据库使用 TEXT 避免中文存储长度语义差异。
@@ -112,6 +116,13 @@ public class ProjectApplicationService {
      * 手工需求复用的内部扫描源类型，仓库关联实际保存于单条需求 JSON。
      */
     private static final String MANUAL_SOURCE_TYPE = "manual";
+
+    /**
+     * 项目云盘知识库初始化目录模板（zip 原包上传，不解压）。
+     */
+    private static final String KNOWLEDGE_DIR_TEMPLATE_PATH = "templates/knowledgeDirTemplate.zip";
+
+    private static final String KNOWLEDGE_DIR_TEMPLATE_FILENAME = "knowledgeDirTemplate.zip";
 
     /**
      * 手工需求内容 JSON 的命名空间，与需求创建和编辑链路保持一致。
@@ -202,11 +213,11 @@ public class ProjectApplicationService {
         project.setProjectName(projectName);
         project.setDescription(dto.getDescription());
         project.setResourceId(dto.getResourceId());
-        String projectType = dto.getProjectType() != null ? dto.getProjectType() : "normal";
+        // 项目类型字段已废弃，所有新项目统一按普通项目处理。
+        String projectType = "normal";
         project.setProjectType(projectType);
         project.setIsShare(dto.getIsShare() != null ? dto.getIsShare() : Constants.NO_VALUE_N);
-        // 研发项目须先由架构数字员工初始化工作区,建成前禁止建需求/启动任务;普通项目直接就绪。
-        project.setInitStatus("develop".equals(projectType) ? "pending" : "ready");
+        project.setInitStatus("ready");
         project.setBuildIndex(Constants.NO_VALUE_N);
         project.setCreateBy(CurrentUserHolder.getCurrentUserId());
         project.setCreateTime(new Date());
@@ -224,7 +235,7 @@ public class ProjectApplicationService {
             MemberRole.OWNER);
 
         // 创建云盘知识库并回写项目关联
-        SsResource cloudResource = this.createCloudResource(project);
+        SsResource cloudResource = this.createCloudResource(project, false);
         project.setCloudResourceId(cloudResource.getResourceId());
         projectService.update(project);
 
@@ -242,15 +253,49 @@ public class ProjectApplicationService {
      * @param project 项目实体
      * @return 新建的云盘知识库资源
      */
-    public SsResource createCloudResource(Project project) {
+    public SsResource createCloudResource(Project project, boolean isInitDirTemplate) {
         String projectName = project.getProjectName();
         DatasetDto datasetDto = new DatasetDto();
         datasetDto.setResourceName(I18nUtil.get("project.cloud.resource.name", projectName));
         datasetDto.setResourceDesc(I18nUtil.get("project.cloud.resource.desc", projectName));
         datasetDto.setSystemCode("BYAI");
-        datasetDto.setResourceBizType("KG_DOC");
+        datasetDto.setResourceBizType("KG_CLOUD");
         datasetDto.setType("dataset");
-        return datasetApplicationService.createDataset(datasetDto);
+        SsResource ssResource = datasetApplicationService.createDataset(datasetDto);
+        if (isInitDirTemplate) {
+            this.uploadKnowledgeDirTemplate(ssResource.getResourceId());
+        }
+        return ssResource;
+    }
+
+    /**
+     * 读取 classpath 中的知识库目录模板 zip 二进制，直接上传到知识库根目录（由 QA 侧解压）。
+     *
+     * @param resourceId 知识库资源 ID
+     */
+    private void uploadKnowledgeDirTemplate(Long resourceId) {
+        ClassPathResource template = new ClassPathResource(KNOWLEDGE_DIR_TEMPLATE_PATH);
+        if (!template.exists()) {
+            log.error("项目云盘知识库目录模板不存在");
+        }
+
+        try (InputStream inputStream = template.getInputStream()) {
+
+            // 传递请求头信息
+            Map<String, String> headers = new HashMap<String, String>();
+            headers.put("X-USER-CODE", CurrentUserHolder.getCurrentUserCode());
+
+            MultipartFile multipartFile = new MultipartFileUtil("files", KNOWLEDGE_DIR_TEMPLATE_FILENAME,
+                "application/zip", inputStream);
+
+            datasetApplicationService.uploadFiles(new MultipartFile[]{
+                multipartFile
+
+            }, resourceId, "/", "init", false, false, true, headers);
+
+        } catch (IOException e) {
+            log.error("上传项目云盘知识库目录模板失败, resourceId={}", resourceId, e);
+        }
     }
 
     /**
@@ -296,7 +341,7 @@ public class ProjectApplicationService {
         //如果没有初始化云盘，创建云盘知识库
         Long cloudResourceId = project.getCloudResourceId();
         if (cloudResourceId == null) {
-            SsResource cloudResource = this.createCloudResource(project);
+            SsResource cloudResource = this.createCloudResource(project, false);
             project.setCloudResourceId(cloudResource.getResourceId());
         }
 
@@ -316,19 +361,6 @@ public class ProjectApplicationService {
         }
         if (dto.getResourceId() != null) {
             project.setResourceId(dto.getResourceId());
-        }
-        if (dto.getProjectType() != null) {
-            if (PROJECT_TYPE_DEFAULT.equals(project.getProjectType())
-                && !PROJECT_TYPE_DEFAULT.equals(dto.getProjectType())) {
-                // 默认项目类型由系统维护，编辑时只能回显，不能被接口改成普通/研发项目。
-                throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.default.type.change.forbidden");
-            }
-            if (!PROJECT_TYPE_DEFAULT.equals(project.getProjectType())
-                && PROJECT_TYPE_DEFAULT.equals(dto.getProjectType())) {
-                // 默认项目不允许通过编辑接口手动创建，避免普通项目被改成系统内置分组。
-                throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.type.to.default.forbidden");
-            }
-            project.setProjectType(dto.getProjectType());
         }
         if (PROJECT_TYPE_DEFAULT.equals(project.getProjectType())) {
             if (dto.getIsShare() != null && !Constants.NO_VALUE_N.equalsIgnoreCase(dto.getIsShare())) {
@@ -659,7 +691,6 @@ public class ProjectApplicationService {
         map.put("projectName", project.getProjectName());
         map.put("description", project.getDescription());
         map.put("resourceId", project.getResourceId());
-        map.put("projectType", project.getProjectType());
         map.put("isShare", project.getIsShare());
         // 研发项目初始化状态与配置:前端据此拦截建需求/启动任务并展示初始化中指示。
         map.put("initStatus", project.getInitStatus());
@@ -680,7 +711,7 @@ public class ProjectApplicationService {
      * 「查不到」和「调用失败」，前者可以继续走追问兜底，后者必须重试或报错。
      *
      * @param sessionId 会话 ID，必填
-     * @return 含 bound、projectId、projectName、projectType
+     * @return 含 bound、projectId、projectName
      */
     public Map<String, Object> resolveProjectBySession(Long sessionId) {
         if (sessionId == null) {
@@ -694,13 +725,11 @@ public class ProjectApplicationService {
             map.put("bound", false);
             map.put("projectId", null);
             map.put("projectName", null);
-            map.put("projectType", null);
             return map;
         }
         map.put("bound", true);
         map.put("projectId", project.getProjectId());
         map.put("projectName", project.getProjectName());
-        map.put("projectType", project.getProjectType());
         return map;
     }
 

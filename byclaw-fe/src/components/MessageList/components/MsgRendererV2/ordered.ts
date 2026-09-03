@@ -1,8 +1,8 @@
 import type { IMessageListItem } from '@/typescript/message';
 import type { IMessage } from '@/typescript/message';
-import { IMessageState } from '@/constants/message';
+import { IMessageState, SSEMessageType } from '@/constants/message';
 
-export type OrderedChannel = 'think' | 'answer';
+export type OrderedChannel = 'think' | 'event' | 'answer';
 
 export type OrderedItem = {
   item: IMessageListItem;
@@ -33,8 +33,12 @@ export const isV2Message = (message: IMessage) => {
 };
 
 export const mergeOrderedItems = (thinkList: IMessageListItem[] = [], messageList: IMessageListItem[] = []) => {
+  const structuredTimelineTypes = new Set<string>([`${SSEMessageType.thinkStatusTitle}`, `${SSEMessageType.toolCall}`]);
   const items: OrderedItem[] = [
-    ...thinkList.map((item) => ({ item, channel: 'think' as const })),
+    ...thinkList.map((item) => ({
+      item,
+      channel: structuredTimelineTypes.has(`${item.contentType}`) ? ('event' as const) : ('think' as const),
+    })),
     ...messageList.map((item) => ({ item, channel: 'answer' as const })),
   ];
   return items.sort((left, right) => Number(left.item.seq) - Number(right.item.seq));

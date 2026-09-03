@@ -45,6 +45,9 @@ public class ArtifactProperties {
     @Value("${artifact.lifecycle.max-expires-seconds:2592000}")
     private long maxExpiresSeconds;
 
+    @Value("${artifact.lifecycle.purge-retention-seconds:2592000}")
+    private long purgeRetentionSeconds;
+
     @Value("${artifact.archive.max-upload-bytes:314572800}")
     private long maxUploadBytes;
 

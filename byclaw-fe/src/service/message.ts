@@ -16,6 +16,7 @@ export type ConversationOutlineItem = {
   role?: string;
   usage: number;
   content?: string;
+  displayContent?: string;
   creatorName?: string;
   createTime?: string;
   position: number;

@@ -104,6 +104,7 @@ import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupInstallResultVo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupUninstallPreviewVo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupUninstallSkillVo;
 import com.iwhalecloud.byai.common.constants.Constants;
+import com.iwhalecloud.byai.common.constants.resource.WorkerAgentType;
 import com.iwhalecloud.byai.common.util.RedisUtil;
 import jakarta.servlet.http.HttpSession;
 
@@ -370,6 +371,10 @@ public class DigitalEmployeeApplicationService {
         return pageInfo;
     }
 
+    /**
+     * 查询数字员工组成员候选：企业组由 ownerType=enterprise 限定为企业员工，个人组不限制归属类型，
+     * 再结合本人创建、管理及 AVAILABLE_USE/FORCE_USE 使用授权筛选可用员工。
+     */
     public PageInfo<EmployeeGroupMemberDTO> queryEmployeeGroupMemberCandidates(DigitalEmployeeQo digitalEmployeeQo) {
         if (digitalEmployeeQo == null) {
             digitalEmployeeQo = new DigitalEmployeeQo();
@@ -679,9 +684,11 @@ public class DigitalEmployeeApplicationService {
         // 商业版本(dataset.system=WHALE_AGENT)下,企业 tab 不允许创建编码型(011)/ 调试型(010)数字员工
         validateCommercialEditionDigitalEmployeeCreation(digitalEmployeeDTO);
         String resourceName = digitalEmployeeDTO.getResourceName();
-        long count = ssResourceService.countResource(resourceName, ResourceBizTypeEnum.DIG_EMPLOYEE.name(), null);
+        String ownerType = digitalEmployeeDTO.getOwnerType();
+        long count = ssResourceService.countResource(resourceName, ResourceBizTypeEnum.DIG_EMPLOYEE.name(), ownerType, null);
         if (count > 0) {
-            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("digemployee.name.duplicate"));
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
+                I18nUtil.get("digemployee.name.duplicate", resourceName));
         }
 
         // 保存资源表
@@ -709,7 +716,12 @@ public class DigitalEmployeeApplicationService {
         ssResource.setOwnerType(StringUtils.trimToNull(digitalEmployeeDTO.getOwnerType()));
         ssResource.setResourceDVerid(1L);
         ssResource.setResourceRVerid(0L);
-        fillDigitalEmployeeImplInfo(ssResource, digitalEmployeeDTO.getAgentType());
+        if (StringUtil.isNotEmpty(digitalEmployeeDTO.getImplType()) && StringUtil.isNotEmpty(digitalEmployeeDTO.getWorkerAgentType())) {
+            ssResource.setImplType(digitalEmployeeDTO.getImplType());
+            ssResource.setWorkerAgentType(digitalEmployeeDTO.getWorkerAgentType());
+        } else {
+            fillDigitalEmployeeImplInfo(ssResource, digitalEmployeeDTO.getAgentType());
+        }
         ssResourceService.saveResource(ssResource);
 
         // 保存扩展表
@@ -931,9 +943,11 @@ public class DigitalEmployeeApplicationService {
 
         Long resourceId = digitalEmployeeDTO.getResourceId();
         String resourceName = digitalEmployeeDTO.getResourceName();
-        long count = ssResourceService.countResource(resourceName, ResourceBizTypeEnum.DIG_EMPLOYEE.name(), resourceId);
+        String ownerType = digitalEmployeeDTO.getOwnerType();
+        long count = ssResourceService.countResource(resourceName, ResourceBizTypeEnum.DIG_EMPLOYEE.name(), ownerType, resourceId);
         if (count > 0) {
-            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("digemployee.name.duplicate"));
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
+                I18nUtil.get("digemployee.name.duplicate", resourceName));
         }
 
         // 全量编辑可能改变技能关系，必须与技能组快照安装/卸载串行化。
@@ -950,13 +964,24 @@ public class DigitalEmployeeApplicationService {
             // 默认个人助理始终按助手型运行,避免前端旧参数把 worker_agent_type 覆盖成编码型等其他类型.
             digitalEmployeeDTO.setAgentType(DigitalEmployType.AGENT_TYPE_ASSISTANT.getCode());
         }
+        // HARNESS is a deployment/runtime choice and is not derived from the legacy
+        // digital-employee agentType.  Keep it when editing an existing employee;
+        // otherwise a no-op/profile (including knowledge) save silently routes it
+        // back to BYCLAW_* based on agentType.
+        boolean harnessRuntime = StringUtils.equalsIgnoreCase(
+            StringUtils.trimToEmpty(ssResource.getWorkerAgentType()), WorkerAgentType.HARNESS.getCode());
         BeanUtil.copyProperties(digitalEmployeeDTO, ssResource);
         ssResource.setUpdateBy(CurrentUserHolder.getCurrentUserId());
         ssResource.setUpdateTime(new Date());
         ssResource.setResourceStatus(ResourceStatus.LIST.getNum());
         // 更新时允许前端同步调整资源归属类型,避免个人资源仍保留旧的 owner_type.
         ssResource.setOwnerType(StringUtils.trimToNull(digitalEmployeeDTO.getOwnerType()));
-        fillDigitalEmployeeImplInfo(ssResource, digitalEmployeeDTO.getAgentType());
+        if (harnessRuntime) {
+            ssResource.setImplType(ImplType.ASK_AGENT.getCode());
+            ssResource.setWorkerAgentType(WorkerAgentType.HARNESS.getCode());
+        } else {
+            fillDigitalEmployeeImplInfo(ssResource, digitalEmployeeDTO.getAgentType());
+        }
         ssResourceService.updateResourceEntity(ssResource);
 
         // 更新扩展表
@@ -2013,9 +2038,6 @@ public class DigitalEmployeeApplicationService {
      * @param inputDto   前端 save/update 时传入的原始 DTO;为 null 时退化为纯 DB 拼装
      */
     public boolean synOpenClawWorkSpace(Long resourceId, DigitalEmployeeDTO inputDto) {
-        if (digitalEmployeeGroupApplicationService.isGroup(resourceId)) {
-            return true;
-        }
         try {
             return doSyncOpenClawWorkSpace(resourceId, inputDto);
         } catch (Exception e) {

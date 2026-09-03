@@ -15,6 +15,7 @@
 'use strict';
 
 import { executeLocalCommand } from './command-router.mjs';
+import { resolveBuildIdentity } from './build-identity.mjs';
 import { delegatePlatformCommand } from './platform-delegate.mjs';
 
 const VERSION = '3.0.0';
@@ -28,23 +29,50 @@ function defineCommand(spec) {
 }
 
 const COMMAND_SPECS = {
+  'acquire-web': defineCommand({
+    group: 'collection',
+    title: '通过 byCLI 受控抓取已授权的通用网页候选',
+    args: {
+      '--session-dir': '必填。已由 init 创建的会话目录',
+      '--item-id': '必填。稳定条目 ID',
+      '--source-url': '必填。public-discover 已授权的 article URL',
+    },
+    example: 'knowledge-collection.mjs acquire-web --session-dir /tmp/kc1 --item-id report --source-url https://example.com/news/1234567',
+  }),
   'public-discover': defineCommand({
     group: 'discovery',
-    title: '运行 SearXNG 与按需 hot-discovery，持久化并合并公共 URL 候选',
+    title: '运行 WSA 主用、SearXNG 故障降级的 online-search 与按需 hot-discovery，持久化并合并公共 URL 候选',
     args: {
       '--session-dir': '必填。已由 init 创建的会话目录',
       '--query': '必填。公共互联网检索词',
-      '--category': '可选。SearXNG 类别，默认 general；同值传给 hot-discovery，后者额外补 general',
-      '--language': '可选。SearXNG 语言，默认 all',
-      '--pageno': '可选。SearXNG 页码，默认 1',
-      '--max-results': '可选。SearXNG 结果上限，默认 20',
-      '--requested-count': '可选。用户明确指定的采集篇数；先运行 SearXNG，SearXNG 无候选或输出无效时自动回退到 hot-discovery',
-      '--timeout': '可选。SearXNG 与 hot-discovery 外层进程总等待秒数，默认 60；SearXNG 单个引擎请求固定为 10 秒',
-      '--time-range': '可选。SearXNG 时间范围：day | week | month | year',
+      '--category': '可选。online-search 类别，默认 general；同值传给 hot-discovery，后者额外补 general',
+      '--language': '可选。SearXNG 降级通道语言，默认 all；WSA 不映射该参数',
+      '--pageno': '可选。SearXNG 降级通道页码，默认 1；WSA 不映射该参数',
+      '--max-results': '可选。online-search 结果上限，默认 20',
+      '--requested-count': '可选。用户明确指定的采集篇数；online-search 可用文章候选不足时自动运行 hot-discovery',
+      '--timeout': '可选。online-search 与 hot-discovery 外层进程总等待秒数，默认 60',
+      '--time-range': '可选。online-search 时间范围：day | week | month | year',
       '--tiers': '可选。hot-discovery 档位，默认 1,2,3',
       '--limit': '可选。每个 hot-discovery 适配器的结果上限，默认 20',
     },
     example: 'knowledge-collection.mjs public-discover --session-dir /tmp/kc1 --query "DeepSeek Harness" --category it --language zh-CN',
+  }),
+  'public-collect': defineCommand({
+    group: 'collection',
+    title: '发现并逐一验证公共文章，直到晋升指定数量的唯一全文或穷尽有界预算',
+    args: {
+      '--session-dir': '必填。无既有业务产物的 schema 2.0 会话目录',
+      '--query': '新运行必填。第一轮检索词',
+      '--fallback-query': '新运行必填。候选不足时的第二轮检索词',
+      '--requested-count': '新运行必填。最终必须交付的唯一已验证文章数，1..20',
+      '--category': '可选。发现类别，默认 general',
+      '--language': '可选。语言，默认 zh-CN',
+      '--manual-policy': '可选。遇到登录或验证时 pause(默认) | fail',
+      '--run-id': '恢复形式必填。现有 public-collect run ID',
+      '--resume': '恢复形式。继续暂停的尝试；与 --skip 二选一',
+      '--skip': '恢复形式。跳过暂停的尝试；与 --resume 二选一',
+    },
+    example: 'knowledge-collection.mjs public-collect --session-dir /tmp/kc1 --query "DeepSeek Harness 文章" --fallback-query "DeepSeek Harness 工程实践" --requested-count 10',
   }),
   init: defineCommand({
     group: 'research',
@@ -64,6 +92,8 @@ const COMMAND_SPECS = {
       '--max-search-rounds': '可选。正整数;检索轮数上限',
       '--source-scope': 'JSON 数组;默认 ["public-internet"]. 可选 public-internet、dingtalk、feishu、wecom、ima',
       '--materialization-target': 'candidates | selected(默认) | all。all 表示所有请求正文必须物化或如实标记失败/待处理',
+      '--required-content-granularity': 'any(默认) | full-text。用户明确要求全文时必须设为 full-text',
+      '--direct-urls': '可选。用户在原始请求中明确提供的公共 URL JSON 数组；这些 URL 以 user-provided 候选登记',
       '--started-at': '可选。ISO 时间;缺省为当前时间',
       '--collection-result-input-file': '可选。预置 canonical collection-result.json',
       '--metadata-input-file': '可选。预置 collection metadata',
@@ -133,6 +163,48 @@ const COMMAND_SPECS = {
       '--dry-run': '可选。仅校验,不持久化',
     },
     example: 'knowledge-collection.mjs collect --session-dir /tmp/kc1 --item-json-file /tmp/kc1/.collection-inputs/items.json',
+  }),
+  publish: defineCommand({
+    group: 'collection',
+    title: '把已校验正文及其引用的本地图片安全发布到用户交付目录',
+    args: {
+      '--session-dir': '必填。内部采集会话目录',
+      '--delivery-dir': '必填。用户指定的交付目录；相对路径基于当前 Session Root',
+    },
+    example: 'knowledge-collection.mjs publish --session-dir /tmp/kc1 --delivery-dir 00-collection --session-root /by/.sessions/20037048',
+  }),
+  'materialize-wechat': defineCommand({
+    group: 'collection',
+    title: '校验 byCLI Weixin 下载结果，净化正文并生成 collect payload',
+    args: {
+      '--session-dir': '必填。已由 init 创建的会话目录',
+      '--executor-result-file': '必填。位于会话 raw/ 下的 byCLI Weixin 下载结果 JSON',
+      '--item-id': '必填。小写字母、数字、下划线或连字符组成的稳定条目 ID',
+    },
+    example: 'knowledge-collection.mjs materialize-wechat --session-dir /tmp/kc1 --executor-result-file /tmp/kc1/raw/bycli/weixin/item/download-result.json --item-id item',
+  }),
+  'materialize-web': defineCommand({
+    group: 'collection',
+    title: '校验 acquire-web 受控产物，净化正文、复制本地资产并生成 collect payload',
+    args: {
+      '--session-dir': '必填。已由 init 创建的会话目录',
+      '--item-id': '必填。小写字母、数字、下划线或连字符组成的稳定条目 ID',
+      '--executor-result-file': '必填。位于该条目 raw/bycli/web/ 目录中的执行结果 JSON',
+    },
+    example: 'knowledge-collection.mjs materialize-web --session-dir /tmp/kc1 --item-id report --executor-result-file /tmp/kc1/raw/bycli/web/report/executor-result.json',
+  }),
+  'materialize-arxiv': defineCommand({
+    group: 'collection',
+    title: '校验同一 arXiv 论文的 byCLI 元数据与 HTML 全文，生成已注册的 full-text collect payload',
+    args: {
+      '--session-dir': '必填。已由 init 创建的会话目录',
+      '--metadata-file': '必填。位于会话 raw/ 下的 byCLI arXiv 元数据 JSON',
+      '--fulltext-file': '必填。位于会话 raw/ 下的 byCLI web read Markdown',
+      '--source-url': '必填。用户或发现阶段授权的 arXiv abs/pdf/html URL',
+      '--acquisition-url': '必填。byCLI 实际读取的同论文 arXiv HTML URL',
+      '--item-id': '必填。小写字母、数字、下划线或连字符组成的稳定条目 ID',
+    },
+    example: 'knowledge-collection.mjs materialize-arxiv --session-dir /tmp/kc1 --metadata-file /tmp/kc1/raw/bycli/arxiv/paper/metadata.json --fulltext-file /tmp/kc1/raw/bycli/arxiv/paper/executor-output.md --source-url https://arxiv.org/pdf/2501.12948 --acquisition-url https://arxiv.org/html/2501.12948 --item-id deepseek-r1',
   }),
   inspect: defineCommand({
     group: 'collection',
@@ -226,6 +298,14 @@ const SCHEMA = {
 };
 
 const COMMAND_SCHEMA_OVERRIDES = {
+  'acquire-web': {
+    required: ['session-dir', 'item-id', 'source-url'],
+    properties: {
+      'session-dir': SCHEMA.sessionDir,
+      'item-id': { type: 'string', pattern: '^[a-z0-9][a-z0-9_-]{0,63}$' },
+      'source-url': { type: 'string', format: 'http-url' },
+    },
+  },
   'public-discover': {
     required: ['session-dir', 'query'],
     properties: {
@@ -241,6 +321,26 @@ const COMMAND_SCHEMA_OVERRIDES = {
       tiers: { type: 'string', default: '1,2,3' },
       limit: { ...SCHEMA.positiveInteger, default: 20 },
     },
+  },
+  'public-collect': {
+    required: ['session-dir'],
+    properties: {
+      'session-dir': SCHEMA.sessionDir,
+      query: { type: 'string', minLength: 1 },
+      'fallback-query': { type: 'string', minLength: 1 },
+      'requested-count': { type: 'integer', minimum: 1, maximum: 20 },
+      category: { type: 'string', default: 'general' },
+      language: { type: 'string', default: 'zh-CN' },
+      'manual-policy': { type: 'string', enum: ['pause', 'fail'], default: 'pause' },
+      'run-id': { type: 'string', minLength: 1 },
+      resume: SCHEMA.boolean,
+      skip: SCHEMA.boolean,
+    },
+    oneOf: [
+      { required: ['query', 'fallback-query', 'requested-count'] },
+      { required: ['run-id', 'resume'] },
+      { required: ['run-id', 'skip'] },
+    ],
   },
   init: {
     required: ['session-dir', 'query'],
@@ -262,6 +362,8 @@ const COMMAND_SCHEMA_OVERRIDES = {
         items: { type: 'string', enum: ['public-internet', 'dingtalk', 'feishu', 'wecom', 'ima'] },
       },
       'materialization-target': { type: 'string', enum: ['candidates', 'selected', 'all'], default: 'selected' },
+      'required-content-granularity': { type: 'string', enum: ['any', 'full-text'], default: 'any' },
+      'direct-urls': SCHEMA.jsonArray,
       'started-at': { type: 'string', format: 'date-time' },
       'collection-result-input-file': SCHEMA.file,
       'metadata-input-file': SCHEMA.file,
@@ -312,6 +414,40 @@ const COMMAND_SCHEMA_OVERRIDES = {
     },
   },
   collect: { required: ['session-dir', 'item-json-file'], properties: { 'session-dir': SCHEMA.sessionDir, 'item-json-file': SCHEMA.inputFile, 'dry-run': SCHEMA.boolean } },
+  publish: {
+    required: ['session-dir', 'delivery-dir'],
+    properties: {
+      'session-dir': SCHEMA.sessionDir,
+      'delivery-dir': SCHEMA.sessionDir,
+    },
+  },
+  'materialize-wechat': {
+    required: ['session-dir', 'executor-result-file', 'item-id'],
+    properties: {
+      'session-dir': SCHEMA.sessionDir,
+      'executor-result-file': SCHEMA.file,
+      'item-id': { type: 'string', pattern: '^[a-z0-9][a-z0-9_-]{0,63}$' },
+    },
+  },
+  'materialize-web': {
+    required: ['session-dir', 'item-id', 'executor-result-file'],
+    properties: {
+      'session-dir': SCHEMA.sessionDir,
+      'item-id': { type: 'string', pattern: '^[a-z0-9][a-z0-9_-]{0,63}$' },
+      'executor-result-file': SCHEMA.file,
+    },
+  },
+  'materialize-arxiv': {
+    required: ['session-dir', 'metadata-file', 'fulltext-file', 'source-url', 'acquisition-url', 'item-id'],
+    properties: {
+      'session-dir': SCHEMA.sessionDir,
+      'metadata-file': SCHEMA.file,
+      'fulltext-file': SCHEMA.file,
+      'source-url': { type: 'string', format: 'http-url' },
+      'acquisition-url': { type: 'string', format: 'http-url' },
+      'item-id': { type: 'string', pattern: '^[a-z0-9][a-z0-9_-]{0,63}$' },
+    },
+  },
   inspect: { required: ['session-dir'], properties: { 'session-dir': SCHEMA.sessionDir, full: SCHEMA.boolean } },
   'unlock-stale': { required: ['session-dir'], properties: { 'session-dir': SCHEMA.sessionDir } },
   'export-views': { required: ['session-dir'], properties: { 'session-dir': SCHEMA.sessionDir } },
@@ -323,6 +459,7 @@ const COMMAND_SCHEMA_OVERRIDES = {
 };
 
 function commandSchema() {
+  const buildIdentity = resolveBuildIdentity();
   const commands = {};
   for (const [name, spec] of Object.entries(COMMAND_SPECS)) {
     if (spec.group === 'platform') {
@@ -360,6 +497,7 @@ function commandSchema() {
   return {
     ok: true,
     name: 'knowledge-collection',
+    ...buildIdentity,
     schemaVersion: '1.0',
     cli: { flagStyle: '--kebab-case', jsonArrayEncoding: 'JSON string array' },
     commands,
@@ -462,6 +600,7 @@ function commandHelp(command) {
 }
 
 function help() {
+  const buildIdentity = resolveBuildIdentity();
   const groups = {};
   for (const [name, spec] of Object.entries(COMMAND_SPECS)) {
     (groups[spec.group] ||= []).push({ name, title: spec.title, deprecated: Boolean(spec.deprecated) });
@@ -470,6 +609,7 @@ function help() {
     ok: true,
     name: 'knowledge-collection',
     version: VERSION,
+    ...buildIdentity,
     stateFile: '<session-dir>/session.json (schemaVersion 2.0, task+research+collection 一体化)',
     output: '默认缩进 JSON;--compact 输出单行 JSON',
     usage: 'knowledge-collection.mjs <command> [options]',
@@ -492,7 +632,12 @@ async function main() {
     return;
   }
   if (command === 'version' || args.version === true) {
-    render({ ok: true, name: 'knowledge-collection', version: VERSION }, compactRequested(args));
+    render({
+      ok: true,
+      name: 'knowledge-collection',
+      version: VERSION,
+      ...resolveBuildIdentity(),
+    }, compactRequested(args));
     return;
   }
   if (command === 'command-schema') {
@@ -524,9 +669,12 @@ async function main() {
 }
 
 main().catch((error) => {
+  const message = error instanceof Error ? error.message : String(error);
+  const errorCode = /^([A-Z][A-Z0-9_]+):/.exec(message)?.[1];
   render({
     ok: false,
-    error: error instanceof Error ? error.message : String(error),
+    ...(errorCode ? { errorCode } : {}),
+    error: message,
   }, false);
   process.exitCode = 1;
 });

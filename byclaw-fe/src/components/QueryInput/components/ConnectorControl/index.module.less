@@ -57,6 +57,40 @@
   margin: 0 -8px;
 }
 
+.connectorListInline {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+
+  .viewAllInlineButton {
+    align-self: center;
+    margin-top: 8px;
+    color: #7a8596;
+
+    &:hover,
+    &:focus-visible {
+      color: #4f5b6b;
+    }
+  }
+
+  .connectorItem {
+    width: 100%;
+    box-sizing: border-box;
+  }
+}
+
+.connectorLoading {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: #7a8596;
+  font-size: 14px;
+}
+
 .emptyState {
   padding: 28px 12px;
   color: #7a8596;
@@ -90,6 +124,14 @@
   }
 }
 
+.inlineMoreActionButton {
+  display: none;
+
+  &:focus-visible {
+    display: inline-flex;
+  }
+}
+
 .connectorItem {
   display: flex;
   align-items: center;
@@ -100,6 +142,10 @@
 
   &:hover {
     background: #f7f9fc;
+
+    .inlineMoreActionButton {
+      display: inline-flex;
+    }
   }
 }
 
@@ -141,6 +187,12 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+}
+
+.connectorDescription {
+  display: block;
+  max-width: 100%;
+  white-space: nowrap;
 }
 
 .credentialExpiration {
@@ -411,6 +463,10 @@
   background: transparent;
   border: 0;
   cursor: pointer;
+}
+
+.selectionStatic {
+  cursor: default;
 }
 
 .selectionGroup {

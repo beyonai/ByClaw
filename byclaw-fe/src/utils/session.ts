@@ -153,6 +153,9 @@ export const getSessionsCreatedDuringRequest = (
 
   return currentSessions.filter((session) => {
     const sessionId = `${session.sessionId}`;
-    return !initialSessionIds.has(sessionId) && !responseSessionIds.has(sessionId);
+    // 上传文件会先创建临时会话，随后发送消息可能触发列表查询；此时
+    // 请求开始前它已经在本地列表中，但后端列表仍可能暂时查不到。
+    // 标记为本地临时会话的记录也必须保留，避免短暂出现后又消失。
+    return !responseSessionIds.has(sessionId) && (session.isLocalSession || !initialSessionIds.has(sessionId));
   });
 };

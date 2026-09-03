@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState, useMemo, ForwardedRef } from 'react';
 import { useDispatch, useIntl, useSelector } from '@umijs/max';
 import { isEmpty, last, size } from 'lodash';
-import { notification } from 'antd';
+import { notification, Spin } from 'antd';
 import { ArrowLeftOutlined, LockOutlined } from '@ant-design/icons';
 
 import MessageList from '@/components/MessageList';
@@ -27,8 +27,8 @@ import useEventEmitterHooks from './hooks/useEventEmitterHooks';
 import ChatTitle from './ChatTitle';
 import MultiChoices from './components/MultiChoices';
 import EasyConfirm from './components/EasyConfirm';
-import TaskExecutionPlan from '@/components/MessageList/components/TaskExecutionPlan';
 import { selectLatestTaskPlan } from '@/components/MessageList/components/TaskExecutionPlan/projection';
+import ChatTaskPlanDock from './ChatTaskPlanDock';
 
 import type { IState as UseEmployeesIState } from '@/models/useEmployees.ts';
 
@@ -46,6 +46,7 @@ import { closeChatResourceTab, upsertChatResourceTab, type ChatResourceTab } fro
 import { isNotificationSession } from '@/utils/session';
 import { qryConversations } from '@/service/layout';
 import { isExternalChildSession } from '@/utils/scopedSession';
+import { useChatResourceProject } from './ChatResourceWorkspace/useChatResourceProject';
 
 type IProps = {
   sessionId: string;
@@ -132,6 +133,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
   const [selectedProject, setSelectedProject] = useState<{
     projectId: string;
     projectName: string;
+    cloudResourceId?: string | number;
   }>();
 
   // 工作区状态只属于当前聊天实例，路由刷新后不恢复详情页签，避免复用失效的 React 节点。
@@ -230,6 +232,15 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
       ? normalizedProjectId
       : undefined;
   }, [currentSession?.projectId, projectId]);
+  const { project: sessionProject } = useChatResourceProject(sessionProjectId);
+  // 新会话项目下拉会把 cloudResourceId 放在输入框上下文中；同时读取该值，避免项目选择器状态尚未
+  // 回写到资源面板状态时，加号弹窗拿不到项目云盘知识库 ID。
+  const inputSelectedProject = queryInputProps.selectedProject as { cloudResourceId?: string | number } | undefined;
+  const sessionCloudResourceId =
+    currentSession?.cloudResourceId ||
+    selectedProject?.cloudResourceId ||
+    inputSelectedProject?.cloudResourceId ||
+    sessionProject?.cloudResourceId;
 
   const notificationSession = isNotificationSession(currentSession);
   const externalChildSession = isExternalChildSession(currentSession);
@@ -336,6 +347,19 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     [activeResourceTabKey, resourceTabs]
   );
 
+  const closeResourceTabs = useCallback((keys: string[]) => {
+    if (!keys.length) return;
+    setResourceTabs((currentTabs) => {
+      const nextTabs = currentTabs.filter((tab) => !keys.includes(tab.key));
+      setActiveResourceTabKey((currentActiveKey) => {
+        if (nextTabs.some((tab) => tab.key === currentActiveKey)) return currentActiveKey;
+        return nextTabs[nextTabs.length - 1]?.key || '';
+      });
+      if (!nextTabs.length) setResourceListOpen(true);
+      return nextTabs;
+    });
+  }, []);
+
   const resourceWorkspaceVisible = isBottom && (resourceListOpen || resourceTabs.length > 0);
 
   // 预览页签栏的列表按钮只负责显示/隐藏资源列表，不能误关已经打开的文件预览。
@@ -368,6 +392,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
       <ChatResourceWorkspace
         sessionId={sessionId}
         projectId={sessionProjectId}
+        cloudResourceId={sessionCloudResourceId}
         listOpen={resourceListOpen}
         tabs={resourceTabs}
         activeTabKey={activeResourceTabKey}
@@ -375,6 +400,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
         onOpenDetail={openResourceDetailFromResourceList}
         onActiveTabChange={setActiveResourceTabKey}
         onCloseTab={closeResourceTab}
+        onCloseTabs={closeResourceTabs}
       />,
       {
         width: resourceTabs.length ? HALF_MAIN_CONTENT_DETAIL_PANEL_WIDTH : DEFAULT_DETAIL_PANEL_WIDTH,
@@ -384,12 +410,14 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     activeResourceTabKey,
     clearDetailPanel,
     closeResourceTab,
+    closeResourceTabs,
     openResourceDetailFromResourceList,
     resourceListOpen,
     resourceTabs,
     resourceWorkspaceVisible,
     resourceWorkspaceRefreshKey,
     sessionId,
+    sessionCloudResourceId,
     sessionProjectId,
     setDetailPanel,
     toggleResourceList,
@@ -483,7 +511,10 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     updateMessage,
     deleteMessage,
     isSessionRunning,
+    canAcceptInput,
     cancelCurrentSession,
+    sessionMessageLoadState,
+    retrySessionMessageLoad,
   } = useChat({
     chatUrl,
     sessionId,
@@ -645,11 +676,11 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
   }));
 
   const messageState = React.useMemo(() => {
-    if (isSessionRunning) {
+    if (isSessionRunning && !canAcceptInput) {
       return IMessageState.Answer;
     }
     return lastMsg?.messageState;
-  }, [isSessionRunning, lastMsg?.messageState]);
+  }, [canAcceptInput, isSessionRunning, lastMsg?.messageState]);
 
   const showNewSessionProjectSelector = Boolean(
     userInfo && queryInputProps.enableTaskTemplate !== false && (!sessionId || (preserveNewSessionView && !isBottom))
@@ -683,6 +714,20 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
             )}
             {isBottom && (
               <div className={classnames(styles.messageList, 'ub-f1 overflow-hidden')}>
+                {sessionMessageLoadState === 'loading' && (
+                  <div className={styles.sessionMessageLoadNotice} role="status">
+                    <Spin size="small" /> 正在同步会话消息…
+                  </div>
+                )}
+                {sessionMessageLoadState === 'error' && (
+                  <button
+                    type="button"
+                    className={styles.sessionMessageLoadError}
+                    onClick={() => void retrySessionMessageLoad()}
+                  >
+                    会话消息加载失败，点击重试
+                  </button>
+                )}
                 <MessageList
                   ref={messageListCompRef}
                   onNext={onNext}
@@ -700,6 +745,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
                 />
               </div>
             )}
+            {latestTaskPlan ? <ChatTaskPlanDock taskPlan={latestTaskPlan} /> : null}
             {!effectiveReadOnly && (
               <div
                 className={classnames(styles.queryInputWrapper, queryInputWrapperClassName, {
@@ -708,18 +754,18 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
                 })}
                 id="queryInputWrapper"
               >
-                {latestTaskPlan ? (
-                  <div className={styles.taskPlanDock}>
-                    <TaskExecutionPlan taskPlan={latestTaskPlan} />
-                  </div>
-                ) : null}
                 <EasyConfirm
                   messageState={messageState}
                   disabledInput={disabledInput}
                   isBottom={isBottom}
                   cannotAt={cannotAt}
                   disableInputDraft={disableInputDraft}
-                  queryInputProps={{ ...queryInputProps, projectId: sessionProjectId, selectedProject }}
+                  queryInputProps={{
+                    ...queryInputProps,
+                    projectId: sessionProjectId,
+                    projectCloudResourceId: sessionCloudResourceId,
+                    selectedProject,
+                  }}
                   lastMsg={lastMsg}
                   sessionId={sessionId}
                   preserveInputOnSessionChange={preserveNewSessionView && !isBottom}

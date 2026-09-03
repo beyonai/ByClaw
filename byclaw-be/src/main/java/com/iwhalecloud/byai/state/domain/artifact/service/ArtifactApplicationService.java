@@ -6,6 +6,7 @@ import com.iwhalecloud.byai.common.storage.constants.StorageType;
 import com.iwhalecloud.byai.common.storage.model.FileMetadata;
 import com.iwhalecloud.byai.manager.mapper.artifact.ArtifactMapper;
 import com.iwhalecloud.byai.state.domain.artifact.config.ArtifactProperties;
+import com.iwhalecloud.byai.state.domain.artifact.dto.ArtifactContentUpdateDto;
 import com.iwhalecloud.byai.state.domain.artifact.dto.ArtifactDto;
 import com.iwhalecloud.byai.state.domain.artifact.model.ArtifactKind;
 import com.iwhalecloud.byai.state.domain.artifact.model.ArtifactPublishMode;
@@ -28,6 +29,7 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -36,6 +38,7 @@ import org.springframework.web.multipart.MultipartFile;
  * Orchestrates authenticated publication, capability access, and owner lifecycle operations.
  */
 @Service
+@Slf4j
 public class ArtifactApplicationService {
 
     private static final DateTimeFormatter STORAGE_DATE = DateTimeFormatter.ofPattern("yyyy/MM/dd");
@@ -63,7 +66,7 @@ public class ArtifactApplicationService {
         long ttlSeconds = validateExpiry(expiresInSeconds);
         String originalName = safeOriginalName(file.getOriginalFilename());
         String artifactId = UUID.randomUUID().toString();
-        String accessKey = generateAccessKey();
+        String accessKey = generateManagementAccessKey();
         String storageType = StringUtils.defaultIfBlank(properties.getStorageType(), StorageType.FILE);
         String storageRoot = StorageType.isLocalFilesystem(storageType)
             ? properties.getLocalRoot() : properties.getBucket();
@@ -85,7 +88,9 @@ public class ArtifactApplicationService {
         record.setOriginalName(originalName);
         record.setDisplayName(StringUtils.defaultIfBlank(displayName, originalName));
         record.setFileSize(file.getSize());
-        record.setExpiresAt(now.plusSeconds(ttlSeconds));
+        LocalDateTime expiresAt = now.plusSeconds(ttlSeconds);
+        record.setExpiresAt(expiresAt);
+        record.setPurgeAt(expiresAt.plusSeconds(validatedPurgeRetentionSeconds()));
         record.setCreateTime(now);
         record.setUpdateTime(now);
         record.setAccessKeyHash(sha256Hex(accessKey.getBytes(StandardCharsets.UTF_8)));
@@ -128,6 +133,112 @@ public class ArtifactApplicationService {
 
     public ArtifactDto getOwned(String artifactId) {
         ArtifactRecord record = requireOwned(artifactId);
+        renewPurgeAfterAccess(record);
+        return toDto(record, null, parseWarnings(record.getWarningsJson()));
+    }
+
+    /**
+     * Replaces the published bytes while preserving the Artifact identity, access key, data, and lifecycle.
+     */
+    public ArtifactContentUpdateDto replaceOwnedContent(String artifactId, MultipartFile file,
+        ArtifactPublishMode publishMode, String entryPoint, boolean stripTopLevelDirectory, String displayName,
+        String expectedSha256) {
+        validateUpload(file);
+        ArtifactPublishMode mode = publishMode == null ? ArtifactPublishMode.AUTO : publishMode;
+        ArtifactRecord current = requireOwned(artifactId);
+        LocalDateTime now = LocalDateTime.now();
+        if (!ArtifactStatus.READY.name().equals(current.getStatus())
+            || current.getPurgeAt() == null || !current.getPurgeAt().isAfter(now)) {
+            throw new IllegalArgumentException("Artifact已进入删除流程或超过物理保留期限，无法更新");
+        }
+
+        String originalName = safeOriginalName(file.getOriginalFilename());
+        String replacementPrefix = join(current.getStoragePrefix(), "updates/" + UUID.randomUUID());
+        String originalKey = replacementPrefix + "/original/" + storageFileName(originalName);
+        String contentPrefix = replacementPrefix + "/content";
+        ArtifactRecord replacement = new ArtifactRecord();
+        replacement.setArtifactId(current.getArtifactId());
+        replacement.setOriginalKey(originalKey);
+        replacement.setContentPrefix(contentPrefix);
+        replacement.setOriginalName(originalName);
+        replacement.setDisplayName(StringUtils.defaultIfBlank(displayName, current.getDisplayName()));
+        replacement.setFileSize(file.getSize());
+
+        boolean activated = false;
+        try {
+            storage.initialize(current.getStorageType(), current.getStorageRoot());
+            String calculatedSha256 = calculateSha256(file);
+            if (StringUtils.isNotBlank(expectedSha256)
+                && !calculatedSha256.equalsIgnoreCase(expectedSha256.trim())) {
+                throw new IllegalArgumentException("上传文件SHA-256校验失败");
+            }
+            replacement.setSha256(calculatedSha256);
+            replacement.setContentType(ArtifactMediaTypeResolver.resolve(originalName, readPrefix(file, 512)));
+            try (InputStream input = file.getInputStream()) {
+                storage.put(current.getStorageType(), current.getStorageRoot(), originalKey, input, file.getSize(),
+                    replacement.getContentType());
+            }
+
+            replacement.setStorageType(current.getStorageType());
+            replacement.setStorageRoot(current.getStorageRoot());
+            Publication publication = publishContent(replacement, file, mode, entryPoint, stripTopLevelDirectory);
+            replacement.setKind(publication.kind().name());
+            replacement.setEntryPoint(publication.entryPoint());
+            replacement.setExpandedSize(publication.expandedSize());
+            replacement.setWarningsJson(JSON.toJSONString(publication.warnings()));
+            replacement.setUpdateTime(now);
+
+            String previousOriginalKey = current.getOriginalKey();
+            String previousContentPrefix = current.getContentPrefix();
+            int updated = artifactMapper.replaceContent(replacement, current.getOwnerUserId(), previousOriginalKey,
+                previousContentPrefix, now);
+            if (updated != 1) {
+                throw new IllegalArgumentException("Artifact已被更新或当前不可修改，请重新获取后重试");
+            }
+            activated = true;
+            applyContentMetadata(current, replacement);
+            cleanReplacedContent(current, previousOriginalKey, previousContentPrefix);
+            return ArtifactContentUpdateDto.builder()
+                .ok(true)
+                .operation("updated")
+                .status(current.getStatus())
+                .build();
+        }
+        catch (Exception e) {
+            if (!activated) {
+                cleanPrefixQuietly(current.getStorageType(), current.getStorageRoot(), replacementPrefix,
+                    "清理Artifact更新临时目录失败");
+            }
+            if (e instanceof RuntimeException runtimeException) {
+                throw runtimeException;
+            }
+            throw new IllegalStateException("Artifact更新失败", e);
+        }
+    }
+
+    /**
+     * Restores or extends public access while the Artifact is still inside its physical retention window.
+     */
+    public ArtifactDto renewOwnedExpiration(String artifactId, Long expiresInSeconds) {
+        long ttlSeconds = validateExpiry(expiresInSeconds);
+        ArtifactRecord record = requireOwned(artifactId);
+        LocalDateTime now = LocalDateTime.now();
+        if (!ArtifactStatus.READY.name().equals(record.getStatus())
+            || record.getPurgeAt() == null || !record.getPurgeAt().isAfter(now)) {
+            throw new IllegalArgumentException("Artifact已超过物理保留期限或进入删除流程，无法续约");
+        }
+
+        LocalDateTime expiresAt = now.plusSeconds(ttlSeconds);
+        LocalDateTime purgeAt = latest(record.getPurgeAt(),
+            expiresAt.plusSeconds(validatedPurgeRetentionSeconds()), expiresAt);
+        int updated = artifactMapper.renewExpiration(
+            artifactId, record.getOwnerUserId(), expiresAt, purgeAt, now);
+        if (updated != 1) {
+            throw new IllegalArgumentException("Artifact已超过物理保留期限或进入删除流程，无法续约");
+        }
+        record.setExpiresAt(expiresAt);
+        record.setPurgeAt(purgeAt);
+        record.setUpdateTime(now);
         return toDto(record, null, parseWarnings(record.getWarningsJson()));
     }
 
@@ -142,20 +253,36 @@ public class ArtifactApplicationService {
         cleanupService.deleteAsync(record.getArtifactId());
     }
 
-    public void requireOwnedDataAccessible(String artifactId) {
-        requireDataAccessible(requireOwned(artifactId));
-    }
-
-    public void requireCapabilityDataAccessible(String artifactId, String accessKey) {
-        ArtifactRecord record = resolveCapability(artifactId, accessKey);
+    public void requirePublicDataAccessible(String artifactId) {
+        ArtifactRecord record = resolvePublicAccess(artifactId);
         if (record == null) {
-            throw new IllegalArgumentException("Artifact不存在或访问凭证无效");
+            throw new IllegalArgumentException("Artifact不存在或已过期");
         }
-        requireDataAccessible(record);
+        requireRetainedHtmlDataAccessible(record);
     }
 
-    public ArtifactContent resolvePreview(String artifactId, String accessKey, String requestedPath) {
-        ArtifactRecord record = resolveCapability(artifactId, accessKey);
+    /**
+     * Verifies the management key before allowing an unscoped read of retained Artifact data.
+     */
+    public void requireManagementDataAccessible(String artifactId, String accessKey) {
+        if (StringUtils.isAnyBlank(artifactId, accessKey)) {
+            throw new IllegalArgumentException("Artifact不存在或管理访问密钥无效");
+        }
+        ArtifactRecord record = artifactMapper.selectById(artifactId);
+        if (record == null || StringUtils.isBlank(record.getAccessKeyHash())) {
+            throw new IllegalArgumentException("Artifact不存在或管理访问密钥无效");
+        }
+        byte[] actual = sha256Hex(accessKey.getBytes(StandardCharsets.UTF_8)).getBytes(StandardCharsets.US_ASCII);
+        byte[] expected = record.getAccessKeyHash().getBytes(StandardCharsets.US_ASCII);
+        if (!MessageDigest.isEqual(actual, expected)) {
+            throw new IllegalArgumentException("Artifact不存在或管理访问密钥无效");
+        }
+        requireRetainedHtmlDataAccessible(record);
+        renewPurgeAfterAccess(record);
+    }
+
+    public ArtifactContent resolvePreview(String artifactId, String requestedPath) {
+        ArtifactRecord record = resolvePublicAccess(artifactId);
         if (record == null || ArtifactKind.DOWNLOAD_ONLY.name().equals(record.getKind())) {
             return null;
         }
@@ -183,8 +310,8 @@ public class ArtifactApplicationService {
         return new ArtifactContent(record, objectKey, fileName, metadata);
     }
 
-    public ArtifactContent resolveDownload(String artifactId, String accessKey) {
-        ArtifactRecord record = resolveCapability(artifactId, accessKey);
+    public ArtifactContent resolveDownload(String artifactId) {
+        ArtifactRecord record = resolvePublicAccess(artifactId);
         if (record == null
             || !storage.exists(record.getStorageType(), record.getStorageRoot(), record.getOriginalKey())) {
             return null;
@@ -232,18 +359,18 @@ public class ArtifactApplicationService {
         return new Publication(ArtifactKind.SITE, normalizedEntryPoint, extraction.expandedSize(), extraction.warnings());
     }
 
-    private ArtifactRecord resolveCapability(String artifactId, String accessKey) {
-        if (StringUtils.isAnyBlank(artifactId, accessKey)) {
+    private ArtifactRecord resolvePublicAccess(String artifactId) {
+        if (StringUtils.isBlank(artifactId)) {
             return null;
         }
         ArtifactRecord record = artifactMapper.selectById(artifactId);
         if (record == null || !ArtifactStatus.READY.name().equals(record.getStatus())
-            || record.getExpiresAt() == null || !record.getExpiresAt().isAfter(LocalDateTime.now())) {
+            || record.getExpiresAt() == null || !record.getExpiresAt().isAfter(LocalDateTime.now())
+            || record.getPurgeAt() == null || !record.getPurgeAt().isAfter(LocalDateTime.now())) {
             return null;
         }
-        byte[] actual = sha256Hex(accessKey.getBytes(StandardCharsets.UTF_8)).getBytes(StandardCharsets.US_ASCII);
-        byte[] expected = record.getAccessKeyHash().getBytes(StandardCharsets.US_ASCII);
-        return MessageDigest.isEqual(actual, expected) ? record : null;
+        renewPurgeAfterAccess(record);
+        return record;
     }
 
     private ArtifactRecord requireOwned(String artifactId) {
@@ -255,26 +382,49 @@ public class ArtifactApplicationService {
         return record;
     }
 
-    private void requireDataAccessible(ArtifactRecord record) {
+    private void requireRetainedHtmlDataAccessible(ArtifactRecord record) {
         boolean htmlArtifact = ArtifactKind.SITE.name().equals(record.getKind())
             || ArtifactMediaTypeResolver.isHtml(record.getOriginalName());
         if (!ArtifactStatus.READY.name().equals(record.getStatus())
-            || record.getExpiresAt() == null || !record.getExpiresAt().isAfter(LocalDateTime.now())
+            || record.getPurgeAt() == null || !record.getPurgeAt().isAfter(LocalDateTime.now())
             || !htmlArtifact) {
-            throw new IllegalArgumentException("Artifact不可写入数据");
+            throw new IllegalArgumentException("Artifact数据已不可访问");
+        }
+    }
+
+    /**
+     * Extends physical retention after a valid access. Day-boundary rounding limits metadata writes to once per day.
+     */
+    private void renewPurgeAfterAccess(ArtifactRecord record) {
+        if (!ArtifactStatus.READY.name().equals(record.getStatus()) || record.getPurgeAt() == null) {
+            return;
+        }
+        LocalDateTime now = LocalDateTime.now();
+        if (!record.getPurgeAt().isAfter(now)) {
+            return;
+        }
+        long retentionSeconds = validatedPurgeRetentionSeconds();
+        LocalDateTime retentionBase = record.getExpiresAt() != null && record.getExpiresAt().isAfter(now)
+            ? record.getExpiresAt() : now;
+        LocalDateTime target = roundUpToDay(retentionBase.plusSeconds(retentionSeconds));
+        if (!record.getPurgeAt().isBefore(target)) {
+            return;
+        }
+        int updated = artifactMapper.renewPurgeAt(record.getArtifactId(), target, now);
+        if (updated == 1) {
+            record.setPurgeAt(target);
+            record.setUpdateTime(now);
         }
     }
 
     private ArtifactDto toDto(ArtifactRecord record, String accessKey, List<String> warnings) {
         String previewUrl = null;
         String downloadUrl = null;
-        if (StringUtils.isNotBlank(accessKey)) {
-            String capabilityPath = "/" + record.getArtifactId() + "/" + accessKey;
-            if (!ArtifactKind.DOWNLOAD_ONLY.name().equals(record.getKind())) {
-                previewUrl = buildPublicUrl(properties.getPreviewPathPrefix() + capabilityPath + "/");
-            }
-            downloadUrl = buildPublicUrl(properties.getDownloadPathPrefix() + capabilityPath);
+        String publicPath = "/" + record.getArtifactId();
+        if (!ArtifactKind.DOWNLOAD_ONLY.name().equals(record.getKind())) {
+            previewUrl = buildPublicUrl(properties.getPreviewPathPrefix() + publicPath + "/");
         }
+        downloadUrl = buildPublicUrl(properties.getDownloadPathPrefix() + publicPath);
         return ArtifactDto.builder()
             .artifactId(record.getArtifactId())
             .kind(record.getKind())
@@ -285,10 +435,44 @@ public class ArtifactApplicationService {
             .sha256(record.getSha256())
             .previewUrl(previewUrl)
             .downloadUrl(downloadUrl)
+            .accessKey(accessKey)
             .expiresAt(record.getExpiresAt() == null
                 ? null : record.getExpiresAt().atZone(ZoneId.systemDefault()).toOffsetDateTime())
+            .purgeAt(record.getPurgeAt() == null
+                ? null : record.getPurgeAt().atZone(ZoneId.systemDefault()).toOffsetDateTime())
             .warnings(warnings)
             .build();
+    }
+
+    private void applyContentMetadata(ArtifactRecord current, ArtifactRecord replacement) {
+        current.setKind(replacement.getKind());
+        current.setOriginalKey(replacement.getOriginalKey());
+        current.setContentPrefix(replacement.getContentPrefix());
+        current.setOriginalName(replacement.getOriginalName());
+        current.setDisplayName(replacement.getDisplayName());
+        current.setEntryPoint(replacement.getEntryPoint());
+        current.setContentType(replacement.getContentType());
+        current.setFileSize(replacement.getFileSize());
+        current.setExpandedSize(replacement.getExpandedSize());
+        current.setSha256(replacement.getSha256());
+        current.setWarningsJson(replacement.getWarningsJson());
+        current.setUpdateTime(replacement.getUpdateTime());
+    }
+
+    private void cleanReplacedContent(ArtifactRecord current, String originalKey, String contentPrefix) {
+        cleanPrefixQuietly(current.getStorageType(), current.getStorageRoot(), contentPrefix,
+            "清理Artifact旧站点内容失败");
+        cleanPrefixQuietly(current.getStorageType(), current.getStorageRoot(), originalKey,
+            "清理Artifact旧原始文件失败");
+    }
+
+    private void cleanPrefixQuietly(String storageType, String storageRoot, String prefix, String message) {
+        try {
+            storage.deletePrefix(storageType, storageRoot, prefix);
+        }
+        catch (Exception e) {
+            log.warn("{}, prefix={}", message, prefix, e);
+        }
     }
 
     private String buildPublicUrl(String path) {
@@ -312,6 +496,24 @@ public class ArtifactApplicationService {
             throw new IllegalArgumentException("expiresInSeconds必须大于0且不超过" + properties.getMaxExpiresSeconds());
         }
         return value;
+    }
+
+    private long validatedPurgeRetentionSeconds() {
+        long value = properties.getPurgeRetentionSeconds();
+        if (value <= 0) {
+            throw new IllegalStateException("artifact.lifecycle.purge-retention-seconds必须大于0");
+        }
+        return value;
+    }
+
+    private LocalDateTime latest(LocalDateTime first, LocalDateTime second, LocalDateTime third) {
+        LocalDateTime result = first.isAfter(second) ? first : second;
+        return result.isAfter(third) ? result : third;
+    }
+
+    private LocalDateTime roundUpToDay(LocalDateTime value) {
+        LocalDateTime startOfDay = value.toLocalDate().atStartOfDay();
+        return value.equals(startOfDay) ? value : startOfDay.plusDays(1);
     }
 
     private boolean isZip(MultipartFile file, String fileName) throws IOException {
@@ -363,7 +565,7 @@ public class ArtifactApplicationService {
         }
     }
 
-    private String generateAccessKey() {
+    private String generateManagementAccessKey() {
         byte[] bytes = new byte[32];
         SECURE_RANDOM.nextBytes(bytes);
         return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);

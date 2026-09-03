@@ -69,9 +69,12 @@ const Employees = () => {
     selectedAgentId?: string;
     selectedEmployee?: IAgentCache;
     keepSiderActiveKey?: string;
+    initialQuestion?: string;
   } | null;
   const routeStateAgentId = `${routeState?.selectedAgentId || ''}`;
   const routeStateEmployee = routeState?.selectedEmployee;
+  const initialQuestion = `${routeState?.initialQuestion || ''}`.trim();
+  const initialQuestionSentRef = useRef(false);
   const previousRouteSelectionRef = useRef('');
   const staleEmployeeSessionIdRef = useRef('');
   const fileUploadSessionIdRef = useRef('');
@@ -127,6 +130,21 @@ const Employees = () => {
   const canChat = useMemo(() => {
     return canShowEmployeeChat(employeeTab, employeeResourceId, employeeUsePermission);
   }, [employeeResourceId, employeeTab, employeeUsePermission]);
+
+  useEffect(() => {
+    initialQuestionSentRef.current = false;
+  }, [initialQuestion, myAgentId]);
+
+  useEffect(() => {
+    if (!initialQuestion || !canChat || initialQuestionSentRef.current || !detailAgentInfo) return;
+    // 等输入组件挂载后回填推荐问题，避免路由切换时事件早于 QueryInput 监听器注册。
+    const timer = window.setTimeout(() => {
+      if (initialQuestionSentRef.current) return;
+      initialQuestionSentRef.current = true;
+      EventEmitter.emit('queryInput-set-value', initialQuestion);
+    }, 1000);
+    return () => window.clearTimeout(timer);
+  }, [EventEmitter, canChat, detailAgentInfo, initialQuestion]);
 
   const disableActionList = React.useMemo(() => {
     const list: ('delete' | 'apply' | 'unapply')[] = [];
@@ -424,6 +442,11 @@ const Employees = () => {
                 agentType={detailAgentInfo?.agentType || agentTypeMap.agent}
                 queryInputProps={{
                   placeholder: '',
+                  onMounted: () => {
+                    if (!initialQuestion || initialQuestionSentRef.current) return;
+                    initialQuestionSentRef.current = true;
+                    EventEmitter.emit('queryInput-set-value', initialQuestion);
+                  },
                   onFileUploadSessionCreated: (newSessionId: string) => {
                     // 员工详情上传文件会提前创建会话，但仍保持员工介绍页，发送消息后再进入聊天态。
                     if (employeeSessionId) return;

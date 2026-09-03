@@ -179,8 +179,10 @@ CREATE 只提交任务定义：
 ACTIVE → CANCELLING → CANCELLED
 ```
 
-进入 `CANCELLING` 后拒绝迟到的 Tool 推进；确认 Runtime、Tool 和数字员工停止后，把所有非终态任务
-改为 `CANCELLED`。历史消息查询仍返回 `CANCELLED` 快照，Runtime 的活动计划查询只返回 `ACTIVE`。
+进入 `CANCELLING` 后拒绝迟到的 Tool 推进。生产 `STOP_CHAT` 由 BE 统一编排：先请求计划取消，
+再停止 Runtime，最后由 BE 把所有非终态任务改为 `CANCELLED`；即使下游 Runtime 停止失败，BE 也会
+在本次停止请求中确认计划终态。历史消息查询仍返回 `CANCELLED` 快照，Runtime 的活动计划查询只返回
+`ACTIVE`。
 
 ## 8. API
 

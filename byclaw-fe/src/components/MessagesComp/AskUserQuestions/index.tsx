@@ -70,9 +70,41 @@ function isUsableRawMetadata(v: unknown): boolean {
   return true;
 }
 
+/** 提取 Super 用于识别 askUserQuestion ResumeCommand 的两个路由字段。 */
+function getUserInteractionResumeRoute(v: unknown): { parentRunId?: string; interactionId?: string } {
+  let metadata = v;
+  if (typeof metadata === 'string') {
+    try {
+      metadata = JSON.parse(metadata);
+    } catch {
+      return {};
+    }
+  }
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return {};
+
+  const entries = Object.entries(metadata as Record<string, unknown>);
+  const getNonEmptyString = (key: string) => {
+    const entry = entries.find(
+      ([candidate, value]) => candidate.toLowerCase() === key && typeof value === 'string' && value.trim()
+    );
+    return typeof entry?.[1] === 'string' ? entry[1].trim() : undefined;
+  };
+  return {
+    parentRunId: getNonEmptyString('parent_run_id'),
+    interactionId: getNonEmptyString('interaction_id'),
+  };
+}
+
+/** 用户交互恢复必须同时具备 Run 与 Interaction 路由，避免可解析但不完整的 metadata 抢占完整卡片 metadata。 */
+function hasUserInteractionResumeRoute(v: unknown): boolean {
+  const { parentRunId, interactionId } = getUserInteractionResumeRoute(v);
+  return Boolean(parentRunId && interactionId);
+}
+
 /**
  * 原样透传、不做 JSON 解析。优先本条助手回答上的 metadata（含 LangGraph checkpoint 全量）；
- * 卡片级多为空串或片段，放后面且空串不占优。
+ * 但 askUserQuestion 恢复必须优先选择路由字段完整的候选，防止后发 reasoningLogEnd 的
+ * `{ parent_run_id }` 覆盖消息级 metadata 后挡住卡片上的完整 interaction metadata。
  */
 function pickRawResumeMetadata(
   messageInfo: IMessage | undefined,
@@ -83,6 +115,10 @@ function pickRawResumeMetadata(
     get(messageListItemContent, 'substance.metadata'),
     get(messageListItemContent, 'metadata'),
   ];
+  const routedMetadata = candidates.find(hasUserInteractionResumeRoute);
+  if (routedMetadata !== undefined) {
+    return routedMetadata;
+  }
   for (const v of candidates) {
     if (isUsableRawMetadata(v)) {
       return v;
@@ -433,6 +469,29 @@ export function AskUserQuestions(props: IProps) {
             disabled={isDisabled || (isAskUserQuestion && !allQuestionsAnswered)}
             onClick={async () => {
               const resumeMetadata = pickRawResumeMetadata(messageInfo, messageListItemContent);
+              const resumeRoute = getUserInteractionResumeRoute(resumeMetadata);
+              const missingRouteFields = [
+                !resumeRoute.interactionId ? 'interaction_id' : undefined,
+                !resumeRoute.parentRunId ? 'parent_run_id' : undefined,
+              ].filter(Boolean);
+              if (missingRouteFields.length > 0) {
+                console.error('[ASK_USER_QUESTION_RESUME_TRACE] FE_SUBMIT_UNROUTABLE', {
+                  traceId: messageInfo.traceId,
+                  sessionId: messageInfo.sessionId,
+                  messageId: messageInfo.messageId,
+                  resumeMessageId,
+                  missingRouteFields,
+                  resumeRoute: {
+                    interaction_id: resumeRoute.interactionId,
+                    parent_run_id: resumeRoute.parentRunId,
+                  },
+                  metadataCandidateRoutes: {
+                    message: getUserInteractionResumeRoute(messageInfo.metadata),
+                    substance: getUserInteractionResumeRoute(get(messageListItemContent, 'substance.metadata')),
+                    card: getUserInteractionResumeRoute(get(messageListItemContent, 'metadata')),
+                  },
+                });
+              }
               const parsedResumeMetadata = parseResumeMetadata(resumeMetadata);
               const submittedAnswers = prepareAnswersForSubmit(answers);
               const finishedContent: IMessageListItemContent = {

@@ -24,15 +24,15 @@ class ArtifactContentControllerTest {
     void servesSingleByteRangeWithPreviewSecurityHeaders() throws Exception {
         ArtifactApplicationService service = mock(ArtifactApplicationService.class);
         ArtifactContent content = content("video.mp4", 10L);
-        when(service.resolvePreview("artifact", "key", null)).thenReturn(content);
+        when(service.resolvePreview("artifact", null)).thenReturn(content);
         when(service.open(content, 2L, 4L))
             .thenReturn(new ByteArrayInputStream("2345".getBytes(StandardCharsets.UTF_8)));
         ArtifactContentController controller = new ArtifactContentController(service);
         MockHttpServletRequest request = new MockHttpServletRequest("GET",
-            "/artifact-preview/artifact/key");
+            "/artifact-preview/artifact");
         request.addHeader(HttpHeaders.RANGE, "bytes=2-5");
 
-        ResponseEntity<StreamingResponseBody> response = controller.preview("artifact", "key", null, request);
+        ResponseEntity<StreamingResponseBody> response = controller.preview("artifact", null, request);
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         response.getBody().writeTo(output);
 
@@ -46,13 +46,13 @@ class ArtifactContentControllerTest {
     void rejectsMultipleRangesWithoutOpeningStorage() {
         ArtifactApplicationService service = mock(ArtifactApplicationService.class);
         ArtifactContent content = content("video.mp4", 10L);
-        when(service.resolvePreview("artifact", "key", null)).thenReturn(content);
+        when(service.resolvePreview("artifact", null)).thenReturn(content);
         ArtifactContentController controller = new ArtifactContentController(service);
         MockHttpServletRequest request = new MockHttpServletRequest("GET",
-            "/artifact-preview/artifact/key");
+            "/artifact-preview/artifact");
         request.addHeader(HttpHeaders.RANGE, "bytes=0-1,4-5");
 
-        ResponseEntity<StreamingResponseBody> response = controller.preview("artifact", "key", null, request);
+        ResponseEntity<StreamingResponseBody> response = controller.preview("artifact", null, request);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.REQUESTED_RANGE_NOT_SATISFIABLE);
         assertThat(response.getHeaders().getFirst(HttpHeaders.CONTENT_RANGE)).isEqualTo("bytes */10");
@@ -62,12 +62,12 @@ class ArtifactContentControllerTest {
     void downloadAlwaysUsesAttachmentDisposition() {
         ArtifactApplicationService service = mock(ArtifactApplicationService.class);
         ArtifactContent content = content("index.html", 4L);
-        when(service.resolveDownload("artifact", "key")).thenReturn(content);
+        when(service.resolveDownload("artifact")).thenReturn(content);
         ArtifactContentController controller = new ArtifactContentController(service);
         MockHttpServletRequest request = new MockHttpServletRequest("HEAD",
-            "/artifact-download/artifact/key");
+            "/artifact-download/artifact");
 
-        ResponseEntity<StreamingResponseBody> response = controller.download("artifact", "key", request);
+        ResponseEntity<StreamingResponseBody> response = controller.download("artifact", request);
 
         assertThat(response.getHeaders().getContentDisposition().getType()).isEqualTo("attachment");
         assertThat(response.getHeaders().getContentType().toString()).isEqualTo("text/html");
@@ -77,17 +77,17 @@ class ArtifactContentControllerTest {
     void honorsMatchingEntityTagWithoutOpeningStorage() {
         ArtifactApplicationService service = mock(ArtifactApplicationService.class);
         ArtifactContent content = content("app.js", 4L);
-        when(service.resolvePreview("artifact", "key", null)).thenReturn(content);
+        when(service.resolvePreview("artifact", null)).thenReturn(content);
         ArtifactContentController controller = new ArtifactContentController(service);
         MockHttpServletRequest firstRequest = new MockHttpServletRequest("HEAD",
-            "/artifact-preview/artifact/key");
-        String etag = controller.preview("artifact", "key", null, firstRequest).getHeaders().getETag();
+            "/artifact-preview/artifact");
+        String etag = controller.preview("artifact", null, firstRequest).getHeaders().getETag();
         MockHttpServletRequest conditionalRequest = new MockHttpServletRequest("GET",
-            "/artifact-preview/artifact/key");
+            "/artifact-preview/artifact");
         conditionalRequest.addHeader(HttpHeaders.IF_NONE_MATCH, etag);
 
         ResponseEntity<StreamingResponseBody> response = controller.preview(
-            "artifact", "key", null, conditionalRequest);
+            "artifact", null, conditionalRequest);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_MODIFIED);
         assertThat(response.getBody()).isNull();

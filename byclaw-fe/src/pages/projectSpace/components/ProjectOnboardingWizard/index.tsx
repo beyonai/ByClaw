@@ -14,7 +14,6 @@ import ProjectBasicForm, {
   type ProjectFormValues,
 } from '../ProjectFormModal/ProjectBasicForm';
 import type { ProjectTypeOption } from '../../hooks/useProjectTypeConfig';
-import { supportsProjectRepositories } from '../../projectCapabilities';
 import styles from './index.module.less';
 
 interface Props {
@@ -58,9 +57,8 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
   // step1 复用单表单弹窗的完整表单主体(类型选择器 + 共享 + 默认员工),命令式取值经 basicRef。
   const [form] = Form.useForm<ProjectFormValues>();
   const basicRef = useRef<ProjectBasicFormHandle>(null);
-  const projectType = Form.useWatch('projectType', form);
-  // 研发、运营项目展开「仓库」步骤;普通项目 step1 填完直接建。
-  const isRepositoryProject = supportsProjectRepositories(projectType);
+  // 项目创建统一在基本信息表单完成，不再拆分仓库配置步骤。
+  const isRepositoryProject = false;
 
   // 已配置仓库:按后端 repoType 区分工作区与代码仓库(存量数据无类型时按 code 处理)。
   const [repos, setRepos] = useState<DevloopProjectRepo[]>([]);
@@ -96,12 +94,7 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
       const createdId = await onCreateProject(values);
       if (!createdId) return;
       setProjectId(createdId);
-      if (supportsProjectRepositories(values.projectType)) {
-        await refreshRepos(createdId).catch(() => setRepos([]));
-        setStep(1);
-      } else {
-        onFinish(createdId);
-      }
+      onFinish(createdId);
     } finally {
       setCreating(false);
     }

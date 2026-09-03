@@ -1,18 +1,26 @@
 ---
 name: online-search
-description: 镜像内置的 SearXNG 元搜索 CLI，一次调用聚合 40+ 搜索引擎结果并输出结构化 JSON。适合需要真实网页搜索结果、多引擎交叉验证、时间窗过滤（最近一天/周/月/年）、学术类别（arxiv/crossref/pubmed/openalex）或中文搜索（baidu/sogou/360search）的场景。无需常驻服务。
+description: 公共网页 URL 发现通道，腾讯 WSA 主用且仅在通道级故障时降级到镜像内置 SearXNG；与 hot-discovery 协同但不负责正文抓取。
 ---
 
-# Online Search（SearXNG 元搜索 CLI）
+# Online Search（腾讯 WSA 主用、SearXNG 故障降级）
+
+> `knowledge-collection public-discover` 必须通过统一 online-search provider 调用本能力。WSA 凭据齐全且未显式
+> 关闭时优先使用 WSA；只有 WSA 通道级故障才使用 SearXNG。WSA 合法空结果或候选不足不触发 SearXNG，
+> 而是继续既有 hot-discovery 判断。直接运行 `searxng-cli` 仅用于独立调试。
 
 > **入口与使用前提（必读）**：被调用时，若本会话尚未读过本文件，**必须先打开完整通读本文**
 > （含参数表、输出格式、实测引擎可用性），再按其中命令面执行；禁止把技能名当作平台工具名调用
 > （如直接调 `online-search` 工具会报 "Tool not found"），禁止凭名称猜测 CLI 用法。
 > 本技能只负责**发现 URL**，取内容一律委派来源执行器（公共网页 `bycli`）。通过
-> `knowledge-collection` 采集公共 URL 时，必须使用 `public-discover`，该命令会与 SearXNG
-> 并行运行 `hot_discovery`；直接运行本 CLI 仅用于独立调试。
+> `knowledge-collection` 采集公共 URL 时，必须使用 `public-discover`，该命令会让统一
+> online-search provider（WSA 主用、SearXNG 故障降级）与 `hot_discovery` 并行运行；
+> 直接运行 `searxng-cli` 仅用于独立调试降级通道。
 
-基于 SearXNG（249 引擎元搜索内核）的**进程内搜索 CLI**：每次调用起一个进程，完成搜索后向 stdout 输出单个 JSON 对象并退出。**不启动 Web 服务、不监听端口、不写缓存**。
+统一 online-search provider 的主通道是腾讯 WSA。仅当 WSA 未启用、凭据缺失、超时、鉴权失败、
+限流或响应无效等通道级故障时，才调用基于 SearXNG（249 引擎元搜索内核）的进程内 CLI。
+SearXNG 每次调用起一个进程，完成搜索后向 stdout 输出单个 JSON 对象并退出；**不启动 Web 服务、
+不监听端口、不写缓存**。
 
 ## 目录结构
 
@@ -30,14 +38,14 @@ online-search/
 
 ## 运行
 
-OpenClaw 镜像在构建时已将 SearXNG 核心、锁定 Python 依赖和启动器安装为全局命令；无需在 skill 目录创建 venv。直接调用：
+OpenClaw 镜像在构建时通过 PyPI 包 `searxng-cli` 将 SearXNG 核心、Python 3.12 依赖和 console script 安装到独立 venv，并把命令链接为全局 `searxng-cli`；无需在 skill 目录创建 venv。直接调用：
 
 ```bash
 searxng-cli "查询词" [参数...]
 ```
 
-仅在运维或开发需要显式指定解释器时设置 `ONLINE_SEARCH_PYTHON`；镜像内默认使用
-`/opt/searxng-cli/searxng_cli.py`，本地开发可同时设置 `ONLINE_SEARCH_SCRIPT` 指向仓库中的入口脚本。
+仅在运维或开发需要显式指定解释器时设置 `ONLINE_SEARCH_PYTHON` 和 `ONLINE_SEARCH_SCRIPT`。
+镜像内默认命令是 `/usr/local/bin/searxng-cli`（Python 环境位于 `/opt/searxng-cli-venv`）。
 
 ## 参数
 
@@ -118,14 +126,14 @@ stdout 输出**单个 JSON 对象**（`ensure_ascii=False`，中文原样保留�
 
 ## 子技能：hot_discovery（热度发现通道）
 
-searxng 给的是**相关性**排序，拿不到平台原生热度。需要「相关 **且** 高热」时，
+online-search provider 给的是**相关性**排序，拿不到平台原生热度。需要「相关 **且** 高热」时，
 与本技能**并行**调用子技能 [references/hot_discovery/SKILL.md](references/hot_discovery/SKILL.md)——
 它经 bycli 适配器按关键词检索，取平台原生热度字段（`citations` / `downloads` / `stars` / `score` …），
 再由其 `merge` 子命令归并两个通道的结果。
 
 **两个通道的分工**：
 
-| | searxng（本技能） | hot_discovery（子技能） |
+| | online-search provider（本技能） | hot_discovery（子技能） |
 | --- | --- | --- |
 | 排序依据 | 多引擎相关性 | 平台原生热度字段 |
 | 覆盖面 | 249 引擎，几乎所有类别 | 33 个适配器，热度集中在 packages/science/it |
@@ -151,7 +159,7 @@ node scripts/knowledge-collection.mjs public-discover \
 手工调试命令如下：
 
 ```bash
-# 通道 1（本技能）
+# 通道 1（仅独立调试 SearXNG 降级通道）
 searxng-cli "AI agent framework" --category it --max-results 20 > /tmp/sx.json
 
 # 通道 2（子技能，同时跑）
@@ -182,7 +190,7 @@ node references/hot_discovery/scripts/hot_discovery.mjs merge \
 
 - **默认直连，内置白名单**：上游引擎请求直连互联网，默认按类别使用 120 个实测直连可用引擎（配置见 `/opt/searxng-cli/searxng_pack_settings.yml` 的 `cli.default_engines` 段）；海外引擎（google、duckduckgo、wikipedia、brave 等）在无代理环境会超时/被拒，属预期行为，其余引擎自动降级不影响结果
 - **可选代理**：如需访问被墙的海外引擎，在构建镜像前修改 `middleware/openclaw/searxng-cli/searxng_pack_settings.yml`，在 `outgoing:` 下加入 `proxies: {all://: [http://127.0.0.1:7890]}` 后重新构建；SearXNG 使用自定义网络层，**不读取系统环境变量代理**
-- **运行环境**：镜像构建时安装 Python 3.12 依赖到独立 venv；运行时只需 `searxng-cli`
+- **运行环境**：镜像构建时从 PyPI 安装 `searxng-cli` 到 `/opt/searxng-cli-venv`，并把 console script 链接到 `/usr/local/bin/searxng-cli`；运行时只需 `searxng-cli`
 - 本 CLI 不启动 Flask 服务、不监听端口、不写缓存（valkey/redis 已禁用为内存模式）
 - 首次启动约 1.5s（加载全部引擎）；搜索本身耗时见 `elapsed_sec`，上限受 `--timeout` 约束
 

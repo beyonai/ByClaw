@@ -361,6 +361,7 @@ describe('ConnectorControl authorization states', () => {
     fireEvent.click(await screen.findByText('查看全部连接器'));
     fireEvent.mouseEnter(await screen.findByRole('button', { name: '账号操作' }));
     fireEvent.click(await screen.findByText('projectSpace.operation.account.delete'));
+    expect(await screen.findAllByText('projectSpace.operation.account.deleteConfirmTitle')).not.toHaveLength(0);
     fireEvent.click(await screen.findByRole('button', { name: 'projectSpace.operation.account.deleteConfirmOk' }));
 
     await waitFor(() => expect(mockDeleteOperationAccount).toHaveBeenCalledWith(7));
@@ -789,8 +790,41 @@ describe('ConnectorControl authorization states', () => {
     expect(container.querySelector('.ant-avatar-group')).not.toBeNull();
     expect(container.querySelectorAll('.ant-avatar')).toHaveLength(2);
 
-    fireEvent.click(screen.getByRole('button', { name: '查看已连接连接器' }));
+    fireEvent.click(screen.getByRole('button', { name: '查看连接器' }));
     expect(screen.getByRole('dialog', { name: '连接器设置' })).toBeInTheDocument();
+  });
+
+  it('shows enabled connectors outside the input without an interactive settings trigger', async () => {
+    mockQueryConnectorList.mockResolvedValue({
+      list: [
+        {
+          connectorId: 1,
+          connectorCode: 'dingtalk',
+          connectorName: '钉钉',
+          connectorType: 'SYSTEM',
+          description: '',
+          enableFlag: 'Y',
+        },
+      ],
+      pageNum: 1,
+      pageSize: 100,
+      total: 1,
+      totalPages: 1,
+    });
+
+    const { container } = render(<ConnectorControl canAuthorize outside />);
+
+    await waitFor(() => expect(container.querySelector('.ant-avatar-group')).not.toBeNull());
+    expect(screen.queryByRole('button', { name: '查看连接器' })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('已连接连接器')).toBeInTheDocument();
+  });
+
+  it('does not render an outside connector item when none are enabled', async () => {
+    const { container } = render(<ConnectorControl canAuthorize outside />);
+
+    await waitFor(() => expect(mockQueryConnectorList).toHaveBeenCalledTimes(1));
+    expect(container.querySelector('.ant-avatar-group')).toBeNull();
+    expect(screen.queryByLabelText('连接器设置')).not.toBeInTheDocument();
   });
 
   it('prioritizes enabled connectors in the three-item chat preview', async () => {
@@ -837,7 +871,7 @@ describe('ConnectorControl authorization states', () => {
 
     render(<ConnectorControl canAuthorize />);
 
-    fireEvent.click(await screen.findByRole('button', { name: '查看已连接连接器' }));
+    fireEvent.click(await screen.findByRole('button', { name: '查看连接器' }));
     const dialog = screen.getByRole('dialog', { name: '连接器设置' });
 
     expect(await within(dialog).findByText('GitHub')).toBeInTheDocument();
@@ -1015,7 +1049,7 @@ describe('ConnectorControl authorization states', () => {
     expect(await screen.findByRole('heading', { name: '连接 钉钉 作为 AI 知识库' })).toBeInTheDocument();
   });
 
-  it('opens reauthorization from an inline connector card', async () => {
+  it('shows the enabled state switch on an inline connector card', async () => {
     mockQueryConnectorList.mockResolvedValue({
       list: [
         {
@@ -1035,9 +1069,7 @@ describe('ConnectorControl authorization states', () => {
 
     render(<ConnectorControl canAuthorize inline />);
 
-    fireEvent.click(await screen.findByRole('button', { name: '更多钉钉操作' }));
-    fireEvent.click(await screen.findByText('重新授权'));
-    expect(await screen.findByRole('heading', { name: '连接 钉钉 作为 AI 知识库' })).toBeInTheDocument();
+    expect(await screen.findByRole('switch', { name: '停用钉钉' })).toBeInTheDocument();
   });
 
   it('confirms and revokes an existing connector authorization', async () => {
@@ -1059,7 +1091,7 @@ describe('ConnectorControl authorization states', () => {
     });
 
     render(<ConnectorControl canAuthorize />);
-    fireEvent.click(await screen.findByRole('button', { name: '查看已连接连接器' }));
+    fireEvent.click(await screen.findByRole('button', { name: '查看连接器' }));
     fireEvent.click(await screen.findByRole('button', { name: '更多钉钉操作' }));
     fireEvent.click(await screen.findByText('取消授权'));
 
@@ -1068,6 +1100,43 @@ describe('ConnectorControl authorization states', () => {
     fireEvent.click(screen.getByRole('button', { name: '确认取消授权' }));
 
     await waitFor(() => expect(mockRevokeConnectorAuthorization).toHaveBeenCalledWith(1));
+  });
+
+  it('keeps the configuration drawer open while revoke confirmation is active', async () => {
+    mockQueryConnectorList.mockResolvedValue({
+      list: [
+        {
+          connectorId: 10,
+          connectorCode: 'ima-openapi',
+          connectorName: 'IMA',
+          connectorType: 'SYSTEM',
+          description: 'IMA 知识库',
+          enableFlag: 'Y',
+          authMode: 'AK_SK',
+        },
+      ],
+      pageNum: 1,
+      pageSize: 100,
+      total: 1,
+      totalPages: 1,
+    });
+
+    render(<ConnectorControl canAuthorize />);
+    fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
+    fireEvent.click(await screen.findByText('查看全部连接器'));
+    fireEvent.click(await screen.findByRole('button', { name: '更多IMA操作' }));
+    fireEvent.click(await screen.findByText('取消授权'));
+
+    expect(await screen.findAllByText('取消IMA授权？')).not.toHaveLength(0);
+    const drawerMask = document.querySelector('.ant-drawer-mask');
+    expect(drawerMask).not.toBeNull();
+    fireEvent.click(drawerMask as HTMLElement);
+
+    expect(screen.getByText('连接器配置').closest('.ant-drawer')).toHaveClass('ant-drawer-open');
+    fireEvent.click(screen.getByRole('button', { name: '确认取消授权' }));
+
+    await waitFor(() => expect(mockRevokeConnectorAuthorization).toHaveBeenCalledWith(10));
+    expect(screen.getByText('连接器配置').closest('.ant-drawer')).toHaveClass('ant-drawer-open');
   });
 
   it('clears stale expiration immediately when revocation succeeds and the list refresh fails', async () => {
@@ -2474,38 +2543,73 @@ describe('ConnectorControl authorization states', () => {
     Modal.destroyAll();
   });
 
-  it('closes local authorization from malformed IMA metadata', async () => {
-    mockQueryConnectorList.mockResolvedValue({
-      list: [
-        {
-          connectorId: 10,
-          connectorCode: 'ima-openapi',
-          connectorName: 'IMA',
-          connectorType: 'SYSTEM',
-          description: 'IMA 知识库',
-          enableFlag: null,
-          authMode: 'AK_SK',
-          credentialForm: {
-            helpUrl: 'https://ima.qq.com/openapi',
-            fields: [],
-          },
-        },
-      ],
-      pageNum: 1,
-      pageSize: 100,
-      total: 1,
-      totalPages: 1,
-    });
+  it('opens the credential form when optional IMA help metadata is null', async () => {
+    const malformedIma = {
+      connectorId: 10,
+      connectorCode: 'ima-openapi',
+      connectorName: 'IMA',
+      connectorType: 'SYSTEM' as const,
+      description: 'IMA 知识库',
+      enableFlag: null,
+      authMode: 'AK_SK',
+      credentialForm: {
+        helpUrl: 'https://ima.qq.com/openapi',
+        fields: [],
+      },
+    };
+    const validIma = {
+      ...malformedIma,
+      credentialForm: {
+        helpUrl: 'https://ima.qq.com/openapi',
+        helpText: null,
+        helpLinkText: null,
+        fields: [
+          { key: 'clientId', label: 'Client ID', inputType: 'text' as const, maxLength: 256 },
+          { key: 'apiKey', label: 'API Key', inputType: 'password' as const, maxLength: 2048 },
+        ],
+      },
+    };
+    mockQueryAllConnectors
+      .mockResolvedValueOnce([malformedIma])
+      .mockResolvedValueOnce([malformedIma])
+      .mockResolvedValue([validIma]);
 
     render(<ConnectorControl canAuthorize />);
     fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
     fireEvent.click(await screen.findByRole('button', { name: '连接' }));
 
-    await waitFor(() =>
-      expect(screen.queryByRole('heading', { name: '连接 IMA 作为 AI 知识库' })).not.toBeInTheDocument()
-    );
+    await waitFor(() => expect(mockQueryAllConnectors).toHaveBeenCalledTimes(3));
+    expect(await screen.findByLabelText('Client ID')).toBeInTheDocument();
+    expect(screen.getByLabelText('API Key')).toBeInTheDocument();
+    expect(mockMessageError).not.toHaveBeenCalledWith('IMA 连接配置暂不可用，请稍后重试');
+  });
+
+  it('keeps IMA authorization closed when metadata recovery fails', async () => {
+    const malformedIma = {
+      connectorId: 10,
+      connectorCode: 'ima-openapi',
+      connectorName: 'IMA',
+      connectorType: 'SYSTEM' as const,
+      description: 'IMA 知识库',
+      enableFlag: null,
+      authMode: 'AK_SK',
+      credentialForm: {
+        helpUrl: 'https://ima.qq.com/openapi',
+        fields: [],
+      },
+    };
+    mockQueryAllConnectors
+      .mockResolvedValueOnce([malformedIma])
+      .mockResolvedValueOnce([malformedIma])
+      .mockRejectedValueOnce(new Error('offline'));
+
+    render(<ConnectorControl canAuthorize />);
+    fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
+    fireEvent.click(await screen.findByRole('button', { name: '连接' }));
+
+    await waitFor(() => expect(mockMessageError).toHaveBeenCalledWith('IMA 连接配置暂不可用，请稍后重试'));
+    await waitFor(() => expect(screen.queryByRole('status', { name: 'IMA状态刷新中' })).not.toBeInTheDocument());
     expect(screen.queryByLabelText('Client ID')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '立即前往授权' })).not.toBeInTheDocument();
   });
 
   it.each(['', 'javascript:alert(1)', 'data:text/plain,credentials', '/ima/openapi', 'not a valid URL'])(

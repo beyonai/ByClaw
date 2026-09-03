@@ -49,4 +49,12 @@ public class SandboxInfo {
     private LocalDateTime createdTime;
 
     private LocalDateTime lastHeartbeatTime;
+
+    private String workerId;
+
+    private Boolean workerOnline;
+
+    private Long workerLastSeen;
+
+    private Long workerLeaseTtlSeconds;
 }

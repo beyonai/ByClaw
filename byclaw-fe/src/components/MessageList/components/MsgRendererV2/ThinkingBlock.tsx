@@ -19,18 +19,30 @@ type Props = {
   updateMessage: (message: IMessage) => IMessage | void;
 };
 
+const getThinkingPreview = (items: IMessageListItem[], ended: boolean) => {
+  const lines = items
+    .map((item) => item.content?.substance)
+    .filter((substance): substance is string => typeof substance === 'string')
+    .flatMap((substance) => substance.split(/\r?\n/))
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+  const preview = (ended ? lines[0] : lines[lines.length - 1]) || '';
+  return preview.length > 120 ? `${preview.slice(0, 120)}…` : preview;
+};
+
 export default function ThinkingBlock({ blockId, items, message, ended, updateMessage }: Props) {
   const intl = useIntl();
-  const [collapsed, setCollapsed] = useState(ended);
+  const [collapsed, setCollapsed] = useState(true);
   const transformedList = useMemo(
     () => transformList(items, ended, message.messageId, message),
     [items, ended, message]
   );
   const hasPendingInteraction = hasPendingEasyConfirmItem(message, items);
   const effectiveCollapsed = collapsed && !hasPendingInteraction;
+  const preview = useMemo(() => getThinkingPreview(items, ended), [ended, items]);
 
   useEffect(() => {
-    setCollapsed(ended && !hasPendingInteraction);
+    setCollapsed(!hasPendingInteraction);
   }, [ended, hasPendingInteraction]);
 
   const updateItem = useCallback(
@@ -50,31 +62,33 @@ export default function ThinkingBlock({ blockId, items, message, ended, updateMe
   if (isEmpty(items)) return null;
 
   return (
-    <div id={`thinkingBlock_${message.msgId}_${blockId}`}>
-      <p style={{ color: '#707680' }}>
-        {ended ? (
-          <span
-            className={classnames('ub ub-ac gap12', { pointer: !hasPendingInteraction })}
-            onClick={() => {
-              if (hasPendingInteraction) return;
-              setCollapsed((value) => !value);
-            }}
-          >
-            <span style={{ color: 'var(--beyond-color-text-tertiary)' }}>
-              {intl.formatMessage({ id: 'thinkingProcess.done' })}
-            </span>
-            {effectiveCollapsed ? (
-              <RightOutlined style={{ fontSize: 12 }} />
-            ) : (
-              <DownOutlined style={{ fontSize: 12 }} />
-            )}
-          </span>
-        ) : (
-          <span className={classnames(styles.highlightText, styles.autoHighlight)}>
-            {intl.formatMessage({ id: 'thinkingProcess.thinking' })}
+    <div className={styles.thinkingBlock} id={`thinkingBlock_${message.msgId}_${blockId}`}>
+      <button
+        type="button"
+        className={classnames(styles.thinkingSummary, { [styles.thinkingSummaryLocked]: hasPendingInteraction })}
+        aria-expanded={!effectiveCollapsed}
+        disabled={hasPendingInteraction}
+        onClick={() => setCollapsed((value) => !value)}
+      >
+        <span
+          className={classnames(styles.thinkingStatus, {
+            [styles.highlightText]: !ended,
+            [styles.autoHighlight]: !ended,
+          })}
+        >
+          {intl.formatMessage({ id: ended ? 'thinkingProcess.done' : 'thinkingProcess.thinking' })}
+        </span>
+        {preview && (
+          <span className={styles.thinkingPreview} title={preview}>
+            {preview}
           </span>
         )}
-      </p>
+        {effectiveCollapsed ? (
+          <RightOutlined className={styles.thinkingChevron} />
+        ) : (
+          <DownOutlined className={styles.thinkingChevron} />
+        )}
+      </button>
       {!effectiveCollapsed && (
         <div className={styles.thinkingProcessWrapper}>
           {transformedList.map((item) => (

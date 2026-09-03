@@ -214,9 +214,9 @@ const ConfirmMenuLabel = ({
     >
       <div
         className={styles.confirmMenuTrigger}
-        onClick={(event) => {
+        onMouseDown={(event) => {
+          // 防止按下菜单项时触发卡片点击，但保留 click 事件给 antd Menu/Popconfirm 处理。
           event.stopPropagation();
-          event.preventDefault();
         }}
       >
         {children}
@@ -574,7 +574,7 @@ const RenderContent = (props: ResourceCardProps) => {
     const items: NonNullable<MenuProps['items']> = [];
 
     // 后端按当前用户权限和默认员工关系返回 canSetDefault。
-    if (isDigitalEmployeeResource && canSetDefault === true) {
+    if (isDigitalEmployeeResource && canSetDefault === true && !isDefaultDigitalEmployee) {
       items.push({
         key: 'setDefaultAssistant',
         label: (
@@ -1061,9 +1061,7 @@ const RenderContent = (props: ResourceCardProps) => {
                       >
                         <Button type="text" icon={<EllipsisOutlined className={styles.cardActionBtnIcon} />} />
                       </Dropdown>
-                    ) : (
-                      <Button type="text" disabled icon={<EllipsisOutlined className={styles.cardActionBtnIcon} />} />
-                    )}
+                    ) : null}
                   </>
                 )}
               </div>

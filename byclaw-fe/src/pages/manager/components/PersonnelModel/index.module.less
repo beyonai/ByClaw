@@ -83,11 +83,17 @@
         font-size: 13px;
       }
 
-      .groupTitle {
-        color: #707680;
-        font-size: 14px;
-      }
+    .groupTitle {
+      color: #707680;
+      font-size: 14px;
     }
+
+    .groupItems {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+  }
 
     :global {
       .@{antPrefix}-checkbox-group {
@@ -161,7 +167,9 @@
     .selectedList {
       flex: 1;
       display: flex;
-      flex-wrap: wrap;
+      // 已选授权对象按行展示，避免多个成员挤在同一行导致名称和关闭按钮拥挤。
+      flex-direction: column;
+      flex-wrap: nowrap;
       height: 0px;
       min-width: 0;
       overflow-x: hidden;

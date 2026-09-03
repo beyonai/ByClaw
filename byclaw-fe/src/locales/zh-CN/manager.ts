@@ -443,6 +443,7 @@ export default {
   'modelMgr.modal.modelTypeRERANK': '重排模型（RERANK）',
   'modelMgr.modal.modelTypeEMBEDDING': '向量模型（EMBEDDING）',
   'modelMgr.modal.modelTypeIMAGE_GENERATION': '文生图',
+  'modelMgr.modal.modelTypeTTS': '语音模型（TTS）',
   'modelMgr.modal.minimaxModel': 'MiniMax 模型',
   'modelMgr.modal.minimaxModelPlaceholder': '请输入 MiniMax 模型，例如 image-01',
   'modelMgr.modal.minimaxModelRequired': '请输入 MiniMax 模型',

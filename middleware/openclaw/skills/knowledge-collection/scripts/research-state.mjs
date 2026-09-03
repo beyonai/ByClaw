@@ -30,6 +30,7 @@ import {
   resolveSandboxPath,
 } from './session.mjs';
 import { deliveryCompleteForSession } from './delivery-state.mjs';
+import { createDiscoveryAuthorization } from './discovery-authorization.mjs';
 
 export const DEFAULTS = {
   breadth: 3,
@@ -43,6 +44,7 @@ const BRANCH_STATUSES = new Set(['done', 'pending', 'failed']);
 const TASK_MODES = new Set(['research', 'collection']);
 const SOURCE_SCOPES = new Set(['public-internet', 'dingtalk', 'feishu', 'wecom', 'ima']);
 const MATERIALIZATION_TARGETS = new Set(['candidates', 'selected', 'all']);
+const REQUIRED_CONTENT_GRANULARITIES = new Set(['any', 'full-text']);
 const REQUIRED_REPORT_HEADINGS = ['采集范围', '采集成果', '来源与追溯', '覆盖缺口与局限'];
 
 function parseJsonArg(value, fallback) {
@@ -145,6 +147,14 @@ function materializationTarget(value) {
   return target;
 }
 
+function requiredContentGranularity(value) {
+  const required = typeof value === 'string' && value.trim() ? value.trim() : 'any';
+  if (!REQUIRED_CONTENT_GRANULARITIES.has(required)) {
+    throw new Error(`--required-content-granularity 必须是 ${[...REQUIRED_CONTENT_GRANULARITIES].join(' | ')}`);
+  }
+  return required;
+}
+
 function validateReportSections(reportPath) {
   const report = fs.readFileSync(reportPath, 'utf8');
   const missing = REQUIRED_REPORT_HEADINGS.filter((heading) => !new RegExp(`^##\\s+${heading}\\s*$`, 'm').test(report));
@@ -158,11 +168,13 @@ function deliverySummary(session) {
   const count = (status) => items.filter((item) => item?.materialization?.status === status).length;
   const duplicateGroups = new Set(items.map((item) => item?.duplicateGroupKey || item?.itemId).filter(Boolean));
   const materializationTarget = session?.task?.materializationTarget || 'selected';
+  const requiredContentGranularity = session?.task?.requiredContentGranularity || 'any';
   const pending = count('pending');
   const failed = count('failed');
   return {
     sourceScope: Array.isArray(session?.task?.sourceScope) ? session.task.sourceScope : ['public-internet'],
     materializationTarget,
+    requiredContentGranularity,
     sourceRecords: items.length,
     materialized: count('materialized'),
     pending,
@@ -531,6 +543,13 @@ export function cmdInit(args) {
   const maxSearchRounds = optionalPositiveInt(args['max-search-rounds'], '--max-search-rounds', { max: 1000 });
   const effectiveSourceScope = sourceScope(args['source-scope']);
   const effectiveMaterializationTarget = materializationTarget(args['materialization-target']);
+  const effectiveRequiredContentGranularity = requiredContentGranularity(
+    args['required-content-granularity'],
+  );
+  const explicitDirectUrls = nonEmptyStringList(
+    parseJsonArg(args['direct-urls'], []),
+    '--direct-urls',
+  );
   const startedAt = typeof args['started-at'] === 'string' && args['started-at'].trim()
     ? args['started-at'].trim()
     : new Date().toISOString();
@@ -563,12 +582,20 @@ export function cmdInit(args) {
       maxSearchRounds,
       sourceScope: effectiveSourceScope,
       materializationTarget: effectiveMaterializationTarget,
+      requiredContentGranularity: effectiveRequiredContentGranularity,
       startedAt,
       initialSearch: [],
       followups: [],
       combinedQuery: null,
       stopReason: null,
       status: 'initialized',
+      ...(effectiveSourceScope.includes('public-internet')
+        ? { discoveryGate: createDiscoveryAuthorization({
+          directUrls: explicitDirectUrls,
+          query,
+          topicRequired: mode === 'collection',
+        }) }
+        : {}),
     },
     research: { branches: [], learnings: [], citations: {}, context: [], visitedUrls: [], reportPath: null },
     collection: {
@@ -592,6 +619,16 @@ export function cmdInit(args) {
     }
     assertNoSensitiveKeys(metadata, '--metadata-input-file');
     session.collection = metadata;
+  }
+  if (session.task.discoveryGate && (collectionResultInput || metadataInput)) {
+    const importedUrls = (session.collection.collection.items || [])
+      .map((item) => item?.sourceUrl)
+      .filter((url) => typeof url === 'string' && /^https?:\/\//i.test(url));
+    session.task.discoveryGate = createDiscoveryAuthorization({
+      directUrls: [...explicitDirectUrls, ...importedUrls],
+      query,
+      topicRequired: mode === 'collection',
+    });
   }
   persistSession({ root, session: sessionFile }, session);
   return {

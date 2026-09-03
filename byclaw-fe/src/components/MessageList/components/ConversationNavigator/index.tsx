@@ -7,7 +7,14 @@ import useGlobal from '@/hooks/useGlobal';
 import { getMessageOutline, type ConversationOutlineItem } from '@/service/message';
 import type { IMessage } from '@/typescript/message';
 import styles from './index.module.less';
-import { buildConversationTurns, createLocalOutlineItems, mergeOutlineItems } from './utils';
+import {
+  buildConversationTurns,
+  CONVERSATION_NAVIGATOR_ACTIVATION_RATIO,
+  createLocalOutlineItems,
+  getConversationNavigatorScrollTop,
+  mergeOutlineItems,
+  shouldShowConversationNavigator,
+} from './utils';
 
 type Props = {
   sessionId: string;
@@ -29,6 +36,12 @@ export default function ConversationNavigator({
   const [activeTurnId, setActiveTurnId] = useState('');
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const updateRafRef = useRef<number>();
+  const clickedTurnIdRef = useRef('');
+
+  useEffect(() => {
+    clickedTurnIdRef.current = '';
+    setActiveTurnId('');
+  }, [sessionId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -54,7 +67,15 @@ export default function ConversationNavigator({
     const scroller = document.getElementById(scrollContainerId);
     if (!scroller) return;
 
-    const activationLine = scroller.getBoundingClientRect().top + scroller.clientHeight * 0.32;
+    const clickedTurnId = clickedTurnIdRef.current;
+    if (clickedTurnId && turns.some((turn) => turn.id === clickedTurnId)) {
+      setActiveTurnId(clickedTurnId);
+      return;
+    }
+    clickedTurnIdRef.current = '';
+
+    const activationLine =
+      scroller.getBoundingClientRect().top + scroller.clientHeight * CONVERSATION_NAVIGATOR_ACTIVATION_RATIO;
     let nextActive = turns[0]?.id || '';
     turns.forEach((turn) => {
       const loadedElements = turn.messageIds
@@ -82,12 +103,21 @@ export default function ConversationNavigator({
 
     scheduleUpdate();
     scroller.addEventListener('scroll', scheduleUpdate, { passive: true });
+    const releaseClickedTurn = () => {
+      clickedTurnIdRef.current = '';
+    };
+    scroller.addEventListener('wheel', releaseClickedTurn, { passive: true });
+    scroller.addEventListener('touchstart', releaseClickedTurn, { passive: true });
+    scroller.addEventListener('pointerdown', releaseClickedTurn);
     const resizeObserver = new ResizeObserver(scheduleUpdate);
     resizeObserver.observe(host);
     resizeObserver.observe(scroller);
     if (scroller.firstElementChild) resizeObserver.observe(scroller.firstElementChild);
     return () => {
       scroller.removeEventListener('scroll', scheduleUpdate);
+      scroller.removeEventListener('wheel', releaseClickedTurn);
+      scroller.removeEventListener('touchstart', releaseClickedTurn);
+      scroller.removeEventListener('pointerdown', releaseClickedTurn);
       resizeObserver.disconnect();
       if (updateRafRef.current !== undefined) cancelAnimationFrame(updateRafRef.current);
     };
@@ -95,12 +125,27 @@ export default function ConversationNavigator({
 
   const handleTurnClick = useCallback(
     (turn: (typeof turns)[number]) => {
+      clickedTurnIdRef.current = turn.id;
+      setActiveTurnId(turn.id);
       const loadedElement = turn.messageIds
         .map((messageId) => document.getElementById(`wrapper_${messageId}`))
         .find(Boolean);
       if (loadedElement) {
         onLoadedMessageClick?.();
-        loadedElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        const scroller = document.getElementById(scrollContainerId);
+        if (scroller) {
+          scroller.scrollTo({
+            top: getConversationNavigatorScrollTop({
+              scrollTop: scroller.scrollTop,
+              scrollerTop: scroller.getBoundingClientRect().top,
+              scrollerHeight: scroller.clientHeight,
+              targetTop: loadedElement.getBoundingClientRect().top,
+            }),
+            behavior: 'smooth',
+          });
+        } else {
+          loadedElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
         return;
       }
       dispatch({
@@ -122,10 +167,10 @@ export default function ConversationNavigator({
         });
       });
     },
-    [dispatch, EventEmitter, onLoadedMessageClick, sessionId, turns]
+    [dispatch, EventEmitter, onLoadedMessageClick, scrollContainerId, sessionId, turns]
   );
 
-  if (!turns.length) return null;
+  if (!shouldShowConversationNavigator(turns)) return null;
 
   return (
     <nav className={styles.navigator} aria-label={intl.formatMessage({ id: 'conversationNavigator.label' })}>
@@ -139,6 +184,7 @@ export default function ConversationNavigator({
                 key={turn.id}
                 placement="right"
                 mouseEnterDelay={0.15}
+                overlayClassName={styles.tooltipOverlay}
                 title={
                   <div className={styles.tooltip}>
                     <div className={styles.tooltipTitle}>
@@ -152,7 +198,7 @@ export default function ConversationNavigator({
                 <button
                   type="button"
                   className={classnames(styles.markerButton, {
-                    [styles.active]: active && hoveredIndex === null,
+                    [styles.active]: active,
                     [styles.hovered]: hoverDistance === 0,
                     [styles.near]: hoverDistance === 1,
                     [styles.far]: hoverDistance === 2,

@@ -549,6 +549,13 @@ COMMENT ON COLUMN byai.byai_project.init_session_id IS '工作区初始化会话
 SELECT byai.add_column_if_missing('byai', 'byai_project', 'init_fail_reason', 'VARCHAR(500)');
 COMMENT ON COLUMN byai.byai_project.init_fail_reason IS '上次工作区初始化失败/超时原因;重新下发初始化时清空';
 
+-- 外部平台账号的通用可检索标识。微信开放平台写入 authorizer_appid。
+SELECT byai.add_column_if_missing('byai', 'byai_connector_auth', 'external_account_id', 'VARCHAR(128)');
+COMMENT ON COLUMN byai.byai_connector_auth.external_account_id IS '外部平台账号标识，可用于授权撤销事件定位；敏感资料仍保存于加密凭据';
+
+CREATE INDEX IF NOT EXISTS idx_byai_connector_auth_external_account
+    ON byai.byai_connector_auth (connector_id, external_account_id, status_cd);
+
 DROP FUNCTION byai.add_column_if_missing(TEXT, TEXT, TEXT, TEXT);
 
 -- 运营任务模板只保存模板目录元数据和默认配置；用户补充的任务参数进入会话提示词，不回写系统模板。
@@ -752,7 +759,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_byai_connector_credential_secret_active
     ON byai.byai_connector_credential_secret (user_id, connector_id, provider_code)
     WHERE status_cd = '00A';
 
-COMMENT ON TABLE byai.byai_connector_credential_secret IS '连接器 OAuth2 等真实凭证密文；授权绑定表仅保存 credential_reference';
+COMMENT ON TABLE byai.byai_connector_credential_secret IS '连接器 OAuth2 等真实凭证密文；通用授权记录仅保存 credential_reference';
 COMMENT ON COLUMN byai.byai_connector_credential_secret.credential_reference IS '随机 UUID 凭证引用，不含 token';
 COMMENT ON COLUMN byai.byai_connector_credential_secret.access_token_cipher IS 'SM4 加密的 access token，禁止写入日志或响应';
 COMMENT ON COLUMN byai.byai_connector_credential_secret.refresh_token_cipher IS 'SM4 加密的 refresh token，允许为空';
@@ -784,6 +791,7 @@ CREATE TABLE IF NOT EXISTS byai.byai_artifact (
     access_key_hash    VARCHAR(64)    NOT NULL,
     warnings_json      TEXT,
     expires_at         TIMESTAMP      NOT NULL,
+    purge_at           TIMESTAMP      NOT NULL,
     create_time        TIMESTAMP      NOT NULL DEFAULT CURRENT_TIMESTAMP,
     update_time        TIMESTAMP      NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT pk_byai_artifact PRIMARY KEY (artifact_id)
@@ -793,11 +801,13 @@ CREATE INDEX IF NOT EXISTS idx_byai_artifact_owner
     ON byai.byai_artifact (owner_user_id, create_time DESC);
 
 CREATE INDEX IF NOT EXISTS idx_byai_artifact_cleanup
-    ON byai.byai_artifact (status, expires_at);
+    ON byai.byai_artifact (status, purge_at);
 
 COMMENT ON TABLE byai.byai_artifact IS 'Agent Harness发布的限时预览与下载Artifact元数据';
 COMMENT ON COLUMN byai.byai_artifact.access_key_hash IS '不记名访问密钥的SHA-256，仅上传响应返回原始密钥';
 COMMENT ON COLUMN byai.byai_artifact.storage_type IS '创建时实际使用的存储后端，切换默认后仍用于读取历史Artifact';
+COMMENT ON COLUMN byai.byai_artifact.expires_at IS '公开预览、下载与公开数据接口的失效时间';
+COMMENT ON COLUMN byai.byai_artifact.purge_at IS 'Artifact文件及其持久化数据的物理删除时间，有效访问可顺延';
 
 -- Add platform-managed general-purpose JSON records for published HTML Artifacts.
 CREATE TABLE IF NOT EXISTS byai.artifact_data_record (
@@ -828,3 +838,128 @@ ALTER TABLE ss_resource ALTER COLUMN owner_type SET DEFAULT 'personal';
 -- so the instance table must be dropped first.
 DROP TABLE IF EXISTS byai.byai_schedule_task_inst;
 DROP TABLE IF EXISTS byai.byai_schedule_task;
+
+alter table ss_res_ext_dig_employee add column tts_model_id bigint;
+comment on column ss_res_ext_dig_employee.tts_model_id is 'TTS语音模型id';
+
+
+CREATE TABLE IF NOT EXISTS byai_agent_task_plan
+(
+    plan_id               BIGSERIAL     NOT NULL,
+    user_id               BIGINT        NOT NULL,
+    session_id            BIGINT        NOT NULL,
+    message_id            BIGINT        NOT NULL,
+    turn_id               VARCHAR(128),
+    lane_id               VARCHAR(128),
+    trace_id              VARCHAR(128),
+    source_runtime        VARCHAR(32)    NOT NULL,
+    source_run_id         VARCHAR(128)   NOT NULL,
+    title                 VARCHAR(500)   NOT NULL,
+    last_explanation      VARCHAR(2000),
+    status                VARCHAR(32)    NOT NULL,
+    status_reason_code    VARCHAR(64),
+    status_reason_message VARCHAR(500),
+    version               INT           NOT NULL,
+    tasks_payload         TEXT          NOT NULL,
+    last_command_id       VARCHAR(128)   NOT NULL,
+    created_at            TIMESTAMP     NOT NULL,
+    updated_at            TIMESTAMP     NOT NULL,
+    completed_at          TIMESTAMP,
+    CONSTRAINT pk_byai_agent_task_plan PRIMARY KEY (plan_id)
+);
+
+-- 同一用户、同一会话同时最多存在一个非终态计划
+CREATE UNIQUE INDEX IF NOT EXISTS uk_agent_task_plan_active
+    ON byai_agent_task_plan (user_id, session_id)
+    WHERE status IN ('ACTIVE', 'CANCELLING');
+
+CREATE INDEX IF NOT EXISTS idx_agent_task_plan_message
+    ON byai_agent_task_plan
+       (user_id, session_id, message_id, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_agent_task_plan_trace
+    ON byai_agent_task_plan
+       (user_id, session_id, trace_id, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_agent_task_plan_run
+    ON byai_agent_task_plan
+       (user_id, source_runtime, source_run_id, updated_at DESC);
+
+-- ByClaw Super：D0.3.2（schema v9）升级至 develop（schema v12）
+
+-- v10: delegation_last_activity
+ALTER TABLE byai.byai_super_delegations
+  ADD COLUMN last_activity_at timestamptz NULL;
+
+UPDATE byai.byai_super_delegations
+   SET last_activity_at = updated_at
+ WHERE started_at IS NOT NULL;
+
+INSERT INTO byai.byai_super_schema_migrations(version, name)
+SELECT 10, 'delegation_last_activity'
+WHERE NOT EXISTS (
+  SELECT 1
+    FROM byai.byai_super_schema_migrations
+   WHERE version = 10
+);
+
+-- v11: delegation_callback_deadline
+ALTER TABLE byai.byai_super_delegations
+  ADD COLUMN callback_deadline_at timestamptz NULL;
+
+CREATE INDEX delegations_callback_deadline_idx
+  ON byai.byai_super_delegations(callback_deadline_at)
+  WHERE status = 'RUNNING'
+    AND callback_deadline_at IS NOT NULL;
+
+CREATE TABLE byai.byai_super_callback_timeout_outbox (
+  run_id uuid PRIMARY KEY
+    REFERENCES byai.byai_super_runs(id) ON DELETE CASCADE,
+  claimed_by text NULL,
+  claim_expires_at timestamptz NULL,
+  delivered_at timestamptz NULL,
+  attempt_count integer NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL,
+  updated_at timestamptz NOT NULL
+);
+
+CREATE INDEX callback_timeout_outbox_pending_idx
+  ON byai.byai_super_callback_timeout_outbox(claim_expires_at, created_at)
+  WHERE delivered_at IS NULL;
+
+INSERT INTO byai.byai_super_schema_migrations(version, name)
+SELECT 11, 'delegation_callback_deadline'
+WHERE NOT EXISTS (
+  SELECT 1
+    FROM byai.byai_super_schema_migrations
+   WHERE version = 11
+);
+
+-- v12: delegation_task_position
+ALTER TABLE byai.byai_super_delegations
+  ADD COLUMN task_position integer NULL;
+
+ALTER TABLE byai.byai_super_delegations
+  ADD CONSTRAINT delegations_task_position_positive
+  CHECK (task_position IS NULL OR task_position > 0);
+
+INSERT INTO byai.byai_super_schema_migrations(version, name)
+SELECT 12, 'delegation_task_position'
+WHERE NOT EXISTS (
+  SELECT 1
+    FROM byai.byai_super_schema_migrations
+   WHERE version = 12
+);
+
+-- 更新代码代理沙箱规格，确保迁移重复执行时不会保留旧配置。
+DELETE FROM "byai"."sandbox_service_spec"
+ WHERE "service_key" IN ('byclaw-code-agent');
+
+INSERT INTO "byai"."sandbox_service_spec"
+    ("service_key", "spec_json", "template_json", "updated_at")
+VALUES (
+    'byclaw-code-agent',
+    '{"env": {"TZ": "Asia/Shanghai", "GH_TOKEN": "${GH_TOKEN}", "USER_CODE": "${USER_CODE}", "MODEL_NAME": "${MODEL_NAME}", "REDIS_HOST": "${REDIS_HOST}", "BEYOND_TOKEN": "${BEYOND_TOKEN}", "WEB_BASE_URL": "${WEB_BASE_URL}", "BE_DOMAINNAME": "ByaiService", "MODEL_API_KEY": "${MODEL_API_KEY}", "BYAI_WORKER_ID": "${USER_CODE}", "MODEL_BASE_URL": "${MODEL_BASE_URL}", "REDIS_PASSWORD": "${REDIS_PASSWORD}", "REDIS_USERNAME": "${REDIS_USERNAME}", "CLAUDE_AGENT_CWD": "/by/workspace", "CLAUDE_MAX_TURNS": "500", "CLAUDE_CODE_SKIP_ROOTALERT": true, "BYCLAW_SANDBOX_FILE_VOLUME_ROOT": "${BYCLAW_SANDBOX_FILE_VOLUME_ROOT}", "BYCLAW_DIGITAL_EMPLOYEE_STARTUP_TIMEOUT_SECONDS": "600"}, "image": "192.168.0.81:8080/byclaw/byclaw-code-agent:dev", "ports": [{"port": 8080, "protocol": "http"}], "startup": {"entrypoint": ["/app/entrypoint.sh"]}, "volumes": [{"gid": 1001, "key": "base", "uid": 1001, "mode": "0770", "scope": "PRIVATE", "subPath": "byclaw-${user_code}/by", "hostPath": "${BYCLAW_SANDBOX_FILE_VOLUME_ROOT}", "readOnly": false, "mountPath": "/by"}, {"gid": 1001, "uid": 1001, "mode": "0770", "scope": "PRIVATE", "subPath": "byclaw-code-agent/byclaw-${user_code}/home", "hostPath": "${BYCLAW_SANDBOX_FILE_VOLUME_ROOT}", "readOnly": false, "mountPath": "/home"}, {"gid": 1001, "uid": 1001, "mode": "0770", "scope": "PRIVATE", "subPath": ".m2", "hostPath": "${BYCLAW_SANDBOX_FILE_VOLUME_ROOT}", "readOnly": false, "mountPath": "/home/byclaw/.m2"}, {"gid": 1001, "uid": 1001, "mode": "0770", "scope": "PRIVATE", "subPath": "repos", "hostPath": "${BYCLAW_SANDBOX_FILE_VOLUME_ROOT}", "readOnly": false, "mountPath": "/by/repos"}], "resourceLimits": {"cpu": "2", "memory": "6Gi"}}',
+    '',
+    CURRENT_TIMESTAMP
+);

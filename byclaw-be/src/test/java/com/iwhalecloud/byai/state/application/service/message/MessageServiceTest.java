@@ -31,6 +31,8 @@ class MessageServiceTest {
 
     private TaskPlanApplicationService taskPlanApplicationService;
 
+    private ConversationOutlineDisplayService conversationOutlineDisplayService;
+
     private MessageService service;
 
     @BeforeEach
@@ -38,10 +40,12 @@ class MessageServiceTest {
         byaiMessageHotService = mock(ByaiMessageHotService.class);
         showcaseService = mock(ShowcaseService.class);
         taskPlanApplicationService = mock(TaskPlanApplicationService.class);
+        conversationOutlineDisplayService = mock(ConversationOutlineDisplayService.class);
         service = new MessageService();
         ReflectionTestUtils.setField(service, "byaiMessageHotService", byaiMessageHotService);
         ReflectionTestUtils.setField(service, "showcaseService", showcaseService);
         ReflectionTestUtils.setField(service, "taskPlanApplicationService", taskPlanApplicationService);
+        ReflectionTestUtils.setField(service, "conversationOutlineDisplayService", conversationOutlineDisplayService);
         when(showcaseService.getByaiShowcaseList(any())).thenReturn(List.of());
     }
 
@@ -89,13 +93,16 @@ class MessageServiceTest {
         ConversationOutlineItem item = new ConversationOutlineItem();
         item.setMessageId(12L);
         item.setContent("answer summary");
-        when(byaiMessageHotService.selectConversationOutline(11L)).thenReturn(List.of(item));
+        List<ConversationOutlineItem> outline = List.of(item);
+        when(byaiMessageHotService.selectConversationOutline(11L)).thenReturn(outline);
+        when(conversationOutlineDisplayService.enrich(outline)).thenReturn(outline);
 
         MessageQo query = new MessageQo();
         query.setSessionId(11L);
 
         assertThat(service.getConversationOutline(query)).containsExactly(item);
         verify(byaiMessageHotService).selectConversationOutline(11L);
+        verify(conversationOutlineDisplayService).enrich(outline);
     }
 
     private ByaiMessage message(Long messageId, Integer usage) {

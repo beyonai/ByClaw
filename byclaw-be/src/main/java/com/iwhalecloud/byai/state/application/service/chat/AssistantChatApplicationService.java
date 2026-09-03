@@ -154,7 +154,7 @@ public class AssistantChatApplicationService {
      * agentId 表示不一致导致的缓存未命中场景。
      *
      * @param sessionId 会话 ID
-     * @param agentId 当前请求使用的数字员工 ID，可为空
+     * @param agentId   当前请求使用的数字员工 ID，可为空
      * @return 会话状态，所有来源均不可用时返回结构化的不可用状态
      */
     public JSONObject getSessionStatus(String sessionId, Long agentId) throws IOException {
@@ -213,8 +213,7 @@ public class AssistantChatApplicationService {
                 Long sessionAgentId = targetAgentResolver.resolveAgentId(session.getObjectId());
                 addStatusField(triedFields, resolveSessionStatusField(sessionAgentId));
             }
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             log.warn("查询会话关联数字员工失败, sessionId: {}", sessionId, e);
         }
 
@@ -261,8 +260,7 @@ public class AssistantChatApplicationService {
         try {
             JSONObject status = JSON.parseObject(statusValue);
             return Boolean.FALSE.equals(status.getBoolean("ok")) ? null : status;
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             log.warn("Session status 缓存不是有效 JSON", e);
             return null;
         }
@@ -295,8 +293,7 @@ public class AssistantChatApplicationService {
                 return null;
             }
             return parseSessionStatus(responseBody);
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             log.warn("查询沙箱 Session status 异常, sessionId: {}", sessionId, e);
             return null;
         }
@@ -360,6 +357,14 @@ public class AssistantChatApplicationService {
         if (stopChatDto == null || stopChatDto.getSessionId() == null) {
             return;
         }
+        // STOP_CHAT 到达 BE 后，第一件事就是把仍为 ACTIVE 的计划直接落为 CANCELLED。
+        List<TaskPlanSnapshot> cancelledPlans = taskPlanApplicationService.cancel(stopChatDto,
+            "USER_STOPPED", "用户已停止执行");
+        if (cancelledPlans != null) {
+            cancelledPlans.forEach(plan -> taskPlanWebSocketPublisher.broadcast(
+                CurrentUserHolder.getCurrentUserId(), plan, stopChatDto.getClientRequestId()));
+        }
+
         // 停止前将已堆积的消息落库，避免本轮回答内容丢失。
         boolean persistedBeforeStop = flushAccumulatedMessage(stopChatDto);
         RunningChatInfo runningInfo = runningOutputStreamRegistry.getRunning(stopChatDto.getSessionId());
@@ -372,13 +377,6 @@ public class AssistantChatApplicationService {
         }
         if (stopChatDto.getMessageId() == null) {
             stopChatDto.setMessageId(runningMessageId);
-        }
-
-        List<TaskPlanSnapshot> cancellingPlans = taskPlanApplicationService.requestCancellation(stopChatDto,
-            "USER_STOPPED", "用户请求停止");
-        if (cancellingPlans != null) {
-            cancellingPlans.forEach(plan -> taskPlanWebSocketPublisher.broadcast(
-                CurrentUserHolder.getCurrentUserId(), plan, stopChatDto.getClientRequestId()));
         }
 
         /*
@@ -399,22 +397,20 @@ public class AssistantChatApplicationService {
         gatewayClient.cancelTask(executionId, String.valueOf(stopChatDto.getSessionId()),
             "user cancel task", targetAgentType, CurrentUserHolder.getCurrentUserCode(), "force");
         */
-        gatewayClient.cancelSession(String.valueOf(stopChatDto.getSessionId()), "user cancel task");
+        try {
+            gatewayClient.cancelSession(String.valueOf(stopChatDto.getSessionId()), "user cancel task");
+        }
+        catch (Exception e) {
+            log.warn("stopChat 下游取消失败，计划已由 BE 更新为 CANCELLED, sessionId: {}",
+                stopChatDto.getSessionId(), e);
+        }
 
         Long cleanupMessageId = resolveStopCleanupMessageId(stopChatDto);
-
-        List<TaskPlanSnapshot> cancelledPlans = taskPlanApplicationService.confirmCancellation(stopChatDto,
-            "USER_STOPPED", "用户已停止执行");
-        if (cancelledPlans != null) {
-            cancelledPlans.forEach(plan -> taskPlanWebSocketPublisher.broadcast(
-                CurrentUserHolder.getCurrentUserId(), plan, stopChatDto.getClientRequestId()));
-        }
 
         if (persistedBeforeStop) {
             runningOutputStreamRegistry.release(stopChatDto.getSessionId(), cleanupMessageId);
             runningChatSnapshotService.delete(stopChatDto.getSessionId(), cleanupMessageId);
-        }
-        else {
+        } else {
             log.warn("stopChat 未确认已堆积消息落库，保留运行态与快照供恢复重试, sessionId: {}, messageId: {}",
                 stopChatDto.getSessionId(), cleanupMessageId);
         }
@@ -481,8 +477,7 @@ public class AssistantChatApplicationService {
                     try {
                         // 队列有界后必须等待已有事件被请求线程消费，确保停止哨兵不会静默丢失。
                         ctx.getGatewayEventQueue().put(sentinel);
-                    }
-                    catch (InterruptedException e) {
+                    } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
                         throw e;
                     }
@@ -552,12 +547,7 @@ public class AssistantChatApplicationService {
                 : ConversationObjectType.DIGITAL_EMPLOYEES;
 
             session = sessionService.createSession(sessionName, SessionType.H_AS.getCode(), agentId,
-                objectType, DebugModeEnum.DEBUG_0.getNum());
-            if (projectId != null) {
-                // 上传接口会先创建会话，必须在此处写入项目归属，后续首条消息才能沿用该项目。
-                session.setProjectId(projectId);
-                sessionService.update(session);
-            }
+                objectType, DebugModeEnum.DEBUG_0.getNum(), projectId);
 
             sessionId = session.getSessionId();
             sessionTitleService.markInitialTitlePending(sessionId);

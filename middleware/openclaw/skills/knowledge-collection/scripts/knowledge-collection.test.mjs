@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -66,7 +66,10 @@ function collectPayload(itemId = 'item-test1', url = 'https://arxiv.org/abs/2608
 
 async function setupCollectedSession({ mode = 'collection' } = {}) {
   const root = makeSessionDir();
-  const init = await runCli(['init', '--session-dir', root, '--query', 'q', '--mode', mode]);
+  const init = await runCli([
+    'init', '--session-dir', root, '--query', 'q', '--mode', mode,
+    '--direct-urls', '["https://arxiv.org/abs/2608.04002"]',
+  ]);
   assert.equal(init.json.ok, true);
   writeExecutorOutputs(root);
   const payloadPath = join(root, '.collection-inputs/items.json');
@@ -187,6 +190,8 @@ await (async () => {
   const h = await runCli(['help']);
   assert.equal(h.json.ok, true);
   assert.equal(h.json.version, '3.0.0');
+  assert.match(h.json.buildId, /^sha256:[a-f0-9]{64}$/);
+  assert.equal(h.json.buildIdSource, 'content-fingerprint');
   assert.ok(h.json.commandsByGroup.research.some((item) => item.name === 'init'));
   const rootEnterprise = h.json.commandsByGroup.platform.find((item) => item.name === 'enterprise');
   assert.match(rootEnterprise.title, /resume-resource/);
@@ -201,12 +206,41 @@ await (async () => {
   assert.equal(publicDiscoverHelp.json.command, 'public-discover');
   assert.match(publicDiscoverHelp.json.args['--category'], /general/);
   assert.match(publicDiscoverHelp.json.args['--requested-count'], /明确指定/);
-  assert.match(publicDiscoverHelp.json.args['--requested-count'], /SearXNG 无候选.*hot-discovery/);
-  assert.match(publicDiscoverHelp.json.args['--timeout'], /SearXNG 与 hot-discovery/);
+  assert.match(publicDiscoverHelp.json.args['--requested-count'], /可用文章候选不足.*hot-discovery/);
+  assert.match(publicDiscoverHelp.json.args['--timeout'], /online-search 与 hot-discovery/);
+
+  const publicCollectHelp = await runCli(['public-collect', '--help']);
+  assert.equal(publicCollectHelp.code, 0);
+  assert.match(publicCollectHelp.json.title, /指定数量/);
+  assert.match(publicCollectHelp.json.args['--fallback-query'], /第二轮/);
+  assert.match(publicCollectHelp.json.args['--resume'], /--skip/);
+
+  const wechatMaterializeHelp = await runCli(['materialize-wechat', '--help']);
+  assert.equal(wechatMaterializeHelp.code, 0);
+  assert.equal(wechatMaterializeHelp.json.command, 'materialize-wechat');
+  assert.match(wechatMaterializeHelp.json.args['--executor-result-file'], /raw\/.*JSON/);
+
+  const arxivMaterializeHelp = await runCli(['materialize-arxiv', '--help']);
+  assert.equal(arxivMaterializeHelp.code, 0);
+  assert.equal(arxivMaterializeHelp.json.command, 'materialize-arxiv');
+  assert.match(arxivMaterializeHelp.json.args['--fulltext-file'], /raw\/.*Markdown/);
+
+  const publishHelp = await runCli(['publish', '--help']);
+  assert.equal(publishHelp.code, 0);
+  assert.equal(publishHelp.json.command, 'publish');
+  assert.match(publishHelp.json.args['--delivery-dir'], /用户/);
 
   const schema = await runCli(['command-schema']);
   assert.equal(schema.code, 0, schema.stderr);
   assert.equal(schema.json.schemaVersion, '1.0');
+  assert.equal(schema.json.buildId, h.json.buildId);
+
+  const injectedVersion = await runCli(['version'], {
+    KNOWLEDGE_COLLECTION_BUILD_ID: 'commit:cc7ca601f',
+  });
+  assert.equal(injectedVersion.code, 0, injectedVersion.stderr);
+  assert.equal(injectedVersion.json.buildId, 'commit:cc7ca601f');
+  assert.equal(injectedVersion.json.buildIdSource, 'environment');
   assert.deepEqual(schema.json.commands.init.required, ['session-dir', 'query']);
   assert.equal(schema.json.commands.init.properties['session-dir'].format, 'sandbox-path');
   assert.equal(schema.json.commands.init.properties['session-root'].format, 'absolute-path');
@@ -227,12 +261,47 @@ await (async () => {
   assert.equal(schema.json.commands.report.properties['report-path'].format, 'sandbox-path');
   assert.equal(schema.json.commands.status.properties['session-root'].format, 'absolute-path');
   assert.equal(schema.json.commands.collect.properties['item-json-file'].format, 'collection-input-file');
+  assert.deepEqual(schema.json.commands.publish.required, ['session-dir', 'delivery-dir']);
+  assert.equal(schema.json.commands['public-collect'].properties['requested-count'].maximum, 20);
+  assert.equal(schema.json.commands['public-collect'].oneOf.length, 3);
+  assert.equal(schema.json.commands.publish.properties['session-dir'].format, 'sandbox-path');
+  assert.equal(schema.json.commands.publish.properties['delivery-dir'].format, 'sandbox-path');
+  assert.equal(schema.json.commands.publish.properties['session-root'].format, 'absolute-path');
   assert.equal(schema.json.commands['crawl-seed'].properties['max-pages'].type, 'integer');
   assert.equal(schema.json.commands['crawl-seed'].properties.depth.default, 1);
   assert.deepEqual(schema.json.commands['public-discover'].required, ['session-dir', 'query']);
   assert.equal(schema.json.commands['public-discover'].properties.category.default, 'general');
   assert.equal(schema.json.commands['public-discover'].properties['requested-count'].type, 'integer');
   assert.equal(schema.json.commands['public-discover'].properties['requested-count'].minimum, 1);
+  assert.deepEqual(schema.json.commands['materialize-wechat'].required, [
+    'session-dir', 'executor-result-file', 'item-id',
+  ]);
+  assert.equal(
+    schema.json.commands['materialize-wechat'].properties['item-id'].pattern,
+    '^[a-z0-9][a-z0-9_-]{0,63}$',
+  );
+  assert.deepEqual(schema.json.commands['materialize-arxiv'].required, [
+    'session-dir', 'metadata-file', 'fulltext-file', 'source-url', 'acquisition-url', 'item-id',
+  ]);
+  assert.equal(
+    schema.json.commands['materialize-arxiv'].properties['item-id'].pattern,
+    '^[a-z0-9][a-z0-9_-]{0,63}$',
+  );
+  assert.deepEqual(schema.json.commands['acquire-web'].required, [
+    'session-dir', 'item-id', 'source-url',
+  ]);
+  assert.equal(schema.json.commands['acquire-web'].properties['source-url'].format, 'http-url');
+  assert.equal(
+    schema.json.commands['acquire-web'].properties['item-id'].pattern,
+    '^[a-z0-9][a-z0-9_-]{0,63}$',
+  );
+  assert.deepEqual(schema.json.commands['materialize-web'].required, [
+    'session-dir', 'item-id', 'executor-result-file',
+  ]);
+  assert.equal(
+    schema.json.commands['materialize-web'].properties['item-id'].pattern,
+    '^[a-z0-9][a-z0-9_-]{0,63}$',
+  );
   for (const [name, contract] of Object.entries(schema.json.commands)) {
     if (contract.type !== 'delegated-command') {
       assert.equal(contract.schemaComplete, true, `${name} schema must be explicit`);
@@ -285,7 +354,11 @@ await (async () => {
   writeFileSync(fixtureSearxng, `#!/usr/bin/env node
 process.stdout.write(JSON.stringify({
   query: 'async discovery',
-  results: [{ url: 'https://example.com/article', title: 'Async result', engine: 'fixture' }],
+  results: [{
+    url: 'https://example.com/news/async-discovery-report',
+    title: 'Async discovery 深度报道',
+    engine: 'fixture',
+  }],
 }));
 `);
   chmodSync(fixtureSearxng, 0o700);
@@ -298,6 +371,50 @@ process.stdout.write(JSON.stringify({
   assert.equal(asyncDiscovery.json.ok, true);
   assert.equal(asyncDiscovery.json.action, 'public-discover');
   rmSync(asyncDiscoveryRoot, { recursive: true, force: true });
+
+  const wechatRoot = makeSessionDir();
+  const wechatInit = await runCli([
+    'init', '--session-dir', wechatRoot, '--query', 'WeChat materializer CLI',
+    '--source-scope', '["public-internet"]', '--materialization-target', 'selected',
+    '--direct-urls', '["https://weixin.sogou.com/link?url=cli-fixture"]',
+  ]);
+  assert.equal(wechatInit.code, 0, wechatInit.stderr);
+  const rawWechatDir = join(wechatRoot, 'raw/bycli/weixin/cli-fixture');
+  mkdirSync(rawWechatDir, { recursive: true });
+  const rawWechatMarkdown = join(rawWechatDir, 'index.md');
+  writeFileSync(rawWechatMarkdown, [
+    '# CLI 微信文章', '', '测试作者', '',
+    '第一段正文。', '', '第二段正文。', '', '第三段正文。', '',
+    '第四段正文。', '', '第五段正文。', '', '第六段正文。', '',
+    '注：作者声明。', '', '相关阅读', '',
+    '[推荐](https://mp.weixin.qq.com/s/related)', '', '赞赏', '',
+  ].join('\n'));
+  const rawWechatResult = join(rawWechatDir, 'download-result.json');
+  writeFileSync(rawWechatResult, JSON.stringify({
+    status: 'downloaded',
+    saved: 'raw/bycli/weixin/cli-fixture/index.md',
+    size: statSync(rawWechatMarkdown).size,
+    title: 'CLI 微信文章',
+    author: '测试作者',
+    publish_time: '2026-08-31T00:00:00Z',
+    source_url: 'https://weixin.sogou.com/link?url=cli-fixture',
+    resolved_url: 'https://mp.weixin.qq.com/s/cli-fixture',
+  }));
+  const materializedWechat = await runCli([
+    'materialize-wechat', '--session-dir', wechatRoot,
+    '--executor-result-file', rawWechatResult, '--item-id', 'cli-fixture',
+  ]);
+  assert.equal(materializedWechat.code, 0, materializedWechat.stderr || materializedWechat.stdout);
+  assert.equal(materializedWechat.json.materialization.contentGranularity, 'full-text');
+  const collectedWechat = await runCli([
+    'collect', '--session-dir', wechatRoot,
+    '--item-json-file', materializedWechat.json.collectPayloadPath,
+  ]);
+  assert.equal(collectedWechat.code, 0, collectedWechat.stderr || collectedWechat.stdout);
+  const wechatStatus = await runCli(['status', '--session-dir', wechatRoot]);
+  assert.equal(wechatStatus.json.collection.deliveryComplete, true);
+  assert.equal(wechatStatus.json.collection.contentGranularity['full-text'], 1);
+  rmSync(wechatRoot, { recursive: true, force: true });
 
   const siteCrawlFrontmatter = readFileSync(siteCrawlSkillPath, 'utf8').split('---')[1];
   assert.match(siteCrawlFrontmatter, /Do not use for one known URL/);
@@ -400,14 +517,40 @@ await (async () => {
   const defaultScope = await runCli(['init', '--session-dir', makeSessionDir(), '--query', '公开资料']);
   assert.deepEqual(defaultScope.json.task.sourceScope, ['public-internet']);
   assert.equal(defaultScope.json.task.materializationTarget, 'selected');
+  assert.equal(defaultScope.json.task.requiredContentGranularity, 'any');
+  assert.equal(defaultScope.json.task.discoveryGate.attemptCount, 0);
+  assert.equal(defaultScope.json.task.discoveryGate.schemaVersion, '2.0');
+  assert.deepEqual(defaultScope.json.task.discoveryGate.observations, []);
+  assert.equal(defaultScope.json.task.discoveryGate.topicContract.required, false);
+  assert.equal(defaultScope.json.task.discoveryGate.topicContract.normalizedSubject, '公开资料');
+  assert.deepEqual(defaultScope.json.task.discoveryGate.candidates, []);
+
+  const directUrl = 'https://example.com/user-selected-article';
+  const directScope = await runCli([
+    'init', '--session-dir', makeSessionDir(), '--query', '采集指定链接',
+    '--direct-urls', JSON.stringify([directUrl]),
+  ]);
+  assert.equal(directScope.json.task.discoveryGate.candidates.length, 1);
+  assert.equal(directScope.json.task.discoveryGate.candidates[0].origin, 'user-provided');
+  assert.equal(directScope.json.task.discoveryGate.candidates[0].canonicalUrl, directUrl);
+  assert.equal(directScope.json.task.discoveryGate.candidates[0].topicRelevance.status, 'not-required');
 
   const explicitScope = await runCli([
     'init', '--session-dir', makeSessionDir(), '--query', '团队方案',
     '--source-scope', '["public-internet","feishu"]',
     '--materialization-target', 'all',
+    '--required-content-granularity', 'full-text',
   ]);
   assert.deepEqual(explicitScope.json.task.sourceScope, ['public-internet', 'feishu']);
   assert.equal(explicitScope.json.task.materializationTarget, 'all');
+  assert.equal(explicitScope.json.task.requiredContentGranularity, 'full-text');
+
+  const invalidGranularity = await runCli([
+    'init', '--session-dir', makeSessionDir(), '--query', '无效粒度',
+    '--required-content-granularity', 'excerpt',
+  ]);
+  assert.equal(invalidGranularity.code, 1);
+  assert.match(invalidGranularity.json.error, /required-content-granularity/);
   console.log('PASS source scope and materialization target');
 })();
 
@@ -479,7 +622,11 @@ await (async () => {
 
 await (async () => {
   const root = makeSessionDir();
-  const r = await runCli(['init', '--session-dir', root, '--query', '数据本体论上周发展', '--mode', 'research', '--depth', '2', '--deadline-minutes', '60']);
+  const r = await runCli([
+    'init', '--session-dir', root, '--query', '数据本体论上周发展',
+    '--mode', 'research', '--depth', '2', '--deadline-minutes', '60',
+    '--direct-urls', '["https://arxiv.org/abs/2608.04002"]',
+  ]);
   assert.equal(r.json.ok, true);
   assert.ok(r.json.task.startedAt);
   writeExecutorOutputs(root);

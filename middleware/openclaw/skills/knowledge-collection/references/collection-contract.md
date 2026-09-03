@@ -2,12 +2,14 @@
 
 ## 单一状态文件 `session.json`
 
-会话的权威状态是 `<session-dir>/session.json`（`schemaVersion: "2.0"`），由 `scripts/knowledge-collection.mjs` 统一读写。采集状态只描述任务、研究过程、来源 inventory 与正文物化，不追踪交付后的动作。
+会话的权威状态是 `<session-dir>/session.json`（`schemaVersion: "2.0"`），由 `scripts/knowledge-collection.mjs` 统一读写。采集状态描述任务、研究过程、来源 inventory 与正文物化；可选的顶层 `delivery` 只记录本次用户文件交付的校验回执，不追踪下游业务动作。
 
 - `task.sourceScope`：本任务实际允许使用的来源，默认 `public-internet`；企业来源只能因用户点名或明确内部语境加入。
 - `task.materializationTarget`：`candidates`、`selected` 或 `all`。
+- `task.requiredContentGranularity`：`any` 或 `full-text`。用户明确要求全文、完整正文或 PDF 全文时必须在 `init` 传入 `--required-content-granularity full-text`；其他任务默认 `any`。
+- `task.discoveryGate`：公共来源授权状态。新会话使用 `schemaVersion: "1.1"`，保存从初始化任务派生且不可由第二轮 query 改写的 `topicContract`，并记录最多两轮发现、页面形态、主题证据、耗尽状态、兼容 `stopReason` 与诊断 `stopDetail`。用户明确提供的 URL 由 `init --direct-urls` 登记为 `origin=user-provided + topicRelevance.status=not-required`；Agent 自己发现或记忆的 URL 不得放入该参数。
 - `collection.collection.status`：`complete`、`partial` 或 `failed`。
-- `collection.collection.items`：完整文章清单，可以包含尚未物化的 pending/failed 条目。
+- `collection.collection.items`：完整文章清单，可以包含尚未物化的 pending/failed 条目。公共发现条目保存 `provenanceKind=public-discover`、`discoveryCandidateId` 与由 CLI 计算的 `materializedTopicRelevance`；用户直链与 crawl frontier 保存各自 provenance，但不要求正文主题门禁。
 - `research`：研究问题、分支、learnings、citations、context 与报告路径。
 
 `session.json` 只能由脚本命令修改，禁止手工编辑；任何层级出现敏感字段名（token、Cookie、secrets 等）时拒绝持久化。
@@ -72,8 +74,9 @@ collection_filters:
 
 ### 会话目录边界
 
-在用户沙箱中，推荐把采集会话根放在当前聊天会话的
-`/by/.sessions/<sessionId>/collections/<task-name>/`。`sessionId` 取自 Agent 上下文提供的 Session Root，不能从登录认证
+在用户沙箱中，没有显式保存路径时推荐把采集会话根放在当前聊天会话的
+`/by/.sessions/<sessionId>/collections/<task-name>/`。用户提供的保存路径是交付目录，不是采集会话目录；此时内部会话必须放在
+`<Session Root>/.collection-runs/<run-id>/`，保存路径只传给最终 `publish`。`sessionId` 取自 Agent 上下文提供的 Session Root，不能从登录认证
 环境变量或 Cookie 推导。对外路径参数以 `/` 开头时按绝对路径使用，可指向沙箱内任意可写位置；相对路径以可信的
 `--session-root /by/.sessions/<sessionId>` 为基准解析，不得依赖进程当前目录。相对路径规范化后的结果以及其真实祖先
 不得通过 `..` 或符号链接越出该 Session Root。绝对历史会话和绝对输出路径不要求属于当前 Session Root。
@@ -82,20 +85,29 @@ collection_filters:
 
 单一企业来源的 `enterprise search` 必须原位发布：`--output-dir` 必须等于 `--parent-session-dir`。禁止在 `raw/` 下创建第二个完整采集会话；`raw/ima/sanitized/items`、`raw/dingtalk/session.json` 等嵌套会话或交付结构均无效。旧调用若把 `--output-dir` 指向父会话的 `raw/` 子树，runner 会将其归一到父会话根，最终正文仍只能落在根级 `sanitized/items/`。
 
-出现重复 URL、部分下载失败或正文无法物化时，保留原始证据，并在同一会话 inventory 中登记为重复、`pending` 或 `failed`。这些情况不得触发旁路归档，也不得把会话外文件作为下游正文交付。
+出现重复 URL、部分下载失败或正文无法物化时，保留原始证据，并在同一会话 inventory 中登记为重复、`pending` 或 `failed`。这些情况不得触发旁路归档，也不得把未经 `publish` 交付校验的会话外文件作为下游正文交付。
 
 新写入的 `sanitized/metadata.json` 使用 `schemaVersion: "1.0"`，并包含：
 
 - `storage.fallback`：是否使用工作区回退目录。
 - `collection.status`：采集状态 `complete`、`partial` 或 `failed`。
-- `collection.items`：完整文章清单。每项使用稳定 `itemId`，并记录 `sourceSkill`、`backend`、`sourceItemId`、`sourceUrl`、用户筛选、`rawArtifacts` 及 `materialization`。
+- `collection.items`：完整文章清单。每项使用稳定 `itemId`，并记录 `sourceSkill`、`backend`、`sourceItemId`、`sourceUrl`、用户筛选、`rawArtifacts` 及 `materialization`。公共发现条目还记录 `discoveryCandidateId`，它必须指向本会话 `task.discoveryGate.candidates` 中主题匹配的 `article`/`weak`，或用户明确提供的 URL。
 - `materialization.status`：`materialized`、`pending` 或 `failed`；已物化时记录准确的 `markdownPath` 与 `sanitizedPath`，文件删除或校验失败后相应路径必须置为 `null`。
-- `materialization.contentGranularity`：`full-text`、`excerpt`、`abstract` 或 `unknown`，表示正文内容粒度，与 `materialization.status`、`collection.status` 和 `deliveryComplete` 正交。旧会话或缺失字段一律按 `unknown`，不得默认 `full-text`；普通 `content`、`markdown` 或字数不能单独证明全文完整。
+- `materialization.contentGranularity`：`full-text`、`excerpt`、`abstract` 或 `unknown`，表示正文内容粒度。`requiredContentGranularity=any` 时它不单独改变完成状态；显式要求 `full-text` 时则参与 `deliveryComplete` 判定，摘要或节选不能满足全文要求。旧会话或缺失字段一律按 `unknown`，不得默认 `full-text`；普通 `content`、`markdown` 或字数不能单独证明全文完整。
+- `fullTextEvidence`：公共来源声明 `full-text` 时必填，记录 `schemaVersion`、获准 `executor` 和位于 `raw/` 的结构化 `artifact`。回执必须确认相同来源 URL、相同执行器、`complete=true` 与 `contentGranularity=full-text`，并同时登记在 `rawArtifacts`。只有获准来源执行器或专用 materializer 可以生成并在 `session.task.fullTextEvidenceReceipts` 注册该回执及哈希，不得由 Agent 手写；缺少注册、内容变化或字段不匹配时 `collect` 拒绝全文声明。
 - `media`：文章媒体覆盖状态。`coverStatus` 为 `not-present`、`materialized`、`unavailable` 或 `unknown`，并记录 `coverCount`、`materializedCoverCount` 与非敏感 `reason`。`unavailable` 表示至少一个已知封面未能物化，允许 `materializedCoverCount` 小于 `coverCount` 以表达部分成功。旧会话缺失或含非法 media 状态时只读归一为 `unknown`，使用 `reason=legacy-media-state-unknown`；不得猜测为无封面或已物化。
 - `materialization.pendingArtifactCleanup`：仅用于重新物化时清除旧工作副本的内部队列，只允许包含 `markdown/` 或 `sanitized/items/` 下的 Markdown，不得包含共享 `raw/`，也不得用于交付后的清理。
 - `sourceMetadata`：来源执行器的非敏感版本、任务 ID、范围和诊断信息。
 
 `sourceSkill`、来源 ID/URL、用户筛选和 `rawArtifacts` 组成非敏感恢复描述。缺少净化正文时，采集编排器据此让原始执行器从 raw 重新净化；raw 不足时再由同一执行器补采。不得保存恢复所需的凭据。
+
+公共互联网新会话默认启用发现门禁。`public-discover` 原子登记 query、category、页面分类、主题相关性和最多两轮的调用状态。结构型 `article` 只有同时满足 `topicRelevance.status=matched|not-required` 才进入 `articleCandidateIds`；`structuralArticleCandidateIds` 只用于诊断。`requested-count`、hot-discovery fallback 和第二轮预算使用同一个 eligible article 语义；来源抓取授权额外允许已登记且主题匹配的 weak 候选。第二轮仍无相关候选时保留 `stopReason=no-article-candidates`，并写 `stopDetail=no-relevant-article-candidates`。
+
+中文文章发现使用 60 秒软预算、90 秒硬上限和单适配器 10 秒限制；软预算后不再调度新来源。公共发现最多允许两轮；weak 候选不进入自动选文或 `articleCandidateIds`，但已登记且主题匹配的 weak 候选允许进入受控的 `acquire-web`。通用网页必须通过 `acquire-web` 生成受控 executor-result，再由 `materialize-web` 校验哈希、授权、正文结构与本地资产并生成 `collectPayloadPath`。weak 只有成功物化并通过正文主题复验后才能收录。不得手工重定向 stdout，不得手工构造 collect payload，也不得手写 sanitized 正文或 full-text receipt。
+
+首次登记公共 inventory 时按互斥顺序解析来源：用户原始直链、已 fetched 且仍在 scope 内的 crawl frontier、最后才是 public-discover 已授权的 article 或 weak 候选。public-discover 条目在 `collect` 时还会针对 canonical title 与去除 frontmatter、URL、图片路径和纯元数据后的 sanitized Markdown 复验主题；只有 `matched`（无主题契约时为 `not-required`）才能物化。`status` 对新 1.1 会话只读复验候选与正文，失配时 `deliveryComplete=false` 且不返回 `downstreamInput`，`publish` 因而不能创建交付目录。
+
+不在候选中的 URL、`reject` 候选、`unmatched`/`unknown` 候选以及 Agent 手工补充的 URL 仍拒绝；来源门禁返回 `SOURCE_NOT_AUTHORIZED_BY_DISCOVERY`，主题门禁返回对应的主题错误。`pageType=weak` 只表示页面结构尚不确定，可以进入受控抓取和物化，但不能人工提升为 article，也不能绕过 materializer 或正文主题复验。旧 1.0 或缺少 gate 的公共会话保持 status/inspect/export 只读兼容并返回 warning；新的 `public-discover`、`collect`、`record-pending` 和首次 `publish` 返回 `DISCOVERY_RELEVANCE_MIGRATION_REQUIRED`，恢复方式是创建新内部 run。已经发布且来源、计划和目标完全未变化的历史回执仍可只读或幂等返回，不得原地推断、回填或篡改历史主题结论。enterprise 会话不受这项公共来源迁移规则影响。
 
 同一 `sourceSkill + sourceUrl` 视为同一来源记录；inventory 不得存在相同来源身份，并以最新采集操作为准。HTTP(S) URL 另按去 fragment、去末尾 `index.html`、统一尾斜杠及 query 参数排序后的值生成 `duplicateGroupKey`。同组的所有来源记录和 provenance 必须保留，第一条为 provenance 主记录，其余条目以 `duplicateOf` 指向主记录；canonical view 每个重复组仅输出按 inventory 顺序选出的首个已物化代表。
 
@@ -162,8 +174,76 @@ payload 文件必须位于当前会话的 `.collection-inputs/` 内，成功登�
 
 `rawArtifacts` 是可选的来源恢复证据列表。每个显式登记的文件必须位于 `raw/`、真实存在、非空、可读且不是符号链接；重复路径按首次出现顺序去重。`rawArtifacts` 省略时保留 inventory 中已有的列表，显式传入时替换当前列表，传入空数组表示明确清空当前来源证据。
 
+公共来源只有在执行器或专用 materializer 生成 `fullTextEvidence` 时才能把 `contentGranularity` 设为 `full-text`。证据对象不得由 Agent 手写，其 `artifact` 必须同时位于 `rawArtifacts`；否则使用 `unknown`、`excerpt` 或 `abstract` 的实际粒度。
+
+## arXiv 全文物化
+
+已授权并选中的 arXiv 候选无论来自 `--direct-urls` 或 `public-discover`，都以该候选 URL 作为规范来源 `sourceUrl`。若 PDF 表示不能直接读取，允许来源执行器读取同一论文 ID 的
+`https://arxiv.org/html/<paper-id>`，但必须把该实际地址登记为 `acquisitionUrl`；两者必须是 `arxiv.org` 官方 HTTPS 地址且具有
+相同论文 ID。不得用模型记忆、镜像、`curl`、`web_fetch`、`wget` 或 `requests` 取得替代内容。
+
+元数据 JSON 与 `bycli web read --url <URL> --output <session-dir>/raw/bycli/arxiv/<item-id>/` 生成的 Markdown、图片均原样保存在
+本会话 `raw/`。重试必须写入新的 `raw/bycli/arxiv/<item-id>-<attempt>/` 并保留既有输出；不得覆盖或手工改写 raw 证据，
+也不得手工下载、补抓图片；将 byCLI 实际生成的 Markdown 文件作为 `--fulltext-file` 后运行：
+
+```bash
+node scripts/knowledge-collection.mjs materialize-arxiv --session-dir <dir> \
+  --metadata-file <dir>/raw/bycli/arxiv/<item-id>/metadata.json \
+  --fulltext-file <dir>/raw/bycli/arxiv/<item-id>/fulltext.md \
+  --source-url <已授权候选 arXiv URL> \
+  --acquisition-url https://arxiv.org/html/<paper-id> \
+  --item-id <item-id>
+```
+
+`materialize-arxiv` 校验论文身份、标题、摘要、引言、参考文献、章节数量、截断标记和本地图片边界，并在 `raw/materialization/`
+生成含 `sourceUrl`、`acquisitionUrl` 的结构化回执。校验完整时返回 `.collection-inputs/` 下的 `collectPayloadPath` 并注册
+`fullTextEvidence`；只有返回非空 `collectPayloadPath` 时才能调用 `collect`。校验不足时保留 raw 证据，将条目维持为 pending，
+不得由 Agent 手写 Markdown 或证据将摘要、节选提升为完整正文。
+
 只有需要在建会话时预置包含 pending 条目的完整清单，才使用 `--metadata-input-file`。只有导入历史兼容视图时才需要 `--collection-result-input-file`；新会话的第一次 `collect` 不再要求预置它。除此之外一律通过 `collect` 登记。
+
+## 微信下载结果物化
+
+对 `bycli weixin download` 已保存到会话 `raw/` 下的结果，使用：
+
+```bash
+node scripts/knowledge-collection.mjs materialize-wechat --session-dir <dir> \
+  --executor-result-file <dir>/raw/bycli/weixin/<item-id>/download-result.json \
+  --item-id <item-id>
+```
+
+执行器结果 JSON 必须记录成功状态、`saved`、实际字节数、标题、作者、发布时间、`source_url` 和可信的
+`resolved_url=https://mp.weixin.qq.com/s...`。命令只删除确定的微信 UI、远程图片引用和纯推荐链接块，保留正文结语与作者免责声明；
+`source_url` 必须保持为用户直链或 `public-discover` 选中的原始授权 URL（包括 Sogou 微信中转链接），并作为 canonical source；
+`resolved_url` 只记录 byCLI 实际解析到的微信文章地址。物化诊断必须记录两者、受控输入/输出文件哈希和 transactionId。
+高置信度时写入 `markdown/items/<item-id>/index.md`、`sanitized/items/<item-id>/index.md` 并返回
+`.collection-inputs/` 下的 `collectPayloadPath`。低置信度、登录页或疑似截断内容不生成 payload，而是保留 raw 证据并登记
+`materialization.status=pending`、`contentGranularity=unknown`，原因固定为 `wechat-materialization-low-confidence`。
+不得用正文长度或清洗成功本身把 unknown 提升为 full-text，也不得手工编辑 session inventory。
 
 ## 交付
 
-运行 `status` 后，只交付 `status.downstreamInput.files` 列出的、已验证存在于 `sanitized/items/` 下的 Markdown。详细终止规则见 [delivery.md](delivery.md)。
+运行 `status` 后，只有 `status.collection.deliveryComplete=true` 才能执行用户文件发布：
+
+```bash
+node scripts/knowledge-collection.mjs publish --session-dir <dir> --delivery-dir <path>
+```
+
+`selected` 和 `all` 至少包含一个条目，且不能有阻塞交付的 pending/failed 项；显式要求 `full-text` 时所有交付正文还必须为
+`full-text`。摘要或节选不能满足全文要求，空 inventory 也不能使这两种目标完成。条件不满足时不得执行 `publish`。
+
+相对 `<path>` 必须补充 `--session-root <Session Root>`；绝对路径保持原位置。目标不存在或为空时直接成为
+`actualDirectory`。目标非空时，在其中创建 `<task-slug>-collection-<short-run-id>/`，不得覆盖或删除目标目录中已有的未知内容。
+`<task-slug>` 优先来自首个已物化代表条目的标题，并限制为简短稳定名称；不得直接截取整段用户问题。`deliveryComplete=true` 之前以及 `publish` 调用之前不得创建或写入用户交付目录。
+目标是 `/`、普通文件或符号链接时拒绝。发布内容只来自 `status.downstreamInput.files`，并且只复制 Markdown 引用的本地图片；
+`raw/`、`markdown/`、metadata、状态文件和未引用图片不会发布。
+
+发布使用临时目录和原子改名，并在 `session.delivery` 中记录 `schemaVersion: "1.0"`、`status`、`planHash`、请求/实际目录、
+正文与图片的 source/target/hash 计划和时间。`status` 为 `planned`、`published`、`stale` 或 `failed`；写入用户目录前先持久化
+`planned`，最终文件复验和状态落盘完成后才变为 `published`。来源变化时交付为 `stale`；目标内容被修改、增减未知文件或目录时
+为 `failed`，不得覆盖。发布器同时持有会话锁和按请求路径派生的目标锁；异常留下的 staging 只能按计划中记录的精确路径与所有权
+标记恢复或清理，不得通配删除。
+只有目标仍与上次回执完全一致时，才能在同一个 `actualDirectory` 重新发布。
+
+未指定保存路径时，只交付 `status.downstreamInput.files` 列出的内部 Markdown。指定保存路径且发布成功时，交付
+`publish.deliveryInput`；详细终止与跨 Agent 规则见 [delivery.md](delivery.md)。

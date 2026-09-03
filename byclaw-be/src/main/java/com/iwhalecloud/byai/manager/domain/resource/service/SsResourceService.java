@@ -8,6 +8,7 @@ import com.alibaba.fastjson.JSONObject;
 import com.github.pagehelper.Page;
 import com.github.pagehelper.PageHelper;
 import com.iwhalecloud.byai.common.constants.resource.ImplType;
+import com.iwhalecloud.byai.common.constants.resource.OwnerType;
 import com.iwhalecloud.byai.common.constants.resource.SystemCode;
 import com.iwhalecloud.byai.common.constants.resource.WorkerAgentType;
 import com.iwhalecloud.byai.common.exception.BaseException;
@@ -214,7 +215,7 @@ public class SsResourceService {
         if (StringUtil.isNotEmpty(resourceCode)) {
             queryWrapper.eq(SsResource::getResourceCode, resourceCode);
         }
-        return ssResourceMapper.selectOne(queryWrapper);
+        return ssResourceMapper.selectOne(queryWrapper, false);
     }
 
     /**
@@ -490,11 +491,15 @@ public class SsResourceService {
      * @param resourceIdNoEqual 排除的资源主键（编辑时排除自身），可空
      * @return 匹配条数
      */
-    public long countResource(String resourceName, String resourceBizType, Long resourceIdNoEqual) {
+    public long countResource(String resourceName, String resourceBizType, String ownerType, Long resourceIdNoEqual) {
 
         LambdaQueryWrapper<SsResource> queryWrapper = new LambdaQueryWrapper<>();
-        queryWrapper.eq(SsResource::getResourceName, resourceName);
 
+        if (OwnerType.PERSONAL.equalsIgnoreCase(ownerType)) {
+            queryWrapper.eq(SsResource::getCreateBy, CurrentUserHolder.getCurrentUserId());
+        }
+
+        queryWrapper.eq(SsResource::getResourceName, resourceName);
         if (StringUtil.isNotEmpty(resourceBizType)) {
             queryWrapper.eq(SsResource::getResourceBizType, resourceBizType);
         }
@@ -513,14 +518,14 @@ public class SsResourceService {
      * @return 可用资源名称
      */
     public String generateAvailableResourceName(String baseName, String resourceBizType) {
-        long sameBaseNameCount = this.countResource(baseName, resourceBizType, null);
+        long sameBaseNameCount = this.countResource(baseName, resourceBizType, null, null);
         if (sameBaseNameCount <= 0) {
             return baseName;
         }
 
         int suffix = Math.toIntExact(sameBaseNameCount + 1);
         String availableName = baseName + "(" + suffix + ")";
-        while (this.countResource(availableName, resourceBizType, null) > 0) {
+        while (this.countResource(availableName, resourceBizType, null, null) > 0) {
             suffix++;
             availableName = baseName + "(" + suffix + ")";
         }
@@ -888,5 +893,19 @@ public class SsResourceService {
         queryWrapper.orderByAsc(SsResource::getResourceName);
         queryWrapper.orderByAsc(SsResource::getResourceId);
         return ssResourceMapper.selectList(queryWrapper);
+    }
+
+
+    /**
+     * 根据编码统计资源数量
+     *
+     * @param resourceCodes 资源编码
+     * @return long
+     */
+    public long countByResourceCodes(List<String> resourceCodes) {
+        LambdaQueryWrapper<SsResource> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.in(SsResource::getResourceCode, resourceCodes);
+        Long count = ssResourceMapper.selectCount(queryWrapper);
+        return count != null ? count : 0L;
     }
 }

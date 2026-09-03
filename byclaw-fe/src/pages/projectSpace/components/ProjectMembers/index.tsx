@@ -26,6 +26,7 @@ import styles from '../../index.module.less';
 interface Props {
   project: ProjectSpace;
   keyword?: string;
+  compact?: boolean;
   onToolbarChange?: (toolbar: React.ReactNode | null) => void;
   onRefreshToolbarChange?: (toolbar: React.ReactNode | null) => void;
 }
@@ -36,10 +37,18 @@ const AGENT_PAGE_SIZE = 10;
 const getMemberAvatarText = (member: ProjectMember) =>
   getDisplayUserNameInChat(`${member.userName || member.userCode || member.userId || ''}`.trim()) || '?';
 
-const ProjectMembers: React.FC<Props> = ({ project, keyword = '', onToolbarChange, onRefreshToolbarChange }) => {
+const ProjectMembers: React.FC<Props> = ({
+  project,
+  keyword = '',
+  compact = false,
+  onToolbarChange,
+  onRefreshToolbarChange,
+}) => {
   const intl = useIntl();
   const userInfo = useSelector((state: any) => state.user?.userInfo) || {};
   const currentUserId = userInfo.userId ?? userInfo.id;
+  const currentUserCode = userInfo.userCode;
+  const currentUserName = userInfo.userName ?? userInfo.name;
   const [allMembers, setAllMembers] = useState<ProjectMember[]>([]);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [loading, setLoading] = useState(false);
@@ -63,12 +72,14 @@ const ProjectMembers: React.FC<Props> = ({ project, keyword = '', onToolbarChang
     () =>
       currentUserId !== undefined &&
       (`${currentUserId}` === `${project.createBy}` ||
+        `${currentUserCode || ''}` === `${project.createBy}` ||
+        `${currentUserName || ''}` === `${project.createBy}` ||
         allMembers.some(
           (member) =>
             `${member.userId}` === `${currentUserId}` &&
             ['owner', 'creator'].includes(`${member.role || ''}`.toLowerCase())
         )),
-    [allMembers, currentUserId, project.createBy]
+    [allMembers, currentUserCode, currentUserId, currentUserName, project.createBy]
   );
   const isCurrentUserMember = useCallback(
     (member: ProjectMember) => currentUserId !== undefined && `${currentUserId}` === `${member.userId}`,
@@ -426,9 +437,15 @@ const ProjectMembers: React.FC<Props> = ({ project, keyword = '', onToolbarChang
     onToolbarChange?.(
       isProjectCreator ? (
         <div className={styles.headerActions}>
-          <Button size="small" icon={<PlusOutlined />} loading={addMemberLoading} onClick={handleOpenAddMember}>
-            {intl.formatMessage({ id: 'projectSpace.members.addMember' })}
-          </Button>
+          <Button
+            type="text"
+            size="small"
+            className={styles.resourceCardExpandButton}
+            icon={<PlusOutlined />}
+            aria-label={intl.formatMessage({ id: 'projectSpace.members.addMember' })}
+            loading={addMemberLoading}
+            onClick={handleOpenAddMember}
+          />
         </div>
       ) : null
     );
@@ -476,110 +493,180 @@ const ProjectMembers: React.FC<Props> = ({ project, keyword = '', onToolbarChang
       <div className={styles.dataPanel}>
         <Spin spinning={loading}>
           {visibleMembers.length ? (
-            <div className={styles.dataCardGrid}>
-              {visibleMembers.map((member) => {
-                const isOwner = `${member.role || ''}`.toLowerCase() === 'owner';
-                const isCurrentUser = isCurrentUserMember(member);
-                const canOperate = isProjectCreator || isCurrentUser;
-                const memberCreateTime =
-                  member.createTime && dayjs(member.createTime).isValid()
-                    ? dayjs(member.createTime).format('YYYY-MM-DD HH:mm')
-                    : member.createTime || '-';
-                return (
-                  <article
-                    key={`${member.memberId || member.userId}`}
-                    className={styles.dataCard}
-                    tabIndex={canOperate ? 0 : -1}
-                  >
-                    <div className={styles.memberCardIdentity}>
-                      {/* 成员头像复用系统用户头像规则，使用方形主色底并展示姓名后两个字。 */}
-                      <div className={styles.memberUserAvatar}>{getMemberAvatarText(member)}</div>
-                      <div className={styles.memberCardName}>
-                        <Typography.Text strong ellipsis>
+            compact ? (
+              <div className={styles.membersCompactCard}>
+                {filteredMembers.map((member) => {
+                  const isOwner = `${member.role || ''}`.toLowerCase() === 'owner';
+                  const canOperate = isProjectCreator || isCurrentUserMember(member);
+                  return (
+                    <Dropdown
+                      key={`${member.memberId || member.userId}`}
+                      trigger={['hover']}
+                      placement="bottomRight"
+                      menu={{
+                        items: [
+                          ...(canOperate
+                            ? [
+                              {
+                                key: 'bind-agent',
+                                icon: <RobotOutlined />,
+                                label: intl.formatMessage({
+                                  id: member.agentId
+                                    ? 'projectSpace.members.changeAgent'
+                                    : 'projectSpace.members.bindAgent',
+                                }),
+                              },
+                              ...(member.agentId
+                                ? [
+                                  {
+                                    key: 'unbind-agent',
+                                    danger: true,
+                                    icon: <DisconnectOutlined />,
+                                    label: intl.formatMessage({ id: 'projectSpace.members.unbindAgent' }),
+                                  },
+                                ]
+                                : []),
+                              ...(isProjectCreator && !isOwner
+                                ? [
+                                  {
+                                    key: 'remove-member',
+                                    danger: true,
+                                    icon: <DeleteOutlined />,
+                                    label: intl.formatMessage({ id: 'projectSpace.members.removeMember' }),
+                                  },
+                                ]
+                                : []),
+                            ]
+                            : []),
+                        ],
+                        onClick: ({ key }) => {
+                          if (key === 'bind-agent') handleOpenAgentModal(member);
+                          if (key === 'unbind-agent') handleUnbindAgent(member);
+                          if (key === 'remove-member') handleRemoveMember(member);
+                        },
+                      }}
+                    >
+                      <span className={styles.memberCompactTag}>
+                        <span className={styles.memberCompactAvatar}>{getMemberAvatarText(member)}</span>
+                        <span className={styles.memberCompactName}>
                           {member.userName || member.userCode || `${member.userId}`}
+                        </span>
+                        {canOperate && <MoreOutlined className={styles.memberCompactMore} />}
+                      </span>
+                    </Dropdown>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className={styles.dataCardGrid}>
+                {visibleMembers.map((member) => {
+                  const isOwner = `${member.role || ''}`.toLowerCase() === 'owner';
+                  const isCurrentUser = isCurrentUserMember(member);
+                  const canOperate = isProjectCreator || isCurrentUser;
+                  const memberCreateTime =
+                    member.createTime && dayjs(member.createTime).isValid()
+                      ? dayjs(member.createTime).format('YYYY-MM-DD HH:mm')
+                      : member.createTime || '-';
+                  return (
+                    <article
+                      key={`${member.memberId || member.userId}`}
+                      className={styles.dataCard}
+                      tabIndex={canOperate ? 0 : -1}
+                    >
+                      <div className={styles.memberCardIdentity}>
+                        {/* 成员头像复用系统用户头像规则，使用方形主色底并展示姓名后两个字。 */}
+                        <div className={styles.memberUserAvatar}>{getMemberAvatarText(member)}</div>
+                        <div className={styles.memberCardName}>
+                          <Typography.Text strong ellipsis>
+                            {member.userName || member.userCode || `${member.userId}`}
+                          </Typography.Text>
+                          <Typography.Text type="secondary" ellipsis>
+                            {member.userCode || `${member.userId}`}
+                          </Typography.Text>
+                        </div>
+                      </div>
+                      <Tag
+                        className={styles.memberRoleTag}
+                        color={isOwner ? 'gold' : isCurrentUser ? 'blue' : 'default'}
+                      >
+                        {isOwner
+                          ? intl.formatMessage({ id: 'projectSpace.members.owner' })
+                          : isCurrentUser
+                            ? intl.formatMessage({ id: 'projectSpace.members.currentUser' })
+                            : intl.formatMessage({ id: 'projectSpace.members.member' })}
+                      </Tag>
+                      <div className={styles.memberCardMeta}>
+                        <Typography.Text className={styles.memberCardAgent} type="secondary" ellipsis>
+                          <span>
+                            {member.agentName || intl.formatMessage({ id: 'projectSpace.members.unboundAgent' })}
+                          </span>
                         </Typography.Text>
-                        <Typography.Text type="secondary" ellipsis>
-                          {member.userCode || `${member.userId}`}
+                        {/* 成员创建时间只展示到分钟，悬停操作出现时主动让出右下角空间。 */}
+                        <Typography.Text className={styles.memberCardCreateTime} type="secondary">
+                          {memberCreateTime}
                         </Typography.Text>
                       </div>
-                    </div>
-                    <Tag className={styles.memberRoleTag} color={isOwner ? 'gold' : isCurrentUser ? 'blue' : 'default'}>
-                      {isOwner
-                        ? intl.formatMessage({ id: 'projectSpace.members.owner' })
-                        : isCurrentUser
-                          ? intl.formatMessage({ id: 'projectSpace.members.currentUser' })
-                          : intl.formatMessage({ id: 'projectSpace.members.member' })}
-                    </Tag>
-                    <div className={styles.memberCardMeta}>
-                      <Typography.Text className={styles.memberCardAgent} type="secondary" ellipsis>
-                        <span>
-                          {member.agentName || intl.formatMessage({ id: 'projectSpace.members.unboundAgent' })}
-                        </span>
-                      </Typography.Text>
-                      {/* 成员创建时间只展示到分钟，悬停操作出现时主动让出右下角空间。 */}
-                      <Typography.Text className={styles.memberCardCreateTime} type="secondary">
-                        {memberCreateTime}
-                      </Typography.Text>
-                    </div>
-                    {canOperate && (
-                      <Dropdown
-                        trigger={['hover']}
-                        placement="bottomRight"
-                        menu={{
-                          items: [
-                            {
-                              key: 'bind-agent',
-                              icon: <RobotOutlined />,
-                              label: intl.formatMessage({
-                                id: member.agentId
-                                  ? 'projectSpace.members.changeAgent'
-                                  : 'projectSpace.members.bindAgent',
-                              }),
+                      {canOperate && (
+                        <Dropdown
+                          trigger={['hover']}
+                          placement="bottomRight"
+                          menu={{
+                            items: [
+                              {
+                                key: 'bind-agent',
+                                icon: <RobotOutlined />,
+                                label: intl.formatMessage({
+                                  id: member.agentId
+                                    ? 'projectSpace.members.changeAgent'
+                                    : 'projectSpace.members.bindAgent',
+                                }),
+                              },
+                              ...(member.agentId
+                                ? [
+                                  {
+                                    key: 'unbind-agent',
+                                    danger: true,
+                                    icon: <DisconnectOutlined />,
+                                    label: intl.formatMessage({ id: 'projectSpace.members.unbindAgent' }),
+                                  },
+                                ]
+                                : []),
+                              ...(isProjectCreator && !isOwner
+                                ? [
+                                  {
+                                    key: 'remove-member',
+                                    danger: true,
+                                    icon: <DeleteOutlined />,
+                                    label: intl.formatMessage({ id: 'projectSpace.members.removeMember' }),
+                                  },
+                                ]
+                                : []),
+                            ],
+                            onClick: ({ key }) => {
+                              if (key === 'bind-agent') {
+                                handleOpenAgentModal(member);
+                              } else if (key === 'unbind-agent') {
+                                handleUnbindAgent(member);
+                              } else if (key === 'remove-member') {
+                                handleRemoveMember(member);
+                              }
                             },
-                            ...(member.agentId
-                              ? [
-                                {
-                                  key: 'unbind-agent',
-                                  danger: true,
-                                  icon: <DisconnectOutlined />,
-                                  label: intl.formatMessage({ id: 'projectSpace.members.unbindAgent' }),
-                                },
-                              ]
-                              : []),
-                            ...(isProjectCreator && !isOwner
-                              ? [
-                                {
-                                  key: 'remove-member',
-                                  danger: true,
-                                  icon: <DeleteOutlined />,
-                                  label: intl.formatMessage({ id: 'projectSpace.members.removeMember' }),
-                                },
-                              ]
-                              : []),
-                          ],
-                          onClick: ({ key }) => {
-                            if (key === 'bind-agent') {
-                              handleOpenAgentModal(member);
-                            } else if (key === 'unbind-agent') {
-                              handleUnbindAgent(member);
-                            } else if (key === 'remove-member') {
-                              handleRemoveMember(member);
-                            }
-                          },
-                        }}
-                      >
-                        <Button className={styles.memberCardMore} type="text" size="small" icon={<MoreOutlined />} />
-                      </Dropdown>
-                    )}
-                  </article>
-                );
-              })}
-            </div>
+                          }}
+                        >
+                          <Button className={styles.memberCardMore} type="text" size="small" icon={<MoreOutlined />} />
+                        </Dropdown>
+                      )}
+                    </article>
+                  );
+                })}
+              </div>
+            )
           ) : (
             !loading && (
               <Empty
+                className={styles.membersEmpty}
                 image={Empty.PRESENTED_IMAGE_SIMPLE}
-                description={intl.formatMessage({ id: 'projectSpace.members.empty' })}
+                description={intl.formatMessage({ id: 'common.noData' })}
               />
             )
           )}
@@ -631,7 +718,7 @@ const ProjectMembers: React.FC<Props> = ({ project, keyword = '', onToolbarChang
         <Spin spinning={agentLoading}>
           <div className={smallDetailStyles.agentList} onScroll={handleAgentListScroll}>
             {agentOptions.length === 0 ? (
-              <Empty description={intl.formatMessage({ id: 'projectSpace.members.emptyAgents' })} />
+              <Empty description={intl.formatMessage({ id: 'common.noData' })} />
             ) : (
               <List
                 dataSource={agentOptions}

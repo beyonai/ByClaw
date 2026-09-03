@@ -62,4 +62,57 @@ describe('stateful message item updates', () => {
       content: { substance: { title: 'Done', status: SSEEventStatus.done } },
     });
   });
+
+  it('updates an edit diff card in place when its applied result arrives later', () => {
+    const list = [
+      {
+        seq: 1,
+        contentType: SSEMessageType.editDiff,
+        status: SSEEventStatus.start,
+        content: {
+          orderId: 'edit-call-1',
+          substance: { type: 'edit_diff', schemaVersion: 1, eventId: 'edit-call-1', phase: 'running' },
+        },
+      } as IMessageListItem,
+      { seq: 2, contentType: SSEMessageType.text, content: { substance: '处理中' } } as IMessageListItem,
+    ];
+    const replay = {
+      seq: 3,
+      contentType: SSEMessageType.editDiff,
+      status: SSEEventStatus.done,
+      content: {
+        orderId: 'edit-call-1',
+        substance: { type: 'edit_diff', schemaVersion: 1, eventId: 'edit-call-1', phase: 'applied' },
+      },
+    } as IMessageListItem;
+
+    expect(updateExistingMessage(list, replay)).toBe(true);
+    expect(list).toHaveLength(2);
+    expect(list[0].content.substance).toEqual({
+      type: 'edit_diff',
+      schemaVersion: 1,
+      eventId: 'edit-call-1',
+      phase: 'applied',
+    });
+    expect(list[0].status).toBe(SSEEventStatus.done);
+  });
+
+  it('replaces a streamed task-plan snapshot instead of concatenating JSON payloads', () => {
+    const first = {
+      seq: 1,
+      contentType: SSEMessageType.taskOutline,
+      content: { orderId: 'child-message:plan', substance: '{"planId":"v1"}' },
+    } as IMessageListItem;
+    const list = [first];
+    const next = {
+      seq: 2,
+      contentType: SSEMessageType.taskOutline,
+      content: { orderId: 'child-message:plan', substance: '{"planId":"v2"}' },
+    } as IMessageListItem;
+
+    expect(updateExistingMessage(list, next)).toBe(true);
+    expect(list).toHaveLength(1);
+    expect(list[0].seq).toBe(1);
+    expect(list[0].content.substance).toBe('{"planId":"v2"}');
+  });
 });

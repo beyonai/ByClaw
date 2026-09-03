@@ -5,6 +5,7 @@ import { createMessage, fetchMessageHandler, hasVisibleMessageContent } from '@/
 import { getMessages, getMessageState } from '@/service/message';
 
 import type { IMessage, TaskPlanSnapshot } from '@/typescript/message';
+import { shouldApplyScopedChildRun, type ScopedChildRunState } from '@/utils/scopedSession';
 
 const _INIT_PAGESIZE_ = 20;
 
@@ -128,6 +129,7 @@ export type IMessageInfo = {
   targetMessageId?: string;
   pageRange: [number, number];
   hasMore?: boolean;
+  childRun?: ScopedChildRunState;
 };
 
 export type MessageListUpdater = IMessage[] | ((messageList: IMessage[]) => IMessage[]);
@@ -354,12 +356,9 @@ export default {
 
       if (oldMessageInfo) {
         newSessionListMap.set(`${sessionId}`, {
+          ...oldMessageInfo,
           list: messageList,
-          pageSize: oldMessageInfo.pageSize,
-          pageNum: oldMessageInfo.pageNum,
           total: oldMessageInfo.total + (size(messageList) - size(oldMessageInfo.list)),
-          pageRange: oldMessageInfo.pageRange,
-          hasMore: oldMessageInfo.hasMore,
         });
       } else if (allowCreateSession) {
         newSessionListMap.set(`${sessionId}`, {
@@ -377,6 +376,33 @@ export default {
         sessionListMap: newSessionListMap,
       };
     },
+    applyScopedChildProjection(
+      state: IState,
+      action: {
+        payload: { sessionId: string; message: IMessage; childRun: ScopedChildRunState };
+      }
+    ) {
+      const { sessionId, message, childRun } = action.payload;
+      const sessionListMap = new Map(state.sessionListMap);
+      const messageInfo = sessionListMap.get(`${sessionId}`);
+      if (!messageInfo || !shouldApplyScopedChildRun(messageInfo.childRun, childRun)) return state;
+
+      const list = [...(messageInfo.list || [])];
+      const messageIndex = list.findIndex((item) => {
+        if (item.messageId && message.messageId) return `${item.messageId}` === `${message.messageId}`;
+        return Boolean(item.msgId && message.msgId && `${item.msgId}` === `${message.msgId}`);
+      });
+      if (messageIndex >= 0) list[messageIndex] = message;
+      else list.push(message);
+
+      sessionListMap.set(`${sessionId}`, {
+        ...messageInfo,
+        list,
+        total: messageInfo.total + (messageIndex >= 0 ? 0 : 1),
+        childRun,
+      });
+      return { ...state, sessionListMap };
+    },
     applyTaskPlanSnapshot(
       state: IState,
       action: { payload: { sessionId: string; messageId?: string; taskPlan: TaskPlanSnapshot } }
@@ -392,9 +418,15 @@ export default {
         const matchesTraceId = taskPlan.traceId && `${message.traceId || ''}` === `${taskPlan.traceId}`;
         if (!message.fromBeyond || (!matchesMessageId && !matchesTraceId)) return message;
 
+        const currentPlan = message.taskPlan;
         const currentVersion = Number(message.taskPlan?.version || 0);
         const nextVersion = Number(taskPlan.version || 0);
-        if (currentVersion >= nextVersion) return message;
+        if (currentPlan?.planId === taskPlan.planId && currentVersion >= nextVersion) return message;
+        if (currentPlan?.planId && currentPlan.planId !== taskPlan.planId) {
+          const currentTime = Date.parse(`${currentPlan.updatedAt || currentPlan.createdAt || ''}`);
+          const nextTime = Date.parse(`${taskPlan.updatedAt || taskPlan.createdAt || ''}`);
+          if (Number.isFinite(currentTime) && Number.isFinite(nextTime) && nextTime < currentTime) return message;
+        }
 
         changed = true;
         return { ...message, taskPlan };

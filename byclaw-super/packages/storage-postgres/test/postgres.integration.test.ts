@@ -219,7 +219,14 @@ suite("PostgreSQL persistence integration", () => {
         WHERE run_id = $1`,
       [run.id],
     );
-    expect(storedCredential.rows[0]?.credential).toBe("short-lived-token");
+    expect(JSON.parse(storedCredential.rows[0]?.credential)).toEqual({
+      format: "byclaw-execution-context-v1",
+      secret: "short-lived-token",
+      metadata: {
+        "System-Code": "system-1",
+        channelExtension: { source: "byclaw-be" },
+      },
+    });
     await database.pool.query(
       `UPDATE "${database.schema}"."byai_super_run_execution_credentials"
           SET expires_at = clock_timestamp() - interval '1 second'
@@ -235,7 +242,44 @@ suite("PostgreSQL persistence integration", () => {
     ).resolves.toMatchObject({
       runId: run.id,
       secret: "short-lived-token",
+      metadata: {
+        "System-Code": "system-1",
+        channelExtension: { source: "byclaw-be" },
+      },
     });
+
+    await database.credentials.save({
+      runId: run.id,
+      secret: "refreshed-token",
+      createdAt: Date.now(),
+    });
+    await expect(
+      database.credentials.loadForLease({
+        runId: run.id,
+        instanceId: "instance-a",
+        fencingToken: first?.fencingToken ?? 0,
+      }),
+    ).resolves.toMatchObject({
+      secret: "refreshed-token",
+      metadata: {
+        "System-Code": "system-1",
+        channelExtension: { source: "byclaw-be" },
+      },
+    });
+
+    await database.pool.query(
+      `UPDATE "${database.schema}"."byai_super_run_execution_credentials"
+          SET credential = 'legacy-token'
+        WHERE run_id = $1`,
+      [run.id],
+    );
+    await expect(
+      database.credentials.loadForLease({
+        runId: run.id,
+        instanceId: "instance-a",
+        fencingToken: first?.fencingToken ?? 0,
+      }),
+    ).resolves.toMatchObject({ secret: "legacy-token", metadata: {} });
 
     await database.pool.query(
       `UPDATE "${database.schema}"."byai_super_session_execution_leases"
@@ -638,6 +682,10 @@ function executionCredential(runId: string): ExecutionCredential {
   return {
     runId,
     secret: "short-lived-token",
+    metadata: {
+      "System-Code": "system-1",
+      channelExtension: { source: "byclaw-be" },
+    },
     createdAt: now,
   };
 }

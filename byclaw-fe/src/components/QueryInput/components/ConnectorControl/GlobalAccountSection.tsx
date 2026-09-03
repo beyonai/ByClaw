@@ -65,7 +65,20 @@ const GlobalAccountSection = ({ onToolbarChange }: GlobalAccountSectionProps) =>
         if (account) {
           await updateOperationAccount({ ...payload, accountId: account.id });
         } else {
-          await createGlobalOperationAccount(payload);
+          const result: any = await createGlobalOperationAccount(payload);
+          // 新增账号保存成功后，沿用账号卡片的登录链路，自动打开右侧远程桌面。
+          const createdAccountId = result?.accountId ?? result?.data?.accountId ?? result?.id ?? result?.data?.id;
+          if (createdAccountId !== undefined && createdAccountId !== null) {
+            // Login preparation opens the remote desktop and may wait on sandbox
+            // initialization. Do not block the account refresh on that UI flow.
+            void handleLogin({
+              id: createdAccountId,
+              platformId: values.platformId,
+              accountName: values.accountName,
+              accountId: values.accountId,
+              customUrl: values.customUrl,
+            }).catch(() => undefined);
+          }
         }
         await loadAccounts();
         message.success(intl.formatMessage({ id: 'projectSpace.operation.account.saveSuccess' }));
@@ -73,7 +86,7 @@ const GlobalAccountSection = ({ onToolbarChange }: GlobalAccountSectionProps) =>
         setSaving(false);
       }
     },
-    [intl, loadAccounts]
+    [handleLogin, intl, loadAccounts]
   );
 
   const handleDelete = useCallback(

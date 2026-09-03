@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Dropdown, Empty, Input, Modal, Skeleton, Spin, Tag, Tooltip, message } from 'antd';
-import { DownOutlined, LoadingOutlined, PlusOutlined, RightOutlined, SearchOutlined } from '@ant-design/icons';
+import { Button, Dropdown, Empty, Input, Modal, Skeleton, Spin, Tooltip, message } from 'antd';
+import { DownOutlined, PlusOutlined, RightOutlined, SearchOutlined } from '@ant-design/icons';
 // @ts-ignore
 import { useDispatch, useIntl, useNavigate, useSelector } from '@umijs/max';
-import classNames from 'classnames';
 import { trim } from 'lodash';
+import classNames from 'classnames';
 import useGlobal from '@/hooks/useGlobal';
 import ProjectFormModal, {
   type ProjectFormValues,
@@ -24,7 +24,6 @@ import {
 import type { ProjectMember, ProjectSession, ProjectSpace } from '@/pages/projectSpace/types';
 import {
   getArrayData,
-  getProjectTagMeta,
   normalizeProjectDetail,
   normalizeProjectSession,
 } from '@/pages/projectSpace/utils';
@@ -61,8 +60,6 @@ type ProjectSessionPageState = {
   keyword?: string;
   searchMode?: DevloopProjectSessionSearchMode;
 };
-
-type ProjectSpaceTranslate = (id: string, values?: Record<string, string | number>) => string;
 
 const sortProjectSessions = (sessions: ProjectSession[] = []) => {
   return [...sessions].sort((left, right) => {
@@ -151,41 +148,7 @@ const getOperationSessionDescription = (session: ProjectSession): string | undef
   );
 };
 
-const getProjectScenes = (project: ProjectSpace, t: ProjectSpaceTranslate) => {
-  const projectTag = getProjectTagMeta(project);
-  return [{ classSuffix: projectTag.classSuffix, text: t(projectTag.messageId.replace('projectSpace.', '')) }];
-};
-
 // 研发项目未完成初始化(pending/initialized/initializing)时展示初始化中标签,提示尚不能建需求/启动任务。
-const isProjectInitializing = (project: ProjectSpace) =>
-  project.projectType === 'develop' && !!project.initStatus && project.initStatus !== 'ready';
-
-const renderProjectSceneTag = (project: ProjectSpace, t: ProjectSpaceTranslate, className?: string) => {
-  const scenes = getProjectScenes(project, t);
-  return (
-    <span className={styles.projectTagGroup}>
-      {scenes.map((scene) => (
-        <Tag
-          key={scene.classSuffix}
-          bordered={false}
-          className={classNames(styles.projectTag, styles[`projectTag${scene.classSuffix}`], className)}
-        >
-          {scene.text}
-        </Tag>
-      ))}
-      {isProjectInitializing(project) && (
-        <Tag
-          bordered={false}
-          icon={<LoadingOutlined spin />}
-          className={classNames(styles.projectTag, styles.projectTagInitializing, className)}
-        >
-          {t('scene.initializing')}
-        </Tag>
-      )}
-    </span>
-  );
-};
-
 const isDefaultProject = (project?: ProjectSpace) => project?.projectType === 'default';
 
 const getProjectIdFromSaveResponse = (response: any) => {
@@ -341,7 +304,6 @@ const ProjectSpaceList: React.FC = () => {
       label: (
         <span className={styles.scopeMenuLabel}>
           <span className={styles.scopeMenuName}>{project.projectName || t('unnamedProject')}</span>
-          {renderProjectSceneTag(project, t, styles.scopeMenuTag)}
         </span>
       ),
     }));

@@ -309,6 +309,13 @@ export function loadSession(paths, { persistMigration = true } = {}) {
 
 /** 权威写入: 校验敏感字段后原子落盘 session.json。 */
 export function persistSession(paths, session) {
+  const activeRunId = session?.task?.activeOrchestrationRunId;
+  if (activeRunId) {
+    const run = session.task?.publicCollectRun;
+    if (run?.runId !== activeRunId || Number(run?.actionLease?.pid) !== process.pid) {
+      throw new Error(`ORCHESTRATION_IN_PROGRESS: run=${activeRunId}`);
+    }
+  }
   assertNoSensitiveKeys(session);
   atomicWriteJson(paths.session, session);
 }
@@ -317,6 +324,18 @@ export function persistSession(paths, session) {
 export function persistCollection(paths, session, collectionMetadata) {
   session.collection = collectionMetadata;
   persistSession(paths, session);
+}
+
+export function markDeliveryStale(session, reason = 'collection-updated') {
+  if (session?.delivery?.schemaVersion === '1.0'
+    && session.delivery.status === 'published') {
+    session.delivery = {
+      ...session.delivery,
+      status: 'stale',
+      reason,
+      staleAt: new Date().toISOString(),
+    };
+  }
 }
 
 // ── 会话锁(pid/createdAt/ownerId/command) ──
@@ -375,7 +394,7 @@ function sameLock(left, right) {
     && left?.processStartTime === right?.processStartTime;
 }
 
-function linuxProcessStartTime(pid) {
+export function linuxProcessStartTime(pid) {
   try {
     const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
     const commEnd = stat.lastIndexOf(')');

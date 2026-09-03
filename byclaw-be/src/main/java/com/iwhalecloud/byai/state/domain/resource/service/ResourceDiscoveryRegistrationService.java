@@ -161,7 +161,7 @@ public class ResourceDiscoveryRegistrationService {
             return;
         }
         try {
-            LOGGER.info("资源服务开始反注册, serviceName={}, resourceBizType={}, resourceId={}, resourceCode={}",
+            LOGGER.warn("资源服务开始反注册, serviceName={}, resourceBizType={}, resourceId={}, resourceCode={}, registryTracked={}",
                 serviceName, resourceBizType, resourceId, resourceCode);
             ServiceRegistry registry = resourceRegistryMap.remove(serviceName);
             if (registry != null) {
@@ -186,6 +186,9 @@ public class ResourceDiscoveryRegistrationService {
             String instancesKey = SD_INSTANCE_DETAILS_PREFIX + serviceName;
             String activeKey = SD_ACTIVE_INSTANCES_PREFIX + serviceName;
             Map<String, String> instanceMap = jedis.hgetAll(instancesKey);
+            LOGGER.warn("资源服务清理 Redis 注册信息, serviceName={}, instancesKey={}, activeKey={}, instanceIds={}, activeCountBefore={}",
+                serviceName, instancesKey, activeKey,
+                instanceMap == null ? java.util.List.of() : instanceMap.keySet(), jedis.zcard(activeKey));
             if (instanceMap != null && !instanceMap.isEmpty()) {
                 String[] instanceIds = instanceMap.keySet().toArray(new String[0]);
                 jedis.hdel(instancesKey, instanceIds);
@@ -194,6 +197,7 @@ public class ResourceDiscoveryRegistrationService {
             jedis.del(instancesKey);
             jedis.del(activeKey);
             jedis.srem(SD_SERVICES_KEY, serviceName);
+            LOGGER.warn("资源服务清理 Redis 注册信息完成, serviceName={}, deletedInstancesKey={}, deletedActiveKey={}", serviceName, instancesKey, activeKey);
         }
     }
 
@@ -280,8 +284,10 @@ public class ResourceDiscoveryRegistrationService {
 
     @PreDestroy
     public void shutdown() {
+        LOGGER.warn("资源服务注册器开始 shutdown, trackedServiceNames={}", resourceRegistryMap.keySet());
         resourceRegistryMap.forEach((serviceName, registry) -> {
             try {
+                LOGGER.warn("应用关闭注销资源服务, serviceName={}, hasRegistry={}, hasCurrentInstance={}", serviceName, registry != null, registry != null && registry.getCurrentInstance() != null);
                 if (registry != null && registry.getCurrentInstance() != null) {
                     registry.unregister();
                 }
@@ -290,5 +296,6 @@ public class ResourceDiscoveryRegistrationService {
             }
         });
         resourceRegistryMap.clear();
+        LOGGER.warn("资源服务注册器 shutdown 完成");
     }
 }

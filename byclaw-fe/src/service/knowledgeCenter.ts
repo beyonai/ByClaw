@@ -57,7 +57,10 @@ export const queryAuthDoc = (data: any) => POST<any>('/byaiService/api/v2/resour
 export const delShare = (data: any) => POST<any>('/byaiService/datasetController/delShare', data);
 
 // 新建文件夹
-export const createFolder = (data: any) => POST<any>('/byaiService/datasetController/createFolder', data);
+export const createFolder = (data: any, config?: ConfigType) =>
+  config
+    ? POST<any>('/byaiService/datasetController/createFolder', data, config)
+    : POST<any>('/byaiService/datasetController/createFolder', data);
 
 // 查询文件列表
 export const getDataList = (data: any) => POST<any>('/byaiService/datasetController/getDataList', data);
@@ -317,11 +320,13 @@ export interface KnowledgeUploadResult {
 }
 
 // 上传文件
-export const uploadFiles = (data: FormData) =>
+export const uploadFiles = (data: FormData, config?: ConfigType) =>
   POST<KnowledgeUploadResult>('/byaiService/datasetController/uploadFiles', data, {
     timeout: 8 * 60 * 1000,
+    ...config,
     headers: {
       'Content-Type': 'multipart/form-data; charset=utf-8',
+      ...(config?.headers || {}),
     },
   });
 

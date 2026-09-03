@@ -6,6 +6,56 @@
   min-height: 22px;
 }
 
+.thinkingBlock {
+  min-width: 0;
+  color: var(--beyond-color-text-tertiary);
+}
+
+.thinkingSummary {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  padding: 4px 0;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  line-height: 22px;
+  text-align: left;
+  background: transparent;
+  cursor: pointer;
+
+  &:focus-visible {
+    border-radius: 4px;
+    outline: 2px solid var(--beyond-color-primary, #6f5cff);
+    outline-offset: 2px;
+  }
+}
+
+.thinkingSummaryLocked {
+  cursor: default;
+}
+
+.thinkingStatus {
+  flex-shrink: 0;
+  color: var(--beyond-color-text-tertiary);
+}
+
+.thinkingPreview {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--beyond-color-text-tertiary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thinkingChevron {
+  flex-shrink: 0;
+  margin-left: auto;
+  font-size: 12px;
+}
+
 .thinkingProcessResourceList {
   display: inline-block;
   padding: 4px 12px;

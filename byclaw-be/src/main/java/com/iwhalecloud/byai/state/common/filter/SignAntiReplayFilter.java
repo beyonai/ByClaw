@@ -3,7 +3,6 @@ package com.iwhalecloud.byai.state.common.filter;
 
 import java.io.IOException;
 import java.util.List;
-import java.util.regex.Pattern;
 
 import com.iwhalecloud.byai.common.constants.staticdata.RedisConfig;
 import com.iwhalecloud.byai.common.ecrypt.MD5Util;
@@ -40,6 +39,9 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
 
     private static final String FEISHU_BOT_EVENT_CALLBACK_PATH = "/feishu/bot/events";
 
+    private static final String WEIXIN_OPEN_PLATFORM_EVENT_CALLBACK_PATH =
+        "/connector/authorization/callback/weixin-open-platform/events";
+
     private static final String THIRD_PARTY_SKILL_INSTALL_PATH = "/tool/installThirdPartySkill";
 
     private static final String THIRD_PARTY_SKILL_MANAGEABLE_DIGITAL_EMPLOYEE_PATH =
@@ -52,9 +54,6 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
         "/internal/v1/orchestrators/resolve-runtime";
 
     private static final String ARTIFACT_UPLOAD_PATH = "/open/api/v1/artifacts";
-
-    private static final Pattern ARTIFACT_DATA_OWNER_PATH = Pattern.compile(
-        ".*/open/api/v1/artifacts/[^/]+/data-records(?:/[^/]+)?/?$");
 
     @org.springframework.beans.factory.annotation.Value("${artifact.preview.path-prefix:/artifact-preview}")
     private String artifactPreviewPathPrefix;
@@ -86,9 +85,9 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
             filterChain.doFilter(request, response);
             return;
         }
-        // 飞书开放平台回调由 Controller 内部校验 verificationToken/encryptKey，
+        // 飞书/微信开放平台事件回调由各自的 Controller/Service 校验平台签名与加密内容，
         // 外部平台不会携带系统签名头，必须在签名防重放过滤器中直接放行。
-        if (this.isFeishuBotEventCallback(request)) {
+        if (this.isFeishuBotEventCallback(request) || this.isWeixinOpenPlatformEventCallback(request)) {
             filterChain.doFilter(request, response);
             return;
         }
@@ -110,9 +109,8 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
             filterChain.doFilter(request, response);
             return;
         }
-        // 沙箱上传与数据访问使用Beyond-Token，匿名预览与数据访问使用能力URL，调用方都不持有门户签名盐。
-        if (this.isArtifactUpload(request) || this.isArtifactDataOwnerRequest(request)
-            || this.isArtifactCapabilityRequest(request)) {
+        // 沙箱上传使用 Beyond-Token；Artifact 公开内容与数据接口使用业务层访问约束，调用方均不持有门户签名盐。
+        if (this.isArtifactUpload(request) || this.isArtifactCapabilityRequest(request)) {
             filterChain.doFilter(request, response);
             return;
         }
@@ -190,6 +188,20 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
         return isRequestPath(request, THIRD_PARTY_SKILL_INSTALL_PATH);
     }
 
+    private boolean isWeixinOpenPlatformEventCallback(HttpServletRequest request) {
+        return isExactPostRequestPath(request, WEIXIN_OPEN_PLATFORM_EVENT_CALLBACK_PATH);
+    }
+
+    private boolean isExactPostRequestPath(HttpServletRequest request, String expectedPath) {
+        if (request == null || !"POST".equalsIgnoreCase(request.getMethod())) {
+            return false;
+        }
+        String requestUri = StringUtils.defaultString(request.getRequestURI());
+        String expectedUri = StringUtils.defaultString(request.getContextPath()) + expectedPath;
+        String normalizedUri = requestUri.endsWith("/") ? requestUri.substring(0, requestUri.length() - 1) : requestUri;
+        return normalizedUri.equals(expectedUri);
+    }
+
     private boolean isThirdPartySkillMarketplaceRequest(HttpServletRequest request) {
         return isThirdPartySkillInstall(request)
             || isRequestPath(request, THIRD_PARTY_SKILL_MANAGEABLE_DIGITAL_EMPLOYEE_PATH);
@@ -216,15 +228,6 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
     private boolean isArtifactUpload(HttpServletRequest request) {
         return request != null && "POST".equalsIgnoreCase(request.getMethod())
             && endsWithPath(request.getRequestURI(), ARTIFACT_UPLOAD_PATH);
-    }
-
-    private boolean isArtifactDataOwnerRequest(HttpServletRequest request) {
-        if (request == null || !("GET".equalsIgnoreCase(request.getMethod())
-            || "POST".equalsIgnoreCase(request.getMethod())
-            || "PUT".equalsIgnoreCase(request.getMethod()))) {
-            return false;
-        }
-        return ARTIFACT_DATA_OWNER_PATH.matcher(StringUtils.defaultString(request.getRequestURI())).matches();
     }
 
     private boolean isArtifactCapabilityRequest(HttpServletRequest request) {

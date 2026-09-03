@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.state.common.filter;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 import com.iwhalecloud.byai.common.config.SignAntiReplayConfig;
 import org.junit.jupiter.api.Test;
@@ -10,6 +11,40 @@ import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.util.ReflectionTestUtils;
 
 class SignAntiReplayFilterTest {
+
+    @Test
+    void letsWeixinOpenPlatformEventsPassWithoutCommonRequestSignature() throws Exception {
+        SignAntiReplayFilter filter = enabledFilter();
+        for (String path : java.util.List.of(
+                "/byaiService/connector/authorization/callback/weixin-open-platform/events",
+                "/byaiService/connector/authorization/callback/weixin-open-platform/events/")) {
+            MockHttpServletRequest request = new MockHttpServletRequest("POST", path);
+            request.setContextPath("/byaiService");
+            MockFilterChain filterChain = new MockFilterChain();
+
+            assertThatCode(() -> filter.doFilter(request, new MockHttpServletResponse(), filterChain))
+                .doesNotThrowAnyException();
+
+            assertThat(filterChain.getRequest()).isSameAs(request);
+        }
+    }
+
+    @Test
+    void requiresCommonSignatureForLookalikeOrNonPostWeixinEventPaths() {
+        SignAntiReplayFilter filter = enabledFilter();
+        for (MockHttpServletRequest request : java.util.List.of(
+                request("POST", "/other/connector/authorization/callback/weixin-open-platform/events", ""),
+                request("POST", "/byaiService/connector/authorization/callback/weixin-open-platform/events/more",
+                    "/byaiService"),
+                request("GET", "/byaiService/connector/authorization/callback/weixin-open-platform/events",
+                    "/byaiService"))) {
+            MockFilterChain filterChain = new MockFilterChain();
+            org.assertj.core.api.Assertions.assertThatThrownBy(
+                () -> filter.doFilter(request, new MockHttpServletResponse(), filterChain))
+                .isInstanceOf(RuntimeException.class);
+            assertThat(filterChain.getRequest()).isNull();
+        }
+    }
 
     @Test
     void letsSkillMarketplaceEndpointUseBeyondTokenWithoutCommonRequestSignature() throws Exception {
@@ -94,7 +129,7 @@ class SignAntiReplayFilterTest {
         ReflectionTestUtils.setField(filter, "artifactPreviewPathPrefix", "/artifact-preview");
         ReflectionTestUtils.setField(filter, "artifactDownloadPathPrefix", "/artifact-download");
         MockHttpServletRequest request = new MockHttpServletRequest("GET",
-            "/byaiService/artifact-preview/artifact/key/index.html");
+            "/byaiService/artifact-preview/artifact/index.html");
         request.setContextPath("/byaiService");
         MockFilterChain filterChain = new MockFilterChain();
 
@@ -108,20 +143,8 @@ class SignAntiReplayFilterTest {
         SignAntiReplayFilter filter = enabledFilter();
         ReflectionTestUtils.setField(filter, "artifactDataPathPrefix", "/artifact-data");
         MockHttpServletRequest request = new MockHttpServletRequest("GET",
-            "/byaiService/artifact-data/artifact/key/records/record-1");
+            "/byaiService/artifact-data/artifact/records/record-1");
         request.setContextPath("/byaiService");
-        MockFilterChain filterChain = new MockFilterChain();
-
-        filter.doFilter(request, new MockHttpServletResponse(), filterChain);
-
-        assertThat(filterChain.getRequest()).isSameAs(request);
-    }
-
-    @Test
-    void letsArtifactDataOwnerReadUseBeyondTokenWithoutRequestSignature() throws Exception {
-        SignAntiReplayFilter filter = enabledFilter();
-        MockHttpServletRequest request = new MockHttpServletRequest("GET",
-            "/byaiService/open/api/v1/artifacts/artifact-1/data-records/record-1");
         MockFilterChain filterChain = new MockFilterChain();
 
         filter.doFilter(request, new MockHttpServletResponse(), filterChain);
@@ -135,5 +158,11 @@ class SignAntiReplayFilterTest {
         config.setEnabled(true);
         ReflectionTestUtils.setField(filter, "signProperties", config);
         return filter;
+    }
+
+    private MockHttpServletRequest request(String method, String uri, String contextPath) {
+        MockHttpServletRequest request = new MockHttpServletRequest(method, uri);
+        request.setContextPath(contextPath);
+        return request;
     }
 }

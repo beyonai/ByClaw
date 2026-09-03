@@ -25,6 +25,7 @@ import { hydrateV2RuntimeState } from '@/utils/messageV2Runtime';
 import { getFileTypeByName } from '@/utils/file';
 import {
   commitScopedStream,
+  getScopedChildRunState,
   isExternalChildExtParams,
   isExternalChildSession,
   isScopedChildProjection,
@@ -247,6 +248,9 @@ function useChat(props: IProps) {
     updateMessage,
     reloadLatestMessageList,
     waitForSessionMessageLoaded = () => Promise.resolve(),
+    getSessionMessageLoadState = () => 'idle' as const,
+    retrySessionMessageLoad = () => Promise.resolve(),
+    applyScopedChildProjectionMessage,
   } = useMessage({
     sessionId,
   });
@@ -391,6 +395,10 @@ function useChat(props: IProps) {
 
   const isSessionRunning = useMemo(() => {
     return chatSessionRuntimeManager.isSessionRunning(sessionId);
+  }, [sessionId, runtimeVersion]);
+
+  const canAcceptInput = useMemo(() => {
+    return chatSessionRuntimeManager.canAcceptInput(sessionId);
   }, [sessionId, runtimeVersion]);
 
   const syncCurrentSessionRunningState = usePersistFn(async () => {
@@ -544,7 +552,12 @@ function useChat(props: IProps) {
 
     await waitForSessionMessageLoaded(projectionSessionId);
     const streamId = projection?.snapshotStreamId || projection?.streamId || envelopeStreamId;
-    if (!isScopedStreamNewer(scopedChildWatermarksRef.current, projectionSessionId, streamId)) return true;
+    if (
+      !applyScopedChildProjectionMessage &&
+      !isScopedStreamNewer(scopedChildWatermarksRef.current, projectionSessionId, streamId)
+    ) {
+      return true;
+    }
 
     const message = fetchMessageHandler({
       ...projection,
@@ -556,8 +569,12 @@ function useChat(props: IProps) {
     set(message, 'snapshotStreamId', streamId);
     set(message, 'streamId', streamId);
     hydrateV2RuntimeState(message);
-    updateMessage(message, { isAssign: true, allowCreateSession: false });
-    commitScopedStream(scopedChildWatermarksRef.current, projectionSessionId, streamId);
+    if (applyScopedChildProjectionMessage) {
+      applyScopedChildProjectionMessage(projectionSessionId, message, getScopedChildRunState(projection, streamId));
+    } else {
+      updateMessage(message, { isAssign: true, allowCreateSession: false });
+      commitScopedStream(scopedChildWatermarksRef.current, projectionSessionId, streamId);
+    }
     return true;
   });
 
@@ -901,7 +918,11 @@ function useChat(props: IProps) {
     let isContinuingRunningTrace = false;
     // 不要用 isSessionRunning，因为 isSessionRunning 是异步的，这里需要同步判断
     if (chatSessionRuntimeManager.isSessionRunning(sessionId)) {
-      if (!isResumeChat && preliminaryDigitalEmployeeResources.length <= 1) {
+      if (
+        !isResumeChat &&
+        preliminaryDigitalEmployeeResources.length <= 1 &&
+        !chatSessionRuntimeManager.canAcceptInput(sessionId)
+      ) {
         return false;
       }
       if (isResumeChat) {
@@ -1302,10 +1323,13 @@ function useChat(props: IProps) {
     updateMessage, // 更新消息的方法
     deleteMessage, // 删除消息的方法
     isSessionRunning,
+    canAcceptInput,
     cancelCurrentSession,
 
     getMessageList,
     setMessageList,
+    sessionMessageLoadState: getSessionMessageLoadState(sessionId),
+    retrySessionMessageLoad: () => retrySessionMessageLoad(sessionId),
   };
 }
 

@@ -477,7 +477,8 @@ const OntologyCenter: React.FC = () => {
       }
       try {
         const res: any = await pageOntologyResources({
-          ownerType: activeTab,
+          // “我可用的”按当前用户创建及被授权的数据查询；官方推荐仍限定企业资源。
+          ownerType: activeTab === 'personal' ? undefined : activeTab,
           resourceBizTypeList: ['VIEW', 'OBJECT'],
           systemCode: ontologySystemCode,
           keyword,
@@ -1062,6 +1063,7 @@ const OntologyCenter: React.FC = () => {
   return (
     <div className={styles.container} onScroll={handleContainerScroll}>
       <CommonTabs
+        className={styles.secondaryTabs}
         activeKey={activeTab}
         onChange={(key) => {
           setActiveTab(key as OwnerTab);

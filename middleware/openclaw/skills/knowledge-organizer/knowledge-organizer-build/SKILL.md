@@ -6,7 +6,7 @@ allowed-tools: read, exec
 
 # 补全知识实体
 
-加载并遵循 `by-knowledge-manager` skill，使用 `entity-enrich` 执行本阶段。不得上传文件或发起实体发现。
+加载并遵循 `project-cloud-knowledge` skill，使用 `entity-enrich` 执行本阶段。不得上传文件或发起实体发现。
 
 ## 选择范围
 
@@ -19,4 +19,4 @@ allowed-tools: read, exec
 
 ## 完成标准
 
-只有 `entity-enrich` 返回批次受理或复用结果时，才算提交成功。按 `by-knowledge-manager` 的规则汇报范围、批次、任务、文件路径和状态，并明确说明补全任务**已提交**，不能声称已经完成。
+只有 `entity-enrich` 返回批次受理或复用结果时，才算提交成功。按 `project-cloud-knowledge` 的规则汇报范围、批次、任务、文件路径和状态，并明确说明补全任务**已提交**，不能声称已经完成。

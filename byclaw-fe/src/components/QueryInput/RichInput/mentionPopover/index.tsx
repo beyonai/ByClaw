@@ -7,6 +7,7 @@ import classNames from 'classnames';
 import React, { useEffect, useRef, useCallback, useMemo, useState } from 'react';
 import styles from './index.module.less';
 import ResourceTabs from './resourceTabsCompact';
+import ResourceToolMenu from '../../components/ResourceToolMenu';
 import { ResourceType } from '../utils/constants';
 import type { IResourceType } from '../types';
 import EmployeeList from '@/layout/sider/components/EmployeeList';
@@ -35,6 +36,11 @@ interface MentionPopoverProps {
   excludedAgentIds?: string[];
   children?: React.ReactNode;
   placement?: PopoverProps['placement'];
+  projectCloudResourceId?: string | number;
+  projectId?: number;
+
+  /** 打开时默认展示的资源分类。 */
+  activeTabKey?: string;
 }
 
 const MentionPopover: React.FC<MentionPopoverProps> = ({
@@ -50,21 +56,29 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
   excludedAgentIds,
   children,
   placement,
+  projectCloudResourceId,
+  projectId,
+  activeTabKey,
 }) => {
   const { trackerEmployeeClick } = useTracker();
   const intl = useIntl();
   const popoverRef = useRef<TooltipRef>(null);
   const open = !!popoverPos;
-  const { top, left } = popoverPos || {};
+  const { width } = popoverPos || {};
+  const isAtPopover = type === '@';
 
   const [currentAgent, setCurrentAgent] = useState<IAgentCache | null>(null);
   const { employeesList } = useSelector(({ employees }: { employees: UseEmployeesIState }) => employees);
+  const userInfo = useSelector((state: any) => state.user?.userInfo);
   const scopedAgentId = resourceAgentIds
     ?.split(',')
     .map((item) => item.trim())
     .find(Boolean);
   const resolvedAgentId = currentAgent?.agentId || scopedAgentId || agentId;
   const isExpertResourceOverlayOpen = chatMode === chatModeMap.expert && !!currentAgent;
+  const useInputWidth = isAtPopover && !isExpertResourceOverlayOpen && !!width;
+  const panelHeight = useInputWidth ? '40vh' : '65vh';
+  const panelWidth = useInputWidth && width ? width : 'min(calc(100vw - 24px), 485px)';
 
   useEffect(() => {
     if (open && popoverRef.current) {
@@ -72,7 +86,27 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
         popoverRef.current?.forceAlign();
       });
     }
-  }, [open, top, left, currentAgent]);
+  }, [open, currentAgent]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+
+    const handleDocumentMouseDown = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      // 连接器授权、凭据配置等通过 Portal 渲染到 body，操作这些浮层时不能被资源弹窗的外部点击关闭逻辑卸载。
+      if (
+        target.closest(
+          `.${styles.popover}, [data-resource-tool-menu], .connectorItem, .connectorAction, .ant-modal-root, .ant-drawer, .ant-dropdown, .ant-popover`
+        )
+      )
+        return;
+      onClose();
+    };
+
+    document.addEventListener('mousedown', handleDocumentMouseDown, true);
+    return () => document.removeEventListener('mousedown', handleDocumentMouseDown, true);
+  }, [onClose, open]);
 
   const onSelectAtMention = useCallback(
     (item: any) => {
@@ -171,27 +205,35 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
   }, [type, currentAgent]);
 
   const trigger = useMemo(() => {
+    const isBottomPlacement = `${placement || ''}`.startsWith('bottom');
     return (
       children || (
         <div
           style={{
-            top,
-            left,
-            position: 'fixed',
-            width: 1,
+            position: 'absolute',
+            ...(isBottomPlacement ? { bottom: 0 } : { top: 0 }),
+            left: 0,
+            width: '100%',
             height: 1,
             opacity: 0,
           }}
         />
       )
     );
-  }, [children, top, left]);
+  }, [children, placement]);
 
   return (
     <Popover
       open={open}
-      trigger="click"
-      placement={placement}
+      // 弹窗打开状态由两个入口各自的统一适配层控制，避免触发节点位置影响布局。
+      trigger={[]}
+      // 连接器授权等子弹窗通过 Portal 打开时，资源面板仍需保持挂载，返回后继续保留当前分类和列表状态。
+      destroyOnHidden={false}
+      placement={placement || (isAtPopover ? 'topLeft' : undefined)}
+      // 位置由输入框所在区域统一决定：历史会话固定显示在输入框上方，新会话固定显示在下方。
+      // 禁止 antd 根据可视区域自动翻转，否则历史会话可能被错误翻到输入框下方并遮挡输入框。
+      // # 面板需要兼容窄屏，允许 antd 自动水平偏移；@ 面板仍保持输入框上下定位规则。
+      autoAdjustOverflow={!isAtPopover}
       ref={popoverRef}
       arrow={false}
       onOpenChange={(v) => {
@@ -200,9 +242,11 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
         }
       }}
       styles={{
+        root: { width: panelWidth, minWidth: panelWidth, maxWidth: panelWidth },
         body: {
-          height: '50vh',
-          minWidth: 320,
+          height: panelHeight,
+          width: panelWidth,
+          minWidth: panelWidth,
           padding: 0,
         },
       }}
@@ -223,6 +267,12 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
             className={classNames(styles.contentViewport, {
               [styles.contentViewportWide]: isExpertResourceOverlayOpen,
             })}
+            style={{
+              height: panelHeight,
+              overflow: useInputWidth ? 'hidden' : undefined,
+              width: panelWidth,
+              maxWidth: panelWidth,
+            }}
           >
             <div className={styles.contentInner}>
               {(() => {
@@ -240,6 +290,23 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
                         showSkillTab={!currentAgent || currentAgent.skillsCount !== 0}
                       />
                     </div>
+                  );
+                }
+
+                if (type === '@') {
+                  return (
+                    <ResourceToolMenu
+                      keyword={inputText}
+                      sessionId={sessionId}
+                      projectId={projectId}
+                      projectCloudResourceId={projectCloudResourceId}
+                      userInfo={userInfo}
+                      agentId={resolvedAgentId}
+                      resourceAgentIds={resourceAgentIds}
+                      excludedAgentIds={excludedAgentIds}
+                      activeKey={activeTabKey}
+                      onSelect={onSelect}
+                    />
                   );
                 }
 

@@ -5,9 +5,7 @@ import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
 import com.iwhalecloud.byai.common.constants.Constants;
-import com.iwhalecloud.byai.common.constants.devloop.DeleteFlag;
 import com.iwhalecloud.byai.common.constants.devloop.MemberRole;
-import com.iwhalecloud.byai.common.constants.devloop.ProjectResourceType;
 import com.iwhalecloud.byai.common.constants.resource.ResourceBizType;
 import com.iwhalecloud.byai.common.ecrypt.Sm4Util;
 import com.iwhalecloud.byai.common.feign.client.FeignDataCloudService;
@@ -43,7 +41,6 @@ import com.iwhalecloud.byai.manager.domain.auth.enums.GrantType;
 import com.iwhalecloud.byai.manager.domain.auth.enums.OperType;
 import com.iwhalecloud.byai.manager.domain.auth.service.PrivilegeGrantService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectMemberService;
-import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectResourceService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDigEmployeeService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtSkillService;
@@ -61,7 +58,6 @@ import com.iwhalecloud.byai.manager.dto.resource.SsResExtSkillDto;
 import com.iwhalecloud.byai.manager.entity.aimodel.ByaiAimodel;
 import com.iwhalecloud.byai.manager.entity.auth.PrivilegeGrant;
 import com.iwhalecloud.byai.manager.entity.devloop.Project;
-import com.iwhalecloud.byai.manager.entity.devloop.ProjectResource;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtDigEmployee;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtSkill;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
@@ -134,8 +130,6 @@ public class SuasSuperassistApplicationService {
     @Autowired
     private ProjectMemberService projectMemberService;
 
-    @Autowired
-    private ProjectResourceService projectResourceService;
 
     @Autowired
     private FeignDataCloudService feignDataCloudService;
@@ -265,23 +259,19 @@ public class SuasSuperassistApplicationService {
             JSONObject jsonObject = initTemplates.getJSONObject(i);
 
             String resourceCode = jsonObject.getString("resourceCode");
+            String modelName = jsonObject.getString("modelName");
             String modelProtocol = jsonObject.getString("modelProtocol");
-            String relSkillCodes = jsonObject.getString("relSkillCodes");
             String relToolCodes = jsonObject.getString("relToolCodes");
+            String relOntologyCodes = jsonObject.getString("relOntologyCodes");
+            String relSkillCodes = jsonObject.getString("relSkillCodes");
             String isRelDefaultDataset = jsonObject.getString("isRelDefaultDataset");
 
-            // 先从当前map获取，没有再查或者创建，不用重复查询
-            AgentPrologueDto.ModelInfo modelInfo = modelInfoMap.get(modelProtocol);
-            if (modelInfo == null) {
-                modelInfo = this.buildDefaultModelInfo(modelProtocol);
-                modelInfoMap.put(modelProtocol, modelInfo);
-            }
 
             // 如果已经存在了，不再进行初始化
             SsResource ssResource = ssResourceService.findByIdOrCode(null, resourceCode);
             if (ssResource != null) {
                 // 对技能进行对比
-                this.compareDigEmployee(ssResource, jsonObject, loginInfo);
+                this.compareDigEmployee(ssResource, jsonObject, loginInfo, Collections.emptyList());
 
                 continue;
             }
@@ -294,6 +284,9 @@ public class SuasSuperassistApplicationService {
             // 其他类型数字员工设置默认模型
             String prologue = digitalEmployeeDTO.getPrologue();
 
+            //获取模型信息
+            AgentPrologueDto.ModelInfo modelInfo = this.getModelInfo(modelInfoMap, modelName, modelProtocol);
+
             // 是否关联默认知识库
             if (Constants.YES_VALUE_Y.equalsIgnoreCase(isRelDefaultDataset)) {
                 digitalEmployeeDTO.setRelIds(List.of(defaultDatasetId));
@@ -303,8 +296,14 @@ public class SuasSuperassistApplicationService {
                 digitalEmployeeDTO.setPrologue(this.buildPrologue(prologue, modelInfo, null));
             }
 
-            // 关联工具agent|tool|view
-            this.handleRelToolCodes(digitalEmployeeDTO, relToolCodes, userId);
+            // 关联工具agent|tool|view|object
+            this.handleRelResourceCodes(digitalEmployeeDTO, relToolCodes, userId);
+
+            // 联本体对象
+            this.initSubmitWorkspaceTemplate(relOntologyCodes);
+
+            // 关联本体对象
+            this.handleRelResourceCodes(digitalEmployeeDTO, relOntologyCodes, userId);
 
             // 处理关联技能
             this.handleRelSkillCodes(digitalEmployeeDTO, relSkillCodes, userId);
@@ -324,6 +323,43 @@ public class SuasSuperassistApplicationService {
         return defaultDigEmployeeId;
     }
 
+
+    /**
+     * 获取模型信息，协根据名称先获取，然后再根据协议获取
+     *
+     * @param modelInfoMap  模型收集器
+     * @param modelName     模型名称
+     * @param modelProtocol 模型协议
+     * @return AgentPrologueDto
+     */
+    private AgentPrologueDto.ModelInfo getModelInfo(Map<String, AgentPrologueDto.ModelInfo> modelInfoMap, String modelName, String modelProtocol) {
+
+        if (StringUtil.isNotEmpty(modelName)) {
+            FindAiModelQo findAiModelQo = new FindAiModelQo();
+            findAiModelQo.setStatus(Constants.STATUS_ENABLED);
+            findAiModelQo.setModelName(modelName);
+            List<ByaiAimodel> tokenSaverModels = byaiAimodelService.findAiModelByQo(findAiModelQo);
+            if (ListUtil.isNotEmpty(tokenSaverModels)) {
+                ByaiAimodel byaiAimodel = tokenSaverModels.getFirst();
+                AgentPrologueDto.ModelInfo modelInfo = new AgentPrologueDto.ModelInfo();
+                modelInfo.setMaxToken(byaiAimodel.getMaxContentToken());
+                modelInfo.setModelId(byaiAimodel.getModelId());
+                modelInfo.setModel(byaiAimodel.getModelName());
+                modelInfo.setHistory(10);
+                return modelInfo;
+            }
+        }
+
+        // 先从当前map获取，没有再查或者创建，不用重复查询
+        AgentPrologueDto.ModelInfo modelInfo = modelInfoMap.get(modelProtocol);
+        if (modelInfo == null) {
+            modelInfo = this.getByModelProtocol(modelProtocol);
+            modelInfoMap.put(modelProtocol, modelInfo);
+        }
+
+        return modelInfo;
+    }
+
     /**
      * 对比初始化的数字员工
      *
@@ -331,13 +367,39 @@ public class SuasSuperassistApplicationService {
      * @param jsonObject 模板资源配置
      * @param loginInfo  登陆信息
      */
-    private ResourceExtDigEmployeeDto compareDigEmployee(SsResource ssResource, JSONObject jsonObject, LoginInfo loginInfo) {
+    private ResourceExtDigEmployeeDto compareDigEmployee(SsResource ssResource, JSONObject jsonObject, LoginInfo loginInfo, List<EmployeeGroupMemberDTO> employeeGroupMembers) {
 
         try {
             String resourceDesc = jsonObject.getString("resourceDesc");
+
+            boolean changeEmploy = false;
             if (StringUtil.isNotEmpty(resourceDesc) && StringUtil.isEmpty(ssResource.getResourceDesc())) {
+                changeEmploy = true;
+                ssResource.setResourceDesc(resourceDesc);
+            }
+
+            String avatar = jsonObject.getString("avatar");
+            if (StringUtil.isNotEmpty(avatar) && StringUtil.isEmpty(ssResource.getAvatar())) {
+                changeEmploy = true;
+                ssResource.setAvatar(avatar);
+            }
+
+            String implType = jsonObject.getString("implType");
+            if (StringUtil.isNotEmpty(implType) && StringUtil.isEmpty(ssResource.getImplType())) {
+                changeEmploy = true;
+                ssResource.setImplType(implType);
+            }
+
+            String workerAgentType = jsonObject.getString("workerAgentType");
+            if (StringUtil.isNotEmpty(workerAgentType) && StringUtil.isEmpty(ssResource.getWorkerAgentType())) {
+                changeEmploy = true;
+                ssResource.setWorkerAgentType(workerAgentType);
+            }
+
+            if (changeEmploy) {
                 ssResourceService.update(ssResource);
             }
+
 
             SsResExtDigEmployee ssResExtDigEmployee = ssResExtDigEmployeeService.findById(ssResource.getResourceId());
             // 如果不为空，则更新
@@ -359,8 +421,20 @@ public class SuasSuperassistApplicationService {
                 ssResExtDigEmployeeService.save(ssResExtDigEmployee);
             }
 
-            digitalEmployeeApplicationService.syncExistingDigEmployeeConfigToRedisQuietly(ssResource.getResourceId());
+            // 关联数据员工组,每次更新时对比
+            for (int i = 0; employeeGroupMembers != null && i < employeeGroupMembers.size(); i++) {
+                EmployeeGroupMemberDTO employeeGroupMemberDTO = employeeGroupMembers.get(i);
+                List<SsResourceRelDetail> ssResourceRelDetails = ssResourceRelDetailService.find(ssResource.getResourceId(), employeeGroupMemberDTO.getResourceId());
+                if (ListUtil.isEmpty(ssResourceRelDetails)) {
+                    Long resourceId = ssResource.getResourceId();
+                    Long relResourceId = employeeGroupMemberDTO.getResourceId();
+                    String teamRole = employeeGroupMemberDTO.getTeamRole();
+                    Integer sortOrder = employeeGroupMemberDTO.getSortOrder();
+                    ssResourceRelDetailService.saveDigEmployeeGroupRelDetail(resourceId, relResourceId, teamRole, sortOrder);
+                }
+            }
 
+            digitalEmployeeApplicationService.syncExistingDigEmployeeConfigToRedisQuietly(ssResource.getResourceId());
 
             ResourceExtDigEmployeeDto resourceExtDigEmployeeDto = new ResourceExtDigEmployeeDto();
             BeanUtil.copyProperties(ssResource, resourceExtDigEmployeeDto);
@@ -410,6 +484,8 @@ public class SuasSuperassistApplicationService {
 
         String prologue = jsonObject.getString("prologue");
         String relToolCodes = jsonObject.getString("relToolCodes");
+        String relOntologyCodes = jsonObject.getString("relOntologyCodes");
+
         String coreCompetencies = jsonObject.getString("coreCompetencies");
         String corePersonaDefinition = jsonObject.getString("corePersonaDefinition");
 
@@ -459,12 +535,14 @@ public class SuasSuperassistApplicationService {
         // 设置关联技能的json信息
         ssResExtDigEmployee.setSkills(this.buildJsonBySkillDto(ssResExtSkillDtos));
 
-        // 关联工具
-        List<String> splitToolCodes = StringUtil.splitStr(relToolCodes, ",");
-        for (String toolCode : splitToolCodes) {
-            SsResourceDTO ssResourceDTO = relResourceMap.get(toolCode);
+        // 关联资源
+        List<String> resourceCodes = new ArrayList<>();
+        resourceCodes.addAll(StringUtil.splitStr(relToolCodes, ","));
+        resourceCodes.addAll(StringUtil.splitStr(relOntologyCodes, ","));
+        for (String resourceCode : resourceCodes) {
+            SsResourceDTO ssResourceDTO = relResourceMap.get(resourceCode);
             if (ssResourceDTO == null) {
-                SsResource relSsResource = ssResourceService.findByIdOrCode(null, toolCode);
+                SsResource relSsResource = ssResourceService.findByIdOrCode(null, resourceCode);
 
                 if (relSsResource == null) {
                     continue;
@@ -487,12 +565,12 @@ public class SuasSuperassistApplicationService {
      * 解析并关联工具编码到数字员工。
      *
      * @param digitalEmployeeDTO 数字员工新增对象
-     * @param relToolCodes       工具编码，逗号分隔
+     * @param relResourceCodes   资源编码,关联工具agent|tool|view|object
      * @param userId             用户标识
      */
-    private void handleRelToolCodes(DigitalEmployeeDTO digitalEmployeeDTO, String relToolCodes, Long userId) {
+    private void handleRelResourceCodes(DigitalEmployeeDTO digitalEmployeeDTO, String relResourceCodes, Long userId) {
 
-        List<String> splitToolCodes = StringUtil.splitStr(relToolCodes, ",");
+        List<String> splitToolCodes = StringUtil.splitStr(relResourceCodes, ",");
         if (ListUtil.isEmpty(splitToolCodes)) {
             return;
         }
@@ -646,7 +724,7 @@ public class SuasSuperassistApplicationService {
      * @param modelProtocol 模型协议
      * @return 模型信息，默认模型不存在时返回 null
      */
-    private AgentPrologueDto.ModelInfo buildDefaultModelInfo(String modelProtocol) {
+    private AgentPrologueDto.ModelInfo getByModelProtocol(String modelProtocol) {
 
         String modelQuotaJson = byaiSystemConfigService.findByParamCode("MODEL_QUOTA");
 
@@ -881,7 +959,7 @@ public class SuasSuperassistApplicationService {
                 Map<String, AgentPrologueDto.ModelInfo> modelInfoMap = new HashMap<String, AgentPrologueDto.ModelInfo>();
 
                 JSONArray expertTeams = jsonObject.getJSONArray("expertTeams");
-                for (int j = i; expertTeams != null && j < expertTeams.size(); j++) {
+                for (int j = 0; expertTeams != null && j < expertTeams.size(); j++) {
 
                     JSONObject expertTeamTemplate = expertTeams.getJSONObject(j);
 
@@ -915,7 +993,7 @@ public class SuasSuperassistApplicationService {
 
                 }
             }
-        } catch (Exception e) {
+        } catch (Throwable e) {
             logger.error(e.getMessage(), e);
         }
     }
@@ -935,24 +1013,22 @@ public class SuasSuperassistApplicationService {
         Long defaultDatasetId = loginInfo.getSessionDatasetId();
 
         String resourceCode = jsonObject.getString("resourceCode");
+        String modelName = jsonObject.getString("modelName");
         String modelProtocol = jsonObject.getString("modelProtocol");
-        String relSkillCodes = jsonObject.getString("relSkillCodes");
         String relToolCodes = jsonObject.getString("relToolCodes");
+        String relOntologyCodes = jsonObject.getString("relOntologyCodes");
+        String relSkillCodes = jsonObject.getString("relSkillCodes");
         String isRelDefaultDataset = jsonObject.getString("isRelDefaultDataset");
 
         // 先从当前map获取，没有再查或者创建，不用重复查询
-        AgentPrologueDto.ModelInfo modelInfo = modelInfoMap.get(modelProtocol);
-        if (modelInfo == null) {
-            modelInfo = this.buildDefaultModelInfo(modelProtocol);
-            modelInfoMap.put(modelProtocol, modelInfo);
-        }
+        AgentPrologueDto.ModelInfo modelInfo = this.getModelInfo(modelInfoMap, modelName, modelProtocol);
 
 
         // 如果已经存在了，不再进行初始化
         SsResource ssResource = ssResourceService.findByIdOrCode(null, resourceCode);
         if (ssResource != null) {
             // 对技能进行对比
-            return this.compareDigEmployee(ssResource, jsonObject, loginInfo);
+            return this.compareDigEmployee(ssResource, jsonObject, loginInfo, employeeGroupMembers);
         }
 
         DigitalEmployeeDTO digitalEmployeeDTO = new DigitalEmployeeDTO();
@@ -973,8 +1049,14 @@ public class SuasSuperassistApplicationService {
             digitalEmployeeDTO.setPrologue(this.buildPrologue(prologue, modelInfo, null));
         }
 
-        // 关联工具agent|tool|view
-        this.handleRelToolCodes(digitalEmployeeDTO, relToolCodes, userId);
+        // 关联工具agent|tool|view|object
+        this.handleRelResourceCodes(digitalEmployeeDTO, relToolCodes, userId);
+
+        // 初始化本体
+        this.initSubmitWorkspaceTemplate(relOntologyCodes);
+
+        // 关联本体对象
+        this.handleRelResourceCodes(digitalEmployeeDTO, relOntologyCodes, userId);
 
         // 处理关联技能
         this.handleRelSkillCodes(digitalEmployeeDTO, relSkillCodes, userId);
@@ -1002,9 +1084,6 @@ public class SuasSuperassistApplicationService {
         String description = jsonObject.getString("description");
         String isShare = jsonObject.getString("isShare");
 
-        JSONArray resources = jsonObject.getJSONArray("resources");
-
-
         //不存在则创建
         Project project = projectService.findByProjectName(projectName);
         if (project == null) {
@@ -1018,40 +1097,17 @@ public class SuasSuperassistApplicationService {
             project.setCreateBy(loginInfo.getUserId());
 
             //初始化云盘
-            SsResource cloudResource = projectApplicationService.createCloudResource(project);
+            SsResource cloudResource = projectApplicationService.createCloudResource(project, true);
             project.setCloudResourceId(cloudResource.getResourceId());
 
             projectService.save(project);
 
-            //初始化本体对象
-            List<String> objectCodes = this.initSubmitWorkspaceTemplate();
-            logger.info("初始化对象:{}", objectCodes);
-
-            for (int i = 0; resources != null && i < resources.size(); i++) {
-                JSONObject resourceJSONObject = resources.getJSONObject(i);
-
-                String resourceCode = resourceJSONObject.getString("resourceCode");
-
-                SsResource ssResource = ssResourceService.findByIdOrCode(null, resourceCode);
-
-                ProjectResource resource = new ProjectResource();
-                resource.setId(sequenceService.nextVal());
-                resource.setProjectId(project.getProjectId());
-                resource.setResourceType(ProjectResourceType.fromResourceBizType(ssResource.getResourceBizType()));
-                resource.setResourceId(ssResource.getResourceId());
-                resource.setResourceName(ssResource.getResourceName());
-                resource.setSortNo(i);
-                resource.setCreateBy(loginInfo.getUserId());
-                resource.setCreateTime(new Date());
-                resource.setDeleteFlag(DeleteFlag.NORMAL);
-                projectResourceService.save(resource);
-            }
         } else {
 
             // 初始化项目云盘
             Long cloudResourceId = project.getCloudResourceId();
             if (cloudResourceId == null) {
-                SsResource cloudResource = projectApplicationService.createCloudResource(project);
+                SsResource cloudResource = projectApplicationService.createCloudResource(project, true);
                 project.setCloudResourceId(cloudResource.getResourceId());
                 projectService.update(project);
             }
@@ -1072,7 +1128,19 @@ public class SuasSuperassistApplicationService {
      *
      * @return 首个模板提交结果中的对象编码列表，无结果时返回空列表
      */
-    private List<String> initSubmitWorkspaceTemplate() {
+    private List<String> initSubmitWorkspaceTemplate(String relOntologyCodes) {
+
+        List<String> splitOntologyCodes = StringUtil.splitStr(relOntologyCodes, ",");
+        if (ListUtil.isEmpty(splitOntologyCodes)) {
+            return splitOntologyCodes;
+        }
+
+        //统计资源，如果已经存在，则不再进行初始化调用
+        long count = ssResourceService.countByResourceCodes(splitOntologyCodes);
+        if (count >= splitOntologyCodes.size()) {
+            return splitOntologyCodes;
+        }
+
 
         Users users = userService.findByUserCode("adminvip");
 

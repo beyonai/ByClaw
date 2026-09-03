@@ -140,7 +140,7 @@ chrome_window_size="${OPENCLAW_CHROME_WINDOW_SIZE:-${xvfb_width},${xvfb_height}}
 
 if ! pgrep -f "Xvfb ${DISPLAY}" >/dev/null 2>&1; then
   log "starting Xvfb on ${DISPLAY}"
-  Xvfb "${DISPLAY}" -screen 0 "${xvfb_screen}" -nolisten tcp >/tmp/openclaw-xvfb.log 2>&1 &
+  Xvfb "${DISPLAY}" -screen 0 "${xvfb_screen}" -nolisten tcp >/tmp/openclaw-xvfb.log 2>&1 9>&- &
   sleep 1
 fi
 
@@ -151,7 +151,7 @@ if [ "${OPENCLAW_CHROME_REMOTE_DEBUGGING_ADDRESS}" = "0.0.0.0" ]; then
   chrome_debug_port="${OPENCLAW_CHROME_INTERNAL_REMOTE_DEBUGGING_PORT:-$((OPENCLAW_CHROME_REMOTE_DEBUGGING_PORT + 1))}"
   if ! pgrep -f "openclaw-chrome-port-proxy ${OPENCLAW_CHROME_REMOTE_DEBUGGING_PORT} ${chrome_debug_port}" >/dev/null 2>&1; then
     log "starting CDP proxy on 0.0.0.0:${OPENCLAW_CHROME_REMOTE_DEBUGGING_PORT} -> 127.0.0.1:${chrome_debug_port}"
-    python3 - "${OPENCLAW_CHROME_REMOTE_DEBUGGING_PORT}" "${chrome_debug_port}" openclaw-chrome-port-proxy <<'PY' >/tmp/openclaw-chrome-port-proxy.log 2>&1 &
+    python3 - "${OPENCLAW_CHROME_REMOTE_DEBUGGING_PORT}" "${chrome_debug_port}" openclaw-chrome-port-proxy <<'PY' >/tmp/openclaw-chrome-port-proxy.log 2>&1 9>&- &
 import select
 import socket
 import sys
@@ -228,4 +228,4 @@ log "starting ${OPENCLAW_CHROME_EXECUTABLE}, profile=${OPENCLAW_BROWSER_PROFILE}
   --no-sandbox \
   --window-size="${chrome_window_size}" \
   --window-position=0,0 \
-  about:blank >/tmp/openclaw-chrome.log 2>&1 &
+  about:blank >/tmp/openclaw-chrome.log 2>&1 9>&- &

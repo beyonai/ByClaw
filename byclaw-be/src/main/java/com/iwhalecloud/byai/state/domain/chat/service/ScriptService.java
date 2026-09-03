@@ -63,6 +63,7 @@ import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.state.infrastructure.common.constants.SseResponseEventEnum;
 import com.iwhalecloud.byai.state.infrastructure.utils.ChatUtils;
 import com.iwhalecloud.byai.state.infrastructure.utils.CompletionsUtils;
+import com.iwhalecloud.byai.state.infrastructure.utils.ResumeRoutingTraceLogger;
 import com.iwhalecloud.byai.common.log.exception.PythonRuntimeException;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessageHotDto;
 import static com.iwhalecloud.byai.state.domain.chat.enums.ChatUseageEnum.SYSTEM_RESPONSE;
@@ -301,11 +302,17 @@ public class ScriptService extends AbstractChatProcess {
     }
 
     private void resolveRunningTraceState(ChatProcessContext ctx) {
-        if (ctx == null || ctx.sessionId == null) {
+        if (ctx == null) {
+            return;
+        }
+
+        if (ctx.sessionId == null) {
+            ResumeRoutingTraceLogger.logRunningState(ctx.assistantChatDto, null);
             return;
         }
 
         RunningChatInfo runningInfo = runningOutputStreamRegistry.getRunning(ctx.sessionId);
+        ResumeRoutingTraceLogger.logRunningState(ctx.assistantChatDto, runningInfo);
         if (!Boolean.TRUE.equals(runningInfo.getRunning())) {
             return;
         }

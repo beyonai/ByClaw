@@ -10,7 +10,7 @@ REPO_ROOT = Path(__file__).parents[3]
 INITDB_DML = REPO_ROOT / "deploy" / "middleware" / "initdb" / "04_dml.sql"
 V030_DML = REPO_ROOT / "deploy" / "migrations" / "versions" / "V0.3.0" / "V0.3.0__dml.sql"
 V031_DML = REPO_ROOT / "deploy" / "migrations" / "versions" / "V0.3.1" / "V0.3.1__dml.sql"
-V051_DML = REPO_ROOT / "deploy" / "migrations" / "versions" / "V0.5.1" / "V0.5.1__dml.sql"
+V040_DML = REPO_ROOT / "deploy" / "migrations" / "versions" / "V0.4.0" / "V0.4.0__dml.sql"
 META_PROMPT_SERVICE = (
     REPO_ROOT
     / "byclaw-be"
@@ -38,6 +38,29 @@ CHILD_SKILLS = {
     "dws/SKILL.md": "dws",
     "fws/SKILL.md": "fws",
     "wecom/SKILL.md": "wecomcli",
+}
+WEIXIN_COMMANDS = {
+    "article-fetch",
+    "articles",
+    "collection-detail",
+    "collections",
+    "create-draft",
+    "create-newspic",
+    "download",
+    "download-publish-data",
+    "drafts",
+    "freepublish-get",
+    "freepublish-list",
+    "get-public-account-info",
+    "home-overview",
+    "open-platform-authorizer-info",
+    "published",
+    "published-articles",
+    "save-articles",
+    "sougousearch",
+    "user-attributes",
+    "user-growth",
+    "user-info",
 }
 
 
@@ -89,6 +112,107 @@ def markdown_section(text, heading):
 
 
 class KnowledgeCollectionSkillContractTest(unittest.TestCase):
+    def test_generic_web_collection_uses_controlled_commands_and_bounded_discovery(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        routing = (SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8")
+        contract = (SKILL_ROOT / "references" / "collection-contract.md").read_text(encoding="utf-8")
+        online = (SKILL_ROOT / "references" / "online-search.md").read_text(encoding="utf-8")
+        combined = f"{skill}\n{routing}\n{contract}\n{online}"
+
+        for phrase in (
+            "acquire-web",
+            "materialize-web",
+            "不得手工重定向 stdout",
+            "不得手工构造 collect payload",
+            "公共发现最多允许两轮",
+            "60 秒软预算",
+            "90 秒硬上限",
+            "weak 候选不进入自动选文",
+            "允许进入受控的 `acquire-web`",
+            "`reject` 候选仍拒绝",
+            "成功物化并通过正文主题复验",
+            "STOP",
+            "buildId",
+        ):
+            self.assertIn(phrase, combined)
+
+    def test_public_full_text_requires_executor_owned_evidence(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        contract = (SKILL_ROOT / "references" / "collection-contract.md").read_text(encoding="utf-8")
+
+        for phrase in (
+            "fullTextEvidence",
+            "只有获准来源执行器或专用 materializer",
+            "不得由 Agent 手写",
+        ):
+            self.assertIn(phrase, skill + contract)
+
+    def test_explicit_full_text_request_controls_init_and_delivery_completion(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        contract = (SKILL_ROOT / "references" / "collection-contract.md").read_text(encoding="utf-8")
+        delivery = (SKILL_ROOT / "references" / "delivery.md").read_text(encoding="utf-8")
+        combined = f"{skill}\n{contract}\n{delivery}"
+
+        for phrase in (
+            "--required-content-granularity full-text",
+            "完整正文",
+            "摘要或节选不能满足全文要求",
+            "selected` 和 `all` 至少包含一个条目",
+            "不得执行 `publish`",
+        ):
+            self.assertIn(phrase, combined)
+
+    def test_arxiv_full_text_materialization_records_actual_acquisition_url(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        routing = (SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8")
+        contract = (SKILL_ROOT / "references" / "collection-contract.md").read_text(encoding="utf-8")
+        combined = f"{skill}\n{routing}\n{contract}"
+
+        for phrase in (
+            "materialize-arxiv",
+            "已授权并选中的 arXiv 候选",
+            "`--direct-urls` 或 `public-discover`",
+            "https://arxiv.org/html/<paper-id>",
+            "acquisitionUrl",
+            "相同论文 ID",
+            "collectPayloadPath",
+            "bycli web read --url <URL> --output <session-dir>/raw/bycli/arxiv/<item-id>/",
+            "不得手工下载或补抓图片",
+            "不得使用 `curl`、`web_fetch`",
+        ):
+            self.assertIn(phrase, combined)
+
+        self.assertNotIn(
+            "bycli web read --url <用户提供的 URL> --stdout",
+            routing,
+        )
+
+    def test_publish_completion_requires_first_response_delivery_input_echo(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        delivery = (SKILL_ROOT / "references" / "delivery.md").read_text(encoding="utf-8")
+
+        for phrase in (
+            "首次最终答复",
+            "原样回显 `deliveryInput`",
+            "不得只报告路径",
+            "publish 之前不得创建",
+            "不得对其执行 `mkdir`、`ls`、`find`",
+            "不得做存在性或空目录检查",
+            "委派来源执行器时只传内部 `session-dir`",
+            "只有根 Agent",
+        ):
+            self.assertIn(phrase, skill + delivery)
+
+    def test_public_discovery_cannot_be_bypassed_by_manual_source_search(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        contract = (SKILL_ROOT / "references" / "collection-contract.md").read_text(encoding="utf-8")
+        self.assertIn("--direct-urls", skill)
+        self.assertIn("SOURCE_NOT_AUTHORIZED_BY_DISCOVERY", skill)
+        self.assertIn("公共发现最多允许两轮", skill)
+        self.assertIn("用户明确提供的 URL", contract)
+        self.assertIn("discoveryCandidateId", contract)
+        self.assertIn("不得使用模型记忆中的 URL、DOI、论文 ID", skill)
+
     def test_knowledge_collection_upgrade_is_isolated_in_v031(self):
         self.assertTrue(V031_DML.is_file(), "knowledge collection migration must be versioned as V0.3.1")
         v030 = V030_DML.read_text(encoding="utf-8")
@@ -188,11 +312,11 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "`sanitized/items/*.md`",
             "采集流程不得主动询问 `入库 / 知识整理 / 跳过`",
             "由根 Agent 根据用户已经表达的意图决定是否调用",
-            "`by-knowledge-manager`、`knowledge-organizer` 或其他下游 Skill",
+            "`project-cloud-knowledge`、`knowledge-organizer` 或其他下游 Skill",
         ):
             self.assertIn(phrase, skill)
 
-        self.assertNotIn("不得调用 `by-knowledge-manager`", skill)
+        self.assertNotIn("不得调用 `project-cloud-knowledge`", skill)
         self.assertNotIn("不得调用 `knowledge-organizer`", skill)
 
         for forbidden in (
@@ -240,6 +364,21 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "`download-publish-data`",
         ):
             self.assertIn(phrase, f"{routing}\n{bycli}\n{weixin}")
+
+    def test_adaptive_discovery_and_wechat_materialization_are_documented(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        routing = (SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8")
+        online_search = (SKILL_ROOT / "references" / "online-search.md").read_text(encoding="utf-8")
+        contract = (SKILL_ROOT / "references" / "collection-contract.md").read_text(encoding="utf-8")
+
+        for phrase in ("eligibleArticle", "candidateQuality", "`materialize-wechat`", "阶段耗时"):
+            self.assertIn(phrase, skill)
+        self.assertIn("`bycli weixin download --url <URL>`", routing)
+        self.assertIn("自适应", online_search)
+        self.assertIn("`contentGranularity=unknown`", contract)
+        self.assertIn("`wechat-materialization-low-confidence`", contract)
+        for forbidden_fallback in ("`curl`", "`wget`", "`requests`"):
+            self.assertIn(forbidden_fallback, routing)
 
     def test_skill_has_exact_openclaw_ui_metadata(self):
         metadata_text = (SKILL_ROOT / "agents" / "openai.yaml").read_text(encoding="utf-8")
@@ -392,11 +531,11 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "下游 Agent",
             "不得主动询问 `入库 / 知识整理 / 跳过`",
             "根 Agent 根据用户已经表达的意图决定是否调用",
-            "`by-knowledge-manager`、`knowledge-organizer` 或其他下游 Skill",
+            "`project-cloud-knowledge`、`knowledge-organizer` 或其他下游 Skill",
         ):
             self.assertIn(phrase, f"{skill}\n{delivery}")
 
-        self.assertNotIn("不得调用 `by-knowledge-manager`", f"{skill}\n{delivery}")
+        self.assertNotIn("不得调用 `project-cloud-knowledge`", f"{skill}\n{delivery}")
         self.assertNotIn("不得调用 `knowledge-organizer`", f"{skill}\n{delivery}")
 
         indexed_paths = {
@@ -407,6 +546,24 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         self.assertNotIn("knowledge-ingest.md", indexed_paths)
         self.assertFalse((SKILL_ROOT / "references" / "post-processing.md").exists())
         self.assertFalse((SKILL_ROOT / "references" / "knowledge-ingest.md").exists())
+
+    def test_explicit_user_delivery_uses_internal_session_and_exact_handoff(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        contract = (SKILL_ROOT / "references" / "collection-contract.md").read_text(encoding="utf-8")
+        delivery = (SKILL_ROOT / "references" / "delivery.md").read_text(encoding="utf-8")
+        combined = f"{skill}\n{contract}\n{delivery}"
+
+        for phrase in (
+            "`.collection-runs/<run-id>/`",
+            "用户提供的保存路径是交付目录，不是采集会话目录",
+            "`status.collection.deliveryComplete=true`",
+            "`publish --session-dir <dir> --delivery-dir <path>`",
+            "不得覆盖或删除目标目录中已有的未知内容",
+            "`deliveryInput`",
+            "必须把原样的 `deliveryInput` 传给下游 Agent",
+            "不得扫描或猜测交付目录",
+        ):
+            self.assertIn(phrase, combined)
 
     def test_skill_main_entry_stops_after_delivery(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
@@ -420,9 +577,9 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         ):
             self.assertIn(phrase, skill)
 
-    def test_v051_updates_installed_collection_descriptions(self):
-        self.assertTrue(V051_DML.is_file())
-        upgrade = V051_DML.read_text(encoding="utf-8")
+    def test_v040_updates_installed_collection_descriptions(self):
+        self.assertTrue(V040_DML.is_file())
+        upgrade = V040_DML.read_text(encoding="utf-8")
         self.assertIn("SET search_path TO byai", upgrade)
         self.assertIn("resource_code = 'knowledge-collection'", upgrade)
         self.assertIn("规范化正文交付", upgrade)
@@ -558,6 +715,23 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         self.assertFalse((bycli_root / "references" / "weixin" / "SKILL.md").exists())
         self.assertFalse((bycli_root / "references" / "knowledge-ingest.md").exists())
 
+    def test_weixin_reference_tracks_the_environment_installed_command_surface(self):
+        bycli = (SKILLS_ROOT / "bycli" / "SKILL.md").read_text(encoding="utf-8")
+        weixin = (SKILLS_ROOT / "bycli" / "references" / "weixin.md").read_text(encoding="utf-8")
+        commands = markdown_section(weixin, "Command selection")
+
+        documented = set(
+            re.findall(r"^\| `([a-z0-9-]+)(?: [^`]*)?` \|", commands, re.MULTILINE)
+        )
+        self.assertEqual(WEIXIN_COMMANDS, documented)
+        self.assertIn("environment's installed `@sovovs/bycli`", weixin)
+        self.assertNotIn("2.1.55", bycli + weixin)
+        self.assertIn("Aliases: `overview`, `dashboard`, `fans`", commands)
+        self.assertIn("Alias: `userInfo`", commands)
+        self.assertIn("`get-public-account-info/articles", bycli)
+        self.assertNotRegex(weixin, r"`(?:bycli weixin )?accounts(?:\s|`)")
+        self.assertNotIn("`accounts/", bycli)
+
     def test_weixin_reference_keeps_executor_and_security_rules_only(self):
         weixin = (SKILLS_ROOT / "bycli" / "references" / "weixin.md").read_text(encoding="utf-8")
 
@@ -639,9 +813,9 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
 
         for phrase in (
             "Every browser-backed Weixin command must run through",
-            "`scripts/weixin-login-gate.mjs`",
+            "`scripts/weixin-browser-runner.mjs`",
             "A retry-shaped user message is not explicit verification completion",
-            "`byCLI 2.1.44`",
+            "环境中的 byCLI",
             "至少 5 秒的租约启动错峰",
         ):
             self.assertIn(phrase, bycli)
@@ -663,8 +837,11 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         downloads = markdown_section(weixin, "Published-data spreadsheet downloads")
         login = markdown_section(weixin, "Login and verification gate")
 
-        self.assertIn("@sovovs/bycli` 2.1.44", weixin)
-        self.assertIn("Explicit account identity or account-history intent starts with `accounts`", discovery)
+        self.assertIn("environment's installed `@sovovs/bycli`", weixin)
+        self.assertIn(
+            "Explicit account identity or account-history intent starts with `get-public-account-info`",
+            discovery,
+        )
         self.assertIn("Article-title or topic intent starts with `sougousearch`", discovery)
         self.assertIn("reinterpret it as topic intent", discovery)
         self.assertIn(
@@ -677,7 +854,7 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "omit `--name` and keep the command backend-only",
             "ask for the exact nickname before offering public fallback",
             "must not be merged",
-            "Only an exact nickname from one unique `accounts` result",
+            "Only an exact nickname from one unique `get-public-account-info` result",
             "whose `fakeid` equals the selected `fakeid`",
             "A user-supplied nickname beside a direct `fakeid` is not identity proof",
         ):
@@ -697,8 +874,8 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "absent, unverified, mismatched, or ambiguous",
             "diagnostic retry budget has already been consumed",
             "diagnostic retry budget is unused",
-            "login-gate rerun has already been consumed",
-            "single post-confirmation login-gate rerun",
+            "The tenth post-confirmation login-gate rerun",
+            "fewer than ten confirmed reruns have been consumed",
             "`RATE_LIMITED`",
             "legacy `COMMAND_EXEC`",
             "`freq control` or `rate limited`",
@@ -730,8 +907,8 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             terminal.index("login `TIMEOUT` / exit code 75"),
         )
         self.assertLess(
-            terminal.index("login-gate rerun has already been consumed"),
-            terminal.index("login `TIMEOUT` / exit code 75"),
+            terminal.index("The tenth post-confirmation login-gate rerun"),
+            terminal.index("fewer than ten confirmed reruns have been consumed"),
         )
         self.assertLess(
             terminal.index("`RATE_LIMITED`"),
@@ -745,11 +922,11 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         self.assertIn("including another top-level `TIMEOUT`, is terminal", downloads)
         self.assertIn("Backend-only examples omit `--name`", weixin)
         self.assertIn(
-            "Only after `accounts` proves one unique nickname-to-`fakeid` binding",
+            "Only after `get-public-account-info` proves one unique nickname-to-`fakeid` binding",
             weixin,
         )
-        self.assertIn("Verified for byCLI 2.1.44", login)
-        self.assertNotIn("2.1.44 and later", login)
+        self.assertIn("For the environment's installed byCLI", login)
+        self.assertNotIn("2.1.55", login)
         self.assertIn("`create-draft` session failures return `AUTH_REQUIRED`", login)
         self.assertIn(
             "An authentication outcome from an already-consumed diagnostic rerun follows terminal priority 1",
@@ -784,7 +961,7 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "Do not create a browser fallback draft",
             "`no final status`",
             "If the failing stage cannot be determined, classify it as uncertain",
-            "scripts/weixin-login-gate.mjs",
+            "scripts/weixin-browser-runner.mjs",
             "paused, non-terminal operation",
             "process-level facts",
             "title substrings are not matches",

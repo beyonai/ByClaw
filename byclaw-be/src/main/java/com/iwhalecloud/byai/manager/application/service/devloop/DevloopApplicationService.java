@@ -3234,6 +3234,8 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
 
         LambdaQueryWrapper<ByaiSession> wrapper = new LambdaQueryWrapper<ByaiSession>()
             .eq(ByaiSession::getProjectId, query.getProjectId())
+            // 子会话是数字员工/执行器内部任务，不在研发任务列表中单独呈现。
+            .isNull(ByaiSession::getParentSessionId)
             .ge(query.getCreateTimeStart() != null, ByaiSession::getCreateTime, query.getCreateTimeStart())
             .le(query.getCreateTimeEnd() != null, ByaiSession::getCreateTime, query.getCreateTimeEnd());
         // 任务名称与会话标题一一对应，搜索仅匹配名称，分页总数与前端搜索结果一致。
@@ -3417,7 +3419,9 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
             }
             String baseBranch = selected.repo().getDefaultBranch() == null
                 || selected.repo().getDefaultBranch().isBlank() ? "main" : selected.repo().getDefaultBranch();
-            LocalGitChangeService.LocalChangeResult local = localGitChangeService.collectChanges(selected.path(),
+            Path selectedPath = projectWorkspaceGitService.resolveRepository(selected.repo(), sessionId)
+                .orElse(selected.path());
+            LocalGitChangeService.LocalChangeResult local = localGitChangeService.collectChanges(selectedPath,
                 baseBranch);
             if (local.getStatus() != LocalGitChangeService.LocalStatus.OK) {
                 return ResponseUtil.successResponse(emptyLocalChangesMap());
@@ -3472,7 +3476,9 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
             }
             String baseBranch = selected.repo().getDefaultBranch() == null
                 || selected.repo().getDefaultBranch().isBlank() ? "main" : selected.repo().getDefaultBranch();
-            LocalGitChangeService.FileDiffResult result = localGitChangeService.fileDiff(selected.path(), baseBranch,
+            Path selectedPath = projectWorkspaceGitService.resolveRepository(selected.repo(), sessionId)
+                .orElse(selected.path());
+            LocalGitChangeService.FileDiffResult result = localGitChangeService.fileDiff(selectedPath, baseBranch,
                 filePath);
             Map<String, Object> map = new HashMap<>();
             map.put("status", result.getStatus().name().toLowerCase());

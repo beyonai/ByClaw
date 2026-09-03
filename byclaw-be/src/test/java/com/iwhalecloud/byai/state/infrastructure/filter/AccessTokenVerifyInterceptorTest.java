@@ -8,6 +8,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import java.util.List;
+
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
@@ -40,6 +42,38 @@ class AccessTokenVerifyInterceptorTest {
             "http://localhost:8086/byaiService/tool/installThirdPartySkill"));
         assertFalse(interceptor.checkUrlByRegex(
             "http://localhost:8086/system/session/currentUser"));
+    }
+
+    @Test
+    void allowsAnonymousWeixinOpenPlatformEventsWithContextPathAndTrailingSlash() {
+        AccessTokenVerifyInterceptor interceptor = new AccessTokenVerifyInterceptor();
+        for (String path : List.of(
+                "/byaiService/connector/authorization/callback/weixin-open-platform/events",
+                "/byaiService/connector/authorization/callback/weixin-open-platform/events/")) {
+            MockHttpServletRequest request = new MockHttpServletRequest("POST", path);
+            request.setContextPath("/byaiService");
+
+            assertTrue(interceptor.preHandle(request, new MockHttpServletResponse(), new Object()));
+        }
+    }
+
+    @Test
+    void doesNotAnonymouslyAllowLookalikeOrNonPostWeixinEventPaths() {
+        AccessTokenVerifyInterceptor interceptor = new AccessTokenVerifyInterceptor();
+        for (MockHttpServletRequest request : List.of(
+                request("POST", "/other/connector/authorization/callback/weixin-open-platform/events", ""),
+                request("POST", "/byaiService/connector/authorization/callback/weixin-open-platform/events/more",
+                    "/byaiService"),
+                request("GET", "/byaiService/connector/authorization/callback/weixin-open-platform/events",
+                    "/byaiService"))) {
+            assertFalse(interceptor.preHandle(request, new MockHttpServletResponse(), new Object()));
+        }
+    }
+
+    private MockHttpServletRequest request(String method, String uri, String contextPath) {
+        MockHttpServletRequest request = new MockHttpServletRequest(method, uri);
+        request.setContextPath(contextPath);
+        return request;
     }
 
     @Test
@@ -313,7 +347,7 @@ class AccessTokenVerifyInterceptorTest {
         ReflectionTestUtils.setField(interceptor, "artifactPreviewPathPrefix", "/artifact-preview");
         ReflectionTestUtils.setField(interceptor, "artifactDownloadPathPrefix", "/artifact-download");
         MockHttpServletRequest request = new MockHttpServletRequest("GET",
-            "/byaiService/artifact-preview/artifact/key/index.html");
+            "/byaiService/artifact-preview/artifact/index.html");
         request.setContextPath("/byaiService");
 
         assertTrue(interceptor.preHandle(request, new MockHttpServletResponse(), new Object()));
@@ -324,35 +358,10 @@ class AccessTokenVerifyInterceptorTest {
         AccessTokenVerifyInterceptor interceptor = new AccessTokenVerifyInterceptor();
         ReflectionTestUtils.setField(interceptor, "artifactDataPathPrefix", "/artifact-data");
         MockHttpServletRequest request = new MockHttpServletRequest("GET",
-            "/byaiService/artifact-data/artifact/key/records/record-1");
+            "/byaiService/artifact-data/artifact/records/record-1");
         request.setContextPath("/byaiService");
 
         assertTrue(interceptor.preHandle(request, new MockHttpServletResponse(), new Object()));
     }
 
-    @Test
-    void artifactDataOwnerReadUsesBeyondTokenIdentity() {
-        AccessTokenVerifyInterceptor interceptor = new AccessTokenVerifyInterceptor();
-        JwtTokenFilter jwtTokenFilter = mock(JwtTokenFilter.class);
-        LoginApplicationService loginApplicationService = mock(LoginApplicationService.class);
-        ReflectionTestUtils.setField(interceptor, "jwtTokenFilter", jwtTokenFilter);
-        ReflectionTestUtils.setField(interceptor, "loginApplicationService", loginApplicationService);
-        LoginInfo tokenLoginInfo = new LoginInfo();
-        tokenLoginInfo.setUserId(100L);
-        tokenLoginInfo.setUserCode("artifact-user");
-        LoginInfo localLoginInfo = new LoginInfo();
-        localLoginInfo.setUserId(10L);
-        localLoginInfo.setUserCode("artifact-user");
-        when(jwtTokenFilter.doFilter(null, "artifact-token")).thenAnswer(invocation -> {
-            CurrentUserHolder.setLoginInfo(tokenLoginInfo);
-            return true;
-        });
-        when(loginApplicationService.getLoginInfo("artifact-user")).thenReturn(localLoginInfo);
-        MockHttpServletRequest request = new MockHttpServletRequest("GET",
-            "/byaiService/open/api/v1/artifacts/artifact-1/data-records/record-1");
-        request.addHeader("Beyond-Token", "artifact-token");
-
-        assertTrue(interceptor.preHandle(request, new MockHttpServletResponse(), new Object()));
-        assertThat(CurrentUserHolder.getCurrentUserId()).isEqualTo(10L);
-    }
 }

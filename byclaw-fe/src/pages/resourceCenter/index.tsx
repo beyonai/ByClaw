@@ -41,11 +41,6 @@ const ResourceCenter: React.FC = () => {
       icon: <ToolOutlined />,
     },
     {
-      key: 'ontology',
-      label: intl.formatMessage({ id: 'common.resourceType.ontology' }),
-      icon: <ApartmentOutlined />,
-    },
-    {
       key: 'view',
       label: intl.formatMessage({ id: 'common.viewName' }),
       icon: <EyeOutlined />,
@@ -54,6 +49,11 @@ const ResourceCenter: React.FC = () => {
       key: 'object',
       label: intl.formatMessage({ id: 'common.object' }),
       icon: <AppstoreOutlined />,
+    },
+    {
+      key: 'ontology',
+      label: intl.formatMessage({ id: 'common.resourceType.ontology' }),
+      icon: <ApartmentOutlined />,
     },
     {
       key: 'model',

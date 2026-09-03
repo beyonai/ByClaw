@@ -11,6 +11,7 @@ import type {
   AgentResult,
   ArtifactRef,
   Delegation,
+  DelegationCallbackStatus,
   DelegationStatus,
   JsonValue,
   RunAttachment,
@@ -32,15 +33,19 @@ export class UnauthorizedAgentError extends Error {
 
 export interface ExternalDelegationCallback {
   delegationId: string;
-  status: string;
+  status: DelegationCallbackStatus;
   finalAnswer: string;
 }
 
-export interface ExternalDelegationCallbackResult {
-  accepted: boolean;
-  runId?: string;
-  result?: AgentResult;
-}
+export type ExternalDelegationCallbackResult =
+  | { outcome: "delegation_not_found" }
+  | {
+      outcome: "delegation_already_settled";
+      runId: string;
+      delegationStatus: DelegationStatus;
+      result?: AgentResult;
+    }
+  | { outcome: "delegation_settled"; runId: string; result: AgentResult };
 
 export interface ExecuteDelegationInput {
   session: Session;
@@ -868,12 +873,13 @@ export class DelegationService {
   ): Promise<ExternalDelegationCallbackResult> {
     const delegation = await this.delegations.get(callback.delegationId);
     if (!delegation) {
-      return { accepted: false };
+      return { outcome: "delegation_not_found" };
     }
     if (TERMINAL_DELEGATION_STATUSES.has(delegation.status)) {
       return {
-        accepted: false,
+        outcome: "delegation_already_settled",
         runId: delegation.runId,
+        delegationStatus: delegation.status,
         ...(delegation.result ? { result: structuredClone(delegation.result) } : {}),
       };
     }
@@ -903,7 +909,7 @@ export class DelegationService {
       result,
       terminalStatus === "COMPLETED" ? undefined : "agent_callback",
     );
-    return { accepted: true, runId: delegation.runId, result };
+    return { outcome: "delegation_settled", runId: delegation.runId, result };
   }
 
   /** 响应一个由 Connector 发起且仍在等待的用户交互。 */

@@ -47,6 +47,7 @@ class MessageServiceBeanWiringTest {
         registerMock(context, "sequenceService", SequenceService.class);
         registerMock(context, "sessionApplicationService", SessionApplicationService.class);
         registerMock(context, "byaiMessageHotService", ByaiMessageHotService.class);
+        registerMock(context, "conversationOutlineDisplayService", ConversationOutlineDisplayService.class);
         registerMock(context, "byaiMessageRelObjService", ByaiMessageRelObjService.class);
         registerMock(context, "sessionExtService", SessionExtService.class);
         registerMock(context, "sessionService", SessionService.class);

@@ -12,6 +12,7 @@ import {
   type CallerPrincipal,
   type CallbackTimeoutDelivery,
   type Delegation,
+  type DelegationStatus,
   type DelegationRepository,
   type ExecutionCredential,
   type ExecutionCredentialRepository,
@@ -21,6 +22,7 @@ import {
   type PiSessionCheckpoint,
   type Run,
   type RunAttachment,
+  type RunExecutionStage,
   type RunIngressContextV1,
   type RunEvent,
   type RunEventStore,
@@ -28,8 +30,10 @@ import {
   type RunExecutionQueue,
   type RunPage,
   type RunRepository,
+  type RunStatus,
   type Session,
   type SessionRepository,
+  type WaitingCallbackSettlementResult,
 } from "@byclaw/by-conductor";
 import {
   Pool,
@@ -1207,7 +1211,7 @@ export class PostgresRunExecutionQueue implements RunExecutionQueue {
     status: "COMPLETED" | "FAILED" | "CANCELLED";
     finalAnswer: string;
     enforceDeadline?: boolean;
-  }): Promise<{ accepted: boolean; runId?: string; wakeRun?: boolean }> {
+  }): Promise<WaitingCallbackSettlementResult> {
     return transaction(this.pool, async (client) => {
       // 事件写入会先持有 Run 事件序列锁，再通过外键读取 runs。这里必须采用相同顺序：
       // 先定位 runId 并获取事件锁，再锁 Delegation/Run 行。否则并发 append 可能持有
@@ -1220,7 +1224,7 @@ export class PostgresRunExecutionQueue implements RunExecutionQueue {
       );
       const locatedRunId = located.rows[0]?.run_id;
       if (!locatedRunId) {
-        return { accepted: false };
+        return { outcome: "delegation_not_found" };
       }
       await lockRunEventSequence(client, locatedRunId);
       const selected = await client.query<{
@@ -1228,9 +1232,9 @@ export class PostgresRunExecutionQueue implements RunExecutionQueue {
         run_id: string;
         agent_id: string;
         agent_name: string | null;
-        delegation_status: string;
-        run_status: string;
-        execution_stage: string;
+        delegation_status: DelegationStatus;
+        run_status: RunStatus;
+        execution_stage: RunExecutionStage;
         callback_expired: boolean;
         settled_at: Date | string;
       }>(
@@ -1248,17 +1252,25 @@ export class PostgresRunExecutionQueue implements RunExecutionQueue {
       );
       const row = selected.rows[0];
       if (!row) {
-        return { accepted: false };
+        return { outcome: "delegation_not_found" };
       }
       if (["COMPLETED", "FAILED", "CANCELLED", "TIMED_OUT"].includes(row.delegation_status)) {
-        return { accepted: false, runId: row.run_id };
+        return {
+          outcome: "delegation_already_settled",
+          runId: row.run_id,
+          delegationStatus: row.delegation_status,
+        };
       }
       // 启用超时时由数据库时钟裁决；即使扫描器尚未抢到，迟到 Resume 也不能越过期限。
       if (input.enforceDeadline !== false && row.callback_expired) {
-        return { accepted: false, runId: row.run_id };
+        return { outcome: "callback_expired", runId: row.run_id };
       }
       if (["CANCELLING", "COMPLETED", "FAILED", "CANCELLED"].includes(row.run_status)) {
-        return { accepted: false, runId: row.run_id };
+        return {
+          outcome: "run_not_resumable",
+          runId: row.run_id,
+          runStatus: row.run_status,
+        };
       }
       const settledAt = milliseconds(row.settled_at);
       const resultStatus =
@@ -1327,7 +1339,15 @@ export class PostgresRunExecutionQueue implements RunExecutionQueue {
         ]);
       }
       await notifyRunEvent(client, this.schema, row.run_id);
-      return { accepted: true, runId: row.run_id, wakeRun };
+      if (wakeRun) {
+        return { outcome: "run_resumed", runId: row.run_id };
+      }
+      return {
+        outcome: "delegation_settled",
+        runId: row.run_id,
+        runStatus: row.run_status,
+        executionStage: row.execution_stage,
+      };
     });
   }
 
@@ -1484,8 +1504,24 @@ async function writeCredential(
   schema: string,
   credential: ExecutionCredential,
 ): Promise<void> {
-  const values = [credential.runId, credential.secret, date(credential.createdAt)];
   await advisoryLock(client, `credential:${credential.runId}`);
+  let metadata = credential.metadata;
+  if (metadata === undefined) {
+    const existing = await client.query(
+      `SELECT credential
+         FROM ${table(schema, "run_execution_credentials")}
+        WHERE run_id = $1`,
+      [credential.runId],
+    );
+    metadata = existing.rows[0]
+      ? decodeStoredCredential(text(existing.rows[0].credential)).metadata ?? {}
+      : {};
+  }
+  const values = [
+    credential.runId,
+    encodeStoredCredential({ ...credential, metadata }),
+    date(credential.createdAt),
+  ];
   const updated = await client.query(
     `UPDATE ${table(schema, "run_execution_credentials")}
         SET credential = $2,
@@ -2402,11 +2438,50 @@ function readLeaderModelSelection(raw: unknown) {
 }
 
 function mapCredential(row: QueryResultRow): ExecutionCredential {
+  const stored = decodeStoredCredential(text(row.credential));
   return {
     runId: text(row.run_id),
-    secret: text(row.credential),
+    secret: stored.secret,
+    metadata: stored.metadata ?? {},
     createdAt: milliseconds(row.created_at),
   };
+}
+
+const EXECUTION_CONTEXT_FORMAT = "byclaw-execution-context-v1";
+
+/** 新记录使用版本化 JSON；旧的纯 token 文本继续兼容读取。 */
+function encodeStoredCredential(credential: ExecutionCredential): string {
+  return JSON.stringify({
+    format: EXECUTION_CONTEXT_FORMAT,
+    secret: credential.secret,
+    metadata: credential.metadata ?? {},
+  });
+}
+
+function decodeStoredCredential(value: string): Pick<ExecutionCredential, "secret" | "metadata"> {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      !Array.isArray(parsed) &&
+      (parsed as Record<string, unknown>).format === EXECUTION_CONTEXT_FORMAT &&
+      typeof (parsed as Record<string, unknown>).secret === "string"
+    ) {
+      const record = parsed as Record<string, unknown>;
+      const metadata = record.metadata;
+      return {
+        secret: record.secret as string,
+        metadata:
+          metadata && typeof metadata === "object" && !Array.isArray(metadata)
+            ? (metadata as Record<string, unknown>)
+            : {},
+      };
+    }
+  } catch {
+    // 旧版 credential 是任意纯文本 token，不要求符合 JSON。
+  }
+  return { secret: value, metadata: {} };
 }
 
 async function transaction<T>(

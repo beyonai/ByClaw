@@ -6,7 +6,6 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.Executor;
 
 import org.apache.commons.collections.MapUtils;
 import org.slf4j.Logger;
@@ -31,8 +30,7 @@ import com.iwhalecloud.byai.common.login.bean.UsersOrganization;
 import com.iwhalecloud.byai.common.util.MapParamUtil;
 import com.iwhalecloud.byai.common.util.RedisUtil;
 import com.iwhalecloud.byai.common.util.StringUtil;
-import com.iwhalecloud.byai.common.util.threadPoolUti.ThreadPoolUtil;
-import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
+import com.iwhalecloud.byai.gateway.sandbox.service.SandboxLoginAutoStartService;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthRedisSyncService;
 import com.iwhalecloud.byai.manager.application.service.superassist.SuasSuperassistApplicationService;
 import com.iwhalecloud.byai.manager.application.service.user.UserApplicationService;
@@ -107,12 +105,10 @@ public class LoginApplicationService {
     private JwtService jwtService;
 
     @Autowired
-    private SandboxService sandboxService;
+    private SandboxLoginAutoStartService sandboxLoginAutoStartService;
 
     @Autowired
     private AuthRedisSyncService authRedisSyncService;
-
-    private final Executor asyncExecutor = ThreadPoolUtil.getThreadPool(4, 8, 32, 60, "async-user-login-job");
 
     /**
      * 根据用户标识获取用户登陆信息
@@ -342,24 +338,29 @@ public class LoginApplicationService {
         return null;
     }
 
-    /**
-     * 异步启动用户沙箱，不阻塞当前请求
-     *
-     * @param userCode 用户编码
-     */
+    /** 登录后的异步任务只负责分发，任务之间互不影响。 */
     private void doAsyncJobAfterLogin(String userCode, Long userId) {
         if (StringUtil.isEmpty(userCode)) {
             return;
         }
-        asyncExecutor.execute(() -> {
-            try {
-                sandboxService.ensureSandboxReady(userCode, -1L, null);
-                authRedisSyncService.asyncSyncUserAuthToRedis(userId);
-            }
-            catch (Exception e) {
-                logger.warn("异步启动用户沙箱失败，用户编码：{}", userCode, e);
-            }
-        });
+        try {
+            sandboxLoginAutoStartService.trigger(userCode);
+        }
+        catch (Exception e) {
+            logger.error("提交登录沙箱自启动任务失败，用户编码：{}", userCode, e);
+        }
+        try {
+            authRedisSyncService.asyncSyncUserAuthToRedis(userId);
+        }
+        catch (Exception e) {
+            logger.error("提交登录用户权限同步任务失败，用户ID：{}", userId, e);
+        }
+        try {
+            authRedisSyncService.asyncSyncUserManageAuthToRedis(userId);
+        }
+        catch (Exception e) {
+            logger.error("提交登录用户管理权限同步任务失败，用户ID：{}", userId, e);
+        }
     }
 
     /**

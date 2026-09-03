@@ -1,7 +1,10 @@
 package com.iwhalecloud.byai.state.domain.chat.service;
 
 import com.iwhalecloud.byai.manager.application.service.user.UserPrivateParamCacheReader;
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
+import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
+import com.iwhalecloud.byai.common.constants.resource.WorkerAgentType;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
 
@@ -11,34 +14,61 @@ import org.springframework.stereotype.Service;
 @Service
 public class SystemParamTargetAgentResolver {
 
-    private static final String ENABLE_PARAM_CODE = "ENABLE_DSH";
+    private static final String ENABLE_HARNESS_PARAM_CODE = "ENABLE_DSH";
 
-    private static final String TARGET_AGENT_PREFIX = "BYCLAW_DSH_";
+    private static final String TARGET_AGENT_PREFIX = WorkerAgentType.HARNESS.getCode() + "_";
 
     private final ByaiSystemConfigService systemConfigService;
 
     private final UserPrivateParamCacheReader privateParamCacheReader;
 
+    private final SsResourceService ssResourceService;
+
     public SystemParamTargetAgentResolver(
             ByaiSystemConfigService systemConfigService,
-            UserPrivateParamCacheReader privateParamCacheReader
+            UserPrivateParamCacheReader privateParamCacheReader,
+            SsResourceService ssResourceService
     ) {
         this.systemConfigService = systemConfigService;
         this.privateParamCacheReader = privateParamCacheReader;
+        this.ssResourceService = ssResourceService;
     }
 
     public String resolve(String currentTargetAgentType, String userCode) {
+        return resolve(currentTargetAgentType, null, userCode);
+    }
+
+    /**
+     * Applies user-level DSH routing first, then routes HARNESS digital employees to DSH.
+     */
+    public String resolve(String currentTargetAgentType, Long agentId, String userCode) {
         if (StringUtils.isBlank(userCode)) {
             return currentTargetAgentType;
         }
         String normalizedUserCode = StringUtils.trim(userCode);
-        String enabled = privateParamCacheReader.getValue(normalizedUserCode, ENABLE_PARAM_CODE);
+        String enabled = privateParamCacheReader.getValue(normalizedUserCode, ENABLE_HARNESS_PARAM_CODE);
         if (StringUtils.isBlank(enabled)) {
-            enabled = systemConfigService.getDcSystemConfigValueByCode(ENABLE_PARAM_CODE);
+            enabled = systemConfigService.getDcSystemConfigValueByCode(ENABLE_HARNESS_PARAM_CODE);
         }
         if (!"1".equals(StringUtils.trim(enabled))) {
-            return currentTargetAgentType;
+            if (!isHarnessAgent(agentId)) {
+                return currentTargetAgentType;
+            }
         }
         return TARGET_AGENT_PREFIX + normalizedUserCode;
+    }
+
+    private boolean isHarnessAgent(Long agentId) {
+        if (agentId == null || ssResourceService == null) {
+            return false;
+        }
+        try {
+            SsResource resource = ssResourceService.findById(agentId);
+            return resource != null
+                && WorkerAgentType.HARNESS.getCode().equals(StringUtils.trim(resource.getWorkerAgentType()));
+        }
+        catch (Exception ignored) {
+            return false;
+        }
     }
 }

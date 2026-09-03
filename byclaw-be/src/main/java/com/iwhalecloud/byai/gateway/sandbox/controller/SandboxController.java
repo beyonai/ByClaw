@@ -9,6 +9,7 @@ import java.util.stream.Collectors;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.constants.Constants;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
+import com.iwhalecloud.byai.common.log.util.RequestContextUtil;
 import com.iwhalecloud.byai.gateway.sandbox.service.ingress.openclaw.OpenClawUiProxyPaths;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import org.apache.commons.lang3.StringUtils;
@@ -27,6 +28,7 @@ import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.gateway.sandbox.mapper.SandboxServiceProfileEntityMapper;
 import com.iwhalecloud.byai.gateway.sandbox.mapper.SandboxServiceSpecEntityMapper;
 import com.iwhalecloud.byai.gateway.sandbox.model.SandboxInfo;
+import com.iwhalecloud.byai.gateway.sandbox.model.SandboxRecordView;
 import com.iwhalecloud.byai.gateway.sandbox.persistence.SandboxServiceProfileEntity;
 import com.iwhalecloud.byai.gateway.sandbox.persistence.SandboxServiceSpecEntity;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxHealthConfigService;
@@ -48,6 +50,7 @@ import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * 沙箱管理控制器
@@ -56,6 +59,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 @RestController
 @RequestMapping("/sandbox")
 @Tag(name = "沙箱管理", description = "提供沙箱心跳保活、状态查询等功能")
+@Slf4j
 public class SandboxController {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -229,6 +233,12 @@ public class SandboxController {
                 result.put("instanceEndpoints", sandbox.getInstanceEndpoints());
                 result.put("token", sandbox.getGatewayToken());
                 result.put("status", record != null ? record.getStatus() : "UNKNOWN");
+                SandboxRecordView workerView = record == null ? null : sandboxService.buildRecordView(record);
+                result.put("workerId", workerView == null ? null : workerView.getWorkerId());
+                result.put("workerOnline", workerView == null ? null : workerView.getWorkerOnline());
+                result.put("workerLastSeen", workerView == null ? null : workerView.getWorkerLastSeen());
+                result.put("workerLeaseTtlSeconds",
+                    workerView == null ? null : workerView.getWorkerLeaseTtlSeconds());
                 data.add(result);
             }
         }
@@ -241,20 +251,44 @@ public class SandboxController {
     @PostMapping("/browser/navigate")
     public ResponseUtil navigateBrowser(@RequestBody Map<String, Object> params) {
         String userCode = CurrentUserHolder.getCurrentUserCode();
+        String sandboxId = stringValue(params.get("sandboxId"));
+        String targetUrl = stringValue(params.get("targetUrl"));
+        String sessionKey = stringValue(params.get("sessionKey"));
+        Long requestId = RequestContextUtil.getRequestId();
+        log.info("[SandboxBrowser] stage=CONTROLLER_INGRESS requestId={} userCode={} sandboxId={} "
+                + "sessionKey={} target={}",
+            requestId, userCode, sandboxId, sessionKey, SandboxBrowserNavigationService.safeUri(targetUrl));
         if (StringUtils.isBlank(userCode)) {
+            log.warn("[SandboxBrowser] stage=CONTROLLER_REJECTED requestId={} reason=MISSING_USER "
+                    + "sandboxId={} sessionKey={} target={}",
+                requestId, sandboxId, sessionKey, SandboxBrowserNavigationService.safeUri(targetUrl));
             return ResponseUtil.fail(I18nUtil.get("sandbox.browser.user.required"));
         }
         try {
-            sandboxBrowserNavigationService.navigate(userCode,
-                params.get("sandboxId") == null ? null : params.get("sandboxId").toString(),
-                params.get("targetUrl") == null ? null : params.get("targetUrl").toString(),
-                params.get("sessionKey") == null ? null : params.get("sessionKey").toString());
+            sandboxBrowserNavigationService.navigate(userCode, sandboxId, targetUrl, sessionKey);
+            log.info("[SandboxBrowser] stage=CONTROLLER_SUCCESS requestId={} userCode={} sandboxId={} "
+                    + "sessionKey={}",
+                requestId, userCode, sandboxId, sessionKey);
             return ResponseUtil.successResponse();
         } catch (IllegalArgumentException exception) {
+            log.warn("[SandboxBrowser] stage=CONTROLLER_REJECTED requestId={} userCode={} sandboxId={} "
+                + "sessionKey={} target={} exceptionType={} error={}",
+                requestId, userCode, sandboxId, sessionKey, SandboxBrowserNavigationService.safeUri(targetUrl),
+                exception.getClass().getSimpleName(), SandboxBrowserNavigationService.safeLogValue(
+                    exception.getMessage()));
             return ResponseUtil.fail(I18nUtil.get("sandbox.browser.navigate.failed"));
         } catch (Exception exception) {
+            log.error("[SandboxBrowser] stage=CONTROLLER_FAILURE requestId={} userCode={} sandboxId={} "
+                    + "sessionKey={} target={} exceptionType={} error={} stackTrace={}",
+                requestId, userCode, sandboxId, sessionKey, SandboxBrowserNavigationService.safeUri(targetUrl),
+                exception.getClass().getSimpleName(), SandboxBrowserNavigationService.safeLogValue(
+                    exception.getMessage()), SandboxBrowserNavigationService.safeStackTrace(exception));
             return ResponseUtil.fail(I18nUtil.get("sandbox.browser.navigate.failed"));
         }
+    }
+
+    private String stringValue(Object value) {
+        return value == null ? null : value.toString();
     }
 
     /**
@@ -273,6 +307,7 @@ public class SandboxController {
     public ResponseUtil removeSandbox(
         @Parameter(description = "请求参数，userCode和resourceId为必填") @RequestBody Map<String, Object> params) {
         String userCode = (String) params.get("userCode");
+        String sandboxType = params.get("sandboxType") != null ? params.get("sandboxType").toString().trim() : null;
         Object resourceIdObj = params.get("resourceId");
         Long resourceId = null;
 
@@ -290,7 +325,7 @@ public class SandboxController {
             }
         }
 
-        sandboxService.removeSandbox(userCode, resourceId);
+        sandboxService.removeSandbox(userCode, resourceId, sandboxType);
         return ResponseUtil.successResponse();
     }
 
@@ -379,7 +414,9 @@ public class SandboxController {
         }
 
         int offset = (pageIndex - 1) * pageSize;
-        List<SsSandboxRecord> list = sandboxRecordMapper.selectByPage(keyword, status, offset, pageSize);
+        List<SandboxRecordView> list = sandboxRecordMapper.selectByPage(keyword, status, offset, pageSize).stream()
+            .map(sandboxService::buildRecordView)
+            .collect(Collectors.toList());
         // 动态端口的 openclaw 控制台外网不可达；配置了 WEB_BASE_URL 时改写为经网关整页代理的对外地址，
         // 未配置则保持原始 endpoint（原逻辑）。
         String webBaseUrl = byaiSystemConfigService.getDcSystemConfigValueByCode(Constants.WEB_BASE_URL);
@@ -759,6 +796,7 @@ public class SandboxController {
         String serviceKey = (String) params.get("serviceKey");
         String specJson = (String) params.get("specJson");
         String templateJson = (String) params.get("templateJson");
+        Integer enabled = parseEnabled(params.get("enabled"));
 
         if (serviceKey == null || serviceKey.trim().isEmpty()) {
             return ResponseUtil.fail("serviceKey is required");
@@ -775,13 +813,29 @@ public class SandboxController {
         SandboxServiceSpecEntity existing = sandboxServiceSpecEntityMapper.selectById(serviceKeyTrimmed);
         if (existing == null) {
             // 新增 - 使用自定义 SQL 处理 jsonb 类型
-            sandboxServiceSpecEntityMapper.insertSpec(serviceKeyTrimmed, specJsonTrimmed, templateJsonTrimmed);
+            sandboxServiceSpecEntityMapper.insertSpec(serviceKeyTrimmed, specJsonTrimmed, templateJsonTrimmed,
+                enabled);
         } else {
             // 更新 - 使用自定义 SQL 处理 jsonb 类型
-            sandboxServiceSpecEntityMapper.updateSpec(serviceKeyTrimmed, specJsonTrimmed, templateJsonTrimmed);
+            sandboxServiceSpecEntityMapper.updateSpec(serviceKeyTrimmed, specJsonTrimmed, templateJsonTrimmed,
+                enabled);
         }
 
         return ResponseUtil.successResponse();
+    }
+
+    private Integer parseEnabled(Object value) {
+        if (value == null) {
+            return 1;
+        }
+        if (value instanceof Boolean booleanValue) {
+            return booleanValue ? 1 : 0;
+        }
+        if (value instanceof Number numberValue) {
+            return numberValue.intValue() == 0 ? 0 : 1;
+        }
+        String stringValue = value.toString().trim();
+        return "0".equals(stringValue) || "false".equalsIgnoreCase(stringValue) ? 0 : 1;
     }
 
     /**

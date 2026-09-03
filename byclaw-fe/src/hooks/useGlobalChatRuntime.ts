@@ -7,9 +7,11 @@ import {
   clearChatRuntime,
   handleChatStreamError,
   handleParsedChatStream,
+  handleSessionRuntimeState,
   handleTaskPlanSnapshot,
 } from '@/hooks/useChat/chatRuntime';
 import webSocketManager from '@/utils/websocket';
+import type { SessionRuntimeState } from '@/utils/chatSessionRuntimeManager';
 
 import type { ISession } from '@/typescript/session';
 import type { TaskPlanSnapshot } from '@/typescript/message';
@@ -95,15 +97,35 @@ export default function useGlobalChatRuntime() {
       });
     };
 
+    const handleSessionRuntime = (message: {
+      data?: SessionRuntimeState | string;
+      sessionId?: string;
+      traceId?: string;
+    }) => {
+      try {
+        const payload = typeof message.data === 'string' ? JSON.parse(message.data) : message.data;
+        if (!payload) return;
+        handleSessionRuntimeState({
+          ...payload,
+          sessionId: `${payload.sessionId || message.sessionId || ''}`,
+          traceId: `${payload.traceId || message.traceId || ''}`,
+        });
+      } catch (error) {
+        console.warn('Ignored invalid session runtime message', error);
+      }
+    };
+
     webSocketManager.onMessage('ERROR', handleChatStreamError);
     webSocketManager.onMessage('NOTIFICATION', handleNotification);
     webSocketManager.onMessage('TASK_PLAN_SNAPSHOT', handleTaskPlan);
+    webSocketManager.onMessage('SESSION_RUNTIME_STATUS', handleSessionRuntime);
 
     return () => {
       unsubscribeChatStream();
       webSocketManager.offMessage('ERROR', handleChatStreamError);
       webSocketManager.offMessage('NOTIFICATION', handleNotification);
       webSocketManager.offMessage('TASK_PLAN_SNAPSHOT', handleTaskPlan);
+      webSocketManager.offMessage('SESSION_RUNTIME_STATUS', handleSessionRuntime);
     };
   }, [dispatch, userId]);
 }
