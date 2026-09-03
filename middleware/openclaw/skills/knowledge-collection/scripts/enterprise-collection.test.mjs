@@ -105,7 +105,7 @@ await (async () => {
       metadataOnly: true,
       inventory: [{
         itemId: 'candidate-1', title: 'Policy', sourceUrl: 'https://ima.example.test/item/1',
-        sourceItemId: '1', sourceSkill: 'ima-skill', backend: 'ima', collectionFilters: {},
+        sourceItemId: '1', sourceSkill: 'bycli', backend: 'ima', collectionFilters: {},
         rawArtifacts: ['raw/candidate.json'],
         materialization: {
           status: 'pending', markdownPath: null, sanitizedPath: null,
@@ -191,7 +191,7 @@ await (async () => {
       title: 'IMA body', source: 'ima', backend: 'ima', url: 'ima://item/1', filters: {},
       inventory: [{
         itemId: 'item-1', title: 'Item', sourceUrl: 'ima://item/1', sourceItemId: '1',
-        sourceSkill: 'ima-skill', backend: 'ima', collectionFilters: {}, rawArtifacts: [],
+        sourceSkill: 'bycli', backend: 'ima', collectionFilters: {}, rawArtifacts: [],
         materialization: {
           status: 'materialized', markdownPath: 'markdown/item.md',
           sanitizedPath: 'sanitized/items/item.md', pendingArtifactCleanup: [], reason: null,
@@ -278,17 +278,14 @@ console.log(JSON.stringify({ ok: true, data: { minute_token: 'minute-1' } }));
 }
 
 async function createImaFixture(root) {
-  const fixturePath = join(root, 'ima-cli');
+  const fixturePath = join(root, 'bycli-ima-fixture');
   await writeFile(fixturePath, `#!/usr/bin/env node
 const args = process.argv.slice(2);
 const out = (value) => process.stdout.write(JSON.stringify(value));
-if (args[0] === 'auth' && args[1] === 'check') out({ checks: { token_fetch: true } });
-else if (args[0] === 'wiki' && args[1] === 'search-base') out({ knowledge_bases: [{ id: 'kb-1', name: args[2] }] });
-else if (args[0] === 'ima' && args[1] === 'knowledge') out([{
+if (args[0] === 'ima' && args[1] === 'knowledge') out([{
   mediaId: 'article-1', title: '企业 AI 实践', url: 'https://ima.example.test/article-1',
-  abstract: '摘要', introduction: '引言', coverUrls: [],
+  abstract: '企业级AI应用落地实践摘要', introduction: '引言', coverUrls: [],
 }]);
-else if (args[0] === 'wiki' && args[1] === 'search') out({ content: '摘要\\n\\n引言' });
 else process.exit(2);
 `, { mode: 0o700 });
   await chmod(fixturePath, 0o700);
@@ -342,7 +339,7 @@ async function testImaSearchPublishesAtTheOuterSessionRoot() {
       scriptPath, 'search', '--parent-session-dir', parent, '--source', 'ima',
       '--query', '企业级AI应用落地实践', '--kb', '企业级AI应用落地实践',
       '--limit', '1', '--output-dir', requestedNestedOutput,
-    ], { IMA_CLI_BIN: fixture, BYCLI_BIN: fixture });
+    ], { BYCLI_BIN: fixture });
 
     assert.equal(result.code, 0, result.stderr || result.stdout);
     const outcome = JSON.parse(result.stdout);

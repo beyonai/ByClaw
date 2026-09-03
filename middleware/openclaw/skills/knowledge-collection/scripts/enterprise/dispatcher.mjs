@@ -11,7 +11,7 @@ const SEARCH_OPTIONS = {
   dingtalk: new Map([['workspace-ids', 'workspaceIds'], ['extensions', 'extensions'], ['folder-id', 'folderId']]),
   feishu: new Map([['space-id', 'spaceId'], ['file-types', 'fileTypes']]),
   wecom: new Map(),
-  ima: new Map([['kb', 'kb'], ['note-mode', 'noteMode']]),
+  ima: new Map([['kb', 'kb']]),
 };
 const RESOURCE_OPTIONS = {
   dingtalk: new Map(),
@@ -205,7 +205,6 @@ function defaultAdapters() {
     feishu: createFwsAdapter({ bin: process.env.LARK_CLI_BIN || 'lark-cli', env: process.env }),
     wecom: createWecomAdapter({ bin: process.env.WECOM_CLI_BIN || 'wecom-cli', env: process.env }),
     ima: createImaAdapter({
-      bin: process.env.IMA_CLI_BIN || 'ima',
       bycliBin: process.env.BYCLI_BIN || 'bycli',
       env: process.env,
     }),

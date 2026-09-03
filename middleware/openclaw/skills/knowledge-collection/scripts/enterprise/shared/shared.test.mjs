@@ -509,7 +509,7 @@ test('createArtifactWriter publishes into an empty initialized collection sessio
       title: 'IMA collection', source: 'ima', backend: 'ima', url: 'ima://search', filters: {},
       inventory: [{
         itemId: 'ima-1', title: 'Article', sourceUrl: 'ima://article/1', sourceItemId: '1',
-        sourceSkill: 'ima-skill', backend: 'ima', collectionFilters: {}, rawArtifacts: [],
+        sourceSkill: 'bycli', backend: 'ima', collectionFilters: {}, rawArtifacts: [],
         materialization: {
           status: 'materialized', markdownPath: 'markdown/items/article/index.md',
           sanitizedPath: 'sanitized/items/article/index.md', pendingArtifactCleanup: [],
@@ -1413,7 +1413,7 @@ test('SOURCE_IDENTITY exposes the exact enterprise connector identities', async 
     dingtalk: { connector: 'dws', source: 'dws', backend: 'dws', sourceSkill: 'dws' },
     feishu: { connector: 'fws', source: 'fws', backend: 'lark-cli', sourceSkill: 'fws' },
     wecom: { connector: 'wecom', source: 'wecom', backend: 'wecom-cli', sourceSkill: 'wecomcli' },
-    ima: { connector: 'ima', source: 'ima', backend: 'ima', sourceSkill: 'ima-skill' },
+    ima: { connector: 'ima', source: 'ima', backend: 'ima', sourceSkill: 'bycli' },
   });
 });
 

@@ -75,11 +75,6 @@ function isTrustedWechatArticleUrl(value) {
     && (url.pathname === '/s' || url.pathname.startsWith('/s/'));
 }
 
-function requiresImaAuthForMaterialization(item) {
-  return !discoveryExcerptOf(item)
-    && !(item?.sourceType === 'wiki' && isTrustedWechatArticleUrl(item.sourceUrl));
-}
-
 function coverUrlsOf(value) {
   if (!Array.isArray(value?.coverUrls)) return [];
   return [...new Set(value.coverUrls.filter((url) => {
@@ -200,6 +195,8 @@ function itemFromRecord(record, sourceType, kb = '', materializationKb = '') {
     preview: contentOf(record) || [abstract, introduction].filter(Boolean).join('\n\n'),
     abstract,
     introduction,
+    folderPath: stringValue(record, ['folderPath', 'sourcePath']),
+    tags: Array.isArray(record?.tags) ? record.tags.filter((tag) => typeof tag === 'string') : [],
     completeEvidence: false,
     coverUrls: coverUrlsOf(record),
   };
@@ -224,12 +221,6 @@ function mediaStateFor(item) {
     : {
       coverStatus: 'not-present', coverCount: 0, materializedCoverCount: 0, reason: null,
     };
-}
-
-function knowledgeBaseId(value, name) {
-  const bases = Array.isArray(value?.knowledge_bases) ? value.knowledge_bases : [];
-  const match = bases.find((base) => base?.name === name) || bases[0];
-  return stringValue(match, ['id']);
 }
 
 function itemIdFor(item) {
@@ -272,6 +263,8 @@ function inventoryItem(item, rawArtifacts, materialization = {}, media = mediaSt
     preview: item.preview,
     abstract: item.abstract,
     introduction: item.introduction,
+    folderPath: item.folderPath,
+    tags: [...(item.tags || [])],
     completeEvidence: item.completeEvidence === true,
     coverUrls: [...(item.coverUrls || [])],
     sourceSkill: identity.sourceSkill,
@@ -324,44 +317,49 @@ async function prepareCovers(item, fetchImpl) {
   return { prepared, failures };
 }
 
-function cliReason(result) {
+function bycliReason(result) {
   const output = `${result?.stdout || ''}\n${result?.stderr || ''}`;
-  if (/IMA_CREDENTIALS_UNAVAILABLE|auth|credential|unauthorized|401|403/i.test(output)) return 'IMA 连接尚未配置或已失效';
-  if (result?.failure) return `ima failed to start: ${result.failure.code || result.failure.message}`;
-  return `ima command failed with exit ${result?.exitCode}`;
-}
-
-async function authCheck(bin, env) {
-  const result = await runCli(bin, ['auth', 'check', '--test', '--json'], { env });
-  if (result.failure || result.exitCode !== 0) throw Object.assign(new Error(cliReason(result)), { auth: true });
-  let parsed;
-  try { parsed = JSON.parse(result.stdout); } catch { throw Object.assign(new Error('ima auth check returned invalid JSON'), { auth: true }); }
-  if (parsed?.checks?.token_fetch !== true) {
-    throw Object.assign(new Error('IMA 连接尚未配置或已失效'), { auth: true });
+  if (/auth|credential|unauthorized|login|登录|401|403/i.test(output)) return 'IMA 网页登录状态不可用';
+  if (/BRIDGE_UNAVAILABLE|BRIDGE_RECOVERY_BUSY|browser bridge|ECONNREFUSED/i.test(output)) {
+    return 'byCLI browser bridge is unavailable';
   }
-  return parsed;
+  if (result?.failure) return `bycli failed to start: ${result.failure.code || result.failure.message}`;
+  return `bycli command failed with exit ${result?.exitCode}`;
 }
 
-async function callJson(writer, bin, env, args, artifact) {
-  const result = await runCli(bin, args, { env });
-  if (result.failure || result.exitCode !== 0) throw Object.assign(new Error(cliReason(result)), { auth: /auth|credential|401|403/i.test(`${result.stdout}\n${result.stderr}`) });
+function isAuthorizationFailure(result) {
+  return /auth|credential|unauthorized|login|登录|401|403/i.test(`${result?.stdout || ''}\n${result?.stderr || ''}`);
+}
+
+async function callBycliImaJson(writer, bycliBin, env, args, artifact) {
+  const result = await runCli(bycliBin, ['ima', ...args, '-f', 'json'], { env });
+  if (result.failure || result.exitCode !== 0) {
+    const reason = bycliReason(result);
+    await writer.writeJson(artifact, {
+      status: 'failed',
+      exitCode: result.exitCode,
+      failure: result.failure ? { code: result.failure.code || 'start-failed' } : null,
+      reason,
+    });
+    throw Object.assign(new Error(`bycli ima ${args[0]} failed: ${reason}`), {
+      auth: isAuthorizationFailure(result),
+      rawArtifacts: [artifact],
+    });
+  }
   let parsed;
-  try { parsed = JSON.parse(result.stdout); } catch { throw new Error('ima returned invalid JSON'); }
+  try { parsed = JSON.parse(result.stdout); } catch {
+    await writer.writeJson(artifact, { status: 'failed', reason: 'invalid-json' });
+    throw Object.assign(new Error(`bycli ima ${args[0]} returned invalid JSON`), { rawArtifacts: [artifact] });
+  }
   await writer.writeJson(artifact, parsed);
   return parsed;
 }
 
 async function bycliKnowledgeList(writer, bycliBin, env, kb) {
-  const result = await runCli(bycliBin, ['ima', 'knowledge', kb, '-f', 'json'], { env });
-  if (result.failure || result.exitCode !== 0) {
-    throw new Error(`bycli ima knowledge failed: ${cliReason(result)}`);
-  }
-  let parsed;
-  try { parsed = JSON.parse(result.stdout); } catch { throw new Error('bycli ima knowledge returned invalid JSON'); }
+  const parsed = await callBycliImaJson(writer, bycliBin, env, ['knowledge', kb], 'raw/bycli-knowledge.json');
   if (!Array.isArray(parsed) && !objectValue(parsed)) {
     throw new Error('bycli ima knowledge returned an unsupported JSON shape');
   }
-  await writer.writeJson('raw/bycli-knowledge.json', parsed);
   return parsed;
 }
 
@@ -448,7 +446,7 @@ async function bycliWechatDownload(writer, bycliBin, env, item, paths) {
     error.rawArtifacts = [artifact];
     throw error;
   };
-  if (result.failure || result.exitCode !== 0) fail(`bycli weixin download failed: ${cliReason(result)}`);
+  if (result.failure || result.exitCode !== 0) fail(`bycli weixin download failed: ${bycliReason(result)}`);
   if (!parsed) fail('bycli weixin download returned invalid JSON');
   const record = bycliDownloadRecord(parsed);
   if (!record || !/^success$/i.test(stringValue(record, ['status']))) {
@@ -477,73 +475,86 @@ async function bycliWechatDownload(writer, bycliBin, env, item, paths) {
   };
 }
 
-async function discover(writer, request, bin, bycliBin, env) {
+function knowledgeBasesOf(value) {
+  return records(value).map((record) => {
+    const id = stringValue(record, ['id', 'knowledgeBaseId']);
+    const name = stringValue(record, ['name', 'knowledgeBase']);
+    const selector = id || name;
+    return selector ? { id, name, selector } : null;
+  }).filter(Boolean);
+}
+
+function recordMatchesQuery(record, query) {
+  const terms = String(query || '').normalize('NFKC').toLocaleLowerCase().split(/\s+/).filter(Boolean);
+  if (terms.length === 0) return true;
+  const tags = Array.isArray(record?.tags) ? record.tags.join(' ') : '';
+  const searchable = [
+    stringValue(record, ['title', 'name', 'fileName', 'subject']),
+    stringValue(record, ['folderPath']),
+    stringValue(record, ['abstract']),
+    stringValue(record, ['introduction']),
+    stringValue(record, ['sourcePath']),
+    stringValue(record, ['url', 'sourceUrl', 'link']),
+    tags,
+  ].join('\n').normalize('NFKC').toLocaleLowerCase();
+  return terms.every((term) => searchable.includes(term));
+}
+
+function knowledgeArtifact(selector) {
+  const suffix = crypto.createHash('sha256').update(selector).digest('hex').slice(0, 16);
+  return `raw/bycli-knowledge-${suffix}.json`;
+}
+
+async function discover(writer, request, bycliBin, env) {
   const found = [];
   const seenSourceItems = new Set();
   const seenSourceUrls = new Set();
   const rawArtifacts = [];
-  const fallbackReasons = [];
-  let materializationKb = request.kb;
-  const runDiscovery = async (sourceType, artifact, load) => {
-    const response = await load();
+  const failures = [];
+  const runDiscovery = (response, kb, selector, artifact) => {
     rawArtifacts.push(artifact);
     for (const record of records(response)) {
-      const item = itemFromRecord(record, sourceType, request.kb);
-      const sourceItemKey = item && `${sourceType}:${item.sourceItemId}`;
+      if (!recordMatchesQuery(record, request.query)) continue;
+      const item = itemFromRecord(record, 'wiki', kb, selector);
+      const sourceItemKey = item && `wiki:${item.sourceItemId}`;
       if (!item || seenSourceItems.has(sourceItemKey) || seenSourceUrls.has(item.sourceUrl)) continue;
       seenSourceItems.add(sourceItemKey);
       seenSourceUrls.add(item.sourceUrl);
-      found.push({ ...item, materializationKb, sourceRank: found.length + 1, rawArtifacts: [artifact] });
-      if (found.length >= request.limit) break;
+      found.push({ ...item, sourceRank: found.length + 1, rawArtifacts: [artifact] });
     }
   };
   if (request.kb) {
-    const baseSearch = await callJson(writer, bin, env, ['wiki', 'search-base', request.kb, '--json'], 'raw/wiki-search-base.json');
-    materializationKb = knowledgeBaseId(baseSearch, request.kb);
-    if (!materializationKb) throw new Error(`ima knowledge base not found: ${request.kb}`);
-    try {
-      await runDiscovery('wiki', 'raw/bycli-knowledge.json', () => bycliKnowledgeList(writer, bycliBin, env, request.kb));
-    } catch (error) {
-      fallbackReasons.push(reasonOf(error));
-      try {
-        await runDiscovery('wiki', 'raw/wiki-search.json', () => callJson(
-          writer,
-          bin,
-          env,
-          ['wiki', 'search', request.query, '--kb', materializationKb, '--json'],
-          'raw/wiki-search.json',
-        ));
-      } catch (fallbackError) {
-        throw new Error(`IMA knowledge listing failed: bycli=${fallbackReasons.join('; ')}; wiki=${reasonOf(fallbackError)}`);
-      }
-    }
-    return { found: found.slice(0, request.limit), rawArtifacts, fallbackReasons };
+    const response = await bycliKnowledgeList(writer, bycliBin, env, request.kb);
+    runDiscovery(response, request.kb, request.kb, 'raw/bycli-knowledge.json');
+    return { found: found.slice(0, request.limit), rawArtifacts, failures };
   }
-  const noteArgs = ['note', 'search', '--content', request.query, '--start', '0', '--end', String(request.limit), '--json'];
-  if (request.noteMode === 'title') {
-    noteArgs.splice(2, 2, '--title', request.query);
-  }
-  await runDiscovery('note', 'raw/note-search.json', () => callJson(writer, bin, env, noteArgs, 'raw/note-search.json'));
-  if (found.length < request.limit) {
-    const wikiArgs = ['wiki', 'search', request.query, ...(request.kb ? ['--kb', request.kb] : []), '--json'];
+
+  const basesArtifact = 'raw/bycli-knowledge-list.json';
+  const basesResponse = await callBycliImaJson(writer, bycliBin, env, ['knowledge-list'], basesArtifact);
+  rawArtifacts.push(basesArtifact);
+  const bases = knowledgeBasesOf(basesResponse);
+  let successfulBases = 0;
+  for (const base of bases) {
+    const artifact = knowledgeArtifact(base.selector);
     try {
-      await runDiscovery('wiki', 'raw/wiki-search.json', () => callJson(writer, bin, env, wikiArgs, 'raw/wiki-search.json'));
+      const response = await callBycliImaJson(writer, bycliBin, env, ['knowledge', base.selector], artifact);
+      successfulBases += 1;
+      runDiscovery(response, base.name || base.id, base.selector, artifact);
     } catch (error) {
-      if (fallbackReasons.length) {
-        throw new Error(`IMA knowledge listing failed: bycli=${fallbackReasons.join('; ')}; wiki=${reasonOf(error)}`);
-      }
-      throw error;
+      rawArtifacts.push(...(error.rawArtifacts || [artifact]));
+      failures.push({ knowledgeBase: base.name || base.id, reason: reasonOf(error) });
     }
   }
-  return { found: found.slice(0, request.limit), rawArtifacts, fallbackReasons };
+  if (bases.length > 0 && successfulBases === 0) {
+    const error = new Error(`IMA knowledge enumeration failed: ${failures.map((failure) => `${failure.knowledgeBase}: ${failure.reason}`).join('; ')}`);
+    error.auth = failures.some((failure) => /登录|auth|credential|unauthorized|401|403/i.test(failure.reason));
+    throw error;
+  }
+  return { found: found.slice(0, request.limit), rawArtifacts, failures };
 }
 
-async function materializeOne(writer, item, bin, bycliBin, env, fetchImpl) {
+async function materializeOne(writer, item, bycliBin, env, fetchImpl) {
   const paths = materializationPaths(item);
-  const artifact = `raw/${item.sourceType}-get-${paths.suffix}.json`;
-  const args = item.sourceType === 'note'
-    ? ['note', 'get', item.sourceItemId, '--format', '0', '--json']
-    : ['wiki', 'search', item.title, ...(item.materializationKb ? ['--kb', item.materializationKb] : []), '--json'];
   const createdFiles = [];
   let rawArtifacts = item.rawArtifacts;
   let materializedItem = item;
@@ -558,16 +569,14 @@ async function materializeOne(writer, item, bin, bycliBin, env, fetchImpl) {
         content = sanitizeWechatMarkdown(downloaded.content, wechatImages);
         materializedItem = { ...item, completeEvidence: true };
       } else {
-        const response = await callJson(writer, bin, env, args, artifact);
-        rawArtifacts = [...item.rawArtifacts, artifact];
-        content = contentOf(response) || item.preview;
+        content = discoveryExcerptOf(item);
       }
     } catch (error) {
       if (Array.isArray(error?.rawArtifacts)) rawArtifacts = [...item.rawArtifacts, ...error.rawArtifacts];
       content = discoveryExcerptOf(item);
       if (!content) throw error;
     }
-    if (!content) throw new Error(`ima ${item.sourceType} returned no content`);
+    if (!content) throw new Error('bycli ima returned no materializable excerpt');
     if (Buffer.byteLength(content, 'utf8') > MAX_CONTENT_BYTES) {
       throw new Error('IMA content exceeds materialization limit');
     }
@@ -635,10 +644,7 @@ function failedInventory(item, error) {
 
 function commonKnowledgeBase(items) {
   const values = [...new Set(items.map((item) => item.kb).filter(Boolean))];
-  if (values.length > 1) {
-    throw new Error(`IMA materialization cannot mix knowledge bases: ${values.join(', ')}`);
-  }
-  return values[0] || '';
+  return values.length === 1 ? values[0] : '';
 }
 
 async function persistSearch(writer, request, inventory, canonicalItems, rawArtifacts, status, discovery) {
@@ -663,7 +669,6 @@ async function persistSearch(writer, request, inventory, canonicalItems, rawArti
 }
 
 export function createImaAdapter(dependencies = {}) {
-  const bin = dependencies.bin || 'ima';
   const bycliBin = dependencies.bycliBin || 'bycli';
   const env = dependencies.env || process.env;
   const fetchImpl = dependencies.fetchImpl || globalThis.fetch;
@@ -677,13 +682,12 @@ export function createImaAdapter(dependencies = {}) {
       limit: request.limit || 50,
     };
     try {
-      await authCheck(bin, env);
-      const discovery = await discover(writer, normalized, bin, bycliBin, env);
+      const discovery = await discover(writer, normalized, bycliBin, env);
       const inventory = normalized.metadataOnly ? discovery.found.map((item) => inventoryItem(item, item.rawArtifacts)) : [];
       const materialized = [];
       if (!normalized.metadataOnly) {
         for (const item of discovery.found) {
-          try { materialized.push(await materializeOne(writer, item, bin, bycliBin, env, fetchImpl)); }
+          try { materialized.push(await materializeOne(writer, item, bycliBin, env, fetchImpl)); }
           catch (error) { materialized.push(failedInventory(item, error)); }
         }
       }
@@ -691,10 +695,14 @@ export function createImaAdapter(dependencies = {}) {
       const canonicalItems = finalInventory.filter((item) => item.materialization.status === 'materialized').map((item) => ({
         title: item.title, url: item.sourceUrl, author: '', publishTime: '', markdown: item.materialization.sanitizedPath, fileName: item.materialization.sanitizedPath,
       }));
-      const status = deriveCollectionStatus({ metadataOnly: normalized.metadataOnly, itemStates: finalInventory.map((item) => item.materialization.status) });
+      const status = deriveCollectionStatus({
+        metadataOnly: normalized.metadataOnly,
+        paginationFailed: discovery.failures.length > 0,
+        itemStates: finalInventory.map((item) => item.materialization.status),
+      });
       await persistSearch(writer, normalized, finalInventory, canonicalItems, discovery.rawArtifacts, status, {
         discovered: finalInventory.length,
-        fallbackReasons: discovery.fallbackReasons,
+        failures: discovery.failures,
       });
       return handledOutcome(identity.connector, status, outputDir, inventoryCounts(finalInventory));
     } catch (error) {
@@ -710,11 +718,10 @@ export function createImaAdapter(dependencies = {}) {
   async function materialize(request = {}) {
     const writer = await createArtifactWriter(request.outputDir);
     const candidates = await copyResumeArtifacts(writer, await readResumeCandidates(request.sessionDir, identity.source, request.itemIds || []));
-    if (candidates.some(requiresImaAuthForMaterialization)) await authCheck(bin, env);
     const kb = commonKnowledgeBase(candidates);
     const inventory = [];
     for (const item of candidates) {
-      try { inventory.push(await materializeOne(writer, item, bin, bycliBin, env, fetchImpl)); }
+      try { inventory.push(await materializeOne(writer, item, bycliBin, env, fetchImpl)); }
       catch (error) { inventory.push(failedInventory(item, error)); }
     }
     const canonicalItems = inventory.filter((item) => item.materialization.status === 'materialized').map((item) => ({ title: item.title, url: item.sourceUrl, author: '', publishTime: '', markdown: item.materialization.sanitizedPath, fileName: item.materialization.sanitizedPath }));

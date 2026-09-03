@@ -16,14 +16,14 @@ VALUES (nextval('byai.seq_any_table'), 'github', 'GitHub', '通过 OAuth2 连接
 -- IMA OpenAPI 连接器。凭据仅由后续用户私有参数流程写入，迁移仅声明前端表单与受管环境白名单。
 INSERT INTO byai.byai_connector_info (
     connector_id, connector_code, connector_name, description, connector_type,
-    provider_code, skill_code, auth_mode, auth_config, request_config, runtime_manifest, sort
+    provider_code, skill_code, auth_mode, auth_config, request_config, runtime_manifest, sort, status_cd
 )
 SELECT nextval('byai.seq_any_table'), 'ima-openapi', 'IMA', '通过 IMA OpenAPI 连接 IMA 服务', 'SYSTEM',
        'ima-openapi', 'ima-skill', 'AK_SK',
        '{"credentialForm":{"helpUrl":"https://ima.qq.com/agent-interface","helpLinkText":"前往 IMA 获取 API 凭据","helpText":"连接器作用：安全保存 IMA OpenAPI 的 Client ID 和 API Key，供数字员工访问 IMA 笔记和知识库。\n\n获取步骤：\n1. 点击下方链接进入 IMA 智能体接口页面并登录。\n2. 创建或选择需要连接的应用。\n3. 复制 Client ID 和 API Key。\n4. 返回本页填写凭据，点击“保存并连接”。\n\n安全提示：API Key 相当于账号密码，请勿发送到聊天、截图、工单或代码仓库。重新生成后旧值可能失效，需要重新连接。","fields":[{"key":"clientId","label":"Client ID","inputType":"text","maxLength":256},{"key":"apiKey","label":"API Key","inputType":"password","maxLength":2048}]}}',
        '{}',
        '{"schemaVersion":"1.0","id":"ima-openapi","version":"1.0.0","runtime":{"type":"cli","authorizeIn":"be-auth-job","commands":{"version":[["ima","--version"]]}},"authStorage":{"mode":"managed-environment","owner":"be-auth-job","runtimeMutation":"provider-refresh-only","managedEnvironmentKeys":["IMA_OPENAPI_CLIENTID","IMA_OPENAPI_APIKEY"],"environment":{}},"skill":{"code":"ima-skill","source":"system-builtin","installScope":"user","grantScope":"agent"}}',
-       50
+       50, '00X'
 WHERE NOT EXISTS (
     SELECT 1 FROM byai.byai_connector_info WHERE connector_code = 'ima-openapi'
 );

@@ -51,6 +51,9 @@ test('request parsers reject invalid, foreign, and sensitive source options', ()
   assert.throws(() => parseSearchRequest({
     source: 'dingtalk', query: 'q', 'output-dir': '/tmp/out', 'folder-id': 'folder-1', 'workspace-ids': 'workspace-1',
   }), /workspace-ids.*folder-id/);
+  assert.throws(() => parseSearchRequest({
+    source: 'ima', query: 'q', 'output-dir': '/tmp/out', 'note-mode': 'title',
+  }), /note-mode.*not allowed/);
 });
 
 test('search accepts bare metadata-only and validates whitelisted JSON source options', () => {
