@@ -123,6 +123,7 @@ type CredentialExpirationFormatter = (
   now: string
 ) => { formattedTime: string; expired: boolean } | undefined;
 type CredentialOffsetNormalizer = (value: string) => string;
+type CredentialErrorClassifier = (connector: ConnectorControlModule.Connector, errorCode?: string) => string;
 
 const getTerminalError = (
   ConnectorControlModule as typeof ConnectorControlModule & {
@@ -139,6 +140,11 @@ const normalizeCredentialExpirationOffset = (
     normalizeCredentialExpirationOffset?: CredentialOffsetNormalizer;
   }
 ).normalizeCredentialExpirationOffset;
+const getCredentialAuthorizationError = (
+  ConnectorControlModule as typeof ConnectorControlModule & {
+    getCredentialAuthorizationError?: CredentialErrorClassifier;
+  }
+).getCredentialAuthorizationError;
 
 describe('ConnectorControl authorization states', () => {
   beforeEach(() => {
@@ -1186,6 +1192,36 @@ describe('ConnectorControl authorization states', () => {
     expect(getTerminalError?.({ status: 'pending' })).toBeUndefined();
   });
 
+  it.each([
+    ['CONNECTOR_CREDENTIAL_INVALID', 'Client ID 或 API Key 无效或不匹配，请确认使用同一组最新凭据'],
+    ['IMA_RATE_LIMITED', 'IMA 接口请求过于频繁，请稍后再试'],
+    ['IMA_PERMISSION_DENIED', '当前 IMA 账号没有所需的笔记接口权限，请在 IMA 中确认开放接口权限'],
+    ['IMA_SERVICE_UNAVAILABLE', '暂时无法连接 IMA 服务，请检查后端网络后重试'],
+    ['CONNECTOR_VERIFICATION_TIMEOUT', '连接 IMA 超时，请检查后端网络或稍后重试'],
+    ['CONNECTOR_CLI_UNAVAILABLE', 'IMA 验证组件不可用，请联系管理员检查后端部署'],
+    ['PROVIDER_PROTOCOL_ERROR', 'IMA 验证组件版本不兼容，请联系管理员升级后端'],
+    ['CONNECTOR_VERIFICATION_BUSY', 'IMA 凭据正在验证中，请稍候再试'],
+    ['SESSION_ALREADY_ACTIVE', 'IMA 凭据正在验证中，请稍候再试'],
+    ['AUTH_BINDING_FAILED', '凭据验证通过，但保存连接失败，请稍后重试'],
+    ['CONNECTOR_MANIFEST_INVALID', 'IMA 连接器配置异常，请联系管理员'],
+    ['PROVIDER_NOT_CONFIGURED', 'IMA 连接器尚未配置完整，请联系管理员'],
+    ['CONNECTOR_VERIFICATION_FAILED', 'IMA 验证未通过，请稍后重试；如持续失败请联系管理员'],
+    ['UNKNOWN_CODE', 'IMA 凭据验证失败，请检查后重试'],
+  ])('maps IMA error code %s to a safe action message', (errorCode, expectedMessage) => {
+    const connector = {
+      id: 10,
+      code: 'ima-openapi',
+      name: 'IMA',
+      description: 'IMA 知识库',
+      authType: 'oauth',
+      icon: null,
+      enableFlag: null,
+      authMode: 'AK_SK',
+    } satisfies ConnectorControlModule.Connector;
+
+    expect(getCredentialAuthorizationError?.(connector, errorCode)).toBe(expectedMessage);
+  });
+
   it('automatically opens a pending authorization URL and keeps the fallback link', async () => {
     mockStartConnectorAuthorization.mockResolvedValue({
       authorizationId: 'authorization-9',
@@ -2212,7 +2248,7 @@ describe('ConnectorControl authorization states', () => {
     fireEvent.change(screen.getByLabelText('API Key'), { target: { value: 'api-key' } });
     fireEvent.click(screen.getByRole('button', { name: '保存并连接' }));
 
-    await waitFor(() => expect(mockMessageError).toHaveBeenCalledWith('IMA 凭据验证失败，请检查后重试'));
+    await waitFor(() => expect(mockMessageError).toHaveBeenCalledWith('IMA 凭据验证失败，请检查网络后重试'));
     expect(mockStartConnectorCredentialAuthorization).toHaveBeenCalledTimes(1);
     expect(mockStartConnectorAuthorization).not.toHaveBeenCalled();
     expect(screen.getByLabelText('Client ID')).toHaveValue('');

@@ -275,7 +275,26 @@ const hasValidCredentialForm = (
   });
 };
 
-const getCredentialAuthorizationError = (connector: Connector, errorCode?: string) => {
+const imaCredentialErrorMessages: Record<string, string> = {
+  CONNECTOR_CREDENTIAL_INVALID: 'Client ID 或 API Key 无效或不匹配，请确认使用同一组最新凭据',
+  IMA_RATE_LIMITED: 'IMA 接口请求过于频繁，请稍后再试',
+  IMA_PERMISSION_DENIED: '当前 IMA 账号没有所需的笔记接口权限，请在 IMA 中确认开放接口权限',
+  IMA_SERVICE_UNAVAILABLE: '暂时无法连接 IMA 服务，请检查后端网络后重试',
+  CONNECTOR_VERIFICATION_TIMEOUT: '连接 IMA 超时，请检查后端网络或稍后重试',
+  CONNECTOR_CLI_UNAVAILABLE: 'IMA 验证组件不可用，请联系管理员检查后端部署',
+  PROVIDER_PROTOCOL_ERROR: 'IMA 验证组件版本不兼容，请联系管理员升级后端',
+  CONNECTOR_VERIFICATION_BUSY: 'IMA 凭据正在验证中，请稍候再试',
+  SESSION_ALREADY_ACTIVE: 'IMA 凭据正在验证中，请稍候再试',
+  AUTH_BINDING_FAILED: '凭据验证通过，但保存连接失败，请稍后重试',
+  CONNECTOR_MANIFEST_INVALID: 'IMA 连接器配置异常，请联系管理员',
+  PROVIDER_NOT_CONFIGURED: 'IMA 连接器尚未配置完整，请联系管理员',
+  CONNECTOR_VERIFICATION_FAILED: 'IMA 验证未通过，请稍后重试；如持续失败请联系管理员',
+};
+
+export const getCredentialAuthorizationError = (connector: Connector, errorCode?: string) => {
+  if (connector.code === 'ima-openapi') {
+    return (errorCode && imaCredentialErrorMessages[errorCode]) || 'IMA 凭据验证失败，请检查后重试';
+  }
   if (connector.code === 'weixin-official-api') {
     if (errorCode === 'CONNECTOR_CREDENTIAL_INVALID') {
       return 'AppID 或 AppSecret 无效，请检查后重试';
@@ -822,7 +841,11 @@ const ConnectorControl = ({
     } catch {
       if (!cancelToken.signal.aborted && startAuthorizationGenerationRef.current === requestGeneration) {
         // 不展示后端原始错误，避免错误内容意外回显用户提交的凭据。
-        message.error(getCredentialAuthorizationError(authorizingConnector));
+        const requestFailureMessage =
+          authorizingConnector.code === 'ima-openapi'
+            ? 'IMA 凭据验证失败，请检查网络后重试'
+            : getCredentialAuthorizationError(authorizingConnector);
+        message.error(requestFailureMessage);
       }
     } finally {
       if (credentialAbortControllerRef.current === cancelToken) {
