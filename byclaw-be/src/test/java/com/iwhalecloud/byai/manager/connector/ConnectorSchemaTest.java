@@ -312,6 +312,7 @@ class ConnectorSchemaTest {
             "'weixin-official-web'",
             "'微信公众号'",
             "'account_template'",
+            "null, null, 'none'",
             "\"platformcode\":\"customlink\"",
             "\"accountname\":\"微信公众号\"",
             "\"accountcode\":\"\"",
