@@ -328,6 +328,28 @@ class ConnectorSchemaTest {
     }
 
     @Test
+    void v040SeedsImaWebAccountTemplate() throws Exception {
+        String sql = readPreservingCase("deploy/migrations/versions/V0.4.0/V0.4.0__dml.sql");
+        ConnectorInsertSeed seed = extractConnectorSeed(sql, "ima-web");
+
+        assertThat(seed.values())
+            .containsEntry("connector_name", "IMA")
+            .containsEntry("connector_type", "ACCOUNT_TEMPLATE")
+            .containsEntry("provider_code", "NULL")
+            .containsEntry("skill_code", "NULL")
+            .containsEntry("auth_mode", "NONE")
+            .containsEntry("auth_config", "{}")
+            .containsEntry("runtime_manifest", "NULL")
+            .containsEntry("sort", "58");
+        assertThat(parseJson(seed.values().get("request_config"))).isEqualTo(parseJson("""
+            {"operationAccount":{"platformCode":"CustomLink","accountName":"IMA",
+             "accountCode":"","customUrl":"https://ima.qq.com/"}}
+            """));
+        assertThat(normalizeSql(seed.statement())).contains(
+            "WHERE NOT EXISTS ( SELECT 1 FROM byai.byai_connector_info WHERE connector_code = 'ima-web' )");
+    }
+
+    @Test
     void enabledConnectorMetadataQueryUsesCredentialStateInsteadOfAccessExpiration() throws Exception {
         String sql = read("byclaw-be/src/main/java/com/iwhalecloud/byai/manager/mapper/connector/ConnectorAuthMapper.java");
 

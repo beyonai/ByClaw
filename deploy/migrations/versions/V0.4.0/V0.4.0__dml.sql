@@ -74,6 +74,20 @@ WHERE NOT EXISTS (
     SELECT 1 FROM byai.byai_connector_info WHERE connector_code = 'weixin-official-web'
 );
 
+-- IMA 网页账号模板。仅用于初始化用户级运营账号，不作为普通连接器展示或授权。
+INSERT INTO byai.byai_connector_info (
+    connector_id, connector_code, connector_name, description, connector_type,
+    provider_code, skill_code, auth_mode, auth_config, request_config, runtime_manifest, sort
+)
+SELECT nextval('byai.seq_any_table'), 'ima-web', 'IMA',
+       '登录 IMA 网页端', 'ACCOUNT_TEMPLATE',
+       NULL, NULL, 'NONE', '{}',
+       '{"operationAccount":{"platformCode":"CustomLink","accountName":"IMA","accountCode":"","customUrl":"https://ima.qq.com/"}}',
+       NULL, 58
+WHERE NOT EXISTS (
+    SELECT 1 FROM byai.byai_connector_info WHERE connector_code = 'ima-web'
+);
+
 -- 将旧版通过 config 标记的模板账号迁移到专用来源字段；软删除历史同样回填，以阻止再次初始化。
 UPDATE byai.byai_project_account
 SET template_connector_code = 'weixin-official-web'
