@@ -1801,3 +1801,37 @@ INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_nam
   ],
   "en_US": []
 }', '初始化项目专家组数字员工模板');
+
+INSERT INTO byai.byai_super_schema_migrations(version, name)
+SELECT 11, 'delegation_callback_deadline'
+    WHERE NOT EXISTS (
+  SELECT 1
+    FROM byai.byai_super_schema_migrations
+   WHERE version = 11
+);
+
+INSERT INTO byai.byai_super_schema_migrations(version, name)
+SELECT 12, 'delegation_task_position'
+    WHERE NOT EXISTS (
+  SELECT 1
+    FROM byai.byai_super_schema_migrations
+   WHERE version = 12
+);
+
+-- 更新代码代理沙箱规格，确保迁移重复执行时不会保留旧配置。
+DELETE FROM "byai"."sandbox_service_spec"
+WHERE "service_key" IN ('byclaw-code-agent');
+
+INSERT INTO "byai"."sandbox_service_spec"
+("service_key", "spec_json", "template_json", "updated_at")
+VALUES (
+           'byclaw-code-agent',
+           '{"env": {"TZ": "Asia/Shanghai", "GH_TOKEN": "${GH_TOKEN}", "USER_CODE": "${USER_CODE}", "MODEL_NAME": "${MODEL_NAME}", "REDIS_HOST": "${REDIS_HOST}", "BEYOND_TOKEN": "${BEYOND_TOKEN}", "WEB_BASE_URL": "${WEB_BASE_URL}", "BE_DOMAINNAME": "ByaiService", "MODEL_API_KEY": "${MODEL_API_KEY}", "BYAI_WORKER_ID": "${USER_CODE}", "MODEL_BASE_URL": "${MODEL_BASE_URL}", "REDIS_PASSWORD": "${REDIS_PASSWORD}", "REDIS_USERNAME": "${REDIS_USERNAME}", "CLAUDE_AGENT_CWD": "/by/workspace", "CLAUDE_MAX_TURNS": "500", "CLAUDE_CODE_SKIP_ROOTALERT": true, "BYCLAW_SANDBOX_FILE_VOLUME_ROOT": "${BYCLAW_SANDBOX_FILE_VOLUME_ROOT}", "BYCLAW_DIGITAL_EMPLOYEE_STARTUP_TIMEOUT_SECONDS": "600"}, "image": "192.168.0.81:8080/byclaw/byclaw-code-agent:dev", "ports": [{"port": 8080, "protocol": "http"}], "startup": {"entrypoint": ["/app/entrypoint.sh"]}, "volumes": [{"gid": 1001, "key": "base", "uid": 1001, "mode": "0770", "scope": "PRIVATE", "subPath": "byclaw-${user_code}/by", "hostPath": "${BYCLAW_SANDBOX_FILE_VOLUME_ROOT}", "readOnly": false, "mountPath": "/by"}, {"gid": 1001, "uid": 1001, "mode": "0770", "scope": "PRIVATE", "subPath": "byclaw-code-agent/byclaw-${user_code}/home", "hostPath": "${BYCLAW_SANDBOX_FILE_VOLUME_ROOT}", "readOnly": false, "mountPath": "/home"}, {"gid": 1001, "uid": 1001, "mode": "0770", "scope": "PRIVATE", "subPath": ".m2", "hostPath": "${BYCLAW_SANDBOX_FILE_VOLUME_ROOT}", "readOnly": false, "mountPath": "/home/byclaw/.m2"}, {"gid": 1001, "uid": 1001, "mode": "0770", "scope": "PRIVATE", "subPath": "repos", "hostPath": "${BYCLAW_SANDBOX_FILE_VOLUME_ROOT}", "readOnly": false, "mountPath": "/by/repos"}], "resourceLimits": {"cpu": "2", "memory": "6Gi"}}',
+           '',
+           CURRENT_TIMESTAMP
+       );
+COMMENT ON COLUMN byai.byai_connector_info.connector_type IS
+    '连接器类型：SYSTEM=系统内置，CUSTOM=自定义连接器，ACCOUNT_TEMPLATE=运营账号初始化模板';
+
+-- 新增项目编码字段
+UPDATE byai_project set project_code =concat('project_',project_id) where project_code is null;
