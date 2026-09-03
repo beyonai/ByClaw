@@ -148,12 +148,11 @@ class ConnectorAuthServiceTest {
     }
 
     @Test
-    void findConnectorEnableStatesUsesConnectorCodeWhenManifestSkillIsMissing() {
+    void findConnectorEnableStatesIgnoresConnectorWhenSkillCodeIsMissing() {
         when(connectorAuthMapper.selectConnectorEnableStates("1001"))
             .thenReturn(java.util.List.of(state("custom", null, true)));
 
-        assertThat(service.findConnectorEnableStates(1001L))
-            .containsExactly(Map.entry("custom", true));
+        assertThat(service.findConnectorEnableStates(1001L)).isEmpty();
     }
 
     @Test

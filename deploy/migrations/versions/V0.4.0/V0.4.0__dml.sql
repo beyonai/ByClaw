@@ -67,7 +67,7 @@ INSERT INTO byai.byai_connector_info (
 )
 SELECT nextval('byai.seq_any_table'), 'weixin-official-web', '微信公众号',
        '登录微信公众平台网页后台', 'ACCOUNT_TEMPLATE',
-       NULL, 'wechat-api', 'NONE', '{}',
+       NULL, NULL, 'NONE', '{}',
        '{"operationAccount":{"platformCode":"CustomLink","accountName":"微信公众号","accountCode":"","customUrl":"https://mp.weixin.qq.com/"}}',
        NULL, 57
 WHERE NOT EXISTS (
