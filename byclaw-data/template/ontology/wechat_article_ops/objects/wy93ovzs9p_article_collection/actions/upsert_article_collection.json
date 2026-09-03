@@ -2,7 +2,7 @@
   "action_code": "upsert_article_collection",
   "action_name": "写入或更新文章合集",
   "action_type": "OPERATION",
-  "action_desc": "按 id 或 (collection_name,collection_type) 业务键写入或更新合集；校验枚举、日期顺序",
+  "action_desc": "按 id 或 (collection_name,collection_type) 业务键写入或更新真实合集；校验枚举、日期顺序；拒绝将报告分桶‘无合集’持久化",
   "permission_roles": [
     "ops",
     "admin"

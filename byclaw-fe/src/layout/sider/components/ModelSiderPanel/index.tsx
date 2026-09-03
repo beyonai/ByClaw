@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, Card, Descriptions, Drawer, Input, List, Popconfirm, Progress, Spin, Tag, message } from 'antd';
-import { SearchOutlined } from '@ant-design/icons';
+import { CopyOutlined, SearchOutlined } from '@ant-design/icons';
+import dayjs from 'dayjs';
 import { useIntl, useSelector } from '@umijs/max';
 import AntdIcon from '@/components/AntdIcon';
 import ActiveSiderAgentBar, { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentBar';
@@ -12,6 +13,7 @@ import { updateDigitalEmployee } from '@/pages/manager/service/DigitalEmployeeMg
 import { queryResourceOperationPermissions } from '@/pages/manager/service/resources';
 import { POST } from '@/service/common/request';
 import { getModelDetail } from '@/pages/manager/service/ModelMgr';
+import { getDcSystemConfigListByStandType } from '@/pages/manager/service/session';
 import chromeStyles from '@/layout/sider/components/ResourceSiderPanel/index.module.less';
 import styles from './index.module.less';
 
@@ -33,6 +35,11 @@ function safeJsonParse(value: any) {
 
 function normalizeModelValue(value: any) {
   return `${value ?? ''}`.trim();
+}
+
+function formatModelDateTime(value: any) {
+  const parsed = dayjs(value);
+  return parsed.isValid() ? parsed.format('YYYY-MM-DD HH:mm:ss') : `${value ?? ''}`;
 }
 
 const MODEL_DETAIL_LABELS: Record<string, string> = {
@@ -66,6 +73,8 @@ const MODEL_DETAIL_LABELS: Record<string, string> = {
   retryIntervalSec: '重试间隔',
   reasoningConfig: '思考配置',
   inparamTemplate: '入参模板',
+  inParams: '入参配置',
+  in_params: '入参配置',
   extendParam: '扩展参数',
   updatedAt: '最近更新时间',
   ownerType: '归属类型',
@@ -86,6 +95,39 @@ function formatModelDetailValue(value: any) {
     return JSON.stringify(value, null, 2);
   }
   return `${value}`;
+}
+
+function isCopyableModelDetailKey(key: string) {
+  return [
+    'apitoken',
+    'apitokenmasked',
+    'reasoningconfig',
+    'inparamtemplate',
+    'inparams',
+    'in_params',
+    'apiendpoint',
+    'headers',
+  ].includes(key.toLowerCase());
+}
+
+async function copyModelDetailValue(value: string) {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+    } else {
+      const textarea = document.createElement('textarea');
+      textarea.value = value;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+    }
+    message.success('复制成功');
+  } catch {
+    message.error('复制失败');
+  }
 }
 
 function getModelDetailItems(model: any) {
@@ -141,8 +183,9 @@ function getModelDetailItems(model: any) {
     },
     { key: 'reasoningConfig', label: '思考配置', value: model.reasoningConfig },
     { key: 'inparamTemplate', label: '入参模板', value: model.inparamTemplate },
+    { key: 'inParams', label: '入参配置', value: model.inParams ?? model.in_params },
     { key: 'extendParam', label: '扩展参数', value: model.extendParam },
-    { key: 'updatedAt', label: '最近更新时间', value: model.updatedAt },
+    { key: 'updatedAt', label: '最近更新时间', value: formatModelDateTime(model.updatedAt) },
   ];
   const knownKeys = new Set([
     ...items.map((item) => item.key),
@@ -151,6 +194,8 @@ function getModelDetailItems(model: any) {
     'modelName',
     'modelNo',
     'apiTokenMasked',
+    'inParams',
+    'in_params',
   ]);
   Object.entries(model).forEach(([key, value]) => {
     if (!knownKeys.has(key) && value !== undefined && value !== null && value !== '') {
@@ -209,7 +254,15 @@ function getModelDetailSections(model: any) {
     {
       key: 'advanced',
       title: '其他配置',
-      keys: new Set(['reasoningConfig', 'inparamTemplate', 'extendParam', 'updatedAt', 'ownerType']),
+      keys: new Set([
+        'reasoningConfig',
+        'inparamTemplate',
+        'inParams',
+        'in_params',
+        'extendParam',
+        'updatedAt',
+        'ownerType',
+      ]),
     },
   ];
   const assignedKeys = new Set(groups.flatMap((group) => [...group.keys]));
@@ -313,6 +366,7 @@ const ModelSiderPanel: React.FC<ModelSiderPanelProps> = ({ embedded = false, sho
     exceeded?: boolean;
   } | null>(null);
   const [models, setModels] = useState<any[]>([]);
+  const [abilityLabelMap, setAbilityLabelMap] = useState<Record<string, string>>({});
   const [modelKeyword, setModelKeyword] = useState('');
   const [loading, setLoading] = useState(false);
   const [agentDetail, setAgentDetail] = useState<any>(null);
@@ -444,6 +498,24 @@ const ModelSiderPanel: React.FC<ModelSiderPanelProps> = ({ embedded = false, sho
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  useEffect(() => {
+    // 能力编号来自模型标签配置，复用模型管理页的字典接口转换为可读名称。
+    void getDcSystemConfigListByStandType({ standType: 'MODEL_TAGS' })
+      .then((response: any) => {
+        const list = Array.isArray(response?.data) ? response.data : [];
+        const nextMap: Record<string, string> = {};
+        list.forEach((item: any) => {
+          const value = `${item?.paramValue ?? item?.param_value ?? item?.standCode ?? ''}`.trim();
+          const label = `${item?.paramName ?? item?.param_name ?? item?.standDisplayValue ?? value}`.trim();
+          if (value) nextMap[value] = label || value;
+        });
+        setAbilityLabelMap(nextMap);
+      })
+      .catch(() => {
+        // 字典加载失败时保留原始能力编号，确保详情仍可查看。
+      });
+  }, []);
 
   useEffect(() => {
     setAgentDetail(null);
@@ -641,7 +713,29 @@ const ModelSiderPanel: React.FC<ModelSiderPanelProps> = ({ embedded = false, sho
                 <Descriptions column={1} size="small" bordered>
                   {section.items.map(({ key, label, value }) => (
                     <Descriptions.Item key={key} label={label}>
-                      <span className={styles.modelDetailValue}>{formatModelDetailValue(value)}</span>
+                      {(() => {
+                        const displayValue = formatModelDetailValue(
+                          key === 'abilities' && Array.isArray(value)
+                            ? value.map((item) => abilityLabelMap[`${item}`] || item)
+                            : value
+                        );
+                        return (
+                          <div className={styles.modelDetailValueRow}>
+                            <span className={styles.modelDetailValue}>{displayValue}</span>
+                            {isCopyableModelDetailKey(key) && displayValue !== '-' ? (
+                              <Button
+                                type="text"
+                                size="small"
+                                className={styles.modelDetailCopy}
+                                icon={<CopyOutlined />}
+                                title="复制"
+                                aria-label="复制"
+                                onClick={() => void copyModelDetailValue(displayValue)}
+                              />
+                            ) : null}
+                          </div>
+                        );
+                      })()}
                     </Descriptions.Item>
                   ))}
                 </Descriptions>

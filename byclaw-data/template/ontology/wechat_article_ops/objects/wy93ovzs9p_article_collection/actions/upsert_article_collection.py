@@ -56,6 +56,11 @@ async def execute(params: dict) -> dict:
     values["account_name"] = account_name
     if not values.get("collection_name") or not values.get("collection_type"):
         return _error("INVALID_ARGUMENT", "collection_name和collection_type不能为空")
+    if str(values.get("collection_name") or "").strip() == "无合集":
+        return _error(
+            "VIRTUAL_COLLECTION_FORBIDDEN",
+            "无合集仅是报告目录分桶，不是本体合集；文章应使用空 collection_id",
+        )
 
     for k in ("start_date", "end_date"):
         if values.get(k) is not None:

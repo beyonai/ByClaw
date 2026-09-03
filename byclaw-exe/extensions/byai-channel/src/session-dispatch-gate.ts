@@ -169,6 +169,34 @@ export type SessionDispatchGateLeaseResult<T> = {
   release: () => void;
 };
 
+function abortError(signal: AbortSignal): Error {
+  return signal.reason instanceof Error
+    ? signal.reason
+    : new Error(String(signal.reason || "task cancelled"));
+}
+
+async function waitForPreviousLease(
+  previous: Promise<void>,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  if (!signal) {
+    await previous;
+    return true;
+  }
+  if (signal.aborted) return false;
+
+  let onAbort: (() => void) | undefined;
+  const cancelled = new Promise<false>((resolve) => {
+    onAbort = () => resolve(false);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+  try {
+    return await Promise.race([previous.then(() => true as const), cancelled]);
+  } finally {
+    if (onAbort) signal.removeEventListener("abort", onAbort);
+  }
+}
+
 /**
  * Variant whose FIFO lease survives the task promise. This is used when a
  * GatewayWorker must return a prepared result to its owner, emit FINAL_ANSWER,
@@ -177,7 +205,11 @@ export type SessionDispatchGateLeaseResult<T> = {
 export async function runSessionDispatchExclusiveLeased<T>(
   sessionKey: string,
   task: () => Promise<T>,
+  options?: { signal?: AbortSignal },
 ): Promise<SessionDispatchGateLeaseResult<T>> {
+  if (options?.signal?.aborted) {
+    throw abortError(options.signal);
+  }
   const normalized = normalizeSessionKey(sessionKey);
   if (!normalized) {
     return {
@@ -214,7 +246,16 @@ export async function runSessionDispatchExclusiveLeased<T>(
     };
   });
 
-  await previous;
+  const acquired = await waitForPreviousLease(previous, options?.signal);
+  if (!acquired) {
+    if (queued) {
+      entry.waiters = Math.max(0, entry.waiters - 1);
+    }
+    // Preserve FIFO ordering: this cancelled link follows its predecessor
+    // before releasing later requests.
+    void previous.then(releaseTail, releaseTail);
+    throw abortError(options!.signal!);
+  }
   const waitMs = Date.now() - waitStartedAt;
   entry.activeRuns.add(runToken);
   entry.currentRelease = releaseTail;

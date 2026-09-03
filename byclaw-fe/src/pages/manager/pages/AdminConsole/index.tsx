@@ -101,6 +101,14 @@ const AdminConsole: React.FC = () => {
     setRedisKeys(Array.from(new Set(values.filter(Boolean).map(String))));
   };
 
+  const buildMatchPattern = (value: string) => {
+    const input = value.trim();
+    if (!input) return '*';
+    // 普通关键字按包含关系搜索，同时保留 Redis glob 写法供前缀/后缀筛选。
+    const hasGlob = ['*', '?', '[', ']'].some((character) => input.includes(character));
+    return hasGlob ? input : `*${input}*`;
+  };
+
   const redisTree = useMemo(() => buildTree(redisKeys), [redisKeys]);
 
   if (userInfo?.userCode?.toLowerCase() !== 'adminvip') {
@@ -153,11 +161,11 @@ const AdminConsole: React.FC = () => {
                   </Button>
                 </Space.Compact>
                 <Input.Search
-                  placeholder="搜索 Key"
+                  placeholder="模糊搜索 Key，例如 session 或 byai:*"
                   allowClear
                   loading={loading}
                   onSearch={(value) =>
-                    execute(`SCAN 0 MATCH ${value || '*'} COUNT 100`, (data) => updateKeys(data?.result))
+                    execute(`SCAN 0 MATCH ${buildMatchPattern(value)} COUNT 100`, (data) => updateKeys(data?.result))
                   }
                 />
                 <Typography.Text type="secondary">Key 列表（{redisKeys.length}）</Typography.Text>

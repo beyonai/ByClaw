@@ -112,13 +112,43 @@ function resolveCallAgentSyncTimeoutSec(params: {
 
 export const __callAgentTestInternals = {
   DEFAULT_TRACKED_SYNC_TIMEOUT_SEC,
+  getCallAgentAbortReason,
   resolveCallAgentSyncTimeoutSec,
   shouldTrackCallAgentRemoteTask,
 };
 
+function getCallAgentAbortReason(signal?: AbortSignal): string {
+  const reason = signal?.reason;
+  if (reason instanceof Error && reason.message) return reason.message;
+  if (typeof reason === "string" && reason.trim()) return reason;
+  return "callAgent 调用已取消";
+}
+
+function makeCallAgentAbortedError(
+  input: ExecuteViaCallAgentInput,
+): ExecutorFailure {
+  return makeError("CALL_AGENT_ABORTED", getCallAgentAbortReason(input.signal));
+}
+
 export async function executeViaCallAgent(
   input: ExecuteViaCallAgentInput,
 ): Promise<ExecutorResponse> {
+  if (input.signal?.aborted) {
+    return makeCallAgentAbortedError(input);
+  }
+
+  let remoteTaskTracked = false;
+  const deleteTrackedRemoteTask = async (): Promise<void> => {
+    if (!remoteTaskTracked) return;
+    await appendBaiyingRemoteTaskDeletedEvent(asString(input.toolCallId)).catch((err) => {
+      logBaiyingRequest(input.logger, "call_agent.track_delete_failed", {
+        tool_call_id: input.toolCallId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+    remoteTaskTracked = false;
+  };
+
   let ctx: { redis: RedisClient; registry: WorkerRegistry };
   try {
     ctx = createCallAgentContext();
@@ -275,15 +305,23 @@ export async function executeViaCallAgent(
         language: asString(input.resourceContext.language),
         beyondToken: asString(input.resourceContext.beyondToken),
       };
-      await appendBaiyingRemoteTaskStartedEvent(record).catch((err) => {
-        logBaiyingRequest(input.logger, "call_agent.track_failed", {
-          task: record,
-          error: err instanceof Error ? err.message : String(err),
+      await appendBaiyingRemoteTaskStartedEvent(record)
+        .then(() => {
+          remoteTaskTracked = true;
+        })
+        .catch((err) => {
+          logBaiyingRequest(input.logger, "call_agent.track_failed", {
+            task: record,
+            error: err instanceof Error ? err.message : String(err),
+          });
         });
-      });
     }
 
     if (callMode === "async") {
+      if (input.signal?.aborted) {
+        await deleteTrackedRemoteTask();
+        return makeCallAgentAbortedError(input);
+      }
       return getCallAgentAsyncModeResult(ack, input);
     }
 
@@ -302,6 +340,10 @@ export async function executeViaCallAgent(
     });
 
     if (!poll.success) {
+      if (poll.event_type === "aborted") {
+        await deleteTrackedRemoteTask();
+        return makeCallAgentAbortedError(input);
+      }
       // poll 超时后，自动切换到 async 模式 -> 记录任务，通过 remote-task-watch 拉取结果
       if (poll.event_type === "timeout" && shouldTrackRemoteTask) {
         return getCallAgentAsyncModeResult(ack, input);
@@ -323,12 +365,7 @@ export async function executeViaCallAgent(
     }
 
     if (shouldTrackRemoteTask) {
-      await appendBaiyingRemoteTaskDeletedEvent(asString(input.toolCallId)).catch((err) => {
-        logBaiyingRequest(input.logger, "call_agent.track_delete_failed", {
-          tool_call_id: input.toolCallId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      });
+      await deleteTrackedRemoteTask();
     }
 
     return {
@@ -340,6 +377,10 @@ export async function executeViaCallAgent(
       target: input.target,
     };
   } catch (err) {
+    if (input.signal?.aborted) {
+      await deleteTrackedRemoteTask();
+      return makeCallAgentAbortedError(input);
+    }
     const failure: ExecutorFailure = makeError(
       "CALL_AGENT_FAILED",
       err instanceof Error ? err.message : String(err),
