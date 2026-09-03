@@ -83,6 +83,21 @@ function successfulRunner(calls) {
   };
 }
 
+function trailingSlashRunner(calls) {
+  const runner = successfulRunner(calls);
+  return async (bin, args, options) => {
+    if (args.includes('get') && args.includes('url')) {
+      return { exitCode: 0, stdout: `${SOURCE_URL}/\n`, stderr: '' };
+    }
+    if (args.includes('extract')) {
+      const outcome = await runner(bin, args, options);
+      const chunk = JSON.parse(outcome.stdout);
+      return { ...outcome, stdout: JSON.stringify({ ...chunk, url: `${SOURCE_URL}/` }) };
+    }
+    return runner(bin, args, options);
+  };
+}
+
 test('acquires contiguous browser chunks and leaves the item pending for materialization', async () => {
   const f = await fixture();
   const calls = [];
@@ -125,6 +140,96 @@ test('probe acquisition returns controlled body without creating collection inve
   } finally {
     await rm(f.root, { recursive: true, force: true });
   }
+});
+
+test('probe authorizes trailing-slash canonicalization and validates equivalent chunk URLs', async () => {
+  const calls = [];
+  const result = await acquireWebProbe({
+    canonicalUrl: SOURCE_URL,
+    acquisitionUrls: [SOURCE_URL],
+  }, { runProcess: trailingSlashRunner(calls), probeId: 'fixture-trailing-slash' });
+
+  assert.equal(result.status, 'saved');
+  assert.equal(result.requestedUrl, SOURCE_URL);
+  assert.equal(result.resolvedUrl, `${SOURCE_URL}/`);
+  assert.equal(result.markdown, 'first body\nsecond body');
+});
+
+test('probe rejects a different redirect path with structured authorization diagnostics', async () => {
+  const calls = [];
+  const runner = successfulRunner(calls);
+  const resolvedUrl = 'https://example.com/news/7654321';
+  const result = await acquireWebProbe({
+    canonicalUrl: SOURCE_URL,
+    acquisitionUrls: [SOURCE_URL],
+  }, {
+    probeId: 'fixture-bad-redirect',
+    runProcess: async (bin, args, options) => {
+      if (args.includes('get') && args.includes('url')) {
+        return { exitCode: 0, stdout: `${resolvedUrl}\n`, stderr: '' };
+      }
+      return runner(bin, args, options);
+    },
+  });
+
+  assert.equal(result.status, 'unavailable');
+  assert.equal(result.reasonCode, 'SOURCE_NOT_AUTHORIZED_BY_DISCOVERY');
+  assert.deepEqual(result.failureDiagnostic, {
+    stage: 'resolved-url-authorization',
+    mismatchKind: 'redirect-not-authorized',
+    requestedUrl: SOURCE_URL,
+    resolvedUrl,
+  });
+});
+
+test('probe keeps query changes outside trailing-slash authorization equivalence', async () => {
+  const calls = [];
+  const runner = successfulRunner(calls);
+  const resolvedUrl = `${SOURCE_URL}/?tracking=1`;
+  const result = await acquireWebProbe({
+    canonicalUrl: SOURCE_URL,
+    acquisitionUrls: [SOURCE_URL],
+  }, {
+    probeId: 'fixture-query-change',
+    runProcess: async (bin, args, options) => {
+      if (args.includes('get') && args.includes('url')) {
+        return { exitCode: 0, stdout: `${resolvedUrl}\n`, stderr: '' };
+      }
+      return runner(bin, args, options);
+    },
+  });
+
+  assert.equal(result.status, 'unavailable');
+  assert.equal(result.failureDiagnostic.mismatchKind, 'redirect-not-authorized');
+  assert.equal(result.failureDiagnostic.resolvedUrl, resolvedUrl);
+});
+
+test('probe diagnoses an extracted chunk that changes to another URL', async () => {
+  const calls = [];
+  const runner = successfulRunner(calls);
+  const chunkUrl = 'https://example.com/news/7654321';
+  const result = await acquireWebProbe({
+    canonicalUrl: SOURCE_URL,
+    acquisitionUrls: [SOURCE_URL],
+  }, {
+    probeId: 'fixture-chunk-url-change',
+    runProcess: async (bin, args, options) => {
+      if (args.includes('extract')) {
+        const outcome = await runner(bin, args, options);
+        return { ...outcome, stdout: JSON.stringify({ ...JSON.parse(outcome.stdout), url: chunkUrl }) };
+      }
+      return runner(bin, args, options);
+    },
+  });
+
+  assert.equal(result.status, 'unavailable');
+  assert.equal(result.reasonCode, 'EXECUTOR_CHUNK_INVALID');
+  assert.deepEqual(result.failureDiagnostic, {
+    stage: 'extract-url-continuity',
+    mismatchKind: 'extract-url-changed',
+    requestedUrl: SOURCE_URL,
+    resolvedUrl: chunkUrl,
+  });
 });
 
 test('probe acquisition reports bridge failure as infrastructure-blocked', async () => {
@@ -190,9 +295,33 @@ test('rejects an unauthorized resolved URL and records a failed item', async () 
     });
     assert.equal(result.status, 'failed');
     assert.equal(result.errorCode, 'SOURCE_NOT_AUTHORIZED_BY_DISCOVERY');
+    assert.deepEqual(result.failureDiagnostic, {
+      stage: 'resolved-url-authorization',
+      mismatchKind: 'redirect-not-authorized',
+      requestedUrl: SOURCE_URL,
+      resolvedUrl: 'https://example.com/',
+    });
+    const persisted = JSON.parse(await readFile(join(f.root, result.executorResult), 'utf8'));
+    assert.deepEqual(persisted.failureDiagnostic, result.failureDiagnostic);
     const session = JSON.parse(await readFile(join(f.root, 'session.json'), 'utf8'));
     assert.equal(session.collection.collection.items[0].materialization.status, 'failed');
     assert.equal(session.collection.collection.status, 'failed');
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test('direct acquisition authorizes trailing-slash canonicalization', async () => {
+  const f = await fixture();
+  const calls = [];
+  try {
+    const result = await runWebAcquire(f.paths, {
+      'item-id': 'trailing-slash', 'source-url': SOURCE_URL,
+    }, { runProcess: trailingSlashRunner(calls) });
+
+    assert.equal(result.status, 'saved');
+    assert.equal(result.resolvedUrl, `${SOURCE_URL}/`);
+    assert.equal(await readFile(join(f.root, result.saved), 'utf8'), 'first body\nsecond body');
   } finally {
     await rm(f.root, { recursive: true, force: true });
   }

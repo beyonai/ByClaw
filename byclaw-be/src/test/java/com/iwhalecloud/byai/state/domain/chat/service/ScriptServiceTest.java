@@ -2,8 +2,11 @@ package com.iwhalecloud.byai.state.domain.chat.service;
 
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
+import com.iwhalecloud.byai.common.message.service.ByaiMessageHotService;
 import com.iwhalecloud.byai.manager.domain.connector.service.ConnectorAuthService;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
+import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatSnapshotResponse;
+import com.iwhalecloud.byai.state.domain.message.enums.MsgStatus;
 import com.iwhalecloud.byai.state.domain.message.dto.ByaiMessageHotDtoDto;
 import com.iwhalecloud.byai.state.domain.message.service.MemoryMessageService;
 import org.junit.jupiter.api.AfterEach;
@@ -81,5 +84,23 @@ class ScriptServiceTest {
         verify(memoryMessageService, never()).save(org.mockito.ArgumentMatchers.anyLong(),
             org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.any(),
             org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void flushFromSnapshotPersistsBothCompletionSignals() {
+        RunningChatSnapshotService snapshotService = mock(RunningChatSnapshotService.class);
+        ByaiMessageHotService messageHotService = mock(ByaiMessageHotService.class);
+        ReflectionTestUtils.setField(service, "runningChatSnapshotService", snapshotService);
+        ReflectionTestUtils.setField(service, "byaiMessageHotService", messageHotService);
+        RunningChatSnapshotResponse snapshot = new RunningChatSnapshotResponse();
+        snapshot.setMessageId(21L);
+        when(snapshotService.get(20L, null, 21L)).thenReturn(snapshot);
+
+        boolean persisted = service.flushFromSnapshot(20L, 21L);
+
+        assertThat(persisted).isTrue();
+        assertThat(snapshot.getMsgStatus()).isEqualTo(MsgStatus.FINISH.getCode());
+        assertThat(snapshot.isComplete()).isTrue();
+        verify(messageHotService).updateSelective(snapshot);
     }
 }

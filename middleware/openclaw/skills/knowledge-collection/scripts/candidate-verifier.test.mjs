@@ -119,6 +119,27 @@ test('complete topic-matched body is promoted with a deterministic receipt', asy
   assert.equal(replay.itemId, result.itemId);
 });
 
+test('candidate verification accepts a resolved URL that only adds a trailing slash', async () => {
+  const { paths, run } = setup();
+  const url = 'https://example.com/article/deepseek-harness-slash';
+  const candidate = addCandidate(paths, 'candidate-trailing-slash', url);
+  const attempt = reserveProbeAttempt(paths, run.runId, candidate, { expectedRevision: 1 });
+
+  const result = await verifyCandidate(paths, { runId: run.runId, attemptId: attempt.attemptId }, {
+    acquire: async () => ({
+      status: 'saved',
+      requestedUrl: url,
+      resolvedUrl: `${url}/`,
+      title: 'DeepSeek Harness 工程实践',
+      markdown: articleMarkdown(),
+      executor: 'fixture-web',
+    }),
+  });
+
+  assert.equal(result.promotionStatus, 'promoted');
+  assert.equal(loadSession(paths).session.collection.collection.items.length, 1);
+});
+
 test('WeChat candidates use dedicated sanitization before promotion', async () => {
   const { paths, run } = setup();
   const url = 'https://mp.weixin.qq.com/s/deepseek-harness-fixture';
@@ -210,6 +231,35 @@ test('challenge pause persists verifier-owned browser cleanup state', async () =
   const persisted = loadSession(paths).session.task.publicCollectRun;
   assert.equal(persisted.pause.ownedSession.sessionId, 'kc-probe-fixture-challenge');
   assert.equal(persisted.ownedSessionCleanupPending.length, 1);
+});
+
+test('unavailable acquisition persists structured redirect authorization diagnostics', async () => {
+  const { paths, run } = setup();
+  const requestedUrl = 'https://example.com/article/authorized';
+  const resolvedUrl = 'https://example.com/article/other';
+  const selected = addCandidate(paths, 'candidate-redirect-diagnostic', requestedUrl);
+  const attempt = reserveProbeAttempt(paths, run.runId, selected, { expectedRevision: 1 });
+  const result = await verifyCandidate(paths, { runId: run.runId, attemptId: attempt.attemptId }, {
+    acquire: async () => ({
+      status: 'unavailable',
+      reasonCode: 'SOURCE_NOT_AUTHORIZED_BY_DISCOVERY',
+      failureDiagnostic: {
+        stage: 'resolved-url-authorization',
+        mismatchKind: 'redirect-not-authorized',
+        requestedUrl,
+        resolvedUrl,
+      },
+    }),
+  });
+
+  assert.deepEqual(result.failureDiagnostic, {
+    stage: 'resolved-url-authorization',
+    mismatchKind: 'redirect-not-authorized',
+    requestedUrl,
+    resolvedUrl,
+  });
+  const persisted = loadSession(paths).session.task.publicCollectRun.attempts[0];
+  assert.deepEqual(persisted.failureDiagnostic, result.failureDiagnostic);
 });
 
 test('damaged verification receipt invalidates requested-count delivery', async () => {

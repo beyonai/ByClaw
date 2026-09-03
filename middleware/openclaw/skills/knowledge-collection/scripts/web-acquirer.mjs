@@ -21,6 +21,7 @@ const STRONG_CHALLENGE_MARKER = /(?:验证码|安全验证|环境验证|访问�
 const LOGIN_MARKER = /(?:登录|log\s*in|sign\s*in)/i;
 const MAX_LOGIN_PAGE_CHARS = 800;
 const SENSITIVE_DIAGNOSTIC = /((?:authorization|cookie|credential|password|secret|token)\s*(?:=|:)\s*)(?:Bearer\s+)?[^\s,;]+/gi;
+const MAX_DIAGNOSTIC_URL_CHARS = 2_000;
 const DEFAULT_BRIDGE_SCRIPT = '/app/skills/bycli/scripts/bridge-bootstrap.mjs';
 const LOCAL_BRIDGE_SCRIPT = fileURLToPath(new URL('../../bycli/scripts/bridge-bootstrap.mjs', import.meta.url));
 
@@ -89,6 +90,34 @@ function normalizedHttpUrl(rawUrl, label) {
   url.hostname = url.hostname.toLowerCase();
   url.searchParams.sort();
   return url.toString();
+}
+
+function authorizationComparableUrl(rawUrl, label) {
+  const normalized = normalizedHttpUrl(rawUrl, label);
+  const url = new URL(normalized);
+  if (url.pathname.length > 1 && url.pathname.endsWith('/')) {
+    url.pathname = url.pathname.slice(0, -1);
+  }
+  return url.toString();
+}
+
+export function authorizationEquivalentHttpUrl(left, right) {
+  return authorizationComparableUrl(left, 'authorized URL')
+    === authorizationComparableUrl(right, 'resolved URL');
+}
+
+function diagnosticUrl(value) {
+  if (typeof value !== 'string') return null;
+  return [...value].slice(0, MAX_DIAGNOSTIC_URL_CHARS).join('');
+}
+
+function failureDiagnostic(stage, mismatchKind, requestedUrl, resolvedUrl) {
+  return {
+    stage,
+    mismatchKind,
+    requestedUrl: diagnosticUrl(requestedUrl),
+    resolvedUrl: diagnosticUrl(resolvedUrl),
+  };
 }
 
 function resolvedUrlFromOutput(stdout) {
@@ -162,7 +191,7 @@ export async function acquireWebProbe(candidate, options = {}) {
     'candidate acquisition URL',
   );
   const allowedUrls = new Set([candidate?.canonicalUrl, ...(candidate?.acquisitionUrls || [])]
-    .map((url) => normalizedHttpUrl(url, 'candidate acquisition URL')));
+    .map((url) => authorizationComparableUrl(url, 'candidate acquisition URL')));
   const requested = new URL(requestedUrl);
   const unsupportedHost = /(^|\.)(?:youtube\.com|youtu\.be|bilibili\.com|douyin\.com|x\.com|twitter\.com|reddit\.com|redd\.it|facebook\.com|instagram\.com|linkedin\.com|xiaohongshu\.com|xueqiu\.com)$/iu;
   const specializedFeed = /(?:^|\/)(?:feed|rss|atom)(?:[/.]|$)/iu.test(requested.pathname)
@@ -206,8 +235,18 @@ export async function acquireWebProbe(candidate, options = {}) {
     const resolved = resolvedUrl ? new URL(resolvedUrl) : null;
     const trustedWechatRedirect = requested.hostname === 'weixin.sogou.com'
       && resolved?.hostname === 'mp.weixin.qq.com' && /^\/s(?:\/|$)/u.test(resolved.pathname);
-    if (!resolvedUrl || (!allowedUrls.has(resolvedUrl) && !trustedWechatRedirect)) {
-      return { status: 'unavailable', reasonCode: 'SOURCE_NOT_AUTHORIZED_BY_DISCOVERY' };
+    if (!resolvedUrl || (!allowedUrls.has(authorizationComparableUrl(resolvedUrl, 'resolved URL'))
+      && !trustedWechatRedirect)) {
+      return {
+        status: 'unavailable',
+        reasonCode: 'SOURCE_NOT_AUTHORIZED_BY_DISCOVERY',
+        failureDiagnostic: failureDiagnostic(
+          'resolved-url-authorization',
+          resolvedUrl ? 'redirect-not-authorized' : 'resolved-url-unavailable',
+          requestedUrl,
+          resolvedUrl,
+        ),
+      };
     }
 
     let expectedStart = 0;
@@ -223,8 +262,18 @@ export async function acquireWebProbe(candidate, options = {}) {
         return probeFailure(outputErrorCode(extracted));
       }
       const chunk = parseJson(extracted.stdout);
-      if (!chunk || normalizedHttpUrl(chunk.url, 'extract.url') !== resolvedUrl
-        || chunk.start !== expectedStart || !Number.isInteger(chunk.end) || chunk.end < chunk.start
+      let chunkUrl = null;
+      try { chunkUrl = normalizedHttpUrl(chunk?.url, 'extract.url'); } catch {}
+      if (!chunkUrl || !authorizationEquivalentHttpUrl(chunkUrl, resolvedUrl)) {
+        return {
+          status: 'unavailable',
+          reasonCode: 'EXECUTOR_CHUNK_INVALID',
+          failureDiagnostic: failureDiagnostic(
+            'extract-url-continuity', 'extract-url-changed', resolvedUrl, chunkUrl,
+          ),
+        };
+      }
+      if (chunk.start !== expectedStart || !Number.isInteger(chunk.end) || chunk.end < chunk.start
         || !Number.isInteger(chunk.total_chars) || (totalChars !== null && totalChars !== chunk.total_chars)
         || typeof chunk.content !== 'string') {
         return { status: 'unavailable', reasonCode: 'EXECUTOR_CHUNK_INVALID' };
@@ -351,6 +400,7 @@ export async function runWebAcquire(paths, args, options = {}) {
       finishedAt: new Date(finishedAtMs).toISOString(),
       durationMs: Math.max(0, finishedAtMs - startedAtMs),
       ...(partial.stderr ? { stderr: safeStderr(partial.stderr) } : {}),
+      ...(partial.failureDiagnostic ? { failureDiagnostic: partial.failureDiagnostic } : {}),
     };
     const executorResult = publishArtifacts(paths, itemId, result, article);
     const rawArtifacts = [executorResult, ...(savedRelative ? [savedRelative] : [])];
@@ -394,14 +444,19 @@ export async function runWebAcquire(paths, args, options = {}) {
       return finish({ status: 'failed', exitCode: 1, errorCode: 'EXECUTOR_RESOLVED_URL_UNAVAILABLE' });
     }
     try {
-      const resolvedAuthorization = authorizePublicSource(session.task?.discoveryGate, resolvedUrl);
-      if (resolvedAuthorization.candidateId !== requestedAuthorization.candidateId) {
-        throw new Error('SOURCE_NOT_AUTHORIZED_BY_DISCOVERY');
+      if (!authorizationEquivalentHttpUrl(requestedUrl, resolvedUrl)) {
+        const resolvedAuthorization = authorizePublicSource(session.task?.discoveryGate, resolvedUrl);
+        if (resolvedAuthorization.candidateId !== requestedAuthorization.candidateId) {
+          throw new Error('SOURCE_NOT_AUTHORIZED_BY_DISCOVERY');
+        }
       }
     } catch (error) {
       return finish({
         status: 'failed', exitCode: 1, errorCode: 'SOURCE_NOT_AUTHORIZED_BY_DISCOVERY',
         resolvedUrl, stderr: error.message,
+        failureDiagnostic: failureDiagnostic(
+          'resolved-url-authorization', 'redirect-not-authorized', requestedUrl, resolvedUrl,
+        ),
       });
     }
 
@@ -421,8 +476,17 @@ export async function runWebAcquire(paths, args, options = {}) {
         });
       }
       const chunk = parseJson(extracted.stdout);
-      if (!chunk || normalizedHttpUrl(chunk.url, 'extract.url') !== resolvedUrl
-        || !Number.isInteger(chunk.start) || chunk.start !== expectedStart
+      let chunkUrl = null;
+      try { chunkUrl = normalizedHttpUrl(chunk?.url, 'extract.url'); } catch {}
+      if (!chunkUrl || !authorizationEquivalentHttpUrl(chunkUrl, resolvedUrl)) {
+        return finish({
+          status: 'failed', exitCode: 1, errorCode: 'EXECUTOR_CHUNK_INVALID', resolvedUrl,
+          failureDiagnostic: failureDiagnostic(
+            'extract-url-continuity', 'extract-url-changed', resolvedUrl, chunkUrl,
+          ),
+        });
+      }
+      if (!Number.isInteger(chunk.start) || chunk.start !== expectedStart
         || !Number.isInteger(chunk.end) || chunk.end < chunk.start
         || !Number.isInteger(chunk.total_chars) || (totalChars !== null && totalChars !== chunk.total_chars)
         || typeof chunk.content !== 'string') {

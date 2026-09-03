@@ -32,7 +32,8 @@
 ## 用户指定目录的发布
 
 用户提供的保存路径是交付目录，不是采集会话目录。根 Agent 必须把内部会话初始化在当前 Session Root 的
-`.collection-runs/<run-id>/`，完成采集并确认 `status.collection.deliveryComplete=true` 后执行：
+`.collection-runs/<run-id>/`，并在 `init` 传 `--delivery-requested true`。没有显式保存路径时必须改用
+`collections/<task-name>/`，两种目录布局互斥。完成采集并确认 `status.collection.deliveryComplete=true` 后执行：
 
 ```bash
 node scripts/knowledge-collection.mjs publish --session-dir <dir> --delivery-dir <path>

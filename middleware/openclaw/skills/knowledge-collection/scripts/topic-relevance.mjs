@@ -160,13 +160,23 @@ function latinAnchor(anchor) {
   return /^[\p{Script=Latin}\p{N}\s\-_.+]+$/u.test(anchor);
 }
 
+function normalizeLexicalBoundaries(value) {
+  return value
+    .replace(/(\p{Script=Han})([\p{Script=Latin}\p{N}])/gu, '$1 $2')
+    .replace(/([\p{Script=Latin}\p{N}])(\p{Script=Han})/gu, '$1 $2')
+    .replace(/(\p{Script=Latin})(\p{N})/gu, '$1 $2')
+    .replace(/(\p{N})(\p{Script=Latin})/gu, '$1 $2');
+}
+
 function anchorPattern(anchor) {
   const escaped = anchor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/[\s\-_.+]+/gu, '[\\s\\-_.+]+');
   return new RegExp(`(^|[^\\p{L}\\p{N}])${escaped}(?=$|[^\\p{L}\\p{N}])`, 'iu');
 }
 
 function matchesAnchor(normalized, anchor) {
-  return latinAnchor(anchor) ? anchorPattern(anchor).test(normalized) : normalized.includes(anchor);
+  return latinAnchor(anchor)
+    ? anchorPattern(normalizeLexicalBoundaries(anchor)).test(normalizeLexicalBoundaries(normalized))
+    : normalized.includes(anchor);
 }
 
 function matchedAnchors(contract, normalized) {

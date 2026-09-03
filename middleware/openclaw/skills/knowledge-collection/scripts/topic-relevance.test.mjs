@@ -84,6 +84,40 @@ test('Latin anchors use token boundaries instead of substring matching', () => {
   }).status, 'matched');
 });
 
+test('matches Latin and numeric topic anchors across Chinese script boundaries', () => {
+  const contract = createTopicContract('iPhone 18 文章');
+  const titles = [
+    '苹果憋了4年的王炸iPhone18深度测评:信号、续航、卡顿全部根治',
+    '果粉别硬扛旧机!iPhone18全系史诗升级,换代才是真旗舰',
+    '真实体验iPhone 18全系列:2nm时代的稳与进,没有噱头的诚意升级',
+    'iPhone18重磅升级!告别挤牙膏,这代才是苹果诚意旗舰 - 今日头条',
+    'iPhone18:2个好消息,1个坏消息',
+  ];
+
+  for (const title of titles) {
+    const assessed = assessCandidateTopic(contract, {
+      url: 'https://example.com/article/123456',
+      title,
+    });
+    assert.equal(assessed.status, 'matched', title);
+    assert.deepEqual(assessed.evidenceFields, ['title'], title);
+  }
+});
+
+test('treats compact and spaced Latin-number product names as equivalent', () => {
+  const compact = createTopicContract('采集一篇关于 iPhone18 的文章');
+  assert.equal(assessCandidateTopic(compact, {
+    url: 'https://example.com/article/123456',
+    title: 'iPhone 18 全系列体验报告',
+  }).status, 'matched');
+
+  const numeric = createTopicContract('18 文章');
+  assert.equal(assessCandidateTopic(numeric, {
+    url: 'https://example.com/article/123456',
+    title: '型号 180 使用报告',
+  }).status, 'unmatched');
+});
+
 test('query drift is rejected without changing the immutable topic contract', () => {
   const contract = createTopicContract('采集一篇关于 DeepSeek 的文章');
   assert.doesNotThrow(() => assertDiscoveryQueryMatches(contract, 'DeepSeek-R1 paper'));

@@ -185,6 +185,58 @@ await (async () => {
 })();
 
 await (async () => {
+  const tempRoot = makeSessionDir();
+  const sessionsRoot = join(tempRoot, 'by', '.sessions');
+  const sessionRoot = join(sessionsRoot, 'session-layout');
+  const sandboxEnv = { KNOWLEDGE_COLLECTION_SESSIONS_ROOT: sessionsRoot };
+
+  const ordinaryStaging = join(sessionRoot, '.collection-runs', 'ordinary-run');
+  const rejectedOrdinaryStaging = await runCli([
+    'init', '--session-dir', ordinaryStaging, '--session-root', sessionRoot,
+    '--query', 'ordinary collection',
+  ], sandboxEnv);
+  assert.equal(rejectedOrdinaryStaging.code, 1);
+  assert.match(rejectedOrdinaryStaging.json.error, /delivery-requested|显式保存路径/);
+  assert.equal(existsSync(ordinaryStaging), false);
+
+  const wrongDeliveryLayout = join(sessionRoot, 'collections', 'delivery-run');
+  const rejectedDeliveryLayout = await runCli([
+    'init', '--session-dir', wrongDeliveryLayout, '--session-root', sessionRoot,
+    '--query', 'delivery collection', '--delivery-requested', 'true',
+  ], sandboxEnv);
+  assert.equal(rejectedDeliveryLayout.code, 1);
+  assert.match(rejectedDeliveryLayout.json.error, /\.collection-runs\/[^/]+/);
+  assert.equal(existsSync(wrongDeliveryLayout), false);
+
+  const nestedDeliveryLayout = join(sessionRoot, '.collection-runs', 'run-001', 'nested');
+  const rejectedNestedDelivery = await runCli([
+    'init', '--session-dir', nestedDeliveryLayout, '--session-root', sessionRoot,
+    '--query', 'nested delivery collection', '--delivery-requested', 'true',
+  ], sandboxEnv);
+  assert.equal(rejectedNestedDelivery.code, 1);
+  assert.match(rejectedNestedDelivery.json.error, /\.collection-runs\/[^/]+/);
+  assert.equal(existsSync(nestedDeliveryLayout), false);
+
+  const ordinarySession = join(sessionRoot, 'collections', 'ordinary-collection');
+  const acceptedOrdinary = await runCli([
+    'init', '--session-dir', ordinarySession, '--session-root', sessionRoot,
+    '--query', 'ordinary collection',
+  ], sandboxEnv);
+  assert.equal(acceptedOrdinary.code, 0, acceptedOrdinary.stderr || acceptedOrdinary.stdout);
+  assert.equal(acceptedOrdinary.json.task.deliveryRequested, false);
+
+  const deliverySession = join(sessionRoot, '.collection-runs', 'run-001');
+  const acceptedDelivery = await runCli([
+    'init', '--session-dir', deliverySession, '--session-root', sessionRoot,
+    '--query', 'delivery collection', '--delivery-requested', 'true',
+  ], sandboxEnv);
+  assert.equal(acceptedDelivery.code, 0, acceptedDelivery.stderr || acceptedDelivery.stdout);
+  assert.equal(acceptedDelivery.json.task.deliveryRequested, true);
+
+  rmSync(tempRoot, { recursive: true, force: true });
+})();
+
+await (async () => {
   assert.equal(existsSync(routerScriptPath), true, 'local command routing must live outside the CLI entrypoint');
   assert.equal(existsSync(platformDelegatePath), true, 'platform command delegation must live outside the CLI entrypoint');
   const h = await runCli(['help']);
@@ -251,6 +303,8 @@ await (async () => {
   assert.deepEqual(schema.json.commands.init.properties['source-scope'].default, ['public-internet']);
   assert.deepEqual(schema.json.commands.init.properties['materialization-target'].enum, ['candidates', 'selected', 'all']);
   assert.equal(schema.json.commands.init.properties['materialization-target'].default, 'selected');
+  assert.equal(schema.json.commands.init.properties['delivery-requested'].type, 'boolean');
+  assert.equal(schema.json.commands.init.properties['delivery-requested'].default, false);
   assert.deepEqual(schema.json.commands.plan.required, ['session-dir', 'initial-search', 'channels']);
   assert.equal(schema.json.commands.plan.properties['session-root'].format, 'absolute-path');
   assert.equal(schema.json.commands.plan.properties['initial-search'].type, 'array');

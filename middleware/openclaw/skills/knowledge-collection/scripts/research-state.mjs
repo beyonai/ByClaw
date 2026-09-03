@@ -114,6 +114,30 @@ function asBool(value, label) {
   throw new Error(`${label} 必须是布尔值`);
 }
 
+function validateSessionDirectoryIntent(root, currentSessionRoot, deliveryRequested) {
+  const normalizedRoot = path.resolve(root);
+  const usesDeliveryStaging = normalizedRoot.split(path.sep).includes('.collection-runs');
+  if (!deliveryRequested) {
+    if (usesDeliveryStaging) {
+      throw new Error('只有用户明确提供保存路径时才能使用 .collection-runs；请传 --delivery-requested true，否则使用 collections/<task-name>');
+    }
+    return;
+  }
+
+  if (typeof currentSessionRoot !== 'string' || !currentSessionRoot.trim()) {
+    throw new Error('--delivery-requested true 时必须传入当前 Session Root');
+  }
+  const trustedSessionRoot = resolveSandboxPath('.', '--session-root', {
+    currentSessionRoot,
+  });
+  const relative = path.relative(trustedSessionRoot, normalizedRoot);
+  const parts = relative.split(path.sep).filter(Boolean);
+  if (relative.startsWith('..') || path.isAbsolute(relative)
+    || parts.length !== 2 || parts[0] !== '.collection-runs' || !parts[1]) {
+    throw new Error('--delivery-requested true 时 --session-dir 必须严格匹配 <Session Root>/.collection-runs/<run-id>');
+  }
+}
+
 function nonEmptyStringList(value, label) {
   const items = asList(value, label);
   for (const item of items) {
@@ -546,6 +570,8 @@ export function cmdInit(args) {
   const effectiveRequiredContentGranularity = requiredContentGranularity(
     args['required-content-granularity'],
   );
+  const deliveryRequested = asBool(args['delivery-requested'], '--delivery-requested');
+  validateSessionDirectoryIntent(root, args['session-root'], deliveryRequested);
   const explicitDirectUrls = nonEmptyStringList(
     parseJsonArg(args['direct-urls'], []),
     '--direct-urls',
@@ -583,6 +609,7 @@ export function cmdInit(args) {
       sourceScope: effectiveSourceScope,
       materializationTarget: effectiveMaterializationTarget,
       requiredContentGranularity: effectiveRequiredContentGranularity,
+      deliveryRequested,
       startedAt,
       initialSearch: [],
       followups: [],
