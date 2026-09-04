@@ -162,7 +162,7 @@ export async function runUnifiedSearch(paths, args = {}, dependencies = {}) {
     const writer = await createArtifactWriter(paths.root, { allowExistingSession: true, allowFailed: true });
     try {
       const sourceMetadata = {
-        operation: 'unified-search', query,
+        operation: 'unified-search', query, metadataOnly: true,
         sources: {
           publicInternet: { status: publicResult ? 'complete' : 'failed', error: publicResult ? null : 'PUBLIC_SEARCH_FAILED' },
           cloudKnowledge: { status: cloudOutcome ? cloudOutcome.status : 'unavailable', error: cloudOutcome ? null : 'CLOUD_CONTEXT_UNAVAILABLE' },

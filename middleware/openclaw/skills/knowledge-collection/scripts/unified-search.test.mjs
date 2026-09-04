@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -50,6 +50,8 @@ test('unified search continues with cloud results when public discovery fails', 
     assert.equal(result.sources.publicInternet.status, 'failed');
     assert.equal(result.sources.cloudKnowledge.status, 'complete');
     assert.equal(result.candidates[0].source, 'cloud-knowledge');
+    const metadata = JSON.parse(await readFile(join(root, 'sanitized/metadata.json'), 'utf8'));
+    assert.equal(metadata.sourceMetadata.metadataOnly, true);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
