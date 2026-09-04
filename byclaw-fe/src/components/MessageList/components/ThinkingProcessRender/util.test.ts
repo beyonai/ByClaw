@@ -48,6 +48,52 @@ describe('ThinkingProcessRender transformList', () => {
     expect(completedResult[0].children?.[0].content.orderId).toBe('delegation-1:progress');
   });
 
+  it('keeps delegation input and child output under the original running status root', () => {
+    const statusTitle: IMessageListItem = {
+      contentType: SSEMessageType.thinkStatusTitle,
+      status: SSEEventStatus.start,
+      objectType: 'tool_call',
+      content: {
+        substance: { title: '数字员工正在处理', status: '_START_' },
+        orderId: 'delegation-1',
+        parentOrderId: '-1',
+      },
+    };
+    const dispatchInput: IMessageListItem = {
+      contentType: SSEMessageType.toolCall,
+      status: SSEEventStatus.done,
+      objectType: 'tool_call',
+      content: {
+        substance: {
+          title: '发送给数字员工的指令',
+          input: { instruction: '分析销售数据' },
+          status: '_DONE_',
+        },
+        orderId: 'delegation-1:dispatch-input',
+        parentOrderId: 'delegation-1',
+      },
+    };
+    const childOutput: IMessageListItem = {
+      contentType: SSEMessageType.thinkText,
+      status: SSEEventStatus.query,
+      content: {
+        substance: '正在分析销售数据',
+        orderId: 'delegation-1:answer:text',
+        parentOrderId: 'delegation-1',
+      },
+    };
+
+    const result = transformList([statusTitle, dispatchInput, childOutput], false);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].contentType).toBe(SSEMessageType.thinkStatusTitle);
+    expect(result[0].isCollapsed).toBe(false);
+    expect(result[0].children?.map((node) => node.content.orderId)).toEqual([
+      'delegation-1:dispatch-input',
+      'delegation-1:answer:text',
+    ]);
+  });
+
   it('attaches nodes to the matched parentOrderId node instead of the current title node', () => {
     const thinkList: IMessageListItem[] = [
       {
