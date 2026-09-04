@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { dispatchEnterprise, dispatchEnterpriseBatch, parseMaterializeRequest, parseResourceRequest, parseSearchRequest } from './dispatcher.mjs';
+import { dispatchEnterprise, dispatchEnterpriseBatch, parseMaterializeRequest, parseResourceRequest, parseSearchRequest, parseSearchBatchRequests } from './dispatcher.mjs';
 import * as dispatcher from './dispatcher.mjs';
 import { createArtifactWriter } from './shared/artifact-writer.mjs';
 import { assertPrivateTree } from './test-helpers.mjs';
@@ -33,6 +35,50 @@ test('parseSearchRequest applies bounded defaults and source option allowlists',
   }), {
     source: 'feishu', query: 'minutes', outputDir: '/tmp/feishu', limit: 500, concurrency: 16,
     cursor: 'next', metadataOnly: true, sourceOptions: { spaceId: 'space-1', fileTypes: ['docx', 'sheet'] },
+  });
+});
+
+test('cloud knowledge search is single-source metadata-only and rejects search-all', () => {
+  assert.deepEqual(parseSearchRequest({
+    source: 'cloud-knowledge', query: '巡检流程', 'output-dir': '/tmp/cloud-search',
+  }), {
+    source: 'cloud-knowledge', query: '巡检流程', outputDir: '/tmp/cloud-search', limit: 50,
+    concurrency: 4, cursor: null, metadataOnly: true, sourceOptions: {},
+  });
+  assert.deepEqual(parseSearchRequest({
+    source: 'cloud-knowledge', query: '巡检流程', 'output-dir': '/tmp/cloud-search', 'metadata-only': 'true',
+  }).metadataOnly, true);
+  assert.throws(() => parseSearchRequest({
+    source: 'cloud-knowledge', query: '巡检流程', 'output-dir': '/tmp/cloud-search', 'metadata-only': 'false',
+  }), /metadata-only/);
+  assert.throws(() => parseSearchBatchRequests({
+    sources: 'cloud-knowledge', query: '巡检流程', 'output-root': '/tmp/cloud-batch',
+  }), /cloud-knowledge.*search-all|search-all.*cloud-knowledge/);
+  assert.throws(() => parseResourceRequest({
+    source: 'cloud-knowledge', url: 'https://example.test/cloud', 'output-dir': '/tmp/cloud-resource',
+  }), /cloud-knowledge.*resource|resource.*cloud-knowledge/);
+});
+
+test('enterprise command schema advertises cloud knowledge only on supported single-source commands', async () => {
+  const schema = JSON.parse((await new Promise((resolve) => {
+    const child = spawn(process.execPath, [fileURLToPath(new URL('../enterprise-collection.mjs', import.meta.url)), 'command-schema']);
+    let stdout = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.on('close', () => resolve(stdout));
+  })));
+  assert.ok(schema.commands.search.properties.source.enum.includes('cloud-knowledge'));
+  assert.ok(schema.commands.materialize.properties.source.enum.includes('cloud-knowledge'));
+  assert.deepEqual(schema.commands['search-all'].properties.sources.items.enum, ['dingtalk', 'feishu', 'wecom', 'ima']);
+  assert.deepEqual(schema.commands.resource.properties.source.enum, ['dingtalk', 'feishu', 'wecom', 'ima']);
+});
+
+test('cloud metadata-search is a supported single-source command', () => {
+  assert.deepEqual(dispatcher.parseMetadataSearchRequest({
+    source: 'cloud-knowledge', 'parent-session-dir': '/tmp/cloud', 'output-dir': '/tmp/cloud',
+    'where-json': '{"eq":{"fieldName":"fileType","value":"pdf"}}', limit: '20',
+  }), {
+    source: 'cloud-knowledge', outputDir: '/tmp/cloud',
+    where: { eq: { fieldName: 'fileType', value: 'pdf' } }, limit: 20,
   });
 });
 

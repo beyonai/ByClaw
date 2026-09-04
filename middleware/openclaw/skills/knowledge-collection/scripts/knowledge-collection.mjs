@@ -76,7 +76,8 @@ const COMMAND_SPECS = {
   }),
   init: defineCommand({
     group: 'research',
-    title: '创建研究/采集会话骨架与 session.json',
+    title: '创建研究/采集会话骨架与 session.json。返回体中的 warnings 为必读字段:'
+      + '非空时须逐条处理后再继续,它指向的形状此刻还能免费改正,采集开始后只能靠 retighten 补救或无法补救',
     args: {
       '--session-dir': '必填。会话目录(必须不存在或为空)',
       '--session-root': '相对路径必填。当前 Agent 上下文提供的 /by/.sessions/<sessionId>',
@@ -90,11 +91,15 @@ const COMMAND_SPECS = {
       '--max-branches': '可选。正整数;研究分支总数上限',
       '--max-sources-per-branch': '可选。正整数;单分支来源数上限',
       '--max-search-rounds': '可选。正整数;检索轮数上限',
-      '--source-scope': 'JSON 数组;默认 ["public-internet"]. 可选 public-internet、dingtalk、feishu、wecom、ima',
+      '--source-scope': 'JSON 数组;默认 ["public-internet","cloud-knowledge"]. 可选 public-internet、dingtalk、feishu、wecom、ima、cloud-knowledge',
       '--materialization-target': 'candidates | selected(默认) | all。all 表示所有请求正文必须物化或如实标记失败/待处理',
       '--required-content-granularity': 'any(默认) | full-text。用户明确要求全文时必须设为 full-text',
       '--workflow': '可选。public-collect；仅用于公共互联网 selected + full-text 的单写者会话',
       '--delivery-requested': '布尔值，默认 false。仅当用户明确提供保存路径时设为 true，并使用 <Session Root>/.collection-runs/<run-id>',
+      '--delivery-dir': '可选但强烈建议。用户给出的最终落盘目录；必须与 --delivery-requested true 同时给出。'
+        + '此处绑定后由 publish --delivery-handle 引用，裸路径不再需要出现在后续参数中。init 不对其做任何文件系统访问。'
+        + '声明了 --delivery-requested 却省略本参数时 init 会在 warnings 里提示未绑定，交付将回退到 publish --delivery-dir',
+      '--cloud-discovery-scope': '云盘发现授权集 JSON；source-scope 包含 cloud-knowledge 时必填',
       '--direct-urls': '可选。用户在原始请求中明确提供的公共 URL JSON 数组；这些 URL 以 user-provided 候选登记',
       '--started-at': '可选。ISO 时间;缺省为当前时间',
       '--collection-result-input-file': '可选。预置 canonical collection-result.json',
@@ -166,14 +171,48 @@ const COMMAND_SPECS = {
     },
     example: 'knowledge-collection.mjs collect --session-dir /tmp/kc1 --item-json-file /tmp/kc1/.collection-inputs/items.json',
   }),
+  retighten: defineCommand({
+    group: 'collection',
+    title: '单调收紧 requiredContentGranularity(仅 any → full-text)',
+    args: {
+      '--session-dir': '必填。已由 init 创建的会话目录',
+      '--required-content-granularity': '必填。只接受 full-text；反向放松会被拒绝',
+    },
+    example: 'knowledge-collection.mjs retighten --session-dir /tmp/kc1 --required-content-granularity full-text',
+  }),
   publish: defineCommand({
     group: 'collection',
     title: '把已校验正文及其引用的本地图片安全发布到用户交付目录',
     args: {
       '--session-dir': '必填。内部采集会话目录',
-      '--delivery-dir': '必填。用户指定的交付目录；相对路径基于当前 Session Root',
+      '--delivery-handle': '与 --delivery-dir 二选一(推荐)。init --delivery-dir 返回的 handle；'
+        + '交付路径从会话状态读取，无需在参数中重复裸路径',
+      '--delivery-dir': '与 --delivery-handle 二选一。用户指定的交付目录；相对路径基于当前 Session Root。'
+        + '两者同时给出时必须解析到同一目录。会话已在 init 阶段绑定交付目标时不应再用本参数；'
+        + '但企业 search-all 聚合会话与旧版本创建的会话没有 handle，本参数是它们唯一的交付形式，因此不会被移除',
     },
-    example: 'knowledge-collection.mjs publish --session-dir /tmp/kc1 --delivery-dir 00-collection --session-root /by/.sessions/20037048',
+    example: 'knowledge-collection.mjs publish --session-dir /tmp/kc1 --delivery-handle delivery-1a2b3c4d --session-root /by/.sessions/20037048',
+  }),
+  'unified-search': defineCommand({
+    group: 'collection',
+    title: '并行搜索公共互联网与项目云盘，并按用户意图统一排序',
+    args: {
+      '--session-dir': '必填。已由 init 创建的主会话目录',
+      '--query': '可选。默认使用 init 时的任务主题',
+      '--cloud-resource-id': '可选。由 project-context basic 返回的 cloudResourceId；缺失时从环境读取',
+      '--category': '可选。公共互联网检索类别，默认 general',
+      '--limit': '可选。统一候选上限，默认 50',
+    },
+    example: 'knowledge-collection.mjs unified-search --session-dir /tmp/kc1 --cloud-resource-id 1024 --query "巡检流程"',
+  }),
+  'unified-materialize': defineCommand({
+    group: 'collection',
+    title: '按统一候选来源物化公共网页与云盘文件，并保留可重试状态',
+    args: {
+      '--session-dir': '必填。unified-search 生成的主会话目录',
+      '--item-ids': '必填。逗号分隔的统一候选 itemId',
+    },
+    example: 'knowledge-collection.mjs unified-materialize --session-dir /tmp/kc1 --item-ids public-abc,cloud-def',
   }),
   'materialize-wechat': defineCommand({
     group: 'collection',
@@ -360,13 +399,15 @@ const COMMAND_SCHEMA_OVERRIDES = {
       'max-sources-per-branch': SCHEMA.positiveInteger,
       'max-search-rounds': SCHEMA.positiveInteger,
       'source-scope': {
-        type: 'array', minItems: 1, uniqueItems: true, default: ['public-internet'], cliEncoding: 'json',
-        items: { type: 'string', enum: ['public-internet', 'dingtalk', 'feishu', 'wecom', 'ima'] },
+        type: 'array', minItems: 1, uniqueItems: true, default: ['public-internet', 'cloud-knowledge'], cliEncoding: 'json',
+        items: { type: 'string', enum: ['public-internet', 'dingtalk', 'feishu', 'wecom', 'ima', 'cloud-knowledge'] },
       },
       'materialization-target': { type: 'string', enum: ['candidates', 'selected', 'all'], default: 'selected' },
       'required-content-granularity': { type: 'string', enum: ['any', 'full-text'], default: 'any' },
       workflow: { type: 'string', enum: ['public-collect'] },
       'delivery-requested': { ...SCHEMA.boolean, default: false },
+      'delivery-dir': { type: 'string', minLength: 1 },
+      'cloud-discovery-scope': { type: 'object', cliEncoding: 'json' },
       'direct-urls': SCHEMA.jsonArray,
       'started-at': { type: 'string', format: 'date-time' },
       'collection-result-input-file': SCHEMA.file,
@@ -418,11 +459,39 @@ const COMMAND_SCHEMA_OVERRIDES = {
     },
   },
   collect: { required: ['session-dir', 'item-json-file'], properties: { 'session-dir': SCHEMA.sessionDir, 'item-json-file': SCHEMA.inputFile, 'dry-run': SCHEMA.boolean } },
-  publish: {
-    required: ['session-dir', 'delivery-dir'],
+  retighten: {
+    required: ['session-dir', 'required-content-granularity'],
     properties: {
       'session-dir': SCHEMA.sessionDir,
+      'required-content-granularity': { type: 'string', enum: ['full-text'] },
+    },
+  },
+  publish: {
+    required: ['session-dir'],
+    oneOf: [{ required: ['delivery-handle'] }, { required: ['delivery-dir'] }],
+    properties: {
+      'session-dir': SCHEMA.sessionDir,
+      'delivery-handle': { type: 'string', pattern: '^delivery-[0-9a-f]{8}$' },
+      // 不标 deprecated:企业 search-all 聚合会话与旧版本会话没有 handle,本参数是它们唯一的
+      // 交付形式(见 references/delivery.md)。标成弃用会与那条硬要求直接矛盾。
       'delivery-dir': SCHEMA.sessionDir,
+    },
+  },
+  'unified-search': {
+    required: ['session-dir'],
+    properties: {
+      'session-dir': SCHEMA.sessionDir,
+      query: { type: 'string', minLength: 1 },
+      'cloud-resource-id': SCHEMA.positiveInteger,
+      category: { type: 'string', default: 'general' },
+      limit: { ...SCHEMA.positiveInteger, maximum: 500, default: 50 },
+    },
+  },
+  'unified-materialize': {
+    required: ['session-dir', 'item-ids'],
+    properties: {
+      'session-dir': SCHEMA.sessionDir,
+      'item-ids': { type: 'string', minLength: 1 },
     },
   },
   'materialize-wechat': {

@@ -203,7 +203,8 @@ const ProjectResources: React.FC<Props> = ({
     try {
       const response = await listScanSources({
         projectId: Number(project.projectId),
-        onlyMine: false,
+        // 项目详情仅展示当前登录用户创建的定时任务，避免混入项目内其他成员的任务。
+        onlyMine: true,
         pageNum: 1,
         pageSize: 100,
       });

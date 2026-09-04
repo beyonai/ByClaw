@@ -64,7 +64,6 @@ const DigitalEmployeesPage: React.FC = () => {
   const [dropdownParam, setDropdownParam] = useState<IOnOkParams>(getDefaultParams());
   const AvailableGroupRef = React.useRef<any>(null);
   const AvailableEmployeeRef = React.useRef<any>(null);
-  const OfficialGroupRef = React.useRef<any>(null);
   const OfficialEmployeeRef = React.useRef<any>(null);
   const [preview, setPreview] = useState<any>(null);
   const [enterpriseCreateOpen, setEnterpriseCreateOpen] = useState(false);
@@ -117,8 +116,7 @@ const DigitalEmployeesPage: React.FC = () => {
 
   const getSearch = React.useCallback(
     debounce((otherParam?: any) => {
-      const refs =
-        activeTab === 'available' ? [AvailableGroupRef, AvailableEmployeeRef] : [OfficialGroupRef, OfficialEmployeeRef];
+      const refs = activeTab === 'available' ? [AvailableGroupRef, AvailableEmployeeRef] : [OfficialEmployeeRef];
       refs.forEach((item) => item.current?.getSearch?.(keywords[activeTab] || '', otherParam || dropdownParam));
     }, 500),
     [activeTab, dropdownParam, keywords]
@@ -267,21 +265,8 @@ const DigitalEmployeesPage: React.FC = () => {
           </Tabs.TabPane>
           <Tabs.TabPane tab="官方推荐" key="official">
             <div id="officialDigitalEmployeesScroller" className={styles.tabContent}>
-              <div className={styles.sectionTitle}>数字员工组</div>
               <AllDigitalEmployees
-                mode="group"
-                source="official"
-                ref={OfficialGroupRef}
-                onEmployeeClick={setPreview}
-                onChatEmployee={handleEmployeeChat}
-                hideCategories
-                buildFilterParam={buildDigitalEmployeeFilterParam}
-                compactLayout
-                scrollableTarget="officialDigitalEmployeesScroller"
-              />
-              <div className={styles.sectionTitle}>数字员工</div>
-              <AllDigitalEmployees
-                mode="employee"
+                mode="all"
                 source="official"
                 ref={OfficialEmployeeRef}
                 onEmployeeClick={setPreview}

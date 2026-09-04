@@ -1,0 +1,29 @@
+{
+  "action_code": "get_article_user_profiles",
+  "action_name": "查询文章用户画像",
+  "action_type": "QUERY",
+  "action_desc": "按文章ID查询用户画像；可分页返回指定统计日期范围内的画像，或返回截至某日每篇文章最近一条真实画像。items 明确包含 article_id、title、publish_time、profile_stat_date、gender_distribution、age_distribution、region_distribution、sample_size，供直接事实问答使用",
+  "permission_roles": ["analyst", "ops", "admin"],
+  "params": [
+    {"paramCode": "projectId", "paramName": "项目ID", "type": "string", "isRequired": true, "direction": "input"},
+    {"paramCode": "account_code", "paramName": "公众号编码", "type": "string", "isRequired": true, "direction": "input"},
+    {"paramCode": "article_ids", "paramName": "文章ID列表（1-200个，元素必须为整数）", "type": "array", "itemType": "integer", "isRequired": true, "direction": "input"},
+    {"paramCode": "stat_date_from", "paramName": "统计日期下限（含，YYYY-MM-DD）", "type": "date", "isRequired": false, "direction": "input"},
+    {"paramCode": "stat_date_to", "paramName": "统计日期上限（含，YYYY-MM-DD）", "type": "date", "isRequired": false, "direction": "input"},
+    {"paramCode": "as_of_date", "paramName": "截至日期（YYYY-MM-DD，每篇取最近一条）", "type": "date", "isRequired": false, "direction": "input"},
+    {"paramCode": "page", "paramName": "页码（从1开始，仅日期范围模式）", "type": "integer", "isRequired": false, "direction": "input"},
+    {"paramCode": "page_size", "paramName": "每页条数（1-200，仅日期范围模式）", "type": "integer", "isRequired": false, "direction": "input"},
+    {"paramCode": "success", "paramName": "是否成功", "type": "boolean", "isRequired": false, "direction": "output"},
+    {"paramCode": "mode", "paramName": "查询模式", "type": "string", "isRequired": false, "direction": "output"},
+    {"paramCode": "as_of_date_out", "paramName": "实际截至日期", "type": "date", "isRequired": false, "direction": "output"},
+    {"paramCode": "period", "paramName": "实际查询统计周期", "type": "object", "isRequired": false, "direction": "output"},
+    {"paramCode": "items", "paramName": "文章用户画像", "type": "array", "isRequired": false, "direction": "output"},
+    {"paramCode": "total_matched", "paramName": "符合条件的总条数", "type": "integer", "isRequired": false, "direction": "output"},
+    {"paramCode": "page", "paramName": "当前页码", "type": "integer", "isRequired": false, "direction": "output"},
+    {"paramCode": "page_size", "paramName": "每页条数", "type": "integer", "isRequired": false, "direction": "output"},
+    {"paramCode": "missing_article_ids", "paramName": "没有画像的文章ID", "type": "array", "isRequired": false, "direction": "output"},
+    {"paramCode": "error", "paramName": "错误描述", "type": "string", "isRequired": false, "direction": "output"},
+    {"paramCode": "code", "paramName": "错误码", "type": "string", "isRequired": false, "direction": "output"}
+  ],
+  "object_references": ["wy93ovzs9p_article"]
+}

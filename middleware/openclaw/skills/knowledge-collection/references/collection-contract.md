@@ -238,8 +238,11 @@ node scripts/knowledge-collection.mjs materialize-wechat --session-dir <dir> \
 运行 `status` 后，只有 `status.collection.deliveryComplete=true` 才能执行用户文件发布：
 
 ```bash
-node scripts/knowledge-collection.mjs publish --session-dir <dir> --delivery-dir <path>
+node scripts/knowledge-collection.mjs publish --session-dir <dir> --delivery-handle <handle>
 ```
+
+handle 来自首次 `init --delivery-dir <path>`：交付目标在 `init` 阶段一次性绑定，`init` 不对交付目录做任何文件系统访问。
+未绑定的会话使用回退形式 `publish --session-dir <dir> --delivery-dir <path>`。
 
 `selected` 和 `all` 至少包含一个条目，且不能有阻塞交付的 pending/failed 项；显式要求 `full-text` 时所有交付正文还必须为
 `full-text`。摘要或节选不能满足全文要求，空 inventory 也不能使这两种目标完成。条件不满足时不得执行 `publish`。

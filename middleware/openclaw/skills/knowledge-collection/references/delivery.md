@@ -32,27 +32,45 @@
 ## 用户指定目录的发布
 
 用户提供的保存路径是交付目录，不是采集会话目录。根 Agent 必须把内部会话初始化在当前 Session Root 的
-`.collection-runs/<run-id>/`，并在 `init` 传 `--delivery-requested true`。没有显式保存路径时必须改用
-`collections/<task-name>/`，两种目录布局互斥。完成采集并确认 `status.collection.deliveryComplete=true` 后执行：
+`.collection-runs/<run-id>/`，并在 `init` 传 `--delivery-requested true` 与 `init --delivery-dir <path>` 一次性绑定交付目标。
+没有显式保存路径时必须改用 `collections/<task-name>/`，两种目录布局互斥。`init` 不对交付目录做任何文件系统访问，
+只返回 opaque 的 `deliveryTarget.handle`。完成采集并确认 `status.collection.deliveryComplete=true` 后执行：
+
+```bash
+node scripts/knowledge-collection.mjs publish --session-dir <dir> --delivery-handle <handle>
+```
+
+会话未在 `init` 阶段绑定交付目标时，回退形式仍然有效：
 
 ```bash
 node scripts/knowledge-collection.mjs publish --session-dir <dir> --delivery-dir <path>
 ```
 
+两者同时给出时必须解析到同一目录，否则 `publish` 报错。handle 与裸路径两种形式共享同一份 receipt、同一把交付目标锁
+与同一个 `planHash`，因此中断后可以用另一种形式恢复，重复发布也不会另开 `<slug>-collection-<hash>` 子目录。
+
 只有根 Agent 可以调用 `publish`。委派来源执行器时只传内部 `session-dir` 及其 `raw/` 子路径，不得把用户交付目录传给被委派 Agent。
 publish 之前不得创建、探测或操作用户交付目录，并将该路径视为 opaque 值：不得对其执行 `mkdir`、`ls`、`find`、写入、删除、清空、移动或复制，不得做存在性或空目录检查，也不得用临时文件探测或要求被委派 Agent 操作它。采集失败时只保留内部会话和审计证据，目标目录原本不存在就必须继续不存在。
 当 `status.collection.deliveryComplete=false` 时不得执行 `publish`；应报告空结果、未满足的全文粒度或其他覆盖缺口，不能把已存在的摘要、节选或内部文件当成交付成功。
 
-在正式调用 `publish` 之前，任何工具调用的参数或 shell 命令文本都不得包含 `requestedDeliveryDir`；第一次允许包含该路径的工具调用必须是正式的 `publish`。不得把该路径赋给 shell 变量，也不得 `echo`、记录或打印该路径。禁止用 `mkdir`、`ls`、`find`、`stat`、`test`、`realpath`、`readlink` 或任何等价命令访问它；“检查残留目录”、“确认目录不存在”和“只做只读检查”都不是例外。每次调用工具前先检查：如果参数或命令含有该路径且当前调用不是已经通过交付校验后的 `publish`，删除该路径并改为只操作内部 `session-dir`。当 `status.collection.deliveryComplete=false` 时，该路径不得出现在后续任何工具调用中，只能在最终答复中说明未发布。
+除首次 `init` 的 `--delivery-dir` 与最终的 `publish` 之外，任何工具调用的参数或 shell 命令文本都不得包含 `requestedDeliveryDir`。不得把该路径赋给 shell 变量，也不得 `echo`、记录或打印该路径。禁止用 `mkdir`、`ls`、`find`、`stat`、`test`、`realpath`、`readlink` 或任何等价命令访问它；“检查残留目录”、“确认目录不存在”和“只做只读检查”都不是例外。每次调用工具前先检查：如果参数或命令含有该路径且当前调用既不是首次 `init` 也不是已通过交付校验后的 `publish`，删除该路径并改为只操作内部 `session-dir` 或 handle。当 `status.collection.deliveryComplete=false` 时，该路径不得出现在后续任何工具调用中，只能在最终答复中说明未发布。
 
 ```bash
 # 错误：不可用变量保存交付路径后再做只读检查
 REQUESTED_DELIVERY_DIR=/by/example-output
 ls "$REQUESTED_DELIVERY_DIR"
 
-# 正确：交付路径第一次进入工具调用就是通过校验后的 publish
-node scripts/knowledge-collection.mjs publish --session-dir "$SESSION_DIR" --delivery-dir /by/example-output
+# 正确：init 绑定一次，采集期间只出现 handle
+node scripts/knowledge-collection.mjs init --session-dir "$SESSION_DIR" \
+  --delivery-requested true --delivery-dir /by/example-output --session-root "$SESSION_ROOT" ...
+node scripts/knowledge-collection.mjs publish --session-dir "$SESSION_DIR" --delivery-handle delivery-1a2b3c4d
 ```
+
+## 企业聚合会话按路径交付
+
+企业 `search-all` 聚合会话由多个来源会话汇总而成，没有绑定交付目标——它不经过采集侧的 `init --delivery-dir`，
+因此 `task.deliveryTarget` 不存在，`--delivery-handle` 会以 `DELIVERY_TARGET_NOT_BOUND` 失败。这类会话必须使用 `--delivery-dir`
+发布。这是有意保留的不对称：不要为了统一形式而给聚合会话补一个 handle。
 
 相对路径同时传 `--session-root <Session Root>`，绝对路径按原值使用。发布器只复制经验证的 Markdown 及其引用的本地图片，
 并按交付布局改写相对图片链接。根级 `post-01.md` 与 `post-01-images/` 保持伴随布局；

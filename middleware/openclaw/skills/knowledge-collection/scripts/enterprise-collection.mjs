@@ -45,6 +45,7 @@ function requireValue(values, key) {
 
 const EXTERNAL_PATHS_BY_COMMAND = {
   search: ['parent-session-dir', 'output-dir'],
+  'metadata-search': ['parent-session-dir', 'output-dir'],
   'search-all': ['parent-session-dir', 'output-root'],
   materialize: ['session-dir', 'output-dir'],
   resource: ['parent-session-dir', 'output-dir'],
@@ -133,6 +134,18 @@ export function assertImaParentContract(parentSessionDir, parentSession, query, 
     : '';
   if (!parentQuery || query.trim() !== parentQuery) {
     throw new Error('IMA search query must match the parent task query; query drift is not allowed');
+  }
+}
+
+export function assertCloudKnowledgeParentContract(parentSessionDir, parentSession, query, outputDir = null) {
+  const parentRoot = resolve(parentSessionDir);
+  if (outputDir !== null && resolve(outputDir) !== parentRoot) {
+    throw new Error('cloud-knowledge search output must remain in the parent session');
+  }
+  const parentQuery = typeof parentSession?.task?.query === 'string'
+    ? parentSession.task.query.trim() : '';
+  if (!parentQuery || query.trim() !== parentQuery) {
+    throw new Error('cloud-knowledge search query must match the parent task query; query drift is not allowed');
   }
 }
 
@@ -368,9 +381,11 @@ function help() {
     usage: 'knowledge-collection.mjs enterprise search|search-all|materialize|resource|resume-resource [options]',
     defaults: 'search defaults: limit 50, concurrency 4, cursor null, metadata-only false; search-all defaults: sources dingtalk,feishu,wecom,ima, limit 50, concurrency 4, metadata-only true',
     commands: {
-      search: '--session-root </by/.sessions/sessionId> --parent-session-dir <sandbox-path> --source dingtalk|feishu|wecom|ima --query <query> --output-dir <sandbox-path; same resolved path as parent-session-dir> [--limit 1..500] [--concurrency 1..16] [--cursor <cursor>] [--metadata-only [true|false]] [--source-options <json>]',
+      search: '--session-root </by/.sessions/sessionId> --parent-session-dir <sandbox-path> --source dingtalk|feishu|wecom|ima|cloud-knowledge --query <query> --output-dir <sandbox-path; same resolved path as parent-session-dir> [--limit 1..500] [--concurrency 1..16] [--cursor <cursor>] [--metadata-only [true|false]] [--source-options <json>]; cloud-knowledge forces metadata-only',
+      metadataSearch: '--session-root </by/.sessions/sessionId> --parent-session-dir <sandbox-path> --source cloud-knowledge --where-json <json> --output-dir <sandbox-path; same resolved path as parent-session-dir> [--limit 1..500]',
+      metadataSearch: '--session-root </by/.sessions/sessionId> --parent-session-dir <sandbox-path> --source cloud-knowledge --where-json <json> --output-dir <sandbox-path; same resolved path as parent-session-dir> [--limit 1..500]',
       searchAll: '--session-root </by/.sessions/sessionId> --parent-session-dir <sandbox-path> [--sources dingtalk,feishu,wecom,ima] --query <query> --output-root <sandbox-path> [--limit 1..500] [--concurrency 1..16] [--metadata-only [true|false]]; defaults to all sources and metadata-only; continues after a connector auth failure',
-      materialize: '--session-root </by/.sessions/sessionId> --source dingtalk|feishu|ima --session-dir <sandbox-path> --item-ids <id[,id...]> --output-dir <sandbox-path; for ima, same resolved path as session-dir> [--concurrency 1..16]',
+      materialize: '--session-root </by/.sessions/sessionId> --source dingtalk|feishu|ima|cloud-knowledge --session-dir <sandbox-path> --item-ids <id[,id...]> --output-dir <sandbox-path; for ima/cloud-knowledge, same resolved path as session-dir> [--concurrency 1..16]',
       resource: '--session-root </by/.sessions/sessionId> --parent-session-dir <sandbox-path> --source dingtalk|feishu|wecom|ima --url <http(s)-url> --output-dir <sandbox-path> [--minute-token <token> for feishu]',
       resumeResource: '--session-root </by/.sessions/sessionId> --source wecom --session-dir <sandbox-path> --output-dir <sandbox-path>',
       legacy: 'wecom-smartpage and feishu-minutes remain supported and require --parent-session-dir',
@@ -379,7 +394,7 @@ function help() {
 }
 
 function commandSchema() {
-  const source = { type: 'string', enum: ['dingtalk', 'feishu', 'wecom', 'ima'] };
+  const source = { type: 'string', enum: ['dingtalk', 'feishu', 'wecom', 'ima', 'cloud-knowledge'] };
   const absolutePath = { type: 'string', format: 'absolute-path' };
   const sandboxPath = { type: 'string', format: 'sandbox-path' };
   const parentSession = { 'parent-session-dir': sandboxPath };
@@ -394,19 +409,23 @@ function commandSchema() {
     commands: {
       search: {
         type: 'object', additionalProperties: false, required: ['parent-session-dir', 'source', 'query', 'output-dir'],
-        properties: { ...parentSession, ...currentSession, source, query: { type: 'string', minLength: 1 }, 'output-dir': sandboxPath, limit: positiveLimit, concurrency, cursor: { type: 'string' }, 'metadata-only': { type: 'boolean', default: false }, 'source-options': { type: 'object', cliEncoding: 'json' } },
+        properties: { ...parentSession, ...currentSession, source, query: { type: 'string', minLength: 1 }, 'output-dir': sandboxPath, limit: positiveLimit, concurrency, cursor: { type: 'string' }, 'metadata-only': { type: 'boolean', default: false, description: 'cloud-knowledge 强制为 true' }, 'source-options': { type: 'object', cliEncoding: 'json' } },
+      },
+      'metadata-search': {
+        type: 'object', additionalProperties: false, required: ['parent-session-dir', 'source', 'where-json', 'output-dir'],
+        properties: { ...parentSession, ...currentSession, source: { type: 'string', enum: ['cloud-knowledge'] }, 'where-json': { type: 'object', cliEncoding: 'json' }, 'output-dir': sandboxPath, limit: positiveLimit },
       },
       'search-all': {
         type: 'object', additionalProperties: false, required: ['parent-session-dir', 'query', 'output-root'],
-        properties: { ...parentSession, ...currentSession, sources: { type: 'array', items: source, minItems: 1, uniqueItems: true, cliEncoding: 'comma-separated', default: ['dingtalk', 'feishu', 'wecom', 'ima'] }, query: { type: 'string', minLength: 1 }, 'output-root': sandboxPath, limit: positiveLimit, concurrency, 'metadata-only': { type: 'boolean', default: true } },
+        properties: { ...parentSession, ...currentSession, sources: { type: 'array', items: { type: 'string', enum: ['dingtalk', 'feishu', 'wecom', 'ima'] }, minItems: 1, uniqueItems: true, cliEncoding: 'comma-separated', default: ['dingtalk', 'feishu', 'wecom', 'ima'] }, query: { type: 'string', minLength: 1 }, 'output-root': sandboxPath, limit: positiveLimit, concurrency, 'metadata-only': { type: 'boolean', default: true } },
       },
       materialize: {
         type: 'object', additionalProperties: false, required: ['source', 'session-dir', 'item-ids', 'output-dir'],
-        properties: { ...currentSession, source: { ...source, enum: ['dingtalk', 'feishu', 'ima'] }, 'session-dir': sandboxPath, 'item-ids': { type: 'array', minItems: 1, uniqueItems: true, items: { type: 'string', minLength: 1 }, cliEncoding: 'comma-separated' }, 'output-dir': sandboxPath, concurrency },
+        properties: { ...currentSession, source: { ...source, enum: ['dingtalk', 'feishu', 'ima', 'cloud-knowledge'] }, 'session-dir': sandboxPath, 'item-ids': { type: 'array', minItems: 1, uniqueItems: true, items: { type: 'string', minLength: 1 }, cliEncoding: 'comma-separated' }, 'output-dir': sandboxPath, concurrency },
       },
       resource: {
         type: 'object', additionalProperties: false, required: ['parent-session-dir', 'source', 'url', 'output-dir'],
-        properties: { ...parentSession, ...currentSession, source, url: { type: 'string', format: 'http-url' }, 'output-dir': sandboxPath, 'minute-token': { type: 'string', minLength: 1 } },
+        properties: { ...parentSession, ...currentSession, source: { ...source, enum: ['dingtalk', 'feishu', 'wecom', 'ima'] }, url: { type: 'string', format: 'http-url' }, 'output-dir': sandboxPath, 'minute-token': { type: 'string', minLength: 1 } },
       },
       'resume-resource': {
         type: 'object', additionalProperties: false, required: ['source', 'session-dir', 'output-dir'],
@@ -453,21 +472,23 @@ async function main() {
     if (outcome.status !== 'complete') throw new Error(outcome.reason || outcome.status);
     return;
   }
-  if (command === 'search' || command === 'materialize' || command === 'resource' || command === 'resume-resource') {
+  if (command === 'search' || command === 'metadata-search' || command === 'materialize' || command === 'resource' || command === 'resume-resource') {
     const normalizedValues = normalizeEnterprisePaths(command, values);
-    const scopeSessionDir = command === 'search' || command === 'resource'
+    const scopeSessionDir = command === 'search' || command === 'metadata-search' || command === 'resource'
       ? normalizedValues['parent-session-dir'] : normalizedValues['session-dir'];
     const source = requireValue(values, 'source');
     const parentSession = assertEnterpriseScope(scopeSessionDir, [source]);
     let dispatchOptions = {};
-    if (command === 'search' && source === 'ima') {
-      assertImaParentContract(
+    if (command === 'search' && ['ima', 'cloud-knowledge'].includes(source)) {
+      const contractCheck = source === 'cloud-knowledge'
+        ? assertCloudKnowledgeParentContract : assertImaParentContract;
+      contractCheck(
         scopeSessionDir,
         parentSession,
         requireValue(values, 'query'),
         normalizedValues['output-dir'],
       );
-      dispatchOptions = { taskContract: enterpriseChildTaskContract(parentSession) };
+      dispatchOptions = source === 'ima' ? { taskContract: enterpriseChildTaskContract(parentSession) } : {};
     }
     const { ['parent-session-dir']: _parentSessionDir, ['session-root']: _sessionRoot, ...dispatchValues } = normalizedValues;
     render(await dispatchEnterprise(command, dispatchValues, dispatchOptions));

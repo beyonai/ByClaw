@@ -1,5 +1,6 @@
 import json
 import re
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -212,6 +213,25 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         self.assertIn("用户明确提供的 URL", contract)
         self.assertIn("discoveryCandidateId", contract)
         self.assertIn("不得使用模型记忆中的 URL、DOI、论文 ID", skill)
+
+    def test_article_routing_uses_unified_sources_without_count_and_public_collect_with_count(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        routing = (SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8")
+        combined = f"{skill}\n{routing}"
+
+        self.assertIn("文章、正文、全文或落盘内容但未指定数量时，默认使用 `unified-search`", combined)
+        self.assertIn("并行检索公共互联网与当前项目云盘", combined)
+        self.assertIn("用户明确要求数量", combined)
+        self.assertIn("改用 `public-collect`，只检索公共互联网", combined)
+        self.assertIn("用户明确指定数量时", combined)
+        self.assertIn("使用 `public-collect`，仅检索公共互联网", combined)
+        self.assertIn("用户明确限定来源时服从限定，不自动添加其他来源", combined)
+
+    def test_default_public_article_scope_mentions_project_cloud_context(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("without an explicit result count", skill)
+        self.assertIn("`public-internet` + `cloud-knowledge`", skill)
+        self.assertIn("`public-internet` | `selected` + `full-text` via `public-collect`", skill)
 
     def test_knowledge_collection_upgrade_is_isolated_in_v031(self):
         self.assertTrue(V031_DML.is_file(), "knowledge collection migration must be versioned as V0.3.1")
@@ -592,7 +612,7 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "只要候选链接",
             "即使用户指定了链接数量",
             "使用 `public-discover`",
-            "“文章”按完整正文处理",
+            "其中“文章”按完整正文处理",
             "`--workflow public-collect`",
             "`--query` 与 `--fallback-query`",
             "都复用首次 `init` 的原始任务描述",
@@ -1102,6 +1122,105 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
 
         self.assertNotIn("Any API failure—including", weixin)
         self.assertNotIn("their failed API attempt follows the automatic browser fallback", weixin)
+
+    def test_delivery_target_is_bound_at_init_and_referenced_by_handle(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        delivery = (SKILL_ROOT / "references" / "delivery.md").read_text(encoding="utf-8")
+        contract = (SKILL_ROOT / "references" / "collection-contract.md").read_text(encoding="utf-8")
+        combined = f"{skill}\n{contract}\n{delivery}"
+
+        for phrase in (
+            "`init --delivery-dir <path>`",
+            "`publish --session-dir <dir> --delivery-handle <handle>`",
+            "`init` 不对交付目录做任何文件系统访问",
+        ):
+            self.assertIn(phrase, combined)
+
+        # 绑定流程取代了旧的「init 不得包含 --delivery-dir」禁令，但探测禁令必须留下
+        self.assertNotIn("`init` 命令不得包含 `--delivery-dir`", combined)
+        for phrase in (
+            "不得预先 `mkdir`",
+            "不得扫描或猜测交付目录",
+        ):
+            self.assertIn(phrase, combined)
+
+    def test_init_warnings_are_declared_mandatory_reading(self):
+        """init 的 advisory 只有在被要求读取时才有意义。
+
+        三条 warning 都不改变 init 的成败，忽略它们不会报错，因此若文档不点明
+        「必读」，整块 advisory 等于没做。这里锁住那句要求本身，以及三条 warning
+        各自的处置方式。
+        """
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+
+        self.assertIn("`warnings` 是必读字段", skill)
+        for phrase in (
+            "会话未绑定交付目标",
+            "缺 `--workflow`",
+            "不能重新运行 `init`",
+            "在原会话上执行 `retighten --required-content-granularity full-text`",
+            "改用 `retighten` 就地修复原会话",
+        ):
+            self.assertIn(phrase, skill)
+
+    def test_delivery_dir_is_not_marked_deprecated(self):
+        """聚合会话唯一的交付形式不能同时被标为弃用。
+
+        delivery.md 要求企业 search-all 会话必须用 --delivery-dir；若 schema 又把它
+        标成 deprecated，两处文档直接矛盾，下游会据此移除仍在承载硬需求的参数。
+        """
+        schema = json.loads(
+            subprocess.run(
+                [
+                    "node",
+                    str(SKILL_ROOT / "scripts" / "knowledge-collection.mjs"),
+                    "command-schema",
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout
+        )
+        publish = schema["commands"]["publish"]["properties"]
+        self.assertNotIn("deprecated", publish["delivery-dir"])
+        self.assertIn("delivery-handle", publish)
+
+    def test_both_delivery_forms_stay_documented(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        delivery = (SKILL_ROOT / "references" / "delivery.md").read_text(encoding="utf-8")
+        contract = (SKILL_ROOT / "references" / "collection-contract.md").read_text(encoding="utf-8")
+        combined = f"{skill}\n{contract}\n{delivery}"
+
+        # handle 形式是推荐路径，裸路径形式作为兼容回退保留：两者都不得被后续编辑删掉
+        self.assertIn("`publish --session-dir <dir> --delivery-dir <path>`", combined)
+        self.assertIn("--delivery-handle", combined)
+
+    def test_retighten_is_the_only_sanctioned_granularity_repair(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        contract = (SKILL_ROOT / "references" / "collection-contract.md").read_text(encoding="utf-8")
+        combined = f"{skill}\n{contract}"
+
+        for phrase in (
+            "`retighten`",
+            "只允许 `any` → `full-text`",
+            "不得先用 `any` 初始化",
+            "不得为修正粒度新建",
+            "RETIGHTEN_SESSION_NOT_FRESH",
+        ):
+            self.assertIn(phrase, combined)
+
+        # 反向放松必须被写成明确禁令，而不是留白让 Agent 自己猜
+        self.assertIn("不存在 `full-text` → `any`", combined)
+
+    def test_enterprise_aggregate_sessions_deliver_by_path_not_handle(self):
+        delivery = (SKILL_ROOT / "references" / "delivery.md").read_text(encoding="utf-8")
+
+        for phrase in (
+            "`search-all`",
+            "没有绑定交付目标",
+            "必须使用 `--delivery-dir`",
+        ):
+            self.assertIn(phrase, delivery)
 
     def test_candidate_article_requires_user_confirmation_before_download(self):
         weixin = (SKILLS_ROOT / "bycli" / "references" / "weixin.md").read_text(encoding="utf-8")

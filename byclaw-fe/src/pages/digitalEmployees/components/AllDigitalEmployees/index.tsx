@@ -76,7 +76,7 @@ function AllDigitalEmployees(
       filterParam?: IOnOkParams,
       source?: 'official' | 'available'
     ) => Record<string, any>;
-    mode?: 'employee' | 'group';
+    mode?: 'employee' | 'group' | 'all';
     source?: 'official' | 'available';
     onEmployeeClick?: (employee: IAgentCache) => void;
     onChatEmployee?: (employee: IAgentCache) => void;
@@ -99,6 +99,7 @@ function AllDigitalEmployees(
     scrollableTarget,
   } = props;
   const isEmployeeGroup = mode === 'group';
+  const isAllEmployees = mode === 'all';
   const listTabKey = isEmployeeGroup ? 'group' : 'enterprise';
   const catalogSearchParamKey = isEmployeeGroup ? 'groupCatalogId' : 'enterpriseCatalogId';
   const scrollerId = isEmployeeGroup ? 'allDigitalEmployeeGroupsScroller' : 'allDigitalEmployeesScroller';
@@ -131,6 +132,8 @@ function AllDigitalEmployees(
   const [bannerList, setBannerList] = useState<any[]>([]);
   const [bannerLoaded, setBannerLoaded] = useState(false);
   const hasInitializedRef = React.useRef(false);
+  // 分页请求复用当前筛选条件，避免滚动加载下一页时丢失 resourceStatus 等参数。
+  const activeFilterParamRef = React.useRef<IOnOkParams | undefined>(dropdownParam);
 
   const hasMore = paginationInfo.total > size(list);
 
@@ -168,6 +171,9 @@ function AllDigitalEmployees(
 
   const myGetAllDigitalEmployeesV2 = React.useCallback(
     (keyword: string = '', catalogId?: string | number, pageNum: number = 1, filterParam?: IOnOkParams) => {
+      // 直接触发的分页请求也复用最近一次筛选，兼容“我可用的”两类列表。
+      const effectiveFilterParam = filterParam ?? activeFilterParamRef.current;
+      activeFilterParamRef.current = effectiveFilterParam;
       if (abortControllerRef.current && !abortControllerRef.current?.signal?.aborted) {
         abortControllerRef.current.abort();
       }
@@ -182,9 +188,10 @@ function AllDigitalEmployees(
         pageNum,
         pageSize: paginationInfo.pageSize,
         keyword,
-        ...(buildFilterParam?.(listTabKey, filterParam, source) || {}),
+        ...(buildFilterParam?.(listTabKey, effectiveFilterParam, source) || {}),
         ...(source === 'official' ? { ownerType: 'enterprise' } : {}),
         ...(isEmployeeGroup ? { agentType: '017' } : {}),
+        ...(source === 'official' && isAllEmployees ? { includeEmployeeGroup: true, employeeGroupFirst: true } : {}),
         orderField: 'updateTime',
         orderBy: 'desc',
       };
@@ -238,6 +245,7 @@ function AllDigitalEmployees(
       catalogId?: string | number
     ) => {
       const targetCatalogId = catalogId ?? (curActiveLink || myEmployeesTypeList?.[0]?.catalogId || ALL_CATEGORY_KEY);
+      activeFilterParamRef.current = filterParam;
 
       if (pageNum === 1) {
         setIsLoading(true);
@@ -370,9 +378,20 @@ function AllDigitalEmployees(
 
   const defaultResourceId = defaultDigEmployeeId || userInfo?.defaultDigEmployeeId;
   const visibleList = useMemo(() => {
+    if (source === 'official') return list;
     const sortedList = sortDefaultDigitalEmployeeFirst(list, defaultResourceId);
-    return source === 'available' ? sortDigitalEmployeeByRecent(sortedList) : sortedList;
+    return sortDigitalEmployeeByRecent(sortedList);
   }, [defaultResourceId, list, source]);
+
+  // 合并查询模式仍按资源类型分块展示，避免员工组和数字员工混在同一块中。
+  const employeeGroupList = useMemo(
+    () => (isAllEmployees ? visibleList.filter((item) => `${item.agentType}` === '017') : []),
+    [isAllEmployees, visibleList]
+  );
+  const employeeList = useMemo(
+    () => (isAllEmployees ? visibleList.filter((item) => `${item.agentType}` !== '017') : visibleList),
+    [isAllEmployees, visibleList]
+  );
 
   const showNoUsePermissionWarning = React.useCallback(() => {
     message.destroy();
@@ -544,6 +563,26 @@ function AllDigitalEmployees(
     [EventEmitter, intl]
   );
 
+  const renderEmployeeCard = (employee: IAgentCache) => (
+    <ResourceCard
+      key={employee.agentId}
+      resource={employee}
+      resourceType="DIG_EMPLOYEE"
+      avatarNode={<div className={styles.employeeAvatar}>{getAgentChatAvatar(employee.chatAvatar)}</div>}
+      onCardClick={(resource) => onClickEmployee((resource as IAgentCache) || employee)}
+      digitalEmployeeActionMode
+      actionConfig={{
+        scene: 'enterprise',
+        onChat: () => chatEmployee(employee),
+        onEdit: () => onEditEmployee(employee),
+        onAuth: (type: any) => onAuthEmployee(employee, type),
+        onApplyUse: () => onApplyEmployee(employee),
+        onAuditUse: () => onAuditEmployee(employee),
+        onDelete: () => onDeleteEmployee(employee),
+      }}
+    />
+  );
+
   return (
     <div
       className={classnames('full-width ub ub-ver', {
@@ -605,7 +644,7 @@ function AllDigitalEmployees(
                     searchName || '',
                     curActiveLink,
                     paginationInfo.pageIndex + 1,
-                    dropdownParam
+                    activeFilterParamRef.current
                   );
                 }}
                 hasMore={hasMore}
@@ -624,31 +663,27 @@ function AllDigitalEmployees(
                   overflow: 'visible',
                 }}
               >
-                <div className={styles.employeeList}>
-                  {visibleList.map((employee: IAgentCache) => {
-                    return (
-                      <ResourceCard
-                        key={employee.agentId}
-                        resource={employee}
-                        resourceType="DIG_EMPLOYEE"
-                        avatarNode={
-                          <div className={styles.employeeAvatar}>{getAgentChatAvatar(employee.chatAvatar)}</div>
-                        }
-                        onCardClick={(resource) => onClickEmployee((resource as IAgentCache) || employee)}
-                        digitalEmployeeActionMode
-                        actionConfig={{
-                          scene: 'enterprise',
-                          onChat: () => chatEmployee(employee),
-                          onEdit: () => onEditEmployee(employee),
-                          onAuth: (type: any) => onAuthEmployee(employee, type),
-                          onApplyUse: () => onApplyEmployee(employee),
-                          onAuditUse: () => onAuditEmployee(employee),
-                          onDelete: () => onDeleteEmployee(employee),
-                        }}
-                      />
-                    );
-                  })}
-                </div>
+                {isAllEmployees && employeeGroupList.length > 0 && (
+                  <section className={styles.allEmployeesSection}>
+                    <div className={styles.allEmployeesSectionTitle}>数字员工组</div>
+                    <div className={styles.employeeList}>
+                      {employeeGroupList.map((employee) => renderEmployeeCard(employee))}
+                    </div>
+                  </section>
+                )}
+                {isAllEmployees && employeeList.length > 0 && (
+                  <section className={styles.allEmployeesSection}>
+                    <div className={styles.allEmployeesSectionTitle}>数字员工</div>
+                    <div className={styles.employeeList}>
+                      {employeeList.map((employee) => renderEmployeeCard(employee))}
+                    </div>
+                  </section>
+                )}
+                {!isAllEmployees && (
+                  <div className={styles.employeeList}>
+                    {employeeList.map((employee) => renderEmployeeCard(employee))}
+                  </div>
+                )}
               </InfiniteScroll>
             )}
           </Spin>
