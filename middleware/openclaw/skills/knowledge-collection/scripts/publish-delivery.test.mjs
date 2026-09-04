@@ -99,7 +99,9 @@ async function setupCollectedSession(root, {
       },
     }],
   }, null, 2)}\n`);
-  const collect = await runCli(['collect', '--session-dir', sessionDir, '--item-json-file', payloadPath]);
+  const collect = await runCli(
+    ['collect', '--session-dir', sessionDir, '--item-json-file', payloadPath], env,
+  );
   assert.equal(collect.code, 0, collect.stderr || collect.stdout);
   return {
     sessionDir, sanitizedRelative, imageRelative, unreferencedRelative, initResult: init,
@@ -756,6 +758,10 @@ test('the two publish forms share one receipt, one lock and one recovery path', 
     ], env);
     assert.equal(byDir.code, 0, byDir.stderr || byDir.stdout);
     assert.equal(byDir.json.delivery.actualDirectory, deliveryDir);
+    // planHash 不在 publicDelivery 投影里,只能从 session.delivery 读
+    const readPlanHash = () => JSON.parse(readFileSync(join(sessionDir, 'session.json'), 'utf8'))
+      .delivery.planHash;
+    const hashAfterDir = readPlanHash();
 
     const byHandle = await runCli([
       'publish', '--session-dir', sessionDir, '--delivery-handle', handle,
@@ -793,6 +799,12 @@ test('the two publish forms share one receipt, one lock and one recovery path', 
       crypto.createHash('sha256').update(resolve(byHandle.json.delivery.requestedDirectory)).digest('hex'),
       '两种形式的 requestedDirectory 必须逐字节一致,否则锁键分裂',
     );
+
+    // planHash 覆盖 requestedDirectory / actualDirectory / 文件清单三者。只比对
+    // requestedDirectory 不足以锁住复用:hash 变了就意味着 receipt 判定会分裂。
+    assert.match(hashAfterDir, /^sha256:[a-f0-9]{64}$/);
+    assert.equal(readPlanHash(), hashAfterDir,
+      'handle 形式复用同一 receipt 时不得改写 planHash,否则复用判定会分裂');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -856,6 +868,65 @@ test('the delivery-path redaction is scoped to task.deliveryTarget and never sup
     assert.equal(after.json.deliveryInput.directory, deliveryDir);
     assert.equal(after.json.task.deliveryTarget.requestedDirectory, undefined,
       'task.deliveryTarget 的脱敏在发布后仍然生效');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// init 存的串必须就是 publish 解析出来的串。knowledge-collection.test.mjs 里那条
+// 同名断言只证明了 init 侧的写入,没有跑过 publish;两侧各自解析一次路径,任何一侧
+// 的 Session Root 优先级或规范化跑偏,都会让 handle 指向另一个目录而不报错。
+test('publish re-resolves --delivery-dir to the byte-identical string init stored', async () => {
+  const root = tempRoot();
+  try {
+    const sessionsRoot = join(root, 'by', '.sessions');
+    const envSessionRoot = join(sessionsRoot, 'env-wins');
+    const argSessionRoot = join(sessionsRoot, 'arg-loses');
+    mkdirSync(envSessionRoot, { recursive: true });
+    mkdirSync(argSessionRoot, { recursive: true });
+    // 环境变量优先于 --session-root:两侧必须沿用同一优先级
+    const env = {
+      KNOWLEDGE_COLLECTION_SESSIONS_ROOT: sessionsRoot,
+      KNOWLEDGE_COLLECTION_SESSION_ROOT: envSessionRoot,
+    };
+
+    for (const [label, raw] of [
+      ['plain', '00-collections'],
+      ['trailing-slash', '00-collections/'],
+      ['dot-prefixed', './00-collections'],
+    ]) {
+      const sessionDir = join(envSessionRoot, '.collection-runs', `run-${label}`);
+      await setupCollectedSession(root, {
+        sessionDir,
+        query: `identity ${label}`,
+        env,
+        extraInitArgs: [
+          '--session-root', argSessionRoot,
+          '--delivery-requested', 'true', '--delivery-dir', raw,
+        ],
+      });
+
+      const stored = JSON.parse(readFileSync(join(sessionDir, 'session.json'), 'utf8'))
+        .task.deliveryTarget;
+      assert.equal(stored.requestedDirectory, join(envSessionRoot, '00-collections'),
+        `${label}: init 必须基于环境变量的 Session Root 解析并去掉尾斜杠`);
+
+      const published = await runCli(
+        ['publish', '--session-dir', sessionDir, '--delivery-handle', stored.handle], env,
+      );
+      assert.equal(published.code, 0, published.stderr || published.stdout);
+      // 逐字节相等,不是"解析到同一个目录":receipt 里的串会被下游拿去比对与复用
+      assert.equal(published.json.delivery.requestedDirectory, stored.requestedDirectory,
+        `${label}: publish 解析结果必须与 init 存储串逐字节一致`);
+      // 目标为空/不存在时直接落在 requested 上,非空时才分配子目录 —— 三轮共用同一个
+      // 交付目录,所以第一轮是前者、后两轮是后者,两种都必须收敛到存储的那个串。
+      const actual = published.json.delivery.actualDirectory;
+      assert.ok(
+        actual === stored.requestedDirectory || dirname(actual) === stored.requestedDirectory,
+        `${label}: 实际落盘目录必须是存储的交付目录本身或其直接子目录,实际 ${actual}`,
+      );
+      assert.ok(existsSync(published.json.delivery.actualDirectory));
+    }
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
