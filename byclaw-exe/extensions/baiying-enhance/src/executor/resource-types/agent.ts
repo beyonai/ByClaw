@@ -115,11 +115,16 @@ async function loadPersonalAgentHandler(resourceId: string, folderName?: string)
   return null;
 }
 
-async function getA2ASseUrl(cardUrl: string, headers: Record<string, any> = {}) {
+async function getA2ASseUrl(
+  cardUrl: string,
+  headers: Record<string, any> = {},
+  signal?: AbortSignal,
+) {
   // A2A 类型的数字员工，这里拿到的sseUrl只是`cardUrl`，需要先查一次真正的url
   const response = await fetch(cardUrl, {
     method: "GET",
     headers,
+    signal,
   });
   try {
     const cardJson = await response.json();
@@ -647,7 +652,7 @@ You MUST:
   if (agent.integration_type === "A2A") {
     const cardUrl = sseUrl;
     /** 从 A2A 卡片 URL 获取真正的 SSE URL */
-    const rpcUrl = await getA2ASseUrl(cardUrl, headers);
+    const rpcUrl = await getA2ASseUrl(cardUrl, headers, params.signal);
     if (!rpcUrl) {
       return makeError("SSE_URL_NOT_FOUND", `Cannot fetch sse url from A2A url: ${cardUrl}`);
     }
@@ -670,6 +675,7 @@ You MUST:
       payload: jsonRpcPayload,
       headers,
       timeoutMs: params.timeoutMs,
+      signal: params.signal,
       onEventStream: (raw) => {
         const errMsg = extractA2aRpcError(raw);
         if (errMsg) {
@@ -725,6 +731,7 @@ You MUST:
     payload,
     headers,
     timeoutMs: params.timeoutMs,
+    signal: params.signal,
     onEventStream: (data) => {
       const content = extractTextContentFromEventData(data);
       if (content) contentParts.push(content);

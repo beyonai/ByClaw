@@ -18,10 +18,14 @@ async function postMcpJson(params: {
   payload: unknown;
   headers: Record<string, string>;
   timeoutMs: number;
+  signal?: AbortSignal;
   fetchImpl?: FetchLike;
 }): Promise<{ response: Response; bodyText: string } | { error: unknown }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), params.timeoutMs);
+  const abortFromCaller = () => controller.abort(params.signal?.reason);
+  if (params.signal?.aborted) abortFromCaller();
+  else params.signal?.addEventListener("abort", abortFromCaller, { once: true });
   try {
     const fetchFn = params.fetchImpl ?? fetch;
     const response = await fetchFn(params.url, {
@@ -36,6 +40,7 @@ async function postMcpJson(params: {
     return { error: err };
   } finally {
     clearTimeout(timer);
+    params.signal?.removeEventListener("abort", abortFromCaller);
   }
 }
 
@@ -300,6 +305,7 @@ async function callMcpJsonRpc(params: {
   payload: unknown;
   headers: Record<string, string>;
   timeoutMs: number;
+  signal?: AbortSignal;
   fetchImpl?: FetchLike;
 }): Promise<{ response: Response; payload: Dict | null } | { error: unknown }> {
   if (params.transferType === "sse") {
@@ -308,6 +314,7 @@ async function callMcpJsonRpc(params: {
       payload: params.payload,
       headers: params.headers,
       timeoutMs: params.timeoutMs,
+      signal: params.signal,
       fetchImpl: params.fetchImpl,
     });
     if ("error" in streamRes) return streamRes;
@@ -322,6 +329,7 @@ async function callMcpJsonRpc(params: {
     payload: params.payload,
     headers: params.headers,
     timeoutMs: params.timeoutMs,
+    signal: params.signal,
     fetchImpl: params.fetchImpl,
   });
   if ("error" in jsonRes) return jsonRes;
@@ -336,10 +344,14 @@ async function postMcpSse(params: {
   payload: unknown;
   headers: Record<string, string>;
   timeoutMs: number;
+  signal?: AbortSignal;
   fetchImpl?: FetchLike;
 }): Promise<{ response: Response; events: Dict[] } | { error: unknown }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), params.timeoutMs);
+  const abortFromCaller = () => controller.abort(params.signal?.reason);
+  if (params.signal?.aborted) abortFromCaller();
+  else params.signal?.addEventListener("abort", abortFromCaller, { once: true });
   try {
     const fetchFn = params.fetchImpl ?? fetch;
     const response = await fetchFn(params.url, {
@@ -384,6 +396,7 @@ async function postMcpSse(params: {
     return { error: err };
   } finally {
     clearTimeout(timer);
+    params.signal?.removeEventListener("abort", abortFromCaller);
   }
 }
 

@@ -163,6 +163,7 @@ export async function readSseEvents(params: {
   payload: unknown;
   headers: Record<string, string>;
   timeoutMs?: number;
+  signal?: AbortSignal;
   onEventStream?: (data: Dict) => void;
 }): Promise<{ response: Response; events: Dict[]; bodyPreview: string } | { error: ExecutorFailure }> {
   const controller = new AbortController();
@@ -171,6 +172,15 @@ export async function readSseEvents(params: {
       controller.abort(new Error("request timed out"));
     }
   }, params.timeoutMs ?? 0);
+  const abortFromCaller = () => controller.abort(params.signal?.reason);
+  if (params.signal) {
+    if (params.signal.aborted) abortFromCaller();
+    else params.signal.addEventListener("abort", abortFromCaller, { once: true });
+  }
+  const cleanup = () => {
+    clearTimeout(timer);
+    params.signal?.removeEventListener("abort", abortFromCaller);
+  };
   let response: Response;
   try {
     response = await fetch(params.url, {
@@ -180,7 +190,7 @@ export async function readSseEvents(params: {
       signal: controller.signal,
     });
   } catch (err) {
-    clearTimeout(timer);
+    cleanup();
     return {
       error: makeError(
         "AGENT_REQUEST_FAILED",
@@ -191,12 +201,12 @@ export async function readSseEvents(params: {
 
   const previewChunks: string[] = [];
   if (response.status === 401 || response.status === 403) {
-    clearTimeout(timer);
+    cleanup();
     const text = await response.text().catch(() => "");
     return { error: authError(text.slice(0, 200)) };
   }
   if (!response.ok) {
-    clearTimeout(timer);
+    cleanup();
     const text = await response.text().catch(() => "");
     return {
       error: makeError("AGENT_REQUEST_FAILED", `HTTP ${response.status}: ${text.slice(0, 200)}`),
@@ -208,7 +218,7 @@ export async function readSseEvents(params: {
   let buffer = "";
 
   if (!response.body) {
-    clearTimeout(timer);
+    cleanup();
     const text = await response.text().catch(() => "");
     return { response, events, bodyPreview: text.slice(0, 500) };
   }
@@ -246,7 +256,7 @@ export async function readSseEvents(params: {
       }
     }
   } finally {
-    clearTimeout(timer);
+    cleanup();
     reader.releaseLock();
   }
 

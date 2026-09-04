@@ -39,6 +39,15 @@ function normalizeText(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (!signal?.aborted) return;
+  const reason = signal.reason;
+  if (reason instanceof Error) throw reason;
+  const error = new Error(typeof reason === "string" ? reason : "baiying_call cancelled");
+  error.name = "AbortError";
+  throw error;
+}
+
 function isDocResourceType(value: string): boolean {
   const t = normalizeText(value).toUpperCase();
   return t === "DOC" || t === "ATOM" || t === "KG_DOC" || t === "KG_DB" || t === "KG_QA";
@@ -423,6 +432,7 @@ export function createBaiyingCallToolFactory(params: {
           details?: Record<string, unknown>;
         }) => void,
       ) {
+        throwIfAborted(signal);
         const actionName = normalizeText(toolParams.action);
         const requesterSessionKey =
           normalizeText((ctx as any)?.sessionKey) ||
@@ -650,6 +660,8 @@ export function createBaiyingCallToolFactory(params: {
             })
           : false;
 
+        throwIfAborted(signal);
+
         // For DOC sync calls, forward the OpenClaw `onUpdate` callback down to
         // the executor so partial answer chunks reach the chat UI as they
         // arrive. Async calls ignore this (they return an ack before any worker
@@ -685,6 +697,9 @@ export function createBaiyingCallToolFactory(params: {
             signal,
             logger: params.logger,
           });
+          // Executor implementations may represent cancellation as a value;
+          // OpenClaw must see a rejected tool promise to stop the tool turn.
+          throwIfAborted(signal);
           if (typeof result === "string") {
             if (langfuseToolObservationCreated) {
               await updateLangfuseToolObservation({
@@ -737,6 +752,9 @@ export function createBaiyingCallToolFactory(params: {
           }
           return result;
         } catch (err) {
+          if (signal?.aborted) {
+            throwIfAborted(signal);
+          }
           traceLog("executor.error", {
             agent_id: agent.agentId,
             resource_id: resourceId,

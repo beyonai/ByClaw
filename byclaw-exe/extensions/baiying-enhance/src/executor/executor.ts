@@ -118,6 +118,11 @@ export class BaiyingExecutor {
     /** Host logger; request logs go through OpenClaw's plugin logger when available. */
     logger?: BaiyingEnhanceLogger;
   }): Promise<ExecutorResponse> {
+    if (params.signal?.aborted) {
+      throw params.signal.reason instanceof Error
+        ? params.signal.reason
+        : Object.assign(new Error("baiying_call cancelled"), { name: "AbortError" });
+    }
     const payload = isRecord(params.payload) ? params.payload : {};
     const action = params.action || String(payload.action ?? "");
     const resourceContext = getResourceContext(payload);
@@ -155,6 +160,11 @@ export class BaiyingExecutor {
     }
 
     const resType = normalizeResourceType(resolvedType ?? capability.resource_type ?? "");
+    if (params.signal?.aborted) {
+      throw params.signal.reason instanceof Error
+        ? params.signal.reason
+        : Object.assign(new Error("baiying_call cancelled"), { name: "AbortError" });
+    }
     if (resType === "agent") {
       return await executeAgent({
         capability,

@@ -215,7 +215,18 @@ export async function pollDocResult(params: {
 
     let abortRead: (() => void) | undefined;
     const abort = new Promise<typeof abortedRead>((resolve) => {
-      abortRead = () => resolve(abortedRead);
+      abortRead = () => {
+        // XREAD BLOCK cannot be cancelled by Promise.race alone. Disconnect
+        // this per-call Redis client so the abandoned blocking command cannot
+        // keep the tool/attempt alive after the caller aborts.
+        const disconnect = (params.redis as unknown as { disconnect?: () => void }).disconnect;
+        try {
+          disconnect?.();
+        } catch {
+          // Abort cleanup is best effort; the poll still settles immediately.
+        }
+        resolve(abortedRead);
+      };
       params.signal?.addEventListener("abort", abortRead, { once: true });
     });
     try {
