@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, unlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, symlink, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -60,10 +60,12 @@ await (async () => {
   console.log('PASS enterprise external paths support absolute and Session-Root-relative values');
 })();
 
-async function createParentSession(root, sourceScope, parent = join(root, 'parent-session')) {
+async function createParentSession(
+  root, sourceScope, parent = join(root, 'parent-session'), task = {},
+) {
   ensureSessionSkeleton(parent);
   await writeFile(join(parent, 'session.json'), `${JSON.stringify(newSession({
-    query: 'enterprise test', sourceScope, materializationTarget: 'candidates',
+    query: 'enterprise test', sourceScope, materializationTarget: 'candidates', ...task,
   }))}\n`);
   return parent;
 }
@@ -78,8 +80,21 @@ await (async () => {
       query: 'enterprise', sourceScope: ['ima'], materializationTarget: 'candidates',
     }))}\n`);
     assert.doesNotThrow(() => enterpriseCollection.assertEnterpriseScope(root, ['ima']));
+    const legacy = newSession({ query: 'legacy enterprise', sourceScope: ['ima'] });
+    assert.equal(enterpriseCollection.enterpriseChildTaskContract(legacy).materializationTarget, 'selected');
     assert.equal(enterpriseCollection.resolveEnterpriseOutputRoot(root, root), root);
     assert.equal(enterpriseCollection.resolveEnterpriseOutputRoot(root, join(root, 'raw/ima')), root);
+    assert.doesNotThrow(() => enterpriseCollection.assertDistinctSessionTrees(
+      join(root, 'parent'), join(root, 'aggregate'),
+    ));
+    assert.throws(
+      () => enterpriseCollection.assertDistinctSessionTrees(root, root),
+      /distinct.*session trees/i,
+    );
+    assert.throws(
+      () => enterpriseCollection.assertDistinctSessionTrees(root, join(root, 'aggregate')),
+      /distinct.*session trees/i,
+    );
     assert.throws(
       () => enterpriseCollection.assertEnterpriseScope(root, ['feishu']),
       /sourceScope.*feishu/,
@@ -100,12 +115,12 @@ await (async () => {
     const sourceWriter = await createArtifactWriter(sourceDir);
     await sourceWriter.writeJson('raw/candidate.json', { id: 'candidate-1' });
     await sourceWriter.writeCollectionBundle({
-      title: 'IMA candidates', query: 'Q3 policy', source: 'ima', backend: 'ima',
+      title: 'IMA candidates', query: 'Q3 policy', source: 'ima', backend: 'bycli',
       url: 'https://ima.example.test/search', filters: { query: 'Q3 policy' },
       metadataOnly: true,
       inventory: [{
         itemId: 'candidate-1', title: 'Policy', sourceUrl: 'https://ima.example.test/item/1',
-        sourceItemId: '1', sourceSkill: 'bycli', backend: 'ima', collectionFilters: {},
+        sourceItemId: '1', sourceSkill: 'bycli', backend: 'bycli', collectionFilters: {},
         rawArtifacts: ['raw/candidate.json'],
         materialization: {
           status: 'pending', markdownPath: null, sanitizedPath: null,
@@ -128,10 +143,78 @@ await (async () => {
     assert.equal(parsed.task.materializationTarget, 'candidates');
     assert.equal(parsed.collection.deliveryComplete, true);
     assert.deepEqual(parsed.downstreamInput.files, []);
+    const metadata = JSON.parse(await readFile(join(outputRoot, 'sanitized/metadata.json'), 'utf8'));
+    assert.deepEqual(metadata.collection.items[0].rawArtifacts, ['raw/ima/candidate.json']);
+    assert.deepEqual(
+      JSON.parse(await readFile(join(outputRoot, 'raw/ima/candidate.json'), 'utf8')),
+      { id: 'candidate-1' },
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }
   console.log('PASS search-all aggregate is a canonical statusable session');
+})();
+
+await (async () => {
+  const { createArtifactWriter } = await import('./enterprise/shared/artifact-writer.mjs');
+  const root = await mkdtemp(join(tmpdir(), 'enterprise-search-all-assets-'));
+  const outputRoot = join(root, 'output');
+  try {
+    const aggregateWriter = await createArtifactWriter(outputRoot);
+    const sourceDir = join(outputRoot, 'ima');
+    const sourceWriter = await createArtifactWriter(sourceDir);
+    const markdown = '# IMA item\n\n![cover](assets/cover.png)\n';
+    await sourceWriter.writeText('markdown/item/index.md', markdown);
+    await sourceWriter.writeText('sanitized/items/item/index.md', markdown);
+    await sourceWriter.writeBytes('sanitized/items/item/assets/cover.png', Buffer.from('ima-cover'));
+    await sourceWriter.writeCollectionBundle({
+      title: 'IMA body', source: 'ima', backend: 'bycli', url: 'ima://item/1', filters: {},
+      inventory: [{
+        itemId: 'item-1', title: 'Item', sourceUrl: 'ima://item/1', sourceItemId: '1',
+        sourceSkill: 'bycli', backend: 'bycli', collectionFilters: {}, rawArtifacts: [],
+        materialization: {
+          status: 'materialized', markdownPath: 'markdown/item/index.md',
+          sanitizedPath: 'sanitized/items/item/index.md', pendingArtifactCleanup: [], reason: null,
+        },
+      }],
+      canonicalItems: [{
+        title: 'Item', url: 'ima://item/1', author: '', publishTime: '',
+        markdown: 'sanitized/items/item/index.md', fileName: 'sanitized/items/item/index.md',
+      }],
+      sourceMetadata: {},
+    });
+
+    await enterpriseCollection.writeSearchAllAggregate({
+      aggregateWriter, outputRoot, query: 'item', sources: ['ima'], metadataOnly: false,
+      outcomes: [{ source: 'ima', sessionDir: sourceDir, outcome: { status: 'complete' } }],
+    });
+
+    assert.equal(
+      (await readFile(join(outputRoot, 'sanitized/items/ima/item/assets/cover.png'))).toString(),
+      'ima-cover',
+    );
+    assert.equal(
+      (await readFile(join(outputRoot, 'markdown/ima/item/assets/cover.png'))).toString(),
+      'ima-cover',
+    );
+    const status = await run(process.execPath, [collectionScriptPath, 'status', '--session-dir', outputRoot]);
+    assert.equal(status.code, 0, status.stderr || status.stdout);
+    const downstreamFiles = JSON.parse(status.stdout).downstreamInput.files;
+    assert.equal(downstreamFiles.length, 1);
+    assert.match(downstreamFiles[0], /sanitized\/items\/ima\/item\/index\.md$/);
+    const deliveryDir = join(await realpath(root), 'delivery');
+    const published = await run(process.execPath, [
+      collectionScriptPath, 'publish', '--session-dir', outputRoot, '--delivery-dir', deliveryDir,
+    ]);
+    assert.equal(published.code, 0, published.stderr || published.stdout);
+    const deliveredFiles = await readdir(deliveryDir, { recursive: true });
+    const deliveredCover = deliveredFiles.find((file) => file.endsWith('cover.png'));
+    assert.ok(deliveredCover);
+    assert.equal((await readFile(join(deliveryDir, deliveredCover))).toString(), 'ima-cover');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+  console.log('PASS materialized search-all aggregate preserves referenced local images');
 })();
 
 await (async () => {
@@ -163,6 +246,39 @@ await (async () => {
 })();
 
 await (async () => {
+  const { createArtifactWriter } = await import('./enterprise/shared/artifact-writer.mjs');
+  const root = await mkdtemp(join(tmpdir(), 'enterprise-search-all-failed-bundle-'));
+  const outputRoot = join(root, 'output');
+  try {
+    const aggregateWriter = await createArtifactWriter(outputRoot);
+    const sourceDir = join(outputRoot, 'ima');
+    const sourceWriter = await createArtifactWriter(sourceDir);
+    await sourceWriter.writeJson('raw/failure.json', { status: 'failed' });
+    await sourceWriter.writeCollectionBundle({
+      title: 'IMA failed', source: 'ima', backend: 'bycli', url: 'ima://search', filters: {},
+      metadataOnly: true, discoverySucceeded: false, inventory: [], canonicalItems: [],
+      sourceMetadata: { terminal: { status: 'bridge_unavailable', reasonCode: 'BRIDGE_UNAVAILABLE' } },
+    });
+    await enterpriseCollection.writeSearchAllAggregate({
+      aggregateWriter,
+      query: 'failed IMA',
+      sources: ['ima'],
+      metadataOnly: true,
+      outcomes: [{
+        source: 'ima', sessionDir: sourceDir,
+        outcome: { status: 'bridge_unavailable', reasonCode: 'BRIDGE_UNAVAILABLE' },
+      }],
+    });
+    const status = await run(process.execPath, [collectionScriptPath, 'status', '--session-dir', outputRoot]);
+    assert.equal(status.code, 0, status.stderr || status.stdout);
+    assert.equal(JSON.parse(status.stdout).collection.collectionStatus, 'failed');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+  console.log('PASS readable failed search-all child remains an aggregate failure');
+})();
+
+await (async () => {
   const root = await mkdtemp(join(tmpdir(), 'enterprise-legacy-scope-'));
   try {
     const result = await run(process.execPath, [
@@ -188,10 +304,10 @@ await (async () => {
     await sourceWriter.writeText('markdown/item.md', '# Safe\n');
     await sourceWriter.writeText('sanitized/items/item.md', '# Safe\n');
     await sourceWriter.writeCollectionBundle({
-      title: 'IMA body', source: 'ima', backend: 'ima', url: 'ima://item/1', filters: {},
+      title: 'IMA body', source: 'ima', backend: 'bycli', url: 'ima://item/1', filters: {},
       inventory: [{
         itemId: 'item-1', title: 'Item', sourceUrl: 'ima://item/1', sourceItemId: '1',
-        sourceSkill: 'bycli', backend: 'ima', collectionFilters: {}, rawArtifacts: [],
+        sourceSkill: 'bycli', backend: 'bycli', collectionFilters: {}, rawArtifacts: [],
         materialization: {
           status: 'materialized', markdownPath: 'markdown/item.md',
           sanitizedPath: 'sanitized/items/item.md', pendingArtifactCleanup: [], reason: null,
@@ -218,6 +334,32 @@ await (async () => {
     await rm(root, { recursive: true, force: true });
   }
   console.log('PASS search-all rejects child work-copy symlink escapes');
+})();
+
+await (async () => {
+  assert.equal(typeof enterpriseCollection.withSearchAllAggregateWriter, 'function');
+  const root = await mkdtemp(join(tmpdir(), 'enterprise-search-all-abort-'));
+  const outputRoot = join(root, 'output');
+  try {
+    await assert.rejects(
+      enterpriseCollection.withSearchAllAggregateWriter(
+        outputRoot,
+        {
+          query: 'item', materializationTarget: 'candidates',
+          requiredContentGranularity: 'any', deliveryRequested: false,
+        },
+        async (writer) => {
+          await writer.writeText('raw/started.txt', 'started');
+          throw new Error('aggregate copy failed');
+        },
+      ),
+      /aggregate copy failed/,
+    );
+    await assert.rejects(stat(outputRoot), { code: 'ENOENT' });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+  console.log('PASS search-all aborts its aggregate session after orchestration failure');
 })();
 
 function run(command, args, env) {
@@ -282,7 +424,8 @@ async function createImaFixture(root) {
   await writeFile(fixturePath, `#!/usr/bin/env node
 const args = process.argv.slice(2);
 const out = (value) => process.stdout.write(JSON.stringify(value));
-if (args[0] === 'ima' && args[1] === 'knowledge') out([{
+if (args[0] === 'ima' && args[1] === 'knowledge-list') out([{ id: 'kb-1', name: '企业知识库' }]);
+else if (args[0] === 'ima' && args[1] === 'knowledge') out([{
   mediaId: 'article-1', title: '企业 AI 实践', url: 'https://ima.example.test/article-1',
   abstract: '企业级AI应用落地实践摘要', introduction: '引言', coverUrls: [],
 }]);
@@ -332,7 +475,10 @@ async function testSearchFailsWhenTheDwsExecutableCannotStart() {
 async function testImaSearchPublishesAtTheOuterSessionRoot() {
   const tempRoot = await mkdtemp(join(tmpdir(), 'enterprise-collection-ima-root-'));
   try {
-    const parent = await createParentSession(tempRoot, ['ima']);
+    const parent = await createParentSession(
+      tempRoot, ['ima'], join(tempRoot, 'parent-session'),
+      { query: '企业级AI应用落地实践' },
+    );
     const requestedNestedOutput = join(parent, 'raw/ima');
     const fixture = await createImaFixture(tempRoot);
     const result = await run(process.execPath, [
@@ -349,6 +495,110 @@ async function testImaSearchPublishesAtTheOuterSessionRoot() {
     assert.equal(session.collection.collection.items[0].materialization.status, 'materialized');
     await stat(join(parent, session.collection.collection.items[0].materialization.sanitizedPath));
     await assert.rejects(stat(requestedNestedOutput), { code: 'ENOENT' });
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+}
+
+async function testImaSearchRejectsOutputOutsideParentSession() {
+  const tempRoot = await mkdtemp(join(tmpdir(), 'enterprise-collection-ima-detached-'));
+  try {
+    const query = '企业级AI应用落地实践';
+    const parent = await createParentSession(
+      tempRoot, ['ima'], join(tempRoot, 'parent-session'), { query },
+    );
+    const outputDir = join(tempRoot, 'detached-output');
+    const fixture = await createImaFixture(tempRoot);
+    const result = await run(process.execPath, [
+      scriptPath, 'search', '--parent-session-dir', parent, '--source', 'ima',
+      '--query', query, '--kb', '企业知识库', '--output-dir', outputDir,
+    ], { BYCLI_BIN: fixture });
+
+    assert.notEqual(result.code, 0);
+    assert.match(result.stderr, /IMA search.*parent session/i);
+    await assert.rejects(stat(outputDir), { code: 'ENOENT' });
+    assert.equal((await readFile(join(parent, 'session.json'), 'utf8')).includes('"status":"initialized"'), true);
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+}
+
+async function testImaSearchRejectsParentQueryDrift() {
+  const tempRoot = await mkdtemp(join(tmpdir(), 'enterprise-collection-ima-query-drift-'));
+  try {
+    const parent = await createParentSession(
+      tempRoot, ['ima'], join(tempRoot, 'parent-session'), { query: '原始 IMA 主题' },
+    );
+    const fixture = await createImaFixture(tempRoot);
+    const result = await run(process.execPath, [
+      scriptPath, 'search', '--parent-session-dir', parent, '--source', 'ima',
+      '--query', '无关主题', '--kb', '企业知识库', '--output-dir', parent,
+    ], { BYCLI_BIN: fixture });
+
+    assert.notEqual(result.code, 0);
+    assert.match(result.stderr, /IMA.*query.*parent|query.*drift/i);
+    const session = JSON.parse(await readFile(join(parent, 'session.json'), 'utf8'));
+    assert.equal(session.task.status, 'initialized');
+    await assert.rejects(stat(join(parent, 'collection-result.json')), { code: 'ENOENT' });
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+}
+
+async function testImaSearchAllAggregateInheritsParentDeliveryContract() {
+  const tempRoot = await mkdtemp(join(tmpdir(), 'enterprise-collection-ima-aggregate-contract-'));
+  try {
+    const query = '企业 AI 实践';
+    const parent = await createParentSession(
+      tempRoot,
+      ['ima'],
+      join(tempRoot, 'parent-session'),
+      {
+        query,
+        materializationTarget: 'selected',
+        requiredContentGranularity: 'full-text',
+        deliveryRequested: true,
+      },
+    );
+    const outputRoot = join(tempRoot, 'aggregate');
+    const fixture = await createImaFixture(tempRoot);
+    const result = await run(process.execPath, [
+      scriptPath, 'search-all', '--parent-session-dir', parent, '--sources', 'ima',
+      '--query', query, '--output-root', outputRoot, '--metadata-only', 'true',
+    ], { BYCLI_BIN: fixture });
+
+    assert.equal(result.code, 0, result.stderr || result.stdout);
+    const aggregateSession = JSON.parse(await readFile(join(outputRoot, 'session.json'), 'utf8'));
+    assert.equal(aggregateSession.task.query, query);
+    assert.equal(aggregateSession.task.materializationTarget, 'selected');
+    assert.equal(aggregateSession.task.requiredContentGranularity, 'full-text');
+    assert.equal(aggregateSession.task.deliveryRequested, true);
+    const status = await run(process.execPath, [collectionScriptPath, 'status', '--session-dir', outputRoot]);
+    assert.equal(status.code, 0, status.stderr);
+    assert.equal(JSON.parse(status.stdout).collection.deliveryComplete, false);
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+}
+
+async function testImaSearchAllRejectsParentQueryDrift() {
+  const tempRoot = await mkdtemp(join(tmpdir(), 'enterprise-collection-ima-batch-query-drift-'));
+  try {
+    const parent = await createParentSession(
+      tempRoot, ['ima'], join(tempRoot, 'parent-session'), { query: '原始 IMA 主题' },
+    );
+    const outputRoot = join(tempRoot, 'aggregate');
+    const fixture = await createImaFixture(tempRoot);
+    const result = await run(process.execPath, [
+      scriptPath, 'search-all', '--parent-session-dir', parent, '--sources', 'ima',
+      '--query', '无关主题', '--output-root', outputRoot,
+    ], { BYCLI_BIN: fixture });
+
+    assert.notEqual(result.code, 0);
+    assert.match(result.stderr, /IMA.*query.*parent|query.*drift/i);
+    await assert.rejects(stat(outputRoot), { code: 'ENOENT' });
+    const session = JSON.parse(await readFile(join(parent, 'session.json'), 'utf8'));
+    assert.equal(session.task.status, 'initialized');
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
   }
@@ -771,6 +1021,10 @@ async function testFeishuMissingTranscriptPersistsPartialMetadata() {
 
 await testScriptHasValidSyntax();
 await testImaSearchPublishesAtTheOuterSessionRoot();
+await testImaSearchRejectsOutputOutsideParentSession();
+await testImaSearchRejectsParentQueryDrift();
+await testImaSearchAllAggregateInheritsParentDeliveryContract();
+await testImaSearchAllRejectsParentQueryDrift();
 await testSearchFailsWhenTheDwsExecutableCannotStart();
 await testSearchFailsWhenTheFwsExecutableCannotStart();
 await testSearchFailsWhenConnectorHomeIsMissing();

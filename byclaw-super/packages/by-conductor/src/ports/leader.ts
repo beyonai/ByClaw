@@ -1,3 +1,4 @@
+import type { ProjectContext } from "../domain/project-context.js";
 import type {
   AttachmentInspection,
   AttachmentInspectionMode,
@@ -27,6 +28,8 @@ export interface LeaderRunInput {
   message: string;
   /** by-framework 入站会话 ID；存在时用于声明用户可见的规范会话空间。 */
   externalSessionId?: string;
+  /** 本轮 BE 项目信息快照。 */
+  projectContext?: ProjectContext;
   /** 本次 Run 的附件；Leader 可据此生成摘要，工具按 ID 引用，不直接抓取内容。 */
   attachments: readonly RunAttachment[];
   thinkingLevel: ThinkingLevel;

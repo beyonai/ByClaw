@@ -14,6 +14,8 @@ import {
   publishApp,
   queryAgentByPage,
   queryEmployeeGroupMemberCandidates,
+  queryInstallTargetEmployees,
+  batchInstallDigitalEmployeeRelResources,
   queryResourcesByPage,
   saveDigitalEmployee,
   selectDigitalEmployeeByQo,
@@ -62,6 +64,30 @@ describe('manager/service/DigitalEmployeeMgr', () => {
         },
       }
     );
+  });
+
+  it('queryInstallTargetEmployees posts to the install target endpoint', () => {
+    const payload = { pageNum: 1, pageSize: 10, keyword: '代码', relResourceId: '900' };
+    queryInstallTargetEmployees(payload);
+    expect(mockPOST).toHaveBeenCalledWith(
+      '/byaiService/digitalEmployeeController/queryInstallTargetEmployees',
+      payload,
+      {
+        responseCfg: {
+          customHandle: true,
+        },
+      }
+    );
+  });
+
+  it('batchInstallDigitalEmployeeRelResources posts all selected employees', () => {
+    const payload = { digitalEmployeeIds: ['101', '102'], relIds: ['900'] };
+    batchInstallDigitalEmployeeRelResources(payload);
+    expect(mockPOST).toHaveBeenCalledWith('/byaiService/digitalEmployeeController/installRelResourcesBatch', payload, {
+      responseCfg: {
+        customHandle: true,
+      },
+    });
   });
 
   it('createDigitalEmployee posts with customHandle config', () => {

@@ -46,6 +46,7 @@ import com.iwhalecloud.byai.manager.entity.users.Users;
 import com.iwhalecloud.byai.manager.mapper.resource.SkillGroupMapper;
 import com.iwhalecloud.byai.manager.qo.resource.DigitalEmployeeQo;
 import com.iwhalecloud.byai.manager.vo.digitemploy.SetDefaultDigitalEmployeeResultVo;
+import com.iwhalecloud.byai.manager.vo.digitemploy.DigitalEmployeeInstallTargetVo;
 import com.iwhalecloud.byai.manager.vo.resource.DigitalEmployeePageVo;
 import com.iwhalecloud.byai.manager.vo.resource.DigitalEmployeeVo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupInstallResultVo;
@@ -604,6 +605,33 @@ class DigitalEmployeeApplicationServiceTest {
 
         assertThat(qo.getPageNum()).isEqualTo(1);
         assertThat(qo.getPageSize()).isEqualTo(100);
+    }
+
+    @Test
+    void queryInstallTargetEmployees_includesCurrentUserContextAndResourceId() {
+        DigitalEmployeeQo qo = new DigitalEmployeeQo();
+        qo.setPageNum(0);
+        qo.setPageSize(200);
+        qo.setKeyword("代码");
+        qo.setRelResourceId(900L);
+        PageInfo<DigitalEmployeeInstallTargetVo> expected = new PageInfo<>();
+        when(authApplicationService.isCurrentUserGlobalResourceManager()).thenReturn(true);
+        when(ssResExtDigEmployeeService.selectInstallTargetEmployees(any(DigitalEmployeeQo.class)))
+            .thenReturn(expected);
+
+        PageInfo<DigitalEmployeeInstallTargetVo> result = service.queryInstallTargetEmployees(qo);
+
+        verify(resourceAuthContextService).setCurrentUserAuthQo(qo);
+        verify(ssResExtDigEmployeeService).selectInstallTargetEmployees(qo);
+        assertThat(result).isSameAs(expected);
+        assertThat(qo.getPageNum()).isEqualTo(1);
+        assertThat(qo.getPageSize()).isEqualTo(100);
+        assertThat(qo.getKeyword()).isEqualTo("代码");
+        assertThat(qo.getRelResourceId()).isEqualTo(900L);
+        assertThat(qo.getMemberCandidateEnterpriseId()).isEqualTo(201L);
+        assertThat(qo.getMemberCandidateGlobalManager()).isTrue();
+        assertThat(qo.getDefaultDigEmployeeId()).isEqualTo(100L);
+        assertThat(qo.getDefaultSuperAssistantResourceCode()).isEqualTo("zhangsan_main");
     }
 
     @Test

@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { lstat, readFile, readdir, realpath } from 'node:fs/promises';
-import { dirname, isAbsolute, relative, sep } from 'node:path';
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { createArtifactWriter } from '../shared/artifact-writer.mjs';
 import { positiveEnv, runCli } from '../shared/cli-runner.mjs';
 import { copyResumeArtifacts, readResumeCandidates } from '../shared/resume.mjs';
@@ -12,6 +12,7 @@ const MAX_COVER_BYTES = 10 * 1024 * 1024;
 const MAX_COVER_TIMEOUT_MS = 15_000;
 const MAX_COVER_REDIRECTS = 3;
 const DEFAULT_WEIXIN_TIMEOUT_MS = 120_000;
+const MAX_KNOWLEDGE_BASES = 500;
 const COVER_EXTENSIONS = new Map([
   ['image/jpeg', 'jpg'],
   ['image/png', 'png'],
@@ -44,6 +45,23 @@ function records(value) {
   }
   if (Array.isArray(value)) return value;
   return [];
+}
+
+function hasListResponseShape(value) {
+  if (Array.isArray(value)) return true;
+  const root = objectValue(value);
+  if (!root) return false;
+  return ['items', 'results', 'notes', 'documents', 'list', 'data'].some(
+    (key) => Array.isArray(root[key]) || Array.isArray(root[key]?.items),
+  );
+}
+
+function assertListResponseShape(value, operation, artifact) {
+  if (hasListResponseShape(value)) return value;
+  throw Object.assign(new Error(`bycli ima ${operation} returned an unsupported JSON shape`), {
+    reasonCode: 'INVALID_RESPONSE',
+    rawArtifacts: [artifact],
+  });
 }
 
 function contentOf(value) {
@@ -331,10 +349,18 @@ function isAuthorizationFailure(result) {
   return /auth|credential|unauthorized|login|登录|401|403/i.test(`${result?.stdout || ''}\n${result?.stderr || ''}`);
 }
 
+function bridgeReasonCode(result) {
+  const output = `${result?.stdout || ''}\n${result?.stderr || ''}`;
+  if (/BRIDGE_RECOVERY_BUSY/i.test(output)) return 'BRIDGE_RECOVERY_BUSY';
+  if (/BRIDGE_UNAVAILABLE|browser bridge|ECONNREFUSED/i.test(output)) return 'BRIDGE_UNAVAILABLE';
+  return null;
+}
+
 async function callBycliImaJson(writer, bycliBin, env, args, artifact) {
   const result = await runCli(bycliBin, ['ima', ...args, '-f', 'json'], { env });
   if (result.failure || result.exitCode !== 0) {
     const reason = bycliReason(result);
+    const reasonCode = bridgeReasonCode(result);
     await writer.writeJson(artifact, {
       status: 'failed',
       exitCode: result.exitCode,
@@ -343,13 +369,18 @@ async function callBycliImaJson(writer, bycliBin, env, args, artifact) {
     });
     throw Object.assign(new Error(`bycli ima ${args[0]} failed: ${reason}`), {
       auth: isAuthorizationFailure(result),
+      bridge: reasonCode !== null,
+      reasonCode,
       rawArtifacts: [artifact],
     });
   }
   let parsed;
   try { parsed = JSON.parse(result.stdout); } catch {
     await writer.writeJson(artifact, { status: 'failed', reason: 'invalid-json' });
-    throw Object.assign(new Error(`bycli ima ${args[0]} returned invalid JSON`), { rawArtifacts: [artifact] });
+    throw Object.assign(new Error(`bycli ima ${args[0]} returned invalid JSON`), {
+      reasonCode: 'INVALID_RESPONSE',
+      rawArtifacts: [artifact],
+    });
   }
   await writer.writeJson(artifact, parsed);
   return parsed;
@@ -357,10 +388,7 @@ async function callBycliImaJson(writer, bycliBin, env, args, artifact) {
 
 async function bycliKnowledgeList(writer, bycliBin, env, kb) {
   const parsed = await callBycliImaJson(writer, bycliBin, env, ['knowledge', kb], 'raw/bycli-knowledge.json');
-  if (!Array.isArray(parsed) && !objectValue(parsed)) {
-    throw new Error('bycli ima knowledge returned an unsupported JSON shape');
-  }
-  return parsed;
+  return assertListResponseShape(parsed, 'knowledge', 'raw/bycli-knowledge.json');
 }
 
 function bycliDownloadRecord(value) {
@@ -505,6 +533,28 @@ function knowledgeArtifact(selector) {
   return `raw/bycli-knowledge-${suffix}.json`;
 }
 
+function boundedConcurrency(value) {
+  const numeric = Number(value);
+  return Number.isSafeInteger(numeric) && numeric >= 1 && numeric <= 16 ? numeric : 4;
+}
+
+async function mapWithConcurrency(values, concurrency, operation) {
+  const results = new Array(values.length);
+  let nextIndex = 0;
+  async function worker() {
+    while (nextIndex < values.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await operation(values[index], index);
+    }
+  }
+  await Promise.all(Array.from(
+    { length: Math.min(boundedConcurrency(concurrency), values.length) },
+    () => worker(),
+  ));
+  return results;
+}
+
 async function discover(writer, request, bycliBin, env) {
   const found = [];
   const seenSourceItems = new Set();
@@ -530,24 +580,68 @@ async function discover(writer, request, bycliBin, env) {
   }
 
   const basesArtifact = 'raw/bycli-knowledge-list.json';
-  const basesResponse = await callBycliImaJson(writer, bycliBin, env, ['knowledge-list'], basesArtifact);
+  const basesResponse = assertListResponseShape(
+    await callBycliImaJson(writer, bycliBin, env, ['knowledge-list'], basesArtifact),
+    'knowledge-list',
+    basesArtifact,
+  );
   rawArtifacts.push(basesArtifact);
-  const bases = knowledgeBasesOf(basesResponse);
+  const seenSelectors = new Set();
+  const uniqueBases = knowledgeBasesOf(basesResponse).filter((base) => {
+    if (seenSelectors.has(base.selector)) return false;
+    seenSelectors.add(base.selector);
+    return true;
+  });
+  const bases = uniqueBases.slice(0, MAX_KNOWLEDGE_BASES);
+  if (uniqueBases.length > bases.length) {
+    failures.push({ knowledgeBase: '*', reason: 'knowledge-base-budget-exhausted' });
+  }
+  const baseResults = [];
   let successfulBases = 0;
-  for (const base of bases) {
-    const artifact = knowledgeArtifact(base.selector);
-    try {
-      const response = await callBycliImaJson(writer, bycliBin, env, ['knowledge', base.selector], artifact);
-      successfulBases += 1;
-      runDiscovery(response, base.name || base.id, base.selector, artifact);
-    } catch (error) {
+  const batchSize = boundedConcurrency(request.concurrency);
+  for (let offset = 0; offset < bases.length && found.length < request.limit; offset += batchSize) {
+    const batch = await mapWithConcurrency(
+      bases.slice(offset, offset + batchSize),
+      batchSize,
+      async (base) => {
+        const artifact = knowledgeArtifact(base.selector);
+        try {
+          const response = assertListResponseShape(
+            await callBycliImaJson(writer, bycliBin, env, ['knowledge', base.selector], artifact),
+            'knowledge',
+            artifact,
+          );
+          return { base, artifact, response, error: null };
+        } catch (error) {
+          return { base, artifact, response: null, error };
+        }
+      },
+    );
+    baseResults.push(...batch);
+    for (const { base, artifact, response, error } of batch) {
+      if (!error) {
+        successfulBases += 1;
+        runDiscovery(response, base.name || base.id, base.selector, artifact);
+        continue;
+      }
       rawArtifacts.push(...(error.rawArtifacts || [artifact]));
       failures.push({ knowledgeBase: base.name || base.id, reason: reasonOf(error) });
     }
   }
   if (bases.length > 0 && successfulBases === 0) {
     const error = new Error(`IMA knowledge enumeration failed: ${failures.map((failure) => `${failure.knowledgeBase}: ${failure.reason}`).join('; ')}`);
-    error.auth = failures.some((failure) => /登录|auth|credential|unauthorized|401|403/i.test(failure.reason));
+    const errors = baseResults.map((result) => result.error).filter(Boolean);
+    error.auth = errors.length > 0 && errors.every((failure) => failure.auth === true);
+    const bridgeCodes = new Set(['BRIDGE_UNAVAILABLE', 'BRIDGE_RECOVERY_BUSY']);
+    error.bridge = errors.length > 0 && errors.every((failure) => bridgeCodes.has(failure.reasonCode));
+    error.reasonCode = error.bridge
+      ? (errors.some((failure) => failure.reasonCode === 'BRIDGE_UNAVAILABLE')
+        ? 'BRIDGE_UNAVAILABLE' : 'BRIDGE_RECOVERY_BUSY')
+      : errors.length > 0 && errors.every((failure) => failure.reasonCode === 'INVALID_RESPONSE')
+        ? 'INVALID_RESPONSE'
+        : null;
+    error.rawArtifacts = rawArtifacts;
+    error.failures = failures;
     throw error;
   }
   return { found: found.slice(0, request.limit), rawArtifacts, failures };
@@ -627,6 +721,16 @@ async function materializeOne(writer, item, bycliBin, env, fetchImpl) {
   }
 }
 
+async function materializeItems(writer, items, bycliBin, env, fetchImpl, concurrency) {
+  return mapWithConcurrency(items, concurrency, async (item) => {
+    try {
+      return await materializeOne(writer, item, bycliBin, env, fetchImpl);
+    } catch (error) {
+      return failedInventory(item, error);
+    }
+  });
+}
+
 function failedInventory(item, error) {
   const media = error?.media || (item.coverUrls?.length
     ? {
@@ -647,13 +751,20 @@ function commonKnowledgeBase(items) {
   return values.length === 1 ? values[0] : '';
 }
 
-async function persistSearch(writer, request, inventory, canonicalItems, rawArtifacts, status, discovery) {
+async function persistSearch(writer, request, inventory, canonicalItems, rawArtifacts, status, discovery, terminal = null) {
+  const sourceMetadata = {
+    ...identity,
+    operation: 'search',
+    metadataOnly: Boolean(request.metadataOnly),
+    discovery,
+    ...(terminal ? { terminal } : {}),
+  };
   await writer.writeJson('raw/metadata.json', {
     ...identity,
     operation: 'search',
     rawArtifacts,
     status,
-    sourceMetadata: { ...identity, operation: 'search', metadataOnly: Boolean(request.metadataOnly), discovery },
+    sourceMetadata,
   });
   await writer.writeCollectionBundle({
     title: `IMA search: ${request.query}`,
@@ -663,8 +774,10 @@ async function persistSearch(writer, request, inventory, canonicalItems, rawArti
     filters: request.kb ? { kb: request.kb } : {},
     inventory,
     canonicalItems,
-    sourceMetadata: { ...identity, operation: 'search', metadataOnly: Boolean(request.metadataOnly), discovery },
+    sourceMetadata,
     metadataOnly: Boolean(request.metadataOnly),
+    discoverySucceeded: status !== 'failed',
+    paginationFailed: status === 'partial',
   });
 }
 
@@ -675,7 +788,9 @@ export function createImaAdapter(dependencies = {}) {
 
   async function search(request = {}) {
     const outputDir = request.outputDir;
-    const writer = await createArtifactWriter(outputDir);
+    const writer = await createArtifactWriter(outputDir, {
+      initialTaskContract: request.taskContract,
+    });
     const normalized = {
       ...request,
       query: typeof request.query === 'string' ? request.query.trim() : '',
@@ -684,13 +799,9 @@ export function createImaAdapter(dependencies = {}) {
     try {
       const discovery = await discover(writer, normalized, bycliBin, env);
       const inventory = normalized.metadataOnly ? discovery.found.map((item) => inventoryItem(item, item.rawArtifacts)) : [];
-      const materialized = [];
-      if (!normalized.metadataOnly) {
-        for (const item of discovery.found) {
-          try { materialized.push(await materializeOne(writer, item, bycliBin, env, fetchImpl)); }
-          catch (error) { materialized.push(failedInventory(item, error)); }
-        }
-      }
+      const materialized = normalized.metadataOnly ? [] : await materializeItems(
+        writer, discovery.found, bycliBin, env, fetchImpl, normalized.concurrency,
+      );
       const finalInventory = normalized.metadataOnly ? inventory : materialized;
       const canonicalItems = finalInventory.filter((item) => item.materialization.status === 'materialized').map((item) => ({
         title: item.title, url: item.sourceUrl, author: '', publishTime: '', markdown: item.materialization.sanitizedPath, fileName: item.materialization.sanitizedPath,
@@ -706,8 +817,43 @@ export function createImaAdapter(dependencies = {}) {
       });
       return handledOutcome(identity.connector, status, outputDir, inventoryCounts(finalInventory));
     } catch (error) {
-      if (error.auth) return handledOutcome(identity.connector, 'auth_required', outputDir, { failed: 0 });
-      throw error;
+      const reasonCode = error.bridge
+        ? (error.reasonCode || 'BRIDGE_UNAVAILABLE')
+        : error.auth
+          ? 'AUTH_REQUIRED'
+          : error.reasonCode === 'INVALID_RESPONSE'
+            ? 'INVALID_RESPONSE'
+            : 'SOURCE_FAILED';
+      const terminal = {
+        status: reasonCode === 'BRIDGE_RECOVERY_BUSY'
+          ? 'bridge_recovery_busy'
+          : reasonCode === 'BRIDGE_UNAVAILABLE'
+            ? 'bridge_unavailable'
+            : reasonCode === 'AUTH_REQUIRED'
+              ? 'auth_required'
+              : 'failed',
+        reasonCode,
+        reason: reasonOf(error),
+      };
+      await persistSearch(
+        writer,
+        normalized,
+        [],
+        [],
+        error.rawArtifacts || [],
+        'failed',
+        {
+          discovered: 0,
+          failures: Array.isArray(error.failures) && error.failures.length > 0
+            ? error.failures : [{ reason: terminal.reason }],
+        },
+        terminal,
+      );
+      return {
+        ...handledOutcome(identity.connector, terminal.status, outputDir, { failed: 0 }),
+        reasonCode: terminal.reasonCode,
+        reason: terminal.reason,
+      };
     }
   }
 
@@ -716,28 +862,34 @@ export function createImaAdapter(dependencies = {}) {
   }
 
   async function materialize(request = {}) {
-    const writer = await createArtifactWriter(request.outputDir);
-    const candidates = await copyResumeArtifacts(writer, await readResumeCandidates(request.sessionDir, identity.source, request.itemIds || []));
-    const kb = commonKnowledgeBase(candidates);
-    const inventory = [];
-    for (const item of candidates) {
-      try { inventory.push(await materializeOne(writer, item, bycliBin, env, fetchImpl)); }
-      catch (error) { inventory.push(failedInventory(item, error)); }
+    if (resolve(request.sessionDir || '') !== resolve(request.outputDir || '')) {
+      throw new Error('IMA materialization must remain in the same discovery session');
     }
-    const canonicalItems = inventory.filter((item) => item.materialization.status === 'materialized').map((item) => ({ title: item.title, url: item.sourceUrl, author: '', publishTime: '', markdown: item.materialization.sanitizedPath, fileName: item.materialization.sanitizedPath }));
-    const status = deriveCollectionStatus({ itemStates: inventory.map((item) => item.materialization.status) });
-    await writer.writeCollectionBundle({
-      title: 'IMA materialized collection',
-      source: identity.source,
-      backend: identity.backend,
-      url: 'ima://materialize',
-      filters: kb ? { kb } : {},
-      inventory,
-      canonicalItems,
-      sourceMetadata: { ...identity, operation: 'materialize', ...(kb ? { kb } : {}) },
-      metadataOnly: false,
-    });
-    return handledOutcome(identity.connector, status, request.outputDir, inventoryCounts(inventory));
+    const writer = await createArtifactWriter(request.outputDir, { allowExistingSession: true });
+    try {
+      const candidates = await copyResumeArtifacts(writer, await readResumeCandidates(request.sessionDir, identity.source, request.itemIds || []));
+      const kb = commonKnowledgeBase(candidates);
+      const inventory = await materializeItems(
+        writer, candidates, bycliBin, env, fetchImpl, request.concurrency,
+      );
+      const canonicalItems = inventory.filter((item) => item.materialization.status === 'materialized').map((item) => ({ title: item.title, url: item.sourceUrl, author: '', publishTime: '', markdown: item.materialization.sanitizedPath, fileName: item.materialization.sanitizedPath }));
+      const status = deriveCollectionStatus({ itemStates: inventory.map((item) => item.materialization.status) });
+      await writer.writeCollectionBundle({
+        title: 'IMA materialized collection',
+        source: identity.source,
+        backend: identity.backend,
+        url: 'ima://materialize',
+        filters: kb ? { kb } : {},
+        inventory,
+        canonicalItems,
+        sourceMetadata: { ...identity, operation: 'materialize', ...(kb ? { kb } : {}) },
+        metadataOnly: false,
+      });
+      return handledOutcome(identity.connector, status, request.outputDir, inventoryCounts(inventory));
+    } catch (error) {
+      await writer.abort().catch(() => {});
+      throw error;
+    }
   }
 
   return { ...identity, search, collectResource, materialize };

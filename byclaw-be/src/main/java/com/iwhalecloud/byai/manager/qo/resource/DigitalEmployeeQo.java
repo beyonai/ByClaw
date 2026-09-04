@@ -76,6 +76,11 @@ public class DigitalEmployeeQo extends AuthQo {
     private String defaultSuperAssistantResourceCode;
 
     /**
+     * 安装目标查询时用于判断数字员工是否已经安装指定资源。
+     */
+    private Long relResourceId;
+
+    /**
      * 资源发布类型：publish-公开发布，private-私有。
      * 给知识前端的通用查询入口使用；当前端不传时，默认按 publish 查询。
      */

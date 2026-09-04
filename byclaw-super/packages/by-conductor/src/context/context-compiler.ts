@@ -3,6 +3,7 @@ import { performance } from "node:perf_hooks";
 import { AuthorizedAgentsProcessor } from "./processors/authorized-agents.js";
 import { ContextCleanupProcessor } from "./processors/cleanup.js";
 import { GroupChatContextProcessor } from "./processors/group-chat-context.js";
+import { ProjectContextProcessor } from "./processors/project-context.js";
 import { SessionContextProcessor } from "./processors/session-context.js";
 import { SessionWorkspaceProcessor } from "./processors/session-workspace.js";
 import { SupervisorPolicyProcessor } from "./processors/supervisor-policy.js";
@@ -39,6 +40,7 @@ export class ContextCompiler implements SystemContextCompiler {
     private readonly processors: readonly ContextProcessor[] = [
       new SupervisorPolicyProcessor(),
       new SessionContextProcessor(),
+      new ProjectContextProcessor(),
       new SessionWorkspaceProcessor(),
       new UserContextProcessor(),
       new GroupChatContextProcessor(),
