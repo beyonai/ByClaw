@@ -66,6 +66,9 @@ describe("project context", () => {
           : {}),
       };
       const compiled = compiler.compile({ ...input, projectContext: project });
+      expect(compiled.dynamicSystemContext).toContain(
+        "你当前正在这个项目环境下工作：\n<project_context>",
+      );
       expect(compiled.dynamicSystemContext).toContain(JSON.stringify(project));
       expect(compiled.dynamicSystemContext).toContain(
         "pass this project context to the child agent",
