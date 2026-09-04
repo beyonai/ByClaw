@@ -6,6 +6,9 @@ export interface FileBrowserItem {
   isDir: boolean;
   size?: number;
   lastModified?: string;
+
+  /** 代码仓库文件的外部链接（仅项目代码模块使用）。 */
+  url?: string;
 }
 
 export interface ChangedFileDiff {

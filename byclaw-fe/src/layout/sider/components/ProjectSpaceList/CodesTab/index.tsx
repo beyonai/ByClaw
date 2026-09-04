@@ -51,6 +51,7 @@ function toRepoFileItems(nodes: ProjectRepoTreeNode[], rootPath: string, pathPre
       path: isDir ? ensureDirectoryPath(path) : path,
       isDir,
       size: node.size,
+      url: node.url,
     };
   });
 }
@@ -305,6 +306,8 @@ const CodesTab: React.FC<CodesTabProps> = ({
   const quoteFile = useCallback(
     (item: FileBrowserItem) => {
       if (!normalizedResourceId) return;
+      // 外部仓库链接仅用于查看，不参与聊天资源引用。
+      if (/^https?:\/\//i.test(`${(item as any).url || ''}`)) return;
       EventEmitter.emit('queryInput-insert-item', {
         item: normalizeReferenceItem(item, normalizedResourceId),
         type: isDirectory(item) ? DragType.commonFolder : DragType.commonFile,
@@ -313,15 +316,24 @@ const CodesTab: React.FC<CodesTabProps> = ({
     [EventEmitter, normalizedResourceId]
   );
 
-  const getActionItems = useCallback((): MenuProps['items'] => {
-    if (!normalizedResourceId) return [];
-    return [
-      {
-        key: 'quote',
-        label: intl.formatMessage({ id: 'common.quote' }),
-      },
-    ];
-  }, [intl, normalizedResourceId]);
+  const getActionItems = useCallback(
+    (item: FileBrowserItem): MenuProps['items'] => {
+      if (!normalizedResourceId) return [];
+      if (/^https?:\/\//i.test(`${item.url || ''}`.trim())) return [];
+      return [
+        {
+          key: 'quote',
+          label: intl.formatMessage({ id: 'common.quote' }),
+        },
+      ];
+    },
+    [intl, normalizedResourceId]
+  );
+
+  const getTooltipPath = useCallback((item: FileBrowserItem) => {
+    const url = `${(item as any).url || ''}`.trim();
+    return /^https?:\/\//i.test(url) ? url : undefined;
+  }, []);
 
   const handleAction = useCallback(
     (key: Key, item: FileBrowserItem) => {
@@ -733,6 +745,7 @@ const CodesTab: React.FC<CodesTabProps> = ({
         showActions={!!normalizedResourceId}
         getActionItems={getActionItems}
         onAction={handleAction}
+        getTooltipPath={getTooltipPath}
       />
       {renderFileDiffDrawer()}
     </div>

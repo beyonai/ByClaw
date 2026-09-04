@@ -649,9 +649,9 @@
                 <when test="agentType != null and agentType != ''">
                     and b.agent_type = #{agentType}
                 </when>
-                <otherwise>
+                <when test="includeEmployeeGroup != true">
                     and coalesce(b.agent_type, '') != '017'
-                </otherwise>
+                </when>
             </choose>
             <choose>
                 <when test="resourceStatus != null">
@@ -758,6 +758,11 @@
         </where>
         <!-- 排序规则 -->
         <choose>
+            <when test="employeeGroupFirst == true">
+                order by case when b.agent_type = '017' then 0 else 1 end asc,
+                         COALESCE(a.update_time, a.create_time, '1970-01-01 00:00:00') desc,
+                         a.create_time desc
+            </when>
             <when test="orderField == 'use' and orderBy == 'asc'">
                 order by case when a.resource_status = 3 then 1 else 0 end asc,
                          COALESCE(d.total, 0) asc

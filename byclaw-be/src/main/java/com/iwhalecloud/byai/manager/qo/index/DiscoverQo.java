@@ -22,6 +22,12 @@ public class DiscoverQo extends AuthQo {
      */
     private String agentType;
 
+    /** 官方推荐合并查询时同时返回数字员工组和数字员工。 */
+    private Boolean includeEmployeeGroup;
+
+    /** 官方推荐合并查询时按数字员工组优先、同类型按修改时间倒序排列。 */
+    private Boolean employeeGroupFirst;
+
     /**
      * 目录id
      */
