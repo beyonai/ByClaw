@@ -105,7 +105,7 @@ export class ByFrameworkRunPresenter {
     const displayPrefix = displayName ? `${displayName} ` : "";
     const failureReason = stringData(event.data.error);
     const failureStage = stringData(event.data.failureStage);
-    const description =
+    const content =
       status === "_START_"
         ? `${displayPrefix}数字员工正在处理`
         : status === "_DONE_"
@@ -116,28 +116,6 @@ export class ByFrameworkRunPresenter {
               reason: failureReason,
               stage: failureStage,
             });
-    const card: Record<string, unknown> = {
-      title: displayName ? `调度数字员工：${displayName}` : "调度数字员工",
-      description,
-      status,
-    };
-    if (status === "_START_") {
-      const task = stringData(event.data.task);
-      const expectedOutput = stringData(event.data.expectedOutput);
-      const attachments = delegationAttachments(event.data.attachments);
-      card.input = {
-        ...(agentId ? { agentId } : {}),
-        ...(agentName ? { agentName } : {}),
-        ...(task ? { instruction: task } : {}),
-        ...(expectedOutput ? { expectedOutput } : {}),
-        ...(attachments.length > 0 ? { attachments } : {}),
-      };
-    } else if (status === "_ERROR_") {
-      card.output = {
-        ...(failureStage ? { stage: failureStage } : {}),
-        ...(failureReason ? { error: failureReason } : {}),
-      };
-    }
 
     await this.#emitter.emitEvent({
       sessionId: context.sessionId,
@@ -148,8 +126,8 @@ export class ByFrameworkRunPresenter {
       parentMessageId: "-1",
       data: protocolMessage({
         event: EventType.REASONING_LOG_DELTA,
-        content: JSON.stringify(card),
-        contentType: "3015",
+        content,
+        contentType: "3009",
         orderId: delegationId,
         parentOrderId: "-1",
         objectType: "tool_call",
@@ -158,6 +136,62 @@ export class ByFrameworkRunPresenter {
       metadata: {
         parent_run_id: event.runId,
         delegation_id: delegationId,
+        ...(agentId ? { delegated_agent_id: agentId } : {}),
+        ...(agentName ? { delegated_agent_name: agentName } : {}),
+      },
+    });
+
+    if (status === "_START_") {
+      await this.#emitDelegationInput(event, context, delegationId, agentId, agentName);
+    }
+  }
+
+  /** 把调度参数作为根状态卡的静态子节点展示，避免改变原有 Delegation 树的生命周期语义。 */
+  async #emitDelegationInput(
+    event: RunEvent,
+    context: AgentContext,
+    delegationId: string,
+    agentId: string,
+    agentName: string,
+  ): Promise<void> {
+    const task = stringData(event.data.task);
+    const expectedOutput = stringData(event.data.expectedOutput);
+    const attachments = delegationAttachments(event.data.attachments);
+    const displayName = agentName || agentId;
+    const messageId = `${delegationId}:dispatch-input`;
+    const card = {
+      title: "发送给数字员工的指令",
+      ...(displayName ? { description: `目标：${displayName}` } : {}),
+      input: {
+        ...(agentId ? { agentId } : {}),
+        ...(agentName ? { agentName } : {}),
+        ...(task ? { instruction: task } : {}),
+        ...(expectedOutput ? { expectedOutput } : {}),
+        ...(attachments.length > 0 ? { attachments } : {}),
+      },
+      status: "_DONE_",
+    };
+
+    await this.#emitter.emitEvent({
+      sessionId: context.sessionId,
+      traceId: context.traceId,
+      eventType: EventType.REASONING_LOG_DELTA,
+      sourceAgentType: this.#agentType,
+      messageId,
+      parentMessageId: delegationId,
+      data: protocolMessage({
+        event: EventType.REASONING_LOG_DELTA,
+        content: JSON.stringify(card),
+        contentType: "3015",
+        orderId: messageId,
+        parentOrderId: delegationId,
+        objectType: "tool_call",
+        status: "_DONE_",
+      }),
+      metadata: {
+        parent_run_id: event.runId,
+        delegation_id: delegationId,
+        delegation_input: true,
         ...(agentId ? { delegated_agent_id: agentId } : {}),
         ...(agentName ? { delegated_agent_name: agentName } : {}),
       },
