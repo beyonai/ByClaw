@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -186,6 +186,33 @@ await (async () => {
 
 await (async () => {
   const tempRoot = makeSessionDir();
+  const sessionRoot = join(tempRoot, 'by', '.sessions');
+  const sessionDir = join(sessionRoot, 'cloud-session');
+  const env = { KNOWLEDGE_COLLECTION_SESSIONS_ROOT: join(tempRoot, 'by', '.sessions') };
+  const scope = JSON.stringify({
+    schemaVersion: '1.0',
+    resources: [{ resourceId: 1024, directoryPath: '/docs', origin: 'user-input' }],
+  });
+  const init = await runCli([
+    'init', '--session-dir', sessionDir, '--session-root', sessionRoot, '--query', 'cloud query',
+    '--source-scope', '["cloud-knowledge"]', '--materialization-target', 'selected',
+    '--required-content-granularity', 'full-text', '--cloud-discovery-scope', scope,
+  ], env);
+  assert.equal(init.code, 0, init.stderr || init.stdout);
+  const persisted = JSON.parse(readFileSync(join(sessionDir, 'session.json'), 'utf8'));
+  assert.deepEqual(persisted.task.cloudDiscoveryScope.resources, [{ resourceId: 1024, directoryPath: '/docs', origin: 'user-input' }]);
+  const rejected = await runCli([
+    'init', '--session-dir', join(sessionRoot, 'bad'), '--session-root', sessionRoot, '--query', 'bad',
+    '--source-scope', '["public-internet"]', '--cloud-discovery-scope', scope,
+  ], env);
+  assert.equal(rejected.code, 1);
+  assert.match(rejected.json.error, /cloud-discovery-scope|cloud-knowledge/);
+  rmSync(tempRoot, { recursive: true, force: true });
+  console.log('PASS cloud discovery scope persists and is source-scoped');
+})();
+
+await (async () => {
+  const tempRoot = makeSessionDir();
   const sessionsRoot = join(tempRoot, 'by', '.sessions');
   const sessionRoot = join(sessionsRoot, 'session-layout');
   const sandboxEnv = { KNOWLEDGE_COLLECTION_SESSIONS_ROOT: sessionsRoot };
@@ -298,9 +325,10 @@ await (async () => {
   assert.equal(schema.json.commands.init.properties['session-root'].format, 'absolute-path');
   assert.equal(schema.json.commands.init.properties['source-scope'].type, 'array');
   assert.deepEqual(schema.json.commands.init.properties['source-scope'].items.enum, [
-    'public-internet', 'dingtalk', 'feishu', 'wecom', 'ima',
+    'public-internet', 'dingtalk', 'feishu', 'wecom', 'ima', 'cloud-knowledge',
   ]);
-  assert.deepEqual(schema.json.commands.init.properties['source-scope'].default, ['public-internet']);
+  assert.deepEqual(schema.json.commands.init.properties['source-scope'].default, ['public-internet', 'cloud-knowledge']);
+  assert.equal(schema.json.commands.init.properties['cloud-discovery-scope'].type, 'object');
   assert.deepEqual(schema.json.commands.init.properties['materialization-target'].enum, ['candidates', 'selected', 'all']);
   assert.equal(schema.json.commands.init.properties['materialization-target'].default, 'selected');
   assert.deepEqual(schema.json.commands.init.properties.workflow.enum, ['public-collect']);
@@ -316,7 +344,15 @@ await (async () => {
   assert.equal(schema.json.commands.report.properties['report-path'].format, 'sandbox-path');
   assert.equal(schema.json.commands.status.properties['session-root'].format, 'absolute-path');
   assert.equal(schema.json.commands.collect.properties['item-json-file'].format, 'collection-input-file');
-  assert.deepEqual(schema.json.commands.publish.required, ['session-dir', 'delivery-dir']);
+  assert.deepEqual(schema.json.commands.publish.required, ['session-dir']);
+  assert.deepEqual(schema.json.commands.publish.oneOf, [
+    { required: ['delivery-handle'] },
+    { required: ['delivery-dir'] },
+  ]);
+  // --delivery-dir 不得标为 deprecated:企业 search-all 聚合会话与旧版本会话没有 handle,
+  // 它是这些会话唯一的交付形式,标弃用会与 references/delivery.md 的硬要求矛盾。
+  assert.equal(schema.json.commands.publish.properties['delivery-dir'].deprecated, undefined);
+  assert.equal(schema.json.commands.publish.properties['delivery-handle'].type, 'string');
   assert.equal(schema.json.commands['public-collect'].properties['requested-count'].maximum, 20);
   assert.equal(schema.json.commands['public-collect'].oneOf.length, 3);
   assert.equal(schema.json.commands.publish.properties['session-dir'].format, 'sandbox-path');
@@ -616,7 +652,7 @@ await (async () => {
 
 await (async () => {
   const defaultScope = await runCli(['init', '--session-dir', makeSessionDir(), '--query', '公开资料']);
-  assert.deepEqual(defaultScope.json.task.sourceScope, ['public-internet']);
+  assert.deepEqual(defaultScope.json.task.sourceScope, ['public-internet', 'cloud-knowledge']);
   assert.equal(defaultScope.json.task.materializationTarget, 'selected');
   assert.equal(defaultScope.json.task.requiredContentGranularity, 'any');
   assert.equal(defaultScope.json.task.discoveryGate.attemptCount, 0);
@@ -887,6 +923,281 @@ await (async () => {
   assert.equal(c.json.ok, false);
   assert.ok(c.json.error.includes('锁'));
   console.log('PASS lock conflict');
+})();
+
+// ── init --delivery-dir: 绑定交付目标并以 handle 引用 ──
+
+await (async () => {
+  const tempRoot = makeSessionDir();
+  const sessionsRoot = join(tempRoot, 'by', '.sessions');
+  const sessionRoot = join(sessionsRoot, 'session-delivery-bind');
+  const sandboxEnv = { KNOWLEDGE_COLLECTION_SESSIONS_ROOT: sessionsRoot };
+  const staging = () => join(sessionRoot, '.collection-runs', `run-${Math.random().toString(36).slice(2, 8)}`);
+
+  // 绝对交付路径:持久化 requestedDirectory + handle,但 stdout 只暴露 handle
+  const deliveryDir = join(tempRoot, '00-collections');
+  const sessionDir = staging();
+  const bound = await runCli([
+    'init', '--session-dir', sessionDir, '--session-root', sessionRoot,
+    '--query', 'deepseek 采集', '--delivery-requested', 'true',
+    '--delivery-dir', deliveryDir,
+  ], sandboxEnv);
+  assert.equal(bound.code, 0, bound.stderr || bound.stdout);
+  assert.equal(bound.json.task.deliveryTarget.bound, true);
+  assert.match(bound.json.task.deliveryTarget.handle, /^delivery-[0-9a-f]{8}$/);
+  assert.equal(bound.json.task.deliveryTarget.requestedDirectory, undefined);
+  assert.equal(bound.stdout.includes(deliveryDir), false, 'init stdout 不得包含交付路径');
+  const persisted = JSON.parse(readFileSync(join(sessionDir, 'session.json'), 'utf8'));
+  assert.equal(persisted.task.deliveryTarget.requestedDirectory, deliveryDir);
+  assert.equal(persisted.task.deliveryTarget.handle, bound.json.task.deliveryTarget.handle);
+
+  // status 同样只暴露 handle
+  const status = await runCli(['status', '--session-dir', sessionDir], sandboxEnv);
+  assert.equal(status.code, 0, status.stderr || status.stdout);
+  assert.equal(status.json.task.deliveryTarget.bound, true);
+  assert.equal(status.json.task.deliveryTarget.requestedDirectory, undefined);
+  assert.equal(status.stdout.includes(deliveryDir), false, 'status stdout 不得包含交付路径');
+
+  // 交付目标不存在也不被创建,init 不对其做任何 stat
+  assert.equal(existsSync(deliveryDir), false, 'init 不得创建交付目录');
+
+  // 交付目标的父目录不可读时 init 仍成功(证明未发生 syscall)
+  const sealedParent = join(tempRoot, 'sealed');
+  mkdirSync(sealedParent, { recursive: true });
+  chmodSync(sealedParent, 0o000);
+  try {
+    const sealed = await runCli([
+      'init', '--session-dir', staging(), '--session-root', sessionRoot,
+      '--query', 'sealed parent', '--delivery-requested', 'true',
+      '--delivery-dir', join(sealedParent, 'target'),
+    ], sandboxEnv);
+    assert.equal(sealed.code, 0, sealed.stderr || sealed.stdout);
+  } finally {
+    chmodSync(sealedParent, 0o755);
+  }
+
+  // --delivery-dir 必须与 --delivery-requested true 同时出现
+  const missingIntent = await runCli([
+    'init', '--session-dir', join(sessionRoot, 'collections', 'no-intent'),
+    '--session-root', sessionRoot, '--query', 'no intent',
+    '--delivery-dir', join(tempRoot, 'elsewhere'),
+  ], sandboxEnv);
+  assert.equal(missingIntent.code, 1);
+  assert.match(missingIntent.json.error, /--delivery-requested/);
+
+  // 相对交付路径缺少 --session-root 时拒绝
+  const relativeWithoutRoot = await runCli([
+    'init', '--session-dir', join(tempRoot, 'loose-session'),
+    '--query', 'relative without root',
+    '--delivery-requested', 'true', '--delivery-dir', '00-collections',
+  ], sandboxEnv);
+  assert.equal(relativeWithoutRoot.code, 1);
+  assert.match(relativeWithoutRoot.json.error, /Session Root/);
+
+  // 交付路径位于采集会话目录内时拒绝
+  const insideSession = staging();
+  const rejectedInside = await runCli([
+    'init', '--session-dir', insideSession, '--session-root', sessionRoot,
+    '--query', 'inside session', '--delivery-requested', 'true',
+    '--delivery-dir', join(insideSession, 'out'),
+  ], sandboxEnv);
+  assert.equal(rejectedInside.code, 1);
+  assert.match(rejectedInside.json.error, /内部采集会话目录/);
+
+  // 交付路径解析为文件系统根目录时拒绝
+  const rejectedRoot = await runCli([
+    'init', '--session-dir', staging(), '--session-root', sessionRoot,
+    '--query', 'fs root', '--delivery-requested', 'true', '--delivery-dir', '/',
+  ], sandboxEnv);
+  assert.equal(rejectedRoot.code, 1);
+  assert.match(rejectedRoot.json.error, /文件系统根目录/);
+
+  rmSync(tempRoot, { recursive: true, force: true });
+  console.log('PASS init binds delivery target and redacts the path');
+})();
+
+// ── init --delivery-dir: 存储串必须与 publish 解析结果逐字节一致 ──
+
+await (async () => {
+  const tempRoot = makeSessionDir();
+  const sessionsRoot = join(tempRoot, 'by', '.sessions');
+  const envSessionRoot = join(sessionsRoot, 'env-wins');
+  const argSessionRoot = join(sessionsRoot, 'arg-loses');
+  mkdirSync(envSessionRoot, { recursive: true });
+  mkdirSync(argSessionRoot, { recursive: true });
+
+  // 环境变量优先于 --session-root,init 必须沿用同一优先级
+  const envEnv = {
+    KNOWLEDGE_COLLECTION_SESSIONS_ROOT: sessionsRoot,
+    KNOWLEDGE_COLLECTION_SESSION_ROOT: envSessionRoot,
+  };
+  for (const [label, raw] of [
+    ['plain', '00-collections'],
+    ['trailing-slash', '00-collections/'],
+    ['dot-prefixed', './00-collections'],
+  ]) {
+    const sessionDir = join(envSessionRoot, '.collection-runs', `run-${label}`);
+    const res = await runCli([
+      'init', '--session-dir', sessionDir, '--session-root', argSessionRoot,
+      '--query', `identity ${label}`, '--delivery-requested', 'true',
+      '--delivery-dir', raw,
+    ], envEnv);
+    assert.equal(res.code, 0, res.stderr || res.stdout);
+    const stored = JSON.parse(readFileSync(join(sessionDir, 'session.json'), 'utf8'))
+      .task.deliveryTarget.requestedDirectory;
+    assert.equal(stored, join(envSessionRoot, '00-collections'),
+      `${label} 必须基于环境变量指定的 Session Root 解析,且规范化为无尾斜杠绝对路径`);
+  }
+
+  rmSync(tempRoot, { recursive: true, force: true });
+  console.log('PASS init stores the same string publish would resolve');
+})();
+
+// ── command-schema 暴露 init --delivery-dir ──
+
+await (async () => {
+  const schema = await runCli(['command-schema']);
+  assert.equal(schema.json.ok, true);
+  assert.equal(schema.json.commands.init.properties['delivery-dir'].type, 'string');
+  console.log('PASS command-schema exposes init --delivery-dir');
+})();
+
+// ── Task 4: init 阶段的 advisory warnings ──
+
+// 回归护栏:--workflow public-collect + 显式 any 必须仍然抛错,且抛在建目录之前。
+// 设计曾提出把它默默改成 full-text,已在评审中撤回(§2.3):那会覆盖调用方明确写下的参数。
+await (async () => {
+  const tempRoot = realpathSync(mkdtempSync(join(tmpdir(), 'kc-pc-any-')));
+  const sessionDir = join(tempRoot, 'session');
+  const res = await runCli([
+    'init', '--session-dir', sessionDir, '--query', '采集一篇关于 DeepSeek Harness 的文章',
+    '--source-scope', '["public-internet"]', '--materialization-target', 'selected',
+    '--required-content-granularity', 'any', '--workflow', 'public-collect',
+  ]);
+  assert.equal(res.code, 1);
+  assert.match(res.json.error, /public-collect workflow 要求/);
+  assert.equal(existsSync(sessionDir), false, '抛错必须发生在创建 session 目录之前');
+  rmSync(tempRoot, { recursive: true, force: true });
+  console.log('PASS public-collect + any still throws before creating anything');
+})();
+
+// selected + --delivery-requested true 且没有 --workflow:成功,并提示 public-collect
+await (async () => {
+  const tempRoot = realpathSync(mkdtempSync(join(tmpdir(), 'kc-warn-wf-')));
+  const sessionRoot = join(tempRoot, 'by', '.sessions', '20037048');
+  const sessionDir = join(sessionRoot, '.collection-runs', 'run-001');
+  const res = await runCli([
+    'init', '--session-dir', sessionDir, '--query', '采集一篇关于 DeepSeek Harness 的文章',
+    '--source-scope', '["public-internet"]', '--materialization-target', 'selected',
+    '--delivery-requested', 'true', '--session-root', sessionRoot,
+  ], { KNOWLEDGE_COLLECTION_SESSIONS_ROOT: join(tempRoot, 'by', '.sessions') });
+  assert.equal(res.code, 0, res.stderr || res.stdout);
+  assert.ok(
+    res.json.warnings.some((w) => /public-collect/.test(w)),
+    `期望出现 public-collect 提示,实际: ${JSON.stringify(res.json.warnings)}`,
+  );
+
+  // 带上 --workflow 后不应再提示
+  const explicit = join(sessionRoot, '.collection-runs', 'run-002');
+  const withWorkflow = await runCli([
+    'init', '--session-dir', explicit, '--query', '采集一篇关于 DeepSeek Harness 的文章',
+    '--source-scope', '["public-internet"]', '--materialization-target', 'selected',
+    '--required-content-granularity', 'full-text', '--delivery-requested', 'true',
+    '--session-root', sessionRoot, '--workflow', 'public-collect',
+  ], { KNOWLEDGE_COLLECTION_SESSIONS_ROOT: join(tempRoot, 'by', '.sessions') });
+  assert.equal(withWorkflow.code, 0, withWorkflow.stderr || withWorkflow.stdout);
+  assert.equal(
+    (withWorkflow.json.warnings || []).some((w) => /public-collect/.test(w)),
+    false,
+    '显式给出 --workflow 时不应再提示',
+  );
+  rmSync(tempRoot, { recursive: true, force: true });
+  console.log('PASS init warns when selected + delivery-requested omits --workflow');
+})();
+
+// --delivery-requested true 缺 --delivery-dir:只警告未绑定,不拒绝(回退形式必须继续可用)
+await (async () => {
+  const tempRoot = realpathSync(mkdtempSync(join(tmpdir(), 'kc-warn-unbound-')));
+  const sessionRoot = join(tempRoot, 'by', '.sessions', '20037048');
+  const env = { KNOWLEDGE_COLLECTION_SESSIONS_ROOT: join(tempRoot, 'by', '.sessions') };
+  const baseArgs = (dir) => [
+    'init', '--session-dir', dir, '--query', '采集一篇关于 DeepSeek Harness 的文章',
+    '--source-scope', '["public-internet"]', '--workflow', 'public-collect',
+    '--materialization-target', 'selected', '--required-content-granularity', 'full-text',
+    '--delivery-requested', 'true', '--session-root', sessionRoot,
+  ];
+
+  const unbound = await runCli(baseArgs(join(sessionRoot, '.collection-runs', 'run-001')), env);
+  assert.equal(unbound.code, 0, unbound.stderr || unbound.stdout);
+  assert.equal(unbound.json.task.deliveryRequested, true);
+  assert.equal(unbound.json.task.deliveryTarget, undefined, '未给路径就不该有 handle');
+  assert.ok(
+    unbound.json.warnings.some((w) => /未提供 `?--delivery-dir/.test(w) && /handle/.test(w)),
+    `期望提示未绑定交付目标,实际: ${JSON.stringify(unbound.json.warnings)}`,
+  );
+
+  // 给了 --delivery-dir 就不该再提示
+  const bound = await runCli([
+    ...baseArgs(join(sessionRoot, '.collection-runs', 'run-002')),
+    '--delivery-dir', join(tempRoot, 'out'),
+  ], env);
+  assert.equal(bound.code, 0, bound.stderr || bound.stdout);
+  assert.equal(bound.json.task.deliveryTarget.bound, true);
+  assert.equal(
+    (bound.json.warnings || []).some((w) => /--delivery-dir/.test(w)),
+    false,
+    '已绑定交付目标时不应再提示',
+  );
+
+  // 不要求交付的会话不应被这条 advisory 波及
+  const noDelivery = await runCli([
+    'init', '--session-dir', join(tempRoot, 'plain'), '--query', 'plain collection',
+    '--source-scope', '["public-internet"]',
+  ], env);
+  assert.equal(noDelivery.code, 0, noDelivery.stderr || noDelivery.stdout);
+  assert.deepEqual(noDelivery.json.warnings, []);
+
+  rmSync(tempRoot, { recursive: true, force: true });
+  console.log('PASS init warns when delivery-requested omits --delivery-dir');
+})();
+
+// 相似兄弟目录名只警告,不拒绝(§2.4:deepseek 与 deepseek-articles 可能是两个真任务)
+await (async () => {
+  const tempRoot = realpathSync(mkdtempSync(join(tmpdir(), 'kc-warn-sib-')));
+  const baseArgs = (dir) => [
+    'init', '--session-dir', dir, '--query', '采集一篇关于 DeepSeek Harness 的文章',
+    '--source-scope', '["public-internet"]', '--materialization-target', 'selected',
+  ];
+  const first = await runCli(baseArgs(join(tempRoot, 'deepseek')));
+  assert.equal(first.code, 0, first.stderr || first.stdout);
+  assert.equal(
+    (first.json.warnings || []).some((w) => /deepseek/.test(w)),
+    false,
+    '第一个会话没有兄弟,不应有相似提示',
+  );
+
+  for (const suffix of ['-v2', '-fulltext', '-articles']) {
+    const dir = join(tempRoot, `deepseek${suffix}`);
+    const res = await runCli(baseArgs(dir));
+    assert.equal(res.code, 0, `${suffix} 必须成功而不是被拒绝: ${res.stderr || res.stdout}`);
+    assert.equal(existsSync(join(dir, 'session.json')), true, `${suffix} 会话必须真的建起来`);
+    assert.ok(
+      (res.json.warnings || []).some((w) => /deepseek/.test(w)),
+      `${suffix} 期望出现相似兄弟提示,实际: ${JSON.stringify(res.json.warnings)}`,
+    );
+  }
+
+  // 无关名字不应触发
+  const unrelated = join(tempRoot, 'qwen-benchmark');
+  const res = await runCli(baseArgs(unrelated));
+  assert.equal(res.code, 0, res.stderr || res.stdout);
+  assert.equal(
+    (res.json.warnings || []).some((w) => /相似/.test(w)),
+    false,
+    '无关目录名不应触发相似提示',
+  );
+  rmSync(tempRoot, { recursive: true, force: true });
+  console.log('PASS similar sibling directory names warn but never reject');
 })();
 
 console.log('ALL TESTS PASSED');

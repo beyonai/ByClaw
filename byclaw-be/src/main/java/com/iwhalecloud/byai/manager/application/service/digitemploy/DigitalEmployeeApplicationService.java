@@ -59,6 +59,7 @@ import com.iwhalecloud.byai.state.application.service.session.ByClawSkillDeleteA
 import com.iwhalecloud.byai.state.application.service.session.ByClawSkillPathResolver;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDetailsDTO;
+import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeBatchInstallResourceDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeInstallResourceDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.EmployeeIdDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.EmployeeGroupMemberDTO;
@@ -99,6 +100,8 @@ import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.manager.vo.digitemploy.DebugSessionVo;
 import com.iwhalecloud.byai.manager.vo.digitemploy.SetDefaultDigitalEmployeeResultVo;
+import com.iwhalecloud.byai.manager.vo.digitemploy.DigitalEmployeeBatchInstallResultVo;
+import com.iwhalecloud.byai.manager.vo.digitemploy.DigitalEmployeeInstallTargetVo;
 import com.iwhalecloud.byai.manager.vo.resource.DigitalEmployeeVo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupInstallResultVo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupUninstallPreviewVo;
@@ -148,6 +151,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
@@ -177,6 +183,8 @@ public class DigitalEmployeeApplicationService {
 
     private static final String DEFAULT_SUPER_ASSISTANT_RESOURCE_CODE_SUFFIX = "_main";
 
+    private static final String ADMIN_VIP_USER_CODE = "adminvip";
+
     private static final String TEMPLATE_DIGITAL_EMPLOYEE_PARAM_CODE = "TEMPLATE_DIGITAL_EMPLOYEE";
 
     private static final String TEMPLATE_DIGITAL_EMPLOYEE_GROUP_PARAM_CODE = "TEMPLATE_DIGITAL_EMPLOYEE_GROUP";
@@ -186,6 +194,8 @@ public class DigitalEmployeeApplicationService {
     private static final int MEMBER_CANDIDATE_DEFAULT_PAGE_SIZE = 30;
 
     private static final int MEMBER_CANDIDATE_MAX_PAGE_SIZE = 100;
+
+    private static final int INSTALL_TARGET_MAX_BATCH_SIZE = 100;
 
     @Autowired
     private SequenceService sequenceService;
@@ -323,6 +333,9 @@ public class DigitalEmployeeApplicationService {
     @Autowired
     private DigEmployeeStartupSyncProperties digEmployeeStartupSyncProperties;
 
+    @Autowired
+    private PlatformTransactionManager transactionManager;
+
     /**
      * 查询列表
      *
@@ -338,6 +351,32 @@ public class DigitalEmployeeApplicationService {
         PageInfo<DigitalEmployeePageVo> pageInfo = ssResExtDigEmployeeService
             .selectDigitalEmployeeByQo(digitalEmployeeQo);
         return pageInfo;
+    }
+
+    /**
+     * 查询当前用户可管理的个人及企业数字员工，供资源安装时选择。
+     */
+    public PageInfo<DigitalEmployeeInstallTargetVo> queryInstallTargetEmployees(DigitalEmployeeQo qo) {
+        if (qo == null) {
+            qo = new DigitalEmployeeQo();
+        }
+        if (qo.getPageNum() == null || qo.getPageNum() < 1) {
+            qo.setPageNum(1);
+        }
+        if (qo.getPageSize() == null || qo.getPageSize() < 1) {
+            qo.setPageSize(MEMBER_CANDIDATE_DEFAULT_PAGE_SIZE);
+        } else if (qo.getPageSize() > MEMBER_CANDIDATE_MAX_PAGE_SIZE) {
+            qo.setPageSize(MEMBER_CANDIDATE_MAX_PAGE_SIZE);
+        }
+
+        resourceAuthContextService.setCurrentUserAuthQo(qo);
+        qo.setMemberCandidateEnterpriseId(CurrentUserHolder.getEnterpriseId());
+        qo.setInstallTargetAdminVip(
+            ADMIN_VIP_USER_CODE.equalsIgnoreCase(CurrentUserHolder.getCurrentUserCode()));
+        qo.setDefaultDigEmployeeId(CurrentUserHolder.getDefaultDigEmployeeId());
+        qo.setDefaultSuperAssistantResourceCode(buildDefaultSuperAssistantResourceCode(
+            CurrentUserHolder.getCurrentUserCode(), CurrentUserHolder.getCurrentUserId()));
+        return ssResExtDigEmployeeService.selectInstallTargetEmployees(qo);
     }
 
     /**
@@ -1052,6 +1091,63 @@ public class DigitalEmployeeApplicationService {
      */
     @Transactional(rollbackFor = Exception.class)
     public DigitalEmployeeDetailsDTO installDigitalEmployeeRelResources(
+        DigitalEmployeeInstallResourceDTO installResourceDTO) {
+        return doInstallDigitalEmployeeRelResources(installResourceDTO);
+    }
+
+    /**
+     * 将同一批资源分别安装到多个数字员工。每个员工使用独立事务，单个目标失败不回滚其他目标。
+     */
+    public DigitalEmployeeBatchInstallResultVo batchInstallDigitalEmployeeRelResources(
+        DigitalEmployeeBatchInstallResourceDTO installResourceDTO) {
+        List<Long> digitalEmployeeIds = installResourceDTO == null ? null : installResourceDTO.getDigitalEmployeeIds();
+        List<Long> relIds = installResourceDTO == null ? null : installResourceDTO.getRelIds();
+        List<Long> distinctEmployeeIds = digitalEmployeeIds == null ? Collections.emptyList()
+            : digitalEmployeeIds.stream().filter(Objects::nonNull).distinct().collect(Collectors.toList());
+        List<Long> distinctRelIds = relIds == null ? Collections.emptyList()
+            : relIds.stream().filter(Objects::nonNull).distinct().collect(Collectors.toList());
+        if (CollectionUtils.isEmpty(distinctEmployeeIds) || CollectionUtils.isEmpty(distinctRelIds)) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
+                I18nUtil.get("digemployee.processor.param.notnull"));
+        }
+        if (distinctEmployeeIds.size() > INSTALL_TARGET_MAX_BATCH_SIZE) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
+                I18nUtil.get("digemployee.install.target.too.many", INSTALL_TARGET_MAX_BATCH_SIZE));
+        }
+
+        // 资源本身无效时整批直接失败；员工权限等目标相关校验在各自事务中完成。
+        findInstallRelResources(distinctRelIds);
+        TransactionTemplate transactionTemplate = new TransactionTemplate(transactionManager);
+        transactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+
+        DigitalEmployeeBatchInstallResultVo result = new DigitalEmployeeBatchInstallResultVo();
+        result.setTotalCount(distinctEmployeeIds.size());
+        for (Long digitalEmployeeId : distinctEmployeeIds) {
+            DigitalEmployeeBatchInstallResultVo.Item item = new DigitalEmployeeBatchInstallResultVo.Item();
+            item.setDigitalEmployeeId(digitalEmployeeId);
+            try {
+                DigitalEmployeeInstallResourceDTO singleRequest = new DigitalEmployeeInstallResourceDTO();
+                singleRequest.setDigitalEmployeeId(digitalEmployeeId);
+                singleRequest.setRelIds(distinctRelIds);
+                transactionTemplate.executeWithoutResult(
+                    status -> doInstallDigitalEmployeeRelResources(singleRequest));
+                item.setSuccess(true);
+                item.setMessage(I18nUtil.get("resource.install.success"));
+                result.setSuccessCount(result.getSuccessCount() + 1);
+            } catch (Exception exception) {
+                logger.warn("批量安装资源到数字员工失败, digitalEmployeeId: {}, relIds: {}",
+                    digitalEmployeeId, distinctRelIds, exception);
+                item.setSuccess(false);
+                item.setMessage(StringUtils.defaultIfBlank(exception.getMessage(),
+                    I18nUtil.get("common.operation.failed")));
+                result.setFailureCount(result.getFailureCount() + 1);
+            }
+            result.getResults().add(item);
+        }
+        return result;
+    }
+
+    private DigitalEmployeeDetailsDTO doInstallDigitalEmployeeRelResources(
         DigitalEmployeeInstallResourceDTO installResourceDTO) {
         Long digitalEmployeeId = installResourceDTO == null ? null : installResourceDTO.getDigitalEmployeeId();
         List<Long> installRelIds = installResourceDTO == null ? null : installResourceDTO.getRelIds();

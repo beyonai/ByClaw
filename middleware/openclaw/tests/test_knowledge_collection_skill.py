@@ -1,5 +1,6 @@
 import json
 import re
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -427,7 +428,7 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
 
         self.assertIn("企业来源", agent_reach)
         self.assertIn("采集编排器 `knowledge-collection`", agent_reach)
-        self.assertIn("不得作为公共互联网任务交给 `bycli`", agent_reach)
+        self.assertIn("不得作为公共互联网任务走本路由层", agent_reach)
 
         bridges = {
             "references/sources/wecom-wecomcli.md": "`wecomcli` skill",
@@ -729,6 +730,53 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             self.assertIn(phrase, ima)
         self.assertIn("封面失败不改变正文的物化状态", ima)
         self.assertNotIn("任一封面下载、校验或写入失败时，该条物化失败", ima)
+
+    def test_ima_collection_contract_uses_only_the_bycli_ima_adapter(self):
+        ima = (SKILL_ROOT / "references" / "sources" / "ima.md").read_text(encoding="utf-8")
+        agent_reach = (SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8")
+        ima_skill = (SKILLS_ROOT / "ima-skill" / "SKILL.md").read_text(encoding="utf-8")
+        combined = f"{ima}\n{agent_reach}"
+
+        for phrase in (
+            "`bycli ima knowledge-list -f json`",
+            "`bycli ima knowledge <knowledgeBase> -f json`",
+            "逐库",
+            "本地筛选",
+            "部分失败",
+        ):
+            self.assertIn(phrase, combined)
+        for standalone_command in (
+            "ima auth check",
+            "ima note search",
+            "ima wiki search",
+            "ima-openapi-cli",
+        ):
+            self.assertNotIn(standalone_command, combined)
+        self.assertIn(
+            "`knowledge-collection` 的 IMA 采集只能使用 `bycli ima`",
+            ima_skill,
+        )
+        self.assertNotIn(
+            "失败后可由 `knowledge-collection` 调用一次 `ima wiki search`",
+            ima_skill,
+        )
+
+    def test_ima_collection_contract_closes_terminal_batch_and_recovery_paths(self):
+        ima = (SKILL_ROOT / "references" / "sources" / "ima.md").read_text(encoding="utf-8")
+
+        for phrase in (
+            "所有终态失败都必须写出",
+            "`AUTH_REQUIRED`、`INVALID_RESPONSE`、`SOURCE_FAILED`",
+            "继承父会话",
+            "`--query` 必须与父会话 `task.query` 完全一致",
+            "`search-all` 聚合会话与 IMA 子会话都必须继承父会话",
+            "父会话和聚合会话必须使用互不包含的独立会话树",
+            "`source=ima`、`backend=bycli`",
+            "独占会话锁",
+            "`raw/<source>/`",
+            "最多调度 500 个唯一知识库",
+        ):
+            self.assertIn(phrase, ima)
 
     def test_delegated_adapter_candidate_does_not_create_a_second_question(self):
         bycli = (SKILLS_ROOT / "bycli" / "SKILL.md").read_text(encoding="utf-8")
@@ -1055,6 +1103,103 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
 
         self.assertNotIn("Any API failure—including", weixin)
         self.assertNotIn("their failed API attempt follows the automatic browser fallback", weixin)
+
+    def test_delivery_target_is_bound_at_init_and_referenced_by_handle(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        delivery = (SKILL_ROOT / "references" / "delivery.md").read_text(encoding="utf-8")
+        contract = (SKILL_ROOT / "references" / "collection-contract.md").read_text(encoding="utf-8")
+        combined = f"{skill}\n{contract}\n{delivery}"
+
+        for phrase in (
+            "`init --delivery-dir <path>`",
+            "`publish --session-dir <dir> --delivery-handle <handle>`",
+            "`init` 不对交付目录做任何文件系统访问",
+        ):
+            self.assertIn(phrase, combined)
+
+        # 绑定流程取代了旧的「init 不得包含 --delivery-dir」禁令，但探测禁令必须留下
+        self.assertNotIn("`init` 命令不得包含 `--delivery-dir`", combined)
+        for phrase in (
+            "不得预先 `mkdir`",
+            "不得扫描或猜测交付目录",
+        ):
+            self.assertIn(phrase, combined)
+
+    def test_init_warnings_are_declared_mandatory_reading(self):
+        """init 的 advisory 只有在被要求读取时才有意义。
+
+        三条 warning 都不改变 init 的成败，忽略它们不会报错，因此若文档不点明
+        「必读」，整块 advisory 等于没做。这里锁住那句要求本身，以及三条 warning
+        各自的处置方式。
+        """
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+
+        self.assertIn("`warnings` 是必读字段", skill)
+        for phrase in (
+            "会话未绑定交付目标",
+            "缺 `--workflow`",
+            "改用 `retighten` 就地修复原会话",
+        ):
+            self.assertIn(phrase, skill)
+
+    def test_delivery_dir_is_not_marked_deprecated(self):
+        """聚合会话唯一的交付形式不能同时被标为弃用。
+
+        delivery.md 要求企业 search-all 会话必须用 --delivery-dir；若 schema 又把它
+        标成 deprecated，两处文档直接矛盾，下游会据此移除仍在承载硬需求的参数。
+        """
+        schema = json.loads(
+            subprocess.run(
+                [
+                    "node",
+                    str(SKILL_ROOT / "scripts" / "knowledge-collection.mjs"),
+                    "command-schema",
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout
+        )
+        publish = schema["commands"]["publish"]["properties"]
+        self.assertNotIn("deprecated", publish["delivery-dir"])
+        self.assertIn("delivery-handle", publish)
+
+    def test_both_delivery_forms_stay_documented(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        delivery = (SKILL_ROOT / "references" / "delivery.md").read_text(encoding="utf-8")
+        contract = (SKILL_ROOT / "references" / "collection-contract.md").read_text(encoding="utf-8")
+        combined = f"{skill}\n{contract}\n{delivery}"
+
+        # handle 形式是推荐路径，裸路径形式作为兼容回退保留：两者都不得被后续编辑删掉
+        self.assertIn("`publish --session-dir <dir> --delivery-dir <path>`", combined)
+        self.assertIn("--delivery-handle", combined)
+
+    def test_retighten_is_the_only_sanctioned_granularity_repair(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        contract = (SKILL_ROOT / "references" / "collection-contract.md").read_text(encoding="utf-8")
+        combined = f"{skill}\n{contract}"
+
+        for phrase in (
+            "`retighten`",
+            "只允许 `any` → `full-text`",
+            "不得先用 `any` 初始化",
+            "不得为修正粒度新建",
+            "RETIGHTEN_SESSION_NOT_FRESH",
+        ):
+            self.assertIn(phrase, combined)
+
+        # 反向放松必须被写成明确禁令，而不是留白让 Agent 自己猜
+        self.assertIn("不存在 `full-text` → `any`", combined)
+
+    def test_enterprise_aggregate_sessions_deliver_by_path_not_handle(self):
+        delivery = (SKILL_ROOT / "references" / "delivery.md").read_text(encoding="utf-8")
+
+        for phrase in (
+            "`search-all`",
+            "没有绑定交付目标",
+            "必须使用 `--delivery-dir`",
+        ):
+            self.assertIn(phrase, delivery)
 
     def test_candidate_article_requires_user_confirmation_before_download(self):
         weixin = (SKILLS_ROOT / "bycli" / "references" / "weixin.md").read_text(encoding="utf-8")

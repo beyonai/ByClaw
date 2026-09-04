@@ -46,6 +46,21 @@ function createHarness(
 }
 
 describe("ByFrameworkConnector", () => {
+  it("passes project metadata without overriding cwd and uses the session for temporary files", async () => {
+    const harness = createHarness();
+    const req = request();
+    const project = { project_id: 42, project_name: "项目甲", workspace: "/by/projects/project-42" };
+    req.metadata.project_info = project;
+    await harness.connector.start(req, { signal: new AbortController().signal });
+    const input = harness.callAgent.mock.calls[0][0];
+    expect(input.metadata.project_info).toEqual(project);
+    expect(input.extraPayload).not.toHaveProperty("cwd");
+    expect(input.content).toContain("Your session workspace is `/by/.sessions/external-session-1/`");
+    expect(input.content).toContain("Place temporary artifacts and temporary files");
+    expect(input.content).toContain("Decide where to save final deliverables");
+    expect(input.content).not.toContain("Your project workspace is");
+  });
+
   it("uses callAgent, preserves the parent traceId and returns callback completion", async () => {
     const harness = createHarness();
     const req = request();
@@ -113,6 +128,8 @@ describe("ByFrameworkConnector", () => {
       content: { text: string; files: Array<Record<string, unknown>> };
     }>;
     expect(messages[0].content.text).toContain("/by/.sessions/external-session-1/report.xlsx");
+    expect(messages[0].content.text).toContain("Place temporary artifacts and temporary files");
+    expect(messages[0].content.text).toContain("Decide where to save final deliverables");
     expect(messages[0].content.files[0]).toMatchObject({
       fileId: "123",
       fileName: "report.xlsx",

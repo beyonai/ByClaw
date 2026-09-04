@@ -21,13 +21,13 @@ function hasBinaryField(schema: unknown): boolean {
   return false;
 }
 
-async function buildMultipartPayload(parameters: Dict): Promise<FormData> {
+async function buildMultipartPayload(parameters: Dict, signal?: AbortSignal): Promise<FormData> {
   const form = new FormData();
   for (const [key, value] of Object.entries(parameters)) {
     if (value === undefined || value === null) continue;
     if (key === "fileContent") {
       if (typeof value === "string") {
-        const bytes = await readFile(value);
+        const bytes = await readFile(value, { signal });
         form.append(key, new Blob([bytes]), path.basename(value));
         continue;
       }
@@ -55,6 +55,7 @@ export async function executeToolkit(params: {
   timeoutMs?: number;
   logger?: BaiyingEnhanceLogger;
   privateParams?: Record<string, string>;
+  signal?: AbortSignal;
 }): Promise<ExecutorResponse> {
   const { capability } = params;
   const requestParameters = applyPrivateEnvPlaceholders(params.parameters, params.privateParams, params.logger);
@@ -118,15 +119,17 @@ export async function executeToolkit(params: {
   const result = useMultipart
     ? await postMultipartForm({
         url,
-        formData: await buildMultipartPayload(requestParameters),
+        formData: await buildMultipartPayload(requestParameters, params.signal),
         headers,
         timeoutMs: params.timeoutMs ?? 30_000,
+        signal: params.signal,
       })
     : await postJson({
         url,
         payload: requestParameters,
         headers,
         timeoutMs: params.timeoutMs ?? 30_000,
+        signal: params.signal,
       });
 
   if ("error" in result) {

@@ -22,6 +22,31 @@ test('readResumeCandidates accepts only selected pending candidates from a metad
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+test('readResumeCandidates preserves cloud knowledge fields required for safe materialization', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'enterprise-resume-cloud-'));
+  await mkdir(join(root, 'raw'), { recursive: true });
+  await mkdir(join(root, 'sanitized'), { recursive: true });
+  await writeFile(join(root, 'raw/search.json'), '{}');
+  await writeFile(join(root, 'sanitized/metadata.json'), JSON.stringify({
+    sourceMetadata: { source: 'cloud-knowledge', metadataOnly: true },
+    collection: { items: [{
+      itemId: 'cloud-one', sourceItemId: null, sourceUrl: 'cloud-knowledge://1024/docs/a.pdf',
+      title: 'A', sourceType: 'file', materializationType: 'pdf', sourceRank: 1,
+      sourceSkill: 'project-cloud-knowledge', rawArtifacts: ['raw/search.json'], collectionFilters: {},
+      resourceId: 1024, filePath: '/docs/a.pdf', originalFileName: 'a.pdf', fileType: 'pdf', fileSize: 10,
+      fileSignature: 'a'.repeat(64), duplicateGroupKey: 'sha256:' + 'a'.repeat(64),
+      materialization: { status: 'pending', markdownPath: null, sanitizedPath: null },
+    }] },
+  }));
+  const [candidate] = await readResumeCandidates(root, 'cloud-knowledge', ['cloud-one']);
+  assert.equal(candidate.resourceId, 1024);
+  assert.equal(candidate.filePath, '/docs/a.pdf');
+  assert.equal(candidate.fileType, 'pdf');
+  assert.equal(candidate.fileSize, 10);
+  assert.equal(candidate.fileSignature, 'a'.repeat(64));
+  await rm(root, { recursive: true, force: true });
+});
+
 test('readResumeCandidates keeps legacy DWS drive files on the converter materialization path', async () => {
   const root = await mkdtemp(join(tmpdir(), 'enterprise-resume-legacy-dws-'));
   try {

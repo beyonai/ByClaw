@@ -307,14 +307,16 @@ function withSessionWorkspaceReminder(
   }
   const workspace = `/by/.sessions/${externalSessionId}/`;
   const readPaths = sessionWorkspaceReadPaths(attachments);
-  if (readPaths.length === 0) {
-    return `${task}\n\nYour session workspace is \`${workspace}\`. If you produce any files, place them under this session workspace.`;
-  }
   const lines = [
     `Your session workspace is \`${workspace}\`.`,
-    "Files attached to this task are available in this workspace for reading:",
-    ...readPaths.map((path) => `- \`${path}\``),
-    "If you produce any files, place them under this session workspace.",
+    "Place temporary artifacts and temporary files, including intermediate outputs, under this session workspace.",
+    ...(readPaths.length > 0
+      ? [
+          "Files attached to this task are available at these paths for reading:",
+          ...readPaths.map((path) => `- \`${path}\``),
+        ]
+      : []),
+    "Decide where to save final deliverables according to the task and user requirements; project information is background context only.",
   ];
   return `${task}\n\n${lines.join("\n")}`;
 }

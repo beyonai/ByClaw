@@ -77,7 +77,7 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
     return () => {
       disposed = true;
     };
-  }, [projectId, sessionId, sessionResourceRefreshKey]);
+  }, [projectId, sessionId]);
 
   useEffect(() => {
     if (!showCode && secondaryState.session === 'code') {

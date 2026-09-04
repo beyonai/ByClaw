@@ -1256,6 +1256,14 @@ describe("RunService", () => {
   });
 
   it("restores complete metadata from credentials when another instance claims the Run", async () => {
+    const projectContext = {
+      project_id: 42,
+      project_name: "项目甲",
+      workspace: "/by/projects/project-42",
+      project_resources: [{ resourceId: 7, resourceName: "需求" }],
+    };
+    const dispatchedTasks: string[] = [];
+    const leaderProjects: LeaderRunInput["projectContext"][] = [];
     const sessions = new InMemorySessionRepository();
     const runs = new InMemoryRunRepository(sessions);
     const delegations = new InMemoryDelegationRepository();
@@ -1267,6 +1275,7 @@ describe("RunService", () => {
     registry.register({
       ...fakeCallbackConnector(),
       async start(request) {
+        dispatchedTasks.push(request.task);
         dispatchedMetadata.push(structuredClone(request.metadata));
         return {
           completionMode: "callback",
@@ -1299,6 +1308,7 @@ describe("RunService", () => {
     const run = await receivingService.createSessionRun({
       owner: { userCode: "user-1" },
       message: "delegate after takeover",
+      ingressContext: { projectContext },
       agentList: [agent],
       metadata: {
         "Beyond-Token": "token-1",
@@ -1313,6 +1323,7 @@ describe("RunService", () => {
         return {
           contextRevision: 0,
           async run(input) {
+            leaderProjects.push(input.projectContext);
             try {
               await input.delegate({ agentId: agent.id, task: "claimed task" });
             } catch (error) {
@@ -1352,7 +1363,15 @@ describe("RunService", () => {
     claimingService.start();
 
     await waitFor(() => Promise.resolve(dispatchedMetadata.length === 1));
+    expect(leaderProjects).toEqual([projectContext]);
+    expect(dispatchedTasks[0]).toContain("claimed task");
+    expect(dispatchedTasks[0]).toContain(
+      "当前任务关联以下项目环境。请结合它理解用户请求和可用资源，但不得据此扩展、替换或改写用户原始意图；如有冲突，以用户的明确要求为准：\n<project_context>",
+    );
+    expect(dispatchedTasks[0]).toContain(JSON.stringify(projectContext));
+    expect(dispatchedTasks[0]).not.toContain("token-1");
     expect(dispatchedMetadata[0]).toEqual({
+      project_info: projectContext,
       "Beyond-Token": "token-1",
       "System-Code": "system-1",
       channelExtension: { source: "byclaw-be" },

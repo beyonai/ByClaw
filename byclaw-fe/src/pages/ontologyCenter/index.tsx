@@ -27,8 +27,7 @@ import ResourceFilter, {
   STATUS_IN_STOCK_VALUE,
 } from '@/components/Resources/components/ResourceFilter';
 import { SiderContentContext } from '@/layout/sider/siderContentContext';
-import { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentBar';
-import { findDetailsById, installDigitalEmployeeRelResources } from '@/pages/manager/service/DigitalEmployeeMgr';
+import { findDetailsById } from '@/pages/manager/service/DigitalEmployeeMgr';
 import AuthListDrawer from '@/pages/manager/components/AuthListDrawer';
 import UseApplyAuditDrawer from '@/pages/manager/components/UseApplyAuditDrawer';
 import { applyResourceUse } from '@/pages/manager/service/resources';
@@ -44,6 +43,8 @@ import {
 } from '@/service/ontology';
 import { normalizeCatalogTree } from '@/utils/catalog';
 import OntologyNodeDrawer from './OntologyNodeDrawer';
+import ResourceInstallDialog from '@/components/Resources/components/ResourceInstallDialog';
+import useResourceInstallTargetContext from '@/components/Resources/useResourceInstallTargetContext';
 import styles from './index.module.less';
 
 type OwnerTab = 'personal' | 'enterprise' | 'enterpriseTerm';
@@ -393,7 +394,9 @@ const OntologyCenter: React.FC = () => {
   const intl = useIntl();
   const t = (id: string, values?: any) => intl.formatMessage({ id }, values);
   const { setDetailPanel, clearDetailPanel } = useContext(SiderContentContext);
-  const activeSiderAgent = useActiveSiderAgent();
+  const installTargetContext = useResourceInstallTargetContext();
+  const fixedInstallTargetId =
+    installTargetContext.mode === 'fixed' ? installTargetContext.digitalEmployeeId : undefined;
 
   const [activeTab, setActiveTab] = useState<OwnerTab>('personal');
   const [ontologySystemCode, setOntologySystemCode] = useState(DEFAULT_ONTOLOGY_SYSTEM_CODE);
@@ -413,6 +416,7 @@ const OntologyCenter: React.FC = () => {
   const [syncSummary, setSyncSummary] = useState({ created: 0, updated: 0, synced: 0, totalPages: 0 });
   const [installedKeys, setInstalledKeys] = useState<Set<string>>(new Set());
   const [installingKeys, setInstallingKeys] = useState<Set<string>>(new Set());
+  const [installResourceTarget, setInstallResourceTarget] = useState<any>(null);
   const [canRefreshEnterprise, setCanRefreshEnterprise] = useState(false);
   const [authDrawerOpen, setAuthDrawerOpen] = useState(false);
   const [authType, setAuthType] = useState<'useAuth' | 'mgrAuth'>('useAuth');
@@ -424,12 +428,12 @@ const OntologyCenter: React.FC = () => {
   }, [catalogList]);
 
   const loadInstalledKeys = useCallback(async () => {
-    if (!activeSiderAgent?.resourceId) {
+    if (!fixedInstallTargetId) {
       setInstalledKeys(new Set());
       return;
     }
     try {
-      const res: any = await findDetailsById({ resourceId: String(activeSiderAgent.resourceId) });
+      const res: any = await findDetailsById({ resourceId: fixedInstallTargetId });
       const detail = getData(res) || {};
       const relEntries = [
         ...parseMaybeArray(detail.relResourceList),
@@ -439,7 +443,7 @@ const OntologyCenter: React.FC = () => {
     } catch {
       setInstalledKeys((prev) => new Set(prev));
     }
-  }, [activeSiderAgent?.resourceId]);
+  }, [fixedInstallTargetId]);
 
   useEffect(() => {
     queryCatalogTree({ catalogType: '6' })
@@ -709,63 +713,13 @@ const OntologyCenter: React.FC = () => {
   };
 
   const installResource = async (resource: any) => {
-    if (!activeSiderAgent?.resourceId) {
-      message.error(t('resource.noDefaultDigitalEmployee'));
-      return;
-    }
     if (!resource?.resourceId) {
       message.error('当前资源还没有真实资源ID，请先刷新同步后再安装');
       return;
     }
     const key = getResourceKey(resource);
-    if (installedKeys.has(key)) return;
-    setInstallingKeys((prev) => new Set(prev).add(key));
-    try {
-      const res: any = await installDigitalEmployeeRelResources({
-        digitalEmployeeId: `${activeSiderAgent.resourceId}`,
-        relIds: [`${resource.resourceId}`],
-      });
-      if (res && res.code !== undefined && res.code !== 0 && res.code !== 200) {
-        message.error(res.msg || res.message || t('common.operationFailed'));
-        return;
-      }
-
-      const entry = resourceToRelEntry(resource);
-      const detail = getData(res) || {};
-      const relEntries = [
-        entry,
-        ...parseMaybeArray(detail.relResourceList),
-        ...parseMaybeArray(detail.relIds).map((resourceId) => ({ resourceId })),
-      ];
-      setInstalledKeys((prev) => {
-        const next = new Set(prev);
-        relEntries.flatMap(getResourceKeys).forEach((item) => item && next.add(item));
-        return next;
-      });
-      message.success(t('resource.installSuccess'));
-      window.dispatchEvent(
-        new CustomEvent('ontologyBindSaved', {
-          detail: {
-            tab: resource.resourceBizType === 'VIEW' ? 'view' : 'object',
-            entry,
-            entries: [entry],
-            openSider: true,
-          },
-        })
-      );
-      window.dispatchEvent(
-        new CustomEvent('digitalEmployeeResourceInstalled', { detail: { resourceId: resource.resourceId } })
-      );
-      await loadInstalledKeys();
-    } catch (error: any) {
-      message.error(typeof error === 'string' ? error : error?.message || t('common.operationFailed'));
-    } finally {
-      setInstallingKeys((prev) => {
-        const next = new Set(prev);
-        next.delete(key);
-        return next;
-      });
-    }
+    if (fixedInstallTargetId && installedKeys.has(key)) return;
+    setInstallResourceTarget(resource);
   };
 
   const openTablePanel = useCallback(
@@ -1159,6 +1113,48 @@ const OntologyCenter: React.FC = () => {
           </div>
         </div>
       </Modal>
+
+      {installResourceTarget && (
+        <ResourceInstallDialog
+          open
+          resourceId={installResourceTarget.resourceId}
+          resourceType={installResourceTarget.resourceBizType}
+          targetContext={installTargetContext}
+          onClose={() => setInstallResourceTarget(null)}
+          onInstallingChange={(installing) => {
+            const key = getResourceKey(installResourceTarget);
+            setInstallingKeys((previous) => {
+              const next = new Set(previous);
+              if (installing) {
+                next.add(key);
+              } else {
+                next.delete(key);
+              }
+              return next;
+            });
+          }}
+          onSuccess={(digitalEmployeeIds) => {
+            if (!fixedInstallTargetId || !digitalEmployeeIds.includes(fixedInstallTargetId)) return;
+            const entry = resourceToRelEntry(installResourceTarget);
+            setInstalledKeys((previous) => {
+              const next = new Set(previous);
+              getResourceKeys(entry).forEach((item) => item && next.add(item));
+              return next;
+            });
+            window.dispatchEvent(
+              new CustomEvent('ontologyBindSaved', {
+                detail: {
+                  tab: installResourceTarget.resourceBizType === 'VIEW' ? 'view' : 'object',
+                  entry,
+                  entries: [entry],
+                  openSider: true,
+                },
+              })
+            );
+            loadInstalledKeys();
+          }}
+        />
+      )}
 
       {authDrawerOpen && (
         <AuthListDrawer

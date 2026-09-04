@@ -407,6 +407,7 @@ export class PiLeaderSession implements LeaderSession {
                 ...(active.externalSessionId
                   ? { externalSessionId: active.externalSessionId }
                   : {}),
+                ...(active.projectContext ? { projectContext: active.projectContext } : {}),
                 authorizedAgents: active.agents,
                 ...(active.authorizedAgentsUnavailable
                   ? { authorizedAgentsUnavailable: true }

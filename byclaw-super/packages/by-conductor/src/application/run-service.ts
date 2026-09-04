@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { renderProjectContext } from "../context/processors/project-context.js";
 import {
   ATTACHMENT_INSPECTION_ERROR_CODES,
   AttachmentInspectionError,
@@ -1102,6 +1103,9 @@ ${JSON.stringify(completedDelegations)}`;
         ...(current.ingressContext?.externalSessionId
           ? { externalSessionId: current.ingressContext.externalSessionId }
           : {}),
+        ...(current.ingressContext?.projectContext
+          ? { projectContext: current.ingressContext.projectContext }
+          : {}),
         attachments: current.attachments,
         thinkingLevel: current.thinkingLevel ?? "off",
         agents: current.agentList,
@@ -1184,7 +1188,9 @@ ${JSON.stringify(completedDelegations)}`;
             traceId: current.ingressContext?.traceId ?? current.id,
             agents: current.agentList,
             agentId: delegationInput.agentId,
-            task: delegationInput.task,
+            task: current.ingressContext?.projectContext
+              ? `${delegationInput.task}\n\n${renderProjectContext(current.ingressContext.projectContext)}`
+              : delegationInput.task,
             // 只能从当前 Run 的附件集合按 ID 选择；未知 ID 在解析阶段被拒绝。
             attachments: resolveAttachmentSelection(
               current.attachments,
@@ -1195,6 +1201,9 @@ ${JSON.stringify(completedDelegations)}`;
               : {}),
             metadata: {
               ...metadata,
+              ...(current.ingressContext?.projectContext
+                ? { project_info: current.ingressContext.projectContext }
+                : {}),
               ...(current.ingressContext?.externalSessionId
                 ? { externalSessionId: current.ingressContext.externalSessionId }
                 : {}),
