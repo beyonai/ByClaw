@@ -105,7 +105,7 @@ export class ByFrameworkRunPresenter {
     const displayPrefix = displayName ? `${displayName} ` : "";
     const failureReason = stringData(event.data.error);
     const failureStage = stringData(event.data.failureStage);
-    const content =
+    const description =
       status === "_START_"
         ? `${displayPrefix}数字员工正在处理`
         : status === "_DONE_"
@@ -116,6 +116,28 @@ export class ByFrameworkRunPresenter {
               reason: failureReason,
               stage: failureStage,
             });
+    const card: Record<string, unknown> = {
+      title: displayName ? `调度数字员工：${displayName}` : "调度数字员工",
+      description,
+      status,
+    };
+    if (status === "_START_") {
+      const task = stringData(event.data.task);
+      const expectedOutput = stringData(event.data.expectedOutput);
+      const attachments = delegationAttachments(event.data.attachments);
+      card.input = {
+        ...(agentId ? { agentId } : {}),
+        ...(agentName ? { agentName } : {}),
+        ...(task ? { instruction: task } : {}),
+        ...(expectedOutput ? { expectedOutput } : {}),
+        ...(attachments.length > 0 ? { attachments } : {}),
+      };
+    } else if (status === "_ERROR_") {
+      card.output = {
+        ...(failureStage ? { stage: failureStage } : {}),
+        ...(failureReason ? { error: failureReason } : {}),
+      };
+    }
 
     await this.#emitter.emitEvent({
       sessionId: context.sessionId,
@@ -126,8 +148,8 @@ export class ByFrameworkRunPresenter {
       parentMessageId: "-1",
       data: protocolMessage({
         event: EventType.REASONING_LOG_DELTA,
-        content,
-        contentType: "3009",
+        content: JSON.stringify(card),
+        contentType: "3015",
         orderId: delegationId,
         parentOrderId: "-1",
         objectType: "tool_call",
@@ -171,6 +193,32 @@ export class ByFrameworkRunPresenter {
       },
     });
   }
+}
+
+/** 只把已持久化的附件展示字段带入调度卡，不暴露路径、URL 或传输元数据。 */
+function delegationAttachments(value: unknown): Array<Record<string, string>> {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.flatMap((item) => {
+    const attachment = recordValue(item);
+    if (!attachment) {
+      return [];
+    }
+    const id = stringData(attachment.id);
+    const name = stringData(attachment.name);
+    const mediaType = stringData(attachment.mediaType);
+    if (!id && !name && !mediaType) {
+      return [];
+    }
+    return [
+      {
+        ...(id ? { id } : {}),
+        ...(name ? { name } : {}),
+        ...(mediaType ? { mediaType } : {}),
+      },
+    ];
+  });
 }
 
 function isLeaderInteraction(event: RunEvent): boolean {

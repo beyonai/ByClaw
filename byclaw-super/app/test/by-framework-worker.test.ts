@@ -1080,15 +1080,27 @@ describe("ByClawSuperGatewayWorker", () => {
         data: expect.objectContaining({
           orderId: "delegation-1",
           parentOrderId: "-1",
+          contentType: "3015",
           status: "_START_",
-          choices: [
-            expect.objectContaining({
-              delta: { content: "数据分析助手 数字员工正在处理" },
-            }),
-          ],
         }),
       }),
     );
+    expect(
+      JSON.parse(emitEvent.mock.calls[0]?.[0].data.choices[0].delta.content),
+    ).toEqual({
+      title: "调度数字员工：数据分析助手",
+      description: "数据分析助手 数字员工正在处理",
+      input: {
+        agentId: "agent-1",
+        agentName: "数据分析助手",
+        instruction: "请分析销售数据",
+        expectedOutput: "结构化结论",
+        attachments: [
+          { id: "attachment-1", name: "sales.csv", mediaType: "text/csv" },
+        ],
+      },
+      status: "_START_",
+    });
     expect(emitEvent).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
@@ -1098,15 +1110,18 @@ describe("ByClawSuperGatewayWorker", () => {
         data: expect.objectContaining({
           orderId: "delegation-1",
           parentOrderId: "-1",
+          contentType: "3015",
           status: "_DONE_",
-          choices: [
-            expect.objectContaining({
-              delta: { content: "数据分析助手 数字员工处理完成" },
-            }),
-          ],
         }),
       }),
     );
+    expect(
+      JSON.parse(emitEvent.mock.calls[1]?.[0].data.choices[0].delta.content),
+    ).toEqual({
+      title: "调度数字员工：数据分析助手",
+      description: "数据分析助手 数字员工处理完成",
+      status: "_DONE_",
+    });
     expect(
       emitEvent.mock.calls.some((call) => call[0].parentMessageId === "delegation-1"),
     ).toBe(false);
@@ -1156,18 +1171,22 @@ describe("ByClawSuperGatewayWorker", () => {
         messageId: "delegation-failed",
         parentMessageId: "-1",
         data: expect.objectContaining({
-          choices: [
-            expect.objectContaining({
-              delta: {
-                content: "失败员工 调度失败：下游数字员工不可用",
-              },
-            }),
-          ],
-          contentType: "3009",
+          contentType: "3015",
           status: "_ERROR_",
         }),
       }),
     );
+    expect(
+      JSON.parse(emitEvent.mock.calls[1]?.[0].data.choices[0].delta.content),
+    ).toEqual({
+      title: "调度数字员工：失败员工",
+      description: "失败员工 调度失败：下游数字员工不可用",
+      output: {
+        stage: "dispatch",
+        error: "下游数字员工不可用",
+      },
+      status: "_ERROR_",
+    });
   });
   it("returns the provider error instead of throwing when the downstream model fails", async () => {
     const emitChunk = vi.fn(async () => undefined);
