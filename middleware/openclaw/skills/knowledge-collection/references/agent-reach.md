@@ -19,6 +19,8 @@
 node scripts/knowledge-collection.mjs acquire-web --session-dir <dir> --item-id <item-id> --source-url <URL>
 ```
 
+底层 byCLI 网页读取接口（仅由获准执行器在采集会话内调用）为 `bycli web read --url <URL> --stdout`；根 Agent 和来源 Agent 不得直接调用它绕过 `acquire-web`，也不得以 `web_fetch` 或其他 HTTP 客户端替代。
+
 不得预读、探测，也不得回退到 fetcher、reader proxy、直连 HTTP 客户端、旧适配器、通用浏览器或其他网页工具；
 不得使用 `web_fetch`、`curl`、`wget`、`requests`。**byCLI 无法完成时必须停止并报告，不得回退到其他网页获取工具。**
 已经用直连拿到内容时该结果作废，按规范流程重新采集。

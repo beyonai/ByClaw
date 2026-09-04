@@ -73,6 +73,27 @@ Use it only when the user explicitly asks to collect, crawl, batch-search, archi
 
 Before discovery, state the effective source scope and materialization target in ordinary language. Do not make the user choose technical modes.
 
+### 来源决策优先级（必须先判定，再调用命令）
+
+先按以下顺序确定 `sourceScope`，不得让“默认同时检索”覆盖更具体的来源约束：
+
+1. 用户明确指定来源（例如“在云盘中”“项目资料”“全网”“公开互联网”）时，只使用指定来源。
+2. 用户明确指定数量时，只使用 `public-internet`，走 `public-collect` 的全文闭环。
+3. 用户未指定来源、未指定数量，但当前上下文存在可信 `<project_context>` 且可解析出有效 `cloudResourceId` 时，默认使用 `public-internet` + `cloud-knowledge`，但必须先完成项目上下文和云盘资源解析，再执行统一搜索。
+4. 用户未指定来源，且项目云盘不可用或无法授权时，只使用 `public-internet`，并在状态中记录 `cloud-knowledge` 为 `unavailable` 或 `failed`；不得把云盘失败改写为“没有结果”。
+
+“默认同时检索”是一个有前提的策略，不是无条件命令。`unified-search` 只有在 `sourceScope` 已确认同时包含两个来源、`project_id` 已透传、且 `cloudResourceId/cloudDiscoveryScope` 已成功解析时才允许调用。若用户明确要求云盘，云盘搜索失败后不得静默切换为公网；若用户未限定来源，云盘分支失败可保留公网分支继续，但最终必须分别报告两个来源的状态。
+
+### 网页获取硬门槛（不可被下游 Agent 覆盖）
+
+凡是打开、读取、下载或物化任何 HTTP(S) 网页，必须先加载 `bycli` skill，并由获准的 `bycli`/`knowledge-collection` 执行器完成：
+
+- 微信文章：`bycli weixin download` → `materialize-wechat`；
+- arXiv：`bycli arxiv`/`bycli web read` → `materialize-arxiv`；
+- 其他网页：`acquire-web` → `materialize-web`。
+
+严禁 `web_fetch`、`curl`、`wget`、`requests`、`urllib`、手工 HTTP 客户端或通用浏览器直接下载正文。即使 `bycli` 失败，也只能保留 `pending`/`failed` 并报告，不能换用上述工具补抓。来源 Agent 不得自行选择替代下载器；根 Agent 也不得通过提示词放宽此门槛。
+
 | User intent | `sourceScope` | `materializationTarget` |
 |---|---|---|
 | Public information, no internal context, without an explicit result count | `public-internet` + `cloud-knowledge` when project-cloud context is available | `selected` by default |
