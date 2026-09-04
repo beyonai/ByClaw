@@ -186,7 +186,7 @@ const CodesTab: React.FC<CodesTabProps> = ({
   const fetchTaskChanges = useCallback(async () => {
     const requestSeq = taskChangesRequestSeqRef.current + 1;
     taskChangesRequestSeqRef.current = requestSeq;
-    if (!codeChangesEnabled || !sessionId || !selectedRepo) {
+    if (!codeChangesEnabled || !sessionId || !selectedRepo || selectedRepo.changesSupported === false) {
       setTaskChanges(null);
       return;
     }
@@ -689,15 +689,17 @@ const CodesTab: React.FC<CodesTabProps> = ({
                 </button>
               </Dropdown>
             ) : null}
-            <button
-              type="button"
-              className={`${styles.repoChangesButton} ${showChangesView ? styles.repoChangesButtonActive : ''}`}
-              aria-label={t(showChangesView ? 'repo.showFiles' : 'repo.showCodeChanges')}
-              onClick={() => setRepoChangesViewMap((current) => ({ ...current, [repoKey]: !current[repoKey] }))}
-            >
-              <BranchesOutlined />
-              {taskChangeCount > 0 && <span className={styles.repoChangesCount}>{taskChangeCount}</span>}
-            </button>
+            {repo.changesSupported !== false && (
+              <button
+                type="button"
+                className={`${styles.repoChangesButton} ${showChangesView ? styles.repoChangesButtonActive : ''}`}
+                aria-label={t(showChangesView ? 'repo.showFiles' : 'repo.showCodeChanges')}
+                onClick={() => setRepoChangesViewMap((current) => ({ ...current, [repoKey]: !current[repoKey] }))}
+              >
+                <BranchesOutlined />
+                {taskChangeCount > 0 && <span className={styles.repoChangesCount}>{taskChangeCount}</span>}
+              </button>
+            )}
           </>
         }
         contentBefore={
