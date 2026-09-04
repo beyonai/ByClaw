@@ -327,7 +327,7 @@ await (async () => {
   assert.deepEqual(schema.json.commands.init.properties['source-scope'].items.enum, [
     'public-internet', 'dingtalk', 'feishu', 'wecom', 'ima', 'cloud-knowledge',
   ]);
-  assert.deepEqual(schema.json.commands.init.properties['source-scope'].default, ['public-internet']);
+  assert.deepEqual(schema.json.commands.init.properties['source-scope'].default, ['public-internet', 'cloud-knowledge']);
   assert.equal(schema.json.commands.init.properties['cloud-discovery-scope'].type, 'object');
   assert.deepEqual(schema.json.commands.init.properties['materialization-target'].enum, ['candidates', 'selected', 'all']);
   assert.equal(schema.json.commands.init.properties['materialization-target'].default, 'selected');
@@ -652,7 +652,7 @@ await (async () => {
 
 await (async () => {
   const defaultScope = await runCli(['init', '--session-dir', makeSessionDir(), '--query', '公开资料']);
-  assert.deepEqual(defaultScope.json.task.sourceScope, ['public-internet']);
+  assert.deepEqual(defaultScope.json.task.sourceScope, ['public-internet', 'cloud-knowledge']);
   assert.equal(defaultScope.json.task.materializationTarget, 'selected');
   assert.equal(defaultScope.json.task.requiredContentGranularity, 'any');
   assert.equal(defaultScope.json.task.discoveryGate.attemptCount, 0);

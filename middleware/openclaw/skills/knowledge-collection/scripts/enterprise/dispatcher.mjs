@@ -173,6 +173,20 @@ export function parseSearchRequest(values) {
   };
 }
 
+export function parseMetadataSearchRequest(values) {
+  const source = parseSource(values);
+  if (source !== 'cloud-knowledge') throw new Error('metadata-search V2 currently supports only cloud-knowledge');
+  const allowed = new Set(['source', 'parent-session-dir', 'output-dir', 'where-json', 'limit', 'help']);
+  for (const key of Object.keys(values)) {
+    if (!allowed.has(key) || SENSITIVE_KEY.test(key)) throw new Error(`--${key} is not allowed for metadata-search`);
+  }
+  let where;
+  try { where = JSON.parse(requiredString(values, 'where-json')); } catch { throw new Error('--where-json must be valid JSON'); }
+  if (!asPlainObject(where)) throw new Error('--where-json must be a JSON object');
+  const outputDir = absoluteOutputDir(values);
+  return { source, outputDir, where, limit: parseInteger(values, 'limit', 50, 1, 500) };
+}
+
 export function parseSearchBatchRequests(values) {
   const allowed = new Set(['sources', 'query', 'output-root', 'limit', 'concurrency', 'metadata-only', 'help']);
   for (const key of Object.keys(values)) {
@@ -246,6 +260,7 @@ export async function dispatchEnterprise(command, values, {
   adapters = defaultAdapters(), taskContract = null,
 } = {}) {
   const request = command === 'search' ? parseSearchRequest(values)
+    : command === 'metadata-search' ? parseMetadataSearchRequest(values)
     : command === 'resource' ? parseResourceRequest(values)
       : command === 'materialize' ? parseMaterializeRequest(values)
         : command === 'resume-resource' ? parseResumeResourceRequest(values)
@@ -253,6 +268,7 @@ export async function dispatchEnterprise(command, values, {
   const adapter = adapters[request.source];
   if (!adapter) return unavailable(request.source, request.outputDir);
   const method = command === 'search' ? adapter.search
+    : command === 'metadata-search' ? adapter.metadataSearch
     : command === 'resource' ? adapter.collectResource
       : command === 'materialize' ? adapter.materialize
         : adapter.resumeResource;
@@ -283,6 +299,7 @@ export async function dispatchEnterpriseBatch(command, requests, {
     throw new Error('enterprise batch concurrency must be an integer between 1 and 16');
   }
   const parser = command === 'search' ? parseSearchRequest
+    : command === 'metadata-search' ? parseMetadataSearchRequest
     : command === 'resource' ? parseResourceRequest
       : command === 'materialize' ? parseMaterializeRequest
         : command === 'resume-resource' ? parseResumeResourceRequest

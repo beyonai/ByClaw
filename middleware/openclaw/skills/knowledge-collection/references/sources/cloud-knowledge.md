@@ -1,6 +1,6 @@
 # 项目云盘知识采集
 
-`cloud-knowledge` 只支持单源 `enterprise search` 与随后一次 `enterprise materialize`。采集前必须在 `init` 中使用 `--source-scope '["cloud-knowledge"]'` 和 `--cloud-discovery-scope` 固定用户授权的资源 ID 与目录前缀。
+`cloud-knowledge` 支持单源 `enterprise search`/`metadata-search`，也支持 knowledge-collection V2 的 `unified-search` 与随后可恢复的 `unified-materialize`。单源采集前必须在 `init` 中使用 `--source-scope '["cloud-knowledge"]'` 和 `--cloud-discovery-scope` 固定用户授权的资源 ID 与目录前缀；统一搜索默认同时启用公共互联网和云盘。
 
 搜索阶段强制 metadata-only，只调用项目云盘 Skill 自带的 Python CLI `search-file`，不读取正文。候选必须携带 `resourceId`、`filePath`、`fileType`、`fileSize` 和 `sourceUrl`，并在 session metadata 与恢复 projection 之间完整保留。云盘不支持 `search-all`、单文件 resource 或目录全量 materialization。
 

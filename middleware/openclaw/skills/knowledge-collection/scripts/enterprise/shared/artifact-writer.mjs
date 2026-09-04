@@ -319,7 +319,7 @@ async function createPrivateRoot(normalizedRoot) {
   }
 }
 
-async function openInitializedSessionRoot(normalizedRoot, { allowCollected = false } = {}) {
+async function openInitializedSessionRoot(normalizedRoot, { allowCollected = false, allowFailed = false } = {}) {
   let rootEntry;
   try {
     rootEntry = await lstat(normalizedRoot);
@@ -345,7 +345,11 @@ async function openInitializedSessionRoot(normalizedRoot, { allowCollected = fal
     && session.task?.status === 'collected'
     && session.task?.publicationStatus === 'committed'
     && Array.isArray(session.collection?.collection?.items);
-  if (!emptyInitialized && !committedCollection) {
+  const failedCollection = allowFailed
+    && session.task?.status === 'failed'
+    && session.task?.publicationStatus === 'committed'
+    && Array.isArray(session.collection?.collection?.items);
+  if (!emptyInitialized && !committedCollection && !failedCollection) {
     throw rejectExisting();
   }
   for (const relativePath of REQUIRED_DIRECTORIES) {
@@ -355,7 +359,7 @@ async function openInitializedSessionRoot(normalizedRoot, { allowCollected = fal
   return {
     rootIdentity: { dev: rootEntry.dev, ino: rootEntry.ino },
     session: structuredClone(session),
-    replaceable: committedCollection,
+    replaceable: committedCollection || failedCollection,
   };
 }
 
@@ -822,7 +826,7 @@ async function writePersistedJson(root, rootIdentity, relativePath, value) {
 }
 
 export async function createArtifactWriter(root, {
-  allowExistingSession = false, initialTaskContract = null, beforeCompatibilityPublish = null,
+  allowExistingSession = false, allowFailed = false, initialTaskContract = null, beforeCompatibilityPublish = null,
 } = {}) {
   if (!isAbsolute(root)) {
     throw new TypeError('output root must be an absolute path');
@@ -856,6 +860,7 @@ export async function createArtifactWriter(root, {
   try {
     initializedRoot = await openInitializedSessionRoot(normalizedRoot, {
       allowCollected: allowExistingSession,
+      allowFailed,
     });
   } catch (error) {
     releaseSessionLock(lockPaths, sessionLock);

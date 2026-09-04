@@ -4,7 +4,7 @@ import { extname, join, relative, resolve, sep } from 'node:path';
 import { createArtifactWriter } from '../shared/artifact-writer.mjs';
 import { runCli, positiveEnv } from '../shared/cli-runner.mjs';
 import { deriveCollectionStatus, SOURCE_IDENTITY, handledOutcome, inventoryCounts } from '../shared/status-model.mjs';
-import { readResumeCandidates } from '../shared/resume.mjs';
+import { readCloudResumeCandidates, readResumeCandidates } from '../shared/resume.mjs';
 
 const identity = SOURCE_IDENTITY['cloud-knowledge'];
 const MAX_MATERIALIZED_BYTES = 50 * 1024 * 1024;
@@ -347,7 +347,11 @@ export function createCloudKnowledgeAdapter(dependencies = {}) {
   async function materialize(request = {}) {
     const scope = await readCloudScope(request.sessionDir);
     if (resolve(request.sessionDir) !== resolve(request.outputDir)) throw new Error('cloud-knowledge materialization must use the discovery session');
-    const candidates = await readResumeCandidates(request.sessionDir, identity.source, request.itemIds || []);
+    const candidates = Array.isArray(request.candidates)
+      ? request.candidates
+      : await readCloudResumeCandidates(request.sessionDir, request.itemIds || []);
+    const currentMetadata = JSON.parse(await readFile(join(resolve(request.sessionDir), 'sanitized/metadata.json'), 'utf8'));
+    const currentInventory = Array.isArray(currentMetadata?.collection?.items) ? currentMetadata.collection.items : [];
     const authorizationFailures = [];
     const validCandidates = [];
     for (const candidate of candidates) {
@@ -371,18 +375,23 @@ export function createCloudKnowledgeAdapter(dependencies = {}) {
       }
       validCandidates.push(candidate);
     }
-    const writer = await createArtifactWriter(request.outputDir, { allowExistingSession: true });
+    const writer = await createArtifactWriter(request.outputDir, { allowExistingSession: true, allowFailed: true });
     try {
-      const inventory = [...authorizationFailures];
+      const selectedInventory = [...authorizationFailures];
       for (const candidate of validCandidates) {
         try {
-          inventory.push(await materializeOne(writer, candidate, { ...dependencies, python, script }, env));
+          selectedInventory.push(await materializeOne(writer, candidate, { ...dependencies, python, script }, env));
         } catch (error) {
           const failedArtifact = `raw/failed-${candidate.itemId}.json`;
           await writer.writeJson(failedArtifact, { itemId: candidate.itemId, stage: 'materialization', reason: sanitizedReason(error, 'SOURCE_DOWNLOAD_FAILED') });
-          inventory.push(inventoryItem(candidate, [...candidate.rawArtifacts, failedArtifact], { status: 'failed', reason: sanitizedReason(error, error.message?.includes('unsupported') ? 'UNSUPPORTED_FORMAT' : 'SOURCE_DOWNLOAD_FAILED') }));
+          selectedInventory.push(inventoryItem(candidate, [...candidate.rawArtifacts, failedArtifact], { status: 'failed', reason: sanitizedReason(error, error.message?.includes('unsupported') ? 'UNSUPPORTED_FORMAT' : 'SOURCE_DOWNLOAD_FAILED') }));
         }
       }
+      const selectedIds = new Set(request.itemIds || []);
+      const inventory = [
+        ...currentInventory.filter((item) => !selectedIds.has(item?.itemId)),
+        ...selectedInventory,
+      ];
       const canonicalItems = inventory.filter((item) => item.materialization.status === 'materialized').map((item) => ({
         title: item.title, url: item.sourceUrl, author: '', publishTime: '', markdown: item.materialization.sanitizedPath, fileName: item.materialization.sanitizedPath,
       }));
@@ -400,5 +409,49 @@ export function createCloudKnowledgeAdapter(dependencies = {}) {
     }
   }
 
-  return { ...identity, search, materialize };
+  async function metadataSearch(request = {}) {
+    const scope = await readCloudScope(request.outputDir);
+    const writer = await createArtifactWriter(request.outputDir, { allowExistingSession: true });
+    try {
+      const records = [];
+      const rawArtifacts = [];
+      const failures = [];
+      for (const [index, resource] of scope.resources.entries()) {
+        const artifact = `raw/metadata-search-${index + 1}.json`;
+        try {
+          const result = await callJson(writer, python, script, [
+            'metadata-search', '--resource-id', String(resource.resourceId), '--where-json', JSON.stringify(request.where),
+            '--metadata-field', 'fileType', '--metadata-field', 'fileSize', '--metadata-field', 'fileSignature',
+            '--metadata-field', 'updatedAt', '--page-size', String(request.limit),
+          ], artifact, env);
+          rawArtifacts.push(artifact);
+          for (const record of responseRecords(result)) {
+            const candidate = cloudCandidateFromRecord(record, { ...scope, resources: [resource] });
+            if (candidate) records.push({ ...candidate, rawArtifacts: [artifact], score: 0 });
+          }
+        } catch (error) {
+          failures.push({ resourceId: resource.resourceId, reason: sanitizedReason(error, error.reasonCode || 'SOURCE_FAILED') });
+          await writer.writeJson(artifact, { operation: 'metadata-search', resourceId: resource.resourceId, status: 'failed', reason: sanitizedReason(error, error.reasonCode || 'SOURCE_FAILED') });
+          rawArtifacts.push(artifact);
+        }
+      }
+      const unique = [...new Map(records.map((item) => [`${item.resourceId}\n${item.filePath}`, item])).values()];
+      const inventory = sortCandidates(unique).slice(0, request.limit).map((candidate) => inventoryItem(candidate, candidate.rawArtifacts));
+      const discoverySucceeded = failures.length < scope.resources.length;
+      const status = deriveCollectionStatus({ discoverySucceeded, metadataOnly: true, paginationFailed: failures.length > 0 });
+      const sourceMetadata = { ...identity, operation: 'metadata-search', metadataOnly: true, discovery: { resources: scope.resources.length, failures, returnedMatches: inventory.length } };
+      await writer.writeJson('raw/metadata.json', { ...identity, operation: 'metadata-search', rawArtifacts, sourceMetadata });
+      await writer.writeCollectionBundle({
+        title: 'Cloud knowledge metadata search', source: identity.source, backend: identity.backend,
+        url: 'cloud-knowledge://metadata-search', filters: { where: request.where }, inventory, canonicalItems: [],
+        sourceMetadata, metadataOnly: true, paginationFailed: failures.length > 0, discoverySucceeded,
+      });
+      return handledOutcome(identity.connector, status, request.outputDir, inventoryCounts(inventory));
+    } catch (error) {
+      await writer.abort().catch(() => {});
+      throw error;
+    }
+  }
+
+  return { ...identity, search, materialize, metadataSearch };
 }

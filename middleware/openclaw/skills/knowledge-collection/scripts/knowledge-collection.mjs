@@ -91,7 +91,7 @@ const COMMAND_SPECS = {
       '--max-branches': '可选。正整数;研究分支总数上限',
       '--max-sources-per-branch': '可选。正整数;单分支来源数上限',
       '--max-search-rounds': '可选。正整数;检索轮数上限',
-      '--source-scope': 'JSON 数组;默认 ["public-internet"]. 可选 public-internet、dingtalk、feishu、wecom、ima、cloud-knowledge',
+      '--source-scope': 'JSON 数组;默认 ["public-internet","cloud-knowledge"]. 可选 public-internet、dingtalk、feishu、wecom、ima、cloud-knowledge',
       '--materialization-target': 'candidates | selected(默认) | all。all 表示所有请求正文必须物化或如实标记失败/待处理',
       '--required-content-granularity': 'any(默认) | full-text。用户明确要求全文时必须设为 full-text',
       '--workflow': '可选。public-collect；仅用于公共互联网 selected + full-text 的单写者会话',
@@ -192,6 +192,27 @@ const COMMAND_SPECS = {
         + '但企业 search-all 聚合会话与旧版本创建的会话没有 handle，本参数是它们唯一的交付形式，因此不会被移除',
     },
     example: 'knowledge-collection.mjs publish --session-dir /tmp/kc1 --delivery-handle delivery-1a2b3c4d --session-root /by/.sessions/20037048',
+  }),
+  'unified-search': defineCommand({
+    group: 'collection',
+    title: '并行搜索公共互联网与项目云盘，并按用户意图统一排序',
+    args: {
+      '--session-dir': '必填。已由 init 创建的主会话目录',
+      '--query': '可选。默认使用 init 时的任务主题',
+      '--cloud-resource-id': '可选。由 project-context basic 返回的 cloudResourceId；缺失时从环境读取',
+      '--category': '可选。公共互联网检索类别，默认 general',
+      '--limit': '可选。统一候选上限，默认 50',
+    },
+    example: 'knowledge-collection.mjs unified-search --session-dir /tmp/kc1 --cloud-resource-id 1024 --query "巡检流程"',
+  }),
+  'unified-materialize': defineCommand({
+    group: 'collection',
+    title: '按统一候选来源物化公共网页与云盘文件，并保留可重试状态',
+    args: {
+      '--session-dir': '必填。unified-search 生成的主会话目录',
+      '--item-ids': '必填。逗号分隔的统一候选 itemId',
+    },
+    example: 'knowledge-collection.mjs unified-materialize --session-dir /tmp/kc1 --item-ids public-abc,cloud-def',
   }),
   'materialize-wechat': defineCommand({
     group: 'collection',
@@ -378,7 +399,7 @@ const COMMAND_SCHEMA_OVERRIDES = {
       'max-sources-per-branch': SCHEMA.positiveInteger,
       'max-search-rounds': SCHEMA.positiveInteger,
       'source-scope': {
-        type: 'array', minItems: 1, uniqueItems: true, default: ['public-internet'], cliEncoding: 'json',
+        type: 'array', minItems: 1, uniqueItems: true, default: ['public-internet', 'cloud-knowledge'], cliEncoding: 'json',
         items: { type: 'string', enum: ['public-internet', 'dingtalk', 'feishu', 'wecom', 'ima', 'cloud-knowledge'] },
       },
       'materialization-target': { type: 'string', enum: ['candidates', 'selected', 'all'], default: 'selected' },
@@ -454,6 +475,23 @@ const COMMAND_SCHEMA_OVERRIDES = {
       // 不标 deprecated:企业 search-all 聚合会话与旧版本会话没有 handle,本参数是它们唯一的
       // 交付形式(见 references/delivery.md)。标成弃用会与那条硬要求直接矛盾。
       'delivery-dir': SCHEMA.sessionDir,
+    },
+  },
+  'unified-search': {
+    required: ['session-dir'],
+    properties: {
+      'session-dir': SCHEMA.sessionDir,
+      query: { type: 'string', minLength: 1 },
+      'cloud-resource-id': SCHEMA.positiveInteger,
+      category: { type: 'string', default: 'general' },
+      limit: { ...SCHEMA.positiveInteger, maximum: 500, default: 50 },
+    },
+  },
+  'unified-materialize': {
+    required: ['session-dir', 'item-ids'],
+    properties: {
+      'session-dir': SCHEMA.sessionDir,
+      'item-ids': { type: 'string', minLength: 1 },
     },
   },
   'materialize-wechat': {

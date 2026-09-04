@@ -72,6 +72,16 @@ test('enterprise command schema advertises cloud knowledge only on supported sin
   assert.deepEqual(schema.commands.resource.properties.source.enum, ['dingtalk', 'feishu', 'wecom', 'ima']);
 });
 
+test('cloud metadata-search is a supported single-source command', () => {
+  assert.deepEqual(dispatcher.parseMetadataSearchRequest({
+    source: 'cloud-knowledge', 'parent-session-dir': '/tmp/cloud', 'output-dir': '/tmp/cloud',
+    'where-json': '{"eq":{"fieldName":"fileType","value":"pdf"}}', limit: '20',
+  }), {
+    source: 'cloud-knowledge', outputDir: '/tmp/cloud',
+    where: { eq: { fieldName: 'fileType', value: 'pdf' } }, limit: 20,
+  });
+});
+
 test('request parsers reject invalid, foreign, and sensitive source options', () => {
   for (const args of [
     { source: 'wecom', query: 'q', 'output-dir': 'relative' },

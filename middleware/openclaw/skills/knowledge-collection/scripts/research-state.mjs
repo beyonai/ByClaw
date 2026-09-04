@@ -239,7 +239,7 @@ function nonEmptyStringList(value, label) {
 }
 
 function sourceScope(value) {
-  const scopes = nonEmptyStringList(parseJsonArg(value, ['public-internet']), '--source-scope');
+  const scopes = nonEmptyStringList(parseJsonArg(value, ['public-internet', 'cloud-knowledge']), '--source-scope');
   const seen = new Set();
   for (const scope of scopes) {
     if (!SOURCE_SCOPES.has(scope)) {
@@ -700,8 +700,10 @@ export function cmdInit(args) {
   );
   const effectiveWorkflow = workflow(args.workflow);
   const deliveryRequested = asBool(args['delivery-requested'], '--delivery-requested');
+  const sourceScopeWasExplicit = args['source-scope'] !== undefined;
   const cloudDiscoveryScope = effectiveSourceScope.includes('cloud-knowledge')
-    ? validateCloudDiscoveryScope(args['cloud-discovery-scope']) : null;
+    ? (args['cloud-discovery-scope'] === undefined && !sourceScopeWasExplicit
+      ? null : validateCloudDiscoveryScope(args['cloud-discovery-scope'])) : null;
   if (!effectiveSourceScope.includes('cloud-knowledge') && args['cloud-discovery-scope'] !== undefined) {
     throw new Error('--cloud-discovery-scope 仅在 sourceScope 包含 cloud-knowledge 时允许');
   }

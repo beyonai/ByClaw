@@ -109,3 +109,27 @@ test('cloud knowledge search persists a structured terminal reason for authentic
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('cloud knowledge materialization can retry a failed item without redownloading successful items', async () => {
+  const { root, script } = await fixture();
+  try {
+    const adapter = createCloudKnowledgeAdapter({ python: process.execPath, script, env: process.env });
+    const discovered = await adapter.search({ outputDir: root, query: '巡检流程', limit: 10 });
+    assert.equal(discovered.status, 'complete');
+    const metadata = JSON.parse(await readFile(join(root, 'sanitized/metadata.json'), 'utf8'));
+    const itemId = metadata.collection.items[0].itemId;
+    await writeFile(script, `process.exit(2);`);
+    const failed = await adapter.materialize({ sessionDir: root, outputDir: root, itemIds: [itemId] });
+    assert.equal(failed.status, 'failed');
+    await writeFile(script, `
+import fs from 'node:fs'; import path from 'node:path';
+const args = process.argv.slice(2); const output = args[args.indexOf('--output') + 1];
+if (args[0] === 'download') { fs.mkdirSync(path.dirname(output), { recursive: true }); fs.writeFileSync(output, '# retry ok\\n'); process.stdout.write(JSON.stringify({ ok: true })); }
+`);
+    const retried = await adapter.materialize({ sessionDir: root, outputDir: root, itemIds: [itemId] });
+    assert.equal(retried.status, 'complete');
+    assert.equal(retried.counts.materialized, 1);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

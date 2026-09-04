@@ -12,9 +12,9 @@ import { runPublicCollect } from './public-collect.mjs';
 import { runWechatMaterialize } from './wechat-materializer.mjs';
 import { runArxivMaterialize } from './arxiv-materializer.mjs';
 import { runWebAcquire } from './web-acquirer.mjs';
-import { runWebMaterialize } from './web-materializer.mjs';
 import { cmdPublish, inspectDelivery } from './publish-delivery.mjs';
 import { cmdRetighten } from './granularity-repair.mjs';
+import { runUnifiedMaterialize, runUnifiedSearch } from './unified-search.mjs';
 import { assertExternalSessionWriteAllowed } from './probe-state.mjs';
 import { resolveSandboxPath, sessionPaths } from './session.mjs';
 
@@ -45,6 +45,11 @@ const SESSION_HANDLERS = {
   'export-views': (paths) => cmdExportViews(paths),
   publish: (paths, args) => cmdPublish(paths, args),
   retighten: (paths, args) => cmdRetighten(paths, args),
+  'unified-search': (paths, args) => runUnifiedSearch(paths, args),
+  'unified-materialize': (paths, args) => runUnifiedMaterialize(paths, args, {
+    runWebAcquire: (target, options) => runWebAcquire(target, options),
+    runWebMaterialize: (target, options) => runWebMaterialize(target, options),
+  }),
 };
 
 function status(paths, args) {

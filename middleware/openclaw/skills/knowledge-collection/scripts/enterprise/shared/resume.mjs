@@ -62,7 +62,10 @@ export async function readResumeCandidates(sessionDir, source, itemIds) {
   if (selected.some((item) => item?.materialization?.status !== 'pending')) {
     throw new Error('only pending metadata-only candidates can be materialized');
   }
-  return selected.map((item) => {
+  return selected.map((item) => projectResumeCandidate(item, source, root, resumeIdentity));
+}
+
+function projectResumeCandidate(item, source, root, resumeIdentity) {
     const candidate = {
       itemId: item.itemId,
       sourceItemId: item.sourceItemId,
@@ -102,7 +105,26 @@ export async function readResumeCandidates(sessionDir, source, itemIds) {
     }
     Object.defineProperty(candidate, 'resumeIdentity', { value: resumeIdentity });
     return candidate;
-  });
+}
+
+export async function readCloudResumeCandidates(sessionDir, itemIds) {
+  const { root, resumeIdentity, metadata } = await readResumeMetadata(sessionDir);
+  if (metadata?.sourceMetadata?.source !== 'cloud-knowledge'
+    && metadata?.sourceMetadata?.operation !== 'unified-search') {
+    throw new Error('resume session is not a cloud-knowledge discovery');
+  }
+  const metadataOnly = metadata?.sourceMetadata?.metadataOnly === true;
+  const operation = metadata?.sourceMetadata?.operation;
+  if (!metadataOnly && operation !== 'materialize') {
+    throw new Error('resume session is not a resumable cloud-knowledge discovery');
+  }
+  const inventory = Array.isArray(metadata?.collection?.items) ? metadata.collection.items : [];
+  const selected = itemIds.map((itemId) => inventory.find((item) => item?.itemId === itemId));
+  if (selected.some((item) => !item)) throw new Error('one or more --item-ids are not candidates in the resume session');
+  if (selected.some((item) => !['pending', 'failed'].includes(item?.materialization?.status))) {
+    throw new Error('only pending or failed cloud candidates can be materialized');
+  }
+  return selected.map((item) => projectResumeCandidate(item, 'cloud-knowledge', root, resumeIdentity));
 }
 
 export async function copyResumeArtifacts(writer, candidates) {

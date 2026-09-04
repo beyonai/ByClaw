@@ -1,4 +1,14 @@
-# 云盘作为 knowledge-collection 采集来源（V1 设计）
+# 云盘作为 knowledge-collection 采集来源（V2 设计）
+
+## V2 范围
+
+V2 在保留 V1 授权、脱敏和安全路径约束的基础上，交付三项能力：**可恢复物化**、`metadata-search`、以及公共互联网与云盘的多来源统一聚合。新增 `unified-search` 默认同时搜索 `public-internet` 与 `cloud-knowledge`；旧的 `public-discover`、`public-collect` 和单源 enterprise 命令保持原有语义。
+
+统一搜索分别调用公共发现链路和云盘 metadata 检索，再将候选归一化为统一 schema。排序综合用户查询词在标题、摘要/片段和路径中的命中、来源分数、可物化性及全文粒度；同一来源按稳定身份去重，跨来源记录保留为独立来源并统一输出。某一来源失败不阻断另一来源，结果在 `sourceMetadata` 中报告来源状态。
+
+云盘上下文优先来自已持久化的 `cloudDiscoveryScope`，也可由 Agent 将可信 `project-context basic` 返回的 `cloudResourceId` 传给 `unified-search`；没有可信云盘上下文时跳过云盘并继续公共搜索，不猜测资源 ID 或目录。用户提供多个云盘地址时，每个地址都解析为授权集中的 `{ resourceId, directoryPath }`，云盘搜索只在这些资源和目录前缀内执行。
+
+`metadata-search` 只返回文件元数据候选，不读取正文；`unified-materialize` 根据候选来源分别调用公共网页的 `acquire-web`/`materialize-web` 或云盘 adapter。物化失败的条目保留在 inventory，后续可重试；已经成功物化的条目不重复下载，并保持稳定 itemId、输出路径和 canonical view。
 
 ## 目标
 
@@ -6,9 +16,9 @@
 
 V1 只实现两个动作：**按主题检索定位文件**（`search-file`）与**取回正文**（`download`）。
 
-## 非目标
+## V1 基线与 V2 覆盖
 
-- 不实现 `search`（切片检索）与 `metadata-search`。
+- V1 不实现 `search`（切片检索）与 `metadata-search`；V2 新增 `metadata-search`，仍不读取正文。
 - 不实现云盘写入。采集完成后是否入库由根 Agent 依已有的 `ingest-handoff` 契约另行决定，与本设计无关。
 - 不改动公共采集链路（WSA / hot-discovery / browser bridge / `public-collect`）。
 - 不做云盘目录的递归全量归档（`materializationTarget=all` 语义在 V1 不开放给云盘）。
@@ -64,7 +74,7 @@ enterprise materialize --source cloud-knowledge \
 status / publish（复用现有命令，无需改动）
 ```
 
-**流程里没有 `collect`。** bundle 写入时 [artifact-writer.mjs:999](../../middleware/openclaw/skills/knowledge-collection/scripts/enterprise/shared/artifact-writer.mjs#L999) 置 `task.status`，[artifact-writer.mjs:1015](../../middleware/openclaw/skills/knowledge-collection/scripts/enterprise/shared/artifact-writer.mjs#L1015) 置 `publicationStatus='committed'`，inventory 由 bundle 直接给出。`collect` 是**另一条路**——给手工登记单条目用（[collection-state.mjs:777-802](../../middleware/openclaw/skills/knowledge-collection/scripts/collection-state.mjs#L777-L802) 的 `canonicalItem` + `source` 入参），企业 adapter 路径不经过它。物化完成后直接 `status` 看结果、`publish` 交付。
+**流程里没有 `collect`。** bundle 写入时 [artifact-writer.mjs:999](../../middleware/openclaw/skills/knowledge-collection/scripts/enterprise/shared/artifact-writer.mjs#L999) 置 `task.status`，[artifact-writer.mjs:1015](../../middleware/openclaw/skills/knowledge-collection/scripts/enterprise/shared/artifact-writer.mjs#L1015) 置 `publicationStatus='committed'`，inventory 由 bundle 直接给出。`collect` 是**另一条路**——给手工登记单条目用（[collection-state.mjs:777-802](../../middleware/openclaw/skills/knowledge-collection/scripts/collection-state.mjs#L777-L802) 的 `canonicalItem` + `source` 入参），企业 adapter 路径不经过它。V2 的统一物化通过 `unified-materialize` 复用两类 adapter，完成后仍直接 `status` 看结果、`publish` 交付。
 
 **两步式是强制的，不是可选优化。** 云盘正常路径由 dispatcher 强制 `metadata-only=true`；[resume.mjs:56](../../middleware/openclaw/skills/knowledge-collection/scripts/enterprise/shared/resume.mjs#L56) 仍硬校验 `sourceMetadata.metadataOnly === true`，用于拒绝被篡改或不符合 V1 契约的旧会话。云盘文件动辄几十 MB，先列候选再按需下载也避免为用户不要的文件付下载代价。
 
@@ -384,15 +394,15 @@ materialization: {
 
 这里有个容易走偏的地方：既然 `abort()` 能保住会话，实现者很可能觉得认证失败用 `abort()` 更友好。**不行**——[references/sources/ima.md:21](../../middleware/openclaw/skills/knowledge-collection/references/sources/ima.md) 要求所有终态失败都写出完整 bundle，不得留下仅 `initialized` 的会话。`abort()` 只用于**非终态的意外异常**（照 [ima.mjs:889-892](../../middleware/openclaw/skills/knowledge-collection/scripts/enterprise/adapters/ima.mjs#L889-L892) 的 `materialize` catch：`abort()` 后原样 `throw`，让调用方看到异常栈），认证失效、无效响应、全资源失败这三类必须走 bundle。「会话不可原地重试」是这条策略的既定代价，不是实现可以自行优化掉的缺陷。
 
-### materialize 是一次性的，两步流没有第二次机会
+### V1 materialize 一次性；V2 改为可恢复
 
-这是两步流最关键的约束，也是最容易在实现时想当然的地方。`materialize` **每个会话只能成功执行一次**，机制是：
+这是 V1 两步流的历史约束。V2 的 `cloud-knowledge` 物化允许对 `pending` / `failed` 条目重试，成功条目保持原有物化路径并跳过重复下载；统一入口使用 `unified-materialize` 按来源分流。下述一次性行为仅适用于未迁移的 V1 单源会话：
 
 1. [artifact-writer.mjs:1005](../../middleware/openclaw/skills/knowledge-collection/scripts/enterprise/shared/artifact-writer.mjs#L1005) 每次写 bundle 都覆盖 `sanitized/metadata.json`，其中 `metadataOnly` 取自本次 bundle（[770 行](../../middleware/openclaw/skills/knowledge-collection/scripts/enterprise/shared/artifact-writer.mjs#L770)）。
 2. `materialize` 的 bundle 是 `metadataOnly: false`（照 [ima.mjs:886](../../middleware/openclaw/skills/knowledge-collection/scripts/enterprise/adapters/ima.mjs#L886)），于是检索阶段那份 `metadataOnly: true` 被抹掉。
 3. [resume.mjs:56-57](../../middleware/openclaw/skills/knowledge-collection/scripts/enterprise/shared/resume.mjs#L56-L57) 读的正是 `sanitized/metadata.json`，要求 `metadataOnly === true`，否则抛 `resume session is not a metadata-only cloud-knowledge discovery`。
 
-所以第二次 `materialize` 一律被拒，**与第一次的结果无关**——成功、部分成功、全失败都一样。再叠加「bundle inventory = 选中集合」这条规则（未选中候选不写进 bundle），未选中的候选记录在第一次物化后就从 `sanitized/metadata.json` 里消失了，也无从再选。
+V2 不再接受这个死路：物化 bundle 保留完整候选 inventory，恢复投影允许 `pending` 和 `failed`，并在每次成功或失败后重建 canonical view。
 
 由此得到 V1 两步流的真实语义，必须原样告知用户：
 
@@ -402,12 +412,12 @@ materialization: {
 | 部分成功 | `collected` | **`publish` 被拒**（`partial` → `deliveryCompleteForSession` 返回 false），且无法补物化 |
 | 全部失败 | `failed` | 任何命令被拒 |
 
-**一次失败条目就足以让整个会话无法交付，且不可修补。** 这不是缺陷推测，是 `deriveCollectionStatus`（[status-model.mjs:75-77](../../middleware/openclaw/skills/knowledge-collection/scripts/enterprise/shared/status-model.mjs#L75-L77)：`materialized === 0` → `failed`，有失败条目 → `partial`）与 `resume.mjs` 一次性判定叠加出的既有行为。V1 不改动它（改动面涉及企业侧共享层，超出本设计范围），但必须靠两件事把风险前移：
+**V1 一次失败条目就足以让会话无法交付，且不可修补。** V2 保留 `failed` 条目并允许重试；只有最终仍存在失败或 pending 条目时，状态才阻止交付。实现仍依赖 `deriveCollectionStatus`（[status-model.mjs:75-77](../../middleware/openclaw/skills/knowledge-collection/scripts/enterprise/shared/status-model.mjs#L75-L77)）如实反映缺口。
 
 - **物化前预筛。** 格式不在白名单、`fileSize` 超 50 MiB 的候选，在下发 `--item-ids` 之前就拦下并提示用户改选。这不是优化，是唯一的防线——放它进物化就是让整个会话报废。
 - **选择时告知代价。** 让用户在第二步选择时就知道「这一次选定即定稿，选中的任一条目失败会导致本次采集无法交付，需从检索重来」，而不是等失败后才发现。
 
-失败后的提示语要写明「需重新发起检索（`init` 到新会话目录 + 重跑 `search`）」，并附逐条 `materialization.reason`，让用户下一轮能避开同样的条目。切勿提示「重试上一条命令」。
+V1 失败后的提示语要写明「需重新发起检索（`init` 到新会话目录 + 重跑 `search`）」；V2 则应提示可对 pending/failed 条目运行 `unified-materialize` 或云盘 `materialize` 重试，并附逐条 `materialization.reason`。
 
 `abort()` 后已写进 `raw/` 的文件（检索响应、已下载的原始文件）会留下来，但不影响下次准入——[准入判定](../../middleware/openclaw/skills/knowledge-collection/scripts/enterprise/shared/artifact-writer.mjs#L340-L343) 只看 `task.status` / `publicationStatus` / inventory 条目数，不看 `raw/` 内容。重试时 `search-file-<hash>.json` 同名覆盖，`download/<itemId>/` 下的孤儿文件不会被列进新一轮的 `rawArtifacts`，属惰性残留。
 
@@ -415,7 +425,7 @@ materialization: {
 
 条目级失败必须以 `materialization.status=failed` **留在 inventory**，不得丢弃——这是挡住静默少交付的唯一机制，`deriveCollectionStatus` 靠它把会话判为 `partial`，而 `deliveryCompleteForSession` 对 `partial` 直接返回 false。
 
-与之相对，**未选中的候选不得进入 `materialize` 的 bundle inventory**。[status-model.mjs:77](../../middleware/openclaw/skills/knowledge-collection/scripts/enterprise/shared/status-model.mjs#L77) 的判定是 `materialized === itemStates.length ? 'complete' : 'partial'`，而 `pending` 计入 `itemStates.length`——未选中候选留在里面会让会话永久 `partial`、`publish` 永久被拒。照 ima 的做法：`materialize` 的 inventory 只包含 `--item-ids` 选中的条目。
+V1 单源物化时**未选中的候选不得进入 `materialize` 的 bundle inventory**。[status-model.mjs:77](../../middleware/openclaw/skills/knowledge-collection/scripts/enterprise/shared/status-model.mjs#L77) 的判定是 `materialized === itemStates.length ? 'complete' : 'partial'`。V2 统一会话例外：`unified-materialize` 保留完整候选 inventory，但只更新选中的条目；未选中候选的 pending 状态代表仍可后续选择，不直接作为本轮交付失败。
 
 两条合起来是一条判据：**bundle inventory = 选中集合**，选中且失败的留下记 `failed`，未选中的不出现。
 
@@ -707,11 +717,11 @@ adapter 必须拥有以下唯一责任函数，避免各阶段自行拼接路径
 
 单元测试对齐既有形态：`adapters/cloud-knowledge.test.mjs` + `dispatcher.test.mjs` 增量用例，全部用 stub CLI，不打真实后端。
 
-## 后续（不在 V1）
+## 后续（不在 V2）
 
-- `metadata-search`：无主题词、纯条件枚举场景。
+- `search`（切片正文检索）：需要返回正文片段定位的语义检索。
 - 开放更多 DSL 形态（时间窗、自定义元数据）。
-- `search`（切片检索）作为命中定位诊断，仅用于报告，不作交付物。
+- 更复杂的 `search`（切片检索）作为命中定位诊断，仅用于报告，不作交付物。
 - `collectResource`：单个云盘文件 URL 直采。
 - `resumeResource`：metadata-only 会话的恢复物化。
-- **硬数量保证**：若要让「给我 5 篇」成为交付闸门，需为云盘条目补出 `promotionId` / `verificationReceipt` / `fullTextEvidence` / `verifiedTopicStatus` 四件套，等于在企业路径重建一遍 `public-collect` 的探针状态机。代价远超 V1，V1 明确不做。
+- **硬数量保证**：若要让「给我 5 篇」成为云盘交付闸门，需为云盘条目补出 `promotionId` / `verificationReceipt` / `fullTextEvidence` / `verifiedTopicStatus` 四件套，等于在企业路径重建一遍 `public-collect` 的探针状态机，留到 V3。

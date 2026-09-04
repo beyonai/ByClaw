@@ -45,6 +45,7 @@ function requireValue(values, key) {
 
 const EXTERNAL_PATHS_BY_COMMAND = {
   search: ['parent-session-dir', 'output-dir'],
+  'metadata-search': ['parent-session-dir', 'output-dir'],
   'search-all': ['parent-session-dir', 'output-root'],
   materialize: ['session-dir', 'output-dir'],
   resource: ['parent-session-dir', 'output-dir'],
@@ -381,6 +382,8 @@ function help() {
     defaults: 'search defaults: limit 50, concurrency 4, cursor null, metadata-only false; search-all defaults: sources dingtalk,feishu,wecom,ima, limit 50, concurrency 4, metadata-only true',
     commands: {
       search: '--session-root </by/.sessions/sessionId> --parent-session-dir <sandbox-path> --source dingtalk|feishu|wecom|ima|cloud-knowledge --query <query> --output-dir <sandbox-path; same resolved path as parent-session-dir> [--limit 1..500] [--concurrency 1..16] [--cursor <cursor>] [--metadata-only [true|false]] [--source-options <json>]; cloud-knowledge forces metadata-only',
+      metadataSearch: '--session-root </by/.sessions/sessionId> --parent-session-dir <sandbox-path> --source cloud-knowledge --where-json <json> --output-dir <sandbox-path; same resolved path as parent-session-dir> [--limit 1..500]',
+      metadataSearch: '--session-root </by/.sessions/sessionId> --parent-session-dir <sandbox-path> --source cloud-knowledge --where-json <json> --output-dir <sandbox-path; same resolved path as parent-session-dir> [--limit 1..500]',
       searchAll: '--session-root </by/.sessions/sessionId> --parent-session-dir <sandbox-path> [--sources dingtalk,feishu,wecom,ima] --query <query> --output-root <sandbox-path> [--limit 1..500] [--concurrency 1..16] [--metadata-only [true|false]]; defaults to all sources and metadata-only; continues after a connector auth failure',
       materialize: '--session-root </by/.sessions/sessionId> --source dingtalk|feishu|ima|cloud-knowledge --session-dir <sandbox-path> --item-ids <id[,id...]> --output-dir <sandbox-path; for ima/cloud-knowledge, same resolved path as session-dir> [--concurrency 1..16]',
       resource: '--session-root </by/.sessions/sessionId> --parent-session-dir <sandbox-path> --source dingtalk|feishu|wecom|ima --url <http(s)-url> --output-dir <sandbox-path> [--minute-token <token> for feishu]',
@@ -407,6 +410,10 @@ function commandSchema() {
       search: {
         type: 'object', additionalProperties: false, required: ['parent-session-dir', 'source', 'query', 'output-dir'],
         properties: { ...parentSession, ...currentSession, source, query: { type: 'string', minLength: 1 }, 'output-dir': sandboxPath, limit: positiveLimit, concurrency, cursor: { type: 'string' }, 'metadata-only': { type: 'boolean', default: false, description: 'cloud-knowledge 强制为 true' }, 'source-options': { type: 'object', cliEncoding: 'json' } },
+      },
+      'metadata-search': {
+        type: 'object', additionalProperties: false, required: ['parent-session-dir', 'source', 'where-json', 'output-dir'],
+        properties: { ...parentSession, ...currentSession, source: { type: 'string', enum: ['cloud-knowledge'] }, 'where-json': { type: 'object', cliEncoding: 'json' }, 'output-dir': sandboxPath, limit: positiveLimit },
       },
       'search-all': {
         type: 'object', additionalProperties: false, required: ['parent-session-dir', 'query', 'output-root'],
@@ -465,9 +472,9 @@ async function main() {
     if (outcome.status !== 'complete') throw new Error(outcome.reason || outcome.status);
     return;
   }
-  if (command === 'search' || command === 'materialize' || command === 'resource' || command === 'resume-resource') {
+  if (command === 'search' || command === 'metadata-search' || command === 'materialize' || command === 'resource' || command === 'resume-resource') {
     const normalizedValues = normalizeEnterprisePaths(command, values);
-    const scopeSessionDir = command === 'search' || command === 'resource'
+    const scopeSessionDir = command === 'search' || command === 'metadata-search' || command === 'resource'
       ? normalizedValues['parent-session-dir'] : normalizedValues['session-dir'];
     const source = requireValue(values, 'source');
     const parentSession = assertEnterpriseScope(scopeSessionDir, [source]);
