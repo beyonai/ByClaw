@@ -241,6 +241,8 @@ export interface ActiveSdkRequest {
   /** Gateway workers defer APP_STREAM_RESPONSE until after FINAL_ANSWER. */
   deferFrameworkFinalization: boolean;
   frameworkCompletionPrepared: boolean;
+  /** Root runs whose terminal error has already been emitted to the SDK stream. */
+  emittedRootErrorRunIds: Set<string>;
   lastReasoningText: string;
   lastReasoningMessageId: string;
   language: Language;
@@ -972,6 +974,7 @@ export function registerActiveSdkRequest(params: {
         frameworkFinalAnswerTerminalOutcome: "none",
         deferFrameworkFinalization: params.deferFrameworkFinalization === true,
         frameworkCompletionPrepared: false,
+        emittedRootErrorRunIds: new Set<string>(),
         lastReasoningText: "",
         lastReasoningMessageId: "",
         language: params.language,
@@ -1492,16 +1495,18 @@ export async function completeActiveSdkRequest(
             }
             if (result?.error) {
                 const errorText = mapAgentEndErrorForSdk(latest, result.error);
-                const errorOptions = withActiveSdkRequestEmitMetadata(latest, {
-                    eventType: EventType.ANSWER_DELTA,
-                    messageId: generateRandomId(),
-                });
-                await sdkEmitter.emitChunk(
-                    latest.sessionId,
-                    latest.traceId || "",
-                    buildSdkChunkEvent(errorText, errorOptions),
-                    errorOptions,
-                );
+                if (claimActiveSdkRootError(latest, terminalRunId, errorText)) {
+                    const errorOptions = withActiveSdkRequestEmitMetadata(latest, {
+                        eventType: EventType.ANSWER_DELTA,
+                        messageId: generateRandomId(),
+                    });
+                    await sdkEmitter.emitChunk(
+                        latest.sessionId,
+                        latest.traceId || "",
+                        buildSdkChunkEvent(errorText, errorOptions),
+                        errorOptions,
+                    );
+                }
             }
         } catch (error) {
             console.error("Error waiting for agent end result:", error);
@@ -1594,6 +1599,27 @@ export function recordActiveSdkRootAgentEnd(params: {
         return;
     }
     recordRootRunAgentEnd(binding.request.frameworkFinalAnswerLedger, params);
+}
+
+/**
+ * Claim a root-run error for SDK emission. Lifecycle and agent_end are separate
+ * channels and may report the same failure (with slightly different normalization);
+ * only the first claimant for a run may emit it.
+ */
+export function claimActiveSdkRootError(
+    request: ActiveSdkRequest,
+    runId: string | undefined,
+    error: string,
+): boolean {
+    const normalizedRunId = normalizeAlias(runId);
+    if (!normalizedRunId || !error) {
+        return true;
+    }
+    if (request.emittedRootErrorRunIds.has(normalizedRunId)) {
+        return false;
+    }
+    request.emittedRootErrorRunIds.add(normalizedRunId);
+    return true;
 }
 
 export function markActiveSdkRootRunOverflowFragment(

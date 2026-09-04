@@ -11,6 +11,7 @@ import {
   markActiveSdkRootLifecycleFinished,
   markActiveSdkRootLifecycleStarted,
   recordActiveSdkRootStreamAnswer,
+  claimActiveSdkRootError,
   resolveActiveSdkRequestBySessionKey,
   resolveActiveSdkRunBinding,
   resolveSdkEmitter,
@@ -474,9 +475,11 @@ async function handleLifecycleEvent(
   }
   if (phase === "error") {
     const errorText = typeof data?.error === "string" ? data.error : "Agent run failed";
-    await emitSdkChunk(request, errorText, {
-      eventType: EventType.ANSWER_DELTA,
-    });
+    if (claimActiveSdkRootError(activeRequest, event.runId, errorText)) {
+      await emitSdkChunk(request, errorText, {
+        eventType: EventType.ANSWER_DELTA,
+      });
+    }
   }
   clearIncrementalTextSnapshot(`${event.runId}:`);
   const completionReason =

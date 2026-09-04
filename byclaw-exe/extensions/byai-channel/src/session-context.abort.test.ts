@@ -28,6 +28,7 @@ vi.mock("openclaw/plugin-sdk/routing", () => ({
 import {
     bindActiveSdkRequestRunId,
     clearActiveSdkRequestRecord,
+    claimActiveSdkRootError,
     completeActiveSdkRequest,
     markActiveSdkRootLifecycleFinished,
     registerActiveSdkRequest,
@@ -37,6 +38,23 @@ import {
 import { waitForSdkSessionDispatchSettled } from "./session-dispatch-settle.js";
 
 describe("active SDK request cancellation", () => {
+    it("deduplicates the same root error reported by lifecycle and agent_end", () => {
+        const request = registerActiveSdkRequest({
+            accountId: "dedupe-root-error",
+            sessionKey: "agent:main:direct:dedupe-root-error",
+            to: "user:dedupe-root-error",
+            sessionId: "dedupe-root-error",
+            traceId: "trace-dedupe-root-error",
+            language: "zh_CN",
+            languageProvided: true,
+        });
+
+        expect(claimActiveSdkRootError(request, "run-dedupe-root-error", "Reply operation aborted by user")).toBe(true);
+        expect(claimActiveSdkRootError(request, "run-dedupe-root-error", "Reply operation aborted by user")).toBe(false);
+        expect(claimActiveSdkRootError(request, "run-dedupe-root-error-2", "A different error")).toBe(true);
+        clearActiveSdkRequestRecord(request);
+    });
+
     it("stops waiting for agent_end when onCancelTask clears its resolver", async () => {
         const accountId = "abort-agent-end";
         const abortController = new AbortController();
