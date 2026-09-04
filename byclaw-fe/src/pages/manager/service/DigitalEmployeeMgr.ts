@@ -82,6 +82,22 @@ export async function installDigitalEmployeeRelResources(params: {
   return POST('/byaiService/digitalEmployeeController/installRelResources', { ...params });
 }
 
+export async function queryInstallTargetEmployees(params: {
+  keyword?: string;
+  pageNum: number;
+  pageSize: number;
+  relResourceId?: string | number;
+}) {
+  return POST('/byaiService/digitalEmployeeController/queryInstallTargetEmployees', { ...params });
+}
+
+export async function batchInstallDigitalEmployeeRelResources(params: {
+  digitalEmployeeIds: Array<string | number>;
+  relIds: Array<string | number>;
+}) {
+  return POST('/byaiService/digitalEmployeeController/installRelResourcesBatch', { ...params });
+}
+
 export async function uninstallDigitalEmployeeRelResources(params: {
   digitalEmployeeId: string | number;
   relIds: Array<string | number>;

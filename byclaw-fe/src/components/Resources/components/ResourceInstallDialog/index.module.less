@@ -1,0 +1,62 @@
+.employeeList {
+  min-height: 360px;
+  max-height: 420px;
+  margin-top: 16px;
+  overflow-y: auto;
+}
+
+.employeeItem {
+  display: flex;
+  gap: 12px;
+  padding: 12px !important;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+
+  &:hover {
+    background: #f5f7fa;
+  }
+}
+
+.employeeItemSelected {
+  border-color: #8aabff;
+  background: #f2f6ff;
+}
+
+.employeeItemDisabled {
+  color: #9ca3af;
+  cursor: not-allowed;
+}
+
+.employeeInfo {
+  min-width: 0;
+  flex: 1;
+}
+
+.employeeTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  > span:first-child {
+    overflow: hidden;
+    font-weight: 500;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.employeeDesc {
+  margin-top: 4px;
+  overflow: hidden;
+  color: #7a8290;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pagination {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+}

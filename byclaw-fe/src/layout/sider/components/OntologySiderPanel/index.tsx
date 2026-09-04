@@ -248,7 +248,8 @@ const OntologySiderPanel: React.FC<OntologySiderPanelProps> = ({ embedded = fals
   const { isCenterPage: isOntologyCenterPage, toggleCenter } = useResourceCenterRouter(
     '/ontologyCenter',
     'ontology',
-    showRouter
+    showRouter,
+    activeSiderAgent
   );
   const clickTimerRef = useRef<number | null>(null);
 

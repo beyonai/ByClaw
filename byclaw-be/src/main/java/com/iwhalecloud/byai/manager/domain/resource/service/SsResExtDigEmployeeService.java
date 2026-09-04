@@ -12,6 +12,7 @@ import com.iwhalecloud.byai.manager.qo.resource.DigitalEmployeeQo;
 import com.iwhalecloud.byai.manager.vo.resource.DigitalEmployeePageVo;
 import com.iwhalecloud.byai.manager.dto.digitemploy.EmployeeGroupMemberDTO;
 import com.iwhalecloud.byai.manager.vo.resource.DigitalEmployeeVo;
+import com.iwhalecloud.byai.manager.vo.digitemploy.DigitalEmployeeInstallTargetVo;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDetailsDTO;
 import com.iwhalecloud.byai.common.util.PageHelperUtil;
 import com.iwhalecloud.byai.common.page.PageInfo;
@@ -77,6 +78,17 @@ public class SsResExtDigEmployeeService {
         Page<EmployeeGroupMemberDTO> page = PageHelper.startPage(digitalEmployeeQo.getPageNum(),
             digitalEmployeeQo.getPageSize());
         ssResExtDigEmployeeMapper.selectEmployeeGroupMemberCandidates(digitalEmployeeQo);
+        return PageHelperUtil.toPageInfo(page);
+    }
+
+    /**
+     * 分页查询资源安装目标数字员工。
+     */
+    public PageInfo<DigitalEmployeeInstallTargetVo> selectInstallTargetEmployees(
+        DigitalEmployeeQo digitalEmployeeQo) {
+        Page<DigitalEmployeeInstallTargetVo> page = PageHelper.startPage(digitalEmployeeQo.getPageNum(),
+            digitalEmployeeQo.getPageSize());
+        ssResExtDigEmployeeMapper.selectInstallTargetEmployees(digitalEmployeeQo);
         return PageHelperUtil.toPageInfo(page);
     }
 
