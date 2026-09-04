@@ -233,6 +233,14 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         self.assertIn("`public-internet` + `cloud-knowledge`", skill)
         self.assertIn("`public-internet` | `selected` + `full-text` via `public-collect`", skill)
 
+    def test_unified_search_must_forward_project_id_for_cloud_resource_resolution(self):
+        combined = "\n".join([
+            (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8"),
+            (SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8"),
+        ])
+        self.assertIn("`project_id` 透传为 `--project-id`", combined)
+        self.assertIn("通过 `project-context basic` 解析项目云盘资源", combined)
+
     def test_knowledge_collection_upgrade_is_isolated_in_v031(self):
         self.assertTrue(V031_DML.is_file(), "knowledge collection migration must be versioned as V0.3.1")
         v030 = V030_DML.read_text(encoding="utf-8")

@@ -1,6 +1,8 @@
 'use strict';
 
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { dirname, join } from 'node:path';
 import { createDiscoveryAuthorization } from './discovery-authorization.mjs';
 import { runPublicDiscover } from './public-discovery.mjs';
@@ -12,6 +14,26 @@ import {
   ensureSessionSkeleton, loadSession, newSession, persistSession, sessionPaths,
 } from './session.mjs';
 import { mergeUnifiedCandidates } from './unified-candidates.mjs';
+
+const execFileAsync = promisify(execFile);
+
+async function resolveCloudResourceIdFromProject(projectId, dependencies = {}) {
+  if (dependencies.resolveCloudResourceId) {
+    return dependencies.resolveCloudResourceId(projectId);
+  }
+  const script = process.env.PROJECT_CONTEXT_SCRIPT || '/app/skills/project-context/scripts/project-context.mjs';
+  try {
+    const { stdout } = await execFileAsync(process.execPath, [script, 'basic', '--project-id', String(projectId)], {
+      timeout: 30_000,
+      maxBuffer: 1_000_000,
+    });
+    const result = JSON.parse(stdout);
+    const resourceId = result?.project?.cloudResourceId;
+    return Number.isSafeInteger(Number(resourceId)) && Number(resourceId) > 0 ? Number(resourceId) : null;
+  } catch {
+    return null;
+  }
+}
 
 function sourceCandidate(item, source) {
   if (source === 'cloud-knowledge') return item;
@@ -82,7 +104,13 @@ export async function runUnifiedSearch(paths, args = {}, dependencies = {}) {
   let cloudMetadata = null;
   try {
     const publicPaths = await childSession(parent, publicRoot, 'public-internet');
-    const cloudResourceId = Number(args['cloud-resource-id'] || process.env.BYCLAW_CLOUD_RESOURCE_ID);
+    let cloudResourceId = Number(args['cloud-resource-id'] || process.env.BYCLAW_CLOUD_RESOURCE_ID);
+    if (!(Number.isSafeInteger(cloudResourceId) && cloudResourceId > 0)) {
+      const projectId = Number(args['project-id']);
+      if (Number.isSafeInteger(projectId) && projectId > 0) {
+        cloudResourceId = await resolveCloudResourceIdFromProject(projectId, dependencies) || 0;
+      }
+    }
     const explicitScope = parent.task?.cloudDiscoveryScope;
     const cloudScope = explicitScope?.resources?.length
       ? explicitScope
