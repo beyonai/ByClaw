@@ -124,8 +124,9 @@ Pi 的 `before_agent_start` 钩子负责调用编译器。稳定规则始终位�
 保存为本轮 `Run.ingressContext.projectContext` 快照；超级助手和专家团团长都通过
 `ProjectContextProcessor` 获得项目上下文，实例接管和恢复执行继续使用同一快照。
 每次 `delegateAgent` 调用都会自动把项目上下文附加到子 Agent 的任务正文，并通过
-`metadata.project_info` 继续传递。项目信息（含 `workspace`）只作为背景，由子 Agent
-收到“你当前正在这个项目环境下工作”的明确提示，并结合项目信息理解和执行任务；
+`metadata.project_info` 继续传递。子 Agent 会收到“当前任务关联以下项目环境”的明确提示；
+项目信息（含 `workspace`）只作为背景，用于辅助理解用户请求和可用资源，
+不得据此扩展、替换或改写用户原始意图，发生冲突时以用户明确要求为准。子 Agent
 根据任务和用户要求决定正式成果的保存位置；Super 不用项目目录覆盖子请求的 `cwd`。
 超级助手、专家团团长及 by-framework 子请求均明确：临时产物、临时文件和中间结果保存到
 `/by/.sessions/{externalSessionId}/` 会话目录。返回用户的文件路径采用子 Agent 实际给出的路径。

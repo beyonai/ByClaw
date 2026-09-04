@@ -499,6 +499,11 @@ public class SsResourceService {
             queryWrapper.eq(SsResource::getCreateBy, CurrentUserHolder.getCurrentUserId());
         }
 
+        // 增加个人|企业类型的过滤
+        if (StringUtil.isNotEmpty(ownerType)) {
+            queryWrapper.eq(SsResource::getOwnerType, ownerType);
+        }
+
         queryWrapper.eq(SsResource::getResourceName, resourceName);
         if (StringUtil.isNotEmpty(resourceBizType)) {
             queryWrapper.eq(SsResource::getResourceBizType, resourceBizType);

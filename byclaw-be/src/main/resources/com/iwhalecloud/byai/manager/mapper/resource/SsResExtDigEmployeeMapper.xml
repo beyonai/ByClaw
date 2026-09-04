@@ -559,7 +559,7 @@
          order by a.resource_name, a.resource_id
     </select>
 
-    <!-- 资源安装目标：个人、企业及当前用户自己的默认个人员工，且当前用户必须可管理。 -->
+    <!-- 资源安装目标：仅本人创建、有效显式管理授权或 adminvip 可管理的数字员工。 -->
     <select id="selectInstallTargetEmployees" resultMap="installTargetEmployeeResultMap">
         select a.resource_id,
                a.resource_name,
@@ -613,7 +613,6 @@
          where a.resource_biz_type = 'DIG_EMPLOYEE'
            and a.resource_status = 2
            and coalesce(e.agent_type, '') != '017'
-           and (manage_auth.black_count = 0 or manage_auth.black_count is null)
            and (
                 (a.owner_type = 'enterprise' and a.com_acct_id = #{memberCandidateEnterpriseId})
                 or a.owner_type = 'personal'
@@ -626,27 +625,15 @@
                 )
            )
            and (
+                <if test="installTargetAdminVip == true">
+                    1 = 1
+                    or
+                </if>
                 a.create_by = #{userId}
-                or manage_auth.allow_manage_count > 0
-                <if test="memberCandidateGlobalManager == true">
-                    or (a.owner_type = 'enterprise' and a.com_acct_id = #{memberCandidateEnterpriseId})
-                </if>
-                <if test="managerOrgPathCodes != null and managerOrgPathCodes.size() > 0">
-                    or (
-                        a.owner_type = 'enterprise'
-                        and exists (
-                            select 1
-                              from po_organization manage_org
-                             where manage_org.org_id = a.man_org_id
-                               and (
-                                <foreach collection="managerOrgPathCodes" item="pathCode" separator=" or ">
-                                    manage_org.path_code = #{pathCode}
-                                    or manage_org.path_code like concat(#{pathCode}, '.%')
-                                </foreach>
-                               )
-                        )
-                    )
-                </if>
+                or (
+                    manage_auth.allow_manage_count > 0
+                    and (manage_auth.black_count = 0 or manage_auth.black_count is null)
+                )
            )
            <if test="keyword != null and keyword != ''">
                and (
