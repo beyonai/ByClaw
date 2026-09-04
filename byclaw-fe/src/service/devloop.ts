@@ -284,7 +284,15 @@ export const updateProjectRepo = (data: {
 export const listProjectRepos = (projectId: number) =>
   POST<DevloopProjectRepo[]>('/byaiService/project/repo/list', { projectId });
 
-export type AvailableProjectRepo = DevloopProjectRepo & { path: string };
+export type AvailableProjectRepo = DevloopProjectRepo & {
+  path: string;
+
+  /** 是否已在当前项目/会话目录中存在本地 Git 仓库。 */
+  localAvailable?: boolean;
+
+  /** 是否可以查询当前会话的本地变更。 */
+  changesSupported?: boolean;
+};
 
 export const listAvailableProjectRepos = (projectId: number, sessionId?: string | number) =>
   POST<AvailableProjectRepo[]>('/byaiService/project/repo/available-list', { projectId, sessionId });

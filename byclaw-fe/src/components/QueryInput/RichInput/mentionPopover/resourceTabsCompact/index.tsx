@@ -732,7 +732,6 @@ const ResourceTabsCompact: React.FC<Props> = ({
       <div className={styles.searchRow}>
         <Input
           allowClear
-          disabled={!!keyword}
           placeholder={intl.formatMessage({ id: 'selectMember.searchPlaceholder' })}
           className={styles.searchInput}
           suffix={<SearchOutlined />}
