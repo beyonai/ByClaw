@@ -17,6 +17,12 @@ import { mergeUnifiedCandidates } from './unified-candidates.mjs';
 
 const execFileAsync = promisify(execFile);
 
+function safeDiagnostic(error) {
+  return String(error instanceof Error ? error.message : error)
+    .replace(/((?:authorization|cookie|credential|password|secret|token)\s*(?:=|:)\s*)(?:Bearer\s+)?[^\s,;]+/gi, '$1[REDACTED]')
+    .slice(0, 2_000);
+}
+
 async function resolveCloudResourceIdFromProject(projectId, dependencies = {}) {
   if (dependencies.resolveCloudResourceId) {
     return dependencies.resolveCloudResourceId(projectId);
@@ -24,6 +30,26 @@ async function resolveCloudResourceIdFromProject(projectId, dependencies = {}) {
   const script = process.env.PROJECT_CONTEXT_SCRIPT || '/app/skills/project-context/scripts/project-context.mjs';
   try {
     const { stdout } = await execFileAsync(process.execPath, [script, 'basic', '--project-id', String(projectId)], {
+      timeout: 30_000,
+      maxBuffer: 1_000_000,
+    });
+    const result = JSON.parse(stdout);
+    const resourceId = result?.project?.cloudResourceId;
+    return Number.isSafeInteger(Number(resourceId)) && Number(resourceId) > 0 ? Number(resourceId) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function resolveCloudResourceIdFromSessionRoot(sessionRoot, dependencies = {}) {
+  const sessionId = String(sessionRoot || '').split('/').filter(Boolean).at(-1);
+  if (!/^\d+$/.test(sessionId)) return null;
+  if (dependencies.resolveCloudResourceIdFromSession) {
+    return dependencies.resolveCloudResourceIdFromSession(Number(sessionId));
+  }
+  const script = process.env.PROJECT_CONTEXT_SCRIPT || '/app/skills/project-context/scripts/project-context.mjs';
+  try {
+    const { stdout } = await execFileAsync(process.execPath, [script, 'basic', '--session-id', sessionId], {
       timeout: 30_000,
       maxBuffer: 1_000_000,
     });
@@ -47,11 +73,19 @@ function sourceCandidate(item, source) {
 
 function publicCandidates(result) {
   const merged = result?.merged || {};
-  return Array.isArray(merged.results)
-    ? merged.results
-    : Array.isArray(merged.candidates)
-      ? merged.candidates
-      : Array.isArray(result?.results) ? result.results : [];
+  const candidates = [
+    ...(Array.isArray(merged.candidates) ? merged.candidates : []),
+    ...(Array.isArray(merged.results) ? merged.results : []),
+    ...(Array.isArray(result?.candidates) ? result.candidates : []),
+    ...(Array.isArray(result?.results) ? result.results : []),
+  ];
+  const seen = new Set();
+  return candidates.filter((candidate) => {
+    const sourceUrl = candidate?.url || candidate?.sourceUrl;
+    if (!sourceUrl || seen.has(sourceUrl)) return false;
+    seen.add(sourceUrl);
+    return true;
+  });
 }
 
 async function childSession(parent, root, source, cloudDiscoveryScope) {
@@ -111,6 +145,9 @@ export async function runUnifiedSearch(paths, args = {}, dependencies = {}) {
         cloudResourceId = await resolveCloudResourceIdFromProject(projectId, dependencies) || 0;
       }
     }
+    if (!(Number.isSafeInteger(cloudResourceId) && cloudResourceId > 0)) {
+      cloudResourceId = await resolveCloudResourceIdFromSessionRoot(paths.root, dependencies) || 0;
+    }
     const explicitScope = parent.task?.cloudDiscoveryScope;
     const cloudScope = explicitScope?.resources?.length
       ? explicitScope
@@ -165,7 +202,14 @@ export async function runUnifiedSearch(paths, args = {}, dependencies = {}) {
         operation: 'unified-search', query,
         sources: {
           publicInternet: { status: publicResult ? 'complete' : 'failed', error: publicResult ? null : 'PUBLIC_SEARCH_FAILED' },
-          cloudKnowledge: { status: cloudOutcome ? cloudOutcome.status : 'unavailable', error: cloudOutcome ? null : 'CLOUD_CONTEXT_UNAVAILABLE' },
+          cloudKnowledge: {
+            status: cloudOutcome ? cloudOutcome.status : 'unavailable',
+            error: cloudOutcome ? null : 'CLOUD_CONTEXT_UNAVAILABLE',
+            ...(cloudSettled.ok ? {} : {
+              code: 'CLOUD_SEARCH_FAILED',
+              detail: safeDiagnostic(cloudSettled.error),
+            }),
+          },
         },
         ranking: { schemaVersion: '1.0', candidateCount: candidates.length },
       };

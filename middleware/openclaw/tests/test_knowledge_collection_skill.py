@@ -238,10 +238,11 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8"),
             (SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8"),
         ])
-        self.assertIn("`project_id` 透传为 `--project-id`", combined)
-        self.assertIn("`project-context basic` 返回的 `project.cloudResourceId`", combined)
+        self.assertIn("可信 `<project_context>` 中的 `project_id`", combined)
+        self.assertIn("把返回的 `project.cloudResourceId`", combined)
         self.assertIn("首次 `init --cloud-resource-id`", combined)
         self.assertIn("不要手工拼接或猜测 scope JSON", combined)
+        self.assertIn("从当前 collection session ID 调用 `project-context basic --session-id`", combined)
 
     def test_knowledge_collection_upgrade_is_isolated_in_v031(self):
         self.assertTrue(V031_DML.is_file(), "knowledge collection migration must be versioned as V0.3.1")

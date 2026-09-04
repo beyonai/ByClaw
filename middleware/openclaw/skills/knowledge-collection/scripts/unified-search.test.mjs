@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { ensureSessionSkeleton, newSession, persistSession, sessionPaths } from './session.mjs';
+import { ensureSessionSkeleton, loadSession, newSession, persistSession, sessionPaths } from './session.mjs';
 import { mergeUnifiedCandidates } from './unified-candidates.mjs';
 import { runUnifiedMaterialize, runUnifiedSearch } from './unified-search.mjs';
 
@@ -55,6 +55,34 @@ test('unified search continues with cloud results when public discovery fails', 
   }
 });
 
+test('unified search keeps public candidates when merged results is empty', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'unified-public-candidates-'));
+  try {
+    ensureSessionSkeleton(root);
+    const paths = { root, session: join(root, 'session.json'), collectionResult: join(root, 'collection-result.json'), metadata: join(root, 'sanitized/metadata.json'), inputDir: join(root, '.collection-inputs'), lock: join(root, '.knowledge-collection.lock') };
+    persistSession(paths, newSession({ query: '联网代理文章', sourceScope: ['public-internet', 'cloud-knowledge'] }));
+    const result = await runUnifiedSearch(paths, { query: '联网代理文章' }, {
+      runPublicDiscover: async () => ({ merged: {
+        results: [],
+        candidates: [{ url: 'https://example.test/article', title: '联网代理文章', content: '联网代理文章正文' }],
+      } }),
+      createCloudKnowledgeAdapter: () => ({
+        search: async ({ outputDir }) => {
+          await writeFile(join(outputDir, 'sanitized/metadata.json'), JSON.stringify({ collection: { items: [] } }));
+          return { ok: true, status: 'complete' };
+        },
+      }),
+    });
+    assert.equal(result.candidates.length, 1);
+    assert.equal(result.inventory, 1);
+    assert.deepEqual(loadSession(paths).session.collection.collection.items.map((item) => item.itemId), [
+      result.candidates[0].candidateId,
+    ]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('unified search resolves cloud resource from project id when no explicit resource id is given', async () => {
   const root = await mkdtemp(join(tmpdir(), 'unified-project-context-'));
   try {
@@ -79,6 +107,34 @@ test('unified search resolves cloud resource from project id when no explicit re
     assert.equal(result.sources.cloudKnowledge.status, 'complete');
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('unified search falls back to the collection session id when project id is omitted', async () => {
+  const parent = await mkdtemp(join(tmpdir(), 'unified-session-fallback-'));
+  const root = join(parent, '20055822');
+  try {
+    ensureSessionSkeleton(root);
+    const paths = { root, session: join(root, 'session.json'), collectionResult: join(root, 'collection-result.json'), metadata: join(root, 'sanitized/metadata.json'), inputDir: join(root, '.collection-inputs'), lock: join(root, '.knowledge-collection.lock') };
+    persistSession(paths, newSession({ query: '巡检流程', sourceScope: ['public-internet', 'cloud-knowledge'] }));
+    let resolvedSessionId;
+    const result = await runUnifiedSearch(paths, { query: '巡检流程' }, {
+      runPublicDiscover: async () => ({ merged: { results: [] } }),
+      resolveCloudResourceIdFromSession: async (sessionId) => {
+        resolvedSessionId = sessionId;
+        return 7;
+      },
+      createCloudKnowledgeAdapter: () => ({
+        search: async ({ outputDir }) => {
+          await writeFile(join(outputDir, 'sanitized/metadata.json'), JSON.stringify({ collection: { items: [] } }));
+          return { ok: true, status: 'complete' };
+        },
+      }),
+    });
+    assert.equal(resolvedSessionId, 20055822);
+    assert.equal(result.sources.cloudKnowledge.status, 'complete');
+  } finally {
+    await rm(parent, { recursive: true, force: true });
   }
 });
 
