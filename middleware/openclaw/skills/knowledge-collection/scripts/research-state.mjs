@@ -199,8 +199,8 @@ function initAdvisories(root, {
   }
   if (target === 'selected' && deliveryRequested && !effectiveWorkflow) {
     warnings.push('selected + --delivery-requested 通常意味着 public-collect 工作流;'
-      + '若确实要走 public-collect,请在本次 init 就传 --workflow public-collect 与 '
-      + '--required-content-granularity full-text,不要先用 any 初始化');
+      + '本次 init 已成功创建会话,不能重新运行 init;若确实要走 public-collect,请在原会话上执行 '
+      + 'retighten --required-content-granularity full-text,再直接运行 public-collect,由该命令建立工作流状态');
   }
 
   const resolvedRoot = path.resolve(root);

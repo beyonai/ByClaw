@@ -1096,6 +1096,10 @@ await (async () => {
     res.json.warnings.some((w) => /public-collect/.test(w)),
     `期望出现 public-collect 提示,实际: ${JSON.stringify(res.json.warnings)}`,
   );
+  assert.ok(
+    res.json.warnings.some((w) => /retighten.*required-content-granularity full-text/.test(w)),
+    `warning 必须给出可执行的 retighten 修复路径,实际: ${JSON.stringify(res.json.warnings)}`,
+  );
 
   // 带上 --workflow 后不应再提示
   const explicit = join(sessionRoot, '.collection-runs', 'run-002');

@@ -1138,6 +1138,8 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         for phrase in (
             "会话未绑定交付目标",
             "缺 `--workflow`",
+            "不能重新运行 `init`",
+            "在原会话上执行 `retighten --required-content-granularity full-text`",
             "改用 `retighten` 就地修复原会话",
         ):
             self.assertIn(phrase, skill)
