@@ -618,14 +618,14 @@ acp下发任务告诉对方启动的时候必须要调用skill：self-developed-
 
 
 -- 数字员工组类型字典（OpenGauss，可重复执行）。
-DELETE FROM byai.byai_system_config_list WHERE param_group_code = 'DIG_EMPLOYEE_AGENT_TYPE' AND param_value = '017';
+delete from byai.byai_system_config_list where param_group_code in('DIG_EMPLOYEE_AGENT_TYPE');
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'DIG_EMPLOYEE_AGENT_TYPE', '数字员工类型', '助手', 'Assistant', '001', '助手', 1);
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'DIG_EMPLOYEE_AGENT_TYPE', '数字员工类型', '问答', 'QA', '006', '问答', 2);
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'DIG_EMPLOYEE_AGENT_TYPE', '数字员工类型', '问数', 'DataQuery', '005', '问数', 3);
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'DIG_EMPLOYEE_AGENT_TYPE', '数字员工类型', '调试', 'Debug', '010', '调试', 4);
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'DIG_EMPLOYEE_AGENT_TYPE', '数字员工类型', '编码', 'Coding', '011', '编码', 5);
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'DIG_EMPLOYEE_AGENT_TYPE', '数字员工类型', '数字员工组', 'Digital Employee Group', '017', '数字员工组', 6);
 
-INSERT INTO byai.byai_system_config_list
-(param_id, param_group_code, param_group_name, param_name, param_en_name,
- param_value, param_desc, param_seq)
-VALUES
-    (nextval('byai.seq_any_table'), 'DIG_EMPLOYEE_AGENT_TYPE', '数字员工类型',
-     '数字员工组', 'Digital Employee Group', '017', '数字员工组', 6);
 delete from byai.byai_ai_prompt where prompt_group_code in('SUMMARY_CHAT_CONTENT') and prompt_code in('SUMMARY_CHAT_CONTENT');
 INSERT INTO byai.byai_ai_prompt (prompt_id, prompt_group_code, prompt_code, prompt_name, prompt_desc, prompt_filed_code, prompt_zh_template, prompt_en_template, create_by, create_time, update_time, model_code) VALUES (nextval('byai.seq_any_table'), 'SUMMARY_CHAT_CONTENT', 'SUMMARY_CHAT_CONTENT', '会话总结提示词', '会话总结提示词模板，占位符 ${chatContent}', 'chatContent', '基于下面用户输入内容生成会话标题
 用户输入原文：${chatContent}
