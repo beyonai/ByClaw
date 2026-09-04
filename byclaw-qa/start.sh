@@ -300,6 +300,8 @@ default_env_if_unset "INSTANT_SEARCH_MIN_SENTENCE_TOKENS" "50"
 default_env_if_unset "BY_QA_MODEL_CONFIG_PROVIDER" "redis_model_config:RedisModelConfigProvider"
 default_env_if_unset "BY_QA_STORAGE_PROVIDER" "byclaw_knowledge_storage:build_byclaw_knowledge_storage_provider"
 default_env_if_unset "BY_QA_EVENT_PUBLISHER_PROVIDER" "byclaw_knowledge_event_publisher:build_byclaw_knowledge_event_publisher"
+default_env_if_unset "BYAI_QA_LANGFUSE_ENABLED" "false"
+map_env_if_unset "BYAI_LANGFUSE_ENABLED" "BYAI_QA_LANGFUSE_ENABLED"
 default_env_if_unset "DSL_MAX_DEPTH" "5"
 default_env_if_unset "DSL_MAX_LEAF_COUNT" "10000"
 
