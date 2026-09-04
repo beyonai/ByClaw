@@ -3,21 +3,26 @@ import { createDingtalkAdapter } from './adapters/dingtalk.mjs';
 import { createFwsAdapter } from './adapters/fws.mjs';
 import { createWecomAdapter } from './adapters/wecom.mjs';
 import { createImaAdapter } from './adapters/ima.mjs';
+import { createCloudKnowledgeAdapter } from './adapters/cloud-knowledge.mjs';
 import { handledOutcome } from './shared/status-model.mjs';
 
-const SOURCES = new Set(['dingtalk', 'feishu', 'wecom', 'ima']);
+const ENTERPRISE_SOURCES = new Set(['dingtalk', 'feishu', 'wecom', 'ima', 'cloud-knowledge']);
+const SEARCH_ALL_SOURCES = new Set(['dingtalk', 'feishu', 'wecom', 'ima']);
+const SEARCH_ALL_DEFAULT_SOURCES = ['dingtalk', 'feishu', 'wecom', 'ima'];
 const SENSITIVE_KEY = /(token|cookie|secret|password|authorization|credential|device[_-]?code)/i;
 const SEARCH_OPTIONS = {
   dingtalk: new Map([['workspace-ids', 'workspaceIds'], ['extensions', 'extensions'], ['folder-id', 'folderId']]),
   feishu: new Map([['space-id', 'spaceId'], ['file-types', 'fileTypes']]),
   wecom: new Map(),
   ima: new Map([['kb', 'kb']]),
+  'cloud-knowledge': new Map(),
 };
 const RESOURCE_OPTIONS = {
   dingtalk: new Map(),
   feishu: new Map([['minute-token', 'minuteToken']]),
   wecom: new Map(),
   ima: new Map(),
+  'cloud-knowledge': new Map(),
 };
 
 function requiredString(values, key) {
@@ -46,7 +51,7 @@ function parseBoolean(values, key, fallback) {
 
 function parseSource(values) {
   const source = requiredString(values, 'source');
-  if (!SOURCES.has(source)) throw new Error(`--source must be one of: ${[...SOURCES].join(', ')}`);
+  if (!ENTERPRISE_SOURCES.has(source)) throw new Error(`--source must be one of: ${[...ENTERPRISE_SOURCES].join(', ')}`);
   return source;
 }
 
@@ -131,8 +136,8 @@ export function parseMaterializeRequest(values) {
   }
   const sessionDir = absoluteSessionDir(values);
   const outputDir = absoluteOutputDir(values);
-  if (source === 'ima' && resolve(sessionDir) !== resolve(outputDir)) {
-    throw new Error('IMA materialization must use the same discovery session for --session-dir and --output-dir');
+  if (['ima', 'cloud-knowledge'].includes(source) && resolve(sessionDir) !== resolve(outputDir)) {
+    throw new Error(`${source} materialization must use the same discovery session for --session-dir and --output-dir`);
   }
   return {
     source,
@@ -152,6 +157,10 @@ export function parseSearchRequest(values) {
   if (source === 'dingtalk' && sourceOptions.folderId && sourceOptions.workspaceIds) {
     throw new Error('--workspace-ids cannot be combined with --folder-id');
   }
+  const metadataOnly = parseBoolean(values, 'metadata-only', source === 'cloud-knowledge');
+  if (source === 'cloud-knowledge' && !metadataOnly) {
+    throw new Error('cloud-knowledge search requires metadata-only=true');
+  }
   return {
     source,
     query: requiredString(values, 'query'),
@@ -159,7 +168,7 @@ export function parseSearchRequest(values) {
     limit: parseInteger(values, 'limit', 50, 1, 500),
     concurrency: parseInteger(values, 'concurrency', 4, 1, 16),
     cursor,
-    metadataOnly: parseBoolean(values, 'metadata-only', false),
+    metadataOnly,
     sourceOptions,
   };
 }
@@ -171,10 +180,13 @@ export function parseSearchBatchRequests(values) {
   }
   const outputRoot = requiredString(values, 'output-root');
   if (!isAbsolute(outputRoot)) throw new Error('--output-root must be an absolute path');
-  const sourceList = values.sources === undefined ? [...SOURCES].join(',') : requiredString(values, 'sources');
+  const sourceList = values.sources === undefined ? SEARCH_ALL_DEFAULT_SOURCES.join(',') : requiredString(values, 'sources');
   const sources = sourceList.split(',').map((source) => source.trim()).filter(Boolean);
-  if (!sources.length || new Set(sources).size !== sources.length || sources.some((source) => !SOURCES.has(source))) {
-    throw new Error(`--sources must be a comma-separated list of distinct values: ${[...SOURCES].join(', ')}`);
+  if (sources.includes('cloud-knowledge')) {
+    throw new Error('cloud-knowledge does not support search-all; use single-source enterprise search');
+  }
+  if (!sources.length || new Set(sources).size !== sources.length || sources.some((source) => !SEARCH_ALL_SOURCES.has(source))) {
+    throw new Error(`--sources must be a comma-separated list of distinct values: ${[...SEARCH_ALL_SOURCES].join(', ')}`);
   }
   return sources.map((source) => ({
     source,
@@ -188,6 +200,7 @@ export function parseSearchBatchRequests(values) {
 
 export function parseResourceRequest(values) {
   const source = parseSource(values);
+  if (source === 'cloud-knowledge') throw new Error('cloud-knowledge does not support resource collection');
   const sourceOptions = parseOptions(values, source, RESOURCE_OPTIONS, ['source', 'output-dir', 'url']);
   const url = parseUrl(values);
   if (source === 'feishu' && !sourceOptions.minuteToken) throw new Error('--minute-token is required for source feishu');
@@ -211,6 +224,11 @@ function defaultAdapters() {
     wecom: createWecomAdapter({ bin: process.env.WECOM_CLI_BIN || 'wecom-cli', env: process.env }),
     ima: createImaAdapter({
       bycliBin: process.env.BYCLI_BIN || 'bycli',
+      env: process.env,
+    }),
+    'cloud-knowledge': createCloudKnowledgeAdapter({
+      python: process.env.PYTHON_BIN || 'python3',
+      script: process.env.CLOUD_KNOWLEDGE_CLI || new URL('../../../project-cloud-knowledge/scripts/project_cloud_knowledge.py', import.meta.url).pathname,
       env: process.env,
     }),
   };

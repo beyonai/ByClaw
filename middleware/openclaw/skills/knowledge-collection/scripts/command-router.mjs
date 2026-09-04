@@ -14,6 +14,7 @@ import { runArxivMaterialize } from './arxiv-materializer.mjs';
 import { runWebAcquire } from './web-acquirer.mjs';
 import { runWebMaterialize } from './web-materializer.mjs';
 import { cmdPublish, inspectDelivery } from './publish-delivery.mjs';
+import { cmdRetighten } from './granularity-repair.mjs';
 import { assertExternalSessionWriteAllowed } from './probe-state.mjs';
 import { resolveSandboxPath, sessionPaths } from './session.mjs';
 
@@ -43,6 +44,7 @@ const SESSION_HANDLERS = {
   'unlock-stale': (paths) => cmdUnlockStale(paths),
   'export-views': (paths) => cmdExportViews(paths),
   publish: (paths, args) => cmdPublish(paths, args),
+  retighten: (paths, args) => cmdRetighten(paths, args),
 };
 
 function status(paths, args) {

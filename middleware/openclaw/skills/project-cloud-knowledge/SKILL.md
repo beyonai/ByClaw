@@ -59,14 +59,14 @@ python3 <project-cloud-knowledge目录>/scripts/project_cloud_knowledge.py <comm
 
 读取和检索子命令不接受 `--session-id`。`--dry-run` 不调用接口，只校验操作参数和计划。
 
-## 接收 knowledge-collection 入库交接单
+## 接收 knowledge-collection 的采集产物
 
-当上游 `knowledge-collection` 返回 `action: "ingest-handoff"` 时，读取其 `handoff`，不要自行扩大文件、知识库或目录范围。
+根 Agent 会转交采集阶段的交接对象：已发布时是 `publish` 返回的 `deliveryInput`，未发布时是 `status.downstreamInput`。两者都只提供正文文件清单，不携带目标知识库信息。
 
-- 使用 `handoff.target.resourceId`、`handoff.target.directoryPath` 和 `handoff.selection.files`；从上游已验证的正文产物取得对应本地文件。
-- `handoff.manager.command=upload` 时执行 `upload`；`checkConflicts=true` 时按写入子 Skill 先检查冲突。
-- 有 `confirmedOverwritePaths` 时重新验证冲突路径完全一致，再按文件逐一执行 `update-file`；不得接受部分确认。
-- 返回管理器原始 JSON，使上游可依 `handoff.resultContract` 映射 `itemId`、上传路径和 build 受理状态；不能唯一映射时由上游记为 `unknown`。
+- 正文文件只取 `deliveryInput.files` 或 `downstreamInput.files`；图片按 Markdown 相对链接解析。不得扫描或猜测交付目录，也不得改用 `raw/`、`markdown/`、摘要或候选元数据。
+- `--resource-id` 与目录按本 Skill「确定操作资源」小节自行解析；交接对象里没有这些值，缺失时先询问，不要猜测。
+- 写入按写入子 Skill 执行：新增用 `upload`，覆盖已有文件用 `update-file` 并遵守其确认规则。
+- 采集编排器不负责下游生命周期，本 Skill 自行维护自己的状态与确认流程。
 
 ## 通用约束
 

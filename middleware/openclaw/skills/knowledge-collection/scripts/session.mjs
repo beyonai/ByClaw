@@ -86,7 +86,12 @@ export function isInside(root, candidate) {
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
-function resolveTrustedSessionRoot(currentSessionRoot, label) {
+/**
+ * 只做「可信 Session Root 选择」这一半:含环境变量优先级与 Session Root 自身的校验，
+ * 不触碰任何目标路径。需要按同一优先级解析相对路径、但不得探测目标的调用方（例如 init
+ * 绑定交付目标）必须复用此函数，不要重新实现优先级，也不要落到 resolveSandboxPath。
+ */
+export function resolveTrustedSessionRoot(currentSessionRoot, label) {
   const configuredRoot = process.env.KNOWLEDGE_COLLECTION_SESSION_ROOT?.trim();
   const configuredSessionsRoot = process.env.KNOWLEDGE_COLLECTION_SESSIONS_ROOT?.trim();
   const sessionsRoot = configuredSessionsRoot

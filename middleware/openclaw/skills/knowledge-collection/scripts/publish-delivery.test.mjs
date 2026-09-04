@@ -34,13 +34,17 @@ function tempRoot() {
   return realpathSync(mkdtempSync(join(tmpdir(), 'kc-publish-test-')));
 }
 
-async function setupCollectedSession(root, { query = 'DeepSeek article', nested = false } = {}) {
-  const sessionDir = join(root, 'internal-session');
+async function setupCollectedSession(root, {
+  query = 'DeepSeek article', nested = false, sessionDir: explicitSessionDir,
+  extraInitArgs = [], env = {},
+} = {}) {
+  const sessionDir = explicitSessionDir || join(root, 'internal-session');
   const init = await runCli([
     'init', '--session-dir', sessionDir, '--query', query,
     '--source-scope', '["public-internet"]', '--materialization-target', 'selected',
     '--direct-urls', '["https://example.com/deepseek","https://example.com/another","https://example.com/second"]',
-  ]);
+    ...extraInitArgs,
+  ], env);
   assert.equal(init.code, 0, init.stderr || init.stdout);
 
   const sanitizedRelative = nested ? 'sanitized/items/post-01/index.md' : 'sanitized/items/post-01.md';
@@ -97,7 +101,35 @@ async function setupCollectedSession(root, { query = 'DeepSeek article', nested 
   }, null, 2)}\n`);
   const collect = await runCli(['collect', '--session-dir', sessionDir, '--item-json-file', payloadPath]);
   assert.equal(collect.code, 0, collect.stderr || collect.stdout);
-  return { sessionDir, sanitizedRelative, imageRelative, unreferencedRelative };
+  return {
+    sessionDir, sanitizedRelative, imageRelative, unreferencedRelative, initResult: init,
+  };
+}
+
+/** 在 init 阶段绑定交付目标，返回可用于 publish --delivery-handle 的会话。 */
+async function setupBoundSession(root, { query = 'DeepSeek article', deliveryDir } = {}) {
+  const sessionsRoot = join(root, 'by', '.sessions');
+  const sessionRoot = join(sessionsRoot, 'bound-session');
+  const sessionDir = join(sessionRoot, '.collection-runs', 'run-001');
+  const env = { KNOWLEDGE_COLLECTION_SESSIONS_ROOT: sessionsRoot };
+  const target = deliveryDir || join(root, '00-collection');
+  const session = await setupCollectedSession(root, {
+    query,
+    sessionDir,
+    env,
+    extraInitArgs: [
+      '--session-root', sessionRoot,
+      '--delivery-requested', 'true',
+      '--delivery-dir', target,
+    ],
+  });
+  return {
+    ...session,
+    env,
+    sessionRoot,
+    deliveryDir: target,
+    handle: session.initResult.json.task.deliveryTarget.handle,
+  };
 }
 
 test('publish delivers only validated Markdown and referenced local images to an empty target', async () => {
@@ -624,6 +656,206 @@ test('duplicate output basenames receive stable suffixes with correctly paired a
       assert.equal(content.includes(`${stem}-assets/cover.jpg`), true);
       assert.equal(existsSync(join(deliveryDir, `${stem}-assets`, 'cover.jpg')), true);
     }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('publish resolves the delivery target from a handle bound at init', async () => {
+  const root = tempRoot();
+  try {
+    const { sessionDir, deliveryDir, handle, env } = await setupBoundSession(root);
+    mkdirSync(deliveryDir, { recursive: true });
+
+    const published = await runCli([
+      'publish', '--session-dir', sessionDir, '--delivery-handle', handle,
+    ], env);
+    assert.equal(published.code, 0, published.stderr || published.stdout);
+    assert.equal(published.json.delivery.requestedDirectory, deliveryDir);
+    assert.equal(published.json.delivery.actualDirectory, deliveryDir);
+    assert.deepEqual(published.json.delivery.files, [join(deliveryDir, 'post-01.md')]);
+
+    // 幂等重发:同一 actualDirectory,不触发漂移检测
+    const again = await runCli([
+      'publish', '--session-dir', sessionDir, '--delivery-handle', handle,
+    ], env);
+    assert.equal(again.code, 0, again.stderr || again.stdout);
+    assert.equal(again.json.delivery.actualDirectory, deliveryDir);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('publish rejects an unknown or unbound delivery handle and still requires one form', async () => {
+  const root = tempRoot();
+  try {
+    const { sessionDir, handle, env } = await setupBoundSession(root);
+
+    const unknown = await runCli([
+      'publish', '--session-dir', sessionDir, '--delivery-handle', 'delivery-deadbeef',
+    ], env);
+    assert.equal(unknown.code, 1);
+    assert.match(unknown.json.error, /delivery-deadbeef|DELIVERY_HANDLE_UNKNOWN/);
+    assert.notEqual(handle, 'delivery-deadbeef');
+
+    const neither = await runCli(['publish', '--session-dir', sessionDir], env);
+    assert.equal(neither.code, 1);
+    assert.match(neither.json.error, /--delivery-dir|--delivery-handle/);
+
+    // 未绑定交付目标的会话:handle 形式必须报 DELIVERY_TARGET_NOT_BOUND
+    const unboundRoot = tempRoot();
+    try {
+      const unbound = await setupCollectedSession(unboundRoot);
+      const res = await runCli([
+        'publish', '--session-dir', unbound.sessionDir, '--delivery-handle', handle,
+      ]);
+      assert.equal(res.code, 1);
+      assert.match(res.json.error, /DELIVERY_TARGET_NOT_BOUND/);
+      assert.match(res.json.error, /--delivery-dir/);
+    } finally {
+      rmSync(unboundRoot, { recursive: true, force: true });
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('publish accepts both flags only when they resolve to the same directory', async () => {
+  const root = tempRoot();
+  try {
+    const { sessionDir, deliveryDir, handle, env } = await setupBoundSession(root);
+    mkdirSync(deliveryDir, { recursive: true });
+
+    const divergent = await runCli([
+      'publish', '--session-dir', sessionDir, '--delivery-handle', handle,
+      '--delivery-dir', join(root, 'other-target'),
+    ], env);
+    assert.equal(divergent.code, 1);
+    assert.match(divergent.json.error, /不一致|一致/);
+
+    const agreeing = await runCli([
+      'publish', '--session-dir', sessionDir, '--delivery-handle', handle,
+      '--delivery-dir', deliveryDir,
+    ], env);
+    assert.equal(agreeing.code, 0, agreeing.stderr || agreeing.stdout);
+    assert.equal(agreeing.json.delivery.actualDirectory, deliveryDir);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('the two publish forms share one receipt, one lock and one recovery path', async () => {
+  const root = tempRoot();
+  try {
+    const { sessionDir, deliveryDir, handle, env } = await setupBoundSession(root);
+    mkdirSync(deliveryDir, { recursive: true });
+
+    // --delivery-dir 先发布,再用 --delivery-handle 重发:必须复用 receipt,不得另建子目录
+    const byDir = await runCli([
+      'publish', '--session-dir', sessionDir, '--delivery-dir', deliveryDir,
+    ], env);
+    assert.equal(byDir.code, 0, byDir.stderr || byDir.stdout);
+    assert.equal(byDir.json.delivery.actualDirectory, deliveryDir);
+
+    const byHandle = await runCli([
+      'publish', '--session-dir', sessionDir, '--delivery-handle', handle,
+    ], env);
+    assert.equal(byHandle.code, 0, byHandle.stderr || byHandle.stdout);
+    assert.equal(byHandle.json.delivery.actualDirectory, deliveryDir,
+      'handle 形式必须复用既有 receipt,而非分配 <slug>-collection-<hash> 子目录');
+    assert.equal(byHandle.json.delivery.requestedDirectory, byDir.json.delivery.requestedDirectory);
+    assert.deepEqual(readdirSync(deliveryDir).filter((e) => e.includes('-collection-')), []);
+
+    // 反向顺序:handle 先发布,--delivery-dir 重发同样复用
+    const reverseRoot = tempRoot();
+    try {
+      const reverse = await setupBoundSession(reverseRoot);
+      mkdirSync(reverse.deliveryDir, { recursive: true });
+      const h = await runCli([
+        'publish', '--session-dir', reverse.sessionDir, '--delivery-handle', reverse.handle,
+      ], reverse.env);
+      assert.equal(h.code, 0, h.stderr || h.stdout);
+      const d = await runCli([
+        'publish', '--session-dir', reverse.sessionDir, '--delivery-dir', reverse.deliveryDir,
+      ], reverse.env);
+      assert.equal(d.code, 0, d.stderr || d.stdout);
+      assert.equal(d.json.delivery.actualDirectory, h.json.delivery.actualDirectory);
+    } finally {
+      rmSync(reverseRoot, { recursive: true, force: true });
+    }
+
+    // 两种形式对同一目标必须映射到同一把锁
+    const lockRoot = join(tmpdir(), 'knowledge-collection-publish-locks');
+    const expectedLock = `${crypto.createHash('sha256').update(resolve(deliveryDir)).digest('hex')}.lock`;
+    assert.equal(existsSync(join(lockRoot, expectedLock)), false, '锁必须在发布结束后释放');
+    assert.equal(
+      crypto.createHash('sha256').update(resolve(byDir.json.delivery.requestedDirectory)).digest('hex'),
+      crypto.createHash('sha256').update(resolve(byHandle.json.delivery.requestedDirectory)).digest('hex'),
+      '两种形式的 requestedDirectory 必须逐字节一致,否则锁键分裂',
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('publish --delivery-handle recovers a planned receipt written by the --delivery-dir form', async () => {
+  const root = tempRoot();
+  try {
+    const { sessionDir, deliveryDir, handle, env } = await setupBoundSession(root);
+    mkdirSync(deliveryDir, { recursive: true });
+
+    const published = await runCli([
+      'publish', '--session-dir', sessionDir, '--delivery-dir', deliveryDir,
+    ], env);
+    assert.equal(published.code, 0, published.stderr || published.stdout);
+
+    // 模拟被中断的发布:receipt 退回 planned(由 --delivery-dir 形式写入)
+    const sessionFile = join(sessionDir, 'session.json');
+    const state = JSON.parse(readFileSync(sessionFile, 'utf8'));
+    state.delivery.status = 'planned';
+    writeFileSync(sessionFile, `${JSON.stringify(state, null, 2)}\n`);
+
+    const recovered = await runCli([
+      'publish', '--session-dir', sessionDir, '--delivery-handle', handle,
+    ], env);
+    assert.equal(recovered.code, 0, recovered.stderr || recovered.stdout);
+    assert.equal(recovered.json.delivery.actualDirectory, deliveryDir);
+    assert.equal(
+      JSON.parse(readFileSync(sessionFile, 'utf8')).delivery.status,
+      'published',
+      'handle 形式必须把 --delivery-dir 写下的 planned receipt 恢复为 published',
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('the delivery-path redaction is scoped to task.deliveryTarget and never suppresses the handoff', async () => {
+  const root = tempRoot();
+  try {
+    const { sessionDir, deliveryDir, handle, env } = await setupBoundSession(root);
+    mkdirSync(deliveryDir, { recursive: true });
+
+    // 发布前:status 不得泄露交付路径
+    const before = await runCli(['status', '--session-dir', sessionDir], env);
+    assert.equal(before.code, 0, before.stderr || before.stdout);
+    assert.equal(before.stdout.includes(deliveryDir), false, '发布前 status 不得包含交付路径');
+    assert.equal(before.json.task.deliveryTarget.handle, handle);
+
+    const published = await runCli([
+      'publish', '--session-dir', sessionDir, '--delivery-handle', handle,
+    ], env);
+    assert.equal(published.code, 0, published.stderr || published.stdout);
+
+    // 发布后:receipt 与 deliveryInput 必须照常披露路径,过度脱敏会破坏 SKILL.md 要求的交接
+    assert.equal(published.json.delivery.requestedDirectory, deliveryDir);
+    assert.equal(published.json.deliveryInput.directory, deliveryDir);
+
+    const after = await runCli(['status', '--session-dir', sessionDir], env);
+    assert.equal(after.code, 0, after.stderr || after.stdout);
+    assert.equal(after.json.deliveryInput.directory, deliveryDir);
+    assert.equal(after.json.task.deliveryTarget.requestedDirectory, undefined,
+      'task.deliveryTarget 的脱敏在发布后仍然生效');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

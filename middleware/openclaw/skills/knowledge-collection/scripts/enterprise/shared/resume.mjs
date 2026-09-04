@@ -86,6 +86,20 @@ export async function readResumeCandidates(sessionDir, source, itemIds) {
       candidate.completeEvidence = item.completeEvidence === true;
       candidate.coverUrls = Array.isArray(item.coverUrls) ? item.coverUrls : [];
     }
+    if (source === 'cloud-knowledge') {
+      candidate.resourceId = item.resourceId;
+      candidate.filePath = item.filePath;
+      candidate.originalFileName = item.originalFileName;
+      candidate.fileType = item.fileType;
+      candidate.fileSize = item.fileSize;
+      candidate.fileSignature = item.fileSignature;
+      candidate.duplicateGroupKey = item.duplicateGroupKey;
+      candidate.duplicateGroupProvisional = item.duplicateGroupProvisional === true;
+      if (!Number.isSafeInteger(candidate.resourceId) || typeof candidate.filePath !== 'string'
+        || typeof candidate.fileType !== 'string' || !Number.isSafeInteger(candidate.fileSize)) {
+        throw new Error('cloud resume candidate is missing required metadata');
+      }
+    }
     Object.defineProperty(candidate, 'resumeIdentity', { value: resumeIdentity });
     return candidate;
   });

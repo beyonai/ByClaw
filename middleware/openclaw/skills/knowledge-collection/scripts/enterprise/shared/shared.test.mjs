@@ -1622,6 +1622,10 @@ test('SOURCE_IDENTITY exposes the exact enterprise connector identities', async 
     feishu: { connector: 'fws', source: 'fws', backend: 'lark-cli', sourceSkill: 'fws' },
     wecom: { connector: 'wecom', source: 'wecom', backend: 'wecom-cli', sourceSkill: 'wecomcli' },
     ima: { connector: 'ima', source: 'ima', backend: 'bycli', sourceSkill: 'bycli' },
+    'cloud-knowledge': {
+      connector: 'cloud-knowledge', source: 'cloud-knowledge',
+      backend: 'project-cloud-knowledge', sourceSkill: 'project-cloud-knowledge',
+    },
   });
 });
 
