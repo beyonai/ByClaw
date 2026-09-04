@@ -7,7 +7,6 @@ import classnames from 'classnames';
 import { debounce, noop } from 'lodash';
 import AntdIcon from '@/components/AntdIcon';
 import { queryResourceOperationPermissions, restoreResource } from '@/pages/manager/service/resources';
-import { installDigitalEmployeeRelResources } from '@/pages/manager/service/DigitalEmployeeMgr';
 import { setDefaultDigitalEmployee } from '@/service/digitalEmployees';
 import { getFileUrl } from '@/utils/file';
 import { useRequest } from '@/hooks/useRequest';
@@ -20,6 +19,8 @@ import { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentB
 import { useWorkspaceSkillActions } from '../../workspaceSkill/useWorkspaceSkillActions';
 import WorkspaceSkillShareAuthModal from '../../workspaceSkill/WorkspaceSkillShareAuthModal';
 import type { WorkspaceSkillItem } from '../../workspaceSkill/utils';
+import ResourceInstallDialog from '../ResourceInstallDialog';
+import type { ResourceInstallTargetContext } from '../../resourceInstallContext';
 import styles from './index.module.less';
 
 const { Paragraph } = Typography;
@@ -88,6 +89,7 @@ export interface IResourceCardItem {
 type ResourceCardActionConfig = {
   scene?: ResourceCardActionScene;
   installedResourceIds?: ReadonlySet<string>;
+  installTargetContext?: ResourceInstallTargetContext;
 
   /** 当前用户对该数字员工是否有管理权限，无则隐藏工作空间技能的删除入口。 */
   canManageWorkspaceSkill?: boolean;
@@ -329,6 +331,8 @@ const RenderContent = (props: ResourceCardProps) => {
   const dispatch = useDispatch();
   const { agentId, agentInfo, EventEmitter } = useGlobal();
   const [digitalEmployeeMenuOpen, setDigitalEmployeeMenuOpen] = useState(false);
+  const [installDialogOpen, setInstallDialogOpen] = useState(false);
+  const [installing, setInstalling] = useState(false);
   const { userInfo, defaultDigEmployeeId } = useSelector(
     ({ user, employees }: { user: any; employees: IEmployeesState }) => ({
       userInfo: user.userInfo,
@@ -369,33 +373,7 @@ const RenderContent = (props: ResourceCardProps) => {
       // message.error(intl.formatMessage({ id: 'common.operationFailed' }));
     },
   });
-  const { mutate: handleInstall, isLoading: installing } = useRequest({
-    mutationFn: async () => {
-      // installRelResources 走 customHandle，业务失败（如无管理权限 code!==0）也会 resolve，
-      // 这里必须显式校验 code，否则 onSuccess 会把“没权限”当成“安装成功”。
-      const res: any = await installDigitalEmployeeRelResources({
-        digitalEmployeeId: `${activeDigitalEmployeeId}`,
-        relIds: [`${resource.resourceId}`],
-      });
-      if (res && res.code !== 0) {
-        throw res.msg || intl.formatMessage({ id: 'common.operationFailed' });
-      }
-      return res;
-    },
-    onSuccess: () => {
-      message.success(intl.formatMessage({ id: 'resource.installSuccess' }));
-      window.dispatchEvent(
-        new CustomEvent('digitalEmployeeResourceInstalled', { detail: { resourceId: resource?.resourceId } })
-      );
-      if (isSkillResource(resource, resourceType)) {
-        EventEmitter?.emit('beyond-resourceList-resourceType-reload', {
-          resourceType: 'SKILL',
-          resetSkillFilters: false,
-          skipResourceCenterRefresh: true,
-        });
-      }
-    },
-  });
+  const installTargetContext = actionConfig?.installTargetContext || { mode: 'select' as const };
 
   const displayTitle = resource.resourceName || resource.name || intl.formatMessage({ id: 'common.none' });
   const displayDescription =
@@ -662,26 +640,19 @@ const RenderContent = (props: ResourceCardProps) => {
       });
     }
 
-    // 安装到当前默认数字员工
+    // 资源中心选择目标员工安装；从“当前员工”进入时由路由显式指定唯一目标。
     if (canInstallResource(resource, resourceType) && !isInstalledSkill) {
-      const disabled = !activeDigitalEmployeeId;
       items.push({
         key: 'install',
         label: (
-          <ConfirmMenuLabel
-            disabled={disabled || installing}
-            title={intl.formatMessage({ id: 'resource.installConfirm' })}
-            onConfirm={() => handleInstall(undefined)}
-          >
-            <BuildMenuLabel
-              icon="icon-a-Addtianjia"
-              text={intl.formatMessage({ id: getInstallLabelId(resource, resourceType) })}
-              disabled={disabled}
-              disabledTip={intl.formatMessage({ id: 'resource.noDefaultDigitalEmployee' })}
-              loading={installing}
-            />
-          </ConfirmMenuLabel>
+          <BuildMenuLabel
+            icon="icon-a-Addtianjia"
+            text={intl.formatMessage({ id: getInstallLabelId(resource, resourceType) })}
+            loading={installing}
+          />
         ),
+        disabled: installing,
+        onClick: () => setInstallDialogOpen(true),
       });
     }
 
@@ -735,7 +706,6 @@ const RenderContent = (props: ResourceCardProps) => {
     dispatch,
     EventEmitter,
     handleSetDefaultDebounced,
-    handleInstall,
     intl,
     isDefaultDigitalEmployee,
     isDigitalEmployeeResource,
@@ -813,6 +783,26 @@ const RenderContent = (props: ResourceCardProps) => {
         onSuccess={notifySkillListReload}
       />
     ) : null;
+  const installDialog =
+    resource.resourceId && installDialogOpen ? (
+      <ResourceInstallDialog
+        open={installDialogOpen}
+        resourceId={resource.resourceId}
+        resourceType={resourceType || resource.resourceBizType}
+        targetContext={installTargetContext}
+        onClose={() => setInstallDialogOpen(false)}
+        onInstallingChange={setInstalling}
+        onSuccess={() => {
+          if (isSkillResource(resource, resourceType)) {
+            EventEmitter?.emit('beyond-resourceList-resourceType-reload', {
+              resourceType: 'SKILL',
+              resetSkillFilters: false,
+              skipResourceCenterRefresh: true,
+            });
+          }
+        }}
+      />
+    ) : null;
 
   const getDefaultIcon = () => {
     switch (resourceType) {
@@ -835,6 +825,7 @@ const RenderContent = (props: ResourceCardProps) => {
           [styles.disabledClickContent]: isCardClickDisabled,
         })}
         onClick={() => {
+          if (installDialogOpen) return;
           if (isCancelledResource) return;
           if (isCardClickDisabled) {
             onCardClickDisabled?.(resource);
@@ -914,6 +905,7 @@ const RenderContent = (props: ResourceCardProps) => {
             {workspaceShareModal}
           </div>
         )}
+        {installDialog}
       </div>
     );
   }
@@ -926,6 +918,7 @@ const RenderContent = (props: ResourceCardProps) => {
         [styles.disabledClickContent]: isCardClickDisabled,
       })}
       onClick={() => {
+        if (installDialogOpen) return;
         if (isCancelledResource) return;
         if (isCardClickDisabled) {
           onCardClickDisabled?.(resource);
@@ -1107,6 +1100,7 @@ const RenderContent = (props: ResourceCardProps) => {
           </div>
         </div>
       </div>
+      {installDialog}
     </div>
   );
 };

@@ -77,24 +77,37 @@ export const FilePathTooltip: React.FC<{ item: FileBrowserItem; children: React.
 function toFileTreeData(
   list: FileBrowserItem[],
   childrenByPath: Record<string, FileBrowserItem[]>,
-  expandedDirectoryKeySet: Set<string>
+  expandedDirectoryKeySet: Set<string>,
+  ancestorDirectoryPaths: Set<string> = new Set()
 ): FileTreeItem[] {
-  return sortFileBrowserItems(list).map((item) => {
-    const dir = isDirectory(item);
-    const directoryPath = ensureDirectoryPath(item.path);
-    const expanded = dir && expandedDirectoryKeySet.has(directoryPath);
-    return {
-      ...item,
-      key: dir ? directoryPath : item.path,
-      title: <span>{item.name}</span>,
-      isLeaf: !dir,
-      className: expanded ? styles.treeNodeExpanded : undefined,
-      children:
-        dir && childrenByPath[directoryPath]
-          ? toFileTreeData(childrenByPath[directoryPath], childrenByPath, expandedDirectoryKeySet)
-          : undefined,
-    };
-  });
+  // 接口异常时可能把当前目录再次作为子节点返回；递归渲染前去重并阻断祖先路径，避免栈溢出。
+  const seenPaths = new Set<string>();
+  return sortFileBrowserItems(list)
+    .filter((item) => {
+      const path = normalizeFileBrowserPath(item.path);
+      if (seenPaths.has(path)) return false;
+      seenPaths.add(path);
+      return true;
+    })
+    .map((item) => {
+      const dir = isDirectory(item);
+      const directoryPath = ensureDirectoryPath(item.path);
+      const expanded = dir && expandedDirectoryKeySet.has(directoryPath);
+      const nextAncestorPaths = new Set(ancestorDirectoryPaths);
+      nextAncestorPaths.add(directoryPath);
+      const childItems = dir && childrenByPath[directoryPath];
+      return {
+        ...item,
+        key: dir ? directoryPath : item.path,
+        title: <span>{item.name}</span>,
+        isLeaf: !dir,
+        className: expanded ? styles.treeNodeExpanded : undefined,
+        children:
+          childItems && !ancestorDirectoryPaths.has(directoryPath)
+            ? toFileTreeData(childItems, childrenByPath, expandedDirectoryKeySet, nextAncestorPaths)
+            : undefined,
+      };
+    });
 }
 
 const formatFileSize = (size?: number) => {

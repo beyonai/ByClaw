@@ -1,4 +1,4 @@
-import { isAbsolute, join } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 import { createDingtalkAdapter } from './adapters/dingtalk.mjs';
 import { createFwsAdapter } from './adapters/fws.mjs';
 import { createWecomAdapter } from './adapters/wecom.mjs';
@@ -11,7 +11,7 @@ const SEARCH_OPTIONS = {
   dingtalk: new Map([['workspace-ids', 'workspaceIds'], ['extensions', 'extensions'], ['folder-id', 'folderId']]),
   feishu: new Map([['space-id', 'spaceId'], ['file-types', 'fileTypes']]),
   wecom: new Map(),
-  ima: new Map([['kb', 'kb'], ['note-mode', 'noteMode']]),
+  ima: new Map([['kb', 'kb']]),
 };
 const RESOURCE_OPTIONS = {
   dingtalk: new Map(),
@@ -129,10 +129,15 @@ export function parseMaterializeRequest(values) {
   if (!itemIds.length || new Set(itemIds).size !== itemIds.length) {
     throw new Error('--item-ids must be a comma-separated list of distinct candidate IDs');
   }
+  const sessionDir = absoluteSessionDir(values);
+  const outputDir = absoluteOutputDir(values);
+  if (source === 'ima' && resolve(sessionDir) !== resolve(outputDir)) {
+    throw new Error('IMA materialization must use the same discovery session for --session-dir and --output-dir');
+  }
   return {
     source,
-    sessionDir: absoluteSessionDir(values),
-    outputDir: absoluteOutputDir(values),
+    sessionDir,
+    outputDir,
     itemIds,
     concurrency: parseInteger(values, 'concurrency', 4, 1, 16),
   };
@@ -205,7 +210,6 @@ function defaultAdapters() {
     feishu: createFwsAdapter({ bin: process.env.LARK_CLI_BIN || 'lark-cli', env: process.env }),
     wecom: createWecomAdapter({ bin: process.env.WECOM_CLI_BIN || 'wecom-cli', env: process.env }),
     ima: createImaAdapter({
-      bin: process.env.IMA_CLI_BIN || 'ima',
       bycliBin: process.env.BYCLI_BIN || 'bycli',
       env: process.env,
     }),
@@ -220,7 +224,9 @@ function reasonOf(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
-export async function dispatchEnterprise(command, values, { adapters = defaultAdapters() } = {}) {
+export async function dispatchEnterprise(command, values, {
+  adapters = defaultAdapters(), taskContract = null,
+} = {}) {
   const request = command === 'search' ? parseSearchRequest(values)
     : command === 'resource' ? parseResourceRequest(values)
       : command === 'materialize' ? parseMaterializeRequest(values)
@@ -236,6 +242,7 @@ export async function dispatchEnterprise(command, values, { adapters = defaultAd
   const outcome = await method({
     ...request,
     ...request.sourceOptions,
+    ...(taskContract ? { taskContract } : {}),
     ...(command === 'resource' && request.source === 'feishu' ? { resourceKind: 'minutes' } : {}),
   });
   if (!outcome || typeof outcome !== 'object') throw new Error('connector returned an invalid outcome');
@@ -248,7 +255,9 @@ export async function dispatchEnterprise(command, values, { adapters = defaultAd
   };
 }
 
-export async function dispatchEnterpriseBatch(command, requests, { adapters = defaultAdapters(), concurrency = 4 } = {}) {
+export async function dispatchEnterpriseBatch(command, requests, {
+  adapters = defaultAdapters(), concurrency = 4, taskContract = null,
+} = {}) {
   if (!Array.isArray(requests) || requests.length === 0) {
     throw new Error('enterprise batch requests must be a non-empty array');
   }
@@ -277,7 +286,7 @@ export async function dispatchEnterpriseBatch(command, requests, { adapters = de
       const session = sessions[index];
       let outcome;
       try {
-        outcome = await dispatchEnterprise(command, session.values, { adapters });
+        outcome = await dispatchEnterprise(command, session.values, { adapters, taskContract });
       } catch (error) {
         outcome = {
           ...handledOutcome(session.source, 'failed', session.sessionDir),

@@ -97,8 +97,6 @@ ARG WECOM_CLI_VERSION=0.1.9
 ARG LARKSUITE_CLI_VERSION=1.0.85
 ARG ZREAD_CLI_VERSION=0.2.13
 ARG CHATLAB_CLI_VERSION=0.37.0
-ARG IMA_OPENAPI_CLI_VERSION=0.1.3
-ARG IMA_OPENAPI_CLI_INTEGRITY=sha512-ckur/WWHugygFu130u/Zmn2IU9w7Ghc2cmPPxS6lFWvETSz7Rl3lqQGjMLmhSbTY2eCIR8DvqOzozOf5rWRbHg==
 ARG INSTALL_BROWSER_STACK=true
 ARG SEARXNG_CLI_VERSION=0.1.0
 
@@ -132,24 +130,16 @@ RUN npm config set registry "${NPM_REGISTRY}" --global \
     && npm config set fetch-retry-mintimeout 20000 --global \
     && npm config set fetch-retry-maxtimeout 120000 --global \
     && cd /tmp \
-    && npm pack "ima-openapi-cli@${IMA_OPENAPI_CLI_VERSION}" \
-    && node -e 'const fs=require("fs"); const crypto=require("crypto"); const [expected,file]=process.argv.slice(1); const actual="sha512-"+crypto.createHash("sha512").update(fs.readFileSync(file)).digest("base64"); if (actual !== expected) throw new Error("IMA CLI integrity mismatch");' "${IMA_OPENAPI_CLI_INTEGRITY}" "/tmp/ima-openapi-cli-${IMA_OPENAPI_CLI_VERSION}.tgz" \
     && npm install -g \
         "hyperframes@${HYPERFRAMES_VERSION}" \
         "@remotion/cli@${REMOTION_VERSION}" \
         "@byclaw/by-framework@${BY_FRAMEWORK_TS_VERSION}" \
         "zread_cli@${ZREAD_CLI_VERSION}" \
         "chatlab-cli@${CHATLAB_CLI_VERSION}" \
-        "/tmp/ima-openapi-cli-${IMA_OPENAPI_CLI_VERSION}.tgz" \
-    && test "$(ima --version)" = "${IMA_OPENAPI_CLI_VERSION}" \
-    && ima auth --help >/dev/null \
-    && ima note --help >/dev/null \
-    && ima wiki --help >/dev/null \
-    && zread version --stdio | grep -F "\"version\":\"${ZREAD_CLI_VERSION}\"" >/dev/null \
-    && rm -f "/tmp/ima-openapi-cli-${IMA_OPENAPI_CLI_VERSION}.tgz"
+    && zread version --stdio | grep -F "\"version\":\"${ZREAD_CLI_VERSION}\"" >/dev/null
 
 ARG OPENCLI_VERSION=2.1.56
-ARG OPENCLI_EXTENSION_VERSION=2.1.21
+ARG OPENCLI_EXTENSION_VERSION=2.1.22
 RUN set -eux; \
     if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
         sed -i 's|http://deb.debian.org/debian|https://mirrors.tuna.tsinghua.edu.cn/debian|g' /etc/apt/sources.list.d/debian.sources; \

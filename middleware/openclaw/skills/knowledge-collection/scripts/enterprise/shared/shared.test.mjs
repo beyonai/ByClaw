@@ -506,10 +506,10 @@ test('createArtifactWriter publishes into an empty initialized collection sessio
     await writer.writeText('markdown/items/article/index.md', '# Article\n');
     await writer.writeText('sanitized/items/article/index.md', '# Article\n');
     await writer.writeCollectionBundle({
-      title: 'IMA collection', source: 'ima', backend: 'ima', url: 'ima://search', filters: {},
+      title: 'IMA collection', source: 'ima', backend: 'bycli', url: 'ima://search', filters: {},
       inventory: [{
         itemId: 'ima-1', title: 'Article', sourceUrl: 'ima://article/1', sourceItemId: '1',
-        sourceSkill: 'ima-skill', backend: 'ima', collectionFilters: {}, rawArtifacts: [],
+        sourceSkill: 'bycli', backend: 'bycli', collectionFilters: {}, rawArtifacts: [],
         materialization: {
           status: 'materialized', markdownPath: 'markdown/items/article/index.md',
           sanitizedPath: 'sanitized/items/article/index.md', pendingArtifactCleanup: [],
@@ -567,6 +567,185 @@ test('createArtifactWriter atomically allows only one concurrent owner for a new
     assert.deepEqual(
       (await readdir(join(root, 'missing/a'))).filter((name) => /staging|initializ/i.test(name)),
       [],
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('createArtifactWriter allows only one replacement owner for a committed session', async () => {
+  const { createArtifactWriter } = await import('./artifact-writer.mjs');
+  const { root } = await tempCase('enterprise-artifact-replacement-owner-');
+  const outputRoot = join(root, 'replacement-output');
+  try {
+    const initial = await createArtifactWriter(outputRoot);
+    await initial.writeText('markdown/item-1.md', '# Item\n');
+    await initial.writeText('sanitized/items/item-1.md', '# Item\n');
+    const bundle = validBundle();
+    bundle.inventory[0].rawArtifacts = [];
+    await initial.writeCollectionBundle(bundle);
+
+    const results = await Promise.allSettled([
+      createArtifactWriter(outputRoot, { allowExistingSession: true }),
+      createArtifactWriter(outputRoot, { allowExistingSession: true }),
+    ]);
+    assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1);
+    const rejection = results.find((result) => result.status === 'rejected');
+    assert.match(rejection.reason.message, /锁|lock|replacement.*owner/i);
+    const owner = results.find((result) => result.status === 'fulfilled').value;
+    await owner.abort();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('createArtifactWriter allows only one writer for an existing initialized session', async () => {
+  const { createArtifactWriter } = await import('./artifact-writer.mjs');
+  const { ensureSessionSkeleton, newSession } = await import('../../session.mjs');
+  const { root } = await tempCase('enterprise-artifact-initialized-owner-');
+  const outputRoot = join(root, 'initialized-output');
+  try {
+    ensureSessionSkeleton(outputRoot);
+    await writeFile(join(outputRoot, 'session.json'), `${JSON.stringify(newSession({
+      query: 'IMA query', sourceScope: ['ima'], materializationTarget: 'selected',
+    }))}\n`);
+
+    const results = await Promise.allSettled([
+      createArtifactWriter(outputRoot),
+      createArtifactWriter(outputRoot),
+    ]);
+    assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1);
+    const rejection = results.find((result) => result.status === 'rejected');
+    assert.match(rejection.reason.message, /锁|lock|writer.*owner/i);
+    const owner = results.find((result) => result.status === 'fulfilled').value;
+    await owner.abort();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('createArtifactWriter recovers an interrupted replacement from its committed backup', async () => {
+  const { createArtifactWriter } = await import('./artifact-writer.mjs');
+  const { root } = await tempCase('enterprise-artifact-replacement-recovery-');
+  const outputRoot = join(root, 'replacement-output');
+  try {
+    const initial = await createArtifactWriter(outputRoot);
+    await initial.writeText('markdown/item-1.md', '# Item\n');
+    await initial.writeText('sanitized/items/item-1.md', '# Item\n');
+    const bundle = validBundle();
+    bundle.inventory[0].rawArtifacts = [];
+    await initial.writeCollectionBundle(bundle);
+
+    const backupDir = join(outputRoot, '.kc-bundle-backup');
+    await mkdir(backupDir, { mode: 0o700 });
+    await writeFile(join(backupDir, 'session.json'), await readFile(join(outputRoot, 'session.json')));
+    await writeFile(join(backupDir, 'metadata.json'), await readFile(join(outputRoot, 'sanitized/metadata.json')));
+    await writeFile(join(backupDir, 'collection-result.json'), await readFile(join(outputRoot, 'collection-result.json')));
+    const interrupted = await readJson(join(outputRoot, 'session.json'));
+    interrupted.task.publicationStatus = 'uncommitted';
+    interrupted.task.status = 'failed';
+    await writeFile(join(outputRoot, 'session.json'), `${JSON.stringify(interrupted)}\n`);
+
+    const recovered = await createArtifactWriter(outputRoot, { allowExistingSession: true });
+    const session = await readJson(join(outputRoot, 'session.json'));
+    assert.equal(session.task.status, 'collected');
+    assert.equal(session.task.publicationStatus, 'committed');
+    assert.equal(await fileExists(backupDir), false);
+    await recovered.abort();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('replacement publishes the uncommitted marker before compatibility metadata', async () => {
+  const { createArtifactWriter } = await import('./artifact-writer.mjs');
+  const { root } = await tempCase('enterprise-artifact-replacement-order-');
+  const outputRoot = join(root, 'replacement-output');
+  try {
+    const initial = await createArtifactWriter(outputRoot);
+    await initial.writeText('markdown/item-1.md', '# Item\n');
+    await initial.writeText('sanitized/items/item-1.md', '# Item\n');
+    const bundle = validBundle();
+    bundle.inventory[0].rawArtifacts = [];
+    await initial.writeCollectionBundle(bundle);
+
+    let observedPublicationStatus = null;
+    const replacement = await createArtifactWriter(outputRoot, {
+      allowExistingSession: true,
+      beforeCompatibilityPublish: async () => {
+        observedPublicationStatus = (await readJson(join(outputRoot, 'session.json'))).task.publicationStatus;
+        throw new Error('injected compatibility publication failure');
+      },
+    });
+    await assert.rejects(
+      replacement.writeCollectionBundle(bundle),
+      /injected compatibility publication failure/,
+    );
+    assert.equal(observedPublicationStatus, 'uncommitted');
+    assert.equal((await readJson(join(outputRoot, 'session.json'))).task.publicationStatus, 'committed');
+    await replacement.abort();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('initialized session publication failure restores the original initialized session', async () => {
+  const { createArtifactWriter } = await import('./artifact-writer.mjs');
+  const { ensureSessionSkeleton, newSession } = await import('../../session.mjs');
+  const { root } = await tempCase('enterprise-artifact-initialized-recovery-');
+  const outputRoot = join(root, 'initialized-output');
+  try {
+    ensureSessionSkeleton(outputRoot);
+    const initialized = newSession({
+      query: 'enterprise query', sourceScope: ['feishu'], materializationTarget: 'selected',
+    });
+    await writeFile(join(outputRoot, 'session.json'), `${JSON.stringify(initialized)}\n`);
+    const writer = await createArtifactWriter(outputRoot, {
+      beforeCompatibilityPublish: async () => {
+        throw new Error('injected initialized publication failure');
+      },
+    });
+    await writer.writeText('markdown/item-1.md', '# Item\n');
+    await writer.writeText('sanitized/items/item-1.md', '# Item\n');
+    const bundle = validBundle();
+    bundle.inventory[0].rawArtifacts = [];
+
+    await assert.rejects(
+      writer.writeCollectionBundle(bundle),
+      /injected initialized publication failure/,
+    );
+    const restored = await readJson(join(outputRoot, 'session.json'));
+    assert.equal(restored.task.status, 'initialized');
+    assert.equal(restored.task.publicationStatus, undefined);
+    assert.equal(await fileExists(join(outputRoot, '.kc-bundle-backup')), false);
+    await writer.abort();
+
+    const next = await createArtifactWriter(outputRoot);
+    await next.abort();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('replacement rejects a symlinked live bundle file', async () => {
+  const { createArtifactWriter } = await import('./artifact-writer.mjs');
+  const { root } = await tempCase('enterprise-artifact-replacement-symlink-');
+  const outputRoot = join(root, 'replacement-output');
+  try {
+    const initial = await createArtifactWriter(outputRoot);
+    await initial.writeText('markdown/item-1.md', '# Item\n');
+    await initial.writeText('sanitized/items/item-1.md', '# Item\n');
+    const bundle = validBundle();
+    bundle.inventory[0].rawArtifacts = [];
+    await initial.writeCollectionBundle(bundle);
+
+    const outsideSession = join(root, 'outside-session.json');
+    await writeFile(outsideSession, await readFile(join(outputRoot, 'session.json')));
+    await rm(join(outputRoot, 'session.json'));
+    await symlink(outsideSession, join(outputRoot, 'session.json'));
+    await assert.rejects(
+      createArtifactWriter(outputRoot, { allowExistingSession: true }),
+      /outside output root|symbolic link|must not already exist/i,
     );
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -844,7 +1023,7 @@ function validBundle() {
       sourceSkill: 'fws',
       backend: 'lark-cli',
       collectionFilters: { cookie: 'inventory-secret' },
-      rawArtifacts: ['raw/item-1.json'],
+      rawArtifacts: [],
       materialization: {
         status: 'materialized',
         markdownPath: 'markdown/item-1.md',
@@ -965,6 +1144,35 @@ test('writeCollectionBundle rejects consumer-invalid bundle and inventory before
           'inspect', '--session-dir', outputRoot, '--full',
         ]);
         assert.notEqual(inspected.code, 0);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    });
+  }
+});
+
+test('writeCollectionBundle rejects missing, out-of-raw, and symlink raw artifacts', async (t) => {
+  const { createArtifactWriter } = await import('./artifact-writer.mjs');
+  for (const scenario of ['missing', 'outside', 'symlink']) {
+    await t.test(scenario, async () => {
+      const { root } = await tempCase(`enterprise-invalid-raw-${scenario}-`);
+      const outputRoot = join(root, 'output-new');
+      try {
+        const writer = await createArtifactWriter(outputRoot);
+        await writer.writeText('markdown/item-1.md', '# Item\n');
+        await writer.writeText('sanitized/items/item-1.md', '# Item\n');
+        const bundle = validBundle();
+        if (scenario === 'missing') bundle.inventory[0].rawArtifacts = ['raw/missing.json'];
+        if (scenario === 'outside') bundle.inventory[0].rawArtifacts = ['markdown/item-1.md'];
+        if (scenario === 'symlink') {
+          await writer.writeJson('raw/evidence.json', { ok: true });
+          await symlink(join(outputRoot, 'raw/evidence.json'), join(outputRoot, 'raw/link.json'));
+          bundle.inventory[0].rawArtifacts = ['raw/link.json'];
+        }
+        await assert.rejects(
+          writer.writeCollectionBundle(bundle),
+          /raw artifact|rawArtifacts|symbolic link|regular file|outside output root/i,
+        );
       } finally {
         await rm(root, { recursive: true, force: true });
       }
@@ -1413,7 +1621,7 @@ test('SOURCE_IDENTITY exposes the exact enterprise connector identities', async 
     dingtalk: { connector: 'dws', source: 'dws', backend: 'dws', sourceSkill: 'dws' },
     feishu: { connector: 'fws', source: 'fws', backend: 'lark-cli', sourceSkill: 'fws' },
     wecom: { connector: 'wecom', source: 'wecom', backend: 'wecom-cli', sourceSkill: 'wecomcli' },
-    ima: { connector: 'ima', source: 'ima', backend: 'ima', sourceSkill: 'ima-skill' },
+    ima: { connector: 'ima', source: 'ima', backend: 'bycli', sourceSkill: 'bycli' },
   });
 });
 

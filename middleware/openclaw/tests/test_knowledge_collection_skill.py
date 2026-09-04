@@ -427,7 +427,7 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
 
         self.assertIn("企业来源", agent_reach)
         self.assertIn("采集编排器 `knowledge-collection`", agent_reach)
-        self.assertIn("不得作为公共互联网任务交给 `bycli`", agent_reach)
+        self.assertIn("不得作为公共互联网任务走本路由层", agent_reach)
 
         bridges = {
             "references/sources/wecom-wecomcli.md": "`wecomcli` skill",
@@ -729,6 +729,53 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             self.assertIn(phrase, ima)
         self.assertIn("封面失败不改变正文的物化状态", ima)
         self.assertNotIn("任一封面下载、校验或写入失败时，该条物化失败", ima)
+
+    def test_ima_collection_contract_uses_only_the_bycli_ima_adapter(self):
+        ima = (SKILL_ROOT / "references" / "sources" / "ima.md").read_text(encoding="utf-8")
+        agent_reach = (SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8")
+        ima_skill = (SKILLS_ROOT / "ima-skill" / "SKILL.md").read_text(encoding="utf-8")
+        combined = f"{ima}\n{agent_reach}"
+
+        for phrase in (
+            "`bycli ima knowledge-list -f json`",
+            "`bycli ima knowledge <knowledgeBase> -f json`",
+            "逐库",
+            "本地筛选",
+            "部分失败",
+        ):
+            self.assertIn(phrase, combined)
+        for standalone_command in (
+            "ima auth check",
+            "ima note search",
+            "ima wiki search",
+            "ima-openapi-cli",
+        ):
+            self.assertNotIn(standalone_command, combined)
+        self.assertIn(
+            "`knowledge-collection` 的 IMA 采集只能使用 `bycli ima`",
+            ima_skill,
+        )
+        self.assertNotIn(
+            "失败后可由 `knowledge-collection` 调用一次 `ima wiki search`",
+            ima_skill,
+        )
+
+    def test_ima_collection_contract_closes_terminal_batch_and_recovery_paths(self):
+        ima = (SKILL_ROOT / "references" / "sources" / "ima.md").read_text(encoding="utf-8")
+
+        for phrase in (
+            "所有终态失败都必须写出",
+            "`AUTH_REQUIRED`、`INVALID_RESPONSE`、`SOURCE_FAILED`",
+            "继承父会话",
+            "`--query` 必须与父会话 `task.query` 完全一致",
+            "`search-all` 聚合会话与 IMA 子会话都必须继承父会话",
+            "父会话和聚合会话必须使用互不包含的独立会话树",
+            "`source=ima`、`backend=bycli`",
+            "独占会话锁",
+            "`raw/<source>/`",
+            "最多调度 500 个唯一知识库",
+        ):
+            self.assertIn(phrase, ima)
 
     def test_delegated_adapter_candidate_does_not_create_a_second_question(self):
         bycli = (SKILLS_ROOT / "bycli" / "SKILL.md").read_text(encoding="utf-8")

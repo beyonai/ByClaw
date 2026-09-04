@@ -89,6 +89,11 @@ node scripts/knowledge-collection.mjs publish --session-dir "$SESSION_DIR" --del
 - 来源链接、失败来源、权限限制和覆盖缺口；
 - 来源执行器返回的 `adapterCandidate`（如有）。它只是非阻塞建议，由直接查询所有者（根 Agent）判断是否另行询问或委派；采集编排器不得增加第二次提问。
 
+采集结束后的最终答复必须逐篇列出文章名称及其实际保存路径，不得只给目录或文件数量。路径清单只取本次交付的
+权威正文输入：成功执行 `publish` 后使用 `deliveryInput.files`，否则使用 `status.downstreamInput.files`。文章名称优先取
+对应 Markdown 的非空 frontmatter `title`；没有可用标题时，使用去掉 `.md` 扩展名的文件名。每个权威正文文件必须
+且只能出现一次；没有有效正文时明确说明未采集到可交付文章，不得编造名称或路径。
+
 可点击预览必须引用已知来源 URL；预览不改变下游文件边界，也不能把候选元数据升级为正文。
 
 ## 终止规则

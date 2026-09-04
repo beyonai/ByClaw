@@ -325,7 +325,8 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
   const { isCenterPage: isResourceCenterPage, toggleCenter } = useResourceCenterRouter(
     config.navigatePath,
     config.siderKey,
-    showRouter
+    showRouter,
+    activeSiderAgent
   );
   const placeholder = intl.formatMessage(
     { id: 'form.inputPlaceholder' },

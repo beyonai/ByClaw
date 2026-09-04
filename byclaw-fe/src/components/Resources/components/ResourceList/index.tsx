@@ -19,6 +19,7 @@ import { buildResourceListFilterParam, getBaseResourceBizTypeList } from '../../
 import { isWorkspaceSkill, mapWorkspaceSkillRows } from '../../workspaceSkill/utils';
 import { useDigitalEmployeeManagePermission } from '../../workspaceSkill/useDigitalEmployeeManagePermission';
 import styles from './index.module.less';
+import useResourceInstallTargetContext from '../../useResourceInstallTargetContext';
 
 interface IResourceItem {
   resourceId: string;
@@ -107,6 +108,7 @@ const ResourceList: React.FC<ResourceListProps> = ({
   const baseResourceBizTypeList = useMemo(() => getBaseResourceBizTypeList(resourceType), [resourceType]);
 
   const intl = useIntl();
+  const installTargetContext = useResourceInstallTargetContext();
   const { agentId, agentInfo } = useGlobal();
   const { userInfo, defaultDigEmployeeId } = useSelector(
     ({ user, employees }: { user: any; employees: IEmployeesState }) => ({
@@ -244,15 +246,18 @@ const ResourceList: React.FC<ResourceListProps> = ({
     getList({ pageIndex: 1 });
   }, [baseResourceBizTypeList, activeTab, catalogId, dropdownParam, getList]);
 
+  const fixedInstallTargetId =
+    installTargetContext.mode === 'fixed' ? installTargetContext.digitalEmployeeId : undefined;
+
   useEffect(() => {
     let cancelled = false;
-    if (resourceType !== 'SKILL' || !activeDigitalEmployeeId) {
+    if (resourceType !== 'SKILL' || !fixedInstallTargetId) {
       setInstalledResourceIds(new Set());
       return () => {
         cancelled = true;
       };
     }
-    findDetailsById({ resourceId: `${activeDigitalEmployeeId}` })
+    findDetailsById({ resourceId: fixedInstallTargetId })
       .then((res) => {
         if (cancelled) return;
         setInstalledResourceIds(collectInstalledResourceIds(normalizeResponseData(res)));
@@ -264,7 +269,7 @@ const ResourceList: React.FC<ResourceListProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [activeDigitalEmployeeId, resourceType]);
+  }, [fixedInstallTargetId, resourceType]);
 
   // 监听资源操作事件，刷新列表
   useEffect(() => {
@@ -281,8 +286,23 @@ const ResourceList: React.FC<ResourceListProps> = ({
 
   useEffect(() => {
     const handleResourceInstalled = (event: Event) => {
-      const resourceId = (event as CustomEvent<{ resourceId?: string | number }>).detail?.resourceId;
-      if (resourceType !== 'SKILL' || resourceId === undefined || resourceId === null || `${resourceId}` === '') {
+      const detail = (
+        event as CustomEvent<{ resourceId?: string | number; digitalEmployeeIds?: Array<string | number> }>
+      ).detail;
+      const resourceId = detail?.resourceId;
+      if (
+        resourceType !== 'SKILL' ||
+        !fixedInstallTargetId ||
+        resourceId === undefined ||
+        resourceId === null ||
+        `${resourceId}` === ''
+      ) {
+        return;
+      }
+      if (
+        detail?.digitalEmployeeIds?.length &&
+        !detail.digitalEmployeeIds.some((employeeId) => `${employeeId}` === fixedInstallTargetId)
+      ) {
         return;
       }
       setInstalledResourceIds((prev) => {
@@ -295,7 +315,7 @@ const ResourceList: React.FC<ResourceListProps> = ({
     return () => {
       window.removeEventListener('digitalEmployeeResourceInstalled', handleResourceInstalled);
     };
-  }, [resourceType]);
+  }, [fixedInstallTargetId, resourceType]);
 
   const loadMore = useCallback(() => {
     if (loading || !hasMore) return;
@@ -326,6 +346,7 @@ const ResourceList: React.FC<ResourceListProps> = ({
       actionConfig={{
         scene: item.ownerType === 'personal' || activeTab === 'personal' ? 'personal' : 'enterprise',
         installedResourceIds,
+        installTargetContext,
         canManageWorkspaceSkill: canManageActiveEmployee,
         onEdit: () => onEdit(item),
         onAuth: (authType) => onAuth(item, authType),

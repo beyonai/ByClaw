@@ -27,7 +27,8 @@ const DataCenter: React.FC<Props> = (props) => {
   const { isCenterPage: isKnowledgeCenterPage, toggleCenter } = useResourceCenterRouter(
     '/knowledgeCenter',
     'knowledge',
-    showRouter
+    showRouter,
+    activeSiderAgent
   );
 
   return (

@@ -567,18 +567,23 @@ export function acquireSessionLock(paths, command) {
 }
 
 export function withSessionLock(paths, command, callback) {
-  const { descriptor, ownerId } = acquireSessionLock(paths, command);
+  const lock = acquireSessionLock(paths, command);
   try {
     return callback();
   } finally {
-    try { fs.closeSync(descriptor); } catch {}
-    try {
-      const current = readLock(paths);
-      if (current?.ownerId === ownerId) {
-        fs.unlinkSync(paths.lock);
-      }
-    } catch {}
+    releaseSessionLock(paths, lock);
   }
+}
+
+export function releaseSessionLock(paths, lock) {
+  if (!lock) return;
+  try { fs.closeSync(lock.descriptor); } catch {}
+  try {
+    const current = readLock(paths);
+    if (current?.ownerId === lock.ownerId) {
+      fs.unlinkSync(paths.lock);
+    }
+  } catch {}
 }
 
 /** 会话目录骨架(init 使用)。 */

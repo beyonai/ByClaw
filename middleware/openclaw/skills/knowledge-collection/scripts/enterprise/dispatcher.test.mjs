@@ -51,6 +51,9 @@ test('request parsers reject invalid, foreign, and sensitive source options', ()
   assert.throws(() => parseSearchRequest({
     source: 'dingtalk', query: 'q', 'output-dir': '/tmp/out', 'folder-id': 'folder-1', 'workspace-ids': 'workspace-1',
   }), /workspace-ids.*folder-id/);
+  assert.throws(() => parseSearchRequest({
+    source: 'ima', query: 'q', 'output-dir': '/tmp/out', 'note-mode': 'title',
+  }), /note-mode.*not allowed/);
 });
 
 test('search accepts bare metadata-only and validates whitelisted JSON source options', () => {
@@ -98,16 +101,24 @@ test('parseResourceRequest enforces source-specific resource fields', () => {
   }));
 });
 
-test('parseMaterializeRequest requires a new output session and explicit candidate IDs', () => {
+test('parseMaterializeRequest requires explicit candidate IDs and keeps IMA in its discovery session', () => {
   assert.deepEqual(parseMaterializeRequest({
     source: 'dingtalk', 'session-dir': '/tmp/discovery', 'output-dir': '/tmp/materialized', 'item-ids': 'dws-a,dws-b', concurrency: '2',
   }), {
     source: 'dingtalk', sessionDir: '/tmp/discovery', outputDir: '/tmp/materialized', itemIds: ['dws-a', 'dws-b'], concurrency: 2,
   });
+  assert.deepEqual(parseMaterializeRequest({
+    source: 'ima', 'session-dir': '/tmp/ima-discovery', 'output-dir': '/tmp/ima-discovery',
+    'item-ids': 'ima-a', concurrency: '2',
+  }), {
+    source: 'ima', sessionDir: '/tmp/ima-discovery', outputDir: '/tmp/ima-discovery',
+    itemIds: ['ima-a'], concurrency: 2,
+  });
   for (const values of [
     { source: 'dingtalk', 'session-dir': '/tmp/discovery', 'output-dir': '/tmp/materialized', 'item-ids': '' },
     { source: 'dingtalk', 'session-dir': 'relative', 'output-dir': '/tmp/materialized', 'item-ids': 'dws-a' },
     { source: 'wecom', 'session-dir': '/tmp/discovery', 'output-dir': '/tmp/materialized', 'item-ids': 'wecom-a' },
+    { source: 'ima', 'session-dir': '/tmp/discovery', 'output-dir': '/tmp/materialized', 'item-ids': 'ima-a' },
   ]) assert.throws(() => parseMaterializeRequest(values));
 });
 
@@ -273,4 +284,30 @@ test('batch search continues after a connector throws', async () => {
   assert.deepEqual(calls, ['dingtalk', 'feishu', 'wecom']);
   assert.deepEqual(results.map((result) => result.outcome.status), ['failed', 'complete', 'complete']);
   assert.match(results[0].outcome.reason, /connector startup failed/);
+});
+
+test('batch search forwards the immutable parent task contract to child adapters', async () => {
+  let received;
+  const taskContract = {
+    query: 'original request',
+    materializationTarget: 'selected',
+    requiredContentGranularity: 'full-text',
+    deliveryRequested: true,
+  };
+  await dispatchEnterpriseBatch('search', [{
+    source: 'ima', query: 'q', 'output-dir': '/tmp/batch-contract-ima', 'metadata-only': 'true',
+  }], {
+    concurrency: 1,
+    taskContract,
+    adapters: {
+      ima: {
+        connector: 'ima',
+        search: async (request) => {
+          received = request.taskContract;
+          return { status: 'complete' };
+        },
+      },
+    },
+  });
+  assert.deepEqual(received, taskContract);
 });

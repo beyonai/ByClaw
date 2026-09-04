@@ -3,6 +3,7 @@ import {
   lstat,
   mkdir,
   open,
+  readFile,
   realpath,
   rename,
   rm,
@@ -16,13 +17,26 @@ import {
   normalizeContentGranularity,
   normalizeMediaState,
 } from './status-model.mjs';
-import { loadSession, newSession, sessionPaths } from '../../session.mjs';
+import {
+  acquireSessionLock,
+  loadSession,
+  newSession,
+  releaseSessionLock,
+  sessionPaths,
+} from '../../session.mjs';
 
 const PRIVATE_DIRECTORY_MODE = 0o700;
 const PRIVATE_FILE_MODE = 0o600;
 const REQUIRED_DIRECTORIES = ['raw', 'markdown', 'sanitized', 'sanitized/items'];
 const CANONICAL_ITEM_KEYS = ['title', 'url', 'author', 'publishTime', 'markdown', 'fileName'];
 const SOURCE_SCOPE = { dws: 'dingtalk', fws: 'feishu', wecom: 'wecom', ima: 'ima' };
+const BUNDLE_BACKUP_DIRECTORY = '.kc-bundle-backup';
+const BUNDLE_BACKUP_MANIFEST = 'manifest.json';
+const BUNDLE_VIEWS = [
+  { live: 'session.json', backup: 'session.json', required: true },
+  { live: 'sanitized/metadata.json', backup: 'metadata.json', required: false },
+  { live: 'collection-result.json', backup: 'collection-result.json', required: false },
+];
 
 function outsideRootError() {
   return new Error('path is outside output root');
@@ -305,7 +319,7 @@ async function createPrivateRoot(normalizedRoot) {
   }
 }
 
-async function openInitializedSessionRoot(normalizedRoot) {
+async function openInitializedSessionRoot(normalizedRoot, { allowCollected = false } = {}) {
   let rootEntry;
   try {
     rootEntry = await lstat(normalizedRoot);
@@ -316,16 +330,22 @@ async function openInitializedSessionRoot(normalizedRoot) {
   const rejectExisting = () => new Error('output root must not already exist unless it is an empty initialized collection session');
   if (!rootEntry.isDirectory() || rootEntry.isSymbolicLink()) throw rejectExisting();
   assertSafeDirectoryMode(rootEntry);
+  await recoverInterruptedBundle(normalizedRoot, { dev: rootEntry.dev, ino: rootEntry.ino });
   let session;
   try {
     session = loadSession(sessionPaths(normalizedRoot), { persistMigration: false }).session;
   } catch {
     throw rejectExisting();
   }
-  if (session.task?.status !== 'initialized'
-    || session.task?.publicationStatus
-    || !Array.isArray(session.collection?.collection?.items)
-    || session.collection.collection.items.length !== 0) {
+  const emptyInitialized = session.task?.status === 'initialized'
+    && !session.task?.publicationStatus
+    && Array.isArray(session.collection?.collection?.items)
+    && session.collection.collection.items.length === 0;
+  const committedCollection = allowCollected
+    && session.task?.status === 'collected'
+    && session.task?.publicationStatus === 'committed'
+    && Array.isArray(session.collection?.collection?.items);
+  if (!emptyInitialized && !committedCollection) {
     throw rejectExisting();
   }
   for (const relativePath of REQUIRED_DIRECTORIES) {
@@ -335,7 +355,141 @@ async function openInitializedSessionRoot(normalizedRoot) {
   return {
     rootIdentity: { dev: rootEntry.dev, ino: rootEntry.ino },
     session: structuredClone(session),
+    replaceable: committedCollection,
   };
+}
+
+async function removeBundleBackup(root, rootIdentity) {
+  const backupDir = resolveInside(root, BUNDLE_BACKUP_DIRECTORY);
+  let entry;
+  try {
+    entry = await lstat(backupDir);
+  } catch (error) {
+    if (error.code === 'ENOENT') return;
+    throw error;
+  }
+  if (!entry.isDirectory() || entry.isSymbolicLink()) {
+    throw new Error('collection bundle backup is unsafe');
+  }
+  await assertRootIdentity(root, rootIdentity);
+  await removeOwnedPath(backupDir, entry, true);
+}
+
+async function readBundleBackup(root, relativePath) {
+  const target = resolveInside(root, `${BUNDLE_BACKUP_DIRECTORY}/${relativePath}`);
+  await rejectExistingSymlinks(root, target);
+  const entry = await lstat(target);
+  if (!entry.isFile() || entry.isSymbolicLink()) {
+    throw new Error('collection bundle backup is incomplete');
+  }
+  const content = await readFile(target, 'utf8');
+  JSON.parse(content);
+  return content;
+}
+
+async function readLiveBundleFile(root, relativePath) {
+  const target = resolveInside(root, relativePath);
+  await rejectExistingSymlinks(root, target);
+  const entry = await lstat(target);
+  if (!entry.isFile() || entry.isSymbolicLink()) {
+    throw new Error('collection bundle file must be a regular file');
+  }
+  const content = await readFile(target, 'utf8');
+  JSON.parse(content);
+  return content;
+}
+
+async function removeLiveBundleFile(root, rootIdentity, relativePath) {
+  const target = resolveInside(root, relativePath);
+  await rejectExistingSymlinks(root, target);
+  let entry;
+  try {
+    entry = await lstat(target);
+  } catch (error) {
+    if (error.code === 'ENOENT') return;
+    throw error;
+  }
+  if (!entry.isFile() || entry.isSymbolicLink()) {
+    throw new Error('collection bundle file must be a regular file');
+  }
+  await assertRootIdentity(root, rootIdentity);
+  await removeOwnedPath(target, entry, false);
+}
+
+async function backupManifest(root) {
+  try {
+    const manifest = JSON.parse(await readBundleBackup(root, BUNDLE_BACKUP_MANIFEST));
+    const allowed = new Set(BUNDLE_VIEWS.map((view) => view.backup));
+    if (manifest?.schemaVersion !== 1
+      || !Array.isArray(manifest.present)
+      || !manifest.present.includes('session.json')
+      || manifest.present.some((entry) => typeof entry !== 'string' || !allowed.has(entry))) {
+      throw new Error('collection bundle backup manifest is invalid');
+    }
+    return new Set(manifest.present);
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      return new Set(BUNDLE_VIEWS.map((view) => view.backup));
+    }
+    throw error;
+  }
+}
+
+async function recoverInterruptedBundle(root, rootIdentity) {
+  let current;
+  try {
+    current = JSON.parse(await readLiveBundleFile(root, 'session.json'));
+  } catch (error) {
+    if (error.code === 'ENOENT' || error instanceof SyntaxError) return;
+    throw error;
+  }
+  if (current?.task?.publicationStatus !== 'uncommitted') return;
+  const present = await backupManifest(root);
+  const restored = new Map();
+  for (const view of BUNDLE_VIEWS) {
+    if (present.has(view.backup)) {
+      restored.set(view.live, await readBundleBackup(root, view.backup));
+    }
+  }
+  const session = restored.get('session.json');
+  const committed = JSON.parse(session);
+  const validCommitted = committed?.task?.publicationStatus === 'committed';
+  const validInitialized = committed?.task?.status === 'initialized'
+    && committed?.task?.publicationStatus === undefined;
+  if (!validCommitted && !validInitialized) {
+    throw new Error('collection bundle backup is not a recoverable session');
+  }
+  for (const view of BUNDLE_VIEWS.filter((entry) => entry.live !== 'session.json')) {
+    if (restored.has(view.live)) {
+      await writePrivateFile(root, rootIdentity, view.live, restored.get(view.live));
+    } else {
+      await removeLiveBundleFile(root, rootIdentity, view.live);
+    }
+  }
+  await writePrivateFile(root, rootIdentity, 'session.json', session);
+  await removeBundleBackup(root, rootIdentity);
+}
+
+async function prepareBundleBackup(root, rootIdentity) {
+  await removeBundleBackup(root, rootIdentity);
+  const present = [];
+  for (const view of BUNDLE_VIEWS) {
+    let content;
+    try {
+      content = await readLiveBundleFile(root, view.live);
+    } catch (error) {
+      if (error.code === 'ENOENT' && !view.required) continue;
+      throw error;
+    }
+    await writePrivateFile(root, rootIdentity, `${BUNDLE_BACKUP_DIRECTORY}/${view.backup}`, content);
+    present.push(view.backup);
+  }
+  await writePrivateFile(
+    root,
+    rootIdentity,
+    `${BUNDLE_BACKUP_DIRECTORY}/${BUNDLE_BACKUP_MANIFEST}`,
+    `${JSON.stringify({ schemaVersion: 1, present }, null, 2)}\n`,
+  );
 }
 
 /*
@@ -381,6 +535,30 @@ function isPlainObject(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const prototype = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
+}
+
+function normalizeInitialTaskContract(value) {
+  if (value === undefined || value === null) return {};
+  if (!isPlainObject(value)) throw new TypeError('initial task contract must be a plain object');
+  const allowed = new Set([
+    'query', 'materializationTarget', 'requiredContentGranularity', 'deliveryRequested',
+  ]);
+  for (const key of Object.keys(value)) {
+    if (!allowed.has(key)) throw new TypeError(`initial task contract field is not allowed: ${key}`);
+  }
+  if (typeof value.query !== 'string' || !value.query.trim()) {
+    throw new TypeError('initial task contract query must be a non-empty string');
+  }
+  if (!['candidates', 'selected', 'all'].includes(value.materializationTarget)) {
+    throw new TypeError('initial task contract materializationTarget is invalid');
+  }
+  if (!['any', 'full-text'].includes(value.requiredContentGranularity)) {
+    throw new TypeError('initial task contract requiredContentGranularity is invalid');
+  }
+  if (typeof value.deliveryRequested !== 'boolean') {
+    throw new TypeError('initial task contract deliveryRequested must be a boolean');
+  }
+  return { ...value, query: value.query.trim() };
 }
 
 function isStrictlyInside(directory, target) {
@@ -506,7 +684,7 @@ function normalizeInventory(root, inventory) {
     return {
       ...item,
       media: normalizeMediaState(item.media, { strict: true, coverUrls: item.coverUrls }),
-      rawArtifacts: [...item.rawArtifacts],
+      rawArtifacts: [...new Set(item.rawArtifacts)],
       materialization: {
         ...item.materialization,
         contentGranularity: normalizeContentGranularity(
@@ -541,6 +719,31 @@ async function validateInventoryPaths(root, inventory) {
     for (const [cleanupIndex, relativePath] of materialization.pendingArtifactCleanup.entries()) {
       const target = resolveWorkCopyPath(root, relativePath, `inventory item ${index} cleanup path ${cleanupIndex}`);
       await rejectExistingSymlinks(root, target);
+    }
+    for (const [artifactIndex, relativePath] of item.rawArtifacts.entries()) {
+      const label = `inventory item ${index} raw artifact ${artifactIndex}`;
+      if (!relativePath.startsWith('raw/')) {
+        throw new TypeError(`${label} must be inside raw/`);
+      }
+      const target = resolveInside(root, relativePath);
+      if (!isStrictlyInside(resolve(root, 'raw'), target)) {
+        throw new TypeError(`${label} must be inside raw/`);
+      }
+      await rejectExistingSymlinks(root, target);
+      let entry;
+      try {
+        entry = await lstat(target);
+      } catch {
+        throw new TypeError(`${label} must point to a regular file`);
+      }
+      if (!entry.isFile() || entry.isSymbolicLink() || entry.size <= 0) {
+        throw new TypeError(`${label} must point to a non-empty regular file`);
+      }
+      try {
+        await readFile(target);
+      } catch {
+        throw new TypeError(`${label} must be readable`);
+      }
     }
   }
 }
@@ -618,15 +821,55 @@ async function writePersistedJson(root, rootIdentity, relativePath, value) {
   );
 }
 
-export async function createArtifactWriter(root) {
+export async function createArtifactWriter(root, {
+  allowExistingSession = false, initialTaskContract = null, beforeCompatibilityPublish = null,
+} = {}) {
   if (!isAbsolute(root)) {
     throw new TypeError('output root must be an absolute path');
   }
   const normalizedRoot = resolve(root);
-  const initializedRoot = await openInitializedSessionRoot(normalizedRoot);
+  if (beforeCompatibilityPublish !== null && typeof beforeCompatibilityPublish !== 'function') {
+    throw new TypeError('beforeCompatibilityPublish must be a function');
+  }
+  const initialTask = normalizeInitialTaskContract(initialTaskContract);
+  const lockPaths = { lock: resolve(normalizedRoot, '.knowledge-collection.lock') };
+  let sessionLock = null;
+  let existingRoot = false;
+  try {
+    const entry = await lstat(normalizedRoot);
+    if (!entry.isDirectory() || entry.isSymbolicLink()) {
+      throw new Error('existing output root must be a regular directory');
+    }
+    assertSafeDirectoryMode(entry);
+    existingRoot = true;
+  } catch (error) {
+    if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') throw error;
+    if (allowExistingSession) throw error;
+  }
+  if (existingRoot) {
+    sessionLock = acquireSessionLock(
+      lockPaths,
+      allowExistingSession ? 'enterprise-replace' : 'enterprise-write',
+    );
+  }
+  let initializedRoot;
+  try {
+    initializedRoot = await openInitializedSessionRoot(normalizedRoot, {
+      allowCollected: allowExistingSession,
+    });
+  } catch (error) {
+    releaseSessionLock(lockPaths, sessionLock);
+    throw error;
+  }
   const rootIdentity = initializedRoot?.rootIdentity || await createPrivateRoot(normalizedRoot);
   const ownsRoot = !initializedRoot;
   let publicationState = 'open';
+  let lockReleased = false;
+  const releaseWriterLock = () => {
+    if (lockReleased) return;
+    releaseSessionLock(lockPaths, sessionLock);
+    lockReleased = true;
+  };
 
   const writer = {
     absolute(relativePath) {
@@ -690,6 +933,7 @@ export async function createArtifactWriter(root) {
       }
       if (ownsRoot) await removeOwnedPath(normalizedRoot, rootIdentity, true);
       publicationState = 'aborted';
+      releaseWriterLock();
     },
 
     async writeCollectionBundle(bundle) {
@@ -739,21 +983,26 @@ export async function createArtifactWriter(root) {
         const session = initializedRoot
           ? structuredClone(initializedRoot.session)
           : newSession({
-            query: bundle.query || title,
+            ...initialTask,
+            query: initialTask.query || bundle.query || title,
             sourceScope: [...new Set(sourceScope)],
-            materializationTarget,
+            materializationTarget: initialTask.materializationTarget || materializationTarget,
           });
         if (initializedRoot) {
           const allowed = new Set(session.task.sourceScope || []);
           const denied = sourceScope.filter((entry) => !allowed.has(entry));
           if (denied.length) throw new Error(`initialized session sourceScope does not allow: ${denied.join(', ')}`);
         }
+        if (initializedRoot) {
+          await prepareBundleBackup(normalizedRoot, rootIdentity);
+        }
         session.task.status = status === 'failed' ? 'failed' : 'collected';
         session.task.publicationStatus = 'uncommitted';
         session.collection = metadata;
-        await writePersistedJson(normalizedRoot, rootIdentity, 'sanitized/metadata.json', metadata);
         await writePersistedJson(normalizedRoot, rootIdentity, 'session.json', session);
         // Readers reject the session until both compatibility views have been published.
+        if (beforeCompatibilityPublish) await beforeCompatibilityPublish();
+        await writePersistedJson(normalizedRoot, rootIdentity, 'sanitized/metadata.json', metadata);
         await writePersistedJson(normalizedRoot, rootIdentity, 'collection-result.json', {
           schemaVersion: '1.0',
           title,
@@ -765,9 +1014,16 @@ export async function createArtifactWriter(root) {
         });
         session.task.publicationStatus = 'committed';
         await writePersistedJson(normalizedRoot, rootIdentity, 'session.json', session);
+        if (initializedRoot) {
+          await removeBundleBackup(normalizedRoot, rootIdentity);
+        }
         publicationState = 'committed';
+        releaseWriterLock();
         await assertRootIdentity(normalizedRoot, rootIdentity);
       } catch (error) {
+        if (initializedRoot) {
+          try { await recoverInterruptedBundle(normalizedRoot, rootIdentity); } catch {}
+        }
         if (publicationState !== 'committed') publicationState = 'open';
         throw error;
       }
