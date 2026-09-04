@@ -75,7 +75,8 @@ Before discovery, state the effective source scope and materialization target in
 
 | User intent | `sourceScope` | `materializationTarget` |
 |---|---|---|
-| Public information, no internal context | `public-internet` | `selected` by default |
+| Public information, no internal context, without an explicit result count | `public-internet` + `cloud-knowledge` when project-cloud context is available | `selected` by default |
+| Explicit result count for articles/full text | `public-internet` | `selected` + `full-text` via `public-collect` |
 | Names DingTalk, Feishu, WeCom, or IMA | Add only the named platform(s) | Match the requested result |
 | Explicit internal-material request | Add only the necessary enterprise source(s) | Match the requested result |
 | “Find candidates” | Task-derived scope | `candidates` |
@@ -112,9 +113,9 @@ Read only the reference that matches the chosen workflow, plus `collection-contr
 
    `init` 返回体里的 `warnings` 是必读字段，不是可选诊断。它非空时必须逐条读完并在继续之前处理：这些提示指向的形状在当下都还能免费改正，一旦开始采集就只能靠 `retighten` 补救或根本无法补救。当前会出现三类提示——会话未绑定交付目标（应回到本次 `init` 补 `--delivery-dir`）、`selected + --delivery-requested` 缺 `--workflow`（当前 `init` 已成功创建会话，不能重新运行 `init`；若确实要走 `public-collect`，应在原会话上执行 `retighten --required-content-granularity full-text`，再直接运行 `public-collect`，由该命令建立工作流状态）、存在仅差 `-v2`/`-fulltext`/`-articles` 后缀的兄弟会话目录（应改用 `retighten` 就地修复原会话，不得新建替代会话）。`warnings` 不改变 `init` 的成功与失败，因此忽略它不会报错——但由它引出的死路会在后续命令上以硬失败出现。
 
-2. For candidate-only public URL discovery, run `public-discover`. 路由先看交付物：用户明确只要候选链接时，即使用户指定了链接数量，也使用 `public-discover`；用户要求文章、正文、全文或落盘内容时使用 `public-collect`，其中“文章”按完整正文处理，除非用户明确只要链接或摘要。Its `online-search` channel uses Tencent WSA when credentials are available and WSA is not explicitly disabled; only a channel-level WSA failure falls back to SearXNG. WSA 返回的 passage/content 搜索摘要只是发现证据，不是文章正文，也不保证目标页不会是登录、注册、验证、错误或导航页面。`pageType`、`weak`、`articleCandidateIds` 都只是兼容性分类，不代表正文已经验证；是否可尝试读取由持久化的 `discoveryDisposition=probe` 决定。
+2. For candidate-only public URL discovery, run `public-discover`. 路由先看交付物和是否指定数量：用户明确只要候选链接时，即使用户指定了链接数量，也使用 `public-discover`；用户要求文章、正文、全文或落盘内容但未指定数量时，默认使用 `unified-search`，并行检索公共互联网与当前项目云盘，再用 `unified-materialize` 物化选中的两类正文；其中“文章”按完整正文处理。用户明确要求数量（如“一篇”“5 篇”“至少 10 篇”）时，改用 `public-collect`，只检索公共互联网并执行数量闭环。用户明确限定来源时服从限定，不自动添加其他来源。Its `online-search` channel uses Tencent WSA when credentials are available and WSA is not explicitly disabled; only a channel-level WSA failure falls back to SearXNG. WSA 返回的 passage/content 搜索摘要只是发现证据，不是文章正文，也不保证目标页不会是登录、注册、验证、错误或导航页面。`pageType`、`weak`、`articleCandidateIds` 都只是兼容性分类，不代表正文已经验证；是否可尝试读取由持久化的 `discoveryDisposition=probe` 决定。
 
-   `public-discover` 输出的 `candidateQuality`（包括 `eligibleArticle`）仅用于候选诊断和排序；`reject` 候选仍拒绝。公共发现最多允许两轮，任何未由用户明确提供或发现状态持久化授权的 URL 都必须以 `SOURCE_NOT_AUTHORIZED_BY_DISCOVERY` 拒绝。不得使用模型记忆中的 URL、DOI、论文 ID 绕过发现授权。
+   `public-discover` 输出的 `candidateQuality`（包括 `eligibleArticle`）仅用于候选诊断和排序；`reject` 候选仍拒绝。公共发现最多允许两轮，任何未由用户明确提供或发现状态持久化授权的 URL 都必须以 `SOURCE_NOT_AUTHORIZED_BY_DISCOVERY` 拒绝。不得使用模型记忆中的 URL、DOI、论文 ID 绕过发现授权。`unified-search` 找不到可信项目云盘资源或 `cloudDiscoveryScope` 时，不得猜测资源 ID；应保留公共互联网结果，并在 sources/status 中明确记录 `cloud-knowledge` 不可用。
 
    当用户明确要求一篇或多篇等数量结果时，必须使用 `public-collect`，并传入 `--query`、`--fallback-query` 与 `--requested-count`。在调用它之前，唯一会话必须已经由首次 `init` 以 `selected + full-text` 初始化；不得先用 `any` 初始化，也不得为修正粒度新建带 `-v2`、`-fulltext` 或其他后缀的替代会话。如果会话已经错误地以 `any` 初始化，唯一被认可的修复是在原会话上执行 `retighten`：
 
