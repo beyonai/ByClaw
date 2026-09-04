@@ -615,7 +615,6 @@ class DigitalEmployeeApplicationServiceTest {
         qo.setKeyword("代码");
         qo.setRelResourceId(900L);
         PageInfo<DigitalEmployeeInstallTargetVo> expected = new PageInfo<>();
-        when(authApplicationService.isCurrentUserGlobalResourceManager()).thenReturn(true);
         when(ssResExtDigEmployeeService.selectInstallTargetEmployees(any(DigitalEmployeeQo.class)))
             .thenReturn(expected);
 
@@ -629,9 +628,22 @@ class DigitalEmployeeApplicationServiceTest {
         assertThat(qo.getKeyword()).isEqualTo("代码");
         assertThat(qo.getRelResourceId()).isEqualTo(900L);
         assertThat(qo.getMemberCandidateEnterpriseId()).isEqualTo(201L);
-        assertThat(qo.getMemberCandidateGlobalManager()).isTrue();
+        assertThat(qo.getInstallTargetAdminVip()).isFalse();
         assertThat(qo.getDefaultDigEmployeeId()).isEqualTo(100L);
         assertThat(qo.getDefaultSuperAssistantResourceCode()).isEqualTo("zhangsan_main");
+    }
+
+    @Test
+    void queryInstallTargetEmployees_marksAdminVipWithoutGrantingOtherAdminRoles() {
+        CurrentUserHolder.getLoginInfo().setUserCode("adminvip");
+        DigitalEmployeeQo qo = new DigitalEmployeeQo();
+        when(ssResExtDigEmployeeService.selectInstallTargetEmployees(any(DigitalEmployeeQo.class)))
+            .thenReturn(new PageInfo<>());
+
+        service.queryInstallTargetEmployees(qo);
+
+        assertThat(qo.getInstallTargetAdminVip()).isTrue();
+        verify(authApplicationService, never()).isCurrentUserGlobalResourceManager();
     }
 
     @Test

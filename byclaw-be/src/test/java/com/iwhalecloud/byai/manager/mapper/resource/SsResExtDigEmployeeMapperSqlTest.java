@@ -30,7 +30,7 @@ class SsResExtDigEmployeeMapperSqlTest {
     }
 
     @Test
-    void installTargetQuery_includesPersonalEnterpriseAndManagePermissionOnly() throws IOException {
+    void installTargetQuery_limitsManagePermissionToCreatorExplicitGrantAndAdminVip() throws IOException {
         String resourcePath = "/com/iwhalecloud/byai/manager/mapper/resource/SsResExtDigEmployeeMapper.xml";
         try (var input = getClass().getResourceAsStream(resourcePath)) {
             assertThat(input).isNotNull();
@@ -46,9 +46,14 @@ class SsResExtDigEmployeeMapperSqlTest {
                 .contains("a.owner_type = 'personal_default'")
                 .contains("grant_type = 'ALLOW_MANAGE'")
                 .contains("a.create_by = #{userId}")
+                .contains("installTargetAdminVip == true")
+                .contains("manage_auth.allow_manage_count > 0")
+                .contains("manage_auth.black_count = 0")
                 .contains("upper(a.resource_name)")
                 .contains("upper(a.resource_desc)")
                 .contains("coalesce(e.agent_type, '') != '017'")
+                .doesNotContain("memberCandidateGlobalManager == true")
+                .doesNotContain("managerOrgPathCodes")
                 .doesNotContain("grant_type in ('AVAILABLE_USE', 'FORCE_USE'");
         }
     }

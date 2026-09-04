@@ -183,6 +183,8 @@ public class DigitalEmployeeApplicationService {
 
     private static final String DEFAULT_SUPER_ASSISTANT_RESOURCE_CODE_SUFFIX = "_main";
 
+    private static final String ADMIN_VIP_USER_CODE = "adminvip";
+
     private static final String TEMPLATE_DIGITAL_EMPLOYEE_PARAM_CODE = "TEMPLATE_DIGITAL_EMPLOYEE";
 
     private static final String TEMPLATE_DIGITAL_EMPLOYEE_GROUP_PARAM_CODE = "TEMPLATE_DIGITAL_EMPLOYEE_GROUP";
@@ -369,7 +371,8 @@ public class DigitalEmployeeApplicationService {
 
         resourceAuthContextService.setCurrentUserAuthQo(qo);
         qo.setMemberCandidateEnterpriseId(CurrentUserHolder.getEnterpriseId());
-        qo.setMemberCandidateGlobalManager(authApplicationService.isCurrentUserGlobalResourceManager());
+        qo.setInstallTargetAdminVip(
+            ADMIN_VIP_USER_CODE.equalsIgnoreCase(CurrentUserHolder.getCurrentUserCode()));
         qo.setDefaultDigEmployeeId(CurrentUserHolder.getDefaultDigEmployeeId());
         qo.setDefaultSuperAssistantResourceCode(buildDefaultSuperAssistantResourceCode(
             CurrentUserHolder.getCurrentUserCode(), CurrentUserHolder.getCurrentUserId()));
