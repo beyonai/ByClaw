@@ -2585,6 +2585,7 @@ INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_grou
 INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'DIG_EMPLOYEE_AGENT_TYPE', '数字员工类型', '问数', 'DataQuery', '005', '问数', 3);
 INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'DIG_EMPLOYEE_AGENT_TYPE', '数字员工类型', '调试', 'Debug', '010', '调试', 4);
 INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'DIG_EMPLOYEE_AGENT_TYPE', '数字员工类型', '编码', 'Coding', '011', '编码', 5);
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'DIG_EMPLOYEE_AGENT_TYPE', '数字员工类型', '数字员工组', 'Digital Employee Group', '017', '数字员工组', 6);
 
 delete from byai.byai_system_config_list where param_group_name in('MENU_ICON_SHOW_TAB');
 INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'MENU_ICON_SHOW_TAB', '菜单图标显示', '工具', 'Tool', 'true', '工具', 4);

@@ -214,6 +214,25 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         self.assertIn("discoveryCandidateId", contract)
         self.assertIn("不得使用模型记忆中的 URL、DOI、论文 ID", skill)
 
+    def test_article_routing_uses_unified_sources_without_count_and_public_collect_with_count(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        routing = (SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8")
+        combined = f"{skill}\n{routing}"
+
+        self.assertIn("文章、正文、全文或落盘内容但未指定数量时，默认使用 `unified-search`", combined)
+        self.assertIn("并行检索公共互联网与当前项目云盘", combined)
+        self.assertIn("用户明确要求数量", combined)
+        self.assertIn("改用 `public-collect`，只检索公共互联网", combined)
+        self.assertIn("用户明确指定数量时", combined)
+        self.assertIn("使用 `public-collect`，仅检索公共互联网", combined)
+        self.assertIn("用户明确限定来源时服从限定，不自动添加其他来源", combined)
+
+    def test_default_public_article_scope_mentions_project_cloud_context(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("without an explicit result count", skill)
+        self.assertIn("`public-internet` + `cloud-knowledge`", skill)
+        self.assertIn("`public-internet` | `selected` + `full-text` via `public-collect`", skill)
+
     def test_knowledge_collection_upgrade_is_isolated_in_v031(self):
         self.assertTrue(V031_DML.is_file(), "knowledge collection migration must be versioned as V0.3.1")
         v030 = V030_DML.read_text(encoding="utf-8")
@@ -593,7 +612,7 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "只要候选链接",
             "即使用户指定了链接数量",
             "使用 `public-discover`",
-            "“文章”按完整正文处理",
+            "其中“文章”按完整正文处理",
             "`--workflow public-collect`",
             "`--query` 与 `--fallback-query`",
             "都复用首次 `init` 的原始任务描述",
