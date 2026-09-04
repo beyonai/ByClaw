@@ -285,3 +285,29 @@ test('batch search continues after a connector throws', async () => {
   assert.deepEqual(results.map((result) => result.outcome.status), ['failed', 'complete', 'complete']);
   assert.match(results[0].outcome.reason, /connector startup failed/);
 });
+
+test('batch search forwards the immutable parent task contract to child adapters', async () => {
+  let received;
+  const taskContract = {
+    query: 'original request',
+    materializationTarget: 'selected',
+    requiredContentGranularity: 'full-text',
+    deliveryRequested: true,
+  };
+  await dispatchEnterpriseBatch('search', [{
+    source: 'ima', query: 'q', 'output-dir': '/tmp/batch-contract-ima', 'metadata-only': 'true',
+  }], {
+    concurrency: 1,
+    taskContract,
+    adapters: {
+      ima: {
+        connector: 'ima',
+        search: async (request) => {
+          received = request.taskContract;
+          return { status: 'complete' };
+        },
+      },
+    },
+  });
+  assert.deepEqual(received, taskContract);
+});

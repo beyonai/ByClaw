@@ -86,6 +86,20 @@ export function resolveEnterpriseOutputRoot(parentSessionDir, requestedOutputDir
   return requested;
 }
 
+export function assertDistinctSessionTrees(firstSessionDir, secondSessionDir) {
+  const first = resolve(firstSessionDir);
+  const second = resolve(secondSessionDir);
+  const secondFromFirst = relative(first, second);
+  const firstFromSecond = relative(second, first);
+  const nested = (candidate) => candidate
+    && candidate !== '..'
+    && !candidate.startsWith(`..${sep}`)
+    && !isAbsolute(candidate);
+  if (first === second || nested(secondFromFirst) || nested(firstFromSecond)) {
+    throw new Error('parent and aggregate must use distinct, non-overlapping session trees');
+  }
+}
+
 export function assertEnterpriseScope(parentSessionDir, requestedSources) {
   if (typeof parentSessionDir !== 'string' || !isAbsolute(parentSessionDir)) {
     throw new Error('--parent-session-dir must be an absolute initialized collection session');
@@ -97,6 +111,29 @@ export function assertEnterpriseScope(parentSessionDir, requestedSources) {
     throw new Error(`session task.sourceScope 不允许企业来源: ${denied.join(', ')}`);
   }
   return session;
+}
+
+export function enterpriseChildTaskContract(session) {
+  const task = session?.task || {};
+  return {
+    query: task.query,
+    materializationTarget: task.materializationTarget || 'selected',
+    requiredContentGranularity: task.requiredContentGranularity || 'any',
+    deliveryRequested: task.deliveryRequested === true,
+  };
+}
+
+export function assertImaParentContract(parentSessionDir, parentSession, query, outputDir = null) {
+  const parentRoot = resolve(parentSessionDir);
+  if (outputDir !== null && resolve(outputDir) !== parentRoot) {
+    throw new Error('IMA search output must remain in the parent session');
+  }
+  const parentQuery = typeof parentSession?.task?.query === 'string'
+    ? parentSession.task.query.trim()
+    : '';
+  if (!parentQuery || query.trim() !== parentQuery) {
+    throw new Error('IMA search query must match the parent task query; query drift is not allowed');
+  }
 }
 
 function relativeChildPath(sessionDir, relativePath, label) {
@@ -210,8 +247,9 @@ export async function writeSearchAllAggregate({
   const inventory = [];
   const canonicalItems = [];
   const sourceMetadata = { outcomes: [] };
-  let loadedBundles = 0;
+  let successfulBundles = 0;
   let bundleFailures = 0;
+  const copiedRawArtifacts = new Set();
   for (const result of outcomes) {
     const sourceOutcome = { source: result.source, outcome: result.outcome };
     sourceMetadata.outcomes.push(sourceOutcome);
@@ -225,7 +263,10 @@ export async function writeSearchAllAggregate({
       bundleFailures += 1;
       continue;
     }
-    loadedBundles += 1;
+    if (metadata.collection?.status !== 'failed'
+      && ['complete', 'partial'].includes(result.outcome?.status)) {
+      successfulBundles += 1;
+    }
     const canonicalByPath = new Map((collectionResult.items || []).map((item) => [item.fileName, item]));
     for (const item of metadata.collection?.items || []) {
       const prefix = result.source;
@@ -254,16 +295,30 @@ export async function writeSearchAllAggregate({
         materialization.markdownPath = markdownRelative;
         materialization.sanitizedPath = sanitizedRelative;
       }
+      const rawArtifacts = [];
+      for (const artifact of item.rawArtifacts || []) {
+        if (typeof artifact !== 'string' || !artifact.startsWith('raw/')) {
+          throw new Error(`来源 ${result.source} 的 raw artifact 不在 raw/ 中`);
+        }
+        const target = `raw/${prefix}/${artifact.slice('raw/'.length)}`;
+        if (!copiedRawArtifacts.has(target)) {
+          const bytes = await readChildBytes(result.sessionDir, artifact, 'aggregate raw artifact');
+          if (bytes.length === 0) throw new Error('aggregate raw artifact must not be empty');
+          await aggregateWriter.writeBytes(target, bytes);
+          copiedRawArtifacts.add(target);
+        }
+        rawArtifacts.push(target);
+      }
       inventory.push({
         ...item,
         itemId: `${prefix}:${item.itemId}`,
         duplicateOf: item.duplicateOf ? `${prefix}:${item.duplicateOf}` : null,
-        rawArtifacts: (item.rawArtifacts || []).map((artifact) => `${prefix}/${artifact}`),
+        rawArtifacts,
         materialization,
       });
     }
   }
-  const anySucceeded = loadedBundles > 0;
+  const anySucceeded = successfulBundles > 0;
   const anyIncomplete = bundleFailures > 0
     || outcomes.some((result) => result.outcome?.status !== 'complete');
   await aggregateWriter.writeJson('raw/search-all.json', { command: 'search-all', outcomes });
@@ -284,6 +339,22 @@ export async function writeSearchAllAggregate({
     paginationFailed: anyIncomplete,
   });
   return { aggregatePath: 'raw/search-all.json', inventory: inventory.length };
+}
+
+export async function withSearchAllAggregateWriter(outputRoot, taskContract, operation) {
+  const aggregateWriter = await createArtifactWriter(outputRoot, {
+    initialTaskContract: taskContract,
+  });
+  try {
+    return await operation(aggregateWriter);
+  } catch (error) {
+    try {
+      await aggregateWriter.abort();
+    } catch (abortError) {
+      error.abortError = abortError;
+    }
+    throw error;
+  }
 }
 
 function render(value) {
@@ -386,9 +457,20 @@ async function main() {
     const normalizedValues = normalizeEnterprisePaths(command, values);
     const scopeSessionDir = command === 'search' || command === 'resource'
       ? normalizedValues['parent-session-dir'] : normalizedValues['session-dir'];
-    assertEnterpriseScope(scopeSessionDir, [requireValue(values, 'source')]);
+    const source = requireValue(values, 'source');
+    const parentSession = assertEnterpriseScope(scopeSessionDir, [source]);
+    let dispatchOptions = {};
+    if (command === 'search' && source === 'ima') {
+      assertImaParentContract(
+        scopeSessionDir,
+        parentSession,
+        requireValue(values, 'query'),
+        normalizedValues['output-dir'],
+      );
+      dispatchOptions = { taskContract: enterpriseChildTaskContract(parentSession) };
+    }
     const { ['parent-session-dir']: _parentSessionDir, ['session-root']: _sessionRoot, ...dispatchValues } = normalizedValues;
-    render(await dispatchEnterprise(command, dispatchValues));
+    render(await dispatchEnterprise(command, dispatchValues, dispatchOptions));
     return;
   }
   if (command === 'search-all') {
@@ -396,18 +478,29 @@ async function main() {
     const { ['parent-session-dir']: _parentSessionDir, ['session-root']: _sessionRoot, ...batchValues } = normalizedValues;
     const requests = parseSearchBatchRequests(batchValues);
     const sources = requests.map((request) => request.source);
-    assertEnterpriseScope(normalizedValues['parent-session-dir'], sources);
+    const parentSession = assertEnterpriseScope(normalizedValues['parent-session-dir'], sources);
     const outputRoot = normalizedValues['output-root'];
-    const aggregateWriter = await createArtifactWriter(outputRoot);
-    const outcomes = await dispatchEnterpriseBatch('search', requests, { concurrency: Number(values.concurrency) || 4 });
-    const aggregate = await writeSearchAllAggregate({
-      aggregateWriter,
-      query: requireValue(values, 'query'),
-      sources,
-      metadataOnly: values['metadata-only'] !== false && values['metadata-only'] !== 'false' && values['metadata-only'] !== '0',
-      outcomes,
+    assertDistinctSessionTrees(normalizedValues['parent-session-dir'], outputRoot);
+    const query = requireValue(values, 'query');
+    if (sources.includes('ima')) {
+      assertImaParentContract(normalizedValues['parent-session-dir'], parentSession, query);
+    }
+    const taskContract = enterpriseChildTaskContract(parentSession);
+    const result = await withSearchAllAggregateWriter(outputRoot, taskContract, async (aggregateWriter) => {
+      const outcomes = await dispatchEnterpriseBatch('search', requests, {
+        concurrency: Number(values.concurrency) || 4,
+        taskContract,
+      });
+      const aggregate = await writeSearchAllAggregate({
+        aggregateWriter,
+        query,
+        sources,
+        metadataOnly: values['metadata-only'] !== false && values['metadata-only'] !== 'false' && values['metadata-only'] !== '0',
+        outcomes,
+      });
+      return { outputDir: outputRoot, ...aggregate, outcomes };
     });
-    render({ outputDir: outputRoot, ...aggregate, outcomes });
+    render(result);
     return;
   }
   throw new Error(`unsupported command: ${command || '(missing)'}`);

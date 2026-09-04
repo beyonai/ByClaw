@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { createImaAdapter, imaContentGranularity } from './ima.mjs';
-import { ensureSessionSkeleton, newSession } from '../../session.mjs';
+import { collectionStatus } from '../../collection-state.mjs';
+import { ensureSessionSkeleton, newSession, sessionPaths } from '../../session.mjs';
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'ima-adapter-'));
@@ -24,6 +25,22 @@ if (args[0] === 'ima' && ['knowledge', 'knowledge-list'].includes(args[1]) && pr
   const code = process.env.BYCLI_BRIDGE_FAILURE === 'busy' ? 'BRIDGE_RECOVERY_BUSY' : 'BRIDGE_UNAVAILABLE';
   process.stderr.write(code + ': browser bridge refused connection');
   process.exit(69);
+}
+if (args[0] === 'ima' && ['knowledge', 'knowledge-list'].includes(args[1]) && process.env.BYCLI_AUTH_FAILURE === 'true') {
+  process.stderr.write('AUTH_REQUIRED: login required');
+  process.exit(2);
+}
+if (args[0] === 'ima' && args[1] === 'knowledge' && process.env.BYCLI_INVALID_JSON === 'true') {
+  process.stdout.write('{invalid-json');
+  process.exit(0);
+}
+if (args[0] === 'ima' && args[1] === 'knowledge-list' && process.env.BYCLI_UNSUPPORTED_LIST === 'true') {
+  out({ unexpected: true });
+  process.exit(0);
+}
+if (args[0] === 'ima' && args[1] === 'knowledge' && process.env.BYCLI_UNSUPPORTED_KNOWLEDGE === 'true') {
+  out({ unexpected: true });
+  process.exit(0);
 }
 if (args[0] === 'weixin' && args[1] === 'download' && process.env.WEIXIN_FAILURE_MODE === 'true') { process.stderr.write('weixin download failed'); process.exit(2); }
 else if (args[0] === 'weixin' && args[1] === 'download') {
@@ -59,6 +76,18 @@ else if (args[0] === 'ima' && args[1] === 'knowledge-list' && process.env.BYCLI_
   { id: 'kb-a', name: 'Alpha' },
   { id: 'kb-b', name: 'Beta' },
 ]);
+else if (args[0] === 'ima' && args[1] === 'knowledge-list' && process.env.BYCLI_FANOUT_MODE === 'true') out([
+  { id: 'kb-a', name: 'Alpha' },
+  { id: 'kb-a', name: 'Alpha duplicate' },
+  { id: 'kb-b', name: 'Beta' },
+  { id: 'kb-c', name: 'Gamma' },
+  { id: 'kb-d', name: 'Delta' },
+  { id: 'kb-e', name: 'Epsilon' },
+]);
+else if (args[0] === 'ima' && args[1] === 'knowledge' && process.env.BYCLI_FANOUT_MODE === 'true') out([{
+  mediaId: 'item-' + args[2], title: 'Roadmap ' + args[2],
+  url: 'https://ima.qq.com/item-' + args[2], abstract: 'roadmap summary',
+}]);
 else if (args[0] === 'ima' && args[1] === 'knowledge' && process.env.BYCLI_ENUMERATION_MODE === 'true') {
   if (args[2] === 'kb-b' && process.env.BYCLI_PARTIAL_FAILURE === 'true') {
     process.stderr.write('knowledge base requires login');
@@ -176,6 +205,25 @@ test('IMA unscoped discovery honors bounded concurrency and keeps knowledge-base
     assert.deepEqual(metadata.collection.items.map((item) => item.sourceItemId), [
       'alpha-title', 'alpha-folder', 'beta-introduction', 'beta-tags',
     ]);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('IMA unscoped discovery deduplicates selectors and stops scheduling after reaching limit', async () => {
+  const { root, bin } = await fixture();
+  try {
+    const callsPath = join(root, 'calls.json');
+    const outputDir = join(root, 'search');
+    const result = await createImaAdapter({
+      bycliBin: bin,
+      env: { ...process.env, BYCLI_FANOUT_MODE: 'true', IMA_CALLS_PATH: callsPath },
+    }).search({ outputDir, query: 'roadmap', limit: 1, concurrency: 2, metadataOnly: true });
+
+    assert.equal(result.status, 'complete');
+    assert.equal(result.counts.discovered, 1);
+    const calls = (await readFile(callsPath, 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+    const knowledgeCalls = calls.filter((args) => args[0] === 'ima' && args[1] === 'knowledge');
+    assert.equal(knowledgeCalls.length, 2);
+    assert.deepEqual(new Set(knowledgeCalls.map((args) => args[2])), new Set(['kb-a', 'kb-b']));
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
@@ -362,9 +410,48 @@ test('IMA knowledge-base listing uses bycli results without a standalone fallbac
     assert.equal(result.status, 'complete');
     const metadata = JSON.parse(await readFile(join(outputDir, 'sanitized/metadata.json'), 'utf8'));
     assert.equal(metadata.collection.items.find((item) => item.sourceType === 'wiki').sourceItemId, 'wiki-bycli-1');
+    assert.equal(metadata.collection.items[0].backend, 'bycli');
+    const collectionResult = JSON.parse(await readFile(join(outputDir, 'collection-result.json'), 'utf8'));
+    assert.equal(collectionResult.source, 'ima');
+    assert.equal(collectionResult.backend, 'bycli');
     const calls = (await readFile(callsPath, 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
     assert.equal(calls.some((args) => args[0] === 'ima' && args[1] === 'knowledge'), true);
     assert.equal(calls.some((args) => args[0] === 'wiki' && args[1] === 'search'), false);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('IMA unscoped search commits unsupported knowledge-list shapes as INVALID_RESPONSE', async () => {
+  const { root, bin } = await fixture();
+  try {
+    const outputDir = join(root, 'search');
+    const result = await createImaAdapter({
+      bycliBin: bin,
+      env: { ...process.env, BYCLI_UNSUPPORTED_LIST: 'true' },
+    }).search({ outputDir, query: 'roadmap', limit: 10, metadataOnly: true });
+
+    assert.equal(result.status, 'failed');
+    assert.equal(result.reasonCode, 'INVALID_RESPONSE');
+    const session = JSON.parse(await readFile(join(outputDir, 'session.json'), 'utf8'));
+    assert.equal(session.task.publicationStatus, 'committed');
+    assert.equal(session.collection.collection.status, 'failed');
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('IMA all-invalid knowledge responses stay INVALID_RESPONSE instead of becoming bridge failures', async () => {
+  const { root, bin } = await fixture();
+  try {
+    const outputDir = join(root, 'search');
+    const result = await createImaAdapter({
+      bycliBin: bin,
+      env: {
+        ...process.env,
+        BYCLI_ENUMERATION_MODE: 'true',
+        BYCLI_UNSUPPORTED_KNOWLEDGE: 'true',
+      },
+    }).search({ outputDir, query: 'roadmap', limit: 10, metadataOnly: true });
+
+    assert.equal(result.status, 'failed');
+    assert.equal(result.reasonCode, 'INVALID_RESPONSE');
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
@@ -547,6 +634,46 @@ test('IMA selected materialization stays in-place and preserves the initialized 
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+test('IMA search-all child inherits full-text delivery requirements through materialization', async () => {
+  const { root, bin } = await fixture();
+  try {
+    const sessionDir = join(root, 'search-all-child');
+    const taskContract = {
+      query: 'original full-text request',
+      materializationTarget: 'selected',
+      requiredContentGranularity: 'full-text',
+      deliveryRequested: true,
+    };
+    const adapter = createImaAdapter({
+      bycliBin: bin,
+      env: { ...process.env, BYCLI_SUCCESS: 'true' },
+    });
+    await adapter.search({
+      outputDir: sessionDir,
+      query: 'roadmap',
+      kb: 'kb-name',
+      limit: 10,
+      metadataOnly: true,
+      taskContract,
+    });
+    const discovery = JSON.parse(await readFile(join(sessionDir, 'sanitized/metadata.json'), 'utf8'));
+    await adapter.materialize({
+      sessionDir,
+      outputDir: sessionDir,
+      itemIds: [discovery.collection.items[0].itemId],
+    });
+
+    const session = JSON.parse(await readFile(join(sessionDir, 'session.json'), 'utf8'));
+    assert.equal(session.task.query, taskContract.query);
+    assert.equal(session.task.materializationTarget, 'selected');
+    assert.equal(session.task.requiredContentGranularity, 'full-text');
+    assert.equal(session.task.deliveryRequested, true);
+    const status = collectionStatus(sessionPaths(sessionDir));
+    assert.equal(status.deliveryComplete, false);
+    assert.equal(status.unmetRequiredGranularity, 1);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test('IMA materializes discovered excerpts and covers without a standalone Wiki retrieval', async () => {
   const { root, bin } = await fixture();
   try {
@@ -701,14 +828,20 @@ test('IMA specified knowledge-base failure does not fall back to a standalone CL
   try {
     const callsPath = join(root, 'calls.json');
     const outputDir = join(root, 'search');
-    await assert.rejects(
-      createImaAdapter({
-        bin,
-        bycliBin: bin,
-        env: { ...process.env, IMA_CALLS_PATH: callsPath },
-      }).search({ outputDir, query: 'roadmap', limit: 10, metadataOnly: true, kb: 'kb-1' }),
-      /bycli ima knowledge failed/,
-    );
+    const result = await createImaAdapter({
+      bin,
+      bycliBin: bin,
+      env: { ...process.env, IMA_CALLS_PATH: callsPath },
+    }).search({ outputDir, query: 'roadmap', limit: 10, metadataOnly: true, kb: 'kb-1' });
+    assert.equal(result.status, 'failed');
+    assert.equal(result.reasonCode, 'SOURCE_FAILED');
+    const metadata = JSON.parse(await readFile(join(outputDir, 'sanitized/metadata.json'), 'utf8'));
+    assert.equal(metadata.collection.status, 'failed');
+    assert.equal(metadata.sourceMetadata.terminal.status, 'failed');
+    assert.equal(metadata.sourceMetadata.terminal.reasonCode, 'SOURCE_FAILED');
+    const session = JSON.parse(await readFile(join(outputDir, 'session.json'), 'utf8'));
+    assert.equal(session.task.status, 'failed');
+    assert.equal(session.task.publicationStatus, 'committed');
     const calls = (await readFile(callsPath, 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
     assert.equal(calls.some((args) => args[0] === 'ima' && args[1] === 'knowledge'), true);
     assert.equal(calls.some((args) => ['auth', 'note', 'wiki'].includes(args[0])), false);
@@ -718,14 +851,54 @@ test('IMA specified knowledge-base failure does not fall back to a standalone CL
 test('IMA unscoped search fails when every enumerated knowledge base fails', async () => {
   const { root, bin } = await fixture();
   try {
-    await assert.rejects(
-      createImaAdapter({
-        bin,
-        bycliBin: bin,
-        env: { ...process.env, BYCLI_ALL_FAILURE_MODE: 'true' },
-      }).search({ outputDir: join(root, 'search'), query: 'roadmap', limit: 10, metadataOnly: true }),
-      /IMA knowledge enumeration failed/,
-    );
+    const outputDir = join(root, 'search');
+    const result = await createImaAdapter({
+      bin,
+      bycliBin: bin,
+      env: { ...process.env, BYCLI_ALL_FAILURE_MODE: 'true' },
+    }).search({ outputDir, query: 'roadmap', limit: 10, metadataOnly: true });
+    assert.equal(result.status, 'failed');
+    assert.equal(result.reasonCode, 'SOURCE_FAILED');
+    const metadata = JSON.parse(await readFile(join(outputDir, 'sanitized/metadata.json'), 'utf8'));
+    assert.equal(metadata.collection.status, 'failed');
+    assert.equal(metadata.sourceMetadata.discovery.failures.length, 2);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('IMA authentication failure publishes a committed auth-required terminal bundle', async () => {
+  const { root, bin } = await fixture();
+  try {
+    const outputDir = join(root, 'search');
+    const result = await createImaAdapter({
+      bycliBin: bin,
+      env: { ...process.env, BYCLI_AUTH_FAILURE: 'true' },
+    }).search({ outputDir, query: 'roadmap', kb: 'kb-name', limit: 10, metadataOnly: true });
+
+    assert.equal(result.status, 'auth_required');
+    assert.equal(result.reasonCode, 'AUTH_REQUIRED');
+    const metadata = JSON.parse(await readFile(join(outputDir, 'sanitized/metadata.json'), 'utf8'));
+    assert.equal(metadata.collection.status, 'failed');
+    assert.equal(metadata.sourceMetadata.terminal.status, 'auth_required');
+    const session = JSON.parse(await readFile(join(outputDir, 'session.json'), 'utf8'));
+    assert.equal(session.task.status, 'failed');
+    assert.equal(session.task.publicationStatus, 'committed');
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('IMA invalid JSON publishes a structured failed terminal bundle', async () => {
+  const { root, bin } = await fixture();
+  try {
+    const outputDir = join(root, 'search');
+    const result = await createImaAdapter({
+      bycliBin: bin,
+      env: { ...process.env, BYCLI_INVALID_JSON: 'true' },
+    }).search({ outputDir, query: 'roadmap', kb: 'kb-name', limit: 10, metadataOnly: true });
+
+    assert.equal(result.status, 'failed');
+    assert.equal(result.reasonCode, 'INVALID_RESPONSE');
+    const metadata = JSON.parse(await readFile(join(outputDir, 'sanitized/metadata.json'), 'utf8'));
+    assert.equal(metadata.collection.status, 'failed');
+    assert.equal(metadata.sourceMetadata.terminal.reasonCode, 'INVALID_RESPONSE');
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

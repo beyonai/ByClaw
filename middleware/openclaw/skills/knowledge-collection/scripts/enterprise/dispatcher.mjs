@@ -224,7 +224,9 @@ function reasonOf(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
-export async function dispatchEnterprise(command, values, { adapters = defaultAdapters() } = {}) {
+export async function dispatchEnterprise(command, values, {
+  adapters = defaultAdapters(), taskContract = null,
+} = {}) {
   const request = command === 'search' ? parseSearchRequest(values)
     : command === 'resource' ? parseResourceRequest(values)
       : command === 'materialize' ? parseMaterializeRequest(values)
@@ -240,6 +242,7 @@ export async function dispatchEnterprise(command, values, { adapters = defaultAd
   const outcome = await method({
     ...request,
     ...request.sourceOptions,
+    ...(taskContract ? { taskContract } : {}),
     ...(command === 'resource' && request.source === 'feishu' ? { resourceKind: 'minutes' } : {}),
   });
   if (!outcome || typeof outcome !== 'object') throw new Error('connector returned an invalid outcome');
@@ -252,7 +255,9 @@ export async function dispatchEnterprise(command, values, { adapters = defaultAd
   };
 }
 
-export async function dispatchEnterpriseBatch(command, requests, { adapters = defaultAdapters(), concurrency = 4 } = {}) {
+export async function dispatchEnterpriseBatch(command, requests, {
+  adapters = defaultAdapters(), concurrency = 4, taskContract = null,
+} = {}) {
   if (!Array.isArray(requests) || requests.length === 0) {
     throw new Error('enterprise batch requests must be a non-empty array');
   }
@@ -281,7 +286,7 @@ export async function dispatchEnterpriseBatch(command, requests, { adapters = de
       const session = sessions[index];
       let outcome;
       try {
-        outcome = await dispatchEnterprise(command, session.values, { adapters });
+        outcome = await dispatchEnterprise(command, session.values, { adapters, taskContract });
       } catch (error) {
         outcome = {
           ...handledOutcome(session.source, 'failed', session.sessionDir),
