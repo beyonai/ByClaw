@@ -417,16 +417,30 @@ export async function deliverReplyToAgentViaSdk(
   const sessionKey = baseSessionKey;
 
   const waitForEmbeddedAttemptDrain = async (): Promise<void> => {
-    if (!deps.abortController?.signal.aborted) {
+    const channelSignal = deps.abortController?.signal;
+    deps.log?.info?.(
+      `[diagnose-sdk] embedded drain check: sessionKey=${sessionKey}, signalPresent=${String(Boolean(channelSignal))}, aborted=${String(Boolean(channelSignal?.aborted))}, reason=${String(channelSignal?.reason ?? "none")}`,
+    );
+    if (!channelSignal?.aborted) {
       return;
     }
     const activeSessionId = resolveActiveEmbeddedRunSessionId(sessionKey);
+    deps.log?.info?.(
+      `[diagnose-sdk] embedded drain target resolved: sessionKey=${sessionKey}, activeSessionId=${activeSessionId ?? "none"}`,
+    );
     if (activeSessionId) {
+      const drainStartedAt = Date.now();
+      deps.log?.info?.(
+        `[diagnose-sdk] calling abortAndDrainAgentHarnessRun: sessionKey=${sessionKey}, sessionId=${activeSessionId}, settleMs=15000`,
+      );
       const drain = await abortAndDrainAgentHarnessRun({
         sessionId: activeSessionId,
         sessionKey,
         settleMs: 15_000,
       });
+      deps.log?.info?.(
+        `[diagnose-sdk] abortAndDrainAgentHarnessRun returned: sessionKey=${sessionKey}, sessionId=${activeSessionId}, aborted=${String(drain.aborted)}, drained=${String(drain.drained)}, forceCleared=${String(drain.forceCleared)}, elapsedMs=${Date.now() - drainStartedAt}`,
+      );
       if (!drain.drained) {
         deps.log?.warn?.(
           `[diagnose-sdk] embedded attempt drain timed out before releasing session lease: sessionKey=${sessionKey}, sessionId=${activeSessionId}`,
@@ -715,6 +729,10 @@ async function deliverReplyToAgentViaSdkUnderGate(
 
       const finalizedCtx = rt.channel.reply.finalizeInboundContext(ctxPayload);
       log?.info?.(`[diagnose-sdk] finalized ctx, SessionKey: ${finalizedCtx.SessionKey}, To: ${To}`);
+      const dispatchSignal = deps.abortController?.signal;
+      log?.info?.(
+        `[diagnose-sdk] dispatch abort signal snapshot: sessionKey=${sessionKey}, signalPresent=${String(Boolean(dispatchSignal))}, aborted=${String(Boolean(dispatchSignal?.aborted))}, reason=${String(dispatchSignal?.reason ?? "none")}`,
+      );
 
       dispatchStartedAt = emitByaiSdkDispatchStarted(diagnosticRef, diagnosticTrace);
       const turnResult = await runWithByaiSdkDiagnosticTrace(diagnosticTrace, () =>
@@ -799,6 +817,9 @@ async function deliverReplyToAgentViaSdkUnderGate(
       // flag and continue to use rootLifecyclePhase as their drain signal.
       markActiveSdkDispatchSettled(sessionKey);
     } catch (err) {
+      log?.info?.(
+        `[diagnose-sdk] dispatch threw: sessionKey=${sessionKey}, signalAborted=${String(Boolean(deps.abortController?.signal.aborted))}, signalReason=${String(deps.abortController?.signal.reason ?? "none")}, error=${String(err)}`,
+      );
       if (dispatchStartedAt > 0) {
         emitByaiSdkDispatchCompleted(diagnosticRef, diagnosticTrace, {
           startedAt: dispatchStartedAt,

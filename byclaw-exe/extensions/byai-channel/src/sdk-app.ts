@@ -421,6 +421,9 @@ export class ByaiChannelGatewayWorker extends GatewayWorker {
 
   private cancelActiveRequest(traceId: string, reason: string): void {
     const activeRequest = resolveActiveSdkRequestByTraceId(traceId);
+    this.log?.info?.(
+      `[${this.account.accountId}] cancelActiveRequest entered: traceId=${traceId}, reason=${reason}, found=${String(Boolean(activeRequest))}, alreadyAborted=${String(Boolean(activeRequest?.abortController?.signal.aborted))}`,
+    );
     if (!activeRequest?.abortController) {
       this.log?.info?.(
         `[${this.account.accountId}] cancel skipped: no active request for traceId ${traceId}`,
@@ -428,8 +431,14 @@ export class ByaiChannelGatewayWorker extends GatewayWorker {
       return;
     }
     if (!activeRequest.abortController.signal.aborted) {
+      this.log?.info?.(
+        `[${this.account.accountId}] aborting channel AbortController: traceId=${traceId}, signalReason=${String(activeRequest.abortController.signal.reason ?? "none")}`,
+      );
       activeRequest.abortController.abort(
         new Error(`[${this.account.accountId}] task canceled, reason: ${reason}`),
+      );
+      this.log?.info?.(
+        `[${this.account.accountId}] channel AbortController aborted: traceId=${traceId}, reason=${String(activeRequest.abortController.signal.reason ?? "none")}`,
       );
     }
     // Keep the per-session lease until the OpenClaw embedded attempt drains.
@@ -544,6 +553,9 @@ export class ByaiChannelGatewayWorker extends GatewayWorker {
     }
 
     const frameworkSignal = context.getCancellationSignal();
+    this.log?.info?.(
+      `[${this.account.accountId}] framework cancellation signal captured: messageId=${messageId}, traceId=${traceId || ""}, present=${String(Boolean(frameworkSignal))}, aborted=${String(Boolean(frameworkSignal?.aborted))}, reason=${String(frameworkSignal?.reason ?? "none")}`,
+    );
     let emittedLaneError = false;
     const emitSdkError = async (currentInbound: ByaiSdkInboundMessage, err: unknown) => {
       emittedLaneError = true;
@@ -569,9 +581,24 @@ export class ByaiChannelGatewayWorker extends GatewayWorker {
     const handleInbound = async (currentInbound: ByaiSdkInboundMessage) => {
       const abortController = new AbortController();
       let businessResult: Awaited<ReturnType<typeof deliverReplyToAgentViaSdk>> | undefined;
+      abortController.signal.addEventListener(
+        "abort",
+        () => {
+          this.log?.info?.(
+            `[${this.account.accountId}] channel AbortController abort event: messageId=${currentInbound.messageId}, traceId=${currentInbound.traceId || ""}, reason=${String(abortController.signal.reason ?? "none")}`,
+          );
+        },
+        { once: true },
+      );
       const abortFromFramework = () => {
+        this.log?.info?.(
+          `[${this.account.accountId}] framework cancellation observed: messageId=${currentInbound.messageId}, traceId=${currentInbound.traceId || ""}, frameworkAborted=${String(Boolean(frameworkSignal?.aborted))}, frameworkReason=${String(frameworkSignal?.reason ?? "none")}, channelAbortedBefore=${String(abortController.signal.aborted)}`,
+        );
         if (!abortController.signal.aborted) {
           abortController.abort(frameworkSignal?.reason || "task cancelled");
+          this.log?.info?.(
+            `[${this.account.accountId}] channel AbortController bridged from framework: messageId=${currentInbound.messageId}, traceId=${currentInbound.traceId || ""}, reason=${String(abortController.signal.reason ?? "none")}`,
+          );
         }
       };
       if (frameworkSignal?.aborted) {
@@ -582,6 +609,9 @@ export class ByaiChannelGatewayWorker extends GatewayWorker {
         });
       }
       try {
+        this.log?.info?.(
+          `[${this.account.accountId}] handleInbound started: messageId=${currentInbound.messageId}, traceId=${currentInbound.traceId || ""}, channelAborted=${String(abortController.signal.aborted)}, frameworkAborted=${String(Boolean(frameworkSignal?.aborted))}`,
+        );
         businessResult = await deliverReplyToAgentViaSdk({
           message: currentInbound,
           account: this.account,
@@ -611,6 +641,9 @@ export class ByaiChannelGatewayWorker extends GatewayWorker {
         }
         return businessResult;
       } catch (err) {
+        this.log?.info?.(
+          `[${this.account.accountId}] handleInbound failed: messageId=${currentInbound.messageId}, traceId=${currentInbound.traceId || ""}, channelAborted=${String(abortController.signal.aborted)}, channelReason=${String(abortController.signal.reason ?? "none")}, frameworkAborted=${String(Boolean(frameworkSignal?.aborted))}, error=${String(err)}`,
+        );
         if (abortController.signal.aborted) {
           this.cancelActiveRequest(
             currentInbound.traceId,
