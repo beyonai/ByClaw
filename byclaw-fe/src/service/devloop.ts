@@ -312,6 +312,7 @@ export type ProjectRepoTreeNode = {
   size?: number;
   sha?: string;
   url?: string;
+  downloadUrl?: string;
   hasChildren?: boolean;
 };
 

@@ -13,5 +13,7 @@ public class ProjectRepoTreeNodeDTO {
     private Long size;
     private String sha;
     private String url;
+    /** 原始文件下载地址；目录节点通常为空。 */
+    private String downloadUrl;
     private Boolean hasChildren;
 }

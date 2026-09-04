@@ -52,6 +52,8 @@ function toRepoFileItems(nodes: ProjectRepoTreeNode[], rootPath: string, pathPre
       isDir,
       size: node.size,
       url: node.url,
+      downloadUrl: node.downloadUrl,
+      url: node.url,
     };
   });
 }
@@ -289,12 +291,20 @@ const CodesTab: React.FC<CodesTabProps> = ({
         message.warning(intl.formatMessage({ id: 'fileBrowser.preview.unavailable' }));
         return;
       }
+      const remoteUrl = `${(item as any).url || ''}`.trim();
+      const remoteDownloadUrl = `${(item as any).downloadUrl || ''}`.trim();
+      const fileUrl = /^https?:\/\//i.test(remoteDownloadUrl)
+        ? remoteDownloadUrl
+        : /^https?:\/\//i.test(remoteUrl)
+        ? remoteUrl
+        : undefined;
       // 预览挂在资源工作区页签上，同一路径复用同一个页签而不是重复打开。
       onOpenDetail(
         <FilePreviewPanel
           fileName={item.name}
           resourceId={normalizedResourceId}
           path={item.path}
+          fileUrl={fileUrl}
           source="fileBrowser"
         />,
         { tabKey: `repo-file:${item.path}`, title: item.name }
