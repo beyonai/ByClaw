@@ -123,6 +123,21 @@ ENV BYCLI_CONFIG_DIR=/by/.bycli \
     BYCLI_BROWSER_RECOVERY_COMMAND=/usr/local/bin/start-chrome.sh \
     BYCLI_DAEMON_HOST=0.0.0.0
 
+# chatlab-cli 依赖 better-sqlite3；当对应 Node.js 版本没有预编译包时，
+# npm 会通过 node-gyp 本地编译，因此需要提前准备完整的原生模块编译工具链。
+RUN if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+        sed -i 's|http://deb.debian.org/debian|https://mirrors.tuna.tsinghua.edu.cn/debian|g' /etc/apt/sources.list.d/debian.sources; \
+        sed -i 's|http://deb.debian.org/debian-security|https://mirrors.tuna.tsinghua.edu.cn/debian-security|g' /etc/apt/sources.list.d/debian.sources; \
+    elif [ -f /etc/apt/sources.list ]; then \
+        sed -i 's|http://deb.debian.org/debian|https://mirrors.tuna.tsinghua.edu.cn/debian|g' /etc/apt/sources.list; \
+        sed -i 's|http://security.debian.org/debian-security|https://mirrors.tuna.tsinghua.edu.cn/debian-security|g' /etc/apt/sources.list; \
+    fi; \
+    apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+        python3 \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN npm config set registry "${NPM_REGISTRY}" --global \
     && npm config set fund false --global \
     && npm config set audit false --global \
