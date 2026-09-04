@@ -161,11 +161,24 @@ export async function runUnifiedSearch(paths, args = {}, dependencies = {}) {
       : publicInventory(candidate));
     const writer = await createArtifactWriter(paths.root, { allowExistingSession: true, allowFailed: true });
     try {
+      const cloudStatus = cloudOutcome ? cloudOutcome.status : 'unavailable';
+      const cloudError = cloudOutcome?.reasonCode
+        ? cloudOutcome.reasonCode
+        : cloudOutcome?.reason
+          ? cloudOutcome.reason
+          : cloudOutcome
+            ? null
+            : 'CLOUD_CONTEXT_UNAVAILABLE';
       const sourceMetadata = {
         operation: 'unified-search', query, metadataOnly: true,
         sources: {
           publicInternet: { status: publicResult ? 'complete' : 'failed', error: publicResult ? null : 'PUBLIC_SEARCH_FAILED' },
-          cloudKnowledge: { status: cloudOutcome ? cloudOutcome.status : 'unavailable', error: cloudOutcome ? null : 'CLOUD_CONTEXT_UNAVAILABLE' },
+          cloudKnowledge: {
+            status: cloudStatus,
+            error: cloudError,
+            ...(cloudOutcome?.reasonCode ? { reasonCode: cloudOutcome.reasonCode } : {}),
+            ...(cloudOutcome?.reason ? { reason: cloudOutcome.reason } : {}),
+          },
         },
         ranking: { schemaVersion: '1.0', candidateCount: candidates.length },
       };

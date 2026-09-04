@@ -84,6 +84,30 @@ test('unified search resolves cloud resource from project id when no explicit re
   }
 });
 
+test('unified search propagates cloud failure reason', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'unified-cloud-failure-'));
+  try {
+    ensureSessionSkeleton(root);
+    const paths = { root, session: join(root, 'session.json'), collectionResult: join(root, 'collection-result.json'), metadata: join(root, 'sanitized/metadata.json'), inputDir: join(root, '.collection-inputs'), lock: join(root, '.knowledge-collection.lock') };
+    persistSession(paths, newSession({
+      query: '云盘失败测试', sourceScope: ['public-internet', 'cloud-knowledge'],
+      cloudDiscoveryScope: { schemaVersion: '1.0', resources: [{ resourceId: 7, directoryPath: '/', origin: 'user-input' }] },
+    }));
+    const result = await runUnifiedSearch(paths, { query: '云盘失败测试' }, {
+      runPublicDiscover: async () => ({ merged: { results: [] } }),
+      createCloudKnowledgeAdapter: () => ({
+        search: async () => ({ ok: true, status: 'failed', reasonCode: 'SOURCE_FAILED', reason: 'backend unavailable' }),
+      }),
+    });
+    assert.equal(result.sources.cloudKnowledge.status, 'failed');
+    assert.equal(result.sources.cloudKnowledge.error, 'SOURCE_FAILED');
+    assert.equal(result.sources.cloudKnowledge.reasonCode, 'SOURCE_FAILED');
+    assert.equal(result.sources.cloudKnowledge.reason, 'backend unavailable');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('unified materialize routes public and cloud candidates independently', async () => {
   const root = await mkdtemp(join(tmpdir(), 'unified-materialize-'));
   try {
