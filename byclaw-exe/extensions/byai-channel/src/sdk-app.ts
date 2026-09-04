@@ -45,7 +45,6 @@ import {
   createRedisClient,
   type RedisClient,
 } from "../../shared/src/redis-compat.js";
-import { releaseCancelledSessionDispatch } from "./session-dispatch-gate.js";
 import { connectorAuthorizationFromMetadata } from "./connector-authorization.js";
 
 export interface ByaiSdkAppOptions {
@@ -433,7 +432,9 @@ export class ByaiChannelGatewayWorker extends GatewayWorker {
         new Error(`[${this.account.accountId}] task canceled, reason: ${reason}`),
       );
     }
-    releaseCancelledSessionDispatch(activeRequest.sessionKey);
+    // Keep the per-session lease until the OpenClaw embedded attempt drains.
+    // Releasing here lets a replacement write the transcript while the aborted
+    // attempt is still unwinding its prompt lock and cleanup fence.
     clearActiveSdkRequestRecord(activeRequest);
   }
 
@@ -567,6 +568,7 @@ export class ByaiChannelGatewayWorker extends GatewayWorker {
 
     const handleInbound = async (currentInbound: ByaiSdkInboundMessage) => {
       const abortController = new AbortController();
+      let businessResult: Awaited<ReturnType<typeof deliverReplyToAgentViaSdk>> | undefined;
       const abortFromFramework = () => {
         if (!abortController.signal.aborted) {
           abortController.abort(frameworkSignal?.reason || "task cancelled");
@@ -580,7 +582,7 @@ export class ByaiChannelGatewayWorker extends GatewayWorker {
         });
       }
       try {
-        const businessResult = await deliverReplyToAgentViaSdk({
+        businessResult = await deliverReplyToAgentViaSdk({
           message: currentInbound,
           account: this.account,
           cfg: getRuntimeConfig(),
@@ -604,6 +606,7 @@ export class ByaiChannelGatewayWorker extends GatewayWorker {
           },
         });
         if (abortController.signal.aborted) {
+          await businessResult.finalize();
           throw new TaskCancelledError(String(abortController.signal.reason || "task cancelled"));
         }
         return businessResult;
@@ -613,6 +616,7 @@ export class ByaiChannelGatewayWorker extends GatewayWorker {
             currentInbound.traceId,
             String(abortController.signal.reason || err),
           );
+          await businessResult?.finalize().catch(() => undefined);
           throw new TaskCancelledError(String(abortController.signal.reason || "task cancelled"));
         }
         await emitSdkError(currentInbound, err);

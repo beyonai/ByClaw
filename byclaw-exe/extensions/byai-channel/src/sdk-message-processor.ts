@@ -10,6 +10,10 @@ import {
   resolveChannelMediaMaxBytes,
   saveMediaBuffer,
 } from "openclaw/plugin-sdk/media-runtime";
+import {
+  abortAndDrainAgentHarnessRun,
+  resolveActiveEmbeddedRunSessionId,
+} from "openclaw/plugin-sdk/agent-harness-runtime";
 import { getByaiRuntime } from "./runtime.js";
 import { resolveAgentIdFromSessionKey } from "openclaw/plugin-sdk/routing";
 import type { ByaiLaneMetadata, SdkInboundFile, SdkProcessorDeps } from "./types.js";
@@ -412,6 +416,25 @@ export async function deliverReplyToAgentViaSdk(
   });
   const sessionKey = baseSessionKey;
 
+  const waitForEmbeddedAttemptDrain = async (): Promise<void> => {
+    if (!deps.abortController?.signal.aborted) {
+      return;
+    }
+    const activeSessionId = resolveActiveEmbeddedRunSessionId(sessionKey);
+    if (activeSessionId) {
+      const drain = await abortAndDrainAgentHarnessRun({
+        sessionId: activeSessionId,
+        sessionKey,
+        settleMs: 15_000,
+      });
+      if (!drain.drained) {
+        deps.log?.warn?.(
+          `[diagnose-sdk] embedded attempt drain timed out before releasing session lease: sessionKey=${sessionKey}, sessionId=${activeSessionId}`,
+        );
+      }
+    }
+  };
+
   const { result, meta, release } = await runSessionDispatchExclusiveLeased(sessionKey, async () => {
     const dispatchCfg = await waitForBaiyingAgentConfig({
       runtime: rt,
@@ -421,15 +444,20 @@ export async function deliverReplyToAgentViaSdk(
       signal: deps.abortController?.signal,
     });
 
-    return await deliverReplyToAgentViaSdkUnderGate({
-      ...deps,
-      cfg: dispatchCfg,
-      sessionKey,
-      routing,
-      targetAgentId,
-      extraPayload,
-      laneMetadata,
-    });
+    try {
+      return await deliverReplyToAgentViaSdkUnderGate({
+        ...deps,
+        cfg: dispatchCfg,
+        sessionKey,
+        routing,
+        targetAgentId,
+        extraPayload,
+        laneMetadata,
+      });
+    } catch (error) {
+      await waitForEmbeddedAttemptDrain();
+      throw error;
+    }
   }, { signal: deps.abortController?.signal });
 
   if (meta.queued) {
@@ -448,8 +476,13 @@ export async function deliverReplyToAgentViaSdk(
       try {
         await result.finalize();
       } finally {
-        // Keep the FIFO lease through FINAL_ANSWER and APP_STREAM_RESPONSE so the
-        // next inbound cannot take ownership of the transcript between them.
+        // On cancellation, wait for OpenClaw's embedded attempt to leave its
+        // active-run registry before releasing this lease. Otherwise a new
+        // inbound can write the transcript while the old attempt is still
+        // unwinding its prompt lock and cleanup fence.
+        await waitForEmbeddedAttemptDrain();
+        // Keep the FIFO lease through FINAL_ANSWER and APP_STREAM_RESPONSE, and
+        // through cancellation drain, before the next inbound can own the transcript.
         release();
       }
     },
