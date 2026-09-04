@@ -201,6 +201,24 @@ await (async () => {
   assert.equal(init.code, 0, init.stderr || init.stdout);
   const persisted = JSON.parse(readFileSync(join(sessionDir, 'session.json'), 'utf8'));
   assert.deepEqual(persisted.task.cloudDiscoveryScope.resources, [{ resourceId: 1024, directoryPath: '/docs', origin: 'user-input' }]);
+  const rootScope = JSON.stringify({
+    schemaVersion: '1.0',
+    resources: [{ resourceId: 1024, directoryPath: '/', origin: 'user-input' }],
+  });
+  const rootScopeInit = await runCli([
+    'init', '--session-dir', join(sessionRoot, 'cloud-root-scope'), '--session-root', sessionRoot, '--query', 'cloud root query',
+    '--source-scope', '["cloud-knowledge"]', '--materialization-target', 'selected',
+    '--cloud-discovery-scope', rootScope,
+  ], env);
+  assert.equal(rootScopeInit.code, 0, rootScopeInit.stderr || rootScopeInit.stdout);
+  const idScopeInit = await runCli([
+    'init', '--session-dir', join(sessionRoot, 'cloud-id-scope'), '--session-root', sessionRoot, '--query', 'cloud id query',
+    '--source-scope', '["cloud-knowledge"]', '--materialization-target', 'selected',
+    '--cloud-resource-id', '1024',
+  ], env);
+  assert.equal(idScopeInit.code, 0, idScopeInit.stderr || idScopeInit.stdout);
+  const idScopePersisted = JSON.parse(readFileSync(join(sessionRoot, 'cloud-id-scope', 'session.json'), 'utf8'));
+  assert.deepEqual(idScopePersisted.task.cloudDiscoveryScope.resources, [{ resourceId: 1024, directoryPath: '/', origin: 'user-input' }]);
   const rejected = await runCli([
     'init', '--session-dir', join(sessionRoot, 'bad'), '--session-root', sessionRoot, '--query', 'bad',
     '--source-scope', '["public-internet"]', '--cloud-discovery-scope', scope,

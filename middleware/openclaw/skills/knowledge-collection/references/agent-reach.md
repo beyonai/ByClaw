@@ -29,7 +29,7 @@ node scripts/knowledge-collection.mjs acquire-web --session-dir <dir> --item-id 
 
 本文件下列原子来源命令仅适用于未由 `public-collect` 持有的 operator 会话。`public-collect` 持有的会话只能调用编排器内部 verifier；根 Agent、路由层和来源执行器均不得对该会话手工执行表格或后文中的 `acquire-web`、`materialize-*`、`collect`、`crawl-*` 命令。
 
-用户明确只要候选链接时，即使用户指定了链接数量，也使用 `public-discover`。用户要求文章、正文或全文但未指定数量时，默认使用 `unified-search` 并行检索公共互联网与当前项目云盘；调用时必须把可信 `<project_context>` 的 `project_id` 传为 `--project-id`，缺少显式 `cloudResourceId` 时由 `project-context basic` 解析项目云盘资源，再用 `unified-materialize` 物化选中的正文。用户明确指定数量时（如“一篇”“5 篇”“至少 10 篇”），使用 `public-collect`，仅检索公共互联网，并在首次 `init` 传 `--workflow public-collect`。用户明确限定来源时服从限定，不自动扩展来源。直链无独立检索主题时，`--query` 与 `--fallback-query` 都复用首次 `init` 的原始任务描述。
+用户明确只要候选链接时，即使用户指定了链接数量，也使用 `public-discover`。用户要求文章、正文或全文但未指定数量时，默认使用 `unified-search` 并行检索公共互联网与当前项目云盘；调用前将可信 `<project_context>` 的 `project_id` 传给 `project-context basic`，再把返回的 `project.cloudResourceId` 传给首次 `init --cloud-resource-id`（CLI 自动生成根目录授权 scope），随后调用 `unified-search --project-id`，不要手工拼接 scope JSON。用户明确指定数量时（如“一篇”“5 篇”“至少 10 篇”），使用 `public-collect`，仅检索公共互联网，并在首次 `init` 传 `--workflow public-collect`。用户明确限定来源时服从限定，不自动扩展来源。直链无独立检索主题时，`--query` 与 `--fallback-query` 都复用首次 `init` 的原始任务描述。
 
 ## 路由表
 

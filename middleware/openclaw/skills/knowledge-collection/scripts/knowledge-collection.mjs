@@ -100,6 +100,7 @@ const COMMAND_SPECS = {
         + '此处绑定后由 publish --delivery-handle 引用，裸路径不再需要出现在后续参数中。init 不对其做任何文件系统访问。'
         + '声明了 --delivery-requested 却省略本参数时 init 会在 warnings 里提示未绑定，交付将回退到 publish --delivery-dir',
       '--cloud-discovery-scope': '云盘发现授权集 JSON；source-scope 包含 cloud-knowledge 时必填',
+      '--cloud-resource-id': '可选。云盘资源 ID；与 cloud-knowledge 一起使用时自动生成根目录授权 scope',
       '--direct-urls': '可选。用户在原始请求中明确提供的公共 URL JSON 数组；这些 URL 以 user-provided 候选登记',
       '--started-at': '可选。ISO 时间;缺省为当前时间',
       '--collection-result-input-file': '可选。预置 canonical collection-result.json',
@@ -409,6 +410,7 @@ const COMMAND_SCHEMA_OVERRIDES = {
       'delivery-requested': { ...SCHEMA.boolean, default: false },
       'delivery-dir': { type: 'string', minLength: 1 },
       'cloud-discovery-scope': { type: 'object', cliEncoding: 'json' },
+      'cloud-resource-id': SCHEMA.positiveInteger,
       'direct-urls': SCHEMA.jsonArray,
       'started-at': { type: 'string', format: 'date-time' },
       'collection-result-input-file': SCHEMA.file,
