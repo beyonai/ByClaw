@@ -102,11 +102,11 @@ class RecorderVncModeTest {
 
     @Test
     void vncSessionUsesGatewayPortAndForegroundWindow() throws Exception {
-        BycliRecorderBrowserPortTest.FakeDaemon defaultDaemon = null;
-        BycliRecorderBrowserPortTest.FakeDaemon gatewayDaemon = null;
+        RecorderFakeDaemonTestSupport.FakeDaemon defaultDaemon = null;
+        RecorderFakeDaemonTestSupport.FakeDaemon gatewayDaemon = null;
         try {
-            defaultDaemon = BycliRecorderBrowserPortTest.FakeDaemon.start();
-            gatewayDaemon = BycliRecorderBrowserPortTest.FakeDaemon.start();
+            defaultDaemon = RecorderFakeDaemonTestSupport.FakeDaemon.start();
+            gatewayDaemon = RecorderFakeDaemonTestSupport.FakeDaemon.start();
             gatewayDaemon.enqueueJson(200, Map.of(
                 "ok", true,
                 "page", "container-page-1",
