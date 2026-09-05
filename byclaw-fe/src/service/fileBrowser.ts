@@ -9,6 +9,9 @@ export interface FileBrowserItem {
 
   /** 代码仓库文件的外部链接（仅项目代码模块使用）。 */
   url?: string;
+
+  /** 代码仓库文件的原始下载地址。 */
+  downloadUrl?: string;
 }
 
 export interface ChangedFileDiff {

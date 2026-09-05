@@ -73,6 +73,27 @@ Use it only when the user explicitly asks to collect, crawl, batch-search, archi
 
 Before discovery, state the effective source scope and materialization target in ordinary language. Do not make the user choose technical modes.
 
+### 来源决策优先级（必须先判定，再调用命令）
+
+先按以下顺序确定 `sourceScope`，不得让“默认同时检索”覆盖更具体的来源约束：
+
+1. 用户明确指定来源（例如“在云盘中”“项目资料”“全网”“公开互联网”）时，只使用指定来源。
+2. 用户明确指定数量时，只使用 `public-internet`，走 `public-collect` 的全文闭环。
+3. 用户未指定来源、未指定数量，但当前上下文存在可信 `<project_context>` 且可解析出有效 `cloudResourceId` 时，默认使用 `public-internet` + `cloud-knowledge`，但必须先完成项目上下文和云盘资源解析，再执行统一搜索。
+4. 用户未指定来源，且项目云盘不可用或无法授权时，只使用 `public-internet`，并在状态中记录 `cloud-knowledge` 为 `unavailable` 或 `failed`；不得把云盘失败改写为“没有结果”。
+
+“默认同时检索”是一个有前提的策略，不是无条件命令。`unified-search` 只有在 `sourceScope` 已确认同时包含两个来源、`project_id` 已透传、且 `cloudResourceId/cloudDiscoveryScope` 已成功解析时才允许调用。若用户明确要求云盘，云盘搜索失败后不得静默切换为公网；若用户未限定来源，云盘分支失败可保留公网分支继续，但最终必须分别报告两个来源的状态。
+
+### 网页获取硬门槛（不可被下游 Agent 覆盖）
+
+凡是打开、读取、下载或物化任何 HTTP(S) 网页，必须先加载 `bycli` skill，并由获准的 `bycli`/`knowledge-collection` 执行器完成：
+
+- 微信文章：`bycli weixin download` → `materialize-wechat`；
+- arXiv：`bycli arxiv`/`bycli web read` → `materialize-arxiv`；
+- 其他网页：`acquire-web` → `materialize-web`。
+
+严禁 `web_fetch`、`curl`、`wget`、`requests`、`urllib`、手工 HTTP 客户端或通用浏览器直接下载正文。即使 `bycli` 失败，也只能保留 `pending`/`failed` 并报告，不能换用上述工具补抓。来源 Agent 不得自行选择替代下载器；根 Agent 也不得通过提示词放宽此门槛。
+
 | User intent | `sourceScope` | `materializationTarget` |
 |---|---|---|
 | Public information, no internal context, without an explicit result count | `public-internet` + `cloud-knowledge` when project-cloud context is available | `selected` by default |
@@ -113,7 +134,7 @@ Read only the reference that matches the chosen workflow, plus `collection-contr
 
    `init` 返回体里的 `warnings` 是必读字段，不是可选诊断。它非空时必须逐条读完并在继续之前处理：这些提示指向的形状在当下都还能免费改正，一旦开始采集就只能靠 `retighten` 补救或根本无法补救。当前会出现三类提示——会话未绑定交付目标（应回到本次 `init` 补 `--delivery-dir`）、`selected + --delivery-requested` 缺 `--workflow`（当前 `init` 已成功创建会话，不能重新运行 `init`；若确实要走 `public-collect`，应在原会话上执行 `retighten --required-content-granularity full-text`，再直接运行 `public-collect`，由该命令建立工作流状态）、存在仅差 `-v2`/`-fulltext`/`-articles` 后缀的兄弟会话目录（应改用 `retighten` 就地修复原会话，不得新建替代会话）。`warnings` 不改变 `init` 的成功与失败，因此忽略它不会报错——但由它引出的死路会在后续命令上以硬失败出现。
 
-2. For candidate-only public URL discovery, run `public-discover`. 路由先看交付物和是否指定数量：用户明确只要候选链接时，即使用户指定了链接数量，也使用 `public-discover`；用户要求文章、正文、全文或落盘内容但未指定数量时，默认使用 `unified-search`，并行检索公共互联网与当前项目云盘，再用 `unified-materialize` 物化选中的两类正文；其中“文章”按完整正文处理。用户明确要求数量（如“一篇”“5 篇”“至少 10 篇”）时，改用 `public-collect`，只检索公共互联网并执行数量闭环。用户明确限定来源时服从限定，不自动添加其他来源。Its `online-search` channel uses Tencent WSA when credentials are available and WSA is not explicitly disabled; only a channel-level WSA failure falls back to SearXNG. WSA 返回的 passage/content 搜索摘要只是发现证据，不是文章正文，也不保证目标页不会是登录、注册、验证、错误或导航页面。`pageType`、`weak`、`articleCandidateIds` 都只是兼容性分类，不代表正文已经验证；是否可尝试读取由持久化的 `discoveryDisposition=probe` 决定。
+2. For candidate-only public URL discovery, run `public-discover`. 路由先看交付物和是否指定数量：用户明确只要候选链接时，即使用户指定了链接数量，也使用 `public-discover`；用户要求文章、正文、全文或落盘内容但未指定数量时，默认使用 `unified-search`，并行检索公共互联网与当前项目云盘，再用 `unified-materialize` 物化选中的两类正文；其中“文章”按完整正文处理。执行 `unified-search` 时，必须把可信 `<project_context>` 中的 `project_id` 透传为 `--project-id`，并把 `project-context basic` 返回的 `project.cloudResourceId` 传给首次 `init --cloud-resource-id`（CLI 会自动生成根目录 `cloudDiscoveryScope`），随后再调用 `unified-search --project-id`；不要手工拼接或猜测 scope JSON。用户明确要求数量（如“一篇”“5 篇”“至少 10 篇”）时，改用 `public-collect`，只检索公共互联网并执行数量闭环。用户明确限定来源时服从限定，不自动添加其他来源。Its `online-search` channel uses Tencent WSA when credentials are available and WSA is not explicitly disabled; only a channel-level WSA failure falls back to SearXNG. WSA 返回的 passage/content 搜索摘要只是发现证据，不是文章正文，也不保证目标页不会是登录、注册、验证、错误或导航页面。`pageType`、`weak`、`articleCandidateIds` 都只是兼容性分类，不代表正文已经验证；是否可尝试读取由持久化的 `discoveryDisposition=probe` 决定。
 
    `public-discover` 输出的 `candidateQuality`（包括 `eligibleArticle`）仅用于候选诊断和排序；`reject` 候选仍拒绝。公共发现最多允许两轮，任何未由用户明确提供或发现状态持久化授权的 URL 都必须以 `SOURCE_NOT_AUTHORIZED_BY_DISCOVERY` 拒绝。不得使用模型记忆中的 URL、DOI、论文 ID 绕过发现授权。`unified-search` 找不到可信项目云盘资源或 `cloudDiscoveryScope` 时，不得猜测资源 ID；应保留公共互联网结果，并在 sources/status 中明确记录 `cloud-knowledge` 不可用。
 

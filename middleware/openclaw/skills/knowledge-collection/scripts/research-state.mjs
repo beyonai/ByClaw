@@ -268,7 +268,8 @@ function validateCloudDiscoveryScope(value) {
       const resourceId = positiveInt(resource.resourceId, `resources[${index}].resourceId`);
       const directoryPath = typeof resource.directoryPath === 'string' ? resource.directoryPath : '';
       const pathParts = directoryPath.split('/');
-      if (!directoryPath.startsWith('/') || directoryPath.includes('\\') || pathParts.slice(1).some((part) => !part || part === '.' || part === '..')) {
+      if (!directoryPath.startsWith('/') || directoryPath.includes('\\')
+        || (directoryPath !== '/' && pathParts.slice(1).some((part) => !part || part === '.' || part === '..'))) {
         throw new Error(`--cloud-discovery-scope.resources[${index}].directoryPath 必须是安全绝对 POSIX 路径`);
       }
       if (resource.origin !== 'user-input') {
@@ -280,6 +281,12 @@ function validateCloudDiscoveryScope(value) {
       return { resourceId, directoryPath, origin: 'user-input' };
     }),
   };
+}
+
+function cloudDiscoveryScopeFromResourceId(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const resourceId = positiveInt(value, '--cloud-resource-id');
+  return { schemaVersion: '1.0', resources: [{ resourceId, directoryPath: '/', origin: 'user-input' }] };
 }
 
 function materializationTarget(value) {
@@ -702,8 +709,10 @@ export function cmdInit(args) {
   const deliveryRequested = asBool(args['delivery-requested'], '--delivery-requested');
   const sourceScopeWasExplicit = args['source-scope'] !== undefined;
   const cloudDiscoveryScope = effectiveSourceScope.includes('cloud-knowledge')
-    ? (args['cloud-discovery-scope'] === undefined && !sourceScopeWasExplicit
-      ? null : validateCloudDiscoveryScope(args['cloud-discovery-scope'])) : null;
+    ? (args['cloud-discovery-scope'] !== undefined
+      ? validateCloudDiscoveryScope(args['cloud-discovery-scope'])
+      : cloudDiscoveryScopeFromResourceId(args['cloud-resource-id'])
+        || (args['cloud-discovery-scope'] === undefined && !sourceScopeWasExplicit ? null : null)) : null;
   if (!effectiveSourceScope.includes('cloud-knowledge') && args['cloud-discovery-scope'] !== undefined) {
     throw new Error('--cloud-discovery-scope 仅在 sourceScope 包含 cloud-knowledge 时允许');
   }

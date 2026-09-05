@@ -19,6 +19,8 @@
 node scripts/knowledge-collection.mjs acquire-web --session-dir <dir> --item-id <item-id> --source-url <URL>
 ```
 
+底层 byCLI 网页读取接口（仅由获准执行器在采集会话内调用）为 `bycli web read --url <URL> --stdout`；根 Agent 和来源 Agent 不得直接调用它绕过 `acquire-web`，也不得以 `web_fetch` 或其他 HTTP 客户端替代。
+
 不得预读、探测，也不得回退到 fetcher、reader proxy、直连 HTTP 客户端、旧适配器、通用浏览器或其他网页工具；
 不得使用 `web_fetch`、`curl`、`wget`、`requests`。**byCLI 无法完成时必须停止并报告，不得回退到其他网页获取工具。**
 已经用直连拿到内容时该结果作废，按规范流程重新采集。
@@ -29,7 +31,7 @@ node scripts/knowledge-collection.mjs acquire-web --session-dir <dir> --item-id 
 
 本文件下列原子来源命令仅适用于未由 `public-collect` 持有的 operator 会话。`public-collect` 持有的会话只能调用编排器内部 verifier；根 Agent、路由层和来源执行器均不得对该会话手工执行表格或后文中的 `acquire-web`、`materialize-*`、`collect`、`crawl-*` 命令。
 
-用户明确只要候选链接时，即使用户指定了链接数量，也使用 `public-discover`。用户要求文章、正文或全文但未指定数量时，默认使用 `unified-search` 并行检索公共互联网与当前项目云盘，再用 `unified-materialize` 物化选中的正文；用户明确指定数量时（如“一篇”“5 篇”“至少 10 篇”），使用 `public-collect`，仅检索公共互联网，并在首次 `init` 传 `--workflow public-collect`。用户明确限定来源时服从限定，不自动扩展来源。直链无独立检索主题时，`--query` 与 `--fallback-query` 都复用首次 `init` 的原始任务描述。
+用户明确只要候选链接时，即使用户指定了链接数量，也使用 `public-discover`。用户要求文章、正文或全文但未指定数量时，默认使用 `unified-search` 并行检索公共互联网与当前项目云盘；调用前将可信 `<project_context>` 的 `project_id` 传给 `project-context basic`，再把返回的 `project.cloudResourceId` 传给首次 `init --cloud-resource-id`（CLI 自动生成根目录授权 scope），随后调用 `unified-search --project-id`，不要手工拼接 scope JSON。用户明确指定数量时（如“一篇”“5 篇”“至少 10 篇”），使用 `public-collect`，仅检索公共互联网，并在首次 `init` 传 `--workflow public-collect`。用户明确限定来源时服从限定，不自动扩展来源。直链无独立检索主题时，`--query` 与 `--fallback-query` 都复用首次 `init` 的原始任务描述。
 
 ## 路由表
 

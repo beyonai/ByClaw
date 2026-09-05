@@ -257,12 +257,12 @@ async function materializeOne(writer, candidate, dependencies, env) {
 
 export function createCloudKnowledgeAdapter(dependencies = {}) {
   const env = dependencies.env || process.env;
-  const python = dependencies.python || process.execPath;
+  const python = dependencies.python || 'python3';
   const script = dependencies.script || new URL('../../../../project-cloud-knowledge/scripts/project_cloud_knowledge.py', import.meta.url).pathname;
 
   async function search(request = {}) {
     const scope = await readCloudScope(request.outputDir);
-    const writer = await createArtifactWriter(request.outputDir);
+    const writer = await createArtifactWriter(request.outputDir, { allowExistingSession: true, allowFailed: true });
     try {
     const groups = [...new Map(scope.resources.map((resource) => [resource.directoryPath, resource])).values()]
       .sort((a, b) => (a.directoryPath === '/' ? 1 : b.directoryPath === '/' ? -1 : a.directoryPath.localeCompare(b.directoryPath)));

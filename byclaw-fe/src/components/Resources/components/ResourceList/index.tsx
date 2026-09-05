@@ -371,7 +371,8 @@ const ResourceList: React.FC<ResourceListProps> = ({
         )}
 
         {/* 切换资源一级 Tab 时先隐藏旧列表，避免旧卡片套用新 resourceType 样式产生瞬间变形；仅展示 loading。 */}
-        {list.length > 0 && !loading && (
+        {/* 翻页加载时保留已展示的数据，避免 loading=true 导致整个技能列表白屏。 */}
+        {list.length > 0 && (
           <InfiniteScroll
             next={loadMore}
             hasMore={hasMore}

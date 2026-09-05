@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -50,6 +50,59 @@ test('unified search continues with cloud results when public discovery fails', 
     assert.equal(result.sources.publicInternet.status, 'failed');
     assert.equal(result.sources.cloudKnowledge.status, 'complete');
     assert.equal(result.candidates[0].source, 'cloud-knowledge');
+    const metadata = JSON.parse(await readFile(join(root, 'sanitized/metadata.json'), 'utf8'));
+    assert.equal(metadata.sourceMetadata.metadataOnly, true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('unified search resolves cloud resource from project id when no explicit resource id is given', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'unified-project-context-'));
+  try {
+    ensureSessionSkeleton(root);
+    const paths = { root, session: join(root, 'session.json'), collectionResult: join(root, 'collection-result.json'), metadata: join(root, 'sanitized/metadata.json'), inputDir: join(root, '.collection-inputs'), lock: join(root, '.knowledge-collection.lock') };
+    persistSession(paths, newSession({ query: '巡检流程', sourceScope: ['public-internet', 'cloud-knowledge'] }));
+    let resolvedProjectId;
+    const result = await runUnifiedSearch(paths, { query: '巡检流程', 'project-id': '20044191' }, {
+      runPublicDiscover: async () => ({ merged: { results: [] } }),
+      resolveCloudResourceId: async (projectId) => {
+        resolvedProjectId = projectId;
+        return 7;
+      },
+      createCloudKnowledgeAdapter: () => ({
+        search: async ({ outputDir }) => {
+          await writeFile(join(outputDir, 'sanitized/metadata.json'), JSON.stringify({ collection: { items: [] } }));
+          return { ok: true, status: 'complete' };
+        },
+      }),
+    });
+    assert.equal(resolvedProjectId, 20044191);
+    assert.equal(result.sources.cloudKnowledge.status, 'complete');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('unified search propagates cloud failure reason', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'unified-cloud-failure-'));
+  try {
+    ensureSessionSkeleton(root);
+    const paths = { root, session: join(root, 'session.json'), collectionResult: join(root, 'collection-result.json'), metadata: join(root, 'sanitized/metadata.json'), inputDir: join(root, '.collection-inputs'), lock: join(root, '.knowledge-collection.lock') };
+    persistSession(paths, newSession({
+      query: '云盘失败测试', sourceScope: ['public-internet', 'cloud-knowledge'],
+      cloudDiscoveryScope: { schemaVersion: '1.0', resources: [{ resourceId: 7, directoryPath: '/', origin: 'user-input' }] },
+    }));
+    const result = await runUnifiedSearch(paths, { query: '云盘失败测试' }, {
+      runPublicDiscover: async () => ({ merged: { results: [] } }),
+      createCloudKnowledgeAdapter: () => ({
+        search: async () => ({ ok: true, status: 'failed', reasonCode: 'SOURCE_FAILED', reason: 'backend unavailable' }),
+      }),
+    });
+    assert.equal(result.sources.cloudKnowledge.status, 'failed');
+    assert.equal(result.sources.cloudKnowledge.error, 'SOURCE_FAILED');
+    assert.equal(result.sources.cloudKnowledge.reasonCode, 'SOURCE_FAILED');
+    assert.equal(result.sources.cloudKnowledge.reason, 'backend unavailable');
   } finally {
     await rm(root, { recursive: true, force: true });
   }
