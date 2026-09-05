@@ -40,4 +40,33 @@ class ChatRuntimeInstanceTest {
             .isInstanceOf(IllegalStateException.class)
             .hasMessageContaining("hostname");
     }
+
+    @Test
+    void publicConstructorReadsDotenvValuesFromSystemProperties() {
+        String originalEnvironment = System.getProperty("BE_ENV");
+        String originalDomainName = System.getProperty("BE_DOMAINNAME");
+        try {
+            System.setProperty("BE_ENV", "development");
+            System.setProperty("BE_DOMAINNAME", "ByaiService-dotenv");
+
+            ChatRuntimeInstance instance = new ChatRuntimeInstance();
+
+            assertThat(instance.isDevelopment()).isTrue();
+            assertThat(instance.getInstanceId()).startsWith("development:");
+            assertThat(instance.getInstanceId()).endsWith(":ByaiService-dotenv");
+        }
+        finally {
+            restoreSystemProperty("BE_ENV", originalEnvironment);
+            restoreSystemProperty("BE_DOMAINNAME", originalDomainName);
+        }
+    }
+
+    private static void restoreSystemProperty(String key, String value) {
+        if (value == null) {
+            System.clearProperty(key);
+        }
+        else {
+            System.setProperty(key, value);
+        }
+    }
 }

@@ -16,7 +16,7 @@ public class ChatRuntimeInstance {
     private final String instanceId;
 
     public ChatRuntimeInstance() {
-        this(System.getenv("BE_ENV"), System.getenv("BE_DOMAINNAME"), resolveHostName());
+        this(resolveConfigValue("BE_ENV"), resolveConfigValue("BE_DOMAINNAME"), resolveHostName());
     }
 
     ChatRuntimeInstance(String environment, String domainName, String hostName) {
@@ -52,5 +52,17 @@ public class ChatRuntimeInstance {
         catch (Exception e) {
             return null;
         }
+    }
+
+    /**
+     * ByaiServerApplication loads repository .env values into JVM system properties.
+     * Keep environment variables as the fallback for containers and externally managed runtimes.
+     */
+    private static String resolveConfigValue(String key) {
+        String systemProperty = System.getProperty(key);
+        if (StringUtils.isNotBlank(systemProperty)) {
+            return systemProperty;
+        }
+        return System.getenv(key);
     }
 }
