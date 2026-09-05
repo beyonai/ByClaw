@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test;
 
 class BycliRecorderContextRoutingTest {
 
-    private BycliRecorderBrowserPortTest.FakeDaemon daemon;
+    private RecorderFakeDaemonTestSupport.FakeDaemon daemon;
 
     @AfterEach
     void tearDown() {
@@ -21,7 +21,7 @@ class BycliRecorderContextRoutingTest {
 
     @Test
     void navigateOmitsUnsetContextIdForDaemonProfileAutoSelection() throws Exception {
-        daemon = BycliRecorderBrowserPortTest.FakeDaemon.start();
+        daemon = RecorderFakeDaemonTestSupport.FakeDaemon.start();
         daemon.enqueueJson(200, Map.of(
             "ok", true,
             "page", "page-1",
