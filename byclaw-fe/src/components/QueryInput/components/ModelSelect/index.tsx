@@ -43,11 +43,8 @@ const DesktopModelSelect: React.FC<Props> = ({ value, onChange }) => {
     if (!desktop) return undefined;
     let cancelled = false;
     setLoading(true);
-    const localPromise = window.byclawDesktop?.getLocalModels
-      ? window.byclawDesktop.getLocalModels().catch(() => [])
-      : window.byclawDesktop?.models?.local
-        ? window.byclawDesktop.models.local().catch(() => [])
-        : Promise.resolve([]);
+    const localModels = window.byclawDesktop?.models?.local;
+    const localPromise = localModels ? localModels().catch(() => []) : Promise.resolve([]);
     Promise.all([
       localPromise,
       getMyModels({ pageNum: 1, pageSize: 100, modelType: 'LLM', status: 'ENABLED' }),
