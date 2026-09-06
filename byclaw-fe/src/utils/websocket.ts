@@ -5,6 +5,8 @@
 import { clearToken, getToken, loginRedirect } from './auth';
 import { getLocale } from '@umijs/max';
 
+import { debugLog } from './debugLog';
+
 interface WebSocketMessage {
   type: string;
   clientRequestId?: string;
@@ -47,6 +49,15 @@ class WebSocketManager {
 
   private connectionToken: string | null = null;
 
+  /**
+   * 桌面外壳注入的本地聊天通道；只有聊天 WebSocket 走它，
+   * 其余 HTTP/API 请求仍然走 Java。
+   * 桌面中间层用哪种 agent runtime 与前端无关，这里只关心地址和 token。
+   */
+  private desktopChatWsUrl: string | null = null;
+  private desktopChatConfigReady: Promise<void>;
+  private desktopChatConfigLoaded = false;
+
   private handleVisibilityChange = (): void => {
     if (document.visibilityState === 'visible') {
       this.ensureConnected();
@@ -54,7 +65,26 @@ class WebSocketManager {
   };
 
   private constructor() {
+    this.desktopChatConfigReady = Promise.resolve();
+    // 普通浏览器没有 Electron preload bridge；不要阻塞 Java WebSocket 初始化。
+    this.desktopChatConfigLoaded = true;
     if (typeof window !== 'undefined') {
+      const desktopChat = window.byclawDesktop?.chat;
+      if (desktopChat?.config) {
+        this.desktopChatConfigLoaded = false;
+        this.desktopChatConfigReady = desktopChat
+          .config()
+          .then((config) => {
+            if (config.wsUrl && config.token)
+              this.desktopChatWsUrl = `${config.wsUrl}?token=${encodeURIComponent(config.token)}`;
+            this.desktopChatConfigLoaded = true;
+          })
+          .catch(() => {
+            // IPC may be unavailable during hot reload or when the page is opened
+            // outside the shell; fall back to the Java WebSocket in that case.
+            this.desktopChatConfigLoaded = true;
+          });
+      }
       window.addEventListener('online', this.ensureConnected);
       document.addEventListener('visibilitychange', this.handleVisibilityChange);
     }
@@ -98,6 +128,7 @@ class WebSocketManager {
    * @returns 完整的 WebSocket URL
    */
   private getWebSocketUrl(path: string): string {
+    if (path.startsWith('byaiService/ws') && this.desktopChatWsUrl) return this.desktopChatWsUrl;
     const url = new URL(window.location.href);
     const protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
     const { hostname, host } = url;
@@ -119,6 +150,12 @@ class WebSocketManager {
    * 初始化 WebSocket 连接
    */
   public init(): void {
+    if (!this.desktopChatConfigLoaded && this.desktopChatConfigReady) {
+      void this.desktopChatConfigReady.then(() => {
+        if (!this.ws && !this.isConnecting) this.init();
+      });
+      return;
+    }
     this.manuallyDisconnected = false;
 
     const token = this.getConnectionToken();
@@ -144,6 +181,9 @@ class WebSocketManager {
         language: getLocale(),
       });
       const wsUrl = this.getWebSocketUrl(`byaiService/ws?${params.toString()}`);
+      debugLog('ws', 'chat WebSocket connecting', () => ({
+        url: wsUrl.replace(/([?&]token=)[^&]+/, '$1<redacted>'),
+      }));
       const connectionId = this.connectionSeq + 1;
       this.connectionSeq = connectionId;
       this.activeConnectionId = connectionId;
@@ -265,7 +305,9 @@ class WebSocketManager {
   public sendMessage(message: WebSocketMessage): void {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       try {
-        this.ws.send(JSON.stringify(this.withCurrentLanguage(message)));
+        const outbound =
+          this.desktopChatWsUrl && message.type === 'LLM_MESSAGE' ? { ...message, beyondToken: getToken() } : message;
+        this.ws.send(JSON.stringify(this.withCurrentLanguage(outbound)));
       } catch (error) {
         console.error('WebSocket 消息发送失败:', error);
       }

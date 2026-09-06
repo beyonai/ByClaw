@@ -11,6 +11,7 @@ import QueryInputBase, { IProps as pIProps, IState as pIState } from '@/componen
 
 import UploadFile from '../components/UploadFile';
 import ConnectorControl from '../components/ConnectorControl';
+import ModelSelect from '../components/ModelSelect';
 
 import type { UserState } from '@/models/common/user';
 import type { IAgentCache } from '@/typescript/agent';
@@ -28,6 +29,7 @@ type IState = {
   fileList: IFile[];
   showMentionPopoverType: '' | '@' | '#';
   chatSettings: IChatSettingValue;
+  selectedModelId?: string;
 } & Omit<pIState, 'showAssitant'>;
 
 type IProps = {
@@ -53,6 +55,7 @@ class EmployeesInputChat extends QueryInputBase<IProps, IState> {
         functionCloud: {},
         memory: {},
       } as IChatSettingValue,
+      selectedModelId: undefined,
     };
   }
 
@@ -76,6 +79,7 @@ class EmployeesInputChat extends QueryInputBase<IProps, IState> {
           files: [],
         },
         agentType: myAgentType,
+        ...(this.state.selectedModelId ? { relModelId: this.state.selectedModelId } : {}),
         ...chatSettings,
       },
       msgOpt: {
@@ -330,6 +334,11 @@ class EmployeesInputChat extends QueryInputBase<IProps, IState> {
               }}
             />
           )}
+          <ModelSelect
+            key={`desktop-model-${this.props.sessionId || 'new'}`}
+            value={this.state.selectedModelId}
+            onChange={(selectedModelId) => this.setState({ selectedModelId })}
+          />
           {this.STTRender()}
         </Space>
       </>

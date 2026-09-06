@@ -14,6 +14,7 @@ import { ResourceTypeMap } from '@/constants/resource';
 
 import UploadFile from '../components/UploadFile';
 import ConnectorControl from '../components/ConnectorControl';
+import ModelSelect from '../components/ModelSelect';
 
 import type { UserInfo } from '@/models/common/user';
 import type { IFile } from '@/typescript/file';
@@ -32,6 +33,7 @@ type IState = {
 
   beyondSmartModePopoverOpen: boolean;
   selectedResourceAgentIds: string;
+  selectedModelId?: string;
 } & pIState;
 
 type IProps = {
@@ -61,6 +63,7 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
       resourceList: [],
       beyondSmartModePopoverOpen: false,
       selectedResourceAgentIds: '',
+      selectedModelId: undefined,
     };
   }
 
@@ -132,6 +135,7 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
         mode,
         agentType: myAgentType,
         agentId,
+        ...(this.state.selectedModelId ? { relModelId: this.state.selectedModelId } : {}),
         ...chatSettings,
       },
       msgOpt: {
@@ -425,6 +429,11 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
               }}
             />
           )}
+          <ModelSelect
+            key={`desktop-model-${this.props.sessionId || 'new'}`}
+            value={this.state.selectedModelId}
+            onChange={(selectedModelId) => this.setState({ selectedModelId })}
+          />
           {this.STTRender()}
         </Space>
       </>
@@ -445,7 +454,7 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
       ...prevState,
       inputValue: persistentMentionDraft.text,
       fileList: [],
-      resourceList: persistentMentionDraft.resourceList,
+      resourceList: persistentMentionDraft.resourceList || [],
     }));
     this.props.onInputDraftChange?.(persistentMentionDraft);
 
