@@ -421,6 +421,40 @@ class KnowledgeManagerTests(unittest.TestCase):
         )
         self.assertTrue(result["dryRun"])
 
+    def test_build_submits_file_directory_or_root_once(self) -> None:
+        for target in ("/docs/a.md", "/产品资料", "/"):
+            for dry_run in (False, True):
+                with self.subTest(target=target, dry_run=dry_run):
+                    self.transport.calls.clear()
+                    args = ["build", "--resource-id", "7", "--file-path", target]
+                    if dry_run:
+                        args.append("--dry-run")
+                    result = self.manager.execute(self.parse(*args))
+                    payload = {"resourceId": 7, "directoryPath": target}
+                    if dry_run:
+                        self.assertEqual(result["payload"], payload)
+                        self.assertEqual(self.transport.calls, [])
+                    else:
+                        self.assertEqual(len(self.transport.calls), 1)
+                        self.assertEqual(self.transport.calls[0]["method"], "POST")
+                        self.assertEqual(self.transport.calls[0]["path"], "/byaiService/datasetController/build")
+                        self.assertEqual(self.transport.calls[0]["payload"], payload)
+                        self.assertIsNone(result["built"])
+
+    def test_upload_builds_only_returned_files_without_expanding_to_directory(self) -> None:
+        archive = self.make_file("batch.zip")
+        paths = ["/docs/a.md", "/docs/nested/b.pdf"]
+        self.transport.responses = [{"uploadItems": [{"filePath": path} for path in paths]}]
+        result = self.manager.execute(self.parse(
+            "upload", "--resource-id", "7", "--directory-path", "/docs",
+            "--file-path", str(archive),
+        ))
+        self.assertEqual(
+            [call["payload"] for call in self.transport.calls[1:]],
+            [{"resourceId": 7, "directoryPath": path} for path in paths],
+        )
+        self.assertEqual(result["builds"], [{"filePath": path, "built": None} for path in paths])
+
     def test_upload_allows_zip_and_builds_returned_items(self) -> None:
         archive = self.make_file("batch.zip")
         self.transport.responses = [
