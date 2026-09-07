@@ -46,8 +46,6 @@ public class SandboxLaunchContextFactory {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(SandboxLaunchContextFactory.class);
 
-    private static final String BYCLAW_DSH_SANDBOX_TYPE = "byclaw-dsh";
-
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     @Value("${sandbox.model_provider_name:iwhalecloud}")
@@ -143,8 +141,9 @@ public class SandboxLaunchContextFactory {
                     SandboxLaunchRouting.DEFAULT_CODE_AGENT_RESOURCE_ID);
             }
             if (StringUtils.startsWith(workerAgentType, WorkerAgentType.HARNESS.getCode())) {
+                // See byclaw-be/src/main/java/com/iwhalecloud/byai/gateway/sandbox/README.md#sandbox-launch-routing.
                 LOGGER.info("资源ID：{} workerAgentType 为 HARNESS，使用 byclaw-dsh 沙箱", resourceId);
-                return new SandboxLaunchRouting(BYCLAW_DSH_SANDBOX_TYPE,
+                return new SandboxLaunchRouting(SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE,
                     SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
             }
         }
