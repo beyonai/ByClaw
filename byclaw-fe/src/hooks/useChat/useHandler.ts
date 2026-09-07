@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef } from 'react';
 
 // @ts-ignore
 import { useDispatch } from '@umijs/max';
-import { assign, get, isPlainObject, isString, last, set, isNil, pick } from 'lodash';
+import { assign, get, isPlainObject, isString, last, set, isNil, pick, isEmpty } from 'lodash';
 
 import useAppStore from '@/models/common/useAppStore';
 import { IMessageState, SSEEventStatus, SSEMessageType, IObjectType } from '@/constants/message';
@@ -597,7 +597,7 @@ function useHandler(props: IProps) {
       }
 
       void resolveSandboxesInfo(useAppStore.getState().sandboxesInfo).then((resolvedSandboxesInfo) => {
-        if (!resolvedSandboxesInfo?.sandboxId) return;
+        if (isEmpty(resolvedSandboxesInfo)) return;
         const url = getVNCUrl(resolvedSandboxesInfo);
 
         setSiderCollapsed(true);
