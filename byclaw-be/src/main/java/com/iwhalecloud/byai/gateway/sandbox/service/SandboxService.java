@@ -80,6 +80,8 @@ public class SandboxService {
 
     private static final String GATEWAY_TOKEN_METADATA_KEY = "gateway_token";
 
+    private static final String BYCLAW_DSH_SANDBOX_TYPE = "byclaw-dsh";
+
     private static final Logger LOGGER = LoggerFactory.getLogger(SandboxService.class);
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
@@ -970,7 +972,27 @@ public class SandboxService {
 
         try {
             Map<String, Object> worker = gatewayWorkerRegistry.getWorker(workerId);
-            view.setWorkerOnline(worker != null);
+            if (worker == null) {
+                String workerAgentType = buildSandboxWorkerAgentType(record.getUserCode(), record.getSandboxType());
+                WorkerRegistry.OnlineAgentCheckResult onlineWorkers =
+                    gatewayWorkerRegistry.hasOnlineAgentType(workerAgentType, true);
+                view.setWorkerOnline(onlineWorkers != null && onlineWorkers.exists);
+                if (onlineWorkers != null && onlineWorkers.workerIds != null) {
+                    String registeredWorkerId = onlineWorkers.workerIds.stream()
+                        .filter(StringUtils::isNotBlank)
+                        .sorted()
+                        .findFirst()
+                        .orElse(null);
+                    if (registeredWorkerId != null) {
+                        workerId = registeredWorkerId;
+                        view.setWorkerId(workerId);
+                        worker = gatewayWorkerRegistry.getWorker(workerId);
+                    }
+                }
+            }
+            else {
+                view.setWorkerOnline(true);
+            }
             if (worker != null) {
                 view.setWorkerLastSeen(toLong(worker.get("last_seen")));
                 Object agentTypes = worker.get("agent_types");
@@ -2232,6 +2254,9 @@ public class SandboxService {
         }
         if (SandboxLaunchRouting.BYCLAW_CODE_AGENT_SANDBOX_TYPE.equals(sandboxType)) {
             return WorkerAgentType.BYCLAW_CODE.getCode() + "_" + userCode;
+        }
+        if (BYCLAW_DSH_SANDBOX_TYPE.equals(sandboxType)) {
+            return WorkerAgentType.BYCLAW_DSH.getCode() + "_" + userCode;
         }
         return sandboxType + "_" + userCode;
     }
