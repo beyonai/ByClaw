@@ -25,8 +25,6 @@ public class TargetAgentResolver {
 
     private static final Logger logger = LoggerFactory.getLogger(TargetAgentResolver.class);
 
-    private static final String HARNESS_RUNTIME_AGENT_TYPE = "BYCLAW_DSH";
-
     @Autowired
     private SsResourceService ssResourceService;
 
@@ -114,7 +112,8 @@ public class TargetAgentResolver {
         return StringUtils.equalsIgnoreCase(targetAgentType, buildUserAgentType(WorkerAgentType.BYCLAW_EXE, userCode))
             || StringUtils.equalsIgnoreCase(targetAgentType, buildUserAgentType(WorkerAgentType.BYCLAW_CODE, userCode))
             || StringUtils.equalsIgnoreCase(targetAgentType, buildUserAgentType(WorkerAgentType.HARNESS, userCode))
-            || StringUtils.equalsIgnoreCase(targetAgentType, buildUserAgentTypeCode(HARNESS_RUNTIME_AGENT_TYPE, userCode));
+            || StringUtils.equalsIgnoreCase(targetAgentType,
+                buildUserAgentType(WorkerAgentType.BYCLAW_DSH, userCode));
     }
 
     private String resolveUserSandboxAgentType(String targetAgentType, String userCode) {
@@ -136,7 +135,7 @@ public class TargetAgentResolver {
     private String resolveRuntimeAgentType(String targetAgentType, String userCode) {
         // HARNESS 是数据库中的稳定逻辑类型；当前运行时使用 DeepSeek Harness（DSH），后续可替换为其他实现。
         if (StringUtils.startsWith(targetAgentType, WorkerAgentType.HARNESS.getCode())) {
-            return buildUserAgentTypeCode(HARNESS_RUNTIME_AGENT_TYPE, userCode);
+            return buildUserAgentType(WorkerAgentType.BYCLAW_DSH, userCode);
         }
         return targetAgentType;
     }
@@ -145,7 +144,4 @@ public class TargetAgentResolver {
         return workerAgentType.getCode() + "_" + userCode;
     }
 
-    private String buildUserAgentTypeCode(String workerAgentType, String userCode) {
-        return workerAgentType + "_" + userCode;
-    }
 }

@@ -303,7 +303,7 @@ class SandboxServiceTest {
         Date lastAccess = new Date(1_000L);
         record.setLastAccessTime(lastAccess);
         when(workerRegistry.getWorker("byclaw-dsh-user001"))
-            .thenReturn(Map.of("last_seen", 2_000L, "agent_types", List.of("BYCLAW_EXE_user001")));
+            .thenReturn(Map.of("last_seen", 2_000L, "agent_types", List.of("BYCLAW_DSH_user001")));
         when(redisClient.getResource()).thenReturn(jedis);
         when(jedis.ttl(Constants.RegistryKeys.workerOnlineLease("byclaw-dsh-user001"))).thenReturn(13L);
 
@@ -315,6 +315,36 @@ class SandboxServiceTest {
         assertThat(view.getWorkerOnline()).isTrue();
         assertThat(view.getWorkerLastSeen()).isEqualTo(2_000L);
         assertThat(view.getWorkerLeaseTtlSeconds()).isEqualTo(13L);
+    }
+
+    @Test
+    void buildRecordViewFindsOnlineDshWorkerByRoutableAgentTypeWhenWorkerIdIsDynamic() {
+        WorkerRegistry workerRegistry = mock(WorkerRegistry.class);
+        RedisClient redisClient = mock(RedisClient.class);
+        Jedis jedis = mock(Jedis.class);
+        SandboxService sandboxService = new SandboxService();
+        ReflectionTestUtils.setField(sandboxService, "gatewayWorkerRegistry", workerRegistry);
+        ReflectionTestUtils.setField(sandboxService, "redisClient", redisClient);
+        SsSandboxRecord record = new SsSandboxRecord();
+        record.setId(10L);
+        record.setUserCode("user001");
+        record.setSandboxType("byclaw-dsh");
+        record.setStatus("RUNNING");
+        String dynamicWorkerId = "byclaw-dsh-sandbox-10-30-user001";
+        when(workerRegistry.getWorker("byclaw-dsh-user001")).thenReturn(null);
+        when(workerRegistry.hasOnlineAgentType("BYCLAW_DSH_user001", true))
+            .thenReturn(new WorkerRegistry.OnlineAgentCheckResult(true, List.of(dynamicWorkerId)));
+        when(workerRegistry.getWorker(dynamicWorkerId))
+            .thenReturn(Map.of("last_seen", 3_000L, "agent_types", List.of("BYCLAW_DSH_user001")));
+        when(redisClient.getResource()).thenReturn(jedis);
+        when(jedis.ttl(Constants.RegistryKeys.workerOnlineLease(dynamicWorkerId))).thenReturn(11L);
+
+        SandboxRecordView view = sandboxService.buildRecordView(record);
+
+        assertThat(view.getWorkerId()).isEqualTo(dynamicWorkerId);
+        assertThat(view.getWorkerOnline()).isTrue();
+        assertThat(view.getWorkerLastSeen()).isEqualTo(3_000L);
+        assertThat(view.getWorkerLeaseTtlSeconds()).isEqualTo(11L);
     }
 
     @Test
