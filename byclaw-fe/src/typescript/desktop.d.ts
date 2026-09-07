@@ -42,6 +42,7 @@ type IDesktopSaveResult =
 type IDesktopCapability =
   | 'chat'
   | 'models.local'
+  | 'app.update'
   | 'files.browse'
   | 'files.write'
   /** 增删改查一组一起给：不会出现只能重命名不能删除的外壳。 */
@@ -71,6 +72,18 @@ interface IDesktopBridge {
   capabilities?: IDesktopCapability[];
   app?: {
     info?: () => Promise<IDesktopAppInfo>;
+    checkUpdate?: () => Promise<{
+      available: boolean;
+      currentVersion: string;
+      latestVersion?: string;
+      url?: string;
+      updateType?: string;
+      updateMsg?: string;
+      updateStatus?: string;
+      deviceType: string;
+    }>;
+    downloadUpdate?: (url: string) => Promise<{ path: string }>;
+    installUpdate?: (path: string) => Promise<void>;
   };
   chat?: {
     status?: () => Promise<{ running: boolean }>;
