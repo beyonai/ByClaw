@@ -4,6 +4,7 @@ import java.time.OffsetDateTime;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -18,6 +19,8 @@ import com.iwhalecloud.byai.gateway.sandbox.model.SandboxInfo;
 import com.iwhalecloud.byai.gateway.sandbox.model.SandboxRecordView;
 import com.iwhalecloud.byai.gateway.sandbox.runtime.SandboxRuntimeInstance;
 import com.iwhalecloud.byai.gateway.sandbox.runtime.SandboxRuntimePage;
+import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpec;
+import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpecRepository;
 import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
 import com.iwhalecloud.byai.manager.entity.sandbox.SandboxReconcileGroup;
 import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord;
@@ -345,6 +348,43 @@ class SandboxServiceTest {
         assertThat(view.getWorkerOnline()).isTrue();
         assertThat(view.getWorkerLastSeen()).isEqualTo(3_000L);
         assertThat(view.getWorkerLeaseTtlSeconds()).isEqualTo(11L);
+    }
+
+    @Test
+    void buildRecordViewUsesWorkerAgentTypeConfiguredBySandboxSpec() {
+        WorkerRegistry workerRegistry = mock(WorkerRegistry.class);
+        RedisClient redisClient = mock(RedisClient.class);
+        Jedis jedis = mock(Jedis.class);
+        SandboxServiceSpecRepository specRepository = mock(SandboxServiceSpecRepository.class);
+        SandboxService sandboxService = new SandboxService();
+        ReflectionTestUtils.setField(sandboxService, "gatewayWorkerRegistry", workerRegistry);
+        ReflectionTestUtils.setField(sandboxService, "redisClient", redisClient);
+        ReflectionTestUtils.setField(sandboxService, "sandboxServiceSpecRepository", specRepository);
+        SandboxServiceSpec spec = new SandboxServiceSpec();
+        spec.setEnv(Map.of("BYAI_WORKER_AGENT_TYPE", "CUSTOM_RUNTIME"));
+        when(specRepository.findByServiceKeyAndProfile("custom-sandbox", "large"))
+            .thenReturn(Optional.of(spec));
+        SsSandboxRecord record = new SsSandboxRecord();
+        record.setId(11L);
+        record.setUserCode("user001");
+        record.setSandboxType("custom-sandbox");
+        record.setProfileKey("large");
+        record.setStatus("RUNNING");
+        String dynamicWorkerId = "custom-sandbox-sandbox-11-30-user001";
+        when(workerRegistry.getWorker("custom-sandbox-user001")).thenReturn(null);
+        when(workerRegistry.hasOnlineAgentType("CUSTOM_RUNTIME_user001", true))
+            .thenReturn(new WorkerRegistry.OnlineAgentCheckResult(true, List.of(dynamicWorkerId)));
+        when(workerRegistry.getWorker(dynamicWorkerId))
+            .thenReturn(Map.of("last_seen", 4_000L, "agent_types", List.of("CUSTOM_RUNTIME_user001")));
+        when(redisClient.getResource()).thenReturn(jedis);
+        when(jedis.ttl(Constants.RegistryKeys.workerOnlineLease(dynamicWorkerId))).thenReturn(9L);
+
+        SandboxRecordView view = sandboxService.buildRecordView(record);
+
+        assertThat(view.getWorkerId()).isEqualTo(dynamicWorkerId);
+        assertThat(view.getWorkerOnline()).isTrue();
+        assertThat(view.getWorkerAgentTypes()).containsExactly("CUSTOM_RUNTIME_user001");
+        assertThat(view.getWorkerLeaseTtlSeconds()).isEqualTo(9L);
     }
 
     @Test

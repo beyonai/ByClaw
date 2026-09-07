@@ -15,6 +15,13 @@ import lombok.Data;
 @Data
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class SandboxServiceSpec {
+
+    /**
+     * Base Worker AgentType advertised by this sandbox runtime. The user code is appended by the backend.
+     * See {@code byclaw-be/src/main/java/com/iwhalecloud/byai/gateway/sandbox/README.md#worker-agent-type-configuration}.
+     */
+    public static final String WORKER_AGENT_TYPE_ENV = "BYAI_WORKER_AGENT_TYPE";
+
     /**
      * Container image (CreateSandboxRequest.image.uri).
      */
