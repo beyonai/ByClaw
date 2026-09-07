@@ -15,6 +15,8 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
+import org.springframework.core.task.SimpleAsyncTaskExecutor;
+import org.springframework.core.task.SyncTaskExecutor;
 import org.springframework.data.redis.connection.RedisClusterConfiguration;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.connection.RedisSentinelConfiguration;
@@ -180,10 +182,23 @@ public class RedisConfiguration {
     }
 
     @Bean
+    @Primary
     public RedisMessageListenerContainer redisMessageListenerContainer() {
         RedisMessageListenerContainer redisMessageListenerContainer = new RedisMessageListenerContainer();
         redisMessageListenerContainer.setConnectionFactory(connectionFactory());
         return redisMessageListenerContainer;
+    }
+
+    /** 保持聊天广播的 Redis 接收顺序，不改变其他订阅者的并发行为。 */
+    @Bean
+    public RedisMessageListenerContainer webSocketBroadcastListenerContainer(RedisConnectionFactory factory) {
+        RedisMessageListenerContainer container = new RedisMessageListenerContainer();
+        container.setConnectionFactory(factory);
+        // 回调只解析信封并调用 Netty 非阻塞写入；不能让默认异步线程打乱初始化和增量的顺序。
+        container.setTaskExecutor(new SyncTaskExecutor());
+        // Jedis 的订阅是阻塞的，必须与消息回调分开执行。
+        container.setSubscriptionExecutor(new SimpleAsyncTaskExecutor("ws-broadcast-subscription-"));
+        return container;
     }
 
     // kvstore Unable to configure Redis to keyspace notifications

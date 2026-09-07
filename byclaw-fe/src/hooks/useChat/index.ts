@@ -37,6 +37,7 @@ import {
   startRestoringChatStream,
   stopRestoringChatStream,
   unregisterPendingChatContext,
+  unregisterSessionChatContext,
 } from './chatRuntime';
 
 import { IMessageState } from '@/constants/message';
@@ -160,6 +161,27 @@ function useChat(props: IProps) {
   // 获取消息发送方法
   const { send } = useSend({ sessionId, agentType, chatUrl });
 
+  const requestLatestTaskPlan = usePersistFn((runningInfo: RunningChatInfo) => {
+    const targetSessionId = `${runningInfo.sessionId || sessionId || ''}`;
+    const targetMessageId = `${runningInfo.modelAnswerMessageId || ''}`;
+    if (!/^\d+$/.test(targetSessionId) || !/^\d+$/.test(targetMessageId)) {
+      return;
+    }
+
+    void webSocketManager
+      .sendMessageWhenReady({
+        type: 'TASK_PLAN_GET',
+        clientRequestId: runningInfo.clientRequestId,
+        sessionId: targetSessionId,
+        messageId: targetMessageId,
+        traceId: runningInfo.traceId,
+      })
+      .catch((error) => {
+        // 任务计划可由历史消息恢复；查询失败不应阻断聊天运行态恢复。
+        console.error('同步任务计划快照失败:', error);
+      });
+  });
+
   // 获取消息相关方法和状态
   const {
     messageList,
@@ -185,6 +207,21 @@ function useChat(props: IProps) {
     browserHandler,
   } = useHandler({ addSession, setSessionId });
 
+  const taskPlanRecoveryHandler = usePersistFn((onionsProps: IOnionsProps) => {
+    const { sseRes, sseMsg, newAnswerMsg } = onionsProps;
+    if (sseMsg?.event !== 'initialization') {
+      return onionsProps;
+    }
+
+    requestLatestTaskPlan({
+      clientRequestId: sseMsg.clientRequestId,
+      sessionId: newAnswerMsg.sessionId || sseRes.sessionId || sessionId,
+      modelAnswerMessageId: newAnswerMsg.messageId || sseRes.messageId,
+      traceId: newAnswerMsg.traceId || sseRes.traceId,
+    });
+    return onionsProps;
+  });
+
   const flowHandler = useMemo(
     () =>
       flow(
@@ -192,6 +229,7 @@ function useChat(props: IProps) {
           sessionInfoHandler,
           messageIdHandler,
           queryMessageIdHandler,
+          taskPlanRecoveryHandler,
           rewriteQuestionHandler,
           textHandler,
           messageHandler,
@@ -203,6 +241,7 @@ function useChat(props: IProps) {
       sessionInfoHandler,
       messageIdHandler,
       queryMessageIdHandler,
+      taskPlanRecoveryHandler,
       rewriteQuestionHandler,
       textHandler,
       messageHandler,
@@ -261,6 +300,7 @@ function useChat(props: IProps) {
       const list: RunningChatInfo[] = await getChatRunningStatus({ sessionIds: [sessionId] });
       const runningInfo = list.find((item) => `${item.sessionId}` === `${sessionId}`);
       if (runningInfo?.running) {
+        requestLatestTaskPlan(runningInfo);
         return;
       }
       chatSessionRuntimeManager.completeBySession(sessionId);
@@ -324,6 +364,8 @@ function useChat(props: IProps) {
 
   const createRestoredAnswerMessageFromSnapshot = usePersistFn((snapshot: any, runningInfo: RunningChatInfo) => {
     const answerMsg = createMessage(fetchMessageHandler(snapshot));
+    // Running snapshots do not carry task plans; do not erase a plan already received over WS.
+    if (!snapshot?.taskPlan) delete answerMsg.taskPlan;
     set(answerMsg, 'msgId', getAnswerClientMsgId(runningInfo.clientRequestId));
     set(answerMsg, 'messageState', IMessageState.Answer);
     set(answerMsg, 'thinkDone', false);
@@ -366,24 +408,186 @@ function useChat(props: IProps) {
     });
   });
 
+  const restoreRunningContext = usePersistFn((runningInfo: RunningChatInfo) => {
+    unregisterPendingChatContext(runningInfo.clientRequestId);
+    const messageId = runningInfo.modelAnswerMessageId ? `${runningInfo.modelAnswerMessageId}` : '';
+    let answerMsg = messageListRef.current.find((item) => {
+      return (
+        `${item.messageId}` === messageId || `${item.msgId}` === `${getAnswerClientMsgId(runningInfo.clientRequestId)}`
+      );
+    });
+
+    if (!answerMsg) {
+      answerMsg = createRestoredAnswerMessage(runningInfo, sessionId);
+    }
+    answerMsg.cancelSSE = debounce(() => stopRestoredRunningSession(answerMsg!, runningInfo), 100);
+    set(answerMsg, 'messageState', IMessageState.Answer);
+    chatSessionRuntimeManager.hydrateRunning(runningInfo, () => answerMsg?.cancelSSE?.());
+
+    const runtimeInfo = chatSessionRuntimeManager.getBySession(sessionId);
+    const askClientMessageId = getQueryClientMsgId(runningInfo.clientRequestId);
+    const queryMsg =
+      messageListRef.current.find(
+        (item) => `${item.messageId}` === `${runningInfo.userMessageId}` || `${item.msgId}` === `${askClientMessageId}`
+      ) ||
+      createMessage({
+        msgId: askClientMessageId,
+        messageId: `${runningInfo.userMessageId ?? askClientMessageId}`,
+        text: runningInfo.chatContent || '',
+        fromBeyond: false,
+        messageState: IMessageState.Done,
+        sessionId,
+      });
+
+    updateMessage(queryMsg, { isAssign: true });
+    answerMsg = updateMessage(answerMsg, { isAssign: true });
+    const context = {
+      clientRequestId: runtimeInfo!.clientRequestId,
+      queryMsg,
+      answerMsg,
+      restored: true,
+      getMessageList,
+      flowHandler,
+      updateMessage,
+    };
+    registerPendingChatContext(context);
+    registerSessionChatContext(sessionId, context);
+    return answerMsg;
+  });
+
+  const applyRunningSnapshot = usePersistFn(
+    async (answerMsg: IMessage, runningInfo: RunningChatInfo, isDisposed?: () => boolean) => {
+      const targetSessionId = runningInfo.sessionId || sessionId;
+      if (!targetSessionId) {
+        return;
+      }
+      try {
+        const snapshot = await getChatRunningSnapshot({
+          sessionId: targetSessionId,
+          traceId: runningInfo.traceId,
+          modelAnswerMessageId: runningInfo.modelAnswerMessageId,
+        });
+        if (isDisposed?.() || !snapshot?.messageId) {
+          return;
+        }
+
+        const latestRuntimeInfo = chatSessionRuntimeManager.getBySession(sessionId);
+        const snapshotAnswerMsg = createRestoredAnswerMessageFromSnapshot(snapshot, runningInfo);
+        const snapshotStreamId = snapshotAnswerMsg.snapshotStreamId;
+        const shouldApplySnapshot =
+          !snapshotStreamId ||
+          !latestRuntimeInfo?.lastAppliedStreamId ||
+          compareStreamId(snapshotStreamId, latestRuntimeInfo.lastAppliedStreamId) > 0;
+        if (!shouldApplySnapshot) {
+          return;
+        }
+
+        assign(answerMsg, snapshotAnswerMsg);
+        answerMsg.cancelSSE = debounce(() => stopRestoredRunningSession(answerMsg, runningInfo), 100);
+        set(answerMsg, 'messageState', IMessageState.Answer);
+        updateMessage(answerMsg, { isAssign: true });
+        chatSessionRuntimeManager.updateLastAppliedStreamId(
+          latestRuntimeInfo?.clientRequestId || runningInfo.clientRequestId,
+          snapshotStreamId
+        );
+      } catch (error) {
+        console.error(error);
+      }
+    }
+  );
+
+  const reconcileCurrentSessionAfterReconnect = usePersistFn(async () => {
+    if (!sessionId) {
+      return;
+    }
+
+    try {
+      const list: RunningChatInfo[] = await getChatRunningStatus({ sessionIds: [sessionId] });
+      const runningInfo = list.find((item) => `${item.sessionId}` === `${sessionId}` && item.running && item.traceId);
+      if (!runningInfo) {
+        chatSessionRuntimeManager.completeBySession(sessionId);
+        await reloadLatestMessageList();
+        return;
+      }
+
+      // A previous turn may have finished and a new one started while this client was offline.
+      const localRuntime = chatSessionRuntimeManager.getBySession(sessionId);
+      if (localRuntime && localRuntime.clientRequestId !== runningInfo.clientRequestId) {
+        unregisterPendingChatContext(localRuntime.clientRequestId);
+        unregisterSessionChatContext(sessionId);
+        chatSessionRuntimeManager.completeBySession(sessionId);
+      }
+      const restoreKey = getRestoredStreamKey(sessionId, runningInfo.traceId);
+      startRestoringChatStream(restoreKey);
+      try {
+        const answerMsg = restoreRunningContext(runningInfo);
+        requestLatestTaskPlan(runningInfo);
+        await applyRunningSnapshot(answerMsg, runningInfo);
+      } finally {
+        flushRestoredChatStreamBuffer(restoreKey);
+      }
+    } catch (error) {
+      console.error('WebSocket 重连后同步会话运行态失败:', error);
+    }
+  });
+
+  useEffect(() => {
+    return webSocketManager.onReconnect(() => {
+      void reconcileCurrentSessionAfterReconnect();
+    });
+  }, [reconcileCurrentSessionAfterReconnect]);
+
   useEffect(() => {
     const handler = (message: any) => {
       const data = get(message, 'data') || message;
+      const clientRequestId = `${get(message, 'clientRequestId') || ''}`;
       const messageSessionId = get(data, 'sessionId') || get(message, 'sessionId');
       if (!messageSessionId || `${messageSessionId}` !== `${sessionId}`) return;
 
-      const answerMsg = fetchMessageHandler({
+      const newMsg = fetchMessageHandler({
         ...data,
         sessionId: messageSessionId,
       });
-      updateMessage(answerMsg, { allowCreateSession: false });
+      if (clientRequestId) {
+        newMsg.msgId = newMsg.fromBeyond ? getAnswerClientMsgId(clientRequestId) : getQueryClientMsgId(clientRequestId);
+      }
+      updateMessage(newMsg, { allowCreateSession: false });
+
+      if (!newMsg.fromBeyond && clientRequestId) {
+        const messageAgentId = get(message, 'agentId');
+        const newAnswerMsg = createMessage({
+          agentId: messageAgentId,
+          text: '',
+          fromBeyond: true,
+          messageState: IMessageState.Query,
+          msgId: getAnswerClientMsgId(clientRequestId),
+          queryMsgId: newMsg.msgId,
+          sessionId: `${messageSessionId}`,
+          metadata: messageAgentId ? JSON.stringify({ agentId: messageAgentId }) : '',
+        });
+        updateMessage(newAnswerMsg, { isAssign: true });
+        registerPendingChatContext({
+          clientRequestId,
+          queryMsg: newMsg,
+          answerMsg: newAnswerMsg,
+          getMessageList,
+          flowHandler,
+          updateMessage,
+        });
+        chatSessionRuntimeManager.register({
+          clientRequestId,
+          sessionId: `${messageSessionId}`,
+          restored: false,
+          cancel: () => newAnswerMsg.cancelSSE?.(),
+        });
+      }
     };
 
     webSocketManager.onMessage('NEW_MESSAGE', handler);
     return () => {
       webSocketManager.offMessage('NEW_MESSAGE', handler);
     };
-  }, [sessionId, updateMessage]);
+  }, [flowHandler, getMessageList, sessionId, updateMessage]);
 
   useEffect(() => {
     if (!sessionId) {
@@ -407,81 +611,10 @@ function useChat(props: IProps) {
         restoreKey = getRestoredStreamKey(sessionId, runningInfo.traceId);
         startRestoringChatStream(restoreKey);
 
-        const messageId = runningInfo.modelAnswerMessageId ? `${runningInfo.modelAnswerMessageId}` : '';
-        let answerMsg = messageListRef.current.find((item) => {
-          return (
-            `${item.messageId}` === messageId ||
-            `${item.msgId}` === `${getAnswerClientMsgId(runningInfo.clientRequestId)}`
-          );
-        });
-
-        if (!answerMsg) {
-          answerMsg = createRestoredAnswerMessage(runningInfo, sessionId);
-        }
-        answerMsg.cancelSSE = debounce(() => stopRestoredRunningSession(answerMsg!, runningInfo), 100);
-        set(answerMsg, 'messageState', IMessageState.Answer);
-        answerMsg = updateMessage(answerMsg, { isAssign: true });
-        chatSessionRuntimeManager.hydrateRunning(runningInfo, () => answerMsg?.cancelSSE?.());
-
-        const runtimeInfo = chatSessionRuntimeManager.getBySession(sessionId);
-        const askClientMessageId = getQueryClientMsgId(runningInfo.clientRequestId);
-        const queryMsg =
-          messageListRef.current.find(
-            (item) =>
-              `${item.messageId}` === `${runningInfo.userMessageId}` || `${item.msgId}` === `${askClientMessageId}`
-          ) ||
-          createMessage({
-            msgId: askClientMessageId,
-            messageId: `${runningInfo.userMessageId ?? askClientMessageId}`,
-            text: runningInfo.chatContent || '',
-            fromBeyond: false,
-            messageState: IMessageState.Done,
-            sessionId,
-          });
-
-        registerSessionChatContext(sessionId, {
-          clientRequestId: runtimeInfo!.clientRequestId,
-          queryMsg,
-          answerMsg,
-          restored: true,
-          getMessageList,
-          flowHandler,
-          updateMessage,
-        });
-
-        let snapshotAnswerMsg: IMessage | undefined;
-        try {
-          const snapshot = await getChatRunningSnapshot({
-            sessionId,
-            traceId: runningInfo.traceId,
-            modelAnswerMessageId: runningInfo.modelAnswerMessageId,
-          });
-          if (disposed) return;
-          if (snapshot?.messageId) {
-            snapshotAnswerMsg = createRestoredAnswerMessageFromSnapshot(snapshot, runningInfo);
-          }
-        } catch (error) {
-          console.error(error);
-        }
-
-        if (snapshotAnswerMsg) {
-          const latestRuntimeInfo = chatSessionRuntimeManager.getBySession(sessionId);
-          const snapshotStreamId = snapshotAnswerMsg.snapshotStreamId;
-          const shouldApplySnapshot =
-            !snapshotStreamId ||
-            !latestRuntimeInfo?.lastAppliedStreamId ||
-            compareStreamId(snapshotStreamId, latestRuntimeInfo.lastAppliedStreamId) > 0;
-          if (shouldApplySnapshot) {
-            assign(answerMsg, snapshotAnswerMsg);
-            answerMsg.cancelSSE = debounce(() => stopRestoredRunningSession(answerMsg!, runningInfo), 100);
-            set(answerMsg, 'messageState', IMessageState.Answer);
-            answerMsg = updateMessage(answerMsg, { isAssign: true });
-            chatSessionRuntimeManager.updateLastAppliedStreamId(
-              latestRuntimeInfo?.clientRequestId || runningInfo.clientRequestId,
-              snapshotStreamId
-            );
-          }
-        }
+        const answerMsg = restoreRunningContext(runningInfo);
+        requestLatestTaskPlan(runningInfo);
+        await applyRunningSnapshot(answerMsg, runningInfo, () => disposed);
+        if (disposed) return;
 
         flushRestoredChatStreamBuffer(restoreKey);
       })

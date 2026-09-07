@@ -17,10 +17,12 @@ import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import com.alibaba.fastjson.JSON;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
@@ -30,10 +32,39 @@ import com.iwhalecloud.byai.manager.mapper.taskplan.ByaiAgentTaskPlanMapper;
 import com.iwhalecloud.byai.state.domain.chat.dto.StopChatDto;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 import com.iwhalecloud.byai.state.domain.taskplan.dto.TaskPlanSnapshot;
+import com.iwhalecloud.byai.state.domain.taskplan.dto.TaskPlanLookupRequest;
 import com.iwhalecloud.byai.state.domain.taskplan.dto.TaskPlanUpdateRequest;
 import com.iwhalecloud.byai.state.domain.taskplan.exception.TaskPlanCommandException;
 
 class TaskPlanApplicationServiceTest {
+
+    @Test
+    void findLatestForMessage_scopesRecoveryToTheOwnedAnswerIncludingTerminalPlans() {
+        when(planMapper.selectOne(any())).thenReturn(plan("COMPLETED", 3, tasks("COMPLETED", "COMPLETED")));
+        TaskPlanLookupRequest request = new TaskPlanLookupRequest();
+        request.setSessionId("11");
+        request.setMessageId("21");
+
+        TaskPlanSnapshot snapshot = service.findLatestForMessage(request);
+
+        assertThat(snapshot.getStatus()).isEqualTo("COMPLETED");
+        ArgumentCaptor<Wrapper<ByaiAgentTaskPlan>> captor = ArgumentCaptor.forClass(Wrapper.class);
+        verify(planMapper).selectOne(captor.capture());
+        LambdaQueryWrapper<ByaiAgentTaskPlan> query = (LambdaQueryWrapper<ByaiAgentTaskPlan>) captor.getValue();
+        assertThat(query.getSqlSegment()).contains("user_id =", "session_id =", "message_id =", "LIMIT 1")
+            .doesNotContain("status");
+        assertThat(query.getParamNameValuePairs().values()).containsExactlyInAnyOrder(7L, 11L, 21L);
+    }
+
+    @Test
+    void findLatestForMessage_returnsNullWhenTheNewAnswerHasNoPlan() {
+        TaskPlanLookupRequest request = new TaskPlanLookupRequest();
+        request.setSessionId("11");
+        request.setMessageId("22");
+        when(planMapper.selectOne(any())).thenReturn(null);
+
+        assertThat(service.findLatestForMessage(request)).isNull();
+    }
 
     private ByaiAgentTaskPlanMapper planMapper;
 

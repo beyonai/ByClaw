@@ -29,7 +29,7 @@ public class TaskPlanWebSocketService {
         request.setMessageId(message.getMessageId() == null ? null : String.valueOf(message.getMessageId()));
         request.setTraceId(message.getTraceId());
         request.setIncludeTerminal(true);
-        TaskPlanSnapshot snapshot = taskPlanService.findActive(request);
+        TaskPlanSnapshot snapshot = taskPlanService.findLatestForMessage(request);
         publisher.send(ctx.channel(), snapshot, message.getClientRequestId(), request.getSessionId(),
             request.getMessageId());
     }

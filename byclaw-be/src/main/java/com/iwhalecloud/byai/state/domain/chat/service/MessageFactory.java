@@ -34,6 +34,7 @@ import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
+import com.iwhalecloud.byai.state.domain.chat.enums.ChatUseageEnum;
 
 @Service
 @Slf4j
@@ -67,6 +68,8 @@ public class MessageFactory {
         askMsg.setMessageId(userMessageId);
         // todo 提问消息标签
         askMsg.setContentTags(null);
+        askMsg.setUsage(ChatUseageEnum.USER_INPUT.getCode());
+        askMsg.setCreatorId(CurrentUserHolder.getCurrentUserId());
         return askMsg;
     }
 

@@ -328,12 +328,12 @@ public class ScriptService extends AbstractChatProcess {
                 return;
             }
             JSONObject userMsg = new JSONObject();
-            userMsg.put("messageId", ctx.userMessageId);
+            userMsg.put("type", "NEW_MESSAGE");
             userMsg.put("sessionId", ctx.sessionId);
-            userMsg.put("chatContent", ctx.assistantChatDto.getChatContent());
-            userMsg.put("metadata", ctx.assistantChatDto.getMetadata());
-            multiDeviceBroadcastService.broadcastToUserDevices(ctx.userId, ctx.sessionId, "userMessage",
-                userMsg.toJSONString(), ctx.senderChannel);
+            userMsg.put("data", JSON.toJSON(ctx.askMsg));
+            userMsg.put("clientRequestId", ctx.assistantChatDto.getClientRequestId());
+            userMsg.put("agentId", ctx.assistantChatDto.getAgentId());
+            multiDeviceBroadcastService.broadcastRawToUser(ctx.userId, userMsg, ctx.senderChannel);
         }
         catch (Exception e) {
             log.warn("多端广播 userMessage 事件异常, sessionId: {}", ctx.sessionId, e);
@@ -409,9 +409,10 @@ public class ScriptService extends AbstractChatProcess {
             ChatInitializationDto dto = new ChatInitializationDto();
             dto.setMessageId(ctx.modelAnswerMessageId);
             dto.setQueryMessageId(ctx.userMessageId);
+            dto.setTraceId(ctx.traceId);
             dto.setMetadata(ctx.assistantChatDto.getMetadata());
             multiDeviceBroadcastService.broadcastToUserDevices(ctx.userId, ctx.sessionId,
-                SseResponseEventEnum.initialization, JSON.toJSONString(dto), ctx.senderChannel);
+                SseResponseEventEnum.initialization, JSON.toJSONString(dto), ctx.senderChannel, ctx.clientRequestId);
         }
         catch (Exception e) {
             log.warn("多端广播 initialization 事件异常, sessionId: {}", ctx.sessionId, e);
@@ -463,7 +464,8 @@ public class ScriptService extends AbstractChatProcess {
         try {
             if (ctx.chatResponse != null) {
                 multiDeviceBroadcastService.broadcastToUserDevices(ctx.userId, ctx.sessionId,
-                    SseResponseEventEnum.appStreamResponse, JSON.toJSONString(ctx.chatResponse), ctx.senderChannel);
+                    SseResponseEventEnum.appStreamResponse, JSON.toJSONString(ctx.chatResponse),
+                    ctx.senderChannel, ctx.clientRequestId);
             }
         }
         catch (Exception e) {

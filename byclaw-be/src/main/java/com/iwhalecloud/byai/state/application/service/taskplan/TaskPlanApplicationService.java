@@ -103,6 +103,25 @@ public class TaskPlanApplicationService {
         return plan == null ? null : snapshot(plan);
     }
 
+    /** 前端按回答消息恢复最新计划，包含终态；不改变 Runtime 的会话级查找语义。 */
+    public TaskPlanSnapshot findLatestForMessage(TaskPlanLookupRequest request) {
+        if (request == null) {
+            return null;
+        }
+        Long userId = CurrentUserHolder.getCurrentUserId();
+        Long sessionId = parseRequiredLong(request.getSessionId(), "sessionId");
+        Long messageId = parseRequiredLong(request.getMessageId(), "messageId");
+        requireOwnedSession(sessionId, userId);
+        ByaiAgentTaskPlan plan = planMapper.selectOne(Wrappers.<ByaiAgentTaskPlan>lambdaQuery()
+            .eq(ByaiAgentTaskPlan::getUserId, userId)
+            .eq(ByaiAgentTaskPlan::getSessionId, sessionId)
+            .eq(ByaiAgentTaskPlan::getMessageId, messageId)
+            .orderByDesc(ByaiAgentTaskPlan::getUpdatedAt)
+            .orderByDesc(ByaiAgentTaskPlan::getPlanId)
+            .last("LIMIT 1"));
+        return plan == null ? null : snapshot(plan);
+    }
+
     /** 为历史消息页批量查询每条回答的最新计划，包含终态计划。 */
     public Map<Long, TaskPlanSnapshot> findLatestByMessageIds(Long sessionId, List<Long> messageIds) {
         Long userId = CurrentUserHolder.getCurrentUserId();

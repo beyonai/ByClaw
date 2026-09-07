@@ -237,6 +237,34 @@ describe('hooks/useChat/useMessage', () => {
     expect(result.current.messageList.map((item) => item.msgId)).toEqual(['m1', 'm2', 'm3', 'm4']);
   });
 
+  it.each([true, false])('preserves newer task plans when stale chat updates arrive (assign=%s)', async (isAssign) => {
+    const { result } = renderHook(() => useMessage({ sessionId: 's1' }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const plan = { planId: 'p1', version: 3, tasks: [{ taskId: 't1', status: 'COMPLETED' }] };
+    act(() => {
+      result.current.updateMessage({ msgId: 'm1', messageId: 'm1', taskPlan: plan } as any);
+      result.current.updateMessage({ msgId: 'm1', messageId: 'm1', text: 'snapshot', taskPlan: undefined } as any, {
+        isAssign,
+      });
+    });
+    expect(sessionListMap.get('s1').list[0].taskPlan).toEqual(plan);
+    act(() => {
+      result.current.updateMessage(
+        { msgId: 'm1', messageId: 'm1', taskPlan: { ...plan, version: 2, tasks: [] } } as any,
+        { isAssign }
+      );
+    });
+    expect(sessionListMap.get('s1').list[0].taskPlan).toEqual(plan);
+    act(() => {
+      result.current.updateMessage({ msgId: 'm1', messageId: 'm1', taskPlan: { ...plan, version: 4 } } as any, {
+        isAssign,
+      });
+    });
+    expect(sessionListMap.get('s1').list[0].taskPlan.version).toBe(4);
+  });
+
   it('deleteMessage removes local message and calls delMessage for persisted ids', async () => {
     const { result, rerender } = renderHook(({ sessionId }) => useMessage({ sessionId }), {
       initialProps: { sessionId: 's1' },

@@ -147,6 +147,29 @@ describe('utils/websocket', () => {
     expect(handler).toHaveBeenCalledWith({ type: 'NOTIFICATION', session: { sessionId: '1' } });
   });
 
+  it('notifies reconnect handlers only after a connection is restored', () => {
+    mockGetToken.mockReturnValue('token-1');
+    const ws = require('../websocket').default;
+    const handler = jest.fn();
+    const unsubscribe = ws.onReconnect(handler);
+
+    ws.disconnect();
+    ws.init();
+    socketInstance.onopen();
+    expect(handler).not.toHaveBeenCalled();
+
+    socketInstance.onclose({ code: 1006, reason: 'network error' });
+    jest.advanceTimersByTime(2000);
+    socketInstance.onopen();
+    expect(handler).toHaveBeenCalledTimes(1);
+
+    unsubscribe();
+    socketInstance.onclose({ code: 1006, reason: 'network error' });
+    jest.advanceTimersByTime(2000);
+    socketInstance.onopen();
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
   it('disconnect tears down timers and socket', () => {
     mockGetToken.mockReturnValue('token-1');
     const ws = require('../websocket').default;

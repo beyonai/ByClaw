@@ -226,6 +226,8 @@ export const handleTaskPlanSnapshot = (message: any) => {
 
   const context = findChatStreamContext(message, taskPlan);
   if (!context) return false;
+  // A delayed snapshot from the previous turn must not bind to the current session fallback.
+  if (context.answerMsg.messageId && `${context.answerMsg.messageId}` !== `${taskPlan.messageId}`) return false;
 
   const currentVersion = Number(context.answerMsg.taskPlan?.version || 0);
   const nextVersion = Number(taskPlan.version || 0);
