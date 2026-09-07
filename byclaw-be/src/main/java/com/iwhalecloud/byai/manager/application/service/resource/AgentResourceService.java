@@ -184,7 +184,7 @@ public class AgentResourceService {
 
         // 批量查询关联资源；默认个人资源允许未上架状态，以便默认个人助理能使用默认个人知识库。
         LambdaQueryWrapper<SsResource> allRelQueryWrapper = new LambdaQueryWrapper<>();
-        allRelQueryWrapper.and(wrapper -> wrapper.in(SsResource::getResourceStatus, ResourceStatus.LIST.getNum())
+        allRelQueryWrapper.and(wrapper -> wrapper.in(SsResource::getResourceStatus, ResourceStatus.ON_SHELF.getNum())
             .or().eq(SsResource::getOwnerType, OwnerType.PERSONAL_DEFAULT));
         allRelQueryWrapper.in(SsResource::getResourceId, allRelResourceIds);
 

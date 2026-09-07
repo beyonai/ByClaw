@@ -422,7 +422,7 @@ public class OntologyBaseService {
         resource.setResourceType(RESOURCE_TYPE_ATOM);
         resource.setSystemCode(systemCode);
         resource.setOwnerType(StringUtils.defaultIfBlank(row.getString("ownerType"), ownerType));
-        resource.setResourceStatus(ResourceStatus.LIST.getNum());
+        resource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         resource.setResourceVersionId("1.0");
         resource.setParentResourceId(ROOT_PARENT_ID);
         resource.setHostType("local");
@@ -440,7 +440,7 @@ public class OntologyBaseService {
     private String resourceStatus(JSONObject request) {
         JSONArray statusList = request.getJSONArray("statusList");
         if (statusList == null || statusList.isEmpty()) {
-            return String.valueOf(ResourceStatus.LIST.getNum());
+            return String.valueOf(ResourceStatus.ON_SHELF.getNum());
         }
         List<Integer> values = new ArrayList<>();
         for (Object item : statusList) {
@@ -449,7 +449,7 @@ public class OntologyBaseService {
             }
         }
         if (values.isEmpty()) {
-            return String.valueOf(ResourceStatus.LIST.getNum());
+            return String.valueOf(ResourceStatus.ON_SHELF.getNum());
         }
         return values.size() == 1 ? String.valueOf(values.get(0)) : "";
     }
@@ -869,7 +869,7 @@ public class OntologyBaseService {
                     // 更新：名称/描述/状态置回已上架 + 刷新扩展表镜像；更新者记为 adminvip
                     exist.setResourceName(displayName);
                     exist.setResourceDesc(description);
-                    exist.setResourceStatus(ResourceStatus.LIST.getNum());
+                    exist.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
                     exist.setHostType(REMOTE.equalsIgnoreCase(sourceType) ? "hosted" : "local");
                     exist.setUpdateBy(adminUserId);
                     ssResourceService.updateResourceEntity(exist);
@@ -888,7 +888,7 @@ public class OntologyBaseService {
         }
 
         // 远程门户已删、本地仍在的 → 下架（resource_status=3）；更新者记为 adminvip
-        Integer removed = ResourceStatus.REMOVED.getNum();
+        Integer removed = ResourceStatus.OFF_SHELF.getNum();
         for (SsResource exist : existingList) {
             if (!remoteIds.contains(exist.getResourceCode()) && !removed.equals(exist.getResourceStatus())) {
                 exist.setResourceStatus(removed);
@@ -1159,7 +1159,7 @@ public class OntologyBaseService {
         res.setResourceType(RESOURCE_TYPE_ATOM);
         res.setSystemCode(SYSTEM_CODE_DATACLOUD);
         res.setOwnerType(ownerType);
-        res.setResourceStatus(ResourceStatus.LIST.getNum()); // 2 已上架
+        res.setResourceStatus(ResourceStatus.ON_SHELF.getNum()); // 2 已上架
         res.setResourceVersionId("1.0"); // createResource 规整为 "1.0.0"
         res.setParentResourceId(parentId);
         res.setHostType(REMOTE.equalsIgnoreCase(sourceType) ? "hosted" : "local");

@@ -8,6 +8,7 @@
         <result column="resource_desc" property="resourceDesc" />
         <result column="resource_code" property="resourceCode" />
         <result column="owner_type" property="ownerType" />
+        <result column="resource_status" property="resourceStatus" />
         <result column="agent_type" property="agentType" />
         <result column="agent_home_url" property="agentHomeUrl" />
         <result column="avatar" property="avatar" />
@@ -86,6 +87,7 @@
         <result column="resource_code" property="resourceCode" />
         <result column="resource_desc" property="resourceDesc" />
         <result column="avatar" property="avatar" />
+        <result column="resource_status" property="resourceStatus" />
         <result column="agent_type" property="agentType" />
         <result column="agent_home_url" property="agentHomeUrl" />
         <result column="terminal" property="terminal" />
@@ -100,6 +102,7 @@
         <result column="resource_name" property="resourceName" />
         <result column="resource_desc" property="resourceDesc" />
         <result column="resource_biz_type" property="resourceBizType" />
+        <result column="resource_status" property="resourceStatus" />
         <result column="create_by" property="createBy" />
         <result column="create_time" property="createTime" />
         <result column="man_user_id" property="manUserId" />
@@ -113,6 +116,7 @@
                a.resource_code,
                a.resource_desc,
                a.owner_type,
+               a.resource_status,
                a.avatar,
                a.create_by,
                a.update_time,
@@ -287,6 +291,7 @@
                a.resource_code,
                a.resource_desc,
                a.owner_type,
+               a.resource_status,
                a.avatar,
                a.create_by,
                b.agent_type,
@@ -381,6 +386,7 @@
                a.resource_code,
                a.resource_desc,
                a.owner_type,
+               a.resource_status,
                a.avatar,
                a.create_by,
                b.agent_type,
@@ -866,6 +872,7 @@
             a.resource_code,
             a.resource_desc,
             a.avatar,
+            a.resource_status,
             b.agent_type,
             b.agent_home_url,
             b.terminal,
@@ -888,6 +895,7 @@
                a.resource_name,
                a.resource_desc,
                a.resource_biz_type,
+               a.resource_status,
                a.create_by,
                a.create_time,
                a.man_org_id,
@@ -976,6 +984,7 @@
                a.resource_name,
                a.resource_desc,
                a.resource_biz_type,
+               a.resource_status,
                a.create_by,
                a.create_time,
                a.man_org_id,

@@ -317,7 +317,7 @@ public class AuthApplicationService {
                 new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
             qw.eq(com.iwhalecloud.byai.manager.entity.resource.SsResource::getCreateBy, userId)
               .ne(com.iwhalecloud.byai.manager.entity.resource.SsResource::getResourceStatus,
-                  com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus.REMOVED.getNum());
+                  com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus.OFF_SHELF.getNum());
             List<com.iwhalecloud.byai.manager.entity.resource.SsResource> createdResources =
                 ssResourceMapper.selectList(qw);
             if (!CollectionUtils.isEmpty(createdResources)) {
@@ -352,7 +352,7 @@ public class AuthApplicationService {
                         new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
                     rqw.in(com.iwhalecloud.byai.manager.entity.resource.SsResource::getManOrgId, managedOrgIds)
                        .ne(com.iwhalecloud.byai.manager.entity.resource.SsResource::getResourceStatus,
-                           com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus.REMOVED.getNum());
+                           com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus.OFF_SHELF.getNum());
                     List<com.iwhalecloud.byai.manager.entity.resource.SsResource> orgResources =
                         ssResourceMapper.selectList(rqw);
                     if (!CollectionUtils.isEmpty(orgResources)) {
@@ -388,7 +388,7 @@ public class AuthApplicationService {
         }
         Set<Long> effectiveResourceIds = resources.stream()
             .filter(Objects::nonNull)
-            .filter(resource -> !Objects.equals(resource.getResourceStatus(), ResourceStatus.REMOVED.getNum()))
+            .filter(resource -> !Objects.equals(resource.getResourceStatus(), ResourceStatus.OFF_SHELF.getNum()))
             .map(SsResource::getResourceId)
             .filter(Objects::nonNull)
             .collect(Collectors.toSet());
@@ -714,7 +714,7 @@ public class AuthApplicationService {
             return UseApplyOutcome.PENDING;
         }
         if (isPersonalResourceUseApplyUnsupported(ssResource)
-            || Objects.equals(ssResource.getResourceStatus(), ResourceStatus.REMOVED.getNum())
+            || Objects.equals(ssResource.getResourceStatus(), ResourceStatus.OFF_SHELF.getNum())
             || !checkCanApplyUse(ssResource)) {
             return UseApplyOutcome.UNAVAILABLE;
         }
@@ -1199,7 +1199,7 @@ public class AuthApplicationService {
     public boolean hasResourceUsePermission(SsResource ssResource, Long userId) {
         if (ssResource == null || ssResource.getResourceId() == null
             || StringUtils.isBlank(ssResource.getResourceBizType())
-            || Objects.equals(ssResource.getResourceStatus(), ResourceStatus.REMOVED.getNum()) || userId == null) {
+            || Objects.equals(ssResource.getResourceStatus(), ResourceStatus.OFF_SHELF.getNum()) || userId == null) {
             return false;
         }
         if (userId.equals(ssResource.getCreateBy())
@@ -3163,7 +3163,7 @@ public class AuthApplicationService {
         vo.setOwnerType(ssResource.getOwnerType());
         vo.setResourceBizType(ssResource.getResourceBizType());
 
-        boolean isResourceRemoved = Objects.equals(ssResource.getResourceStatus(), ResourceStatus.REMOVED.getNum());
+        boolean isResourceRemoved = Objects.equals(ssResource.getResourceStatus(), ResourceStatus.OFF_SHELF.getNum());
         boolean canManage =
             hasResourceMemberSettingPermission(ssResource, currentUserId, managePrivilegeIds, organizationManageCache);
         boolean hasUsePermission =
@@ -3218,7 +3218,7 @@ public class AuthApplicationService {
         Long defaultDigitalEmployeeId) {
         return ssResource != null
             && ResourceBizTypeEnum.DIG_EMPLOYEE.name().equals(ssResource.getResourceBizType())
-            && !Objects.equals(ssResource.getResourceStatus(), ResourceStatus.REMOVED.getNum())
+            && !Objects.equals(ssResource.getResourceStatus(), ResourceStatus.OFF_SHELF.getNum())
             && !Objects.equals(ssResource.getResourceId(), defaultDigitalEmployeeId)
             && (canManage || hasUsePermission);
     }
@@ -3264,7 +3264,7 @@ public class AuthApplicationService {
         Set<Long> usePermittedIds) {
         if (ssResource == null || ssResource.getResourceId() == null
             || StringUtils.isBlank(ssResource.getResourceBizType())
-            || Objects.equals(ssResource.getResourceStatus(), ResourceStatus.REMOVED.getNum())
+            || Objects.equals(ssResource.getResourceStatus(), ResourceStatus.OFF_SHELF.getNum())
             || currentUserId == null) {
             return false;
         }
@@ -3348,7 +3348,7 @@ public class AuthApplicationService {
         vo.setOwnerType(ssResource.getOwnerType());
         vo.setResourceBizType(ssResource.getResourceBizType());
 
-        boolean isResourceRemoved = Objects.equals(ssResource.getResourceStatus(), ResourceStatus.REMOVED.getNum());
+        boolean isResourceRemoved = Objects.equals(ssResource.getResourceStatus(), ResourceStatus.OFF_SHELF.getNum());
         boolean canManage = hasResourceManagePermission(ssResource);
         boolean hasUsePermission = hasResourceUsePermission(ssResource);
         Set<Long> pendingUseApplyIds = queryCurrentUserPendingUseApplyResourceIds(List.of(resourceId),

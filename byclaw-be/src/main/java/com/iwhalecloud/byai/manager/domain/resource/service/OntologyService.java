@@ -1222,7 +1222,7 @@ public class OntologyService {
                 existingResource.setResourceName(actionInfo.getName());
                 existingResource.setResourceCode(actionInfo.getCode());
                 existingResource.setResourceDesc(actionInfo.getDesc());
-                existingResource.setResourceStatus(ResourceStatus.LIST.getNum());
+                existingResource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
                 existingResource.setUpdateBy(currentUserId);
                 existingResource.setUpdateTime(now);
                 updateResourceList.add(existingResource);
@@ -1489,7 +1489,7 @@ public class OntologyService {
         SsResource resource = new SsResource();
         resource.setResourceId(SequenceService.nextVal());
         resource.setResourceName(resourceName);
-        resource.setResourceStatus(ResourceStatus.LIST.getNum());
+        resource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         resource.setSystemCode(SystemCode.BYAI.getCode());
         resource.setResourceCode(resourceCode);
         resource.setComAcctId(CurrentUserHolder.getEnterpriseId());

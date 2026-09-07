@@ -1232,7 +1232,7 @@ class AuthApplicationServiceTest {
         parentOrgGrant.setGrantToType(Color.RED);
         SsResource activeResource = new SsResource();
         activeResource.setResourceId(500L);
-        activeResource.setResourceStatus(ResourceStatus.LIST.getNum());
+        activeResource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         when(ssResourceService.findByIdList(any())).thenReturn(List.of(activeResource));
         when(privilegeGrantService.findPrivilegeByQo(any())).thenAnswer(invocation -> {
             PrivilegeGrantQo qo = invocation.getArgument(0);
@@ -1278,7 +1278,7 @@ class AuthApplicationServiceTest {
         childOrgBlacklist.setGrantToType(Color.BLACK);
         SsResource activeResource = new SsResource();
         activeResource.setResourceId(500L);
-        activeResource.setResourceStatus(ResourceStatus.LIST.getNum());
+        activeResource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         when(ssResourceService.findByIdList(any())).thenReturn(List.of(activeResource));
         when(privilegeGrantService.findPrivilegeByQo(any())).thenAnswer(invocation -> {
             PrivilegeGrantQo qo = invocation.getArgument(0);
@@ -1322,7 +1322,7 @@ class AuthApplicationServiceTest {
 
         SsResource removedResource = new SsResource();
         removedResource.setResourceId(500L);
-        removedResource.setResourceStatus(ResourceStatus.REMOVED.getNum());
+        removedResource.setResourceStatus(ResourceStatus.OFF_SHELF.getNum());
         when(ssResourceService.findByIdList(Set.of(500L))).thenReturn(List.of(removedResource));
 
         assertThat(service.buildUserAuthResources(1001L)).doesNotContainKey("500");
@@ -1364,7 +1364,7 @@ class AuthApplicationServiceTest {
         });
         SsResource activeResource = new SsResource();
         activeResource.setResourceId(500L);
-        activeResource.setResourceStatus(ResourceStatus.LIST.getNum());
+        activeResource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         when(ssResourceService.findByIdList(Set.of(500L))).thenReturn(List.of(activeResource));
 
         Map<String, String> resources = service.buildUserManageResources(1001L);
@@ -1416,7 +1416,7 @@ class AuthApplicationServiceTest {
         });
         SsResource activeResource = new SsResource();
         activeResource.setResourceId(500L);
-        activeResource.setResourceStatus(ResourceStatus.LIST.getNum());
+        activeResource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         when(ssResourceService.findByIdList(Set.of(500L))).thenReturn(List.of(activeResource));
 
         assertThat(service.buildUserManageResources(1001L)).doesNotContainKey("500");
@@ -1448,7 +1448,7 @@ class AuthApplicationServiceTest {
         createdResource.setResourceId(600L);
         createdResource.setResourceBizType(ResourceBizTypeEnum.DIG_EMPLOYEE.name());
         createdResource.setCreateBy(1001L);
-        createdResource.setResourceStatus(ResourceStatus.LIST.getNum());
+        createdResource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         when(ssResourceMapper.selectList(argThat(qw -> qw != null))).thenReturn(List.of(createdResource));
 
         assertThat(service.buildUserManageResources(1001L)).containsEntry("600",
@@ -1488,7 +1488,7 @@ class AuthApplicationServiceTest {
         orgResource.setResourceId(700L);
         orgResource.setResourceBizType(ResourceBizTypeEnum.DIG_EMPLOYEE.name());
         orgResource.setManOrgId(11L);
-        orgResource.setResourceStatus(ResourceStatus.LIST.getNum());
+        orgResource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         // First selectList call resolves the creator-dimension query (empty), second resolves org resources.
         when(ssResourceMapper.selectList(any())).thenReturn(List.of()).thenReturn(List.of(orgResource));
 
