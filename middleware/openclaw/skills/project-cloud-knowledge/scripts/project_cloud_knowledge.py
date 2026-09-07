@@ -850,6 +850,7 @@ class KnowledgeManager:
         return {"ok": True, "action": "update-file", "updated": {"resourceId": resource_id, "filePath": target_path}, "builds": [{"filePath": target_path, "built": built}]}
 
     def _build(self, args: argparse.Namespace) -> dict[str, Any]:
+        # 后端复用 directoryPath 承载文件或目录，再映射为原生 API 的 filePath。
         payload = self._file_path_payload(self._resource_id(args), args.file_path)
         if args.dry_run:
             return {"ok": True, "action": "build", "dryRun": True, "payload": payload}
@@ -1159,7 +1160,7 @@ def build_parser() -> argparse.ArgumentParser:
         "check-conflicts": "上传前检查目标目录中的同名文件",
         "upload": "导入一个或多个文件或 ZIP，并自动触发构建",
         "update-file": "更新一个已有文件，并自动触发构建",
-        "build": "触发指定知识文件构建",
+        "build": "构建指定文件或递归批量构建目录（/ 表示全库）",
         "build-status": "查询知识文件构建状态",
         "download": "下载知识库文件或目录压缩包",
         "read-file": "按行读取知识库文件内容",
@@ -1278,7 +1279,10 @@ def build_parser() -> argparse.ArgumentParser:
             "--file-path",
             required=True,
             metavar="PATH",
-            help="知识库文件的绝对路径",
+            help=(
+                "知识库文件或目录的绝对路径；目录递归构建，/ 表示全库"
+                if name == "build" else "知识库文件的绝对路径"
+            ),
         )
         if name != "build-status":
             _add_dry_run(command)

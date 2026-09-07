@@ -1,6 +1,6 @@
 ---
 name: project-cloud-knowledge-write
-description: "变更 ByClaw 知识库或项目云盘目录和文件。用于创建、重命名或删除目录，检查上传冲突，上传或更新文件与 ZIP，触发构建，以及删除文件。"
+description: "变更 ByClaw 知识库或项目云盘目录和文件。用于创建、重命名或删除目录，检查上传冲突，上传或更新文件与 ZIP，触发单文件、目录递归批量或全库构建，以及删除文件。"
 ---
 
 # 变更知识库内容
@@ -103,9 +103,9 @@ python3 <project-cloud-knowledge目录>/scripts/project_cloud_knowledge.py updat
 
 更新成功后 CLI 会重新触发构建。
 
-## 构建或删除文件
+## 构建文件或目录
 
-触发构建：
+单文件构建：
 
 ```bash
 python3 <project-cloud-knowledge目录>/scripts/project_cloud_knowledge.py build \
@@ -113,6 +113,21 @@ python3 <project-cloud-knowledge目录>/scripts/project_cloud_knowledge.py build
   --resource-id RESOURCE_ID \
   --file-path /产品资料/a.md
 ```
+
+目录递归批量构建，复用 `--file-path`，一次请求即可：
+
+```bash
+python3 <project-cloud-knowledge目录>/scripts/project_cloud_knowledge.py build \
+  --session-id SESSION_ID \
+  --resource-id RESOURCE_ID \
+  --file-path /产品资料
+```
+
+全库构建使用 `--file-path /`，仅在用户要求全库范围时使用。无需枚举目录逐文件提交，也无需新增 `--directory-path`。服务端按路径识别文件或目录；目录包含全部子目录，范围固定为受理时的文件快照，之后新增或移入的文件不加入本批次。路径不存在时受理失败。
+
+构建请求成功只表示已受理，不表示构建完成。返回结果为空时也不能声称构建完成或虚构批次 ID。需要确认具体文件就绪时读取只读子 Skill 并查询 `build-status`；该命令仍只接受文件，不能把目录路径当作批次状态查询，也不能用单个文件的状态代表整个目录。
+
+## 删除文件
 
 删除文件：
 
@@ -122,5 +137,3 @@ python3 <project-cloud-knowledge目录>/scripts/project_cloud_knowledge.py remov
   --resource-id RESOURCE_ID \
   --file-path /产品资料/a.md
 ```
-
-构建请求成功只表示异步任务已受理，不表示构建完成。需要确认就绪时读取只读子 Skill 并查询 `build-status`。

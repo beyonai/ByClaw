@@ -27,7 +27,7 @@ python3 <project-cloud-knowledge目录>/scripts/project_cloud_knowledge.py build
   --file-path /产品资料/a.md
 ```
 
-把 `pending` 或处理中状态表述为仍在构建；`unsupported` 表示文件已入库但格式不支持知识构建。
+`build-status` 按文件查询，不支持目录或整批状态；目录批量构建后不能用单个文件状态代表全部文件。把 `pending` 表述为“排队中”，处理中状态表述为“构建中”；`unsupported` 表示文件已入库但格式不支持知识构建。
 
 ## 下载内容
 
