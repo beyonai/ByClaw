@@ -106,6 +106,16 @@ export default function useMessage({ sessionId }: { sessionId?: string }) {
               } else {
                 newMessage = merge({}, targetMsg, msg);
               }
+              // Chat snapshots and stream updates may lag behind the independent task-plan snapshot.
+              const currentPlan = targetMsg.taskPlan;
+              if (
+                currentPlan &&
+                (!msg.taskPlan ||
+                  (currentPlan.planId === msg.taskPlan.planId &&
+                    Number(currentPlan.version) > Number(msg.taskPlan.version)))
+              ) {
+                newMessage.taskPlan = currentPlan;
+              }
               newMessage.updateKey = getMsgId();
               if (shouldDropCompletedEmptyAnswer(newMessage)) {
                 list.splice(targetIndex, 1);

@@ -155,6 +155,30 @@ describe('hooks/useChat/chatRuntime', () => {
     jest.useRealTimers();
   });
 
+  it('does not attach a previous answer plan to the current session context', () => {
+    const answerMsg: any = { msgId: 'a2', messageId: '202', sessionId: 's1' };
+    const updateMessage = jest.fn((msg) => msg);
+    registerPendingChatContext({
+      clientRequestId: 'c2',
+      queryMsg: { msgId: 'q2', sessionId: 's1' } as any,
+      answerMsg,
+      getMessageList: () => [answerMsg],
+      flowHandler: jest.fn(),
+      updateMessage,
+    });
+
+    expect(
+      handleTaskPlanSnapshot({
+        type: 'TASK_PLAN_SNAPSHOT',
+        sessionId: 's1',
+        data: { planId: 'p1', messageId: '201', sessionId: 's1', version: 9 },
+      })
+    ).toBe(false);
+    expect(answerMsg.messageId).toBe('202');
+    expect(answerMsg.taskPlan).toBeUndefined();
+    expect(updateMessage).not.toHaveBeenCalled();
+  });
+
   it('does not create message cache when no context exists', () => {
     expect(() => handleParsedChatStream(createParsed())).not.toThrow();
   });

@@ -1,11 +1,24 @@
 package com.iwhalecloud.byai.state.domain.ws.service;
 
+import java.nio.charset.StandardCharsets;
+import java.util.Objects;
 import java.util.Set;
 
-import org.springframework.beans.factory.annotation.Autowired;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
+
+import org.apache.commons.lang3.StringUtils;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.data.redis.connection.Message;
+import org.springframework.data.redis.connection.MessageListener;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.listener.ChannelTopic;
+import org.springframework.data.redis.listener.RedisMessageListenerContainer;
 import org.springframework.stereotype.Service;
 
 import com.alibaba.fastjson.JSONObject;
+import com.iwhalecloud.byai.state.domain.chat.service.ChatRuntimeInstance;
 import com.iwhalecloud.byai.state.domain.ws.manager.ChannelManager;
 
 import io.netty.channel.Channel;
@@ -14,14 +27,62 @@ import lombok.extern.slf4j.Slf4j;
 
 /**
  * 多端广播服务：将消息事件推送到同一用户的所有 WebSocket Channel（排除发送端）。
- * 用于实现多设备同时在线时的消息实时同步。
+ * 本实例先完成本地推送，再通过 Redis Pub/Sub 通知其他后端实例完成各自的本地推送。
  */
 @Slf4j
 @Service
-public class MultiDeviceBroadcastService {
+public class MultiDeviceBroadcastService implements MessageListener {
 
-    @Autowired
-    private ChannelManager channelManager;
+    static final String DEFAULT_PUBSUB_TOPIC = "byai:pub:websocket_user_broadcast";
+    static final int ENVELOPE_SCHEMA_VERSION = 1;
+
+    private final ChannelManager channelManager;
+
+    private final StringRedisTemplate stringRedisTemplate;
+
+    private final RedisMessageListenerContainer listenerContainer;
+
+    private final ChatRuntimeInstance runtimeInstance;
+
+    private final String pubsubTopicName;
+
+    private ChannelTopic pubsubTopic;
+
+    public MultiDeviceBroadcastService(ChannelManager channelManager,
+                                       StringRedisTemplate stringRedisTemplate,
+                                       @Qualifier("webSocketBroadcastListenerContainer")
+                                       RedisMessageListenerContainer listenerContainer,
+                                       ChatRuntimeInstance runtimeInstance,
+                                       @Value("${byai.websocket.broadcast.pubsub-topic:"
+                                           + DEFAULT_PUBSUB_TOPIC + "}") String pubsubTopicName) {
+        this.channelManager = channelManager;
+        this.stringRedisTemplate = stringRedisTemplate;
+        this.listenerContainer = listenerContainer;
+        this.runtimeInstance = runtimeInstance;
+        this.pubsubTopicName = StringUtils.defaultIfBlank(pubsubTopicName, DEFAULT_PUBSUB_TOPIC);
+    }
+
+    @PostConstruct
+    public void subscribe() {
+        pubsubTopic = new ChannelTopic(pubsubTopicName);
+        listenerContainer.addMessageListener(this, pubsubTopic);
+        log.info("已订阅跨实例 WebSocket 广播 Redis topic: {}", pubsubTopicName);
+    }
+
+    @PreDestroy
+    public void unsubscribe() {
+        if (pubsubTopic != null) {
+            listenerContainer.removeMessageListener(this, pubsubTopic);
+        }
+    }
+
+    @Override
+    public void onMessage(Message message, byte[] pattern) {
+        if (message == null || message.getBody() == null) {
+            return;
+        }
+        handleRemoteBroadcast(new String(message.getBody(), StandardCharsets.UTF_8));
+    }
 
     /**
      * 向用户的所有其他设备广播事件
@@ -34,38 +95,23 @@ public class MultiDeviceBroadcastService {
      */
     public void broadcastToUserDevices(Long userId, Long sessionId, String eventType,
                                        String data, Channel senderChannel) {
+        broadcastToUserDevices(userId, sessionId, eventType, data, senderChannel, null);
+    }
+
+    public void broadcastToUserDevices(Long userId, Long sessionId, String eventType,
+                                       String data, Channel senderChannel, String clientRequestId) {
         if (userId == null) {
             return;
         }
 
-        Set<Channel> channels = channelManager.getChannels(userId);
-        if (channels.isEmpty()) {
-            return;
-        }
-
         JSONObject message = new JSONObject();
-        message.put("type", "SESSION_EVENT");
+        message.put("type", "CHAT_STREAM");
+        message.put("clientRequestId", clientRequestId);
         message.put("sessionId", String.valueOf(sessionId));
         message.put("event", eventType);
         message.put("data", data);
 
-        String frameText = message.toJSONString();
-
-        for (Channel channel : channels) {
-            if (channel.equals(senderChannel)) {
-                continue;
-            }
-            if (!channel.isActive()) {
-                log.debug("跳过非活跃 Channel, userId: {}", userId);
-                continue;
-            }
-            try {
-                channel.writeAndFlush(new TextWebSocketFrame(frameText));
-            } catch (Exception e) {
-                log.warn("多端广播写入失败, userId: {}, sessionId: {}, eventType: {}",
-                    userId, sessionId, eventType, e);
-            }
-        }
+        broadcastFrame(userId, message.toJSONString(), senderChannel, eventType);
     }
 
     /**
@@ -83,12 +129,7 @@ public class MultiDeviceBroadcastService {
 
     public void broadcastRawEvent(Long userId, Long sessionId, JSONObject dataJson,
                                   Channel senderChannel, String clientRequestId) {
-        if (userId == null) {
-            return;
-        }
-
-        Set<Channel> channels = channelManager.getChannels(userId);
-        if (channels.isEmpty()) {
+        if (userId == null || dataJson == null) {
             return;
         }
 
@@ -109,22 +150,7 @@ public class MultiDeviceBroadcastService {
             message.put("metadata", metadata);
         }
 
-        String frameText = message.toJSONString();
-
-        for (Channel channel : channels) {
-            if (channel.equals(senderChannel)) {
-                continue;
-            }
-            if (!channel.isActive()) {
-                continue;
-            }
-            try {
-                channel.writeAndFlush(new TextWebSocketFrame(frameText));
-            } catch (Exception e) {
-                log.warn("多端广播原始事件写入失败, userId: {}, sessionId: {}, eventType: {}",
-                    userId, sessionId, eventType, e);
-            }
-        }
+        broadcastFrame(userId, message.toJSONString(), senderChannel, eventType);
     }
 
     /**
@@ -133,19 +159,57 @@ public class MultiDeviceBroadcastService {
      *
      * @param userId 用户ID
      * @param message 原始消息
-     * @return 成功写入的通道数量
+     * @return 当前实例成功写入的通道数量（远端实例通过 Redis 异步发送，不计入返回值）
      */
     public int broadcastRawToUser(Long userId, JSONObject message, Channel senderChannel) {
         if (userId == null || message == null) {
             return 0;
         }
+        String frameText = message.toJSONString();
+        String messageType = message.getString("type");
+        int sentCount = broadcastLocally(userId, frameText, senderChannel, messageType);
+        publish(userId, frameText, messageType);
+        return sentCount;
+    }
 
-        Set<Channel> channels = channelManager.getChannels(userId);
-        if (channels.isEmpty()) {
+    /**
+     * Redis 订阅回调的可测试入口。远端消息只能本地发送，不能再次发布，避免广播环路。
+     */
+    int handleRemoteBroadcast(String rawEnvelope) {
+        if (StringUtils.isBlank(rawEnvelope)) {
             return 0;
         }
+        try {
+            JSONObject envelope = JSONObject.parseObject(rawEnvelope);
+            if (envelope == null
+                || envelope.getIntValue("schemaVersion") != ENVELOPE_SCHEMA_VERSION
+                || StringUtils.isBlank(envelope.getString("sourceInstanceId"))) {
+                return 0;
+            }
+            if (Objects.equals(runtimeInstance.getInstanceId(), envelope.getString("sourceInstanceId"))) {
+                return 0;
+            }
 
-        String frameText = message.toJSONString();
+            Long userId = envelope.getLong("userId");
+            String frameText = envelope.getString("frameText");
+            if (userId == null || StringUtils.isBlank(frameText)) {
+                return 0;
+            }
+            return broadcastLocally(userId, frameText, null, envelope.getString("messageType"));
+        }
+        catch (Exception e) {
+            log.warn("忽略无效的跨实例 WebSocket 广播消息: {}", e.getMessage());
+            return 0;
+        }
+    }
+
+    private void broadcastFrame(Long userId, String frameText, Channel senderChannel, String messageType) {
+        broadcastLocally(userId, frameText, senderChannel, messageType);
+        publish(userId, frameText, messageType);
+    }
+
+    private int broadcastLocally(Long userId, String frameText, Channel senderChannel, String messageType) {
+        Set<Channel> channels = channelManager.getChannels(userId);
         int sentCount = 0;
         for (Channel channel : channels) {
             if (channel.equals(senderChannel)) {
@@ -160,9 +224,26 @@ public class MultiDeviceBroadcastService {
             }
             catch (Exception e) {
                 log.warn("原始 WebSocket 消息推送失败, userId: {}, messageType: {}",
-                    userId, message.getString("type"), e);
+                    userId, messageType, e);
             }
         }
         return sentCount;
+    }
+
+    private void publish(Long userId, String frameText, String messageType) {
+        JSONObject envelope = new JSONObject();
+        envelope.put("schemaVersion", ENVELOPE_SCHEMA_VERSION);
+        envelope.put("sourceInstanceId", runtimeInstance.getInstanceId());
+        envelope.put("userId", userId);
+        envelope.put("messageType", messageType);
+        envelope.put("frameText", frameText);
+        try {
+            stringRedisTemplate.convertAndSend(pubsubTopicName, envelope.toJSONString());
+        }
+        catch (Exception e) {
+            // 本机推送已经完成；Redis 暂时不可用不应反向影响当前实例上的客户端。
+            log.warn("跨实例 WebSocket 广播发布失败, userId: {}, messageType: {}, error: {}",
+                userId, envelope.getString("messageType"), e.getMessage());
+        }
     }
 }

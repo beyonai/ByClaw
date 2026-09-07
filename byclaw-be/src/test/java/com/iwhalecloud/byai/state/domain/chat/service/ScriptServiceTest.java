@@ -103,7 +103,8 @@ class ScriptServiceTest {
         recoveredService.storeMessage(ctx);
         verify(broadcast).broadcastToUserDevices(org.mockito.ArgumentMatchers.eq(1001L),
             org.mockito.ArgumentMatchers.eq(20L), org.mockito.ArgumentMatchers.eq("appStreamResponse"),
-            org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.isNull());
+            org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.isNull(),
+            org.mockito.ArgumentMatchers.isNull());
         assertThat(ctx.chatResponse).isSameAs(response);
     }
 

@@ -591,7 +591,7 @@ public class ScriptService extends AbstractChatProcess {
     private void broadcastMultiAgentAppStreamResponse(ChatProcessContext ctx, JSONObject payload) {
         try {
             multiDeviceBroadcastService.broadcastToUserDevices(ctx.userId, ctx.sessionId,
-                SseResponseEventEnum.appStreamResponse, payload.toJSONString(), ctx.senderChannel);
+                SseResponseEventEnum.appStreamResponse, payload.toJSONString(), ctx.senderChannel, ctx.clientRequestId);
         }
         catch (Exception e) {
             log.warn("多端广播多智能体 appStreamResponse 事件异常, sessionId: {}", ctx.sessionId, e);
@@ -627,9 +627,10 @@ public class ScriptService extends AbstractChatProcess {
             ChatInitializationDto dto = new ChatInitializationDto();
             dto.setMessageId(ctx.modelAnswerMessageId);
             dto.setQueryMessageId(ctx.userMessageId);
+            dto.setTraceId(ctx.traceId);
             dto.setMetadata(ctx.assistantChatDto.getMetadata());
             multiDeviceBroadcastService.broadcastToUserDevices(ctx.userId, ctx.sessionId,
-                SseResponseEventEnum.initialization, JSON.toJSONString(dto), ctx.senderChannel);
+                SseResponseEventEnum.initialization, JSON.toJSONString(dto), ctx.senderChannel, ctx.clientRequestId);
         }
         catch (Exception e) {
             log.warn("多端广播 initialization 事件异常, sessionId: {}", ctx.sessionId, e);
@@ -682,7 +683,8 @@ public class ScriptService extends AbstractChatProcess {
         try {
             if (ctx.chatResponse != null) {
                 multiDeviceBroadcastService.broadcastToUserDevices(ctx.userId, ctx.sessionId,
-                    SseResponseEventEnum.appStreamResponse, JSON.toJSONString(ctx.chatResponse), ctx.senderChannel);
+                    SseResponseEventEnum.appStreamResponse, JSON.toJSONString(ctx.chatResponse),
+                    ctx.senderChannel, ctx.clientRequestId);
             }
         }
         catch (Exception e) {
