@@ -33,7 +33,9 @@ Redis 连接。worker 显式注入的 Redis 客户端不受该共享逻辑影响
 知识变更通过 by-qa 的统一 `KnowledgeEventPublisher` 上报到
 `/byaiService/devloop/operation/saveOrUpdateObjectFiles`。当前覆盖目录创建、重命名、删除，
 文件导入、更新、删除、移动，异步构建终态，以及 `entityDiscovery`、`entityEnrich` 文件终态；
-语义处理的 batch 终态只记录日志。只有事件上下文同时包含 `X-User-Code` 和
+构建、Discovery 和 Enrich 的 batch 终态通过
+`/byaiService/open/api/v1/dingtalk/testSend` 通知发起用户（仅要求 `X-User-Code`）。
+文件事件只有在上下文同时包含 `X-User-Code` 和
 `X-CHAT-SESSION-ID` 时才调用后端接口。上报前会通过
 `SHARE_BFM_USER_CODE_{X-User-Code}` 查询真实用户 ID，再从
 `user:{userId}:login:auth` 的 `Beyond-Token` 字段读取登录 token 并放入请求 header；token
@@ -45,10 +47,18 @@ Redis 连接。worker 显式注入的 Redis 客户端不受该共享逻辑影响
 `DROPPED`、失败任务中的不完整 actions 以及重复路径不会上报。该列表表示本次关联到的实体
 文件，不承诺这些文件一定由本次任务实际新建。
 
-KnowledgeEntity 请求进入持久化队列时，ByClaw 适配层会把 `X-User-Code`、
+KnowledgeEntity 和 `fileToMarkdownIndex` 请求进入持久化队列时，ByClaw 适配层会把 `X-User-Code`、
 `X-CHAT-SESSION-ID` 和 `X-BYCLAW-RESOURCE-ID` 写入任务与批次的服务器内部上下文；不保存
 `Beyond-Token`。后台 worker 领取任务后恢复这些字段，并通过 Redis 重新解析当前登录 token，
 用于 RESOURCE 空间文件读写和终态事件上报。该内部上下文不属于 ByKC 的公共请求协议。
+
+`fileToMarkdownIndex` 支持文件、目录及 `/` 批量构建。适配层在批量受理的 SQL 入口
+注入内部上下文，由依赖同时写入新建任务及批次的 `extra_params`，后台构建 worker 恢复身份。
+脱离请求上下文的构建 callback 从 `knowledge_build_batch` 恢复原始调用信息。
+构建 v2 文件事件使用 `filePathSnapshot`，`SUCCEEDED`、`FAILED`、`SKIPPED`、`UNSUPPORTED`
+分别回写 `已完成`、`构建失败-待重试`、`待构建`、`不支持构建`，并兼容旧版 v1 文件事件。
+批次通知包含目标路径、成功/失败/跳过/不支持数量，以及候选、符合条件、新建、复用和受理时跳过数量。
+复用任务不计为本批次成功；零新建任务的批次通知明确说明未新建任务。
 
 启动即时问答 worker：
 
@@ -85,7 +95,7 @@ KnowledgeEntity 请求进入持久化队列时，ByClaw 适配层会把 `X-User-
 
 当前模块依赖：
 
-- `by-qa[all]==0.2.6`
+- `by-qa[all]==0.4.2`
 - `by-framework==0.2.2.dev11`
 
 建议使用 `uv` 管理依赖和运行环境。
@@ -93,7 +103,7 @@ KnowledgeEntity 请求进入持久化队列时，ByClaw 适配层会把 `X-User-
 如果需要从本地 wheel 重新安装 `by-qa`，请使用 `uv pip` 指向当前项目虚拟环境：
 
 ```bash
-uv pip install --python .venv/bin/python --force-reinstall "./by_qa-0.2.6-py3-none-any.whl[all]"
+uv pip install --python .venv/bin/python --force-reinstall "./by_qa-0.4.2-py3-none-any.whl[all]"
 ```
 
 不要使用 `uv run pip install ...`。当前 `.venv` 默认不包含 `pip` 模块，`uv run pip` 可能会命中系统或 Conda 环境里的 `pip`，导致把 `by-qa` 及其依赖安装到已有 `open-webui`、`streamlit` 等工具共用的环境中，从而出现依赖冲突提示。

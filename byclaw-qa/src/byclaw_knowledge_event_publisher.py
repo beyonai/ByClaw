@@ -25,6 +25,8 @@ from by_qa.knowledge_base.events import (
     DiscoveryFileCompletedEvent,
     EnrichBatchCompletedEvent,
     EnrichFileCompletedEvent,
+    FileBuildBatchTerminalEvent,
+    FileBuildTerminalPayload,
     FileDeletedEvent,
     FileImportedEvent,
     FileUpdatedEvent,
@@ -34,6 +36,9 @@ from by_qa.knowledge_base.events import (
 from by_qa.knowledge_base.infrastructure.database import build_connection_factory
 from by_qa.knowledge_base.repositories.knowledge_base_repository import (
     KnowledgeBaseRepository,
+)
+from by_qa.knowledge_base.repositories.knowledge_build_batch_repository import (
+    KnowledgeBuildBatchRepository,
 )
 from by_qa.knowledge_base.repositories.knowledge_semantic_processing_batch_repository import (
     KnowledgeSemanticProcessingBatchRepository,
@@ -100,9 +105,15 @@ class ByClawKnowledgeEventPublisher:
     user_id_resolver: UserIdResolver | None = None
     knowledge_base_resolver: KnowledgeBaseResolver | None = None
     batch_context_resolver: BatchContextResolver | None = None
+    build_batch_context_resolver: BatchContextResolver | None = None
 
     async def publish(self, event: KnowledgeEvent) -> None:
-        if isinstance(event, DiscoveryBatchCompletedEvent | EnrichBatchCompletedEvent):
+        if isinstance(
+            event,
+            DiscoveryBatchCompletedEvent
+            | EnrichBatchCompletedEvent
+            | FileBuildBatchTerminalEvent,
+        ):
             await self._publish_batch_completed(event)
             return
 
@@ -157,7 +168,9 @@ class ByClawKnowledgeEventPublisher:
 
     async def _publish_batch_completed(
         self,
-        event: DiscoveryBatchCompletedEvent | EnrichBatchCompletedEvent,
+        event: (
+            DiscoveryBatchCompletedEvent | EnrichBatchCompletedEvent | FileBuildBatchTerminalEvent
+        ),
     ) -> None:
         started_at = time.perf_counter()
         context = await self._resolve_context(event)
@@ -204,13 +217,29 @@ class ByClawKnowledgeEventPublisher:
             "completed_count=%s total_count=%s invoke_result=success elapsed_ms=%.2f",
             event.event_type,
             event.payload.batch_id,
-            event.payload.progress.completed_count,
-            event.payload.progress.total_count,
+            _batch_progress(event).completed_count,
+            _batch_progress(event).total_count,
             (time.perf_counter() - started_at) * 1000,
         )
 
     async def _resolve_context(self, event: KnowledgeEvent) -> ByClawCallbackContext:
         current = _context_from_headers(get_byclaw_userfs_header_context())
+        # Supersession can emit an older batch event inside another user's request.
+        # Always use the persisted owner for v2 build callbacks.
+        if isinstance(event, FileBuildBatchTerminalEvent) or (
+            isinstance(event, BuildFileCompletedEvent)
+            and isinstance(event.payload, FileBuildTerminalPayload)
+        ):
+            if self.build_batch_context_resolver is None:
+                raw = await _resolve_build_batch_context_from_db(
+                    event.payload.batch_id, event.kb_code
+                )
+            else:
+                result = self.build_batch_context_resolver(
+                    event.payload.batch_id, event.kb_code
+                )
+                raw = await result if inspect.isawaitable(result) else result
+            return _context_from_extra_params(raw)
         if current.deliverable:
             return current
         if not isinstance(
@@ -414,6 +443,24 @@ async def _resolve_batch_context_from_db(
     return _json_mapping((row or {}).get("extra_params"))
 
 
+async def _resolve_build_batch_context_from_db(
+    batch_id: str,
+    kb_code: str,
+) -> Mapping[str, Any]:
+    connection = await build_connection_factory(get_settings())()
+    try:
+        cursor = connection.cursor()
+        kb = await KnowledgeBaseRepository().get_by_code(cursor, kb_code)
+        if not kb:
+            return {}
+        row = await KnowledgeBuildBatchRepository().get_batch(
+            cursor, batch_id=batch_id, knowledge_base_id=int(kb["kid"])
+        )
+        return _json_mapping((row or {}).get("extra_params"))
+    finally:
+        await connection.close()
+
+
 async def _resolve_knowledge_base_from_db(kb_code: str) -> Mapping[str, Any]:
     connection = await build_connection_factory(get_settings())()
     try:
@@ -460,8 +507,20 @@ async def _resolve_user_id_from_redis(
     return normalized_user_id
 
 
+def _batch_progress(
+    event: (
+        DiscoveryBatchCompletedEvent | EnrichBatchCompletedEvent | FileBuildBatchTerminalEvent
+    ),
+):
+    if isinstance(event, FileBuildBatchTerminalEvent):
+        return event.payload
+    return event.payload.progress
+
+
 def _build_batch_notification(
-    event: DiscoveryBatchCompletedEvent | EnrichBatchCompletedEvent,
+    event: (
+        DiscoveryBatchCompletedEvent | EnrichBatchCompletedEvent | FileBuildBatchTerminalEvent
+    ),
     *,
     resource_id: str,
 ) -> str:
@@ -470,24 +529,41 @@ def _build_batch_notification(
         if isinstance(event, DiscoveryBatchCompletedEvent)
         else "知识实体整理"
     )
-    progress = event.payload.progress
+    if isinstance(event, FileBuildBatchTerminalEvent):
+        task_name = "文件构建"
+    progress = _batch_progress(event)
     if progress.failed_count:
         conclusion = "任务已完成，部分文件处理失败"
+    elif isinstance(event, FileBuildBatchTerminalEvent) and progress.unsupported_count:
+        conclusion = "任务已完成，部分文件不支持构建"
     elif progress.skipped_count:
         conclusion = "任务已完成，部分文件已跳过"
     else:
         conclusion = "任务已全部成功完成"
-    return "\n".join(
-        (
-            f"【{task_name}】{conclusion}",
-            f"知识库资源 ID：{resource_id or '未提供'}",
-            f"批次：{event.payload.batch_id}",
-            f"总计：{progress.total_count} 个文件",
-            f"成功：{progress.succeeded_count} 个",
-            f"失败：{progress.failed_count} 个",
-            f"跳过：{progress.skipped_count} 个",
+    lines = [
+        f"【{task_name}】{conclusion}",
+        f"知识库资源 ID：{resource_id or '未提供'}",
+        f"批次：{event.payload.batch_id}",
+        f"总计：{progress.total_count} 个文件",
+        f"成功：{progress.succeeded_count} 个",
+        f"失败：{progress.failed_count} 个",
+        f"跳过：{progress.skipped_count} 个",
+    ]
+    if isinstance(event, FileBuildBatchTerminalEvent):
+        lines.extend(
+            [
+                f"不支持构建：{progress.unsupported_count} 个",
+                f"目标路径：{progress.target_path}",
+                f"候选：{progress.candidate_count} 个",
+                f"符合条件：{progress.eligible_count} 个",
+                f"新建任务：{progress.accepted_count} 个",
+                f"复用：{progress.reused_count} 个",
+                f"受理时跳过：{progress.acceptance_skipped_count} 个",
+            ]
         )
-    )
+        if not progress.total_count:
+            lines[0] = f"【{task_name}】批次已完成，本批次未新建构建任务"
+    return "\n".join(lines)
 
 
 def _build_object_files(
@@ -510,15 +586,24 @@ def _build_object_files(
         )
         return files
     if isinstance(event, BuildFileCompletedEvent):
+        file_path = (
+            event.payload.file_path_snapshot
+            if isinstance(event.payload, FileBuildTerminalPayload)
+            else event.payload.file_path
+        )
         status = {
             "complete": "已完成",
             "failed": "构建失败-待重试",
             "unsupported": "不支持构建",
+            "SUCCEEDED": "已完成",
+            "FAILED": "构建失败-待重试",
+            "SKIPPED": "待构建",
+            "UNSUPPORTED": "不支持构建",
         }[event.payload.status]
         return [
             _object_file(
                 event=event,
-                file_path=event.payload.file_path,
+                file_path=file_path,
                 status=status,
                 context=context,
                 metadata=metadata,

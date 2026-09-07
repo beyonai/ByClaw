@@ -1,15 +1,21 @@
-"""Persist and restore ByClaw identity for durable KnowledgeEntity tasks."""
+"""Persist and restore ByClaw identity for durable knowledge processing tasks."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Any
 
+from by_qa.knowledge_base.repositories.knowledge_build_acceptance_repository import (
+    KnowledgeBuildAcceptanceRepository,
+)
 from by_qa.knowledge_base.repositories.knowledge_semantic_processing_batch_repository import (
     KnowledgeSemanticProcessingBatchRepository,
 )
 from by_qa.knowledge_base.repositories.knowledge_semantic_processing_task_repository import (
     KnowledgeSemanticProcessingTaskRepository,
+)
+from by_qa.knowledge_base.services.file_build_background_runner import (
+    FileBuildBackgroundRunner,
 )
 from by_qa.knowledge_base.services.knowledge_entity_background_runner import (
     KnowledgeEntityBackgroundRunner,
@@ -88,10 +94,29 @@ class ByClawKnowledgeEntityBackgroundRunner(KnowledgeEntityBackgroundRunner):
             reset_byclaw_userfs_headers(context_token)
 
 
+class ByClawKnowledgeBuildAcceptanceRepository(KnowledgeBuildAcceptanceRepository):
+    async def accept(self, cursor: Any, **kwargs: Any):
+        kwargs["extra_params"] = _with_runtime_context(kwargs.get("extra_params"))
+        return await super().accept(cursor, **kwargs)
+
+
+class ByClawFileBuildBackgroundRunner(FileBuildBackgroundRunner):
+    async def _execute_claimed(self, row: dict[str, Any]) -> None:
+        context_token = set_byclaw_userfs_headers(_context_headers(row))
+        try:
+            await super()._execute_claimed(row)
+        finally:
+            reset_byclaw_userfs_headers(context_token)
+
+
 def install_byclaw_knowledge_entity_runtime() -> None:
     """Install durable-context adapters before by-qa builds its lazy runtime."""
     from by_qa.knowledge_base.infrastructure import runtime
 
+    runtime.KnowledgeBuildAcceptanceRepository = (
+        ByClawKnowledgeBuildAcceptanceRepository
+    )
+    runtime.FileBuildBackgroundRunner = ByClawFileBuildBackgroundRunner
     runtime.KnowledgeSemanticProcessingBatchRepository = (
         ByClawKnowledgeSemanticProcessingBatchRepository
     )
@@ -103,6 +128,8 @@ def install_byclaw_knowledge_entity_runtime() -> None:
 
 __all__ = [
     "BYCLAW_RUNTIME_CONTEXT_PARAM",
+    "ByClawKnowledgeBuildAcceptanceRepository",
+    "ByClawFileBuildBackgroundRunner",
     "ByClawKnowledgeEntityBackgroundRunner",
     "ByClawKnowledgeSemanticProcessingBatchRepository",
     "ByClawKnowledgeSemanticProcessingTaskRepository",
