@@ -73,14 +73,15 @@ async def test_build_batch_notifies_without_chat_session_and_counts_unsupported(
     post = MagicMock()
     publisher = ByClawKnowledgeEventPublisher(
         get_json=get, post_json=post, user_id_resolver=lambda _: '77',
+        batch_details_resolver=lambda _: {'kb_name': '研发知识库', 'files': []},
         beyond_token_resolver=lambda _: 'token',
         build_batch_context_resolver=lambda *_: {
             CALLBACK_CONTEXT_EXTRA_PARAM: {'userCode': 'user-1', 'resourceId': '42'}},
     )
     await publisher.publish(batch_event())
     content = get.await_args.args[1]['content']
-    assert '【文件构建】任务已完成，部分文件不支持构建' in content
-    for line in ('不支持构建：1 个', '复用：1 个', '受理时跳过：1 个', '目标路径：/Docs'):
+    assert '【文件构建】处理结束，部分文件未完成处理' in content
+    for line in ('不支持 1', '复用 1', '受理时跳过 1', '处理范围：/Docs'):
         assert line in content
     post.assert_not_called()
 
@@ -91,7 +92,7 @@ def test_empty_build_batch_does_not_claim_reused_tasks_completed():
         target_path_snapshot='/', candidate_count=1, eligible_count=1,
         accepted_count=0, reused_count=1, acceptance_skipped_count=0, completed_count=0,
     ), {})
-    assert '本批次未新建构建任务' in _build_batch_notification(event, resource_id='42')
+    assert '本次未新建处理任务' in _build_batch_notification(event, resource_id='42')
 
 
 @pytest.mark.parametrize('event', [file_event(), batch_event()])

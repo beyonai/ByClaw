@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
 import os
@@ -44,6 +45,10 @@ from by_qa.knowledge_base.repositories.knowledge_semantic_processing_batch_repos
     KnowledgeSemanticProcessingBatchRepository,
 )
 
+from by_qa.knowledge_base.repositories.processing_task_query_repository import (
+    ProcessingTaskQueryRepository,
+)
+
 from byclaw_userfs_storage import (
     CHAT_SESSION_ID_HEADER,
     RESOURCE_ID_HEADER,
@@ -61,6 +66,8 @@ EVENT_PUBLISHER_PROVIDER_PATH = (
     "byclaw_knowledge_event_publisher:build_byclaw_knowledge_event_publisher"
 )
 _TIMEOUT_SECONDS = 30.0
+_BATCH_DETAILS_TIMEOUT_SECONDS = 2.0
+_BATCH_FILE_LIMIT = 10
 
 PostJson = Callable[
     [str, dict[str, Any], dict[str, str]],
@@ -106,6 +113,7 @@ class ByClawKnowledgeEventPublisher:
     knowledge_base_resolver: KnowledgeBaseResolver | None = None
     batch_context_resolver: BatchContextResolver | None = None
     build_batch_context_resolver: BatchContextResolver | None = None
+    batch_details_resolver: Callable[[KnowledgeEvent], Any] | None = None
 
     async def publish(self, event: KnowledgeEvent) -> None:
         if isinstance(
@@ -173,6 +181,39 @@ class ByClawKnowledgeEventPublisher:
         ),
     ) -> None:
         started_at = time.perf_counter()
+        if isinstance(event, FileBuildBatchTerminalEvent) and event.payload.scope == "SINGLE_FILE":
+            logger.info(
+                "byclaw batch notification skipped: event_type=%s batch_id=%s "
+                "invoke_result=skipped_single_file_build",
+                event.event_type,
+                event.payload.batch_id,
+            )
+            return
+        progress = _batch_progress(event)
+        counts = [
+            progress.total_count,
+            progress.completed_count,
+            progress.succeeded_count,
+            progress.failed_count,
+            progress.skipped_count,
+        ]
+        if isinstance(event, FileBuildBatchTerminalEvent):
+            counts.extend([
+                progress.candidate_count,
+                progress.eligible_count,
+                progress.accepted_count,
+                progress.reused_count,
+                progress.acceptance_skipped_count,
+                progress.unsupported_count,
+            ])
+        if not any(counts):
+            logger.info(
+                "byclaw batch notification skipped: event_type=%s batch_id=%s "
+                "invoke_result=skipped_empty_batch",
+                event.event_type,
+                event.payload.batch_id,
+            )
+            return
         context = await self._resolve_context(event)
         if not context.user_code:
             logger.info(
@@ -188,12 +229,15 @@ class ByClawKnowledgeEventPublisher:
             headers = {
                 "Beyond-Token": await self._resolve_beyond_token(context.user_code)
             }
+            details = await self._resolve_batch_details(event)
             params = {
                 "senderUserId": user_id,
                 "receiverUserId": user_id,
                 "content": _build_batch_notification(
                     event,
                     resource_id=context.resource_id,
+                    chat_session_id=context.chat_session_id,
+                    details=details,
                 ),
             }
             if self.get_json is None:
@@ -222,6 +266,21 @@ class ByClawKnowledgeEventPublisher:
             (time.perf_counter() - started_at) * 1000,
         )
 
+    async def _resolve_batch_details(self, event: KnowledgeEvent) -> Mapping[str, Any]:
+        try:
+            async with asyncio.timeout(_BATCH_DETAILS_TIMEOUT_SECONDS):
+                resolver = self.batch_details_resolver or _resolve_batch_details_from_db
+                result = resolver(event)
+                return await result if inspect.isawaitable(result) else result
+        except Exception:
+            # Metadata enrichment must not prevent the terminal notification.
+            logger.warning(
+                "byclaw batch notification details unavailable: event_type=%s batch_id=%s",
+                event.event_type,
+                event.payload.batch_id,
+            )
+            return {"unavailable": True}
+
     async def _resolve_context(self, event: KnowledgeEvent) -> ByClawCallbackContext:
         current = _context_from_headers(get_byclaw_userfs_header_context())
         # Supersession can emit an older batch event inside another user's request.
@@ -240,7 +299,9 @@ class ByClawKnowledgeEventPublisher:
                 )
                 raw = await result if inspect.isawaitable(result) else result
             return _context_from_extra_params(raw)
-        if current.deliverable:
+        if current.deliverable and not isinstance(
+            event, DiscoveryBatchCompletedEvent | EnrichBatchCompletedEvent
+        ):
             return current
         if not isinstance(
             event,
@@ -507,6 +568,52 @@ async def _resolve_user_id_from_redis(
     return normalized_user_id
 
 
+async def _resolve_batch_details_from_db(event: KnowledgeEvent) -> Mapping[str, Any]:
+    """Reuse the status API read model; prioritize failures within a bounded preview."""
+    connection = await build_connection_factory(get_settings())()
+    try:
+        cursor = connection.cursor()
+        kb = await KnowledgeBaseRepository().get_by_code(cursor, event.kb_code)
+        if not kb:
+            return {"unavailable": True}
+        details: dict[str, Any] = {
+            "kb_name": kb.get("kb_name") or kb.get("name") or "",
+            "files": [],
+        }
+        progress = _batch_progress(event)
+        groups = [
+            (["failed"], progress.failed_count),
+            (["skipped", "unsupported"], progress.skipped_count + getattr(progress, "unsupported_count", 0)),
+            (["succeeded"], progress.succeeded_count),
+        ]
+        repository = ProcessingTaskQueryRepository()
+        for statuses, count in groups:
+            remaining = _BATCH_FILE_LIMIT - len(details["files"])
+            if not count or remaining <= 0:
+                continue
+            _, rows = await repository.query(
+                cursor,
+                knowledge_base_id=int(kb["kid"]),
+                task_id=None,
+                fs_entry_id=None,
+                batch_id=event.payload.batch_id,
+                task_type=event.payload.task_type,
+                statuses=statuses,
+                latest_only=False,
+                limit=remaining,
+                offset=0,
+            )
+            details["files"].extend(rows)
+        return details
+    finally:
+        await connection.close()
+
+
+def _notification_text(value: Any, limit: int) -> str:
+    text = " ".join(str(value or "").split())
+    return text if len(text) <= limit else text[:limit - 1] + "…"
+
+
 def _batch_progress(
     event: (
         DiscoveryBatchCompletedEvent | EnrichBatchCompletedEvent | FileBuildBatchTerminalEvent
@@ -523,47 +630,69 @@ def _build_batch_notification(
     ),
     *,
     resource_id: str,
+    chat_session_id: str = "",
+    details: Mapping[str, Any] | None = None,
 ) -> str:
+    details = details or {}
     task_name = (
         "知识实体发现"
         if isinstance(event, DiscoveryBatchCompletedEvent)
         else "知识实体整理"
     )
-    if isinstance(event, FileBuildBatchTerminalEvent):
+    is_build = isinstance(event, FileBuildBatchTerminalEvent)
+    if is_build:
         task_name = "文件构建"
     progress = _batch_progress(event)
-    if progress.failed_count:
-        conclusion = "任务已完成，部分文件处理失败"
-    elif isinstance(event, FileBuildBatchTerminalEvent) and progress.unsupported_count:
-        conclusion = "任务已完成，部分文件不支持构建"
-    elif progress.skipped_count:
-        conclusion = "任务已完成，部分文件已跳过"
+    unsupported = getattr(progress, "unsupported_count", 0)
+    if not progress.total_count:
+        conclusion = "本次未新建处理任务"
+    elif progress.failed_count:
+        conclusion = "处理结束，有文件失败"
+    elif progress.skipped_count or unsupported:
+        conclusion = "处理结束，部分文件未完成处理"
     else:
-        conclusion = "任务已全部成功完成"
+        conclusion = f"处理完成，{progress.succeeded_count} 个文件成功"
     lines = [
         f"【{task_name}】{conclusion}",
+        "",
+        f"知识库：{_notification_text(details.get('kb_name'), 100) or '名称暂不可用'}（编码：{event.kb_code}）",
         f"知识库资源 ID：{resource_id or '未提供'}",
-        f"批次：{event.payload.batch_id}",
-        f"总计：{progress.total_count} 个文件",
-        f"成功：{progress.succeeded_count} 个",
-        f"失败：{progress.failed_count} 个",
-        f"跳过：{progress.skipped_count} 个",
+        f"来源会话 ID：{chat_session_id or '未提供'}",
     ]
-    if isinstance(event, FileBuildBatchTerminalEvent):
-        lines.extend(
-            [
-                f"不支持构建：{progress.unsupported_count} 个",
-                f"目标路径：{progress.target_path}",
-                f"候选：{progress.candidate_count} 个",
-                f"符合条件：{progress.eligible_count} 个",
-                f"新建任务：{progress.accepted_count} 个",
-                f"复用：{progress.reused_count} 个",
-                f"受理时跳过：{progress.acceptance_skipped_count} 个",
-            ]
+    if is_build:
+        lines.append(f"处理范围：{_notification_text(progress.target_path, 200)}")
+    lines.extend([
+        "",
+        f"本批次新建任务：{progress.total_count} 个文件",
+        f"成功 {progress.succeeded_count} · 失败 {progress.failed_count} · 跳过 {progress.skipped_count}"
+        + (f" · 不支持 {unsupported}" if is_build else ""),
+    ])
+    if is_build:
+        lines.append(
+            f"候选 {progress.candidate_count} · 复用 {progress.reused_count} · 受理时跳过 {progress.acceptance_skipped_count}"
         )
-        if not progress.total_count:
-            lines[0] = f"【{task_name}】批次已完成，本批次未新建构建任务"
-    return "\n".join(lines)
+    elif not progress.total_count:
+        lines.append("本批次没有新建任务文件；已有任务复用及受理时跳过的明细不在批次清单中。")
+
+    files = list(details.get("files") or [])[:_BATCH_FILE_LIMIT]
+    if files:
+        lines.extend(["", f"文件清单（展示 {len(files)} / {progress.total_count}，优先展示失败文件）："])
+        labels = {"succeeded": "成功", "failed": "失败", "skipped": "跳过", "unsupported": "不支持"}
+        for row in files:
+            status = str(row.get("status") or "").lower()
+            path = _notification_text(row.get("file_path_snapshot"), 180) or "路径未记录"
+            lines.append(f"• [{labels.get(status, '未知状态')}] {path}")
+            if status in {"failed", "skipped", "unsupported"}:
+                reason = _notification_text(row.get("error_message"), 160) or "未记录原因"
+                code = _notification_text(row.get("error_code"), 60)
+                lines.append(f"  原因：{reason}" + (f"（{code}）" if code else ""))
+        remaining = max(0, progress.total_count - len(files))
+        if remaining:
+            lines.append(f"另有 {remaining} 个文件未展示。")
+    if details.get("unavailable") or (progress.total_count and not files):
+        lines.extend(["", "文件详情暂不可用，可按批次查询处理结果。"])
+    lines.extend(["", f"批次：{event.payload.batch_id}"])
+    return "\r\n".join(lines)
 
 
 def _build_object_files(
