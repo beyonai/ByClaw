@@ -85,6 +85,13 @@ public class DigitalEmployeeController {
             digitalEmployeeApplicationService.queryInstallTargetEmployees(qo));
     }
 
+    /** 查询当前用户可管理数字员工的已安装资源 ID。 */
+    @PostMapping("/queryInstalledResourceIds")
+    public ResponseUtil<List<Long>> queryInstalledResourceIds(@RequestBody EmployeeIdDTO employeeIdDTO) {
+        return ResponseUtil.successResponse(
+            digitalEmployeeApplicationService.queryInstalledResourceIds(employeeIdDTO));
+    }
+
     /**
      * 给知识前端使用的通用数字员工列表查询。 当前端未传状态字段时，默认： publishType = publish publishStatus = 2 且不限定 ownerType / owner 视角。
      */

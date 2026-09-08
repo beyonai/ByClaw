@@ -15,6 +15,7 @@ import {
   queryAgentByPage,
   queryEmployeeGroupMemberCandidates,
   queryInstallTargetEmployees,
+  queryInstalledResourceIds,
   batchInstallDigitalEmployeeRelResources,
   queryResourcesByPage,
   saveDigitalEmployee,
@@ -72,6 +73,19 @@ describe('manager/service/DigitalEmployeeMgr', () => {
     expect(mockPOST).toHaveBeenCalledWith(
       '/byaiService/digitalEmployeeController/queryInstallTargetEmployees',
       payload,
+      {
+        responseCfg: {
+          customHandle: true,
+        },
+      }
+    );
+  });
+
+  it('queryInstalledResourceIds posts the fixed digital employee id', () => {
+    queryInstalledResourceIds({ resourceId: '101' });
+    expect(mockPOST).toHaveBeenCalledWith(
+      '/byaiService/digitalEmployeeController/queryInstalledResourceIds',
+      { resourceId: '101' },
       {
         responseCfg: {
           customHandle: true,

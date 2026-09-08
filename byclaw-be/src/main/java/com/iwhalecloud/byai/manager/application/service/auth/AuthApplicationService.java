@@ -1186,6 +1186,24 @@ public class AuthApplicationService {
     }
 
     /**
+     * 判断当前用户是否可以作为资源安装目标数字员工的管理人。
+     * 安装场景不继承平台、业务或组织管理角色，只允许资源创建人、有效 ALLOW_MANAGE 授权用户和 adminvip。
+     */
+    public boolean hasResourceInstallTargetManagePermission(SsResource ssResource) {
+        if (ssResource == null) {
+            return false;
+        }
+        if (ADMIN_VIP_USER_CODE.equalsIgnoreCase(CurrentUserHolder.getCurrentUserCode())) {
+            return true;
+        }
+        Long currentUserId = CurrentUserHolder.getCurrentUserId();
+        if (currentUserId != null && currentUserId.equals(ssResource.getCreateBy())) {
+            return true;
+        }
+        return hasEffectiveAllowManagePrivilege(ssResource, currentUserId);
+    }
+
+    /**
      * 判断当前登录用户是否具备指定资源的使用权限。
      * 有效的显式 ALLOW_MANAGE 授权同时具备使用权限；平台管理员、组织管理员等角色兜底能力不在这里隐式算作使用权限。
      */

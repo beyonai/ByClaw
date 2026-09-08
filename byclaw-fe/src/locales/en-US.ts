@@ -156,6 +156,8 @@ export default {
   'resource.personalEmployee': 'Personal',
   'resource.installed': 'Installed',
   'resource.uninstallSkill': 'Uninstall',
+  'resource.uninstall': 'Uninstall',
+  'resource.uninstallConfirm': 'Uninstall "{resourceName}" from the current digital employee "{employeeName}"?',
   'resource.uninstallSkillConfirm': 'Uninstall this skill from "{employeeName}"?',
   'resource.uninstallWorkspaceSkillConfirm':
     'Delete user-developed skill "{skillName}" from "{employeeName}"? This will remove the skill directory.',

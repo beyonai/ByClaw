@@ -27,7 +27,7 @@ import ResourceFilter, {
   STATUS_IN_STOCK_VALUE,
 } from '@/components/Resources/components/ResourceFilter';
 import { SiderContentContext } from '@/layout/sider/siderContentContext';
-import { findDetailsById } from '@/pages/manager/service/DigitalEmployeeMgr';
+import { queryInstalledResourceIds } from '@/pages/manager/service/DigitalEmployeeMgr';
 import AuthListDrawer from '@/pages/manager/components/AuthListDrawer';
 import UseApplyAuditDrawer from '@/pages/manager/components/UseApplyAuditDrawer';
 import { applyResourceUse } from '@/pages/manager/service/resources';
@@ -415,6 +415,7 @@ const OntologyCenter: React.FC = () => {
   const [syncBatches, setSyncBatches] = useState<SyncBatch[]>([]);
   const [syncSummary, setSyncSummary] = useState({ created: 0, updated: 0, synced: 0, totalPages: 0 });
   const [installedKeys, setInstalledKeys] = useState<Set<string>>(new Set());
+  const [canManageInstallTarget, setCanManageInstallTarget] = useState(false);
   const [installingKeys, setInstallingKeys] = useState<Set<string>>(new Set());
   const [installResourceTarget, setInstallResourceTarget] = useState<any>(null);
   const [canRefreshEnterprise, setCanRefreshEnterprise] = useState(false);
@@ -430,18 +431,21 @@ const OntologyCenter: React.FC = () => {
   const loadInstalledKeys = useCallback(async () => {
     if (!fixedInstallTargetId) {
       setInstalledKeys(new Set());
+      setCanManageInstallTarget(true);
       return;
     }
+    setCanManageInstallTarget(false);
     try {
-      const res: any = await findDetailsById({ resourceId: fixedInstallTargetId });
-      const detail = getData(res) || {};
-      const relEntries = [
-        ...parseMaybeArray(detail.relResourceList),
-        ...parseMaybeArray(detail.relIds).map((resourceId) => ({ resourceId })),
-      ];
-      setInstalledKeys(new Set(relEntries.flatMap(getResourceKeys).filter(Boolean)));
+      const res: any = await queryInstalledResourceIds({ resourceId: fixedInstallTargetId });
+      if (res?.code !== undefined && ![0, 200].includes(Number(res.code))) {
+        throw new Error(res.msg || res.message);
+      }
+      const resourceIds = parseMaybeArray(getData(res));
+      setInstalledKeys(new Set(resourceIds.filter(Boolean).map((resourceId) => `ID:${resourceId}`)));
+      setCanManageInstallTarget(true);
     } catch {
-      setInstalledKeys((prev) => new Set(prev));
+      setInstalledKeys(new Set());
+      setCanManageInstallTarget(false);
     }
   }, [fixedInstallTargetId]);
 
@@ -718,7 +722,7 @@ const OntologyCenter: React.FC = () => {
       return;
     }
     const key = getResourceKey(resource);
-    if (fixedInstallTargetId && installedKeys.has(key)) return;
+    if (fixedInstallTargetId && (!canManageInstallTarget || installedKeys.has(key))) return;
     setInstallResourceTarget(resource);
   };
 
@@ -895,7 +899,7 @@ const OntologyCenter: React.FC = () => {
     const installed = installedKeys.has(getResourceKey(resource));
     const isView = resource.resourceBizType === 'VIEW';
     const actions: any[] = [];
-    if (!installed) {
+    if (!installed && (!fixedInstallTargetId || canManageInstallTarget)) {
       actions.push({
         key: 'install',
         label: isView ? t('resource.installView') : t('resource.installObject'),

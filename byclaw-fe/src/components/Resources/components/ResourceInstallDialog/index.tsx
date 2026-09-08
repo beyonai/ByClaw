@@ -4,9 +4,9 @@ import { UserOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import {
   batchInstallDigitalEmployeeRelResources,
-  findDetailsById,
   installDigitalEmployeeRelResources,
   queryInstallTargetEmployees,
+  queryInstalledResourceIds,
 } from '@/pages/manager/service/DigitalEmployeeMgr';
 import { getFileUrl } from '@/utils/file';
 import type { ResourceInstallTargetContext } from '../../resourceInstallContext';
@@ -146,15 +146,10 @@ const ResourceInstallDialog: React.FC<ResourceInstallDialogProps> = ({
     try {
       if (targetContext.mode === 'fixed') {
         try {
-          const employeeResponse: any = await findDetailsById({
+          const employeeResponse: any = await queryInstalledResourceIds({
             resourceId: targetContext.digitalEmployeeId,
           });
           assertResponseSuccess(employeeResponse);
-          const employee = getResponseData(employeeResponse);
-          const actualEmployeeId = employee?.resourceId ?? employee?.id;
-          if (`${actualEmployeeId || ''}` !== targetContext.digitalEmployeeId) {
-            throw new Error('digital employee id mismatch');
-          }
         } catch {
           throw new Error(intl.formatMessage({ id: 'resource.currentEmployeeUnavailable' }));
         }
