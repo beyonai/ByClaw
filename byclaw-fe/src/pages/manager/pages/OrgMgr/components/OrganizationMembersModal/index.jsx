@@ -61,11 +61,12 @@ const OrganizationMembersModal = (props) => {
       return () => window.clearTimeout(timer);
     }
 
-    if (record?.userId) {
+    if (record?.userId ?? record?.id) {
+      // 编辑时保留列表中被编辑成员的主键，不能使用当前登录账号 ID。
       dispatch({
         type: 'memberMgr/searchUser',
         payload: {
-          userId: record?.userId,
+          userId: record?.userId ?? record?.id,
           orgId: record?.orgId,
         },
         success: (res) => {
@@ -205,8 +206,12 @@ const OrganizationMembersModal = (props) => {
             delete payload.phone;
           }
           // 编辑模式下才传递 userId
-          if (type === 'edit' && record?.userId) {
-            payload.userId = record.userId;
+          if (type === 'edit') {
+            // 编辑成员必须携带被编辑成员的主键，后端才能在工号唯一性校验时排除自身。
+            const editedUserId = record?.userId ?? record?.id;
+            if (editedUserId !== undefined && editedUserId !== null) {
+              payload.userId = editedUserId;
+            }
           }
           setConfirmLoading(true);
           dispatch({
