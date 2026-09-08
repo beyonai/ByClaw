@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { App } from 'antd';
 import { useIntl, useSelector } from '@umijs/max';
+import { get, concat } from 'lodash';
 import useGlobal from '@/hooks/useGlobal';
 import useAppStore from '@/models/common/useAppStore';
 import { loginOperationAccount } from '@/service/devloop';
@@ -54,8 +55,9 @@ export function useOperationAccountLogin(onLoggedIn?: () => void | Promise<void>
   const resolveSandbox = useCallback(async (): Promise<ISandboxesInfo> => {
     const currentSandboxes = (await getSandboxInfo({})) || EmptyArr;
     const runningSandbox =
-      currentSandboxes?.find((sandbox) => sandbox.status === 'RUNNING' && !!sandbox.sandboxId) ||
-      currentSandboxes?.find((sandbox) => !!sandbox.sandboxId);
+      currentSandboxes?.find(
+        (sandbox) => sandbox.status === 'RUNNING' && !!sandbox.sandboxId && get(sandbox, 'instanceEndpoints.vnc')
+      ) || currentSandboxes?.find((sandbox) => !!sandbox.sandboxId && get(sandbox, 'instanceEndpoints.vnc'));
     if (runningSandbox) {
       useAppStore.setState({ sandboxesInfo: currentSandboxes });
       return runningSandbox;
@@ -94,7 +96,7 @@ export function useOperationAccountLogin(onLoggedIn?: () => void | Promise<void>
           overlay: true,
           width: '50vw',
         });
-        EventEmitter.emit('beyond-main-driver-message', { url: getVNCUrl(toStoreSandboxInfo(sandboxInfo)) });
+        EventEmitter.emit('beyond-main-driver-message', { url: getVNCUrl(concat([], sandboxInfo)) });
         try {
           // 首次登录时浏览器可能还在启动，导航失败后自动重试一次
           let navigateSuccess = false;
