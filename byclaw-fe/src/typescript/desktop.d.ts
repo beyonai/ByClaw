@@ -25,7 +25,8 @@ type IDesktopCapability =
   | 'local-files.v2'
   | 'files.attachments'
   | 'projects.local-directories'
-  | 'sessions.local';
+  | 'sessions.local'
+  | 'sessions.local-history';
 
 interface IDesktopDirectorySelection {
   canceled: boolean;
@@ -47,6 +48,37 @@ interface IDesktopLocalSessionPage {
   pageNum: number;
   pageSize: number;
   totalPages: number;
+}
+
+type IDesktopLocalHistoryBlock =
+  | { type: 'reasoning'; text: string; seq: number; truncated?: boolean }
+  | {
+      type: 'tool';
+      callId: string;
+      name: string;
+      input?: unknown;
+      output?: string;
+      status: 'done' | 'error';
+      seq: number;
+      truncated?: boolean;
+    }
+  | { type: 'text'; text: string; seq: number; truncated?: boolean };
+
+interface IDesktopLocalHistoryPage {
+  list: Array<{
+    id: string;
+    role: 'user' | 'assistant';
+    createdAt: string;
+    queryId?: string;
+    text?: string;
+    blocks?: IDesktopLocalHistoryBlock[];
+  }>;
+  total: number;
+  pageNum: number;
+  pageSize: number;
+  totalPages: number;
+  hasMore: boolean;
+  warnings?: Array<{ code: string; segment?: string }>;
 }
 
 /**
@@ -100,6 +132,12 @@ interface IDesktopBridge {
       pageNum?: number;
       pageSize?: number;
     }) => Promise<IDesktopLocalSessionPage>;
+    /** 读取 agent provider 转换后的 ByClaw 本地历史页。 */
+    readLocalHistory?: (params: {
+      sessionId: string;
+      pageNum?: number;
+      pageSize?: number;
+    }) => Promise<IDesktopLocalHistoryPage>;
   };
   files?: {
     registerAttachments?: (files: File[]) => Promise<Array<{

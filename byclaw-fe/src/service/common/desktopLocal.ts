@@ -38,6 +38,21 @@ export function hasDesktopLocalFiles(): boolean {
   return Boolean(window.byclawDesktop?.capabilities?.includes('local-files.v2'));
 }
 
+/** 新旧 Desktop 与远端页面独立发布，历史能力必须同时检查 token 和 member。 */
+export function hasDesktopLocalHistory(): boolean {
+  return Boolean(
+    window.byclawDesktop?.capabilities?.includes('sessions.local-history') &&
+      window.byclawDesktop?.sessions?.readLocalHistory
+  );
+}
+
+export function readDesktopLocalHistory(params: { sessionId: string; pageNum: number; pageSize: number }) {
+  if (!hasDesktopLocalHistory()) {
+    return Promise.reject(new Error('当前 Desktop 版本不支持本地会话历史，请升级后重试'));
+  }
+  return window.byclawDesktop!.sessions!.readLocalHistory!(params);
+}
+
 export async function getDesktopLocalRequest(url: string, method: Method, data: any) {
   if (!hasDesktopLocalFiles() || !LOCAL_ROUTES.has(routeKey(url, method))) return undefined;
   // Shared drives, knowledge bases and other virtual roots still belong to the Web
