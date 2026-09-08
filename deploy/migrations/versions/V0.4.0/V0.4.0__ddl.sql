@@ -41,6 +41,7 @@ $$ LANGUAGE plpgsql;
 SELECT byai.add_column_if_missing('byai', 'po_user_mail_account', 'provider_code', 'VARCHAR(64)');
 SELECT byai.add_column_if_missing('byai', 'po_user_mail_account', 'auth_type', 'VARCHAR(32)');
 SELECT byai.add_column_if_missing('byai', 'po_user_mail_account', 'credential_ref', 'VARCHAR(200)');
+SELECT byai.add_column_if_missing('byai', 'po_user_mail_account', 'connector_id', 'BIGINT');
 
 -- 允许 OAuth2 等无需 IMAP/SMTP 参数的提供商账号。
 ALTER TABLE byai.po_user_mail_account
@@ -66,6 +67,9 @@ CREATE INDEX IF NOT EXISTS idx_po_user_mail_account_user_provider
 CREATE INDEX IF NOT EXISTS idx_po_user_mail_account_credential_ref
     ON byai.po_user_mail_account (credential_ref)
     WHERE credential_ref IS NOT NULL AND delete_flag = '0';
+
+CREATE INDEX IF NOT EXISTS idx_po_user_mail_account_connector
+    ON byai.po_user_mail_account (user_id, connector_id, delete_flag);
 
 COMMENT ON COLUMN byai.po_user_mail_account.provider_code IS '邮箱提供商路由编码，如 custom-imap、gmail、microsoft';
 COMMENT ON COLUMN byai.po_user_mail_account.auth_type IS '邮箱认证方式，如 APP_PASSWORD、OAUTH2';

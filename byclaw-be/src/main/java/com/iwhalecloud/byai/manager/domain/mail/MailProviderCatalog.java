@@ -26,22 +26,22 @@ public final class MailProviderCatalog {
     private static final List<MailProviderVO> PROVIDERS = List.of(
         nativeProvider("gmail", "Gmail", "Gmail API", "OAUTH2", null, null, "gmail-mail", false,
             List.of("AUTHORIZE_OAUTH2")),
-        nativeProvider("fastmail", "Fastmail", "JMAP", "API_TOKEN", null, null, null, false,
+        nativeProvider("fastmail", "Fastmail", "JMAP", "API_TOKEN", null, null, "fastmail-mail", false,
             List.of("CREATE_API_TOKEN")),
         provider("qq", "QQ Mail", "IMAP_SMTP", "APP_PASSWORD",
-            server("imap.qq.com", 993), server("smtp.qq.com", 465), null, false,
+            server("imap.qq.com", 993), server("smtp.qq.com", 465), "qq-mail", false,
             List.of("ENABLE_IMAP_SMTP", "USE_AUTHORIZATION_CODE")),
         provider("netease-163", "NetEase 163 Mail", "IMAP_SMTP", "APP_PASSWORD",
-            server("imap.163.com", 993), server("smtp.163.com", 465), null, false,
+            server("imap.163.com", 993), server("smtp.163.com", 465), "netease-163-mail", false,
             List.of("ENABLE_IMAP_SMTP", "USE_AUTHORIZATION_CODE")),
         provider("aliyun-mail", "Aliyun Mail", "IMAP_SMTP", "APP_PASSWORD",
-            server("imap.qiye.aliyun.com", 993), server("smtp.qiye.aliyun.com", 465), null, false,
+            server("imap.qiye.aliyun.com", 993), server("smtp.qiye.aliyun.com", 465), "aliyun-mail", false,
             List.of("ADMIN_ENABLE_THIRD_PARTY_CLIENT", "USE_SECURITY_PASSWORD")),
         nativeProvider("microsoft-365", "Microsoft 365", "GRAPH", "OAUTH2", null, null,
             "microsoft-mail", false, List.of("AUTHORIZE_OAUTH2")),
         conditionalNativeProvider("iwhalecloud", "iWhaleCloud", "EXCHANGE_EWS_OWA", "BROWSER_SSO",
             List.of("SIGN_IN_WITH_BROWSER_OR_CONFIGURE_EWS")),
-        provider(CUSTOM_IMAP, "Custom IMAP", "IMAP_SMTP", "APP_PASSWORD", null, null, null, true,
+        provider(CUSTOM_IMAP, "Custom IMAP", "IMAP_SMTP", "APP_PASSWORD", null, null, "custom-imap-mail", true,
             List.of("PROVIDE_IMAP_SMTP_SETTINGS", "USE_APP_PASSWORD"))
     );
 

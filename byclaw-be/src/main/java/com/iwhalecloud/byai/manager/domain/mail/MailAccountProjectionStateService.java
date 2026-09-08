@@ -70,7 +70,27 @@ public class MailAccountProjectionStateService implements MailConnectorLookup {
         ConnectorInfo connector = connectorById(connectorId);
         if (connector == null) return Set.of();
         MailProviderVO provider = MailProviderCatalog.findByConnectorCode(connector.getConnectorCode()).orElse(null);
-        if (provider == null || !"OAUTH2".equals(provider.getAuthType())) return Set.of();
+        if (provider == null) return Set.of();
+        if (!"OAUTH2".equals(provider.getAuthType())) {
+            ConnectorAuth auth = connectionStateService.findEnabledActiveAuthorization(userId.toString(), connectorId);
+            if (auth != null) return Set.of();
+            Set<Long> affected = new LinkedHashSet<>();
+            for (UserMailAccount account : mailAccountMapper.selectList(new LambdaQueryWrapper<UserMailAccount>()
+                    .eq(UserMailAccount::getUserId, userId)
+                    .eq(UserMailAccount::getConnectorId, connectorId)
+                    .eq(UserMailAccount::getDeleteFlag, "0"))) {
+                if (account.getAccountId() == null) continue;
+                mailAccountMapper.update(null, new LambdaUpdateWrapper<UserMailAccount>()
+                    .set(UserMailAccount::getDeleteFlag, "1")
+                    .set(UserMailAccount::getStatus, "DELETED")
+                    .set(UserMailAccount::getUpdateTime, new Date())
+                    .eq(UserMailAccount::getUserId, userId)
+                    .eq(UserMailAccount::getAccountId, account.getAccountId())
+                    .eq(UserMailAccount::getConnectorId, connectorId));
+                affected.add(account.getAccountId());
+            }
+            return affected;
+        }
         return reconcileProvider(userId, provider, connector);
     }
 

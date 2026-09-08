@@ -311,6 +311,56 @@ VALUES (nextval('byai.seq_any_table'), 'github', 'GitHub', '通过 OAuth2 连接
        '{"schemaVersion":"1.0","id":"github","version":"1.0.0","runtime":{"type":"oauth2","authorizeIn":"be-auth-job"},"authStorage":{"mode":"credential-reference","owner":"be-auth-job","runtimeMutation":"shared-volume-projection","projectionPath":"/by/.connector-auth/.github/credential.json","environment":{}},"skill":{"code":"github","source":"system-builtin","installScope":"user","grantScope":"agent"}}',
        40);
 
+-- Gmail OAuth2 连接器。Client Secret 仅从后端部署环境读取，不写入数据库。
+INSERT INTO byai.byai_connector_info (
+    connector_id, connector_code, connector_name, description, connector_type,
+    provider_code, skill_code, auth_mode, auth_config, request_config, runtime_manifest, sort, status_cd
+)
+SELECT nextval('byai.seq_any_table'), 'gmail-mail', 'Gmail', '通过 OAuth2 连接 Gmail 用户账号', 'SYSTEM',
+       'gmail-oauth2', 'mail', 'OAUTH2',
+       '{"clientIdEnv":"GMAIL_OAUTH_CLIENT_ID","clientSecretEnv":"GMAIL_OAUTH_CLIENT_SECRET","redirectUriEnv":"GMAIL_OAUTH_REDIRECT_URI","scope":"openid email profile https://www.googleapis.com/auth/gmail.modify"}',
+       '{}',
+       '{"schemaVersion":"1.0","id":"gmail-mail","version":"1.0.0","runtime":{"type":"oauth2","authorizeIn":"be-auth-job"},"authStorage":{"mode":"credential-reference","owner":"be-auth-job","runtimeMutation":"shared-volume-projection","projectionPath":"/by/.connector-auth/.gmail-mail/credential.json","environment":{}},"skill":{"code":"mail","source":"system-builtin","installScope":"user","grantScope":"agent"}}',
+       60, '00A'
+WHERE NOT EXISTS (
+    SELECT 1 FROM byai.byai_connector_info WHERE connector_code = 'gmail-mail'
+);
+
+-- Microsoft 365 OAuth2 连接器。Client Secret 仅从后端部署环境读取，不写入数据库。
+INSERT INTO byai.byai_connector_info (
+    connector_id, connector_code, connector_name, description, connector_type,
+    provider_code, skill_code, auth_mode, auth_config, request_config, runtime_manifest, sort, status_cd
+)
+SELECT nextval('byai.seq_any_table'), 'microsoft-mail', 'Microsoft 365', '通过 OAuth2 连接 Microsoft 365 用户账号', 'SYSTEM',
+       'microsoft-mail-oauth2', 'mail', 'OAUTH2',
+       '{"clientIdEnv":"MICROSOFT_MAIL_CLIENT_ID","clientSecretEnv":"MICROSOFT_MAIL_CLIENT_SECRET","redirectUriEnv":"MICROSOFT_MAIL_REDIRECT_URI","scope":"openid profile email offline_access User.Read Mail.ReadWrite Mail.Send"}',
+       '{}',
+       '{"schemaVersion":"1.0","id":"microsoft-mail","version":"1.0.0","runtime":{"type":"oauth2","authorizeIn":"be-auth-job"},"authStorage":{"mode":"credential-reference","owner":"be-auth-job","runtimeMutation":"shared-volume-projection","projectionPath":"/by/.connector-auth/.microsoft-mail/credential.json","environment":{}},"skill":{"code":"mail","source":"system-builtin","installScope":"user","grantScope":"agent"}}',
+       61, '00A'
+WHERE NOT EXISTS (
+    SELECT 1 FROM byai.byai_connector_info WHERE connector_code = 'microsoft-mail'
+);
+
+-- Mail 表单连接器：凭据由统一 MailCredentialFormProvider 校验并托管。
+UPDATE byai.byai_connector_info
+SET provider_code = 'mail-form', update_time = CURRENT_TIMESTAMP
+WHERE connector_code IN ('fastmail-mail', 'qq-mail', 'netease-163-mail', 'aliyun-mail', 'custom-imap-mail');
+
+INSERT INTO byai.byai_connector_info (
+    connector_id, connector_code, connector_name, description, connector_type,
+    provider_code, skill_code, auth_mode, auth_config, request_config, runtime_manifest, sort, status_cd
+)
+SELECT nextval('byai.seq_any_table'), v.code, v.name, v.description, 'SYSTEM',
+       v.provider, 'mail', v.auth_mode, v.auth_config, '{}', v.manifest, v.sort, '00A'
+FROM (VALUES
+ ('fastmail-mail','Fastmail','通过 API Token 连接 Fastmail 用户账号','mail-form','API_TOKEN','{"credentialForm":{"fields":[{"key":"email","label":"邮箱地址","inputType":"email","required":true},{"key":"apiToken","label":"API Token","inputType":"password","required":true}]}}','{"schemaVersion":"1.0","id":"fastmail-mail","version":"1.0.0","runtime":{"type":"mail","provider":"fastmail"},"authStorage":{"mode":"credential-reference","projectionPath":"/by/.connector-auth/.mail/accounts.json"}}',62),
+ ('qq-mail','QQ 邮箱','通过 IMAP/SMTP 连接 QQ 邮箱','mail-form','APP_PASSWORD','{"credentialForm":{"fields":[{"key":"email","label":"邮箱地址","inputType":"email","required":true},{"key":"authCode","label":"授权码","inputType":"password","required":true}]}}','{"schemaVersion":"1.0","id":"qq-mail","version":"1.0.0","runtime":{"type":"mail","provider":"qq"},"authStorage":{"mode":"credential-reference","projectionPath":"/by/.connector-auth/.mail/accounts.json"}}',63),
+ ('netease-163-mail','网易 163 邮箱','通过 IMAP/SMTP 连接网易 163 邮箱','mail-form','APP_PASSWORD','{"credentialForm":{"fields":[{"key":"email","label":"邮箱地址","inputType":"email","required":true},{"key":"authCode","label":"授权码","inputType":"password","required":true}]}}','{"schemaVersion":"1.0","id":"netease-163-mail","version":"1.0.0","runtime":{"type":"mail","provider":"netease-163"},"authStorage":{"mode":"credential-reference","projectionPath":"/by/.connector-auth/.mail/accounts.json"}}',64),
+ ('aliyun-mail','阿里邮箱','通过 IMAP/SMTP 连接阿里邮箱','mail-form','APP_PASSWORD','{"credentialForm":{"fields":[{"key":"email","label":"邮箱地址","inputType":"email","required":true},{"key":"authCode","label":"安全密码","inputType":"password","required":true}]}}','{"schemaVersion":"1.0","id":"aliyun-mail","version":"1.0.0","runtime":{"type":"mail","provider":"aliyun-mail"},"authStorage":{"mode":"credential-reference","projectionPath":"/by/.connector-auth/.mail/accounts.json"}}',65),
+ ('custom-imap-mail','自定义 IMAP','通过自定义 IMAP/SMTP 服务器连接邮箱','mail-form','APP_PASSWORD','{"credentialForm":{"fields":[{"key":"email","label":"邮箱地址","inputType":"email","required":true},{"key":"authCode","label":"应用专用密码","inputType":"password","required":true},{"key":"imapHost","label":"IMAP 地址","inputType":"text","required":true},{"key":"imapPort","label":"IMAP 端口","inputType":"number","required":true},{"key":"imapEncryption","label":"IMAP 加密","inputType":"select","required":true,"options":["ssl","starttls","tls"]},{"key":"smtpHost","label":"SMTP 地址","inputType":"text","required":true},{"key":"smtpPort","label":"SMTP 端口","inputType":"number","required":true},{"key":"smtpEncryption","label":"SMTP 加密","inputType":"select","required":true,"options":["ssl","starttls","tls"]}]}}','{"schemaVersion":"1.0","id":"custom-imap-mail","version":"1.0.0","runtime":{"type":"mail","provider":"custom-imap"},"authStorage":{"mode":"credential-reference","projectionPath":"/by/.connector-auth/.mail/accounts.json"}}',66)
+) AS v(code,name,description,provider,auth_mode,auth_config,manifest,sort)
+WHERE NOT EXISTS (SELECT 1 FROM byai.byai_connector_info i WHERE i.connector_code = v.code);
+
 -- IMA OpenAPI 连接器。凭据仅由后续用户私有参数流程写入，迁移仅声明前端表单与受管环境白名单。
 INSERT INTO byai.byai_connector_info (
     connector_id, connector_code, connector_name, description, connector_type,

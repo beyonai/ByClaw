@@ -242,6 +242,28 @@ public class UserMailAccountApplicationService {
         return toVo(entity);
     }
 
+    /** Binds a connector-created account to its connector for precise lifecycle cleanup. */
+    @Transactional(rollbackFor = Exception.class)
+    public void bindConnector(Long accountId, Long connectorId, Long userId) {
+        if (accountId == null || connectorId == null || userId == null) {
+            throw new IllegalArgumentException("邮箱连接器绑定参数不能为空");
+        }
+        UserMailAccount account = userMailAccountMapper.selectOne(baseQuery(userId)
+            .eq(UserMailAccount::getAccountId, accountId));
+        if (account == null) {
+            throw new IllegalArgumentException("邮箱账号不存在或无权限访问");
+        }
+        UserMailAccount update = new UserMailAccount();
+        update.setAccountId(accountId);
+        update.setConnectorId(connectorId);
+        update.setUpdateBy(userId);
+        update.setUpdateTime(new Date());
+        if (userMailAccountMapper.updateById(update) != 1) {
+            throw new IllegalStateException("邮箱连接器绑定失败");
+        }
+        mailAccountProjectionService.sync(userId, Set.of(accountId));
+    }
+
     /**
      * 软删除邮箱账号；如果删除的是默认账号，自动把剩余最新账号设为默认。
      */
