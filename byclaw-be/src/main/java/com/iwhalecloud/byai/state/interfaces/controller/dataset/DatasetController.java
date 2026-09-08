@@ -24,6 +24,7 @@ import com.iwhalecloud.byai.manager.dto.resource.DatasetIdDto;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeReadFileRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeBuildResultRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileMetadataRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileMetadataUpdateRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeEntityDiscoveryRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeEntityEnrichRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeGlobRequest;
@@ -462,6 +463,17 @@ public class DatasetController {
         @Valid @RequestBody KnowledgeFileMetadataRequest request) {
         return ResponseUtil.successResponse(I18nUtil.get("dataset.file.metadata.query.success"),
             datasetApplicationService.getKnowledgeFileMetadata(request));
+    }
+
+    /**
+     * 批量新增、修改或删除指定知识文件或目录的元数据字段。
+     */
+    @PostMapping(value = "/knowledgeItems/metadata/update")
+    public ResponseUtil<Map<String, Object>> updateKnowledgeFileMetadata(HttpServletRequest httpServletRequest,
+                                                                         @Valid @RequestBody KnowledgeFileMetadataUpdateRequest request) {
+        Map<String, String> headers = this.parseHeadersFromRequest(httpServletRequest);
+        return ResponseUtil.successResponse(I18nUtil.get("dataset.file.metadata.update.success"),
+            datasetApplicationService.updateKnowledgeFileMetadata(request, headers));
     }
 
     /**

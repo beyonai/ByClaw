@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.common.feign.request.pythonbuild;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import lombok.Getter;
@@ -29,6 +30,11 @@ public class KbEntityDiscovery {
     private Integer maxEntities;
 
     private Boolean force;
+
+    /**
+     * 追加到本次 Discovery 实际创建或锚定到的 KnowledgeEntity metadata。
+     */
+    private List<String> tags;
 
     private Map<String, Object> extraParams = new LinkedHashMap<>();
 }

@@ -8,6 +8,7 @@ import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileImport;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbBuildResult;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileRead;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileMetadataGet;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileMetadataUpdate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileUpdate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbEntityDiscovery;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbEntityEnrich;
@@ -44,6 +45,7 @@ import com.iwhalecloud.byai.manager.dto.resource.KnowledgeMetadataSearchRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeBuildResultRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeReadFileRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileMetadataRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileMetadataUpdateRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeEntityDiscoveryRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeEntityEnrichRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeGlobRequest;
@@ -511,6 +513,55 @@ class DatasetApplicationServiceTest {
     }
 
     @Test
+    void updateKnowledgeFileMetadata_mapsResourceIdToKnCodeAndForwardsOperations() {
+        SsResource resource = defaultPersonalDataset();
+        when(ssResourceService.findById(100L)).thenReturn(resource);
+        when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
+
+        PythonBuildResponse<Map<String, Object>> response = new PythonBuildResponse<>();
+        response.setResultCode(PythonBuildResponse.RESPONSE_SUCCESS);
+        response.setResultObject(Collections.emptyMap());
+
+        Map<String, String> headers = new HashMap<>();
+        headers.put(FeignPythonBuildService.RESOURCE_ID_HEADER, String.valueOf(100L));
+        when(feignPythonBuildService.updateKnowledgeFileMetadata(any(), eq(headers))).thenReturn(response);
+
+        KnowledgeFileMetadataUpdateRequest.MetadataOperation setStatus =
+            new KnowledgeFileMetadataUpdateRequest.MetadataOperation();
+        setStatus.setPropertyName("status");
+        setStatus.setOperation("set");
+        setStatus.setValueType("string");
+        setStatus.setValue("active");
+
+        KnowledgeFileMetadataUpdateRequest.MetadataOperation appendTags =
+            new KnowledgeFileMetadataUpdateRequest.MetadataOperation();
+        appendTags.setPropertyName("tags");
+        appendTags.setOperation("append");
+        appendTags.setValue(List.of("contract", "renewal"));
+
+        KnowledgeFileMetadataUpdateRequest request = new KnowledgeFileMetadataUpdateRequest();
+        request.setResourceId(100L);
+        request.setFilePath("制度/人事/续签流程.md");
+        request.setOperationList(List.of(setStatus, appendTags));
+
+        Map<String, Object> result = service.updateKnowledgeFileMetadata(request, Collections.emptyMap());
+
+        ArgumentCaptor<KbFileMetadataUpdate> captor = ArgumentCaptor.forClass(KbFileMetadataUpdate.class);
+        verify(feignPythonBuildService).updateKnowledgeFileMetadata(captor.capture(), eq(headers));
+        assertThat(captor.getValue().getKnCode()).isEqualTo("personal-kb");
+        assertThat(captor.getValue().getFilePath()).isEqualTo("/制度/人事/续签流程.md");
+        assertThat(captor.getValue().getOperationList()).hasSize(2);
+        assertThat(captor.getValue().getOperationList().get(0).getPropertyName()).isEqualTo("status");
+        assertThat(captor.getValue().getOperationList().get(0).getOperation()).isEqualTo("set");
+        assertThat(captor.getValue().getOperationList().get(0).getValueType()).isEqualTo("string");
+        assertThat(captor.getValue().getOperationList().get(0).getValue()).isEqualTo("active");
+        assertThat(captor.getValue().getOperationList().get(1).getPropertyName()).isEqualTo("tags");
+        assertThat(captor.getValue().getOperationList().get(1).getOperation()).isEqualTo("append");
+        assertThat(captor.getValue().getOperationList().get(1).getValue()).isEqualTo(List.of("contract", "renewal"));
+        assertThat(result).isEmpty();
+    }
+
+    @Test
     void searchKnowledgeItems_forwardsLatestFilteringFields() {
         SsResource resource = defaultPersonalDataset();
         when(ssResourceService.findById(100L)).thenReturn(resource);
@@ -590,6 +641,7 @@ class DatasetApplicationServiceTest {
         request.setResourceId(100L);
         request.setMaxEntities(12);
         request.setForce(true);
+        request.setTags(List.of("organization", "ai"));
         request.setExtraParams(Map.of("source", "portal"));
 
         KnowledgeEntityBatchResult result = service.entityDiscovery(request, Collections.emptyMap());
@@ -600,6 +652,7 @@ class DatasetApplicationServiceTest {
         assertThat(captor.getValue().getFilePath()).isNull();
         assertThat(captor.getValue().getMaxEntities()).isEqualTo(12);
         assertThat(captor.getValue().getForce()).isTrue();
+        assertThat(captor.getValue().getTags()).containsExactly("organization", "ai");
         assertThat(captor.getValue().getExtraParams()).containsEntry("source", "portal");
         assertThat(result.getResourceId()).isEqualTo(100L);
         assertThat(result.getBatchId()).isEqualTo("ed-20260817-0001");

@@ -33,6 +33,7 @@ import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbEntityDiscovery;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbEntityEnrich;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileDownload;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileMetadataGet;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileMetadataUpdate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileRead;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileToMarkdownIndex;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileUpdate;
@@ -76,6 +77,7 @@ import com.iwhalecloud.byai.manager.dto.resource.DatasetDto;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeReadFileRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeBuildResultRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileMetadataRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileMetadataUpdateRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeEntityDiscoveryRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeEntityEnrichRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeGlobRequest;
@@ -989,6 +991,7 @@ public class DatasetApplicationService {
         qaRequest.setFilePath(normalizeOptionalKnowledgeFilePath(request.getFilePath()));
         qaRequest.setMaxEntities(request.getMaxEntities() == null ? 12 : request.getMaxEntities());
         qaRequest.setForce(Boolean.TRUE.equals(request.getForce()));
+        qaRequest.setTags(request.getTags());
         qaRequest.setExtraParams(
             request.getExtraParams() == null ? Collections.emptyMap() : request.getExtraParams());
 
@@ -1611,6 +1614,40 @@ public class DatasetApplicationService {
             request.getResourceId());
         assertPythonBuildSuccess(response, "查询知识库文件元数据");
         return response.getResultObject() == null ? new KbFileMetadataResult() : response.getResultObject();
+    }
+
+    /**
+     * 批量新增、修改或删除知识文件/目录元数据。门户使用 resourceId 校验管理权限，转发 QA 时转换为 knCode。
+     */
+    public Map<String, Object> updateKnowledgeFileMetadata(KnowledgeFileMetadataUpdateRequest request,
+                                                           Map<String, String> headers) {
+        SsResource ssResource = loadDatasetResource(request.getResourceId());
+        validateDatasetManagePermission(ssResource);
+
+        KbFileMetadataUpdate qaRequest = new KbFileMetadataUpdate();
+        qaRequest.setKnCode(ssResource.getResourceCode());
+        qaRequest.setFilePath(normalizeKnowledgeFilePath(request.getFilePath()));
+        List<KbFileMetadataUpdate.MetadataOperation> operations = new ArrayList<>();
+        if (request.getOperationList() != null) {
+            for (KnowledgeFileMetadataUpdateRequest.MetadataOperation item : request.getOperationList()) {
+                if (item == null) {
+                    continue;
+                }
+                KbFileMetadataUpdate.MetadataOperation operation = new KbFileMetadataUpdate.MetadataOperation();
+                operation.setPropertyName(item.getPropertyName());
+                operation.setOperation(item.getOperation());
+                operation.setValueType(item.getValueType());
+                operation.setValue(item.getValue());
+                operations.add(operation);
+            }
+        }
+        qaRequest.setOperationList(operations);
+
+        Map<String, String> forwardedHeaders = forwardKnowledgeHeaders(headers, request.getResourceId());
+        PythonBuildResponse<Map<String, Object>> response = feignPythonBuildService
+            .updateKnowledgeFileMetadata(qaRequest, forwardedHeaders);
+        assertPythonBuildSuccess(response, "更新知识库文件元数据");
+        return response.getResultObject() == null ? Collections.emptyMap() : response.getResultObject();
     }
 
     /**
