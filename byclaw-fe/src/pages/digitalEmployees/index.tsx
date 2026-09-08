@@ -5,7 +5,11 @@ import { Badge, Button, Dropdown, Input, Menu, Modal, Popconfirm, Space, Spin, T
 import { trim, debounce } from 'lodash';
 import useGlobal from '@/hooks/useGlobal';
 import AllDigitalEmployees from './components/AllDigitalEmployees';
-import ResourceFilter, { IOnOkParams, getDefaultParams } from '@/components/Resources/components/ResourceFilter';
+import ResourceFilter, {
+  IOnOkParams,
+  getDefaultParams,
+  digitalEmployeeStatusOptions,
+} from '@/components/Resources/components/ResourceFilter';
 import { PERMISSION_AUTHORIZED_TO_ME_VALUE, PERMISSION_CREATED_BY_ME_VALUE } from '@/components/Resources/constants';
 import { getCompositeAppInfo } from '@/service/digitalEmployees';
 import { getAgentChatAvatar } from '@/utils/agent';
@@ -27,6 +31,7 @@ const buildDigitalEmployeeFilterParam = (
   source: 'official' | 'available' = 'available'
 ) => {
   const permission = filterParam?.permission;
+  const employeeType = filterParam?.digitalEmployeeType;
   let type: string | undefined;
   if (source === 'available') {
     if (permission === PERMISSION_CREATED_BY_ME_VALUE) {
@@ -36,14 +41,25 @@ const buildDigitalEmployeeFilterParam = (
     }
   }
 
+  const employeeTypeParams =
+    source === 'available' && employeeType
+      ? {
+        ...(employeeType.includes('PERSONAL') ? { ownerType: 'personal' } : { ownerType: 'enterprise' }),
+        ...(employeeType.includes('GROUP') ? { agentType: '017' } : { excludeEmployeeGroup: true }),
+      }
+      : {};
+
   return {
     ...(filterParam?.resourceStatus === '' ? { includeAllResourceStatus: true } : {}),
+    // 官方推荐的“全部”不展示已删除数据；具体状态筛选仍由 resourceStatus 控制。
+    ...(source === 'official' ? { excludeDeleted: true } : {}),
     ...(filterParam?.resourceStatus !== undefined && filterParam?.resourceStatus !== ''
       ? { resourceStatus: filterParam.resourceStatus }
       : {}),
     // 我可用接口使用 type=owner/authorize；官方推荐 discover 接口使用通用 permission 枚举。
     ...(source === 'official' && permission ? { permission } : {}),
     ...(type ? { type } : {}),
+    ...employeeTypeParams,
   };
 };
 
@@ -147,6 +163,7 @@ const DigitalEmployeesPage: React.FC = () => {
     <Space>
       <ResourceFilter
         resourceType="DIG_EMPLOYEE"
+        statusOptionsOverride={digitalEmployeeStatusOptions.filter((item) => !['-1', '1'].includes(item.value))}
         // 按一级 tab 重建筛选组件，加载该 tab 上次保存的筛选条件。
         key={activeTab}
         onOk={(param: any) => {
@@ -155,7 +172,10 @@ const DigitalEmployeesPage: React.FC = () => {
         }}
         defaultParam={dropdownParam}
         activeTab={activeTab}
-        alwaysShowStatusFilter
+        // 我可用的仅按权限筛选，不展示状态筛选；官方推荐仍保留状态筛选。
+        hideStatusFilter={activeTab === 'available'}
+        // 类型筛选已移除，列表仍按员工组/数字员工分块展示。
+        digitalEmployeeTypeFilter={false}
       />
       <Input
         suffix={
@@ -182,9 +202,9 @@ const DigitalEmployeesPage: React.FC = () => {
           <Menu
             items={[
               { key: 'personal', label: '创建个人数字员工' },
-              { key: 'personal-group', label: '创建个人数字员工组' },
+              { key: 'personal-group', label: '创建个人员工组' },
               { key: 'enterprise', label: '创建企业数字员工' },
-              { key: 'enterprise-group', label: '创建企业数字员工组' },
+              { key: 'enterprise-group', label: '创建企业员工组' },
             ]}
             onClick={({ key }) => {
               if (key === 'enterprise') {

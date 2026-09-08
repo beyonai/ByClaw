@@ -895,6 +895,8 @@ export default {
   'digitalEmployees.tag.enterpriseEmployee': '企业数字员工',
   'digitalEmployees.tag.personalGroup': '个人数字员工组',
   'digitalEmployees.tag.enterpriseGroup': '企业数字员工组',
+  'digitalEmployees.filter.personalGroup': '个人员工组',
+  'digitalEmployees.filter.enterpriseGroup': '企业员工组',
   'employeeDetail.groupMember.title': '配置组成员',
   'employeeDetail.groupMember.hint': '选择可调度的数字员工，并配置其团队角色和顺序',
   'employeeDetail.groupMember.select': '选择数字员工',

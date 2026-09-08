@@ -267,6 +267,9 @@
             <if test="excludeEmployeeGroup == true">
                 and (b.agent_type is null or b.agent_type != '017')
             </if>
+            <if test="ownerType != null and ownerType != ''">
+                and a.owner_type = #{ownerType}
+            </if>
             <!-- 关键字搜索 -->
             <if test="keyword != null and keyword != ''">
                 and UPPER(a.resource_name) like concat('%', UPPER(#{keyword}), '%')
@@ -698,6 +701,9 @@
                     and a.resource_status = 2
                 </otherwise>
             </choose>
+            <if test="excludeDeleted == true">
+                and a.resource_status != -1
+            </if>
             <if test="ownerType != null and ownerType !=''">
                 and a.owner_type = #{ownerType}
             </if>

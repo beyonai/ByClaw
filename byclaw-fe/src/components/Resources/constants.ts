@@ -34,6 +34,15 @@ export const digitalEmployeeStatusOptions = [
   { label: 'resourceStatus.deleted', value: '-1' },
 ];
 
+// 我可用的数字员工类型筛选值。
+export const digitalEmployeeTypeOptions = [
+  { label: 'common.all', value: '' },
+  { label: 'digitalEmployees.tag.personalEmployee', value: 'PERSONAL_EMPLOYEE' },
+  { label: 'digitalEmployees.tag.enterpriseEmployee', value: 'ENTERPRISE_EMPLOYEE' },
+  { label: 'digitalEmployees.filter.personalGroup', value: 'PERSONAL_GROUP' },
+  { label: 'digitalEmployees.filter.enterpriseGroup', value: 'ENTERPRISE_GROUP' },
+];
+
 // 归属筛选选项
 export const belongOptions = [
   {

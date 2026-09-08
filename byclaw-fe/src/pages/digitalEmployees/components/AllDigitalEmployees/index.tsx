@@ -383,7 +383,7 @@ function AllDigitalEmployees(
   // 列表顺序完全采用接口返回顺序，避免前端二次排序覆盖后端排序规则。
   const visibleList = list;
 
-  // 合并查询模式仍按资源类型分块展示，避免员工组和数字员工混在同一块中。
+  // 合并查询模式按资源类型分块展示，保证“我可用的”和“官方推荐”都先显示员工组、再显示数字员工。
   const employeeGroupList = useMemo(
     () => (isAllEmployees ? visibleList.filter((item) => `${item.agentType}` === '017') : []),
     [isAllEmployees, visibleList]
@@ -525,7 +525,7 @@ function AllDigitalEmployees(
               },
             ],
           });
-          getSearch(searchName || '', dropdownParam, 1, curActiveLink);
+          getSearch(searchName || '', activeFilterParamRef.current, 1, curActiveLink);
         })
         .catch((error: any) => {
           message.error(error?.message || error || intl.formatMessage({ id: 'common.deleteFailed' }));
@@ -549,7 +549,7 @@ function AllDigitalEmployees(
             id: action === 'shelf' ? 'digitalEmployees.shelfSuccess' : 'digitalEmployees.unShelfSuccess',
           })
         );
-        getSearch(searchName || '', dropdownParam, 1, curActiveLink);
+        getSearch(searchName || '', activeFilterParamRef.current, 1, curActiveLink);
       } catch (error: any) {
         message.error(error?.message || error || intl.formatMessage({ id: 'common.operationFailed' }));
       }
@@ -605,9 +605,11 @@ function AllDigitalEmployees(
         onDeleteData: () => onDeleteEmployee(employee),
         onShelf: () => onChangeShelfStatus(employee, 'shelf'),
         onUnShelf: () => onChangeShelfStatus(employee, 'unShelf'),
-        // “我可用的”只用于使用和授权，不展示上下架操作；我创建的资源额外提供删除数据。
-        enableDigitalEmployeeLifecycle: false,
-        enableDigitalEmployeeDelete: source === 'available' && dropdownParam?.permission === 'CREATED_BY_ME',
+        // 两个 Tab 的卡片统一展示数字员工状态标签；我可用的不展示上下架操作。
+        enableDigitalEmployeeLifecycle: source === 'official',
+        // 已下架且当前用户具备删除权限时展示“删除数据”；权限由卡片资源权限接口返回。
+        enableDigitalEmployeeDelete: true,
+        showDigitalEmployeeTypeTag: false,
       }}
     />
   );

@@ -898,6 +898,8 @@ export default {
   'digitalEmployees.tag.enterpriseEmployee': 'Enterprise Employee',
   'digitalEmployees.tag.personalGroup': 'Personal Employee Group',
   'digitalEmployees.tag.enterpriseGroup': 'Enterprise Employee Group',
+  'digitalEmployees.filter.personalGroup': 'Personal Employee Group',
+  'digitalEmployees.filter.enterpriseGroup': 'Enterprise Employee Group',
   'employeeDetail.groupMember.title': 'Configure Group Members',
   'employeeDetail.groupMember.hint': 'Choose routable digital employees and set their team roles and order',
   'employeeDetail.groupMember.select': 'Select Digital Employees',

@@ -304,34 +304,78 @@
 }
 
 // 数字员工不同状态使用不同语义色，便于快速识别当前生命周期。
-.digitalEmployeeStatus-1 {
+.digitalEmployeeStatusTag {
+  padding: 1px 6px;
+  border: 0;
+  border-radius: 4px;
+  font-size: 11px;
+
+  .tagText {
+    font-size: 11px;
+    font-weight: 400;
+    line-height: 18px;
+  }
+}
+
+.digitalEmployeeStatusDeleted,
+.digitalEmployeeStatus0,
+.digitalEmployeeStatus1,
+.digitalEmployeeStatus2,
+.digitalEmployeeStatus3 {
+  padding: 1px 6px;
+  border: 0;
+  border-radius: 4px;
+
+  .tagText {
+    font-size: 11px;
+    font-weight: 400;
+    line-height: 18px;
+  }
+}
+
+.digitalEmployeeStatusDeleted {
   background: #fff1f0;
   border-color: #ffa39e;
-  .tagText { color: #cf1322; -webkit-text-fill-color: #cf1322; }
+  .tagText {
+    color: #cf1322;
+    -webkit-text-fill-color: #cf1322;
+  }
 }
 
 .digitalEmployeeStatus0 {
   background: #f5f5f5;
   border-color: #d9d9d9;
-  .tagText { color: #595959; -webkit-text-fill-color: #595959; }
+  .tagText {
+    color: #595959;
+    -webkit-text-fill-color: #595959;
+  }
 }
 
 .digitalEmployeeStatus1 {
   background: #fff7e6;
   border-color: #ffd591;
-  .tagText { color: #d46b08; -webkit-text-fill-color: #d46b08; }
+  .tagText {
+    color: #d46b08;
+    -webkit-text-fill-color: #d46b08;
+  }
 }
 
 .digitalEmployeeStatus2 {
   background: #f6ffed;
   border-color: #b7eb8f;
-  .tagText { color: #389e0d; -webkit-text-fill-color: #389e0d; }
+  .tagText {
+    color: #389e0d;
+    -webkit-text-fill-color: #389e0d;
+  }
 }
 
 .digitalEmployeeStatus3 {
   background: #fff7e6;
   border-color: #ffd591;
-  .tagText { color: #d46b08; -webkit-text-fill-color: #d46b08; }
+  .tagText {
+    color: #d46b08;
+    -webkit-text-fill-color: #d46b08;
+  }
 }
 
 .digitalEmployeeDefaultTag {
@@ -369,6 +413,55 @@
 
 .digitalEmployeePersonalTag {
   .digitalEmployeeTag;
+  padding: 1px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: #e8f3ff;
+  .tagText {
+    color: #165dff;
+    -webkit-text-fill-color: #165dff;
+    font-size: 11px;
+  }
+}
+
+// 我可用列表的四类数字员工标签使用不同语义色，便于区分个人/企业及员工/员工组。
+.digitalEmployeePersonalGroupTag {
+  .digitalEmployeeTag;
+  padding: 1px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: #f9f0ff;
+  .tagText {
+    color: #722ed1;
+    -webkit-text-fill-color: #722ed1;
+    font-size: 11px;
+  }
+}
+
+.digitalEmployeeEnterpriseTag {
+  .digitalEmployeeTag;
+  padding: 1px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: #f6ffed;
+  .tagText {
+    color: #389e0d;
+    -webkit-text-fill-color: #389e0d;
+    font-size: 11px;
+  }
+}
+
+.digitalEmployeeEnterpriseGroupTag {
+  .digitalEmployeeTag;
+  padding: 1px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: #fff7e6;
+  .tagText {
+    color: #d46b08;
+    -webkit-text-fill-color: #d46b08;
+    font-size: 11px;
+  }
 }
 
 .personalDefaultTag {

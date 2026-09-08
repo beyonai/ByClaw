@@ -115,6 +115,7 @@ type ResourceCardActionConfig = {
   onUnShelf?: () => void;
   enableDigitalEmployeeLifecycle?: boolean;
   enableDigitalEmployeeDelete?: boolean;
+  showDigitalEmployeeTypeTag?: boolean;
   onRestore?: () => void;
   onAuth?: (authType: 'useAuth' | 'mgrAuth') => void;
   onEdit?: () => void;
@@ -337,6 +338,10 @@ const RenderContent = (props: ResourceCardProps) => {
     onChat = noop,
   } = actionConfig || {};
   const enableDigitalEmployeeLifecycle = actionConfig?.enableDigitalEmployeeLifecycle !== false;
+  const enableDigitalEmployeeDelete = actionConfig?.enableDigitalEmployeeDelete === true;
+  // Standalone cards keep the descriptive employee-type tag by default; list
+  // views can explicitly opt into lifecycle status tags when needed.
+  const showDigitalEmployeeTypeTag = actionConfig?.showDigitalEmployeeTypeTag ?? true;
 
   const intl = useIntl();
   const dispatch = useDispatch();
@@ -352,6 +357,14 @@ const RenderContent = (props: ResourceCardProps) => {
   );
   const activeDigitalEmployeeId =
     agentId || agentInfo?.agentId || defaultDigEmployeeId || userInfo?.defaultDigEmployeeId;
+  const currentUserId = userInfo?.userId ?? userInfo?.id ?? userInfo?.userCode;
+  const resourceCreatorId = resource?.createBy ?? resource?.createdBy ?? resource?.creatorId;
+  const isResourceCreator =
+    currentUserId !== undefined &&
+    currentUserId !== null &&
+    resourceCreatorId !== undefined &&
+    resourceCreatorId !== null &&
+    `${currentUserId}` === `${resourceCreatorId}`;
 
   // 工作空间(用户开发)技能：复用公共 hook 处理详情 / 分享(资源化) / 删除，与左边栏一致。
   const { setDetailPanel, clearDetailPanel } = useContext(SiderContentContext);
@@ -444,7 +457,7 @@ const RenderContent = (props: ResourceCardProps) => {
 
   const getDisplayTopRightTag = () => {
     // 数字员工状态由后端 resourceStatus 返回，统一映射为卡片右上角状态标签。
-    if (isDigitalEmployeeResource) {
+    if (isDigitalEmployeeResource && !showDigitalEmployeeTypeTag) {
       const statusLabelMap: Record<string, string> = {
         '-1': 'resourceStatus.deleted',
         '0': 'resourceStatus.draft',
@@ -452,7 +465,11 @@ const RenderContent = (props: ResourceCardProps) => {
         '2': 'resourceStatus.published',
         '3': 'resourceStatus.unpublished',
       };
-      const statusMessageId = statusLabelMap[`${resource.resourceStatus ?? resource.metaStatus ?? ''}`];
+      // 员工组与数字员工接口的状态字段可能不同，统一按同一组回退字段取值。
+      const statusMessageId =
+        statusLabelMap[
+          `${resource.resourceStatus ?? resource.metaStatus ?? resource.publishStatus ?? resource.status ?? ''}`
+        ];
       if (statusMessageId) return intl.formatMessage({ id: statusMessageId });
     }
     const digitalEmployeeTypeTag = getDigitalEmployeeTypeTag();
@@ -498,9 +515,41 @@ const RenderContent = (props: ResourceCardProps) => {
     return undefined;
   };
   const displayTopRightTag = getDisplayTopRightTag();
-  const digitalEmployeeStatus = `${resource?.resourceStatus ?? resource?.metaStatus ?? ''}`;
+  const digitalEmployeeStatus = `${
+    resource?.resourceStatus ?? resource?.metaStatus ?? resource?.publishStatus ?? resource?.status ?? ''
+  }`;
   const isCancelledResource = isDigitalEmployeeResource && digitalEmployeeStatus === '-1';
-  const digitalEmployeeStatusClass = isDigitalEmployeeResource ? `digitalEmployeeStatus${digitalEmployeeStatus}` : '';
+  const statusTagTextMap: Record<string, string> = {
+    已上架: '2',
+    Published: '2',
+    已下架: '3',
+    Unpublished: '3',
+    草稿箱: '0',
+    Draft: '0',
+    待上架: '1',
+    'Pending publication': '1',
+    已删除: '-1',
+    Deleted: '-1',
+    ON_SHELF: '2',
+    OFF_SHELF: '3',
+    PUBLISHED: '2',
+    UNPUBLISHED: '3',
+    DRAFT: '0',
+    PENDING_SHELF: '1',
+  };
+  // 部分旧接口仅返回状态标签文本，按文本补齐状态样式，避免同一状态出现不同颜色。
+  const rawStatusKey = `${digitalEmployeeStatus || ''}`.trim();
+  const normalizedStatus =
+    statusTagTextMap[rawStatusKey] ||
+    statusTagTextMap[rawStatusKey.toUpperCase()] ||
+    statusTagTextMap[`${displayTopRightTag || ''}`] ||
+    '';
+  const digitalEmployeeStatusClass =
+    isDigitalEmployeeResource && !showDigitalEmployeeTypeTag
+      ? normalizedStatus === '-1'
+        ? 'digitalEmployeeStatusDeleted'
+        : `digitalEmployeeStatus${normalizedStatus}`
+      : '';
   const topRightTag = displayTopRightTag;
   const isInnerSkill = isInnerSkillResource(resource, resourceType);
   const isInstalledSkill =
@@ -572,8 +621,7 @@ const RenderContent = (props: ResourceCardProps) => {
   useEffect(() => () => handleSetDefaultDebounced.cancel(), [handleSetDefaultDebounced]);
 
   const menuItems = useMemo<MenuProps['items']>(() => {
-    const { canEdit, canManageAuth, canUseAuth, canApplyUse, canDelete, canUnShelf, canSetDefault, canRestore } =
-      resource || {};
+    const { canEdit, canManageAuth, canUseAuth, canApplyUse, canDelete, canSetDefault, canRestore } = resource || {};
     const items: NonNullable<MenuProps['items']> = [];
 
     // 后端按当前用户权限和默认员工关系返回 canSetDefault。
@@ -681,9 +729,9 @@ const RenderContent = (props: ResourceCardProps) => {
       });
     }
 
-    // 数字员工的“下架数据”权限由后端 canDelete 返回，但实际调用下架接口。
-    const canUnShelfDigitalEmployee = isDigitalEmployeeResource && (canUnShelf ?? canDelete);
-    if ((!isDigitalEmployeeResource && canDelete) || canUnShelfDigitalEmployee) {
+    // 数字员工下架使用“编辑信息”权限；我可用列表通过生命周期开关整体隐藏该操作。
+    const canUnShelfDigitalEmployee = isDigitalEmployeeResource && digitalEmployeeStatus === '2' && canEdit;
+    if (enableDigitalEmployeeLifecycle && ((!isDigitalEmployeeResource && canDelete) || canUnShelfDigitalEmployee)) {
       items.push({
         key: isDigitalEmployeeResource ? 'unShelfData' : 'delete',
         label: (
@@ -694,7 +742,7 @@ const RenderContent = (props: ResourceCardProps) => {
             onConfirm={() => (isDigitalEmployeeResource ? onUnShelf() : onDelete())}
           >
             <BuildMenuLabel
-              icon="icon-a-Deleteshanchu"
+              icon={isDigitalEmployeeResource ? 'icon-a-Downloadxiazai' : 'icon-a-Deleteshanchu'}
               text={
                 isDigitalEmployeeResource
                   ? intl.formatMessage({ id: 'resource.unShelfData' })
@@ -707,12 +755,32 @@ const RenderContent = (props: ResourceCardProps) => {
     }
 
     // 已下架数字员工始终提供“上架数据”，不再依赖恢复权限字段。
-    if (isDigitalEmployeeResource && digitalEmployeeStatus === '3') {
+    if (enableDigitalEmployeeLifecycle && isDigitalEmployeeResource && digitalEmployeeStatus === '3') {
       items.push({
         key: 'shelfData',
         label: (
           <ConfirmMenuLabel title={intl.formatMessage({ id: 'resource.shelfDataConfirm' })} onConfirm={() => onShelf()}>
             <BuildMenuLabel icon="icon-a-Returnfanhui" text={intl.formatMessage({ id: 'resource.shelfData' })} />
+          </ConfirmMenuLabel>
+        ),
+      });
+    }
+
+    // 我创建的已下架数字员工允许永久删除数据，操作与上下架生命周期菜单分开控制。
+    if (
+      isDigitalEmployeeResource &&
+      digitalEmployeeStatus === '3' &&
+      enableDigitalEmployeeDelete &&
+      isResourceCreator
+    ) {
+      items.push({
+        key: 'deleteData',
+        label: (
+          <ConfirmMenuLabel
+            title={intl.formatMessage({ id: 'resource.deleteDataConfirm' })}
+            onConfirm={() => onDeleteData()}
+          >
+            <BuildMenuLabel icon="icon-a-Deleteshanchu" text={intl.formatMessage({ id: 'resource.deleteData' })} />
           </ConfirmMenuLabel>
         ),
       });
@@ -774,6 +842,9 @@ const RenderContent = (props: ResourceCardProps) => {
     onShelf,
     onUnShelf,
     enableDigitalEmployeeLifecycle,
+    enableDigitalEmployeeDelete,
+    isResourceCreator,
+    showDigitalEmployeeTypeTag,
     onEdit,
     onRestore,
     onSetDefault,
@@ -1037,8 +1108,33 @@ const RenderContent = (props: ResourceCardProps) => {
               {effectiveTopRightTag ? (
                 <span
                   className={classnames(styles.tag, {
-                    [styles.digitalEmployeePersonalTag]: isPersonalDigitalEmployee,
-                    [styles.digitalEmployeeTag]: isDigitalEmployeeResource && !isPersonalDigitalEmployee,
+                    // 我可用列表按个人/企业及员工/员工组区分标签颜色；官方推荐仍沿用状态标签样式。
+                    [styles.digitalEmployeePersonalTag]:
+                      isDigitalEmployeeResource &&
+                      showDigitalEmployeeTypeTag &&
+                      isPersonalDigitalEmployee &&
+                      !isDigitalEmployeeGroup,
+                    [styles.digitalEmployeePersonalGroupTag]:
+                      isDigitalEmployeeResource &&
+                      showDigitalEmployeeTypeTag &&
+                      isPersonalDigitalEmployee &&
+                      isDigitalEmployeeGroup,
+                    [styles.digitalEmployeeEnterpriseTag]:
+                      isDigitalEmployeeResource &&
+                      showDigitalEmployeeTypeTag &&
+                      !isPersonalDigitalEmployee &&
+                      !isDigitalEmployeeGroup,
+                    [styles.digitalEmployeeEnterpriseGroupTag]:
+                      isDigitalEmployeeResource &&
+                      showDigitalEmployeeTypeTag &&
+                      !isPersonalDigitalEmployee &&
+                      isDigitalEmployeeGroup,
+                    [styles.digitalEmployeeTag]:
+                      isDigitalEmployeeResource &&
+                      !isPersonalDigitalEmployee &&
+                      !isDigitalEmployeeGroup &&
+                      !showDigitalEmployeeTypeTag,
+                    [styles.digitalEmployeeStatusTag]: isDigitalEmployeeResource && !showDigitalEmployeeTypeTag,
                     [styles.digitalEmployeeTopRightTag]: isDigitalEmployeeResource,
                     [styles[digitalEmployeeStatusClass]]: Boolean(digitalEmployeeStatusClass),
                     [styles.cancelledTag]: isCancelledResource,

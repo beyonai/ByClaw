@@ -30,6 +30,9 @@ public class MyAuthEmployQo extends AuthQo {
      */
     private String agentType;
 
+    /** 数字员工归属类型：personal 或 enterprise。 */
+    private String ownerType;
+
     /**
      * 是否排除数字员工组。true 时排除 agentType=017。
      */
