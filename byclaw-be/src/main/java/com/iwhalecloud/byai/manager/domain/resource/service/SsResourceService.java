@@ -512,6 +512,10 @@ public class SsResourceService {
         if (resourceIdNoEqual != null) {
             queryWrapper.notIn(SsResource::getResourceId, resourceIdNoEqual);
         }
+
+        // 排除删除状态的
+        queryWrapper.ne(SsResource::getResourceStatus, ResourceStatus.DELETE);
+
         return ssResourceMapper.selectCount(queryWrapper);
     }
 
