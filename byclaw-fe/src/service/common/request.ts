@@ -63,6 +63,8 @@ const maxQuantityMap: Record<
   }
 > = {};
 
+let globalLogoutPromise: Promise<void> | null = null;
+
 function requestStart({ url, maxQuantity }: { url: string; maxQuantity?: number }) {
   if (!maxQuantity) return;
   const item = maxQuantityMap[url];
@@ -138,6 +140,8 @@ function checkFactoryRes(
 
 // 全局退出登录
 export const globalLogout = (showLoginModal?: boolean, expectedAuthSnapshot?: AuthSnapshot) => {
+  if (globalLogoutPromise) return globalLogoutPromise;
+
   try {
     // 退出动作可能由旧请求延迟触发，只有请求所属会话仍然存在时才允许清理凭证。
     const hasExpectedAuth = expectedAuthSnapshot ? hasAuthSnapshot(expectedAuthSnapshot) : false;
@@ -150,10 +154,10 @@ export const globalLogout = (showLoginModal?: boolean, expectedAuthSnapshot?: Au
     const shouldLogout = Boolean(userState.userInfo) || hasExpectedAuth;
     if (!shouldLogout) return Promise.resolve();
 
-    if (userState.userInfo) {
-      // 在清理本地凭证前构造退出请求，确保请求仍携带当前会话凭证。
-      Promise.resolve(logout()).catch((error) => console.error(error));
-    }
+    // 在清理本地凭证前构造退出请求，确保请求仍携带当前会话凭证。
+    const serverLogoutPromise = userState.userInfo
+      ? Promise.resolve(logout()).catch((error) => console.error(error))
+      : Promise.resolve();
 
     clearToken();
 
@@ -162,7 +166,11 @@ export const globalLogout = (showLoginModal?: boolean, expectedAuthSnapshot?: Au
 
     loginRedirect(showLoginModal ? { openLoginModal: '1' } : {});
 
-    return Promise.resolve();
+    const logoutTask = serverLogoutPromise.finally(() => {
+      if (globalLogoutPromise === logoutTask) globalLogoutPromise = null;
+    });
+    globalLogoutPromise = logoutTask;
+    return logoutTask;
   } catch (error) {
     console.error(error);
     return Promise.reject(error);
