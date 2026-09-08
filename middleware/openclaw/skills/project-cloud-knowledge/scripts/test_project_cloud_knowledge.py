@@ -230,6 +230,14 @@ class BackendApiTests(unittest.TestCase):
         self.api.search({"resourceIdList": [1]})
         self.api.search_file({"resourceIdList": [1]})
         self.api.metadata_search({"resourceIdList": [1]})
+        self.api.metadata_get({"resourceId": 1, "filePath": "/a.md"})
+        self.api.metadata_update(
+            {
+                "resourceId": 1,
+                "filePath": "/a.md",
+                "operationList": [{"propertyName": "status", "operation": "unset"}],
+            }
+        )
         self.api.entity_discovery({"resourceId": 1})
         self.api.entity_enrich({"resourceId": 1})
         self.api.remove_file({"resourceId": 1})
@@ -245,6 +253,8 @@ class BackendApiTests(unittest.TestCase):
             "/byaiService/datasetController/knowledgeItems/search",
             "/byaiService/datasetController/knowledgeItems/searchFile",
             "/byaiService/datasetController/knowledgeItems/metadataSearch",
+            "/byaiService/datasetController/knowledgeItems/metadata/get",
+            "/byaiService/datasetController/knowledgeItems/metadata/update",
             "/byaiService/datasetController/knowledgeItems/entityDiscovery",
             "/byaiService/datasetController/knowledgeItems/entityEnrich",
             "/byaiService/datasetController/removeFile",
@@ -679,6 +689,180 @@ class KnowledgeManagerTests(unittest.TestCase):
             ):
                 parser.parse_args(argv)
 
+    def test_metadata_get_uses_resource_id_and_preserves_typed_values(self) -> None:
+        self.transport.responses = [
+            {
+                "metadata": {
+                    "status": {"valueType": "string", "value": "active"},
+                    "tags": {"valueType": "stringList", "value": ["contract"]},
+                }
+            }
+        ]
+
+        result = self.manager.execute(
+            self.parse(
+                "metadata-get",
+                "--resource-id",
+                "7",
+                "--file-path",
+                "/contracts/a.md",
+                "--metadata-field",
+                "status",
+                "--metadata-field",
+                "tags",
+            )
+        )
+
+        self.assertEqual(
+            self.transport.calls[0],
+            {
+                "kind": "request",
+                "method": "POST",
+                "path": "/byaiService/datasetController/knowledgeItems/metadata/get",
+                "payload": {
+                    "resourceId": 7,
+                    "filePath": "/contracts/a.md",
+                    "metadataFieldList": ["status", "tags"],
+                },
+            },
+        )
+        self.assertEqual(result["resourceId"], 7)
+        self.assertEqual(result["filePath"], "/contracts/a.md")
+        self.assertEqual(result["metadata"]["tags"]["value"], ["contract"])
+
+    def test_metadata_update_builds_atomic_operations_from_readable_flags(self) -> None:
+        result = self.manager.execute(
+            self.parse(
+                "metadata-update",
+                "--resource-id",
+                "7",
+                "--file-path",
+                "/contracts/a.md",
+                "--set-string",
+                "status",
+                "active",
+                "--set-string-list",
+                "reviewers",
+                "alice",
+                "bob",
+                "--set-number",
+                "priority",
+                "2.5",
+                "--set-boolean",
+                "approved",
+                "true",
+                "--set-datetime",
+                "reviewedAt",
+                "2026-09-08T10:00:00+08:00",
+                "--append",
+                "tags",
+                "contract",
+                "renewal",
+                "--remove",
+                "watchers",
+                "legacy",
+                "--unset",
+                "owner",
+                "--clear",
+                "aliases",
+            )
+        )
+
+        expected_operations = [
+            {
+                "propertyName": "status",
+                "operation": "set",
+                "valueType": "string",
+                "value": "active",
+            },
+            {
+                "propertyName": "reviewers",
+                "operation": "set",
+                "valueType": "stringList",
+                "value": ["alice", "bob"],
+            },
+            {
+                "propertyName": "priority",
+                "operation": "set",
+                "valueType": "number",
+                "value": 2.5,
+            },
+            {
+                "propertyName": "approved",
+                "operation": "set",
+                "valueType": "boolean",
+                "value": True,
+            },
+            {
+                "propertyName": "reviewedAt",
+                "operation": "set",
+                "valueType": "datetime",
+                "value": "2026-09-08T10:00:00+08:00",
+            },
+            {
+                "propertyName": "tags",
+                "operation": "append",
+                "value": ["contract", "renewal"],
+            },
+            {
+                "propertyName": "watchers",
+                "operation": "remove",
+                "value": ["legacy"],
+            },
+            {"propertyName": "owner", "operation": "unset"},
+            {"propertyName": "aliases", "operation": "clear"},
+        ]
+        self.assertEqual(
+            self.transport.calls[0],
+            {
+                "kind": "request",
+                "method": "POST",
+                "path": "/byaiService/datasetController/knowledgeItems/metadata/update",
+                "payload": {
+                    "resourceId": 7,
+                    "filePath": "/contracts/a.md",
+                    "operationList": expected_operations,
+                },
+            },
+        )
+        self.assertEqual(result["operationCount"], len(expected_operations))
+
+    def test_metadata_update_rejects_missing_or_duplicate_property_operations(self) -> None:
+        invalid_commands = (
+            (
+                "metadata-update",
+                "--resource-id",
+                "7",
+                "--file-path",
+                "/a.md",
+            ),
+            (
+                "metadata-update",
+                "--resource-id",
+                "7",
+                "--file-path",
+                "/a.md",
+                "--set-string",
+                "status",
+                "active",
+                "--unset",
+                "status",
+            ),
+            (
+                "metadata-update",
+                "--resource-id",
+                "7",
+                "--file-path",
+                "/a.md",
+                "--append",
+                "tags",
+            ),
+        )
+        for argv in invalid_commands:
+            with self.subTest(argv=argv), self.assertRaises(ValueError):
+                self.manager.execute(self.parse(*argv))
+        self.assertEqual(self.transport.calls, [])
+
     def test_agent_dsl_validates_structure_and_complexity(self) -> None:
         valid = manager_module._agent_dsl(
             '{"and":['
@@ -786,6 +970,25 @@ class KnowledgeManagerTests(unittest.TestCase):
                 },
             },
         )
+        self.assertEqual(self.transport.calls, [])
+
+    def test_entity_discovery_accepts_repeated_tags(self) -> None:
+        result = self.manager.execute(
+            self.parse(
+                "entity-discovery",
+                "--resource-id",
+                "7",
+                "--file-path",
+                "/docs/a.md",
+                "--tag",
+                "organization",
+                "--tag",
+                "ai",
+                "--dry-run",
+            )
+        )
+
+        self.assertEqual(result["payload"]["tags"], ["organization", "ai"])
         self.assertEqual(self.transport.calls, [])
 
     def test_entity_enrich_supports_whole_kb_dry_run(self) -> None:
@@ -896,6 +1099,8 @@ class KnowledgeManagerTests(unittest.TestCase):
         self.assertIn("upload", top_level_help)
         self.assertIn("entity-discovery", top_level_help)
         self.assertIn("entity-enrich", top_level_help)
+        self.assertIn("metadata-get", top_level_help)
+        self.assertIn("metadata-update", top_level_help)
         self.assertIn("查看子命令参数", top_level_help)
 
         output = io.StringIO()
@@ -927,12 +1132,22 @@ class KnowledgeManagerTests(unittest.TestCase):
         self.assertIn("--page-num N", metadata_help)
         self.assertIn("--page-size N", metadata_help)
 
+        metadata_update_output = io.StringIO()
+        with redirect_stdout(metadata_update_output), self.assertRaises(SystemExit):
+            parser.parse_args(["metadata-update", "--help"])
+        metadata_update_help = metadata_update_output.getvalue()
+        self.assertNotIn("operation-list", metadata_update_help)
+        self.assertIn("--set-string PROPERTY VALUE", metadata_update_help)
+        self.assertIn("--append PROPERTY [VALUE ...]", metadata_update_help)
+        self.assertIn("--unset PROPERTY", metadata_update_help)
+
         discovery_output = io.StringIO()
         with redirect_stdout(discovery_output), self.assertRaises(SystemExit):
             parser.parse_args(["entity-discovery", "--help"])
         discovery_help = discovery_output.getvalue()
         self.assertIn("--file-path PATH", discovery_help)
         self.assertIn("--directory-path PATH", discovery_help)
+        self.assertIn("--tag TAG", discovery_help)
         self.assertIn("递归处理该目录及其子目录", discovery_help)
 
     def test_main_without_arguments_prints_help(self) -> None:

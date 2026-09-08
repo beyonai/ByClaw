@@ -1,6 +1,6 @@
 ---
 name: project-cloud-knowledge-search
-description: "检索一个或多个 ByClaw 知识库或项目云盘。用于语义切片检索、文件级检索、选择全文/向量/混合召回模式，以及使用 Agent DSL 按系统文件属性或自定义元数据过滤结果。"
+description: "查找一个或多个 ByClaw 知识库或项目云盘中的内容和文件。用于按关键词、语义、标签或状态等文件属性筛选结果，以及选择全文、向量或混合查找方式。"
 ---
 
 # 检索知识库
@@ -11,9 +11,9 @@ description: "检索一个或多个 ByClaw 知识库或项目云盘。用于语�
 
 - 需要命中文本、评分和行范围时使用 `search`。
 - 只需要定位相关文件时使用 `search-file`。
-- 不需要自然语言召回、只按元数据条件分页筛选文件时使用 `metadata-search`。
+- 不需要自然语言查找、只想按标签、状态或其他文件属性分页筛选时使用 `metadata-search`。
 - 需要结构化过滤时传 `--where-json`。编写过滤条件前必须读取 [`../references/agent-dsl.md`](../references/agent-dsl.md)，不要凭印象编造操作符。
-- 需要返回元数据值时，对每个字段重复传入 `--metadata-field`。
+- 需要同时返回标签或其他文件属性时，对每个属性重复传入 `--metadata-field`。
 - 默认使用 `mixedRecall`；只有用户或场景明确要求时才改为 `fullTextRecall` 或 `embedding`。
 
 ## 执行切片检索
@@ -55,7 +55,7 @@ python3 <project-cloud-knowledge目录>/scripts/project_cloud_knowledge.py searc
 
 结果字段包括 `resourceId`、`filePath`、`score` 和可选 `metadata`。需要查看正文时读取只读子 Skill，再使用 `read-file` 或 `download`。
 
-## 执行纯元数据检索
+## 按标签或其他属性查找
 
 `metadata-search` 不接受自然语言查询，必须提供 `--where-json`：
 
