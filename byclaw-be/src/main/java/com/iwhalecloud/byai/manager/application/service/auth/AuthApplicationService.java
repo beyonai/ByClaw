@@ -3393,47 +3393,64 @@ public class AuthApplicationService {
             defaultDigitalEmployeeId));
 
         Integer resourceStatus = ssResource.getResourceStatus();
+        String ownerType = ssResource.getOwnerType();
         //是资源创建者
         boolean isOwner = this.isOwner(ssResource.getCreateBy());
         // 是否超管adminVip
         boolean isAdminVip = CurrentUserHolder.isAdminVip();
         if (isDigitalEmployee) {
-            vo.setCanOnShelf(this.canOnShelfStatus(resourceStatus) && (isOwner || canManage || isAdminVip));
-            vo.setCanOffShelf(this.canOffShelfStatus(resourceStatus) && (isOwner || canManage || isAdminVip));
+            vo.setCanOnShelf(this.canOnShelfStatus(resourceStatus, ownerType) && (isOwner || canManage || isAdminVip));
+            vo.setCanOffShelf(this.canOffShelfStatus(resourceStatus, ownerType) && (isOwner || canManage || isAdminVip));
             vo.setCanEdit(isOwner || canManage || isAdminVip);
-            vo.setCanDelete(this.canDeleteStatus(resourceStatus) && (isOwner || isAdminVip));
+            vo.setCanDelete(this.canDeleteStatus(resourceStatus, ownerType) && (isOwner || isAdminVip));
         }
 
         return vo;
     }
 
     /**
-     * 草稿和下架状态能上架。
+     * 个人创建的，不允许上架，企业创建草稿和下架状态能上架。
      *
      * @param resourceStatus 资源状态
+     * @param ownerType      资源归类型
      * @return boolean
      */
-    private boolean canOnShelfStatus(Integer resourceStatus) {
+    private boolean canOnShelfStatus(Integer resourceStatus, String ownerType) {
+
+        if (OwnerType.PERSONAL.equalsIgnoreCase(ownerType)) {
+            return false;
+        }
+        
         return ResourceStatus.DRAFT.getNum().equals(resourceStatus) || ResourceStatus.OFF_SHELF.getNum().equals(resourceStatus);
     }
 
     /**
-     * 上架状态能下架。
+     * 个人创建的，不允许下架，企业创建的，上架状态能下架。
      *
      * @param resourceStatus 资源状态
+     * @param ownerType      资源归类型
      * @return boolean
      */
-    private boolean canOffShelfStatus(Integer resourceStatus) {
+    private boolean canOffShelfStatus(Integer resourceStatus, String ownerType) {
+
+        if (OwnerType.PERSONAL.equalsIgnoreCase(ownerType)) {
+            return false;
+        }
+
         return ResourceStatus.ON_SHELF.getNum().equals(resourceStatus);
     }
 
     /**
-     * 草稿和下架状态能删除
+     * 个人创建的，允许直接删除，企业创建的草稿和下架状态能删除
      *
      * @param resourceStatus 资源状态
+     * @param ownerType      资源归类型
      * @return boolean
      */
-    private boolean canDeleteStatus(Integer resourceStatus) {
+    private boolean canDeleteStatus(Integer resourceStatus, String ownerType) {
+        if (OwnerType.PERSONAL.equalsIgnoreCase(ownerType)) {
+            return true;
+        }
         return ResourceStatus.DRAFT.getNum().equals(resourceStatus) || ResourceStatus.OFF_SHELF.getNum().equals(resourceStatus);
     }
 
