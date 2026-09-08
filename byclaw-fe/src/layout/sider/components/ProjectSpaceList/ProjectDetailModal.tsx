@@ -21,6 +21,7 @@ import {
   message,
   type MenuProps,
 } from 'antd';
+import { get, concat } from 'lodash';
 import {
   AppstoreOutlined,
   BarChartOutlined,
@@ -2050,8 +2051,9 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const resolveOperationAccountSandbox = useCallback(async (): Promise<ISandboxesInfo> => {
     const currentSandboxes = (await getSandboxInfo({})) || EmptyArr;
     const runningSandbox =
-      currentSandboxes?.find((sandbox) => sandbox.status === 'RUNNING' && !!sandbox.sandboxId) ||
-      currentSandboxes?.find((sandbox) => !!sandbox.sandboxId);
+      currentSandboxes?.find(
+        (sandbox) => sandbox.status === 'RUNNING' && !!sandbox.sandboxId && get(sandbox, 'instanceEndpoints.vnc')
+      ) || currentSandboxes?.find((sandbox) => !!sandbox.sandboxId && get(sandbox, 'instanceEndpoints.vnc'));
     if (runningSandbox) {
       return runningSandbox;
     }
@@ -2091,7 +2093,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
           width: '50vw',
         });
         EventEmitter.emit('beyond-main-driver-message', {
-          url: getVNCUrl(sandboxInfo),
+          url: getVNCUrl(concat([], sandboxInfo)),
         });
         try {
           await navigateSandboxBrowser({
