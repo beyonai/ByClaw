@@ -293,7 +293,7 @@ class DigitalEmployeeApplicationServiceTest {
 
         assertThat(resource.getResourceStatus()).isEqualTo(ResourceStatus.ON_SHELF.getNum());
         verify(ssResourceService).update(resource);
-        verify(resourceEventService).sendResourceShelfEvent(resource);
+        verify(resourceEventService, never()).sendResourceShelfEvent(any(SsResource.class));
         verify(operationLogService).recordOperationLog(resource, OperationTypeEnum.SHELF);
         verify(robotChannelRegistryCoordinator).registerForResource(200L);
         verify(digitalEmployeeRuntimeRefreshService).scheduleDigitalEmployeeUpdateRefreshAfterCommit(200L, null);
@@ -328,7 +328,7 @@ class DigitalEmployeeApplicationServiceTest {
 
         assertThat(resource.getResourceStatus()).isEqualTo(ResourceStatus.OFF_SHELF.getNum());
         verify(ssResourceService).update(resource);
-        verify(resourceEventService).sendResourceUnshelfEvent(resource);
+        verify(resourceEventService, never()).sendResourceUnshelfEvent(any(SsResource.class));
         verify(operationLogService).recordOperationLog(resource, OperationTypeEnum.UNSHELF);
         verify(robotChannelRegistryCoordinator).unregisterForResource(200L);
         verify(digEmployeeChangeEventPublisher).publishAfterCommitOrNow(
