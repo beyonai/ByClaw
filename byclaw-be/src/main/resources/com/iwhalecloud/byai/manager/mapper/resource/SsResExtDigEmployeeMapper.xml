@@ -46,6 +46,7 @@
         <result column="createUserName" property="createUserName" />
         <result column="manOrgName" property="manOrgName" />
         <result column="resource_id" property="id" />
+        <result column="resource_status" property="resourceStatus" />
     </resultMap>
 
     <!-- selectDigitalEmployeeByQo：仅映射该 SQL 实际返回列 -> DigitalEmployeePageVo -->

@@ -349,12 +349,12 @@ public class OntologyBaseService {
             if (permissions == null) {
                 return;
             }
-            row.setCanEdit(permissions.getCanEdit());
-            row.setCanManageAuth(permissions.getCanManageAuth());
-            row.setCanUseAuth(permissions.getCanUseAuth());
-            row.setCanDelete(permissions.getCanDelete());
-            row.setCanApplyUse(permissions.getCanApplyUse());
-            row.setCanAuditUse(permissions.getCanAuditUse());
+            row.setCanEdit(permissions.isCanEdit());
+            row.setCanManageAuth(permissions.isCanManageAuth());
+            row.setCanUseAuth(permissions.isCanUseAuth());
+            row.setCanDelete(permissions.isCanDelete());
+            row.setCanApplyUse(permissions.isCanApplyUse());
+            row.setCanAuditUse(permissions.isCanAuditUse());
         });
     }
 
