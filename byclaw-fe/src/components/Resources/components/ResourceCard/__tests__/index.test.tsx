@@ -161,6 +161,40 @@ describe('ResourceCard', () => {
     expect(screen.queryByText('resource.installSkill')).toBeNull();
   });
 
+  it('hides install knowledge action when current digital employee already installed it', () => {
+    renderWithQueryClient(
+      <ResourceCard
+        resourceType="KG_DOC"
+        resource={{
+          resourceId: 'knowledge-1',
+          resourceName: 'Knowledge',
+          resourceBizType: 'KG_DOC',
+        }}
+        actionConfig={{
+          installedResourceIds: new Set(['knowledge-1']),
+        }}
+      />
+    );
+
+    expect(screen.queryByText('resource.installKnowledge')).toBeNull();
+  });
+
+  it('hides install action when the fixed digital employee is not manageable', () => {
+    renderWithQueryClient(
+      <ResourceCard
+        resourceType="KG_DOC"
+        resource={{
+          resourceId: 'knowledge-1',
+          resourceName: 'Knowledge',
+          resourceBizType: 'KG_DOC',
+        }}
+        actionConfig={{ canInstallToTarget: false }}
+      />
+    );
+
+    expect(screen.queryByText('resource.installKnowledge')).toBeNull();
+  });
+
   it('shows the default digital employee badge when the digital employee is default', () => {
     renderWithQueryClient(
       <ResourceCard

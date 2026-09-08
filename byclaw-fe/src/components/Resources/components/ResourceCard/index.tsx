@@ -89,6 +89,7 @@ export interface IResourceCardItem {
 type ResourceCardActionConfig = {
   scene?: ResourceCardActionScene;
   installedResourceIds?: ReadonlySet<string>;
+  canInstallToTarget?: boolean;
   installTargetContext?: ResourceInstallTargetContext;
 
   /** 当前用户对该数字员工是否有管理权限，无则隐藏工作空间技能的删除入口。 */
@@ -478,9 +479,9 @@ const RenderContent = (props: ResourceCardProps) => {
   const isCancelledResource = `${resource?.resourceStatus ?? ''}` === '3';
   const topRightTag = isCancelledResource ? intl.formatMessage({ id: 'resource.statusCancelled' }) : displayTopRightTag;
   const isInnerSkill = isInnerSkillResource(resource, resourceType);
-  const isInstalledSkill =
-    isSkillResource(resource, resourceType) &&
-    Boolean(resource?.resourceId && actionConfig?.installedResourceIds?.has(`${resource.resourceId}`));
+  const isInstalledResource = Boolean(
+    resource?.resourceId && actionConfig?.installedResourceIds?.has(`${resource.resourceId}`)
+  );
   const isCardClickDisabled =
     typeof cardClickDisabled === 'function' ? cardClickDisabled(resource) : !!cardClickDisabled;
 
@@ -641,7 +642,11 @@ const RenderContent = (props: ResourceCardProps) => {
     }
 
     // 资源中心选择目标员工安装；从“当前员工”进入时由路由显式指定唯一目标。
-    if (canInstallResource(resource, resourceType) && !isInstalledSkill) {
+    if (
+      canInstallResource(resource, resourceType) &&
+      actionConfig?.canInstallToTarget !== false &&
+      !isInstalledResource
+    ) {
       items.push({
         key: 'install',
         label: (
@@ -732,7 +737,7 @@ const RenderContent = (props: ResourceCardProps) => {
     resource?.skillType,
     resourceType,
     isInnerSkill,
-    isInstalledSkill,
+    isInstalledResource,
     installing,
     restoring,
     settingDefault,

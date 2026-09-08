@@ -75,7 +75,7 @@ public class OntologyBindService {
         if (digitalEmployee == null || !BIZ_DIG_EMPLOYEE.equals(digitalEmployee.getResourceBizType())) {
             throw new BaseException("数字员工资源不存在或类型不正确");
         }
-        if (!authApplicationService.hasResourceManagePermission(digitalEmployee)) {
+        if (!authApplicationService.hasResourceInstallTargetManagePermission(digitalEmployee)) {
             throw new BaseException("当前用户对数字员工【" + digitalEmployee.getResourceName() + "】没有管理权限，无法解绑本体");
         }
 

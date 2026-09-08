@@ -149,6 +149,8 @@ export default {
   'resource.personalEmployee': '个人',
   'resource.installed': '已安装',
   'resource.uninstallSkill': '卸载',
+  'resource.uninstall': '卸载',
+  'resource.uninstallConfirm': '确认从当前数字员工“{employeeName}”卸载“{resourceName}”？',
   'resource.uninstallSkillConfirm': '确认从当前数字员工“{employeeName}”卸载该技能？',
   'resource.uninstallWorkspaceSkillConfirm':
     '确认删除当前数字员工“{employeeName}”下的用户开发技能“{skillName}”？该操作会删除技能目录。',

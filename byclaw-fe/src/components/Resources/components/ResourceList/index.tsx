@@ -10,7 +10,7 @@ import {
   deleteKnowledge,
   queryWorkspacePersonalSkillList,
 } from '@/pages/manager/service/resources';
-import { findDetailsById } from '@/pages/manager/service/DigitalEmployeeMgr';
+import { queryInstalledResourceIds } from '@/pages/manager/service/DigitalEmployeeMgr';
 import { useRequest } from '@/hooks/useRequest';
 import useGlobal from '@/hooks/useGlobal';
 import type { IState as IEmployeesState } from '@/models/useEmployees';
@@ -75,19 +75,17 @@ interface ResourceListProps {
 const PAGE_SIZE_DEFAULT = 30;
 const WIDE_CARD_RESOURCE_TYPES = new Set(['KG_DOC', 'TOOL']);
 
-const normalizeResponseData = (response: any) => response?.data ?? response;
-
-const collectInstalledResourceIds = (detail: any) => {
-  const installedIds = new Set<string>();
-  const relResourceList = Array.isArray(detail?.relResourceList) ? detail.relResourceList : [];
-  const relSkills = Array.isArray(detail?.relSkills) ? detail.relSkills : [];
-  [...relResourceList, ...relSkills].forEach((item: any) => {
-    const resourceId = item?.resourceId ?? item?.relResourceId ?? item?.skillId;
-    if (resourceId !== undefined && resourceId !== null && `${resourceId}` !== '') {
-      installedIds.add(`${resourceId}`);
-    }
-  });
-  return installedIds;
+const collectInstalledResourceIds = (response: any) => {
+  if (response?.code !== undefined && ![0, 200].includes(Number(response.code))) {
+    throw new Error(response.msg || response.message);
+  }
+  const data = response?.data?.data ?? response?.data ?? response;
+  const resourceIds = Array.isArray(data) ? data : [];
+  return new Set<string>(
+    resourceIds
+      .filter((resourceId) => resourceId !== undefined && resourceId !== null && `${resourceId}` !== '')
+      .map((resourceId) => `${resourceId}`)
+  );
 };
 
 const ResourceList: React.FC<ResourceListProps> = ({
@@ -132,6 +130,7 @@ const ResourceList: React.FC<ResourceListProps> = ({
   const [loading, setLoading] = useState(false);
   const [list, setList] = useState<IResourceItem[]>([]);
   const [installedResourceIds, setInstalledResourceIds] = useState<ReadonlySet<string>>(new Set());
+  const [canManageInstallTarget, setCanManageInstallTarget] = useState(false);
   const [pageInfo, setPageInfo] = useState({
     pageNum: 1,
     pageSize: PAGE_SIZE_DEFAULT,
@@ -251,25 +250,29 @@ const ResourceList: React.FC<ResourceListProps> = ({
 
   useEffect(() => {
     let cancelled = false;
-    if (resourceType !== 'SKILL' || !fixedInstallTargetId) {
+    if (!fixedInstallTargetId) {
       setInstalledResourceIds(new Set());
+      setCanManageInstallTarget(true);
       return () => {
         cancelled = true;
       };
     }
-    findDetailsById({ resourceId: fixedInstallTargetId })
+    setCanManageInstallTarget(false);
+    queryInstalledResourceIds({ resourceId: fixedInstallTargetId })
       .then((res) => {
         if (cancelled) return;
-        setInstalledResourceIds(collectInstalledResourceIds(normalizeResponseData(res)));
+        setInstalledResourceIds(collectInstalledResourceIds(res));
+        setCanManageInstallTarget(true);
       })
       .catch(() => {
         if (cancelled) return;
         setInstalledResourceIds(new Set());
+        setCanManageInstallTarget(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [fixedInstallTargetId, resourceType]);
+  }, [fixedInstallTargetId]);
 
   // 监听资源操作事件，刷新列表
   useEffect(() => {
@@ -290,13 +293,7 @@ const ResourceList: React.FC<ResourceListProps> = ({
         event as CustomEvent<{ resourceId?: string | number; digitalEmployeeIds?: Array<string | number> }>
       ).detail;
       const resourceId = detail?.resourceId;
-      if (
-        resourceType !== 'SKILL' ||
-        !fixedInstallTargetId ||
-        resourceId === undefined ||
-        resourceId === null ||
-        `${resourceId}` === ''
-      ) {
+      if (!fixedInstallTargetId || resourceId === undefined || resourceId === null || `${resourceId}` === '') {
         return;
       }
       if (
@@ -315,7 +312,33 @@ const ResourceList: React.FC<ResourceListProps> = ({
     return () => {
       window.removeEventListener('digitalEmployeeResourceInstalled', handleResourceInstalled);
     };
-  }, [fixedInstallTargetId, resourceType]);
+  }, [fixedInstallTargetId]);
+
+  useEffect(() => {
+    const handleResourceUninstalled = (event: Event) => {
+      const detail = (event as CustomEvent<{ resourceId?: string | number; digitalEmployeeId?: string | number }>)
+        .detail;
+      const resourceId = detail?.resourceId;
+      if (
+        !fixedInstallTargetId ||
+        resourceId === undefined ||
+        resourceId === null ||
+        `${resourceId}` === '' ||
+        (detail?.digitalEmployeeId !== undefined && `${detail.digitalEmployeeId}` !== fixedInstallTargetId)
+      ) {
+        return;
+      }
+      setInstalledResourceIds((prev) => {
+        const next = new Set(prev);
+        next.delete(`${resourceId}`);
+        return next;
+      });
+    };
+    window.addEventListener('digitalEmployeeResourceUninstalled', handleResourceUninstalled);
+    return () => {
+      window.removeEventListener('digitalEmployeeResourceUninstalled', handleResourceUninstalled);
+    };
+  }, [fixedInstallTargetId]);
 
   const loadMore = useCallback(() => {
     if (loading || !hasMore) return;
@@ -346,6 +369,7 @@ const ResourceList: React.FC<ResourceListProps> = ({
       actionConfig={{
         scene: item.ownerType === 'personal' || activeTab === 'personal' ? 'personal' : 'enterprise',
         installedResourceIds,
+        canInstallToTarget: installTargetContext.mode !== 'fixed' || canManageInstallTarget,
         installTargetContext,
         canManageWorkspaceSkill: canManageActiveEmployee,
         onEdit: () => onEdit(item),

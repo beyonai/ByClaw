@@ -91,6 +91,12 @@ export async function queryInstallTargetEmployees(params: {
   return POST('/byaiService/digitalEmployeeController/queryInstallTargetEmployees', { ...params });
 }
 
+export async function queryInstalledResourceIds(params: { resourceId: string | number }) {
+  return POST('/byaiService/digitalEmployeeController/queryInstalledResourceIds', {
+    resourceId: params.resourceId,
+  });
+}
+
 export async function batchInstallDigitalEmployeeRelResources(params: {
   digitalEmployeeIds: Array<string | number>;
   relIds: Array<string | number>;

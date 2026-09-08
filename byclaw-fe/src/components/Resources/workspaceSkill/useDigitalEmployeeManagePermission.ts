@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
-import { queryResourceOperationPermissions } from '@/pages/manager/service/resources';
+import { queryInstalledResourceIds } from '@/pages/manager/service/DigitalEmployeeMgr';
 
 /**
  * 查询当前用户对指定数字员工是否有「管理权限」。
- * 返回的 hasManagePermission 与后端 hasResourceManagePermission 同口径，
- * 用于在无管理权限时隐藏技能的卸载 / 删除入口（后端仍是安全边界，这里仅做 UX 收口）。
+ * 复用安装目标专用接口，由后端按“本人创建、显式管理授权、adminvip”统一校验，
+ * 用于在无管理权限时隐藏安装、卸载和删除入口（后端仍是安全边界）。
  *
  * 默认 false：权限确认前不暴露卸载/删除，避免无权限用户点击后才报错。
  */
@@ -19,11 +19,11 @@ export const useDigitalEmployeeManagePermission = (digitalEmployeeId?: string | 
         cancelled = true;
       };
     }
-    queryResourceOperationPermissions({ resourceId: `${digitalEmployeeId}` })
+    queryInstalledResourceIds({ resourceId: `${digitalEmployeeId}` })
       .then((res: any) => {
         if (cancelled) return;
-        const permissions = res?.data || res || {};
-        setCanManage(!!(permissions.hasManagePermission ?? permissions.canManageAuth));
+        const responseCode = res?.code;
+        setCanManage(responseCode === undefined || [0, 200].includes(Number(responseCode)));
       })
       .catch(() => {
         if (cancelled) return;

@@ -48,18 +48,21 @@ jest.mock('@ant-design/icons', () => ({
 
 jest.mock('@/pages/manager/service/DigitalEmployeeMgr', () => ({
   batchInstallDigitalEmployeeRelResources: jest.fn(),
-  findDetailsById: jest.fn(),
   installDigitalEmployeeRelResources: jest.fn(),
   queryInstallTargetEmployees: jest.fn(),
+  queryInstalledResourceIds: jest.fn(),
 }));
 
 jest.mock('@/utils/file', () => ({ getFileUrl: (value: string) => value }));
 
 import { message } from 'antd';
-import { findDetailsById, installDigitalEmployeeRelResources } from '@/pages/manager/service/DigitalEmployeeMgr';
+import {
+  installDigitalEmployeeRelResources,
+  queryInstalledResourceIds,
+} from '@/pages/manager/service/DigitalEmployeeMgr';
 import ResourceInstallDialog from '..';
 
-const mockFindDetailsById = findDetailsById as jest.Mock;
+const mockQueryInstalledResourceIds = queryInstalledResourceIds as jest.Mock;
 const mockInstallDigitalEmployeeRelResources = installDigitalEmployeeRelResources as jest.Mock;
 const mockMessageError = message.error as jest.Mock;
 
@@ -85,13 +88,13 @@ describe('ResourceInstallDialog fixed current employee', () => {
   });
 
   it('validates and installs with the resource id shown by the current employee panel', async () => {
-    mockFindDetailsById.mockResolvedValue({ code: 0, data: { resourceId: 'employee-resource-2' } });
+    mockQueryInstalledResourceIds.mockResolvedValue({ code: 0, data: [] });
     renderFixedTargetDialog();
 
     fireEvent.click(screen.getByRole('button', { name: 'confirm' }));
 
     await waitFor(() => {
-      expect(mockFindDetailsById).toHaveBeenCalledWith({ resourceId: 'employee-resource-2' });
+      expect(mockQueryInstalledResourceIds).toHaveBeenCalledWith({ resourceId: 'employee-resource-2' });
       expect(mockInstallDigitalEmployeeRelResources).toHaveBeenCalledWith({
         digitalEmployeeId: 'employee-resource-2',
         relIds: ['resource-1'],
@@ -100,7 +103,7 @@ describe('ResourceInstallDialog fixed current employee', () => {
   });
 
   it('does not call the install endpoint when the current employee cannot be validated', async () => {
-    mockFindDetailsById.mockRejectedValue(new Error('resource not found'));
+    mockQueryInstalledResourceIds.mockRejectedValue(new Error('resource not found'));
     renderFixedTargetDialog();
 
     fireEvent.click(screen.getByRole('button', { name: 'confirm' }));

@@ -380,6 +380,31 @@ public class DigitalEmployeeApplicationService {
     }
 
     /**
+     * 查询指定数字员工已安装的资源 ID。仅返回关系表中的目标 ID，避免为安装状态判断加载完整员工详情。
+     */
+    public List<Long> queryInstalledResourceIds(EmployeeIdDTO employeeIdDTO) {
+        Long digitalEmployeeId = employeeIdDTO == null ? null : employeeIdDTO.getResourceId();
+        if (digitalEmployeeId == null) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
+                I18nUtil.get("digemployee.processor.param.notnull"));
+        }
+        if (digitalEmployeeGroupApplicationService.isGroup(digitalEmployeeId)) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
+                I18nUtil.get("digemployee.group.install.unsupported"));
+        }
+
+        SsResource digitalEmployee = ssResourceService.findById(digitalEmployeeId);
+        validateDigitalEmployeeResourceInstallPermission(digitalEmployee);
+        List<Long> relResourceIds = ssResourceRelDetailService.findRelResourceIdsByResourceId(digitalEmployeeId);
+        if (CollectionUtils.isEmpty(relResourceIds)) {
+            return Collections.emptyList();
+        }
+        return relResourceIds.stream()
+            .distinct()
+            .collect(Collectors.toList());
+    }
+
+    /**
      * 给知识前端使用的通用数字员工列表查询. 规则说明: 1. 不限定 ownerType,也不限定 owner/authorize/manager 视角,默认按“全部”查询; 2. 若前端未传 publishType,则默认查询
      * publish; 3. 若前端未传 publishStatus,则默认查询有效状态 2(LIST); 4. 当前数字员工列表仍使用 ss_resource.resource_status 做状态过滤,因此
      * publishStatus 会收口到 resourceStatus.
@@ -1166,7 +1191,7 @@ public class DigitalEmployeeApplicationService {
             validateSkillInstallPermission(ssResource, installRelResources);
         } else {
             ssResource = ssResourceService.findById(digitalEmployeeId);
-            validateDigitalEmployeeUpdatePermission(ssResource);
+            validateDigitalEmployeeResourceInstallPermission(ssResource);
         }
 
         List<SsResourceRelDetail> resourceRelDetails = ssResourceRelDetailService.findByResourceId(digitalEmployeeId);
@@ -1459,7 +1484,7 @@ public class DigitalEmployeeApplicationService {
         }
 
         SsResource ssResource = ssResourceService.findById(digitalEmployeeId);
-        validateDigitalEmployeeUpdatePermission(ssResource);
+        validateDigitalEmployeeResourceUninstallPermission(ssResource);
 
         List<LegacyWorkspaceSkill> legacyWorkspaceSkills = findLegacyWorkspaceSkillsToDelete(ssResource,
             uninstallRelResources);
@@ -1803,21 +1828,23 @@ public class DigitalEmployeeApplicationService {
     }
 
     private void validateSkillInstallPermission(SsResource digitalEmployee, List<SsResource> installRelResources) {
-        if (digitalEmployee == null) {
-            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("resource.not.found"));
-        }
-        // 技能安装目标是前端当前选中的数字员工:显式 @ 的数字员工优先,没有 @ 时才回退默认数字员工.
-        // 因此这里按目标数字员工的管理权限校验,不再强制要求它必须等于 defaultDigEmployeeId.
-        if (!authApplicationService.hasResourceManagePermission(digitalEmployee)) {
-            throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
-                I18nUtil.get("digemployee.skill.install.no.manage.permission", digitalEmployee.getResourceName()));
-        }
+        validateDigitalEmployeeResourceInstallPermission(digitalEmployee);
         for (SsResource resource : installRelResources) {
             if (resource != null && StringUtils.equals(RESOURCE_BIZ_TYPE_SKILL, resource.getResourceBizType())
                 && !authApplicationService.hasResourceUsePermission(resource)) {
                 throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
                     I18nUtil.get("digemployee.skill.install.no.use.permission", resource.getResourceName()));
             }
+        }
+    }
+
+    private void validateDigitalEmployeeResourceInstallPermission(SsResource digitalEmployee) {
+        if (digitalEmployee == null) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("resource.not.found"));
+        }
+        if (!authApplicationService.hasResourceInstallTargetManagePermission(digitalEmployee)) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
+                I18nUtil.get("digemployee.resource.install.no.manage.permission", digitalEmployee.getResourceName()));
         }
     }
 
@@ -1837,9 +1864,19 @@ public class DigitalEmployeeApplicationService {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("resource.not.found"));
         }
         // 技能卸载同安装一样,按请求里的当前数字员工校验管理权限.
-        if (!authApplicationService.hasResourceManagePermission(digitalEmployee)) {
+        if (!authApplicationService.hasResourceInstallTargetManagePermission(digitalEmployee)) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
                 I18nUtil.get("digemployee.skill.uninstall.no.manage.permission", digitalEmployee.getResourceName()));
+        }
+    }
+
+    private void validateDigitalEmployeeResourceUninstallPermission(SsResource digitalEmployee) {
+        if (digitalEmployee == null) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("resource.not.found"));
+        }
+        if (!authApplicationService.hasResourceInstallTargetManagePermission(digitalEmployee)) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
+                I18nUtil.get("digemployee.resource.uninstall.no.manage.permission", digitalEmployee.getResourceName()));
         }
     }
 

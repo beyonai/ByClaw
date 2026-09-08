@@ -209,6 +209,43 @@ class AuthApplicationServiceTest {
         assertThat(service.hasResourceManagePermission(resource)).isFalse();
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {
+        UserType.PLAT_MAN,
+        UserType.PLAT_DEVOPS,
+        UserType.BUSINESS_MAN,
+        UserType.ORG_MAN
+    })
+    void hasResourceInstallTargetManagePermission_doesNotAllowAdministratorRoles(String userType) {
+        AuthApplicationService service = newExplicitUserPermissionService(List.of());
+        LoginInfo loginInfo = loginInfo(2L);
+        loginInfo.setUserCode("manager");
+        UsersOrganization administratorRole = new UsersOrganization();
+        administratorRole.setUserType(userType);
+        loginInfo.setUsersOrganizations(List.of(administratorRole));
+        CurrentUserHolder.setLoginInfo(loginInfo);
+
+        assertThat(service.hasResourceInstallTargetManagePermission(enterpriseResource(500L, 1L))).isFalse();
+    }
+
+    @Test
+    void hasResourceInstallTargetManagePermission_allowsCreatorAdminVipAndExplicitGrant() {
+        CurrentUserHolder.setLoginInfo(loginInfo(2L));
+        AuthApplicationService creatorService = new AuthApplicationService();
+        assertThat(creatorService.hasResourceInstallTargetManagePermission(enterpriseResource(500L, 2L))).isTrue();
+
+        LoginInfo adminVip = loginInfo(3L);
+        adminVip.setUserCode("adminvip");
+        CurrentUserHolder.setLoginInfo(adminVip);
+        AuthApplicationService adminVipService = new AuthApplicationService();
+        assertThat(adminVipService.hasResourceInstallTargetManagePermission(enterpriseResource(501L, 1L))).isTrue();
+
+        CurrentUserHolder.setLoginInfo(loginInfo(4L));
+        AuthApplicationService grantedService = newExplicitUserPermissionService(
+            List.of(manageGrant(502L, 4L, GrantToObjType.USER, Color.RED, "A")));
+        assertThat(grantedService.hasResourceInstallTargetManagePermission(enterpriseResource(502L, 1L))).isTrue();
+    }
+
     /**
      * 个人助理不对外开放管理授权、使用申请和申请审核；即使当前用户具备平台管理员能力，也要由资源类型兜底压住。
      */
