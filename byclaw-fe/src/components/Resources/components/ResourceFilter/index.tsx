@@ -28,6 +28,7 @@ import {
   resourceBizTypeOptions,
   knowledgeResourceBizTypeOptions,
   permissionOptions,
+  digitalEmployeeStatusOptions,
 } from '../../constants';
 import { isAllResourceBizTypeSelected, normalizeResourceBizTypeList } from '../../utils';
 import styles from './index.module.less';
@@ -53,6 +54,7 @@ export {
   STATUS_IN_STOCK_VALUE,
   STATUS_CANCELLED_VALUE,
   statusOptions,
+  digitalEmployeeStatusOptions,
   belongOptions,
   PERMISSION_ALL_VALUE,
   PERMISSION_CREATED_BY_ME_VALUE,
@@ -110,6 +112,7 @@ const ResourceFilterForm = ({
     permission: filterPermission,
   } = filterParam;
   const typeOptions = resourceType === 'KG_DOC' ? knowledgeResourceBizTypeOptions : resourceBizTypeOptions;
+  const currentStatusOptions = resourceType === 'DIG_EMPLOYEE' ? digitalEmployeeStatusOptions : statusOptions;
   const showTypeFilter = resourceType === 'TOOL' || resourceType === 'KG_DOC';
   const normalizedResourceBizTypeList = normalizeResourceBizTypeList(filterResourceBizTypeList, resourceType);
 
@@ -118,8 +121,8 @@ const ResourceFilterForm = ({
     () =>
       activeTab === 'personal'
         ? permissionOptions.filter(
-          (opt) => opt.value !== PERMISSION_PENDING_MY_APPROVAL_VALUE && opt.value !== PERMISSION_APPLIED_BY_ME_VALUE
-        )
+            (opt) => opt.value !== PERMISSION_PENDING_MY_APPROVAL_VALUE && opt.value !== PERMISSION_APPLIED_BY_ME_VALUE
+          )
         : permissionOptions,
     [activeTab]
   );
@@ -162,10 +165,10 @@ const ResourceFilterForm = ({
       activeTab === 'personal'
         ? {}
         : {
-          belong: filterBelong,
-          deptBelong: deptSelectValue,
-          orgFilters: buildOrgFilters(),
-        };
+            belong: filterBelong,
+            deptBelong: deptSelectValue,
+            orgFilters: buildOrgFilters(),
+          };
 
     if (activeTab === 'personal') {
       return {
@@ -227,7 +230,7 @@ const ResourceFilterForm = ({
           <div className="ub ub-ver gap8">
             <p className={styles.filterTitle}>{intl.formatMessage({ id: 'common.status' })}</p>
             <div className="ub gap8 ub-wrap">
-              {statusOptions.map((item) => (
+              {currentStatusOptions.map((item) => (
                 <div
                   key={item.value}
                   className={classnames(styles.statusItem, 'ub ub-ac pointer', {
@@ -445,6 +448,7 @@ const ResourceFilter: React.FC<ResourceFilterWithDropdownProps> = ({
   const [dropdownOpen, setDropdownOpen] = React.useState(false);
   const [brandVersion, setBrandVersion] = React.useState<'commercial' | 'openSource' | null>();
   const showStatusFilter = alwaysShowStatusFilter || brandVersion === 'openSource' || brandVersion === null;
+  const currentStatusOptions = resourceType === 'DIG_EMPLOYEE' ? digitalEmployeeStatusOptions : statusOptions;
 
   React.useEffect(() => {
     getDcSystemConfig({ paramCode: 'BYAI_BRAND_VERSION' })
@@ -506,7 +510,9 @@ const ResourceFilter: React.FC<ResourceFilterWithDropdownProps> = ({
             <div className={styles.selectedItem}>
               {intl.formatMessage({ id: 'common.status' })}：
               {(() => {
-                const selectedOption = statusOptions.find((item) => item.value === get(defaultParam, 'resourceStatus'));
+                const selectedOption = currentStatusOptions.find(
+                  (item) => item.value === get(defaultParam, 'resourceStatus')
+                );
                 return selectedOption
                   ? intl.formatMessage({ id: selectedOption.label })
                   : intl.formatMessage({ id: 'resource.statusActive' });

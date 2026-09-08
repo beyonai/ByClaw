@@ -61,11 +61,14 @@ export interface IResourceCardItem {
   canApplyUse?: boolean;
   canAuditUse?: boolean;
   canDelete?: boolean;
+  canUnShelf?: boolean;
+  canDeleteData?: boolean;
   canSetDefault?: boolean;
   canRestore?: boolean;
   approveStatus?: string;
   useApplyPending?: boolean;
   resourceStatus?: number | string;
+  metaStatus?: number | string;
   ownerType?: string;
   agentType?: string;
   isDefault?: boolean | string;
@@ -107,6 +110,11 @@ type ResourceCardActionConfig = {
   onApplyUse?: () => void;
   onAuditUse?: () => void;
   onDelete?: () => void;
+  onDeleteData?: () => void;
+  onShelf?: () => void;
+  onUnShelf?: () => void;
+  enableDigitalEmployeeLifecycle?: boolean;
+  enableDigitalEmployeeDelete?: boolean;
   onRestore?: () => void;
   onAuth?: (authType: 'useAuth' | 'mgrAuth') => void;
   onEdit?: () => void;
@@ -320,12 +328,15 @@ const RenderContent = (props: ResourceCardProps) => {
     onEdit = noop,
     onAuth = noop,
     onApplyUse = noop,
-    onAuditUse = noop,
     onRestore = noop,
     onDelete = noop,
+    onDeleteData = noop,
+    onShelf = noop,
+    onUnShelf = noop,
     onSetDefault = noop,
     onChat = noop,
   } = actionConfig || {};
+  const enableDigitalEmployeeLifecycle = actionConfig?.enableDigitalEmployeeLifecycle !== false;
 
   const intl = useIntl();
   const dispatch = useDispatch();
@@ -432,6 +443,18 @@ const RenderContent = (props: ResourceCardProps) => {
   };
 
   const getDisplayTopRightTag = () => {
+    // 数字员工状态由后端 resourceStatus 返回，统一映射为卡片右上角状态标签。
+    if (isDigitalEmployeeResource) {
+      const statusLabelMap: Record<string, string> = {
+        '-1': 'resourceStatus.deleted',
+        '0': 'resourceStatus.draft',
+        '1': 'resourceStatus.pendingShelf',
+        '2': 'resourceStatus.published',
+        '3': 'resourceStatus.unpublished',
+      };
+      const statusMessageId = statusLabelMap[`${resource.resourceStatus ?? resource.metaStatus ?? ''}`];
+      if (statusMessageId) return intl.formatMessage({ id: statusMessageId });
+    }
     const digitalEmployeeTypeTag = getDigitalEmployeeTypeTag();
     if (digitalEmployeeTypeTag) {
       return digitalEmployeeTypeTag;
@@ -475,8 +498,10 @@ const RenderContent = (props: ResourceCardProps) => {
     return undefined;
   };
   const displayTopRightTag = getDisplayTopRightTag();
-  const isCancelledResource = `${resource?.resourceStatus ?? ''}` === '3';
-  const topRightTag = isCancelledResource ? intl.formatMessage({ id: 'resource.statusCancelled' }) : displayTopRightTag;
+  const digitalEmployeeStatus = `${resource?.resourceStatus ?? resource?.metaStatus ?? ''}`;
+  const isCancelledResource = isDigitalEmployeeResource && digitalEmployeeStatus === '-1';
+  const digitalEmployeeStatusClass = isDigitalEmployeeResource ? `digitalEmployeeStatus${digitalEmployeeStatus}` : '';
+  const topRightTag = displayTopRightTag;
   const isInnerSkill = isInnerSkillResource(resource, resourceType);
   const isInstalledSkill =
     isSkillResource(resource, resourceType) &&
@@ -547,7 +572,7 @@ const RenderContent = (props: ResourceCardProps) => {
   useEffect(() => () => handleSetDefaultDebounced.cancel(), [handleSetDefaultDebounced]);
 
   const menuItems = useMemo<MenuProps['items']>(() => {
-    const { canEdit, canManageAuth, canUseAuth, canApplyUse, canAuditUse, canDelete, canSetDefault, canRestore } =
+    const { canEdit, canManageAuth, canUseAuth, canApplyUse, canDelete, canUnShelf, canSetDefault, canRestore } =
       resource || {};
     const items: NonNullable<MenuProps['items']> = [];
 
@@ -629,16 +654,16 @@ const RenderContent = (props: ResourceCardProps) => {
       });
     }
 
-    // 使用审核
-    if (canAuditUse) {
-      items.push({
-        key: 'auditUse',
-        label: <BuildMenuLabel icon="icon-a-Listliebiao" text={intl.formatMessage({ id: 'resource.auditUse' })} />,
-        onClick: () => {
-          onAuditUse?.();
-        },
-      });
-    }
+    // 使用审核入口暂时由审核中心统一承载，保留原逻辑注释以便后续恢复。
+    // if (canAuditUse) {
+    //   items.push({
+    //     key: 'auditUse',
+    //     label: <BuildMenuLabel icon="icon-a-Listliebiao" text={intl.formatMessage({ id: 'resource.auditUse' })} />,
+    //     onClick: () => {
+    //       onAuditUse?.();
+    //     },
+    //   });
+    // }
 
     // 资源中心选择目标员工安装；从“当前员工”进入时由路由显式指定唯一目标。
     if (canInstallResource(resource, resourceType) && !isInstalledSkill) {
@@ -656,31 +681,64 @@ const RenderContent = (props: ResourceCardProps) => {
       });
     }
 
-    // 注销数据
-    if (canDelete && !isInnerSkill) {
+    // 数字员工的“下架数据”权限由后端 canDelete 返回，但实际调用下架接口。
+    const canUnShelfDigitalEmployee = isDigitalEmployeeResource && (canUnShelf ?? canDelete);
+    if ((!isDigitalEmployeeResource && canDelete) || canUnShelfDigitalEmployee) {
       items.push({
-        key: 'delete',
+        key: isDigitalEmployeeResource ? 'unShelfData' : 'delete',
         label: (
-          <ConfirmMenuLabel title={intl.formatMessage({ id: 'common.deactivateConfirm' })} onConfirm={() => onDelete()}>
-            <BuildMenuLabel icon="icon-a-Deleteshanchu" text={intl.formatMessage({ id: 'common.deleteResource' })} />
+          <ConfirmMenuLabel
+            title={intl.formatMessage({
+              id: isDigitalEmployeeResource ? 'resource.unShelfDataConfirm' : 'common.deactivateConfirm',
+            })}
+            onConfirm={() => (isDigitalEmployeeResource ? onUnShelf() : onDelete())}
+          >
+            <BuildMenuLabel
+              icon="icon-a-Deleteshanchu"
+              text={
+                isDigitalEmployeeResource
+                  ? intl.formatMessage({ id: 'resource.unShelfData' })
+                  : intl.formatMessage({ id: 'common.deleteResource' })
+              }
+            />
           </ConfirmMenuLabel>
         ),
       });
     }
 
-    // 恢复数据
-    if (canRestore) {
+    // 已下架数字员工始终提供“上架数据”，不再依赖恢复权限字段。
+    if (isDigitalEmployeeResource && digitalEmployeeStatus === '3') {
+      items.push({
+        key: 'shelfData',
+        label: (
+          <ConfirmMenuLabel title={intl.formatMessage({ id: 'resource.shelfDataConfirm' })} onConfirm={() => onShelf()}>
+            <BuildMenuLabel icon="icon-a-Returnfanhui" text={intl.formatMessage({ id: 'resource.shelfData' })} />
+          </ConfirmMenuLabel>
+        ),
+      });
+    }
+
+    // 其他资源继续使用原有恢复逻辑。
+    if (canRestore && !isDigitalEmployeeResource) {
       items.push({
         key: 'restore',
         label: (
           <ConfirmMenuLabel
             disabled={restoring}
-            title={intl.formatMessage({ id: 'common.restoreConfirm' })}
-            onConfirm={() => handleRestore({ resourceId: resource?.resourceId })}
+            title={intl.formatMessage({
+              id: isDigitalEmployeeResource ? 'resource.shelfDataConfirm' : 'common.restoreConfirm',
+            })}
+            onConfirm={() =>
+              isDigitalEmployeeResource ? onShelf() : handleRestore({ resourceId: resource?.resourceId })
+            }
           >
             <BuildMenuLabel
               icon="icon-a-Returnfanhui"
-              text={intl.formatMessage({ id: 'common.restoreResource' })}
+              text={
+                isDigitalEmployeeResource
+                  ? intl.formatMessage({ id: 'resource.shelfData' })
+                  : intl.formatMessage({ id: 'common.restoreResource' })
+              }
               loading={restoring}
             />
           </ConfirmMenuLabel>
@@ -710,9 +768,12 @@ const RenderContent = (props: ResourceCardProps) => {
     isDefaultDigitalEmployee,
     isDigitalEmployeeResource,
     onApplyUse,
-    onAuditUse,
     onAuth,
     onDelete,
+    onDeleteData,
+    onShelf,
+    onUnShelf,
+    enableDigitalEmployeeLifecycle,
     onEdit,
     onRestore,
     onSetDefault,
@@ -721,8 +782,9 @@ const RenderContent = (props: ResourceCardProps) => {
     resource?.canUseAuth,
     resource?.canApplyUse,
     resource?.canSetDefault,
-    resource?.canAuditUse,
     resource?.canDelete,
+    resource?.canUnShelf,
+    resource?.canDeleteData,
     resource?.canRestore,
     resource?.hasUsePermission,
     resource?.ownerType,
@@ -978,6 +1040,7 @@ const RenderContent = (props: ResourceCardProps) => {
                     [styles.digitalEmployeePersonalTag]: isPersonalDigitalEmployee,
                     [styles.digitalEmployeeTag]: isDigitalEmployeeResource && !isPersonalDigitalEmployee,
                     [styles.digitalEmployeeTopRightTag]: isDigitalEmployeeResource,
+                    [styles[digitalEmployeeStatusClass]]: Boolean(digitalEmployeeStatusClass),
                     [styles.cancelledTag]: isCancelledResource,
                   })}
                 >
@@ -1199,7 +1262,10 @@ function ResourceCard(props: ResourceCardProps) {
   }, [operationResourceId, permissionQueryKey, props.digitalEmployeeActionMode, resource]);
 
   const displayResource = operationPermissions ? { ...resource, ...operationPermissions } : resource;
-  const isCancelledResource = `${displayResource?.resourceStatus ?? ''}` === '3';
+  const isCancelledResource =
+    displayResource?.resourceBizType === resourceBizTypeMap.DIG_EMPLOYEE
+      ? `${displayResource?.resourceStatus ?? displayResource?.metaStatus ?? ''}` === '-1'
+      : `${displayResource?.resourceStatus ?? ''}` === '3';
   const isCardClickDisabled =
     typeof props.cardClickDisabled === 'function'
       ? props.cardClickDisabled(displayResource)

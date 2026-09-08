@@ -3341,6 +3341,18 @@ export default {
   'resourceStatus.notPassed': 'Not Passed',
   'resourceStatus.published': 'Published',
   'resourceStatus.unpublished': 'Unpublished',
+  'resourceStatus.deleted': 'Deleted',
+  'resourceStatus.pendingShelf': 'Pending publication',
+  'resource.shelf': 'Publish',
+  'resource.unShelf': 'Unpublish',
+  'resource.unShelfData': 'Unpublish data',
+  'resource.shelfData': 'Publish data',
+  'resource.shelfDataConfirm': 'Are you sure you want to publish this data?',
+  'resource.unShelfDataConfirm': 'Are you sure you want to unpublish this data?',
+  'resource.deleteData': 'Delete data',
+  'resource.deleteDataConfirm': 'Delete this data?',
+  'digitalEmployees.shelfSuccess': 'Published successfully',
+  'digitalEmployees.unShelfSuccess': 'Unpublished successfully',
 
   // Resource
   'resource.propertyInfo': 'Property Information',

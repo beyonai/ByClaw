@@ -61,12 +61,17 @@ const DigitalEmployeesPage: React.FC = () => {
     return tabFromUrl === 'official' ? 'official' : 'available';
   });
   const [keywords, setKeywords] = useState<Record<string, string>>({});
-  const [dropdownParam, setDropdownParam] = useState<IOnOkParams>(getDefaultParams());
-  const AvailableGroupRef = React.useRef<any>(null);
-  const AvailableEmployeeRef = React.useRef<any>(null);
+  const defaultFilterParam = getDefaultParams();
+  const [filterParamsByTab, setFilterParamsByTab] = useState<Record<string, IOnOkParams>>({
+    available: defaultFilterParam,
+    official: defaultFilterParam,
+  });
+  // 我可用的与官方推荐都使用合并列表组件，统一分页后再按类型分块展示。
+  const AvailableRef = React.useRef<any>(null);
   const OfficialEmployeeRef = React.useRef<any>(null);
   const [preview, setPreview] = useState<any>(null);
   const [enterpriseCreateOpen, setEnterpriseCreateOpen] = useState(false);
+  const dropdownParam = filterParamsByTab[activeTab] || defaultFilterParam;
 
   const handleEmployeeChat = React.useCallback(
     (employee: any, question?: string) => {
@@ -116,7 +121,7 @@ const DigitalEmployeesPage: React.FC = () => {
 
   const getSearch = React.useCallback(
     debounce((otherParam?: any) => {
-      const refs = activeTab === 'available' ? [AvailableGroupRef, AvailableEmployeeRef] : [OfficialEmployeeRef];
+      const refs = activeTab === 'available' ? [AvailableRef] : [OfficialEmployeeRef];
       refs.forEach((item) => item.current?.getSearch?.(keywords[activeTab] || '', otherParam || dropdownParam));
     }, 500),
     [activeTab, dropdownParam, keywords]
@@ -141,8 +146,11 @@ const DigitalEmployeesPage: React.FC = () => {
   const tabBarExtraContent = (
     <Space>
       <ResourceFilter
+        resourceType="DIG_EMPLOYEE"
+        // 按一级 tab 重建筛选组件，加载该 tab 上次保存的筛选条件。
+        key={activeTab}
         onOk={(param: any) => {
-          setDropdownParam(param);
+          setFilterParamsByTab((current) => ({ ...current, [activeTab]: param }));
           getSearch(param);
         }}
         defaultParam={dropdownParam}
@@ -229,7 +237,11 @@ const DigitalEmployeesPage: React.FC = () => {
           onChange={(key) => {
             const nextTab = key;
             const nextSearchParams = new URLSearchParams(searchParams);
-            setDropdownParam(getDefaultParams());
+            const nextFilterParam = filterParamsByTab[nextTab] || defaultFilterParam;
+            setFilterParamsByTab((current) => ({
+              ...current,
+              [nextTab]: nextFilterParam,
+            }));
             nextSearchParams.set('tab', nextTab);
             setActiveTab(nextTab);
             setSearchParams(nextSearchParams);
@@ -237,23 +249,10 @@ const DigitalEmployeesPage: React.FC = () => {
         >
           <Tabs.TabPane tab="我可用的" key="available">
             <div id="availableDigitalEmployeesScroller" className={styles.tabContent}>
-              <div className={styles.sectionTitle}>数字员工组</div>
               <AllDigitalEmployees
-                mode="group"
+                mode="all"
                 source="available"
-                ref={AvailableGroupRef}
-                onEmployeeClick={setPreview}
-                onChatEmployee={handleEmployeeChat}
-                hideCategories
-                buildFilterParam={buildDigitalEmployeeFilterParam}
-                compactLayout
-                scrollableTarget="availableDigitalEmployeesScroller"
-              />
-              <div className={styles.sectionTitle}>数字员工</div>
-              <AllDigitalEmployees
-                mode="employee"
-                source="available"
-                ref={AvailableEmployeeRef}
+                ref={AvailableRef}
                 onEmployeeClick={setPreview}
                 onChatEmployee={handleEmployeeChat}
                 hideCategories
