@@ -178,7 +178,10 @@ public class RedisConfiguration {
 
     @Bean
     public org.springframework.session.config.SessionRepositoryCustomizer<RedisSessionRepository> sessionRepositoryCustomizer() {
-        return repository -> repository.setDefaultMaxInactiveInterval(sessionTimeout);
+        return repository -> {
+            repository.setDefaultMaxInactiveInterval(sessionTimeout);
+            repository.setRedisSessionMapper(new SafeRedisSessionMapper());
+        };
     }
 
     @Bean
