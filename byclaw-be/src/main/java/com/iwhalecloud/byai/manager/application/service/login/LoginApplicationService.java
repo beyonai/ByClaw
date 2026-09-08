@@ -399,7 +399,7 @@ public class LoginApplicationService {
      * @return ResponseUtil
      */
     public ResponseUtil logout(HttpServletRequest request) {
-        HttpSession session = request.getSession();
+        HttpSession session = request.getSession(false);
         if (session == null) {
             return ResponseUtil.fail(I18nUtil.get("login.user.not.logged.in.logout"));
         }
