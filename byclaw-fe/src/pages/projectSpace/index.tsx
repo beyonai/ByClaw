@@ -18,7 +18,12 @@ import { ResourceType } from '@/components/QueryInput/RichInput/utils/constants'
 import { agentTypeMap } from '@/constants/agent';
 import { clearEasyConfirmInputDraft } from '@/components/ChatLayoutComp/components/EasyConfirm';
 import { getPublicPath } from '@/utils';
-import { activateDesktopProject, registerDesktopProject, removeDesktopProject } from '@/service/common/desktopLocal';
+import {
+  activateDesktopProject,
+  registerDesktopProject,
+  removeDesktopProject,
+  renameDesktopProject,
+} from '@/service/common/desktopLocal';
 import {
   createProject,
   deleteProject,
@@ -296,6 +301,11 @@ const ProjectSpacePage: React.FC = () => {
             projectId: Number(editingProject.projectId),
             resources,
           });
+          if (isDesktop && localDirectories?.length) {
+            await registerDesktopProject(editingProject.projectId, localDirectories, projectName);
+          } else if (isDesktop) {
+            await renameDesktopProject(editingProject.projectId, projectName);
+          }
         } else {
           const response = await createProject(
             {
@@ -310,7 +320,7 @@ const ProjectSpacePage: React.FC = () => {
           );
           savedProjectId = getProjectIdFromSaveResponse(response);
           if (!savedProjectId) throw new Error(intl.formatMessage({ id: 'projectSpace.message.createFailed' }));
-          if (localDirectories?.length) await registerDesktopProject(savedProjectId, localDirectories);
+          if (localDirectories?.length) await registerDesktopProject(savedProjectId, localDirectories, projectName);
         }
 
         await saveProjectMembers({
@@ -351,7 +361,17 @@ const ProjectSpacePage: React.FC = () => {
         setEditLoading(false);
       }
     },
-    [EventEmitter, editLoading, editingProject, fetchProjects, intl, projects, refreshProject, setSelectedProjectId]
+    [
+      EventEmitter,
+      editLoading,
+      editingProject,
+      fetchProjects,
+      intl,
+      isDesktop,
+      projects,
+      refreshProject,
+      setSelectedProjectId,
+    ]
   );
 
   const handleOpenRenameProject = useCallback((project: ProjectSpace) => {

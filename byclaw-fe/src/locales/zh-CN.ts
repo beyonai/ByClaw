@@ -1042,6 +1042,7 @@ export default {
   'workspaceSider.fileCenter': '文件中心',
   'workspaceSider.projectSection': '项目列表',
   'workspaceSider.localSessions': '本地会话',
+  'workspaceSider.tasks': '任务',
   'workspaceSider.projectCount': '项目 ({count})',
   'workspaceSider.collapseSidebar': '收起侧边栏',
   'workspaceSider.expandSidebar': '展开侧边栏',

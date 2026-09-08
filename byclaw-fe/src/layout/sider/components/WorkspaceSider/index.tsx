@@ -30,9 +30,9 @@ import WorkspaceProjectActions from './WorkspaceProjectActions';
 import WorkspaceSessionActions from './WorkspaceSessionActions';
 import WorkspaceUserBar from './WorkspaceUserBar';
 import styles from './index.module.less';
+import { DESKTOP_UNASSIGNED_SESSION_SCOPE, hasDesktopTaskSessions } from './workspaceSiderState';
 
 const PROJECT_SESSION_PAGE_SIZE = 5;
-const DESKTOP_UNASSIGNED_SESSION_SCOPE = '__desktop_unassigned_sessions__';
 const EXPANDED_PROJECTS_STORAGE_KEY = 'byclaw.workspaceSider.expandedProjectIds';
 
 const RESOURCE_PATHS = [
@@ -392,11 +392,6 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
     [desktopMode, updateProjectSessionState]
   );
 
-  useEffect(() => {
-    if (!desktopMode) return;
-    void fetchProjectSessions(DESKTOP_UNASSIGNED_SESSION_SCOPE);
-  }, [desktopMode, fetchProjectSessions]);
-
   const selectProject = useCallback(
     (project: ProjectSpace, shouldExpand = true) => {
       const projectId = normalizeProjectId(project.projectId);
@@ -417,6 +412,11 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
     },
     [EventEmitter, updateExpandedProjectIds, updateProjectScopeId]
   );
+
+  useEffect(() => {
+    if (!desktopMode) return;
+    void fetchProjectSessions(DESKTOP_UNASSIGNED_SESSION_SCOPE);
+  }, [desktopMode, fetchProjectSessions]);
 
   useEffect(() => {
     if (initializedProjectRef.current || !projects.length) return;
@@ -662,6 +662,17 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
     [fetchProjectSessions, updateExpandedProjectIds]
   );
 
+  const handleDesktopTaskToggle = useCallback(() => {
+    const isExpanded = expandedProjectIdsRef.current.has(DESKTOP_UNASSIGNED_SESSION_SCOPE);
+    updateExpandedProjectIds((currentIds) => {
+      const nextIds = new Set(currentIds);
+      if (isExpanded) nextIds.delete(DESKTOP_UNASSIGNED_SESSION_SCOPE);
+      else nextIds.add(DESKTOP_UNASSIGNED_SESSION_SCOPE);
+      return nextIds;
+    });
+    if (!isExpanded) void fetchProjectSessions(DESKTOP_UNASSIGNED_SESSION_SCOPE);
+  }, [fetchProjectSessions, updateExpandedProjectIds]);
+
   const handleProjectClick = useCallback(
     (project: ProjectSpace) => {
       handleProjectExpandToggle(project);
@@ -897,14 +908,6 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
         </div>
 
         <div className={styles.projectList} role="tree">
-          {desktopMode && (
-            <div className={styles.localSessionGroup} role="group">
-              <div className={styles.localSessionGroupTitle}>
-                {intl.formatMessage({ id: 'workspaceSider.localSessions' })}
-              </div>
-              {renderProjectSessions()}
-            </div>
-          )}
           {loading && !projects.length && (
             <div className={styles.projectLoading} role="status">
               <LoadingOutlined spin />
@@ -950,6 +953,33 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
               </div>
             );
           })}
+          {hasDesktopTaskSessions(desktopMode, sessionStateMap[DESKTOP_UNASSIGNED_SESSION_SCOPE]) && (
+            <div
+              className={styles.projectItem}
+              role="treeitem"
+              aria-expanded={expandedProjectIds.has(DESKTOP_UNASSIGNED_SESSION_SCOPE)}
+            >
+              <div className={styles.projectRow}>
+                <button type="button" className={styles.projectButton} onClick={handleDesktopTaskToggle}>
+                  <ShareAltOutlined className={styles.projectIcon} aria-hidden="true" />
+                  <span className={styles.projectName}>{intl.formatMessage({ id: 'workspaceSider.tasks' })}</span>
+                </button>
+                <button
+                  type="button"
+                  className={styles.projectExpandButton}
+                  aria-label={intl.formatMessage({
+                    id: expandedProjectIds.has(DESKTOP_UNASSIGNED_SESSION_SCOPE)
+                      ? 'workspaceSider.collapseProject'
+                      : 'workspaceSider.expandProject',
+                  })}
+                  onClick={handleDesktopTaskToggle}
+                >
+                  {expandedProjectIds.has(DESKTOP_UNASSIGNED_SESSION_SCOPE) ? <DownOutlined /> : <RightOutlined />}
+                </button>
+              </div>
+              {expandedProjectIds.has(DESKTOP_UNASSIGNED_SESSION_SCOPE) && renderProjectSessions()}
+            </div>
+          )}
         </div>
       </section>
       <WorkspaceUserBar />

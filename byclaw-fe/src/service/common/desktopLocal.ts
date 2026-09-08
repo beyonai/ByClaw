@@ -80,9 +80,10 @@ export async function getDesktopLocalRequest(url: string, method: Method, data: 
 
 export async function registerDesktopProject(
   projectId: string | number,
-  directories: Array<{ name: string; path: string; primary: boolean }>
+  directories: Array<{ name: string; path: string; primary: boolean }>,
+  projectName?: string
 ) {
-  return window.byclawDesktop?.projects?.register?.({ projectId, directories });
+  return window.byclawDesktop?.projects?.register?.({ projectId, projectName, directories });
 }
 
 export function activateDesktopProject(projectId?: string | number | null) {
@@ -91,4 +92,8 @@ export function activateDesktopProject(projectId?: string | number | null) {
 
 export function removeDesktopProject(projectId: string | number) {
   return window.byclawDesktop?.projects?.remove?.({ projectId });
+}
+
+export function renameDesktopProject(projectId: string | number, projectName: string) {
+  return window.byclawDesktop?.projects?.rename?.({ projectId, projectName });
 }

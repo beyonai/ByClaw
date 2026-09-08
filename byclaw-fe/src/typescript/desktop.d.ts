@@ -120,10 +120,13 @@ interface IDesktopBridge {
   projects?: {
     register?: (params: {
       projectId: string | number;
+      projectName?: string;
       directories: Array<{ id?: string; name: string; path: string; primary: boolean }>;
     }) => Promise<void>;
     remove?: (params: { projectId: string | number }) => Promise<void>;
+    rename?: (params: { projectId: string | number; projectName: string }) => Promise<void>;
     activate?: (params: { projectId?: string | number | null }) => Promise<void>;
+    listLocal?: () => Promise<{ projects: Array<{ projectId: string; projectName?: string }> }>;
   };
   sessions?: {
     /** 仅返回由当前桌面外壳登记的本地会话；projectId=null 表示无项目会话。 */

@@ -1047,6 +1047,7 @@ export default {
   'workspaceSider.fileCenter': 'File Center',
   'workspaceSider.projectSection': 'Project list',
   'workspaceSider.localSessions': 'Local sessions',
+  'workspaceSider.tasks': 'Tasks',
   'workspaceSider.projectCount': 'Projects ({count})',
   'workspaceSider.collapseSidebar': 'Collapse sidebar',
   'workspaceSider.expandSidebar': 'Expand sidebar',
