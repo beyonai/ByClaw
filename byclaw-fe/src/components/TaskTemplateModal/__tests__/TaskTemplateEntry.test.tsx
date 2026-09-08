@@ -131,4 +131,48 @@ describe('TaskTemplateEntry project selector', () => {
 
     expect(screen.getByTestId('project-onboarding-wizard')).toBeInTheDocument();
   });
+
+  it('clears a deleted project from the selector value after the project list refreshes', async () => {
+    const { rerender } = render(<TaskTemplateEntry onApply={jest.fn()} />);
+
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: '请选择项目' }));
+    fireEvent.change(screen.getByRole('combobox', { name: '请选择项目' }), { target: { value: '项目二' } });
+    fireEvent.click(await screen.findByText('项目二'));
+
+    mockUseProjectList.mockReturnValue({
+      projects: [{ projectId: '1', projectName: '项目一', projectType: 'normal' } as any],
+      loading: false,
+      keyword: '',
+      setKeyword: jest.fn(),
+      fetchProjects: jest.fn(),
+      hasMore: false,
+      loadMoreProjects: jest.fn(),
+    });
+    rerender(<TaskTemplateEntry onApply={jest.fn()} />);
+
+    await waitFor(() => {
+      expect(mockUpdateProjectScopeId).toHaveBeenCalledWith('1');
+    });
+    expect(screen.getByRole('combobox', { name: '请选择项目' })).not.toHaveValue('2');
+  });
+
+  it('does not display a persisted project id when no projects are available', async () => {
+    mockUseProjectScopeId.mockReturnValue(['20059102', mockUpdateProjectScopeId]);
+    mockUseProjectList.mockReturnValue({
+      projects: [],
+      loading: false,
+      keyword: '',
+      setKeyword: jest.fn(),
+      fetchProjects: jest.fn(),
+      hasMore: false,
+      loadMoreProjects: jest.fn(),
+    });
+
+    render(<TaskTemplateEntry onApply={jest.fn()} />);
+
+    await waitFor(() => {
+      expect(mockUpdateProjectScopeId).toHaveBeenCalledWith(undefined);
+    });
+    expect(screen.queryByRole('combobox', { name: '请选择项目' })).not.toBeInTheDocument();
+  });
 });
