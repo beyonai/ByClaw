@@ -14,7 +14,7 @@ SET param_value = (
         'skillDescZh', '通过统一邮箱运行时安全地读取和管理邮件。',
         'skillDescEn', 'Read and manage email safely through the unified mail runtime.'
     )::jsonb
-)::text
+)::text)
 WHERE c.param_code = 'OPENCLAW_BUNDLED_SKILLS'
   AND jsonb_typeof(c.param_value::jsonb) = 'array'
   AND NOT EXISTS (
