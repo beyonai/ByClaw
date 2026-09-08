@@ -28,6 +28,7 @@ const LOCAL_ROUTES = new Set([
   'POST /byaiService/project/repo/file/content',
   'POST /byaiService/devloop/task/changes',
   'POST /byaiService/devloop/task/file-diff',
+  'GET /byaiService/assiman/removeConversation',
 ]);
 
 function routeKey(url: string, method: Method): string {
