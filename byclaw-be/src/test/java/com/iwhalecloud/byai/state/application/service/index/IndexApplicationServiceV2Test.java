@@ -142,16 +142,30 @@ class IndexApplicationServiceV2Test {
 
         assertThat(selectBody(mapperXml, "selectAuthDigitEmploy"))
             .contains("a.resource_biz_type = 'DIG_EMPLOYEE'")
+            .contains("resourceStatus != null")
+            .contains("a.resource_status = #{resourceStatus}")
+            .contains("a.resource_status = 2")
             .doesNotContain("coalesce(b.agent_type, '') != '017'");
         assertThat(selectBody(mapperXml, "queryMyUsual"))
             .contains("a.resource_biz_type = 'DIG_EMPLOYEE'")
+            .contains("resourceStatus != null")
+            .contains("a.resource_status = #{resourceStatus}")
             .doesNotContain("coalesce(b.agent_type, '') != '017'");
         assertThat(selectBody(mapperXml, "queryRecentlyAdded"))
             .contains("a.resource_biz_type = 'DIG_EMPLOYEE'")
+            .contains("resourceStatus != null")
+            .contains("a.resource_status = #{resourceStatus}")
             .doesNotContain("coalesce(b.agent_type, '') != '017'");
-
-        // 管理端的普通数字员工列表仍保持分类，不把员工组混入原列表。
-        assertThat(selectBody(mapperXml, "queryMyCreated")).contains("coalesce(b.agent_type, '') != '017'");
+        assertThat(selectBody(mapperXml, "queryMyCreated"))
+            .contains("resourceStatus != null")
+            .contains("a.resource_status = #{resourceStatus}")
+            .contains("coalesce(b.agent_type, '') != '017'");
+        assertThat(selectBody(mapperXml, "queryAuthDoc"))
+            .contains("and a.resource_status = 2")
+            .doesNotContain("resourceStatus != null");
+        assertThat(selectBody(mapperXml, "queryAuthTools"))
+            .contains("and a.resource_status = 2")
+            .doesNotContain("resourceStatus != null");
     }
 
     private String selectBody(String mapperXml, String statementId) {

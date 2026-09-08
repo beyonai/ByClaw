@@ -235,7 +235,14 @@
         <where>
             <!-- 基础过滤条件 -->
             and a.resource_biz_type = 'DIG_EMPLOYEE'
-            and a.resource_status = 2
+            <choose>
+                <when test="resourceStatus != null">
+                    and a.resource_status = #{resourceStatus}
+                </when>
+                <otherwise>
+                    and a.resource_status = 2
+                </otherwise>
+            </choose>
             <!-- 黑名单排除：不能有黑名单记录 -->
             and (k.black_count = 0 or k.black_count is null)
             <!-- 类型过滤：all-全部，owner-我创建的，authorize-授权给我的 -->
@@ -358,7 +365,14 @@
         <where>
             <!-- 基础过滤条件 -->
             and a.resource_biz_type = 'DIG_EMPLOYEE'
-            and a.resource_status = 2
+            <choose>
+                <when test="resourceStatus != null">
+                    and a.resource_status = #{resourceStatus}
+                </when>
+                <otherwise>
+                    and a.resource_status = 2
+                </otherwise>
+            </choose>
             <!-- 红名单判断：必须有红名单授权或自己创建的 -->
             and (k.red_count > 0 or a.create_by = #{userId})
             <!-- 黑名单排除：不能有黑名单记录 -->
@@ -439,7 +453,14 @@
                  ) k on a.resource_id = k.grant_obj_id
         <where>
             and a.resource_biz_type = 'DIG_EMPLOYEE'
-            and a.resource_status = 2
+            <choose>
+                <when test="resourceStatus != null">
+                    and a.resource_status = #{resourceStatus}
+                </when>
+                <otherwise>
+                    and a.resource_status = 2
+                </otherwise>
+            </choose>
             <!-- 红名单判断：必须有红名单授权 -->
             and (k.red_count > 0 or a.create_by = #{userId})
             <!-- 黑名单排除：不能有黑名单记录 -->
@@ -515,7 +536,14 @@
         <where>
             <!-- 基础过滤条件 -->
             and a.resource_biz_type = 'DIG_EMPLOYEE'
-            and a.resource_status = 2
+            <choose>
+                <when test="resourceStatus != null">
+                    and a.resource_status = #{resourceStatus}
+                </when>
+                <otherwise>
+                    and a.resource_status = 2
+                </otherwise>
+            </choose>
             and coalesce(b.agent_type, '') != '017'
             <if test="userId !=null">
                 and a.create_by = #{userId}
