@@ -1,7 +1,7 @@
 import React from 'react';
 import { Button } from 'antd';
 import { useIntl } from '@umijs/max';
-import { isPlainObject } from 'lodash';
+import { isPlainObject, isEmpty } from 'lodash';
 import DesktopOutlined from '@ant-design/icons/DesktopOutlined';
 import useAppStore from '@/models/common/useAppStore';
 import useGlobal from '@/hooks/useGlobal';
@@ -43,7 +43,7 @@ export default function VNC() {
       type="text"
       onClick={async () => {
         const resolvedSandboxesInfo = await resolveSandboxesInfo(sandboxesInfo);
-        if (!resolvedSandboxesInfo?.sandboxId) return;
+        if (isEmpty(resolvedSandboxesInfo)) return;
 
         const url = getVNCUrl(resolvedSandboxesInfo);
         setSiderCollapsed(true);

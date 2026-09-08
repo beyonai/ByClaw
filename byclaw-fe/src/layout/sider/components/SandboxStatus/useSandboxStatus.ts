@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { getSandboxInfo, removeSandbox, launchSandboxByUserCode, type SandboxInfo } from '@/service/sandbox';
+import { getSandboxInfo, removeSandbox, launchSandboxByUserCode } from '@/service/sandbox';
+import type { ISandboxesInfo } from '@/models/common/useAppStore';
 import { calculateSandboxStatus, type SandboxAggregateStatus } from './statusUtils';
 
 // 稳定态（RUNNING/stopped）30 秒足够；过渡态（RELEASING）压到 5 秒，否则状态点最长要等 30 秒才跟上。
@@ -28,7 +29,7 @@ export default function useSandboxStatus(userCode: string) {
     }
   }, [data]);
 
-  const restartSandbox = async (sandbox: SandboxInfo) => {
+  const restartSandbox = async (sandbox: ISandboxesInfo) => {
     // 1. 只释放用户选中的沙箱服务，避免影响其他同时运行的容器。
     await removeSandbox({ userCode, resourceId: null, sandboxType: sandbox.sandboxType });
 

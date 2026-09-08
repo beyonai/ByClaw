@@ -3,7 +3,7 @@ import { Dropdown, Tooltip, message, Modal } from 'antd';
 import type { MenuProps } from 'antd';
 import { useIntl } from '@umijs/max';
 import classNames from 'classnames';
-import type { SandboxInfo } from '@/service/sandbox';
+import type { ISandboxesInfo } from '@/models/common/useAppStore';
 import useSandboxStatus from './useSandboxStatus';
 import {
   getSandboxItemStatus,
@@ -23,7 +23,7 @@ const SandboxStatusIndicator: React.FC<SandboxStatusIndicatorProps> = ({ userCod
   const intl = useIntl();
   const { status, sandboxes, refetch, restartSandbox } = useSandboxStatus(userCode);
   const [isRestarting, setIsRestarting] = useState(false);
-  const [restartTarget, setRestartTarget] = useState<SandboxInfo | null>(null);
+  const [restartTarget, setRestartTarget] = useState<ISandboxesInfo | null>(null);
   const summary = summarizeSandboxes(sandboxes);
 
   const handleRestartConfirm = async () => {
@@ -41,7 +41,7 @@ const SandboxStatusIndicator: React.FC<SandboxStatusIndicatorProps> = ({ userCod
     }
   };
 
-  const handleRestart = (sandbox: SandboxInfo) => {
+  const handleRestart = (sandbox: ISandboxesInfo) => {
     setRestartTarget(sandbox);
   };
 

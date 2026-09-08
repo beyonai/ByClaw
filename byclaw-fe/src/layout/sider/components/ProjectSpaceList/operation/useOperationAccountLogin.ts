@@ -4,20 +4,10 @@ import { useIntl, useSelector } from '@umijs/max';
 import useGlobal from '@/hooks/useGlobal';
 import useAppStore from '@/models/common/useAppStore';
 import { loginOperationAccount } from '@/service/devloop';
-import { getSandboxInfo, launchSandboxByUserCode, navigateSandboxBrowser, type SandboxInfo } from '@/service/sandbox';
+import { getSandboxInfo, launchSandboxByUserCode, navigateSandboxBrowser } from '@/service/sandbox';
 import type { ISandboxesInfo } from '@/models/common/useAppStore';
 import { getVNCUrl } from '@/utils/chat';
 import type { OperationAccount, OperationIdentifier } from './types';
-
-// 沙箱接口的 instanceEndpoints 为开放键值，全局 store 只声明已知端点，写入前按 store 结构收敛。
-const toStoreSandboxInfo = (sandbox: SandboxInfo): ISandboxesInfo => ({
-  endpoints: sandbox.endpoints,
-  instanceEndpoints: sandbox.instanceEndpoints as ISandboxesInfo['instanceEndpoints'],
-  sandboxId: sandbox.sandboxId,
-  sandboxType: sandbox.sandboxType,
-  userCode: sandbox.userCode,
-  token: sandbox.token,
-});
 
 // 四个平台复用采集沙箱中的浏览器，登录入口只维护平台地址，不再创建独立 Recorder 会话。
 export const OPERATION_PLATFORM_LOGIN_URLS: Record<string, string> = {
@@ -30,6 +20,8 @@ export const OPERATION_PLATFORM_LOGIN_URLS: Record<string, string> = {
   Douyin: 'https://creator.douyin.com/',
   douyin: 'https://creator.douyin.com/',
 };
+
+const EmptyArr: ISandboxesInfo[] = [];
 
 /** 自定义链接平台的登录地址来自账号自身的 customUrl，其余平台使用预设站点。 */
 export const resolveOperationAccountLoginUrl = (account: OperationAccount): string | undefined =>
@@ -59,24 +51,24 @@ export function useOperationAccountLogin(onLoggedIn?: () => void | Promise<void>
   }, [EventEmitter]);
 
   // 优先复用采集流程已经启动的沙箱；首次使用尚无沙箱时按当前用户启动默认 openclaw 沙箱。
-  const resolveSandbox = useCallback(async (): Promise<SandboxInfo> => {
-    const currentSandboxes = await getSandboxInfo({});
+  const resolveSandbox = useCallback(async (): Promise<ISandboxesInfo> => {
+    const currentSandboxes = (await getSandboxInfo({})) || EmptyArr;
     const runningSandbox =
-      currentSandboxes.find((sandbox) => sandbox.status === 'RUNNING' && !!sandbox.sandboxId) ||
-      currentSandboxes.find((sandbox) => !!sandbox.sandboxId);
+      currentSandboxes?.find((sandbox) => sandbox.status === 'RUNNING' && !!sandbox.sandboxId) ||
+      currentSandboxes?.find((sandbox) => !!sandbox.sandboxId);
     if (runningSandbox) {
-      useAppStore.setState({ sandboxesInfo: toStoreSandboxInfo(runningSandbox) });
+      useAppStore.setState({ sandboxesInfo: currentSandboxes });
       return runningSandbox;
     }
     if (!userInfo?.userCode) throw new Error('missing_user_code');
     const launchedSandbox = await launchSandboxByUserCode({ userCode: userInfo.userCode, serviceKey: 'openclaw' });
-    const sandboxInfo: SandboxInfo = {
+    const sandboxInfo: ISandboxesInfo = {
       ...launchedSandbox,
       userCode: userInfo.userCode,
       sandboxType: 'byclaw',
       status: 'RUNNING',
     };
-    useAppStore.setState({ sandboxesInfo: toStoreSandboxInfo(sandboxInfo) });
+    useAppStore.setState({ sandboxesInfo: [...currentSandboxes, sandboxInfo] });
     return sandboxInfo;
   }, [userInfo?.userCode]);
 
