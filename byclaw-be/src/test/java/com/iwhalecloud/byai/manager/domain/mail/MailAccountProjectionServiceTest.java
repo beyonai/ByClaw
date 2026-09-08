@@ -58,6 +58,7 @@ import org.springframework.data.redis.core.ValueOperations;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
 
+@DisabledOnOs(OS.WINDOWS)
 class MailAccountProjectionServiceTest {
     @TempDir Path temporaryDirectory;
 

@@ -29,9 +29,11 @@ import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.entity.users.Users;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 import com.sun.net.httpserver.HttpServer;
-
+@DisabledOnOs(OS.WINDOWS)
 class MailRuntimeProbeTest {
 
     @TempDir

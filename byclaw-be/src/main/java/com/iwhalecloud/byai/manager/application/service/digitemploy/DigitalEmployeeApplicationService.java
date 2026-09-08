@@ -22,6 +22,7 @@ import com.iwhalecloud.byai.manager.domain.aimodel.service.AIService;
 import com.iwhalecloud.byai.manager.domain.aimodel.service.AiModelService;
 import com.iwhalecloud.byai.manager.domain.aimodel.service.AiPromptService;
 import com.iwhalecloud.byai.manager.domain.auth.enums.Color;
+import com.iwhalecloud.byai.manager.domain.auth.service.PrivilegeGrantService;
 import com.iwhalecloud.byai.manager.domain.resource.enums.OperationTypeEnum;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceBizTypeEnum;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus;
@@ -93,6 +94,7 @@ import com.iwhalecloud.byai.common.feign.request.conversation.AgentPrologueDto;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.util.ListUtil;
 import com.iwhalecloud.byai.common.util.MapParamUtil;
+import com.iwhalecloud.byai.common.util.RedisUtil.RedisKVPair;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.common.page.PageInfo;
@@ -108,6 +110,7 @@ import com.iwhalecloud.byai.common.constants.Constants;
 import com.iwhalecloud.byai.common.constants.resource.WorkerAgentType;
 import com.iwhalecloud.byai.common.util.RedisUtil;
 import jakarta.servlet.http.HttpSession;
+
 import java.util.ArrayList;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -126,6 +129,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
+
 import com.iwhalecloud.byai.state.domain.resource.service.ResourceAuthContextService;
 import com.iwhalecloud.byai.state.domain.index.service.IndexService;
 import com.iwhalecloud.byai.common.feign.client.FeignPythonToolService;
@@ -136,6 +140,7 @@ import com.iwhalecloud.byai.common.feign.response.PythonToolResponse;
 import com.iwhalecloud.byai.common.feign.response.knowledge.ModelDto;
 import com.iwhalecloud.byai.common.feign.response.python.EmployeeAuditResult;
 import com.iwhalecloud.byai.state.domain.resource.service.ResourceArtifactStorageService;
+import org.apache.commons.beanutils.BeanUtils;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.collections4.MapUtils;
 import org.apache.commons.lang3.math.NumberUtils;
@@ -1228,7 +1233,6 @@ public class DigitalEmployeeApplicationService {
         } else {
             ssResource = ssResourceService.findById(digitalEmployeeId);
             validateDigitalEmployeeResourceInstallPermission(ssResource);
-
         }
 
         List<SsResourceRelDetail> resourceRelDetails = ssResourceRelDetailService.findByResourceId(digitalEmployeeId);
@@ -1532,9 +1536,7 @@ public class DigitalEmployeeApplicationService {
         }
 
         SsResource ssResource = ssResourceService.findById(digitalEmployeeId);
-
         validateDigitalEmployeeResourceUninstallPermission(ssResource);
-
 
         List<LegacyWorkspaceSkill> legacyWorkspaceSkills = this.findLegacyWorkspaceSkillsToDelete(ssResource,
             uninstallRelResources);

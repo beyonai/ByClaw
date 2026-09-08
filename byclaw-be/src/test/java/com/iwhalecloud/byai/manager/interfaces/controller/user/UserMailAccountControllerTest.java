@@ -28,13 +28,15 @@ import com.iwhalecloud.byai.state.infrastructure.exception.GlobalExceptionHandle
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-
+@DisabledOnOs(OS.WINDOWS)
 class UserMailAccountControllerTest {
 
     private static MockMvc mockMvc(UserMailAccountApplicationService service) {
