@@ -2,112 +2,103 @@ package com.iwhalecloud.byai.manager.vo.auth;
 
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
-import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Getter;
 import lombok.Setter;
 
 /**
- * 当前登录用户对单个资源的 6 项操作权限。
- * 与列表查询返回的 canEdit/canManageAuth/... 字段语义一致，由
- * {@link com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService#queryResourceOperationPermissions(Long)}
- * 计算返回。
+ * 当前登录用户对单个资源的操作权限。
+ * 与列表查询返回的 canEdit/canManageAuth 等字段语义一致。
  *
  * @author qin.guoquan
  * @date 2026-05-06
  */
 @Getter
 @Setter
-@Schema(description = "资源操作权限")
 public class ResourceOperationPermissionsVo {
 
     /**
      * 资源 ID。
      */
     @JsonSerialize(using = ToStringSerializer.class)
-    @Schema(description = "资源 ID")
     private Long resourceId;
 
     /**
      * 资源归属类型：personal / personal_default / enterprise。
      */
-    @Schema(description = "资源归属类型")
     private String ownerType;
 
     /**
      * 资源业务类型：DIG_EMPLOYEE / KG_DOC / TOOLKIT 等。
      */
-    @Schema(description = "资源业务类型")
     private String resourceBizType;
 
     /**
      * 是否具备资源管理权限。
      */
-    @Schema(description = "是否具备资源管理权限")
-    private Boolean hasManagePermission;
+    private boolean hasManagePermission;
 
     /**
      * 是否具备资源使用权限。
      */
-    @Schema(description = "是否具备资源使用权限")
-    private Boolean hasUsePermission;
+    private boolean hasUsePermission;
 
     /**
      * 是否允许进入资源详情。
      */
-    @Schema(description = "是否允许进入资源详情")
-    private Boolean canViewDetail;
+    private boolean canViewDetail;
 
     /**
      * 是否可编辑信息。
      */
-    @Schema(description = "是否可编辑信息")
-    private Boolean canEdit;
+    private boolean canEdit;
 
     /**
      * 是否可管理授权（设置资源管理员）。
      */
-    @Schema(description = "是否可管理授权")
-    private Boolean canManageAuth;
+    private boolean canManageAuth;
 
     /**
      * 是否可设置使用授权（设置可使用本资源的成员）。
      */
-    @Schema(description = "是否可设置使用授权")
-    private Boolean canUseAuth;
+    private boolean canUseAuth;
 
     /**
      * 是否可注销资源。
      */
-    @Schema(description = "是否可注销资源")
-    private Boolean canDelete;
+    private boolean canDelete;
 
     /**
      * 是否可发起使用申请。
      */
-    @Schema(description = "是否可发起使用申请")
-    private Boolean canApplyUse;
+    private boolean canApplyUse;
 
     /**
      * 当前用户是否已有待审核的使用申请。
      */
-    @Schema(description = "是否已有待审核的使用申请")
-    private Boolean useApplyPending;
+    private boolean useApplyPending;
 
     /**
      * 是否可审核使用申请。
      */
-    @Schema(description = "是否可审核使用申请")
-    private Boolean canAuditUse;
+    private boolean canAuditUse;
 
     /**
-     * 是否可设为默认（仅数字员工类型有值，其他业务类型为 null）。
+     * 是否可设为默认（仅数字员工类型有意义，其他业务类型为 false）。
      */
-    @Schema(description = "是否可设为默认（仅数字员工有效）")
-    private Boolean canSetDefault;
+    private boolean canSetDefault;
 
     /**
-     * 是否可恢复资源（仅当资源状态为已注销时为true）。
+     * 是否可恢复资源（仅当资源状态为已注销时为 true）。
      */
-    @Schema(description = "是否可恢复资源")
-    private Boolean canRestore;
+    private boolean canRestore;
+
+    /**
+     * 是否可上架。仅数字员工且当前为已下架、具备管理权限时为 true。
+     */
+    private boolean canOnShelf;
+
+    /**
+     * 是否可下架。仅数字员工且当前为已上架、具备管理权限时为 true。
+     */
+    private boolean canOffShelf;
 }

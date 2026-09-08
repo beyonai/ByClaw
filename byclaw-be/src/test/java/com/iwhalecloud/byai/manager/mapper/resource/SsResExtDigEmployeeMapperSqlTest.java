@@ -57,4 +57,38 @@ class SsResExtDigEmployeeMapperSqlTest {
                 .doesNotContain("grant_type in ('AVAILABLE_USE', 'FORCE_USE'");
         }
     }
+
+    @Test
+    void personalAndManageListQueries_mapResourceStatus() throws IOException {
+        String resourcePath = "/com/iwhalecloud/byai/manager/mapper/resource/SsResExtDigEmployeeMapper.xml";
+        try (var input = getClass().getResourceAsStream(resourcePath)) {
+            assertThat(input).isNotNull();
+            String mapperXml = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+
+            assertThat(selectBody(mapperXml, "selectDigitalEmployeeByQo")).contains("a.resource_status");
+            assertThat(selectBody(mapperXml, "selectPersonalDigitalEmployeeByQo")).contains("a.resource_status");
+            assertThat(resultMapBody(mapperXml, "digitalEmployeePageVoResultMap"))
+                .contains("column=\"resource_status\" property=\"resourceStatus\"");
+            assertThat(resultMapBody(mapperXml, "digitalEmployeeVoResultMap"))
+                .contains("column=\"resource_status\" property=\"resourceStatus\"");
+        }
+    }
+
+    private static String selectBody(String mapperXml, String statementId) {
+        String startTag = "<select id=\"" + statementId + "\"";
+        int start = mapperXml.indexOf(startTag);
+        assertThat(start).as(statementId + " start").isGreaterThanOrEqualTo(0);
+        int end = mapperXml.indexOf("</select>", start);
+        assertThat(end).as(statementId + " end").isGreaterThan(start);
+        return mapperXml.substring(start, end);
+    }
+
+    private static String resultMapBody(String mapperXml, String resultMapId) {
+        String startTag = "<resultMap id=\"" + resultMapId + "\"";
+        int start = mapperXml.indexOf(startTag);
+        assertThat(start).as(resultMapId + " start").isGreaterThanOrEqualTo(0);
+        int end = mapperXml.indexOf("</resultMap>", start);
+        assertThat(end).as(resultMapId + " end").isGreaterThan(start);
+        return mapperXml.substring(start, end);
+    }
 }

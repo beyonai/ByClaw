@@ -110,7 +110,7 @@ public class PluginModuleRegisterService {
         ssResource.setResourceCode(employeeType.getCode());
         ssResource.setResourceName(employeeType.getDesc());
         ssResource.setResourceDesc(employeeType.getDesc() + "数字员工");
-        ssResource.setResourceStatus(ResourceStatus.LIST.getNum());
+        ssResource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         ssResource.setResourceId(SequenceService.nextVal());
         ssResource.setResourceBizType(ResourceBizTypeEnum.DIG_EMPLOYEE.name());
         ssResource.setCreateBy(CurrentUserHolder.getCurrentUserId());

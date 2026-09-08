@@ -222,6 +222,32 @@ public class DigitalEmployeeController {
     }
 
     /**
+     * 上架数字员工。
+     *
+     * @param employeeIdDTO 资源标识
+     * @return ResponseUtil
+     */
+    @ManageLogAnnotation(name = "数字员工", description = "上架数字员工")
+    @RequestMapping(value = "/shelfDigitalEmployee", method = RequestMethod.POST)
+    public ResponseUtil<String> shelfDigitalEmployee(@RequestBody EmployeeIdDTO employeeIdDTO) {
+        digitalEmployeeApplicationService.shelfDigitalEmployee(employeeIdDTO);
+        return ResponseUtil.success(I18nUtil.get("digemployee.shelf.success"));
+    }
+
+    /**
+     * 下架数字员工。
+     *
+     * @param employeeIdDTO 资源标识
+     * @return ResponseUtil
+     */
+    @ManageLogAnnotation(name = "数字员工", description = "下架数字员工")
+    @RequestMapping(value = "/unShelfDigitalEmployee", method = RequestMethod.POST)
+    public ResponseUtil<String> unShelfDigitalEmployee(@RequestBody EmployeeIdDTO employeeIdDTO) {
+        digitalEmployeeApplicationService.unShelfDigitalEmployee(employeeIdDTO);
+        return ResponseUtil.success(I18nUtil.get("digemployee.unshelf.success"));
+    }
+
+    /**
      * 检查数字员工
      *
      * @param digitalEmployeeDTO 数字员工

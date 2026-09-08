@@ -24,6 +24,25 @@ export const statusOptions = [
   },
 ];
 
+// 数字员工专用状态筛选，值与 digitalEmployeeController 返回的 resourceStatus 一致。
+export const digitalEmployeeStatusOptions = [
+  { label: 'common.all', value: STATUS_ALL_VALUE },
+  { label: 'resourceStatus.draft', value: '0' },
+  { label: 'resourceStatus.pendingShelf', value: '1' },
+  { label: 'resourceStatus.published', value: '2' },
+  { label: 'resourceStatus.unpublished', value: '3' },
+  { label: 'resourceStatus.deleted', value: '-1' },
+];
+
+// 我可用的数字员工类型筛选值。
+export const digitalEmployeeTypeOptions = [
+  { label: 'common.all', value: '' },
+  { label: 'digitalEmployees.tag.personalEmployee', value: 'PERSONAL_EMPLOYEE' },
+  { label: 'digitalEmployees.tag.enterpriseEmployee', value: 'ENTERPRISE_EMPLOYEE' },
+  { label: 'digitalEmployees.filter.personalGroup', value: 'PERSONAL_GROUP' },
+  { label: 'digitalEmployees.filter.enterpriseGroup', value: 'ENTERPRISE_GROUP' },
+];
+
 // 归属筛选选项
 export const belongOptions = [
   {

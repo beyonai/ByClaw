@@ -90,6 +90,9 @@ public class DiscoverQo extends AuthQo {
      */
     private Boolean includeAllResourceStatus;
 
+    /** 官方推荐查询全部状态时排除已删除数据。 */
+    private Boolean excludeDeleted;
+
     /**
      * 仅查询当前账号下可用的数字员工（我创建的 或 红名单授权给我的）。
      * <p>
