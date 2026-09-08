@@ -22,6 +22,7 @@ import AuthListDrawer from '@/pages/manager/components/AuthListDrawer';
 type OwnerTab = 'personal' | 'enterprise' | 'audit';
 type ResourceFilter = 'all' | 'employee' | 'group';
 type EnterpriseScope = 'created' | 'managed';
+type EmployeeStatusFilter = 'all' | '0' | '1' | '2' | '3' | '-1';
 type AuditFilter = 'pending' | 'history';
 
 type AuditRow = ResourceUseApplyAuditItem & {
@@ -86,6 +87,7 @@ const MyEmployeesPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<OwnerTab>('personal');
   const location = useLocation();
   const [resourceFilter, setResourceFilter] = useState<ResourceFilter>('all');
+  const [statusFilter, setStatusFilter] = useState<EmployeeStatusFilter>('all');
   const [enterpriseScope, setEnterpriseScope] = useState<EnterpriseScope>('created');
   const [loading, setLoading] = useState(false);
   const [historyAuditLoading, setHistoryAuditLoading] = useState(false);
@@ -116,7 +118,13 @@ const MyEmployeesPage: React.FC = () => {
       const request = activeTab === 'personal' ? queryMyCreated : queryManagedEnterpriseEmployees;
       const type =
         activeTab === 'enterprise' ? (enterpriseScope === 'created' ? 'owner' : 'managerExcludingOwner') : 'manageable';
-      const commonParams = { pageNum, pageSize: PAGE_SIZE, type, agentType, resourceStatus: 2 };
+      const commonParams = {
+        pageNum,
+        pageSize: PAGE_SIZE,
+        type,
+        agentType,
+        ...(statusFilter === 'all' ? { includeAllResourceStatus: true } : { resourceStatus: Number(statusFilter) }),
+      };
       if (resourceFilter === 'all') {
         const [employees, groups] = await Promise.all([
           request({ ...commonParams, pageNum: 1, pageSize: 200, agentType: undefined }),
@@ -135,7 +143,7 @@ const MyEmployeesPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [activeTab, agentType, enterpriseScope, pageNum, resourceFilter]);
+  }, [activeTab, agentType, enterpriseScope, pageNum, resourceFilter, statusFilter]);
 
   useEffect(() => {
     loadEmployees();
@@ -361,6 +369,7 @@ const MyEmployeesPage: React.FC = () => {
         onChange={(key) => {
           setActiveTab(key as OwnerTab);
           setResourceFilter('all');
+          setStatusFilter('all');
           setEnterpriseScope('created');
           setPageNum(1);
         }}
@@ -377,6 +386,19 @@ const MyEmployeesPage: React.FC = () => {
               ]}
               onChange={(value) => {
                 setResourceFilter(value as ResourceFilter);
+                setPageNum(1);
+              }}
+            />
+            <Segmented
+              value={statusFilter}
+              options={[
+                { value: 'all', label: '全部' },
+                { value: '0', label: '草稿' },
+                { value: '2', label: '已上架' },
+                { value: '3', label: '已下架' },
+              ]}
+              onChange={(value) => {
+                setStatusFilter(value as EmployeeStatusFilter);
                 setPageNum(1);
               }}
             />
@@ -412,6 +434,9 @@ const MyEmployeesPage: React.FC = () => {
                       onEdit: () => handleEdit(employee),
                       onAuth: (type) => handleAuth(employee, type),
                       onDelete: () => handleDelete(employee),
+                      // 我的员工卡片统一按资源状态展示标签，并保留创建人/管理人的操作权限。
+                      showDigitalEmployeeTypeTag: false,
+                      enableDigitalEmployeeLifecycle: true,
                     }}
                   />
                 ))}

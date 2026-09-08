@@ -48,4 +48,7 @@ public class MyCreatedQo {
      */
     private Integer resourceStatus;
 
+    /** 是否查询全部资源状态。 */
+    private Boolean includeAllResourceStatus;
+
 }

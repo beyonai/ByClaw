@@ -61,6 +61,8 @@ export interface IResourceCardItem {
   canApplyUse?: boolean;
   canAuditUse?: boolean;
   canDelete?: boolean;
+  canOnShelf?: boolean;
+  canOffShelf?: boolean;
   canUnShelf?: boolean;
   canDeleteData?: boolean;
   canSetDefault?: boolean;
@@ -357,14 +359,6 @@ const RenderContent = (props: ResourceCardProps) => {
   );
   const activeDigitalEmployeeId =
     agentId || agentInfo?.agentId || defaultDigEmployeeId || userInfo?.defaultDigEmployeeId;
-  const currentUserId = userInfo?.userId ?? userInfo?.id ?? userInfo?.userCode;
-  const resourceCreatorId = resource?.createBy ?? resource?.createdBy ?? resource?.creatorId;
-  const isResourceCreator =
-    currentUserId !== undefined &&
-    currentUserId !== null &&
-    resourceCreatorId !== undefined &&
-    resourceCreatorId !== null &&
-    `${currentUserId}` === `${resourceCreatorId}`;
 
   // 工作空间(用户开发)技能：复用公共 hook 处理详情 / 分享(资源化) / 删除，与左边栏一致。
   const { setDetailPanel, clearDetailPanel } = useContext(SiderContentContext);
@@ -524,6 +518,7 @@ const RenderContent = (props: ResourceCardProps) => {
     Published: '2',
     已下架: '3',
     Unpublished: '3',
+    草稿: '0',
     草稿箱: '0',
     Draft: '0',
     待上架: '1',
@@ -621,7 +616,17 @@ const RenderContent = (props: ResourceCardProps) => {
   useEffect(() => () => handleSetDefaultDebounced.cancel(), [handleSetDefaultDebounced]);
 
   const menuItems = useMemo<MenuProps['items']>(() => {
-    const { canEdit, canManageAuth, canUseAuth, canApplyUse, canDelete, canSetDefault, canRestore } = resource || {};
+    const {
+      canEdit,
+      canManageAuth,
+      canUseAuth,
+      canApplyUse,
+      canDelete,
+      canOnShelf,
+      canOffShelf,
+      canSetDefault,
+      canRestore,
+    } = resource || {};
     const items: NonNullable<MenuProps['items']> = [];
 
     // 后端按当前用户权限和默认员工关系返回 canSetDefault。
@@ -730,7 +735,7 @@ const RenderContent = (props: ResourceCardProps) => {
     }
 
     // 数字员工下架使用“编辑信息”权限；我可用列表通过生命周期开关整体隐藏该操作。
-    const canUnShelfDigitalEmployee = isDigitalEmployeeResource && digitalEmployeeStatus === '2' && canEdit;
+    const canUnShelfDigitalEmployee = isDigitalEmployeeResource && canOffShelf === true;
     if (enableDigitalEmployeeLifecycle && ((!isDigitalEmployeeResource && canDelete) || canUnShelfDigitalEmployee)) {
       items.push({
         key: isDigitalEmployeeResource ? 'unShelfData' : 'delete',
@@ -755,7 +760,7 @@ const RenderContent = (props: ResourceCardProps) => {
     }
 
     // 已下架数字员工始终提供“上架数据”，不再依赖恢复权限字段。
-    if (enableDigitalEmployeeLifecycle && isDigitalEmployeeResource && digitalEmployeeStatus === '3') {
+    if (enableDigitalEmployeeLifecycle && isDigitalEmployeeResource && canOnShelf === true) {
       items.push({
         key: 'shelfData',
         label: (
@@ -767,12 +772,7 @@ const RenderContent = (props: ResourceCardProps) => {
     }
 
     // 我创建的已下架数字员工允许永久删除数据，操作与上下架生命周期菜单分开控制。
-    if (
-      isDigitalEmployeeResource &&
-      digitalEmployeeStatus === '3' &&
-      enableDigitalEmployeeDelete &&
-      isResourceCreator
-    ) {
+    if (isDigitalEmployeeResource && enableDigitalEmployeeDelete && canDelete === true) {
       items.push({
         key: 'deleteData',
         label: (
@@ -843,7 +843,6 @@ const RenderContent = (props: ResourceCardProps) => {
     onUnShelf,
     enableDigitalEmployeeLifecycle,
     enableDigitalEmployeeDelete,
-    isResourceCreator,
     showDigitalEmployeeTypeTag,
     onEdit,
     onRestore,
@@ -854,6 +853,8 @@ const RenderContent = (props: ResourceCardProps) => {
     resource?.canApplyUse,
     resource?.canSetDefault,
     resource?.canDelete,
+    resource?.canOnShelf,
+    resource?.canOffShelf,
     resource?.canUnShelf,
     resource?.canDeleteData,
     resource?.canRestore,
@@ -1298,6 +1299,8 @@ function ResourceCard(props: ResourceCardProps) {
             canManageAuth,
             canUseAuth,
             canDelete,
+            canOnShelf,
+            canOffShelf,
             canApplyUse,
             canAuditUse,
             canSetDefault,
@@ -1315,6 +1318,8 @@ function ResourceCard(props: ResourceCardProps) {
             canManageAuth,
             canUseAuth,
             canDelete,
+            canOnShelf,
+            canOffShelf,
             canApplyUse,
             canAuditUse,
             canSetDefault,

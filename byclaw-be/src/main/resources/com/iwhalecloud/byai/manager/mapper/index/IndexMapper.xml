@@ -239,6 +239,9 @@
                 <when test="resourceStatus != null">
                     and a.resource_status = #{resourceStatus}
                 </when>
+                <when test="includeAllResourceStatus == true">
+                    <!-- 查询全部状态：不附加 resource_status 过滤 -->
+                </when>
                 <otherwise>
                     and a.resource_status = 2
                 </otherwise>
