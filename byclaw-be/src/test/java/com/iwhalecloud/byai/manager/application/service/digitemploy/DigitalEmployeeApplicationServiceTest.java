@@ -13,6 +13,7 @@ import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.gateway.channels.service.robot.RobotChannelRegistryCoordinator;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.event.DigEmployeeChangeEventPublisher;
+import com.iwhalecloud.byai.manager.application.service.digitemploy.event.DigEmployeeChangeEventType;
 import com.iwhalecloud.byai.manager.application.service.template.TemplateRuleInfoApplicationService;
 import com.iwhalecloud.byai.manager.domain.aimodel.service.AiModelService;
 import com.iwhalecloud.byai.manager.domain.resource.enums.OperationTypeEnum;
@@ -272,11 +273,82 @@ class DigitalEmployeeApplicationServiceTest {
 
         service.deleteDigitalEmployee(dto);
 
-        assertThat(resource.getResourceStatus()).isEqualTo(ResourceStatus.REMOVED.getNum());
+        assertThat(resource.getResourceStatus()).isEqualTo(ResourceStatus.DELETE.getNum());
         InOrder order = inOrder(ssResourceService, authApplicationService);
-        order.verify(ssResourceService).updateResourceEntity(resource);
+        order.verify(ssResourceService).update(resource);
         order.verify(authApplicationService).invalidateResourceAuthorizationCachesAfterCommit(200L,
             ResourceBizTypeEnum.DIG_EMPLOYEE.name());
+    }
+
+    @Test
+    void shelfDigitalEmployee_restoresOffShelfResourceToOnShelf() {
+        EmployeeIdDTO dto = new EmployeeIdDTO();
+        dto.setResourceId(200L);
+        SsResource resource = buildDigitalEmployee(200L, OwnerType.ENTERPRISE, 1L);
+        resource.setResourceStatus(ResourceStatus.OFF_SHELF.getNum());
+        when(ssResourceService.findById(200L)).thenReturn(resource);
+        when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
+        when(digitalEmployeeGroupApplicationService.isGroup(200L)).thenReturn(false);
+
+        service.shelfDigitalEmployee(dto);
+
+        assertThat(resource.getResourceStatus()).isEqualTo(ResourceStatus.ON_SHELF.getNum());
+        verify(ssResourceService).update(resource);
+        verify(resourceEventService, never()).sendResourceShelfEvent(any(SsResource.class));
+        verify(operationLogService).recordOperationLog(resource, OperationTypeEnum.SHELF);
+        verify(robotChannelRegistryCoordinator).registerForResource(200L);
+        verify(digitalEmployeeRuntimeRefreshService).scheduleDigitalEmployeeUpdateRefreshAfterCommit(200L, null);
+    }
+
+    @Test
+    void shelfDigitalEmployee_rejectsWhenStatusIsNotOffShelf() {
+        EmployeeIdDTO dto = new EmployeeIdDTO();
+        dto.setResourceId(200L);
+        SsResource resource = buildDigitalEmployee(200L, OwnerType.ENTERPRISE, 1L);
+        resource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
+        when(ssResourceService.findById(200L)).thenReturn(resource);
+        when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
+
+        assertThatThrownBy(() -> service.shelfDigitalEmployee(dto))
+            .isInstanceOf(BaseException.class)
+            .hasMessage("digemployee.shelf.status.invalid");
+        verify(ssResourceService, never()).update(any(SsResource.class));
+    }
+
+    @Test
+    void unShelfDigitalEmployee_marksOnShelfResourceAsOffShelf() {
+        EmployeeIdDTO dto = new EmployeeIdDTO();
+        dto.setResourceId(200L);
+        SsResource resource = buildDigitalEmployee(200L, OwnerType.ENTERPRISE, 1L);
+        resource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
+        when(ssResourceService.findById(200L)).thenReturn(resource);
+        when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
+        when(digitalEmployeeGroupApplicationService.isGroup(200L)).thenReturn(false);
+
+        service.unShelfDigitalEmployee(dto);
+
+        assertThat(resource.getResourceStatus()).isEqualTo(ResourceStatus.OFF_SHELF.getNum());
+        verify(ssResourceService).update(resource);
+        verify(resourceEventService, never()).sendResourceUnshelfEvent(any(SsResource.class));
+        verify(operationLogService).recordOperationLog(resource, OperationTypeEnum.UNSHELF);
+        verify(robotChannelRegistryCoordinator).unregisterForResource(200L);
+        verify(digEmployeeChangeEventPublisher).publishAfterCommitOrNow(
+            DigEmployeeChangeEventType.DIG_EMPLOYEE_DELETED, 200L);
+    }
+
+    @Test
+    void unShelfDigitalEmployee_rejectsWhenStatusIsNotOnShelf() {
+        EmployeeIdDTO dto = new EmployeeIdDTO();
+        dto.setResourceId(200L);
+        SsResource resource = buildDigitalEmployee(200L, OwnerType.ENTERPRISE, 1L);
+        resource.setResourceStatus(ResourceStatus.OFF_SHELF.getNum());
+        when(ssResourceService.findById(200L)).thenReturn(resource);
+        when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
+
+        assertThatThrownBy(() -> service.unShelfDigitalEmployee(dto))
+            .isInstanceOf(BaseException.class)
+            .hasMessage("digemployee.unshelf.status.invalid");
+        verify(ssResourceService, never()).update(any(SsResource.class));
     }
 
     /**
@@ -2242,7 +2314,7 @@ class DigitalEmployeeApplicationServiceTest {
         SsResource resource = new SsResource();
         resource.setResourceId(resourceId);
         resource.setResourceBizType(ResourceBizTypeEnum.DIG_EMPLOYEE.name());
-        resource.setResourceStatus(ResourceStatus.LIST.getNum());
+        resource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         resource.setOwnerType(ownerType);
         resource.setCreateBy(createBy);
         return resource;

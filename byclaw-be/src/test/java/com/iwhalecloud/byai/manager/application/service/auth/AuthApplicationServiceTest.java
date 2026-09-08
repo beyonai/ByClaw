@@ -273,9 +273,9 @@ class AuthApplicationServiceTest {
 
         ResourceOperationPermissionsVo vo = service.queryResourceOperationPermissions(200L);
 
-        assertThat(vo.getCanManageAuth()).isFalse();
-        assertThat(vo.getCanAuditUse()).isFalse();
-        assertThat(vo.getCanApplyUse()).isFalse();
+        assertThat(vo.isCanManageAuth()).isFalse();
+        assertThat(vo.isCanAuditUse()).isFalse();
+        assertThat(vo.isCanApplyUse()).isFalse();
     }
 
     /**
@@ -304,8 +304,33 @@ class AuthApplicationServiceTest {
 
         ResourceOperationPermissionsVo vo = service.queryResourceOperationPermissions(205L);
 
-        assertThat(vo.getCanEdit()).isTrue();
-        assertThat(vo.getCanDelete()).isFalse();
+        assertThat(vo.isCanEdit()).isTrue();
+        assertThat(vo.isCanDelete()).isFalse();
+    }
+
+    @Test
+    void queryResourceOperationPermissions_exposesShelfFlagsByDigitalEmployeeStatus() {
+        AuthApplicationService service = new AuthApplicationService();
+        SsResourceService ssResourceService = mock(SsResourceService.class);
+        ReflectionTestUtils.setField(service, "ssResourceService", ssResourceService);
+        mockEmptyUsePermissionDependencies(service);
+        CurrentUserHolder.setLoginInfo(loginInfo(1L));
+
+        SsResource onShelf = enterpriseResource(220L, 1L);
+        onShelf.setResourceBizType(ResourceBizTypeEnum.DIG_EMPLOYEE.name());
+        onShelf.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
+        when(ssResourceService.findById(220L)).thenReturn(onShelf);
+        ResourceOperationPermissionsVo onShelfVo = service.queryResourceOperationPermissions(220L);
+        assertThat(onShelfVo.isCanOnShelf()).isFalse();
+        assertThat(onShelfVo.isCanOffShelf()).isTrue();
+
+        SsResource offShelf = enterpriseResource(221L, 1L);
+        offShelf.setResourceBizType(ResourceBizTypeEnum.DIG_EMPLOYEE.name());
+        offShelf.setResourceStatus(ResourceStatus.OFF_SHELF.getNum());
+        when(ssResourceService.findById(221L)).thenReturn(offShelf);
+        ResourceOperationPermissionsVo offShelfVo = service.queryResourceOperationPermissions(221L);
+        assertThat(offShelfVo.isCanOnShelf()).isTrue();
+        assertThat(offShelfVo.isCanOffShelf()).isFalse();
     }
 
     /**
@@ -335,10 +360,10 @@ class AuthApplicationServiceTest {
 
         ResourceOperationPermissionsVo vo = service.queryResourceOperationPermissions(201L);
 
-        assertThat(vo.getCanManageAuth()).isTrue();
-        assertThat(vo.getCanUseAuth()).isTrue();
-        assertThat(vo.getCanAuditUse()).isFalse();
-        assertThat(vo.getCanApplyUse()).isFalse();
+        assertThat(vo.isCanManageAuth()).isTrue();
+        assertThat(vo.isCanUseAuth()).isTrue();
+        assertThat(vo.isCanAuditUse()).isFalse();
+        assertThat(vo.isCanApplyUse()).isFalse();
     }
 
     /**
@@ -366,10 +391,10 @@ class AuthApplicationServiceTest {
 
         ResourceOperationPermissionsVo vo = service.queryResourceOperationPermissions(202L);
 
-        assertThat(vo.getCanEdit()).isFalse();
-        assertThat(vo.getCanDelete()).isFalse();
-        assertThat(vo.getCanManageAuth()).isTrue();
-        assertThat(vo.getCanUseAuth()).isTrue();
+        assertThat(vo.isCanEdit()).isFalse();
+        assertThat(vo.isCanDelete()).isFalse();
+        assertThat(vo.isCanManageAuth()).isTrue();
+        assertThat(vo.isCanUseAuth()).isTrue();
     }
 
     /**
@@ -941,9 +966,9 @@ class AuthApplicationServiceTest {
 
         ResourceOperationPermissionsVo result = service.queryResourceOperationPermissions(600L);
 
-        assertThat(result.getUseApplyPending()).isTrue();
-        assertThat(result.getCanApplyUse()).isFalse();
-        assertThat(result.getHasUsePermission()).isFalse();
+        assertThat(result.isUseApplyPending()).isTrue();
+        assertThat(result.isCanApplyUse()).isFalse();
+        assertThat(result.isHasUsePermission()).isFalse();
     }
 
     @Test
@@ -965,10 +990,10 @@ class AuthApplicationServiceTest {
         Map<Long, ResourceOperationPermissionsVo> result =
             service.queryResourceOperationPermissionsBatch(List.of(601L, 602L));
 
-        assertThat(result.get(601L).getUseApplyPending()).isTrue();
-        assertThat(result.get(601L).getCanApplyUse()).isFalse();
-        assertThat(result.get(602L).getUseApplyPending()).isFalse();
-        assertThat(result.get(602L).getCanApplyUse()).isFalse();
+        assertThat(result.get(601L).isUseApplyPending()).isTrue();
+        assertThat(result.get(601L).isCanApplyUse()).isFalse();
+        assertThat(result.get(602L).isUseApplyPending()).isFalse();
+        assertThat(result.get(602L).isCanApplyUse()).isFalse();
         verify(privilegeGrantMapper, times(1)).selectList(any());
     }
 
@@ -1269,7 +1294,7 @@ class AuthApplicationServiceTest {
         parentOrgGrant.setGrantToType(Color.RED);
         SsResource activeResource = new SsResource();
         activeResource.setResourceId(500L);
-        activeResource.setResourceStatus(ResourceStatus.LIST.getNum());
+        activeResource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         when(ssResourceService.findByIdList(any())).thenReturn(List.of(activeResource));
         when(privilegeGrantService.findPrivilegeByQo(any())).thenAnswer(invocation -> {
             PrivilegeGrantQo qo = invocation.getArgument(0);
@@ -1315,7 +1340,7 @@ class AuthApplicationServiceTest {
         childOrgBlacklist.setGrantToType(Color.BLACK);
         SsResource activeResource = new SsResource();
         activeResource.setResourceId(500L);
-        activeResource.setResourceStatus(ResourceStatus.LIST.getNum());
+        activeResource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         when(ssResourceService.findByIdList(any())).thenReturn(List.of(activeResource));
         when(privilegeGrantService.findPrivilegeByQo(any())).thenAnswer(invocation -> {
             PrivilegeGrantQo qo = invocation.getArgument(0);
@@ -1359,7 +1384,7 @@ class AuthApplicationServiceTest {
 
         SsResource removedResource = new SsResource();
         removedResource.setResourceId(500L);
-        removedResource.setResourceStatus(ResourceStatus.REMOVED.getNum());
+        removedResource.setResourceStatus(ResourceStatus.OFF_SHELF.getNum());
         when(ssResourceService.findByIdList(Set.of(500L))).thenReturn(List.of(removedResource));
 
         assertThat(service.buildUserAuthResources(1001L)).doesNotContainKey("500");
@@ -1401,7 +1426,7 @@ class AuthApplicationServiceTest {
         });
         SsResource activeResource = new SsResource();
         activeResource.setResourceId(500L);
-        activeResource.setResourceStatus(ResourceStatus.LIST.getNum());
+        activeResource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         when(ssResourceService.findByIdList(Set.of(500L))).thenReturn(List.of(activeResource));
 
         Map<String, String> resources = service.buildUserManageResources(1001L);
@@ -1453,7 +1478,7 @@ class AuthApplicationServiceTest {
         });
         SsResource activeResource = new SsResource();
         activeResource.setResourceId(500L);
-        activeResource.setResourceStatus(ResourceStatus.LIST.getNum());
+        activeResource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         when(ssResourceService.findByIdList(Set.of(500L))).thenReturn(List.of(activeResource));
 
         assertThat(service.buildUserManageResources(1001L)).doesNotContainKey("500");
@@ -1485,7 +1510,7 @@ class AuthApplicationServiceTest {
         createdResource.setResourceId(600L);
         createdResource.setResourceBizType(ResourceBizTypeEnum.DIG_EMPLOYEE.name());
         createdResource.setCreateBy(1001L);
-        createdResource.setResourceStatus(ResourceStatus.LIST.getNum());
+        createdResource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         when(ssResourceMapper.selectList(argThat(qw -> qw != null))).thenReturn(List.of(createdResource));
 
         assertThat(service.buildUserManageResources(1001L)).containsEntry("600",
@@ -1525,7 +1550,7 @@ class AuthApplicationServiceTest {
         orgResource.setResourceId(700L);
         orgResource.setResourceBizType(ResourceBizTypeEnum.DIG_EMPLOYEE.name());
         orgResource.setManOrgId(11L);
-        orgResource.setResourceStatus(ResourceStatus.LIST.getNum());
+        orgResource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         // First selectList call resolves the creator-dimension query (empty), second resolves org resources.
         when(ssResourceMapper.selectList(any())).thenReturn(List.of()).thenReturn(List.of(orgResource));
 

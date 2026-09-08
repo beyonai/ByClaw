@@ -133,7 +133,7 @@ class SkillGroupApplicationServiceTest {
         SsResource saved = captor.getValue();
         assertThat(saved.getResourceBizType()).isEqualTo("SKILL_GROUP");
         assertThat(saved.getResourceType()).isEqualTo("COMBIN");
-        assertThat(saved.getResourceStatus()).isEqualTo(ResourceStatus.LIST.getNum());
+        assertThat(saved.getResourceStatus()).isEqualTo(ResourceStatus.ON_SHELF.getNum());
         assertThat(saved.getOwnerType()).isEqualTo("personal");
         assertThat(saved.getResourceName()).isEqualTo("Analysis group");
         assertThat(saved.getResourceDesc()).isEqualTo("description");
@@ -374,7 +374,7 @@ class SkillGroupApplicationServiceTest {
                 .isInstanceOf(BaseException.class);
 
         SsResource invalid = skill(501L);
-        invalid.setResourceStatus(ResourceStatus.REMOVED.getNum());
+        invalid.setResourceStatus(ResourceStatus.OFF_SHELF.getNum());
         List<SkillGroupMemberVo> invalidMembers = List.of(
                 statusMember(501L, SkillGroupMemberStatus.INSTALLABLE));
         when(mapper.selectActiveMembers(GROUP_ID)).thenReturn(invalidMembers);
@@ -410,7 +410,7 @@ class SkillGroupApplicationServiceTest {
     void uninstallAllowsRemovedEmployeeAndDelegatesWithoutReadingCurrentMembers() {
         SsResource group = group();
         SsResource employee = digitalEmployee(401L);
-        employee.setResourceStatus(ResourceStatus.REMOVED.getNum());
+        employee.setResourceStatus(ResourceStatus.OFF_SHELF.getNum());
         when(mapper.selectGroupForUpdate(GROUP_ID, TENANT_ID)).thenReturn(group);
         when(authService.hasResourceManagePermission(group)).thenReturn(true);
         when(mapper.selectDigitalEmployeeForUpdate(401L, TENANT_ID)).thenReturn(employee);
@@ -574,7 +574,7 @@ class SkillGroupApplicationServiceTest {
     @Test
     void inactiveEmployeeIsRejectedByDetailPreflightInstallAndExecuteBeforeEvaluation() {
         SsResource inactiveEmployee = digitalEmployee(401L);
-        inactiveEmployee.setResourceStatus(ResourceStatus.REMOVED.getNum());
+        inactiveEmployee.setResourceStatus(ResourceStatus.OFF_SHELF.getNum());
         SkillGroupVo visible = new SkillGroupVo();
         visible.setResourceId(GROUP_ID);
         when(mapper.selectDetail(GROUP_ID, TENANT_ID, USER_ID)).thenReturn(visible);
@@ -640,7 +640,7 @@ class SkillGroupApplicationServiceTest {
     @Test
     void preflightIsReadOnlyAndEvaluatesExactlyOnce() {
         SsResource group = group();
-        group.setResourceStatus(ResourceStatus.LIST.getNum());
+        group.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         SsResource employee = digitalEmployee(401L);
         List<SkillGroupMemberVo> members = List.of(
                 statusMember(501L, SkillGroupMemberStatus.INSTALLABLE),
@@ -992,7 +992,7 @@ class SkillGroupApplicationServiceTest {
         prepareManagedGroup();
         SsResource valid = skill(501L);
         SsResource invalid = skill(502L);
-        invalid.setResourceStatus(ResourceStatus.REMOVED.getNum());
+        invalid.setResourceStatus(ResourceStatus.OFF_SHELF.getNum());
         when(resourceService.findByIdList(List.of(501L, 502L))).thenReturn(List.of(valid, invalid));
         when(authService.hasResourceUsePermission(valid)).thenReturn(true);
 
@@ -1167,7 +1167,7 @@ class SkillGroupApplicationServiceTest {
 
     private void prepareInstallLocks(Long employeeId) {
         SsResource group = group();
-        group.setResourceStatus(ResourceStatus.LIST.getNum());
+        group.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         SsResource employee = digitalEmployee(employeeId);
         when(mapper.selectGroupForUpdate(GROUP_ID, TENANT_ID)).thenReturn(group);
         when(authService.hasResourceUsePermission(group)).thenReturn(true);
@@ -1245,7 +1245,7 @@ class SkillGroupApplicationServiceTest {
         resource.setResourceBizType("SKILL_GROUP");
         resource.setResourceType("COMBIN");
         resource.setResourceName("Group");
-        resource.setResourceStatus(ResourceStatus.LIST.getNum());
+        resource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         resource.setComAcctId(TENANT_ID);
         resource.setCreateBy(USER_ID);
         return resource;
@@ -1255,7 +1255,7 @@ class SkillGroupApplicationServiceTest {
         SsResource resource = new SsResource();
         resource.setResourceId(id);
         resource.setResourceBizType("SKILL");
-        resource.setResourceStatus(ResourceStatus.LIST.getNum());
+        resource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         resource.setOwnerType("enterprise");
         resource.setComAcctId(TENANT_ID);
         resource.setCreateBy(USER_ID);
@@ -1266,7 +1266,7 @@ class SkillGroupApplicationServiceTest {
         SsResource resource = new SsResource();
         resource.setResourceId(id);
         resource.setResourceBizType("DIG_EMPLOYEE");
-        resource.setResourceStatus(ResourceStatus.LIST.getNum());
+        resource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         resource.setComAcctId(TENANT_ID);
         return resource;
     }

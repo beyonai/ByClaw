@@ -251,7 +251,7 @@ public class DatasetApplicationService {
         myResource.setResourceCode(resourceCode);
         myResource.setResourceName(resourceName);
         myResource.setResourceDesc(resourceDesc);
-        myResource.setResourceStatus(ResourceStatus.LIST.getNum());
+        myResource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         myResource.setOwnerType(ownerType);
         myResource.setCatalogId(datasetDto.getCatalogId());
 
@@ -422,9 +422,9 @@ public class DatasetApplicationService {
         SsResExtDoc extDoc = ssResExtDocService.findById(resourceId);
         String targetContent = extDoc == null ? null : extDoc.getTargetContent();
 
-        // 软删除：把 ss_resource.resource_status 置为 REMOVED(3)，保留主表与扩展表数据，
+        // 软删除：把 ss_resource.resource_status 置为 OFF_SHELF(3)，保留主表与扩展表数据，
         // 让前端"已注销"筛选项可以查询到这些记录；运行期副作用（向量库/注册等）继续清理。
-        ssResource.setResourceStatus(ResourceStatus.REMOVED.getNum());
+        ssResource.setResourceStatus(ResourceStatus.OFF_SHELF.getNum());
         ssResource.setUpdateBy(CurrentUserHolder.getCurrentUserId());
         ssResource.setUpdateTime(new Date());
         ssResourceService.updateResourceEntity(ssResource);
@@ -1382,7 +1382,7 @@ public class DatasetApplicationService {
 
         /**
          * SsResource ssResource = ssResourceService.createResource(resourceBizType, resourceCode, resourceName,
-         * resourceDesc, ResourceStatus.LIST.getNum(), ownerType, datasetImportDto.getSystemCode(),
+         * resourceDesc, ResourceStatus.ON_SHELF.getNum(), ownerType, datasetImportDto.getSystemCode(),
          * datasetImportDto.getVersion(), datasetImportDto.getCatalogId());
          */
 
@@ -1392,7 +1392,7 @@ public class DatasetApplicationService {
         myResource.setResourceCode(resourceCode);
         myResource.setResourceName(resourceName);
         myResource.setResourceDesc(resourceDesc);
-        myResource.setResourceStatus(ResourceStatus.LIST.getNum());
+        myResource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         myResource.setOwnerType(ownerType);
         myResource.setSystemCode(datasetImportDto.getSystemCode());
         myResource.setResourceVersionId(datasetImportDto.getVersion());

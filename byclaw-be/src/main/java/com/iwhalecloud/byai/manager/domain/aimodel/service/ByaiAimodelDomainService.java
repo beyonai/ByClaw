@@ -93,17 +93,33 @@ public class ByaiAimodelDomainService {
     }
 
     /**
-     * 判断模型名称是否已被占用：新增时 excludeModelId 传 null（存在同名即占用）；修改时传当前 id（存在其他记录同名即占用）
+     * 统计模型数量
      *
-     * @param modelName      模型名称（displayName 对应 model_name），建议调用方先 trim
-     * @param excludeModelId 排除的模型 ID，为 null 时统计所有同名
-     * @return true 表示名称已被占用，不允许保存
+     * @param modelName      名称
+     * @param ownerType      类型
+     * @param createBy       创建人
+     * @param excludeModelId 排除当前模型标识，编辑时用
+     * @return countModel
      */
-    public boolean existsByModelNameExcludeId(String modelName, Long excludeModelId) {
-        if (StringUtil.isEmpty(modelName)) {
-            return false;
+    public long countModel(String modelName, String ownerType, Long createBy, Long excludeModelId) {
+        LambdaQueryWrapper<ByaiAimodel> queryWrapper = new LambdaQueryWrapper<>();
+
+        queryWrapper.eq(ByaiAimodel::getModelName, modelName);
+
+        if (StringUtil.isNotEmpty(ownerType)) {
+            queryWrapper.eq(ByaiAimodel::getOwnerType, ownerType);
         }
-        return byaiAimodelMapper.countByModelNameExcludeId(modelName.trim(), excludeModelId) > 0;
+
+        if (createBy != null) {
+            queryWrapper.eq(ByaiAimodel::getCreateBy, createBy);
+        }
+
+        if (excludeModelId != null) {
+            queryWrapper.ne(ByaiAimodel::getModelId, excludeModelId);
+        }
+
+        Long count = byaiAimodelMapper.selectCount(queryWrapper);
+        return count != null ? count : 0L;
     }
 
     /**
@@ -263,6 +279,7 @@ public class ByaiAimodelDomainService {
         return dto;
     }
 
+    /** 解析模型是否为默认模型标记。 */
     private Integer resolveDefaultFlag(ByaiAimodel entity) {
         if (entity.getIsDefault() != null) {
             return entity.getIsDefault();
@@ -274,6 +291,7 @@ public class ByaiAimodelDomainService {
             .anyMatch(rel -> entity.getModelId().equals(rel.getObjId())) ? 1 : 0;
     }
 
+    /** 将默认模型排到列表前面，并保证默认标记唯一。 */
     private List<ModelDto> normalizeDefaultOrder(List<ModelDto> models) {
         if (models == null || models.isEmpty()) {
             return List.of();
@@ -311,6 +329,12 @@ public class ByaiAimodelDomainService {
         }
     }
 
+    /**
+     * 按标签等条件查询模型列表。
+     *
+     * @param request 查询条件
+     * @return 模型列表
+     */
     public List<ByaiAimodel> listModel(ModelRequest request) {
         if (request.getTagId() == null) {
             return Collections.emptyList();

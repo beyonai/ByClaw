@@ -568,7 +568,7 @@ public class SsResourceService {
 
         SsResource ssResource = new SsResource();
         ssResource.setAuthStatus("passed");
-        ssResource.setResourceStatus(ResourceStatus.LIST.getNum());
+        ssResource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
 
         LambdaUpdateWrapper<SsResource> updateWrapper = new LambdaUpdateWrapper<>();
         updateWrapper.eq(SsResource::getParentResourceId, parentResourceId);
@@ -846,7 +846,7 @@ public class SsResourceService {
             resourceQo.getPageNum(), resourceQo.getPageSize());
 
         QueryWrapper<SsResource> queryWrapper = new QueryWrapper<>();
-        queryWrapper.eq("resource_status", ResourceStatus.LIST.getNum());
+        queryWrapper.eq("resource_status", ResourceStatus.ON_SHELF.getNum());
 
         if (ListUtil.isNotEmpty(resourceQo.getResourceIds())) {
             queryWrapper.in("resource_id", resourceQo.getResourceIds());
@@ -881,7 +881,7 @@ public class SsResourceService {
         int safePageSize = pageSize > 0 ? pageSize : 1000;
         LambdaQueryWrapper<SsResource> queryWrapper = new LambdaQueryWrapper<>();
         queryWrapper.eq(SsResource::getResourceBizType, ResourceBizTypeEnum.DIG_EMPLOYEE.name());
-        queryWrapper.ne(SsResource::getResourceStatus, ResourceStatus.REMOVED.getNum());
+        queryWrapper.ne(SsResource::getResourceStatus, ResourceStatus.OFF_SHELF.getNum());
         queryWrapper.orderByAsc(SsResource::getResourceId);
         com.baomidou.mybatisplus.extension.plugins.pagination.Page<SsResource> page =
             new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>(safePageNum, safePageSize, false);
@@ -894,7 +894,7 @@ public class SsResourceService {
     public List<SsResource> listActiveDigitalEmployees() {
         LambdaQueryWrapper<SsResource> queryWrapper = new LambdaQueryWrapper<>();
         queryWrapper.eq(SsResource::getResourceBizType, ResourceBizTypeEnum.DIG_EMPLOYEE.name());
-        queryWrapper.ne(SsResource::getResourceStatus, ResourceStatus.REMOVED.getNum());
+        queryWrapper.ne(SsResource::getResourceStatus, ResourceStatus.OFF_SHELF.getNum());
         queryWrapper.orderByAsc(SsResource::getResourceName);
         queryWrapper.orderByAsc(SsResource::getResourceId);
         return ssResourceMapper.selectList(queryWrapper);

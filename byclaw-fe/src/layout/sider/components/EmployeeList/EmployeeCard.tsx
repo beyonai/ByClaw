@@ -5,14 +5,13 @@ import { debounce, noop, isEmpty } from 'lodash';
 import { useNavigate, useIntl, useDispatch } from '@umijs/max';
 import { List, Skeleton, Typography, Dropdown, Popconfirm, message } from 'antd';
 import classNames from 'classnames';
-import { isTopAgent, setDefaultDigitalEmployee } from '@/service/digitalEmployees';
+import { setDefaultDigitalEmployee } from '@/service/digitalEmployees';
 import AntdIcon from '@/components/AntdIcon';
 import useGlobal from '@/hooks/useGlobal';
 import { IAgentCache } from '@/typescript/agent';
 import { agentHandler, getAgentChatAvatar } from '@/utils/agent';
 import EmployeesDrawer from '@/pages/employees/components/EmployeesDrawer';
 import { UnApplyButton } from '@/pages/digitalEmployees/components/AllDigitalEmployees/RenderRightBottom';
-import { ResourceTypeMap } from '@/constants/resource';
 import useTracker from '@/hooks/useTracker';
 import { EmployeeListContext, isInputMode } from './index';
 
@@ -97,7 +96,20 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
                 });
             }}
           >
-            <div className={classNames(styles.dropdownMenuItem, { [styles.dropdownMenuItemDisabled]: settingDefault })}>
+            <div
+              className={classNames(styles.dropdownMenuItem, { [styles.dropdownMenuItemDisabled]: settingDefault })}
+              onMouseDown={(event) => {
+                // 阻止外层加号资源弹窗监听到菜单按下事件，设置默认后保持弹窗打开。
+                event.stopPropagation();
+                document.body.dataset.resourceActionOverlay = 'true';
+              }}
+              onClick={(event) => {
+                event.stopPropagation();
+                window.setTimeout(() => {
+                  delete document.body.dataset.resourceActionOverlay;
+                }, 1000);
+              }}
+            >
               <AntdIcon type="icon-a-Useryonghu" style={{ marginRight: '10px' }} />
               {intl.formatMessage({ id: 'resource.setDefaultAssistant' })}
             </div>
@@ -106,31 +118,29 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
       });
     }
 
-    // 置顶
-    if (`${item.isTop}` === '0' && !disabledAction.includes('pin')) {
-      items.push({
-        key: 'pin',
-        label: (
-          <div className={styles.dropdownMenuItem}>
-            <AntdIcon type="icon-zhiding" style={{ marginRight: '10px' }} />
-            {intl.formatMessage({ id: 'common.pin' })}
-          </div>
-        ),
-      });
-    }
-
-    // 取消置顶
-    if (`${item.isTop}` === '1' && !disabledAction.includes('unpin')) {
-      items.push({
-        key: 'unpin',
-        label: (
-          <div className={styles.dropdownMenuItem}>
-            <AntdIcon type="icon-quxiaozhiding" style={{ marginRight: '10px' }} />
-            {intl.formatMessage({ id: 'common.unpin' })}
-          </div>
-        ),
-      });
-    }
+    // 置顶/取消置顶入口暂时下线，保留原代码注释以便后续恢复。
+    // if (`${item.isTop}` === '0' && !disabledAction.includes('pin')) {
+    //   items.push({
+    //     key: 'pin',
+    //     label: (
+    //       <div className={styles.dropdownMenuItem}>
+    //         <AntdIcon type="icon-zhiding" style={{ marginRight: '10px' }} />
+    //         {intl.formatMessage({ id: 'common.pin' })}
+    //       </div>
+    //     ),
+    //   });
+    // }
+    // if (`${item.isTop}` === '1' && !disabledAction.includes('unpin')) {
+    //   items.push({
+    //     key: 'unpin',
+    //     label: (
+    //       <div className={styles.dropdownMenuItem}>
+    //         <AntdIcon type="icon-quxiaozhiding" style={{ marginRight: '10px' }} />
+    //         {intl.formatMessage({ id: 'common.unpin' })}
+    //       </div>
+    //     ),
+    //   });
+    // }
 
     // 移除
     if (item.grantType === 'AVAILABLE_USE' && !disabledAction.includes('unapply')) {
@@ -264,7 +274,12 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
       className={classNames({
         pointer: true,
       })}
-      onClick={() => {
+      onClick={(event) => {
+        // 更多操作及其确认浮层不属于员工选择操作，避免点击“设为默认”时触发外层资源弹窗关闭。
+        const target = event.target as HTMLElement;
+        if (target?.closest?.('.ant-dropdown, .ant-popover, .ant-modal, .ant-drawer')) {
+          return;
+        }
         if (isInput) {
           onSelect?.(employee);
           return;
@@ -296,19 +311,20 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
                   return;
                 }
 
-                if (key === 'pin' || key === 'unpin') {
-                  isTopAgent({
-                    agentIds: [employee.id],
-                    isTop: key === 'pin' ? 1 : 0,
-                    agentTypeList: [ResourceTypeMap.digitalEmployee],
-                  }).then(() => {
-                    if (key === 'pin') {
-                      EventEmitter.emit('beyond-update-employee', { pinList: [employee.agentId] });
-                    } else {
-                      EventEmitter.emit('beyond-update-employee', { unpinList: [employee.agentId] });
-                    }
-                  });
-                }
+                // 置顶/取消置顶逻辑暂时下线，保留原处理位置避免后续恢复时丢失上下文。
+                // if (key === 'pin' || key === 'unpin') {
+                //   isTopAgent({
+                //     agentIds: [employee.id],
+                //     isTop: key === 'pin' ? 1 : 0,
+                //     agentTypeList: [ResourceTypeMap.digitalEmployee],
+                //   }).then(() => {
+                //     if (key === 'pin') {
+                //       EventEmitter.emit('beyond-update-employee', { pinList: [employee.agentId] });
+                //     } else {
+                //       EventEmitter.emit('beyond-update-employee', { unpinList: [employee.agentId] });
+                //     }
+                //   });
+                // }
               },
             }}
             overlayClassName={styles.mydropdown}
@@ -356,7 +372,8 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
               >
                 {employee?.resourceDesc}
               </Paragraph>
-              {`${employee?.isTop}` === '1' && <AntdIcon type="icon-zhiding-fill" className={styles.pinBadge} />}
+              {/* 置顶标识暂时下线，保留原显示逻辑注释便于后续恢复。 */}
+              {/* {`${employee?.isTop}` === '1' && <AntdIcon type="icon-zhiding-fill" className={styles.pinBadge} />} */}
             </div>
           }
         />

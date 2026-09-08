@@ -8,6 +8,7 @@
         <result column="resource_desc" property="resourceDesc" />
         <result column="resource_code" property="resourceCode" />
         <result column="owner_type" property="ownerType" />
+        <result column="resource_status" property="resourceStatus" />
         <result column="agent_type" property="agentType" />
         <result column="agent_home_url" property="agentHomeUrl" />
         <result column="avatar" property="avatar" />
@@ -86,6 +87,7 @@
         <result column="resource_code" property="resourceCode" />
         <result column="resource_desc" property="resourceDesc" />
         <result column="avatar" property="avatar" />
+        <result column="resource_status" property="resourceStatus" />
         <result column="agent_type" property="agentType" />
         <result column="agent_home_url" property="agentHomeUrl" />
         <result column="terminal" property="terminal" />
@@ -100,6 +102,7 @@
         <result column="resource_name" property="resourceName" />
         <result column="resource_desc" property="resourceDesc" />
         <result column="resource_biz_type" property="resourceBizType" />
+        <result column="resource_status" property="resourceStatus" />
         <result column="create_by" property="createBy" />
         <result column="create_time" property="createTime" />
         <result column="man_user_id" property="manUserId" />
@@ -113,6 +116,7 @@
                a.resource_code,
                a.resource_desc,
                a.owner_type,
+               a.resource_status,
                a.avatar,
                a.create_by,
                a.update_time,
@@ -231,7 +235,17 @@
         <where>
             <!-- 基础过滤条件 -->
             and a.resource_biz_type = 'DIG_EMPLOYEE'
-            and a.resource_status = 2
+            <choose>
+                <when test="resourceStatus != null">
+                    and a.resource_status = #{resourceStatus}
+                </when>
+                <when test="includeAllResourceStatus == true">
+                    <!-- 查询全部状态：不附加 resource_status 过滤 -->
+                </when>
+                <otherwise>
+                    and a.resource_status = 2
+                </otherwise>
+            </choose>
             <!-- 黑名单排除：不能有黑名单记录 -->
             and (k.black_count = 0 or k.black_count is null)
             <!-- 类型过滤：all-全部，owner-我创建的，authorize-授权给我的 -->
@@ -255,6 +269,9 @@
             </if>
             <if test="excludeEmployeeGroup == true">
                 and (b.agent_type is null or b.agent_type != '017')
+            </if>
+            <if test="ownerType != null and ownerType != ''">
+                and a.owner_type = #{ownerType}
             </if>
             <!-- 关键字搜索 -->
             <if test="keyword != null and keyword != ''">
@@ -287,6 +304,7 @@
                a.resource_code,
                a.resource_desc,
                a.owner_type,
+               a.resource_status,
                a.avatar,
                a.create_by,
                b.agent_type,
@@ -353,7 +371,14 @@
         <where>
             <!-- 基础过滤条件 -->
             and a.resource_biz_type = 'DIG_EMPLOYEE'
-            and a.resource_status = 2
+            <choose>
+                <when test="resourceStatus != null">
+                    and a.resource_status = #{resourceStatus}
+                </when>
+                <otherwise>
+                    and a.resource_status = 2
+                </otherwise>
+            </choose>
             <!-- 红名单判断：必须有红名单授权或自己创建的 -->
             and (k.red_count > 0 or a.create_by = #{userId})
             <!-- 黑名单排除：不能有黑名单记录 -->
@@ -381,6 +406,7 @@
                a.resource_code,
                a.resource_desc,
                a.owner_type,
+               a.resource_status,
                a.avatar,
                a.create_by,
                b.agent_type,
@@ -433,7 +459,14 @@
                  ) k on a.resource_id = k.grant_obj_id
         <where>
             and a.resource_biz_type = 'DIG_EMPLOYEE'
-            and a.resource_status = 2
+            <choose>
+                <when test="resourceStatus != null">
+                    and a.resource_status = #{resourceStatus}
+                </when>
+                <otherwise>
+                    and a.resource_status = 2
+                </otherwise>
+            </choose>
             <!-- 红名单判断：必须有红名单授权 -->
             and (k.red_count > 0 or a.create_by = #{userId})
             <!-- 黑名单排除：不能有黑名单记录 -->
@@ -509,7 +542,14 @@
         <where>
             <!-- 基础过滤条件 -->
             and a.resource_biz_type = 'DIG_EMPLOYEE'
-            and a.resource_status = 2
+            <choose>
+                <when test="resourceStatus != null">
+                    and a.resource_status = #{resourceStatus}
+                </when>
+                <otherwise>
+                    and a.resource_status = 2
+                </otherwise>
+            </choose>
             and coalesce(b.agent_type, '') != '017'
             <if test="userId !=null">
                 and a.create_by = #{userId}
@@ -664,6 +704,9 @@
                     and a.resource_status = 2
                 </otherwise>
             </choose>
+            <if test="excludeDeleted == true">
+                and a.resource_status != -1
+            </if>
             <if test="ownerType != null and ownerType !=''">
                 and a.owner_type = #{ownerType}
             </if>
@@ -866,6 +909,7 @@
             a.resource_code,
             a.resource_desc,
             a.avatar,
+            a.resource_status,
             b.agent_type,
             b.agent_home_url,
             b.terminal,
@@ -888,6 +932,7 @@
                a.resource_name,
                a.resource_desc,
                a.resource_biz_type,
+               a.resource_status,
                a.create_by,
                a.create_time,
                a.man_org_id,
@@ -976,6 +1021,7 @@
                a.resource_name,
                a.resource_desc,
                a.resource_biz_type,
+               a.resource_status,
                a.create_by,
                a.create_time,
                a.man_org_id,

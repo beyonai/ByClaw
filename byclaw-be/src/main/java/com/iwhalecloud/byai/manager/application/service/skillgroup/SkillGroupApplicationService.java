@@ -99,7 +99,7 @@ public class SkillGroupApplicationService {
         SsResource resource = new SsResource();
         resource.setResourceBizType(SKILL_GROUP);
         resource.setResourceType(RESOURCE_TYPE_COMBIN);
-        resource.setResourceStatus(ResourceStatus.LIST.getNum());
+        resource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         resource.setOwnerType(qo.getOwnerType());
         resource.setResourceName(qo.getResourceName());
         resource.setResourceDesc(qo.getResourceDesc());
@@ -492,7 +492,7 @@ public class SkillGroupApplicationService {
     }
 
     private void validateActiveGroup(SsResource group) {
-        if (!Objects.equals(ResourceStatus.LIST.getNum(), group.getResourceStatus())) {
+        if (!Objects.equals(ResourceStatus.ON_SHELF.getNum(), group.getResourceStatus())) {
             throw new BaseException("技能组未上架");
         }
     }
@@ -521,7 +521,7 @@ public class SkillGroupApplicationService {
     }
 
     private void validateActiveDigitalEmployee(SsResource digitalEmployee) {
-        if (!Objects.equals(ResourceStatus.LIST.getNum(), digitalEmployee.getResourceStatus())) {
+        if (!Objects.equals(ResourceStatus.ON_SHELF.getNum(), digitalEmployee.getResourceStatus())) {
             throw new BaseException("数字员工未上架");
         }
     }
@@ -701,7 +701,7 @@ public class SkillGroupApplicationService {
             if (!Objects.equals(group.getComAcctId(), skill.getComAcctId())) {
                 throw new BaseException("组内技能不属于当前企业：" + skillId);
             }
-            if (!Objects.equals(ResourceStatus.LIST.getNum(), skill.getResourceStatus())) {
+            if (!Objects.equals(ResourceStatus.ON_SHELF.getNum(), skill.getResourceStatus())) {
                 throw new BaseException("组内技能未上架：" + skillId);
             }
             SsResExtSkill extSkill = extById.get(skillId);

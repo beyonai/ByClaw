@@ -43,4 +43,12 @@ public class MyCreatedQo {
      */
     private List<Long> catalogIds;
 
+    /**
+     * 资源状态筛选。有值时按该状态过滤；未传时 SQL 默认查 resource_status = 2（已上架）。
+     */
+    private Integer resourceStatus;
+
+    /** 是否查询全部资源状态。 */
+    private Boolean includeAllResourceStatus;
+
 }

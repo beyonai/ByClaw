@@ -312,6 +312,16 @@ export default {
   'resourceStatus.notPassed': '审核不通过',
   'resourceStatus.published': '已上架',
   'resourceStatus.unpublished': '已下架',
+  'resourceStatus.deleted': '已删除',
+  'resourceStatus.pendingShelf': '待上架',
+  'resource.shelf': '上架',
+  'resource.unShelf': '下架',
+  'resource.unShelfData': '下架数据',
+  'resource.shelfData': '上架数据',
+  'resource.shelfDataConfirm': '确定要上架该数据吗？',
+  'resource.unShelfDataConfirm': '确定要下架该数据吗？',
+  'resource.deleteData': '删除数据',
+  'resource.deleteDataConfirm': '确定删除该数据吗？',
 
   // 资源类型
   'resourceAction.push': '上架',
