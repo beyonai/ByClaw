@@ -44,4 +44,9 @@ public class MyAuthEmployQo extends AuthQo {
      * 资源状态筛选。有值时按该状态过滤；未传时 SQL 默认查 resource_status = 2（已上架）。
      */
     private Integer resourceStatus;
+
+    /**
+     * 是否查询全部资源状态；为 true 时不附加资源状态过滤。
+     */
+    private Boolean includeAllResourceStatus;
 }
