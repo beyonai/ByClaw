@@ -17,7 +17,37 @@ interface IDesktopAppInfo {
   packaged: boolean;
 }
 
-type IDesktopCapability = 'chat' | 'models.local' | 'app.update';
+type IDesktopCapability =
+  | 'chat'
+  | 'models.local'
+  | 'app.update'
+  | 'dialog.selectDirectories'
+  | 'local-files.v2'
+  | 'files.attachments'
+  | 'projects.local-directories'
+  | 'sessions.local';
+
+interface IDesktopDirectorySelection {
+  canceled: boolean;
+  paths: string[];
+}
+
+interface IDesktopLocalSessionPage {
+  list: Array<{
+    sessionId: string;
+    projectId?: string;
+    sessionName: string;
+    sessionContent?: string;
+    objectId?: string;
+    objectType?: string;
+    createTime: string;
+    updateTime: string;
+  }>;
+  total: number;
+  pageNum: number;
+  pageSize: number;
+  totalPages: number;
+}
 
 /**
  * 页面是远端加载的，版本和已安装的外壳互相独立：新页面经常跑在旧外壳上。
@@ -50,6 +80,34 @@ interface IDesktopBridge {
   };
   models?: {
     local?: () => Promise<Array<{ id: string; name: string; provider: string; source: 'claude' | 'codex'; detail?: string }>>;
+  };
+  dialog?: {
+    /** 打开系统原生目录选择器，返回 Windows 或 macOS 的绝对路径。 */
+    selectDirectories?: () => Promise<IDesktopDirectorySelection>;
+  };
+  projects?: {
+    register?: (params: {
+      projectId: string | number;
+      directories: Array<{ id?: string; name: string; path: string; primary: boolean }>;
+    }) => Promise<void>;
+    remove?: (params: { projectId: string | number }) => Promise<void>;
+    activate?: (params: { projectId?: string | number | null }) => Promise<void>;
+  };
+  sessions?: {
+    /** 仅返回由当前桌面外壳登记的本地会话；projectId=null 表示无项目会话。 */
+    listLocal?: (params: {
+      projectId?: string | number | null;
+      pageNum?: number;
+      pageSize?: number;
+    }) => Promise<IDesktopLocalSessionPage>;
+  };
+  files?: {
+    registerAttachments?: (files: File[]) => Promise<Array<{
+      attachmentId: string;
+      name: string;
+      size: number;
+      contentType?: string;
+    }>>;
   };
 }
 

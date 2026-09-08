@@ -1,4 +1,5 @@
 import { GET, POST } from '@/service/common/request';
+import { hasDesktopLocalFiles } from '@/service/common/desktopLocal';
 
 export interface FileBrowserItem {
   name: string;
@@ -107,6 +108,15 @@ export function uploadFiles(
   files: File[],
   onUploadProgress?: (e: any) => void
 ) {
+  if (hasDesktopLocalFiles() && window.byclawDesktop?.files?.registerAttachments) {
+    return window.byclawDesktop.files.registerAttachments(files).then((registered) =>
+      POST('/byaiService/fileBrowser/upload', {
+        resourceId,
+        path,
+        attachmentIds: registered.map((item) => item.attachmentId),
+      })
+    );
+  }
   const formData = new FormData();
   formData.append('resourceId', String(resourceId));
   formData.append('path', path);

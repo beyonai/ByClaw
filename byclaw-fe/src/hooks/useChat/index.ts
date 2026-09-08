@@ -296,6 +296,12 @@ function useChat(props: IProps) {
       const clientRequestId = params.clientRequestId || '';
       const projectId = clientRequestId ? pendingProjectIdByClientRequestRef.current.get(clientRequestId) : undefined;
       if (!projectId) {
+        // Desktop 的无项目会话同样需要进入 WorkspaceSider 的本地会话分组。
+        EventEmitter.emit('projectSpace-session-bound', {
+          sessionId: params.sessionId,
+          clientRequestId,
+          session: params.session,
+        });
         return;
       }
 
@@ -1224,6 +1230,13 @@ function useChat(props: IProps) {
       bindSessionToProject(projectId, sessionId);
     }
 
+    const currentSession = sessionList?.find((item) => `${item.sessionId}` === `${sessionId}`);
+    // 上传附件可能先创建会话 ID；显式告诉 Desktop 这仍是本地会话的首轮。
+    const desktopNewSession =
+      typeof window !== 'undefined' && window.byclawDesktop?.isDesktop && (!sessionId || currentSession?.isLocalSession)
+        ? true
+        : undefined;
+
     // 发送请求并处理SSE响应
     const sendResult = send(_queryQuestion, {
       sessionId,
@@ -1235,6 +1248,7 @@ function useChat(props: IProps) {
       agentId: isMultiAgentSend ? primaryEntry.lane.agentId : Number(_agentId) ? _agentId : null,
       agentCode: isMultiAgentSend ? primaryEntry.lane.agentCode : Number(_agentId) ? null : _agentId,
       agentType: _agentType,
+      ...(desktopNewSession ? { desktopNewSession } : {}),
     });
     const cancel = () => {
       if (!isContinuingRunningTrace) {

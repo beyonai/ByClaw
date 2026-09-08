@@ -23,13 +23,22 @@ type DevloopProjectShareTargetPayload = {
   targetName?: string;
 };
 
-type DevloopProjectPayload = {
+export type DevloopProjectLocalDirectoryPayload = {
+  name: string;
+  path: string;
+  primary: boolean;
+};
+
+export type DevloopProjectPayload = {
   projectName: string;
   description?: string;
   projectType?: DevloopProjectType;
   isShare?: DevloopProjectShareFlag;
   shareTargets?: DevloopProjectShareTargetPayload[];
   resources?: ProjectResourcePayload[];
+
+  /** Desktop 项目可读写的本地目录；Web 项目不传此字段。 */
+  localDirectories?: DevloopProjectLocalDirectoryPayload[];
 };
 
 type DevloopProjectSessionListPayload = {
