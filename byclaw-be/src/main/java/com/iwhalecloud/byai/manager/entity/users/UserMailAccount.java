@@ -30,6 +30,12 @@ public class UserMailAccount {
 
     private String defaultFlag;
 
+    private String providerCode;
+
+    private String authType;
+
+    private String credentialRef;
+
     private String imapHost;
 
     private Integer imapPort;

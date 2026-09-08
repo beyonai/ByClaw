@@ -1,7 +1,6 @@
 -- V0.4.0 研发闭环·集成测试环境模块
 -- 集成测试环境:回答"在哪测/怎么连/怎么部署/用什么账号登录"。
 -- 注意:定时(cron)和执行员工不在这里,归属"独立测试数字员工"配置(需求级,一份),避免与环境重复。
-
 -- 连接器授权记录允许在连接器模板重建时保留历史数据，不能被连接器信息表的外键阻塞。
 -- 约束删除是幂等的，兼容已执行过部分迁移的环境。
 DO $$
@@ -37,6 +36,40 @@ BEGIN
     END IF;
 END;
 $$ LANGUAGE plpgsql;
+
+-- 邮箱提供商和托管凭据字段兼容存量表；先补列，再执行回填和索引创建。
+SELECT byai.add_column_if_missing('byai', 'po_user_mail_account', 'provider_code', 'VARCHAR(64)');
+SELECT byai.add_column_if_missing('byai', 'po_user_mail_account', 'auth_type', 'VARCHAR(32)');
+SELECT byai.add_column_if_missing('byai', 'po_user_mail_account', 'credential_ref', 'VARCHAR(200)');
+
+-- 允许 OAuth2 等无需 IMAP/SMTP 参数的提供商账号。
+ALTER TABLE byai.po_user_mail_account
+    ALTER COLUMN imap_host DROP NOT NULL,
+    ALTER COLUMN imap_port DROP NOT NULL,
+    ALTER COLUMN smtp_host DROP NOT NULL,
+    ALTER COLUMN smtp_port DROP NOT NULL;
+
+-- 存量未删除记录均为自定义 IMAP + 应用专用密码配置。
+UPDATE byai.po_user_mail_account
+SET provider_code = COALESCE(provider_code, 'custom-imap'),
+    auth_type = COALESCE(auth_type, 'APP_PASSWORD')
+WHERE delete_flag = '0'
+  AND (provider_code IS NULL OR auth_type IS NULL);
+
+ALTER TABLE byai.po_user_mail_account
+    ALTER COLUMN provider_code SET DEFAULT 'custom-imap',
+    ALTER COLUMN auth_type SET DEFAULT 'APP_PASSWORD';
+
+CREATE INDEX IF NOT EXISTS idx_po_user_mail_account_user_provider
+    ON byai.po_user_mail_account (user_id, provider_code, delete_flag);
+
+CREATE INDEX IF NOT EXISTS idx_po_user_mail_account_credential_ref
+    ON byai.po_user_mail_account (credential_ref)
+    WHERE credential_ref IS NOT NULL AND delete_flag = '0';
+
+COMMENT ON COLUMN byai.po_user_mail_account.provider_code IS '邮箱提供商路由编码，如 custom-imap、gmail、microsoft';
+COMMENT ON COLUMN byai.po_user_mail_account.auth_type IS '邮箱认证方式，如 APP_PASSWORD、OAUTH2';
+COMMENT ON COLUMN byai.po_user_mail_account.credential_ref IS '托管凭证引用，不存储明文密码或令牌';
 
 CREATE TABLE IF NOT EXISTS byai.byai_integration_env (
     env_id              BIGINT          NOT NULL,

@@ -47,6 +47,11 @@ class ConnectorConnectionStateServiceTest {
 
     @BeforeEach
     void setUp() {
+        if (com.baomidou.mybatisplus.core.metadata.TableInfoHelper.getTableInfo(ConnectorAuth.class) == null) {
+            com.baomidou.mybatisplus.core.metadata.TableInfoHelper.initTableInfo(
+                new org.apache.ibatis.builder.MapperBuilderAssistant(
+                    new com.baomidou.mybatisplus.core.MybatisConfiguration(), ""), ConnectorAuth.class);
+        }
         connectorAuthMapper = mock(ConnectorAuthMapper.class);
         connectorInfoMapper = mock(ConnectorInfoMapper.class);
         sequenceService = mock(SequenceService.class);
@@ -65,6 +70,7 @@ class ConnectorConnectionStateServiceTest {
         );
         when(connectorAuthMapper.insertActiveIgnoreConflict(any())).thenReturn(1);
         when(connectorAuthMapper.updateById(any())).thenReturn(1);
+        when(connectorAuthMapper.update(org.mockito.ArgumentMatchers.isNull(), any())).thenReturn(1);
         Users user = new Users();
         user.setUserId(1001L);
         user.setUserCode("tester");
@@ -107,6 +113,22 @@ class ConnectorConnectionStateServiceTest {
             .containsEntry("principalName", "Example Corp");
         verify(manifestService).upsertAndEnable(1001L, connector);
         verify(privateParamService).refreshPrivateParamCacheAfterCommit(1001L, "tester");
+    }
+
+    @Test
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    void enabledAuthorizationLookupSelectsTheLatestActiveTabResult() {
+        ConnectorAuth latest = activeAuth();
+        latest.setAuthName("latest@example.com");
+        when(connectorAuthMapper.selectOne(any())).thenReturn(latest);
+
+        assertThat(service.findEnabledActiveAuthorization(USER_ID, CONNECTOR_ID)).isSameAs(latest);
+
+        ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper> query =
+            ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper.class);
+        verify(connectorAuthMapper).selectOne(query.capture());
+        assertThat(query.getValue().getSqlSegment())
+            .contains("user_id", "connector_id", "enable_flag", "status_cd", "ORDER BY update_time DESC", "LIMIT 1");
     }
 
     @Test
@@ -472,6 +494,70 @@ class ConnectorConnectionStateServiceTest {
             .getMethod("revokeAuthorization", String.class, Long.class)
             .getAnnotation(org.springframework.transaction.annotation.Transactional.class);
         assertThat(tx.rollbackFor()).containsExactly(Exception.class);
+    }
+
+    @Test
+    void lifecycleRefreshPreservesCredentialMetadataAndPublishesSync() {
+        ConnectorInfo connector = connector();
+        connector.setConnectorCode("gmail-mail");
+        connector.setProviderCode("gmail-oauth2");
+        ConnectorAuth auth = activeAuth();
+        auth.setEnableFlag("Y");
+        auth.setAuthCredential("encrypted-reference");
+        auth.setAuthName("old@example.com");
+        auth.setExternalAccountId("external-id");
+        when(connectorAuthMapper.selectOne(any())).thenReturn(auth);
+        when(manifestService.credentialProjection(connector)).thenReturn(java.util.Optional.of(
+            new CredentialProjectionSpec("/by/.connector-auth/.gmail-mail/credential.json")));
+        Date expiry = new Date(System.currentTimeMillis() + 3_600_000L);
+        AuthorizationStatusResult renewed = AuthorizationStatusResult.connected("changed", "changed@example.com",
+            com.iwhalecloud.byai.manager.domain.connector.authorization.CredentialState.READY,
+            com.iwhalecloud.byai.manager.domain.connector.authorization.CredentialRenewalMode.REFRESH_TOKEN,
+            expiry, null, new Date(), "same-ref");
+
+        service.updateCredentialLifecycle(USER_ID, connector, renewed);
+
+        assertThat(auth.getAuthCredential()).isEqualTo("encrypted-reference");
+        assertThat(auth.getAuthName()).isEqualTo("old@example.com");
+        assertThat(auth.getExternalAccountId()).isEqualTo("external-id");
+        assertThat(auth.getAccessExpireTime()).as("selected row is not mutated and written back").isNull();
+        ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<ConnectorAuth>> update =
+            ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper.class);
+        verify(connectorAuthMapper).update(org.mockito.ArgumentMatchers.isNull(), update.capture());
+        String sqlSet = update.getValue().getSqlSet();
+        assertThat(sqlSet).contains("expire_time", "access_expire_time", "refresh_expire_time",
+            "credential_state", "renewal_mode", "last_verified_at", "last_sync_time", "update_time");
+        assertThat(sqlSet).doesNotContain("auth_credential", "auth_name", "external_account_id", "enable_flag",
+            "status_cd", "credential_reference");
+        assertThat(update.getValue().getSqlSegment()).contains(
+            "auth_id", "user_id", "connector_id", "enable_flag", "status_cd");
+        verify(connectorAuthMapper, never()).updateById(any());
+        verify(eventPublisher).publishEvent(new ConnectorCredentialProjectionEvent(
+            1001L, CONNECTOR_ID, ConnectorCredentialProjectionEvent.Action.SYNC));
+    }
+
+    @Test
+    void terminalAndTransientRenewalStatesUseNarrowUpdates() {
+        ConnectorInfo connector = connector();
+        connector.setConnectorCode("gmail-mail");
+        ConnectorAuth auth = activeAuth();
+        auth.setEnableFlag("Y");
+        when(connectorAuthMapper.selectOne(any())).thenReturn(auth);
+        when(manifestService.credentialProjection(connector)).thenReturn(java.util.Optional.of(
+            new CredentialProjectionSpec("/by/.connector-auth/.gmail-mail/credential.json")));
+
+        service.markRefreshNeeded(USER_ID, connector);
+        service.markReauthRequired(USER_ID, connector);
+
+        var updates = org.mockito.ArgumentCaptor.forClass(
+            com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper.class);
+        verify(connectorAuthMapper, times(2)).update(org.mockito.ArgumentMatchers.isNull(), updates.capture());
+        assertThat(updates.getAllValues().get(0).getSqlSet()).contains("credential_state", "last_sync_time")
+            .doesNotContain("auth_credential", "renewal_mode");
+        assertThat(updates.getAllValues().get(1).getSqlSet()).contains("credential_state", "renewal_mode",
+            "last_sync_time").doesNotContain("auth_credential", "auth_name", "external_account_id");
+        verify(eventPublisher).publishEvent(new ConnectorCredentialProjectionEvent(
+            1001L, CONNECTOR_ID, ConnectorCredentialProjectionEvent.Action.DELETE));
     }
 
     private ConnectorInfo connector() {
