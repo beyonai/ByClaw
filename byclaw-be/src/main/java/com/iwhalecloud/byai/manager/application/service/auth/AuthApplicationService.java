@@ -3163,7 +3163,7 @@ public class AuthApplicationService {
         vo.setOwnerType(ssResource.getOwnerType());
         vo.setResourceBizType(ssResource.getResourceBizType());
 
-        boolean isResourceRemoved = Objects.equals(ssResource.getResourceStatus(), ResourceStatus.OFF_SHELF.getNum());
+        boolean isResourceRemoved = Objects.equals(ssResource.getResourceStatus(), ResourceStatus.DELETE.getNum());
         boolean canManage =
             hasResourceMemberSettingPermission(ssResource, currentUserId, managePrivilegeIds, organizationManageCache);
         boolean hasUsePermission =
@@ -3348,7 +3348,7 @@ public class AuthApplicationService {
         vo.setOwnerType(ssResource.getOwnerType());
         vo.setResourceBizType(ssResource.getResourceBizType());
 
-        boolean isResourceRemoved = Objects.equals(ssResource.getResourceStatus(), ResourceStatus.OFF_SHELF.getNum());
+        boolean isResourceRemoved = Objects.equals(ssResource.getResourceStatus(), ResourceStatus.DELETE.getNum());
         boolean canManage = hasResourceManagePermission(ssResource);
         boolean hasUsePermission = hasResourceUsePermission(ssResource);
         Set<Long> pendingUseApplyIds = queryCurrentUserPendingUseApplyResourceIds(List.of(resourceId),
