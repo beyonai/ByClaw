@@ -269,7 +269,7 @@ public class WecomMessageListener {
         AssistantChatDto dto = new AssistantChatDto();
         dto.setAccessTerminal(ChannelType.WECOM.getCode());
         dto.setChatContent(userText == null ? "" : userText);
-        dto.setRelModelId(-1L);
+        dto.setRelModelId("-1");
         dto.setAgentId(digitEmploy.getId());
         dto.setAgentType(digitEmploy.getAgentType());
 

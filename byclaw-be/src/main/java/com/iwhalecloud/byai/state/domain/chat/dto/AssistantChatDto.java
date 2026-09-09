@@ -10,6 +10,7 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSessionExt;
 import com.iwhalecloud.byai.common.constants.men.TaskOperateTypeEnum;
 import com.iwhalecloud.byai.state.domain.chat.model.MessageFileDto;
+import com.iwhalecloud.byai.state.domain.chat.model.SessionModelSelection;
 import com.iwhalecloud.byai.state.domain.resource.dto.ResourceVo;
 import io.netty.channel.Channel;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -61,10 +62,23 @@ public class AssistantChatDto {
     private List<MessageFileDto> files;
 
     /**
-     * 使用回答的模型(用户选择)
+     * 使用回答的模型(用户选择)。正整数为模型主键；-1 表示使用数字员工配置模型（清除会话覆盖）；
+     * 非数字为桌面本地模型 id，服务端忽略（由桌面 bridge 处理）。
      */
-    @Schema(description = "使用的模型ID(用户选择)", example = "1")
-    private Long relModelId;
+    @Schema(description = "使用的模型ID(用户选择)；-1=默认模型", example = "1")
+    private String relModelId;
+
+    /**
+     * 本轮实际使用的模型（服务端解析结果，含回退），仅进程内传递，不参与序列化。
+     */
+    @JsonIgnore
+    private transient SessionModelSelection sessionModelSelection;
+
+    /**
+     * 本轮是否已完成实际模型解析，避免额度判断与主流程重复解析。
+     */
+    @JsonIgnore
+    private transient boolean sessionModelResolved;
 
     /**
      * 是否搜索企业资料
