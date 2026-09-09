@@ -223,6 +223,7 @@ class ByclawResultFileStorage(ResultFileStorage):
         tenant_id = str(getattr(ctx, "tenant_id", "") or "").strip()
         if token:
             headers["Authorization"] = f"Bearer {token}"
+            headers["beyond-token"] = token
         if system_code:
             headers["X-System-Code"] = system_code
         if tenant_id:
