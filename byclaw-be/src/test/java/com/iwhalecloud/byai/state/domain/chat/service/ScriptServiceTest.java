@@ -6,6 +6,7 @@ import com.iwhalecloud.byai.common.message.service.ByaiMessageHotService;
 import com.iwhalecloud.byai.manager.domain.connector.service.ConnectorAuthService;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatSnapshotResponse;
+import com.iwhalecloud.byai.state.domain.chat.model.SessionModelSelection;
 import com.iwhalecloud.byai.state.domain.message.enums.MsgStatus;
 import com.iwhalecloud.byai.state.domain.message.dto.ByaiMessageHotDtoDto;
 import com.iwhalecloud.byai.state.domain.message.service.MemoryMessageService;
@@ -123,5 +124,31 @@ class ScriptServiceTest {
         assertThat(snapshot.getMsgStatus()).isEqualTo(MsgStatus.FINISH.getCode());
         assertThat(snapshot.isComplete()).isTrue();
         verify(messageHotService).updateSelective(snapshot);
+    }
+
+    @Test
+    void metadataIncludesUsedModelWhenSelectionResolved() {
+        when(connectorAuthService.findConnectorEnableStates(1001L)).thenReturn(new LinkedHashMap<>());
+        AssistantChatDto chatDto = new AssistantChatDto();
+        chatDto.setSessionModelSelection(
+            new SessionModelSelection("10004014", "deepseek-v4-flash", "lwt-deepseek", "DeepSeek"));
+
+        Map<String, Object> metadata = service.getMetadataByassistantChatDto(chatDto);
+
+        assertThat(metadata).containsKey("usedModel");
+        assertThat(metadata.get("usedModel")).isInstanceOf(Map.class);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> usedModel = (Map<String, Object>) metadata.get("usedModel");
+        assertThat(usedModel).containsEntry("id", "10004014").containsEntry("code", "deepseek-v4-flash")
+            .containsEntry("name", "lwt-deepseek").containsEntry("provider", "DeepSeek");
+    }
+
+    @Test
+    void metadataOmitsUsedModelWithoutResolvedSelection() {
+        when(connectorAuthService.findConnectorEnableStates(1001L)).thenReturn(new LinkedHashMap<>());
+
+        Map<String, Object> metadata = service.getMetadataByassistantChatDto(new AssistantChatDto());
+
+        assertThat(metadata).doesNotContainKey("usedModel");
     }
 }

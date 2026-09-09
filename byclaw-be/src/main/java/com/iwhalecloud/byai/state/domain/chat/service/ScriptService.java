@@ -51,6 +51,7 @@ import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatInfo;
 import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatSnapshotResponse;
 import com.iwhalecloud.byai.state.domain.chat.model.ChatResponse;
 import com.iwhalecloud.byai.state.domain.chat.model.MessageContext;
+import com.iwhalecloud.byai.state.domain.chat.model.SessionModelSelection;
 import com.iwhalecloud.byai.state.domain.men.enums.SystemCodeEnum;
 import com.iwhalecloud.byai.state.domain.men.enums.TaskTypeEnum;
 import com.iwhalecloud.byai.state.domain.men.service.MenTaskService;
@@ -656,6 +657,11 @@ public class ScriptService extends AbstractChatProcess {
         metadata.put("authConnectorList", connectorAuthService.findConnectorEnableStates(userId));
         // 放在外面，一定会写的
         metadata.put("mode", assistantChatDto.getMode());
+        // 本轮实际使用的模型：随消息 metadata 落库并由 initialization 事件下发，前端渲染每轮角标。
+        SessionModelSelection usedModel = assistantChatDto.getSessionModelSelection();
+        if (usedModel != null && StringUtils.isNotBlank(usedModel.getModelId())) {
+            metadata.put("usedModel", usedModel.toMetadata());
+        }
         // 增加智能体，聊天消息等标题，头像信息
         try {
             List<ResourceVo> resourceList = assistantChatDto.getResourceList();
