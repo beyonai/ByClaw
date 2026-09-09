@@ -40,6 +40,7 @@ import {
   multiChoicesHandler,
 } from '../messgae';
 import { IMessageState, ResourceFromType, SSEEventStatus, SSEMessageType } from '@/constants/message';
+import { getUsedModelFromMetadata } from '@/components/MessageList/utils';
 import { ResourceTypeMap } from '@/constants/resource';
 
 describe('utils/messgae', () => {
@@ -351,5 +352,28 @@ describe('utils/messgae', () => {
         metadata: JSON.stringify({ agentId: 'a1' }),
       } as any)
     ).toBe(true);
+  });
+
+  it('fetchMessageHandler keeps usedModel metadata so history replays the per-round model badge', () => {
+    const message = fetchMessageHandler({
+      creatorId: 'assistant',
+      creatorName: 'Assistant',
+      usage: '2',
+      messageId: 'm-used-model',
+      messageContent: 'answer',
+      metadata: JSON.stringify({
+        usedModel: { id: '9001', code: 'deepseek-v4-flash', name: 'lwt-deepseek-v4-flash', provider: 'DeepSeek' },
+      }),
+      createTime: '200',
+      sessionId: 's1',
+    });
+
+    expect(message.metadata).toContain('usedModel');
+    expect(getUsedModelFromMetadata(message.metadata)).toEqual({
+      id: '9001',
+      code: 'deepseek-v4-flash',
+      name: 'lwt-deepseek-v4-flash',
+      provider: 'DeepSeek',
+    });
   });
 });

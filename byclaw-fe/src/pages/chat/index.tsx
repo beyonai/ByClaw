@@ -83,6 +83,8 @@ const Chat = () => {
 
   const queryInputProps = React.useMemo(() => {
     return {
+      // 个人数字员工会话（/chat 默认助理与 /employees）在网页端也展示模型选择器。
+      enableModelSelect: true,
       onModeSelectChange: (mode: string) => {
         if (['uploadExcel', 'knowledgeBase'].includes(mode)) {
           setModeSelect(mode as 'uploadExcel' | 'knowledgeBase');
@@ -181,9 +183,9 @@ const Chat = () => {
       setProjectChatContext(
         isValidProjectContextId(projectId)
           ? {
-            projectId,
-            projectName: payload?.projectName,
-          }
+              projectId,
+              projectName: payload?.projectName,
+            }
           : {}
       );
     };

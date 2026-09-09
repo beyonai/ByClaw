@@ -33,12 +33,18 @@ type IState = {
 
   beyondSmartModePopoverOpen: boolean;
   selectedResourceAgentIds: string;
+  // undefined=本会话未选择（不发送 relModelId）；'-1'=显式默认模型；正数=模型主键。
   selectedModelId?: string;
+  // 按会话记住选择，避免切换会话后把 A 会话的模型带到 B 会话。
+  selectedModelBySession: Record<string, string>;
 } & pIState;
 
 type IProps = {
   dispatch?: any;
   userInfo?: UserInfo | null;
+
+  /** 网页端是否展示模型选择器（个人数字员工会话由页面传入）。 */
+  enableModelSelect?: boolean;
 } & pIProps;
 
 const staticEmptyObject = {};
@@ -64,10 +70,65 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
       beyondSmartModePopoverOpen: false,
       selectedResourceAgentIds: '',
       selectedModelId: undefined,
+      selectedModelBySession: {},
     };
   }
 
+  componentDidUpdate(prevProps: IProps): void {
+    if (`${prevProps.sessionId || ''}` === `${this.props.sessionId || ''}`) return;
+    const prevSessionId = `${prevProps.sessionId || 'new'}`;
+    const nextSessionId = this.sessionKey();
+    const selectedModelBySession = { ...this.state.selectedModelBySession };
+    // 新建会话拿到真实 sessionId 后，把 'new' 下的选择迁移过去，避免首轮消息后丢失。
+    if (prevSessionId === 'new' && nextSessionId !== 'new' && selectedModelBySession.new) {
+      selectedModelBySession[nextSessionId] = selectedModelBySession.new;
+      delete selectedModelBySession.new;
+      this.writeStoredModel(nextSessionId, selectedModelBySession[nextSessionId]);
+      this.clearStoredModel('new');
+    }
+    const restored = selectedModelBySession[nextSessionId];
+    if (restored !== this.state.selectedModelId || selectedModelBySession !== this.state.selectedModelBySession) {
+      this.setState({ selectedModelId: restored, selectedModelBySession });
+    }
+  }
+
+  sessionKey = () => `${this.props.sessionId || 'new'}`;
+
+  modelStorageKey = (sessionId: string) => `byclaw.session.selected-model.${sessionId}`;
+
+  readStoredModel = (sessionId: string) =>
+    typeof window === 'undefined'
+      ? undefined
+      : window.sessionStorage.getItem(this.modelStorageKey(sessionId)) || undefined;
+
+  writeStoredModel = (sessionId: string, value: string) => {
+    if (typeof window !== 'undefined') window.sessionStorage.setItem(this.modelStorageKey(sessionId), value);
+  };
+
+  clearStoredModel = (sessionId: string) => {
+    if (typeof window !== 'undefined') window.sessionStorage.removeItem(this.modelStorageKey(sessionId));
+  };
+
+  restoreSelectedModel = () => {
+    const stored = this.readStoredModel(this.sessionKey());
+    if (stored) {
+      this.setState({ selectedModelId: stored, selectedModelBySession: { [this.sessionKey()]: stored } });
+    }
+  };
+
+  // 选择器空值 = 「默认模型」：显式发送 -1 让服务端清除本会话覆盖。
+  onModelSelectChange = (next?: string) => {
+    const sessionKey = this.sessionKey();
+    const stored = next || '-1';
+    this.writeStoredModel(sessionKey, stored);
+    this.setState((prevState) => ({
+      selectedModelId: stored,
+      selectedModelBySession: { ...prevState.selectedModelBySession, [sessionKey]: stored },
+    }));
+  };
+
   componentDidMount(): void {
+    this.restoreSelectedModel();
     const { EventEmitter } = this.props.globalContext;
     EventEmitter.on('queryInput-set-schema-imme', this.setStateBySchema);
     super.componentDidMount();
@@ -135,6 +196,7 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
         mode,
         agentType: myAgentType,
         agentId,
+        // 仅在用户为本会话显式选择时发送：'-1' = 默认模型（清除覆盖），正数 = 模型主键。
         ...(this.state.selectedModelId ? { relModelId: this.state.selectedModelId } : {}),
         ...chatSettings,
       },
@@ -431,8 +493,9 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
           )}
           <ModelSelect
             key={`desktop-model-${this.props.sessionId || 'new'}`}
+            allowWeb={this.props.enableModelSelect}
             value={this.state.selectedModelId}
-            onChange={(selectedModelId) => this.setState({ selectedModelId })}
+            onChange={this.onModelSelectChange}
           />
           {this.STTRender()}
         </Space>

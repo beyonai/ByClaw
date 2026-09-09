@@ -104,4 +104,26 @@ describe('hooks/useSseSender/useSend', () => {
       })
     );
   });
+
+  it('lets the session model selection override the default relModelId', async () => {
+    const { result } = renderHook(() =>
+      useSend({
+        sessionId: 'session-3',
+        chatUrl: '/chat/url',
+      })
+    );
+
+    await act(async () => {
+      const { promise } = result.current.send('hello', { relModelId: 9001 });
+      await expect(promise).resolves.toEqual({});
+    });
+
+    expect(mockWebSocketManager.sendMessageWhenReady).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'LLM_MESSAGE',
+        sessionId: 'session-3',
+        relModelId: 9001,
+      })
+    );
+  });
 });
