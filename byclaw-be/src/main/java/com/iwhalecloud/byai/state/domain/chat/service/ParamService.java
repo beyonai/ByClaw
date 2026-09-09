@@ -61,6 +61,7 @@ import com.iwhalecloud.byai.state.domain.agent.enums.MetaStatusEnum;
 import com.iwhalecloud.byai.state.domain.agent.service.SsSuperassistSubAgentService;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import com.iwhalecloud.byai.state.domain.chat.model.MessageFileDto;
+import com.iwhalecloud.byai.state.domain.chat.model.SessionModelSelection;
 import com.iwhalecloud.byai.state.domain.men.service.MenResComService;
 import com.iwhalecloud.byai.state.domain.monitor.mapper.service.MonitorTargetService;
 import com.iwhalecloud.byai.state.domain.resource.bo.AuthContextBo;
@@ -137,6 +138,13 @@ public class ParamService {
         params.put("agent_id", assistantChatDto.getAgentId());
         params.put("ext_params", assistantChatDto.getExtParams());
         params.put("worker_agent_type", resolveWorkerAgentType(assistantChatDto.getAgentId()));
+        // 会话级模型选择：透传给 Agent 运行时（BY_SUPER 走 by-framework extraPayload）并便于日志排查。
+        SessionModelSelection effectiveModel = assistantChatDto.getSessionModelSelection();
+        if (effectiveModel != null) {
+            params.put("rel_model_id", effectiveModel.getModelId());
+            params.put("rel_model_code", effectiveModel.getModelCode());
+            params.put("rel_model_name", effectiveModel.getModelName());
+        }
 
         if (assistantChatDto.getAgentId() != null
             && digitalEmployeeGroupApplicationService.isGroup(assistantChatDto.getAgentId())) {

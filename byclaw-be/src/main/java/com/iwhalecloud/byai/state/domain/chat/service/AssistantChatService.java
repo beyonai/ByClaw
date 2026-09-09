@@ -124,6 +124,9 @@ public class AssistantChatService {
     @Autowired
     private TargetAgentResolver targetAgentResolver;
 
+    @Autowired
+    private SessionModelSelectionService sessionModelSelectionService;
+
     /**
      * 研发派发待接单放行钩子;manager 侧实现,未装配时聊天链路不受影响。
      * 必须延迟取:实现方 DevloopApplicationService 反过来依赖本类下发提示词,直接注入会构成 bean 环
@@ -196,6 +199,9 @@ public class AssistantChatService {
             if (assistantChatDto != null) {
                 assistantChatDto.setAgentId(targetAgentResolver.resolveAgentId(assistantChatDto));
                 applyCallAcpAgentDelegation(assistantChatDto);
+                // 会话标识与最终 agentId 已确定：解析本轮实际模型并维护会话级覆盖键（写/删）。
+                sessionModelSelectionService.resolveSelection(assistantChatDto);
+                sessionModelSelectionService.applySessionOverride(assistantChatDto);
             }
 
             // 执行聊天处理：Gateway 模式下 handleGatewayMode() 内部阻塞等待 Redis 监听器完成，

@@ -13,6 +13,8 @@ import com.iwhalecloud.byai.state.application.service.limit.TokenQuotaService;
 import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatInfo;
 import com.iwhalecloud.byai.state.domain.chat.dto.StopChatDto;
 import com.iwhalecloud.byai.state.domain.chat.enums.MessageType;
+import com.iwhalecloud.byai.state.domain.chat.model.SessionModelSelection;
+import com.iwhalecloud.byai.state.domain.chat.service.SessionModelSelectionService;
 import com.iwhalecloud.byai.state.domain.chat.service.RunningOutputStreamRegistry;
 import com.iwhalecloud.byai.state.infrastructure.utils.PushUtil;
 import io.netty.buffer.ByteBuf;
@@ -60,6 +62,9 @@ public class ChatService {
     @Autowired
     private TokenQuotaService tokenQuotaService;
 
+    @Autowired
+    private SessionModelSelectionService sessionModelSelectionService;
+
     /**
      * Handles direct chat interactions with the Large Language Model.
      * <p>
@@ -76,8 +81,17 @@ public class ChatService {
 
         // Token 月度限额检查（仅对公共模型和 TokenSaver 模型生效）
         try {
+            // 会话级模型选择：只解析本轮显式选择，额度判断按实际选中模型归属执行，否则切到公共模型会绕过限额。
+            // 这里不解析「回退模型」——最终 agentId 尚未确定（applyDefaultPersonalAssistant 在 chat 内），
+            // 提前回退会得到错误的数字员工配置模型；chat 内会按最终 agentId 解析并写入 metadata。
+            SessionModelSelection selectedModel = sessionModelSelectionService.resolve(message.getRelModelId())
+                .orElse(null);
+            boolean subjectToQuota = selectedModel == null
+                    ? tokenQuotaService.isModelSubjectToQuota(message.getAgentId())
+                    : tokenQuotaService.isModelSubjectToQuotaByModelId(
+                        sessionModelSelectionService.parseModelId(selectedModel.getModelId()));
             if (currentUser != null
-                    && tokenQuotaService.isModelSubjectToQuota(message.getAgentId())
+                    && subjectToQuota
                     && tokenQuotaService.isQuotaExceeded(currentUser.getUserId())) {
                 JSONObject error = new JSONObject();
                 error.put("type", MessageType.ERROR.name());
