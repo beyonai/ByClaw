@@ -11,6 +11,7 @@ import {
 } from "./agent-session-model-reconcile.js";
 import { resolveChannelSessionIdForTool } from "./channel-session-resolve.js";
 import { setActiveLangfuseSessionId } from "./langfuse-observation.js";
+import { resolveSessionModelOverride } from "./session-model-override.js";
 import { resolveAgentIdFromSessionKey } from "./session-agent-id.js";
 import { MANAGED_AGENT_PREFIX } from "./types.js";
 
@@ -341,16 +342,28 @@ export async function syncManagedAgentSessionModelForInbound(params: {
   api: OpenClawPluginApi;
   sessionKey?: string;
   agentId?: string;
+  /** 会话级模型覆盖的 `provider/model` 引用；提供时优先于数字员工配置模型。 */
+  modelRefOverride?: string;
 }): Promise<void> {
   const agentId = params.agentId?.trim() || resolveAgentIdFromSessionKey(params.sessionKey);
   if (!agentId?.startsWith(MANAGED_AGENT_PREFIX)) {
     return;
   }
-  const resolved = resolveManagedAgentModelFromConfig({
-    cfg: currentRuntimeConfig(params.api),
-    agentId,
-  });
-  if (!resolved) {
+  const overrideParsed = params.modelRefOverride
+    ? parseModelPrimaryRef(params.modelRefOverride.trim())
+    : null;
+  const resolved = overrideParsed
+    ? null
+    : resolveManagedAgentModelFromConfig({
+        cfg: currentRuntimeConfig(params.api),
+        agentId,
+      });
+  const parsed = overrideParsed
+    ? overrideParsed
+    : resolved
+      ? parseModelPrimaryRef(`${resolved.providerOverride}/${resolved.modelOverride}`)
+      : null;
+  if (!parsed) {
     return;
   }
   const sessionApi = params.api.runtime?.agent?.session;
@@ -361,10 +374,6 @@ export async function syncManagedAgentSessionModelForInbound(params: {
   const storePath = sessionApi.resolveStorePath(cfg.session?.store, { agentId });
   const sessionKey = params.sessionKey?.trim();
   if (!storePath || !sessionKey) {
-    return;
-  }
-  const parsed = parseModelPrimaryRef(`${resolved.providerOverride}/${resolved.modelOverride}`);
-  if (!parsed) {
     return;
   }
   await sessionApi.updateSessionStoreEntry({
@@ -396,10 +405,27 @@ export function registerManagedAgentModelHooks(
         mainParentAgentId,
       });
     }
+    const sessionModelOverride = aimodelRunSync
+      ? await resolveSessionModelOverride({
+          api,
+          pluginConfig: aimodelRunSync.pluginConfig,
+          sessionId: resolveLangfuseSessionIdFromHookContext(ctx),
+          aimodelSecretResolverScriptPath: aimodelRunSync.aimodelSecretResolverScriptPath,
+          log: api.logger,
+        }).catch((error: unknown) => {
+          api.logger.warn(
+            `baiying-enhance: session model override resolve failed: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+          return undefined;
+        })
+      : undefined;
     await syncManagedAgentSessionModelForInbound({
       api,
       sessionKey,
       agentId,
+      ...(sessionModelOverride ? { modelRefOverride: sessionModelOverride.modelRef } : {}),
     });
   });
 

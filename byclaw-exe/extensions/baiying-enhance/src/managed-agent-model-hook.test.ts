@@ -291,4 +291,55 @@ describe("syncManagedAgentSessionModelForInbound", () => {
     expect(entry.modelOverride).toBe("qwen3.6-27b");
     expect(entry.modelOverrideSource).toBe("auto");
   });
+
+  it("aligns the session to the user-picked model when a session override is provided", async () => {
+    const entry: Record<string, unknown> = {
+      modelProvider: "baiying-m-10004000",
+      model: "qwen3.6-27b",
+    };
+    const updateSessionStoreEntry = vi.fn(async (_params) => {
+      const mutator = _params.update as (entry: Record<string, unknown>) => Promise<void>;
+      await mutator(entry);
+    });
+    const cfg = {
+      session: { store: "(multiple)" },
+      agents: {
+        list: [
+          {
+            id: "baiying-agent-10000455",
+            model: { primary: "baiying-m-10004000/qwen3.6-27b" },
+          },
+        ],
+      },
+      models: {
+        providers: {
+          "baiying-m-10004000": { models: [{ id: "qwen3.6-27b" }] },
+          "baiying-m-9001": { models: [{ id: "code-9001" }] },
+        },
+      },
+    };
+    const api = {
+      runtime: {
+        config: { current: () => cfg, loadConfig: () => cfg },
+        agent: {
+          session: {
+            resolveStorePath: () => "/tmp/sessions.json",
+            updateSessionStoreEntry,
+          },
+        },
+      },
+    } as never;
+
+    await syncManagedAgentSessionModelForInbound({
+      api,
+      sessionKey: "agent:baiying-agent-10000455:byai-channel:direct:10006251",
+      modelRefOverride: "baiying-m-9001/code-9001",
+    });
+
+    expect(updateSessionStoreEntry).toHaveBeenCalledOnce();
+    expect(entry.providerOverride).toBe("baiying-m-9001");
+    expect(entry.modelOverride).toBe("code-9001");
+    expect(entry.modelProvider).toBe("baiying-m-9001");
+    expect(entry.model).toBe("code-9001");
+  });
 });
