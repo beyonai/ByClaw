@@ -227,7 +227,7 @@ describe("alignManagedAgentSessionModel session override", () => {
     models: { providers: { "baiying-m-1": { models: [{ id: "model-1" }] } } },
   } as never;
 
-  it("skips config-primary alignment when the gateway carries a positive relModelId", async () => {
+  it.each(["9001", "-2000"])("preserves an explicit stored model id %s during config-primary alignment", async (relModelId) => {
     const patchSessionEntry = vi.fn(async () => undefined);
     setByaiRuntime({
       agent: {
@@ -244,7 +244,7 @@ describe("alignManagedAgentSessionModel session override", () => {
       cfg: managedCfg,
       sessionAgentId: "baiying-agent-1",
       sessionKey: "agent:baiying-agent-1:byai-channel:direct:42",
-      relModelId: "9001",
+      relModelId,
       log,
     });
 

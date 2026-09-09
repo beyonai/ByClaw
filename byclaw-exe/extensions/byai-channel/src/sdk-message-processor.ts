@@ -181,7 +181,7 @@ export async function alignManagedAgentSessionModel(params: {
     warn?: (msg: string) => void;
   };
 }): Promise<void> {
-  if (params.relModelId && /^[1-9]\d*$/.test(params.relModelId.trim())) {
+  if (params.relModelId && /^-?[1-9]\d*$/.test(params.relModelId.trim()) && params.relModelId.trim() !== "-1") {
     params.log?.info?.(
       `[diagnose-sdk] session model override present (relModelId=${params.relModelId.trim()}), skip config-primary alignment: agent=${params.sessionAgentId}, session=${params.sessionKey}`,
     );
@@ -488,7 +488,7 @@ type DeliverReplyUnderGateDeps = SdkProcessorDeps & {
     agent_id?: unknown;
     agent_code?: unknown;
     agent_name?: unknown;
-    /** Java 网关透传的会话级模型选择（正整数模型主键，-1 表示默认模型）。 */
+    /** Java 网关透传的会话级模型选择（非零模型主键，-1 表示默认模型）。 */
     rel_model_id?: unknown;
     rel_model_code?: unknown;
     rel_model_name?: unknown;
