@@ -29,7 +29,7 @@ vi.mock("./diagnostics.js", () => ({
 }));
 // 头部原有SDK会话溢出媒体处理导入
 import type { GatewayDataEmitter } from "@byclaw/by-framework";
-import { deliverReplyToAgentViaSdk } from "./sdk-message-processor.js";
+import { alignManagedAgentSessionModel, deliverReplyToAgentViaSdk } from "./sdk-message-processor.js";
 import {
   clearActiveSdkRequestByTarget,
   getAgentRunEndPromiseResolver,
@@ -38,7 +38,7 @@ import {
   markActiveSdkRootLifecycleFinished,
   registerSdkEmitter,
 } from "./session-context.js";
-import { setByaiRuntime } from "./runtime.js";
+import { getByaiRuntime, setByaiRuntime } from "./runtime.js";
 import type { ResolvedByaiAccount } from "./types.js";
 // 新版本新增导入（冲突右侧）
 import { isOpenClawContextOverflowDispatchError } from "./dispatch-error.js";
@@ -201,5 +201,64 @@ describe("isOpenClawContextOverflowDispatchError", () => {
       false,
     );
     expect(isOpenClawContextOverflowDispatchError("provider returned HTTP 401")).toBe(false);
+  });
+});
+
+describe("alignManagedAgentSessionModel session override", () => {
+  const managedCfg = {
+    agents: {
+      list: [{ id: "baiying-agent-1", model: { primary: "baiying-m-1/model-1" } }],
+    },
+    models: { providers: { "baiying-m-1": { models: [{ id: "model-1" }] } } },
+  } as never;
+
+  it("skips config-primary alignment when the gateway carries a positive relModelId", async () => {
+    const patchSessionEntry = vi.fn(async () => undefined);
+    setByaiRuntime({
+      agent: {
+        session: {
+          patchSessionEntry,
+          resolveStorePath: () => "/tmp/sessions.json",
+        },
+      },
+    } as never);
+    const log = { info: vi.fn(), warn: vi.fn() };
+
+    await alignManagedAgentSessionModel({
+      rt: getByaiRuntime(),
+      cfg: managedCfg,
+      sessionAgentId: "baiying-agent-1",
+      sessionKey: "agent:baiying-agent-1:byai-channel:direct:42",
+      relModelId: "9001",
+      log,
+    });
+
+    expect(patchSessionEntry).not.toHaveBeenCalled();
+    expect(log.info).toHaveBeenCalledWith(expect.stringContaining("skip config-primary alignment"));
+  });
+
+  it("aligns to the employee config model for the default-model signal", async () => {
+    const patchSessionEntry = vi.fn(async (params: { update: (entry: Record<string, unknown>) => unknown }) => {
+      params.update({});
+    });
+    setByaiRuntime({
+      agent: {
+        session: {
+          patchSessionEntry,
+          resolveStorePath: () => "/tmp/sessions.json",
+        },
+      },
+    } as never);
+
+    await alignManagedAgentSessionModel({
+      rt: getByaiRuntime(),
+      cfg: managedCfg,
+      sessionAgentId: "baiying-agent-1",
+      sessionKey: "agent:baiying-agent-1:byai-channel:direct:42",
+      relModelId: "-1",
+      log: { info: vi.fn(), warn: vi.fn() },
+    });
+
+    expect(patchSessionEntry).toHaveBeenCalledOnce();
   });
 });

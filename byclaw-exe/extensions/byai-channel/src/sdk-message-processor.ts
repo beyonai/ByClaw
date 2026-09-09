@@ -163,17 +163,29 @@ function resolveManagedAgentPrimaryModel(
   return { ...parsed, primary };
 }
 
-async function alignManagedAgentSessionModel(params: {
+export async function alignManagedAgentSessionModel(params: {
   rt: ReturnType<typeof getByaiRuntime>;
   cfg: import("openclaw/plugin-sdk").OpenClawConfig;
   sessionAgentId: string;
   sessionKey: string;
   signal?: AbortSignal;
+  /**
+   * 网关透传的会话级模型选择信号（params.rel_model_id）。
+   * 正整数表示用户在对话框选定了模型：对齐工作交给 baiying-enhance（它负责按需注册 provider），
+   * 这里必须跳过，否则会把会话模型打回数字员工配置值。
+   */
+  relModelId?: string;
   log?: {
     info?: (msg: string) => void;
     warn?: (msg: string) => void;
   };
 }): Promise<void> {
+  if (params.relModelId && /^[1-9]\d*$/.test(params.relModelId.trim())) {
+    params.log?.info?.(
+      `[diagnose-sdk] session model override present (relModelId=${params.relModelId.trim()}), skip config-primary alignment: agent=${params.sessionAgentId}, session=${params.sessionKey}`,
+    );
+    return;
+  }
   const target = resolveManagedAgentPrimaryModel(params.cfg, params.sessionAgentId);
   if (!target) {
     return;
@@ -469,6 +481,10 @@ type DeliverReplyUnderGateDeps = SdkProcessorDeps & {
     agent_id?: unknown;
     agent_code?: unknown;
     agent_name?: unknown;
+    /** Java 网关透传的会话级模型选择（正整数模型主键，-1 表示默认模型）。 */
+    rel_model_id?: unknown;
+    rel_model_code?: unknown;
+    rel_model_name?: unknown;
   };
   laneMetadata?: ByaiLaneMetadata;
 };
@@ -540,6 +556,9 @@ async function deliverReplyToAgentViaSdkUnderGate(
     cfg,
     sessionAgentId,
     sessionKey,
+    ...(stringValue(extraPayload.rel_model_id).trim()
+      ? { relModelId: stringValue(extraPayload.rel_model_id).trim() }
+      : {}),
     signal: deps.abortController?.signal,
     log,
   });
