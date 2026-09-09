@@ -50,6 +50,23 @@ class SandboxLoginAutoStartServiceTest {
     }
 
     @Test
+    void trigger_usesPersonalPreferenceInsteadOfStartingCompetingDefaultSandbox() {
+        SandboxServiceSpecEntityMapper mapper = mock(SandboxServiceSpecEntityMapper.class);
+        SandboxService sandboxService = mock(SandboxService.class);
+        SandboxLoginAutoStartService service = new SandboxLoginAutoStartService(mapper, sandboxService,
+            Runnable::run);
+        when(mapper.selectAutoStartSpecs()).thenReturn(List.of(
+            spec("openclaw"), spec("openclaw"), spec("personal-test"), spec("byclaw-dsh")));
+        when(sandboxService.getPreferredServiceKey("user001")).thenReturn(" personal-test ");
+
+        service.trigger("user001");
+
+        verify(sandboxService).launchSandboxWithServiceKey("user001", "personal-test");
+        verify(sandboxService).launchSandboxWithServiceKey("user001", "byclaw-dsh");
+        verify(sandboxService, never()).launchSandboxWithServiceKey("user001", "openclaw");
+    }
+
+    @Test
     void trigger_coalescesConcurrentRequestsForSameUser() {
         SandboxServiceSpecEntityMapper mapper = mock(SandboxServiceSpecEntityMapper.class);
         SandboxService sandboxService = mock(SandboxService.class);

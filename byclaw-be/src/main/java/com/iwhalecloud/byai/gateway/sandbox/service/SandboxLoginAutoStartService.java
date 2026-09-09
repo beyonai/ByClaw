@@ -69,6 +69,14 @@ public class SandboxLoginAutoStartService {
                 }
             }
 
+            if (serviceKeys.contains(SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE)) {
+                String preferred = StringUtils.trimToNull(sandboxService.getPreferredServiceKey(userCode));
+                if (preferred != null) {
+                    serviceKeys.remove(SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE);
+                    serviceKeys.add(preferred);
+                }
+            }
+
             for (String serviceKey : serviceKeys) {
                 try {
                     sandboxService.launchSandboxWithServiceKey(userCode, serviceKey);
