@@ -3,6 +3,7 @@ import { AskAgentCommand, MessageHeader } from "@byclaw/by-framework";
 import { describe, expect, it } from "vitest";
 import {
   commandOrchestratorRef,
+  commandRelModelId,
   commandSessionContext,
   commandSourceAgentId,
   extractUserInput,
@@ -192,6 +193,27 @@ describe("commandOrchestratorRef", () => {
     expect(orchestratorBindingSessionId("session-1", undefined)).toBe(
       "session-1",
     );
+  });
+});
+
+describe("commandRelModelId", () => {
+  it("reads a positive numeric rel_model_id", () => {
+    expect(commandRelModelId({ extraPayload: { rel_model_id: 9001 } })).toBe("9001");
+    expect(commandRelModelId({ extraPayload: { rel_model_id: " 9001 " } })).toBe("9001");
+  });
+
+  it("falls back to camelCase relModelId", () => {
+    expect(commandRelModelId({ extraPayload: { relModelId: "42" } })).toBe("42");
+  });
+
+  it("ignores the default-model signal, non-numeric desktop ids and missing values", () => {
+    expect(commandRelModelId({ extraPayload: { rel_model_id: -1 } })).toBeUndefined();
+    expect(commandRelModelId({ extraPayload: { rel_model_id: "-1" } })).toBeUndefined();
+    expect(commandRelModelId({ extraPayload: { rel_model_id: "0" } })).toBeUndefined();
+    expect(commandRelModelId({ extraPayload: { rel_model_id: "claude-sonnet-4" } })).toBeUndefined();
+    expect(commandRelModelId({ extraPayload: { rel_model_id: "12x" } })).toBeUndefined();
+    expect(commandRelModelId({ extraPayload: {} })).toBeUndefined();
+    expect(commandRelModelId({})).toBeUndefined();
   });
 });
 
