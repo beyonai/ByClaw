@@ -549,7 +549,8 @@ function useHandler(props: IProps) {
             body?.command?.includes('web-acquirer.mjs') ||
             body?.command?.includes('ima.mjs') ||
             body?.command?.includes('bycli_integration.mjs') ||
-            body?.command?.includes('public-discovery.mjs')
+            body?.command?.includes('public-discovery.mjs') ||
+            body?.command?.includes('public-collect')
           );
         }
         if ('path' in body && typeof body?.path === 'string') {
