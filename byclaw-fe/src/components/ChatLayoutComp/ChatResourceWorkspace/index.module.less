@@ -591,3 +591,16 @@
   color: #82071e;
   background: #ffebe9;
 }
+
+.saveProjectModal {
+  :global(.ant-modal-body) {
+    max-height: min(60vh, 520px);
+    overflow: hidden;
+  }
+}
+
+.saveProjectTreeScroll {
+  max-height: min(60vh, 520px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}

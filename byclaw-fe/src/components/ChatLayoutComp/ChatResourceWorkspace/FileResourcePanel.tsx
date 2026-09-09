@@ -952,30 +952,43 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
           if (!savingToProject) setSaveProjectTarget(null);
         }}
         destroyOnClose
+        className={styles.saveProjectModal}
       >
-        <Spin spinning={saveProjectTreeLoading}>
-          <Tree
-            treeData={saveProjectTreeData}
-            expandedKeys={saveProjectExpandedKeys}
-            selectedKeys={[saveProjectTargetPath]}
-            onExpand={(keys) => setSaveProjectExpandedKeys(keys)}
-            onSelect={(keys) => {
-              if (keys.length) setSaveProjectTargetPath(String(keys[0]));
-            }}
-            loadData={async (node: any) => {
-              if (node.children?.length) return;
-              setSaveProjectTreeLoading(true);
-              try {
-                node.children = await loadSaveProjectDirectories(String(node.key));
-                setSaveProjectTreeData((current) => [...current]);
-              } finally {
-                setSaveProjectTreeLoading(false);
-              }
-            }}
-            blockNode
-            showIcon
-          />
-        </Spin>
+        <div className={styles.saveProjectTreeScroll}>
+          <Spin spinning={saveProjectTreeLoading}>
+            <Tree
+              treeData={saveProjectTreeData}
+              expandedKeys={saveProjectExpandedKeys}
+              selectedKeys={[saveProjectTargetPath]}
+              onExpand={(keys) => setSaveProjectExpandedKeys(keys)}
+              onSelect={(keys) => {
+                if (keys.length) setSaveProjectTargetPath(String(keys[0]));
+              }}
+              loadData={async (node: any) => {
+                if (node.children?.length) return;
+                setSaveProjectTreeLoading(true);
+                try {
+                  const children = await loadSaveProjectDirectories(String(node.key));
+                  const updateChildren = (nodes: any[]): any[] =>
+                    nodes.map((item) => {
+                      if (String(item.key) === String(node.key)) {
+                        return { ...item, children, isLeaf: children.length === 0 };
+                      }
+                      if (Array.isArray(item.children) && item.children.length > 0) {
+                        return { ...item, children: updateChildren(item.children) };
+                      }
+                      return item;
+                    });
+                  setSaveProjectTreeData((current) => updateChildren(current));
+                } finally {
+                  setSaveProjectTreeLoading(false);
+                }
+              }}
+              blockNode
+              showIcon
+            />
+          </Spin>
+        </div>
       </Modal>
       <Modal
         open={!!moveTarget}
