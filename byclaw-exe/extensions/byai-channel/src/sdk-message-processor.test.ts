@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { setSessionModelPreparer } from "../../shared/src/session-model-runtime.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("openclaw/plugin-sdk/media-runtime", () => ({
   detectMime: vi.fn(async () => "application/octet-stream"),
@@ -43,9 +44,11 @@ import type { ResolvedByaiAccount } from "./types.js";
 // 新版本新增导入（冲突右侧）
 import { isOpenClawContextOverflowDispatchError } from "./dispatch-error.js";
 
+afterEach(() => setSessionModelPreparer(undefined));
+
 // 冲突HEAD：SDK自动续答不携带原始媒体的测试套件
 describe("deliverReplyToAgentViaSdk overflow continuation media handling", () => {
-  it("does not attach the original inbound media to the auto-continue dispatch", async () => {
+  it.each([false, true])("preserves continuation media and captures config after model preparation (new provider=%s)", async (prepareNewModel) => {
     const account: ResolvedByaiAccount = {
       accountId: "acct-media",
       name: "acct-media",
@@ -63,8 +66,14 @@ describe("deliverReplyToAgentViaSdk overflow continuation media handling", () =>
     const contexts: Array<Record<string, unknown>> = [];
     const skillFilters: Array<string[] | undefined> = [];
     let dispatchCount = 0;
+    let currentConfig: any = cfg;
+    const prepare = vi.fn(async () => {
+      currentConfig = { ...cfg, models: { providers: { "baiying-m-9002": { models: [{ id: "first-use-model" }] } } } };
+    });
+    if (prepareNewModel) setSessionModelPreparer(prepare);
 
     setByaiRuntime({
+      config: { current: () => currentConfig, loadConfig: () => currentConfig },
       agent: {
         resolveAgentWorkspaceDir: () => "/tmp/byai-channel-test-workspace",
       },
@@ -94,15 +103,21 @@ describe("deliverReplyToAgentViaSdk overflow continuation media handling", () =>
           finalizeInboundContext: (ctx: Record<string, unknown>) => ctx,
           withReplyDispatcher: async ({ run }: { run: () => Promise<unknown> }) => await run(),
           dispatchReplyFromConfig: async ({
+            cfg: dispatchConfig,
             ctx,
             replyOptions,
           }: {
+            cfg: any;
             ctx: Record<string, unknown>;
             replyOptions: {
               onAgentRunStart?: (runId: string) => Promise<void>;
               skillFilter?: string[];
             };
           }) => {
+            if (prepareNewModel) {
+              expect(prepare).toHaveBeenCalledWith("user-media");
+              expect(dispatchConfig.models.providers["baiying-m-9002"].models[0].id).toBe("first-use-model");
+            }
             contexts.push(ctx);
             skillFilters.push(replyOptions.skillFilter);
             dispatchCount += 1;

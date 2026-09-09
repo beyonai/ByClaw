@@ -4,6 +4,7 @@
  */
 
 import path from "node:path";
+import { prepareSessionModelForDispatch } from "../../shared/src/session-model-runtime.js";
 import {
   detectMime,
   fetchRemoteMedia,
@@ -425,6 +426,12 @@ export async function deliverReplyToAgentViaSdk(
   const sessionKey = baseSessionKey;
 
   const { result, meta, release } = await runSessionDispatchExclusiveLeased(sessionKey, async () => {
+    // Provider registration can replace the runtime config. Complete it before
+    // taking the snapshot that OpenClaw retains throughout this dispatch.
+    await awaitWithAbort(
+      prepareSessionModelForDispatch(message.sessionId),
+      deps.abortController?.signal,
+    );
     const dispatchCfg = await waitForBaiyingAgentConfig({
       runtime: rt,
       cfg,
