@@ -21,6 +21,7 @@ import type { IFile, IQueryFile } from '@/typescript/file';
 import { chatModeMap } from '@/constants/query';
 import { ResourceTypeMap } from '@/constants/resource';
 import { getDownloadOpenClawFileUrl, isOpenClawAgent, uploadFileToOpenClaw } from '@/utils/openClaw/utils';
+import { createPendingRemoteSession } from '@/utils/session';
 import queryStyles from '../index.module.less';
 import MentionPopover from '../RichInput/mentionPopover';
 import styles from './index.module.less';
@@ -304,31 +305,29 @@ class EmployeesInputChat extends QueryInputBase<IProps, IState> {
                 setSessionId?.(mySessionId);
                 dispatch({
                   type: 'session/addSession',
-                  payload: {
+                  payload: createPendingRemoteSession({
                     sessionId: mySessionId,
                     sessionName,
-                    isLocalSession: true,
                     projectName: this.props.selectedProject?.projectName,
                     projectId: this.props.projectId ?? this.props.selectedProject?.projectId,
                     objectId: agentId,
                     objectType: agentId ? 'DigEmployee' : undefined,
                     agentType: this.props.myAgentType,
-                  },
+                  }),
                 });
                 const projectId = this.props.projectId ?? this.props.selectedProject?.projectId;
                 if (projectId !== undefined && projectId !== null) {
                   this.props.globalContext.EventEmitter.emit('projectSpace-session-refresh', {
                     projectId,
                     projectName: this.props.selectedProject?.projectName,
-                    session: {
+                    session: createPendingRemoteSession({
                       sessionId: mySessionId,
                       sessionName,
                       projectId,
                       projectName: this.props.selectedProject?.projectName,
                       updateTime: new Date().toISOString(),
                       createTime: new Date().toISOString(),
-                      isLocalSession: true,
-                    },
+                    }),
                   });
                 }
               }}

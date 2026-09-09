@@ -24,6 +24,7 @@ import styles from './index.module.less';
 import MentionPopover from '../RichInput/mentionPopover';
 import { IChatSettingValue } from '@/typescript/cloud';
 import { agentTypeMap } from '@/constants/agent';
+import { createPendingRemoteSession } from '@/utils/session';
 
 type IState = {
   deepThink: boolean;
@@ -399,31 +400,29 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
                 setSessionId?.(mySessionId);
                 dispatch({
                   type: 'session/addSession',
-                  payload: {
+                  payload: createPendingRemoteSession({
                     sessionId: mySessionId,
                     sessionName,
-                    isLocalSession: true,
                     projectName: this.props.selectedProject?.projectName,
                     projectId: this.props.projectId ?? this.props.selectedProject?.projectId,
                     objectId: agentId,
                     objectType: agentId ? 'DigEmployee' : undefined,
                     agentType: this.props.myAgentType,
-                  },
+                  }),
                 });
                 const projectId = this.props.projectId ?? this.props.selectedProject?.projectId;
                 if (projectId !== undefined && projectId !== null) {
                   this.props.globalContext.EventEmitter.emit('projectSpace-session-refresh', {
                     projectId,
                     projectName: this.props.selectedProject?.projectName,
-                    session: {
+                    session: createPendingRemoteSession({
                       sessionId: mySessionId,
                       sessionName,
                       projectId,
                       projectName: this.props.selectedProject?.projectName,
                       updateTime: new Date().toISOString(),
                       createTime: new Date().toISOString(),
-                      isLocalSession: true,
-                    },
+                    }),
                   });
                 }
               }}
