@@ -157,6 +157,37 @@ byclaw-be/
 
 ## 快速开始
 
+### 外部子会话快照恢复
+
+外部子会话按确定的 Redis key 读取快照；首次消息或快照过期时直接返回缺失，
+不执行 `KEYS` 或全库 `SCAN`。保存快照时同步登记专用 ZSET
+`byai:chat:running:external-child:index`，只有索引与快照写入均成功后才允许后续广播和 ACK。
+单机/哨兵使用 pipeline，Jedis Cluster 使用单 key 索引脚本后再保存快照，避免跨 slot 脚本和
+不受支持的 Cluster pipeline。索引保留约 31 分钟，快照仍保留 30 分钟；每次登记最多清理
+16 个过期索引项。已落库快照仍可用于重连，恢复通过已落库 Stream 水位过滤，不能直接删除
+索引项，否则旧版本落库可能误删新版本的恢复入口。
+
+启动恢复由独立的 `scoped-message-recovery` 线程执行，只遍历该索引，每批最多读取 100 个
+快照及其水位，批次间等待 100ms；落库队列有至少 100 个待处理会话时暂停补入恢复数据。
+实时消息入队不等待恢复线程，恢复数据不会替换正在排队的实时消息；恢复写入前再次核对
+已落库水位，避免覆盖本实例已经完成的新写入。
+
+这不是跨实例的版本写入协议：水位检查与数据库写入之间仍有竞态窗口，多实例同时恢复与写入
+同一消息时仍需依赖后续的分布式互斥或数据库版本条件更新；本次修复不提供跨实例写入顺序保证。
+
+**首次升级注意：**旧版本快照没有该索引，缺失索引时不会退回全库扫描。升级前应停止向旧实例
+分配新消费任务，并正常关闭、确认 write-behind 队列已排空；仍有未落库快照时应先完成落库再
+移除旧实例。旧快照的精确 key 重连读取保持可用，但不可依赖新版本启动自动发现旧的无索引积压。
+
+真实 Redis 回归测试仅连接本机一次性测试实例（测试会清空该实例数据库）：
+
+```bash
+BYCLAW_TEST_REDIS_PORT=16389 mvn -B -f byclaw-be/pom.xml \
+  -Dtest=ExternalChildSnapshotRedisTest,RunningChatSnapshotServiceTest,ScopedMessageWriteBehindTest test
+BYCLAW_TEST_REDIS_CLUSTER_PORT=16390 mvn -B -f byclaw-be/pom.xml \
+  -Dtest=ExternalChildSnapshotRedisClusterTest test
+```
+
 ### 环境要求
 
 - Java 21+
