@@ -127,6 +127,23 @@ class RedisStreamMessageListenerTest {
         verify(metrics).recordAckFailure();
     }
 
+    @Test
+    void closedListenerRegistersFailedAckOfProcessedRecordWithoutSchedulingRetry() {
+        MapRecord<String, String, String> record = record();
+        when(processor.process(record)).thenAnswer(invocation -> {
+            listener.close();
+            return StreamDispatchResult.HANDLED;
+        });
+        when(streamOperations.acknowledge(any(), any(), any(RecordId.class)))
+            .thenThrow(new IllegalStateException("redis down"));
+
+        listener.onMessage(record);
+
+        verify(streamOperations).acknowledge("stream-10", "byai_conversation_service_group", record.getId());
+        org.assertj.core.api.Assertions.assertThat(ackFailureRegistry.hasFailures("stream-10")).isTrue();
+        verify(processor, never()).afterAcknowledge(any());
+    }
+
     @SuppressWarnings("unchecked")
     private MapRecord<String, String, String> record() {
         MapRecord<String, String, String> record = mock(MapRecord.class);

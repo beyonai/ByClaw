@@ -8,18 +8,25 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.Date;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.data.redis.core.Cursor;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.data.redis.core.SetOperations;
 import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
@@ -170,11 +177,12 @@ class ChatRuntimeStateServiceTest {
         indexMembers.add("11");
         indexMembers.add("12");
         indexMembers.add("13");
-        when(setOperations.members("byai:chat:runtime:index")).thenReturn(indexMembers);
-        when(valueOperations.get("byai:chat:runtime:10")).thenReturn(JSON.toJSONString(running));
-        when(valueOperations.get("byai:chat:runtime:11")).thenReturn(JSON.toJSONString(finished));
-        when(valueOperations.get("byai:chat:runtime:12")).thenReturn(null);
-        when(valueOperations.get("byai:chat:runtime:13")).thenReturn(JSON.toJSONString(handoff));
+        Cursor<Object> indexCursor = cursor(indexMembers);
+        when(setOperations.scan(eq("byai:chat:runtime:index"), any(ScanOptions.class)))
+            .thenReturn(indexCursor);
+        when(valueOperations.multiGet(List.of("byai:chat:runtime:10", "byai:chat:runtime:11",
+            "byai:chat:runtime:12", "byai:chat:runtime:13"))).thenReturn(Arrays.asList(
+                JSON.toJSONString(running), JSON.toJSONString(finished), null, JSON.toJSONString(handoff)));
 
         List<ChatRuntimeState> states = service.listRunningStates();
 
@@ -183,6 +191,8 @@ class ChatRuntimeStateServiceTest {
         assertEquals(13L, states.get(1).getSessionId());
         verify(setOperations).remove("byai:chat:runtime:index", "11");
         verify(setOperations).remove("byai:chat:runtime:index", "12");
+        verify(setOperations, never()).members(anyString());
+        verify(valueOperations, never()).get(anyString());
     }
 
     /**
@@ -200,14 +210,52 @@ class ChatRuntimeStateServiceTest {
 
         Set<Object> indexMembers = new LinkedHashSet<>();
         indexMembers.add("10");
-        when(setOperations.members("byai:chat:runtime:index")).thenReturn(indexMembers);
-        when(valueOperations.get("byai:chat:runtime:10")).thenReturn("not-a-json");
-        when(redisTemplate.hasKey("byai:chat:runtime:10")).thenReturn(true);
+        Cursor<Object> indexCursor = cursor(indexMembers);
+        when(setOperations.scan(eq("byai:chat:runtime:index"), any(ScanOptions.class)))
+            .thenReturn(indexCursor);
+        when(valueOperations.multiGet(List.of("byai:chat:runtime:10"))).thenReturn(List.of("not-a-json"));
 
         List<ChatRuntimeState> states = service.listRunningStates();
 
         assertEquals(0, states.size());
         verify(setOperations, never()).remove(anyString(), any(Object.class));
+    }
+
+    @Test
+    void listRunningStatesBoundsBulkReadsEvenWhenScanReturnsMoreThanItsCountHint() {
+        RedisTemplate<String, Object> redisTemplate = mock(RedisTemplate.class);
+        ValueOperations<String, Object> valueOperations = mock(ValueOperations.class);
+        SetOperations<String, Object> setOperations = mock(SetOperations.class);
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(redisTemplate.opsForSet()).thenReturn(setOperations);
+        ReflectionTestUtils.setField(service, "redisTemplate", redisTemplate);
+        List<Object> indexMembers = new ArrayList<>();
+        for (long sessionId = 1; sessionId <= 205; sessionId++) {
+            indexMembers.add(String.valueOf(sessionId));
+        }
+        Cursor<Object> indexCursor = cursor(indexMembers);
+        when(setOperations.scan(eq("byai:chat:runtime:index"), any(ScanOptions.class)))
+            .thenReturn(indexCursor);
+        when(valueOperations.multiGet(any())).thenAnswer(call -> {
+            List<String> keys = call.getArgument(0);
+            List<Object> values = new ArrayList<>();
+            for (String key : keys) {
+                ChatRuntimeState running = runtimeState(null);
+                running.setSessionId(Long.valueOf(key.substring(key.lastIndexOf(':') + 1)));
+                running.setStatus(ChatRuntimeState.STATUS_RUNNING);
+                values.add(JSON.toJSONString(running));
+            }
+            return values;
+        });
+
+        List<ChatRuntimeState> states = service.listRunningStates();
+
+        assertEquals(205, states.size());
+        ArgumentCaptor<List<String>> batches = ArgumentCaptor.forClass(List.class);
+        verify(valueOperations, times(3)).multiGet(batches.capture());
+        for (List<String> batch : batches.getAllValues()) {
+            org.assertj.core.api.Assertions.assertThat(batch).hasSizeLessThanOrEqualTo(100);
+        }
     }
 
     @Test
@@ -233,7 +281,13 @@ class ChatRuntimeStateServiceTest {
             indexes.computeIfAbsent(call.getArgument(0), key -> new LinkedHashSet<>()).add(call.getArgument(1));
             return 1L;
         });
+        when(sets.scan(anyString(), any(ScanOptions.class))).thenAnswer(call ->
+            cursor(indexes.getOrDefault(call.getArgument(0), Set.of())));
         when(sets.members(anyString())).thenAnswer(call -> indexes.get(call.getArgument(0)));
+        when(values.multiGet(any())).thenAnswer(call -> {
+            List<String> keys = call.getArgument(0);
+            return keys.stream().map(records::get).toList();
+        });
 
         ChatProcessContext owner = new ChatProcessContext(null, assistantChatDto());
         owner.sessionId = 10L;
@@ -278,5 +332,16 @@ class ChatRuntimeStateServiceTest {
         assistantChatDto.setAgentType("001");
         assistantChatDto.setChatContent("hello");
         return assistantChatDto;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Cursor<Object> cursor(Iterable<?> values) {
+        List<Object> copy = new ArrayList<>();
+        values.forEach(copy::add);
+        AtomicInteger offset = new AtomicInteger();
+        Cursor<Object> cursor = mock(Cursor.class);
+        when(cursor.hasNext()).thenAnswer(call -> offset.get() < copy.size());
+        when(cursor.next()).thenAnswer(call -> copy.get(offset.getAndIncrement()));
+        return cursor;
     }
 }

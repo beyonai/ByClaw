@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.state.domain.chat.service;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -24,6 +25,7 @@ import org.springframework.data.redis.connection.stream.Consumer;
 import org.springframework.data.redis.connection.stream.PendingMessage;
 import org.springframework.data.redis.connection.stream.PendingMessages;
 import org.springframework.data.redis.connection.stream.RecordId;
+import org.springframework.data.redis.connection.stream.MapRecord;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.StreamOperations;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -42,6 +44,8 @@ class SessionStreamRecoveryClaimTest {
     private StreamOperations<String, Object, Object> streamOps;
     private SessionStreamManager sessionStreamManager;
     private SessionStreamRecoveryService recoveryService;
+    private StreamRecordProcessor processor;
+    private StreamAckFailureRegistry ackFailures;
 
     @BeforeEach
     @SuppressWarnings("unchecked")
@@ -52,7 +56,9 @@ class SessionStreamRecoveryClaimTest {
         when(redisTemplate.opsForStream()).thenReturn(streamOps);
 
         sessionStreamManager = mockField("sessionStreamManager", SessionStreamManager.class);
-        mockField("streamRecordProcessor", StreamRecordProcessor.class);
+        processor = mockField("streamRecordProcessor", StreamRecordProcessor.class);
+        ackFailures = new StreamAckFailureRegistry();
+        ReflectionTestUtils.setField(recoveryService, "streamAckFailureRegistry", ackFailures);
         ReflectionTestUtils.setField(recoveryService, "redisTemplate", redisTemplate);
         mockField("chatRuntimeStateService", ChatRuntimeStateService.class);
         mockField("chatContextRecoveryService", ChatContextRecoveryService.class);
@@ -62,9 +68,12 @@ class SessionStreamRecoveryClaimTest {
 
         when(sessionStreamManager.buildStreamKey("10")).thenReturn("byai_gateway:session:10:data_stream");
         when(sessionStreamManager.buildConsumerName("10")).thenReturn("byai_conversation_consumer:instance-a:10");
-        // claim 后返回空列表即可（dispatch 路径已在别处覆盖），这里只验证 claim 调用与分页行为。
+        when(processor.process(any())).thenReturn(StreamDispatchResult.HANDLED);
+        // Return each requested record: an omitted result cannot prove that the PEL checkpoint succeeded.
         when(streamOps.claim(any(), any(), any(), any(RedisStreamCommands.XClaimOptions.class)))
-            .thenReturn(Collections.emptyList());
+            .thenAnswer(call -> ((RedisStreamCommands.XClaimOptions) call.getArgument(3)).getIds().stream()
+                .map(id -> MapRecord.create("byai_gateway:session:10:data_stream",
+                    java.util.Map.<Object, Object>of("data", "{}")).withId(id)).toList());
     }
 
     private <T> T mockField(String name, Class<T> type) {
@@ -82,22 +91,42 @@ class SessionStreamRecoveryClaimTest {
     }
 
     @Test
-    void claimsAcrossMultiplePages() {
-        // 第一页满 100 条（全部 idle 已满），第二页 1 条，第三页空 → 应分页 claim 两次。
+    void limitsEachSessionToOnePelPagePerRecoveryPass() {
+        // 即使第一页已满，本轮也只处理一页，让其他 session 获得恢复机会。
         List<PendingMessage> page1 = new ArrayList<>();
         for (int i = 1; i <= 100; i++) {
             page1.add(pending(i + "-0", IDLE + 1000));
         }
-        List<PendingMessage> page2 = Collections.singletonList(pending("200-0", IDLE + 1000));
 
+        when(streamOps.pending(eq("byai_gateway:session:10:data_stream"), eq(GROUP), any(Range.class), anyLong()))
+            .thenReturn(new PendingMessages(GROUP, page1));
+
+        invokeClaim();
+
+        verify(streamOps).pending(any(), anyString(), any(Range.class), anyLong());
+        verify(streamOps).claim(any(), any(), any(), any(RedisStreamCommands.XClaimOptions.class));
+    }
+
+    @Test
+    void nextRecoveryPassContinuesAfterThePreviousFullPage() {
+        List<PendingMessage> page1 = new ArrayList<>();
+        for (int i = 1; i <= 100; i++) {
+            page1.add(pending(i + "-0", IDLE + 1000));
+        }
+        List<PendingMessage> page2 = Collections.singletonList(pending("101-0", IDLE + 1000));
         when(streamOps.pending(eq("byai_gateway:session:10:data_stream"), eq(GROUP), any(Range.class), anyLong()))
             .thenReturn(new PendingMessages(GROUP, page1))
             .thenReturn(new PendingMessages(GROUP, page2));
 
         invokeClaim();
+        invokeClaim();
 
-        // 两页各 claim 一次（第二页不足 100 条，循环结束）。
-        verify(streamOps, times(2)).claim(any(), any(), any(), any(RedisStreamCommands.XClaimOptions.class));
+        ArgumentCaptor<Range<String>> ranges = ArgumentCaptor.forClass(Range.class);
+        verify(streamOps, times(2)).pending(any(), anyString(), ranges.capture(), anyLong());
+        org.assertj.core.api.Assertions.assertThat(ranges.getAllValues().get(0).getLowerBound().isBounded()).isFalse();
+        Range.Bound<String> secondLowerBound = ranges.getAllValues().get(1).getLowerBound();
+        org.assertj.core.api.Assertions.assertThat(secondLowerBound.getValue()).contains("100-0");
+        org.assertj.core.api.Assertions.assertThat(secondLowerBound.isInclusive()).isFalse();
     }
 
     @Test
@@ -129,5 +158,106 @@ class SessionStreamRecoveryClaimTest {
         invokeClaim();
 
         verify(streamOps, never()).claim(any(), any(), any(), any(RedisStreamCommands.XClaimOptions.class));
+    }
+
+    @Test
+    void retriesFailedRecordBeforeProcessingOrAdvancingPastItsSuffix() {
+        List<PendingMessage> firstPage = new ArrayList<>();
+        for (int i = 1; i <= 100; i++) firstPage.add(pending(i + "-0", IDLE + 1000));
+        when(streamOps.pending(any(), eq(GROUP), any(Range.class), anyLong()))
+            .thenReturn(new PendingMessages(GROUP, firstPage))
+            .thenReturn(new PendingMessages(GROUP, firstPage.subList(49, 100)));
+        when(streamOps.claim(any(), any(), any(), any(RedisStreamCommands.XClaimOptions.class)))
+            .thenAnswer(call -> ((RedisStreamCommands.XClaimOptions) call.getArgument(3)).getIds().stream()
+                .map(id -> MapRecord.create("byai_gateway:session:10:data_stream",
+                    java.util.Map.<Object, Object>of("data", "{}" )).withId(id)).toList());
+        List<String> processed = new ArrayList<>();
+        java.util.concurrent.atomic.AtomicInteger failedAttempts = new java.util.concurrent.atomic.AtomicInteger();
+        when(processor.process(any())).thenAnswer(call -> {
+            String id = ((MapRecord<?, ?, ?>) call.getArgument(0)).getId().getValue();
+            processed.add(id);
+            return "50-0".equals(id) && failedAttempts.getAndIncrement() == 0
+                ? StreamDispatchResult.ERROR : StreamDispatchResult.HANDLED;
+        });
+
+        invokeClaim();
+
+        org.junit.jupiter.api.Assertions.assertEquals(50, processed.size(), "Failed checkpoint must stop later records");
+        invokeClaim();
+        ArgumentCaptor<Range<String>> ranges = ArgumentCaptor.forClass(Range.class);
+        verify(streamOps, times(2)).pending(any(), anyString(), ranges.capture(), anyLong());
+        org.junit.jupiter.api.Assertions.assertFalse(ranges.getAllValues().get(1).getLowerBound().isBounded(),
+            "The failed page must be retried before scanning newer IDs");
+        org.junit.jupiter.api.Assertions.assertEquals("50-0", processed.get(50));
+        org.junit.jupiter.api.Assertions.assertEquals("51-0", processed.get(51));
+    }
+
+    @Test
+    void doesNotOvertakeAnEarlierRecordWhoseIdleThresholdIsNotMet() {
+        when(streamOps.pending(any(), eq(GROUP), any(Range.class), anyLong()))
+            .thenReturn(new PendingMessages(GROUP, List.of(pending("100-0", 1000), pending("101-0", IDLE + 1000))));
+
+        invokeClaim();
+
+        verify(streamOps, never()).claim(any(), any(), any(), any(RedisStreamCommands.XClaimOptions.class));
+    }
+
+    @Test
+    void retriesNewlyClaimedLocalFailureWithoutWaitingForForeignConsumerIdleThreshold() {
+        PendingMessage localFirst = new PendingMessage(RecordId.of("50-0"), Consumer.from(GROUP,
+            "byai_conversation_consumer:instance-a:10"), Duration.ofMillis(1), 2);
+        PendingMessage localSecond = new PendingMessage(RecordId.of("51-0"), Consumer.from(GROUP,
+            "byai_conversation_consumer:instance-a:10"), Duration.ofMillis(1), 2);
+        when(streamOps.pending(any(), eq(GROUP), any(Range.class), anyLong()))
+            .thenReturn(new PendingMessages(GROUP, List.of(pending("50-0", IDLE + 1000), pending("51-0", IDLE + 1000))))
+            .thenReturn(new PendingMessages(GROUP, List.of(localFirst, localSecond)));
+        when(streamOps.claim(any(), any(), any(), any(RedisStreamCommands.XClaimOptions.class)))
+            .thenAnswer(call -> ((RedisStreamCommands.XClaimOptions) call.getArgument(3)).getIds().stream()
+                .map(id -> MapRecord.create("byai_gateway:session:10:data_stream",
+                    java.util.Map.<Object, Object>of("data", "{}")).withId(id)).toList());
+        List<String> processed = new ArrayList<>();
+        when(processor.process(any())).thenAnswer(call -> {
+            String id = ((MapRecord<?, ?, ?>) call.getArgument(0)).getId().getValue();
+            processed.add(id);
+            return processed.size() == 1 ? StreamDispatchResult.ERROR : StreamDispatchResult.HANDLED;
+        });
+
+        invokeClaim();
+        invokeClaim();
+
+        org.junit.jupiter.api.Assertions.assertEquals(List.of("50-0", "50-0", "51-0"), processed,
+            "XCLAIM resets idle but the paused owner must retry its own failure on the next pass");
+    }
+
+    @Test
+    void missingClaimedRecordStillInPelStopsLaterRecordsAndKeepsBarrierClosed() {
+        when(streamOps.pending(any(), eq(GROUP), any(Range.class), anyLong()))
+            .thenReturn(new PendingMessages(GROUP, List.of(pending("50-0", IDLE + 1000), pending("51-0", IDLE + 1000))));
+        MapRecord<String, Object, Object> newer = MapRecord.create("byai_gateway:session:10:data_stream",
+            java.util.Map.<Object, Object>of("data", "{}")).withId(RecordId.of("51-0"));
+        when(streamOps.claim(any(), any(), any(), any(RedisStreamCommands.XClaimOptions.class)))
+            .thenReturn(List.of(newer));
+        when(processor.process(any())).thenReturn(StreamDispatchResult.HANDLED);
+
+        Object drained = ReflectionTestUtils.invokeMethod(recoveryService, "claimPendingMessages", "10");
+
+        org.junit.jupiter.api.Assertions.assertEquals(false, drained, "A missing claim result is not proof of checkpointing");
+        verify(processor, never()).process(any());
+    }
+
+    @Test
+    void registersOnlyFailedAcknowledgementAndClearsItOnSuccessfulRetry() {
+        String stream = "byai_gateway:session:10:data_stream";
+        when(streamOps.pending(any(), eq(GROUP), any(Range.class), anyLong()))
+            .thenReturn(new PendingMessages(GROUP, List.of(pending("50-0", IDLE + 1000))));
+        when(streamOps.acknowledge(any(), anyString(), any(RecordId.class)))
+            .thenThrow(new IllegalStateException("ACK transport unavailable")).thenReturn(1L);
+
+        invokeClaim();
+
+        org.junit.jupiter.api.Assertions.assertTrue(ackFailures.hasFailures(stream),
+            "After unread resumes, completed dispatches require targeted ACK recovery");
+        invokeClaim();
+        org.junit.jupiter.api.Assertions.assertFalse(ackFailures.hasFailures(stream));
     }
 }

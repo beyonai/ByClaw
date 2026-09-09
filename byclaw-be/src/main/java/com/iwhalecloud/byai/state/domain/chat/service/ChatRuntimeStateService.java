@@ -10,7 +10,9 @@ import java.util.concurrent.TimeUnit;
 
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.Cursor;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 
@@ -36,6 +38,8 @@ public class ChatRuntimeStateService {
     private static final long RUNTIME_TTL_SECONDS = 24 * 60 * 60L;
 
     private static final long RECOVERY_LOCK_TTL_SECONDS = 120L;
+
+    private static final int RUNTIME_INDEX_BATCH_SIZE = 100;
 
     /** 心跳与关闭交接都用单 key Lua 更新，避免关闭线程和最后一次 keepalive 相互覆盖。 */
     private static final DefaultRedisScript<Long> TOUCH_SCRIPT = new DefaultRedisScript<>("""
@@ -237,27 +241,20 @@ public class ChatRuntimeStateService {
 
     public List<ChatRuntimeState> listRunningStates() {
         List<ChatRuntimeState> states = new ArrayList<>();
+        ScanOptions options = ScanOptions.scanOptions().count(RUNTIME_INDEX_BATCH_SIZE).build();
         try {
-            Set<Object> sessionIds = redisTemplate.opsForSet().members(RUNTIME_INDEX_KEY);
-            if (sessionIds == null || sessionIds.isEmpty()) {
-                return states;
-            }
-            for (Object sessionId : sessionIds) {
-                ChatRuntimeState state = get(String.valueOf(sessionId));
-                if (state == null) {
-                    // 只有运行态 key 确实不存在才剔除索引：get() 对解析异常同样返回 null，
-                    // 若一并剔除，一次瞬时反序列化失败就会让该会话永久无法被恢复扫描发现。
-                    if (!runtimeStateExists(sessionId)) {
-                        redisTemplate.opsForSet().remove(RUNTIME_INDEX_KEY, sessionId);
+            try (Cursor<Object> sessionIds = redisTemplate.opsForSet().scan(RUNTIME_INDEX_KEY, options)) {
+                List<Object> batch = new ArrayList<>(RUNTIME_INDEX_BATCH_SIZE);
+                while (sessionIds.hasNext()) {
+                    batch.add(sessionIds.next());
+                    // SSCAN COUNT is only a hint, so enforce the MGET bound ourselves.
+                    if (batch.size() == RUNTIME_INDEX_BATCH_SIZE) {
+                        appendRunningStates(batch, states);
+                        batch.clear();
                     }
-                    continue;
                 }
-                if (ChatRuntimeState.STATUS_RUNNING.equals(state.getStatus())
-                    || ChatRuntimeState.STATUS_HANDOFF_REQUESTED.equals(state.getStatus())) {
-                    states.add(state);
-                }
-                else {
-                    redisTemplate.opsForSet().remove(RUNTIME_INDEX_KEY, sessionId);
+                if (!batch.isEmpty()) {
+                    appendRunningStates(batch, states);
                 }
             }
         }
@@ -267,14 +264,40 @@ public class ChatRuntimeStateService {
         return states;
     }
 
-    private boolean runtimeStateExists(Object sessionId) {
-        try {
-            return Boolean.TRUE.equals(redisTemplate.hasKey(RUNTIME_KEY_PREFIX + sessionId));
-        }
-        catch (Exception e) {
-            // 探测失败按存在处理，宁可多留一轮索引，也不误删待恢复会话。
-            log.warn("探测聊天运行态 key 失败, sessionId: {}", sessionId, e);
-            return true;
+    private void appendRunningStates(List<Object> sessionIds, List<ChatRuntimeState> states) {
+        List<String> keys = sessionIds.stream()
+            .map(sessionId -> RUNTIME_KEY_PREFIX + sessionId).toList();
+        List<Object> values = redisTemplate.opsForValue().multiGet(keys);
+        for (int i = 0; i < sessionIds.size(); i++) {
+            Object sessionId = sessionIds.get(i);
+            Object value = values == null || i >= values.size() ? null : values.get(i);
+            if (value == null) {
+                redisTemplate.opsForSet().remove(RUNTIME_INDEX_KEY, sessionId);
+                continue;
+            }
+            String json = String.valueOf(value);
+            if (StringUtils.isBlank(json)) {
+                // A returned value proves the key exists. Keep malformed entries discoverable for a later scan.
+                continue;
+            }
+            ChatRuntimeState state;
+            try {
+                state = JSON.parseObject(json, ChatRuntimeState.class);
+            }
+            catch (Exception e) {
+                // Do not permanently hide a recoverable session because one stored value could not be parsed.
+                continue;
+            }
+            if (state == null) {
+                continue;
+            }
+            if (ChatRuntimeState.STATUS_RUNNING.equals(state.getStatus())
+                || ChatRuntimeState.STATUS_HANDOFF_REQUESTED.equals(state.getStatus())) {
+                states.add(state);
+            }
+            else {
+                redisTemplate.opsForSet().remove(RUNTIME_INDEX_KEY, sessionId);
+            }
         }
     }
 

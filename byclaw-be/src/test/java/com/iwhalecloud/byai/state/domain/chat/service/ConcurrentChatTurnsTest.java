@@ -118,6 +118,22 @@ class ConcurrentChatTurnsTest {
     }
 
     @Test
+    void failedRunningStateRegistrationStopsNewListenerAndRemovesItsContext() {
+        ChatStreamRuntimeCoordinator coordinator = coordinator(false);
+        RunningChatInfo idle = new RunningChatInfo();
+        idle.setRunning(false);
+        when(running.getRunning(10L)).thenReturn(idle);
+        doReturn(true).when(streams).startSessionListener("10", followup);
+        doThrow(new IllegalStateException("Redis unavailable")).when(running).markRunning(followup);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> coordinator.startIfNecessary(followup))
+            .hasMessage("Redis unavailable");
+
+        verify(streams).stopSessionListener("10");
+        assertThat(outputs.getContext("10", "followup")).isNull();
+    }
+
+    @Test
     void interleavedEventsReachTheirOwnTurnQueues() {
         SessionStreamEventRouter router = new SessionStreamEventRouter();
         ReflectionTestUtils.setField(router, "outputStreamManager", outputs);

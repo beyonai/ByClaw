@@ -75,6 +75,17 @@ public class SessionStreamEventRouter {
     /**
      * Redis Stream 统一入口。HTTP SSE 投递到请求线程队列，WebSocket 直接推送到已登记的 Channel。
      */
+    public StreamDispatchResult dispatchChildBatch(Long sessionId, List<JSONObject> events) {
+        try {
+            scopedSessionEventService.handleChildBatch(sessionId, events);
+            return StreamDispatchResult.HANDLED;
+        }
+        catch (Exception e) {
+            log.warn("处理外部子会话批次失败, sessionId: {}, size: {}", sessionId, events.size(), e);
+            return StreamDispatchResult.ERROR;
+        }
+    }
+
     public StreamDispatchResult dispatch(JSONObject dataJson) {
         String sessionId = dataJson == null ? null : dataJson.getString("session_id");
         if (StringUtils.isBlank(sessionId)) {

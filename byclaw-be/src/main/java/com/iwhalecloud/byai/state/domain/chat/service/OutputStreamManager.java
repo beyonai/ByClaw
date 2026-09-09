@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.state.domain.chat.service;
 
 import java.io.OutputStream;
+import java.util.function.Supplier;
 import java.util.Objects;
 import java.util.List;
 import java.util.Map;
@@ -69,6 +70,13 @@ public class OutputStreamManager {
      */
     public boolean containsKey(String key) {
         return outputStreamMap.containsKey(key);
+    }
+
+    private final SessionLifecycleLocks lifecycleLocks = new SessionLifecycleLocks();
+
+    /** Serialize lifecycle I/O only for this session; context reads never acquire this lock. */
+    public <T> T withSessionLock(String sessionId, Supplier<T> action) {
+        return lifecycleLocks.withLock(sessionId, action);
     }
 
     // -------------------- ChatProcessContext 缓存方法 --------------------

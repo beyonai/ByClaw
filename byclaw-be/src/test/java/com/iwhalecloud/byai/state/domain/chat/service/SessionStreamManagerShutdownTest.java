@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.state.domain.chat.service;
 
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.when;
 
 import java.util.Map;
@@ -20,7 +21,7 @@ class SessionStreamManagerShutdownTest {
     void marksOwnedRuntimeForHandoffBeforeReleasingListenerLease() {
         SessionStreamManager manager = new SessionStreamManager();
         SessionStreamMetrics metrics = mock(SessionStreamMetrics.class);
-        OutputStreamManager outputStreamManager = mock(OutputStreamManager.class);
+        OutputStreamManager outputStreamManager = spy(new OutputStreamManager());
         ChatRuntimeStateService runtimeStateService = mock(ChatRuntimeStateService.class);
         SessionStreamLeaseService leaseService = mock(SessionStreamLeaseService.class);
         StreamMessageListenerContainer container = mock(StreamMessageListenerContainer.class);

@@ -37,9 +37,8 @@ public class ChatStreamRuntimeCoordinator {
      * @return true 表示本次请求登记了独立轮次；false 表示继续已有轮次，只需发送 Gateway 消息。
      */
     public boolean startIfNecessary(ChatProcessContext ctx) {
-        synchronized (outputStreamManager) {
-            return registerTurn(ctx);
-        }
+        if (ctx == null || ctx.sessionId == null) return false;
+        return outputStreamManager.withSessionLock(String.valueOf(ctx.sessionId), () -> registerTurn(ctx));
     }
 
     private boolean registerTurn(ChatProcessContext ctx) {
@@ -76,7 +75,15 @@ public class ChatStreamRuntimeCoordinator {
         outputStreamManager.putContext(sessionId, ctx);
 
         // 启动监听器：使用 XREAD 轮询，从锚点之后读取，避免消费旧消息。
-        if (!sessionStreamManager.startSessionListener(sessionId, ctx)) {
+        boolean listenerStarted;
+        try {
+            listenerStarted = sessionStreamManager.startSessionListener(sessionId, ctx);
+        }
+        catch (RuntimeException e) {
+            outputStreamManager.removeContext(sessionId, ctx);
+            throw e;
+        }
+        if (!listenerStarted) {
             ctx.sendByFrameworkMsgOnly = true;
             log.info("会话 listener 已由其他实例持有，本次只发送 Gateway 消息, sessionId: {}, traceId: {}",
                 sessionId, ctx.traceId);
@@ -85,7 +92,22 @@ public class ChatStreamRuntimeCoordinator {
         }
 
         // 记录运行态，用于重开页面恢复、停止和避免重复监听。
-        runningOutputStreamRegistry.markRunning(ctx);
+        try {
+            runningOutputStreamRegistry.markRunning(ctx);
+        }
+        catch (RuntimeException e) {
+            // A failed registration must not leave an orphan polling task occupying admission.
+            try {
+                sessionStreamManager.stopSessionListener(sessionId);
+            }
+            catch (RuntimeException cleanupFailure) {
+                e.addSuppressed(cleanupFailure);
+            }
+            finally {
+                outputStreamManager.removeContext(sessionId, ctx);
+            }
+            throw e;
+        }
         return true;
     }
 
