@@ -19,8 +19,8 @@ import org.springframework.stereotype.Component;
  * Coalesces accumulated scoped-session projections before broadcasting them.
  *
  * <p>Each projection already contains all content accumulated for a message. Keeping only the newest revision in a
- * short window prevents full-message WebSocket traffic from growing quadratically while a response streams. Terminal
- * revisions bypass the delay so completion remains immediate.</p>
+ * short window reduces redundant full-message traffic; each projection still scales with accumulated content. Terminal
+ * revisions bypass the coalescing delay. Transport backpressure separately bounds queued snapshots per client.</p>
  */
 @Component
 public class ScopedProjectionBroadcaster {
@@ -31,7 +31,7 @@ public class ScopedProjectionBroadcaster {
 
     private final ScheduledExecutorService scheduler;
 
-    private final Map<String, PendingState> states = new ConcurrentHashMap<>();
+    private final Map<ProjectionKey, PendingState> states = new ConcurrentHashMap<>();
 
     private volatile boolean shuttingDown;
 
@@ -63,19 +63,21 @@ public class ScopedProjectionBroadcaster {
         if (shuttingDown) {
             throw new IllegalStateException("scoped projection broadcaster is shutting down");
         }
+        JSONObject data = message.getJSONObject("data");
+        ProjectionKey key = new ProjectionKey(contextKey, data == null ? null : data.getString("messageId"));
         while (true) {
-            PendingState state = states.computeIfAbsent(contextKey, ignored -> new PendingState());
+            PendingState state = states.computeIfAbsent(key, ignored -> new PendingState());
             synchronized (state) {
-                if (states.get(contextKey) != state) {
+                if (states.get(key) != state) {
                     continue;
                 }
-                state.latest = new PendingBroadcast(userId, message);
+                state.latest = new PendingBroadcast(userId, message, terminal);
                 if (terminal && state.future != null) {
                     state.future.cancel(false);
                     state.future = null;
                 }
                 if (state.future == null) {
-                    state.future = scheduler.schedule(() -> drain(contextKey, state),
+                    state.future = scheduler.schedule(() -> drain(key, state),
                         terminal ? 0L : coalesceMillis, TimeUnit.MILLISECONDS);
                 }
                 return;
@@ -83,7 +85,7 @@ public class ScopedProjectionBroadcaster {
         }
     }
 
-    private void drain(String contextKey, PendingState state) {
+    private void drain(ProjectionKey key, PendingState state) {
         PendingBroadcast pending;
         synchronized (state) {
             state.future = null;
@@ -91,14 +93,14 @@ public class ScopedProjectionBroadcaster {
             state.latest = null;
         }
         if (pending != null) {
-            broadcastService.broadcastRawToUser(pending.userId(), pending.message(), null);
+            broadcastService.broadcastScopedProjection(pending.userId(), key.contextKey(), pending.message(), pending.terminal());
         }
         synchronized (state) {
             if (state.latest == null) {
-                states.remove(contextKey, state);
+                states.remove(key, state);
             }
             else if (!shuttingDown && state.future == null) {
-                state.future = scheduler.schedule(() -> drain(contextKey, state), coalesceMillis,
+                state.future = scheduler.schedule(() -> drain(key, state), coalesceMillis,
                     TimeUnit.MILLISECONDS);
             }
         }
@@ -107,7 +109,7 @@ public class ScopedProjectionBroadcaster {
     @PreDestroy
     void shutdown() {
         shuttingDown = true;
-        states.forEach((contextKey, state) -> {
+        states.forEach((key, state) -> {
             PendingBroadcast pending;
             synchronized (state) {
                 if (state.future != null) {
@@ -118,9 +120,9 @@ public class ScopedProjectionBroadcaster {
                 state.latest = null;
             }
             if (pending != null) {
-                broadcastService.broadcastRawToUser(pending.userId(), pending.message(), null);
+                broadcastService.broadcastScopedProjection(pending.userId(), key.contextKey(), pending.message(), pending.terminal());
             }
-            states.remove(contextKey, state);
+            states.remove(key, state);
         });
         scheduler.shutdown();
     }
@@ -133,7 +135,10 @@ public class ScopedProjectionBroadcaster {
         };
     }
 
-    private record PendingBroadcast(Long userId, JSONObject message) {
+    private record PendingBroadcast(Long userId, JSONObject message, boolean terminal) {
+    }
+
+    private record ProjectionKey(String contextKey, String messageId) {
     }
 
     private static final class PendingState {

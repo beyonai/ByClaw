@@ -214,6 +214,14 @@ Stream 长轮询使用独立的 `sessionStreamRedisConnectionFactory`，业务 R
 避免 HTTP 结束事件先关闭监听而遗留已处理消息。关闭后 ACK 失败登记到恢复队列，不再启动本地重试。
 合并能减少完整投影的构建和传输次数；单次完整快照成本仍随回答长度增长。
 
+子会话 WebSocket 广播按客户端等待实际 Netty 写入完成，每个连接最多一个执行中写入；
+待发送队列仅保留同一 messageId 的最新完整投影，不同轮次分别保留，避免覆盖上一轮终态。
+默认最多 64 个待发送消息投影、64 MiB 编码后内容（含执行中帧）、单帧 8 MiB、写入期限 5 秒。
+分别通过 `byclaw.scoped-message.websocket-max-pending-contexts`、`websocket-max-retained-bytes`、
+`websocket-max-frame-bytes`、`websocket-write-timeout-millis` 配置（后三项使用相同前缀）。
+超过限制、写入超时或失败时关闭该慢客户端连接并记录日志；客户端重连后从持久化快照/历史恢复。
+该限制只作用于子会话完整投影，编码字节限制不等于 JVM 实际堆占用，也不限制其他 WebSocket 事件。
+
 活跃子会话复用本实例已加载的轮次标识；冷启动和终态之后重新读取 Redis 校验轮次。快照失败后
 丢弃尚未持久化的内存累积，重试从已持久化水位恢复。主会话快照写入使用 4 个后台线程，Redis I/O
 位于每个 key 的写锁内，消费入队只操作内存；终态写入等待旧写入结束，再覆盖为最终版本。
