@@ -23,6 +23,43 @@ export function getDisplayDateTime(dateTime: string | number) {
   return createTimeDayjsObj.format(formatStr);
 }
 
+export type IUsedModelInfo = {
+  id?: string;
+  code?: string;
+  name?: string;
+  provider?: string;
+};
+
+/**
+ * 读取后端写入消息 metadata 的 usedModel（本轮实际使用的模型），用于每轮回答的模型角标。
+ * metadata 缺失、非 JSON 或没有可用名称/编码时返回 null，调用方不渲染角标。
+ */
+export function getUsedModelFromMetadata(metadata?: string): IUsedModelInfo | null {
+  if (!metadata) {
+    return null;
+  }
+  try {
+    const metaObj = JSON.parse(metadata);
+    const usedModel = metaObj?.usedModel;
+    if (!usedModel || typeof usedModel !== 'object') {
+      return null;
+    }
+    const name = `${usedModel.name ?? ''}`.trim();
+    const code = `${usedModel.code ?? ''}`.trim();
+    if (!name && !code) {
+      return null;
+    }
+    return {
+      id: `${usedModel.id ?? ''}`.trim() || undefined,
+      code: code || undefined,
+      name: name || undefined,
+      provider: `${usedModel.provider ?? ''}`.trim() || undefined,
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
 export function getResponseAgentInfo(
   agentDatas: Pick<useEmployeesIState, 'employeesList' | 'agentList'>,
   metadata?: string

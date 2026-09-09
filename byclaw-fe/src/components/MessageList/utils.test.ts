@@ -4,7 +4,7 @@ jest.mock('@umijs/max', () => ({
   })),
 }));
 
-import { getDigitalEmployeeMentionItem, getResponseAgentInfoByMessage } from './utils';
+import { getDigitalEmployeeMentionItem, getResponseAgentInfoByMessage, getUsedModelFromMetadata } from './utils';
 
 describe('MessageList utils', () => {
   it('builds a rich input mention item from response agent info', () => {
@@ -75,5 +75,39 @@ describe('MessageList utils', () => {
       resourceCode: 'agent-b',
       resourceDesc: 'Creates product plans and code reviews',
     });
+  });
+});
+
+describe('getUsedModelFromMetadata', () => {
+  it('reads the used model written by the backend', () => {
+    expect(
+      getUsedModelFromMetadata(
+        JSON.stringify({
+          usedModel: { id: '10004014', code: 'deepseek-v4-flash', name: 'lwt-deepseek-v4-flash', provider: 'DeepSeek' },
+        })
+      )
+    ).toEqual({
+      id: '10004014',
+      code: 'deepseek-v4-flash',
+      name: 'lwt-deepseek-v4-flash',
+      provider: 'DeepSeek',
+    });
+  });
+
+  it('falls back to the model code when no display name was recorded', () => {
+    expect(getUsedModelFromMetadata(JSON.stringify({ usedModel: { code: 'qwen3.6-27b' } }))).toEqual({
+      id: undefined,
+      code: 'qwen3.6-27b',
+      name: undefined,
+      provider: undefined,
+    });
+  });
+
+  it('returns null for missing, malformed or empty metadata', () => {
+    expect(getUsedModelFromMetadata(undefined)).toBeNull();
+    expect(getUsedModelFromMetadata('')).toBeNull();
+    expect(getUsedModelFromMetadata('not-json')).toBeNull();
+    expect(getUsedModelFromMetadata(JSON.stringify({ agentId: '1' }))).toBeNull();
+    expect(getUsedModelFromMetadata(JSON.stringify({ usedModel: {} }))).toBeNull();
   });
 });
