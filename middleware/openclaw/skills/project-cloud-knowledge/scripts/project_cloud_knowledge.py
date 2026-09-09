@@ -846,15 +846,45 @@ class KnowledgeManager:
             result["postProcessErrors"] = value["postProcessErrors"]
         return result
 
-    def _build_uploaded(self, resource_id: int, uploaded: dict[str, Any]) -> list[dict[str, Any]]:
+    @staticmethod
+    def _uploaded_build_paths(
+        directory_path: str, uploaded: dict[str, Any]
+    ) -> list[str]:
         items = uploaded.get("uploadItems", [])
         if not items:
             raise ValueError("上传成功但未返回 uploadItems，无法触发构建")
-        builds = []
+        target_directory = PurePosixPath(_canonical_remote_path(directory_path))
+        build_paths: list[str] = []
+        seen: set[str] = set()
         for item in items:
             file_path = item.get("filePath") if isinstance(item, dict) else None
             if not file_path:
                 raise ValueError("uploadItems 中的文件缺少 filePath")
+            uploaded_path = PurePosixPath(_canonical_remote_path(file_path))
+            try:
+                relative_path = uploaded_path.relative_to(target_directory)
+            except ValueError as exc:
+                raise ValueError(
+                    f"uploadItems 中的路径不在上传目标目录内: {uploaded_path}"
+                ) from exc
+            if not relative_path.parts:
+                raise ValueError(f"uploadItems 返回了上传目标目录自身: {uploaded_path}")
+            build_path = (
+                uploaded_path
+                if len(relative_path.parts) == 1
+                else target_directory / relative_path.parts[0]
+            )
+            normalized_build_path = str(build_path)
+            if normalized_build_path not in seen:
+                seen.add(normalized_build_path)
+                build_paths.append(normalized_build_path)
+        return build_paths
+
+    def _build_uploaded(
+        self, resource_id: int, directory_path: str, uploaded: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        builds = []
+        for file_path in self._uploaded_build_paths(directory_path, uploaded):
             built = self.api.build(self._file_path_payload(resource_id, file_path))
             builds.append({"filePath": file_path, "built": built})
         return builds
@@ -873,7 +903,7 @@ class KnowledgeManager:
             if isinstance(conflict, dict) and conflict.get("conflict"):
                 return {"ok": True, "action": "upload", "conflict": True, "needsOverwriteConfirmation": True, "overwritePaths": conflict.get("overwritePaths", [])}
         uploaded = self._upload_result(self.api.upload_files(files=files, form_fields=fields), resource_id)
-        builds = self._build_uploaded(resource_id, uploaded)
+        builds = self._build_uploaded(resource_id, args.directory_path, uploaded)
         return {"ok": True, "action": "upload", "uploaded": uploaded, "builds": builds}
 
     def _update_file(self, args: argparse.Namespace) -> dict[str, Any]:

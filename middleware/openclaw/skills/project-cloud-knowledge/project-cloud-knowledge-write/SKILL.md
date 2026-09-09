@@ -104,7 +104,7 @@ python3 <project-cloud-knowledge目录>/scripts/project_cloud_knowledge.py uploa
   --file-path /tmp/docs.zip
 ```
 
-上传成功后 CLI 会对后端返回的每个文件触发构建。
+上传成功后，CLI 只构建这次成功上传且位于目标目录下一层的内容：直属文件逐个构建；每个新产生的一级目录只提交一次目录递归构建。一级目录内更深的文件由该目录批次覆盖，不再逐文件重复提交。
 
 ## 更新已有文件
 

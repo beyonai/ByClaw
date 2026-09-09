@@ -505,19 +505,58 @@ class KnowledgeManagerTests(unittest.TestCase):
                         self.assertEqual(self.transport.calls[0]["payload"], payload)
                         self.assertIsNone(result["built"])
 
-    def test_upload_builds_only_returned_files_without_expanding_to_directory(self) -> None:
-        archive = self.make_file("batch.zip")
-        paths = ["/docs/a.md", "/docs/nested/b.pdf"]
+    def test_zip_upload_builds_direct_files_and_unique_first_level_directories(self) -> None:
+        archive = self.make_zip(
+            "batch.zip",
+            {
+                "a.md": "# A\n",
+                "team/b.pdf": "B",
+                "team/nested/c.md": "# C\n",
+                "other/d.md": "# D\n",
+            },
+        )
+        paths = [
+            "/docs/a.md",
+            "/docs/team/b.pdf",
+            "/docs/team/nested/c.md",
+            "/docs/other/d.md",
+        ]
         self.transport.responses = [{"uploadItems": [{"filePath": path} for path in paths]}]
         result = self.manager.execute(self.parse(
             "upload", "--resource-id", "7", "--directory-path", "/docs",
             "--file-path", str(archive),
         ))
+        build_paths = ["/docs/a.md", "/docs/team", "/docs/other"]
         self.assertEqual(
             [call["payload"] for call in self.transport.calls[1:]],
-            [{"resourceId": 7, "directoryPath": path} for path in paths],
+            [{"resourceId": 7, "directoryPath": path} for path in build_paths],
         )
-        self.assertEqual(result["builds"], [{"filePath": path, "built": None} for path in paths])
+        self.assertEqual(
+            result["builds"],
+            [{"filePath": path, "built": None} for path in build_paths],
+        )
+
+    def test_upload_build_target_selection_handles_root_and_duplicates(self) -> None:
+        uploaded = {
+            "uploadItems": [
+                {"filePath": "/a.md"},
+                {"filePath": "/team/b.md"},
+                {"filePath": "/team/c.md"},
+                {"filePath": "/a.md"},
+            ]
+        }
+
+        self.assertEqual(
+            self.manager._uploaded_build_paths("/", uploaded),
+            ["/a.md", "/team"],
+        )
+
+    def test_upload_build_target_selection_rejects_path_outside_target(self) -> None:
+        with self.assertRaisesRegex(ValueError, "不在上传目标目录内"):
+            self.manager._uploaded_build_paths(
+                "/docs",
+                {"uploadItems": [{"filePath": "/docs-other/a.md"}]},
+            )
 
     def test_upload_allows_zip_and_builds_returned_items(self) -> None:
         archive = self.make_file("batch.zip")
