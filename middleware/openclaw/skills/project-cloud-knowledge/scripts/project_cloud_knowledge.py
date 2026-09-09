@@ -26,6 +26,7 @@ SESSION_AWARE_COMMANDS = frozenset(
     {
         "mkdir",
         "rename-dir",
+        "move",
         "delete-dir",
         "check-conflicts",
         "upload",
@@ -553,6 +554,9 @@ class BackendApi:
     def delete_directory(self, payload: dict[str, Any]) -> Any:
         return self.transport.request(method="POST", path=self._path("deleteFolder"), payload=payload)
 
+    def move_items(self, payload: dict[str, Any]) -> Any:
+        return self.transport.request(method="POST", path=self._path("moveKnowledgeItems"), payload=payload)
+
     def list_directory(self, payload: dict[str, Any]) -> Any:
         return self.transport.request(method="POST", path=self._path("queryDirAndFileByLevel"), payload=payload)
 
@@ -735,6 +739,32 @@ class KnowledgeManager:
             }
         )
         return {"ok": True, "action": "rename-dir", "renamed": renamed}
+
+    def _move(self, args: argparse.Namespace) -> dict[str, Any]:
+        sources = args.source_path
+        target = args.target_directory_path or args.target_file_path
+        for path in [*sources, target]:
+            if not path or not path.strip() or not path.startswith("/"):
+                raise ValueError("移动源和目标必须是资源内绝对路径")
+            _ensure_not_knowledge_entity_path(path)
+        if any(_canonical_remote_path(path) == "/" for path in sources):
+            raise ValueError("不能移动知识库根目录")
+        if args.target_file_path and len(sources) != 1:
+            raise ValueError("--target-file-path 只支持一个 --source-path")
+        if args.target_directory_path:
+            for source in sources:
+                _ensure_not_knowledge_entity_path(
+                    _remote_child_path(target, PurePosixPath(_canonical_remote_path(source)).name)
+                )
+        payload = {
+            "resourceId": self._resource_id(args),
+            "sourcePath": sources,
+            "overwrite": False,
+        }
+        payload["targetDirectoryPath" if args.target_directory_path else "targetFilePath"] = target
+        if args.dry_run:
+            return {"ok": True, "action": "move", "dryRun": True, "payload": payload}
+        return {"ok": True, "action": "move", "result": self.api.move_items(payload)}
 
     def _delete_dir(self, args: argparse.Namespace) -> dict[str, Any]:
         payload = {"resourceId": self._resource_id(args), "directoryPath": args.directory_path}
@@ -1294,6 +1324,7 @@ def build_parser() -> argparse.ArgumentParser:
     descriptions = {
         "mkdir": "创建知识库目录",
         "rename-dir": "重命名知识库目录",
+        "move": "在同一知识库内移动文件或目录（不支持覆盖）",
         "delete-dir": "删除知识库目录",
         "list": "列出指定目录的文件和子目录",
         "check-conflicts": "上传前检查目标目录中的同名文件",
@@ -1335,6 +1366,15 @@ def build_parser() -> argparse.ArgumentParser:
                 help="目录说明",
             )
         _add_dry_run(command)
+
+    move = _add_command(subparsers, "move", descriptions["move"])
+    _add_single_resource(move)
+    move.add_argument("--source-path", action="append", required=True, metavar="PATH",
+                      help="源文件或目录的绝对路径；批量移动时重复传入")
+    target = move.add_mutually_exclusive_group(required=True)
+    target.add_argument("--target-directory-path", metavar="PATH", help="接收源文件或目录的目标目录")
+    target.add_argument("--target-file-path", metavar="PATH", help="单个源的完整目标路径")
+    _add_dry_run(move)
 
     for name in ("delete-dir", "list"):
         command = _add_command(subparsers, name, descriptions[name])

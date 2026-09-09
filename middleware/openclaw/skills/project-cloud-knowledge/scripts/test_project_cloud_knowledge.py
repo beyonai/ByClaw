@@ -309,6 +309,60 @@ class KnowledgeManagerTests(unittest.TestCase):
     def parse(self, *argv: str):
         return manager_module.build_parser().parse_args(argv)
 
+    def test_move_batch_preserves_partial_results_and_backend_contract(self) -> None:
+        result = {"data": [
+            {"sourcePath": "/a.md", "targetPath": "/归档/a.md", "success": True},
+            {"sourcePath": "/资料", "success": False, "error": "目标已存在"},
+        ], "summary": {"total": 2, "succeeded": 1, "failed": 1}}
+        self.transport.responses.append(result)
+        args = self.parse("move", "--resource-id", "7", "--source-path", "/a.md",
+                          "--source-path", "/资料", "--target-directory-path", "/归档",
+                          "--session-id", "session-1")
+        output = self.manager.execute(args)
+        self.assertEqual(output["result"], result)
+        self.assertEqual(self.transport.calls, [{
+            "kind": "request", "method": "POST",
+            "path": "/byaiService/datasetController/moveKnowledgeItems",
+            "payload": {"resourceId": 7, "sourcePath": ["/a.md", "/资料"],
+                        "targetDirectoryPath": "/归档", "overwrite": False},
+        }])
+        self.assertIn(args.command, manager_module.SESSION_AWARE_COMMANDS)
+
+    def test_move_exact_target_dry_run_does_not_call_backend(self) -> None:
+        output = self.manager.execute(self.parse(
+            "move", "--resource-id", "7", "--source-path", "/a.md",
+            "--target-file-path", "/归档/b.md", "--dry-run"))
+        self.assertEqual(output["payload"], {
+            "resourceId": 7, "sourcePath": ["/a.md"],
+            "targetFilePath": "/归档/b.md", "overwrite": False})
+        self.assertEqual(self.transport.calls, [])
+
+    def test_move_rejects_invalid_or_reserved_paths_before_network(self) -> None:
+        cases = [
+            ["--source-path", "/" , "--target-directory-path", "/归档"],
+            ["--source-path", "a.md", "--target-directory-path", "/归档"],
+            ["--source-path", "/a.md", "--target-directory-path", ""],
+            ["--source-path", "/KnowledgeEntity/a.md", "--target-directory-path", "/归档"],
+            ["--source-path", "/a.md", "--target-directory-path", "/资料/../KnowledgeEntity"],
+            ["--source-path", "/资料/KnowledgeEntity", "--target-directory-path", "/"],
+            ["--source-path", "/a.md", "--target-file-path", "/KnowledgeEntity/a.md"],
+            ["--source-path", "/a.md", "--source-path", "/b.md", "--target-file-path", "/c.md"],
+        ]
+        for case in cases:
+            for dry_run in ([], ["--dry-run"]):
+                with self.subTest(case=case, dry_run=dry_run):
+                    with self.assertRaises(ValueError):
+                        self.manager.execute(self.parse("move", "--resource-id", "7", *case, *dry_run))
+        self.assertEqual(self.transport.calls, [])
+
+    def test_move_requires_exactly_one_target_and_disallows_overwrite(self) -> None:
+        base = ["move", "--resource-id", "7", "--source-path", "/a.md"]
+        for options in ([], ["--target-file-path", "/b.md", "--target-directory-path", "/"],
+                        ["--target-directory-path", "/", "--overwrite"]):
+            with self.subTest(options=options), redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit):
+                    self.parse(*base, *options)
+
     def make_file(self, name: str = "a.md") -> Path:
         file = Path(self.temp_dir.name) / name
         file.write_text("# A\n", encoding="utf-8")

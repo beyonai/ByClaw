@@ -1,6 +1,6 @@
 ---
 name: project-cloud-knowledge
-description: "管理 ByClaw 普通知识库或项目云盘，并复用 project-context 查询项目信息。用于浏览、查找、上传、更新或删除知识库/云盘文件与目录，查标签、打标签、改标签、删标签或修改其他文件属性，执行知识构建和知识实体处理，或查询项目、仓库、资源、成员与共享文件；用户提到知识库、项目云盘、云盘、cloudResourceId 或 cloud_resource_id 时使用。不用于管理本体、对象类型或本体对象关系。"
+description: "管理 ByClaw 普通知识库或项目云盘，并复用 project-context 查询项目信息。用于浏览、查找、上传、更新、移动或删除知识库/云盘文件与目录，查标签、打标签、改标签、删标签或修改其他文件属性，执行知识构建和知识实体处理，或查询项目、仓库、资源、成员与共享文件；用户提到知识库、项目云盘、云盘、cloudResourceId 或 cloud_resource_id 时使用。不用于管理本体、对象类型或本体对象关系。"
 metadata:
   openclaw:
     requires:
@@ -20,7 +20,7 @@ byclaw_managed: true
 |---|---|
 | 查询项目基本信息、仓库、资源、成员、共享文件，或解析项目云盘资源 ID | 读取并执行 `project-context` |
 | 浏览目录、查看文件、查询构建状态、下载 | [`project-cloud-knowledge-read/SKILL.md`](project-cloud-knowledge-read/SKILL.md) |
-| 新建、重命名、删除、上传、更新、文件或目录批量构建 | [`project-cloud-knowledge-write/SKILL.md`](project-cloud-knowledge-write/SKILL.md) |
+| 新建、重命名、移动、删除、上传、更新、文件或目录批量构建 | [`project-cloud-knowledge-write/SKILL.md`](project-cloud-knowledge-write/SKILL.md) |
 | 按关键词、标签或其他属性查找文件，或使用 DSL 过滤 | [`project-cloud-knowledge-search/SKILL.md`](project-cloud-knowledge-search/SKILL.md) |
 | 查看某个文件或目录的标签和属性，打标签、改标签、删标签或修改其他属性 | [`project-cloud-knowledge-metadata/SKILL.md`](project-cloud-knowledge-metadata/SKILL.md) |
 | 知识实体发现或补全，包括项目云盘知识整理 | [`project-cloud-knowledge-entity/SKILL.md`](project-cloud-knowledge-entity/SKILL.md) |

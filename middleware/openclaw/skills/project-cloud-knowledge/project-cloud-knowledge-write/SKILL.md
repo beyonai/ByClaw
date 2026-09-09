@@ -1,6 +1,6 @@
 ---
 name: project-cloud-knowledge-write
-description: "变更 ByClaw 知识库或项目云盘目录和文件。用于创建、重命名或删除目录，检查上传冲突，上传或更新文件与 ZIP，触发单文件、目录递归批量或全库构建，以及删除文件。"
+description: "变更 ByClaw 知识库或项目云盘目录和文件。用于移动文件或目录，创建、重命名或删除目录，检查上传冲突，上传或更新文件与 ZIP，触发单文件、目录递归批量或全库构建，以及删除文件。"
 ---
 
 # 变更知识库内容
@@ -18,7 +18,7 @@ description: "变更 ByClaw 知识库或项目云盘目录和文件。用于创�
 
 ## 保护系统实体目录
 
-禁止通过目录创建或重命名、文件上传或更新、ZIP 批量导入，把任何目录或文件保存到 `/KnowledgeEntity` 或其子目录。这个目录只存在系统整理出来的知识实体文件，普通资料和用户创建的目录不能混入。
+禁止通过移动、目录创建或重命名、文件上传或更新、ZIP 批量导入，把任何目录或文件保存到 `/KnowledgeEntity` 或其子目录。这个目录只存在系统整理出来的知识实体文件，普通资料和用户创建的目录不能混入。
 
 Python CLI 会在请求后端前强制校验最终路径和 ZIP 内部条目，`--dry-run` 也不能绕过。校验失败时更换目标目录；不得绕过 CLI 调用其他接口写入。
 
@@ -52,6 +52,23 @@ python3 <project-cloud-knowledge目录>/scripts/project_cloud_knowledge.py delet
   --resource-id RESOURCE_ID \
   --directory-path /产品手册
 ```
+
+## 移动文件或目录
+
+使用 `move` 在同一知识库内移动一个或多个文件、目录。重复传入 `--source-path` 指定多个源，使用 `--target-directory-path` 指定接收它们的目录：
+
+```bash
+python3 <project-cloud-knowledge目录>/scripts/project_cloud_knowledge.py move \
+  --session-id SESSION_ID \
+  --resource-id RESOURCE_ID \
+  --source-path /产品资料/a.md \
+  --source-path /产品资料/旧手册 \
+  --target-directory-path /归档
+```
+
+需要指定单个源的完整目标路径时，改用 `--target-file-path /归档/新名称.md`；两个目标参数必须且只能选一个。源和目标都使用资源内绝对路径，不支持跨知识库移动、移动根目录或覆盖已存在的目标。不得移动 `/KnowledgeEntity` 及其内容，也不得移入该目录。
+
+执行前查看源和目标目录；执行后核对目标及源目录。批量操作可能部分成功：按返回的 `result.data` 中每项的 `sourcePath`、`targetPath`、`success`、`error` 和 `result.summary` 汇报成功与失败，不能把请求成功当作全部移动成功。结果为空时需查询目录核实，不能声称全部完成。重试前重新核对路径，仅处理尚未成功的项目。
 
 ## 上传新文件
 
