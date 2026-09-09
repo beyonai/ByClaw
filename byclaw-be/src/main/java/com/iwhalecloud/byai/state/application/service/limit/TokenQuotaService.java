@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import com.iwhalecloud.byai.manager.domain.aimodel.enums.ModelOwnerType;
 import com.iwhalecloud.byai.manager.domain.aimodel.enums.ModelSourceType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -118,6 +119,33 @@ public class TokenQuotaService {
             return false;
         } catch (Exception e) {
             log.warn("isModelSubjectToQuota 解析失败, resourceId={}: {}", resourceId, e.getMessage());
+            return true;
+        }
+    }
+
+    /**
+     * 判断指定模型是否受限额约束（用户会话级选择模型时使用）。
+     * 规则与 {@link #isModelSubjectToQuota(Long)} 一致：ownerType=PUBLIC 或 sourceType=TOKEN_SAVER 受限，
+     * 用户自购个人模型不受限。模型不存在时按受限处理，避免绕过额度。
+     *
+     * @param modelId 模型主键（byai_aimodel.model_id）
+     * @return true-受限额约束，false-不受限
+     */
+    public boolean isModelSubjectToQuotaByModelId(Long modelId) {
+        if (modelId == null) {
+            return true;
+        }
+        try {
+            ByaiAimodel model = byaiAimodelMapper.selectById(modelId);
+            if (model == null) {
+                return true;
+            }
+            if (ModelOwnerType.PUBLIC.equalsIgnoreCase(model.getOwnerType())) {
+                return true;
+            }
+            return ModelSourceType.TOKEN_SAVER.equals(model.getSourceType());
+        } catch (Exception e) {
+            log.warn("isModelSubjectToQuotaByModelId 解析失败, modelId={}: {}", modelId, e.getMessage());
             return true;
         }
     }
