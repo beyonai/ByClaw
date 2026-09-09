@@ -21,7 +21,6 @@ import {
   PERMISSION_ALL_VALUE,
   PERMISSION_CREATED_BY_ME_VALUE,
   PERMISSION_AUTHORIZED_TO_ME_VALUE,
-  PERMISSION_PENDING_MY_APPROVAL_VALUE,
   PERMISSION_APPLIED_BY_ME_VALUE,
   statusOptions,
   belongOptions,
@@ -62,7 +61,6 @@ export {
   PERMISSION_ALL_VALUE,
   PERMISSION_CREATED_BY_ME_VALUE,
   PERMISSION_AUTHORIZED_TO_ME_VALUE,
-  PERMISSION_PENDING_MY_APPROVAL_VALUE,
   PERMISSION_APPLIED_BY_ME_VALUE,
 };
 
@@ -127,23 +125,14 @@ const ResourceFilterForm = ({
   const showTypeFilter = resourceType === 'TOOL' || resourceType === 'KG_DOC';
   const normalizedResourceBizTypeList = normalizeResourceBizTypeList(filterResourceBizTypeList, resourceType);
 
-  // 个人 tab 下不展示"待我审核""我申请中"两个权限选项——这两项语义只在企业 tab 下成立。
-  const visiblePermissionOptions = React.useMemo(
-    () =>
-      activeTab === 'personal'
-        ? permissionOptions.filter(
-          (opt) => opt.value !== PERMISSION_PENDING_MY_APPROVAL_VALUE && opt.value !== PERMISSION_APPLIED_BY_ME_VALUE
-        )
-        : permissionOptions,
-    [activeTab]
-  );
+  const visiblePermissionOptions =
+    activeTab === 'personal'
+      ? permissionOptions.filter((opt) => opt.value !== PERMISSION_APPLIED_BY_ME_VALUE)
+      : permissionOptions;
 
   // 切到 personal tab 时，如果残留 forbidden 权限值，自动复位为 ""，避免 UI 与 state 不一致。
   React.useEffect(() => {
-    if (
-      activeTab === 'personal' &&
-      (filterPermission === PERMISSION_PENDING_MY_APPROVAL_VALUE || filterPermission === PERMISSION_APPLIED_BY_ME_VALUE)
-    ) {
+    if (activeTab === 'personal' && filterPermission === PERMISSION_APPLIED_BY_ME_VALUE) {
       setFilterParam({ type: 'update', item: { permission: '' } });
     }
   }, [activeTab, filterPermission]);
@@ -579,9 +568,7 @@ const ResourceFilter: React.FC<ResourceFilterWithDropdownProps> = ({
               const currentPermission = get(defaultParam, 'permission');
               // personal tab 下"待我审核 / 我申请中"两个值不展示——若残留按"全部"回显
               const isHiddenInPersonal =
-                activeTab === 'personal' &&
-                (currentPermission === PERMISSION_PENDING_MY_APPROVAL_VALUE ||
-                  currentPermission === PERMISSION_APPLIED_BY_ME_VALUE);
+                activeTab === 'personal' && currentPermission === PERMISSION_APPLIED_BY_ME_VALUE;
               if (isHiddenInPersonal) {
                 return intl.formatMessage({ id: 'common.all' });
               }

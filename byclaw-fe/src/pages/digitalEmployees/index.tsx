@@ -50,7 +50,8 @@ const buildDigitalEmployeeFilterParam = (
       : {};
 
   return {
-    ...(filterParam?.resourceStatus === '' ? { includeAllResourceStatus: true } : {}),
+    // “我可用的”接口固定只查已上架；官方推荐选择“全部”时仍需查询除已删除外的全部状态。
+    ...(source === 'official' && filterParam?.resourceStatus === '' ? { includeAllResourceStatus: true } : {}),
     // 官方推荐的“全部”不展示已删除数据；具体状态筛选仍由 resourceStatus 控制。
     ...(source === 'official' ? { excludeDeleted: true } : {}),
     ...(filterParam?.resourceStatus !== undefined && filterParam?.resourceStatus !== ''
@@ -342,6 +343,8 @@ export function EmployeePreviewModal({ employee, onClose, onCreateTask }: any) {
   const employeeResourceId = detail?.resourceId || detail?.id || detail?.agentId;
   const hasUsePermission = permissions?.hasUsePermission === true;
   const isApplyPending = permissions?.useApplyPending === true || employee?.approveStatus === 'S';
+  const isOffShelfEmployee =
+    `${detail?.resourceStatus ?? employee?.resourceStatus ?? detail?.metaStatus ?? ''}` === '3';
   const handleApplyUse = async () => {
     if (!employeeResourceId || applyLoading || isApplyPending) return;
     setApplyLoading(true);
@@ -521,7 +524,7 @@ export function EmployeePreviewModal({ employee, onClose, onCreateTask }: any) {
                   </Typography.Title>
                   <span className={styles.employeePreviewTag}>{employeeTypeLabel}</span>
                 </div>
-                {hasUsePermission ? (
+                {isOffShelfEmployee ? null : hasUsePermission ? (
                   <Button type="primary" icon={<PlusOutlined />} onClick={() => onCreateTask?.()}>
                     新建任务
                   </Button>

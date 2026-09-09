@@ -3750,7 +3750,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
           }
           await fetchRepos();
         } catch (error: any) {
-          message.error(error?.message || t('repository.deleteFailed'));
+          message.error(typeof error === 'string' ? error : error?.message || t('repository.deleteFailed'));
         }
       },
     });

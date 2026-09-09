@@ -253,6 +253,8 @@
             <where>
                 and a.resource_biz_type = 'DIG_EMPLOYEE'
                 and a.owner_type = 'enterprise'
+                <!-- “我的员工-企业”不展示逻辑删除的数字员工。 -->
+                and a.resource_status != -1
                 <choose>
                     <when test="agentType != null and agentType != ''">
                         and e.agent_type = #{agentType}
@@ -642,8 +644,8 @@
                    or upper(a.resource_desc) like concat('%', upper(#{keyword}), '%')
                )
            </if>
-         order by case a.owner_type when 'personal_default' then 0 when 'personal' then 1 else 2 end,
-                  coalesce(a.update_time, a.create_time) desc
+         order by coalesce(a.update_time, a.create_time) desc,
+                  a.create_time desc
     </select>
 
     <select id="selectPersonalDigitalEmployeeByQo" resultMap="digitalEmployeeVoResultMap">
@@ -746,6 +748,8 @@
         <where>
             <!-- 基础过滤条件 -->
             and a.resource_biz_type = 'DIG_EMPLOYEE'
+            <!-- “我的员工-个人”不展示逻辑删除的数字员工。 -->
+            and a.resource_status != -1
             <choose>
                 <when test="agentType != null and agentType != ''">
                     and b.agent_type = #{agentType}
@@ -893,8 +897,7 @@
                     or UPPER(a.resource_desc) like concat('%', UPPER(#{keyword}), '%')
                 )
             </if>
-            order by case when a.resource_status = 3 then 1 else 0 end asc,
-                     COALESCE(a.update_time, '1970-01-01 00:00:00') desc,
+            order by coalesce(a.update_time, a.create_time) desc,
                      a.create_time desc
         </where>
     </select>

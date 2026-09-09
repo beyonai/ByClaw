@@ -435,7 +435,11 @@ const ProjectResources: React.FC<Props> = ({
           message.success(intl.formatMessage({ id: 'projectSpace.resources.deleteRepoSuccess' }));
           await loadRepos();
         } catch (error: any) {
-          message.error(error?.message || intl.formatMessage({ id: 'projectSpace.resources.deleteRepoFailed' }));
+          message.error(
+            typeof error === 'string'
+              ? error
+              : error?.message || intl.formatMessage({ id: 'projectSpace.resources.deleteRepoFailed' })
+          );
         }
       },
     });

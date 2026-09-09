@@ -1,13 +1,33 @@
 import { LeftOutlined } from '@ant-design/icons';
 import { useLocation, useNavigate } from '@umijs/max';
-import { Badge, Button, Empty, Pagination, Popconfirm, Segmented, Space, Spin, Table, Tabs, Tag, message } from 'antd';
+import {
+  Badge,
+  Button,
+  Empty,
+  Input,
+  Pagination,
+  Popconfirm,
+  Segmented,
+  Space,
+  Spin,
+  Table,
+  Tabs,
+  Tag,
+  message,
+} from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import dayjs from 'dayjs';
 import ResourceCard from '@/components/Resources/components/ResourceCard';
 import { getAgentChatAvatar, agentHandler } from '@/utils/agent';
 import type { IAgentCache } from '@/typescript/agent';
-import { deleteDigitalEmployee, queryManagedEnterpriseEmployees, queryMyCreated } from '@/service/digitalEmployees';
+import {
+  deleteDigitalEmployee,
+  queryManagedEnterpriseEmployees,
+  queryMyCreated,
+  shelfDigitalEmployee,
+  unShelfDigitalEmployee,
+} from '@/service/digitalEmployees';
 import {
   approveUseApply,
   applyResourceUse,
@@ -56,7 +76,10 @@ const isProcessedAuditStatus = (status: unknown) => {
 
 const PAGE_SIZE = 20;
 
-const normalizeList = (value: any) => (value?.list || value?.data?.list || []).map((item: any) => agentHandler(item));
+const normalizeList = (value: any) =>
+  (value?.list || value?.data?.list || [])
+    .filter((item: any) => `${item?.resourceStatus ?? item?.metaStatus ?? ''}` !== '-1')
+    .map((item: any) => agentHandler(item));
 
 const normalizeAuditRows = (response: any, history: boolean): AuditRow[] => {
   const auditItems = response?.data || response || [];
@@ -87,6 +110,8 @@ const MyEmployeesPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<OwnerTab>('personal');
   const location = useLocation();
   const [resourceFilter, setResourceFilter] = useState<ResourceFilter>('all');
+  const [keyword, setKeyword] = useState('');
+  const [debouncedKeyword, setDebouncedKeyword] = useState('');
   const [statusFilter, setStatusFilter] = useState<EmployeeStatusFilter>('all');
   const [enterpriseScope, setEnterpriseScope] = useState<EnterpriseScope>('created');
   const [loading, setLoading] = useState(false);
@@ -94,6 +119,7 @@ const MyEmployeesPage: React.FC = () => {
   const [list, setList] = useState<IAgentCache[]>([]);
   const [pageNum, setPageNum] = useState(1);
   const [total, setTotal] = useState(0);
+  const [permissionRefreshKey, setPermissionRefreshKey] = useState(0);
   const [pendingAuditRows, setPendingAuditRows] = useState<AuditRow[]>(() => {
     // 待审核数据由数字员工首页通过路由状态传入，避免进入“我的员工”后再次请求。
     const routeState = location.state as { pendingAuditRows?: ResourceUseApplyAuditItem[] } | null;
@@ -123,6 +149,7 @@ const MyEmployeesPage: React.FC = () => {
         pageSize: PAGE_SIZE,
         type,
         agentType,
+        keyword: debouncedKeyword.trim() || undefined,
         ...(statusFilter === 'all' ? { includeAllResourceStatus: true } : { resourceStatus: Number(statusFilter) }),
       };
       if (resourceFilter === 'all') {
@@ -143,7 +170,15 @@ const MyEmployeesPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [activeTab, agentType, enterpriseScope, pageNum, resourceFilter, statusFilter]);
+  }, [activeTab, agentType, debouncedKeyword, enterpriseScope, pageNum, resourceFilter, statusFilter]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedKeyword(keyword);
+      setPageNum(1);
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [keyword]);
 
   useEffect(() => {
     loadEmployees();
@@ -267,10 +302,32 @@ const MyEmployeesPage: React.FC = () => {
       if (!resourceId) return;
       try {
         await deleteDigitalEmployee({ resourceId: String(resourceId) });
-        message.success('注销成功');
+        message.success('删除成功');
         await loadEmployees();
+        setPermissionRefreshKey((key) => key + 1);
       } catch (error: any) {
-        message.error(error?.message || '注销失败');
+        message.error(error?.message || '删除失败');
+      }
+    },
+    [loadEmployees]
+  );
+
+  const handleShelfStatusChange = useCallback(
+    async (employee: IAgentCache, action: 'shelf' | 'unShelf') => {
+      const resourceId = employee.resourceId ?? employee.id ?? employee.agentId;
+      if (!resourceId) return;
+      try {
+        const request = action === 'shelf' ? shelfDigitalEmployee : unShelfDigitalEmployee;
+        const response: any = await request({ resourceId: String(resourceId) });
+        if (response?.success === false || (response?.code !== undefined && response.code !== 0)) {
+          throw new Error(response?.msg || `${action === 'shelf' ? '上架' : '下架'}失败`);
+        }
+        message.success(`${action === 'shelf' ? '上架' : '下架'}成功`);
+        // 操作完成后沿用当前企业范围、资源类型和状态筛选刷新列表。
+        await loadEmployees();
+        setPermissionRefreshKey((key) => key + 1);
+      } catch (error: any) {
+        message.error(error?.message || `${action === 'shelf' ? '上架' : '下架'}失败`);
       }
     },
     [loadEmployees]
@@ -369,6 +426,7 @@ const MyEmployeesPage: React.FC = () => {
         onChange={(key) => {
           setActiveTab(key as OwnerTab);
           setResourceFilter('all');
+          setKeyword('');
           setStatusFilter('all');
           setEnterpriseScope('created');
           setPageNum(1);
@@ -377,51 +435,66 @@ const MyEmployeesPage: React.FC = () => {
       {activeTab !== 'audit' ? (
         <>
           <div className={styles.toolbar}>
-            <Segmented
-              value={resourceFilter}
-              options={[
-                { value: 'all', label: '全部' },
-                { value: 'employee', label: '数字员工' },
-                { value: 'group', label: '数字员工组' },
-              ]}
-              onChange={(value) => {
-                setResourceFilter(value as ResourceFilter);
+            <Input.Search
+              className={styles.employeeSearch}
+              allowClear
+              placeholder="搜索数字员工名称"
+              value={keyword}
+              onChange={(event) => {
+                setKeyword(event.target.value);
                 setPageNum(1);
               }}
+              onSearch={() => setPageNum(1)}
             />
-            <Segmented
-              value={statusFilter}
-              options={[
-                { value: 'all', label: '全部' },
-                { value: '0', label: '草稿' },
-                { value: '2', label: '已上架' },
-                { value: '3', label: '已下架' },
-              ]}
-              onChange={(value) => {
-                setStatusFilter(value as EmployeeStatusFilter);
-                setPageNum(1);
-              }}
-            />
-            {activeTab === 'enterprise' && (
+            <div className={styles.rightFilters}>
               <Segmented
-                value={enterpriseScope}
+                value={resourceFilter}
                 options={[
-                  { value: 'created', label: '我创建的' },
-                  { value: 'managed', label: '我授权的' },
+                  { value: 'all', label: '全部' },
+                  { value: 'employee', label: '数字员工' },
+                  { value: 'group', label: '数字员工组' },
                 ]}
                 onChange={(value) => {
-                  setEnterpriseScope(value as EnterpriseScope);
+                  setResourceFilter(value as ResourceFilter);
                   setPageNum(1);
                 }}
               />
-            )}
+              {activeTab === 'enterprise' && (
+                <div className={styles.enterpriseFilters}>
+                  <Segmented
+                    value={enterpriseScope}
+                    options={[
+                      { value: 'created', label: '我创建的' },
+                      { value: 'managed', label: '我管理的' },
+                    ]}
+                    onChange={(value) => {
+                      setEnterpriseScope(value as EnterpriseScope);
+                      setPageNum(1);
+                    }}
+                  />
+                  <Segmented
+                    value={statusFilter}
+                    options={[
+                      { value: 'all', label: '全部' },
+                      { value: '0', label: '草稿' },
+                      { value: '2', label: '已上架' },
+                      { value: '3', label: '已下架' },
+                    ]}
+                    onChange={(value) => {
+                      setStatusFilter(value as EmployeeStatusFilter);
+                      setPageNum(1);
+                    }}
+                  />
+                </div>
+              )}
+            </div>
           </div>
           <Spin spinning={loading}>
             {list.length ? (
               <div className={styles.grid}>
                 {list.map((employee) => (
                   <ResourceCard
-                    key={`${employee.resourceId || employee.id || employee.agentId}`}
+                    key={`${employee.resourceId || employee.id || employee.agentId}-${permissionRefreshKey}`}
                     resource={employee}
                     resourceType="DIG_EMPLOYEE"
                     avatarNode={<div className={styles.avatar}>{getAgentChatAvatar(employee.chatAvatar)}</div>}
@@ -434,6 +507,8 @@ const MyEmployeesPage: React.FC = () => {
                       onEdit: () => handleEdit(employee),
                       onAuth: (type) => handleAuth(employee, type),
                       onDelete: () => handleDelete(employee),
+                      onShelf: () => handleShelfStatusChange(employee, 'shelf'),
+                      onUnShelf: () => handleShelfStatusChange(employee, 'unShelf'),
                       // 我的员工卡片统一按资源状态展示标签，并保留创建人/管理人的操作权限。
                       showDigitalEmployeeTypeTag: false,
                       enableDigitalEmployeeLifecycle: true,
@@ -442,7 +517,9 @@ const MyEmployeesPage: React.FC = () => {
                 ))}
               </div>
             ) : (
-              <Empty className={styles.empty} />
+              <div className={styles.emptyState}>
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              </div>
             )}
             {resourceFilter !== 'all' && total > PAGE_SIZE && (
               <Pagination
@@ -475,6 +552,13 @@ const MyEmployeesPage: React.FC = () => {
                 pagination={false}
                 sticky
                 columns={auditColumns}
+                locale={{
+                  emptyText: (
+                    <div className={styles.emptyState}>
+                      <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                    </div>
+                  ),
+                }}
               />
             </div>
           </Spin>

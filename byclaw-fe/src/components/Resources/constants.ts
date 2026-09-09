@@ -139,10 +139,6 @@ export const permissionOptions = [
     value: PERMISSION_AUTHORIZED_TO_ME_VALUE,
   },
   {
-    label: 'resource.pendingMyApproval',
-    value: PERMISSION_PENDING_MY_APPROVAL_VALUE,
-  },
-  {
     label: 'resource.appliedByMe',
     value: PERMISSION_APPLIED_BY_ME_VALUE,
   },

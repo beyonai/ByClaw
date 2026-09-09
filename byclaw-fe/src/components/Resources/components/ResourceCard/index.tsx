@@ -328,6 +328,13 @@ const RenderContent = (props: ResourceCardProps) => {
     digitalEmployeeActionMode = false,
   } = props;
   const { ownerType } = resource || {};
+  const isDeletedDigitalEmployee =
+    (resource?.resourceBizType === resourceBizTypeMap.DIG_EMPLOYEE ||
+      resourceType === resourceBizTypeMap.DIG_EMPLOYEE) &&
+    `${resource?.resourceStatus ?? resource?.metaStatus ?? ''}` === '-1';
+  const canApplyUseForStatus =
+    `${resource?.resourceStatus ?? resource?.metaStatus ?? ''}` !== '3' &&
+    `${resource?.resourceStatus ?? resource?.metaStatus ?? ''}` !== '-1';
   const {
     onEdit = noop,
     onAuth = noop,
@@ -427,6 +434,12 @@ const RenderContent = (props: ResourceCardProps) => {
 
   const isDigitalEmployeeResource =
     resource.resourceBizType === resourceBizTypeMap.DIG_EMPLOYEE || resourceType === resourceBizTypeMap.DIG_EMPLOYEE;
+  const isPublishedDigitalEmployee =
+    !isDigitalEmployeeResource || `${resource?.resourceStatus ?? resource?.metaStatus ?? ''}` === '2';
+  const isPendingUseApproval =
+    isPublishedDigitalEmployee && (resource.approveStatus === 'S' || isTruthyFlag(resource.useApplyPending));
+  const canApplyForUse =
+    isPublishedDigitalEmployee && !isTruthyFlag(resource.hasUsePermission) && isTruthyFlag(resource.canApplyUse);
   const resourceIdentity = `${resource.resourceId ?? resource.id ?? ''}`;
   const defaultEmployeeIdentity = `${defaultDigEmployeeId || userInfo?.defaultDigEmployeeId || ''}`;
   const isDefaultDigitalEmployee =
@@ -629,6 +642,10 @@ const RenderContent = (props: ResourceCardProps) => {
       canRestore,
     } = resource || {};
     const items: NonNullable<MenuProps['items']> = [];
+    // 企业数字员工的操作权限接口以 canEdit 表示管理权限；兼容部分旧返回未带 canOffShelf 的情况。
+    const canManageEnterpriseDigitalEmployee =
+      isDigitalEmployeeResource && `${ownerType || ''}`.toLowerCase() === 'enterprise' && canEdit === true;
+    const digitalEmployeeStatus = `${resource?.resourceStatus ?? resource?.metaStatus ?? ''}`;
 
     // 后端按当前用户权限和默认员工关系返回 canSetDefault。
     if (isDigitalEmployeeResource && canSetDefault === true && !isDefaultDigitalEmployee) {
@@ -694,7 +711,7 @@ const RenderContent = (props: ResourceCardProps) => {
     }
 
     // 使用申请与其他权限操作并列展示，由后端返回的权限字段决定其他操作是否出现。
-    if (canApplyUse) {
+    if (canApplyUse && canApplyUseForStatus) {
       items.push({
         key: 'applyUse',
         label: (
@@ -740,7 +757,9 @@ const RenderContent = (props: ResourceCardProps) => {
     }
 
     // 数字员工下架使用“编辑信息”权限；我可用列表通过生命周期开关整体隐藏该操作。
-    const canUnShelfDigitalEmployee = isDigitalEmployeeResource && canOffShelf === true;
+    const canUnShelfDigitalEmployee =
+      isDigitalEmployeeResource &&
+      (canOffShelf === true || (canManageEnterpriseDigitalEmployee && digitalEmployeeStatus === '2'));
     if (enableDigitalEmployeeLifecycle && ((!isDigitalEmployeeResource && canDelete) || canUnShelfDigitalEmployee)) {
       items.push({
         key: isDigitalEmployeeResource ? 'unShelfData' : 'delete',
@@ -765,12 +784,16 @@ const RenderContent = (props: ResourceCardProps) => {
     }
 
     // 已下架数字员工始终提供“上架数据”，不再依赖恢复权限字段。
-    if (enableDigitalEmployeeLifecycle && isDigitalEmployeeResource && canOnShelf === true) {
+    if (
+      enableDigitalEmployeeLifecycle &&
+      isDigitalEmployeeResource &&
+      (canOnShelf === true || (canManageEnterpriseDigitalEmployee && ['0', '3'].includes(digitalEmployeeStatus)))
+    ) {
       items.push({
         key: 'shelfData',
         label: (
           <ConfirmMenuLabel title={intl.formatMessage({ id: 'resource.shelfDataConfirm' })} onConfirm={() => onShelf()}>
-            <BuildMenuLabel icon="icon-a-Returnfanhui" text={intl.formatMessage({ id: 'resource.shelfData' })} />
+            <BuildMenuLabel icon="icon-a-Uploadshangchuan" text={intl.formatMessage({ id: 'resource.shelfData' })} />
           </ConfirmMenuLabel>
         ),
       });
@@ -840,6 +863,8 @@ const RenderContent = (props: ResourceCardProps) => {
     intl,
     isDefaultDigitalEmployee,
     isDigitalEmployeeResource,
+    isDeletedDigitalEmployee,
+    isPublishedDigitalEmployee,
     onApplyUse,
     onAuth,
     onDelete,
@@ -856,6 +881,7 @@ const RenderContent = (props: ResourceCardProps) => {
     resource?.canManageAuth,
     resource?.canUseAuth,
     resource?.canApplyUse,
+    canApplyUseForStatus,
     resource?.canSetDefault,
     resource?.canDelete,
     resource?.canOnShelf,
@@ -1170,45 +1196,60 @@ const RenderContent = (props: ResourceCardProps) => {
 
             {digitalEmployeeActionMode && (
               <div className={styles.digitalEmployeeActions} onClick={(event) => event.stopPropagation()}>
-                {resource.approveStatus === 'S' || isTruthyFlag(resource.useApplyPending) ? (
+                {isPendingUseApproval ? (
                   <div className={styles.applyActionWrap}>
                     <Button disabled shape="circle" icon={<PlusOutlined className={styles.cardActionBtnIcon} />} />
                     <span className={styles.pendingApplyText}>待授权通过</span>
                   </div>
-                ) : !isTruthyFlag(resource.hasUsePermission) && isTruthyFlag(resource.canApplyUse) ? (
-                  <Tooltip title="使用申请">
-                    <Popconfirm
-                      title={intl.formatMessage({ id: 'digitalEmployees.applyConfirm' })}
-                      okText={intl.formatMessage({ id: 'common.confirm' })}
-                      cancelText={intl.formatMessage({ id: 'common.cancel' })}
-                      onConfirm={(event) => {
-                        event?.stopPropagation();
-                        onApplyUse?.();
-                      }}
-                      onCancel={(event) => event?.stopPropagation()}
-                    >
-                      <Button
-                        shape="circle"
-                        icon={<PlusOutlined className={styles.cardActionBtnIcon} />}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          event.preventDefault();
+                ) : canApplyForUse ? (
+                  <>
+                    <Tooltip title="使用申请">
+                      <Popconfirm
+                        title={intl.formatMessage({ id: 'digitalEmployees.applyConfirm' })}
+                        okText={intl.formatMessage({ id: 'common.confirm' })}
+                        cancelText={intl.formatMessage({ id: 'common.cancel' })}
+                        onConfirm={(event) => {
+                          event?.stopPropagation();
+                          onApplyUse?.();
                         }}
-                      />
-                    </Popconfirm>
-                  </Tooltip>
+                        onCancel={(event) => event?.stopPropagation()}
+                      >
+                        <Button
+                          shape="circle"
+                          icon={<PlusOutlined className={styles.cardActionBtnIcon} />}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            event.preventDefault();
+                          }}
+                        />
+                      </Popconfirm>
+                    </Tooltip>
+                    {!!effectiveMenuItems?.length ? (
+                      <Dropdown
+                        menu={{ items: effectiveMenuItems }}
+                        placement="bottomRight"
+                        trigger={['click']}
+                        open={digitalEmployeeMenuOpen}
+                        onOpenChange={setDigitalEmployeeMenuOpen}
+                      >
+                        <Button type="text" icon={<EllipsisOutlined className={styles.cardActionBtnIcon} />} />
+                      </Dropdown>
+                    ) : null}
+                  </>
                 ) : (
                   <>
-                    <Tooltip title="进入会话">
-                      <Button
-                        shape="circle"
-                        icon={<MessageOutlined className={styles.cardActionBtnIcon} />}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onChat?.();
-                        }}
-                      />
-                    </Tooltip>
+                    {!isDeletedDigitalEmployee && isPublishedDigitalEmployee && (
+                      <Tooltip title="进入会话">
+                        <Button
+                          shape="circle"
+                          icon={<MessageOutlined className={styles.cardActionBtnIcon} />}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onChat?.();
+                          }}
+                        />
+                      </Tooltip>
+                    )}
                     {!!effectiveMenuItems?.length ? (
                       <Dropdown
                         menu={{ items: effectiveMenuItems }}

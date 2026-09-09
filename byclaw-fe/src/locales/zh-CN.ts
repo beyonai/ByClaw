@@ -933,7 +933,7 @@ export default {
   'digitalEmployees.unapplyConfirmDesc': '移除后，您可随时在员工市场重新申请使用。',
   'digitalEmployees.deleteConfirmTitle': '确定要注销您创建的数字员工吗？',
   'digitalEmployees.deleteConfirmDesc': '注销后，该数字员工将立即下架且不可恢复。',
-  'digitalEmployees.deleteSuccess': '注销成功',
+  'digitalEmployees.deleteSuccess': '删除成功',
   'digitalEmployees.noPermission': '暂无打开权限',
   'digitalEmployees.noUsePermissionApplyFirst': '暂无使用权限，请先申请使用',
   'digitalEmployees.popular': '热门',

@@ -45,8 +45,4 @@ public class MyAuthEmployQo extends AuthQo {
      */
     private Integer resourceStatus;
 
-    /**
-     * 是否查询全部资源状态；为 true 时不附加资源状态过滤。
-     */
-    private Boolean includeAllResourceStatus;
 }
