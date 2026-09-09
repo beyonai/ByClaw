@@ -1,23 +1,28 @@
-import { isAbsolute, join } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 import { createDingtalkAdapter } from './adapters/dingtalk.mjs';
 import { createFwsAdapter } from './adapters/fws.mjs';
 import { createWecomAdapter } from './adapters/wecom.mjs';
 import { createImaAdapter } from './adapters/ima.mjs';
+import { createCloudKnowledgeAdapter } from './adapters/cloud-knowledge.mjs';
 import { handledOutcome } from './shared/status-model.mjs';
 
-const SOURCES = new Set(['dingtalk', 'feishu', 'wecom', 'ima']);
+const ENTERPRISE_SOURCES = new Set(['dingtalk', 'feishu', 'wecom', 'ima', 'cloud-knowledge']);
+const SEARCH_ALL_SOURCES = new Set(['dingtalk', 'feishu', 'wecom', 'ima']);
+const SEARCH_ALL_DEFAULT_SOURCES = ['dingtalk', 'feishu', 'wecom', 'ima'];
 const SENSITIVE_KEY = /(token|cookie|secret|password|authorization|credential|device[_-]?code)/i;
 const SEARCH_OPTIONS = {
   dingtalk: new Map([['workspace-ids', 'workspaceIds'], ['extensions', 'extensions'], ['folder-id', 'folderId']]),
   feishu: new Map([['space-id', 'spaceId'], ['file-types', 'fileTypes']]),
   wecom: new Map(),
-  ima: new Map([['kb', 'kb'], ['note-mode', 'noteMode']]),
+  ima: new Map([['kb', 'kb']]),
+  'cloud-knowledge': new Map(),
 };
 const RESOURCE_OPTIONS = {
   dingtalk: new Map(),
   feishu: new Map([['minute-token', 'minuteToken']]),
   wecom: new Map(),
   ima: new Map(),
+  'cloud-knowledge': new Map(),
 };
 
 function requiredString(values, key) {
@@ -46,7 +51,7 @@ function parseBoolean(values, key, fallback) {
 
 function parseSource(values) {
   const source = requiredString(values, 'source');
-  if (!SOURCES.has(source)) throw new Error(`--source must be one of: ${[...SOURCES].join(', ')}`);
+  if (!ENTERPRISE_SOURCES.has(source)) throw new Error(`--source must be one of: ${[...ENTERPRISE_SOURCES].join(', ')}`);
   return source;
 }
 
@@ -129,10 +134,15 @@ export function parseMaterializeRequest(values) {
   if (!itemIds.length || new Set(itemIds).size !== itemIds.length) {
     throw new Error('--item-ids must be a comma-separated list of distinct candidate IDs');
   }
+  const sessionDir = absoluteSessionDir(values);
+  const outputDir = absoluteOutputDir(values);
+  if (['ima', 'cloud-knowledge'].includes(source) && resolve(sessionDir) !== resolve(outputDir)) {
+    throw new Error(`${source} materialization must use the same discovery session for --session-dir and --output-dir`);
+  }
   return {
     source,
-    sessionDir: absoluteSessionDir(values),
-    outputDir: absoluteOutputDir(values),
+    sessionDir,
+    outputDir,
     itemIds,
     concurrency: parseInteger(values, 'concurrency', 4, 1, 16),
   };
@@ -147,6 +157,10 @@ export function parseSearchRequest(values) {
   if (source === 'dingtalk' && sourceOptions.folderId && sourceOptions.workspaceIds) {
     throw new Error('--workspace-ids cannot be combined with --folder-id');
   }
+  const metadataOnly = parseBoolean(values, 'metadata-only', source === 'cloud-knowledge');
+  if (source === 'cloud-knowledge' && !metadataOnly) {
+    throw new Error('cloud-knowledge search requires metadata-only=true');
+  }
   return {
     source,
     query: requiredString(values, 'query'),
@@ -154,9 +168,23 @@ export function parseSearchRequest(values) {
     limit: parseInteger(values, 'limit', 50, 1, 500),
     concurrency: parseInteger(values, 'concurrency', 4, 1, 16),
     cursor,
-    metadataOnly: parseBoolean(values, 'metadata-only', false),
+    metadataOnly,
     sourceOptions,
   };
+}
+
+export function parseMetadataSearchRequest(values) {
+  const source = parseSource(values);
+  if (source !== 'cloud-knowledge') throw new Error('metadata-search V2 currently supports only cloud-knowledge');
+  const allowed = new Set(['source', 'parent-session-dir', 'output-dir', 'where-json', 'limit', 'help']);
+  for (const key of Object.keys(values)) {
+    if (!allowed.has(key) || SENSITIVE_KEY.test(key)) throw new Error(`--${key} is not allowed for metadata-search`);
+  }
+  let where;
+  try { where = JSON.parse(requiredString(values, 'where-json')); } catch { throw new Error('--where-json must be valid JSON'); }
+  if (!asPlainObject(where)) throw new Error('--where-json must be a JSON object');
+  const outputDir = absoluteOutputDir(values);
+  return { source, outputDir, where, limit: parseInteger(values, 'limit', 50, 1, 500) };
 }
 
 export function parseSearchBatchRequests(values) {
@@ -166,10 +194,13 @@ export function parseSearchBatchRequests(values) {
   }
   const outputRoot = requiredString(values, 'output-root');
   if (!isAbsolute(outputRoot)) throw new Error('--output-root must be an absolute path');
-  const sourceList = values.sources === undefined ? [...SOURCES].join(',') : requiredString(values, 'sources');
+  const sourceList = values.sources === undefined ? SEARCH_ALL_DEFAULT_SOURCES.join(',') : requiredString(values, 'sources');
   const sources = sourceList.split(',').map((source) => source.trim()).filter(Boolean);
-  if (!sources.length || new Set(sources).size !== sources.length || sources.some((source) => !SOURCES.has(source))) {
-    throw new Error(`--sources must be a comma-separated list of distinct values: ${[...SOURCES].join(', ')}`);
+  if (sources.includes('cloud-knowledge')) {
+    throw new Error('cloud-knowledge does not support search-all; use single-source enterprise search');
+  }
+  if (!sources.length || new Set(sources).size !== sources.length || sources.some((source) => !SEARCH_ALL_SOURCES.has(source))) {
+    throw new Error(`--sources must be a comma-separated list of distinct values: ${[...SEARCH_ALL_SOURCES].join(', ')}`);
   }
   return sources.map((source) => ({
     source,
@@ -183,6 +214,7 @@ export function parseSearchBatchRequests(values) {
 
 export function parseResourceRequest(values) {
   const source = parseSource(values);
+  if (source === 'cloud-knowledge') throw new Error('cloud-knowledge does not support resource collection');
   const sourceOptions = parseOptions(values, source, RESOURCE_OPTIONS, ['source', 'output-dir', 'url']);
   const url = parseUrl(values);
   if (source === 'feishu' && !sourceOptions.minuteToken) throw new Error('--minute-token is required for source feishu');
@@ -205,8 +237,12 @@ function defaultAdapters() {
     feishu: createFwsAdapter({ bin: process.env.LARK_CLI_BIN || 'lark-cli', env: process.env }),
     wecom: createWecomAdapter({ bin: process.env.WECOM_CLI_BIN || 'wecom-cli', env: process.env }),
     ima: createImaAdapter({
-      bin: process.env.IMA_CLI_BIN || 'ima',
       bycliBin: process.env.BYCLI_BIN || 'bycli',
+      env: process.env,
+    }),
+    'cloud-knowledge': createCloudKnowledgeAdapter({
+      python: process.env.PYTHON_BIN || 'python3',
+      script: process.env.CLOUD_KNOWLEDGE_CLI || new URL('../../../project-cloud-knowledge/scripts/project_cloud_knowledge.py', import.meta.url).pathname,
       env: process.env,
     }),
   };
@@ -220,8 +256,11 @@ function reasonOf(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
-export async function dispatchEnterprise(command, values, { adapters = defaultAdapters() } = {}) {
+export async function dispatchEnterprise(command, values, {
+  adapters = defaultAdapters(), taskContract = null,
+} = {}) {
   const request = command === 'search' ? parseSearchRequest(values)
+    : command === 'metadata-search' ? parseMetadataSearchRequest(values)
     : command === 'resource' ? parseResourceRequest(values)
       : command === 'materialize' ? parseMaterializeRequest(values)
         : command === 'resume-resource' ? parseResumeResourceRequest(values)
@@ -229,6 +268,7 @@ export async function dispatchEnterprise(command, values, { adapters = defaultAd
   const adapter = adapters[request.source];
   if (!adapter) return unavailable(request.source, request.outputDir);
   const method = command === 'search' ? adapter.search
+    : command === 'metadata-search' ? adapter.metadataSearch
     : command === 'resource' ? adapter.collectResource
       : command === 'materialize' ? adapter.materialize
         : adapter.resumeResource;
@@ -236,6 +276,7 @@ export async function dispatchEnterprise(command, values, { adapters = defaultAd
   const outcome = await method({
     ...request,
     ...request.sourceOptions,
+    ...(taskContract ? { taskContract } : {}),
     ...(command === 'resource' && request.source === 'feishu' ? { resourceKind: 'minutes' } : {}),
   });
   if (!outcome || typeof outcome !== 'object') throw new Error('connector returned an invalid outcome');
@@ -248,7 +289,9 @@ export async function dispatchEnterprise(command, values, { adapters = defaultAd
   };
 }
 
-export async function dispatchEnterpriseBatch(command, requests, { adapters = defaultAdapters(), concurrency = 4 } = {}) {
+export async function dispatchEnterpriseBatch(command, requests, {
+  adapters = defaultAdapters(), concurrency = 4, taskContract = null,
+} = {}) {
   if (!Array.isArray(requests) || requests.length === 0) {
     throw new Error('enterprise batch requests must be a non-empty array');
   }
@@ -256,6 +299,7 @@ export async function dispatchEnterpriseBatch(command, requests, { adapters = de
     throw new Error('enterprise batch concurrency must be an integer between 1 and 16');
   }
   const parser = command === 'search' ? parseSearchRequest
+    : command === 'metadata-search' ? parseMetadataSearchRequest
     : command === 'resource' ? parseResourceRequest
       : command === 'materialize' ? parseMaterializeRequest
         : command === 'resume-resource' ? parseResumeResourceRequest
@@ -277,7 +321,7 @@ export async function dispatchEnterpriseBatch(command, requests, { adapters = de
       const session = sessions[index];
       let outcome;
       try {
-        outcome = await dispatchEnterprise(command, session.values, { adapters });
+        outcome = await dispatchEnterprise(command, session.values, { adapters, taskContract });
       } catch (error) {
         outcome = {
           ...handledOutcome(session.source, 'failed', session.sessionDir),

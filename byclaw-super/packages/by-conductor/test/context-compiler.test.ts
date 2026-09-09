@@ -51,6 +51,7 @@ describe("ContextCompiler", () => {
     expect(compiled.diagnostics.processors.map(({ name }) => name)).toEqual([
       "supervisor-policy",
       "session-context",
+      "project-context",
       "session-workspace",
       "user-context",
       "group-chat-context",
@@ -350,11 +351,13 @@ describe("OrchestratorContextCompiler", () => {
     expect(compiled.systemPrompt).not.toContain("ByClaw Super Assistant");
     expect(compiled.dynamicSystemContext).toContain('"role":"数据复核"');
     expect(compiled.dynamicSystemContext).toContain("<session_context>");
-    expect(compiled.dynamicSystemContext).not.toContain("<session_workspace>");
+    expect(compiled.dynamicSystemContext).toContain("<session_workspace>");
     expect(compiled.dynamicSystemContext).not.toContain("<user_context>");
     expect(compiled.diagnostics.processors.map(({ name }) => name)).toEqual([
       "supervisor-policy",
       "session-context",
+      "project-context",
+      "session-workspace",
       "task-plan",
       "authorized-agents",
       "context-cleanup",

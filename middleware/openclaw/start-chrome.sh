@@ -130,7 +130,60 @@ clear_stale_profile_lock() {
     "${OPENCLAW_BROWSER_USER_DATA_DIR}/SingletonSocket"
 }
 
+extension_fingerprint_marker="${OPENCLAW_STATE_DIR}/opencli/extension-runtime.fingerprint"
+
+extension_runtime_fingerprint() {
+  [ -f "${OPENCLI_EXTENSION_DIR}/manifest.json" ] || return 1
+  [ -f "${OPENCLI_EXTENSION_DIR}/dist/background.js" ] || return 1
+  cksum \
+    "${OPENCLI_EXTENSION_DIR}/manifest.json" \
+    "${OPENCLI_EXTENSION_DIR}/dist/background.js" \
+    | cksum | awk '{ print $1 ":" $2 }'
+}
+
+managed_chrome_pids() {
+  pgrep -f "${OPENCLAW_CHROME_EXECUTABLE}.*--user-data-dir=${OPENCLAW_BROWSER_USER_DATA_DIR}" 2>/dev/null || true
+}
+
+terminate_managed_chrome() {
+  candidates="$1"
+  selected=""
+
+  for pid in ${candidates}; do
+    process_args="$(ps -p "${pid}" -o args= 2>/dev/null || true)"
+    case " ${process_args} " in
+      *"${OPENCLAW_CHROME_EXECUTABLE}"*" --user-data-dir=${OPENCLAW_BROWSER_USER_DATA_DIR} "*) ;;
+      *) continue ;;
+    esac
+    kill "${pid}"
+    selected="${selected} ${pid}"
+  done
+
+  if [ -z "${selected}" ]; then
+    log "managed Chromium was detected but no exact process could be selected for restart"
+    return 1
+  fi
+
+  attempts=0
+  while [ "${attempts}" -lt 50 ]; do
+    still_running=""
+    for pid in ${selected}; do
+      if kill -0 "${pid}" 2>/dev/null; then
+        still_running="${still_running} ${pid}"
+      fi
+    done
+    [ -z "${still_running}" ] && return 0
+    sleep 0.1
+    attempts=$((attempts + 1))
+  done
+
+  log "managed Chromium did not stop after TERM:${still_running}"
+  return 1
+}
+
 clear_stale_profile_lock
+
+current_extension_fingerprint="$(extension_runtime_fingerprint 2>/dev/null || true)"
 
 xvfb_screen="${OPENCLAW_XVFB_SCREEN:-1365x768x24}"
 xvfb_width="${xvfb_screen%%x*}"
@@ -203,9 +256,18 @@ PY
   fi
 fi
 
-if pgrep -f "${OPENCLAW_CHROME_EXECUTABLE}.*--user-data-dir=${OPENCLAW_BROWSER_USER_DATA_DIR}" >/dev/null 2>&1; then
-  log "already running for user data dir ${OPENCLAW_BROWSER_USER_DATA_DIR}"
-  exit 0
+running_chrome_pids="$(managed_chrome_pids)"
+if [ -n "${running_chrome_pids}" ]; then
+  recorded_extension_fingerprint="$(cat "${extension_fingerprint_marker}" 2>/dev/null || true)"
+  if [ -z "${current_extension_fingerprint}" ] \
+    || [ "${recorded_extension_fingerprint}" = "${current_extension_fingerprint}" ]; then
+    log "already running for user data dir ${OPENCLAW_BROWSER_USER_DATA_DIR}"
+    exit 0
+  fi
+
+  log "extension runtime changed; restarting managed Chromium"
+  terminate_managed_chrome "${running_chrome_pids}"
+  clear_stale_profile_lock
 fi
 
 extension_args=""
@@ -229,3 +291,9 @@ log "starting ${OPENCLAW_CHROME_EXECUTABLE}, profile=${OPENCLAW_BROWSER_PROFILE}
   --window-size="${chrome_window_size}" \
   --window-position=0,0 \
   about:blank >/tmp/openclaw-chrome.log 2>&1 9>&- &
+
+if [ -n "${current_extension_fingerprint}" ]; then
+  marker_tmp="${extension_fingerprint_marker}.$$"
+  printf '%s\n' "${current_extension_fingerprint}" > "${marker_tmp}"
+  mv "${marker_tmp}" "${extension_fingerprint_marker}"
+fi

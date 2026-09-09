@@ -84,7 +84,6 @@ export const applyAgentTeamsChildProjection = (
     ...member,
     status: `${metadata.session_status || (childRun.running ? 'running' : member.status || 'completed')}`,
     activity: childRun.running ? 'working' : 'idle',
-    currentTask: metadata.child_task || member.currentTask,
     childRunId: childRun.childRunId,
     childTurn: childRun.childTurn,
     lastStreamId: childRun.lastStreamId,

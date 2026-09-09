@@ -8,6 +8,7 @@ import com.iwhalecloud.byai.manager.domain.devloop.provider.GitRepositoryProvide
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectService;
 import com.iwhalecloud.byai.manager.domain.project.service.ProjectWorkspaceGitService;
 import com.iwhalecloud.byai.manager.domain.project.service.GitCommandExecutor;
+import com.iwhalecloud.byai.manager.application.service.project.ProjectInitService;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectRepoBranchDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectRepoFileContentDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectRepoTreeNodeDTO;
@@ -51,6 +52,9 @@ public class ProjectRepositoryService {
 
     @Autowired
     private GitCommandExecutor gitCommandExecutor;
+
+    @Autowired
+    private ProjectInitService projectInitService;
 
     private final Map<String, GitRepositoryProvider> providers;
 
@@ -184,16 +188,24 @@ public class ProjectRepositoryService {
     public List<Map<String, Object>> listAvailableRepositories(Long projectId, Long sessionId) {
         requireProject(projectId);
         List<Map<String, Object>> repositories = new ArrayList<>();
-        for (ProjectWorkspaceGitService.ResolvedRepository item
-            : projectWorkspaceGitService.resolveRepositories(projectId)) {
-            Path resolvedPath = sessionId == null ? item.path()
-                : projectWorkspaceGitService.resolveRepository(item.repo(), sessionId).orElse(item.path());
-            String path = projectWorkspaceGitService.toSandboxPath(resolvedPath).orElse(null);
+        List<ProjectRepo> configuredRepos = projectRepoMapper.selectList(new LambdaQueryWrapper<ProjectRepo>()
+            .eq(ProjectRepo::getProjectId, projectId).orderByAsc(ProjectRepo::getRepoId));
+        Map<Long, ProjectWorkspaceGitService.ResolvedRepository> localRepos =
+            projectWorkspaceGitService.resolveRepositories(projectId).stream()
+                .collect(Collectors.toMap(item -> item.repo().getRepoId(), Function.identity(), (left, right) -> left));
+        for (ProjectRepo repo : configuredRepos) {
+            ProjectWorkspaceGitService.ResolvedRepository local = localRepos.get(repo.getRepoId());
+            Path resolvedPath = local == null
+                ? projectWorkspaceGitService.resolveRepository(repo, sessionId).orElse(null)
+                : sessionId == null ? local.path()
+                    : projectWorkspaceGitService.resolveRepository(repo, sessionId).orElse(local.path());
+            Path configuredPath = projectInitService.getProjectRepositoryPath(repo);
+            String path = projectWorkspaceGitService.toSandboxPath(resolvedPath)
+                .or(() -> projectWorkspaceGitService.toSandboxPath(configuredPath)).orElse(null);
             if (path == null) {
                 continue;
             }
             Map<String, Object> result = new HashMap<>();
-            ProjectRepo repo = item.repo();
             result.put("repoId", repo.getRepoId());
             result.put("projectId", repo.getProjectId());
             result.put("repoFullName", repo.getRepoFullName());
@@ -202,6 +214,12 @@ public class ProjectRepositoryService {
             result.put("repoType", repo.getRepoType());
             result.put("provider", repo.getProvider());
             result.put("path", path);
+            // resolveRepository may return the configured target path as a fallback even
+            // when it has not been cloned yet; only a real Git metadata entry can serve
+            // local tree/changes requests.
+            boolean localAvailable = resolvedPath != null && Files.exists(resolvedPath.resolve(".git"));
+            result.put("localAvailable", localAvailable);
+            result.put("changesSupported", localAvailable);
             repositories.add(result);
         }
         return repositories;

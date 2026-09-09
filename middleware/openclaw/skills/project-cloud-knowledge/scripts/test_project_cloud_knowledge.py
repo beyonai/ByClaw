@@ -230,6 +230,14 @@ class BackendApiTests(unittest.TestCase):
         self.api.search({"resourceIdList": [1]})
         self.api.search_file({"resourceIdList": [1]})
         self.api.metadata_search({"resourceIdList": [1]})
+        self.api.metadata_get({"resourceId": 1, "filePath": "/a.md"})
+        self.api.metadata_update(
+            {
+                "resourceId": 1,
+                "filePath": "/a.md",
+                "operationList": [{"propertyName": "status", "operation": "unset"}],
+            }
+        )
         self.api.entity_discovery({"resourceId": 1})
         self.api.entity_enrich({"resourceId": 1})
         self.api.remove_file({"resourceId": 1})
@@ -245,6 +253,8 @@ class BackendApiTests(unittest.TestCase):
             "/byaiService/datasetController/knowledgeItems/search",
             "/byaiService/datasetController/knowledgeItems/searchFile",
             "/byaiService/datasetController/knowledgeItems/metadataSearch",
+            "/byaiService/datasetController/knowledgeItems/metadata/get",
+            "/byaiService/datasetController/knowledgeItems/metadata/update",
             "/byaiService/datasetController/knowledgeItems/entityDiscovery",
             "/byaiService/datasetController/knowledgeItems/entityEnrich",
             "/byaiService/datasetController/removeFile",
@@ -298,6 +308,60 @@ class KnowledgeManagerTests(unittest.TestCase):
 
     def parse(self, *argv: str):
         return manager_module.build_parser().parse_args(argv)
+
+    def test_move_batch_preserves_partial_results_and_backend_contract(self) -> None:
+        result = {"data": [
+            {"sourcePath": "/a.md", "targetPath": "/归档/a.md", "success": True},
+            {"sourcePath": "/资料", "success": False, "error": "目标已存在"},
+        ], "summary": {"total": 2, "succeeded": 1, "failed": 1}}
+        self.transport.responses.append(result)
+        args = self.parse("move", "--resource-id", "7", "--source-path", "/a.md",
+                          "--source-path", "/资料", "--target-directory-path", "/归档",
+                          "--session-id", "session-1")
+        output = self.manager.execute(args)
+        self.assertEqual(output["result"], result)
+        self.assertEqual(self.transport.calls, [{
+            "kind": "request", "method": "POST",
+            "path": "/byaiService/datasetController/moveKnowledgeItems",
+            "payload": {"resourceId": 7, "sourcePath": ["/a.md", "/资料"],
+                        "targetDirectoryPath": "/归档", "overwrite": False},
+        }])
+        self.assertIn(args.command, manager_module.SESSION_AWARE_COMMANDS)
+
+    def test_move_exact_target_dry_run_does_not_call_backend(self) -> None:
+        output = self.manager.execute(self.parse(
+            "move", "--resource-id", "7", "--source-path", "/a.md",
+            "--target-file-path", "/归档/b.md", "--dry-run"))
+        self.assertEqual(output["payload"], {
+            "resourceId": 7, "sourcePath": ["/a.md"],
+            "targetFilePath": "/归档/b.md", "overwrite": False})
+        self.assertEqual(self.transport.calls, [])
+
+    def test_move_rejects_invalid_or_reserved_paths_before_network(self) -> None:
+        cases = [
+            ["--source-path", "/" , "--target-directory-path", "/归档"],
+            ["--source-path", "a.md", "--target-directory-path", "/归档"],
+            ["--source-path", "/a.md", "--target-directory-path", ""],
+            ["--source-path", "/KnowledgeEntity/a.md", "--target-directory-path", "/归档"],
+            ["--source-path", "/a.md", "--target-directory-path", "/资料/../KnowledgeEntity"],
+            ["--source-path", "/资料/KnowledgeEntity", "--target-directory-path", "/"],
+            ["--source-path", "/a.md", "--target-file-path", "/KnowledgeEntity/a.md"],
+            ["--source-path", "/a.md", "--source-path", "/b.md", "--target-file-path", "/c.md"],
+        ]
+        for case in cases:
+            for dry_run in ([], ["--dry-run"]):
+                with self.subTest(case=case, dry_run=dry_run):
+                    with self.assertRaises(ValueError):
+                        self.manager.execute(self.parse("move", "--resource-id", "7", *case, *dry_run))
+        self.assertEqual(self.transport.calls, [])
+
+    def test_move_requires_exactly_one_target_and_disallows_overwrite(self) -> None:
+        base = ["move", "--resource-id", "7", "--source-path", "/a.md"]
+        for options in ([], ["--target-file-path", "/b.md", "--target-directory-path", "/"],
+                        ["--target-directory-path", "/", "--overwrite"]):
+            with self.subTest(options=options), redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit):
+                    self.parse(*base, *options)
 
     def make_file(self, name: str = "a.md") -> Path:
         file = Path(self.temp_dir.name) / name
@@ -420,6 +484,79 @@ class KnowledgeManagerTests(unittest.TestCase):
             )
         )
         self.assertTrue(result["dryRun"])
+
+    def test_build_submits_file_directory_or_root_once(self) -> None:
+        for target in ("/docs/a.md", "/产品资料", "/"):
+            for dry_run in (False, True):
+                with self.subTest(target=target, dry_run=dry_run):
+                    self.transport.calls.clear()
+                    args = ["build", "--resource-id", "7", "--file-path", target]
+                    if dry_run:
+                        args.append("--dry-run")
+                    result = self.manager.execute(self.parse(*args))
+                    payload = {"resourceId": 7, "directoryPath": target}
+                    if dry_run:
+                        self.assertEqual(result["payload"], payload)
+                        self.assertEqual(self.transport.calls, [])
+                    else:
+                        self.assertEqual(len(self.transport.calls), 1)
+                        self.assertEqual(self.transport.calls[0]["method"], "POST")
+                        self.assertEqual(self.transport.calls[0]["path"], "/byaiService/datasetController/build")
+                        self.assertEqual(self.transport.calls[0]["payload"], payload)
+                        self.assertIsNone(result["built"])
+
+    def test_zip_upload_builds_direct_files_and_unique_first_level_directories(self) -> None:
+        archive = self.make_zip(
+            "batch.zip",
+            {
+                "a.md": "# A\n",
+                "team/b.pdf": "B",
+                "team/nested/c.md": "# C\n",
+                "other/d.md": "# D\n",
+            },
+        )
+        paths = [
+            "/docs/a.md",
+            "/docs/team/b.pdf",
+            "/docs/team/nested/c.md",
+            "/docs/other/d.md",
+        ]
+        self.transport.responses = [{"uploadItems": [{"filePath": path} for path in paths]}]
+        result = self.manager.execute(self.parse(
+            "upload", "--resource-id", "7", "--directory-path", "/docs",
+            "--file-path", str(archive),
+        ))
+        build_paths = ["/docs/a.md", "/docs/team", "/docs/other"]
+        self.assertEqual(
+            [call["payload"] for call in self.transport.calls[1:]],
+            [{"resourceId": 7, "directoryPath": path} for path in build_paths],
+        )
+        self.assertEqual(
+            result["builds"],
+            [{"filePath": path, "built": None} for path in build_paths],
+        )
+
+    def test_upload_build_target_selection_handles_root_and_duplicates(self) -> None:
+        uploaded = {
+            "uploadItems": [
+                {"filePath": "/a.md"},
+                {"filePath": "/team/b.md"},
+                {"filePath": "/team/c.md"},
+                {"filePath": "/a.md"},
+            ]
+        }
+
+        self.assertEqual(
+            self.manager._uploaded_build_paths("/", uploaded),
+            ["/a.md", "/team"],
+        )
+
+    def test_upload_build_target_selection_rejects_path_outside_target(self) -> None:
+        with self.assertRaisesRegex(ValueError, "不在上传目标目录内"):
+            self.manager._uploaded_build_paths(
+                "/docs",
+                {"uploadItems": [{"filePath": "/docs-other/a.md"}]},
+            )
 
     def test_upload_allows_zip_and_builds_returned_items(self) -> None:
         archive = self.make_file("batch.zip")
@@ -645,6 +782,180 @@ class KnowledgeManagerTests(unittest.TestCase):
             ):
                 parser.parse_args(argv)
 
+    def test_metadata_get_uses_resource_id_and_preserves_typed_values(self) -> None:
+        self.transport.responses = [
+            {
+                "metadata": {
+                    "status": {"valueType": "string", "value": "active"},
+                    "tags": {"valueType": "stringList", "value": ["contract"]},
+                }
+            }
+        ]
+
+        result = self.manager.execute(
+            self.parse(
+                "metadata-get",
+                "--resource-id",
+                "7",
+                "--file-path",
+                "/contracts/a.md",
+                "--metadata-field",
+                "status",
+                "--metadata-field",
+                "tags",
+            )
+        )
+
+        self.assertEqual(
+            self.transport.calls[0],
+            {
+                "kind": "request",
+                "method": "POST",
+                "path": "/byaiService/datasetController/knowledgeItems/metadata/get",
+                "payload": {
+                    "resourceId": 7,
+                    "filePath": "/contracts/a.md",
+                    "metadataFieldList": ["status", "tags"],
+                },
+            },
+        )
+        self.assertEqual(result["resourceId"], 7)
+        self.assertEqual(result["filePath"], "/contracts/a.md")
+        self.assertEqual(result["metadata"]["tags"]["value"], ["contract"])
+
+    def test_metadata_update_builds_atomic_operations_from_readable_flags(self) -> None:
+        result = self.manager.execute(
+            self.parse(
+                "metadata-update",
+                "--resource-id",
+                "7",
+                "--file-path",
+                "/contracts/a.md",
+                "--set-string",
+                "status",
+                "active",
+                "--set-string-list",
+                "reviewers",
+                "alice",
+                "bob",
+                "--set-number",
+                "priority",
+                "2.5",
+                "--set-boolean",
+                "approved",
+                "true",
+                "--set-datetime",
+                "reviewedAt",
+                "2026-09-08T10:00:00+08:00",
+                "--append",
+                "tags",
+                "contract",
+                "renewal",
+                "--remove",
+                "watchers",
+                "legacy",
+                "--unset",
+                "owner",
+                "--clear",
+                "aliases",
+            )
+        )
+
+        expected_operations = [
+            {
+                "propertyName": "status",
+                "operation": "set",
+                "valueType": "string",
+                "value": "active",
+            },
+            {
+                "propertyName": "reviewers",
+                "operation": "set",
+                "valueType": "stringList",
+                "value": ["alice", "bob"],
+            },
+            {
+                "propertyName": "priority",
+                "operation": "set",
+                "valueType": "number",
+                "value": 2.5,
+            },
+            {
+                "propertyName": "approved",
+                "operation": "set",
+                "valueType": "boolean",
+                "value": True,
+            },
+            {
+                "propertyName": "reviewedAt",
+                "operation": "set",
+                "valueType": "datetime",
+                "value": "2026-09-08T10:00:00+08:00",
+            },
+            {
+                "propertyName": "tags",
+                "operation": "append",
+                "value": ["contract", "renewal"],
+            },
+            {
+                "propertyName": "watchers",
+                "operation": "remove",
+                "value": ["legacy"],
+            },
+            {"propertyName": "owner", "operation": "unset"},
+            {"propertyName": "aliases", "operation": "clear"},
+        ]
+        self.assertEqual(
+            self.transport.calls[0],
+            {
+                "kind": "request",
+                "method": "POST",
+                "path": "/byaiService/datasetController/knowledgeItems/metadata/update",
+                "payload": {
+                    "resourceId": 7,
+                    "filePath": "/contracts/a.md",
+                    "operationList": expected_operations,
+                },
+            },
+        )
+        self.assertEqual(result["operationCount"], len(expected_operations))
+
+    def test_metadata_update_rejects_missing_or_duplicate_property_operations(self) -> None:
+        invalid_commands = (
+            (
+                "metadata-update",
+                "--resource-id",
+                "7",
+                "--file-path",
+                "/a.md",
+            ),
+            (
+                "metadata-update",
+                "--resource-id",
+                "7",
+                "--file-path",
+                "/a.md",
+                "--set-string",
+                "status",
+                "active",
+                "--unset",
+                "status",
+            ),
+            (
+                "metadata-update",
+                "--resource-id",
+                "7",
+                "--file-path",
+                "/a.md",
+                "--append",
+                "tags",
+            ),
+        )
+        for argv in invalid_commands:
+            with self.subTest(argv=argv), self.assertRaises(ValueError):
+                self.manager.execute(self.parse(*argv))
+        self.assertEqual(self.transport.calls, [])
+
     def test_agent_dsl_validates_structure_and_complexity(self) -> None:
         valid = manager_module._agent_dsl(
             '{"and":['
@@ -752,6 +1063,25 @@ class KnowledgeManagerTests(unittest.TestCase):
                 },
             },
         )
+        self.assertEqual(self.transport.calls, [])
+
+    def test_entity_discovery_accepts_repeated_tags(self) -> None:
+        result = self.manager.execute(
+            self.parse(
+                "entity-discovery",
+                "--resource-id",
+                "7",
+                "--file-path",
+                "/docs/a.md",
+                "--tag",
+                "organization",
+                "--tag",
+                "ai",
+                "--dry-run",
+            )
+        )
+
+        self.assertEqual(result["payload"]["tags"], ["organization", "ai"])
         self.assertEqual(self.transport.calls, [])
 
     def test_entity_enrich_supports_whole_kb_dry_run(self) -> None:
@@ -862,6 +1192,8 @@ class KnowledgeManagerTests(unittest.TestCase):
         self.assertIn("upload", top_level_help)
         self.assertIn("entity-discovery", top_level_help)
         self.assertIn("entity-enrich", top_level_help)
+        self.assertIn("metadata-get", top_level_help)
+        self.assertIn("metadata-update", top_level_help)
         self.assertIn("查看子命令参数", top_level_help)
 
         output = io.StringIO()
@@ -893,12 +1225,22 @@ class KnowledgeManagerTests(unittest.TestCase):
         self.assertIn("--page-num N", metadata_help)
         self.assertIn("--page-size N", metadata_help)
 
+        metadata_update_output = io.StringIO()
+        with redirect_stdout(metadata_update_output), self.assertRaises(SystemExit):
+            parser.parse_args(["metadata-update", "--help"])
+        metadata_update_help = metadata_update_output.getvalue()
+        self.assertNotIn("operation-list", metadata_update_help)
+        self.assertIn("--set-string PROPERTY VALUE", metadata_update_help)
+        self.assertIn("--append PROPERTY [VALUE ...]", metadata_update_help)
+        self.assertIn("--unset PROPERTY", metadata_update_help)
+
         discovery_output = io.StringIO()
         with redirect_stdout(discovery_output), self.assertRaises(SystemExit):
             parser.parse_args(["entity-discovery", "--help"])
         discovery_help = discovery_output.getvalue()
         self.assertIn("--file-path PATH", discovery_help)
         self.assertIn("--directory-path PATH", discovery_help)
+        self.assertIn("--tag TAG", discovery_help)
         self.assertIn("递归处理该目录及其子目录", discovery_help)
 
     def test_main_without_arguments_prints_help(self) -> None:

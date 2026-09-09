@@ -74,7 +74,10 @@ public class RunningOutputStreamRegistry {
         redisTemplate.opsForValue().set(buildKey(ctx.sessionId), value.toJSONString(), RUNNING_TTL_SECONDS,
             TimeUnit.SECONDS);
         if (chatRuntimeStateService != null) {
-            chatRuntimeStateService.save(ctx, ctx.runningOutputStreamToken);
+            // A turn keeps its durable key when it becomes the session's visible owner.
+            // This also lets another instance safely clean up a failed dispatch by trace/token.
+            if (ctx.concurrentGatewayTurn) chatRuntimeStateService.touch(ctx);
+            else chatRuntimeStateService.save(ctx, ctx.runningOutputStreamToken);
         }
     }
 

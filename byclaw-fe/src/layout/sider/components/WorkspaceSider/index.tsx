@@ -30,6 +30,7 @@ import WorkspaceProjectActions from './WorkspaceProjectActions';
 import WorkspaceSessionActions from './WorkspaceSessionActions';
 import WorkspaceUserBar from './WorkspaceUserBar';
 import styles from './index.module.less';
+import { DESKTOP_UNASSIGNED_SESSION_SCOPE, hasDesktopTaskSessions } from './workspaceSiderState';
 
 const PROJECT_SESSION_PAGE_SIZE = 5;
 const EXPANDED_PROJECTS_STORAGE_KEY = 'byclaw.workspaceSider.expandedProjectIds';
@@ -184,6 +185,7 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
   const sessionLoadingProjectIdsRef = useRef<Set<string>>(new Set());
   const hasStoredExpandedProjectIdsRef = useRef(hasStoredExpandedProjectIds());
   const displayedSessionRuntimeKeyRef = useRef('');
+  const desktopMode = typeof window !== 'undefined' && window.byclawDesktop?.isDesktop === true;
 
   useEffect(() => {
     expandedProjectIdsRef.current = expandedProjectIds;
@@ -209,7 +211,8 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
   const loadedSessionIdsKey = loadedSessionIds.join(',');
 
   const syncRunningStatus = useCallback(async () => {
-    if (!loadedSessionIdsKey) return;
+    // 桌面会话运行态由本地 runtime manager 随流式事件维护，不调用后端运行态接口。
+    if (desktopMode || !loadedSessionIdsKey) return;
 
     try {
       const runningInfoList: RunningChatInfo[] = await getChatRunningStatus({
@@ -219,7 +222,7 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
     } catch (error) {
       console.error('Failed to synchronize workspace session running status:', error);
     }
-  }, [loadedSessionIdsKey]);
+  }, [desktopMode, loadedSessionIdsKey]);
 
   const updateDisplayedSessionRuntime = useCallback(() => {
     const nextDisplayedSessionRuntimeKey = Object.values(sessionStateMapRef.current)
@@ -230,11 +233,14 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
         const isRunning = chatSessionRuntimeManager.isSessionRunning(loadedSessionId);
         const isWaitingForUserInput = chatSessionRuntimeManager.isSessionWaitingForUserInput(loadedSessionId);
         const sessionRuntime = chatSessionRuntimeManager.getSessionRuntime(loadedSessionId);
-        return isRunning || isWaitingForUserInput
-          ? `${loadedSessionId}:${isRunning ? 'running' : 'idle'}:${isWaitingForUserInput ? 'waiting' : 'active'}:${
-            sessionRuntime?.status || ''
-          }:${sessionRuntime?.activeAgentCount || 0}`
-          : '';
+        if (!isRunning && !isWaitingForUserInput) return '';
+        return [
+          loadedSessionId,
+          isRunning ? 'running' : 'idle',
+          isWaitingForUserInput ? 'waiting' : 'active',
+          sessionRuntime?.status || '',
+          sessionRuntime?.activeAgentCount || 0,
+        ].join(':');
       })
       .filter(Boolean)
       .sort()
@@ -311,8 +317,9 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
     async (projectId: string, options: SessionLoadOptions = {}) => {
       const { append = false, force = false } = options;
       const normalizedProjectId = normalizeProjectId(projectId);
+      const isUnassignedDesktopScope = normalizedProjectId === DESKTOP_UNASSIGNED_SESSION_SCOPE;
       const numericProjectId = Number(normalizedProjectId);
-      if (!normalizedProjectId || !Number.isFinite(numericProjectId)) return;
+      if (!normalizedProjectId || (!isUnassignedDesktopScope && !Number.isFinite(numericProjectId))) return;
       if (sessionLoadingProjectIdsRef.current.has(normalizedProjectId)) return;
 
       const currentState = sessionStateMapRef.current[normalizedProjectId] || createEmptySessionState();
@@ -329,12 +336,28 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
       });
 
       try {
-        const response = await listProjectSessionsByQo({
-          projectId: numericProjectId,
-          pageNum,
-          pageSize: PROJECT_SESSION_PAGE_SIZE,
-        });
-        const nextSessions = getArrayData(response).map((item) => normalizeProjectSession(item, normalizedProjectId));
+        let response;
+        if (desktopMode) {
+          const listLocalSessions = window.byclawDesktop?.sessions?.listLocal;
+          if (!listLocalSessions) throw new Error('The installed desktop shell does not support local session lists');
+          response = await listLocalSessions({
+            projectId: isUnassignedDesktopScope ? null : normalizedProjectId,
+            pageNum,
+            pageSize: PROJECT_SESSION_PAGE_SIZE,
+          });
+        } else {
+          response = await listProjectSessionsByQo({
+            projectId: numericProjectId,
+            pageNum,
+            pageSize: PROJECT_SESSION_PAGE_SIZE,
+          });
+        }
+        const nextSessions = getArrayData(response).map((item) =>
+          normalizeProjectSession(
+            desktopMode ? { ...item, isLocalSession: true } : item,
+            isUnassignedDesktopScope ? undefined : normalizedProjectId
+          )
+        );
         const previousSessions = sessionStateMapRef.current[normalizedProjectId]?.sessions || [];
         const sessionsCreatedDuringRequest = getSessionsCreatedDuringRequest(
           sessionsAtRequestStart,
@@ -366,7 +389,7 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
         sessionLoadingProjectIdsRef.current.delete(normalizedProjectId);
       }
     },
-    [updateProjectSessionState]
+    [desktopMode, updateProjectSessionState]
   );
 
   const selectProject = useCallback(
@@ -389,6 +412,11 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
     },
     [EventEmitter, updateExpandedProjectIds, updateProjectScopeId]
   );
+
+  useEffect(() => {
+    if (!desktopMode) return;
+    void fetchProjectSessions(DESKTOP_UNASSIGNED_SESSION_SCOPE);
+  }, [desktopMode, fetchProjectSessions]);
 
   useEffect(() => {
     if (initializedProjectRef.current || !projects.length) return;
@@ -433,7 +461,7 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
       });
     };
     const handleProjectSessionPending = (payload: ProjectSessionRefreshPayload) => {
-      const projectId = normalizeProjectId(payload?.projectId);
+      const projectId = normalizeProjectId(payload?.projectId) || (desktopMode ? DESKTOP_UNASSIGNED_SESSION_SCOPE : '');
       const clientRequestId = `${payload?.clientRequestId || ''}`.trim();
       if (!projectId || !clientRequestId) return;
 
@@ -458,7 +486,7 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
       });
     };
     const handleProjectSessionRefresh = (payload: ProjectSessionRefreshPayload) => {
-      const projectId = normalizeProjectId(payload?.projectId);
+      const projectId = normalizeProjectId(payload?.projectId) || (desktopMode ? DESKTOP_UNASSIGNED_SESSION_SCOPE : '');
       if (!projectId) return;
 
       const currentState = sessionStateMapRef.current[projectId] || createEmptySessionState();
@@ -466,7 +494,7 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
         const normalizedSession = normalizeProjectSession(payload.session, projectId);
         if (!normalizedSession.sessionId) {
           updateProjectSessionState(projectId, { loaded: false });
-          if (expandedProjectIdsRef.current.has(projectId)) {
+          if (projectId === DESKTOP_UNASSIGNED_SESSION_SCOPE || expandedProjectIdsRef.current.has(projectId)) {
             void fetchProjectSessions(projectId, { force: true });
           }
           return;
@@ -492,7 +520,7 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
       }
 
       updateProjectSessionState(projectId, { loaded: false });
-      if (expandedProjectIdsRef.current.has(projectId)) {
+      if (projectId === DESKTOP_UNASSIGNED_SESSION_SCOPE || expandedProjectIdsRef.current.has(projectId)) {
         void fetchProjectSessions(projectId, { force: true });
       }
     };
@@ -505,7 +533,15 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
       EventEmitter.off('projectSpace-session-pending', handleProjectSessionPending);
       EventEmitter.off('projectSpace-session-bound', handleProjectSessionRefresh);
     };
-  }, [EventEmitter, fetchProjectSessions, fetchProjects, intl, updateExpandedProjectIds, updateProjectSessionState]);
+  }, [
+    EventEmitter,
+    desktopMode,
+    fetchProjectSessions,
+    fetchProjects,
+    intl,
+    updateExpandedProjectIds,
+    updateProjectSessionState,
+  ]);
 
   const activeProject = useMemo(
     () => projects.find((project) => normalizeProjectId(project.projectId) === projectScopeId),
@@ -541,13 +577,19 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
   }, [activeProject, clearDetailPanel, navigate, setAgentId, setSessionId]);
 
   const handleOpenSession = useCallback(
-    (project: ProjectSpace, session: ProjectSession) => {
-      const projectId = normalizeProjectId(project.projectId);
-      if (!projectId || !session.sessionId) return;
+    (project: ProjectSpace | undefined, session: ProjectSession) => {
+      const projectId = normalizeProjectId(project?.projectId);
+      if (!session.sessionId) return;
 
       clearDetailPanel?.();
       clearEasyConfirmInputDraft(session.sessionId);
-      selectProject(project, false);
+      if (project) {
+        selectProject(project, false);
+      } else {
+        // 无项目本地会话不能继承上一次选中的项目，否则后续消息会错误绑定工作目录。
+        updateProjectScopeId();
+        EventEmitter.emit('projectSpace-active-project-change', {});
+      }
 
       if (Array.isArray(session.sessionExts) && session.sessionExts.length > 0) {
         dispatch({
@@ -566,7 +608,7 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
         ...session,
         sessionId: `${session.sessionId}`,
         sessionName: session.sessionName || intl.formatMessage({ id: 'workspaceSider.newSession' }),
-        projectId,
+        projectId: projectId || undefined,
         objectId: session.objectId,
         objectType: session.objectType,
       };
@@ -578,15 +620,23 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
       navigate('/chat', {
         state: {
           keepSiderActiveKey: 'sessions',
-          from: 'projectSpace',
-          projectId,
-          projectName: project.projectName,
+          ...(project ? { from: 'projectSpace', projectId, projectName: project.projectName } : {}),
           selectedAgentId: session.objectId,
           selectedAgentObjectType: session.objectType,
         },
       });
     },
-    [clearDetailPanel, dispatch, intl, navigate, selectProject, setAgentId, setSessionId]
+    [
+      EventEmitter,
+      clearDetailPanel,
+      dispatch,
+      intl,
+      navigate,
+      selectProject,
+      setAgentId,
+      setSessionId,
+      updateProjectScopeId,
+    ]
   );
 
   const handleProjectExpandToggle = useCallback(
@@ -611,6 +661,17 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
     },
     [fetchProjectSessions, updateExpandedProjectIds]
   );
+
+  const handleDesktopTaskToggle = useCallback(() => {
+    const isExpanded = expandedProjectIdsRef.current.has(DESKTOP_UNASSIGNED_SESSION_SCOPE);
+    updateExpandedProjectIds((currentIds) => {
+      const nextIds = new Set(currentIds);
+      if (isExpanded) nextIds.delete(DESKTOP_UNASSIGNED_SESSION_SCOPE);
+      else nextIds.add(DESKTOP_UNASSIGNED_SESSION_SCOPE);
+      return nextIds;
+    });
+    if (!isExpanded) void fetchProjectSessions(DESKTOP_UNASSIGNED_SESSION_SCOPE);
+  }, [fetchProjectSessions, updateExpandedProjectIds]);
 
   const handleProjectClick = useCallback(
     (project: ProjectSpace) => {
@@ -686,15 +747,15 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
     [sessionId, setAgentId, setSessionId, updateProjectSessionState]
   );
 
-  const renderProjectSessions = (project: ProjectSpace) => {
-    const projectId = normalizeProjectId(project.projectId);
-    const sessionState = sessionStateMap[projectId] || createEmptySessionState();
+  const renderProjectSessions = (project?: ProjectSpace) => {
+    const sessionScope = project ? normalizeProjectId(project.projectId) : DESKTOP_UNASSIGNED_SESSION_SCOPE;
+    const sessionState = sessionStateMap[sessionScope] || createEmptySessionState();
     const hasMoreSessions = sessionState.loaded && sessionState.total > sessionState.sessions.length;
     const canCollapseSessions =
       sessionState.loaded && !hasMoreSessions && sessionState.sessions.length > PROJECT_SESSION_PAGE_SIZE;
 
     const handleCollapseSessions = () => {
-      updateProjectSessionState(projectId, {
+      updateProjectSessionState(sessionScope, {
         sessions: sessionState.sessions.slice(0, PROJECT_SESSION_PAGE_SIZE),
         pageNum: 1,
       });
@@ -712,7 +773,7 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
         {sessionState.error && !sessionState.sessions.length && (
           <div className={styles.sessionFeedback}>
             <span>{intl.formatMessage({ id: 'workspaceSider.sessionLoadFailed' })}</span>
-            <button type="button" onClick={() => void fetchProjectSessions(projectId, { force: true })}>
+            <button type="button" onClick={() => void fetchProjectSessions(sessionScope, { force: true })}>
               <ReloadOutlined />
               {intl.formatMessage({ id: 'workspaceSider.retry' })}
             </button>
@@ -749,8 +810,8 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
             </button>
             <WorkspaceSessionActions
               session={session}
-              onEdited={(sessionName) => handleSessionEdited(projectId, session, sessionName)}
-              onDeleted={() => handleSessionDeleted(projectId, session)}
+              onEdited={(sessionName) => handleSessionEdited(sessionScope, session, sessionName)}
+              onDeleted={() => handleSessionDeleted(sessionScope, session)}
             />
           </div>
         ))}
@@ -761,7 +822,7 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
               type="button"
               className={styles.loadMoreSessions}
               disabled={sessionState.loadingMore}
-              onClick={() => void fetchProjectSessions(projectId, { append: true })}
+              onClick={() => void fetchProjectSessions(sessionScope, { append: true })}
             >
               {sessionState.loadingMore ? <LoadingOutlined spin /> : null}
               {intl.formatMessage({ id: 'workspaceSider.loadMore' })}
@@ -892,6 +953,33 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
               </div>
             );
           })}
+          {hasDesktopTaskSessions(desktopMode, sessionStateMap[DESKTOP_UNASSIGNED_SESSION_SCOPE]) && (
+            <div
+              className={styles.projectItem}
+              role="treeitem"
+              aria-expanded={expandedProjectIds.has(DESKTOP_UNASSIGNED_SESSION_SCOPE)}
+            >
+              <div className={styles.projectRow}>
+                <button type="button" className={styles.projectButton} onClick={handleDesktopTaskToggle}>
+                  <ShareAltOutlined className={styles.projectIcon} aria-hidden="true" />
+                  <span className={styles.projectName}>{intl.formatMessage({ id: 'workspaceSider.tasks' })}</span>
+                </button>
+                <button
+                  type="button"
+                  className={styles.projectExpandButton}
+                  aria-label={intl.formatMessage({
+                    id: expandedProjectIds.has(DESKTOP_UNASSIGNED_SESSION_SCOPE)
+                      ? 'workspaceSider.collapseProject'
+                      : 'workspaceSider.expandProject',
+                  })}
+                  onClick={handleDesktopTaskToggle}
+                >
+                  {expandedProjectIds.has(DESKTOP_UNASSIGNED_SESSION_SCOPE) ? <DownOutlined /> : <RightOutlined />}
+                </button>
+              </div>
+              {expandedProjectIds.has(DESKTOP_UNASSIGNED_SESSION_SCOPE) && renderProjectSessions()}
+            </div>
+          )}
         </div>
       </section>
       <WorkspaceUserBar />

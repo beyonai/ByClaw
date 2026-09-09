@@ -57,7 +57,11 @@ function activeRun(session) {
   return session?.task?.publicCollectRun || null;
 }
 
-function hasBusinessArtifacts(session) {
+/**
+ * public-collect 的「新鲜度」判定。retighten 必须复用本函数而非重新实现：
+ * 只有两者用同一谓词，retighten 才能保证「报告成功」等价于「public-collect 真的能开跑」。
+ */
+export function hasBusinessArtifacts(session) {
   const gate = session?.task?.discoveryGate;
   const inventory = session?.collection?.collection?.items;
   return Boolean(

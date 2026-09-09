@@ -86,6 +86,11 @@ export default [
             name: 'managerNotification',
             component: './manager/pages/NotificationMgr',
           },
+          {
+            path: '/manager/admin-console',
+            name: 'managerAdminConsole',
+            component: './manager/pages/AdminConsole',
+          },
         ],
       },
       {

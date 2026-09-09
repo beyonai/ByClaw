@@ -25,7 +25,8 @@ python3 <project-cloud-knowledge目录>/scripts/project_cloud_knowledge.py entit
   --resource-id RESOURCE_ID \
   --file-path /产品资料/a.md \
   --max-entities 12 \
-  --extra-params-json '{"requestSource":"manual"}'
+  --tag organization \
+  --tag ai
 ```
 
 实体发现支持三种范围：
@@ -35,6 +36,8 @@ python3 <project-cloud-knowledge目录>/scripts/project_cloud_knowledge.py entit
 - 两者都省略时扫描整库中的合格原始文档。
 
 `--file-path` 与 `--directory-path` 不能同时传入。任何范围都不要把 `/KnowledgeEntity` 下的文件作为发现输入。
+
+`--tag TAG` 中的 `TAG` 是要追加到 KnowledgeEntity 的 `tags` 属性中的一个字符串元素。每个标签重复传入一次 `--tag`；上例会把 `organization` 和 `ai` 作为两个元素追加到本次创建或锚定实体的 `tags` 列表，不会创建名为 `organization` 或 `ai` 的属性，也不会给被扫描的原始文档加标签。已有标签保持原顺序，新标签按参数顺序追加，重复值不会重复写入；不传 `--tag` 等价于不修改 `tags`。携带标签时，后端只会复用已经覆盖这些标签的运行中任务，且不会复用历史已完成任务，以确保标签实际生效。
 
 指定目录示例：
 

@@ -76,6 +76,11 @@ public class DigitalEmployeeQo extends AuthQo {
     private String defaultSuperAssistantResourceCode;
 
     /**
+     * 安装目标查询时用于判断数字员工是否已经安装指定资源。
+     */
+    private Long relResourceId;
+
+    /**
      * 资源发布类型：publish-公开发布，private-私有。
      * 给知识前端的通用查询入口使用；当前端不传时，默认按 publish 查询。
      */
@@ -92,6 +97,9 @@ public class DigitalEmployeeQo extends AuthQo {
 
     /** 当前用户是否拥有全局资源管理权限。 */
     private Boolean memberCandidateGlobalManager;
+
+    /** 当前用户是否为安装目标查询专用的 adminvip 超级管理员。 */
+    private Boolean installTargetAdminVip;
 
     /** 允许加入数字员工组的数字员工类型。 */
     private Collection<String> memberCandidateAgentTypes;

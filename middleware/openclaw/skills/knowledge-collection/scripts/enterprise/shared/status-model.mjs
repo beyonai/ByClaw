@@ -2,7 +2,11 @@ export const SOURCE_IDENTITY = {
   dingtalk: { connector: 'dws', source: 'dws', backend: 'dws', sourceSkill: 'dws' },
   feishu: { connector: 'fws', source: 'fws', backend: 'lark-cli', sourceSkill: 'fws' },
   wecom: { connector: 'wecom', source: 'wecom', backend: 'wecom-cli', sourceSkill: 'wecomcli' },
-  ima: { connector: 'ima', source: 'ima', backend: 'ima', sourceSkill: 'ima-skill' },
+  ima: { connector: 'ima', source: 'ima', backend: 'bycli', sourceSkill: 'bycli' },
+  'cloud-knowledge': {
+    connector: 'cloud-knowledge', source: 'cloud-knowledge',
+    backend: 'project-cloud-knowledge', sourceSkill: 'project-cloud-knowledge',
+  },
 };
 
 export const CONTENT_GRANULARITIES = new Set(['full-text', 'excerpt', 'abstract', 'unknown']);

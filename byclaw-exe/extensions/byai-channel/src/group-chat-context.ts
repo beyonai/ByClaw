@@ -18,6 +18,27 @@ type LoggerLike = {
   info?: (message: string) => void;
 };
 
+function abortError(signal: AbortSignal): Error {
+  return signal.reason instanceof Error
+    ? signal.reason
+    : new Error(String(signal.reason || "task cancelled"));
+}
+
+async function awaitWithAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) throw abortError(signal);
+  let onAbort: (() => void) | undefined;
+  const cancelled = new Promise<never>((_resolve, reject) => {
+    onAbort = () => reject(abortError(signal));
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+  try {
+    return await Promise.race([promise, cancelled]);
+  } finally {
+    if (onAbort) signal.removeEventListener("abort", onAbort);
+  }
+}
+
 export interface GroupChatRefV1 {
   schemaVersion: typeof GROUP_CHAT_REF_SCHEMA_VERSION;
   conversationKey: string;
@@ -199,7 +220,7 @@ export class ByclawBeGroupChatContextProvider implements GroupChatContextProvide
     beyondToken: string;
     signal?: AbortSignal;
   }): Promise<GroupChatContextV1> {
-    const baseUrl = await this.#endpointResolver.resolve();
+    const baseUrl = await awaitWithAbort(this.#endpointResolver.resolve(), input.signal);
     if (!baseUrl) {
       throw new ByclawBeGroupChatContextError("ByClaw BE group chat endpoint is unavailable");
     }
@@ -329,12 +350,15 @@ export async function loadGroupChatContextForAgent(input: {
   }
 
   try {
-    const context = await (input.provider ?? defaultGroupChatContextProvider).load({
-      conversationKey: reference.conversationKey,
-      beforeMessageId: reference.beforeMessageId,
-      beyondToken,
-      ...(input.signal ? { signal: input.signal } : {}),
-    });
+    const context = await awaitWithAbort(
+      (input.provider ?? defaultGroupChatContextProvider).load({
+        conversationKey: reference.conversationKey,
+        beforeMessageId: reference.beforeMessageId,
+        beyondToken,
+        ...(input.signal ? { signal: input.signal } : {}),
+      }),
+      input.signal,
+    );
     const filtered = excludeCurrentAgentFromGroupChatContext(context, {
       agentIds: input.currentAgentIds,
       agentNames: input.currentAgentNames,
@@ -344,6 +368,9 @@ export async function loadGroupChatContextForAgent(input: {
     );
     return filtered;
   } catch (error) {
+    if (input.signal?.aborted) {
+      throw abortError(input.signal);
+    }
     warnGroupChatUnavailable(input.logger, reference, input.sessionId, error, {
       targetAgentId,
       elapsedMs: Date.now() - startedAt,

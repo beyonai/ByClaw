@@ -39,6 +39,11 @@ public class AuthDigitEmployVo {
     private String ownerType;
 
     /**
+     * 资源状态
+     */
+    private Integer resourceStatus;
+
+    /**
      * 智能体类型。
      */
     private String agentType;

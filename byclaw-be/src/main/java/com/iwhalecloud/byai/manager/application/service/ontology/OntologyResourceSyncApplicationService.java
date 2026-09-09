@@ -224,7 +224,7 @@ public class OntologyResourceSyncApplicationService {
         resource.setResourceType(RESOURCE_TYPE_ATOM);
         resource.setSystemCode(StringUtils.trim(request.getSystemCode()));
         resource.setOwnerType(resolveOwnerType(request, parent));
-        resource.setResourceStatus(ResourceStatus.LIST.getNum());
+        resource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         resource.setResourceVersionId("1.0");
         resource.setParentResourceId(parent == null ? ROOT_PARENT_ID : parent.getResourceId());
         resource.setHostType("local");
@@ -241,7 +241,7 @@ public class OntologyResourceSyncApplicationService {
         resource.setResourceName(resolveName(request, bizType, resourceCode));
         resource.setResourceDesc(resolveDesc(request));
         resource.setOwnerType(resolveOwnerType(request, parent));
-        resource.setResourceStatus(ResourceStatus.LIST.getNum());
+        resource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         resource.setParentResourceId(parent == null ? ROOT_PARENT_ID : parent.getResourceId());
         resource.setSystemCode(StringUtils.trim(request.getSystemCode()));
         resource.setResourceType(RESOURCE_TYPE_ATOM);

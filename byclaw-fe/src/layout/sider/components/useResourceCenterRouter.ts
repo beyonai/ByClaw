@@ -11,6 +11,16 @@ interface StoredReturnLocation {
 interface CenterRouterState {
   preserveDetailPanel?: boolean;
   resourceCenterReturnLocation?: StoredReturnLocation;
+  resourceInstallContext?: {
+    source: 'currentEmployee';
+    digitalEmployeeId?: string;
+    digitalEmployeeName?: string;
+  };
+}
+
+interface ResourceCenterEmployeeContext {
+  resourceId?: string;
+  name?: string;
 }
 
 const getReusableReturnState = (value: unknown) => {
@@ -20,6 +30,7 @@ const getReusableReturnState = (value: unknown) => {
   delete returnState.selectedAgentId;
   delete returnState.selectedAgentObjectType;
   delete returnState.resourceCenterReturnLocation;
+  delete returnState.resourceInstallContext;
   // 自动发送和员工初始化只应在首次进入会话时执行，返回中心页前的会话时不能再次触发。
   return returnState;
 };
@@ -27,7 +38,12 @@ const getReusableReturnState = (value: unknown) => {
 /**
  * 统一处理右侧资源面板的中心页入口：首次点击打开中心页，再次点击返回原会话，保留资源小面板。
  */
-export const useResourceCenterRouter = (centerPath: string, siderKey: string, showRouter: boolean) => {
+export const useResourceCenterRouter = (
+  centerPath: string,
+  siderKey: string,
+  showRouter: boolean,
+  employee?: ResourceCenterEmployeeContext
+) => {
   const navigate = useNavigate();
   const location = useLocation();
   const state = (location.state || {}) as CenterRouterState;
@@ -71,10 +87,19 @@ export const useResourceCenterRouter = (centerPath: string, siderKey: string, sh
       hash: location.hash,
       state: getReusableReturnState(location.state),
     };
+    let resourceInstallContext: CenterRouterState['resourceInstallContext'];
+    if (employee) {
+      resourceInstallContext = {
+        source: 'currentEmployee',
+        digitalEmployeeId: employee.resourceId ? `${employee.resourceId}` : undefined,
+        digitalEmployeeName: employee.name || (employee.resourceId ? `${employee.resourceId}` : undefined),
+      };
+    }
     navigate(centerPath, {
       state: {
         preserveDetailPanel: true,
         resourceCenterReturnLocation: returnLocation,
+        ...(resourceInstallContext ? { resourceInstallContext } : {}),
       },
     });
   }, [
@@ -85,6 +110,8 @@ export const useResourceCenterRouter = (centerPath: string, siderKey: string, sh
     location.search,
     location.state,
     navigate,
+    employee?.name,
+    employee?.resourceId,
     showRouter,
     siderKey,
     storedReturnLocation,

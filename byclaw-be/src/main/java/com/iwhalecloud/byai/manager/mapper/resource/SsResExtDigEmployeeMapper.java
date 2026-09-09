@@ -9,6 +9,7 @@ import com.iwhalecloud.byai.manager.qo.resource.DigitalEmployeeQo;
 import com.iwhalecloud.byai.manager.vo.resource.DigitalEmployeePageVo;
 import com.iwhalecloud.byai.manager.vo.resource.DigitalEmployeeVo;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDetailsDTO;
+import com.iwhalecloud.byai.manager.vo.digitemploy.DigitalEmployeeInstallTargetVo;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import java.util.Collection;
@@ -35,6 +36,11 @@ public interface SsResExtDigEmployeeMapper extends BaseMapper<SsResExtDigEmploye
      * @return 数字员工组成员候选
      */
     List<EmployeeGroupMemberDTO> selectEmployeeGroupMemberCandidates(DigitalEmployeeQo digitalEmployeeQo);
+
+    /**
+     * 分页查询当前用户可管理的个人及企业数字员工，供资源安装时选择。
+     */
+    List<DigitalEmployeeInstallTargetVo> selectInstallTargetEmployees(DigitalEmployeeQo digitalEmployeeQo);
 
     /**
      * 查询个人归属数字员工列表。

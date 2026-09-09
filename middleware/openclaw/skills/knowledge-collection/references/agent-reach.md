@@ -4,7 +4,7 @@
 任何一次公共互联网取内容前，必须先按本文选定来源执行器，再委派该执行器；**采集编排器自身永不取内容**。
 
 角色固定为：采集编排器 `knowledge-collection`（本技能，含本路由层）、网站执行器 `bycli`、
-企业来源执行器 `dws` / `fws` / `wecomcli` / `ima`、直接查询所有者（根 Agent）。
+企业来源执行器 `dws` / `fws` / `wecomcli` / `bycli ima` adapter、直接查询所有者（根 Agent）。
 路由层只选择执行器并接收其返回结果，持久化、产物契约与采集交付归采集编排器。
 来源执行器不得启动任何下游动作，也不得反向加载 `knowledge-collection`。
 
@@ -19,17 +19,19 @@
 node scripts/knowledge-collection.mjs acquire-web --session-dir <dir> --item-id <item-id> --source-url <URL>
 ```
 
+底层 byCLI 网页读取接口（仅由获准执行器在采集会话内调用）为 `bycli web read --url <URL> --stdout`；根 Agent 和来源 Agent 不得直接调用它绕过 `acquire-web`，也不得以 `web_fetch` 或其他 HTTP 客户端替代。
+
 不得预读、探测，也不得回退到 fetcher、reader proxy、直连 HTTP 客户端、旧适配器、通用浏览器或其他网页工具；
 不得使用 `web_fetch`、`curl`、`wget`、`requests`。**byCLI 无法完成时必须停止并报告，不得回退到其他网页获取工具。**
 已经用直连拿到内容时该结果作废，按规范流程重新采集。
 
-`knowledge-collection public-discover` 只负责公共发现、候选授权和证据落盘。WSA 的 passage/content 是搜索摘要级发现证据，不保证目标 URL 是正文页，也不保证不会返回登录、注册、验证、错误或导航页面。明确要求数量的文章任务必须改用 `knowledge-collection public-collect`，由它独占两轮发现、正文探测、验证、去重、晋升与数量闭环；不得手工串联原子命令模拟。SearXNG 无候选或输出无效时，不得手工执行 `bycli <site> search`、使用模型记忆中的 URL/DOI/论文 ID，或调用独立搜索器补结果。
+`knowledge-collection public-discover` 只负责公共发现、候选授权和证据落盘。WSA 的 passage/content 是搜索摘要级发现证据，不保证目标 URL 是正文页，也不保证不会返回登录、注册、验证、错误或导航页面。明确要求数量的文章任务必须改用 `knowledge-collection public-collect`，由它独占两轮发现、正文探测、验证、去重、晋升与数量闭环；不得手工串联原子命令模拟。未指定数量的文章任务默认由 `unified-search` 同时检索公共互联网与当前项目云盘，再由 `unified-materialize` 物化选中的正文。SearXNG 无候选或输出无效时，不得手工执行 `bycli <site> search`、使用模型记忆中的 URL/DOI/论文 ID，或调用独立搜索器补结果。
 
 `public-collect` 的自动正文 probe 支持三类来源：普通 HTTP(S) 文章页、微信文章和 arXiv 论文。微信候选进入专用正文净化与结构验证，arXiv 候选只使用已登记的同论文官方 HTML 表示并执行论文结构验证；视频、社交平台和 RSS 等尚无专用 verifier 的候选会明确记为 `unsupported`，不会计入 requested count。每个 query 必须先运行 online-search 并验证其候选，仍缺正文时才运行同一 query 的 hot-discovery；阻塞恢复必须回到原 query 和原 channel。遇到真实登录、MFA 或 CAPTCHA 时按 run ID 恢复或跳过；不得创建平行会话继续写入。
 
 本文件下列原子来源命令仅适用于未由 `public-collect` 持有的 operator 会话。`public-collect` 持有的会话只能调用编排器内部 verifier；根 Agent、路由层和来源执行器均不得对该会话手工执行表格或后文中的 `acquire-web`、`materialize-*`、`collect`、`crawl-*` 命令。
 
-用户明确只要候选链接时，即使用户指定了链接数量，也使用 `public-discover`。用户要求文章、正文或全文时，“文章”按完整正文处理，改用 `public-collect`，并在首次 `init` 传 `--workflow public-collect`。直链无独立检索主题时，`--query` 与 `--fallback-query` 都复用首次 `init` 的原始任务描述。
+用户明确只要候选链接时，即使用户指定了链接数量，也使用 `public-discover`。用户要求文章、正文或全文但未指定数量时，默认使用 `unified-search` 并行检索公共互联网与当前项目云盘；调用前将可信 `<project_context>` 的 `project_id` 传给 `project-context basic`，再把返回的 `project.cloudResourceId` 传给首次 `init --cloud-resource-id`（CLI 自动生成根目录授权 scope），随后调用 `unified-search --project-id`，不要手工拼接 scope JSON。用户明确指定数量时（如“一篇”“5 篇”“至少 10 篇”），使用 `public-collect`，仅检索公共互联网，并在首次 `init` 传 `--workflow public-collect`。用户明确限定来源时服从限定，不自动扩展来源。直链无独立检索主题时，`--query` 与 `--fallback-query` 都复用首次 `init` 的原始任务描述。
 
 ## 路由表
 
@@ -149,16 +151,18 @@ provider 诊断只是被动信息，不能替代企业业务 Skills。
 ## 企业来源不走本路由层
 
 企业来源（钉钉/飞书/企微/IMA）的采集、归档或批量搜索按 SKILL.md「来源路由」节加载
-`dws` / `fws` / `wecomcli` / `ima-skill`，不得作为公共互联网任务交给 `bycli`。
+`dws` / `fws` / `wecomcli` / 对应来源 reference，不得作为公共互联网任务走本路由层。
 
-IMA 企业渠道的命令面由 `ima-skill` 提供：
+IMA 企业渠道统一使用浏览器支持的 byCLI IMA adapter：
 
 ```bash
-ima auth check --test --json
-ima note search --content "<query>" --json
+bycli ima knowledge-list -f json
+bycli ima knowledge "<knowledgeBase>" -f json
 ```
 
-IMA 只允许通过 CLI 访问；认证失败时停止并提示重新连接，不得回退到 `bycli` 或直接 HTTP。采集编排器不执行 IMA 写操作。
+指定知识库时直接读取该库；未指定时先枚举知识库再逐库读取，并按
+[sources/ima.md](sources/ima.md) 在本地筛选、去重和记录部分失败。登录或 bridge 不可用时按 collection Runner 的
+结构化状态停止，不得回退到独立 IMA 命令或直接 HTTP。采集编排器不执行 IMA 写操作。
 
 ---
 

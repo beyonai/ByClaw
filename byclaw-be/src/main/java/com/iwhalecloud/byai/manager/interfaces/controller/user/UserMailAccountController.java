@@ -5,6 +5,7 @@ import java.util.List;
 import com.iwhalecloud.byai.manager.application.service.user.UserMailAccountApplicationService;
 import com.iwhalecloud.byai.manager.dto.users.UserMailAccountDTO;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
+import com.iwhalecloud.byai.manager.vo.users.MailProviderVO;
 import com.iwhalecloud.byai.manager.vo.users.UserMailAccountVO;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -28,6 +29,11 @@ public class UserMailAccountController {
     @GetMapping("/list")
     public ResponseUtil<List<UserMailAccountVO>> list() {
         return ResponseUtil.successResponse("邮箱账号查询成功", userMailAccountApplicationService.list());
+    }
+
+    @GetMapping("/providers")
+    public ResponseUtil<List<MailProviderVO>> providers() {
+        return ResponseUtil.successResponse("邮箱服务商查询成功", userMailAccountApplicationService.providers());
     }
 
     @PostMapping("/save")

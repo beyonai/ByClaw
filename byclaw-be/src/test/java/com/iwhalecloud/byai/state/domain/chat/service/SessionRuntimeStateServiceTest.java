@@ -3,12 +3,22 @@ package com.iwhalecloud.byai.state.domain.chat.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
@@ -96,6 +106,93 @@ class SessionRuntimeStateServiceTest {
             runtimeEvent("test-engine", "trace-1", "running", 99L, 5L, 4L, 0L, 3000L))).isNull();
         assertThat(service.applyEvent(10L,
             runtimeEvent("test-engine", "trace-2", "running", 1L, 1L, 0L, 0L, 4000L))).isNotNull();
+    }
+
+    @Test
+    void blockedRedisWriteDoesNotDelayAnotherSessionsApplyOrCancel() throws Exception {
+        Map<String, String> storage = new ConcurrentHashMap<>();
+        CountDownLatch writing = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        when(valueOperations.get(anyString())).thenAnswer(invocation -> storage.get(invocation.getArgument(0)));
+        doAnswer(invocation -> {
+            String key = invocation.getArgument(0);
+            if (key.equals("byai:chat:session-runtime:10")) {
+                writing.countDown();
+                assertTrue(release.await(3, TimeUnit.SECONDS));
+            }
+            storage.put(key, invocation.getArgument(1));
+            return null;
+        }).when(valueOperations).set(anyString(), any(), eq(24L * 60L * 60L), eq(TimeUnit.SECONDS));
+
+        try (ExecutorService workers = Executors.newVirtualThreadPerTaskExecutor()) {
+            try {
+                var first = workers.submit(() -> service.applyEvent(10L,
+                    runtimeEvent("dsh", "trace-a", "running", 1L, 1L, 0L, 0L, 1000L)));
+                assertTrue(writing.await(1, TimeUnit.SECONDS));
+                assertThat(workers.submit(() -> service.applyEvent(20L,
+                    runtimeEvent("dsh", "trace-b", "running", 1L, 1L, 0L, 0L, 1000L)))
+                    .get(1, TimeUnit.SECONDS)).isNotNull();
+                assertThat(workers.submit(() -> service.cancel(20L)).get(1, TimeUnit.SECONDS).getStatus())
+                    .isEqualTo("cancelled");
+                release.countDown();
+                assertThat(first.get(1, TimeUnit.SECONDS)).isNotNull();
+            }
+            finally {
+                release.countDown();
+            }
+        }
+    }
+
+    @Test
+    void cancellationWaitsForSameSessionsInflightWriteAndCannotBeOverwrittenByQueuedRuntime() throws Exception {
+        Map<String, String> storage = new ConcurrentHashMap<>();
+        CountDownLatch writing = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        when(valueOperations.get(anyString())).thenAnswer(invocation -> storage.get(invocation.getArgument(0)));
+        doAnswer(invocation -> {
+            String value = invocation.getArgument(1);
+            if (JSON.parseObject(value).getString("status").equals("running")) {
+                writing.countDown();
+                assertTrue(release.await(3, TimeUnit.SECONDS));
+            }
+            storage.put(invocation.getArgument(0), value);
+            return null;
+        }).when(valueOperations).set(anyString(), any(), eq(24L * 60L * 60L), eq(TimeUnit.SECONDS));
+
+        try (ExecutorService workers = Executors.newVirtualThreadPerTaskExecutor()) {
+            try {
+                var apply = workers.submit(() -> service.applyEvent(10L,
+                    runtimeEvent("dsh", "trace-a", "running", 1L, 1L, 0L, 0L, 1000L)));
+                assertTrue(writing.await(1, TimeUnit.SECONDS));
+                var cancel = workers.submit(() -> service.cancel(10L));
+                assertThrows(TimeoutException.class, () -> cancel.get(100, TimeUnit.MILLISECONDS));
+                release.countDown();
+                assertThat(apply.get(1, TimeUnit.SECONDS)).isNotNull();
+                SessionRuntimeState cancelled = cancel.get(1, TimeUnit.SECONDS);
+                assertThat(cancelled.getStatus()).isEqualTo("cancelled");
+                assertThat(cancelled.getRevision()).isEqualTo(2L);
+                assertThat(service.applyEvent(10L,
+                    runtimeEvent("dsh", "trace-a", "running", 99L, 1L, 0L, 0L, 2000L))).isNull();
+                assertThat(service.get(10L).getStatus()).isEqualTo("cancelled");
+            }
+            finally {
+                release.countDown();
+            }
+        }
+    }
+
+    @Test
+    void failedCancellationPreservesExceptionAndReleasesItsSessionLock() throws Exception {
+        SessionRuntimeState current = state("dsh", "trace-a", "running", 1L, 1000L);
+        when(valueOperations.get("byai:chat:session-runtime:10")).thenReturn(JSON.toJSONString(current));
+        org.mockito.Mockito.doThrow(new IllegalStateException("Redis unavailable")).doNothing()
+            .when(valueOperations).set(anyString(), any(), eq(24L * 60L * 60L), eq(TimeUnit.SECONDS));
+
+        assertThrows(IllegalStateException.class, () -> service.cancel(10L));
+        try (ExecutorService workers = Executors.newVirtualThreadPerTaskExecutor()) {
+            assertThat(workers.submit(() -> service.cancel(10L)).get(1, TimeUnit.SECONDS).getStatus())
+                .isEqualTo("cancelled");
+        }
     }
 
     private SessionRuntimeState state(String source, String traceId, String status, Long revision, Long changedAt) {

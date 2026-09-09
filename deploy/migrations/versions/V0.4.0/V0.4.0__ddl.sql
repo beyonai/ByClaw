@@ -1,7 +1,6 @@
 -- V0.4.0 研发闭环·集成测试环境模块
 -- 集成测试环境:回答"在哪测/怎么连/怎么部署/用什么账号登录"。
 -- 注意:定时(cron)和执行员工不在这里,归属"独立测试数字员工"配置(需求级,一份),避免与环境重复。
-
 -- 连接器授权记录允许在连接器模板重建时保留历史数据，不能被连接器信息表的外键阻塞。
 -- 约束删除是幂等的，兼容已执行过部分迁移的环境。
 DO $$
@@ -17,26 +16,43 @@ BEGIN
     END IF;
 END
 $$;
--- OpenGauss 不支持 ADD COLUMN 的 IF NOT EXISTS 形式，统一通过信息架构表做幂等判断。
-CREATE OR REPLACE FUNCTION byai.add_column_if_missing(
-    p_schema_name TEXT,
-    p_table_name TEXT,
-    p_column_name TEXT,
-    p_column_definition TEXT
-) RETURNS VOID AS $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1
-        FROM information_schema.columns
-        WHERE table_schema = p_schema_name
-          AND table_name = p_table_name
-          AND column_name = p_column_name
-    ) THEN
-        EXECUTE 'ALTER TABLE ' || quote_ident(p_schema_name) || '.' || quote_ident(p_table_name)
-            || ' ADD COLUMN ' || quote_ident(p_column_name) || ' ' || p_column_definition;
-    END IF;
-END;
-$$ LANGUAGE plpgsql;
+-- 邮箱提供商和托管凭据字段兼容存量表；先补列，再执行回填和索引创建。
+ALTER TABLE byai.po_user_mail_account ADD COLUMN provider_code VARCHAR(64);
+ALTER TABLE byai.po_user_mail_account ADD COLUMN auth_type VARCHAR(32);
+ALTER TABLE byai.po_user_mail_account ADD COLUMN credential_ref VARCHAR(200);
+ALTER TABLE byai.po_user_mail_account ADD COLUMN connector_id BIGINT;
+
+-- 允许 OAuth2 等无需 IMAP/SMTP 参数的提供商账号。
+ALTER TABLE byai.po_user_mail_account
+    ALTER COLUMN imap_host DROP NOT NULL,
+    ALTER COLUMN imap_port DROP NOT NULL,
+    ALTER COLUMN smtp_host DROP NOT NULL,
+    ALTER COLUMN smtp_port DROP NOT NULL;
+
+-- 存量未删除记录均为自定义 IMAP + 应用专用密码配置。
+UPDATE byai.po_user_mail_account
+SET provider_code = COALESCE(provider_code, 'custom-imap'),
+    auth_type = COALESCE(auth_type, 'APP_PASSWORD')
+WHERE delete_flag = '0'
+  AND (provider_code IS NULL OR auth_type IS NULL);
+
+ALTER TABLE byai.po_user_mail_account
+    ALTER COLUMN provider_code SET DEFAULT 'custom-imap',
+    ALTER COLUMN auth_type SET DEFAULT 'APP_PASSWORD';
+
+CREATE INDEX IF NOT EXISTS idx_po_user_mail_account_user_provider
+    ON byai.po_user_mail_account (user_id, provider_code, delete_flag);
+
+CREATE INDEX IF NOT EXISTS idx_po_user_mail_account_credential_ref
+    ON byai.po_user_mail_account (credential_ref)
+    WHERE credential_ref IS NOT NULL AND delete_flag = '0';
+
+CREATE INDEX IF NOT EXISTS idx_po_user_mail_account_connector
+    ON byai.po_user_mail_account (user_id, connector_id, delete_flag);
+
+COMMENT ON COLUMN byai.po_user_mail_account.provider_code IS '邮箱提供商路由编码，如 custom-imap、gmail、microsoft';
+COMMENT ON COLUMN byai.po_user_mail_account.auth_type IS '邮箱认证方式，如 APP_PASSWORD、OAUTH2';
+COMMENT ON COLUMN byai.po_user_mail_account.credential_ref IS '托管凭证引用，不存储明文密码或令牌';
 
 CREATE TABLE IF NOT EXISTS byai.byai_integration_env (
     env_id              BIGINT          NOT NULL,
@@ -243,9 +259,9 @@ CREATE INDEX IF NOT EXISTS idx_integration_run_step_run ON byai.byai_integration
 -- 运营需求复用扫描源主表，source_type=collect/publish/analyze 时表示运营需求。
 -- 研发渠道仍使用原有类型和字段，新增列均允许为空，不改变钉钉、GitHub 扫描逻辑。
 ALTER TABLE byai.byai_scan_source ALTER COLUMN source_name TYPE VARCHAR(500);
-SELECT byai.add_column_if_missing('byai', 'byai_scan_source', 'source_description', 'TEXT');
-SELECT byai.add_column_if_missing('byai', 'byai_scan_source', 'assignee', 'BIGINT');
-SELECT byai.add_column_if_missing('byai', 'byai_scan_source', 'due_time', 'TIMESTAMP');
+ALTER TABLE byai.byai_scan_source ADD COLUMN source_description TEXT;
+ALTER TABLE byai.byai_scan_source ADD COLUMN assignee BIGINT;
+ALTER TABLE byai.byai_scan_source ADD COLUMN due_time TIMESTAMP;
 -- chat 型自动化是应用级的，不归属任何项目，所以 project_id 必须允许为空。
 ALTER TABLE byai.byai_scan_source ALTER COLUMN project_id DROP NOT NULL;
 
@@ -516,23 +532,17 @@ CREATE INDEX IF NOT EXISTS idx_scan_item_task_session ON byai.byai_scan_item_tas
 
 -- 仓库区分工作区与代码仓库:研发项目须有且仅有一个 workspace 仓库承载项目上下文/产出,其余为 code 代码仓库。
 -- 存量行默认 code;工作区先行由应用层保证,DB 仅存类型不强约束唯一,避免历史数据迁移期写入失败。
-SELECT byai.add_column_if_missing(
-    'byai', 'byai_project_repo', 'repo_type',
-    'VARCHAR(16) NOT NULL DEFAULT ''code'''
-);
+ALTER TABLE byai.byai_project_repo ADD COLUMN repo_type VARCHAR(16) NOT NULL DEFAULT 'code';
 COMMENT ON COLUMN byai.byai_project_repo.repo_type IS '仓库类型 workspace工作区(项目上下文/产出落点,单个)/code代码仓库(可多个)';
 
 -- 仓库代码平台:决定 clone host 与令牌注入(github->GH_TOKEN,gitlab->GL_TOKEN oauth2前缀,gitea->GITEA_TOKEN)。
 -- 存量行默认 github;自建/私有实例靠 repo_url 显式完整地址兜底,不受 host 拼接影响。
-SELECT byai.add_column_if_missing(
-    'byai', 'byai_project_repo', 'provider',
-    'VARCHAR(20) NOT NULL DEFAULT ''github'''
-);
+ALTER TABLE byai.byai_project_repo ADD COLUMN provider VARCHAR(20) NOT NULL DEFAULT 'github';
 COMMENT ON COLUMN byai.byai_project_repo.provider IS '代码平台 github/gitlab/gitea;决定 clone host 与令牌变量,存量默认 github';
 
 -- 仓库用途描述:人工填写,给后来人和大模型理解该仓库承担什么职责。
 -- 需求 AI 预拆据此判断该改哪些仓库,仅凭 owner/repo 名字猜职责经常拆错。可空,存量行为 NULL。
-SELECT byai.add_column_if_missing('byai', 'byai_project_repo', 'description', 'TEXT');
+ALTER TABLE byai.byai_project_repo ADD COLUMN description TEXT;
 COMMENT ON COLUMN byai.byai_project_repo.description IS '仓库用途描述,人工填写;供需求AI预拆判断职责归属与人工理解';
 
 -- 项目描述仍由前后端限制最多500个字符；存储改为TEXT，避免不同数据库对中文VARCHAR长度语义不一致。
@@ -540,29 +550,24 @@ ALTER TABLE byai.byai_project ALTER COLUMN description TYPE TEXT;
 COMMENT ON COLUMN byai.byai_project.description IS '项目描述,前后端限制最多500个字符';
 
 -- 研发项目工作区初始化状态:架构数字员工建成工作区前禁止建需求/启动任务。
-SELECT byai.add_column_if_missing('byai', 'byai_project', 'init_status', 'VARCHAR(16)');
+ALTER TABLE byai.byai_project ADD COLUMN init_status VARCHAR(16);
 COMMENT ON COLUMN byai.byai_project.init_status IS '研发项目初始化状态 pending待初始化/initialized工作区已建好待架构员工/initializing架构员工进行中/ready已就绪;仅 develop 未 ready 前禁用建需求与启动任务。无列默认值,应用层建项目时显式赋值';
-SELECT byai.add_column_if_missing(
-    'byai', 'byai_project', 'build_index',
-    'VARCHAR(4) NOT NULL DEFAULT ''N'''
-);
+ALTER TABLE byai.byai_project ADD COLUMN build_index VARCHAR(4) NOT NULL DEFAULT 'N';
 COMMENT ON COLUMN byai.byai_project.build_index IS '初始化是否建索引 Y建立/N不建立(默认)';
-SELECT byai.add_column_if_missing('byai', 'byai_project', 'index_skills', 'VARCHAR(512)');
+ALTER TABLE byai.byai_project ADD COLUMN index_skills VARCHAR(512);
 COMMENT ON COLUMN byai.byai_project.index_skills IS '建索引所需技能包,逗号分隔(如 trellis,superpowers)';
 -- 初始化交给架构数字员工在沙箱里做:必须记住是哪条会话,轮询才知道该读哪个任务状态文件。
-SELECT byai.add_column_if_missing('byai', 'byai_project', 'init_session_id', 'BIGINT');
+ALTER TABLE byai.byai_project ADD COLUMN init_session_id BIGINT;
 COMMENT ON COLUMN byai.byai_project.init_session_id IS '工作区初始化会话ID(架构数字员工会话);轮询按此会话读 /by/.acp-runs/sessions/<会话ID>.json 判完成。空表示尚未下发初始化';
-SELECT byai.add_column_if_missing('byai', 'byai_project', 'init_fail_reason', 'VARCHAR(500)');
+ALTER TABLE byai.byai_project ADD COLUMN init_fail_reason VARCHAR(500);
 COMMENT ON COLUMN byai.byai_project.init_fail_reason IS '上次工作区初始化失败/超时原因;重新下发初始化时清空';
 
 -- 外部平台账号的通用可检索标识。微信开放平台写入 authorizer_appid。
-SELECT byai.add_column_if_missing('byai', 'byai_connector_auth', 'external_account_id', 'VARCHAR(128)');
+ALTER TABLE byai.byai_connector_auth ADD COLUMN external_account_id VARCHAR(128);
 COMMENT ON COLUMN byai.byai_connector_auth.external_account_id IS '外部平台账号标识，可用于授权撤销事件定位；敏感资料仍保存于加密凭据';
 
 CREATE INDEX IF NOT EXISTS idx_byai_connector_auth_external_account
     ON byai.byai_connector_auth (connector_id, external_account_id, status_cd);
-
-DROP FUNCTION byai.add_column_if_missing(TEXT, TEXT, TEXT, TEXT);
 
 -- 运营任务模板只保存模板目录元数据和默认配置；用户补充的任务参数进入会话提示词，不回写系统模板。
 CREATE TABLE IF NOT EXISTS byai.byai_task_template (
@@ -933,13 +938,6 @@ CREATE INDEX callback_timeout_outbox_pending_idx
   ON byai.byai_super_callback_timeout_outbox(claim_expires_at, created_at)
   WHERE delivered_at IS NULL;
 
-INSERT INTO byai.byai_super_schema_migrations(version, name)
-SELECT 11, 'delegation_callback_deadline'
-WHERE NOT EXISTS (
-  SELECT 1
-    FROM byai.byai_super_schema_migrations
-   WHERE version = 11
-);
 
 -- v12: delegation_task_position
 ALTER TABLE byai.byai_super_delegations
@@ -949,25 +947,6 @@ ALTER TABLE byai.byai_super_delegations
   ADD CONSTRAINT delegations_task_position_positive
   CHECK (task_position IS NULL OR task_position > 0);
 
-INSERT INTO byai.byai_super_schema_migrations(version, name)
-SELECT 12, 'delegation_task_position'
-WHERE NOT EXISTS (
-  SELECT 1
-    FROM byai.byai_super_schema_migrations
-   WHERE version = 12
-);
 
--- 更新代码代理沙箱规格，确保迁移重复执行时不会保留旧配置。
-DELETE FROM "byai"."sandbox_service_spec"
- WHERE "service_key" IN ('byclaw-code-agent');
-
-INSERT INTO "byai"."sandbox_service_spec"
-    ("service_key", "spec_json", "template_json", "updated_at")
-VALUES (
-    'byclaw-code-agent',
-    '{"env": {"TZ": "Asia/Shanghai", "GH_TOKEN": "${GH_TOKEN}", "USER_CODE": "${USER_CODE}", "MODEL_NAME": "${MODEL_NAME}", "REDIS_HOST": "${REDIS_HOST}", "BEYOND_TOKEN": "${BEYOND_TOKEN}", "WEB_BASE_URL": "${WEB_BASE_URL}", "BE_DOMAINNAME": "ByaiService", "MODEL_API_KEY": "${MODEL_API_KEY}", "BYAI_WORKER_ID": "${USER_CODE}", "MODEL_BASE_URL": "${MODEL_BASE_URL}", "REDIS_PASSWORD": "${REDIS_PASSWORD}", "REDIS_USERNAME": "${REDIS_USERNAME}", "CLAUDE_AGENT_CWD": "/by/workspace", "CLAUDE_MAX_TURNS": "500", "CLAUDE_CODE_SKIP_ROOTALERT": true, "BYCLAW_SANDBOX_FILE_VOLUME_ROOT": "${BYCLAW_SANDBOX_FILE_VOLUME_ROOT}", "BYCLAW_DIGITAL_EMPLOYEE_STARTUP_TIMEOUT_SECONDS": "600"}, "image": "192.168.0.81:8080/byclaw/byclaw-code-agent:dev", "ports": [{"port": 8080, "protocol": "http"}], "startup": {"entrypoint": ["/app/entrypoint.sh"]}, "volumes": [{"gid": 1001, "key": "base", "uid": 1001, "mode": "0770", "scope": "PRIVATE", "subPath": "byclaw-${user_code}/by", "hostPath": "${BYCLAW_SANDBOX_FILE_VOLUME_ROOT}", "readOnly": false, "mountPath": "/by"}, {"gid": 1001, "uid": 1001, "mode": "0770", "scope": "PRIVATE", "subPath": "byclaw-code-agent/byclaw-${user_code}/home", "hostPath": "${BYCLAW_SANDBOX_FILE_VOLUME_ROOT}", "readOnly": false, "mountPath": "/home"}, {"gid": 1001, "uid": 1001, "mode": "0770", "scope": "PRIVATE", "subPath": ".m2", "hostPath": "${BYCLAW_SANDBOX_FILE_VOLUME_ROOT}", "readOnly": false, "mountPath": "/home/byclaw/.m2"}, {"gid": 1001, "uid": 1001, "mode": "0770", "scope": "PRIVATE", "subPath": "repos", "hostPath": "${BYCLAW_SANDBOX_FILE_VOLUME_ROOT}", "readOnly": false, "mountPath": "/by/repos"}], "resourceLimits": {"cpu": "2", "memory": "6Gi"}}',
-    '',
-    CURRENT_TIMESTAMP
-);
-COMMENT ON COLUMN byai.byai_connector_info.connector_type IS
-    '连接器类型：SYSTEM=系统内置，CUSTOM=自定义连接器，ACCOUNT_TEMPLATE=运营账号初始化模板';
+ALTER TABLE byai_project ADD COLUMN project_code VARCHAR(64);
+COMMENT ON COLUMN byai_project.project_code IS '项目编码，企业唯一业务编码';

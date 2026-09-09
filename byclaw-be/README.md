@@ -157,6 +157,101 @@ byclaw-be/
 
 ## 快速开始
 
+### 外部子会话快照恢复
+
+外部子会话按确定的 Redis key 读取快照；首次消息或快照过期时直接返回缺失，
+不执行 `KEYS` 或全库 `SCAN`。保存快照时同步登记专用 ZSET
+`byai:chat:running:external-child:index`，只有索引与快照写入均成功后才允许后续广播和 ACK。
+单机/哨兵使用 pipeline，Jedis Cluster 使用单 key 索引脚本后再保存快照，避免跨 slot 脚本和
+不受支持的 Cluster pipeline。索引保留约 31 分钟，快照仍保留 30 分钟；每次登记最多清理
+16 个过期索引项。已落库快照仍可用于重连，恢复通过已落库 Stream 水位过滤，不能直接删除
+索引项，否则旧版本落库可能误删新版本的恢复入口。
+
+启动恢复由独立的 `scoped-message-recovery` 线程执行，只遍历该索引，每批最多读取 100 个
+快照及其水位，批次间等待 100ms；落库队列有至少 100 个待处理会话时暂停补入恢复数据。
+实时消息入队不等待恢复线程，恢复数据不会替换正在排队的实时消息；恢复写入前再次核对
+已落库水位，避免覆盖本实例已经完成的新写入。
+
+这不是跨实例的版本写入协议：水位检查与数据库写入之间仍有竞态窗口，多实例同时恢复与写入
+同一消息时仍需依赖后续的分布式互斥或数据库版本条件更新；本次修复不提供跨实例写入顺序保证。
+
+**首次升级注意：**旧版本快照没有该索引，缺失索引时不会退回全库扫描。升级前应停止向旧实例
+分配新消费任务，并正常关闭、确认 write-behind 队列已排空；仍有未落库快照时应先完成落库再
+移除旧实例。旧快照的精确 key 重连读取保持可用，但不可依赖新版本启动自动发现旧的无索引积压。
+
+真实 Redis 回归测试仅连接本机一次性测试实例（测试会清空该实例数据库）：
+
+```bash
+BYCLAW_TEST_REDIS_PORT=16389 mvn -B -f byclaw-be/pom.xml \
+  -Dtest=ExternalChildSnapshotRedisTest,RunningChatSnapshotServiceTest,ScopedMessageWriteBehindTest test
+BYCLAW_TEST_REDIS_CLUSTER_PORT=16390 mvn -B -f byclaw-be/pom.xml \
+  -Dtest=ExternalChildSnapshotRedisClusterTest test
+```
+
+### 会话消费并发与背压
+
+会话事件处理使用按 session 隔离的 `ReentrantLock`，保持同一会话串行，并避免 Java 21 虚拟线程
+在持有 `synchronized` 监视器等待 I/O 时占住载体线程。启动登记和结束清理同样使用按会话的
+生命周期锁；全局上下文锁只保护内存操作，不覆盖 Redis 调用。
+
+Stream 长轮询使用独立的 `sessionStreamRedisConnectionFactory`，业务 RedisTemplate 继续使用主连接池。
+单实例监听数由 `byclaw.session-stream.max-listeners` 控制（默认 128），独立读池容量为该值加 1。
+启动和停止中的读取任务也占用名额，直到读取任务实际退出才释放；超过上限会拒绝新增监听，
+由调用方报错或后续恢复轮次重试，避免挤占业务 Redis 连接。
+
+| 配置 | 默认值 | 作用 |
+| --- | --- | --- |
+| `byclaw.session-stream.max-listeners` | 128 | 单实例长轮询并发上限 |
+| `byclaw.session-stream.batch-delay-millis` | 20 | 消费合并窗口；0 关闭合并 |
+| `byclaw.session-stream.batch-queue-capacity` | 256 | 每个 listener 的待处理缓冲上限 |
+| `byclaw.running-snapshot.write-behind-millis` | 50 | 主会话快照合并窗口 |
+
+每次最多处理 100 条消息，只合并连续且属于同一子会话、同一轮次的增量，合并后生成一次完整快照。
+每个 listener 最多缓存 256 条待处理消息，加一个最多 100 条的执行/重试批次；满时阻塞该会话的
+读取任务。这是 listener 队列上限，不等于 PEL 上限；读取容器当前批次尚未交付的记录也已进入 PEL。
+未生成持久化快照的消息保留在 Redis PEL，成功后才逐条 ACK。业务处理失败后每秒重试
+失败的后缀，后续事件等待，避免结束事件越过未持久化的增量。关闭 listener 时未处理的缓冲消息仍在 PEL；已完成持久化的执行中批次继续 ACK，
+避免 HTTP 结束事件先关闭监听而遗留已处理消息。关闭后 ACK 失败登记到恢复队列，不再启动本地重试。
+合并能减少完整投影的构建和传输次数；单次完整快照成本仍随回答长度增长。
+
+子会话 WebSocket 广播按客户端等待实际 Netty 写入完成，每个连接最多一个执行中写入；
+待发送队列仅保留同一 messageId 的最新完整投影，不同轮次分别保留，避免覆盖上一轮终态。
+默认最多 64 个待发送消息投影、64 MiB 编码后内容（含执行中帧）、单帧 8 MiB、写入期限 5 秒。
+分别通过 `byclaw.scoped-message.websocket-max-pending-contexts`、`websocket-max-retained-bytes`、
+`websocket-max-frame-bytes`、`websocket-write-timeout-millis` 配置（后三项使用相同前缀）。
+超过限制、写入超时或失败时关闭该慢客户端连接并记录日志；客户端重连后从持久化快照/历史恢复。
+该限制只作用于子会话完整投影，编码字节限制不等于 JVM 实际堆占用，也不限制其他 WebSocket 事件。
+
+活跃子会话复用本实例已加载的轮次标识；冷启动和终态之后重新读取 Redis 校验轮次。快照失败后
+丢弃尚未持久化的内存累积，重试从已持久化水位恢复。主会话快照写入使用 4 个后台线程，Redis I/O
+位于每个 key 的写锁内，消费入队只操作内存；终态写入等待旧写入结束，再覆盖为最终版本。
+
+普通快照的 messageId 查询使用有 TTL 的精确索引，session 查询只遍历该 session 的 ZSET 索引。
+`RunningChatSnapshotService` 的查询和删除均不再执行 Redis `KEYS` 或全 keyspace `SCAN`。
+旧版本未建立索引的快照仍可通过精确 trace key 读取，不能通过新索引按 messageId 自动发现。
+
+运行态扫描使用 SSCAN 加每批最多 100 条 MGET；恢复任务使用有界工作队列，按会话去重并轮转调度。
+接管时先暂停新消息读取并保留租约和并发名额，每次最多处理 100 条 PEL 消息，约 1 秒后重新排队
+处理下一批；历史消息处理完成后才放行新消息，业务失败停在失败位置重试。慢会话不会独占整个恢复线程。
+会话运行态更新和取消也使用按会话的锁，Redis I/O 不再持有全局监视器。租约续期与 running 标记刷新
+分别使用独立线程池；续期异常会停止归属不确定的本地监听，后续通过恢复流程接管。
+
+### DSH AgentTeams 沙箱活跃心跳
+
+DSH 的 `plugins/byclaw-integration` 插件按实际运行态汇总沙箱忙闲状态：父会话空闲时，仍在运行的
+AgentTeams 子 Agent 或待响应交互会继续保持 busy。插件在忙闲切换时立即上报，并每 30 秒发送
+新快照；使用至多一个正在发送的请求和一个待发送的最新快照，避免心跳积压。
+
+后端默认订阅 `byai_gateway:registry:worker:stats:dsh`，识别
+`byclaw_dsh.busy_state.redis_stats` v1 / `byclaw-dsh-busy-state` v1 消息，仅刷新该用户运行中的
+`byclaw-dsh` 沙箱的访问时间、缓存及健康状态。DSH 心跳的 `emittedAt` 和 `payload.generatedAt`
+都必须在最近 120 秒内，且不能超前服务器时间超过 30 秒；idle 不续活跃时间。
+`sandbox.running-state.dsh-topic` 可覆盖订阅主题，
+`sandbox.running-state.dsh-max-age-seconds` 可调整最大消息年龄，生产两端主题应保持一致。
+
+此修复需要同时更新 DSH 插件和后端，只有 Worker 注册心跳无法替代沙箱忙闲心跳。
+子任务结束后停止续活跃时间，沙箱按原有空闲超时规则释放；OpenClaw 心跳协议保持兼容。
+
 ### 环境要求
 
 - Java 21+

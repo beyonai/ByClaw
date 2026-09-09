@@ -13,14 +13,20 @@ import org.apache.commons.io.FilenameUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 
+import com.iwhalecloud.byai.common.constants.devloop.DeleteFlag;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.storage.UserFS;
 import com.iwhalecloud.byai.common.storage.model.FileMetadata;
 import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
+import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectMemberService;
+import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectService;
+import com.iwhalecloud.byai.manager.entity.devloop.Project;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.state.application.service.fs.FsOperationApplicationService;
 import com.iwhalecloud.byai.state.application.service.fs.FsOperationApplicationService.FsDownload;
@@ -30,9 +36,10 @@ import com.iwhalecloud.byai.state.domain.session.service.SessionMemberService;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 
 /**
- * 将回复文本中的文件路径解析为受会话权限保护的下载文件。
+ * 将回复文本中的文件路径解析为受会话可见性保护的下载文件。
  *
- * 会话目录内的文件直接使用；会话创建人自己 UserFS 中的其他文件会先归档到会话目录。
+ * 创建人、会话用户成员、项目可见成员和平台管理员可读取已归档的会话文件；只有会话创建人可以把自己
+ * UserFS 中的其他文件归档到会话目录。下载始终限制在当前会话目录内。
  *
  * @author qin.guoquan
  * @date 2026-08-18 20:00:38
@@ -52,9 +59,15 @@ public class ChatFileArtifactApplicationService {
 
     private static final String SESSION_ROOT = "/.sessions/";
 
+    private static final String ADMIN_VIP_USER_CODE = "adminvip";
+
     private final SessionService sessionService;
 
     private final SessionMemberService sessionMemberService;
+
+    private final ProjectService projectService;
+
+    private final ProjectMemberService projectMemberService;
 
     private final LoginApplicationService loginApplicationService;
 
@@ -63,10 +76,13 @@ public class ChatFileArtifactApplicationService {
     private final UserFS userFS;
 
     public ChatFileArtifactApplicationService(SessionService sessionService, SessionMemberService sessionMemberService,
+        ProjectService projectService, ProjectMemberService projectMemberService,
         LoginApplicationService loginApplicationService, FsOperationApplicationService fsOperationApplicationService,
         UserFS userFS) {
         this.sessionService = sessionService;
         this.sessionMemberService = sessionMemberService;
+        this.projectService = projectService;
+        this.projectMemberService = projectMemberService;
         this.loginApplicationService = loginApplicationService;
         this.fsOperationApplicationService = fsOperationApplicationService;
         this.userFS = userFS;
@@ -74,7 +90,7 @@ public class ChatFileArtifactApplicationService {
 
     public List<ChatFileArtifactVo> resolve(ChatFileArtifactResolveRequest request) {
         if (request == null || request.getSessionId() == null) {
-            throw new BaseException("chat.file.artifact.session.not.empty");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "chat.file.artifact.session.not.empty");
         }
         ByaiSession session = requireSessionAccess(request.getSessionId());
         if (request.getPaths() == null || request.getPaths().isEmpty()) {
@@ -82,6 +98,11 @@ public class ChatFileArtifactApplicationService {
         }
 
         String ownerUserCode = resolveSessionOwnerUserCode(session);
+        if (StringUtils.isBlank(ownerUserCode)) {
+            // 文件附件只是历史消息的增强展示；创建人账号失效时不应阻断整条历史消息。
+            LOGGER.debug("跳过无法确定会话文件所有者的解析: sessionId={}", session.getSessionId());
+            return List.of();
+        }
         LinkedHashSet<String> candidates = new LinkedHashSet<>(request.getPaths());
         List<ChatFileArtifactVo> result = new ArrayList<>();
         int processed = 0;
@@ -107,10 +128,20 @@ public class ChatFileArtifactApplicationService {
 
     public FsDownload download(Long sessionId, String path) {
         ByaiSession session = requireSessionAccess(sessionId);
-        String normalizedPath = normalizeUserPath(path);
+        String ownerUserCode = resolveSessionOwnerUserCode(session);
+        if (StringUtils.isBlank(ownerUserCode)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND,
+                "chat.file.artifact.session.owner.not.exist");
+        }
+        String normalizedPath;
+        try {
+            normalizedPath = normalizeUserPath(path);
+        }
+        catch (BaseException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
+        }
         assertBelongsToSession(normalizedPath, sessionId);
-        return fsOperationApplicationService.downloadFileAsUser(resolveSessionOwnerUserCode(session), "USER", null,
-            normalizedPath);
+        return fsOperationApplicationService.downloadFileAsUser(ownerUserCode, "USER", null, normalizedPath);
     }
 
     private ChatFileArtifactVo resolveCandidate(ByaiSession session, String ownerUserCode, String messageId,
@@ -184,19 +215,42 @@ public class ChatFileArtifactApplicationService {
     }
 
     private ByaiSession requireSessionAccess(Long sessionId) {
-        if (sessionId == null || CurrentUserHolder.getCurrentUserId() == null) {
-            throw new BaseException("chat.file.artifact.session.access.denied");
+        if (sessionId == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "chat.file.artifact.session.not.empty");
+        }
+        if (CurrentUserHolder.getLoginInfo() == null) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "chat.file.artifact.session.access.denied");
         }
         ByaiSession session = sessionService.findById(sessionId);
         if (session == null) {
-            throw new BaseException("chat.file.artifact.session.not.exist");
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "chat.file.artifact.session.not.exist");
         }
-        Long currentUserId = CurrentUserHolder.getCurrentUserId();
-        if (Objects.equals(session.getCreatorId(), currentUserId)
-            || sessionMemberService.findSessionMember(sessionId, "USER", currentUserId) != null) {
+        if (canViewSession(session)) {
             return session;
         }
-        throw new BaseException("chat.file.artifact.session.access.denied");
+        throw new ResponseStatusException(HttpStatus.FORBIDDEN, "chat.file.artifact.session.access.denied");
+    }
+
+    private boolean canViewSession(ByaiSession session) {
+        Long currentUserId = CurrentUserHolder.getCurrentUserId();
+        if (Objects.equals(session.getCreatorId(), currentUserId)
+            || CurrentUserHolder.isPlatformAdminOrOperator()
+            || ADMIN_VIP_USER_CODE.equalsIgnoreCase(CurrentUserHolder.getCurrentUserCode())
+            || sessionMemberService.findSessionMember(session.getSessionId(), "USER", currentUserId) != null) {
+            return true;
+        }
+
+        Long projectId = session.getProjectId();
+        if (projectId == null) {
+            return false;
+        }
+        Project project = projectService.findById(projectId);
+        if (project == null || DeleteFlag.DELETED.equals(project.getDeleteFlag())
+            || "default".equalsIgnoreCase(project.getProjectType())) {
+            return false;
+        }
+        return Objects.equals(project.getCreateBy(), currentUserId)
+            || projectMemberService.isMember(projectId, currentUserId);
     }
 
     private String resolveSessionOwnerUserCode(ByaiSession session) {
@@ -205,7 +259,7 @@ public class ChatFileArtifactApplicationService {
         }
         LoginInfo ownerLoginInfo = loginApplicationService.getLoginInfo(session.getCreatorId());
         if (ownerLoginInfo == null || StringUtils.isBlank(ownerLoginInfo.getUserCode())) {
-            throw new BaseException("chat.file.artifact.session.owner.not.exist");
+            return null;
         }
         return ownerLoginInfo.getUserCode();
     }
@@ -224,12 +278,15 @@ public class ChatFileArtifactApplicationService {
                 throw new BaseException("chat.file.artifact.path.invalid");
             }
         }
-        String currentUserBucketPrefix = "/" + com.iwhalecloud.byai.common.storage.util.UserBucketNameResolver
-            .buildUserBucketName(CurrentUserHolder.getCurrentUserCode()) + USER_SPACE_PREFIX;
-        if (StringUtils.startsWith(normalized, currentUserBucketPrefix + "/")) {
-            normalized = normalized.substring(currentUserBucketPrefix.length());
+        String currentUserCode = CurrentUserHolder.getCurrentUserCode();
+        if (StringUtils.isNotBlank(currentUserCode)) {
+            String currentUserBucketPrefix = "/" + com.iwhalecloud.byai.common.storage.util.UserBucketNameResolver
+                .buildUserBucketName(currentUserCode) + USER_SPACE_PREFIX;
+            if (StringUtils.startsWith(normalized, currentUserBucketPrefix + "/")) {
+                normalized = normalized.substring(currentUserBucketPrefix.length());
+            }
         }
-        else if (StringUtils.startsWith(normalized, USER_SPACE_PREFIX + "/")) {
+        if (StringUtils.startsWith(normalized, USER_SPACE_PREFIX + "/")) {
             normalized = normalized.substring(USER_SPACE_PREFIX.length());
         }
         if (StringUtils.endsWith(normalized, "/")) {
@@ -240,7 +297,8 @@ public class ChatFileArtifactApplicationService {
 
     private void assertBelongsToSession(String path, Long sessionId) {
         if (!StringUtils.startsWith(path, sessionPrefix(sessionId))) {
-            throw new BaseException("chat.file.artifact.path.not.in.session");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                "chat.file.artifact.path.not.in.session");
         }
     }
 

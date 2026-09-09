@@ -5,7 +5,12 @@ import { Badge, Button, Dropdown, Input, Menu, Modal, Popconfirm, Space, Spin, T
 import { trim, debounce } from 'lodash';
 import useGlobal from '@/hooks/useGlobal';
 import AllDigitalEmployees from './components/AllDigitalEmployees';
-import ResourceFilter, { IOnOkParams, getDefaultParams } from '@/components/Resources/components/ResourceFilter';
+import ResourceFilter, {
+  IOnOkParams,
+  getDefaultParams,
+  digitalEmployeeStatusOptions,
+} from '@/components/Resources/components/ResourceFilter';
+import { PERMISSION_AUTHORIZED_TO_ME_VALUE, PERMISSION_CREATED_BY_ME_VALUE } from '@/components/Resources/constants';
 import { getCompositeAppInfo } from '@/service/digitalEmployees';
 import { getAgentChatAvatar } from '@/utils/agent';
 import { navigateToEmployeeChat } from '@/utils/employeeChat';
@@ -20,13 +25,44 @@ import classnames from 'classnames';
 
 import styles from './index.module.less';
 
-const buildDigitalEmployeeFilterParam = (_activeTab: string, filterParam?: IOnOkParams) => ({
-  ...(filterParam?.resourceStatus === '' ? { includeAllResourceStatus: true } : {}),
-  ...(filterParam?.resourceStatus !== undefined && filterParam?.resourceStatus !== ''
-    ? { resourceStatus: filterParam.resourceStatus }
-    : {}),
-  ...(filterParam?.permission ? { permission: filterParam.permission } : {}),
-});
+const buildDigitalEmployeeFilterParam = (
+  _activeTab: string,
+  filterParam?: IOnOkParams,
+  source: 'official' | 'available' = 'available'
+) => {
+  const permission = filterParam?.permission;
+  const employeeType = filterParam?.digitalEmployeeType;
+  let type: string | undefined;
+  if (source === 'available') {
+    if (permission === PERMISSION_CREATED_BY_ME_VALUE) {
+      type = 'owner';
+    } else if (permission === PERMISSION_AUTHORIZED_TO_ME_VALUE) {
+      type = 'authorize';
+    }
+  }
+
+  const employeeTypeParams =
+    source === 'available' && employeeType
+      ? {
+        ...(employeeType.includes('PERSONAL') ? { ownerType: 'personal' } : { ownerType: 'enterprise' }),
+        ...(employeeType.includes('GROUP') ? { agentType: '017' } : { excludeEmployeeGroup: true }),
+      }
+      : {};
+
+  return {
+    // “我可用的”接口固定只查已上架；官方推荐选择“全部”时仍需查询除已删除外的全部状态。
+    ...(source === 'official' && filterParam?.resourceStatus === '' ? { includeAllResourceStatus: true } : {}),
+    // 官方推荐的“全部”不展示已删除数据；具体状态筛选仍由 resourceStatus 控制。
+    ...(source === 'official' ? { excludeDeleted: true } : {}),
+    ...(filterParam?.resourceStatus !== undefined && filterParam?.resourceStatus !== ''
+      ? { resourceStatus: filterParam.resourceStatus }
+      : {}),
+    // 我可用接口使用 type=owner/authorize；官方推荐 discover 接口使用通用 permission 枚举。
+    ...(source === 'official' && permission ? { permission } : {}),
+    ...(type ? { type } : {}),
+    ...employeeTypeParams,
+  };
+};
 
 const DigitalEmployeesPage: React.FC = () => {
   const intl = useIntl();
@@ -34,7 +70,7 @@ const DigitalEmployeesPage: React.FC = () => {
   const dispatch = useDispatch();
   const { EventEmitter, setAgentId, setSessionId } = useGlobal();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { count: auditCount } = useDigitalEmployeeAuditCount();
+  const { count: auditCount, rows: auditRows } = useDigitalEmployeeAuditCount();
 
   const [isLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<string>(() => {
@@ -42,13 +78,17 @@ const DigitalEmployeesPage: React.FC = () => {
     return tabFromUrl === 'official' ? 'official' : 'available';
   });
   const [keywords, setKeywords] = useState<Record<string, string>>({});
-  const [dropdownParam, setDropdownParam] = useState<IOnOkParams>(getDefaultParams());
-  const AvailableGroupRef = React.useRef<any>(null);
-  const AvailableEmployeeRef = React.useRef<any>(null);
-  const OfficialGroupRef = React.useRef<any>(null);
+  const defaultFilterParam = getDefaultParams();
+  const [filterParamsByTab, setFilterParamsByTab] = useState<Record<string, IOnOkParams>>({
+    available: defaultFilterParam,
+    official: defaultFilterParam,
+  });
+  // 我可用的与官方推荐都使用合并列表组件，统一分页后再按类型分块展示。
+  const AvailableRef = React.useRef<any>(null);
   const OfficialEmployeeRef = React.useRef<any>(null);
   const [preview, setPreview] = useState<any>(null);
   const [enterpriseCreateOpen, setEnterpriseCreateOpen] = useState(false);
+  const dropdownParam = filterParamsByTab[activeTab] || defaultFilterParam;
 
   const handleEmployeeChat = React.useCallback(
     (employee: any, question?: string) => {
@@ -98,8 +138,7 @@ const DigitalEmployeesPage: React.FC = () => {
 
   const getSearch = React.useCallback(
     debounce((otherParam?: any) => {
-      const refs =
-        activeTab === 'available' ? [AvailableGroupRef, AvailableEmployeeRef] : [OfficialGroupRef, OfficialEmployeeRef];
+      const refs = activeTab === 'available' ? [AvailableRef] : [OfficialEmployeeRef];
       refs.forEach((item) => item.current?.getSearch?.(keywords[activeTab] || '', otherParam || dropdownParam));
     }, 500),
     [activeTab, dropdownParam, keywords]
@@ -124,13 +163,20 @@ const DigitalEmployeesPage: React.FC = () => {
   const tabBarExtraContent = (
     <Space>
       <ResourceFilter
+        resourceType="DIG_EMPLOYEE"
+        statusOptionsOverride={digitalEmployeeStatusOptions.filter((item) => !['-1', '1'].includes(item.value))}
+        // 按一级 tab 重建筛选组件，加载该 tab 上次保存的筛选条件。
+        key={activeTab}
         onOk={(param: any) => {
-          setDropdownParam(param);
+          setFilterParamsByTab((current) => ({ ...current, [activeTab]: param }));
           getSearch(param);
         }}
         defaultParam={dropdownParam}
         activeTab={activeTab}
-        alwaysShowStatusFilter
+        // 我可用的仅按权限筛选，不展示状态筛选；官方推荐仍保留状态筛选。
+        hideStatusFilter={activeTab === 'available'}
+        // 类型筛选已移除，列表仍按员工组/数字员工分块展示。
+        digitalEmployeeTypeFilter={false}
       />
       <Input
         suffix={
@@ -157,9 +203,9 @@ const DigitalEmployeesPage: React.FC = () => {
           <Menu
             items={[
               { key: 'personal', label: '创建个人数字员工' },
-              { key: 'personal-group', label: '创建个人数字员工组' },
+              { key: 'personal-group', label: '创建个人员工组' },
               { key: 'enterprise', label: '创建企业数字员工' },
-              { key: 'enterprise-group', label: '创建企业数字员工组' },
+              { key: 'enterprise-group', label: '创建企业员工组' },
             ]}
             onClick={({ key }) => {
               if (key === 'enterprise') {
@@ -183,7 +229,15 @@ const DigitalEmployeesPage: React.FC = () => {
         </Button>
       </Dropdown>
       <Badge count={auditCount} size="small" offset={[-2, 2]}>
-        <Button icon={<UnorderedListOutlined />} onClick={() => navigate('/myEmployees')}>
+        <Button
+          icon={<UnorderedListOutlined />}
+          onClick={() => {
+            // 复用首页已加载的审核数据，进入“我的员工”后不再重复请求待审核接口。
+            navigate('/myEmployees', {
+              state: { pendingAuditRows: auditRows },
+            });
+          }}
+        >
           我的员工
         </Button>
       </Badge>
@@ -204,7 +258,11 @@ const DigitalEmployeesPage: React.FC = () => {
           onChange={(key) => {
             const nextTab = key;
             const nextSearchParams = new URLSearchParams(searchParams);
-            setDropdownParam(getDefaultParams());
+            const nextFilterParam = filterParamsByTab[nextTab] || defaultFilterParam;
+            setFilterParamsByTab((current) => ({
+              ...current,
+              [nextTab]: nextFilterParam,
+            }));
             nextSearchParams.set('tab', nextTab);
             setActiveTab(nextTab);
             setSearchParams(nextSearchParams);
@@ -212,23 +270,10 @@ const DigitalEmployeesPage: React.FC = () => {
         >
           <Tabs.TabPane tab="我可用的" key="available">
             <div id="availableDigitalEmployeesScroller" className={styles.tabContent}>
-              <div className={styles.sectionTitle}>数字员工组</div>
               <AllDigitalEmployees
-                mode="group"
+                mode="all"
                 source="available"
-                ref={AvailableGroupRef}
-                onEmployeeClick={setPreview}
-                onChatEmployee={handleEmployeeChat}
-                hideCategories
-                buildFilterParam={buildDigitalEmployeeFilterParam}
-                compactLayout
-                scrollableTarget="availableDigitalEmployeesScroller"
-              />
-              <div className={styles.sectionTitle}>数字员工</div>
-              <AllDigitalEmployees
-                mode="employee"
-                source="available"
-                ref={AvailableEmployeeRef}
+                ref={AvailableRef}
                 onEmployeeClick={setPreview}
                 onChatEmployee={handleEmployeeChat}
                 hideCategories
@@ -240,21 +285,8 @@ const DigitalEmployeesPage: React.FC = () => {
           </Tabs.TabPane>
           <Tabs.TabPane tab="官方推荐" key="official">
             <div id="officialDigitalEmployeesScroller" className={styles.tabContent}>
-              <div className={styles.sectionTitle}>数字员工组</div>
               <AllDigitalEmployees
-                mode="group"
-                source="official"
-                ref={OfficialGroupRef}
-                onEmployeeClick={setPreview}
-                onChatEmployee={handleEmployeeChat}
-                hideCategories
-                buildFilterParam={buildDigitalEmployeeFilterParam}
-                compactLayout
-                scrollableTarget="officialDigitalEmployeesScroller"
-              />
-              <div className={styles.sectionTitle}>数字员工</div>
-              <AllDigitalEmployees
-                mode="employee"
+                mode="all"
                 source="official"
                 ref={OfficialEmployeeRef}
                 onEmployeeClick={setPreview}
@@ -311,6 +343,8 @@ export function EmployeePreviewModal({ employee, onClose, onCreateTask }: any) {
   const employeeResourceId = detail?.resourceId || detail?.id || detail?.agentId;
   const hasUsePermission = permissions?.hasUsePermission === true;
   const isApplyPending = permissions?.useApplyPending === true || employee?.approveStatus === 'S';
+  const isOffShelfEmployee =
+    `${detail?.resourceStatus ?? employee?.resourceStatus ?? detail?.metaStatus ?? ''}` === '3';
   const handleApplyUse = async () => {
     if (!employeeResourceId || applyLoading || isApplyPending) return;
     setApplyLoading(true);
@@ -490,7 +524,7 @@ export function EmployeePreviewModal({ employee, onClose, onCreateTask }: any) {
                   </Typography.Title>
                   <span className={styles.employeePreviewTag}>{employeeTypeLabel}</span>
                 </div>
-                {hasUsePermission ? (
+                {isOffShelfEmployee ? null : hasUsePermission ? (
                   <Button type="primary" icon={<PlusOutlined />} onClick={() => onCreateTask?.()}>
                     新建任务
                   </Button>

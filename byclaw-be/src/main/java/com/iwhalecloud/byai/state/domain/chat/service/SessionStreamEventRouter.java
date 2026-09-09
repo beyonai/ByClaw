@@ -75,6 +75,17 @@ public class SessionStreamEventRouter {
     /**
      * Redis Stream 统一入口。HTTP SSE 投递到请求线程队列，WebSocket 直接推送到已登记的 Channel。
      */
+    public StreamDispatchResult dispatchChildBatch(Long sessionId, List<JSONObject> events) {
+        try {
+            scopedSessionEventService.handleChildBatch(sessionId, events);
+            return StreamDispatchResult.HANDLED;
+        }
+        catch (Exception e) {
+            log.warn("处理外部子会话批次失败, sessionId: {}, size: {}", sessionId, events.size(), e);
+            return StreamDispatchResult.ERROR;
+        }
+    }
+
     public StreamDispatchResult dispatch(JSONObject dataJson) {
         String sessionId = dataJson == null ? null : dataJson.getString("session_id");
         if (StringUtils.isBlank(sessionId)) {
@@ -108,10 +119,12 @@ public class SessionStreamEventRouter {
             return StreamDispatchResult.HANDLED;
         }
 
-        ChatProcessContext ctx = outputStreamManager.getContext(sessionId);
+        ChatProcessContext ctx = outputStreamManager.getContext(sessionId, dataJson.getString("trace_id"));
         if (ctx == null) {
             ctx = chatContextRecoveryService.recoverIfNecessary(dataJson);
         }
+        // Truly historical traces still use the existing history accumulator.
+        if (ctx == null) ctx = outputStreamManager.getContext(sessionId);
         if (ctx == null) {
             return StreamDispatchResult.MISSING_CONTEXT;
         }

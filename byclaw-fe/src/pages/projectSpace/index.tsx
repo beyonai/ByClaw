@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Dropdown, Empty, Input, Modal, message } from 'antd';
+import { Button, Dropdown, Empty, Input, Modal, Spin, message } from 'antd';
 import {
   DeleteOutlined,
   EditOutlined,
+  LoadingOutlined,
   MoreOutlined,
   PlusOutlined,
   SearchOutlined,
@@ -18,14 +19,22 @@ import { agentTypeMap } from '@/constants/agent';
 import { clearEasyConfirmInputDraft } from '@/components/ChatLayoutComp/components/EasyConfirm';
 import { getPublicPath } from '@/utils';
 import {
+  activateDesktopProject,
+  registerDesktopProject,
+  removeDesktopProject,
+  renameDesktopProject,
+} from '@/service/common/desktopLocal';
+import {
   createProject,
   deleteProject,
+  type DevloopProjectLocalDirectoryPayload,
   saveProjectMembers,
   saveProjectResources,
   updateProject,
 } from '@/service/devloop';
 import ProjectFormModal, { type ProjectFormValues } from './components/ProjectFormModal';
 import ProjectOnboardingWizard from './components/ProjectOnboardingWizard';
+import DesktopProjectCreateModal, { type DesktopProjectCreateValues } from './desktop/DesktopProjectCreateModal';
 import ProjectDetail from './components/ProjectDetail';
 import { type ChatWithAgentTarget } from './components/ProjectDefaultAgentPanel';
 import { useProjectDetail } from './hooks/useProjectDetail';
@@ -137,6 +146,7 @@ const ProjectSpacePage: React.FC = () => {
   const [renameLoading, setRenameLoading] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [showProjectList, setShowProjectList] = useState(true);
+  const isDesktop = typeof window !== 'undefined' && Boolean(window.byclawDesktop);
   const projectIdFromSearch = useMemo(
     () => getProjectId(new URLSearchParams(location.search).get('projectId')),
     [location.search]
@@ -159,6 +169,10 @@ const ProjectSpacePage: React.FC = () => {
 
   const { activeProject, refreshProject } = useProjectDetail(projects, selectedProjectId);
   const canManageProject = useMemo(() => isProjectCreator(activeProject, userInfo), [activeProject, userInfo]);
+
+  useEffect(() => {
+    void activateDesktopProject(selectedProjectId || null);
+  }, [selectedProjectId]);
 
   useEffect(() => {
     const refresh = () => {
@@ -247,7 +261,7 @@ const ProjectSpacePage: React.FC = () => {
   }, [setProjectKeyword]);
 
   const handleSaveProject = useCallback(
-    async (values: ProjectFormValues) => {
+    async (values: ProjectFormValues, localDirectories?: DevloopProjectLocalDirectoryPayload[]) => {
       if (editLoading) return '';
       const projectName = values.projectName.trim();
       if (!projectName) {
@@ -287,6 +301,11 @@ const ProjectSpacePage: React.FC = () => {
             projectId: Number(editingProject.projectId),
             resources,
           });
+          if (isDesktop && localDirectories?.length) {
+            await registerDesktopProject(editingProject.projectId, localDirectories, projectName);
+          } else if (isDesktop) {
+            await renameDesktopProject(editingProject.projectId, projectName);
+          }
         } else {
           const response = await createProject(
             {
@@ -301,6 +320,7 @@ const ProjectSpacePage: React.FC = () => {
           );
           savedProjectId = getProjectIdFromSaveResponse(response);
           if (!savedProjectId) throw new Error(intl.formatMessage({ id: 'projectSpace.message.createFailed' }));
+          if (localDirectories?.length) await registerDesktopProject(savedProjectId, localDirectories, projectName);
         }
 
         await saveProjectMembers({
@@ -341,7 +361,17 @@ const ProjectSpacePage: React.FC = () => {
         setEditLoading(false);
       }
     },
-    [EventEmitter, editLoading, editingProject, fetchProjects, intl, projects, refreshProject, setSelectedProjectId]
+    [
+      EventEmitter,
+      editLoading,
+      editingProject,
+      fetchProjects,
+      intl,
+      isDesktop,
+      projects,
+      refreshProject,
+      setSelectedProjectId,
+    ]
   );
 
   const handleOpenRenameProject = useCallback((project: ProjectSpace) => {
@@ -406,6 +436,7 @@ const ProjectSpacePage: React.FC = () => {
         onOk: async () => {
           try {
             await deleteProject(Number(project.projectId));
+            await removeDesktopProject(project.projectId);
             message.success(intl.formatMessage({ id: 'projectSpace.message.deleteSuccess' }));
             setSelectedProjectId(undefined);
             await fetchProjects();
@@ -442,6 +473,24 @@ const ProjectSpacePage: React.FC = () => {
     [setSelectedProjectId]
   );
 
+  const handleCreateDesktopProject = useCallback(
+    async (values: DesktopProjectCreateValues) => {
+      const projectId = await handleSaveProject(
+        {
+          projectName: values.projectName,
+          projectType: 'normal',
+          sharedFlag: false,
+          shareMembers: [],
+          resources: [],
+        },
+        values.localDirectories
+      );
+      if (projectId) handleWizardFinish(projectId);
+      return projectId;
+    },
+    [handleSaveProject, handleWizardFinish]
+  );
+
   const renderProjectCards = () => {
     return (
       <div className={styles.projectListPage}>
@@ -469,16 +518,9 @@ const ProjectSpacePage: React.FC = () => {
           />
         </div>
         {projectsLoading && !projects.length ? (
-          <div className={styles.projectCardGrid} aria-busy="true">
-            {Array.from({ length: 9 }, (_, index) => (
-              <div key={index} className={styles.projectSkeletonCard} aria-hidden="true">
-                <span className={styles.projectSkeletonIcon} />
-                <span className={styles.projectSkeletonBody}>
-                  <span className={styles.projectSkeletonTitle} />
-                  <span className={styles.projectSkeletonDescription} />
-                </span>
-              </div>
-            ))}
+          <div className={styles.projectListLoading} aria-busy="true">
+            {/* 项目大列表统一使用 loading 图，避免骨架屏造成卡片布局跳变。 */}
+            <Spin indicator={<LoadingOutlined spin />} />
           </div>
         ) : !projects.length ? (
           <div className={styles.projectListFeedback}>
@@ -634,14 +676,23 @@ const ProjectSpacePage: React.FC = () => {
         onSubmit={handleSaveProject}
       />
 
-      <ProjectOnboardingWizard
-        open={wizardOpen}
-        projectTypeConfigOptions={projectTypeOptions}
-        projectTypeLoading={projectTypeLoading}
-        onCancel={() => setWizardOpen(false)}
-        onCreateProject={handleSaveProject}
-        onFinish={handleWizardFinish}
-      />
+      {isDesktop ? (
+        <DesktopProjectCreateModal
+          open={wizardOpen}
+          loading={editLoading}
+          onCancel={() => setWizardOpen(false)}
+          onSubmit={handleCreateDesktopProject}
+        />
+      ) : (
+        <ProjectOnboardingWizard
+          open={wizardOpen}
+          projectTypeConfigOptions={projectTypeOptions}
+          projectTypeLoading={projectTypeLoading}
+          onCancel={() => setWizardOpen(false)}
+          onCreateProject={handleSaveProject}
+          onFinish={handleWizardFinish}
+        />
+      )}
 
       <Modal
         open={Boolean(renameProject)}

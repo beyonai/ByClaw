@@ -81,15 +81,80 @@
   gap: 4px;
 }
 
+.statusCell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+
+  :global {
+    .@{antPrefix}-btn {
+      height: auto;
+      padding: 0;
+    }
+  }
+}
+
+.catalogState {
+  display: flex;
+  min-height: 160px;
+  align-items: center;
+  justify-content: center;
+}
+
 .formGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0 16px;
 }
 
+.providerDetails {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid #0000000f;
+  border-radius: 12px;
+  background: #00000005;
+}
+
+.providerHeading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+
+  > div {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+}
+
+.capabilities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.readonlyServers {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  border-radius: 8px;
+  background: #00000008;
+}
+
+.oauthActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .serverSection {
   padding: 14px 16px 2px;
-  margin-bottom: 16px;
+  margin-bottom: 0;
   border: 1px solid #0000000f;
   border-radius: 12px;
   background: #00000005;
@@ -110,5 +175,20 @@
     .@{antPrefix}-input-number {
       width: 100%;
     }
+  }
+}
+
+@media (max-width: 640px) {
+  .header {
+    flex-direction: column;
+  }
+
+  .formGrid,
+  .serverGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .emailModalWrap {
+    padding: 12px;
   }
 }

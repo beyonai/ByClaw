@@ -88,6 +88,9 @@ public class RedisConfiguration {
     @Value("${server.servlet.session.timeout:30m}")
     private Duration sessionTimeout;
 
+    @Value("${byclaw.session-stream.max-listeners:128}")
+    private int sessionStreamMaxListeners = 128;
+
     @Primary
     @Bean
     public RedisConnectionFactory connectionFactory() {
@@ -95,6 +98,30 @@ public class RedisConfiguration {
 
         // 使用RedisProperties配置连接池
         poolConfig.setPoolConfig(redisProperties);
+
+        return createConnectionFactory(poolConfig);
+    }
+
+    /**
+     * Isolate long-running XREADGROUP BLOCK calls from business and session Redis operations.
+     */
+    @Bean
+    public RedisConnectionFactory sessionStreamRedisConnectionFactory() {
+        if (sessionStreamMaxListeners < 1 || sessionStreamMaxListeners == Integer.MAX_VALUE) {
+            throw new IllegalArgumentException("byclaw.session-stream.max-listeners must be between 1 and 2147483646");
+        }
+        CustomJedisPoolConfig poolConfig = new CustomJedisPoolConfig();
+        poolConfig.setPoolConfig(redisProperties);
+        // Keep one connection available for listener setup while all admitted readers are blocked.
+        poolConfig.setMaxTotal(sessionStreamMaxListeners + 1);
+        poolConfig.setMaxIdle(Math.min(16, sessionStreamMaxListeners + 1));
+        poolConfig.setMinIdle(0);
+        poolConfig.setBlockWhenExhausted(false);
+
+        return createConnectionFactory(poolConfig);
+    }
+
+    private RedisConnectionFactory createConnectionFactory(CustomJedisPoolConfig poolConfig) {
 
         JedisClientConfiguration.DefaultJedisClientConfigurationBuilder clientConfigBuilder = (JedisClientConfiguration.DefaultJedisClientConfigurationBuilder) JedisClientConfiguration
             .builder();
@@ -178,7 +205,10 @@ public class RedisConfiguration {
 
     @Bean
     public org.springframework.session.config.SessionRepositoryCustomizer<RedisSessionRepository> sessionRepositoryCustomizer() {
-        return repository -> repository.setDefaultMaxInactiveInterval(sessionTimeout);
+        return repository -> {
+            repository.setDefaultMaxInactiveInterval(sessionTimeout);
+            repository.setRedisSessionMapper(new SafeRedisSessionMapper());
+        };
     }
 
     @Bean

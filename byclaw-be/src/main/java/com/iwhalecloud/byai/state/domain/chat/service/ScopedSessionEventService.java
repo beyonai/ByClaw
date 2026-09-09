@@ -1,6 +1,9 @@
 package com.iwhalecloud.byai.state.domain.chat.service;
 
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import org.springframework.beans.BeanUtils;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
@@ -46,6 +49,8 @@ public class ScopedSessionEventService {
 
     private static final Set<String> TERMINAL_EVENTS = Set.of("session.error", "error");
 
+    private static final int MAX_RECENT_EVENT_SEQUENCES = 512;
+
     private final ExternalChildSessionService childSessionService;
 
     private final GatewayStreamEventProcessor gatewayStreamEventProcessor;
@@ -62,7 +67,11 @@ public class ScopedSessionEventService {
 
     private final Map<String, MessageContext> childMessageContexts = new ConcurrentHashMap<>();
 
+    private final Map<String, RunningChatSnapshotResponse> childRunSnapshots = new ConcurrentHashMap<>();
+
     private final Map<String, String> childStreamWatermarks = new ConcurrentHashMap<>();
+
+    private final Map<String, RecentEventSequences> childEventSequences = new ConcurrentHashMap<>();
 
     public ScopedSessionEventService(
             ExternalChildSessionService childSessionService,
@@ -100,81 +109,153 @@ public class ScopedSessionEventService {
     }
 
     private void persistChildEvent(Long parentSessionId, JSONObject dataJson, JSONObject metadata) {
+        handleChildBatch(parentSessionId, List.of(dataJson));
+    }
+
+    /** Called under the processor's session lock; all events belong to the same child and run. */
+    public void handleChildBatch(Long parentSessionId, List<JSONObject> events) {
+        if (events.isEmpty()) return;
+        JSONObject metadata = events.getFirst().getJSONObject("metadata");
         ExternalChildSessionBinding binding = childSessionService.ensureBinding(parentSessionId, metadata);
         String contextKey = parentSessionId + ":" + binding.externalSessionId();
-        RunningChatSnapshotResponse currentSnapshot = runningChatSnapshotService.getExternalChildSnapshot(
-            binding.session().getSessionId(), binding.messageId());
-        ChildRunDisposition runDisposition = compareChildRun(currentSnapshot, metadata);
-        if (runDisposition == ChildRunDisposition.STALE) {
-            return;
-        }
+        boolean restoring = !childMessageContexts.containsKey(contextKey);
+        RunningChatSnapshotResponse currentSnapshot = !restoring
+            ? childRunSnapshots.get(contextKey)
+            : runningChatSnapshotService.getExternalChildSnapshot(binding.session().getSessionId(), binding.messageId());
+        if (currentSnapshot != null) childRunSnapshots.put(contextKey, currentSnapshot);
+        ChildRunDisposition disposition = compareChildRun(currentSnapshot, metadata);
+        if (disposition == ChildRunDisposition.STALE) return;
         MessageContext messageContext;
-        if (runDisposition == ChildRunDisposition.NEWER) {
+        if (disposition == ChildRunDisposition.NEWER) {
             messageContext = new MessageContext(AgentTypeEnum.AGENT, binding.messageId());
             childMessageContexts.put(contextKey, messageContext);
             childStreamWatermarks.remove(contextKey);
+            childEventSequences.remove(contextKey);
         }
         else {
             messageContext = childMessageContexts.computeIfAbsent(contextKey,
-                ignored -> restoreMessageContext(contextKey, binding));
+                ignored -> restoreMessageContext(contextKey, binding, currentSnapshot));
         }
-        String streamId = dataJson.getString("stream_id");
-        if (StreamIdUtil.isProcessedByWatermark(streamId, childStreamWatermarks.get(contextKey))) {
-            return;
-        }
-
         ChatProcessContext eventContext = new ChatProcessContext(null, null);
         eventContext.sessionId = binding.session().getSessionId();
         eventContext.userMessageId = 0L;
-        String eventData = gatewayStreamEventProcessor.buildEventData(eventContext, dataJson, metadata);
-        JSONObject lineJson = new JSONObject();
-        lineJson.put("event", dataJson.getString("event_type"));
-        lineJson.put("data", eventData);
-
-        JSONObject messageMetadata = new JSONObject(metadata);
-        messageMetadata.put("event_stream_id", streamId);
-        AssistantChatDto assistantChatDto = new AssistantChatDto();
-        assistantChatDto.setAccessTerminal("Web");
-        assistantChatDto.setMetadata(messageMetadata.toJSONString());
-
-        boolean terminal = isTerminal(dataJson, metadata);
-
         LoginInfo previousLoginInfo = CurrentUserHolder.getLoginInfo();
         try {
             CurrentUserHolder.setLoginInfo(buildLoginInfo(binding.session()));
-            ByaiMessageHotDtoDto persisted;
-            synchronized (messageContext) {
-                pythonSseService.accumulateEvent(lineJson.toJSONString(), messageContext);
-                terminal = terminal || Boolean.TRUE.equals(messageContext.getComplete());
-                if (terminal) {
-                    messageContext.setComplete(true);
+            String watermark = childStreamWatermarks.get(contextKey);
+            RecentEventSequences recentSequences = childEventSequences.computeIfAbsent(contextKey,
+                ignored -> RecentEventSequences.fromSnapshot(currentSnapshot));
+            Set<String> acceptedSequences = new LinkedHashSet<>();
+            JSONObject lastEvent = null;
+            boolean terminal = Boolean.TRUE.equals(messageContext.getComplete());
+            for (JSONObject event : events) {
+                String streamId = event.getString("stream_id");
+                if (StreamIdUtil.isProcessedByWatermark(streamId, watermark)) continue;
+                JSONObject eventMetadata = event.getJSONObject("metadata");
+                String logicalSequence = logicalSequence(eventMetadata);
+                boolean duplicate = logicalSequence != null
+                    && (recentSequences.contains(logicalSequence) || acceptedSequences.contains(logicalSequence));
+                if (!duplicate) {
+                    String eventData = gatewayStreamEventProcessor.buildEventData(eventContext, event, eventMetadata);
+                    JSONObject line = new JSONObject();
+                    line.put("event", event.getString("event_type"));
+                    line.put("data", eventData);
+                    pythonSseService.accumulateEvent(line.toJSONString(), messageContext);
+                    if (logicalSequence != null) acceptedSequences.add(logicalSequence);
                 }
-                persisted = memoryMessageService.generateMessage(binding.session().getSessionId(),
-                    ChatUseageEnum.SYSTEM_RESPONSE.getCode(), messageContext, assistantChatDto);
-                persisted.setMsgStatus(terminal ? MsgStatus.FINISH.getCode() : MsgStatus.APPEND.getCode());
+                terminal = terminal || isTerminal(event, eventMetadata) || Boolean.TRUE.equals(messageContext.getComplete());
+                if (terminal) messageContext.setComplete(true);
+                watermark = StreamIdUtil.max(watermark, streamId, streamId);
+                lastEvent = event;
             }
-            if (!runningChatSnapshotService.saveExternalChild(persisted, streamId, terminal)) {
+            if (lastEvent == null) {
+                if (restoring && currentSnapshot != null) ensureReplayedSnapshotPersistence(contextKey, binding, currentSnapshot);
+                if (terminal) discardChildContext(contextKey);
+                return;
+            }
+            JSONObject messageMetadata = new JSONObject(lastEvent.getJSONObject("metadata"));
+            messageMetadata.put("event_stream_id", watermark);
+            AssistantChatDto assistant = new AssistantChatDto();
+            assistant.setAccessTerminal("Web");
+            assistant.setMetadata(messageMetadata.toJSONString());
+            ByaiMessageHotDtoDto persisted = memoryMessageService.generateMessage(binding.session().getSessionId(),
+                ChatUseageEnum.SYSTEM_RESPONSE.getCode(), messageContext, assistant);
+            persisted.setMsgStatus(terminal ? MsgStatus.FINISH.getCode() : MsgStatus.APPEND.getCode());
+            // The caller ACKs the whole batch only after this durable checkpoint succeeds.
+            if (!runningChatSnapshotService.saveExternalChild(persisted, watermark, terminal)) {
                 throw new IllegalStateException("external child snapshot was not persisted");
             }
-            broadcastChildMessage(contextKey, binding.session(), persisted, streamId, terminal);
-            childMessageWriteBehind.enqueue(
-                "child:" + binding.session().getSessionId() + ":" + binding.messageId(),
+            recentSequences.addAll(acceptedSequences);
+            broadcastChildMessage(contextKey, binding.session(), persisted, watermark, terminal);
+            childMessageWriteBehind.enqueue("child:" + binding.session().getSessionId() + ":" + binding.messageId(),
                 binding.session().getSessionId(), persisted, terminal);
-            if (StringUtils.isNotBlank(streamId)) {
-                childStreamWatermarks.put(contextKey, streamId);
-            }
-            if (terminal) {
-                childMessageContexts.remove(contextKey, messageContext);
-                childStreamWatermarks.remove(contextKey);
-            }
+            if (StringUtils.isNotBlank(watermark)) childStreamWatermarks.put(contextKey, watermark);
+            RunningChatSnapshotResponse identity = new RunningChatSnapshotResponse();
+            identity.setChildRunId(messageMetadata.getString("child_run_id"));
+            identity.setChildTurn(messageMetadata.getLong("child_turn"));
+            childRunSnapshots.put(contextKey, identity);
+            if (terminal) discardChildContext(contextKey);
+        }
+        catch (RuntimeException e) {
+            // Discard uncheckpointed mutations, so a PEL retry cannot append the same deltas twice.
+            discardChildContext(contextKey);
+            throw e;
         }
         finally {
-            if (previousLoginInfo == null) {
-                CurrentUserHolder.clearLoginInfo();
+            if (previousLoginInfo == null) CurrentUserHolder.clearLoginInfo();
+            else CurrentUserHolder.setLoginInfo(previousLoginInfo);
+        }
+    }
+
+    private void discardChildContext(String contextKey) {
+        childMessageContexts.remove(contextKey);
+        childStreamWatermarks.remove(contextKey);
+        childRunSnapshots.remove(contextKey);
+        childEventSequences.remove(contextKey);
+    }
+
+    private String logicalSequence(JSONObject metadata) {
+        String sequence = metadata == null ? null : StringUtils.trimToNull(metadata.getString("event_sequence"));
+        if (sequence == null) return null;
+        return normalize(metadata.getString("event_kind")) + ":" + sequence;
+    }
+
+    private static final class RecentEventSequences {
+        private final LinkedHashMap<String, Boolean> values = new LinkedHashMap<>();
+
+        static RecentEventSequences fromSnapshot(RunningChatSnapshotResponse snapshot) {
+            RecentEventSequences sequences = new RecentEventSequences();
+            if (snapshot == null || StringUtils.isBlank(snapshot.getMetadata())) return sequences;
+            try {
+                JSONObject metadata = JSON.parseObject(snapshot.getMetadata());
+                String sequence = StringUtils.trimToNull(metadata.getString("event_sequence"));
+                if (sequence != null) {
+                    sequences.add(normalizeEventKind(metadata.getString("event_kind")) + ":" + sequence);
+                }
             }
-            else {
-                CurrentUserHolder.setLoginInfo(previousLoginInfo);
+            catch (RuntimeException ignored) {
+                // Old or custom workers may store non-JSON metadata; stream watermark deduplication still applies.
             }
+            return sequences;
+        }
+
+        synchronized boolean contains(String sequence) {
+            return values.containsKey(sequence);
+        }
+
+        synchronized void addAll(Set<String> sequences) {
+            for (String sequence : sequences) add(sequence);
+        }
+
+        private void add(String sequence) {
+            values.put(sequence, Boolean.TRUE);
+            while (values.size() > MAX_RECENT_EVENT_SEQUENCES) {
+                values.remove(values.keySet().iterator().next());
+            }
+        }
+
+        private static String normalizeEventKind(String value) {
+            return StringUtils.trimToEmpty(value).toLowerCase(Locale.ROOT);
         }
     }
 
@@ -210,20 +291,40 @@ public class ScopedSessionEventService {
         STALE
     }
 
-    private MessageContext restoreMessageContext(String contextKey, ExternalChildSessionBinding binding) {
+    private void ensureReplayedSnapshotPersistence(String contextKey, ExternalChildSessionBinding binding,
+            RunningChatSnapshotResponse snapshot) {
+        ByaiMessageHotDtoDto message = new ByaiMessageHotDtoDto();
+        BeanUtils.copyProperties(snapshot, message);
+        JSONObject metadata = JSON.parseObject(StringUtils.defaultIfBlank(message.getMetadata(), "{}"));
+        metadata.put("event_stream_id", snapshot.getSnapshotStreamId());
+        message.setMetadata(metadata.toJSONString());
+        if (runningChatSnapshotService.isExternalChildPersisted(message)) return;
+        boolean terminal = Boolean.FALSE.equals(snapshot.getRunning());
+        // A write may commit while its reply is lost. Repair its recovery index before ACKing a replay.
+        if (!runningChatSnapshotService.saveExternalChild(message, snapshot.getSnapshotStreamId(), terminal)) {
+            throw new IllegalStateException("external child replay checkpoint was not persisted");
+        }
+        childMessageWriteBehind.enqueue("child:" + binding.session().getSessionId() + ":" + binding.messageId(),
+            binding.session().getSessionId(), message, terminal);
+        broadcastChildMessage(contextKey, binding.session(), message, snapshot.getSnapshotStreamId(), terminal);
+    }
+
+    private MessageContext restoreMessageContext(String contextKey, ExternalChildSessionBinding binding,
+            RunningChatSnapshotResponse snapshot) {
+        if (snapshot == null) return new MessageContext(AgentTypeEnum.AGENT, binding.messageId());
         ChatRuntimeState state = new ChatRuntimeState();
         state.setSessionId(binding.session().getSessionId());
         state.setTraceId(RunningChatSnapshotService.externalChildTraceId(binding.session().getSessionId()));
         state.setModelAnswerMessageId(binding.messageId());
         String[] watermark = new String[1];
-        MessageContext restored = runningChatSnapshotService.hydrateMessageContext(state, watermark);
+        MessageContext restored = runningChatSnapshotService.hydrateMessageContextFromSnapshot(state, snapshot, watermark);
         if (restored != null) {
             if (StringUtils.isNotBlank(watermark[0])) {
                 childStreamWatermarks.put(contextKey, watermark[0]);
             }
             return restored;
         }
-        return new MessageContext(AgentTypeEnum.AGENT, binding.messageId());
+        throw new IllegalStateException("existing child snapshot could not be hydrated");
     }
 
     private LoginInfo buildLoginInfo(ByaiSession child) {

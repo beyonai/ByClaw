@@ -325,7 +325,8 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
   const { isCenterPage: isResourceCenterPage, toggleCenter } = useResourceCenterRouter(
     config.navigatePath,
     config.siderKey,
-    showRouter
+    showRouter,
+    activeSiderAgent
   );
   const placeholder = intl.formatMessage(
     { id: 'form.inputPlaceholder' },
@@ -921,6 +922,15 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
             }
           }
           message.success(intl.formatMessage({ id: 'resource.uninstallSuccess' }));
+          window.dispatchEvent(
+            new CustomEvent('digitalEmployeeResourceUninstalled', {
+              detail: {
+                resourceId: item.resourceId,
+                resourceType: item.resourceBizType,
+                digitalEmployeeId: activeSiderAgent.resourceId,
+              },
+            })
+          );
           if (!isInDrillDown()) {
             loadResources({ reset: true });
           }

@@ -19,6 +19,7 @@ import {
   filterDelegableAgents,
   fingerprintGroupChatContext,
   resolveRunMessage,
+  parseProjectContext,
 } from "@byclaw/by-conductor";
 import {
   type BeyondTokenClaims,
@@ -57,8 +58,8 @@ export interface CreateSessionRunRequest extends AuthenticatedIngressRequest {
   /** 已规范化的附件（由各入口在调用前 normalize）；缺省为空数组。 */
   attachments?: RunAttachment[];
   /**
-   * by-framework 入站 metadata；不写入 Run 业务快照，但会随临时执行凭证保存，
-   * 供 lease 接管实例继续透传。
+   * by-framework 入站 metadata；project_info 的业务字段提取为 Run 项目快照，
+   * 完整 metadata 随临时执行凭证保存，供 lease 接管实例继续透传。
    */
   metadata?: Record<string, unknown>;
   /**
@@ -133,6 +134,7 @@ export class RunIngressService {
     );
     const ingressContext = this.mergeIngressContext({
       context: loadedContext,
+      metadata: input.metadata,
       ...(orchestration.agentCatalogError
         ? { agentCatalogError: orchestration.agentCatalogError }
         : {}),
@@ -202,6 +204,7 @@ export class RunIngressService {
     );
     const ingressContext = this.mergeIngressContext({
       context: loadedContext,
+      metadata: input.metadata,
       ...(orchestration.agentCatalogError
         ? { agentCatalogError: orchestration.agentCatalogError }
         : {}),
@@ -498,6 +501,7 @@ export class RunIngressService {
 
   private mergeIngressContext(input: {
     context: Awaited<ReturnType<RunIngressService["loadIngressContext"]>>;
+    metadata: Record<string, unknown> | undefined;
     agentCatalogError?: string;
     leaderModel?: LeaderModelSelection;
     orchestrator?: ExpertTeamRuntimeSnapshotV1;
@@ -505,7 +509,9 @@ export class RunIngressService {
     parentMessageId?: string;
     traceId?: string;
   }) {
+    const projectContext = parseProjectContext(input.metadata?.project_info);
     if (
+      !projectContext &&
       !input.context &&
       !input.agentCatalogError &&
       !input.leaderModel &&
@@ -518,6 +524,7 @@ export class RunIngressService {
     }
     return {
       ...(input.context ?? {}),
+      ...(projectContext ? { projectContext } : {}),
       ...(input.externalSessionId
         ? { externalSessionId: input.externalSessionId }
         : {}),

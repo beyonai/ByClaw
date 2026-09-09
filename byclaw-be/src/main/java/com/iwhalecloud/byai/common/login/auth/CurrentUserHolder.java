@@ -393,5 +393,14 @@ public final class CurrentUserHolder {
         return loginInfo == null ? null : loginInfo.getLanguage();
     }
 
+    /**
+     * 判断当前用户是否是adminvip管理员
+     *
+     * @return boolean
+     */
+    public static boolean isAdminVip() {
+        String userCode = getCurrentUserCode();
+        return "adminvip".equalsIgnoreCase(userCode);
+    }
 
 }

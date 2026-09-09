@@ -255,8 +255,21 @@
 }
 
 .credentialModalWithHelp {
+  height: min(760px, calc(100vh - 96px));
   min-width: 640px;
   max-width: 1250px;
+
+  :global(.ant-modal-content) {
+    display: flex;
+    height: 100%;
+    flex-direction: column;
+  }
+
+  :global(.ant-modal-body) {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+  }
 }
 
 .credentialContent {
@@ -286,8 +299,9 @@
 
 .credentialContentWithHelp {
   display: flex;
+  flex: 1;
   flex-direction: column;
-  height: min(760px, calc(100vh - 96px));
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -305,6 +319,7 @@
 }
 
 .credentialFormBody {
+  flex: 1;
   min-height: 0;
   padding: 0 4px 4px;
   overflow-y: auto;

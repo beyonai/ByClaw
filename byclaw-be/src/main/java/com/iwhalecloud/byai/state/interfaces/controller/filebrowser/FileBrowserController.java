@@ -69,7 +69,8 @@ public class FileBrowserController {
             return ResponseUtil.fail("resourceId is required");
         }
         String path = StringUtils.defaultIfBlank(request.getPath(), "/");
-        List<FileBrowserItemVo> items = fileBrowserService.list(userCode, request.getResourceId(), path);
+        // 将排序策略透传给文件浏览服务，由服务统一处理目录和名称排序。
+        List<FileBrowserItemVo> items = fileBrowserService.list(userCode, request.getResourceId(), path, request.getSort());
         return ResponseUtil.successResponse(items);
     }
 

@@ -26,6 +26,8 @@ public class SessionRuntimeStateService {
     @Autowired
     private RedisTemplate<String, Object> redisTemplate;
 
+    private final SessionLifecycleLocks lifecycleLocks = new SessionLifecycleLocks();
+
     public boolean isRuntimeEvent(JSONObject dataJson) {
         JSONObject metadata = dataJson == null ? null : dataJson.getJSONObject("metadata");
         return metadata != null
@@ -37,10 +39,14 @@ public class SessionRuntimeStateService {
      * Applies a snapshot only when it moves the same source/trace forward, or belongs to a newer turn.
      * Returning {@code null} means the event was stale or malformed and must not be broadcast.
      */
-    public synchronized SessionRuntimeState applyEvent(Long sessionId, JSONObject dataJson) {
+    public SessionRuntimeState applyEvent(Long sessionId, JSONObject dataJson) {
         if (sessionId == null || !isRuntimeEvent(dataJson)) {
             return null;
         }
+        return lifecycleLocks.withLock(String.valueOf(sessionId), () -> applyEventLocked(sessionId, dataJson));
+    }
+
+    private SessionRuntimeState applyEventLocked(Long sessionId, JSONObject dataJson) {
         try {
             SessionRuntimeState incoming = fromEvent(sessionId, dataJson);
             if (!isValid(incoming)) {
@@ -75,7 +81,14 @@ public class SessionRuntimeStateService {
     }
 
     /** Stop is terminal for this trace, including runtime events already queued in Redis. */
-    public synchronized SessionRuntimeState cancel(Long sessionId) {
+    public SessionRuntimeState cancel(Long sessionId) {
+        if (sessionId == null) {
+            return null;
+        }
+        return lifecycleLocks.withLock(String.valueOf(sessionId), () -> cancelLocked(sessionId));
+    }
+
+    private SessionRuntimeState cancelLocked(Long sessionId) {
         SessionRuntimeState state = get(sessionId);
         if (state == null || "cancelled".equals(state.getStatus())) {
             return state;

@@ -13,6 +13,8 @@ public interface SsResourceRelDetailService extends IService<SsResourceRelDetail
 
     List<SsResourceRelDetail> findByResourceId(Long resourceId);
 
+    List<Long> findRelResourceIdsByResourceId(Long resourceId);
+
     void removeAllByResourceIdOrRelResourceId(Long resourceId);
 
     /**

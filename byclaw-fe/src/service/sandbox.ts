@@ -1,18 +1,5 @@
 import { POST } from './common/request';
-
-export interface SandboxInfo {
-  userCode: string;
-  sandboxType: string;
-  sandboxId: string;
-  endpoints?: string[];
-  instanceEndpoints?: Record<string, string>;
-  token?: string;
-  status?: string;
-  workerId?: string;
-  workerOnline?: boolean;
-  workerLastSeen?: number;
-  workerLeaseTtlSeconds?: number;
-}
+import { ISandboxesInfo } from '@/models/common/useAppStore';
 
 export interface LaunchSandboxResult {
   endpoint: string;
@@ -42,7 +29,10 @@ export async function navigateSandboxBrowser(params: {
 /**
  * 查询沙箱信息
  */
-export async function getSandboxInfo(params: { userCode?: string; sandboxType?: string }): Promise<SandboxInfo[]> {
+export async function getSandboxInfo(params: {
+  userCode?: string;
+  sandboxType?: string;
+}): Promise<Array<ISandboxesInfo>> {
   return POST('/byaiService/sandbox/getSandboxInfo', params);
 }
 
@@ -77,6 +67,6 @@ export async function sandboxHeartbeat(params: { resourceId?: number }): Promise
 /**
  * 沙箱续约
  */
-export async function renewSandbox(params: { userCode?: string; resourceId?: number }): Promise<SandboxInfo> {
+export async function renewSandbox(params: { userCode?: string; resourceId?: number }): Promise<ISandboxesInfo> {
   return POST('/byaiService/sandbox/renewSandbox', params);
 }

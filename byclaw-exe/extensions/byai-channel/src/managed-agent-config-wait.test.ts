@@ -205,4 +205,24 @@ describe("baiying agent config wait", () => {
     );
     expect(log.warn).not.toHaveBeenCalled();
   });
+
+  it("stops waiting when the inbound task is cancelled", async () => {
+    const coldConfig = {
+      agents: { list: [] },
+      models: { providers: {} },
+    } as unknown as OpenClawConfig;
+    const controller = new AbortController();
+    const pending = waitForManagedBaiyingAgentConfig({
+      runtime: { config: { current: () => coldConfig } },
+      cfg: coldConfig,
+      agentId: "baiying-agent-cancelled",
+      waitMs: 60_000,
+      pollMs: 1000,
+      signal: controller.signal,
+    });
+
+    controller.abort(new Error("config wait cancelled"));
+
+    await expect(pending).rejects.toThrow("config wait cancelled");
+  });
 });

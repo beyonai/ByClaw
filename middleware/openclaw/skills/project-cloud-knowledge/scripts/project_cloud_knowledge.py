@@ -26,11 +26,13 @@ SESSION_AWARE_COMMANDS = frozenset(
     {
         "mkdir",
         "rename-dir",
+        "move",
         "delete-dir",
         "check-conflicts",
         "upload",
         "update-file",
         "build",
+        "metadata-update",
         "entity-discovery",
         "entity-enrich",
         "remove-file",
@@ -552,6 +554,9 @@ class BackendApi:
     def delete_directory(self, payload: dict[str, Any]) -> Any:
         return self.transport.request(method="POST", path=self._path("deleteFolder"), payload=payload)
 
+    def move_items(self, payload: dict[str, Any]) -> Any:
+        return self.transport.request(method="POST", path=self._path("moveKnowledgeItems"), payload=payload)
+
     def list_directory(self, payload: dict[str, Any]) -> Any:
         return self.transport.request(method="POST", path=self._path("queryDirAndFileByLevel"), payload=payload)
 
@@ -604,6 +609,20 @@ class BackendApi:
         return self.transport.request(
             method="POST",
             path=self._path("knowledgeItems/metadataSearch"),
+            payload=payload,
+        )
+
+    def metadata_get(self, payload: dict[str, Any]) -> Any:
+        return self.transport.request(
+            method="POST",
+            path=self._path("knowledgeItems/metadata/get"),
+            payload=payload,
+        )
+
+    def metadata_update(self, payload: dict[str, Any]) -> Any:
+        return self.transport.request(
+            method="POST",
+            path=self._path("knowledgeItems/metadata/update"),
             payload=payload,
         )
 
@@ -721,6 +740,32 @@ class KnowledgeManager:
         )
         return {"ok": True, "action": "rename-dir", "renamed": renamed}
 
+    def _move(self, args: argparse.Namespace) -> dict[str, Any]:
+        sources = args.source_path
+        target = args.target_directory_path or args.target_file_path
+        for path in [*sources, target]:
+            if not path or not path.strip() or not path.startswith("/"):
+                raise ValueError("移动源和目标必须是资源内绝对路径")
+            _ensure_not_knowledge_entity_path(path)
+        if any(_canonical_remote_path(path) == "/" for path in sources):
+            raise ValueError("不能移动知识库根目录")
+        if args.target_file_path and len(sources) != 1:
+            raise ValueError("--target-file-path 只支持一个 --source-path")
+        if args.target_directory_path:
+            for source in sources:
+                _ensure_not_knowledge_entity_path(
+                    _remote_child_path(target, PurePosixPath(_canonical_remote_path(source)).name)
+                )
+        payload = {
+            "resourceId": self._resource_id(args),
+            "sourcePath": sources,
+            "overwrite": False,
+        }
+        payload["targetDirectoryPath" if args.target_directory_path else "targetFilePath"] = target
+        if args.dry_run:
+            return {"ok": True, "action": "move", "dryRun": True, "payload": payload}
+        return {"ok": True, "action": "move", "result": self.api.move_items(payload)}
+
     def _delete_dir(self, args: argparse.Namespace) -> dict[str, Any]:
         payload = {"resourceId": self._resource_id(args), "directoryPath": args.directory_path}
         if args.dry_run:
@@ -801,15 +846,45 @@ class KnowledgeManager:
             result["postProcessErrors"] = value["postProcessErrors"]
         return result
 
-    def _build_uploaded(self, resource_id: int, uploaded: dict[str, Any]) -> list[dict[str, Any]]:
+    @staticmethod
+    def _uploaded_build_paths(
+        directory_path: str, uploaded: dict[str, Any]
+    ) -> list[str]:
         items = uploaded.get("uploadItems", [])
         if not items:
             raise ValueError("上传成功但未返回 uploadItems，无法触发构建")
-        builds = []
+        target_directory = PurePosixPath(_canonical_remote_path(directory_path))
+        build_paths: list[str] = []
+        seen: set[str] = set()
         for item in items:
             file_path = item.get("filePath") if isinstance(item, dict) else None
             if not file_path:
                 raise ValueError("uploadItems 中的文件缺少 filePath")
+            uploaded_path = PurePosixPath(_canonical_remote_path(file_path))
+            try:
+                relative_path = uploaded_path.relative_to(target_directory)
+            except ValueError as exc:
+                raise ValueError(
+                    f"uploadItems 中的路径不在上传目标目录内: {uploaded_path}"
+                ) from exc
+            if not relative_path.parts:
+                raise ValueError(f"uploadItems 返回了上传目标目录自身: {uploaded_path}")
+            build_path = (
+                uploaded_path
+                if len(relative_path.parts) == 1
+                else target_directory / relative_path.parts[0]
+            )
+            normalized_build_path = str(build_path)
+            if normalized_build_path not in seen:
+                seen.add(normalized_build_path)
+                build_paths.append(normalized_build_path)
+        return build_paths
+
+    def _build_uploaded(
+        self, resource_id: int, directory_path: str, uploaded: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        builds = []
+        for file_path in self._uploaded_build_paths(directory_path, uploaded):
             built = self.api.build(self._file_path_payload(resource_id, file_path))
             builds.append({"filePath": file_path, "built": built})
         return builds
@@ -828,7 +903,7 @@ class KnowledgeManager:
             if isinstance(conflict, dict) and conflict.get("conflict"):
                 return {"ok": True, "action": "upload", "conflict": True, "needsOverwriteConfirmation": True, "overwritePaths": conflict.get("overwritePaths", [])}
         uploaded = self._upload_result(self.api.upload_files(files=files, form_fields=fields), resource_id)
-        builds = self._build_uploaded(resource_id, uploaded)
+        builds = self._build_uploaded(resource_id, args.directory_path, uploaded)
         return {"ok": True, "action": "upload", "uploaded": uploaded, "builds": builds}
 
     def _update_file(self, args: argparse.Namespace) -> dict[str, Any]:
@@ -850,6 +925,7 @@ class KnowledgeManager:
         return {"ok": True, "action": "update-file", "updated": {"resourceId": resource_id, "filePath": target_path}, "builds": [{"filePath": target_path, "built": built}]}
 
     def _build(self, args: argparse.Namespace) -> dict[str, Any]:
+        # 后端复用 directoryPath 承载文件或目录，再映射为原生 API 的 filePath。
         payload = self._file_path_payload(self._resource_id(args), args.file_path)
         if args.dry_run:
             return {"ok": True, "action": "build", "dryRun": True, "payload": payload}
@@ -969,6 +1045,129 @@ class KnowledgeManager:
             "items": items,
         }
 
+    def _metadata_get(self, args: argparse.Namespace) -> dict[str, Any]:
+        resource_id = self._resource_id(args)
+        file_path = args.file_path.strip()
+        payload = _compact(
+            {
+                "resourceId": resource_id,
+                "filePath": file_path,
+                "metadataFieldList": args.metadata_field,
+            }
+        )
+        value = self.api.metadata_get(payload)
+        value = value if isinstance(value, dict) else {}
+        metadata = value.get("metadata")
+        return {
+            "ok": True,
+            "action": "metadata-get",
+            "resourceId": resource_id,
+            "filePath": file_path,
+            "metadataFields": args.metadata_field or [],
+            "metadata": metadata if isinstance(metadata, dict) else {},
+        }
+
+    @staticmethod
+    def _metadata_operations(args: argparse.Namespace) -> list[dict[str, Any]]:
+        operations: list[dict[str, Any]] = []
+
+        def property_name(raw_name: str) -> str:
+            name = raw_name.strip()
+            if not name:
+                raise ValueError("元数据属性名不能为空")
+            return name
+
+        def add_set(attribute: str, value_type: str, convert: Any = None) -> None:
+            for raw_name, raw_value in getattr(args, attribute) or []:
+                value = convert(raw_value) if convert else raw_value
+                operations.append(
+                    {
+                        "propertyName": property_name(raw_name),
+                        "operation": "set",
+                        "valueType": value_type,
+                        "value": value,
+                    }
+                )
+
+        add_set("set_string", "string")
+        for values in args.set_string_list or []:
+            operations.append(
+                {
+                    "propertyName": property_name(values[0]),
+                    "operation": "set",
+                    "valueType": "stringList",
+                    "value": values[1:],
+                }
+            )
+        add_set("set_number", "number", _metadata_number)
+        add_set("set_boolean", "boolean", _metadata_boolean)
+        add_set("set_datetime", "datetime")
+
+        for operation_name in ("append", "remove"):
+            for values in getattr(args, operation_name) or []:
+                if len(values) < 2:
+                    raise ValueError(
+                        f"--{operation_name} 需要属性名和至少一个字符串值"
+                    )
+                operations.append(
+                    {
+                        "propertyName": property_name(values[0]),
+                        "operation": operation_name,
+                        "value": values[1:],
+                    }
+                )
+        for operation_name in ("unset", "clear"):
+            for raw_name in getattr(args, operation_name) or []:
+                operations.append(
+                    {
+                        "propertyName": property_name(raw_name),
+                        "operation": operation_name,
+                    }
+                )
+
+        if not operations:
+            raise ValueError("metadata-update 至少需要一个元数据操作参数")
+        property_names = [operation["propertyName"] for operation in operations]
+        duplicate_names = sorted(
+            {name for name in property_names if property_names.count(name) > 1}
+        )
+        if duplicate_names:
+            raise ValueError(
+                "同一请求中每个元数据属性只能操作一次: "
+                + ", ".join(duplicate_names)
+            )
+        return operations
+
+    def _metadata_update(self, args: argparse.Namespace) -> dict[str, Any]:
+        resource_id = self._resource_id(args)
+        file_path = args.file_path.strip()
+        operations = self._metadata_operations(args)
+        payload = {
+            "resourceId": resource_id,
+            "filePath": file_path,
+            "operationList": operations,
+        }
+        if args.dry_run:
+            result = {
+                "ok": True,
+                "action": "metadata-update",
+                "dryRun": True,
+                "payload": payload,
+            }
+            session_id = _normalize_session_id(args.session_id)
+            if session_id:
+                result["headers"] = {SESSION_ID_HEADER: session_id}
+            return result
+        self.api.metadata_update(payload)
+        return {
+            "ok": True,
+            "action": "metadata-update",
+            "resourceId": resource_id,
+            "filePath": file_path,
+            "operationCount": len(operations),
+            "properties": [operation["propertyName"] for operation in operations],
+        }
+
     @staticmethod
     def _entity_batch(value: Any, *, resource_id: int) -> dict[str, Any]:
         if not isinstance(value, dict) or not str(value.get("batchId") or "").strip():
@@ -1021,6 +1220,7 @@ class KnowledgeManager:
                 ),
                 field_name: getattr(args, attribute_name),
                 "force": args.force,
+                "tags": getattr(args, "tag", None),
                 "extraParams": args.extra_params_json,
             }
         )
@@ -1131,7 +1331,7 @@ def _add_command(
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="project-cloud-knowledge",
-        description="管理 ByClaw 知识库或项目云盘的目录、文件、构建、实体处理任务和检索。",
+        description="管理 ByClaw 知识库或项目云盘的目录、文件、构建、标签和其他属性、实体处理任务及检索。",
         epilog=(
             "示例：\n"
             "  project-cloud-knowledge list --resource-id 1001 --directory-path /\n"
@@ -1154,18 +1354,21 @@ def build_parser() -> argparse.ArgumentParser:
     descriptions = {
         "mkdir": "创建知识库目录",
         "rename-dir": "重命名知识库目录",
+        "move": "在同一知识库内移动文件或目录（不支持覆盖）",
         "delete-dir": "删除知识库目录",
         "list": "列出指定目录的文件和子目录",
         "check-conflicts": "上传前检查目标目录中的同名文件",
         "upload": "导入一个或多个文件或 ZIP，并自动触发构建",
         "update-file": "更新一个已有文件，并自动触发构建",
-        "build": "触发指定知识文件构建",
+        "build": "构建指定文件或递归批量构建目录（/ 表示全库）",
         "build-status": "查询知识文件构建状态",
         "download": "下载知识库文件或目录压缩包",
         "read-file": "按行读取知识库文件内容",
         "search": "检索知识库内容切片",
         "search-file": "检索知识库相关文件",
-        "metadata-search": "仅按元数据条件分页检索知识库文件",
+        "metadata-search": "仅按标签或其他属性条件分页查找知识库文件",
+        "metadata-get": "查看知识文件或目录的标签和其他属性",
+        "metadata-update": "给知识文件或目录打标签，或原子更新其他属性",
         "entity-discovery": "异步发现原始文档中的知识实体",
         "entity-enrich": "异步补全 KnowledgeEntity 文档",
         "remove-file": "删除知识库文件",
@@ -1193,6 +1396,15 @@ def build_parser() -> argparse.ArgumentParser:
                 help="目录说明",
             )
         _add_dry_run(command)
+
+    move = _add_command(subparsers, "move", descriptions["move"])
+    _add_single_resource(move)
+    move.add_argument("--source-path", action="append", required=True, metavar="PATH",
+                      help="源文件或目录的绝对路径；批量移动时重复传入")
+    target = move.add_mutually_exclusive_group(required=True)
+    target.add_argument("--target-directory-path", metavar="PATH", help="接收源文件或目录的目标目录")
+    target.add_argument("--target-file-path", metavar="PATH", help="单个源的完整目标路径")
+    _add_dry_run(move)
 
     for name in ("delete-dir", "list"):
         command = _add_command(subparsers, name, descriptions[name])
@@ -1278,7 +1490,10 @@ def build_parser() -> argparse.ArgumentParser:
             "--file-path",
             required=True,
             metavar="PATH",
-            help="知识库文件的绝对路径",
+            help=(
+                "知识库文件或目录的绝对路径；目录递归构建，/ 表示全库"
+                if name == "build" else "知识库文件的绝对路径"
+            ),
         )
         if name != "build-status":
             _add_dry_run(command)
@@ -1413,6 +1628,74 @@ def build_parser() -> argparse.ArgumentParser:
         help="每页条数，优先于 --top-k（最大 10000）",
     )
 
+    metadata_get = _add_command(
+        subparsers,
+        "metadata-get",
+        descriptions["metadata-get"],
+    )
+    _add_single_resource(metadata_get)
+    metadata_get.add_argument(
+        "--file-path",
+        required=True,
+        metavar="PATH",
+        help="知识库内文件或目录的绝对路径",
+    )
+    metadata_get.add_argument(
+        "--metadata-field",
+        action="append",
+        metavar="NAME",
+        help="需要返回的标签或其他属性名；省略时返回全部属性，多个属性时重复传入",
+    )
+
+    metadata_update = _add_command(
+        subparsers,
+        "metadata-update",
+        descriptions["metadata-update"],
+    )
+    _add_single_resource(metadata_update)
+    metadata_update.add_argument(
+        "--file-path",
+        required=True,
+        metavar="PATH",
+        help="知识库内文件或目录的绝对路径",
+    )
+    for option, value_type in (
+        ("--set-string", "字符串"),
+        ("--set-number", "数值"),
+        ("--set-boolean", "布尔值 true/false"),
+        ("--set-datetime", "ISO 8601 时间"),
+    ):
+        metadata_update.add_argument(
+            option,
+            action="append",
+            nargs=2,
+            metavar=("PROPERTY", "VALUE"),
+            help=f"把属性设为{value_type}；可重复传入以设置不同属性",
+        )
+    metadata_update.add_argument(
+        "--set-string-list",
+        action="append",
+        nargs="+",
+        metavar=("PROPERTY", "VALUE"),
+        help="把属性设为字符串列表；属性名后可跟零个或多个值",
+    )
+    for option, operation in (("--append", "追加"), ("--remove", "删除")):
+        metadata_update.add_argument(
+            option,
+            action="append",
+            nargs="+",
+            metavar=("PROPERTY", "VALUE"),
+            help=f"对已有 stringList 属性{operation}一个或多个值",
+        )
+    for option, operation in (("--unset", "删除属性"), ("--clear", "清空 stringList")):
+        metadata_update.add_argument(
+            option,
+            action="append",
+            metavar="PROPERTY",
+            help=f"{operation}；可重复传入以操作不同属性",
+        )
+    _add_dry_run(metadata_update)
+
     for name in ("entity-discovery", "entity-enrich"):
         command = _add_command(subparsers, name, descriptions[name])
         _add_single_resource(command)
@@ -1434,6 +1717,13 @@ def build_parser() -> argparse.ArgumentParser:
                 default=12,
                 metavar="N",
                 help="单个文档最多发现的实体数，范围 1-12（默认 12）",
+            )
+            command.add_argument(
+                "--tag",
+                action="append",
+                type=_non_empty_text,
+                metavar="TAG",
+                help="追加到本次创建或锚定实体的标签；多个标签时重复传入",
             )
         else:
             command.add_argument(
@@ -1461,7 +1751,7 @@ def build_parser() -> argparse.ArgumentParser:
             type=_json_object,
             default={},
             metavar="JSON",
-            help="随异步任务保存的 JSON 对象",
+            help="已弃用的历史兼容参数；新调用不要传入",
         )
         _add_dry_run(command)
 
@@ -1475,6 +1765,33 @@ def _boolean(value: str) -> bool:
     if normalized in {"false", "0", "no"}:
         return False
     raise argparse.ArgumentTypeError("必须是 true 或 false")
+
+
+def _non_empty_text(value: str) -> str:
+    normalized = value.strip()
+    if not normalized:
+        raise argparse.ArgumentTypeError("不能为空")
+    return normalized
+
+
+def _metadata_boolean(value: str) -> bool:
+    try:
+        return _boolean(value)
+    except argparse.ArgumentTypeError as exc:
+        raise ValueError("布尔元数据值必须是 true 或 false") from exc
+
+
+def _metadata_number(value: str) -> int | float:
+    try:
+        return int(value)
+    except ValueError:
+        try:
+            number = float(value)
+        except ValueError as exc:
+            raise ValueError(f"数值元数据不是合法数字: {value}") from exc
+        if number != number or number in {float("inf"), float("-inf")}:
+            raise ValueError(f"数值元数据必须是有限数字: {value}")
+        return number
 
 
 def _positive_int(value: str) -> int:

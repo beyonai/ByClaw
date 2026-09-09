@@ -18,6 +18,7 @@ export async function executeTool(params: {
   timeoutMs?: number;
   logger?: BaiyingEnhanceLogger;
   privateParams?: Record<string, string>;
+  signal?: AbortSignal;
 }): Promise<ExecutorResponse> {
   const { capability } = params;
   const tool = isRecord(capability.tool) ? (capability.tool as Dict) : {};
@@ -77,6 +78,7 @@ export async function executeTool(params: {
     payload: requestParameters,
     headers,
     timeoutMs: params.timeoutMs ?? 30_000,
+    signal: params.signal,
   });
 
   if ("error" in result) {

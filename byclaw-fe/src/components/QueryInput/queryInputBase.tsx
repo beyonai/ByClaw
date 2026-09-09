@@ -762,14 +762,21 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
           projectId={this.props.projectId}
           projectCloudResourceId={this.props.projectCloudResourceId}
           mentionPopoverPlacement={this.props.mentionPopoverPlacement}
-          onResourcePopoverChange={({ open, inputText, width }) =>
+          onResourcePopoverChange={({ open, inputText, width }) => {
+            if (!open) {
+              // 员工更多操作的 Dropdown/Popconfirm 会使编辑器失焦，不能因此关闭加号资源弹窗。
+              const hasResourceActionOverlay =
+                document.body.dataset.resourceActionOverlay === 'true' ||
+                document.querySelector('.ant-dropdown, .ant-popconfirm, .ant-popover-buttons');
+              if (hasResourceActionOverlay) return;
+            }
             this.setState({
               toolsPopoverOpen: open,
               toolsPopoverWidth: open ? width : undefined,
               toolsPopoverKeyword: open ? inputText : undefined,
               ...(open ? { activeToolMenuKey: 'expert', visitedToolTabs: ['expert'] } : {}),
-            })
-          }
+            });
+          }}
         />
         {this.getAssitantTrigger()}
       </div>

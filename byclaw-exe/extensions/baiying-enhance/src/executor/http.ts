@@ -32,13 +32,18 @@ export async function postJson(params: {
   const controller = new AbortController();
   const cleanupTimer = setTimeout(() => controller.abort(new Error("request timed out")), params.timeoutMs);
   const externalSignal = params.signal;
+  const abortFromCaller = () => controller.abort(externalSignal?.reason);
   if (externalSignal) {
     if (externalSignal.aborted) {
-      controller.abort(externalSignal.reason);
+      abortFromCaller();
     } else {
-      externalSignal.addEventListener("abort", () => controller.abort(externalSignal.reason), { once: true });
+      externalSignal.addEventListener("abort", abortFromCaller, { once: true });
     }
   }
+  const cleanup = () => {
+    clearTimeout(cleanupTimer);
+    externalSignal?.removeEventListener("abort", abortFromCaller);
+  };
   let response: Response;
   try {
     response = await fetch(params.url, {
@@ -48,12 +53,12 @@ export async function postJson(params: {
       signal: controller.signal,
     });
   } catch (err) {
-    clearTimeout(cleanupTimer);
+    cleanup();
     const message = formatFetchError(err, params.url);
     return { error: makeError("REQUEST_FAILED", message) };
   }
   const bodyText = await response.text().catch(() => "");
-  clearTimeout(cleanupTimer);
+  cleanup();
 
   if (response.status === 401 || response.status === 403) {
     return { error: authError(bodyText.slice(0, 200)) };
@@ -71,13 +76,18 @@ export async function postMultipartForm(params: {
   const controller = new AbortController();
   const cleanupTimer = setTimeout(() => controller.abort(new Error("request timed out")), params.timeoutMs);
   const externalSignal = params.signal;
+  const abortFromCaller = () => controller.abort(externalSignal?.reason);
   if (externalSignal) {
     if (externalSignal.aborted) {
-      controller.abort(externalSignal.reason);
+      abortFromCaller();
     } else {
-      externalSignal.addEventListener("abort", () => controller.abort(externalSignal.reason), { once: true });
+      externalSignal.addEventListener("abort", abortFromCaller, { once: true });
     }
   }
+  const cleanup = () => {
+    clearTimeout(cleanupTimer);
+    externalSignal?.removeEventListener("abort", abortFromCaller);
+  };
   const requestHeaders: Record<string, string> = {};
   for (const [k, v] of Object.entries(params.headers)) {
     if (k.toLowerCase() === "content-type") continue;
@@ -92,12 +102,12 @@ export async function postMultipartForm(params: {
       signal: controller.signal,
     });
   } catch (err) {
-    clearTimeout(cleanupTimer);
+    cleanup();
     const message = formatFetchError(err, params.url);
     return { error: makeError("REQUEST_FAILED", message) };
   }
   const bodyText = await response.text().catch(() => "");
-  clearTimeout(cleanupTimer);
+  cleanup();
 
   if (response.status === 401 || response.status === 403) {
     return { error: authError(bodyText.slice(0, 200)) };

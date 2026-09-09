@@ -28,4 +28,67 @@ class SsResExtDigEmployeeMapperSqlTest {
                 .doesNotContain("trim(a.worker_agent_type) != ''");
         }
     }
+
+    @Test
+    void installTargetQuery_limitsManagePermissionToCreatorExplicitGrantAndAdminVip() throws IOException {
+        String resourcePath = "/com/iwhalecloud/byai/manager/mapper/resource/SsResExtDigEmployeeMapper.xml";
+        try (var input = getClass().getResourceAsStream(resourcePath)) {
+            assertThat(input).isNotNull();
+            String mapperXml = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+            int queryStart = mapperXml.indexOf("<select id=\"selectInstallTargetEmployees\"");
+            int queryEnd = mapperXml.indexOf("</select>", queryStart);
+            assertThat(queryStart).isGreaterThanOrEqualTo(0);
+            assertThat(queryEnd).isGreaterThan(queryStart);
+            String query = mapperXml.substring(queryStart, queryEnd);
+
+            assertThat(query).contains("a.owner_type = 'enterprise'")
+                .contains("a.owner_type = 'personal'")
+                .contains("a.owner_type = 'personal_default'")
+                .contains("grant_type = 'ALLOW_MANAGE'")
+                .contains("a.create_by = #{userId}")
+                .contains("installTargetAdminVip == true")
+                .contains("manage_auth.allow_manage_count > 0")
+                .contains("manage_auth.black_count = 0")
+                .contains("upper(a.resource_name)")
+                .contains("upper(a.resource_desc)")
+                .contains("coalesce(e.agent_type, '') != '017'")
+                .doesNotContain("memberCandidateGlobalManager == true")
+                .doesNotContain("managerOrgPathCodes")
+                .doesNotContain("grant_type in ('AVAILABLE_USE', 'FORCE_USE'");
+        }
+    }
+
+    @Test
+    void personalAndManageListQueries_mapResourceStatus() throws IOException {
+        String resourcePath = "/com/iwhalecloud/byai/manager/mapper/resource/SsResExtDigEmployeeMapper.xml";
+        try (var input = getClass().getResourceAsStream(resourcePath)) {
+            assertThat(input).isNotNull();
+            String mapperXml = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+
+            assertThat(selectBody(mapperXml, "selectDigitalEmployeeByQo")).contains("a.resource_status");
+            assertThat(selectBody(mapperXml, "selectPersonalDigitalEmployeeByQo")).contains("a.resource_status");
+            assertThat(resultMapBody(mapperXml, "digitalEmployeePageVoResultMap"))
+                .contains("column=\"resource_status\" property=\"resourceStatus\"");
+            assertThat(resultMapBody(mapperXml, "digitalEmployeeVoResultMap"))
+                .contains("column=\"resource_status\" property=\"resourceStatus\"");
+        }
+    }
+
+    private static String selectBody(String mapperXml, String statementId) {
+        String startTag = "<select id=\"" + statementId + "\"";
+        int start = mapperXml.indexOf(startTag);
+        assertThat(start).as(statementId + " start").isGreaterThanOrEqualTo(0);
+        int end = mapperXml.indexOf("</select>", start);
+        assertThat(end).as(statementId + " end").isGreaterThan(start);
+        return mapperXml.substring(start, end);
+    }
+
+    private static String resultMapBody(String mapperXml, String resultMapId) {
+        String startTag = "<resultMap id=\"" + resultMapId + "\"";
+        int start = mapperXml.indexOf(startTag);
+        assertThat(start).as(resultMapId + " start").isGreaterThanOrEqualTo(0);
+        int end = mapperXml.indexOf("</resultMap>", start);
+        assertThat(end).as(resultMapId + " end").isGreaterThan(start);
+        return mapperXml.substring(start, end);
+    }
 }

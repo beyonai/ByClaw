@@ -20,12 +20,14 @@ import BeyondBroadcastChannel from '@/utils/broadcastChannel';
 import axios, { AxiosProgressEvent, AxiosResponse, InternalAxiosRequestConfig, Method } from 'axios';
 import { get, isPlainObject, throttle, isNil } from 'lodash';
 import { logout } from '../user';
+import { getDesktopLocalRequest } from './desktopLocal';
 
 declare module 'axios' {
   // 录制器需要在 409 时保留服务端原始响应，供调用方自行处理。
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   interface AxiosRequestConfig<D = any> {
     preserveErrorResponse?: boolean;
+    desktopLocal?: boolean;
   }
 }
 
@@ -60,6 +62,8 @@ const maxQuantityMap: Record<
     sign: AbortController;
   }
 > = {};
+
+let globalLogoutPromise: Promise<void> | null = null;
 
 function requestStart({ url, maxQuantity }: { url: string; maxQuantity?: number }) {
   if (!maxQuantity) return;
@@ -136,6 +140,8 @@ function checkFactoryRes(
 
 // 全局退出登录
 export const globalLogout = (showLoginModal?: boolean, expectedAuthSnapshot?: AuthSnapshot) => {
+  if (globalLogoutPromise) return globalLogoutPromise;
+
   try {
     // 退出动作可能由旧请求延迟触发，只有请求所属会话仍然存在时才允许清理凭证。
     const hasExpectedAuth = expectedAuthSnapshot ? hasAuthSnapshot(expectedAuthSnapshot) : false;
@@ -148,10 +154,10 @@ export const globalLogout = (showLoginModal?: boolean, expectedAuthSnapshot?: Au
     const shouldLogout = Boolean(userState.userInfo) || hasExpectedAuth;
     if (!shouldLogout) return Promise.resolve();
 
-    if (userState.userInfo) {
-      // 在清理本地凭证前构造退出请求，确保请求仍携带当前会话凭证。
-      Promise.resolve(logout()).catch((error) => console.error(error));
-    }
+    // 在清理本地凭证前构造退出请求，确保请求仍携带当前会话凭证。
+    const serverLogoutPromise = userState.userInfo
+      ? Promise.resolve(logout()).catch((error) => console.error(error))
+      : Promise.resolve();
 
     clearToken();
 
@@ -160,7 +166,11 @@ export const globalLogout = (showLoginModal?: boolean, expectedAuthSnapshot?: Au
 
     loginRedirect(showLoginModal ? { openLoginModal: '1' } : {});
 
-    return Promise.resolve();
+    const logoutTask = serverLogoutPromise.finally(() => {
+      if (globalLogoutPromise === logoutTask) globalLogoutPromise = null;
+    });
+    globalLogoutPromise = logoutTask;
+    return logoutTask;
   } catch (error) {
     console.error(error);
     return Promise.reject(error);
@@ -179,6 +189,9 @@ const instance = axios.create({
 /* 请求拦截 */
 instance.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
+    // Loopback file APIs authenticate with their short-lived bearer token. Web API
+    // signatures and login headers are intentionally not exposed to the local server.
+    if (config.desktopLocal) return config;
     try {
       // 接口签名
       const method = (config.method || 'GET').toUpperCase();
@@ -318,49 +331,61 @@ export function request(url: string, data: any, cfg: ConfigType, method: Method)
   }
 
   // 通过 Axios 标准 headers 传递认证信息，避免旧的自定义 myHeader 被单独覆盖或丢失。
-  return instance
-    .request({
-      ...config,
-      headers,
-      baseURL: '/',
-      url,
-      method,
-      data: ['POST', 'PUT'].includes(method) ? myData : null,
-      params: !['POST', 'PUT'].includes(method) ? myData : null,
-      signal: cancelToken?.signal,
-      preserveErrorResponse: responseCfg?.preserveErrorResponse,
-    })
-    .then((res) => {
-      if (config && config.responseType === 'blob') {
-        // @ts-ignore
-        const disposition = res.headers.get('content-disposition') || '';
-        // 解析 Content-Disposition 文件名：优先取 RFC 5987 的 filename*=UTF-8''xxx（中文 / 特殊字符更稳），
-        // 缺失时再退回 filename="xxx"。两条都用各自的正则截断到下一个 ';' 或行尾，
-        // 避免之前的 substr(indexOf('filename=')+...) 把后续 filename*=... 一起拼进文件名。
-        let rawName = '';
-        const star = disposition.match(/filename\*=([^']*)''([^;\r\n]+)/i);
-        if (star) {
-          rawName = star[2];
-        } else {
-          const plain = disposition.match(/filename="?([^";\r\n]+)"?/i);
-          if (plain) {
-            rawName = plain[1];
+  return getDesktopLocalRequest(url, method, myData).then((desktop) =>
+    instance
+      .request({
+        ...config,
+        headers,
+        baseURL: desktop?.baseURL || '/',
+        url,
+        method,
+        data: ['POST', 'PUT'].includes(method) ? myData : null,
+        params: !['POST', 'PUT'].includes(method) ? myData : null,
+        signal: cancelToken?.signal,
+        preserveErrorResponse: responseCfg?.preserveErrorResponse,
+        ...(desktop
+          ? {
+            desktopLocal: true,
+            headers: {
+              'content-type':
+                  config.headers?.['Content-Type'] || config.headers?.['content-type'] || 'application/json',
+              Authorization: `Bearer ${desktop.token}`,
+            },
           }
+          : {}),
+      })
+      .then((res) => {
+        if (config && config.responseType === 'blob') {
+          // @ts-ignore
+          const disposition = res.headers.get('content-disposition') || '';
+          // 解析 Content-Disposition 文件名：优先取 RFC 5987 的 filename*=UTF-8''xxx（中文 / 特殊字符更稳），
+          // 缺失时再退回 filename="xxx"。两条都用各自的正则截断到下一个 ';' 或行尾，
+          // 避免之前的 substr(indexOf('filename=')+...) 把后续 filename*=... 一起拼进文件名。
+          let rawName = '';
+          const star = disposition.match(/filename\*=([^']*)''([^;\r\n]+)/i);
+          if (star) {
+            rawName = star[2];
+          } else {
+            const plain = disposition.match(/filename="?([^";\r\n]+)"?/i);
+            if (plain) {
+              rawName = plain[1];
+            }
+          }
+          let resolvedName = '';
+          try {
+            resolvedName = rawName ? window.decodeURIComponent(rawName) : '';
+          } catch (e) {
+            resolvedName = rawName;
+          }
+          return {
+            fileName: resolvedName,
+            file: res.data,
+          };
         }
-        let resolvedName = '';
-        try {
-          resolvedName = rawName ? window.decodeURIComponent(rawName) : '';
-        } catch (e) {
-          resolvedName = rawName;
-        }
-        return {
-          fileName: resolvedName,
-          file: res.data,
-        };
-      }
-      return checkFactoryRes(res.data, res, responseCfg);
-    })
-    .finally(() => requestFinish({ url }));
+        return checkFactoryRes(res.data, res, responseCfg);
+      })
+      .finally(() => requestFinish({ url }))
+  );
 }
 
 /**

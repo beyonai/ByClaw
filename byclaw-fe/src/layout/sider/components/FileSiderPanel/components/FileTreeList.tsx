@@ -37,14 +37,22 @@ interface FileTreeListProps {
   onNodeDoubleClick: (item: FileTreeItem) => void;
   getActionItems: (item: FileBrowserItem) => MenuProps['items'];
   onAction: (key: Key, item: FileBrowserItem) => void;
+  getTooltipPath?: (item: FileBrowserItem) => string | undefined;
 }
 
-export const FilePathTooltip: React.FC<{ item: FileBrowserItem; children: React.ReactNode }> = ({ item, children }) => {
+export const FilePathTooltip: React.FC<{ item: FileBrowserItem; path?: string; children: React.ReactNode }> = ({
+  item,
+  path,
+  children,
+}) => {
   const intl = useIntl();
+  const tooltipPath = path || item.path;
   const handleCopy = (event: React.MouseEvent) => {
     event.preventDefault();
     event.stopPropagation();
-    void copyTextToClipboard(item.path, () => message.success(intl.formatMessage({ id: 'fileBrowser.copy.success' })));
+    void copyTextToClipboard(tooltipPath, () =>
+      message.success(intl.formatMessage({ id: 'fileBrowser.copy.success' }))
+    );
   };
   return (
     <Popover
@@ -56,7 +64,7 @@ export const FilePathTooltip: React.FC<{ item: FileBrowserItem; children: React.
         <div className={styles.filePathTooltip}>
           <div className={styles.filePathTooltipName}>{item.name}</div>
           <div className={styles.filePathTooltipPathRow}>
-            <span className={styles.filePathTooltipPath}>{item.path}</span>
+            <span className={styles.filePathTooltipPath}>{tooltipPath}</span>
             <Button
               type="text"
               size="small"
@@ -77,24 +85,37 @@ export const FilePathTooltip: React.FC<{ item: FileBrowserItem; children: React.
 function toFileTreeData(
   list: FileBrowserItem[],
   childrenByPath: Record<string, FileBrowserItem[]>,
-  expandedDirectoryKeySet: Set<string>
+  expandedDirectoryKeySet: Set<string>,
+  ancestorDirectoryPaths: Set<string> = new Set()
 ): FileTreeItem[] {
-  return sortFileBrowserItems(list).map((item) => {
-    const dir = isDirectory(item);
-    const directoryPath = ensureDirectoryPath(item.path);
-    const expanded = dir && expandedDirectoryKeySet.has(directoryPath);
-    return {
-      ...item,
-      key: dir ? directoryPath : item.path,
-      title: <span>{item.name}</span>,
-      isLeaf: !dir,
-      className: expanded ? styles.treeNodeExpanded : undefined,
-      children:
-        dir && childrenByPath[directoryPath]
-          ? toFileTreeData(childrenByPath[directoryPath], childrenByPath, expandedDirectoryKeySet)
-          : undefined,
-    };
-  });
+  // 接口异常时可能把当前目录再次作为子节点返回；递归渲染前去重并阻断祖先路径，避免栈溢出。
+  const seenPaths = new Set<string>();
+  return sortFileBrowserItems(list)
+    .filter((item) => {
+      const path = normalizeFileBrowserPath(item.path);
+      if (seenPaths.has(path)) return false;
+      seenPaths.add(path);
+      return true;
+    })
+    .map((item) => {
+      const dir = isDirectory(item);
+      const directoryPath = ensureDirectoryPath(item.path);
+      const expanded = dir && expandedDirectoryKeySet.has(directoryPath);
+      const nextAncestorPaths = new Set(ancestorDirectoryPaths);
+      nextAncestorPaths.add(directoryPath);
+      const childItems = dir && childrenByPath[directoryPath];
+      return {
+        ...item,
+        key: dir ? directoryPath : item.path,
+        title: <span>{item.name}</span>,
+        isLeaf: !dir,
+        className: expanded ? styles.treeNodeExpanded : undefined,
+        children:
+          childItems && !ancestorDirectoryPaths.has(directoryPath)
+            ? toFileTreeData(childItems, childrenByPath, expandedDirectoryKeySet, nextAncestorPaths)
+            : undefined,
+      };
+    });
 }
 
 const formatFileSize = (size?: number) => {
@@ -135,6 +156,7 @@ const FileTreeList: React.FC<FileTreeListProps> = ({
   onNodeDoubleClick,
   getActionItems,
   onAction,
+  getTooltipPath,
 }) => {
   const treeData = useMemo(() => {
     const expandedDirectoryKeySet = new Set(
@@ -166,7 +188,7 @@ const FileTreeList: React.FC<FileTreeListProps> = ({
                   ? 'a-Folder-openwenjianjia-kai'
                   : getIconType(item.name, isDirectory(item));
                 return (
-                  <FilePathTooltip item={item}>
+                  <FilePathTooltip item={item} path={getTooltipPath?.(item)}>
                     <span>
                       <AntdIcon type={`icon-${iconType}`} />
                     </span>
@@ -205,7 +227,7 @@ const FileTreeList: React.FC<FileTreeListProps> = ({
                       .filter(Boolean)
                       .join(' ')}
                   >
-                    <FilePathTooltip item={item}>
+                    <FilePathTooltip item={item} path={getTooltipPath?.(item)}>
                       <span
                         className={[styles.treeTitleName, previewable ? styles.previewableTreeTitle : '']
                           .filter(Boolean)
@@ -228,7 +250,7 @@ const FileTreeList: React.FC<FileTreeListProps> = ({
                         ) : null}
                       </span>
                     </FilePathTooltip>
-                    {showActions && (
+                    {showActions && getActionItems(treeItem)?.length ? (
                       <Dropdown
                         trigger={['hover']}
                         overlayClassName={employeeStyles.mydropdown}
@@ -248,7 +270,7 @@ const FileTreeList: React.FC<FileTreeListProps> = ({
                           <EllipsisOutlined />
                         </span>
                       </Dropdown>
-                    )}
+                    ) : null}
                   </span>
                 );
               }}

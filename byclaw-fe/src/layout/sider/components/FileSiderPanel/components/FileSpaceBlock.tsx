@@ -58,6 +58,9 @@ interface FileSpaceBlockProps {
   onNodeDoubleClick?: (item: FileTreeItem) => void;
   getActionItems?: (item: FileBrowserItem) => MenuProps['items'];
   onAction?: (key: Key, item: FileBrowserItem) => void;
+
+  /** 项目代码可通过接口 URL 覆盖文件悬浮提示路径。 */
+  getTooltipPath?: (item: FileBrowserItem) => string | undefined;
 }
 
 export const getFileSpaceFileCount = (items: FileBrowserItem[] = []) =>
@@ -99,6 +102,7 @@ const FileSpaceBlock: React.FC<FileSpaceBlockProps> = ({
   onNodeDoubleClick,
   getActionItems,
   onAction,
+  getTooltipPath,
   style,
 }) => {
   const [collapsedGroupKeys, setCollapsedGroupKeys] = useState<Set<string>>(() => new Set());
@@ -167,6 +171,7 @@ const FileSpaceBlock: React.FC<FileSpaceBlockProps> = ({
         onNodeDoubleClick={onNodeDoubleClick || noopNodeDoubleClick}
         getActionItems={getActionItems || noopActionItems}
         onAction={onAction || noopAction}
+        getTooltipPath={getTooltipPath}
       />
     </div>
   );

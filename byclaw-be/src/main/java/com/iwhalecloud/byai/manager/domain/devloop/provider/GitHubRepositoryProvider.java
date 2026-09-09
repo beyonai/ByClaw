@@ -68,6 +68,7 @@ public class GitHubRepositoryProvider implements GitRepositoryProvider {
                 node.setSize(item.has("size") ? item.path("size").asLong() : null);
                 node.setSha(item.path("sha").asText(null));
                 node.setUrl(item.path("html_url").asText(null));
+                node.setDownloadUrl(item.path("download_url").asText(null));
                 node.setHasChildren("directory".equals(node.getType()));
                 nodes.add(node);
             }

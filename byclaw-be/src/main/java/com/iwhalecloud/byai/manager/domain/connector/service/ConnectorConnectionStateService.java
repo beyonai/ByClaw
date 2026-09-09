@@ -6,6 +6,7 @@ import java.util.Map;
 
 import com.alibaba.fastjson.JSON;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.iwhalecloud.byai.common.ecrypt.Sm4Util;
 import com.iwhalecloud.byai.manager.application.service.user.UserPrivateParamApplicationService;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatusResult;
@@ -180,6 +181,97 @@ public class ConnectorConnectionStateService {
             .eq(ConnectorAuth::getStatusCd, "00A")
             .orderByDesc(ConnectorAuth::getUpdateTime)
             .last("LIMIT 1"));
+    }
+
+    /** Updates only renewable credential lifecycle fields and retains the encrypted authorization metadata. */
+    @Transactional(rollbackFor = Exception.class)
+    public void updateCredentialLifecycle(
+            String userId, ConnectorInfo connector, AuthorizationStatusResult statusResult) {
+        if (connector == null || connector.getConnectorId() == null || statusResult == null) {
+            throw new IllegalArgumentException("连接器凭证生命周期参数无效");
+        }
+        ConnectorAuth auth = connectorAuthMapper.selectOne(new LambdaQueryWrapper<ConnectorAuth>()
+            .select(ConnectorAuth::getAuthId)
+            .eq(ConnectorAuth::getUserId, userId)
+            .eq(ConnectorAuth::getConnectorId, connector.getConnectorId())
+            .eq(ConnectorAuth::getEnableFlag, "Y")
+            .eq(ConnectorAuth::getStatusCd, "00A")
+            .orderByDesc(ConnectorAuth::getUpdateTime)
+            .last("LIMIT 1"));
+        if (auth == null) {
+            throw new IllegalArgumentException("连接器授权记录不存在");
+        }
+        Date now = new Date();
+        LambdaUpdateWrapper<ConnectorAuth> update = new LambdaUpdateWrapper<ConnectorAuth>(ConnectorAuth.class)
+            .eq(ConnectorAuth::getAuthId, auth.getAuthId())
+            .eq(ConnectorAuth::getUserId, userId)
+            .eq(ConnectorAuth::getConnectorId, connector.getConnectorId())
+            .eq(ConnectorAuth::getEnableFlag, "Y")
+            .eq(ConnectorAuth::getStatusCd, "00A")
+            .set(ConnectorAuth::getExpireTime, statusResult.accessExpiresAt())
+            .set(ConnectorAuth::getAccessExpireTime, statusResult.accessExpiresAt())
+            .set(ConnectorAuth::getRefreshExpireTime, statusResult.refreshExpiresAt())
+            .set(ConnectorAuth::getCredentialState, statusResult.credentialState().name())
+            .set(ConnectorAuth::getRenewalMode, statusResult.renewalMode().name())
+            .set(ConnectorAuth::getLastVerifiedAt, statusResult.lastVerifiedAt())
+            .set(ConnectorAuth::getLastSyncTime, now)
+            .set(ConnectorAuth::getUpdateTime, now);
+        requireSingleAffectedRow(connectorAuthMapper.update(null, update));
+        publishCredentialProjection(Long.valueOf(userId), connector,
+            ConnectorCredentialProjectionEvent.Action.SYNC);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void markRefreshNeeded(String userId, ConnectorInfo connector) {
+        ConnectorAuth auth = lifecycleAuthId(userId, connector);
+        Date now = new Date();
+        LambdaUpdateWrapper<ConnectorAuth> update = lifecycleUpdate(auth.getAuthId(), userId, connector)
+            .set(ConnectorAuth::getCredentialState, "REFRESH_NEEDED")
+            .set(ConnectorAuth::getLastSyncTime, now)
+            .set(ConnectorAuth::getUpdateTime, now);
+        requireSingleAffectedRow(connectorAuthMapper.update(null, update));
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void markReauthRequired(String userId, ConnectorInfo connector) {
+        ConnectorAuth auth = lifecycleAuthId(userId, connector);
+        Date now = new Date();
+        LambdaUpdateWrapper<ConnectorAuth> update = lifecycleUpdate(auth.getAuthId(), userId, connector)
+            .set(ConnectorAuth::getCredentialState, "REAUTH_REQUIRED")
+            .set(ConnectorAuth::getRenewalMode, "CREDENTIAL_REISSUE")
+            .set(ConnectorAuth::getLastSyncTime, now)
+            .set(ConnectorAuth::getUpdateTime, now);
+        requireSingleAffectedRow(connectorAuthMapper.update(null, update));
+        publishCredentialProjection(Long.valueOf(userId), connector,
+            ConnectorCredentialProjectionEvent.Action.DELETE);
+    }
+
+    private ConnectorAuth lifecycleAuthId(String userId, ConnectorInfo connector) {
+        if (connector == null || connector.getConnectorId() == null) {
+            throw new IllegalArgumentException("连接器凭证生命周期参数无效");
+        }
+        ConnectorAuth auth = connectorAuthMapper.selectOne(new LambdaQueryWrapper<ConnectorAuth>()
+            .select(ConnectorAuth::getAuthId)
+            .eq(ConnectorAuth::getUserId, userId)
+            .eq(ConnectorAuth::getConnectorId, connector.getConnectorId())
+            .eq(ConnectorAuth::getEnableFlag, "Y")
+            .eq(ConnectorAuth::getStatusCd, "00A")
+            .orderByDesc(ConnectorAuth::getUpdateTime)
+            .last("LIMIT 1"));
+        if (auth == null) {
+            throw new IllegalArgumentException("连接器授权记录不存在");
+        }
+        return auth;
+    }
+
+    private LambdaUpdateWrapper<ConnectorAuth> lifecycleUpdate(
+            Long authId, String userId, ConnectorInfo connector) {
+        return new LambdaUpdateWrapper<ConnectorAuth>(ConnectorAuth.class)
+            .eq(ConnectorAuth::getAuthId, authId)
+            .eq(ConnectorAuth::getUserId, userId)
+            .eq(ConnectorAuth::getConnectorId, connector.getConnectorId())
+            .eq(ConnectorAuth::getEnableFlag, "Y")
+            .eq(ConnectorAuth::getStatusCd, "00A");
     }
 
 

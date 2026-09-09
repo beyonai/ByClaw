@@ -1,10 +1,14 @@
 package com.iwhalecloud.byai.gateway.sandbox.service;
 
 import java.time.OffsetDateTime;
+import java.time.Instant;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.data.redis.listener.RedisMessageListenerContainer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -18,6 +22,8 @@ import com.iwhalecloud.byai.gateway.sandbox.model.SandboxInfo;
 import com.iwhalecloud.byai.gateway.sandbox.model.SandboxRecordView;
 import com.iwhalecloud.byai.gateway.sandbox.runtime.SandboxRuntimeInstance;
 import com.iwhalecloud.byai.gateway.sandbox.runtime.SandboxRuntimePage;
+import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpec;
+import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpecRepository;
 import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
 import com.iwhalecloud.byai.manager.entity.sandbox.SandboxReconcileGroup;
 import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord;
@@ -303,7 +309,7 @@ class SandboxServiceTest {
         Date lastAccess = new Date(1_000L);
         record.setLastAccessTime(lastAccess);
         when(workerRegistry.getWorker("byclaw-dsh-user001"))
-            .thenReturn(Map.of("last_seen", 2_000L, "agent_types", List.of("BYCLAW_EXE_user001")));
+            .thenReturn(Map.of("last_seen", 2_000L, "agent_types", List.of("BYCLAW_DSH_user001")));
         when(redisClient.getResource()).thenReturn(jedis);
         when(jedis.ttl(Constants.RegistryKeys.workerOnlineLease("byclaw-dsh-user001"))).thenReturn(13L);
 
@@ -315,6 +321,73 @@ class SandboxServiceTest {
         assertThat(view.getWorkerOnline()).isTrue();
         assertThat(view.getWorkerLastSeen()).isEqualTo(2_000L);
         assertThat(view.getWorkerLeaseTtlSeconds()).isEqualTo(13L);
+    }
+
+    @Test
+    void buildRecordViewFindsOnlineDshWorkerByRoutableAgentTypeWhenWorkerIdIsDynamic() {
+        WorkerRegistry workerRegistry = mock(WorkerRegistry.class);
+        RedisClient redisClient = mock(RedisClient.class);
+        Jedis jedis = mock(Jedis.class);
+        SandboxService sandboxService = new SandboxService();
+        ReflectionTestUtils.setField(sandboxService, "gatewayWorkerRegistry", workerRegistry);
+        ReflectionTestUtils.setField(sandboxService, "redisClient", redisClient);
+        SsSandboxRecord record = new SsSandboxRecord();
+        record.setId(10L);
+        record.setUserCode("user001");
+        record.setSandboxType("byclaw-dsh");
+        record.setStatus("RUNNING");
+        String dynamicWorkerId = "byclaw-dsh-sandbox-10-30-user001";
+        when(workerRegistry.getWorker("byclaw-dsh-user001")).thenReturn(null);
+        when(workerRegistry.hasOnlineAgentType("BYCLAW_DSH_user001", true))
+            .thenReturn(new WorkerRegistry.OnlineAgentCheckResult(true, List.of(dynamicWorkerId)));
+        when(workerRegistry.getWorker(dynamicWorkerId))
+            .thenReturn(Map.of("last_seen", 3_000L, "agent_types", List.of("BYCLAW_DSH_user001")));
+        when(redisClient.getResource()).thenReturn(jedis);
+        when(jedis.ttl(Constants.RegistryKeys.workerOnlineLease(dynamicWorkerId))).thenReturn(11L);
+
+        SandboxRecordView view = sandboxService.buildRecordView(record);
+
+        assertThat(view.getWorkerId()).isEqualTo(dynamicWorkerId);
+        assertThat(view.getWorkerOnline()).isTrue();
+        assertThat(view.getWorkerLastSeen()).isEqualTo(3_000L);
+        assertThat(view.getWorkerLeaseTtlSeconds()).isEqualTo(11L);
+    }
+
+    @Test
+    void buildRecordViewUsesWorkerAgentTypeConfiguredBySandboxSpec() {
+        WorkerRegistry workerRegistry = mock(WorkerRegistry.class);
+        RedisClient redisClient = mock(RedisClient.class);
+        Jedis jedis = mock(Jedis.class);
+        SandboxServiceSpecRepository specRepository = mock(SandboxServiceSpecRepository.class);
+        SandboxService sandboxService = new SandboxService();
+        ReflectionTestUtils.setField(sandboxService, "gatewayWorkerRegistry", workerRegistry);
+        ReflectionTestUtils.setField(sandboxService, "redisClient", redisClient);
+        ReflectionTestUtils.setField(sandboxService, "sandboxServiceSpecRepository", specRepository);
+        SandboxServiceSpec spec = new SandboxServiceSpec();
+        spec.setEnv(Map.of("BYAI_WORKER_AGENT_TYPE", "CUSTOM_RUNTIME"));
+        when(specRepository.findByServiceKeyAndProfile("custom-sandbox", "large"))
+            .thenReturn(Optional.of(spec));
+        SsSandboxRecord record = new SsSandboxRecord();
+        record.setId(11L);
+        record.setUserCode("user001");
+        record.setSandboxType("custom-sandbox");
+        record.setProfileKey("large");
+        record.setStatus("RUNNING");
+        String dynamicWorkerId = "custom-sandbox-sandbox-11-30-user001";
+        when(workerRegistry.getWorker("custom-sandbox-user001")).thenReturn(null);
+        when(workerRegistry.hasOnlineAgentType("CUSTOM_RUNTIME_user001", true))
+            .thenReturn(new WorkerRegistry.OnlineAgentCheckResult(true, List.of(dynamicWorkerId)));
+        when(workerRegistry.getWorker(dynamicWorkerId))
+            .thenReturn(Map.of("last_seen", 4_000L, "agent_types", List.of("CUSTOM_RUNTIME_user001")));
+        when(redisClient.getResource()).thenReturn(jedis);
+        when(jedis.ttl(Constants.RegistryKeys.workerOnlineLease(dynamicWorkerId))).thenReturn(9L);
+
+        SandboxRecordView view = sandboxService.buildRecordView(record);
+
+        assertThat(view.getWorkerId()).isEqualTo(dynamicWorkerId);
+        assertThat(view.getWorkerOnline()).isTrue();
+        assertThat(view.getWorkerAgentTypes()).containsExactly("CUSTOM_RUNTIME_user001");
+        assertThat(view.getWorkerLeaseTtlSeconds()).isEqualTo(9L);
     }
 
     @Test
@@ -350,6 +423,46 @@ class SandboxServiceTest {
         verify(sandboxRecordMapper, never()).selectRunningByUser("user001");
         verify(sandboxMetadataCache).put(any(SandboxInfo.class));
         verify(sandboxHealthWatchService).touch("user001", "openclaw");
+    }
+
+    @Test
+    void dshBusyHeartbeatRefreshesAccessAndHealthOnlyForRunningDshRecords() {
+        SandboxMetadataCache metadata = mock(SandboxMetadataCache.class);
+        SsSandboxRecordMapper records = mock(SsSandboxRecordMapper.class);
+        SandboxHealthWatchService health = mock(SandboxHealthWatchService.class);
+        SandboxService service = new SandboxService();
+        ReflectionTestUtils.setField(service, "sandboxRecordMapper", records);
+        ReflectionTestUtils.setField(service, "sandboxMetadataCache", metadata);
+        ReflectionTestUtils.setField(service, "sandboxHealthWatchService", health);
+        SsSandboxRecord dsh = new SsSandboxRecord();
+        dsh.setId(7L);
+        dsh.setUserCode("user001");
+        dsh.setSandboxType(SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE);
+        dsh.setResourceId(123L);
+        dsh.setStatus("RUNNING");
+        dsh.setSandboxId("sandbox-dsh");
+        dsh.setLockVersion(3);
+        dsh.setVersion(1);
+        when(records.selectRunningByUserAndSandboxType("user001", "byclaw-dsh")).thenReturn(List.of(dsh));
+        when(records.updateLastAccessTime(eq(7L), any(Date.class), eq(3))).thenReturn(1);
+        RunningStateRedisSubscriber subscriber = new RunningStateRedisSubscriber(
+            mock(RedisMessageListenerContainer.class), service, new ObjectMapper(),
+            RunningStateRedisSubscriber.DEFAULT_TOPIC);
+
+        boolean refreshed = subscriber.handleMessage(RunningStateRedisSubscriberTest.dshMessage(
+            "BYCLAW_DSH_user001", true, Instant.now()));
+
+        assertThat(refreshed).isTrue();
+        assertThat(dsh.getLastAccessTime()).isNotNull();
+        verify(records).selectRunningByUserAndSandboxType("user001", "byclaw-dsh");
+        verify(records, never()).selectRunningByUserAndSandboxType("user001", "openclaw");
+        verify(records, never()).selectRunningByUser("user001");
+        verify(records).updateLastAccessTime(eq(7L), any(Date.class), eq(3));
+        ArgumentCaptor<SandboxInfo> cacheEntry = ArgumentCaptor.forClass(SandboxInfo.class);
+        verify(metadata).put(cacheEntry.capture());
+        assertThat(cacheEntry.getValue().getSandboxType()).isEqualTo("byclaw-dsh");
+        verify(health).touch("user001", "byclaw-dsh");
+        verify(health, never()).touch("user001", "openclaw");
     }
 
     @Test

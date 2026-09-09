@@ -602,7 +602,6 @@ class InstantSearchWorker(worker_mod.GatewayWorker):
         has_error = False
         aggregator_instance_ids: set[str] = set()
 
-        chunks: list[str] = []
         async with InstantQAEngine(config=config) as engine:
             async with aclosing(engine.stream_search(input_data)) as stream:
                 async for event in stream:
@@ -655,7 +654,7 @@ class InstantSearchWorker(worker_mod.GatewayWorker):
                     event_type = event_type_mod.EventType.REASONING_LOG_DELTA.value
                     content = translate_fallback(event.data.get("content", ""))
                     if event.type.value == "search_result_chunks":
-                        chunks.extend(event.data.get("chunks", []))
+                        continue
                     elif is_aggregator_output:
                         final_answer_parts.append(content)
                         parent_message_ids = [parent_message_id]

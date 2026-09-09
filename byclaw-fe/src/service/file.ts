@@ -1,5 +1,6 @@
 import { GET, POST } from '@/service/common/request';
 import type { IQueryFile } from '@/typescript/file';
+import { hasDesktopLocalFiles } from '@/service/common/desktopLocal';
 
 /** datasetController/download 查询参数 */
 export type DownloadDatasetFileParams = {
@@ -49,8 +50,18 @@ export const uploadImage = (data: FormData) =>
     },
   });
 
-export const uploadFiles = (data: FormData) =>
-  POST<any>('/byaiService/chat/uploadFiles', data, {
+export const uploadFiles = async (data: FormData) => {
+  if (hasDesktopLocalFiles() && window.byclawDesktop?.files?.registerAttachments) {
+    const files = data.getAll('files').filter((value): value is File => value instanceof File);
+    const registered = await window.byclawDesktop.files.registerAttachments(files);
+    const payload: Record<string, any> = { attachmentIds: registered.map((item) => item.attachmentId) };
+    data.forEach((value, key) => {
+      if (key !== 'files' && typeof value === 'string') payload[key] = value;
+    });
+    const res = await POST<any>('/byaiService/chat/uploadFiles', payload);
+    return { ...res, rebuildFileList: res.uploadItems || [] };
+  }
+  return POST<any>('/byaiService/chat/uploadFiles', data, {
     timeout: 480000,
     headers: {
       'Content-Type': 'multipart/form-data; charset=utf-8',
@@ -61,6 +72,7 @@ export const uploadFiles = (data: FormData) =>
       rebuildFileList: res.uploadItems || [],
     };
   });
+};
 
 // 下载知识库文件
 export const downloadResourceFile = (params: DownloadDatasetFileParams) =>

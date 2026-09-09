@@ -14,7 +14,7 @@ type Props = {
 };
 
 const STATUS_MAP: Record<string, { className?: string; label: string }> = {
-  ENABLED: { className: styles.currentTag, label: 'personalModel.action.enable' },
+  ENABLED: { className: styles.statusTag, label: 'personalModel.action.enable' },
   DISABLED: { label: 'personalModel.action.disable' },
 };
 
@@ -36,6 +36,9 @@ const ModelCard: React.FC<Props> = ({ data, current, onEdit, onDebug, onDelete, 
           </div>
           <div className={styles.subtitleRow}>
             <span className={styles.modelPill}>{modelType || 'LLM'}</span>
+            {status === 'ENABLED' ? (
+              <Tag className={styles.statusTag}>{intl.formatMessage({ id: statusInfo.label })}</Tag>
+            ) : null}
             <span className={classNames(styles.provider, 'ellipsis')} title={providerName}>
               {providerName || '-'}
             </span>
@@ -43,9 +46,9 @@ const ModelCard: React.FC<Props> = ({ data, current, onEdit, onDebug, onDelete, 
         </div>
         {current ? (
           <Tag className={styles.currentTag}>{intl.formatMessage({ id: 'fileBrowserEntry.debug.currentModel' })}</Tag>
-        ) : (
+        ) : status !== 'ENABLED' ? (
           <Tag className={statusInfo.className}>{intl.formatMessage({ id: statusInfo.label })}</Tag>
-        )}
+        ) : null}
       </div>
 
       <div className={styles.content}>

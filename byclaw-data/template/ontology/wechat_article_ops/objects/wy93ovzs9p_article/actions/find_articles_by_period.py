@@ -17,7 +17,7 @@ async def execute(params: dict) -> dict:
     account_code = str(params.get("account_code") or "").strip()
     if not account_code:
         return {"records": [{"success": False, "code": "ACCOUNT_CODE_REQUIRED", "error": "account_code不能为空"}], "total": 1, "meta": {"total": 1}}
-    import json as _json
+    from datetime import datetime as _datetime
 
     def _err(code, message):
         return {"records": [{"success": False, "code": code, "error": message}],
@@ -36,6 +36,24 @@ async def execute(params: dict) -> dict:
     if published_to is not None:
         published_to = str(published_to).strip() or None
 
+    def _parse_publish_time(value):
+        if value is None:
+            return None
+        try:
+            parsed = _datetime.fromisoformat(value)
+        except ValueError:
+            return None
+        return parsed if "T" in value and parsed.tzinfo is not None else None
+
+    published_from_datetime = _parse_publish_time(published_from)
+    published_to_datetime = _parse_publish_time(published_to)
+    if ((published_from is not None and published_from_datetime is None)
+            or (published_to is not None and published_to_datetime is None)):
+        return _err(
+            "INVALID_TIME_FORMAT",
+            "published_from/published_to必须使用带时区的ISO-8601格式，例如2026-09-04T00:00:00+08:00",
+        )
+
     raw_canonical = params.get("canonical_url")
     canonical_url = str(raw_canonical).strip() if raw_canonical is not None else ""
 
@@ -43,8 +61,20 @@ async def execute(params: dict) -> dict:
         return _err("INVALID_ARGUMENT",
                     "title_keyword / published_from / published_to / canonical_url 至少需要提供一个")
 
-    if published_from and published_to and published_from > published_to:
+    if (published_from_datetime is not None and published_to_datetime is not None
+            and published_from_datetime > published_to_datetime):
         return _err("INVALID_DATE_RANGE", "published_from 必须 <= published_to")
+
+    # publish_time is stored as an ISO-like text column in the current ontology.
+    # Validate chronologically above, then bind the canonical database text form.
+    published_from_value = (
+        published_from_datetime.isoformat(sep=" ", timespec="seconds")
+        if published_from_datetime is not None else None
+    )
+    published_to_value = (
+        published_to_datetime.isoformat(sep=" ", timespec="seconds")
+        if published_to_datetime is not None else None
+    )
 
     try:
         page = int(params.get("page", 1))
@@ -69,10 +99,10 @@ async def execute(params: dict) -> dict:
     if title_keyword:
         safe_kw = title_keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         q = q.like(F.title, f"%{safe_kw}%")
-    if published_from:
-        q = q.gte(F.publish_time, published_from)
-    if published_to:
-        q = q.lte(F.publish_time, published_to)
+    if published_from_value is not None:
+        q = q.gte(F.publish_time, published_from_value)
+    if published_to_value is not None:
+        q = q.lte(F.publish_time, published_to_value)
     if canonical_url:
         q = q.eq(F.canonical_url, canonical_url)
 

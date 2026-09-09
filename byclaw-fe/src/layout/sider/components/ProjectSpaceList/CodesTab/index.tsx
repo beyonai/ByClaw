@@ -51,6 +51,9 @@ function toRepoFileItems(nodes: ProjectRepoTreeNode[], rootPath: string, pathPre
       path: isDir ? ensureDirectoryPath(path) : path,
       isDir,
       size: node.size,
+      url: node.url,
+      downloadUrl: node.downloadUrl,
+      url: node.url,
     };
   });
 }
@@ -186,7 +189,7 @@ const CodesTab: React.FC<CodesTabProps> = ({
   const fetchTaskChanges = useCallback(async () => {
     const requestSeq = taskChangesRequestSeqRef.current + 1;
     taskChangesRequestSeqRef.current = requestSeq;
-    if (!codeChangesEnabled || !sessionId || !selectedRepo) {
+    if (!codeChangesEnabled || !sessionId || !selectedRepo || selectedRepo.changesSupported === false) {
       setTaskChanges(null);
       return;
     }
@@ -288,12 +291,20 @@ const CodesTab: React.FC<CodesTabProps> = ({
         message.warning(intl.formatMessage({ id: 'fileBrowser.preview.unavailable' }));
         return;
       }
+      const remoteUrl = `${(item as any).url || ''}`.trim();
+      const remoteDownloadUrl = `${(item as any).downloadUrl || ''}`.trim();
+      const fileUrl = /^https?:\/\//i.test(remoteDownloadUrl)
+        ? remoteDownloadUrl
+        : /^https?:\/\//i.test(remoteUrl)
+          ? remoteUrl
+          : undefined;
       // 预览挂在资源工作区页签上，同一路径复用同一个页签而不是重复打开。
       onOpenDetail(
         <FilePreviewPanel
           fileName={item.name}
           resourceId={normalizedResourceId}
           path={item.path}
+          fileUrl={fileUrl}
           source="fileBrowser"
         />,
         { tabKey: `repo-file:${item.path}`, title: item.name }
@@ -305,6 +316,8 @@ const CodesTab: React.FC<CodesTabProps> = ({
   const quoteFile = useCallback(
     (item: FileBrowserItem) => {
       if (!normalizedResourceId) return;
+      // 外部仓库链接仅用于查看，不参与聊天资源引用。
+      if (/^https?:\/\//i.test(`${(item as any).url || ''}`)) return;
       EventEmitter.emit('queryInput-insert-item', {
         item: normalizeReferenceItem(item, normalizedResourceId),
         type: isDirectory(item) ? DragType.commonFolder : DragType.commonFile,
@@ -313,15 +326,24 @@ const CodesTab: React.FC<CodesTabProps> = ({
     [EventEmitter, normalizedResourceId]
   );
 
-  const getActionItems = useCallback((): MenuProps['items'] => {
-    if (!normalizedResourceId) return [];
-    return [
-      {
-        key: 'quote',
-        label: intl.formatMessage({ id: 'common.quote' }),
-      },
-    ];
-  }, [intl, normalizedResourceId]);
+  const getActionItems = useCallback(
+    (item: FileBrowserItem): MenuProps['items'] => {
+      if (!normalizedResourceId) return [];
+      if (/^https?:\/\//i.test(`${item.url || ''}`.trim())) return [];
+      return [
+        {
+          key: 'quote',
+          label: intl.formatMessage({ id: 'common.quote' }),
+        },
+      ];
+    },
+    [intl, normalizedResourceId]
+  );
+
+  const getTooltipPath = useCallback((item: FileBrowserItem) => {
+    const url = `${(item as any).url || ''}`.trim();
+    return /^https?:\/\//i.test(url) ? url : undefined;
+  }, []);
 
   const handleAction = useCallback(
     (key: Key, item: FileBrowserItem) => {
@@ -689,15 +711,17 @@ const CodesTab: React.FC<CodesTabProps> = ({
                 </button>
               </Dropdown>
             ) : null}
-            <button
-              type="button"
-              className={`${styles.repoChangesButton} ${showChangesView ? styles.repoChangesButtonActive : ''}`}
-              aria-label={t(showChangesView ? 'repo.showFiles' : 'repo.showCodeChanges')}
-              onClick={() => setRepoChangesViewMap((current) => ({ ...current, [repoKey]: !current[repoKey] }))}
-            >
-              <BranchesOutlined />
-              {taskChangeCount > 0 && <span className={styles.repoChangesCount}>{taskChangeCount}</span>}
-            </button>
+            {repo.changesSupported !== false && (
+              <button
+                type="button"
+                className={`${styles.repoChangesButton} ${showChangesView ? styles.repoChangesButtonActive : ''}`}
+                aria-label={t(showChangesView ? 'repo.showFiles' : 'repo.showCodeChanges')}
+                onClick={() => setRepoChangesViewMap((current) => ({ ...current, [repoKey]: !current[repoKey] }))}
+              >
+                <BranchesOutlined />
+                {taskChangeCount > 0 && <span className={styles.repoChangesCount}>{taskChangeCount}</span>}
+              </button>
+            )}
           </>
         }
         contentBefore={
@@ -731,6 +755,7 @@ const CodesTab: React.FC<CodesTabProps> = ({
         showActions={!!normalizedResourceId}
         getActionItems={getActionItems}
         onAction={handleAction}
+        getTooltipPath={getTooltipPath}
       />
       {renderFileDiffDrawer()}
     </div>

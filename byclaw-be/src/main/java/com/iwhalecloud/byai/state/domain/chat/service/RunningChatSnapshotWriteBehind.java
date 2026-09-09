@@ -2,11 +2,12 @@ package com.iwhalecloud.byai.state.domain.chat.service;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 
 import com.iwhalecloud.byai.state.domain.chat.model.MessageContext;
 import jakarta.annotation.PreDestroy;
@@ -39,8 +40,7 @@ public class RunningChatSnapshotWriteBehind {
             RunningChatSnapshotService snapshotService,
             @Value("${byclaw.running-snapshot.write-behind-millis:50}") long coalesceMillis
     ) {
-        this(snapshotService, coalesceMillis,
-            Executors.newSingleThreadScheduledExecutor(daemonThreadFactory()));
+        this(snapshotService, coalesceMillis, writerPool());
     }
 
     RunningChatSnapshotWriteBehind(
@@ -64,8 +64,17 @@ public class RunningChatSnapshotWriteBehind {
         while (true) {
             PendingState state = states.computeIfAbsent(key, ignored -> new PendingState());
             synchronized (state) {
+                if (state.terminal) {
+                    return;
+                }
                 if (states.get(key) != state) {
                     continue;
+                }
+                if (shuttingDown) {
+                    if (state.latest == null && state.future == null) {
+                        states.remove(key, state);
+                    }
+                    return;
                 }
                 state.latest = new PendingSnapshot(context, traceId, messageContext);
                 if (state.future == null) {
@@ -78,57 +87,99 @@ public class RunningChatSnapshotWriteBehind {
 
     /** Cancel a queued older revision and synchronously persist the terminal reconnect baseline. */
     public void flushNow(String key, ChatProcessContext context, String traceId, MessageContext messageContext) {
-        PendingState state = key == null ? null : states.get(key);
-        if (state != null) {
+        if (key == null) {
+            snapshotService.save(context, traceId, messageContext);
+            return;
+        }
+        PendingState state;
+        while (true) {
+            state = states.computeIfAbsent(key, ignored -> new PendingState());
             synchronized (state) {
+                if (states.get(key) != state) {
+                    continue;
+                }
+                // Retain this state until every terminal writer finishes. Enqueue must not create a replacement
+                // while an older Redis write or the terminal write is still in flight.
+                state.terminal = true;
+                state.flushers++;
                 if (state.future != null) {
                     state.future.cancel(false);
                     state.future = null;
                 }
                 state.latest = null;
-                states.remove(key, state);
-                snapshotService.save(context, traceId, messageContext);
-                return;
+                break;
             }
         }
-        snapshotService.save(context, traceId, messageContext);
+        state.writeLock.lock();
+        try {
+            snapshotService.save(context, traceId, messageContext);
+        }
+        finally {
+            synchronized (state) {
+                if (--state.flushers == 0) {
+                    states.remove(key, state);
+                }
+            }
+            state.writeLock.unlock();
+        }
     }
 
     private void drain(String key, PendingState state) {
-        synchronized (state) {
-            state.future = null;
-            PendingSnapshot pending = state.latest;
-            state.latest = null;
-            if (pending != null) {
-                snapshotService.save(pending.context(), pending.traceId(), pending.messageContext());
+        state.writeLock.lock();
+        try {
+            PendingSnapshot pending;
+            synchronized (state) {
+                if (states.get(key) != state || state.terminal) {
+                    return;
+                }
+                pending = state.latest;
+                state.latest = null;
             }
-            if (state.latest == null) {
-                states.remove(key, state);
+            try {
+                if (pending != null) {
+                    snapshotService.save(pending.context(), pending.traceId(), pending.messageContext());
+                }
             }
-            else if (!shuttingDown) {
-                state.future = scheduler.schedule(() -> drain(key, state), coalesceMillis, TimeUnit.MILLISECONDS);
+            finally {
+                synchronized (state) {
+                    state.future = null;
+                    if (state.latest == null && state.flushers == 0) {
+                        states.remove(key, state);
+                    }
+                    else if (!state.terminal && !shuttingDown) {
+                        state.future = scheduler.schedule(() -> drain(key, state), coalesceMillis, TimeUnit.MILLISECONDS);
+                    }
+                }
             }
+        }
+        finally {
+            state.writeLock.unlock();
         }
     }
 
     @PreDestroy
     void shutdown() {
         shuttingDown = true;
-        states.forEach((key, state) -> {
-            synchronized (state) {
-                if (state.future != null) {
-                    state.future.cancel(false);
-                    state.future = null;
+        try {
+            states.forEach((key, state) -> {
+                synchronized (state) {
+                    if (state.future != null) {
+                        state.future.cancel(false);
+                    }
                 }
-                PendingSnapshot pending = state.latest;
-                state.latest = null;
-                if (pending != null) {
-                    snapshotService.save(pending.context(), pending.traceId(), pending.messageContext());
-                }
-                states.remove(key, state);
-            }
-        });
-        scheduler.shutdown();
+                drain(key, state);
+            });
+        }
+        finally {
+            scheduler.shutdown();
+        }
+    }
+
+    private static ScheduledExecutorService writerPool() {
+        // Bound Redis concurrency while allowing independent sessions to progress past a slow write.
+        ScheduledThreadPoolExecutor executor = new ScheduledThreadPoolExecutor(4, daemonThreadFactory());
+        executor.setRemoveOnCancelPolicy(true);
+        return executor;
     }
 
     private static ThreadFactory daemonThreadFactory() {
@@ -143,7 +194,11 @@ public class RunningChatSnapshotWriteBehind {
     }
 
     private static final class PendingState {
+        // Redis I/O uses a parkable lock; enqueue only holds the short in-memory monitor.
+        private final ReentrantLock writeLock = new ReentrantLock(true);
         private PendingSnapshot latest;
         private ScheduledFuture<?> future;
+        private boolean terminal;
+        private int flushers;
     }
 }

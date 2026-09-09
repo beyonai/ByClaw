@@ -170,7 +170,11 @@ function ChildSessionNavigator({ sessionId, currentSession }: ChildSessionNaviga
         sessionId: childSessionId,
         parentSessionId: rootSessionId,
         sessionName: `${metadata.child_name || previousChild?.sessionName || '子 Agent'}`,
-        sessionContent: `${metadata.child_task || previousChild?.sessionContent || ''}`,
+        sessionContent: `${
+          message?.type === 'SCOPED_SESSION_STATUS'
+            ? previousChild?.sessionContent || ''
+            : metadata.child_task || previousChild?.sessionContent || ''
+        }`,
         createTime: baseSession?.createTime || now,
         updateTime: now,
         sessionExts,
@@ -183,7 +187,11 @@ function ChildSessionNavigator({ sessionId, currentSession }: ChildSessionNaviga
     };
 
     webSocketManager.onMessage('NEW_MESSAGE', handleNewMessage);
-    return () => webSocketManager.offMessage('NEW_MESSAGE', handleNewMessage);
+    webSocketManager.onMessage('SCOPED_SESSION_STATUS', handleNewMessage);
+    return () => {
+      webSocketManager.offMessage('NEW_MESSAGE', handleNewMessage);
+      webSocketManager.offMessage('SCOPED_SESSION_STATUS', handleNewMessage);
+    };
   }, [dispatch, rootSessionId]);
 
   const navigateTo = (target: ISession) => {

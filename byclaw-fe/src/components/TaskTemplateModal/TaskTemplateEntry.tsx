@@ -102,16 +102,23 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
   }, [onProjectChange, projectOptions, selectedProjectValue, sessionId]);
 
   useEffect(() => {
-    if (!projectOptions.length) return;
+    if (!projectOptions.length) {
+      if (selectedProjectOverride) setSelectedProjectOverride(undefined);
+      if (selectedProjectValue) updateProjectScopeId(undefined);
+      return;
+    }
 
     const storedProject = selectedProjectValue
       ? projectOptions.find((project) => `${project.projectId}` === `${selectedProjectValue}`)
       : undefined;
     const nextProject = storedProject || projectOptions[0];
+    if (!storedProject && selectedProjectOverride) {
+      setSelectedProjectOverride(undefined);
+    }
     if (nextProject && `${nextProject.projectId}` !== `${selectedProjectValue || ''}`) {
       updateProjectScopeId(nextProject.projectId);
     }
-  }, [projectOptions, selectedProjectValue, updateProjectScopeId]);
+  }, [projectOptions, selectedProjectOverride, selectedProjectValue, updateProjectScopeId]);
 
   // 任务模板使用会话、项目模块共用的当前项目；项目选择器负责首次默认和本地恢复。
   const sharedProjectId = Number(selectedProjectValue);

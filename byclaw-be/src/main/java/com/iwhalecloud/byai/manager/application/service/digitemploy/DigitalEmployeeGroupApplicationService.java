@@ -314,7 +314,7 @@ public class DigitalEmployeeGroupApplicationService {
         if (Objects.equals(group.getResourceId(), fact.getResourceId())
             || !Objects.equals(group.getComAcctId(), fact.getComAcctId())
             || !ResourceBizTypeEnum.DIG_EMPLOYEE.name().equals(fact.getResourceBizType())
-            || !Objects.equals(ResourceStatus.LIST.getNum(), fact.getResourceStatus())
+            || !Objects.equals(ResourceStatus.ON_SHELF.getNum(), fact.getResourceStatus())
             || !ALLOWED_MEMBER_AGENT_TYPES.contains(ext.getAgentType())
             || WorkerAgentType.BY_SUPER.getCode().equals(fact.getWorkerAgentType())
             || StringUtils.isAnyBlank(fact.getResourceCode(), fact.getResourceName(), fact.getWorkerAgentType())) {
@@ -516,7 +516,7 @@ public class DigitalEmployeeGroupApplicationService {
     private boolean isVisibleGroup(SsResource group, SsResExtDigEmployee ext) {
         return group != null && ext != null && isGroup(ext.getAgentType())
             && ResourceBizTypeEnum.DIG_EMPLOYEE.name().equals(group.getResourceBizType())
-            && Objects.equals(ResourceStatus.LIST.getNum(), group.getResourceStatus())
+            && Objects.equals(ResourceStatus.ON_SHELF.getNum(), group.getResourceStatus())
             && Objects.equals(CurrentUserHolder.getEnterpriseId(), group.getComAcctId());
     }
 

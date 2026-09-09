@@ -208,6 +208,13 @@ function normalizeDuplicateUrl(sourceUrl) {
 function normalizeDuplicateGroups(metadata) {
   const representatives = new Map();
   for (const item of metadata.collection.items) {
+    if (item.sourceUrl?.startsWith('cloud-knowledge://') && typeof item.duplicateGroupKey === 'string'
+      && item.duplicateGroupKey) {
+      const representative = representatives.get(item.duplicateGroupKey) || item.itemId;
+      representatives.set(item.duplicateGroupKey, representative);
+      item.duplicateOf = representative === item.itemId ? null : representative;
+      continue;
+    }
     const duplicateGroupKey = normalizeDuplicateUrl(item.sourceUrl)
       || `source:${articleIdentity(item)}`;
     const representative = representatives.get(duplicateGroupKey) || item.itemId;
@@ -617,9 +624,10 @@ function reconcileCanonicalView(collectionResult, metadata) {
   const seenGroups = new Set();
   const items = [];
   for (const inventory of metadata.collection.items) {
-    if (inventory.materialization.status !== 'materialized'
-      || seenGroups.has(inventory.duplicateGroupKey)) continue;
-    seenGroups.add(inventory.duplicateGroupKey);
+    if (inventory.materialization.status !== 'materialized') continue;
+    const isCloud = inventory.sourceUrl?.startsWith('cloud-knowledge://');
+    if (!isCloud && seenGroups.has(inventory.duplicateGroupKey)) continue;
+    if (!isCloud) seenGroups.add(inventory.duplicateGroupKey);
     const sanitizedPath = inventory.materialization.sanitizedPath;
     items.push(existingByPath.get(sanitizedPath) || canonicalViewItem({
       title: inventory.title,
@@ -653,10 +661,10 @@ function validateCanonicalView(root, collectionResult, metadata) {
     if (!inventory || item.url !== inventory.sourceUrl) {
       throw new Error(`collection-result.json canonical view 未对应 materialized inventory: ${item.fileName}`);
     }
-    if (seenGroups.has(inventory.duplicateGroupKey)) {
+    if (!inventory.sourceUrl?.startsWith('cloud-knowledge://') && seenGroups.has(inventory.duplicateGroupKey)) {
       throw new Error(`collection-result.json canonical view 重复组出现多次: ${item.fileName}`);
     }
-    seenGroups.add(inventory.duplicateGroupKey);
+    if (!inventory.sourceUrl?.startsWith('cloud-knowledge://')) seenGroups.add(inventory.duplicateGroupKey);
     validateMarkdownPath(root, item.fileName, `collection-result.json items[${index}].fileName`, path.join('sanitized', 'items'));
   }
 }

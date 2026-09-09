@@ -19,17 +19,12 @@ export const normalizeProjectCloudDriveItem = (item: any, fallbackDirectoryPath 
   // 接口返回的 fileName 偶尔是完整路径；列表展示和预览参数只使用当前节点名称。
   const name = rawName.split('/').filter(Boolean).at(-1) || rawName;
   const directoryPath = normalizeFileBrowserPath(item?.directoryPath || fallbackDirectoryPath || '/');
-  let parentPath = directoryPath === '/' ? '/' : directoryPath.replace(/\/$/, '');
-  // 兼容接口偶发把当前文件名重复拼到 directoryPath 的情况（如 /a.txt/a.txt）。
-  const pathSegments = parentPath.split('/').filter(Boolean);
-  if (pathSegments.length >= 2 && pathSegments.at(-1) === name && pathSegments.at(-2) === name) {
-    pathSegments.pop();
-    parentPath = `/${pathSegments.join('/')}`;
-  }
+  const normalizedDirectoryPath = directoryPath === '/' ? '/' : directoryPath.replace(/\/$/, '');
+  // fileBrowser 接口返回的 directoryPath 是当前节点完整路径；旧数据也可能只返回父目录，按末级名称兼容两种格式。
   const rawPath =
-    parentPath.endsWith(`/${name}`) || parentPath === `/${name}`
-      ? parentPath
-      : `${parentPath === '/' ? '' : parentPath}/${name}`;
+    normalizedDirectoryPath === '/' || normalizedDirectoryPath.split('/').filter(Boolean).at(-1) !== name
+      ? `${normalizedDirectoryPath === '/' ? '' : normalizedDirectoryPath}/${name}`
+      : normalizedDirectoryPath;
   const path = normalizeFileBrowserPath(rawPath);
   const itemType = `${item?.type || item?.fileType || item?.resourceType || ''}`.toLowerCase();
   const isDir =

@@ -6,13 +6,17 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.any;
 
 import java.util.Collections;
 import java.util.Date;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.SessionCallback;
 import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -28,6 +32,92 @@ import org.mockito.ArgumentCaptor;
 class RunningChatSnapshotServiceTest {
 
     private final RunningChatSnapshotService runningChatSnapshotService = new RunningChatSnapshotService();
+
+    @Test
+    void missingExternalChildSnapshotDoesNotSearchTheRedisKeyspace() {
+        RedisTemplate<String, Object> redisTemplate = mock(RedisTemplate.class);
+        ValueOperations<String, Object> values = mock(ValueOperations.class);
+        when(redisTemplate.opsForValue()).thenReturn(values);
+        RunningChatSnapshotService service = new RunningChatSnapshotService();
+        ReflectionTestUtils.setField(service, "redisTemplate", redisTemplate);
+
+        assertThat(service.getExternalChildSnapshot(20L, 21L)).isNull();
+
+        verify(values).get("byai:chat:running:snapshot:20:external-child-20");
+        verify(redisTemplate, never()).keys(anyString());
+    }
+
+    @Test
+    void missingExternalChildContextDoesNotSearchTheRedisKeyspaceDuringFirstEventRecovery() {
+        RedisTemplate<String, Object> redisTemplate = mock(RedisTemplate.class);
+        ValueOperations<String, Object> values = mock(ValueOperations.class);
+        when(redisTemplate.opsForValue()).thenReturn(values);
+        RunningChatSnapshotService service = new RunningChatSnapshotService();
+        ReflectionTestUtils.setField(service, "redisTemplate", redisTemplate);
+        ChatRuntimeState state = new ChatRuntimeState();
+        state.setSessionId(20L);
+        state.setTraceId("external-child-20");
+        state.setModelAnswerMessageId(21L);
+
+        assertThat(service.hydrateMessageContext(state, new String[1])).isNull();
+
+        verify(values).get("byai:chat:running:snapshot:20:external-child-20");
+        verify(redisTemplate, never()).keys(anyString());
+    }
+
+    @Test
+    void historicalMissAndMessageLookupNeverSearchRedisKeyspace() {
+        RedisTemplate<String, Object> redis = mock(RedisTemplate.class);
+        ValueOperations<String, Object> values = mock(ValueOperations.class);
+        when(redis.opsForValue()).thenReturn(values);
+        ReflectionTestUtils.setField(runningChatSnapshotService, "redisTemplate", redis);
+        assertThat(runningChatSnapshotService.get(3L, "expired-history", 21L)).isNull();
+        assertThat(runningChatSnapshotService.findByMessageId(21L)).isNull();
+        assertThat(runningChatSnapshotService.get(3L, null, null)).isNull();
+        runningChatSnapshotService.delete(3L, 21L);
+        verify(redis, never()).keys(anyString());
+    }
+
+    @Test
+    void staleMessagePointerCannotReturnAnotherMessageAfterTraceKeyReuse() {
+        RedisTemplate<String, Object> redis = mock(RedisTemplate.class);
+        ValueOperations<String, Object> values = mock(ValueOperations.class);
+        when(redis.opsForValue()).thenReturn(values);
+        when(values.get("byai:chat:running:message:21")).thenReturn("byai:chat:running:snapshot:3:trace-reused");
+        RunningChatSnapshotResponse replacement = new RunningChatSnapshotResponse();
+        replacement.setSessionId(3L);
+        replacement.setModelAnswerMessageId(22L);
+        when(values.get("byai:chat:running:snapshot:3:trace-reused"))
+            .thenReturn(JSONObject.toJSONString(replacement));
+        ReflectionTestUtils.setField(runningChatSnapshotService, "redisTemplate", redis);
+        assertThat(runningChatSnapshotService.findByMessageId(21L)).isNull();
+        assertThat(runningChatSnapshotService.get(3L, "trace-reused", 21L)).isNull();
+    }
+
+    @Test
+    void saveMakesSnapshotDiscoverableByMessageWithoutKeyspaceSearch() {
+        RedisTemplate<String, Object> redis = mock(RedisTemplate.class);
+        ValueOperations<String, Object> values = mock(ValueOperations.class);
+        java.util.Map<String, Object> stored = new java.util.HashMap<>();
+        when(redis.opsForValue()).thenReturn(values);
+        org.mockito.Mockito.doAnswer(call -> {
+            stored.put(call.getArgument(0), call.getArgument(1));
+            return null;
+        }).when(values).set(anyString(), any(), org.mockito.ArgumentMatchers.anyLong(), any(TimeUnit.class));
+        when(values.get(anyString())).thenAnswer(call -> stored.get(call.getArgument(0)));
+        ReflectionTestUtils.setField(runningChatSnapshotService, "redisTemplate", redis);
+        ChatProcessContext ctx = new ChatProcessContext(null, new AssistantChatDto());
+        ctx.sessionId = 3L;
+        ctx.traceId = "trace-indexed";
+        ctx.modelAnswerMessageId = 21L;
+        ctx.messageContext = new MessageContext();
+        ctx.messageContext.setMessageId(21L);
+        ctx.messageContext.getAnswerText().append("indexed answer");
+        runningChatSnapshotService.save(ctx);
+        assertThat(runningChatSnapshotService.findByMessageId(21L)).isNotNull()
+            .extracting(RunningChatSnapshotResponse::getMessageContent).isEqualTo("indexed answer");
+        verify(redis, never()).keys(anyString());
+    }
 
     @Test
     void buildSnapshot_usesFirstResponseTimeAsCreateTimeWhenPresent() {
@@ -129,6 +219,10 @@ class RunningChatSnapshotServiceTest {
         RedisTemplate<String, Object> redisTemplate = mock(RedisTemplate.class);
         ValueOperations<String, Object> valueOperations = mock(ValueOperations.class);
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(redisTemplate.executePipelined(any(SessionCallback.class))).thenAnswer(invocation -> {
+            invocation.getArgument(0, SessionCallback.class).execute(redisTemplate);
+            return List.of(1L, true);
+        });
         RunningChatSnapshotService service = new RunningChatSnapshotService();
         ReflectionTestUtils.setField(service, "redisTemplate", redisTemplate);
         ByaiMessageHotDtoDto message = new ByaiMessageHotDtoDto();
@@ -137,7 +231,7 @@ class RunningChatSnapshotServiceTest {
         message.setMessageContent("latest child output");
         message.setMetadata("{\"child_run_id\":\"worker-child-1:2\",\"child_turn\":2}");
 
-        service.saveExternalChild(message, "123-4", false);
+        assertThat(service.saveExternalChild(message, "123-4", false)).isTrue();
 
         ArgumentCaptor<String> json = ArgumentCaptor.forClass(String.class);
         verify(valueOperations).set(eq("byai:chat:running:snapshot:20:external-child-20"), json.capture(),

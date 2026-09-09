@@ -31,10 +31,16 @@ export const useActiveSiderAgent = (): ActiveSiderAgent => {
   return useMemo(() => {
     // 输入框存在手动 @ 时优先跟随最后一个员工，否则回退到当前会话或默认员工。
     const selectedAgentId = siderAgentId || agentId || agentInfo?.agentId;
-    const resourceId = selectedAgentId || defaultDigEmployeeId || userInfo?.defaultDigEmployeeId;
-    const allAgents = [...(agentList || []), ...(employeesList || [])];
-    const matchedAgent = allAgents.find((item) => matchAgentById(item, resourceId));
+    const defaultEmployeeId = defaultDigEmployeeId || userInfo?.defaultDigEmployeeId;
+    const selectedId = selectedAgentId || defaultEmployeeId;
+    // employeesList 的 discover 数据同时包含 id/resourceId，优先于仅用于默认员工展示的 agentList。
+    const allAgents = [...(employeesList || []), ...(agentList || [])];
+    const matchedAgent = allAgents.find((item) => matchAgentById(item, selectedId));
     const selectedGlobalAgent = agentInfo && matchAgentById(agentInfo, selectedAgentId) ? agentInfo : undefined;
+    // 会话态 agentId 来自 session.objectId。匹配不到员工资源时不能将它直接当作 resourceId；
+    // 输入框 @ 和默认员工 ID 的来源字段本身就是 resourceId，可以在列表尚未加载时使用。
+    const trustedSourceId = siderAgentId || (!selectedAgentId ? defaultEmployeeId : undefined);
+    const resourceId = selectedGlobalAgent?.resourceId || matchedAgent?.resourceId || trustedSourceId;
     const name =
       selectedGlobalAgent?.resourceName ||
       selectedGlobalAgent?.name ||

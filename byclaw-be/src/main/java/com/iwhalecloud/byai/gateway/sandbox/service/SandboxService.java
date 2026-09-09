@@ -382,7 +382,8 @@ public class SandboxService {
                 }
                 incrementVersions(existingRecord, true);
                 sandboxMetadataCache.evict(existingRecord.getUserCode(), existingRecord.getSandboxType());
-                unregisterSandboxEndpoint(existingRecord.getUserCode(), existingRecord.getSandboxType());
+                unregisterSandboxEndpoint(existingRecord.getUserCode(), existingRecord.getSandboxType(),
+                    existingRecord.getProfileKey());
                 cleanupWorkerRegistryForSandbox(existingRecord);
                 LOGGER.warn("远端沙箱退出，已清理远端并终结旧沙箱记录：{}", sandboxRef(existingRecord));
             }
@@ -898,14 +899,23 @@ public class SandboxService {
      * running-state 心跳：只刷新当前用户 openclaw 类型运行中沙箱的最后访问时间。
      */
     public boolean heartbeatOpenclawSandbox(String userCode) {
+        return heartbeatRunningSandboxType(userCode, SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE);
+    }
+
+    /** A busy DSH parent or AgentTeams child refreshes only this user's running DSH sandboxes. */
+    public boolean heartbeatDshSandbox(String userCode) {
+        return heartbeatRunningSandboxType(userCode, SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE);
+    }
+
+    private boolean heartbeatRunningSandboxType(String userCode, String sandboxType) {
         if (StringUtils.isBlank(userCode)) {
             LOGGER.warn("running-state 心跳失败：无法获取用户编码");
             return false;
         }
         List<SsSandboxRecord> records = sandboxRecordMapper.selectRunningByUserAndSandboxType(userCode,
-            SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE);
+            sandboxType);
         if (records == null || records.isEmpty()) {
-            LOGGER.warn("running-state 心跳失败：未找到运行中的 openclaw 沙箱记录，用户编码：{}", userCode);
+            LOGGER.warn("running-state 心跳失败：未找到运行中的沙箱记录，用户编码：{}，沙箱类型：{}", userCode, sandboxType);
             return false;
         }
         Date now = new Date();
@@ -925,7 +935,7 @@ public class SandboxService {
             LOGGER.warn("running-state 心跳部分记录跳过，用户编码：{}，跳过记录：{}", userCode, skippedRecords);
         }
         if (updatedCount == 0) {
-            LOGGER.warn("running-state 心跳失败：openclaw 运行中记录均未更新，用户编码：{}", userCode);
+            LOGGER.warn("running-state 心跳失败：运行中记录均未更新，用户编码：{}，沙箱类型：{}", userCode, sandboxType);
             return false;
         }
         LOGGER.debug("running-state 心跳成功，用户编码：{}，命中记录数：{}，更新记录数：{}，lastAccessTime：{}",
@@ -970,7 +980,29 @@ public class SandboxService {
 
         try {
             Map<String, Object> worker = gatewayWorkerRegistry.getWorker(workerId);
-            view.setWorkerOnline(worker != null);
+            if (worker == null) {
+                // See byclaw-be/src/main/java/com/iwhalecloud/byai/gateway/sandbox/README.md#worker-agent-type-configuration.
+                String workerAgentType = buildSandboxWorkerAgentType(record.getUserCode(), record.getSandboxType(),
+                    record.getProfileKey());
+                WorkerRegistry.OnlineAgentCheckResult onlineWorkers =
+                    gatewayWorkerRegistry.hasOnlineAgentType(workerAgentType, true);
+                view.setWorkerOnline(onlineWorkers != null && onlineWorkers.exists);
+                if (onlineWorkers != null && onlineWorkers.workerIds != null) {
+                    String registeredWorkerId = onlineWorkers.workerIds.stream()
+                        .filter(StringUtils::isNotBlank)
+                        .sorted()
+                        .findFirst()
+                        .orElse(null);
+                    if (registeredWorkerId != null) {
+                        workerId = registeredWorkerId;
+                        view.setWorkerId(workerId);
+                        worker = gatewayWorkerRegistry.getWorker(workerId);
+                    }
+                }
+            }
+            else {
+                view.setWorkerOnline(true);
+            }
             if (worker != null) {
                 view.setWorkerLastSeen(toLong(worker.get("last_seen")));
                 Object agentTypes = worker.get("agent_types");
@@ -1935,7 +1967,7 @@ public class SandboxService {
         record.setUpdateTime(releaseTime);
         incrementVersions(record, true);
         sandboxMetadataCache.evict(record.getUserCode(), record.getSandboxType());
-        unregisterSandboxEndpoint(record.getUserCode(), record.getSandboxType());
+        unregisterSandboxEndpoint(record.getUserCode(), record.getSandboxType(), record.getProfileKey());
         cleanupWorkerRegistryForSandbox(record);
         LOGGER.info("沙箱释放完成：{}，releaseReason：{}", sandboxRef(record), releaseReason);
     }
@@ -1963,7 +1995,7 @@ public class SandboxService {
             + record.getResourceId();
         RedisUtil.del(lockKey);
         sandboxMetadataCache.evict(record.getUserCode(), record.getSandboxType());
-        unregisterSandboxEndpoint(record.getUserCode(), record.getSandboxType());
+        unregisterSandboxEndpoint(record.getUserCode(), record.getSandboxType(), record.getProfileKey());
         LOGGER.info("启动中沙箱已标记释放：{}，releaseReason：{}", sandboxRef(record), releaseReason);
         return true;
     }
@@ -2097,7 +2129,7 @@ public class SandboxService {
         }
         if (clearLocalBinding) {
             sandboxMetadataCache.evict(record.getUserCode(), record.getSandboxType());
-            unregisterSandboxEndpoint(record.getUserCode(), record.getSandboxType());
+            unregisterSandboxEndpoint(record.getUserCode(), record.getSandboxType(), record.getProfileKey());
         }
     }
 
@@ -2182,7 +2214,8 @@ public class SandboxService {
                 routing != null ? routing.getSandboxType() : null);
             return;
         }
-        String serviceName = buildSandboxWorkerAgentType(userCode, routing != null ? routing.getSandboxType() : null);
+        String serviceName = buildSandboxWorkerAgentType(userCode, routing != null ? routing.getSandboxType() : null,
+            routing != null ? routing.getProfileKey() : null);
         if (StringUtils.isBlank(serviceName)) {
             LOGGER.warn("无法解析沙箱worker_agent_type，跳过服务注册，用户编码：{}，沙箱类型：{}", userCode,
                 routing != null ? routing.getSandboxType() : null);
@@ -2207,8 +2240,8 @@ public class SandboxService {
         }
     }
 
-    private void unregisterSandboxEndpoint(String userCode, String sandboxType) {
-        String serviceName = buildSandboxWorkerAgentType(userCode, sandboxType);
+    private void unregisterSandboxEndpoint(String userCode, String sandboxType, String profileKey) {
+        String serviceName = buildSandboxWorkerAgentType(userCode, sandboxType, profileKey);
         if (StringUtils.isBlank(serviceName)) {
             return;
         }
@@ -2223,15 +2256,27 @@ public class SandboxService {
         }
     }
 
-    private String buildSandboxWorkerAgentType(String userCode, String sandboxType) {
+    private String buildSandboxWorkerAgentType(String userCode, String sandboxType, String profileKey) {
         if (StringUtils.isBlank(userCode) || StringUtils.isBlank(sandboxType)) {
             return null;
+        }
+        // See byclaw-be/src/main/java/com/iwhalecloud/byai/gateway/sandbox/README.md#compatibility-fallback.
+        SandboxServiceSpec spec = resolveEffectiveSpec(sandboxType, profileKey);
+        if (spec != null && spec.getEnv() != null) {
+            String configuredAgentType = StringUtils.trimToNull(
+                spec.getEnv().get(SandboxServiceSpec.WORKER_AGENT_TYPE_ENV));
+            if (configuredAgentType != null) {
+                return configuredAgentType + "_" + userCode;
+            }
         }
         if (SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE.equals(sandboxType)) {
             return WorkerAgentType.BYCLAW_EXE.getCode() + "_" + userCode;
         }
         if (SandboxLaunchRouting.BYCLAW_CODE_AGENT_SANDBOX_TYPE.equals(sandboxType)) {
             return WorkerAgentType.BYCLAW_CODE.getCode() + "_" + userCode;
+        }
+        if (SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE.equals(sandboxType)) {
+            return WorkerAgentType.BYCLAW_DSH.getCode() + "_" + userCode;
         }
         return sandboxType + "_" + userCode;
     }

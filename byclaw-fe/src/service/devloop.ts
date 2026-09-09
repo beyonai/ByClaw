@@ -23,13 +23,22 @@ type DevloopProjectShareTargetPayload = {
   targetName?: string;
 };
 
-type DevloopProjectPayload = {
+export type DevloopProjectLocalDirectoryPayload = {
+  name: string;
+  path: string;
+  primary: boolean;
+};
+
+export type DevloopProjectPayload = {
   projectName: string;
   description?: string;
   projectType?: DevloopProjectType;
   isShare?: DevloopProjectShareFlag;
   shareTargets?: DevloopProjectShareTargetPayload[];
   resources?: ProjectResourcePayload[];
+
+  /** Desktop 项目可读写的本地目录；Web 项目不传此字段。 */
+  localDirectories?: DevloopProjectLocalDirectoryPayload[];
 };
 
 type DevloopProjectSessionListPayload = {
@@ -284,7 +293,15 @@ export const updateProjectRepo = (data: {
 export const listProjectRepos = (projectId: number) =>
   POST<DevloopProjectRepo[]>('/byaiService/project/repo/list', { projectId });
 
-export type AvailableProjectRepo = DevloopProjectRepo & { path: string };
+export type AvailableProjectRepo = DevloopProjectRepo & {
+  path: string;
+
+  /** 是否已在当前项目/会话目录中存在本地 Git 仓库。 */
+  localAvailable?: boolean;
+
+  /** 是否可以查询当前会话的本地变更。 */
+  changesSupported?: boolean;
+};
 
 export const listAvailableProjectRepos = (projectId: number, sessionId?: string | number) =>
   POST<AvailableProjectRepo[]>('/byaiService/project/repo/available-list', { projectId, sessionId });
@@ -304,6 +321,7 @@ export type ProjectRepoTreeNode = {
   size?: number;
   sha?: string;
   url?: string;
+  downloadUrl?: string;
   hasChildren?: boolean;
 };
 

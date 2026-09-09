@@ -1,15 +1,41 @@
 package com.iwhalecloud.byai.manager.domain.resource.enums;
 
-import java.util.List;
-
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 
+/**
+ * 资源状态枚举。
+ * <p>
+ * 数值约定：-1=已删除，0=草稿箱，1=待上架（已发布待上架），2=已上架，3=已下架，
+ * 4=待上架（审核中），5=审核驳回，6=发布状态。
+ */
 @RequiredArgsConstructor
 @Getter
 public enum ResourceStatus {
-    // 资源状态：0=草稿箱，1,4待上架，2=已上架，3=已下架,6=发布状态
-    DRAFT(0), RELEASE(1), LIST(2), REMOVED(3), AUDIT(4), AUDIT_REJECT(5), PUBLISH(6);
+
+    /** 已删除（逻辑删除标记） */
+    DELETE(-1),
+
+    /** 草稿箱 */
+    DRAFT(0),
+
+    /** 待上架（已发布待上架） */
+    RELEASE(1),
+
+    /** 已上架 */
+    ON_SHELF(2),
+
+    /** 已下架 */
+    OFF_SHELF(3),
+
+    /** 待上架（审核中） */
+    AUDIT(4),
+
+    /** 审核驳回 */
+    AUDIT_REJECT(5),
+
+    /** 发布状态 */
+    PUBLISH(6);
 
     private final Integer num;
 
@@ -20,15 +46,5 @@ public enum ResourceStatus {
             }
         }
         return false;
-    }
-
-    public static boolean arrIsExist(List<Integer> statusList) {
-        for (Integer status : statusList) {
-            boolean exist = isExist(status);
-            if (!exist) {
-                return false;
-            }
-        }
-        return true;
     }
 }

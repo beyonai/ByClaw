@@ -3,6 +3,7 @@ package com.iwhalecloud.byai.manager.application.service.ontology;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.iwhalecloud.byai.common.constants.resource.ResourceBizType;
 import com.iwhalecloud.byai.common.exception.BaseException;
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeApplicationService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceRelDetailService;
@@ -69,14 +70,15 @@ public class OntologyBindService {
     @Transactional(rollbackFor = Exception.class)
     public void unbindResource(Long digitalEmployeeId, Long relResourceId) {
         if (digitalEmployeeId == null || relResourceId == null) {
-            throw new BaseException("解绑参数不完整：digitalEmployeeId / relResourceId 不能为空");
+            throw new BaseException(I18nUtil.get("ontology.unbind.param.required"));
         }
         SsResource digitalEmployee = ssResourceService.findById(digitalEmployeeId);
         if (digitalEmployee == null || !BIZ_DIG_EMPLOYEE.equals(digitalEmployee.getResourceBizType())) {
-            throw new BaseException("数字员工资源不存在或类型不正确");
+            throw new BaseException(I18nUtil.get("ontology.unbind.digital.employee.invalid"));
         }
-        if (!authApplicationService.hasResourceManagePermission(digitalEmployee)) {
-            throw new BaseException("当前用户对数字员工【" + digitalEmployee.getResourceName() + "】没有管理权限，无法解绑本体");
+        if (!authApplicationService.hasResourceInstallTargetManagePermission(digitalEmployee)) {
+            throw new BaseException(I18nUtil.get("ontology.unbind.no.manage.permission",
+                digitalEmployee.getResourceName()));
         }
 
         List<SsResourceRelDetail> existingDetails = ssResourceRelDetailService.findByResourceId(digitalEmployeeId);

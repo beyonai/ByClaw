@@ -3,10 +3,12 @@ package com.iwhalecloud.byai.state.domain.chat.service;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.iwhalecloud.byai.common.message.service.ByaiMessageHotService;
 import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatSnapshotResponse;
@@ -45,6 +47,14 @@ public class ScopedMessageWriteBehind {
     private final long retryDelayMillis;
 
     private final Map<String, PendingState> states = new ConcurrentHashMap<>();
+
+    private final AtomicBoolean recoveryStarted = new AtomicBoolean();
+
+    private final ExecutorService recoveryExecutor = Executors.newSingleThreadExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "scoped-message-recovery");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     private volatile boolean shuttingDown;
 
@@ -92,23 +102,48 @@ public class ScopedMessageWriteBehind {
 
     @EventListener(ApplicationReadyEvent.class)
     public void recoverDurableSnapshots() {
-        if (runningChatSnapshotService == null) {
+        if (runningChatSnapshotService == null || shuttingDown || !recoveryStarted.compareAndSet(false, true)) {
             return;
         }
-        for (RunningChatSnapshotResponse snapshot : runningChatSnapshotService.findExternalChildSnapshots()) {
-            if (snapshot == null || snapshot.getSessionId() == null || snapshot.getMessageId() == null) {
-                continue;
+        recoveryExecutor.execute(() -> runningChatSnapshotService.findExternalChildSnapshots(batch -> {
+            for (RunningChatSnapshotResponse snapshot : batch) {
+                // Live enqueues never wait. Recovery yields while persistence workers are backlogged.
+                while (!shuttingDown && states.size() >= RunningChatSnapshotService.RECOVERY_BATCH_SIZE) {
+                    if (!pauseRecovery()) {
+                        return;
+                    }
+                }
+                if (shuttingDown || Thread.currentThread().isInterrupted()) {
+                    return;
+                }
+                ByaiMessageHotDtoDto message = new ByaiMessageHotDtoDto();
+                BeanUtils.copyProperties(snapshot, message);
+                enqueue("child:" + snapshot.getSessionId() + ":" + snapshot.getMessageId(),
+                    snapshot.getSessionId(), message, Boolean.FALSE.equals(snapshot.getRunning()), true);
             }
-            ByaiMessageHotDtoDto message = new ByaiMessageHotDtoDto();
-            BeanUtils.copyProperties(snapshot, message);
-            boolean terminal = Boolean.FALSE.equals(snapshot.getRunning());
-            enqueue("child:" + snapshot.getSessionId() + ":" + snapshot.getMessageId(),
-                snapshot.getSessionId(), message, terminal);
+            // Pace even fully persisted batches so recovery cannot flood Redis with reads.
+            pauseRecovery();
+        }));
+    }
+
+    private boolean pauseRecovery() {
+        try {
+            TimeUnit.MILLISECONDS.sleep(100);
+            return !shuttingDown;
+        }
+        catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
         }
     }
 
     /** Enqueue the latest accumulated child message without waiting for database I/O. */
     public void enqueue(String contextKey, Long sessionId, ByaiMessageHotDtoDto message, boolean terminal) {
+        enqueue(contextKey, sessionId, message, terminal, false);
+    }
+
+    private void enqueue(String contextKey, Long sessionId, ByaiMessageHotDtoDto message, boolean terminal,
+            boolean recovered) {
         if (contextKey == null || sessionId == null || message == null) {
             return;
         }
@@ -124,8 +159,11 @@ public class ScopedMessageWriteBehind {
                 if (shuttingDown) {
                     throw new IllegalStateException("scoped message persistence queue is shutting down");
                 }
+                if (recovered && (state.latest != null || state.writing)) {
+                    return;
+                }
                 state.revision++;
-                state.latest = new PendingWrite(sessionId, message, terminal, state.revision);
+                state.latest = new PendingWrite(sessionId, message, terminal, state.revision, recovered);
                 if (terminal && state.future != null) {
                     state.future.cancel(false);
                     state.future = null;
@@ -160,11 +198,7 @@ public class ScopedMessageWriteBehind {
 
         boolean persisted = false;
         try {
-            messageHotService.updateSelective(pending.message());
-            sessionService.touchUpdateTime(pending.sessionId());
-            if (runningChatSnapshotService != null) {
-                runningChatSnapshotService.markExternalChildPersisted(pending.message());
-            }
+            persist(pending);
             persisted = true;
         }
         catch (Exception e) {
@@ -191,6 +225,7 @@ public class ScopedMessageWriteBehind {
     @PreDestroy
     void shutdown() {
         shuttingDown = true;
+        recoveryExecutor.shutdownNow();
         for (Map.Entry<String, PendingState> entry : states.entrySet()) {
             PendingState state = entry.getValue();
             synchronized (state) {
@@ -227,11 +262,7 @@ public class ScopedMessageWriteBehind {
         }
         boolean persisted = false;
         try {
-            messageHotService.updateSelective(pending.message());
-            sessionService.touchUpdateTime(pending.sessionId());
-            if (runningChatSnapshotService != null) {
-                runningChatSnapshotService.markExternalChildPersisted(pending.message());
-            }
+            persist(pending);
             persisted = true;
         }
         catch (Exception e) {
@@ -249,6 +280,19 @@ public class ScopedMessageWriteBehind {
         }
     }
 
+    private void persist(PendingWrite pending) {
+        // A live write may have completed after this recovery batch was read from Redis.
+        if (pending.recovered() && runningChatSnapshotService != null
+                && runningChatSnapshotService.isExternalChildPersisted(pending.message())) {
+            return;
+        }
+        messageHotService.updateSelective(pending.message());
+        sessionService.touchUpdateTime(pending.sessionId());
+        if (runningChatSnapshotService != null) {
+            runningChatSnapshotService.markExternalChildPersisted(pending.message());
+        }
+    }
+
     private static ThreadFactory daemonThreadFactory() {
         return runnable -> {
             Thread thread = new Thread(runnable, "scoped-message-persistence");
@@ -257,7 +301,8 @@ public class ScopedMessageWriteBehind {
         };
     }
 
-    private record PendingWrite(Long sessionId, ByaiMessageHotDtoDto message, boolean terminal, long revision) {
+    private record PendingWrite(Long sessionId, ByaiMessageHotDtoDto message, boolean terminal, long revision,
+            boolean recovered) {
     }
 
     private static final class PendingState {

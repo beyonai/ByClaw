@@ -134,6 +134,15 @@ export function deleteDigitalEmployee(params = {}) {
   });
 }
 
+// 数字员工上架/下架操作，状态由后端返回的 resourceStatus 驱动。
+export function shelfDigitalEmployee(params = {}) {
+  return POST<any>('/byaiService/digitalEmployeeController/shelfDigitalEmployee', { ...params });
+}
+
+export function unShelfDigitalEmployee(params = {}) {
+  return POST<any>('/byaiService/digitalEmployeeController/unShelfDigitalEmployee', { ...params });
+}
+
 // 设置默认数字员工
 export function setDefaultDigitalEmployee(params = {}) {
   return POST<any>('/byaiService/digitalEmployeeController/setDefaultDigitalEmployee', {

@@ -7,6 +7,7 @@ import com.iwhalecloud.byai.manager.dto.openapi.PrivilegeQueryDTO;
 import com.iwhalecloud.byai.manager.qo.auth.AuthQo;
 import com.iwhalecloud.byai.manager.qo.auth.ResourceAuthQo;
 import com.iwhalecloud.byai.manager.vo.auth.DigitalEmployeeAuthVo;
+import com.iwhalecloud.byai.manager.vo.auth.DigitalEmployeeUseApplyAuditVo;
 import com.iwhalecloud.byai.manager.vo.auth.ManPrivDto;
 import com.iwhalecloud.byai.manager.qo.resource.PrivListQo;
 import java.util.List;
@@ -135,4 +136,7 @@ public interface PrivilegeGrantMapper extends BaseMapper<PrivilegeGrant> {
     List<ResourceAuthVo> listResource(ResourceAuthQo resourceAuthQo);
 
     List<DigitalEmployeeAuthVo> listDigitalEmployeeAuthByUser(AuthQo authQo);
+
+    /** 批量查询数字员工审核中心的待审核或历史申请，避免按资源逐条查询。 */
+    List<DigitalEmployeeUseApplyAuditVo> queryDigitalEmployeeUseApplyAudit(@Param("history") boolean history);
 }

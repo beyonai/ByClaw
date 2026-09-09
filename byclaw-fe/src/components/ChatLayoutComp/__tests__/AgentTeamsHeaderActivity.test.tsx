@@ -11,7 +11,7 @@ import AgentTeamsHeaderActivity from '../AgentTeamsHeaderActivity';
 
 const mockDispatch = jest.fn();
 const mockSetSessionId = jest.fn();
-let newMessageHandler: ((message: any) => void) | undefined;
+const mockMessageHandlers = new Map<string, (message: any) => void>();
 const messages: Record<string, string> = {
   'agentTeamsActivity.openPanel': '打开专家团活动面板',
   'agentTeamsActivity.panelTitle': '专家团活动面板',
@@ -25,8 +25,8 @@ jest.mock('@/hooks/useGlobal', () => () => ({ setSessionId: mockSetSessionId }))
 jest.mock('@/utils/websocket', () => ({
   __esModule: true,
   default: {
-    onMessage: jest.fn((_type: string, handler: (message: any) => void) => {
-      newMessageHandler = handler;
+    onMessage: jest.fn((type: string, handler: (message: any) => void) => {
+      mockMessageHandlers.set(type, handler);
     }),
     offMessage: jest.fn(),
   },
@@ -72,7 +72,7 @@ describe('AgentTeamsHeaderActivity', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     clearAgentTeamsSnapshots();
-    newMessageHandler = undefined;
+    mockMessageHandlers.clear();
     publishAgentTeamsSnapshot('100', snapshot as any);
   });
 
@@ -150,7 +150,7 @@ describe('AgentTeamsHeaderActivity', () => {
     fireEvent.click(screen.getByRole('button', { name: '打开专家团活动面板' }));
 
     act(() => {
-      newMessageHandler?.({
+      mockMessageHandlers.get('NEW_MESSAGE')?.({
         sessionId: '201',
         streamId: '20-0',
         data: {
@@ -170,7 +170,7 @@ describe('AgentTeamsHeaderActivity', () => {
     expect(screen.getByText('执行中')).toBeInTheDocument();
 
     act(() => {
-      newMessageHandler?.({
+      mockMessageHandlers.get('NEW_MESSAGE')?.({
         sessionId: '201',
         streamId: '21-0',
         data: {
@@ -188,5 +188,34 @@ describe('AgentTeamsHeaderActivity', () => {
       });
     });
     expect(screen.getByText('执行中')).toBeInTheDocument();
+  });
+
+  it('updates member activity from a lightweight status event without consuming child content', () => {
+    render(<AgentTeamsHeaderActivity rootSessionId="100" currentSession={{ sessionId: '100' } as any} />);
+    fireEvent.click(screen.getByRole('button', { name: '打开专家团活动面板' }));
+
+    act(() => {
+      mockMessageHandlers.get('SCOPED_SESSION_STATUS')?.({
+        type: 'SCOPED_SESSION_STATUS',
+        sessionId: '202',
+        streamId: '30-0',
+        data: {
+          sessionId: '202',
+          running: true,
+          metadata: JSON.stringify({
+            session_scope: 'child',
+            external_parent_session_id: '100',
+            external_session_id: 'member-2',
+            session_status: 'running',
+            child_task: '后台处理',
+          }),
+        },
+      });
+    });
+
+    expect(screen.getAllByText('执行中')).toHaveLength(2);
+    expect(screen.queryByText('后台处理')).not.toBeInTheDocument();
+    expect(getAgentTeamsSnapshot('100')?.team.members?.[1].currentTask).toBeUndefined();
+    expect(screen.queryByText('private child message')).not.toBeInTheDocument();
   });
 });

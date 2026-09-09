@@ -1,3 +1,4 @@
+import type { ProjectContext } from "./project-context.js";
 import type { LeaderModelSelection } from "../ports/leader.js";
 import type { GroupChatContextV1 } from "./group-chat-context.js";
 import type { ExpertTeamRuntimeSnapshotV1 } from "./orchestrator.js";
@@ -9,6 +10,8 @@ import type { ExpertTeamRuntimeSnapshotV1 } from "./orchestrator.js";
 export interface RunIngressContextV1 {
   /** by-framework 入站会话 ID，同时是子 Agent 应使用的会话空间 ID。 */
   externalSessionId?: string;
+  /** 本轮 BE 项目信息快照。 */
+  projectContext?: ProjectContext;
   /** by-framework 入站消息 ID；后续委派将其作为 parentMessageId 建立级联取消关系。 */
   parentMessageId?: string;
   /** by-framework 入站执行链路 ID；用于任务计划快照与 STOP_CHAT 关联。 */

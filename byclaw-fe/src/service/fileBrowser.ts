@@ -1,4 +1,5 @@
 import { GET, POST } from '@/service/common/request';
+import { hasDesktopLocalFiles } from '@/service/common/desktopLocal';
 
 export interface FileBrowserItem {
   name: string;
@@ -6,6 +7,12 @@ export interface FileBrowserItem {
   isDir: boolean;
   size?: number;
   lastModified?: string;
+
+  /** 代码仓库文件的外部链接（仅项目代码模块使用）。 */
+  url?: string;
+
+  /** 代码仓库文件的原始下载地址。 */
+  downloadUrl?: string;
 }
 
 export interface ChangedFileDiff {
@@ -36,6 +43,9 @@ export interface FileBrowserListParams {
   resourceId: string | number;
   path?: string;
   language?: string;
+
+  /** 列表排序：文件夹优先，同类型按名称升序。 */
+  sort?: 'DIRECTORY_FIRST_NAME_ASC' | string;
 }
 
 export interface FileBrowserDeleteParams {
@@ -98,6 +108,15 @@ export function uploadFiles(
   files: File[],
   onUploadProgress?: (e: any) => void
 ) {
+  if (hasDesktopLocalFiles() && window.byclawDesktop?.files?.registerAttachments) {
+    return window.byclawDesktop.files.registerAttachments(files).then((registered) =>
+      POST('/byaiService/fileBrowser/upload', {
+        resourceId,
+        path,
+        attachmentIds: registered.map((item) => item.attachmentId),
+      })
+    );
+  }
   const formData = new FormData();
   formData.append('resourceId', String(resourceId));
   formData.append('path', path);

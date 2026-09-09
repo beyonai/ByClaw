@@ -6,9 +6,13 @@ package com.iwhalecloud.byai.gateway.sandbox.service;
  */
 public class SandboxLaunchRouting {
 
+    // See byclaw-be/src/main/java/com/iwhalecloud/byai/gateway/sandbox/README.md#sandbox-launch-routing.
+
     public static final String DEFAULT_SANDBOX_TYPE = "openclaw";
 
     public static final String BYCLAW_CODE_AGENT_SANDBOX_TYPE = "byclaw-code-agent";
+
+    public static final String BYCLAW_DSH_SANDBOX_TYPE = "byclaw-dsh";
 
     public static final Long DEFAULT_RESOURCE_ID = -1L;
 

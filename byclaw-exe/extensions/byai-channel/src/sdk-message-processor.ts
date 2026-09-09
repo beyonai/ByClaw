@@ -89,6 +89,27 @@ function stringValue(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
+function abortError(signal: AbortSignal): Error {
+  return signal.reason instanceof Error
+    ? signal.reason
+    : new Error(String(signal.reason || "task cancelled"));
+}
+
+async function awaitWithAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) throw abortError(signal);
+  let onAbort: (() => void) | undefined;
+  const cancelled = new Promise<never>((_resolve, reject) => {
+    onAbort = () => reject(abortError(signal));
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+  try {
+    return await Promise.race([promise, cancelled]);
+  } finally {
+    if (onAbort) signal.removeEventListener("abort", onAbort);
+  }
+}
+
 function parsePrimaryModelRef(primary: string): { provider: string; model: string } | null {
   const trimmed = primary.trim();
   const slash = trimmed.indexOf("/");
@@ -147,6 +168,7 @@ async function alignManagedAgentSessionModel(params: {
   cfg: import("openclaw/plugin-sdk").OpenClawConfig;
   sessionAgentId: string;
   sessionKey: string;
+  signal?: AbortSignal;
   log?: {
     info?: (msg: string) => void;
     warn?: (msg: string) => void;
@@ -167,7 +189,7 @@ async function alignManagedAgentSessionModel(params: {
     agentId: params.sessionAgentId,
   });
   const now = Date.now();
-  await sessionApi.patchSessionEntry({
+  await awaitWithAbort(sessionApi.patchSessionEntry({
     storePath,
     sessionKey: params.sessionKey,
     fallbackEntry: {
@@ -197,7 +219,7 @@ async function alignManagedAgentSessionModel(params: {
       }
       return Object.keys(patch).length > 0 ? patch : null;
     },
-  });
+  }), params.signal);
   params.log?.info?.(
     `[diagnose-sdk] aligned managed agent session model before dispatch: agent=${params.sessionAgentId}, session=${params.sessionKey}, model=${target.primary}`,
   );
@@ -224,6 +246,7 @@ async function resolveSdkInboundMediaPayload(params: {
   accountId: string;
   sessionId: string;
   files?: SdkInboundFile[];
+  signal?: AbortSignal;
   log?: {
     info?: (msg: string) => void;
     warn?: (msg: string) => void;
@@ -281,18 +304,18 @@ async function resolveSdkInboundMediaPayload(params: {
       seenSources.add(sourceKey);
 
       const filePathHint = path.posix.basename(remoteUrl.pathname) || undefined;
-      const fetched = await fetchRemoteMedia({
+      const fetched = await awaitWithAbort(fetchRemoteMedia({
         url: sourceKey,
         filePathHint,
         maxBytes: effectiveMaxBytes,
-      });
-      const saved = await saveMediaBuffer(
+      }), params.signal);
+      const saved = await awaitWithAbort(saveMediaBuffer(
         fetched.buffer,
         fetched.contentType ?? file.contentType ?? file.mimeType,
         "inbound",
         effectiveMaxBytes,
         fetched.fileName ?? filePathHint,
-      );
+      ), params.signal);
       mediaPaths.push(saved.path);
       mediaTypes.push((saved.contentType ?? "").trim());
       continue;
@@ -307,10 +330,10 @@ async function resolveSdkInboundMediaPayload(params: {
 
     mediaPaths.push(resolvedPath);
     const detectedMime =
-      (await detectMime({
+      (await awaitWithAbort(detectMime({
         filePath: resolvedPath,
         headerMime: file.contentType ?? file.mimeType ?? undefined,
-      })) ?? "";
+      }), params.signal)) ?? "";
     mediaTypes.push(detectedMime.trim());
   }
 
@@ -371,6 +394,7 @@ export async function deliverReplyToAgentViaSdk(
     cfg,
     agentId: targetAgentId,
     log,
+    signal: deps.abortController?.signal,
   });
   routing = rt.channel.routing.resolveAgentRoute({
     cfg,
@@ -394,6 +418,7 @@ export async function deliverReplyToAgentViaSdk(
       cfg,
       agentId: targetAgentId,
       log,
+      signal: deps.abortController?.signal,
     });
 
     return await deliverReplyToAgentViaSdkUnderGate({
@@ -405,7 +430,7 @@ export async function deliverReplyToAgentViaSdk(
       extraPayload,
       laneMetadata,
     });
-  });
+  }, { signal: deps.abortController?.signal });
 
   if (meta.queued) {
     log?.info?.(
@@ -515,6 +540,7 @@ async function deliverReplyToAgentViaSdkUnderGate(
     cfg,
     sessionAgentId,
     sessionKey,
+    signal: deps.abortController?.signal,
     log,
   });
 
@@ -601,6 +627,7 @@ async function deliverReplyToAgentViaSdkUnderGate(
     accountId,
     sessionId: message.sessionId,
     files: message.files,
+    signal: deps.abortController?.signal,
     log,
   });
 

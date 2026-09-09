@@ -2,7 +2,7 @@
   "action_code": "find_articles_by_period",
   "action_name": "按标题模糊+发布时间范围+规范化链接检索文章",
   "action_type": "QUERY",
-  "action_desc": "按文章标题模糊检索 + 发布时间范围过滤 + 规范化链接精确匹配，按发布时间倒序，支持分页；返回 article_id、title、publish_time、canonical_url、url",
+  "action_desc": "按文章标题模糊检索 + 发布时间范围过滤 + 规范化链接精确匹配，按发布时间倒序，支持分页；发布时间必须使用带时区的 ISO-8601 格式，例如 2026-09-04T00:00:00+08:00；返回 article_id、title、publish_time、canonical_url、url",
   "permission_roles": [
     "analyst",
     "ops",
@@ -32,14 +32,14 @@
     },
     {
       "paramCode": "published_from",
-      "paramName": "发布时间下限（含）",
+      "paramName": "发布时间下限（含，ISO-8601，例如 2026-09-04T00:00:00+08:00）",
       "type": "string",
       "isRequired": false,
       "direction": "input"
     },
     {
       "paramCode": "published_to",
-      "paramName": "发布时间上限（含）",
+      "paramName": "发布时间上限（含，ISO-8601，例如 2026-09-04T23:59:59+08:00）",
       "type": "string",
       "isRequired": false,
       "direction": "input"

@@ -18,4 +18,7 @@ public class FileBrowserListRequest {
 
     /** 目录相对路径 */
     private String path;
+
+    /** 排序方式：DIRECTORY_FIRST_NAME_ASC 表示文件夹优先、名称升序。 */
+    private String sort;
 }

@@ -5,6 +5,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Comparator;
 
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
@@ -50,11 +51,21 @@ public class FileBrowserApplicationService {
     }
 
     public List<FileBrowserItemVo> list(String userCode, Long resourceId, String relativePath) {
+        return list(userCode, resourceId, relativePath, null);
+    }
+
+    public List<FileBrowserItemVo> list(String userCode, Long resourceId, String relativePath, String sort) {
         FileBrowserPathPolicy.assertBrowsable(relativePath);
-        return providerFactory.getProvider().list(userCode, resourceId, toProviderPath(relativePath)).stream()
+        List<FileBrowserItemVo> items = providerFactory.getProvider().list(userCode, resourceId, toProviderPath(relativePath)).stream()
             .filter(item -> !FileBrowserPathPolicy.isProtected(item.getPath()))
             .map(this::toExternalItem)
-            .toList();
+            .collect(java.util.stream.Collectors.toList());
+        // 仅在调用方显式指定时排序，兼容其他文件浏览场景原有的返回顺序。
+        if ("DIRECTORY_FIRST_NAME_ASC".equalsIgnoreCase(sort)) {
+            items.sort(Comparator.comparing((FileBrowserItemVo item) -> !item.isDir())
+                .thenComparing(item -> StringUtils.defaultString(item.getName()), String.CASE_INSENSITIVE_ORDER));
+        }
+        return items;
     }
 
     public void upload(String userCode, Long resourceId, String relativePath, MultipartFile[] files) throws Exception {

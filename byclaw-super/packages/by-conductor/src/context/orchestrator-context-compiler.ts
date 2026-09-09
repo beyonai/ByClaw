@@ -2,7 +2,9 @@ import { ContextCompiler } from "./context-compiler.js";
 import { buildExpertTeamSystemPrompt } from "./expert-team-system-prompt.js";
 import { AuthorizedAgentsProcessor } from "./processors/authorized-agents.js";
 import { ContextCleanupProcessor } from "./processors/cleanup.js";
+import { ProjectContextProcessor } from "./processors/project-context.js";
 import { SessionContextProcessor } from "./processors/session-context.js";
+import { SessionWorkspaceProcessor } from "./processors/session-workspace.js";
 import { SupervisorPolicyProcessor } from "./processors/supervisor-policy.js";
 import { TaskPlanProcessor } from "./processors/task-plan.js";
 import type {
@@ -20,6 +22,8 @@ export class OrchestratorContextCompiler implements SystemContextCompiler {
   readonly #expertTeam = new ContextCompiler([
     new SupervisorPolicyProcessor(),
     new SessionContextProcessor(),
+    new ProjectContextProcessor(),
+    new SessionWorkspaceProcessor(),
     new TaskPlanProcessor(),
     new AuthorizedAgentsProcessor(),
     new ContextCleanupProcessor(),

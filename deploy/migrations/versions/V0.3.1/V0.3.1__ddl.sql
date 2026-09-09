@@ -1,5 +1,5 @@
 -- V0.3.1 增量 DDL：为已有环境增加连接器授权、Runtime Manifest 和系统托管参数快照结构。
--- 所有新增表、字段、约束和索引均采用幂等方式，支持升级脚本安全重放。
+-- 新增表、约束和索引采用幂等方式；字段补充使用直接 ALTER，重复执行失败时手动跳过。
 SET search_path TO byai;
 
 -- 连接器基础元信息：保存平台级连接器模板；runtime_manifest 在后续兼容字段块中幂等补充。
@@ -130,39 +130,11 @@ COMMENT ON COLUMN byai.byai_connector_auth.update_time IS '更新时间，新增
 
 
 -- 连接器 Runtime Manifest 模板与用户系统托管快照字段。
--- 使用临时辅助函数兼容不同历史库结构：字段存在时跳过，不覆盖已有数据。
-CREATE OR REPLACE FUNCTION byai.add_column_if_missing(
-    p_schema_name TEXT,
-    p_table_name TEXT,
-    p_column_name TEXT,
-    p_column_definition TEXT
-) RETURNS VOID AS $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1
-        FROM information_schema.columns
-        WHERE table_schema = p_schema_name
-          AND table_name = p_table_name
-          AND column_name = p_column_name
-    ) THEN
-        EXECUTE 'ALTER TABLE ' || quote_ident(p_schema_name) || '.' || quote_ident(p_table_name)
-            || ' ADD COLUMN ' || quote_ident(p_column_name) || ' ' || p_column_definition;
-    END IF;
-END;
-$$ LANGUAGE plpgsql;
-
 -- 平台连接器保存规范化 Runtime Manifest；用户参数增加来源类型与连接器业务标识。
-SELECT byai.add_column_if_missing('byai', 'byai_connector_info', 'runtime_manifest', 'TEXT');
-SELECT byai.add_column_if_missing('byai', 'byai_connector_info', 'skill_code', 'VARCHAR(64)');
-SELECT byai.add_column_if_missing(
-    'byai',
-    'po_user_private_param',
-    'param_source',
-    'VARCHAR(32) NOT NULL DEFAULT ''USER'''
-);
-SELECT byai.add_column_if_missing('byai', 'po_user_private_param', 'source_ref', 'VARCHAR(128)');
-
-DROP FUNCTION byai.add_column_if_missing(TEXT, TEXT, TEXT, TEXT);
+ALTER TABLE byai.byai_connector_info ADD COLUMN runtime_manifest TEXT;
+ALTER TABLE byai.byai_connector_info ADD COLUMN skill_code VARCHAR(64);
+ALTER TABLE byai.po_user_private_param ADD COLUMN param_source VARCHAR(32) NOT NULL DEFAULT 'USER';
+ALTER TABLE byai.po_user_private_param ADD COLUMN source_ref VARCHAR(128);
 
 -- 同一用户、同一连接器可以保存多条环境参数，但同一参数名只能有一条未删除记录。
 DROP INDEX IF EXISTS byai.uk_po_user_private_param_connector;

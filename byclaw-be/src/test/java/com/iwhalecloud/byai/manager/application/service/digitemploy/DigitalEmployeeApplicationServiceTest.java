@@ -13,6 +13,7 @@ import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.gateway.channels.service.robot.RobotChannelRegistryCoordinator;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.event.DigEmployeeChangeEventPublisher;
+import com.iwhalecloud.byai.manager.application.service.digitemploy.event.DigEmployeeChangeEventType;
 import com.iwhalecloud.byai.manager.application.service.template.TemplateRuleInfoApplicationService;
 import com.iwhalecloud.byai.manager.domain.aimodel.service.AiModelService;
 import com.iwhalecloud.byai.manager.domain.resource.enums.OperationTypeEnum;
@@ -46,6 +47,7 @@ import com.iwhalecloud.byai.manager.entity.users.Users;
 import com.iwhalecloud.byai.manager.mapper.resource.SkillGroupMapper;
 import com.iwhalecloud.byai.manager.qo.resource.DigitalEmployeeQo;
 import com.iwhalecloud.byai.manager.vo.digitemploy.SetDefaultDigitalEmployeeResultVo;
+import com.iwhalecloud.byai.manager.vo.digitemploy.DigitalEmployeeInstallTargetVo;
 import com.iwhalecloud.byai.manager.vo.resource.DigitalEmployeePageVo;
 import com.iwhalecloud.byai.manager.vo.resource.DigitalEmployeeVo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupInstallResultVo;
@@ -125,6 +127,7 @@ class DigitalEmployeeApplicationServiceTest {
         suasSuperassistService = mock(SuasSuperassistService.class);
         operationLogService = mock(OperationLogService.class);
         authApplicationService = mock(AuthApplicationService.class);
+        when(authApplicationService.hasResourceInstallTargetManagePermission(any())).thenReturn(true);
         sequenceService = mock(SequenceService.class);
         resourceEventService = mock(ResourceEventService.class);
         aiModelService = mock(AiModelService.class);
@@ -270,11 +273,82 @@ class DigitalEmployeeApplicationServiceTest {
 
         service.deleteDigitalEmployee(dto);
 
-        assertThat(resource.getResourceStatus()).isEqualTo(ResourceStatus.REMOVED.getNum());
+        assertThat(resource.getResourceStatus()).isEqualTo(ResourceStatus.DELETE.getNum());
         InOrder order = inOrder(ssResourceService, authApplicationService);
-        order.verify(ssResourceService).updateResourceEntity(resource);
+        order.verify(ssResourceService).update(resource);
         order.verify(authApplicationService).invalidateResourceAuthorizationCachesAfterCommit(200L,
             ResourceBizTypeEnum.DIG_EMPLOYEE.name());
+    }
+
+    @Test
+    void shelfDigitalEmployee_restoresOffShelfResourceToOnShelf() {
+        EmployeeIdDTO dto = new EmployeeIdDTO();
+        dto.setResourceId(200L);
+        SsResource resource = buildDigitalEmployee(200L, OwnerType.ENTERPRISE, 1L);
+        resource.setResourceStatus(ResourceStatus.OFF_SHELF.getNum());
+        when(ssResourceService.findById(200L)).thenReturn(resource);
+        when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
+        when(digitalEmployeeGroupApplicationService.isGroup(200L)).thenReturn(false);
+
+        service.shelfDigitalEmployee(dto);
+
+        assertThat(resource.getResourceStatus()).isEqualTo(ResourceStatus.ON_SHELF.getNum());
+        verify(ssResourceService).update(resource);
+        verify(resourceEventService, never()).sendResourceShelfEvent(any(SsResource.class));
+        verify(operationLogService).recordOperationLog(resource, OperationTypeEnum.SHELF);
+        verify(robotChannelRegistryCoordinator).registerForResource(200L);
+        verify(digitalEmployeeRuntimeRefreshService).scheduleDigitalEmployeeUpdateRefreshAfterCommit(200L, null);
+    }
+
+    @Test
+    void shelfDigitalEmployee_rejectsWhenStatusIsNotOffShelf() {
+        EmployeeIdDTO dto = new EmployeeIdDTO();
+        dto.setResourceId(200L);
+        SsResource resource = buildDigitalEmployee(200L, OwnerType.ENTERPRISE, 1L);
+        resource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
+        when(ssResourceService.findById(200L)).thenReturn(resource);
+        when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
+
+        assertThatThrownBy(() -> service.shelfDigitalEmployee(dto))
+            .isInstanceOf(BaseException.class)
+            .hasMessage("digemployee.shelf.status.invalid");
+        verify(ssResourceService, never()).update(any(SsResource.class));
+    }
+
+    @Test
+    void unShelfDigitalEmployee_marksOnShelfResourceAsOffShelf() {
+        EmployeeIdDTO dto = new EmployeeIdDTO();
+        dto.setResourceId(200L);
+        SsResource resource = buildDigitalEmployee(200L, OwnerType.ENTERPRISE, 1L);
+        resource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
+        when(ssResourceService.findById(200L)).thenReturn(resource);
+        when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
+        when(digitalEmployeeGroupApplicationService.isGroup(200L)).thenReturn(false);
+
+        service.unShelfDigitalEmployee(dto);
+
+        assertThat(resource.getResourceStatus()).isEqualTo(ResourceStatus.OFF_SHELF.getNum());
+        verify(ssResourceService).update(resource);
+        verify(resourceEventService, never()).sendResourceUnshelfEvent(any(SsResource.class));
+        verify(operationLogService).recordOperationLog(resource, OperationTypeEnum.UNSHELF);
+        verify(robotChannelRegistryCoordinator).unregisterForResource(200L);
+        verify(digEmployeeChangeEventPublisher).publishAfterCommitOrNow(
+            DigEmployeeChangeEventType.DIG_EMPLOYEE_DELETED, 200L);
+    }
+
+    @Test
+    void unShelfDigitalEmployee_rejectsWhenStatusIsNotOnShelf() {
+        EmployeeIdDTO dto = new EmployeeIdDTO();
+        dto.setResourceId(200L);
+        SsResource resource = buildDigitalEmployee(200L, OwnerType.ENTERPRISE, 1L);
+        resource.setResourceStatus(ResourceStatus.OFF_SHELF.getNum());
+        when(ssResourceService.findById(200L)).thenReturn(resource);
+        when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
+
+        assertThatThrownBy(() -> service.unShelfDigitalEmployee(dto))
+            .isInstanceOf(BaseException.class)
+            .hasMessage("digemployee.unshelf.status.invalid");
+        verify(ssResourceService, never()).update(any(SsResource.class));
     }
 
     /**
@@ -498,7 +572,7 @@ class DigitalEmployeeApplicationServiceTest {
 
         SsResource employee = createAndUninstallService.saveDigitalEmployee(createDto(300L));
         when(skillGroupMapper.selectDigitalEmployeeForUpdate(100L, 201L)).thenReturn(employee);
-        when(authApplicationService.hasResourceManagePermission(employee)).thenReturn(true);
+        when(authApplicationService.hasResourceInstallTargetManagePermission(employee)).thenReturn(true);
         when(ssResourceRelDetailService.removeById(901L)).thenReturn(true);
         doReturn(new DigitalEmployeeDetailsDTO()).when(createAndUninstallService)
             .findDetailsById(any(EmployeeIdDTO.class));
@@ -604,6 +678,73 @@ class DigitalEmployeeApplicationServiceTest {
 
         assertThat(qo.getPageNum()).isEqualTo(1);
         assertThat(qo.getPageSize()).isEqualTo(100);
+    }
+
+    @Test
+    void queryInstallTargetEmployees_includesCurrentUserContextAndResourceId() {
+        DigitalEmployeeQo qo = new DigitalEmployeeQo();
+        qo.setPageNum(0);
+        qo.setPageSize(200);
+        qo.setKeyword("代码");
+        qo.setRelResourceId(900L);
+        PageInfo<DigitalEmployeeInstallTargetVo> expected = new PageInfo<>();
+        when(ssResExtDigEmployeeService.selectInstallTargetEmployees(any(DigitalEmployeeQo.class)))
+            .thenReturn(expected);
+
+        PageInfo<DigitalEmployeeInstallTargetVo> result = service.queryInstallTargetEmployees(qo);
+
+        verify(resourceAuthContextService).setCurrentUserAuthQo(qo);
+        verify(ssResExtDigEmployeeService).selectInstallTargetEmployees(qo);
+        assertThat(result).isSameAs(expected);
+        assertThat(qo.getPageNum()).isEqualTo(1);
+        assertThat(qo.getPageSize()).isEqualTo(100);
+        assertThat(qo.getKeyword()).isEqualTo("代码");
+        assertThat(qo.getRelResourceId()).isEqualTo(900L);
+        assertThat(qo.getMemberCandidateEnterpriseId()).isEqualTo(201L);
+        assertThat(qo.getInstallTargetAdminVip()).isFalse();
+        assertThat(qo.getDefaultDigEmployeeId()).isEqualTo(100L);
+        assertThat(qo.getDefaultSuperAssistantResourceCode()).isEqualTo("zhangsan_main");
+    }
+
+    @Test
+    void queryInstallTargetEmployees_marksAdminVipWithoutGrantingOtherAdminRoles() {
+        CurrentUserHolder.getLoginInfo().setUserCode("adminvip");
+        DigitalEmployeeQo qo = new DigitalEmployeeQo();
+        when(ssResExtDigEmployeeService.selectInstallTargetEmployees(any(DigitalEmployeeQo.class)))
+            .thenReturn(new PageInfo<>());
+
+        service.queryInstallTargetEmployees(qo);
+
+        assertThat(qo.getInstallTargetAdminVip()).isTrue();
+        verify(authApplicationService, never()).isCurrentUserGlobalResourceManager();
+    }
+
+    @Test
+    void queryInstalledResourceIds_returnsDistinctRelationTargets() {
+        EmployeeIdDTO dto = new EmployeeIdDTO();
+        dto.setResourceId(100L);
+        SsResource employee = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
+        when(ssResourceService.findById(100L)).thenReturn(employee);
+        when(ssResourceRelDetailService.findRelResourceIdsByResourceId(100L))
+            .thenReturn(List.of(301L, 301L, 401L));
+
+        List<Long> result = service.queryInstalledResourceIds(dto);
+
+        assertThat(result).containsExactly(301L, 401L);
+        verify(authApplicationService).hasResourceInstallTargetManagePermission(employee);
+    }
+
+    @Test
+    void queryInstalledResourceIds_rejectsEmployeeWithoutStrictManagePermission() {
+        EmployeeIdDTO dto = new EmployeeIdDTO();
+        dto.setResourceId(100L);
+        SsResource employee = buildDigitalEmployee(100L, OwnerType.ENTERPRISE, 2L);
+        when(ssResourceService.findById(100L)).thenReturn(employee);
+        when(authApplicationService.hasResourceInstallTargetManagePermission(employee)).thenReturn(false);
+
+        assertThatThrownBy(() -> service.queryInstalledResourceIds(dto)).isInstanceOf(BaseException.class);
+
+        verify(ssResourceRelDetailService, never()).findRelResourceIdsByResourceId(100L);
     }
 
     @Test
@@ -735,10 +876,32 @@ class DigitalEmployeeApplicationServiceTest {
         when(ssResourceService.findById(100L)).thenReturn(currentDefaultResource);
         when(skillGroupMapper.selectDigitalEmployeeForUpdate(100L, 201L)).thenReturn(currentDefaultResource);
         when(ssResourceService.findByIdList(List.of(300L))).thenReturn(List.of(skillResource));
-        when(authApplicationService.hasResourceManagePermission(currentDefaultResource)).thenReturn(false);
+        when(authApplicationService.hasResourceInstallTargetManagePermission(currentDefaultResource)).thenReturn(false);
 
         assertThatThrownBy(() -> service.installDigitalEmployeeRelResources(dto)).isInstanceOf(RuntimeException.class);
         verify(authApplicationService, never()).hasResourceUsePermission(skillResource);
+        verify(ssResourceRelDetailService, never()).findByResourceId(100L);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = { "KG_DOC", "KG_QA", "KG_TERM", "ONTOLOGY_BASE", "SCENE", "VIEW", "OBJECT" })
+    void installDigitalEmployeeRelResources_rejectsNonSkillResourceWhenBoundDefaultEmployeeIsNotManageable(
+        String resourceBizType) {
+        DigitalEmployeeInstallResourceDTO dto = new DigitalEmployeeInstallResourceDTO();
+        dto.setDigitalEmployeeId(100L);
+        dto.setRelIds(List.of(400L));
+
+        SsResource boundDefaultEmployee = buildDigitalEmployee(100L, OwnerType.PERSONAL_DEFAULT, 99L);
+        SsResource resource = new SsResource();
+        resource.setResourceId(400L);
+        resource.setResourceBizType(resourceBizType);
+
+        when(ssResourceService.findByIdList(List.of(400L))).thenReturn(List.of(resource));
+        when(ssResourceService.findById(100L)).thenReturn(boundDefaultEmployee);
+        when(authApplicationService.hasResourceInstallTargetManagePermission(boundDefaultEmployee)).thenReturn(false);
+
+        assertThatThrownBy(() -> service.installDigitalEmployeeRelResources(dto)).isInstanceOf(BaseException.class);
+        verify(authApplicationService).hasResourceInstallTargetManagePermission(boundDefaultEmployee);
         verify(ssResourceRelDetailService, never()).findByResourceId(100L);
     }
 
@@ -1094,7 +1257,7 @@ class DigitalEmployeeApplicationServiceTest {
         when(ssResourceService.findById(100L)).thenReturn(employee);
         when(skillGroupMapper.selectDigitalEmployeeForUpdate(100L, 201L)).thenReturn(employee);
         when(ssResourceService.findByIdList(List.of(301L, 401L))).thenReturn(List.of(skill, object));
-        when(authApplicationService.hasResourceManagePermission(employee)).thenReturn(true);
+        when(authApplicationService.hasResourceInstallTargetManagePermission(employee)).thenReturn(true);
         when(authApplicationService.hasResourceUsePermission(skill)).thenReturn(true);
         when(ssResourceRelDetailService.findByResourceId(100L)).thenReturn(List.of(skillRelation, objectRelation));
         when(skillGroupMapper.selectDigitalEmployeeSkillRelations(100L, List.of(301L)))
@@ -1234,7 +1397,7 @@ class DigitalEmployeeApplicationServiceTest {
             "{\"manual\":true,\"sourceGroupIds\":[]}");
         when(ssResourceService.findByIdList(List.of(301L))).thenReturn(List.of(skill));
         when(skillGroupMapper.selectDigitalEmployeeForUpdate(100L, 201L)).thenReturn(employee);
-        when(authApplicationService.hasResourceManagePermission(employee)).thenReturn(true);
+        when(authApplicationService.hasResourceInstallTargetManagePermission(employee)).thenReturn(true);
         when(skillGroupMapper.selectDigitalEmployeeSkillRelations(100L, List.of(301L)))
             .thenReturn(List.of(relation));
         when(ssResourceRelDetailService.removeById(901L)).thenReturn(true);
@@ -1244,7 +1407,7 @@ class DigitalEmployeeApplicationServiceTest {
 
         InOrder order = inOrder(skillGroupMapper, authApplicationService, ssResourceRelDetailService);
         order.verify(skillGroupMapper).selectDigitalEmployeeForUpdate(100L, 201L);
-        order.verify(authApplicationService).hasResourceManagePermission(employee);
+        order.verify(authApplicationService).hasResourceInstallTargetManagePermission(employee);
         order.verify(skillGroupMapper).selectDigitalEmployeeSkillRelations(100L, List.of(301L));
         order.verify(ssResourceRelDetailService).removeById(901L);
         verify(ssResourceRelDetailService, never()).updateById(relation);
@@ -1261,7 +1424,7 @@ class DigitalEmployeeApplicationServiceTest {
             "{\"manual\":true,\"sourceGroupIds\":[700]}");
         when(ssResourceService.findByIdList(List.of(301L))).thenReturn(List.of(skill));
         when(skillGroupMapper.selectDigitalEmployeeForUpdate(100L, 201L)).thenReturn(employee);
-        when(authApplicationService.hasResourceManagePermission(employee)).thenReturn(true);
+        when(authApplicationService.hasResourceInstallTargetManagePermission(employee)).thenReturn(true);
         when(skillGroupMapper.selectDigitalEmployeeSkillRelations(100L, List.of(301L)))
             .thenReturn(List.of(relation));
         when(ssResourceRelDetailService.updateById(relation)).thenReturn(true);
@@ -1342,7 +1505,7 @@ class DigitalEmployeeApplicationServiceTest {
             "{\"manual\":true,\"sourceGroupIds\":[700]}");
         when(ssResourceService.findByIdList(List.of(301L))).thenReturn(List.of(skill));
         when(skillGroupMapper.selectDigitalEmployeeForUpdate(100L, 201L)).thenReturn(employee);
-        when(authApplicationService.hasResourceManagePermission(employee)).thenReturn(true);
+        when(authApplicationService.hasResourceInstallTargetManagePermission(employee)).thenReturn(true);
         when(skillGroupMapper.selectDigitalEmployeeSkillRelations(100L, List.of(301L)))
             .thenReturn(List.of(manualOnly, manualAndGroup));
         when(ssResourceRelDetailService.removeById(901L)).thenReturn(true);
@@ -1374,7 +1537,7 @@ class DigitalEmployeeApplicationServiceTest {
         relation.setRelResourceId(401L);
         when(ssResourceService.findByIdList(List.of(401L))).thenReturn(List.of(object));
         when(ssResourceService.findById(100L)).thenReturn(employee);
-        when(authApplicationService.hasResourceManagePermission(employee)).thenReturn(true);
+        when(authApplicationService.hasResourceInstallTargetManagePermission(employee)).thenReturn(true);
         when(ssResourceRelDetailService.findByResourceId(100L)).thenReturn(List.of(relation));
         when(ssResourceRelDetailService.removeById(901L)).thenReturn(true);
         doReturn(new DigitalEmployeeDetailsDTO()).when(uninstallService).findDetailsById(any(EmployeeIdDTO.class));
@@ -1393,6 +1556,22 @@ class DigitalEmployeeApplicationServiceTest {
     }
 
     @Test
+    void ordinaryNonSkillUninstallRejectsEmployeeWithoutStrictManagePermission() {
+        SsResource employee = buildDigitalEmployee(100L, OwnerType.ENTERPRISE, 2L);
+        SsResource object = new SsResource();
+        object.setResourceId(401L);
+        object.setResourceBizType(ResourceBizTypeEnum.OBJECT.name());
+        when(ssResourceService.findByIdList(List.of(401L))).thenReturn(List.of(object));
+        when(ssResourceService.findById(100L)).thenReturn(employee);
+        when(authApplicationService.hasResourceInstallTargetManagePermission(employee)).thenReturn(false);
+
+        assertThatThrownBy(() -> service.uninstallDigitalEmployeeRelResources(uninstallDto(401L)))
+            .isInstanceOf(BaseException.class);
+
+        verify(ssResourceRelDetailService, never()).findByResourceId(100L);
+    }
+
+    @Test
     void ordinaryMixedUninstallPreservesGroupSkillAndFullyDeletesRequestedNonSkill() {
         DigitalEmployeeApplicationService uninstallService = snapshotServiceSpy();
         SsResource employee = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
@@ -1408,7 +1587,7 @@ class DigitalEmployeeApplicationServiceTest {
         objectRelation.setRelResourceId(401L);
         when(ssResourceService.findByIdList(List.of(301L, 401L))).thenReturn(List.of(skill, object));
         when(skillGroupMapper.selectDigitalEmployeeForUpdate(100L, 201L)).thenReturn(employee);
-        when(authApplicationService.hasResourceManagePermission(employee)).thenReturn(true);
+        when(authApplicationService.hasResourceInstallTargetManagePermission(employee)).thenReturn(true);
         when(skillGroupMapper.selectDigitalEmployeeSkillRelations(100L, List.of(301L)))
             .thenReturn(List.of(skillRelation));
         when(ssResourceRelDetailService.findByResourceId(100L)).thenReturn(List.of(skillRelation, objectRelation));
@@ -1446,7 +1625,7 @@ class DigitalEmployeeApplicationServiceTest {
         when(skillGroupMapper.selectDigitalEmployeeForUpdate(100L, 201L)).thenReturn(currentDefaultResource);
         when(skillGroupMapper.selectDigitalEmployeeSkillRelations(100L, List.of(300L)))
             .thenReturn(List.of(skillRel));
-        when(authApplicationService.hasResourceManagePermission(currentDefaultResource)).thenReturn(true);
+        when(authApplicationService.hasResourceInstallTargetManagePermission(currentDefaultResource)).thenReturn(true);
         when(ssResourceRelDetailService.removeById(900L)).thenReturn(true);
         when(ssResourceRelDetailService.findByResourceId(100L)).thenReturn(List.of());
         when(ssResExtDigEmployeeService.findById(100L)).thenReturn(extDigEmployee);
@@ -1491,7 +1670,7 @@ class DigitalEmployeeApplicationServiceTest {
         when(skillGroupMapper.selectDigitalEmployeeForUpdate(100L, 201L)).thenReturn(digitalEmployee);
         when(skillGroupMapper.selectDigitalEmployeeSkillRelations(100L, List.of(300L)))
             .thenReturn(List.of(skillRel));
-        when(authApplicationService.hasResourceManagePermission(digitalEmployee)).thenReturn(true);
+        when(authApplicationService.hasResourceInstallTargetManagePermission(digitalEmployee)).thenReturn(true);
         when(ssResExtSkillService.findById(300L)).thenReturn(extSkill);
         when(userService.findById(1L)).thenReturn(creator);
         when(byClawSkillPathResolver.resolveSkillRootPrefix("zhangsan", 100L))
@@ -1521,7 +1700,7 @@ class DigitalEmployeeApplicationServiceTest {
 
         when(ssResourceService.findByIdList(List.of(300L))).thenReturn(List.of(skillResource));
         when(skillGroupMapper.selectDigitalEmployeeForUpdate(100L, 201L)).thenReturn(currentDefaultResource);
-        when(authApplicationService.hasResourceManagePermission(currentDefaultResource)).thenReturn(false);
+        when(authApplicationService.hasResourceInstallTargetManagePermission(currentDefaultResource)).thenReturn(false);
 
         assertThatThrownBy(() -> service.uninstallDigitalEmployeeRelResources(dto)).isInstanceOf(RuntimeException.class);
         verify(authApplicationService, never()).hasResourceUsePermission(skillResource);
@@ -2104,7 +2283,7 @@ class DigitalEmployeeApplicationServiceTest {
         employee.setComAcctId(201L);
         when(ssResourceService.findByIdList(List.of(skill.getResourceId()))).thenReturn(List.of(skill));
         when(skillGroupMapper.selectDigitalEmployeeForUpdate(100L, 201L)).thenReturn(employee);
-        when(authApplicationService.hasResourceManagePermission(employee)).thenReturn(true);
+        when(authApplicationService.hasResourceInstallTargetManagePermission(employee)).thenReturn(true);
         when(skillGroupMapper.selectDigitalEmployeeSkillRelations(100L, List.of(skill.getResourceId())))
             .thenReturn(List.of(relation));
     }
@@ -2135,7 +2314,7 @@ class DigitalEmployeeApplicationServiceTest {
         SsResource resource = new SsResource();
         resource.setResourceId(resourceId);
         resource.setResourceBizType(ResourceBizTypeEnum.DIG_EMPLOYEE.name());
-        resource.setResourceStatus(ResourceStatus.LIST.getNum());
+        resource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
         resource.setOwnerType(ownerType);
         resource.setCreateBy(createBy);
         return resource;

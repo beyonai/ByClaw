@@ -11,6 +11,7 @@ import ActiveSiderAgentBar, { useActiveSiderAgent } from '@/layout/sider/compone
 import useResourceCenterRouter from '@/layout/sider/components/useResourceCenterRouter';
 import { SiderContentContext } from '@/layout/sider/siderContentContext';
 import { findDetailsById } from '@/pages/manager/service/DigitalEmployeeMgr';
+import { useDigitalEmployeeManagePermission } from '@/components/Resources/workspaceSkill/useDigitalEmployeeManagePermission';
 import {
   getOntologyObjectDetail,
   listOntologyObjectsByView,
@@ -248,7 +249,8 @@ const OntologySiderPanel: React.FC<OntologySiderPanelProps> = ({ embedded = fals
   const { isCenterPage: isOntologyCenterPage, toggleCenter } = useResourceCenterRouter(
     '/ontologyCenter',
     'ontology',
-    showRouter
+    showRouter,
+    activeSiderAgent
   );
   const clickTimerRef = useRef<number | null>(null);
 
@@ -258,6 +260,7 @@ const OntologySiderPanel: React.FC<OntologySiderPanelProps> = ({ embedded = fals
   const [searchValue, setSearchValue] = useState('');
 
   const deId = activeSiderAgent?.resourceId;
+  const canManageActiveEmployee = useDigitalEmployeeManagePermission(deId);
 
   // 拉取当前数字员工详情，relResourceList 给真实资源，relOntology 补充本体路径元数据。
   const loadBound = useCallback(
@@ -675,7 +678,9 @@ const OntologySiderPanel: React.FC<OntologySiderPanelProps> = ({ embedded = fals
         { key: 'quote', label: intl.formatMessage({ id: 'common.quote' }) },
         { key: 'detail', label: intl.formatMessage({ id: 'common.detail' }) },
         ...bizItems,
-        { key: 'unbind', label: intl.formatMessage({ id: 'ontologySider.unbind' }) },
+        ...(canManageActiveEmployee
+          ? [{ key: 'unbind', label: intl.formatMessage({ id: 'ontologySider.unbind' }) }]
+          : []),
       ];
       return (
         <div
@@ -741,6 +746,7 @@ const OntologySiderPanel: React.FC<OntologySiderPanelProps> = ({ embedded = fals
       handleNodeClick,
       handleNodeDoubleClick,
       handleUnbind,
+      canManageActiveEmployee,
       intl,
       openLeafDetail,
       quoteLeafToChat,

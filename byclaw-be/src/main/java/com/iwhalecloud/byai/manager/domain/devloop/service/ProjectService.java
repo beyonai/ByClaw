@@ -55,15 +55,16 @@ public class ProjectService {
         return projectMapper.selectById(projectId);
     }
 
+
     /**
-     * 按项目名称查询。
+     * 按项目编码查询。
      *
-     * @param projectName 项目名称
+     * @param projectCode 项目编码
      * @return 项目实体，不存在则返回 null
      */
-    public Project findByProjectName(String projectName) {
+    public Project findByProjectCode(String projectCode) {
         LambdaQueryWrapper<Project> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(Project::getProjectName, projectName);
+        wrapper.eq(Project::getProjectCode, projectCode);
         return projectMapper.selectOne(wrapper, false);
     }
 
@@ -99,5 +100,6 @@ public class ProjectService {
         Long count = projectMapper.selectCount(wrapper);
         return count != null && count > 0;
     }
+
 
 }

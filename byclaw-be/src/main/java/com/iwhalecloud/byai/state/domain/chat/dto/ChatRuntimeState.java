@@ -25,6 +25,8 @@ public class ChatRuntimeState {
 
     private String traceId;
 
+    private Boolean concurrentGatewayTurn;
+
     private Long userMessageId;
 
     private Long modelAnswerMessageId;

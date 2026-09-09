@@ -22,6 +22,12 @@ public class DiscoverQo extends AuthQo {
      */
     private String agentType;
 
+    /** 官方推荐合并查询时同时返回数字员工组和数字员工。 */
+    private Boolean includeEmployeeGroup;
+
+    /** 官方推荐合并查询时按数字员工组优先、同类型按修改时间倒序排列。 */
+    private Boolean employeeGroupFirst;
+
     /**
      * 目录id
      */
@@ -83,6 +89,9 @@ public class DiscoverQo extends AuthQo {
      * 是否查询全部资源状态。true 时不再附加 a.resource_status 过滤，覆盖筛选"全部"语义。
      */
     private Boolean includeAllResourceStatus;
+
+    /** 官方推荐查询全部状态时排除已删除数据。 */
+    private Boolean excludeDeleted;
 
     /**
      * 仅查询当前账号下可用的数字员工（我创建的 或 红名单授权给我的）。

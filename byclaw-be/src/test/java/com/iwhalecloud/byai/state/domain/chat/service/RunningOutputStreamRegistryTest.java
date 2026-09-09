@@ -72,6 +72,38 @@ class RunningOutputStreamRegistryTest {
     }
 
     @Test
+    void selectingRemainingTurnAsOwnerKeepsItsStableRecoveryRegistration() {
+        ChatProcessContext ctx = new ChatProcessContext(null, null);
+        ctx.sessionId = 10L;
+        ctx.traceId = "followup";
+        ctx.modelAnswerMessageId = 21L;
+        ctx.runningOutputStreamToken = "followup-token";
+        ctx.concurrentGatewayTurn = true;
+        runningOutputStreamRegistry.markRunning(ctx);
+        assertThat(ctx.concurrentGatewayTurn).isTrue();
+        assertThat(ctx.runningOutputStreamToken).isEqualTo("followup-token");
+        verify(chatRuntimeStateService).touch(ctx);
+        verify(chatRuntimeStateService, never()).saveConcurrent(org.mockito.ArgumentMatchers.any());
+        verify(chatRuntimeStateService, never()).save(org.mockito.ArgumentMatchers.any(), anyString());
+        verify(chatRuntimeStateService, never()).clearConcurrent(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void ownerRefreshFailureDoesNotRemoveTheOnlyRecoveryRegistration() {
+        ChatProcessContext ctx = new ChatProcessContext(null, null);
+        ctx.sessionId = 10L;
+        ctx.traceId = "followup";
+        ctx.modelAnswerMessageId = 21L;
+        ctx.concurrentGatewayTurn = true;
+        org.mockito.Mockito.doThrow(new IllegalStateException("Redis write failed"))
+            .when(chatRuntimeStateService).touch(ctx);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> runningOutputStreamRegistry.markRunning(ctx))
+            .hasMessage("Redis write failed");
+        assertThat(ctx.concurrentGatewayTurn).isTrue();
+        verify(chatRuntimeStateService, never()).clearConcurrent(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
     void release_deletesMatchingRunningMessage() {
         when(valueOperations.get("byai:chat:running:10"))
             .thenReturn("{\"sessionId\":10,\"modelAnswerMessageId\":20}");

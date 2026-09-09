@@ -1,0 +1,38 @@
+.select {
+  min-width: 180px;
+}
+.panel {
+  padding: 0 12px 10px;
+}
+.panel :global(.ant-tabs-nav) {
+  margin: 0 -4px 8px;
+}
+.panel :global(.ant-tabs-tab) {
+  padding: 10px 8px;
+}
+.list {
+  max-height: 280px;
+  overflow: auto;
+}
+.item {
+  padding: 10px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.item:hover,
+.selected {
+  background: #f0f5ff;
+}
+.option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+}
+.option :global(.ant-tag) {
+  margin-inline-end: 0;
+  color: #597ef7;
+  background: #f0f5ff;
+}

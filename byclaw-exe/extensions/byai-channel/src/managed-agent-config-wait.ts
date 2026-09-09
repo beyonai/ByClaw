@@ -29,8 +29,38 @@ export type BaiyingAgentConfigReadiness = {
 
 export type ManagedAgentConfigReadiness = BaiyingAgentConfigReadiness;
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function throwIfAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return;
+  throw signal.reason instanceof Error
+    ? signal.reason
+    : new Error(String(signal.reason || "task cancelled"));
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  throwIfAborted(signal);
+  return new Promise<void>((resolve, reject) => {
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const finish = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      callback();
+    };
+    const onAbort = () => {
+      finish(() =>
+        reject(
+          signal?.reason instanceof Error
+            ? signal.reason
+            : new Error(String(signal?.reason || "task cancelled")),
+        ),
+      );
+    };
+    timer = setTimeout(() => finish(resolve), ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted) onAbort();
+  });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -199,11 +229,13 @@ export async function waitForBaiyingAgentConfig(params: {
   log?: Logger;
   waitMs?: number;
   pollMs?: number;
+  signal?: AbortSignal;
 }): Promise<OpenClawConfig> {
   const waitMs = params.waitMs ?? DEFAULT_WAIT_MS;
   const pollMs = params.pollMs ?? DEFAULT_POLL_MS;
   const start = Date.now();
   let cfg = readRuntimeConfig(params.runtime, params.cfg);
+  throwIfAborted(params.signal);
   let readiness = resolveBaiyingAgentConfigReadiness(cfg, params.agentId);
 
   if (readiness.ready) {
@@ -215,7 +247,7 @@ export async function waitForBaiyingAgentConfig(params: {
   );
 
   while (Date.now() - start < waitMs) {
-    await sleep(pollMs);
+    await sleep(pollMs, params.signal);
     cfg = readRuntimeConfig(params.runtime, params.cfg);
     readiness = resolveBaiyingAgentConfigReadiness(cfg, params.agentId);
     if (readiness.ready) {
@@ -239,6 +271,7 @@ export async function waitForManagedBaiyingAgentConfig(params: {
   log?: Logger;
   waitMs?: number;
   pollMs?: number;
+  signal?: AbortSignal;
 }): Promise<OpenClawConfig> {
   return waitForBaiyingAgentConfig(params);
 }

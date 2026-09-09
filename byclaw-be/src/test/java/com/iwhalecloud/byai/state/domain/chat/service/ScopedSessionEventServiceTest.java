@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -57,6 +58,8 @@ class ScopedSessionEventServiceTest {
     void setUp() {
         service = new ScopedSessionEventService(childSessionService, gatewayStreamEventProcessor, pythonSseService,
             memoryMessageService, projectionBroadcaster, runningChatSnapshotService, childMessageWriteBehind);
+        org.mockito.Mockito.lenient().doCallRealMethod().when(runningChatSnapshotService)
+            .hydrateMessageContextFromSnapshot(any(), any(), any());
     }
 
     @Test
@@ -171,9 +174,15 @@ class ScopedSessionEventServiceTest {
         when(childSessionService.ensureBinding(100L, metadata))
             .thenReturn(new ExternalChildSessionBinding(child, "worker-child-1", 201L));
 
+        RunningChatSnapshotResponse existing = new RunningChatSnapshotResponse();
+        existing.setSessionId(200L);
+        existing.setMessageId(201L);
+        existing.setRunning(false);
+        when(runningChatSnapshotService.getExternalChildSnapshot(200L, 201L)).thenReturn(existing);
         MessageContext completedContext = new MessageContext(AgentTypeEnum.AGENT, 201L);
         completedContext.setComplete(true);
-        when(runningChatSnapshotService.hydrateMessageContext(any(), any())).thenReturn(completedContext);
+        org.mockito.Mockito.doReturn(completedContext).when(runningChatSnapshotService)
+            .hydrateMessageContextFromSnapshot(any(), any(), any());
         when(gatewayStreamEventProcessor.buildEventData(any(ChatProcessContext.class), eq(event), eq(metadata)))
             .thenReturn(event.getString("data"));
 
@@ -216,7 +225,8 @@ class ScopedSessionEventServiceTest {
         when(runningChatSnapshotService.getExternalChildSnapshot(200L, 201L)).thenReturn(completedSnapshot);
         MessageContext completedContext = new MessageContext(AgentTypeEnum.AGENT, 201L);
         completedContext.setComplete(true);
-        when(runningChatSnapshotService.hydrateMessageContext(any(), any())).thenReturn(completedContext);
+        org.mockito.Mockito.doReturn(completedContext).when(runningChatSnapshotService)
+            .hydrateMessageContextFromSnapshot(any(), any(), any());
         when(gatewayStreamEventProcessor.buildEventData(any(ChatProcessContext.class), eq(event), eq(metadata)))
             .thenReturn(event.getString("data"));
 
@@ -354,6 +364,151 @@ class ScopedSessionEventServiceTest {
 
         verify(childMessageWriteBehind, never()).enqueue(any(), any(), any(), any(Boolean.class));
         verify(projectionBroadcaster, never()).enqueue(any(), any(), any(), any(Boolean.class));
+    }
+
+    @Test
+    void burstOfChildDeltasBuildsAndPersistsOnlyOneCompleteProjection() {
+        JSONObject metadata = childMetadata("worker-child-1", "child", "worker");
+        metadata.put("session_status", "running");
+        metadata.put("event_kind", "session.output");
+        ByaiSession child = childSession(200L, 100L, 900L);
+        when(childSessionService.ensureBinding(100L, metadata))
+            .thenReturn(new ExternalChildSessionBinding(child, "worker-child-1", 201L));
+        when(gatewayStreamEventProcessor.buildEventData(any(), any(), eq(metadata)))
+            .thenAnswer(call -> call.getArgument(1, JSONObject.class).getString("data"));
+        ByaiMessageHotDtoDto projection = new ByaiMessageHotDtoDto();
+        projection.setSessionId(200L);
+        projection.setMessageId(201L);
+        when(memoryMessageService.generateMessage(any(), any(), any(), any())).thenReturn(projection);
+        when(runningChatSnapshotService.saveExternalChild(projection, "100-0", false)).thenReturn(true);
+        java.util.List<JSONObject> events = new java.util.ArrayList<>();
+        for (int index = 1; index <= 100; index++) {
+            JSONObject event = streamEvent("reasoningLogDelta", "delta", metadata);
+            event.put("stream_id", index + "-0");
+            events.add(event);
+        }
+        org.springframework.test.util.ReflectionTestUtils.invokeMethod(service, "handleChildBatch", 100L, events);
+        verify(pythonSseService, org.mockito.Mockito.times(100)).accumulateEvent(any(), any());
+        verify(memoryMessageService).generateMessage(any(), any(), any(), any());
+        verify(runningChatSnapshotService).saveExternalChild(projection, "100-0", false);
+        verify(runningChatSnapshotService).getExternalChildSnapshot(200L, 201L);
+        verify(childMessageWriteBehind).enqueue("child:200:201", 200L, projection, false);
+    }
+
+    @Test
+    void stableEventSequenceSuppressesRetryDuplicatesButKeepsEqualTextFromDistinctEvents() {
+        ByaiSession child = childSession(200L, 100L, 900L);
+        when(childSessionService.ensureBinding(eq(100L), any(JSONObject.class)))
+            .thenReturn(new ExternalChildSessionBinding(child, "worker-child-1", 201L));
+        when(gatewayStreamEventProcessor.buildEventData(any(), any(), any()))
+            .thenAnswer(call -> call.getArgument(1, JSONObject.class).getString("data"));
+        ByaiMessageHotDtoDto projection = new ByaiMessageHotDtoDto();
+        projection.setSessionId(200L);
+        projection.setMessageId(201L);
+        when(memoryMessageService.generateMessage(any(), any(), any(), any())).thenReturn(projection);
+        when(runningChatSnapshotService.saveExternalChild(eq(projection), any(), eq(false))).thenReturn(true);
+
+        JSONObject firstMetadata = childMetadata("worker-child-1", "child", "worker");
+        firstMetadata.put("session_status", "running");
+        firstMetadata.put("event_kind", "session.output");
+        firstMetadata.put("event_sequence", "event-1");
+        JSONObject first = streamEvent("reasoningLogDelta", "same text", firstMetadata);
+        first.put("stream_id", "1-0");
+        JSONObject retry = JSON.parseObject(first.toJSONString());
+        retry.put("stream_id", "2-0");
+        JSONObject distinct = JSON.parseObject(first.toJSONString());
+        distinct.put("stream_id", "3-0");
+        distinct.getJSONObject("metadata").put("event_sequence", "event-2");
+
+        service.handleIfNecessary(100L, first);
+        service.handleIfNecessary(100L, retry);
+        service.handleIfNecessary(100L, distinct);
+
+        verify(pythonSseService, times(2)).accumulateEvent(any(), any());
+        verify(runningChatSnapshotService, times(3)).saveExternalChild(eq(projection), any(), eq(false));
+    }
+
+    @Test
+    void activeChildReusesRunIdentityInsteadOfReadingWholeSnapshotOnEveryDelta() {
+        JSONObject metadata = childMetadata("worker-child-1", "child", "worker");
+        metadata.put("session_status", "running");
+        metadata.put("event_kind", "session.output");
+        ByaiSession child = childSession(200L, 100L, 900L);
+        when(childSessionService.ensureBinding(100L, metadata))
+            .thenReturn(new ExternalChildSessionBinding(child, "worker-child-1", 201L));
+        when(gatewayStreamEventProcessor.buildEventData(any(), any(), eq(metadata)))
+            .thenAnswer(call -> call.getArgument(1, JSONObject.class).getString("data"));
+        ByaiMessageHotDtoDto projection = new ByaiMessageHotDtoDto();
+        projection.setSessionId(200L);
+        projection.setMessageId(201L);
+        when(memoryMessageService.generateMessage(any(), any(), any(), any())).thenReturn(projection);
+        when(runningChatSnapshotService.saveExternalChild(eq(projection), any(), eq(false))).thenReturn(true);
+        for (int i = 1; i <= 3; i++) {
+            JSONObject event = streamEvent("reasoningLogDelta", "delta", metadata);
+            event.put("stream_id", i + "-0");
+            service.handleIfNecessary(100L, event);
+        }
+        verify(runningChatSnapshotService).getExternalChildSnapshot(200L, 201L);
+    }
+
+    @Test
+    void retryAfterAmbiguousSnapshotSuccessStillSchedulesDatabasePersistence() {
+        JSONObject metadata = childMetadata("worker-child-1", "child", "worker");
+        JSONObject event = streamEvent("answerDelta", "output", metadata);
+        ByaiSession child = childSession(200L, 100L, 900L);
+        when(childSessionService.ensureBinding(100L, metadata))
+            .thenReturn(new ExternalChildSessionBinding(child, "worker-child-1", 201L));
+        RunningChatSnapshotResponse checkpoint = new RunningChatSnapshotResponse();
+        checkpoint.setSessionId(200L);
+        checkpoint.setMessageId(201L);
+        checkpoint.setModelAnswerMessageId(201L);
+        checkpoint.setSnapshotStreamId("1-0");
+        checkpoint.setRunning(false);
+        checkpoint.setMetadata("{\"event_stream_id\":\"1-0\"}");
+        checkpoint.setMessageContent("durable output");
+        when(runningChatSnapshotService.getExternalChildSnapshot(200L, 201L)).thenReturn(checkpoint);
+        org.mockito.Mockito.lenient().when(runningChatSnapshotService.saveExternalChild(any(), eq("1-0"), eq(true)))
+            .thenReturn(true);
+        service.handleIfNecessary(100L, event);
+        verify(childMessageWriteBehind).enqueue(eq("child:200:201"), eq(200L), any(), eq(true));
+    }
+
+    @Test
+    void successfullyReadSnapshotIsHydratedWithoutASecondRedisGet() {
+        JSONObject metadata = childMetadata("worker-child-1", "child", "worker");
+        metadata.put("session_status", "running");
+        JSONObject event = streamEvent("reasoningLogDelta", "delta", metadata);
+        event.put("stream_id", "2-0");
+        ByaiSession child = childSession(200L, 100L, 900L);
+        when(childSessionService.ensureBinding(100L, metadata))
+            .thenReturn(new ExternalChildSessionBinding(child, "worker-child-1", 201L));
+        org.springframework.data.redis.core.RedisTemplate<String, Object> redis = org.mockito.Mockito.mock(
+            org.springframework.data.redis.core.RedisTemplate.class);
+        org.springframework.data.redis.core.ValueOperations<String, Object> values = org.mockito.Mockito.mock(
+            org.springframework.data.redis.core.ValueOperations.class);
+        when(redis.opsForValue()).thenReturn(values);
+        RunningChatSnapshotResponse checkpoint = new RunningChatSnapshotResponse();
+        checkpoint.setSessionId(200L);
+        checkpoint.setMessageId(201L);
+        checkpoint.setModelAnswerMessageId(201L);
+        checkpoint.setSnapshotStreamId("1-0");
+        checkpoint.setRunning(true);
+        checkpoint.setMessageContent("previous output");
+        when(values.get("byai:chat:running:snapshot:200:external-child-200"))
+            .thenReturn(JSON.toJSONString(checkpoint)).thenThrow(new IllegalStateException("second read failed"));
+        RunningChatSnapshotService snapshots = org.mockito.Mockito.spy(new RunningChatSnapshotService());
+        org.springframework.test.util.ReflectionTestUtils.setField(snapshots, "redisTemplate", redis);
+        org.mockito.Mockito.doReturn(true).when(snapshots).saveExternalChild(any(), any(), eq(false));
+        service = new ScopedSessionEventService(childSessionService, gatewayStreamEventProcessor, pythonSseService,
+            memoryMessageService, projectionBroadcaster, snapshots, childMessageWriteBehind);
+        when(gatewayStreamEventProcessor.buildEventData(any(), any(), any())).thenReturn(event.getString("data"));
+        ByaiMessageHotDtoDto projection = new ByaiMessageHotDtoDto();
+        when(memoryMessageService.generateMessage(any(), any(), any(), any())).thenAnswer(call -> {
+            assertThat(call.getArgument(2, MessageContext.class).returnAnswerText()).isEqualTo("previous output");
+            return projection;
+        });
+        service.handleIfNecessary(100L, event);
+        verify(values).get("byai:chat:running:snapshot:200:external-child-200");
     }
 
     @Test
