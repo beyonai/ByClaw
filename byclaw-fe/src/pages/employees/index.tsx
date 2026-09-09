@@ -442,6 +442,8 @@ const Employees = () => {
                 agentType={detailAgentInfo?.agentType || agentTypeMap.agent}
                 queryInputProps={{
                   placeholder: '',
+                  // 网页端个人数字员工会话展示模型选择器。
+                  enableModelSelect: true,
                   onMounted: () => {
                     if (!initialQuestion || initialQuestionSentRef.current) return;
                     initialQuestionSentRef.current = true;
