@@ -21,6 +21,7 @@ import CopyComp from './components/AnswerActions/Copy';
 import MoreActions from './components/AnswerActions/MoreActions';
 import ThumbUp from './components/AnswerActions/ThumbUp';
 import MsgRenderer from './components/MsgRenderer';
+import UsedModelBadge from './components/UsedModelBadge';
 import MsgRendererV2 from './components/MsgRendererV2';
 import { isV2Message } from './components/MsgRendererV2/ordered';
 import UserInfoModal from '@/components/OrgUserSelector/components/UserInfoModal';
@@ -519,6 +520,7 @@ export default function useRender({
                   <span>{intl.formatMessage({ id: 'common.digitalClone' })}</span>
                 </div>
               )}
+              <UsedModelBadge metadata={msg.metadata} />
               <span className={styles.createTime}>{displayCreateTime}</span>
             </div>
           )}
