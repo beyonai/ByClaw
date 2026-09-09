@@ -55,4 +55,29 @@ class WebSocketHandlerI18nTest {
         assertThat(response.text()).contains("HEARTBEAT");
         response.release();
     }
+
+    @Test
+    void heartbeatUpdatesTheSelectedScopedChildWithoutAddingANewMessageType() {
+        WebSocketHandler handler = new WebSocketHandler();
+        ReflectionTestUtils.setField(handler, "chatService", mock(ChatService.class));
+        ReflectionTestUtils.setField(handler, "notificationService", mock(NotificationService.class));
+        ReflectionTestUtils.setField(handler, "sandboxService", mock(SandboxService.class));
+
+        LoginInfo loginInfo = new LoginInfo();
+        loginInfo.setUserId(1L);
+        loginInfo.setUserCode("u1");
+        loginInfo.setUserName("tester");
+        EmbeddedChannel channel = new EmbeddedChannel(handler);
+        channel.attr(Constant.ATT_USER_INFO).set(loginInfo);
+
+        channel.writeInbound(new TextWebSocketFrame(
+            "{\"type\":\"HEARTBEAT\",\"scopedSessionId\":\"201\"}"));
+        assertThat(channel.attr(Constant.ATT_SCOPED_SESSION_ID).get()).isEqualTo("201");
+        ((TextWebSocketFrame) channel.readOutbound()).release();
+
+        channel.writeInbound(new TextWebSocketFrame(
+            "{\"type\":\"HEARTBEAT\",\"scopedSessionId\":\"\"}"));
+        assertThat(channel.attr(Constant.ATT_SCOPED_SESSION_ID).get()).isNull();
+        ((TextWebSocketFrame) channel.readOutbound()).release();
+    }
 }

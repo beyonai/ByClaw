@@ -114,7 +114,9 @@ describe('utils/websocket', () => {
     ws.disconnect();
     ws.init();
 
-    expect(WebSocketMock).toHaveBeenCalledWith('ws://example.com/byaiService/ws?beyond-token=token-1&language=zh-CN');
+    expect(WebSocketMock).toHaveBeenCalledWith(
+      'ws://example.com/byaiService/ws?beyond-token=token-1&language=zh-CN&scoped-delta-version=1'
+    );
     expect(ws.getConnectionStatus()).toBe('connected');
   });
 
@@ -132,7 +134,7 @@ describe('utils/websocket', () => {
 
     expect(oldSocket.close).toHaveBeenCalled();
     expect(WebSocketMock).toHaveBeenLastCalledWith(
-      'ws://example.com/byaiService/ws?beyond-token=token-2&language=zh-CN'
+      'ws://example.com/byaiService/ws?beyond-token=token-2&language=zh-CN&scoped-delta-version=1'
     );
   });
 
@@ -146,6 +148,33 @@ describe('utils/websocket', () => {
 
     jest.advanceTimersByTime(6000);
     expect(socketInstance.send).toHaveBeenCalledWith(JSON.stringify({ language: 'zh-CN', type: 'NOTIFICATION' }));
+  });
+
+  it('sends and restores the selected scoped child through a backward-compatible heartbeat', () => {
+    mockGetToken.mockReturnValue('token-1');
+    const ws = require('../websocket').default;
+
+    ws.disconnect();
+    ws.setScopedSessionId('201');
+    ws.init();
+    socketInstance.onopen();
+
+    expect(socketInstance.send).toHaveBeenLastCalledWith(
+      JSON.stringify({ language: 'zh-CN', type: 'HEARTBEAT', scopedSessionId: '201' })
+    );
+
+    ws.setScopedSessionId('202');
+    expect(socketInstance.send).toHaveBeenLastCalledWith(
+      JSON.stringify({ language: 'zh-CN', type: 'HEARTBEAT', scopedSessionId: '202' })
+    );
+    const sendCount = socketInstance.send.mock.calls.length;
+    ws.setScopedSessionId('202');
+    expect(socketInstance.send).toHaveBeenCalledTimes(sendCount);
+
+    ws.setScopedSessionId(undefined);
+    expect(socketInstance.send).toHaveBeenLastCalledWith(
+      JSON.stringify({ language: 'zh-CN', type: 'HEARTBEAT', scopedSessionId: '' })
+    );
   });
 
   it('notifies reconnect subscribers only after a disconnected socket reconnects', () => {

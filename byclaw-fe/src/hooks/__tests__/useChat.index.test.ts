@@ -32,6 +32,7 @@ let mockExtParamsBySessionId: Record<string, unknown> = {};
 let mockSessionList: any[] = [];
 let mockMessageLoadState = 'idle';
 const mockRetrySessionMessageLoad = jest.fn(() => Promise.resolve());
+const mockSetScopedSessionId = jest.fn();
 
 jest.mock('@/utils/websocket', () => ({
   __esModule: true,
@@ -47,6 +48,7 @@ jest.mock('@/utils/websocket', () => ({
     onMessage: jest.fn(),
     offMessage: jest.fn(),
     sendMessageWhenReady: jest.fn(() => Promise.resolve()),
+    setScopedSessionId: (...args: any[]) => mockSetScopedSessionId(...args),
   },
 }));
 
@@ -117,6 +119,7 @@ import { useDispatch, useSelector } from '@umijs/max';
 import useAppStore from '@/models/common/useAppStore';
 import { getChatRunningSnapshot, getChatRunningStatus } from '@/service/message';
 import { chatSessionRuntimeManager } from '@/utils/chatSessionRuntimeManager';
+import webSocketManager from '@/utils/websocket';
 import { IMessageState, SSEMessageType } from '@/constants/message';
 import { clearChatRuntime } from '../useChat/chatRuntime';
 
@@ -220,6 +223,14 @@ describe('hooks/useChat/index', () => {
       }),
       { isAssign: true }
     );
+  });
+
+  it('clears the scoped child content subscription while a root session is active', async () => {
+    renderHook(() => useChat({ sessionId: 'root', addSession: jest.fn() } as any));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(mockSetScopedSessionId).toHaveBeenCalledWith(undefined);
   });
 
   it('restores an idle parent without loading while children work and resumes on a later root event', async () => {
@@ -431,6 +442,7 @@ describe('hooks/useChat/index', () => {
     });
 
     expect(mockGetChatRunningStatus).not.toHaveBeenCalled();
+    expect(mockSetScopedSessionId).toHaveBeenCalledWith('child');
     expect(mockGetChatRunningSnapshot).toHaveBeenCalledWith({
       sessionId: 'child',
       traceId: 'external-child-child',
@@ -492,6 +504,78 @@ describe('hooks/useChat/index', () => {
       expect.objectContaining({ messageId: 'answer-1', snapshotStreamId: '200-1' }),
       { isAssign: true, allowCreateSession: false }
     );
+  });
+
+  it('reconstructs scoped child deltas and ignores a repeated stream revision', async () => {
+    mockSessionList = [
+      {
+        sessionId: 'child',
+        parentSessionId: 100,
+        sessionExts: [{ extParamCode: 'external_session_id', extParamValue: 'worker-child-1' }],
+      },
+    ];
+    renderHook(() => useChat({ sessionId: 'child', addSession: jest.fn() } as any));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const onMessage = webSocketManager.onMessage as jest.Mock;
+    const baselineHandler = onMessage.mock.calls.find(([type]) => type === 'NEW_MESSAGE')?.[1];
+    const deltaHandler = onMessage.mock.calls.find(([type]) => type === 'SCOPED_MESSAGE_DELTA')?.[1];
+    expect(deltaHandler).toEqual(expect.any(Function));
+
+    await act(async () => {
+      await baselineHandler({
+        type: 'NEW_MESSAGE',
+        sessionId: 'child',
+        streamId: '100-0',
+        data: {
+          sessionId: 'child',
+          messageId: 'answer-1',
+          messageContent: 'hello',
+          inferLog: '[]',
+          msgStatus: 1,
+        },
+      });
+      await deltaHandler({
+        type: 'SCOPED_MESSAGE_DELTA',
+        sessionId: 'child',
+        streamId: '101-0',
+        data: {
+          sessionId: 'child',
+          messageId: 'answer-1',
+          baseStreamId: '100-0',
+          streamId: '101-0',
+          operations: [
+            { field: 'messageContent', op: 'append', offset: 5, value: ' world' },
+            { field: 'msgStatus', op: 'set', value: 0 },
+          ],
+        },
+      });
+      await deltaHandler({
+        type: 'SCOPED_MESSAGE_DELTA',
+        sessionId: 'child',
+        streamId: '101-0',
+        data: {
+          sessionId: 'child',
+          messageId: 'answer-1',
+          baseStreamId: '100-0',
+          streamId: '101-0',
+          operations: [{ field: 'messageContent', op: 'append', offset: 5, value: ' world' }],
+        },
+      });
+    });
+
+    expect(mockUpdateMessage).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        messageId: 'answer-1',
+        messageState: IMessageState.Done,
+        snapshotStreamId: '101-0',
+      }),
+      { isAssign: true, allowCreateSession: false }
+    );
+    expect(mockUpdateMessage.mock.calls.filter(([message]) => message.snapshotStreamId === '101-0')).toHaveLength(1);
   });
 
   it('reloads persisted child history when the reconnect snapshot is absent', async () => {

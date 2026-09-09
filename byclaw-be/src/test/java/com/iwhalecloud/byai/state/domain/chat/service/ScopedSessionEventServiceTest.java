@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -392,6 +393,39 @@ class ScopedSessionEventServiceTest {
         verify(runningChatSnapshotService).saveExternalChild(projection, "100-0", false);
         verify(runningChatSnapshotService).getExternalChildSnapshot(200L, 201L);
         verify(childMessageWriteBehind).enqueue("child:200:201", 200L, projection, false);
+    }
+
+    @Test
+    void stableEventSequenceSuppressesRetryDuplicatesButKeepsEqualTextFromDistinctEvents() {
+        ByaiSession child = childSession(200L, 100L, 900L);
+        when(childSessionService.ensureBinding(eq(100L), any(JSONObject.class)))
+            .thenReturn(new ExternalChildSessionBinding(child, "worker-child-1", 201L));
+        when(gatewayStreamEventProcessor.buildEventData(any(), any(), any()))
+            .thenAnswer(call -> call.getArgument(1, JSONObject.class).getString("data"));
+        ByaiMessageHotDtoDto projection = new ByaiMessageHotDtoDto();
+        projection.setSessionId(200L);
+        projection.setMessageId(201L);
+        when(memoryMessageService.generateMessage(any(), any(), any(), any())).thenReturn(projection);
+        when(runningChatSnapshotService.saveExternalChild(eq(projection), any(), eq(false))).thenReturn(true);
+
+        JSONObject firstMetadata = childMetadata("worker-child-1", "child", "worker");
+        firstMetadata.put("session_status", "running");
+        firstMetadata.put("event_kind", "session.output");
+        firstMetadata.put("event_sequence", "event-1");
+        JSONObject first = streamEvent("reasoningLogDelta", "same text", firstMetadata);
+        first.put("stream_id", "1-0");
+        JSONObject retry = JSON.parseObject(first.toJSONString());
+        retry.put("stream_id", "2-0");
+        JSONObject distinct = JSON.parseObject(first.toJSONString());
+        distinct.put("stream_id", "3-0");
+        distinct.getJSONObject("metadata").put("event_sequence", "event-2");
+
+        service.handleIfNecessary(100L, first);
+        service.handleIfNecessary(100L, retry);
+        service.handleIfNecessary(100L, distinct);
+
+        verify(pythonSseService, times(2)).accumulateEvent(any(), any());
+        verify(runningChatSnapshotService, times(3)).saveExternalChild(eq(projection), any(), eq(false));
     }
 
     @Test

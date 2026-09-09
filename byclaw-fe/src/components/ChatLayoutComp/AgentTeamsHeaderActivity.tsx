@@ -55,7 +55,11 @@ function AgentTeamsHeaderActivity({ rootSessionId, currentSession }: Props) {
       applyAgentTeamsChildProjection(rootSessionId, projection, message?.streamId);
     };
     webSocketManager.onMessage('NEW_MESSAGE', handleNewMessage);
-    return () => webSocketManager.offMessage('NEW_MESSAGE', handleNewMessage);
+    webSocketManager.onMessage('SCOPED_SESSION_STATUS', handleNewMessage);
+    return () => {
+      webSocketManager.offMessage('NEW_MESSAGE', handleNewMessage);
+      webSocketManager.offMessage('SCOPED_SESSION_STATUS', handleNewMessage);
+    };
   }, [rootSessionId]);
   if (!snapshot) return null;
 

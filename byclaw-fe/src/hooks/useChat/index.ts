@@ -36,6 +36,7 @@ import useHandler from './useHandler';
 import useMessage from './useMessage';
 import useGlobal from '@/hooks/useGlobal';
 import webSocketManager from '@/utils/websocket';
+import { applyScopedProjectionDelta, type ScopedProjectionState } from '@/utils/scopedProjectionDelta';
 import { chatSessionRuntimeManager, type RunningChatInfo } from '@/utils/chatSessionRuntimeManager';
 import {
   applyProjectedRootState,
@@ -207,6 +208,7 @@ function useChat(props: IProps) {
   const pendingProjectIdByClientRequestRef = useRef(new Map<string, string>());
   const boundProjectSessionKeysRef = useRef(new Set<string>());
   const scopedChildWatermarksRef = useRef(new Map<string, string>());
+  const scopedProjectionBasesRef = useRef(new Map<string, ScopedProjectionState>());
   const [runtimeVersion, setRuntimeVersion] = useState(0);
 
   const { userInfo, extParamsBySessionId, sessionList } = useSelector((state: ConnectState) => ({
@@ -567,7 +569,10 @@ function useChat(props: IProps) {
     if (!projectionSessionId || projectionSessionId !== `${sessionId}`) return false;
 
     await waitForSessionMessageLoaded(projectionSessionId);
-    const streamId = projection?.snapshotStreamId || projection?.streamId || envelopeStreamId;
+    const streamId = envelopeStreamId || projection?.snapshotStreamId || projection?.streamId;
+    const projectionKey = `${projectionSessionId}:${projection?.messageId || ''}`;
+    const cached = scopedProjectionBasesRef.current.get(projectionKey);
+    if (cached?.streamId && streamId && compareStreamId(streamId, cached.streamId) <= 0) return true;
     if (
       !applyScopedChildProjectionMessage &&
       !isScopedStreamNewer(scopedChildWatermarksRef.current, projectionSessionId, streamId)
@@ -591,6 +596,10 @@ function useChat(props: IProps) {
       updateMessage(message, { isAssign: true, allowCreateSession: false });
       commitScopedStream(scopedChildWatermarksRef.current, projectionSessionId, streamId);
     }
+    scopedProjectionBasesRef.current.set(projectionKey, {
+      projection: cloneDeep({ ...projection, sessionId: projectionSessionId }),
+      streamId,
+    });
     return true;
   });
 
@@ -759,6 +768,37 @@ function useChat(props: IProps) {
     updateMessage,
     waitForSessionMessageLoaded,
   ]);
+
+  useEffect(() => {
+    const handler = async (message: any) => {
+      const payload = get(message, 'data');
+      const projectionSessionId = `${get(payload, 'sessionId') || get(message, 'sessionId') || ''}`;
+      const messageId = `${get(payload, 'messageId') || ''}`;
+      if (!projectionSessionId || projectionSessionId !== `${sessionId}` || !messageId) return;
+      const projectionKey = `${projectionSessionId}:${messageId}`;
+      const base = scopedProjectionBasesRef.current.get(projectionKey);
+      const streamId = get(payload, 'streamId') || get(message, 'streamId');
+      if (base?.streamId && streamId && compareStreamId(streamId, base.streamId) <= 0) return;
+      const next = base ? applyScopedProjectionDelta(base, message) : null;
+      if (!next) {
+        await reconcileScopedChildProjection();
+        return;
+      }
+      await applyScopedChildProjection(next.projection, next.streamId);
+    };
+
+    webSocketManager.onMessage('SCOPED_MESSAGE_DELTA', handler);
+    return () => {
+      webSocketManager.offMessage('SCOPED_MESSAGE_DELTA', handler);
+    };
+  }, [applyScopedChildProjection, reconcileScopedChildProjection, sessionId]);
+
+  useEffect(() => {
+    webSocketManager.setScopedSessionId(isCurrentExternalChildSession ? `${sessionId}` : undefined);
+    return () => {
+      if (isCurrentExternalChildSession) webSocketManager.setScopedSessionId(undefined);
+    };
+  }, [isCurrentExternalChildSession, sessionId]);
 
   useEffect(() => {
     if (!isCurrentExternalChildSession) return;

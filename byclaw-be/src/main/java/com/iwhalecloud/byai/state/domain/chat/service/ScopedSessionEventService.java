@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.state.domain.chat.service;
 
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import org.springframework.beans.BeanUtils;
 import java.util.Locale;
@@ -48,6 +49,8 @@ public class ScopedSessionEventService {
 
     private static final Set<String> TERMINAL_EVENTS = Set.of("session.error", "error");
 
+    private static final int MAX_RECENT_EVENT_SEQUENCES = 512;
+
     private final ExternalChildSessionService childSessionService;
 
     private final GatewayStreamEventProcessor gatewayStreamEventProcessor;
@@ -67,6 +70,8 @@ public class ScopedSessionEventService {
     private final Map<String, RunningChatSnapshotResponse> childRunSnapshots = new ConcurrentHashMap<>();
 
     private final Map<String, String> childStreamWatermarks = new ConcurrentHashMap<>();
+
+    private final Map<String, RecentEventSequences> childEventSequences = new ConcurrentHashMap<>();
 
     public ScopedSessionEventService(
             ExternalChildSessionService childSessionService,
@@ -125,6 +130,7 @@ public class ScopedSessionEventService {
             messageContext = new MessageContext(AgentTypeEnum.AGENT, binding.messageId());
             childMessageContexts.put(contextKey, messageContext);
             childStreamWatermarks.remove(contextKey);
+            childEventSequences.remove(contextKey);
         }
         else {
             messageContext = childMessageContexts.computeIfAbsent(contextKey,
@@ -137,17 +143,26 @@ public class ScopedSessionEventService {
         try {
             CurrentUserHolder.setLoginInfo(buildLoginInfo(binding.session()));
             String watermark = childStreamWatermarks.get(contextKey);
+            RecentEventSequences recentSequences = childEventSequences.computeIfAbsent(contextKey,
+                ignored -> RecentEventSequences.fromSnapshot(currentSnapshot));
+            Set<String> acceptedSequences = new LinkedHashSet<>();
             JSONObject lastEvent = null;
             boolean terminal = Boolean.TRUE.equals(messageContext.getComplete());
             for (JSONObject event : events) {
                 String streamId = event.getString("stream_id");
                 if (StreamIdUtil.isProcessedByWatermark(streamId, watermark)) continue;
                 JSONObject eventMetadata = event.getJSONObject("metadata");
-                String eventData = gatewayStreamEventProcessor.buildEventData(eventContext, event, eventMetadata);
-                JSONObject line = new JSONObject();
-                line.put("event", event.getString("event_type"));
-                line.put("data", eventData);
-                pythonSseService.accumulateEvent(line.toJSONString(), messageContext);
+                String logicalSequence = logicalSequence(eventMetadata);
+                boolean duplicate = logicalSequence != null
+                    && (recentSequences.contains(logicalSequence) || acceptedSequences.contains(logicalSequence));
+                if (!duplicate) {
+                    String eventData = gatewayStreamEventProcessor.buildEventData(eventContext, event, eventMetadata);
+                    JSONObject line = new JSONObject();
+                    line.put("event", event.getString("event_type"));
+                    line.put("data", eventData);
+                    pythonSseService.accumulateEvent(line.toJSONString(), messageContext);
+                    if (logicalSequence != null) acceptedSequences.add(logicalSequence);
+                }
                 terminal = terminal || isTerminal(event, eventMetadata) || Boolean.TRUE.equals(messageContext.getComplete());
                 if (terminal) messageContext.setComplete(true);
                 watermark = StreamIdUtil.max(watermark, streamId, streamId);
@@ -170,6 +185,7 @@ public class ScopedSessionEventService {
             if (!runningChatSnapshotService.saveExternalChild(persisted, watermark, terminal)) {
                 throw new IllegalStateException("external child snapshot was not persisted");
             }
+            recentSequences.addAll(acceptedSequences);
             broadcastChildMessage(contextKey, binding.session(), persisted, watermark, terminal);
             childMessageWriteBehind.enqueue("child:" + binding.session().getSessionId() + ":" + binding.messageId(),
                 binding.session().getSessionId(), persisted, terminal);
@@ -195,6 +211,52 @@ public class ScopedSessionEventService {
         childMessageContexts.remove(contextKey);
         childStreamWatermarks.remove(contextKey);
         childRunSnapshots.remove(contextKey);
+        childEventSequences.remove(contextKey);
+    }
+
+    private String logicalSequence(JSONObject metadata) {
+        String sequence = metadata == null ? null : StringUtils.trimToNull(metadata.getString("event_sequence"));
+        if (sequence == null) return null;
+        return normalize(metadata.getString("event_kind")) + ":" + sequence;
+    }
+
+    private static final class RecentEventSequences {
+        private final LinkedHashMap<String, Boolean> values = new LinkedHashMap<>();
+
+        static RecentEventSequences fromSnapshot(RunningChatSnapshotResponse snapshot) {
+            RecentEventSequences sequences = new RecentEventSequences();
+            if (snapshot == null || StringUtils.isBlank(snapshot.getMetadata())) return sequences;
+            try {
+                JSONObject metadata = JSON.parseObject(snapshot.getMetadata());
+                String sequence = StringUtils.trimToNull(metadata.getString("event_sequence"));
+                if (sequence != null) {
+                    sequences.add(normalizeEventKind(metadata.getString("event_kind")) + ":" + sequence);
+                }
+            }
+            catch (RuntimeException ignored) {
+                // Old or custom workers may store non-JSON metadata; stream watermark deduplication still applies.
+            }
+            return sequences;
+        }
+
+        synchronized boolean contains(String sequence) {
+            return values.containsKey(sequence);
+        }
+
+        synchronized void addAll(Set<String> sequences) {
+            for (String sequence : sequences) add(sequence);
+        }
+
+        private void add(String sequence) {
+            values.put(sequence, Boolean.TRUE);
+            while (values.size() > MAX_RECENT_EVENT_SEQUENCES) {
+                values.remove(values.keySet().iterator().next());
+            }
+        }
+
+        private static String normalizeEventKind(String value) {
+            return StringUtils.trimToEmpty(value).toLowerCase(Locale.ROOT);
+        }
     }
 
     private ChildRunDisposition compareChildRun(RunningChatSnapshotResponse snapshot, JSONObject metadata) {

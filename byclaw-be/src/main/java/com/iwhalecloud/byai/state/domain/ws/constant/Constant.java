@@ -11,5 +11,6 @@ public class Constant {
 
     public static final AttributeKey<LoginInfo> ATT_USER_INFO = AttributeKey.valueOf(USER_INFO);
     public static final AttributeKey<Map<String, String>> ATT_HEADER = AttributeKey.valueOf("header");
+    public static final AttributeKey<String> ATT_SCOPED_SESSION_ID = AttributeKey.valueOf("scopedSessionId");
 
 }

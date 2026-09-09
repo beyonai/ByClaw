@@ -13,6 +13,7 @@ const mockOnMessage = jest.fn();
 const mockOffMessage = jest.fn();
 const mockOnReconnect = jest.fn();
 let newMessageHandler: ((message: any) => void | Promise<void>) | undefined;
+let scopedStatusHandler: ((message: any) => void | Promise<void>) | undefined;
 let reconnectHandler: (() => void) | undefined;
 
 jest.mock('@umijs/max', () => ({
@@ -53,9 +54,11 @@ describe('ChildSessionNavigator', () => {
     jest.clearAllMocks();
     clearAgentTeamsSnapshots();
     newMessageHandler = undefined;
+    scopedStatusHandler = undefined;
     reconnectHandler = undefined;
     mockOnMessage.mockImplementation((type: string, handler: (message: any) => void | Promise<void>) => {
       if (type === 'NEW_MESSAGE') newMessageHandler = handler;
+      if (type === 'SCOPED_SESSION_STATUS') scopedStatusHandler = handler;
     });
     mockOnReconnect.mockImplementation((handler: () => void) => {
       reconnectHandler = handler;
@@ -158,6 +161,36 @@ describe('ChildSessionNavigator', () => {
         },
       });
     });
+    expect(mockQryConversations).toHaveBeenCalledTimes(1);
+  });
+
+  it('adds and updates children from lightweight status events without message content', async () => {
+    const root = session('root-1', '主会话');
+    mockQryConversations.mockResolvedValue({ list: [] } as any);
+    render(<ChildSessionNavigator sessionId="root-1" currentSession={root} />);
+    await waitFor(() => expect(mockQryConversations).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      await scopedStatusHandler?.({
+        type: 'SCOPED_SESSION_STATUS',
+        sessionId: 'child-1',
+        streamId: '10-0',
+        data: {
+          sessionId: 'child-1',
+          running: true,
+          metadata: JSON.stringify({
+            session_scope: 'child',
+            external_session_id: 'member-1',
+            external_parent_session_id: 'root-1',
+            child_name: '架构舵手',
+            child_task: '检查消息带宽',
+            session_status: 'running',
+          }),
+        },
+      });
+    });
+
+    expect(await screen.findByRole('button', { name: '打开子会话列表' })).toHaveTextContent('1 个子代理');
     expect(mockQryConversations).toHaveBeenCalledTimes(1);
   });
 

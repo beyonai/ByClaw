@@ -49,6 +49,8 @@ class WebSocketManager {
 
   private connectionToken: string | null = null;
 
+  private scopedSessionId = '';
+
   /**
    * 桌面外壳注入的本地聊天通道；只有聊天 WebSocket 走它，
    * 其余 HTTP/API 请求仍然走 Java。
@@ -179,6 +181,7 @@ class WebSocketManager {
       const params = new URLSearchParams({
         'beyond-token': token,
         language: getLocale(),
+        'scoped-delta-version': '1',
       });
       const wsUrl = this.getWebSocketUrl(`byaiService/ws?${params.toString()}`);
       debugLog('ws', 'chat WebSocket connecting', () => ({
@@ -201,6 +204,9 @@ class WebSocketManager {
         this.isConnecting = false;
 
         this.startHeartbeat();
+        if (this.scopedSessionId) {
+          this.sendScopedSessionSelection();
+        }
         this.reconnectCount = 0;
         this.resolveConnectWaiters();
         if (wasReconnect) {
@@ -346,6 +352,24 @@ class WebSocketManager {
   public async sendMessageWhenReady(message: WebSocketMessage): Promise<void> {
     await this.waitUntilConnected();
     this.sendMessage(message);
+  }
+
+  /**
+   * Selects the only external child whose full projection may be pushed to this connection.
+   * HEARTBEAT keeps the control message harmless when this frontend is used with an older backend.
+   */
+  public setScopedSessionId(sessionId?: string): void {
+    const next = `${sessionId || ''}`;
+    if (next === this.scopedSessionId) return;
+    this.scopedSessionId = next;
+    this.sendScopedSessionSelection();
+  }
+
+  private sendScopedSessionSelection(): void {
+    this.sendMessage({
+      type: 'HEARTBEAT',
+      scopedSessionId: this.scopedSessionId,
+    });
   }
 
   /**
