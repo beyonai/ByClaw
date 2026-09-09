@@ -13,6 +13,7 @@ import com.alibaba.fastjson.JSON;
 import com.iwhalecloud.byai.common.feign.response.knowledge.ModelDto;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.domain.aimodel.enums.ModelOwnerType;
+import com.iwhalecloud.byai.manager.domain.aimodel.enums.ModelStatusEnum;
 import com.iwhalecloud.byai.manager.domain.aimodel.service.AiModelService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDigEmployeeService;
 import com.iwhalecloud.byai.manager.entity.aimodel.ByaiAimodel;
@@ -270,7 +271,7 @@ public class SessionModelSelectionService {
     }
 
     private boolean isEnabled(String status) {
-        return "1".equals(status) || "ENABLED".equalsIgnoreCase(status);
+        return ModelStatusEnum.isEnabledDb(status) || "1".equals(status) || "ENABLED".equalsIgnoreCase(status);
     }
 
     private boolean isDefaultModelSignal(String relModelId) {

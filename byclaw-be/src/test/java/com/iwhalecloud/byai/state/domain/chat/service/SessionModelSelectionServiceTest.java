@@ -82,6 +82,32 @@ class SessionModelSelectionServiceTest {
     }
 
     @Test
+    void resolve_enabledDatabaseStatusReturnsSelection() {
+        ByaiAimodel enabled = model(10L, "PUBLIC", "LLM", null);
+        enabled.setStatus("OOA");
+        when(byaiAimodelMapper.selectById(10L)).thenReturn(enabled);
+        when(aiModelService.getModel("10")).thenReturn(modelDto("selected", "selected", null));
+
+        AssistantChatDto dto = new AssistantChatDto();
+        dto.setRelModelId("10");
+        assertThat(service.resolveSelection(dto).map(SessionModelSelection::getModelId)).contains("10");
+    }
+
+    @Test
+    void resolve_disabledAndTestingDatabaseStatusesRejected() {
+        ByaiAimodel disabled = model(12L, "PUBLIC", "LLM", null);
+        disabled.setStatus("OOX");
+        ByaiAimodel testing = model(13L, "PUBLIC", "LLM", null);
+        testing.setStatus("OOD");
+        when(byaiAimodelMapper.selectById(12L)).thenReturn(disabled);
+        when(byaiAimodelMapper.selectById(13L)).thenReturn(testing);
+
+        assertThat(service.resolve("12")).isEmpty();
+        assertThat(service.resolve("13")).isEmpty();
+        verify(aiModelService, never()).getModel(any());
+    }
+
+    @Test
     void resolve_personalModelOwnedByCurrentUserAllowed() {
         when(byaiAimodelMapper.selectById(11L)).thenReturn(model(11L, "PERSONAL", "LLM", USER_ID));
         when(aiModelService.getModel("11")).thenReturn(modelDto("m", "m", null));
