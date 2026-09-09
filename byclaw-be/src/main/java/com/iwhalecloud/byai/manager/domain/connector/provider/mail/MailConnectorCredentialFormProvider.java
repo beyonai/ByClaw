@@ -73,7 +73,13 @@ public class MailConnectorCredentialFormProvider implements ConnectorCredentialF
             probeFastmail(request.getEmail(), secret);
             return;
         }
-        MailProviderCatalog.resolve(request.getProviderCode());
+        MailServerConfigDTO[] defaults = serverDefaults(request.getProviderCode());
+        if (request.getImap() == null) {
+            request.setImap(defaults[0]);
+        }
+        if (request.getSmtp() == null) {
+            request.setSmtp(defaults[1]);
+        }
         if (request.getImap() == null || request.getSmtp() == null) {
             throw new IllegalArgumentException("邮箱服务器配置不完整");
         }
@@ -134,6 +140,11 @@ public class MailConnectorCredentialFormProvider implements ConnectorCredentialF
             case "custom-imap-mail" -> "custom-imap";
             default -> throw new IllegalArgumentException("不支持的邮箱连接器");
         };
+    }
+
+    static MailServerConfigDTO[] serverDefaults(String providerCode) {
+        var provider = MailProviderCatalog.resolve(providerCode);
+        return new MailServerConfigDTO[] { provider.getImap(), provider.getSmtp() };
     }
 
     private MailServerConfigDTO server(Map<String, String> values, String hostKey, String portKey, String encryptionKey) {
