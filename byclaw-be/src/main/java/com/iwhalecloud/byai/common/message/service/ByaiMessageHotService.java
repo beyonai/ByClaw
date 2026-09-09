@@ -236,6 +236,7 @@ public class ByaiMessageHotService {
         MessageHotQo qo = new MessageHotQo();
         qo.setSessionId(messageQo.getSessionId());
         qo.setTopK(messageQo.getTopK());
+        qo.setCreatorId(messageQo.getCreatorId());
         return findByQo(qo);
     }
 

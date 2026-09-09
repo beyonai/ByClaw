@@ -70,10 +70,10 @@ public class OpenApiResourceController {
     }
 
     /**
-     * 数字员工列表查询（免登录） 入参：数字员工类型（001-助手、005-问答、006-问数）、数字员工名称（模糊查询） 出参：数字员工详情列表
+     * 数字员工列表查询（需登录鉴权） 入参：数字员工类型（001-助手、005-问答、006-问数）、数字员工名称（模糊查询） 出参：数字员工详情列表
      */
     @PostMapping("/v1/queryDigEmployeeList")
-    @ManageLogAnnotation(name = "会话API调用", description = "查询数字员工列表(免登录)")
+    @ManageLogAnnotation(name = "会话API调用", description = "查询数字员工列表")
     public ResponseUtil<List<DigitalEmployeeDetailsDTO>> queryDigEmployeeList(
         @RequestBody OpenApiDigEmployeeQueryQo qo) {
         try {
@@ -88,10 +88,10 @@ public class OpenApiResourceController {
     }
 
     /**
-     * 数字员工详情查询（免登录） 入参：数字员工ID 出参：数字员工详情信息
+     * 数字员工详情查询（需登录鉴权） 入参：数字员工ID 出参：数字员工详情信息
      */
     @PostMapping("/v1/queryDigEmployeeDetail")
-    @ManageLogAnnotation(name = "会话API调用", description = "查询数字员工详情(免登录)")
+    @ManageLogAnnotation(name = "会话API调用", description = "查询数字员工详情")
     public ResponseUtil<DigitalEmployeeDetailsDTO> queryDigEmployeeDetail(@RequestBody OpenApiDigEmployeeSkillQo qo) {
         try {
             if (qo.getResourceId() == null) {
@@ -111,10 +111,10 @@ public class OpenApiResourceController {
     }
 
     /**
-     * 数字员工技能查询（免登录） 入参：数字员工ID、技能类型（可空） 出参：数字员工的技能列表
+     * 数字员工技能查询（需登录鉴权） 入参：数字员工ID、技能类型（可空） 出参：数字员工的技能列表
      */
     @PostMapping("/v1/queryDigEmployeeSkills")
-    @ManageLogAnnotation(name = "会话API调用", description = "查询数字员工技能(免登录)")
+    @ManageLogAnnotation(name = "会话API调用", description = "查询数字员工技能")
     public ResponseUtil<List<SsResourceRelDetailDTO>> queryDigEmployeeSkills(
         @RequestBody OpenApiDigEmployeeSkillQo qo) {
         try {
