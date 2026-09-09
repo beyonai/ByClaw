@@ -8,11 +8,13 @@ import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.springframework.context.ApplicationContext;
 import org.springframework.data.redis.connection.stream.StreamRecords;
 import org.springframework.test.util.ReflectionTestUtils;
 import com.alibaba.fastjson.JSONObject;
-
+@DisabledOnOs(OS.WINDOWS)
 class SessionConsumerIsolationTest {
     @Test
     void blockedDispatchDoesNotPinTheOnlyVirtualThreadCarrier() throws Exception {

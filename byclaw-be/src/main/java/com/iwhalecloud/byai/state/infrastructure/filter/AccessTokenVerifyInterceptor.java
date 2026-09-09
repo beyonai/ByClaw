@@ -99,16 +99,7 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
     public void init() {
         try {
 
-            // Add Swagger URLs to ignore list
-            matcherList.add(Pattern.compile("/swagger-ui.html"));
-            matcherList.add(Pattern.compile("/swagger-ui/")); // To cover all swagger-ui resources
-            matcherList.add(Pattern.compile("/v3/api-docs/")); // OpenAPI 3 paths
-            matcherList.add(Pattern.compile("/swagger-resources/")); // Additional swagger resources
-            matcherList.add(Pattern.compile("/webjars/")); // Swagger UI web jars
-            matcherList.add(Pattern.compile("/openapi.json")); // Swagger UI web jars
-            matcherList.add(Pattern.compile("/api-docs/")); // Swagger UI web jars
-            matcherList.add(Pattern.compile("/api-docs")); // Swagger UI web jars
-            matcherList.add(Pattern.compile("/api/v1/appVersion/latest")); // Swagger UI web jars
+            matcherList.add(Pattern.compile("/api/v1/appVersion/latest"));
             matcherList.add(Pattern.compile("/actuator/health"));
             matcherList.add(Pattern.compile("/actuator/info"));
             matcherList.add(Pattern.compile("/actuator/metrics"));
@@ -118,15 +109,6 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
             matcherList.add(Pattern.compile("/ws")); // ws 接口
             matcherList.add(Pattern.compile("/system/session/getDcSystemConfigValueByCodes")); // 登录页系统配置（免登录）
             matcherList.add(Pattern.compile("/system/staticdata/getDcSystemConfig")); // 登录页品牌配置（免登录）
-            matcherList.add(Pattern.compile("/open/api/inner/.*"));
-            matcherList.add(Pattern.compile("/open/api/v1/queryDigEmployeeList")); // 数字员工列表查询（免登录）
-            matcherList.add(Pattern.compile("/open/api/v1/queryDigEmployeeDetail")); // 数字员工详情查询（免登录）
-            matcherList.add(Pattern.compile("/open/api/v1/queryDigEmployeeSkills")); // 数字员工技能查询（免登录）
-            matcherList.add(Pattern.compile("/open/api/v1/conversation/writeTxt")); // 会话文件覆盖写（免登录）
-            matcherList.add(Pattern.compile("/open/api/v1/conversation/appendTxt")); // 会话文件追加写（免登录）
-            matcherList.add(Pattern.compile("/open/api/v1/conversation/read")); // 会话文件按行读取（免登录）
-            matcherList.add(Pattern.compile("/chat/message/share-link/access")); // 消息分享链接
-            matcherList.add(Pattern.compile("/open/api/getAllUserInfoByUserCode")); // 获取用户信息
             matcherList.add(Pattern.compile("/commonFile/view")); // 文件查看（controller自行处理登录重定向）
             matcherList.add(Pattern.compile("/feishu/bot/events")); // 飞书事件回调：开放平台匿名推送，Controller 内部校验 token
             matcherList.add(Pattern.compile("/openclaw-ui")); // openclaw 控制台整页代理（用 openclaw 自带 token 鉴权，非系统登录态）
