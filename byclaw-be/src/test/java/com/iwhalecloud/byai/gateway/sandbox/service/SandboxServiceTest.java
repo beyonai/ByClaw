@@ -1,11 +1,14 @@
 package com.iwhalecloud.byai.gateway.sandbox.service;
 
 import java.time.OffsetDateTime;
+import java.time.Instant;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.data.redis.listener.RedisMessageListenerContainer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -420,6 +423,46 @@ class SandboxServiceTest {
         verify(sandboxRecordMapper, never()).selectRunningByUser("user001");
         verify(sandboxMetadataCache).put(any(SandboxInfo.class));
         verify(sandboxHealthWatchService).touch("user001", "openclaw");
+    }
+
+    @Test
+    void dshBusyHeartbeatRefreshesAccessAndHealthOnlyForRunningDshRecords() {
+        SandboxMetadataCache metadata = mock(SandboxMetadataCache.class);
+        SsSandboxRecordMapper records = mock(SsSandboxRecordMapper.class);
+        SandboxHealthWatchService health = mock(SandboxHealthWatchService.class);
+        SandboxService service = new SandboxService();
+        ReflectionTestUtils.setField(service, "sandboxRecordMapper", records);
+        ReflectionTestUtils.setField(service, "sandboxMetadataCache", metadata);
+        ReflectionTestUtils.setField(service, "sandboxHealthWatchService", health);
+        SsSandboxRecord dsh = new SsSandboxRecord();
+        dsh.setId(7L);
+        dsh.setUserCode("user001");
+        dsh.setSandboxType(SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE);
+        dsh.setResourceId(123L);
+        dsh.setStatus("RUNNING");
+        dsh.setSandboxId("sandbox-dsh");
+        dsh.setLockVersion(3);
+        dsh.setVersion(1);
+        when(records.selectRunningByUserAndSandboxType("user001", "byclaw-dsh")).thenReturn(List.of(dsh));
+        when(records.updateLastAccessTime(eq(7L), any(Date.class), eq(3))).thenReturn(1);
+        RunningStateRedisSubscriber subscriber = new RunningStateRedisSubscriber(
+            mock(RedisMessageListenerContainer.class), service, new ObjectMapper(),
+            RunningStateRedisSubscriber.DEFAULT_TOPIC);
+
+        boolean refreshed = subscriber.handleMessage(RunningStateRedisSubscriberTest.dshMessage(
+            "BYCLAW_DSH_user001", true, Instant.now()));
+
+        assertThat(refreshed).isTrue();
+        assertThat(dsh.getLastAccessTime()).isNotNull();
+        verify(records).selectRunningByUserAndSandboxType("user001", "byclaw-dsh");
+        verify(records, never()).selectRunningByUserAndSandboxType("user001", "openclaw");
+        verify(records, never()).selectRunningByUser("user001");
+        verify(records).updateLastAccessTime(eq(7L), any(Date.class), eq(3));
+        ArgumentCaptor<SandboxInfo> cacheEntry = ArgumentCaptor.forClass(SandboxInfo.class);
+        verify(metadata).put(cacheEntry.capture());
+        assertThat(cacheEntry.getValue().getSandboxType()).isEqualTo("byclaw-dsh");
+        verify(health).touch("user001", "byclaw-dsh");
+        verify(health, never()).touch("user001", "openclaw");
     }
 
     @Test

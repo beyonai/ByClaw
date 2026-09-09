@@ -236,6 +236,22 @@ Stream 长轮询使用独立的 `sessionStreamRedisConnectionFactory`，业务 R
 会话运行态更新和取消也使用按会话的锁，Redis I/O 不再持有全局监视器。租约续期与 running 标记刷新
 分别使用独立线程池；续期异常会停止归属不确定的本地监听，后续通过恢复流程接管。
 
+### DSH AgentTeams 沙箱活跃心跳
+
+DSH 的 `plugins/byclaw-integration` 插件按实际运行态汇总沙箱忙闲状态：父会话空闲时，仍在运行的
+AgentTeams 子 Agent 或待响应交互会继续保持 busy。插件在忙闲切换时立即上报，并每 30 秒发送
+新快照；使用至多一个正在发送的请求和一个待发送的最新快照，避免心跳积压。
+
+后端默认订阅 `byai_gateway:registry:worker:stats:dsh`，识别
+`byclaw_dsh.busy_state.redis_stats` v1 / `byclaw-dsh-busy-state` v1 消息，仅刷新该用户运行中的
+`byclaw-dsh` 沙箱的访问时间、缓存及健康状态。DSH 心跳的 `emittedAt` 和 `payload.generatedAt`
+都必须在最近 120 秒内，且不能超前服务器时间超过 30 秒；idle 不续活跃时间。
+`sandbox.running-state.dsh-topic` 可覆盖订阅主题，
+`sandbox.running-state.dsh-max-age-seconds` 可调整最大消息年龄，生产两端主题应保持一致。
+
+此修复需要同时更新 DSH 插件和后端，只有 Worker 注册心跳无法替代沙箱忙闲心跳。
+子任务结束后停止续活跃时间，沙箱按原有空闲超时规则释放；OpenClaw 心跳协议保持兼容。
+
 ### 环境要求
 
 - Java 21+
