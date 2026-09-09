@@ -41,6 +41,8 @@ export interface ResourceModelResolver {
     beyondToken: string;
     systemCode?: string;
   }): Promise<LeaderModelSelection>;
+  /** 会话级模型覆盖：按模型主键直接解析，供用户在对话框切换模型时使用。 */
+  resolveByModelId?(modelId: string): Promise<LeaderModelSelection>;
 }
 
 interface AuthenticatedIngressRequest {
@@ -54,6 +56,11 @@ export interface CreateSessionRunRequest extends AuthenticatedIngressRequest {
    */
   message?: string;
   thinkingLevel?: ThinkingLevel;
+  /**
+   * 会话级模型覆盖（模型主键，来自 Java 网关 params.rel_model_id）。
+   * 存在且可解析时优先于数字员工配置模型；解析失败回退配置模型。
+   */
+  relModelId?: string;
   context?: SessionContextInput;
   /** 已规范化的附件（由各入口在调用前 normalize）；缺省为空数组。 */
   attachments?: RunAttachment[];
@@ -547,6 +554,29 @@ export class RunIngressService {
     const resourceId = input.sourceAgentId?.trim();
     if (!resourceId || !this.resourceModels) {
       return undefined;
+    }
+    const overrideModelId = input.relModelId?.trim();
+    if (overrideModelId && this.resourceModels.resolveByModelId) {
+      try {
+        const override = await this.resourceModels.resolveByModelId(overrideModelId);
+        this.#lastKnownLeaderModels.set(resourceId, override);
+        this.logger?.info(
+          { resourceId, modelId: override.modelId },
+          "会话级模型覆盖生效，本轮使用用户选择的模型",
+        );
+        return override;
+      } catch (error) {
+        const normalized = error instanceof Error ? error : new Error(String(error));
+        this.logger?.warn(
+          {
+            resourceId,
+            modelId: overrideModelId,
+            errorName: normalized.name,
+            errorMessage: normalized.message,
+          },
+          "会话级模型覆盖解析失败，回退数字员工配置模型",
+        );
+      }
     }
     try {
       const model = await this.resourceModels.resolve({

@@ -54,6 +54,11 @@ export class ByClawBeResourceModelResolver {
     const modelId = modelIdFromPrologue(data.prologue);
     return resolveLeaderModelSelection(this.#llmProvider, modelId);
   }
+
+  /** 会话级模型覆盖：直接按模型主键解析，跳过资源详情查询。 */
+  async resolveByModelId(modelId: string): Promise<LeaderModelSelection> {
+    return resolveLeaderModelSelection(this.#llmProvider, modelId);
+  }
 }
 
 /** 根据 BE 返回的模型主键生成不包含密钥的、可持久化的 Leader 选择快照。 */

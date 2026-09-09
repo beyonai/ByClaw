@@ -440,6 +440,97 @@ describe("RunIngressService group chat snapshot", () => {
       "超级助手模型绑定不可用，本次沿用最后一次有效模型",
     );
   });
+
+  it("prefers the session-level model override and falls back when it cannot be resolved", async () => {
+    const runService = fakeRunService();
+    const resolve = vi.fn(async () => ({ modelId: "11000161", fingerprint: "a".repeat(64) }));
+    const resolveByModelId = vi
+      .fn()
+      .mockResolvedValueOnce({ modelId: "9001", fingerprint: "d".repeat(64) })
+      .mockRejectedValueOnce(new Error("redis unavailable"));
+    const info = vi.fn();
+    const warn = vi.fn();
+    const ingress = new RunIngressService(
+      runService.impl,
+      async () => ({ userCode: "creator" }),
+      catalog([]),
+      undefined,
+      { info, warn },
+      { resolve, resolveByModelId },
+    );
+
+    await ingress.createSessionRun({
+      beyondToken: PRINCIPAL_TOKEN,
+      sourceAgentId: "10000249",
+      message: "hello",
+      relModelId: "9001",
+    });
+
+    expect(runService.createSessionRun.mock.calls[0][0].ingressContext.leaderModel).toEqual({
+      modelId: "9001",
+      fingerprint: "d".repeat(64),
+    });
+    expect(resolve).not.toHaveBeenCalled();
+    expect(info).toHaveBeenCalledWith(
+      expect.objectContaining({ resourceId: "10000249", modelId: "9001" }),
+      "会话级模型覆盖生效，本轮使用用户选择的模型",
+    );
+
+    await ingress.createRun({
+      beyondToken: PRINCIPAL_TOKEN,
+      sessionId: "session-1",
+      sourceAgentId: "10000249",
+      message: "next",
+      relModelId: "9002",
+    });
+
+    expect(runService.createRun.mock.calls[0][0].ingressContext.leaderModel).toEqual({
+      modelId: "11000161",
+      fingerprint: "a".repeat(64),
+    });
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({ resourceId: "10000249", modelId: "9002" }),
+      "会话级模型覆盖解析失败，回退数字员工配置模型",
+    );
+  });
+
+  it("keeps sessions isolated: a run without a session override uses the employee model", async () => {
+    const runService = fakeRunService();
+    const resolve = vi.fn(async () => ({ modelId: "11000161", fingerprint: "a".repeat(64) }));
+    const resolveByModelId = vi.fn(async () => ({ modelId: "9001", fingerprint: "d".repeat(64) }));
+    const ingress = new RunIngressService(
+      runService.impl,
+      async () => ({ userCode: "creator" }),
+      catalog([]),
+      undefined,
+      undefined,
+      { resolve, resolveByModelId },
+    );
+
+    await ingress.createSessionRun({
+      beyondToken: PRINCIPAL_TOKEN,
+      sourceAgentId: "10000249",
+      message: "with override",
+      relModelId: "9001",
+    });
+    await ingress.createRun({
+      beyondToken: PRINCIPAL_TOKEN,
+      sessionId: "session-1",
+      sourceAgentId: "10000249",
+      message: "without override",
+    });
+
+    expect(resolveByModelId).toHaveBeenCalledTimes(1);
+    expect(resolve).toHaveBeenCalledTimes(1);
+    expect(runService.createSessionRun.mock.calls[0][0].ingressContext.leaderModel).toEqual({
+      modelId: "9001",
+      fingerprint: "d".repeat(64),
+    });
+    expect(runService.createRun.mock.calls[0][0].ingressContext.leaderModel).toEqual({
+      modelId: "11000161",
+      fingerprint: "a".repeat(64),
+    });
+  });
 });
 
 describe("RunIngressService expert-team orchestration", () => {
