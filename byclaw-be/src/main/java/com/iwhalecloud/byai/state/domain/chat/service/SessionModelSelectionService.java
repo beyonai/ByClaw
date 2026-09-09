@@ -282,7 +282,7 @@ public class SessionModelSelectionService {
      * 解析模型主键；空、-1、非数字（桌面本地模型 id）返回 null。
      *
      * @param relModelId 前端入参
-     * @return 正整数模型主键，或 null
+     * @return 非零模型主键（保留 -1 为默认信号），或 null
      */
     public Long parseModelId(String relModelId) {
         String value = StringUtils.trimToEmpty(relModelId);
@@ -291,7 +291,7 @@ public class SessionModelSelectionService {
         }
         try {
             long modelId = Long.parseLong(value);
-            return modelId > 0 ? modelId : null;
+            return modelId != 0 && modelId != -1 ? modelId : null;
         }
         catch (NumberFormatException e) {
             return null;

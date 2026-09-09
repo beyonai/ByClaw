@@ -82,6 +82,20 @@ class SessionModelSelectionServiceTest {
     }
 
     @Test
+    void resolve_negativeStoredModelIdReturnsSelection() {
+        when(byaiAimodelMapper.selectById(-2000L)).thenReturn(model(-2000L, "PUBLIC", "LLM", null));
+        when(aiModelService.getModel("-2000")).thenReturn(modelDto("MiniMax-M3", "MiniMax-M3-2000", "OpenAI"));
+
+        SessionModelSelection selection = service.resolve("-2000").orElseThrow(AssertionError::new);
+
+        assertThat(selection.getModelId()).isEqualTo("-2000");
+        assertThat(selection.getModelCode()).isEqualTo("MiniMax-M3");
+        assertThat(service.parseModelId("0")).isNull();
+        assertThat(service.parseModelId("-1")).isNull();
+        assertThat(service.parseModelId("-01")).isNull();
+    }
+
+    @Test
     void resolve_enabledDatabaseStatusReturnsSelection() {
         ByaiAimodel enabled = model(10L, "PUBLIC", "LLM", null);
         enabled.setStatus("OOA");
