@@ -1,3 +1,4 @@
+import { setSessionModelPreparer } from "../../shared/src/session-model-runtime.js";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/compat";
 import type { AimodelDefaultRunSyncDeps } from "./aimodel-default-run-sync.js";
 import {
@@ -392,6 +393,18 @@ export function registerManagedAgentModelHooks(
   const mainParentAgentId = aimodelRunSync?.pluginConfig.mainParentAgentId?.trim() || "main";
   api.logger.info(
     `baiying-enhance: registered typed hooks for main default LLM run-check (mainParentAgentId=${mainParentAgentId}, aimodelRunSync=${aimodelRunSync ? "on" : "off"})`,
+  );
+
+  setSessionModelPreparer(
+    aimodelRunSync ? async (sessionId) => {
+      await resolveSessionModelOverride({
+        api,
+        pluginConfig: aimodelRunSync.pluginConfig,
+        sessionId,
+        aimodelSecretResolverScriptPath: aimodelRunSync.aimodelSecretResolverScriptPath,
+        log: api.logger,
+      });
+    } : undefined,
   );
 
   api.on("before_dispatch", async (event, ctx) => {

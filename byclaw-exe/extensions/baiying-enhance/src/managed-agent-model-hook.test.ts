@@ -1,3 +1,4 @@
+import { prepareSessionModelForDispatch, setSessionModelPreparer } from "../../shared/src/session-model-runtime.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setSharedRedisJsonStore } from "./redis-json-store.js";
 import {
@@ -11,9 +12,41 @@ import {
   warnUnresolvedManagedProviderApiKeysAfterSync,
 } from "./managed-agent-model-hook.js";
 
-afterEach(() => setSharedRedisJsonStore(null));
+afterEach(() => { setSharedRedisJsonStore(null); setSessionModelPreparer(undefined); });
 
 describe("registered before_model_resolve hook", () => {
+  it("prepares a previously unknown provider before the channel captures its dispatch config", async () => {
+    let current: any = structuredClone(registeredCfg);
+    const stale = current;
+    const hooks = new Map<string, (...args: any[]) => any>();
+    const selection = { modelId: "9002", modelCode: "first-use-model" };
+    const record = {
+      instanceId: "9002", modelCode: "first-use-model", modelName: "First use",
+      status: 1, authToken: "test-token", url: "https://example.test/v1",
+      maxContentToken: "128000", instanceParam: { maxTokens: 1024 },
+    };
+    setSharedRedisJsonStore({
+      getJsonByKey: async () => ({ raw: selection }),
+      getHashJson: async () => ({ raw: record, content: JSON.stringify(record), hash: "new" }),
+    } as never);
+    registerManagedAgentModelHooks({
+      on: (name: string, handler: (...args: any[]) => any) => hooks.set(name, handler),
+      logger: { info: vi.fn(), warn: vi.fn() },
+      runtime: { config: {
+        current: () => current, loadConfig: () => current,
+        writeConfigFile: async (next: any) => { current = next; },
+      } },
+    } as never, { pluginConfig: { mainParentAgentId: "main" } } as never);
+    await prepareSessionModelForDispatch("11210442");
+    const dispatchConfig = current;
+    expect(stale.models.providers["baiying-m-9002"]).toBeUndefined();
+    expect(dispatchConfig.models.providers["baiying-m-9002"].models[0].id).toBe("first-use-model");
+    expect(await hooks.get("before_model_resolve")!({}, {
+      agentId: "baiying-agent-10000455", sessionKey: "agent:baiying-agent-10000455:direct:11210442",
+    })).toEqual({ providerOverride: "baiying-m-9002", modelOverride: "first-use-model" });
+    expect(dispatchConfig.agents.list[0].model.primary).toBe(stale.agents.list[0].model.primary);
+  });
+
   it("uses the selected session model at final resolution and falls back after reset without leaking to another session", async () => {
     const hooks = new Map<string, (...args: any[]) => any>();
     let selected = true;
