@@ -433,6 +433,22 @@ export function registerManagedAgentModelHooks(
     await attachLangfuseSessionToActiveSpan(ctx);
     const agentId = ctx.agentId?.trim() || resolveAgentIdFromSessionKey(ctx.sessionKey);
     if (aimodelRunSync) {
+      const sessionOverride = await resolveSessionModelOverride({
+        api,
+        pluginConfig: aimodelRunSync.pluginConfig,
+        sessionId: resolveLangfuseSessionIdFromHookContext(ctx),
+        aimodelSecretResolverScriptPath: aimodelRunSync.aimodelSecretResolverScriptPath,
+        log: api.logger,
+      });
+      if (sessionOverride) {
+        api.logger.info(
+          `baiying-enhance: before_model_resolve selected session model ${sessionOverride.modelRef} for sessionId=${resolveLangfuseSessionIdFromHookContext(ctx)}`,
+        );
+        return {
+          providerOverride: sessionOverride.providerKey,
+          modelOverride: sessionOverride.model,
+        };
+      }
       const mainDefault = await resolveMainDefaultAimodelOnAgentRun(aimodelRunSync, agentId);
       if (mainDefault) {
         return mainDefault;

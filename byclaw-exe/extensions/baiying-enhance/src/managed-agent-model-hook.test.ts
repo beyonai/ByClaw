@@ -1,13 +1,55 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { setSharedRedisJsonStore } from "./redis-json-store.js";
 import {
   buildManagedAgentRuntimeModelSystemContext,
   hasManagedModelConfigDrift,
   resolveLangfuseSessionIdFromHookContext,
   resolveManagedAgentModelFromConfig,
+  registerManagedAgentModelHooks,
   shouldDeferManagedAgentModelOverrideForRun,
   syncManagedAgentSessionModelForInbound,
   warnUnresolvedManagedProviderApiKeysAfterSync,
 } from "./managed-agent-model-hook.js";
+
+afterEach(() => setSharedRedisJsonStore(null));
+
+describe("registered before_model_resolve hook", () => {
+  it("uses the selected session model at final resolution and falls back after reset without leaking to another session", async () => {
+    const hooks = new Map<string, (...args: any[]) => any>();
+    let selected = true;
+    const read = vi.fn(async (key: string) => {
+      if (!selected || key !== "byai:chat:session_model:11210442") return null;
+      const raw = { modelId: "9001", modelCode: "selected-model" };
+      return { raw, key, content: JSON.stringify(raw), hash: "selected" };
+    });
+    setSharedRedisJsonStore({ getJsonByKey: read } as never);
+    const cfg = {
+      ...registeredCfg,
+      models: { providers: {
+        ...registeredCfg.models.providers,
+        "baiying-m-9001": { models: [{ id: "selected-model" }] },
+      } },
+    };
+    registerManagedAgentModelHooks({
+      on: (name: string, handler: (...args: any[]) => any) => hooks.set(name, handler),
+      logger: { info: vi.fn(), warn: vi.fn() },
+      runtime: { config: { current: () => cfg, loadConfig: () => cfg } },
+    } as never, { pluginConfig: { mainParentAgentId: "main" } } as never);
+    const resolve = hooks.get("before_model_resolve")!;
+    const ctx = { agentId: "baiying-agent-10000455", sessionKey: "agent:baiying-agent-10000455:direct:11210442" };
+
+    // Exercise the actual final hook without relying on before_dispatch firing first.
+    expect(await resolve({}, ctx)).toEqual({ providerOverride: "baiying-m-9001", modelOverride: "selected-model" });
+    expect(await resolve({}, { ...ctx, sessionKey: "agent:baiying-agent-10000455:direct:11210443" })).toEqual({
+      providerOverride: "baiying-m-10003989", modelOverride: "qwen3.6-35b-a3b",
+    });
+    selected = false;
+    expect(await resolve({}, ctx)).toEqual({
+      providerOverride: "baiying-m-10003989", modelOverride: "qwen3.6-35b-a3b",
+    });
+    expect(cfg.agents.list[0].model.primary).toBe("baiying-m-10003989/qwen3.6-35b-a3b");
+  });
+});
 
 const registeredCfg = {
   agents: {
