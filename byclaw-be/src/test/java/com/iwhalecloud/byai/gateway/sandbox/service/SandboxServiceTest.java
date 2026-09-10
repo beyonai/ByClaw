@@ -217,16 +217,14 @@ class SandboxServiceTest {
     }
 
     @Test
-    void heartbeatRefreshesOnlyTheSandboxResolvedForTheRequestedResource() {
+    void heartbeatRefreshesAllRunningSandboxesForCurrentUser() {
         SandboxMetadataCache sandboxMetadataCache = mock(SandboxMetadataCache.class);
         SsSandboxRecordMapper sandboxRecordMapper = mock(SsSandboxRecordMapper.class);
         SandboxHealthWatchService sandboxHealthWatchService = mock(SandboxHealthWatchService.class);
-        SandboxLaunchContextFactory sandboxLaunchContextFactory = mock(SandboxLaunchContextFactory.class);
         SandboxService sandboxService = new SandboxService();
         ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", sandboxRecordMapper);
         ReflectionTestUtils.setField(sandboxService, "sandboxMetadataCache", sandboxMetadataCache);
         ReflectionTestUtils.setField(sandboxService, "sandboxHealthWatchService", sandboxHealthWatchService);
-        ReflectionTestUtils.setField(sandboxService, "sandboxLaunchContextFactory", sandboxLaunchContextFactory);
 
         LoginInfo loginInfo = new LoginInfo();
         loginInfo.setUserCode("user001");
@@ -242,55 +240,74 @@ class SandboxServiceTest {
         openclawRecord.setLockVersion(3);
         openclawRecord.setVersion(1);
 
-        SsSandboxRecord codeAgentRecord = new SsSandboxRecord();
-        codeAgentRecord.setId(2L);
-        codeAgentRecord.setUserCode("user001");
-        codeAgentRecord.setSandboxType("byclaw-code-agent");
-        codeAgentRecord.setResourceId(SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
-        codeAgentRecord.setStatus("RUNNING");
-        codeAgentRecord.setSandboxId("sandbox-code-agent");
-        codeAgentRecord.setLockVersion(7);
-        codeAgentRecord.setVersion(2);
+        SsSandboxRecord dshRecord = new SsSandboxRecord();
+        dshRecord.setId(2L);
+        dshRecord.setUserCode("user001");
+        dshRecord.setSandboxType("byclaw-dsh");
+        dshRecord.setResourceId(SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+        dshRecord.setStatus("RUNNING");
+        dshRecord.setSandboxId("sandbox-dsh");
+        dshRecord.setLockVersion(7);
+        dshRecord.setVersion(2);
 
-        SandboxLaunchRouting routing = new SandboxLaunchRouting("byclaw-code-agent",
-            SandboxLaunchRouting.DEFAULT_CODE_AGENT_RESOURCE_ID);
-        when(sandboxLaunchContextFactory.resolveRouting(123L, "user001")).thenReturn(routing);
-        when(sandboxRecordMapper.selectRunningByUserAndResource("user001", "byclaw-code-agent",
-            SandboxLaunchRouting.DEFAULT_CODE_AGENT_RESOURCE_ID)).thenReturn(codeAgentRecord);
+        when(sandboxRecordMapper.selectRunningByUser("user001")).thenReturn(List.of(openclawRecord, dshRecord));
+        when(sandboxRecordMapper.updateLastAccessTime(eq(1L), any(Date.class), eq(3))).thenReturn(1);
         when(sandboxRecordMapper.updateLastAccessTime(eq(2L), any(Date.class), eq(7))).thenReturn(1);
 
         boolean result = sandboxService.heartbeat(123L);
 
         assertThat(result).isTrue();
-        assertThat(openclawRecord.getLastAccessTime()).isNull();
-        assertThat(codeAgentRecord.getLastAccessTime()).isNotNull();
-        verify(sandboxRecordMapper).selectRunningByUserAndResource("user001", "byclaw-code-agent",
-            SandboxLaunchRouting.DEFAULT_CODE_AGENT_RESOURCE_ID);
-        verify(sandboxRecordMapper, never()).selectRunningByUser("user001");
-        verify(sandboxRecordMapper, never()).updateLastAccessTime(eq(1L), any(Date.class), eq(3));
+        assertThat(openclawRecord.getLastAccessTime()).isNotNull();
+        assertThat(dshRecord.getLastAccessTime()).isNotNull();
+        verify(sandboxRecordMapper).selectRunningByUser("user001");
+        verify(sandboxRecordMapper, never()).selectRunningByUserAndResource(any(), any(), any());
+        verify(sandboxRecordMapper).updateLastAccessTime(eq(1L), any(Date.class), eq(3));
         verify(sandboxRecordMapper).updateLastAccessTime(eq(2L), any(Date.class), eq(7));
-        verify(sandboxMetadataCache).put(any(SandboxInfo.class));
-        verify(sandboxHealthWatchService).touch("user001", "byclaw-code-agent");
+        verify(sandboxMetadataCache, times(2)).put(any(SandboxInfo.class));
+        verify(sandboxHealthWatchService).touch("user001", "openclaw");
+        verify(sandboxHealthWatchService).touch("user001", "byclaw-dsh");
     }
 
     @Test
-    void heartbeatDoesNotFallBackToAnotherSandboxWhenTheExactRouteIsMissing() {
-        SandboxLaunchContextFactory sandboxLaunchContextFactory = mock(SandboxLaunchContextFactory.class);
+    void heartbeatWithExplicitUserRefreshesAllRunningSandboxes() {
+        SandboxMetadataCache sandboxMetadataCache = mock(SandboxMetadataCache.class);
         SsSandboxRecordMapper sandboxRecordMapper = mock(SsSandboxRecordMapper.class);
+        SandboxHealthWatchService sandboxHealthWatchService = mock(SandboxHealthWatchService.class);
         SandboxService sandboxService = new SandboxService();
-        ReflectionTestUtils.setField(sandboxService, "sandboxLaunchContextFactory", sandboxLaunchContextFactory);
         ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", sandboxRecordMapper);
-        SandboxLaunchRouting routing = new SandboxLaunchRouting("byclaw-dsh",
-            SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
-        when(sandboxLaunchContextFactory.resolveRouting(20010819L, "user001")).thenReturn(routing);
-        when(sandboxRecordMapper.selectRunningByUserAndResource("user001", "byclaw-dsh",
-            SandboxLaunchRouting.DEFAULT_RESOURCE_ID)).thenReturn(null);
+        ReflectionTestUtils.setField(sandboxService, "sandboxMetadataCache", sandboxMetadataCache);
+        ReflectionTestUtils.setField(sandboxService, "sandboxHealthWatchService", sandboxHealthWatchService);
+
+        SsSandboxRecord openclawRecord = new SsSandboxRecord();
+        openclawRecord.setId(1L);
+        openclawRecord.setUserCode("user001");
+        openclawRecord.setSandboxType("openclaw");
+        openclawRecord.setStatus("RUNNING");
+        openclawRecord.setSandboxId("sandbox-openclaw");
+        openclawRecord.setLockVersion(3);
+        openclawRecord.setVersion(1);
+
+        SsSandboxRecord dshRecord = new SsSandboxRecord();
+        dshRecord.setId(2L);
+        dshRecord.setUserCode("user001");
+        dshRecord.setSandboxType("byclaw-dsh");
+        dshRecord.setStatus("RUNNING");
+        dshRecord.setSandboxId("sandbox-dsh");
+        dshRecord.setLockVersion(7);
+        dshRecord.setVersion(2);
+
+        when(sandboxRecordMapper.selectRunningByUser("user001")).thenReturn(List.of(openclawRecord, dshRecord));
+        when(sandboxRecordMapper.updateLastAccessTime(eq(1L), any(Date.class), eq(3))).thenReturn(1);
+        when(sandboxRecordMapper.updateLastAccessTime(eq(2L), any(Date.class), eq(7))).thenReturn(1);
 
         boolean result = sandboxService.heartbeat("user001", 20010819L);
 
-        assertThat(result).isFalse();
-        verify(sandboxRecordMapper, never()).selectRunningByUser("user001");
-        verify(sandboxRecordMapper, never()).updateLastAccessTime(any(), any(), any());
+        assertThat(result).isTrue();
+        assertThat(openclawRecord.getLastAccessTime()).isNotNull();
+        assertThat(dshRecord.getLastAccessTime()).isNotNull();
+        verify(sandboxMetadataCache, times(2)).put(any(SandboxInfo.class));
+        verify(sandboxHealthWatchService).touch("user001", "openclaw");
+        verify(sandboxHealthWatchService).touch("user001", "byclaw-dsh");
     }
 
     @Test
