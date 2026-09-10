@@ -65,7 +65,13 @@ public class ChatRuntimeStateService {
         return 1
         """, Long.class);
 
-    /** Delete a turn and its discovery entries only while its ownership token still matches. */
+    /**
+     * Delete a turn's runtime record only while its ownership token still matches.
+     * <p>
+     * 只操作单个 key：Redis Cluster 要求一条命令的所有 key 落在同一 hash slot，而运行态 key 与两个索引 key
+     * 没有共同的 hash tag，写在同一段脚本里会被客户端直接拒绝（Keys must belong to same hashslot），
+     * 整个终结清理链路随之中断。索引清理因此拆到脚本之外单独执行，见 {@link #deleteTurn}。
+     */
     private static final DefaultRedisScript<Long> DELETE_TURN_SCRIPT = new DefaultRedisScript<>("""
         local current = redis.call('get', KEYS[1])
         if current then
@@ -73,8 +79,6 @@ public class ChatRuntimeStateService {
             if not ok or state.token ~= ARGV[1] then return 0 end
             redis.call('del', KEYS[1])
         end
-        redis.call('srem', KEYS[2], ARGV[2])
-        redis.call('srem', KEYS[3], ARGV[2])
         return 1
         """, Long.class);
 
@@ -320,11 +324,39 @@ public class ChatRuntimeStateService {
         }
     }
 
+    /**
+     * 删除一轮对话的运行态记录及其两处索引条目。
+     * <p>
+     * 三个 key 分属不同 hash slot，无法合并到一条 Lua 脚本里（见 {@link #DELETE_TURN_SCRIPT}），
+     * 因此拆成「先按 token 校验并删除运行态，再逐个摘除索引」的序列。
+     * <p>
+     * 顺序不可颠倒：先删运行态，索引条目才会短暂指向一个已不存在的 key，而这种残留是自愈的 ——
+     * 索引扫描读到空值即摘除条目（见 {@link #loadStates}），{@link #getSessionTurns} 同样会跳过读不到的条目。
+     * 反过来先摘索引则会留下无人发现的运行态 key，恢复逻辑再也看不到它，只能等 TTL 到期。
+     * <p>
+     * 索引摘除各自独立吞掉异常：它们的残留可自愈，但把异常抛给调用方会中断整条终结清理链路，
+     * 让 listener、keep-alive 与租约续期全部泄漏到进程重启。token 校验删除的异常仍然向上传播 ——
+     * 运行态没删掉却继续往下走，恢复逻辑会把一轮已结束的对话当作仍在运行。
+     */
     private void deleteTurn(ChatProcessContext ctx, String identifier) {
         if (StringUtils.isBlank(ctx.runningOutputStreamToken)) return;
-        redisTemplate.execute(DELETE_TURN_SCRIPT,
-            List.of(RUNTIME_KEY_PREFIX + identifier, RUNTIME_INDEX_KEY, concurrentIndex(ctx.sessionId)),
+        Long deleted = redisTemplate.execute(DELETE_TURN_SCRIPT, List.of(RUNTIME_KEY_PREFIX + identifier),
             ctx.runningOutputStreamToken, identifier);
+        if (!Long.valueOf(1L).equals(deleted)) {
+            // token 不匹配说明这个 identifier 已被后续轮次接管，索引条目属于新的持有者，不能摘除。
+            return;
+        }
+        removeIndexEntry(RUNTIME_INDEX_KEY, identifier);
+        removeIndexEntry(concurrentIndex(ctx.sessionId), identifier);
+    }
+
+    private void removeIndexEntry(String indexKey, String identifier) {
+        try {
+            redisTemplate.opsForSet().remove(indexKey, identifier);
+        }
+        catch (Exception e) {
+            log.warn("摘除聊天运行态索引条目失败, indexKey: {}, identifier: {}", indexKey, identifier, e);
+        }
     }
 
     public void delete(Long sessionId) {
