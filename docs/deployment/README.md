@@ -42,7 +42,6 @@ ByClaw 由以下组件组成：
 | BE | 后端服务 | 8086 (HTTP) / 8082 (WebSocket) |
 | QA Manager | QA 管理服务 | 8000 |
 | QA Worker | QA 工作进程 | 无端口 |
-| Data | DataCloud 服务 | 8087 |
 | Redis | 缓存服务 | 6379 |
 | MinIO | 对象存储 | 9000 (API) / 9001 (Console) |
 | OpenGauss | 数据库 | 5432 |
