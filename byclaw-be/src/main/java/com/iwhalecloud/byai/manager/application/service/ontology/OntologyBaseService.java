@@ -1224,7 +1224,12 @@ public class OntologyBaseService {
             ext.setResourceId(resourceId);
             ext.setSceneCode(code);
             ext.setTargetContent(targetJson);
-            ssResExtSceneMapper.insert(ext);
+            if (ssResExtSceneMapper.selectById(resourceId) == null) {
+                ssResExtSceneMapper.insert(ext);
+            }
+            else {
+                ssResExtSceneMapper.updateById(ext);
+            }
             return;
         }
         if (ResourceBizType.VIEW.getCode().equals(bizType)) {
