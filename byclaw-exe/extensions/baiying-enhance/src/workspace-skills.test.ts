@@ -148,6 +148,7 @@ describe("workspace-skills", () => {
             "project-context",
             "notice",
             "project-cloud-knowledge",
+            "project-task-status-update",
             "json-skill",
             "extra-filter-name",
             "missing-extra",
@@ -204,7 +205,7 @@ describe("workspace-skills", () => {
     ).resolves.toMatchObject([
       {
         listEntry: {
-          skills: ["project-context", "notice", "project-cloud-knowledge", "inner-filter-name"],
+          skills: ["project-context", "notice", "project-cloud-knowledge", "project-task-status-update", "inner-filter-name"],
         },
       },
     ]);
@@ -230,7 +231,7 @@ describe("workspace-skills", () => {
     ).resolves.toMatchObject([
       {
         listEntry: {
-          skills: ["project-context", "notice", "project-cloud-knowledge"],
+          skills: ["project-context", "notice", "project-cloud-knowledge", "project-task-status-update"],
         },
       },
     ]);
