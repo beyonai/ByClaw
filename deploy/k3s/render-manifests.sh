@@ -75,7 +75,6 @@ BYCLAW_FE_REPLICAS="${BYCLAW_FE_REPLICAS:-1}"
 BYCLAW_SUPER_REPLICAS="${BYCLAW_SUPER_REPLICAS:-1}"
 BYCLAW_QA_REPLICAS="${BYCLAW_QA_REPLICAS:-1}"
 BYCLAW_QA_WORKER_REPLICAS="${BYCLAW_QA_WORKER_REPLICAS:-1}"
-BYCLAW_DATA_REPLICAS="${BYCLAW_DATA_REPLICAS:-1}"
 BYCLAW_DEMO_REPLICAS="${BYCLAW_DEMO_REPLICAS:-1}"
 BYCLAW_DEPLOY_CONFIG_DIR="${BYCLAW_DEPLOY_CONFIG_DIR:-$SCRIPT_DIR/../config}"
 BYCLAW_BE_APPLICATION_PROPERTIES="${BYCLAW_DEPLOY_CONFIG_DIR}/application.properties"
@@ -87,7 +86,6 @@ IMAGE_FE="${IMAGE_FE:-ghcr.io/beyonai/byclaw/byclaw-fe:main}"
 IMAGE_BE="${IMAGE_BE:-ghcr.io/beyonai/byclaw/byclaw-be:main}"
 IMAGE_SUPER="${IMAGE_SUPER:-ghcr.io/beyonai/byclaw/byclaw-super:main}"
 IMAGE_QA="${IMAGE_QA:-ghcr.io/beyonai/byclaw/byclaw-qa:main}"
-IMAGE_DATA="${IMAGE_DATA:-ghcr.io/beyonai/byclaw/byclaw-data:main}"
 IMAGE_DEMO="${IMAGE_DEMO:-ghcr.io/beyonai/byclaw-middleware/byclaw-demo:main}"
 IMAGE_REDIS="${IMAGE_REDIS:-ghcr.io/beyonai/byclaw/byclaw-redis:main}"
 IMAGE_OPENGAUSS="${IMAGE_OPENGAUSS:-ghcr.io/beyonai/byclaw/byclaw-opengauss:main}"
@@ -109,7 +107,6 @@ fi
 BE_DOMAINNAME="${BE_DOMAINNAME:-ByaiService}"
 QA_DOMAINNAME="${QA_DOMAINNAME:-byclaw-qa-manager}"
 QA_WORKER_NAME="${QA_WORKER_NAME:-byclaw-qa-worker}"
-DATACLOUD_DOMAINNAME="${DATACLOUD_DOMAINNAME:-byclaw-datacloud}"
 HOST="${HOST:-byclaw-be.${NS_SERVICE}.svc.cluster.local}"
 BE_SERVER_PORT="${BE_SERVER_PORT:-8086}"
 BE_WS_PORT="${BE_WS_PORT:-8082}"
@@ -118,11 +115,7 @@ BYCLAW_SUPER_DB_SSL="${BYCLAW_SUPER_DB_SSL:-false}"
 BYCLAW_SUPER_DB_EVENT_LISTEN_ENABLED="${BYCLAW_SUPER_DB_EVENT_LISTEN_ENABLED:-false}"
 BYCLAW_SUPER_BE_BASE_URL="${BYCLAW_SUPER_BE_BASE_URL:-http://byclaw-be.${NS_SERVICE}.svc.cluster.local:${BE_SERVER_PORT}}"
 BYCLAW_QA_PORT="${BYCLAW_QA_PORT:-8000}"
-DATACLOUD_PORT="${DATACLOUD_PORT:-8088}"
-DATACLOUD_DATA_SERVICE_PORT="${DATACLOUD_DATA_SERVICE_PORT:-$DATACLOUD_PORT}"
 APIDEMO_PORT="${APIDEMO_PORT:-8999}"
-DATACLOUD_DATA_SERVICE_URL="${DATACLOUD_DATA_SERVICE_URL:-http://127.0.0.1:${DATACLOUD_DATA_SERVICE_PORT}}"
-DATACLOUD_API_BASE_URL="${DATACLOUD_API_BASE_URL:-http://${DATACLOUD_DOMAINNAME}.${NS_SERVICE}.svc.cluster.local:${DATACLOUD_DATA_SERVICE_PORT}}"
 BE_DOMAINNAME_URL="${BE_DOMAINNAME_URL:-http://byclaw-be.${NS_SERVICE}.svc.cluster.local:${BE_SERVER_PORT}}"
 BYCLAW_SERVICE_IMAGE_PULL_POLICY="${BYCLAW_SERVICE_IMAGE_PULL_POLICY:-Always}"
 OPENSANDBOX_SANDBOX_IMAGE_PULL_POLICY="${OPENSANDBOX_SANDBOX_IMAGE_PULL_POLICY:-Always}"
@@ -176,12 +169,6 @@ MINIO_ENDPOINT="${MINIO_ENDPOINT:-disabled}"
 MINIO_ACCESS_KEY="${MINIO_ACCESS_KEY:-disabled}"
 MINIO_SECRET_KEY="${MINIO_SECRET_KEY:-disabled}"
 MINIO_SECURE="${MINIO_SECURE:-false}"
-DATACLOUD_START_MCP_SERVICE="${DATACLOUD_START_MCP_SERVICE:-true}"
-DATACLOUD_START_GATEWAY_WORKER="${DATACLOUD_START_GATEWAY_WORKER:-true}"
-DATACLOUD_GATEWAY_WORKER_ID="${DATACLOUD_GATEWAY_WORKER_ID:-BYCLAW_DATA}"
-DATACLOUD_GATEWAY_CONSUMER_GROUP="${DATACLOUD_GATEWAY_CONSUMER_GROUP:-datacloud}"
-DATACLOUD_GATEWAY_WORKSPACE_DIR="${DATACLOUD_GATEWAY_WORKSPACE_DIR:-/tmp/datacloud}"
-DATACLOUD_RESULT_FILE_API_BASE_URL="${DATACLOUD_RESULT_FILE_API_BASE_URL:-$BE_DOMAINNAME_URL}"
 
 if [ ! -f "$BYCLAW_BE_APPLICATION_PROPERTIES" ]; then
     echo "Error: missing BE config: $BYCLAW_BE_APPLICATION_PROPERTIES" >&2
@@ -405,10 +392,6 @@ write_byclaw_runtime_env_files() {
         render_env_line "HOST" "${QA_WORKER_NAME}.${NS_SERVICE}.svc.cluster.local"
         render_env_line "SERVICE_NAME" "$QA_WORKER_NAME"
     } > "$dir/.byclaw-qa-worker-runtime.env"
-    {
-        render_env_line "HOST" "${DATACLOUD_DOMAINNAME}.${NS_SERVICE}.svc.cluster.local"
-        render_env_line "SERVICE_NAME" "$DATACLOUD_DOMAINNAME"
-    } > "$dir/.byclaw-data-runtime.env"
     {
         render_env_line "HOST" "byclaw-demo.${NS_SERVICE}.svc.cluster.local"
         render_env_line "SERVICE_NAME" "byclaw-demo"
@@ -1834,88 +1817,6 @@ spec:
   ports:
     - name: http
       port: ${BYCLAW_QA_PORT}
-      targetPort: http
-EOF
-
-cat > "$OUT_DIR/40-service/byclaw-data.yaml" <<EOF
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: ${DATACLOUD_DOMAINNAME}
-  namespace: ${NS_SERVICE}
-spec:
-  replicas: ${BYCLAW_DATA_REPLICAS}
-  strategy:
-    type: Recreate
-  selector:
-    matchLabels:
-      app: ${DATACLOUD_DOMAINNAME}
-  template:
-    metadata:
-      labels:
-        app: ${DATACLOUD_DOMAINNAME}
-      annotations:
-        byclaw.io/runtime-env-sha256: "${BYCLAW_RUNTIME_ENV_CHECKSUM}"
-    spec:
-      containers:
-        - name: data
-          image: ${IMAGE_DATA}
-          imagePullPolicy: ${BYCLAW_SERVICE_IMAGE_PULL_POLICY}
-          ports:
-            - name: http
-              containerPort: ${DATACLOUD_DATA_SERVICE_PORT}
-          envFrom:
-            - configMapRef:
-                name: byclaw-runtime-env
-            - configMapRef:
-                name: byclaw-data-runtime-env
-            - secretRef:
-                name: byclaw-runtime-secret
-          resources:
-            requests:
-              cpu: "${BYCLAW_DATA_CPU_REQUEST:-250m}"
-              memory: "${BYCLAW_DATA_MEMORY_REQUEST:-512Mi}"
-            limits:
-              cpu: "${BYCLAW_DATA_CPU_LIMIT:-1}"
-              memory: "${BYCLAW_DATA_MEMORY_LIMIT:-2Gi}"
-          volumeMounts:
-            - name: config
-              mountPath: /app/config
-              readOnly: true
-            - name: logs
-              mountPath: /app/logs
-              subPath: logs/data
-            - name: workspace
-              mountPath: ${FILE_STORAGE_MINIO_MOUNT_PATH}
-            - name: runtime-env-file
-              mountPath: /etc/byclaw/.env
-              subPath: .env
-              readOnly: true
-      volumes:
-        - name: config
-          configMap:
-            name: byclaw-be-config
-        - name: logs
-          persistentVolumeClaim:
-            claimName: ${WORKSPACE_PVC_NAME}
-        - name: workspace
-          persistentVolumeClaim:
-            claimName: ${WORKSPACE_PVC_NAME}
-        - name: runtime-env-file
-          configMap:
-            name: byclaw-data-runtime-env-file
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: ${DATACLOUD_DOMAINNAME}
-  namespace: ${NS_SERVICE}
-spec:
-  selector:
-    app: ${DATACLOUD_DOMAINNAME}
-  ports:
-    - name: http
-      port: ${DATACLOUD_DATA_SERVICE_PORT}
       targetPort: http
 EOF
 
