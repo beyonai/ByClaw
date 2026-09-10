@@ -23,7 +23,6 @@ public class ProjectContextDto {
     private ProjectSummary project;
     private List<RepositorySummary> repositories = new ArrayList<>();
     private List<ResourceSummary> knowledgeBases = new ArrayList<>();
-    private OntologySummary ontologies = new OntologySummary();
     private List<ResourceSummary> digitalEmployees = new ArrayList<>();
     private List<ResourceSummary> otherResources = new ArrayList<>();
     private List<MemberSummary> members = new ArrayList<>();
@@ -75,16 +74,6 @@ public class ProjectContextDto {
         private String description;
         private Long parentResourceId;
         private boolean available;
-    }
-
-    @Getter
-    @Setter
-    public static class OntologySummary {
-        private List<ResourceSummary> bases = new ArrayList<>();
-        private List<ResourceSummary> objects = new ArrayList<>();
-        private List<ResourceSummary> views = new ArrayList<>();
-        private List<ResourceSummary> scenes = new ArrayList<>();
-        private List<ResourceSummary> others = new ArrayList<>();
     }
 
     @Getter

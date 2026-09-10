@@ -1726,7 +1726,7 @@ public class DigitalEmployeeApplicationService {
 
     /**
      * 以给定的全量目标 relIds 覆盖式同步数字员工的关联资源明细,并触发运行期重同步.
-     * 供本体绑定等场景复用:调用方自行计算好目标集合(多退少补),本方法只做落库 + 同步.
+     * 供数字员工资源绑定等场景复用:调用方自行计算好目标集合(多退少补),本方法只做落库 + 同步.
      *
      * @param digitalEmployeeId 数字员工资源 ID
      * @param targetRelIds      目标全量关联资源 ID(为空表示清空全部关联)
@@ -3550,9 +3550,6 @@ public class DigitalEmployeeApplicationService {
             }
         }
 
-        // 本体类关联资源:注入 ontologyBaseCode,并重建 relOntology 明细
-        this.enrichOntologyRelResources(relResourceList, digitalEmployeeDetailsDTO);
-
         digitalEmployeeDetailsDTO.setRelIds(relIds);
         digitalEmployeeDetailsDTO.setRelResourceList(relResourceList);
         List<Map<String, Object>> relSkills = this.buildRelSkillsFromRelations(resourceId);
@@ -3593,141 +3590,6 @@ public class DigitalEmployeeApplicationService {
             logger.warn("解析关联资源明细失败，按无可用子资源处理, ignored. err={}", e.getMessage());
             return 0;
         }
-    }
-
-    /**
-     * 为本体类关联资源(ONTOLOGY_BASE/SCENE/VIEW/OBJECT)注入 ontologyBaseCode,并重建 relOntology 扁平明细.
-     * ontologyBaseCode 取自各自扩展表;relOntology 的路径(sceneId/viewCode/objectCode 等)
-     * 由资源树本身重建:resource_code 即各级编码、resource_name 即名称、parent_resource_id 即层级,
-     * 不依赖 ext.target_content 格式(快照对象的 ext 为 datacloud 原始格式,缺 sceneId,会导致回显对不上).
-     */
-    private void enrichOntologyRelResources(List<SsResourceDTO> relResourceList, DigitalEmployeeDetailsDTO details) {
-        if (CollectionUtils.isEmpty(relResourceList)) {
-            return;
-        }
-        Set<String> ontologyBizTypes = Set.of("ONTOLOGY_BASE", "SCENE", "VIEW", "OBJECT");
-        List<SsResourceDTO> ontologyResources = relResourceList.stream()
-            .filter(r -> r != null && ontologyBizTypes.contains(r.getResourceBizType())).collect(Collectors.toList());
-        if (CollectionUtils.isEmpty(ontologyResources)) {
-            return;
-        }
-        // ontologyBaseCode 注入(Part B)
-        List<Long> ids = ontologyResources.stream().map(SsResource::getResourceId).filter(Objects::nonNull)
-            .collect(Collectors.toList());
-        Map<Long, String> pidMap = ssResourceService.findOntologyBaseCodeMap(ids);
-
-        // 构建 id->资源 映射用于回溯父链:先放入关联资源,再补齐缺失的祖先
-        Map<Long, SsResource> byId = new HashMap<>();
-        for (SsResourceDTO r : relResourceList) {
-            if (r != null && r.getResourceId() != null) {
-                byId.put(r.getResourceId(), r);
-            }
-        }
-        boolean added = true;
-        while (added) {
-            added = false;
-            List<Long> missing = new ArrayList<>();
-            for (SsResource r : new ArrayList<>(byId.values())) {
-                Long p = r.getParentResourceId();
-                if (p != null && p > 0 && !byId.containsKey(p)) {
-                    missing.add(p);
-                }
-            }
-            if (!missing.isEmpty()) {
-                List<SsResource> loaded = ssResourceService
-                    .findByIdList(missing.stream().distinct().collect(Collectors.toList()));
-                for (SsResource s : loaded) {
-                    if (s != null && !byId.containsKey(s.getResourceId())) {
-                        byId.put(s.getResourceId(), s);
-                        added = true;
-                    }
-                }
-            }
-        }
-
-        List<JSONObject> relOntology = new ArrayList<>();
-        for (SsResourceDTO dto : ontologyResources) {
-            String baseCode = pidMap.get(dto.getResourceId());
-            if (StringUtils.isBlank(baseCode) && "ONTOLOGY_BASE".equals(dto.getResourceBizType())) {
-                baseCode = dto.getResourceCode();
-            }
-            SsResource baseResource = this.findOntologyBaseResource(dto, baseCode, byId);
-            if (StringUtils.isBlank(baseCode) && baseResource != null) {
-                baseCode = baseResource.getResourceCode();
-            }
-            dto.setOntologyBaseCode(baseCode);
-
-            JSONObject entry = new JSONObject();
-            entry.put("resourceId", dto.getResourceId());
-            entry.put("resourceBizType", dto.getResourceBizType());
-            entry.put("ontologyBaseCode", baseCode);
-            if (baseResource != null) {
-                entry.put("ontologyBaseName", baseResource.getResourceName());
-                entry.put("ownerType", baseResource.getOwnerType());
-            }
-            entry.put("resourceName", dto.getResourceName());
-
-            String biz = dto.getResourceBizType();
-            if ("SCENE".equals(biz)) {
-                entry.put("sceneId", dto.getResourceCode());
-                entry.put("sceneName", dto.getResourceName());
-            } else if ("VIEW".equals(biz)) {
-                entry.put("viewCode", dto.getResourceCode());
-                entry.put("viewName", dto.getResourceName());
-                SsResource scene = byId.get(dto.getParentResourceId());
-                if (scene != null) {
-                    entry.put("sceneId", scene.getResourceCode());
-                    entry.put("sceneName", scene.getResourceName());
-                }
-            } else if ("OBJECT".equals(biz)) {
-                entry.put("objectCode", dto.getResourceCode());
-                entry.put("objectName", dto.getResourceName());
-                SsResource parent = byId.get(dto.getParentResourceId());
-                if (parent != null && "VIEW".equals(parent.getResourceBizType())) {
-                    entry.put("viewCode", parent.getResourceCode());
-                    entry.put("viewName", parent.getResourceName());
-                    SsResource scene = byId.get(parent.getParentResourceId());
-                    if (scene != null) {
-                        entry.put("sceneId", scene.getResourceCode());
-                        entry.put("sceneName", scene.getResourceName());
-                    }
-                } else if (parent != null && "SCENE".equals(parent.getResourceBizType())) {
-                    entry.put("sceneId", parent.getResourceCode());
-                    entry.put("sceneName", parent.getResourceName());
-                }
-            }
-            relOntology.add(entry);
-        }
-        details.setRelOntology(relOntology);
-    }
-
-    /**
-     * 查找本体基础资源。
-     */
-    private SsResource findOntologyBaseResource(SsResource resource, String baseCode, Map<Long, SsResource> byId) {
-        if (resource == null) {
-            return null;
-        }
-        if ("ONTOLOGY_BASE".equals(resource.getResourceBizType())) {
-            return resource;
-        }
-        Long cur = resource.getParentResourceId();
-        while (cur != null && cur > 0) {
-            SsResource parent = byId.get(cur);
-            if (parent == null) {
-                break;
-            }
-            if ("ONTOLOGY_BASE".equals(parent.getResourceBizType())) {
-                if (StringUtils.isBlank(baseCode) || StringUtils.equals(baseCode, parent.getResourceCode())) {
-                    return parent;
-                }
-            }
-            cur = parent.getParentResourceId();
-        }
-        return byId.values().stream()
-            .filter(r -> r != null && "ONTOLOGY_BASE".equals(r.getResourceBizType()))
-            .filter(r -> StringUtils.isBlank(baseCode) || StringUtils.equals(baseCode, r.getResourceCode())).findFirst()
-            .orElse(null);
     }
 
     /**

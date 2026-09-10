@@ -575,14 +575,20 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
           fileList.forEach((file) => formData.append('files', file));
           formData.append('resourceId', String(resourceId));
           formData.append('directoryPath', targetPath);
-          await uploadKnowledgeFiles(formData);
+          await uploadKnowledgeFiles(formData, { responseCfg: { hideErrorTips: true } });
         } else {
           await uploadFiles(resourceId, targetPath, fileList);
         }
         message.success(intl.formatMessage({ id: 'fileBrowser.upload.success' }));
         await loadRoot();
       } catch (error: any) {
-        message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.upload.failed' }));
+        const errorMessage =
+          (typeof error === 'string' ? error : undefined) ||
+          error?.response?.data?.msg ||
+          error?.data?.msg ||
+          error?.msg ||
+          error?.message;
+        message.error(errorMessage || intl.formatMessage({ id: 'fileBrowser.upload.failed' }));
       } finally {
         setUploading(false);
       }
@@ -701,7 +707,16 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         message.success(intl.formatMessage({ id: 'fileBrowser.rename.success' }));
         setRenameTarget(null);
       } catch (error: any) {
-        message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.rename.failed' }));
+        const errorMessage =
+          (typeof error === 'string' ? error : undefined) ||
+          error?.response?.data?.error_description ||
+          error?.response?.data?.msg ||
+          error?.data?.error_description ||
+          error?.data?.msg ||
+          error?.error_description ||
+          error?.msg ||
+          error?.message;
+        message.error(errorMessage || intl.formatMessage({ id: 'fileBrowser.rename.failed' }));
       } finally {
         setRenameLoading(false);
       }

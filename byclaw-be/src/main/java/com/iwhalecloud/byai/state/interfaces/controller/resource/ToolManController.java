@@ -380,7 +380,7 @@ public class ToolManController {
         try {
             // 核心流程统一下沉到 service：
             // 1. zip 落盘并解压；
-            // 2. 解析 ontology/objects 下的对象 owl；
+            // 2. 解析 objects 目录下的对象 owl；
             // 3. 写主表 / 对象子表；
             // 4. 同步对象 json 与批次 zip 到 FTP。
             ObjectZipImportResult data = toolManService.importObjectZipFromMultipart(file[0], catalogId, ownerType);
@@ -418,7 +418,7 @@ public class ToolManController {
         try {
             // 核心流程统一下沉到 service：
             // 1. zip 落盘并解压；
-            // 2. 解析 ontology/views 下的视图 owl；
+            // 2. 解析 views 目录下的视图 owl；
             // 3. 写主表 / 视图子表 / 视图与对象关系；
             // 4. 同步视图 json 与批次 zip 到 FTP。
             ObjectZipImportResult data = toolManService.importViewZipFromMultipart(file[0], catalogId, ownerType);

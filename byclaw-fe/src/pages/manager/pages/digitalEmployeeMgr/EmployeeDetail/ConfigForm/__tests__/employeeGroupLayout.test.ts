@@ -19,7 +19,7 @@ describe('digital employee group editor layout', () => {
     );
     expect(resourceSection).toContain('<div className={styles.knowledgeSection} hidden={isEmployeeGroup}>');
     expect(resourceSection.match(/<div className=\{styles\.skillsSection\} hidden=\{isEmployeeGroup\}>/g)).toHaveLength(
-      3
+      2
     );
     expect(resourceSection).toContain('<div className={styles.robotSection} hidden={isEmployeeGroup}>');
     expect(configFormSource.match(/<EmployeeGroupMembers/g)).toHaveLength(1);

@@ -10,7 +10,6 @@ public final class ProjectResourceType {
 
     public static final String KNOWLEDGE = "knowledge";
     public static final String DIGITAL_EMPLOYEE = "digital_employee";
-    public static final String ONTOLOGY = "ontology";
 
     private ProjectResourceType() {
     }
@@ -32,7 +31,7 @@ public final class ProjectResourceType {
         return switch (bizType) {
             case KG_DOC, KG_DB, KG_TERM, KG_QA -> KNOWLEDGE;
             case DIG_EMPLOYEE -> DIGITAL_EMPLOYEE;
-            case VIEW, OBJECT, ONTOLOGY_BASE -> ONTOLOGY;
+            case VIEW, OBJECT, ONTOLOGY_BASE -> null;
             default -> null;
         };
     }

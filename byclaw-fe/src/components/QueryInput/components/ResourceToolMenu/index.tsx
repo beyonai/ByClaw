@@ -44,7 +44,7 @@ const ResourceToolMenu: React.FC<Props> = ({
   const [activeKey, setActiveKey] = useState('expert');
   const [visitedKeys, setVisitedKeys] = useState<string[]>(['expert']);
   useEffect(() => {
-    if (!activeKeyProp) return;
+    if (!activeKeyProp || activeKeyProp === 'object' || activeKeyProp === 'ontology') return;
     setActiveKey(activeKeyProp);
     setVisitedKeys((current) => (current.includes(activeKeyProp) ? current : [...current, activeKeyProp]));
   }, [activeKeyProp]);
@@ -60,7 +60,6 @@ const ResourceToolMenu: React.FC<Props> = ({
     { key: 'projectCloud', label: '项目云盘', icon: 'icon-a-Folder-openwenjianjia-kai' },
     { key: 'tool', label: '工具', icon: 'icon-a-Database-networkshujukuwangluo' },
     { key: 'knowledge', label: '知识', icon: 'icon-zhishi' },
-    { key: 'object', label: '本体', icon: 'icon-tongxun' },
   ];
   // 新会话没有可查询的过程文件，隐藏该分类；历史会话沿用右侧资源面板的会话文件数据。
   const visibleTabs = sessionId ? tabs : tabs.filter((tab) => tab.key !== 'processFile');

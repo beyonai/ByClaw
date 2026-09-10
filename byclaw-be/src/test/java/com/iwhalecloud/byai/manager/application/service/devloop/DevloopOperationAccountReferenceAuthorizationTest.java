@@ -78,6 +78,31 @@ class DevloopOperationAccountReferenceAuthorizationTest {
     private DevloopApplicationService service;
     private MessageSource originalMessageSource;
 
+    @ParameterizedTest
+    @ValueSource(strings = {"knowledge", "object_discovery", "KNOWLEDGE"})
+    void rejectsRetiredTaskTypesWithoutLookingUpAccounts(String type) {
+        String error = ReflectionTestUtils.invokeMethod(service, "validateOperationAccountReference",
+            type, Map.of(), PROJECT_ID, USER_ID, USER_CODE, true);
+        assertThat(error).isEqualTo("feature retired");
+        verifyNoInteractions(accountAccessService);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"ontology", "sourceOntology", "knowledgeOrganization", "organizeTemplateId"})
+    void rejectsHistoricalOntologyConfiguration(String field) {
+        String error = ReflectionTestUtils.invokeMethod(service, "validateOperationAccountReference",
+            "collect", Map.of(field, "legacy"), PROJECT_ID, USER_ID, USER_CODE, true);
+        assertThat(error).isEqualTo("feature retired");
+        verifyNoInteractions(accountAccessService);
+    }
+
+    @Test
+    void keepsIndependentKnowledgeCollectionAvailable() {
+        String error = ReflectionTestUtils.invokeMethod(service, "validateOperationAccountReference",
+            "collect", Map.of("storageMode", "knowledge"), PROJECT_ID, USER_ID, USER_CODE, true);
+        assertThat(error).isNull();
+    }
+
     @BeforeEach
     void setUp() {
         LoginInfo loginInfo = new LoginInfo();
@@ -87,6 +112,7 @@ class DevloopOperationAccountReferenceAuthorizationTest {
 
         originalMessageSource = (MessageSource) ReflectionTestUtils.getField(I18nUtil.class, "messageSource");
         StaticMessageSource messages = new StaticMessageSource();
+        messages.addMessage("devloop.operationTask.feature.retired", Locale.US, "feature retired");
         messages.addMessage("devloop.operationAccount.notFound", Locale.US, "account not found");
         messages.addMessage("devloop.operationAccount.browser.sandbox.invalid", Locale.US, "invalid sandbox");
         messages.addMessage("devloop.operationTaskTemplate.notFound", Locale.US, "template not found");

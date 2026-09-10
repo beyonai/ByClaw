@@ -41,7 +41,6 @@ const RESOURCE_PATHS = [
   '/toolCenter',
   '/viewCenter',
   '/objectCenter',
-  '/ontologyCenter',
   '/skillCenter',
   '/files',
 ] as const;

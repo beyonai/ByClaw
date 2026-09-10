@@ -8,20 +8,14 @@ import com.iwhalecloud.byai.common.constants.Constants;
 import com.iwhalecloud.byai.common.constants.devloop.MemberRole;
 import com.iwhalecloud.byai.common.constants.resource.ResourceBizType;
 import com.iwhalecloud.byai.common.ecrypt.Sm4Util;
-import com.iwhalecloud.byai.common.feign.client.FeignDataCloudService;
 import com.iwhalecloud.byai.common.feign.client.FeignTokenSaverService;
 import com.iwhalecloud.byai.common.feign.request.conversation.AgentPrologueDto;
-import com.iwhalecloud.byai.common.feign.request.datacloud.SubmitWorkspaceTemplateReq;
 import com.iwhalecloud.byai.common.feign.request.token.TokenSaveRequest;
-import com.iwhalecloud.byai.common.feign.response.DataCloudResponse;
-import com.iwhalecloud.byai.common.feign.response.datacloud.TemplateSubmitResp;
-import com.iwhalecloud.byai.common.feign.response.datacloud.TemplateSubmitResult;
 import com.iwhalecloud.byai.common.feign.response.token.TokenApiResponse;
 import com.iwhalecloud.byai.common.feign.response.token.TokenDto;
 import com.iwhalecloud.byai.common.feign.response.token.TokenKeyResult;
 import com.iwhalecloud.byai.common.feign.response.token.TokenPageResult;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
-import com.iwhalecloud.byai.common.jwt.JwtService;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.util.ListUtil;
@@ -30,7 +24,6 @@ import com.iwhalecloud.byai.common.util.RedisUtil;
 import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.manager.application.service.devloop.ProjectApplicationService;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeApplicationService;
-import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
 import com.iwhalecloud.byai.manager.domain.aimodel.enums.ModelOwnerType;
 import com.iwhalecloud.byai.manager.domain.aimodel.enums.ModelProtocol;
 import com.iwhalecloud.byai.manager.domain.aimodel.enums.ModelSourceType;
@@ -46,7 +39,6 @@ import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDigEmployeeS
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtSkillService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceRelDetailService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
-import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.dto.aimodel.ModelQuota;
 import com.iwhalecloud.byai.manager.dto.aimodel.TokenSaver;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDTO;
@@ -64,7 +56,6 @@ import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail;
 import com.iwhalecloud.byai.manager.entity.superassist.SuasSuperassist;
 import com.iwhalecloud.byai.manager.domain.superassist.service.SuasSuperassistService;
-import com.iwhalecloud.byai.manager.entity.users.Users;
 import com.iwhalecloud.byai.manager.qo.aimodel.DefaultAiModelQo;
 import com.iwhalecloud.byai.manager.qo.aimodel.FindAiModelQo;
 import com.iwhalecloud.byai.state.application.service.dataset.DatasetApplicationService;
@@ -129,19 +120,6 @@ public class SuasSuperassistApplicationService {
 
     @Autowired
     private ProjectMemberService projectMemberService;
-
-
-    @Autowired
-    private FeignDataCloudService feignDataCloudService;
-
-    @Autowired
-    private UserService userService;
-
-    @Autowired
-    private LoginApplicationService loginApplicationService;
-
-    @Autowired
-    private JwtService jwtService;
 
     @Autowired
     private ProjectApplicationService projectApplicationService;
@@ -262,7 +240,6 @@ public class SuasSuperassistApplicationService {
             String modelName = jsonObject.getString("modelName");
             String modelProtocol = jsonObject.getString("modelProtocol");
             String relToolCodes = jsonObject.getString("relToolCodes");
-            String relOntologyCodes = jsonObject.getString("relOntologyCodes");
             String relSkillCodes = jsonObject.getString("relSkillCodes");
             String isRelDefaultDataset = jsonObject.getString("isRelDefaultDataset");
 
@@ -298,12 +275,6 @@ public class SuasSuperassistApplicationService {
 
             // 关联工具agent|tool|view|object
             this.handleRelResourceCodes(digitalEmployeeDTO, relToolCodes, userId);
-
-            // 联本体对象
-            this.initSubmitWorkspaceTemplate(relOntologyCodes);
-
-            // 关联本体对象
-            this.handleRelResourceCodes(digitalEmployeeDTO, relOntologyCodes, userId);
 
             // 处理关联技能
             this.handleRelSkillCodes(digitalEmployeeDTO, relSkillCodes, userId);
@@ -484,7 +455,6 @@ public class SuasSuperassistApplicationService {
 
         String prologue = jsonObject.getString("prologue");
         String relToolCodes = jsonObject.getString("relToolCodes");
-        String relOntologyCodes = jsonObject.getString("relOntologyCodes");
 
         String coreCompetencies = jsonObject.getString("coreCompetencies");
         String corePersonaDefinition = jsonObject.getString("corePersonaDefinition");
@@ -538,7 +508,6 @@ public class SuasSuperassistApplicationService {
         // 关联资源
         List<String> resourceCodes = new ArrayList<>();
         resourceCodes.addAll(StringUtil.splitStr(relToolCodes, ","));
-        resourceCodes.addAll(StringUtil.splitStr(relOntologyCodes, ","));
         for (String resourceCode : resourceCodes) {
             SsResourceDTO ssResourceDTO = relResourceMap.get(resourceCode);
             if (ssResourceDTO == null) {
@@ -1016,7 +985,6 @@ public class SuasSuperassistApplicationService {
         String modelName = jsonObject.getString("modelName");
         String modelProtocol = jsonObject.getString("modelProtocol");
         String relToolCodes = jsonObject.getString("relToolCodes");
-        String relOntologyCodes = jsonObject.getString("relOntologyCodes");
         String relSkillCodes = jsonObject.getString("relSkillCodes");
         String isRelDefaultDataset = jsonObject.getString("isRelDefaultDataset");
 
@@ -1051,12 +1019,6 @@ public class SuasSuperassistApplicationService {
 
         // 关联工具agent|tool|view|object
         this.handleRelResourceCodes(digitalEmployeeDTO, relToolCodes, userId);
-
-        // 初始化本体
-        this.initSubmitWorkspaceTemplate(relOntologyCodes);
-
-        // 关联本体对象
-        this.handleRelResourceCodes(digitalEmployeeDTO, relOntologyCodes, userId);
 
         // 处理关联技能
         this.handleRelSkillCodes(digitalEmployeeDTO, relSkillCodes, userId);
@@ -1122,50 +1084,6 @@ public class SuasSuperassistApplicationService {
         }
 
         return project;
-    }
-
-
-    /**
-     * 调用 DataCloud 提交工作区模板，初始化本体。
-     *
-     * @return 首个模板提交结果中的对象编码列表，无结果时返回空列表
-     */
-    private List<String> initSubmitWorkspaceTemplate(String relOntologyCodes) {
-
-        List<String> splitOntologyCodes = StringUtil.splitStr(relOntologyCodes, ",");
-        if (ListUtil.isEmpty(splitOntologyCodes)) {
-            return splitOntologyCodes;
-        }
-
-        //统计资源，如果已经存在，则不再进行初始化调用
-        long count = ssResourceService.countByResourceCodes(splitOntologyCodes);
-        if (count >= splitOntologyCodes.size()) {
-            return splitOntologyCodes;
-        }
-
-
-        Users users = userService.findByUserCode("adminvip");
-
-        Map<String, String> headers = new HashMap<>();
-        headers.put("X-User-Code", users.getUserCode());
-
-        LoginInfo loginInfo = loginApplicationService.getLoginInfo(users.getUserCode());
-        headers.put("Beyond-Token", jwtService.createJwt(loginInfo));
-        headers.put("Content-Type", "application/json");
-
-        SubmitWorkspaceTemplateReq submitTemplateReq = new SubmitWorkspaceTemplateReq();
-        submitTemplateReq.setPersonal(false);
-        submitTemplateReq.setSqlite(false);
-        submitTemplateReq.setReuseTargetTables(true);
-        submitTemplateReq.setConfirmDropTargetTables(false);
-        logger.info("初始化DataCloud本体请求:{}", JSON.toJSONString(submitTemplateReq));
-        DataCloudResponse<TemplateSubmitResp> dataCloudResponse = feignDataCloudService.submitWorkspaceTemplates(submitTemplateReq, headers);
-        logger.info("初始化DataCloud本体返回:{}", JSON.toJSONString(dataCloudResponse));
-
-        TemplateSubmitResp templateSubmitResp = dataCloudResponse.getData();
-        List<TemplateSubmitResult> results = templateSubmitResp.getResults();
-
-        return ListUtil.isNotEmpty(results) ? results.getFirst().getObjectCodes() : Collections.emptyList();
     }
 
 }

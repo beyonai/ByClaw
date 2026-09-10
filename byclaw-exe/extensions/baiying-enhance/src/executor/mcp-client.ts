@@ -8,7 +8,7 @@ import {
 } from "./auth.js";
 import { makeError } from "./errors.js";
 import { extractJsonRpcPayload } from "./http.js";
-import { buildOntologyMcpHeaders, debugMcpSessionHeaders } from "./ontology-headers.js";
+import { buildResourceMcpHeaders, debugMcpSessionHeaders } from "./resource-headers.js";
 import { runLegacySseJsonRpcSequence } from "./mcp-legacy-sse.js";
 
 type FetchLike = typeof fetch;
@@ -57,9 +57,9 @@ export async function listMcpToolsLive(params: {
     return { tools: null, error: makeError("MCP_SERVER_NOT_FOUND", "MCP Server URL not found") };
   }
 
-  const { headers: ontologyHeaders, error: ontologyError } = buildOntologyMcpHeaders(params.capability);
-  if (ontologyError) {
-    return { tools: null, error: ontologyError };
+  const { headers: resourceHeaders, error: resourceError } = buildResourceMcpHeaders(params.capability);
+  if (resourceError) {
+    return { tools: null, error: resourceError };
   }
 
   const { headers } = mergeAuthHeaders({
@@ -71,7 +71,7 @@ export async function listMcpToolsLive(params: {
     },
     authContext: params.authContext,
     session: params.session,
-    extraHeaders: { ...ontologyHeaders, ...(params.forwardHeaders ?? {}) },
+    extraHeaders: { ...resourceHeaders, ...(params.forwardHeaders ?? {}) },
   });
   ensureMcpIdentityHeaders(headers);
   applyEnvAuthOverrides(headers);
@@ -79,7 +79,7 @@ export async function listMcpToolsLive(params: {
     stage: "mcp_discovery_initialize",
     capability: params.capability,
     forwardHeaders: params.forwardHeaders,
-    ontologyHeaders,
+    resourceHeaders,
     finalHeaders: headers,
   });
 

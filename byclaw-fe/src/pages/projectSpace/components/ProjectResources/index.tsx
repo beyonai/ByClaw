@@ -1,6 +1,5 @@
 import { Button, Drawer, Dropdown, Empty, Modal, Select, Spin, Switch, Typography, message } from 'antd';
 import {
-  ApartmentOutlined,
   BranchesOutlined,
   DatabaseOutlined,
   DeleteOutlined,
@@ -50,7 +49,6 @@ import {
   type ProjectResourceType,
 } from '@/service/devloop';
 import { listResourceUseAuth } from '@/pages/manager/service/resources';
-import { listOntologyBases, pageOntologyResources } from '@/service/ontology';
 import { deleteFolder, removeFile } from '@/service/knowledgeCenter';
 import { ResourceTypeMap } from '@/constants/resource';
 import { useDigitalEmployeeOptions } from '../../hooks/useDigitalEmployeeOptions';
@@ -81,7 +79,6 @@ type RepoFileItem = { name: string; path: string; isDir: boolean; size?: number 
 const EMPTY_SELECTION: ResourceSelection = {
   knowledge: [],
   digital_employee: [],
-  ontology: [],
 };
 
 const toFileBrowserItem = (node: ProjectRepoTreeNode): RepoFileItem => ({
@@ -143,7 +140,6 @@ const ProjectResources: React.FC<Props> = ({
   } | null>(null);
   const requestSeqRef = useRef(0);
   const [knowledgeOptions, setKnowledgeOptions] = useState<ResourceOption[]>([]);
-  const [ontologyOptions, setOntologyOptions] = useState<ResourceOption[]>([]);
   const [selectedResources, setSelectedResources] = useState<ResourceSelection>(EMPTY_SELECTION);
   const { options: agentOptions, loading: agentOptionsLoading } = useDigitalEmployeeOptions(
     project.projectType === 'operation'
@@ -241,9 +237,6 @@ const ProjectResources: React.FC<Props> = ({
         digital_employee: rows
           .filter((resource) => resource.resourceType === 'digital_employee')
           .map((resource) => `${resource.resourceId}`),
-        ontology: rows
-          .filter((resource) => resource.resourceType === 'ontology')
-          .map((resource) => `${resource.resourceId}`),
       });
     } catch (error: any) {
       setBoundResources([]);
@@ -279,32 +272,9 @@ const ProjectResources: React.FC<Props> = ({
         ],
         resourceStatus: '2',
       };
-      const [
-        knowledgePersonal,
-        knowledgeEnterprise,
-        ontologyPersonal,
-        ontologyEnterprise,
-        ontologyResourcePersonal,
-        ontologyResourceEnterprise,
-      ] = await Promise.all([
+      const [knowledgePersonal, knowledgeEnterprise] = await Promise.all([
         listResourceUseAuth({ ...knowledgeQuery, ownerType: 'personal', permission: '' }),
         listResourceUseAuth({ ...knowledgeQuery, ownerType: 'enterprise', permission: '', belong: 'ALL' }),
-        listOntologyBases({ ownerType: 'personal' }),
-        listOntologyBases({ ownerType: 'enterprise' }),
-        pageOntologyResources({
-          ownerType: 'personal',
-          resourceBizTypeList: ['VIEW', 'OBJECT'],
-          statusList: [0, 1, 2, 3, 4, 5],
-          pageNum: 1,
-          pageSize: 1000,
-        }),
-        pageOntologyResources({
-          ownerType: 'enterprise',
-          resourceBizTypeList: ['VIEW', 'OBJECT'],
-          statusList: [0, 1, 2, 3, 4, 5],
-          pageNum: 1,
-          pageSize: 1000,
-        }),
       ]);
 
       const knowledgeMap = new Map<string, ResourceOption>();
@@ -317,25 +287,10 @@ const ProjectResources: React.FC<Props> = ({
         }
       });
 
-      const ontologyMap = new Map<string, ResourceOption>();
-      [ontologyPersonal, ontologyEnterprise, ontologyResourcePersonal, ontologyResourceEnterprise]
-        .flatMap(getResourceRows)
-        .forEach((item: any) => {
-          const value = item.baseId ?? item.resourceId ?? item.id;
-          const label = item.displayName || item.resourceName || item.name;
-          const description =
-            item.resourceDesc || item.baseDesc || item.objectDesc || item.description || item.desc || '';
-          if (value !== undefined && value !== null && label) {
-            ontologyMap.set(`${value}`, { value: `${value}`, label, description });
-          }
-        });
-
       setKnowledgeOptions(Array.from(knowledgeMap.values()));
-      setOntologyOptions(Array.from(ontologyMap.values()));
     } catch (error) {
       console.error('Failed to load project resource options:', error);
       setKnowledgeOptions([]);
-      setOntologyOptions([]);
     } finally {
       setResourceOptionsLoading(false);
     }
@@ -382,9 +337,6 @@ const ProjectResources: React.FC<Props> = ({
       digital_employee: boundResources
         .filter((resource) => resource.resourceType === 'digital_employee')
         .map((resource) => `${resource.resourceId}`),
-      ontology: boundResources
-        .filter((resource) => resource.resourceType === 'ontology')
-        .map((resource) => `${resource.resourceId}`),
     });
     setResourceModalOpen(true);
   };
@@ -394,7 +346,7 @@ const ProjectResources: React.FC<Props> = ({
     setResourceSaving(true);
     try {
       const optionLabelMap = new Map<string, string>(
-        [...knowledgeOptions, ...ontologyOptions, ...agentOptions].map((option) => [`${option.value}`, option.label])
+        [...knowledgeOptions, ...agentOptions].map((option) => [`${option.value}`, option.label])
       );
       const previousNameMap = new Map(
         boundResources.map((resource) => [`${resource.resourceType}:${resource.resourceId}`, resource.resourceName])
@@ -629,14 +581,12 @@ const ProjectResources: React.FC<Props> = ({
     const iconClassName = {
       knowledge: styles.resourceKnowledgeIcon,
       digital_employee: styles.resourceEmployeeIcon,
-      ontology: styles.resourceOntologyIcon,
     }[resourceType];
 
     const descriptionMap = new Map<string, string>(
       [
         ...knowledgeOptions.map((option) => [`knowledge:${option.value}`, option.description]),
         ...agentOptions.map((option) => [`digital_employee:${option.value}`, option.description]),
-        ...ontologyOptions.map((option) => [`ontology:${option.value}`, option.description]),
       ].filter((item): item is [string, string] => Boolean(item[1]))
     );
     const resourceItems = items.map((resource) => {
@@ -680,7 +630,6 @@ const ProjectResources: React.FC<Props> = ({
 
   const boundKnowledge = boundResources.filter((resource) => resource.resourceType === 'knowledge');
   const boundEmployees = boundResources.filter((resource) => resource.resourceType === 'digital_employee');
-  const boundOntologies = boundResources.filter((resource) => resource.resourceType === 'ontology');
 
   const renderSharedFile = (file: DevloopProjectSpaceFile) => {
     const metadata = [
@@ -1016,21 +965,6 @@ const ProjectResources: React.FC<Props> = ({
             {renderBoundResources(boundEmployees, 'digital_employee', <RobotOutlined />)}
           </section>
         )}
-
-        {isOperationProject && (
-          <section
-            className={`${styles.resourceCategoryCard} ${
-              expandedCard === 'ontology' ? styles.resourceCategoryCardExpanded : ''
-            }`}
-          >
-            {renderCardHeader(
-              intl.formatMessage({ id: 'projectSpace.resources.sharedOntology' }),
-              'ontology',
-              openResourceModal
-            )}
-            {renderBoundResources(boundOntologies, 'ontology', <ApartmentOutlined />)}
-          </section>
-        )}
       </div>
 
       {isOperationProject && (
@@ -1074,21 +1008,6 @@ const ProjectResources: React.FC<Props> = ({
                   optionFilterProp="label"
                   placeholder={intl.formatMessage({ id: 'projectSpace.resources.employeePlaceholder' })}
                   onChange={(value) => setSelectedResources((current) => ({ ...current, digital_employee: value }))}
-                />
-              </div>
-              <div>
-                <Typography.Text strong>
-                  {intl.formatMessage({ id: 'projectSpace.resources.ontology' })}
-                </Typography.Text>
-                <Select
-                  mode="multiple"
-                  value={selectedResources.ontology}
-                  options={ontologyOptions}
-                  loading={resourceOptionsLoading}
-                  showSearch
-                  optionFilterProp="label"
-                  placeholder={intl.formatMessage({ id: 'projectSpace.resources.ontologyPlaceholder' })}
-                  onChange={(value) => setSelectedResources((current) => ({ ...current, ontology: value }))}
                 />
               </div>
             </div>

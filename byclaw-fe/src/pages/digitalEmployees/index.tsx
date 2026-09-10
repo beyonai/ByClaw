@@ -386,15 +386,16 @@ export function EmployeePreviewModal({ employee, onClose, onCreateTask }: any) {
       return true;
     });
     const relTools = (Array.isArray(detail?.relTools) ? detail.relTools : []).filter(hasResourceName);
-    const relOntology = (Array.isArray(detail?.relOntology) ? detail.relOntology : []).filter(hasResourceName);
     return [
       ...relSkills.map((item: any) => ({
         ...(typeof item === 'string' ? { name: item } : item),
         resourceBizType: 'SKILL',
       })),
       ...relTools.map((item: any) => ({ name: item, resourceName: item, resourceBizType: 'TOOL' })),
-      ...relResourceList,
-      ...relOntology.map((item: any) => ({ ...item, resourceBizType: 'ONTOLOGY' })),
+      ...relResourceList.filter((item: any) => {
+        const type = `${item?.resourceBizType || item?.grantResourceType || ''}`.toUpperCase();
+        return !['ONTOLOGY', 'ONTOLOGY_BASE', 'OBJECT', 'VIEW', 'SCENE'].includes(type);
+      }),
     ];
   }, [detail]);
   const resourceTabs = useMemo(() => {
@@ -408,13 +409,11 @@ export function EmployeePreviewModal({ employee, onClose, onCreateTask }: any) {
       { key: 'SKILL', label: '技能' },
       { key: 'TOOL', label: '工具' },
       { key: 'KG_DOC', label: '知识' },
-      { key: 'ONTOLOGY', label: '本体' },
     ];
   }, [detail?.agentType]);
   const [resourceTab, setResourceTab] = useState('SKILL');
   const currentResources = resources.filter((item: any) => {
     const type = `${item?.resourceBizType || item?.bizType || item?.resourceType || ''}`.toUpperCase();
-    if (resourceTab === 'ONTOLOGY') return type.includes('ONTOLOGY') || type === 'OBJECT' || type === 'VIEW';
     if (resourceTab === 'TOOL') return type.includes('TOOL') || type === 'MCP' || type === 'PLUGIN';
     return type === resourceTab || (resourceTab === 'KG_DOC' && type.startsWith('KG_'));
   });

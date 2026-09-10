@@ -130,8 +130,8 @@ class V032BaselineCompensationMigrationTest {
         String dml = readMigration();
 
         assertThat(ddl).contains(
-            "'credential_state', 'varchar(32) default ''unknown'' not null'",
-            "'renewal_mode', 'varchar(32) default ''none'' not null'"
+            "add column credential_state varchar(32) default 'unknown' not null",
+            "add column renewal_mode varchar(32) default 'none' not null"
         );
         assertThat(dml).contains(
             "set access_expire_time = expire_time",

@@ -145,8 +145,9 @@ const mockGetAuthorization = getConnectorAuthorization as jest.MockedFunction<ty
 
 const openCreate = async () => {
   render(<PersonalEmailSettings />);
-  await screen.findByRole('button', { name: 'settings.email.addAccount' });
-  fireEvent.click(screen.getByRole('button', { name: 'settings.email.addAccount' }));
+  const addButton = await screen.findByRole('button', { name: 'settings.email.addAccount' });
+  await waitFor(() => expect(addButton).toBeEnabled());
+  fireEvent.click(addButton);
   await screen.findByLabelText('邮箱服务商');
 };
 
@@ -166,7 +167,19 @@ const deferred = <T,>() => {
 
 describe('PersonalEmailSettings provider-first flow', () => {
   beforeEach(() => {
+    jest.restoreAllMocks();
     jest.clearAllMocks();
+    [
+      mockQueryAccounts,
+      mockQueryProviders,
+      mockSave,
+      mockCheck,
+      mockDelete,
+      mockSetDefault,
+      mockQueryConnectors,
+      mockStartAuthorization,
+      mockGetAuthorization,
+    ].forEach((mock) => mock.mockReset());
     mockQueryAccounts.mockResolvedValue([]);
     mockQueryProviders.mockResolvedValue(providers.map((provider) => ({ ...provider })));
     mockSave.mockResolvedValue({ accountId: 1, email: 'person@example.com' });
