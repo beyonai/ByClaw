@@ -5,8 +5,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.iwhalecloud.byai.common.ecrypt.Sm4Util;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.dto.users.MailServerConfigDTO;
@@ -18,11 +16,9 @@ import com.iwhalecloud.byai.manager.domain.mail.MailConnectionCheckAdmissionServ
 import com.iwhalecloud.byai.manager.domain.mail.MailProviderCatalog;
 import com.iwhalecloud.byai.manager.domain.mail.MailRuntimeProbe;
 import com.iwhalecloud.byai.manager.entity.users.UserMailAccount;
-import com.iwhalecloud.byai.manager.mapper.users.UserMailAccountMapper;
 import com.iwhalecloud.byai.manager.vo.users.MailConnectionCheckResultVO;
 import com.iwhalecloud.byai.manager.vo.users.MailProviderVO;
 import com.iwhalecloud.byai.manager.vo.users.UserMailAccountVO;
-import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -61,12 +57,6 @@ public class UserMailAccountApplicationService {
     private static final Set<String> SUPPORTED_ENCRYPTIONS = Set.of("tls", "starttls", "ssl");
 
     @Autowired
-    private UserMailAccountMapper userMailAccountMapper;
-
-    @Autowired
-    private SequenceService sequenceService;
-
-    @Autowired
     private MailAccountProjectionService mailAccountProjectionService;
 
     @Autowired
@@ -81,12 +71,16 @@ public class UserMailAccountApplicationService {
     @Autowired
     private MailConnectionCheckAdmissionService mailConnectionCheckAdmissionService;
 
+    @Autowired
+    private com.iwhalecloud.byai.manager.domain.mail.MailPrivateParamStore mailPrivateParamStore;
+
     /**
      * 查询当前用户的个人邮箱账号列表。
      */
     public List<UserMailAccountVO> list() {
         Long userId = currentUserId();
         List<UserMailAccount> accounts = listAccounts(userId);
+
         mailAccountMetadataCacheService.refresh(userId);
         return accounts
             .stream()
@@ -128,22 +122,11 @@ public class UserMailAccountApplicationService {
                 mailConnectionCheckLeaseService.assertOwnedAndRenew(lease);
                 Date checkedAt = new Date();
                 String status = probeResult.status().name();
-                LambdaUpdateWrapper<UserMailAccount> update = new LambdaUpdateWrapper<UserMailAccount>()
-                    .set(UserMailAccount::getStatus, status)
-                    .set(UserMailAccount::getLastCheckTime, checkedAt)
-                    .set(UserMailAccount::getUpdateBy, userId)
-                    .set(UserMailAccount::getUpdateTime, checkedAt)
-                    .eq(UserMailAccount::getAccountId, accountId)
-                    .eq(UserMailAccount::getUserId, userId)
-                    .eq(UserMailAccount::getDeleteFlag, DELETE_FLAG_NORMAL)
-                    .eq(UserMailAccount::getStatus, observedStatus);
-                if (observedUpdateTime == null) {
-                    update.isNull(UserMailAccount::getUpdateTime);
-                }
-                else {
-                    update.eq(UserMailAccount::getUpdateTime, observedUpdateTime);
-                }
-                if (userMailAccountMapper.update(null, update) != 1) {
+                account.setStatus(status);
+                account.setLastCheckTime(checkedAt);
+                account.setUpdateBy(userId);
+                account.setUpdateTime(checkedAt);
+                if (!mailPrivateParamStore.updateCheck(account, observedStatus, observedUpdateTime)) {
                     throw new IllegalStateException("邮箱账号已发生变化，请重试");
                 }
                 scheduleStateRefresh(userId, accountId);
@@ -184,17 +167,20 @@ public class UserMailAccountApplicationService {
             throw new IllegalArgumentException("新增或切换邮箱服务商时授权码不能为空");
         }
         if (create) {
-            entity.setAccountId(sequenceService.nextVal());
             entity.setUserId(userId);
             entity.setCreateBy(userId);
             entity.setCreateTime(now);
             entity.setDeleteFlag(DELETE_FLAG_NORMAL);
         }
 
+        if (!create && !oldProvider.getCode().equals(provider.getCode())) {
+            throw new IllegalArgumentException("每种邮箱连接器独立管理账号，请删除原账号后新增目标服务商账号");
+        }
         entity.setAccountName(StringUtils.trim(request.getName()));
         entity.setEmail(StringUtils.trim(request.getEmail()));
         entity.setDisplayName(StringUtils.trim(resolveDisplayName(request)));
         entity.setProviderCode(provider.getCode());
+        if (create) mailPrivateParamStore.initialize(entity);
         entity.setAuthType(selectedAuthType);
         applyServerConfig(entity, provider, request);
         entity.setUpdateBy(userId);
@@ -232,36 +218,9 @@ public class UserMailAccountApplicationService {
             clearOtherDefault(userId, entity.getAccountId(), now);
         }
 
-        if (create) {
-            userMailAccountMapper.insert(entity);
-        }
-        else {
-            updateSavedAccount(entity, userId);
-        }
+        mailPrivateParamStore.save(entity);
         scheduleStateRefresh(userId, entity.getAccountId());
         return toVo(entity);
-    }
-
-    /** Binds a connector-created account to its connector for precise lifecycle cleanup. */
-    @Transactional(rollbackFor = Exception.class)
-    public void bindConnector(Long accountId, Long connectorId, Long userId) {
-        if (accountId == null || connectorId == null || userId == null) {
-            throw new IllegalArgumentException("邮箱连接器绑定参数不能为空");
-        }
-        UserMailAccount account = userMailAccountMapper.selectOne(baseQuery(userId)
-            .eq(UserMailAccount::getAccountId, accountId));
-        if (account == null) {
-            throw new IllegalArgumentException("邮箱账号不存在或无权限访问");
-        }
-        UserMailAccount update = new UserMailAccount();
-        update.setAccountId(accountId);
-        update.setConnectorId(connectorId);
-        update.setUpdateBy(userId);
-        update.setUpdateTime(new Date());
-        if (userMailAccountMapper.updateById(update) != 1) {
-            throw new IllegalStateException("邮箱连接器绑定失败");
-        }
-        mailAccountProjectionService.sync(userId, Set.of(accountId));
     }
 
     /**
@@ -276,15 +235,15 @@ public class UserMailAccountApplicationService {
         Long userId = currentUserId();
         UserMailAccount account = getOwnedAccount(userId, accountId);
         Date now = new Date();
-        UserMailAccount update = new UserMailAccount();
-        update.setAccountId(accountId);
+        boolean wasDefault = YES.equals(account.getDefaultFlag());
+        UserMailAccount update = account;
         update.setStatus(DELETED);
         update.setDeleteFlag(DELETE_FLAG_DELETED);
         update.setDefaultFlag(NO);
         update.setUpdateBy(userId);
         update.setUpdateTime(now);
-        userMailAccountMapper.updateById(update);
-        if (YES.equals(account.getDefaultFlag())) {
+        mailPrivateParamStore.save(update);
+        if (wasDefault) {
             ensureOneDefault(userId, now);
         }
         scheduleStateRefresh(userId, accountId);
@@ -304,12 +263,11 @@ public class UserMailAccountApplicationService {
         UserMailAccount account = getOwnedAccount(userId, accountId);
         Date now = new Date();
         clearOtherDefault(userId, accountId, now);
-        UserMailAccount update = new UserMailAccount();
-        update.setAccountId(accountId);
+        UserMailAccount update = account;
         update.setDefaultFlag(YES);
         update.setUpdateBy(userId);
         update.setUpdateTime(now);
-        userMailAccountMapper.updateById(update);
+        mailPrivateParamStore.save(update);
         account.setDefaultFlag(YES);
         account.setUpdateTime(now);
         scheduleStateRefresh(userId, accountId);
@@ -317,21 +275,18 @@ public class UserMailAccountApplicationService {
     }
 
     private List<UserMailAccount> listAccounts(Long userId) {
-        return userMailAccountMapper.selectList(baseQuery(userId)
-            .orderByDesc(UserMailAccount::getDefaultFlag)
-            .orderByDesc(UserMailAccount::getUpdateTime)
-            .orderByDesc(UserMailAccount::getCreateTime));
-    }
-
-    private LambdaQueryWrapper<UserMailAccount> baseQuery(Long userId) {
-        return new LambdaQueryWrapper<UserMailAccount>()
-            .eq(UserMailAccount::getUserId, userId)
-            .eq(UserMailAccount::getDeleteFlag, DELETE_FLAG_NORMAL);
+        return mailPrivateParamStore.active(userId).stream()
+            .sorted(java.util.Comparator.comparing(UserMailAccount::getDefaultFlag,
+                java.util.Comparator.nullsLast(java.util.Comparator.reverseOrder()))
+                .thenComparing(UserMailAccount::getUpdateTime,
+                    java.util.Comparator.nullsLast(java.util.Comparator.reverseOrder()))
+                .thenComparing(UserMailAccount::getCreateTime,
+                    java.util.Comparator.nullsLast(java.util.Comparator.reverseOrder())))
+            .toList();
     }
 
     private UserMailAccount getOwnedAccount(Long userId, Long accountId) {
-        UserMailAccount account = userMailAccountMapper.selectOne(baseQuery(userId)
-            .eq(UserMailAccount::getAccountId, accountId));
+        UserMailAccount account = mailPrivateParamStore.find(userId, accountId);
         if (account == null) {
             throw new IllegalArgumentException("邮箱账号不存在或无权限访问");
         }
@@ -414,31 +369,6 @@ public class UserMailAccountApplicationService {
             && Set.of("BROWSER_SSO", "KERBEROS").contains(account.getAuthType());
     }
 
-    private void updateSavedAccount(UserMailAccount entity, Long userId) {
-        userMailAccountMapper.update(null, new LambdaUpdateWrapper<UserMailAccount>()
-            .set(UserMailAccount::getAccountName, entity.getAccountName())
-            .set(UserMailAccount::getEmail, entity.getEmail())
-            .set(UserMailAccount::getDisplayName, entity.getDisplayName())
-            .set(UserMailAccount::getDefaultFlag, entity.getDefaultFlag())
-            .set(UserMailAccount::getProviderCode, entity.getProviderCode())
-            .set(UserMailAccount::getAuthType, entity.getAuthType())
-            .set(UserMailAccount::getImapHost, entity.getImapHost())
-            .set(UserMailAccount::getImapPort, entity.getImapPort())
-            .set(UserMailAccount::getImapEncryption, entity.getImapEncryption())
-            .set(UserMailAccount::getSmtpHost, entity.getSmtpHost())
-            .set(UserMailAccount::getSmtpPort, entity.getSmtpPort())
-            .set(UserMailAccount::getSmtpEncryption, entity.getSmtpEncryption())
-            .set(UserMailAccount::getAuthCodeCipher, entity.getAuthCodeCipher())
-            .set(UserMailAccount::getAuthCodeLast4, entity.getAuthCodeLast4())
-            .set(UserMailAccount::getCredentialRef, entity.getCredentialRef())
-            .set(UserMailAccount::getStatus, entity.getStatus())
-            .set(UserMailAccount::getUpdateBy, entity.getUpdateBy())
-            .set(UserMailAccount::getUpdateTime, entity.getUpdateTime())
-            .eq(UserMailAccount::getAccountId, entity.getAccountId())
-            .eq(UserMailAccount::getUserId, userId)
-            .eq(UserMailAccount::getDeleteFlag, DELETE_FLAG_NORMAL));
-    }
-
     private void validateServerConfig(MailServerConfigDTO config, String label) {
         if (config == null || StringUtils.isBlank(config.getHost()) || config.getPort() == null) {
             throw new IllegalArgumentException(label + "服务器配置不能为空");
@@ -456,31 +386,29 @@ public class UserMailAccountApplicationService {
     }
 
     private boolean isFirstAccount(Long userId, Long currentAccountId) {
-        return userMailAccountMapper.selectCount(baseQuery(userId)
-            .ne(currentAccountId != null, UserMailAccount::getAccountId, currentAccountId)) == 0;
+        return mailPrivateParamStore.active(userId).stream()
+            .noneMatch(account -> !account.getAccountId().equals(currentAccountId));
     }
 
     private void clearOtherDefault(Long userId, Long accountId, Date now) {
-        userMailAccountMapper.update(null, new LambdaUpdateWrapper<UserMailAccount>()
-            .set(UserMailAccount::getDefaultFlag, NO)
-            .set(UserMailAccount::getUpdateTime, now)
-            .eq(UserMailAccount::getUserId, userId)
-            .eq(UserMailAccount::getDeleteFlag, DELETE_FLAG_NORMAL)
-            .ne(UserMailAccount::getAccountId, accountId));
+        for (UserMailAccount account : mailPrivateParamStore.active(userId)) {
+            if (account.getAccountId().equals(accountId) || !YES.equals(account.getDefaultFlag())) continue;
+            account.setDefaultFlag(NO);
+            account.setUpdateTime(now);
+            account.setUpdateBy(userId);
+            mailPrivateParamStore.save(account);
+        }
     }
 
     private void ensureOneDefault(Long userId, Date now) {
-        UserMailAccount account = userMailAccountMapper.selectOne(baseQuery(userId)
-            .orderByDesc(UserMailAccount::getUpdateTime)
-            .orderByDesc(UserMailAccount::getCreateTime)
-            .last("LIMIT 1"));
+        UserMailAccount account = listAccounts(userId).stream().findFirst().orElse(null);
         if (account == null) {
             return;
         }
         account.setDefaultFlag(YES);
         account.setUpdateTime(now);
         account.setUpdateBy(userId);
-        userMailAccountMapper.updateById(account);
+        mailPrivateParamStore.save(account);
     }
 
     private UserMailAccountVO toVo(UserMailAccount account) {

@@ -88,6 +88,19 @@ class ConnectorCredentialWorkspaceServiceTest {
     }
 
     @Test
+    void projectionParentsArePrivateIncludingPreviouslyCreatedDirectories() throws Exception {
+        stubValidUserAndBucket();
+        Path parent = tempDir.resolve("byclaw-user001/by/.connector-auth/.mail");
+        Files.createDirectories(parent);
+        Files.setPosixFilePermissions(parent, java.nio.file.attribute.PosixFilePermissions.fromString("rwxr-xr-x"));
+        Path file = service.resolveProjectionFile(USER_ID, "/by/.connector-auth/.mail/accounts.json");
+        assertThat(Files.getPosixFilePermissions(file.getParent()))
+            .isEqualTo(java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"));
+        assertThat(Files.getPosixFilePermissions(file.getParent().getParent()))
+            .isEqualTo(java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"));
+    }
+
+    @Test
     void constructorRejectsNullOrBlankStorageRoot() {
         assertThatThrownBy(() -> new ConnectorCredentialWorkspaceService(
             loginApplicationService, userBucketNamingService, null))

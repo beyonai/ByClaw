@@ -88,6 +88,16 @@ class ConnectorCredentialProjectionServiceTest {
     }
 
     @Test
+    void genericWriterNeverDeletesOrOverwritesSharedMailAccounts() throws Exception {
+        ConnectorInfo mail = connector("qq-mail", "mail-form");
+        when(manifestService.credentialProjection(mail)).thenReturn(Optional.of(new CredentialProjectionSpec(PROJECTION_PATH)));
+        Files.writeString(credentialFile, "mail-accounts-owned-by-mail-writer");
+        service.sync(USER_ID, mail);
+        service.delete(USER_ID, mail);
+        assertThat(Files.readString(credentialFile)).isEqualTo("mail-accounts-owned-by-mail-writer");
+    }
+
+    @Test
     void projectionIsConnectorAgnosticAndUsesManifestPath() throws Exception {
         String path = "/by/.connector-auth/.custom/oauth.json";
         Path customFile = Files.createDirectories(tempDir.resolve(".connector-auth/.custom")).resolve("oauth.json");

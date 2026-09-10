@@ -11,8 +11,9 @@ import javax.mail.Transport;
 
 import org.springframework.stereotype.Component;
 
-import com.iwhalecloud.byai.manager.application.service.user.UserMailAccountApplicationService;
-import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatus;
+import com.iwhalecloud.byai.common.ecrypt.Sm4Util;
+import com.iwhalecloud.byai.manager.domain.mail.MailPrivateParamStore;
+import com.iwhalecloud.byai.manager.entity.users.UserMailAccount;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatusResult;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialFormProvider;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.CredentialFormVerification;
@@ -22,16 +23,15 @@ import com.iwhalecloud.byai.manager.dto.users.MailServerConfigDTO;
 import com.iwhalecloud.byai.manager.dto.users.UserMailAccountDTO;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 import com.iwhalecloud.byai.manager.domain.mail.MailProviderCatalog;
-import com.iwhalecloud.byai.manager.vo.users.UserMailAccountVO;
 
-/** Bridges connector credential forms to the existing encrypted personal-mail account flow. */
+/** Verifies credentials without persistence; the binding transaction stores the encrypted configuration. */
 @Component
 public class MailConnectorCredentialFormProvider implements ConnectorCredentialFormProvider {
 
-    private final UserMailAccountApplicationService accountService;
+    private final MailPrivateParamStore privateParamStore;
 
-    public MailConnectorCredentialFormProvider(UserMailAccountApplicationService accountService) {
-        this.accountService = accountService;
+    public MailConnectorCredentialFormProvider(MailPrivateParamStore privateParamStore) {
+        this.privateParamStore = privateParamStore;
     }
 
     @Override
@@ -58,17 +58,36 @@ public class MailConnectorCredentialFormProvider implements ConnectorCredentialF
             request.setSmtp(server(credentials, "smtpHost", "smtpPort", "smtpEncryption"));
         }
         probe(connector, request, secret);
-        UserMailAccountVO account = accountService.save(request);
-        accountService.bindConnector(account.getAccountId(), connector.getConnectorId(), Long.valueOf(userId));
+        UserMailAccount account = new UserMailAccount();
+        account.setAccountId(connector.getConnectorId());
+        account.setConnectorId(connector.getConnectorId());
+        account.setUserId(Long.valueOf(userId));
+        account.setAccountName(request.getName());
+        account.setEmail(email);
+        account.setProviderCode(request.getProviderCode());
+        account.setAuthType(request.getAuthType());
+        account.setAuthCodeCipher(Sm4Util.encrypt(secret));
+        account.setStatus("PENDING");
+        account.setDeleteFlag("0");
+        account.setDefaultFlag("N");
+        if (request.getImap() != null) {
+            account.setImapHost(request.getImap().getHost());
+            account.setImapPort(request.getImap().getPort());
+            account.setImapEncryption(request.getImap().getEncryption());
+        }
+        if (request.getSmtp() != null) {
+            account.setSmtpHost(request.getSmtp().getHost());
+            account.setSmtpPort(request.getSmtp().getPort());
+            account.setSmtpEncryption(request.getSmtp().getEncryption());
+        }
         Map<String, String> environment = new LinkedHashMap<>();
-        environment.put("MAIL_ACCOUNT_ID", String.valueOf(account.getAccountId()));
-        environment.put("MAIL_EMAIL", email);
+        environment.put(MailPrivateParamStore.key(connector.getConnectorId()), privateParamStore.encode(account));
         return new CredentialFormVerification(AuthorizationStatusResult.connected(
             String.valueOf(account.getAccountId()), email, CredentialState.READY,
             CredentialRenewalMode.NONE, null, null, new Date(), null), environment);
     }
 
-    private void probe(ConnectorInfo connector, UserMailAccountDTO request, String secret) {
+    void probe(ConnectorInfo connector, UserMailAccountDTO request, String secret) {
         if ("fastmail-mail".equals(connector.getConnectorCode())) {
             probeFastmail(request.getEmail(), secret);
             return;

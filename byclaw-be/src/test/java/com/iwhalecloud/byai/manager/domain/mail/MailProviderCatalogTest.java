@@ -56,10 +56,10 @@ class MailProviderCatalogTest {
         assertThat(qq.getAuthType()).isEqualTo("APP_PASSWORD");
         assertThat(qq.getImap().getHost()).isEqualTo("imap.qq.com");
         assertThat(qq.getImap().getPort()).isEqualTo(993);
-        assertThat(qq.getImap().getEncryption()).isEqualTo("tls");
+        assertThat(qq.getImap().getEncryption()).isEqualTo("ssl");
         assertThat(qq.getSmtp().getHost()).isEqualTo("smtp.qq.com");
         assertThat(qq.getSmtp().getPort()).isEqualTo(465);
-        assertThat(qq.getSmtp().getEncryption()).isEqualTo("tls");
+        assertThat(qq.getSmtp().getEncryption()).isEqualTo("ssl");
 
         assertThat(MailProviderCatalog.require("custom-imap").getAdvancedServerEditable()).isTrue();
         assertThat(MailProviderCatalog.list().stream()

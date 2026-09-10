@@ -31,9 +31,28 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
-import com.iwhalecloud.byai.manager.mapper.users.UserMailAccountMapper;
+import com.iwhalecloud.byai.manager.domain.mail.MailPrivateParamStore;
 
 class MailAccountTransactionIntegrationTest {
+    @Test
+    void mailProjectionFailureRunsAfterCommitAndCannotRollbackSavedCredentials() {
+        try (var context = new AnnotationConfigApplicationContext(TestConfiguration.class)) {
+            var transactions = context.getBean(CommittingTransactionManager.class);
+            var committed = context.getBean(CommittedStore.class);
+            var template = new org.springframework.transaction.support.TransactionTemplate(transactions);
+            var lease = context.getBean(MailAccountProjectionLeaseService.class);
+            template.executeWithoutResult(status -> {
+                transactions.onCommit(() -> committed.write("mail-config", "committed"));
+                context.publishEvent(new com.iwhalecloud.byai.manager.domain.connector.authorization
+                    .ConnectorCredentialProjectionEvent(1001L, 11L,
+                        com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialProjectionEvent.Action.SYNC));
+                org.mockito.Mockito.verifyNoInteractions(lease);
+            });
+            assertThat(committed.read("mail-config")).isEqualTo("committed");
+            org.mockito.Mockito.verify(lease).trigger(1001L);
+        }
+    }
+
     @Test
     void committedOuterTransactionRunsRealRequiresNewCacheUpdate() {
         try (AnnotationConfigApplicationContext context =
@@ -61,6 +80,24 @@ class MailAccountTransactionIntegrationTest {
     @EnableTransactionManagement
     static class TestConfiguration {
         @Bean
+        MailAccountProjectionLeaseService projectionLease() {
+            var lease = mock(MailAccountProjectionLeaseService.class);
+            org.mockito.Mockito.doThrow(new IllegalStateException("simulated projection infrastructure failure"))
+                .when(lease).trigger(anyLong());
+            return lease;
+        }
+
+        @Bean
+        MailAccountProjectionService projection(MailAccountProjectionLeaseService lease) {
+            var state = mock(MailAccountProjectionStateService.class);
+            when(state.recognizesMailConnector(11L)).thenReturn(true);
+            return new MailAccountProjectionService(
+                mock(com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialWorkspaceService.class),
+                mock(MailCredentialResolver.class), state, lease, mock(MailAccountMetadataCacheService.class),
+                new ObjectMapper());
+        }
+
+        @Bean
         CommittingTransactionManager transactionManager() {
             return new CommittingTransactionManager();
         }
@@ -74,8 +111,8 @@ class MailAccountTransactionIntegrationTest {
         @SuppressWarnings("unchecked")
         MailAccountMetadataCacheTransactionService cacheTransactions(
                 CommittingTransactionManager transactions, CommittedStore committed) {
-            UserMailAccountMapper mapper = mock(UserMailAccountMapper.class);
-            when(mapper.selectList(any())).thenReturn(List.of());
+            MailPrivateParamStore mapper = mock(MailPrivateParamStore.class);
+            when(mapper.active(any())).thenReturn(List.of());
             LoginApplicationService logins = mock(LoginApplicationService.class);
             when(logins.getLoginInfo(anyLong())).thenAnswer(invocation -> {
                 LoginInfo login = new LoginInfo();

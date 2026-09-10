@@ -2,22 +2,18 @@ package com.iwhalecloud.byai.manager.entity.users;
 
 import java.util.Date;
 
-import com.baomidou.mybatisplus.annotation.TableId;
-import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Getter;
 import lombok.Setter;
 
 /**
- * 用户个人邮箱账号配置。
+ * 用户个人邮箱配置值对象，序列化后加密存入个人参数表；不是独立数据库实体。
  * @author qin.guoquan
  * @date 2026-06-11 17:38:38
  */
 @Getter
 @Setter
-@TableName("po_user_mail_account")
 public class UserMailAccount {
 
-    @TableId
     private Long accountId;
 
     private Long userId;

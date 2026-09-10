@@ -476,6 +476,9 @@ public class UserPrivateParamApplicationService {
     private Map<String, String> buildActiveParamMap(List<UserPrivateParam> params) {
         Map<String, String> activeParams = new LinkedHashMap<>();
         for (UserPrivateParam param : params) {
+            if (com.iwhalecloud.byai.manager.domain.mail.MailPrivateParamStore.isPrivateMailParam(param)) {
+                continue; // Keep mail secrets out of the generic environment cache.
+            }
             if (!NORMAL.equals(param.getStatus()) || StringUtils.isBlank(param.getParamValueCipher())) {
                 continue;
             }

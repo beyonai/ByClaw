@@ -104,7 +104,7 @@ public final class MailProviderCatalog {
         MailServerConfigDTO server = new MailServerConfigDTO();
         server.setHost(host);
         server.setPort(port);
-        server.setEncryption("tls");
+        server.setEncryption("ssl");
         return server;
     }
 }

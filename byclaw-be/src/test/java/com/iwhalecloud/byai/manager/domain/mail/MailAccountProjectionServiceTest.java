@@ -47,7 +47,7 @@ import com.iwhalecloud.byai.manager.entity.connector.ConnectorAuth;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 import com.iwhalecloud.byai.manager.entity.users.UserMailAccount;
 import com.iwhalecloud.byai.manager.mapper.connector.ConnectorInfoMapper;
-import com.iwhalecloud.byai.manager.mapper.users.UserMailAccountMapper;
+import com.iwhalecloud.byai.manager.domain.mail.MailPrivateParamStore;
 import com.iwhalecloud.byai.common.ecrypt.Sm4Util;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
@@ -62,6 +62,31 @@ import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationSe
 class MailAccountProjectionServiceTest {
     @TempDir Path temporaryDirectory;
 
+    @Test
+    @DisabledOnOs(value = OS.MAC, disabledReason = "SecureDirectoryStream requires Linux")
+    void restartSweepRetriesPrivateParametersWithoutLegacyRowsOrRedisDirtyState() throws Exception {
+        Path target = temporaryDirectory.resolve("accounts.json");
+        ConnectorCredentialWorkspaceService workspace = mock(ConnectorCredentialWorkspaceService.class);
+        when(workspace.resolveProjectionFile(1001L, MailAccountProjectionService.PROJECTION_PATH)).thenReturn(target);
+        MailAccountProjectionStateService state = mock(MailAccountProjectionStateService.class);
+        when(state.scanProjectionUsersAfter(0L, 100)).thenReturn(
+            new MailAccountProjectionStateService.ProjectionUserBatch(Set.of(1001L), 100L, false));
+        when(state.loadAllAccountIds(1001L)).thenReturn(Set.of(11L));
+        UserMailAccount account = account(11L, "N", new Date(), "qq", "APP_PASSWORD");
+        when(state.loadActiveSnapshot(1001L)).thenReturn(List.of(account));
+        MailCredentialResolver resolver = mock(MailCredentialResolver.class);
+        when(resolver.resolve(account)).thenReturn(Optional.of(MailCredentialResolver.ResolvedAuth
+            .secret("APP_PASSWORD", account.getEmail(), "test-secret")));
+        MailAccountProjectionLeaseService lease = acquiredLease("restart-owner");
+        when(lease.dirtyUsers(100)).thenReturn(Set.of());
+        new MailAccountProjectionService(workspace, resolver, state, lease,
+            mock(MailAccountMetadataCacheService.class), new ObjectMapper()).reconcileDirtyUsers();
+        assertThat(new ObjectMapper().readTree(target.toFile()).path("accounts").get(0).path("accountId").asText())
+            .isEqualTo("11");
+        assertThat(Files.getPosixFilePermissions(target)).containsExactlyInAnyOrder(
+            PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE);
+    }
+
     @BeforeAll
     static void initializeTableMetadata() {
         if (TableInfoHelper.getTableInfo(UserMailAccount.class) == null) {
@@ -74,10 +99,10 @@ class MailAccountProjectionServiceTest {
     @Test
     void writesStablePrivateProjectionWithoutRefreshOrReference() throws Exception {
         Path target = temporaryDirectory.resolve("accounts.json");
-        UserMailAccountMapper mapper = mock(UserMailAccountMapper.class);
+        MailPrivateParamStore mapper = mock(MailPrivateParamStore.class);
         UserMailAccount later = account(2L, "N", new Date(2_000), "gmail", "OAUTH2");
         UserMailAccount preferred = account(1L, "Y", new Date(1_000), "qq", "APP_PASSWORD");
-        when(mapper.selectList(any())).thenReturn(List.of(later, preferred));
+        when(mapper.active(any())).thenReturn(List.of(later, preferred));
         MailCredentialResolver resolver = mock(MailCredentialResolver.class);
         when(resolver.resolve(preferred)).thenReturn(Optional.of(new MailCredentialResolver.ResolvedAuth(
             "APP_PASSWORD", preferred.getEmail(), "secret", null, null, List.of(), null, null, null)));
@@ -124,10 +149,10 @@ class MailAccountProjectionServiceTest {
     @Test
     void emptyDisplayNameIsStillPresent() throws Exception {
         Path target = temporaryDirectory.resolve("accounts.json");
-        UserMailAccountMapper mapper = mock(UserMailAccountMapper.class);
+        MailPrivateParamStore mapper = mock(MailPrivateParamStore.class);
         UserMailAccount account = account(1L, "Y", new Date(), "qq", "APP_PASSWORD");
         account.setDisplayName(null);
-        when(mapper.selectList(any())).thenReturn(List.of(account));
+        when(mapper.active(any())).thenReturn(List.of(account));
         MailCredentialResolver resolver = mock(MailCredentialResolver.class);
         when(resolver.resolve(account)).thenReturn(Optional.of(new MailCredentialResolver.ResolvedAuth(
             "APP_PASSWORD", account.getEmail(), "secret", null, null, List.of(), null, null, null)));
@@ -143,9 +168,9 @@ class MailAccountProjectionServiceTest {
     @Test
     void excludesUnresolvableAndWritesEmptyArray() throws Exception {
         Path target = temporaryDirectory.resolve("accounts.json");
-        UserMailAccountMapper mapper = mock(UserMailAccountMapper.class);
+        MailPrivateParamStore mapper = mock(MailPrivateParamStore.class);
         UserMailAccount account = account(1L, "Y", new Date(), "gmail", "OAUTH2");
-        when(mapper.selectList(any())).thenReturn(List.of(account));
+        when(mapper.active(any())).thenReturn(List.of(account));
         MailCredentialResolver resolver = mock(MailCredentialResolver.class);
         when(resolver.resolve(account)).thenReturn(Optional.empty());
 
@@ -161,8 +186,8 @@ class MailAccountProjectionServiceTest {
         Files.writeString(real, "old-content");
         Path symlink = temporaryDirectory.resolve("accounts.json");
         Files.createSymbolicLink(symlink, real.getFileName());
-        UserMailAccountMapper mapper = mock(UserMailAccountMapper.class);
-        when(mapper.selectList(any())).thenReturn(List.of());
+        MailPrivateParamStore mapper = mock(MailPrivateParamStore.class);
+        when(mapper.active(any())).thenReturn(List.of());
         service(symlink, mapper, mock(MailCredentialResolver.class)).sync(1001L);
         assertThat(Files.readString(real)).isEqualTo("old-content");
         assertThat(Files.isSymbolicLink(symlink)).isFalse();
@@ -170,7 +195,7 @@ class MailAccountProjectionServiceTest {
         Files.writeString(symlink, "old-content");
         UserMailAccount huge = account(1L, "Y", new Date(), "qq", "APP_PASSWORD");
         huge.setDisplayName("x".repeat(70_000));
-        when(mapper.selectList(any())).thenReturn(List.of(huge));
+        when(mapper.active(any())).thenReturn(List.of(huge));
         MailCredentialResolver resolver = mock(MailCredentialResolver.class);
         when(resolver.resolve(huge)).thenReturn(Optional.of(new MailCredentialResolver.ResolvedAuth(
             "APP_PASSWORD", huge.getEmail(), "secret", null, null, List.of(), null, null, null)));
@@ -183,11 +208,11 @@ class MailAccountProjectionServiceTest {
     @Test
     void connectorEventBindsAndDeleteEventUnbindsOnlyMatchingMailProvider() {
         Path target = temporaryDirectory.resolve("accounts.json");
-        UserMailAccountMapper mapper = mock(UserMailAccountMapper.class);
+        MailPrivateParamStore mapper = mock(MailPrivateParamStore.class);
         UserMailAccount gmail = account(1L, "Y", new Date(), "gmail", "OAUTH2");
         gmail.setCredentialRef(null);
         gmail.setStatus("AUTH_REQUIRED");
-        when(mapper.selectList(any())).thenReturn(List.of(gmail));
+        when(mapper.active(any())).thenReturn(List.of(gmail));
         ConnectorInfo connector = new ConnectorInfo();
         connector.setConnectorId(9L);
         connector.setConnectorCode("gmail-mail");
@@ -850,14 +875,14 @@ class MailAccountProjectionServiceTest {
     }
 
     private MailAccountProjectionService service(
-            Path target, UserMailAccountMapper mapper, MailCredentialResolver resolver) {
+            Path target, MailPrivateParamStore mapper, MailCredentialResolver resolver) {
         return service(target, mapper, resolver, new MailAccountProjectionService.NioFileOperations());
     }
 
-    private MailAccountProjectionService service(Path target, UserMailAccountMapper mapper,
+    private MailAccountProjectionService service(Path target, MailPrivateParamStore mapper,
             MailCredentialResolver resolver, MailAccountProjectionService.FileOperations fileOperations) {
         MailAccountProjectionStateService state = mock(MailAccountProjectionStateService.class);
-        when(state.loadActiveSnapshot(1001L)).thenAnswer(invocation -> mapper.selectList(null));
+        when(state.loadActiveSnapshot(1001L)).thenAnswer(invocation -> mapper.active(1001L));
         when(state.reconcileCurrentBindings(1001L)).thenReturn(Set.of());
         return service(target, resolver, fileOperations, state);
     }
@@ -875,9 +900,9 @@ class MailAccountProjectionServiceTest {
             new ObjectMapper(), fileOperations);
     }
 
-    private UserMailAccountMapper emptyMapper() {
-        UserMailAccountMapper mapper = mock(UserMailAccountMapper.class);
-        when(mapper.selectList(any())).thenReturn(List.of());
+    private MailPrivateParamStore emptyMapper() {
+        MailPrivateParamStore mapper = mock(MailPrivateParamStore.class);
+        when(mapper.active(any())).thenReturn(List.of());
         return mapper;
     }
 
@@ -928,8 +953,8 @@ class MailAccountProjectionServiceTest {
     @SuppressWarnings("unchecked")
     private MailAccountMetadataCacheService realCache(
             List<UserMailAccount> accounts, AtomicReference<String> redisJson) {
-        UserMailAccountMapper mapper = mock(UserMailAccountMapper.class);
-        when(mapper.selectList(any())).thenReturn(accounts);
+        MailPrivateParamStore mapper = mock(MailPrivateParamStore.class);
+        when(mapper.active(any())).thenReturn(accounts);
         LoginApplicationService logins = mock(LoginApplicationService.class);
         LoginInfo login = new LoginInfo();
         login.setUserCode("tester");

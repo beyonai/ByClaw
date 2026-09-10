@@ -256,6 +256,10 @@ public class ConnectorCredentialProjectionService {
     }
 
     private Optional<CredentialProjectionSpec> projectionSpec(ConnectorInfo connector) {
+        if (connector != null && com.iwhalecloud.byai.manager.domain.mail.MailProviderCatalog
+                .findByConnectorCode(connector.getConnectorCode()).isPresent()) {
+            return Optional.empty(); // The aggregate mail writer alone owns accounts.json.
+        }
         try {
             return connector == null ? Optional.empty() : manifestService.credentialProjection(connector);
         } catch (RuntimeException e) {

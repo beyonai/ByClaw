@@ -78,6 +78,27 @@ class ConnectorConnectionStateServiceTest {
     }
 
     @Test
+    void oauthMailAuthorizationWritesPrivateConfigurationBeforePublishingProjection() {
+        ConnectorInfo connector = connector();
+        connector.setConnectorCode("gmail-mail");
+        connector.setProviderCode("gmail-oauth2");
+        connector.setAuthMode("OAUTH2");
+        var store = mock(com.iwhalecloud.byai.manager.domain.mail.MailPrivateParamStore.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "mailPrivateParamStore", store);
+        var result = new AuthorizationStatusResult(AuthorizationStatus.CONNECTED,
+            "external-id", "test@gmail.com", null, "credential-ref", null, null);
+        when(store.oauthConfiguration(1001L, connector, result)).thenReturn("{mail-config}");
+        when(sequenceService.nextVal()).thenReturn(8001L);
+        service.saveEnabledAuthorization(USER_ID, connector, result, "authorization-id");
+        var order = org.mockito.Mockito.inOrder(manifestService, connectorAuthMapper, eventPublisher);
+        order.verify(manifestService).upsertAndEnable(1001L, connector, Map.of("MAIL_CONNECTOR_15", "{mail-config}"));
+        order.verify(connectorAuthMapper).insertActiveIgnoreConflict(any());
+        order.verify(eventPublisher).publishEvent(new ConnectorCredentialProjectionEvent(
+            1001L, CONNECTOR_ID, ConnectorCredentialProjectionEvent.Action.SYNC));
+        verify(manifestService, never()).upsertAndEnable(1001L, connector);
+    }
+
+    @Test
     void saveEnabledAuthorizationWritesBindingProjectionAndSchedulesCacheRefresh() {
         ConnectorInfo connector = connector();
         when(connectorAuthMapper.selectOne(any())).thenReturn(null);
@@ -199,6 +220,20 @@ class ConnectorConnectionStateServiceTest {
             java.util.Map.of("IMA_OPENAPI_CLIENTID", "client", "IMA_OPENAPI_APIKEY", "key"));
 
         verify(privateParamService).refreshPrivateParamCacheAfterCommit(1001L, "tester");
+    }
+
+    @Test
+    void mailBindingPublishesProjectionEvenWithoutGenericManifestProjection() {
+        ConnectorInfo connector = connector();
+        connector.setConnectorCode("qq-mail");
+        connector.setProviderCode("mail-form");
+        when(sequenceService.nextVal()).thenReturn(8010L);
+        service.saveEnabledCredentialAuthorization(USER_ID, connector, new AuthorizationStatusResult(
+            AuthorizationStatus.CONNECTED, null, "QQ", null, null, null, null), "authorization-id",
+            Map.of("MAIL_CONNECTOR_2001", "encrypted-at-persistence"));
+        verify(eventPublisher).publishEvent(new com.iwhalecloud.byai.manager.domain.connector.authorization
+            .ConnectorCredentialProjectionEvent(1001L, connector.getConnectorId(),
+                com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialProjectionEvent.Action.SYNC));
     }
 
     @Test

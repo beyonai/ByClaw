@@ -2,7 +2,6 @@ package com.iwhalecloud.byai.manager.domain.mail;
 
 import java.io.IOException;
 import java.net.IDN;
-import java.util.ArrayList;
 import java.util.Date;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -15,7 +14,6 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.ecrypt.Sm4Util;
@@ -26,22 +24,21 @@ import com.iwhalecloud.byai.manager.entity.connector.ConnectorAuth;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 import com.iwhalecloud.byai.manager.entity.users.UserMailAccount;
 import com.iwhalecloud.byai.manager.mapper.connector.ConnectorInfoMapper;
-import com.iwhalecloud.byai.manager.mapper.users.UserMailAccountMapper;
 import com.iwhalecloud.byai.manager.vo.users.MailProviderVO;
 
 /** Owns all post-commit mail projection database reads and writes in independent transactions. */
 @Service
 public class MailAccountProjectionStateService implements MailConnectorLookup {
-    private final UserMailAccountMapper mailAccountMapper;
+    private final MailPrivateParamStore privateParamStore;
     private final ConnectorInfoMapper connectorInfoMapper;
     private final ConnectorConnectionStateService connectionStateService;
     private final ConnectorCredentialSecretStore secretStore;
     private final ObjectMapper objectMapper;
 
-    public MailAccountProjectionStateService(UserMailAccountMapper mailAccountMapper,
+    public MailAccountProjectionStateService(MailPrivateParamStore privateParamStore,
             ConnectorInfoMapper connectorInfoMapper, ConnectorConnectionStateService connectionStateService,
             ConnectorCredentialSecretStore secretStore, ObjectMapper objectMapper) {
-        this.mailAccountMapper = mailAccountMapper;
+        this.privateParamStore = privateParamStore;
         this.connectorInfoMapper = connectorInfoMapper;
         this.connectionStateService = connectionStateService;
         this.secretStore = secretStore;
@@ -50,9 +47,7 @@ public class MailAccountProjectionStateService implements MailConnectorLookup {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true)
     public List<UserMailAccount> loadActiveSnapshot(Long userId) {
-        return new ArrayList<>(mailAccountMapper.selectList(new LambdaQueryWrapper<UserMailAccount>()
-            .eq(UserMailAccount::getUserId, userId)
-            .eq(UserMailAccount::getDeleteFlag, "0")));
+        return privateParamStore.active(userId);
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -72,42 +67,14 @@ public class MailAccountProjectionStateService implements MailConnectorLookup {
         MailProviderVO provider = MailProviderCatalog.findByConnectorCode(connector.getConnectorCode()).orElse(null);
         if (provider == null) return Set.of();
         if (!"OAUTH2".equals(provider.getAuthType())) {
-            ConnectorAuth auth = connectionStateService.findEnabledActiveAuthorization(userId.toString(), connectorId);
-            if (auth != null) return Set.of();
-            Set<Long> affected = new LinkedHashSet<>();
-            for (UserMailAccount account : mailAccountMapper.selectList(new LambdaQueryWrapper<UserMailAccount>()
-                    .eq(UserMailAccount::getUserId, userId)
-                    .eq(UserMailAccount::getConnectorId, connectorId)
-                    .eq(UserMailAccount::getDeleteFlag, "0"))) {
-                if (account.getAccountId() == null) continue;
-                mailAccountMapper.update(null, new LambdaUpdateWrapper<UserMailAccount>()
-                    .set(UserMailAccount::getDeleteFlag, "1")
-                    .set(UserMailAccount::getStatus, "DELETED")
-                    .set(UserMailAccount::getUpdateTime, new Date())
-                    .eq(UserMailAccount::getUserId, userId)
-                    .eq(UserMailAccount::getAccountId, account.getAccountId())
-                    .eq(UserMailAccount::getConnectorId, connectorId));
-                affected.add(account.getAccountId());
-            }
-            return affected;
+            return privateParamStore.ids(userId).contains(connectorId) ? Set.of(connectorId) : Set.of();
         }
         return reconcileProvider(userId, provider, connector);
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true)
     public Set<Long> loadAccountIdsForConnector(Long userId, Long connectorId) {
-        ConnectorInfo connector = connectorById(connectorId);
-        if (connector == null) return Set.of();
-        MailProviderVO provider = MailProviderCatalog.findByConnectorCode(connector.getConnectorCode()).orElse(null);
-        if (provider == null) return Set.of();
-        Set<Long> ids = new LinkedHashSet<>();
-        for (UserMailAccount account : mailAccountMapper.selectList(new LambdaQueryWrapper<UserMailAccount>()
-                .eq(UserMailAccount::getUserId, userId)
-                .eq(UserMailAccount::getProviderCode, provider.getCode())
-                .eq(UserMailAccount::getDeleteFlag, "0"))) {
-            if (account.getAccountId() != null) ids.add(account.getAccountId());
-        }
-        return ids;
+        return privateParamStore.ids(userId).contains(connectorId) ? Set.of(connectorId) : Set.of();
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true)
@@ -124,35 +91,12 @@ public class MailAccountProjectionStateService implements MailConnectorLookup {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void markProjectionFailed(Long userId, Set<Long> accountIds) {
-        for (Long accountId : safeIds(accountIds)) {
-            mailAccountMapper.update(null, new LambdaUpdateWrapper<UserMailAccount>()
-                .set(UserMailAccount::getStatus, "PROJECTION_FAILED")
-                .set(UserMailAccount::getUpdateTime, new Date())
-                .eq(UserMailAccount::getUserId, userId)
-                .eq(UserMailAccount::getAccountId, accountId));
-        }
+        privateParamStore.projectionStatus(userId, safeIds(accountIds), true);
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public Set<Long> markProjectionSucceeded(Long userId, Set<Long> accountIds) {
-        Set<Long> restored = new LinkedHashSet<>();
-        for (UserMailAccount account : loadForSuccess(userId, accountIds)) {
-            String status = expectedProjectionStatus(account);
-            LambdaUpdateWrapper<UserMailAccount> update = new LambdaUpdateWrapper<UserMailAccount>()
-                .set(UserMailAccount::getStatus, status)
-                .set(UserMailAccount::getUpdateTime, new Date())
-                .eq(UserMailAccount::getUserId, userId)
-                .eq(UserMailAccount::getAccountId, account.getAccountId())
-                .eq(UserMailAccount::getStatus, "PROJECTION_FAILED")
-                .eq(account.getUpdateTime() != null, UserMailAccount::getUpdateTime, account.getUpdateTime());
-            if (account.getCredentialRef() == null) {
-                update.isNull(UserMailAccount::getCredentialRef);
-            } else {
-                update.eq(UserMailAccount::getCredentialRef, account.getCredentialRef());
-            }
-            if (mailAccountMapper.update(null, update) == 1) restored.add(account.getAccountId());
-        }
-        return restored;
+        return privateParamStore.projectionStatus(userId, safeIds(accountIds), false);
     }
 
     /** Read-only preparation used inside the mail account save transaction. */
@@ -165,56 +109,21 @@ public class MailAccountProjectionStateService implements MailConnectorLookup {
         account.setStatus(reference == null ? "AUTH_REQUIRED" : "NORMAL");
     }
 
-    private List<UserMailAccount> loadForSuccess(Long userId, Set<Long> ids) {
-        Set<Long> safe = safeIds(ids);
-        if (safe.isEmpty()) return List.of();
-        return mailAccountMapper.selectList(new LambdaQueryWrapper<UserMailAccount>()
-            .eq(UserMailAccount::getUserId, userId)
-            .in(UserMailAccount::getAccountId, safe)
-            .eq(UserMailAccount::getStatus, "PROJECTION_FAILED"));
-    }
-
     @Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true)
     public ProjectionUserBatch scanProjectionUsersAfter(long afterAccountId, int limit) {
-        int boundedLimit = Math.max(1, Math.min(limit, 100));
-        List<UserMailAccount> rows = mailAccountMapper.selectList(new LambdaQueryWrapper<UserMailAccount>()
-            .select(UserMailAccount::getAccountId, UserMailAccount::getUserId)
-            .gt(UserMailAccount::getAccountId, afterAccountId)
-            .orderByAsc(UserMailAccount::getAccountId)
-            .last("LIMIT " + boundedLimit));
-        Set<Long> userIds = new LinkedHashSet<>();
-        long cursor = afterAccountId;
-        for (UserMailAccount row : rows) {
-            if (row.getUserId() != null) userIds.add(row.getUserId());
-            if (row.getAccountId() != null) cursor = Math.max(cursor, row.getAccountId());
-        }
-        return new ProjectionUserBatch(userIds, cursor, rows.size() == boundedLimit);
+        return privateParamStore.scan(afterAccountId, limit);
     }
 
     public record ProjectionUserBatch(Set<Long> userIds, long nextAccountId, boolean hasMore) { }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true)
     public Set<Long> loadAllAccountIds(Long userId) {
-        Set<Long> ids = new LinkedHashSet<>();
-        for (UserMailAccount account : mailAccountMapper.selectList(new LambdaQueryWrapper<UserMailAccount>()
-                .select(UserMailAccount::getAccountId)
-                .eq(UserMailAccount::getUserId, userId))) {
-            if (account.getAccountId() != null) ids.add(account.getAccountId());
-        }
-        return ids;
+        return privateParamStore.ids(userId);
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true)
     public Set<Long> loadProjectionRecoveryIds(Long userId) {
-        Set<Long> ids = new LinkedHashSet<>();
-        for (UserMailAccount account : mailAccountMapper.selectList(new LambdaQueryWrapper<UserMailAccount>()
-                .select(UserMailAccount::getAccountId)
-                .eq(UserMailAccount::getUserId, userId)
-                .and(scope -> scope.eq(UserMailAccount::getDeleteFlag, "0")
-                    .or().eq(UserMailAccount::getStatus, "PROJECTION_FAILED")))) {
-            if (account.getAccountId() != null) ids.add(account.getAccountId());
-        }
-        return ids;
+        return privateParamStore.ids(userId);
     }
 
     private Set<Long> safeIds(Set<Long> ids) {
@@ -237,23 +146,22 @@ public class MailAccountProjectionStateService implements MailConnectorLookup {
 
     private Set<Long> reconcileProvider(Long userId, MailProviderVO provider, ConnectorInfo connector) {
         Set<Long> affected = new LinkedHashSet<>();
-        List<UserMailAccount> accounts = mailAccountMapper.selectList(new LambdaQueryWrapper<UserMailAccount>()
-            .eq(UserMailAccount::getUserId, userId)
-            .eq(UserMailAccount::getProviderCode, provider.getCode())
-            .eq(UserMailAccount::getDeleteFlag, "0"));
+        List<UserMailAccount> accounts = privateParamStore.active(userId).stream()
+            .filter(account -> provider.getCode().equals(account.getProviderCode())).toList();
         for (UserMailAccount account : accounts) {
             String reference = validAuthorizationReference(userId, connector, account.getEmail());
             String status = reference == null ? "AUTH_REQUIRED" : "NORMAL";
             if (java.util.Objects.equals(reference, account.getCredentialRef())
                     && java.util.Objects.equals(status, account.getStatus())) continue;
             affected.add(account.getAccountId());
-            mailAccountMapper.update(null, new LambdaUpdateWrapper<UserMailAccount>()
-                .set(UserMailAccount::getCredentialRef, reference)
-                .set(UserMailAccount::getStatus, status)
-                .set(UserMailAccount::getUpdateTime, new Date())
-                .eq(UserMailAccount::getAccountId, account.getAccountId())
-                .eq(UserMailAccount::getUserId, userId)
-                .eq(UserMailAccount::getDeleteFlag, "0"));
+            String observedStatus = account.getStatus();
+            Date observedTime = account.getUpdateTime();
+            account.setCredentialRef(reference);
+            account.setStatus(status);
+            account.setUpdateTime(new Date());
+            if (!privateParamStore.updateCheck(account, observedStatus, observedTime)) {
+                throw new IllegalStateException("邮箱配置已发生变化，请重试投影");
+            }
         }
         return affected;
     }

@@ -66,6 +66,9 @@ public class ConnectorConnectionStateService {
             privateParamService, event -> { });
     }
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.manager.domain.mail.MailPrivateParamStore mailPrivateParamStore;
+
     @Transactional(rollbackFor = Exception.class)
     public ConnectorAuth saveEnabledAuthorization(
             String userId,
@@ -73,7 +76,11 @@ public class ConnectorConnectionStateService {
             AuthorizationStatusResult statusResult,
             String authorizationId) {
         UserIdentity user = requireUser(userId);
-        boolean manifestChanged = manifestService.upsertAndEnable(user.userId(), connector);
+        boolean manifestChanged = com.iwhalecloud.byai.manager.domain.mail.MailPrivateParamStore.supports(connector)
+            ? manifestService.upsertAndEnable(user.userId(), connector, Map.of(
+                com.iwhalecloud.byai.manager.domain.mail.MailPrivateParamStore.key(connector.getConnectorId()),
+                mailPrivateParamStore.oauthConfiguration(user.userId(), connector, statusResult)))
+            : manifestService.upsertAndEnable(user.userId(), connector);
 
         ConnectorAuth existing = findActiveAuthorization(userId, connector.getConnectorId());
         Date now = new Date();
@@ -112,6 +119,7 @@ public class ConnectorConnectionStateService {
             auth = insertOrUpdateWinner(auth, userId, connector, statusResult, authorizationId, now);
         }
         refreshPrivateParamCache(user);
+        publishCredentialProjection(user.userId(), connector, ConnectorCredentialProjectionEvent.Action.SYNC);
         return auth;
     }
 
@@ -386,7 +394,8 @@ public class ConnectorConnectionStateService {
             return;
         }
         try {
-            if (manifestService.credentialProjection(connector).isPresent()) {
+            if (com.iwhalecloud.byai.manager.domain.mail.MailPrivateParamStore.supports(connector)
+                    || manifestService.credentialProjection(connector).isPresent()) {
                 eventPublisher.publishEvent(new ConnectorCredentialProjectionEvent(
                     userId, connector.getConnectorId(), action));
             }

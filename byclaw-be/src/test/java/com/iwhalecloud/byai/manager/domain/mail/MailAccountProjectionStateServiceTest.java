@@ -27,7 +27,7 @@ import com.iwhalecloud.byai.manager.entity.connector.ConnectorAuth;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 import com.iwhalecloud.byai.manager.entity.users.UserMailAccount;
 import com.iwhalecloud.byai.manager.mapper.connector.ConnectorInfoMapper;
-import com.iwhalecloud.byai.manager.mapper.users.UserMailAccountMapper;
+import com.iwhalecloud.byai.manager.domain.mail.MailPrivateParamStore;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
@@ -65,7 +65,7 @@ class MailAccountProjectionStateServiceTest {
 
     @Test
     void prepareOAuthBindingPropagatesInfrastructureFailure() {
-        UserMailAccountMapper accounts = mock(UserMailAccountMapper.class);
+        MailPrivateParamStore accounts = mock(MailPrivateParamStore.class);
         ConnectorInfoMapper connectors = mock(ConnectorInfoMapper.class);
         when(connectors.selectOne(any())).thenThrow(new IllegalStateException("database unavailable"));
         MailAccountProjectionStateService service = new MailAccountProjectionStateService(accounts, connectors,
@@ -149,12 +149,13 @@ class MailAccountProjectionStateServiceTest {
 
     @Test
     void boundedDatabaseSweepIncludesDeletedRowsAndReturnsCursor() {
-        UserMailAccountMapper accounts = mock(UserMailAccountMapper.class);
+        MailPrivateParamStore accounts = mock(MailPrivateParamStore.class);
         UserMailAccount deleted = new UserMailAccount();
         deleted.setAccountId(11L);
         deleted.setUserId(1001L);
         deleted.setDeleteFlag("1");
-        when(accounts.selectList(any())).thenReturn(java.util.List.of(deleted));
+        when(accounts.scan(0L, 100)).thenReturn(
+            new MailAccountProjectionStateService.ProjectionUserBatch(Set.of(1001L), 11L, false));
         MailAccountProjectionStateService service = new MailAccountProjectionStateService(accounts,
             mock(ConnectorInfoMapper.class), mock(ConnectorConnectionStateService.class),
             mock(ConnectorCredentialSecretStore.class), new ObjectMapper());
@@ -168,7 +169,7 @@ class MailAccountProjectionStateServiceTest {
 
     @Test
     void inactiveMailConnectorReconcilesItsProviderToAuthRequired() {
-        UserMailAccountMapper accounts = mock(UserMailAccountMapper.class);
+        MailPrivateParamStore accounts = mock(MailPrivateParamStore.class);
         UserMailAccount gmail = new UserMailAccount();
         gmail.setAccountId(7L);
         gmail.setUserId(1001L);
@@ -176,7 +177,8 @@ class MailAccountProjectionStateServiceTest {
         gmail.setCredentialRef("revoked-ref");
         gmail.setStatus("NORMAL");
         gmail.setDeleteFlag("0");
-        when(accounts.selectList(any())).thenReturn(java.util.List.of(gmail));
+        when(accounts.active(any())).thenReturn(java.util.List.of(gmail));
+        when(accounts.updateCheck(any(), any(), any())).thenReturn(true);
         ConnectorInfoMapper connectors = mock(ConnectorInfoMapper.class);
         ConnectorInfo inactive = new ConnectorInfo();
         inactive.setConnectorId(9L);
@@ -194,23 +196,19 @@ class MailAccountProjectionStateServiceTest {
     @Test
     @SuppressWarnings({"rawtypes", "unchecked"})
     void successRecoveryDatabaseQueryIsRestrictedToAffectedIds() {
-        UserMailAccountMapper accounts = mock(UserMailAccountMapper.class);
-        when(accounts.selectList(any())).thenReturn(java.util.List.of());
+        MailPrivateParamStore accounts = mock(MailPrivateParamStore.class);
+        when(accounts.active(any())).thenReturn(java.util.List.of());
         MailAccountProjectionStateService service = new MailAccountProjectionStateService(accounts,
             mock(ConnectorInfoMapper.class), mock(ConnectorConnectionStateService.class),
             mock(ConnectorCredentialSecretStore.class), new ObjectMapper());
 
         service.markProjectionSucceeded(1001L, Set.of(7L));
 
-        ArgumentCaptor<LambdaQueryWrapper> query = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
-        verify(accounts).selectList(query.capture());
-        assertThat(query.getValue().getSqlSegment()).contains("account_id IN");
-        assertThat(query.getValue().getParamNameValuePairs()).containsValue(7L);
-        assertThat(query.getValue().getParamNameValuePairs()).doesNotContainValue(8L);
+        verify(accounts).projectionStatus(1001L, Set.of(7L), false);
     }
 
     private OAuthFixture oauthFixture(String providerCode, String connectorCode, String credentialProviderCode) {
-        UserMailAccountMapper accounts = mock(UserMailAccountMapper.class);
+        MailPrivateParamStore accounts = mock(MailPrivateParamStore.class);
         ConnectorInfoMapper connectors = mock(ConnectorInfoMapper.class);
         ConnectorInfo connector = new ConnectorInfo();
         connector.setConnectorId(9L);

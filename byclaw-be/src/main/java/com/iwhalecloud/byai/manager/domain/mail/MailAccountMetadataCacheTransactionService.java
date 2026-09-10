@@ -9,28 +9,26 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
 import com.iwhalecloud.byai.manager.entity.users.UserMailAccount;
-import com.iwhalecloud.byai.manager.mapper.users.UserMailAccountMapper;
 import com.iwhalecloud.byai.manager.vo.users.MailProviderVO;
 
 /** Owns the independent database-to-Redis metadata refresh transaction. */
 @Service
 public class MailAccountMetadataCacheTransactionService {
     private static final String KEY_PREFIX = "byai:user:mail_account:";
-    private final UserMailAccountMapper mapper;
+    private final MailPrivateParamStore privateParamStore;
     private final LoginApplicationService loginApplicationService;
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
 
-    public MailAccountMetadataCacheTransactionService(UserMailAccountMapper mapper,
+    public MailAccountMetadataCacheTransactionService(MailPrivateParamStore privateParamStore,
             LoginApplicationService loginApplicationService, StringRedisTemplate redisTemplate,
             ObjectMapper objectMapper) {
-        this.mapper = mapper;
+        this.privateParamStore = privateParamStore;
         this.loginApplicationService = loginApplicationService;
         this.redisTemplate = redisTemplate;
         this.objectMapper = objectMapper;
@@ -42,9 +40,7 @@ public class MailAccountMetadataCacheTransactionService {
         if (login == null || login.getUserCode() == null || login.getUserCode().isBlank()) {
             throw new IllegalStateException("Unable to resolve mail metadata owner");
         }
-        List<UserMailAccount> accounts = mapper.selectList(new LambdaQueryWrapper<UserMailAccount>()
-            .eq(UserMailAccount::getUserId, userId).eq(UserMailAccount::getDeleteFlag, "0")
-            .orderByDesc(UserMailAccount::getDefaultFlag).orderByDesc(UserMailAccount::getUpdateTime));
+        List<UserMailAccount> accounts = privateParamStore.active(userId);
         redisTemplate.opsForValue().set(buildRedisKey(login.getUserCode()), buildJson(accounts));
     }
 

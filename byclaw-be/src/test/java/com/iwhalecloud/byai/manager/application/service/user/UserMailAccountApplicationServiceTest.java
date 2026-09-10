@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.manager.application.service.user;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -35,7 +36,7 @@ import com.iwhalecloud.byai.manager.domain.mail.MailConnectionCheckLeaseService;
 import com.iwhalecloud.byai.manager.domain.mail.MailConnectionCheckAdmissionService;
 import com.iwhalecloud.byai.manager.domain.mail.MailRuntimeProbe;
 import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
-import com.iwhalecloud.byai.manager.mapper.users.UserMailAccountMapper;
+import com.iwhalecloud.byai.manager.domain.mail.MailPrivateParamStore;
 import com.iwhalecloud.byai.manager.vo.users.UserMailAccountVO;
 import com.iwhalecloud.byai.manager.vo.users.MailConnectionCheckResultVO;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
@@ -52,7 +53,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 class UserMailAccountApplicationServiceTest {
 
-    private UserMailAccountMapper mapper;
+    private MailPrivateParamStore mapper;
     private UserMailAccountApplicationService service;
     private MailAccountProjectionService projectionService;
     private MailAccountMetadataCacheService metadataCacheService;
@@ -68,12 +69,15 @@ class UserMailAccountApplicationServiceTest {
             TableInfoHelper.initTableInfo(
                 new MapperBuilderAssistant(new MybatisConfiguration(), ""), UserMailAccount.class);
         }
-        mapper = mock(UserMailAccountMapper.class);
+        mapper = mock(MailPrivateParamStore.class);
         service = new UserMailAccountApplicationService();
-        ReflectionTestUtils.setField(service, "userMailAccountMapper", mapper);
-        SequenceService sequenceService = mock(SequenceService.class);
-        when(sequenceService.nextVal()).thenReturn(8001L);
-        ReflectionTestUtils.setField(service, "sequenceService", sequenceService);
+        ReflectionTestUtils.setField(service, "mailPrivateParamStore", mapper);
+        doAnswer(call -> {
+            UserMailAccount account = call.getArgument(0);
+            account.setAccountId(8001L);
+            account.setConnectorId(8001L);
+            return null;
+        }).when(mapper).initialize(any());
         projectionService = mock(MailAccountProjectionService.class);
         ReflectionTestUtils.setField(service, "mailAccountProjectionService", projectionService);
         metadataCacheService = mock(MailAccountMetadataCacheService.class);
@@ -86,8 +90,7 @@ class UserMailAccountApplicationServiceTest {
         admission = mock(MailConnectionCheckAdmissionService.Admission.class);
         when(admissionService.acquire(1001L)).thenReturn(admission);
         ReflectionTestUtils.setField(service, "mailConnectionCheckAdmissionService", admissionService);
-        when(mapper.selectCount(any())).thenReturn(1L);
-        when(mapper.selectList(any())).thenReturn(List.of());
+        when(mapper.active(any())).thenReturn(List.of());
 
         LoginInfo loginInfo = new LoginInfo();
         loginInfo.setUserId(1001L);
@@ -110,7 +113,7 @@ class UserMailAccountApplicationServiceTest {
         UserMailAccountVO result = service.save(request);
 
         ArgumentCaptor<UserMailAccount> saved = ArgumentCaptor.forClass(UserMailAccount.class);
-        verify(mapper).insert(saved.capture());
+        verify(mapper).save(saved.capture());
         assertThat(saved.getValue().getProviderCode()).isEqualTo("qq");
         assertThat(saved.getValue().getAuthType()).isEqualTo("APP_PASSWORD");
         assertThat(saved.getValue().getImapHost()).isEqualTo("imap.qq.com");
@@ -128,7 +131,7 @@ class UserMailAccountApplicationServiceTest {
     void checkRequiresOwnedActiveAccountAndPersistsSafeStatusWithLastCheckTime() {
         UserMailAccount existing = existingQqAccount();
         existing.setUpdateTime(new Date(1_000L));
-        when(mapper.selectOne(any())).thenReturn(existing);
+        when(mapper.find(any(), any())).thenReturn(existing);
         MailConnectionCheckLeaseService.Lease lease = new MailConnectionCheckLeaseService.Lease(7001L, "owner");
         when(checkLeaseService.tryAcquire(7001L)).thenReturn(Optional.of(lease));
         when(runtimeProbe.check(1001L, 7001L)).thenReturn(new MailRuntimeProbe.Result(
@@ -140,7 +143,7 @@ class UserMailAccountApplicationServiceTest {
                 Map.entry("send", "YES"),
                 Map.entry("reply", "YES"),
                 Map.entry("delete", "NO")), "safe"));
-        when(mapper.update(isNull(), any())).thenReturn(1);
+        when(mapper.updateCheck(any(), any(), any())).thenReturn(true);
 
         MailConnectionCheckResultVO result = service.check(7001L);
 
@@ -157,11 +160,11 @@ class UserMailAccountApplicationServiceTest {
             org.assertj.core.data.MapEntry.entry("delete", "NO"));
         assertThatThrownBy(() -> result.getCapabilityStatus().put("subject", "message-secret"))
             .isInstanceOf(UnsupportedOperationException.class);
-        ArgumentCaptor<LambdaUpdateWrapper> wrapper = ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
-        verify(mapper).update(isNull(), wrapper.capture());
-        assertThat(wrapper.getValue().getSqlSet()).contains("status", "last_check_time", "update_time");
-        assertThat(wrapper.getValue().getSqlSegment())
-            .contains("account_id", "user_id", "delete_flag", "update_time", "status");
+        ArgumentCaptor<UserMailAccount> checked = ArgumentCaptor.forClass(UserMailAccount.class);
+        verify(mapper).updateCheck(checked.capture(), org.mockito.ArgumentMatchers.eq("NORMAL"),
+            org.mockito.ArgumentMatchers.eq(new Date(1_000L)));
+        assertThat(checked.getValue().getStatus()).isEqualTo("PARTIAL");
+        assertThat(checked.getValue().getLastCheckTime()).isEqualTo(result.getLastCheckTime());
         verify(checkLeaseService).assertOwnedAndRenew(lease);
         verify(admission).assertOwnedAndRenew();
         verify(admission).close();
@@ -170,7 +173,7 @@ class UserMailAccountApplicationServiceTest {
 
     @Test
     void checkRejectsMissingOwnershipAndConcurrentLeaseBeforeRunningRuntime() {
-        when(mapper.selectOne(any())).thenReturn(null);
+        when(mapper.find(any(), any())).thenReturn(null);
         assertThatThrownBy(() -> service.check(7001L))
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessageContaining("不存在");
@@ -178,7 +181,7 @@ class UserMailAccountApplicationServiceTest {
 
         UserMailAccount deleted = existingQqAccount();
         deleted.setStatus("DELETED");
-        when(mapper.selectOne(any())).thenReturn(deleted);
+        when(mapper.find(any(), any())).thenReturn(deleted);
         assertThatThrownBy(() -> service.check(7001L))
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessageContaining("不存在");
@@ -186,14 +189,14 @@ class UserMailAccountApplicationServiceTest {
 
         UserMailAccount projectionFailed = existingQqAccount();
         projectionFailed.setStatus("PROJECTION_FAILED");
-        when(mapper.selectOne(any())).thenReturn(projectionFailed);
+        when(mapper.find(any(), any())).thenReturn(projectionFailed);
         assertThatThrownBy(() -> service.check(7001L))
             .isInstanceOf(IllegalStateException.class)
             .hasMessageNotContaining("projection");
         verify(checkLeaseService, never()).tryAcquire(7001L);
 
         UserMailAccount existing = existingQqAccount();
-        when(mapper.selectOne(any())).thenReturn(existing);
+        when(mapper.find(any(), any())).thenReturn(existing);
         when(checkLeaseService.tryAcquire(7001L)).thenReturn(Optional.empty());
         assertThatThrownBy(() -> service.check(7001L))
             .isInstanceOf(MailConnectionCheckAdmissionService.BusyException.class)
@@ -205,12 +208,12 @@ class UserMailAccountApplicationServiceTest {
     void checkAlwaysReleasesLeaseAndRejectsStalePersistence() {
         UserMailAccount existing = existingQqAccount();
         existing.setUpdateTime(new Date(1_000L));
-        when(mapper.selectOne(any())).thenReturn(existing);
+        when(mapper.find(any(), any())).thenReturn(existing);
         MailConnectionCheckLeaseService.Lease lease = new MailConnectionCheckLeaseService.Lease(7001L, "owner");
         when(checkLeaseService.tryAcquire(7001L)).thenReturn(Optional.of(lease));
         when(runtimeProbe.check(1001L, 7001L)).thenReturn(new MailRuntimeProbe.Result(
             MailRuntimeProbe.Status.NORMAL, 5L, Map.of("list", "YES"), null));
-        when(mapper.update(isNull(), any())).thenReturn(0);
+        when(mapper.updateCheck(any(), any(), any())).thenReturn(false);
 
         assertThatThrownBy(() -> service.check(7001L))
             .isInstanceOf(IllegalStateException.class)
@@ -221,7 +224,7 @@ class UserMailAccountApplicationServiceTest {
     @Test
     void checkDiscardsResultWhenLeaseExpiredOrHasANewOwner() {
         UserMailAccount existing = existingQqAccount();
-        when(mapper.selectOne(any())).thenReturn(existing);
+        when(mapper.find(any(), any())).thenReturn(existing);
         MailConnectionCheckLeaseService.Lease lease = new MailConnectionCheckLeaseService.Lease(7001L, "old-owner");
         when(checkLeaseService.tryAcquire(7001L)).thenReturn(Optional.of(lease));
         when(runtimeProbe.check(1001L, 7001L)).thenReturn(new MailRuntimeProbe.Result(
@@ -232,14 +235,14 @@ class UserMailAccountApplicationServiceTest {
         assertThatThrownBy(() -> service.check(7001L))
             .isInstanceOf(MailConnectionCheckLeaseService.LeaseLostException.class)
             .hasMessageNotContaining("old-owner");
-        verify(mapper, never()).update(isNull(), any());
+        verify(mapper, never()).updateCheck(any(), any(), any());
         verify(checkLeaseService).release(lease);
     }
 
     @Test
     void checkReleasesLeaseWhenProbeUnexpectedlyFailsWithoutPersisting() {
         UserMailAccount existing = existingQqAccount();
-        when(mapper.selectOne(any())).thenReturn(existing);
+        when(mapper.find(any(), any())).thenReturn(existing);
         MailConnectionCheckLeaseService.Lease lease = new MailConnectionCheckLeaseService.Lease(7001L, "owner");
         when(checkLeaseService.tryAcquire(7001L)).thenReturn(Optional.of(lease));
         when(runtimeProbe.check(1001L, 7001L)).thenThrow(new IllegalStateException("process-secret"));
@@ -247,17 +250,17 @@ class UserMailAccountApplicationServiceTest {
         assertThatThrownBy(() -> service.check(7001L))
             .isInstanceOf(IllegalStateException.class)
             .hasMessageNotContaining("process-secret");
-        verify(mapper, never()).update(isNull(), any());
+        verify(mapper, never()).updateCheck(any(), any(), any());
         verify(checkLeaseService).release(lease);
     }
 
     @Test
     void checkMapsAuthenticationAndUnavailableStatusesToFailedConnectionState() {
         UserMailAccount existing = existingQqAccount();
-        when(mapper.selectOne(any())).thenReturn(existing);
+        when(mapper.find(any(), any())).thenReturn(existing);
         MailConnectionCheckLeaseService.Lease lease = new MailConnectionCheckLeaseService.Lease(7001L, "owner");
         when(checkLeaseService.tryAcquire(7001L)).thenReturn(Optional.of(lease));
-        when(mapper.update(isNull(), any())).thenReturn(1);
+        when(mapper.updateCheck(any(), any(), any())).thenReturn(true);
         when(runtimeProbe.check(1001L, 7001L))
             .thenReturn(new MailRuntimeProbe.Result(
                 MailRuntimeProbe.Status.AUTH_REQUIRED, null, Map.of(), "safe"))
@@ -265,6 +268,7 @@ class UserMailAccountApplicationServiceTest {
                 MailRuntimeProbe.Status.UNAVAILABLE, null, Map.of(), "safe"));
 
         MailConnectionCheckResultVO authentication = service.check(7001L);
+        existing.setStatus("NORMAL"); // Independent check scenario after credentials have been restored.
         MailConnectionCheckResultVO unavailable = service.check(7001L);
 
         assertThat(authentication.getConnectionState()).isEqualTo("FAILED");
@@ -280,15 +284,15 @@ class UserMailAccountApplicationServiceTest {
         UserMailAccountDTO request = baseRequest("iwhalecloud", null);
         service.save(request);
         ArgumentCaptor<UserMailAccount> saved = ArgumentCaptor.forClass(UserMailAccount.class);
-        verify(mapper).insert(saved.capture());
+        verify(mapper).save(saved.capture());
         assertThat(saved.getValue().getStatus()).isEqualTo("AUTH_REQUIRED");
-        when(mapper.selectOne(any())).thenReturn(saved.getValue());
+        when(mapper.find(any(), any())).thenReturn(saved.getValue());
         MailConnectionCheckLeaseService.Lease lease =
             new MailConnectionCheckLeaseService.Lease(saved.getValue().getAccountId(), "owner");
         when(checkLeaseService.tryAcquire(saved.getValue().getAccountId())).thenReturn(Optional.of(lease));
         when(runtimeProbe.check(1001L, saved.getValue().getAccountId())).thenReturn(new MailRuntimeProbe.Result(
             MailRuntimeProbe.Status.NORMAL, 5L, Map.of(), null));
-        when(mapper.update(isNull(), any())).thenReturn(1);
+        when(mapper.updateCheck(any(), any(), any())).thenReturn(true);
 
         assertThat(service.check(saved.getValue().getAccountId()).getStatus()).isEqualTo("NORMAL");
     }
@@ -299,13 +303,13 @@ class UserMailAccountApplicationServiceTest {
         kerberos.setProviderCode("iwhalecloud");
         kerberos.setAuthType("KERBEROS");
         kerberos.setStatus("AUTH_REQUIRED");
-        when(mapper.selectOne(any())).thenReturn(kerberos);
+        when(mapper.find(any(), any())).thenReturn(kerberos);
         MailConnectionCheckLeaseService.Lease lease =
             new MailConnectionCheckLeaseService.Lease(kerberos.getAccountId(), "owner");
         when(checkLeaseService.tryAcquire(kerberos.getAccountId())).thenReturn(Optional.of(lease));
         when(runtimeProbe.check(1001L, kerberos.getAccountId())).thenReturn(new MailRuntimeProbe.Result(
             MailRuntimeProbe.Status.NORMAL, 5L, Map.of(), null));
-        when(mapper.update(isNull(), any())).thenReturn(1);
+        when(mapper.updateCheck(any(), any(), any())).thenReturn(true);
 
         assertThat(service.check(kerberos.getAccountId()).getStatus()).isEqualTo("NORMAL");
 
@@ -313,7 +317,7 @@ class UserMailAccountApplicationServiceTest {
         gmailPassword.setProviderCode("gmail");
         gmailPassword.setAuthType("APP_PASSWORD");
         gmailPassword.setStatus("AUTH_REQUIRED");
-        when(mapper.selectOne(any())).thenReturn(gmailPassword);
+        when(mapper.find(any(), any())).thenReturn(gmailPassword);
         assertThatThrownBy(() -> service.check(gmailPassword.getAccountId()))
             .isInstanceOf(IllegalStateException.class)
             .hasMessageContaining("尚未准备好");
@@ -325,7 +329,7 @@ class UserMailAccountApplicationServiceTest {
         malformedBrowser.setProviderCode("gmail");
         malformedBrowser.setAuthType("BROWSER_SSO");
         malformedBrowser.setStatus("AUTH_REQUIRED");
-        when(mapper.selectOne(any())).thenReturn(malformedBrowser);
+        when(mapper.find(any(), any())).thenReturn(malformedBrowser);
 
         assertThatThrownBy(() -> service.check(malformedBrowser.getAccountId()))
             .isInstanceOf(IllegalStateException.class)
@@ -335,7 +339,7 @@ class UserMailAccountApplicationServiceTest {
         malformedKerberos.setProviderCode("custom-imap");
         malformedKerberos.setAuthType("KERBEROS");
         malformedKerberos.setStatus("AUTH_REQUIRED");
-        when(mapper.selectOne(any())).thenReturn(malformedKerberos);
+        when(mapper.find(any(), any())).thenReturn(malformedKerberos);
 
         assertThatThrownBy(() -> service.check(malformedKerberos.getAccountId()))
             .isInstanceOf(IllegalStateException.class)
@@ -351,7 +355,7 @@ class UserMailAccountApplicationServiceTest {
         service.save(request);
 
         ArgumentCaptor<UserMailAccount> saved = ArgumentCaptor.forClass(UserMailAccount.class);
-        verify(mapper).insert(saved.capture());
+        verify(mapper).save(saved.capture());
         assertThat(saved.getValue().getAuthType()).isEqualTo("NTLM");
         assertThat(saved.getValue().getAuthCodeCipher()).isNotBlank();
     }
@@ -442,7 +446,7 @@ class UserMailAccountApplicationServiceTest {
         UserMailAccountVO result = service.save(withoutSecret);
 
         ArgumentCaptor<UserMailAccount> saved = ArgumentCaptor.forClass(UserMailAccount.class);
-        verify(mapper).insert(saved.capture());
+        verify(mapper).save(saved.capture());
         assertThat(saved.getValue().getStatus()).isEqualTo("AUTH_REQUIRED");
         assertThat(saved.getValue().getAuthCodeCipher()).isNull();
         assertThat(result.getConnectionState()).isEqualTo("FAILED");
@@ -460,7 +464,7 @@ class UserMailAccountApplicationServiceTest {
         UserMailAccountVO result = service.save(baseRequest("gmail", null));
 
         ArgumentCaptor<UserMailAccount> saved = ArgumentCaptor.forClass(UserMailAccount.class);
-        verify(mapper).insert(saved.capture());
+        verify(mapper).save(saved.capture());
         assertThat(saved.getValue().getCredentialRef()).isEqualTo("owned-ref");
         assertThat(result.getStatus()).isEqualTo("NORMAL");
     }
@@ -480,7 +484,7 @@ class UserMailAccountApplicationServiceTest {
         UserMailAccount existing = existingCustomAccount();
         existing.setAuthCodeCipher("existing-ciphertext");
         existing.setAuthCodeLast4("1234");
-        when(mapper.selectOne(any())).thenReturn(existing);
+        when(mapper.find(any(), any())).thenReturn(existing);
         UserMailAccountDTO edit = customRequest(null);
         edit.setAccountId(7001L);
 
@@ -495,8 +499,8 @@ class UserMailAccountApplicationServiceTest {
         UserMailAccount existing = existingQqAccount();
         existing.setStatus("AUTH_REQUIRED");
         existing.setAuthCodeCipher(Sm4Util.encrypt("old-secret"));
-        when(mapper.selectOne(any())).thenReturn(existing);
-        when(mapper.update(isNull(), any())).thenReturn(1);
+        when(mapper.find(any(), any())).thenReturn(existing);
+        when(mapper.updateCheck(any(), any(), any())).thenReturn(true);
         UserMailAccountDTO edit = baseRequest("qq", "new-secret");
         edit.setAccountId(existing.getAccountId());
 
@@ -521,7 +525,7 @@ class UserMailAccountApplicationServiceTest {
             UserMailAccount existing = existingQqAccount();
             existing.setStatus("AUTH_REQUIRED");
             existing.setAuthCodeCipher(Sm4Util.encrypt("same-secret"));
-            when(mapper.selectOne(any())).thenReturn(existing);
+            when(mapper.find(any(), any())).thenReturn(existing);
             UserMailAccountDTO edit = baseRequest("qq", submitted);
             edit.setAccountId(existing.getAccountId());
 
@@ -535,7 +539,7 @@ class UserMailAccountApplicationServiceTest {
         UserMailAccount existing = existingQqAccount();
         existing.setStatus("PROJECTION_FAILED");
         existing.setAuthCodeCipher(Sm4Util.encrypt("old-secret"));
-        when(mapper.selectOne(any())).thenReturn(existing);
+        when(mapper.find(any(), any())).thenReturn(existing);
         UserMailAccountDTO edit = baseRequest("qq", "new-secret");
         edit.setAccountId(existing.getAccountId());
 
@@ -545,7 +549,7 @@ class UserMailAccountApplicationServiceTest {
     @Test
     void editWithoutProviderKeepsExistingProviderAndCatalogServers() {
         UserMailAccount existing = existingQqAccount();
-        when(mapper.selectOne(any())).thenReturn(existing);
+        when(mapper.find(any(), any())).thenReturn(existing);
         UserMailAccountDTO edit = baseRequest(null, null);
         edit.setAccountId(existing.getAccountId());
 
@@ -561,54 +565,25 @@ class UserMailAccountApplicationServiceTest {
 
     @Test
     @SuppressWarnings({ "rawtypes", "unchecked" })
-    void switchingQqToGmailClearsSecretsServersAndCredentialReference() {
+    void switchingQqToGmailRequiresSeparateAccount() {
         UserMailAccount existing = existingQqAccount();
-        when(mapper.selectOne(any())).thenReturn(existing);
+        when(mapper.find(any(), any())).thenReturn(existing);
         UserMailAccountDTO edit = baseRequest("gmail", null);
         edit.setAccountId(existing.getAccountId());
-
-        UserMailAccountVO result = service.save(edit);
-
-        assertThat(result.getProviderCode()).isEqualTo("gmail");
-        assertThat(existing.getStatus()).isEqualTo("AUTH_REQUIRED");
-        assertThat(existing.getImapHost()).isNull();
-        assertThat(existing.getSmtpHost()).isNull();
-        assertThat(existing.getAuthCodeCipher()).isNull();
-        assertThat(existing.getAuthCodeLast4()).isNull();
-        assertThat(existing.getCredentialRef()).isNull();
-
-        ArgumentCaptor<LambdaUpdateWrapper> wrapper = ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
-        verify(mapper).update(isNull(), wrapper.capture());
-        assertThat(wrapper.getValue().getSqlSet())
-            .contains("provider_code", "auth_type", "imap_host", "imap_port", "imap_encryption",
-                "smtp_host", "smtp_port", "smtp_encryption", "auth_code_cipher", "auth_code_last4",
-                "credential_ref", "status");
-        assertThat(wrapper.getValue().getParamNameValuePairs().values())
-            .filteredOn(value -> value == null)
-            .hasSizeGreaterThanOrEqualTo(9);
+        assertThatThrownBy(() -> service.save(edit)).isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("独立管理");
+        verify(mapper, never()).save(any());
     }
 
     @Test
-    void switchingGmailToQqRequiresAndStoresNewSecret() {
+    void switchingGmailToQqRequiresSeparateAccount() {
         UserMailAccount existing = existingGmailAccount();
-        when(mapper.selectOne(any())).thenReturn(existing);
-        UserMailAccountDTO missingSecret = baseRequest("qq", null);
-        missingSecret.setAccountId(existing.getAccountId());
-        assertThatThrownBy(() -> service.save(missingSecret))
-            .isInstanceOf(IllegalArgumentException.class)
-            .hasMessageContaining("授权码");
-
-        UserMailAccountDTO edit = baseRequest("qq", "replacement-5678");
+        when(mapper.find(any(), any())).thenReturn(existing);
+        UserMailAccountDTO edit = baseRequest("qq", "fresh-secret");
         edit.setAccountId(existing.getAccountId());
-        UserMailAccountVO result = service.save(edit);
-
-        assertThat(result.getProviderCode()).isEqualTo("qq");
-        assertThat(existing.getStatus()).isEqualTo("NORMAL");
-        assertThat(existing.getImapHost()).isEqualTo("imap.qq.com");
-        assertThat(existing.getSmtpHost()).isEqualTo("smtp.qq.com");
-        assertThat(existing.getAuthCodeCipher()).isNotBlank().doesNotContain("replacement-5678");
-        assertThat(existing.getAuthCodeLast4()).isEqualTo("5678");
-        assertThat(existing.getCredentialRef()).isNull();
+        assertThatThrownBy(() -> service.save(edit)).isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("独立管理");
+        verify(mapper, never()).save(any());
     }
 
     @Test
@@ -618,7 +593,7 @@ class UserMailAccountApplicationServiceTest {
         existing.setAuthType("NTLM");
         existing.setAuthCodeCipher("stale-ciphertext");
         existing.setAuthCodeLast4("old4");
-        when(mapper.selectOne(any())).thenReturn(existing);
+        when(mapper.find(any(), any())).thenReturn(existing);
 
         UserMailAccountDTO kerberos = baseRequest("iwhalecloud", null);
         kerberos.setAccountId(existing.getAccountId());
@@ -681,7 +656,7 @@ class UserMailAccountApplicationServiceTest {
     @Test
     void deleteProjectsOnlyAfterCommit() {
         UserMailAccount existing = existingCustomAccount();
-        when(mapper.selectOne(any())).thenReturn(existing);
+        when(mapper.find(any(), any())).thenReturn(existing);
         UserMailAccountDTO request = accountIdRequest(existing.getAccountId());
         TransactionSynchronizationManager.initSynchronization();
         try {
@@ -700,7 +675,7 @@ class UserMailAccountApplicationServiceTest {
     @Test
     void deleteProjectionFailureMarksDeletedAccountAndRefreshesRedis() {
         UserMailAccount existing = existingCustomAccount();
-        when(mapper.selectOne(any())).thenReturn(existing);
+        when(mapper.find(any(), any())).thenReturn(existing);
         doThrow(new IllegalStateException("write failed")).when(projectionService)
             .sync(1001L, Set.of(existing.getAccountId()));
         TransactionSynchronizationManager.initSynchronization();
@@ -718,7 +693,7 @@ class UserMailAccountApplicationServiceTest {
     @Test
     void setDefaultProjectsOnlyAfterCommit() {
         UserMailAccount existing = existingCustomAccount();
-        when(mapper.selectOne(any())).thenReturn(existing);
+        when(mapper.find(any(), any())).thenReturn(existing);
         TransactionSynchronizationManager.initSynchronization();
         try {
             service.setDefault(accountIdRequest(existing.getAccountId()));
@@ -736,7 +711,7 @@ class UserMailAccountApplicationServiceTest {
     @Test
     void setDefaultProjectionFailureMarksChangedAccountAndRefreshesRedis() {
         UserMailAccount existing = existingCustomAccount();
-        when(mapper.selectOne(any())).thenReturn(existing);
+        when(mapper.find(any(), any())).thenReturn(existing);
         doThrow(new IllegalStateException("write failed")).when(projectionService)
             .sync(1001L, Set.of(existing.getAccountId()));
         TransactionSynchronizationManager.initSynchronization();
@@ -756,7 +731,7 @@ class UserMailAccountApplicationServiceTest {
         UserMailAccount legacy = existingCustomAccount();
         legacy.setProviderCode(null);
         legacy.setAuthType(null);
-        when(mapper.selectList(any())).thenReturn(List.of(legacy));
+        when(mapper.active(any())).thenReturn(List.of(legacy));
 
         UserMailAccountVO result = service.list().getFirst();
 
@@ -782,7 +757,7 @@ class UserMailAccountApplicationServiceTest {
         UserMailAccount projectionFailed = existingQqAccount();
         projectionFailed.setAccountId(5L);
         projectionFailed.setStatus("PROJECTION_FAILED");
-        when(mapper.selectList(any())).thenReturn(List.of(normal, partial, auth, unavailable, projectionFailed));
+        when(mapper.active(any())).thenReturn(List.of(normal, partial, auth, unavailable, projectionFailed));
 
         List<UserMailAccountVO> results = service.list();
 
