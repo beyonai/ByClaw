@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -352,6 +354,51 @@ class SessionStreamManagerConcurrencyTest {
             }
             finally {
                 release.countDown();
+            }
+        }
+    }
+
+    /**
+     * 重新使用保留窗口内的 session 时，必须把上一轮终结留下的剩余 TTL 撑开到完整的 session 生命周期，
+     * 否则 Redis 会在会话活跃期间回收整个 Stream Key，消费者随即收到 NOGROUP。
+     */
+    @Test
+    void restartingASessionRefreshesTheRetentionLeftBehindByItsPreviousCompletion() {
+        RedisTemplate<String, Object> redis = context.getBean(RedisTemplate.class);
+
+        assertTrue(manager.startSessionListener("first", null));
+
+        verify(redis).expire(eq(manager.buildStreamKey("first")), anyLong(), eq(TimeUnit.SECONDS));
+    }
+
+    /**
+     * 终结清理与新一轮对话启动竞争同一个 Stream Key 的 TTL：启动侧撑开 TTL，清理侧收紧 TTL。
+     * 清理必须在 session 锁内判定并设置，否则「判定无 listener」之后启动的会话，
+     * 其刷新结果会被清理覆盖，活跃 Stream 重新带上已终结的保留期并可能在会话中途被回收。
+     */
+    @Test
+    void completedTrimSerializesWithSessionRestartOnTheSameStream() throws Exception {
+        CountDownLatch trimEntered = new CountDownLatch(1);
+        CountDownLatch releaseLock = new CountDownLatch(1);
+        try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            try {
+                var holder = executor.submit(() -> outputs.withSessionLock("first", () -> {
+                    trimEntered.countDown();
+                    awaitUninterruptibly(releaseLock);
+                    return null;
+                }));
+                assertTrue(trimEntered.await(1, TimeUnit.SECONDS));
+
+                var trim = executor.submit(() -> manager.trimCompletedStream("first"));
+                assertThrows(TimeoutException.class, () -> trim.get(200, TimeUnit.MILLISECONDS),
+                    "Trim must not decide on retention while a restart holds the session lock");
+
+                releaseLock.countDown();
+                trim.get(2, TimeUnit.SECONDS);
+                holder.get(2, TimeUnit.SECONDS);
+            }
+            finally {
+                releaseLock.countDown();
             }
         }
     }
