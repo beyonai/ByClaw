@@ -9,7 +9,7 @@ SELECT nextval('byai.seq_any_table'), v.code, v.name, v.description, 'SYSTEM',
          'runtime',json_build_object('type',CASE WHEN v.mode='OAUTH2' THEN 'oauth2' ELSE 'mail' END,'provider',v.runtime_provider),
          'authStorage',json_build_object('mode','credential-reference','projectionPath','/by/.connector-auth/.mail/accounts.json'),
          'skill',json_build_object('code','mail','source','system-builtin','installScope','user','grantScope','agent'))::text,
-       v.sort, '00A'
+       v.sort, CASE WHEN v.code IN ('aliyun-mail','microsoft-mail','fastmail-mail') THEN '00X' ELSE '00A' END
 FROM (VALUES
  ('gmail-mail','Gmail','通过 OAuth2 连接 Gmail 用户账号','gmail-oauth2','OAUTH2','{}','gmail',60),
  ('microsoft-mail','Microsoft 365','通过 OAuth2 连接 Microsoft 365 用户账号','microsoft-mail-oauth2','OAUTH2','{}','microsoft',61),
@@ -23,8 +23,10 @@ WHERE NOT EXISTS (SELECT 1 FROM byai.byai_connector_info i WHERE i.connector_cod
 
 -- V0.5.0 邮箱连接器迁移，仅维护连接器目录，不迁移历史邮箱账号。
 -- 表单字段配置需满足前端校验器：HTTPS helpUrl、text/password 类型及 maxLength。
+-- 阿里邮箱、Microsoft 365、Fastmail 暂不可用；其他已有连接器保持原状态。
 UPDATE byai.byai_connector_info
 SET provider_code = CASE WHEN connector_code='gmail-mail' THEN 'gmail-oauth2' WHEN connector_code='microsoft-mail' THEN 'microsoft-mail-oauth2' ELSE 'mail-form' END,
+    status_cd = CASE WHEN connector_code IN ('aliyun-mail','microsoft-mail','fastmail-mail') THEN '00X' ELSE status_cd END,
     auth_mode = CASE WHEN connector_code IN ('gmail-mail','microsoft-mail') THEN 'OAUTH2' ELSE 'AK_SK' END,
     auth_config = CASE
       WHEN connector_code='gmail-mail' THEN '{"clientIdEnv":"GMAIL_OAUTH_CLIENT_ID","clientSecretEnv":"GMAIL_OAUTH_CLIENT_SECRET","redirectUriEnv":"GMAIL_OAUTH_REDIRECT_URI","scope":"openid email profile https://www.googleapis.com/auth/gmail.modify"}'

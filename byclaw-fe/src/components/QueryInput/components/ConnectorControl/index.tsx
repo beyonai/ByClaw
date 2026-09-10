@@ -14,7 +14,7 @@ import {
   ReloadOutlined,
   SettingOutlined,
 } from '@ant-design/icons';
-import { Avatar, Button, Drawer, Dropdown, Empty, Form, Input, Modal, Spin, Switch, Tooltip, message } from 'antd';
+import { Avatar, Button, Drawer, Dropdown, Empty, Form, Modal, Spin, Switch, Tooltip, message } from 'antd';
 import classNames from 'classnames';
 import dayjs from 'dayjs';
 import customParseFormat from 'dayjs/plugin/customParseFormat';
@@ -42,6 +42,7 @@ import {
 
 import styles from './index.module.less';
 import CredentialHelpCard from './CredentialHelpCard';
+import CredentialFields from './CredentialFields';
 import GlobalAccountSection from './GlobalAccountSection';
 
 dayjs.extend(customParseFormat);
@@ -1139,14 +1140,15 @@ const ConnectorControl = ({
 
       <Modal
         centered
-        className={classNames(styles.credentialModal, credentialSchema?.helpText && styles.credentialModalWithHelp)}
+        className={styles.credentialModal}
+        styles={{ content: { padding: 0, overflow: 'hidden', borderRadius: 16 }, body: { padding: 0 } }}
         closable={!startingAuthorization}
         footer={null}
         keyboard={!startingAuthorization}
         maskClosable={!startingAuthorization}
         open={!!authorizingConnector && !!credentialSchema && !authorizationSession}
         zIndex={2000}
-        width={credentialSchema?.helpText ? '80vw' : 480}
+        width={authorizingConnector?.code === 'custom-imap-mail' || credentialSchema?.helpText ? 680 : 520}
         onCancel={() => {
           if (!startingAuthorization) {
             void cancelAuthorization();
@@ -1154,15 +1156,14 @@ const ConnectorControl = ({
         }}
       >
         {authorizingConnector && credentialSchema && (
-          <div
-            className={classNames(
-              styles.credentialContent,
-              credentialSchema.helpText && styles.credentialContentWithHelp
-            )}
-          >
-            <ConnectorIcon connector={authorizingConnector} />
-            <h2>连接 {authorizingConnector.name}</h2>
-            <p>请输入所需凭据。验证通过后将加密保存，仅在连接器启用时使用。</p>
+          <div className={styles.credentialContent}>
+            <header className={styles.credentialHeader}>
+              <ConnectorIcon connector={authorizingConnector} />
+              <div>
+                <h2>连接 {authorizingConnector.name}</h2>
+                <p>凭据将加密保存，仅在连接器启用时使用。</p>
+              </div>
+            </header>
             <Form<CredentialValues>
               autoComplete="off"
               className={styles.credentialForm}
@@ -1183,23 +1184,16 @@ const ConnectorControl = ({
                     {credentialSchema.helpLinkText?.trim() || `前往${authorizingConnector.name}获取凭据`}
                   </a>
                 )}
-                {credentialSchema.fields.map((field) => (
-                  <Form.Item
-                    key={field.key}
-                    label={field.label}
-                    name={field.key}
-                    rules={[{ required: true, whitespace: true, message: `请输入${field.label}` }]}
-                  >
-                    {field.inputType === 'password' ? (
-                      <Input.Password autoComplete="off" maxLength={field.maxLength} />
-                    ) : (
-                      <Input autoComplete="off" maxLength={field.maxLength} />
-                    )}
-                  </Form.Item>
-                ))}
+                <CredentialFields
+                  fields={credentialSchema.fields}
+                  customImap={authorizingConnector.code === 'custom-imap-mail'}
+                />
               </div>
               <div className={styles.credentialActions}>
-                <Button block htmlType="submit" loading={startingAuthorization} size="large" type="primary">
+                <Button disabled={startingAuthorization} onClick={() => void cancelAuthorization()}>
+                  取消
+                </Button>
+                <Button htmlType="submit" loading={startingAuthorization} type="primary">
                   保存并连接
                 </Button>
               </div>
