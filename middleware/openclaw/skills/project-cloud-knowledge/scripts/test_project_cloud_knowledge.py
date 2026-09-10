@@ -238,6 +238,7 @@ class BackendApiTests(unittest.TestCase):
                 "operationList": [{"propertyName": "status", "operation": "unset"}],
             }
         )
+        self.api.references({"resourceId": 1, "filePath": "/a.md", "direction": "all"})
         self.api.entity_discovery({"resourceId": 1})
         self.api.entity_enrich({"resourceId": 1})
         self.api.remove_file({"resourceId": 1})
@@ -255,6 +256,7 @@ class BackendApiTests(unittest.TestCase):
             "/byaiService/datasetController/knowledgeItems/metadataSearch",
             "/byaiService/datasetController/knowledgeItems/metadata/get",
             "/byaiService/datasetController/knowledgeItems/metadata/update",
+            "/byaiService/datasetController/knowledgeItems/references",
             "/byaiService/datasetController/knowledgeItems/entityDiscovery",
             "/byaiService/datasetController/knowledgeItems/entityEnrich",
             "/byaiService/datasetController/removeFile",
@@ -822,6 +824,59 @@ class KnowledgeManagerTests(unittest.TestCase):
         self.assertEqual(result["resourceId"], 7)
         self.assertEqual(result["filePath"], "/contracts/a.md")
         self.assertEqual(result["metadata"]["tags"]["value"], ["contract"])
+
+    def test_references_returns_only_related_paths_and_statuses(self) -> None:
+        self.transport.responses = [
+            {
+                "inbound": [
+                    {
+                        "sourcePath": "/docs/overview.md",
+                        "targetPath": "/docs/a.md",
+                        "originalTarget": "a.md",
+                        "status": "resolved",
+                    }
+                ],
+                "outbound": [
+                    {
+                        "sourcePath": "/docs/a.md",
+                        "targetPath": "/docs/missing.md",
+                        "originalTarget": "missing.md",
+                        "status": "broken",
+                    }
+                ],
+            }
+        ]
+
+        result = self.manager.execute(
+            self.parse(
+                "references",
+                "--resource-id",
+                "7",
+                "--file-path",
+                "/docs/a.md",
+            )
+        )
+
+        self.assertEqual(
+            self.transport.calls[0],
+            {
+                "kind": "request",
+                "method": "POST",
+                "path": "/byaiService/datasetController/knowledgeItems/references",
+                "payload": {
+                    "resourceId": 7,
+                    "filePath": "/docs/a.md",
+                    "direction": "all",
+                },
+            },
+        )
+        self.assertEqual(
+            result,
+            {
+                "inbound": [{"filePath": "/docs/overview.md", "status": "valid"}],
+                "outbound": [{"filePath": "/docs/missing.md", "status": "invalid"}],
+            },
+        )
 
     def test_metadata_update_builds_atomic_operations_from_readable_flags(self) -> None:
         result = self.manager.execute(

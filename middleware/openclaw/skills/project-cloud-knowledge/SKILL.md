@@ -19,7 +19,7 @@ byclaw_managed: true
 | 用户意图 | 读取 |
 |---|---|
 | 查询项目基本信息、仓库、资源、成员、共享文件，或解析项目云盘资源 ID | 读取并执行 `project-context` |
-| 浏览目录、查看文件、查询构建状态、下载 | [`project-cloud-knowledge-read/SKILL.md`](project-cloud-knowledge-read/SKILL.md) |
+| 浏览目录、查看文件、查询构建状态或引用关系、下载 | [`project-cloud-knowledge-read/SKILL.md`](project-cloud-knowledge-read/SKILL.md) |
 | 新建、重命名、移动、删除、上传、更新、文件或目录批量构建 | [`project-cloud-knowledge-write/SKILL.md`](project-cloud-knowledge-write/SKILL.md) |
 | 按关键词、标签或其他属性查找文件，或使用 DSL 过滤 | [`project-cloud-knowledge-search/SKILL.md`](project-cloud-knowledge-search/SKILL.md) |
 | 查看某个文件或目录的标签和属性，打标签、改标签、删标签或修改其他属性 | [`project-cloud-knowledge-metadata/SKILL.md`](project-cloud-knowledge-metadata/SKILL.md) |

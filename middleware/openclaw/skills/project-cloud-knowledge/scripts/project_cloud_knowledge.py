@@ -626,6 +626,13 @@ class BackendApi:
             payload=payload,
         )
 
+    def references(self, payload: dict[str, Any]) -> Any:
+        return self.transport.request(
+            method="POST",
+            path=self._path("knowledgeItems/references"),
+            payload=payload,
+        )
+
     def entity_discovery(
         self,
         payload: dict[str, Any],
@@ -955,6 +962,35 @@ class KnowledgeManager:
         value = value if isinstance(value, dict) else {}
         file = _compact({"resourceId": resource_id, "filePath": value.get("filePath"), "startLine": _as_int(value.get("startLine")), "endLine": _as_int(value.get("endLine")), "content": value.get("data"), "reachedEof": value.get("reachedEof")})
         return {"ok": True, "action": "read-file", "file": file}
+
+    def _references(self, args: argparse.Namespace) -> dict[str, Any]:
+        payload = {
+            "resourceId": self._resource_id(args),
+            "filePath": args.file_path,
+            "direction": args.direction,
+        }
+        value = self.api.references(payload)
+        value = value if isinstance(value, dict) else {}
+
+        def items(name: str, path_field: str) -> list[dict[str, Any]]:
+            result: list[dict[str, Any]] = []
+            for item in value.get(name, []):
+                if not isinstance(item, dict):
+                    continue
+                raw_status = item.get("status")
+                if raw_status == "resolved":
+                    status = "valid"
+                elif raw_status in {"unresolved", "broken"}:
+                    status = "invalid"
+                else:
+                    raise ValueError(f"未知的引用状态: {raw_status}")
+                result.append(_compact({"filePath": item.get(path_field), "status": status}))
+            return result
+
+        return {
+            "inbound": items("inbound", "sourcePath"),
+            "outbound": items("outbound", "targetPath"),
+        }
 
     def _search_payload(self, args: argparse.Namespace) -> dict[str, Any]:
         if any(resource_id <= 0 for resource_id in args.resource_id):
@@ -1364,6 +1400,7 @@ def build_parser() -> argparse.ArgumentParser:
         "build-status": "查询知识文件构建状态",
         "download": "下载知识库文件或目录压缩包",
         "read-file": "按行读取知识库文件内容",
+        "references": "查询文件的入站和出站引用",
         "search": "检索知识库内容切片",
         "search-file": "检索知识库相关文件",
         "metadata-search": "仅按标签或其他属性条件分页查找知识库文件",
@@ -1538,6 +1575,21 @@ def build_parser() -> argparse.ArgumentParser:
         type=_positive_int,
         metavar="N",
         help="结束行号（包含该行）",
+    )
+
+    references = _add_command(subparsers, "references", descriptions["references"])
+    _add_single_resource(references)
+    references.add_argument(
+        "--file-path",
+        required=True,
+        metavar="PATH",
+        help="要查询引用关系的文件绝对路径",
+    )
+    references.add_argument(
+        "--direction",
+        choices=("inbound", "outbound", "all"),
+        default="all",
+        help="查询方向（默认 all）",
     )
 
     for name in ("search", "search-file"):
