@@ -26,6 +26,8 @@ public interface ByaiMessageMapper extends BaseMapper<ByaiMessage> {
      */
     List<ByaiMessage> selectBySessionId(@Param("sessionId") Long sessionId);
 
+    Long selectLatestMessageId(@Param("sessionId") Long sessionId);
+
     /**
      * 根据任务ID查询消息列表
      *
@@ -41,6 +43,10 @@ public interface ByaiMessageMapper extends BaseMapper<ByaiMessage> {
      * @return 记录（可能为 null）
      */
     ByaiMessage selectByMessageId(@Param("messageId") Long messageId);
+
+    /** 查询群聊入站消息的客户端幂等键。 */
+    ByaiMessage selectGroupMessageByClientRequestId(@Param("sessionId") Long sessionId,
+        @Param("clientRequestId") String clientRequestId);
 
     /**
      * 根据会话ID删除记录

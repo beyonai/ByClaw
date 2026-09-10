@@ -13,6 +13,7 @@ import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.alibaba.fastjson.JSON;
@@ -27,6 +28,9 @@ import com.iwhalecloud.byai.state.domain.chat.dto.GroupChatContextResponse;
 import com.iwhalecloud.byai.state.domain.chat.model.MessageFileDto;
 import com.iwhalecloud.byai.state.domain.chat.model.MessageResourceDto;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
+import com.iwhalecloud.byai.state.domain.session.service.SessionMemberService;
+import com.iwhalecloud.byai.state.domain.session.enums.MemObjType;
+import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatContextTokenService;
 
 /**
  * 从 byai_session/byai_message 构建一次有边界、可鉴权的群聊快照。
@@ -49,19 +53,32 @@ public class GroupChatContextService {
     private final SessionService sessionService;
 
     private final SsResourceService resourceService;
+    private final SessionMemberService memberService;
+    private final GroupChatContextTokenService tokenService;
 
+    @Autowired
     public GroupChatContextService(ByaiMessageMapper messageMapper, SessionService sessionService,
-        SsResourceService resourceService) {
+        SsResourceService resourceService, SessionMemberService memberService, GroupChatContextTokenService tokenService) {
         this.messageMapper = messageMapper;
         this.sessionService = sessionService;
         this.resourceService = resourceService;
+        this.memberService = memberService;
+        this.tokenService = tokenService;
+    }
+
+    /** 兼容既有单元测试和历史构造方式。 */
+    public GroupChatContextService(ByaiMessageMapper messageMapper, SessionService sessionService,
+        SsResourceService resourceService) {
+        this(messageMapper, sessionService, resourceService, null, null);
     }
 
     public GroupChatContextResponse load(GroupChatContextRequest request) {
         Long sessionId = parseRequiredLong(request == null ? null : request.getConversationKey(), "conversationKey");
-        Long beforeMessageId = parseRequiredLong(request == null ? null : request.getBeforeMessageId(),
-            "beforeMessageId");
-        requireOwnedSession(sessionId);
+        Long beforeMessageId = parseOptionalLong(request == null ? null : request.getBeforeMessageId());
+        if (beforeMessageId == null) {
+            beforeMessageId = Objects.requireNonNullElse(messageMapper.selectLatestMessageId(sessionId), 0L) + 1;
+        }
+        requireGroupMember(sessionId, request);
 
         int maxMessages = bounded(request.getMaxMessages(), DEFAULT_MAX_MESSAGES, MAX_MESSAGES);
         int maxCharacters = bounded(request.getMaxCharacters(), DEFAULT_MAX_CHARACTERS, MAX_CHARACTERS);
@@ -104,10 +121,40 @@ public class GroupChatContextService {
         return response;
     }
 
-    private void requireOwnedSession(Long sessionId) {
+    private void requireGroupMember(Long sessionId, GroupChatContextRequest request) {
         ByaiSession session = sessionService.findById(sessionId);
+        String contextToken = request == null ? null : request.getContextToken();
+        if (contextToken != null && tokenService != null) {
+            Map<String, Object> claims = tokenService.verify(contextToken);
+            if (request == null || request.getChildSessionId() == null || request.getInitiatorUserId() == null
+                || request.getTargetAgentId() == null) {
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversation not found");
+            }
+            if (!String.valueOf(sessionId).equals(String.valueOf(claims.get("groupSessionId")))) {
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversation not found");
+            }
+            if (request.getInitiatorUserId() != null
+                && !String.valueOf(request.getInitiatorUserId()).equals(String.valueOf(claims.get("initiatorUserId")))) {
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversation not found");
+            }
+            if (request.getTargetAgentId() != null
+                && !String.valueOf(request.getTargetAgentId()).equals(String.valueOf(claims.get("targetAgentId")))) {
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversation not found");
+            }
+            if (!String.valueOf(request.getChildSessionId()).equals(String.valueOf(claims.get("childSessionId")))) {
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversation not found");
+            }
+            Object boundary = claims.get("boundaryMessageId");
+            Long requestedBefore = parseRequiredLong(request.getBeforeMessageId(), "beforeMessageId");
+            if (boundary != null && requestedBefore > Long.parseLong(String.valueOf(boundary))) {
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversation not found");
+            }
+            return;
+        }
         Long currentUserId = CurrentUserHolder.getCurrentUserId();
-        if (session == null || !Objects.equals(session.getCreatorId(), currentUserId)) {
+        boolean member = memberService != null
+            && memberService.findSessionMember(sessionId, MemObjType.USER.name(), currentUserId) != null;
+        if (session == null || (memberService != null && !member)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversation not found");
         }
     }
@@ -137,12 +184,43 @@ public class GroupChatContextService {
             message.setSequence(index);
             message.setCreatedAt(source.getCreateTime() == null ? 0L : source.getCreateTime().getTime());
             message.setContent(StringUtils.defaultString(source.getMessageContent()));
+            message.setTarget(toTarget(source));
             message.setRole(Integer.valueOf(1).equals(source.getUsage()) ? "user" : "assistant");
             message.setSpeaker(toSpeaker(source, resources));
             message.setAttachments(toAttachments(source.getRelatedResources()));
+            if (source.getMessageRef() != null) {
+                ByaiMessage referenced = messageMapper.selectByMessageId(source.getMessageRef());
+                if (referenced != null && Objects.equals(source.getSessionId(), referenced.getSessionId())) {
+                    GroupChatContextResponse.ReplyReference reply = new GroupChatContextResponse.ReplyReference();
+                    reply.setMessageId(String.valueOf(referenced.getMessageId()));
+                    reply.setContent(StringUtils.defaultString(referenced.getMessageContent()));
+                    reply.setRole(Integer.valueOf(1).equals(referenced.getUsage()) ? "user" : "assistant");
+                    reply.setSpeaker(toSpeaker(referenced, resources));
+                    message.setReplyTo(reply);
+                }
+            }
             result.add(message);
         }
         return result;
+    }
+
+    private GroupChatContextResponse.Target toTarget(ByaiMessage source) {
+        if (StringUtils.isBlank(source.getMetadata())) {
+            return null;
+        }
+        try {
+            Map<?, ?> metadata = JSON.parseObject(source.getMetadata(), Map.class);
+            Object targetAgentId = metadata.get("targetAgentId");
+            if (targetAgentId == null) {
+                return null;
+            }
+            GroupChatContextResponse.Target target = new GroupChatContextResponse.Target();
+            target.setAgentId(String.valueOf(targetAgentId));
+            return target;
+        }
+        catch (Exception ignored) {
+            return null;
+        }
     }
 
     private GroupChatContextResponse.Speaker toSpeaker(ByaiMessage message, Map<Long, SsResource> resources) {
@@ -231,6 +309,18 @@ public class GroupChatContextService {
         }
         catch (NumberFormatException error) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, field + " is invalid");
+        }
+    }
+
+    private Long parseOptionalLong(String value) {
+        if (StringUtils.isBlank(value)) {
+            return null;
+        }
+        try {
+            return Long.valueOf(value);
+        }
+        catch (NumberFormatException exception) {
+            throw new IllegalArgumentException("Invalid beforeMessageId");
         }
     }
 

@@ -1,15 +1,19 @@
 package com.iwhalecloud.byai.state.domain.chat.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Date;
+import java.util.Map;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.web.server.ResponseStatusException;
 
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
@@ -20,6 +24,8 @@ import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper;
 import com.iwhalecloud.byai.state.domain.chat.dto.GroupChatContextRequest;
 import com.iwhalecloud.byai.state.domain.chat.dto.GroupChatContextResponse;
+import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatContextTokenService;
+import com.iwhalecloud.byai.state.domain.session.service.SessionMemberService;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 
 class GroupChatContextServiceTest {
@@ -88,6 +94,41 @@ class GroupChatContextServiceTest {
         assertThat(response.getMessages().get(1).getSpeaker().getAgentId()).isEqualTo("1001");
         assertThat(response.getMessages().get(1).getSpeaker().getAgentName()).isEqualTo("Agent A");
         assertThat(response.getTruncation().getTruncated()).isFalse();
+    }
+
+    @Test
+    void signedParentContextRequiresTheBoundChildSession() {
+        SessionMemberService memberService = mock(SessionMemberService.class);
+        GroupChatContextTokenService tokenService = mock(GroupChatContextTokenService.class);
+        service = new GroupChatContextService(messageMapper, sessionService, resourceService, memberService,
+            tokenService);
+        ByaiSession session = new ByaiSession();
+        session.setSessionId(3L);
+        when(sessionService.findById(3L)).thenReturn(session);
+        when(tokenService.verify("signed-context-token")).thenReturn(Map.of(
+            "scene", "GROUP_CHAT_CONTEXT",
+            "groupSessionId", 3L,
+            "childSessionId", 500L,
+            "initiatorUserId", 100L,
+            "targetAgentId", 200L,
+            "boundaryMessageId", 30L));
+        when(messageMapper.countVisibleBeforeMessageId(3L, 30L)).thenReturn(0L);
+        when(messageMapper.selectVisibleBeforeMessageId(3L, 30L, 60)).thenReturn(Collections.emptyList());
+
+        GroupChatContextRequest request = new GroupChatContextRequest();
+        request.setConversationKey("3");
+        request.setBeforeMessageId("30");
+        request.setContextToken("signed-context-token");
+        request.setChildSessionId(500L);
+        request.setInitiatorUserId(100L);
+        request.setTargetAgentId(200L);
+
+        assertThat(service.load(request).getConversationKey()).isEqualTo("3");
+
+        request.setChildSessionId(501L);
+        assertThatThrownBy(() -> service.load(request))
+            .isInstanceOf(ResponseStatusException.class)
+            .hasMessageContaining("Conversation not found");
     }
 
     private ByaiMessage message(Long messageId, int usage, String content, long createdAt) {

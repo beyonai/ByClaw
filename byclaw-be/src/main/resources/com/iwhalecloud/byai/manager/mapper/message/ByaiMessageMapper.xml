@@ -85,6 +85,10 @@
         ORDER BY create_time DESC, message_id DESC
     </select>
 
+    <select id="selectLatestMessageId" resultType="long">
+        SELECT MAX(message_id) FROM byai_message WHERE session_id = #{sessionId}
+    </select>
+
     <select id="selectByTaskId" resultMap="BaseResultMap">
         SELECT <include refid="Base_Column_List" />
         FROM byai_message
@@ -96,6 +100,15 @@
         SELECT <include refid="Base_Column_List" />
         FROM byai_message
         WHERE message_id = #{messageId}
+        LIMIT 1
+    </select>
+
+    <select id="selectGroupMessageByClientRequestId" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" />
+        FROM byai_message
+        WHERE session_id = #{sessionId}
+          AND metadata::jsonb ->> 'clientRequestId' = #{clientRequestId}
+        ORDER BY message_id DESC
         LIMIT 1
     </select>
 

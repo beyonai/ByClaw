@@ -60,6 +60,7 @@ import com.iwhalecloud.byai.state.domain.men.enums.TaskTypeEnum;
 import com.iwhalecloud.byai.state.domain.men.service.MenResComService;
 import com.iwhalecloud.byai.state.domain.men.service.MenTaskService;
 import com.iwhalecloud.byai.state.domain.message.service.MemoryMessageService;
+import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTaskChatGuard;
 import com.iwhalecloud.byai.state.domain.session.enums.MemObjType;
 import com.iwhalecloud.byai.state.domain.session.enums.SessionType;
 import com.iwhalecloud.byai.state.domain.session.enums.UserRole;
@@ -134,6 +135,9 @@ public class AssistantChatService {
     private ObjectProvider<PendingTaskConfirmHook> pendingTaskConfirmHookProvider;
 
     @Autowired
+    private ObjectProvider<GroupChatTaskChatGuard> groupChatTaskGuardProvider;
+
+    @Autowired
     private RedisTemplate<String, Object> redisTemplate;
 
 
@@ -155,6 +159,8 @@ public class AssistantChatService {
     @WithSpan(value = "chat", inheritContext = false)
     public void chat(AssistantChatDto assistantChatDto, OutputStream outputStream, LoginInfo userInfo)
         throws IOException {
+        boolean groupTaskTurn = false;
+        boolean groupTaskSucceeded = false;
         Span span = Span.current();
         if (assistantChatDto != null && span != null && assistantChatDto.getSessionId() != null) {
             span.setAttribute("sessionId", assistantChatDto.getSessionId());
@@ -186,6 +192,9 @@ public class AssistantChatService {
 
             // 处理sessionId相关逻辑,校验消息发送权限
             handleSessionLogic(outputStream, assistantChatDto);
+            GroupChatTaskChatGuard taskGuard = groupChatTaskGuardProvider.getIfAvailable();
+            groupTaskTurn = taskGuard != null && assistantChatDto != null
+                && taskGuard.beforeTurn(assistantChatDto.getSessionId());
 
             // 研发派发的会话在等承接人接单:命中确认词才把完整任务提示词换上去下发,不命中原样放行。
             applyPendingTaskConfirm(assistantChatDto);
@@ -201,11 +210,18 @@ public class AssistantChatService {
             // 执行聊天处理：Gateway 模式下 handleGatewayMode() 内部阻塞等待 Redis 监听器完成，
             // 返回后即可安全执行 storeMessage/afterProcess，最终由 finally 关闭流
             executeChat(assistantChatDto, outputStream, firstTextStartTime);
+            groupTaskSucceeded = true;
         } catch (BdpRuntimeException e) {
             handleBdpRuntimeException(e, assistantChatDto, outputStream);
         } catch (Exception e) {
             handleGeneralException(e, outputStream);
         } finally {
+            if (groupTaskTurn && assistantChatDto != null) {
+                GroupChatTaskChatGuard taskGuard = groupChatTaskGuardProvider.getIfAvailable();
+                if (taskGuard != null) {
+                    taskGuard.afterTurn(assistantChatDto.getSessionId(), groupTaskSucceeded);
+                }
+            }
             cleanupResources(userInfo, outputStream);
         }
     }

@@ -48,7 +48,17 @@ public class GroupChatContextResponse {
 
         private String content;
 
+        private ReplyReference replyTo;
+
         private List<Attachment> attachments;
+    }
+
+    @Data
+    public static class ReplyReference {
+        private String messageId;
+        private String content;
+        private String role;
+        private Speaker speaker;
     }
 
     @Data

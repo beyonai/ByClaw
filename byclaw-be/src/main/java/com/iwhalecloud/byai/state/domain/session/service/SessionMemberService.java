@@ -59,6 +59,13 @@ public class SessionMemberService {
         byaiSessionMemberMapper.delete(queryWrapper);
     }
 
+    /** 按成员主键删除单条群成员。 */
+    public void deleteMember(Long memberId) {
+        if (memberId != null) {
+            byaiSessionMemberMapper.deleteById(memberId);
+        }
+    }
+
     public List<ByaiSessionMember> findSessionMembers(Long sessionId, String memObjType, Long memObjId) {
         LambdaQueryWrapper<ByaiSessionMember> queryWrapper = new LambdaQueryWrapper<>();
         queryWrapper.eq(ByaiSessionMember::getSessionId, sessionId);

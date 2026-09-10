@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatExecutionMapper">
+
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatExecution">
+        <id column="execution_id" property="executionId" />
+        <result column="group_session_id" property="groupSessionId" />
+        <result column="source_message_id" property="sourceMessageId" />
+        <result column="reply_to_message_id" property="replyToMessageId" />
+        <result column="initiator_user_id" property="initiatorUserId" />
+        <result column="target_agent_id" property="targetAgentId" />
+        <result column="candidate_session_id" property="candidateSessionId" />
+        <result column="status" property="status" />
+        <result column="disposition" property="disposition" />
+        <result column="task_name" property="taskName" />
+        <result column="ack_text" property="ackText" />
+        <result column="disposition_time" property="dispositionTime" />
+        <result column="parent_execution_id" property="parentExecutionId" />
+        <result column="root_message_id" property="rootMessageId" />
+        <result column="trace_id" property="traceId" />
+        <result column="gateway_session_id" property="gatewaySessionId" />
+        <result column="ack_message_id" property="ackMessageId" />
+        <result column="answer_message_id" property="answerMessageId" />
+        <result column="error_code" property="errorCode" />
+        <result column="error_message" property="errorMessage" />
+        <result column="attempt" property="attempt" />
+        <result column="create_time" property="createTime" />
+        <result column="start_time" property="startTime" />
+        <result column="finish_time" property="finishTime" />
+    </resultMap>
+
+    <sql id="BaseColumns">
+        execution_id, group_session_id, source_message_id, reply_to_message_id,
+        initiator_user_id, target_agent_id, candidate_session_id, status,
+        disposition, task_name, ack_text, disposition_time,
+        parent_execution_id, root_message_id, trace_id, gateway_session_id,
+        ack_message_id, answer_message_id, error_code, error_message,
+        attempt, create_time, start_time, finish_time
+    </sql>
+
+    <select id="selectBySourceAndAgent" resultMap="BaseResultMap">
+        SELECT <include refid="BaseColumns" />
+        FROM byai_group_chat_execution
+        WHERE source_message_id = #{sourceMessageId}
+          AND target_agent_id = #{targetAgentId}
+        LIMIT 1
+    </select>
+
+    <update id="claim">
+        UPDATE byai_group_chat_execution
+        SET status = 'RUNNING', start_time = #{now}, attempt = COALESCE(attempt, 0) + 1
+        WHERE execution_id = #{executionId} AND status = 'QUEUED'
+    </update>
+
+    <select id="selectNextQueued" resultMap="BaseResultMap">
+        SELECT <include refid="BaseColumns" />
+        FROM byai_group_chat_execution
+        WHERE status = 'QUEUED'
+        ORDER BY create_time ASC, execution_id ASC
+        LIMIT 1
+    </select>
+
+    <select id="selectByCandidateSessionId" resultMap="BaseResultMap">
+        SELECT <include refid="BaseColumns" />
+        FROM byai_group_chat_execution
+        WHERE candidate_session_id = #{candidateSessionId}
+        LIMIT 1
+    </select>
+
+    <update id="decideDisposition">
+        UPDATE byai_group_chat_execution
+        SET disposition = #{disposition}, task_name = #{taskName}, ack_text = #{ackText},
+            disposition_time = #{now}
+        WHERE execution_id = #{executionId} AND disposition = 'UNKNOWN'
+    </update>
+
+    <update id="setAckMessage">
+        UPDATE byai_group_chat_execution SET ack_message_id = #{messageId}
+        WHERE execution_id = #{executionId} AND ack_message_id IS NULL
+    </update>
+
+    <insert id="insertEventIfAbsent">
+        INSERT INTO byai_group_chat_execution_event (execution_id, event_id, event_type)
+        VALUES (#{executionId}, #{eventId}, #{eventType})
+        ON CONFLICT (execution_id, event_id) DO NOTHING
+    </insert>
+
+    <update id="markSucceeded">
+        UPDATE byai_group_chat_execution
+        SET status = 'SUCCEEDED', answer_message_id = COALESCE(#{answerMessageId}, answer_message_id), finish_time = #{now}
+        WHERE execution_id = #{executionId} AND status = 'RUNNING'
+    </update>
+
+    <update id="markFailed">
+        UPDATE byai_group_chat_execution
+        SET status = 'FAILED', error_code = #{errorCode}, error_message = #{errorMessage}, finish_time = #{now}
+        WHERE execution_id = #{executionId} AND status IN ('RUNNING', 'QUEUED')
+    </update>
+
+    <select id="selectStaleRunning" resultMap="BaseResultMap">
+        SELECT <include refid="BaseColumns" />
+        FROM byai_group_chat_execution
+        WHERE status = 'RUNNING'
+          AND start_time &lt; #{before}
+        ORDER BY start_time ASC, execution_id ASC
+    </select>
+
+    <update id="requeueStaleRunning">
+        UPDATE byai_group_chat_execution
+        SET status = CASE WHEN COALESCE(attempt, 0) >= 3 THEN 'FAILED_RETRYABLE' ELSE 'QUEUED' END,
+            start_time = NULL,
+            error_code = CASE WHEN COALESCE(attempt, 0) >= 3 THEN 'STALE_TIMEOUT' ELSE error_code END,
+            error_message = CASE WHEN COALESCE(attempt, 0) >= 3 THEN 'Execution exceeded stale retry limit' ELSE error_message END
+        WHERE status = 'RUNNING'
+          AND start_time &lt; #{before}
+    </update>
+
+    <select id="selectRunningExecutions" resultMap="BaseResultMap">
+        SELECT <include refid="BaseColumns" />
+        FROM byai_group_chat_execution
+        WHERE status = 'RUNNING'
+        ORDER BY start_time ASC, execution_id ASC
+    </select>
+
+    <select id="selectQueuedExecutions" resultMap="BaseResultMap">
+        SELECT <include refid="BaseColumns" />
+        FROM byai_group_chat_execution
+        WHERE status = 'QUEUED'
+        ORDER BY create_time ASC, execution_id ASC
+    </select>
+
+</mapper>

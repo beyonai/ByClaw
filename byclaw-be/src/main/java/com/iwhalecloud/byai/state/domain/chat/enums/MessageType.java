@@ -7,5 +7,6 @@ public enum MessageType {
     NOTIFICATION, // 通知
     STOP_CHAT,
     TASK_PLAN_GET,
+    GROUP_CHAT_SEND,
     ERROR;
 }
