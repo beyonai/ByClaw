@@ -1492,7 +1492,7 @@ INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_nam
 }
 ', '初始化项目专家组数字员工模板');
 
-DELETE FROM byai.byai_system_config WHERE param_code IN('INIT_DEFAULT_PROJECT_EXPERT_TEAMS_TEMPLATE');
+DELETE FROM byai.byai_system_config WHERE param_code IN('INIT_DEFAULT_DIGEMPLOYEE_TEMPLATE');
 INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_name, param_en_name, param_value, param_desc) VALUES (nextval('byai.seq_any_table'), 'json', 'INIT_DEFAULT_DIGEMPLOYEE_TEMPLATE', '用户登陆初始数字员工助手模板', 'INIT_DEFAULT_DIGEMPLOYEE_TEMPLATE', e'{
 	"zh_CN": [{
 			"resourceName": "${userName}的超级助手",
