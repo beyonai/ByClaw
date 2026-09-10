@@ -876,23 +876,26 @@ public class SandboxService {
         }
     }
 
-    /** 沙箱心跳：只更新 resource 路由解析出的运行中沙箱。 */
+    /**
+     * 沙箱心跳：更新当前用户所有运行中沙箱的最后访问时间。
+     * 页面心跳不区分沙箱类型，因此按用户维度刷新，避免同一用户的其他沙箱类型被空闲回收。
+     */
     public boolean heartbeat(Long resourceId) {
         String userCode = CurrentUserHolder.getCurrentUserCode();
         if (StringUtils.isBlank(userCode)) {
             LOGGER.warn("心跳失败：无法获取当前用户编码，资源ID：{}", resourceId);
             return false;
         }
-        return heartbeatResolvedSandbox(userCode, resourceId);
+        return heartbeatRunningSandboxesByUser(userCode, resourceId);
     }
 
-    /** 沙箱心跳：只更新指定用户 resource 路由解析出的运行中沙箱。 */
+    /** 沙箱心跳：更新指定用户所有运行中沙箱的最后访问时间。 */
     public boolean heartbeat(String userCode, Long resourceId) {
         if (StringUtils.isBlank(userCode)) {
             LOGGER.warn("心跳失败：无法获取当前用户编码，资源ID：{}", resourceId);
             return false;
         }
-        return heartbeatResolvedSandbox(userCode, resourceId);
+        return heartbeatRunningSandboxesByUser(userCode, resourceId);
     }
 
     /**
@@ -934,26 +937,34 @@ public class SandboxService {
         return true;
     }
 
-    private boolean heartbeatResolvedSandbox(String userCode, Long resourceId) {
-        SandboxLaunchRouting routing = sandboxLaunchContextFactory.resolveRouting(resourceId, userCode);
-        SsSandboxRecord record = sandboxRecordMapper.selectRunningByUserAndResource(userCode,
-            routing.getSandboxType(), routing.getEffectiveResourceId());
-        if (record == null) {
-            LOGGER.warn("心跳失败：未找到精确路由的运行中沙箱，用户编码：{}，资源ID：{}，沙箱类型：{}，effectiveResourceId：{}",
-                userCode, resourceId, routing.getSandboxType(), routing.getEffectiveResourceId());
+    private boolean heartbeatRunningSandboxesByUser(String userCode, Long resourceId) {
+        List<SsSandboxRecord> records = sandboxRecordMapper.selectRunningByUser(userCode);
+        if (records == null || records.isEmpty()) {
+            LOGGER.warn("心跳失败：未找到运行中的沙箱记录，用户编码：{}，资源ID：{}", userCode, resourceId);
             return false;
         }
         Date now = new Date();
-        SsSandboxRecord updatedRecord = refreshLastAccessTime(record, now);
-        if (updatedRecord == null) {
-            LOGGER.warn("沙箱心跳失败：精确路由记录未更新，用户编码：{}，资源ID：{}，记录：{}",
-                userCode, resourceId, sandboxRef(record));
+        int updatedCount = 0;
+        List<String> skippedRecords = new ArrayList<>();
+        for (SsSandboxRecord record : records) {
+            SsSandboxRecord updatedRecord = refreshLastAccessTime(record, now);
+            if (updatedRecord == null) {
+                skippedRecords.add(sandboxRef(record));
+                continue;
+            }
+            sandboxMetadataCache.put(toSandboxInfo(updatedRecord));
+            sandboxHealthWatchService.touch(userCode, resolveHealthServiceType(updatedRecord));
+            updatedCount++;
+        }
+        if (!skippedRecords.isEmpty()) {
+            LOGGER.warn("沙箱心跳部分记录跳过，用户编码：{}，资源ID：{}，跳过记录：{}", userCode, resourceId, skippedRecords);
+        }
+        if (updatedCount == 0) {
+            LOGGER.warn("沙箱心跳失败：运行中记录均未更新，用户编码：{}，资源ID：{}", userCode, resourceId);
             return false;
         }
-        sandboxMetadataCache.put(toSandboxInfo(updatedRecord));
-        sandboxHealthWatchService.touch(userCode, resolveHealthServiceType(updatedRecord));
-        LOGGER.debug("沙箱心跳成功，用户编码：{}，资源ID：{}，沙箱类型：{}，记录ID：{}，lastAccessTime：{}",
-            userCode, resourceId, routing.getSandboxType(), record.getId(), now);
+        LOGGER.debug("沙箱心跳成功，用户编码：{}，资源ID：{}，命中记录数：{}，更新记录数：{}，lastAccessTime：{}",
+            userCode, resourceId, records.size(), updatedCount, now);
         return true;
     }
 
