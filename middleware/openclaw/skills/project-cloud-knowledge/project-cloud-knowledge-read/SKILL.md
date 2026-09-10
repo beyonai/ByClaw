@@ -1,6 +1,6 @@
 ---
 name: project-cloud-knowledge-read
-description: "只读浏览 ByClaw 知识库或项目云盘。用于列出目录、查询文件构建状态、下载文件或目录，以及按行读取文件。"
+description: "只读浏览 ByClaw 知识库或项目云盘。用于列出目录、查询文件构建状态和引用关系、下载文件或目录，以及按行读取文件。"
 ---
 
 # 读取知识库内容
@@ -28,6 +28,18 @@ python3 <project-cloud-knowledge目录>/scripts/project_cloud_knowledge.py build
 ```
 
 `build-status` 按文件查询，不支持目录或整批状态；目录批量构建后不能用单个文件状态代表全部文件。把 `pending` 表述为“排队中”，处理中状态表述为“构建中”；`unsupported` 表示文件已入库但格式不支持知识构建。
+
+## 查询引用关系
+
+使用 `references` 查询一个文件被哪些文件引用（入站）以及它引用了哪些文件（出站）：
+
+```bash
+python3 <project-cloud-knowledge目录>/scripts/project_cloud_knowledge.py references \
+  --resource-id RESOURCE_ID \
+  --file-path /产品资料/a.md
+```
+
+默认返回双向关系；需要单向查询时传 `--direction inbound` 或 `--direction outbound`。输出只包含 `inbound`、`outbound` 两个数组，其中每项仅有相关文件的 `filePath` 与引用状态 `status`（`valid` 或 `invalid`）。
 
 ## 下载内容
 
