@@ -529,11 +529,11 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
         >
           {hasTools && (
             <>
-              <Tooltip title="可添加数字员工、技能、连接器">
+              <Tooltip title={getIntl().formatMessage({ id: 'queryInput.tools.addResources' })}>
                 <Button
                   type="text"
                   className={styles.addToolButton}
-                  aria-label="打开聊天工具"
+                  aria-label={getIntl().formatMessage({ id: 'queryInput.tools.open' })}
                   icon={<AntdIcon type="icon-a-Plusjia" style={{ fontSize: 20 }} />}
                   onClick={() => this.openResourcePicker('expert')}
                 />

@@ -959,27 +959,13 @@ public class ProjectApplicationService {
         return "github";
     }
 
-    /**
-     * 删除项目仓库，已被扫描源或手工需求关联时拒绝删除。
-     *
-     * @param repoId 仓库 ID
-     */
+    /** 删除项目仓库；扫描源关联不再阻断删除。 */
     @Transactional
     public void deleteProjectRepo(Long repoId) {
         if (repoId == null) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.repo.id.required");
         }
-        Long boundCount = scanSourceService.countByRepoId(repoId);
-        if (boundCount != null && boundCount > 0) {
-            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("project.repo.bound", boundCount));
-        }
         ProjectRepo repo = projectRepoMapper.selectById(repoId);
-        long manualRequirementBoundCount = repo == null ? 0
-            : countManualRequirementRepoBindings(repo.getProjectId(), repoId);
-        if (manualRequirementBoundCount > 0) {
-            throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
-                I18nUtil.get("project.repo.manualRequirement.bound", manualRequirementBoundCount));
-        }
         projectRepoMapper.deleteById(repoId);
         if (repo != null) {
             projectWorkspaceManifestService.syncProjectGitmodules(repo.getProjectId());

@@ -1,5 +1,5 @@
 import { LeftOutlined } from '@ant-design/icons';
-import { useLocation, useNavigate } from '@umijs/max';
+import { useLocation, useNavigate, useIntl } from '@umijs/max';
 import {
   Badge,
   Button,
@@ -106,6 +106,7 @@ const normalizeAuditRows = (response: any, history: boolean): AuditRow[] => {
 const getAuditRowKey = (row: AuditRow) => `${row.privilegeGrantId || ''}-${row.resourceId || ''}-${row.userId || ''}`;
 
 const MyEmployeesPage: React.FC = () => {
+  const intl = useIntl();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<OwnerTab>('personal');
   const location = useLocation();
@@ -335,7 +336,7 @@ const MyEmployeesPage: React.FC = () => {
 
   const auditColumns: ColumnsType<AuditRow> = [
     {
-      title: '数字员工名称',
+      title: intl.formatMessage({ id: 'myEmployees.employeeName' }),
       dataIndex: 'resourceName',
       render: (value, row) => (
         <div className={styles.auditEmployeeName}>
@@ -344,10 +345,10 @@ const MyEmployeesPage: React.FC = () => {
         </div>
       ),
     },
-    { title: '类型', dataIndex: 'employeeType' },
-    { title: '申请用户', dataIndex: 'userName' },
+    { title: intl.formatMessage({ id: 'myEmployees.type' }), dataIndex: 'employeeType' },
+    { title: intl.formatMessage({ id: 'myEmployees.applicant' }), dataIndex: 'userName' },
     {
-      title: '申请时间',
+      title: intl.formatMessage({ id: 'myEmployees.applicationTime' }),
       dataIndex: 'applyTime',
       render: (value) => (value && dayjs(value).isValid() ? dayjs(value).format('YYYY-MM-DD HH:mm') : value || '-'),
     },
@@ -355,7 +356,7 @@ const MyEmployeesPage: React.FC = () => {
 
   if (auditFilter === 'history') {
     auditColumns.push({
-      title: '处理时间',
+      title: intl.formatMessage({ id: 'myEmployees.processedTime' }),
       dataIndex: 'auditTime',
       render: (value) => (value && dayjs(value).isValid() ? dayjs(value).format('YYYY-MM-DD HH:mm') : value || '-'),
     });
@@ -363,34 +364,34 @@ const MyEmployeesPage: React.FC = () => {
 
   if (auditFilter === 'pending') {
     auditColumns.push({
-      title: '状态',
+      title: intl.formatMessage({ id: 'myEmployees.status' }),
       dataIndex: 'applyStatus',
       render: (value) => (
         <Tag color={value === '已驳回' ? 'error' : value === '审核通过' ? 'success' : 'processing'}>{value}</Tag>
       ),
     });
     auditColumns.push({
-      title: '操作',
+      title: intl.formatMessage({ id: 'myEmployees.actions' }),
       render: (_: unknown, row: AuditRow) => (
         <Space>
           <Popconfirm
-            title="确认通过该使用申请吗？"
-            okText="确认"
-            cancelText="取消"
+            title={intl.formatMessage({ id: 'myEmployees.confirmApprove' })}
+            okText={intl.formatMessage({ id: 'common.confirm' })}
+            cancelText={intl.formatMessage({ id: 'common.cancel' })}
             onConfirm={() => handleAudit(row, 'approve')}
           >
             <Button type="link" size="small" loading={actionKey === `approve-${row.resourceId}-${row.userId}`}>
-              通过
+              {intl.formatMessage({ id: 'myEmployees.approve' })}
             </Button>
           </Popconfirm>
           <Popconfirm
-            title="确认驳回该使用申请吗？"
-            okText="确认"
-            cancelText="取消"
+            title={intl.formatMessage({ id: 'myEmployees.confirmReject' })}
+            okText={intl.formatMessage({ id: 'common.confirm' })}
+            cancelText={intl.formatMessage({ id: 'common.cancel' })}
             onConfirm={() => handleAudit(row, 'reject')}
           >
             <Button danger type="link" size="small" loading={actionKey === `reject-${row.resourceId}-${row.userId}`}>
-              驳回
+              {intl.formatMessage({ id: 'myEmployees.reject' })}
             </Button>
           </Popconfirm>
         </Space>
@@ -400,24 +401,24 @@ const MyEmployeesPage: React.FC = () => {
 
   const tabItems = useMemo(
     () => [
-      { key: 'personal', label: '个人' },
-      { key: 'enterprise', label: '企业' },
+      { key: 'personal', label: intl.formatMessage({ id: 'myEmployees.personal' }) },
+      { key: 'enterprise', label: intl.formatMessage({ id: 'myEmployees.enterprise' }) },
       {
         key: 'audit',
         label: (
           <Badge count={auditPendingCount} size="small" offset={[2, -2]}>
-            <span className={styles.auditTabLabel}>审核中心</span>
+            <span className={styles.auditTabLabel}>{intl.formatMessage({ id: 'myEmployees.auditCenter' })}</span>
           </Badge>
         ),
       },
     ],
-    [auditPendingCount]
+    [auditPendingCount, intl]
   );
 
   return (
     <div className={`${styles.container} ${activeTab === 'audit' ? styles.auditContainer : ''}`}>
       <div className={styles.back} onClick={() => navigate('/digitalEmployees')}>
-        <LeftOutlined /> 返回全部
+        <LeftOutlined /> {intl.formatMessage({ id: 'myEmployees.backToAll' })}
       </div>
       <Tabs
         className={styles.header}
@@ -438,7 +439,7 @@ const MyEmployeesPage: React.FC = () => {
             <Input.Search
               className={styles.employeeSearch}
               allowClear
-              placeholder="搜索数字员工名称"
+              placeholder={intl.formatMessage({ id: 'myEmployees.searchPlaceholder' })}
               value={keyword}
               onChange={(event) => {
                 setKeyword(event.target.value);
@@ -450,9 +451,9 @@ const MyEmployeesPage: React.FC = () => {
               <Segmented
                 value={resourceFilter}
                 options={[
-                  { value: 'all', label: '全部' },
-                  { value: 'employee', label: '数字员工' },
-                  { value: 'group', label: '数字员工组' },
+                  { value: 'all', label: intl.formatMessage({ id: 'myEmployees.all' }) },
+                  { value: 'employee', label: intl.formatMessage({ id: 'myEmployees.employee' }) },
+                  { value: 'group', label: intl.formatMessage({ id: 'myEmployees.group' }) },
                 ]}
                 onChange={(value) => {
                   setResourceFilter(value as ResourceFilter);
@@ -464,8 +465,8 @@ const MyEmployeesPage: React.FC = () => {
                   <Segmented
                     value={enterpriseScope}
                     options={[
-                      { value: 'created', label: '我创建的' },
-                      { value: 'managed', label: '我管理的' },
+                      { value: 'created', label: intl.formatMessage({ id: 'myEmployees.createdByMe' }) },
+                      { value: 'managed', label: intl.formatMessage({ id: 'myEmployees.managedByMe' }) },
                     ]}
                     onChange={(value) => {
                       setEnterpriseScope(value as EnterpriseScope);
@@ -475,10 +476,10 @@ const MyEmployeesPage: React.FC = () => {
                   <Segmented
                     value={statusFilter}
                     options={[
-                      { value: 'all', label: '全部' },
-                      { value: '0', label: '草稿' },
-                      { value: '2', label: '已上架' },
-                      { value: '3', label: '已下架' },
+                      { value: 'all', label: intl.formatMessage({ id: 'myEmployees.all' }) },
+                      { value: '0', label: intl.formatMessage({ id: 'resourceStatus.draft' }) },
+                      { value: '2', label: intl.formatMessage({ id: 'resourceStatus.published' }) },
+                      { value: '3', label: intl.formatMessage({ id: 'resourceStatus.unpublished' }) },
                     ]}
                     onChange={(value) => {
                       setStatusFilter(value as EmployeeStatusFilter);
@@ -538,8 +539,8 @@ const MyEmployeesPage: React.FC = () => {
             <Segmented
               value={auditFilter}
               options={[
-                { value: 'pending', label: '未审核' },
-                { value: 'history', label: '历史审核' },
+                { value: 'pending', label: intl.formatMessage({ id: 'myEmployees.unreviewed' }) },
+                { value: 'history', label: intl.formatMessage({ id: 'myEmployees.reviewHistory' }) },
               ]}
               onChange={(value) => setAuditFilter(value as AuditFilter)}
             />

@@ -202,10 +202,10 @@ const DigitalEmployeesPage: React.FC = () => {
         overlay={
           <Menu
             items={[
-              { key: 'personal', label: '创建个人数字员工' },
-              { key: 'personal-group', label: '创建个人员工组' },
-              { key: 'enterprise', label: '创建企业数字员工' },
-              { key: 'enterprise-group', label: '创建企业员工组' },
+              { key: 'personal', label: intl.formatMessage({ id: 'digitalEmployees.createPersonal' }) },
+              { key: 'personal-group', label: intl.formatMessage({ id: 'digitalEmployees.createPersonalGroup' }) },
+              { key: 'enterprise', label: intl.formatMessage({ id: 'digitalEmployees.createEnterprise' }) },
+              { key: 'enterprise-group', label: intl.formatMessage({ id: 'digitalEmployees.createEnterpriseGroup' }) },
             ]}
             onClick={({ key }) => {
               if (key === 'enterprise') {
@@ -225,7 +225,7 @@ const DigitalEmployeesPage: React.FC = () => {
         }
       >
         <Button type="primary" icon={<PlusOutlined />} id="guideStep2-6">
-          创建
+          {intl.formatMessage({ id: 'digitalEmployees.create' })}
         </Button>
       </Dropdown>
       <Badge count={auditCount} size="small" offset={[-2, 2]}>
@@ -238,7 +238,7 @@ const DigitalEmployeesPage: React.FC = () => {
             });
           }}
         >
-          我的员工
+          {intl.formatMessage({ id: 'digitalEmployees.myEmployees' })}
         </Button>
       </Badge>
     </Space>
@@ -268,7 +268,7 @@ const DigitalEmployeesPage: React.FC = () => {
             setSearchParams(nextSearchParams);
           }}
         >
-          <Tabs.TabPane tab="我可用的" key="available">
+          <Tabs.TabPane tab={intl.formatMessage({ id: 'digitalEmployees.available' })} key="available">
             <div id="availableDigitalEmployeesScroller" className={styles.tabContent}>
               <AllDigitalEmployees
                 mode="all"
@@ -283,7 +283,7 @@ const DigitalEmployeesPage: React.FC = () => {
               />
             </div>
           </Tabs.TabPane>
-          <Tabs.TabPane tab="官方推荐" key="official">
+          <Tabs.TabPane tab={intl.formatMessage({ id: 'digitalEmployees.official' })} key="official">
             <div id="officialDigitalEmployeesScroller" className={styles.tabContent}>
               <AllDigitalEmployees
                 mode="all"
@@ -401,14 +401,14 @@ export function EmployeePreviewModal({ employee, onClose, onCreateTask }: any) {
   const resourceTabs = useMemo(() => {
     if (detail?.agentType === '017') {
       return [
-        { key: 'MEMBERS', label: '小组成员' },
-        { key: 'WORK_STANDARD', label: '工作规范' },
+        { key: 'MEMBERS', label: intl.formatMessage({ id: 'digitalEmployees.groupMembers' }) },
+        { key: 'WORK_STANDARD', label: intl.formatMessage({ id: 'digitalEmployees.workStandard' }) },
       ];
     }
     return [
-      { key: 'SKILL', label: '技能' },
-      { key: 'TOOL', label: '工具' },
-      { key: 'KG_DOC', label: '知识' },
+      { key: 'SKILL', label: intl.formatMessage({ id: 'digitalEmployees.skill' }) },
+      { key: 'TOOL', label: intl.formatMessage({ id: 'digitalEmployees.tool' }) },
+      { key: 'KG_DOC', label: intl.formatMessage({ id: 'digitalEmployees.knowledge' }) },
     ];
   }, [detail?.agentType]);
   const [resourceTab, setResourceTab] = useState('SKILL');
@@ -525,7 +525,7 @@ export function EmployeePreviewModal({ employee, onClose, onCreateTask }: any) {
                 </div>
                 {isOffShelfEmployee ? null : hasUsePermission ? (
                   <Button type="primary" icon={<PlusOutlined />} onClick={() => onCreateTask?.()}>
-                    新建任务
+                    {intl.formatMessage({ id: 'digitalEmployees.newTask' })}
                   </Button>
                 ) : (
                   <Popconfirm
@@ -536,19 +536,22 @@ export function EmployeePreviewModal({ employee, onClose, onCreateTask }: any) {
                     onConfirm={handleApplyUse}
                   >
                     <Button type="primary" icon={<PlusOutlined />} disabled={isApplyPending} loading={applyLoading}>
-                      {isApplyPending ? '待授权通过' : '使用申请'}
+                      {isApplyPending
+                        ? intl.formatMessage({ id: 'digitalEmployees.pendingApproval' })
+                        : intl.formatMessage({ id: 'digitalEmployees.useRequest' })}
                     </Button>
                   </Popconfirm>
                 )}
               </div>
             </div>
             <div className={styles.employeePreviewCreator}>
-              创建者: {detail.createUserName || detail.creatorName || '-'}
+              {intl.formatMessage({ id: 'digitalEmployees.creator' })}{' '}
+              {detail.createUserName || detail.creatorName || '-'}
             </div>
             <Typography.Paragraph className={styles.employeePreviewDescription}>
-              {detail.resourceDesc || detail.intro || '暂无描述'}
+              {detail.resourceDesc || detail.intro || intl.formatMessage({ id: 'digitalEmployees.noDescription' })}
             </Typography.Paragraph>
-            <div className={styles.exampleTitle}>试试这样问我</div>
+            <div className={styles.exampleTitle}>{intl.formatMessage({ id: 'digitalEmployees.tryAsk' })}</div>
             <div className={styles.exampleList}>
               {examples.length ? (
                 examples.slice(0, 3).map((item: string, index: number) => (
@@ -570,7 +573,9 @@ export function EmployeePreviewModal({ employee, onClose, onCreateTask }: any) {
                   </div>
                 ))
               ) : (
-                <div className={styles.exampleEmpty}>暂无示例问题</div>
+                <div className={styles.exampleEmpty}>
+                  {intl.formatMessage({ id: 'digitalEmployees.noExampleQuestions' })}
+                </div>
               )}
             </div>
           </section>
@@ -598,7 +603,9 @@ export function EmployeePreviewModal({ employee, onClose, onCreateTask }: any) {
                     </div>
                   ))
                 ) : (
-                  <div className={styles.previewResourceEmpty}>暂无小组成员</div>
+                  <div className={styles.previewResourceEmpty}>
+                    {intl.formatMessage({ id: 'digitalEmployees.noGroupMembers' })}
+                  </div>
                 )
               ) : currentResources.length ? (
                 currentResources.map((item: any, index: number) => (
@@ -612,14 +619,19 @@ export function EmployeePreviewModal({ employee, onClose, onCreateTask }: any) {
                         {item?.resourceName || item?.name || item?.resourceCode || '-'}
                       </div>
                       <div className={styles.previewResourceDesc}>
-                        {item?.resourceDesc || item?.description || '暂无描述'}
+                        {item?.resourceDesc ||
+                          item?.description ||
+                          intl.formatMessage({ id: 'digitalEmployees.noDescription' })}
                       </div>
                     </div>
                   </div>
                 ))
               ) : (
                 <div className={styles.previewResourceEmpty}>
-                  暂无{resourceTabs.find((item) => item.key === resourceTab)?.label}资源
+                  {intl.formatMessage(
+                    { id: 'digitalEmployees.noResources' },
+                    { type: resourceTabs.find((item) => item.key === resourceTab)?.label || '' }
+                  )}
                 </div>
               )}
             </div>

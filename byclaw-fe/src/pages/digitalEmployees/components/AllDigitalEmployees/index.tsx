@@ -696,7 +696,9 @@ function AllDigitalEmployees(
               >
                 {isAllEmployees && employeeGroupList.length > 0 && (
                   <section className={styles.allEmployeesSection}>
-                    <div className={styles.allEmployeesSectionTitle}>数字员工组</div>
+                    <div className={styles.allEmployeesSectionTitle}>
+                      {intl.formatMessage({ id: 'digitalEmployees.employeeGroup' })}
+                    </div>
                     <div className={styles.employeeList}>
                       {employeeGroupList.map((employee) => renderEmployeeCard(employee))}
                     </div>
@@ -704,7 +706,9 @@ function AllDigitalEmployees(
                 )}
                 {isAllEmployees && employeeList.length > 0 && (
                   <section className={styles.allEmployeesSection}>
-                    <div className={styles.allEmployeesSectionTitle}>数字员工</div>
+                    <div className={styles.allEmployeesSectionTitle}>
+                      {intl.formatMessage({ id: 'digitalEmployees.title' })}
+                    </div>
                     <div className={styles.employeeList}>
                       {employeeList.map((employee) => renderEmployeeCard(employee))}
                     </div>

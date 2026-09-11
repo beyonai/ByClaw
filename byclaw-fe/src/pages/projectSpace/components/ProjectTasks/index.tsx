@@ -472,9 +472,9 @@ const ProjectTasks: React.FC<Props> = ({
         <Segmented
           value={datePreset}
           options={[
-            { label: '今天', value: 'today' },
-            { label: '本周', value: 'week' },
-            { label: '本月', value: 'month' },
+            { label: intl.formatMessage({ id: 'projectSpace.tasks.date.today' }), value: 'today' },
+            { label: intl.formatMessage({ id: 'projectSpace.tasks.date.week' }), value: 'week' },
+            { label: intl.formatMessage({ id: 'projectSpace.tasks.date.month' }), value: 'month' },
           ]}
           onChange={(value) => {
             const preset = value as 'today' | 'week' | 'month';
@@ -493,21 +493,49 @@ const ProjectTasks: React.FC<Props> = ({
           value={dateRange}
           allowClear={false}
           presets={[
-            { label: '今天', value: [dayjs().startOf('day'), dayjs().endOf('day')] },
-            { label: '近7天', value: [dayjs().subtract(6, 'day').startOf('day'), dayjs().endOf('day')] },
-            { label: '近14天', value: [dayjs().subtract(13, 'day').startOf('day'), dayjs().endOf('day')] },
-            { label: '近30天', value: [dayjs().subtract(29, 'day').startOf('day'), dayjs().endOf('day')] },
-            { label: '本周', value: [dayjs().startOf('week'), dayjs().endOf('week')] },
-            { label: '本月', value: [dayjs().startOf('month'), dayjs().endOf('month')] },
-            { label: '本季度', value: [dayjs().startOf('quarter'), dayjs().endOf('quarter')] },
-            { label: '本年', value: [dayjs().startOf('year'), dayjs().endOf('year')] },
+            {
+              label: intl.formatMessage({ id: 'projectSpace.tasks.date.today' }),
+              value: [dayjs().startOf('day'), dayjs().endOf('day')],
+            },
+            {
+              label: intl.formatMessage({ id: 'projectSpace.tasks.date.last7Days' }),
+              value: [dayjs().subtract(6, 'day').startOf('day'), dayjs().endOf('day')],
+            },
+            {
+              label: intl.formatMessage({ id: 'projectSpace.tasks.date.last14Days' }),
+              value: [dayjs().subtract(13, 'day').startOf('day'), dayjs().endOf('day')],
+            },
+            {
+              label: intl.formatMessage({ id: 'projectSpace.tasks.date.last30Days' }),
+              value: [dayjs().subtract(29, 'day').startOf('day'), dayjs().endOf('day')],
+            },
+            {
+              label: intl.formatMessage({ id: 'projectSpace.tasks.date.week' }),
+              value: [dayjs().startOf('week'), dayjs().endOf('week')],
+            },
+            {
+              label: intl.formatMessage({ id: 'projectSpace.tasks.date.month' }),
+              value: [dayjs().startOf('month'), dayjs().endOf('month')],
+            },
+            {
+              label: intl.formatMessage({ id: 'projectSpace.tasks.date.quarter' }),
+              value: [dayjs().startOf('quarter'), dayjs().endOf('quarter')],
+            },
+            {
+              label: intl.formatMessage({ id: 'projectSpace.tasks.date.year' }),
+              value: [dayjs().startOf('year'), dayjs().endOf('year')],
+            },
           ]}
           onChange={(value) => value?.[0] && value?.[1] && setDateRange([value[0], value[1]])}
         />
         <Checkbox checked={onlyMine} onChange={(event) => setOnlyMine(event.target.checked)}>
           {intl.formatMessage({ id: 'projectSpace.tasks.onlyMine' })}
         </Checkbox>
-        <Input.Search placeholder="请输入关键字" value={keyword} readOnly />
+        <Input.Search
+          placeholder={intl.formatMessage({ id: 'projectSpace.tasks.keywordPlaceholder' })}
+          value={keyword}
+          readOnly
+        />
       </div>
       <Spin spinning={loading}>
         {tasks.length ? (

@@ -702,7 +702,7 @@ const PersonalEmailSettings: React.FC = () => {
         ),
       },
       {
-        title: '邮箱服务商',
+        title: intl.formatMessage({ id: 'settings.email.provider' }),
         dataIndex: 'providerCode',
         width: 170,
         render: (code) => {
@@ -711,7 +711,7 @@ const PersonalEmailSettings: React.FC = () => {
         },
       },
       {
-        title: '能力',
+        title: intl.formatMessage({ id: 'settings.email.capabilities' }),
         dataIndex: 'capabilities',
         width: 340,
         render: (_, record) => (
@@ -731,7 +731,7 @@ const PersonalEmailSettings: React.FC = () => {
         ),
       },
       {
-        title: '连接状态',
+        title: intl.formatMessage({ id: 'settings.email.connectionStatus' }),
         dataIndex: 'connectionState',
         width: 210,
         render: (_, record) => (
@@ -749,7 +749,7 @@ const PersonalEmailSettings: React.FC = () => {
               disabled={mutatingAccountIds.has(String(record.accountId))}
               onClick={() => handleConnectionCheck(record)}
             >
-              检查连接
+              {intl.formatMessage({ id: 'settings.email.checkConnection' })}
             </Button>
           </div>
         ),
@@ -838,10 +838,10 @@ const PersonalEmailSettings: React.FC = () => {
         <Alert
           type="error"
           showIcon
-          message="邮箱账号加载失败"
+          message={intl.formatMessage({ id: 'settings.email.loadFailed' })}
           action={
             <Button onClick={() => void loadAccounts()} disabled={loading}>
-              重试加载邮箱账号
+              {intl.formatMessage({ id: 'settings.email.retryLoad' })}
             </Button>
           }
         />
@@ -882,11 +882,11 @@ const PersonalEmailSettings: React.FC = () => {
           <Alert
             type="error"
             showIcon
-            message="邮箱服务商加载失败"
+            message={intl.formatMessage({ id: 'settings.email.providerLoadFailed' })}
             action={<Button onClick={() => void loadProviders()}>重试</Button>}
           />
         ) : providers.length === 0 ? (
-          <Empty description="暂无可用邮箱服务商" />
+          <Empty description={intl.formatMessage({ id: 'settings.email.noProviders' })} />
         ) : (
           <Form form={form} layout="vertical" preserve={false}>
             <Form.Item label="邮箱服务商" name="providerCode" rules={[{ required: true, message: '请选择邮箱服务商' }]}>

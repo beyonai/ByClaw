@@ -365,9 +365,9 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
             popoverPos={showMentionPopoverType === '#' ? staticEmptyObject : undefined}
             onClose={() => this.setState((prev) => ({ ...prev, showMentionPopoverType: '' }))}
           >
-            <Tooltip title="选择技能">
+            <Tooltip title={getIntl().formatMessage({ id: 'queryInput.tools.selectSkill' })}>
               <span
-                aria-label="技能"
+                aria-label={getIntl().formatMessage({ id: 'queryInput.tools.skill' })}
                 className={styles.attachment}
                 onClick={() => this.setState((prev) => ({ ...prev, showMentionPopoverType: '#' }))}
               >

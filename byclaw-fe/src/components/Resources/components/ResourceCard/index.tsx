@@ -1199,11 +1199,13 @@ const RenderContent = (props: ResourceCardProps) => {
                 {isPendingUseApproval ? (
                   <div className={styles.applyActionWrap}>
                     <Button disabled shape="circle" icon={<PlusOutlined className={styles.cardActionBtnIcon} />} />
-                    <span className={styles.pendingApplyText}>待授权通过</span>
+                    <span className={styles.pendingApplyText}>
+                      {intl.formatMessage({ id: 'resource.pendingAuthorization' })}
+                    </span>
                   </div>
                 ) : canApplyForUse ? (
                   <>
-                    <Tooltip title="使用申请">
+                    <Tooltip title={intl.formatMessage({ id: 'resource.applyUse' })}>
                       <Popconfirm
                         title={intl.formatMessage({ id: 'digitalEmployees.applyConfirm' })}
                         okText={intl.formatMessage({ id: 'common.confirm' })}
@@ -1239,7 +1241,7 @@ const RenderContent = (props: ResourceCardProps) => {
                 ) : (
                   <>
                     {!isDeletedDigitalEmployee && isPublishedDigitalEmployee && (
-                      <Tooltip title="进入会话">
+                      <Tooltip title={intl.formatMessage({ id: 'resource.enterConversation' })}>
                         <Button
                           shape="circle"
                           icon={<MessageOutlined className={styles.cardActionBtnIcon} />}

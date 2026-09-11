@@ -54,12 +54,28 @@ const ResourceToolMenu: React.FC<Props> = ({
       label: intl.formatMessage({ id: 'common.digitalEmployee' }),
       icon: 'icon-cebianlan-shuziyuangong',
     },
-    { key: 'skill', label: '技能', icon: 'icon-chajian' },
-    { key: 'connector', label: '连接器', icon: <LinkOutlined aria-hidden /> },
-    { key: 'processFile', label: '过程文件', icon: 'icon-a-Data-fileshujuwenjian' },
-    { key: 'projectCloud', label: '项目云盘', icon: 'icon-a-Folder-openwenjianjia-kai' },
-    { key: 'tool', label: '工具', icon: 'icon-a-Database-networkshujukuwangluo' },
-    { key: 'knowledge', label: '知识', icon: 'icon-zhishi' },
+    { key: 'skill', label: intl.formatMessage({ id: 'queryInput.tools.skill' }), icon: 'icon-chajian' },
+    {
+      key: 'connector',
+      label: intl.formatMessage({ id: 'queryInput.tools.connector' }),
+      icon: <LinkOutlined aria-hidden />,
+    },
+    {
+      key: 'processFile',
+      label: intl.formatMessage({ id: 'queryInput.tools.processFile' }),
+      icon: 'icon-a-Data-fileshujuwenjian',
+    },
+    {
+      key: 'projectCloud',
+      label: intl.formatMessage({ id: 'queryInput.tools.projectCloud' }),
+      icon: 'icon-a-Folder-openwenjianjia-kai',
+    },
+    {
+      key: 'tool',
+      label: intl.formatMessage({ id: 'queryInput.tools.tool' }),
+      icon: 'icon-a-Database-networkshujukuwangluo',
+    },
+    { key: 'knowledge', label: intl.formatMessage({ id: 'queryInput.tools.knowledge' }), icon: 'icon-zhishi' },
   ];
   // 新会话没有可查询的过程文件，隐藏该分类；历史会话沿用右侧资源面板的会话文件数据。
   const visibleTabs = sessionId ? tabs : tabs.filter((tab) => tab.key !== 'processFile');
@@ -111,7 +127,10 @@ const ResourceToolMenu: React.FC<Props> = ({
           onOpenDetail={() => undefined}
         />
       ) : (
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无过程文件" />
+        <Empty
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+          description={intl.formatMessage({ id: 'queryInput.tools.noProcessFiles' })}
+        />
       );
     }
     if (key === 'projectCloud') {
@@ -125,7 +144,10 @@ const ResourceToolMenu: React.FC<Props> = ({
           onOpenDetail={() => undefined}
         />
       ) : (
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂未初始化项目知识库" />
+        <Empty
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+          description={intl.formatMessage({ id: 'queryInput.tools.noProjectKnowledge' })}
+        />
       );
     }
     return (
