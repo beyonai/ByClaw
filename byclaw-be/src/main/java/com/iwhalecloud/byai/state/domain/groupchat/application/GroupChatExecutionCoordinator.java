@@ -86,16 +86,8 @@ public class GroupChatExecutionCoordinator {
         }
     }
 
-    @Scheduled(fixedDelayString = "${byclaw.group-chat.execution-recovery-ms:30000}")
-    public void recoverStaleExecutions() {
-        if (gatewayExecutor == null) {
-            return;
-        }
-        Date before = new Date(System.currentTimeMillis()
-            - java.util.concurrent.TimeUnit.MINUTES.toMillis(10));
-        executionMapper.requeueStaleRunning(before);
-        pollQueuedExecutions();
-    }
+    // RUNNING 由 Stream 路由器接管，包括 BE 重启后的执行。启动时间不能证明远端已停止，
+    // 因此不得按固定时长重新发送；没有可靠租约或远端终止证据时保持原执行等待结果。
 
     private void dispatch(ByaiGroupChatExecution execution) {
         if (execution == null || gatewayExecutor == null) {

@@ -6,6 +6,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+import org.apache.commons.lang3.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
 
@@ -15,6 +18,7 @@ import com.iwhalecloud.byai.common.message.entity.ByaiMessage;
 import com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatExecutionMapper;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
+import com.iwhalecloud.byai.state.domain.chat.service.TargetAgentResolver;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatExecutionCoordinator;
 import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatExecution;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
@@ -36,6 +40,8 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 /** Redis Stream 群委派适配器，负责分类、任务私有流以及公开消息投影。 */
 @Service
 public class GroupChatExecutionEventHandler {
+    private static final Logger log = LoggerFactory.getLogger(GroupChatExecutionEventHandler.class);
+    private final TargetAgentResolver targetAgentResolver;
     private final ByaiMessageMapper messageMapper;
     private final GroupChatEventPublisher eventPublisher;
     private final SequenceService sequenceService;
@@ -59,7 +65,8 @@ public class GroupChatExecutionEventHandler {
         UserService userService, GroupChatDispositionReader dispositionReader, GroupChatTaskService taskService,
         GroupChatCandidateSessionService candidateSessionService,
         MultiDeviceBroadcastService multiDeviceBroadcastService, GroupChatAgentMentionParser mentionParser,
-        GroupChatMentionService mentionService) {
+        GroupChatMentionService mentionService, TargetAgentResolver targetAgentResolver) {
+        this.targetAgentResolver = targetAgentResolver;
         this.messageMapper = messageMapper;
         this.eventPublisher = eventPublisher;
         this.sequenceService = sequenceService;
@@ -73,6 +80,18 @@ public class GroupChatExecutionEventHandler {
         this.multiDeviceBroadcastService = multiDeviceBroadcastService;
         this.mentionParser = mentionParser;
         this.mentionService = mentionService;
+    }
+
+    public GroupChatExecutionEventHandler(ByaiMessageMapper messageMapper, GroupChatEventPublisher eventPublisher,
+        SequenceService sequenceService, ByaiGroupChatExecutionMapper executionMapper,
+        GroupChatExecutionCoordinator executionCoordinator, SsResourceService resourceService,
+        UserService userService, GroupChatDispositionReader dispositionReader, GroupChatTaskService taskService,
+        GroupChatCandidateSessionService candidateSessionService,
+        MultiDeviceBroadcastService multiDeviceBroadcastService, GroupChatAgentMentionParser mentionParser,
+        GroupChatMentionService mentionService) {
+        this(messageMapper, eventPublisher, sequenceService, executionMapper, executionCoordinator, resourceService,
+            userService, dispositionReader, taskService, candidateSessionService, multiDeviceBroadcastService,
+            mentionParser, mentionService, null);
     }
 
     public GroupChatExecutionEventHandler(ByaiMessageMapper messageMapper, GroupChatEventPublisher eventPublisher,
@@ -249,6 +268,12 @@ public class GroupChatExecutionEventHandler {
     @Transactional
     public boolean handle(Long executionId, Long groupSessionId, Long sourceMessageId, Long replyToMessageId,
         Long targetAgentId, JSONObject event) {
+        ByaiGroupChatExecution execution = executionMapper == null || executionId == null
+            ? null : executionMapper.selectById(executionId);
+        if (execution != null && (!acceptsExecutionEvent(execution, event)
+            || (execution.getStatus() != null && !"RUNNING".equals(execution.getStatus())))) {
+            return false;
+        }
         if (executionMapper != null && executionId != null && event != null) {
             String eventId = event.getString("event_id");
             if (eventId == null) {
@@ -258,8 +283,6 @@ public class GroupChatExecutionEventHandler {
                 return false;
             }
         }
-        ByaiGroupChatExecution execution = executionMapper == null || executionId == null
-            ? null : executionMapper.selectById(executionId);
         if (execution != null) {
             String disposition = resolveDisposition(execution, event);
             if ("TASK".equals(disposition)) {
@@ -271,6 +294,9 @@ public class GroupChatExecutionEventHandler {
                 if (isTurnTerminal(event)) {
                     GroupChatAgentMention mentions = parseMentions(execution, extractor.finish());
                     Long taskAnswerMessageId = persistTaskAnswer(execution, mentions, event);
+                    log.info("Group task turn ended: executionId={}, eventId={}, eventType={}, traceId={}, sourceAgentType={}, answerMessageId={}",
+                        executionId, event.getString("redis_stream_id"), eventType(event), event.getString("trace_id"),
+                        event.getString("source_agent_type"), taskAnswerMessageId);
                     scheduleAgentMentions(execution, mentions.resourceList());
                     extractors.remove(key);
                     taskService.updateTurnStatus(execution.getCandidateSessionId(),
@@ -303,6 +329,38 @@ public class GroupChatExecutionEventHandler {
             }
         }
         return handled;
+    }
+
+    /** 只允许本次派发的目标 Agent 决定答案与终止状态，子 Agent 的结束不代表主 turn 结束。 */
+    private boolean acceptsExecutionEvent(ByaiGroupChatExecution execution, JSONObject event) {
+        if (event == null) {
+            return false;
+        }
+        String type = eventType(event);
+        if ("_dispositionPoll".equals(type)) {
+            return true;
+        }
+        boolean matches = (StringUtils.isBlank(execution.getTraceId())
+            || execution.getTraceId().equals(event.getString("trace_id")))
+            && (StringUtils.isBlank(execution.getGatewaySessionId())
+                || execution.getGatewaySessionId().equals(event.getString("session_id")));
+        String source = event.getString("source_agent_type");
+        if (matches && targetAgentResolver != null && StringUtils.isNotBlank(source)
+            && (GroupChatFinalAnswerExtractor.isTerminal(event) || "answerDelta".equalsIgnoreCase(type))) {
+            SsResource agent = resourceService.findById(execution.getTargetAgentId());
+            Users initiator = userService.findById(execution.getInitiatorUserId());
+            if (agent == null || initiator == null) {
+                throw new IllegalStateException("Group execution resources are unavailable for event validation");
+            }
+            String target = targetAgentResolver.resolveAgentType(agent.getWorkerAgentType(),
+                execution.getTargetAgentId(), null, initiator.getUserCode());
+            matches = source.equals(target);
+        }
+        if (!matches) {
+            log.debug("Ignored unrelated group execution event: executionId={}, eventId={}, eventType={}, traceId={}, sourceAgentType={}",
+                execution.getExecutionId(), event.getString("redis_stream_id"), type, event.getString("trace_id"), source);
+        }
+        return matches;
     }
 
     private String resolveDisposition(ByaiGroupChatExecution execution, JSONObject event) {

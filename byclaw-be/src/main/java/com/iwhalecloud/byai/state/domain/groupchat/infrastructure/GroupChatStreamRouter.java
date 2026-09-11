@@ -73,6 +73,8 @@ public class GroupChatStreamRouter {
                 continue;
             }
             JSONObject event = JSON.parseObject(String.valueOf(raw));
+            // 保留 Redis 原始 ID 供终止事件日志定位，不覆盖上游事件标识。
+            event.put("redis_stream_id", record.getId().getValue());
             event.put("executionId", execution.getExecutionId());
             event.put("initiatorUserId", execution.getInitiatorUserId());
             event.put("rootMessageId", execution.getRootMessageId());

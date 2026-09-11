@@ -26,6 +26,14 @@ ByClaw-BE 是 BeyondAI 平台的后端服务，提供完整的 AI 应用开发�
 - **多模型支持** - 支持多种大语言模型接入
 - **企业级安全** - 完整的认证、授权和审计机制
 
+## 群聊任务执行与恢复
+
+- `TASK` 的 Agent 答案保存在独立任务会话；当前 turn 结束后进入 `WAITING_USER`，仍须发起人确认完成并发布到群里。
+- `RUNNING` execution 持续由 Redis Stream 路由器消费，BE 重启后继续扫描这些执行。运行超过十分钟不会自动重新发送 Gateway 请求；启动时间不是远端执行失效的证据。
+- 当前没有可靠的远端执行租约，因此不对“运行中但长时间没有结果”的任务盲目重发。若投递结果不确定或远端失联，应先核实 Gateway/Agent 状态；用户可取消异常任务。此修复不会自动恢复此前已经误标为 `SUCCEEDED` 的记录。
+- Gateway 事件必须匹配 execution 的 `trace_id` 和 `session_id`（存在预期值时）；有 `source_agent_type` 的答案、结束及错误事件还必须匹配派发时采用的目标 Agent 解析规则。历史缺少来源类型的事件保持兼容。其他 Agent 的答案或终止事件不会结束主任务。
+- 任务终止日志记录 execution、Redis Stream record ID、事件类型、trace、Agent 来源和答案消息 ID，便于区分“结果已生成”“BE 已保存”和“用户已发布”。日志不输出答案正文。
+
 ## 系统架构
 
 ```
