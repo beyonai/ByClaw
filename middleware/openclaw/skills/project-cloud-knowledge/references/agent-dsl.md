@@ -24,7 +24,7 @@
 叶子操作符：
 
 - `eq`、`ne`、`in`
-- `contains`、`exists`
+- `containsAll`、`containsAny`、`contains`、`exists`
 - `gt`、`gte`、`lt`、`lte`
 - `prefix`、`wildcard`
 
@@ -44,15 +44,17 @@
 
 | 字段类型 | 支持的操作符 | 不支持的操作符 |
 |---|---|---|
-| `string` | `eq`、`ne`、`in`、`exists`、`prefix`、`wildcard` | `contains`、数值比较 |
-| `stringList` | `contains`、`exists` | `eq`、`ne`、`in`、数值比较、`prefix`、`wildcard` |
-| `number` | `eq`、`ne`、`in`、`exists`、`gt`、`gte`、`lt`、`lte` | `contains`、`prefix`、`wildcard` |
-| `boolean` | `eq`、`ne`、`in`、`exists` | `contains`、数值比较、`prefix`、`wildcard` |
-| `datetime` | `eq`、`ne`、`in`、`exists`、`gt`、`gte`、`lt`、`lte` | `contains`、`prefix`、`wildcard` |
+| `string` | `eq`、`ne`、`in`、`exists`、`prefix`、`wildcard` | `containsAll`、`containsAny`、`contains`、数值比较 |
+| `stringList` | `containsAll`、`containsAny`、`contains`、`exists` | `eq`、`ne`、`in`、数值比较、`prefix`、`wildcard` |
+| `number` | `eq`、`ne`、`in`、`exists`、`gt`、`gte`、`lt`、`lte` | `containsAll`、`containsAny`、`contains`、`prefix`、`wildcard` |
+| `boolean` | `eq`、`ne`、`in`、`exists` | `containsAll`、`containsAny`、`contains`、数值比较、`prefix`、`wildcard` |
+| `datetime` | `eq`、`ne`、`in`、`exists`、`gt`、`gte`、`lt`、`lte` | `containsAll`、`containsAny`、`contains`、`prefix`、`wildcard` |
 
 关键语义：
 
-- `contains` 表示 `stringList` 包含一个元素，不是字符串子串匹配。
+- `containsAll` 表示 `stringList` 同时包含给定的全部元素。
+- `containsAny` 表示 `stringList` 至少包含给定元素中的一个。
+- `contains` 表示 `stringList` 包含一个元素，不是字符串子串匹配；它仅为兼容旧请求保留，新请求优先使用 `containsAll` 或 `containsAny`。
 - `prefix` 只适用于 `string`，表示值以指定文本开头。
 - `wildcard` 只适用于 `string`；`*` 匹配零个或多个字符，`?` 匹配一个字符。
 - `gt`、`gte`、`lt`、`lte` 只适用于 `number` 和 `datetime`。
@@ -82,9 +84,10 @@
 - `boolean` 的值必须是 JSON 布尔值。
 - `datetime` 的值必须是 ISO 8601 字符串。
 - 时间返回值会转换到后端 `DB_TIMEZONE`，默认时区为 `Asia/Shanghai`；输入建议显式携带时区偏移。
+- `containsAll.value` 和 `containsAny.value` 必须是非空字符串数组。
 - `contains.value` 必须是单个字符串。
 - `exists` 不得携带 `value`。
-- `in.value` 必须是非空数组；`stringList` 不支持 `in`，应使用 `contains`。
+- `in.value` 必须是非空数组；`stringList` 不支持 `in`，应根据语义使用 `containsAll` 或 `containsAny`。
 - 最大布尔嵌套深度为 3。
 - 最大叶子条件数为 12。
 - 不支持 `between`、`regex`、脚本表达式或其他未列出的操作符。
@@ -103,10 +106,16 @@
 {"in": {"fieldName": "fileType", "value": ["md", "pdf"]}}
 ```
 
-列表包含元素：
+列表包含全部元素：
 
 ```json
-{"contains": {"fieldName": "tags", "value": "contract"}}
+{"containsAll": {"fieldName": "tags", "value": ["contract", "legal"]}}
+```
+
+列表包含任意元素：
+
+```json
+{"containsAny": {"fieldName": "tags", "value": ["contract", "legal"]}}
 ```
 
 数值与时间组合：

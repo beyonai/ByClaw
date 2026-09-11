@@ -33,7 +33,7 @@ python3 <project-cloud-knowledge目录>/scripts/project_cloud_knowledge.py searc
 python3 <project-cloud-knowledge目录>/scripts/project_cloud_knowledge.py search \
   --resource-id RESOURCE_ID \
   --query "合同续签" \
-  --where-json '{"and":[{"eq":{"fieldName":"status","value":"active"}},{"contains":{"fieldName":"tags","value":"contract"}}]}' \
+  --where-json '{"and":[{"eq":{"fieldName":"status","value":"active"}},{"containsAny":{"fieldName":"tags","value":["contract","legal"]}}]}' \
   --metadata-field status \
   --metadata-field tags \
   --search-mode mixedRecall \

@@ -1890,6 +1890,8 @@ def _agent_dsl(value: str) -> dict[str, Any]:
         "eq",
         "ne",
         "in",
+        "containsAll",
+        "containsAny",
         "contains",
         "exists",
         "gt",
@@ -1961,6 +1963,14 @@ def _agent_dsl(value: str) -> dict[str, Any]:
             not isinstance(leaf_value, list) or not leaf_value
         ):
             raise argparse.ArgumentTypeError("in.value 必须是非空数组")
+        if operator in {"containsAll", "containsAny"} and (
+            not isinstance(leaf_value, list)
+            or not leaf_value
+            or any(not isinstance(item, str) for item in leaf_value)
+        ):
+            raise argparse.ArgumentTypeError(
+                f"{operator}.value 必须是非空字符串数组"
+            )
         if operator in {"contains", "prefix", "wildcard"} and not isinstance(
             leaf_value, str
         ):
