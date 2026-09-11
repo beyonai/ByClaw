@@ -1015,7 +1015,8 @@ class KnowledgeManagerTests(unittest.TestCase):
         valid = manager_module._agent_dsl(
             '{"and":['
             '{"eq":{"fieldName":"status","value":"active"}},'
-            '{"contains":{"fieldName":"tags","value":"contract"}}'
+            '{"containsAll":{"fieldName":"tags","value":["contract","legal"]}},'
+            '{"containsAny":{"fieldName":"tags","value":["finance","legal"]}}'
             "]}"
         )
         self.assertIn("and", valid)
@@ -1025,6 +1026,8 @@ class KnowledgeManagerTests(unittest.TestCase):
             '"ne":{"fieldName":"status","value":"disabled"}}',
             '{"and":[]}',
             '{"in":{"fieldName":"status","value":[]}}',
+            '{"containsAll":{"fieldName":"tags","value":[]}}',
+            '{"containsAny":{"fieldName":"tags","value":["contract",1]}}',
             '{"exists":{"fieldName":"status","value":true}}',
             '{"not":{"not":{"not":{"not":'
             '{"eq":{"fieldName":"status","value":"active"}}}}}}}',
