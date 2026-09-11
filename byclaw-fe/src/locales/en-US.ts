@@ -1631,7 +1631,7 @@ export default {
   'projectSpace.tasks.loadFailed': 'Failed to load tasks',
   'projectSpace.tasks.unnamed': 'Unnamed task',
   'projectSpace.tasks.openSession': 'Enter session',
-  'projectSpace.tasks.onlyMine': 'Only my tasks',
+  'projectSpace.tasks.onlyMine': 'Only mine',
   'projectSpace.tasks.mode.list': 'List',
   'projectSpace.tasks.mode.board': 'Board',
   'projectSpace.tasks.editValidation': 'Enter a task name and select an assignee',

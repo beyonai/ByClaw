@@ -741,7 +741,14 @@ public class ProjectApplicationService {
         }
         LambdaQueryWrapper<ProjectRepo> repoWrapper = new LambdaQueryWrapper<>();
         repoWrapper.eq(ProjectRepo::getProjectId, projectId);
-        return projectRepoMapper.selectList(repoWrapper);
+        List<ProjectRepo> repos = projectRepoMapper.selectList(repoWrapper);
+        repos.forEach(repo -> {
+            if (projectInitService != null) repo.setCloneStatus(projectInitService.getCloneStatus(repo));
+            if (projectInitService != null && "ready".equals(repo.getCloneStatus())) {
+                repo.setLocalPath(projectInitService.getProjectRepositoryPath(repo).toString());
+            }
+        });
+        return repos;
     }
 
     /**
@@ -882,6 +889,7 @@ public class ProjectApplicationService {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.repo.name.required");
         }
         ProjectRepo repo = insertProjectRepo(dto.getProjectId(), dto);
+        projectInitService.cloneProjectRepositoryAsync(repo);
         projectWorkspaceManifestService.syncProjectGitmodules(dto.getProjectId());
         Map<String, Object> result = new HashMap<>();
         result.put("repoId", repo.getRepoId());

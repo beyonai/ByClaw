@@ -143,7 +143,9 @@ const CodesTab: React.FC<CodesTabProps> = ({
   const repoRequestSeqRef = useRef<Record<string, number>>({});
   const taskChangesRequestSeqRef = useRef(0);
   const clickTimerRef = useRef<number | null>(null);
-  const normalizedResourceId = resourceId === undefined || resourceId === '' ? undefined : `${resourceId}`;
+  // 当前会话项目代码来自项目级 clone 目录；没有员工资源 ID 时使用项目 ID 作为引用资源标识。
+  const normalizedResourceId =
+    resourceId === undefined || resourceId === '' ? (projectId ? `${projectId}` : undefined) : `${resourceId}`;
 
   const selectedRepo = useMemo(
     () => repos.find((repo) => repo.repoId === selectedRepoId) || repos[0],
@@ -161,7 +163,8 @@ const CodesTab: React.FC<CodesTabProps> = ({
         const response = await listProjectRepoTree({
           projectId,
           repoId: repo.repoId,
-          sessionId,
+          // 项目代码使用项目级 clone 目录；当前会话只用于权限和变更上下文。
+          sessionId: undefined,
         });
         if (requestSeq === repoRequestSeqRef.current[repoKey]) {
           setRepoFilesMap((current) => ({

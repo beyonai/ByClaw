@@ -8,6 +8,8 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -55,6 +57,8 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 @Service
 public class ProjectInitService {
+
+    private final Map<Long, String> cloneStatuses = new ConcurrentHashMap<>();
 
     @Value("${file.storage.local.path}")
     private String fileStorageLocalPath;
@@ -633,6 +637,53 @@ public class ProjectInitService {
      */
     public Path getProjectRepositoryPath(ProjectRepo repo) {
         return buildRepoPath(repo).toAbsolutePath().normalize();
+    }
+
+    /** 克隆项目仓库到当前用户的项目工作目录；已存在有效仓库时复用。 */
+    public Path cloneProjectRepository(ProjectRepo repo) throws BaseException {
+        Path repoPath = getProjectRepositoryPath(repo);
+        if (gitCommandExecutor.isGitRepository(repoPath)) {
+            return repoPath;
+        }
+        String repoUrl = StringUtils.trimToEmpty(repo.getRepoUrl());
+        if (repoUrl.isEmpty()) {
+            throw new BaseException(50500, "project.repo.url.required");
+        }
+        String token = getUserGitHubToken();
+        if (token == null || token.isBlank()) {
+            throw new BaseException(50403, "GitHub Token (GH_TOKEN) is required for Git operations.");
+        }
+        try {
+            Files.createDirectories(repoPath.getParent());
+            gitCommandExecutor.cloneRepository(injectTokenIntoUrl(repoUrl, token), repoPath,
+                StringUtils.defaultIfBlank(repo.getDefaultBranch(), "main"));
+            return repoPath;
+        }
+        catch (Exception e) {
+            throw new BaseException(50500, "Failed to clone repository: " + repoUrl + ". Error: " + e.getMessage(), e);
+        }
+    }
+
+    /** 异步克隆项目代码仓库，避免新增仓库接口被远程网络耗时阻塞。 */
+    @Async
+    public void cloneProjectRepositoryAsync(ProjectRepo repo) {
+        cloneStatuses.put(repo.getRepoId(), "cloning");
+        try {
+            cloneProjectRepository(repo);
+            cloneStatuses.put(repo.getRepoId(), "ready");
+            log.info("Project repository cloned asynchronously: repoId={}, projectId={}",
+                repo.getRepoId(), repo.getProjectId());
+        }
+        catch (Exception e) {
+            cloneStatuses.put(repo.getRepoId(), "failed");
+            log.error("Failed to clone project repository asynchronously: repoId={}, projectId={}",
+                repo.getRepoId(), repo.getProjectId(), e);
+        }
+    }
+
+    public String getCloneStatus(ProjectRepo repo) {
+        if (gitCommandExecutor.isGitRepository(getProjectRepositoryPath(repo))) return "ready";
+        return cloneStatuses.getOrDefault(repo.getRepoId(), "pending");
     }
 
     /**

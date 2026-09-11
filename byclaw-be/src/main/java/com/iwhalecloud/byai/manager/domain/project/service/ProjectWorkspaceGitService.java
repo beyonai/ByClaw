@@ -97,6 +97,12 @@ public class ProjectWorkspaceGitService {
             Path candidate = "workspace".equalsIgnoreCase(repo.getRepoType()) ? sessionRoot : sessionRoot.resolve(name);
             if (isGitRepository(candidate)) return Optional.of(candidate);
         }
+        // 代码仓库由项目仓库新增流程直接克隆到 projects/{projectId}/repos/{name}，
+        // 当前会话没有对应 worktree 时也应使用该项目级本地仓库。
+        if (!"workspace".equalsIgnoreCase(repo.getRepoType())) {
+            Path projectRepoPath = projectInitService.getProjectRepositoryPath(repo);
+            if (isGitRepository(projectRepoPath)) return Optional.of(projectRepoPath);
+        }
         return resolveRepository(repo);
     }
 

@@ -84,7 +84,8 @@ public class ProjectRepositoryService {
             Path localRepo = (sessionId == null
                 ? projectWorkspaceGitService.resolveRepository(repo)
                 : projectWorkspaceGitService.resolveRepository(repo, sessionId)).orElseThrow();
-            return listLocalTree(localRepo, normalizePath(path), branch);
+            // 本地仓库以实际检出的 HEAD 为准；配置中的默认分支可能已失效或与远程默认分支不同。
+            return listLocalTree(localRepo, normalizePath(path), ref == null || ref.isBlank() ? "HEAD" : branch);
         }
         catch (Exception e) {
             log.info("Local repository tree unavailable, falling back to provider, projectId={}, repoId={}",
@@ -117,7 +118,7 @@ public class ProjectRepositoryService {
             Path localRepo = (sessionId == null
                 ? projectWorkspaceGitService.resolveRepository(repo)
                 : projectWorkspaceGitService.resolveRepository(repo, sessionId)).orElseThrow();
-            return searchLocalTree(localRepo, keyword.trim(), branch);
+            return searchLocalTree(localRepo, keyword.trim(), ref == null || ref.isBlank() ? "HEAD" : branch);
         }
         catch (Exception e) {
             log.info("Local repository search unavailable, falling back to provider, projectId={}, repoId={}",
@@ -195,14 +196,16 @@ public class ProjectRepositoryService {
                 .collect(Collectors.toMap(item -> item.repo().getRepoId(), Function.identity(), (left, right) -> left));
         for (ProjectRepo repo : configuredRepos) {
             ProjectWorkspaceGitService.ResolvedRepository local = localRepos.get(repo.getRepoId());
-            Path resolvedPath = local == null
-                ? projectWorkspaceGitService.resolveRepository(repo, sessionId).orElse(null)
-                : sessionId == null ? local.path()
-                    : projectWorkspaceGitService.resolveRepository(repo, sessionId).orElse(local.path());
-            Path configuredPath = projectInitService.getProjectRepositoryPath(repo);
+            // 当前会话的项目代码统一使用项目级 clone 目录，不使用会话 worktree。
+            Path projectPath = projectInitService == null ? null : projectInitService.getProjectRepositoryPath(repo);
+            Path resolvedPath = projectPath != null && Files.exists(projectPath.resolve(".git")) ? projectPath
+                : (local == null ? projectWorkspaceGitService.resolveRepository(repo, sessionId).orElse(null)
+                    : sessionId == null ? local.path()
+                        : projectWorkspaceGitService.resolveRepository(repo, sessionId).orElse(local.path()));
+            Path configuredPath = resolvedPath;
             String path = projectWorkspaceGitService.toSandboxPath(resolvedPath)
                 .or(() -> projectWorkspaceGitService.toSandboxPath(configuredPath)).orElse(null);
-            if (path == null) {
+            if (path == null || resolvedPath == null || !Files.exists(resolvedPath.resolve(".git"))) {
                 continue;
             }
             Map<String, Object> result = new HashMap<>();

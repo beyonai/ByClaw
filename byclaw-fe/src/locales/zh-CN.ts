@@ -1610,7 +1610,7 @@ export default {
   'projectSpace.tasks.loadFailed': '任务加载失败',
   'projectSpace.tasks.unnamed': '未命名任务',
   'projectSpace.tasks.openSession': '进入会话',
-  'projectSpace.tasks.onlyMine': '只看我的任务',
+  'projectSpace.tasks.onlyMine': '只看我的',
   // 任务 Tab 的两种模式：列表是卡片列表，视图是原来的「任务视图」看板。
   'projectSpace.tasks.mode.list': '列表',
   'projectSpace.tasks.mode.board': '视图',
