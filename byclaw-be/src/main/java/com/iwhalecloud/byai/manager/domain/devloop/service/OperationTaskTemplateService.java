@@ -8,7 +8,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 
-/** 运营任务模板目录查询服务；模板暂由系统迁移脚本初始化，delete_flag 是唯一可用性标记。 */
+/** 运营任务模板目录查询服务；模板暂由系统迁移脚本初始化，过滤已删除和已下线类型。 */
 @Service
 public class OperationTaskTemplateService {
 
@@ -20,6 +20,7 @@ public class OperationTaskTemplateService {
     public List<OperationTaskTemplate> list(String templateType) {
         LambdaQueryWrapper<OperationTaskTemplate> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(OperationTaskTemplate::getDeleteFlag, NORMAL_DELETE_FLAG)
+            .notIn(OperationTaskTemplate::getTemplateType, "knowledge", "object_discovery")
             .orderByAsc(OperationTaskTemplate::getSortNo)
             .orderByAsc(OperationTaskTemplate::getTemplateId);
         if (templateType != null && !templateType.trim().isEmpty()) {
@@ -33,7 +34,9 @@ public class OperationTaskTemplateService {
             return null;
         }
         OperationTaskTemplate template = operationTaskTemplateMapper.selectById(templateId);
-        if (template == null || !NORMAL_DELETE_FLAG.equals(template.getDeleteFlag())) {
+        if (template == null || !NORMAL_DELETE_FLAG.equals(template.getDeleteFlag())
+            || "knowledge".equalsIgnoreCase(template.getTemplateType())
+            || "object_discovery".equalsIgnoreCase(template.getTemplateType())) {
             return null;
         }
         return template;

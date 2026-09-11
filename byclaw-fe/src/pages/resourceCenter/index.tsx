@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { Tabs } from 'antd';
 import {
-  ApartmentOutlined,
   AppstoreOutlined,
   DatabaseOutlined,
   EyeOutlined,
@@ -14,10 +13,9 @@ import AntdIcon from '@/components/AntdIcon';
 import Resources from '@/components/Resources';
 import FilesPage from '@/pages/files';
 import ModelsPage from '@/pages/models';
-import OntologyCenter from '@/pages/ontologyCenter';
 import styles from './index.module.less';
 
-type ResourceTabKey = 'knowledge' | 'tool' | 'view' | 'object' | 'ontology' | 'skill' | 'model' | 'file';
+type ResourceTabKey = 'knowledge' | 'tool' | 'view' | 'object' | 'skill' | 'model' | 'file';
 
 const ResourceCenter: React.FC = () => {
   const intl = useIntl();
@@ -51,11 +49,6 @@ const ResourceCenter: React.FC = () => {
       icon: <AppstoreOutlined />,
     },
     {
-      key: 'ontology',
-      label: intl.formatMessage({ id: 'common.resourceType.ontology' }),
-      icon: <ApartmentOutlined />,
-    },
-    {
       key: 'model',
       label: intl.formatMessage({ id: 'common.model' }),
       icon: <AntdIcon type="icon-a-Braindanao" />,
@@ -73,7 +66,6 @@ const ResourceCenter: React.FC = () => {
     if (activeKey === 'tool') return <Resources resourceType="TOOL" {...installedProps} />;
     if (activeKey === 'view') return <Resources resourceType="VIEW" {...installedProps} />;
     if (activeKey === 'object') return <Resources resourceType="OBJECT" {...installedProps} />;
-    if (activeKey === 'ontology') return <OntologyCenter />;
     if (activeKey === 'skill') return <Resources resourceType="SKILL" {...installedProps} />;
     if (activeKey === 'model') return <ModelsPage />;
     return <FilesPage />;
@@ -88,7 +80,7 @@ const ResourceCenter: React.FC = () => {
         onChange={(key) => {
           const nextKey = key as ResourceTabKey;
           setActiveKey(nextKey);
-          if (nextKey === 'ontology' || nextKey === 'file') {
+          if (nextKey === 'file') {
             setInstalledOnly(false);
           }
         }}

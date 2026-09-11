@@ -3,7 +3,7 @@ import type { Dayjs } from 'dayjs';
 // 运营模块中的业务主键均兼容后端数字 ID 与字符串 ID，避免不同资源接口之间发生类型转换错误。
 export type OperationIdentifier = string | number;
 
-// 运营需求按原型拆成四类；接口适配层负责兼容旧版 publish/content 等历史取值。
+// 包含历史任务类型以便回显；已下线类型不再提供新建和执行入口。
 export type OperationTaskType = 'collect' | 'knowledge' | 'object_discovery' | 'content' | 'analyze';
 
 export type OperationLoginStatus = 'logged_in' | 'logged_out' | 'expired' | 'unknown';
@@ -116,19 +116,6 @@ export interface OperationCollectConfig {
   /** 周期采集使用的标准五段 Cron，后端保存到 byai_scan_source.cron_expr。 */
   cronExpr?: string;
   schedule?: string;
-  organize?: boolean;
-  organizeTemplateId?: OperationIdentifier;
-  // 整理配置既支持引用已有本体，也支持为当前运营需求新建结构化要求。
-  knowledgeOrganization?: OperationKnowledgeOrganization;
-}
-
-// 新建整理模板只归属当前运营需求，结构化要求随需求 config 持久化，避免误写入平台级本体资源。
-export interface OperationKnowledgeOrganization {
-  mode: 'existing' | 'new';
-  templateId?: OperationIdentifier;
-  templateName?: string;
-  request?: string;
-  structure?: string;
 }
 
 export interface OperationContentConfig {

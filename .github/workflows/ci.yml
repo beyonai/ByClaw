@@ -21,7 +21,6 @@ jobs:
       fe: ${{ steps.filter.outputs.fe }}
       be: ${{ steps.filter.outputs.be }}
       exe: ${{ steps.filter.outputs.exe }}
-      data: ${{ steps.filter.outputs.data }}
       qa: ${{ steps.filter.outputs.qa }}
     steps:
       - uses: actions/checkout@v6
@@ -37,9 +36,6 @@ jobs:
               - '.github/workflows/**'
             exe:
               - 'byclaw-exe/**'
-              - '.github/workflows/**'
-            data:
-              - 'byclaw-data/**'
               - '.github/workflows/**'
             qa:
               - 'byclaw-qa/**'
@@ -113,19 +109,6 @@ jobs:
           pip install -e ".[dev]"
           ruff check .
           pytest
-
-  data:
-    needs: changes
-    if: needs.changes.outputs.data == 'true' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: astral-sh/setup-uv@v7
-      - name: Install & test (byclaw-data)
-        working-directory: byclaw-data
-        run: |
-          uv sync --frozen --dev
-          uv run ruff check . --exclude template
 
   qa:
     needs: changes

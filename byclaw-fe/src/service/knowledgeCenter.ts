@@ -121,7 +121,10 @@ export interface RenameFolderPayload {
 
 // 文件夹重命名（body 仅含 resourceId、directoryName、directoryPath）
 export const renameFolder = (data: RenameFolderPayload) =>
-  POST<any>('/byaiService/datasetController/renameFolder', data, { languageConf: false });
+  POST<any>('/byaiService/datasetController/renameFolder', data, {
+    languageConf: false,
+    responseCfg: { hideErrorTips: true },
+  });
 
 /** datasetController/deleteFolder 请求体 */
 export interface DeleteFolderPayload {
@@ -206,7 +209,8 @@ export interface RemoveFilePayload {
 }
 
 // 修改文件
-export const updateFileInfo = (data: any) => POST<any>('/byaiService/datasetController/updateFileInfo', data);
+export const updateFileInfo = (data: any) =>
+  POST<any>('/byaiService/datasetController/updateFileInfo', data, { responseCfg: { hideErrorTips: true } });
 
 // 权限列表
 export const getPriviledgeList = (data: any) => POST<any>('/byaiService/datasetController/getPriviledgeList', data);

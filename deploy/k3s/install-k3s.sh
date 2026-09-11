@@ -561,7 +561,7 @@ default_prune_image_repos() {
     local image
     local repo
     local repos=""
-    for image in "${IMAGE_BE:-}" "${IMAGE_SUPER:-}" "${IMAGE_FE:-}" "${IMAGE_QA:-}" "${IMAGE_DATA:-}"; do
+    for image in "${IMAGE_BE:-}" "${IMAGE_SUPER:-}" "${IMAGE_FE:-}" "${IMAGE_QA:-}"; do
         [ -n "$image" ] || continue
         repo="$(image_repo_from_ref "$image")"
         [ -n "$repo" ] || continue

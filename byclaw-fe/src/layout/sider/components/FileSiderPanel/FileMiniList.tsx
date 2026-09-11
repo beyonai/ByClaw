@@ -741,7 +741,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       formData.append('processFrontMatter', String(processFrontMatter));
       formData.append('overwrite', String(Boolean(options.overwrite)));
 
-      const result = await uploadKnowledgeFiles(formData);
+      const result = await uploadKnowledgeFiles(formData, { responseCfg: { hideErrorTips: true } });
       const succeeded = Number(result?.summary?.succeeded || 0);
       const failed = Number(result?.summary?.failed || 0);
       const postProcessErrorCount = result?.postProcessErrors?.length || 0;
@@ -820,7 +820,13 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
           return nextChildrenByPath;
         });
       } catch (error: any) {
-        message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.upload.failed' }));
+        const errorMessage =
+          (typeof error === 'string' ? error : undefined) ||
+          error?.response?.data?.msg ||
+          error?.data?.msg ||
+          error?.msg ||
+          error?.message;
+        message.error(errorMessage || intl.formatMessage({ id: 'fileBrowser.upload.failed' }));
       } finally {
         setUploadingFiles(false);
       }
@@ -933,7 +939,16 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
         }
         await refreshFileBrowserDirectory(parentPath);
       } catch (error: any) {
-        message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.rename.failed' }));
+        const errorMessage =
+          (typeof error === 'string' ? error : undefined) ||
+          error?.response?.data?.error_description ||
+          error?.response?.data?.msg ||
+          error?.data?.error_description ||
+          error?.data?.msg ||
+          error?.error_description ||
+          error?.msg ||
+          error?.message;
+        message.error(errorMessage || intl.formatMessage({ id: 'fileBrowser.rename.failed' }));
       } finally {
         setRenameLoading(false);
       }

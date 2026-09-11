@@ -106,15 +106,20 @@ export function uploadFiles(
   resourceId: string | number,
   path: string,
   files: File[],
-  onUploadProgress?: (e: any) => void
+  onUploadProgress?: (e: any) => void,
+  responseCfg?: Record<string, any>
 ) {
   if (hasDesktopLocalFiles() && window.byclawDesktop?.files?.registerAttachments) {
     return window.byclawDesktop.files.registerAttachments(files).then((registered) =>
-      POST('/byaiService/fileBrowser/upload', {
-        resourceId,
-        path,
-        attachmentIds: registered.map((item) => item.attachmentId),
-      })
+      POST(
+        '/byaiService/fileBrowser/upload',
+        {
+          resourceId,
+          path,
+          attachmentIds: registered.map((item) => item.attachmentId),
+        },
+        { responseCfg: { hideErrorTips: true } }
+      )
     );
   }
   const formData = new FormData();
@@ -122,6 +127,7 @@ export function uploadFiles(
   formData.append('path', path);
   files.forEach((file) => formData.append('files', file));
   return POST('/byaiService/fileBrowser/upload', formData, {
+    responseCfg: { hideErrorTips: true, ...responseCfg },
     headers: { 'Content-Type': 'multipart/form-data' },
     onUploadProgress,
   });
@@ -140,7 +146,7 @@ export function deleteFiles(params: FileBrowserDeleteParams) {
 }
 
 export function renameFile(params: FileBrowserRenameParams) {
-  return POST('/byaiService/fileBrowser/rename', params);
+  return POST('/byaiService/fileBrowser/rename', params, { responseCfg: { hideErrorTips: true } });
 }
 
 export function moveFiles(params: FileBrowserMoveParams) {

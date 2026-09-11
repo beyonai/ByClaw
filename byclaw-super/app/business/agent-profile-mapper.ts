@@ -12,6 +12,7 @@ export const OPENCLAW_PLATFORM_SKILLS = [
   "project-context",
   "notice",
   "project-cloud-knowledge",
+  "project-task-status-update",
 ] as const;
 
 /** BE 数字员工资源事实；不同目录接口可只返回其中一部分。 */

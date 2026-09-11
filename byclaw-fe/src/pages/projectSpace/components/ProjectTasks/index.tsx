@@ -47,6 +47,7 @@ import { isCurrentUserTaskAssignee } from '@/layout/sider/components/ProjectSpac
 interface Props {
   project: ProjectSpace;
   keyword?: string;
+
   /** 项目大详情固定使用看板时由外层指定，普通项目也可展示看板。 */
   viewMode?: 'list' | 'board';
   onOpenSession?: (session: ProjectSession) => void;
@@ -242,35 +243,6 @@ const ProjectTasks: React.FC<Props> = ({
       value: resource.resourceId,
       label: resource.resourceName || `${resource.resourceId}`,
     }));
-  const projectOntologyOptions = (project.resources || project.boundResources || [])
-    .filter((resource) => resource.resourceType === 'ontology')
-    .map((resource) => {
-      const resourceDetail = resource as typeof resource & Record<string, any>;
-      const code = resourceDetail.objectCode || resourceDetail.resourceCode || resourceDetail.code || '';
-      const name = resource.resourceName || resourceDetail.objectName || resourceDetail.name || code;
-      const description = resourceDetail.objectDesc || resourceDetail.resourceDesc || resourceDetail.description || '';
-      return {
-        value: resource.resourceId,
-        label: name,
-        // 项目绑定记录可能只保留 ID、名称；先补齐标准字段，模板提交时还会统一归一化别名。
-        raw: {
-          ...resourceDetail,
-          id: resourceDetail.id,
-          objectId: resourceDetail.objectId,
-          resourceId: resource.resourceId,
-          baseId: resourceDetail.baseId,
-          code,
-          objectCode: resourceDetail.objectCode || code,
-          resourceCode: resourceDetail.resourceCode || code,
-          name,
-          objectName: resourceDetail.objectName || name,
-          resourceName: resource.resourceName || name,
-          description,
-          objectDesc: resourceDetail.objectDesc || description,
-          resourceDesc: resourceDetail.resourceDesc || description,
-        },
-      };
-    });
   const projectAgentOptions = (project.resources || project.boundResources || [])
     .filter((resource) => resource.resourceType === 'digital_employee')
     .map((resource) => ({
@@ -703,8 +675,6 @@ const ProjectTasks: React.FC<Props> = ({
         initialDescription={(templateTask as any)?.description || templateTask?.requirementTitle}
         knowledgeOptions={projectKnowledgeOptions}
         knowledgeOptionsOnly
-        ontologyOptions={projectOntologyOptions}
-        ontologyOptionsOnly
         applyText={intl.formatMessage({ id: 'common.confirm' })}
         onCancel={() => setTemplateTask(null)}
         onApply={async (result: TaskTemplateApplyResult) => {

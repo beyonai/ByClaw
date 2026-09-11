@@ -4,7 +4,6 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigEmployeeInfo;
 import com.iwhalecloud.byai.manager.dto.digitemploy.SsResourceDTO;
-import com.iwhalecloud.byai.manager.dto.ontology.ObjectDto;
 import com.iwhalecloud.byai.manager.dto.resource.DigEmployeeDto;
 import com.iwhalecloud.byai.manager.dto.resource.ResourceCountDto;
 import com.iwhalecloud.byai.manager.dto.resource.ResourceDetailDto;
@@ -22,7 +21,6 @@ import com.iwhalecloud.byai.manager.vo.resource.DirAndFileVo;
 import com.iwhalecloud.byai.manager.vo.resource.ShelfResourceVo;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import com.iwhalecloud.byai.state.domain.resource.qo.DatasetQo;
 import com.iwhalecloud.byai.state.domain.resource.vo.DatasetDetailVo;
 import com.iwhalecloud.byai.state.domain.resource.vo.DatasetVo;
@@ -74,8 +72,6 @@ public interface SsResourceMapper extends BaseMapper<SsResource> {
     List<SourceSystem> getSourceSystemListByTypes(@Param("query") SystemQo query);
 
     DigEmployeeInfo queryBasicInfoById(@Param("resourceId") Long resourceId);
-
-    List<ObjectDto> queryRelObjects(@Param("resourceIds") Set<Long> resourceIds);
 
     /**
      * 批量插入资源

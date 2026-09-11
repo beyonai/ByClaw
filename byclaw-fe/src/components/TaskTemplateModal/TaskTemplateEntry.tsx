@@ -184,16 +184,6 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
         })),
     [projectResources]
   );
-  const projectOntologyOptions = useMemo(
-    () =>
-      projectResources
-        .filter((resource) => resource.resourceType === 'ontology')
-        .map((resource) => ({
-          value: resource.resourceId,
-          label: resource.resourceName || `${resource.resourceId}`,
-        })),
-    [projectResources]
-  );
   const projectAgentOptions = useMemo(
     () =>
       projectResources
@@ -368,8 +358,6 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
           agentOptionsOnly
           knowledgeOptions={projectKnowledgeOptions}
           knowledgeOptionsOnly
-          ontologyOptions={projectOntologyOptions}
-          ontologyOptionsOnly
           categoryLabel="运营项目"
           onCancel={() => setVisible(false)}
           onApply={(result) => applyPrompt(result.prompt)}

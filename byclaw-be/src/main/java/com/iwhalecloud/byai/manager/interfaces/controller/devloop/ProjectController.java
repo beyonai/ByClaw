@@ -329,7 +329,7 @@ public class ProjectController {
             query == null ? null : query.getPath()));
     }
 
-    /** 查询项目绑定的知识库、数字员工和本体。 */
+    /** 查询项目绑定的知识库、数字员工。 */
     @PostMapping("/resource/list")
     public ResponseUtil<List<ProjectResource>> listProjectResources(@RequestBody Map<String, Object> params) {
         Long projectId = MapParamUtil.getLongValue(params, "projectId");

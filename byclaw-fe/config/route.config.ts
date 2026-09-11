@@ -193,16 +193,6 @@ export default [
             component: './objectCenter',
           },
           {
-            path: '/ontologyCenter',
-            name: 'ontologyCenter',
-            component: './ontologyCenter',
-          },
-          {
-            path: '/ontologyBaseDetail',
-            name: 'ontologyBaseDetail',
-            component: './ontologyBaseDetail',
-          },
-          {
             path: '/skillCenter',
             name: 'skillCenter',
             component: './skillCenter',

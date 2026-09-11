@@ -1,6 +1,6 @@
 # Agent DSL 过滤规则
 
-只在 `search` 或 `search-file` 使用 `--where-json` 时读取本文。DSL 是传给后端 `where` 字段的 JSON AST，不是 SQL，也不是本体查询语言。
+只在 `search` 或 `search-file` 使用 `--where-json` 时读取本文。DSL 是传给后端 `where` 字段的 JSON AST，不是 SQL。
 
 ## 目录
 

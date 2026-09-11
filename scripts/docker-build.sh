@@ -12,7 +12,7 @@ Usage: $(basename "$0") [OPTIONS] <module...>
 
 Build Docker images with embedded build-info.json metadata.
 
-Modules: byclaw-fe, byclaw-be, byclaw-qa, byclaw-data
+Modules: byclaw-fe, byclaw-be, byclaw-qa
 
 Options:
   --all             Build all modules
@@ -32,7 +32,7 @@ EOF
 TAG=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --all) MODULES=(byclaw-fe byclaw-be byclaw-qa byclaw-data); shift ;;
+        --all) MODULES=(byclaw-fe byclaw-be byclaw-qa); shift ;;
         --push) PUSH=true; shift ;;
         --registry) REGISTRY="$2"; shift 2 ;;
         --tag) TAG="$2"; shift 2 ;;
@@ -73,10 +73,6 @@ build_module() {
         byclaw-qa)
             context="$REPO_ROOT/byclaw-qa"
             dockerfile="$context/Dockerfile"
-            ;;
-        byclaw-data)
-            context="$REPO_ROOT"
-            dockerfile="$REPO_ROOT/byclaw-data/Dockerfile"
             ;;
         *)
             echo "Unknown module: $module"; return 1 ;;

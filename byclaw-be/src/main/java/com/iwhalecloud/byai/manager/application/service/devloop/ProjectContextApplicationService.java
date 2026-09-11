@@ -45,7 +45,7 @@ public class ProjectContextApplicationService {
     private static final int DEFAULT_FILE_LIMIT = 50;
     private static final int MAX_FILE_LIMIT = 100;
     private static final Set<String> ALL_SECTIONS = Set.of(
-        "basic", "repositories", "knowledge", "ontologies", "members", "sharedfiles");
+        "basic", "repositories", "knowledge", "members", "sharedfiles");
     private static final Set<String> KNOWLEDGE_TYPES = Set.of("KG_DOC", "KG_DB", "KG_QA", "KG_TERM");
 
     @Autowired
@@ -93,7 +93,7 @@ public class ProjectContextApplicationService {
             result.setRepositories(repositories);
             result.getCounts().put("repositories", (long) repositories.size());
         }
-        if (sections.contains("knowledge") || sections.contains("ontologies")) {
+        if (sections.contains("knowledge")) {
             loadResources(project.getProjectId(), sections, result);
         }
         if (sections.contains("members")) {
@@ -197,6 +197,9 @@ public class ProjectContextApplicationService {
             .orderByAsc(ProjectResource::getSortNo)
             .orderByAsc(ProjectResource::getId));
 
+        bindings = bindings.stream()
+            .filter(binding -> ("knowledge".equals(binding.getResourceType()) || "digital_employee".equals(binding.getResourceType())))
+            .toList();
         Set<Long> numericIds = bindings.stream()
             .map(ProjectResource::getResourceId)
             .filter(Objects::nonNull)
@@ -213,10 +216,6 @@ public class ProjectContextApplicationService {
                 if (sections.contains("knowledge")) result.getKnowledgeBases().add(summary);
                 continue;
             }
-            if (isOntology(binding, bizType)) {
-                if (sections.contains("ontologies")) addOntology(result.getOntologies(), bizType, summary);
-                continue;
-            }
             if ("digital_employee".equalsIgnoreCase(binding.getResourceType())) {
                 if (sections.contains("knowledge")) result.getDigitalEmployees().add(summary);
             } else if (sections.contains("knowledge")) {
@@ -228,14 +227,6 @@ public class ProjectContextApplicationService {
             result.getCounts().put("knowledgeBases", (long) result.getKnowledgeBases().size());
             result.getCounts().put("digitalEmployees", (long) result.getDigitalEmployees().size());
             result.getCounts().put("otherResources", (long) result.getOtherResources().size());
-        }
-        if (sections.contains("ontologies")) {
-            ProjectContextDto.OntologySummary ontologies = result.getOntologies();
-            result.getCounts().put("ontologyBases", (long) ontologies.getBases().size());
-            result.getCounts().put("ontologyObjects", (long) ontologies.getObjects().size());
-            result.getCounts().put("ontologyViews", (long) ontologies.getViews().size());
-            result.getCounts().put("ontologyScenes", (long) ontologies.getScenes().size());
-            result.getCounts().put("ontologyOthers", (long) ontologies.getOthers().size());
         }
     }
 
@@ -252,26 +243,6 @@ public class ProjectContextApplicationService {
         summary.setParentResourceId(resource == null ? null : resource.getParentResourceId());
         summary.setAvailable(resource != null);
         return summary;
-    }
-
-    private boolean isOntology(ProjectResource binding, String bizType) {
-        return "ontology".equalsIgnoreCase(binding.getResourceType())
-            || (bizType != null && Set.of("ONTOLOGY_BASE", "OBJECT", "VIEW", "SCENE").contains(bizType));
-    }
-
-    private void addOntology(ProjectContextDto.OntologySummary ontology, String bizType,
-                             ProjectContextDto.ResourceSummary summary) {
-        if ("ONTOLOGY_BASE".equals(bizType)) {
-            ontology.getBases().add(summary);
-        } else if ("OBJECT".equals(bizType)) {
-            ontology.getObjects().add(summary);
-        } else if ("VIEW".equals(bizType)) {
-            ontology.getViews().add(summary);
-        } else if ("SCENE".equals(bizType)) {
-            ontology.getScenes().add(summary);
-        } else {
-            ontology.getOthers().add(summary);
-        }
     }
 
     private List<ProjectContextDto.MemberSummary> loadMembers(Long projectId) {

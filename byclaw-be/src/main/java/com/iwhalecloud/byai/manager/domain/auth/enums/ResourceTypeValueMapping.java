@@ -54,6 +54,7 @@ public enum ResourceTypeValueMapping {
     OBJECT(ResourceBizTypeEnum.OBJECT.name(), "OBJECT"),
 
     // 本体库资源
+    // 仅保留历史数据类型兼容，不提供业务入口。
     ONTOLOGY_BASE(ResourceBizTypeEnum.ONTOLOGY_BASE.name(), "ONTOLOGY_BASE"),
 
     // 场景资源

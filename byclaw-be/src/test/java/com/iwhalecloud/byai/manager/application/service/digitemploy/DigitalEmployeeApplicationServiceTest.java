@@ -884,7 +884,7 @@ class DigitalEmployeeApplicationServiceTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = { "KG_DOC", "KG_QA", "KG_TERM", "ONTOLOGY_BASE", "SCENE", "VIEW", "OBJECT" })
+    @ValueSource(strings = { "KG_DOC", "KG_QA", "KG_TERM", "VIEW", "OBJECT" })
     void installDigitalEmployeeRelResources_rejectsNonSkillResourceWhenBoundDefaultEmployeeIsNotManageable(
         String resourceBizType) {
         DigitalEmployeeInstallResourceDTO dto = new DigitalEmployeeInstallResourceDTO();

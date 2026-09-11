@@ -14,7 +14,7 @@ import java.util.List;
 /**
  * 项目资源绑定领域服务。
  * <p>
- * 负责项目与知识库、数字员工、本体之间绑定关系的增删改查。
+ * 负责项目与知识库、数字员工之间绑定关系的增删改查。
  */
 @Service
 public class ProjectResourceService {
@@ -59,6 +59,7 @@ public class ProjectResourceService {
     public List<ProjectResource> listByProjectId(Long projectId) {
         LambdaQueryWrapper<ProjectResource> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(ProjectResource::getProjectId, projectId)
+            .in(ProjectResource::getResourceType, "knowledge", "digital_employee")
             .and(item -> item.isNull(ProjectResource::getDeleteFlag)
                 .or().ne(ProjectResource::getDeleteFlag, DeleteFlag.DELETED))
             .orderByAsc(ProjectResource::getResourceType)
@@ -68,13 +69,14 @@ public class ProjectResourceService {
     }
 
     /**
-     * 按项目 ID 物理删除全部资源绑定，供全量覆盖保存复用。
+     * 按项目 ID 物理删除可用类型的资源绑定，保留已下线类型的历史记录，供全量覆盖保存复用。
      *
      * @param projectId 项目 ID
      */
     public void deleteByProjectId(Long projectId) {
         projectResourceMapper.delete(new LambdaQueryWrapper<ProjectResource>()
-            .eq(ProjectResource::getProjectId, projectId));
+            .eq(ProjectResource::getProjectId, projectId)
+            .in(ProjectResource::getResourceType, "knowledge", "digital_employee"));
     }
 
 

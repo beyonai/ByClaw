@@ -278,7 +278,7 @@ const canInstallResource = (resource: IResourceCardItem, resourceType?: string) 
   if (bizType === 'SKILL' || resourceType === 'SKILL') {
     return Boolean(resource?.resourceId && resource?.hasUsePermission);
   }
-  // 本体库走"按粒度安装"选择器（库/场景/对象/视图），不提供内建的整库快装入口。
+  // 阻止历史已下线资源再次安装。
   if (bizType === 'ONTOLOGY_BASE' || resourceType === 'ONTOLOGY_BASE') {
     return false;
   }
@@ -842,7 +842,7 @@ const RenderContent = (props: ResourceCardProps) => {
       });
     }
 
-    // 额外操作（如本体的「绑定本体」）：调用方可按当前资源权限控制展示。
+    // 额外操作：调用方可按当前资源权限控制展示。
     if (actionConfig?.extraMenuItems?.length) {
       items.push(
         ...actionConfig.extraMenuItems.filter((item: ExtraResourceMenuItem) => {
