@@ -875,6 +875,13 @@ const ConnectorControl = ({
   const credentialSchema = hasValidCredentialForm(authorizingConnector)
     ? authorizingConnector.credentialForm
     : undefined;
+  const oauthHelp =
+    authorizingConnector?.authMode === 'OAUTH2' &&
+    authorizingConnector.credentialForm?.helpText &&
+    authorizingConnector.credentialForm.helpText.length <= 500 &&
+    isSafeCredentialHelpUrl(authorizingConnector.credentialForm.helpUrl)
+      ? authorizingConnector.credentialForm
+      : undefined;
 
   const renderConnectorAction = (connector: Connector) => {
     if (catalogRefreshing) {
@@ -1100,7 +1107,7 @@ const ConnectorControl = ({
         footer={null}
         open={!!authorizingConnector && !authorizationSession && !credentialSchema}
         zIndex={2000}
-        width={570}
+        width={oauthHelp ? 680 : 570}
         onCancel={() => void cancelAuthorization()}
       >
         {authorizingConnector && (
@@ -1110,25 +1117,42 @@ const ConnectorControl = ({
               <span>›</span>
               <ConnectorIcon connector={authorizingConnector} />
             </div>
-            <h2>连接 {authorizingConnector.name} 作为 AI 知识库</h2>
-            <p>授权后，助手将能读取你有权限访问的内容，为你提供总结、智能问答和检索服务。</p>
-            <div className={styles.permissionBlock}>
-              <strong>即将获取以下权限</strong>
-              <div>
-                <GlobalOutlined />
-                <span>
-                  <b>读取知识库与内容</b>
-                  <small>读取你有权限访问的内容</small>
-                </span>
-              </div>
-              <div>
-                <FileTextOutlined />
-                <span>
-                  <b>编辑与管理内容</b>
-                  <small>用于整理、创建和管理授权范围内的内容</small>
-                </span>
-              </div>
-            </div>
+            {oauthHelp ? (
+              <>
+                <h2>连接 {authorizingConnector.name}</h2>
+                <CredentialHelpCard helpText={oauthHelp.helpText!} />
+                <a
+                  className={styles.credentialHelpLink}
+                  href={oauthHelp.helpUrl}
+                  rel="noopener noreferrer"
+                  target="_blank"
+                >
+                  {oauthHelp.helpLinkText || '查看授权说明'}
+                </a>
+              </>
+            ) : (
+              <>
+                <h2>连接 {authorizingConnector.name} 作为 AI 知识库</h2>
+                <p>授权后，助手将能读取你有权限访问的内容，为你提供总结、智能问答和检索服务。</p>
+                <div className={styles.permissionBlock}>
+                  <strong>即将获取以下权限</strong>
+                  <div>
+                    <GlobalOutlined />
+                    <span>
+                      <b>读取知识库与内容</b>
+                      <small>读取你有权限访问的内容</small>
+                    </span>
+                  </div>
+                  <div>
+                    <FileTextOutlined />
+                    <span>
+                      <b>编辑与管理内容</b>
+                      <small>用于整理、创建和管理授权范围内的内容</small>
+                    </span>
+                  </div>
+                </div>
+              </>
+            )}
             <Button type="primary" block loading={startingAuthorization} size="large" onClick={startAuthorization}>
               立即前往授权
             </Button>

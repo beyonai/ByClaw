@@ -104,12 +104,13 @@ public class ConnectorInfoService {
             return;
         }
         try {
-            if (!"AK_SK".equals(connector.getAuthMode())) {
+            boolean oauth = "OAUTH2".equals(connector.getAuthMode());
+            if (!"AK_SK".equals(connector.getAuthMode()) && !oauth) {
                 return;
             }
             JSONObject root = JSON.parseObject(connector.getAuthConfig());
             JSONObject form = root == null ? null : root.getJSONObject("credentialForm");
-            ConnectorCredentialFormDto sanitized = sanitizeCredentialForm(form);
+            ConnectorCredentialFormDto sanitized = sanitizeCredentialForm(form, oauth);
             connector.setCredentialForm(sanitized);
         } catch (RuntimeException ignored) {
             connector.setCredentialForm(null);
@@ -118,7 +119,7 @@ public class ConnectorInfoService {
         }
     }
 
-    private static ConnectorCredentialFormDto sanitizeCredentialForm(JSONObject form) {
+    private static ConnectorCredentialFormDto sanitizeCredentialForm(JSONObject form, boolean oauth) {
         if (form == null || !isSafeHelpUrl(form.getString("helpUrl"))) {
             return null;
         }
@@ -131,7 +132,8 @@ public class ConnectorInfoService {
             return null;
         }
         JSONArray fields = form.getJSONArray("fields");
-        if (fields == null || fields.isEmpty() || fields.size() > MAX_CREDENTIAL_FIELDS) {
+        if (fields == null || (oauth ? !fields.isEmpty() || helpText == null : fields.isEmpty())
+                || fields.size() > MAX_CREDENTIAL_FIELDS) {
             return null;
         }
         List<ConnectorCredentialFieldDto> sanitizedFields = new ArrayList<>();
