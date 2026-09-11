@@ -343,7 +343,7 @@ await (async () => {
   assert.equal(schema.json.commands.init.properties['session-root'].format, 'absolute-path');
   assert.equal(schema.json.commands.init.properties['source-scope'].type, 'array');
   assert.deepEqual(schema.json.commands.init.properties['source-scope'].items.enum, [
-    'public-internet', 'dingtalk', 'feishu', 'wecom', 'ima', 'cloud-knowledge',
+    'public-internet', 'dingtalk', 'feishu', 'wecom', 'ima', 'cloud-knowledge', 'mail',
   ]);
   assert.deepEqual(schema.json.commands.init.properties['source-scope'].default, ['public-internet', 'cloud-knowledge']);
   assert.equal(schema.json.commands.init.properties['cloud-discovery-scope'].type, 'object');

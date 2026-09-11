@@ -208,6 +208,9 @@ RUN set -eux; \
         ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${tmp_mp3}"; \
         rm -f "${tmp_mp3}"; \
         npm install -g "@sovovs/bycli@${OPENCLI_VERSION}"; \
+        bycli iwhalecloud list --help >/dev/null; \
+        bycli iwhalecloud read --help >/dev/null; \
+        bycli iwhalecloud download --help >/dev/null; \
         mkdir -p /opt/opencli/extension; \
         curl -fsSL -o /tmp/opencli-extension.zip \
             "https://github.com/sovovs/byCLI/releases/download/v${OPENCLI_VERSION}/bycli-extension-v${OPENCLI_EXTENSION_VERSION}.zip"; \

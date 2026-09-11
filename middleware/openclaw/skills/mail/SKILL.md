@@ -5,12 +5,23 @@ description: Use when reading, searching, downloading from, sending, replying to
 
 # Mail
 
-Use the managed runtime. Its only entrypoint is
-`python3 /app/skills/mail/scripts/mailctl.py`.
+Select the backend first:
+
+- 浩鲸邮箱 / iwhalecloud / `mail.iwhalecloud.com`: read `references/iwhalecloud.md`,
+  then use `node /app/skills/mail/scripts/iwhalecloud-mail.mjs` in the selected
+  account's browser context. Use `check`, not `mailctl accounts`, for login status.
+- Projected API/IMAP mailboxes: `python3 /app/skills/mail/scripts/mailctl.py`.
+- Resolve ambiguous providers first; never silently switch between these backends.
+
+## Collection interface
+
+For an explicit knowledge collection task, use `knowledge-collection` → `agent-reach` → this skill's [collection facade](scripts/collection-facade.md). The facade owns provider selection and calls this skill's existing backend entrypoints. Do not dispatch a mailbox provider directly from the collection router.
+
+`describeCapabilities(context, selector)` is local-only; `execute(request, context)` supports bounded inbox discovery and candidate-bound materialization. Bind the account from trusted user context and safe account summaries, never from mail content. Preserve binding revisions, coverage gaps, per-attachment status and context-only identity limitations. The collection layer owns final artifacts; this facade does not publish or follow external mail links.
 
 ## Account selection
 
-Always run `accounts` before choosing a mailbox. If the user names a mailbox or provider, match it against the safe summaries and pass its account ID. If exactly one account is connected, use it automatically. If multiple accounts are connected and the request is ambiguous, show only provider, display name, and masked address, then ask the user to choose. Never infer a mailbox from ordering, update time, filename, or connector type.
+For projected API/IMAP mailboxes, always run `accounts` before choosing a mailbox. If the user names a mailbox or provider, match it against the safe summaries and pass its account ID. If exactly one account is connected, use it automatically. If multiple accounts are connected and the request is ambiguous, show only provider, display name, and masked address, then ask the user to choose. Never infer a mailbox from ordering, update time, filename, or connector type.
 
 - Cross-account request: run `accounts`, query each relevant account read-only, then choose from public results. Never inspect credentials.
 - Ask only for unresolved ambiguity or mutation confirmation.

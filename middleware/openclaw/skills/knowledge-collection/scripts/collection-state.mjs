@@ -1514,6 +1514,24 @@ export function collectionStatus(paths) {
     ? items.filter((item) => item.materialization.status === 'materialized'
       && item.materialization.contentGranularity !== 'full-text').length
     : 0;
+  const mailAttachmentWarnings = [];
+  for (const item of items.filter(entry => entry.sourceSkill === 'mail' && entry.attachmentsRequested)) {
+    for (const attachment of item.attachments || []) {
+      try {
+        if (attachment.status !== 'complete') throw new Error('attachment incomplete');
+        const target = validateRelativePath(paths.root, attachment.localPath, 'mail attachment');
+        validatePathPrefix(paths.root, attachment.localPath, 'sanitized/items', 'mail attachment');
+        let cursor = paths.root;
+        for (const segment of path.relative(paths.root, target).split(path.sep)) {
+          cursor = path.join(cursor, segment);
+          if (fs.lstatSync(cursor).isSymbolicLink()) throw new Error('attachment symlink');
+        }
+        const stat = fs.lstatSync(target);
+        if (!stat.isFile() || stat.size !== attachment.size || stat.size > 25 * 1024 * 1024
+          || crypto.createHash('sha256').update(fs.readFileSync(target)).digest('hex') !== attachment.sha256) throw new Error('attachment changed');
+      } catch { mailAttachmentWarnings.push(`MAIL_ATTACHMENT_INVALID: ${item.itemId}`); }
+    }
+  }
   const relevance = evaluateStoredTopicRelevance(paths, session, metadata, collectionResult);
   const promotionEvidence = validatePromotionEvidence(paths, session);
   const baseProbeSummary = summarizeProbeRun(session);
@@ -1540,13 +1558,13 @@ export function collectionStatus(paths) {
     requiredContentGranularity,
     unmetRequiredGranularity,
     deliveryComplete: deliveryCompleteForSession(session) && relevance.valid
-      && promotionEvidence.remainingCount === 0,
+      && promotionEvidence.remainingCount === 0 && mailAttachmentWarnings.length === 0,
     publicCollectRun: probeSummary,
     crawl: summarizeCrawlDelivery(session),
     canonicalItems: collectionResult.items.length,
     ...(relevance.valid ? { downstreamInput: buildDownstreamInput(paths, collectionResult) } : {}),
     warnings: [...new Set([
-      ...loaded.warnings, ...relevance.warnings, ...promotionEvidence.warnings,
+      ...loaded.warnings, ...relevance.warnings, ...promotionEvidence.warnings, ...mailAttachmentWarnings,
     ])],
   };
 }

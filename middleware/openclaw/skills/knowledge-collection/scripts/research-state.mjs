@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { validateMailBindings } from './routing/dispatcher.mjs';
 /**
  * research-state.mjs — 深化研究方法的状态机(deep_research.py 的 JS 等价平替)。
  *
@@ -44,7 +45,7 @@ export const TREE_FILENAME = 'research-tree.md';
 export const REPORT_FILENAME = 'report.md';
 const BRANCH_STATUSES = new Set(['done', 'pending', 'failed']);
 const TASK_MODES = new Set(['research', 'collection']);
-const SOURCE_SCOPES = new Set(['public-internet', 'dingtalk', 'feishu', 'wecom', 'ima', 'cloud-knowledge']);
+const SOURCE_SCOPES = new Set(['public-internet', 'dingtalk', 'feishu', 'wecom', 'ima', 'cloud-knowledge', 'mail']);
 const MATERIALIZATION_TARGETS = new Set(['candidates', 'selected', 'all']);
 const REQUIRED_CONTENT_GRANULARITIES = new Set(['any', 'full-text']);
 const WORKFLOWS = new Set(['public-collect']);
@@ -701,6 +702,9 @@ export function cmdInit(args) {
   const maxSourcesPerBranch = optionalPositiveInt(args['max-sources-per-branch'], '--max-sources-per-branch', { max: 1000 });
   const maxSearchRounds = optionalPositiveInt(args['max-search-rounds'], '--max-search-rounds', { max: 1000 });
   const effectiveSourceScope = sourceScope(args['source-scope']);
+  const mailBindings = effectiveSourceScope.includes('mail')
+    ? validateMailBindings(parseJsonArg(args['mail-bindings'], null)) : null;
+  if (!mailBindings && args['mail-bindings'] !== undefined) throw new Error('--mail-bindings requires mail source scope');
   const effectiveMaterializationTarget = materializationTarget(args['materialization-target']);
   const effectiveRequiredContentGranularity = requiredContentGranularity(
     args['required-content-granularity'],
@@ -779,6 +783,7 @@ export function cmdInit(args) {
       maxSourcesPerBranch,
       maxSearchRounds,
       sourceScope: effectiveSourceScope,
+      ...(mailBindings ? { mailBindings } : {}),
       materializationTarget: effectiveMaterializationTarget,
       requiredContentGranularity: effectiveRequiredContentGranularity,
       ...(effectiveWorkflow ? { workflow: effectiveWorkflow } : {}),

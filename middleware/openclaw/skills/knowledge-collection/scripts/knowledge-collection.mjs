@@ -29,6 +29,14 @@ function defineCommand(spec) {
 }
 
 const COMMAND_SPECS = {
+  ...Object.fromEntries(['route-evaluate', 'route-resolve', 'route-dispatch', 'route-status'].map(name => [name, defineCommand({
+    group: 'collection', title: '统一渠道选路、计划提交、执行与状态查询',
+    args: { '--session-dir': '必填。已初始化会话目录',
+      ...(name === 'route-evaluate' || name === 'route-resolve'
+        ? { '--request-file': '必填。会话 .collection-inputs 下的严格 JSON 请求文件' }
+        : { '--plan-id': '必填。route-resolve 返回的 planId' }) },
+    example: `knowledge-collection.mjs ${name} --session-dir <dir>`,
+  })])),
   'acquire-web': defineCommand({
     group: 'collection',
     title: '通过 byCLI 受控抓取已授权的通用网页候选',
@@ -91,7 +99,8 @@ const COMMAND_SPECS = {
       '--max-branches': '可选。正整数;研究分支总数上限',
       '--max-sources-per-branch': '可选。正整数;单分支来源数上限',
       '--max-search-rounds': '可选。正整数;检索轮数上限',
-      '--source-scope': 'JSON 数组;默认 ["public-internet","cloud-knowledge"]. 可选 public-internet、dingtalk、feishu、wecom、ima、cloud-knowledge',
+      '--source-scope': 'JSON 数组;默认 ["public-internet","cloud-knowledge"]. 可选 public-internet、dingtalk、feishu、wecom、ima、cloud-knowledge、mail',
+      '--mail-bindings': 'mail 来源必填。可信账号上下文绑定 JSON 数组；不得填写凭据',
       '--materialization-target': 'candidates | selected(默认) | all。all 表示所有请求正文必须物化或如实标记失败/待处理',
       '--required-content-granularity': 'any(默认) | full-text。用户明确要求全文时必须设为 full-text',
       '--workflow': '可选。public-collect；仅用于公共互联网 selected + full-text 的单写者会话',
@@ -341,6 +350,12 @@ const SCHEMA = {
 };
 
 const COMMAND_SCHEMA_OVERRIDES = {
+  ...Object.fromEntries(['route-evaluate', 'route-resolve', 'route-dispatch', 'route-status'].map(name => [name, {
+    required: ['session-dir', name === 'route-evaluate' || name === 'route-resolve' ? 'request-file' : 'plan-id'],
+    properties: { 'session-dir': SCHEMA.sessionDir,
+      ...(name === 'route-evaluate' || name === 'route-resolve'
+        ? { 'request-file': SCHEMA.inputFile } : { 'plan-id': { type: 'string', pattern: '^[a-f0-9]{64}$' } }) },
+  }])),
   'acquire-web': {
     required: ['session-dir', 'item-id', 'source-url'],
     properties: {
@@ -402,8 +417,9 @@ const COMMAND_SCHEMA_OVERRIDES = {
       'max-search-rounds': SCHEMA.positiveInteger,
       'source-scope': {
         type: 'array', minItems: 1, uniqueItems: true, default: ['public-internet', 'cloud-knowledge'], cliEncoding: 'json',
-        items: { type: 'string', enum: ['public-internet', 'dingtalk', 'feishu', 'wecom', 'ima', 'cloud-knowledge'] },
+        items: { type: 'string', enum: ['public-internet', 'dingtalk', 'feishu', 'wecom', 'ima', 'cloud-knowledge', 'mail'] },
       },
+      'mail-bindings': SCHEMA.jsonArray,
       'materialization-target': { type: 'string', enum: ['candidates', 'selected', 'all'], default: 'selected' },
       'required-content-granularity': { type: 'string', enum: ['any', 'full-text'], default: 'any' },
       workflow: { type: 'string', enum: ['public-collect'] },
@@ -535,7 +551,7 @@ const COMMAND_SCHEMA_OVERRIDES = {
   status: { required: ['session-dir'], properties: { 'session-dir': SCHEMA.sessionDir, full: SCHEMA.boolean } },
 };
 
-function commandSchema() {
+export function commandSchema() {
   const buildIdentity = resolveBuildIdentity();
   const commands = {};
   for (const [name, spec] of Object.entries(COMMAND_SPECS)) {
@@ -745,7 +761,7 @@ async function main() {
   render(await executeLocalCommand(canonical, args), compactRequested(args));
 }
 
-main().catch((error) => {
+if (process.argv[1] === new URL(import.meta.url).pathname) main().catch((error) => {
   const message = error instanceof Error ? error.message : String(error);
   const errorCode = /^([A-Z][A-Z0-9_]+):/.exec(message)?.[1];
   render({

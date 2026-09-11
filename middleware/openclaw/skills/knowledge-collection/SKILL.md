@@ -115,13 +115,17 @@ Before discovery, state the effective source scope and materialization target in
 | Situation | Required reference |
 |---|---|
 | Complex, multi-source, cited research | [research-methodology.md](references/research-methodology.md) |
-| Public URL/source routing | [agent-reach.md](references/agent-reach.md) |
+| All collection channels | [agent-reach.md](references/agent-reach.md) |
+| Public URL/source execution | [public-internet.md](references/sources/public-internet.md) |
+| Mail collection | [mail/SKILL.md](../mail/SKILL.md), then its collection facade |
 | DingTalk, Feishu, WeCom, or IMA | Relevant file in [references/sources/](references/sources/) |
 | Product documentation site or multi-page crawl | [site-crawl/SKILL.md](references/site-crawl/SKILL.md) |
 | Session state and collection artifacts | [collection-contract.md](references/collection-contract.md) |
 | Final validation and handoff | [delivery.md](references/delivery.md) |
 
-Read only the reference that matches the chosen workflow, plus `collection-contract.md` for any collection session and `delivery.md` before handoff. The complete reference index is [manifest.json](references/manifest.json).
+Read agent-reach.md for every collection, then only the reference that matches the chosen workflow, plus `collection-contract.md` for any collection session and `delivery.md` before handoff. The complete reference index is [manifest.json](references/manifest.json).
+
+邮件采集必须显式 `init --source-scope '["mail"]' --mail-bindings '<可信绑定数组>'`，再通过 `route-evaluate` / `route-resolve` / `route-dispatch` 委派 mail 技能级接口。总路由不选择邮箱 provider，不直接调用邮箱后端。普通邮件查询仍属于 mail 技能。邮件正文、附件下载和附件解析分别记账，未完成要求时不能标记交付完成。
 
 ## 3. Execute through validated commands
 
@@ -172,11 +176,11 @@ node scripts/knowledge-collection.mjs retighten --session-dir <dir> --required-c
 3. Delegate retrieval to the selected source executor. Do not use `web_fetch`, `curl`, `wget`, `requests`, or another direct HTTP client to bypass it. 委派来源执行器时只传内部 `session-dir` 及其 `raw/` 子路径，不得向被委派 Agent 或执行器传递、描述或要求其操作
    `requestedDeliveryDir`。
 
-   已选候选是 `https://mp.weixin.qq.com/s...` 或 `https://weixin.sogou.com/link?...` 时，按 [agent-reach.md](references/agent-reach.md) 委派 `bycli weixin download --url <URL>`，把输出目录和结构化结果都保存在本会话 `raw/bycli/weixin/<item-id>/`。确认返回的 `saved` 文件可读后，运行 `materialize-wechat`，参数为 `--executor-result-file <raw-result.json> --item-id <item-id>`；只有命令返回非空 `collectPayloadPath` 时才把它交给 `collect`。低置信度结果由该命令保留为 pending/unknown，不得手写脚本将其提升为全文。本段命令仅适用于 operator 会话；`public-collect` 持有的会话必须使用编排器内部 verifier，不得手工执行本段命令。
+   已选候选是 `https://mp.weixin.qq.com/s...` 或 `https://weixin.sogou.com/link?...` 时，按 [public-internet.md](references/sources/public-internet.md) 委派 `bycli weixin download --url <URL>`，把输出目录和结构化结果都保存在本会话 `raw/bycli/weixin/<item-id>/`。确认返回的 `saved` 文件可读后，运行 `materialize-wechat`，参数为 `--executor-result-file <raw-result.json> --item-id <item-id>`；只有命令返回非空 `collectPayloadPath` 时才把它交给 `collect`。低置信度结果由该命令保留为 pending/unknown，不得手写脚本将其提升为全文。本段命令仅适用于 operator 会话；`public-collect` 持有的会话必须使用编排器内部 verifier，不得手工执行本段命令。
 
    其他通用网页必须先运行 `acquire-web --item-id <item-id> --source-url <已授权 URL>`，再把命令返回的 `executorResult` 交给 `materialize-web --item-id <item-id> --executor-result-file <path>`。不得手工重定向 stdout 到 raw，不得手工构造 collect payload；只有 `materialize-web` 返回非空 `collectPayloadPath` 时才能调用 `collect`。执行器返回登录、CAPTCHA、环境验证或其他 requires-user-action 时遵守 byCLI **STOP** 契约：保留 pending/raw 与命令自有 TAB，停止且不降级、不清理、不自动重试。本段命令仅适用于 operator 会话；`public-collect` 持有的会话必须使用编排器内部 verifier，不得手工执行本段命令。
 
-   已授权并选中的 arXiv 候选要求完整正文时，无论候选来自用户通过 `--direct-urls` 提供的直链还是 `public-discover` 的 eligible article，都按 [agent-reach.md](references/agent-reach.md) 获取元数据与全文。全文读取必须使用 `bycli web read --url <URL> --output <session-dir>/raw/bycli/arxiv/<item-id>/`，由 byCLI 同时落盘正文和图片。若原始 PDF URL 不能由 `bycli web read` 物化，可仅改用同一官方论文的 `https://arxiv.org/html/<paper-id>`，并保留已授权候选 URL 为 `sourceUrl`、实际读取 URL 为 `acquisitionUrl`；两者必须具有相同论文 ID。把两份执行器原始输出原样保留在 `raw/` 后运行 `materialize-arxiv`。只有该命令返回非空 `collectPayloadPath` 时才交给 `collect`；结构不完整时保持 pending，摘要或节选不能满足全文要求。重试必须写入新的 `raw/bycli/arxiv/<item-id>-<attempt>/`，不得覆盖首次或任何既有执行器输出。不得手工改写 raw 证据，不得手工下载或补抓图片，不得使用 `curl`、`web_fetch`、`wget` 或 `requests` 探测、补抓或转换。本段命令仅适用于 operator 会话；`public-collect` 持有的会话必须使用编排器内部 verifier，不得手工执行本段命令。
+   已授权并选中的 arXiv 候选要求完整正文时，无论候选来自用户通过 `--direct-urls` 提供的直链还是 `public-discover` 的 eligible article，都按 [public-internet.md](references/sources/public-internet.md) 获取元数据与全文。全文读取必须使用 `bycli web read --url <URL> --output <session-dir>/raw/bycli/arxiv/<item-id>/`，由 byCLI 同时落盘正文和图片。若原始 PDF URL 不能由 `bycli web read` 物化，可仅改用同一官方论文的 `https://arxiv.org/html/<paper-id>`，并保留已授权候选 URL 为 `sourceUrl`、实际读取 URL 为 `acquisitionUrl`；两者必须具有相同论文 ID。把两份执行器原始输出原样保留在 `raw/` 后运行 `materialize-arxiv`。只有该命令返回非空 `collectPayloadPath` 时才交给 `collect`；结构不完整时保持 pending，摘要或节选不能满足全文要求。重试必须写入新的 `raw/bycli/arxiv/<item-id>-<attempt>/`，不得覆盖首次或任何既有执行器输出。不得手工改写 raw 证据，不得手工下载或补抓图片，不得使用 `curl`、`web_fetch`、`wget` 或 `requests` 探测、补抓或转换。本段命令仅适用于 operator 会话；`public-collect` 持有的会话必须使用编排器内部 verifier，不得手工执行本段命令。
 
    当选用的执行器是 `bycli` 时，初次 `BROWSER_CONNECT` 是桥接恢复信号，不是要求用户操作桌面浏览器的证据。`public-discover` 返回最终 `bridge_unavailable` 表示其内部 Runner 已消费统一 `bridge-bootstrap` 恢复链路；外层 Agent 不得再次直接执行 `start-chrome.sh`，也不得重复运行 `doctor`、daemon restart 或另一套自定义恢复命令。对于未经过该 Runner 的普通 byCLI 命令，若首次返回 `BROWSER_CONNECT`，也只能调用统一 `bridge-bootstrap` 一次，不得直接调用 `start-chrome.sh`；是否执行启动脚本由 bootstrap 根据托管 Chromium 的结构化状态决定。只有结构化桥接诊断明确列出 `browser_start_script` 时，才能声称执行过 `start-chrome.sh`；诊断未列出该 action 时，只能如实报告最终 `bridge_unavailable`，不得猜测启动脚本已执行或未执行。采集编排器不得直接要求用户打开 Chrome，也不得将这次首次失败归类为认证问题。只有最终 `bridge_unavailable`，或明确的登录、MFA、CAPTCHA、认证结果，才可作为需要用户处理的事项对外说明。
 

@@ -1,3 +1,4 @@
+import { channels, registeredChannel } from '../routing/channels.mjs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { createDingtalkAdapter } from './adapters/dingtalk.mjs';
 import { createFwsAdapter } from './adapters/fws.mjs';
@@ -6,7 +7,7 @@ import { createImaAdapter } from './adapters/ima.mjs';
 import { createCloudKnowledgeAdapter } from './adapters/cloud-knowledge.mjs';
 import { handledOutcome } from './shared/status-model.mjs';
 
-const ENTERPRISE_SOURCES = new Set(['dingtalk', 'feishu', 'wecom', 'ima', 'cloud-knowledge']);
+const ENTERPRISE_SOURCES = new Set(Object.keys(channels).filter(id => channels[id].group === 'enterprise'));
 const SEARCH_ALL_SOURCES = new Set(['dingtalk', 'feishu', 'wecom', 'ima']);
 const SEARCH_ALL_DEFAULT_SOURCES = ['dingtalk', 'feishu', 'wecom', 'ima'];
 const SENSITIVE_KEY = /(token|cookie|secret|password|authorization|credential|device[_-]?code)/i;
@@ -52,6 +53,7 @@ function parseBoolean(values, key, fallback) {
 function parseSource(values) {
   const source = requiredString(values, 'source');
   if (!ENTERPRISE_SOURCES.has(source)) throw new Error(`--source must be one of: ${[...ENTERPRISE_SOURCES].join(', ')}`);
+  registeredChannel(source);
   return source;
 }
 

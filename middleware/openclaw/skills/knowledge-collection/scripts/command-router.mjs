@@ -1,3 +1,6 @@
+import { assertNoActiveRoute } from './routing/plan-store.mjs';
+import { executeRouteCommand } from './routing/cli.mjs';
+import { legacyChannel, registeredChannel } from './routing/channels.mjs';
 import {
   cmdInit, cmdPlan, cmdBranch, cmdAggregate, cmdReport, cmdResearchStatus,
 } from './research-state.mjs';
@@ -93,6 +96,18 @@ function status(paths, args) {
 }
 
 export function executeLocalCommand(command, args) {
+  if (command.startsWith('route-')) return executeRouteCommand(command, args);
+  if (!['status', 'inspect', 'crawl-status', 'init'].includes(command)) {
+    const root = resolveSandboxPath(args['session-dir'], '--session-dir', { currentSessionRoot: args['session-root'] });
+    assertNoActiveRoute({ root, session: `${root}/session.json` });
+  }
+  // Shared selection only: legacy workflows retain their original arguments and owner.
+  const channel = legacyChannel(command);
+  return channel ? registeredChannel(channel).executeLegacy(command, args, executeWorkflowCommand)
+    : executeWorkflowCommand(command, args);
+}
+
+export function executeWorkflowCommand(command, args) {
   const normalizedArgs = {
     ...args,
     'session-dir': resolveSandboxPath(args['session-dir'], '--session-dir', {

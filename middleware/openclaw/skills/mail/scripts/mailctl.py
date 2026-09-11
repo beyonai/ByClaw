@@ -32,6 +32,7 @@ from mail_runtime.registry import AdapterRegistry, build_default_registry
 
 
 DEFAULT_WORKSPACE_ROOT = Path("/by/workspace")
+DEFAULT_COLLECTION_SESSIONS_ROOT = Path("/by/.sessions")
 MAX_INPUT_JSON_BYTES = 256 * 1024
 
 EXIT_CODES = {
@@ -103,6 +104,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_message(attachment)
     attachment.add_argument("--attachment", required=True)
     attachment.add_argument("--output-dir", required=True)
+    attachment.add_argument("--collection-session-dir")
     send = commands.add_parser("send")
     add_account(send)
     send.add_argument("--input-json", required=True)
@@ -150,6 +152,26 @@ def require_exact_result(value: Any, expected: type) -> Any:
     return value
 
 
+def attachment_root(args: argparse.Namespace, workspace_root: Path) -> Path:
+    """Permit only the fixed private mail directory of a collection session.
+
+    This attachment-only option does not change draft/input JSON access. The
+    existing sink opens every ancestor with O_NOFOLLOW and checks private storage.
+    """
+    if getattr(args, "collection_session_dir", None) is None:
+        return workspace_root
+    session = Path(args.collection_session_dir)
+    if session == DEFAULT_COLLECTION_SESSIONS_ROOT:
+        raise MailRuntimeError(ErrorCode.PERMISSION_DENIED)
+    parts = relative_from_absolute(DEFAULT_COLLECTION_SESSIONS_ROOT, session).parts
+    if len(parts) != 3 or parts[1] not in {"collections", ".collection-runs"}:
+        raise MailRuntimeError(ErrorCode.PERMISSION_DENIED)
+    private_root = session / ".routing" / "mail-downloads"
+    if Path(args.output_dir) != private_root / "mail-attachments":
+        raise MailRuntimeError(ErrorCode.PERMISSION_DENIED)
+    return private_root
+
+
 def supports_operation(account: AccountConfig, capability: str) -> bool:
     status = account.capability_status.get(capability)
     if status is not None:
@@ -192,7 +214,7 @@ def execute(
             require_text(args.message, maximum=1024),
             require_text(args.attachment, maximum=1024),
         )
-        with AttachmentSink(workspace_root, Path(args.output_dir)) as sink:
+        with AttachmentSink(attachment_root(args, workspace_root), Path(args.output_dir)) as sink:
             result = adapter.download_attachment(request, sink)
             require_exact_result(result, AttachmentDownloadResult)
             return sink.finalize(result)

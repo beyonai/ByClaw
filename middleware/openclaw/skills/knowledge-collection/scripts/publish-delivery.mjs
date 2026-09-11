@@ -348,7 +348,7 @@ function outputAssetRelative(sourceRoot, sourceMarkdown, sourceAsset, markdownOu
   return slashPath(path.join(`${stem}-assets`, path.relative(assetsRoot, sourceAsset)));
 }
 
-function materializeMarkdown(sourceRoot, sourceMarkdown, outputRelative, assetOutputs) {
+function materializeMarkdown(sourceRoot, sourceMarkdown, outputRelative, assetOutputs, mailAttachments = []) {
   assertRegularFile(sourceMarkdown, 'downstreamInput Markdown');
   const canonicalRoot = fs.realpathSync(sourceRoot);
   assertNoSymlinkComponents(sourceRoot, sourceMarkdown, 'downstreamInput Markdown');
@@ -407,6 +407,14 @@ function materializeMarkdown(sourceRoot, sourceMarkdown, outputRelative, assetOu
   markdown = replaceVisibleMarkdown(markdown, /!\[([^\]]*)\]\((<[^>]+>|[^\s)]+)([^)]*)\)/g,
     (_match, alt, target, suffix) => `![${alt}](${rewriteTarget(target)}${suffix})`);
   markdown = rewriteHtmlMedia(markdown, rewriteTarget);
+  // Only skill-registered mail attachments are added; ordinary document links
+  // retain their old behavior and cannot authorize arbitrary local files.
+  for (const [index, attachment] of mailAttachments.entries()) {
+    if (attachment.status !== 'complete' || typeof attachment.absolute !== 'string'
+      || sha256File(attachment.absolute) !== attachment.sha256) throw new Error('MAIL_ATTACHMENT_INVALID');
+    const target = rewriteTarget(attachment.absolute);
+    markdown += `\n[附件 ${index + 1}](${target})\n`;
+  }
   return markdown;
 }
 
@@ -484,7 +492,12 @@ function buildPublishPlan(paths, downstreamInput, session, previousReceipt) {
   for (const { sourceMarkdown, outputRelative } of candidates) {
     markdownOutputs.set(outputRelative, {
       source: sourceMarkdown,
-      content: materializeMarkdown(sourceRoot, sourceMarkdown, outputRelative, assetOutputs),
+      content: materializeMarkdown(sourceRoot, sourceMarkdown, outputRelative, assetOutputs,
+        (session.collection?.collection?.items || []).filter(item => item.sourceSkill === 'mail'
+          && path.resolve(canonicalSessionRoot, item.materialization?.sanitizedPath || '') === sourceMarkdown)
+          .flatMap(item => (item.attachments || []).filter(attachment => attachment.localPath).map(attachment => ({
+            ...attachment, absolute: path.resolve(canonicalSessionRoot, attachment.localPath),
+          })))),
     });
   }
   for (const relative of markdownOutputs.keys()) {

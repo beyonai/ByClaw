@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
@@ -263,6 +264,82 @@ class MailctlTest(unittest.TestCase):
         self.assertNotEqual(0, code)
         self.assertEqual("PERMISSION_DENIED", result["error"]["code"])
         self.assertEqual("unchanged", victim.read_text(encoding="utf-8"))
+
+    def test_collection_attachment_is_confined_to_private_session_download_root(self) -> None:
+        sessions = self.root / "by" / ".sessions"
+        session = sessions / "session-1" / "collections" / "task-1"
+        private = session / ".routing" / "mail-downloads"
+        private.mkdir(parents=True, mode=0o700)
+        # Historical collection sessions need not be private. Only download storage is.
+        os.chmod(session, 0o755)
+        output = private / "mail-attachments"
+        with patch("mailctl.DEFAULT_COLLECTION_SESSIONS_ROOT", sessions, create=True):
+            code, result, _ = self.run_cli([
+                "attachment", "--account", "1001", "--message", "m1", "--attachment", "a1",
+                "--output-dir", str(output), "--collection-session-dir", str(session),
+            ])
+        self.assertEqual(0, code, result)
+        self.assertEqual(str(output / "report.txt"), result["data"]["path"])
+        self.assertEqual(0o600, (output / "report.txt").stat().st_mode & 0o777)
+        self.assertEqual(0o755, session.stat().st_mode & 0o777)
+
+    def test_collection_attachment_rejects_outside_and_symlink_paths(self) -> None:
+        sessions = self.root / "by" / ".sessions"
+        session = sessions / "session-1" / "collections" / "task-1"
+        private = session / ".routing" / "mail-downloads"
+        private.mkdir(parents=True, mode=0o700)
+        other = sessions / "session-2" / "collections" / "task-2"
+        outside = self.root / "outside"
+        outside.mkdir(mode=0o700)
+        link = session / ".routing" / "linked-downloads"
+        link.symlink_to(outside, target_is_directory=True)
+        cases = [
+            (session, outside),
+            (session, other / ".routing" / "mail-downloads" / "mail-attachments"),
+            (outside, outside / ".routing" / "mail-downloads" / "mail-attachments"),
+            (sessions, private / "mail-attachments"),
+            (session, link / "mail-attachments"),
+        ]
+        with patch("mailctl.DEFAULT_COLLECTION_SESSIONS_ROOT", sessions, create=True):
+            for chosen_session, output in cases:
+                with self.subTest(session=chosen_session, output=output):
+                    code, result, _ = self.run_cli([
+                        "attachment", "--account", "1001", "--message", "m1", "--attachment", "a1",
+                        "--output-dir", str(output), "--collection-session-dir", str(chosen_session),
+                    ])
+                    self.assertEqual("PERMISSION_DENIED", result["error"]["code"])
+                    self.assertNotEqual(0, code)
+            private.rmdir()
+            private.symlink_to(outside, target_is_directory=True)
+            code, result, _ = self.run_cli([
+                "attachment", "--account", "1001", "--message", "m1", "--attachment", "a1",
+                "--output-dir", str(private / "mail-attachments"), "--collection-session-dir", str(session),
+            ])
+            self.assertEqual("PERMISSION_DENIED", result["error"]["code"])
+            self.assertNotEqual(0, code)
+        self.assertEqual([], list(outside.iterdir()))
+
+    def test_collection_run_attachment_supports_explicit_delivery_session(self) -> None:
+        sessions = self.root / "by" / ".sessions"
+        session = sessions / "session-1" / ".collection-runs" / "run-1"
+        private = session / ".routing" / "mail-downloads"
+        private.mkdir(parents=True, mode=0o700)
+        output = private / "mail-attachments"
+        with patch("mailctl.DEFAULT_COLLECTION_SESSIONS_ROOT", sessions):
+            code, result, _ = self.run_cli([
+                "attachment", "--account", "1001", "--message", "m1", "--attachment", "a1",
+                "--output-dir", str(output), "--collection-session-dir", str(session),
+            ])
+        self.assertEqual(0, code, result)
+        self.assertEqual(str(output / "report.txt"), result["data"]["path"])
+
+    def test_collection_session_flag_does_not_expand_draft_input_permissions(self) -> None:
+        code, result, _ = self.run_cli([
+            "send", "--account", "1001", "--input-json", str(self.root / "draft.json"),
+            "--collection-session-dir", str(self.root),
+        ])
+        self.assertEqual("INVALID_REQUEST", result["error"]["code"])
+        self.assertNotEqual(0, code)
 
     def test_attachment_sink_rejects_workspace_root_rename_and_replacement(self) -> None:
         output = self.workspace / "downloads"

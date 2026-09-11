@@ -39,3 +39,20 @@ SET provider_code = CASE WHEN connector_code='gmail-mail' THEN 'gmail-oauth2' WH
       ELSE auth_config END,
     update_time = CURRENT_TIMESTAMP
 WHERE connector_code IN ('gmail-mail','microsoft-mail','fastmail-mail','qq-mail','netease-163-mail','aliyun-mail','custom-imap-mail');
+
+-- 浩鲸邮箱网页账号模板开始
+-- 沿用 IMA 的网页账号机制；登录态由账号浏览器持有，不生成 mail 凭据投影。
+-- 重放不覆盖已有名称、配置或停用状态；用户级账号仍由模板服务按历史去重初始化。
+INSERT INTO byai.byai_connector_info (
+    connector_id, connector_code, connector_name, description, connector_type,
+    provider_code, skill_code, auth_mode, auth_config, request_config, runtime_manifest, sort, status_cd
+)
+SELECT nextval('byai.seq_any_table'), 'iwhalecloud-mail-web', '浩鲸邮箱',
+       '登录浩鲸邮箱网页端，通过 bycli 读取邮件和下载附件', 'ACCOUNT_TEMPLATE',
+       NULL, NULL, 'NONE', '{}',
+       '{"operationAccount":{"platformCode":"CustomLink","accountName":"浩鲸邮箱","accountCode":"","customUrl":"https://mail.iwhalecloud.com/"}}',
+       NULL, 67, '00A'
+WHERE NOT EXISTS (
+    SELECT 1 FROM byai.byai_connector_info WHERE connector_code = 'iwhalecloud-mail-web'
+);
+-- 浩鲸邮箱网页账号模板结束

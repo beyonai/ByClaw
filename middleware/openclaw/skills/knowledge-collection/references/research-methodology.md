@@ -56,8 +56,8 @@
    
    执行任何检索前,必须逐个验证三个发现通道的可用性与适用性:
    
-   - **内置路由层** ([agent-reach.md](agent-reach.md)): Exa 搜索、gh、RSS、站内搜索等渠道。
-     **验证方式**: 通读 agent-reach.md 路由表,确认本主题是否在其覆盖范围。
+   - **内置路由层** ([agent-reach.md](agent-reach.md) → [public-internet.md](sources/public-internet.md)): Exa 搜索、gh、RSS、站内搜索等渠道。
+     **验证方式**: 通读 agent-reach.md 及 sources/public-internet.md 路由表,确认本主题是否在其覆盖范围。
    
    - **online-search** (searxng 多引擎技能): 时间窗(`--time-range day/week/month/year`)、
      中文引擎(baidu/sogou/360search)、学术类别(`--category science`,含 arxiv/crossref/pubmed/openalex)。

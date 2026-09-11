@@ -115,7 +115,7 @@ def markdown_section(text, heading):
 class KnowledgeCollectionSkillContractTest(unittest.TestCase):
     def test_generic_web_collection_uses_controlled_commands_and_bounded_discovery(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
-        routing = (SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8")
+        routing = ((SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8") + "\n" + (SKILL_ROOT / "references" / "sources" / "public-internet.md").read_text(encoding="utf-8"))
         contract = (SKILL_ROOT / "references" / "collection-contract.md").read_text(encoding="utf-8")
         online = (SKILL_ROOT / "references" / "online-search.md").read_text(encoding="utf-8")
         combined = f"{skill}\n{routing}\n{contract}\n{online}"
@@ -165,7 +165,7 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
 
     def test_arxiv_full_text_materialization_records_actual_acquisition_url(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
-        routing = (SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8")
+        routing = ((SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8") + "\n" + (SKILL_ROOT / "references" / "sources" / "public-internet.md").read_text(encoding="utf-8"))
         contract = (SKILL_ROOT / "references" / "collection-contract.md").read_text(encoding="utf-8")
         combined = f"{skill}\n{routing}\n{contract}"
 
@@ -216,7 +216,7 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
 
     def test_article_routing_uses_unified_sources_without_count_and_public_collect_with_count(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
-        routing = (SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8")
+        routing = ((SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8") + "\n" + (SKILL_ROOT / "references" / "sources" / "public-internet.md").read_text(encoding="utf-8"))
         combined = f"{skill}\n{routing}"
 
         self.assertIn("文章、正文、全文或落盘内容但未指定数量时，默认使用 `unified-search`", combined)
@@ -236,7 +236,7 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
     def test_unified_search_must_forward_project_id_for_cloud_resource_resolution(self):
         combined = "\n".join([
             (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8"),
-            (SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8"),
+            ((SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8") + "\n" + (SKILL_ROOT / "references" / "sources" / "public-internet.md").read_text(encoding="utf-8")),
         ])
         self.assertIn("`project_id` 透传为 `--project-id`", combined)
         self.assertIn("`project-context basic` 返回的 `project.cloudResourceId`", combined)
@@ -385,7 +385,7 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         self.assertIn("A normal question, a single fact lookup, opening one page, or login is not collection work", skill)
 
     def test_owned_weixin_backend_collection_routes_directly_to_bycli(self):
-        routing = (SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8")
+        routing = ((SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8") + "\n" + (SKILL_ROOT / "references" / "sources" / "public-internet.md").read_text(encoding="utf-8"))
         bycli = (SKILLS_ROOT / "bycli" / "SKILL.md").read_text(encoding="utf-8")
         weixin = (SKILLS_ROOT / "bycli" / "references" / "weixin.md").read_text(encoding="utf-8")
 
@@ -397,7 +397,7 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
 
     def test_adaptive_discovery_and_wechat_materialization_are_documented(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
-        routing = (SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8")
+        routing = ((SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8") + "\n" + (SKILL_ROOT / "references" / "sources" / "public-internet.md").read_text(encoding="utf-8"))
         online_search = (SKILL_ROOT / "references" / "online-search.md").read_text(encoding="utf-8")
         contract = (SKILL_ROOT / "references" / "collection-contract.md").read_text(encoding="utf-8")
 
@@ -453,11 +453,12 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
 
     def test_agent_reach_enterprise_collection_routes_to_source_bridges(self):
         collection_skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
-        agent_reach = (SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8")
+        agent_reach = ((SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8") + "\n" + (SKILL_ROOT / "references" / "sources" / "public-internet.md").read_text(encoding="utf-8"))
 
         self.assertIn("企业来源", agent_reach)
         self.assertIn("采集编排器 `knowledge-collection`", agent_reach)
-        self.assertIn("不得作为公共互联网任务走本路由层", agent_reach)
+        self.assertIn("企业来源按渠道加载", agent_reach)
+        self.assertIn("用户明确来源优先", agent_reach)
 
         bridges = {
             "references/sources/wecom-wecomcli.md": "`wecomcli` skill",
@@ -615,7 +616,7 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
 
     def test_public_routing_is_selected_by_deliverable_without_count_ambiguity(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
-        routing = (SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8")
+        routing = ((SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8") + "\n" + (SKILL_ROOT / "references" / "sources" / "public-internet.md").read_text(encoding="utf-8"))
         combined = f"{skill}\n{routing}"
 
         for phrase in (
@@ -631,7 +632,7 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
 
     def test_public_collect_owned_sessions_do_not_advertise_external_atomic_paths(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
-        routing = (SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8")
+        routing = ((SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8") + "\n" + (SKILL_ROOT / "references" / "sources" / "public-internet.md").read_text(encoding="utf-8"))
         contract = (SKILL_ROOT / "references" / "collection-contract.md").read_text(encoding="utf-8")
         combined = f"{skill}\n{routing}\n{contract}"
 
@@ -645,7 +646,7 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
 
     def test_each_public_source_path_keeps_its_ownership_boundary_adjacent(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
-        routing = (SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8")
+        routing = ((SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8") + "\n" + (SKILL_ROOT / "references" / "sources" / "public-internet.md").read_text(encoding="utf-8"))
 
         for marker in (
             "已选候选是 `https://mp.weixin.qq.com/s...`",
@@ -762,7 +763,7 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
 
     def test_ima_collection_contract_uses_only_the_bycli_ima_adapter(self):
         ima = (SKILL_ROOT / "references" / "sources" / "ima.md").read_text(encoding="utf-8")
-        agent_reach = (SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8")
+        agent_reach = ((SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8") + "\n" + (SKILL_ROOT / "references" / "sources" / "public-internet.md").read_text(encoding="utf-8"))
         ima_skill = (SKILLS_ROOT / "ima-skill" / "SKILL.md").read_text(encoding="utf-8")
         combined = f"{ima}\n{agent_reach}"
 
@@ -838,7 +839,7 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
 
     def test_cross_skill_direct_query_and_explicit_collection_have_distinct_owners(self):
         knowledge = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
-        agent_reach = (SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8")
+        agent_reach = ((SKILL_ROOT / "references" / "agent-reach.md").read_text(encoding="utf-8") + "\n" + (SKILL_ROOT / "references" / "sources" / "public-internet.md").read_text(encoding="utf-8"))
         bycli = (SKILLS_ROOT / "bycli" / "SKILL.md").read_text(encoding="utf-8")
         delivery = (SKILL_ROOT / "references" / "delivery.md").read_text(encoding="utf-8")
 

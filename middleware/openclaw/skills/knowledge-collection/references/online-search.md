@@ -1,6 +1,6 @@
 # Online Search 检索信源（腾讯 WSA 主用、SearXNG 故障降级）
 
-`online-search` 是知识采集技能的公共网页检索通道（与内置路由层 [agent-reach.md](agent-reach.md) 并列）。
+`online-search` 是知识采集技能的公共网页检索通道（由统一路由层 [agent-reach.md](agent-reach.md) 的公共工作流使用）。
 它优先调用腾讯联网搜索 API（WSA）；只有 WSA 未配置、被显式关闭、鉴权/限流/超时、服务错误或响应损坏等
 通道级故障时，才降级到 OpenClaw 镜像内置的 `searxng-cli`。WSA 合法返回空结果或合格候选不足时不调用
 SearXNG，后续仍由既有 hot-discovery 逻辑补充候选。**本通道只负责发现 URL，不得直接抓取网页；取内容一律委派来源执行器（公共网页 `bycli`）。**

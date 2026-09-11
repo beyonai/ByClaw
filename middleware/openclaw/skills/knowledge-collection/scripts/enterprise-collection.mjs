@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import { assertNoActiveRoute } from './routing/plan-store.mjs';
+import { registeredChannel } from './routing/channels.mjs';
 import { createFeishuAdapter } from './enterprise/adapters/feishu.mjs';
 import { createWecomAdapter } from './enterprise/adapters/wecom.mjs';
 import { dispatchEnterprise, dispatchEnterpriseBatch, parseSearchBatchRequests } from './enterprise/dispatcher.mjs';
@@ -435,6 +437,31 @@ function commandSchema() {
   };
 }
 
+export async function executeEnterpriseWorkflow(command, values, dependencies = {}) {
+  if (command === 'search' || command === 'metadata-search' || command === 'materialize' || command === 'resource' || command === 'resume-resource') {
+    const normalizedValues = normalizeEnterprisePaths(command, values);
+    const scopeSessionDir = command === 'search' || command === 'metadata-search' || command === 'resource'
+      ? normalizedValues['parent-session-dir'] : normalizedValues['session-dir'];
+    const source = requireValue(values, 'source');
+    const parentSession = assertEnterpriseScope(scopeSessionDir, [source]);
+    let dispatchOptions = {};
+    if (command === 'search' && ['ima', 'cloud-knowledge'].includes(source)) {
+      const contractCheck = source === 'cloud-knowledge'
+        ? assertCloudKnowledgeParentContract : assertImaParentContract;
+      contractCheck(
+        scopeSessionDir,
+        parentSession,
+        requireValue(values, 'query'),
+        normalizedValues['output-dir'],
+      );
+      dispatchOptions = source === 'ima' ? { taskContract: enterpriseChildTaskContract(parentSession) } : {};
+    }
+    const { ['parent-session-dir']: _parentSessionDir, ['session-root']: _sessionRoot, ...dispatchValues } = normalizedValues;
+    return registeredChannel(source).executeLegacy(command, dispatchValues, (operation, options) => dispatchEnterprise(operation, options, { ...dependencies, ...dispatchOptions }));
+  }
+  throw new Error('unsupported enterprise workflow');
+}
+
 async function main() {
   const { command, values } = parseArgs(process.argv.slice(2));
   if (!command || command === 'help' || command === '--help' || values.help === true || values.help === 'true') {
@@ -444,6 +471,13 @@ async function main() {
   if (command === 'command-schema') {
     render(commandSchema());
     return;
+  }
+  if (EXTERNAL_PATHS_BY_COMMAND[command]) {
+    const checked = normalizeEnterprisePaths(command, values);
+    const root = checked['parent-session-dir'] || checked['session-dir'];
+    assertNoActiveRoute({ root, session: join(root, 'session.json') });
+    const output = checked['output-root'] || checked['output-dir'];
+    if (output && output !== root) assertNoActiveRoute({ root: output, session: join(output, 'session.json') });
   }
   if (command === 'wecom-smartpage') {
     const normalizedValues = normalizeEnterprisePaths(command, values);
@@ -472,26 +506,8 @@ async function main() {
     if (outcome.status !== 'complete') throw new Error(outcome.reason || outcome.status);
     return;
   }
-  if (command === 'search' || command === 'metadata-search' || command === 'materialize' || command === 'resource' || command === 'resume-resource') {
-    const normalizedValues = normalizeEnterprisePaths(command, values);
-    const scopeSessionDir = command === 'search' || command === 'metadata-search' || command === 'resource'
-      ? normalizedValues['parent-session-dir'] : normalizedValues['session-dir'];
-    const source = requireValue(values, 'source');
-    const parentSession = assertEnterpriseScope(scopeSessionDir, [source]);
-    let dispatchOptions = {};
-    if (command === 'search' && ['ima', 'cloud-knowledge'].includes(source)) {
-      const contractCheck = source === 'cloud-knowledge'
-        ? assertCloudKnowledgeParentContract : assertImaParentContract;
-      contractCheck(
-        scopeSessionDir,
-        parentSession,
-        requireValue(values, 'query'),
-        normalizedValues['output-dir'],
-      );
-      dispatchOptions = source === 'ima' ? { taskContract: enterpriseChildTaskContract(parentSession) } : {};
-    }
-    const { ['parent-session-dir']: _parentSessionDir, ['session-root']: _sessionRoot, ...dispatchValues } = normalizedValues;
-    render(await dispatchEnterprise(command, dispatchValues, dispatchOptions));
+  if (['search', 'metadata-search', 'materialize', 'resource', 'resume-resource'].includes(command)) {
+    render(await executeEnterpriseWorkflow(command, values));
     return;
   }
   if (command === 'search-all') {

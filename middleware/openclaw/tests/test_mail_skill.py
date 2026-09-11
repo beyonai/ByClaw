@@ -58,7 +58,7 @@ class MailSkillContractTest(unittest.TestCase):
         for command in ('accounts', 'list', 'get', 'search', 'attachment', 'send', 'reply', 'delete'):
             self.assertIn(command, result.stdout)
 
-    def test_skill_is_concise_discoverable_and_has_one_runtime_entrypoint(self):
+    def test_skill_is_concise_discoverable_and_routes_runtime_entrypoints(self):
         contents = SKILL.read_text(encoding='utf-8')
         frontmatter = re.match(r'^---\n(.*?)\n---\n', contents, flags=re.DOTALL)
         self.assertIsNotNone(frontmatter)
@@ -66,7 +66,16 @@ class MailSkillContractTest(unittest.TestCase):
         self.assertRegex(frontmatter.group(1), r'(?m)^description:\s*Use when\b')
         self.assertLessEqual(len(contents.split()), 650)
         self.assertEqual(contents.count(ENTRYPOINT), 1)
+        self.assertEqual(contents.count('node /app/skills/mail/scripts/iwhalecloud-mail.mjs'), 1)
+        self.assertIn('references/iwhalecloud.md', contents)
         self.assertNotRegex(contents, r'(?m)^\s*(?:python(?:3)?|\./)[^`\n]*mailctl\.py')
+
+    def test_iwhalecloud_browser_runtime_contract(self):
+        result = subprocess.run(
+            ['node', '--test', str(SKILL_ROOT / 'scripts' / 'iwhalecloud-mail.test.mjs')],
+            check=False, capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_skill_documents_the_existing_cli_contract(self):
         contents = SKILL.read_text(encoding='utf-8')
