@@ -210,6 +210,8 @@ export type DevloopProjectRepo = {
   provider?: RepoProvider;
   createBy?: string;
   createTime?: string;
+  cloneStatus?: 'pending' | 'cloning' | 'ready' | 'failed';
+  localPath?: string;
 };
 
 // 项目管理

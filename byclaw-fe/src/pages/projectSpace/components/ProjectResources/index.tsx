@@ -215,7 +215,8 @@ const ProjectResources: React.FC<Props> = ({
     if (!repositoryProject) return;
     setLoadingRepos(true);
     try {
-      setRepos((await listProjectRepos(Number(project.projectId))) || []);
+      const nextRepos = (await listProjectRepos(Number(project.projectId))) || [];
+      setRepos(nextRepos);
     } catch (error: any) {
       setRepos([]);
       message.error(error?.message || intl.formatMessage({ id: 'projectSpace.resources.loadReposFailed' }));
@@ -223,6 +224,12 @@ const ProjectResources: React.FC<Props> = ({
       setLoadingRepos(false);
     }
   }, [intl, project.projectId, repositoryProject]);
+
+  useEffect(() => {
+    if (!repos.some((repo) => repo.cloneStatus === 'cloning')) return undefined;
+    const timer = window.setTimeout(() => void loadRepos(), 1500);
+    return () => window.clearTimeout(timer);
+  }, [loadRepos, repos]);
 
   const loadBoundResources = useCallback(async () => {
     if (!isOperationProject) return;
@@ -428,7 +435,11 @@ const ProjectResources: React.FC<Props> = ({
   const loadRepoBranches = useCallback(async (repo: DevloopProjectRepo) => {
     try {
       const branchList = await listProjectRepoBranches(repo.repoId);
-      const defaultBranch = repo.defaultBranch || branchList?.[0]?.name || 'main';
+      const defaultBranch =
+        branchList?.find((item) => item.name === repo.defaultBranch)?.name ||
+        branchList?.[0]?.name ||
+        repo.defaultBranch ||
+        'main';
       setBranches(branchList || []);
       setSelectedBranch(defaultBranch);
       return defaultBranch;
