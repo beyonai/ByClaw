@@ -189,6 +189,8 @@ public class GroupChatContextService {
             message.setContent(StringUtils.defaultString(source.getMessageContent()));
             message.setResourceList(toMemberResources(source.getMetadata()));
             message.setClientRequestId(toClientRequestId(source.getMetadata()));
+            message.setTaskId(toMetadataString(source.getMetadata(), "taskId"));
+            message.setKind(toMetadataString(source.getMetadata(), "kind"));
             message.setTarget(toTarget(source));
             message.setRole(Integer.valueOf(1).equals(source.getUsage()) ? "user" : "assistant");
             message.setSpeaker(toSpeaker(source, resources));
@@ -211,12 +213,16 @@ public class GroupChatContextService {
     }
 
     private String toClientRequestId(String metadata) {
+        return toMetadataString(metadata, "clientRequestId");
+    }
+
+    private String toMetadataString(String metadata, String key) {
         if (StringUtils.isBlank(metadata)) {
             return null;
         }
         try {
             JSONObject object = JSON.parseObject(metadata);
-            return object == null ? null : object.getString("clientRequestId");
+            return object == null ? null : object.getString(key);
         }
         catch (RuntimeException ignored) {
             return null;

@@ -39,6 +39,11 @@ public class GroupChatContextResponse {
         /** 关联发送队列，支持广播早于 ACK 或重连后的确认恢复。 */
         private String clientRequestId;
 
+        /** 任务卡片关联的任务会话 ID，与当前群会话 ID 不同。 */
+        private String taskId;
+
+        private String kind;
+
         private String messageId;
 
         private Integer sequence;

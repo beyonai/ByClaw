@@ -152,6 +152,11 @@ class GroupChatContextServiceTest {
         request.setBeforeMessageId("30");
         GroupChatContextResponse response = service.load(request);
         assertThat(response.getMessages().get(0).getClientRequestId()).isEqualTo("retry-1");
+        reply.setMetadata("{\"taskId\":\"9007199254740993\",\"kind\":\"TASK_ACK\"}");
+        GroupChatContextResponse withTask = service.load(request);
+        assertThat(withTask.getMessages().get(1).getTaskId()).isEqualTo("9007199254740993");
+        assertThat(withTask.getMessages().get(1).getKind()).isEqualTo("TASK_ACK");
+        assertThat(withTask.getMessages().get(0).getTaskId()).isNull();
         assertThat(response.getMessages().get(0).getResourceList().get(0).getResourceId())
             .isEqualTo("9223372036854775806");
         assertThat(response.getMessages().get(1).getResourceList().get(0).getResourceName()).isEqualTo("数字员工");
