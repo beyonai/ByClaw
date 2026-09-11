@@ -218,21 +218,26 @@ BYCLAW_TEST_REDIS_CLUSTER_PORT=16390 mvn -B -f byclaw-be/pom.xml \
 在持有 `synchronized` 监视器等待 I/O 时占住载体线程。启动登记和结束清理同样使用按会话的
 生命周期锁；全局上下文锁只保护内存操作，不覆盖 Redis 调用。
 
-Stream 长轮询使用独立的 `sessionStreamRedisConnectionFactory`，业务 RedisTemplate 继续使用主连接池。
-单实例监听数由 `byclaw.session-stream.max-listeners` 控制（默认 128），独立读池容量为该值加 1。
-启动和停止中的读取任务也占用名额，直到读取任务实际退出才释放；超过上限会拒绝新增监听，
-由调用方报错或后续恢复轮次重试，避免挤占业务 Redis 连接。
+Session Stream 的 key 继续由 Gateway SDK 全局协议决定，只使用既有 v1/v2；Redis Cluster 沿用带
+hash tag 的 v2。BE 使用独立的 Lettuce/Netty 连接执行非阻塞、单 key `XREADGROUP`，多个会话共享底层
+NIO 连接，不再为每个会话占用一个阻塞线程和 Jedis 连接，也不再设置 listener 数量上限。
+每个会话同一时刻最多存在一个读取命令；实例级 in-flight 上限只延后轮询，不拒绝会话注册。
+空闲轮询采用 5ms 到 250ms 的指数退避，读取异常每秒重试，业务回调转交 Java 21 虚拟线程，
+不会阻塞 Netty event loop。集群模式始终发送单 key 命令，因此不会产生跨槽读取。
 
 | 配置 | 默认值 | 作用 |
 | --- | --- | --- |
-| `byclaw.session-stream.max-listeners` | 128 | 单实例长轮询并发上限 |
+| `byclaw.session-stream.reactive-max-in-flight-reads` | 256 | 实例级 Redis 读取命令并发上限；饱和时延后轮询 |
+| `byclaw.session-stream.reactive-poll-min-delay-millis` | 5 | 有消息时的最小轮询间隔 |
+| `byclaw.session-stream.reactive-poll-max-idle-delay-millis` | 250 | 空闲轮询的最大退避间隔 |
+| `byclaw.session-stream.reactive-poll-error-delay-millis` | 1000 | Redis 读取失败后的重试间隔 |
 | `byclaw.session-stream.batch-delay-millis` | 20 | 消费合并窗口；0 关闭合并 |
 | `byclaw.session-stream.batch-queue-capacity` | 256 | 每个 listener 的待处理缓冲上限 |
 | `byclaw.running-snapshot.write-behind-millis` | 50 | 主会话快照合并窗口 |
 
 每次最多处理 100 条消息，只合并连续且属于同一子会话、同一轮次的增量，合并后生成一次完整快照。
 每个 listener 最多缓存 256 条待处理消息，加一个最多 100 条的执行/重试批次；满时阻塞该会话的
-读取任务。这是 listener 队列上限，不等于 PEL 上限；读取容器当前批次尚未交付的记录也已进入 PEL。
+读取任务。这是 listener 队列上限，不等于 PEL 上限；单次读取尚未交付的记录也已进入 PEL。
 未生成持久化快照的消息保留在 Redis PEL，成功后才逐条 ACK。业务处理失败后每秒重试
 失败的后缀，后续事件等待，避免结束事件越过未持久化的增量。关闭 listener 时未处理的缓冲消息仍在 PEL；已完成持久化的执行中批次继续 ACK，
 避免 HTTP 结束事件先关闭监听而遗留已处理消息。关闭后 ACK 失败登记到恢复队列，不再启动本地重试。

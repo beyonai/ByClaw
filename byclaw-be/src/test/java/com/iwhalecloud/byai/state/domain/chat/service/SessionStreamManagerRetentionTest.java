@@ -85,9 +85,9 @@ class SessionStreamManagerRetentionTest {
 
     @Test
     void skipsTrimWhileListenerStillActive() {
-        Map<String, Object> containers = (Map<String, Object>) ReflectionTestUtils.getField(manager, "containers");
-        containers.put(SESSION_ID, Mockito.mock(
-            org.springframework.data.redis.stream.StreamMessageListenerContainer.class));
+        Map<String, Object> listeners = (Map<String, Object>) ReflectionTestUtils.getField(manager, "listeners");
+        listeners.put(SESSION_ID, Mockito.mock(
+            com.iwhalecloud.byai.state.domain.ws.handler.RedisStreamMessageListener.class));
 
         manager.trimCompletedStream(SESSION_ID);
 

@@ -17,17 +17,26 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import org.springframework.data.redis.connection.RedisClusterConfiguration;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
+import org.springframework.data.redis.connection.RedisPassword;
 import org.springframework.data.redis.connection.RedisSentinelConfiguration;
 import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
 import org.springframework.data.redis.connection.jedis.JedisClientConfiguration;
 import org.springframework.data.redis.connection.jedis.JedisConnectionFactory;
+import org.springframework.data.redis.connection.lettuce.LettuceClientConfiguration;
+import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
+import org.springframework.data.redis.core.ReactiveRedisTemplate;
 import org.springframework.data.redis.listener.RedisMessageListenerContainer;
 import org.springframework.data.redis.serializer.Jackson2JsonRedisSerializer;
+import org.springframework.data.redis.serializer.RedisSerializationContext;
 import org.springframework.data.redis.serializer.RedisSerializer;
 import org.springframework.session.data.redis.RedisSessionRepository;
 import org.springframework.session.data.redis.config.ConfigureRedisAction;
 import com.iwhalecloud.byai.state.common.exception.BdpRuntimeException;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
+import io.lettuce.core.ClientOptions;
+import io.lettuce.core.RedisURI;
+import io.lettuce.core.SocketOptions;
+import io.lettuce.core.cluster.ClusterClientOptions;
 
 @ConditionalOnProperty(prefix = "spring.redis", value = "enabled", matchIfMissing = true)
 @Configuration
@@ -88,9 +97,6 @@ public class RedisConfiguration {
     @Value("${server.servlet.session.timeout:30m}")
     private Duration sessionTimeout;
 
-    @Value("${byclaw.session-stream.max-listeners:128}")
-    private int sessionStreamMaxListeners = 128;
-
     @Primary
     @Bean
     public RedisConnectionFactory connectionFactory() {
@@ -103,22 +109,102 @@ public class RedisConfiguration {
     }
 
     /**
-     * Isolate long-running XREADGROUP BLOCK calls from business and session Redis operations.
+     * Dedicated Netty/Lettuce connection factory for Session Stream reads using the existing SDK keys.
+     * Short, non-blocking XREADGROUP commands can share the native NIO connection, so the
+     * number of locally-owned sessions no longer determines the Redis connection count.
      */
-    @Bean
-    public RedisConnectionFactory sessionStreamRedisConnectionFactory() {
-        if (sessionStreamMaxListeners < 1 || sessionStreamMaxListeners == Integer.MAX_VALUE) {
-            throw new IllegalArgumentException("byclaw.session-stream.max-listeners must be between 1 and 2147483646");
-        }
-        CustomJedisPoolConfig poolConfig = new CustomJedisPoolConfig();
-        poolConfig.setPoolConfig(redisProperties);
-        // Keep one connection available for listener setup while all admitted readers are blocked.
-        poolConfig.setMaxTotal(sessionStreamMaxListeners + 1);
-        poolConfig.setMaxIdle(Math.min(16, sessionStreamMaxListeners + 1));
-        poolConfig.setMinIdle(0);
-        poolConfig.setBlockWhenExhausted(false);
+    @Bean("sessionStreamReactiveRedisConnectionFactory")
+    public LettuceConnectionFactory sessionStreamReactiveRedisConnectionFactory() {
+        LettuceClientConfiguration.LettuceClientConfigurationBuilder builder = LettuceClientConfiguration.builder()
+            .commandTimeout(Duration.ofMillis(readTimeout))
+            .shutdownTimeout(Duration.ofMillis(timeout));
+        SocketOptions socketOptions = SocketOptions.builder().connectTimeout(Duration.ofMillis(timeout)).build();
+        ClientOptions clientOptions = StringUtils.isNotBlank(clusters)
+            ? ClusterClientOptions.builder().socketOptions(socketOptions).build()
+            : ClientOptions.builder().socketOptions(socketOptions).build();
+        builder.clientOptions(clientOptions);
+        if (ssl) builder.useSsl();
 
-        return createConnectionFactory(poolConfig);
+        LettuceConnectionFactory factory;
+        if (StringUtils.isNotBlank(clusters)) {
+            logger.info("Prepare reactive Session Stream reader for cluster redis:{}", clusters);
+            RedisClusterConfiguration configuration = new RedisClusterConfiguration(
+                new HashSet<>(Arrays.asList(clusters.split(","))));
+            applyCredentials(configuration);
+            if (StringUtils.isNotBlank(maxRedirects)) configuration.setMaxRedirects(Integer.parseInt(maxRedirects));
+            factory = new LettuceConnectionFactory(configuration, builder.build());
+        }
+        else if (StringUtils.isNotBlank(sentinels)) {
+            logger.info("Prepare reactive Session Stream reader for sentinel redis:{},{}", master, sentinels);
+            RedisSentinelConfiguration configuration = new RedisSentinelConfiguration(master,
+                new HashSet<>(Arrays.asList(sentinels.split(","))));
+            applyCredentials(configuration);
+            configuration.setDatabase(parseDatabase());
+            factory = new LettuceConnectionFactory(configuration, builder.build());
+        }
+        else if (StringUtils.isNotBlank(host) && StringUtils.isNotBlank(port)) {
+            logger.info("Prepare reactive Session Stream reader for standalone redis:{},{}", host, port);
+            RedisStandaloneConfiguration configuration = new RedisStandaloneConfiguration(host,
+                Integer.parseInt(port));
+            applyCredentials(configuration);
+            configuration.setDatabase(parseDatabase());
+            factory = new LettuceConnectionFactory(configuration, builder.build());
+        }
+        else if (StringUtils.isNotBlank(url)) {
+            RedisURI redisUri = RedisURI.create(url);
+            if (redisUri.isSsl()) builder.useSsl();
+            RedisStandaloneConfiguration configuration = new RedisStandaloneConfiguration(redisUri.getHost(),
+                redisUri.getPort());
+            if (StringUtils.isNotBlank(redisUri.getUsername())) configuration.setUsername(redisUri.getUsername());
+            if (redisUri.getPassword() != null) configuration.setPassword(RedisPassword.of(redisUri.getPassword()));
+            configuration.setDatabase(redisUri.getDatabase());
+            logger.info("Prepare reactive Session Stream reader from redis URL host:{}, port:{}",
+                redisUri.getHost(), redisUri.getPort());
+            factory = new LettuceConnectionFactory(configuration, builder.build());
+        }
+        else {
+            throw new BdpRuntimeException(I18nUtil.get("redis.configuration.error"));
+        }
+        factory.setShareNativeConnection(true);
+        return factory;
+    }
+
+    @Bean("sessionStreamReactiveRedisTemplate")
+    public ReactiveRedisTemplate<String, String> sessionStreamReactiveRedisTemplate(
+            LettuceConnectionFactory sessionStreamReactiveRedisConnectionFactory) {
+        return new ReactiveRedisTemplate<>(sessionStreamReactiveRedisConnectionFactory,
+            RedisSerializationContext.string());
+    }
+
+    private void applyCredentials(RedisStandaloneConfiguration configuration) {
+        if (StringUtils.isNotBlank(username)) configuration.setUsername(username);
+        String resolvedPassword = resolvedPassword();
+        if (StringUtils.isNotBlank(resolvedPassword)) configuration.setPassword(resolvedPassword);
+    }
+
+    private void applyCredentials(RedisSentinelConfiguration configuration) {
+        if (StringUtils.isNotBlank(username)) configuration.setUsername(username);
+        String resolvedPassword = resolvedPassword();
+        if (StringUtils.isNotBlank(resolvedPassword)) configuration.setPassword(resolvedPassword);
+    }
+
+    private void applyCredentials(RedisClusterConfiguration configuration) {
+        if (StringUtils.isNotBlank(username)) configuration.setUsername(username);
+        String resolvedPassword = resolvedPassword();
+        if (StringUtils.isNotBlank(resolvedPassword)) configuration.setPassword(resolvedPassword);
+    }
+
+    private String resolvedPassword() {
+        if (StringUtils.isBlank(password)) return password;
+        if (encrypt) {
+            logger.warn("Prepare to connect to redis with encrypt password...");
+            return RsaDecrypt.decrypt(password);
+        }
+        return password;
+    }
+
+    private int parseDatabase() {
+        return StringUtils.isBlank(database) ? 0 : Integer.parseInt(database);
     }
 
     private RedisConnectionFactory createConnectionFactory(CustomJedisPoolConfig poolConfig) {

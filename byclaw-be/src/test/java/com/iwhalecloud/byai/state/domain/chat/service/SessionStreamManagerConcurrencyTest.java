@@ -2,8 +2,6 @@ package com.iwhalecloud.byai.state.domain.chat.service;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -11,6 +9,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -20,13 +19,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
@@ -43,8 +39,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.config.InstantiationAwareBeanPostProcessor;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
-import org.springframework.data.redis.connection.RedisConnection;
-import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.connection.RedisStreamCommands;
 import org.springframework.data.domain.Range;
 import org.springframework.data.redis.connection.stream.Consumer;
@@ -56,7 +50,6 @@ import org.springframework.data.redis.core.HashOperations;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.StreamOperations;
 import org.springframework.data.redis.listener.RedisMessageListenerContainer;
-import org.springframework.test.context.support.TestPropertySourceUtils;
 import org.springframework.test.util.ReflectionTestUtils;
 
 class SessionStreamManagerConcurrencyTest {
@@ -65,8 +58,7 @@ class SessionStreamManagerConcurrencyTest {
     private final SessionStreamLeaseService leases = mock(SessionStreamLeaseService.class);
     private final OutputStreamManager outputs = new OutputStreamManager();
     private final RunningOutputStreamRegistry running = mock(RunningOutputStreamRegistry.class);
-    private final BlockingQueue<CountDownLatch> blockedReads = new LinkedBlockingQueue<>();
-    private final List<CountDownLatch> readGates = new CopyOnWriteArrayList<>();
+    private final ReactiveSessionStreamReceiver reactiveReceiver = mock(ReactiveSessionStreamReceiver.class);
     private final List<ScheduledExecutorService> acceleratedSchedulers = new ArrayList<>();
     private final List<RedisStreamMessageListener> listeners = new CopyOnWriteArrayList<>();
     private SessionStreamManager manager;
@@ -81,16 +73,6 @@ class SessionStreamManagerConcurrencyTest {
                 return !org.mockito.Mockito.mockingDetails(bean).isMock();
             }
         });
-        RedisConnectionFactory factory = mock(RedisConnectionFactory.class);
-        RedisConnection connection = mock(RedisConnection.class);
-        when(connection.streamCommands()).thenReturn(mock(RedisStreamCommands.class));
-        when(factory.getConnection()).thenAnswer(invocation -> {
-            CountDownLatch gate = new CountDownLatch(1);
-            readGates.add(gate);
-            blockedReads.add(gate);
-            awaitUninterruptibly(gate);
-            return connection;
-        });
         RedisTemplate<String, Object> redis = mock(RedisTemplate.class);
         when(redis.hasKey(any())).thenReturn(true);
         when(redis.opsForStream()).thenReturn(mock(StreamOperations.class));
@@ -99,14 +81,11 @@ class SessionStreamManagerConcurrencyTest {
             new SessionStreamLeaseService.Lease(invocation.getArgument(0), "owner")));
         when(leases.renew(any())).thenReturn(true);
         when(leases.release(any())).thenReturn(true);
+        when(reactiveReceiver.resume(any())).thenReturn(true);
+        when(reactiveReceiver.isPaused(any())).thenReturn(true);
         ChatRuntimeInstance instance = mock(ChatRuntimeInstance.class);
         when(instance.getInstanceId()).thenReturn("test-instance");
 
-        TestPropertySourceUtils.addInlinedPropertiesToEnvironment(context,
-            "byclaw.session-stream.max-listeners=1");
-        context.registerBean("redisConnectionFactory", RedisConnectionFactory.class, () -> factory,
-            definition -> definition.setPrimary(true));
-        context.registerBean("sessionStreamRedisConnectionFactory", RedisConnectionFactory.class, () -> factory);
         context.registerBean(RedisTemplate.class, () -> redis);
         context.registerBean(SessionStreamLeaseService.class, () -> leases);
         context.registerBean(OutputStreamManager.class, () -> outputs);
@@ -116,6 +95,7 @@ class SessionStreamManagerConcurrencyTest {
         context.registerBean(RunningChatSnapshotService.class, () -> mock(RunningChatSnapshotService.class));
         context.registerBean(StreamAckFailureRegistry.class, () -> mock(StreamAckFailureRegistry.class));
         context.registerBean(SessionStreamMetrics.class, () -> mock(SessionStreamMetrics.class));
+        context.registerBean(ReactiveSessionStreamReceiver.class, () -> reactiveReceiver);
         context.registerBean(RedisMessageListenerContainer.class, () -> mock(RedisMessageListenerContainer.class));
         context.registerBean(SessionStatusRedisMessageListener.class, () -> mock(SessionStatusRedisMessageListener.class));
         context.registerBean(RedisStreamMessageListener.class, () -> {
@@ -131,86 +111,22 @@ class SessionStreamManagerConcurrencyTest {
     @AfterEach
     void tearDown() {
         context.close();
-        readGates.forEach(CountDownLatch::countDown);
         acceleratedSchedulers.forEach(ScheduledExecutorService::shutdownNow);
     }
 
     @Test
-    void stoppingAContainerKeepsAdmissionUntilItsBlockingReadActuallyExits() throws Exception {
-        assertTrue(manager.startSessionListener("first", null));
-        CountDownLatch firstRead = blockedReads.poll(2, TimeUnit.SECONDS);
-        assertTrue(firstRead != null);
-        manager.stopSessionListener("first");
-
-        assertThrows(RejectedExecutionException.class, () -> manager.startSessionListener("second", null));
-        verify(leases, never()).tryAcquire("second");
-        verify(listeners.getFirst()).close();
-
-        firstRead.countDown();
-        assertTrue(await(() -> {
-            try {
-                return manager.startSessionListener("second", null);
-            }
-            catch (RejectedExecutionException busy) {
-                return false;
-            }
-        }));
-        assertTrue(manager.isSessionListenerActive("second"));
-    }
-
-    @Test
-    void listenerAdmissionIncludesStartsStillAcquiringTheirLease() throws Exception {
-        CountDownLatch acquiring = new CountDownLatch(1);
-        CountDownLatch release = new CountDownLatch(1);
-        when(leases.tryAcquire("first")).thenAnswer(invocation -> {
-            acquiring.countDown();
-            assertTrue(release.await(3, TimeUnit.SECONDS));
-            return Optional.of(new SessionStreamLeaseService.Lease("first", "owner"));
-        });
-        try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            try {
-                var first = executor.submit(() -> manager.startSessionListener("first", null));
-                assertTrue(acquiring.await(1, TimeUnit.SECONDS));
-                assertThrows(RejectedExecutionException.class, () -> manager.startSessionListener("second", null));
-                verify(leases, never()).tryAcquire("second");
-                release.countDown();
-                assertTrue(first.get(2, TimeUnit.SECONDS));
-            }
-            finally {
-                release.countDown();
-            }
+    void reactiveNioReadsUseExistingKeysBeyondTheFormer128ReaderLimit() {
+        for (int index = 0; index < 129; index++) {
+            assertTrue(manager.startSessionListener("session-" + index, null));
         }
-    }
 
-    @Test
-    void failingLeaseAcquisitionReturnsItsUnusedAdmission() {
-        when(leases.tryAcquire("first")).thenThrow(new IllegalStateException("Redis unavailable"));
-        assertThrows(IllegalStateException.class, () -> manager.startSessionListener("first", null));
-        assertTrue(manager.startSessionListener("second", null));
-    }
-
-    @Test
-    void pausedRecoveryListenerHoldsAdmissionUntilStoppedWithoutStartingARead() throws Exception {
-        startPaused("first");
-        assertTrue(manager.isSessionListenerActive("first"));
-        assertNull(blockedReads.poll(100, TimeUnit.MILLISECONDS), "Recovery must reserve ownership without polling unread");
-        assertThrows(RejectedExecutionException.class, () -> manager.startSessionListener("second", null));
-
-        manager.stopSessionListener("first");
-
-        assertTrue(manager.startSessionListener("second", null), "Unused recovery admission must be returned on stop");
-        assertNotNull(blockedReads.poll(2, TimeUnit.SECONDS));
-    }
-
-    @Test
-    void pausedRecoveryListenerResumesExactlyOneOwnedRead() throws Exception {
-        startPaused("first");
-        assertNull(blockedReads.poll(100, TimeUnit.MILLISECONDS));
-        ReflectionTestUtils.invokeMethod(manager, "resumeRecoveredSessionListener", "first");
-        assertNotNull(blockedReads.poll(2, TimeUnit.SECONDS));
-        ReflectionTestUtils.invokeMethod(manager, "resumeRecoveredSessionListener", "first");
-        assertNull(blockedReads.poll(100, TimeUnit.MILLISECONDS));
-        verify(leases).tryAcquire("first");
+        verify(reactiveReceiver).register(org.mockito.ArgumentMatchers.eq("session-0"),
+            org.mockito.ArgumentMatchers.eq("byai_gateway:session:session-0:data_stream"), any(), any(),
+            org.mockito.ArgumentMatchers.eq(false));
+        verify(reactiveReceiver).register(org.mockito.ArgumentMatchers.eq("session-128"),
+            org.mockito.ArgumentMatchers.eq("byai_gateway:session:session-128:data_stream"), any(), any(),
+            org.mockito.ArgumentMatchers.eq(false));
+        assertEquals(129, manager.activeSessionIdsSnapshot().size());
     }
 
     @Test
@@ -263,21 +179,14 @@ class SessionStreamManagerConcurrencyTest {
         try {
             ReflectionTestUtils.invokeMethod(recovery, "recoverState", state, true);
             assertEquals(100, checkpointed.get(), "One pass must remain bounded to one PEL page");
-            assertNull(blockedReads.poll(100, TimeUnit.MILLISECONDS), "Unread terminal would overtake pending page two");
+            verify(reactiveReceiver, never()).resume("10");
 
-            assertNotNull(blockedReads.poll(3, TimeUnit.SECONDS), "Backlog continuation must run before the 30s global scan");
+            verify(reactiveReceiver, timeout(3000)).resume("10");
             assertEquals(101, checkpointed.get());
         }
         finally {
             recovery.shutdown();
         }
-    }
-
-    private void startPaused(String sessionId) {
-        var method = org.springframework.util.ReflectionUtils.findMethod(SessionStreamManager.class,
-            "startSessionListenerForRecovery", String.class, ChatProcessContext.class);
-        assertNotNull(method, "Recovery needs an owned, admitted listener that defers unread polling");
-        assertTrue((Boolean) ReflectionTestUtils.invokeMethod(manager, "startSessionListenerForRecovery", sessionId, null));
     }
 
     @Test
@@ -474,4 +383,5 @@ class SessionStreamManagerConcurrencyTest {
             Thread.currentThread().interrupt();
         }
     }
+
 }

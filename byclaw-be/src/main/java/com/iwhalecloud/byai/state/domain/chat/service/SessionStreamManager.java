@@ -1,69 +1,50 @@
 package com.iwhalecloud.byai.state.domain.chat.service;
 
-import java.time.Duration;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executor;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.commons.lang3.StringUtils;
-import com.iwhaleai.byai.framework.common.Constants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationListener;
 import org.springframework.context.event.ContextClosedEvent;
-import org.springframework.data.redis.connection.RedisConnectionFactory;
-import org.springframework.data.redis.connection.stream.Consumer;
-import org.springframework.data.redis.connection.stream.MapRecord;
 import org.springframework.data.redis.connection.stream.ReadOffset;
-import org.springframework.data.redis.connection.stream.StreamOffset;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.listener.PatternTopic;
 import org.springframework.data.redis.listener.RedisMessageListenerContainer;
-import org.springframework.data.redis.stream.StreamMessageListenerContainer;
-import org.springframework.data.redis.stream.StreamMessageListenerContainer.ConsumerStreamReadRequest;
-import org.springframework.data.redis.stream.StreamMessageListenerContainer.StreamMessageListenerContainerOptions;
-import org.springframework.data.redis.stream.StreamMessageListenerContainer.StreamReadRequest;
 import org.springframework.stereotype.Service;
 
+import com.iwhaleai.byai.framework.common.Constants;
 import com.iwhalecloud.byai.state.domain.ws.handler.RedisStreamMessageListener;
 import com.iwhalecloud.byai.state.domain.ws.handler.SessionStatusRedisMessageListener;
-
-import jakarta.annotation.PostConstruct;
 
 /**
  * Gateway 模式下按 session 动态管理 Redis Stream 监听器的服务。
  * <p>
- * 每次对话请求在 gatewayClient.sendMessage() 之后，通过此类启动一个专属的
- * StreamMessageListenerContainer，监听 "byai_gateway:session:{sessionId}:data_stream"。
+ * 每次对话请求在 gatewayClient.sendMessage() 之后，通过此类注册对应的 Session Stream。
  * 监听到 appStreamResponse 或 error 事件后，由 ScriptService 主动调用 stopSessionListener() 停止并清理。
  * <p>
  * 设计要点：
  * <ul>
- *   <li>每个 session 对应一个独立的 StreamMessageListenerContainer，互相隔离。</li>
- *   <li>每个容器使用独立的 RedisStreamMessageListener 实例（每次通过 ApplicationContext 获取 prototype 新实例），避免并发安全问题。</li>
- *   <li>消费者组复用全局 CONSUMER_GROUP（不同 Stream Key 之间无竞争），消费者名称以 sessionId 区分，保证多实例环境唯一性。</li>
- *   <li>应用关闭时通过 ApplicationListener&lt;ContextClosedEvent&gt; 清理所有容器，防止资源泄漏。</li>
+ *   <li>沿用 SDK v1/v2 key，通过 Lettuce/Netty 共享连接执行非阻塞单 key 读取，兼容单机与集群。</li>
+ *   <li>每个 session 使用独立的 RedisStreamMessageListener prototype 实例，保持处理与 ACK 隔离。</li>
+ *   <li>消费者组复用全局 CONSUMER_GROUP；Redis lease 保证每个 session 同一时刻只由一个 BE 实例读取。</li>
+ *   <li>应用关闭时通过 ApplicationListener&lt;ContextClosedEvent&gt; 清理所有订阅，防止资源泄漏。</li>
  * </ul>
  */
 @Service
 public class SessionStreamManager implements ApplicationListener<ContextClosedEvent> {
 
     private static final Logger log = LoggerFactory.getLogger(SessionStreamManager.class);
-
-    static final long DEFAULT_POLL_TIMEOUT_MILLIS = 2000L;
 
     /** Session 状态 Key 前缀 */
     public static final String SESSION_STATUS_KEY_PREFIX = "byai:session:";
@@ -86,10 +67,6 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
 
     /** 会话结束后 Session 状态监听保留时长（毫秒），期间内同一 session 重新开始可复用监听 */
     private static final long SESSION_STATUS_LISTENER_LINGER_MILLIS = 30_000L;
-
-    @Autowired
-    @Qualifier("sessionStreamRedisConnectionFactory")
-    private RedisConnectionFactory redisConnectionFactory;
 
     @Autowired
     private RedisTemplate<String, Object> redisTemplate;
@@ -136,60 +113,16 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
     private SessionStreamMetrics sessionStreamMetrics;
 
     @Autowired
+    private ReactiveSessionStreamReceiver reactiveSessionStreamReceiver;
+
+    @Autowired
     private OutputStreamManager outputStreamManager;
 
     @Autowired
     private ChatRuntimeStateService chatRuntimeStateService;
 
-    @Value("${byclaw.session-stream.poll-timeout-millis:" + DEFAULT_POLL_TIMEOUT_MILLIS + "}")
-    private long pollTimeoutMillis;
-
-    @Value("${spring.redis.read-timeout:5000}")
-    private long redisReadTimeoutMillis;
-
-    /** 单次 XREADGROUP 最多拉取的事件数，避免一次轮询载入过大批次。 */
-    @Value("${byclaw.session-stream.read-batch-size:100}")
-    private int streamReadBatchSize;
-
-    @Value("${byclaw.session-stream.max-listeners:128}")
-    private int maxListeners = 128;
-
-    /**
-     * 同一个 stream 上连续同类读取异常的日志间隔。
-     * <p>
-     * 读取异常不会取消 subscription，因此 NOGROUP 这类持续性故障每轮轮询都会触发一次 errorHandler。
-     * 首次异常立即打印，随后按此间隔汇总，避免单个坏 session 刷满日志。
-     */
-    @Value("${byclaw.session-stream.read-error-log-interval-millis:60000}")
-    private long readErrorLogIntervalMillis;
-
-    /**
-     * 连续读取异常时每轮轮询之间的退避时间。
-     * <p>
-     * XREADGROUP 报错是立即返回的，poll task 不带任何退避就会紧接着发起下一次读取。
-     * 这会让故障 session 退化成空转热循环，持续占用 CPU 并压向 Redis，因此这里显式补上退避。
-     */
-    @Value("${byclaw.session-stream.read-error-backoff-millis:1000}")
-    private long readErrorBackoffMillis;
-
-    private final AtomicInteger admittedReadTasks = new AtomicInteger();
-
     private volatile boolean shuttingDown;
-
-    /** Redis Stream 长轮询使用虚拟线程，阻塞等待不再为每个 session 长期占用平台线程。 */
-    private final ExecutorService streamTaskExecutor = Executors.newVirtualThreadPerTaskExecutor();
-
-    /** 按 stream 记录连续读取异常，用于抑制重复日志。随 listener 停止一起清理。 */
-    private final Map<String, ReadErrorLogState> readErrorLogStates = new ConcurrentHashMap<>();
-
-    /** sessionId -> StreamMessageListenerContainer，按 session 管理监听容器 */
-    private final Map<String, StreamMessageListenerContainer<String, MapRecord<String, String, String>>> containers =
-        new ConcurrentHashMap<>();
-
     private final Map<String, RedisStreamMessageListener> listeners = new ConcurrentHashMap<>();
-
-    /** Recovery owns the lease and reader capacity while older PEL records are checkpointed first. */
-    private final Map<String, ReadAdmission> pausedReadAdmissions = new ConcurrentHashMap<>();
 
     /** sessionId -> Session 状态 Keyspace 监听 topic */
     private final Map<String, PatternTopic> sessionStatusTopics = new ConcurrentHashMap<>();
@@ -234,22 +167,6 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
     });
 
     /**
-     * Redis socket read timeout 必须覆盖 XREADGROUP BLOCK 时长并保留网络处理余量。
-     * 显式配置不合理时只告警，不阻止应用启动，便于存量环境先完成配置修正。
-     */
-    @PostConstruct
-    void validateTimeoutConfiguration() {
-        if (maxListeners <= 0) {
-            throw new IllegalArgumentException("byclaw.session-stream.max-listeners must be greater than zero");
-        }
-        if (redisReadTimeoutMillis <= pollTimeoutMillis) {
-            sessionStreamMetrics.recordInvalidConfiguration();
-            log.warn("Session Stream timeout 配置缺少余量, pollTimeoutMillis: {}, redisReadTimeoutMillis: {}",
-                pollTimeoutMillis, redisReadTimeoutMillis);
-        }
-    }
-
-    /**
      * 启动指定 session 的 Redis Stream 监听器。
      * <p>
      * 应在 gatewayClient.sendMessage() 调用成功之后调用。
@@ -266,28 +183,14 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
     }
 
     public boolean isSessionListenerPaused(String sessionId) {
-        return sessionId != null && pausedReadAdmissions.containsKey(sessionId);
+        return sessionId != null && reactiveSessionStreamReceiver.isPaused(sessionId);
     }
 
     /** Enable unread polling only after the owner has checkpointed the older pending records. */
     public boolean resumeRecoveredSessionListener(String sessionId) {
         return outputStreamManager.withSessionLock(sessionId, () -> {
-            ReadAdmission admission = pausedReadAdmissions.remove(sessionId);
-            if (admission == null) return containers.containsKey(sessionId);
-            try {
-                if (shuttingDown) throw new RejectedExecutionException("Session Stream manager is shutting down");
-                StreamMessageListenerContainer<String, MapRecord<String, String, String>> container = containers.get(sessionId);
-                if (container == null) return false;
-                container.start();
-                return true;
-            }
-            catch (RuntimeException | Error error) {
-                stopSessionListenerLocked(sessionId);
-                throw error;
-            }
-            finally {
-                admission.releaseIfNotSubmitted();
-            }
+            if (shuttingDown) throw new RejectedExecutionException("Session Stream manager is shutting down");
+            return reactiveSessionStreamReceiver.resume(sessionId);
         });
     }
 
@@ -295,12 +198,11 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
         if (shuttingDown) {
             throw new RejectedExecutionException("Session Stream manager is shutting down");
         }
-        if (containers.containsKey(sessionId)) {
+        if (listeners.containsKey(sessionId)) {
             return true;
         }
-        ReadAdmission admission = reserveReadAdmission();
-        StreamMessageListenerContainer<String, MapRecord<String, String, String>> container = null;
         RedisStreamMessageListener listener = null;
+        boolean reactiveRegistered = false;
         try {
             SessionStreamLeaseService.Lease lease = sessionStreamLeaseService.tryAcquire(sessionId).orElse(null);
             if (lease == null) {
@@ -316,13 +218,10 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
             String consumerName = buildConsumerName(sessionId);
             createConsumerGroupIfAbsent(streamKey);
             listener = applicationContext.getBean(RedisStreamMessageListener.class);
-            container = StreamMessageListenerContainer.create(redisConnectionFactory, createContainerOptions(admission));
-            container.register(createReadRequest(sessionId, streamKey, consumerName), listener);
             listeners.put(sessionId, listener);
-            containers.put(sessionId, container);
-            if (paused) pausedReadAdmissions.put(sessionId, admission);
-            else container.start();
-            sessionStreamMetrics.updateActiveListeners(containers.size());
+            reactiveRegistered = true;
+            reactiveSessionStreamReceiver.register(sessionId, streamKey, consumerName, listener, paused);
+            sessionStreamMetrics.updateActiveListeners(listeners.size());
             startSessionStatusListener(sessionId, resolveAgentId(ctx));
             startKeepAlive(sessionId, ctx);
             startStreamLeaseRenewal(sessionId, lease);
@@ -334,30 +233,15 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
             return true;
         }
         catch (RuntimeException | Error error) {
-            pausedReadAdmissions.remove(sessionId, admission);
+            if (reactiveRegistered) reactiveSessionStreamReceiver.unregister(sessionId);
             if (listener != null) {
                 listeners.remove(sessionId, listener);
                 listener.close();
-            }
-            if (container != null) {
-                containers.remove(sessionId, container);
-                sessionStreamMetrics.updateActiveListeners(containers.size());
-                try {
-                    container.stop();
-                }
-                catch (Exception stopException) {
-                    log.warn("启动 Session Stream listener 失败后停止容器异常, sessionId: {}", sessionId, stopException);
-                }
             }
             cancelKeepAlive(sessionId);
             cancelStreamLease(sessionId);
             stopSessionStatusListener(sessionId);
             throw error;
-        }
-        finally {
-            // Once submitted, only the polling runnable's finally may return the read slot. stop() does not wait
-            // for an outstanding XREADGROUP BLOCK/socket read to exit.
-            if (pausedReadAdmissions.get(sessionId) != admission) admission.releaseIfNotSubmitted();
         }
     }
 
@@ -411,32 +295,20 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
         cancelStreamLease(sessionId);
         scheduleSessionStatusListenerStop(sessionId);
         streamAckFailureRegistry.clearAll(buildStreamKey(sessionId));
-        resetReadErrorLogState(buildStreamKey(sessionId));
         ChatProcessContext ctx = outputStreamManager.removeContext(sessionId);
         applicationContext.getBean(RunningOutputStreamRegistry.class).releaseIfOwner(ctx);
     }
 
     private void stopPolling(String sessionId) {
-        ReadAdmission pausedAdmission = pausedReadAdmissions.remove(sessionId);
-        if (pausedAdmission != null) pausedAdmission.releaseIfNotSubmitted();
+        reactiveSessionStreamReceiver.unregister(sessionId);
         RedisStreamMessageListener listener = listeners.remove(sessionId);
         if (listener != null) {
             // close() wakes queue backpressure and discards unacknowledged work without joining its worker.
             // A terminal event may call this on the active batch worker itself.
             listener.close();
         }
-        StreamMessageListenerContainer<String, MapRecord<String, String, String>> container =
-            containers.remove(sessionId);
-        sessionStreamMetrics.updateActiveListeners(containers.size());
-        if (container != null) {
-            try {
-                container.stop();
-                log.info("Session Stream 监听已停止, sessionId: {}", sessionId);
-            }
-            catch (Exception error) {
-                log.warn("停止 session 监听容器时发生异常, sessionId: {}", sessionId, error);
-            }
-        }
+        sessionStreamMetrics.updateActiveListeners(listeners.size());
+        log.info("Session Stream 监听已停止, sessionId: {}", sessionId);
     }
 
     /**
@@ -446,7 +318,7 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
     public void onApplicationEvent(ContextClosedEvent event) {
         shuttingDown = true;
         log.info("应用关闭，开始清理所有 Session Stream 监听器...");
-        Set<String> activeSessionIds = new HashSet<>(containers.keySet());
+        Set<String> activeSessionIds = new HashSet<>(listeners.keySet());
         activeSessionIds.addAll(streamLeases.keySet());
         for (String sessionId : activeSessionIds) {
             outputStreamManager.withSessionLock(sessionId, () -> {
@@ -474,28 +346,7 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
         keepAliveExecutor.shutdownNow();
         streamLeaseExecutor.shutdownNow();
         sessionStatusExecutor.shutdownNow();
-        streamTaskExecutor.shutdownNow();
         log.info("所有 Session Stream 监听器已清理完成");
-    }
-
-    /**
-     * 构建 Session Stream 容器配置。读取批量设上限，长轮询任务使用虚拟线程承载阻塞等待。
-     */
-    StreamMessageListenerContainerOptions<String, MapRecord<String, String, String>> createContainerOptions() {
-        return createContainerOptions(streamTaskExecutor);
-    }
-
-    private StreamMessageListenerContainerOptions<String, MapRecord<String, String, String>> createContainerOptions(
-            Executor executor) {
-        if (streamReadBatchSize <= 0) {
-            throw new IllegalStateException("byclaw.session-stream.read-batch-size must be greater than zero");
-        }
-        return StreamMessageListenerContainerOptions
-            .builder()
-            .pollTimeout(Duration.ofMillis(pollTimeoutMillis))
-            .batchSize(streamReadBatchSize)
-            .executor(executor)
-            .build();
     }
 
     private void startKeepAlive(String sessionId, ChatProcessContext ctx) {
@@ -539,7 +390,7 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
      * 构建 Session Stream Key。
      *
      * @param sessionId 会话 ID
-     * @return 完整的 Stream Key，格式：byai_gateway:session:{sessionId}:data_stream
+     * @return 与 REDIS_KEY_SCHEMA_VERSION 对应的完整 Stream Key
      */
     public String buildStreamKey(String sessionId) {
         return Constants.QueueNames.sessionDataStream(sessionId);
@@ -550,143 +401,14 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
     }
 
     public boolean isSessionListenerActive(String sessionId) {
-        return sessionId != null && containers.containsKey(sessionId);
+        return sessionId != null && listeners.containsKey(sessionId);
     }
 
     /**
      * 返回当前实例活跃 Session Stream listener 的只读快照，供低频聚合指标采样使用。
      */
     Set<String> activeSessionIdsSnapshot() {
-        return Set.copyOf(containers.keySet());
-    }
-
-    /**
-     * 构建手动 ACK 的 Consumer Group 读取请求。
-     * <p>
-     * Redis 读取或反序列化异常不会取消 subscription，poll task 会在错误处理后继续下一轮读取。
-     * 持续性故障下的日志去重与轮询退避都在 {@link #handleReadError} 中完成。
-     */
-    ConsumerStreamReadRequest<String> createReadRequest(String sessionId, String streamKey, String consumerName) {
-        return StreamReadRequest.<String>builder(StreamOffset.create(streamKey, ReadOffset.lastConsumed()))
-            .consumer(Consumer.from(CONSUMER_GROUP, consumerName))
-            .autoAcknowledge(false)
-            .errorHandler(error -> handleReadError(sessionId, streamKey, consumerName, error))
-            .cancelOnError(error -> false)
-            .build();
-    }
-
-    /**
-     * 处理一次读取异常：指标照常累加，日志按 stream 去重，并在返回前退避。
-     * <p>
-     * 指标是聚合计数，逐次累加才能反映真实故障速率，因此不参与去重。日志则相反：像 NOGROUP
-     * 这种在人工修复前不会自愈的故障，每轮轮询都会重复同一行，去重后才留得下有用信息。
-     * <p>
-     * 退避在这里而不是在轮询侧完成，因为只有出错的这一轮需要等待：正常轮询本身已经阻塞在
-     * XREADGROUP 的 BLOCK 上，而报错是立即返回的。poll task 每个 subscription 独占一个虚拟线程，
-     * 在此休眠只推迟这一个 session 的下一次读取。
-     */
-    private void handleReadError(String sessionId, String streamKey, String consumerName, Throwable error) {
-        sessionStreamMetrics.recordReadError(error);
-        logReadErrorThrottled(sessionId, streamKey, consumerName, error);
-        backoffAfterReadError();
-    }
-
-    private void logReadErrorThrottled(String sessionId, String streamKey, String consumerName, Throwable error) {
-        String errorType = error.getClass().getSimpleName();
-        ReadErrorLogState state = readErrorLogStates.computeIfAbsent(streamKey, key -> new ReadErrorLogState());
-        long suppressed = state.countAndTakeSuppressedIfDue(errorType, readErrorLogIntervalMillis);
-        if (suppressed < 0) {
-            return;
-        }
-        if (suppressed == 0) {
-            log.warn("Session Stream 读取异常，将继续轮询, sessionId: {}, stream: {}, consumer: {}, "
-                    + "errorType: {}, errorMessage: {}",
-                sessionId, streamKey, consumerName, errorType, error.getMessage());
-            return;
-        }
-        log.warn("Session Stream 读取异常持续存在，将继续轮询, sessionId: {}, stream: {}, consumer: {}, "
-                + "errorType: {}, errorMessage: {}, 期间已抑制重复日志: {} 次",
-            sessionId, streamKey, consumerName, errorType, error.getMessage(), suppressed);
-    }
-
-    private void backoffAfterReadError() {
-        if (readErrorBackoffMillis <= 0 || shuttingDown) {
-            return;
-        }
-        try {
-            Thread.sleep(readErrorBackoffMillis);
-        }
-        catch (InterruptedException e) {
-            // 保留中断标记，让 poll task 自己按既有逻辑结束本轮循环。
-            Thread.currentThread().interrupt();
-        }
-    }
-
-    /**
-     * listener 停止时丢弃去重状态，既避免 map 随 session 累积，也让下一轮监听重新即时告警。
-     * <p>
-     * 单次偶发异常不依赖这里复位：静默窗口只压制窗口内的重复，间隔超过窗口的异常照常逐条打印。
-     */
-    void resetReadErrorLogState(String streamKey) {
-        readErrorLogStates.remove(streamKey);
-    }
-
-    /**
-     * 单个 stream 的读取异常去重状态。
-     * <p>
-     * 由对应 subscription 的 poll task 单线程访问；这里仍做同步，以便 listener 停止时的清理与其安全并存。
-     */
-    private static final class ReadErrorLogState {
-
-        /**
-         * 单个静默窗口内最多允许多少种故障类型各自即时打印。
-         * <p>
-         * 用于给「新类型即时打印」兜底：Redis 抖动可能连续抛出多种不同异常，没有上限的话
-         * 每种类型都能绕过静默窗口，日志量重新失控。
-         */
-        private static final int MAX_IMMEDIATE_TYPES_PER_WINDOW = 8;
-
-        /** 当前静默窗口内已经打印过的故障类型，用于区分「新问题」与「同一问题的重复」。 */
-        private final Set<String> loggedErrorTypes = new HashSet<>();
-
-        private boolean windowOpen;
-
-        private long windowStartedAtNanos;
-
-        /** 当前窗口内被跳过的次数，跨故障类型累计：它衡量的是这个 stream 的刷屏量，不是某一类异常的次数。 */
-        private long suppressedCount;
-
-        /**
-         * 记录一次异常，并判断是否到了该打印的时候。
-         * <p>
-         * 静默窗口内，同一故障类型只打印一次；窗口内首次出现的新类型仍即时打印（受
-         * {@link #MAX_IMMEDIATE_TYPES_PER_WINDOW} 限制），以免真正的新问题被上一个问题的窗口盖掉。
-         * 窗口到期后的第一次异常负责汇报期间累计跳过的次数，并开启新窗口。
-         *
-         * @param intervalMillis 静默窗口长度；小于等于 0 表示不做抑制，每次异常都打印
-         * @return 需要按首次异常打印时返回 {@code 0}；需要按汇总打印时返回期间抑制的次数（正数）；
-         *         无需打印时返回 {@code -1}
-         */
-        synchronized long countAndTakeSuppressedIfDue(String errorType, long intervalMillis) {
-            // 用单调时钟测量间隔：墙上时钟被 NTP 回拨时，经过时间会算成负数，静默窗口将远超预期。
-            long now = System.nanoTime();
-            long intervalNanos = TimeUnit.MILLISECONDS.toNanos(Math.max(0L, intervalMillis));
-            if (!windowOpen || now - windowStartedAtNanos >= intervalNanos) {
-                long suppressed = suppressedCount;
-                windowOpen = true;
-                windowStartedAtNanos = now;
-                suppressedCount = 0;
-                loggedErrorTypes.clear();
-                loggedErrorTypes.add(errorType);
-                // 窗口内一次都没跳过时返回 0，按首次异常打印，避免出现「已抑制 0 次」这种无意义的措辞。
-                return suppressed;
-            }
-            if (loggedErrorTypes.size() < MAX_IMMEDIATE_TYPES_PER_WINDOW && loggedErrorTypes.add(errorType)) {
-                return 0;
-            }
-            suppressedCount++;
-            return -1;
-        }
+        return Set.copyOf(listeners.keySet());
     }
 
     /**
@@ -986,58 +708,6 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
         catch (Exception e) {
             // 刷新失败不阻断监听启动：TTL 到期前的事件仍可正常消费，recovery 会接管其余部分。
             log.warn("刷新 Session Stream 过期时间失败, stream: {}", streamKey, e);
-        }
-    }
-
-    private ReadAdmission reserveReadAdmission() {
-        while (true) {
-            int current = admittedReadTasks.get();
-            if (current >= maxListeners) {
-                throw new RejectedExecutionException("Session Stream listener capacity exhausted (max-listeners="
-                    + maxListeners + "); retry after an active or stopping reader exits");
-            }
-            if (admittedReadTasks.compareAndSet(current, current + 1)) {
-                return new ReadAdmission();
-            }
-        }
-    }
-
-    /** One admission covers lease acquisition, scheduling, and the entire blocking polling task. */
-    private final class ReadAdmission implements Executor {
-        private final AtomicBoolean submitted = new AtomicBoolean();
-        private final AtomicBoolean released = new AtomicBoolean();
-
-        @Override
-        public void execute(Runnable command) {
-            if (!submitted.compareAndSet(false, true)) {
-                throw new RejectedExecutionException("A Session Stream listener may only submit one polling task");
-            }
-            try {
-                streamTaskExecutor.execute(() -> {
-                    try {
-                        command.run();
-                    }
-                    finally {
-                        release();
-                    }
-                });
-            }
-            catch (RuntimeException | Error error) {
-                release();
-                throw error;
-            }
-        }
-
-        private void releaseIfNotSubmitted() {
-            if (!submitted.get()) {
-                release();
-            }
-        }
-
-        private void release() {
-            if (released.compareAndSet(false, true)) {
-                admittedReadTasks.decrementAndGet();
-            }
         }
     }
 

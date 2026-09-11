@@ -10,8 +10,9 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 import org.springframework.context.event.ContextClosedEvent;
-import org.springframework.data.redis.stream.StreamMessageListenerContainer;
 import org.springframework.test.util.ReflectionTestUtils;
+
+import com.iwhalecloud.byai.state.domain.ws.handler.RedisStreamMessageListener;
 
 /** 验证优雅关闭先停止消费，再标记运行态可交接，最后释放跨 Pod listener lease。 */
 class SessionStreamManagerShutdownTest {
@@ -24,7 +25,8 @@ class SessionStreamManagerShutdownTest {
         OutputStreamManager outputStreamManager = spy(new OutputStreamManager());
         ChatRuntimeStateService runtimeStateService = mock(ChatRuntimeStateService.class);
         SessionStreamLeaseService leaseService = mock(SessionStreamLeaseService.class);
-        StreamMessageListenerContainer container = mock(StreamMessageListenerContainer.class);
+        ReactiveSessionStreamReceiver receiver = mock(ReactiveSessionStreamReceiver.class);
+        RedisStreamMessageListener listener = mock(RedisStreamMessageListener.class);
         SessionStreamLeaseService.Lease lease = new SessionStreamLeaseService.Lease("10", "lease-token");
         ChatProcessContext ctx = new ChatProcessContext(null, null);
         ctx.sessionId = 10L;
@@ -34,8 +36,9 @@ class SessionStreamManagerShutdownTest {
         ReflectionTestUtils.setField(manager, "outputStreamManager", outputStreamManager);
         ReflectionTestUtils.setField(manager, "chatRuntimeStateService", runtimeStateService);
         ReflectionTestUtils.setField(manager, "sessionStreamLeaseService", leaseService);
-        ((Map<String, StreamMessageListenerContainer>) ReflectionTestUtils.getField(manager, "containers"))
-            .put("10", container);
+        ReflectionTestUtils.setField(manager, "reactiveSessionStreamReceiver", receiver);
+        ((Map<String, RedisStreamMessageListener>) ReflectionTestUtils.getField(manager, "listeners"))
+            .put("10", listener);
         ((Map<String, SessionStreamLeaseService.Lease>) ReflectionTestUtils.getField(manager, "streamLeases"))
             .put("10", lease);
         when(outputStreamManager.getContexts("10")).thenReturn(java.util.List.of(ctx));
@@ -43,8 +46,8 @@ class SessionStreamManagerShutdownTest {
 
         manager.onApplicationEvent(mock(ContextClosedEvent.class));
 
-        InOrder shutdownOrder = inOrder(container, runtimeStateService, leaseService);
-        shutdownOrder.verify(container).stop();
+        InOrder shutdownOrder = inOrder(receiver, runtimeStateService, leaseService);
+        shutdownOrder.verify(receiver).unregister("10");
         shutdownOrder.verify(runtimeStateService).requestHandoff(ctx);
         shutdownOrder.verify(leaseService).release(lease);
     }
