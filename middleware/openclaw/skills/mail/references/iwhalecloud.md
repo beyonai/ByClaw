@@ -36,6 +36,14 @@ server order, use `--sort default --order default`.
 There is no server-side search, send, reply or delete capability. A search request
 can only use an explicitly bounded list scan and local filtering; read bodies if
 body matching is requested. State the scanned folder/count/time scope and any gaps.
+The current wrapper exposes `date`, `times.sentAt`, and `times.createdAt`, but has
+no verified receipt-time mapping. Do not interpret these as receipt timestamps or
+claim "received today" coverage from them. `times.sentAt` is a sender-time field;
+it must not be described as server delivery time. If a receipt-time field becomes
+available upstream, verify its source before adding a mapping. Keep any identity
+verification limitation in the report; a successful check alone is not proof of
+the logged-in mailbox owner's identity.
+
 `coverage.complete=false` and `snapshotConsistent=false` must not become a claim of
 complete mailbox coverage. Never fall back to QQ or another provider for unsupported operations.
 

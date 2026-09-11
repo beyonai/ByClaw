@@ -25,8 +25,9 @@ from mail_runtime.models import (
     ListRequest,
     MailRuntimeError,
     SearchRequest,
+    to_jsonable,
 )
-from mail_runtime.imap_smtp import ImapSmtpAdapter, _token, register_imap_smtp
+from mail_runtime.imap_smtp import ImapSmtpAdapter, _internal_date, _token, register_imap_smtp
 from mail_runtime.registry import AdapterRegistry, build_default_registry
 
 
@@ -58,6 +59,7 @@ class FakeImap:
         self.reported_size = None
         self.list_rows = [b'(\\HasNoChildren \\Trash) "/" "Deleted Messages"']
         self.fail_select = False
+        self.internal_date = ' INTERNALDATE "10-Sep-2026 17:30:00 -0700"'
 
     def starttls(self, ssl_context=None):
         self.calls.append(("starttls", ssl_context))
@@ -127,8 +129,8 @@ class FakeImap:
                 return "OK", [(f"{uid} ({request} {{{len(chunk)}}}".encode(), chunk), b")"]
             if "HEADER.FIELDS" in str(args[1]):
                 header = self.raw.split(b"\n\n", 1)[0] + b"\n\n"
-                return "OK", [(f"{uid} (UID {uid} RFC822.SIZE {len(self.raw)} FLAGS (\\Seen) BODYSTRUCTURE (ATTACHMENT))".encode(), header), b")"]
-            return "OK", [(f"{uid} (UID {uid} RFC822.SIZE {len(self.raw)})".encode(), self.raw), b")"]
+                return "OK", [(f"{uid} (UID {uid}{self.internal_date} RFC822.SIZE {len(self.raw)} FLAGS (\\Seen) BODYSTRUCTURE (ATTACHMENT))".encode(), header), b")"]
+            return "OK", [(f"{uid} (UID {uid}{self.internal_date} RFC822.SIZE {len(self.raw)})".encode(), self.raw), b")"]
         if command in {"MOVE", "COPY", "STORE", "EXPUNGE"}:
             return "OK", [b"done"]
         return "BAD", [b"bad"]
@@ -213,6 +215,39 @@ def configured_account(*, imap_encryption="SSL", smtp_encryption="SSL", auth_typ
 
 
 class ImapSmtpAdapterTest(unittest.TestCase):
+    def test_received_and_sent_times_are_distinct_in_list_search_and_get(self):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        adapter, factories = self.make_adapter()
+        page = adapter.list_messages(ListRequest(limit=1))
+        results = (page.items[0], adapter.search_messages(SearchRequest(query="test")).items[0],
+                   adapter.get_message(page.items[0].message_id))
+        for result in results:
+            output = to_jsonable(result)
+            self.assertEqual(output["receivedAt"], "2026-09-10T17:30:00-07:00")
+            self.assertEqual(output["sentAt"], "2026-08-31T10:00:00+08:00")
+            self.assertEqual(datetime.fromisoformat(output["receivedAt"]).astimezone(
+                ZoneInfo("Asia/Shanghai")).isoformat(), "2026-09-11T08:30:00+08:00")
+        for call in factories.imap.calls:
+            if call[0:2] == ("uid", "FETCH") and "BODY.PEEK" in call[3]:
+                self.assertIn("INTERNALDATE", call[3])
+
+    def test_missing_internal_date_does_not_fall_back_to_sender_date(self):
+        imap = FakeImap()
+        imap.internal_date = ""
+        adapter, _ = self.make_adapter(factories=Factories(imap=imap))
+        item = adapter.list_messages(ListRequest(limit=1)).items[0]
+        self.assertIsNone(item.received_at)
+        self.assertIsNotNone(item.sent_at)
+        self.assertIsNone(adapter.get_message(item.message_id).received_at)
+
+    def test_internal_date_keeps_offsets_and_rejects_invalid_or_missing_timezone(self):
+        self.assertEqual(_internal_date(b'INTERNALDATE " 1-Sep-2026 00:30:00 +0800"'),
+                         "2026-09-01T00:30:00+08:00")
+        for raw in (b"", b'INTERNALDATE "invalid"', b'INTERNALDATE "11-Sep-2026 00:00:00"'):
+            self.assertIsNone(_internal_date(raw))
+
     def test_netease_id_precedes_readonly_mailbox_operations(self):
         for operation in ("probe", "list", "search"):
             with self.subTest(operation=operation):

@@ -32,6 +32,29 @@ An ID handshake failure does not by itself mean credentials need reauthorization
 
 ## Commands
 
+### Received dates and daily coverage
+
+For IMAP mailboxes, `receivedAt` is the server's `INTERNALDATE`, including its
+timezone offset. `sentAt` is the sender's `Date:` header. They may differ by days;
+never substitute `sentAt` when `receivedAt` is null. Report missing/invalid receipt
+timestamps as a coverage gap. Other providers may leave `sentAt` null.
+
+For "received today", use the user's timezone (Asia/Shanghai when requested) and
+the half-open interval `[local midnight, next local midnight)`. IMAP `since:` and
+`before:` compare internal calendar dates, ignoring time and timezone; they are
+candidate filters, not exact timezone-aware boundaries. Widen the candidate dates
+on both sides, follow every `nextCursor`, deduplicate by message ID, then convert
+each `receivedAt` to the requested timezone and filter precisely. For example,
+Shanghai 2026-09-11 can use `since:2026-09-10 before:2026-09-13` as candidates.
+Do not stop paging based on a single sender date or assume UID order is date order.
+Record the query cutoff, per-page counts, deduplicated count, final matched count,
+and missing timestamp count. Describe coverage only for the folders actually read;
+new arrivals during pagination mean this is not an atomic mailbox snapshot.
+
+For "sent today", use `sentAt`; receipt-date candidate filtering alone cannot
+guarantee coverage of sender dates. List/search results are header summaries,
+not body summaries. Never claim a full day's final total before the day ends.
+
 `--input-json` and attachment destinations must be absolute paths under `/by/workspace`.
 
 | Command | Arguments |

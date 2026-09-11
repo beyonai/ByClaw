@@ -341,7 +341,18 @@ def _attachment_parts(message: EmailMessage) -> list[tuple[str, Message]]:
     return result
 
 
-def _message_content(uid: str, message: EmailMessage) -> MessageContent:
+def _internal_date(metadata: bytes) -> str | None:
+    match = re.search(rb'\bINTERNALDATE "([^"\r\n]+)"', metadata, re.IGNORECASE)
+    if not match:
+        return None
+    try:
+        value = parsedate_to_datetime(match.group(1).decode("ascii").replace("-", " ", 2).strip())
+        return value.isoformat() if value.tzinfo is not None else None
+    except (UnicodeError, TypeError, ValueError, OverflowError):
+        return None
+
+
+def _message_content(uid: str, message: EmailMessage, metadata: bytes = b"") -> MessageContent:
     text: str | None = None
     html: str | None = None
     for part in message.walk():
@@ -367,7 +378,8 @@ def _message_content(uid: str, message: EmailMessage) -> MessageContent:
         subject=_decode_header(message.get("subject")),
         sender=_decode_header(message.get("from")) or None,
         recipients=recipients,
-        received_at=_date(message.get("date")),
+        received_at=_internal_date(metadata),
+        sent_at=_date(message.get("date")),
         text=text,
         html=html,
         attachments=tuple(attachments),
@@ -380,7 +392,8 @@ def _summary(uid: str, message: EmailMessage, metadata: bytes) -> MessageSummary
         message_id=uid,
         subject=_decode_header(message.get("subject")),
         sender=_decode_header(message.get("from")) or None,
-        received_at=_date(message.get("date")),
+        received_at=_internal_date(metadata),
+        sent_at=_date(message.get("date")),
         preview=None,
         has_attachments=has_attachments,
     )
@@ -567,15 +580,15 @@ class ImapSmtpAdapter:
             raise MailRuntimeError(ErrorCode.UPSTREAM_UNAVAILABLE)
         return size
 
-    def _fetch_message(self, client: Any, uid: str) -> EmailMessage:
+    def _fetch_message(self, client: Any, uid: str) -> tuple[EmailMessage, bytes]:
         self._message_size(client, uid)
-        response = client.uid("FETCH", _uid(uid), "(UID RFC822.SIZE BODY.PEEK[])")
+        response = client.uid("FETCH", _uid(uid), "(UID INTERNALDATE RFC822.SIZE BODY.PEEK[])")
         if not _ok(response):
             raise MailRuntimeError(ErrorCode.MESSAGE_NOT_FOUND)
-        _, raw = _extract_bytes(response[1])
+        metadata, raw = _extract_bytes(response[1])
         if not raw:
             raise MailRuntimeError(ErrorCode.MESSAGE_NOT_FOUND)
-        return _parse_message(raw)
+        return _parse_message(raw), metadata
 
     def _page(self, client: Any, mailbox: _Mailbox, request: ListRequest, criteria: tuple[Any, ...]) -> Page:
         if type(request.limit) is not int or not 1 <= request.limit <= MAX_PAGE_SIZE:
@@ -604,7 +617,7 @@ class ImapSmtpAdapter:
             ids = [item for item in ids if int(item) < int(cursor)]
         selected = ids[: request.limit]
         summaries: list[MessageSummary] = []
-        fields = "(UID FLAGS RFC822.SIZE BODYSTRUCTURE BODY.PEEK[HEADER.FIELDS (SUBJECT FROM TO CC DATE)])"
+        fields = "(UID INTERNALDATE FLAGS RFC822.SIZE BODYSTRUCTURE BODY.PEEK[HEADER.FIELDS (SUBJECT FROM TO CC DATE)])"
         for item in selected:
             fetch = client.uid("FETCH", item, fields)
             if not _ok(fetch):
@@ -621,6 +634,7 @@ class ImapSmtpAdapter:
                     raw_summary.received_at,
                     raw_summary.preview,
                     raw_summary.has_attachments,
+                    raw_summary.sent_at,
                 )
             )
         next_cursor = (
@@ -644,7 +658,8 @@ class ImapSmtpAdapter:
     def get_message(self, message_id: str) -> MessageContent:
         with self._imap() as client:
             _mailbox, uid = self._select_locator(client, message_id, readonly=True)
-            return _message_content(message_id, self._fetch_message(client, uid))
+            message, metadata = self._fetch_message(client, uid)
+            return _message_content(message_id, message, metadata)
 
     def _search_criteria(self, query: str) -> tuple[Any, ...]:
         query = _control_free(query, maximum=4096)
@@ -860,7 +875,7 @@ class ImapSmtpAdapter:
     def reply_message(self, message_id: str, draft: Draft) -> ReplyResult:
         with self._imap() as client:
             _mailbox, uid = self._select_locator(client, message_id, readonly=True)
-            original = self._fetch_message(client, uid)
+            original, _metadata = self._fetch_message(client, uid)
         try:
             original_id = _header_value(str(original.get("Message-ID") or ""), maximum=998)
             references = _header_value(

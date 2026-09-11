@@ -256,12 +256,14 @@ class MessageSummary:
     received_at: str | None = None
     preview: str | None = None
     has_attachments: bool = False
+    sent_at: str | None = None
 
     def __post_init__(self) -> None:
         _require_output_string(self.message_id)
         _require_output_string(self.subject)
         _require_output_string(self.sender, optional=True)
         _require_output_string(self.received_at, optional=True)
+        _require_output_string(self.sent_at, optional=True)
         _require_output_string(self.preview, optional=True)
         if type(self.has_attachments) is not bool:
             raise MailRuntimeError(ErrorCode.INTERNAL_ERROR)
@@ -292,12 +294,14 @@ class MessageContent:
     text: str | None = None
     html: str | None = None
     attachments: tuple[AttachmentMeta, ...] = ()
+    sent_at: str | None = None
 
     def __post_init__(self) -> None:
         _require_output_string(self.message_id)
         _require_output_string(self.subject)
         _require_output_string(self.sender, optional=True)
         _require_output_string(self.received_at, optional=True)
+        _require_output_string(self.sent_at, optional=True)
         _require_output_string(self.text, optional=True)
         _require_output_string(self.html, optional=True)
         if type(self.recipients) is not tuple or not all(type(item) is str for item in self.recipients):
@@ -394,6 +398,7 @@ def _summary_json(value: MessageSummary) -> dict[str, Any]:
         "subject": value.subject,
         "sender": value.sender,
         "receivedAt": value.received_at,
+        "sentAt": value.sent_at,
         "preview": value.preview,
         "hasAttachments": value.has_attachments,
     }
@@ -450,6 +455,7 @@ def _validate_account_summary(value: Any) -> None:
 def _validate_message_summary(value: Any) -> None:
     if type(value) is not MessageSummary:
         raise MailRuntimeError(ErrorCode.INTERNAL_ERROR)
+    _serialized_string(value.sent_at, maximum=256, optional=True)
     _serialized_string(value.message_id, maximum=4096, allow_empty=False)
     _serialized_string(value.subject, maximum=65536)
     _serialized_string(value.sender, maximum=4096, optional=True)
@@ -480,6 +486,7 @@ def _validate_page(value: Any) -> None:
 def _validate_message_content(value: Any) -> None:
     if type(value) is not MessageContent:
         raise MailRuntimeError(ErrorCode.INTERNAL_ERROR)
+    _serialized_string(value.sent_at, maximum=256, optional=True)
     _serialized_string(value.message_id, maximum=4096, allow_empty=False)
     _serialized_string(value.subject, maximum=65536)
     _serialized_string(value.sender, maximum=4096, optional=True)
@@ -530,6 +537,7 @@ def to_jsonable(value: Any) -> Any:
             "sender": value.sender,
             "recipients": list(value.recipients),
             "receivedAt": value.received_at,
+            "sentAt": value.sent_at,
             "text": value.text,
             "html": value.html,
             "attachments": [_attachment_json(item) for item in value.attachments],
