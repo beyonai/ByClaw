@@ -70,6 +70,17 @@ public class ByaiSessionMember {
     private Long requestCount;
 
     /**
+     * 已实际展示给该用户的最新群消息标识
+     */
+    private Long lastReadMessageId;
+
+    /**
+     * 读取游标最近一次向前推进的时间
+     */
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "GMT+8")
+    private Date lastReadTime;
+
+    /**
      * 所属企业
      */
     private Long comAcctId;

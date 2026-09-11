@@ -23,11 +23,15 @@ import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.entity.users.Users;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatCandidateSessionService;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTaskService;
+import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatMentionService;
 import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatDisposition;
 import com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService;
 import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatAgentMention;
 import com.iwhalecloud.byai.state.domain.resource.dto.ResourceVo;
 import com.iwhalecloud.byai.state.domain.agent.enums.AgentMetaEnum;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /** Redis Stream 群委派适配器，负责分类、任务私有流以及公开消息投影。 */
 @Service
@@ -44,6 +48,7 @@ public class GroupChatExecutionEventHandler {
     private final GroupChatCandidateSessionService candidateSessionService;
     private final MultiDeviceBroadcastService multiDeviceBroadcastService;
     private final GroupChatAgentMentionParser mentionParser;
+    private final GroupChatMentionService mentionService;
     private final Map<String, GroupChatFinalAnswerExtractor> extractors = new ConcurrentHashMap<>();
     private final Map<String, Boolean> completedExecutions = new ConcurrentHashMap<>();
 
@@ -53,7 +58,8 @@ public class GroupChatExecutionEventHandler {
         GroupChatExecutionCoordinator executionCoordinator, SsResourceService resourceService,
         UserService userService, GroupChatDispositionReader dispositionReader, GroupChatTaskService taskService,
         GroupChatCandidateSessionService candidateSessionService,
-        MultiDeviceBroadcastService multiDeviceBroadcastService, GroupChatAgentMentionParser mentionParser) {
+        MultiDeviceBroadcastService multiDeviceBroadcastService, GroupChatAgentMentionParser mentionParser,
+        GroupChatMentionService mentionService) {
         this.messageMapper = messageMapper;
         this.eventPublisher = eventPublisher;
         this.sequenceService = sequenceService;
@@ -66,23 +72,37 @@ public class GroupChatExecutionEventHandler {
         this.candidateSessionService = candidateSessionService;
         this.multiDeviceBroadcastService = multiDeviceBroadcastService;
         this.mentionParser = mentionParser;
+        this.mentionService = mentionService;
+    }
+
+    public GroupChatExecutionEventHandler(ByaiMessageMapper messageMapper, GroupChatEventPublisher eventPublisher,
+        SequenceService sequenceService, ByaiGroupChatExecutionMapper executionMapper,
+        GroupChatExecutionCoordinator executionCoordinator, SsResourceService resourceService,
+        UserService userService, GroupChatDispositionReader dispositionReader, GroupChatTaskService taskService,
+        GroupChatCandidateSessionService candidateSessionService,
+        MultiDeviceBroadcastService multiDeviceBroadcastService, GroupChatAgentMentionParser mentionParser) {
+        this(messageMapper, eventPublisher, sequenceService, executionMapper, executionCoordinator, resourceService,
+            userService, dispositionReader, taskService, candidateSessionService, multiDeviceBroadcastService,
+            mentionParser, null);
     }
 
     public GroupChatExecutionEventHandler(ByaiMessageMapper messageMapper, GroupChatEventPublisher eventPublisher) {
-        this(messageMapper, eventPublisher, null, null, null, null, null, null, null, null, null, null);
+        this(messageMapper, eventPublisher, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     public GroupChatExecutionEventHandler(ByaiMessageMapper messageMapper, GroupChatEventPublisher eventPublisher,
         SequenceService sequenceService) {
-        this(messageMapper, eventPublisher, sequenceService, null, null, null, null, null, null, null, null, null);
+        this(messageMapper, eventPublisher, sequenceService, null, null, null, null, null, null, null, null, null,
+            null);
     }
 
     public GroupChatExecutionEventHandler(ByaiMessageMapper messageMapper, GroupChatEventPublisher eventPublisher,
         SequenceService sequenceService, ByaiGroupChatExecutionMapper executionMapper) {
         this(messageMapper, eventPublisher, sequenceService, executionMapper, null, null, null, null, null, null, null,
-            null);
+            null, null);
     }
 
+    @Transactional
     public boolean handle(Long groupSessionId, Long sourceMessageId, Long replyToMessageId, Long targetAgentId,
         JSONObject event) {
         return handle((ByaiGroupChatExecution) null, groupSessionId, sourceMessageId, replyToMessageId,
@@ -117,39 +137,56 @@ public class GroupChatExecutionEventHandler {
         if (completedExecutions.putIfAbsent(key, Boolean.TRUE) != null) {
             return false;
         }
-        extractors.remove(key);
-        GroupChatAgentMention mentions = mentionParser == null
-            ? new GroupChatAgentMention(content, List.of()) : mentionParser.parse(groupSessionId, targetAgentId, content);
-        content = mentions.normalizedContent();
-        long messageId = sequenceService == null ? System.currentTimeMillis() : sequenceService.nextVal();
-        ByaiMessage message = new ByaiMessage();
-        message.setId(messageId);
-        message.setMessageId(messageId);
-        message.setSessionId(groupSessionId);
-        message.setMessageRef(sourceMessageId);
-        message.setMessageContent(content);
-        message.setCreatorId(targetAgentId);
-        message.setCreatorName(event == null ? null : event.getString("agentName"));
-        message.setUsage(2);
-        message.setIsComplete(true);
-        message.setCreateTime(new Date());
-        message.setUpdateTime(new Date());
-        Map<String, Object> metadata = new HashMap<>();
-        metadata.put("scene", "GROUP_CHAT");
-        metadata.put("targetAgentId", targetAgentId);
-        metadata.put("sourceMessageId", sourceMessageId);
-        metadata.put("replyToMessageId", sourceMessageId);
-        metadata.put("resourceList", mentions.resourceList());
-        message.setMetadata(JSON.toJSONString(metadata));
-        messageMapper.insert(message);
-        if (execution != null) {
-            execution.setAnswerMessageId(messageId);
+        try {
+            GroupChatAgentMention mentions = mentionParser == null
+                ? new GroupChatAgentMention(content, List.of()) : mentionParser.parse(groupSessionId, targetAgentId, content);
+            content = mentions.normalizedContent();
+            long messageId = sequenceService == null ? System.currentTimeMillis() : sequenceService.nextVal();
+            ByaiMessage message = new ByaiMessage();
+            message.setId(messageId);
+            message.setMessageId(messageId);
+            message.setSessionId(groupSessionId);
+            message.setMessageRef(sourceMessageId);
+            message.setMessageContent(content);
+            message.setCreatorId(targetAgentId);
+            message.setCreatorName(event == null ? null : event.getString("agentName"));
+            message.setUsage(2);
+            message.setIsComplete(true);
+            message.setCreateTime(new Date());
+            message.setUpdateTime(new Date());
+            Map<String, Object> metadata = new HashMap<>();
+            metadata.put("scene", "GROUP_CHAT");
+            metadata.put("targetAgentId", targetAgentId);
+            metadata.put("sourceMessageId", sourceMessageId);
+            metadata.put("replyToMessageId", sourceMessageId);
+            metadata.put("resourceList", mentions.resourceList());
+            message.setMetadata(JSON.toJSONString(metadata));
+            messageMapper.insert(message);
+            if (mentionService != null) {
+                mentionService.indexHumanMentions(groupSessionId, messageId, targetAgentId, null,
+                    mentions.resourceList());
+            }
+            if (execution != null) {
+                execution.setAnswerMessageId(messageId);
+            }
+            JSONObject payload = buildMessageCreatedPayload(groupSessionId, sourceMessageId, targetAgentId, event,
+                message, content, mentions.resourceList());
+            publishProjectionAfterCommit(key, groupSessionId, payload, execution, mentions.resourceList());
+            return true;
         }
+        catch (RuntimeException error) {
+            completedExecutions.remove(key);
+            throw error;
+        }
+    }
+
+    private JSONObject buildMessageCreatedPayload(Long groupSessionId, Long sourceMessageId, Long targetAgentId,
+        JSONObject event, ByaiMessage message, String content, List<ResourceVo> resourceList) {
         JSONObject payload = new JSONObject();
         payload.put("type", "GROUP_CHAT_EVENT");
         payload.put("event", "MESSAGE_CREATED");
         payload.put("sessionId", String.valueOf(groupSessionId));
-        payload.put("messageId", String.valueOf(messageId));
+        payload.put("messageId", String.valueOf(message.getMessageId()));
         payload.put("messageRef", message.getMessageRef());
         payload.put("sourceMessageId", sourceMessageId);
         payload.put("replyToMessageId", message.getMessageRef());
@@ -169,10 +206,31 @@ public class GroupChatExecutionEventHandler {
         speaker.put("displayName", agentName);
         payload.put("speaker", speaker);
         payload.put("content", content);
-        payload.put("resourceList", mentions.resourceList());
+        payload.put("resourceList", resourceList);
+        return payload;
+    }
+
+    private void publishProjectionAfterCommit(String key, Long groupSessionId, JSONObject payload,
+        ByaiGroupChatExecution execution, List<ResourceVo> resourceList) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCompletion(int status) {
+                    if (status == TransactionSynchronization.STATUS_COMMITTED) {
+                        extractors.remove(key);
+                        eventPublisher.publish(groupSessionId, payload, null);
+                        scheduleAgentMentions(execution, resourceList);
+                    }
+                    else {
+                        completedExecutions.remove(key);
+                    }
+                }
+            });
+            return;
+        }
+        extractors.remove(key);
         eventPublisher.publish(groupSessionId, payload, null);
-        scheduleAgentMentions(execution, mentions.resourceList());
-        return true;
+        scheduleAgentMentions(execution, resourceList);
     }
 
     private void scheduleAgentMentions(ByaiGroupChatExecution parent, List<ResourceVo> resourceList) {
@@ -186,6 +244,7 @@ public class GroupChatExecutionEventHandler {
         }
     }
 
+    @Transactional
     public boolean handle(Long executionId, Long groupSessionId, Long sourceMessageId, Long replyToMessageId,
         Long targetAgentId, JSONObject event) {
         if (executionMapper != null && executionId != null && event != null) {

@@ -13,6 +13,8 @@
         <result column="creator_id" property="creatorId" />
         <result column="mem_name" property="memName" />
         <result column="request_count" property="requestCount" />
+        <result column="last_read_message_id" property="lastReadMessageId" />
+        <result column="last_read_time" property="lastReadTime" />
         <result column="com_acct_id" property="comAcctId" />
     </resultMap>
 
@@ -29,6 +31,8 @@
             creator_id,
             mem_name,
             request_count,
+            last_read_message_id,
+            last_read_time,
             com_acct_id
         from byai_session_member
         where session_id = #{sessionId}
@@ -70,6 +74,14 @@
             </if>
         </set>
         where byai_session_member_id = #{byaiSessionMemberId}
+    </update>
+
+    <update id="advanceReadCursor">
+        UPDATE byai_session_member
+        SET last_read_message_id = #{messageId},
+            last_read_time = #{readTime}
+        WHERE byai_session_member_id = #{memberId}
+          AND (last_read_message_id IS NULL OR last_read_message_id &lt; #{messageId})
     </update>
 
     <!-- 根据成员对象ID和时间范围查询会话成员列表 -->

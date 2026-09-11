@@ -20,6 +20,11 @@ import com.iwhalecloud.byai.state.domain.chat.dto.GroupChatContextResponse;
 import com.iwhalecloud.byai.state.domain.chat.service.GroupChatContextService;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTaskService;
 import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTask;
+import com.iwhalecloud.byai.common.page.PageInfo;
+import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatReadService;
+import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatListItemResponse;
+import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatReadStateRequest;
+import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatReadStateResponse;
 
 /** 群聊资源接口。 */
 @RestController
@@ -28,12 +33,30 @@ public class GroupChatController {
     private final GroupChatApplicationService applicationService;
     private final GroupChatContextService contextService;
     private final GroupChatTaskService taskService;
+    private final GroupChatReadService readService;
 
     public GroupChatController(GroupChatApplicationService applicationService, GroupChatContextService contextService,
-        GroupChatTaskService taskService) {
+        GroupChatTaskService taskService, GroupChatReadService readService) {
         this.applicationService = applicationService;
         this.contextService = contextService;
         this.taskService = taskService;
+        this.readService = readService;
+    }
+
+    /** 按当前 USER 成员关系返回群列表及未读 mention 状态。 */
+    @org.springframework.web.bind.annotation.GetMapping
+    public ResponseUtil<PageInfo<GroupChatListItemResponse>> list(
+        @org.springframework.web.bind.annotation.RequestParam(defaultValue = "1") Integer pageNum,
+        @org.springframework.web.bind.annotation.RequestParam(defaultValue = "20") Integer pageSize) {
+        return ResponseUtil.successResponse(readService.listMyGroups(pageNum, pageSize));
+    }
+
+    /** 只把前端已实际展示的群消息推进为已读位置。 */
+    @org.springframework.web.bind.annotation.PutMapping("/{sessionId}/read-state")
+    public ResponseUtil<GroupChatReadStateResponse> markRead(
+        @org.springframework.web.bind.annotation.PathVariable Long sessionId,
+        @Valid @RequestBody GroupChatReadStateRequest request) {
+        return ResponseUtil.successResponse(readService.markRead(sessionId, request.getLastReadMessageId()));
     }
 
     @org.springframework.web.bind.annotation.GetMapping("/{sessionId}/tasks")

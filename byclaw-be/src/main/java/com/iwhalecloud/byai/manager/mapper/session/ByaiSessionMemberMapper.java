@@ -34,6 +34,10 @@ public interface ByaiSessionMemberMapper extends BaseMapper<ByaiSessionMember> {
      */
     int updateSelective(ByaiSessionMember sessionMember);
 
+    /** 仅当新游标更大时推进群成员的已读位置。 */
+    int advanceReadCursor(@Param("memberId") Long memberId, @Param("messageId") Long messageId,
+        @Param("readTime") java.util.Date readTime);
+
     /**
      * 根据成员对象ID和时间范围查询会话成员列表
      *

@@ -80,9 +80,18 @@
     </update>
 
     <insert id="insertEventIfAbsent">
-        INSERT INTO byai_group_chat_execution_event (execution_id, event_id, event_type)
-        VALUES (#{executionId}, #{eventId}, #{eventType})
-        ON CONFLICT (execution_id, event_id) DO NOTHING
+        MERGE INTO byai_group_chat_execution_event target
+        USING (
+            SELECT CAST(#{executionId} AS BIGINT) AS execution_id,
+                   CAST(#{eventId} AS VARCHAR(255)) AS event_id,
+                   CAST(#{eventType} AS VARCHAR(64)) AS event_type
+        ) source
+        ON (
+            target.execution_id = source.execution_id
+            AND target.event_id = source.event_id
+        )
+        WHEN NOT MATCHED THEN INSERT (execution_id, event_id, event_type)
+        VALUES (source.execution_id, source.event_id, source.event_type)
     </insert>
 
     <update id="markSucceeded">

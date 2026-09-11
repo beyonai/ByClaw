@@ -55,12 +55,14 @@ public class GroupChatApplicationService {
     private final GroupChatExecutionCoordinator executionCoordinator;
     private final GroupChatEventPublisher eventPublisher;
     private final SessionExtService sessionExtService;
+    private final GroupChatMentionService mentionService;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public GroupChatApplicationService(SessionService sessionService, SequenceService sequenceService,
         GroupChatAuthorizationService authorizationService, SessionMemberService memberService,
         ProjectService projectService, ProjectMemberService projectMemberService, ByaiMessageMapper messageMapper,
         GroupChatExecutionCoordinator executionCoordinator, GroupChatEventPublisher eventPublisher,
-        SessionExtService sessionExtService) {
+        SessionExtService sessionExtService, GroupChatMentionService mentionService) {
         this.sessionService = sessionService;
         this.sequenceService = sequenceService;
         this.authorizationService = authorizationService;
@@ -71,6 +73,16 @@ public class GroupChatApplicationService {
         this.executionCoordinator = executionCoordinator;
         this.eventPublisher = eventPublisher;
         this.sessionExtService = sessionExtService;
+        this.mentionService = mentionService;
+    }
+
+    public GroupChatApplicationService(SessionService sessionService, SequenceService sequenceService,
+        GroupChatAuthorizationService authorizationService, SessionMemberService memberService,
+        ProjectService projectService, ProjectMemberService projectMemberService, ByaiMessageMapper messageMapper,
+        GroupChatExecutionCoordinator executionCoordinator, GroupChatEventPublisher eventPublisher,
+        SessionExtService sessionExtService) {
+        this(sessionService, sequenceService, authorizationService, memberService, projectService,
+            projectMemberService, messageMapper, executionCoordinator, eventPublisher, sessionExtService, null);
     }
 
     @Transactional
@@ -180,6 +192,10 @@ public class GroupChatApplicationService {
         message.setUpdateTime(new Date());
         message.setIsComplete(true);
         messageMapper.insert(message);
+        if (mentionService != null) {
+            mentionService.indexHumanMentions(session.getSessionId(), messageId,
+                CurrentUserHolder.getCurrentUserId(), CurrentUserHolder.getCurrentUserId(), command.getResourceList());
+        }
         com.alibaba.fastjson.JSONObject event = new com.alibaba.fastjson.JSONObject();
         event.put("type", "GROUP_CHAT_EVENT");
         event.put("event", "MESSAGE_CREATED");
@@ -317,6 +333,10 @@ public class GroupChatApplicationService {
         member.setUserRole(UserRole.MEMBER.name());
         member.setCreatorId(CurrentUserHolder.getCurrentUserId());
         member.setCreateTime(new Date());
+        if (MemObjType.USER.name().equals(type)) {
+            member.setLastReadMessageId(messageMapper.selectLatestMessageId(sessionId));
+            member.setLastReadTime(new Date());
+        }
         memberService.save(member);
         return member;
     }

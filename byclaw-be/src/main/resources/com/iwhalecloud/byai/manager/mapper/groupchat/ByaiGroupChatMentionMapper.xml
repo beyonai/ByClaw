@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatMentionMapper">
+
+    <resultMap id="GroupListItemMap"
+        type="com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatListItemResponse">
+        <id column="session_id" property="sessionId" />
+        <result column="session_name" property="name" />
+        <result column="project_id" property="projectId" />
+        <result column="user_role" property="role" />
+        <result column="latest_message_id" property="latestMessageId" />
+        <result column="latest_message_content" property="latestMessageContent" />
+        <result column="latest_message_time" property="latestMessageTime" />
+        <result column="latest_message_creator_id" property="latestMessageCreatorId" />
+        <result column="latest_message_creator_name" property="latestMessageCreatorName" />
+        <result column="last_read_message_id" property="lastReadMessageId" />
+        <result column="unread_mention_count" property="unreadMentionCount" />
+        <result column="latest_mention_message_id" property="latestMentionMessageId" />
+    </resultMap>
+
+    <insert id="insertIfAbsent">
+        MERGE INTO byai_group_chat_mention target
+        USING (
+            SELECT CAST(#{messageId} AS BIGINT) AS message_id,
+                   CAST(#{groupSessionId} AS BIGINT) AS group_session_id,
+                   CAST(#{mentionedUserId} AS BIGINT) AS mentioned_user_id,
+                   CAST(#{creatorId} AS BIGINT) AS creator_id,
+                   CAST(#{createTime} AS TIMESTAMP) AS create_time
+        ) source
+        ON (
+            target.message_id = source.message_id
+            AND target.mentioned_user_id = source.mentioned_user_id
+        )
+        WHEN NOT MATCHED THEN INSERT (
+            message_id, group_session_id, mentioned_user_id, creator_id, create_time
+        ) VALUES (
+            source.message_id, source.group_session_id, source.mentioned_user_id,
+            source.creator_id, source.create_time
+        )
+    </insert>
+
+    <sql id="MentionStateColumns">
+        COALESCE((
+            SELECT COUNT(1)
+            FROM byai_group_chat_mention mention
+            JOIN byai_message mentioned_message
+              ON mentioned_message.session_id = mention.group_session_id
+             AND mentioned_message.message_id = mention.message_id
+             AND mentioned_message.archived_at IS NULL
+            WHERE mention.group_session_id = session.session_id
+              AND mention.mentioned_user_id = #{userId}
+              AND mention.message_id &gt; COALESCE(member.last_read_message_id, 0)
+        ), 0) AS unread_mention_count,
+        (
+            SELECT MAX(mention.message_id)
+            FROM byai_group_chat_mention mention
+            JOIN byai_message mentioned_message
+              ON mentioned_message.session_id = mention.group_session_id
+             AND mentioned_message.message_id = mention.message_id
+             AND mentioned_message.archived_at IS NULL
+            WHERE mention.group_session_id = session.session_id
+              AND mention.mentioned_user_id = #{userId}
+              AND mention.message_id &gt; COALESCE(member.last_read_message_id, 0)
+        ) AS latest_mention_message_id
+    </sql>
+
+    <select id="selectMyGroups" resultMap="GroupListItemMap">
+        SELECT session.session_id,
+               session.session_name,
+               session.project_id,
+               member.user_role,
+               member.last_read_message_id,
+               latest.message_id AS latest_message_id,
+               latest.message_content AS latest_message_content,
+               latest.create_time AS latest_message_time,
+               latest.creator_id AS latest_message_creator_id,
+               latest.creator_name AS latest_message_creator_name,
+               <include refid="MentionStateColumns" />
+        FROM byai_session_member member
+        JOIN byai_session session ON session.session_id = member.session_id
+        LEFT JOIN (
+            SELECT message.session_id,
+                   message.message_id,
+                   message.message_content,
+                   message.create_time,
+                   message.creator_id,
+                   message.creator_name,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY message.session_id
+                       ORDER BY message.create_time DESC, message.message_id DESC
+                   ) AS latest_row_num
+            FROM byai_message message
+            WHERE message.archived_at IS NULL
+        ) latest
+          ON latest.session_id = session.session_id
+         AND latest.latest_row_num = 1
+        WHERE member.mem_obj_type = 'USER'
+          AND member.mem_obj_id = #{userId}
+          AND session.session_type = 'hs_as'
+        ORDER BY COALESCE(latest.create_time, session.update_time, session.create_time) DESC,
+                 session.session_id DESC
+    </select>
+
+    <select id="selectMentionState" resultMap="GroupListItemMap">
+        SELECT session.session_id,
+               member.last_read_message_id,
+               <include refid="MentionStateColumns" />
+        FROM byai_session_member member
+        JOIN byai_session session ON session.session_id = member.session_id
+        WHERE member.mem_obj_type = 'USER'
+          AND member.mem_obj_id = #{userId}
+          AND member.session_id = #{sessionId}
+          AND session.session_type = 'hs_as'
+    </select>
+</mapper>

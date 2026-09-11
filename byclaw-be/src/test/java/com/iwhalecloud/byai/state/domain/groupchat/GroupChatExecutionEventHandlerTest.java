@@ -5,11 +5,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import org.junit.jupiter.api.Test;
 
@@ -17,6 +21,7 @@ import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatEventPublisher;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatExecutionEventHandler;
+import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatMentionService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatExecution;
@@ -136,6 +141,61 @@ class GroupChatExecutionEventHandlerTest {
     }
 
     @Test
+    void chatIndexesHumanMentionsWithThePublicMessage() {
+        ByaiMessageMapper messageMapper = mock(ByaiMessageMapper.class);
+        ByaiGroupChatExecutionMapper executionMapper = mock(ByaiGroupChatExecutionMapper.class);
+        GroupChatAgentMentionParser parser = mock(GroupChatAgentMentionParser.class);
+        GroupChatMentionService mentionService = mock(GroupChatMentionService.class);
+        SequenceService sequenceService = mock(SequenceService.class);
+        ByaiGroupChatExecution execution = execution(8L, "CHAT");
+        ResourceVo human = resource(AgentMetaEnum.HUMAN, 30L);
+        when(executionMapper.selectById(8L)).thenReturn(execution);
+        when(sequenceService.nextVal()).thenReturn(102L);
+        when(parser.parse(1L, 4L, "@human"))
+            .thenReturn(new GroupChatAgentMention("{{HUMAN_30}}", List.of(human)));
+        GroupChatExecutionEventHandler handler = new GroupChatExecutionEventHandler(messageMapper,
+            mock(GroupChatEventPublisher.class), sequenceService, executionMapper, null,
+            mock(SsResourceService.class), mock(UserService.class), null, mock(GroupChatTaskService.class),
+            mock(GroupChatCandidateSessionService.class), null, parser, mentionService);
+        JSONObject event = new JSONObject();
+        event.put("event_type", "finalAnswer");
+        event.put("content", "@human");
+
+        assertTrue(handler.handle(8L, 1L, 2L, null, 4L, event));
+
+        verify(mentionService).indexHumanMentions(1L, 102L, 4L, null, List.of(human));
+    }
+
+    @Test
+    void mentionIndexFailureDoesNotPoisonChatProjectionRetry() {
+        ByaiMessageMapper messageMapper = mock(ByaiMessageMapper.class);
+        GroupChatEventPublisher publisher = mock(GroupChatEventPublisher.class);
+        GroupChatMentionService mentionService = mock(GroupChatMentionService.class);
+        SequenceService sequenceService = mock(SequenceService.class);
+        ResourceVo human = resource(AgentMetaEnum.HUMAN, 30L);
+        GroupChatAgentMentionParser parser = mock(GroupChatAgentMentionParser.class);
+        when(parser.parse(1L, 4L, "@human"))
+            .thenReturn(new GroupChatAgentMention("{{HUMAN_30}}", List.of(human)));
+        when(sequenceService.nextVal()).thenReturn(102L, 103L);
+        doThrow(new IllegalStateException("index failed")).doNothing().when(mentionService)
+            .indexHumanMentions(eq(1L), any(), eq(4L), eq(null), eq(List.of(human)));
+        GroupChatExecutionEventHandler handler = new GroupChatExecutionEventHandler(messageMapper, publisher,
+            sequenceService, null, null, mock(SsResourceService.class), mock(UserService.class), null,
+            mock(GroupChatTaskService.class), mock(GroupChatCandidateSessionService.class), null, parser,
+            mentionService);
+        JSONObject event = new JSONObject();
+        event.put("event_type", "finalAnswer");
+        event.put("content", "@human");
+
+        assertThatThrownBy(() -> handler.handle(1L, 2L, null, 4L, event))
+            .isInstanceOf(IllegalStateException.class);
+        assertTrue(handler.handle(1L, 2L, null, 4L, event));
+
+        verify(messageMapper, times(2)).insert(any(ByaiMessage.class));
+        verify(publisher).publish(eq(1L), any(JSONObject.class), eq(null));
+    }
+
+    @Test
     void chatRedeliveryUsesPersistedAnswerMessageAsIdempotencyBoundary() {
         ByaiMessageMapper messageMapper = mock(ByaiMessageMapper.class);
         GroupChatEventPublisher publisher = mock(GroupChatEventPublisher.class);
@@ -205,11 +265,15 @@ class GroupChatExecutionEventHandlerTest {
     }
 
     private ResourceVo resource(Long id) {
+        return resource(AgentMetaEnum.DIG_EMPLOYEE, id);
+    }
+
+    private ResourceVo resource(AgentMetaEnum type, Long id) {
         ResourceVo resource = new ResourceVo();
-        resource.setId("DIG_EMPLOYEE_" + id);
+        resource.setId(type.name() + "_" + id);
         resource.setResourceId(String.valueOf(id));
         resource.setResourceName("真实智能体");
-        resource.setResourceType(AgentMetaEnum.DIG_EMPLOYEE);
+        resource.setResourceType(type);
         return resource;
     }
 }

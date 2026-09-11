@@ -31,6 +31,7 @@ import com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper;
 import com.iwhalecloud.byai.state.domain.agent.enums.AgentMetaEnum;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatApplicationService;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatExecutionCoordinator;
+import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatMentionService;
 import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatAuthorizationService;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatEventPublisher;
 import com.iwhalecloud.byai.state.domain.resource.dto.ResourceVo;
@@ -50,8 +51,10 @@ class GroupChatApplicationServiceResourceListTest {
     private final SessionMemberService memberService = mock(SessionMemberService.class);
     private final SequenceService sequenceService = mock(SequenceService.class);
     private final ByaiMessageMapper messageMapper = mock(ByaiMessageMapper.class);
+    private final ProjectMemberService projectMemberService = mock(ProjectMemberService.class);
     private final GroupChatExecutionCoordinator executionCoordinator = mock(GroupChatExecutionCoordinator.class);
     private final GroupChatEventPublisher eventPublisher = mock(GroupChatEventPublisher.class);
+    private final GroupChatMentionService mentionService = mock(GroupChatMentionService.class);
     private GroupChatApplicationService service;
 
     @BeforeEach
@@ -68,8 +71,8 @@ class GroupChatApplicationServiceResourceListTest {
         when(authorizationService.requireCurrentUserMember(GROUP_ID)).thenReturn(new ByaiSessionMember());
         when(sequenceService.nextVal()).thenReturn(MESSAGE_ID);
         service = new GroupChatApplicationService(mock(SessionService.class), sequenceService, authorizationService,
-            memberService, mock(ProjectService.class), mock(ProjectMemberService.class), messageMapper,
-            executionCoordinator, eventPublisher, mock(SessionExtService.class));
+            memberService, mock(ProjectService.class), projectMemberService, messageMapper,
+            executionCoordinator, eventPublisher, mock(SessionExtService.class), mentionService);
     }
 
     @AfterEach
@@ -115,7 +118,21 @@ class GroupChatApplicationServiceResourceListTest {
         service.acceptUserMessage(command(List.of(resource(AgentMetaEnum.HUMAN, "601", "HUMAN_999"))));
 
         verify(messageMapper).insert(any(ByaiMessage.class));
+        verify(mentionService).indexHumanMentions(eq(GROUP_ID), eq(MESSAGE_ID), eq(USER_ID), eq(USER_ID), any());
         verify(executionCoordinator, never()).enqueue(any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void invitedUserStartsReadingAfterExistingGroupHistory() {
+        when(projectMemberService.isMember(400L, 601L)).thenReturn(true);
+        when(messageMapper.selectLatestMessageId(GROUP_ID)).thenReturn(199L);
+
+        service.invite(GROUP_ID, MemObjType.USER.name(), 601L);
+
+        ArgumentCaptor<ByaiSessionMember> memberCaptor = ArgumentCaptor.forClass(ByaiSessionMember.class);
+        verify(memberService).save(memberCaptor.capture());
+        assertThat(memberCaptor.getValue().getLastReadMessageId()).isEqualTo(199L);
+        assertThat(memberCaptor.getValue().getLastReadTime()).isNotNull();
     }
 
     @Test
