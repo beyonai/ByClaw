@@ -104,8 +104,24 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
     private long sessionStreamMaxLength;
 
     /** 已终结 Session Stream 的保留时长（小时），到期后由 Redis 回收整个 key。 */
-    @Value("${byclaw.session-stream.completed-retention-hours:24}")
+    /**
+     * 会话终结后 Stream Key 的保留时长，与 {@link #activeStreamTtlSeconds} 一致地对齐 session 生命周期。
+     * <p>
+     * 事件的写入方是沙箱内的 gateway SDK，它在每条事件的 pipeline 里把 TTL 续期到 session 生命周期。
+     * 这里如果取更短的值，等于 BE 单方面缩短了写入方声明的保留期：历史会话在写入方认为仍然有效的窗口内
+     * 就被回收，前端回看不到内容，跨实例 recovery 也失去可重放的数据。
+     */
+    @Value("${byclaw.session-stream.completed-retention-hours:168}")
     private long completedStreamRetentionHours;
+
+    /**
+     * 活跃会话 Stream Key 的过期时间，需与 gateway SDK 的 {@code RegistryKeys.DEFAULT_SESSION_TTL} 保持一致。
+     * <p>
+     * 只用于在监听启动时撑开上一轮终结时留下的 TTL，真正的续期由 SDK 在每条事件上完成。
+     * 取值必须远大于沙箱冷启动到首条事件的耗时，否则这段空窗内 key 仍可能被回收。
+     */
+    @Value("${byclaw.session-stream.active-ttl-seconds:604800}")
+    private long activeStreamTtlSeconds;
 
     @Autowired
     private SessionStreamLeaseService sessionStreamLeaseService;
@@ -138,12 +154,33 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
     @Value("${byclaw.session-stream.max-listeners:128}")
     private int maxListeners = 128;
 
+    /**
+     * 同一个 stream 上连续同类读取异常的日志间隔。
+     * <p>
+     * 读取异常不会取消 subscription，因此 NOGROUP 这类持续性故障每轮轮询都会触发一次 errorHandler。
+     * 首次异常立即打印，随后按此间隔汇总，避免单个坏 session 刷满日志。
+     */
+    @Value("${byclaw.session-stream.read-error-log-interval-millis:60000}")
+    private long readErrorLogIntervalMillis;
+
+    /**
+     * 连续读取异常时每轮轮询之间的退避时间。
+     * <p>
+     * XREADGROUP 报错是立即返回的，poll task 不带任何退避就会紧接着发起下一次读取。
+     * 这会让故障 session 退化成空转热循环，持续占用 CPU 并压向 Redis，因此这里显式补上退避。
+     */
+    @Value("${byclaw.session-stream.read-error-backoff-millis:1000}")
+    private long readErrorBackoffMillis;
+
     private final AtomicInteger admittedReadTasks = new AtomicInteger();
 
     private volatile boolean shuttingDown;
 
     /** Redis Stream 长轮询使用虚拟线程，阻塞等待不再为每个 session 长期占用平台线程。 */
     private final ExecutorService streamTaskExecutor = Executors.newVirtualThreadPerTaskExecutor();
+
+    /** 按 stream 记录连续读取异常，用于抑制重复日志。随 listener 停止一起清理。 */
+    private final Map<String, ReadErrorLogState> readErrorLogStates = new ConcurrentHashMap<>();
 
     /** sessionId -> StreamMessageListenerContainer，按 session 管理监听容器 */
     private final Map<String, StreamMessageListenerContainer<String, MapRecord<String, String, String>>> containers =
@@ -374,6 +411,7 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
         cancelStreamLease(sessionId);
         scheduleSessionStatusListenerStop(sessionId);
         streamAckFailureRegistry.clearAll(buildStreamKey(sessionId));
+        resetReadErrorLogState(buildStreamKey(sessionId));
         ChatProcessContext ctx = outputStreamManager.removeContext(sessionId);
         applicationContext.getBean(RunningOutputStreamRegistry.class).releaseIfOwner(ctx);
     }
@@ -526,19 +564,129 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
      * 构建手动 ACK 的 Consumer Group 读取请求。
      * <p>
      * Redis 读取或反序列化异常不会取消 subscription，poll task 会在错误处理后继续下一轮读取。
+     * 持续性故障下的日志去重与轮询退避都在 {@link #handleReadError} 中完成。
      */
     ConsumerStreamReadRequest<String> createReadRequest(String sessionId, String streamKey, String consumerName) {
         return StreamReadRequest.<String>builder(StreamOffset.create(streamKey, ReadOffset.lastConsumed()))
             .consumer(Consumer.from(CONSUMER_GROUP, consumerName))
             .autoAcknowledge(false)
-            .errorHandler(error -> {
-                sessionStreamMetrics.recordReadError(error);
-                log.warn("Session Stream 读取异常，将继续轮询, sessionId: {}, stream: {}, consumer: {}, "
-                        + "errorType: {}, errorMessage: {}",
-                    sessionId, streamKey, consumerName, error.getClass().getSimpleName(), error.getMessage());
-            })
+            .errorHandler(error -> handleReadError(sessionId, streamKey, consumerName, error))
             .cancelOnError(error -> false)
             .build();
+    }
+
+    /**
+     * 处理一次读取异常：指标照常累加，日志按 stream 去重，并在返回前退避。
+     * <p>
+     * 指标是聚合计数，逐次累加才能反映真实故障速率，因此不参与去重。日志则相反：像 NOGROUP
+     * 这种在人工修复前不会自愈的故障，每轮轮询都会重复同一行，去重后才留得下有用信息。
+     * <p>
+     * 退避在这里而不是在轮询侧完成，因为只有出错的这一轮需要等待：正常轮询本身已经阻塞在
+     * XREADGROUP 的 BLOCK 上，而报错是立即返回的。poll task 每个 subscription 独占一个虚拟线程，
+     * 在此休眠只推迟这一个 session 的下一次读取。
+     */
+    private void handleReadError(String sessionId, String streamKey, String consumerName, Throwable error) {
+        sessionStreamMetrics.recordReadError(error);
+        logReadErrorThrottled(sessionId, streamKey, consumerName, error);
+        backoffAfterReadError();
+    }
+
+    private void logReadErrorThrottled(String sessionId, String streamKey, String consumerName, Throwable error) {
+        String errorType = error.getClass().getSimpleName();
+        ReadErrorLogState state = readErrorLogStates.computeIfAbsent(streamKey, key -> new ReadErrorLogState());
+        long suppressed = state.countAndTakeSuppressedIfDue(errorType, readErrorLogIntervalMillis);
+        if (suppressed < 0) {
+            return;
+        }
+        if (suppressed == 0) {
+            log.warn("Session Stream 读取异常，将继续轮询, sessionId: {}, stream: {}, consumer: {}, "
+                    + "errorType: {}, errorMessage: {}",
+                sessionId, streamKey, consumerName, errorType, error.getMessage());
+            return;
+        }
+        log.warn("Session Stream 读取异常持续存在，将继续轮询, sessionId: {}, stream: {}, consumer: {}, "
+                + "errorType: {}, errorMessage: {}, 期间已抑制重复日志: {} 次",
+            sessionId, streamKey, consumerName, errorType, error.getMessage(), suppressed);
+    }
+
+    private void backoffAfterReadError() {
+        if (readErrorBackoffMillis <= 0 || shuttingDown) {
+            return;
+        }
+        try {
+            Thread.sleep(readErrorBackoffMillis);
+        }
+        catch (InterruptedException e) {
+            // 保留中断标记，让 poll task 自己按既有逻辑结束本轮循环。
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    /**
+     * listener 停止时丢弃去重状态，既避免 map 随 session 累积，也让下一轮监听重新即时告警。
+     * <p>
+     * 单次偶发异常不依赖这里复位：静默窗口只压制窗口内的重复，间隔超过窗口的异常照常逐条打印。
+     */
+    void resetReadErrorLogState(String streamKey) {
+        readErrorLogStates.remove(streamKey);
+    }
+
+    /**
+     * 单个 stream 的读取异常去重状态。
+     * <p>
+     * 由对应 subscription 的 poll task 单线程访问；这里仍做同步，以便 listener 停止时的清理与其安全并存。
+     */
+    private static final class ReadErrorLogState {
+
+        /**
+         * 单个静默窗口内最多允许多少种故障类型各自即时打印。
+         * <p>
+         * 用于给「新类型即时打印」兜底：Redis 抖动可能连续抛出多种不同异常，没有上限的话
+         * 每种类型都能绕过静默窗口，日志量重新失控。
+         */
+        private static final int MAX_IMMEDIATE_TYPES_PER_WINDOW = 8;
+
+        /** 当前静默窗口内已经打印过的故障类型，用于区分「新问题」与「同一问题的重复」。 */
+        private final Set<String> loggedErrorTypes = new HashSet<>();
+
+        private boolean windowOpen;
+
+        private long windowStartedAtNanos;
+
+        /** 当前窗口内被跳过的次数，跨故障类型累计：它衡量的是这个 stream 的刷屏量，不是某一类异常的次数。 */
+        private long suppressedCount;
+
+        /**
+         * 记录一次异常，并判断是否到了该打印的时候。
+         * <p>
+         * 静默窗口内，同一故障类型只打印一次；窗口内首次出现的新类型仍即时打印（受
+         * {@link #MAX_IMMEDIATE_TYPES_PER_WINDOW} 限制），以免真正的新问题被上一个问题的窗口盖掉。
+         * 窗口到期后的第一次异常负责汇报期间累计跳过的次数，并开启新窗口。
+         *
+         * @param intervalMillis 静默窗口长度；小于等于 0 表示不做抑制，每次异常都打印
+         * @return 需要按首次异常打印时返回 {@code 0}；需要按汇总打印时返回期间抑制的次数（正数）；
+         *         无需打印时返回 {@code -1}
+         */
+        synchronized long countAndTakeSuppressedIfDue(String errorType, long intervalMillis) {
+            // 用单调时钟测量间隔：墙上时钟被 NTP 回拨时，经过时间会算成负数，静默窗口将远超预期。
+            long now = System.nanoTime();
+            long intervalNanos = TimeUnit.MILLISECONDS.toNanos(Math.max(0L, intervalMillis));
+            if (!windowOpen || now - windowStartedAtNanos >= intervalNanos) {
+                long suppressed = suppressedCount;
+                windowOpen = true;
+                windowStartedAtNanos = now;
+                suppressedCount = 0;
+                loggedErrorTypes.clear();
+                loggedErrorTypes.add(errorType);
+                // 窗口内一次都没跳过时返回 0，按首次异常打印，避免出现「已抑制 0 次」这种无意义的措辞。
+                return suppressed;
+            }
+            if (loggedErrorTypes.size() < MAX_IMMEDIATE_TYPES_PER_WINDOW && loggedErrorTypes.add(errorType)) {
+                return 0;
+            }
+            suppressedCount++;
+            return -1;
+        }
     }
 
     /**
@@ -547,7 +695,20 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
      * Spring Data Redis 当前版本只暴露 MAXLEN trim，因此宁可延后清理，也不在存在 PEL 时删除记录。
      */
     public void trimCompletedStream(String sessionId) {
-        if (sessionId == null || isSessionListenerActive(sessionId)) {
+        if (sessionId == null) {
+            return;
+        }
+        // 在 session 锁内判定并设置过期，使其与 startSessionListenerLocked 的 persist 互斥。
+        // 否则「判定无 listener」与「设置过期」之间新一轮对话若启动成功，其 persist 会被这里的 expire 覆盖，
+        // 活跃会话的 Stream 又重新带上 TTL。
+        outputStreamManager.withSessionLock(sessionId, () -> {
+            trimCompletedStreamLocked(sessionId);
+            return null;
+        });
+    }
+
+    private void trimCompletedStreamLocked(String sessionId) {
+        if (isSessionListenerActive(sessionId)) {
             return;
         }
         String streamKey = buildStreamKey(sessionId);
@@ -793,10 +954,39 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
 
     private void ensureStreamExists(String streamKey) {
         if (Boolean.TRUE.equals(redisTemplate.hasKey(streamKey))) {
+            refreshActiveStreamTtl(streamKey);
             return;
         }
         redisTemplate.opsForStream().add(streamKey, Map.of("data", INIT_EVENT));
         log.info("Session Stream 不存在，已初始化创建, stream: {}", streamKey);
+        // XADD 创建新 key 时不带过期时间。事件写入方会在首条事件上补齐 TTL，但在它到达之前这个 key 是永不过期的；
+        // 若本轮始终没有事件写入，它就会永久驻留，因此创建时即给出与 session 生命周期一致的上界。
+        refreshActiveStreamTtl(streamKey);
+    }
+
+    /**
+     * 把上一轮终结时留下的剩余 TTL 重新撑开到完整的 session 生命周期。
+     * <p>
+     * 同一个 session 可以在保留窗口内被重新使用。此时 Stream Key 仍然存在，Consumer Group 与 PEL 也都完好，
+     * 但 key 上那个为「已终结」设置的 TTL 仍在倒计时。事件写入方（沙箱内的 gateway SDK）只在实际写事件时续期，
+     * 因此从监听启动到首条事件之间存在一段空窗；若剩余 TTL 短于沙箱冷启动耗时，Redis 会在这段空窗里回收整个 key。
+     * 随后消费者在 XREADGROUP 上收到 NOGROUP，而写入方的下一条事件又会把 key 重建成没有 Consumer Group 的新流，
+     * 消费侧将持续报错且再也读不到任何事件。
+     * <p>
+     * 这里刷新 TTL 而不是清除：清除虽然同样能覆盖空窗，但一旦本轮既没有事件写入、又没能走到终结逻辑
+     * （例如进程被杀），key 就会永久驻留。刷新则在任何异常路径下都保留一个上界。
+     */
+    private void refreshActiveStreamTtl(String streamKey) {
+        try {
+            if (Boolean.TRUE.equals(redisTemplate.expire(streamKey, activeStreamTtlSeconds, TimeUnit.SECONDS))) {
+                log.info("已刷新 Session Stream 过期时间，避免活跃会话被回收, stream: {}, ttlSeconds: {}",
+                    streamKey, activeStreamTtlSeconds);
+            }
+        }
+        catch (Exception e) {
+            // 刷新失败不阻断监听启动：TTL 到期前的事件仍可正常消费，recovery 会接管其余部分。
+            log.warn("刷新 Session Stream 过期时间失败, stream: {}", streamKey, e);
+        }
     }
 
     private ReadAdmission reserveReadAdmission() {

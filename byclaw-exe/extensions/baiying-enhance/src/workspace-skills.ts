@@ -8,8 +8,13 @@ import { resolveStateDir } from "./workspace-paths.js";
 const SKILLS_DIR_NAME = "skills";
 const PLUGIN_SKILLS_DIR_NAME = "plugin-skills";
 const SKILL_DOC_FILE_NAME = "SKILL.md";
-// 平台级只读能力由镜像统一提供在 /app/skills，不复制到各数字员工 workspace。
-const CORE_BUNDLED_SKILLS = ["project-context", "notice", "project-cloud-knowledge"];
+// 平台级核心技能由镜像统一提供在 /app/skills，不复制到各数字员工 workspace。
+const CORE_BUNDLED_SKILLS = [
+  "project-context",
+  "notice",
+  "project-cloud-knowledge",
+  "project-task-status-update",
+];
 
 function normalizeSkillName(raw: unknown): string {
   return typeof raw === "string" ? raw.trim() : "";
