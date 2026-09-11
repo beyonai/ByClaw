@@ -138,8 +138,8 @@ RUN npm config set registry "${NPM_REGISTRY}" --global \
         "chatlab-cli@${CHATLAB_CLI_VERSION}" \
     && zread version --stdio | grep -F "\"version\":\"${ZREAD_CLI_VERSION}\"" >/dev/null
 
-ARG OPENCLI_VERSION=2.1.56
-ARG OPENCLI_EXTENSION_VERSION=2.1.22
+ARG OPENCLI_VERSION=2.1.61
+ARG OPENCLI_EXTENSION_VERSION=2.1.23
 RUN set -eux; \
     if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
         sed -i 's|http://deb.debian.org/debian|https://mirrors.tuna.tsinghua.edu.cn/debian|g' /etc/apt/sources.list.d/debian.sources; \
