@@ -23,6 +23,7 @@ import utc from 'dayjs/plugin/utc';
 import { useSelector } from '@umijs/max';
 
 import AntdIcon from '@/components/AntdIcon';
+import { OVERLAY_DRAWER_WIDTH } from '@/components/MainDrawer/constants';
 import {
   getConnectorAuthorization,
   cancelConnectorAuthorization,
@@ -1261,7 +1262,8 @@ const ConnectorControl = ({
         open={configurationOpen}
         title="连接器配置"
         extra={accountToolbar}
-        width={Math.min(980, window.innerWidth - 24)}
+        width={OVERLAY_DRAWER_WIDTH}
+        mask
         maskClosable={!revokeConfirmationOpen && revokingConnectorIds.size === 0}
         onClose={() => setConfigurationOpen(false)}
       >

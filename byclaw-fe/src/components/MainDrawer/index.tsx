@@ -1,11 +1,12 @@
 import { ArrowsAltOutlined, CloseOutlined } from '@ant-design/icons';
 import React, { lazy, Suspense, useMemo, useRef } from 'react';
-import { Space } from 'antd';
+import { Drawer, Space } from 'antd';
 import classnames from 'classnames';
 
 import useGlobal from '@/hooks/useGlobal';
 import { getRandomNumber } from '@/utils/math';
 import useActionEffect, { INIT_DRAWER_CFG } from './useEventEmitter';
+import { OVERLAY_DRAWER_WIDTH } from './constants';
 
 import IframeRender from '@/components/MessagesComp/Iframe/IframeRender';
 
@@ -55,14 +56,13 @@ const MyDrawer = (props: IMyDrawerProps) => {
   const drawer = (
     <div
       style={{
-        width: open ? drawerCfg?.width : '0',
-        minWidth: open ? drawerCfg?.minWidth : '0',
-        maxWidth: drawerCfg?.maxWidth,
+        width: drawerCfg?.overlay ? '100%' : open ? drawerCfg?.width : '0',
+        minWidth: drawerCfg?.overlay ? 0 : open ? drawerCfg?.minWidth : '0',
+        maxWidth: drawerCfg?.overlay ? '100%' : drawerCfg?.maxWidth,
       }}
       className={classnames(styles.myDrawer, {
-        [styles.opening]: open,
+        [styles.opening]: open && !drawerCfg?.overlay,
         [styles.closing]: !open,
-        [styles.overlay]: drawerCfg?.overlay,
       })}
     >
       <div className="ub ub-ver full-height">
@@ -94,7 +94,21 @@ const MyDrawer = (props: IMyDrawerProps) => {
     </div>
   );
   // 覆盖式抽屉不参与 Flex 布局，避免账号登录时挤压左侧项目列表和露出后面的会话页。
-  if (drawerCfg?.overlay) return drawer;
+  if (drawerCfg?.overlay) {
+    return (
+      <Drawer
+        open={open}
+        width={OVERLAY_DRAWER_WIDTH}
+        mask
+        closable={false}
+        onClose={onClose}
+        zIndex={1300}
+        styles={{ body: { padding: 0, overflow: 'hidden' } }}
+      >
+        {drawer}
+      </Drawer>
+    );
+  }
   return (
     <Resizable left limit={{ minWidth: drawerCfg.minWidth, maxWidth: drawerCfg.maxWidth }}>
       {drawer}

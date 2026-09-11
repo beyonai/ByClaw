@@ -40,20 +40,6 @@
     // border-right: 0.5px var(--beyond-color-border) solid;
   }
 
-  // 账号登录等覆盖式场景只叠加在页面右侧，不占用主布局宽度。
-  &.overlay {
-    // 覆盖式远程桌面需要脱离页面局部 stacking context，显示在连接器弹窗及其遮罩层之上。
-    position: fixed;
-    z-index: 1300;
-    top: 8px;
-    right: 8px;
-    bottom: 8px;
-    height: auto;
-    margin-left: 0;
-    border-radius: 12px;
-    box-shadow: 0 6px 24px rgb(0 0 0 / 12%);
-  }
-
   // &.closing {
   //   animation: drawer-close 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
   // }
