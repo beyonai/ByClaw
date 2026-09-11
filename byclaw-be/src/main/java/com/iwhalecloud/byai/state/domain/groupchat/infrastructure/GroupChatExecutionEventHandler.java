@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.state.domain.groupchat.infrastructure;
 
 import java.util.Date;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -24,6 +25,9 @@ import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatCandidat
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTaskService;
 import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatDisposition;
 import com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService;
+import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatAgentMention;
+import com.iwhalecloud.byai.state.domain.resource.dto.ResourceVo;
+import com.iwhalecloud.byai.state.domain.agent.enums.AgentMetaEnum;
 
 /** Redis Stream 群委派适配器，负责分类、任务私有流以及公开消息投影。 */
 @Service
@@ -39,6 +43,7 @@ public class GroupChatExecutionEventHandler {
     private final GroupChatTaskService taskService;
     private final GroupChatCandidateSessionService candidateSessionService;
     private final MultiDeviceBroadcastService multiDeviceBroadcastService;
+    private final GroupChatAgentMentionParser mentionParser;
     private final Map<String, GroupChatFinalAnswerExtractor> extractors = new ConcurrentHashMap<>();
     private final Map<String, Boolean> completedExecutions = new ConcurrentHashMap<>();
 
@@ -48,7 +53,7 @@ public class GroupChatExecutionEventHandler {
         GroupChatExecutionCoordinator executionCoordinator, SsResourceService resourceService,
         UserService userService, GroupChatDispositionReader dispositionReader, GroupChatTaskService taskService,
         GroupChatCandidateSessionService candidateSessionService,
-        MultiDeviceBroadcastService multiDeviceBroadcastService) {
+        MultiDeviceBroadcastService multiDeviceBroadcastService, GroupChatAgentMentionParser mentionParser) {
         this.messageMapper = messageMapper;
         this.eventPublisher = eventPublisher;
         this.sequenceService = sequenceService;
@@ -60,25 +65,38 @@ public class GroupChatExecutionEventHandler {
         this.taskService = taskService;
         this.candidateSessionService = candidateSessionService;
         this.multiDeviceBroadcastService = multiDeviceBroadcastService;
+        this.mentionParser = mentionParser;
     }
 
     public GroupChatExecutionEventHandler(ByaiMessageMapper messageMapper, GroupChatEventPublisher eventPublisher) {
-        this(messageMapper, eventPublisher, null, null, null, null, null, null, null, null, null);
+        this(messageMapper, eventPublisher, null, null, null, null, null, null, null, null, null, null);
     }
 
     public GroupChatExecutionEventHandler(ByaiMessageMapper messageMapper, GroupChatEventPublisher eventPublisher,
         SequenceService sequenceService) {
-        this(messageMapper, eventPublisher, sequenceService, null, null, null, null, null, null, null, null);
+        this(messageMapper, eventPublisher, sequenceService, null, null, null, null, null, null, null, null, null);
     }
 
     public GroupChatExecutionEventHandler(ByaiMessageMapper messageMapper, GroupChatEventPublisher eventPublisher,
         SequenceService sequenceService, ByaiGroupChatExecutionMapper executionMapper) {
-        this(messageMapper, eventPublisher, sequenceService, executionMapper, null, null, null, null, null, null, null);
+        this(messageMapper, eventPublisher, sequenceService, executionMapper, null, null, null, null, null, null, null,
+            null);
     }
 
     public boolean handle(Long groupSessionId, Long sourceMessageId, Long replyToMessageId, Long targetAgentId,
         JSONObject event) {
+        return handle((ByaiGroupChatExecution) null, groupSessionId, sourceMessageId, replyToMessageId,
+            targetAgentId, event);
+    }
+
+    private boolean handle(ByaiGroupChatExecution execution, Long groupSessionId, Long sourceMessageId,
+        Long replyToMessageId, Long targetAgentId, JSONObject event) {
         String key = executionKey(groupSessionId, sourceMessageId, targetAgentId);
+        if (execution != null && execution.getAnswerMessageId() != null) {
+            completedExecutions.put(key, Boolean.TRUE);
+            extractors.remove(key);
+            return false;
+        }
         if (completedExecutions.containsKey(key)) {
             return false;
         }
@@ -100,6 +118,9 @@ public class GroupChatExecutionEventHandler {
             return false;
         }
         extractors.remove(key);
+        GroupChatAgentMention mentions = mentionParser == null
+            ? new GroupChatAgentMention(content, List.of()) : mentionParser.parse(groupSessionId, targetAgentId, content);
+        content = mentions.normalizedContent();
         long messageId = sequenceService == null ? System.currentTimeMillis() : sequenceService.nextVal();
         ByaiMessage message = new ByaiMessage();
         message.setId(messageId);
@@ -118,8 +139,12 @@ public class GroupChatExecutionEventHandler {
         metadata.put("targetAgentId", targetAgentId);
         metadata.put("sourceMessageId", sourceMessageId);
         metadata.put("replyToMessageId", sourceMessageId);
+        metadata.put("resourceList", mentions.resourceList());
         message.setMetadata(JSON.toJSONString(metadata));
         messageMapper.insert(message);
+        if (execution != null) {
+            execution.setAnswerMessageId(messageId);
+        }
         JSONObject payload = new JSONObject();
         payload.put("type", "GROUP_CHAT_EVENT");
         payload.put("event", "MESSAGE_CREATED");
@@ -144,26 +169,19 @@ public class GroupChatExecutionEventHandler {
         speaker.put("displayName", agentName);
         payload.put("speaker", speaker);
         payload.put("content", content);
+        payload.put("resourceList", mentions.resourceList());
         eventPublisher.publish(groupSessionId, payload, null);
-        scheduleStructuredMentions(groupSessionId, sourceMessageId, targetAgentId, event);
+        scheduleAgentMentions(execution, mentions.resourceList());
         return true;
     }
 
-    private void scheduleStructuredMentions(Long groupSessionId, Long sourceMessageId, Long parentAgentId,
-        JSONObject event) {
-        if (executionCoordinator == null || event == null || event.getJSONArray("mentions") == null) {
+    private void scheduleAgentMentions(ByaiGroupChatExecution parent, List<ResourceVo> resourceList) {
+        if (executionCoordinator == null || parent == null || resourceList == null) {
             return;
         }
-        ByaiGroupChatExecution parent = new ByaiGroupChatExecution();
-        parent.setGroupSessionId(groupSessionId);
-        parent.setSourceMessageId(sourceMessageId);
-        parent.setTargetAgentId(parentAgentId);
-        parent.setInitiatorUserId(event.getLong("initiatorUserId"));
-        parent.setRootMessageId(event.getLong("rootMessageId") == null ? sourceMessageId : event.getLong("rootMessageId"));
-        parent.setExecutionId(event.getLong("executionId"));
-        for (JSONObject mention : event.getJSONArray("mentions").toJavaList(JSONObject.class)) {
-            if (mention != null && "AGENT".equalsIgnoreCase(mention.getString("type"))) {
-                executionCoordinator.enqueueChild(parent, mention.getLong("id"));
+        for (ResourceVo resource : resourceList) {
+            if (resource != null && resource.getResourceType() == AgentMetaEnum.DIG_EMPLOYEE) {
+                executionCoordinator.enqueueChild(parent, Long.valueOf(resource.getResourceId()));
             }
         }
     }
@@ -190,7 +208,9 @@ public class GroupChatExecutionEventHandler {
                     ignored -> new GroupChatFinalAnswerExtractor());
                 extractor.accept(event);
                 if (isTurnTerminal(event)) {
-                    Long taskAnswerMessageId = persistTaskAnswer(execution, extractor.finish(), event);
+                    GroupChatAgentMention mentions = parseMentions(execution, extractor.finish());
+                    Long taskAnswerMessageId = persistTaskAnswer(execution, mentions, event);
+                    scheduleAgentMentions(execution, mentions.resourceList());
                     extractors.remove(key);
                     taskService.updateTurnStatus(execution.getCandidateSessionId(),
                         "error".equalsIgnoreCase(eventType(event)) ? "FAILED" : "WAITING_USER");
@@ -211,10 +231,11 @@ public class GroupChatExecutionEventHandler {
                 return false;
             }
         }
-        boolean handled = handle(groupSessionId, sourceMessageId, replyToMessageId, targetAgentId, event);
+        boolean handled = handle(execution, groupSessionId, sourceMessageId, replyToMessageId, targetAgentId, event);
         if (executionMapper != null && executionId != null) {
             if (handled) {
-                executionMapper.markSucceeded(executionId, null, new Date());
+                executionMapper.markSucceeded(executionId,
+                    execution == null ? null : execution.getAnswerMessageId(), new Date());
             } else if ("error".equalsIgnoreCase(eventType(event))) {
                 executionMapper.markFailed(executionId, event.getString("error_code"),
                     event.getString("content"), new Date());
@@ -253,7 +274,14 @@ public class GroupChatExecutionEventHandler {
         return "UNKNOWN";
     }
 
-    private Long persistTaskAnswer(ByaiGroupChatExecution execution, String content, JSONObject event) {
+    private GroupChatAgentMention parseMentions(ByaiGroupChatExecution execution, String content) {
+        return mentionParser == null ? new GroupChatAgentMention(content, List.of())
+            : mentionParser.parse(execution.getGroupSessionId(), execution.getTargetAgentId(), content);
+    }
+
+    private Long persistTaskAnswer(ByaiGroupChatExecution execution, GroupChatAgentMention mentions,
+        JSONObject event) {
+        String content = mentions.normalizedContent();
         if (content == null || execution.getAnswerMessageId() != null) {
             return execution.getAnswerMessageId();
         }
@@ -269,8 +297,11 @@ public class GroupChatExecutionEventHandler {
         message.setCreatorName(event == null ? null : event.getString("agentName"));
         message.setUsage(2);
         message.setIsComplete(true);
-        message.setMetadata(JSON.toJSONString(Map.of("scene", "GROUP_TASK", "dispatchId",
-            execution.getExecutionId())));
+        Map<String, Object> metadata = new HashMap<>();
+        metadata.put("scene", "GROUP_TASK");
+        metadata.put("dispatchId", execution.getExecutionId());
+        metadata.put("resourceList", mentions.resourceList());
+        message.setMetadata(JSON.toJSONString(metadata));
         message.setCreateTime(new Date());
         message.setUpdateTime(new Date());
         messageMapper.insert(message);

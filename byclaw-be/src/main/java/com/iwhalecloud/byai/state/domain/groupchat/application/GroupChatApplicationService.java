@@ -3,7 +3,10 @@ package com.iwhalecloud.byai.state.domain.groupchat.application;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import com.alibaba.fastjson.JSON;
 
@@ -32,6 +35,8 @@ import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.state.domain.session.service.SessionExtService;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatEventPublisher;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatExecutionCoordinator;
+import com.iwhalecloud.byai.state.domain.agent.enums.AgentMetaEnum;
+import com.iwhalecloud.byai.state.domain.resource.dto.ResourceVo;
 
 /** 群聊资源创建和成员管理用例。 */
 @Service
@@ -141,12 +146,13 @@ public class GroupChatApplicationService {
         members.add(member);
     }
 
-    /** 接收入站群消息并持久化；Agent 委派由后续协调器消费 mentions。 */
+    /** 接收入站群消息并持久化；Agent 委派由后续协调器消费 resourceList。 */
     @Transactional
     public Long acceptUserMessage(com.iwhalecloud.byai.state.domain.ws.model.ChatMessage command) {
         ByaiSession session = authorizationService.requireGroup(command.getSessionId());
         authorizationService.requireCurrentUserMember(session.getSessionId());
-        validateMentions(session.getSessionId(), command.getMentions());
+        Set<Long> mentionedAgentIds = validateAndResolveMemberResources(session.getSessionId(),
+            command.getResourceList());
         if (command.getClientRequestId() != null) {
             ByaiMessage existing = messageMapper.selectGroupMessageByClientRequestId(session.getSessionId(),
                 command.getClientRequestId());
@@ -168,7 +174,7 @@ public class GroupChatApplicationService {
         Map<String, Object> metadata = new HashMap<>();
         metadata.put("scene", "GROUP_CHAT");
         metadata.put("clientRequestId", command.getClientRequestId());
-        metadata.put("mentions", command.getMentions());
+        metadata.put("resourceList", command.getResourceList());
         message.setMetadata(JSON.toJSONString(metadata));
         message.setCreateTime(new Date());
         message.setUpdateTime(new Date());
@@ -182,6 +188,7 @@ public class GroupChatApplicationService {
         event.put("content", command.getChatContent());
         event.put("creatorId", CurrentUserHolder.getCurrentUserId());
         event.put("creatorName", CurrentUserHolder.getCurrentUserName());
+        event.put("resourceList", command.getResourceList());
         Map<String, Object> speaker = new HashMap<>();
         speaker.put("type", "USER");
         speaker.put("displayName", CurrentUserHolder.getCurrentUserName());
@@ -190,14 +197,8 @@ public class GroupChatApplicationService {
         event.put("messageRef", command.getReplyToMessageId());
         event.put("replyTo", buildReplySummary(session.getSessionId(), command.getReplyToMessageId()));
         eventPublisher.publish(session.getSessionId(), event, null);
-        if (command.getMentions() != null) {
-            command.getMentions().stream()
-                .filter(mention -> mention != null && MemObjType.AGENT.name().equals(mention.getType()))
-                .forEach(mention -> {
-                    executionCoordinator.enqueue(session.getSessionId(), messageId, command.getReplyToMessageId(),
-                        CurrentUserHolder.getCurrentUserId(), mention.getId(), null, messageId);
-                });
-        }
+        mentionedAgentIds.forEach(agentId -> executionCoordinator.enqueue(session.getSessionId(), messageId,
+            command.getReplyToMessageId(), CurrentUserHolder.getCurrentUserId(), agentId, null, messageId));
         return messageId;
     }
 
@@ -226,16 +227,53 @@ public class GroupChatApplicationService {
         return response;
     }
 
-    private void validateMentions(Long sessionId,
-        java.util.List<com.iwhalecloud.byai.state.domain.ws.model.ChatMessage.GroupChatMentionDto> mentions) {
-        if (mentions == null) {
-            return;
+    /**
+     * 群聊只接受成员类型资源。数字员工会触发委派，普通用户仅保留在消息资源信息中。
+     */
+    private Set<Long> validateAndResolveMemberResources(Long sessionId, List<ResourceVo> resourceList) {
+        Set<Long> agentIds = new LinkedHashSet<>();
+        Map<Long, String> referencedMemberTypes = new HashMap<>();
+        if (resourceList == null) {
+            return agentIds;
         }
-        for (com.iwhalecloud.byai.state.domain.ws.model.ChatMessage.GroupChatMentionDto mention : mentions) {
-            if (mention == null || !MemObjType.AGENT.name().equals(mention.getType()) || mention.getId() == null
-                || memberService.findSessionMember(sessionId, MemObjType.AGENT.name(), mention.getId()) == null) {
-                throw new IllegalArgumentException("Mentioned agent is not a group member");
+        for (ResourceVo resource : resourceList) {
+            if (resource == null || resource.getResourceType() == null) {
+                throw new IllegalArgumentException("Invalid group member resource");
             }
+            String memberType;
+            if (AgentMetaEnum.DIG_EMPLOYEE.equals(resource.getResourceType())) {
+                memberType = MemObjType.AGENT.name();
+            }
+            else if (AgentMetaEnum.HUMAN.equals(resource.getResourceType())) {
+                memberType = MemObjType.USER.name();
+            }
+            else {
+                throw new IllegalArgumentException("Unsupported group member resource type");
+            }
+            Long memberId = parseResourceId(resource.getResourceId());
+            String existingMemberType = referencedMemberTypes.putIfAbsent(memberId, memberType);
+            if (existingMemberType != null && !existingMemberType.equals(memberType)) {
+                throw new IllegalArgumentException("Conflicting group member resource types");
+            }
+            if (memberService.findSessionMember(sessionId, memberType, memberId) == null) {
+                throw new IllegalArgumentException("Referenced resource is not a group member");
+            }
+            if (MemObjType.AGENT.name().equals(memberType)) {
+                agentIds.add(memberId);
+            }
+        }
+        return agentIds;
+    }
+
+    private Long parseResourceId(String resourceId) {
+        if (resourceId == null || resourceId.isBlank()) {
+            throw new IllegalArgumentException("Invalid group member resource ID");
+        }
+        try {
+            return Long.valueOf(resourceId);
+        }
+        catch (NumberFormatException exception) {
+            throw new IllegalArgumentException("Invalid group member resource ID", exception);
         }
     }
 

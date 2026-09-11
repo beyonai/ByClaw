@@ -3,10 +3,13 @@ package com.iwhalecloud.byai.state.domain.groupchat;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
+import static org.assertj.core.api.Assertions.assertThat;
 
 import org.junit.jupiter.api.Test;
 
@@ -24,6 +27,14 @@ import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTaskServ
 import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatDisposition;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatDispositionReader;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
+import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatExecutionCoordinator;
+import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatAgentMention;
+import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatAgentMentionParser;
+import com.iwhalecloud.byai.state.domain.resource.dto.ResourceVo;
+import com.iwhalecloud.byai.state.domain.agent.enums.AgentMetaEnum;
+import com.iwhalecloud.byai.common.message.entity.ByaiMessage;
+import org.mockito.ArgumentCaptor;
+import java.util.List;
 
 class GroupChatExecutionEventHandlerTest {
     @Test
@@ -78,7 +89,7 @@ class GroupChatExecutionEventHandlerTest {
         when(reader.read("u1", 6L, 5L)).thenReturn(disposition);
         GroupChatExecutionEventHandler handler = new GroupChatExecutionEventHandler(messageMapper, publisher,
             mock(SequenceService.class), executionMapper, null, mock(SsResourceService.class), userService, reader,
-            taskService, candidateService, null);
+            taskService, candidateService, null, null);
         JSONObject event = new JSONObject();
         event.put("event_type", "answerDelta");
         event.put("content", "处理中");
@@ -88,5 +99,117 @@ class GroupChatExecutionEventHandlerTest {
         verify(taskService).promote(execution, "财务报告", null);
         verify(messageMapper, never()).insert(any());
         verify(publisher, never()).publish(any(), any(), any());
+    }
+
+    @Test
+    void chatNormalizesMentionsPublishesResourcesAndDispatchesChild() {
+        ByaiMessageMapper messageMapper = mock(ByaiMessageMapper.class);
+        GroupChatEventPublisher publisher = mock(GroupChatEventPublisher.class);
+        ByaiGroupChatExecutionMapper executionMapper = mock(ByaiGroupChatExecutionMapper.class);
+        GroupChatExecutionCoordinator coordinator = mock(GroupChatExecutionCoordinator.class);
+        GroupChatAgentMentionParser parser = mock(GroupChatAgentMentionParser.class);
+        SequenceService sequenceService = mock(SequenceService.class);
+        ByaiGroupChatExecution execution = execution(5L, "CHAT");
+        ResourceVo resource = resource(30L);
+        when(executionMapper.selectById(5L)).thenReturn(execution);
+        when(sequenceService.nextVal()).thenReturn(99L);
+        when(parser.parse(1L, 4L, "[@伪造](uid?=DIG_EMPLOYEE_30)"))
+            .thenReturn(new GroupChatAgentMention("{{DIG_EMPLOYEE_30}}", List.of(resource)));
+        GroupChatExecutionEventHandler handler = new GroupChatExecutionEventHandler(messageMapper, publisher,
+            sequenceService, executionMapper, coordinator, mock(SsResourceService.class), mock(UserService.class),
+            null, mock(GroupChatTaskService.class), mock(GroupChatCandidateSessionService.class), null, parser);
+        JSONObject event = new JSONObject();
+        event.put("event_type", "finalAnswer");
+        event.put("content", "[@伪造](uid?=DIG_EMPLOYEE_30)");
+
+        assertTrue(handler.handle(5L, 1L, 2L, null, 4L, event));
+
+        ArgumentCaptor<ByaiMessage> messageCaptor = ArgumentCaptor.forClass(ByaiMessage.class);
+        verify(messageMapper).insert(messageCaptor.capture());
+        assertThat(messageCaptor.getValue().getMessageContent()).isEqualTo("{{DIG_EMPLOYEE_30}}");
+        assertThat(messageCaptor.getValue().getMetadata()).contains("resourceList", "真实智能体");
+        ArgumentCaptor<JSONObject> eventCaptor = ArgumentCaptor.forClass(JSONObject.class);
+        verify(publisher).publish(eq(1L), eventCaptor.capture(), eq(null));
+        assertThat(eventCaptor.getValue().getJSONArray("resourceList")).hasSize(1);
+        verify(coordinator).enqueueChild(execution, 30L);
+        verify(executionMapper).markSucceeded(eq(5L), eq(99L), any());
+    }
+
+    @Test
+    void chatRedeliveryUsesPersistedAnswerMessageAsIdempotencyBoundary() {
+        ByaiMessageMapper messageMapper = mock(ByaiMessageMapper.class);
+        GroupChatEventPublisher publisher = mock(GroupChatEventPublisher.class);
+        ByaiGroupChatExecutionMapper executionMapper = mock(ByaiGroupChatExecutionMapper.class);
+        GroupChatExecutionCoordinator coordinator = mock(GroupChatExecutionCoordinator.class);
+        GroupChatAgentMentionParser parser = mock(GroupChatAgentMentionParser.class);
+        ByaiGroupChatExecution execution = execution(7L, "CHAT");
+        execution.setAnswerMessageId(101L);
+        when(executionMapper.selectById(7L)).thenReturn(execution);
+        GroupChatExecutionEventHandler handler = new GroupChatExecutionEventHandler(messageMapper, publisher,
+            mock(SequenceService.class), executionMapper, coordinator, mock(SsResourceService.class),
+            mock(UserService.class), null, mock(GroupChatTaskService.class),
+            mock(GroupChatCandidateSessionService.class), null, parser);
+        JSONObject event = new JSONObject();
+        event.put("event_type", "finalAnswer");
+        event.put("content", "[@智能体](uid?=DIG_EMPLOYEE_30)");
+
+        assertFalse(handler.handle(7L, 1L, 2L, null, 4L, event));
+
+        verifyNoInteractions(messageMapper, publisher, coordinator, parser);
+    }
+
+    @Test
+    void taskFinalAnswerAlsoDispatchesParsedAgentMentions() {
+        ByaiMessageMapper messageMapper = mock(ByaiMessageMapper.class);
+        GroupChatEventPublisher publisher = mock(GroupChatEventPublisher.class);
+        ByaiGroupChatExecutionMapper executionMapper = mock(ByaiGroupChatExecutionMapper.class);
+        GroupChatExecutionCoordinator coordinator = mock(GroupChatExecutionCoordinator.class);
+        GroupChatAgentMentionParser parser = mock(GroupChatAgentMentionParser.class);
+        SequenceService sequenceService = mock(SequenceService.class);
+        GroupChatTaskService taskService = mock(GroupChatTaskService.class);
+        ByaiGroupChatExecution execution = execution(6L, "TASK");
+        ResourceVo resource = resource(30L);
+        when(executionMapper.selectById(6L)).thenReturn(execution);
+        when(sequenceService.nextVal()).thenReturn(100L);
+        when(parser.parse(1L, 4L, "final"))
+            .thenReturn(new GroupChatAgentMention("{{DIG_EMPLOYEE_30}}", List.of(resource)));
+        GroupChatExecutionEventHandler handler = new GroupChatExecutionEventHandler(messageMapper, publisher,
+            sequenceService, executionMapper, coordinator, mock(SsResourceService.class), mock(UserService.class),
+            null, taskService, mock(GroupChatCandidateSessionService.class), null, parser);
+        JSONObject answer = new JSONObject();
+        answer.put("event_type", "finalAnswer");
+        answer.put("content", "final");
+        JSONObject terminal = new JSONObject();
+        terminal.put("event_type", "appStreamResponse");
+
+        assertFalse(handler.handle(6L, 1L, 2L, null, 4L, answer));
+        assertFalse(handler.handle(6L, 1L, 2L, null, 4L, terminal));
+
+        ArgumentCaptor<ByaiMessage> messageCaptor = ArgumentCaptor.forClass(ByaiMessage.class);
+        verify(messageMapper).insert(messageCaptor.capture());
+        assertThat(messageCaptor.getValue().getMessageContent()).isEqualTo("{{DIG_EMPLOYEE_30}}");
+        assertThat(messageCaptor.getValue().getMetadata()).contains("resourceList", "真实智能体");
+        verify(coordinator).enqueueChild(execution, 30L);
+    }
+
+    private ByaiGroupChatExecution execution(Long id, String disposition) {
+        ByaiGroupChatExecution execution = new ByaiGroupChatExecution();
+        execution.setExecutionId(id);
+        execution.setCandidateSessionId(60L);
+        execution.setGroupSessionId(1L);
+        execution.setSourceMessageId(2L);
+        execution.setTargetAgentId(4L);
+        execution.setInitiatorUserId(7L);
+        execution.setDisposition(disposition);
+        return execution;
+    }
+
+    private ResourceVo resource(Long id) {
+        ResourceVo resource = new ResourceVo();
+        resource.setId("DIG_EMPLOYEE_" + id);
+        resource.setResourceId(String.valueOf(id));
+        resource.setResourceName("真实智能体");
+        resource.setResourceType(AgentMetaEnum.DIG_EMPLOYEE);
+        return resource;
     }
 }
