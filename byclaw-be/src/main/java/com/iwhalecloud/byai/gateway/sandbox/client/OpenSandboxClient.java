@@ -1,12 +1,6 @@
 package com.iwhalecloud.byai.gateway.sandbox.client;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.InterruptedIOException;
-import java.nio.ByteBuffer;
-import java.nio.charset.CharacterCodingException;
-import java.nio.charset.CodingErrorAction;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Collections;
@@ -16,7 +10,6 @@ import java.util.StringJoiner;
 import java.util.TreeSet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.concurrent.TimeUnit;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -51,13 +44,9 @@ public class OpenSandboxClient {
     private static final Logger log = LoggerFactory.getLogger(OpenSandboxClient.class);
     private static final MediaType JSON_MEDIA_TYPE = MediaType.get("application/json; charset=utf-8");
     private static final Pattern PROCESS_EXIT_CODE_PATTERN = Pattern.compile("(?i)\\bcode\\s+(\\d+)\\b");
-    private static final int RAW_COMMAND_OVERHEAD_BYTES = 64 * 1024;
-    private static final int MAX_RAW_COMMAND_BYTES = 64 * 1024 * 1024;
-    private static final int MAX_COMMAND_ENDPOINT_BYTES = 8 * 1024;
 
     private final OkHttpClient httpClient;
     private final ObjectMapper objectMapper;
-    private final ObjectMapper commandEndpointMapper;
     private final SandboxProperties properties;
     private final String baseUrl;
     private final String apiKey;
@@ -82,9 +71,6 @@ public class OpenSandboxClient {
         this.objectMapper = new ObjectMapper();
         this.objectMapper.registerModule(new JavaTimeModule());
         this.objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
-        this.commandEndpointMapper = this.objectMapper.copy()
-            .enable(com.fasterxml.jackson.core.JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
-            .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
     }
 
     public CreateSandboxResponse createSandbox(CreateSandboxRequest request) {
@@ -258,15 +244,10 @@ public class OpenSandboxClient {
     public SandboxCommandResult runCommand(String sandboxId, SandboxCommandRequest request) {
         log.debug("Executing foreground command in sandbox: sandboxId={}, timeoutMs={}",
             sandboxId, request.timeout().toMillis());
-        CommandDeadline deadline = commandDeadline(request.timeout());
-        String endpoint = resolveCommandEndpoint(sandboxId, remaining(deadline));
-        Duration commandBudget = remaining(deadline);
-        String body = toJson(commandBody(request, false, Math.max(1L, commandBudget.toMillis())));
-        try (Response response = commandCallToEndpoint(endpoint, "/command", body, commandBudget)) {
-            String stream = responseBodyBounded(response, rawCommandLimit(request.maxOutputBytes()));
+        String body = toJson(commandBody(request, false));
+        try (Response response = commandCall(sandboxId, "/command", body, request.timeout())) {
+            String stream = responseBody(response);
             return parseCommandStream(stream, request.maxOutputBytes(), false);
-        } catch (InterruptedIOException e) {
-            throw new OpenSandboxCommandTimeoutException();
         } catch (IOException e) {
             throw new OpenSandboxException("Failed to execute command in sandbox " + sandboxId, e);
         }
@@ -277,15 +258,13 @@ public class OpenSandboxClient {
             sandboxId, request.timeout().toMillis());
         String body = toJson(commandBody(request, true));
         try (Response response = commandCall(sandboxId, "/command", body, request.timeout())) {
-            String stream = responseBodyBounded(response, rawCommandLimit(request.maxOutputBytes()));
+            String stream = responseBody(response);
             String processId = firstCommandId(stream);
             if (processId == null || processId.isBlank()) {
                 throw new OpenSandboxException("OpenSandbox did not return a command id");
             }
             log.debug("Background command started: sandboxId={}, processId={}", sandboxId, processId);
             return new SandboxProcessHandle(sandboxId, processId, Instant.now());
-        } catch (InterruptedIOException e) {
-            throw new OpenSandboxCommandTimeoutException();
         } catch (IOException e) {
             throw new OpenSandboxException("Failed to start command in sandbox " + sandboxId, e);
         }
@@ -358,19 +337,13 @@ public class OpenSandboxClient {
 
     private Response commandCall(String sandboxId, String path, String body, Duration timeout) throws IOException {
         String endpoint = resolveExecdEndpoint(sandboxId);
-        return commandCallToEndpoint(endpoint, path, body, timeout);
-    }
-
-    private Response commandCallToEndpoint(String endpoint, String path, String body, Duration timeout)
-            throws IOException {
         Request request = newExecdRequestBuilder(endpoint + path)
             .post(RequestBody.create(body, JSON_MEDIA_TYPE)).build();
-        okhttp3.Call call = httpClient.newCall(request);
-        call.timeout().timeout(timeout.toNanos(), TimeUnit.NANOSECONDS);
-        Response response = call.execute();
+        Response response = httpClient.newCall(request).execute();
         if (!response.isSuccessful()) {
+            String error = responseBody(response);
             response.close();
-            throw new OpenSandboxException("OpenSandbox command failed: HTTP " + response.code());
+            throw new OpenSandboxException("OpenSandbox command failed: HTTP " + response.code() + " " + error);
         }
         return response;
     }
@@ -388,106 +361,11 @@ public class OpenSandboxClient {
             : properties.getOpensandbox().getEndpointScheme() + "://" + value;
     }
 
-    private String resolveCommandEndpoint(String sandboxId, Duration timeout) {
-        String url = baseUrl + "/v1/sandboxes/" + sandboxId + "/endpoints/"
-            + properties.getOpensandbox().getExecdPort();
-        Request request = newRequestBuilder(url).get().build();
-        okhttp3.Call call = httpClient.newCall(request);
-        call.timeout().timeout(timeout.toNanos(), TimeUnit.NANOSECONDS);
-        try (Response response = call.execute()) {
-            String body;
-            try {
-                body = decodeCommandEndpoint(responseBytesBounded(response, MAX_COMMAND_ENDPOINT_BYTES));
-            } catch (OpenSandboxOutputLimitException e) {
-                throw new OpenSandboxEndpointInvalidResponseException();
-            }
-            if (!response.isSuccessful()) {
-                throw new OpenSandboxEndpointUnavailableException();
-            }
-            return parseCommandEndpoint(body);
-        } catch (InterruptedIOException e) {
-            throw new OpenSandboxCommandTimeoutException();
-        } catch (OpenSandboxException e) {
-            throw e;
-        } catch (IOException e) {
-            throw new OpenSandboxEndpointUnavailableException();
-        }
-    }
-
-    private String parseCommandEndpoint(String body) {
-        try {
-            JsonNode root = commandEndpointMapper.readTree(body);
-            if (root == null || !root.isObject()) {
-                throw new OpenSandboxEndpointInvalidResponseException();
-            }
-            java.util.Set<String> fields = new java.util.HashSet<>();
-            root.fieldNames().forEachRemaining(fields::add);
-            if (!fields.equals(java.util.Set.of("endpoint", "headers"))
-                    || !root.path("endpoint").isTextual() || !root.path("headers").isObject()) {
-                throw new OpenSandboxEndpointInvalidResponseException();
-            }
-            String value = root.path("endpoint").textValue().trim();
-            if (value.isEmpty() || value.length() > 2048 || value.chars().anyMatch(
-                    character -> character < 32 || character == 127)) {
-                throw new OpenSandboxEndpointInvalidResponseException();
-            }
-            var headers = root.path("headers").fields();
-            while (headers.hasNext()) {
-                var header = headers.next();
-                if (header.getKey().isBlank() || header.getKey().length() > 256
-                        || !header.getValue().isTextual() || header.getValue().textValue().length() > 4096) {
-                    throw new OpenSandboxEndpointInvalidResponseException();
-                }
-            }
-            String resolved = value.startsWith("http://") || value.startsWith("https://")
-                ? value : properties.getOpensandbox().getEndpointScheme() + "://" + value;
-            HttpUrl parsed = HttpUrl.parse(resolved);
-            if (parsed == null || !("http".equals(parsed.scheme()) || "https".equals(parsed.scheme()))) {
-                throw new OpenSandboxEndpointInvalidResponseException();
-            }
-            log.debug("Resolved command endpoint: sandboxIdPresent={}, endpointPort={}",
-                true, properties.getOpensandbox().getExecdPort());
-            return resolved.replaceAll("/$", "");
-        } catch (OpenSandboxEndpointInvalidResponseException e) {
-            throw e;
-        } catch (IOException | RuntimeException e) {
-            throw new OpenSandboxEndpointInvalidResponseException();
-        }
-    }
-
-    private CommandDeadline commandDeadline(Duration timeout) {
-        if (timeout == null || timeout.isZero() || timeout.isNegative()) {
-            throw new OpenSandboxCommandTimeoutException();
-        }
-        long duration;
-        try {
-            duration = timeout.toNanos();
-        } catch (ArithmeticException e) {
-            duration = Long.MAX_VALUE;
-        }
-        return new CommandDeadline(System.nanoTime(), duration);
-    }
-
-    private Duration remaining(CommandDeadline deadline) {
-        long elapsed = System.nanoTime() - deadline.startedAtNanos();
-        long nanos = deadline.timeoutNanos() - elapsed;
-        if (nanos <= 0) {
-            throw new OpenSandboxCommandTimeoutException();
-        }
-        return Duration.ofNanos(nanos);
-    }
-
-    private record CommandDeadline(long startedAtNanos, long timeoutNanos) { }
-
     private Map<String, Object> commandBody(SandboxCommandRequest request, boolean background) {
-        return commandBody(request, background, request.timeout().toMillis());
-    }
-
-    private Map<String, Object> commandBody(SandboxCommandRequest request, boolean background, long timeoutMillis) {
         return Map.of(
             "command", shellCommand(request.argv()),
             "background", background,
-            "timeout", timeoutMillis,
+            "timeout", request.timeout().toMillis(),
             "envs", request.environment());
     }
 
@@ -525,6 +403,7 @@ public class OpenSandboxClient {
         StringBuilder stderr = new StringBuilder();
         StringBuilder commandError = new StringBuilder();
         int exitCode = 0;
+        boolean truncated = false;
         try {
             for (String line : stream.split("\\R")) {
                 JsonNode node = commandEventNode(line);
@@ -548,11 +427,11 @@ public class OpenSandboxClient {
         if (stderr.isEmpty() && !commandError.isEmpty()) {
             stderr.append(commandError);
         }
-        int outputBytes = utf8Length(stdout) + utf8Length(stderr);
-        if (outputBytes > maxOutputBytes) {
-            throw new OpenSandboxOutputLimitException();
+        if (stdout.length() + stderr.length() > maxOutputBytes) {
+            truncated = true;
+            stdout.setLength(Math.min(stdout.length(), maxOutputBytes));
         }
-        return new SandboxCommandResult(exitCode, stdout.toString(), stderr.toString(), false, false);
+        return new SandboxCommandResult(exitCode, stdout.toString(), stderr.toString(), truncated, false);
     }
 
     private JsonNode commandEventNode(String line) throws IOException {
@@ -598,54 +477,6 @@ public class OpenSandboxClient {
 
     private String responseBody(Response response) throws IOException {
         return response.body() == null ? "" : response.body().string();
-    }
-
-    private String responseBodyBounded(Response response, int maximumBytes) throws IOException {
-        return new String(responseBytesBounded(response, maximumBytes), java.nio.charset.StandardCharsets.UTF_8);
-    }
-
-    private byte[] responseBytesBounded(Response response, int maximumBytes) throws IOException {
-        if (response.body() == null) {
-            return new byte[0];
-        }
-        try (InputStream input = response.body().byteStream();
-                ByteArrayOutputStream output = new ByteArrayOutputStream(Math.min(maximumBytes, 8192))) {
-            byte[] buffer = new byte[8192];
-            int total = 0;
-            int read;
-            while ((read = input.read(buffer)) != -1) {
-                if (read > maximumBytes - total) {
-                    throw new OpenSandboxOutputLimitException();
-                }
-                output.write(buffer, 0, read);
-                total += read;
-            }
-            return output.toByteArray();
-        }
-    }
-
-    private String decodeCommandEndpoint(byte[] bytes) {
-        try {
-            return java.nio.charset.StandardCharsets.UTF_8.newDecoder()
-                .onMalformedInput(CodingErrorAction.REPORT)
-                .onUnmappableCharacter(CodingErrorAction.REPORT)
-                .decode(ByteBuffer.wrap(bytes))
-                .toString();
-        } catch (CharacterCodingException e) {
-            throw new OpenSandboxEndpointInvalidResponseException();
-        }
-    }
-
-    private int rawCommandLimit(int maxOutputBytes) {
-        if (maxOutputBytes < 1) {
-            throw new IllegalArgumentException("maxOutputBytes must be positive");
-        }
-        long escaped = (long) maxOutputBytes * 6L + RAW_COMMAND_OVERHEAD_BYTES;
-        return (int) Math.min(MAX_RAW_COMMAND_BYTES, escaped);
-    }
-
-    private int utf8Length(CharSequence value) {
-        return value.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
     }
 
     private void ensureSuccessful(Response response, String body) {
@@ -849,30 +680,6 @@ public class OpenSandboxClient {
 
         public OpenSandboxException(String message, Throwable cause) {
             super(message, cause);
-        }
-    }
-
-    public static class OpenSandboxCommandTimeoutException extends OpenSandboxException {
-        public OpenSandboxCommandTimeoutException() {
-            super("OpenSandbox command timed out");
-        }
-    }
-
-    public static class OpenSandboxOutputLimitException extends OpenSandboxException {
-        public OpenSandboxOutputLimitException() {
-            super("OpenSandbox command output exceeded the configured limit");
-        }
-    }
-
-    public static class OpenSandboxEndpointUnavailableException extends OpenSandboxException {
-        public OpenSandboxEndpointUnavailableException() {
-            super("OpenSandbox command endpoint is unavailable");
-        }
-    }
-
-    public static class OpenSandboxEndpointInvalidResponseException extends OpenSandboxException {
-        public OpenSandboxEndpointInvalidResponseException() {
-            super("OpenSandbox command endpoint response is invalid");
         }
     }
 }
