@@ -24,7 +24,7 @@ import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessage;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectMemberService;
-import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectService;
+import com.iwhalecloud.byai.manager.application.service.devloop.ProjectApplicationService;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSessionMember;
 import com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper;
@@ -71,7 +71,7 @@ class GroupChatApplicationServiceResourceListTest {
         when(authorizationService.requireCurrentUserMember(GROUP_ID)).thenReturn(new ByaiSessionMember());
         when(sequenceService.nextVal()).thenReturn(MESSAGE_ID);
         service = new GroupChatApplicationService(mock(SessionService.class), sequenceService, authorizationService,
-            memberService, mock(ProjectService.class), projectMemberService, messageMapper,
+            memberService, mock(ProjectApplicationService.class), projectMemberService, messageMapper,
             executionCoordinator, eventPublisher, mock(SessionExtService.class), mentionService);
     }
 

@@ -9,6 +9,10 @@ import java.util.Map;
 import java.util.Set;
 
 import com.alibaba.fastjson.JSON;
+import com.iwhalecloud.byai.common.constants.devloop.MemberRole;
+import com.iwhalecloud.byai.manager.application.service.devloop.ProjectApplicationService;
+import com.iwhalecloud.byai.manager.dto.devloop.ProjectDTO;
+import com.iwhalecloud.byai.manager.entity.devloop.Project;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,7 +30,6 @@ import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 import com.iwhalecloud.byai.state.domain.session.service.SessionMemberService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectMemberService;
-import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectService;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessage;
 import com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSessionExt;
@@ -49,7 +52,7 @@ public class GroupChatApplicationService {
     private final SequenceService sequenceService;
     private final GroupChatAuthorizationService authorizationService;
     private final SessionMemberService memberService;
-    private final ProjectService projectService;
+    private final ProjectApplicationService projectApplicationService;
     private final ProjectMemberService projectMemberService;
     private final ByaiMessageMapper messageMapper;
     private final GroupChatExecutionCoordinator executionCoordinator;
@@ -60,14 +63,14 @@ public class GroupChatApplicationService {
     @org.springframework.beans.factory.annotation.Autowired
     public GroupChatApplicationService(SessionService sessionService, SequenceService sequenceService,
         GroupChatAuthorizationService authorizationService, SessionMemberService memberService,
-        ProjectService projectService, ProjectMemberService projectMemberService, ByaiMessageMapper messageMapper,
+        ProjectApplicationService projectApplicationService, ProjectMemberService projectMemberService, ByaiMessageMapper messageMapper,
         GroupChatExecutionCoordinator executionCoordinator, GroupChatEventPublisher eventPublisher,
         SessionExtService sessionExtService, GroupChatMentionService mentionService) {
         this.sessionService = sessionService;
         this.sequenceService = sequenceService;
         this.authorizationService = authorizationService;
         this.memberService = memberService;
-        this.projectService = projectService;
+        this.projectApplicationService = projectApplicationService;
         this.projectMemberService = projectMemberService;
         this.messageMapper = messageMapper;
         this.executionCoordinator = executionCoordinator;
@@ -78,44 +81,45 @@ public class GroupChatApplicationService {
 
     public GroupChatApplicationService(SessionService sessionService, SequenceService sequenceService,
         GroupChatAuthorizationService authorizationService, SessionMemberService memberService,
-        ProjectService projectService, ProjectMemberService projectMemberService, ByaiMessageMapper messageMapper,
+        ProjectApplicationService projectApplicationService, ProjectMemberService projectMemberService, ByaiMessageMapper messageMapper,
         GroupChatExecutionCoordinator executionCoordinator, GroupChatEventPublisher eventPublisher,
         SessionExtService sessionExtService) {
-        this(sessionService, sequenceService, authorizationService, memberService, projectService,
+        this(sessionService, sequenceService, authorizationService, memberService, projectApplicationService,
             projectMemberService, messageMapper, executionCoordinator, eventPublisher, sessionExtService, null);
     }
 
     @Transactional
     public GroupChatDetailResponse create(GroupChatCreateRequest request) {
-        if (projectService.findById(request.getProjectId()) == null) {
-            throw new IllegalArgumentException("Project not found");
-        }
         Long operatorId = CurrentUserHolder.getCurrentUserId();
-        if (operatorId == null || !operatorId.equals(projectService.findById(request.getProjectId()).getCreateBy())) {
-            throw new IllegalArgumentException("Only project administrator can create this group");
+        if (operatorId == null || operatorId <= 0) {
+            throw new IllegalArgumentException("Login required");
         }
-        validateProjectUsers(request);
+        // 复用项目创建用例，云盘、工作目录和项目 owner 均使用现有初始化流程。
+        ProjectDTO projectRequest = new ProjectDTO();
+        projectRequest.setProjectName(request.getName());
+        Project project = projectApplicationService.createProject(projectRequest);
+        Set<Long> userIds = new LinkedHashSet<>();
+        if (request.getUserIds() != null) {
+            userIds.addAll(request.getUserIds());
+        }
+        userIds.remove(operatorId);
+        projectMemberService.addMembers(project.getProjectId(), new ArrayList<>(userIds), MemberRole.MEMBER);
         ByaiSession session = new ByaiSession();
         session.setSessionId(sequenceService.nextVal());
-        session.setProjectId(request.getProjectId());
-        session.setSessionName(request.getName());
+        session.setProjectId(project.getProjectId());
+        session.setSessionName(project.getProjectName());
         session.setSessionType(SessionType.HS_AS.getCode());
-        session.setCreatorId(request.getOwnerUserId());
+        session.setCreatorId(operatorId);
         session.setEnterpriseId(CurrentUserHolder.getEnterpriseId());
         session.setCreateTime(new Date());
         session.setUpdateTime(new Date());
         sessionService.save(session);
 
         ArrayList<ByaiSessionMember> members = new ArrayList<>();
-        addMember(members, session.getSessionId(), MemObjType.USER.name(), request.getOwnerUserId(), UserRole.OWNER.name());
-        if (request.getAdminUserIds() != null) {
-            request.getAdminUserIds().forEach(id -> addMember(members, session.getSessionId(), MemObjType.USER.name(), id,
-                UserRole.ADMIN.name()));
-        }
-        if (request.getUserIds() != null) {
-            request.getUserIds().forEach(id -> addMember(members, session.getSessionId(), MemObjType.USER.name(), id,
-                UserRole.MEMBER.name()));
-        }
+        // OWNER 是群管理员权限的上位角色，同时保留转让群主和退出群聊的既有规则。
+        addMember(members, session.getSessionId(), MemObjType.USER.name(), operatorId, UserRole.OWNER.name());
+        userIds.forEach(id -> addMember(members, session.getSessionId(), MemObjType.USER.name(), id,
+            UserRole.MEMBER.name()));
         if (request.getAgentIds() != null) {
             request.getAgentIds().forEach(id -> addMember(members, session.getSessionId(), MemObjType.AGENT.name(), id,
                 UserRole.MEMBER.name()));
@@ -125,22 +129,6 @@ public class GroupChatApplicationService {
         response.setSession(session);
         response.setMembers(members);
         return response;
-    }
-
-    private void validateProjectUsers(GroupChatCreateRequest request) {
-        java.util.Set<Long> userIds = new java.util.HashSet<>();
-        userIds.add(request.getOwnerUserId());
-        if (request.getAdminUserIds() != null) {
-            userIds.addAll(request.getAdminUserIds());
-        }
-        if (request.getUserIds() != null) {
-            userIds.addAll(request.getUserIds());
-        }
-        for (Long userId : userIds) {
-            if (userId == null || !projectMemberService.isMember(request.getProjectId(), userId)) {
-                throw new IllegalArgumentException("User is not a project member");
-            }
-        }
     }
 
     private void addMember(ArrayList<ByaiSessionMember> members, Long sessionId, String type, Long id, String role) {
@@ -319,11 +307,12 @@ public class GroupChatApplicationService {
         if (!MemObjType.isValid(type) || memberId == null) {
             throw new IllegalArgumentException("Invalid group member");
         }
-        if (MemObjType.USER.name().equals(type) && !projectMemberService.isMember(session.getProjectId(), memberId)) {
-            throw new IllegalArgumentException("User is not a project member");
-        }
         if (memberService.findSessionMember(sessionId, type, memberId) != null) {
             throw new IllegalArgumentException("Member already exists");
+        }
+        // 邀请真人时补齐项目成员关系；已有成员的角色不变，数字员工不加入项目成员表。
+        if (MemObjType.USER.name().equals(type) && !projectMemberService.isMember(session.getProjectId(), memberId)) {
+            projectMemberService.addMember(session.getProjectId(), memberId, MemberRole.MEMBER);
         }
         ByaiSessionMember member = new ByaiSessionMember();
         member.setByaiSessionMemberId(sequenceService.nextVal());
