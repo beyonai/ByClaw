@@ -1,8 +1,10 @@
+import dataSource from './zh-CN/dataSource';
 import secondEdition from './zh-CN/secondEdition';
 import manager from './zh-CN/manager';
 import personalModel from '@/pages/models/locales/zh-CN';
 
 export default {
+  ...dataSource,
   ...manager,
   ...personalModel,
   'agentTeamsActivity.openPanel': '打开专家团活动面板',

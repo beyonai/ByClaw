@@ -7,6 +7,7 @@ export const ResourceTypeMap = {
   knowledgeBaseTerm: 'KG_TERM', // 知识库问答
   knowledgeFolder: 'KG_DOC_FOLDER', // 知识库文件夹
   knowledgeFile: 'KG_DOC_FILE', // 知识库文件
+  dataSource: 'DATA_SOURCE', // Reusable project data source
   database: 'KG_DB', // chatbi数据库
   doc: 'DOC', // KG_DOC,KG_QA,KG_TERM
 

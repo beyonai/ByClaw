@@ -28,6 +28,30 @@ describe('RichInput', () => {
     jest.clearAllMocks();
   });
 
+  it('serializes a data source reference into the actual send payload without connection fields', async () => {
+    const inputRef = createRef<RichInputRef>();
+    render(<RichInput ref={inputRef} chatMode={chatModeMap.expert} canQuote />);
+    const listener = mockEventEmitter.on.mock.calls.find(([eventName]) => eventName === 'queryInput-insert-item')?.[1];
+    await act(async () => {
+      listener({
+        item: {
+          resourceId: '17',
+          resourceName: 'Analytics',
+          password: 'must-not-leak',
+          config: { host: 'must-not-leak' },
+        },
+        type: ResourceType.dataSource,
+      });
+    });
+    await waitFor(() => {
+      expect(inputRef.current?.getPayload().text).toContain('{{DATA_SOURCE_17}}');
+      expect(inputRef.current?.getPayload().resourceList).toEqual([
+        expect.objectContaining({ resourceType: 'DATA_SOURCE', resourceId: '17', resourceName: 'Analytics' }),
+      ]);
+    });
+    expect(JSON.stringify(inputRef.current?.getPayload())).not.toContain('must-not-leak');
+  });
+
   it('keeps the resource quote listener stable while the input rerenders', async () => {
     const inputRef = createRef<RichInputRef>();
     const view = render(<RichInput ref={inputRef} chatMode={chatModeMap.expert} canQuote />);

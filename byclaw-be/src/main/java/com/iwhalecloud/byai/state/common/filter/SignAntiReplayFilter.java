@@ -115,6 +115,13 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
             return;
         }
 
+        // 开放资源查询使用调用用户令牌认证，不要求外部客户端持有门户签名盐。
+        // 仅豁免此 POST 路径的门户签名；全局登录拦截器和会话、项目权限校验仍然执行。
+        if (this.isExactPostRequestPath(request, "/open/api/v1/sessionResources/query")) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+
         // 例外的地址，免登录的个别地址也得配置在这里一起噢。不然可能获取不到用户code
         String servletPath = request.getServletPath();
         if (this.matches(servletPath, signProperties.getExcludeUrlList())) {
