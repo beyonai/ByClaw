@@ -84,6 +84,14 @@ class FakeImap:
         self.calls.append(("noop",))
         return "OK", [b"ready"]
 
+    def capability(self):
+        self.calls.append(("capability",))
+        return "OK", [b" ".join(c.encode() if isinstance(c, str) else c for c in self.capabilities)]
+
+    def xatom(self, name, *args):
+        self.calls.append((name, *args))
+        return "OK", [b"ID completed"]
+
     def response(self, code):
         self.calls.append(("response", code))
         if code == "UIDVALIDITY":
@@ -205,6 +213,44 @@ def configured_account(*, imap_encryption="SSL", smtp_encryption="SSL", auth_typ
 
 
 class ImapSmtpAdapterTest(unittest.TestCase):
+    def test_netease_id_precedes_readonly_mailbox_operations(self):
+        for operation in ("probe", "list", "search"):
+            with self.subTest(operation=operation):
+                value = account(provider="netease-163")
+                imap = FakeImap(capabilities=(b"IMAP4rev1", b"ID"))
+                adapter, _ = self.make_adapter(config=AccountConfig.from_mapping(value), factories=Factories(imap=imap))
+                if operation == "probe":
+                    adapter.probe_connection()
+                elif operation == "list":
+                    adapter.list_messages(ListRequest())
+                else:
+                    adapter.search_messages(SearchRequest(query="test"))
+                names = [call[0] for call in imap.calls]
+                self.assertLess(names.index("login"), names.index("ID"))
+                self.assertLess(names.index("ID"), names.index("select"))
+                self.assertIn(("ID", '("name" "ByClaw" "version" "1.0")'), imap.calls)
+                self.assertTrue(all(call[2] for call in imap.calls if call[0] == "select"))
+
+    def test_netease_id_rejection_stops_before_mailbox_access(self):
+        value = account(provider="netease-163")
+        imap = FakeImap(capabilities=("ID",))
+        imap.xatom = lambda *args: ("NO", [b"private-server-detail"])
+        adapter, _ = self.make_adapter(config=AccountConfig.from_mapping(value), factories=Factories(imap=imap))
+        with self.assertRaises(MailRuntimeError) as raised:
+            adapter.probe_connection()
+        self.assertEqual(ErrorCode.UPSTREAM_UNAVAILABLE, raised.exception.code)
+        self.assertNotIn("private-server-detail", str(raised.exception))
+        self.assertFalse(any(call[0] == "select" for call in imap.calls))
+        self.assertTrue(imap.closed)
+
+    def test_id_is_not_sent_for_qq_or_when_extension_is_absent(self):
+        for provider, capabilities in (("qq", ("ID",)), ("netease-163", ())):
+            value = account(provider=provider)
+            imap = FakeImap(capabilities=capabilities)
+            adapter, _ = self.make_adapter(config=AccountConfig.from_mapping(value), factories=Factories(imap=imap))
+            adapter.probe_connection()
+            self.assertFalse(any(call[0] == "ID" for call in imap.calls))
+
     def make_adapter(self, **kwargs):
         factories = kwargs.pop("factories", Factories())
         adapter = ImapSmtpAdapter(

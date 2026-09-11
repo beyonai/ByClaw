@@ -26,6 +26,10 @@ For projected API/IMAP mailboxes, always run `accounts` before choosing a mailbo
 - Cross-account request: run `accounts`, query each relevant account read-only, then choose from public results. Never inspect credentials.
 - Ask only for unresolved ambiguity or mutation confirmation.
 
+For NetEase 163, the IMAP runtime queries capabilities after login and sends a
+ByClaw client ID when the server advertises `ID`, before opening a mailbox.
+An ID handshake failure does not by itself mean credentials need reauthorization.
+
 ## Commands
 
 `--input-json` and attachment destinations must be absolute paths under `/by/workspace`.

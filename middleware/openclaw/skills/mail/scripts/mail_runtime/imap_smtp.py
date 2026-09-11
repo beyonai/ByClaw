@@ -456,6 +456,19 @@ class ImapSmtpAdapter:
                 raise MailRuntimeError(ErrorCode.AUTH_REQUIRED) from exc
             if not _ok(response):
                 raise MailRuntimeError(ErrorCode.AUTH_REQUIRED)
+            if self._account.provider == "netease-163":
+                # Refresh capabilities after authentication before using the ID extension.
+                response = client.capability()
+                if not _ok(response):
+                    raise MailRuntimeError(ErrorCode.UPSTREAM_UNAVAILABLE)
+                capabilities = b" ".join(
+                    item if isinstance(item, bytes) else str(item).encode("ascii")
+                    for item in response[1] if item is not None
+                ).upper().split()
+                if b"ID" in capabilities:
+                    response = client.xatom("ID", '("name" "ByClaw" "version" "1.0")')
+                    if not _ok(response):
+                        raise MailRuntimeError(ErrorCode.UPSTREAM_UNAVAILABLE)
             yield client
         except MailRuntimeError:
             raise
