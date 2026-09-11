@@ -1,8 +1,10 @@
+import dataSource from './en-US/dataSource';
 import secondEdition from './en-US/secondEdition';
 import manager from './en-US/manager';
 import personalModel from '@/pages/models/locales/en-US';
 
 export default {
+  ...dataSource,
   ...manager,
   ...personalModel,
   'agentTeamsActivity.openPanel': 'Open expert team activity panel',

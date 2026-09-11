@@ -16,7 +16,8 @@ import {
   RobotOutlined,
 } from '@ant-design/icons';
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { useIntl } from '@umijs/max';
+import ProjectDataSources from '@/components/ProjectDataSources';
+import { useIntl, useSelector } from '@umijs/max';
 import { getAgentChatAvatar } from '@/utils/agent';
 import AntdIcon from '@/components/AntdIcon';
 import { getFileIconType } from '@/constants/icon';
@@ -107,6 +108,14 @@ const ProjectResources: React.FC<Props> = ({
   repositoryRefreshVersion = 0,
 }) => {
   const intl = useIntl();
+  const currentUser = useSelector(
+    (state: { user?: { userInfo?: { userId?: string | number; id?: string | number; userCode?: string } } }) =>
+      state.user?.userInfo
+  );
+  const canManageDataSources = [currentUser?.userId, currentUser?.id, currentUser?.userCode].some(
+    (id) => id !== undefined && `${id}` === `${project.createBy}`
+  );
+  const [dataSourceRefreshKey, setDataSourceRefreshKey] = useState(0);
   const siderContentContext = useContext(SiderContentContext);
   const [files, setFiles] = useState<DevloopProjectSpaceFile[]>([]);
   const [cloudPath, setCloudPath] = useState('/');
@@ -153,7 +162,7 @@ const ProjectResources: React.FC<Props> = ({
   const isOperationProject = project.projectType === 'operation';
   const repositoryProject = supportsProjectRepositories(project.projectType);
   // 资源分类始终在同一行等宽铺满：研发 2 类、运营 5 类，默认和普通项目仅展示共享文件。
-  const resourceCategoryCount = getProjectResourceCategoryCount(project.projectType);
+  const resourceCategoryCount = getProjectResourceCategoryCount(project.projectType) + 1;
 
   const loadFiles = useCallback(async () => {
     const cloudResourceId = project.cloudResourceId;
@@ -309,6 +318,7 @@ const ProjectResources: React.FC<Props> = ({
         icon={<ReloadOutlined />}
         loading={loadingFiles || loadingRepos || loadingBoundResources}
         onClick={() => {
+          setDataSourceRefreshKey((value) => value + 1);
           void loadFiles();
           void loadRepos();
           void loadBoundResources();
@@ -901,6 +911,22 @@ const ProjectResources: React.FC<Props> = ({
               </div>
             )}
           </div>
+        </section>
+
+        <section
+          className={`${styles.resourceCategoryCard} ${
+            expandedCard === 'dataSources' ? styles.resourceCategoryCardExpanded : ''
+          }`}
+        >
+          <ProjectDataSources
+            key={project.projectId}
+            projectId={Number(project.projectId)}
+            canManage={canManageDataSources}
+            renderHeader={(actions) =>
+              renderCardHeader(intl.formatMessage({ id: 'dataSource.title' }), 'dataSources', undefined, actions)
+            }
+            refreshKey={dataSourceRefreshKey}
+          />
         </section>
 
         {repositoryProject && (

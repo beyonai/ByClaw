@@ -1,3 +1,4 @@
+import ProjectDataSources from '@/components/ProjectDataSources';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Button, Empty, Spin, Tabs } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
@@ -48,6 +49,7 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
   const resourceId = activeEmployee.resourceId || (project?.resourceId ? `${project.resourceId}` : undefined);
   const resolvedProjectId = Number(project?.projectId ?? projectId);
   const sessionFileTabKeys = useMemo(() => getSessionFileTabKeys(resolvedProjectId), [resolvedProjectId]);
+  const showDataSources = Number.isFinite(resolvedProjectId) && resolvedProjectId > 0;
   const showProjectCloudDrive = sessionFileTabKeys.includes('projectFile');
   // 项目云盘只能使用项目知识库 ID；未初始化知识库时保留空值并展示对应空态。
   const rawProjectCloudResourceId = cloudResourceId ?? project?.cloudResourceId;
@@ -85,10 +87,13 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
   }, [secondaryState.session, showCode]);
 
   useEffect(() => {
-    if (!showProjectCloudDrive && secondaryState.session === 'projectFile') {
+    if (
+      (!showProjectCloudDrive && secondaryState.session === 'projectFile') ||
+      (!showDataSources && secondaryState.session === 'dataSources')
+    ) {
       setSecondaryState((current) => ({ ...current, session: 'sharedFile' }));
     }
-  }, [secondaryState.session, showProjectCloudDrive]);
+  }, [secondaryState.session, showProjectCloudDrive, showDataSources]);
 
   const upperSecondaryItems = useMemo(() => {
     const label = (id: string) => intl.formatMessage({ id });
@@ -101,19 +106,24 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
     }
     return [
       ...sessionFileTabKeys.map((key) => ({ key, label: label(SESSION_FILE_TAB_LABEL_IDS[key]) })),
+      ...(showDataSources ? [{ key: 'dataSources', label: label('dataSource.title') }] : []),
       ...(showCode ? [{ key: 'code', label: label('chatResource.projectCode') }] : []),
     ];
-  }, [intl, sessionFileTabKeys, showCode, upperScopeKey]);
+  }, [intl, sessionFileTabKeys, showCode, showDataSources, upperScopeKey]);
 
   const upperSecondaryKey = secondaryState[upperScopeKey];
   const showSecondaryRefresh =
-    upperScopeKey === 'session' && ['file', 'sharedFile', 'projectFile', 'code'].includes(upperSecondaryKey);
+    upperScopeKey === 'session' &&
+    ['file', 'sharedFile', 'projectFile', 'code', 'dataSources'].includes(upperSecondaryKey);
   const empty = (
     <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={intl.formatMessage({ id: 'chatResource.empty' })} />
   );
 
   const upperContent = useMemo(() => {
     if (upperScopeKey === 'session') {
+      if (upperSecondaryKey === 'dataSources' && showDataSources) {
+        return <ProjectDataSources key={sessionId} sessionId={sessionId} refreshKey={sessionResourceRefreshKey} />;
+      }
       if (upperSecondaryKey === 'file') {
         return (
           <FileResourcePanel
@@ -190,6 +200,7 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
     sessionResourceRefreshKey,
     sessionId,
     showCode,
+    showDataSources,
     upperScopeKey,
     upperSecondaryKey,
   ]);

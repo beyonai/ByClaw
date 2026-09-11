@@ -24,7 +24,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * 脚本模板管理控制器 用于管理脚本模板的REST API接口
- * 
+ *
  * @author system
  * @date 2025-01-15
  */
@@ -41,7 +41,7 @@ public class DatacloudScriptTemplateController {
 
     /**
      * 分页查询脚本模板列表
-     * 
+     *
      * @param query 查询条件
      * @return 分页结果
      */
@@ -54,7 +54,7 @@ public class DatacloudScriptTemplateController {
 
     /**
      * 根据ID查询脚本模板详情
-     * 
+     *
      * @param templateId 模板ID
      * @return 模板详情
      */
@@ -68,7 +68,7 @@ public class DatacloudScriptTemplateController {
 
     /**
      * 保存脚本模板
-     * 
+     *
      * @param dto 模板信息
      * @return 保存结果
      */
@@ -81,7 +81,7 @@ public class DatacloudScriptTemplateController {
 
     /**
      * 更新脚本模板
-     * 
+     *
      * @param dto 模板信息
      * @return 更新结果
      */
@@ -94,7 +94,7 @@ public class DatacloudScriptTemplateController {
 
     /**
      * 删除脚本模板
-     * 
+     *
      * @param templateId 模板ID
      * @return 删除结果
      */
@@ -108,7 +108,7 @@ public class DatacloudScriptTemplateController {
 
     /**
      * 批量删除脚本模板
-     * 
+     *
      * @param dto 批量删除请求
      * @return 删除结果
      */
@@ -121,7 +121,7 @@ public class DatacloudScriptTemplateController {
 
     /**
      * 查询可用的脚本模板列表）
-     * 
+     *
      * @param templateType 模板类型
      * @param framework 框架类型
      * @param enterpriseId 企业ID
@@ -139,7 +139,7 @@ public class DatacloudScriptTemplateController {
 
     /**
      * 启用/禁用脚本模板
-     * 
+     *
      * @param templateId 模板ID
      * @param isActive 是否启用
      * @return 操作结果
@@ -155,7 +155,7 @@ public class DatacloudScriptTemplateController {
 
     /**
      * 检查模板名称是否重复）
-     * 
+     *
      * @param templateName 模板名称
      * @param templateId 模板ID（更新时排除自己? * @param enterpriseId 企业ID
      * @return 检查结?

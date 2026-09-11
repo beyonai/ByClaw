@@ -97,6 +97,15 @@ export default function getElementData(type: IResourceType, data: any) {
         children: [{ text: getElementDisplayText({ resourceType: type, data: { name, agentName: data.agentName } }) }],
       };
     }
+    case ResourceType.dataSource:
+      return {
+        name: data.resourceName,
+        id: data.resourceId,
+        type: ELEMENT_RESOURCE,
+        resourceType: type,
+        resourceName: data.resourceName,
+        children: [{ text: getElementDisplayText({ resourceType: type, data: { name: data.resourceName } }) }],
+      };
     case ResourceType.knowledgeBase:
     case ResourceType.tool:
     case ResourceType.OBJECT:
