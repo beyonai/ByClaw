@@ -293,6 +293,26 @@ public class GroupChatContextService {
         if (message.getResComId() != null) {
             return message.getResComId();
         }
+        // 旧群聊回复只在 metadata 中保存执行员工，不能从被 @ 的资源列表推断发言者。
+        if (StringUtils.isNotBlank(message.getMetadata())) {
+            try {
+                JSONObject metadata = JSON.parseObject(message.getMetadata());
+                if (metadata != null && "GROUP_CHAT".equals(metadata.getString("scene"))) {
+                    String targetAgentId = metadata.getString("targetAgentId");
+                    if (StringUtils.isNotBlank(targetAgentId)) {
+                        return Long.valueOf(targetAgentId);
+                    }
+                    // 旧任务回执/结果未保存 targetAgentId，其 creatorId 由群任务服务写为员工 ID。
+                    if ("TASK_ACK".equals(metadata.getString("kind"))
+                            || "TASK_RESULT".equals(metadata.getString("kind"))) {
+                        return message.getCreatorId();
+                    }
+                }
+            }
+            catch (RuntimeException ignored) {
+                // 无效旧元数据不应阻断整页历史，继续尝试原有资源字段。
+            }
+        }
         Matcher matcher = RESOURCE_ID_PATTERN.matcher(StringUtils.defaultString(message.getResComIds()));
         if (!matcher.find()) {
             return null;

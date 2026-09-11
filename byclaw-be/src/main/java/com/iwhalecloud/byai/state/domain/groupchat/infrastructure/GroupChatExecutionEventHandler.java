@@ -149,6 +149,8 @@ public class GroupChatExecutionEventHandler {
             message.setMessageRef(sourceMessageId);
             message.setMessageContent(content);
             message.setCreatorId(targetAgentId);
+            // 持久化发言员工身份，供历史和引用投影使用。
+            message.setResComId(targetAgentId);
             message.setCreatorName(event == null ? null : event.getString("agentName"));
             message.setUsage(2);
             message.setIsComplete(true);

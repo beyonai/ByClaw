@@ -62,7 +62,9 @@ class GroupChatExecutionEventHandlerTest {
         event.put("event_type", "final_answer");
         event.put("final_content", "answer");
         assertTrue(handler.handle(10L, 20L, 30L, 40L, event));
-        verify(mapper).insert(any());
+        ArgumentCaptor<ByaiMessage> saved = ArgumentCaptor.forClass(ByaiMessage.class);
+        verify(mapper).insert(saved.capture());
+        assertThat(saved.getValue().getResComId()).isEqualTo(40L);
         verify(publisher).publish(any(), any(), any());
     }
 

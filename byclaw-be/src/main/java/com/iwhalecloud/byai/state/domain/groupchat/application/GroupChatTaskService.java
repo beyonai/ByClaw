@@ -233,6 +233,8 @@ public class GroupChatTaskService {
         message.setMessageRef(task.getSourceMessageId());
         message.setMessageContent(StringUtils.defaultString(content));
         message.setCreatorId(task.getTargetAgentId());
+        // 群任务回执和结果与普通群回复使用相同的发言者身份字段。
+        message.setResComId(task.getTargetAgentId());
         SsResource agent = resourceService.findById(task.getTargetAgentId());
         message.setCreatorName(agent == null ? null : agent.getResourceName());
         message.setUsage(2);
@@ -240,6 +242,7 @@ public class GroupChatTaskService {
         Map<String, Object> metadata = new HashMap<>();
         metadata.put("scene", "GROUP_CHAT");
         metadata.put("kind", kind);
+        metadata.put("targetAgentId", task.getTargetAgentId());
         metadata.put("taskId", task.getTaskSessionId());
         metadata.put("sourceMessageId", task.getSourceMessageId());
         metadata.put("publisherUserId", "TASK_RESULT".equals(kind) ? CurrentUserHolder.getCurrentUserId() : null);

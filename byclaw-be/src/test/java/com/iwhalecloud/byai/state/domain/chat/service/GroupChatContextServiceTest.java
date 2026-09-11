@@ -165,6 +165,43 @@ class GroupChatContextServiceTest {
         assertThat(legacy.getMessages().get(1).getReplyTo().getResourceList()).isEmpty();
     }
 
+    @Test
+    void restoresLegacyGroupAgentIdentityInHistoryAndQuotedReplies() {
+        ByaiSession session = new ByaiSession();
+        session.setSessionId(3L);
+        session.setCreatorId(100L);
+        when(sessionService.findById(3L)).thenReturn(session);
+        SsResource resource = new SsResource();
+        resource.setResourceName("PPT创作助理(官方认证)");
+        when(resourceService.findById(20047408L)).thenReturn(resource);
+        ByaiMessage agent = message(10L, 2, "技能介绍", 100L);
+        agent.setMetadata("{\"scene\":\"GROUP_CHAT\",\"targetAgentId\":\"20047408\"}");
+        ByaiMessage reply = message(20L, 1, "收到", 200L);
+        reply.setMessageRef(10L);
+        when(messageMapper.selectByMessageId(10L)).thenReturn(agent);
+        when(messageMapper.selectVisibleBeforeMessageId(3L, 30L, 60)).thenReturn(Arrays.asList(reply, agent));
+        GroupChatContextRequest request = new GroupChatContextRequest();
+        request.setConversationKey("3");
+        request.setBeforeMessageId("30");
+
+        GroupChatContextResponse response = service.load(request);
+        assertThat(response.getMessages().get(0).getSpeaker().getAgentId()).isEqualTo("20047408");
+        assertThat(response.getMessages().get(0).getSpeaker().getAgentName()).isEqualTo("PPT创作助理(官方认证)");
+        assertThat(response.getMessages().get(1).getReplyTo().getSpeaker().getAgentId()).isEqualTo("20047408");
+
+        for (String kind : Arrays.asList("TASK_ACK", "TASK_RESULT")) {
+            agent.setCreatorId(20047408L);
+            agent.setMetadata("{\"scene\":\"GROUP_CHAT\",\"kind\":\"" + kind + "\"}");
+            assertThat(service.load(request).getMessages().get(0).getSpeaker().getAgentId()).isEqualTo("20047408");
+        }
+        agent.setMetadata("{\"scene\":\"GROUP_CHAT\",\"targetAgentId\":\"invalid\"}");
+        agent.setResComIds("[20047408]");
+        assertThat(service.load(request).getMessages().get(0).getSpeaker().getAgentId()).isEqualTo("20047408");
+        agent.setResComIds(null);
+        agent.setMetadata("invalid-json");
+        assertThat(service.load(request).getMessages().get(0).getSpeaker().getAgentId()).isEqualTo("unknown");
+    }
+
     private ByaiMessage message(Long messageId, int usage, String content, long createdAt) {
         ByaiMessage message = new ByaiMessage();
         message.setMessageId(messageId);
