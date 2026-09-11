@@ -90,6 +90,7 @@ class GroupChatApplicationServiceResourceListTest {
         when(memberService.findSessionMember(GROUP_ID, MemObjType.USER.name(), 601L))
             .thenReturn(new ByaiSessionMember());
         ChatMessage command = command(List.of(firstAgent, user, duplicateAgent));
+        command.setClientRequestId("broadcast-before-ack");
 
         assertThat(service.acceptUserMessage(command)).isEqualTo(MESSAGE_ID);
 
@@ -102,6 +103,7 @@ class GroupChatApplicationServiceResourceListTest {
         verify(eventPublisher).publish(eq(GROUP_ID), eventCaptor.capture(), isNull());
         JSONObject event = eventCaptor.getValue();
         assertThat(event.getJSONArray("resourceList")).hasSize(3);
+        assertThat(event.getString("clientRequestId")).isEqualTo("broadcast-before-ack");
         assertThat(event.getJSONArray("resourceList").getJSONObject(0).getString("resourceId")).isEqualTo("501");
         assertThat(event.getJSONArray("resourceList").getJSONObject(1).getString("resourceId")).isEqualTo("601");
         assertThat(event.containsKey("mentions")).isFalse();

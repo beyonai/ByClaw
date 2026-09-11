@@ -193,6 +193,8 @@ public class GroupChatApplicationService {
         event.put("creatorId", CurrentUserHolder.getCurrentUserId());
         event.put("creatorName", CurrentUserHolder.getCurrentUserName());
         event.put("resourceList", command.getResourceList());
+        // 与发送端请求关联，广播早于 ACK 时也能合并待发送消息。
+        event.put("clientRequestId", command.getClientRequestId());
         Map<String, Object> speaker = new HashMap<>();
         speaker.put("type", "USER");
         speaker.put("displayName", CurrentUserHolder.getCurrentUserName());

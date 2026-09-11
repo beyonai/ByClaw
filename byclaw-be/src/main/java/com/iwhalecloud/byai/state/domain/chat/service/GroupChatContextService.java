@@ -17,6 +17,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONArray;
+import com.alibaba.fastjson.JSONObject;
+import com.iwhalecloud.byai.state.domain.resource.dto.ResourceVo;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessage;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
@@ -184,6 +187,8 @@ public class GroupChatContextService {
             message.setSequence(index);
             message.setCreatedAt(source.getCreateTime() == null ? 0L : source.getCreateTime().getTime());
             message.setContent(StringUtils.defaultString(source.getMessageContent()));
+            message.setResourceList(toMemberResources(source.getMetadata()));
+            message.setClientRequestId(toClientRequestId(source.getMetadata()));
             message.setTarget(toTarget(source));
             message.setRole(Integer.valueOf(1).equals(source.getUsage()) ? "user" : "assistant");
             message.setSpeaker(toSpeaker(source, resources));
@@ -194,6 +199,7 @@ public class GroupChatContextService {
                     GroupChatContextResponse.ReplyReference reply = new GroupChatContextResponse.ReplyReference();
                     reply.setMessageId(String.valueOf(referenced.getMessageId()));
                     reply.setContent(StringUtils.defaultString(referenced.getMessageContent()));
+                    reply.setResourceList(toMemberResources(referenced.getMetadata()));
                     reply.setRole(Integer.valueOf(1).equals(referenced.getUsage()) ? "user" : "assistant");
                     reply.setSpeaker(toSpeaker(referenced, resources));
                     message.setReplyTo(reply);
@@ -202,6 +208,34 @@ public class GroupChatContextService {
             result.add(message);
         }
         return result;
+    }
+
+    private String toClientRequestId(String metadata) {
+        if (StringUtils.isBlank(metadata)) {
+            return null;
+        }
+        try {
+            JSONObject object = JSON.parseObject(metadata);
+            return object == null ? null : object.getString("clientRequestId");
+        }
+        catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    /** 历史资源来自入站消息保存的 metadata，旧消息缺失或损坏时保留可读正文。 */
+    private List<ResourceVo> toMemberResources(String metadata) {
+        if (StringUtils.isBlank(metadata)) {
+            return Collections.emptyList();
+        }
+        try {
+            JSONObject object = JSON.parseObject(metadata);
+            JSONArray resourceList = object == null ? null : object.getJSONArray("resourceList");
+            return resourceList == null ? Collections.emptyList() : resourceList.toJavaList(ResourceVo.class);
+        }
+        catch (RuntimeException ignored) {
+            return Collections.emptyList();
+        }
     }
 
     private GroupChatContextResponse.Target toTarget(ByaiMessage source) {

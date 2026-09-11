@@ -131,6 +131,40 @@ class GroupChatContextServiceTest {
             .hasMessageContaining("Conversation not found");
     }
 
+    @Test
+    void historyAndReplyRestoreMemberResourcesWithoutLosingLongIds() {
+        ByaiSession session = new ByaiSession();
+        session.setSessionId(3L);
+        session.setCreatorId(100L);
+        when(sessionService.findById(3L)).thenReturn(session);
+        ByaiMessage original = message(10L, 1, "{{HUMAN_9223372036854775806}} 确认下", 100L);
+        original.setMetadata("{\"clientRequestId\":\"retry-1\",\"resourceList\":[{\"id\":\"HUMAN_9223372036854775806\","
+            + "\"resourceId\":\"9223372036854775806\",\"resourceName\":\"用户A\",\"resourceType\":\"HUMAN\"}]}");
+        ByaiMessage reply = message(20L, 1, "好的", 200L);
+        reply.setMessageRef(10L);
+        reply.setMetadata("{\"resourceList\":[{\"id\":\"DIG_EMPLOYEE_3001\","
+            + "\"resourceId\":\"3001\",\"resourceName\":\"数字员工\",\"resourceType\":\"DIG_EMPLOYEE\"}]}");
+        when(messageMapper.selectByMessageId(10L)).thenReturn(original);
+        when(messageMapper.countVisibleBeforeMessageId(3L, 30L)).thenReturn(2L);
+        when(messageMapper.selectVisibleBeforeMessageId(3L, 30L, 60)).thenReturn(Arrays.asList(reply, original));
+        GroupChatContextRequest request = new GroupChatContextRequest();
+        request.setConversationKey("3");
+        request.setBeforeMessageId("30");
+        GroupChatContextResponse response = service.load(request);
+        assertThat(response.getMessages().get(0).getClientRequestId()).isEqualTo("retry-1");
+        assertThat(response.getMessages().get(0).getResourceList().get(0).getResourceId())
+            .isEqualTo("9223372036854775806");
+        assertThat(response.getMessages().get(1).getResourceList().get(0).getResourceName()).isEqualTo("数字员工");
+        assertThat(response.getMessages().get(1).getReplyTo().getResourceList().get(0).getResourceName())
+            .isEqualTo("用户A");
+        original.setMetadata("invalid-json");
+        reply.setMetadata(null);
+        GroupChatContextResponse legacy = service.load(request);
+        assertThat(legacy.getMessages().get(0).getResourceList()).isEmpty();
+        assertThat(legacy.getMessages().get(1).getResourceList()).isEmpty();
+        assertThat(legacy.getMessages().get(1).getReplyTo().getResourceList()).isEmpty();
+    }
+
     private ByaiMessage message(Long messageId, int usage, String content, long createdAt) {
         ByaiMessage message = new ByaiMessage();
         message.setMessageId(messageId);

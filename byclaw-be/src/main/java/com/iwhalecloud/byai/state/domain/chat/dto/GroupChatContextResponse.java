@@ -5,6 +5,8 @@ import java.util.List;
 
 import lombok.Data;
 
+import com.iwhalecloud.byai.state.domain.resource.dto.ResourceVo;
+
 /**
  * ByClaw BE 对外提供的群聊事实快照。消息正文只通过该受鉴权接口返回。
  */
@@ -34,6 +36,9 @@ public class GroupChatContextResponse {
     @Data
     public static class Message {
 
+        /** 关联发送队列，支持广播早于 ACK 或重连后的确认恢复。 */
+        private String clientRequestId;
+
         private String messageId;
 
         private Integer sequence;
@@ -48,6 +53,9 @@ public class GroupChatContextResponse {
 
         private String content;
 
+        /** 与实时群消息一致的成员引用，用于还原正文中的占位符。 */
+        private List<ResourceVo> resourceList = new ArrayList<>();
+
         private ReplyReference replyTo;
 
         private List<Attachment> attachments;
@@ -57,6 +65,9 @@ public class GroupChatContextResponse {
     public static class ReplyReference {
         private String messageId;
         private String content;
+
+        /** 与实时群消息一致的成员引用，用于还原正文中的占位符。 */
+        private List<ResourceVo> resourceList = new ArrayList<>();
         private String role;
         private Speaker speaker;
     }
