@@ -56,3 +56,20 @@ WHERE NOT EXISTS (
     SELECT 1 FROM byai.byai_connector_info WHERE connector_code = 'iwhalecloud-mail-web'
 );
 -- 浩鲸邮箱网页账号模板结束
+
+-- 下线 IMA OpenAPI 连接器，清理其受管参数和授权；保留 ima-web 及用户网页账号。
+-- 删除顺序保证先清理关联记录；可重复执行。
+DELETE FROM byai.po_user_private_param
+WHERE param_source = 'CONNECTOR' AND source_ref = 'ima-openapi';
+
+DELETE FROM byai.byai_connector_credential_secret
+WHERE connector_id IN (
+    SELECT connector_id FROM byai.byai_connector_info WHERE connector_code = 'ima-openapi'
+);
+
+DELETE FROM byai.byai_connector_auth
+WHERE connector_id IN (
+    SELECT connector_id FROM byai.byai_connector_info WHERE connector_code = 'ima-openapi'
+);
+
+DELETE FROM byai.byai_connector_info WHERE connector_code = 'ima-openapi';
