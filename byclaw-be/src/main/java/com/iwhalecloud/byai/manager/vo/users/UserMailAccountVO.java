@@ -45,9 +45,6 @@ public class UserMailAccountVO {
         return displayName;
     }
 
-    @JsonProperty("default")
-    private Boolean defaultAccount;
-
     private MailServerConfigDTO imap;
 
     private MailServerConfigDTO smtp;

@@ -15,20 +15,34 @@ import org.junit.jupiter.api.Test;
 class MailProviderCatalogTest {
 
     @Test
+    void removedProviderAndDefaultContractsAreAbsent() throws Exception {
+        assertThat(MailProviderCatalog.list()).extracting(MailProviderVO::getCode).doesNotContain("iwhalecloud");
+        ObjectMapper mapper = new ObjectMapper();
+        for (Object value : List.of(
+                new com.iwhalecloud.byai.manager.entity.users.UserMailAccount(),
+                new com.iwhalecloud.byai.manager.dto.users.UserMailAccountDTO(),
+                new com.iwhalecloud.byai.manager.vo.users.UserMailAccountVO())) {
+            JsonNode serialized = mapper.valueToTree(value);
+            assertThat(serialized.has("default")).isFalse();
+            assertThat(serialized.has("defaultFlag")).isFalse();
+            assertThat(serialized.has("defaultAccount")).isFalse();
+        }
+        assertThat(java.util.Arrays.stream(
+            com.iwhalecloud.byai.manager.interfaces.controller.user.UserMailAccountController.class.getDeclaredMethods())
+                .map(java.lang.reflect.Method::getName)).doesNotContain("setDefault");
+    }
+
+    @Test
     void exposesGuaranteedCapabilitiesAndConditionalDeleteStatus() {
         List<MailProviderVO> providers = MailProviderCatalog.list();
 
         assertThat(providers).extracting(MailProviderVO::getCode).containsExactly(
-            "gmail", "fastmail", "qq", "netease-163", "aliyun-mail", "microsoft-365", "iwhalecloud",
+            "gmail", "fastmail", "qq", "netease-163", "aliyun-mail", "microsoft-365",
             "custom-imap"
         );
         assertThat(MailProviderCatalog.require("gmail").getCapabilityStatus().values()).containsOnly("YES");
         assertThat(MailProviderCatalog.require("fastmail").getCapabilityStatus().values()).containsOnly("YES");
         assertThat(MailProviderCatalog.require("microsoft-365").getCapabilityStatus().values()).containsOnly("YES");
-        assertThat(MailProviderCatalog.require("iwhalecloud").getCapabilityStatus().values())
-            .containsOnly("CONDITIONAL_EWS_ENTERPRISE_AUTH_OR_BROWSER_SSO");
-        assertThat(MailProviderCatalog.require("iwhalecloud").getSetupRequirements())
-            .containsExactly("SIGN_IN_WITH_BROWSER_OR_CONFIGURE_EWS");
         for (String provider : List.of("qq", "netease-163", "aliyun-mail", "custom-imap")) {
             assertThat(MailProviderCatalog.require(provider).getCapabilities()).containsExactly(
                 "list", "get", "search", "downloadAttachment", "send", "reply");
@@ -89,11 +103,9 @@ class MailProviderCatalogTest {
 
     @Test
     void sharedProjectionFixtureMatchesCatalogCapabilityMetadata() throws Exception {
-        Path fixture = Path.of("../middleware/openclaw/skills/mail/tests/fixtures/backend_projection_accounts.json")
-            .normalize();
-        JsonNode accounts = new ObjectMapper().readTree(fixture.toFile()).path("accounts");
-
-        for (JsonNode account : accounts) {
+        for (String code : List.of("qq-mail", "netease-163-mail", "gmail-mail", "custom-imap-mail")) {
+            Path fixture = Path.of("../middleware/openclaw/skills/mail/tests/fixtures", code + ".json").normalize();
+            JsonNode account = new ObjectMapper().readTree(fixture.toFile()).path("account");
             MailProviderVO provider = MailProviderCatalog.require(account.path("provider").asText());
             assertThat(StreamSupport.stream(account.path("capabilities").spliterator(), false)
                 .map(JsonNode::asText).toList())

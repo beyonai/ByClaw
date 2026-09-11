@@ -38,15 +38,8 @@ public class MailCredentialResolver {
             return Optional.empty();
         }
         String type = account.getAuthType();
-        boolean iWhaleEnterprise = "iwhalecloud".equals(catalogProvider.getCode())
-            && ("NTLM".equals(type) || "KERBEROS".equals(type));
-        if (!catalogProvider.getAuthType().equals(type) && !iWhaleEnterprise) {
-            return Optional.empty();
-        }
-        if ("BROWSER_SSO".equals(type)) {
-            return Optional.of(ResolvedAuth.browser());
-        }
-        if ("APP_PASSWORD".equals(type) || "API_TOKEN".equals(type) || "NTLM".equals(type)) {
+        if (!catalogProvider.getAuthType().equals(type)) return Optional.empty();
+        if ("APP_PASSWORD".equals(type) || "API_TOKEN".equals(type)) {
             if (!StringUtils.hasText(account.getAuthCodeCipher())) {
                 return Optional.empty();
             }
@@ -58,10 +51,6 @@ public class MailCredentialResolver {
                 throw new MailCredentialResolutionException(
                     MailCredentialResolutionException.Code.CORRUPT_CREDENTIAL, e);
             }
-        }
-        if ("KERBEROS".equals(type)) {
-            return Optional.of(new ResolvedAuth("KERBEROS", null, null, null, null, List.of(),
-                null, null, null));
         }
         if (!"OAUTH2".equals(type) || !StringUtils.hasText(account.getCredentialRef())) {
             return Optional.empty();
@@ -117,8 +106,6 @@ public class MailCredentialResolver {
             return new ResolvedAuth("OAUTH2", null, null, token, tokenType, scopes, expiresAt, null, null);
         }
 
-        static ResolvedAuth browser() {
-            return new ResolvedAuth("BROWSER_SSO", null, null, null, null, List.of(), null, null, null);
-        }
+
     }
 }

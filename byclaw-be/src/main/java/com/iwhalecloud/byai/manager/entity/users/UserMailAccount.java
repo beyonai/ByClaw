@@ -24,8 +24,6 @@ public class UserMailAccount {
 
     private String displayName;
 
-    private String defaultFlag;
-
     private String providerCode;
 
     private Long connectorId;

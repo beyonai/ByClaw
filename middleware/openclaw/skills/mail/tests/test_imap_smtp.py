@@ -229,6 +229,12 @@ class ImapSmtpAdapterTest(unittest.TestCase):
             value["auth"] = {"type": "APP_PASSWORD", "username": "person@example.com", "secret": "secret"}
             self.assertIsInstance(registry.adapter_for(AccountConfig.from_mapping(value)), ImapSmtpAdapter)
 
+    def test_default_registry_does_not_route_iwhalecloud(self):
+        value = account(provider="iwhalecloud")
+        with self.assertRaises(MailRuntimeError) as raised:
+            build_default_registry().adapter_for(AccountConfig.from_mapping(value))
+        self.assertEqual(ErrorCode.UNSUPPORTED, raised.exception.code)
+
     def test_default_registry_routes_fastmail_api_token_to_jmap_not_imap(self):
         from mail_runtime.fastmail_jmap import FastmailJmapAdapter
 

@@ -10,7 +10,6 @@ OPENCLAW_ROOT = REPOSITORY_ROOT / 'middleware' / 'openclaw'
 SKILL_ROOT = OPENCLAW_ROOT / 'skills' / 'mail'
 SKILL = SKILL_ROOT / 'SKILL.md'
 MAILCTL = SKILL_ROOT / 'scripts' / 'mailctl.py'
-ADAPTER = OPENCLAW_ROOT / 'bycli-adapters' / 'mail.iwhalecloud.com' / 'mail.js'
 DOCKERFILE = OPENCLAW_ROOT / 'Dockerfile'
 BYCLAW_DOCKERFILE = OPENCLAW_ROOT / 'Dockerfile.byclaw'
 START_OPENCLI = OPENCLAW_ROOT / 'start-opencli.sh'
@@ -19,7 +18,6 @@ MIGRATION_WORKFLOW = REPOSITORY_ROOT / '.github' / 'workflows' / 'mail-migration
 MIGRATION_MERGER = REPOSITORY_ROOT / 'deploy' / 'migrations' / 'merge_migrations.py'
 K3S_DEPLOY = REPOSITORY_ROOT / 'deploy' / 'k3s' / 'deploy.sh'
 ENTRYPOINT = 'python3 /app/skills/mail/scripts/mailctl.py'
-ADAPTER_IMAGE_PATH = '/usr/local/share/byclaw/bycli-adapters/mail.iwhalecloud.com/mail.js'
 
 
 def assert_docker_mail_contract(testcase, dockerfile):
@@ -28,20 +26,15 @@ def assert_docker_mail_contract(testcase, dockerfile):
         r'COPY\s+middleware/openclaw/skills/\s+/app/skills/',
         'the image must copy the bundled mail skill',
     )
-    testcase.assertRegex(
-        dockerfile,
-        rf'COPY\s+middleware/openclaw/bycli-adapters/mail\.iwhalecloud\.com/mail\.js\s+\\?\s*{re.escape(ADAPTER_IMAGE_PATH)}',
-        'the managed adapter source must be available in the image',
-    )
     expected_checks = (
         'python3 /app/skills/mail/scripts/mailctl.py --help >/dev/null',
         'python3 -m compileall -q /app/skills/mail/scripts',
-        f'test -f {ADAPTER_IMAGE_PATH}',
     )
     positions = [dockerfile.find(check) for check in expected_checks]
     testcase.assertTrue(all(position >= 0 for position in positions), 'mail image build checks are incomplete')
     testcase.assertEqual(positions, sorted(positions), 'mail image build checks must run in dependency order')
     testcase.assertNotIn('/app/bycli-adapters', dockerfile)
+    testcase.assertNotIn('mail.iwhalecloud.com', dockerfile)
 
 
 def parse_markdown_policy_table(section):
@@ -103,23 +96,15 @@ class MailSkillContractTest(unittest.TestCase):
         self.assertRegex(payload.group(0), r'(?i)(text|html).{0,100}(required|at least one)')
         self.assertNotRegex(payload.group(0), r'(?i)`(?:token|cookie|password|credential)`')
 
-    def test_account_selection_matrix_always_lists_before_choosing_an_unnamed_account(self):
+    def test_account_selection_lists_then_uses_one_or_asks_for_multiple(self):
         contents = SKILL.read_text(encoding='utf-8')
         section = re.search(r'(?s)## Account selection\n(.*?)(?=\n## )', contents)
         self.assertIsNotNone(section)
-        rows = {}
-        for line in section.group(1).splitlines():
-            columns = [column.strip().strip('`') for column in line.strip().strip('|').split('|')]
-            if len(columns) == 3 and columns[0] in {'yes', 'no'} and columns[1] in {'yes', 'no', 'n/a'}:
-                rows[(columns[0], columns[1])] = columns[2].lower()
-
-        self.assertIn(('yes', 'n/a'), rows)
-        self.assertNotIn('accounts', rows[('yes', 'n/a')])
-        for case in (('no', 'yes'), ('no', 'no')):
-            self.assertIn(case, rows)
-            self.assertIn('accounts', rows[case])
-        self.assertRegex(rows[('no', 'yes')], r'(default|projected)')
-        self.assertRegex(rows[('no', 'no')], r'(ask|ambigu|multiple|none)')
+        normalized = ' '.join(section.group(1).lower().split())
+        self.assertIn('always run `accounts`', normalized)
+        self.assertRegex(normalized, r'exactly one.{0,100}automatically')
+        self.assertRegex(normalized, r'multiple.{0,150}ask')
+        self.assertNotIn('default', normalized)
 
     def test_adversarial_mail_content_cannot_supply_authority_or_override_execution(self):
         contents = SKILL.read_text(encoding='utf-8')
@@ -173,33 +158,15 @@ class MailSkillContractTest(unittest.TestCase):
     def test_dockerfile_copies_and_verifies_mail_runtime(self):
         self.assertTrue(SKILL.is_file())
         self.assertTrue(MAILCTL.is_file())
-        self.assertTrue(ADAPTER.is_file())
         for path in (DOCKERFILE, BYCLAW_DOCKERFILE):
             with self.subTest(path=path.name):
                 assert_docker_mail_contract(self, path.read_text(encoding='utf-8'))
 
         start_script = START_OPENCLI.read_text(encoding='utf-8')
-        self.assertIn(f'BYCLAW_MAIL_ADAPTER_SOURCE:={ADAPTER_IMAGE_PATH}', start_script)
-        self.assertEqual(start_script.count(ADAPTER_IMAGE_PATH), 1)
-        assignment = re.search(r'(?m)^: "\$\{BYCLAW_MAIL_ADAPTER_SOURCE:=.*\}"$', start_script)
-        self.assertIsNotNone(assignment)
-        resolved = subprocess.run(
-            ['sh', '-c', f'unset BYCLAW_MAIL_ADAPTER_SOURCE; {assignment.group(0)}; printf %s "$BYCLAW_MAIL_ADAPTER_SOURCE"'],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        self.assertEqual(ADAPTER_IMAGE_PATH, resolved.stdout)
+        self.assertNotIn('mail.iwhalecloud.com', start_script)
 
-    def test_docker_contract_detects_missing_copy_and_build_path(self):
+    def test_docker_contract_detects_missing_build_path(self):
         dockerfile = DOCKERFILE.read_text(encoding='utf-8')
-        broken_copy = re.sub(
-            re.escape(ADAPTER_IMAGE_PATH),
-            '/wrong/byclaw-mail.js',
-            dockerfile,
-        )
-        with self.assertRaises(AssertionError):
-            assert_docker_mail_contract(self, broken_copy)
         broken_check = dockerfile.replace('/app/skills/mail/scripts/mailctl.py --help', '/wrong/mailctl.py --help')
         with self.assertRaises(AssertionError):
             assert_docker_mail_contract(self, broken_check)

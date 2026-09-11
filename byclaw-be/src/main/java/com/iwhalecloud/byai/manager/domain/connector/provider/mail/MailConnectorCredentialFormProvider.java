@@ -69,7 +69,6 @@ public class MailConnectorCredentialFormProvider implements ConnectorCredentialF
         account.setAuthCodeCipher(Sm4Util.encrypt(secret));
         account.setStatus("PENDING");
         account.setDeleteFlag("0");
-        account.setDefaultFlag("N");
         if (request.getImap() != null) {
             account.setImapHost(request.getImap().getHost());
             account.setImapPort(request.getImap().getPort());

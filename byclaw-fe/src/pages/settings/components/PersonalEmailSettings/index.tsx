@@ -13,7 +13,6 @@ import {
   Select,
   Space,
   Spin,
-  Switch,
   Table,
   Tag,
   Typography,
@@ -36,7 +35,6 @@ import {
   queryMailProviders,
   queryPersonalEmailAccounts,
   savePersonalEmailAccount,
-  setDefaultPersonalEmailAccount,
 } from '@/service/personalEmail';
 import {
   ConnectorAuthorization,
@@ -55,7 +53,6 @@ const PROVIDER_NAMES: Record<string, string> = {
   'netease-163': '网易163邮箱',
   'aliyun-mail': '阿里邮箱',
   'microsoft-365': 'Outlook / Microsoft 365',
-  iwhalecloud: 'iWhaleCloud',
   'custom-imap': '自定义 IMAP',
 };
 
@@ -89,7 +86,6 @@ const REQUIREMENT_TEXT: Record<string, string> = {
   USE_AUTHORIZATION_CODE: '使用邮箱生成的授权码，不要使用登录密码',
   ADMIN_ENABLE_THIRD_PARTY_CLIENT: '请管理员开启第三方客户端访问',
   USE_SECURITY_PASSWORD: '使用阿里邮箱安全密码',
-  SIGN_IN_WITH_BROWSER_OR_CONFIGURE_EWS: '推荐浏览器登录，也可由企业管理员配置 EWS',
   PROVIDE_IMAP_SMTP_SETTINGS: '填写 IMAP/SMTP 服务器设置',
   USE_APP_PASSWORD: '建议使用应用专用密码',
 };
@@ -175,9 +171,6 @@ const capabilityText = (capability: MailCapability, status?: MailCapabilityStatu
   const name = CAPABILITY_NAMES[capability];
   if (status === 'NO') return `${name}（不支持）`;
   if (status === 'CONDITIONAL_MOVE_OR_UIDPLUS') return `${name}（需要服务器支持 MOVE 或 UIDPLUS）`;
-  if (status === 'CONDITIONAL_EWS_ENTERPRISE_AUTH_OR_BROWSER_SSO') {
-    return `${name}（需要企业 EWS 认证或浏览器登录）`;
-  }
   if (status?.startsWith('CONDITIONAL_')) return `${name}（需满足服务商条件）`;
   return name;
 };
@@ -216,7 +209,6 @@ const PersonalEmailSettings: React.FC = () => {
   const [authorization, setAuthorization] = useState<ConnectorAuthorization>();
   const [checkingAccountIds, setCheckingAccountIds] = useState<Set<string>>(new Set());
   const [mutatingAccountIds, setMutatingAccountIds] = useState<Set<string>>(new Set());
-  const [defaultMutationPending, setDefaultMutationPending] = useState(false);
   const providerRequestRef = useRef<Promise<MailProvider[]> | null>(null);
   const mountedRef = useRef(true);
   const accountsAuthoritativeRef = useRef(false);
@@ -233,12 +225,10 @@ const PersonalEmailSettings: React.FC = () => {
   const connectionPendingRef = useRef(new Set<string>());
   const connectionGenerationRef = useRef(new Map<string, number>());
   const mutationPendingRef = useRef(new Set<string>());
-  const defaultMutationPendingRef = useRef(false);
 
   const selectedProvider = providers.find((provider) => provider.code === selectedProviderCode);
   const isCustom = selectedProvider?.code === 'custom-imap';
   const isOAuth = selectedProvider?.authType === 'OAUTH2';
-  const isIWhaleCloud = selectedProvider?.code === 'iwhalecloud';
   const selectedAuthType = Form.useWatch('authType', form) || selectedProvider?.authType;
 
   const loadAccounts = async () => {
@@ -269,7 +259,6 @@ const PersonalEmailSettings: React.FC = () => {
       accountLoadGenerationRef.current += 1;
       connectionGenerationRef.current.clear();
       mutationPendingRef.current.clear();
-      defaultMutationPendingRef.current = false;
     };
   }, []);
 
@@ -336,7 +325,6 @@ const PersonalEmailSettings: React.FC = () => {
     setAdvancedOpen(false);
     setAuthorization(undefined);
     form.resetFields();
-    form.setFieldsValue({ default: accounts.length === 0 });
     setModalOpen(true);
     void loadProviders();
   };
@@ -421,7 +409,6 @@ const PersonalEmailSettings: React.FC = () => {
       providerCode: selectedProvider?.code,
       authType: values.authType || selectedProvider?.authType,
       displayName: values.displayName,
-      default: values.default,
     };
     if (isCustom) {
       payload.imap = secureServerConfig(values.imap);
@@ -611,31 +598,6 @@ const PersonalEmailSettings: React.FC = () => {
       'settings.email.deleteSuccess'
     );
 
-  const handleSetDefault = async (record: PersonalEmailAccount) => {
-    if (!record.accountId || defaultMutationPendingRef.current) return;
-    const accountKey = String(record.accountId);
-    if (mutationPendingRef.current.has(accountKey)) return;
-    defaultMutationPendingRef.current = true;
-    mutationPendingRef.current.add(accountKey);
-    setDefaultMutationPending(true);
-    setMutatingAccountIds(new Set(mutationPendingRef.current));
-    try {
-      await setDefaultPersonalEmailAccount(record.accountId);
-      if (!mountedRef.current) return;
-      message.success(intl.formatMessage({ id: 'settings.email.defaultSuccess' }));
-      await loadAccounts();
-    } catch {
-      if (mountedRef.current) message.error('邮箱账号操作失败，请稍后重试');
-    } finally {
-      defaultMutationPendingRef.current = false;
-      mutationPendingRef.current.delete(accountKey);
-      if (mountedRef.current) {
-        setDefaultMutationPending(false);
-        setMutatingAccountIds(new Set(mutationPendingRef.current));
-      }
-    }
-  };
-
   const handleConnectionCheck = async (record: PersonalEmailAccount) => {
     if (!record.accountId) return;
     const accountKey = String(record.accountId);
@@ -693,10 +655,7 @@ const PersonalEmailSettings: React.FC = () => {
         width: 180,
         render: (_, record) => (
           <div className={styles.accountCell}>
-            <Space>
-              <Text strong>{record.name}</Text>
-              {record.default ? <Tag color="blue">{intl.formatMessage({ id: 'settings.email.default' })}</Tag> : null}
-            </Space>
+            <Text strong>{record.name}</Text>
             <Text type="secondary">{record.displayName || record.display_name}</Text>
           </div>
         ),
@@ -767,17 +726,6 @@ const PersonalEmailSettings: React.FC = () => {
         fixed: 'right',
         render: (_, record) => (
           <Space>
-            {!record.default ? (
-              <Button
-                type="link"
-                size="small"
-                loading={defaultMutationPending && mutatingAccountIds.has(String(record.accountId))}
-                disabled={defaultMutationPending || checkingAccountIds.has(String(record.accountId))}
-                onClick={() => handleSetDefault(record)}
-              >
-                {intl.formatMessage({ id: 'settings.email.setDefault' })}
-              </Button>
-            ) : null}
             <Button
               type="link"
               size="small"
@@ -809,7 +757,7 @@ const PersonalEmailSettings: React.FC = () => {
         ),
       },
     ],
-    [checkingAccountIds, defaultMutationPending, intl, mutatingAccountIds, providers]
+    [checkingAccountIds, intl, mutatingAccountIds, providers]
   );
 
   const providerOptions = providers.map((provider) => ({ label: getProviderName(provider), value: provider.code }));
@@ -817,13 +765,6 @@ const PersonalEmailSettings: React.FC = () => {
   const requiresSecret =
     selectedAuthType === 'APP_PASSWORD' || selectedAuthType === 'API_TOKEN' || selectedAuthType === 'NTLM';
   const hasExistingSecret = editingAccount?.hasAuthCode && editingAccount.providerCode === selectedProvider?.code;
-  const enterpriseAuthOptions = [{ label: '浏览器登录', value: 'BROWSER_SSO' }];
-  if (advancedOpen) {
-    enterpriseAuthOptions.push(
-      { label: 'NTLM（由企业凭据服务提供）', value: 'NTLM' },
-      { label: 'Kerberos（使用当前企业身份）', value: 'KERBEROS' }
-    );
-  }
 
   return (
     <div className={styles.emailSettings}>
@@ -917,13 +858,6 @@ const PersonalEmailSettings: React.FC = () => {
               <Form.Item label={intl.formatMessage({ id: 'settings.email.displayName' })} name="displayName">
                 <Input placeholder="发件人名称" />
               </Form.Item>
-              <Form.Item
-                label={intl.formatMessage({ id: 'settings.email.default' })}
-                name="default"
-                valuePropName="checked"
-              >
-                <Switch />
-              </Form.Item>
             </div>
 
             {selectedProvider ? (
@@ -959,15 +893,6 @@ const PersonalEmailSettings: React.FC = () => {
                     return <Tag key={capability}>{capabilityText(capability, status)}</Tag>;
                   })}
                 </div>
-
-                {isIWhaleCloud ? (
-                  <>
-                    <Alert type="warning" showIcon message="浏览器登录是默认方式；连接状态检查通过前不会标记为就绪。" />
-                    <Form.Item label="企业认证方式" name="authType">
-                      <Select options={enterpriseAuthOptions} />
-                    </Form.Item>
-                  </>
-                ) : null}
 
                 {isCustom ? (
                   <>

@@ -71,62 +71,13 @@ class MailCredentialResolverTest {
         assertThat(resolver.resolve(account)).isEmpty();
     }
 
-    @Test
-    void browserSsoHasNoSecretMaterial() {
-        MailCredentialResolver resolver = new MailCredentialResolver(
-            mock(ConnectorCredentialSecretStore.class), mock(MailConnectorLookup.class));
-        MailCredentialResolver.ResolvedAuth auth = resolver.resolve(account("iwhalecloud", "BROWSER_SSO"))
-            .orElseThrow();
-        assertThat(auth.type()).isEqualTo("BROWSER_SSO");
-        assertThat(auth.secret()).isNull();
-        assertThat(auth.accessToken()).isNull();
-    }
 
-    @Test
-    void iWhaleCloudNtlmIsProjectedOnlyFromEncryptedSecret() {
-        MailCredentialResolver resolver = new MailCredentialResolver(
-            mock(ConnectorCredentialSecretStore.class), mock(MailConnectorLookup.class));
-        UserMailAccount account = account("iwhalecloud", "NTLM");
-        account.setAuthCodeCipher(Sm4Util.encrypt("enterprise-secret"));
 
-        MailCredentialResolver.ResolvedAuth auth = resolver.resolve(account).orElseThrow();
 
-        assertThat(auth.type()).isEqualTo("NTLM");
-        assertThat(auth.username()).isEqualTo("user@example.com");
-        assertThat(auth.secret()).isEqualTo("enterprise-secret");
-    }
 
-    @Test
-    void softDeletedAccountIsNeverResolvable() {
-        MailCredentialResolver resolver = new MailCredentialResolver(
-            mock(ConnectorCredentialSecretStore.class), mock(MailConnectorLookup.class));
-        UserMailAccount account = account("iwhalecloud", "BROWSER_SSO");
-        account.setDeleteFlag("1");
 
-        assertThat(resolver.resolve(account)).isEmpty();
-    }
 
-    @Test
-    void apiTokenResolvesButEveryStoredAuthTypeMustMatchCatalog() {
-        MailCredentialResolver resolver = new MailCredentialResolver(
-            mock(ConnectorCredentialSecretStore.class), mock(MailConnectorLookup.class));
-        UserMailAccount fastmail = account("fastmail", "API_TOKEN");
-        fastmail.setAuthCodeCipher(Sm4Util.encrypt("api-token"));
-        assertThat(resolver.resolve(fastmail)).get()
-            .extracting(MailCredentialResolver.ResolvedAuth::secret).isEqualTo("api-token");
 
-        UserMailAccount gmailPassword = account("gmail", "APP_PASSWORD");
-        gmailPassword.setAuthCodeCipher(Sm4Util.encrypt("must-not-project"));
-        assertThat(resolver.resolve(gmailPassword)).isEmpty();
-
-        UserMailAccount fastmailPassword = account("fastmail", "APP_PASSWORD");
-        fastmailPassword.setAuthCodeCipher(Sm4Util.encrypt("must-not-project"));
-        assertThat(resolver.resolve(fastmailPassword)).isEmpty();
-
-        assertThat(resolver.resolve(account("qq", "OAUTH2"))).isEmpty();
-        assertThat(resolver.resolve(account("qq", "BROWSER_SSO"))).isEmpty();
-        assertThat(resolver.resolve(account("iwhalecloud", "OAUTH2"))).isEmpty();
-    }
 
     @Test
     void infrastructureAndCorruptCredentialFailuresAreTypedAndSafe() {

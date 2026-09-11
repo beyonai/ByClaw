@@ -30,6 +30,39 @@ class MailPrivateParamStoreTest {
     }
 
     @Test
+    void corruptAndLegacyPayloadsDoNotBlockHealthyAccountsOrStatusUpdates() throws Exception {
+        var healthy = row("NORMAL");
+        var corrupt = row("NORMAL");
+        corrupt.setParamId(101L);
+        corrupt.setParamKey("MAIL_CONNECTOR_12");
+        corrupt.setSourceRef("gmail-mail");
+        corrupt.setParamValueCipher("invalid ciphertext");
+        when(mapper.selectList(any())).thenReturn(List.of(corrupt, healthy));
+        when(mapper.update(isNull(), any())).thenReturn(1);
+        assertThat(store.active(42L)).extracting(UserMailAccount::getAccountId).containsExactly(11L);
+        assertThat(store.ids(42L)).containsExactlyInAnyOrder(11L, 12L);
+        assertThat(store.invalidProjectionIds(42L)).containsExactly(12L);
+        assertThat(store.projectionStatus(42L, Set.of(11L), true)).containsExactly(11L);
+        var old = json.readTree(Sm4Util.decrypt(healthy.getParamValueCipher()));
+        ((com.fasterxml.jackson.databind.node.ObjectNode) old).put("defaultFlag", "Y");
+        corrupt.setParamValueCipher(Sm4Util.encrypt(json.writeValueAsString(old)));
+        assertThat(store.invalidProjectionIds(42L)).containsExactly(12L);
+        assertThat(store.active(42L)).hasSize(1);
+        corrupt.setParamValueCipher(Sm4Util.encrypt("null"));
+        assertThat(store.invalidProjectionIds(42L)).containsExactly(12L);
+        assertThat(store.active(42L)).hasSize(1);
+        assertThat(store.projectionStatus(42L, Set.of(11L, 12L), true)).containsExactly(11L);
+    }
+
+    @Test
+    void removedSpecialProviderKeyIsNeverARecognizedPrivateMailParameter() {
+        var legacy = row("NORMAL");
+        legacy.setParamKey("MAIL_PROVIDER_IWHALECLOUD");
+        legacy.setSourceRef("mail:iwhalecloud");
+        assertThat(MailPrivateParamStore.isPrivateMailParam(legacy)).isFalse();
+    }
+
+    @Test
     void connectorIdentityComesFromPrivateRowAndRevocationRemovesSecrets() {
         var row = row("NORMAL");
         when(mapper.selectList(any())).thenReturn(List.of(row));

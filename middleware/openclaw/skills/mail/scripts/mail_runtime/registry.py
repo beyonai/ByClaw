@@ -105,13 +105,11 @@ def build_default_registry() -> AdapterRegistry:
     from .fastmail_jmap import FastmailJmapAdapter
     from .imap_smtp import ImapSmtpAdapter
     from .microsoft_graph import MicrosoftGraphAdapter
-    from .iwhale_bcli import IWhaleCloudAdapter
 
     registry = AdapterRegistry()
     registry.register("gmail", GmailAdapter)
     registry.register("fastmail", FastmailJmapAdapter)
     registry.register("microsoft-365", MicrosoftGraphAdapter)
-    registry.register("iwhalecloud", IWhaleCloudAdapter)
     for provider in ("imap_smtp", "qq", "netease-163", "aliyun-mail", "custom-imap"):
         registry.register(provider, ImapSmtpAdapter)
     return registry

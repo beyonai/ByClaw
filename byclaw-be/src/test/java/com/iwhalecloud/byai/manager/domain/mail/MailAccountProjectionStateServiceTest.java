@@ -44,6 +44,20 @@ class MailAccountProjectionStateServiceTest {
     }
 
     @Test
+    void unchangedOAuthBindingDoesNotOverwriteRemoteConnectionCheckStatus() {
+        OAuthFixture fixture = oauthFixture("gmail", "gmail-mail", "google");
+        fixture.account().setEmail("person@example.com");
+        fixture.account().setCredentialRef("credential-ref");
+        when(fixture.accounts().active(any())).thenReturn(java.util.List.of(fixture.account()));
+        for (String status : java.util.List.of("AUTH_REQUIRED", "UNAVAILABLE", "PARTIAL")) {
+            fixture.account().setStatus(status);
+            assertThat(fixture.service().reconcileCurrentBindings(1001L)).isEmpty();
+            assertThat(fixture.account().getStatus()).isEqualTo(status);
+        }
+        org.mockito.Mockito.verify(fixture.accounts(), org.mockito.Mockito.never()).updateCheck(any(), any(), any());
+    }
+
+    @Test
     void everyAfterCommitDatabaseBoundaryUsesRequiresNew() {
         Set<String> required = Set.of("loadActiveSnapshot", "reconcileCurrentBindings",
             "markProjectionFailed", "markProjectionSucceeded", "recognizesMailConnector",
@@ -236,9 +250,9 @@ class MailAccountProjectionStateServiceTest {
         account.setProviderCode(providerCode);
         account.setAuthType("OAUTH2");
         return new OAuthFixture(new MailAccountProjectionStateService(accounts, connectors, connectionState,
-            secrets, new ObjectMapper()), account, authorization);
+            secrets, new ObjectMapper()), account, authorization, accounts);
     }
 
     private record OAuthFixture(MailAccountProjectionStateService service, UserMailAccount account,
-                                ConnectorAuth authorization) { }
+                                ConnectorAuth authorization, MailPrivateParamStore accounts) { }
 }

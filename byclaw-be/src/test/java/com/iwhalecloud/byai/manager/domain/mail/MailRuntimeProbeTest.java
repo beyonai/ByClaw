@@ -78,7 +78,7 @@ class MailRuntimeProbeTest {
 
     @Test
     void realOpenSandboxExecutorContractReachesProjectedAccountRuntime() throws Exception {
-        Path projection = sandboxRoot.toRealPath().resolve("by/.connector-auth/.mail/accounts.json");
+        Path projection = sandboxRoot.toRealPath().resolve("by/.connector-auth/.mail/qq-mail.json");
         Files.createDirectories(projection.getParent());
         Files.setPosixFilePermissions(projection.getParent(), PosixFilePermissions.fromString("rwx------"));
         Files.writeString(projection, projection("1001"), StandardCharsets.UTF_8);
@@ -165,10 +165,10 @@ class MailRuntimeProbeTest {
     }
 
     private static String projection(String accountId) {
-        return "{\"schemaVersion\":1,\"accounts\":[{"
+        return "{\"schemaVersion\":2,\"connectorCode\":\"qq-mail\",\"account\":{"
             + "\"accountId\":\"" + accountId + "\",\"provider\":\"qq\","
             + "\"email\":\"person@example.test\",\"displayName\":\"Work\","
-            + "\"default\":true,\"status\":\"NORMAL\","
+            + "\"status\":\"NORMAL\","
             + "\"locatorKey\":\"MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA\","
             + "\"capabilities\":[\"list\",\"get\",\"search\",\"downloadAttachment\","
             + "\"send\",\"reply\",\"delete\"],"
@@ -179,7 +179,7 @@ class MailRuntimeProbeTest {
             + "\"secret\":\"fixture-only\"},"
             + "\"server\":{\"imap\":{\"host\":\"imap.example.test\",\"port\":993,"
             + "\"encryption\":\"SSL\"},\"smtp\":{\"host\":\"smtp.example.test\","
-            + "\"port\":465,\"encryption\":\"SSL\"}}}]}";
+            + "\"port\":465,\"encryption\":\"SSL\"}}}}";
     }
 
     private UserService userService() {

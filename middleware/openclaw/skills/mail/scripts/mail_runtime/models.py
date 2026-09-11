@@ -97,7 +97,6 @@ class AccountSummary:
     provider: str
     email: str
     display_name: str
-    default: bool
     status: str
     capabilities: tuple[str, ...]
     capability_status: Mapping[str, str] = field(default_factory=dict)
@@ -110,7 +109,6 @@ class AccountSummary:
             "provider": self.provider,
             "email": self.email,
             "displayName": self.display_name,
-            "default": self.default,
             "status": self.status,
             "capabilities": list(self.capabilities),
             "capabilityStatus": dict(self.capability_status),
@@ -124,7 +122,6 @@ class AccountConfig:
     provider: str
     email: str
     display_name: str
-    default: bool
     status: str
     capabilities: tuple[str, ...]
     auth: Mapping[str, Any] = field(repr=False)
@@ -142,7 +139,7 @@ class AccountConfig:
         server = value.get("server", {})
         raw_status = value.get("capabilityStatus", {})
         raw_setup = value.get("setupRequirements", [])
-        if not isinstance(value.get("default", False), bool):
+        if "default" in value:
             raise MailRuntimeError(ErrorCode.INVALID_REQUEST)
         if not isinstance(capabilities, list) or not all(isinstance(item, str) for item in capabilities):
             raise MailRuntimeError(ErrorCode.INVALID_REQUEST)
@@ -166,7 +163,6 @@ class AccountConfig:
             provider=require_text(value.get("provider"), maximum=64),
             email=require_text(value.get("email"), maximum=320),
             display_name=require_text(value.get("displayName", ""), allow_empty=True, maximum=256),
-            default=value.get("default", False),
             status=require_text(value.get("status", "UNKNOWN"), maximum=64),
             capabilities=safe_capabilities,
             capability_status=safe_status,
@@ -182,7 +178,6 @@ class AccountConfig:
             self.provider,
             self.email,
             self.display_name,
-            self.default,
             self.status,
             self.capabilities,
             self.capability_status,
@@ -435,7 +430,7 @@ def _validate_account_summary(value: Any) -> None:
     _serialized_string(value.email, maximum=320, allow_empty=False)
     _serialized_string(value.display_name, maximum=256)
     _serialized_string(value.status, maximum=64, allow_empty=False)
-    if type(value.default) is not bool or type(value.capabilities) is not tuple:
+    if type(value.capabilities) is not tuple:
         raise MailRuntimeError(ErrorCode.INTERNAL_ERROR)
     if len(value.capabilities) > 64:
         raise MailRuntimeError(ErrorCode.INTERNAL_ERROR)

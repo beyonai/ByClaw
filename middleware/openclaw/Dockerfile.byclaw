@@ -247,6 +247,8 @@ RUN ln -s /app /app/node_modules/openclaw
 
 
 COPY middleware/openclaw/skills/ /app/skills/
+RUN python3 /app/skills/mail/scripts/mailctl.py --help >/dev/null \
+    && python3 -m compileall -q /app/skills/mail/scripts
 
 
 COPY middleware/openclaw/linux-amd64-filebrowser/filebrowser /usr/local/bin/filebrowser

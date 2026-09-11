@@ -49,7 +49,6 @@ public class MailPrivateParamStore {
         UserMailAccount account = find(userId, connector.getConnectorId());
         if (account == null) {
             account = new UserMailAccount();
-            account.setDefaultFlag(active(userId).isEmpty() ? "Y" : "N");
             account.setCreateBy(userId);
             account.setCreateTime(new Date());
         }
@@ -78,8 +77,7 @@ public class MailPrivateParamStore {
     public static boolean isPrivateMailParam(UserPrivateParam row) {
         return row != null && "CONNECTOR".equals(row.getParamSource())
             && ((row.getParamKey() != null && row.getParamKey().matches("MAIL_CONNECTOR_[0-9]+")
-                && row.getSourceRef() != null && MailProviderCatalog.findByConnectorCode(row.getSourceRef()).isPresent())
-                || ("MAIL_PROVIDER_IWHALECLOUD".equals(row.getParamKey()) && "mail:iwhalecloud".equals(row.getSourceRef())));
+                && row.getSourceRef() != null && MailProviderCatalog.findByConnectorCode(row.getSourceRef()).isPresent()));
     }
 
     public String encode(UserMailAccount account) {
@@ -99,22 +97,23 @@ public class MailPrivateParamStore {
     }
 
     private UserMailAccount decode(UserPrivateParam row) {
-        Long connectorId = row.getParamKey().startsWith(KEY_PREFIX)
-            ? Long.valueOf(row.getParamKey().substring(KEY_PREFIX.length())) : null;
+        Long connectorId = Long.valueOf(row.getParamKey().substring(KEY_PREFIX.length()));
         UserMailAccount account;
         try {
             account = row.getParamValueCipher() == null || row.getParamValueCipher().isBlank()
                 ? new UserMailAccount()
-                : json.readValue(Sm4Util.decrypt(row.getParamValueCipher()), UserMailAccount.class);
+                : json.readerFor(UserMailAccount.class)
+                    .with(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+                    .readValue(Sm4Util.decrypt(row.getParamValueCipher()));
+            if (account == null) throw new IllegalStateException("Invalid mail account document");
         } catch (Exception e) {
             throw new IllegalStateException("Invalid encrypted mail configuration for paramId=" + row.getParamId());
         }
         // Ownership and identity come from the database row, never the serialized payload.
         account.setUserId(row.getUserId());
         account.setConnectorId(connectorId);
-        account.setAccountId(connectorId == null ? row.getParamId() : connectorId);
-        account.setProviderCode(connectorId == null ? "iwhalecloud"
-            : MailProviderCatalog.findByConnectorCode(row.getSourceRef()).orElseThrow().getCode());
+        account.setAccountId(connectorId);
+        account.setProviderCode(MailProviderCatalog.findByConnectorCode(row.getSourceRef()).orElseThrow().getCode());
         account.setDeleteFlag("NORMAL".equals(row.getStatus()) ? "0" : "1");
         if (!"0".equals(account.getDeleteFlag())) account.setStatus("DELETED");
         account.setUpdateTime(row.getUpdateTime());
@@ -122,7 +121,15 @@ public class MailPrivateParamStore {
     }
 
     public List<UserMailAccount> snapshot(Long userId) {
-        return rows(userId).stream().map(this::decode).toList();
+        List<UserMailAccount> accounts = new java.util.ArrayList<>();
+        for (UserPrivateParam row : rows(userId)) {
+            try { accounts.add(decode(row)); }
+            catch (IllegalStateException invalid) {
+                // Unsupported/corrupt ciphertext is never projected or returned as an account.
+                // invalidProjectionIds retains this binding in the retry set without decoding other rows.
+            }
+        }
+        return List.copyOf(accounts);
     }
 
     public List<UserMailAccount> active(Long userId) {
@@ -136,31 +143,25 @@ public class MailPrivateParamStore {
     /** One stable account identity for each provider/connector, including repeated saves. */
     public void initialize(UserMailAccount account) {
         String code = MailProviderCatalog.require(account.getProviderCode()).getConnectorCode();
-        if (code != null) {
-            ConnectorInfo connector = connectors.selectOne(new LambdaQueryWrapper<ConnectorInfo>()
-                .eq(ConnectorInfo::getConnectorCode, code).eq(ConnectorInfo::getStatusCd, "00A").last("LIMIT 1"));
-            if (connector == null) throw new IllegalArgumentException("邮箱连接器未配置");
-            account.setConnectorId(connector.getConnectorId());
-            account.setAccountId(connector.getConnectorId());
-        } else {
-            account.setAccountId(snapshot(account.getUserId()).stream()
-                .filter(current -> current.getProviderCode().equals(account.getProviderCode()))
-                .map(UserMailAccount::getAccountId).findFirst().orElseGet(sequenceService::nextVal));
-        }
+        ConnectorInfo connector = connectors.selectOne(new LambdaQueryWrapper<ConnectorInfo>()
+            .eq(ConnectorInfo::getConnectorCode, code).eq(ConnectorInfo::getStatusCd, "00A").last("LIMIT 1"));
+        if (connector == null) throw new IllegalArgumentException("邮箱连接器未配置");
+        account.setConnectorId(connector.getConnectorId());
+        account.setAccountId(connector.getConnectorId());
     }
 
     @Transactional(rollbackFor = Exception.class)
     public void save(UserMailAccount account) {
         String code = MailProviderCatalog.require(account.getProviderCode()).getConnectorCode();
-        String key = code == null ? "MAIL_PROVIDER_IWHALECLOUD" : key(account.getConnectorId());
-        String source = code == null ? "mail:iwhalecloud" : code;
+        String key = key(account.getConnectorId());
+        String source = code;
         UserPrivateParam row = mapper.selectOne(new LambdaQueryWrapper<UserPrivateParam>()
             .eq(UserPrivateParam::getUserId, account.getUserId()).eq(UserPrivateParam::getParamKey, key)
             .eq(UserPrivateParam::getDeleteFlag, "0"));
         boolean create = row == null;
         if (create) {
             row = new UserPrivateParam();
-            row.setParamId(code == null ? account.getAccountId() : sequenceService.nextVal());
+            row.setParamId(sequenceService.nextVal());
             row.setUserId(account.getUserId());
             row.setParamKey(key);
             row.setParamSource("CONNECTOR");
@@ -189,6 +190,7 @@ public class MailPrivateParamStore {
     @Transactional(rollbackFor = Exception.class)
     public boolean updateCheck(UserMailAccount account, String observedStatus, Date observedTime) {
         for (UserPrivateParam row : rows(account.getUserId())) {
+            if (!key(account.getAccountId()).equals(row.getParamKey())) continue;
             UserMailAccount current = decode(row);
             if (!account.getAccountId().equals(current.getAccountId()) || !"0".equals(current.getDeleteFlag())) continue;
             if (!java.util.Objects.equals(observedStatus, current.getStatus())
@@ -207,8 +209,24 @@ public class MailPrivateParamStore {
     }
 
     public Set<Long> ids(Long userId) {
-        return snapshot(userId).stream().map(UserMailAccount::getAccountId)
+        return rows(userId).stream().map(row -> Long.valueOf(row.getParamKey().substring(KEY_PREFIX.length())))
             .collect(java.util.stream.Collectors.toSet());
+    }
+
+    public Set<Long> invalidProjectionIds(Long userId) {
+        Set<Long> invalid = new LinkedHashSet<>();
+        for (UserPrivateParam row : rows(userId)) {
+            try { decode(row); }
+            catch (IllegalStateException e) {
+                invalid.add(Long.valueOf(row.getParamKey().substring(KEY_PREFIX.length())));
+            }
+        }
+        return invalid;
+    }
+
+    public String connectorCode(Long userId, Long connectorId) {
+        return rows(userId).stream().filter(row -> key(connectorId).equals(row.getParamKey()))
+            .map(UserPrivateParam::getSourceRef).findFirst().orElse(null);
     }
 
     /** Independent post-commit status write; CAS protects concurrent reauthorization/revocation. */
@@ -216,8 +234,11 @@ public class MailPrivateParamStore {
     public Set<Long> projectionStatus(Long userId, Set<Long> ids, boolean failed) {
         Set<Long> changed = new LinkedHashSet<>();
         for (UserPrivateParam row : rows(userId)) {
-            UserMailAccount account = decode(row);
-            if (!ids.contains(account.getAccountId()) || !"NORMAL".equals(row.getStatus())) continue;
+            Long connectorId = Long.valueOf(row.getParamKey().substring(KEY_PREFIX.length()));
+            if (!ids.contains(connectorId) || !"NORMAL".equals(row.getStatus())) continue;
+            UserMailAccount account;
+            try { account = decode(row); }
+            catch (IllegalStateException invalid) { continue; }
             // A successful file write is not a successful remote connection check.
             if (!failed && !"PENDING".equals(account.getStatus()) && !"PROJECTION_FAILED".equals(account.getStatus())) continue;
             String status = failed ? "PROJECTION_FAILED" : MailAccountProjectionStateService.expectedProjectionStatus(account);

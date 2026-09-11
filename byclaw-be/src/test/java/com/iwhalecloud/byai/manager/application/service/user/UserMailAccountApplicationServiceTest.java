@@ -279,49 +279,9 @@ class UserMailAccountApplicationServiceTest {
         assertThat(unavailable.getCapabilityStatus()).isEmpty();
     }
 
-    @Test
-    void browserSsoAccountCanRunItsFirstCheckAfterExternalLogin() {
-        UserMailAccountDTO request = baseRequest("iwhalecloud", null);
-        service.save(request);
-        ArgumentCaptor<UserMailAccount> saved = ArgumentCaptor.forClass(UserMailAccount.class);
-        verify(mapper).save(saved.capture());
-        assertThat(saved.getValue().getStatus()).isEqualTo("AUTH_REQUIRED");
-        when(mapper.find(any(), any())).thenReturn(saved.getValue());
-        MailConnectionCheckLeaseService.Lease lease =
-            new MailConnectionCheckLeaseService.Lease(saved.getValue().getAccountId(), "owner");
-        when(checkLeaseService.tryAcquire(saved.getValue().getAccountId())).thenReturn(Optional.of(lease));
-        when(runtimeProbe.check(1001L, saved.getValue().getAccountId())).thenReturn(new MailRuntimeProbe.Result(
-            MailRuntimeProbe.Status.NORMAL, 5L, Map.of(), null));
-        when(mapper.updateCheck(any(), any(), any())).thenReturn(true);
 
-        assertThat(service.check(saved.getValue().getAccountId()).getStatus()).isEqualTo("NORMAL");
-    }
 
-    @Test
-    void kerberosAccountCanRunCheckFromAuthRequiredButPasswordAccountCannot() {
-        UserMailAccount kerberos = existingQqAccount();
-        kerberos.setProviderCode("iwhalecloud");
-        kerberos.setAuthType("KERBEROS");
-        kerberos.setStatus("AUTH_REQUIRED");
-        when(mapper.find(any(), any())).thenReturn(kerberos);
-        MailConnectionCheckLeaseService.Lease lease =
-            new MailConnectionCheckLeaseService.Lease(kerberos.getAccountId(), "owner");
-        when(checkLeaseService.tryAcquire(kerberos.getAccountId())).thenReturn(Optional.of(lease));
-        when(runtimeProbe.check(1001L, kerberos.getAccountId())).thenReturn(new MailRuntimeProbe.Result(
-            MailRuntimeProbe.Status.NORMAL, 5L, Map.of(), null));
-        when(mapper.updateCheck(any(), any(), any())).thenReturn(true);
 
-        assertThat(service.check(kerberos.getAccountId()).getStatus()).isEqualTo("NORMAL");
-
-        UserMailAccount gmailPassword = existingQqAccount();
-        gmailPassword.setProviderCode("gmail");
-        gmailPassword.setAuthType("APP_PASSWORD");
-        gmailPassword.setStatus("AUTH_REQUIRED");
-        when(mapper.find(any(), any())).thenReturn(gmailPassword);
-        assertThatThrownBy(() -> service.check(gmailPassword.getAccountId()))
-            .isInstanceOf(IllegalStateException.class)
-            .hasMessageContaining("尚未准备好");
-    }
 
     @Test
     void nonIWhaleLegacyBrowserSsoAndKerberosAccountsCannotBypassAuthRequired() {
@@ -347,18 +307,7 @@ class UserMailAccountApplicationServiceTest {
         verify(checkLeaseService, never()).tryAcquire(malformedBrowser.getAccountId());
     }
 
-    @Test
-    void iWhaleCloudAcceptsExplicitNtlmEnterpriseAuthentication() {
-        UserMailAccountDTO request = baseRequest("iwhalecloud", "enterprise-secret");
-        request.setAuthType("NTLM");
 
-        service.save(request);
-
-        ArgumentCaptor<UserMailAccount> saved = ArgumentCaptor.forClass(UserMailAccount.class);
-        verify(mapper).save(saved.capture());
-        assertThat(saved.getValue().getAuthType()).isEqualTo("NTLM");
-        assertThat(saved.getValue().getAuthCodeCipher()).isNotBlank();
-    }
 
     @Test
     void rejectsIncompleteCustomServersAndMismatchedAuthenticationType() {
@@ -586,37 +535,7 @@ class UserMailAccountApplicationServiceTest {
         verify(mapper, never()).save(any());
     }
 
-    @Test
-    void iWhaleCloudNtlmAndKerberosTransitionsNeverReuseStaleSecret() {
-        UserMailAccount existing = existingQqAccount();
-        existing.setProviderCode("iwhalecloud");
-        existing.setAuthType("NTLM");
-        existing.setAuthCodeCipher("stale-ciphertext");
-        existing.setAuthCodeLast4("old4");
-        when(mapper.find(any(), any())).thenReturn(existing);
 
-        UserMailAccountDTO kerberos = baseRequest("iwhalecloud", null);
-        kerberos.setAccountId(existing.getAccountId());
-        kerberos.setAuthType("KERBEROS");
-        service.save(kerberos);
-        assertThat(existing.getAuthType()).isEqualTo("KERBEROS");
-        assertThat(existing.getAuthCodeCipher()).isNull();
-        assertThat(existing.getAuthCodeLast4()).isNull();
-
-        existing.setAuthCodeCipher("must-not-be-reused");
-        UserMailAccountDTO missingNtlm = baseRequest("iwhalecloud", null);
-        missingNtlm.setAccountId(existing.getAccountId());
-        missingNtlm.setAuthType("NTLM");
-        assertThatThrownBy(() -> service.save(missingNtlm))
-            .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("授权码");
-
-        UserMailAccountDTO freshNtlm = baseRequest("iwhalecloud", "fresh-ntlm-secret");
-        freshNtlm.setAccountId(existing.getAccountId());
-        freshNtlm.setAuthType("NTLM");
-        service.save(freshNtlm);
-        assertThat(existing.getAuthCodeCipher()).isNotBlank().isNotEqualTo("must-not-be-reused");
-        assertThat(existing.getAuthCodeLast4()).isEqualTo("cret");
-    }
 
     @Test
     void saveRefreshesRedisOnlyAfterTransactionCommit() {
@@ -690,41 +609,9 @@ class UserMailAccountApplicationServiceTest {
         }
     }
 
-    @Test
-    void setDefaultProjectsOnlyAfterCommit() {
-        UserMailAccount existing = existingCustomAccount();
-        when(mapper.find(any(), any())).thenReturn(existing);
-        TransactionSynchronizationManager.initSynchronization();
-        try {
-            service.setDefault(accountIdRequest(existing.getAccountId()));
-            verify(projectionService, never()).sync(any(), any());
 
-            TransactionSynchronizationManager.getSynchronizations()
-                .forEach(TransactionSynchronization::afterCommit);
 
-            verify(projectionService).sync(1001L, Set.of(existing.getAccountId()));
-        } finally {
-            TransactionSynchronizationManager.clearSynchronization();
-        }
-    }
 
-    @Test
-    void setDefaultProjectionFailureMarksChangedAccountAndRefreshesRedis() {
-        UserMailAccount existing = existingCustomAccount();
-        when(mapper.find(any(), any())).thenReturn(existing);
-        doThrow(new IllegalStateException("write failed")).when(projectionService)
-            .sync(1001L, Set.of(existing.getAccountId()));
-        TransactionSynchronizationManager.initSynchronization();
-        try {
-            service.setDefault(accountIdRequest(existing.getAccountId()));
-            TransactionSynchronizationManager.getSynchronizations()
-                .forEach(TransactionSynchronization::afterCommit);
-
-            verify(projectionService).sync(1001L, Set.of(existing.getAccountId()));
-        } finally {
-            TransactionSynchronizationManager.clearSynchronization();
-        }
-    }
 
     @Test
     void nullProviderOnLegacyEntityIsExposedAsCustomImap() {
@@ -826,7 +713,6 @@ class UserMailAccountApplicationServiceTest {
         account.setUserId(1001L);
         account.setAccountName("Legacy mail");
         account.setEmail("legacy@example.com");
-        account.setDefaultFlag("N");
         account.setImapHost("imap.example.com");
         account.setImapPort(993);
         account.setImapEncryption("tls");

@@ -19,7 +19,6 @@ fi
 : "${OPENCLI_COMMAND_TIMEOUT:=3}"
 : "${BYCLI_CONFIG_DIR:=/by/.bycli}"
 : "${BYCLI_TRUSTED_GID:=$(id -g)}"
-: "${BYCLAW_MAIL_ADAPTER_SOURCE:=/usr/local/share/byclaw/bycli-adapters/mail.iwhalecloud.com/mail.js}"
 
 case "${BYCLI_CONFIG_DIR}" in
   /*) ;;
@@ -73,13 +72,12 @@ if ! command -v bycli >/dev/null 2>&1; then
   exit 0
 fi
 
-python3 - "${BYCLI_CONFIG_DIR}" "${BYCLAW_MAIL_ADAPTER_SOURCE}" "${BYCLI_TRUSTED_GID}" <<'PY'
+python3 - "${BYCLI_CONFIG_DIR}" "${BYCLI_TRUSTED_GID}" <<'PY'
 import os
-import secrets
 import stat
 import sys
 
-config_path, source_path, trusted_gid_text = sys.argv[1:]
+config_path, trusted_gid_text = sys.argv[1:]
 if not trusted_gid_text.isdecimal():
     raise PermissionError("invalid trusted byCLI group")
 trusted_gid = int(trusted_gid_text)
@@ -116,16 +114,6 @@ def open_directory(path, create=False):
         os.close(current)
         raise
 
-def open_file(path):
-    parts = components(path)
-    if not parts:
-        raise PermissionError("unsafe source")
-    parent = open_directory("/" + "/".join(parts[:-1]))
-    try:
-        return os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW, dir_fd=parent)
-    finally:
-        os.close(parent)
-
 config_fd = open_directory(config_path, create=True)
 def secure_shared(fd, mode):
     current = os.fstat(fd)
@@ -148,60 +136,9 @@ for name in ("clis", "sites", ".recorder-drafts"):
     child_fd = os.open(name, flags, dir_fd=config_fd)
     secure_shared(child_fd, 0o2770)
     child_fds[name] = child_fd
-clis_fd = child_fds["clis"]
-managed_fd = None
-temporary = None
 try:
-    try:
-        os.mkdir("mail.iwhalecloud.com", 0o700, dir_fd=clis_fd)
-    except FileExistsError:
-        pass
-    managed_fd = os.open("mail.iwhalecloud.com", flags, dir_fd=clis_fd)
-    managed_stat = os.fstat(managed_fd)
-    if not stat.S_ISDIR(managed_stat.st_mode):
-        raise PermissionError("unsafe managed adapter directory")
-    secure_shared(managed_fd, 0o2770)
-    try:
-        target_stat = os.stat("byclaw-mail.js", dir_fd=managed_fd, follow_symlinks=False)
-        if not stat.S_ISREG(target_stat.st_mode) or target_stat.st_gid != trusted_gid or target_stat.st_mode & 0o027:
-            raise PermissionError("unsafe managed adapter target")
-    except FileNotFoundError:
-        pass
-    source_fd = open_file(source_path)
-    try:
-        if not stat.S_ISREG(os.fstat(source_fd).st_mode):
-            raise PermissionError("unsafe managed adapter source")
-        temporary = f".byclaw-mail.{secrets.token_hex(12)}"
-        output_fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                            0o640, dir_fd=managed_fd)
-        try:
-            while True:
-                chunk = os.read(source_fd, 65536)
-                if not chunk:
-                    break
-                view = memoryview(chunk)
-                while view:
-                    written = os.write(output_fd, view)
-                    if written <= 0:
-                        raise OSError("short managed-adapter write")
-                    view = view[written:]
-            os.fsync(output_fd)
-            os.fchmod(output_fd, 0o640)
-        finally:
-            os.close(output_fd)
-    finally:
-        os.close(source_fd)
-    os.rename(temporary, "byclaw-mail.js", src_dir_fd=managed_fd, dst_dir_fd=managed_fd)
-    os.fsync(managed_fd)
-    temporary = None
+    os.fsync(config_fd)
 finally:
-    if temporary is not None and managed_fd is not None:
-        try:
-            os.unlink(temporary, dir_fd=managed_fd)
-        except FileNotFoundError:
-            pass
-    if managed_fd is not None:
-        os.close(managed_fd)
     for child_fd in child_fds.values():
         os.close(child_fd)
     os.close(config_fd)

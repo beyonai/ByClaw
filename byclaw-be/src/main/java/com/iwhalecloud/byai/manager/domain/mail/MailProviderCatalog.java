@@ -39,8 +39,6 @@ public final class MailProviderCatalog {
             List.of("ADMIN_ENABLE_THIRD_PARTY_CLIENT", "USE_SECURITY_PASSWORD")),
         nativeProvider("microsoft-365", "Microsoft 365", "GRAPH", "OAUTH2", null, null,
             "microsoft-mail", false, List.of("AUTHORIZE_OAUTH2")),
-        conditionalNativeProvider("iwhalecloud", "iWhaleCloud", "EXCHANGE_EWS_OWA", "BROWSER_SSO",
-            List.of("SIGN_IN_WITH_BROWSER_OR_CONFIGURE_EWS")),
         provider(CUSTOM_IMAP, "Custom IMAP", "IMAP_SMTP", "APP_PASSWORD", null, null, "custom-imap-mail", true,
             List.of("PROVIDE_IMAP_SMTP_SETTINGS", "USE_APP_PASSWORD"))
     );
@@ -83,15 +81,6 @@ public final class MailProviderCatalog {
         boolean advancedServerEditable, List<String> setupRequirements) {
         return new MailProviderVO(code, name, transport, authType, imap, smtp, connectorCode,
             NATIVE_CAPABILITIES, yesStatus(NATIVE_CAPABILITIES), setupRequirements, advancedServerEditable);
-    }
-
-    private static MailProviderVO conditionalNativeProvider(String code, String name, String transport,
-        String authType, List<String> setupRequirements) {
-        Map<String, String> status = new LinkedHashMap<>();
-        NATIVE_CAPABILITIES.forEach(capability ->
-            status.put(capability, "CONDITIONAL_EWS_ENTERPRISE_AUTH_OR_BROWSER_SSO"));
-        return new MailProviderVO(code, name, transport, authType, null, null, null,
-            NATIVE_CAPABILITIES, status, setupRequirements, false);
     }
 
     private static Map<String, String> yesStatus(List<String> capabilities) {

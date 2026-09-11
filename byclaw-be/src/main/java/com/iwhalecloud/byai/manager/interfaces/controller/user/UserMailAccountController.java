@@ -46,8 +46,4 @@ public class UserMailAccountController {
         return ResponseUtil.successResponse("邮箱账号删除成功", userMailAccountApplicationService.delete(request));
     }
 
-    @PostMapping("/setDefault")
-    public ResponseUtil<UserMailAccountVO> setDefault(@RequestBody UserMailAccountDTO request) {
-        return ResponseUtil.successResponse("默认邮箱账号设置成功", userMailAccountApplicationService.setDefault(request));
-    }
 }

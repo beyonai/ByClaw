@@ -57,7 +57,6 @@ public class MailAccountMetadataCacheTransactionService {
         item.put("name", account.getAccountName());
         item.put("email", account.getEmail());
         item.put("display_name", account.getDisplayName());
-        item.put("default", "Y".equals(account.getDefaultFlag()));
         item.put("provider_code", provider.getCode());
         item.put("auth_type", org.apache.commons.lang3.StringUtils.defaultIfBlank(
             account.getAuthType(), provider.getAuthType()));

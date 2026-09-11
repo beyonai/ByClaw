@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 2,
+  "connectorCode": "custom-imap-mail",
+  "account": {
+    "accountId": "4",
+    "provider": "custom-imap",
+    "email": "fixture@example.invalid",
+    "displayName": "Fixture",
+    "status": "NORMAL",
+    "locatorKey": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA",
+    "capabilities": [
+      "list",
+      "get",
+      "search",
+      "downloadAttachment",
+      "send",
+      "reply"
+    ],
+    "capabilityStatus": {
+      "list": "YES",
+      "get": "YES",
+      "search": "YES",
+      "downloadAttachment": "YES",
+      "send": "YES",
+      "reply": "YES",
+      "delete": "CONDITIONAL_MOVE_OR_UIDPLUS"
+    },
+    "setupRequirements": [
+      "PROVIDE_IMAP_SMTP_SETTINGS",
+      "USE_APP_PASSWORD"
+    ],
+    "auth": {
+      "type": "APP_PASSWORD",
+      "username": "fixture@example.invalid",
+      "secret": "fixture-only"
+    },
+    "server": {
+      "imap": {
+        "host": "imap.example.invalid",
+        "port": 993,
+        "encryption": "SSL"
+      },
+      "smtp": {
+        "host": "smtp.example.invalid",
+        "port": 465,
+        "encryption": "SSL"
+      }
+    }
+  }
+}

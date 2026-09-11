@@ -38,10 +38,6 @@ public class UserMailAccountApplicationService {
 
     private static final Logger log = LoggerFactory.getLogger(UserMailAccountApplicationService.class);
 
-    private static final String YES = "Y";
-
-    private static final String NO = "N";
-
     private static final String NORMAL = "NORMAL";
 
     private static final String AUTH_REQUIRED = "AUTH_REQUIRED";
@@ -103,7 +99,7 @@ public class UserMailAccountApplicationService {
             throw new IllegalArgumentException("邮箱账号不存在或无权限访问");
         }
         String observedStatus = account.getStatus();
-        if (!isReadyForConnectionCheck(account, observedStatus)) {
+        if (!isReadyForConnectionCheck(observedStatus)) {
             throw new IllegalStateException("邮箱账号尚未准备好连接检查");
         }
         Date observedUpdateTime = account.getUpdateTime();
@@ -204,19 +200,7 @@ public class UserMailAccountApplicationService {
         else if (create) {
             entity.setStatus(requiresExternalAuthorization(selectedAuthType) ? AUTH_REQUIRED : NORMAL);
         }
-        if ("KERBEROS".equals(selectedAuthType)) {
-            entity.setAuthCodeCipher(null);
-            entity.setAuthCodeLast4(null);
-            entity.setCredentialRef(null);
-            entity.setStatus(NORMAL);
-        }
         mailAccountProjectionService.bindAvailableOAuth(entity);
-
-        boolean shouldDefault = Boolean.TRUE.equals(request.getDefaultAccount()) || isFirstAccount(userId, entity.getAccountId());
-        entity.setDefaultFlag(shouldDefault ? YES : NO);
-        if (shouldDefault) {
-            clearOtherDefault(userId, entity.getAccountId(), now);
-        }
 
         mailPrivateParamStore.save(entity);
         scheduleStateRefresh(userId, entity.getAccountId());
@@ -224,7 +208,7 @@ public class UserMailAccountApplicationService {
     }
 
     /**
-     * 软删除邮箱账号；如果删除的是默认账号，自动把剩余最新账号设为默认。
+     * 软删除邮箱账号并移除其凭据投影。
      */
     @Transactional(rollbackFor = Exception.class)
     public Boolean delete(UserMailAccountDTO request) {
@@ -235,50 +219,19 @@ public class UserMailAccountApplicationService {
         Long userId = currentUserId();
         UserMailAccount account = getOwnedAccount(userId, accountId);
         Date now = new Date();
-        boolean wasDefault = YES.equals(account.getDefaultFlag());
         UserMailAccount update = account;
         update.setStatus(DELETED);
         update.setDeleteFlag(DELETE_FLAG_DELETED);
-        update.setDefaultFlag(NO);
         update.setUpdateBy(userId);
         update.setUpdateTime(now);
         mailPrivateParamStore.save(update);
-        if (wasDefault) {
-            ensureOneDefault(userId, now);
-        }
         scheduleStateRefresh(userId, accountId);
         return Boolean.TRUE;
     }
 
-    /**
-     * 设置默认邮箱账号，同一用户只保留一个默认账号。
-     */
-    @Transactional(rollbackFor = Exception.class)
-    public UserMailAccountVO setDefault(UserMailAccountDTO request) {
-        Long accountId = request == null ? null : request.getAccountId();
-        if (accountId == null) {
-            throw new IllegalArgumentException("邮箱账号ID不能为空");
-        }
-        Long userId = currentUserId();
-        UserMailAccount account = getOwnedAccount(userId, accountId);
-        Date now = new Date();
-        clearOtherDefault(userId, accountId, now);
-        UserMailAccount update = account;
-        update.setDefaultFlag(YES);
-        update.setUpdateBy(userId);
-        update.setUpdateTime(now);
-        mailPrivateParamStore.save(update);
-        account.setDefaultFlag(YES);
-        account.setUpdateTime(now);
-        scheduleStateRefresh(userId, accountId);
-        return toVo(account);
-    }
-
     private List<UserMailAccount> listAccounts(Long userId) {
         return mailPrivateParamStore.active(userId).stream()
-            .sorted(java.util.Comparator.comparing(UserMailAccount::getDefaultFlag,
-                java.util.Comparator.nullsLast(java.util.Comparator.reverseOrder()))
-                .thenComparing(UserMailAccount::getUpdateTime,
+            .sorted(java.util.Comparator.comparing(UserMailAccount::getUpdateTime,
                     java.util.Comparator.nullsLast(java.util.Comparator.reverseOrder()))
                 .thenComparing(UserMailAccount::getCreateTime,
                     java.util.Comparator.nullsLast(java.util.Comparator.reverseOrder())))
@@ -315,10 +268,8 @@ public class UserMailAccountApplicationService {
 
     private void validateProviderRequest(UserMailAccountDTO request, MailProviderVO provider) {
         String requestedAuthType = StringUtils.trim(request.getAuthType());
-        boolean iWhaleEnterprise = "iwhalecloud".equals(provider.getCode())
-            && ("NTLM".equals(requestedAuthType) || "KERBEROS".equals(requestedAuthType));
         if (StringUtils.isNotBlank(requestedAuthType)
-            && !provider.getAuthType().equals(requestedAuthType) && !iWhaleEnterprise) {
+            && !provider.getAuthType().equals(requestedAuthType)) {
             throw new IllegalArgumentException("authType与邮箱服务商不一致");
         }
         if (provider.getAdvancedServerEditable()) {
@@ -353,20 +304,18 @@ public class UserMailAccountApplicationService {
     }
 
     private boolean requiresSecret(String authType) {
-        return "APP_PASSWORD".equals(authType) || "API_TOKEN".equals(authType) || "NTLM".equals(authType);
+        return "APP_PASSWORD".equals(authType) || "API_TOKEN".equals(authType);
     }
 
     private boolean requiresExternalAuthorization(String authType) {
-        return "OAUTH2".equals(authType) || "BROWSER_SSO".equals(authType);
+        return "OAUTH2".equals(authType);
     }
 
-    private boolean isReadyForConnectionCheck(UserMailAccount account, String status) {
+    private boolean isReadyForConnectionCheck(String status) {
         if (Set.of(NORMAL, "PARTIAL", UNAVAILABLE).contains(status)) {
             return true;
         }
-        return AUTH_REQUIRED.equals(status)
-            && "iwhalecloud".equals(account.getProviderCode())
-            && Set.of("BROWSER_SSO", "KERBEROS").contains(account.getAuthType());
+        return false;
     }
 
     private void validateServerConfig(MailServerConfigDTO config, String label) {
@@ -385,32 +334,6 @@ public class UserMailAccountApplicationService {
         }
     }
 
-    private boolean isFirstAccount(Long userId, Long currentAccountId) {
-        return mailPrivateParamStore.active(userId).stream()
-            .noneMatch(account -> !account.getAccountId().equals(currentAccountId));
-    }
-
-    private void clearOtherDefault(Long userId, Long accountId, Date now) {
-        for (UserMailAccount account : mailPrivateParamStore.active(userId)) {
-            if (account.getAccountId().equals(accountId) || !YES.equals(account.getDefaultFlag())) continue;
-            account.setDefaultFlag(NO);
-            account.setUpdateTime(now);
-            account.setUpdateBy(userId);
-            mailPrivateParamStore.save(account);
-        }
-    }
-
-    private void ensureOneDefault(Long userId, Date now) {
-        UserMailAccount account = listAccounts(userId).stream().findFirst().orElse(null);
-        if (account == null) {
-            return;
-        }
-        account.setDefaultFlag(YES);
-        account.setUpdateTime(now);
-        account.setUpdateBy(userId);
-        mailPrivateParamStore.save(account);
-    }
-
     private UserMailAccountVO toVo(UserMailAccount account) {
         MailProviderVO provider = MailProviderCatalog.resolve(account.getProviderCode());
         UserMailAccountVO vo = new UserMailAccountVO();
@@ -425,7 +348,6 @@ public class UserMailAccountApplicationService {
         vo.setConnectionState(connectionState(account.getStatus()));
         vo.setLastCheckTime(account.getLastCheckTime());
         vo.setDisplayName(account.getDisplayName());
-        vo.setDefaultAccount(YES.equals(account.getDefaultFlag()));
         vo.setImap(server(account.getImapHost(), account.getImapPort(), account.getImapEncryption()));
         vo.setSmtp(server(account.getSmtpHost(), account.getSmtpPort(), account.getSmtpEncryption()));
         vo.setHasAuthCode(StringUtils.isNotBlank(account.getAuthCodeCipher()));
@@ -472,7 +394,7 @@ public class UserMailAccountApplicationService {
         try {
             mailAccountProjectionService.sync(userId, Set.of(changedAccountId));
         } catch (RuntimeException ex) {
-            log.warn("同步用户个人邮箱投影失败，userId={}，reason={}", userId, ex.getMessage());
+            log.warn("同步用户个人邮箱投影失败，userId={}，reason={}", userId, ex.getClass().getSimpleName());
         }
     }
 

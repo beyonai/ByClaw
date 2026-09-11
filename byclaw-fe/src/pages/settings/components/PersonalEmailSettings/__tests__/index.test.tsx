@@ -9,7 +9,6 @@ import {
   queryMailProviders,
   queryPersonalEmailAccounts,
   savePersonalEmailAccount,
-  setDefaultPersonalEmailAccount,
 } from '@/service/personalEmail';
 import { getConnectorAuthorization, queryAllConnectors, startConnectorAuthorization } from '@/service/connector';
 
@@ -24,7 +23,6 @@ jest.mock('@/service/personalEmail', () => ({
   queryMailProviders: jest.fn(),
   savePersonalEmailAccount: jest.fn(),
   deletePersonalEmailAccount: jest.fn(),
-  setDefaultPersonalEmailAccount: jest.fn(),
   checkPersonalEmailConnection: jest.fn(),
 }));
 
@@ -112,16 +110,6 @@ const providers: MailProvider[] = [
     advancedServerEditable: false,
   },
   {
-    code: 'iwhalecloud',
-    name: 'iWhaleCloud',
-    transport: 'EXCHANGE_EWS_OWA',
-    authType: 'BROWSER_SSO',
-    capabilities: ['list', 'get', 'search', 'downloadAttachment', 'send', 'reply', 'delete'],
-    capabilityStatus: { list: 'CONDITIONAL_EWS_ENTERPRISE_AUTH_OR_BROWSER_SSO' },
-    setupRequirements: ['SIGN_IN_WITH_BROWSER_OR_CONFIGURE_EWS'],
-    advancedServerEditable: false,
-  },
-  {
     code: 'custom-imap',
     name: 'Custom IMAP',
     transport: 'IMAP_SMTP',
@@ -138,7 +126,6 @@ const mockQueryProviders = queryMailProviders as jest.MockedFunction<typeof quer
 const mockSave = savePersonalEmailAccount as jest.MockedFunction<typeof savePersonalEmailAccount>;
 const mockCheck = checkPersonalEmailConnection as jest.MockedFunction<typeof checkPersonalEmailConnection>;
 const mockDelete = deletePersonalEmailAccount as jest.MockedFunction<typeof deletePersonalEmailAccount>;
-const mockSetDefault = setDefaultPersonalEmailAccount as jest.MockedFunction<typeof setDefaultPersonalEmailAccount>;
 const mockQueryConnectors = queryAllConnectors as jest.MockedFunction<typeof queryAllConnectors>;
 const mockStartAuthorization = startConnectorAuthorization as jest.MockedFunction<typeof startConnectorAuthorization>;
 const mockGetAuthorization = getConnectorAuthorization as jest.MockedFunction<typeof getConnectorAuthorization>;
@@ -190,7 +177,7 @@ describe('PersonalEmailSettings provider-first flow', () => {
 
   it('shows a stable provider identity in the initial table without loading the modal catalog', async () => {
     mockQueryAccounts.mockResolvedValueOnce([
-      { accountId: 1, name: 'QQ', email: 'person@qq.com', providerCode: 'qq', default: true },
+      { accountId: 1, name: 'QQ', email: 'person@qq.com', providerCode: 'qq' },
       {
         accountId: 2,
         name: 'Hosted',
@@ -207,7 +194,19 @@ describe('PersonalEmailSettings provider-first flow', () => {
     expect(mockQueryProviders).not.toHaveBeenCalled();
   });
 
-  it('waits for the initial account load before deriving the first-account default', async () => {
+  it('does not render or submit default-mailbox controls', async () => {
+    mockQueryAccounts.mockResolvedValueOnce([{ accountId: 1, name: 'QQ', email: 'person@qq.com', providerCode: 'qq' }]);
+    render(<PersonalEmailSettings />);
+    const row = (await screen.findByText('person@qq.com')).closest('tr') as HTMLTableRowElement;
+    expect(within(row).queryByText('settings.email.default')).not.toBeInTheDocument();
+    expect(within(row).queryByRole('button', { name: 'settings.email.setDefault' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'settings.email.addAccount' }));
+    await screen.findByLabelText('邮箱服务商');
+    expect(screen.queryByLabelText('settings.email.default')).not.toBeInTheDocument();
+  });
+
+  it('waits for the initial account load before enabling add', async () => {
     const accountsRequest = deferred<Awaited<ReturnType<typeof queryPersonalEmailAccounts>>>();
     mockQueryAccounts.mockReturnValueOnce(accountsRequest.promise);
 
@@ -217,13 +216,13 @@ describe('PersonalEmailSettings provider-first flow', () => {
 
     await act(async () => {
       accountsRequest.resolve([
-        { accountId: 1, name: 'Existing', email: 'existing@example.com', providerCode: 'custom-imap', default: true },
+        { accountId: 1, name: 'Existing', email: 'existing@example.com', providerCode: 'custom-imap' },
       ]);
     });
     await waitFor(() => expect(addButton).toBeEnabled());
     fireEvent.click(addButton);
     await screen.findByLabelText('邮箱服务商');
-    expect(screen.getByLabelText('settings.email.default')).not.toBeChecked();
+    expect(screen.queryByLabelText('settings.email.default')).not.toBeInTheDocument();
   });
 
   it('keeps add guarded after an initial load failure and enables retry only after authoritative success', async () => {
@@ -238,10 +237,10 @@ describe('PersonalEmailSettings provider-first flow', () => {
     await waitFor(() => expect(addButton).toBeEnabled());
     fireEvent.click(addButton);
     await screen.findByLabelText('邮箱服务商');
-    expect(screen.getByLabelText('settings.email.default')).toBeChecked();
+    expect(screen.queryByLabelText('settings.email.default')).not.toBeInTheDocument();
   });
 
-  it('auto-detects 163 as a changeable default and submits no native server values', async () => {
+  it('auto-detects 163 and submits no native server values', async () => {
     await openCreate();
     fireEvent.change(screen.getByLabelText('settings.email.address'), { target: { value: 'person@163.com' } });
 
@@ -258,7 +257,6 @@ describe('PersonalEmailSettings provider-first flow', () => {
         providerCode: 'netease-163',
         authType: 'APP_PASSWORD',
         displayName: undefined,
-        default: true,
         authCode: 'app-secret',
       })
     );
@@ -365,7 +363,6 @@ describe('PersonalEmailSettings provider-first flow', () => {
         providerCode: 'fastmail',
         authType: 'API_TOKEN',
         hasAuthCode: true,
-        default: true,
       },
     ]);
     render(<PersonalEmailSettings />);
@@ -704,7 +701,6 @@ describe('PersonalEmailSettings provider-first flow', () => {
         connectionState: 'FAILED',
         lastCheckTime: '2026-08-31T09:30:00+08:00',
         status: 'AUTH_REQUIRED',
-        default: true,
       },
     ]);
     render(<PersonalEmailSettings />);
@@ -810,115 +806,6 @@ describe('PersonalEmailSettings provider-first flow', () => {
     expect(within(row).getByText('删除（需要服务器支持 MOVE 或 UIDPLUS）')).toBeInTheDocument();
   });
 
-  it('bounds rejected account mutations and allows a safe retry', async () => {
-    mockSetDefault.mockRejectedValueOnce(new Error('secret-bearing default failure')).mockResolvedValueOnce({});
-    mockQueryAccounts.mockResolvedValue([
-      { accountId: 21, name: 'One', email: 'one@qq.com', providerCode: 'qq', default: true },
-      { accountId: 22, name: 'Two', email: 'two@qq.com', providerCode: 'qq', default: false },
-    ]);
-    render(<PersonalEmailSettings />);
-    const secondRow = (await screen.findByText('two@qq.com')).closest('tr') as HTMLTableRowElement;
-    const defaultButton = within(secondRow).getByRole('button', { name: 'settings.email.setDefault' });
-    fireEvent.click(defaultButton);
-    fireEvent.click(defaultButton);
-    await waitFor(() => expect(mockSetDefault).toHaveBeenCalledTimes(1));
-    expect(await screen.findByText('邮箱账号操作失败，请稍后重试')).toBeInTheDocument();
-    expect(screen.queryByText('secret-bearing default failure')).not.toBeInTheDocument();
-    await waitFor(() => expect(defaultButton).toBeEnabled());
-    fireEvent.click(defaultButton);
-    await waitFor(() => expect(mockSetDefault).toHaveBeenCalledTimes(2));
-  });
-
-  it('globally locks set-default across accounts until the active mutation and reload finish', async () => {
-    const firstMutation = deferred<Awaited<ReturnType<typeof setDefaultPersonalEmailAccount>>>();
-    const secondMutation = deferred<Awaited<ReturnType<typeof setDefaultPersonalEmailAccount>>>();
-    const firstReload = deferred<Awaited<ReturnType<typeof queryPersonalEmailAccounts>>>();
-    mockSetDefault.mockReturnValueOnce(firstMutation.promise).mockReturnValueOnce(secondMutation.promise);
-    const accounts = [
-      { accountId: 41, name: 'Current', email: 'current@qq.com', providerCode: 'qq', default: true },
-      { accountId: 42, name: 'Candidate A', email: 'candidate-a@qq.com', providerCode: 'qq', default: false },
-      { accountId: 43, name: 'Candidate B', email: 'candidate-b@qq.com', providerCode: 'qq', default: false },
-    ];
-    mockQueryAccounts
-      .mockResolvedValueOnce(accounts)
-      .mockReturnValueOnce(firstReload.promise)
-      .mockResolvedValue(accounts);
-    render(<PersonalEmailSettings />);
-    const rowA = (await screen.findByText('candidate-a@qq.com')).closest('tr') as HTMLTableRowElement;
-    const rowB = screen.getByText('candidate-b@qq.com').closest('tr') as HTMLTableRowElement;
-    const buttonA = within(rowA).getByRole('button', { name: 'settings.email.setDefault' });
-    const buttonB = within(rowB).getByRole('button', { name: 'settings.email.setDefault' });
-
-    fireEvent.click(buttonA);
-    fireEvent.click(buttonB);
-    expect(mockSetDefault).toHaveBeenCalledTimes(1);
-    await waitFor(() => {
-      expect(buttonA).toBeDisabled();
-      expect(buttonB).toBeDisabled();
-    });
-
-    await act(async () => {
-      firstMutation.resolve({});
-    });
-    await waitFor(() => expect(mockQueryAccounts).toHaveBeenCalledTimes(2));
-    expect(buttonA).toBeDisabled();
-    expect(buttonB).toBeDisabled();
-    fireEvent.click(buttonB);
-    expect(mockSetDefault).toHaveBeenCalledTimes(1);
-
-    await act(async () => {
-      firstReload.resolve(accounts);
-    });
-    await waitFor(() => {
-      expect(buttonA).toBeEnabled();
-      expect(buttonB).toBeEnabled();
-    });
-    fireEvent.click(buttonB);
-    await waitFor(() => expect(mockSetDefault).toHaveBeenCalledTimes(2));
-    await act(async () => {
-      secondMutation.resolve({});
-    });
-    await waitFor(() => expect(buttonB).toBeEnabled());
-  });
-
-  it('keeps the newest account refresh when mutation-triggered loads resolve out of order', async () => {
-    const olderRefresh = deferred<Awaited<ReturnType<typeof queryPersonalEmailAccounts>>>();
-    const newerRefresh = deferred<Awaited<ReturnType<typeof queryPersonalEmailAccounts>>>();
-    mockQueryAccounts
-      .mockResolvedValueOnce([
-        { accountId: 31, name: 'One', email: 'one@qq.com', providerCode: 'qq', default: true },
-        { accountId: 32, name: 'Two', email: 'two@qq.com', providerCode: 'qq', default: false },
-        { accountId: 33, name: 'Three', email: 'three@qq.com', providerCode: 'qq', default: false },
-      ])
-      .mockReturnValueOnce(olderRefresh.promise)
-      .mockReturnValueOnce(newerRefresh.promise);
-    mockSetDefault.mockResolvedValue({});
-    mockDelete.mockResolvedValue(true);
-    render(<PersonalEmailSettings />);
-    const rowTwo = (await screen.findByText('two@qq.com')).closest('tr') as HTMLTableRowElement;
-    const rowThree = screen.getByText('three@qq.com').closest('tr') as HTMLTableRowElement;
-    fireEvent.click(within(rowTwo).getByRole('button', { name: 'settings.email.setDefault' }));
-    fireEvent.click(within(rowThree).getByRole('button', { name: 'common.delete' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'OK' }));
-    expect(mockSetDefault).toHaveBeenCalledTimes(1);
-    expect(mockDelete).toHaveBeenCalledTimes(1);
-    await waitFor(() => expect(mockQueryAccounts).toHaveBeenCalledTimes(3));
-
-    await act(async () => {
-      newerRefresh.resolve([
-        { accountId: 33, name: 'Newest', email: 'newest@qq.com', providerCode: 'qq', default: true },
-      ]);
-    });
-    expect(await screen.findByText('newest@qq.com')).toBeInTheDocument();
-    await act(async () => {
-      olderRefresh.resolve([
-        { accountId: 32, name: 'Older', email: 'older@qq.com', providerCode: 'qq', default: true },
-      ]);
-    });
-    await waitFor(() => expect(screen.queryByText('older@qq.com')).not.toBeInTheDocument());
-    expect(screen.getByText('newest@qq.com')).toBeInTheDocument();
-  });
-
   it.each([
     ['QQ', 'qq'],
     ['163', 'netease-163'],
@@ -954,38 +841,4 @@ describe('PersonalEmailSettings provider-first flow', () => {
       ]);
     }
   );
-
-  it('uses code-aware guidance for enterprise and unknown conditional capabilities', async () => {
-    mockQueryAccounts.mockResolvedValueOnce([
-      {
-        accountId: 10,
-        name: 'Enterprise',
-        email: 'person@enterprise.example',
-        providerCode: 'iwhalecloud',
-        capabilities: ['list'],
-        capabilityStatus: {
-          list: 'CONDITIONAL_EWS_ENTERPRISE_AUTH_OR_BROWSER_SSO',
-          search: 'CONDITIONAL_UNKNOWN_POLICY',
-        },
-      },
-    ]);
-
-    render(<PersonalEmailSettings />);
-    const row = (await screen.findByText('person@enterprise.example')).closest('tr') as HTMLTableRowElement;
-    expect(within(row).getByText('收取列表（需要企业 EWS 认证或浏览器登录）')).toBeInTheDocument();
-    expect(within(row).getByText('搜索（需满足服务商条件）')).toBeInTheDocument();
-  });
-
-  it('defaults iWhaleCloud to browser sign-in and offers secret-free enterprise auth guidance', async () => {
-    await openCreate();
-    await chooseProvider('iWhaleCloud');
-    expect(screen.getByText('浏览器登录是默认方式；连接状态检查通过前不会标记为就绪。')).toBeInTheDocument();
-    expect(within(screen.getByRole('region', { name: 'iWhaleCloud设置' })).getByText('浏览器登录')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '高级设置' }));
-    fireEvent.mouseDown(screen.getByLabelText('企业认证方式'));
-    expect(screen.getByText('NTLM（由企业凭据服务提供）')).toBeInTheDocument();
-    expect(screen.getByText('Kerberos（使用当前企业身份）')).toBeInTheDocument();
-    expect(screen.queryByLabelText(/Kerberos.*密码/)).not.toBeInTheDocument();
-    expect(screen.queryByText('连接就绪')).not.toBeInTheDocument();
-  });
 });

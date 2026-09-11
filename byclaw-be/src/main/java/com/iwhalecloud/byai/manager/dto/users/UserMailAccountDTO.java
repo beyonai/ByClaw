@@ -28,9 +28,6 @@ public class UserMailAccountDTO {
     @JsonProperty("display_name")
     private String displayNameSnake;
 
-    @JsonProperty("default")
-    private Boolean defaultAccount;
-
     private MailServerConfigDTO imap;
 
     private MailServerConfigDTO smtp;

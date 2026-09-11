@@ -305,11 +305,8 @@ RUN ln -s /app /app/node_modules/openclaw
 
 
 COPY middleware/openclaw/skills/ /app/skills/
-COPY middleware/openclaw/bycli-adapters/mail.iwhalecloud.com/mail.js \
-     /usr/local/share/byclaw/bycli-adapters/mail.iwhalecloud.com/mail.js
 RUN python3 /app/skills/mail/scripts/mailctl.py --help >/dev/null \
-    && python3 -m compileall -q /app/skills/mail/scripts \
-    && test -f /usr/local/share/byclaw/bycli-adapters/mail.iwhalecloud.com/mail.js
+    && python3 -m compileall -q /app/skills/mail/scripts
 COPY middleware/openclaw/runtime-tools/ /usr/local/lib/byclaw/runtime-tools/
 
 RUN cd /app/skills/knowledge-collection/scripts \

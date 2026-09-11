@@ -4,7 +4,6 @@ import contextlib
 import io
 import json
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -32,7 +31,7 @@ class MailctlTest(unittest.TestCase):
         self.root = Path(self.tempdir.name).resolve()
         self.auth_root = self.root / "auth"
         self.auth_root.mkdir(mode=0o700)
-        self.config = write_projection(self.auth_root / "accounts.json")
+        self.config = write_projection(self.auth_root / "qq-mail.json")
         self.workspace = self.root / "workspace"
         self.workspace.mkdir(mode=0o700)
         os.chmod(self.workspace, 0o700)
@@ -175,27 +174,6 @@ class MailctlTest(unittest.TestCase):
         self.assertEqual("AUTH_EXPIRED", result["error"]["code"])
         self.assertNotIn("adapter-secret", json.dumps(result))
         self.assertEqual("", stderr)
-
-    def test_ready_iwhalecloud_projection_fixture_reaches_registry_for_all_operations(self) -> None:
-        fixture = Path(__file__).parent / "fixtures" / "backend_projection_accounts.json"
-        shutil.copyfile(fixture, self.config)
-        os.chmod(self.config, 0o600)
-        registry = AdapterRegistry()
-        registry.register("iwhalecloud", lambda _: self.adapter)
-        draft = self.write_input({"to": ["to@example.com"], "text": "body"}, "iwhale.json")
-        commands = [
-            ["list", "--account", "iwhalecloud-fixture"],
-            ["get", "--account", "iwhalecloud-fixture", "--message", "m1"],
-            ["search", "--account", "iwhalecloud-fixture", "--query", "hello"],
-            ["attachment", "--account", "iwhalecloud-fixture", "--message", "m1", "--attachment", "a1", "--output-dir", str(self.workspace / "iwhale-downloads")],
-            ["send", "--account", "iwhalecloud-fixture", "--input-json", str(draft)],
-            ["reply", "--account", "iwhalecloud-fixture", "--message", "m1", "--input-json", str(draft)],
-            ["delete", "--account", "iwhalecloud-fixture", "--message", "m1"],
-        ]
-        for command in commands:
-            code, result, _ = self.run_cli(command, registry=registry)
-            self.assertEqual(0, code, result)
-            self.assertTrue(result["ok"])
 
     def test_input_json_is_anchored_private_and_workspace_only(self) -> None:
         payload = {"to": ["to@example.com"], "text": "body"}

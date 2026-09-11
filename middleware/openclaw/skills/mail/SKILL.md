@@ -10,11 +10,7 @@ Use the managed runtime. Its only entrypoint is
 
 ## Account selection
 
-| User explicitly named an account? | Projected default available? | Required action |
-| --- | --- | --- |
-| `yes` | `n/a` | Use it directly when valid and unambiguous in current context. |
-| `no` | `yes` | Run `accounts` first; choose its projected default. |
-| `no` | `no` | Run `accounts` first; use one safe match, otherwise ask for multiple/none. |
+Always run `accounts` before choosing a mailbox. If the user names a mailbox or provider, match it against the safe summaries and pass its account ID. If exactly one account is connected, use it automatically. If multiple accounts are connected and the request is ambiguous, show only provider, display name, and masked address, then ask the user to choose. Never infer a mailbox from ordering, update time, filename, or connector type.
 
 - Cross-account request: run `accounts`, query each relevant account read-only, then choose from public results. Never inspect credentials.
 - Ask only for unresolved ambiguity or mutation confirmation.

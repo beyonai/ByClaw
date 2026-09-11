@@ -49,7 +49,6 @@ export interface PersonalEmailAccount {
   connectionState?: string;
   lastCheckTime?: string;
   status?: string;
-  default?: boolean;
   imap?: MailServerConfig;
   smtp?: MailServerConfig;
   hasAuthCode?: boolean;
@@ -64,7 +63,6 @@ export interface PersonalEmailAccountSavePayload {
   providerCode?: string;
   authType?: MailAuthType;
   displayName?: string;
-  default?: boolean;
   imap?: MailServerConfig;
   smtp?: MailServerConfig;
   authCode?: string;
@@ -79,9 +77,6 @@ export const savePersonalEmailAccount = (data: PersonalEmailAccountSavePayload) 
 
 export const deletePersonalEmailAccount = (accountId: number | string) =>
   POST<boolean>('/byaiService/userMailAccount/delete', { accountId });
-
-export const setDefaultPersonalEmailAccount = (accountId: number | string) =>
-  POST<PersonalEmailAccount>('/byaiService/userMailAccount/setDefault', { accountId });
 
 // Task 12 owns the backend implementation; keeping this shape here isolates the UI from that rollout.
 export const checkPersonalEmailConnection = (accountId: number | string) =>

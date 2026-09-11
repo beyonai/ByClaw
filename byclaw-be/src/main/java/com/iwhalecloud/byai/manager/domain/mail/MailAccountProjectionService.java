@@ -20,8 +20,6 @@ import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.BasicFileAttributeView;
 import java.nio.file.attribute.PosixFilePermissions;
-import java.util.Comparator;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.LinkedHashSet;
@@ -53,10 +51,10 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCred
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialWorkspaceService;
 import com.iwhalecloud.byai.manager.entity.users.UserMailAccount;
 
-/** Produces the single private byCLI mail account projection. */
+/** Produces independent private mail connector projections. */
 @Service
 public class MailAccountProjectionService {
-    public static final String PROJECTION_PATH = "/by/.connector-auth/.mail/accounts.json";
+    public static final String PROJECTION_PATH = "/by/.connector-auth/.mail/qq-mail.json";
     private static final long MAX_BYTES = 64 * 1024L;
     private static final Set<PosixFilePermission> PRIVATE_PERMISSIONS = Set.of(
         PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE);
@@ -102,9 +100,17 @@ public class MailAccountProjectionService {
         sync(userId, affectedAccountIds, Reconciliation.NONE, null);
     }
 
+    private static final Map<String, String> CONNECTOR_PROVIDERS = Map.of(
+        "qq-mail", "qq", "netease-163-mail", "netease-163", "gmail-mail", "gmail",
+        "custom-imap-mail", "custom-imap");
+    private static final Set<String> RECOGNIZED_CONNECTORS = Set.of(
+        "qq-mail", "netease-163-mail", "gmail-mail", "custom-imap-mail",
+        "aliyun-mail", "microsoft-mail", "fastmail-mail");
+
     private void sync(Long userId, Set<Long> affectedAccountIds,
             Reconciliation reconciliation, Long connectorId) {
         Set<Long> affected = new LinkedHashSet<>(affectedAccountIds == null ? Set.of() : affectedAccountIds);
+        if (connectorId != null) affected.add(connectorId);
         try {
             leaseService.trigger(userId);
         } catch (RuntimeException e) {
@@ -119,145 +125,143 @@ public class MailAccountProjectionService {
             throw e;
         }
         if (lease.isEmpty()) return;
-        MailAccountProjectionLeaseService.Lease owner = lease.orElseThrow();
-        boolean[] failureHandled = {false};
+        var owner = lease.orElseThrow();
+        String phase = "validation";
         try {
             Path target = workspaceService.resolveProjectionFile(userId, PROJECTION_PATH);
-            ParentIdentity parentIdentity = validatePrivateParent(userId, target);
-            try (AnchoredDirectory directory = fileOperations.openDirectory(target.getParent(), parentIdentity)) {
-                leaseService.assertOwnedAndRenew(owner);
+            ParentIdentity identity = validatePrivateParent(userId, target);
+            phase = "secure-filesystem";
+            try (AnchoredDirectory directory = fileOperations.openDirectory(target.getParent(), identity)) {
+                phase = "locking";
                 try (ProjectionLock ignored = directory.lock()) {
-                    Map<LocatorKeyContext, String> locatorKeys = existingLocatorKeys(directory, target.getFileName());
-                    for (int pass = 0; pass < 3; pass++) {
-                        long generation = leaseService.generation(userId);
-                        List<UserMailAccount> snapshot = List.of();
-                        Set<Long> recovery = new LinkedHashSet<>(affected);
-                        Set<Long> restored = Set.of();
-                        try {
-                            leaseService.assertOwnedAndRenew(owner);
-                            if (reconciliation == Reconciliation.ALL) {
-                                affected.addAll(stateService.reconcileCurrentBindings(userId));
-                            } else if (reconciliation == Reconciliation.CONNECTOR) {
-                                affected.addAll(stateService.reconcileCurrentBinding(userId, connectorId));
-                            }
-                            recovery.addAll(stateService.loadProjectionRecoveryIds(userId));
-                            snapshot = stateService.loadActiveSnapshot(userId);
-                            PreparedProjection prepared = prepareSnapshot(snapshot);
-                            Set<Long> successIds = new LinkedHashSet<>(recovery);
-                            successIds.removeAll(prepared.failedAccountIds());
-                            leaseService.assertOwnedAndRenew(owner);
-                            restored = stateService.markProjectionSucceeded(userId, successIds);
-                            leaseService.assertOwnedAndRenew(owner);
-                            stateService.markProjectionFailed(userId, prepared.failedAccountIds());
-                            leaseService.assertOwnedAndRenew(owner);
-                            String json = serializePrepared(prepared, locatorKeys);
-                            writePrepared(userId, directory, target.getFileName(), json,
-                                () -> leaseService.assertOwnedAndRenew(owner));
-                            leaseService.assertOwnedAndRenew(owner);
-                            try {
-                                metadataCacheService.refreshRequired(userId);
-                            } catch (IOException e) {
-                                throw new IllegalStateException("Mail metadata refresh failed", e);
-                            }
-                        } catch (MailAccountProjectionLeaseService.LeaseLostException e) {
-                            throw e;
-                        } catch (RuntimeException e) {
-                            Set<Long> failureScope = new LinkedHashSet<>(recovery);
-                            failureScope.addAll(restored);
-                            snapshot.stream().map(UserMailAccount::getAccountId)
-                                .filter(Objects::nonNull).forEach(failureScope::add);
-                            markFailedIfOwner(userId, failureScope, owner);
-                            failureHandled[0] = true;
-                            throw e;
-                        }
-                        if (leaseService.generation(userId) == generation) {
-                            leaseService.assertOwnedAndRenew(owner);
-                            leaseService.markClean(userId, generation);
-                            return;
+                for (int pass = 0; pass < 3; pass++) {
+                    phase = "snapshot-validation";
+                    leaseService.assertOwnedAndRenew(owner);
+                    long generation = leaseService.generation(userId);
+                    boolean full = reconciliation == Reconciliation.ALL || affected.isEmpty() || pass > 0;
+                    Set<Long> reconciliationFailures = new LinkedHashSet<>();
+                    if (full) affected.addAll(stateService.loadAllAccountIds(userId));
+                    for (Long id : Set.copyOf(affected)) {
+                        if (!full && reconciliation != Reconciliation.CONNECTOR) continue;
+                        try { stateService.reconcileCurrentBinding(userId, id); }
+                        catch (RuntimeException e) {
+                            reconciliationFailures.add(id);
+                            logFailure(userId, id, "mail", "binding-reconciliation", e);
                         }
                     }
+                    List<UserMailAccount> snapshot = stateService.loadActiveSnapshot(userId);
+                    Map<String, PreparedAccount> desired = new HashMap<>();
+                    Set<String> failedConnectors = new LinkedHashSet<>();
+                    Set<Long> failedIds = new LinkedHashSet<>(reconciliationFailures);
+                    Set<Long> invalidIds = stateService.invalidProjectionIds(userId);
+                    if (full) failedIds.addAll(invalidIds);
+                    else invalidIds.stream().filter(affected::contains).forEach(failedIds::add);
+                    Set<Long> successIds = new LinkedHashSet<>(affected);
+                    Map<String, Long> connectorIds = new HashMap<>();
+                    for (Long id : affected) {
+                        String code = stateService.connectorCode(id);
+                        if (code == null) code = stateService.storedConnectorCode(userId, id);
+                        if (RECOGNIZED_CONNECTORS.contains(code == null ? "" : code)) connectorIds.put(code, id);
+                    }
+                    // Resolve each account independently; unavailable and unauthorized bindings are deletions.
+                    for (UserMailAccount account : snapshot) {
+                        var provider = MailProviderCatalog.require(account.getProviderCode());
+                        String code = provider.getConnectorCode();
+                        connectorIds.put(code, account.getAccountId());
+                        if (!full && !affected.contains(account.getAccountId())) continue;
+                        successIds.add(account.getAccountId());
+                        if (reconciliationFailures.contains(account.getAccountId())) {
+                            failedConnectors.add(code);
+                            continue;
+                        }
+                        if (!account.getProviderCode().equals(CONNECTOR_PROVIDERS.get(code))) continue;
+                        try {
+                            var connector = stateService.findActiveConnector(code);
+                            if (connector == null || !"00A".equals(connector.getStatusCd())
+                                    || !Objects.equals(account.getConnectorId(), connector.getConnectorId())) continue;
+                            Optional<MailCredentialResolver.ResolvedAuth> auth = credentialResolver.resolve(account);
+                            if (auth.isPresent()) {
+                                if (desired.put(code, new PreparedAccount(account, auth.orElseThrow())) != null) {
+                                    throw new IllegalStateException("Duplicate mail connector account");
+                                }
+                            }
+                        } catch (RuntimeException e) {
+                            failedConnectors.add(code);
+                            failedIds.add(account.getAccountId());
+                            logFailure(userId, account.getAccountId(), code, "credential-resolution", e);
+                        }
+                    }
+                    // Remove revoked credentials before any writes; do not parse the obsolete aggregate.
+                    if (full) directory.deleteIfExists(Path.of("accounts.json"));
+                    for (String code : RECOGNIZED_CONNECTORS) {
+                        Long id = connectorIds.get(code);
+                        boolean selected = full || (id != null && affected.contains(id));
+                        if (!selected && connectorId != null) {
+                            selected = code.equals(stateService.connectorCode(connectorId));
+                        }
+                        if (!selected || desired.containsKey(code) || failedConnectors.contains(code)) continue;
+                        try {
+                            leaseService.assertOwnedAndRenew(owner);
+                            directory.deleteIfExists(Path.of(code + ".json"));
+                        } catch (IOException | RuntimeException e) {
+                            if (e instanceof MailAccountProjectionLeaseService.LeaseLostException lost) throw lost;
+                            if (id != null) failedIds.add(id);
+                            else failedIds.addAll(affected);
+                            failedConnectors.add(code);
+                            logFailure(userId, id, code, "deletion", e);
+                        }
+                    }
+                    for (var entry : desired.entrySet()) {
+                        String code = entry.getKey();
+                        PreparedAccount prepared = entry.getValue();
+                        try {
+                            Path filename = Path.of(code + ".json");
+                            Map<LocatorKeyContext, String> keys = existingLocatorKeys(directory, filename);
+                            ObjectNode root = objectMapper.createObjectNode();
+                            root.put("schemaVersion", 2);
+                            root.put("connectorCode", code);
+                            root.set("account", accountJson(prepared.account(), prepared.auth(),
+                                MailAccountProjectionStateService.expectedProjectionStatus(prepared.account()), keys));
+                            write(userId, directory, filename, serialize(root),
+                                () -> leaseService.assertOwnedAndRenew(owner));
+                        } catch (RuntimeException e) {
+                            if (e instanceof MailAccountProjectionLeaseService.LeaseLostException lost) throw lost;
+                            failedIds.add(prepared.account().getAccountId());
+                            failedConnectors.add(code);
+                            logFailure(userId, prepared.account().getAccountId(), code, "write", e);
+                        }
+                    }
+                    successIds.removeAll(failedIds);
+                    leaseService.assertOwnedAndRenew(owner);
+                    phase = "status-update";
+                    stateService.markProjectionSucceeded(userId, successIds);
+                    stateService.markProjectionFailed(userId, failedIds);
+                    metadataCacheService.refreshRequired(userId);
+                    if (!failedConnectors.isEmpty() || !failedIds.isEmpty()) return; // Keep the durable dirty marker for retry.
+                    if (leaseService.generation(userId) == generation) {
+                        leaseService.assertOwnedAndRenew(owner);
+                        leaseService.markClean(userId, generation);
+                        return;
+                    }
+                }
                 }
             }
         } catch (MailAccountProjectionLeaseService.LeaseLostException e) {
             throw e;
-        } catch (IOException e) {
-            if (!failureHandled[0]) {
-                expandGlobalFailureScope(userId, affected);
-                markFailedIfOwner(userId, affected, owner);
-            }
-            throw new IllegalStateException("Unable to lock mail account projection", e);
-        } catch (RuntimeException e) {
-            if (!failureHandled[0]) {
-                expandGlobalFailureScope(userId, affected);
-                markFailedIfOwner(userId, affected, owner);
-            }
-            throw e;
+        } catch (IOException | RuntimeException e) {
+            logFailure(userId, connectorId, "mail", phase, e);
+            expandGlobalFailureScope(userId, affected);
+            markFailedIfOwner(userId, affected, owner);
+            throw new IllegalStateException("Mail projection failed", e);
         } finally {
             leaseService.release(owner);
         }
     }
 
-    private PreparedProjection prepareSnapshot(List<UserMailAccount> snapshot) {
-        List<UserMailAccount> accounts = new ArrayList<>(snapshot);
-        accounts.sort(Comparator
-            .comparing((UserMailAccount account) -> "Y".equals(account.getDefaultFlag())).reversed()
-            .thenComparing(UserMailAccount::getUpdateTime,
-                Comparator.nullsLast(Comparator.reverseOrder()))
-            .thenComparing(UserMailAccount::getAccountId, Comparator.nullsLast(Comparator.reverseOrder())));
-        List<PreparedAccount> preparedAccounts = new ArrayList<>();
-        Set<Long> failedAccountIds = new LinkedHashSet<>();
-        Set<LocatorKeyContext> locatorContexts = new LinkedHashSet<>();
-        for (UserMailAccount account : accounts) {
-            locatorContexts.add(locatorContext(account));
-            try {
-                credentialResolver.resolve(account)
-                    .ifPresent(auth -> preparedAccounts.add(new PreparedAccount(account, auth)));
-            } catch (MailCredentialResolutionException e) {
-                failedAccountIds.add(recoverableFailureAccountId(account, e));
-            }
-        }
-        return new PreparedProjection(List.copyOf(preparedAccounts), Set.copyOf(failedAccountIds),
-            Set.copyOf(locatorContexts));
-    }
-
-    private Long recoverableFailureAccountId(UserMailAccount account,
-                                               MailCredentialResolutionException failure) {
-        return switch (failure.code()) {
-            case CORRUPT_CREDENTIAL -> {
-                if (account.getAccountId() == null) throw failure;
-                yield account.getAccountId();
-            }
-            case INFRASTRUCTURE -> throw failure;
-        };
-    }
-
-    private String serializePrepared(PreparedProjection prepared, Map<LocatorKeyContext, String> locatorKeys) {
-        ObjectNode root = objectMapper.createObjectNode();
-        root.put("schemaVersion", 1);
-        locatorKeys.keySet().retainAll(prepared.activeLocatorContexts());
-        prepared.activeLocatorContexts().forEach(context -> locatorKeys.computeIfAbsent(context, ignored -> newLocatorKey()));
-        ArrayNode keyring = root.putArray("locatorKeyring");
-        locatorKeys.entrySet().stream()
-            .sorted(Map.Entry.comparingByKey(Comparator.comparing(LocatorKeyContext::accountId)
-                .thenComparing(LocatorKeyContext::provider).thenComparing(LocatorKeyContext::email)))
-            .forEach(entry -> {
-                ObjectNode key = keyring.addObject();
-                key.put("accountId", entry.getKey().accountId());
-                key.put("provider", entry.getKey().provider());
-                key.put("email", entry.getKey().email());
-                key.put("key", entry.getValue());
-            });
-        ArrayNode output = root.putArray("accounts");
-        for (PreparedAccount account : prepared.accounts()) {
-            String targetStatus = MailAccountProjectionStateService.expectedProjectionStatus(account.account());
-            output.add(accountJson(account.account(), account.auth(), targetStatus, locatorKeys));
-        }
-        return serialize(root);
-    }
-
-    private void writePrepared(Long userId, AnchoredDirectory directory, Path targetName,
-            String json, Runnable beforeMove) {
-        write(userId, directory, targetName, json, beforeMove);
+    private void logFailure(Long userId, Long connectorId, String code, String phase, Exception error) {
+        log.warn("Mail projection failed userId={} connectorId={} connectorCode={} filename={} phase={} category={}",
+            userId, connectorId, code, RECOGNIZED_CONNECTORS.contains(code) ? code + ".json" : ".mail",
+            error instanceof ProjectionFailure failure ? failure.phase : phase, error.getClass().getSimpleName());
     }
 
     private void markFailedAfterTriggerError(Long userId, Set<Long> affected,
@@ -271,7 +275,7 @@ public class MailAccountProjectionService {
             if (!affected.isEmpty()) stateService.markProjectionFailed(userId, affected);
         } catch (RuntimeException markError) {
             log.warn("Mail projection failure status update failed for userId={}: {}",
-                userId, markError.getMessage());
+                userId, markError.getClass().getSimpleName());
         }
         metadataCacheService.refresh(userId);
     }
@@ -286,7 +290,7 @@ public class MailAccountProjectionService {
         } catch (MailAccountProjectionLeaseService.LeaseLostException e) {
             log.warn("Stale mail projection writer discarded for userId={}", userId);
         } catch (RuntimeException e) {
-            log.warn("Mail projection failure status update failed for userId={}: {}", userId, e.getMessage());
+            log.warn("Mail projection failure status update failed for userId={}: {}", userId, e.getClass().getSimpleName());
         }
     }
 
@@ -295,7 +299,7 @@ public class MailAccountProjectionService {
             affected.addAll(stateService.loadProjectionRecoveryIds(userId));
         } catch (RuntimeException e) {
             log.warn("Unable to determine complete mail projection failure scope for userId={}: {}",
-                userId, e.getMessage());
+                userId, e.getClass().getSimpleName());
         }
     }
 
@@ -310,11 +314,12 @@ public class MailAccountProjectionService {
             return;
         }
         try {
-            if (!stateService.recognizesMailConnector(event.connectorId())) return;
+            if (!stateService.recognizesMailConnector(event.connectorId())
+                    && stateService.loadAccountIdsForConnector(event.userId(), event.connectorId()).isEmpty()) return;
             sync(event.userId(), Set.of(), Reconciliation.CONNECTOR, event.connectorId());
         } catch (RuntimeException e) {
             log.warn("Mail credential projection failed for userId={}, connectorId={}: {}",
-                event.userId(), event.connectorId(), e.getMessage());
+                event.userId(), event.connectorId(), e.getClass().getSimpleName());
         }
     }
 
@@ -330,7 +335,7 @@ public class MailAccountProjectionService {
                 sync(userId, stateService.loadAllAccountIds(userId), Reconciliation.ALL, null);
             } catch (RuntimeException e) {
                 log.warn("Scheduled mail projection reconciliation failed for userId={}: {}",
-                    userId, e.getMessage());
+                    userId, e.getClass().getSimpleName());
             }
         }
         long cursor = databaseSweepCursor.get();
@@ -342,12 +347,12 @@ public class MailAccountProjectionService {
                     sync(userId, stateService.loadAllAccountIds(userId), Reconciliation.ALL, null);
                 } catch (RuntimeException e) {
                     log.warn("Database mail projection reconciliation failed for userId={}: {}",
-                        userId, e.getMessage());
+                        userId, e.getClass().getSimpleName());
                 }
             }
             databaseSweepCursor.set(batch.hasMore() ? batch.nextAccountId() : 0L);
         } catch (RuntimeException e) {
-            log.warn("Database mail projection sweep failed: {}", e.getMessage());
+            log.warn("Database mail projection sweep failed: {}", e.getClass().getSimpleName());
         }
     }
 
@@ -358,7 +363,6 @@ public class MailAccountProjectionService {
         item.put("provider", account.getProviderCode());
         item.put("email", account.getEmail());
         item.put("displayName", account.getDisplayName() == null ? "" : account.getDisplayName());
-        item.put("default", "Y".equals(account.getDefaultFlag()));
         item.put("status", targetStatus);
         item.put("locatorKey", locatorKey(account, locatorKeys));
         ArrayNode capabilities = item.putArray("capabilities");
@@ -412,24 +416,23 @@ public class MailAccountProjectionService {
             if (previous == null) return keys;
             JsonNode root = objectMapper.readTree(previous);
             if (root == null || !root.isObject()) return keys;
-            JsonNode keyring = root.path("locatorKeyring");
-            JsonNode accounts = keyring != null && keyring.isArray() ? keyring : root.path("accounts");
-            if (!accounts.isArray() || accounts.size() > 1000) return keys;
-            for (JsonNode account : accounts) {
-                String accountId = account.path("accountId").asText(null);
-                String provider = account.path("provider").asText(null);
-                String email = account.path("email").asText(null);
-                String key = account.path(keyring != null && keyring.isArray() ? "key" : "locatorKey").asText(null);
-                if (accountId != null && provider != null && email != null && key != null
-                        && accountId.length() <= 128 && provider.length() <= 64 && email.length() <= 320
-                        && key.matches("[A-Za-z0-9_-]{43}")) {
-                    keys.put(new LocatorKeyContext(accountId, provider,
-                        email.trim().toLowerCase(java.util.Locale.ROOT)), key);
-                }
+            String code = root.path("connectorCode").asText();
+            if (root.path("schemaVersion").asInt() != 2 || !targetName.toString().equals(code + ".json")) return keys;
+            JsonNode account = root.path("account");
+            String accountId = account.path("accountId").asText(null);
+            String provider = account.path("provider").asText(null);
+            String email = account.path("email").asText(null);
+            String key = account.path("locatorKey").asText(null);
+            if (accountId != null && email != null && key != null
+                    && Objects.equals(CONNECTOR_PROVIDERS.get(code), provider)
+                    && accountId.length() <= 128 && email.length() <= 320
+                    && key.matches("[A-Za-z0-9_-]{43}")) {
+                keys.put(new LocatorKeyContext(accountId, provider,
+                    email.trim().toLowerCase(java.util.Locale.ROOT)), key);
             }
             return keys;
         } catch (IOException e) {
-            return keys;
+            throw new ProjectionFailure("read-validation", e);
         }
     }
 
@@ -447,7 +450,7 @@ public class MailAccountProjectionService {
         try {
             return objectMapper.writeValueAsString(root);
         } catch (IOException e) {
-            throw new IllegalStateException("Unable to serialize mail account projection", e);
+            throw new ProjectionFailure("serialization", e);
         }
     }
 
@@ -458,17 +461,21 @@ public class MailAccountProjectionService {
             throw new IllegalStateException("Mail account projection exceeds 64KiB");
         }
         OpenedPrivateFile temporary = null;
+        String phase = "temporary-create";
         try {
             temporary = directory.openPrivateTemp();
+            phase = "write-fsync";
             directory.writeAndForce(temporary, content);
+            phase = "validation";
             directory.validateIdentity(temporary, temporary.path());
             beforeMove.run();
+            phase = "rename-fsync";
             directory.moveAtomic(temporary, targetName);
             directory.validateIdentity(temporary, targetName);
             temporary.close();
             temporary = null;
         } catch (IOException | SecurityException e) {
-            throw new IllegalStateException("Unable to write mail account projection", e);
+            throw new ProjectionFailure(phase, e);
         } finally {
             if (temporary != null) {
                 Path path = temporary.path();
@@ -498,12 +505,19 @@ public class MailAccountProjectionService {
                 parent, PosixFileAttributeView.class, LinkOption.NOFOLLOW_LINKS);
             if (view == null) throw new IOException("POSIX projection permissions unavailable");
             Set<PosixFilePermission> permissions = view.readAttributes().permissions();
-            if (permissions.stream().anyMatch(permission -> permission.name().startsWith("GROUP_")
-                    || permission.name().startsWith("OTHERS_"))) {
+            if (!permissions.equals(PosixFilePermissions.fromString("rwx------"))
+                    || !view.readAttributes().owner().equals(parent.getFileSystem().getUserPrincipalLookupService()
+                        .lookupPrincipalByName(System.getProperty("user.name")))) {
                 throw new IOException("Projection parent permissions are not private");
             }
             if (attributes.fileKey() == null) throw new IOException("Projection parent identity unavailable");
-            return new ParentIdentity(attributes.fileKey());
+            if (com.sun.jna.Platform.isMac() || com.sun.jna.Platform.isLinux()) {
+                Map<String, Object> unix = Files.readAttributes(parent, "unix:dev,ino,fileKey", LinkOption.NOFOLLOW_LINKS);
+                if (!attributes.fileKey().equals(unix.get("fileKey"))) throw new IOException("Projection parent changed");
+                return new ParentIdentity(attributes.fileKey(), ((Number) unix.get("dev")).longValue(),
+                    ((Number) unix.get("ino")).longValue());
+            }
+            return new ParentIdentity(attributes.fileKey(), null, null);
         } catch (IOException | SecurityException e) {
             throw new IllegalStateException("Unable to validate mail projection parent", e);
         }
@@ -513,12 +527,19 @@ public class MailAccountProjectionService {
         if (StringUtils.hasText(value)) node.put(key, value);
     }
 
+    private static final class ProjectionFailure extends IllegalStateException {
+        private final String phase;
+        ProjectionFailure(String phase, Throwable cause) {
+            super("Mail projection " + phase + " failed", cause);
+            this.phase = phase;
+        }
+    }
+
     private enum Reconciliation { NONE, ALL, CONNECTOR }
 
-    record ParentIdentity(Object fileKey) { }
-
-    record PreparedProjection(List<PreparedAccount> accounts, Set<Long> failedAccountIds,
-                              Set<LocatorKeyContext> activeLocatorContexts) { }
+    record ParentIdentity(Object fileKey, Long device, Long inode) {
+        ParentIdentity(Object fileKey) { this(fileKey, null, null); }
+    }
 
     record PreparedAccount(UserMailAccount account, MailCredentialResolver.ResolvedAuth auth) { }
 
@@ -572,6 +593,13 @@ public class MailAccountProjectionService {
             DirectoryStream<Path> opened = Files.newDirectoryStream(directory);
             if (!(opened instanceof SecureDirectoryStream<?>)) {
                 opened.close();
+                if (com.sun.jna.Platform.isLinux()) {
+                    try {
+                        return LinuxMailDirectory.open(directory, expectedIdentity, this, channelWriter);
+                    } catch (LinkageError e) {
+                        throw new IOException("Secure Linux native filesystem operations unavailable");
+                    }
+                }
                 throw new IOException("Secure directory operations unavailable");
             }
             SecureDirectoryStream<Path> secure = (SecureDirectoryStream<Path>) opened;
@@ -589,7 +617,7 @@ public class MailAccountProjectionService {
                             || permission.name().startsWith("OTHERS_"))) {
                     throw new IOException("Projection parent permissions are not private");
                 }
-                return new NioAnchoredDirectory(directory.toAbsolutePath().normalize(), secure);
+                return new NioAnchoredDirectory(directory.toAbsolutePath().normalize(), secure, expectedIdentity.fileKey());
             } catch (IOException | RuntimeException e) {
                 secure.close();
                 throw e;
@@ -604,14 +632,17 @@ public class MailAccountProjectionService {
         private class NioAnchoredDirectory implements AnchoredDirectory {
             private final Path directory;
             private final SecureDirectoryStream<Path> secure;
+            private final Object parentKey;
 
-            NioAnchoredDirectory(Path directory, SecureDirectoryStream<Path> secure) {
+            NioAnchoredDirectory(Path directory, SecureDirectoryStream<Path> secure, Object parentKey) {
                 this.directory = directory;
                 this.secure = secure;
+                this.parentKey = parentKey;
             }
 
             @Override
             public ProjectionLock lock() throws IOException {
+                validateParent();
                 Path relative = Path.of(".mail-projection.lock");
                 Path lockKey = directory.resolve(relative);
                 ReentrantLock local = JVM_LOCKS.computeIfAbsent(lockKey, ignored -> new ReentrantLock());
@@ -652,6 +683,7 @@ public class MailAccountProjectionService {
             @Override
             public byte[] readPrivateIfExists(Path file, int maximumBytes) throws IOException {
                 try {
+                    validateParent();
                     BasicFileAttributes attributes = validatePrivatePath(file, null);
                     if (attributes.size() > maximumBytes) throw new IOException("Mail projection exceeds read limit");
                     try (SeekableByteChannel channel = secure.newByteChannel(file,
@@ -663,6 +695,9 @@ public class MailAccountProjectionService {
                             if (read == 0) throw new IOException("Mail projection read made no progress");
                         }
                         if (buffer.hasRemaining()) throw new IOException("Mail projection changed during read");
+                        validateParent();
+                        validatePrivatePath(file, attributes.fileKey());
+                        if (channel.size() != attributes.size()) throw new IOException("Mail projection changed during read");
                         return buffer.array();
                     }
                 } catch (NoSuchFileException e) {
@@ -673,6 +708,7 @@ public class MailAccountProjectionService {
         @Override
         public OpenedPrivateFile openPrivateTemp() throws IOException {
             beforeOpenTemp(directory);
+            validateParent();
             Path path = Path.of(".mail-accounts-" + UUID.randomUUID() + ".tmp");
             FileChannel channel = openNewPrivate(path);
             try {
@@ -707,22 +743,54 @@ public class MailAccountProjectionService {
         @Override
         public void validateIdentity(OpenedPrivateFile file, Path path) throws IOException {
             beforeValidateIdentity(directory, file, path);
+            validateParent();
             validatePrivatePath(path, file.identity());
         }
 
         @Override
         public void moveAtomic(OpenedPrivateFile source, Path target) throws IOException {
             beforeMove(directory, source, target);
+            validateParent();
+            validatePrivatePath(source.path(), source.identity());
+            try { validatePrivatePath(target, null); } catch (NoSuchFileException ignored) { }
             secure.move(source.path(), secure, target);
+            forceDirectory();
         }
 
         @Override
         public void deleteIfExists(Path file) throws IOException {
             try {
+                validateParent();
+                validatePrivatePath(file, null);
                 secure.deleteFile(file);
+                forceDirectory();
             } catch (NoSuchFileException ignored) {
                 // Already absent.
             }
+        }
+
+        private void validateParent() throws IOException {
+            var named = Files.readAttributes(directory, java.nio.file.attribute.PosixFileAttributes.class,
+                LinkOption.NOFOLLOW_LINKS);
+            var held = secure.getFileAttributeView(Path.of("."), PosixFileAttributeView.class,
+                LinkOption.NOFOLLOW_LINKS).readAttributes();
+            var owner = directory.getFileSystem().getUserPrincipalLookupService()
+                .lookupPrincipalByName(System.getProperty("user.name"));
+            if (!named.isDirectory() || !parentKey.equals(named.fileKey()) || !parentKey.equals(held.fileKey())
+                    || !named.permissions().equals(PosixFilePermissions.fromString("rwx------"))
+                    || !held.permissions().equals(named.permissions())
+                    || !named.owner().equals(owner) || !held.owner().equals(owner)) {
+                throw new IOException("Projection parent identity, owner or permissions changed");
+            }
+        }
+
+        private void forceDirectory() throws IOException {
+            validateParent();
+            try (FileChannel channel = FileChannel.open(directory, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS)) {
+                validateParent();
+                channel.force(true);
+            }
+            validateParent();
         }
 
         private FileChannel openNewPrivate(Path path) throws IOException {
@@ -741,7 +809,9 @@ public class MailAccountProjectionService {
             }
             PosixFileAttributeView view = secure
                 .getFileAttributeView(path, PosixFileAttributeView.class, LinkOption.NOFOLLOW_LINKS);
-            if (view == null || !view.readAttributes().permissions().equals(PRIVATE_PERMISSIONS)) {
+            if (view == null || !view.readAttributes().permissions().equals(PRIVATE_PERMISSIONS)
+                    || !view.readAttributes().owner().equals(directory.getFileSystem().getUserPrincipalLookupService()
+                        .lookupPrincipalByName(System.getProperty("user.name")))) {
                 throw new IOException("Mail projection permissions are not private");
             }
             if (expectedIdentity != null && !expectedIdentity.equals(attributes.fileKey())) {

@@ -83,6 +83,22 @@ public class MailAccountProjectionStateService implements MailConnectorLookup {
         return connector != null && MailProviderCatalog.findByConnectorCode(connector.getConnectorCode()).isPresent();
     }
 
+    @Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true)
+    public String connectorCode(Long connectorId) {
+        ConnectorInfo connector = connectorInfoMapper.selectById(connectorId);
+        return connector == null ? null : connector.getConnectorCode();
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true)
+    public Set<Long> invalidProjectionIds(Long userId) {
+        return privateParamStore.invalidProjectionIds(userId);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true)
+    public String storedConnectorCode(Long userId, Long connectorId) {
+        return privateParamStore.connectorCode(userId, connectorId);
+    }
+
     @Override
     @Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true)
     public ConnectorInfo findActiveConnector(String connectorCode) {
@@ -136,12 +152,10 @@ public class MailAccountProjectionStateService implements MailConnectorLookup {
         if ("OAUTH2".equals(account.getAuthType())) {
             return StringUtils.hasText(account.getCredentialRef()) ? "NORMAL" : "AUTH_REQUIRED";
         }
-        if ("APP_PASSWORD".equals(account.getAuthType()) || "API_TOKEN".equals(account.getAuthType())
-                || "NTLM".equals(account.getAuthType())) {
+        if ("APP_PASSWORD".equals(account.getAuthType()) || "API_TOKEN".equals(account.getAuthType())) {
             return StringUtils.hasText(account.getAuthCodeCipher()) ? "NORMAL" : "AUTH_REQUIRED";
         }
-        if ("KERBEROS".equals(account.getAuthType())) return "NORMAL";
-        return "BROWSER_SSO".equals(account.getAuthType()) ? "NORMAL" : "AUTH_REQUIRED";
+        return "AUTH_REQUIRED";
     }
 
     private Set<Long> reconcileProvider(Long userId, MailProviderVO provider, ConnectorInfo connector) {
@@ -152,7 +166,7 @@ public class MailAccountProjectionStateService implements MailConnectorLookup {
             String reference = validAuthorizationReference(userId, connector, account.getEmail());
             String status = reference == null ? "AUTH_REQUIRED" : "NORMAL";
             if (java.util.Objects.equals(reference, account.getCredentialRef())
-                    && java.util.Objects.equals(status, account.getStatus())) continue;
+                    && (reference != null || java.util.Objects.equals(status, account.getStatus()))) continue;
             affected.add(account.getAccountId());
             String observedStatus = account.getStatus();
             Date observedTime = account.getUpdateTime();
