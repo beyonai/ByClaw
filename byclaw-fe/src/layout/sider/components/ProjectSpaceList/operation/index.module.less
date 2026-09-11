@@ -121,14 +121,6 @@
   font-weight: 400;
 }
 
-// 知识整理区域独占新行，开关和本体列表在区域内部保持左右两列对齐。
-.operationKnowledgeOrganizationRow {
-  grid-column: 1 / -1;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  column-gap: 16px;
-}
-
 // 采集方式占左侧一半，周期类型和采集时分各占右侧四分之一，保证三项同一行展示。
 .operationScheduleTopRow {
   grid-column: 1 / -1;
@@ -209,74 +201,6 @@
     font-size: 14px;
     font-weight: 600;
     line-height: 20px;
-  }
-}
-
-// 整理模板配置结果在表单内以摘要呈现，弹窗负责编辑以避免占用采集配置的主表单空间。
-.knowledgeOrganizationSummary {
-  min-height: 40px;
-  padding: 8px 10px;
-  border: 1px solid #d9e2ef;
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  background: #fff;
-
-  > div {
-    min-width: 0;
-    display: flex;
-    flex: 1;
-    flex-direction: column;
-    gap: 2px;
-  }
-
-  strong,
-  span {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  strong {
-    color: #273142;
-    font-size: 13px;
-    font-weight: 500;
-  }
-
-  span {
-    color: #8a94a6;
-    font-size: 12px;
-  }
-}
-
-// 知识整理弹窗的说明和模式切换独立成块，和原型中的已有/新增本体选择保持一致。
-.knowledgeOrganizationModal {
-  :global {
-    .@{antPrefix}-modal-body {
-      padding-right: 20px;
-    }
-  }
-}
-
-.knowledgeOrganizationIntro {
-  margin: 0 0 16px;
-  color: #687385;
-  font-size: 13px;
-  line-height: 20px;
-}
-
-.knowledgeOrganizationMode {
-  :global {
-    .@{antPrefix}-radio-group {
-      display: flex;
-    }
-
-    .@{antPrefix}-radio-button-wrapper {
-      flex: 1;
-      text-align: center;
-    }
   }
 }
 

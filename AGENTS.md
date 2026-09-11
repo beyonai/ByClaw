@@ -20,7 +20,6 @@ This is the canonical contract for automated agents working in this repository:
 | `byclaw-fe/` | Web frontend (React / Umi Max, `pnpm`) |
 | `byclaw-be/` | Java backend (Maven) |
 | `byclaw-exe/` | Python CLIs and tooling (`pyproject.toml` when initialized) |
-| `byclaw-data/` | Data assets, schemas, pipeline notes |
 | `byclaw-qa/` | Cross-cutting QA, e2e, performance |
 | `docs/` | Top-level docs: `architecture/`, `api/`, `quick-start/` |
 | `examples/` | Standalone examples, decoupled from production config |

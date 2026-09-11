@@ -58,10 +58,11 @@ export const uploadFiles = async (data: FormData) => {
     data.forEach((value, key) => {
       if (key !== 'files' && typeof value === 'string') payload[key] = value;
     });
-    const res = await POST<any>('/byaiService/chat/uploadFiles', payload);
+    const res = await POST<any>('/byaiService/chat/uploadFiles', payload, { responseCfg: { hideErrorTips: true } });
     return { ...res, rebuildFileList: res.uploadItems || [] };
   }
   return POST<any>('/byaiService/chat/uploadFiles', data, {
+    responseCfg: { hideErrorTips: true },
     timeout: 480000,
     headers: {
       'Content-Type': 'multipart/form-data; charset=utf-8',

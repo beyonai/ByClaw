@@ -6,7 +6,7 @@ type DevloopProjectType = 'normal' | 'operation' | 'develop' | 'default';
 
 type DevloopProjectShareFlag = 'N' | 'Y';
 
-export type ProjectResourceType = 'knowledge' | 'digital_employee' | 'ontology';
+export type ProjectResourceType = 'knowledge' | 'digital_employee';
 
 export type ProjectResourcePayload = {
   resourceType: ProjectResourceType;
@@ -181,13 +181,7 @@ export type DevloopProjectSpaceFile = {
   shareLink?: string | null;
 };
 
-export type OperationTaskTemplateType =
-  | 'collect'
-  | 'knowledge'
-  | 'object_discovery'
-  | 'content'
-  | 'publish'
-  | 'analyze';
+export type OperationTaskTemplateType = 'collect' | 'content' | 'publish' | 'analyze';
 
 export type OperationTaskTemplate = {
   templateId: number;
@@ -528,15 +522,6 @@ export const listOperationTaskTemplates = (templateType?: OperationTaskTemplateT
 
 export const getOperationTaskTemplate = (templateId: number) =>
   POST<OperationTaskTemplate>('/byaiService/devloop/operation/task-template/get', { templateId });
-
-/** 按当前选择的知识库查询可用本体对象。 */
-export const queryObjectsByKnowledge = (data: {
-  kbResourceId: string | number;
-  kbDirectories?: string[];
-  objectName?: string;
-  pageIndex?: number;
-  pageSize?: number;
-}) => POST<any>('/byaiService/devloop/operation/queryObjectsByKnowledge', data);
 
 export type ProjectObjectFileType = 'object' | 'knowledge';
 

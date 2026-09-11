@@ -13,7 +13,6 @@ STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACMR)
 HAS_FE=false
 HAS_BE=false
 HAS_EXE=false
-HAS_DATA=false
 HAS_KGW=false
 HAS_SUPPER=false
 
@@ -22,7 +21,6 @@ for file in $STAGED_FILES; do
     byclaw-fe/*) HAS_FE=true ;;
     byclaw-be/*) HAS_BE=true ;;
     byclaw-exe/*) HAS_EXE=true ;;
-    byclaw-data/*) HAS_DATA=true ;;
     byclaw-kgw/*) HAS_KGW=true ;;
     byclaw-supper/*) HAS_SUPPER=true ;;
   esac
@@ -143,25 +141,6 @@ if [ "$HAS_EXE" = true ]; then
 fi
 
 # ────────────────────────────────────────────────────────────
-# Python (byclaw-data) checks: ruff
-# ────────────────────────────────────────────────────────────
-if [ "$HAS_DATA" = true ]; then
-  echo "🔍 [pre-commit] Running byclaw-data checks..."
-
-  cd "$REPO_ROOT/byclaw-data"
-  if command -v ruff >/dev/null 2>&1; then
-    ruff check .
-    if [ $? -ne 0 ]; then
-      echo "❌ [pre-commit] byclaw-data ruff check failed"
-      EXIT_CODE=1
-    else
-      echo "✅ [pre-commit] byclaw-data checks passed"
-    fi
-  fi
-  cd "$REPO_ROOT"
-fi
-
-# ────────────────────────────────────────────────────────────
 # Python (byclaw-kgw) checks: pre-commit
 # ────────────────────────────────────────────────────────────
 if [ "$HAS_KGW" = true ]; then
@@ -202,7 +181,7 @@ fi
 # ────────────────────────────────────────────────────────────
 # Summary
 # ────────────────────────────────────────────────────────────
-if [ "$HAS_FE" = false ] && [ "$HAS_BE" = false ] && [ "$HAS_EXE" = false ] && [ "$HAS_DATA" = false ] && [ "$HAS_KGW" = false ] && [ "$HAS_SUPPER" = false ]; then
+if [ "$HAS_FE" = false ] && [ "$HAS_BE" = false ] && [ "$HAS_EXE" = false ] && [ "$HAS_KGW" = false ] && [ "$HAS_SUPPER" = false ]; then
   echo "⏭️  [pre-commit] No module changes detected, skipping checks"
 fi
 

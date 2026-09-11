@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildOntologyCallAgentPayload } from "./mcp.js";
+import { buildResourceCallAgentPayload } from "./mcp.js";
 
-describe("buildOntologyCallAgentPayload", () => {
+describe("buildResourceCallAgentPayload", () => {
   it("adds resource_ids alongside OBJECT resource codes", () => {
-    const payload = buildOntologyCallAgentPayload(
+    const payload = buildResourceCallAgentPayload(
       {
         query: "ignored",
         arguments: {
@@ -28,7 +28,7 @@ describe("buildOntologyCallAgentPayload", () => {
   });
 
   it("adds resource_ids alongside VIEW resource codes", () => {
-    const payload = buildOntologyCallAgentPayload(
+    const payload = buildResourceCallAgentPayload(
       { arguments: { ownerUserCode: "0027003729" } },
       {
         resourceType: "VIEW",

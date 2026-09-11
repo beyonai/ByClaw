@@ -887,7 +887,7 @@ class AuthApplicationServiceTest {
 
         AuthDetailQo qo = new AuthDetailQo();
         qo.setGrantType(GrantType.FORCE_USE);
-        qo.setGrantObjType(ResourceBizTypeEnum.ONTOLOGY_BASE.name());
+        qo.setGrantObjType(ResourceBizTypeEnum.OBJECT.name());
         qo.setGrantObjId(501L);
 
         ResponseUtil response = service.listAuthDetail(qo);

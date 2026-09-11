@@ -21,7 +21,7 @@ public class RedisResourceQueryService {
     private static final int MAX_BATCH_SIZE = 100;
     private static final Map<String, String> RESOURCE_KEY_PREFIXES = Map.of(
         "DIG_EMPLOYEE", "DIG_EMPLOYEE_", "KG_DOC", "KG_DOC_", "OBJECT", "OBJECT_",
-        "VIEW", "VIEW_", "SCENE", "SCENE_", "ONTOLOGY_BASE", "ONTOLOGY_BASE_"
+        "VIEW", "VIEW_", "SCENE", "SCENE_"
     );
 
     @Autowired

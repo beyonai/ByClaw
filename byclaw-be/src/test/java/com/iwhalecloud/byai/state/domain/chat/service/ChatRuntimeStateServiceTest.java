@@ -3,6 +3,7 @@ package com.iwhalecloud.byai.state.domain.chat.service;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -10,6 +11,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.ArrayList;
@@ -24,6 +26,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.dao.QueryTimeoutException;
 import org.springframework.data.redis.core.Cursor;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.ScanOptions;
@@ -332,6 +335,97 @@ class ChatRuntimeStateServiceTest {
         assistantChatDto.setAgentType("001");
         assistantChatDto.setChatContent("hello");
         return assistantChatDto;
+    }
+
+    /**
+     * 运行态 key 与两个索引 key 分属不同 hash slot，一旦被合进同一条 Lua 脚本，
+     * Redis Cluster 会在客户端直接拒绝（Keys must belong to same hashslot），
+     * 整条终结清理链路随之中断，listener 与租约续期泄漏到进程重启。
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void deleteKeepsTheOwnershipScriptSingleKeyedSoItWorksOnACluster() {
+        DeleteTurnFixture fixture = new DeleteTurnFixture(1L);
+
+        service.delete(fixture.ctx);
+
+        ArgumentCaptor<List<String>> keys = ArgumentCaptor.forClass(List.class);
+        verify(fixture.redis).execute(any(DefaultRedisScript.class), keys.capture(), any(), any());
+        assertEquals(List.of("byai:chat:runtime:10"), keys.getValue());
+    }
+
+    @Test
+    void deleteRemovesBothIndexEntriesOutsideTheScript() {
+        DeleteTurnFixture fixture = new DeleteTurnFixture(1L);
+
+        service.delete(fixture.ctx);
+
+        verify(fixture.sets).remove("byai:chat:runtime:index", "10");
+        verify(fixture.sets).remove("byai:chat:runtime:10:turns", "10");
+    }
+
+    /**
+     * token 不匹配说明该 identifier 已被后续轮次接管，索引条目属于新的持有者。
+     * 原子脚本靠 early return 保证这一点，拆开后必须由调用侧维持同样的语义。
+     */
+    @Test
+    void deleteLeavesIndexEntriesAloneWhenTheOwnershipTokenNoLongerMatches() {
+        DeleteTurnFixture fixture = new DeleteTurnFixture(0L);
+
+        service.delete(fixture.ctx);
+
+        verifyNoInteractions(fixture.sets);
+    }
+
+    /**
+     * 索引残留是自愈的（扫描读到空值即摘除），但异常上抛会中断调用方的终结清理，
+     * 代价远高于一条残留条目，因此索引摘除失败必须被吞掉且不影响后续步骤。
+     */
+    @Test
+    void deleteSurvivesIndexRemovalFailureAndStillClearsTheOtherIndex() {
+        DeleteTurnFixture fixture = new DeleteTurnFixture(1L);
+        when(fixture.sets.remove("byai:chat:runtime:index", "10"))
+            .thenThrow(new QueryTimeoutException("redis down"));
+
+        service.delete(fixture.ctx);
+
+        verify(fixture.sets).remove("byai:chat:runtime:10:turns", "10");
+    }
+
+    /**
+     * 运行态没删掉却继续往下走，恢复逻辑会把一轮已结束的对话当作仍在运行，因此这一步的异常必须上抛。
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void deletePropagatesFailuresOfTheOwnershipCheckedRemoval() {
+        DeleteTurnFixture fixture = new DeleteTurnFixture(1L);
+        when(fixture.redis.execute(any(DefaultRedisScript.class), any(List.class), any(), any()))
+            .thenThrow(new QueryTimeoutException("redis down"));
+
+        assertThrows(QueryTimeoutException.class, () -> service.delete(fixture.ctx));
+    }
+
+    /** 组装 deleteTurn 所需的最小依赖，scriptResult 为脚本返回值。 */
+    private final class DeleteTurnFixture {
+
+        private final RedisTemplate<String, Object> redis = mock(RedisTemplate.class);
+        private final SetOperations<String, Object> sets = mock(SetOperations.class);
+        private final ChatProcessContext ctx;
+
+        @SuppressWarnings("unchecked")
+        private DeleteTurnFixture(Long scriptResult) {
+            ChatRuntimeInstance instance = mock(ChatRuntimeInstance.class);
+            when(redis.opsForSet()).thenReturn(sets);
+            when(instance.getInstanceId()).thenReturn("instance-1");
+            when(redis.execute(any(DefaultRedisScript.class), any(List.class), any(), any()))
+                .thenReturn(scriptResult);
+            ReflectionTestUtils.setField(service, "redisTemplate", redis);
+            ReflectionTestUtils.setField(service, "chatRuntimeInstance", instance);
+
+            ctx = new ChatProcessContext(null, assistantChatDto());
+            ctx.sessionId = 10L;
+            ctx.runningOutputStreamToken = "token-1";
+        }
     }
 
     @SuppressWarnings("unchecked")

@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Polyglot monorepo for **Byclaw (BeyondAI)** — an enterprise AI application platform with agent management, multi-turn chat, knowledge bases (RAG), and tool orchestration. Product name: "鲸智百应".
 
-Modules: `byclaw-fe/` (React frontend), `byclaw-be/` (Java backend), `byclaw-exe/` (Python CLIs, stub). Supporting dirs: `byclaw-data/`, `byclaw-qa/`, `docs/`, `examples/`, `scripts/`.
+Modules: `byclaw-fe/` (React frontend), `byclaw-be/` (Java backend), `byclaw-exe/` (Python CLIs, stub). Supporting dirs: `byclaw-qa/`, `docs/`, `examples/`, `scripts/`.
 
 ## Build, lint, and test commands
 

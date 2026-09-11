@@ -11,10 +11,8 @@ import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.feign.client.FeignDataCloudService;
 import com.iwhalecloud.byai.common.feign.request.datacloud.InvokeActionReq;
 import com.iwhalecloud.byai.common.feign.request.datacloud.Params;
-import com.iwhalecloud.byai.common.feign.request.datacloud.QueryByKnowledgeReq;
 import com.iwhalecloud.byai.common.feign.response.DataCloudResponse;
 import com.iwhalecloud.byai.common.feign.response.datacloud.InvokeActionResp;
-import com.iwhalecloud.byai.common.feign.response.datacloud.QueryByKnowledgeResp;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.page.PageInfo;
@@ -37,7 +35,6 @@ import com.iwhalecloud.byai.manager.domain.connector.provider.dingtalk.DwsAuthor
 import com.iwhalecloud.byai.manager.domain.connector.service.ConnectorInfoService;
 import com.iwhalecloud.byai.manager.domain.session.service.ByaiSessionService;
 import com.iwhalecloud.byai.manager.dto.devloop.ListObjectFileDto;
-import com.iwhalecloud.byai.manager.dto.devloop.ListObjectFilePkIdDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ListProjectTaskStatusDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberListDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ManualRequirementDeleteDTO;
@@ -1967,17 +1964,6 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
     }
 
     /**
-     * 根据知识库资源 ID 分页查询对象基本信息，可选按知识库目录列表和对象名称进一步过滤。返回结果不包含对象的 properties 和 actions。
-     *
-     * @param paramReq 请求对象
-     * @return QueryByKnowledgeResp
-     */
-    public QueryByKnowledgeResp queryObjectsByKnowledge(QueryByKnowledgeReq paramReq) {
-        DataCloudResponse<QueryByKnowledgeResp> resp = feignDataCloudService.queryObjectsByKnowledge(paramReq);
-        return resp.getData();
-    }
-
-    /**
      * 保存对象实例到知识库
      *
      * @param params 请求参数
@@ -2095,59 +2081,6 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
             listProjectTaskStatusDto.getDimensionName());
     }
 
-    /**
-     * 查询运营任务对象信息
-     *
-     * @param listObjectFilePkIdDto 查询入参
-     * @return ResponseUtil
-     */
-    public List<Map<String, Object>> listObjectById(ListObjectFilePkIdDto listObjectFilePkIdDto) {
-        Long sessionId = listObjectFilePkIdDto.getSessionId();
-        List<ByaiSessionExt> byaiSessionExts = sessionExtService.selectBySessionId(sessionId);
-        String oploopTaskConfig = this.getOploopTaskConfig(byaiSessionExts);
-        if (StringUtil.isEmpty(oploopTaskConfig)) {
-            return null;
-        }
-
-        Map<String, Object> oploopTaskConfigMap = JSON.parseObject(oploopTaskConfig, Map.class);
-
-        List<Map<String, Object>> resultList = new ArrayList<>();
-        // 来源
-        List<Map<String, Object>> sourceList = (List<Map<String, Object>>) oploopTaskConfigMap.get("sourceOntology");
-        for (int i = 0; sourceList != null && i < sourceList.size(); i++) {
-            // 查询接口与执行接口使用同一套本体字段归一化，避免返回结构因入口不同而不一致。
-            Map<String, Object> ontologyMap = enrichOperationTaskOntology(sourceList.get(i));
-            ontologyMap.put("ontologyConfigType", "source");
-            resultList.add(ontologyMap);
-        }
-
-        // 目标
-        List<Map<String, Object>> targetList = (List<Map<String, Object>>) oploopTaskConfigMap.get("ontology");
-        for (int i = 0; targetList != null && i < targetList.size(); i++) {
-            Map<String, Object> ontologyMap = enrichOperationTaskOntology(targetList.get(i));
-            ontologyMap.put("ontologyConfigType", "target");
-            resultList.add(ontologyMap);
-        }
-
-        return resultList;
-    }
-
-    /**
-     * 获取配置属性
-     *
-     * @param byaiSessionExts 扩展字段
-     * @return String
-     */
-    private String getOploopTaskConfig(List<ByaiSessionExt> byaiSessionExts) {
-        for (ByaiSessionExt byaiSessionExt : byaiSessionExts) {
-            String extParamCode = byaiSessionExt.getExtParamCode();
-            String extParamValue = byaiSessionExt.getExtParamValue();
-            if ("oploop_task_config".equalsIgnoreCase(extParamCode)) {
-                return extParamValue;
-            }
-        }
-        return null;
-    }
 
     /**
      * 更新任务的状态
@@ -4185,6 +4118,12 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
             return ResponseUtil.failRes(accessError);
         }
         Map<String, String> taskExt = operationTaskSessionService.getExtValues(task.getSessionId());
+        String retiredFeatureError = validateRetiredOperationFeature(
+            taskExt.get(OperationTaskSessionService.EXT_OPERATION_TYPE),
+            taskExt.get(OperationTaskSessionService.EXT_CONFIG));
+        if (retiredFeatureError != null) {
+            return ResponseUtil.failRes(retiredFeatureError);
+        }
         if (OperationTaskSessionService.STATUS_RUNNING.equals(taskExt.get(OperationTaskSessionService.EXT_STATUS))) {
             String accountReferenceError = validateOperationAccountReference(
                 taskExt.get(OperationTaskSessionService.EXT_OPERATION_TYPE),
@@ -4218,7 +4157,7 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
             effectiveOperationType = requestedTemplate.getTemplateType();
         }
         if (dto.getConfig() != null) {
-            enrichedRequestConfig = enrichOperationTaskOntologyConfig(dto.getConfig());
+            enrichedRequestConfig = new LinkedHashMap<>(dto.getConfig());
             effectiveConfig = enrichedRequestConfig;
         }
         String accountReferenceError = validateOperationAccountReference(effectiveOperationType, effectiveConfig,
@@ -4245,7 +4184,7 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
                     StringUtils.defaultString(requestedTemplate.getTemplateType()));
             }
             if (dto.getConfig() != null) {
-                // 执行配置中的本体统一补齐 ID、code、名称和描述，供会话对象详情及 Worker 直接消费。
+                // 执行配置原样落库，供会话详情及 Worker 直接消费。
                 templateExtensions.put(OperationTaskSessionService.EXT_CONFIG,
                     JSON.toJSONString(enrichedRequestConfig));
             }
@@ -4299,117 +4238,6 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
         return ResponseUtil.successResponse(result);
     }
 
-    /**
-     * 补全任务模板配置中的本体对象；前端字段不完整时优先从资源表读取真实元数据。
-     */
-    private Map<String, Object> enrichOperationTaskOntologyConfig(Map<String, Object> config) {
-        Map<String, Object> enrichedConfig = new LinkedHashMap<>(config);
-        // 目标本体和来源本体都统一补全为包含 ID/code/name 的对象，供执行器和提示词共同使用。
-        enrichOperationTaskOntologyField(enrichedConfig, "ontology");
-        enrichOperationTaskOntologyField(enrichedConfig, "sourceOntology");
-        return enrichedConfig;
-    }
-
-    private void enrichOperationTaskOntologyField(Map<String, Object> config, String fieldName) {
-        Object value = config.get(fieldName);
-        if (value == null) {
-            return;
-        }
-        List<?> values = value instanceof List<?> list ? list : List.of(value);
-        List<Map<String, Object>> enrichedValues = new ArrayList<>();
-        for (Object item : values) {
-            enrichedValues.add(enrichOperationTaskOntology(item));
-        }
-        config.put(fieldName, enrichedValues);
-    }
-
-    /**
-     * 将单个本体值归一为同时兼容资源、本体对象和通用详情字段的结构。
-     */
-    private Map<String, Object> enrichOperationTaskOntology(Object value) {
-        Map<String, Object> result = new LinkedHashMap<>();
-        if (value instanceof Map<?, ?> valueMap) {
-            valueMap.forEach((key, itemValue) -> result.put(String.valueOf(key), itemValue));
-        } else if (value != null) {
-            // 仅提交数字/字符串时，前端 Select 的值约定为 resourceId，不把它误当 objectId。
-            result.put("resourceId", value);
-        }
-
-        Object requestedObjectId = firstOperationOntologyValue(result, "objectId", "id");
-        Object requestedResourceId = firstOperationOntologyValue(result, "resourceId");
-        Object requestedId = requestedResourceId != null ? requestedResourceId : requestedObjectId;
-        String requestedCode = operationOntologyText(
-            firstOperationOntologyValue(result, "objectCode", "resourceCode", "code"));
-        SsResource resource = findOperationOntologyResource(requestedId, requestedCode);
-        Object resourceId = resource != null && resource.getResourceId() != null ? resource.getResourceId()
-            : requestedResourceId;
-        Object objectId = requestedObjectId != null ? requestedObjectId : resourceId;
-        Object id = objectId != null ? objectId : requestedId;
-        String code = resource != null && StringUtils.isNotBlank(resource.getResourceCode())
-            ? resource.getResourceCode()
-            : requestedCode;
-        String name = operationOntologyText(firstOperationOntologyValue(result, "objectName", "resourceName", "name"));
-        if (StringUtils.isBlank(name) && resource != null) {
-            name = resource.getResourceName();
-        }
-        String description = operationOntologyText(
-            firstOperationOntologyValue(result, "objectDesc", "resourceDesc", "description"));
-        if (StringUtils.isBlank(description) && resource != null) {
-            description = resource.getResourceDesc();
-        }
-
-        result.put("id", id);
-        result.put("objectId", objectId);
-        result.put("resourceId", resourceId != null ? resourceId : id);
-        Object baseId = firstOperationOntologyValue(result, "baseId");
-        result.put("baseId", baseId);
-        result.put("code", StringUtils.defaultString(code));
-        result.put("objectCode", StringUtils.defaultString(code));
-        result.put("resourceCode", StringUtils.defaultString(code));
-        result.put("name", StringUtils.defaultString(name));
-        result.put("objectName", StringUtils.defaultString(name));
-        result.put("resourceName", StringUtils.defaultString(name));
-        result.put("description", StringUtils.defaultString(description));
-        result.put("objectDesc", StringUtils.defaultString(description));
-        result.put("resourceDesc", StringUtils.defaultString(description));
-        return result;
-    }
-
-    private Object firstOperationOntologyValue(Map<String, Object> value, String... keys) {
-        for (String key : keys) {
-            Object candidate = value.get(key);
-            if (candidate != null && StringUtils.isNotBlank(String.valueOf(candidate))) {
-                return candidate;
-            }
-        }
-        return null;
-    }
-
-    private String operationOntologyText(Object value) {
-        return value == null ? null : StringUtils.trimToNull(String.valueOf(value));
-    }
-
-    /**
-     * 本体绑定可能保存资源 ID 或资源 code，两种情况都兼容查询。
-     */
-    private SsResource findOperationOntologyResource(Object id, String code) {
-        if (id != null) {
-            try {
-                SsResource resource = ssResourceMapper.selectByResourceId(Long.valueOf(String.valueOf(id)));
-                if (resource != null) {
-                    return resource;
-                }
-            } catch (NumberFormatException ignored) {
-                // 外部本体 ID 可能是字符串编码，继续按 resource_code 查询。
-            }
-        }
-        String resourceCode = StringUtils.defaultIfBlank(code, id == null ? null : String.valueOf(id));
-        if (StringUtils.isBlank(resourceCode)) {
-            return null;
-        }
-        return ssResourceMapper.selectOne(
-            new LambdaQueryWrapper<SsResource>().eq(SsResource::getResourceCode, resourceCode).last("LIMIT 1"));
-    }
 
     /**
      * 定时聊天型自动化到点执行：把 config 里存的 chat 入参还原成 AssistantChatDto 发起一次会话。
@@ -4787,7 +4615,8 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
         // 避免未执行增量 SQL 的环境继续把已废弃字段发送到首条任务对话中。
         if ("collect".equals(operationType) && StringUtils.isNotBlank(template)
             && (template.contains("${collectChannel}") || template.contains("${collectAccount}")
-            || template.contains("${collectTopic}"))) {
+            || template.contains("${collectTopic}") || template.contains("${collectOntology}")
+            || template.contains("${collectOrganize}") || template.contains("${collectOrganization"))) {
             template = null;
         }
         if (StringUtils.isBlank(template)) {
@@ -4803,12 +4632,8 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
             : StringUtils.defaultString(requirement.getSourceName());
         String requirementDescription = requirement == null ? taskExt.get(OperationTaskSessionService.EXT_DESCRIPTION)
             : StringUtils.defaultString(requirement.getSourceDescription());
-        String sourceModeValue = isKnowledgeOrganizationTask(operationType)
-            ? getOperationKnowledgeOrganizationValue(operationConfigMap, "sourceOntology", "sourceMode")
-            : getOperationSourceModeLabel(findOperationConfigValue(operationConfigMap, "sourceMode"));
-        String storageModeValue = isKnowledgeOrganizationTask(operationType)
-            ? getOperationKnowledgeOrganizationValue(operationConfigMap, "ontology", "storageMode")
-            : getOperationStorageModeLabel(findOperationConfigValue(operationConfigMap, "storageMode"));
+        String sourceModeValue = getOperationSourceModeLabel(findOperationConfigValue(operationConfigMap, "sourceMode"));
+        String storageModeValue = getOperationStorageModeLabel(findOperationConfigValue(operationConfigMap, "storageMode"));
         return template.replace("${projectName}", StringUtils.defaultString(projectName))
             .replace("${taskType}", StringUtils.defaultString(taskType))
             .replace("${title}", StringUtils.defaultString(session.getSessionName()))
@@ -4848,16 +4673,6 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
                 getOperationRunModeLabel(
                     findOperationConfigValue(operationConfigMap, "runMode", "mode", "collectMethod")))
             .replace("${collectSchedule}", getOperationCollectionSchedule(operationConfigMap))
-            .replace("${collectOrganize}",
-                getOperationPromptBoolean(
-                    findOperationConfigValue(operationConfigMap, "organize", "knowledgeOrganize", "storageMode")))
-            .replace("${collectOntology}",
-                getOperationKnowledgeOrganizationValue(operationConfigMap, "templateName", "templateId",
-                    "organizeTemplateId", "ontology"))
-            .replace("${collectOrganizationRequest}",
-                getOperationKnowledgeOrganizationValue(operationConfigMap, "request"))
-            .replace("${collectOrganizationStructure}",
-                getOperationKnowledgeOrganizationValue(operationConfigMap, "structure"))
             .replace("${contentType}", getOperationPromptValue(operationConfigMap, "contentType"))
             .replace("${publishChannel}", getOperationChannelLabel(operationConfigMap.get("publishChannel")))
             .replace("${publishAccount}",
@@ -4877,18 +4692,12 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
             .replace("${operationConfig}", JSON.toJSONString(operationConfigMap));
     }
 
-    private boolean isKnowledgeOrganizationTask(String operationType) {
-        return "knowledge".equalsIgnoreCase(operationType) || "object_discovery".equalsIgnoreCase(operationType);
-    }
-
     /**
      * 运营需求类型与启动提示词参数一一对应；content 是发布类型的历史兼容值。
      */
     private String getOperationTaskPromptConfigCode(String operationType) {
         return switch (operationType == null ? "" : operationType) {
             case "collect" -> "OPLOOP_TASK_START_PROMPT_COLLECT";
-            case "knowledge" -> "OPLOOP_TASK_START_PROMPT_KNOWLEDGE";
-            case "object_discovery" -> "OPLOOP_TASK_START_PROMPT_OBJECT_DISCOVERY";
             case "publish", "content" -> "OPLOOP_TASK_START_PROMPT_PUBLISH";
             case "analyze" -> "OPLOOP_TASK_START_PROMPT_ANALYZE";
             // 未识别类型使用国际化默认模板，不再依赖已废弃的通用参数码。
@@ -4902,8 +4711,6 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
     private String getOperationTaskPromptDefaultMessageCode(String operationType) {
         return switch (operationType == null ? "" : operationType) {
             case "collect" -> "devloop.operationTask.prompt.collect.default";
-            case "knowledge" -> "devloop.operationTask.prompt.knowledge.default";
-            case "object_discovery" -> "devloop.operationTask.prompt.objectDiscovery.default";
             case "publish", "content" -> "devloop.operationTask.prompt.publish.default";
             case "analyze" -> "devloop.operationTask.prompt.analyze.default";
             default -> "devloop.operationTask.prompt.default";
@@ -4934,7 +4741,7 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
         if (value == null) {
             return I18nUtil.get("devloop.operationTask.prompt.notConfigured");
         }
-        // 本体支持多选：提示词按名称/编码拼接，避免把整个数组或 Map 字符串塞进 prompt。
+        // 多选资源按名称/编码拼接，避免把整个数组或 Map 字符串塞进 prompt。
         if (value instanceof Collection<?> collection) {
             List<String> labels = new ArrayList<>();
             for (Object item : collection) {
@@ -4999,24 +4806,20 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
             return I18nUtil.get("devloop.operationTask.prompt.notConfigured");
         }
         return switch (String.valueOf(value).trim().toLowerCase(Locale.ROOT)) {
-            case "ontology" -> I18nUtil.get("devloop.operationTask.storageMode.ontology");
             case "knowledge" -> I18nUtil.get("devloop.operationTask.storageMode.knowledge");
             default -> String.valueOf(value);
         };
     }
 
     /**
-     * 入库位置跟随入库方式读取本体或目标知识库，不再使用旧版“知识整理”字段。
+     * 读取目标知识库入库位置。
      */
     private String getOperationStorageTarget(Map<String, Object> config) {
         String storageMode = StringUtils.defaultString(getOperationConfigText(config, "storageMode"));
-        if ("ontology".equalsIgnoreCase(storageMode)) {
-            return getOperationKnowledgeOrganizationValue(config, "ontology");
-        }
         if ("knowledge".equalsIgnoreCase(storageMode)) {
             return resolveOperationResourceName(findOperationConfigValue(config, "targetKnowledge"));
         }
-        return getOperationPromptValue(config, "ontology", "targetKnowledge", "knowledgeBaseId");
+        return getOperationPromptValue(config, "targetKnowledge", "knowledgeBaseId");
     }
 
     /**
@@ -5112,43 +4915,17 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
         };
     }
 
-    /**
-     * 知识整理开关使用可读文案，避免把 true/false 直接输出到运营提示词。
-     */
-    private String getOperationPromptBoolean(Object value) {
-        if (value == null || StringUtils.isBlank(String.valueOf(value))) {
-            return I18nUtil.get("devloop.operationTask.prompt.notConfigured");
+    /** 拒绝已下线模板及历史本体配置，不修改历史记录。 */
+    private String validateRetiredOperationFeature(String operationType, Object config) {
+        Map<?, ?> values = config instanceof Map<?, ?> map ? map
+            : parseOperationConfig(config == null ? null : String.valueOf(config));
+        if ("knowledge".equalsIgnoreCase(operationType) || "object_discovery".equalsIgnoreCase(operationType)
+            || "ontology".equalsIgnoreCase(String.valueOf(values.get("storageMode")))
+            || Stream.of("ontology", "sourceOntology", "knowledgeOrganization", "organizeTemplateId")
+                .anyMatch(key -> values.get(key) != null && StringUtils.isNotBlank(String.valueOf(values.get(key))))) {
+            return I18nUtil.get("devloop.operationTask.feature.retired");
         }
-        // 模板表单使用 storageMode=knowledge/ontology 表示是否进行知识整理，兼容该结构化字段。
-        if ("knowledge".equalsIgnoreCase(String.valueOf(value))) {
-            return I18nUtil.get("devloop.operationTask.prompt.enabled");
-        }
-        if ("ontology".equalsIgnoreCase(String.valueOf(value))) {
-            return I18nUtil.get("devloop.operationTask.prompt.disabled");
-        }
-        return Boolean.parseBoolean(String.valueOf(value)) ? I18nUtil.get("devloop.operationTask.prompt.enabled")
-            : I18nUtil.get("devloop.operationTask.prompt.disabled");
-    }
-
-    /**
-     * 从整理配置中读取本体、整理要求和结构化要求；历史数据仅有 organizeTemplateId 时也可回显本体标识。
-     */
-    @SuppressWarnings("unchecked")
-    private String getOperationKnowledgeOrganizationValue(Map<String, Object> operationConfig, String... fieldNames) {
-        Object organization = operationConfig.get("knowledgeOrganization");
-        Map<String, Object> organizationConfig = organization instanceof Map ? (Map<String, Object>) organization
-            : parseOperationConfig(organization == null ? null : String.valueOf(organization));
-        Object value = findOperationConfigValue(organizationConfig, fieldNames);
-        if (value == null && Arrays.asList(fieldNames).contains("organizeTemplateId")) {
-            value = operationConfig.get("organizeTemplateId");
-        }
-        // 任务模板把 ontology 放在 config 顶层，优先读取完整对象（支持多选数组）。
-        if (value == null && (Arrays.asList(fieldNames).contains("ontology")
-            || Arrays.asList(fieldNames).contains("sourceOntology"))) {
-            value = operationConfig
-                .get(Arrays.asList(fieldNames).contains("sourceOntology") ? "sourceOntology" : "ontology");
-        }
-        return getOperationPromptValue(value);
+        return null;
     }
 
     /**
@@ -5157,6 +4934,10 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
     private String validateOperationAccountReference(String operationType, Object config, Long projectId,
                                                        Long permissionUserId, String executionUserCode,
                                                        boolean requireUsableSandbox) {
+        String retiredFeatureError = validateRetiredOperationFeature(operationType, config);
+        if (retiredFeatureError != null) {
+            return retiredFeatureError;
+        }
         Object referencedAccountId = resolveReferencedOperationAccountId(operationType, config);
         if (referencedAccountId == null || StringUtils.isBlank(String.valueOf(referencedAccountId))) {
             return null;

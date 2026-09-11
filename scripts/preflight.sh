@@ -4,7 +4,7 @@
 #
 # Usage (from start.sh):
 #   source "$SCRIPTS/preflight.sh"
-#   run_preflight "$START_FE" "$START_BE" "$START_QA" "$START_DATA"
+#   run_preflight "$START_FE" "$START_BE" "$START_QA"
 
 # --- Color helpers (respects NO_COLOR and non-TTY) ---
 if [[ -t 1 ]] && [[ -z "${NO_COLOR:-}" ]]; then
@@ -181,16 +181,6 @@ _check_qa() {
   fi
 }
 
-_check_data() {
-  _check_python_uv
-
-  if [[ -f "$ROOT/byclaw-data/start.sh" ]]; then
-    _check_pass "byclaw-data/start.sh present"
-  else
-    _check_fail "byclaw-data/start.sh missing. Is the data module initialized?"
-  fi
-}
-
 # --- Auto-install frontend dependencies ---
 _auto_install_fe() {
   printf "\n${_C_BOLD}[preflight]${_C_RESET} Installing frontend dependencies...\n"
@@ -213,7 +203,7 @@ _auto_install_fe() {
 
 # --- Main entry point ---
 run_preflight() {
-  local start_fe="$1" start_be="$2" start_qa="$3" start_data="$4"
+  local start_fe="$1" start_be="$2" start_qa="$3"
 
   _PREFLIGHT_ERRORS=()
   _PREFLIGHT_WARNINGS=()
@@ -236,11 +226,6 @@ run_preflight() {
   if [[ $start_qa -eq 1 ]]; then
     _section "QA (byclaw-qa)"
     _check_qa
-  fi
-
-  if [[ $start_data -eq 1 ]]; then
-    _section "Data (byclaw-data)"
-    _check_data
   fi
 
   echo ""

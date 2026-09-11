@@ -5,7 +5,6 @@ import { useIntl } from '@umijs/max';
 import { getAgentChatAvatar } from '@/utils/agent';
 import Knowledge from '@/layout/sider/components/Knowledge';
 import ModelSiderPanel from '@/layout/sider/components/ModelSiderPanel';
-import OntologySiderPanel from '@/layout/sider/components/OntologySiderPanel';
 import ResourceSiderPanel from '@/layout/sider/components/ResourceSiderPanel';
 import { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentBar';
 import type { DetailPanelOptions } from '@/layout/sider/siderContentContext';
@@ -97,7 +96,6 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
       return [
         { key: 'knowledge', label: label('chatResource.knowledge') },
         { key: 'skill', label: label('chatResource.skill') },
-        { key: 'ontology', label: label('chatResource.ontology') },
         { key: 'model', label: label('chatResource.model') },
       ];
     }
@@ -176,7 +174,6 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
       // 右侧资源面板保留与左侧小面板一致的中心入口，但不重复展示当前数字员工栏。
       if (upperSecondaryKey === 'knowledge') return <Knowledge embedded showRouter />;
       if (upperSecondaryKey === 'skill') return <ResourceSiderPanel resourceType="SKILL" embedded showRouter />;
-      if (upperSecondaryKey === 'ontology') return <OntologySiderPanel embedded showRouter />;
       if (upperSecondaryKey === 'model') return <ModelSiderPanel embedded showRouter />;
       return empty;
     }

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Project Task Status Update"
+  short_description: "Update extended task statuses in the session projection JSON using the project status dictionary."
+  default_prompt: "Use the project-task-status-update skill to list legal project statuses and patch task_statuses in /by/.acp-runs/sessions/{sessionId}.json. Do not overwrite the top-level runtime status."

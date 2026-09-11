@@ -12,7 +12,6 @@
 | BE | 后端服务 | 8086 (HTTP) / 8082 (WebSocket) |
 | QA Manager | QA 管理服务 | 8090 |
 | QA Worker | QA 工作进程 | 无端口 |
-| Data | DataCloud 服务 | 8087 |
 
 ## 部署步骤
 
@@ -46,7 +45,6 @@ sh pull.sh
 - `byclaw-fe`
 - `byclaw-be`
 - `byclaw-qa`
-- `byclaw-data`
 
 ### 步骤 4：启动所有服务
 
@@ -66,7 +64,6 @@ sh start-all.sh
 前端: http://localhost:8080
 后端: http://localhost:8086
 QA:   http://localhost:8000
-Data: http://localhost:8087
 ```
 
 ### 步骤 5：验证服务状态
@@ -140,14 +137,12 @@ sh start-fe.sh
 sh start-be.sh
 sh start-qa-manager.sh
 sh start-qa-worker.sh
-sh start-data.sh
 
 # 停止单个服务
 sh stop-fe.sh
 sh stop-be.sh
 sh stop-qa-manager.sh
 sh stop-qa-worker.sh
-sh stop-data.sh
 
 # 停止所有服务
 sh stop-all.sh
@@ -162,7 +157,6 @@ sh stop-all.sh
 | 前端 | http://localhost:8080 |
 | 后端 API | http://localhost:8086/byaiService |
 | QA Manager | http://localhost:8000 |
-| DataCloud | http://localhost:8087 |
 
 ## 查看日志
 
@@ -225,7 +219,6 @@ docker-compose up -d --scale qa-worker=3
 BE_SERVER_PORT=8086
 BE_WS_PORT=8082
 BYCLAW_QA_PORT=8090
-DATACLOUD_PORT=8087
 ```
 
 ## 服务依赖关系
@@ -245,12 +238,6 @@ DATACLOUD_PORT=8087
   │       ├──> OpenGauss
   │       └──> MinIO
   │
-  └──> DataCloud
-          │
-          ├──> Redis
-          ├──> OpenGauss
-          └──> MinIO
-
 QA Worker (后台处理，无端口)
   │
   ├──> Redis

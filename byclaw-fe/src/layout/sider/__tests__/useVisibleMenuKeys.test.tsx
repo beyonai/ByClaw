@@ -46,7 +46,7 @@ describe('useVisibleMenuKeys', () => {
     });
 
     await waitFor(() => {
-      expect(result.current).toEqual(['sessions', 'automation', 'projectSpace', 'skill', 'file', 'model', 'ontology']);
+      expect(result.current).toEqual(['sessions', 'automation', 'projectSpace', 'skill', 'file', 'model']);
     });
   });
 
@@ -61,11 +61,11 @@ describe('useVisibleMenuKeys', () => {
     const { result } = renderHook(() => useVisibleMenuKeys({ userId: 1 }));
 
     await waitFor(() => {
-      expect(result.current).toEqual(['sessions', 'automation', 'projectSpace', 'file', 'model', 'ontology']);
+      expect(result.current).toEqual(['sessions', 'automation', 'projectSpace', 'file', 'model']);
     });
   });
 
-  it('temporarily hides view and object even when remote config enables them', async () => {
+  it('hides retired ontology and hidden view/object entries even when remote config enables them', async () => {
     mockGetDcSystemConfigListByStandType.mockResolvedValue({
       data: [
         { paramName: '会话', paramValue: 'true', paramSeq: 1 },
@@ -78,7 +78,7 @@ describe('useVisibleMenuKeys', () => {
     const { result } = renderHook(() => useVisibleMenuKeys({ userId: 1 }));
 
     await waitFor(() => {
-      expect(result.current).toEqual(['sessions', 'ontology', 'automation', 'projectSpace', 'skill', 'file', 'model']);
+      expect(result.current).toEqual(['sessions', 'automation', 'projectSpace', 'skill', 'file', 'model']);
     });
   });
 

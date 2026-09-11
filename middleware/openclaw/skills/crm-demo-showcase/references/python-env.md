@@ -20,11 +20,9 @@
 ```bash
 export BE_DOMAINNAME=${BE_DOMAINNAME:-ByaiService}
 
-# 结构化本体
-/usr/local/bin/python3 scripts/ontology/structured/<script>.py '<JSON>'
+# 结构化对象/视图
+/usr/local/bin/python3 scripts/resources/<script>.py '<JSON>'
 
-# 非结构化本体
-/usr/local/bin/python3 scripts/ontology/unstructured/<script>.py '<JSON>'
 
 # 周报/会议纪要
 /usr/local/bin/python3 scripts/weekly-report/<script>.py [--args]

@@ -170,7 +170,6 @@
         b.type,
         b.kdb_id,
         t.task_id,
-        ont.pid,
         t.deal_desc
         FROM ss_resource r
         <if test="query.suasSuperassistSubAgent != null and query.suasSuperassistSubAgent != ''">
@@ -181,7 +180,6 @@
         LEFT JOIN ss_res_ext_dig_employee srede ON r.resource_id = srede.resource_id AND r.resource_biz_type = 'DIG_EMPLOYEE'
         LEFT JOIN po_organization po on po.org_id = r.man_org_id
         LEFT JOIN ss_resource_catalog src on src.catalog_id = r.catalog_id
-        LEFT JOIN ss_res_ext_ontology ont ON r.resource_id = ont.resource_id
         LEFT JOIN (
         SELECT
             t1.task_id,
@@ -217,9 +215,6 @@
             </if>
             <if test="query.ownerType != null and query.ownerType != ''">
                 and r.owner_type = #{query.ownerType}
-            </if>
-            <if test="query.pid != null and query.pid != ''">
-                AND ont.pid = #{query.pid}
             </if>
             <if test="query.enterpriseId != null and query.enterpriseId != ''">
                 and r.com_acct_id = #{query.enterpriseId}
@@ -454,7 +449,6 @@
         r.resource_status,
         count(1) as num
         FROM ss_resource r
-        LEFT JOIN ss_res_ext_ontology ont ON r.resource_id = ont.resource_id
         <where>
             and r.parent_resource_id =-1 and resource_status !=6
             <if test="query.resourceName != null and query.resourceName != ''">
@@ -469,9 +463,6 @@
                 <if test="query.resourceTypeList.contains('DIG_EMPLOYEE')">
                     and (r.owner_type is null or r.owner_type = 'enterprise')
                 </if>
-            </if>
-            <if test="query.pid != null and query.pid != ''">
-                and ont.pid = #{query.pid}
             </if>
             <!-- 根据ownershipType判断resourceIdList和create_by的关系 -->
             <choose>
@@ -552,7 +543,6 @@
         src.catalog_name,
         src.catalog_type,
         r.man_org_id,
-        ont.pid,
         po.org_name as man_org_name,
         r.man_user_id,
         r.index_list,
@@ -589,7 +579,6 @@
         LEFT JOIN ss_res_ext_dig_employee srede ON r.resource_id = srede.resource_id AND r.resource_biz_type = 'DIG_EMPLOYEE'
         LEFT JOIN po_organization po on po.org_id = r.man_org_id
         LEFT JOIN ss_resource_catalog src on src.catalog_id = r.catalog_id
-        LEFT JOIN ss_res_ext_ontology ont ON r.resource_id = ont.resource_id
         LEFT JOIN (
         SELECT
         t1.task_id,
@@ -612,9 +601,6 @@
                 <foreach collection="request.resourceTypeList" item="type" open="(" separator="," close=")">
                     #{type}
                 </foreach>
-            </if>
-            <if test="request.pid != null and request.pid != ''">
-                AND ont.pid = #{request.pid}
             </if>
             <if test="request.resourceBizType != null">
                 AND r.resource_biz_type = #{request.bizType}
@@ -959,32 +945,6 @@
         WHERE a.resource_id = #{resourceId};
     </select>
 
-
-    <select id="queryRelObjects" resultType="com.iwhalecloud.byai.manager.dto.ontology.ObjectDto">
-        select
-            a.resource_id as resourceId,
-            a.resource_name as name,
-            a.resource_code as code,
-            a.resource_desc as desc,
-            a.catalog_id as catalogId,
-            a.resource_status as status,
-            b.catalog_type as catalogType,
-            b.catalog_name as catalogName,
-            CASE a.resource_type
-            WHEN 'API' THEN 1
-            WHEN 'DOCUMENT' THEN 2
-            WHEN 'DB_TABLE' THEN 3
-            WHEN 'COMMON_DB' THEN 4
-            ELSE NULL
-            END AS type
-        from ss_resource a
-        left join ss_resource_catalog b on a.catalog_id = b.catalog_id
-        where a.resource_id in
-        <foreach collection="resourceIds" item="item" open="(" separator="," close=")">
-            #{item}
-        </foreach>
-        and a.resource_biz_type = 'OBJECT'
-    </select>
 
     <!-- 批量插入资源 -->
     <insert id="insertBatch" parameterType="java.util.List">

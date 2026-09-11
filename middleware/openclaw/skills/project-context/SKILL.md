@@ -1,6 +1,6 @@
 ---
 name: project-context
-description: 查询当前项目的详细信息、代码仓库、知识库、本体（本体库/对象/视图/场景）、成员和共享文件。用户询问“这个项目”“当前项目”“项目有哪些仓库/知识/本体/成员/文件”时使用。只读，不修改项目数据。
+description: 查询当前项目的详细信息、代码仓库、知识库、数字员工、成员和共享文件。用户询问“这个项目”“当前项目”“项目有哪些仓库/知识/数字员工/成员/文件”时使用。只读，不修改项目数据。
 metadata:
   openclaw:
     requires:
@@ -39,7 +39,7 @@ node scripts/project-context.mjs files --project-id 20014944 --size 50
 - `current`：完整项目上下文。
 - `basic`：项目基本信息，位于返回 JSON 的 `project` 对象：`projectId`、`projectName`、`description`、`projectType`、`isShare`、`initStatus`、`buildIndex`、`indexSkills`、`cloudResourceId`（项目云盘知识库资源 ID）、`createBy`、`createTime`。
 - `repos`：代码仓库。
-- `resources`：知识库、数字员工、本体库、对象、视图、场景。
+- `resources`：知识库、数字员工。
 - `members`：项目成员；不返回手机号。
 - `files`：项目共享文件；默认 50 条，最大 100 条，响应中的 `truncated.sharedFiles` 表示是否截断。
 

@@ -41,7 +41,7 @@ All four are indispensable. Without a secure, scalable, and accumulable technolo
 
 ## Architecture
 
-ByClaw follows an architecture of unified access, centralized governance, distributed execution, and resource isolation. Web, DingTalk, and other entry points are consolidated behind the access gateway and backend service. The backend handles authentication, sessions, resources, permissions, routing, and orchestration, then dispatches agent tasks to DataCloud, QA, OpenClaw, OpenSandbox, and other execution services. Business data, knowledge files, session state, and execution results are stored across the database, Redis, MinIO, and personal sandbox spaces, forming an auditable, scalable, and isolated enterprise agent runtime foundation.
+ByClaw follows an architecture of unified access, centralized governance, distributed execution, and resource isolation. Web, DingTalk, and other entry points are consolidated behind the access gateway and backend service. The backend handles authentication, sessions, resources, permissions, routing, and orchestration, then dispatches agent tasks to QA, OpenClaw, OpenSandbox, and other execution services. Business data, knowledge files, session state, and execution results are stored across the database, Redis, MinIO, and personal sandbox spaces, forming an auditable, scalable, and isolated enterprise agent runtime foundation.
 
 ```
 Users / business systems / DingTalk / Web
@@ -54,10 +54,10 @@ byclaw-fe ── REST / WebSocket / SSE ── byclaw-be
                                           │
               ┌───────────────────────────┼───────────────────────────┐
               ▼                           ▼                           ▼
-        byclaw-qa                   byclaw-data                  byclaw-exe
-  Knowledge base / QA Worker   DataCloud / MCP Worker          Skills / Extensions
-              │                           │                           │
-              └───────────────┬───────────┴───────────┬───────────────┘
+        byclaw-qa                                             byclaw-exe
+  Knowledge base / QA Worker                             Skills / Extensions
+              │                                                   │
+              └───────────────────────┬───────────────────────────┘
                               ▼                       ▼
                      OpenClaw / OpenSandbox       Business APIs / external systems
                               │
@@ -96,7 +96,7 @@ flowchart LR
 
 ### Application Architecture
 
-The application layer is split by responsibility into frontend, backend, DataCloud, QA, extension execution, and middleware services.
+The application layer is split by responsibility into frontend, backend, QA, extension execution, and middleware services.
 
 ```mermaid
 flowchart TB
@@ -105,14 +105,11 @@ flowchart TB
     fe --> be["byclaw-be<br/>Core API / AuthZ / Resource Governance / Gateway Routing"]
     be --> ws["WebSocket / SSE<br/>Streaming Sessions"]
     be --> qa["byclaw-qa<br/>Knowledge Base / QA Worker"]
-    be --> data["byclaw-data<br/>DataCloud MCP / Gateway Worker"]
     be --> exe["byclaw-exe<br/>Skills / Extensions"]
     be --> sandbox["OpenSandbox<br/>Isolated Execution Environment"]
     sandbox --> sandboxRuntime["Sandbox Container<br/>byclaw-openclaw / Agent Runtime"]
-    data --> sandboxRuntime
     exe --> sandboxRuntime
     qa --> infra["Redis / OpenGauss / MinIO"]
-    data --> infra
     be --> infra
 ```
 
@@ -121,7 +118,6 @@ flowchart TB
 | `byclaw-fe` | Web portal and admin console | Chat, knowledge center, digital employees, work center, tool center, sandbox pages, mobile adaptation |
 | `byclaw-be` | Core backend and unified gateway | AuthN/AuthZ, session management, resource management, digital employee management, file management, Feign calls, WebSocket |
 | `byclaw-qa` | Knowledge base and QA service | Knowledge import, index building, retrieval QA, QA Worker, knowledge resource mapping |
-| `byclaw-data` | DataCloud and agent execution service | DataCloud MCP, Gateway Worker, data query and analysis, tool calls, result file storage |
 | `byclaw-exe` | Extension plugins and skill scripts | Skills, Extensions, business scripts, capability extensions |
 | `middleware` | Runtime infrastructure | Redis, MinIO, OpenGauss, OpenSandbox, and related runtime dependencies |
 
@@ -134,7 +130,7 @@ ByClaw separates data into five categories: business metadata, session state, kn
 - **OpenGauss / PostgreSQL**: Stores structured data such as users, organizations, permissions, digital employees, resource metadata, knowledge indexing tasks, and system configuration.
 - **Redis**: Holds login sessions, cache, distributed locks, digital employee configuration snapshots, Pub/Sub notifications, and Worker message channels.
 - **MinIO / OSS / SFTP**: Stores uploaded files, original knowledge files, Markdown conversion outputs, attachments, and large result files.
-- **Vector and retrieval data**: QA and DataCloud services handle knowledge chunking, index building, retrieval projection, and recall for RAG and QA scenarios.
+- **Vector and retrieval data**: QA services handle knowledge chunking, index building, retrieval projection, and recall for RAG and QA scenarios.
 - **Personal data space**: Provides each user or agent with isolated file space and sandbox mount paths, enabling data to follow the user and be shared across authorized agents with minimal sensitive data persistence.
 
 Data access follows the principle of storing metadata in the database, files in object storage, hot state in cache, and isolated execution data in sandboxes, making the system easier to scale, audit, and recover.
@@ -147,7 +143,7 @@ ByClaw uses a multi-language, multi-runtime architecture: Java handles core busi
 flowchart TB
     ui["Frontend Experience<br/>React / Umi Max / TypeScript / Ant Design"] --> api["Enterprise Governance<br/>Java 21 / Spring Boot / Spring Security / MyBatis"]
     api --> agent["Agent Capability<br/>Spring AI / LangChain4j / MCP / OpenClaw / by-framework"]
-    agent --> py["Python Execution<br/>by-qa / by-datacloud / Skills / Workers"]
+    agent --> py["Python Execution<br/>by-qa / Skills / Workers"]
     api --> comm["Communication<br/>REST / WebSocket / SSE / Feign / Redis PubSub"]
     py --> comm
     comm --> storage["Storage and State<br/>OpenGauss / Redis / MinIO / File Mounts"]
@@ -162,7 +158,7 @@ flowchart TB
 |-------|--------------|-------------|
 | Frontend | React 18, Umi Max 4, TypeScript, Ant Design 5 | Enterprise Web console and chat experience |
 | Backend | Java 21, Spring Boot 3.4, Spring Security, Spring Session, MyBatis | Core APIs, authentication and authorization, resource governance, service orchestration |
-| AI / Agent | Spring AI, LangChain4j, MCP, OpenClaw, by-framework, by-qa, by-datacloud | Model integration, agent execution, knowledge QA, data analysis |
+| AI / Agent | Spring AI, LangChain4j, MCP, OpenClaw, by-framework, by-qa | Model integration, agent execution, knowledge QA, data analysis |
 | Communication | REST, WebSocket, SSE, OpenFeign, Redis Pub/Sub | Synchronous requests, streaming responses, service-to-service calls, async notifications |
 | Storage | OpenGauss / PostgreSQL, Redis, MinIO, file mounts | Structured data, cached messages, object files, sandbox data |
 | Engineering | Docker Compose, pnpm, Maven, uv, GitHub Actions | Local development, image building, dependency management, CI/CD |
@@ -178,7 +174,6 @@ flowchart TB
     feC --> beC["byclaw-be<br/>HTTP 8086 / WS 8082"]
     beC --> qaApi["byclaw-qa-manager<br/>API 8000"]
     beC --> qaWorker["byclaw-qa-worker<br/>Background Consumer"]
-    beC --> dataC["byclaw-data<br/>DataCloud 8087 / Worker"]
     beC --> sandboxC["OpenSandbox<br/>Sandbox Scheduling / Lease Management"]
     sandboxC --> sandboxContainer["Sandbox Container<br/>On-demand / Auto-reclaimed"]
     sandboxContainer --> openclawC["byclaw-openclaw<br/>Agent Runtime"]
@@ -194,19 +189,17 @@ flowchart TB
     qaApi --> dbC
     qaApi --> minioC
     qaWorker --> redisC
-    dataC --> redisC
-    dataC --> minioC
     sandboxContainer --> mount["File Mounts / Personal Data Space"]
     minioC --> mount
 ```
 
 - **Middleware layer**: Starts Redis, MinIO, OpenGauss, OpenSandbox, and other infrastructure components first. OpenSandbox is responsible for launching sandbox containers on demand.
-- **Application layer**: Starts `byclaw-fe`, `byclaw-be`, `byclaw-qa-manager`, `byclaw-qa-worker`, and `byclaw-data`.
+- **Application layer**: Starts `byclaw-fe`, `byclaw-be`, `byclaw-qa-manager`, and `byclaw-qa-worker`.
 - **Access layer**: The frontend container embeds Nginx, exposes HTTP / HTTPS, and forwards backend APIs, WebSocket, file browsing, and sandbox-related requests.
 - **Configuration layer**: Injects database, Redis, MinIO, model, sandbox, port, and domain configuration through the root `.env` file and `deploy/config`.
 - **Execution layer**: `byclaw-openclaw` runs inside sandbox containers launched by OpenSandbox. Skills, Extensions, and external business APIs are loaded through the sandbox execution environment on demand.
 
-In production, databases, cache, object storage, QA Workers, DataCloud Workers, and OpenSandbox can be scaled independently. Frontend and backend services remain stateless or weakly stateful, sharing state through Redis and the database.
+In production, databases, cache, object storage, QA Workers, and OpenSandbox can be scaled independently. Frontend and backend services remain stateless or weakly stateful, sharing state through Redis and the database.
 
 ### Security Architecture
 
@@ -325,7 +318,6 @@ The frontend dev server runs at http://localhost:8000 and proxies API requests t
 ByClaw/
 ├── byclaw-fe/          # Web frontend (React, Umi Max, TypeScript)
 ├── byclaw-be/          # Backend service (Spring Boot 3.4, Java 21)
-├── byclaw-data/        # Data cloud service (Python 3.12, uv)
 ├── byclaw-qa/          # QA & Agent service (Python 3.12, uv)
 ├── byclaw-exe/         # Extension plugins & skill scripts
 ├── deploy/             # Docker Compose deployment configs
@@ -344,7 +336,6 @@ ByClaw/
 | Backend HTTP | 8086 |
 | Backend WebSocket | 8082 |
 | QA Manager | 8000 |
-| DataCloud | 8087 |
 | Redis | 6379 |
 | MinIO API / Console | 9000 / 9001 |
 | OpenGauss | 5432 |

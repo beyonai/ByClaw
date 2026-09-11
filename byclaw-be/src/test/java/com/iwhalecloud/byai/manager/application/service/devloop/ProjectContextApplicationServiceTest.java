@@ -81,9 +81,8 @@ class ProjectContextApplicationServiceTest {
 
         ProjectResource knowledgeBinding = binding(101L, "knowledge", "历史知识库");
         ProjectResource deletedKnowledgeBinding = binding(99901L, "knowledge", "已删除知识库");
-        ProjectResource ontologyBinding = binding(99902L, "ontology", "已删除本体对象");
         when(projectResourceMapper.selectList(any()))
-            .thenReturn(List.of(knowledgeBinding, deletedKnowledgeBinding, ontologyBinding));
+            .thenReturn(List.of(knowledgeBinding, deletedKnowledgeBinding));
         SsResource knowledge = new SsResource();
         knowledge.setResourceId(101L);
         knowledge.setResourceName("项目知识库");
@@ -120,10 +119,6 @@ class ProjectContextApplicationServiceTest {
             .isEqualTo("https://github.com/beyonai/byclaw-test.git");
         assertThat(result.getKnowledgeBases()).extracting(ProjectContextDto.ResourceSummary::getResourceName)
             .containsExactly("项目知识库", "已删除知识库");
-        assertThat(result.getOntologies().getOthers()).singleElement().satisfies(item -> {
-            assertThat(item.getResourceName()).isEqualTo("已删除本体对象");
-            assertThat(item.isAvailable()).isFalse();
-        });
         assertThat(result.getMembers()).singleElement().satisfies(item -> {
             assertThat(item.getUserName()).isEqualTo("项目负责人");
             assertThat(item.getUserNumber()).isEqualTo("0027000001");

@@ -12,7 +12,7 @@ export type ProjectMemberRole = 'owner' | 'admin' | 'member';
 
 export type ProjectResourceScope = 'shared' | 'task' | 'session';
 
-export type ProjectBoundResourceType = 'knowledge' | 'digital_employee' | 'ontology';
+export type ProjectBoundResourceType = 'knowledge' | 'digital_employee';
 
 export interface ProjectBoundResource {
   id?: string | number;

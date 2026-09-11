@@ -1,6 +1,6 @@
 ---
 name: project-cloud-knowledge
-description: "管理 ByClaw 普通知识库或项目云盘，并复用 project-context 查询项目信息。用于浏览、查找、上传、更新、移动或删除知识库/云盘文件与目录，查标签、打标签、改标签、删标签或修改其他文件属性，执行知识构建和知识实体处理，或查询项目、仓库、资源、成员与共享文件；用户提到知识库、项目云盘、云盘、cloudResourceId 或 cloud_resource_id 时使用。不用于管理本体、对象类型或本体对象关系。"
+description: "管理 ByClaw 普通知识库或项目云盘，并复用 project-context 查询项目信息。用于浏览、查找、上传、更新、移动或删除知识库/云盘文件与目录，查标签、打标签、改标签、删标签或修改其他文件属性，执行知识构建和知识实体处理，或查询项目、仓库、资源、成员与共享文件；用户提到知识库、项目云盘、云盘、cloudResourceId 或 cloud_resource_id 时使用。不用于管理 OBJECT/VIEW 资源。"
 metadata:
   openclaw:
     requires:
@@ -25,7 +25,7 @@ byclaw_managed: true
 | 查看某个文件或目录的标签和属性，打标签、改标签、删标签或修改其他属性 | [`project-cloud-knowledge-metadata/SKILL.md`](project-cloud-knowledge-metadata/SKILL.md) |
 | 知识实体发现或补全，包括项目云盘知识整理 | [`project-cloud-knowledge-entity/SKILL.md`](project-cloud-knowledge-entity/SKILL.md) |
 
-`KnowledgeEntity` 是知识库内的实体 Markdown 目录，不是本体对象库。涉及本体、对象类型或本体关系时不要使用本 Skill。
+`KnowledgeEntity` 是知识库内的实体 Markdown 目录。涉及 OBJECT/VIEW 资源时不要使用本 Skill。
 
 ## 准备运行环境
 

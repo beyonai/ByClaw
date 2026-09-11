@@ -277,7 +277,7 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
         return response.blob();
       }
       if (resourceId && sourcePath) {
-        // 会话、项目文件来自文件空间；本体关联文件仍按知识库文件来源下载。
+        // 会话、项目文件来自文件空间；知识库文件按知识库来源下载。
         let response: any;
         try {
           response =

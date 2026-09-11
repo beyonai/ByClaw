@@ -6,7 +6,6 @@ import { useIntl, useSelector } from '@umijs/max';
 import AddAuthModal from '@/pages/manager/components/AuthListDrawer/AddAuthModal';
 import { listResourceUseAuth } from '@/pages/manager/service/resources';
 import { listProjectMembers } from '@/service/devloop';
-import { listOntologyBases, pageOntologyResources } from '@/service/ontology';
 import { ResourceTypeMap } from '@/constants/resource';
 import type { ProjectResourcePayload, ProjectResourceType } from '@/service/devloop';
 import type { ProjectTypeOption } from '../../hooks/useProjectTypeConfig';
@@ -81,10 +80,7 @@ const normalizeShareMember = (member: any): ProjectShareMember => {
 };
 
 const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
-  (
-    { open, form, initialValues, projectId, creatorId, onEnterSubmit },
-    ref
-  ) => {
+  ({ open, form, initialValues, projectId, creatorId, onEnterSubmit }, ref) => {
     const intl = useIntl();
     const userInfo = useSelector((state: any) => state.user?.userInfo) || {};
     const [authModalOpen, setAuthModalOpen] = useState(false);
@@ -92,12 +88,10 @@ const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
     const [shareMembersLoading, setShareMembersLoading] = useState(false);
     const [shareMembersLoaded, setShareMembersLoaded] = useState(false);
     const [knowledgeResourceOptions, setKnowledgeResourceOptions] = useState<{ value: string; label: string }[]>([]);
-    const [ontologyResourceOptions, setOntologyResourceOptions] = useState<{ value: string; label: string }[]>([]);
     const [resourceOptionsLoading, setResourceOptionsLoading] = useState(false);
     const [selectedResources, setSelectedResources] = useState<Record<ProjectResourceType, string[]>>({
       knowledge: [],
       digital_employee: [],
-      ontology: [],
     });
     const [resourceValidationTriggered, setResourceValidationTriggered] = useState(false);
     const { options: agentOptions, loading: agentOptionsLoading } = useDigitalEmployeeOptions(open);
@@ -156,9 +150,6 @@ const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
         digital_employee: initialResources
           .filter((resource) => resource.resourceType === 'digital_employee')
           .map((resource) => `${resource.resourceId}`),
-        ontology: initialResources
-          .filter((resource) => resource.resourceType === 'ontology')
-          .map((resource) => `${resource.resourceId}`),
       });
       setResourceValidationTriggered(false);
       setShareMembersLoaded(!projectId);
@@ -201,14 +192,7 @@ const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
               ResourceTypeMap.knowledgeBaseTerm,
             ],
           };
-          const [
-            knowledgePersonal,
-            knowledgeEnterprise,
-            ontologyPersonal,
-            ontologyEnterprise,
-            ontologyResourcePersonal,
-            ontologyResourceEnterprise,
-          ] = await Promise.all([
+          const [knowledgePersonal, knowledgeEnterprise] = await Promise.all([
             // 与“知识”模块保持一致，分别加载当前账号可用的个人知识和企业知识。
             listResourceUseAuth({
               ...knowledgeQuery,
@@ -222,23 +206,6 @@ const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
               resourceStatus: '2',
               permission: '',
               belong: 'ALL',
-            }),
-            listOntologyBases({ ownerType: 'personal' }),
-            listOntologyBases({ ownerType: 'enterprise' }),
-            // 本体中心卡片使用资源分页接口；同时读取该接口，覆盖本体库列表接口未返回的企业本体资源。
-            pageOntologyResources({
-              ownerType: 'personal',
-              resourceBizTypeList: ['VIEW', 'OBJECT'],
-              statusList: [0, 1, 2, 3, 4, 5],
-              pageNum: 1,
-              pageSize: 1000,
-            }),
-            pageOntologyResources({
-              ownerType: 'enterprise',
-              resourceBizTypeList: ['VIEW', 'OBJECT'],
-              statusList: [0, 1, 2, 3, 4, 5],
-              pageNum: 1,
-              pageSize: 1000,
             }),
           ]);
           if (cancelled) return;
@@ -262,38 +229,11 @@ const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
             if (value !== undefined && value !== null && label)
               knowledgeMap.set(`${value}`, { value: `${value}`, label });
           });
-          const ontologyMap = new Map<string, { value: string; label: string }>();
-          [ontologyPersonal, ontologyEnterprise, ontologyResourcePersonal, ontologyResourceEnterprise].forEach(
-            (response) => {
-              // 本体模块接口可能直接返回数组，也可能包在 data/list/rows 中，统一兼容后合并个人和企业本体。
-              getArray(
-                response,
-                response?.list,
-                response?.records,
-                response?.rows,
-                response?.data,
-                response?.data?.list,
-                response?.data?.records,
-                response?.data?.rows,
-                response?.data?.data,
-                response?.data?.data?.list,
-                response?.data?.data?.records,
-                response?.data?.data?.rows
-              ).forEach((item: any) => {
-                const value = item.baseId ?? item.resourceId ?? item.id;
-                const label = item.displayName || item.resourceName || item.name;
-                if (value !== undefined && value !== null && label)
-                  ontologyMap.set(`${value}`, { value: `${value}`, label });
-              });
-            }
-          );
           setKnowledgeResourceOptions(Array.from(knowledgeMap.values()));
-          setOntologyResourceOptions(Array.from(ontologyMap.values()));
         } catch (error) {
           console.error('Failed to load project resource options:', error);
           if (!cancelled) {
             setKnowledgeResourceOptions([]);
-            setOntologyResourceOptions([]);
           }
         } finally {
           if (!cancelled) setResourceOptionsLoading(false);
@@ -418,7 +358,7 @@ const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
                         ? agentLabelById.get(resourceId)
                         : resourceType === 'knowledge'
                           ? knowledgeResourceOptions.find((option) => option.value === resourceId)?.label
-                          : ontologyResourceOptions.find((option) => option.value === resourceId)?.label) || undefined,
+                          : undefined) || undefined,
                   sortNo: index,
                 }))
             )
@@ -429,7 +369,6 @@ const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
         agentLabelById,
         isDevelopProjectEnabled,
         knowledgeResourceOptions,
-        ontologyResourceOptions,
         selectedResources,
         selectedShareMembers,
         shareMembersLoaded,
@@ -443,7 +382,7 @@ const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
         collectValues: async () => {
           // 绑定资源仅在运营项目必填，其他项目类型隐藏该区域且不触发资源校验。
           setResourceValidationTriggered(isOperationProject);
-          const hasMissingResource = (['knowledge', 'digital_employee', 'ontology'] as ProjectResourceType[]).some(
+          const hasMissingResource = (['knowledge', 'digital_employee'] as ProjectResourceType[]).some(
             (resourceType) => isOperationProject && selectedResources[resourceType].length === 0
           );
           try {
@@ -548,29 +487,6 @@ const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
                   />
                   {resourceValidationTriggered && !selectedResources.digital_employee.length && (
                     <div className={styles.projectResourceError}>{formT('validation.digitalEmployeeRequired')}</div>
-                  )}
-                </div>
-                <div
-                  className={
-                    resourceValidationTriggered && !selectedResources.ontology.length
-                      ? styles.projectResourceFieldError
-                      : undefined
-                  }
-                >
-                  <div className={styles.projectResourceLabel}>{formT('resource.ontology')}</div>
-                  <Select
-                    mode="multiple"
-                    allowClear
-                    showSearch
-                    optionFilterProp="label"
-                    value={selectedResources.ontology}
-                    options={ontologyResourceOptions}
-                    loading={resourceOptionsLoading}
-                    placeholder={formT('resource.ontologyPlaceholder')}
-                    onChange={(value: string[]) => setSelectedResources((prev) => ({ ...prev, ontology: value }))}
-                  />
-                  {resourceValidationTriggered && !selectedResources.ontology.length && (
-                    <div className={styles.projectResourceError}>{formT('validation.ontologyRequired')}</div>
                   )}
                 </div>
               </div>

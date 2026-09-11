@@ -745,7 +745,7 @@ public class ProjectApplicationService {
     }
 
     /**
-     * 查询项目绑定的知识库、数字员工和本体资源。
+     * 查询项目绑定的知识库、数字员工资源。
      *
      * @param projectId 项目 ID
      * @return 绑定资源列表
@@ -772,7 +772,7 @@ public class ProjectApplicationService {
         for (ProjectResourceDTO dto : resources) {
             String resourceType = StringUtils.trimToEmpty(dto.getResourceType()).toLowerCase(Locale.ROOT);
             Long resourceId = dto.getResourceId();
-            if (!Set.of("knowledge", "digital_employee", "ontology").contains(resourceType)
+            if (!Set.of("knowledge", "digital_employee").contains(resourceType)
                 || resourceId == null) {
                 throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.resource.invalid");
             }

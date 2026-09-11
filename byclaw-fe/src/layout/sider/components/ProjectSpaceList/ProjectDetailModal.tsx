@@ -106,7 +106,6 @@ import {
 import { deleteFiles, listFiles, renameFile, type FileBrowserItem } from '@/service/fileBrowser';
 import { queryMyCreatedAndSubscribedAgentsV2 } from '@/service/digitalEmployees';
 import { queryAuthDoc as listAccessibleKnowledgeBases } from '@/service/knowledgeCenter';
-import { listOntologyBases } from '@/service/ontology';
 import { getSandboxInfo, launchSandboxByUserCode, navigateSandboxBrowser } from '@/service/sandbox';
 import type { ISandboxesInfo } from '@/models/common/useAppStore';
 import SessionOverviewDrawer from './SessionOverviewDrawer';
@@ -650,18 +649,6 @@ const getOperationTaskInitialValues = (task: any): Partial<OperationTaskFormValu
           ),
           effectiveDateRange: toDateRange(config.effectiveStartDate, config.effectiveEndDate),
           cronExpr: config.cronExpr ?? config.schedule ?? config.collectSchedule,
-          organize: Boolean(config.organize ?? config.knowledgeOrganization),
-          organizeTemplateId: config.organizeTemplateId ?? config.knowledgeOrganization?.templateId,
-          knowledgeOrganization: config.knowledgeOrganization
-            ? {
-              ...config.knowledgeOrganization,
-              // 旧数据只有 templateId，新版弹窗需要显式模式才能正确回显为已有本体。
-              mode: config.knowledgeOrganization.mode || 'existing',
-              templateId: config.knowledgeOrganization.templateId ?? config.organizeTemplateId,
-            }
-            : config.organizeTemplateId
-              ? { mode: 'existing', templateId: config.organizeTemplateId }
-              : undefined,
         }
         : undefined,
     contentConfig:
@@ -1059,40 +1046,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
         })),
     [project?.boundResources, project?.resources]
   );
-  const boundProjectOntologies = useMemo<OperationSelectOption[]>(
-    () =>
-      (project?.resources || project?.boundResources || [])
-        .filter((resource) => resource.resourceType === 'ontology')
-        .map((resource) => {
-          const resourceDetail = resource as typeof resource & Record<string, any>;
-          const code = resourceDetail.objectCode || resourceDetail.resourceCode || resourceDetail.code || '';
-          const name = resource.resourceName || resourceDetail.objectName || resourceDetail.name || code;
-          const description =
-            resourceDetail.objectDesc || resourceDetail.resourceDesc || resourceDetail.description || '';
-          return {
-            value: resource.resourceId,
-            label: name,
-            // 绑定资源接口有时只返回 ID/名称，保留标准字段，避免提交时 code 退化为 resourceId。
-            raw: {
-              ...resourceDetail,
-              id: resourceDetail.id,
-              objectId: resourceDetail.objectId,
-              resourceId: resource.resourceId,
-              baseId: resourceDetail.baseId,
-              code,
-              objectCode: resourceDetail.objectCode || code,
-              resourceCode: resourceDetail.resourceCode || code,
-              name,
-              objectName: resourceDetail.objectName || name,
-              resourceName: resource.resourceName || name,
-              description,
-              objectDesc: resourceDetail.objectDesc || description,
-              resourceDesc: resourceDetail.resourceDesc || description,
-            },
-          };
-        }),
-    [project?.boundResources, project?.resources]
-  );
   const boundProjectAgents = useMemo<OperationSelectOption[]>(
     () =>
       (project?.resources || project?.boundResources || [])
@@ -1103,7 +1056,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
         })),
     [project?.boundResources, project?.resources]
   );
-  const [operationOrganizeTemplates, setOperationOrganizeTemplates] = useState<OperationSelectOption[]>([]);
   const [operationAgents, setOperationAgents] = useState<OperationAgentOption[]>([]);
   const [operationOptionsLoading, setOperationOptionsLoading] = useState(false);
   const [operationAccountSaving, setOperationAccountSaving] = useState(false);
@@ -1858,44 +1810,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
     }
   }, []);
 
-  const fetchOperationOrganizeTemplates = useCallback(async () => {
-    try {
-      const [personalRes, enterpriseRes] = await Promise.all([
-        listOntologyBases({ ownerType: 'personal' }),
-        listOntologyBases({ ownerType: 'enterprise' }),
-      ]);
-      // 个人本体和企业本体接口可能使用不同分页包装，统一提取后按本体 ID 合并去重。
-      const getOntologyOptions = (res: any): OperationSelectOption[] =>
-        getFirstOperationArray(
-          res,
-          res?.list,
-          res?.records,
-          res?.rows,
-          res?.data,
-          res?.data?.list,
-          res?.data?.records,
-          res?.data?.rows
-        )
-          .map((ontology: any) => ({
-            value: ontology.baseId ?? ontology.resourceId ?? ontology.id,
-            label: ontology.displayName || ontology.resourceName || ontology.name || '',
-          }))
-          .filter(
-            (ontology: OperationSelectOption) =>
-              ontology.value !== undefined && ontology.value !== null && `${ontology.value}` !== '' && !!ontology.label
-          );
-      const mergedOntologyMap = new Map<string, OperationSelectOption>();
-      [...getOntologyOptions(personalRes), ...getOntologyOptions(enterpriseRes)].forEach((ontology) => {
-        const ontologyKey = `${ontology.value}`;
-        if (!mergedOntologyMap.has(ontologyKey)) mergedOntologyMap.set(ontologyKey, ontology);
-      });
-      setOperationOrganizeTemplates(Array.from(mergedOntologyMap.values()));
-    } catch (error) {
-      console.error('Failed to load operation organize templates:', error);
-      setOperationOrganizeTemplates([]);
-    }
-  }, []);
-
   const handleMembersChange = useCallback(
     (memberList: any[]) => {
       setMembers(memberList);
@@ -1942,11 +1856,10 @@ const ProjectDetailPanel: React.FC<Props> = ({
     () => ({
       assignees: operationAssigneeOptions,
       knowledgeBases: operationKnowledgeBases,
-      organizeTemplates: operationOrganizeTemplates,
       accounts: operationAccounts,
       works: operationWorks,
     }),
-    [operationAccounts, operationAssigneeOptions, operationKnowledgeBases, operationOrganizeTemplates, operationWorks]
+    [operationAccounts, operationAssigneeOptions, operationKnowledgeBases, operationWorks]
   );
 
   const operationTemplateAccountOptions = useMemo<OperationSelectOption[]>(
@@ -2144,19 +2057,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
     setEditingOperationTask(null);
     setOperationTaskModalOpen(true);
     // 数字员工改到任务执行阶段选择，需求表单只刷新当前原型要求的关联资源。
-    void Promise.allSettled([
-      fetchRepos(),
-      fetchOperationAccounts(),
-      fetchOperationKnowledgeBases(),
-      fetchOperationOrganizeTemplates(),
-    ]);
-  }, [
-    fetchRepos,
-    fetchOperationAccounts,
-    fetchOperationKnowledgeBases,
-    fetchOperationOrganizeTemplates,
-    isOperationProject,
-  ]);
+    void Promise.allSettled([fetchRepos(), fetchOperationAccounts(), fetchOperationKnowledgeBases()]);
+  }, [fetchRepos, fetchOperationAccounts, fetchOperationKnowledgeBases, isOperationProject]);
 
   // 只有尚未启动的运营需求可以编辑；任务已拆解后需求配置需保持稳定以便追溯。
   const handleOpenEditOperationTaskModal = useCallback(
@@ -2165,10 +2067,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
       setDetailTask(null);
       setEditingOperationTask(task);
       setOperationTaskModalOpen(true);
-      // 编辑旧需求时也重新读取已有本体，确保整理模板名称能正确回显。
-      void fetchOperationOrganizeTemplates();
     },
-    [fetchOperationOrganizeTemplates, isOperationProject]
+    [isOperationProject]
   );
 
   // 运营需求只保存目标信息，执行方式和业务资源由后续任务模板统一补充。
@@ -2316,14 +2216,9 @@ const ProjectDetailPanel: React.FC<Props> = ({
     (requirement: any) => {
       if (requirement?.status !== 'todo') return;
       setOperationRequirementStartTarget(requirement);
-      void Promise.allSettled([
-        fetchOperationAgents(),
-        fetchOperationKnowledgeBases(),
-        fetchOperationOrganizeTemplates(),
-        fetchOperationAccounts(),
-      ]);
+      void Promise.allSettled([fetchOperationAgents(), fetchOperationKnowledgeBases(), fetchOperationAccounts()]);
     },
-    [fetchOperationAccounts, fetchOperationAgents, fetchOperationKnowledgeBases, fetchOperationOrganizeTemplates]
+    [fetchOperationAccounts, fetchOperationAgents, fetchOperationKnowledgeBases]
   );
 
   const closeOperationRequirementDetail = useCallback(() => {
@@ -5137,7 +5032,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
         assignees={operationAssigneeOptions}
         agentOptions={boundProjectAgents}
         knowledgeOptions={boundProjectKnowledgeBases}
-        ontologyOptions={boundProjectOntologies}
         accountOptions={operationTemplateAccountOptions}
         loading={operationRequirementStarting}
         onCancel={() => setOperationRequirementStartTarget(null)}
@@ -7086,8 +6980,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
         agentOptionsOnly
         knowledgeOptions={boundProjectKnowledgeBases}
         knowledgeOptionsOnly
-        ontologyOptions={boundProjectOntologies}
-        ontologyOptionsOnly
         applyText="确定"
         onCancel={() => setOperationTaskTemplateTarget(null)}
         onApply={async (result: TaskTemplateApplyResult) => {

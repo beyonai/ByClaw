@@ -31,7 +31,7 @@ done
 TARGET="${ARGS[0]:-$REPO_ROOT}"
 
 # Directories to skip (build artifacts, dependencies, caches)
-SKIP_DIRS="node_modules,.venv,.umi,dist,build,target,.git,public/preview,byclaw-data/.venv,logs,.DS_Store"
+SKIP_DIRS="node_modules,.venv,.umi,dist,build,target,.git,public/preview,logs,.DS_Store"
 
 # Write a .trivyignore for binary/media files that slow down secret scanning
 TRIVYIGNORE="$REPO_ROOT/.trivyignore"
