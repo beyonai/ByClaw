@@ -162,7 +162,6 @@ describe('PersonalEmailSettings provider-first flow', () => {
       mockSave,
       mockCheck,
       mockDelete,
-      mockSetDefault,
       mockQueryConnectors,
       mockStartAuthorization,
       mockGetAuthorization,
