@@ -143,6 +143,22 @@ class ProjectApplicationServiceCreateTest {
         verify(projectInitService).initProjectWorkspace(1001L);
     }
 
+    @Test
+    void derivesGithubCloneUrlWhenOnlyRepositoryFullNameIsProvided() throws Exception {
+        Method method = ProjectApplicationService.class.getDeclaredMethod(
+            "normalizeRepoUrl", String.class, String.class, String.class);
+        method.setAccessible(true);
+
+        Object derived = method.invoke(null, null, "beyonai/customer-leads", "github");
+        Object explicit = method.invoke(null, "https://github.example/customer-leads.git",
+            "beyonai/customer-leads", "github");
+        Object nonGithub = method.invoke(null, null, "group/customer-leads", "gitlab");
+
+        assertThat(derived).isEqualTo("https://github.com/beyonai/customer-leads.git");
+        assertThat(explicit).isEqualTo("https://github.example/customer-leads.git");
+        assertThat(nonGithub).isNull();
+    }
+
     private void stubCreateCloudResource() {
         SsResource cloudResource = new SsResource();
         cloudResource.setResourceId(9001L);
