@@ -95,6 +95,11 @@ public class GroupChatController {
         return ResponseUtil.successResponse(applicationService.invite(sessionId, request.getType(), request.getId()));
     }
 
+    @PostMapping("/{sessionId}/join")
+    public ResponseUtil<ByaiSessionMember> join(@PathVariable Long sessionId) {
+        return ResponseUtil.successResponse(applicationService.joinAsCurrentUser(sessionId));
+    }
+
     @DeleteMapping("/{sessionId}/members/{type}/{id}")
     public ResponseUtil<Void> remove(@PathVariable Long sessionId, @PathVariable String type, @PathVariable Long id) {
         applicationService.remove(sessionId, type, id);

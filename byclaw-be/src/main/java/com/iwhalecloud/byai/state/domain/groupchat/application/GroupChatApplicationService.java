@@ -332,6 +332,30 @@ public class GroupChatApplicationService {
         return member;
     }
 
+    /** 邀请链接登录后的当前用户加入群聊。 */
+    @Transactional
+    public ByaiSessionMember joinAsCurrentUser(Long sessionId) {
+        ByaiSession session = authorizationService.requireGroup(sessionId);
+        Long userId = CurrentUserHolder.getCurrentUserId();
+        if (userId == null) throw new IllegalArgumentException("User is not authenticated");
+        ByaiSessionMember existing = memberService.findSessionMember(sessionId, MemObjType.USER.name(), userId);
+        if (existing != null) return existing;
+        ByaiSessionMember member = new ByaiSessionMember();
+        member.setByaiSessionMemberId(sequenceService.nextVal());
+        member.setSessionId(sessionId);
+        member.setMemObjType(MemObjType.USER.name());
+        member.setMemObjId(userId);
+        member.setUserRole(UserRole.MEMBER.name());
+        member.setCreatorId(userId);
+        member.setCreateTime(new Date());
+        member.setLastReadMessageId(messageMapper.selectLatestMessageId(sessionId));
+        member.setLastReadTime(new Date());
+        memberService.save(member);
+        if (!projectMemberService.isMember(session.getProjectId(), userId))
+            projectMemberService.addMember(session.getProjectId(), userId, MemberRole.MEMBER);
+        return member;
+    }
+
     @Transactional
     public void remove(Long sessionId, String type, Long memberId) {
         authorizationService.requireAdmin(sessionId);
