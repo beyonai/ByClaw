@@ -29,10 +29,11 @@ ByClaw-BE 是 BeyondAI 平台的后端服务，提供完整的 AI 应用开发�
 ## 群聊任务执行与恢复
 
 - `TASK` 的 Agent 答案保存在独立任务会话；当前 turn 结束后进入 `WAITING_USER`，仍须发起人确认完成并发布到群里。
-- `RUNNING` execution 持续由 Redis Stream 路由器消费，BE 重启后继续扫描这些执行。运行超过十分钟不会自动重新发送 Gateway 请求；启动时间不是远端执行失效的证据。
+- 群聊候选子会话从首个 turn 起复用 `ScriptService → RouteService → SessionStreamManager`，由普通聊天链路维护 Redis running/runtime、running snapshot、WebSocket 增量和完整消息落库。没有发起端 WebSocket 连接也能运行；用户在执行中进入或刷新任务会话时，普通聊天页加载快照后继续接收更新。
+- 一条群消息引用多个数字员工时，各员工使用独立的子会话、trace 和回答消息 ID。首条消息完整保留 `resourceList` 供展示，子会话成员统计只计入实际执行的目标员工，BE 重启恢复后仍保持这一约束。
+- 群聊观察器只负责读取 disposition 文件、提前提升 TASK、发送群内回执，以及从已落库的最终答案投影 CHAT 回复；不再独立消费或 ACK 子会话 Stream。初始投影失败可由持久化 execution 补偿，运行超过十分钟不会自动重新发送 Gateway 请求。
 - 当前没有可靠的远端执行租约，因此不对“运行中但长时间没有结果”的任务盲目重发。若投递结果不确定或远端失联，应先核实 Gateway/Agent 状态；用户可取消异常任务。此修复不会自动恢复此前已经误标为 `SUCCEEDED` 的记录。
-- Gateway 事件必须匹配 execution 的 `trace_id` 和 `session_id`（存在预期值时）；有 `source_agent_type` 的答案、结束及错误事件还必须匹配派发时采用的目标 Agent 解析规则。历史缺少来源类型的事件保持兼容。其他 Agent 的答案或终止事件不会结束主任务。
-- 任务终止日志记录 execution、Redis Stream record ID、事件类型、trace、Agent 来源和答案消息 ID，便于区分“结果已生成”“BE 已保存”和“用户已发布”。日志不输出答案正文。
+- Gateway 事件身份校验、流式聚合和恢复使用普通聊天链路。群聊完成投影按子会话和 trace 关联，并以已落库的回答为依据。结束事件已被看到不代表持久化及完成回调已成功；只有成功标记才允许重投时直接 ACK，避免失败回调被跳过。
 
 ## 系统架构
 

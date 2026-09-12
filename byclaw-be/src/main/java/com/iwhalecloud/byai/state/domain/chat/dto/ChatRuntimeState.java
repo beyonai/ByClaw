@@ -35,6 +35,9 @@ public class ChatRuntimeState {
 
     private Long userId;
 
+    /** Preserve the server-owned membership boundary through runtime recovery. */
+    private Long sessionMemberAgentId;
+
     private AssistantChatDto assistantChatDto;
 
     private ByaiMessageHotDtoDto askMsg;

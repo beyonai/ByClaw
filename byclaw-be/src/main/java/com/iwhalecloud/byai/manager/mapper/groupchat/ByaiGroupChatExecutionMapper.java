@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.manager.mapper.groupchat;
 
 import java.util.List;
+import java.util.Date;
 
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -17,7 +18,11 @@ public interface ByaiGroupChatExecutionMapper extends BaseMapper<ByaiGroupChatEx
     ByaiGroupChatExecution selectBySourceAndAgent(@Param("sourceMessageId") Long sourceMessageId,
         @Param("targetAgentId") Long targetAgentId);
 
-    int claim(@Param("executionId") Long executionId, @Param("now") java.util.Date now);
+    ByaiGroupChatExecution selectForUpdateByCandidateSessionId(@Param("candidateSessionId") Long candidateSessionId);
+
+    int bindRuntime(@Param("executionId") Long executionId, @Param("traceId") String traceId);
+
+    int claim(@Param("executionId") Long executionId, @Param("now") Date now);
 
     ByaiGroupChatExecution selectNextQueued();
 
@@ -25,7 +30,7 @@ public interface ByaiGroupChatExecutionMapper extends BaseMapper<ByaiGroupChatEx
 
     int decideDisposition(@Param("executionId") Long executionId, @Param("disposition") String disposition,
         @Param("taskName") String taskName, @Param("ackText") String ackText,
-        @Param("now") java.util.Date now);
+        @Param("now") Date now);
 
     int setAckMessage(@Param("executionId") Long executionId, @Param("messageId") Long messageId);
 
@@ -33,14 +38,14 @@ public interface ByaiGroupChatExecutionMapper extends BaseMapper<ByaiGroupChatEx
         @Param("eventType") String eventType);
 
     int markSucceeded(@Param("executionId") Long executionId, @Param("answerMessageId") Long answerMessageId,
-        @Param("now") java.util.Date now);
+        @Param("now") Date now);
 
     int markFailed(@Param("executionId") Long executionId, @Param("errorCode") String errorCode,
-        @Param("errorMessage") String errorMessage, @Param("now") java.util.Date now);
+        @Param("errorMessage") String errorMessage, @Param("now") Date now);
 
-    List<ByaiGroupChatExecution> selectStaleRunning(@Param("before") java.util.Date before);
+    List<ByaiGroupChatExecution> selectStaleRunning(@Param("before") Date before);
 
-    int requeueStaleRunning(@Param("before") java.util.Date before);
+    int requeueStaleRunning(@Param("before") Date before);
 
     List<ByaiGroupChatExecution> selectRunningExecutions();
 

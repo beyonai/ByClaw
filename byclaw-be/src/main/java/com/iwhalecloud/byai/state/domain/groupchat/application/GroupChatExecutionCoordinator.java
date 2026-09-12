@@ -16,7 +16,6 @@ import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatExecution;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatExecutionMapper;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatGatewayExecutor;
-import com.iwhaleai.byai.framework.client.GatewayClient;
 
 /** 群聊 Agent 执行记录入口；实际 Gateway 消费可由 Redis worker 异步接管。 */
 @Service
@@ -114,13 +113,7 @@ public class GroupChatExecutionCoordinator {
 
     private void execute(ByaiGroupChatExecution execution) {
         try {
-            GatewayClient.SendResponse response = gatewayExecutor.execute(execution,
-                "/by/.sessions/" + execution.getCandidateSessionId());
-            if (response == null || !response.isSuccess()) {
-                executionMapper.markFailed(execution.getExecutionId(),
-                    response == null ? "GATEWAY_EMPTY" : response.getErrorCode(),
-                    response == null ? "Gateway returned no response" : response.getError(), new Date());
-            }
+            gatewayExecutor.execute(execution, "/by/.sessions/" + execution.getCandidateSessionId());
         }
         catch (Exception error) {
             executionMapper.markFailed(execution.getExecutionId(), "GATEWAY_EXCEPTION", error.getMessage(), new Date());

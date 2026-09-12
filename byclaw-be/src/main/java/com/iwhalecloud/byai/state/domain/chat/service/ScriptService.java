@@ -18,15 +18,19 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Objects;
 import java.util.Set;
 import com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.PlatformTransactionManager;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
@@ -66,6 +70,8 @@ import com.iwhalecloud.byai.state.infrastructure.utils.CompletionsUtils;
 import com.iwhalecloud.byai.state.infrastructure.utils.ResumeRoutingTraceLogger;
 import com.iwhalecloud.byai.common.log.exception.PythonRuntimeException;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessageHotDto;
+import com.iwhalecloud.byai.common.message.service.ByaiMessageHotService;
+import com.iwhalecloud.byai.state.domain.message.enums.MsgStatus;
 import static com.iwhalecloud.byai.state.domain.chat.enums.ChatUseageEnum.SYSTEM_RESPONSE;
 import static com.iwhalecloud.byai.state.domain.chat.enums.ChatUseageEnum.USER_INPUT;
 import lombok.extern.slf4j.Slf4j;
@@ -73,6 +79,9 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 @Service
 public class ScriptService extends AbstractChatProcess {
+
+    @Autowired
+    private ObjectProvider<ChatTurnPersistenceObserver> turnPersistenceObservers;
 
     private static final Logger logger = LoggerFactory.getLogger(ScriptService.class);
 
@@ -134,7 +143,7 @@ public class ScriptService extends AbstractChatProcess {
     private RunningChatSnapshotService runningChatSnapshotService;
 
     @Autowired
-    private com.iwhalecloud.byai.common.message.service.ByaiMessageHotService byaiMessageHotService;
+    private ByaiMessageHotService byaiMessageHotService;
 
     @Autowired
     private ConnectorAuthService connectorAuthService;
@@ -162,7 +171,11 @@ public class ScriptService extends AbstractChatProcess {
         }
 
         // 判断是否更新任务
-        if (ctx.continueRunningTrace) {
+        if (ctx.existingUserMessage != null) {
+            ctx.userMessageId = ctx.existingUserMessage.getMessageId();
+            ctx.taskId = sequenceService.nextVal();
+        }
+        else if (ctx.continueRunningTrace) {
             if (ctx.taskId == null) {
                 ctx.taskId = Optional.ofNullable(ctx.assistantChatDto).map(AssistantChatDto::getExtParams)
                     .filter(params -> params.containsKey("beyondTaskId"))
@@ -218,7 +231,10 @@ public class ScriptService extends AbstractChatProcess {
             ctx.traceId = getTraceId(ctx.userMessageId, ctx.modelAnswerMessageId);
         }
 
-        if (!ctx.continueRunningTrace && (TaskOperateTypeEnum.UPDATE.equals(ctx.assistantChatDto.getTaskOperateType())
+        if (ctx.existingUserMessage != null) {
+            ctx.askMsg = ctx.existingUserMessage;
+        }
+        else if (!ctx.continueRunningTrace && (TaskOperateTypeEnum.UPDATE.equals(ctx.assistantChatDto.getTaskOperateType())
             || TaskOperateTypeEnum.RERUN.equals(ctx.assistantChatDto.getTaskOperateType())
             || TaskOperateTypeEnum.FEEDBACK.equals(ctx.assistantChatDto.getTaskOperateType()))) {
             ByaiMessageHotDtoDto askMsg = new ByaiMessageHotDtoDto();
@@ -250,7 +266,7 @@ public class ScriptService extends AbstractChatProcess {
         }
 
         // 将用户聊天内容存储到message表中
-        if (!ctx.continueRunningTrace) {
+        if (!ctx.continueRunningTrace && ctx.existingUserMessage == null) {
             saveUserContent(ctx);
         }
 
@@ -429,6 +445,39 @@ public class ScriptService extends AbstractChatProcess {
      */
     @Override
     public void storeMessage(ChatProcessContext ctx) {
+        if ((ctx.gatewayError || ctx.exception != null) && ctx.messageContext != null) {
+            ctx.messageContext.setComplete(true);
+        }
+        try {
+            persistTurnMessage(ctx);
+        }
+        catch (RuntimeException error) {
+            // A failed message write must remain retryable when the terminal record is redelivered.
+            ctx.messagePersisted.set(false);
+            throw error;
+        }
+        notifyTurnPersisted(ctx);
+    }
+
+    private void notifyTurnPersisted(ChatProcessContext ctx) {
+        if (turnPersistenceObservers == null) {
+            return;
+        }
+        if (TransactionSynchronizationManager.isSynchronizationActive()
+            && TransactionSynchronizationManager.isActualTransactionActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    turnPersistenceObservers.orderedStream().forEach(observer -> observer.afterPersisted(ctx));
+                }
+            });
+        }
+        else {
+            turnPersistenceObservers.orderedStream().forEach(observer -> observer.afterPersisted(ctx));
+        }
+    }
+
+    private void persistTurnMessage(ChatProcessContext ctx) {
         // 落库一次性闸门：用户停止会话时可能已抢先落库，避免请求线程重复 insert。
         if (!ctx.tryBeginPersist()) {
             log.info("storeMessage 跳过：消息已落库, sessionId: {}, traceId: {}", ctx.sessionId, ctx.traceId);
@@ -766,9 +815,16 @@ public class ScriptService extends AbstractChatProcess {
             return false;
         }
         // 按正常完成状态落库，保持与同 pod 路径一致。
-        snapshot.setMsgStatus(com.iwhalecloud.byai.state.domain.message.enums.MsgStatus.FINISH.getCode());
+        snapshot.setMsgStatus(MsgStatus.FINISH.getCode());
         snapshot.setComplete(true);
         byaiMessageHotService.updateSelective(snapshot);
+        ChatProcessContext completed = new ChatProcessContext(null, new AssistantChatDto());
+        completed.sessionId = sessionId;
+        completed.traceId = snapshot.getTraceId();
+        completed.modelAnswerMessageId = snapshot.getMessageId();
+        completed.resMsg = snapshot;
+        completed.userId = CurrentUserHolder.getCurrentUserId();
+        notifyTurnPersisted(completed);
         log.info("stopChat 跨 pod 从快照落库完成, sessionId: {}, messageId: {}", sessionId, snapshot.getMessageId());
         return true;
     }
@@ -780,6 +836,7 @@ public class ScriptService extends AbstractChatProcess {
     public void handleException(ChatProcessContext ctx) {
         try {
             saveExceptionRequiresNew(ctx);
+            notifyTurnPersisted(ctx);
         }
         catch (Exception e) {
             log.error(
@@ -808,6 +865,9 @@ public class ScriptService extends AbstractChatProcess {
             return;
         }
 
+        if (ctx.messageContext != null) {
+            ctx.messageContext.setComplete(true);
+        }
         TransactionTemplate template = new TransactionTemplate(transactionManager);
         template.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         template.execute(status -> {
@@ -904,6 +964,11 @@ public class ScriptService extends AbstractChatProcess {
         if (CollectionUtils.isNotEmpty(ctx.getAgentIds())) {
             allAgentIds.addAll(ctx.getAgentIds());
         }
+        // A server-owned dispatch may quote several employees while only one owns this private session.
+        if (ctx.sessionMemberAgentId != null) {
+            allAgentIds.clear();
+            allAgentIds.add(ctx.sessionMemberAgentId);
+        }
         // 更新使用次数
         for (Long agentId : allAgentIds) {
             ByaiSessionMember sessionMember = sessionMemberService.findSessionMember(sessionId, "AGENT", agentId);
@@ -942,13 +1007,38 @@ public class ScriptService extends AbstractChatProcess {
         }
     }
 
-    /**
-     * 聊天主流程入口，调用模板方法执行主流程（带首词响应开始时间）。
-     *
-     * @param res SSE输出流
-     * @param assistantChatDto 聊天请求参数
-     * @param firstTextStartTime 首词响应开始时间（毫秒）
-     */
+    /** Starts an authenticated server-owned turn without inserting its existing user message again. */
+    public ChatProcessContext startExistingMessageTurn(AssistantChatDto dto, ByaiMessageHotDtoDto existingMessage)
+        throws Exception {
+        if (dto == null || dto.getSessionId() == null || existingMessage == null
+            || !dto.getSessionId().equals(existingMessage.getSessionId())
+            || existingMessage.getMessageId() == null || dto.getLlmMessageId() == null
+            || StringUtils.isBlank(dto.getClientRequestId())
+            || !Objects.equals(CurrentUserHolder.getCurrentUserId(), existingMessage.getCreatorId())
+            || CurrentUserHolder.getCurrentUserId() == null) {
+            throw new IllegalArgumentException("Existing turn requires an owned message and stable runtime identifiers");
+        }
+        ChatProcessContext ctx = new ChatProcessContext(null, dto);
+        ctx.existingUserMessage = existingMessage;
+        ctx.sessionMemberAgentId = dto.getAgentId();
+        ctx.startTime = System.currentTimeMillis();
+        ctx.firstTextStartTime = ctx.startTime;
+        try {
+            prepareParams(ctx);
+            handleGatewayMode(ctx);
+            if (!ctx.asyncResponse && !ctx.sendByFrameworkMsgOnly) {
+                storeMessage(ctx);
+                afterProcess(ctx);
+            }
+            return ctx;
+        }
+        catch (Exception error) {
+            ctx.exception = error;
+            handleException(ctx);
+            throw error;
+        }
+    }
+
     public void executeAssistantChat(OutputStream res, AssistantChatDto assistantChatDto, Long firstTextStartTime) {
         execute(res, assistantChatDto, firstTextStartTime);
     }
@@ -981,6 +1071,12 @@ public class ScriptService extends AbstractChatProcess {
      */
     public ChatResponse resolveMemory(ChatProcessContext ctx, AssistantChatDto assistantChatDto, Long sessionId,
         MessageContext messageContext, ByaiMessageHotDtoDto resMsg) {
+
+        // Keep terminal failure durable for projections that retry after the runtime has been cleaned up.
+        JSONObject turnMetadata = StringUtils.isBlank(assistantChatDto.getMetadata())
+            ? new JSONObject() : JSON.parseObject(assistantChatDto.getMetadata());
+        turnMetadata.put("turnFailed", ctx.gatewayError || ctx.exception != null);
+        assistantChatDto.setMetadata(turnMetadata.toJSONString());
 
         ByaiMessageHotDto systemReponse = null;
         // 判断是否更新任务

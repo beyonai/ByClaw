@@ -46,6 +46,16 @@
         LIMIT 1
     </select>
 
+    <select id="selectForUpdateByCandidateSessionId" resultMap="BaseResultMap">
+        SELECT <include refid="BaseColumns" /> FROM byai_group_chat_execution
+        WHERE candidate_session_id = #{candidateSessionId} FOR UPDATE
+    </select>
+
+    <update id="bindRuntime">
+        UPDATE byai_group_chat_execution SET trace_id = #{traceId}
+        WHERE execution_id = #{executionId} AND status = 'RUNNING'
+    </update>
+
     <update id="claim">
         UPDATE byai_group_chat_execution
         SET status = 'RUNNING', start_time = #{now}, attempt = COALESCE(attempt, 0) + 1

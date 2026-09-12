@@ -102,6 +102,8 @@ public class TransactionAdviceConfig {
         txMap.put("flushOnStop", notSurpportedTx);
         txMap.put("flushFromSnapshot", notSurpportedTx);
         txMap.put("persistAsyncGatewayContext", notSurpportedTx);
+        // Server-owned turns register Redis runtime before dispatch; message writes commit independently.
+        txMap.put("startExistingMessageTurn", notSurpportedTx);
         // 资源包存在性检查和流式读取走对象存储，不涉及数据库事务；异常不能在事务提交阶段才暴露。
         txMap.put("existsWithinResourceRoot", notSurpportedTx);
         txMap.put("readWithinResourceRoot", notSurpportedTx);

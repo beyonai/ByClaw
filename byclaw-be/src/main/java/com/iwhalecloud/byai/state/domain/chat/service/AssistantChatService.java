@@ -160,7 +160,7 @@ public class AssistantChatService {
     public void chat(AssistantChatDto assistantChatDto, OutputStream outputStream, LoginInfo userInfo)
         throws IOException {
         boolean groupTaskTurn = false;
-        boolean groupTaskSucceeded = false;
+        boolean groupTaskStarted = false;
         Span span = Span.current();
         if (assistantChatDto != null && span != null && assistantChatDto.getSessionId() != null) {
             span.setAttribute("sessionId", assistantChatDto.getSessionId());
@@ -210,16 +210,17 @@ public class AssistantChatService {
             // 执行聊天处理：Gateway 模式下 handleGatewayMode() 内部阻塞等待 Redis 监听器完成，
             // 返回后即可安全执行 storeMessage/afterProcess，最终由 finally 关闭流
             executeChat(assistantChatDto, outputStream, firstTextStartTime);
-            groupTaskSucceeded = true;
+            groupTaskStarted = true;
         } catch (BdpRuntimeException e) {
             handleBdpRuntimeException(e, assistantChatDto, outputStream);
         } catch (Exception e) {
             handleGeneralException(e, outputStream);
         } finally {
-            if (groupTaskTurn && assistantChatDto != null) {
+            // Asynchronous request return is not turn completion; only release a failed startup here.
+            if (groupTaskTurn && !groupTaskStarted && assistantChatDto != null) {
                 GroupChatTaskChatGuard taskGuard = groupChatTaskGuardProvider.getIfAvailable();
                 if (taskGuard != null) {
-                    taskGuard.afterTurn(assistantChatDto.getSessionId(), groupTaskSucceeded);
+                    taskGuard.afterTurn(assistantChatDto.getSessionId(), false);
                 }
             }
             cleanupResources(userInfo, outputStream);

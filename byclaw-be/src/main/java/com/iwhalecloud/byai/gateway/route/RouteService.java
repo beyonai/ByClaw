@@ -18,6 +18,10 @@ import com.iwhalecloud.byai.manager.entity.devloop.Project;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.ObjectProvider;
+import java.util.regex.Pattern;
+import java.util.regex.Matcher;
+import com.iwhalecloud.byai.state.domain.chat.service.ChatGatewayRequestDecorator;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import com.alibaba.fastjson.JSON;
@@ -67,6 +71,9 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 @Service
 public class RouteService {
+    @Autowired
+    private ObjectProvider<ChatGatewayRequestDecorator> requestDecorators;
+
 
     private static final int SANDBOX_STARTUP_WAIT_ROUNDS = 5;
     private static final String SESSION_WORKSPACE_ROOT = "/by/.sessions";
@@ -398,8 +405,8 @@ public class RouteService {
         content = removeLeadingDigitalEmployeePlaceholder(content, resourceList, agentId);
 
         // 检查是否包含占位符格式 {{}}
-        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("\\{\\{([^}]++)\\}\\}");
-        java.util.regex.Matcher matcher = pattern.matcher(content);
+        Pattern pattern = Pattern.compile("\\{\\{([^}]++)\\}\\}");
+        Matcher matcher = pattern.matcher(content);
 
         // 构建资源ID到资源信息的映射，resourceId的格式为：resourceType_resourceId
         Map<String, ResourceVo> resourceMap = new HashMap<>();
@@ -420,7 +427,7 @@ public class RouteService {
 
             if (replacement != null) {
                 replacement = prefixResourcePlaceholder(placeholder, replacement, resourceMap);
-                matcher.appendReplacement(result, java.util.regex.Matcher.quoteReplacement(replacement + " "));
+                matcher.appendReplacement(result, Matcher.quoteReplacement(replacement + " "));
             }
             // 如果找不到对应的资源，保留原占位符
         }
@@ -722,6 +729,13 @@ public class RouteService {
             groupChat.put("conversationKey", sessionId);
             groupChat.put("beforeMessageId", String.valueOf(ctx.getUserMessageId()));
             gatewayParams.put("groupChat", groupChat);
+        }
+
+        // Apply server-owned context after the ordinary same-session reference has been assembled.
+        if (requestDecorators != null) {
+            for (ChatGatewayRequestDecorator decorator : requestDecorators.orderedStream().toList()) {
+                messageContent = decorator.decorate(ctx, messageContent, gatewayParams);
+            }
         }
 
         while (true) {

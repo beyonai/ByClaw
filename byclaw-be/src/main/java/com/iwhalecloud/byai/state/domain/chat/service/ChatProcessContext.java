@@ -22,6 +22,7 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 import lombok.Getter;
 import lombok.Setter;
+import io.netty.channel.Channel;
 
 /**
  * 聊天流程上下文对象，用于在主流程各步骤间传递和共享数据。 包含请求参数、消息对象、会话信息、异常、计时等。
@@ -50,6 +51,12 @@ public class ChatProcessContext {
 
     /** 用户消息ID */
     public Long userMessageId;
+
+    /** Server-only launch input; never populated from a public chat request. */
+    public ByaiMessageHotDtoDto existingUserMessage;
+
+    /** Optional server-owned membership boundary; message references need not be session participants. */
+    public Long sessionMemberAgentId;
 
     /** LLM回复消息ID */
     public Long modelAnswerMessageId;
@@ -160,7 +167,7 @@ public class ChatProcessContext {
      */
     public String hydratedStreamId;
 
-    /** 已完成 terminal 事件的 Stream ID，用于 ACK 失败后的终止事件重投幂等。 */
+    /** 已观察到的 terminal Stream ID；消息和完成回调是否提交以持久化 marker 为准。 */
     public String terminalStreamId;
 
     /**
@@ -227,7 +234,7 @@ public class ChatProcessContext {
      * 发送请求的 WebSocket Channel（HTTP SSE 场景为 null），
      * 多端广播时排除该 Channel 避免重复推送
      */
-    public io.netty.channel.Channel senderChannel;
+    public Channel senderChannel;
 
     public ChatProcessContext(OutputStream res, AssistantChatDto assistantChatDto) {
         this.res = res;
