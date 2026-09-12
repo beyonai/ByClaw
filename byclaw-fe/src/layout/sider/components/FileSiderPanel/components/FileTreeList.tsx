@@ -38,6 +38,7 @@ interface FileTreeListProps {
   getActionItems: (item: FileBrowserItem) => MenuProps['items'];
   onAction: (key: Key, item: FileBrowserItem) => void;
   getTooltipPath?: (item: FileBrowserItem) => string | undefined;
+  getNodeExtra?: (item: FileTreeItem) => React.ReactNode;
 }
 
 export const FilePathTooltip: React.FC<{ item: FileBrowserItem; path?: string; children: React.ReactNode }> = ({
@@ -157,6 +158,7 @@ const FileTreeList: React.FC<FileTreeListProps> = ({
   getActionItems,
   onAction,
   getTooltipPath,
+  getNodeExtra,
 }) => {
   const treeData = useMemo(() => {
     const expandedDirectoryKeySet = new Set(
@@ -271,6 +273,7 @@ const FileTreeList: React.FC<FileTreeListProps> = ({
                         </span>
                       </Dropdown>
                     ) : null}
+                    {getNodeExtra?.(treeItem)}
                   </span>
                 );
               }}

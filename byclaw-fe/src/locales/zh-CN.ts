@@ -537,6 +537,7 @@ export default {
   'chatResource.knowledge': '知识',
   'chatResource.code': '代码',
   'chatResource.projectCode': '项目代码',
+  'chatResource.projectSpace': '项目空间',
   'chatResource.skill': '技能',
   'chatResource.model': '模型',
   'chatResource.empty': '暂无数据',

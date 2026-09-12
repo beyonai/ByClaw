@@ -28,6 +28,8 @@ import com.iwhalecloud.byai.manager.dto.devloop.ProjectRepoFileContentDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectRepoFileQueryDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectRepoTreeQueryDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectRepoTreeNodeDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.ProjectSpaceTreeQueryDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.ProjectSpaceTreeNodeDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectResourceDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileDeleteDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileListDto;
@@ -285,6 +287,14 @@ public class ProjectController {
         return ResponseUtil.successResponse(projectRepositoryService.listTree(query == null ? null : query.getProjectId(),
             query == null ? null : query.getRepoId(), query == null ? null : query.getPath(),
             query == null ? null : query.getRef(), query == null ? null : query.getSessionId()));
+    }
+
+    /** 查询项目空间根目录或指定目录的直接子节点。 */
+    @PostMapping("/space/tree")
+    public ResponseUtil<List<ProjectSpaceTreeNodeDTO>> listProjectSpaceTree(
+        @RequestBody ProjectSpaceTreeQueryDTO query) {
+        return ResponseUtil.successResponse(projectRepositoryService.listProjectSpaceTree(
+            query == null ? null : query.getProjectId(), query == null ? null : query.getPath()));
     }
 
     /**

@@ -12,6 +12,7 @@ import com.iwhalecloud.byai.manager.application.service.project.ProjectInitServi
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectRepoBranchDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectRepoFileContentDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectRepoTreeNodeDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.ProjectSpaceTreeNodeDTO;
 import com.iwhalecloud.byai.manager.entity.devloop.Project;
 import com.iwhalecloud.byai.manager.entity.devloop.ProjectRepo;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectRepoMapper;
@@ -21,6 +22,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -93,6 +95,79 @@ public class ProjectRepositoryService {
         }
         return resolveProvider(repo).listTree(repo.getRepoUrl(), repo.getRepoFullName(), normalizePath(path), branch,
             currentUserToken());
+    }
+
+    /** 查询项目空间根目录或指定目录的直接子节点。 */
+    public List<ProjectSpaceTreeNodeDTO> listProjectSpaceTree(Long projectId, String path) {
+        requireProject(projectId);
+        Path projectRoot = projectInitService.initProjectWorkspace(projectId).toAbsolutePath().normalize();
+        String normalizedPath = normalizeSpacePath(path);
+        Path directory = projectRoot.resolve(normalizedPath).normalize();
+        if (!directory.startsWith(projectRoot) || !Files.isDirectory(directory)) {
+            throw new BaseException(50500, "project.space.path.not.found");
+        }
+        Map<Path, ProjectRepo> reposByPath = new HashMap<>();
+        projectWorkspaceGitService.resolveRepositories(projectId).forEach(resolved ->
+            reposByPath.put(resolved.path().toAbsolutePath().normalize(), resolved.repo()));
+        List<ProjectSpaceTreeNodeDTO> nodes = new ArrayList<>();
+        try (java.util.stream.Stream<Path> children = Files.list(directory)) {
+            children.filter(child -> !".git".equals(child.getFileName().toString()))
+                .sorted(Comparator.comparing((Path child) -> !Files.isDirectory(child))
+                    .thenComparing(child -> child.getFileName().toString(), String.CASE_INSENSITIVE_ORDER))
+                .forEach(child -> {
+                    ProjectSpaceTreeNodeDTO node = new ProjectSpaceTreeNodeDTO();
+                    Path relative = projectRoot.relativize(child);
+                    node.setName(child.getFileName().toString());
+                    node.setPath(relative.toString().replace('\\', '/'));
+                    boolean directoryNode = Files.isDirectory(child);
+                    node.setType(directoryNode ? "directory" : "file");
+                    node.setHasChildren(directoryNode);
+                    if (!directoryNode) {
+                        try {
+                            BasicFileAttributes attrs = Files.readAttributes(child, BasicFileAttributes.class);
+                            node.setSize(attrs.size());
+                            node.setLastModified(attrs.lastModifiedTime().toInstant().toString());
+                        } catch (Exception ignored) {
+                            // 文件在扫描期间消失时仍返回节点，下一次刷新会重新同步。
+                        }
+                    } else {
+                        ProjectRepo repo = reposByPath.get(child.toAbsolutePath().normalize());
+                        if (isGitRepository(child)) {
+                            node.setGitRepository(true);
+                            if (repo != null) {
+                                node.setRepoId(repo.getRepoId());
+                                node.setDefaultBranch(repo.getDefaultBranch());
+                            }
+                            if (node.getDefaultBranch() == null || node.getDefaultBranch().isBlank()) {
+                                try {
+                                    String branch = gitCommandExecutor.executeCommandQuietly(child,
+                                        "git", "-c", "safe.directory=*", "symbolic-ref", "--short", "HEAD").trim();
+                                    if (!branch.isBlank()) node.setDefaultBranch(branch);
+                                } catch (Exception ignored) {
+                                    // Detached HEAD or unreadable metadata: branch button can fall back to "branch".
+                                }
+                            }
+                            node.setChangesSupported(repo != null);
+                        } else {
+                            node.setGitRepository(false);
+                        }
+                    }
+                    nodes.add(node);
+                });
+        } catch (java.io.IOException e) {
+            throw new BaseException(50500, "project.space.list.failed", e);
+        }
+        return nodes;
+    }
+
+    private String normalizeSpacePath(String path) {
+        if (path == null || path.isBlank()) return "";
+        String normalized = path.replace('\\', '/').replaceAll("^/+|/+$", "");
+        if (normalized.isBlank() || ".".equals(normalized)) return "";
+        if (normalized.equals("..") || normalized.startsWith("../") || normalized.contains("/../")) {
+            throw new BaseException(50500, "project.space.path.invalid");
+        }
+        return normalized;
     }
 
     /** 按指定分支搜索仓库文件名和路径。 */

@@ -321,6 +321,19 @@ export type ProjectRepoTreeNode = {
   hasChildren?: boolean;
 };
 
+export type ProjectSpaceTreeNode = {
+  name: string;
+  path: string;
+  type: 'directory' | 'file' | string;
+  size?: number;
+  lastModified?: string;
+  hasChildren?: boolean;
+  gitRepository?: boolean;
+  repoId?: number;
+  defaultBranch?: string;
+  changesSupported?: boolean;
+};
+
 export type ProjectRepoBranch = {
   name: string;
   sha?: string;
@@ -347,6 +360,9 @@ export const listProjectRepoTree = (data: {
   ref?: string;
   sessionId?: string | number;
 }) => POST<ProjectRepoTreeNode[]>('/byaiService/project/repo/tree', data);
+
+export const listProjectSpaceTree = (data: { projectId: number; path?: string }) =>
+  POST<ProjectSpaceTreeNode[]>('/byaiService/project/space/tree', data);
 
 export const searchProjectRepoTree = (data: {
   projectId: number;

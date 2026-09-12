@@ -534,6 +534,7 @@ export default {
   'chatResource.knowledge': 'Knowledge',
   'chatResource.code': 'Code',
   'chatResource.projectCode': 'Project Code',
+  'chatResource.projectSpace': 'Project Space',
   'chatResource.skill': 'Skills',
   'chatResource.model': 'Models',
   'chatResource.empty': 'No data',

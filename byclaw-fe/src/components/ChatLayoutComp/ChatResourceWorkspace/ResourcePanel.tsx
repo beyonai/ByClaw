@@ -10,8 +10,7 @@ import ResourceSiderPanel from '@/layout/sider/components/ResourceSiderPanel';
 import { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentBar';
 import type { DetailPanelOptions } from '@/layout/sider/siderContentContext';
 import FileResourcePanel from './FileResourcePanel';
-import CodesTab from '@/layout/sider/components/ProjectSpaceList/CodesTab';
-import { listAvailableProjectRepos } from '@/service/devloop';
+import ProjectSpaceTab from '@/layout/sider/components/ProjectSpaceList/ProjectSpaceTab';
 import { querySessionDataSources } from '@/service/projectDataSources';
 import { useChatResourceProject } from './useChatResourceProject';
 import { getSessionFileTabKeys, type SessionFileTabKey } from './resourceTabUtils';
@@ -46,7 +45,6 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
   const [upperScopeKey, setUpperScopeKey] = useState<UpperScopeKey>('session');
   const [secondaryState, setSecondaryState] = useState<SecondaryState>(EMPTY_SECONDARY_STATE);
   const [sessionResourceRefreshKey, setSessionResourceRefreshKey] = useState(0);
-  const [availableRepoCount, setAvailableRepoCount] = useState<number | null>(null);
   const resourceId = activeEmployee.resourceId || (project?.resourceId ? `${project.resourceId}` : undefined);
   const resolvedProjectId = Number(project?.projectId ?? projectId);
   const sessionFileTabKeys = useMemo(() => getSessionFileTabKeys(resolvedProjectId), [resolvedProjectId]);
@@ -67,9 +65,8 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
   const rawProjectCloudResourceId = cloudResourceId ?? project?.cloudResourceId;
   const projectCloudResourceId = rawProjectCloudResourceId ? `${rawProjectCloudResourceId}` : undefined;
 
-  // 只有当前会话实际可访问到至少一个仓库时才展示项目代码。
-  // null 表示仍在查询，避免先显示再隐藏造成菜单闪烁。
-  const showCode = Boolean(sessionId && availableRepoCount !== null && availableRepoCount > 0);
+  // 项目空间展示项目目录本身，项目尚未配置仓库时也可以浏览普通文件。
+  const showCode = Boolean(sessionId && resolvedProjectId > 0);
 
   // 按当前会话的实际可见数据决定入口；切换会话后不沿用上一个会话的结果。
   useEffect(() => {
@@ -90,27 +87,6 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
       disposed = true;
     };
   }, [resolvedProjectId, sessionId, sessionResourceRefreshKey]);
-
-  useEffect(() => {
-    let disposed = false;
-    setAvailableRepoCount(null);
-    if (!projectId || !sessionId) {
-      return () => {
-        disposed = true;
-      };
-    }
-    void listAvailableProjectRepos(projectId, sessionId)
-      .then((repos) => {
-        if (!disposed) setAvailableRepoCount(Array.isArray(repos) ? repos.length : 0);
-      })
-      .catch(() => {
-        // 仓库可用性查询失败时不展示入口，避免打开后必然得到空代码页。
-        if (!disposed) setAvailableRepoCount(0);
-      });
-    return () => {
-      disposed = true;
-    };
-  }, [projectId, sessionId]);
 
   useEffect(() => {
     if (!showCode && secondaryState.session === 'code') {
@@ -139,7 +115,7 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
     return [
       ...sessionFileTabKeys.map((key) => ({ key, label: label(SESSION_FILE_TAB_LABEL_IDS[key]) })),
       ...(showDataSources ? [{ key: 'dataSources', label: label('dataSource.title') }] : []),
-      ...(showCode ? [{ key: 'code', label: label('chatResource.projectCode') }] : []),
+      ...(showCode ? [{ key: 'code', label: label('chatResource.projectSpace') }] : []),
     ];
   }, [intl, sessionFileTabKeys, showCode, showDataSources, upperScopeKey]);
 
@@ -199,12 +175,11 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
       }
       if (upperSecondaryKey === 'code' && showCode) {
         return (
-          <CodesTab
+          <ProjectSpaceTab
             projectId={Number(project?.projectId || projectId)}
             resourceId={resourceId}
             sessionId={sessionId}
             refreshKey={sessionResourceRefreshKey}
-            codeChangesEnabled
             onOpenDetail={onOpenDetail}
           />
         );
