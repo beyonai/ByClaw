@@ -16,4 +16,5 @@ public class ProjectSpaceTreeNodeDTO {
     private Long repoId;
     private String defaultBranch;
     private Boolean changesSupported;
+    private String remoteUrl;
 }

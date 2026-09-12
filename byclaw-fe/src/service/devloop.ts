@@ -332,6 +332,7 @@ export type ProjectSpaceTreeNode = {
   repoId?: number;
   defaultBranch?: string;
   changesSupported?: boolean;
+  remoteUrl?: string;
 };
 
 export type ProjectRepoBranch = {

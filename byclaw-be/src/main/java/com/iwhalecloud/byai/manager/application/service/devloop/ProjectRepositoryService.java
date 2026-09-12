@@ -148,6 +148,13 @@ public class ProjectRepositoryService {
                                     // Detached HEAD or unreadable metadata: branch button can fall back to "branch".
                                 }
                             }
+                            try {
+                                String remoteUrl = gitCommandExecutor.executeCommandQuietly(child,
+                                    "git", "-c", "safe.directory=*", "remote", "get-url", "origin").trim();
+                                if (!remoteUrl.isBlank()) node.setRemoteUrl(remoteUrl.replaceFirst("(?<=://)[^/@]+@", ""));
+                            } catch (Exception ignored) {
+                                // A local Git repository may not have an origin remote.
+                            }
                             node.setChangesSupported(repo != null);
                         } else {
                             node.setGitRepository(false);

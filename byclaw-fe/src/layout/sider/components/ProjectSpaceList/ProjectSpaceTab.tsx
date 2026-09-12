@@ -35,6 +35,7 @@ interface LocalGitRepositoryViewProps {
   onOpenDetail?: (panel: React.ReactNode, options: DetailPanelOptions) => void;
   getActionItems?: (item: FileBrowserItem) => MenuProps['items'];
   onAction?: (key: Key, item: FileBrowserItem) => void;
+  repository?: SpaceItem;
 }
 
 const toLocalGitItems = (nodes: ProjectSpaceTreeNode[], rootPath: string, repositoryPath: string) => {
@@ -65,6 +66,7 @@ const LocalGitRepositoryView: React.FC<LocalGitRepositoryViewProps> = ({
   onOpenDetail,
   getActionItems,
   onAction,
+  repository,
 }) => {
   const { EventEmitter } = useGlobal();
   const [items, setItems] = useState<FileBrowserItem[]>([]);
@@ -152,7 +154,20 @@ const LocalGitRepositoryView: React.FC<LocalGitRepositoryViewProps> = ({
 
   return (
     <div className={styles.localGitRepositoryView}>
-      <div className={styles.localGitRepositoryHint}>该 Git 仓库尚未配置项目仓库记录，仅支持浏览项目空间文件。</div>
+      <div className={styles.localGitRepositoryMeta}>
+        <div className={styles.localGitRepositoryMetaTitle}>本地 Git 仓库</div>
+        <div className={styles.localGitRepositoryMetaRow}>
+          <span>当前分支：{repository?.defaultBranch || '未知'}</span>
+          {repository?.remoteUrl ? (
+            <a href={repository.remoteUrl} target="_blank" rel="noreferrer">
+              {repository.remoteUrl}
+            </a>
+          ) : (
+            <span>未配置 origin 远程地址</span>
+          )}
+        </div>
+        <div className={styles.localGitRepositoryMetaNote}>该仓库尚未配置项目仓库记录，因此暂不支持 Changes。</div>
+      </div>
       <FileSpaceBlock
         title="项目空间"
         hideHeader
@@ -187,6 +202,7 @@ const toItems = (nodes: ProjectSpaceTreeNode[], rootPath = '/by/projects/') =>
     repoId: node.repoId,
     defaultBranch: node.defaultBranch,
     changesSupported: node.changesSupported,
+    remoteUrl: node.remoteUrl,
   })) as FileBrowserItem[];
 
 type SpaceItem = FileBrowserItem & {
@@ -194,6 +210,7 @@ type SpaceItem = FileBrowserItem & {
   repoId?: number;
   defaultBranch?: string;
   changesSupported?: boolean;
+  remoteUrl?: string;
 };
 
 interface Props {
@@ -632,6 +649,7 @@ const ProjectSpaceTab: React.FC<Props> = ({
             onOpenDetail={onOpenDetail}
             getActionItems={actions}
             onAction={handleAction}
+            repository={gitDrawerItem}
           />
         ) : null}
       </Drawer>
