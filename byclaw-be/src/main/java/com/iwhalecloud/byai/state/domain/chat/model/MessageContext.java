@@ -173,6 +173,9 @@ public class MessageContext {
 
     private Long lastSegmentSeq;
 
+    /** 当前增量完成分段后的输出，供无发起端连接的 WebSocket 广播复用，避免丢失渲染版本和序号。 */
+    private transient String recordedStreamEventData;
+
     /**
      * 默认构造方法
      */
@@ -462,6 +465,7 @@ public class MessageContext {
     }
 
     private String withSegmentMetadata(String text, AnswerDelta segment, String eventType) {
+        recordedStreamEventData = text;
         try {
             JSONObject payload = JSONObject.parseObject(text);
             if (segment != null) {
@@ -471,7 +475,8 @@ public class MessageContext {
                 // select the ordered renderer before the final message is persisted.
                 payload.put("messageRenderVersion", "v2");
             }
-            return payload.toJSONString();
+            recordedStreamEventData = payload.toJSONString();
+            return recordedStreamEventData;
         }
         catch (Exception e) {
             return text;

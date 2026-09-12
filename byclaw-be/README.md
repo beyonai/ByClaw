@@ -28,6 +28,8 @@ ByClaw-BE 是 BeyondAI 平台的后端服务，提供完整的 AI 应用开发�
 
 ## 群聊任务执行与恢复
 
+- 子任务 WebSocket 广播复用普通聚合器处理后的增量，答案和思考事件携带 `messageRenderVersion="v2"` 及对应分段 `seq`。无发起端连接或 BE 恢复后也使用同一格式，广播不会再次聚合正文。
+
 - `TASK` 的 Agent 答案保存在独立任务会话；当前 turn 结束后进入 `WAITING_USER`，仍须发起人确认完成并发布到群里。
 - 群聊候选子会话从首个 turn 起复用 `ScriptService → RouteService → SessionStreamManager`，由普通聊天链路维护 Redis running/runtime、running snapshot、WebSocket 增量和完整消息落库。没有发起端 WebSocket 连接也能运行；用户在执行中进入或刷新任务会话时，普通聊天页加载快照后继续接收更新。
 - 一条群消息引用多个数字员工时，各员工使用独立的子会话、trace 和回答消息 ID。首条消息完整保留 `resourceList` 供展示，子会话成员统计只计入实际执行的目标员工，BE 重启恢复后仍保持这一约束。

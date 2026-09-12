@@ -175,6 +175,9 @@ public class SessionStreamEventRouter {
 
         String receivedTraceId = dataJson.getString("trace_id");
         MessageContext messageContext = ctx.resolveMessageContext(receivedTraceId);
+        if (messageContext != null) {
+            messageContext.setRecordedStreamEventData(null);
+        }
         if (ctx.recoveryOnly) {
             boolean alreadyHydrated = StreamIdUtil.isProcessedByWatermark(ctx.currentStreamId, ctx.hydratedStreamId);
             if (!alreadyHydrated) {
@@ -321,8 +324,19 @@ public class SessionStreamEventRouter {
         // 多端广播必须与当前 WebSocket 路由使用同一套事件类型归一化规则。
         // 否则非目标 agent 的 answerDelta 会在入库时按 reasoningLogDelta 处理，
         // 但其他设备仍收到原始 answerDelta，导致不同 WebSocket 客户端表现不一致。
-        broadcastJson.put("event_type", gatewayStreamEventProcessor.normalizeEventType(ctx, dataJson));
-        broadcastJson.put("data", gatewayStreamEventProcessor.buildEventData(ctx, dataJson, metadata));
+        String eventType = gatewayStreamEventProcessor.normalizeEventType(ctx, dataJson);
+        broadcastJson.put("event_type", eventType);
+        MessageContext messageContext = ctx.resolveMessageContext(dataJson.getString("trace_id"));
+        // WebSocket 增量已经完成聚合，广播直接复用与发起端相同的输出，不从原始事件重建而丢失 v2/seq。
+        if (ChatTransport.WEBSOCKET.equals(ctx.transport)
+            && (SseResponseEventEnum.answerDelta.equals(eventType)
+                || SseResponseEventEnum.reasoningLogDelta.equals(eventType))
+            && messageContext != null && messageContext.getRecordedStreamEventData() != null) {
+            broadcastJson.put("data", messageContext.getRecordedStreamEventData());
+        }
+        else {
+            broadcastJson.put("data", gatewayStreamEventProcessor.buildEventData(ctx, dataJson, metadata));
+        }
         return broadcastJson;
     }
 
