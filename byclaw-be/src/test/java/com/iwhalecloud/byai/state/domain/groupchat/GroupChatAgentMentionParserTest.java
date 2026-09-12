@@ -47,7 +47,7 @@ class GroupChatAgentMentionParserTest {
     @Test
     void normalizesMultipleMentionsDeduplicatesAndUsesAuthoritativeNames() {
         GroupChatAgentMention result = parser.parse(1L, 20L,
-            "请 [@伪造名](uid?=HUMAN_10) 和 [@智能体](uid?=DIG_EMPLOYEE_30)，再次 [@他](uid?=DIG_EMPLOYEE_30)");
+            "请 [@伪造名](uid=HUMAN_10) 和 [@智能体](uid=DIG_EMPLOYEE_30)，再次 [@他](uid=DIG_EMPLOYEE_30)");
 
         assertThat(result.normalizedContent()).isEqualTo("请 {{HUMAN_10}} 和 {{DIG_EMPLOYEE_30}}，再次 {{DIG_EMPLOYEE_30}}");
         assertThat(result.resourceList()).extracting("resourceName").containsExactly("真实用户", "真实智能体");
@@ -55,7 +55,8 @@ class GroupChatAgentMentionParserTest {
 
     @Test
     void leavesMalformedNonMemberAndSelfMentionsAsOrdinaryText() {
-        String content = "[@旧协议](uid?HUMAN_10) [@外部](uid?=HUMAN_99) [@自己](uid?=DIG_EMPLOYEE_20)";
+        String content = "[@旧格式](uid?=DIG_EMPLOYEE_30) [@旧协议](uid?HUMAN_10) [@外部](uid=HUMAN_99) [@自己](uid=DIG_EMPLOYEE_20)"
+            + " @智能体 [智能体](uid=DIG_EMPLOYEE_30) {{DIG_EMPLOYEE_30}}";
         GroupChatAgentMention result = parser.parse(1L, 20L, content);
 
         assertThat(result.normalizedContent()).isEqualTo(content);
@@ -67,7 +68,7 @@ class GroupChatAgentMentionParserTest {
         when(memberService.findSessionMembers(1L, null, null)).thenReturn(List.of(
             member(MemObjType.USER.name(), 0L), member(MemObjType.USER.name(), 10L)));
 
-        GroupChatAgentMention result = parser.parse(1L, 20L, "[@用户](uid?=HUMAN_10)");
+        GroupChatAgentMention result = parser.parse(1L, 20L, "[@用户](uid=HUMAN_10)");
 
         assertThat(result.normalizedContent()).isEqualTo("{{HUMAN_10}}");
         assertThat(result.resourceList()).hasSize(1);

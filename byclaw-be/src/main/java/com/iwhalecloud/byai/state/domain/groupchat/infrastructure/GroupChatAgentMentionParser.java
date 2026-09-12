@@ -25,7 +25,7 @@ import com.iwhalecloud.byai.state.domain.session.service.SessionMemberService;
 /** 在 Agent 最终正文投影边界解析严格的群成员 Markdown mention。 */
 @Component
 public class GroupChatAgentMentionParser {
-    private static final Pattern MENTION_PATTERN = Pattern.compile("\\[@([^]\\r\\n]+)]\\(uid\\?=([^()\\s]+)\\)");
+    private static final Pattern MENTION_PATTERN = Pattern.compile("\\[@([^]\\r\\n]+)]\\(uid=([^()\\s]+)\\)");
 
     private final SessionMemberService memberService;
     private final UserService userService;

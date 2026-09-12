@@ -279,10 +279,10 @@ class GroupChatExecutionEventHandlerTest {
         resource.setResourceType(AgentMetaEnum.DIG_EMPLOYEE);
         resource.setResourceId("40");
         resource.setResourceName("协作员工");
-        answer.setMessageContent("[@协作员工](uid?=DIG_EMPLOYEE_40)");
+        answer.setMessageContent("[@协作员工](uid=DIG_EMPLOYEE_40)");
         answer.setMetadata("{\"messageRenderVersion\":\"v2\"}");
         answer.setMessageStruct("""
-            [{"contentType":"1002","seq":5,"choices":[{"delta":{"content":"[@协作员工](uid?=DIG_EMPLOYEE_40)"}}]}]
+            [{"contentType":"1002","seq":5,"choices":[{"delta":{"content":"[@协作员工](uid=DIG_EMPLOYEE_40)"}}]}]
             """);
         when(parser.parse(1L, 4L, answer.getMessageContent()))
             .thenReturn(new GroupChatAgentMention("{{DIG_EMPLOYEE_40}}", List.of(resource)));

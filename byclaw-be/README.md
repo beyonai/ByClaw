@@ -28,6 +28,10 @@ ByClaw-BE 是 BeyondAI 平台的后端服务，提供完整的 AI 应用开发�
 
 ## 群聊任务执行与恢复
 
+- 群聊分类和 disposition 文件写入要求 Agent 静默执行；过程正文、最终答复和 `taskName` / `ackText` 只包含用户业务内容，不汇报内部分类、控制文件或协议。此约束由请求提示词引导，不改变分类文件读取和任务提升流程。
+
+- Agent 成员引用仅接受 `[@成员名称](uid=目标成员uid)`；旧式 `uid?=`、普通 @ 文本和占位符不触发引用解析。合法引用保存到群历史前转换成 `{{目标成员uid}}` 并生成 `resourceList`，其中数字员工引用继续触发 child execution。
+
 - 子任务 WebSocket 广播复用普通聚合器处理后的增量，答案和思考事件携带 `messageRenderVersion="v2"` 及对应分段 `seq`。无发起端连接或 BE 恢复后也使用同一格式，广播不会再次聚合正文。
 
 - `TASK` 的 Agent 答案保存在独立任务会话；当前 turn 结束后进入 `WAITING_USER`，仍须发起人确认完成并发布到群里。
