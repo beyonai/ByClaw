@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState, type Key } from 'react';
-import { Button, Drawer, Input, Modal, Tooltip, Upload, message, type MenuProps } from 'antd';
-import { FolderAddOutlined, GithubOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons';
+import { Button, Drawer, Input, Modal, Spin, Tooltip, Tree, Upload, message, type MenuProps } from 'antd';
+import { FolderAddOutlined, GithubOutlined, UploadOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import FilePreviewPanel from '@/components/ChatLayoutComp/ChatResourceWorkspace/FilePreviewPanel';
 import { DragType } from '@/components/QueryInput/withDrag';
@@ -23,7 +23,9 @@ import {
   uploadProjectSpaceFiles,
   type ProjectSpaceTreeNode,
 } from '@/service/devloop';
-import type { FileBrowserItem } from '@/service/fileBrowser';
+import { deleteFiles, downloadFile, downloadFolder, renameFile, type FileBrowserItem } from '@/service/fileBrowser';
+import { uploadFiles as uploadKnowledgeFiles } from '@/service/knowledgeCenter';
+import { queryProjectCloudDrive } from '@/components/ProjectCloudDrive';
 import styles from './index.module.less';
 
 const toItems = (nodes: ProjectSpaceTreeNode[], rootPath = '/by/projects/') =>
@@ -49,12 +51,20 @@ type SpaceItem = FileBrowserItem & {
 interface Props {
   projectId: number;
   resourceId?: string | number;
+  projectCloudResourceId?: string | number;
   sessionId?: string | number;
   refreshKey?: number;
   onOpenDetail?: (panel: React.ReactNode, options: DetailPanelOptions) => void;
 }
 
-const ProjectSpaceTab: React.FC<Props> = ({ projectId, resourceId, sessionId, refreshKey = 0, onOpenDetail }) => {
+const ProjectSpaceTab: React.FC<Props> = ({
+  projectId,
+  resourceId,
+  projectCloudResourceId,
+  sessionId,
+  refreshKey = 0,
+  onOpenDetail,
+}) => {
   const intl = useIntl();
   const { EventEmitter } = useGlobal();
   const [items, setItems] = useState<FileBrowserItem[]>([]);
@@ -65,6 +75,14 @@ const ProjectSpaceTab: React.FC<Props> = ({ projectId, resourceId, sessionId, re
   const [uploading, setUploading] = useState(false);
   const [createFolderOpen, setCreateFolderOpen] = useState(false);
   const [createFolderName, setCreateFolderName] = useState('');
+  const [renameTarget, setRenameTarget] = useState<SpaceItem | null>(null);
+  const [renameName, setRenameName] = useState('');
+  const [renameLoading, setRenameLoading] = useState(false);
+  const [saveTarget, setSaveTarget] = useState<SpaceItem | null>(null);
+  const [savePath, setSavePath] = useState('/');
+  const [saveFolders, setSaveFolders] = useState<{ title: string; key: string; isLeaf: boolean }[]>([]);
+  const [saveLoading, setSaveLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
   const clickTimer = useRef<number | null>(null);
   const rootPath = `/by/projects/${projectId}/`;
 
@@ -200,6 +218,105 @@ const ProjectSpaceTab: React.FC<Props> = ({ projectId, resourceId, sessionId, re
     [EventEmitter, resourceId]
   );
 
+  const download = useCallback(
+    async (item: SpaceItem) => {
+      if (!resourceId) return;
+      try {
+        const response: any = item.isDir
+          ? await downloadFolder(resourceId, ensureDirectoryPath(item.path))
+          : await downloadFile(resourceId, item.path);
+        const blob = response?.file instanceof Blob ? response.file : new Blob([response?.file || response]);
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = response?.fileName || (item.isDir ? `${item.name}.zip` : item.name);
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        URL.revokeObjectURL(url);
+      } catch (error: any) {
+        message.error(error?.message || error?.msg || '下载失败');
+      }
+    },
+    [resourceId]
+  );
+
+  const remove = useCallback(
+    (item: SpaceItem) => {
+      if (!resourceId) return;
+      Modal.confirm({
+        title: '确认删除',
+        content: `确定删除“${item.name}”吗？`,
+        okButtonProps: { danger: true },
+        onOk: async () => {
+          await deleteFiles({ resourceId, paths: [item.path] });
+          message.success('删除成功');
+          refreshSpace();
+        },
+      });
+    },
+    [refreshSpace, resourceId]
+  );
+
+  const rename = useCallback(async () => {
+    if (!renameTarget || !resourceId || !renameName.trim()) return;
+    setRenameLoading(true);
+    try {
+      await renameFile({ resourceId, sourcePath: renameTarget.path, newName: renameName.trim() });
+      message.success('重命名成功');
+      setRenameTarget(null);
+      refreshSpace();
+    } catch (error: any) {
+      message.error(error?.message || error?.msg || '重命名失败');
+    } finally {
+      setRenameLoading(false);
+    }
+  }, [refreshSpace, renameName, renameTarget, resourceId]);
+
+  const openSaveToProject = useCallback(
+    async (item: SpaceItem) => {
+      if (!projectCloudResourceId || !resourceId || item.isDir) return;
+      setSaveTarget(item);
+      setSavePath('/');
+      setSaveLoading(true);
+      try {
+        const folders = await queryProjectCloudDrive(projectCloudResourceId, '/');
+        setSaveFolders(
+          folders
+            .filter((folder) => folder.isDir)
+            .map((folder) => ({ title: folder.name, key: ensureDirectoryPath(folder.path), isLeaf: false }))
+        );
+      } catch (error: any) {
+        setSaveFolders([]);
+        message.error(error?.message || error?.msg || '项目云盘目录加载失败');
+      } finally {
+        setSaveLoading(false);
+      }
+    },
+    [projectCloudResourceId, resourceId]
+  );
+
+  const saveToProject = useCallback(async () => {
+    if (!saveTarget || !projectCloudResourceId || !resourceId) return;
+    setSaving(true);
+    try {
+      const response: any = await downloadFile(resourceId, saveTarget.path);
+      const blob = response?.file instanceof Blob ? response.file : response;
+      if (!(blob instanceof Blob)) throw new Error('文件下载失败');
+      const formData = new FormData();
+      formData.append('resourceId', String(projectCloudResourceId));
+      formData.append('directoryPath', ensureDirectoryPath(savePath));
+      formData.append('files', blob, response?.fileName || saveTarget.name);
+      await uploadKnowledgeFiles(formData, { responseCfg: { hideErrorTips: true } });
+      message.success('已保存到项目云盘');
+      setSaveTarget(null);
+    } catch (error: any) {
+      message.error(error?.message || error?.msg || '保存到项目云盘失败');
+    } finally {
+      setSaving(false);
+    }
+  }, [projectCloudResourceId, resourceId, savePath, saveTarget]);
+
   const onNodeClick = useCallback(
     (event: React.MouseEvent, node: FileTreeItem) => {
       event.stopPropagation();
@@ -213,8 +330,33 @@ const ProjectSpaceTab: React.FC<Props> = ({ projectId, resourceId, sessionId, re
   );
 
   const actions = useCallback(
-    (): MenuProps['items'] => [{ key: 'quote', label: intl.formatMessage({ id: 'common.quote' }) }],
-    [intl]
+    (item: FileBrowserItem): MenuProps['items'] => [
+      ...(resourceId ? [{ key: 'quote', label: intl.formatMessage({ id: 'common.quote' }) }] : []),
+      ...(canPreviewFile(item)
+        ? [{ key: 'preview', label: intl.formatMessage({ id: 'fileBrowser.action.preview' }) }]
+        : []),
+      { key: 'download', label: '下载' },
+      ...(projectCloudResourceId && !isDirectory(item) ? [{ key: 'saveToProject', label: '保存到项目云盘' }] : []),
+      { key: 'rename', label: '重命名' },
+      { key: 'delete', label: '删除', danger: true },
+    ],
+    [intl, projectCloudResourceId, resourceId]
+  );
+
+  const handleAction = useCallback(
+    (key: React.Key, rawItem: FileBrowserItem) => {
+      const item = rawItem as SpaceItem;
+      if (key === 'quote') quote(item as FileTreeItem);
+      if (key === 'preview') openPreview(item as FileTreeItem);
+      if (key === 'download') void download(item);
+      if (key === 'saveToProject') void openSaveToProject(item);
+      if (key === 'rename') {
+        setRenameTarget(item);
+        setRenameName(item.name);
+      }
+      if (key === 'delete') remove(item);
+    },
+    [download, openPreview, openSaveToProject, quote, remove]
   );
   return (
     <div className={styles.detailResourcePanel}>
@@ -242,9 +384,6 @@ const ProjectSpaceTab: React.FC<Props> = ({ projectId, resourceId, sessionId, re
             }}
           />
         </Tooltip>
-        <Tooltip title="刷新">
-          <Button size="small" aria-label="刷新" icon={<ReloadOutlined />} onClick={refreshSpace} />
-        </Tooltip>
       </div>
       <FileSpaceBlock
         title={intl.formatMessage({ id: 'chatResource.projectSpace' })}
@@ -263,7 +402,7 @@ const ProjectSpaceTab: React.FC<Props> = ({ projectId, resourceId, sessionId, re
         onNodeDoubleClick={quote}
         showActions={!!resourceId}
         getActionItems={actions}
-        onAction={() => undefined}
+        onAction={handleAction}
         getNodeExtra={getNodeExtra}
       />
       <Modal
@@ -281,6 +420,42 @@ const ProjectSpaceTab: React.FC<Props> = ({ projectId, resourceId, sessionId, re
           onChange={(event) => setCreateFolderName(event.target.value)}
           onPressEnter={() => void handleCreateFolder()}
         />
+      </Modal>
+      <Modal
+        title="重命名"
+        open={!!renameTarget}
+        okText="保存"
+        cancelText="取消"
+        confirmLoading={renameLoading}
+        onCancel={() => !renameLoading && setRenameTarget(null)}
+        onOk={() => void rename()}
+        destroyOnClose
+      >
+        <Input
+          autoFocus
+          value={renameName}
+          onChange={(event) => setRenameName(event.target.value)}
+          onPressEnter={() => void rename()}
+        />
+      </Modal>
+      <Modal
+        title="保存到项目云盘"
+        open={!!saveTarget}
+        okText="保存"
+        cancelText="取消"
+        confirmLoading={saving}
+        onCancel={() => !saving && setSaveTarget(null)}
+        onOk={() => void saveToProject()}
+        destroyOnClose
+      >
+        <Spin spinning={saveLoading}>
+          <Tree
+            treeData={[{ title: '根目录', key: '/', children: saveFolders, isLeaf: !saveFolders.length }]}
+            expandedKeys={['/']}
+            selectedKeys={[savePath]}
+            onSelect={(keys) => keys.length && setSavePath(String(keys[0]))}
+          />
+        </Spin>
       </Modal>
       <Drawer
         open={!!gitDrawerItem}

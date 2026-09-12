@@ -926,6 +926,7 @@ public class ProjectApplicationService {
         if (repo == null || !dto.getProjectId().equals(repo.getProjectId())) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.repo.not.found");
         }
+        String previousRepoType = repo.getRepoType();
         repo.setRepoFullName(dto.getRepoFullName().trim());
         String provider = normalizeProvider(dto.getProvider());
         repo.setRepoUrl(normalizeRepoUrl(dto.getRepoUrl(), repo.getRepoFullName(), provider));
@@ -935,7 +936,12 @@ public class ProjectApplicationService {
         repo.setRepoType("workspace".equals(dto.getRepoType()) ? "workspace" : "code");
         repo.setProvider(provider);
         projectRepoMapper.updateById(repo);
-        projectWorkspaceManifestService.syncProjectGitmodules(repo.getProjectId());
+        if ("workspace".equals(repo.getRepoType()) || "workspace".equals(previousRepoType)) {
+            projectWorkspaceManifestService.syncProjectGitmodules(repo.getProjectId());
+        }
+        if (projectInitService != null && !"ready".equals(projectInitService.getCloneStatus(repo))) {
+            projectInitService.cloneProjectRepositoryAsync(repo);
+        }
         Map<String, Object> result = new HashMap<>();
         result.put("repoId", repo.getRepoId());
         result.put("projectId", repo.getProjectId());

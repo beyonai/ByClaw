@@ -178,6 +178,7 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
           <ProjectSpaceTab
             projectId={Number(project?.projectId || projectId)}
             resourceId={resourceId}
+            projectCloudResourceId={projectCloudResourceId}
             sessionId={sessionId}
             refreshKey={sessionResourceRefreshKey}
             onOpenDetail={onOpenDetail}
