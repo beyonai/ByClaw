@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState, type Key } from 'react';
-import { Dropdown, Popover, type MenuProps } from 'antd';
-import { BranchesOutlined, DownOutlined } from '@ant-design/icons';
+import { Button, Drawer, Input, Modal, Tooltip, Upload, message, type MenuProps } from 'antd';
+import { FolderAddOutlined, GithubOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import FilePreviewPanel from '@/components/ChatLayoutComp/ChatResourceWorkspace/FilePreviewPanel';
 import { DragType } from '@/components/QueryInput/withDrag';
 import useGlobal from '@/hooks/useGlobal';
 import FileSpaceBlock from '@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock';
+import CodesTab from './CodesTab';
 import type { FileTreeItem } from '@/layout/sider/components/FileSiderPanel/constants';
 import {
   canPreviewFile,
@@ -17,11 +18,9 @@ import {
 } from '@/layout/sider/components/FileSiderPanel/utils';
 import type { DetailPanelOptions } from '@/layout/sider/siderContentContext';
 import {
-  getTaskChanges,
-  listProjectRepoBranches,
+  createProjectSpaceFolder,
   listProjectSpaceTree,
-  type DevloopTaskChanges,
-  type ProjectRepoBranch,
+  uploadProjectSpaceFiles,
   type ProjectSpaceTreeNode,
 } from '@/service/devloop';
 import type { FileBrowserItem } from '@/service/fileBrowser';
@@ -62,10 +61,10 @@ const ProjectSpaceTab: React.FC<Props> = ({ projectId, resourceId, sessionId, re
   const [childrenByPath, setChildrenByPath] = useState<Record<string, FileBrowserItem[]>>({});
   const [expandedKeys, setExpandedKeys] = useState<Key[]>([]);
   const [loading, setLoading] = useState(false);
-  const [gitBranches, setGitBranches] = useState<Record<string, ProjectRepoBranch[]>>({});
-  const [selectedBranch, setSelectedBranch] = useState<Record<string, string>>({});
-  const [changes, setChanges] = useState<Record<string, DevloopTaskChanges | null>>({});
-  const [changesOpen, setChangesOpen] = useState<Record<string, boolean>>({});
+  const [gitDrawerItem, setGitDrawerItem] = useState<SpaceItem | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [createFolderOpen, setCreateFolderOpen] = useState(false);
+  const [createFolderName, setCreateFolderName] = useState('');
   const clickTimer = useRef<number | null>(null);
   const rootPath = `/by/projects/${projectId}/`;
 
@@ -92,8 +91,7 @@ const ProjectSpaceTab: React.FC<Props> = ({ projectId, resourceId, sessionId, re
     setItems([]);
     setChildrenByPath({});
     setExpandedKeys([]);
-    setChanges({});
-    setChangesOpen({});
+    setGitDrawerItem(null);
     void load();
   }, [load, refreshKey]);
 
@@ -108,78 +106,74 @@ const ProjectSpaceTab: React.FC<Props> = ({ projectId, resourceId, sessionId, re
     [childrenByPath, load, rootPath]
   );
 
-  const getGitKey = (item: SpaceItem) => `${item.path}`;
-  const loadChanges = useCallback(
-    async (item: SpaceItem) => {
-      if (!sessionId || !item.repoId) return;
-      const result = await getTaskChanges(Number(sessionId), item.repoId).catch(() => null);
-      setChanges((current) => ({ ...current, [getGitKey(item)]: result }));
+  const getNodeExtra = useCallback((raw: FileTreeItem) => {
+    const item = raw as SpaceItem;
+    if (!item.gitRepository) return null;
+    return (
+      <span
+        className={styles.repoNodeGitActions}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        }}
+        onMouseDown={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        }}
+        onDoubleClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        }}
+      >
+        <button
+          type="button"
+          className={styles.repoGithubButton}
+          aria-label="GitHub"
+          title="查看仓库"
+          onClick={() => setGitDrawerItem(item)}
+        >
+          <GithubOutlined />
+        </button>
+      </span>
+    );
+  }, []);
+
+  const refreshSpace = useCallback(() => {
+    setChildrenByPath({});
+    setExpandedKeys([]);
+    void load();
+  }, [load]);
+
+  const handleUpload = useCallback(
+    async (files: File[]) => {
+      if (!projectId || !files.length || uploading) return;
+      setUploading(true);
+      try {
+        await uploadProjectSpaceFiles(projectId, '', files);
+        message.success('上传成功');
+        refreshSpace();
+      } catch (error: any) {
+        message.error(error?.message || error?.msg || '上传失败');
+      } finally {
+        setUploading(false);
+      }
     },
-    [sessionId]
+    [projectId, refreshSpace, uploading]
   );
 
-  const showBranches = useCallback(
-    async (item: SpaceItem) => {
-      if (!item.repoId) return;
-      const key = getGitKey(item);
-      if (gitBranches[key]) return;
-      const result = await listProjectRepoBranches(item.repoId).catch(() => []);
-      setGitBranches((current) => ({ ...current, [key]: result }));
-    },
-    [gitBranches]
-  );
-
-  const getNodeExtra = useCallback(
-    (raw: FileTreeItem) => {
-      const item = raw as SpaceItem;
-      if (!item.gitRepository) return null;
-      const key = getGitKey(item);
-      const branch = selectedBranch[key] || item.defaultBranch || '';
-      const branchItems: MenuProps['items'] = (gitBranches[key] || []).map((entry) => ({
-        key: entry.name,
-        label: entry.name,
-        onClick: () => setSelectedBranch((current) => ({ ...current, [key]: entry.name })),
-      }));
-      const count = changes[key]?.files?.length || 0;
-      const changeFiles = (changes[key]?.files || []).map((file) => (
-        <div className={styles.codeChangePopoverItem} key={file.filename}>
-          {file.filename}
-        </div>
-      ));
-      return (
-        <span className={styles.repoNodeGitActions} onClick={(event) => event.stopPropagation()}>
-          <Dropdown
-            menu={{ items: branchItems }}
-            trigger={['click']}
-            onOpenChange={(open) => open && void showBranches(item)}
-          >
-            <button type="button" className={styles.repoBranch} aria-label={branch || 'branch'}>
-              <BranchesOutlined />
-              <span className={styles.repoBranchName}>{branch || 'branch'}</span>
-              <DownOutlined />
-            </button>
-          </Dropdown>
-          {item.changesSupported !== false && item.repoId ? (
-            <Popover
-              trigger="click"
-              open={!!changesOpen[key]}
-              onOpenChange={(open) => {
-                setChangesOpen((current) => ({ ...current, [key]: open }));
-                if (open) void loadChanges(item);
-              }}
-              content={<div className={styles.codeChangePopover}>{changeFiles.length ? changeFiles : '暂无变更'}</div>}
-            >
-              <button type="button" className={styles.repoChangesButton} aria-label="changes">
-                <BranchesOutlined />
-                {count > 0 && <span className={styles.repoChangesCount}>{count}</span>}
-              </button>
-            </Popover>
-          ) : null}
-        </span>
-      );
-    },
-    [changes, changesOpen, gitBranches, loadChanges, selectedBranch, showBranches]
-  );
+  const handleCreateFolder = useCallback(async () => {
+    const name = createFolderName.trim();
+    if (!projectId || !name) return;
+    try {
+      await createProjectSpaceFolder({ projectId, path: name });
+      message.success('文件夹创建成功');
+      setCreateFolderOpen(false);
+      setCreateFolderName('');
+      refreshSpace();
+    } catch (error: any) {
+      message.error(error?.message || error?.msg || '文件夹创建失败');
+    }
+  }, [createFolderName, projectId, refreshSpace]);
 
   const openPreview = useCallback(
     (item: FileTreeItem) => {
@@ -224,8 +218,37 @@ const ProjectSpaceTab: React.FC<Props> = ({ projectId, resourceId, sessionId, re
   );
   return (
     <div className={styles.detailResourcePanel}>
+      <div className={styles.projectSpaceToolbar}>
+        <Upload
+          multiple
+          showUploadList={false}
+          beforeUpload={(file, fileList) => {
+            if (file === fileList[fileList.length - 1]) void handleUpload(fileList as File[]);
+            return false;
+          }}
+        >
+          <Tooltip title="上传文件">
+            <Button size="small" aria-label="上传文件" icon={<UploadOutlined />} loading={uploading} />
+          </Tooltip>
+        </Upload>
+        <Tooltip title="新建文件夹">
+          <Button
+            size="small"
+            aria-label="新建文件夹"
+            icon={<FolderAddOutlined />}
+            onClick={(event) => {
+              event.stopPropagation();
+              setCreateFolderOpen(true);
+            }}
+          />
+        </Tooltip>
+        <Tooltip title="刷新">
+          <Button size="small" aria-label="刷新" icon={<ReloadOutlined />} onClick={refreshSpace} />
+        </Tooltip>
+      </div>
       <FileSpaceBlock
         title={intl.formatMessage({ id: 'chatResource.projectSpace' })}
+        hideHeader
         fillContainer
         loading={loading}
         items={items}
@@ -243,6 +266,43 @@ const ProjectSpaceTab: React.FC<Props> = ({ projectId, resourceId, sessionId, re
         onAction={() => undefined}
         getNodeExtra={getNodeExtra}
       />
+      <Modal
+        title="新建文件夹"
+        open={createFolderOpen}
+        okText="创建"
+        cancelText="取消"
+        onCancel={() => setCreateFolderOpen(false)}
+        onOk={() => void handleCreateFolder()}
+      >
+        <Input
+          autoFocus
+          value={createFolderName}
+          placeholder="请输入文件夹名称"
+          onChange={(event) => setCreateFolderName(event.target.value)}
+          onPressEnter={() => void handleCreateFolder()}
+        />
+      </Modal>
+      <Drawer
+        open={!!gitDrawerItem}
+        width={760}
+        placement="right"
+        title={gitDrawerItem?.name || 'GitHub 仓库'}
+        onClose={() => setGitDrawerItem(null)}
+        destroyOnClose
+      >
+        {gitDrawerItem?.repoId ? (
+          <CodesTab
+            projectId={projectId}
+            resourceId={resourceId}
+            sessionId={sessionId}
+            refreshKey={refreshKey}
+            initialRepoId={gitDrawerItem.repoId}
+            showBranchSelector
+            codeChangesEnabled={!!sessionId && gitDrawerItem.changesSupported !== false}
+            onOpenDetail={onOpenDetail}
+          />
+        ) : null}
+      </Drawer>
     </div>
   );
 };

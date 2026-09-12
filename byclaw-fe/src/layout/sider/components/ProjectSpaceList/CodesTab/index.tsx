@@ -22,9 +22,11 @@ import {
   getTaskChanges,
   getTaskFileDiff,
   listAvailableProjectRepos,
+  listProjectRepoBranches,
   listProjectRepoTree,
   searchProjectRepoTree,
   type AvailableProjectRepo,
+  type ProjectRepoBranch,
   type ProjectRepoTreeNode,
   type DevloopTaskChanges,
   type DevloopTaskFileDiff,
@@ -53,7 +55,6 @@ function toRepoFileItems(nodes: ProjectRepoTreeNode[], rootPath: string, pathPre
       size: node.size,
       url: node.url,
       downloadUrl: node.downloadUrl,
-      url: node.url,
     };
   });
 }
@@ -69,6 +70,8 @@ interface CodesTabProps {
   onOpenDetail?: (panel: React.ReactNode, options: DetailPanelOptions) => void;
   // 调用方需要自定义点击行为时覆盖内置的预览逻辑。
   onNodeClick?: (event: React.MouseEvent, node: FileTreeItem) => void;
+  initialRepoId?: number;
+  showBranchSelector?: boolean;
 }
 
 type DevloopProjectRepo = AvailableProjectRepo;
@@ -119,6 +122,8 @@ const CodesTab: React.FC<CodesTabProps> = ({
   codeChangesEnabled = false,
   onOpenDetail,
   onNodeClick,
+  initialRepoId,
+  showBranchSelector = false,
 }) => {
   const intl = useIntl();
   const { EventEmitter } = useGlobal();
@@ -129,6 +134,8 @@ const CodesTab: React.FC<CodesTabProps> = ({
   const [repos, setRepos] = useState<DevloopProjectRepo[]>([]);
   const [reposLoading, setReposLoading] = useState(false);
   const [selectedRepoId, setSelectedRepoId] = useState<number | null>(null);
+  const [repoBranchesMap, setRepoBranchesMap] = useState<Record<string, ProjectRepoBranch[]>>({});
+  const [selectedBranchMap, setSelectedBranchMap] = useState<Record<string, string>>({});
   const [repoFilesMap, setRepoFilesMap] = useState<Record<string, FileBrowserItem[]>>({});
   const [repoLoadingMap, setRepoLoadingMap] = useState<Record<string, boolean>>({});
   const [repoSearchValueMap, setRepoSearchValueMap] = useState<Record<string, string>>({});
@@ -153,7 +160,7 @@ const CodesTab: React.FC<CodesTabProps> = ({
   );
 
   const fetchRepoFiles = useCallback(
-    async (repo: DevloopProjectRepo, rootPath: string) => {
+    async (repo: DevloopProjectRepo, rootPath: string, ref?: string) => {
       if (!rootPath) return;
       const repoKey = `${repo.repoId}`;
       const requestSeq = (repoRequestSeqRef.current[repoKey] || 0) + 1;
@@ -163,6 +170,7 @@ const CodesTab: React.FC<CodesTabProps> = ({
         const response = await listProjectRepoTree({
           projectId,
           repoId: repo.repoId,
+          ref: showBranchSelector ? ref || selectedBranchMap[repoKey] || repo.defaultBranch : undefined,
           // 项目代码使用项目级 clone 目录；当前会话只用于权限和变更上下文。
           sessionId: undefined,
         });
@@ -186,7 +194,7 @@ const CodesTab: React.FC<CodesTabProps> = ({
         }
       }
     },
-    [projectId]
+    [projectId, selectedBranchMap, showBranchSelector]
   );
 
   const fetchTaskChanges = useCallback(async () => {
@@ -215,9 +223,9 @@ const CodesTab: React.FC<CodesTabProps> = ({
       const response = await listAvailableProjectRepos(projectId, sessionId);
       const nextRepos = Array.isArray(response) ? response : [];
       setRepos(nextRepos);
-      const nextSelectedRepo = nextRepos[0];
+      const nextSelectedRepo = nextRepos.find((repo) => repo.repoId === initialRepoId) || nextRepos[0];
       setSelectedRepoId(nextSelectedRepo?.repoId || null);
-      if (nextSelectedRepo?.path && sessionId) {
+      if (nextSelectedRepo?.path && (sessionId || showBranchSelector)) {
         await fetchRepoFiles(nextSelectedRepo, ensureDirectoryPath(nextSelectedRepo.path));
       }
     } catch (error) {
@@ -226,7 +234,7 @@ const CodesTab: React.FC<CodesTabProps> = ({
     } finally {
       setReposLoading(false);
     }
-  }, [fetchRepoFiles, projectId, sessionId]);
+  }, [fetchRepoFiles, initialRepoId, projectId, sessionId, showBranchSelector]);
 
   useEffect(() => {
     setRepos([]);
@@ -271,6 +279,7 @@ const CodesTab: React.FC<CodesTabProps> = ({
           projectId,
           repoId,
           sessionId,
+          ref: showBranchSelector ? selectedBranchMap[`${repoId}`] || selectedRepo?.defaultBranch : undefined,
           path: relativePath || undefined,
         });
         setChildrenByPath((current) => ({
@@ -284,7 +293,7 @@ const CodesTab: React.FC<CodesTabProps> = ({
         setChildrenByPath((current) => ({ ...current, [directoryPath]: [] }));
       }
     },
-    [childrenByPath, projectId, selectedRepo, sessionId]
+    [childrenByPath, projectId, selectedBranchMap, selectedRepo, sessionId, showBranchSelector]
   );
 
   const openFilePreview = useCallback(
@@ -296,11 +305,9 @@ const CodesTab: React.FC<CodesTabProps> = ({
       }
       const remoteUrl = `${(item as any).url || ''}`.trim();
       const remoteDownloadUrl = `${(item as any).downloadUrl || ''}`.trim();
-      const fileUrl = /^https?:\/\//i.test(remoteDownloadUrl)
-        ? remoteDownloadUrl
-        : /^https?:\/\//i.test(remoteUrl)
-          ? remoteUrl
-          : undefined;
+      let fileUrl: string | undefined;
+      if (/^https?:\/\//i.test(remoteDownloadUrl)) fileUrl = remoteDownloadUrl;
+      else if (/^https?:\/\//i.test(remoteUrl)) fileUrl = remoteUrl;
       // 预览挂在资源工作区页签上，同一路径复用同一个页签而不是重复打开。
       onOpenDetail(
         <FilePreviewPanel
@@ -426,6 +433,7 @@ const CodesTab: React.FC<CodesTabProps> = ({
           projectId,
           repoId,
           sessionId,
+          ref: showBranchSelector ? selectedBranchMap[repoKey] || repo.defaultBranch : undefined,
           keyword: nextKeyword,
         });
         if (requestSeq === repoRequestSeqRef.current[repoKey]) {
@@ -451,7 +459,32 @@ const CodesTab: React.FC<CodesTabProps> = ({
         }
       }
     },
-    [fetchRepoFiles, projectId, sessionId]
+    [fetchRepoFiles, projectId, selectedBranchMap, sessionId, showBranchSelector]
+  );
+
+  const loadBranches = useCallback(
+    async (repo: DevloopProjectRepo) => {
+      const key = `${repo.repoId}`;
+      if (repoBranchesMap[key]) return;
+      const branches = await listProjectRepoBranches(repo.repoId).catch(() => []);
+      setRepoBranchesMap((current) => ({ ...current, [key]: branches }));
+      if (!selectedBranchMap[key] && (repo.defaultBranch || branches[0]?.name)) {
+        setSelectedBranchMap((current) => ({ ...current, [key]: repo.defaultBranch || branches[0].name }));
+      }
+    },
+    [repoBranchesMap, selectedBranchMap]
+  );
+
+  const switchBranch = useCallback(
+    async (repo: DevloopProjectRepo, branch: string) => {
+      const key = `${repo.repoId}`;
+      setSelectedBranchMap((current) => ({ ...current, [key]: branch }));
+      setChildrenByPath({});
+      setExpandedKeys([]);
+      setRepoFilesMap((current) => ({ ...current, [key]: [] }));
+      await fetchRepoFiles(repo, ensureDirectoryPath(repo.path), branch);
+    },
+    [fetchRepoFiles]
   );
 
   const renderCodeChanges = () => {
@@ -673,6 +706,17 @@ const CodesTab: React.FC<CodesTabProps> = ({
     key: `${item.repoId}`,
     label: item.repoFullName,
   }));
+  const selectedBranch = selectedBranchMap[repoKey] || repo.defaultBranch || '';
+  const branchMenuItems: MenuProps['items'] = (repoBranchesMap[repoKey] || []).map((branch) => ({
+    key: branch.name,
+    label: (
+      <span className={styles.repoBranchMenuItem}>
+        <span>{branch.name}</span>
+        {branch.name === selectedBranch ? <span className={styles.repoBranchCurrent}>当前</span> : null}
+      </span>
+    ),
+    onClick: () => void switchBranch(repo, branch.name),
+  }));
   const branchLabel = taskChanges?.headBranch?.trim() || '';
   const branchBadge = branchLabel ? (
     taskChanges?.compareUrl ? (
@@ -703,13 +747,50 @@ const CodesTab: React.FC<CodesTabProps> = ({
         fillContainer
         headerExtra={
           <>
-            {branchBadge}
+            {!showBranchSelector && branchBadge}
             {repos.length > 1 ? (
               <Dropdown
                 menu={{ items: repoMenuItems, onClick: ({ key }) => void switchRepository(Number(key)) }}
                 trigger={['click']}
               >
-                <button type="button" className={styles.repoSelector} aria-label={repo.repoFullName}>
+                <button
+                  type="button"
+                  className={styles.repoSelector}
+                  aria-label={repo.repoFullName}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                  }}
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                  }}
+                >
+                  <DownOutlined />
+                </button>
+              </Dropdown>
+            ) : null}
+            {showBranchSelector ? (
+              <Dropdown
+                menu={{ items: branchMenuItems }}
+                trigger={['click']}
+                onOpenChange={(open) => open && void loadBranches(repo)}
+              >
+                <button
+                  type="button"
+                  className={styles.repoBranchSelector}
+                  aria-label={selectedBranch || 'branch'}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                  }}
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                  }}
+                >
+                  <BranchesOutlined />
+                  <span className={styles.repoBranchName}>{selectedBranch || 'branch'}</span>
                   <DownOutlined />
                 </button>
               </Dropdown>
@@ -720,6 +801,10 @@ const CodesTab: React.FC<CodesTabProps> = ({
                 className={`${styles.repoChangesButton} ${showChangesView ? styles.repoChangesButtonActive : ''}`}
                 aria-label={t(showChangesView ? 'repo.showFiles' : 'repo.showCodeChanges')}
                 onClick={() => setRepoChangesViewMap((current) => ({ ...current, [repoKey]: !current[repoKey] }))}
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                }}
               >
                 <BranchesOutlined />
                 {taskChangeCount > 0 && <span className={styles.repoChangesCount}>{taskChangeCount}</span>}

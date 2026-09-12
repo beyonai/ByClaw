@@ -364,6 +364,19 @@ export const listProjectRepoTree = (data: {
 export const listProjectSpaceTree = (data: { projectId: number; path?: string }) =>
   POST<ProjectSpaceTreeNode[]>('/byaiService/project/space/tree', data);
 
+export const createProjectSpaceFolder = (data: { projectId: number; path: string }) =>
+  POST<void>('/byaiService/project/space/folder', data);
+
+export const uploadProjectSpaceFiles = (projectId: number, path: string, files: File[]) => {
+  const formData = new FormData();
+  formData.append('projectId', String(projectId));
+  formData.append('path', path);
+  files.forEach((file) => formData.append('files', file));
+  return POST<void>('/byaiService/project/space/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+};
+
 export const searchProjectRepoTree = (data: {
   projectId: number;
   repoId: number;

@@ -889,8 +889,8 @@ public class ProjectApplicationService {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.repo.name.required");
         }
         ProjectRepo repo = insertProjectRepo(dto.getProjectId(), dto);
+        // 新增仓库只负责保存配置并异步克隆，不触发项目初始化、.gitmodules 同步或架构会话流程。
         projectInitService.cloneProjectRepositoryAsync(repo);
-        projectWorkspaceManifestService.syncProjectGitmodules(dto.getProjectId());
         Map<String, Object> result = new HashMap<>();
         result.put("repoId", repo.getRepoId());
         result.put("repoFullName", repo.getRepoFullName());

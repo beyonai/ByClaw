@@ -11,6 +11,8 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.multipart.MultipartFile;
 
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.common.util.MapParamUtil;
@@ -30,6 +32,7 @@ import com.iwhalecloud.byai.manager.dto.devloop.ProjectRepoTreeQueryDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectRepoTreeNodeDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectSpaceTreeQueryDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectSpaceTreeNodeDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.ProjectSpaceFolderCreateDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectResourceDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileDeleteDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileListDto;
@@ -295,6 +298,24 @@ public class ProjectController {
         @RequestBody ProjectSpaceTreeQueryDTO query) {
         return ResponseUtil.successResponse(projectRepositoryService.listProjectSpaceTree(
             query == null ? null : query.getProjectId(), query == null ? null : query.getPath()));
+    }
+
+    /** 在项目空间中创建目录。 */
+    @PostMapping("/space/folder")
+    public ResponseUtil<Void> createProjectSpaceFolder(@RequestBody ProjectSpaceFolderCreateDTO request) {
+        projectRepositoryService.createProjectSpaceFolder(
+            request == null ? null : request.getProjectId(), request == null ? null : request.getPath());
+        return ResponseUtil.successResponse();
+    }
+
+    /** 上传文件到项目空间目录。 */
+    @PostMapping(value = "/space/upload", consumes = "multipart/form-data")
+    public ResponseUtil<Void> uploadProjectSpaceFiles(
+        @RequestParam("projectId") Long projectId,
+        @RequestParam(value = "path", required = false, defaultValue = "") String path,
+        @RequestParam("files") MultipartFile[] files) {
+        projectRepositoryService.uploadProjectSpaceFiles(projectId, path, files);
+        return ResponseUtil.successResponse();
     }
 
     /**

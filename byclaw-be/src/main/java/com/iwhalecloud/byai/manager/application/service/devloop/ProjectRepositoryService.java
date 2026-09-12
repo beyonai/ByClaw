@@ -34,6 +34,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import org.springframework.web.multipart.MultipartFile;
 
 /** 项目仓库浏览应用服务，本地实际 Git 仓库优先，远端 provider 兜底。 */
 @Slf4j
@@ -160,6 +161,49 @@ public class ProjectRepositoryService {
         return nodes;
     }
 
+    /** 在项目空间中创建目录；路径始终相对于 /by/projects/{projectId}/。 */
+    public void createProjectSpaceFolder(Long projectId, String path) {
+        requireProject(projectId);
+        String normalizedPath = normalizeSpacePath(path);
+        if (normalizedPath.isBlank()) {
+            throw new BaseException(50500, "project.space.folder.name.required");
+        }
+        Path projectRoot = projectInitService.initProjectWorkspace(projectId).toAbsolutePath().normalize();
+        Path folder = projectRoot.resolve(normalizedPath).normalize();
+        if (!folder.startsWith(projectRoot)) {
+            throw new BaseException(50500, "project.space.path.invalid");
+        }
+        try {
+            Files.createDirectories(folder);
+        } catch (java.io.IOException e) {
+            throw new BaseException(50500, "project.space.folder.create.failed", e);
+        }
+    }
+
+    /** 将文件上传到项目空间目录。 */
+    public void uploadProjectSpaceFiles(Long projectId, String path, MultipartFile[] files) {
+        requireProject(projectId);
+        String normalizedPath = normalizeSpacePath(path);
+        Path projectRoot = projectInitService.initProjectWorkspace(projectId).toAbsolutePath().normalize();
+        Path targetDirectory = projectRoot.resolve(normalizedPath).normalize();
+        if (!targetDirectory.startsWith(projectRoot) || !Files.isDirectory(targetDirectory)) {
+            throw new BaseException(50500, "project.space.path.not.found");
+        }
+        if (files == null) return;
+        try {
+            for (org.springframework.web.multipart.MultipartFile file : files) {
+                if (file == null || file.isEmpty() || file.getOriginalFilename() == null) continue;
+                Path target = targetDirectory.resolve(file.getOriginalFilename()).normalize();
+                if (!target.startsWith(projectRoot) || !target.getParent().equals(targetDirectory)) {
+                    throw new BaseException(50500, "project.space.path.invalid");
+                }
+                Files.copy(file.getInputStream(), target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
+        } catch (java.io.IOException e) {
+            throw new BaseException(50500, "project.space.file.upload.failed", e);
+        }
+    }
+
     private String normalizeSpacePath(String path) {
         if (path == null || path.isBlank()) return "";
         String normalized = path.replace('\\', '/').replaceAll("^/+|/+$", "");
@@ -280,7 +324,9 @@ public class ProjectRepositoryService {
             Path configuredPath = resolvedPath;
             String path = projectWorkspaceGitService.toSandboxPath(resolvedPath)
                 .or(() -> projectWorkspaceGitService.toSandboxPath(configuredPath)).orElse(null);
-            if (path == null || resolvedPath == null || !Files.exists(resolvedPath.resolve(".git"))) {
+            // 返回数据库配置的仓库时，即使本地 clone 尚未完成也要保留记录；前端通过
+            // localAvailable/changesSupported 判断不能读取本地 changes，避免把仓库误隐藏。
+            if (path == null || resolvedPath == null) {
                 continue;
             }
             Map<String, Object> result = new HashMap<>();
