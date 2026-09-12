@@ -2,9 +2,11 @@ package com.iwhalecloud.byai.state.domain.groupchat.application;
 
 import java.util.Date;
 
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
 
 import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessage;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSessionExt;
@@ -67,7 +69,15 @@ public class GroupChatCandidateSessionService {
         childMessage.setMessageContent(source.getMessageContent());
         childMessage.setUsage(1);
         childMessage.setIsComplete(true);
-        childMessage.setMetadata(JSON.toJSONString(java.util.Map.of("scene", "GROUP_TASK")));
+        JSONObject metadata = new JSONObject();
+        metadata.put("scene", "GROUP_TASK");
+        // 子会话保留原文中的成员占位符，必须同时保留完整资源列表供历史消息渲染。
+        JSONObject sourceMetadata = StringUtils.isBlank(source.getMetadata())
+            ? null : JSON.parseObject(source.getMetadata());
+        if (sourceMetadata != null && sourceMetadata.containsKey("resourceList")) {
+            metadata.put("resourceList", sourceMetadata.get("resourceList"));
+        }
+        childMessage.setMetadata(metadata.toJSONString());
         childMessage.setCreateTime(now);
         childMessage.setUpdateTime(now);
         messageMapper.insert(childMessage);
