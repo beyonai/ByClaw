@@ -172,8 +172,6 @@ export default {
   'resource.skillSource.assistantBound': 'Assistant Bound',
   'resource.skillSource.lobsterInstalled': 'Lobster Installed',
   'resource.skillSource.userDeveloped': 'User Developed',
-  'resource.object': 'Object',
-  'resource.view': 'View',
   'resource.default': 'Resource',
   'resource.thirdPartyKnowledgeBaseMode':
     'Current is third-party knowledge base mode, knowledge base operations are temporarily not supported',

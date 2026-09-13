@@ -51,7 +51,6 @@ export default {
   'common.deleteTips': '确定删除吗？',
   'common.plus': '添加',
   'common.tool': '工具',
-  'common.object': '对象',
   'common.agent': '智能体',
   'common.toolkit': '工具集',
   'common.mcpService': 'MCP',
@@ -208,8 +207,6 @@ export default {
   'orgMgr.tabs.employee': '数字员工',
   'orgMgr.tabs.knowledge': '知识资产',
   'orgMgr.tabs.tool': '工具资产',
-  'orgMgr.tabs.view': '视图资产',
-  'orgMgr.tabs.object': '对象资产',
 
   // 表格列（额外）
   'orgMgr.table.type': '类型',
