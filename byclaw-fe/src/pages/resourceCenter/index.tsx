@@ -1,13 +1,6 @@
 import React, { useState } from 'react';
 import { Tabs } from 'antd';
-import {
-  AppstoreOutlined,
-  DatabaseOutlined,
-  EyeOutlined,
-  FolderOutlined,
-  ProductOutlined,
-  ToolOutlined,
-} from '@ant-design/icons';
+import { DatabaseOutlined, FolderOutlined, ProductOutlined, ToolOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import AntdIcon from '@/components/AntdIcon';
 import Resources from '@/components/Resources';
@@ -15,7 +8,7 @@ import FilesPage from '@/pages/files';
 import ModelsPage from '@/pages/models';
 import styles from './index.module.less';
 
-type ResourceTabKey = 'knowledge' | 'tool' | 'view' | 'object' | 'skill' | 'model' | 'file';
+type ResourceTabKey = 'knowledge' | 'tool' | 'skill' | 'model' | 'file';
 
 const ResourceCenter: React.FC = () => {
   const intl = useIntl();
@@ -39,16 +32,6 @@ const ResourceCenter: React.FC = () => {
       icon: <ToolOutlined />,
     },
     {
-      key: 'view',
-      label: intl.formatMessage({ id: 'common.viewName' }),
-      icon: <EyeOutlined />,
-    },
-    {
-      key: 'object',
-      label: intl.formatMessage({ id: 'common.object' }),
-      icon: <AppstoreOutlined />,
-    },
-    {
       key: 'model',
       label: intl.formatMessage({ id: 'common.model' }),
       icon: <AntdIcon type="icon-a-Braindanao" />,
@@ -64,8 +47,6 @@ const ResourceCenter: React.FC = () => {
     const installedProps = { installedOnly, onInstalledOnlyChange: setInstalledOnly };
     if (activeKey === 'knowledge') return <Resources resourceType="KG_DOC" {...installedProps} />;
     if (activeKey === 'tool') return <Resources resourceType="TOOL" {...installedProps} />;
-    if (activeKey === 'view') return <Resources resourceType="VIEW" {...installedProps} />;
-    if (activeKey === 'object') return <Resources resourceType="OBJECT" {...installedProps} />;
     if (activeKey === 'skill') return <Resources resourceType="SKILL" {...installedProps} />;
     if (activeKey === 'model') return <ModelsPage />;
     return <FilesPage />;
