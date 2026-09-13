@@ -530,7 +530,7 @@ export default {
   'chatResource.sessionFile': '会话文件',
   'chatResource.projectFile': '项目文件',
   'chatResource.processFile': '过程文件',
-  'chatResource.localSharedFile': '本地共享文件',
+  'chatResource.localSharedFile': '本地共享',
   'chatResource.projectCloudDrive': '项目云盘',
   'projectSpace.projectDrive.save': '保存到项目云盘',
   'projectSpace.projectDrive.loadFailed': '项目云盘目录加载失败',
