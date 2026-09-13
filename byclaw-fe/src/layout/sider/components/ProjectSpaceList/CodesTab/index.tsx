@@ -748,7 +748,11 @@ const CodesTab: React.FC<CodesTabProps> = ({
     label: (
       <span className={styles.repoBranchMenuItem}>
         <span>{branch.name}</span>
-        {branch.name === selectedBranch ? <span className={styles.repoBranchCurrent}>当前</span> : null}
+        {branch.name === selectedBranch ? (
+          <span className={styles.repoBranchCurrent}>
+            {intl.formatMessage({ id: 'projectSpace.detail.repo.currentBranch' })}
+          </span>
+        ) : null}
       </span>
     ),
     onClick: () => void switchBranch(repo, branch.name),

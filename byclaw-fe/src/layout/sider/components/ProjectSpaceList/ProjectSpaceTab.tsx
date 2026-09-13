@@ -149,37 +149,40 @@ const ProjectSpaceTab: React.FC<Props> = ({
     [childrenByPath, load, rootPath]
   );
 
-  const getNodeExtra = useCallback((raw: FileTreeItem) => {
-    const item = raw as SpaceItem;
-    if (!item.gitRepository) return null;
-    return (
-      <span
-        className={styles.repoNodeGitActions}
-        onClick={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-        }}
-        onMouseDown={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-        }}
-        onDoubleClick={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-        }}
-      >
-        <button
-          type="button"
-          className={styles.repoGithubButton}
-          aria-label="GitHub"
-          title="查看仓库"
-          onClick={() => setGitDrawerItem(item)}
+  const getNodeExtra = useCallback(
+    (raw: FileTreeItem) => {
+      const item = raw as SpaceItem;
+      if (!item.gitRepository) return null;
+      return (
+        <span
+          className={styles.repoNodeGitActions}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          onMouseDown={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          onDoubleClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
         >
-          <GithubOutlined />
-        </button>
-      </span>
-    );
-  }, []);
+          <button
+            type="button"
+            className={styles.repoGithubButton}
+            aria-label="GitHub"
+            title={intl.formatMessage({ id: 'projectSpace.detail.repo.showFiles' })}
+            onClick={() => setGitDrawerItem(item)}
+          >
+            <GithubOutlined />
+          </button>
+        </span>
+      );
+    },
+    [intl]
+  );
 
   const refreshSpace = useCallback(() => {
     setChildrenByPath({});
@@ -193,15 +196,15 @@ const ProjectSpaceTab: React.FC<Props> = ({
       setUploading(true);
       try {
         await uploadProjectSpaceFiles(projectId, '', files);
-        message.success('上传成功');
+        message.success(intl.formatMessage({ id: 'fileBrowser.upload.success' }));
         refreshSpace();
       } catch (error: any) {
-        message.error(error?.message || error?.msg || '上传失败');
+        message.error(error?.message || error?.msg || intl.formatMessage({ id: 'fileBrowser.upload.failed' }));
       } finally {
         setUploading(false);
       }
     },
-    [projectId, refreshSpace, uploading]
+    [intl, projectId, refreshSpace, uploading]
   );
 
   const handleCreateFolder = useCallback(async () => {
@@ -209,14 +212,14 @@ const ProjectSpaceTab: React.FC<Props> = ({
     if (!projectId || !name) return;
     try {
       await createProjectSpaceFolder({ projectId, path: name });
-      message.success('文件夹创建成功');
+      message.success(intl.formatMessage({ id: 'fileBrowser.createFolder.success' }));
       setCreateFolderOpen(false);
       setCreateFolderName('');
       refreshSpace();
     } catch (error: any) {
-      message.error(error?.message || error?.msg || '文件夹创建失败');
+      message.error(error?.message || error?.msg || intl.formatMessage({ id: 'fileBrowser.createFolder.failed' }));
     }
-  }, [createFolderName, projectId, refreshSpace]);
+  }, [createFolderName, intl, projectId, refreshSpace]);
 
   const openPreview = useCallback(
     (item: FileTreeItem) => {
@@ -260,27 +263,27 @@ const ProjectSpaceTab: React.FC<Props> = ({
         anchor.remove();
         URL.revokeObjectURL(url);
       } catch (error: any) {
-        message.error(error?.message || error?.msg || '下载失败');
+        message.error(error?.message || error?.msg || intl.formatMessage({ id: 'fileBrowser.download.failed' }));
       }
     },
-    [resourceId]
+    [intl, resourceId]
   );
 
   const remove = useCallback(
     (item: SpaceItem) => {
       if (!resourceId) return;
       Modal.confirm({
-        title: '确认删除',
-        content: `确定删除“${item.name}”吗？`,
+        title: intl.formatMessage({ id: 'common.delete' }),
+        content: intl.formatMessage({ id: 'fileBrowser.delete.confirmName' }, { name: item.name }),
         okButtonProps: { danger: true },
         onOk: async () => {
           await deleteFiles({ resourceId, paths: [item.path] });
-          message.success('删除成功');
+          message.success(intl.formatMessage({ id: 'fileBrowser.delete.success' }));
           refreshSpace();
         },
       });
     },
-    [refreshSpace, resourceId]
+    [intl, refreshSpace, resourceId]
   );
 
   const rename = useCallback(async () => {
@@ -288,15 +291,15 @@ const ProjectSpaceTab: React.FC<Props> = ({
     setRenameLoading(true);
     try {
       await renameFile({ resourceId, sourcePath: renameTarget.path, newName: renameName.trim() });
-      message.success('重命名成功');
+      message.success(intl.formatMessage({ id: 'fileBrowser.rename.success' }));
       setRenameTarget(null);
       refreshSpace();
     } catch (error: any) {
-      message.error(error?.message || error?.msg || '重命名失败');
+      message.error(error?.message || error?.msg || intl.formatMessage({ id: 'fileBrowser.rename.failed' }));
     } finally {
       setRenameLoading(false);
     }
-  }, [refreshSpace, renameName, renameTarget, resourceId]);
+  }, [intl, refreshSpace, renameName, renameTarget, resourceId]);
 
   const openSaveToProject = useCallback(
     async (item: SpaceItem) => {
@@ -313,12 +316,14 @@ const ProjectSpaceTab: React.FC<Props> = ({
         );
       } catch (error: any) {
         setSaveFolders([]);
-        message.error(error?.message || error?.msg || '项目云盘目录加载失败');
+        message.error(
+          error?.message || error?.msg || intl.formatMessage({ id: 'projectSpace.projectDrive.loadFailed' })
+        );
       } finally {
         setSaveLoading(false);
       }
     },
-    [projectCloudResourceId, resourceId]
+    [intl, projectCloudResourceId, resourceId]
   );
 
   const saveToProject = useCallback(async () => {
@@ -327,20 +332,32 @@ const ProjectSpaceTab: React.FC<Props> = ({
     try {
       const response: any = await downloadFile(resourceId, saveTarget.path);
       const blob = response?.file instanceof Blob ? response.file : response;
-      if (!(blob instanceof Blob)) throw new Error('文件下载失败');
+      if (!(blob instanceof Blob)) throw new Error(intl.formatMessage({ id: 'fileBrowser.download.failed' }));
       const formData = new FormData();
       formData.append('resourceId', String(projectCloudResourceId));
       formData.append('directoryPath', ensureDirectoryPath(savePath));
       formData.append('files', blob, response?.fileName || saveTarget.name);
       await uploadKnowledgeFiles(formData, { responseCfg: { hideErrorTips: true } });
-      message.success('已保存到项目云盘');
+      message.success(
+        intl.formatMessage(
+          { id: 'fileBrowser.save.success' },
+          { target: intl.formatMessage({ id: 'chatResource.projectCloudDrive' }) }
+        )
+      );
       setSaveTarget(null);
     } catch (error: any) {
-      message.error(error?.message || error?.msg || '保存到项目云盘失败');
+      message.error(
+        error?.message ||
+          error?.msg ||
+          intl.formatMessage(
+            { id: 'fileBrowser.save.failed' },
+            { target: intl.formatMessage({ id: 'chatResource.projectCloudDrive' }) }
+          )
+      );
     } finally {
       setSaving(false);
     }
-  }, [projectCloudResourceId, resourceId, savePath, saveTarget]);
+  }, [intl, projectCloudResourceId, resourceId, savePath, saveTarget]);
 
   const onNodeClick = useCallback(
     (event: React.MouseEvent, node: FileTreeItem) => {
@@ -360,10 +377,12 @@ const ProjectSpaceTab: React.FC<Props> = ({
       ...(canPreviewFile(item)
         ? [{ key: 'preview', label: intl.formatMessage({ id: 'fileBrowser.action.preview' }) }]
         : []),
-      { key: 'download', label: '下载' },
-      ...(projectCloudResourceId && !isDirectory(item) ? [{ key: 'saveToProject', label: '保存到项目云盘' }] : []),
-      { key: 'rename', label: '重命名' },
-      { key: 'delete', label: '删除', danger: true },
+      { key: 'download', label: intl.formatMessage({ id: 'fileBrowser.action.download' }) },
+      ...(projectCloudResourceId && !isDirectory(item)
+        ? [{ key: 'saveToProject', label: intl.formatMessage({ id: 'projectSpace.projectDrive.save' }) }]
+        : []),
+      { key: 'rename', label: intl.formatMessage({ id: 'fileBrowser.action.rename' }) },
+      { key: 'delete', label: intl.formatMessage({ id: 'fileBrowser.action.delete' }), danger: true },
     ],
     [intl, projectCloudResourceId, resourceId]
   );
@@ -394,14 +413,19 @@ const ProjectSpaceTab: React.FC<Props> = ({
             return false;
           }}
         >
-          <Tooltip title="上传文件">
-            <Button size="small" aria-label="上传文件" icon={<UploadOutlined />} loading={uploading} />
+          <Tooltip title={intl.formatMessage({ id: 'fileBrowser.toolbar.upload' })}>
+            <Button
+              size="small"
+              aria-label={intl.formatMessage({ id: 'fileBrowser.toolbar.upload' })}
+              icon={<UploadOutlined />}
+              loading={uploading}
+            />
           </Tooltip>
         </Upload>
-        <Tooltip title="新建文件夹">
+        <Tooltip title={intl.formatMessage({ id: 'fileBrowser.toolbar.newFolder' })}>
           <Button
             size="small"
-            aria-label="新建文件夹"
+            aria-label={intl.formatMessage({ id: 'fileBrowser.toolbar.newFolder' })}
             icon={<FolderAddOutlined />}
             onClick={(event) => {
               event.stopPropagation();
@@ -431,26 +455,26 @@ const ProjectSpaceTab: React.FC<Props> = ({
         getNodeExtra={getNodeExtra}
       />
       <Modal
-        title="新建文件夹"
+        title={intl.formatMessage({ id: 'fileBrowser.toolbar.newFolder' })}
         open={createFolderOpen}
-        okText="创建"
-        cancelText="取消"
+        okText={intl.formatMessage({ id: 'common.create' })}
+        cancelText={intl.formatMessage({ id: 'common.cancel' })}
         onCancel={() => setCreateFolderOpen(false)}
         onOk={() => void handleCreateFolder()}
       >
         <Input
           autoFocus
           value={createFolderName}
-          placeholder="请输入文件夹名称"
+          placeholder={intl.formatMessage({ id: 'fileBrowser.createFolder.prompt' })}
           onChange={(event) => setCreateFolderName(event.target.value)}
           onPressEnter={() => void handleCreateFolder()}
         />
       </Modal>
       <Modal
-        title="重命名"
+        title={intl.formatMessage({ id: 'fileBrowser.rename.title' })}
         open={!!renameTarget}
-        okText="保存"
-        cancelText="取消"
+        okText={intl.formatMessage({ id: 'common.save' })}
+        cancelText={intl.formatMessage({ id: 'common.cancel' })}
         confirmLoading={renameLoading}
         onCancel={() => !renameLoading && setRenameTarget(null)}
         onOk={() => void rename()}
@@ -464,10 +488,10 @@ const ProjectSpaceTab: React.FC<Props> = ({
         />
       </Modal>
       <Modal
-        title="保存到项目云盘"
+        title={intl.formatMessage({ id: 'projectSpace.projectDrive.save' })}
         open={!!saveTarget}
-        okText="保存"
-        cancelText="取消"
+        okText={intl.formatMessage({ id: 'common.save' })}
+        cancelText={intl.formatMessage({ id: 'common.cancel' })}
         confirmLoading={saving}
         onCancel={() => !saving && setSaveTarget(null)}
         onOk={() => void saveToProject()}
@@ -475,7 +499,14 @@ const ProjectSpaceTab: React.FC<Props> = ({
       >
         <Spin spinning={saveLoading}>
           <Tree
-            treeData={[{ title: '根目录', key: '/', children: saveFolders, isLeaf: !saveFolders.length }]}
+            treeData={[
+              {
+                title: intl.formatMessage({ id: 'fileBrowser.root' }),
+                key: '/',
+                children: saveFolders,
+                isLeaf: !saveFolders.length,
+              },
+            ]}
             expandedKeys={['/']}
             selectedKeys={[savePath]}
             onSelect={(keys) => keys.length && setSavePath(String(keys[0]))}
@@ -486,7 +517,7 @@ const ProjectSpaceTab: React.FC<Props> = ({
         open={!!gitDrawerItem}
         width={760}
         placement="right"
-        title={gitDrawerItem?.name || 'GitHub 仓库'}
+        title={gitDrawerItem?.name || intl.formatMessage({ id: 'projectSpace.gitRepository' })}
         onClose={() => setGitDrawerItem(null)}
         destroyOnClose
       >
