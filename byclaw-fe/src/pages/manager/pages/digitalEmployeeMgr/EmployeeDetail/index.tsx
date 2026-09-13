@@ -120,19 +120,6 @@ export const skillHandler = (it) => {
     description: it.description ?? it.resourceDesc ?? it.remark ?? '',
   };
 
-  if (['VIEW', 'OBJECT'].includes(resourceType)) {
-    if (it.relResourceInfo) {
-      try {
-        const relResourceInfo = JSON.parse(it.relResourceInfo);
-        Object.assign(p, {
-          activeResourceIds: (relResourceInfo?.activeResourceIds || []).map((s) => `${s}`),
-        });
-      } catch (e) {
-        console.error(e);
-      }
-    }
-  }
-
   return p;
 };
 
@@ -1419,7 +1406,6 @@ const EmployeeDetail = ({ loading }) => {
 
         set(prologue, 'modelId', prologue?.modelInfo?.modelId);
 
-        const relResourceInfoList = [];
         const relIds = [];
         const relTools = [];
         selectedTools.forEach((it) => {
@@ -1428,22 +1414,6 @@ const EmployeeDetail = ({ loading }) => {
           } else {
             relIds.push(`${it.resourceId}`);
           }
-
-          if (['VIEW', 'OBJECT'].includes(it.grantResourceType)) {
-            const p = {
-              relId: `${it.resourceId}`,
-              activeResourceIds: [],
-            };
-            if (Array.isArray(it.myRelResourceInfo)) {
-              p.activeResourceIds = it.myRelResourceInfo
-                .filter((it) => it.checkedStatus)
-                .map((it) => `${it.resourceId}`);
-            } else if (Array.isArray(it.activeResourceIds)) {
-              p.activeResourceIds = it.activeResourceIds;
-            }
-
-            relResourceInfoList.push(p);
-          }
         });
         knowledgeBases.forEach((it) => {
           it.items.forEach((i) => {
@@ -1451,7 +1421,6 @@ const EmployeeDetail = ({ loading }) => {
           });
         });
 
-        set(param, 'relResourceInfoList', relResourceInfoList);
         set(param, 'createType', effectiveDigitalType);
         if (relTools.length > 0) {
           set(param, 'relTools', relTools);
@@ -2148,27 +2117,6 @@ const EmployeeDetail = ({ loading }) => {
           reload={() => getCompositeAppInfo('reload')}
           skills={selectedTools}
           knowledgeBases={knowledgeBases}
-          handleUpdateItem={(item) => {
-            if (baseListType === '005') {
-              setSelectedTools((prev) => {
-                const targetItem = prev.find((it) => it.resourceId === item.resourceId);
-                if (targetItem) {
-                  Object.assign(targetItem, item);
-                }
-
-                return [...prev];
-              });
-            } else {
-              setKnowledgeBases((prev) => {
-                const targetItem = prev.find((it) => it.resourceId === item.resourceId);
-                if (targetItem) {
-                  Object.assign(targetItem, item);
-                }
-
-                return [...prev];
-              });
-            }
-          }}
           handleSelect={(item) => {
             if (baseListType === '005') {
               setSelectedTools((pre) => [...pre, item]);

@@ -26,14 +26,16 @@ const ToolSelectorModal = ({ open, onClose, onConfirm }) => {
     return typeMap[type] || type;
   }, []);
 
+  // 视图/对象能力已下线：开放接口若仍返回已退休类型的存量行，这里按「只能选当前支持的
+  // 类型」白名单过滤，避免它们进入选择结果并被写入保存载荷的 relIds。
+  const SELECTABLE_SKILL_TYPES = useMemo(() => ['AGENT', 'TOOLKIT', 'TOOL', 'MCP'], []);
+
   const toolTypeLabelMap = useMemo(
     () => ({
       AGENT: intl.formatMessage({ id: 'employeeDetail.skillType.agent' }),
       TOOLKIT: intl.formatMessage({ id: 'employeeDetail.skillType.toolkit' }),
       TOOL: intl.formatMessage({ id: 'employeeDetail.skillType.tool' }),
       MCP: 'MCP',
-      VIEW: intl.formatMessage({ id: 'employeeDetail.view' }),
-      OBJECT: intl.formatMessage({ id: 'employeeDetail.object' }),
     }),
     [intl]
   );
@@ -48,15 +50,18 @@ const ToolSelectorModal = ({ open, onClose, onConfirm }) => {
       })
         .then((res) => {
           const { data } = res;
-          const rows = data?.rows;
-          const normalizedRows = rows.map((item) => ({
-            ...item,
-            id: item.resourceId || item.id,
-            resourceId: item.resourceId || item.id,
-            resourceName: item.resourceName || item.name || '-',
-            description: item.resourceDesc || item.description || '',
-            grantResourceType: normalizeSkillType(item.resourceBizType || item.grantResourceType),
-          }));
+          const rows = data?.rows || [];
+          const normalizedRows = rows
+            .map((item) => ({
+              ...item,
+              id: item.resourceId || item.id,
+              resourceId: item.resourceId || item.id,
+              resourceName: item.resourceName || item.name || '-',
+              description: item.resourceDesc || item.description || '',
+              grantResourceType: normalizeSkillType(item.resourceBizType || item.grantResourceType),
+            }))
+            .filter((item) => SELECTABLE_SKILL_TYPES.includes(item.grantResourceType));
+          // total 仍取后端值：本页过滤只影响展示，不能让分页把后续页里的可选资源判为不存在。
           const total = Number(data?.total || 0) || (pageNum === 1 ? normalizedRows.length : 0);
           setList(normalizedRows);
           setPagination({
