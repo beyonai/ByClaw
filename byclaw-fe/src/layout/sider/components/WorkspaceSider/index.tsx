@@ -35,15 +35,7 @@ import { DESKTOP_UNASSIGNED_SESSION_SCOPE, hasDesktopTaskSessions } from './work
 const PROJECT_SESSION_PAGE_SIZE = 5;
 const EXPANDED_PROJECTS_STORAGE_KEY = 'byclaw.workspaceSider.expandedProjectIds';
 
-const RESOURCE_PATHS = [
-  '/resourceCenter',
-  '/knowledgeCenter',
-  '/toolCenter',
-  '/viewCenter',
-  '/objectCenter',
-  '/skillCenter',
-  '/files',
-] as const;
+const RESOURCE_PATHS = ['/resourceCenter', '/knowledgeCenter', '/toolCenter', '/skillCenter', '/files'] as const;
 
 type ProjectSessionState = {
   sessions: ProjectSession[];
