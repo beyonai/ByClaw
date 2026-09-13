@@ -20,7 +20,7 @@ import { normalizeResourceItem, resourceSiderTypeByTabKey } from './utils';
 import useHeaderSearchResults from './useHeaderSearchResults';
 import useEmployeeResourceSearch from './useEmployeeResourceSearch';
 import useKnowledgeResourceInteraction from './useKnowledgeResourceInteraction';
-import useEmployeeResourceDrill from './useEmployeeResourceDrill';
+import useEmployeeResourceQuote from './useEmployeeResourceQuote';
 import SearchTabs from './SearchTabs';
 import SearchSection from './SearchSection';
 import { SearchEmpty, SearchLoading } from './SearchState';
@@ -82,19 +82,8 @@ const HeaderSearchPage = (props: HeaderSearchPageProps) => {
     eventEmitter: EventEmitter,
     setActiveTab,
   });
-  const {
-    employeeResourceDrillState,
-    employeeResourceDrillLoading,
-    resetEmployeeResourceDrill,
-    getEmployeeResourceDrillable,
-    handleEmployeeResourceItemClick,
-    handleEmployeeResourceDoubleClick,
-    handleEmployeeResourceGoBack,
-  } = useEmployeeResourceDrill({
-    visibleEmployeeResourceTabs,
-    employeeResourceResultMap,
+  const { handleEmployeeResourceDoubleClick } = useEmployeeResourceQuote({
     eventEmitter: EventEmitter,
-    setActiveTab,
   });
 
   const digitList = useMemo(
@@ -110,11 +99,9 @@ const HeaderSearchPage = (props: HeaderSearchPageProps) => {
       cancelSearch();
       cancelEmployeeResourceSearch();
       setCurrentKnowledgeBase(null);
-      resetEmployeeResourceDrill();
       return;
     }
     setCurrentKnowledgeBase(null);
-    resetEmployeeResourceDrill();
     myGetSearchList(keyword);
     myGetEmployeeResourceList(keyword);
 
@@ -130,7 +117,6 @@ const HeaderSearchPage = (props: HeaderSearchPageProps) => {
     cancelSearch,
     cancelEmployeeResourceSearch,
     setCurrentKnowledgeBase,
-    resetEmployeeResourceDrill,
   ]);
 
   /** 弹窗首次打开时立即拉取，避免仅依赖 debounce 的首帧延迟 */
@@ -219,7 +205,6 @@ const HeaderSearchPage = (props: HeaderSearchPageProps) => {
       }
 
       const resourceItem = normalizeResourceItem(item);
-      const drillable = getEmployeeResourceDrillable(tabKey, resourceItem);
       const quoteDisabled = group?.quoteDisabled || resourceItem.quoteDisabled;
 
       return (
@@ -227,19 +212,15 @@ const HeaderSearchPage = (props: HeaderSearchPageProps) => {
           key={`${resourceItem.resourceBizType || ''}_${resourceItem.resourceId || resourceItem.resourceCode}`}
           item={resourceItem}
           resourceType={resourceType}
-          drillable={drillable}
           renderName={(currentItem) => highlight(currentItem.resourceName)}
           renderDescription={(currentItem) =>
             highlight(currentItem.resourceDesc || currentItem.description || currentItem.resourceBizType || '')
-          }
-          onClick={(currentItem, currentDrillable) =>
-            void handleEmployeeResourceItemClick(tabKey, currentItem, currentDrillable)
           }
           onDoubleClick={quoteDisabled ? undefined : () => handleEmployeeResourceDoubleClick(tabKey, resourceItem)}
         />
       );
     },
-    [getEmployeeResourceDrillable, handleEmployeeResourceDoubleClick, handleEmployeeResourceItemClick, highlight]
+    [handleEmployeeResourceDoubleClick, highlight]
   );
 
   const renderItemKnowledgeBase = useCallback(
@@ -378,15 +359,11 @@ const HeaderSearchPage = (props: HeaderSearchPageProps) => {
             expandAllGroupsByDefault={Boolean(keyword.trim())}
             currentKnowledgeBase={currentKnowledgeBase}
             activeSiderAgentResourceId={activeSiderAgent.resourceId}
-            employeeResourceDrillState={employeeResourceDrillState}
-            employeeResourceDrillLoading={employeeResourceDrillLoading}
-            intl={intl}
             renderList={renderList}
             renderItemKnowledgeBase={renderItemKnowledgeBase}
             renderItemEmployeeResource={renderItemEmployeeResource}
             onKnowledgeBaseGoBack={handleKnowledgeBaseGoBack}
             onKnowledgeFileClick={handleKnowledgeFileClick}
-            onEmployeeResourceGoBack={handleEmployeeResourceGoBack}
           />
         </div>
       );
