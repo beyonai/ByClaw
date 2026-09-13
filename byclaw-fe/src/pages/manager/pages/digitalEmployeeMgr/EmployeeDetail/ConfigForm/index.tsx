@@ -51,7 +51,6 @@ import AbilityBoundaryModal from './AbilityBoundaryModal';
 import AbilityExampleModal from './AbilityExampleModal';
 import { useFileTookit } from '@/pages/manager/hooks/useFileTookit';
 import ModelPopover from '../../components/ModelPopover';
-import RelResourceInfoModal from './RelResourceInfoModal';
 import ToolSelectorModal from './ToolSelectorModal';
 import { compressImgFileAndUpload } from '@/pages/manager/utils/file';
 import { Image } from '@/pages/manager/components/Image';
@@ -882,8 +881,6 @@ const ConfigForm = (props) => {
   const internalSyncRef = useRef(false);
   const isOpenSource = brandVersionLoaded && brandVersion !== 'commercial';
 
-  const [relResourceInfoModalOpen, setRelResourceInfoModalOpen] = useState(false);
-  const [selectedToolItem, setSelectedToolItem] = useState(null);
   const [boundaryModalOpen, setBoundaryModalOpen] = useState(false);
   const [editingBoundaryAbilityId, setEditingBoundaryAbilityId] = useState(null);
   const [exampleModalOpen, setExampleModalOpen] = useState(false);
@@ -2792,48 +2789,25 @@ const ConfigForm = (props) => {
                               <div className={styles.skillHeader}>
                                 <span className={styles.skillName}>{tool.resourceName}</span>
                                 <Tag size="small" className={styles.skillTag}>
-                                  {
-                                    {
-                                      AGENT: intl.formatMessage({
-                                        id: 'employeeDetail.skillType.agent',
-                                      }),
-                                      TOOLKIT: intl.formatMessage({
-                                        id: 'employeeDetail.skillType.toolkit',
-                                      }),
-                                      TOOL: intl.formatMessage({
-                                        id: 'employeeDetail.skillType.tool',
-                                      }),
-                                      MCP: 'MCP',
-                                      VIEW: intl.formatMessage({ id: 'employeeDetail.view' }),
-                                      OBJECT: intl.formatMessage({ id: 'employeeDetail.object' }),
-                                    }[tool.grantResourceType]
-                                  }
+                                  {{
+                                    AGENT: intl.formatMessage({
+                                      id: 'employeeDetail.skillType.agent',
+                                    }),
+                                    TOOLKIT: intl.formatMessage({
+                                      id: 'employeeDetail.skillType.toolkit',
+                                    }),
+                                    TOOL: intl.formatMessage({
+                                      id: 'employeeDetail.skillType.tool',
+                                    }),
+                                    MCP: 'MCP',
+                                  }[tool.grantResourceType] || tool.grantResourceType}
                                 </Tag>
                               </div>
                               <div className={styles.skillDescription}>{tool.description}</div>
                             </div>
                             <div className={styles.skillActions}>
-                              {isReadOnly ? (
+                              {!isReadOnly && (
                                 <Space>
-                                  {['VIEW', 'OBJECT'].includes(tool.grantResourceType) && (
-                                    <EyeOutlined
-                                      onClick={() => {
-                                        setSelectedToolItem(tool);
-                                        setRelResourceInfoModalOpen(true);
-                                      }}
-                                    />
-                                  )}
-                                </Space>
-                              ) : (
-                                <Space>
-                                  {['VIEW', 'OBJECT'].includes(tool.grantResourceType) && (
-                                    <FormOutlined
-                                      onClick={() => {
-                                        setSelectedToolItem(tool);
-                                        setRelResourceInfoModalOpen(true);
-                                      }}
-                                    />
-                                  )}
                                   <AntdIcon
                                     type="icon-a-Deleteshanchu"
                                     onClick={() => {
@@ -3498,22 +3472,6 @@ const ConfigForm = (props) => {
           );
         }}
         resourceId={resultDataRef?.current?.resourceId}
-      />
-      <RelResourceInfoModal
-        open={relResourceInfoModalOpen}
-        onClose={() => setRelResourceInfoModalOpen(false)}
-        onOk={(item) => {
-          setSelectedTools((prev) => {
-            const target = prev.find((it) => it.resourceId === item.resourceId);
-            if (target) {
-              Object.assign(target, item);
-              return [...prev];
-            }
-            return prev;
-          });
-        }}
-        item={selectedToolItem}
-        isReadOnly={isReadOnly}
       />
       <Modal
         className={styles.bundledSkillModal}
