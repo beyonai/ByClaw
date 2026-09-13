@@ -1,5 +1,3 @@
-import type { ResourceItem } from '@/layout/sider/components/ResourceSiderPanel/ResourceSiderListItem';
-
 export interface HeaderSearchPageProps {
   keyword?: string;
   className?: string;
@@ -29,17 +27,6 @@ export interface EmployeeResourceTabConfig {
 
 export interface EmployeeResourceTab extends EmployeeResourceTabConfig {
   title: string;
-}
-
-export interface EmployeeResourceDrillBreadcrumb {
-  item: ResourceItem;
-  list: ResourceItem[];
-}
-
-export interface EmployeeResourceDrillState {
-  tabKey: string;
-  breadcrumb: EmployeeResourceDrillBreadcrumb[];
-  list: ResourceItem[];
 }
 
 export interface EmployeeResourceGroup {
