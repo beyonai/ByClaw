@@ -122,8 +122,6 @@ const Resources: React.FC<Props> = ({ resourceType, installedOnly = false, onIns
   const getResourceName = () => {
     if (resourceType === 'KG_DOC') return intl.formatMessage({ id: 'resource.knowledge' });
     if (resourceType === 'TOOL') return intl.formatMessage({ id: 'common.tool' });
-    if (resourceType === 'OBJECT') return intl.formatMessage({ id: 'common.object' });
-    if (resourceType === 'VIEW') return intl.formatMessage({ id: 'common.viewName' });
     if (resourceType === 'SKILL') return intl.formatMessage({ id: 'common.skill' });
     return intl.formatMessage({ id: 'resource.default' }); // 默认值
   };
@@ -411,12 +409,6 @@ const Resources: React.FC<Props> = ({ resourceType, installedOnly = false, onIns
     }
     if (resourceType === 'TOOL') {
       return fixedEntryCapability.canImportEnterpriseToolkit;
-    }
-    if (resourceType === 'VIEW') {
-      return fixedEntryCapability.canImportEnterpriseView;
-    }
-    if (resourceType === 'OBJECT') {
-      return fixedEntryCapability.canImportEnterpriseObject;
     }
     if (resourceType === 'SKILL') {
       return fixedEntryCapability.canImportEnterpriseSkill === true;
@@ -791,16 +783,6 @@ const Resources: React.FC<Props> = ({ resourceType, installedOnly = false, onIns
       return activeTab === 'personal'
         ? [intl.formatMessage({ id: 'resource.banner.personalTool' }), '个人工具']
         : [intl.formatMessage({ id: 'resource.banner.enterpriseTool' }), '企业工具'];
-    }
-    if (resourceType === 'VIEW') {
-      return activeTab === 'personal'
-        ? [intl.formatMessage({ id: 'resource.banner.personalView' }), '个人视图']
-        : [intl.formatMessage({ id: 'resource.banner.enterpriseView' }), '企业视图'];
-    }
-    if (resourceType === 'OBJECT') {
-      return activeTab === 'personal'
-        ? [intl.formatMessage({ id: 'resource.banner.personalObject' }), '个人对象']
-        : [intl.formatMessage({ id: 'resource.banner.enterpriseObject' }), '企业对象'];
     }
     return [];
   }, [activeTab, intl, resourceType]);
