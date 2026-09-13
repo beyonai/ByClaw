@@ -52,12 +52,9 @@ const ResourceElement = ({ attributes, children, element }: RenderElementProps) 
       <span contentEditable={false}>
         {prefix}
         {(el.showQuotePrefix ||
-          !(
-            el.isFromResourceModule ||
-            el.resourceType === 'TOOL' ||
-            el.resourceType === 'OBJECT' ||
-            el.resourceType === 'VIEW'
-          )) && <span style={{ color: '#00000080', marginRight: 2 }}>{intl.formatMessage({ id: 'quote' })}</span>}
+          !(el.isFromResourceModule || el.resourceType === 'TOOL' || el.resourceType === 'OBJECT')) && (
+          <span style={{ color: '#00000080', marginRight: 2 }}>{intl.formatMessage({ id: 'quote' })}</span>
+        )}
         {name}
       </span>
       {children}

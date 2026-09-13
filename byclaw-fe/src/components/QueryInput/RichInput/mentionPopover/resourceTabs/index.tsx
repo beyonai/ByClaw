@@ -407,8 +407,6 @@ const ResourceTabs: React.FC<Props> = ({
     const visible: string[] = isOpenSource ? ['skill'] : [];
     if (visibleKeys.includes('knowledge')) visible.push('knowledge');
     if (visibleKeys.includes('tool')) visible.push('tool');
-    if (visibleKeys.includes('view')) visible.push('view');
-    if (visibleKeys.includes('object')) visible.push('object');
     visible.push('space');
     if (isOpenSource) visible.push('file');
     if (!visible.length) return;
@@ -460,24 +458,6 @@ const ResourceTabs: React.FC<Props> = ({
       ),
     });
     items.push({
-      key: 'object',
-      label: intl.formatMessage({ id: 'common.object' }),
-      children: (
-        <div className={styles.listContainer}>
-          <ResourceCitation
-            resourceType="OBJECT"
-            onSelect={onSelectObject}
-            keyword={queryKeyword}
-            agentId={agentId}
-            agentIds={agentIds}
-            resourceBizTypeList={[ResourceTypeMap.OBJECT]}
-            resources={shouldUseSharedResourceQuery ? getSharedTabResources([ResourceTypeMap.OBJECT]) : undefined}
-            loadingOverride={shouldUseSharedResourceQuery ? sharedLoading : undefined}
-          />
-        </div>
-      ),
-    });
-    items.push({
       key: 'tool',
       label: intl.formatMessage({ id: 'common.tool' }),
       children: (
@@ -491,24 +471,6 @@ const ResourceTabs: React.FC<Props> = ({
             agentIds={agentIds}
             resourceBizTypeList={[...TOOL_TAB_BIZ_TYPES]}
             resources={shouldUseSharedResourceQuery ? getSharedTabResources(TOOL_TAB_BIZ_TYPES) : undefined}
-            loadingOverride={shouldUseSharedResourceQuery ? sharedLoading : undefined}
-          />
-        </div>
-      ),
-    });
-    items.push({
-      key: 'view',
-      label: intl.formatMessage({ id: 'common.viewName' }),
-      children: (
-        <div className={styles.listContainer}>
-          <ResourceCitation
-            resourceType="VIEW"
-            onSelect={onSelectObject}
-            keyword={queryKeyword}
-            agentId={agentId}
-            agentIds={agentIds}
-            resourceBizTypeList={[ResourceTypeMap.VIEW]}
-            resources={shouldUseSharedResourceQuery ? getSharedTabResources([ResourceTypeMap.VIEW]) : undefined}
             loadingOverride={shouldUseSharedResourceQuery ? sharedLoading : undefined}
           />
         </div>
@@ -595,9 +557,7 @@ const ResourceTabs: React.FC<Props> = ({
         ),
       });
     }
-    const tabOrder = isOpenSource
-      ? ['skill', 'knowledge', 'tool', 'view', 'object', 'space', 'file']
-      : ['knowledge', 'tool', 'view', 'object', 'space'];
+    const tabOrder = isOpenSource ? ['skill', 'knowledge', 'tool', 'space', 'file'] : ['knowledge', 'tool', 'space'];
     return tabOrder.map((key) => items.find((item) => item.key === key)).filter(Boolean) as typeof items;
   }, [
     intl,
@@ -641,14 +601,6 @@ const ResourceTabs: React.FC<Props> = ({
         key: 'tool',
         label: intl.formatMessage({ id: 'common.tool' }),
       },
-      {
-        key: 'view',
-        label: intl.formatMessage({ id: 'common.viewName' }),
-      },
-      {
-        key: 'object',
-        label: intl.formatMessage({ id: 'common.object' }),
-      },
     ];
 
     const skillTab = {
@@ -666,7 +618,7 @@ const ResourceTabs: React.FC<Props> = ({
         return !['knowledge', 'tool'].includes(tab.key);
       }
       if (agentType === '006') {
-        return !['tool', 'view', 'object'].includes(tab.key);
+        return tab.key !== 'tool';
       }
       return visibleKeys.includes(tab.key);
     });
@@ -749,8 +701,6 @@ const ResourceTabs: React.FC<Props> = ({
                   onClick={() => {
                     const routeMap: Record<string, string> = {
                       knowledge: '/knowledgeCenter?tab=enterprise',
-                      object: '/objectCenter?tab=enterprise',
-                      view: '/viewCenter?tab=enterprise',
                       tool: '/toolCenter?tab=enterprise',
                     };
                     const route = activeTab ? routeMap[activeTab] || '/workspace' : '/workspace';
@@ -758,8 +708,6 @@ const ResourceTabs: React.FC<Props> = ({
                   }}
                 >
                   {activeTab === 'knowledge' && intl.formatMessage({ id: 'resourceTabs.knowledgeCenter' })}
-                  {activeTab === 'object' && intl.formatMessage({ id: 'resourceTabs.objectCenter' })}
-                  {activeTab === 'view' && intl.formatMessage({ id: 'resourceTabs.viewCenter' })}
                   {activeTab === 'tool' && intl.formatMessage({ id: 'resourceTabs.toolCenter' })}
                 </Button>
               )}
