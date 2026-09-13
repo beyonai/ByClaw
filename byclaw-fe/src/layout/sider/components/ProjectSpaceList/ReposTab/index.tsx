@@ -105,7 +105,7 @@ const ReposTab: React.FC<ReposTabProps> = ({ projectId, resourceId, onOpenDetail
       const repoKey = `${repo.repoId}`;
       setBranchLoadingMap((current) => ({ ...current, [repoKey]: true }));
       try {
-        const branches = await listProjectRepoBranches(repo.repoId);
+        const branches = await listProjectRepoBranches({ projectId, repoId: repo.repoId });
         const projectBranch = `${projectId}`;
         const defaultBranch = branches?.some((branch) => branch.name === projectBranch)
           ? projectBranch
@@ -235,7 +235,7 @@ const ReposTab: React.FC<ReposTabProps> = ({ projectId, resourceId, onOpenDetail
         title: node.name,
       });
       try {
-        const file = await getProjectRepoFileContent({ repoId: repo.repoId, branch, path: node.path });
+        const file = await getProjectRepoFileContent({ projectId, repoId: repo.repoId, branch, path: node.path });
         const content = file.binary ? file.base64Content || '' : file.content || '';
         onOpenDetail(<RemoteFileContent name={node.name} content={content} binary={file.binary} />, {
           tabKey,
@@ -245,7 +245,7 @@ const ReposTab: React.FC<ReposTabProps> = ({ projectId, resourceId, onOpenDetail
         message.error(error?.message || '文件内容加载失败');
       }
     },
-    [branchMap, onOpenDetail]
+    [branchMap, onOpenDetail, projectId]
   );
 
   const quoteFile = useCallback(

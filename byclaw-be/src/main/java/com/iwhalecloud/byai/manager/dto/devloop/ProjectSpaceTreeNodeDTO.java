@@ -17,4 +17,7 @@ public class ProjectSpaceTreeNodeDTO {
     private String defaultBranch;
     private Boolean changesSupported;
     private String remoteUrl;
+
+    /** 数据源类型：project-repo 为已登记仓库，project-space-git 为本地发现但未登记的 Git 仓库。 */
+    private String sourceType;
 }

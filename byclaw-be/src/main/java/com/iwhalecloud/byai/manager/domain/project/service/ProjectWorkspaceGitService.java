@@ -217,6 +217,34 @@ public class ProjectWorkspaceGitService {
         return configuredPath.getParent() == null ? null : configuredPath.getParent().getParent();
     }
 
+    /**
+     * 定位项目空间里未登记 Git 目录在会话 worktree 中的对应仓库。
+     *
+     * <p>没有 ProjectRepo 记录时无法用 repositoryName 推导 worktree 子目录，因此依次尝试目录名和
+     * 完整相对路径两种布局。worktree 是可选的：会话没有 worktree 时返回空，调用方回退项目仓库目录。</p>
+     */
+    public Optional<Path> resolveLocalWorktree(Long sessionId, String repositoryPath) {
+        if (sessionId == null || repositoryPath == null || repositoryPath.isBlank()) {
+            return Optional.empty();
+        }
+        var session = byaiSessionMapper.selectById(sessionId);
+        if (session == null || session.getCreatorId() == null) {
+            return Optional.empty();
+        }
+        String sessionDir = sessionWorkspacePathResolver.resolveSessionDir(session.getCreatorId(), sessionId);
+        if (sessionDir == null) {
+            return Optional.empty();
+        }
+        Path sessionRoot = Path.of(sessionDir, ".worktree");
+        String relative = repositoryPath.replace('\\', '/').replaceAll("^/+|/+$", "");
+        String directoryName = relative.substring(relative.lastIndexOf('/') + 1);
+        return Stream.of(directoryName, relative)
+            .filter(candidate -> !candidate.isBlank())
+            .map(sessionRoot::resolve)
+            .filter(this::isGitRepository)
+            .findFirst();
+    }
+
     /** 定位项目 workspace 根仓；项目代码实际位于 /by/projects/{projectId} 下。 */
     public Optional<Path> resolveSessionWorktree(Long projectId, Object sessionId) {
         if (sessionId == null) {

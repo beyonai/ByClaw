@@ -21,175 +21,14 @@ import {
   createProjectSpaceFolder,
   listProjectSpaceTree,
   uploadProjectSpaceFiles,
+  type AvailableProjectRepo,
+  type GitSourceType,
   type ProjectSpaceTreeNode,
 } from '@/service/devloop';
 import { deleteFiles, downloadFile, downloadFolder, renameFile, type FileBrowserItem } from '@/service/fileBrowser';
 import { uploadFiles as uploadKnowledgeFiles } from '@/service/knowledgeCenter';
 import { queryProjectCloudDrive } from '@/components/ProjectCloudDrive';
 import styles from './index.module.less';
-
-interface LocalGitRepositoryViewProps {
-  projectId: number;
-  repositoryPath: string;
-  resourceId?: string | number;
-  onOpenDetail?: (panel: React.ReactNode, options: DetailPanelOptions) => void;
-  getActionItems?: (item: FileBrowserItem) => MenuProps['items'];
-  onAction?: (key: Key, item: FileBrowserItem) => void;
-  repository?: SpaceItem;
-}
-
-const toLocalGitItems = (nodes: ProjectSpaceTreeNode[], rootPath: string, repositoryPath: string) => {
-  const prefix = `${repositoryPath.replace(/^\/+|\/+$/g, '')}/`;
-  return nodes.map((node) => {
-    const nodePath = node.path.replace(/^\/+/, '');
-    const relativePath = nodePath.startsWith(prefix) ? nodePath.slice(prefix.length) : nodePath;
-    const path = `${rootPath}${relativePath}`;
-    return {
-      name: node.name,
-      path: node.type === 'directory' ? ensureDirectoryPath(path) : path,
-      isDir: node.type === 'directory',
-      size: node.size,
-      lastModified: node.lastModified,
-    } as FileBrowserItem;
-  });
-};
-
-/**
- * A Git directory can exist in the project workspace before it is registered
- * as a project repository. In that case there is no repoId for CodesTab to
- * query, but the files are still available through the project-space API.
- */
-const LocalGitRepositoryView: React.FC<LocalGitRepositoryViewProps> = ({
-  projectId,
-  repositoryPath,
-  resourceId,
-  onOpenDetail,
-  getActionItems,
-  onAction,
-  repository,
-}) => {
-  const { EventEmitter } = useGlobal();
-  const [items, setItems] = useState<FileBrowserItem[]>([]);
-  const [childrenByPath, setChildrenByPath] = useState<Record<string, FileBrowserItem[]>>({});
-  const [expandedKeys, setExpandedKeys] = useState<Key[]>([]);
-  const [loading, setLoading] = useState(false);
-  const rootPath = `/by/projects/${projectId}/${repositoryPath.replace(/^\/+|\/+$/g, '')}/`;
-  const relativeRoot = repositoryPath.replace(/^\/+|\/+$/g, '');
-
-  const load = useCallback(
-    async (relativePath?: string) => {
-      setLoading(true);
-      try {
-        const response = await listProjectSpaceTree({ projectId, path: relativePath || relativeRoot });
-        const currentRootPath = relativePath
-          ? ensureDirectoryPath(`${rootPath}${relativePath.slice(relativeRoot.length)}`)
-          : rootPath;
-        const next = sortFileBrowserItems(
-          toLocalGitItems(
-            unwrapListResponse<ProjectSpaceTreeNode>(response),
-            currentRootPath,
-            relativePath || relativeRoot
-          )
-        );
-        const key = relativePath ? currentRootPath : rootPath;
-        if (relativePath) setChildrenByPath((current) => ({ ...current, [key]: next }));
-        else setItems(next);
-      } catch (error) {
-        console.error('Failed to load unregistered Git repository files:', error);
-        if (!relativePath) setItems([]);
-      } finally {
-        setLoading(false);
-      }
-    },
-    [projectId, relativeRoot, rootPath]
-  );
-
-  useEffect(() => {
-    setItems([]);
-    setChildrenByPath({});
-    setExpandedKeys([]);
-    void load();
-  }, [load]);
-
-  const loadNode = useCallback(
-    async (node: FileTreeItem) => {
-      if (!isDirectory(node)) return;
-      const path = ensureDirectoryPath(node.path);
-      if (childrenByPath[path]) return;
-      const relative = path.slice(rootPath.length).replace(/\/$/, '');
-      await load(`${relativeRoot}/${relative}`);
-    },
-    [childrenByPath, load, relativeRoot, rootPath]
-  );
-
-  const openPreview = useCallback(
-    (item: FileTreeItem) => {
-      if (!onOpenDetail || !resourceId || !canPreviewFile(item)) return;
-      onOpenDetail(
-        <FilePreviewPanel fileName={item.name} resourceId={`${resourceId}`} path={item.path} source="fileBrowser" />,
-        { tabKey: `project-space-file:${item.path}`, title: item.name }
-      );
-    },
-    [onOpenDetail, resourceId]
-  );
-
-  const onNodeClick = useCallback(
-    (event: React.MouseEvent, node: FileTreeItem) => {
-      event.stopPropagation();
-      if (!isDirectory(node)) openPreview(node);
-    },
-    [openPreview]
-  );
-
-  const quote = useCallback(
-    (item: FileTreeItem) => {
-      if (!resourceId) return;
-      EventEmitter.emit('queryInput-insert-item', {
-        item: normalizeReferenceItem(item, `${resourceId}`),
-        type: isDirectory(item) ? DragType.commonFolder : DragType.commonFile,
-      });
-    },
-    [EventEmitter, resourceId]
-  );
-
-  return (
-    <div className={styles.localGitRepositoryView}>
-      <div className={styles.localGitRepositoryMeta}>
-        <div className={styles.localGitRepositoryMetaTitle}>本地 Git 仓库</div>
-        <div className={styles.localGitRepositoryMetaRow}>
-          <span>当前分支：{repository?.defaultBranch || '未知'}</span>
-          {repository?.remoteUrl ? (
-            <a href={repository.remoteUrl} target="_blank" rel="noreferrer">
-              {repository.remoteUrl}
-            </a>
-          ) : (
-            <span>未配置 origin 远程地址</span>
-          )}
-        </div>
-        <div className={styles.localGitRepositoryMetaNote}>该仓库尚未配置项目仓库记录，因此暂不支持 Changes。</div>
-      </div>
-      <FileSpaceBlock
-        title="项目空间"
-        hideHeader
-        fillContainer
-        loading={loading}
-        items={items}
-        currentPath={rootPath}
-        emptyText="暂无文件"
-        resourceEmptyStyle
-        childrenByPath={childrenByPath}
-        expandedKeys={expandedKeys}
-        onExpand={setExpandedKeys}
-        onLoadData={loadNode}
-        onNodeClick={onNodeClick}
-        onNodeDoubleClick={quote}
-        showActions={!!resourceId && !!getActionItems && !!onAction}
-        getActionItems={getActionItems}
-        onAction={onAction}
-      />
-    </div>
-  );
-};
 
 const toItems = (nodes: ProjectSpaceTreeNode[], rootPath = '/by/projects/') =>
   nodes.map((node) => ({
@@ -203,6 +42,7 @@ const toItems = (nodes: ProjectSpaceTreeNode[], rootPath = '/by/projects/') =>
     defaultBranch: node.defaultBranch,
     changesSupported: node.changesSupported,
     remoteUrl: node.remoteUrl,
+    sourceType: node.sourceType,
   })) as FileBrowserItem[];
 
 type SpaceItem = FileBrowserItem & {
@@ -211,6 +51,26 @@ type SpaceItem = FileBrowserItem & {
   defaultBranch?: string;
   changesSupported?: boolean;
   remoteUrl?: string;
+  sourceType?: GitSourceType;
+};
+
+/**
+ * 把项目空间节点转成 CodesTab 的数据源描述。已登记仓库带 repoId，本地发现的仓库只带
+ * repositoryPath，两者在 CodesTab 内走同一套渲染与请求分支。
+ */
+const toGitSource = (item: SpaceItem, projectId: number): AvailableProjectRepo => {
+  const repositoryPath = `${item.path}`.replace(/^\/by\/projects\/\d+\//, '').replace(/^\/+|\/+$/g, '');
+  return {
+    projectId,
+    repoFullName: item.name,
+    repoUrl: item.remoteUrl,
+    defaultBranch: item.defaultBranch,
+    path: ensureDirectoryPath(`${item.path}`),
+    repoId: item.repoId,
+    repositoryPath,
+    sourceType: item.sourceType || (item.repoId ? 'project-repo' : 'project-space-git'),
+    changesSupported: item.changesSupported,
+  };
 };
 
 interface Props {
@@ -630,7 +490,7 @@ const ProjectSpaceTab: React.FC<Props> = ({
         onClose={() => setGitDrawerItem(null)}
         destroyOnClose
       >
-        {gitDrawerItem?.repoId ? (
+        {gitDrawerItem ? (
           <CodesTab
             projectId={projectId}
             resourceId={resourceId}
@@ -639,17 +499,8 @@ const ProjectSpaceTab: React.FC<Props> = ({
             initialRepoId={gitDrawerItem.repoId}
             showBranchSelector
             codeChangesEnabled={!!sessionId && gitDrawerItem.changesSupported !== false}
+            injectedRepos={[toGitSource(gitDrawerItem, projectId)]}
             onOpenDetail={onOpenDetail}
-          />
-        ) : gitDrawerItem ? (
-          <LocalGitRepositoryView
-            projectId={projectId}
-            repositoryPath={gitDrawerItem.path}
-            resourceId={resourceId}
-            onOpenDetail={onOpenDetail}
-            getActionItems={actions}
-            onAction={handleAction}
-            repository={gitDrawerItem}
           />
         ) : null}
       </Drawer>

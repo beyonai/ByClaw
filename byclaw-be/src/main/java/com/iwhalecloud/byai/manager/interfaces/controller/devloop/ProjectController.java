@@ -288,7 +288,8 @@ public class ProjectController {
     public ResponseUtil<List<ProjectRepoTreeNodeDTO>> listProjectRepoTree(
         @RequestBody ProjectRepoTreeQueryDTO query) {
         return ResponseUtil.successResponse(projectRepositoryService.listTree(query == null ? null : query.getProjectId(),
-            query == null ? null : query.getRepoId(), query == null ? null : query.getPath(),
+            query == null ? null : query.getRepoId(), query == null ? null : query.getRepositoryPath(),
+            query == null ? null : query.getPath(),
             query == null ? null : query.getRef(), query == null ? null : query.getSessionId()));
     }
 
@@ -329,6 +330,7 @@ public class ProjectController {
         @RequestBody ProjectRepoTreeQueryDTO query) {
         return ResponseUtil.successResponse(projectRepositoryService.searchTree(
             query == null ? null : query.getProjectId(), query == null ? null : query.getRepoId(),
+            query == null ? null : query.getRepositoryPath(),
             query == null ? null : query.getKeyword(), query == null ? null : query.getRef(),
             query == null ? null : query.getSessionId()));
     }
@@ -342,8 +344,11 @@ public class ProjectController {
     @PostMapping("/repo/branch/list")
     public ResponseUtil<List<ProjectRepoBranchDTO>> listProjectRepoBranches(
         @RequestBody Map<String, Object> params) {
+        Long projectId = MapParamUtil.getLongValue(params, "projectId");
         Long repoId = MapParamUtil.getLongValue(params, "repoId");
-        return ResponseUtil.successResponse(projectRepositoryService.listBranches(repoId));
+        String repositoryPath = params == null || params.get("repositoryPath") == null
+            ? null : params.get("repositoryPath").toString();
+        return ResponseUtil.successResponse(projectRepositoryService.listBranches(projectId, repoId, repositoryPath));
     }
 
     /**
@@ -356,8 +361,44 @@ public class ProjectController {
     public ResponseUtil<ProjectRepoFileContentDTO> getProjectRepoFileContent(
         @RequestBody ProjectRepoFileQueryDTO query) {
         return ResponseUtil.successResponse(projectRepositoryService.getFileContent(
-            query == null ? null : query.getRepoId(), query == null ? null : query.getBranch(),
+            query == null ? null : query.getProjectId(), query == null ? null : query.getRepoId(),
+            query == null ? null : query.getRepositoryPath(), query == null ? null : query.getBranch(),
             query == null ? null : query.getPath()));
+    }
+
+    /**
+     * 查询项目空间本地 Git 仓库的工作区变更。
+     *
+     * <p>基准优先取当前会话 .worktree，缺失时回退项目仓库目录。仅用于没有 ProjectRepo 记录的本地仓库；
+     * 已登记仓库继续走 /devloop/task/changes。</p>
+     *
+     * @param params 包含 projectId、repositoryPath；sessionId 可选
+     */
+    @PostMapping("/repo/local-changes")
+    public ResponseUtil<Map<String, Object>> getLocalRepositoryChanges(@RequestBody Map<String, Object> params) {
+        Long projectId = MapParamUtil.getLongValue(params, "projectId");
+        Long sessionId = MapParamUtil.getLongValue(params, "sessionId");
+        String repositoryPath = params == null || params.get("repositoryPath") == null
+            ? null : params.get("repositoryPath").toString();
+        return ResponseUtil.successResponse(
+            projectRepositoryService.getLocalRepositoryChanges(projectId, repositoryPath, sessionId));
+    }
+
+    /**
+     * 查询项目空间本地 Git 仓库中单个文件的 unified diff，基准与变更列表同口径。
+     *
+     * @param params 包含 projectId、repositoryPath、filePath；sessionId 可选
+     */
+    @PostMapping("/repo/local-file-diff")
+    public ResponseUtil<Map<String, Object>> getLocalRepositoryFileDiff(@RequestBody Map<String, Object> params) {
+        Long projectId = MapParamUtil.getLongValue(params, "projectId");
+        Long sessionId = MapParamUtil.getLongValue(params, "sessionId");
+        String repositoryPath = params == null || params.get("repositoryPath") == null
+            ? null : params.get("repositoryPath").toString();
+        String filePath = params == null || params.get("filePath") == null
+            ? null : params.get("filePath").toString();
+        return ResponseUtil.successResponse(
+            projectRepositoryService.getLocalRepositoryFileDiff(projectId, repositoryPath, filePath, sessionId));
     }
 
     /** 查询项目绑定的知识库、数字员工。 */

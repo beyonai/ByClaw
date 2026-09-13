@@ -5,6 +5,8 @@ import com.iwhalecloud.byai.common.constants.devloop.DeleteFlag;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.domain.devloop.provider.GitRepositoryProvider;
+import com.iwhalecloud.byai.manager.domain.devloop.service.LocalGitChangeService;
+import com.iwhalecloud.byai.manager.domain.devloop.service.LocalGitChangeViewMapper;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectService;
 import com.iwhalecloud.byai.manager.domain.project.service.ProjectWorkspaceGitService;
 import com.iwhalecloud.byai.manager.domain.project.service.GitCommandExecutor;
@@ -59,6 +61,9 @@ public class ProjectRepositoryService {
     @Autowired
     private ProjectInitService projectInitService;
 
+    @Autowired
+    private LocalGitChangeService localGitChangeService;
+
     private final Map<String, GitRepositoryProvider> providers;
 
     @Autowired
@@ -67,33 +72,109 @@ public class ProjectRepositoryService {
             provider -> provider.providerType().toLowerCase(Locale.ROOT), Function.identity()));
     }
 
-    /** 查询仓库指定目录的直接子节点；path 为空即查询仓库根目录。 */
-    public List<ProjectRepoTreeNodeDTO> listTree(Long projectId, Long repoId, String path, String ref) {
-        return listTree(projectId, repoId, path, ref, null);
+    /** 数据源类型：数据库登记的项目仓库。 */
+    public static final String SOURCE_TYPE_PROJECT_REPO = "project-repo";
+
+    /** 数据源类型：项目空间里本地发现但未登记的 Git 仓库。 */
+    public static final String SOURCE_TYPE_PROJECT_SPACE_GIT = "project-space-git";
+
+    /**
+     * 树、分支、文件和变更四类查询的统一数据源。
+     *
+     * <p>repo 为空表示项目空间里未登记的本地 Git 仓库，此时没有远端 provider 契约，
+     * 本地读取失败必须直接报错而不是静默降级。</p>
+     */
+    private record GitSource(Path repoPath, String defaultBranch, ProjectRepo repo, String sourceType) {
+
+        boolean hasProjectRepo() {
+            return repo != null;
+        }
     }
 
-    public List<ProjectRepoTreeNodeDTO> listTree(Long projectId, Long repoId, String path, String ref, Long sessionId) {
+    /**
+     * 按 repoId 或 repositoryPath 解析数据源。
+     *
+     * <p>repoId 优先，保持数据库仓库的原有解析链路不变；repoId 为空时按项目空间相对路径定位本地 Git 仓库。
+     * 两者都为空视为参数缺失。</p>
+     */
+    private GitSource resolveSource(Long projectId, Long repoId, String repositoryPath, Long sessionId) {
         requireProject(projectId);
-        if (repoId == null) {
-            throw new BaseException(50500, "project.repo.id.required");
-        }
-        ProjectRepo repo = projectRepoMapper.selectOne(new LambdaQueryWrapper<ProjectRepo>()
-            .eq(ProjectRepo::getRepoId, repoId).eq(ProjectRepo::getProjectId, projectId));
-        if (repo == null) {
-            throw new BaseException(50500, "project.repo.not.found");
-        }
-        String branch = resolveBranch(projectId, repo, ref);
-        try {
+        if (repoId != null) {
+            ProjectRepo repo = projectRepoMapper.selectOne(new LambdaQueryWrapper<ProjectRepo>()
+                .eq(ProjectRepo::getRepoId, repoId).eq(ProjectRepo::getProjectId, projectId));
+            if (repo == null) {
+                throw new BaseException(50500, "project.repo.not.found");
+            }
             Path localRepo = (sessionId == null
                 ? projectWorkspaceGitService.resolveRepository(repo)
-                : projectWorkspaceGitService.resolveRepository(repo, sessionId)).orElseThrow();
+                : projectWorkspaceGitService.resolveRepository(repo, sessionId)).orElse(null);
+            return new GitSource(localRepo, repo.getDefaultBranch(), repo, SOURCE_TYPE_PROJECT_REPO);
+        }
+        if (repositoryPath == null || repositoryPath.isBlank()) {
+            throw new BaseException(50500, "project.repo.id.required");
+        }
+        return resolveLocalGitSource(projectId, repositoryPath);
+    }
+
+    /** 定位 /by/projects/{projectId}/{repositoryPath} 下的本地 Git 仓库，路径必须落在项目根目录内。 */
+    private GitSource resolveLocalGitSource(Long projectId, String repositoryPath) {
+        Path projectRoot = projectInitService.initProjectWorkspace(projectId).toAbsolutePath().normalize();
+        Path target = projectRoot.resolve(normalizeSpacePath(repositoryPath)).normalize();
+        if (!target.startsWith(projectRoot)) {
+            throw new BaseException(50500, "project.space.path.invalid");
+        }
+        if (!isGitRepository(target)) {
+            throw new BaseException(50500, "project.repo.not.git");
+        }
+        return new GitSource(target, resolveLocalHeadBranch(target), null, SOURCE_TYPE_PROJECT_SPACE_GIT);
+    }
+
+    /** 读取本地仓库当前检出分支；detached HEAD 或元数据不可读时回退 main。 */
+    private String resolveLocalHeadBranch(Path repoPath) {
+        try {
+            String branch = gitCommandExecutor.executeCommandQuietly(repoPath, "git", "-c", "safe.directory=*",
+                "symbolic-ref", "--short", "HEAD").trim();
+            if (!branch.isBlank()) {
+                return branch;
+            }
+        }
+        catch (Exception ignored) {
+            // detached HEAD 或仓库元数据不可读：分支基准回退 main，浏览能力不受影响。
+        }
+        return "main";
+    }
+
+    /** 解析查询使用的 ref：显式 ref 优先，其次数据源默认分支，最后 main。 */
+    private String resolveSourceBranch(GitSource source, String ref) {
+        if (ref != null && !ref.trim().isEmpty()) {
+            return ref.trim();
+        }
+        return source.defaultBranch() == null || source.defaultBranch().isBlank()
+            ? "main" : source.defaultBranch().trim();
+    }
+
+    /** 查询仓库指定目录的直接子节点；path 为空即查询仓库根目录。 */
+    public List<ProjectRepoTreeNodeDTO> listTree(Long projectId, Long repoId, String path, String ref) {
+        return listTree(projectId, repoId, null, path, ref, null);
+    }
+
+    public List<ProjectRepoTreeNodeDTO> listTree(Long projectId, Long repoId, String repositoryPath, String path,
+        String ref, Long sessionId) {
+        GitSource source = resolveSource(projectId, repoId, repositoryPath, sessionId);
+        String branch = resolveSourceBranch(source, ref);
+        try {
             // 本地仓库以实际检出的 HEAD 为准；配置中的默认分支可能已失效或与远程默认分支不同。
-            return listLocalTree(localRepo, normalizePath(path), branch);
+            return listLocalTree(java.util.Objects.requireNonNull(source.repoPath()), normalizePath(path), branch);
         }
         catch (Exception e) {
+            // 未登记的本地仓库没有远端契约，读不到就是错误，不能借 provider 掩盖。
+            if (!source.hasProjectRepo()) {
+                throw e;
+            }
             log.info("Local repository tree unavailable, falling back to provider, projectId={}, repoId={}",
                 projectId, repoId);
         }
+        ProjectRepo repo = source.repo();
         return resolveProvider(repo).listTree(repo.getRepoUrl(), repo.getRepoFullName(), normalizePath(path), branch,
             currentUserToken());
     }
@@ -155,7 +236,10 @@ public class ProjectRepositoryService {
                             } catch (Exception ignored) {
                                 // A local Git repository may not have an origin remote.
                             }
-                            node.setChangesSupported(repo != null);
+                            // 未登记的本地 Git 目录同样支持 Changes：基准取会话 worktree 或项目仓库目录。
+                            node.setChangesSupported(true);
+                            node.setSourceType(repo != null ? SOURCE_TYPE_PROJECT_REPO
+                                : SOURCE_TYPE_PROJECT_SPACE_GIT);
                         } else {
                             node.setGitRepository(false);
                         }
@@ -222,54 +306,47 @@ public class ProjectRepositoryService {
     }
 
     /** 按指定分支搜索仓库文件名和路径。 */
-    public List<ProjectRepoTreeNodeDTO> searchTree(Long projectId, Long repoId, String keyword, String ref) {
-        return searchTree(projectId, repoId, keyword, ref, null);
-    }
-
-    public List<ProjectRepoTreeNodeDTO> searchTree(Long projectId, Long repoId, String keyword, String ref, Long sessionId) {
-        requireProject(projectId);
-        if (repoId == null) {
-            throw new BaseException(50500, "project.repo.id.required");
-        }
+    public List<ProjectRepoTreeNodeDTO> searchTree(Long projectId, Long repoId, String repositoryPath, String keyword,
+        String ref, Long sessionId) {
         if (keyword == null || keyword.trim().isEmpty()) {
             throw new BaseException(50500, "project.repo.search.keyword.required");
         }
-        ProjectRepo repo = projectRepoMapper.selectOne(new LambdaQueryWrapper<ProjectRepo>()
-            .eq(ProjectRepo::getRepoId, repoId).eq(ProjectRepo::getProjectId, projectId));
-        if (repo == null) {
-            throw new BaseException(50500, "project.repo.not.found");
-        }
-        String branch = resolveBranch(projectId, repo, ref);
+        GitSource source = resolveSource(projectId, repoId, repositoryPath, sessionId);
+        String branch = resolveSourceBranch(source, ref);
         try {
-            Path localRepo = (sessionId == null
-                ? projectWorkspaceGitService.resolveRepository(repo)
-                : projectWorkspaceGitService.resolveRepository(repo, sessionId)).orElseThrow();
-            return searchLocalTree(localRepo, keyword.trim(), branch);
+            return searchLocalTree(java.util.Objects.requireNonNull(source.repoPath()), keyword.trim(), branch);
         }
         catch (Exception e) {
+            if (!source.hasProjectRepo()) {
+                throw e;
+            }
             log.info("Local repository search unavailable, falling back to provider, projectId={}, repoId={}",
                 projectId, repoId);
         }
+        ProjectRepo repo = source.repo();
         return resolveProvider(repo).searchTree(repo.getRepoUrl(), repo.getRepoFullName(), keyword.trim(), branch,
             currentUserToken());
     }
 
-    /** 查询指定仓库的全部远程分支。 */
-    public List<ProjectRepoBranchDTO> listBranches(Long repoId) {
-        ProjectRepo repo = requireRepo(repoId);
+    /** 查询指定仓库的全部本地和远程分支。 */
+    public List<ProjectRepoBranchDTO> listBranches(Long projectId, Long repoId, String repositoryPath) {
+        GitSource source = resolveSource(projectId, repoId, repositoryPath, null);
         try {
-            Path localRepo = projectWorkspaceGitService.resolveRepository(repo).orElseThrow();
-            return listLocalBranches(localRepo, repo.getProjectId());
+            return listLocalBranches(java.util.Objects.requireNonNull(source.repoPath()), projectId);
         }
         catch (Exception e) {
+            if (!source.hasProjectRepo()) {
+                throw e;
+            }
             log.info("Local repository branches unavailable, falling back to provider, repoId={}", repoId);
         }
+        ProjectRepo repo = source.repo();
         return resolveProvider(repo).listBranches(repo.getRepoUrl(), repo.getRepoFullName(), currentUserToken());
     }
 
-    /** 查询指定远程分支上的文件内容。 */
-    public ProjectRepoFileContentDTO getFileContent(Long repoId, String branch, String path) {
-        ProjectRepo repo = requireRepo(repoId);
+    /** 查询指定分支上的文件内容。 */
+    public ProjectRepoFileContentDTO getFileContent(Long projectId, Long repoId, String repositoryPath, String branch,
+        String path) {
         if (branch == null || branch.trim().isEmpty()) {
             throw new BaseException(50500, "project.repo.branch.required");
         }
@@ -277,16 +354,79 @@ public class ProjectRepositoryService {
         if (normalizedPath == null) {
             throw new BaseException(50500, "project.repo.file.path.required");
         }
+        GitSource source = resolveSource(projectId, repoId, repositoryPath, null);
         try {
-            Path localRepo = projectWorkspaceGitService.resolveRepository(repo).orElseThrow();
-            return getLocalFileContent(localRepo, branch.trim(), normalizedPath);
+            return getLocalFileContent(java.util.Objects.requireNonNull(source.repoPath()), branch.trim(),
+                normalizedPath);
         }
         catch (Exception e) {
+            if (!source.hasProjectRepo()) {
+                throw e;
+            }
             log.info("Local repository file unavailable, falling back to provider, repoId={}, path={}", repoId,
                 normalizedPath);
         }
+        ProjectRepo repo = source.repo();
         return resolveProvider(repo).getFileContent(repo.getRepoUrl(), repo.getRepoFullName(), branch.trim(),
             normalizedPath, currentUserToken());
+    }
+
+    /**
+     * 查询项目空间本地 Git 仓库的工作区变更。
+     *
+     * <p>基准优先取当前会话 worktree，worktree 缺失时回退项目仓库目录；口径与数据库仓库一致，
+     * 都走 LocalGitChangeService，因此已提交未推送的改动也会列出。</p>
+     */
+    public Map<String, Object> getLocalRepositoryChanges(Long projectId, String repositoryPath, Long sessionId) {
+        // 变更是只读展示，任何本地 Git 异常都收敛成空态，不抛前端。
+        try {
+            GitSource source = resolveLocalGitSource(projectId, requireRepositoryPath(repositoryPath));
+            Path base = resolveChangesBase(source, repositoryPath, sessionId);
+            LocalGitChangeService.LocalChangeResult local = localGitChangeService.collectChanges(base,
+                source.defaultBranch());
+            if (local.getStatus() != LocalGitChangeService.LocalStatus.OK) {
+                return LocalGitChangeViewMapper.emptyChanges();
+            }
+            Map<String, Object> changes = LocalGitChangeViewMapper.toChangesMap(local, repositoryPath);
+            changes.put("sourceType", SOURCE_TYPE_PROJECT_SPACE_GIT);
+            changes.put("repositoryPath", repositoryPath);
+            return changes;
+        }
+        catch (Exception e) {
+            log.error("Local repository changes failed, projectId={}, repositoryPath={}", projectId, repositoryPath, e);
+            return LocalGitChangeViewMapper.errorChanges();
+        }
+    }
+
+    /** 查询项目空间本地 Git 仓库中单个文件的 unified diff，基准与变更列表同口径。 */
+    public Map<String, Object> getLocalRepositoryFileDiff(Long projectId, String repositoryPath, String filePath,
+        Long sessionId) {
+        if (filePath == null || filePath.trim().isEmpty()) {
+            throw new BaseException(50500, "project.repo.file.path.required");
+        }
+        try {
+            GitSource source = resolveLocalGitSource(projectId, requireRepositoryPath(repositoryPath));
+            Path base = resolveChangesBase(source, repositoryPath, sessionId);
+            return LocalGitChangeViewMapper.toFileDiffMap(localGitChangeService.fileDiff(base,
+                source.defaultBranch(), filePath.trim()));
+        }
+        catch (Exception e) {
+            log.error("Local repository file diff failed, projectId={}, file={}", projectId, filePath, e);
+            return LocalGitChangeViewMapper.errorFileDiff(filePath);
+        }
+    }
+
+    private String requireRepositoryPath(String repositoryPath) {
+        if (repositoryPath == null || repositoryPath.isBlank()) {
+            throw new BaseException(50500, "project.space.path.not.found");
+        }
+        return repositoryPath;
+    }
+
+    /** 变更基准：会话 worktree 优先，worktree 可选，缺失时使用项目仓库目录。 */
+    private Path resolveChangesBase(GitSource source, String repositoryPath, Long sessionId) {
+        return projectWorkspaceGitService.resolveLocalWorktree(sessionId, repositoryPath)
+            .orElse(source.repoPath());
     }
 
     /**
@@ -356,18 +496,6 @@ public class ProjectRepositoryService {
         return repositories;
     }
 
-    private ProjectRepo requireRepo(Long repoId) {
-        if (repoId == null) {
-            throw new BaseException(50500, "project.repo.id.required");
-        }
-        ProjectRepo repo = projectRepoMapper.selectById(repoId);
-        if (repo == null) {
-            throw new BaseException(50500, "project.repo.not.found");
-        }
-        requireProject(repo.getProjectId());
-        return repo;
-    }
-
     private GitRepositoryProvider resolveProvider(ProjectRepo repo) {
         String providerName = repo.getProvider() == null ? "github" : repo.getProvider().toLowerCase(Locale.ROOT);
         GitRepositoryProvider provider = providers.get(providerName);
@@ -375,14 +503,6 @@ public class ProjectRepositoryService {
             throw new BaseException(50500, "project.repo.provider.unsupported");
         }
         return provider;
-    }
-
-    private String resolveBranch(Long projectId, ProjectRepo repo, String ref) {
-        if (ref != null && !ref.trim().isEmpty()) {
-            return ref.trim();
-        }
-        return repo.getDefaultBranch() == null || repo.getDefaultBranch().isBlank()
-            ? "main" : repo.getDefaultBranch().trim();
     }
 
     private List<ProjectRepoTreeNodeDTO> listLocalTree(Path repoPath, String path, String branch) {

@@ -1,6 +1,10 @@
 import {
   createManualRequirement,
+  getLocalRepoChanges,
+  getLocalRepoFileDiff,
   getTaskChanges,
+  listProjectRepoBranches,
+  listProjectRepoTree,
   getTaskPhases,
   listAvailableProjectRepos,
   listProjectRepos,
@@ -88,5 +92,56 @@ describe('Devloop task service', () => {
     createManualRequirement(requirement);
 
     expect(mockPOST).toHaveBeenCalledWith('/byaiService/devloop/requirement/create', requirement);
+  });
+
+  it('locates a registered repository by repoId when browsing the repository tree', () => {
+    listProjectRepoTree({ projectId: 203, repoId: 900, path: 'src' });
+
+    expect(mockPOST).toHaveBeenCalledWith('/byaiService/project/repo/tree', {
+      projectId: 203,
+      repoId: 900,
+      path: 'src',
+    });
+  });
+
+  it('locates an unregistered project-space repository by repositoryPath instead of faking a repoId', () => {
+    listProjectRepoTree({ projectId: 203, repositoryPath: 'repos/deepseek-harness', ref: 'master' });
+
+    expect(mockPOST).toHaveBeenCalledWith('/byaiService/project/repo/tree', {
+      projectId: 203,
+      repositoryPath: 'repos/deepseek-harness',
+      ref: 'master',
+    });
+  });
+
+  it('passes the project-space repository path to the branch list endpoint', () => {
+    listProjectRepoBranches({ projectId: 203, repositoryPath: 'repos/deepseek-harness' });
+
+    expect(mockPOST).toHaveBeenCalledWith('/byaiService/project/repo/branch/list', {
+      projectId: 203,
+      repositoryPath: 'repos/deepseek-harness',
+    });
+  });
+
+  it('queries project-space local changes and file diff by repository path', () => {
+    getLocalRepoChanges({ projectId: 203, repositoryPath: 'repos/deepseek-harness', sessionId: 123 });
+    getLocalRepoFileDiff({
+      projectId: 203,
+      repositoryPath: 'repos/deepseek-harness',
+      filePath: 'README.md',
+      sessionId: 123,
+    });
+
+    expect(mockPOST).toHaveBeenNthCalledWith(1, '/byaiService/project/repo/local-changes', {
+      projectId: 203,
+      repositoryPath: 'repos/deepseek-harness',
+      sessionId: 123,
+    });
+    expect(mockPOST).toHaveBeenNthCalledWith(2, '/byaiService/project/repo/local-file-diff', {
+      projectId: 203,
+      repositoryPath: 'repos/deepseek-harness',
+      filePath: 'README.md',
+      sessionId: 123,
+    });
   });
 });
