@@ -29,8 +29,6 @@ interface ResourceImportProps {
 const resourceImportTemplateMap: Record<string, { fileName: string }> = {
   KG_DOC: { fileName: 'knowledge-import-template.json' },
   TOOL: { fileName: 'tool-import-template.json' },
-  OBJECT: { fileName: 'object-import-template.zip' },
-  VIEW: { fileName: 'view-import-template.zip' },
 };
 
 const ResourceImport: React.FC<ResourceImportProps> = ({
@@ -59,7 +57,7 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
   const [activeDiffItem, setActiveDiffItem] = useState<ResourceImportItem | null>(null);
   const invalidFileMessageShownRef = useRef(false);
 
-  const accept = resourceType === 'VIEW' || resourceType === 'OBJECT' || resourceType === 'SKILL' ? '.zip' : '.json';
+  const accept = resourceType === 'SKILL' ? '.zip' : '.json';
   const templateConfig = resourceImportTemplateMap[resourceType];
   const templateUrl = templateConfig
     ? getRuntimeActualUrl(`/download/resource-import-templates/${templateConfig.fileName}`)
@@ -180,10 +178,7 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
     });
   };
 
-  const isZipSummaryMode =
-    currentStep === 'import' &&
-    !!importResult &&
-    (resourceType === 'VIEW' || resourceType === 'OBJECT' || resourceType === 'SKILL');
+  const isZipSummaryMode = currentStep === 'import' && !!importResult && resourceType === 'SKILL';
   const isImportSummaryMode =
     currentStep === 'import' && !!importResult && (isZipSummaryMode || (importResult.items || []).length > 1);
 
@@ -268,13 +263,7 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
         }
         const formData = buildLocalImportFormData();
         const importData = (await importFunc(formData)) as ResourceImportResult | undefined;
-        if (
-          importData &&
-          (resourceType === 'VIEW' ||
-            resourceType === 'OBJECT' ||
-            resourceType === 'SKILL' ||
-            (importData.items || []).length > 1)
-        ) {
+        if (importData && (resourceType === 'SKILL' || (importData.items || []).length > 1)) {
           setImportResult(importData);
           setCompletedImportResult(importData);
           setActiveDiffItem(null);
