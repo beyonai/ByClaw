@@ -14,7 +14,7 @@ export const ResourceTypeMap = {
   MCP: 'MCP',
   TOOL: 'TOOL',
   TOOLKIT: 'TOOLKIT',
-  VIEW: 'VIEW',
+  // 引用元素通用类型：真实资源类型由 resourceBizType 细分（工具/文件/项目云盘等引用均走该类型）
   OBJECT: 'OBJECT',
   SKILL: 'SKILL',
   PROPERTY: 'PROPERTY',

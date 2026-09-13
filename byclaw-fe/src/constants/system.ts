@@ -116,8 +116,6 @@ export const MENU_NAME_TO_KEY_MAP: Record<string, string> = {
   员工: 'agent',
   知识: 'knowledge',
   工具: 'tool',
-  视图: 'view',
-  对象: 'object',
   技能: 'skill',
   文件: 'file',
   模型: 'model',
