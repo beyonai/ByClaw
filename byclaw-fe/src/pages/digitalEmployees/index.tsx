@@ -394,7 +394,7 @@ export function EmployeePreviewModal({ employee, onClose, onCreateTask }: any) {
       ...relTools.map((item: any) => ({ name: item, resourceName: item, resourceBizType: 'TOOL' })),
       ...relResourceList.filter((item: any) => {
         const type = `${item?.resourceBizType || item?.grantResourceType || ''}`.toUpperCase();
-        return !['ONTOLOGY', 'ONTOLOGY_BASE', 'OBJECT', 'VIEW', 'SCENE'].includes(type);
+        return !['ONTOLOGY', 'ONTOLOGY_BASE', 'SCENE'].includes(type);
       }),
     ];
   }, [detail]);
@@ -425,7 +425,7 @@ export function EmployeePreviewModal({ employee, onClose, onCreateTask }: any) {
     const type = `${item?.resourceBizType || item?.bizType || item?.resourceType || ''}`.toUpperCase();
     let icon = 'icon-chajiantubiao';
     if (type === 'KG_DOC' || type.startsWith('KG_')) icon = 'icon-chuangjianfangshi-wendangku';
-    if (type === 'OBJECT' || type === 'VIEW' || type === 'KG_DB') icon = 'icon-chuangjianfangshi-shujuku';
+    if (type === 'KG_DB') icon = 'icon-chuangjianfangshi-shujuku';
     return <AntdIcon type={icon} />;
   };
   const groupMembers = Array.isArray(detail?.employeeGroupMembers) ? detail.employeeGroupMembers : [];
