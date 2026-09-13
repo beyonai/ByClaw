@@ -68,10 +68,6 @@ const NewResource = (props, ref) => {
         resourceBizTypeList = ['KG_DOC', 'KG_QA', 'KG_TERM'];
       } else if (activeTab === 'tool') {
         resourceBizTypeList = ['AGENT', 'MCP', 'TOOLKIT'];
-      } else if (activeTab === 'view') {
-        resourceBizTypeList = ['VIEW'];
-      } else if (activeTab === 'object') {
-        resourceBizTypeList = ['OBJECT'];
       }
 
       dispatch({
