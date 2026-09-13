@@ -50,8 +50,6 @@ export default {
   'common.deleteTips': 'Confirm deletion?',
   'common.plus': 'Add',
   'common.tool': 'Tools',
-  'common.object': 'Object',
-  'common.viewName': 'View',
   'common.agent': 'Agent',
   'common.toolkit': 'Toolkit',
   'common.mcpService': 'MCP Servive',
@@ -209,8 +207,6 @@ export default {
   'orgMgr.tabs.employee': 'Digital Employee',
   'orgMgr.tabs.knowledge': 'Knowledge Assets',
   'orgMgr.tabs.tool': 'Tool Assets',
-  'orgMgr.tabs.view': 'View Assets',
-  'orgMgr.tabs.object': 'Object Assets',
 
   // Table Columns (Extra)
   'orgMgr.table.type': 'Type',

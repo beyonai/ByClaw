@@ -159,8 +159,6 @@ export default {
   'resource.skillSource.assistantBound': '助手绑定',
   'resource.skillSource.lobsterInstalled': '龙虾安装',
   'resource.skillSource.userDeveloped': '用户开发',
-  'resource.object': '对象',
-  'resource.view': '视图',
   'resource.default': '资源',
   'resource.thirdPartyKnowledgeBaseMode': '当前为第三方知识库模式，暂不支持知识库库级操作',
   'resource.personal': '个人',
