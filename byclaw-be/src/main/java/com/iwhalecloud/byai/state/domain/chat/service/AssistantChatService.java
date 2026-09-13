@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.chat.service;
 
+import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatInternalSessionAccess;
+
 import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.manager.application.service.superassist.SuasSuperassistApplicationService;
 import com.iwhalecloud.byai.manager.domain.aimodel.service.AIService;
@@ -572,6 +574,7 @@ public class AssistantChatService {
             CompletionsUtils.responseWrite(outputStream, SseResponseEventEnum.createSession,
                 JSON.toJSONString(membersDto));
         } else {
+            GroupChatInternalSessionAccess.requirePublic(sessionService.findById(assistantChatDto.getSessionId()));
             // sessionId不为空时，检查当前用户是否在群成员列表中
             checkUserMembershipInGroup(assistantChatDto.getSessionId(), currentUserId, assistantChatDto);
             ByaiSession updatedSession = sessionTitleService.resolveInitialTitle(assistantChatDto.getSessionId(),

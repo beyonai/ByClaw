@@ -133,6 +133,23 @@ class GroupChatGatewayExecutorTest {
     }
 
     @Test
+    void directTaskFollowupUsesPublicBoundaryInsteadOfPrivateForkTrigger() {
+        execution.setStatus("CONVERSATION");
+        execution.setSourceMessageId(999L);
+        execution.setReplyToMessageId(20L);
+        ChatProcessContext context = new ChatProcessContext(null, new AssistantChatDto());
+        context.sessionId = 60L;
+        context.userId = 30L;
+        context.assistantChatDto.setAgentId(40L);
+        context.traceId = ScriptService.getTraceId(81L, 82L);
+        Map<String, Object> params = new HashMap<>();
+        assertThat(executor.decorate(context, "继续任务", params)).isEqualTo("继续任务");
+        Map<?, ?> reference = (Map<?, ?>) params.get("groupChat");
+        assertThat(reference.get("beforeMessageId")).isEqualTo("20");
+        assertThat(reference.get("contextToken")).isEqualTo("signed-context-token");
+    }
+
+    @Test
     void ordinarySessionRequestIsUnchanged() {
         ChatProcessContext context = new ChatProcessContext(null, new AssistantChatDto());
         context.sessionId = 99L;

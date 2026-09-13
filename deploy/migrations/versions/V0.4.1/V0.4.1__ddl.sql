@@ -222,3 +222,49 @@ COMMENT ON TABLE byai.byai_group_chat_task IS '可多轮人工干预的群聊任
 COMMENT ON TABLE byai.byai_group_chat_task_publication IS '任务一次性完成发布的不可变快照';
 COMMENT ON TABLE byai.byai_group_chat_mention IS '群消息中对真人用户的 mention 检索索引';
 COMMENT ON COLUMN byai.byai_session_member.last_read_message_id IS '用户已实际阅读到的群消息标识';
+
+-- Each continuation owns its immutable request and durable queue position.
+CREATE TABLE IF NOT EXISTS byai.byai_group_chat_turn (
+    execution_id         BIGINT       NOT NULL,
+    group_session_id     BIGINT       NOT NULL,
+    source_message_id    BIGINT       NOT NULL,
+    reply_to_message_id  BIGINT,
+    initiator_user_id    BIGINT       NOT NULL,
+    target_agent_id      BIGINT       NOT NULL,
+    candidate_session_id BIGINT       NOT NULL,
+    status               VARCHAR(32)  NOT NULL,
+    disposition          VARCHAR(16)  NOT NULL DEFAULT 'UNKNOWN',
+    task_name            VARCHAR(255),
+    ack_text             TEXT,
+    disposition_time     TIMESTAMP,
+    parent_execution_id  BIGINT,
+    root_message_id      BIGINT       NOT NULL,
+    trace_id             VARCHAR(255),
+    gateway_session_id   VARCHAR(255),
+    ack_message_id       BIGINT,
+    answer_message_id    BIGINT,
+    error_code           VARCHAR(128),
+    error_message        TEXT,
+    attempt              INTEGER      NOT NULL DEFAULT 0,
+    create_time          TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    start_time           TIMESTAMP,
+    finish_time          TIMESTAMP,
+    anchor_execution_id BIGINT NOT NULL,
+    trigger_message_id BIGINT NOT NULL,
+    input_message_id BIGINT NOT NULL,
+    parent_turn_id BIGINT,
+    sender_type VARCHAR(16) NOT NULL,
+    sender_id BIGINT NOT NULL,
+    hop_count INTEGER NOT NULL DEFAULT 0,
+    phase VARCHAR(32) NOT NULL DEFAULT 'NORMAL',
+    input_content TEXT NOT NULL,
+    input_metadata TEXT,
+    public_boundary_message_id BIGINT NOT NULL,
+    CONSTRAINT pk_byai_group_chat_turn PRIMARY KEY (execution_id),
+    CONSTRAINT uk_group_turn_trigger_agent UNIQUE (trigger_message_id, target_agent_id),
+    CONSTRAINT ck_group_turn_hop CHECK (hop_count BETWEEN 0 AND 6)
+);
+CREATE INDEX IF NOT EXISTS idx_group_turn_session_queue
+    ON byai.byai_group_chat_turn (candidate_session_id, status, execution_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_group_turn_trace
+    ON byai.byai_group_chat_turn (trace_id);

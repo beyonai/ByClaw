@@ -8,6 +8,7 @@ import java.util.Map;
 
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -20,6 +21,8 @@ import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.entity.devloop.Project;
 import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatExecution;
+import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTurn;
+import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTurnMapper;
 import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTask;
 import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTaskPublication;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
@@ -42,6 +45,8 @@ import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 /** 群聊任务提升、查询、取消以及一次性完成发布用例。 */
 @Service
 public class GroupChatTaskService {
+    @Autowired
+    private ByaiGroupChatTurnMapper turnMapper;
     private final ByaiGroupChatTaskMapper taskMapper;
     private final ByaiGroupChatTaskPublicationMapper publicationMapper;
     private final ByaiGroupChatExecutionMapper executionMapper;
@@ -83,7 +88,9 @@ public class GroupChatTaskService {
             return existing;
         }
         Date now = new Date();
-        if (executionMapper.decideDisposition(execution.getExecutionId(), "TASK", taskName, ackText, now) != 1) {
+        if ((execution instanceof ByaiGroupChatTurn
+            ? turnMapper.decideDisposition(execution.getExecutionId(), "TASK", taskName, ackText, now)
+            : executionMapper.decideDisposition(execution.getExecutionId(), "TASK", taskName, ackText, now)) != 1) {
             existing = taskMapper.selectById(execution.getCandidateSessionId());
             if (existing != null) {
                 return existing;
@@ -103,11 +110,17 @@ public class GroupChatTaskService {
         task.setCreateTime(now);
         task.setUpdateTime(now);
         taskMapper.insert(task);
+        if (execution instanceof ByaiGroupChatTurn) {
+            // The anchor still identifies direct task-entry turns after group scheduling has ended.
+            executionMapper.decideDisposition(((ByaiGroupChatTurn) execution).getAnchorExecutionId(),
+                "TASK", taskName, ackText, now);
+        }
         candidateSessionService.promote(task.getTaskSessionId(), taskName);
         publishTaskEvent(task, "TASK_CREATED", null);
         if (StringUtils.isNotBlank(ackText)) {
             Long messageId = createGroupMessage(task, ackText, "TASK_ACK", null, null);
-            executionMapper.setAckMessage(execution.getExecutionId(), messageId);
+            if (execution instanceof ByaiGroupChatTurn) { turnMapper.setAckMessage(execution.getExecutionId(), messageId); }
+            else { executionMapper.setAckMessage(execution.getExecutionId(), messageId); }
         }
         return task;
     }

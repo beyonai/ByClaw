@@ -15,6 +15,13 @@ import com.iwhalecloud.byai.manager.dto.devloop.ProjectDTO;
 import com.iwhalecloud.byai.manager.entity.devloop.Project;
 
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import com.iwhalecloud.byai.state.domain.ws.model.ChatMessage;
+import com.alibaba.fastjson.JSONObject;
+import com.iwhalecloud.byai.manager.entity.users.Users;
+import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
@@ -44,9 +51,9 @@ import com.iwhalecloud.byai.state.domain.resource.dto.ResourceVo;
 /** 群聊资源创建和成员管理用例。 */
 @Service
 public class GroupChatApplicationService {
-    @org.springframework.beans.factory.annotation.Autowired
+    @Autowired
     private UserService userService;
-    @org.springframework.beans.factory.annotation.Autowired
+    @Autowired
     private SsResourceService resourceService;
     private final SessionService sessionService;
     private final SequenceService sequenceService;
@@ -60,7 +67,7 @@ public class GroupChatApplicationService {
     private final SessionExtService sessionExtService;
     private final GroupChatMentionService mentionService;
 
-    @org.springframework.beans.factory.annotation.Autowired
+    @Autowired
     public GroupChatApplicationService(SessionService sessionService, SequenceService sequenceService,
         GroupChatAuthorizationService authorizationService, SessionMemberService memberService,
         ProjectApplicationService projectApplicationService, ProjectMemberService projectMemberService, ByaiMessageMapper messageMapper,
@@ -148,7 +155,7 @@ public class GroupChatApplicationService {
 
     /** 接收入站群消息并持久化；Agent 委派由后续协调器消费 resourceList。 */
     @Transactional
-    public Long acceptUserMessage(com.iwhalecloud.byai.state.domain.ws.model.ChatMessage command) {
+    public Long acceptUserMessage(ChatMessage command) {
         ByaiSession session = authorizationService.requireGroup(command.getSessionId());
         authorizationService.requireCurrentUserMember(session.getSessionId());
         Set<Long> mentionedAgentIds = validateAndResolveMemberResources(session.getSessionId(),
@@ -184,7 +191,7 @@ public class GroupChatApplicationService {
             mentionService.indexHumanMentions(session.getSessionId(), messageId,
                 CurrentUserHolder.getCurrentUserId(), CurrentUserHolder.getCurrentUserId(), command.getResourceList());
         }
-        com.alibaba.fastjson.JSONObject event = new com.alibaba.fastjson.JSONObject();
+        JSONObject event = new JSONObject();
         event.put("type", "GROUP_CHAT_EVENT");
         event.put("event", "MESSAGE_CREATED");
         event.put("sessionId", String.valueOf(session.getSessionId()));
@@ -202,9 +209,20 @@ public class GroupChatApplicationService {
         event.put("replyToMessageId", command.getReplyToMessageId());
         event.put("messageRef", command.getReplyToMessageId());
         event.put("replyTo", buildReplySummary(session.getSessionId(), command.getReplyToMessageId()));
-        eventPublisher.publish(session.getSessionId(), event, null);
         mentionedAgentIds.forEach(agentId -> executionCoordinator.enqueue(session.getSessionId(), messageId,
             command.getReplyToMessageId(), CurrentUserHolder.getCurrentUserId(), agentId, null, messageId));
+        // A rejected continuation must not leave a broadcast message whose database transaction rolled back.
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    eventPublisher.publish(session.getSessionId(), event, null);
+                }
+            });
+        }
+        else {
+            eventPublisher.publish(session.getSessionId(), event, null);
+        }
         return messageId;
     }
 
@@ -217,13 +235,13 @@ public class GroupChatApplicationService {
         java.util.List<ByaiSessionMember> members = memberService.findSessionMembers(sessionId, null, null);
         for (ByaiSessionMember member : members) {
             if (MemObjType.USER.name().equals(member.getMemObjType()) && userService != null) {
-                com.iwhalecloud.byai.manager.entity.users.Users user = userService.findById(member.getMemObjId());
+                Users user = userService.findById(member.getMemObjId());
                 if (user != null) {
                     member.setMemName(user.getUserName());
                 }
             }
             else if (MemObjType.AGENT.name().equals(member.getMemObjType()) && resourceService != null) {
-                com.iwhalecloud.byai.manager.entity.resource.SsResource agent = resourceService.findById(member.getMemObjId());
+                SsResource agent = resourceService.findById(member.getMemObjId());
                 if (agent != null) {
                     member.setMemName(agent.getResourceName());
                 }

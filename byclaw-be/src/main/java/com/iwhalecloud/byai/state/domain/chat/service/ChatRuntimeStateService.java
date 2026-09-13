@@ -108,6 +108,7 @@ public class ChatRuntimeStateService {
         state.setTaskId(ctx.taskId);
         state.setUserId(ctx.userId);
         state.setSessionMemberAgentId(ctx.sessionMemberAgentId);
+        state.setSuppressUserEvents(ctx.suppressUserEvents);
         state.setAssistantChatDto(ctx.assistantChatDto);
         state.setAskMsg(ctx.askMsg);
         state.setLoginInfo(ctx.loginInfo);
@@ -327,6 +328,7 @@ public class ChatRuntimeStateService {
         ctx.taskId = state.getTaskId();
         ctx.userId = state.getUserId();
         ctx.sessionMemberAgentId = state.getSessionMemberAgentId();
+        ctx.suppressUserEvents = state.isSuppressUserEvents();
         ctx.askMsg = resolveAskMsg(state);
         ctx.loginInfo = state.getLoginInfo();
         ctx.targetAgentType = state.getTargetAgentType();

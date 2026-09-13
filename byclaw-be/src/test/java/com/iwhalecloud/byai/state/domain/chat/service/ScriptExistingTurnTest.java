@@ -8,6 +8,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -15,6 +16,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.Map;
@@ -120,6 +122,32 @@ class ScriptExistingTurnTest {
         verify(writeBehind, never()).enqueue(anyString(), anyLong(), any(), eq(true));
         verify(broadcast).broadcastToUserDevices(eq(30L), eq(60L), eq("initialization"), anyString(), isNull());
         assertThat(ctx.messagePersisted.get()).isFalse();
+    }
+
+    @Test
+    void internalAssessmentKeepsNormalRuntimeAndRecoveryWithoutUserBroadcasts() throws Exception {
+        ChatProcessContext live = script.startExistingMessageTurn(dto, existing, true);
+        verify(route).route(live);
+        verifyNoInteractions(broadcast);
+        assertThat(live.transport).isEqualTo(ChatTransport.WEBSOCKET);
+        ChatRuntimeStateService runtime = new ChatRuntimeStateService();
+        ReflectionTestUtils.setField(runtime, "chatRuntimeInstance", mock(ChatRuntimeInstance.class));
+        ChatRuntimeState saved = ReflectionTestUtils.invokeMethod(runtime, "buildState", live, "token");
+        ChatRuntimeState reloaded = JSON.parseObject(JSON.toJSONString(saved), ChatRuntimeState.class);
+        ChatProcessContext recovered = runtime.buildRecoveryContext(reloaded, mock(RunningChatSnapshotService.class));
+        assertThat(recovered.suppressUserEvents).isTrue();
+        assertThat(recovered.traceId).isEqualTo(live.traceId);
+        assertThat(recovered.askMsg.getMessageId()).isEqualTo(existing.getMessageId());
+    }
+
+    @Test
+    void preparationFailureIsDistinguishedFromUncertainGatewayDelivery() throws Exception {
+        script = spy(script);
+        doThrow(new IllegalStateException("local preparation failed")).when(script).prepareParams(any());
+        doNothing().when(script).handleException(any());
+        assertThatThrownBy(() -> script.startExistingMessageTurn(dto, existing))
+            .isInstanceOf(ChatTurnPreparationException.class);
+        verifyNoInteractions(route);
     }
 
     @Test

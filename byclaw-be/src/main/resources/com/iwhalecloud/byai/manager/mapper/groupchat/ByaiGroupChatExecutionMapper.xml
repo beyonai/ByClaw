@@ -148,4 +148,8 @@
         ORDER BY create_time ASC, execution_id ASC
     </select>
 
+    <select id="selectByPublicMessage" resultMap="BaseResultMap">
+        SELECT <include refid="BaseColumns" /> FROM byai_group_chat_execution
+        WHERE answer_message_id = #{messageId} OR ack_message_id = #{messageId} LIMIT 1
+    </select>
 </mapper>

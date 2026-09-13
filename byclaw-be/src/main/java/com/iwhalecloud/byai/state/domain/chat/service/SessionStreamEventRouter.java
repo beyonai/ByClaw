@@ -302,6 +302,9 @@ public class SessionStreamEventRouter {
     }
 
     private void broadcastToOtherDevices(ChatProcessContext ctx, JSONObject dataJson) {
+        if (ctx.suppressUserEvents) {
+            return;
+        }
         try {
             JSONObject broadcastEvent = buildBroadcastEvent(ctx, dataJson);
             multiDeviceBroadcastService.broadcastRawEvent(ctx.getUserId(), ctx.getSessionId(),
@@ -517,6 +520,9 @@ public class SessionStreamEventRouter {
 
     private void broadcastBackgroundAnswerMessage(Long sessionId, ByaiMessageHotDtoDto message) {
         ByaiSession session = sessionService.findById(sessionId);
+        if (session != null && "GROUP_CHAT_ROUTING".equals(session.getState())) {
+            return;
+        }
         Long userId = session == null ? message.getCreatorId() : session.getCreatorId();
         if (userId == null) {
             return;
@@ -535,6 +541,9 @@ public class SessionStreamEventRouter {
             return;
         }
         ByaiSession session = sessionService.findById(sessionId);
+        if (session != null && "GROUP_CHAT_ROUTING".equals(session.getState())) {
+            return;
+        }
         Long userId = session == null ? null : session.getCreatorId();
         if (userId == null) {
             return;
@@ -552,6 +561,9 @@ public class SessionStreamEventRouter {
             return;
         }
         ByaiSession session = sessionService.findById(runtime.getSessionId());
+        if (session != null && "GROUP_CHAT_ROUTING".equals(session.getState())) {
+            return;
+        }
         Long userId = session == null ? null : session.getCreatorId();
         if (userId == null) {
             return;

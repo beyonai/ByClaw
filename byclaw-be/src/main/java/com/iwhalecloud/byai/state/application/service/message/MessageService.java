@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.application.service.message;
 
+import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatInternalSessionAccess;
+
 import static com.iwhalecloud.byai.state.domain.chat.enums.ChatUseageEnum.FORWARD_TYPE;
 import static com.iwhalecloud.byai.state.domain.chat.enums.ChatUseageEnum.SYSTEM_RESPONSE;
 import static com.iwhalecloud.byai.state.domain.chat.enums.ChatUseageEnum.USER_INPUT;
@@ -38,6 +40,8 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Date;
+import java.util.regex.Pattern;
+import java.util.regex.Matcher;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -240,6 +244,7 @@ public class MessageService {
      * @return 分页消息列表，包含代理头像信息
      */
     public PageInfo<ByaiMessageHotDtoDto> getMessages(MessageQo messageQo) {
+        GroupChatInternalSessionAccess.requirePublic(sessionService.findById(messageQo.getSessionId()));
 
         MessageHotPageQo messageHotPageQo = new MessageHotPageQo();
         messageHotPageQo.setPageNum(messageQo.getPageNum().intValue());
@@ -280,6 +285,7 @@ public class MessageService {
         if (messageQo == null || messageQo.getSessionId() == null || messageQo.getSessionId() <= 0) {
             throw new BdpRuntimeException(I18nUtil.get("assistant.man.session.id.not.empty"));
         }
+        GroupChatInternalSessionAccess.requirePublic(sessionService.findById(messageQo.getSessionId()));
         return conversationOutlineDisplayService.enrich(
             byaiMessageHotService.selectConversationOutline(messageQo.getSessionId()));
     }
@@ -349,6 +355,7 @@ public class MessageService {
 
         ByaiMessageHotDto byaiMessageHotDto = byaiMessageHotService.findById(messageId);
 
+        GroupChatInternalSessionAccess.requirePublic(sessionService.findById(byaiMessageHotDto.getSessionId()));
         ForwardMessageDtoDto forwardMessageDto = new ForwardMessageDtoDto();
         BeanUtils.copyProperties(byaiMessageHotDto, forwardMessageDto);
         // 转发历史记录
@@ -361,7 +368,11 @@ public class MessageService {
         // 从记忆引擎获取消息列表
         MessageHotQo messageHotQo = new MessageHotQo();
         messageHotQo.setMessageIds(messageIds);
-        return byaiMessageHotService.findByQo(messageHotQo);
+        List<ByaiMessageHotDto> history = byaiMessageHotService.findByQo(messageHotQo);
+        for (ByaiMessageHotDto message : history) {
+            GroupChatInternalSessionAccess.requirePublic(sessionService.findById(message.getSessionId()));
+        }
+        return history;
     }
 
     /**
@@ -905,6 +916,7 @@ public class MessageService {
                 return buildErrorHtml("消息不存在，messageId: " + messageId);
             }
 
+            GroupChatInternalSessionAccess.requirePublic(sessionService.findById(byaiMessageHotDto.getSessionId()));
             // 直接获取消息内容
             String content = byaiMessageHotDto.getMessageContent();
             if (StringUtils.isBlank(content)) {
@@ -966,9 +978,9 @@ public class MessageService {
         // 使用正则表达式匹配HTML代码块
         // 匹配 ```html 和 ``` 之间的内容
         String pattern = "```html\\s*([\\s\\S]*?)```";
-        java.util.regex.Pattern htmlPattern = java.util.regex.Pattern.compile(pattern,
-            java.util.regex.Pattern.CASE_INSENSITIVE);
-        java.util.regex.Matcher matcher = htmlPattern.matcher(content);
+        Pattern htmlPattern = Pattern.compile(pattern,
+            Pattern.CASE_INSENSITIVE);
+        Matcher matcher = htmlPattern.matcher(content);
 
         while (matcher.find()) {
             String htmlCode = matcher.group(1).trim();
@@ -981,9 +993,9 @@ public class MessageService {
         if (htmlBlocks.isEmpty()) {
             // 尝试匹配 <!DOCTYPE html> 开头的完整HTML文档
             String doctypePattern = "<!DOCTYPE\\s+html[\\s\\S]*?</html>";
-            java.util.regex.Pattern doctypeHtmlPattern = java.util.regex.Pattern.compile(doctypePattern,
-                java.util.regex.Pattern.CASE_INSENSITIVE);
-            java.util.regex.Matcher doctypeMatcher = doctypeHtmlPattern.matcher(content);
+            Pattern doctypeHtmlPattern = Pattern.compile(doctypePattern,
+                Pattern.CASE_INSENSITIVE);
+            Matcher doctypeMatcher = doctypeHtmlPattern.matcher(content);
 
             while (doctypeMatcher.find()) {
                 String htmlCode = doctypeMatcher.group(0).trim();
@@ -996,9 +1008,9 @@ public class MessageService {
         // 如果还是没有找到，尝试匹配 <html> 标签
         if (htmlBlocks.isEmpty()) {
             String htmlTagPattern = "<html[\\s\\S]*?</html>";
-            java.util.regex.Pattern htmlTagHtmlPattern = java.util.regex.Pattern.compile(htmlTagPattern,
-                java.util.regex.Pattern.CASE_INSENSITIVE);
-            java.util.regex.Matcher htmlTagMatcher = htmlTagHtmlPattern.matcher(content);
+            Pattern htmlTagHtmlPattern = Pattern.compile(htmlTagPattern,
+                Pattern.CASE_INSENSITIVE);
+            Matcher htmlTagMatcher = htmlTagHtmlPattern.matcher(content);
 
             while (htmlTagMatcher.find()) {
                 String htmlCode = htmlTagMatcher.group(0).trim();
@@ -1025,6 +1037,7 @@ public class MessageService {
     }
 
     public Map<String, Object> getMessageCountAndPosition(MessageQo messageQo) {
+        GroupChatInternalSessionAccess.requirePublic(sessionService.findById(messageQo.getSessionId()));
         return memoryMessageService.getMessageCountAndPosition(messageQo);
     }
 

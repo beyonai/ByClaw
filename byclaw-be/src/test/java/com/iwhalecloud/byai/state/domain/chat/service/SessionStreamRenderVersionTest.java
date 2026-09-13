@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
@@ -68,6 +69,36 @@ class SessionStreamRenderVersionTest {
         assertThat(ctx.messageContext.getAnswerMessageList()).hasSize(1);
         assertThat(ctx.messageContext.getAnswerMessageList().get(0).getChoices().get(0).getDelta().getContent())
             .isEqualTo("新闻摘要");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void internalAssessmentStillAggregatesButNeverBroadcastsLiveOrRecoveredDeltas(boolean recovery) {
+        SessionStreamEventRouter router = new SessionStreamEventRouter();
+        OutputStreamManager contexts = mock(OutputStreamManager.class);
+        MultiDeviceBroadcastService broadcast = mock(MultiDeviceBroadcastService.class);
+        ReflectionTestUtils.setField(router, "outputStreamManager", contexts);
+        ReflectionTestUtils.setField(router, "multiDeviceBroadcastService", broadcast);
+        ReflectionTestUtils.setField(router, "gatewayStreamEventProcessor", new GatewayStreamEventProcessor());
+        ReflectionTestUtils.setField(router, "pythonSseService", new PythonSseService());
+        ReflectionTestUtils.setField(router, "runningChatSnapshotWriteBehind", mock(RunningChatSnapshotWriteBehind.class));
+        ReflectionTestUtils.setField(router, "cronService", mock(CronService.class));
+        ChatProcessContext ctx = new ChatProcessContext(null, null);
+        ctx.sessionId = 20071499L;
+        ctx.userId = 10000029L;
+        ctx.traceId = "task-trace";
+        ctx.targetAgentType = "target";
+        ctx.transport = ChatTransport.WEBSOCKET;
+        ctx.recoveryOnly = recovery;
+        ctx.suppressUserEvents = true;
+        ctx.messageContext = new MessageContext(AgentTypeEnum.AGENT, 20071505L, 1L);
+        when(contexts.getContext("20071499", "task-trace")).thenReturn(ctx);
+
+        router.dispatch(event("reasoningLogDelta", "内部分类", "100-0"));
+        router.dispatch(event("answerDelta", "CHAT", "101-0"));
+
+        verifyNoInteractions(broadcast);
+        assertThat(ctx.messageContext.getAnswerText().toString()).isEqualTo("CHAT");
     }
 
     private JSONObject event(String type, String content, String streamId) {

@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.interfaces.controller.chat;
 
+import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatInternalSessionAccess;
+
 import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
@@ -280,7 +282,8 @@ public class AssistantChatController {
     }
 
     private boolean isCurrentUserSession(ByaiSession session, Long currentUserId) {
-        return session != null && Objects.equals(session.getCreatorId(), currentUserId);
+        return session != null && !GroupChatInternalSessionAccess.isInternal(session)
+            && Objects.equals(session.getCreatorId(), currentUserId);
     }
 
     /**

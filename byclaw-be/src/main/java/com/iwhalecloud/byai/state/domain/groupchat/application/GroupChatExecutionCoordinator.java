@@ -7,6 +7,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -20,6 +21,9 @@ import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatGatew
 /** 群聊 Agent 执行记录入口；实际 Gateway 消费可由 Redis worker 异步接管。 */
 @Service
 public class GroupChatExecutionCoordinator {
+    @Autowired
+    private GroupChatTurnCoordinator turnCoordinator;
+
     private final ByaiGroupChatExecutionMapper executionMapper;
     private final SequenceService sequenceService;
     private final GroupChatGatewayExecutor gatewayExecutor;
@@ -37,6 +41,9 @@ public class GroupChatExecutionCoordinator {
     @Transactional
     public ByaiGroupChatExecution enqueue(Long groupSessionId, Long sourceMessageId, Long replyToMessageId,
         Long initiatorUserId, Long targetAgentId, Long parentExecutionId, Long rootMessageId) {
+        if (turnCoordinator != null) {
+            return turnCoordinator.enqueueUser(groupSessionId, sourceMessageId, replyToMessageId, initiatorUserId, targetAgentId);
+        }
         ByaiGroupChatExecution existing = executionMapper.selectBySourceAndAgent(sourceMessageId, targetAgentId);
         if (existing != null) {
             return existing;
@@ -71,6 +78,14 @@ public class GroupChatExecutionCoordinator {
         }
         return enqueue(parent.getGroupSessionId(), parent.getSourceMessageId(), parent.getReplyToMessageId(),
             parent.getInitiatorUserId(), targetAgentId, parent.getExecutionId(), parent.getRootMessageId());
+    }
+
+    public ByaiGroupChatExecution enqueueChild(ByaiGroupChatExecution parent, Long targetAgentId,
+        Long triggerId, Long publicBoundary, String content, Object resourceList) {
+        if (turnCoordinator != null) {
+            return turnCoordinator.enqueueAgent(parent, targetAgentId, triggerId, publicBoundary, content, resourceList);
+        }
+        return enqueueChild(parent, targetAgentId);
     }
 
     /** 扫描持久化队列，进程重启后可重新接管尚未领取的执行。 */

@@ -8,6 +8,7 @@ import java.util.Objects;
 
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -21,6 +22,9 @@ import com.iwhalecloud.byai.common.message.entity.ByaiMessageHotDto;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatExecution;
+import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTurn;
+import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTurnMapper;
+import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTurnCoordinator;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.users.Users;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatExecutionMapper;
@@ -45,6 +49,10 @@ import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 /** 只观察分类和已落库的子会话结果；流式聚合、快照及私有消息持久化由普通聊天链路负责。 */
 @Service
 public class GroupChatExecutionEventHandler implements ChatTurnPersistenceObserver {
+    @Autowired
+    private ByaiGroupChatTurnMapper turnMapper;
+    @Autowired
+    private GroupChatTurnCoordinator turnCoordinator;
     private final ByaiMessageMapper messageMapper;
     private final GroupChatEventPublisher eventPublisher;
     private final SequenceService sequenceService;
@@ -86,6 +94,16 @@ public class GroupChatExecutionEventHandler implements ChatTurnPersistenceObserv
         if (context == null || context.sessionId == null || StringUtils.isBlank(context.traceId)) {
             return;
         }
+        ByaiGroupChatTurn turn = turnMapper == null ? null : turnMapper.selectByTrace(context.traceId);
+        if (turn != null) {
+            turnMapper.lockGroup(turn.getGroupSessionId());
+            executionMapper.selectForUpdateByCandidateSessionId(turn.getCandidateSessionId());
+            turn = turnMapper.selectById(turn.getExecutionId());
+            if ("RUNNING".equals(turn.getStatus()) && Objects.equals(turn.getTraceId(), context.traceId)) {
+                completeInitialTurn(turn, context.modelAnswerMessageId, context.gatewayError || context.getException() != null);
+            }
+            return;
+        }
         ByaiGroupChatExecution execution = executionMapper.selectForUpdateByCandidateSessionId(context.sessionId);
         if (execution == null) {
             return;
@@ -121,9 +139,24 @@ public class GroupChatExecutionEventHandler implements ChatTurnPersistenceObserv
         completeInitialTurn(execution, answerId, false);
     }
 
+    @Transactional
+    public void reconcileTurn(Long turnId) {
+        ByaiGroupChatTurn turn = turnMapper.selectById(turnId);
+        if (turn == null) { return; }
+        turnMapper.lockGroup(turn.getGroupSessionId());
+        executionMapper.selectForUpdateByCandidateSessionId(turn.getCandidateSessionId());
+        turn = turnMapper.selectById(turnId);
+        if (!"RUNNING".equals(turn.getStatus())) { return; }
+        resolveDisposition(turn, false);
+        if (TraceIdCodec.canDecode(turn.getTraceId())) {
+            completeInitialTurn(turn, TraceIdCodec.decode(turn.getTraceId()).getModelAnswerMessageId(), false);
+        }
+    }
+
     private void completeInitialTurn(ByaiGroupChatExecution execution, Long answerId, boolean failed) {
         ByaiMessage answer = answerId == null ? null : messageMapper.selectByMessageId(answerId);
-        if (answer == null || !Objects.equals(answer.getSessionId(), execution.getCandidateSessionId())
+        if (answer == null || !Objects.equals(answer.getSessionId(), execution instanceof ByaiGroupChatTurn
+                ? Long.valueOf(execution.getGatewaySessionId()) : execution.getCandidateSessionId())
             || !Integer.valueOf(2).equals(answer.getUsage())
             || !(Boolean.TRUE.equals(answer.getIsComplete()) || MsgStatus.FINISH.getCode().equals(answer.getMsgStatus()))) {
             return;
@@ -132,6 +165,12 @@ public class GroupChatExecutionEventHandler implements ChatTurnPersistenceObserv
             ? new JSONObject() : JSON.parseObject(answer.getMetadata());
         failed = failed || answerMetadata.getBooleanValue("turnFailed");
         String disposition = resolveDisposition(execution, true);
+        if (execution instanceof ByaiGroupChatTurn && "ASSESSMENT".equals(((ByaiGroupChatTurn) execution).getPhase())) {
+            if ("UNKNOWN".equals(disposition)) { return; }
+            if (failed) { markFailed(execution, "ASSESSMENT_FAILED", "Routing assessment failed"); }
+            else { turnCoordinator.completeAssessment((ByaiGroupChatTurn) execution, disposition); }
+            return;
+        }
         String finalText = finalAnswer(answer);
         GroupChatAgentMention mentions = mentionParser.parse(execution.getGroupSessionId(),
             execution.getTargetAgentId(), finalText);
@@ -139,19 +178,19 @@ public class GroupChatExecutionEventHandler implements ChatTurnPersistenceObserv
             // 保留普通链路保存的过程结构，仅补充合法成员引用的展示信息。
             normalizeTaskMentions(execution, answer, answerMetadata);
             if (!failed) {
-                scheduleAgentMentions(execution, mentions.resourceList());
+                scheduleAgentMentions(execution, mentions, answerId, execution.getSourceMessageId());
             }
             taskService.updateTurnStatus(execution.getCandidateSessionId(), failed ? "FAILED" : "WAITING_USER");
             if (failed) {
-                executionMapper.markFailed(execution.getExecutionId(), "TURN_FAILED", "Task turn failed", new Date());
+                markFailed(execution, "TURN_FAILED", "Task turn failed");
             }
             else {
-                executionMapper.markSucceeded(execution.getExecutionId(), answerId, new Date());
+                markSucceeded(execution, answerId);
             }
         }
         else if (failed || StringUtils.isBlank(mentions.normalizedContent())) {
-            executionMapper.markFailed(execution.getExecutionId(), failed ? "TURN_FAILED" : "EMPTY_ANSWER",
-                failed ? "Chat turn failed" : "Chat turn has no final answer", new Date());
+            markFailed(execution, failed ? "TURN_FAILED" : "EMPTY_ANSWER",
+                failed ? "Chat turn failed" : "Chat turn has no final answer");
             JSONObject event = new JSONObject();
             event.put("type", "GROUP_CHAT_EVENT");
             event.put("event", "EXECUTION_FAILED");
@@ -162,8 +201,8 @@ public class GroupChatExecutionEventHandler implements ChatTurnPersistenceObserv
         }
         else {
             Long groupMessageId = projectChatAnswer(execution, answer, mentions);
-            scheduleAgentMentions(execution, mentions.resourceList());
-            executionMapper.markSucceeded(execution.getExecutionId(), groupMessageId, new Date());
+            scheduleAgentMentions(execution, mentions, groupMessageId, groupMessageId);
+            markSucceeded(execution, groupMessageId);
         }
     }
 
@@ -174,16 +213,29 @@ public class GroupChatExecutionEventHandler implements ChatTurnPersistenceObserv
         }
         Users user = userService.findById(execution.getInitiatorUserId());
         GroupChatDisposition disposition = user == null ? null : dispositionReader.read(user.getUserCode(),
-            execution.getCandidateSessionId(), execution.getExecutionId());
+            execution instanceof ByaiGroupChatTurn ? Long.valueOf(execution.getGatewaySessionId()) : execution.getCandidateSessionId(), execution.getExecutionId());
         if (disposition == null && !terminal) {
             return current;
         }
+        if (disposition == null && execution instanceof ByaiGroupChatTurn
+            && "ASSESSMENT".equals(((ByaiGroupChatTurn) execution).getPhase())) {
+            if (terminal) { markFailed(execution, "INVALID_ASSESSMENT", "Routing assessment did not produce a valid decision"); }
+            return "UNKNOWN";
+        }
         String kind = disposition == null ? "CHAT" : disposition.getKind();
+        if (execution instanceof ByaiGroupChatTurn && "ASSESSMENT".equals(((ByaiGroupChatTurn) execution).getPhase())) {
+            turnMapper.decideDisposition(execution.getExecutionId(), kind, null, null, new Date());
+            execution.setDisposition(kind);
+            return kind;
+        }
         if ("TASK".equals(kind)) {
             taskService.promote(execution, disposition.getTaskName(), disposition.getAckText());
         }
         else {
-            executionMapper.decideDisposition(execution.getExecutionId(), "CHAT", null, null, new Date());
+            if (execution instanceof ByaiGroupChatTurn) {
+                turnMapper.decideDisposition(execution.getExecutionId(), "CHAT", null, null, new Date());
+            }
+            else { executionMapper.decideDisposition(execution.getExecutionId(), "CHAT", null, null, new Date()); }
             candidateSessionService.hideChatCandidate(execution.getCandidateSessionId());
         }
         execution.setDisposition(kind);
@@ -284,6 +336,10 @@ public class GroupChatExecutionEventHandler implements ChatTurnPersistenceObserv
         message.setUpdateTime(new Date());
         Map<String, Object> metadata = new HashMap<>();
         metadata.put("scene", "GROUP_CHAT");
+        if (execution instanceof ByaiGroupChatTurn) {
+            metadata.put("groupTurnId", execution.getExecutionId());
+            metadata.put("rootMessageId", execution.getRootMessageId());
+        }
         metadata.put("targetAgentId", execution.getTargetAgentId());
         metadata.put("sourceMessageId", execution.getSourceMessageId());
         metadata.put("replyToMessageId", execution.getSourceMessageId());
@@ -324,15 +380,29 @@ public class GroupChatExecutionEventHandler implements ChatTurnPersistenceObserv
         Map<String, Object> speaker = new HashMap<>();
         speaker.put("type", Integer.valueOf(1).equals(source.getUsage()) ? "USER" : "AGENT");
         speaker.put("displayName", source.getCreatorName());
+        speaker.put(Integer.valueOf(1).equals(source.getUsage()) ? "userId" : "agentId", source.getCreatorId());
         reply.put("speaker", speaker);
         return reply;
     }
 
-    private void scheduleAgentMentions(ByaiGroupChatExecution execution, List<ResourceVo> resources) {
+    private void markSucceeded(ByaiGroupChatExecution execution, Long answerId) {
+        if (execution instanceof ByaiGroupChatTurn) { turnMapper.markSucceeded(execution.getExecutionId(), answerId, new Date()); }
+        else { executionMapper.markSucceeded(execution.getExecutionId(), answerId, new Date()); }
+    }
+
+    private void markFailed(ByaiGroupChatExecution execution, String code, String message) {
+        if (execution instanceof ByaiGroupChatTurn) { turnMapper.markFailed(execution.getExecutionId(), code, message, new Date()); }
+        else { executionMapper.markFailed(execution.getExecutionId(), code, message, new Date()); }
+    }
+
+    private void scheduleAgentMentions(ByaiGroupChatExecution execution, GroupChatAgentMention mentions,
+        Long triggerId, Long publicBoundary) {
+        List<ResourceVo> resources = mentions.resourceList();
         // 子委派先在当前投影事务中登记，协调器自身在提交后才发给 Gateway，便于失败重试。
         for (ResourceVo resource : resources) {
             if (resource.getResourceType() == AgentMetaEnum.DIG_EMPLOYEE) {
-                executionCoordinator.enqueueChild(execution, Long.valueOf(resource.getResourceId()));
+                executionCoordinator.enqueueChild(execution, Long.valueOf(resource.getResourceId()),
+                    triggerId, publicBoundary, mentions.normalizedContent(), resources);
             }
         }
     }

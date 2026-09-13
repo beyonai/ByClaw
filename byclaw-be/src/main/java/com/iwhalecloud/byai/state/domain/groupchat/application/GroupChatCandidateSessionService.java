@@ -33,6 +33,19 @@ public class GroupChatCandidateSessionService {
     }
 
     public Long create(Long groupSessionId, Long sourceMessageId, Long initiatorUserId, Long targetAgentId) {
+        return create(groupSessionId, sourceMessageId, initiatorUserId, targetAgentId, true, "GROUP_TASK_CANDIDATE");
+    }
+
+    public Long createEmpty(Long groupSessionId, Long sourceMessageId, Long initiatorUserId, Long targetAgentId) {
+        return create(groupSessionId, sourceMessageId, initiatorUserId, targetAgentId, false, "GROUP_TASK_CANDIDATE");
+    }
+
+    public Long createRouting(Long groupSessionId, Long sourceMessageId, Long initiatorUserId, Long targetAgentId) {
+        return create(groupSessionId, sourceMessageId, initiatorUserId, targetAgentId, false, "GROUP_CHAT_ROUTING");
+    }
+
+    private Long create(Long groupSessionId, Long sourceMessageId, Long initiatorUserId, Long targetAgentId,
+        boolean copySource, String state) {
         ByaiSession group = sessionService.findById(groupSessionId);
         ByaiMessage source = messageMapper.selectByMessageId(sourceMessageId);
         if (group == null || source == null) {
@@ -49,7 +62,7 @@ public class GroupChatCandidateSessionService {
         candidate.setObjectId(targetAgentId);
         candidate.setSessionType(SessionType.H_AS.getCode());
         candidate.setSessionName("Group task candidate");
-        candidate.setState("GROUP_TASK_CANDIDATE");
+        candidate.setState(state);
         candidate.setCreateTime(now);
         candidate.setUpdateTime(now);
         sessionService.save(candidate);
@@ -58,6 +71,9 @@ public class GroupChatCandidateSessionService {
         saveExt(sessionId, "group_source_boundary_message_id", String.valueOf(sourceMessageId));
         saveExt(sessionId, "group_source_message_id", String.valueOf(sourceMessageId));
 
+        if (!copySource) {
+            return sessionId;
+        }
         ByaiMessage childMessage = new ByaiMessage();
         Long childMessageId = sequenceService.nextVal();
         childMessage.setId(childMessageId);
