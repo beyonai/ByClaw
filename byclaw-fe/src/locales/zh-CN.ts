@@ -526,7 +526,7 @@ export default {
   'chatResource.sessionFile': '会话文件',
   'chatResource.projectFile': '项目文件',
   'chatResource.processFile': '过程文件',
-  'chatResource.localSharedFile': '本地共享文件',
+  'chatResource.localSharedFile': '本地共享',
   'chatResource.projectCloudDrive': '项目云盘',
   'chatResource.projectKnowledge': '项目知识',
   'chatResource.resizeSections': '调整会话与项目资源区域高度',
