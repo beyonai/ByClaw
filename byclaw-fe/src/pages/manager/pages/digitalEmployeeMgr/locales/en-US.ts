@@ -286,8 +286,6 @@ export default {
   'employeeDetail.knowledgeType.qa': 'Q&A',
   'employeeDetail.knowledgeType.db': 'Database',
   'employeeDetail.knowledgeType.term': 'Terminology',
-  'employeeDetail.view': 'View',
-  'employeeDetail.object': 'Object',
   'employeeDetail.logInfoDrawer.conversationContent': 'Conversation Content',
   'employeeDetail.logInfoDrawer.defaultAgentName': 'Beyond AI',
   'employeeDetail.logInfoDrawer.userFeedback': 'User Feedback',
