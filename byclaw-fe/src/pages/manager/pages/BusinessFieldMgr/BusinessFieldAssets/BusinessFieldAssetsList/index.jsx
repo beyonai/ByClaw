@@ -34,8 +34,6 @@ const BusinessFieldAssetsList = ({ selectedField, assetType, searchKeyword, disp
       tool: ['AGENT', 'MCP', 'TOOLKIT'], // 工具资产
       MCP: ['MCP'], // MCP服务
       dataset: [], // 数据集（待确认）
-      view: ['VIEW'], // 视图
-      object: ['OBJECT'], // 对象
     };
     return typeMap[type] || [];
   };
