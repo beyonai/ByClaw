@@ -45,12 +45,6 @@ const PostResource = (props, ref) => {
     if (activeTab === 'tool') {
       return ['AGENT', 'MCP', 'TOOLKIT'];
     }
-    if (activeTab === 'view') {
-      return ['VIEW'];
-    }
-    if (activeTab === 'object') {
-      return ['OBJECT'];
-    }
     return [];
   }, [activeTab]);
 
@@ -114,8 +108,7 @@ const PostResource = (props, ref) => {
       activeTab,
       ownerTypeMap,
       resourceStatus,
-      showTypeColumn:
-        activeTab === 'knowledge' || activeTab === 'tool' || activeTab === 'view' || activeTab === 'object',
+      showTypeColumn: activeTab === 'knowledge' || activeTab === 'tool',
       showAuthStatus: true,
       getIconSrc: (row, tab) => {
         if (row?.resourceLogoUrl) {
