@@ -301,8 +301,8 @@ export interface ApproveResourceUseApplyParams {
 
 /**
  * 资源导入函数
- * 支持导入知识库(KG_DOC)、工具(TOOL)、视图(VIEW)、对象(OBJECT)、技能(SKILL)等资源类型
- * @param resourceType 资源类型（如：KG_DOC、TOOL、VIEW、OBJECT、SKILL）
+ * 支持导入知识库(KG_DOC)、工具(TOOL)、技能(SKILL)等资源类型
+ * @param resourceType 资源类型（如：KG_DOC、TOOL、SKILL）
  * @param fileType 文件类型（zip 或 json）
  * @param data FormData格式的导入文件数据
  * @returns Promise<ResourceImportResult> 导入结果
@@ -312,8 +312,6 @@ export function importResource(resourceType: string, fileType: string, data: For
   const resourceMap: Record<string, string> = {
     KG_DOC: 'Dataset',
     TOOL: 'Tool',
-    VIEW: 'View',
-    OBJECT: 'Object',
     SKILL: 'Skill',
   };
 
