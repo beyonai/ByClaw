@@ -288,8 +288,6 @@ export default {
   'employeeDetail.knowledgeType.qa': '问答',
   'employeeDetail.knowledgeType.db': '数据库',
   'employeeDetail.knowledgeType.term': '术语',
-  'employeeDetail.view': '视图',
-  'employeeDetail.object': '对象',
   'employeeDetail.logInfoDrawer.conversationContent': '对话内容',
   'employeeDetail.logInfoDrawer.defaultAgentName': '百应AI',
   'employeeDetail.logInfoDrawer.userFeedback': '用户反馈',
