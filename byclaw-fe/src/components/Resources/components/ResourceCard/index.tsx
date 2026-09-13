@@ -267,8 +267,6 @@ const InstallingOverlay = () => {
 const getInstallLabelId = (resource: IResourceCardItem, resourceType?: string) => {
   const bizType = resource?.resourceBizType || resourceType;
   if (['KG_DOC', 'KG_QA', 'KG_TERM'].includes(bizType || '')) return 'resource.installKnowledge';
-  if (bizType === 'VIEW' || resourceType === 'VIEW') return 'resource.installView';
-  if (bizType === 'OBJECT' || resourceType === 'OBJECT') return 'resource.installObject';
   if (bizType === 'SKILL' || resourceType === 'SKILL') return 'resource.installSkill';
   return 'resource.installTool';
 };
@@ -973,9 +971,6 @@ const RenderContent = (props: ResourceCardProps) => {
     switch (resourceType) {
       case 'KG_DOC':
         return 'icon-chuangjianfangshi-wendangku';
-      case 'OBJECT':
-      case 'VIEW':
-        return 'icon-chuangjianfangshi-shujuku';
       default:
         return 'icon-chajiantubiao';
     }
