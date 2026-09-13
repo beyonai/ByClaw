@@ -188,19 +188,9 @@ export default [
             component: './models',
           },
           {
-            path: '/objectCenter',
-            name: 'objectCenter',
-            component: './objectCenter',
-          },
-          {
             path: '/skillCenter',
             name: 'skillCenter',
             component: './skillCenter',
-          },
-          {
-            path: '/viewCenter',
-            name: 'viewCenter',
-            component: './viewCenter',
           },
           {
             path: '/toolCenter',
