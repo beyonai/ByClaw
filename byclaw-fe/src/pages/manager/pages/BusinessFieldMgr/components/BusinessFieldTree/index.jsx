@@ -9,17 +9,7 @@ import styles from './index.module.less';
 
 const { error } = Modal;
 export const ALL_FIELD_KEY = '__ALL_BUSINESS_FIELD__';
-const RESOURCE_BIZ_TYPE_LIST = [
-  'DIG_EMPLOYEE',
-  'KG_DOC',
-  'KG_QA',
-  'KG_TERM',
-  'AGENT',
-  'MCP',
-  'TOOLKIT',
-  'VIEW',
-  'OBJECT',
-];
+const RESOURCE_BIZ_TYPE_LIST = ['DIG_EMPLOYEE', 'KG_DOC', 'KG_QA', 'KG_TERM', 'AGENT', 'MCP', 'TOOLKIT'];
 
 const BusinessFieldTree = ({
   onSelect,
