@@ -1,5 +1,5 @@
 import React, { useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { Breadcrumb, Button, Dropdown, Empty, Input, message, Modal } from 'antd';
+import { Button, Dropdown, Empty, Input, message, Modal } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import { useIntl, useSelector } from '@umijs/max';
 import { trim } from 'lodash';
@@ -9,12 +9,7 @@ import ResourceDetail from '@/components/Resources/components/ResourceDetail';
 import PropertyDetail from '@/components/Resources/components/PropertyDetail';
 import InfiniteScrollAntdList from '@/layout/sider/components/InfiniteScrollAntdList';
 import employeeStyles from '@/layout/sider/components/EmployeeList/index.module.less';
-import {
-  deleteSkill,
-  queryDigEmployeeRelResourceAuth,
-  queryResourceMembers,
-  uploadSkillZip,
-} from '@/pages/manager/service/resources';
+import { deleteSkill, queryDigEmployeeRelResourceAuth, uploadSkillZip } from '@/pages/manager/service/resources';
 import SkillDetailDrawer from '@/pages/manager/components/SkillDetailDrawer/SkillDetailDrawer';
 import AddAuthModal from '@/pages/manager/components/AuthListDrawer/AddAuthModal';
 import {
@@ -69,22 +64,6 @@ const resourceConfigMap: Record<
     navigatePath: '/toolCenter',
     siderKey: 'tool',
     resourceBizTypeList: [ResourceTypeMap.Agent, ResourceTypeMap.MCP, ResourceTypeMap.TOOLKIT],
-  },
-  VIEW: {
-    icon: 'icon-a-yemian-line',
-    labelId: 'common.resourceType.view',
-    centerLabelId: 'resourceTabs.viewCenter',
-    navigatePath: '/viewCenter',
-    siderKey: 'view',
-    resourceBizTypeList: [ResourceTypeMap.VIEW],
-  },
-  OBJECT: {
-    icon: 'icon-tongxun',
-    labelId: 'common.resourceType.object',
-    centerLabelId: 'resourceTabs.objectCenter',
-    navigatePath: '/objectCenter',
-    siderKey: 'object',
-    resourceBizTypeList: [ResourceTypeMap.OBJECT],
   },
   SKILL: {
     icon: 'icon-chajian',
@@ -178,149 +157,18 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
   const [loading, setLoading] = useState(false);
   const [resourceList, setResourceList] = useState<ResourceItem[]>([]);
   const [hasMore, setHasMore] = useState(false);
-  const [resourceDetails, setResourceDetails] = useState<Record<string, any>>({});
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const [shareRecord, setShareRecord] = useState<ResourceItem | null>(null);
   const [shareAuthList, setShareAuthList] = useState<any[]>([]);
   const [shareBlackList, setShareBlackList] = useState<any[]>([]);
   const [skillUploading, setSkillUploading] = useState(false);
 
-  // 下钻相关状态
-  interface BreadcrumbItem {
-    resourceId: string;
-    resourceName: string;
-    resourceType: string;
-    originalList: ResourceItem[];
-  }
-  const [breadcrumb, setBreadcrumb] = useState<BreadcrumbItem[]>([]);
-  const breadcrumbRef = useRef<BreadcrumbItem[]>([]);
-  const [currentLevelOriginalList, setCurrentLevelOriginalList] = useState<ResourceItem[]>([]); // 当前层级的原始列表，用于前端搜索
   const config = resourceConfigMap[resourceType];
 
   useEffect(() => {
     resourceListRef.current = resourceList;
   }, [resourceList]);
 
-  useEffect(() => {
-    breadcrumbRef.current = breadcrumb;
-  }, [breadcrumb]);
-
-  /**
-   * 获取资源详情数据
-   */
-  const getResourceDetail = async (resourceId: string): Promise<any> => {
-    if (resourceDetails[resourceId]) {
-      return resourceDetails[resourceId];
-    }
-
-    try {
-      const data = await queryResourceMembers({ resourceId });
-      setResourceDetails((prev) => ({ ...prev, [resourceId]: data }));
-      return data;
-    } catch (error) {
-      console.error('Error fetching resource detail:', error);
-      return null;
-    }
-  };
-
-  /**
-   * 解析资源的extInfo.targetContent
-   */
-  const parseTargetContent = (itemOrDetail: any) => {
-    try {
-      const targetContent = itemOrDetail?.extInfo?.targetContent
-        ? JSON.parse(itemOrDetail.extInfo.targetContent)
-        : null;
-      return targetContent;
-    } catch (error) {
-      return null;
-    }
-  };
-
-  /**
-   * 判断是否处于下钻状态
-   */
-  const isInDrillDown = (): boolean => {
-    return breadcrumb.length > 0;
-  };
-
-  /**
-   * 判断资源是否可下钻
-   */
-  const canDrillDown = (item: ResourceItem): boolean => {
-    // 根层级：只有 VIEW 和 OBJECT 类型可以下钻
-    if (!isInDrillDown()) {
-      return resourceType === 'VIEW' || resourceType === 'OBJECT';
-    }
-
-    // 下钻层级：关联对象（有 resourceCode）可以继续下钻到属性
-    // 属性（没有 resourceCode，resourceId 包含 "-"）不能继续下钻
-    const resourceIdStr = String(item.resourceId);
-    return !!item.resourceCode && !resourceIdStr.includes('-');
-  };
-
-  /**
-   * 进入下钻层级
-   */
-  const handleDrillDown = async (item: ResourceItem) => {
-    setLoading(true);
-    try {
-      const detail = await getResourceDetail(String(item.resourceId));
-      const targetContent = detail ? parseTargetContent(detail) : parseTargetContent(item);
-
-      if (targetContent) {
-        // 将当前列表保存到面包屑中
-        const newBreadcrumbItem = {
-          resourceId: String(item.resourceId),
-          resourceName: item.resourceName,
-          resourceType: resourceType,
-          originalList: [...resourceList],
-        };
-
-        // 转换下钻数据为 ResourceItem 格式
-        const drillItems: ResourceItem[] = [];
-
-        // 添加关联对象
-        if (targetContent.objects && targetContent.objects.length > 0) {
-          targetContent.objects.forEach((obj: any) => {
-            drillItems.push({
-              resourceId: obj.resourceId,
-              resourceName: obj.resourceName,
-              resourceCode: obj.resourceCode,
-              resourceDesc: obj.resourceDesc,
-              resourceBizType: 'OBJECT',
-            });
-          });
-        }
-
-        // 添加属性
-        if (targetContent.fields && targetContent.fields.length > 0) {
-          targetContent.fields.forEach((field: any) => {
-            drillItems.push({
-              ...field,
-              resourceId: field.propertyCode,
-              resourceName: field.propertyName,
-              resourceDesc: field.propertyCode,
-              resourceBizType: PROPERTY_RESOURCE_TYPE,
-            });
-          });
-        }
-
-        setBreadcrumb((prev) => [...prev, newBreadcrumbItem]);
-        setCurrentLevelOriginalList(drillItems); // 保存当前层级的原始列表用于搜索
-        setResourceList(drillItems);
-        setHasMore(false);
-      }
-    } catch (error) {
-      console.error('Error drill down:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  /**
-   * 判断是否在下钻状态
-   */
   const activeSiderAgent = useActiveSiderAgent();
   const { isCenterPage: isResourceCenterPage, toggleCenter } = useResourceCenterRouter(
     config.navigatePath,
@@ -369,7 +217,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
             keyword: trim(queryKeyword),
             resourceId: activeSiderAgent.resourceId,
             userCode: userInfo?.userCode,
-            includeWorkspace: reset && breadcrumbRef.current.length === 0,
+            includeWorkspace: reset,
           });
           rows = skillResult.boundRows as ResourceItem[];
           nextRows = skillResult.rows as ResourceItem[];
@@ -427,26 +275,6 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
     [activeSiderAgent.resourceId, config.resourceBizTypeList, resourceType, userInfo?.userCode]
   );
 
-  /**
-   * 清空面包屑，返回根层级
-   */
-  const handleReset = () => {
-    if (breadcrumb.length > 0) {
-      breadcrumbRef.current = [];
-      setBreadcrumb([]);
-      loadResources({ reset: true }); // 重新加载根层级数据，reset=true 确保从第一页开始
-    }
-  };
-
-  const handleBreadcrumbClick = (index: number) => {
-    const newBreadcrumb = breadcrumb.slice(0, index + 1);
-    const targetLevelOriginalList = breadcrumb[index + 1]?.originalList ?? [];
-    setBreadcrumb(newBreadcrumb);
-    setResourceList(targetLevelOriginalList);
-    setCurrentLevelOriginalList(targetLevelOriginalList);
-    setHasMore(false);
-  };
-
   useEffect(() => {
     keywordRef.current = '';
     paginationRef.current = {
@@ -493,7 +321,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
   useEffect(() => {
     const handleResourceTypeReload = (payload: string | { resourceType?: string }) => {
       const nextResourceType = typeof payload === 'string' ? payload : payload?.resourceType;
-      if (nextResourceType !== 'SKILL' || resourceType !== 'SKILL' || isInDrillDown()) {
+      if (nextResourceType !== 'SKILL' || resourceType !== 'SKILL') {
         return;
       }
       paginationRef.current = {
@@ -508,7 +336,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
     return () => {
       EventEmitter.off('beyond-resourceList-resourceType-reload', handleResourceTypeReload);
     };
-  }, [EventEmitter, loadResources, resourceType, breadcrumb.length]);
+  }, [EventEmitter, loadResources, resourceType]);
 
   useEffect(() => {
     const handleSiderMenuRefresh = (payload?: { key?: string }) => {
@@ -516,11 +344,6 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
         return;
       }
 
-      if (breadcrumbRef.current.length > 0) {
-        breadcrumbRef.current = [];
-        setBreadcrumb([]);
-        setCurrentLevelOriginalList([]);
-      }
       paginationRef.current = {
         pageNum: 0,
         total: 0,
@@ -542,29 +365,12 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
     const nextKeyword = trim(searchValue);
     keywordRef.current = nextKeyword;
 
-    if (isInDrillDown()) {
-      // 下钻状态：前端模糊搜索
-      if (!nextKeyword) {
-        // 搜索框为空，显示原始列表
-        setResourceList(currentLevelOriginalList);
-      } else {
-        // 根据关键字过滤，只匹配 resourceName 和 resourceDesc
-        const filtered = currentLevelOriginalList.filter((item) => {
-          const nameMatch = item.resourceName?.toLowerCase().includes(nextKeyword.toLowerCase());
-          const descMatch = item.resourceDesc?.toLowerCase().includes(nextKeyword.toLowerCase());
-          return nameMatch || descMatch;
-        });
-        setResourceList(filtered);
-      }
-    } else {
-      // 非下钻状态：后端搜索
-      paginationRef.current = {
-        pageNum: 0,
-        total: 0,
-        loadedCount: 0,
-      };
-      loadResources({ reset: true, queryKeyword: nextKeyword });
-    }
+    paginationRef.current = {
+      pageNum: 0,
+      total: 0,
+      loadedCount: 0,
+    };
+    loadResources({ reset: true, queryKeyword: nextKeyword });
   };
 
   const handleSkillImportClick = () => {
@@ -667,8 +473,6 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
     if (resourceBizType === ResourceTypeMap.TOOL || resourceBizType === resourceBizTypeMap.TOOL) {
       return intl.formatMessage({ id: 'resource.tool' });
     }
-    if (resourceBizType === ResourceTypeMap.VIEW) return intl.formatMessage({ id: 'resource.view' });
-    if (resourceBizType === ResourceTypeMap.OBJECT) return intl.formatMessage({ id: 'resource.object' });
     if (resourceBizType === ResourceTypeMap.SKILL) return intl.formatMessage({ id: 'common.skill' });
     if (resourceBizType === PROPERTY_RESOURCE_TYPE) return intl.formatMessage({ id: 'resource.property' });
     if (
@@ -732,9 +536,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
     onShareAuth: (resourceItem) => openShareAuthModal(resourceItem as ResourceItem),
     onChanged: () => {
       EventEmitter.emit('beyond-resourceList-resourceType-reload', 'SKILL');
-      if (!isInDrillDown()) {
-        loadResources({ reset: true });
-      }
+      loadResources({ reset: true });
     },
   });
 
@@ -868,9 +670,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
       if (res && res.code === 0) {
         message.success(intl.formatMessage({ id: 'common.shareSuccess' }));
         handleShareCancel();
-        if (!isInDrillDown()) {
-          loadResources({ reset: true });
-        }
+        loadResources({ reset: true });
         return;
       }
 
@@ -931,9 +731,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
               },
             })
           );
-          if (!isInDrillDown()) {
-            loadResources({ reset: true });
-          }
+          loadResources({ reset: true });
           EventEmitter.emit('beyond-resourceList-resourceType-reload', 'SKILL');
         } catch (error: any) {
           message.error(error?.message || error || intl.formatMessage({ id: 'common.operationFailed' }));
@@ -947,8 +745,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
    */
   const getQuoteType = (): IDragType => {
     if (resourceType === 'TOOL') return DragType.tool;
-    if (resourceType === 'SKILL') return DragType.SKILL;
-    return DragType.OBJECT;
+    return DragType.SKILL;
   };
 
   const handleQuoteResource = (item: ResourceItem) => {
@@ -1031,18 +828,16 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
   }, []);
 
   const handleResourceItemClick = useCallback(
-    (item: ResourceItem, drillable: boolean) => {
+    (item: ResourceItem) => {
       clearItemClickTimer();
       itemClickTimerRef.current = window.setTimeout(() => {
         itemClickTimerRef.current = null;
-        if (drillable) {
-          void handleDrillDown(item);
-        } else if (item.resourceBizType === PROPERTY_RESOURCE_TYPE) {
+        if (item.resourceBizType === PROPERTY_RESOURCE_TYPE) {
           handleDetail(item);
         }
       }, 220);
     },
-    [clearItemClickTimer, handleDrillDown, handleDetail]
+    [clearItemClickTimer, handleDetail]
   );
 
   const handleResourceItemDoubleClick = useCallback(
@@ -1084,30 +879,6 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
             )}
           </div>
         </>
-      )}
-      {isInDrillDown() && (
-        <Breadcrumb className={styles.breadcrumb}>
-          <Breadcrumb.Item key="-1">
-            <span onClick={handleReset}>
-              <AntdIcon type="icon-a-Leftzuo" className={styles.breadcrumbBackIcon} />
-              {intl.formatMessage({ id: 'dialogueRecord.all' })}
-            </span>
-          </Breadcrumb.Item>
-          {breadcrumb.map((crumb, index) => {
-            const isLast = index === breadcrumb.length - 1;
-            return (
-              <Breadcrumb.Item key={crumb.resourceId}>
-                {isLast ? (
-                  <span className={styles.breadcrumbUnclickable}>{crumb.resourceName}</span>
-                ) : (
-                  <span className={styles.breadcrumbClickable} onClick={() => handleBreadcrumbClick(index)}>
-                    {crumb.resourceName}
-                  </span>
-                )}
-              </Breadcrumb.Item>
-            );
-          })}
-        </Breadcrumb>
       )}
       <div className={styles.searchActionRow}>
         <Input
@@ -1169,24 +940,19 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
           dataSource={resourceList}
           hasMore={hasMore}
           loading={loading}
-          next={() => !isInDrillDown() && loadResources()}
+          next={() => loadResources()}
           renderEmpty={<Empty image={Empty.PRESENTED_IMAGE_SIMPLE} />}
-          renderItem={(item: ResourceItem) => {
-            const drillable = canDrillDown(item);
-
-            return (
-              <ResourceSiderListItem
-                key={item.resourceId}
-                item={item}
-                resourceType={resourceType}
-                drillable={drillable}
-                actions={[renderDetailDropdown(item)]}
-                renderSkillSourceTag={renderSkillSourceTag}
-                onClick={handleResourceItemClick}
-                onDoubleClick={handleResourceItemDoubleClick}
-              />
-            );
-          }}
+          renderItem={(item: ResourceItem) => (
+            <ResourceSiderListItem
+              key={item.resourceId}
+              item={item}
+              resourceType={resourceType}
+              actions={[renderDetailDropdown(item)]}
+              renderSkillSourceTag={renderSkillSourceTag}
+              onClick={handleResourceItemClick}
+              onDoubleClick={handleResourceItemDoubleClick}
+            />
+          )}
         />
       </div>
       {shareModalOpen && (
