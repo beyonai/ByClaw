@@ -12,6 +12,9 @@ import org.springframework.web.bind.annotation.RestController;
 import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTask;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTaskService;
+import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatPendingPublicationService;
+import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatPendingPublicationRequest;
+import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatPendingPublicationResponse;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatTaskCompleteRequest;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatTaskPublicationResponse;
 
@@ -21,8 +24,23 @@ import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatTaskPublicationR
 public class GroupChatTaskController {
     private final GroupChatTaskService taskService;
 
-    public GroupChatTaskController(GroupChatTaskService taskService) {
+    private final GroupChatPendingPublicationService pendingService;
+
+    public GroupChatTaskController(GroupChatTaskService taskService, GroupChatPendingPublicationService pendingService) {
         this.taskService = taskService;
+        this.pendingService = pendingService;
+    }
+
+    /** prepare_group_task_publication 使用登录用户身份调用，不能指定发布人或目标云盘。 */
+    @PostMapping("/{taskId}/pending-publication")
+    public ResponseUtil<GroupChatPendingPublicationResponse> prepare(@PathVariable Long taskId,
+        @Valid @RequestBody GroupChatPendingPublicationRequest request) {
+        return ResponseUtil.successResponse(pendingService.prepare(taskId, request));
+    }
+
+    @GetMapping("/{taskId}/pending-publication")
+    public ResponseUtil<GroupChatPendingPublicationResponse> pending(@PathVariable Long taskId) {
+        return ResponseUtil.successResponse(pendingService.current(taskId));
     }
 
     @GetMapping("/{taskId}")

@@ -268,3 +268,18 @@ CREATE INDEX IF NOT EXISTS idx_group_turn_session_queue
     ON byai.byai_group_chat_turn (candidate_session_id, status, execution_id);
 CREATE UNIQUE INDEX IF NOT EXISTS uk_group_turn_trace
     ON byai.byai_group_chat_turn (trace_id);
+
+-- 发布卡片：任务最多一份待发布内容；上传进度用于失败后的安全重试。
+CREATE TABLE IF NOT EXISTS byai.byai_group_chat_pending_publication (
+    task_session_id BIGINT NOT NULL PRIMARY KEY,
+    pending_publication_id BIGINT NOT NULL UNIQUE,
+    text_content TEXT,
+    source_files_json TEXT NOT NULL DEFAULT '[]',
+    uploaded_files_json TEXT NOT NULL DEFAULT '{}',
+    cloud_resource_id BIGINT,
+    create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_group_chat_pending_task FOREIGN KEY (task_session_id)
+        REFERENCES byai.byai_group_chat_task (task_session_id)
+);
+ALTER TABLE byai.byai_group_chat_task_publication
+    ADD COLUMN IF NOT EXISTS pending_publication_id BIGINT;
