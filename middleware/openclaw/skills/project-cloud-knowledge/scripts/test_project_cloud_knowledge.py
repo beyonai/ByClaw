@@ -37,7 +37,11 @@ class RecordingTransport:
 
     def download(self, **kwargs: object) -> dict[str, object]:
         self.calls.append({"kind": "download", **kwargs})
-        return self.responses.pop(0) if self.responses else {}
+        response = self.responses.pop(0) if self.responses else {}
+        if isinstance(response, str):
+            Path(kwargs["output"]).write_text(response, encoding="utf-8")
+            return {"output": str(kwargs["output"])}
+        return response
 
     def close(self) -> None:
         return None
@@ -1045,10 +1049,7 @@ class KnowledgeManagerTests(unittest.TestCase):
 
     def test_entity_discovery_submits_async_batch_and_preserves_task_ids(self) -> None:
         self.transport.responses = [
-            {
-                "filePath": "/.user_settings/_project.yaml",
-                "data": "素材.实体: [/entities/organization]",
-            },
+            "素材.实体: [/entities/organization]",
             {
                 "resourceId": 7,
                 "batchId": "ed-batch-1",
@@ -1094,12 +1095,14 @@ class KnowledgeManagerTests(unittest.TestCase):
         self.assertFalse(result["batch"]["tasksTruncated"])
         self.assertEqual(result["batch"]["tasks"][0]["taskId"], "task-1")
         self.assertEqual(
-            self.transport.calls[0]["payload"],
+            self.transport.calls[0]["params"],
             {
                 "resourceId": 7,
-                "filePath": "/.user_settings/_project.yaml",
+                "directoryPath": "/.user_settings/_project.yaml",
             },
         )
+        self.assertEqual(self.transport.calls[0]["kind"], "download")
+        self.assertFalse(Path(self.transport.calls[0]["output"]).exists())
         self.assertEqual(
             self.transport.calls[1]["headers"],
             {"X-CHAT-SESSION-ID": "session-001"},
@@ -1243,22 +1246,21 @@ class KnowledgeManagerTests(unittest.TestCase):
 
     def test_entity_enrich_uses_project_mapping_as_default_directory(self) -> None:
         self.transport.responses = [
-            {
-                "filePath": "/.user_settings/_project.yaml",
-                "data": "素材.实体:\n  - /知识/实体",
-            },
+            "素材.实体:\n  - /知识/实体",
             {"batchId": "ee-project-default"},
         ]
 
         self.manager.execute(self.parse("entity-enrich", "--resource-id", "7"))
 
         self.assertEqual(
-            self.transport.calls[0]["payload"],
+            self.transport.calls[0]["params"],
             {
                 "resourceId": 7,
-                "filePath": "/.user_settings/_project.yaml",
+                "directoryPath": "/.user_settings/_project.yaml",
             },
         )
+        self.assertEqual(self.transport.calls[0]["kind"], "download")
+        self.assertFalse(Path(self.transport.calls[0]["output"]).exists())
         self.assertEqual(
             self.transport.calls[1]["payload"],
             {
@@ -1280,7 +1282,7 @@ class KnowledgeManagerTests(unittest.TestCase):
             with self.subTest(content=content):
                 transport = RecordingTransport()
                 transport.responses = [
-                    {"data": content},
+                    content,
                     {"batchId": "ee-fallback"},
                 ]
                 manager = manager_module.KnowledgeManager(
@@ -1296,12 +1298,12 @@ class KnowledgeManagerTests(unittest.TestCase):
 
     def test_missing_project_settings_keeps_backend_defaults(self) -> None:
         class MissingSettingsTransport(RecordingTransport):
+            def download(self, **kwargs: object) -> dict[str, object]:
+                self.calls.append({"kind": "download", **kwargs})
+                raise ValueError("file not found")
+
             def request(self, **kwargs: object) -> object:
                 self.calls.append({"kind": "request", **kwargs})
-                if kwargs.get("path") == (
-                    "/byaiService/datasetController/readFile"
-                ):
-                    raise ValueError("file not found")
                 return {"batchId": "ee-fallback"}
 
         transport = MissingSettingsTransport()
@@ -1315,6 +1317,7 @@ class KnowledgeManagerTests(unittest.TestCase):
             transport.calls[1]["payload"],
             {"resourceId": 7, "topK": 20, "force": False},
         )
+        self.assertFalse(Path(transport.calls[0]["output"]).exists())
 
     def test_entity_enrich_submits_single_file_batch(self) -> None:
         self.transport.responses = [
@@ -1460,6 +1463,7 @@ class KnowledgeManagerTests(unittest.TestCase):
         normalized_discovery_help = " ".join(discovery_help.split())
         self.assertIn("/.user_settings/_project.yaml", normalized_discovery_help)
         self.assertIn("否则使用 /KnowledgeEntity", normalized_discovery_help)
+        self.assertIn("配置读取不要求知识构建", normalized_discovery_help)
 
         enrich_output = io.StringIO()
         with redirect_stdout(enrich_output), self.assertRaises(SystemExit):
@@ -1470,6 +1474,7 @@ class KnowledgeManagerTests(unittest.TestCase):
         normalized_enrich_help = " ".join(enrich_help.split())
         self.assertIn("/.user_settings/_project.yaml", normalized_enrich_help)
         self.assertIn("否则处理整库实体", normalized_enrich_help)
+        self.assertIn("配置读取不要求知识构建", normalized_enrich_help)
 
     def test_main_without_arguments_prints_help(self) -> None:
         output = io.StringIO()

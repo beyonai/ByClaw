@@ -1301,16 +1301,24 @@ class KnowledgeManager:
         )
 
     def _project_entity_directory(self, resource_id: int) -> str | None:
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=".project-settings-",
+            suffix=".yaml",
+        )
+        os.close(descriptor)
+        temporary_path = Path(temporary_name)
         try:
-            value = self.api.read_file(
-                {
-                    "resourceId": resource_id,
-                    "filePath": PROJECT_SETTINGS_PATH,
-                }
+            self.api.download(
+                resource_id=resource_id,
+                target_path=PROJECT_SETTINGS_PATH,
+                output=temporary_path,
             )
-        except ValueError:
+            content = temporary_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError, ValueError):
             return None
-        content = value.get("data") if isinstance(value, dict) else None
+        finally:
+            with suppress(FileNotFoundError):
+                temporary_path.unlink()
         return _parse_project_entity_directory(content)
 
     def _entity_discovery(self, args: argparse.Namespace) -> dict[str, Any]:
@@ -1815,7 +1823,7 @@ def build_parser() -> argparse.ArgumentParser:
             command.description = (
                 "异步发现原始文档中的知识实体。未显式指定输出目录时，"
                 "若 /.user_settings/_project.yaml 的 素材.实体 映射有效则使用"
-                "该目录，否则输出到 /KnowledgeEntity。"
+                "该目录，否则输出到 /KnowledgeEntity；配置读取不要求知识构建。"
             )
             scope = command.add_mutually_exclusive_group()
             scope.add_argument(
@@ -1855,7 +1863,8 @@ def build_parser() -> argparse.ArgumentParser:
             command.description = (
                 "异步补全 KnowledgeEntity 文档。不传 --file-path 和 "
                 "--directory-path 时，若 /.user_settings/_project.yaml 的 "
-                "素材.实体 映射有效则递归处理该目录，否则处理整库实体。"
+                "素材.实体 映射有效则递归处理该目录，否则处理整库实体；配置读取"
+                "不要求知识构建。"
             )
             scope = command.add_mutually_exclusive_group()
             scope.add_argument(
