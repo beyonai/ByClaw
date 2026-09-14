@@ -288,3 +288,9 @@ mvn spring-boot:run -Dspring-boot.run.profiles=local
 服务端在加入时重新校验开关；已有成员可直接进入。组织内邀请沿用管理员添加成员接口。
 
 群详情中的 `members` 当前为全量列表，由数据库按群主、管理员、群成员、数字员工排序，同类按成员主键升序；前端保留接口顺序。
+
+### 群任务发布的云盘文件校验
+
+发布附件通过 `DatasetApplicationService.queryDirAndFileByLevel`，按任务所属项目的 `cloudResourceId` 和附件父目录查询远端知识库，并匹配文件名、排除目录。不得调用 `SsResourceService` 同名旧方法：其 Mapper 仍依赖 `pCatalogId`，与当前路径型 DTO 不兼容。
+
+云盘查询失败、文件不存在或仅匹配同名目录时，发布中止，不创建群消息，待发布卡片保留。已上传文件的检查点继续保留以供重试。回归测试 `GroupChatPendingPublicationTest` 使用真实目录服务，仅模拟远端云盘响应。
