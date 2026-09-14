@@ -25,7 +25,7 @@ byclaw_managed: true
 | 查看某个文件或目录的标签和属性，打标签、改标签、删标签或修改其他属性 | [`project-cloud-knowledge-metadata/SKILL.md`](project-cloud-knowledge-metadata/SKILL.md) |
 | 知识实体发现或补全，包括项目云盘知识整理 | [`project-cloud-knowledge-entity/SKILL.md`](project-cloud-knowledge-entity/SKILL.md) |
 
-`KnowledgeEntity` 是知识库内的实体 Markdown 目录。涉及 OBJECT/VIEW 资源时不要使用本 Skill。
+`KnowledgeEntity` 是知识库内带有实体身份元数据的 Markdown 文档，不限于固定目录。涉及 OBJECT/VIEW 资源时不要使用本 Skill。
 
 ## 准备运行环境
 
