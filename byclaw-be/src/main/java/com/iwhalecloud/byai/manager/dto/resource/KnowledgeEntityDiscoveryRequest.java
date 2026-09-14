@@ -24,16 +24,16 @@ public class KnowledgeEntityDiscoveryRequest {
     @NotNull(message = "知识库资源标识不能为空")
     private Long resourceId;
 
-    /**
-     * 原始文档路径；为空时处理知识库内全部符合条件的原始文档。
-     */
+    /** 原始文档路径；传入时优先于 directoryPath。 */
     private String filePath;
 
+    /** 原始文档目录，递归处理子目录；未传 filePath 时生效。 */
+    private String directoryPath;
 
     /**
-     * 原始文档目录，递归处理子目录；未传 filePath 时生效
+     * KnowledgeEntity 输出目录；为空时由 QA 使用默认目录。
      */
-    private String directoryPath;
+    private String targetDirectoryPath;
 
     @Positive(message = "最大实体数必须大于 0")
     @Max(value = 12, message = "最大实体数不能超过 12")

@@ -995,8 +995,10 @@ public class DatasetApplicationService {
 
         KbEntityDiscovery qaRequest = new KbEntityDiscovery();
         qaRequest.setKnCode(ssResource.getResourceCode());
-        qaRequest.setDirectoryPath(request.getDirectoryPath());
+        qaRequest.setDirectoryPath(normalizeOptionalKnowledgeDirectoryPath(request.getDirectoryPath()));
         qaRequest.setFilePath(normalizeOptionalKnowledgeFilePath(request.getFilePath()));
+        qaRequest.setTargetDirectoryPath(
+            normalizeOptionalKnowledgeDirectoryPath(request.getTargetDirectoryPath()));
         qaRequest.setMaxEntities(request.getMaxEntities() == null ? 12 : request.getMaxEntities());
         qaRequest.setForce(Boolean.TRUE.equals(request.getForce()));
         qaRequest.setTags(request.getTags());
@@ -1021,6 +1023,7 @@ public class DatasetApplicationService {
         KbEntityEnrich qaRequest = new KbEntityEnrich();
         qaRequest.setKnCode(ssResource.getResourceCode());
         qaRequest.setFilePath(normalizeOptionalKnowledgeFilePath(request.getFilePath()));
+        qaRequest.setDirectoryPath(normalizeOptionalKnowledgeDirectoryPath(request.getDirectoryPath()));
         qaRequest.setTopK(request.getTopK() == null ? 20 : request.getTopK());
         qaRequest.setForce(Boolean.TRUE.equals(request.getForce()));
         qaRequest.setExtraParams(
@@ -1850,6 +1853,10 @@ public class DatasetApplicationService {
 
     private String normalizeOptionalKnowledgeFilePath(String filePath) {
         return StringUtils.isBlank(filePath) ? null : normalizeKnowledgeFilePath(filePath);
+    }
+
+    private String normalizeOptionalKnowledgeDirectoryPath(String directoryPath) {
+        return StringUtils.isBlank(directoryPath) ? null : normalizeKnowledgeDirectoryPath(directoryPath);
     }
 
     private KnowledgeEntityBatchResult attachEntityBatchResourceId(KnowledgeEntityBatchResult result,

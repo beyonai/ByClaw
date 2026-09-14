@@ -650,12 +650,37 @@ class DatasetApplicationServiceTest {
         verify(feignPythonBuildService).entityDiscovery(captor.capture(), eq(headers));
         assertThat(captor.getValue().getKnCode()).isEqualTo("personal-kb");
         assertThat(captor.getValue().getFilePath()).isNull();
+        assertThat(captor.getValue().getDirectoryPath()).isNull();
+        assertThat(captor.getValue().getTargetDirectoryPath()).isNull();
         assertThat(captor.getValue().getMaxEntities()).isEqualTo(12);
         assertThat(captor.getValue().getForce()).isTrue();
         assertThat(captor.getValue().getTags()).containsExactly("organization", "ai");
         assertThat(captor.getValue().getExtraParams()).containsEntry("source", "portal");
         assertThat(result.getResourceId()).isEqualTo(100L);
         assertThat(result.getBatchId()).isEqualTo("ed-20260817-0001");
+    }
+
+    @Test
+    void entityDiscovery_forwardsNormalizedInputAndOutputDirectories() {
+        SsResource resource = defaultPersonalDataset();
+        when(ssResourceService.findById(100L)).thenReturn(resource);
+        when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
+        PythonBuildResponse<KnowledgeEntityBatchResult> response = new PythonBuildResponse<>();
+        response.setResultCode(PythonBuildResponse.RESPONSE_SUCCESS);
+        response.setResultObject(new KnowledgeEntityBatchResult());
+        when(feignPythonBuildService.entityDiscovery(any(), any())).thenReturn(response);
+
+        KnowledgeEntityDiscoveryRequest request = new KnowledgeEntityDiscoveryRequest();
+        request.setResourceId(100L);
+        request.setDirectoryPath("原始文档//人力资源/");
+        request.setTargetDirectoryPath("领域知识//组织/");
+
+        service.entityDiscovery(request, Collections.emptyMap());
+
+        ArgumentCaptor<KbEntityDiscovery> captor = ArgumentCaptor.forClass(KbEntityDiscovery.class);
+        verify(feignPythonBuildService).entityDiscovery(captor.capture(), any());
+        assertThat(captor.getValue().getDirectoryPath()).isEqualTo("/原始文档/人力资源");
+        assertThat(captor.getValue().getTargetDirectoryPath()).isEqualTo("/领域知识/组织");
     }
 
     @Test
@@ -688,6 +713,40 @@ class DatasetApplicationServiceTest {
         assertThat(captor.getValue().getFilePath()).isEqualTo("/KnowledgeEntity/OSOT.md");
         assertThat(captor.getValue().getTopK()).isEqualTo(20);
         assertThat(result.getResourceId()).isEqualTo(100L);
+    }
+
+    @Test
+    void entityEnrich_forwardsNormalizedDirectoryScope() {
+        SsResource resource = defaultPersonalDataset();
+        when(ssResourceService.findById(100L)).thenReturn(resource);
+        when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
+        KnowledgeEntityBatchResult qaResult = new KnowledgeEntityBatchResult();
+        qaResult.setBatchId("ee-20260817-0002");
+        qaResult.setScope("DIRECTORY");
+        qaResult.setTargetPath("/领域知识/组织");
+        qaResult.setCandidateCount(3);
+        qaResult.setReturnedTaskCount(2);
+        qaResult.setTasksTruncated(false);
+        PythonBuildResponse<KnowledgeEntityBatchResult> response = new PythonBuildResponse<>();
+        response.setResultCode(PythonBuildResponse.RESPONSE_SUCCESS);
+        response.setResultObject(qaResult);
+        when(feignPythonBuildService.entityEnrich(any(), any())).thenReturn(response);
+
+        KnowledgeEntityEnrichRequest request = new KnowledgeEntityEnrichRequest();
+        request.setResourceId(100L);
+        request.setDirectoryPath("领域知识//组织/");
+
+        KnowledgeEntityBatchResult result = service.entityEnrich(request, Collections.emptyMap());
+
+        ArgumentCaptor<KbEntityEnrich> captor = ArgumentCaptor.forClass(KbEntityEnrich.class);
+        verify(feignPythonBuildService).entityEnrich(captor.capture(), any());
+        assertThat(captor.getValue().getFilePath()).isNull();
+        assertThat(captor.getValue().getDirectoryPath()).isEqualTo("/领域知识/组织");
+        assertThat(result.getScope()).isEqualTo("DIRECTORY");
+        assertThat(result.getTargetPath()).isEqualTo("/领域知识/组织");
+        assertThat(result.getCandidateCount()).isEqualTo(3);
+        assertThat(result.getReturnedTaskCount()).isEqualTo(2);
+        assertThat(result.getTasksTruncated()).isFalse();
     }
 
     @Test
