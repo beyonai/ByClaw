@@ -13,6 +13,8 @@ import styles from './index.module.less';
 
 const { TextArea } = Input;
 
+const HIDDEN_CREATE_AGENT_TYPES = new Set(['005', '017']);
+
 const EmployFormModal = (props) => {
   const { open, type, data, onCancel, reload, creating = false, catalogId } = props;
   const intl = useIntl();
@@ -29,7 +31,7 @@ const EmployFormModal = (props) => {
 
   const defaultAgentTypeOptionsWithLabels = React.useMemo(
     () =>
-      DEFAULT_AGENT_TYPE_OPTIONS.filter((item) => item.paramValue !== '017').map((item) => ({
+      DEFAULT_AGENT_TYPE_OPTIONS.filter((item) => !HIDDEN_CREATE_AGENT_TYPES.has(item.paramValue)).map((item) => ({
         value: item.paramValue,
         label: isEN ? item.paramEnName : item.paramName,
       })),
@@ -61,7 +63,7 @@ const EmployFormModal = (props) => {
         options = defaultAgentTypeOptionsWithLabels;
       } else {
         options = options
-          .filter((item) => item.paramValue !== '017')
+          .filter((item) => !HIDDEN_CREATE_AGENT_TYPES.has(item.paramValue))
           .map((item) => ({
             value: item.paramValue,
             label: isEN ? item.paramEnName : item.paramName,
