@@ -389,7 +389,7 @@ public class GroupChatApplicationService {
     public void changeRole(Long sessionId, String type, Long memberId, String role) {
         sessionService.lockById(sessionId);
         authorizationService.requireOwner(sessionId);
-        if (!MemObjType.isValid(type) || memberId == null || (!UserRole.ADMIN.name().equals(role)
+        if (!MemObjType.USER.name().equals(type) || memberId == null || (!UserRole.ADMIN.name().equals(role)
             && !UserRole.MEMBER.name().equals(role))) {
             throw new IllegalArgumentException("Invalid member role");
         }
