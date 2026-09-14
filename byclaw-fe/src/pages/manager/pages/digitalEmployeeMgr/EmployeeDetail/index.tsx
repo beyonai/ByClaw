@@ -30,6 +30,7 @@ import ConfigForm from './ConfigForm';
 import { normalizeRobotConfig } from './ConfigForm/robotConfig';
 import ImageModelSelect from './ImageModelSelect';
 import { applyImageModelId, normalizeImageModelId } from './imageModelUtils';
+import { isSuperAssistant, preserveSuperAssistantResourceConfiguration } from './resourceConfiguration';
 import { DEFAULT_PERSONALITY_DEFINITION } from './personalityDefinitionDefault';
 import { getDigitalEmployeeTemplateParamCode } from '@/pages/manager/constants/digitalResource';
 import styles from './index.module.less';
@@ -533,11 +534,16 @@ const EmployeeDetail = ({ loading }) => {
   });
 
   const [detailAgentType, setDetailAgentType] = useState();
+  const [detailResourceIdentity, setDetailResourceIdentity] = useState(null);
   const [detailCreateType, setDetailCreateType] = useState();
   const [resourceStatus, setResourceStatus] = useState();
   const [promptFieldMaxLength, setPromptFieldMaxLength] = useState(DIGITAL_EMPLOYEE_TEXT_FIELD_MAX_LENGTH);
 
   const effectiveDigitalType = agentId ? detailCreateType || digitalType : digitalType;
+
+  // 编辑场景等待当前员工详情，避免沿用路由参数或上一个员工的配置权限。
+  const canConfigureResources =
+    !agentId || (detailResourceIdentity?.resourceId === String(agentId) && !isSuperAssistant(detailResourceIdentity));
 
   // 设置标题：优先使用 agentName，如果没有则使用 oldResourseName
   useEffect(() => {
@@ -1150,6 +1156,11 @@ const EmployeeDetail = ({ loading }) => {
               setUpdateTime(dayjs().format('HH:mm:ss'));
             }
             resultDataRef.current = { ...res, appId: agentId };
+            setDetailResourceIdentity({
+              resourceId: String(agentId),
+              ownerType: detailOwnerType,
+              resourceCode: res?.resourceCode,
+            });
             setResourceStatus(res?.resourceStatus);
             prologueRef.current = prologueTemp;
             const relResourceSkills = (relResourceList || [])
@@ -1339,6 +1350,8 @@ const EmployeeDetail = ({ loading }) => {
 
   const updateResource = useCallback(
     debounce(async (params, _isFrontAccess = isFrontAccess) => {
+      if (agentId && String(resultDataRef.current?.resourceId) !== String(agentId)) return;
+
       // 先做核心能力名称校验
       // if (!validateCoreCompetencies()) return;
       let res;
@@ -1520,6 +1533,7 @@ const EmployeeDetail = ({ loading }) => {
           ),
           ...(effectiveAgentType === '017' ? { employeeGroupMembers } : {}),
         };
+        const savePayload = preserveSuperAssistantResourceConfiguration(flattened, resultDataRef.current);
         if (effectiveAgentType === '017' && employeeGroupMembers.length === 0) {
           message.error(intl.formatMessage({ id: 'employeeDetail.groupMember.required' }));
           setSubmitLoading(false);
@@ -1562,7 +1576,7 @@ const EmployeeDetail = ({ loading }) => {
           payload: currentResourceId
             ? {
                 // 编辑：新版接口，参数扁平化并包含新增字段
-                ...flattened,
+                ...savePayload,
                 resourceId: currentResourceId,
                 systemCode: effectiveDigitalType === 'FROM_MANUALLY' ? 'BYAI' : systemCode,
                 resourceBizType: 'DIG_EMPLOYEE',
@@ -1570,7 +1584,7 @@ const EmployeeDetail = ({ loading }) => {
               }
             : {
                 // 创建：新版接口，参数扁平化并包含新增字段
-                ...flattened,
+                ...savePayload,
                 systemCode: effectiveDigitalType === 'FROM_MANUALLY' ? 'BYAI' : systemCode,
                 resourceBizType: 'DIG_EMPLOYEE',
                 isFrontAccess: _isFrontAccess,
@@ -1686,10 +1700,11 @@ const EmployeeDetail = ({ loading }) => {
 
   const showBaseList = useCallback(
     (type: string) => {
+      if (!canConfigureResources) return;
       setBaseListType(type);
       baseListAction?.handleShow('add');
     },
-    [baseListAction]
+    [baseListAction, canConfigureResources]
   );
 
   const onValuesChange = useCallback(() => {
@@ -1944,6 +1959,7 @@ const EmployeeDetail = ({ loading }) => {
                 digitalType={effectiveDigitalType}
                 employeeType={effectiveAgentType}
                 agentType={effectiveAgentType}
+                canConfigureResources={canConfigureResources}
                 onValuesChange={onValuesChange}
                 showBaseList={showBaseList}
                 updateResource={noop}
@@ -2107,7 +2123,7 @@ const EmployeeDetail = ({ loading }) => {
           }}
         />
       )}
-      {baseListState?.open && (
+      {canConfigureResources && baseListState?.open && (
         <BaseListModal
           {...baseListState}
           onCancel={baseListAction?.onCancel}

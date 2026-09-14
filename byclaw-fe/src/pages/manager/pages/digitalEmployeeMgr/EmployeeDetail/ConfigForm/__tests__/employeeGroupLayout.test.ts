@@ -12,7 +12,7 @@ describe('digital employee group editor layout', () => {
     expect(resourceSectionEnd).toBeGreaterThan(resourceSectionMarker);
 
     const resourceSection = configFormSource.slice(resourceSectionMarker, resourceSectionEnd);
-    expect(resourceSection).toContain('{isEmployeeGroup && (');
+    expect(resourceSection).toContain('{canConfigureResources && isEmployeeGroup && (');
     expect(resourceSection).toContain('<EmployeeGroupMembers');
     expect(resourceSection.indexOf('<EmployeeGroupMembers')).toBeLessThan(
       resourceSection.indexOf('employeeDetail.configureKnowledge')

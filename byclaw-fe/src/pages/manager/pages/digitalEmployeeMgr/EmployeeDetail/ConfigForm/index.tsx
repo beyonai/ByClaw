@@ -574,6 +574,7 @@ const ConfigForm = (props) => {
     robotConfigs = [],
     setRobotConfigs,
     isReadOnly = false,
+    canConfigureResources = true,
     className,
     employeeType,
     onValuesChange,
@@ -788,9 +789,13 @@ const ConfigForm = (props) => {
   }, []);
 
   useEffect(() => {
-    if (!bundledSkillModalOpen) return;
+    if (!canConfigureResources || !bundledSkillModalOpen) return;
     fetchBundledSkills({ pageNum: 1, pageSize: BUNDLED_SKILL_PAGE_SIZE, keyword: '' });
-  }, [bundledSkillModalOpen, fetchBundledSkills]);
+  }, [canConfigureResources, bundledSkillModalOpen, fetchBundledSkills]);
+
+  useEffect(() => {
+    if (!canConfigureResources) setBundledSkillModalOpen(false);
+  }, [canConfigureResources]);
 
   useEffect(() => {
     let mounted = true;
@@ -961,6 +966,7 @@ const ConfigForm = (props) => {
 
   const handleToolSelectorConfirm = useCallback(
     (selectedRows) => {
+      if (!canConfigureResources) return;
       setSelectedTools((prev) => {
         const existMap = new Map(prev.map((it) => [`${it.resourceId}`, it]));
         selectedRows.forEach((item) => {
@@ -978,7 +984,7 @@ const ConfigForm = (props) => {
         return Array.from(existMap.values());
       });
     },
-    [setSelectedTools, normalizeSkillType]
+    [canConfigureResources, setSelectedTools, normalizeSkillType]
   );
 
   // 记录上一次的初始岗位职责，用于判断是否需要根据外部变更重新回显
@@ -1379,16 +1385,17 @@ const ConfigForm = (props) => {
 
   const updateBundledSkills = useCallback(
     async (nextSkills = []) => {
+      if (!canConfigureResources) return;
       const normalizedSkills = normalizeBundledSkillItems(nextSkills, bundledSkillOptions);
       form.setFieldsValue({ bundledSkills: normalizedSkills });
       await syncRoleToForm({ bundledSkills: normalizedSkills });
       updateResource();
     },
-    [bundledSkillOptions, form, syncRoleToForm, updateResource]
+    [canConfigureResources, bundledSkillOptions, form, syncRoleToForm, updateResource]
   );
 
   useEffect(() => {
-    if (!bundledSkillOptions.length) {
+    if (!canConfigureResources || !bundledSkillOptions.length) {
       return;
     }
     const currentSkills = form.getFieldValue('bundledSkills') || [];
@@ -1401,9 +1408,10 @@ const ConfigForm = (props) => {
     }
     form.setFieldsValue({ bundledSkills: normalizedSkills });
     syncRoleToForm({ bundledSkills: normalizedSkills });
-  }, [bundledSkillOptions, form, syncRoleToForm]);
+  }, [canConfigureResources, bundledSkillOptions, form, syncRoleToForm]);
 
   useEffect(() => {
+    if (!canConfigureResources) return;
     const currentSkills = Array.isArray(selectedSkills) ? selectedSkills : [];
     const pendingSkills = currentSkills.filter((skill) => {
       if (!needHydrateBundledSkill(skill)) {
@@ -1498,7 +1506,7 @@ const ConfigForm = (props) => {
         pendingKeys.forEach((key) => hydratedBundledSkillKeysRef.current.delete(key));
       }
     };
-  }, [bundledSkillOptions, form, selectedSkills, syncRoleToForm]);
+  }, [canConfigureResources, bundledSkillOptions, form, selectedSkills, syncRoleToForm]);
 
   // 配置技能搜索已改为后端搜索，弹窗只渲染接口当前页返回的数据。
   const filteredBundledSkillOptions = bundledSkillOptions;
@@ -1549,7 +1557,7 @@ const ConfigForm = (props) => {
   );
 
   useEffect(() => {
-    if (!bundledSkillModalOpen || bundledSkillLoading) return;
+    if (!canConfigureResources || !bundledSkillModalOpen || bundledSkillLoading) return;
     if (!bundledSkillPagination.total || bundledSkillOptions.length >= bundledSkillPagination.total) return;
 
     const checkScrollableAndLoadMore = () => {
@@ -1564,6 +1572,7 @@ const ConfigForm = (props) => {
     const rafId = requestAnimationFrame(checkScrollableAndLoadMore);
     return () => cancelAnimationFrame(rafId);
   }, [
+    canConfigureResources,
     bundledSkillLoading,
     bundledSkillModalOpen,
     bundledSkillOptions.length,
@@ -2670,7 +2679,7 @@ const ConfigForm = (props) => {
             {/* )} */}
             {/* {digitalType === 'FROM_MANUALLY' && ( */}
             <>
-              {isEmployeeGroup && (
+              {canConfigureResources && isEmployeeGroup && (
                 <EmployeeGroupMembers
                   value={employeeGroupMembers}
                   onChange={setEmployeeGroupMembers}
@@ -2680,7 +2689,7 @@ const ConfigForm = (props) => {
                 />
               )}
               {/* 配置知识 */}
-              {employeeType !== '005' && (
+              {canConfigureResources && employeeType !== '005' && (
                 <div className={styles.knowledgeSection} hidden={isEmployeeGroup}>
                   <div className={styles.sectionHeader}>
                     <span className={styles.sectionTitle}>
@@ -2758,7 +2767,7 @@ const ConfigForm = (props) => {
               )}
 
               {/* 配置工具 */}
-              {employeeType !== '006' && employeeType !== '005' && (
+              {canConfigureResources && employeeType !== '006' && employeeType !== '005' && (
                 <div className={styles.skillsSection} hidden={isEmployeeGroup}>
                   <div className={styles.sectionHeader}>
                     <span className={styles.sectionTitle}>
@@ -2826,69 +2835,71 @@ const ConfigForm = (props) => {
               )}
 
               {/* 配置技能 */}
-              <div className={styles.skillsSection} hidden={isEmployeeGroup}>
-                <div className={styles.sectionHeader}>
-                  <span className={styles.sectionTitle}>
-                    {intl.formatMessage({ id: 'employeeDetail.configureBundledSkills' })}
-                  </span>
-                  <Button
-                    type="link"
-                    size="small"
-                    disabled={isReadOnly}
-                    onClick={() => {
-                      setBundledSkillSearchName('');
-                      setBundledSkillPagination((prev) => ({ ...prev, pageNum: 1, current: 1 }));
-                      setBundledSkillModalOpen(true);
-                    }}
-                  >
-                    + {intl.formatMessage({ id: 'common.plus' })}
-                  </Button>
-                </div>
-                {selectedBundledSkillItems.length > 0 && (
-                  <div className={styles.skillsList}>
-                    {selectedBundledSkillItems.map((item) => (
-                      <Card
-                        key={getBundledSkillPrimaryKey(item)}
-                        className={classnames(styles.configCard, styles.skillCard, styles.selectedBundledSkillCard)}
-                      >
-                        <div
-                          className={classnames(
-                            styles.skillContent,
-                            styles.bundledSkillContent,
-                            styles.selectedBundledSkillContent
-                          )}
-                        >
-                          {renderBundledSkillPoster(item, styles.selectedBundledSkillPosterImageWrap)}
-                          <div className={classnames(styles.skillInfo, styles.bundledSkillInfo)}>
-                            <div className={styles.skillHeader}>
-                              <span className={styles.skillName}>
-                                {item.label || item.resourceName || item.skillCode || item.resourceId || '-'}
-                              </span>
-                            </div>
-                            <div className={classnames(styles.skillDescription, styles.selectedBundledSkillDesc)}>
-                              {item.resourceDesc || item.description || '-'}
-                            </div>
-                          </div>
-                          <div className={styles.skillActions}>
-                            {!isReadOnly && (
-                              <Space>
-                                <AntdIcon
-                                  type="icon-a-Deleteshanchu"
-                                  onClick={() => {
-                                    updateBundledSkills(
-                                      selectedSkills.filter((skill) => !isSameBundledSkill(skill, item))
-                                    );
-                                  }}
-                                />
-                              </Space>
-                            )}
-                          </div>
-                        </div>
-                      </Card>
-                    ))}
+              {canConfigureResources && (
+                <div className={styles.skillsSection} hidden={isEmployeeGroup}>
+                  <div className={styles.sectionHeader}>
+                    <span className={styles.sectionTitle}>
+                      {intl.formatMessage({ id: 'employeeDetail.configureBundledSkills' })}
+                    </span>
+                    <Button
+                      type="link"
+                      size="small"
+                      disabled={isReadOnly}
+                      onClick={() => {
+                        setBundledSkillSearchName('');
+                        setBundledSkillPagination((prev) => ({ ...prev, pageNum: 1, current: 1 }));
+                        setBundledSkillModalOpen(true);
+                      }}
+                    >
+                      + {intl.formatMessage({ id: 'common.plus' })}
+                    </Button>
                   </div>
-                )}
-              </div>
+                  {selectedBundledSkillItems.length > 0 && (
+                    <div className={styles.skillsList}>
+                      {selectedBundledSkillItems.map((item) => (
+                        <Card
+                          key={getBundledSkillPrimaryKey(item)}
+                          className={classnames(styles.configCard, styles.skillCard, styles.selectedBundledSkillCard)}
+                        >
+                          <div
+                            className={classnames(
+                              styles.skillContent,
+                              styles.bundledSkillContent,
+                              styles.selectedBundledSkillContent
+                            )}
+                          >
+                            {renderBundledSkillPoster(item, styles.selectedBundledSkillPosterImageWrap)}
+                            <div className={classnames(styles.skillInfo, styles.bundledSkillInfo)}>
+                              <div className={styles.skillHeader}>
+                                <span className={styles.skillName}>
+                                  {item.label || item.resourceName || item.skillCode || item.resourceId || '-'}
+                                </span>
+                              </div>
+                              <div className={classnames(styles.skillDescription, styles.selectedBundledSkillDesc)}>
+                                {item.resourceDesc || item.description || '-'}
+                              </div>
+                            </div>
+                            <div className={styles.skillActions}>
+                              {!isReadOnly && (
+                                <Space>
+                                  <AntdIcon
+                                    type="icon-a-Deleteshanchu"
+                                    onClick={() => {
+                                      updateBundledSkills(
+                                        selectedSkills.filter((skill) => !isSameBundledSkill(skill, item))
+                                      );
+                                    }}
+                                  />
+                                </Space>
+                              )}
+                            </div>
+                          </div>
+                        </Card>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* 配置机器人 */}
               {robotChannelOptions.length > 0 && (
@@ -3476,7 +3487,7 @@ const ConfigForm = (props) => {
       <Modal
         className={styles.bundledSkillModal}
         wrapClassName={styles.bundledSkillModalWrap}
-        open={bundledSkillModalOpen}
+        open={canConfigureResources && bundledSkillModalOpen}
         width="min(1840px, calc(100vw - 96px))"
         style={{ top: 48, paddingBottom: 0 }}
         onCancel={() => setBundledSkillModalOpen(false)}
@@ -3607,7 +3618,7 @@ const ConfigForm = (props) => {
         </div>
       </Modal>
       <ToolSelectorModal
-        open={toolSelectorOpen}
+        open={canConfigureResources && toolSelectorOpen}
         onClose={() => setToolSelectorOpen(false)}
         onConfirm={handleToolSelectorConfirm}
       />
