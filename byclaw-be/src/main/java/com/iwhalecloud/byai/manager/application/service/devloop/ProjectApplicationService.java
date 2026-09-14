@@ -65,6 +65,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.http.MediaType;
 import org.springframework.http.MediaTypeFactory;
@@ -169,6 +170,9 @@ public class ProjectApplicationService {
     @Autowired
     private DatasetApplicationService datasetApplicationService;
 
+    @Value("${dataset.system:}")
+    private String datasetSystem;
+
     /**
      * 分页查询用户可见项目
      *
@@ -224,8 +228,8 @@ public class ProjectApplicationService {
             MemberRole.OWNER);
 
         // 创建云盘知识库并回写项目关联
-        SsResource cloudResource = this.createCloudResource(project);
-        project.setCloudResourceId(cloudResource.getResourceId());
+        Long cloudResourceId = this.createCloudResource(project);
+        project.setCloudResourceId(cloudResourceId);
         projectService.update(project);
 
         // 工作目录属于项目创建结果的一部分，初始化失败时由事务回滚项目数据库记录。
@@ -242,7 +246,12 @@ public class ProjectApplicationService {
      * @param project 项目实体
      * @return 新建的云盘知识库资源
      */
-    public SsResource createCloudResource(Project project) {
+    public Long createCloudResource(Project project) {
+
+        if (StringUtils.equalsIgnoreCase(datasetSystem, "WHALE_AGENT")) {
+            logger.info("dataset.system=WHALE_AGENT，智能体不支持云盘创建");
+            return null;
+        }
 
         String projectName = project.getProjectName();
         DatasetDto datasetDto = new DatasetDto();
@@ -257,7 +266,7 @@ public class ProjectApplicationService {
             this.uploadKnowledgeDirTemplate(ssResource.getResourceId());
         }
 
-        return ssResource;
+        return ssResource.getResourceId();
     }
 
     /**
@@ -333,8 +342,8 @@ public class ProjectApplicationService {
         //如果没有初始化云盘，创建云盘知识库
         Long cloudResourceId = project.getCloudResourceId();
         if (cloudResourceId == null) {
-            SsResource cloudResource = this.createCloudResource(project);
-            project.setCloudResourceId(cloudResource.getResourceId());
+             cloudResourceId = this.createCloudResource(project);
+            project.setCloudResourceId(cloudResourceId);
         }
 
         if (dto.getProjectName() != null) {

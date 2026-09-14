@@ -286,7 +286,14 @@ public class DatasetApplicationService {
      * @param userName 用户名称
      * @return 默认个人知识库资源
      */
-    public SsResource createDefaultPersonalDataset(Long userId, String userCode, String userName) {
+    public Long createDefaultPersonalDataset(Long userId, String userCode, String userName) {
+
+        // 跳过默认个人知识库初始化
+        if (StringUtils.equalsIgnoreCase(datasetSystem, "WHALE_AGENT")) {
+            logger.info("dataset.system=WHALE_AGENT，跳过默认个人知识库初始化，userId={}", userId);
+            return null;
+        }
+
         String safeUserCode = StringUtils.defaultIfBlank(userCode, String.valueOf(userId));
         String safeUserName = StringUtils.defaultIfBlank(userName, safeUserCode);
         String resourceName = ssResourceService.generateAvailableResourceName(safeUserName + "的个人知识库",
@@ -299,7 +306,8 @@ public class DatasetApplicationService {
         datasetDto.setOwnerType(OwnerType.PERSONAL_DEFAULT);
         datasetDto.setCatalogId(0L);
         datasetDto.setType("dataset");
-        return this.createDataset(datasetDto);
+        SsResource ssResource = this.createDataset(datasetDto);
+        return ssResource.getResourceId();
     }
 
     /**

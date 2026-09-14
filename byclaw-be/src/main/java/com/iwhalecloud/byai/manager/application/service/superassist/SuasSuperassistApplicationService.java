@@ -172,9 +172,8 @@ public class SuasSuperassistApplicationService {
             // 如果知识库不存在，创建
             Long sessionDatasetId = suasSuperassist.getSessionDatasetId();
             if (sessionDatasetId == null) {
-                SsResource ssResource = datasetApplicationService.createDefaultPersonalDataset(userId, userCode,
+                 sessionDatasetId = datasetApplicationService.createDefaultPersonalDataset(userId, userCode,
                     userName);
-                sessionDatasetId = ssResource.getResourceId();
             }
             suasSuperassist.setSessionDatasetId(sessionDatasetId);
 
@@ -196,11 +195,11 @@ public class SuasSuperassistApplicationService {
             suasSuperassist.setComAcctId(CurrentUserHolder.getEnterpriseId());
 
             // 初始化默认知识库
-            SsResource defDataset = datasetApplicationService.createDefaultPersonalDataset(userId, userCode, userName);
-            suasSuperassist.setSessionDatasetId(defDataset.getResourceId());
+            Long sessionDatasetId = datasetApplicationService.createDefaultPersonalDataset(userId, userCode, userName);
+            suasSuperassist.setSessionDatasetId(sessionDatasetId);
 
             // 根据模板初始化数字员工
-            Long defaultDigEmployeeId = this.initDigEmployeeByTemplate(loginInfo, defDataset.getResourceId());
+            Long defaultDigEmployeeId = this.initDigEmployeeByTemplate(loginInfo, sessionDatasetId);
             suasSuperassist.setDefaultDigEmployeeId(defaultDigEmployeeId);
 
             // 保存超级助手
@@ -1061,8 +1060,8 @@ public class SuasSuperassistApplicationService {
             project.setCreateBy(loginInfo.getUserId());
 
             //初始化云盘
-            SsResource cloudResource = projectApplicationService.createCloudResource(project);
-            project.setCloudResourceId(cloudResource.getResourceId());
+            Long cloudResourceId = projectApplicationService.createCloudResource(project);
+            project.setCloudResourceId(cloudResourceId);
 
             projectService.save(project);
 
@@ -1071,8 +1070,8 @@ public class SuasSuperassistApplicationService {
             // 初始化项目云盘
             Long cloudResourceId = project.getCloudResourceId();
             if (cloudResourceId == null) {
-                SsResource cloudResource = projectApplicationService.createCloudResource(project);
-                project.setCloudResourceId(cloudResource.getResourceId());
+                cloudResourceId = projectApplicationService.createCloudResource(project);
+                project.setCloudResourceId(cloudResourceId);
                 projectService.update(project);
             }
         }
