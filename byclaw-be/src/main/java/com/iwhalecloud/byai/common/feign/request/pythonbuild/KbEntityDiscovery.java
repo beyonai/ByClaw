@@ -27,6 +27,11 @@ public class KbEntityDiscovery {
      */
     private String directoryPath;
 
+    /**
+     * KnowledgeEntity 输出目录；为空时由 QA 使用默认目录。
+     */
+    private String targetDirectoryPath;
+
     private Integer maxEntities;
 
     private Boolean force;

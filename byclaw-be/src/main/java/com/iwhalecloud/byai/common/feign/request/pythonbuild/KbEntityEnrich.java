@@ -18,6 +18,8 @@ public class KbEntityEnrich {
 
     private String filePath;
 
+    private String directoryPath;
+
     private Integer topK;
 
     private Boolean force;
