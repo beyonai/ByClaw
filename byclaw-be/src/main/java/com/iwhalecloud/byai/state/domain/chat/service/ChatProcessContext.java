@@ -58,6 +58,9 @@ public class ChatProcessContext {
     /** Optional server-owned membership boundary; message references need not be session participants. */
     public Long sessionMemberAgentId;
 
+    /** Server-only internal assessments still persist normally but must not produce user-facing events. */
+    public boolean suppressUserEvents;
+
     /** LLM回复消息ID */
     public Long modelAnswerMessageId;
 

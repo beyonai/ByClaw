@@ -18,6 +18,7 @@ import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import com.iwhalecloud.byai.state.domain.session.enums.SessionType;
 import com.iwhalecloud.byai.state.domain.session.service.SessionTitleService;
+import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 
 @ExtendWith(MockitoExtension.class)
 class AssistantChatServiceTest {
@@ -28,6 +29,9 @@ class AssistantChatServiceTest {
     @Mock
     private SessionTitleService sessionTitleService;
 
+    @Mock
+    private SessionService sessionService;
+
     @Test
     void handleSessionLogic_emitsTitleUpdateForFirstUserText() {
         AssistantChatDto assistantChatDto = new AssistantChatDto();
@@ -37,6 +41,7 @@ class AssistantChatServiceTest {
         ByaiSession updatedSession = new ByaiSession();
         updatedSession.setSessionId(10L);
         updatedSession.setSessionName("请分析这个文件");
+        when(sessionService.findById(10L)).thenReturn(updatedSession);
         when(sessionTitleService.resolveInitialTitle(10L, "请分析这个文件")).thenReturn(updatedSession);
         ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
 

@@ -401,6 +401,9 @@ public class ScriptService extends AbstractChatProcess {
      * 多端广播：将用户发送的消息推送到用户的其他设备
      */
     private void broadcastUserMessage(ChatProcessContext ctx) {
+        if (ctx.suppressUserEvents) {
+            return;
+        }
         try {
             if (TaskOperateTypeEnum.UPDATE.equals(ctx.assistantChatDto.getTaskOperateType())
                 || TaskOperateTypeEnum.RERUN.equals(ctx.assistantChatDto.getTaskOperateType())
@@ -645,6 +648,9 @@ public class ScriptService extends AbstractChatProcess {
     }
 
     private void broadcastMultiAgentAppStreamResponse(ChatProcessContext ctx, JSONObject payload) {
+        if (ctx.suppressUserEvents) {
+            return;
+        }
         try {
             multiDeviceBroadcastService.broadcastToUserDevices(ctx.userId, ctx.sessionId,
                 SseResponseEventEnum.appStreamResponse, payload.toJSONString(), ctx.senderChannel);
@@ -679,6 +685,9 @@ public class ScriptService extends AbstractChatProcess {
      * 多端广播：将 initialization 事件推送到用户的其他设备
      */
     private void broadcastInitEvent(ChatProcessContext ctx) {
+        if (ctx.suppressUserEvents) {
+            return;
+        }
         try {
             ChatInitializationDto dto = new ChatInitializationDto();
             dto.setMessageId(ctx.modelAnswerMessageId);
@@ -735,6 +744,9 @@ public class ScriptService extends AbstractChatProcess {
      * 多端广播：将 appStreamResponse 推送到用户的其他设备
      */
     private void broadcastAppStreamResponse(ChatProcessContext ctx) {
+        if (ctx.suppressUserEvents) {
+            return;
+        }
         try {
             if (ctx.chatResponse != null) {
                 multiDeviceBroadcastService.broadcastToUserDevices(ctx.userId, ctx.sessionId,
@@ -1010,6 +1022,12 @@ public class ScriptService extends AbstractChatProcess {
     /** Starts an authenticated server-owned turn without inserting its existing user message again. */
     public ChatProcessContext startExistingMessageTurn(AssistantChatDto dto, ByaiMessageHotDtoDto existingMessage)
         throws Exception {
+        return startExistingMessageTurn(dto, existingMessage, false);
+    }
+
+    /** Internal routing assessments use the same persistence and listener with user transport suppressed. */
+    public ChatProcessContext startExistingMessageTurn(AssistantChatDto dto, ByaiMessageHotDtoDto existingMessage,
+        boolean suppressUserEvents) throws Exception {
         if (dto == null || dto.getSessionId() == null || existingMessage == null
             || !dto.getSessionId().equals(existingMessage.getSessionId())
             || existingMessage.getMessageId() == null || dto.getLlmMessageId() == null
@@ -1020,11 +1038,14 @@ public class ScriptService extends AbstractChatProcess {
         }
         ChatProcessContext ctx = new ChatProcessContext(null, dto);
         ctx.existingUserMessage = existingMessage;
+        ctx.suppressUserEvents = suppressUserEvents;
         ctx.sessionMemberAgentId = dto.getAgentId();
         ctx.startTime = System.currentTimeMillis();
         ctx.firstTextStartTime = ctx.startTime;
+        boolean gatewayRoutingStarted = false;
         try {
             prepareParams(ctx);
+            gatewayRoutingStarted = true;
             handleGatewayMode(ctx);
             if (!ctx.asyncResponse && !ctx.sendByFrameworkMsgOnly) {
                 storeMessage(ctx);
@@ -1034,6 +1055,16 @@ public class ScriptService extends AbstractChatProcess {
         }
         catch (Exception error) {
             ctx.exception = error;
+            if (!gatewayRoutingStarted) {
+                // Persist the ordinary failure, but retain proof that no Gateway delivery was attempted.
+                try {
+                    handleException(ctx);
+                }
+                catch (RuntimeException reported) {
+                    throw new ChatTurnPreparationException(reported);
+                }
+                throw new ChatTurnPreparationException(error);
+            }
             handleException(ctx);
             throw error;
         }

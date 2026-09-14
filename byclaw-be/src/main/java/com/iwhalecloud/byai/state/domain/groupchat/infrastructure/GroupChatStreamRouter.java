@@ -4,14 +4,19 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatExecution;
+import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTurn;
+import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTurnMapper;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatExecutionMapper;
 
 /** 群委派分类和完成投影的补偿观察器；子会话 Stream 由统一 SessionStreamManager 消费。 */
 @Service
 public class GroupChatStreamRouter {
     private static final Logger log = LoggerFactory.getLogger(GroupChatStreamRouter.class);
+    @Autowired
+    private ByaiGroupChatTurnMapper turnMapper;
     private final ByaiGroupChatExecutionMapper executionMapper;
     private final GroupChatExecutionEventHandler eventHandler;
 
@@ -23,6 +28,12 @@ public class GroupChatStreamRouter {
 
     @Scheduled(fixedDelayString = "${byclaw.group-chat.stream-poll-ms:500}")
     public void pollRunningExecutions() {
+        if (turnMapper != null) {
+            for (ByaiGroupChatTurn turn : turnMapper.selectRunningExecutions()) {
+                try { eventHandler.reconcileTurn(turn.getExecutionId()); }
+                catch (RuntimeException error) { log.warn("Group turn reconciliation failed: turnId={}", turn.getExecutionId(), error); }
+            }
+        }
         for (ByaiGroupChatExecution execution : executionMapper.selectRunningExecutions()) {
             try {
                 eventHandler.reconcile(execution.getCandidateSessionId());

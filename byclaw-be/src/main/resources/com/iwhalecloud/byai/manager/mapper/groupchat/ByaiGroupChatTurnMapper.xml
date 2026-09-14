@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTurnMapper">
+
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTurn">
+        <id column="execution_id" property="executionId" />
+        <result column="group_session_id" property="groupSessionId" />
+        <result column="source_message_id" property="sourceMessageId" />
+        <result column="reply_to_message_id" property="replyToMessageId" />
+        <result column="initiator_user_id" property="initiatorUserId" />
+        <result column="target_agent_id" property="targetAgentId" />
+        <result column="candidate_session_id" property="candidateSessionId" />
+        <result column="status" property="status" />
+        <result column="disposition" property="disposition" />
+        <result column="task_name" property="taskName" />
+        <result column="ack_text" property="ackText" />
+        <result column="disposition_time" property="dispositionTime" />
+        <result column="parent_execution_id" property="parentExecutionId" />
+        <result column="root_message_id" property="rootMessageId" />
+        <result column="trace_id" property="traceId" />
+        <result column="gateway_session_id" property="gatewaySessionId" />
+        <result column="ack_message_id" property="ackMessageId" />
+        <result column="answer_message_id" property="answerMessageId" />
+        <result column="error_code" property="errorCode" />
+        <result column="error_message" property="errorMessage" />
+        <result column="attempt" property="attempt" />
+        <result column="create_time" property="createTime" />
+        <result column="start_time" property="startTime" />
+        <result column="finish_time" property="finishTime" />
+        <result column="anchor_execution_id" property="anchorExecutionId" />
+        <result column="trigger_message_id" property="triggerMessageId" />
+        <result column="input_message_id" property="inputMessageId" />
+        <result column="parent_turn_id" property="parentTurnId" />
+        <result column="sender_type" property="senderType" />
+        <result column="sender_id" property="senderId" />
+        <result column="hop_count" property="hopCount" />
+        <result column="phase" property="phase" />
+        <result column="input_content" property="inputContent" />
+        <result column="input_metadata" property="inputMetadata" />
+        <result column="public_boundary_message_id" property="publicBoundaryMessageId" />
+    </resultMap>
+
+    <sql id="BaseColumns">
+        execution_id, group_session_id, source_message_id, reply_to_message_id,
+        initiator_user_id, target_agent_id, candidate_session_id, status,
+        disposition, task_name, ack_text, disposition_time,
+        parent_execution_id, root_message_id, trace_id, gateway_session_id,
+        ack_message_id, answer_message_id, error_code, error_message,
+        attempt, create_time, start_time, finish_time, anchor_execution_id, trigger_message_id, input_message_id, parent_turn_id, sender_type, sender_id, hop_count, phase, input_content, input_metadata, public_boundary_message_id
+    </sql>
+
+
+
+    <update id="bindRuntime">
+        UPDATE byai_group_chat_turn SET trace_id = #{traceId}
+        WHERE execution_id = #{executionId} AND status = 'RUNNING' AND trace_id IS NULL
+    </update>
+
+    <update id="claim">
+        UPDATE byai_group_chat_turn
+        SET status = 'RUNNING', start_time = #{now}, attempt = COALESCE(attempt, 0) + 1
+        WHERE execution_id = #{executionId} AND status = 'QUEUED'
+    </update>
+
+
+
+    <update id="decideDisposition">
+        UPDATE byai_group_chat_turn
+        SET disposition = #{disposition}, task_name = #{taskName}, ack_text = #{ackText},
+            disposition_time = #{now}
+        WHERE execution_id = #{executionId} AND disposition = 'UNKNOWN'
+    </update>
+
+    <update id="setAckMessage">
+        UPDATE byai_group_chat_turn SET ack_message_id = #{messageId}
+        WHERE execution_id = #{executionId} AND ack_message_id IS NULL
+    </update>
+
+
+    <update id="markSucceeded">
+        UPDATE byai_group_chat_turn
+        SET status = 'SUCCEEDED', answer_message_id = COALESCE(#{answerMessageId}, answer_message_id), finish_time = #{now}
+        WHERE execution_id = #{executionId} AND status = 'RUNNING'
+    </update>
+
+    <update id="markFailed">
+        UPDATE byai_group_chat_turn
+        SET status = 'FAILED', error_code = #{errorCode}, error_message = #{errorMessage}, finish_time = #{now}
+        WHERE execution_id = #{executionId} AND status IN ('RUNNING', 'QUEUED')
+    </update>
+
+
+
+    <select id="selectRunningExecutions" resultMap="BaseResultMap">
+        SELECT <include refid="BaseColumns" />
+        FROM byai_group_chat_turn
+        WHERE status = 'RUNNING'
+        ORDER BY start_time ASC, execution_id ASC
+    </select>
+
+    <select id="selectQueuedExecutions" resultMap="BaseResultMap">
+        SELECT <include refid="BaseColumns" />
+        FROM byai_group_chat_turn
+        WHERE status = 'QUEUED'
+        ORDER BY create_time ASC, execution_id ASC
+    </select>
+
+    <select id="selectByTrace" resultMap="BaseResultMap">
+        SELECT <include refid="BaseColumns" /> FROM byai_group_chat_turn WHERE trace_id = #{traceId}
+    </select>
+    <select id="selectRunningBySession" resultMap="BaseResultMap">
+        SELECT <include refid="BaseColumns" /> FROM byai_group_chat_turn
+        WHERE candidate_session_id = #{sessionId} AND status = 'RUNNING' LIMIT 1
+    </select>
+    <select id="selectFirstQueued" resultMap="BaseResultMap">
+        SELECT <include refid="BaseColumns" /> FROM byai_group_chat_turn
+        WHERE candidate_session_id = #{sessionId} AND status = 'QUEUED'
+        ORDER BY execution_id LIMIT 1
+    </select>
+    <select id="selectByTriggerAndAgent" resultMap="BaseResultMap">
+        SELECT <include refid="BaseColumns" /> FROM byai_group_chat_turn
+        WHERE trigger_message_id = #{triggerId} AND target_agent_id = #{agentId} LIMIT 1
+    </select>
+    <select id="selectByPublicMessage" resultMap="BaseResultMap">
+        SELECT <include refid="BaseColumns" /> FROM byai_group_chat_turn
+        WHERE answer_message_id = #{messageId} OR ack_message_id = #{messageId}
+            OR trigger_message_id = #{messageId} ORDER BY execution_id LIMIT 1
+    </select>
+    <select id="lockGroup" resultType="java.lang.Long">
+        SELECT session_id FROM byai_session WHERE session_id = #{groupId} FOR UPDATE
+    </select>
+    <select id="selectAnchor" resultMap="com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatExecutionMapper.BaseResultMap">
+        SELECT * FROM byai_group_chat_execution WHERE root_message_id = #{rootId}
+        AND target_agent_id = #{agentId} AND initiator_user_id = #{userId}
+        ORDER BY execution_id DESC LIMIT 1
+    </select>
+    <update id="resetAfterAssessment">
+        UPDATE byai_group_chat_turn SET anchor_execution_id = #{anchorExecutionId},
+        candidate_session_id = #{candidateSessionId}, gateway_session_id = #{gatewaySessionId},
+        input_message_id = #{inputMessageId}, phase = #{phase}, disposition = #{disposition},
+        status = 'QUEUED', trace_id = NULL, start_time = NULL
+        WHERE execution_id = #{executionId} AND status = 'RUNNING' AND phase = 'ASSESSMENT'
+    </update>
+    <select id="selectForUpdateById" resultMap="BaseResultMap">
+        SELECT <include refid="BaseColumns" /> FROM byai_group_chat_turn WHERE execution_id = #{turnId} FOR UPDATE
+    </select>
+</mapper>

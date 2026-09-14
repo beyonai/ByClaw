@@ -17,6 +17,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
@@ -78,6 +80,34 @@ class GroupChatApplicationServiceResourceListTest {
     @AfterEach
     void tearDown() {
         CurrentUserHolder.clearLoginInfo();
+    }
+
+    @Test
+    void rejectedContinuationNeverBroadcastsTheRolledBackUserMessage() {
+        when(memberService.findSessionMember(GROUP_ID, MemObjType.AGENT.name(), 501L))
+            .thenReturn(new ByaiSessionMember());
+        when(executionCoordinator.enqueue(eq(GROUP_ID), eq(MESSAGE_ID), any(), eq(USER_ID), eq(501L), any(), any()))
+            .thenThrow(new IllegalArgumentException("Unfinished tasks require task entry"));
+        assertThatThrownBy(() -> service.acceptUserMessage(command(List.of(
+            resource(AgentMetaEnum.DIG_EMPLOYEE, "501", "DIG_EMPLOYEE_501")))))
+            .isInstanceOf(IllegalArgumentException.class);
+        verify(eventPublisher, never()).publish(any(), any(), any());
+    }
+
+    @Test
+    void userBroadcastWaitsForSuccessfulCommitOfQueueRegistration() {
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            service.acceptUserMessage(command(List.of()));
+            verify(eventPublisher, never()).publish(any(), any(), any());
+            for (TransactionSynchronization synchronization : TransactionSynchronizationManager.getSynchronizations()) {
+                synchronization.afterCommit();
+            }
+            verify(eventPublisher).publish(eq(GROUP_ID), any(), isNull());
+        }
+        finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
     }
 
     @Test

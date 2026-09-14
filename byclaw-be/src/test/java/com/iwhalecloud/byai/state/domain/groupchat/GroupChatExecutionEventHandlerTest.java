@@ -295,7 +295,8 @@ class GroupChatExecutionEventHandlerTest {
         assertThat(JSON.parseArray(update.getValue().getMessageStruct()).getJSONObject(0).getLong("seq"))
             .isEqualTo(5L);
         assertThat(update.getValue().getMessageStruct()).contains("{{DIG_EMPLOYEE_40}}");
-        verify(coordinator).enqueueChild(execution, 40L);
+        verify(coordinator).enqueueChild(execution, 40L, answer.getMessageId(),
+            execution.getSourceMessageId(), "{{DIG_EMPLOYEE_40}}", List.of(resource));
         verify(messages, never()).insert(any(ByaiMessage.class));
     }
 

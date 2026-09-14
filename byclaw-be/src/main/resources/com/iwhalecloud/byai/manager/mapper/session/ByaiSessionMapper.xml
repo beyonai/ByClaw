@@ -71,6 +71,7 @@
         FROM byai_session a
         LEFT JOIN ss_resource b ON a.object_id = b.resource_id
         <where>
+            AND (a.state IS NULL OR a.state != 'GROUP_CHAT_ROUTING')
             <if test="creatorId != null">
                 AND a.creator_id = #{creatorId}
             </if>
