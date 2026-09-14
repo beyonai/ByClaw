@@ -11,5 +11,6 @@ import lombok.Data;
 @Data
 public class GroupChatDetailResponse {
     private ByaiSession session;
+    private GroupChatSettingsResponse settings;
     private List<ByaiSessionMember> members;
 }

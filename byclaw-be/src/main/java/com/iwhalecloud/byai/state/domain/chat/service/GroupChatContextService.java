@@ -126,6 +126,10 @@ public class GroupChatContextService {
 
     private void requireGroupMember(Long sessionId, GroupChatContextRequest request) {
         ByaiSession session = sessionService.findById(sessionId);
+        if (session == null || com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatAuthorizationService
+            .DISSOLVED_STATE.equals(session.getState())) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversation not found");
+        }
         String contextToken = request == null ? null : request.getContextToken();
         if (contextToken != null && tokenService != null) {
             Map<String, Object> claims = tokenService.verify(contextToken);

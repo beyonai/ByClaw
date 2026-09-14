@@ -18,6 +18,8 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 @Service
 public class GroupChatEventPublisher {
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.state.domain.session.service.SessionService sessionService;
     private final SessionMemberService memberService;
     private final ChannelManager channelManager;
 
@@ -29,6 +31,11 @@ public class GroupChatEventPublisher {
     public int publish(Long sessionId, JSONObject event, Channel excludedChannel) {
         if (sessionId == null || event == null) {
             return 0;
+        }
+        if (sessionService != null && !"GROUP_DISSOLVED".equals(event.getString("event"))) {
+            com.iwhalecloud.byai.manager.entity.session.ByaiSession session = sessionService.findById(sessionId);
+            if (session == null || com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatAuthorizationService
+                .DISSOLVED_STATE.equals(session.getState())) return 0;
         }
         int sent = 0;
         List<ByaiSessionMember> members = memberService.findSessionMembers(sessionId, MemObjType.USER.name(), null);

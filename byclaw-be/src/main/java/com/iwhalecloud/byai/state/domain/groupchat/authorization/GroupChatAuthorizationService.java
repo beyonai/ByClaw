@@ -16,6 +16,7 @@ import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 /** 集中处理群聊成员身份和角色权限。 */
 @Service
 public class GroupChatAuthorizationService {
+    public static final String DISSOLVED_STATE = "GROUP_DISSOLVED";
     private final SessionService sessionService;
     private final SessionMemberService memberService;
 
@@ -26,13 +27,15 @@ public class GroupChatAuthorizationService {
 
     public ByaiSession requireGroup(Long sessionId) {
         ByaiSession session = sessionService.findById(sessionId);
-        if (session == null || !SessionType.HS_AS.getCode().equals(session.getSessionType())) {
+        if (session == null || !SessionType.HS_AS.getCode().equals(session.getSessionType())
+            || DISSOLVED_STATE.equals(session.getState())) {
             throw new IllegalArgumentException("Group chat not found");
         }
         return session;
     }
 
     public ByaiSessionMember requireUserMember(Long sessionId, Long userId) {
+        requireGroup(sessionId);
         ByaiSessionMember member = memberService.findSessionMember(sessionId, MemObjType.USER.name(), userId);
         if (member == null) {
             throw new IllegalArgumentException("User is not a group member");

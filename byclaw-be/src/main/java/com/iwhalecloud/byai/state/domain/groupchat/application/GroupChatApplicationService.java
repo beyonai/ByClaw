@@ -47,6 +47,8 @@ public class GroupChatApplicationService {
     @org.springframework.beans.factory.annotation.Autowired
     private UserService userService;
     @org.springframework.beans.factory.annotation.Autowired
+    private GroupChatSettingsService settingsService;
+    @org.springframework.beans.factory.annotation.Autowired
     private SsResourceService resourceService;
     private final SessionService sessionService;
     private final SequenceService sequenceService;
@@ -128,6 +130,7 @@ public class GroupChatApplicationService {
         GroupChatDetailResponse response = new GroupChatDetailResponse();
         response.setSession(session);
         response.setMembers(members);
+        if (settingsService != null) response.setSettings(settingsService.settings(session.getSessionId()));
         return response;
     }
 
@@ -149,8 +152,11 @@ public class GroupChatApplicationService {
     /** 接收入站群消息并持久化；Agent 委派由后续协调器消费 resourceList。 */
     @Transactional
     public Long acceptUserMessage(com.iwhalecloud.byai.state.domain.ws.model.ChatMessage command) {
+        sessionService.lockById(command.getSessionId());
         ByaiSession session = authorizationService.requireGroup(command.getSessionId());
-        authorizationService.requireCurrentUserMember(session.getSessionId());
+        ByaiSessionMember sender = authorizationService.requireCurrentUserMember(session.getSessionId());
+        String senderName = sender.getMemName() == null || sender.getMemName().isBlank()
+            ? CurrentUserHolder.getCurrentUserName() : sender.getMemName();
         Set<Long> mentionedAgentIds = validateAndResolveMemberResources(session.getSessionId(),
             command.getResourceList());
         if (command.getClientRequestId() != null) {
@@ -167,7 +173,7 @@ public class GroupChatApplicationService {
         message.setSessionId(session.getSessionId());
         message.setProjectId(session.getProjectId());
         message.setCreatorId(CurrentUserHolder.getCurrentUserId());
-        message.setCreatorName(CurrentUserHolder.getCurrentUserName());
+        message.setCreatorName(senderName);
         message.setMessageContent(command.getChatContent());
         message.setUsage(1);
         message.setMessageRef(command.getReplyToMessageId());
@@ -191,13 +197,13 @@ public class GroupChatApplicationService {
         event.put("messageId", String.valueOf(messageId));
         event.put("content", command.getChatContent());
         event.put("creatorId", CurrentUserHolder.getCurrentUserId());
-        event.put("creatorName", CurrentUserHolder.getCurrentUserName());
+        event.put("creatorName", senderName);
         event.put("resourceList", command.getResourceList());
         // 与发送端请求关联，广播早于 ACK 时也能合并待发送消息。
         event.put("clientRequestId", command.getClientRequestId());
         Map<String, Object> speaker = new HashMap<>();
         speaker.put("type", "USER");
-        speaker.put("displayName", CurrentUserHolder.getCurrentUserName());
+        speaker.put("displayName", senderName);
         event.put("speaker", speaker);
         event.put("replyToMessageId", command.getReplyToMessageId());
         event.put("messageRef", command.getReplyToMessageId());
@@ -214,9 +220,10 @@ public class GroupChatApplicationService {
         authorizationService.requireCurrentUserMember(sessionId);
         GroupChatDetailResponse response = new GroupChatDetailResponse();
         response.setSession(session);
-        java.util.List<ByaiSessionMember> members = memberService.findSessionMembers(sessionId, null, null);
+        java.util.List<ByaiSessionMember> members = memberService.findOrderedGroupMembers(sessionId);
         for (ByaiSessionMember member : members) {
-            if (MemObjType.USER.name().equals(member.getMemObjType()) && userService != null) {
+            if (MemObjType.USER.name().equals(member.getMemObjType()) && userService != null
+                && (member.getMemName() == null || member.getMemName().isBlank())) {
                 com.iwhalecloud.byai.manager.entity.users.Users user = userService.findById(member.getMemObjId());
                 if (user != null) {
                     member.setMemName(user.getUserName());
@@ -230,6 +237,7 @@ public class GroupChatApplicationService {
             }
         }
         response.setMembers(members);
+        if (settingsService != null) response.setSettings(settingsService.settings(session.getSessionId()));
         return response;
     }
 
@@ -304,6 +312,7 @@ public class GroupChatApplicationService {
 
     @Transactional
     public ByaiSessionMember invite(Long sessionId, String type, Long memberId) {
+        sessionService.lockById(sessionId);
         authorizationService.requireAdmin(sessionId);
         ByaiSession session = authorizationService.requireGroup(sessionId);
         if (!MemObjType.isValid(type) || memberId == null) {
@@ -332,32 +341,23 @@ public class GroupChatApplicationService {
         return member;
     }
 
-    /** 邀请链接登录后的当前用户加入群聊。 */
+    @Transactional
+    public ByaiSession updateGroupSettings(Long sessionId, String sessionName) {
+        com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatSettingsRequest request =
+            new com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatSettingsRequest();
+        request.setSessionName(sessionName);
+        return settingsService.updateSettings(sessionId, request);
+    }
+
+    /** 保留原链接加入接口，统一执行加入开关和并发校验。 */
     @Transactional
     public ByaiSessionMember joinAsCurrentUser(Long sessionId) {
-        ByaiSession session = authorizationService.requireGroup(sessionId);
-        Long userId = CurrentUserHolder.getCurrentUserId();
-        if (userId == null) throw new IllegalArgumentException("User is not authenticated");
-        ByaiSessionMember existing = memberService.findSessionMember(sessionId, MemObjType.USER.name(), userId);
-        if (existing != null) return existing;
-        ByaiSessionMember member = new ByaiSessionMember();
-        member.setByaiSessionMemberId(sequenceService.nextVal());
-        member.setSessionId(sessionId);
-        member.setMemObjType(MemObjType.USER.name());
-        member.setMemObjId(userId);
-        member.setUserRole(UserRole.MEMBER.name());
-        member.setCreatorId(userId);
-        member.setCreateTime(new Date());
-        member.setLastReadMessageId(messageMapper.selectLatestMessageId(sessionId));
-        member.setLastReadTime(new Date());
-        memberService.save(member);
-        if (!projectMemberService.isMember(session.getProjectId(), userId))
-            projectMemberService.addMember(session.getProjectId(), userId, MemberRole.MEMBER);
-        return member;
+        return settingsService.joinByLink(sessionId);
     }
 
     @Transactional
     public void remove(Long sessionId, String type, Long memberId) {
+        sessionService.lockById(sessionId);
         authorizationService.requireAdmin(sessionId);
         ByaiSessionMember target = memberService.findSessionMember(sessionId, type, memberId);
         if (target == null || UserRole.OWNER.name().equals(target.getUserRole())) {
@@ -368,6 +368,7 @@ public class GroupChatApplicationService {
 
     @Transactional
     public void changeRole(Long sessionId, String type, Long memberId, String role) {
+        sessionService.lockById(sessionId);
         authorizationService.requireOwner(sessionId);
         if (!MemObjType.isValid(type) || memberId == null || (!UserRole.ADMIN.name().equals(role)
             && !UserRole.MEMBER.name().equals(role))) {
@@ -383,6 +384,7 @@ public class GroupChatApplicationService {
 
     @Transactional
     public void transferOwnership(Long sessionId, Long newOwnerUserId) {
+        sessionService.lockById(sessionId);
         authorizationService.requireOwner(sessionId);
         ByaiSessionMember current = authorizationService.requireCurrentUserMember(sessionId);
         ByaiSessionMember target = memberService.findSessionMember(sessionId, MemObjType.USER.name(), newOwnerUserId);
@@ -397,6 +399,7 @@ public class GroupChatApplicationService {
 
     @Transactional
     public void leave(Long sessionId) {
+        sessionService.lockById(sessionId);
         ByaiSessionMember current = authorizationService.requireCurrentUserMember(sessionId);
         if (UserRole.OWNER.name().equals(current.getUserRole())) {
             throw new IllegalArgumentException("Group owner must transfer ownership before leaving");

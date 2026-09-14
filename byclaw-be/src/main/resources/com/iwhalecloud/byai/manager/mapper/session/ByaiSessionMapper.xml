@@ -453,4 +453,8 @@
           )
     </update>
 
+    <!-- 串行化同一群的设置、成员变更与解散，避免并发审批/加入产生重复成员。 -->
+    <select id="selectByIdForUpdate" resultType="com.iwhalecloud.byai.manager.entity.session.ByaiSession">
+        SELECT * FROM byai_session WHERE session_id = #{sessionId} FOR UPDATE
+    </select>
 </mapper>

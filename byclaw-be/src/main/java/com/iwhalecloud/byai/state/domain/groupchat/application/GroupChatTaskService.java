@@ -123,7 +123,9 @@ public class GroupChatTaskService {
 
     @Transactional
     public GroupChatTaskPublicationResponse complete(Long taskId, GroupChatTaskCompleteRequest request) {
-        ByaiGroupChatTask task = taskAuthorizationService.requireInitiator(taskId);
+        ByaiGroupChatTask task = taskAuthorizationService.requireTask(taskId);
+        sessionService.lockById(task.getGroupSessionId());
+        task = taskAuthorizationService.requireInitiator(taskId);
         ByaiGroupChatTaskPublication existing = publicationMapper.selectById(taskId);
         if (existing != null) {
             return response(existing);

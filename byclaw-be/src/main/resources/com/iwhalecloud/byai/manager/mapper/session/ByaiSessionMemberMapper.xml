@@ -19,6 +19,18 @@
     </resultMap>
 
 
+    <select id="findOrderedGroupMembers" resultMap="BaseResultMap">
+        select *
+        from byai_session_member
+        where session_id = #{sessionId}
+        order by case
+            when mem_obj_type = 'AGENT' then 3
+            when user_role = 'OWNER' then 0
+            when user_role = 'ADMIN' then 1
+            else 2
+        end, byai_session_member_id asc
+    </select>
+
     <!-- 查询会话成员 -->
     <select id="findSessionMember" resultMap="BaseResultMap">
         select

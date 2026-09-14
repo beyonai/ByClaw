@@ -41,6 +41,22 @@ ByClaw-BE 是 BeyondAI 平台的后端服务，提供完整的 AI 应用开发�
 - 当前没有可靠的远端执行租约，因此不对“运行中但长时间没有结果”的任务盲目重发。若投递结果不确定或远端失联，应先核实 Gateway/Agent 状态；用户可取消异常任务。此修复不会自动恢复此前已经误标为 `SUCCEEDED` 的记录。
 - Gateway 事件身份校验、流式聚合和恢复使用普通聊天链路。群聊完成投影按子会话和 trace 关联，并以已落库的回答为依据。结束事件已被看到不代表持久化及完成回调已成功；只有成功标记才允许重投时直接 ACK，避免失败回调被跳过。
 
+## 群设置与加入审批接口
+
+以下路径相对于现有 `/group-chats` 控制器，沿用系统登录态与 `ResponseUtil` 包装。
+
+- `GET /{sessionId}/settings`：群成员读取 `groupNumber`、`allowJoinByNumber`、`allowJoinByLink` 和 `numberJoinRequiresApproval`。群号沿用会话 ID 的十进制字符串；不生成另一套短群号。群详情也返回 `settings`。
+- `PUT /{sessionId}/settings`：群主/管理员部分更新 `{ "sessionName": "新名称", "allowJoinByNumber": true, "allowJoinByLink": false }`。未传字段保留原值，群名为 1–100 字符；返回会话，兼容原群名修改调用。
+- `PUT /{sessionId}/members/me/nickname`：当前成员修改自己的 `{ "nickname": "群内昵称" }`，长度 1–100 字符。使用现有 `mem_name`，群成员详情和后续消息署名使用昵称，已发送消息保留发送时名称。
+- `POST /join-by-number`：登录用户提交 `{ "groupNumber": "实际群号" }`，返回申请。申请状态为 `PENDING` 时尚无成员关系及群消息访问权；重复待审申请返回同一申请，已有成员返回 `JOINED`。申请被拒后可重新申请并获得新的 `requestId`。
+- `GET /{sessionId}/join-requests/me`：申请者查看自己的最近一次申请，无申请时返回空数据；解散后也可查到已取消状态。
+- `GET /{sessionId}/join-requests`：群主/管理员查看各申请人的最近一次申请，按申请时间倒序。字段含字符串 `requestId`、`sessionId`、`userId`，以及申请人名称、状态、申请时间、审批人及审批时间（毫秒）。
+- `POST /{sessionId}/join-requests/{requestId}/review`：群主/管理员提交 `{ "approved": true }` 或 `{ "approved": false }`。通过后创建群成员及必要的项目成员关系；相同决定重复提交幂等，已处理申请不允许反向审批。关闭群号加入期间不允许新申请或通过待审申请，仍可拒绝。
+- `POST /{sessionId}/join`：原链接加入接口保持不变，受 `allowJoinByLink` 控制；已入群用户重复调用返回现有成员。通过链接加入后，自己的待审申请转为 `JOINED`。群号和链接是独立加入方式：群号总是需要审批，链接开启时不需要审批。
+- `DELETE /{sessionId}`：仅当前群主可解散，重复调用幂等。状态设为 `GROUP_DISSOLVED`，群列表不再返回该群，拒绝加入、群消息、上下文和群任务访问；待审申请转 `CANCELLED`，活动任务取消，待执行/执行中的群执行记录终态化。成员、历史消息、关联项目及云盘保留；已交给远端的计算不保证立即终止，但后续结果不再投影或广播到已解散群。
+
+加入开关和每人最近一次申请持久化在现有 `byai_session_ext`，无需 DDL 或初始化数据变更。未设置开关的存量群默认允许这两种方式，但群号必须经审批。设置、成员变更、申请审批和解散采用群行锁串行化，事务提交后广播 `SETTINGS_UPDATED`、`MEMBER_UPDATED`、`MEMBER_ADDED` 或 `GROUP_DISSOLVED`。前端需另行对接新增接口和事件；后端上线不会自动启用当前页面中的禁用控件。
+
 ## 系统架构
 
 ```
@@ -252,3 +268,12 @@ mvn spring-boot:run -Dspring-boot.run.profiles=local
 ---
 
 <p align="center">Made with ❤️ by BeyondAI Team</p>
+
+### 工作组邀请摘要
+
+`GET /group-chats/{sessionId}/invitation` 供已登录的受邀用户查看邀请，无需已在群内。
+返回 `groupNumber`、`groupName`、`memberCount`、`allowJoinByLink`、`alreadyMember`，不返回消息和成员身份信息。
+工作组已解散或关闭链接加入时，非成员无法读取摘要。确认加入沿用 `POST /group-chats/{sessionId}/join`，
+服务端在加入时重新校验开关；已有成员可直接进入。组织内邀请沿用管理员添加成员接口。
+
+群详情中的 `members` 当前为全量列表，由数据库按群主、管理员、群成员、数字员工排序，同类按成员主键升序；前端保留接口顺序。

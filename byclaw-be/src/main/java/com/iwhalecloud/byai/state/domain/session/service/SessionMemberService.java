@@ -66,6 +66,10 @@ public class SessionMemberService {
         }
     }
 
+    public List<ByaiSessionMember> findOrderedGroupMembers(Long sessionId) {
+        return byaiSessionMemberMapper.findOrderedGroupMembers(sessionId);
+    }
+
     public List<ByaiSessionMember> findSessionMembers(Long sessionId, String memObjType, Long memObjId) {
         LambdaQueryWrapper<ByaiSessionMember> queryWrapper = new LambdaQueryWrapper<>();
         queryWrapper.eq(ByaiSessionMember::getSessionId, sessionId);

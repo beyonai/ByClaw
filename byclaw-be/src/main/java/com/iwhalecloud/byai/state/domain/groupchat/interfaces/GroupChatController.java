@@ -34,10 +34,21 @@ import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatMemberRequest;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatReadStateRequest;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatReadStateResponse;
 
+import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatSettingsRequest;
+import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatInvitationResponse;
+import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatSettingsResponse;
+import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatNicknameRequest;
+import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatJoinNumberRequest;
+import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatJoinReviewRequest;
+import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatJoinApplication;
+import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatSettingsService;
+
 /** 群聊资源接口。 */
 @RestController
 @RequestMapping("/group-chats")
 public class GroupChatController {
+    @org.springframework.beans.factory.annotation.Autowired
+    private GroupChatSettingsService settingsService;
     private final GroupChatApplicationService applicationService;
     private final GroupChatContextService contextService;
     private final GroupChatTaskService taskService;
@@ -93,6 +104,55 @@ public class GroupChatController {
     public ResponseUtil<ByaiSessionMember> invite(@PathVariable Long sessionId,
         @Valid @RequestBody GroupChatMemberRequest request) {
         return ResponseUtil.successResponse(applicationService.invite(sessionId, request.getType(), request.getId()));
+    }
+
+    @GetMapping("/{sessionId}/invitation")
+    public ResponseUtil<GroupChatInvitationResponse> invitation(@PathVariable Long sessionId) {
+        return ResponseUtil.successResponse(settingsService.invitation(sessionId));
+    }
+
+    @GetMapping("/{sessionId}/settings")
+    public ResponseUtil<GroupChatSettingsResponse> settings(@PathVariable Long sessionId) {
+        return ResponseUtil.successResponse(settingsService.settings(sessionId));
+    }
+
+    @PutMapping("/{sessionId}/settings")
+    public ResponseUtil<ByaiSession> updateSettings(@PathVariable Long sessionId,
+        @Valid @RequestBody GroupChatSettingsRequest body) {
+        return ResponseUtil.successResponse(settingsService.updateSettings(sessionId, body));
+    }
+
+    @PutMapping("/{sessionId}/members/me/nickname")
+    public ResponseUtil<ByaiSessionMember> nickname(@PathVariable Long sessionId,
+        @Valid @RequestBody GroupChatNicknameRequest request) {
+        return ResponseUtil.successResponse(settingsService.updateNickname(sessionId, request.getNickname()));
+    }
+
+    @PostMapping("/join-by-number")
+    public ResponseUtil<GroupChatJoinApplication> joinByNumber(@Valid @RequestBody GroupChatJoinNumberRequest request) {
+        return ResponseUtil.successResponse(settingsService.applyByNumber(request.getGroupNumber()));
+    }
+
+    @GetMapping("/{sessionId}/join-requests/me")
+    public ResponseUtil<GroupChatJoinApplication> myJoinRequest(@PathVariable Long sessionId) {
+        return ResponseUtil.successResponse(settingsService.myApplication(sessionId));
+    }
+
+    @GetMapping("/{sessionId}/join-requests")
+    public ResponseUtil<List<GroupChatJoinApplication>> joinRequests(@PathVariable Long sessionId) {
+        return ResponseUtil.successResponse(settingsService.applications(sessionId));
+    }
+
+    @PostMapping("/{sessionId}/join-requests/{requestId}/review")
+    public ResponseUtil<GroupChatJoinApplication> review(@PathVariable Long sessionId, @PathVariable String requestId,
+        @Valid @RequestBody GroupChatJoinReviewRequest request) {
+        return ResponseUtil.successResponse(settingsService.review(sessionId, requestId, request.getApproved()));
+    }
+
+    @DeleteMapping("/{sessionId}")
+    public ResponseUtil<Void> dissolve(@PathVariable Long sessionId) {
+        settingsService.dissolve(sessionId);
+        return ResponseUtil.successResponse(null);
     }
 
     @PostMapping("/{sessionId}/join")
