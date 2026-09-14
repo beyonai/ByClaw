@@ -79,6 +79,8 @@ class GroupChatPendingPublicationTest {
         task.setStatus("ACTIVE");
         task.setTurnStatus("WAITING_USER");
         when(tasks.selectForUpdate(60L)).thenReturn(task);
+        // 发布流程先读取任务所属群并加锁，再校验发起人权限。
+        when(authorization.requireTask(60L)).thenReturn(task);
         when(authorization.requireInitiator(60L)).thenReturn(task);
         when(authorization.requireCanceller(60L)).thenReturn(task);
         when(sequence.nextVal()).thenReturn(100L, 101L, 102L);

@@ -183,6 +183,10 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
             || resourceService.findById(turn.getTargetAgentId()) == null) {
             throw new IllegalArgumentException("Queued group turn requires an owned target session and input");
         }
+        JSONObject input = JSON.parseObject(turn.getInputContent());
+        if (input == null || !(input.get("本次消息") instanceof String messageContent)) {
+            throw new IllegalArgumentException("Queued group turn requires textual current message content");
+        }
         ByaiMessage child = messageMapper.selectByMessageId(turn.getInputMessageId());
         if (child == null) {
             child = new ByaiMessage();
@@ -193,7 +197,8 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
             // Normal runtime authorization uses creatorId; actual message authorship is retained in metadata/input.
             child.setCreatorId(turn.getInitiatorUserId());
             child.setCreatorName(initiator.getUserName());
-            child.setMessageContent(turn.getInputContent());
+            // 页面、历史记录及普通运行时均使用原始正文，内部调度上下文仅在出站装饰时追加。
+            child.setMessageContent(messageContent);
             child.setMetadata(turn.getInputMetadata());
             child.setUsage(1);
             child.setIsComplete(true);
@@ -204,7 +209,7 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
         else if (!Objects.equals(child.getSessionId(), runtimeSessionId)
             || !Objects.equals(child.getCreatorId(), turn.getInitiatorUserId())
             || !Integer.valueOf(1).equals(child.getUsage())
-            || !Objects.equals(child.getMessageContent(), turn.getInputContent())) {
+            || !Objects.equals(child.getMessageContent(), messageContent)) {
             throw new IllegalArgumentException("Queued input does not match its persisted message");
         }
         ByaiMessageHotDtoDto existing = new ByaiMessageHotDtoDto();
@@ -271,13 +276,15 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
             if (!(content instanceof String)) {
                 throw new IllegalArgumentException("Initial group dispatch requires textual content");
             }
+            String dispatchContent = turn == null ? (String) content
+                : promptBuilder.appendTurnContext((String) content, turn.getInputContent());
             if (turn != null && "ASSESSMENT".equals(turn.getPhase())) {
-                return promptBuilder.appendRoutingAssessment((String) content, turn.getExecutionId(), context.sessionId);
+                return promptBuilder.appendRoutingAssessment(dispatchContent, turn.getExecutionId(), context.sessionId);
             }
             if (turn != null && "CHAT_CONTINUATION".equals(turn.getPhase())) {
-                return promptBuilder.appendChatContinuation((String) content, buildMemberRoster(execution));
+                return promptBuilder.appendChatContinuation(dispatchContent, buildMemberRoster(execution));
             }
-            return promptBuilder.append((String) content, execution.getExecutionId(),
+            return promptBuilder.append(dispatchContent, execution.getExecutionId(),
                 context.sessionId, buildMemberRoster(execution));
         }
         return content;

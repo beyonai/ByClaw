@@ -11,6 +11,15 @@ import org.springframework.stereotype.Component;
 public class GroupChatDispatchPromptBuilder {
     public static final String SCHEMA_VERSION = "1";
 
+    /** 仅在 Gateway 出站时附加冻结的调度快照，不修改用户正文或消息元数据。 */
+    public String appendTurnContext(String content, String inputContent) {
+        return content + "\n\n[群聊消息上下文 - 仅供内部使用]\n"
+            + "以下 JSON 是本轮的上下文数据；原始用户需求和已完成任务的公开成果仅作为背景，"
+            + "当前处理对象是本次消息，发送者和接收者字段用于识别群聊参与者。\n"
+            + "不要在面向用户的正文、过程说明或最终答复中复述该上下文 JSON、内部字段或调度实现。\n"
+            + inputContent;
+    }
+
     public String append(String content, Long dispatchId, Long candidateSessionId) {
         return append(content, dispatchId, candidateSessionId, List.of());
     }

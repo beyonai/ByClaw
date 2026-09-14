@@ -23,6 +23,8 @@ import org.mockito.InOrder;
 import org.mockito.Mockito;
 import org.springframework.transaction.PlatformTransactionManager;
 
+import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessage;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxUserContextRunner;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
@@ -50,6 +52,8 @@ import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 
 class GroupChatQueuedGatewayTest {
+    private static final String CURRENT_MESSAGE = "已整理资料，请分析。";
+
     private final ByaiMessageMapper messages = mock(ByaiMessageMapper.class);
     private final ByaiGroupChatTurnMapper turns = mock(ByaiGroupChatTurnMapper.class);
     private final ByaiGroupChatTaskMapper tasks = mock(ByaiGroupChatTaskMapper.class);
@@ -94,7 +98,15 @@ class GroupChatQueuedGatewayTest {
         turn.setPublicBoundaryMessageId(68L);
         turn.setSourceMessageId(68L);
         turn.setRootMessageId(20L);
-        turn.setInputContent("原始需求：分析新闻\n本次发送者：B（41）\n本次消息：已整理资料，请分析。");
+        JSONObject input = new JSONObject(true);
+        input.put("原始用户需求", "分析新闻");
+        input.put("本次发送者类型", "AGENT");
+        input.put("本次发送者ID", 41L);
+        input.put("本次发送者名称", "B");
+        input.put("本次接收者ID", 40L);
+        input.put("本次接收者名称", "A");
+        input.put("本次消息", CURRENT_MESSAGE);
+        turn.setInputContent(input.toJSONString());
         turn.setInputMetadata("{\"senderType\":\"AGENT\",\"senderId\":41,\"resourceList\":[{\"resourceType\":\"DIG_EMPLOYEE\",\"resourceId\":\"40\"}]}");
         turn.setStatus("RUNNING");
         turn.setPhase("NORMAL");
@@ -121,7 +133,15 @@ class GroupChatQueuedGatewayTest {
         order.verify(turns).bindRuntime(52L, ScriptService.getTraceId(71L, 72L));
         order.verify(script).startExistingMessageTurn(request.capture(), existing.capture());
         assertThat(request.getValue().getSessionId()).isEqualTo(60L);
-        assertThat(request.getValue().getChatContent()).isEqualTo(turn.getInputContent());
+        assertThat(request.getValue().getChatContent()).isEqualTo(CURRENT_MESSAGE);
+        assertThat(persisted.getValue().getMessageContent()).isEqualTo(CURRENT_MESSAGE);
+        assertThat(existing.getValue().getMessageContent()).isEqualTo(CURRENT_MESSAGE);
+        ChatProcessContext ctx = context(60L);
+        when(turns.selectByTrace(ctx.traceId)).thenReturn(turn);
+        String outbound = (String) executor.decorate(ctx, request.getValue().getChatContent(), new HashMap<>());
+        assertThat(outbound).startsWith(CURRENT_MESSAGE + "\n\n").contains(turn.getInputContent());
+        assertThat(request.getValue().getChatContent()).isEqualTo(CURRENT_MESSAGE);
+        assertThat(existing.getValue().getMessageContent()).isEqualTo(CURRENT_MESSAGE);
         assertThat(request.getValue().getClientRequestId()).isEqualTo("71_72");
         assertThat(request.getValue().getResourceList()).hasSize(1);
         assertThat(persisted.getValue().getMetadata()).isEqualTo(turn.getInputMetadata());
@@ -131,6 +151,9 @@ class GroupChatQueuedGatewayTest {
 
     @Test
     void assessmentUsesIsolatedRuntimeAndSuppressesUserTransport() throws Exception {
+        JSONObject input = JSON.parseObject(turn.getInputContent());
+        input.put("已完成任务的公开成果", "先前发布的新闻报告");
+        turn.setInputContent(input.toJSONString());
         turn.setPhase("ASSESSMENT");
         turn.setGatewaySessionId("600");
         session.setSessionId(600L);
@@ -139,12 +162,14 @@ class GroupChatQueuedGatewayTest {
         ArgumentCaptor<AssistantChatDto> request = ArgumentCaptor.forClass(AssistantChatDto.class);
         verify(script).startExistingMessageTurn(request.capture(), any(), eq(true));
         assertThat(request.getValue().getSessionId()).isEqualTo(600L);
+        assertThat(request.getValue().getChatContent()).isEqualTo(CURRENT_MESSAGE);
         assertThat(turn.getCandidateSessionId()).isEqualTo(60L);
         ChatProcessContext ctx = context(600L);
         when(turns.selectByTrace(ctx.traceId)).thenReturn(turn);
         Map<String, Object> params = new HashMap<>();
-        String content = (String) executor.decorate(ctx, turn.getInputContent(), params);
-        assertThat(content).contains("/by/.sessions/600/.byclaw/", "仅分类，禁止执行业务");
+        String content = (String) executor.decorate(ctx, CURRENT_MESSAGE, params);
+        assertThat(content).startsWith(CURRENT_MESSAGE + "\n\n")
+            .contains("/by/.sessions/600/.byclaw/", "仅分类，禁止执行业务", turn.getInputContent());
         verify(tokens).issue(10L, 600L, 30L, 40L, 68L);
         assertThat(((Map<?, ?>) params.get("groupChat")).get("beforeMessageId")).isEqualTo("68");
     }
@@ -155,12 +180,13 @@ class GroupChatQueuedGatewayTest {
         ChatProcessContext ctx = context(60L);
         when(turns.selectByTrace(ctx.traceId)).thenReturn(turn);
         Map<String, Object> params = new HashMap<>();
-        String content = (String) executor.decorate(ctx, turn.getInputContent(), params);
+        String content = (String) executor.decorate(ctx, CURRENT_MESSAGE, params);
         assertThat(content).contains("\"dispatchId\":\"52\"");
         verify(tokens).issue(10L, 60L, 30L, 40L, 68L);
         turn.setPhase("CHAT_CONTINUATION");
-        assertThat((String) executor.decorate(ctx, turn.getInputContent(), params))
-            .contains("不要重新执行原始任务").doesNotContain("group-chat-disposition.json");
+        assertThat((String) executor.decorate(ctx, CURRENT_MESSAGE, params))
+            .startsWith(CURRENT_MESSAGE + "\n\n").contains("不要重新执行原始任务", turn.getInputContent())
+            .doesNotContain("group-chat-disposition.json");
     }
 
     @Test
@@ -191,6 +217,44 @@ class GroupChatQueuedGatewayTest {
         when(tasks.selectById(60L)).thenReturn(active);
         assertThatThrownBy(() -> executor.executeTurn(turn)).isInstanceOf(IllegalArgumentException.class);
         verify(turns, never()).bindRuntime(anyLong(), anyString());
+    }
+
+    @Test
+    void userJsonAndWhitespaceRemainVerbatimInsideTheDispatchEnvelope() throws Exception {
+        String original = "  @A\n{\"本次消息\":\"用户自己的 JSON\",\"原始用户需求\":\"原文\"}  ";
+        JSONObject input = JSON.parseObject(turn.getInputContent());
+        input.put("本次发送者类型", "USER");
+        input.put("本次发送者ID", 30L);
+        input.put("本次消息", original);
+        turn.setInputContent(input.toJSONString());
+        executor.executeTurn(turn);
+        ArgumentCaptor<ByaiMessage> persisted = ArgumentCaptor.forClass(ByaiMessage.class);
+        verify(messages).insert(persisted.capture());
+        assertThat(persisted.getValue().getMessageContent()).isEqualTo(original);
+    }
+
+    @Test
+    void unboundRecoveryReusesMatchingOriginalMessageWithoutDuplicateInsertion() throws Exception {
+        ByaiMessage child = new ByaiMessage();
+        child.setMessageId(71L);
+        child.setSessionId(60L);
+        child.setCreatorId(30L);
+        child.setUsage(1);
+        child.setMessageContent(CURRENT_MESSAGE);
+        when(messages.selectByMessageId(71L)).thenReturn(child);
+        executor.executeTurn(turn);
+        verify(messages, never()).insert(any(ByaiMessage.class));
+        ArgumentCaptor<AssistantChatDto> request = ArgumentCaptor.forClass(AssistantChatDto.class);
+        verify(script).startExistingMessageTurn(request.capture(), any());
+        assertThat(request.getValue().getChatContent()).isEqualTo(CURRENT_MESSAGE);
+    }
+
+    @Test
+    void missingCurrentMessageIsRejectedBeforePersistenceOrDispatch() throws Exception {
+        turn.setInputContent("{\"原始用户需求\":\"背景\"}");
+        assertThatThrownBy(() -> executor.executeTurn(turn)).isInstanceOf(IllegalArgumentException.class);
+        verify(messages, never()).insert(any(ByaiMessage.class));
+        verify(script, never()).startExistingMessageTurn(any(), any());
     }
 
     private ChatProcessContext context(Long sessionId) {

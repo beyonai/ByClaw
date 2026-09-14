@@ -11,6 +11,17 @@ import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatDispa
 
 class GroupChatDispatchPromptBuilderTest {
     @Test
+    void appendsFrozenTurnContextWithInstructionsToKeepItOutOfUserFacingOutput() {
+        String input = "{\"原始用户需求\":\"生成报告\",\"本次消息\":\"解释结论\"}";
+        String content = new GroupChatDispatchPromptBuilder().appendTurnContext("解释结论", input);
+
+        assertTrue(content.startsWith("解释结论\n\n[群聊消息上下文"));
+        assertTrue(content.endsWith(input));
+        assertTrue(content.contains("当前处理对象是本次消息"));
+        assertTrue(content.contains("不要在面向用户的正文、过程说明或最终答复中复述"));
+    }
+
+    @Test
     void appendsDispatchSpecificFileContractAfterOriginalContent() {
         String content = new GroupChatDispatchPromptBuilder().append("帮我生成报告", 21L, 31L);
 

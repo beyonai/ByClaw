@@ -39,6 +39,7 @@ class ByaiGroupChatMentionMapperPaginationTest {
             List<GroupChatListItemResponse> groups = session.getMapper(ByaiGroupChatMentionMapper.class)
                 .selectMyGroups(30L);
 
+            // 分页总数应排除已解散群，同时兼容历史 state 为空的群。
             assertThat(page.getTotal()).isEqualTo(2L);
             assertThat(groups).hasSize(1);
             assertThat(groups.get(0).getSessionId()).isEqualTo(10L);
@@ -61,6 +62,7 @@ class ByaiGroupChatMentionMapperPaginationTest {
                     session_name TEXT,
                     project_id INTEGER,
                     session_type TEXT,
+                    state TEXT,
                     update_time TEXT,
                     create_time TEXT
                 )
@@ -93,16 +95,18 @@ class ByaiGroupChatMentionMapperPaginationTest {
                 )
                 """);
             statement.execute("""
-                INSERT INTO byai_session(session_id, session_name, project_id, session_type, update_time, create_time)
-                VALUES (10, 'group 10', 1, 'hs_as', '2026-09-11 12:00:00', '2026-09-11 10:00:00'),
-                       (20, 'group 20', 1, 'hs_as', '2026-09-11 11:00:00', '2026-09-11 09:00:00')
+                INSERT INTO byai_session(session_id, session_name, project_id, session_type, state, update_time, create_time)
+                VALUES (10, 'group 10', 1, 'hs_as', NULL, '2026-09-11 12:00:00', '2026-09-11 10:00:00'),
+                       (20, 'group 20', 1, 'hs_as', 'GROUP_ACTIVE', '2026-09-11 11:00:00', '2026-09-11 09:00:00'),
+                       (30, 'dissolved group', 1, 'hs_as', 'GROUP_DISSOLVED', '2026-09-11 14:00:00', '2026-09-11 08:00:00')
                 """);
             statement.execute("""
                 INSERT INTO byai_session_member(
                     session_id, user_role, last_read_message_id, mem_obj_type, mem_obj_id
                 )
                 VALUES (10, 'MEMBER', 99, 'USER', 30),
-                       (20, 'MEMBER', NULL, 'USER', 30)
+                       (20, 'MEMBER', NULL, 'USER', 30),
+                       (30, 'MEMBER', NULL, 'USER', 30)
                 """);
             statement.execute("""
                 INSERT INTO byai_message(

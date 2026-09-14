@@ -193,6 +193,7 @@ public class GroupChatTurnCoordinator {
         envelope.put("本次接收者ID", agent);
         envelope.put("本次接收者名称", resources.findById(agent).getResourceName());
         envelope.put("本次消息", content);
+        // 调度快照保留完整上下文；子会话正文只使用“本次消息”，其余信息在 Gateway 出站时追加。
         turn.setInputContent(envelope.toJSONString());
         mergeResources(metadata, metadata(messages.selectByMessageId(root)));
         metadata.put("scene", "GROUP_TASK");
