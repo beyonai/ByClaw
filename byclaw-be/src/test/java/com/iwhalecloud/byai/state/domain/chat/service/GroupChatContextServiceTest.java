@@ -13,6 +13,9 @@ import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
+import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectService;
+import com.iwhalecloud.byai.manager.entity.devloop.Project;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
@@ -205,6 +208,71 @@ class GroupChatContextServiceTest {
         agent.setResComIds(null);
         agent.setMetadata("invalid-json");
         assertThat(service.load(request).getMessages().get(0).getSpeaker().getAgentId()).isEqualTo("unknown");
+    }
+
+    @Test
+    void restoresPublishedCloudFilesWithoutFileIdsAndKeepsOrdinaryAttachments() {
+        ByaiMessage source = message(20L, 2, "成果", 200L);
+        source.setMetadata("{\"scene\":\"GROUP_CHAT\",\"kind\":\"TASK_RESULT\",\"files\":["
+            + "{\"fileName\":\"REPORT.md\",\"filePath\":\"/results/REPORT.md\","
+            + "\"cloudResourceId\":\"9007199254740993\"},null,{},\"invalid\"]}");
+        source.setRelatedResources("{\"files\":[{\"fileId\":\"10\",\"fileName\":\"input.pdf\"}]}");
+        var attachments = loadSingle(source).getAttachments();
+        assertThat(attachments).hasSize(2);
+        assertThat(attachments.get(0).getFileId()).isEqualTo("10");
+        assertThat(attachments.get(1).getFileId()).isNull();
+        assertThat(attachments.get(1).getFileName()).isEqualTo("REPORT.md");
+        assertThat(attachments.get(1).getFilePath()).isEqualTo("/results/REPORT.md");
+        assertThat(attachments.get(1).getCloudResourceId()).isEqualTo("9007199254740993");
+    }
+
+    @Test
+    void restoresOldPublicationUsingGroupProjectCloud() {
+        ProjectService projects = mock(ProjectService.class);
+        ReflectionTestUtils.setField(service, "projectService", projects);
+        Project project = new Project();
+        project.setCloudResourceId(777L);
+        when(projects.findById(5L)).thenReturn(project);
+        ByaiMessage source = message(20L, 2, "旧成果", 200L);
+        source.setMetadata("{\"scene\":\"GROUP_CHAT\",\"kind\":\"TASK_RESULT\",\"files\":["
+            + "{\"fileName\":\"REPORT.md\",\"filePath\":\"/results/REPORT.md\"}]}");
+        assertThat(loadSingle(source).getAttachments()).singleElement().satisfies(file -> {
+            assertThat(file.getCloudResourceId()).isEqualTo("777");
+            assertThat(file.getFilePath()).isEqualTo("/results/REPORT.md");
+        });
+        when(projects.findById(5L)).thenReturn(null);
+        assertThat(loadSingle(source).getAttachments()).singleElement().satisfies(file -> {
+            assertThat(file.getCloudResourceId()).isNull();
+            assertThat(file.getFileName()).isEqualTo("REPORT.md");
+        });
+    }
+
+    @Test
+    void malformedMetadataAndNonPublicationFilesDoNotBreakOrdinaryAttachments() {
+        ByaiMessage source = message(20L, 1, "正文", 200L);
+        source.setRelatedResources("{\"files\":[{\"fileId\":\"10\",\"fileName\":\"input.pdf\"}]}");
+        for (String metadata : Arrays.asList("invalid", null,
+            "{\"scene\":\"GROUP_CHAT\",\"kind\":\"TASK_RESULT\",\"files\":{}}",
+            "{\"scene\":\"GROUP_CHAT\",\"kind\":\"TASK_ACK\",\"files\":[{\"fileName\":\"private.md\",\"filePath\":\"/by/private.md\"}]}")) {
+            source.setMetadata(metadata);
+            assertThat(loadSingle(source).getAttachments()).singleElement()
+                .satisfies(file -> assertThat(file.getFileId()).isEqualTo("10"));
+        }
+        source.setRelatedResources(null);
+        assertThat(loadSingle(source).getAttachments()).isNull();
+    }
+
+    private GroupChatContextResponse.Message loadSingle(ByaiMessage source) {
+        ByaiSession group = new ByaiSession();
+        group.setSessionId(3L);
+        group.setProjectId(5L);
+        when(sessionService.findById(3L)).thenReturn(group);
+        when(messageMapper.selectVisibleBeforeMessageId(3L, 30L, 60))
+            .thenReturn(Collections.singletonList(source));
+        GroupChatContextRequest request = new GroupChatContextRequest();
+        request.setConversationKey("3");
+        request.setBeforeMessageId("30");
+        return service.load(request).getMessages().get(0);
     }
 
     private ByaiMessage message(Long messageId, int usage, String content, long createdAt) {

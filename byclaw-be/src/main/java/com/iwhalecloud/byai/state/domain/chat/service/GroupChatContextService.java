@@ -16,6 +16,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectService;
+import com.iwhalecloud.byai.manager.entity.devloop.Project;
+import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatAuthorizationService;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
@@ -50,6 +53,9 @@ public class GroupChatContextService {
     private static final int MAX_CHARACTERS = 30_000;
 
     private static final Pattern RESOURCE_ID_PATTERN = Pattern.compile("\\d+");
+
+    @Autowired
+    private ProjectService projectService;
 
     private final ByaiMessageMapper messageMapper;
 
@@ -126,8 +132,7 @@ public class GroupChatContextService {
 
     private void requireGroupMember(Long sessionId, GroupChatContextRequest request) {
         ByaiSession session = sessionService.findById(sessionId);
-        if (session == null || com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatAuthorizationService
-            .DISSOLVED_STATE.equals(session.getState())) {
+        if (session == null || GroupChatAuthorizationService.DISSOLVED_STATE.equals(session.getState())) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversation not found");
         }
         String contextToken = request == null ? null : request.getContextToken();
@@ -184,6 +189,7 @@ public class GroupChatContextService {
     private List<GroupChatContextResponse.Message> toMessages(List<ByaiMessage> ordered) {
         List<GroupChatContextResponse.Message> result = new ArrayList<>(ordered.size());
         Map<Long, SsResource> resources = new HashMap<>();
+        Map<Long, String> cloudResources = new HashMap<>();
         for (int index = 0; index < ordered.size(); index++) {
             ByaiMessage source = ordered.get(index);
             GroupChatContextResponse.Message message = new GroupChatContextResponse.Message();
@@ -198,7 +204,7 @@ public class GroupChatContextService {
             message.setTarget(toTarget(source));
             message.setRole(Integer.valueOf(1).equals(source.getUsage()) ? "user" : "assistant");
             message.setSpeaker(toSpeaker(source, resources));
-            message.setAttachments(toAttachments(source.getRelatedResources()));
+            message.setAttachments(toAttachments(source, cloudResources));
             if (source.getMessageRef() != null) {
                 ByaiMessage referenced = messageMapper.selectByMessageId(source.getMessageRef());
                 if (referenced != null && Objects.equals(source.getSessionId(), referenced.getSessionId())) {
@@ -333,6 +339,54 @@ public class GroupChatContextService {
         catch (NumberFormatException ignored) {
             return null;
         }
+    }
+
+    private List<GroupChatContextResponse.Attachment> toAttachments(ByaiMessage source,
+        Map<Long, String> cloudResources) {
+        List<GroupChatContextResponse.Attachment> legacy = toAttachments(source.getRelatedResources());
+        List<GroupChatContextResponse.Attachment> result = legacy == null ? new ArrayList<>() : new ArrayList<>(legacy);
+        JSONObject metadata;
+        try {
+            metadata = JSON.parseObject(source.getMetadata());
+        }
+        catch (RuntimeException ignored) {
+            // 历史元数据损坏时仍返回普通附件，不影响整页消息。
+            return legacy;
+        }
+        if (metadata == null || !"GROUP_CHAT".equals(metadata.getString("scene"))
+            || !"TASK_RESULT".equals(metadata.getString("kind")) || !(metadata.get("files") instanceof JSONArray)) {
+            return legacy;
+        }
+        for (Object value : metadata.getJSONArray("files")) {
+            if (!(value instanceof JSONObject)) {
+                continue;
+            }
+            JSONObject file = (JSONObject) value;
+            String name = file.getString("fileName");
+            String path = file.getString("filePath");
+            if (StringUtils.isBlank(name) || StringUtils.isBlank(path)) {
+                continue;
+            }
+            GroupChatContextResponse.Attachment attachment = new GroupChatContextResponse.Attachment();
+            attachment.setFileId(file.getString("fileId"));
+            attachment.setFileName(name);
+            attachment.setFilePath(path);
+            String cloudResourceId = file.getString("cloudResourceId");
+            if (StringUtils.isBlank(cloudResourceId)) {
+                // 旧发布消息未保存知识库 ID，按所属群项目补齐；一页内同群只查询一次。
+                if (!cloudResources.containsKey(source.getSessionId())) {
+                    ByaiSession group = sessionService.findById(source.getSessionId());
+                    Project project = group == null || group.getProjectId() == null ? null
+                        : projectService.findById(group.getProjectId());
+                    cloudResources.put(source.getSessionId(), project == null || project.getCloudResourceId() == null
+                        ? null : String.valueOf(project.getCloudResourceId()));
+                }
+                cloudResourceId = cloudResources.get(source.getSessionId());
+            }
+            attachment.setCloudResourceId(cloudResourceId);
+            result.add(attachment);
+        }
+        return result.isEmpty() ? null : result;
     }
 
     private List<GroupChatContextResponse.Attachment> toAttachments(String relatedResources) {

@@ -263,3 +263,5 @@ mvn spring-boot:run -Dspring-boot.run.profiles=local
 ---
 
 <p align="center">Made with ❤️ by BeyondAI Team</p>
+
+群历史 `context.messages[].attachments` 会合并普通消息附件与 `TASK_RESULT` 的 `metadata.files`。云盘附件包含 `fileName`、`filePath`、`cloudResourceId`，允许 `fileId` 为空；新发布会保存服务端校验后的云盘 ID，旧消息缺少该字段时从所属群项目补齐。项目不存在时仍返回文件名和路径，云盘 ID 为空。实时 `MESSAGE_CREATED` 同时返回 `attachments` 与兼容字段 `files`。

@@ -14,4 +14,6 @@ public class GroupChatTaskFile {
     private String fileName;
     @NotBlank
     private String filePath;
+    /** 发布时由服务端填充的项目云盘知识库 ID，不信任请求中的值。 */
+    private String cloudResourceId;
 }

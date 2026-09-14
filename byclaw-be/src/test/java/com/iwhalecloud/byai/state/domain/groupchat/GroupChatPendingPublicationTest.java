@@ -24,6 +24,7 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.common.message.entity.ByaiMessage;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
@@ -70,6 +71,7 @@ class GroupChatPendingPublicationTest {
     private final FeignPythonBuildService cloud = mock(FeignPythonBuildService.class);
     // 使用真实目录服务和 DTO 映射，仅模拟远端边界，覆盖发布与云盘查询的接线。
     private final DatasetApplicationService datasets = new DatasetApplicationService();
+    private final GroupChatEventPublisher events = mock(GroupChatEventPublisher.class);
     private final SequenceService sequence = mock(SequenceService.class);
     private final ByaiMessageMapper messages = mock(ByaiMessageMapper.class);
     private final ByaiGroupChatTask task = new ByaiGroupChatTask();
@@ -101,7 +103,7 @@ class GroupChatPendingPublicationTest {
         pending = new GroupChatPendingPublicationService(authorization, tasks, store, sequence);
         completion = new GroupChatTaskService(tasks, publications, null, messages, sequence, null, authorization,
             null, sessions, projects, resources,
-            mock(GroupChatEventPublisher.class), store, uploader, datasets);
+            events, store, uploader, datasets);
     }
 
     @AfterEach
@@ -197,6 +199,7 @@ class GroupChatPendingPublicationTest {
         verifyNoInteractions(messages);
 
         GroupChatTaskFile file = new GroupChatTaskFile();
+        file.setFileId(9007199254740993L);
         file.setFileName("a.md");
         file.setFilePath("/group-task-results/60/100/0/a.md");
         doReturn(List.of(file)).when(uploader).upload(card, 777L);
@@ -208,6 +211,18 @@ class GroupChatPendingPublicationTest {
         assertThat(query.getValue().getDirectoryPath()).isEqualTo("/group-task-results/60/100/0");
         verify(resources, never()).queryDirAndFileByLevel(any());
         verify(store).clear(eq(task), any());
+        ArgumentCaptor<JSONObject> event = ArgumentCaptor.forClass(JSONObject.class);
+        verify(events, times(2)).publish(eq(1L), event.capture(), eq(null));
+        JSONObject created = JSONObject.parseObject(event.getAllValues().get(0).toJSONString());
+        JSONObject attachment = created.getJSONArray("attachments").getJSONObject(0);
+        assertThat(attachment.get("fileId")).isEqualTo("9007199254740993");
+        assertThat(attachment.getString("cloudResourceId")).isEqualTo("777");
+        assertThat(attachment.getString("filePath")).isEqualTo(file.getFilePath());
+        assertThat(file.getCloudResourceId()).isEqualTo("777");
+        ArgumentCaptor<ByaiMessage> message = ArgumentCaptor.forClass(ByaiMessage.class);
+        verify(messages).insert(message.capture());
+        JSONObject metadata = JSONObject.parseObject(message.getValue().getMetadata());
+        assertThat(metadata.getJSONArray("files").getJSONObject(0).getString("cloudResourceId")).isEqualTo("777");
     }
 
     @ParameterizedTest
@@ -223,6 +238,7 @@ class GroupChatPendingPublicationTest {
         card.setSourceFilesJson("[\"/by/.sessions/60/a.md\"]");
         when(store.find(60L)).thenReturn(card);
         GroupChatTaskFile file = new GroupChatTaskFile();
+        file.setFileId(9007199254740993L);
         file.setFileName("a.md");
         file.setFilePath("/group-task-results/60/100/0/a.md");
         when(uploader.upload(card, 777L)).thenReturn(List.of(file));

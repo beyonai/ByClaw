@@ -35,6 +35,7 @@ import com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper;
 import com.iwhalecloud.byai.manager.qo.resource.DirAndFileQo;
 import com.iwhalecloud.byai.manager.vo.resource.DirAndFileVo;
 import com.iwhalecloud.byai.state.application.service.dataset.DatasetApplicationService;
+import com.iwhalecloud.byai.state.domain.chat.dto.GroupChatContextResponse;
 import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatAuthorizationService;
 import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatTaskAuthorizationService;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatTaskCompleteRequest;
@@ -276,6 +277,7 @@ public class GroupChatTaskService {
                 throw new IllegalArgumentException("Project cloud file not found: " + file.getFileName());
             }
             file.setFilePath(normalized);
+            file.setCloudResourceId(String.valueOf(cloudResourceId));
         }
     }
 
@@ -324,6 +326,15 @@ public class GroupChatTaskService {
         event.put("kind", kind);
         event.put("content", content);
         event.put("files", files);
+        // 实时附件使用与历史查询相同的结构，避免大整数文件 ID 在浏览器中丢失精度。
+        event.put("attachments", files.stream().map(file -> {
+            GroupChatContextResponse.Attachment attachment = new GroupChatContextResponse.Attachment();
+            attachment.setFileId(file.getFileId() == null ? null : String.valueOf(file.getFileId()));
+            attachment.setFileName(file.getFileName());
+            attachment.setFilePath(file.getFilePath());
+            attachment.setCloudResourceId(file.getCloudResourceId());
+            return attachment;
+        }).toList());
         event.put("creatorId", task.getTargetAgentId());
         event.put("creatorName", message.getCreatorName());
         Map<String, Object> speaker = new HashMap<>();
