@@ -117,6 +117,11 @@ SELECT byai._v041_add_column_if_missing(
     'byai', 'byai_session_member', 'last_read_time', 'TIMESTAMP'
 );
 
+-- 发布关联字段沿用同一兼容函数，兼容已建表环境并保持重复执行安全。
+SELECT byai._v041_add_column_if_missing(
+    'byai', 'byai_group_chat_task_publication', 'pending_publication_id', 'BIGINT'
+);
+
 DROP FUNCTION IF EXISTS byai._v041_add_column_if_missing(TEXT, TEXT, TEXT, TEXT);
 
 CREATE TABLE IF NOT EXISTS byai.byai_group_chat_mention (
@@ -281,5 +286,3 @@ CREATE TABLE IF NOT EXISTS byai.byai_group_chat_pending_publication (
     CONSTRAINT fk_group_chat_pending_task FOREIGN KEY (task_session_id)
         REFERENCES byai.byai_group_chat_task (task_session_id)
 );
-ALTER TABLE byai.byai_group_chat_task_publication
-    ADD COLUMN IF NOT EXISTS pending_publication_id BIGINT;

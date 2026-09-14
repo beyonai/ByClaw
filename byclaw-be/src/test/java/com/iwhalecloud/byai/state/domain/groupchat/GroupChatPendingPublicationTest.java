@@ -45,7 +45,14 @@ import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatTaskFile;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatTaskPublicationResponse;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.manager.entity.devloop.Project;
-import com.iwhalecloud.byai.manager.vo.resource.DirAndFileVo;
+import com.iwhalecloud.byai.manager.entity.resource.SsResource;
+import com.iwhalecloud.byai.common.feign.client.FeignPythonBuildService;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbListDir;
+import com.iwhalecloud.byai.common.feign.response.PythonBuildResponse;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.Data;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.DirOrFile;
+import com.iwhalecloud.byai.state.application.service.dataset.DatasetApplicationService;
+import org.springframework.test.util.ReflectionTestUtils;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatEventPublisher;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
@@ -60,6 +67,9 @@ class GroupChatPendingPublicationTest {
     private final SessionService sessions = mock(SessionService.class);
     private final ProjectService projects = mock(ProjectService.class);
     private final SsResourceService resources = mock(SsResourceService.class);
+    private final FeignPythonBuildService cloud = mock(FeignPythonBuildService.class);
+    // 使用真实目录服务和 DTO 映射，仅模拟远端边界，覆盖发布与云盘查询的接线。
+    private final DatasetApplicationService datasets = new DatasetApplicationService();
     private final SequenceService sequence = mock(SequenceService.class);
     private final ByaiMessageMapper messages = mock(ByaiMessageMapper.class);
     private final ByaiGroupChatTask task = new ByaiGroupChatTask();
@@ -79,15 +89,19 @@ class GroupChatPendingPublicationTest {
         task.setStatus("ACTIVE");
         task.setTurnStatus("WAITING_USER");
         when(tasks.selectForUpdate(60L)).thenReturn(task);
+        // 发布流程先读取任务所属群并加锁，再校验发起人权限。
+        when(authorization.requireTask(60L)).thenReturn(task);
         when(authorization.requireInitiator(60L)).thenReturn(task);
         when(authorization.requireCanceller(60L)).thenReturn(task);
         when(sequence.nextVal()).thenReturn(100L, 101L, 102L);
         when(tasks.publish(eq(60L), any(), eq(10L), any())).thenReturn(1);
         when(store.response(any())).thenCallRealMethod();
+        ReflectionTestUtils.setField(datasets, "ssResourceService", resources);
+        ReflectionTestUtils.setField(datasets, "feignPythonBuildService", cloud);
         pending = new GroupChatPendingPublicationService(authorization, tasks, store, sequence);
         completion = new GroupChatTaskService(tasks, publications, null, messages, sequence, null, authorization,
             null, sessions, projects, resources,
-            mock(GroupChatEventPublisher.class), store, uploader);
+            mock(GroupChatEventPublisher.class), store, uploader, datasets);
     }
 
     @AfterEach
@@ -186,11 +200,59 @@ class GroupChatPendingPublicationTest {
         file.setFileName("a.md");
         file.setFilePath("/group-task-results/60/100/0/a.md");
         doReturn(List.of(file)).when(uploader).upload(card, 777L);
-        DirAndFileVo existing = new DirAndFileVo();
-        existing.setName("a.md");
-        existing.setType("file");
-        when(resources.queryDirAndFileByLevel(any())).thenReturn(List.of(existing));
+        mockCloudDirectory("file");
         assertThat(completion.complete(60L, confirm(100L)).getFiles()).containsExactly(file);
+        ArgumentCaptor<KbListDir> query = ArgumentCaptor.forClass(KbListDir.class);
+        verify(cloud).listDir(query.capture(), eq(777L));
+        assertThat(query.getValue().getKnCode()).isEqualTo("project-cloud");
+        assertThat(query.getValue().getDirectoryPath()).isEqualTo("/group-task-results/60/100/0");
+        verify(resources, never()).queryDirAndFileByLevel(any());
+        verify(store).clear(eq(task), any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"directory", "missing", "unavailable"})
+    void cloudValidationFailureKeepsPendingCardAndDoesNotPublish(String result) {
+        ByaiSession group = new ByaiSession();
+        group.setProjectId(5L);
+        when(sessions.findById(1L)).thenReturn(group);
+        Project project = new Project();
+        project.setCloudResourceId(777L);
+        when(projects.findById(5L)).thenReturn(project);
+        ByaiGroupChatPendingPublication card = record(100L);
+        card.setSourceFilesJson("[\"/by/.sessions/60/a.md\"]");
+        when(store.find(60L)).thenReturn(card);
+        GroupChatTaskFile file = new GroupChatTaskFile();
+        file.setFileName("a.md");
+        file.setFilePath("/group-task-results/60/100/0/a.md");
+        when(uploader.upload(card, 777L)).thenReturn(List.of(file));
+        mockCloudDirectory(result);
+        if ("unavailable".equals(result)) {
+            when(cloud.listDir(any(), eq(777L))).thenThrow(new IllegalStateException("cloud unavailable"));
+        }
+
+        assertThatThrownBy(() -> completion.complete(60L, confirm(100L)))
+            .hasMessageContaining("unavailable".equals(result) ? "cloud unavailable" : "Project cloud file not found");
+        verify(publications, never()).insert(any(ByaiGroupChatTaskPublication.class));
+        verify(store, never()).clear(any(), any());
+        verifyNoInteractions(messages);
+        verify(tasks, never()).publish(any(), any(), any(), any());
+        assertThat(task.getStatus()).isEqualTo("ACTIVE");
+    }
+
+    private void mockCloudDirectory(String type) {
+        SsResource resource = new SsResource();
+        resource.setResourceCode("project-cloud");
+        when(resources.findById(777L)).thenReturn(resource);
+        DirOrFile item = new DirOrFile();
+        item.setName("/group-task-results/60/100/0/a.md");
+        item.setType(type);
+        Data data = new Data();
+        data.setData("missing".equals(type) ? List.of() : List.of(item));
+        PythonBuildResponse<Data> response = new PythonBuildResponse<>();
+        response.setResultCode(PythonBuildResponse.RESPONSE_SUCCESS);
+        response.setResultObject(data);
+        when(cloud.listDir(any(), eq(777L))).thenReturn(response);
     }
 
     @Test

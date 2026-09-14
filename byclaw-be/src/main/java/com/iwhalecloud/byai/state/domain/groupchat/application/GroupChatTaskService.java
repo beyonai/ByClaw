@@ -34,6 +34,7 @@ import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTaskPublicatio
 import com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper;
 import com.iwhalecloud.byai.manager.qo.resource.DirAndFileQo;
 import com.iwhalecloud.byai.manager.vo.resource.DirAndFileVo;
+import com.iwhalecloud.byai.state.application.service.dataset.DatasetApplicationService;
 import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatAuthorizationService;
 import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatTaskAuthorizationService;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatTaskCompleteRequest;
@@ -59,6 +60,7 @@ public class GroupChatTaskService {
     private final SessionService sessionService;
     private final ProjectService projectService;
     private final SsResourceService resourceService;
+    private final DatasetApplicationService datasetService;
     private final GroupChatEventPublisher eventPublisher;
     private final GroupChatPendingPublicationStore pendingStore;
     private final GroupChatPublicationUploader publicationUploader;
@@ -70,7 +72,8 @@ public class GroupChatTaskService {
         GroupChatTaskAuthorizationService taskAuthorizationService,
         GroupChatAuthorizationService groupAuthorizationService, SessionService sessionService,
         ProjectService projectService, SsResourceService resourceService, GroupChatEventPublisher eventPublisher,
-        GroupChatPendingPublicationStore pendingStore, GroupChatPublicationUploader publicationUploader) {
+        GroupChatPendingPublicationStore pendingStore, GroupChatPublicationUploader publicationUploader,
+        DatasetApplicationService datasetService) {
         this.taskMapper = taskMapper;
         this.publicationMapper = publicationMapper;
         this.executionMapper = executionMapper;
@@ -85,6 +88,7 @@ public class GroupChatTaskService {
         this.eventPublisher = eventPublisher;
         this.pendingStore = pendingStore;
         this.publicationUploader = publicationUploader;
+        this.datasetService = datasetService;
     }
 
     @Transactional
@@ -264,7 +268,8 @@ public class GroupChatTaskService {
             query.setResourceId(cloudResourceId);
             query.setDirectoryPath(directory);
             query.setKeyword(file.getFileName());
-            List<DirAndFileVo> matches = resourceService.queryDirAndFileByLevel(query);
+            // 与文件上传共用知识库目录服务，按项目云盘路径查询，避免进入旧 catalogId SQL。
+            List<DirAndFileVo> matches = datasetService.queryDirAndFileByLevel(query);
             boolean found = matches != null && matches.stream().anyMatch(item -> !"directory".equals(item.getType())
                 && (file.getFileName().equals(item.getFileName()) || file.getFileName().equals(item.getName())));
             if (!found) {
