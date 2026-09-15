@@ -26,6 +26,12 @@ ByClaw-BE 是 BeyondAI 平台的后端服务，提供完整的 AI 应用开发�
 - **多模型支持** - 支持多种大语言模型接入
 - **企业级安全** - 完整的认证、授权和审计机制
 
+## 群列表消息摘要
+
+- `GET /group-chats?pageNum=1&pageSize=20` 仅在返回时将 `latestMessageContent` 中的 `{{DIG_EMPLOYEE_资源ID}}`、`{{HUMAN_资源ID}}` 转成 `@名称`，名称取最新消息 metadata 中 `resourceList.resourceName` 的快照。
+- Agent 的 `[@成员名称](uid=成员UID)` 同样转成 `@名称`；优先使用资源快照名称，没有快照时使用链接中的成员名称。无法找到名称的占位符和其他资源占位符保留原文。
+- 该转换适用于已有消息，不修改数据库正文、WebSocket 消息或 Agent 调度；查询所需的消息 metadata 不包含在接口响应中。
+
 ## 群聊入群授权
 
 - 管理员邀请真人成员（`invite`）与用户接受链接邀请（`acceptInvitation`）统一经 `insertMember` 补齐项目成员和群内全部数字员工的使用授权；已是项目成员或群未关联项目时，也会补齐员工授权。

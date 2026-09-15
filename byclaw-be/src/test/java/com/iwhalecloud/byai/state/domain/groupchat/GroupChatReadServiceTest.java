@@ -3,9 +3,12 @@ package com.iwhalecloud.byai.state.domain.groupchat;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.AfterEach;
@@ -14,6 +17,9 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import com.alibaba.fastjson.JSONObject;
+import com.github.pagehelper.Page;
+import com.github.pagehelper.PageHelper;
+import com.iwhalecloud.byai.common.page.PageInfo;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
@@ -57,6 +63,38 @@ class GroupChatReadServiceTest {
     }
 
     @Test
+    void listOnlyNormalizesLatestMessageContentAndKeepsPagination() throws Exception {
+        GroupChatListItemResponse item = new GroupChatListItemResponse();
+        item.setSessionId(10L);
+        item.setLatestMessageId(20L);
+        item.setLatestMessageContent("{{DIG_EMPLOYEE_20010807}} 开发官网，[@张三](uid=HUMAN_123)");
+        item.setLatestMessageMetadata("""
+            {"resourceList":[{"resourceType":"DIG_EMPLOYEE","resourceId":"20010807","resourceName":"官网助手"}]}
+            """);
+        String storedMetadata = item.getLatestMessageMetadata();
+        when(mentionMapper.selectMyGroups(30L)).thenAnswer(invocation -> {
+            Page<GroupChatListItemResponse> page = PageHelper.getLocalPage();
+            page.setTotal(21L);
+            page.add(item);
+            return page;
+        });
+        try {
+            PageInfo<GroupChatListItemResponse> result = service.listMyGroups(1, 20);
+            assertThat(result.getPageNum()).isEqualTo(1);
+            assertThat(result.getPageSize()).isEqualTo(20);
+            assertThat(result.getTotal()).isEqualTo(21L);
+            assertThat(result.getList().get(0).getLatestMessageContent()).isEqualTo("@官网助手 开发官网，@张三");
+            assertThat(item.getLatestMessageMetadata()).isEqualTo(storedMetadata);
+            assertThat(new ObjectMapper().writeValueAsString(item)).doesNotContain("latestMessageMetadata", "resourceList");
+            assertThat(JSONObject.toJSONString(item)).doesNotContain("latestMessageMetadata", "resourceList");
+            verifyNoInteractions(messageMapper, memberMapper, broadcastService);
+        }
+        finally {
+            PageHelper.clearPage();
+        }
+    }
+
+    @Test
     void advancesCursorAndReturnsRemainingMentionState() {
         ByaiMessage message = new ByaiMessage();
         message.setMessageId(20L);
@@ -70,14 +108,14 @@ class GroupChatReadServiceTest {
 
         GroupChatReadStateResponse response = service.markRead(10L, 20L);
 
-        verify(memberMapper).advanceReadCursor(org.mockito.ArgumentMatchers.eq(11L),
-            org.mockito.ArgumentMatchers.eq(20L), any());
+        verify(memberMapper).advanceReadCursor(eq(11L),
+            eq(20L), any());
         assertThat(response.getLastReadMessageId()).isEqualTo(20L);
         assertThat(response.getUnreadMentionCount()).isEqualTo(2);
         assertThat(response.isHasUnreadMention()).isTrue();
         ArgumentCaptor<JSONObject> eventCaptor = ArgumentCaptor.forClass(JSONObject.class);
-        verify(broadcastService).broadcastRawToUser(org.mockito.ArgumentMatchers.eq(30L), eventCaptor.capture(),
-            org.mockito.ArgumentMatchers.isNull());
+        verify(broadcastService).broadcastRawToUser(eq(30L), eventCaptor.capture(),
+            isNull());
         assertThat(eventCaptor.getValue().getString("sessionId")).isEqualTo("10");
         assertThat(eventCaptor.getValue().getString("lastReadMessageId")).isEqualTo("20");
         assertThat(eventCaptor.getValue().getLongValue("unreadMentionCount")).isEqualTo(2L);
