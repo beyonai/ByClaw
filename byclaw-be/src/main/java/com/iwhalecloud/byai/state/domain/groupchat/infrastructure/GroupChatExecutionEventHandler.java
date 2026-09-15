@@ -96,10 +96,8 @@ public class GroupChatExecutionEventHandler implements ChatTurnPersistenceObserv
         }
         ByaiGroupChatTurn turn = turnMapper == null ? null : turnMapper.selectByTrace(context.traceId);
         if (turn != null) {
-            turnMapper.lockGroup(turn.getGroupSessionId());
-            executionMapper.selectForUpdateByCandidateSessionId(turn.getCandidateSessionId());
-            turn = turnMapper.selectById(turn.getExecutionId());
-            if ("RUNNING".equals(turn.getStatus()) && Objects.equals(turn.getTraceId(), context.traceId)) {
+            turn = lockCurrentTurn(turn);
+            if (turn != null && "RUNNING".equals(turn.getStatus()) && Objects.equals(turn.getTraceId(), context.traceId)) {
                 completeInitialTurn(turn, context.modelAnswerMessageId, context.gatewayError || context.getException() != null);
             }
             return;
@@ -143,14 +141,22 @@ public class GroupChatExecutionEventHandler implements ChatTurnPersistenceObserv
     public void reconcileTurn(Long turnId) {
         ByaiGroupChatTurn turn = turnMapper.selectById(turnId);
         if (turn == null) { return; }
-        turnMapper.lockGroup(turn.getGroupSessionId());
-        executionMapper.selectForUpdateByCandidateSessionId(turn.getCandidateSessionId());
-        turn = turnMapper.selectById(turnId);
-        if (!"RUNNING".equals(turn.getStatus())) { return; }
+        turn = lockCurrentTurn(turn);
+        if (turn == null || !"RUNNING".equals(turn.getStatus())) { return; }
         resolveDisposition(turn, false);
         if (TraceIdCodec.canDecode(turn.getTraceId())) {
             completeInitialTurn(turn, TraceIdCodec.decode(turn.getTraceId()).getModelAnswerMessageId(), false);
         }
+    }
+
+    private ByaiGroupChatTurn lockCurrentTurn(ByaiGroupChatTurn snapshot) {
+        turnMapper.lockGroup(snapshot.getGroupSessionId());
+        executionMapper.selectForUpdateByCandidateSessionId(snapshot.getCandidateSessionId());
+        // 普通查询可能缓存了等待锁之前的 RUNNING 状态，必须锁定读取最新 turn。
+        ByaiGroupChatTurn current = turnMapper.selectForUpdateById(snapshot.getExecutionId());
+        // 路由评估可能已将该 turn 转移到新会话，交由持有新会话锁的后续处理重试。
+        return current != null && Objects.equals(current.getGroupSessionId(), snapshot.getGroupSessionId())
+            && Objects.equals(current.getCandidateSessionId(), snapshot.getCandidateSessionId()) ? current : null;
     }
 
     private void completeInitialTurn(ByaiGroupChatExecution execution, Long answerId, boolean failed) {
@@ -224,22 +230,28 @@ public class GroupChatExecutionEventHandler implements ChatTurnPersistenceObserv
         }
         String kind = disposition == null ? "CHAT" : disposition.getKind();
         if (execution instanceof ByaiGroupChatTurn && "ASSESSMENT".equals(((ByaiGroupChatTurn) execution).getPhase())) {
-            turnMapper.decideDisposition(execution.getExecutionId(), kind, null, null, new Date());
-            execution.setDisposition(kind);
+            decideDisposition(execution, kind);
             return kind;
         }
         if ("TASK".equals(kind)) {
             taskService.promote(execution, disposition.getTaskName(), disposition.getAckText());
         }
         else {
-            if (execution instanceof ByaiGroupChatTurn) {
-                turnMapper.decideDisposition(execution.getExecutionId(), "CHAT", null, null, new Date());
-            }
-            else { executionMapper.decideDisposition(execution.getExecutionId(), "CHAT", null, null, new Date()); }
+            decideDisposition(execution, "CHAT");
             candidateSessionService.hideChatCandidate(execution.getCandidateSessionId());
         }
         execution.setDisposition(kind);
         return kind;
+    }
+
+    private void decideDisposition(ByaiGroupChatExecution execution, String kind) {
+        int changed = execution instanceof ByaiGroupChatTurn
+            ? turnMapper.decideDisposition(execution.getExecutionId(), kind, null, null, new Date())
+            : executionMapper.decideDisposition(execution.getExecutionId(), kind, null, null, new Date());
+        if (changed != 1) {
+            throw new IllegalStateException("Group turn disposition changed concurrently: " + execution.getExecutionId());
+        }
+        execution.setDisposition(kind);
     }
 
     private void normalizeTaskMentions(ByaiGroupChatExecution execution, ByaiMessage answer, JSONObject metadata) {
@@ -386,8 +398,13 @@ public class GroupChatExecutionEventHandler implements ChatTurnPersistenceObserv
     }
 
     private void markSucceeded(ByaiGroupChatExecution execution, Long answerId) {
-        if (execution instanceof ByaiGroupChatTurn) { turnMapper.markSucceeded(execution.getExecutionId(), answerId, new Date()); }
-        else { executionMapper.markSucceeded(execution.getExecutionId(), answerId, new Date()); }
+        int changed = execution instanceof ByaiGroupChatTurn
+            ? turnMapper.markSucceeded(execution.getExecutionId(), answerId, new Date())
+            : executionMapper.markSucceeded(execution.getExecutionId(), answerId, new Date());
+        // 完成状态未取得所有权时，回滚本事务的消息、子委派和待发布事件，禁止留下重复投影。
+        if (changed != 1) {
+            throw new IllegalStateException("Group turn completion changed concurrently: " + execution.getExecutionId());
+        }
     }
 
     private void markFailed(ByaiGroupChatExecution execution, String code, String message) {

@@ -78,6 +78,8 @@ class GroupChatExecutionEventHandlerTest {
         execution.setDisposition("TASK");
         execution.setTraceId(TraceIdCodec.encode(20L, 30L));
         when(executions.selectForUpdateByCandidateSessionId(60L)).thenReturn(execution);
+        when(executions.decideDisposition(any(), any(), any(), any(), any())).thenReturn(1);
+        when(executions.markSucceeded(any(), any(), any())).thenReturn(1);
         when(sequence.nextVal()).thenReturn(100L);
         when(parser.parse(anyLong(), anyLong(), any())).thenAnswer(call ->
             new GroupChatAgentMention(call.getArgument(2), List.of()));
