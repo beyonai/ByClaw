@@ -368,6 +368,7 @@ const ResourceList: React.FC<ResourceListProps> = ({
       onCardClick={() => onDetail(item)}
       actionConfig={{
         scene: item.ownerType === 'personal' || activeTab === 'personal' ? 'personal' : 'enterprise',
+        hiddenMenuItemKeys: activeTab === 'personal' ? ['authorize'] : [],
         installedResourceIds,
         canInstallToTarget: installTargetContext.mode !== 'fixed' || canManageInstallTarget,
         installTargetContext,

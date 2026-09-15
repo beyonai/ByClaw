@@ -637,6 +637,7 @@ function AllDigitalEmployees(
       digitalEmployeeActionMode
       actionConfig={{
         scene: 'enterprise',
+        hiddenMenuItemKeys: source === 'available' ? ['authorize'] : [],
         onChat: () => chatEmployee(employee),
         onEdit: () => onEditEmployee(employee),
         onAuth: (type: any) => onAuthEmployee(employee, type),
