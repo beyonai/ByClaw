@@ -19,12 +19,8 @@ import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.annotation.Isolation;
-import java.util.Date;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Objects;
+
+import java.util.*;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -38,8 +34,8 @@ public class ProjectDataSourceService {
     private final Map<String, DataSourceTypeProvider> providers;
 
     public ProjectDataSourceService(DataSourceMapper sources, ProjectDataSourceMapper bindings,
-            DataSourceAccessService access, SequenceService sequence, ObjectMapper json,
-            List<DataSourceTypeProvider> providers) {
+                                    DataSourceAccessService access, SequenceService sequence, ObjectMapper json,
+                                    List<DataSourceTypeProvider> providers) {
         this.sources = sources;
         this.bindings = bindings;
         this.access = access;
@@ -49,6 +45,10 @@ public class ProjectDataSourceService {
     }
 
     public List<DataSourceView> list(Long projectId) {
+        // 公共默认项目不返回报错
+        if (projectId != null && projectId < 0) {
+            return Collections.emptyList();
+        }
         Project project = access.requireProject(projectId, false);
         return sources.listByProject(projectId).stream().map(source -> view(source, project)).toList();
     }
@@ -114,7 +114,9 @@ public class ProjectDataSourceService {
         sources.deleteById(sourceId);
     }
 
-    /** Called only by the authorized session query provider; browser queries always pass false. */
+    /**
+     * Called only by the authorized session query provider; browser queries always pass false.
+     */
     public SessionResourcePage query(Long projectId, SessionResourceQueryDto query, boolean includeCredentials) {
         Project project = access.requireProject(projectId, false);
         if (query.getDatasourceType() != null && !providers.containsKey(query.getDatasourceType())) {
@@ -170,8 +172,8 @@ public class ProjectDataSourceService {
         if (provider == null) throw new BaseException(400, "datasource.type.unsupported");
         Map<String, Object> config = provider.validate(request.getConnectionConfig());
         if (request.getDatasourceName() == null || request.getDatasourceName().isBlank() || request.getDatasourceName().length() > 128
-                || (request.getDescription() != null && request.getDescription().length() > 2000)
-                || (request.getPassword() != null && request.getPassword().length() > 4096)) {
+            || (request.getDescription() != null && request.getDescription().length() > 2000)
+            || (request.getPassword() != null && request.getPassword().length() > 4096)) {
             throw new BaseException(400, "datasource.fields.invalid");
         }
         source.setDatasourceName(request.getDatasourceName().trim());
@@ -195,7 +197,8 @@ public class ProjectDataSourceService {
 
     private DataSourceView view(Datasource source, Project project) {
         try {
-            Map<String, Object> config = json.readValue(source.getConnectionConfig(), new TypeReference<Map<String, Object>>() {});
+            Map<String, Object> config = json.readValue(source.getConnectionConfig(), new TypeReference<Map<String, Object>>() {
+            });
             // Revalidate persisted JSON to prevent unknown/secret fields from leaking through historical data.
             DataSourceTypeProvider provider = providers.get(source.getDatasourceType());
             if (provider == null) throw new BaseException(400, "datasource.type.unsupported");
