@@ -15,6 +15,7 @@ const {
   finalizeSdkBusinessResult,
   redisClient,
   resolveActiveSdkRequestByTraceId,
+  runtimeConfig,
 } = vi.hoisted(() => {
   const finalizeSdkBusinessResult = vi.fn(async () => undefined);
   return {
@@ -29,6 +30,11 @@ const {
       quit: vi.fn(async () => undefined),
     },
     resolveActiveSdkRequestByTraceId: vi.fn(() => undefined),
+    runtimeConfig: {} as {
+      plugins?: {
+        entries?: Record<string, unknown>;
+      };
+    },
   };
 });
 
@@ -48,7 +54,7 @@ vi.mock("./runtime.js", () => ({
       resolveStateDir: () => "/tmp/byai-channel-sdk-worker-test",
     },
   }),
-  getRuntimeConfig: () => ({ channels: {} }),
+  getRuntimeConfig: () => runtimeConfig,
 }));
 
 vi.mock("./utils.js", () => ({
@@ -80,6 +86,10 @@ vi.mock("../../shared/src/session-key.js", () => ({
 
 import { ByaiChannelGatewayWorker, ByaiSdkApp } from "./sdk-app.js";
 import type { ResolvedByaiAccount } from "./types.js";
+import {
+  markBaiyingEnhanceColdStartReady,
+  resetBaiyingEnhanceColdStartReadiness,
+} from "../../baiying-enhance/src/cold-start-readiness.js";
 
 function createWorker() {
   const emitter = {
@@ -115,9 +125,12 @@ describe("ByaiChannelGatewayWorker", () => {
     deliverReplyToAgentViaSdk.mockClear();
     finalizeSdkBusinessResult.mockClear();
     resolveActiveSdkRequestByTraceId.mockClear();
+    delete runtimeConfig.plugins;
   });
 
   afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllEnvs();
     vi.restoreAllMocks();
   });
 
@@ -420,5 +433,92 @@ describe("ByaiChannelGatewayWorker", () => {
     expect(stop).toHaveBeenCalledWith(expect.objectContaining({ cancelActiveExecutions: true }));
     expect(subscribe).not.toHaveBeenCalled();
     expect(redisClient.quit).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns channel startup before readiness and starts consumption only after ready", async () => {
+    const initialize = vi.spyOn(WorkerRunner.prototype, "initialize").mockResolvedValue(undefined);
+    const start = vi.spyOn(WorkerRunner.prototype, "start").mockResolvedValue(undefined);
+    vi.spyOn(WorkerRunner.prototype, "stop");
+    vi.stubEnv("BAIYING_ENHANCE_COLD_START_WAIT_MS", "10");
+    runtimeConfig.plugins = { entries: { "baiying-enhance": {} } };
+    resetBaiyingEnhanceColdStartReadiness("not_started");
+    const app = new ByaiSdkApp({
+      account: {
+        accountId: "account-readiness",
+        name: "account-readiness",
+        enabled: true,
+        configured: true,
+        config: {},
+      } as ResolvedByaiAccount,
+      cfg: {} as never,
+    });
+
+    await app.start();
+
+    expect(initialize).toHaveBeenCalledTimes(1);
+    expect(start).not.toHaveBeenCalled();
+
+    markBaiyingEnhanceColdStartReady("initial_managed_agent_sync_complete");
+    await vi.waitFor(() => {
+      expect(start).toHaveBeenCalledWith({ initialize: false });
+    });
+    await app.stop();
+  });
+
+  it("cancels a pending readiness gate without starting consumption", async () => {
+    vi.spyOn(WorkerRunner.prototype, "initialize").mockResolvedValue(undefined);
+    const start = vi.spyOn(WorkerRunner.prototype, "start").mockResolvedValue(undefined);
+    vi.spyOn(WorkerRunner.prototype, "stop");
+    const release = vi.spyOn(WorkerRunner.prototype, "release").mockResolvedValue(undefined);
+    runtimeConfig.plugins = { entries: { "baiying-enhance": {} } };
+    resetBaiyingEnhanceColdStartReadiness("not_started");
+    const app = new ByaiSdkApp({
+      account: {
+        accountId: "account-stop-pending",
+        name: "account-stop-pending",
+        enabled: true,
+        configured: true,
+        config: {},
+      } as ResolvedByaiAccount,
+      cfg: {} as never,
+    });
+
+    await app.start();
+    await app.stop();
+    markBaiyingEnhanceColdStartReady("late_ready");
+
+    expect(start).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps consumption stopped after a readiness timeout", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(WorkerRunner.prototype, "initialize").mockResolvedValue(undefined);
+    const start = vi.spyOn(WorkerRunner.prototype, "start").mockResolvedValue(undefined);
+    vi.spyOn(WorkerRunner.prototype, "stop");
+    vi.stubEnv("BAIYING_ENHANCE_COLD_START_WAIT_MS", "1000");
+    runtimeConfig.plugins = { entries: { "baiying-enhance": {} } };
+    resetBaiyingEnhanceColdStartReadiness("not_started");
+    const app = new ByaiSdkApp({
+      account: {
+        accountId: "account-readiness-timeout",
+        name: "account-readiness-timeout",
+        enabled: true,
+        configured: true,
+        config: {},
+      } as ResolvedByaiAccount,
+      cfg: {} as never,
+    });
+
+    const starting = app.start();
+    await vi.advanceTimersByTimeAsync(1000);
+    await starting;
+
+    expect(start).not.toHaveBeenCalled();
+
+    markBaiyingEnhanceColdStartReady("initial_managed_agent_sync_complete");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(start).toHaveBeenCalledWith({ initialize: false });
+    await app.stop();
   });
 });
