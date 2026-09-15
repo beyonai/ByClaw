@@ -273,3 +273,20 @@ mvn spring-boot:run -Dspring-boot.run.profiles=local
 <p align="center">Made with ❤️ by BeyondAI Team</p>
 
 群历史 `context.messages[].attachments` 会合并普通消息附件与 `TASK_RESULT` 的 `metadata.files`。云盘附件包含 `fileName`、`filePath`、`cloudResourceId`，允许 `fileId` 为空；新发布会保存服务端校验后的云盘 ID，旧消息缺少该字段时从所属群项目补齐。项目不存在时仍返回文件名和路径，云盘 ID 为空。实时 `MESSAGE_CREATED` 同时返回 `attachments` 与兼容字段 `files`。
+
+### 工作组邀请凭证接口
+
+`GroupChatController` 提供以下接口（部署网关通常添加 `/byaiService` 前缀）：
+
+- `POST /group-chats/{sessionId}/invitations`：已登录群主/管理员生成邀请；返回 `token`、`expiresAt`（毫秒）。
+- `POST /group-chats/invitations/validate`：请求体 `{"token":"…"}`；允许匿名预览，返回工作组名称/号码、邀请人、企业、成员数量、最多四位 `memberPreviews`（`displayName`/`type`/`avatar`）、有效期、加入开关和当前成员状态。
+- `POST /group-chats/invitations/join`：登录后提交相同 token，锁群后重新校验有效期、群状态、开关、邀请人角色/账户状态及企业限制；返回成员信息，重复加入不重复写入。
+
+凭证由 32 字节安全随机数生成，默认有效期 7 天；现有 Redis 仅保存 SHA-256 摘要键及群、邀请人、企业、过期时间，不保存 token 明文，无需数据库迁移。
+前端链接只使用 `/hacu/invite#token=…`，不得拼接展示资料或群 ID。创建和预览响应禁止缓存。Redis 记录丢失时邀请失效；生产 Redis 持久化策略由部署环境保障。
+旧的 `/{sessionId}/members`（POST）、`/{sessionId}/invitation`（GET）、`/{sessionId}/join`（POST）、
+`/join-by-number`（POST）、`/{sessionId}/join-requests`（GET）、`/{sessionId}/join-requests/me`（GET）
+及 `/{sessionId}/join-requests/{requestId}/review`（POST）已移除（均在 `/group-chats` 下）。
+对应直接邀请、群号申请/审批 service 方法及 DTO 同步删除。入群写操作由 `GroupChatInvitationService` 在凭证校验后执行，
+不再调用旧 service；`GroupChatSettingsService` 仅保留群设置、昵称和解散能力，设置 DTO 移除群号加入开关及审批标记。
+前端需同步更新并重新生成旧链接。历史申请数据不做清理或迁移，移除功能后不再读取。

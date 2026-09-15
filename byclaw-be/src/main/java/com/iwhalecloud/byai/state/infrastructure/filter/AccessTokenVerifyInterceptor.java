@@ -166,6 +166,20 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
                 return false;
             }
 
+            // 仅 token 预览允许匿名；携带登录凭证时仍走现有认证链。
+            if ("POST".equals(request.getMethod())
+                && "/group-chats/invitations/validate".equals(request.getServletPath())) {
+                CurrentUserHolder.clearLoginInfo();
+                response.setHeader("Cache-Control", "no-store");
+                HttpSession previewSession = request.getSession(false);
+                if (StringUtils.isEmpty(getSessionString(previewSession, "USER_CODE"))
+                    && StringUtils.isEmpty(request.getHeader("beyond-token"))
+                    && StringUtils.isEmpty(request.getHeader("SSO-TOKEN"))
+                    && StringUtils.isEmpty(request.getHeader("accessToken"))) {
+                    return true;
+                }
+            }
+
             // 例外的地址
             String url = request.getRequestURL().toString();
             // 飞书/微信开放平台事件回调从外部匿名推送，不会携带系统登录态。

@@ -8,6 +8,5 @@ import lombok.Data;
 public class GroupChatSettingsRequest {
     @Size(max = 100)
     private String sessionName;
-    private Boolean allowJoinByNumber;
     private Boolean allowJoinByLink;
 }

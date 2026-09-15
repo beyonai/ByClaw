@@ -330,48 +330,11 @@ public class GroupChatApplicationService {
     }
 
     @Transactional
-    public ByaiSessionMember invite(Long sessionId, String type, Long memberId) {
-        sessionService.lockById(sessionId);
-        authorizationService.requireAdmin(sessionId);
-        ByaiSession session = authorizationService.requireGroup(sessionId);
-        if (!MemObjType.isValid(type) || memberId == null) {
-            throw new IllegalArgumentException("Invalid group member");
-        }
-        if (memberService.findSessionMember(sessionId, type, memberId) != null) {
-            throw new IllegalArgumentException("Member already exists");
-        }
-        // 邀请真人时补齐项目成员关系；已有成员的角色不变，数字员工不加入项目成员表。
-        if (MemObjType.USER.name().equals(type) && !projectMemberService.isMember(session.getProjectId(), memberId)) {
-            projectMemberService.addMember(session.getProjectId(), memberId, MemberRole.MEMBER);
-        }
-        ByaiSessionMember member = new ByaiSessionMember();
-        member.setByaiSessionMemberId(sequenceService.nextVal());
-        member.setSessionId(sessionId);
-        member.setMemObjType(type);
-        member.setMemObjId(memberId);
-        member.setUserRole(UserRole.MEMBER.name());
-        member.setCreatorId(CurrentUserHolder.getCurrentUserId());
-        member.setCreateTime(new Date());
-        if (MemObjType.USER.name().equals(type)) {
-            member.setLastReadMessageId(messageMapper.selectLatestMessageId(sessionId));
-            member.setLastReadTime(new Date());
-        }
-        memberService.save(member);
-        return member;
-    }
-
-    @Transactional
     public ByaiSession updateGroupSettings(Long sessionId, String sessionName) {
         com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatSettingsRequest request =
             new com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatSettingsRequest();
         request.setSessionName(sessionName);
         return settingsService.updateSettings(sessionId, request);
-    }
-
-    /** 保留原链接加入接口，统一执行加入开关和并发校验。 */
-    @Transactional
-    public ByaiSessionMember joinAsCurrentUser(Long sessionId) {
-        return settingsService.joinByLink(sessionId);
     }
 
     @Transactional

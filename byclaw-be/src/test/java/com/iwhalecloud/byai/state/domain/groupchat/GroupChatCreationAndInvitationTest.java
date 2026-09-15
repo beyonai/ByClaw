@@ -111,6 +111,26 @@ class GroupChatCreationAndInvitationTest {
     }
 
     @Test
+    void legacyInvitationRoutesAreNotRegistered() throws Exception {
+        var controller = new com.iwhalecloud.byai.state.domain.groupchat.interfaces.GroupChatController(
+            service, mock(com.iwhalecloud.byai.state.domain.chat.service.GroupChatContextService.class),
+            mock(com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTaskService.class),
+            mock(com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatReadService.class));
+        org.springframework.test.util.ReflectionTestUtils.setField(controller, "settingsService",
+            mock(com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatSettingsService.class));
+        var mvc = org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(controller).build();
+        for (String path : List.of("/200/invitation", "/200/join-requests/me", "/200/join-requests")) {
+            mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/group-chats" + path))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isNotFound());
+        }
+        for (String path : List.of("/200/join", "/200/members", "/join-by-number", "/200/join-requests/request/review")) {
+            mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/group-chats" + path))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().is4xxClientError());
+        }
+        verifyNoInteractions(members, projectMembers);
+    }
+
+    @Test
     void missingListsStillIncludeCreatorAsOwner() {
         assertThat(service.create(request()).getMembers()).singleElement()
             .satisfies(member -> {
@@ -154,55 +174,6 @@ class GroupChatCreationAndInvitationTest {
     }
 
     @Test
-    void invitationAddsNewHumanToProjectAndInitializesReadCursor() {
-        when(messages.selectLatestMessageId(200L)).thenReturn(199L);
-        ByaiSessionMember member = service.invite(200L, "USER", 20L);
-        verify(authorization).requireAdmin(200L);
-        verify(projectMembers).addMember(100L, 20L, "member");
-        verify(members).save(member);
-        assertThat(member.getLastReadMessageId()).isEqualTo(199L);
-        assertThat(member.getLastReadTime()).isNotNull();
-        assertThat(member.getUserRole()).isEqualTo("MEMBER");
-    }
-
-    @Test
-    void existingProjectMemberKeepsProjectRole() {
-        when(projectMembers.isMember(100L, 20L)).thenReturn(true);
-        service.invite(200L, "USER", 20L);
-        verify(projectMembers, never()).addMember(any(), any(), any());
-        verify(members).save(any());
-    }
-
-    @Test
-    void agentInvitationDoesNotCreateProjectMember() {
-        service.invite(200L, "AGENT", 30L);
-        verifyNoInteractions(projectMembers);
-        verify(members).save(any());
-    }
-
-    @Test
-    void duplicateGroupMemberDoesNotChangeProjectMembership() {
-        when(members.findSessionMember(200L, "USER", 20L)).thenReturn(new ByaiSessionMember());
-        assertThatThrownBy(() -> service.invite(200L, "USER", 20L)).hasMessage("Member already exists");
-        verifyNoInteractions(projectMembers);
-        verify(members, never()).save(any());
-    }
-
-    @Test
-    void unauthorizedInvitationDoesNotWriteAnything() {
-        doThrow(new IllegalArgumentException("Admin required")).when(authorization).requireAdmin(200L);
-        assertThatThrownBy(() -> service.invite(200L, "USER", 20L)).hasMessage("Admin required");
-        verifyNoInteractions(projectMembers, members);
-    }
-
-    @Test
-    void projectMemberFailureDoesNotInsertGroupMember() {
-        when(projectMembers.addMember(100L, 20L, "member")).thenThrow(new IllegalStateException("insert failed"));
-        assertThatThrownBy(() -> service.invite(200L, "USER", 20L)).hasMessage("insert failed");
-        verify(members, never()).save(any());
-    }
-
-    @Test
     void creationFailureRollsBackOuterJdbcTransaction() throws Exception {
         Connection connection = transactionalProxy();
         doAnswer(invocation -> {
@@ -214,19 +185,6 @@ class GroupChatCreationAndInvitationTest {
         }).when(projects).createProject(any());
         doThrow(new IllegalStateException("group members failed")).when(members).batchSave(anyList());
         assertThatThrownBy(() -> service.create(request())).hasMessage("group members failed");
-        verify(connection).rollback();
-        verify(connection, never()).commit();
-    }
-
-    @Test
-    void invitationFailureRollsBackProjectMemberTransaction() throws Exception {
-        Connection connection = transactionalProxy();
-        when(projectMembers.addMember(100L, 20L, "member")).thenAnswer(invocation -> {
-            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isTrue();
-            return null;
-        });
-        doThrow(new IllegalStateException("group member failed")).when(members).save(any());
-        assertThatThrownBy(() -> service.invite(200L, "USER", 20L)).hasMessage("group member failed");
         verify(connection).rollback();
         verify(connection, never()).commit();
     }

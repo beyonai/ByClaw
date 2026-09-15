@@ -24,6 +24,21 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 class AccessTokenVerifyInterceptorTest {
 
+    @Test
+    void allowsOnlyAnonymousTokenPreviewAndClearsThreadIdentity() {
+        AccessTokenVerifyInterceptor interceptor = new AccessTokenVerifyInterceptor();
+        var login = new LoginInfo();
+        login.setUserId(99L);
+        CurrentUserHolder.setLoginInfo(login);
+        var request = new MockHttpServletRequest("POST", "/byaiService/group-chats/invitations/validate");
+        request.setContextPath("/byaiService");
+        request.setServletPath("/group-chats/invitations/validate");
+        var response = new MockHttpServletResponse();
+        assertTrue(interceptor.preHandle(request, response, new Object()));
+        assertThat(CurrentUserHolder.getCurrentUserId()).isLessThanOrEqualTo(0L);
+        assertThat(response.getHeader("Cache-Control")).isEqualTo("no-store");
+    }
+
     @AfterEach
     void clearCurrentUser() {
         CurrentUserHolder.clearLoginInfo();
