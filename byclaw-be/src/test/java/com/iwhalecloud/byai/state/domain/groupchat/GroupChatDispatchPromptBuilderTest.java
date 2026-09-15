@@ -11,6 +11,21 @@ import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatDispa
 
 class GroupChatDispatchPromptBuilderTest {
     @Test
+    void deliveryReminderRequiresActualTaskDeliveryAndPreservesPublicationConfirmation() {
+        String content = new GroupChatDispatchPromptBuilder().appendTaskDeliveryReminder("完成报告");
+        assertTrue(content.startsWith("完成报告\n\n"));
+        assertTrue(content.contains("当前会话已判定为 TASK"));
+        assertTrue(content.contains("更新后的产物"));
+        assertTrue(content.contains("在答复末尾自然地提醒一次"));
+        assertTrue(content.contains("确认没问题后，可以让我帮你发布到群里"));
+        assertTrue(content.contains("尚未完成交付、执行失败、等待用户补充信息"));
+        assertTrue(content.contains("CHAT 回复不提醒"));
+        assertTrue(content.contains("不要将提醒写入 taskName 或 ackText"));
+        assertTrue(content.contains("正在确认发布时"));
+        assertTrue(content.contains("这条提醒本身不是发布授权"));
+    }
+
+    @Test
     void appendsFrozenTurnContextWithInstructionsToKeepItOutOfUserFacingOutput() {
         String input = "{\"原始用户需求\":\"生成报告\",\"本次消息\":\"解释结论\"}";
         String content = new GroupChatDispatchPromptBuilder().appendTurnContext("解释结论", input);
