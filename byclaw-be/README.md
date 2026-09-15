@@ -280,13 +280,17 @@ mvn spring-boot:run -Dspring-boot.run.profiles=local
 
 - `POST /group-chats/{sessionId}/invitations`：已登录群主/管理员生成邀请；返回 `token`、`expiresAt`（毫秒）。
 - `POST /group-chats/invitations/validate`：请求体 `{"token":"…"}`；允许匿名预览，返回工作组名称/号码、邀请人、企业、成员数量、最多四位 `memberPreviews`（`displayName`/`type`/`avatar`）、有效期、加入开关和当前成员状态。
-- `POST /group-chats/invitations/join`：登录后提交相同 token，锁群后重新校验有效期、群状态、开关、邀请人角色/账户状态及企业限制；返回成员信息，重复加入不重复写入。
+- `POST /group-chats/invitations/join`：登录后提交 `{token}`，由服务端解析绑定群 ID，复用 `GroupChatApplicationService.acceptInvitation(sessionId, token)`，锁群后重新校验有效期、群状态、开关、邀请人角色/账户状态及企业限制；返回成员信息，重复加入不重复写入。
 
-凭证由 32 字节安全随机数生成，默认有效期 7 天；现有 Redis 仅保存 SHA-256 摘要键及群、邀请人、企业、过期时间，不保存 token 明文，无需数据库迁移。
+凭证使用 SecureRandom 从大小写字母和数字共 62 个字符中逐位均匀选取，固定 8 位，默认有效期 7 天；现有 Redis 仅保存 SHA-256 摘要键及群、邀请人、企业、过期时间，不保存 token 明文，无需数据库迁移。
 前端链接只使用 `/hacu/invite#token=…`，不得拼接展示资料或群 ID。创建和预览响应禁止缓存。Redis 记录丢失时邀请失效；生产 Redis 持久化策略由部署环境保障。
-旧的 `/{sessionId}/members`（POST）、`/{sessionId}/invitation`（GET）、`/{sessionId}/join`（POST）、
+保留 `POST /group-chats/{sessionId}/members`，由 `GroupChatApplicationService.invite` 支持管理员直接添加真人或数字员工；请求体为 `{"type":"USER 或 AGENT","id":成员ID}`。
+旧的 `/{sessionId}/invitation`（GET）、`/{sessionId}/join`（POST）、
 `/join-by-number`（POST）、`/{sessionId}/join-requests`（GET）、`/{sessionId}/join-requests/me`（GET）
 及 `/{sessionId}/join-requests/{requestId}/review`（POST）已移除（均在 `/group-chats` 下）。
-对应直接邀请、群号申请/审批 service 方法及 DTO 同步删除。入群写操作由 `GroupChatInvitationService` 在凭证校验后执行，
+群号申请/审批 service 方法及 DTO 同步删除。token 入群写操作由 `GroupChatApplicationService.acceptInvitation(sessionId, token)` 在凭证校验后执行，
 不再调用旧 service；`GroupChatSettingsService` 仅保留群设置、昵称和解散能力，设置 DTO 移除群号加入开关及审批标记。
 前端需同步更新并重新生成旧链接。历史申请数据不做清理或迁移，移除功能后不再读取。
+
+`GroupChatInvitationService` 负责生成、预览、解析绑定群及凭证校验；接受邀请通过 `acceptInvitation` 与管理员 `invite` 共用内部 `insertMember` 写入方法，不在邀请 service 中重复实现。
+Redis 邀请记录在创建 7 天后自动过期，不因成功加入而删除，读取不会续期；关闭链接加入或邀请人权限失效时立即拒绝使用，但不主动删除记录。旧 43 位凭证不再接受，需重新生成。

@@ -5,20 +5,11 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.Duration;
-import java.util.Date;
-import com.iwhalecloud.byai.common.constants.devloop.MemberRole;
-import com.iwhalecloud.byai.state.domain.session.enums.MemObjType;
-import com.iwhalecloud.byai.state.domain.session.enums.UserRole;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
-import com.alibaba.fastjson.JSONObject;
-import java.util.Base64;
 import java.util.HexFormat;
 import java.util.Objects;
 
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import com.alibaba.fastjson.JSON;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.domain.users.service.UserService;
@@ -32,7 +23,6 @@ import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatInvitationRespon
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatInvitationTokenResponse;
 import com.iwhalecloud.byai.state.domain.session.service.SessionExtService;
 import com.iwhalecloud.byai.state.domain.session.service.SessionMemberService;
-import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 
@@ -42,17 +32,13 @@ import lombok.RequiredArgsConstructor;
 public class GroupChatInvitationService {
     private static final Duration VALIDITY = Duration.ofDays(7);
     private static final SecureRandom RANDOM = new SecureRandom();
+    private static final String TOKEN_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
     private final StringRedisTemplate redis;
-    private final SessionService sessions;
     private final SessionExtService extensions;
     private final SessionMemberService members;
     private final GroupChatAuthorizationService authorization;
     private final UserService users;
     private final EnterpriseInfoMapper enterprises;
-    private final com.iwhalecloud.byai.state.domain.sys.service.SequenceService sequenceService;
-    private final com.iwhalecloud.byai.manager.domain.devloop.service.ProjectMemberService projectMemberService;
-    private final com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper messageMapper;
-    private final com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatEventPublisher eventPublisher;
     private final com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService resources;
 
     public GroupChatInvitationTokenResponse create(Long sessionId) {
@@ -68,9 +54,11 @@ public class GroupChatInvitationService {
         record.setEnterpriseId(group.getEnterpriseId());
         record.setExpiresAt(System.currentTimeMillis() + VALIDITY.toMillis());
         for (int attempt = 0; attempt < 3; attempt++) {
-            byte[] bytes = new byte[32];
-            RANDOM.nextBytes(bytes);
-            String token = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+            StringBuilder tokenBuilder = new StringBuilder(8);
+            for (int i = 0; i < 8; i++) {
+                tokenBuilder.append(TOKEN_ALPHABET.charAt(RANDOM.nextInt(TOKEN_ALPHABET.length())));
+            }
+            String token = tokenBuilder.toString();
             if (Boolean.TRUE.equals(redis.opsForValue().setIfAbsent(key(token), JSON.toJSONString(record), VALIDITY))) {
                 GroupChatInvitationTokenResponse response = new GroupChatInvitationTokenResponse();
                 response.setToken(token);
@@ -104,49 +92,20 @@ public class GroupChatInvitationService {
         return response;
     }
 
-    @Transactional
-    public ByaiSessionMember join(String token) {
+    /** 只解析服务端绑定群；写入前由 applicationService 在群锁内重新校验。 */
+    public Long resolveSessionId(String token) {
         requireUser();
-        InvitationRecord record = read(token);
-        // 与解散、开关、角色及成员写操作串行，锁后再次检查到期时间及当前权限。
-        sessions.lockById(record.getSessionId());
-        ByaiSession group = validate(record);
-        requireEnterprise(group);
-        ByaiSessionMember existing = members.findSessionMember(group.getSessionId(), "USER", requireUser());
-        if (existing != null) return existing;
-        ByaiSessionMember member = addUser(group, requireUser());
-        JSONObject event = new JSONObject();
-        event.put("type", "GROUP_CHAT_EVENT");
-        event.put("event", "MEMBER_ADDED");
-        event.put("sessionId", String.valueOf(group.getSessionId()));
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                eventPublisher.publish(group.getSessionId(), event, null);
-            }
-        });
-        return member;
+        return read(token).getSessionId();
     }
 
-    private ByaiSessionMember addUser(ByaiSession session, Long userId) {
-        ByaiSessionMember existing = members.findSessionMember(session.getSessionId(), MemObjType.USER.name(), userId);
-        if (existing != null) return existing;
-        if (users.findById(userId) == null) throw new IllegalArgumentException("Applicant no longer exists");
-        if (session.getProjectId() != null && !projectMemberService.isMember(session.getProjectId(), userId)) {
-            projectMemberService.addMember(session.getProjectId(), userId, MemberRole.MEMBER);
-        }
-        ByaiSessionMember member = new ByaiSessionMember();
-        member.setByaiSessionMemberId(sequenceService.nextVal());
-        member.setSessionId(session.getSessionId());
-        member.setMemObjType(MemObjType.USER.name());
-        member.setMemObjId(userId);
-        member.setUserRole(UserRole.MEMBER.name());
-        member.setCreatorId(requireUser());
-        member.setCreateTime(new Date());
-        member.setLastReadMessageId(messageMapper.selectLatestMessageId(session.getSessionId()));
-        member.setLastReadTime(new Date());
-        members.save(member);
-        return member;
+    public ByaiSession validateForMemberInvitation(Long sessionId, String token) {
+        requireUser();
+        InvitationRecord record = read(token);
+        if (!Objects.equals(sessionId, record.getSessionId())) throw invalid();
+        ByaiSession group = validate(record);
+        requireEnterprise(group);
+        if (users.findById(requireUser()) == null) throw invalid();
+        return group;
     }
 
     private GroupChatInvitationResponse.MemberPreview memberPreview(ByaiSessionMember member) {
@@ -167,7 +126,7 @@ public class GroupChatInvitationService {
     }
 
     private InvitationRecord read(String token) {
-        if (token == null || !token.matches("[A-Za-z0-9_-]{43}")) throw invalid();
+        if (token == null || !token.matches("[A-Za-z0-9]{8}")) throw invalid();
         String value = redis.opsForValue().get(key(token));
         if (value == null) throw invalid();
         InvitationRecord record = JSON.parseObject(value, InvitationRecord.class);

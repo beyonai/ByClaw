@@ -34,11 +34,15 @@ class GroupChatInvitationTokenTest {
     private final EnterpriseInfoMapper enterprises = mock(EnterpriseInfoMapper.class);
     private final GroupChatAuthorizationService auth = new GroupChatAuthorizationService(sessions, members);
     private final GroupChatInvitationService service = new GroupChatInvitationService(
-        redis, sessions, extensions, members, auth, users, enterprises, sequence, projectMembers, messages, events, mock(com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService.class));
+        redis, extensions, members, auth, users, enterprises, mock(com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService.class));
+    private final com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatApplicationService application =
+        new com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatApplicationService(
+            sessions, sequence, auth, members, null, projectMembers, messages, null, events, extensions);
     private ByaiSession group;
     private ByaiSessionMember owner;
 
     @BeforeEach void setup() {
+        org.springframework.test.util.ReflectionTestUtils.setField(application, "invitationService", service);
         LoginInfo login = new LoginInfo();
         login.setUserId(10L);
         login.setEnterpriseId(3L);
@@ -69,9 +73,14 @@ class GroupChatInvitationTokenTest {
     }
     @AfterEach void cleanup() { CurrentUserHolder.clearLoginInfo(); }
 
+    @Test void rejectsSymbolsInToken() {
+        assertThatThrownBy(() -> service.preview("Ab12_-CD")).isInstanceOf(IllegalArgumentException.class);
+        verify(values, never()).get(anyString());
+    }
+
     @Test void createsOpaqueTokensAndStoresOnlyDigests() {
         var result = service.create(20L);
-        assertThat(result.getToken()).matches("[A-Za-z0-9_-]{43}");
+        assertThat(result.getToken()).matches("[A-Za-z0-9]{8}");
         assertThat(cache.toString()).doesNotContain(result.getToken());
         assertThat(service.create(20L).getToken()).isNotEqualTo(result.getToken());
     }
@@ -83,7 +92,7 @@ class GroupChatInvitationTokenTest {
         assertThat(preview.getInviterName()).isEqualTo("邀请人");
         assertThat(preview.getMemberCount()).isEqualTo(1);
         assertThat(preview.isAlreadyMember()).isFalse();
-        assertThatThrownBy(() -> service.join(token)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> application.acceptInvitation(20L, token)).isInstanceOf(IllegalArgumentException.class);
     }
     @Test void invalidExpiredAndRemovedTokensAreRejected() {
         assertThatThrownBy(() -> service.preview("20")).isInstanceOf(IllegalArgumentException.class);
@@ -91,14 +100,14 @@ class GroupChatInvitationTokenTest {
         cache.replaceAll((key, value) -> value.replaceAll("\"expiresAt\":\\d+", "\"expiresAt\":1"));
         assertThatThrownBy(() -> service.preview(token)).isInstanceOf(IllegalArgumentException.class);
         cache.clear();
-        assertThatThrownBy(() -> service.join(token)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> application.acceptInvitation(20L, token)).isInstanceOf(IllegalArgumentException.class);
         verify(members, never()).save(any());
     }
     @Test void lostInviterRoleRevokesBothPreviewAndJoin() {
         var token = service.create(20L).getToken();
         owner.setUserRole("MEMBER");
         assertThatThrownBy(() -> service.preview(token)).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> service.join(token)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> application.acceptInvitation(20L, token)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> service.create(20L)).isInstanceOf(IllegalArgumentException.class);
         verify(members, never()).save(any());
     }
@@ -107,7 +116,7 @@ class GroupChatInvitationTokenTest {
         ByaiSessionExt ext = new ByaiSessionExt();
         ext.setExtParamValue("false");
         when(extensions.findOneByExtParamCode(20L, "group_join_link_enabled")).thenReturn(ext);
-        assertThatThrownBy(() -> service.join(token)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> application.acceptInvitation(20L, token)).isInstanceOf(IllegalArgumentException.class);
         when(extensions.findOneByExtParamCode(20L, "group_join_link_enabled")).thenReturn(null);
         group.setState("GROUP_DISSOLVED");
         assertThatThrownBy(() -> service.preview(token)).isInstanceOf(IllegalArgumentException.class);
@@ -116,7 +125,7 @@ class GroupChatInvitationTokenTest {
     @Test void crossEnterpriseCannotJoin() {
         var token = service.create(20L).getToken();
         CurrentUserHolder.getLoginInfo().setEnterpriseId(4L);
-        assertThatThrownBy(() -> service.join(token)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> application.acceptInvitation(20L, token)).isInstanceOf(IllegalArgumentException.class);
         verify(members, never()).save(any());
     }
     @Test void successfulJoinUsesServerBoundGroupAndIsIdempotent() {
@@ -128,7 +137,7 @@ class GroupChatInvitationTokenTest {
         when(messages.selectLatestMessageId(20L)).thenReturn(50L);
         org.springframework.transaction.support.TransactionSynchronizationManager.initSynchronization();
         try {
-            var joined = service.join(token);
+            var joined = application.acceptInvitation(20L, token);
             assertThat(joined.getSessionId()).isEqualTo(20L);
             assertThat(joined.getMemObjId()).isEqualTo(11L);
             assertThat(joined.getUserRole()).isEqualTo("MEMBER");
@@ -140,7 +149,7 @@ class GroupChatInvitationTokenTest {
             callbacks.forEach(callback -> callback.afterCommit());
             verify(events).publish(eq(20L), any(), isNull());
             when(members.findSessionMember(20L, "USER", 11L)).thenReturn(joined);
-            assertThat(service.join(token)).isSameAs(joined);
+            assertThat(application.acceptInvitation(20L, token)).isSameAs(joined);
             verify(members, times(1)).save(any());
             verify(projectMembers, times(1)).addMember(any(), any(), any());
         } finally {
@@ -160,15 +169,21 @@ class GroupChatInvitationTokenTest {
         var interceptor = new org.springframework.transaction.interceptor.TransactionInterceptor();
         interceptor.setTransactionManager(new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource));
         interceptor.setTransactionAttributeSource(new org.springframework.transaction.annotation.AnnotationTransactionAttributeSource());
-        var factory = new org.springframework.aop.framework.ProxyFactory(service);
+        var factory = new org.springframework.aop.framework.ProxyFactory(application);
         factory.setProxyTargetClass(true);
         factory.addAdvice(interceptor);
         when(members.save(any())).thenThrow(new IllegalStateException("group insert failed"));
-        var transactionalService = (GroupChatInvitationService) factory.getProxy();
-        assertThatThrownBy(() -> transactionalService.join(token)).hasMessage("group insert failed");
+        var transactionalService = (com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatApplicationService) factory.getProxy();
+        assertThatThrownBy(() -> transactionalService.acceptInvitation(20L, token)).hasMessage("group insert failed");
         verify(connection).rollback();
         verify(connection, never()).commit();
         verifyNoInteractions(events);
+    }
+
+    @Test void tokenCannotBeUsedForAnotherGroup() {
+        var token = service.create(20L).getToken();
+        assertThatThrownBy(() -> application.acceptInvitation(21L, token)).isInstanceOf(IllegalArgumentException.class);
+        verify(members, never()).save(any());
     }
 
     @Test void previewReturnsAtMostFourDisplayOnlyMembersAndEnterprise() {

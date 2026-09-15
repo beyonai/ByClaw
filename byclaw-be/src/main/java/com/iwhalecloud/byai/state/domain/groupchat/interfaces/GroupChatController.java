@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.Map;
 
 import jakarta.validation.Valid;
+import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatMemberRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatInvitationService;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatInvitationTokenRequest;
@@ -102,6 +103,12 @@ public class GroupChatController {
         return ResponseUtil.successResponse(applicationService.create(request));
     }
 
+    @PostMapping("/{sessionId}/members")
+    public ResponseUtil<ByaiSessionMember> invite(@PathVariable Long sessionId,
+        @Valid @RequestBody GroupChatMemberRequest request) {
+        return ResponseUtil.successResponse(applicationService.invite(sessionId, request.getType(), request.getId()));
+    }
+
     @PostMapping("/{sessionId}/invitations")
     public ResponseUtil<GroupChatInvitationTokenResponse> createInvitation(
         @PathVariable Long sessionId, HttpServletResponse response) {
@@ -120,7 +127,8 @@ public class GroupChatController {
     @PostMapping("/invitations/join")
     public ResponseUtil<ByaiSessionMember> joinInvitation(
         @Valid @RequestBody GroupChatInvitationTokenRequest request) {
-        return ResponseUtil.successResponse(invitationService.join(request.getToken()));
+        Long sessionId = invitationService.resolveSessionId(request.getToken());
+        return ResponseUtil.successResponse(applicationService.acceptInvitation(sessionId, request.getToken()));
     }
 
     @GetMapping("/{sessionId}/settings")

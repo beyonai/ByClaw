@@ -10,6 +10,6 @@ import lombok.Setter;
 @Setter
 public class GroupChatInvitationTokenRequest {
     @NotBlank
-    @Pattern(regexp = "[A-Za-z0-9_-]{43}")
+    @Pattern(regexp = "[A-Za-z0-9]{8}")
     private String token;
 }

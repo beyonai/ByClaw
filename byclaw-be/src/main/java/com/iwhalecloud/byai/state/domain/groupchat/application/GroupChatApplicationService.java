@@ -57,6 +57,8 @@ public class GroupChatApplicationService {
     private GroupChatSettingsService settingsService;
     @Autowired
     private SsResourceService resourceService;
+    @Autowired
+    private GroupChatInvitationService invitationService;
     private final SessionService sessionService;
     private final SequenceService sequenceService;
     private final GroupChatAuthorizationService authorizationService;
@@ -327,6 +329,63 @@ public class GroupChatApplicationService {
         speaker.put("displayName", referenced.getCreatorName());
         reply.put("speaker", speaker);
         return reply;
+    }
+
+    @Transactional
+    public ByaiSessionMember acceptInvitation(Long sessionId, String token) {
+        // 与解散、开关、角色及成员写操作串行，锁后再次检查到期时间及当前权限。
+        sessionService.lockById(sessionId);
+        ByaiSession group = invitationService.validateForMemberInvitation(sessionId, token);
+        ByaiSessionMember existing = memberService.findSessionMember(group.getSessionId(), "USER", CurrentUserHolder.getCurrentUserId());
+        if (existing != null) return existing;
+        ByaiSessionMember member = insertMember(group, MemObjType.USER.name(), CurrentUserHolder.getCurrentUserId());
+        JSONObject event = new JSONObject();
+        event.put("type", "GROUP_CHAT_EVENT");
+        event.put("event", "MEMBER_ADDED");
+        event.put("sessionId", String.valueOf(group.getSessionId()));
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                eventPublisher.publish(group.getSessionId(), event, null);
+            }
+        });
+        return member;
+    }
+
+    @Transactional
+    public ByaiSessionMember invite(Long sessionId, String type, Long memberId) {
+        sessionService.lockById(sessionId);
+        authorizationService.requireAdmin(sessionId);
+        ByaiSession session = authorizationService.requireGroup(sessionId);
+        if (!MemObjType.isValid(type) || memberId == null) {
+            throw new IllegalArgumentException("Invalid group member");
+        }
+        if (memberService.findSessionMember(sessionId, type, memberId) != null) {
+            throw new IllegalArgumentException("Member already exists");
+        }
+        return insertMember(session, type, memberId);
+    }
+
+    /** 两种入口在各自完成授权和重复成员检查后，共用事务内写入逻辑。 */
+    private ByaiSessionMember insertMember(ByaiSession session, String type, Long memberId) {
+        // 邀请真人时补齐项目成员关系；已有成员的角色不变，数字员工不加入项目成员表。
+        if (MemObjType.USER.name().equals(type) && session.getProjectId() != null && !projectMemberService.isMember(session.getProjectId(), memberId)) {
+            projectMemberService.addMember(session.getProjectId(), memberId, MemberRole.MEMBER);
+        }
+        ByaiSessionMember member = new ByaiSessionMember();
+        member.setByaiSessionMemberId(sequenceService.nextVal());
+        member.setSessionId(session.getSessionId());
+        member.setMemObjType(type);
+        member.setMemObjId(memberId);
+        member.setUserRole(UserRole.MEMBER.name());
+        member.setCreatorId(CurrentUserHolder.getCurrentUserId());
+        member.setCreateTime(new Date());
+        if (MemObjType.USER.name().equals(type)) {
+            member.setLastReadMessageId(messageMapper.selectLatestMessageId(session.getSessionId()));
+            member.setLastReadTime(new Date());
+        }
+        memberService.save(member);
+        return member;
     }
 
     @Transactional

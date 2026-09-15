@@ -155,6 +155,19 @@ class GroupChatApplicationServiceResourceListTest {
     }
 
     @Test
+    void invitedUserStartsReadingAfterExistingGroupHistory() {
+        when(projectMemberService.isMember(400L, 601L)).thenReturn(true);
+        when(messageMapper.selectLatestMessageId(GROUP_ID)).thenReturn(199L);
+
+        service.invite(GROUP_ID, MemObjType.USER.name(), 601L);
+
+        ArgumentCaptor<ByaiSessionMember> memberCaptor = ArgumentCaptor.forClass(ByaiSessionMember.class);
+        verify(memberService).save(memberCaptor.capture());
+        assertThat(memberCaptor.getValue().getLastReadMessageId()).isEqualTo(199L);
+        assertThat(memberCaptor.getValue().getLastReadTime()).isNotNull();
+    }
+
+    @Test
     void idempotentRetryDoesNotPersistBroadcastOrDispatchAgain() {
         ResourceVo agent = resource(AgentMetaEnum.DIG_EMPLOYEE, "501", "DIG_EMPLOYEE_501");
         when(memberService.findSessionMember(GROUP_ID, MemObjType.AGENT.name(), 501L))

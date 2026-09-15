@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat.application;
 
+import com.iwhalecloud.byai.state.domain.session.enums.MemObjType;
+
 import java.util.Date;
 
 import org.springframework.stereotype.Service;
