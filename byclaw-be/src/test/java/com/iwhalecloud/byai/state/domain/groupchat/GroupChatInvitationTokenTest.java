@@ -33,8 +33,11 @@ class GroupChatInvitationTokenTest {
     private final com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatEventPublisher events = mock(com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatEventPublisher.class);
     private final EnterpriseInfoMapper enterprises = mock(EnterpriseInfoMapper.class);
     private final GroupChatAuthorizationService auth = new GroupChatAuthorizationService(sessions, members);
+    private final com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatInvitationTokenCipher cipher =
+        mock(com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatInvitationTokenCipher.class);
+    private final Map<String, String> sealedTokens = new HashMap<>();
     private final GroupChatInvitationService service = new GroupChatInvitationService(
-        redis, extensions, members, auth, users, enterprises, mock(com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService.class));
+        redis, sessions, cipher, extensions, members, auth, users, enterprises, mock(com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService.class));
     private final com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatApplicationService application =
         new com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatApplicationService(
             sessions, sequence, auth, members, null, projectMembers, messages, null, events, extensions);
@@ -66,10 +69,22 @@ class GroupChatInvitationTokenTest {
         when(users.findById(10L)).thenReturn(user);
         when(redis.opsForValue()).thenReturn(values);
         when(values.get(anyString())).thenAnswer(call -> cache.get(call.getArgument(0)));
-        when(values.setIfAbsent(anyString(), anyString(), any(Duration.class))).thenAnswer(call -> {
-            assertThat((Duration) call.getArgument(2)).isEqualTo(Duration.ofDays(7));
-            return cache.putIfAbsent(call.getArgument(0), call.getArgument(1)) == null;
+        when(cipher.encrypt(anyString())).thenAnswer(call -> {
+            String sealed = "ciphertext-" + sealedTokens.size();
+            sealedTokens.put(sealed, call.getArgument(0));
+            return sealed;
         });
+        when(cipher.decrypt(anyString())).thenAnswer(call -> sealedTokens.get(call.getArgument(0)));
+        when(redis.execute(any(org.springframework.data.redis.core.script.RedisScript.class), anyList(),
+            anyString(), anyString(), anyString())).thenAnswer(call -> {
+                List<String> keys = call.getArgument(1);
+                String value = call.getArgument(2);
+                assertThat(Long.parseLong(call.getArgument(3))).isEqualTo(Duration.ofDays(7).toMillis());
+                if ("create".equals(call.getArgument(4)) && cache.containsKey(keys.get(0))) return 0L;
+                cache.put(keys.get(0), value);
+                cache.put(keys.get(1), keys.get(0));
+                return 1L;
+            });
     }
     @AfterEach void cleanup() { CurrentUserHolder.clearLoginInfo(); }
 
@@ -82,8 +97,44 @@ class GroupChatInvitationTokenTest {
         var result = service.create(20L);
         assertThat(result.getToken()).matches("[A-Za-z0-9]{8}");
         assertThat(cache.toString()).doesNotContain(result.getToken());
-        assertThat(service.create(20L).getToken()).isNotEqualTo(result.getToken());
+        var repeated = service.create(20L);
+        assertThat(repeated.getToken()).isEqualTo(result.getToken());
+        assertThat(repeated.getExpiresAt()).isGreaterThanOrEqualTo(result.getExpiresAt());
     }
+    @Test void renewsTheSameSessionTokenFromTheCurrentTime() {
+        var first = service.create(20L);
+        cache.replaceAll((key, value) -> value.startsWith("{")
+            ? value.replaceAll("\"expiresAt\":\\d+", "\"expiresAt\":" + (System.currentTimeMillis() + 60000)) : value);
+        var renewed = service.create(20L);
+        assertThat(renewed.getToken()).isEqualTo(first.getToken());
+        assertThat(renewed.getExpiresAt()).isGreaterThan(System.currentTimeMillis() + Duration.ofDays(6).toMillis());
+        assertThat(cache.size()).isEqualTo(2);
+        verify(sessions, times(2)).lockById(20L);
+    }
+
+    @Test void expiredOrMissingRecordsCreateANewToken() {
+        var first = service.create(20L);
+        cache.replaceAll((key, value) -> value.replaceAll("\"expiresAt\":\\d+", "\"expiresAt\":1"));
+        var second = service.create(20L);
+        assertThat(second.getToken()).isNotEqualTo(first.getToken());
+        assertThatThrownBy(() -> service.preview(first.getToken())).isInstanceOf(IllegalArgumentException.class);
+        cache.entrySet().removeIf(entry -> entry.getKey().contains(":token:"));
+        assertThat(service.create(20L).getToken()).isNotEqualTo(second.getToken());
+    }
+
+    @Test void anotherSessionGetsItsOwnToken() {
+        var first = service.create(20L);
+        ByaiSession other = new ByaiSession();
+        other.setSessionId(21L);
+        other.setSessionType("hs_as");
+        other.setEnterpriseId(3L);
+        when(sessions.findById(21L)).thenReturn(other);
+        when(members.findSessionMember(21L, "USER", 10L)).thenReturn(owner);
+        var second = service.create(21L);
+        assertThat(second.getToken()).isNotEqualTo(first.getToken());
+        assertThat(service.create(20L).getToken()).isEqualTo(first.getToken());
+    }
+
     @Test void anonymousPreviewReturnsDisplayData() {
         var token = service.create(20L).getToken();
         CurrentUserHolder.clearLoginInfo();

@@ -34,6 +34,14 @@ public class GroupChatInvitationService {
     private static final SecureRandom RANDOM = new SecureRandom();
     private static final String TOKEN_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
     private final StringRedisTemplate redis;
+    private final com.iwhalecloud.byai.state.domain.session.service.SessionService sessions;
+    private final GroupChatInvitationTokenCipher tokenCipher;
+    // 同一 hash tag 保证 Redis Cluster 下两个键也可在同一脚本中原子更新。
+    private static final org.springframework.data.redis.core.script.DefaultRedisScript<Long> SAVE =
+        new org.springframework.data.redis.core.script.DefaultRedisScript<>(
+            "if ARGV[3] == 'create' and redis.call('EXISTS', KEYS[1]) == 1 then return 0 end "
+            + "redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2]) "
+            + "redis.call('SET', KEYS[2], KEYS[1], 'PX', ARGV[2]) return 1", Long.class);
     private final SessionExtService extensions;
     private final SessionMemberService members;
     private final GroupChatAuthorizationService authorization;
@@ -41,13 +49,31 @@ public class GroupChatInvitationService {
     private final EnterpriseInfoMapper enterprises;
     private final com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService resources;
 
+    @org.springframework.transaction.annotation.Transactional
     public GroupChatInvitationTokenResponse create(Long sessionId) {
         Long userId = requireUser();
+        sessions.lockById(sessionId);
         ByaiSession group = authorization.requireGroup(sessionId);
         authorization.requireAdmin(sessionId);
         requireLinkEnabled(sessionId);
         requireEnterprise(group);
         requireInviter(sessionId, userId);
+        String boundKey = redis.opsForValue().get(sessionKey(sessionId));
+        if (boundKey != null) {
+            String value = redis.opsForValue().get(boundKey);
+            if (value != null) {
+                InvitationRecord existing = JSON.parseObject(value, InvitationRecord.class);
+                if (existing != null && existing.getExpiresAt() > System.currentTimeMillis()) {
+                    if (!Objects.equals(existing.getSessionId(), sessionId)) throw invalid();
+                    validate(existing);
+                    String token = tokenCipher.decrypt(existing.getEncryptedToken());
+                    if (!Objects.equals(key(token), boundKey)) throw invalid();
+                    existing.setExpiresAt(System.currentTimeMillis() + VALIDITY.toMillis());
+                    if (!save(token, existing, false)) throw new IllegalStateException("Unable to renew invitation");
+                    return response(token, existing);
+                }
+            }
+        }
         InvitationRecord record = new InvitationRecord();
         record.setSessionId(sessionId);
         record.setInviterId(userId);
@@ -59,14 +85,27 @@ public class GroupChatInvitationService {
                 tokenBuilder.append(TOKEN_ALPHABET.charAt(RANDOM.nextInt(TOKEN_ALPHABET.length())));
             }
             String token = tokenBuilder.toString();
-            if (Boolean.TRUE.equals(redis.opsForValue().setIfAbsent(key(token), JSON.toJSONString(record), VALIDITY))) {
-                GroupChatInvitationTokenResponse response = new GroupChatInvitationTokenResponse();
-                response.setToken(token);
-                response.setExpiresAt(record.getExpiresAt());
-                return response;
-            }
+            record.setEncryptedToken(tokenCipher.encrypt(token));
+            if (save(token, record, true)) return response(token, record);
         }
         throw new IllegalStateException("Unable to create invitation");
+    }
+
+    private String sessionKey(Long sessionId) {
+        return "group-chat:{invitations}:session:" + sessionId;
+    }
+
+    private boolean save(String token, InvitationRecord record, boolean create) {
+        return Long.valueOf(1).equals(redis.execute(SAVE,
+            java.util.List.of(key(token), sessionKey(record.getSessionId())),
+            JSON.toJSONString(record), String.valueOf(VALIDITY.toMillis()), create ? "create" : "renew"));
+    }
+
+    private GroupChatInvitationTokenResponse response(String token, InvitationRecord record) {
+        GroupChatInvitationTokenResponse response = new GroupChatInvitationTokenResponse();
+        response.setToken(token);
+        response.setExpiresAt(record.getExpiresAt());
+        return response;
     }
 
     public GroupChatInvitationResponse preview(String token) {
@@ -131,6 +170,7 @@ public class GroupChatInvitationService {
         if (value == null) throw invalid();
         InvitationRecord record = JSON.parseObject(value, InvitationRecord.class);
         if (record == null || record.getSessionId() == null || record.getInviterId() == null) throw invalid();
+        if (!Objects.equals(key(token), redis.opsForValue().get(sessionKey(record.getSessionId())))) throw invalid();
         return record;
     }
 
@@ -174,7 +214,7 @@ public class GroupChatInvitationService {
 
     private String key(String token) {
         try {
-            return "group-chat:invitation:" + HexFormat.of().formatHex(
+            return "group-chat:{invitations}:token:" + HexFormat.of().formatHex(
                 MessageDigest.getInstance("SHA-256").digest(token.getBytes(StandardCharsets.UTF_8)));
         } catch (NoSuchAlgorithmException error) {
             throw new IllegalStateException("SHA-256 unavailable", error);
@@ -191,5 +231,6 @@ public class GroupChatInvitationService {
         private Long inviterId;
         private Long enterpriseId;
         private long expiresAt;
+        private String encryptedToken;
     }
 }
