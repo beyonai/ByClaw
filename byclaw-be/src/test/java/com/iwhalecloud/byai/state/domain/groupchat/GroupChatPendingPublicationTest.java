@@ -11,6 +11,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.inOrder;
 
 import java.util.List;
 import java.util.Date;
@@ -127,6 +128,110 @@ class GroupChatPendingPublicationTest {
         assertThat(saved.getAllValues().get(1).getSourceFilesJson()).isEqualTo("[]");
         assertThat(saved.getAllValues().get(1).getTextContent()).isEqualTo("second");
         verifyNoInteractions(uploader, publications, messages);
+    }
+
+    @Test
+    void matchingEditReplacesVersionAndResetsUploadProgressUnderTaskLock() {
+        ByaiGroupChatPendingPublication existing = record(99L);
+        existing.setSourceFilesJson("[\"/by/removed.md\",\"/by/kept.md\"]");
+        existing.setUploadedFilesJson("{\"/by/removed.md\":{}}");
+        existing.setCloudResourceId(777L);
+        when(store.find(60L)).thenReturn(existing);
+        GroupChatPendingPublicationRequest edit = request("  edited text  ");
+        edit.setExpectedPendingPublicationId(99L);
+        edit.setSourcePaths(List.of("/by/kept.md"));
+
+        var response = pending.prepare(60L, edit);
+
+        assertThat(response.getPendingPublicationId()).isEqualTo(100L);
+        assertThat(response.getText()).isEqualTo("edited text");
+        assertThat(response.getSourcePaths()).containsExactly("/by/kept.md");
+        ArgumentCaptor<ByaiGroupChatPendingPublication> saved =
+            ArgumentCaptor.forClass(ByaiGroupChatPendingPublication.class);
+        var order = inOrder(authorization, tasks, store);
+        order.verify(authorization).requireInitiator(60L);
+        order.verify(tasks).selectForUpdate(60L);
+        order.verify(store).find(60L);
+        order.verify(store).replace(eq(task), saved.capture());
+        assertThat(saved.getValue().getUploadedFilesJson()).isEqualTo("{}");
+        assertThat(saved.getValue().getCloudResourceId()).isNull();
+        verifyNoInteractions(uploader, publications, messages, cloud);
+    }
+
+    @ParameterizedTest
+    @ValueSource(longs = {98L, 100L})
+    void staleEditCannotReplaceCurrentContent(long expectedId) {
+        when(store.find(60L)).thenReturn(record(99L));
+        assertRejectedEdit(expectedId, "outdated");
+    }
+
+    @Test
+    void editCannotRecreateMissingCard() {
+        assertRejectedEdit(99L, "outdated");
+    }
+
+    @ParameterizedTest
+    @ValueSource(longs = {0L, -1L})
+    void editRejectsNonPositiveVersion(long expectedId) {
+        assertRejectedEdit(expectedId, "must be positive");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"PUBLISHED", "CANCELLED"})
+    void editRejectsClosedTaskBeforeReadingCard(String status) {
+        task.setStatus(status);
+        assertRejectedEdit(99L, "not active");
+        verify(store, never()).find(any());
+    }
+
+    @Test
+    void editRejectsMissingTaskAfterAuthorization() {
+        when(tasks.selectForUpdate(60L)).thenReturn(null);
+        assertRejectedEdit(99L, "not active");
+        verify(store, never()).find(any());
+    }
+
+    @Test
+    void editRequiresInitiatorBeforeLockingOrReadingCard() {
+        when(authorization.requireInitiator(60L)).thenThrow(new IllegalArgumentException("forbidden"));
+        assertRejectedEdit(99L, "forbidden");
+        verifyNoInteractions(tasks);
+        verify(store, never()).find(any());
+    }
+
+    @Test
+    void editCannotClearBothTextAndFiles() {
+        when(store.find(60L)).thenReturn(record(99L));
+        GroupChatPendingPublicationRequest edit = request("  ");
+        edit.setExpectedPendingPublicationId(99L);
+        assertThatThrownBy(() -> pending.prepare(60L, edit)).hasMessageContaining("requires text or files");
+        verify(store, never()).replace(any(), any());
+        verifyNoInteractions(sequence, uploader, messages, events);
+    }
+
+    @Test
+    void rejectedEditDoesNotWriteOrQueueNotification() {
+        ByaiGroupChatPendingPublicationMapper mapper = mock(ByaiGroupChatPendingPublicationMapper.class);
+        MultiDeviceBroadcastService broadcaster = mock(MultiDeviceBroadcastService.class);
+        GroupChatPendingPublicationStore realStore = new GroupChatPendingPublicationStore(mapper, broadcaster);
+        when(mapper.selectById(60L)).thenReturn(record(101L));
+        pending = new GroupChatPendingPublicationService(authorization, tasks, realStore, sequence);
+        TransactionSynchronizationManager.initSynchronization();
+        GroupChatPendingPublicationRequest edit = request("stale");
+        edit.setExpectedPendingPublicationId(100L);
+        assertThatThrownBy(() -> pending.prepare(60L, edit)).hasMessageContaining("outdated");
+        verify(mapper, never()).deleteById(any(Long.class));
+        verify(mapper, never()).insert(any(ByaiGroupChatPendingPublication.class));
+        assertThat(TransactionSynchronizationManager.getSynchronizations()).isEmpty();
+        verifyNoInteractions(broadcaster, sequence);
+    }
+
+    private void assertRejectedEdit(long expectedId, String message) {
+        GroupChatPendingPublicationRequest edit = request("changed");
+        edit.setExpectedPendingPublicationId(expectedId);
+        assertThatThrownBy(() -> pending.prepare(60L, edit)).hasMessageContaining(message);
+        verify(store, never()).replace(any(), any());
+        verifyNoInteractions(sequence, uploader, publications, messages, events);
     }
 
     @Test

@@ -42,6 +42,17 @@ public class GroupChatPendingPublicationService {
         if (task == null || !"ACTIVE".equals(task.getStatus())) {
             throw new IllegalArgumentException("Task is not active");
         }
+        Long expectedId = request == null ? null : request.getExpectedPendingPublicationId();
+        if (expectedId != null) {
+            if (expectedId <= 0) {
+                throw new IllegalArgumentException("Expected pending publication ID must be positive");
+            }
+            // 与整体替换共用任务行锁，避免检查通过后被其他设备或 Agent 更新。
+            ByaiGroupChatPendingPublication current = store.find(taskId);
+            if (current == null || !expectedId.equals(current.getPendingPublicationId())) {
+                throw new IllegalArgumentException("Pending publication is outdated");
+            }
+        }
         String text = request == null ? null : StringUtils.trimToNull(request.getText());
         List<String> paths = request == null || request.getSourcePaths() == null ? List.of()
             : request.getSourcePaths().stream().map(GroupChatPublicationUploader::validateSourcePath).distinct().toList();

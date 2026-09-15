@@ -37,6 +37,14 @@ ByClaw-BE 是 BeyondAI 平台的后端服务，提供完整的 AI 应用开发�
 - 新表迁移位于 `deploy/migrations/versions/V0.4.1/V0.4.1__ddl.sql`，启动新版后端前须执行对应迁移。既有 execution 保留为会话入口和旧记录恢复依据，不重放已完成历史调用。
 - 后端重启可恢复领取后尚未绑定 trace 的 turn，事务锁和 trace 条件更新防止重复发送。确定发生在 Gateway 路由前的准备失败会结束该 turn；已绑定 trace 且送达情况未知的请求不盲目重发，因此异常远端调用可能继续占用队列，需沿原运行恢复流程处理。
 
+## 群聊待发布成果编辑
+
+- `POST /byaiService/group-chat/tasks/{taskId}/pending-publication` 接受 `text`、`sourcePaths` 和可选的 `expectedPendingPublicationId`。编辑客户端必须以十进制字符串传入当前正数 ID，例如 `{"expectedPendingPublicationId":"95001","text":"修改后的正文","sourcePaths":[]}`；不传该字段时保留原 Agent / 客户端整体替换行为。
+- 发起人仍在群内且任务为 `ACTIVE` 时才能准备内容。后端在任务行锁内比较当前卡片 ID；当前卡片缺失或 ID 不匹配时拒绝，不修改内容、不发送准备通知。成功整体替换并返回新 `pendingPublicationId`，清空旧上传进度，事务提交后发送私有 `TASK_PUBLICATION_PREPARED` 通知。
+- 正文最多 100000 字符、附件最多 100 项、路径最多 4096 字符；正文与附件不能同时为空。移除附件只改变发布列表，不删除源文件或云盘文件，保存时不上传文件。
+- 编辑客户端先保存，再用返回的新 ID 调用原 `POST /byaiService/group-chat/tasks/{taskId}/complete`，请求只传 `pendingPublicationId`，不能混传正文或附件。保存成功但确认失败时，未继续编辑的重试应复用该 ID 和上传记录；外部新版导致冲突时保留本地输入，由用户核对最新版。
+- 本次编辑能力无需数据库迁移，部署顺序为后端先、前端后；旧后端忽略新增字段，不能提供编辑版本保护。回退前端不影响旧准备和确认调用。
+
 ## 群聊任务执行与恢复
 
 - 群聊分类和 disposition 文件写入要求 Agent 静默执行；过程正文、最终答复和 `taskName` / `ackText` 只包含用户业务内容，不汇报内部分类、控制文件或协议。此约束由请求提示词引导，不改变分类文件读取和任务提升流程。
