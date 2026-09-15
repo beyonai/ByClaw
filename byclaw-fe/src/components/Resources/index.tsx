@@ -468,10 +468,7 @@ const Resources: React.FC<Props> = ({ resourceType, installedOnly = false, onIns
           message.error(intl.formatMessage({ id: 'digitalEmployees.noPermission' }));
           return;
         }
-        if (item.canViewDetail !== true) {
-          message.error(intl.formatMessage({ id: 'digitalEmployees.noPermission' }));
-          return;
-        }
+        // 列表权限可能缺失或已过期，进入详情后由后端校验实际的使用/管理权限。
         const params = new URLSearchParams();
         if (resourceId) {
           params.set('resourceId', resourceId);

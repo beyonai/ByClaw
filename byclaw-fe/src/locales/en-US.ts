@@ -547,6 +547,12 @@ export default {
   'knowledgeDetail.newSubFolder': 'New Subfolder',
   'knowledgeDetail.newSiblingFolder': 'New Sibling Folder',
   'knowledgeDetail.uploadFile': 'Upload File',
+  'knowledgeDetail.downloadFile': 'Download Files',
+  'knowledgeDetail.downloadConfirmTitle': 'Confirm Knowledge Base Download',
+  'knowledgeDetail.downloadConfirmContent':
+    'All folders and files in this knowledge base will be downloaded as a ZIP archive. Continue?',
+  'knowledgeDetail.downloadFailed': 'Failed to download the knowledge base. Please try again later.',
+  'knowledgeDetail.downloadPreparing': 'Preparing and downloading the knowledge archive. Keep this page open.',
   'knowledgeDetail.sameNameFileOverwriteTip': 'Same name files will be overwritten',
   'knowledgeDetail.uploadSuccess': 'Upload successful',
   'knowledgeDetail.uploadPartial': 'Upload completed: {succeeded} succeeded, {failed} failed',

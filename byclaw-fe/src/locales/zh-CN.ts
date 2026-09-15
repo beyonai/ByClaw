@@ -549,6 +549,12 @@ export default {
   'knowledgeDetail.newSubFolder': '新增子级目录',
   'knowledgeDetail.newSiblingFolder': '新增同级目录',
   'knowledgeDetail.uploadFile': '上传文件',
+  'knowledgeDetail.downloadFile': '下载文件',
+  'knowledgeDetail.downloadConfirmTitle': '确认下载知识库',
+  'knowledgeDetail.downloadConfirmContent':
+    '将下载此知识库中的全部文件夹和文件并打包为 ZIP 压缩包。确认下载吗？',
+  'knowledgeDetail.downloadFailed': '知识库下载失败，请稍后重试',
+  'knowledgeDetail.downloadPreparing': '正在打包并下载知识库，请勿关闭页面。',
   'knowledgeDetail.sameNameFileOverwriteTip': '相同文件名将覆盖更新',
   'knowledgeDetail.uploadSuccess': '上传成功',
   'knowledgeDetail.uploadPartial': '上传完成：成功 {succeeded} 个，失败 {failed} 个',

@@ -15,6 +15,7 @@ import {
 import { queryKnowledgeCapability, type KnowledgeCapability } from '@/service/knowledgeCenter';
 import AddFolderModal from './components/AddFolderModal';
 import BaseInfo from './components/BaseInfo';
+import DownloadFile from './components/DownloadFile';
 import UploadFile from './components/UploadFile';
 import DirectoryManage, { DirectoryManageRef } from './DirectoryManage';
 import { PermissionManageRef } from './PermissionManage';
@@ -82,24 +83,15 @@ const KnowledgeDetail: React.FC = () => {
         try {
           const res = await queryResourceDetail({ resourceId, resourceBizType, resourceSourcePkId });
           if (!mounted) return;
-          const permissions = (res?.operationPermissions || {}) as ResourceOperationPermissions;
-          const canViewDetail =
-            permissions?.canViewDetail ??
-            permissions?.hasManagePermission ??
-            permissions?.hasUsePermission ??
-            permissions?.canEdit ??
-            permissions?.canManageAuth ??
-            permissions?.canDelete ??
-            false;
-          if (!canViewDetail) {
+          if (!res?.resourceId || String(res.resourceId) !== String(resourceId)) {
             navigate(knowledgeCenterBackPath, { replace: true });
             return;
           }
+          const permissions = (res?.operationPermissions || {}) as ResourceOperationPermissions;
+          // 详情接口已校验访问权限；权限字段只用于控制页面内的管理操作。
           setOperationPermissions(permissions);
 
-          if (mounted && res) {
-            setBaseInfo(res);
-          }
+          setBaseInfo(res);
         } catch {
           if (mounted) {
             navigate(knowledgeCenterBackPath, { replace: true });
@@ -268,6 +260,9 @@ const KnowledgeDetail: React.FC = () => {
                       >
                         {intl.formatMessage({ id: 'directoryManage.batchDeleteWithCount' }, { count: selectedCount })}
                       </Button>
+                    )}
+                    {operationPermissions && resourceId && (
+                      <DownloadFile key={resourceId} resourceId={resourceId} resourceName={baseInfo?.resourceName} />
                     )}
                     {canManageKnowledge && (
                       <UploadFile
