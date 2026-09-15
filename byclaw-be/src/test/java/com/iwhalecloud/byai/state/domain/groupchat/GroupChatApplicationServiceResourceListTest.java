@@ -16,6 +16,8 @@ import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -31,6 +33,11 @@ import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSessionMember;
 import com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper;
 import com.iwhalecloud.byai.state.domain.agent.enums.AgentMetaEnum;
+import com.iwhalecloud.byai.state.domain.chat.model.MessageFileDto;
+import com.iwhalecloud.byai.state.domain.chat.model.MessageResourceDto;
+import com.iwhalecloud.byai.state.domain.chat.dto.GroupChatContextRequest;
+import com.iwhalecloud.byai.state.domain.chat.service.GroupChatContextService;
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatApplicationService;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatExecutionCoordinator;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatMentionService;
@@ -152,6 +159,53 @@ class GroupChatApplicationServiceResourceListTest {
         verify(messageMapper).insert(any(ByaiMessage.class));
         verify(mentionService).indexHumanMentions(eq(GROUP_ID), eq(MESSAGE_ID), eq(USER_ID), eq(USER_ID), any());
         verify(executionCoordinator, never()).enqueue(any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = { "", "请查看附件" })
+    void uploadedFilesSurvivePersistenceAndMessageBroadcast(String text) {
+        ChatMessage command = command(List.of());
+        command.setChatContent(text);
+        MessageFileDto file = new MessageFileDto();
+        file.setFileId("9007199254740993");
+        file.setFileName("报告.pdf");
+        file.setFileType("file");
+        command.setFiles(List.of(file));
+
+        service.acceptUserMessage(command);
+
+        ArgumentCaptor<ByaiMessage> saved = ArgumentCaptor.forClass(ByaiMessage.class);
+        verify(messageMapper).insert(saved.capture());
+        MessageResourceDto resources = JSON.parseObject(saved.getValue().getRelatedResources(), MessageResourceDto.class);
+        assertThat(resources).isNotNull();
+        assertThat(resources.getFiles()).singleElement().satisfies(attachment -> {
+            assertThat(attachment.getFileId()).isEqualTo("9007199254740993");
+            assertThat(attachment.getFileName()).isEqualTo("报告.pdf");
+        });
+        ArgumentCaptor<JSONObject> broadcast = ArgumentCaptor.forClass(JSONObject.class);
+        verify(eventPublisher).publish(eq(GROUP_ID), broadcast.capture(), isNull());
+        assertThat(broadcast.getValue().getJSONArray("files")).singleElement().satisfies(attachment -> {
+            JSONObject value = (JSONObject) JSON.toJSON(attachment);
+            assertThat(value.getString("fileId")).isEqualTo("9007199254740993");
+            assertThat(value.getString("fileName")).isEqualTo("报告.pdf");
+        });
+
+        SessionService sessions = mock(SessionService.class);
+        ByaiSession group = new ByaiSession();
+        group.setSessionId(GROUP_ID);
+        when(sessions.findById(GROUP_ID)).thenReturn(group);
+        when(messageMapper.selectVisibleBeforeMessageId(GROUP_ID, MESSAGE_ID + 1, 60))
+            .thenReturn(List.of(saved.getValue()));
+        GroupChatContextService context = new GroupChatContextService(messageMapper, sessions,
+            mock(SsResourceService.class));
+        GroupChatContextRequest request = new GroupChatContextRequest();
+        request.setConversationKey(String.valueOf(GROUP_ID));
+        request.setBeforeMessageId(String.valueOf(MESSAGE_ID + 1));
+        assertThat(context.load(request).getMessages()).singleElement().satisfies(message ->
+            assertThat(message.getAttachments()).singleElement().satisfies(attachment -> {
+                assertThat(attachment.getFileId()).isEqualTo("9007199254740993");
+                assertThat(attachment.getFileName()).isEqualTo("报告.pdf");
+            }));
     }
 
     @Test

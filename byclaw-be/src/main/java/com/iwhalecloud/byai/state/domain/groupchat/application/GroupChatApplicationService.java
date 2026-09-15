@@ -47,6 +47,7 @@ import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatEvent
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatExecutionCoordinator;
 import com.iwhalecloud.byai.state.domain.agent.enums.AgentMetaEnum;
 import com.iwhalecloud.byai.state.domain.resource.dto.ResourceVo;
+import com.iwhalecloud.byai.state.domain.chat.model.MessageResourceDto;
 
 /** 群聊资源创建和成员管理用例。 */
 @Service
@@ -184,6 +185,12 @@ public class GroupChatApplicationService {
         message.setCreatorId(CurrentUserHolder.getCurrentUserId());
         message.setCreatorName(senderName);
         message.setMessageContent(command.getChatContent());
+        if (command.getFiles() != null && !command.getFiles().isEmpty()) {
+            // 与历史上下文读取的普通附件结构一致，确认后和重新进入群聊时均可恢复。
+            MessageResourceDto resources = new MessageResourceDto();
+            resources.setFiles(command.getFiles());
+            message.setRelatedResources(JSON.toJSONString(resources));
+        }
         message.setUsage(1);
         message.setMessageRef(command.getReplyToMessageId());
         Map<String, Object> metadata = new HashMap<>();
@@ -205,6 +212,9 @@ public class GroupChatApplicationService {
         event.put("sessionId", String.valueOf(session.getSessionId()));
         event.put("messageId", String.valueOf(messageId));
         event.put("content", command.getChatContent());
+        if (command.getFiles() != null && !command.getFiles().isEmpty()) {
+            event.put("files", command.getFiles());
+        }
         event.put("creatorId", CurrentUserHolder.getCurrentUserId());
         event.put("creatorName", senderName);
         event.put("resourceList", command.getResourceList());
