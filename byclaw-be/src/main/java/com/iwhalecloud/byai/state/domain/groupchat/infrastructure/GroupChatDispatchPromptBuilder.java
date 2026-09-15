@@ -11,6 +11,19 @@ import org.springframework.stereotype.Component;
 public class GroupChatDispatchPromptBuilder {
     public static final String SCHEMA_VERSION = "1";
 
+    /** 初次任务和任务内修改共用交付提醒，是否已交付由 Agent 根据本轮实际结果判断。 */
+    public String appendTaskDeliveryReminder(String content) {
+        return content + "\n\n[任务交付提醒]\n"
+            + "仅当当前会话已判定为 TASK，且本轮已经向用户展示可检查的新产物、更新后的产物、"
+            + "有效文件链接或完整交付内容时，在答复末尾自然地提醒一次："
+            + "“你可以先检查一下，有需要调整的地方随时告诉我；确认没问题后，可以让我帮你发布到群里。”\n"
+            + "尚未完成交付、执行失败、等待用户补充信息或本轮只是普通问答时不要提醒；"
+            + "CHAT 回复不提醒，不要在过程说明中反复提醒，不要将提醒写入 taskName 或 ackText。"
+            + "已发布或已取消的任务不提醒；用户已要求发布或正在确认发布时，不再提示用户提出发布请求。"
+            + "这条提醒本身不是发布授权，不要因此自动发起发布或声称已经发布，仍遵循既有发布确认流程。"
+            + "面向用户只表达检查和发布的业务含义，不提及 TASK 分类或内部协议。";
+    }
+
     /** 仅在 Gateway 出站时附加冻结的调度快照，不修改用户正文或消息元数据。 */
     public String appendTurnContext(String content, String inputContent) {
         return content + "\n\n[群聊消息上下文 - 仅供内部使用]\n"

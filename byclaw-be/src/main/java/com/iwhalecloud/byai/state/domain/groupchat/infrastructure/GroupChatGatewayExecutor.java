@@ -284,8 +284,15 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
             if (turn != null && "CHAT_CONTINUATION".equals(turn.getPhase())) {
                 return promptBuilder.appendChatContinuation(dispatchContent, buildMemberRoster(execution));
             }
-            return promptBuilder.append(dispatchContent, execution.getExecutionId(),
-                context.sessionId, buildMemberRoster(execution));
+            return promptBuilder.appendTaskDeliveryReminder(promptBuilder.append(dispatchContent,
+                execution.getExecutionId(), context.sessionId, buildMemberRoster(execution)));
+        }
+        // 私有任务续聊不重复分类；仅未结束任务在交付新版本时需要检查及发布提醒。
+        if (turn == null && taskMapper != null && content instanceof String text) {
+            ByaiGroupChatTask task = taskMapper.selectById(context.sessionId);
+            if (task != null && "ACTIVE".equals(task.getStatus())) {
+                return promptBuilder.appendTaskDeliveryReminder(text);
+            }
         }
         return content;
     }

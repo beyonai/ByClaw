@@ -17,12 +17,15 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mockito;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import com.iwhalecloud.byai.common.message.entity.ByaiMessage;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxUserContextRunner;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatExecution;
+import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTask;
+import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTaskMapper;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSessionMember;
 import com.iwhalecloud.byai.manager.entity.users.Users;
@@ -40,6 +43,7 @@ import com.iwhalecloud.byai.state.domain.session.service.SessionMemberService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 
 class GroupChatGatewayExecutorTest {
+    private final ByaiGroupChatTaskMapper tasks = mock(ByaiGroupChatTaskMapper.class);
     private ScriptService script;
     private ByaiMessageMapper messages;
     private ByaiGroupChatExecutionMapper executions;
@@ -60,6 +64,7 @@ class GroupChatGatewayExecutorTest {
         SandboxUserContextRunner runner = mock(SandboxUserContextRunner.class);
         executor = new GroupChatGatewayExecutor(script, messages, users, resources, tokens,
             new GroupChatDispatchPromptBuilder(), members, new GroupChatMemberUidCodec(), executions, sequences, runner);
+        executor.configureTurnTransactions(mock(PlatformTransactionManager.class), tasks);
         Users user = new Users();
         user.setUserCode("user30");
         user.setUserName("用户三十");
@@ -121,7 +126,7 @@ class GroupChatGatewayExecutorTest {
         Map<String, Object> params = new HashMap<>();
         params.put("groupChat", Map.of("conversationKey", "60"));
         String decorated = (String) executor.decorate(context, child.getMessageContent(), params);
-        assertThat(decorated).contains("group-chat-disposition.json", "HUMAN_30", "用户三十");
+        assertThat(decorated).contains("group-chat-disposition.json", "HUMAN_30", "用户三十", "[任务交付提醒]");
         assertThat(child.getMessageContent()).doesNotContain("group-chat-disposition.json");
         Map<?, ?> groupChat = (Map<?, ?>) params.get("groupChat");
         assertThat(groupChat.get("contextToken")).isEqualTo("signed-context-token");
@@ -147,6 +152,28 @@ class GroupChatGatewayExecutorTest {
         Map<?, ?> reference = (Map<?, ?>) params.get("groupChat");
         assertThat(reference.get("beforeMessageId")).isEqualTo("20");
         assertThat(reference.get("contextToken")).isEqualTo("signed-context-token");
+    }
+
+    @Test
+    void onlyActivePrivateTaskFollowupsReceiveDeliveryReminderWithoutReclassification() {
+        execution.setStatus("CONVERSATION");
+        ByaiGroupChatTask task = new ByaiGroupChatTask();
+        task.setStatus("ACTIVE");
+        when(tasks.selectById(60L)).thenReturn(task);
+        ChatProcessContext context = new ChatProcessContext(null, new AssistantChatDto());
+        context.sessionId = 60L;
+        context.userId = 30L;
+        context.assistantChatDto.setAgentId(40L);
+        context.assistantChatDto.setChatContent("修改报告");
+        context.traceId = ScriptService.getTraceId(81L, 82L);
+        String content = (String) executor.decorate(context, "修改报告", new HashMap<>());
+        assertThat(content).startsWith("修改报告").contains("[任务交付提醒]")
+            .doesNotContain("群聊判定协议", "group-chat-disposition.json");
+        assertThat(context.assistantChatDto.getChatContent()).isEqualTo("修改报告");
+        for (String status : List.of("PUBLISHED", "CANCELLED")) {
+            task.setStatus(status);
+            assertThat(executor.decorate(context, "修改报告", new HashMap<>())).isEqualTo("修改报告");
+        }
     }
 
     @Test

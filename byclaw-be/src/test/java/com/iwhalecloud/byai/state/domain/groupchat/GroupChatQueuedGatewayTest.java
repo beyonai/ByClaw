@@ -139,7 +139,7 @@ class GroupChatQueuedGatewayTest {
         ChatProcessContext ctx = context(60L);
         when(turns.selectByTrace(ctx.traceId)).thenReturn(turn);
         String outbound = (String) executor.decorate(ctx, request.getValue().getChatContent(), new HashMap<>());
-        assertThat(outbound).startsWith(CURRENT_MESSAGE + "\n\n").contains(turn.getInputContent());
+        assertThat(outbound).startsWith(CURRENT_MESSAGE + "\n\n").contains(turn.getInputContent(), "[任务交付提醒]");
         assertThat(request.getValue().getChatContent()).isEqualTo(CURRENT_MESSAGE);
         assertThat(existing.getValue().getMessageContent()).isEqualTo(CURRENT_MESSAGE);
         assertThat(request.getValue().getClientRequestId()).isEqualTo("71_72");
@@ -170,6 +170,7 @@ class GroupChatQueuedGatewayTest {
         String content = (String) executor.decorate(ctx, CURRENT_MESSAGE, params);
         assertThat(content).startsWith(CURRENT_MESSAGE + "\n\n")
             .contains("/by/.sessions/600/.byclaw/", "仅分类，禁止执行业务", turn.getInputContent());
+        assertThat(content).doesNotContain("[任务交付提醒]");
         verify(tokens).issue(10L, 600L, 30L, 40L, 68L);
         assertThat(((Map<?, ?>) params.get("groupChat")).get("beforeMessageId")).isEqualTo("68");
     }
@@ -186,7 +187,7 @@ class GroupChatQueuedGatewayTest {
         turn.setPhase("CHAT_CONTINUATION");
         assertThat((String) executor.decorate(ctx, CURRENT_MESSAGE, params))
             .startsWith(CURRENT_MESSAGE + "\n\n").contains("不要重新执行原始任务", turn.getInputContent())
-            .doesNotContain("group-chat-disposition.json");
+            .doesNotContain("group-chat-disposition.json", "[任务交付提醒]");
     }
 
     @Test
