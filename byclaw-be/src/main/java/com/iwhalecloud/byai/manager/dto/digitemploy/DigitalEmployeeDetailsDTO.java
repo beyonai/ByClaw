@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.dto.digitemploy;
 
+import com.iwhalecloud.byai.manager.vo.auth.ResourceOperationPermissionsVo;
 import com.iwhalecloud.byai.manager.dto.template.MemoryConfigDTO;
 import lombok.Getter;
 import lombok.Setter;
@@ -15,6 +16,8 @@ import java.util.List;
 @Getter
 @Setter
 public class DigitalEmployeeDetailsDTO extends DigitalEmployeeDTO {
+
+    private ResourceOperationPermissionsVo operationPermissions;
 
     /** 当前在用的数字员工组配置版本；普通数字员工不返回。 */
     private String configVersion;

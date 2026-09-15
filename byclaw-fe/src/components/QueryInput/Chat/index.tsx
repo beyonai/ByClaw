@@ -329,6 +329,7 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
             chatMode={chatModeMap.expert}
             agentId={agentId}
             sessionId={sessionId}
+            resourceAgentIds={this.getResourceAgentIds()}
             excludedAgentIds={(this.state.resourceList || [])
               .filter((resource) => `${resource.resourceType}` === `${ResourceTypeMap.digitalEmployee}`)
               .flatMap((resource) =>
@@ -365,9 +366,9 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
             popoverPos={showMentionPopoverType === '#' ? staticEmptyObject : undefined}
             onClose={() => this.setState((prev) => ({ ...prev, showMentionPopoverType: '' }))}
           >
-            <Tooltip title="选择技能">
+            <Tooltip title={getIntl().formatMessage({ id: 'queryInput.tools.selectSkill' })}>
               <span
-                aria-label="技能"
+                aria-label={getIntl().formatMessage({ id: 'queryInput.tools.skill' })}
                 className={styles.attachment}
                 onClick={() => this.setState((prev) => ({ ...prev, showMentionPopoverType: '#' }))}
               >
@@ -465,6 +466,7 @@ export default connect(
   ({ user, employees }: any) => {
     return {
       userInfo: get(user, 'userInfo'),
+      defaultDigEmployeeId: get(employees, 'defaultDigEmployeeId') || get(user, 'userInfo.defaultDigEmployeeId'),
       // @ts-ignore
       employeesList: get(employees, 'employeesList') || [],
     };

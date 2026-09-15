@@ -750,7 +750,14 @@ public class ProjectApplicationService {
         }
         LambdaQueryWrapper<ProjectRepo> repoWrapper = new LambdaQueryWrapper<>();
         repoWrapper.eq(ProjectRepo::getProjectId, projectId);
-        return projectRepoMapper.selectList(repoWrapper);
+        List<ProjectRepo> repos = projectRepoMapper.selectList(repoWrapper);
+        repos.forEach(repo -> {
+            if (projectInitService != null) repo.setCloneStatus(projectInitService.getCloneStatus(repo));
+            if (projectInitService != null && "ready".equals(repo.getCloneStatus())) {
+                repo.setLocalPath(projectInitService.getProjectRepositoryPath(repo).toString());
+            }
+        });
+        return repos;
     }
 
     /**
@@ -862,14 +869,15 @@ public class ProjectApplicationService {
         repo.setRepoId(sequenceService.nextVal());
         repo.setProjectId(projectId);
         repo.setRepoFullName(repoDto.getRepoFullName().trim());
-        repo.setRepoUrl(repoDto.getRepoUrl() != null ? repoDto.getRepoUrl().trim() : null);
+        String provider = normalizeProvider(repoDto.getProvider());
+        repo.setRepoUrl(normalizeRepoUrl(repoDto.getRepoUrl(), repo.getRepoFullName(), provider));
         repo.setDefaultBranch(defaultBranch.isEmpty() ? "main" : defaultBranch);
         // 描述可选,空串归一成 null,避免预拆提示词里出现空的 description= 行。
         repo.setDescription(StringUtils.trimToNull(repoDto.getDescription()));
         // 仅接受受支持的仓库类型,其余(含空)按代码仓库处理;工作区唯一性由应用层/前端保证。
         String repoType = "workspace".equals(repoDto.getRepoType()) ? "workspace" : "code";
         repo.setRepoType(repoType);
-        repo.setProvider(normalizeProvider(repoDto.getProvider()));
+        repo.setProvider(provider);
         repo.setCreateBy(String.valueOf(CurrentUserHolder.getCurrentUserId()));
         repo.setCreateTime(new Date());
         projectRepoMapper.insert(repo);
@@ -891,7 +899,8 @@ public class ProjectApplicationService {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.repo.name.required");
         }
         ProjectRepo repo = insertProjectRepo(dto.getProjectId(), dto);
-        projectWorkspaceManifestService.syncProjectGitmodules(dto.getProjectId());
+        // 新增仓库只负责保存配置并异步克隆，不触发项目初始化、.gitmodules 同步或架构会话流程。
+        projectInitService.cloneProjectRepositoryAsync(repo);
         Map<String, Object> result = new HashMap<>();
         result.put("repoId", repo.getRepoId());
         result.put("repoFullName", repo.getRepoFullName());
@@ -926,15 +935,22 @@ public class ProjectApplicationService {
         if (repo == null || !dto.getProjectId().equals(repo.getProjectId())) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.repo.not.found");
         }
+        String previousRepoType = repo.getRepoType();
         repo.setRepoFullName(dto.getRepoFullName().trim());
-        repo.setRepoUrl(StringUtils.trimToNull(dto.getRepoUrl()));
+        String provider = normalizeProvider(dto.getProvider());
+        repo.setRepoUrl(normalizeRepoUrl(dto.getRepoUrl(), repo.getRepoFullName(), provider));
         String defaultBranch = dto.getDefaultBranch() == null ? "" : dto.getDefaultBranch().trim();
         repo.setDefaultBranch(defaultBranch.isEmpty() ? "main" : defaultBranch);
         repo.setDescription(StringUtils.trimToNull(dto.getDescription()));
         repo.setRepoType("workspace".equals(dto.getRepoType()) ? "workspace" : "code");
-        repo.setProvider(normalizeProvider(dto.getProvider()));
+        repo.setProvider(provider);
         projectRepoMapper.updateById(repo);
-        projectWorkspaceManifestService.syncProjectGitmodules(repo.getProjectId());
+        if ("workspace".equals(repo.getRepoType()) || "workspace".equals(previousRepoType)) {
+            projectWorkspaceManifestService.syncProjectGitmodules(repo.getProjectId());
+        }
+        if (projectInitService != null && !"ready".equals(projectInitService.getCloneStatus(repo))) {
+            projectInitService.cloneProjectRepositoryAsync(repo);
+        }
         Map<String, Object> result = new HashMap<>();
         result.put("repoId", repo.getRepoId());
         result.put("projectId", repo.getProjectId());
@@ -961,26 +977,31 @@ public class ProjectApplicationService {
     }
 
     /**
-     * 删除项目仓库，已被扫描源或手工需求关联时拒绝删除。
-     *
-     * @param repoId 仓库 ID
+     * GitHub 表单允许只填写 owner/repository；持久化时补齐 clone URL，避免异步 clone 因 repoUrl 为空失败。
+     * 显式填写的 URL 始终优先，其他代码平台不做推断。
      */
+    private static String normalizeRepoUrl(String repoUrl, String repoFullName, String provider) {
+        String explicitUrl = StringUtils.trimToNull(repoUrl);
+        if (explicitUrl != null) {
+            return explicitUrl;
+        }
+        if (!"github".equals(provider) || repoFullName == null) {
+            return null;
+        }
+        String fullName = repoFullName.trim().replaceAll("\\.git$", "");
+        if (fullName.matches("[^/\\s]+/[^/\\s]+")) {
+            return "https://github.com/" + fullName + ".git";
+        }
+        return null;
+    }
+
+    /** 删除项目仓库；扫描源关联不再阻断删除。 */
     @Transactional
     public void deleteProjectRepo(Long repoId) {
         if (repoId == null) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.repo.id.required");
         }
-        Long boundCount = scanSourceService.countByRepoId(repoId);
-        if (boundCount != null && boundCount > 0) {
-            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("project.repo.bound", boundCount));
-        }
         ProjectRepo repo = projectRepoMapper.selectById(repoId);
-        long manualRequirementBoundCount = repo == null ? 0
-            : countManualRequirementRepoBindings(repo.getProjectId(), repoId);
-        if (manualRequirementBoundCount > 0) {
-            throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
-                I18nUtil.get("project.repo.manualRequirement.bound", manualRequirementBoundCount));
-        }
         projectRepoMapper.deleteById(repoId);
         if (repo != null) {
             projectWorkspaceManifestService.syncProjectGitmodules(repo.getProjectId());

@@ -2007,8 +2007,8 @@ const EmployeeDetail = ({ loading }) => {
                   <ImageModelSelect
                     value={selectedTtsModelId}
                     modelType="TTS"
-                    label="语音模型"
-                    configurationLabel="语音模型配置"
+                    label={intl.formatMessage({ id: 'employeeDetail.ttsModel' })}
+                    configurationLabel={intl.formatMessage({ id: 'employeeDetail.ttsModelConfiguration' })}
                     disabled={readOnly}
                     onChange={(value) => {
                       form.setFieldValue('ttsModelId', value);

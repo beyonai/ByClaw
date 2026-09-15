@@ -242,10 +242,10 @@ describe('PersonalEmailSettings provider-first flow', () => {
 
     render(<PersonalEmailSettings />);
 
-    expect(await screen.findByText('邮箱账号加载失败')).toBeInTheDocument();
+    expect(await screen.findByText('settings.email.loadFailed')).toBeInTheDocument();
     const addButton = screen.getByRole('button', { name: 'settings.email.addAccount' });
     expect(addButton).toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: '重试加载邮箱账号' }));
+    fireEvent.click(screen.getByRole('button', { name: 'settings.email.retryLoad' }));
     await waitFor(() => expect(addButton).toBeEnabled());
     fireEvent.click(addButton);
     await screen.findByLabelText('邮箱服务商');
@@ -722,7 +722,7 @@ describe('PersonalEmailSettings provider-first flow', () => {
     expect(within(row).getByText('连接失败：需要重新授权')).toBeInTheDocument();
     expect(within(row).getByText(/2026-08-31/)).toBeInTheDocument();
 
-    fireEvent.click(within(row).getByRole('button', { name: '检查连接' }));
+    fireEvent.click(within(row).getByRole('button', { name: 'settings.email.checkConnection' }));
     await waitFor(() => expect(mockCheck).toHaveBeenCalledWith(8));
   });
 
@@ -734,7 +734,7 @@ describe('PersonalEmailSettings provider-first flow', () => {
     ]);
     render(<PersonalEmailSettings />);
     const row = (await screen.findByText('check@qq.com')).closest('tr') as HTMLTableRowElement;
-    const checkButton = within(row).getByRole('button', { name: '检查连接' });
+    const checkButton = within(row).getByRole('button', { name: 'settings.email.checkConnection' });
     fireEvent.click(checkButton);
     fireEvent.click(checkButton);
     expect(mockCheck).toHaveBeenCalledTimes(1);
@@ -766,7 +766,7 @@ describe('PersonalEmailSettings provider-first flow', () => {
       ]);
       render(<PersonalEmailSettings />);
       const row = (await screen.findByText('preserve@qq.com')).closest('tr') as HTMLTableRowElement;
-      fireEvent.click(within(row).getByRole('button', { name: '检查连接' }));
+      fireEvent.click(within(row).getByRole('button', { name: 'settings.email.checkConnection' }));
       await within(row).findByText(status === 'AUTH_REQUIRED' ? '连接失败：需要重新授权' : '连接失败：请检查设置');
       expect(within(row).getByText('搜索（需满足服务商条件）')).toBeInTheDocument();
     }
@@ -790,7 +790,7 @@ describe('PersonalEmailSettings provider-first flow', () => {
     ]);
     render(<PersonalEmailSettings />);
     const row = (await screen.findByText('update@qq.com')).closest('tr') as HTMLTableRowElement;
-    fireEvent.click(within(row).getByRole('button', { name: '检查连接' }));
+    fireEvent.click(within(row).getByRole('button', { name: 'settings.email.checkConnection' }));
     await within(row).findByText('连接就绪');
     expect(within(row).getByText('删除')).toBeInTheDocument();
     expect(within(row).queryByText('删除（需要服务器支持 MOVE 或 UIDPLUS）')).not.toBeInTheDocument();
@@ -813,7 +813,7 @@ describe('PersonalEmailSettings provider-first flow', () => {
     ]);
     render(<PersonalEmailSettings />);
     const row = (await screen.findByText('validate@qq.com')).closest('tr') as HTMLTableRowElement;
-    fireEvent.click(within(row).getByRole('button', { name: '检查连接' }));
+    fireEvent.click(within(row).getByRole('button', { name: 'settings.email.checkConnection' }));
     await within(row).findByText('连接就绪');
     expect(within(row).getByText('删除（需要服务器支持 MOVE 或 UIDPLUS）')).toBeInTheDocument();
   });

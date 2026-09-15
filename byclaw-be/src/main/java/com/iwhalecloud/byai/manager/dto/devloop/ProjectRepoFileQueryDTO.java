@@ -6,7 +6,12 @@ import lombok.Data;
 @Data
 public class ProjectRepoFileQueryDTO {
 
+    private Long projectId;
+
     private Long repoId;
+
+    /** 项目空间相对路径；repoId 为空时用它定位本地发现但未登记的 Git 仓库。 */
+    private String repositoryPath;
 
     /** 远程分支名称。 */
     private String branch;

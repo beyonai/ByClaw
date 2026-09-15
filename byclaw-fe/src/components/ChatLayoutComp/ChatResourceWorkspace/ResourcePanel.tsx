@@ -10,8 +10,8 @@ import ResourceSiderPanel from '@/layout/sider/components/ResourceSiderPanel';
 import { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentBar';
 import type { DetailPanelOptions } from '@/layout/sider/siderContentContext';
 import FileResourcePanel from './FileResourcePanel';
-import CodesTab from '@/layout/sider/components/ProjectSpaceList/CodesTab';
-import { listAvailableProjectRepos } from '@/service/devloop';
+import ProjectSpaceTab from '@/layout/sider/components/ProjectSpaceList/ProjectSpaceTab';
+import { querySessionDataSources } from '@/service/projectDataSources';
 import { useChatResourceProject } from './useChatResourceProject';
 import { getSessionFileTabKeys, type SessionFileTabKey } from './resourceTabUtils';
 import styles from './index.module.less';
@@ -45,40 +45,48 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
   const [upperScopeKey, setUpperScopeKey] = useState<UpperScopeKey>('session');
   const [secondaryState, setSecondaryState] = useState<SecondaryState>(EMPTY_SECONDARY_STATE);
   const [sessionResourceRefreshKey, setSessionResourceRefreshKey] = useState(0);
-  const [availableRepoCount, setAvailableRepoCount] = useState<number | null>(null);
   const resourceId = activeEmployee.resourceId || (project?.resourceId ? `${project.resourceId}` : undefined);
   const resolvedProjectId = Number(project?.projectId ?? projectId);
   const sessionFileTabKeys = useMemo(() => getSessionFileTabKeys(resolvedProjectId), [resolvedProjectId]);
-  const showDataSources = Number.isFinite(resolvedProjectId) && resolvedProjectId > 0;
+  const [dataSourceAvailability, setDataSourceAvailability] = useState<{
+    sessionId: string;
+    projectId: number;
+    hasData: boolean;
+  }>();
+  const showDataSources = Boolean(
+    sessionId &&
+      resolvedProjectId > 0 &&
+      dataSourceAvailability?.sessionId === sessionId &&
+      dataSourceAvailability?.projectId === resolvedProjectId &&
+      dataSourceAvailability?.hasData
+  );
   const showProjectCloudDrive = sessionFileTabKeys.includes('projectFile');
   // 项目云盘只能使用项目知识库 ID；未初始化知识库时保留空值并展示对应空态。
   const rawProjectCloudResourceId = cloudResourceId ?? project?.cloudResourceId;
   const projectCloudResourceId = rawProjectCloudResourceId ? `${rawProjectCloudResourceId}` : undefined;
 
-  // 只有当前会话实际可访问到至少一个仓库时才展示项目代码。
-  // null 表示仍在查询，避免先显示再隐藏造成菜单闪烁。
-  const showCode = Boolean(sessionId && availableRepoCount !== null && availableRepoCount > 0);
+  // 项目空间展示项目目录本身，项目尚未配置仓库时也可以浏览普通文件。
+  const showCode = Boolean(sessionId && resolvedProjectId > 0);
 
+  // 按当前会话的实际可见数据决定入口；切换会话后不沿用上一个会话的结果。
   useEffect(() => {
     let disposed = false;
-    setAvailableRepoCount(null);
-    if (!projectId || !sessionId) {
-      return () => {
-        disposed = true;
-      };
-    }
-    void listAvailableProjectRepos(projectId, sessionId)
-      .then((repos) => {
-        if (!disposed) setAvailableRepoCount(Array.isArray(repos) ? repos.length : 0);
+    if (!sessionId || !Number.isFinite(resolvedProjectId) || resolvedProjectId <= 0) return;
+    void querySessionDataSources(sessionId)
+      .then((result) => {
+        if (!disposed) {
+          setDataSourceAvailability({ sessionId, projectId: resolvedProjectId, hasData: result.total > 0 });
+        }
       })
       .catch(() => {
-        // 仓库可用性查询失败时不展示入口，避免打开后必然得到空代码页。
-        if (!disposed) setAvailableRepoCount(0);
+        if (!disposed) {
+          setDataSourceAvailability({ sessionId, projectId: resolvedProjectId, hasData: false });
+        }
       });
     return () => {
       disposed = true;
     };
-  }, [projectId, sessionId]);
+  }, [resolvedProjectId, sessionId, sessionResourceRefreshKey]);
 
   useEffect(() => {
     if (!showCode && secondaryState.session === 'code') {
@@ -107,7 +115,7 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
     return [
       ...sessionFileTabKeys.map((key) => ({ key, label: label(SESSION_FILE_TAB_LABEL_IDS[key]) })),
       ...(showDataSources ? [{ key: 'dataSources', label: label('dataSource.title') }] : []),
-      ...(showCode ? [{ key: 'code', label: label('chatResource.projectCode') }] : []),
+      ...(showCode ? [{ key: 'code', label: label('chatResource.projectSpace') }] : []),
     ];
   }, [intl, sessionFileTabKeys, showCode, showDataSources, upperScopeKey]);
 
@@ -167,12 +175,12 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
       }
       if (upperSecondaryKey === 'code' && showCode) {
         return (
-          <CodesTab
+          <ProjectSpaceTab
             projectId={Number(project?.projectId || projectId)}
             resourceId={resourceId}
+            projectCloudResourceId={projectCloudResourceId}
             sessionId={sessionId}
             refreshKey={sessionResourceRefreshKey}
-            codeChangesEnabled
             onOpenDetail={onOpenDetail}
           />
         );

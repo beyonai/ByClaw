@@ -224,7 +224,8 @@ const ProjectResources: React.FC<Props> = ({
     if (!repositoryProject) return;
     setLoadingRepos(true);
     try {
-      setRepos((await listProjectRepos(Number(project.projectId))) || []);
+      const nextRepos = (await listProjectRepos(Number(project.projectId))) || [];
+      setRepos(nextRepos);
     } catch (error: any) {
       setRepos([]);
       message.error(error?.message || intl.formatMessage({ id: 'projectSpace.resources.loadReposFailed' }));
@@ -232,6 +233,12 @@ const ProjectResources: React.FC<Props> = ({
       setLoadingRepos(false);
     }
   }, [intl, project.projectId, repositoryProject]);
+
+  useEffect(() => {
+    if (!repos.some((repo) => repo.cloneStatus === 'cloning')) return undefined;
+    const timer = window.setTimeout(() => void loadRepos(), 1500);
+    return () => window.clearTimeout(timer);
+  }, [loadRepos, repos]);
 
   const loadBoundResources = useCallback(async () => {
     if (!isOperationProject) return;
@@ -438,7 +445,11 @@ const ProjectResources: React.FC<Props> = ({
   const loadRepoBranches = useCallback(async (repo: DevloopProjectRepo) => {
     try {
       const branchList = await listProjectRepoBranches(repo.repoId);
-      const defaultBranch = repo.defaultBranch || branchList?.[0]?.name || 'main';
+      const defaultBranch =
+        branchList?.find((item) => item.name === repo.defaultBranch)?.name ||
+        branchList?.[0]?.name ||
+        repo.defaultBranch ||
+        'main';
       setBranches(branchList || []);
       setSelectedBranch(defaultBranch);
       return defaultBranch;
@@ -799,7 +810,7 @@ const ProjectResources: React.FC<Props> = ({
             !cloudResourceId || (!loadingFiles && !files.length) ? styles.resourceCategoryCardEmpty : ''
           } ${expandedCard === 'cloudDrive' ? styles.resourceCategoryCardExpanded : ''}`}
         >
-          {renderCardHeader('项目云盘', 'cloudDrive', undefined)}
+          {renderCardHeader(intl.formatMessage({ id: 'projectSpace.resources.cloudDrive' }), 'cloudDrive', undefined)}
           <FileResourcePanel
             scope="project"
             sessionId=""
@@ -879,17 +890,20 @@ const ProjectResources: React.FC<Props> = ({
                           if (key === 'run') {
                             try {
                               await triggerScan(Number(task.sourceId));
-                              message.success('定时任务已开始执行');
+                              message.success(intl.formatMessage({ id: 'projectSpace.resources.scheduleStarted' }));
                               await loadScheduleTasks();
                             } catch (error: any) {
-                              message.error(error?.message || '定时任务执行失败');
+                              message.error(
+                                error?.message || intl.formatMessage({ id: 'projectSpace.resources.scheduleFailed' })
+                              );
                             }
                           }
                           if (key === 'edit') onEditScheduleTask?.(task);
                           if (key === 'delete') {
                             Modal.confirm({
-                              title: '确认删除定时任务？',
-                              content: task.sourceName || '该定时任务',
+                              title: intl.formatMessage({ id: 'projectSpace.resources.scheduleDeleteConfirm' }),
+                              content:
+                                task.sourceName || intl.formatMessage({ id: 'projectSpace.resources.scheduleTask' }),
                               okButtonProps: { danger: true },
                               onOk: async () => {
                                 await deleteScanSource(Number(task.sourceId));

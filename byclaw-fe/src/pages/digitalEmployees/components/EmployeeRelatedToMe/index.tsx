@@ -7,6 +7,7 @@ import { Spin, message, Tabs } from 'antd';
 import { isEmpty, size, head, compact } from 'lodash';
 import Empty from '@/components/Empty';
 import { deleteDigitalEmployee, queryMyCreated } from '@/service/digitalEmployees';
+import useEmployeeRowRefresh, { employeeRowId, removeEmployeeRow } from '@/hooks/useEmployeeRowRefresh';
 import { getDefaultPagination, paginationReducer } from '@/utils/pageInfo';
 import { agentHandler } from '@/utils/agent';
 import { getTopLevelCatalogs } from '@/utils/catalog';
@@ -69,8 +70,11 @@ function EmployeeRelatedToMe(props: IProps, ref: any) {
   const [curApplyId, setCurApplyId] = useState<string>('');
   const hasInitializedRef = React.useRef(false);
 
-  const [paginationInfo, paginationDispatch] = useReducer(paginationReducer, getDefaultPagination({ pageSize: 30 }));
+  const [paginationInfo, paginationDispatch] = useReducer(paginationReducer, getDefaultPagination({ pageSize: 20 }));
 
+  const refreshEmployee = useEmployeeRowRefresh(list, setList, () => {
+    paginationDispatch({ type: 'change', item: { total: Math.max(0, paginationInfo.total - 1) } });
+  });
   const hasMore = paginationInfo.total > size(list);
 
   const myEmployeesTypeList = useMemo((): ICategory[] => {
@@ -96,6 +100,7 @@ function EmployeeRelatedToMe(props: IProps, ref: any) {
       }
 
       abortControllerRef.current = new AbortController();
+      const requestController = abortControllerRef.current;
 
       if (pageNum === 1) {
         setList([]);
@@ -115,6 +120,7 @@ function EmployeeRelatedToMe(props: IProps, ref: any) {
 
       return queryMyCreated(params, abortControllerRef.current)
         .then((res) => {
+          if (requestController.signal.aborted) return;
           const { list, ...rest } = res || {};
           if (list) {
             const mappedList = list.map((i: IAgentCache) => agentHandler(i));
@@ -229,10 +235,18 @@ function EmployeeRelatedToMe(props: IProps, ref: any) {
             const itemIdentity = `${item.resourceId ?? item.id ?? item.agentId ?? ''}`;
             if (defaultResourceId) {
               const isDefault = itemIdentity === `${defaultResourceId}`;
+              let canSetDefault = item.canSetDefault;
+              if (isDefault) {
+                canSetDefault = false;
+              } else if (item.operationPermissionsLoaded === true) {
+                canSetDefault =
+                  `${item.resourceStatus ?? item.metaStatus ?? ''}` !== '3' &&
+                  (item.hasManagePermission === true || item.hasUsePermission === true);
+              }
               return {
                 ...item,
                 isDefault,
-                canSetDefault: isDefault ? false : item.canSetDefault,
+                canSetDefault,
                 ownerType: !isDefault && item.ownerType === 'personal_default' ? 'personal' : item.ownerType,
               };
             }
@@ -264,11 +278,19 @@ function EmployeeRelatedToMe(props: IProps, ref: any) {
           }),
         ]);
       });
+      if (ApplyList.length || unApplyList.length || defaultResourceId) {
+        [...new Set([...ApplyList, ...unApplyList, ...(defaultResourceId ? [defaultResourceId] : [])])].forEach(
+          (id) => void refreshEmployee(id).catch(console.error)
+        );
+      }
     };
     EventEmitter.on('beyond-update-employee', handler);
 
-    const handleResourceChanged = () => {
-      getSearch(searchName || '', dropdownParam, 1, curActiveLink);
+    const handleResourceChanged = (event: Event) => {
+      const resourceId = (event as CustomEvent).detail?.resourceId;
+      if (!resourceId) return;
+      if (event.type === 'resourceDeleted') removeEmployeeRow(`${resourceId}`);
+      else void refreshEmployee(`${resourceId}`).catch(console.error);
     };
     window.addEventListener('resourceDeleted', handleResourceChanged);
     window.addEventListener('resourceRestored', handleResourceChanged);
@@ -278,7 +300,7 @@ function EmployeeRelatedToMe(props: IProps, ref: any) {
       window.removeEventListener('resourceDeleted', handleResourceChanged);
       window.removeEventListener('resourceRestored', handleResourceChanged);
     };
-  }, [EventEmitter, curActiveLink, dropdownParam, getSearch, searchName]);
+  }, [EventEmitter, refreshEmployee]);
 
   const defaultResourceId = defaultDigEmployeeId || userInfo?.defaultDigEmployeeId;
   const visibleList = useMemo(
@@ -356,27 +378,17 @@ function EmployeeRelatedToMe(props: IProps, ref: any) {
   );
 
   const onDeleteEmployee = React.useCallback(
-    (employee: IAgentCache) => {
-      deleteDigitalEmployee({
-        resourceId: String(employee.resourceId ?? employee.id),
-      })
-        .then(() => {
-          message.success(intl.formatMessage({ id: 'digitalEmployees.deleteSuccess' }));
-          EventEmitter.emit('beyond-update-employee', {
-            updateList: [
-              {
-                ...employee,
-                resourceStatus: 3,
-              },
-            ],
-          });
-          getSearch(searchName || '', dropdownParam, 1, curActiveLink);
-        })
-        .catch((error: any) => {
-          message.error(error?.message || error || intl.formatMessage({ id: 'common.deleteFailed' }));
-        });
+    async (employee: IAgentCache) => {
+      const resourceId = employeeRowId(employee);
+      try {
+        await deleteDigitalEmployee({ resourceId });
+        message.success(intl.formatMessage({ id: 'digitalEmployees.deleteSuccess' }));
+        removeEmployeeRow(resourceId);
+      } catch (error: any) {
+        message.error(error?.message || intl.formatMessage({ id: 'common.deleteFailed' }));
+      }
     },
-    [EventEmitter, curActiveLink, dropdownParam, getSearch, intl, searchName]
+    [intl]
   );
 
   const onAuthEmployee = React.useCallback((employee: IAgentCache, type: 'useAuth' | 'mgrAuth') => {
@@ -444,8 +456,10 @@ function EmployeeRelatedToMe(props: IProps, ref: any) {
             <InfiniteScroll
               ref={infiniteScrollRef}
               next={() => {
-                myQueryMyCreated(searchName, paginationInfo.pageIndex + 1, curActiveLink, dropdownParam);
+                return myQueryMyCreated(searchName, paginationInfo.pageIndex + 1, curActiveLink, dropdownParam);
               }}
+              autoFill
+              isLoading={isLoading}
               hasMore={hasMore}
               loader={
                 <div className="ub ub-ac ub-pc">
@@ -505,7 +519,7 @@ function EmployeeRelatedToMe(props: IProps, ref: any) {
             setSelectRecord(null);
           }}
           onSuccess={() => {
-            getSearch(searchName || '', dropdownParam, 1, curActiveLink);
+            void refreshEmployee(selectRecord).catch(console.error);
           }}
           headerInfo={{
             title: selectRecord?.resourceName || selectRecord?.name,
@@ -522,7 +536,7 @@ function EmployeeRelatedToMe(props: IProps, ref: any) {
           setSelectRecord(null);
         }}
         onSuccess={() => {
-          getSearch(searchName || '', dropdownParam, 1, curActiveLink);
+          void refreshEmployee(selectRecord).catch(console.error);
         }}
       />
       <ApplyForModal
@@ -533,7 +547,7 @@ function EmployeeRelatedToMe(props: IProps, ref: any) {
           setCurApplyId('');
         }}
         onSuccess={() => {
-          getSearch(searchName || '', dropdownParam, 1, curActiveLink);
+          void refreshEmployee(curApplyId).catch(console.error);
         }}
       />
     </div>

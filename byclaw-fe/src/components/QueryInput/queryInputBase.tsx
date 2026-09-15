@@ -53,6 +53,7 @@ export type IProps = {
   onMounted?: () => void;
   uploadFileConfig?: IAgentFileUploadConf;
   employeesList?: IAgentCache[];
+  defaultDigEmployeeId?: string | number;
   inputDraft?: DefaultValueSchema;
   onInputDraftChange?: (draft: DefaultValueSchema) => void;
   contextUsed?: ContextUsed;
@@ -529,11 +530,11 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
         >
           {hasTools && (
             <>
-              <Tooltip title="可添加数字员工、技能、连接器">
+              <Tooltip title={getIntl().formatMessage({ id: 'queryInput.tools.addResources' })}>
                 <Button
                   type="text"
                   className={styles.addToolButton}
-                  aria-label="打开聊天工具"
+                  aria-label={getIntl().formatMessage({ id: 'queryInput.tools.open' })}
                   icon={<AntdIcon type="icon-a-Plusjia" style={{ fontSize: 20 }} />}
                   onClick={() => this.openResourcePicker('expert')}
                 />
@@ -687,7 +688,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
     const inlineAgentIds = this.getInlineDigitalEmployeeList().map((item) => `${item.resourceId}`);
     const quoteAgentId = inlineAgentIds.length === 1 ? inlineAgentIds[0] : undefined;
 
-    // # 资源入口始终可用：未 @ 员工时展示全部资源，已 @ 员工时再按员工范围过滤。
+    // # 资源入口始终可用：未 @ 员工时按默认数字员工过滤，已 @ 员工时按 @ 的员工范围过滤。
     if (!quoteAgentId || !employeesList) return true;
     // 页面集成类型的数字员工，不允许#技能
     const integrationType = employeesList?.find(
@@ -704,9 +705,16 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
   chechCannotAt = () => this.props.cannotAt;
 
   getResourceAgentIds = (): string | undefined => {
-    // 仅使用输入框内显式 @ 的员工作为资源过滤条件；会话默认员工不应限制 # 的全量列表。
+    // 输入框内显式 @ 的员工优先；没有 @ 时使用当前会话员工或默认数字员工，避免资源列表退化为全量数据。
     const inlineAgentIds = Array.from(new Set(this.getInlineDigitalEmployeeList().map((item) => `${item.resourceId}`)));
-    return inlineAgentIds.length ? inlineAgentIds.join(',') : undefined;
+    if (inlineAgentIds.length) {
+      return inlineAgentIds.join(',');
+    }
+
+    const { agentId } = this.props.globalContext;
+    const fallbackAgentId =
+      agentId || this.props.defaultDigEmployeeId || (this.props.userInfo as any)?.defaultDigEmployeeId;
+    return fallbackAgentId ? `${fallbackAgentId}` : undefined;
   };
 
   renderInput() {

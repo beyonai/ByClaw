@@ -3141,6 +3141,15 @@ public class AuthApplicationService {
             .anyMatch(resource -> resource != null
                 && ResourceBizTypeEnum.DIG_EMPLOYEE.name().equals(resource.getResourceBizType()));
         Long defaultDigitalEmployeeId = containsDigitalEmployee ? resolveCurrentUserDefaultDigitalEmployeeId() : null;
+        List<Long> skillResourceIds = resources.stream()
+            .filter(resource -> ResourceBizTypeEnum.SKILL.name().equals(resource.getResourceBizType()))
+            .map(SsResource::getResourceId)
+            .collect(Collectors.toList());
+        Set<Long> innerSkillResourceIds = CollectionUtils.isEmpty(skillResourceIds) ? Collections.emptySet()
+            : ssResExtSkillService.findByIds(skillResourceIds).stream()
+                .filter(skill -> StringUtils.equalsIgnoreCase(SsResExtSkillService.INNER_SKILL_TYPE, skill.getSkillType()))
+                .map(SsResExtSkill::getResourceId)
+                .collect(Collectors.toSet());
         Map<Long, Boolean> organizationManageCache = new HashMap<>();
 
         Map<Long, ResourceOperationPermissionsVo> result = new LinkedHashMap<>();
@@ -3150,14 +3159,15 @@ public class AuthApplicationService {
             }
             result.put(resource.getResourceId(), buildResourceOperationPermissions(resource, currentUserId,
                 managePrivilegeIds, useBlacklistedIds, usePermittedIds, pendingUseApplyIds, organizationManageCache,
-                defaultDigitalEmployeeId));
+                defaultDigitalEmployeeId, innerSkillResourceIds));
         });
         return result;
     }
 
     private ResourceOperationPermissionsVo buildResourceOperationPermissions(SsResource ssResource,
                                                                              Long currentUserId, Set<Long> managePrivilegeIds, Set<Long> useBlacklistedIds, Set<Long> usePermittedIds,
-                                                                             Set<Long> pendingUseApplyIds, Map<Long, Boolean> organizationManageCache, Long defaultDigitalEmployeeId) {
+                                                                             Set<Long> pendingUseApplyIds, Map<Long, Boolean> organizationManageCache, Long defaultDigitalEmployeeId,
+                                                                             Set<Long> innerSkillResourceIds) {
         ResourceOperationPermissionsVo vo = new ResourceOperationPermissionsVo();
         Long resourceId = ssResource.getResourceId();
         vo.setResourceId(resourceId);
@@ -3198,7 +3208,7 @@ public class AuthApplicationService {
         boolean isPersonalAssistantResource = isPersonalAssistantResource(ssResource);
         boolean isPersonalResourceUseApplyUnsupported = isPersonalResourceUseApplyUnsupported(ssResource);
         boolean isWhaleAgentExternalKnowledgeOrToolResource = isWhaleAgentExternalKnowledgeOrToolResource(ssResource);
-        boolean isInnerSkillResource = isInnerSkillResource(ssResource);
+        boolean isInnerSkillResource = innerSkillResourceIds.contains(resourceId);
 
         boolean canEdit = isDigitalEmployee
             ? (canManage || isBoundDefaultDigEmployee)
@@ -3214,6 +3224,18 @@ public class AuthApplicationService {
         vo.setCanSetDefault(canSetDefaultDigitalEmployee(ssResource,
             canManage || isCurrentUserGlobalResourceManager(), hasUsePermission,
             defaultDigitalEmployeeId));
+
+        // 数字员工的上下架/删除权限还需要结合当前资源状态和创建者身份判断，保持与单条权限查询一致。
+        if (isDigitalEmployee) {
+            Integer resourceStatus = ssResource.getResourceStatus();
+            String ownerType = ssResource.getOwnerType();
+            boolean isOwner = currentUserId != null && currentUserId.equals(ssResource.getCreateBy());
+            boolean isAdminVip = CurrentUserHolder.isAdminVip();
+            vo.setCanOnShelf(canOnShelfStatus(resourceStatus, ownerType) && (isOwner || canManage || isAdminVip));
+            vo.setCanOffShelf(canOffShelfStatus(resourceStatus, ownerType) && (isOwner || canManage || isAdminVip));
+            vo.setCanEdit(isOwner || canManage || isAdminVip);
+            vo.setCanDelete(canDeleteStatus(resourceStatus, ownerType) && (isOwner || isAdminVip));
+        }
         return vo;
     }
 

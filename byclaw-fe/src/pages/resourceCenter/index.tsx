@@ -61,9 +61,7 @@ const ResourceCenter: React.FC = () => {
         onChange={(key) => {
           const nextKey = key as ResourceTabKey;
           setActiveKey(nextKey);
-          if (nextKey === 'file') {
-            setInstalledOnly(false);
-          }
+          setInstalledOnly(false);
         }}
       />
       <div className={styles.resourceContent}>{renderActiveContent()}</div>

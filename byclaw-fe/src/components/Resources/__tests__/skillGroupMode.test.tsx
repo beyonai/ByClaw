@@ -206,7 +206,6 @@ jest.mock('@/service/knowledgeCenter', () => ({ queryKnowledgeCapability: jest.f
 jest.mock('@/pages/manager/service/resources', () => ({
   applyResourceUse: jest.fn(),
   queryFixedEntryOperationCapability: jest.fn().mockResolvedValue({ canImportEnterpriseSkill: true }),
-  queryResourceOperationPermissions: jest.fn(),
 }));
 jest.mock('@/pages/manager/service/session', () => ({
   getDcSystemConfig: jest.fn(({ paramCode }: { paramCode: string }) =>

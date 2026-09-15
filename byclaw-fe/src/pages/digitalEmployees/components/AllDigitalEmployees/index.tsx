@@ -20,6 +20,11 @@ import {
 } from '@/service/digitalEmployees';
 import Empty from '@/components/Empty';
 import InfiniteScroll from '@/components/InfiniteScroll';
+import useEmployeeRowRefresh, {
+  employeeRowId,
+  removeEmployeeRow,
+  updateEmployeeRow,
+} from '@/hooks/useEmployeeRowRefresh';
 import { getDefaultPagination, paginationReducer } from '@/utils/pageInfo';
 import ResourceCard from '@/components/Resources/components/ResourceCard';
 
@@ -39,6 +44,7 @@ type DisableActionList = Array<'delete' | 'apply' | 'unapply' | 'edit'>;
 export const disableActionList: DisableActionList = ['delete', 'unapply'];
 
 const ALL_CATEGORY_KEY = '__ALL__';
+const DEFAULT_DIGITAL_EMPLOYEE_FILTER: IOnOkParams = { resourceStatus: '2' };
 
 type ICategory = {
   dirName: string;
@@ -127,14 +133,32 @@ function AllDigitalEmployees(
   const [selectRecord, setSelectRecord] = useState<IAgentCache | null>(null);
   const [authType, setAuthType] = useState<'useAuth' | 'mgrAuth'>('useAuth');
   const [useApplyAuditOpen, setUseApplyAuditOpen] = useState(false);
-  const [paginationInfo, paginationDispatch] = useReducer(paginationReducer, getDefaultPagination({ pageSize: 30 }));
+  const [paginationInfo, paginationDispatch] = useReducer(paginationReducer, getDefaultPagination({ pageSize: 20 }));
   const [bannerList, setBannerList] = useState<any[]>([]);
   const [bannerLoaded, setBannerLoaded] = useState(false);
   const hasInitializedRef = React.useRef(false);
   // 分页请求复用当前筛选条件，避免滚动加载下一页时丢失 resourceStatus 等参数。
-  const activeFilterParamRef = React.useRef<IOnOkParams | undefined>(dropdownParam);
+  const activeFilterParamRef = React.useRef<IOnOkParams | undefined>(
+    dropdownParam || DEFAULT_DIGITAL_EMPLOYEE_FILTER
+  );
 
-  const hasMore = paginationInfo.total > size(list);
+  const shouldKeepEmployee = React.useCallback(
+    (employee: IAgentCache) => {
+      const status = `${employee?.resourceStatus ?? employee?.metaStatus ?? ''}`;
+      // “我可用的”接口只返回可使用的已上架员工，操作下架后当前行应立即移出列表。
+      if (source === 'available') return status === '2';
+
+      // 父页面通过 getSearch 传递筛选条件，当前值以分页请求复用的 ref 为准。
+      const selectedStatus = `${activeFilterParamRef.current?.resourceStatus ?? '2'}`;
+      if (selectedStatus === '') return status !== '-1';
+      return status === selectedStatus;
+    },
+    [source]
+  );
+
+  const refreshEmployee = useEmployeeRowRefresh(list, setList, () => {
+    paginationDispatch({ type: 'change', item: { total: Math.max(0, paginationInfo.total - 1) } });
+  }, shouldKeepEmployee);
 
   const customBannerUrl = getBannerUrl(bannerList, [intl.formatMessage({ id: 'digitalEmployees.title' }), '数字员工']);
   const bannerUrl = customBannerUrl ? getRuntimeActualUrl(customBannerUrl) : '';
@@ -171,13 +195,15 @@ function AllDigitalEmployees(
   const myGetAllDigitalEmployeesV2 = React.useCallback(
     (keyword: string = '', catalogId?: string | number, pageNum: number = 1, filterParam?: IOnOkParams) => {
       // 直接触发的分页请求也复用最近一次筛选，兼容“我可用的”两类列表。
-      const effectiveFilterParam = filterParam ?? activeFilterParamRef.current;
+      const effectiveFilterParam =
+        filterParam ?? activeFilterParamRef.current ?? DEFAULT_DIGITAL_EMPLOYEE_FILTER;
       activeFilterParamRef.current = effectiveFilterParam;
       if (abortControllerRef.current && !abortControllerRef.current?.signal?.aborted) {
         abortControllerRef.current.abort();
       }
 
       abortControllerRef.current = new AbortController();
+      const requestController = abortControllerRef.current;
 
       if (pageNum === 1) {
         setList([]);
@@ -216,6 +242,7 @@ function AllDigitalEmployees(
 
       return request
         .then((res) => {
+          if (requestController.signal.aborted) return;
           const { list: responseList, ...rest } = res || {};
           const mappedList = responseList?.map?.((item: IAgent) => agentHandler(item)) || [];
 
@@ -249,13 +276,15 @@ function AllDigitalEmployees(
       catalogId?: string | number
     ) => {
       const targetCatalogId = catalogId ?? (curActiveLink || myEmployeesTypeList?.[0]?.catalogId || ALL_CATEGORY_KEY);
-      activeFilterParamRef.current = filterParam;
+      const effectiveFilterParam =
+        filterParam ?? activeFilterParamRef.current ?? DEFAULT_DIGITAL_EMPLOYEE_FILTER;
+      activeFilterParamRef.current = effectiveFilterParam;
 
       if (pageNum === 1) {
         setIsLoading(true);
       }
 
-      return myGetAllDigitalEmployeesV2(keyword, targetCatalogId, pageNum, filterParam).finally(() => {
+      return myGetAllDigitalEmployeesV2(keyword, targetCatalogId, pageNum, effectiveFilterParam).finally(() => {
         setIsLoading(false);
       });
     },
@@ -329,10 +358,18 @@ function AllDigitalEmployees(
             const itemIdentity = `${item.resourceId ?? item.id ?? item.agentId ?? ''}`;
             if (defaultResourceId) {
               const isDefault = itemIdentity === `${defaultResourceId}`;
+              let canSetDefault = item.canSetDefault;
+              if (isDefault) {
+                canSetDefault = false;
+              } else if (item.operationPermissionsLoaded === true) {
+                canSetDefault =
+                  `${item.resourceStatus ?? item.metaStatus ?? ''}` !== '3' &&
+                  (item.hasManagePermission === true || item.hasUsePermission === true);
+              }
               return {
                 ...item,
                 isDefault,
-                canSetDefault: isDefault ? false : item.canSetDefault,
+                canSetDefault,
                 ownerType: !isDefault && item.ownerType === 'personal_default' ? 'personal' : item.ownerType,
               };
             }
@@ -364,11 +401,19 @@ function AllDigitalEmployees(
           }),
         ]);
       });
+      if (ApplyList.length || unApplyList.length || defaultResourceId) {
+        [...new Set([...ApplyList, ...unApplyList, ...(defaultResourceId ? [defaultResourceId] : [])])].forEach(
+          (id) => void refreshEmployee(id).catch(console.error)
+        );
+      }
     };
     EventEmitter.on('beyond-update-employee', handler);
 
-    const handleResourceChanged = () => {
-      getSearch(searchName || '', dropdownParam, 1, curActiveLink);
+    const handleResourceChanged = (event: Event) => {
+      const resourceId = (event as CustomEvent).detail?.resourceId;
+      if (!resourceId) return;
+      if (event.type === 'resourceDeleted') removeEmployeeRow(`${resourceId}`);
+      else void refreshEmployee(`${resourceId}`).catch(console.error);
     };
     window.addEventListener('resourceDeleted', handleResourceChanged);
     window.addEventListener('resourceRestored', handleResourceChanged);
@@ -378,10 +423,11 @@ function AllDigitalEmployees(
       window.removeEventListener('resourceDeleted', handleResourceChanged);
       window.removeEventListener('resourceRestored', handleResourceChanged);
     };
-  }, [EventEmitter, curActiveLink, dropdownParam, getSearch, searchName]);
+  }, [EventEmitter, refreshEmployee]);
 
   // 列表顺序完全采用接口返回顺序，避免前端二次排序覆盖后端排序规则。
-  const visibleList = list;
+  const visibleList = useMemo(() => list.filter((item) => shouldKeepEmployee(item)), [list, shouldKeepEmployee]);
+  const hasMore = paginationInfo.total > size(visibleList);
 
   // 合并查询模式按资源类型分块展示，保证“我可用的”和“官方推荐”都先显示员工组、再显示数字员工。
   const employeeGroupList = useMemo(
@@ -511,27 +557,17 @@ function AllDigitalEmployees(
   );
 
   const onDeleteEmployee = React.useCallback(
-    (employee: IAgentCache) => {
-      deleteDigitalEmployee({
-        resourceId: String(employee.resourceId ?? employee.id),
-      })
-        .then(() => {
-          message.success(intl.formatMessage({ id: 'digitalEmployees.deleteSuccess' }));
-          EventEmitter.emit('beyond-update-employee', {
-            updateList: [
-              {
-                ...employee,
-                resourceStatus: 3,
-              },
-            ],
-          });
-          getSearch(searchName || '', activeFilterParamRef.current, 1, curActiveLink);
-        })
-        .catch((error: any) => {
-          message.error(error?.message || error || intl.formatMessage({ id: 'common.deleteFailed' }));
-        });
+    async (employee: IAgentCache) => {
+      const resourceId = employeeRowId(employee);
+      try {
+        await deleteDigitalEmployee({ resourceId });
+        message.success(intl.formatMessage({ id: 'digitalEmployees.deleteSuccess' }));
+        removeEmployeeRow(resourceId);
+      } catch (error: any) {
+        message.error(error?.message || intl.formatMessage({ id: 'common.deleteFailed' }));
+      }
     },
-    [EventEmitter, curActiveLink, dropdownParam, getSearch, intl, searchName]
+    [intl]
   );
 
   const onChangeShelfStatus = React.useCallback(
@@ -549,12 +585,17 @@ function AllDigitalEmployees(
             id: action === 'shelf' ? 'digitalEmployees.shelfSuccess' : 'digitalEmployees.unShelfSuccess',
           })
         );
-        getSearch(searchName || '', activeFilterParamRef.current, 1, curActiveLink);
+        const refreshPromise = refreshEmployee(employee);
+        updateEmployeeRow({
+          resourceId,
+          resourceStatus: action === 'shelf' ? 2 : 3,
+        });
+        await refreshPromise;
       } catch (error: any) {
         message.error(error?.message || error || intl.formatMessage({ id: 'common.operationFailed' }));
       }
     },
-    [curActiveLink, dropdownParam, getSearch, intl, searchName]
+    [intl, refreshEmployee]
   );
 
   const onAuthEmployee = React.useCallback((employee: IAgentCache, type: 'useAuth' | 'mgrAuth') => {
@@ -596,6 +637,7 @@ function AllDigitalEmployees(
       digitalEmployeeActionMode
       actionConfig={{
         scene: 'enterprise',
+        hiddenMenuItemKeys: source === 'available' ? ['authorize', 'use'] : [],
         onChat: () => chatEmployee(employee),
         onEdit: () => onEditEmployee(employee),
         onAuth: (type: any) => onAuthEmployee(employee, type),
@@ -607,7 +649,7 @@ function AllDigitalEmployees(
         onUnShelf: () => onChangeShelfStatus(employee, 'unShelf'),
         // 两个 Tab 的卡片统一展示数字员工状态标签；我可用的不展示上下架操作。
         enableDigitalEmployeeLifecycle: source === 'official',
-        // 已下架且当前用户具备删除权限时展示“删除数据”；权限由卡片资源权限接口返回。
+        // 已下架且当前用户具备删除权限时展示“删除数据”；权限由列表接口返回。
         enableDigitalEmployeeDelete: true,
         showDigitalEmployeeTypeTag: false,
       }}
@@ -663,7 +705,7 @@ function AllDigitalEmployees(
             tip={intl.formatMessage({ id: 'common.loading' })}
             spinning={isLoading}
           >
-            {!isLoading && isEmpty(list) ? (
+            {!isLoading && isEmpty(visibleList) ? (
               <div className="full-height full-width ub ub-ac ub-pc">
                 <Empty />
               </div>
@@ -671,24 +713,26 @@ function AllDigitalEmployees(
               <InfiniteScroll
                 ref={infiniteScrollRef}
                 next={() => {
-                  myGetAllDigitalEmployeesV2(
+                  return myGetAllDigitalEmployeesV2(
                     searchName || '',
                     curActiveLink,
                     paginationInfo.pageIndex + 1,
                     activeFilterParamRef.current
                   );
                 }}
+                autoFill
+                isLoading={isLoading}
                 hasMore={hasMore}
                 loader={
                   <div className="ub ub-ac ub-pc">
                     <Spin />
                   </div>
                 }
-                dataLength={list.length}
+                dataLength={visibleList.length}
                 scrollableTarget={scrollableTarget || scrollerId}
                 className={classnames(styles.messageRowWrap, { [styles.hasMore]: hasMore })}
                 scrollThreshold="50px"
-                hasChildren={list.length > 0}
+                hasChildren={visibleList.length > 0}
                 topItemKey={head(visibleList)?.agentId}
                 style={{
                   overflow: 'visible',
@@ -696,7 +740,9 @@ function AllDigitalEmployees(
               >
                 {isAllEmployees && employeeGroupList.length > 0 && (
                   <section className={styles.allEmployeesSection}>
-                    <div className={styles.allEmployeesSectionTitle}>数字员工组</div>
+                    <div className={styles.allEmployeesSectionTitle}>
+                      {intl.formatMessage({ id: 'digitalEmployees.employeeGroup' })}
+                    </div>
                     <div className={styles.employeeList}>
                       {employeeGroupList.map((employee) => renderEmployeeCard(employee))}
                     </div>
@@ -704,7 +750,9 @@ function AllDigitalEmployees(
                 )}
                 {isAllEmployees && employeeList.length > 0 && (
                   <section className={styles.allEmployeesSection}>
-                    <div className={styles.allEmployeesSectionTitle}>数字员工</div>
+                    <div className={styles.allEmployeesSectionTitle}>
+                      {intl.formatMessage({ id: 'digitalEmployees.title' })}
+                    </div>
                     <div className={styles.employeeList}>
                       {employeeList.map((employee) => renderEmployeeCard(employee))}
                     </div>
@@ -732,7 +780,7 @@ function AllDigitalEmployees(
             setSelectRecord(null);
           }}
           onSuccess={() => {
-            getSearch(searchName || '', dropdownParam, 1, curActiveLink);
+            void refreshEmployee(selectRecord).catch(console.error);
           }}
           headerInfo={{
             title: selectRecord?.resourceName || selectRecord?.name,
@@ -749,7 +797,7 @@ function AllDigitalEmployees(
           setSelectRecord(null);
         }}
         onSuccess={() => {
-          getSearch(searchName || '', dropdownParam, 1, curActiveLink);
+          void refreshEmployee(selectRecord).catch(console.error);
         }}
       />
     </div>

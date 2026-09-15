@@ -931,6 +931,34 @@
 }
 
 // 项目详情 Tab 统一使用响应式卡片网格，避免长列表内容挤在单行中。
+.taskFilterBar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 16px;
+  min-height: 52px;
+  box-sizing: border-box;
+  margin-bottom: 16px;
+  padding: 10px 0;
+  background: #fff;
+  border-bottom: 1px solid #f0f0f0;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  overflow: hidden;
+
+  :global {
+    .@{antPrefix}-picker {
+      height: 32px;
+    }
+  }
+}
+
+.taskFilterBar :global(.@{antPrefix}-input-search) {
+  width: 180px;
+  margin-left: auto;
+  flex: 0 0 180px;
+}
+
 .dataCardGrid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));

@@ -2436,7 +2436,7 @@ const ConfigForm = (props) => {
               </div>
               {!moreModelsOpen && (
                 <button type="button" className={styles.moreModelsButton} onClick={() => setMoreModelsOpen(true)}>
-                  <span>更多模型</span>
+                  <span>{intl.formatMessage({ id: 'employeeDetail.moreModels' })}</span>
                 </button>
               )}
               {moreModelsOpen && (
@@ -2444,7 +2444,7 @@ const ConfigForm = (props) => {
                   {imageModelSelect}
                   {ttsModelSelect}
                   <button type="button" className={styles.moreModelsButton} onClick={() => setMoreModelsOpen(false)}>
-                    <span>收起更多模型</span>
+                    <span>{intl.formatMessage({ id: 'employeeDetail.collapseMoreModels' })}</span>
                   </button>
                 </>
               )}

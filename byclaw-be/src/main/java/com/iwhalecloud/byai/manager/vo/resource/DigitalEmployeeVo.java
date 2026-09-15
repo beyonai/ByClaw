@@ -61,4 +61,23 @@ public class DigitalEmployeeVo extends DigitalEmployeeDTO {
      */
     private Boolean canSetDefault;
 
+    /**
+     * 是否已由列表接口批量回填当前用户的操作权限。
+     */
+    private Boolean operationPermissionsLoaded;
+
+    private Boolean hasManagePermission;
+
+    private Boolean hasUsePermission;
+
+    private Boolean canViewDetail;
+
+    private Boolean useApplyPending;
+
+    private Boolean canRestore;
+
+    private Boolean canOnShelf;
+
+    private Boolean canOffShelf;
+
 }

@@ -23,7 +23,6 @@ import { queryKnowledgeCapability, type KnowledgeCapability } from '@/service/kn
 import {
   applyResourceUse,
   queryFixedEntryOperationCapability,
-  queryResourceOperationPermissions,
   type FixedEntryOperationCapability,
 } from '@/pages/manager/service/resources';
 import type { SkillGroup } from '@/pages/manager/service/resources';
@@ -469,23 +468,8 @@ const Resources: React.FC<Props> = ({ resourceType, installedOnly = false, onIns
           message.error(intl.formatMessage({ id: 'digitalEmployees.noPermission' }));
           return;
         }
-        try {
-          const res: any = await queryResourceOperationPermissions({ resourceId });
-          const permissions = res?.data || res || {};
-          const canViewDetail =
-            permissions?.canViewDetail ??
-            permissions?.hasManagePermission ??
-            permissions?.hasUsePermission ??
-            permissions?.canEdit ??
-            permissions?.canManageAuth ??
-            permissions?.canDelete ??
-            false;
-          if (!canViewDetail) {
-            message.error(intl.formatMessage({ id: 'digitalEmployees.noPermission' }));
-            return;
-          }
-        } catch (error: any) {
-          message.error(error?.msg || error?.message || intl.formatMessage({ id: 'digitalEmployees.noPermission' }));
+        if (item.canViewDetail !== true) {
+          message.error(intl.formatMessage({ id: 'digitalEmployees.noPermission' }));
           return;
         }
         const params = new URLSearchParams();

@@ -20,7 +20,7 @@ import dayjs from 'dayjs';
 import customParseFormat from 'dayjs/plugin/customParseFormat';
 import timezone from 'dayjs/plugin/timezone';
 import utc from 'dayjs/plugin/utc';
-import { useSelector } from '@umijs/max';
+import { useIntl, useSelector } from '@umijs/max';
 
 import AntdIcon from '@/components/AntdIcon';
 import { OVERLAY_DRAWER_WIDTH } from '@/components/MainDrawer/constants';
@@ -363,6 +363,7 @@ const ConnectorControl = ({
   userInfo: userInfoProp,
   onOpenResourcePicker,
 }: ConnectorControlProps) => {
+  const intl = useIntl();
   const storeUserInfo = useSelector((state: any) => state.user?.userInfo);
   const userInfo = userInfoProp || storeUserInfo;
 
@@ -908,8 +909,17 @@ const ConnectorControl = ({
           <Dropdown
             menu={{
               items: [
-                { key: 'reauthorize', icon: <ReloadOutlined />, label: '重新授权' },
-                { key: 'revoke', danger: true, icon: <DisconnectOutlined />, label: '取消授权' },
+                {
+                  key: 'reauthorize',
+                  icon: <ReloadOutlined />,
+                  label: intl.formatMessage({ id: 'connector.reauthorize' }),
+                },
+                {
+                  key: 'revoke',
+                  danger: true,
+                  icon: <DisconnectOutlined />,
+                  label: intl.formatMessage({ id: 'connector.revoke' }),
+                },
               ],
               onClick: ({ key }) => {
                 if (key === 'reauthorize') void beginAuthorization(connector);
@@ -945,7 +955,7 @@ const ConnectorControl = ({
           }}
           style={{ color: 'var(--beyond-color-primary)' }}
         >
-          连接
+          {intl.formatMessage({ id: 'connector.connect' })}
         </Button>
       );
     }
@@ -1016,13 +1026,16 @@ const ConnectorControl = ({
       {/* 内嵌模式展示连接器卡片；授权弹窗和配置抽屉仍复用下面的统一渲染。 */}
       {inline ? (
         !canAuthorize ? (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="登录后即可使用连接器" />
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description={intl.formatMessage({ id: 'connector.loginRequired' })}
+          />
         ) : (
           <div className={classNames(styles.connectorList, styles.connectorListInline)}>
             {loadingConnectors ? (
               <div className={styles.connectorLoading}>
                 <Spin size="small" />
-                <span>正在加载连接器…</span>
+                <span>{intl.formatMessage({ id: 'connector.loading' })}</span>
               </div>
             ) : connectors.length ? (
               connectors.map((connector) => renderConnectorItem(connector))
@@ -1031,13 +1044,13 @@ const ConnectorControl = ({
                 image={Empty.PRESENTED_IMAGE_SIMPLE}
                 description={
                   <Button type="link" onClick={openSettings}>
-                    管理连接器
+                    {intl.formatMessage({ id: 'connector.manage' })}
                   </Button>
                 }
               />
             )}
             <Button type="link" className={styles.viewAllInlineButton} onClick={openAllConnectors}>
-              查看全部连接器
+              {intl.formatMessage({ id: 'connector.viewAll' })}
             </Button>
           </div>
         )
@@ -1284,7 +1297,7 @@ const ConnectorControl = ({
       <Drawer
         className={styles.configurationDrawer}
         open={configurationOpen}
-        title="连接器配置"
+        title={intl.formatMessage({ id: 'connector.configuration' })}
         extra={accountToolbar}
         width={OVERLAY_DRAWER_WIDTH}
         mask
@@ -1295,7 +1308,12 @@ const ConnectorControl = ({
           <div className={styles.configurationGrid}>
             {connectors.length
               ? connectors.map((connector) => renderConnectorItem(connector, true))
-              : !loadingConnectors && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无连接器" />}
+              : !loadingConnectors && (
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description={intl.formatMessage({ id: 'connector.empty' })}
+                />
+              )}
             <GlobalAccountSection onToolbarChange={setAccountToolbar} />
           </div>
         </Spin>

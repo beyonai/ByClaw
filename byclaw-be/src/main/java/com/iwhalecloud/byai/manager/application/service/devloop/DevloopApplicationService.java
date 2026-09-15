@@ -3351,7 +3351,7 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
                     : repoId.equals(item.repo().getRepoId()))
                 .findFirst().orElse(null);
             if (selected == null) {
-                return ResponseUtil.successResponse(emptyLocalChangesMap());
+                return ResponseUtil.successResponse(LocalGitChangeViewMapper.emptyChanges());
             }
             String baseBranch = selected.repo().getDefaultBranch() == null
                 || selected.repo().getDefaultBranch().isBlank() ? "main" : selected.repo().getDefaultBranch();
@@ -3360,9 +3360,9 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
             LocalGitChangeService.LocalChangeResult local = localGitChangeService.collectChanges(selectedPath,
                 baseBranch);
             if (local.getStatus() != LocalGitChangeService.LocalStatus.OK) {
-                return ResponseUtil.successResponse(emptyLocalChangesMap());
+                return ResponseUtil.successResponse(LocalGitChangeViewMapper.emptyChanges());
             }
-            Map<String, Object> changes = localResultToMap(local, selected.repo().getRepoFullName());
+            Map<String, Object> changes = LocalGitChangeViewMapper.toChangesMap(local, selected.repo().getRepoFullName());
             changes.put("repoId", selected.repo().getRepoId());
             @SuppressWarnings("unchecked")
             List<Map<String, Object>> files = (List<Map<String, Object>>) changes.get("files");
@@ -3374,19 +3374,8 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
         } catch (Exception e) {
             // 兜底:任何未预期异常都吞掉,返回 http_error 空态,前端照常渲染"暂时无法获取代码变更"。
             log.error("[Devloop] 查询任务代码变更失败, sessionId={}", sessionId, e);
-            return ResponseUtil.successResponse(errorChangesMap());
+            return ResponseUtil.successResponse(LocalGitChangeViewMapper.errorChanges());
         }
-    }
-
-    /**
-     * 代码变更查询失败时的兜底空态:status=http_error,前端据此展示"暂时无法获取代码变更",不报错。
-     */
-    private Map<String, Object> errorChangesMap() {
-        Map<String, Object> map = new HashMap<>();
-        map.put("status", "http_error");
-        map.put("files", new ArrayList<>());
-        map.put("fileCount", 0);
-        return map;
     }
 
     /**
@@ -3416,57 +3405,11 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
                 .orElse(selected.path());
             LocalGitChangeService.FileDiffResult result = localGitChangeService.fileDiff(selectedPath, baseBranch,
                 filePath);
-            Map<String, Object> map = new HashMap<>();
-            map.put("status", result.getStatus().name().toLowerCase());
-            map.put("filename", result.getFilename());
-            map.put("diff", result.getDiff());
-            map.put("message", result.getMessage());
-            return ResponseUtil.successResponse(map);
+            return ResponseUtil.successResponse(LocalGitChangeViewMapper.toFileDiffMap(result));
         } catch (Exception e) {
             log.error("[Devloop] 查询文件 diff 失败, sessionId={}, file={}", sessionId, filePath, e);
-            Map<String, Object> map = new HashMap<>();
-            map.put("status", "git_error");
-            map.put("filename", filePath);
-            map.put("diff", null);
-            return ResponseUtil.successResponse(map);
+            return ResponseUtil.successResponse(LocalGitChangeViewMapper.errorFileDiff(filePath));
         }
-    }
-
-    /** worktree 不存在时返回成功空集，前端按“暂无改动”展示。 */
-    private Map<String, Object> emptyLocalChangesMap() {
-        Map<String, Object> map = new HashMap<>();
-        map.put("status", "ok");
-        map.put("source", "local");
-        map.put("files", new ArrayList<>());
-        map.put("fileCount", 0);
-        return map;
-    }
-
-    /** 将 worktree 的本地变更结果转换成前端代码变更视图结构。 */
-    private Map<String, Object> localResultToMap(LocalGitChangeService.LocalChangeResult result, String repoFullName) {
-        Map<String, Object> map = new HashMap<>();
-        map.put("status", "ok");
-        // 标记来源为本地,便于前端在需要时提示"含未推送改动";不识别该字段也不影响渲染。
-        map.put("source", "local");
-        map.put("repoFullName", repoFullName);
-        map.put("baseBranch", result.getBaseBranch());
-        map.put("headBranch", result.getHeadBranch());
-        map.put("compareUrl", null);
-        map.put("message", result.getMessage());
-        List<Map<String, Object>> files = new ArrayList<>();
-        for (LocalGitChangeService.LocalFileChange f : result.getFiles()) {
-            Map<String, Object> fm = new HashMap<>();
-            fm.put("filename", f.getFilename());
-            fm.put("status", f.getStatus());
-            fm.put("additions", f.getAdditions());
-            fm.put("deletions", f.getDeletions());
-            fm.put("previousFilename", f.getPreviousFilename());
-            fm.put("blobUrl", null);
-            files.add(fm);
-        }
-        map.put("files", files);
-        map.put("fileCount", files.size());
-        return map;
     }
 
     private DevloopTaskStateDto tryReadTaskState(ByaiSession session) {

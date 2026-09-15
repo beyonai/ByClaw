@@ -10,7 +10,6 @@ import useGlobal from '@/hooks/useGlobal';
 import { getMyModels, getMyQuota } from '@/pages/models/service';
 import { getCompositeAppInfo } from '@/service/digitalEmployees';
 import { updateDigitalEmployee } from '@/pages/manager/service/DigitalEmployeeMgr';
-import { queryResourceOperationPermissions } from '@/pages/manager/service/resources';
 import { POST } from '@/service/common/request';
 import { getModelDetail } from '@/pages/manager/service/ModelMgr';
 import { getDcSystemConfigListByStandType } from '@/pages/manager/service/session';
@@ -427,18 +426,12 @@ const ModelSiderPanel: React.FC<ModelSiderPanelProps> = ({ embedded = false, sho
   }, []);
 
   useEffect(() => {
-    if (!isEmployeeModelPanel || !resourceId) {
-      setCanEditEmployee(false);
-      return undefined;
-    }
-    let cancelled = false;
-    void queryResourceOperationPermissions({ resourceId }).then((response: any) => {
-      if (!cancelled) setCanEditEmployee((response?.data || response || {}).canEdit === true);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [isEmployeeModelPanel, resourceId]);
+    setCanEditEmployee(
+      isEmployeeModelPanel &&
+      `${agentDetail?.operationPermissions?.resourceId ?? ''}` === `${resourceId ?? ''}` &&
+      agentDetail?.operationPermissions?.canEdit === true
+    );
+  }, [isEmployeeModelPanel, agentDetail, resourceId]);
 
   const activateModel = useCallback(
     async (model: any) => {

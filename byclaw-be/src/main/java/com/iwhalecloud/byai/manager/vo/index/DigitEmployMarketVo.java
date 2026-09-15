@@ -225,4 +225,28 @@ public class DigitEmployMarketVo {
      */
     private String skills;
 
+    /**
+     * 是否已由列表接口批量回填当前用户的操作权限。
+     */
+    private Boolean operationPermissionsLoaded;
+
+    /**
+     * 当前用户对该数字员工的操作权限。
+     */
+    private Boolean hasManagePermission;
+
+    private Boolean hasUsePermission;
+
+    private Boolean canViewDetail;
+
+    private Boolean useApplyPending;
+
+    private Boolean canSetDefault;
+
+    private Boolean canRestore;
+
+    private Boolean canOnShelf;
+
+    private Boolean canOffShelf;
+
 }

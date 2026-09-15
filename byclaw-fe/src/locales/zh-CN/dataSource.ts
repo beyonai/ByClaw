@@ -14,7 +14,7 @@ export default {
   'dataSource.selectPlaceholder': '搜索并选择数据源',
   'dataSource.availableEmpty': '暂无可关联的数据源',
 
-  'dataSource.title': '项目数据源',
+  'dataSource.title': '项目数据',
   'dataSource.create': '新增数据源',
   'dataSource.bind': '关联已有数据源',
   'dataSource.view': '查看',

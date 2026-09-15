@@ -11,6 +11,7 @@ import ResourceTabs from '../../RichInput/mentionPopover/resourceTabsCompact';
 import { chatModeMap } from '@/constants/query';
 import { ResourceType } from '../../RichInput/utils/constants';
 import styles from '../../index.module.less';
+import FilePicker from './FilePicker';
 
 interface Props {
   keyword?: string;
@@ -41,6 +42,9 @@ const ResourceToolMenu: React.FC<Props> = ({
 }) => {
   const intl = useIntl();
   const currentUserInfo = useSelector((state: any) => state.user?.userInfo);
+  const defaultDigEmployeeId = useSelector(
+    (state: any) => state.employees?.defaultDigEmployeeId || state.user?.userInfo?.defaultDigEmployeeId
+  );
   const [activeKey, setActiveKey] = useState('expert');
   const [visitedKeys, setVisitedKeys] = useState<string[]>(['expert']);
   useEffect(() => {
@@ -54,12 +58,29 @@ const ResourceToolMenu: React.FC<Props> = ({
       label: intl.formatMessage({ id: 'common.digitalEmployee' }),
       icon: 'icon-cebianlan-shuziyuangong',
     },
-    { key: 'skill', label: '技能', icon: 'icon-chajian' },
-    { key: 'connector', label: '连接器', icon: <LinkOutlined aria-hidden /> },
-    { key: 'processFile', label: '过程文件', icon: 'icon-a-Data-fileshujuwenjian' },
-    { key: 'projectCloud', label: '项目云盘', icon: 'icon-a-Folder-openwenjianjia-kai' },
-    { key: 'tool', label: '工具', icon: 'icon-a-Database-networkshujukuwangluo' },
-    { key: 'knowledge', label: '知识', icon: 'icon-zhishi' },
+    { key: 'skill', label: intl.formatMessage({ id: 'queryInput.tools.skill' }), icon: 'icon-chajian' },
+    {
+      key: 'connector',
+      label: intl.formatMessage({ id: 'queryInput.tools.connector' }),
+      icon: <LinkOutlined aria-hidden />,
+    },
+    {
+      key: 'processFile',
+      label: intl.formatMessage({ id: 'queryInput.tools.processFile' }),
+      icon: 'icon-a-Data-fileshujuwenjian',
+    },
+    {
+      key: 'projectCloud',
+      label: intl.formatMessage({ id: 'queryInput.tools.projectCloud' }),
+      icon: 'icon-a-Folder-openwenjianjia-kai',
+    },
+    {
+      key: 'tool',
+      label: intl.formatMessage({ id: 'queryInput.tools.tool' }),
+      icon: 'icon-a-Database-networkshujukuwangluo',
+    },
+    { key: 'knowledge', label: intl.formatMessage({ id: 'queryInput.tools.knowledge' }), icon: 'icon-zhishi' },
+    { key: 'file', label: intl.formatMessage({ id: 'common.file' }), icon: 'icon-a-Folder-openwenjianjia-kai' },
   ];
   // 新会话没有可查询的过程文件，隐藏该分类；历史会话沿用右侧资源面板的会话文件数据。
   const visibleTabs = sessionId ? tabs : tabs.filter((tab) => tab.key !== 'processFile');
@@ -72,12 +93,20 @@ const ResourceToolMenu: React.FC<Props> = ({
     setActiveKey(key);
     setVisitedKeys((current) => (current.includes(key) ? current : [...current, key]));
   };
-  const quoteAgentId =
-    resourceAgentIds
-      ?.split(',')
-      .map((item) => item.trim())
-      .find(Boolean) || agentId;
+  const normalizedResourceAgentIds = resourceAgentIds
+    ?.split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .join(',');
+  const scopedAgentId = normalizedResourceAgentIds?.split(',').find(Boolean);
+  const defaultResourceAgentId =
+    typeof defaultDigEmployeeId === 'string' || typeof defaultDigEmployeeId === 'number'
+      ? `${defaultDigEmployeeId}`
+      : undefined;
+  const quoteAgentId = scopedAgentId || agentId || defaultResourceAgentId;
+  const queryAgentIds = normalizedResourceAgentIds || (quoteAgentId ? `${quoteAgentId}` : undefined);
   const renderContent = (key: string) => {
+    if (key === 'file') return <FilePicker onSelect={onSelect} />;
     if (key === 'expert') {
       return (
         <EmployeeList
@@ -111,7 +140,10 @@ const ResourceToolMenu: React.FC<Props> = ({
           onOpenDetail={() => undefined}
         />
       ) : (
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无过程文件" />
+        <Empty
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+          description={intl.formatMessage({ id: 'queryInput.tools.noProcessFiles' })}
+        />
       );
     }
     if (key === 'projectCloud') {
@@ -125,7 +157,10 @@ const ResourceToolMenu: React.FC<Props> = ({
           onOpenDetail={() => undefined}
         />
       ) : (
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂未初始化项目知识库" />
+        <Empty
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+          description={intl.formatMessage({ id: 'queryInput.tools.noProjectKnowledge' })}
+        />
       );
     }
     return (
@@ -134,7 +169,7 @@ const ResourceToolMenu: React.FC<Props> = ({
         keyword={keyword}
         agentId={quoteAgentId}
         sessionId={sessionId}
-        agentIds={resourceAgentIds}
+        agentIds={queryAgentIds}
         onlyTab={key}
         // 加号/@面板左侧已经提供资源分类，右侧各资源统一保持“搜索框 + 列表”布局。
         hideTabBar

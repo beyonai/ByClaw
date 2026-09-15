@@ -26,6 +26,8 @@ const LOCAL_ROUTES = new Set([
   'POST /byaiService/project/repo/tree',
   'POST /byaiService/project/repo/tree/search',
   'POST /byaiService/project/repo/file/content',
+  'POST /byaiService/project/repo/local-changes',
+  'POST /byaiService/project/repo/local-file-diff',
   'POST /byaiService/devloop/task/changes',
   'POST /byaiService/devloop/task/file-diff',
   'GET /byaiService/assiman/removeConversation',

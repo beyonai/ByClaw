@@ -572,4 +572,11 @@ export default {
   'employeeDetail.imageModelPlaceholder': 'Select an image generation model',
   'employeeDetail.imageModelLoadError': 'Failed to load image generation models',
   'employeeDetail.imageModelRetry': 'Retry',
+  'employeeDetail.ttsModel': 'Voice model',
+  'employeeDetail.ttsModelConfiguration': 'Voice model configuration',
+  'employeeDetail.ttsModelGlobalDefault': 'Use global default',
+  'employeeDetail.ttsModelLoadError': 'Failed to load voice models',
+  'employeeDetail.ttsModelRetry': 'Retry',
+  'employeeDetail.moreModels': 'More models',
+  'employeeDetail.collapseMoreModels': 'Collapse more models',
 };

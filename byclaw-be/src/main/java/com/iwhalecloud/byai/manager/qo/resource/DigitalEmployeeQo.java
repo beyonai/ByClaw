@@ -21,6 +21,9 @@ public class DigitalEmployeeQo extends AuthQo {
      */
     private String agentType;
 
+    /** 未指定类型时，一起分页查询员工和员工组。 */
+    private Boolean includeEmployeeGroup;
+
     /**
      * 数字员工归属类型：enterprise 为企业员工；未传时个人员工组可同时查询个人和企业员工。
      */

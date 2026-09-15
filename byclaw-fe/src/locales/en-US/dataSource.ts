@@ -15,7 +15,7 @@ export default {
   'dataSource.selectPlaceholder': 'Search and select a data source',
   'dataSource.availableEmpty': 'No data sources available to link',
 
-  'dataSource.title': 'Project data sources',
+  'dataSource.title': 'Project data',
   'dataSource.create': 'New data source',
   'dataSource.bind': 'Link existing source',
   'dataSource.view': 'View',

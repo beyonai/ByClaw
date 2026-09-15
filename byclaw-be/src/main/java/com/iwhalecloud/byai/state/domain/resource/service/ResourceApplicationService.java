@@ -1,5 +1,8 @@
 package com.iwhalecloud.byai.state.domain.resource.service;
 
+import java.util.Collections;
+import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
+import org.springframework.beans.factory.annotation.Autowired;
 import static com.iwhalecloud.byai.state.domain.men.enums.SystemCodeEnum.SANDBOX;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -17,7 +20,6 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.BeanUtils;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 import com.alibaba.fastjson.JSONObject;
@@ -53,6 +55,9 @@ import com.iwhalecloud.byai.state.domain.template.enums.DebugModeEnum;
 
 @Service
 public class ResourceApplicationService {
+
+    @Autowired
+    private AuthApplicationService authApplicationService;
 
     public static final Logger LOGGER = LoggerFactory.getLogger(ResourceApplicationService.class);
 
@@ -186,6 +191,8 @@ public class ResourceApplicationService {
             }
         }
 
+        resourceDetailVo.setOperationPermissions(authApplicationService.queryResourceOperationPermissionsBatch(
+            Collections.singletonList(ssResource.getResourceId())).get(ssResource.getResourceId()));
         return resourceDetailVo;
 
     }

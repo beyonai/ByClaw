@@ -559,4 +559,11 @@ export default {
   'employeeDetail.imageModelPlaceholder': '请选择文生图模型',
   'employeeDetail.imageModelLoadError': '文生图模型加载失败',
   'employeeDetail.imageModelRetry': '重试',
+  'employeeDetail.ttsModel': '语音模型',
+  'employeeDetail.ttsModelConfiguration': '语音模型配置',
+  'employeeDetail.ttsModelGlobalDefault': '跟随全局默认',
+  'employeeDetail.ttsModelLoadError': '语音模型加载失败',
+  'employeeDetail.ttsModelRetry': '重试',
+  'employeeDetail.moreModels': '更多模型',
+  'employeeDetail.collapseMoreModels': '收起更多模型',
 };

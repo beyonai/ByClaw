@@ -210,6 +210,8 @@ export type DevloopProjectRepo = {
   provider?: RepoProvider;
   createBy?: string;
   createTime?: string;
+  cloneStatus?: 'pending' | 'cloning' | 'ready' | 'failed';
+  localPath?: string;
 };
 
 // 项目管理
@@ -287,8 +289,22 @@ export const updateProjectRepo = (data: {
 export const listProjectRepos = (projectId: number) =>
   POST<DevloopProjectRepo[]>('/byaiService/project/repo/list', { projectId });
 
-export type AvailableProjectRepo = DevloopProjectRepo & {
+/**
+ * Git 浏览数据源类型。
+ * project-repo 走数据库登记的仓库记录，project-space-git 走项目空间里本地发现但未登记的 Git 目录。
+ */
+export type GitSourceType = 'project-repo' | 'project-space-git';
+
+export type AvailableProjectRepo = Omit<DevloopProjectRepo, 'repoId'> & {
   path: string;
+
+  /** 数据库登记仓库才有；本地发现的仓库为空，不允许伪造。 */
+  repoId?: number;
+
+  /** 项目空间相对路径，本地发现的仓库用它作为请求标识。 */
+  repositoryPath?: string;
+
+  sourceType?: GitSourceType;
 
   /** 是否已在当前项目/会话目录中存在本地 Git 仓库。 */
   localAvailable?: boolean;
@@ -296,6 +312,9 @@ export type AvailableProjectRepo = DevloopProjectRepo & {
   /** 是否可以查询当前会话的本地变更。 */
   changesSupported?: boolean;
 };
+
+/** 请求 Git 数据时二选一的定位参数：repoId 或 repositoryPath。 */
+export type GitSourceParams = { repoId?: number; repositoryPath?: string };
 
 export const listAvailableProjectRepos = (projectId: number, sessionId?: string | number) =>
   POST<AvailableProjectRepo[]>('/byaiService/project/repo/available-list', { projectId, sessionId });
@@ -319,6 +338,21 @@ export type ProjectRepoTreeNode = {
   hasChildren?: boolean;
 };
 
+export type ProjectSpaceTreeNode = {
+  name: string;
+  path: string;
+  type: 'directory' | 'file' | string;
+  size?: number;
+  lastModified?: string;
+  hasChildren?: boolean;
+  gitRepository?: boolean;
+  repoId?: number;
+  defaultBranch?: string;
+  changesSupported?: boolean;
+  remoteUrl?: string;
+  sourceType?: GitSourceType;
+};
+
 export type ProjectRepoBranch = {
   name: string;
   sha?: string;
@@ -338,27 +372,46 @@ export type ProjectRepoFileContent = {
   downloadUrl?: string;
 };
 
-export const listProjectRepoTree = (data: {
-  projectId: number;
-  repoId: number;
-  path?: string;
-  ref?: string;
-  sessionId?: string | number;
-}) => POST<ProjectRepoTreeNode[]>('/byaiService/project/repo/tree', data);
+export const listProjectRepoTree = (
+  data: GitSourceParams & {
+    projectId: number;
+    path?: string;
+    ref?: string;
+    sessionId?: string | number;
+  }
+) => POST<ProjectRepoTreeNode[]>('/byaiService/project/repo/tree', data);
 
-export const searchProjectRepoTree = (data: {
-  projectId: number;
-  repoId: number;
-  keyword: string;
-  ref?: string;
-  sessionId?: string | number;
-}) => POST<ProjectRepoTreeNode[]>('/byaiService/project/repo/tree/search', data);
+export const listProjectSpaceTree = (data: { projectId: number; path?: string }) =>
+  POST<ProjectSpaceTreeNode[]>('/byaiService/project/space/tree', data);
 
-export const listProjectRepoBranches = (repoId: number) =>
-  POST<ProjectRepoBranch[]>('/byaiService/project/repo/branch/list', { repoId });
+export const createProjectSpaceFolder = (data: { projectId: number; path: string }) =>
+  POST<void>('/byaiService/project/space/folder', data);
 
-export const getProjectRepoFileContent = (data: { repoId: number; branch: string; path: string }) =>
-  POST<ProjectRepoFileContent>('/byaiService/project/repo/file/content', data);
+export const uploadProjectSpaceFiles = (projectId: number, path: string, files: File[]) => {
+  const formData = new FormData();
+  formData.append('projectId', String(projectId));
+  formData.append('path', path);
+  files.forEach((file) => formData.append('files', file));
+  return POST<void>('/byaiService/project/space/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+};
+
+export const searchProjectRepoTree = (
+  data: GitSourceParams & {
+    projectId: number;
+    keyword: string;
+    ref?: string;
+    sessionId?: string | number;
+  }
+) => POST<ProjectRepoTreeNode[]>('/byaiService/project/repo/tree/search', data);
+
+export const listProjectRepoBranches = (data: GitSourceParams & { projectId: number }) =>
+  POST<ProjectRepoBranch[]>('/byaiService/project/repo/branch/list', data);
+
+export const getProjectRepoFileContent = (
+  data: GitSourceParams & { projectId: number; branch: string; path: string }
+) => POST<ProjectRepoFileContent>('/byaiService/project/repo/file/content', data);
 
 export const deleteProjectRepo = (repoId: number) => POST<any>('/byaiService/project/repo/delete', { repoId });
 
@@ -733,6 +786,21 @@ export type DevloopTaskFileDiff = {
 
 export const getTaskFileDiff = (sessionId: number, filePath: string, repoId?: number) =>
   POST<DevloopTaskFileDiff>('/byaiService/devloop/task/file-diff', { sessionId, filePath, repoId });
+
+/**
+ * 项目空间本地 Git 仓库的工作区变更。
+ * 基准优先取当前会话 .worktree，缺失时回退项目仓库目录；返回结构与 getTaskChanges 一致。
+ */
+export const getLocalRepoChanges = (data: { projectId: number; repositoryPath: string; sessionId?: string | number }) =>
+  POST<DevloopTaskChanges>('/byaiService/project/repo/local-changes', data);
+
+/** 项目空间本地 Git 仓库单个文件的 unified diff，基准与变更列表同口径。 */
+export const getLocalRepoFileDiff = (data: {
+  projectId: number;
+  repositoryPath: string;
+  filePath: string;
+  sessionId?: string | number;
+}) => POST<DevloopTaskFileDiff>('/byaiService/project/repo/local-file-diff', data);
 
 // 任务环节进度：直接读取 self-developed-rules v2 会话状态投影
 export const getTaskPhases = (sessionId: number) =>

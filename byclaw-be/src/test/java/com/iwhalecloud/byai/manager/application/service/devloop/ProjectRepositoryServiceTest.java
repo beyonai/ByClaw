@@ -1,11 +1,13 @@
 package com.iwhalecloud.byai.manager.application.service.devloop;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.manager.application.service.project.ProjectInitService;
 import com.iwhalecloud.byai.manager.domain.devloop.provider.GitRepositoryProvider;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectService;
@@ -187,6 +189,94 @@ class ProjectRepositoryServiceTest {
         assertThat(repositories).extracting(item -> item.get("repoId"))
             .containsExactly(workspace.getRepoId(), codeRepo.getRepoId());
         assertThat(repositories.get(1)).containsEntry("path", "/by/projects/203/beyonai/byclaw-test/");
+    }
+
+    @Test
+    void browsesUnregisteredLocalGitDirectoryByRepositoryPath() throws IOException {
+        long projectId = 204L;
+        Fixture fixture = fixture(projectId, null);
+        Path projectRoot = tempDir.resolve("project-" + projectId);
+        Path localRepo = gitDirectory(projectRoot.resolve("repos/deepseek-harness"));
+        when(fixture.projectInitService.initProjectWorkspace(projectId)).thenReturn(projectRoot);
+        when(fixture.gitCommandExecutor.executeCommandQuietly(localRepo, "git", "-c", "safe.directory=*",
+            "symbolic-ref", "--short", "HEAD")).thenReturn("master\n");
+        when(fixture.gitCommandExecutor.executeCommandBytesQuietly(localRepo, "git", "-c", "safe.directory=*",
+            "ls-tree", "-l", "-z", "master"))
+            .thenReturn(gitOutput("100644 blob 123456 12\tREADME.md"));
+
+        List<ProjectRepoTreeNodeDTO> nodes =
+            fixture.service.listTree(projectId, null, "repos/deepseek-harness", null, null, null);
+
+        assertThat(nodes).extracting(ProjectRepoTreeNodeDTO::getName).containsExactly("README.md");
+    }
+
+    @Test
+    void rejectsRepositoryPathEscapingProjectRoot() {
+        long projectId = 205L;
+        Fixture fixture = fixture(projectId, null);
+        Path projectRoot = tempDir.resolve("project-" + projectId);
+        when(fixture.projectInitService.initProjectWorkspace(projectId)).thenReturn(projectRoot);
+
+        assertThatThrownBy(() -> fixture.service.listTree(projectId, null, "../../etc", null, null, null))
+            .isInstanceOf(BaseException.class);
+    }
+
+    @Test
+    void rejectsRepositoryPathThatIsNotAGitRepository() throws IOException {
+        long projectId = 206L;
+        Fixture fixture = fixture(projectId, null);
+        Path projectRoot = tempDir.resolve("project-" + projectId);
+        Files.createDirectories(projectRoot.resolve("docs"));
+        when(fixture.projectInitService.initProjectWorkspace(projectId)).thenReturn(projectRoot);
+
+        assertThatThrownBy(() -> fixture.service.listTree(projectId, null, "docs", null, null, null))
+            .isInstanceOf(BaseException.class);
+    }
+
+    @Test
+    void requiresEitherRepoIdOrRepositoryPath() {
+        long projectId = 207L;
+        Fixture fixture = fixture(projectId, null);
+
+        assertThatThrownBy(() -> fixture.service.listTree(projectId, null, null, null, null, null))
+            .isInstanceOf(BaseException.class);
+    }
+
+    @Test
+    void readsUnregisteredLocalGitFileContentAtRequestedBranch() throws IOException {
+        long projectId = 208L;
+        Fixture fixture = fixture(projectId, null);
+        Path projectRoot = tempDir.resolve("project-" + projectId);
+        Path localRepo = gitDirectory(projectRoot.resolve("repos/deepseek-harness"));
+        when(fixture.projectInitService.initProjectWorkspace(projectId)).thenReturn(projectRoot);
+        when(fixture.gitCommandExecutor.executeCommandBytesQuietly(localRepo, "git", "-c", "safe.directory=*",
+            "show", "dev:README.md")).thenReturn("hello".getBytes(StandardCharsets.UTF_8));
+
+        var content = fixture.service.getFileContent(projectId, null, "repos/deepseek-harness", "dev", "README.md");
+
+        assertThat(content.getContent()).isEqualTo("hello");
+    }
+
+    /** 未登记仓库没有远端契约，本地读失败必须直接报错，不能借 provider 兜底掩盖问题。 */
+    @Test
+    void doesNotFallBackToProviderForUnregisteredLocalGitDirectory() throws IOException {
+        long projectId = 209L;
+        Fixture fixture = fixture(projectId, null);
+        Path projectRoot = tempDir.resolve("project-" + projectId);
+        Path localRepo = gitDirectory(projectRoot.resolve("repos/deepseek-harness"));
+        when(fixture.projectInitService.initProjectWorkspace(projectId)).thenReturn(projectRoot);
+        when(fixture.gitCommandExecutor.executeCommandQuietly(localRepo, "git", "-c", "safe.directory=*",
+            "symbolic-ref", "--short", "HEAD")).thenReturn("master\n");
+        when(fixture.gitCommandExecutor.executeCommandBytesQuietly(localRepo, "git", "-c", "safe.directory=*",
+            "ls-tree", "-l", "-z", "master")).thenThrow(new IllegalStateException("git unavailable"));
+
+        assertThatThrownBy(() -> fixture.service.listTree(projectId, null, "repos/deepseek-harness", null, null, null))
+            .isInstanceOf(IllegalStateException.class);
+    }
+
+    private Path gitDirectory(Path path) throws IOException {
+        Files.createDirectories(path.resolve(".git"));
+        return path.toAbsolutePath().normalize();
     }
 
     private Fixture fixture(long projectId, ProjectRepo repo) {
