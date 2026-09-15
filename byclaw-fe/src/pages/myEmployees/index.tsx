@@ -1,3 +1,8 @@
+import useEmployeeRowRefresh, {
+  employeeRowId,
+  removeEmployeeRow,
+  updateEmployeeRow,
+} from '@/hooks/useEmployeeRowRefresh';
 import { LeftOutlined } from '@ant-design/icons';
 import { useLocation, useNavigate, useIntl } from '@umijs/max';
 import {
@@ -5,7 +10,6 @@ import {
   Button,
   Empty,
   Input,
-  Pagination,
   Popconfirm,
   Segmented,
   Space,
@@ -18,6 +22,7 @@ import {
 import type { ColumnsType } from 'antd/es/table';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import dayjs from 'dayjs';
+import InfiniteScroll from '@/components/InfiniteScroll';
 import ResourceCard from '@/components/Resources/components/ResourceCard';
 import { getAgentChatAvatar, agentHandler } from '@/utils/agent';
 import type { IAgentCache } from '@/typescript/agent';
@@ -120,7 +125,17 @@ const MyEmployeesPage: React.FC = () => {
   const [list, setList] = useState<IAgentCache[]>([]);
   const [pageNum, setPageNum] = useState(1);
   const [total, setTotal] = useState(0);
-  const [permissionRefreshKey, setPermissionRefreshKey] = useState(0);
+  const shouldKeepEmployee = useCallback(
+    (employee: IAgentCache) => {
+      const selectedStatus = `${statusFilter}`;
+      if (selectedStatus === 'all') return `${employee?.resourceStatus ?? employee?.metaStatus ?? ''}` !== '-1';
+      return `${employee?.resourceStatus ?? employee?.metaStatus ?? ''}` === selectedStatus;
+    },
+    [statusFilter]
+  );
+  const refreshEmployee = useEmployeeRowRefresh(list, setList, () => {
+    setTotal((current) => Math.max(0, current - 1));
+  }, shouldKeepEmployee);
   const [pendingAuditRows, setPendingAuditRows] = useState<AuditRow[]>(() => {
     // 待审核数据由数字员工首页通过路由状态传入，避免进入“我的员工”后再次请求。
     const routeState = location.state as { pendingAuditRows?: ResourceUseApplyAuditItem[] } | null;
@@ -135,54 +150,64 @@ const MyEmployeesPage: React.FC = () => {
   const [authRecord, setAuthRecord] = useState<IAgentCache | null>(null);
   const [authType, setAuthType] = useState<'useAuth' | 'mgrAuth'>('useAuth');
   const historyAuditRequestedRef = useRef(false);
+  const employeeRequestRef = useRef(0);
+  const employeeLoadingRef = useRef(false);
 
   const agentType = resourceFilter === 'group' ? '017' : undefined;
 
-  const loadEmployees = useCallback(async () => {
-    if (activeTab === 'audit') return;
+  const loadEmployees = useCallback(async (requestedPage = 1) => {
+    if (activeTab === 'audit' || (requestedPage > 1 && employeeLoadingRef.current)) return;
+    const requestId = ++employeeRequestRef.current;
+    employeeLoadingRef.current = true;
     setLoading(true);
+    if (requestedPage === 1) {
+      setList([]);
+      setTotal(0);
+      setPageNum(1);
+    }
     try {
       const request = activeTab === 'personal' ? queryMyCreated : queryManagedEnterpriseEmployees;
       const type =
         activeTab === 'enterprise' ? (enterpriseScope === 'created' ? 'owner' : 'managerExcludingOwner') : 'manageable';
-      const commonParams = {
-        pageNum,
+      const res = await request({
+        pageNum: requestedPage,
         pageSize: PAGE_SIZE,
         type,
         agentType,
+        includeEmployeeGroup: resourceFilter === 'all',
         keyword: debouncedKeyword.trim() || undefined,
         ...(statusFilter === 'all' ? { includeAllResourceStatus: true } : { resourceStatus: Number(statusFilter) }),
-      };
-      if (resourceFilter === 'all') {
-        const [employees, groups] = await Promise.all([
-          request({ ...commonParams, pageNum: 1, pageSize: 200, agentType: undefined }),
-          request({ ...commonParams, pageNum: 1, pageSize: 200, agentType: '017' }),
-        ]);
-        const employeeList = normalizeList(employees);
-        const groupList = normalizeList(groups);
-        setList([...employeeList, ...groupList]);
-        setTotal(employeeList.length + groupList.length);
-      } else {
-        const res = await request(commonParams);
-        const nextList = normalizeList(res);
-        setList(nextList);
-        setTotal(Number(res?.total || nextList.length));
+      });
+      if (requestId !== employeeRequestRef.current) return;
+      const nextList = normalizeList(res);
+      setList((current) => (requestedPage === 1 ? nextList : [...current, ...nextList]));
+      setPageNum(requestedPage);
+      setTotal(Number(res?.total ?? res?.data?.total ?? 0));
+    } catch (error: any) {
+      if (requestId === employeeRequestRef.current) {
+        message.error(error?.message || intl.formatMessage({ id: 'common.operateFailed' }));
       }
     } finally {
-      setLoading(false);
+      if (requestId === employeeRequestRef.current) {
+        employeeLoadingRef.current = false;
+        setLoading(false);
+      }
     }
-  }, [activeTab, agentType, debouncedKeyword, enterpriseScope, pageNum, resourceFilter, statusFilter]);
+  }, [activeTab, agentType, debouncedKeyword, enterpriseScope, intl, resourceFilter, statusFilter]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
       setDebouncedKeyword(keyword);
-      setPageNum(1);
     }, 300);
     return () => window.clearTimeout(timer);
   }, [keyword]);
 
   useEffect(() => {
-    loadEmployees();
+    void loadEmployees();
+    return () => {
+      employeeRequestRef.current += 1;
+      employeeLoadingRef.current = false;
+    };
   }, [loadEmployees]);
 
   const loadHistoryAudit = useCallback(async () => {
@@ -267,12 +292,12 @@ const MyEmployeesPage: React.FC = () => {
       try {
         await applyResourceUse({ resourceId });
         message.success('申请已提交，等待授权通过');
-        await loadEmployees();
+        await refreshEmployee(employee);
       } catch (error: any) {
         message.error(error?.message || '使用申请失败');
       }
     },
-    [loadEmployees]
+    [refreshEmployee]
   );
 
   const handleEdit = useCallback(
@@ -304,13 +329,12 @@ const MyEmployeesPage: React.FC = () => {
       try {
         await deleteDigitalEmployee({ resourceId: String(resourceId) });
         message.success('删除成功');
-        await loadEmployees();
-        setPermissionRefreshKey((key) => key + 1);
+        removeEmployeeRow(employeeRowId(employee));
       } catch (error: any) {
         message.error(error?.message || '删除失败');
       }
     },
-    [loadEmployees]
+    []
   );
 
   const handleShelfStatusChange = useCallback(
@@ -324,14 +348,18 @@ const MyEmployeesPage: React.FC = () => {
           throw new Error(response?.msg || `${action === 'shelf' ? '上架' : '下架'}失败`);
         }
         message.success(`${action === 'shelf' ? '上架' : '下架'}成功`);
-        // 操作完成后沿用当前企业范围、资源类型和状态筛选刷新列表。
-        await loadEmployees();
-        setPermissionRefreshKey((key) => key + 1);
+        // 仅更新操作员工的状态与权限，保留分页和滚动位置。
+        const refreshPromise = refreshEmployee(employee);
+        updateEmployeeRow({
+          resourceId: String(resourceId),
+          resourceStatus: action === 'shelf' ? 2 : 3,
+        });
+        await refreshPromise;
       } catch (error: any) {
         message.error(error?.message || `${action === 'shelf' ? '上架' : '下架'}失败`);
       }
     },
-    [loadEmployees]
+    [refreshEmployee]
   );
 
   const auditColumns: ColumnsType<AuditRow> = [
@@ -416,7 +444,7 @@ const MyEmployeesPage: React.FC = () => {
   );
 
   return (
-    <div className={`${styles.container} ${activeTab === 'audit' ? styles.auditContainer : ''}`}>
+    <div id="myEmployeesScroller" className={`${styles.container} ${activeTab === 'audit' ? styles.auditContainer : ''}`}>
       <div className={styles.back} onClick={() => navigate('/digitalEmployees')}>
         <LeftOutlined /> {intl.formatMessage({ id: 'myEmployees.backToAll' })}
       </div>
@@ -430,7 +458,6 @@ const MyEmployeesPage: React.FC = () => {
           setKeyword('');
           setStatusFilter('all');
           setEnterpriseScope('created');
-          setPageNum(1);
         }}
       />
       {activeTab !== 'audit' ? (
@@ -443,9 +470,8 @@ const MyEmployeesPage: React.FC = () => {
               value={keyword}
               onChange={(event) => {
                 setKeyword(event.target.value);
-                setPageNum(1);
               }}
-              onSearch={() => setPageNum(1)}
+              onSearch={() => void loadEmployees()}
             />
             <div className={styles.rightFilters}>
               <Segmented
@@ -457,7 +483,6 @@ const MyEmployeesPage: React.FC = () => {
                 ]}
                 onChange={(value) => {
                   setResourceFilter(value as ResourceFilter);
-                  setPageNum(1);
                 }}
               />
               {activeTab === 'enterprise' && (
@@ -470,7 +495,6 @@ const MyEmployeesPage: React.FC = () => {
                     ]}
                     onChange={(value) => {
                       setEnterpriseScope(value as EnterpriseScope);
-                      setPageNum(1);
                     }}
                   />
                   <Segmented
@@ -483,7 +507,6 @@ const MyEmployeesPage: React.FC = () => {
                     ]}
                     onChange={(value) => {
                       setStatusFilter(value as EmployeeStatusFilter);
-                      setPageNum(1);
                     }}
                   />
                 </div>
@@ -491,46 +514,50 @@ const MyEmployeesPage: React.FC = () => {
             </div>
           </div>
           <Spin spinning={loading}>
-            {list.length ? (
-              <div className={styles.grid}>
-                {list.map((employee) => (
-                  <ResourceCard
-                    key={`${employee.resourceId || employee.id || employee.agentId}-${permissionRefreshKey}`}
-                    resource={employee}
-                    resourceType="DIG_EMPLOYEE"
-                    avatarNode={<div className={styles.avatar}>{getAgentChatAvatar(employee.chatAvatar)}</div>}
-                    onCardClick={(resource) => setPreview((resource || employee) as IAgentCache)}
-                    digitalEmployeeActionMode
-                    actionConfig={{
-                      scene: activeTab,
-                      onChat: () => handleChat(employee),
-                      onApplyUse: () => handleApplyUse(employee),
-                      onEdit: () => handleEdit(employee),
-                      onAuth: (type) => handleAuth(employee, type),
-                      onDelete: () => handleDelete(employee),
-                      onShelf: () => handleShelfStatusChange(employee, 'shelf'),
-                      onUnShelf: () => handleShelfStatusChange(employee, 'unShelf'),
-                      // 我的员工卡片统一按资源状态展示标签，并保留创建人/管理人的操作权限。
-                      showDigitalEmployeeTypeTag: false,
-                      enableDigitalEmployeeLifecycle: true,
-                    }}
-                  />
-                ))}
-              </div>
-            ) : (
-              <div className={styles.emptyState}>
-                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} />
-              </div>
-            )}
-            {resourceFilter !== 'all' && total > PAGE_SIZE && (
-              <Pagination
-                current={pageNum}
-                pageSize={PAGE_SIZE}
-                total={total}
-                showSizeChanger={false}
-                onChange={setPageNum}
-              />
-            )}
+            <InfiniteScroll
+              autoFill
+              isLoading={loading}
+              next={() => loadEmployees(pageNum + 1)}
+              hasMore={list.length < total}
+              dataLength={list.length}
+              scrollableTarget="myEmployeesScroller"
+              appendItemsAutoScrollBottom={false}
+              scrollThreshold="50px"
+              style={{ overflow: 'visible' }}
+              loader={<Spin />}
+            >
+              {list.length ? (
+                <div className={styles.grid}>
+                  {list.map((employee) => (
+                    <ResourceCard
+                      key={employee.resourceId || employee.id || employee.agentId}
+                      resource={employee}
+                      resourceType="DIG_EMPLOYEE"
+                      avatarNode={<div className={styles.avatar}>{getAgentChatAvatar(employee.chatAvatar)}</div>}
+                      onCardClick={(resource) => setPreview((resource || employee) as IAgentCache)}
+                      digitalEmployeeActionMode
+                      actionConfig={{
+                        scene: activeTab,
+                        onChat: () => handleChat(employee),
+                        onApplyUse: () => handleApplyUse(employee),
+                        onEdit: () => handleEdit(employee),
+                        onAuth: (type) => handleAuth(employee, type),
+                        onDelete: () => handleDelete(employee),
+                        onShelf: () => handleShelfStatusChange(employee, 'shelf'),
+                        onUnShelf: () => handleShelfStatusChange(employee, 'unShelf'),
+                        // 我的员工卡片统一按资源状态展示标签，并保留创建人/管理人的操作权限。
+                        showDigitalEmployeeTypeTag: false,
+                        enableDigitalEmployeeLifecycle: true,
+                      }}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div className={styles.emptyState}>
+                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                </div>
+              )}
+            </InfiniteScroll>
           </Spin>
         </>
       ) : (
@@ -589,7 +616,7 @@ const MyEmployeesPage: React.FC = () => {
           onSuccess={() => {
             setAuthDrawerOpen(false);
             setAuthRecord(null);
-            loadEmployees();
+            void refreshEmployee(authRecord).catch(console.error);
           }}
           headerInfo={{
             title: authRecord.resourceName || authRecord.name,

@@ -6,7 +6,7 @@ import { getLocale, useDispatch, useIntl, useSelector } from '@umijs/max';
 import classnames from 'classnames';
 import { debounce, noop } from 'lodash';
 import AntdIcon from '@/components/AntdIcon';
-import { queryResourceOperationPermissions, restoreResource } from '@/pages/manager/service/resources';
+import { restoreResource } from '@/pages/manager/service/resources';
 import { setDefaultDigitalEmployee } from '@/service/digitalEmployees';
 import { getFileUrl } from '@/utils/file';
 import { useRequest } from '@/hooks/useRequest';
@@ -89,6 +89,9 @@ export interface IResourceCardItem {
   syncStatus?: string;
   syncError?: string;
   lastSyncTime?: string;
+
+  /** 列表接口已一次性回填当前用户操作权限时为 true。 */
+  operationPermissionsLoaded?: boolean;
 }
 
 type ResourceCardActionConfig = {
@@ -1311,101 +1314,7 @@ const RenderContent = (props: ResourceCardProps) => {
 function ResourceCard(props: ResourceCardProps) {
   const { resource, variant = 'default' } = props;
   const resourceCardRef = useRef<HTMLDivElement>(null);
-  const fetchedPermissionKeyRef = useRef<string | undefined>(undefined);
-  const [operationPermissions, setOperationPermissions] = useState<Partial<IResourceCardItem> | null>(null);
-  const defaultDigEmployeeId = useSelector(
-    ({ employees, user }: any) => employees?.defaultDigEmployeeId || user?.userInfo?.defaultDigEmployeeId
-  );
-  const operationResourceId = resource.resourceId ?? resource.id ?? resource.agentId;
-  const permissionQueryKey = `${operationResourceId ?? ''}:${defaultDigEmployeeId ?? ''}:${
-    resource.approveStatus ?? ''
-  }`;
-
-  useEffect(() => {
-    // 工作空间(用户开发)技能没有真实 resourceId，跳过资源权限查询，避免无效请求。
-    if (!operationResourceId || isWorkspaceSkill(resource) || fetchedPermissionKeyRef.current === permissionQueryKey) {
-      return noop;
-    }
-
-    let observer: IntersectionObserver | undefined;
-    let cancelled = false;
-
-    const loadOperationPermissions = async () => {
-      if (cancelled || fetchedPermissionKeyRef.current === permissionQueryKey) return;
-      fetchedPermissionKeyRef.current = permissionQueryKey;
-      try {
-        const res: any = await queryResourceOperationPermissions({ resourceId: operationResourceId });
-        const permissions = res?.data || res;
-        if (!cancelled && permissions) {
-          const {
-            canEdit,
-            canManageAuth,
-            canUseAuth,
-            canDelete,
-            canOnShelf,
-            canOffShelf,
-            canApplyUse,
-            canAuditUse,
-            canSetDefault,
-            canRestore,
-            hasManagePermission,
-            hasUsePermission,
-            canViewDetail,
-            useApplyPending,
-          } = permissions;
-          setOperationPermissions({
-            hasManagePermission,
-            hasUsePermission,
-            canViewDetail,
-            canEdit,
-            canManageAuth,
-            canUseAuth,
-            canDelete,
-            canOnShelf,
-            canOffShelf,
-            canApplyUse,
-            canAuditUse,
-            canSetDefault,
-            canRestore,
-            useApplyPending,
-            ...(useApplyPending ? { approveStatus: 'S' } : {}),
-          });
-        }
-      } catch {
-        if (fetchedPermissionKeyRef.current === permissionQueryKey) {
-          fetchedPermissionKeyRef.current = undefined;
-        }
-      }
-    };
-
-    // 数字员工操作区需要立即展示完整菜单，不再等待 IntersectionObserver 触发。
-    if (props.digitalEmployeeActionMode) {
-      void loadOperationPermissions();
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    if (!resourceCardRef.current) return noop;
-    const callback = debounce((entries: IntersectionObserverEntry[]) => {
-      for (const entry of entries) {
-        if (entry.intersectionRatio > 0) {
-          void loadOperationPermissions();
-          observer?.disconnect();
-          break;
-        }
-      }
-    }, 100);
-
-    observer = new IntersectionObserver(callback);
-    observer.observe(resourceCardRef.current);
-    return () => {
-      cancelled = true;
-      observer?.disconnect();
-    };
-  }, [operationResourceId, permissionQueryKey, props.digitalEmployeeActionMode, resource]);
-
-  const displayResource = operationPermissions ? { ...resource, ...operationPermissions } : resource;
+  const displayResource = resource;
   const isCancelledResource =
     displayResource?.resourceBizType === resourceBizTypeMap.DIG_EMPLOYEE
       ? `${displayResource?.resourceStatus ?? displayResource?.metaStatus ?? ''}` === '-1'

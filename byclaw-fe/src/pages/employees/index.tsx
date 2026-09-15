@@ -13,7 +13,6 @@ import ChatLayoutComp from '@/components/ChatLayoutComp';
 import { agentTypeMap } from '@/constants/agent';
 import useGlobal from '@/hooks/useGlobal';
 import { queryResourceDetail } from '@/pages/manager/service/DigitalResourceMgr';
-import { queryResourceOperationPermissions } from '@/pages/manager/service/resources';
 import { IAgentCache } from '@/typescript/agent';
 import { getAgentChatAvatar, agentHandler, isSandboxAgent } from '@/utils/agent';
 import { AgentInfo } from '@/pages/digitalEmployees/components/AllDigitalEmployees/components/AvatarCardItem';
@@ -244,31 +243,15 @@ const Employees = () => {
       return undefined;
     }
 
-    let cancelled = false;
-    setEmployeeUsePermission(null);
-
-    queryResourceOperationPermissions({ resourceId: employeeResourceId })
-      .then((res: any) => {
-        if (cancelled) {
-          return;
-        }
-
-        const permissions = res?.data || res || {};
-        setEmployeeUsePermission({
-          resourceId: employeeResourceId,
-          hasUsePermission: permissions?.hasUsePermission === true,
-        });
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setEmployeeUsePermission(null);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [employeeResourceId, employeeTab]);
+    const detailPermissions = appInfo?.operationPermissions;
+    const permissions = `${detailPermissions?.resourceId ?? ''}` === employeeResourceId
+      ? detailPermissions
+      : detailAgentInfo;
+    setEmployeeUsePermission({
+      resourceId: employeeResourceId,
+      hasUsePermission: permissions?.hasUsePermission === true,
+    });
+  }, [appInfo, detailAgentInfo, employeeResourceId, employeeTab]);
 
   useEffect(() => {
     if (!searchParamAgentId || syncedRouteAgentIdRef.current === searchParamAgentId) return;

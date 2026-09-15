@@ -9,6 +9,7 @@ import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.state.domain.agent.enums.OrgFilterType;
 import com.iwhalecloud.byai.manager.domain.superassist.service.SuasSuperassistService;
+import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.entity.superassist.SuasSuperassist;
 import com.iwhalecloud.byai.manager.qo.index.AuthResourceQo;
 import com.iwhalecloud.byai.manager.qo.index.DiscoverQo;
@@ -20,6 +21,7 @@ import com.iwhalecloud.byai.manager.qo.index.OrgFilterQo;
 import com.iwhalecloud.byai.manager.qo.index.RecentlyAddedQo;
 import com.iwhalecloud.byai.state.domain.index.service.IndexService;
 import com.iwhalecloud.byai.manager.vo.index.AuthDigitEmployVo;
+import com.iwhalecloud.byai.manager.vo.auth.ResourceOperationPermissionsVo;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
 import com.iwhalecloud.byai.manager.vo.index.AuthResourceVo;
 import com.iwhalecloud.byai.manager.vo.index.DepartmentRangeVo;
@@ -74,6 +76,9 @@ public class IndexApplicationServiceV2 {
     private IndexService indexService;
 
     @Autowired
+    private AuthApplicationService authApplicationService;
+
+    @Autowired
     private ResourceAuthContextService resourceAuthContextService;
 
     @Autowired
@@ -112,6 +117,7 @@ public class IndexApplicationServiceV2 {
             this.setIsMyCreate(authDigitEmployVo);
             this.fillDefaultAndRuntimeTag(authDigitEmployVo, defaultDigitalEmployeeId);
         }
+        this.fillAuthOperationPermissions(authDigitEmployVos);
 
         PageInfo<AuthDigitEmployVo> pageInfo = PageHelperUtil.toPageInfo(page);
 
@@ -242,6 +248,7 @@ public class IndexApplicationServiceV2 {
             this.setIsMyCreate(authDigitEmployVo);
             this.fillDefaultAndRuntimeTag(authDigitEmployVo, defaultDigitalEmployeeId);
         }
+        this.fillAuthOperationPermissions(authDigitEmployVos);
 
         return pageInfo;
     }
@@ -273,6 +280,7 @@ public class IndexApplicationServiceV2 {
             this.setIsMyCreate(authDigitEmployVo);
             this.fillDefaultAndRuntimeTag(authDigitEmployVo, defaultDigitalEmployeeId);
         }
+        this.fillAuthOperationPermissions(authDigitEmployVos);
 
         return pageInfo;
     }
@@ -296,6 +304,7 @@ public class IndexApplicationServiceV2 {
             // 设置管理/使用权限信息
             this.setManOrUsePriv(digitEmployMarketVo);
         }
+        this.fillMarketOperationPermissions(digitEmployMarketVos);
 
         return PageHelperUtil.toPageInfo(page);
     }
@@ -391,6 +400,9 @@ public class IndexApplicationServiceV2 {
      * @param discoverList 发现页查询结果
      */
     private void enrichDiscoverList(List<DigitEmployMarketExtVo> discoverList) {
+        if (CollectionUtils.isEmpty(discoverList)) {
+            return;
+        }
         Map<Long, DigitEmployMarketVo> digitEmployMarketVoMap = new HashMap<>(discoverList.size());
 
         for (DigitEmployMarketExtVo digitEmployMarketVo : discoverList) {
@@ -419,6 +431,105 @@ public class IndexApplicationServiceV2 {
             this.setManPriv(digitEmployMarketVo, manPrivVos);
 
         }
+
+        this.fillMarketOperationPermissions(discoverList);
+    }
+
+    /**
+     * 批量回填当前用户对“我可用的”列表中每个数字员工的操作权限，避免前端按卡片逐条请求权限接口。
+     */
+    private void fillAuthOperationPermissions(List<AuthDigitEmployVo> digitalEmployees) {
+        if (CollectionUtils.isEmpty(digitalEmployees)) {
+            return;
+        }
+        List<Long> resourceIds = digitalEmployees.stream()
+            .map(AuthDigitEmployVo::getId)
+            .filter(Objects::nonNull)
+            .distinct()
+            .collect(Collectors.toList());
+        Map<Long, ResourceOperationPermissionsVo> permissionMap = queryOperationPermissions(resourceIds);
+        for (AuthDigitEmployVo digitalEmployee : digitalEmployees) {
+            ResourceOperationPermissionsVo permissions = digitalEmployee == null ? null
+                : permissionMap.get(digitalEmployee.getId());
+            applyOperationPermissions(digitalEmployee, permissions);
+        }
+    }
+
+    /**
+     * 批量回填发现页/我创建列表中的数字员工操作权限。
+     */
+    private void fillMarketOperationPermissions(List<? extends DigitEmployMarketVo> digitalEmployees) {
+        if (CollectionUtils.isEmpty(digitalEmployees)) {
+            return;
+        }
+        List<Long> resourceIds = digitalEmployees.stream()
+            .map(DigitEmployMarketVo::getId)
+            .filter(Objects::nonNull)
+            .distinct()
+            .collect(Collectors.toList());
+        Map<Long, ResourceOperationPermissionsVo> permissionMap = queryOperationPermissions(resourceIds);
+        for (DigitEmployMarketVo digitalEmployee : digitalEmployees) {
+            ResourceOperationPermissionsVo permissions = digitalEmployee == null ? null
+                : permissionMap.get(digitalEmployee.getId());
+            applyOperationPermissions(digitalEmployee, permissions);
+        }
+    }
+
+    private Map<Long, ResourceOperationPermissionsVo> queryOperationPermissions(Collection<Long> resourceIds) {
+        if (CollectionUtils.isEmpty(resourceIds)) {
+            return Collections.emptyMap();
+        }
+        return authApplicationService.queryResourceOperationPermissionsBatch(resourceIds);
+    }
+
+    private void applyOperationPermissions(AuthDigitEmployVo digitalEmployee,
+                                           ResourceOperationPermissionsVo permissions) {
+        if (digitalEmployee == null) {
+            return;
+        }
+        digitalEmployee.setOperationPermissionsLoaded(permissions != null);
+        if (permissions == null) {
+            return;
+        }
+        digitalEmployee.setHasManagePermission(permissions.isHasManagePermission());
+        digitalEmployee.setHasUsePermission(permissions.isHasUsePermission());
+        digitalEmployee.setCanViewDetail(permissions.isCanViewDetail());
+        digitalEmployee.setCanEdit(permissions.isCanEdit());
+        digitalEmployee.setCanManageAuth(permissions.isCanManageAuth());
+        digitalEmployee.setCanUseAuth(permissions.isCanUseAuth());
+        digitalEmployee.setCanDelete(permissions.isCanDelete());
+        digitalEmployee.setCanApplyUse(permissions.isCanApplyUse());
+        digitalEmployee.setUseApplyPending(permissions.isUseApplyPending());
+        digitalEmployee.setCanAuditUse(permissions.isCanAuditUse());
+        digitalEmployee.setCanSetDefault(permissions.isCanSetDefault());
+        digitalEmployee.setCanRestore(permissions.isCanRestore());
+        digitalEmployee.setCanOnShelf(permissions.isCanOnShelf());
+        digitalEmployee.setCanOffShelf(permissions.isCanOffShelf());
+    }
+
+    private void applyOperationPermissions(DigitEmployMarketVo digitalEmployee,
+                                           ResourceOperationPermissionsVo permissions) {
+        if (digitalEmployee == null) {
+            return;
+        }
+        digitalEmployee.setOperationPermissionsLoaded(permissions != null);
+        if (permissions == null) {
+            return;
+        }
+        digitalEmployee.setHasManagePermission(permissions.isHasManagePermission());
+        digitalEmployee.setHasUsePermission(permissions.isHasUsePermission());
+        digitalEmployee.setCanViewDetail(permissions.isCanViewDetail());
+        digitalEmployee.setCanEdit(permissions.isCanEdit());
+        digitalEmployee.setCanManageAuth(permissions.isCanManageAuth());
+        digitalEmployee.setCanUseAuth(permissions.isCanUseAuth());
+        digitalEmployee.setCanDelete(permissions.isCanDelete());
+        digitalEmployee.setCanApplyUse(permissions.isCanApplyUse());
+        digitalEmployee.setUseApplyPending(permissions.isUseApplyPending());
+        digitalEmployee.setCanAuditUse(permissions.isCanAuditUse());
+        digitalEmployee.setCanSetDefault(permissions.isCanSetDefault());
+        digitalEmployee.setCanRestore(permissions.isCanRestore());
+        digitalEmployee.setCanOnShelf(permissions.isCanOnShelf());
+        digitalEmployee.setCanOffShelf(permissions.isCanOffShelf());
     }
 
     private void fillCatalogIds(DiscoverQo discoverQo) {

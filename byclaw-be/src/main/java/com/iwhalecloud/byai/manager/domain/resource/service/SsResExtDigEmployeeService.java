@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.resource.service;
 
+import java.util.stream.Collectors;
+import org.springframework.beans.BeanUtils;
 import com.github.pagehelper.Page;
 import com.github.pagehelper.PageHelper;
 import com.iwhalecloud.byai.common.cache.ShareBfmUser;
@@ -98,11 +100,19 @@ public class SsResExtDigEmployeeService {
     public PageInfo<DigitalEmployeeVo> selectAllDigitalEmployeeByQo(DigitalEmployeeQo digitalEmployeeQo) {
         int pageNum = digitalEmployeeQo.getPageNum();
         int pageSize = digitalEmployeeQo.getPageSize();
-        Page<DigitalEmployeeVo> page = PageHelper.startPage(pageNum, pageSize);
+        Page<DigitalEmployeePageVo> page = PageHelper.startPage(pageNum, pageSize);
 
         ssResExtDigEmployeeMapper.selectDigitalEmployeeByQo(digitalEmployeeQo);
 
-        return PageHelperUtil.toPageInfo(page);
+        PageInfo<DigitalEmployeePageVo> sourcePage = PageHelperUtil.toPageInfo(page);
+        PageInfo<DigitalEmployeeVo> result = new PageInfo<>();
+        BeanUtils.copyProperties(sourcePage, result, "list");
+        result.setList(page.stream().map(row -> {
+            DigitalEmployeeVo employee = new DigitalEmployeeVo();
+            BeanUtils.copyProperties(row, employee);
+            return employee;
+        }).collect(Collectors.toList()));
+        return result;
     }
 
     /**

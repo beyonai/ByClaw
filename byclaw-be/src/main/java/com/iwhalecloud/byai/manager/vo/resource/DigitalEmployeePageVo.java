@@ -167,4 +167,37 @@ public class DigitalEmployeePageVo {
 
     @JSONField(format = "yyyy-MM-dd HH:mm:ss")
     private Date updateTime;
+
+    /**
+     * 是否已由列表接口批量回填当前用户的操作权限。
+     */
+    private Boolean operationPermissionsLoaded;
+
+    private Boolean hasManagePermission;
+
+    private Boolean hasUsePermission;
+
+    private Boolean canViewDetail;
+
+    private Boolean canEdit;
+
+    private Boolean canManageAuth;
+
+    private Boolean canUseAuth;
+
+    private Boolean canDelete;
+
+    private Boolean canApplyUse;
+
+    private Boolean useApplyPending;
+
+    private Boolean canAuditUse;
+
+    private Boolean canSetDefault;
+
+    private Boolean canRestore;
+
+    private Boolean canOnShelf;
+
+    private Boolean canOffShelf;
 }

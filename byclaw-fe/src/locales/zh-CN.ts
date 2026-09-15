@@ -918,7 +918,7 @@ export default {
   'queryInput.tools.knowledge': '知识',
   'queryInput.tools.noProcessFiles': '暂无过程文件',
   'queryInput.tools.noProjectKnowledge': '暂未初始化项目知识库',
-  'queryInput.tools.addResources': '可添加数字员工、技能、连接器',
+  'queryInput.tools.addResources': '可添加数字员工、技能、连接器、文件',
   'queryInput.tools.open': '打开聊天工具',
   'queryInput.tools.selectSkill': '选择技能',
   'connector.reauthorize': '重新授权',

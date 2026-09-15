@@ -1,5 +1,8 @@
 package com.iwhalecloud.byai.manager.interfaces.controller.digitemploy;
 
+import java.util.Collections;
+import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
+import org.springframework.beans.factory.annotation.Autowired;
 import java.io.OutputStream;
 import java.util.List;
 import java.util.Map;
@@ -24,7 +27,6 @@ import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -56,6 +58,9 @@ import com.iwhalecloud.byai.manager.vo.digitemploy.DigitalEmployeeInstallTargetV
 @RestController
 @RequestMapping("/digitalEmployeeController")
 public class DigitalEmployeeController {
+
+    @Autowired
+    private AuthApplicationService authApplicationService;
 
     private static final Logger logger = LoggerFactory.getLogger(DigitalEmployeeController.class);
 
@@ -269,6 +274,10 @@ public class DigitalEmployeeController {
     @RequestMapping(value = "/findDetailsById", method = RequestMethod.POST)
     public ResponseUtil findDetailsById(@RequestBody EmployeeIdDTO employeeIdDTO) {
         DigitalEmployeeDetailsDTO digEmployeeDetails = digitalEmployeeApplicationService.findDetailsById(employeeIdDTO);
+        if (digEmployeeDetails != null) {
+            digEmployeeDetails.setOperationPermissions(authApplicationService.queryResourceOperationPermissionsBatch(
+                Collections.singletonList(employeeIdDTO.getResourceId())).get(employeeIdDTO.getResourceId()));
+        }
         return ResponseUtil.successResponse(I18nUtil.get("digemployee.detail.query.success"), digEmployeeDetails);
     }
 

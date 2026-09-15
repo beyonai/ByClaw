@@ -922,7 +922,7 @@ export default {
   'queryInput.tools.knowledge': 'Knowledge',
   'queryInput.tools.noProcessFiles': 'No process files',
   'queryInput.tools.noProjectKnowledge': 'Project knowledge base is not initialized',
-  'queryInput.tools.addResources': 'Add digital employees, skills, and connectors',
+  'queryInput.tools.addResources': 'Add digital employees, skills, connectors, and files',
   'queryInput.tools.open': 'Open chat tools',
   'queryInput.tools.selectSkill': 'Select a skill',
   'connector.reauthorize': 'Reauthorize',

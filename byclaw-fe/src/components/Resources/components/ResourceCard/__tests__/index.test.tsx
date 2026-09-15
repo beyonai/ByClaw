@@ -40,7 +40,6 @@ jest.mock('antd', () => {
 });
 
 jest.mock('@/pages/manager/service/resources', () => ({
-  queryResourceOperationPermissions: jest.fn(),
 }));
 
 jest.mock('@/pages/manager/service/DigitalEmployeeMgr', () => ({

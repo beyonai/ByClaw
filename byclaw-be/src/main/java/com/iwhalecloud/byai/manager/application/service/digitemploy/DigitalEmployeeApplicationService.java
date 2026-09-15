@@ -103,6 +103,7 @@ import com.iwhalecloud.byai.manager.vo.digitemploy.SetDefaultDigitalEmployeeResu
 import com.iwhalecloud.byai.manager.vo.digitemploy.DigitalEmployeeBatchInstallResultVo;
 import com.iwhalecloud.byai.manager.vo.digitemploy.DigitalEmployeeInstallTargetVo;
 import com.iwhalecloud.byai.manager.vo.resource.DigitalEmployeeVo;
+import com.iwhalecloud.byai.manager.vo.auth.ResourceOperationPermissionsVo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupInstallResultVo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupUninstallPreviewVo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupUninstallSkillVo;
@@ -349,6 +350,7 @@ public class DigitalEmployeeApplicationService {
 
         PageInfo<DigitalEmployeePageVo> pageInfo = ssResExtDigEmployeeService
             .selectDigitalEmployeeByQo(digitalEmployeeQo);
+        this.fillPageOperationPermissions(pageInfo);
         return pageInfo;
     }
 
@@ -431,6 +433,7 @@ public class DigitalEmployeeApplicationService {
         PageInfo<DigitalEmployeeVo> pageInfo = ssResExtDigEmployeeService
             .selectAllDigitalEmployeeByQo(digitalEmployeeQo);
         this.fillRuntimeDigitalEmployeeTags(pageInfo);
+        this.fillDigitalEmployeeOperationPermissions(pageInfo);
         return pageInfo;
     }
 
@@ -478,7 +481,107 @@ public class DigitalEmployeeApplicationService {
         PageInfo<DigitalEmployeeVo> pageInfo = ssResExtDigEmployeeService
             .selectPersonalDigitalEmployeeByQo(digitalEmployeeQo);
         this.fillRuntimeDigitalEmployeeTags(pageInfo);
+        this.fillDigitalEmployeeOperationPermissions(pageInfo);
         return pageInfo;
+    }
+
+    /**
+     * 为旧版数字员工管理列表一次性回填当前用户的操作权限，避免前端按记录逐条请求权限接口。
+     */
+    private void fillPageOperationPermissions(PageInfo<DigitalEmployeePageVo> pageInfo) {
+        if (pageInfo == null || CollectionUtils.isEmpty(pageInfo.getList())) {
+            return;
+        }
+        List<DigitalEmployeePageVo> employees = pageInfo.getList();
+        List<Long> resourceIds = employees.stream()
+            .map(DigitalEmployeePageVo::getResourceId)
+            .filter(Objects::nonNull)
+            .distinct()
+            .collect(Collectors.toList());
+        Map<Long, ResourceOperationPermissionsVo> permissionMap = queryOperationPermissions(resourceIds);
+        for (DigitalEmployeePageVo employee : employees) {
+            ResourceOperationPermissionsVo permissions = employee == null ? null
+                : permissionMap.get(employee.getResourceId());
+            applyOperationPermissions(employee, permissions);
+        }
+    }
+
+    /**
+     * 为资源中心使用的数字员工列表一次性回填当前用户的操作权限。
+     */
+    private void fillDigitalEmployeeOperationPermissions(PageInfo<DigitalEmployeeVo> pageInfo) {
+        if (pageInfo == null || CollectionUtils.isEmpty(pageInfo.getList())) {
+            return;
+        }
+        List<DigitalEmployeeVo> employees = pageInfo.getList();
+        List<Long> resourceIds = employees.stream()
+            .map(DigitalEmployeeVo::getId)
+            .filter(Objects::nonNull)
+            .distinct()
+            .collect(Collectors.toList());
+        Map<Long, ResourceOperationPermissionsVo> permissionMap = queryOperationPermissions(resourceIds);
+        for (DigitalEmployeeVo employee : employees) {
+            ResourceOperationPermissionsVo permissions = employee == null ? null
+                : permissionMap.get(employee.getId());
+            applyOperationPermissions(employee, permissions);
+        }
+    }
+
+    private Map<Long, ResourceOperationPermissionsVo> queryOperationPermissions(Collection<Long> resourceIds) {
+        if (CollectionUtils.isEmpty(resourceIds)) {
+            return Collections.emptyMap();
+        }
+        return authApplicationService.queryResourceOperationPermissionsBatch(resourceIds);
+    }
+
+    private void applyOperationPermissions(DigitalEmployeePageVo employee,
+                                           ResourceOperationPermissionsVo permissions) {
+        if (employee == null) {
+            return;
+        }
+        employee.setOperationPermissionsLoaded(permissions != null);
+        if (permissions == null) {
+            return;
+        }
+        employee.setHasManagePermission(permissions.isHasManagePermission());
+        employee.setHasUsePermission(permissions.isHasUsePermission());
+        employee.setCanViewDetail(permissions.isCanViewDetail());
+        employee.setCanEdit(permissions.isCanEdit());
+        employee.setCanManageAuth(permissions.isCanManageAuth());
+        employee.setCanUseAuth(permissions.isCanUseAuth());
+        employee.setCanDelete(permissions.isCanDelete());
+        employee.setCanApplyUse(permissions.isCanApplyUse());
+        employee.setUseApplyPending(permissions.isUseApplyPending());
+        employee.setCanAuditUse(permissions.isCanAuditUse());
+        employee.setCanSetDefault(permissions.isCanSetDefault());
+        employee.setCanRestore(permissions.isCanRestore());
+        employee.setCanOnShelf(permissions.isCanOnShelf());
+        employee.setCanOffShelf(permissions.isCanOffShelf());
+    }
+
+    private void applyOperationPermissions(DigitalEmployeeVo employee,
+                                           ResourceOperationPermissionsVo permissions) {
+        if (employee == null) {
+            return;
+        }
+        employee.setOperationPermissionsLoaded(permissions != null);
+        if (permissions == null) {
+            return;
+        }
+        employee.setHasManagePermission(permissions.isHasManagePermission());
+        employee.setHasUsePermission(permissions.isHasUsePermission());
+        employee.setCanViewDetail(permissions.isCanViewDetail());
+        employee.setCanEdit(permissions.isCanEdit());
+        employee.setCanManageAuth(permissions.isCanManageAuth());
+        employee.setCanUseAuth(permissions.isCanUseAuth());
+        employee.setCanDelete(permissions.isCanDelete());
+        employee.setCanApplyUse(permissions.isCanApplyUse());
+        employee.setUseApplyPending(permissions.isUseApplyPending());
+        employee.setCanAuditUse(permissions.isCanAuditUse());
+        employee.setCanSetDefault(permissions.isCanSetDefault());
+        employee.setCanRestore(permissions.isCanRestore());
+        employee.setCanOnShelf(permissions.isCanOnShelf());
+        employee.setCanOffShelf(permissions.isCanOffShelf());
     }
 
     /**

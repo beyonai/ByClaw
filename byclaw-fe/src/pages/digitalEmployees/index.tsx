@@ -17,13 +17,35 @@ import { navigateToEmployeeChat } from '@/utils/employeeChat';
 import AntdIcon from '@/components/AntdIcon';
 import { getFileUrl } from '@/utils/file';
 import useDigitalEmployeeAuditCount from '@/hooks/useDigitalEmployeeAuditCount';
-import { applyResourceUse, queryResourceOperationPermissions } from '@/pages/manager/service/resources';
+import { applyResourceUse } from '@/pages/manager/service/resources';
 import EmployFormModal from '@/pages/manager/pages/digitalEmployeeMgr/components/EmployFormModal';
 import MdPreview from '@/components/Preview/Md';
 
 import classnames from 'classnames';
 
 import styles from './index.module.less';
+
+const getListOperationPermissions = (employee: any) => {
+  if (employee?.operationPermissionsLoaded !== true) {
+    return null;
+  }
+  return {
+    hasManagePermission: employee.hasManagePermission === true,
+    hasUsePermission: employee.hasUsePermission === true,
+    canViewDetail: employee.canViewDetail === true,
+    canEdit: employee.canEdit === true,
+    canManageAuth: employee.canManageAuth === true,
+    canUseAuth: employee.canUseAuth === true,
+    canDelete: employee.canDelete === true,
+    canApplyUse: employee.canApplyUse === true,
+    useApplyPending: employee.useApplyPending === true,
+    canAuditUse: employee.canAuditUse === true,
+    canSetDefault: employee.canSetDefault === true,
+    canRestore: employee.canRestore === true,
+    canOnShelf: employee.canOnShelf === true,
+    canOffShelf: employee.canOffShelf === true,
+  };
+};
 
 const buildDigitalEmployeeFilterParam = (
   _activeTab: string,
@@ -322,6 +344,7 @@ export function EmployeePreviewModal({ employee, onClose, onCreateTask }: any) {
   const [permissions, setPermissions] = useState<any>(null);
   const [applyLoading, setApplyLoading] = useState(false);
   useEffect(() => {
+    let cancelled = false;
     setDetail(employee);
     setPermissions(null);
     setApplyLoading(false);
@@ -329,16 +352,20 @@ export function EmployeePreviewModal({ employee, onClose, onCreateTask }: any) {
     if (id) {
       getCompositeAppInfo({ resourceId: `${id}` })
         .then((response: any) => {
+          if (cancelled) return;
           const nextDetail = response?.data || response;
           if (nextDetail && typeof nextDetail === 'object') {
             setDetail((current: any) => ({ ...(current || {}), ...nextDetail }));
+            if (nextDetail.operationPermissions) setPermissions(nextDetail.operationPermissions);
           }
         })
         .catch(() => undefined);
-      queryResourceOperationPermissions({ resourceId: `${id}` })
-        .then((res: any) => setPermissions(res?.data || res || {}))
-        .catch(() => setPermissions({}));
+      const listPermissions = getListOperationPermissions(employee);
+      setPermissions(listPermissions || {});
     }
+    return () => {
+      cancelled = true;
+    };
   }, [employee]);
   const employeeResourceId = detail?.resourceId || detail?.id || detail?.agentId;
   const hasUsePermission = permissions?.hasUsePermission === true;

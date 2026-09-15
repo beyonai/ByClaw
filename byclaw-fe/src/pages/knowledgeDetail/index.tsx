@@ -10,7 +10,6 @@ import AntdIcon from '@/components/AntdIcon';
 import CommonTabs from '@/components/CommonTabs';
 import useKnowledgeStore from '@/models/useKnowledgeStore';
 import {
-  queryResourceOperationPermissions,
   type ResourceOperationPermissions,
 } from '@/pages/manager/service/resources';
 import { queryKnowledgeCapability, type KnowledgeCapability } from '@/service/knowledgeCenter';
@@ -81,9 +80,9 @@ const KnowledgeDetail: React.FC = () => {
     if (resourceId) {
       const loadDetail = async () => {
         try {
-          const permissionRes: any = await queryResourceOperationPermissions({ resourceId });
+          const res = await queryResourceDetail({ resourceId, resourceBizType, resourceSourcePkId });
           if (!mounted) return;
-          const permissions = (permissionRes?.data || permissionRes || {}) as ResourceOperationPermissions;
+          const permissions = (res?.operationPermissions || {}) as ResourceOperationPermissions;
           const canViewDetail =
             permissions?.canViewDetail ??
             permissions?.hasManagePermission ??
@@ -98,11 +97,6 @@ const KnowledgeDetail: React.FC = () => {
           }
           setOperationPermissions(permissions);
 
-          const res = await queryResourceDetail({
-            resourceId,
-            resourceBizType,
-            resourceSourcePkId,
-          });
           if (mounted && res) {
             setBaseInfo(res);
           }

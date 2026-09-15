@@ -260,7 +260,9 @@
                         and e.agent_type = #{agentType}
                     </when>
                     <otherwise>
-                        and coalesce(e.agent_type, '') != '017'
+                        <if test="includeEmployeeGroup != true">
+                            and coalesce(e.agent_type, '') != '017'
+                        </if>
                     </otherwise>
                 </choose>
                 and (k.black_count = 0 or k.black_count is null)
@@ -368,6 +370,7 @@
                         or a.resource_desc like concat('%', #{keyword}, '%'))
                 </if>
             </where>
+            order by coalesce(a.update_time, a.create_time) desc, a.resource_id desc
     </select>
 
     <!-- 数字员工组成员候选：权限、有效性和配置完整性均在分页前过滤。 -->
@@ -755,7 +758,9 @@
                     and b.agent_type = #{agentType}
                 </when>
                 <otherwise>
-                    and coalesce(b.agent_type, '') != '017'
+                    <if test="includeEmployeeGroup != true">
+                        and coalesce(b.agent_type, '') != '017'
+                    </if>
                 </otherwise>
             </choose>
             and (
@@ -898,7 +903,7 @@
                 )
             </if>
             order by coalesce(a.update_time, a.create_time) desc,
-                     a.create_time desc
+                     a.create_time desc, a.resource_id desc
         </where>
     </select>
 

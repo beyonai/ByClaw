@@ -329,6 +329,7 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
             chatMode={chatModeMap.expert}
             agentId={agentId}
             sessionId={sessionId}
+            resourceAgentIds={this.getResourceAgentIds()}
             excludedAgentIds={(this.state.resourceList || [])
               .filter((resource) => `${resource.resourceType}` === `${ResourceTypeMap.digitalEmployee}`)
               .flatMap((resource) =>
@@ -465,6 +466,7 @@ export default connect(
   ({ user, employees }: any) => {
     return {
       userInfo: get(user, 'userInfo'),
+      defaultDigEmployeeId: get(employees, 'defaultDigEmployeeId') || get(user, 'userInfo.defaultDigEmployeeId'),
       // @ts-ignore
       employeesList: get(employees, 'employeesList') || [],
     };

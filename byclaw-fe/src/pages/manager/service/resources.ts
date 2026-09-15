@@ -606,17 +606,10 @@ export interface ResourceOperationPermissions {
   canAuditUse: boolean; // 是否有审核权限
   canSetDefault: boolean; // 是否有设为默认权限
   canRestore: boolean; // 是否有恢复权限
+  canOnShelf?: boolean; // 是否可上架
+  canOffShelf?: boolean; // 是否可下架
   useApplyPending?: boolean; // 使用申请是否待审核
 }
-
-/**
- * 查询资源操作权限
- * 获取当前用户对指定资源的详细操作权限
- * @param params 查询参数（包含resourceId资源ID）
- * @returns Promise<ResourceOperationPermissions> 资源操作权限对象
- */
-export const queryResourceOperationPermissions = (params: { resourceId: string | number }) =>
-  POST<ResourceOperationPermissions>('/byaiService/auth/privilegeGrant/queryResourceOperationPermissions', params);
 
 /**
  * 文件/文件夹项
