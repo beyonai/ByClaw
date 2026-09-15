@@ -4,10 +4,26 @@ import {
   hasManagedModelConfigDrift,
   resolveLangfuseSessionIdFromHookContext,
   resolveManagedAgentModelFromConfig,
+  registerManagedAgentModelHooks,
   shouldDeferManagedAgentModelOverrideForRun,
   syncManagedAgentSessionModelForInbound,
   warnUnresolvedManagedProviderApiKeysAfterSync,
 } from "./managed-agent-model-hook.js";
+
+describe("registerManagedAgentModelHooks", () => {
+  it("registers ordering-sensitive hooks ahead of default-priority channel hooks", () => {
+    const on = vi.fn();
+
+    registerManagedAgentModelHooks({
+      logger: { info: vi.fn() },
+      on,
+    } as never);
+
+    for (const hookName of ["before_dispatch", "before_model_resolve", "before_prompt_build"]) {
+      expect(on).toHaveBeenCalledWith(hookName, expect.any(Function), { priority: 100 });
+    }
+  });
+});
 
 const registeredCfg = {
   agents: {

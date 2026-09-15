@@ -376,6 +376,10 @@ export async function syncManagedAgentSessionModelForInbound(params: {
   });
 }
 
+// Channel hooks consume the managed config/context produced here, so these hooks
+// must run before default-priority transport hooks regardless of plugin load order.
+const BAIYING_ENHANCE_HOOK_PRIORITY = 100;
+
 export function registerManagedAgentModelHooks(
   api: OpenClawPluginApi,
   aimodelRunSync?: AimodelDefaultRunSyncDeps,
@@ -401,7 +405,7 @@ export function registerManagedAgentModelHooks(
       sessionKey,
       agentId,
     });
-  });
+  }, { priority: BAIYING_ENHANCE_HOOK_PRIORITY });
 
   api.on("before_model_resolve", async (_event, ctx) => {
     await attachLangfuseSessionToActiveSpan(ctx);
@@ -449,7 +453,7 @@ export function registerManagedAgentModelHooks(
       );
     }
     return retried;
-  });
+  }, { priority: BAIYING_ENHANCE_HOOK_PRIORITY });
 
   api.on("before_prompt_build", async (_event, ctx) => {
     await attachLangfuseSessionToActiveSpan(ctx);
@@ -477,5 +481,5 @@ export function registerManagedAgentModelHooks(
     });
     const parts = [mainContext, managedContext].filter((part): part is string => Boolean(part));
     return parts.length > 0 ? { appendSystemContext: parts.join("\n\n") } : undefined;
-  });
+  }, { priority: BAIYING_ENHANCE_HOOK_PRIORITY });
 }
