@@ -6,11 +6,14 @@ import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 import com.alibaba.fastjson.JSON;
 import com.iwhalecloud.byai.common.constants.devloop.MemberRole;
 import com.iwhalecloud.byai.manager.application.service.devloop.ProjectApplicationService;
+import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
+import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatSettingsRequest;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectDTO;
 import com.iwhalecloud.byai.manager.entity.devloop.Project;
 
@@ -53,6 +56,8 @@ import com.iwhalecloud.byai.state.domain.resource.dto.ResourceVo;
 public class GroupChatApplicationService {
     @Autowired
     private UserService userService;
+    @Autowired
+    private AuthApplicationService authApplicationService;
     @Autowired
     private GroupChatSettingsService settingsService;
     @Autowired
@@ -240,7 +245,7 @@ public class GroupChatApplicationService {
         authorizationService.requireCurrentUserMember(sessionId);
         GroupChatDetailResponse response = new GroupChatDetailResponse();
         response.setSession(session);
-        java.util.List<ByaiSessionMember> members = memberService.findOrderedGroupMembers(sessionId);
+        List<ByaiSessionMember> members = memberService.findOrderedGroupMembers(sessionId);
         for (ByaiSessionMember member : members) {
             if (MemObjType.USER.name().equals(member.getMemObjType()) && userService != null
                 && (member.getMemName() == null || member.getMemName().isBlank())) {
@@ -331,7 +336,7 @@ public class GroupChatApplicationService {
         return reply;
     }
 
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public ByaiSessionMember acceptInvitation(Long sessionId, String token) {
         // 与解散、开关、角色及成员写操作串行，锁后再次检查到期时间及当前权限。
         sessionService.lockById(sessionId);
@@ -352,7 +357,7 @@ public class GroupChatApplicationService {
         return member;
     }
 
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public ByaiSessionMember invite(Long sessionId, String type, Long memberId) {
         sessionService.lockById(sessionId);
         authorizationService.requireAdmin(sessionId);
@@ -372,6 +377,14 @@ public class GroupChatApplicationService {
         if (MemObjType.USER.name().equals(type) && session.getProjectId() != null && !projectMemberService.isMember(session.getProjectId(), memberId)) {
             projectMemberService.addMember(session.getProjectId(), memberId, MemberRole.MEMBER);
         }
+        if (MemObjType.USER.name().equals(type)) {
+            // 群成员中的 AGENT 标识即数字员工 resourceId；授权与项目、群成员写入共用外层事务。
+            List<Long> agentIds = memberService.findSessionMembers(session.getSessionId(), MemObjType.AGENT.name(), null)
+                .stream().map(ByaiSessionMember::getMemObjId).distinct().toList();
+            if (!agentIds.isEmpty()) {
+                authApplicationService.grantDigitalEmployeesToUser(agentIds, memberId);
+            }
+        }
         ByaiSessionMember member = new ByaiSessionMember();
         member.setByaiSessionMemberId(sequenceService.nextVal());
         member.setSessionId(session.getSessionId());
@@ -390,8 +403,7 @@ public class GroupChatApplicationService {
 
     @Transactional
     public ByaiSession updateGroupSettings(Long sessionId, String sessionName) {
-        com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatSettingsRequest request =
-            new com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatSettingsRequest();
+        GroupChatSettingsRequest request = new GroupChatSettingsRequest();
         request.setSessionName(sessionName);
         return settingsService.updateSettings(sessionId, request);
     }
@@ -479,7 +491,7 @@ public class GroupChatApplicationService {
         boundary.setExtParamCode("group_source_boundary_message_id");
         Long latest = messageMapper.selectBySessionId(groupSessionId).stream()
             .map(ByaiMessage::getMessageId)
-            .filter(java.util.Objects::nonNull)
+            .filter(Objects::nonNull)
             .max(Long::compareTo)
             .orElse(0L);
         boundary.setExtParamValue(String.valueOf(latest));
