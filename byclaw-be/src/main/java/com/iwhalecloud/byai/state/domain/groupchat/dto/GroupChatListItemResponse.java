@@ -2,7 +2,9 @@ package com.iwhalecloud.byai.state.domain.groupchat.dto;
 
 import java.util.Date;
 
+import com.alibaba.fastjson.annotation.JSONField;
 import com.fasterxml.jackson.annotation.JsonFormat;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
 
@@ -27,6 +29,11 @@ public class GroupChatListItemResponse {
     private Long latestMessageId;
 
     private String latestMessageContent;
+
+    /** 仅供列表摘要投影使用，不向客户端暴露完整消息元数据。 */
+    @JsonIgnore
+    @JSONField(serialize = false)
+    private String latestMessageMetadata;
 
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "GMT+8")
     private Date latestMessageTime;

@@ -317,15 +317,15 @@ public class AuthApplicationService {
 
         // --- 维度 2：资源创建人 ---
         {
-            com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.iwhalecloud.byai.manager.entity.resource.SsResource> qw =
-                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
-            qw.eq(com.iwhalecloud.byai.manager.entity.resource.SsResource::getCreateBy, userId)
-                .ne(com.iwhalecloud.byai.manager.entity.resource.SsResource::getResourceStatus,
-                    com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus.OFF_SHELF.getNum());
-            List<com.iwhalecloud.byai.manager.entity.resource.SsResource> createdResources =
+            LambdaQueryWrapper<SsResource> qw =
+                new LambdaQueryWrapper<>();
+            qw.eq(SsResource::getCreateBy, userId)
+                .ne(SsResource::getResourceStatus,
+                    ResourceStatus.OFF_SHELF.getNum());
+            List<SsResource> createdResources =
                 ssResourceMapper.selectList(qw);
             if (!CollectionUtils.isEmpty(createdResources)) {
-                for (com.iwhalecloud.byai.manager.entity.resource.SsResource resource : createdResources) {
+                for (SsResource resource : createdResources) {
                     if (resource.getResourceId() != null && resource.getResourceBizType() != null) {
                         result.put(String.valueOf(resource.getResourceId()), resource.getResourceBizType());
                     }
@@ -335,16 +335,16 @@ public class AuthApplicationService {
 
         // --- 维度 3：组织管理员（对其管理组织及所有下级组织名下的 man_org_id 资源） ---
         {
-            com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.iwhalecloud.byai.manager.entity.users.UsersOrganization> uoqw =
-                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
-            uoqw.eq(com.iwhalecloud.byai.manager.entity.users.UsersOrganization::getUserId, userId)
-                .eq(com.iwhalecloud.byai.manager.entity.users.UsersOrganization::getUserType,
-                    com.iwhalecloud.byai.common.constants.users.UserType.ORG_MAN);
-            List<com.iwhalecloud.byai.manager.entity.users.UsersOrganization> orgManagerRecords =
+            LambdaQueryWrapper<UsersOrganization> uoqw =
+                new LambdaQueryWrapper<>();
+            uoqw.eq(UsersOrganization::getUserId, userId)
+                .eq(UsersOrganization::getUserType,
+                    UserType.ORG_MAN);
+            List<UsersOrganization> orgManagerRecords =
                 usersOrganizationMapper.selectList(uoqw);
             if (!CollectionUtils.isEmpty(orgManagerRecords)) {
                 Set<Long> managedOrgIds = new HashSet<>();
-                for (com.iwhalecloud.byai.manager.entity.users.UsersOrganization uo : orgManagerRecords) {
+                for (UsersOrganization uo : orgManagerRecords) {
                     if (uo.getOrgId() != null) {
                         List<Long> selfAndDescendants =
                             organizationService.findSelfAndDescendantOrgIds(uo.getOrgId());
@@ -352,15 +352,15 @@ public class AuthApplicationService {
                     }
                 }
                 if (!managedOrgIds.isEmpty()) {
-                    com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.iwhalecloud.byai.manager.entity.resource.SsResource> rqw =
-                        new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
-                    rqw.in(com.iwhalecloud.byai.manager.entity.resource.SsResource::getManOrgId, managedOrgIds)
-                        .ne(com.iwhalecloud.byai.manager.entity.resource.SsResource::getResourceStatus,
-                            com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus.OFF_SHELF.getNum());
-                    List<com.iwhalecloud.byai.manager.entity.resource.SsResource> orgResources =
+                    LambdaQueryWrapper<SsResource> rqw =
+                        new LambdaQueryWrapper<>();
+                    rqw.in(SsResource::getManOrgId, managedOrgIds)
+                        .ne(SsResource::getResourceStatus,
+                            ResourceStatus.OFF_SHELF.getNum());
+                    List<SsResource> orgResources =
                         ssResourceMapper.selectList(rqw);
                     if (!CollectionUtils.isEmpty(orgResources)) {
-                        for (com.iwhalecloud.byai.manager.entity.resource.SsResource resource : orgResources) {
+                        for (SsResource resource : orgResources) {
                             if (resource.getResourceId() != null && resource.getResourceBizType() != null) {
                                 result.put(String.valueOf(resource.getResourceId()),
                                     resource.getResourceBizType());
@@ -756,7 +756,7 @@ public class AuthApplicationService {
         }
         List<Long> userIds = pendingApplyList.stream()
             .map(PrivilegeGrant::getGrantToObjId)
-            .filter(java.util.Objects::nonNull)
+            .filter(Objects::nonNull)
             .distinct()
             .collect(Collectors.toList());
         Map<Long, Users> userMap = usersMapper.selectBatchIds(userIds).stream()
@@ -1502,7 +1502,7 @@ public class AuthApplicationService {
         queryWrapper.eq(PrivilegeGrant::getStatusCd, USE_APPLY_PENDING_STATUS);
         return privilegeGrantMapper.selectList(queryWrapper).stream()
             .map(PrivilegeGrant::getGrantObjId)
-            .filter(java.util.Objects::nonNull)
+            .filter(Objects::nonNull)
             .collect(Collectors.toSet());
     }
 
@@ -2100,6 +2100,67 @@ public class AuthApplicationService {
         if (!hasCreatorSameDimensionGrant(ssResource, creatorUserId, List.of(GrantType.AVAILABLE_USE, GrantType.FORCE_USE))) {
             handleAuth(buildCreatorUserPrivilegeDto(ssResource, creatorUserId, GrantType.FORCE_USE));
         }
+    }
+
+    /**
+     * 为用户追加多个数字员工的直接使用红名单。调用方须先完成业务准入校验。
+     * 仅查询并补齐同维度 FORCE_USE，不覆盖其他授权；数据库写入加入调用方事务。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void grantDigitalEmployeesToUser(Collection<Long> resourceIds, Long userId) {
+        if (CollectionUtils.isEmpty(resourceIds)) {
+            return;
+        }
+        if (userId == null || userId <= 0 || resourceIds.stream().anyMatch(id -> id == null || id <= 0)) {
+            throw new IllegalArgumentException("Invalid digital employee grant target");
+        }
+        Set<Long> distinctIds = new LinkedHashSet<>(resourceIds);
+        LambdaQueryWrapper<PrivilegeGrant> query = new LambdaQueryWrapper<>();
+        query.eq(PrivilegeGrant::getGrantObjType, GrantObjType.DIG_EMPLOYEE)
+            .in(PrivilegeGrant::getGrantObjId, distinctIds)
+            .eq(PrivilegeGrant::getGrantToObjType, GrantToObjType.USER)
+            .eq(PrivilegeGrant::getGrantToObjId, userId)
+            .eq(PrivilegeGrant::getGrantType, GrantType.FORCE_USE)
+            .eq(PrivilegeGrant::getGrantToType, Color.RED)
+            .eq(PrivilegeGrant::getOperType, OperType.READ)
+            .eq(PrivilegeGrant::getStatusCd, "A");
+        Set<Long> grantedIds = privilegeGrantMapper.selectList(query).stream()
+            .map(PrivilegeGrant::getGrantObjId).collect(Collectors.toSet());
+        List<PrivilegeGrant> addedGrants = new ArrayList<>();
+        for (Long resourceId : distinctIds) {
+            if (grantedIds.contains(resourceId)) {
+                continue;
+            }
+            PrivilegeGrant grant = new PrivilegeGrant();
+            grant.setGrantObjType(GrantObjType.DIG_EMPLOYEE);
+            grant.setGrantObjId(resourceId);
+            grant.setGrantToObjType(GrantToObjType.USER);
+            grant.setGrantToObjId(userId);
+            grant.setGrantType(GrantType.FORCE_USE);
+            grant.setGrantToType(Color.RED);
+            grant.setOperType(OperType.READ);
+            grant.setAllowUnsubscribe(Constants.NOT_ALLOW_UNSUBSCRIBE);
+            grant.setStatusCd("A");
+            privilegeGrantService.save(grant);
+            addedGrants.add(grant);
+        }
+        if (addedGrants.isEmpty()) {
+            return;
+        }
+        // 旧权限集合也必须等数据库提交，避免后续入群失败时 Redis 残留已回滚的授权。
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                try {
+                    for (PrivilegeGrant grant : addedGrants) {
+                        writeRedis(GrantType.FORCE_USE, buildPrivilegeGrantKey(grant), buildPrivilegeGrantValue(grant));
+                    }
+                } catch (Exception exception) {
+                    logger.error("入群授权已提交，同步用户 {} 的数字员工权限缓存失败", userId, exception);
+                }
+            }
+        });
+        syncAuthChangedUsersAfterCommit(Set.of(userId), GrantType.FORCE_USE);
     }
 
     /**

@@ -10,6 +10,7 @@
         <result column="user_role" property="role" />
         <result column="latest_message_id" property="latestMessageId" />
         <result column="latest_message_content" property="latestMessageContent" />
+        <result column="latest_message_metadata" property="latestMessageMetadata" />
         <result column="latest_message_time" property="latestMessageTime" />
         <result column="latest_message_creator_id" property="latestMessageCreatorId" />
         <result column="latest_message_creator_name" property="latestMessageCreatorName" />
@@ -72,6 +73,7 @@
                member.last_read_message_id,
                latest.message_id AS latest_message_id,
                latest.message_content AS latest_message_content,
+               latest.metadata AS latest_message_metadata,
                latest.create_time AS latest_message_time,
                latest.creator_id AS latest_message_creator_id,
                latest.creator_name AS latest_message_creator_name,
@@ -82,6 +84,7 @@
             SELECT message.session_id,
                    message.message_id,
                    message.message_content,
+                   message.metadata,
                    message.create_time,
                    message.creator_id,
                    message.creator_name,

@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat.application;
 
 import java.util.Date;
+import java.util.List;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,6 +20,7 @@ import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatMentionMapper;
 import com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper;
 import com.iwhalecloud.byai.manager.mapper.session.ByaiSessionMemberMapper;
 import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatAuthorizationService;
+import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatMessagePreview;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatListItemResponse;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatReadStateResponse;
 import com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService;
@@ -47,7 +49,11 @@ public class GroupChatReadService {
         int normalizedPageNum = pageNum == null || pageNum < 1 ? 1 : pageNum;
         int normalizedPageSize = pageSize == null || pageSize < 1 ? 20 : Math.min(pageSize, 100);
         Page<GroupChatListItemResponse> page = PageHelper.startPage(normalizedPageNum, normalizedPageSize);
-        mentionMapper.selectMyGroups(CurrentUserHolder.getCurrentUserId());
+        List<GroupChatListItemResponse> groups = mentionMapper.selectMyGroups(CurrentUserHolder.getCurrentUserId());
+        for (GroupChatListItemResponse group : groups) {
+            group.setLatestMessageContent(GroupChatMessagePreview.fromMetadata(
+                group.getLatestMessageContent(), group.getLatestMessageMetadata()));
+        }
         return PageHelperUtil.toPageInfo(page);
     }
 
