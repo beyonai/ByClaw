@@ -4,11 +4,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
+import static org.mockito.ArgumentMatchers.anyCollection;
 
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
 import java.util.Map;
+import java.util.List;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -16,6 +19,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectService;
 import com.iwhalecloud.byai.manager.entity.devloop.Project;
+import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTask;
+import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTaskMapper;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
@@ -41,12 +46,15 @@ class GroupChatContextServiceTest {
 
     private GroupChatContextService service;
 
+    private final ByaiGroupChatTaskMapper tasks = mock(ByaiGroupChatTaskMapper.class);
+
     @BeforeEach
     void setUp() {
         messageMapper = mock(ByaiMessageMapper.class);
         sessionService = mock(SessionService.class);
         resourceService = mock(SsResourceService.class);
         service = new GroupChatContextService(messageMapper, sessionService, resourceService);
+        ReflectionTestUtils.setField(service, "taskMapper", tasks);
 
         LoginInfo loginInfo = new LoginInfo();
         loginInfo.setUserId(100L);
@@ -260,6 +268,49 @@ class GroupChatContextServiceTest {
         }
         source.setRelatedResources(null);
         assertThat(loadSingle(source).getAttachments()).isNull();
+    }
+
+    @Test
+    void taskMessagesExposeActualOwnerAsStringWithOneBatchQuery() {
+        ByaiGroupChatTask task = new ByaiGroupChatTask();
+        task.setTaskSessionId(60L);
+        task.setGroupSessionId(3L);
+        task.setInitiatorUserId(9007199254740993L);
+        when(tasks.selectBatchIds(anyCollection())).thenReturn(List.of(task));
+        ByaiMessage result = message(20L, 2, "报告", 200L);
+        result.setCreatorId(40L);
+        result.setMetadata("{\"kind\":\"TASK_RESULT\",\"taskId\":60,\"publisherUserId\":100,\"initiatorUserId\":999}");
+        ByaiMessage ack = message(19L, 2, "已接收", 100L);
+        ack.setMetadata("{\"kind\":\"TASK_ACK\",\"taskId\":60}");
+        ByaiSession group = new ByaiSession(); group.setSessionId(3L);
+        when(sessionService.findById(3L)).thenReturn(group);
+        when(messageMapper.selectVisibleBeforeMessageId(3L, 30L, 60)).thenReturn(List.of(result, ack));
+        GroupChatContextRequest request = new GroupChatContextRequest();
+        request.setConversationKey("3"); request.setBeforeMessageId("30");
+        GroupChatContextResponse response = service.load(request);
+        assertThat(response.getMessages()).allSatisfy(message ->
+            assertThat(message.getInitiatorUserId()).isEqualTo("9007199254740993"));
+        verify(tasks).selectBatchIds(List.of(60L));
+    }
+
+    @Test
+    void missingInvalidOrCrossGroupTaskCannotSupplyAnOwner() {
+        ByaiMessage source = message(20L, 2, "历史结果", 200L);
+        source.setMetadata("{\"kind\":\"TASK_RESULT\",\"taskId\":60}");
+        assertThat(loadSingle(source).getInitiatorUserId()).isNull();
+        ByaiGroupChatTask task = new ByaiGroupChatTask();
+        task.setTaskSessionId(60L); task.setGroupSessionId(99L); task.setInitiatorUserId(100L);
+        when(tasks.selectBatchIds(anyCollection())).thenReturn(List.of(task));
+        assertThat(loadSingle(source).getInitiatorUserId()).isNull();
+        for (String metadata : List.of("invalid-json", "{\"kind\":\"TASK_RESULT\",\"taskId\":\"invalid\"}",
+            "{\"kind\":\"TASK_RESULT\"}", "{\"taskId\":60}")) {
+            source.setMetadata(metadata);
+            assertThat(loadSingle(source).getInitiatorUserId()).isNull();
+        }
+        source.setMetadata("{\"kind\":\"TASK_RESULT\",\"taskId\":60}");
+        source.setUsage(1);
+        task.setGroupSessionId(3L);
+        assertThat(loadSingle(source).getInitiatorUserId()).isNull();
     }
 
     private GroupChatContextResponse.Message loadSingle(ByaiMessage source) {

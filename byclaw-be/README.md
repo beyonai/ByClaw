@@ -318,3 +318,13 @@ mvn spring-boot:run -Dspring-boot.run.profiles=local
 同一会话的获取在群行锁与数据库事务内串行，邀请人保留首次签发者，复用时仍检查其当前权限。分享主表新增可空的 `link_type`，默认 `MESSAGE`，历史 NULL 按 MESSAGE 查询；消息分享仍使用原来的独立 link_id。主表查询、更新按类型隔离，表达式唯一索引以 `COALESCE(link_type, 'MESSAGE')` 分别约束 ID 和 token。
 
 部署前先执行 `deploy/migrations/versions/V0.4.1/V0.4.1__ddl.sql`；若历史数据存在同类型重复 ID/token，唯一索引创建会失败，应先核查，迁移不自动删数据。此变更不修改 `deploy/middleware/initdb/`。避免新旧后端混跑：旧版本消息分享查询没有类型过滤，旧邀请服务仍读 Redis。
+
+### 群消息任务归属字段
+
+`POST /group-chats/{groupSessionId}/context` 的 `messages[]` 对 `TASK_RESULT` 和 `TASK_ACK` 消息返回
+`initiatorUserId`（字符串），表示任务发起者的用户 ID，与 `taskId` 一样保留完整整数精度。
+归属通过任务记录查询，并校验任务属于当前群；普通消息、任务不存在或引用无效时该字段为空，不从发言 Agent 或发布人推断。
+实时任务消息 `MESSAGE_CREATED` 使用同名字符串字段。
+
+前端处理 `kind="TASK_RESULT"` 时，只有 `initiatorUserId` 非空且等于当前登录用户 ID 的字符串形式才允许回复；
+字段缺失或为空时禁用回复。此字段用于 UI 展示判断，BE 仍独立执行任务发起者校验。

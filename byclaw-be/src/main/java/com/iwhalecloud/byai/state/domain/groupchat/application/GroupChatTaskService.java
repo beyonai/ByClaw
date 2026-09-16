@@ -323,6 +323,8 @@ public class GroupChatTaskService {
         event.put("replyTo", buildReplySummary(task.getGroupSessionId(), task.getSourceMessageId()));
         event.put("targetAgentId", task.getTargetAgentId());
         event.put("taskId", String.valueOf(task.getTaskSessionId()));
+        // 与 context 历史消息保持相同字段和字符串 ID 类型。
+        event.put("initiatorUserId", task.getInitiatorUserId() == null ? null : String.valueOf(task.getInitiatorUserId()));
         event.put("kind", kind);
         event.put("content", content);
         event.put("files", files);
