@@ -1,16 +1,14 @@
 package com.iwhalecloud.byai.state.domain.groupchat.application;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.Duration;
-import java.util.HexFormat;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.Objects;
 
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
-import com.alibaba.fastjson.JSON;
+import com.iwhalecloud.byai.manager.entity.message.MessageShareLink;
+import com.iwhalecloud.byai.manager.mapper.message.MessageShareLinkMapper;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
@@ -26,22 +24,15 @@ import com.iwhalecloud.byai.state.domain.session.service.SessionMemberService;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 
-/** 邀请凭证由服务器签发；Redis 仅以 SHA-256 摘要索引，丢失记录时拒绝访问。 */
+/** 群邀请持久化到分享主表，一群一条记录；原始邀请码用于回显与续期。 */
 @Service
 @RequiredArgsConstructor
 public class GroupChatInvitationService {
     private static final Duration VALIDITY = Duration.ofDays(7);
     private static final SecureRandom RANDOM = new SecureRandom();
     private static final String TOKEN_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-    private final StringRedisTemplate redis;
+    private final MessageShareLinkMapper links;
     private final com.iwhalecloud.byai.state.domain.session.service.SessionService sessions;
-    private final GroupChatInvitationTokenCipher tokenCipher;
-    // 同一 hash tag 保证 Redis Cluster 下两个键也可在同一脚本中原子更新。
-    private static final org.springframework.data.redis.core.script.DefaultRedisScript<Long> SAVE =
-        new org.springframework.data.redis.core.script.DefaultRedisScript<>(
-            "if ARGV[3] == 'create' and redis.call('EXISTS', KEYS[1]) == 1 then return 0 end "
-            + "redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2]) "
-            + "redis.call('SET', KEYS[2], KEYS[1], 'PX', ARGV[2]) return 1", Long.class);
     private final SessionExtService extensions;
     private final SessionMemberService members;
     private final GroupChatAuthorizationService authorization;
@@ -58,47 +49,34 @@ public class GroupChatInvitationService {
         requireLinkEnabled(sessionId);
         requireEnterprise(group);
         requireInviter(sessionId, userId);
-        String boundKey = redis.opsForValue().get(sessionKey(sessionId));
-        if (boundKey != null) {
-            String value = redis.opsForValue().get(boundKey);
-            if (value != null) {
-                InvitationRecord existing = JSON.parseObject(value, InvitationRecord.class);
-                if (existing != null && existing.getExpiresAt() > System.currentTimeMillis()) {
-                    if (!Objects.equals(existing.getSessionId(), sessionId)) throw invalid();
-                    validate(existing);
-                    String token = tokenCipher.decrypt(existing.getEncryptedToken());
-                    if (!Objects.equals(key(token), boundKey)) throw invalid();
-                    existing.setExpiresAt(System.currentTimeMillis() + VALIDITY.toMillis());
-                    if (!save(token, existing, false)) throw new IllegalStateException("Unable to renew invitation");
-                    return response(token, existing);
-                }
-            }
+        MessageShareLink existing = links.selectInvitationBySessionId(sessionId);
+        LocalDateTime now = LocalDateTime.now();
+        if (existing != null && "ACTIVE".equals(existing.getStatus())
+            && existing.getExpireTime() != null && existing.getExpireTime().isAfter(now)) {
+            validate(toRecord(existing));
+            existing.setExpireTime(now.plus(VALIDITY));
+            existing.setUpdateTime(now);
+            if (links.updateInvitation(existing) != 1) throw new IllegalStateException("Unable to renew invitation");
+            return response(existing.getLinkToken(), toRecord(existing));
         }
-        InvitationRecord record = new InvitationRecord();
-        record.setSessionId(sessionId);
-        record.setInviterId(userId);
-        record.setEnterpriseId(group.getEnterpriseId());
-        record.setExpiresAt(System.currentTimeMillis() + VALIDITY.toMillis());
         for (int attempt = 0; attempt < 3; attempt++) {
             StringBuilder tokenBuilder = new StringBuilder(8);
             for (int i = 0; i < 8; i++) {
                 tokenBuilder.append(TOKEN_ALPHABET.charAt(RANDOM.nextInt(TOKEN_ALPHABET.length())));
             }
             String token = tokenBuilder.toString();
-            record.setEncryptedToken(tokenCipher.encrypt(token));
-            if (save(token, record, true)) return response(token, record);
+            // 唯一索引兜底跨群并发碰撞；冲突时整笔事务回滚，不能在已失败的事务中重试。
+            if (links.selectInvitationByToken(token) != null) continue;
+            MessageShareLink record = MessageShareLink.builder()
+                .linkType("GROUP_INVITATION").linkId(sessionId).linkToken(token)
+                .creatorId(userId).comAcctId(group.getEnterpriseId()).status("ACTIVE")
+                .accessPermission("PUBLIC").expireTime(now.plus(VALIDITY))
+                .createTime(now).updateTime(now).currentAccessCount(0L).build();
+            int rows = existing == null ? links.insert(record) : links.updateInvitation(record);
+            if (rows != 1) throw new IllegalStateException("Unable to save invitation");
+            return response(token, toRecord(record));
         }
         throw new IllegalStateException("Unable to create invitation");
-    }
-
-    private String sessionKey(Long sessionId) {
-        return "group-chat:{invitations}:session:" + sessionId;
-    }
-
-    private boolean save(String token, InvitationRecord record, boolean create) {
-        return Long.valueOf(1).equals(redis.execute(SAVE,
-            java.util.List.of(key(token), sessionKey(record.getSessionId())),
-            JSON.toJSONString(record), String.valueOf(VALIDITY.toMillis()), create ? "create" : "renew"));
     }
 
     private GroupChatInvitationTokenResponse response(String token, InvitationRecord record) {
@@ -166,11 +144,19 @@ public class GroupChatInvitationService {
 
     private InvitationRecord read(String token) {
         if (token == null || !token.matches("[A-Za-z0-9]{8}")) throw invalid();
-        String value = redis.opsForValue().get(key(token));
-        if (value == null) throw invalid();
-        InvitationRecord record = JSON.parseObject(value, InvitationRecord.class);
-        if (record == null || record.getSessionId() == null || record.getInviterId() == null) throw invalid();
-        if (!Objects.equals(key(token), redis.opsForValue().get(sessionKey(record.getSessionId())))) throw invalid();
+        return toRecord(links.selectInvitationByToken(token));
+    }
+
+    private InvitationRecord toRecord(MessageShareLink link) {
+        if (link == null || !"GROUP_INVITATION".equals(link.getLinkType())
+            || !"ACTIVE".equals(link.getStatus()) || link.getLinkId() == null
+            || link.getCreatorId() == null || link.getExpireTime() == null
+            || link.getLinkToken() == null || !link.getLinkToken().matches("[A-Za-z0-9]{8}")) throw invalid();
+        InvitationRecord record = new InvitationRecord();
+        record.setSessionId(link.getLinkId());
+        record.setInviterId(link.getCreatorId());
+        record.setEnterpriseId(link.getComAcctId());
+        record.setExpiresAt(link.getExpireTime().atZone(ZoneId.systemDefault()).toInstant().toEpochMilli());
         return record;
     }
 
@@ -212,15 +198,6 @@ public class GroupChatInvitationService {
         return userId;
     }
 
-    private String key(String token) {
-        try {
-            return "group-chat:{invitations}:token:" + HexFormat.of().formatHex(
-                MessageDigest.getInstance("SHA-256").digest(token.getBytes(StandardCharsets.UTF_8)));
-        } catch (NoSuchAlgorithmException error) {
-            throw new IllegalStateException("SHA-256 unavailable", error);
-        }
-    }
-
     private IllegalArgumentException invalid() {
         return new IllegalArgumentException("Invitation is invalid or expired");
     }
@@ -231,6 +208,5 @@ public class GroupChatInvitationService {
         private Long inviterId;
         private Long enterpriseId;
         private long expiresAt;
-        private String encryptedToken;
     }
 }

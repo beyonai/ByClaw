@@ -122,6 +122,23 @@ SELECT byai._v041_add_column_if_missing(
     'byai', 'byai_group_chat_task_publication', 'pending_publication_id', 'BIGINT'
 );
 
+-- 复用分享主表存储群邀请。NULL 类型兼容历史消息分享，群邀请 link_id = session_id。
+SELECT byai._v041_add_column_if_missing(
+    'byai', 'message_share_link', 'link_type', 'VARCHAR(32) DEFAULT ''MESSAGE'''
+);
+ALTER TABLE byai.message_share_link ALTER COLUMN link_type SET DEFAULT 'MESSAGE';
+ALTER TABLE byai.message_share_link ALTER COLUMN link_type DROP NOT NULL;
+
+-- 表达式唯一索引将 NULL 与 MESSAGE 视为同类。存在历史重复数据时建索引失败，
+-- 应先人工核查重复记录，不自动删除或覆盖分享数据。
+CREATE UNIQUE INDEX IF NOT EXISTS uk_message_share_link_type_id
+    ON byai.message_share_link ((COALESCE(link_type, 'MESSAGE')), link_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_message_share_link_type_token
+    ON byai.message_share_link ((COALESCE(link_type, 'MESSAGE')), link_token);
+
+COMMENT ON COLUMN byai.message_share_link.link_type IS
+    'MESSAGE（NULL 兼容历史消息分享）/ GROUP_INVITATION（link_id 为群 session_id）';
+
 DROP FUNCTION IF EXISTS byai._v041_add_column_if_missing(TEXT, TEXT, TEXT, TEXT);
 
 CREATE TABLE IF NOT EXISTS byai.byai_group_chat_mention (

@@ -301,8 +301,8 @@ mvn spring-boot:run -Dspring-boot.run.profiles=local
 - `POST /group-chats/invitations/validate`：请求体 `{"token":"…"}`；允许匿名预览，返回工作组名称/号码、邀请人、企业、成员数量、最多四位 `memberPreviews`（`displayName`/`type`/`avatar`）、有效期、加入开关和当前成员状态。
 - `POST /group-chats/invitations/join`：登录后提交 `{token}`，由服务端解析绑定群 ID，复用 `GroupChatApplicationService.acceptInvitation(sessionId, token)`，锁群后重新校验有效期、群状态、开关、邀请人角色/账户状态及企业限制；返回成员信息，重复加入不重复写入。
 
-凭证使用 SecureRandom 从大小写字母和数字共 62 个字符中逐位均匀选取，固定 8 位，默认有效期 7 天；Redis 保存会话索引、SHA-256 摘要键及群、邀请人、企业、过期时间、RSA 加密后的 token，不保存 token 明文，无需数据库迁移。
-前端链接只使用 `/hacu/invite#token=…`，不得拼接展示资料或群 ID。创建和预览响应禁止缓存。Redis 记录丢失时邀请失效；生产 Redis 持久化策略由部署环境保障。
+凭证使用 SecureRandom 从大小写字母和数字共 62 个字符中逐位均匀选取，固定 8 位，默认有效期 7 天。V0.4.1 起持久化到 `message_share_link`：`link_type=GROUP_INVITATION`、`link_id=session_id`、`link_token` 保存原始邀请码，`creator_id`/`com_acct_id`/`expire_time` 保存邀请人、企业和有效期；一群一行，过期重建更新原行，不保留历史，不写消息关联表。
+前端链接只使用 `/hacu/invite#token=…`，不得拼接展示资料或群 ID。创建和预览响应禁止缓存。邀请码不再依赖 Redis 或 RSA 配置，原 Redis 邀请不会自动迁移，上线后需重新获取。数据库中的原始邀请码属于访问凭证，避免输出到日志。
 保留 `POST /group-chats/{sessionId}/members`，由 `GroupChatApplicationService.invite` 支持管理员直接添加真人或数字员工；请求体为 `{"type":"USER 或 AGENT","id":成员ID}`。
 旧的 `/{sessionId}/invitation`（GET）、`/{sessionId}/join`（POST）、
 `/join-by-number`（POST）、`/{sessionId}/join-requests`（GET）、`/{sessionId}/join-requests/me`（GET）
@@ -312,6 +312,8 @@ mvn spring-boot:run -Dspring-boot.run.profiles=local
 前端需同步更新并重新生成旧链接。历史申请数据不做清理或迁移，移除功能后不再读取。
 
 `GroupChatInvitationService` 负责生成、预览、解析绑定群及凭证校验；接受邀请通过 `acceptInvitation` 与管理员 `invite` 共用内部 `insertMember` 写入方法，不在邀请 service 中重复实现。
-Redis 邀请记录与会话索引在最后一次成功调用获取接口 7 天后自动过期；预览、加入均不续期，成功加入不删除；关闭链接加入或邀请人权限失效时立即拒绝使用，但不主动删除记录。旧 43 位凭证不再接受，需重新生成。
+邀请码在最后一次成功调用获取接口 7 天后逻辑过期（读取时检查 `expire_time`，不依赖自动清理）；预览、加入均不续期，成功加入不删除；关闭链接加入或邀请人权限失效时立即拒绝使用，但不主动删除记录。旧 43 位凭证不再接受，需重新生成。
 
-同一会话的获取在群行锁内串行，Lua 原子写入摘要记录与会话索引，两个 Redis 键共用 `{invitations}` hash tag。邀请人保留首次签发者，复用时仍检查其当前权限。加密复用 `RsaEncrypt` / `RsaDecrypt` 和现有 `byclaw.rsa.modules`、`byclaw.rsa.public-key`、`byclaw.rsa.private-key`；所有实例须使用一致的公私钥，轮换密钥前应处理旧邀请记录。新会话绑定使用独立 Redis 命名空间，上线前生成的无会话索引旧链接需重新获取，不迁移存量数据。
+同一会话的获取在群行锁与数据库事务内串行，邀请人保留首次签发者，复用时仍检查其当前权限。分享主表新增可空的 `link_type`，默认 `MESSAGE`，历史 NULL 按 MESSAGE 查询；消息分享仍使用原来的独立 link_id。主表查询、更新按类型隔离，表达式唯一索引以 `COALESCE(link_type, 'MESSAGE')` 分别约束 ID 和 token。
+
+部署前先执行 `deploy/migrations/versions/V0.4.1/V0.4.1__ddl.sql`；若历史数据存在同类型重复 ID/token，唯一索引创建会失败，应先核查，迁移不自动删数据。此变更不修改 `deploy/middleware/initdb/`。避免新旧后端混跑：旧版本消息分享查询没有类型过滤，旧邀请服务仍读 Redis。

@@ -3,12 +3,13 @@ package com.iwhalecloud.byai.state.domain.groupchat;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.List;
 import org.junit.jupiter.api.*;
-import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.core.ValueOperations;
+import com.iwhalecloud.byai.manager.entity.message.MessageShareLink;
+import com.iwhalecloud.byai.manager.mapper.message.MessageShareLinkMapper;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.manager.domain.users.service.UserService;
@@ -20,9 +21,8 @@ import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatAuthor
 import com.iwhalecloud.byai.state.domain.session.service.*;
 
 class GroupChatInvitationTokenTest {
-    private final StringRedisTemplate redis = mock(StringRedisTemplate.class);
-    private final ValueOperations<String, String> values = mock(ValueOperations.class);
-    private final Map<String, String> cache = new HashMap<>();
+    private final MessageShareLinkMapper links = mock(MessageShareLinkMapper.class);
+    private final Map<Long, MessageShareLink> records = new HashMap<>();
     private final SessionService sessions = mock(SessionService.class);
     private final SessionExtService extensions = mock(SessionExtService.class);
     private final SessionMemberService members = mock(SessionMemberService.class);
@@ -33,11 +33,8 @@ class GroupChatInvitationTokenTest {
     private final com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatEventPublisher events = mock(com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatEventPublisher.class);
     private final EnterpriseInfoMapper enterprises = mock(EnterpriseInfoMapper.class);
     private final GroupChatAuthorizationService auth = new GroupChatAuthorizationService(sessions, members);
-    private final com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatInvitationTokenCipher cipher =
-        mock(com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatInvitationTokenCipher.class);
-    private final Map<String, String> sealedTokens = new HashMap<>();
     private final GroupChatInvitationService service = new GroupChatInvitationService(
-        redis, sessions, cipher, extensions, members, auth, users, enterprises, mock(com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService.class));
+        links, sessions, extensions, members, auth, users, enterprises, mock(com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService.class));
     private final com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatApplicationService application =
         new com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatApplicationService(
             sessions, sequence, auth, members, null, projectMembers, messages, null, events, extensions);
@@ -67,58 +64,56 @@ class GroupChatInvitationTokenTest {
         user.setUserName("邀请人");
         user.setState("A");
         when(users.findById(10L)).thenReturn(user);
-        when(redis.opsForValue()).thenReturn(values);
-        when(values.get(anyString())).thenAnswer(call -> cache.get(call.getArgument(0)));
-        when(cipher.encrypt(anyString())).thenAnswer(call -> {
-            String sealed = "ciphertext-" + sealedTokens.size();
-            sealedTokens.put(sealed, call.getArgument(0));
-            return sealed;
+        when(links.selectInvitationBySessionId(anyLong())).thenAnswer(call -> records.get(call.getArgument(0)));
+        when(links.selectInvitationByToken(anyString())).thenAnswer(call -> records.values().stream()
+            .filter(record -> record.getLinkToken().equals(call.getArgument(0))).findFirst().orElse(null));
+        when(links.insert(any(MessageShareLink.class))).thenAnswer(call -> {
+            MessageShareLink record = call.getArgument(0);
+            assertThat(records.putIfAbsent(record.getLinkId(), record)).isNull();
+            return 1;
         });
-        when(cipher.decrypt(anyString())).thenAnswer(call -> sealedTokens.get(call.getArgument(0)));
-        when(redis.execute(any(org.springframework.data.redis.core.script.RedisScript.class), anyList(),
-            anyString(), anyString(), anyString())).thenAnswer(call -> {
-                List<String> keys = call.getArgument(1);
-                String value = call.getArgument(2);
-                assertThat(Long.parseLong(call.getArgument(3))).isEqualTo(Duration.ofDays(7).toMillis());
-                if ("create".equals(call.getArgument(4)) && cache.containsKey(keys.get(0))) return 0L;
-                cache.put(keys.get(0), value);
-                cache.put(keys.get(1), keys.get(0));
-                return 1L;
-            });
+        when(links.updateInvitation(any())).thenAnswer(call -> {
+            MessageShareLink record = call.getArgument(0);
+            assertThat(records.replace(record.getLinkId(), record)).isNotNull();
+            return 1;
+        });
     }
     @AfterEach void cleanup() { CurrentUserHolder.clearLoginInfo(); }
 
     @Test void rejectsSymbolsInToken() {
         assertThatThrownBy(() -> service.preview("Ab12_-CD")).isInstanceOf(IllegalArgumentException.class);
-        verify(values, never()).get(anyString());
+        verifyNoInteractions(links);
     }
 
-    @Test void createsOpaqueTokensAndStoresOnlyDigests() {
+    @Test void storesOriginalTokenInShareTableAndReusesIt() {
         var result = service.create(20L);
         assertThat(result.getToken()).matches("[A-Za-z0-9]{8}");
-        assertThat(cache.toString()).doesNotContain(result.getToken());
+        assertThat(records.get(20L).getLinkToken()).isEqualTo(result.getToken());
+        assertThat(records.get(20L).getLinkType()).isEqualTo("GROUP_INVITATION");
+        assertThat(records.get(20L).getCreatorId()).isEqualTo(10L);
+        assertThat(records.get(20L).getComAcctId()).isEqualTo(3L);
         var repeated = service.create(20L);
         assertThat(repeated.getToken()).isEqualTo(result.getToken());
         assertThat(repeated.getExpiresAt()).isGreaterThanOrEqualTo(result.getExpiresAt());
     }
     @Test void renewsTheSameSessionTokenFromTheCurrentTime() {
         var first = service.create(20L);
-        cache.replaceAll((key, value) -> value.startsWith("{")
-            ? value.replaceAll("\"expiresAt\":\\d+", "\"expiresAt\":" + (System.currentTimeMillis() + 60000)) : value);
+        records.get(20L).setExpireTime(LocalDateTime.now().plusMinutes(1));
         var renewed = service.create(20L);
         assertThat(renewed.getToken()).isEqualTo(first.getToken());
         assertThat(renewed.getExpiresAt()).isGreaterThan(System.currentTimeMillis() + Duration.ofDays(6).toMillis());
-        assertThat(cache.size()).isEqualTo(2);
+        assertThat(records.size()).isEqualTo(1);
         verify(sessions, times(2)).lockById(20L);
     }
 
     @Test void expiredOrMissingRecordsCreateANewToken() {
         var first = service.create(20L);
-        cache.replaceAll((key, value) -> value.replaceAll("\"expiresAt\":\\d+", "\"expiresAt\":1"));
+        records.get(20L).setExpireTime(LocalDateTime.now().minusDays(1));
         var second = service.create(20L);
         assertThat(second.getToken()).isNotEqualTo(first.getToken());
         assertThatThrownBy(() -> service.preview(first.getToken())).isInstanceOf(IllegalArgumentException.class);
-        cache.entrySet().removeIf(entry -> entry.getKey().contains(":token:"));
+        assertThat(records).hasSize(1);
+        records.clear();
         assertThat(service.create(20L).getToken()).isNotEqualTo(second.getToken());
     }
 
@@ -135,6 +130,33 @@ class GroupChatInvitationTokenTest {
         assertThat(service.create(20L).getToken()).isEqualTo(first.getToken());
     }
 
+    @Test void aNewServiceInstanceReusesPersistedInvitation() {
+        var first = service.create(20L);
+        var restarted = new GroupChatInvitationService(links, sessions, extensions, members, auth, users,
+            enterprises, mock(com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService.class));
+        assertThat(restarted.create(20L).getToken()).isEqualTo(first.getToken());
+        assertThat(restarted.preview(first.getToken()).getGroupName()).isEqualTo("协作组");
+        verify(links, times(1)).insert(any(MessageShareLink.class));
+    }
+
+    @Test void revokedInvitationIsRejectedAndReplacedInPlace() {
+        var first = service.create(20L);
+        records.get(20L).setStatus("REVOKED");
+        assertThatThrownBy(() -> service.preview(first.getToken())).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> application.acceptInvitation(20L, first.getToken()))
+            .isInstanceOf(IllegalArgumentException.class);
+        var replacement = service.create(20L);
+        assertThat(replacement.getToken()).isNotEqualTo(first.getToken());
+        assertThat(records).hasSize(1);
+        assertThatThrownBy(() -> service.preview(first.getToken())).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test void failedPersistenceDoesNotReturnAnInvitation() {
+        when(links.insert(any(MessageShareLink.class))).thenReturn(0);
+        assertThatThrownBy(() -> service.create(20L)).isInstanceOf(IllegalStateException.class);
+        assertThat(records).isEmpty();
+    }
+
     @Test void anonymousPreviewReturnsDisplayData() {
         var token = service.create(20L).getToken();
         CurrentUserHolder.clearLoginInfo();
@@ -148,9 +170,9 @@ class GroupChatInvitationTokenTest {
     @Test void invalidExpiredAndRemovedTokensAreRejected() {
         assertThatThrownBy(() -> service.preview("20")).isInstanceOf(IllegalArgumentException.class);
         var token = service.create(20L).getToken();
-        cache.replaceAll((key, value) -> value.replaceAll("\"expiresAt\":\\d+", "\"expiresAt\":1"));
+        records.get(20L).setExpireTime(LocalDateTime.now().minusDays(1));
         assertThatThrownBy(() -> service.preview(token)).isInstanceOf(IllegalArgumentException.class);
-        cache.clear();
+        records.clear();
         assertThatThrownBy(() -> application.acceptInvitation(20L, token)).isInstanceOf(IllegalArgumentException.class);
         verify(members, never()).save(any());
     }
