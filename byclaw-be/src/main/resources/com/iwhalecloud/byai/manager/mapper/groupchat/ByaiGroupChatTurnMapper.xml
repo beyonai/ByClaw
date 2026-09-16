@@ -141,7 +141,8 @@
         status = 'QUEUED', trace_id = NULL, start_time = NULL
         WHERE execution_id = #{executionId} AND status = 'RUNNING' AND phase = 'ASSESSMENT'
     </update>
-    <select id="selectForUpdateById" resultMap="BaseResultMap">
+    <!-- 锁定重读必须清理普通查询快照，不得从 MyBatis 缓存复用旧的运行状态。 -->
+    <select id="selectForUpdateById" resultMap="BaseResultMap" flushCache="true" useCache="false">
         SELECT <include refid="BaseColumns" /> FROM byai_group_chat_turn WHERE execution_id = #{turnId} FOR UPDATE
     </select>
 </mapper>

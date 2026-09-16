@@ -326,8 +326,8 @@ public class GroupChatTaskService {
         event.put("kind", kind);
         event.put("content", content);
         event.put("files", files);
-        // 实时附件使用与历史查询相同的结构，避免大整数文件 ID 在浏览器中丢失精度。
-        event.put("attachments", files.stream().map(file -> {
+        // 任务回执不携带文件，附件统一返回空数组；有附件时沿用历史查询结构以保留 ID 精度。
+        event.put("attachments", files == null ? Collections.emptyList() : files.stream().map(file -> {
             GroupChatContextResponse.Attachment attachment = new GroupChatContextResponse.Attachment();
             attachment.setFileId(file.getFileId() == null ? null : String.valueOf(file.getFileId()));
             attachment.setFileName(file.getFileName());
