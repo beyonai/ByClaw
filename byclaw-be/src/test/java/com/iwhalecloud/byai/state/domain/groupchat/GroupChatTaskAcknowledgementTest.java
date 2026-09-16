@@ -96,6 +96,7 @@ class GroupChatTaskAcknowledgementTest {
         JSONObject acknowledgement = published.getAllValues().get(1);
         assertThat(acknowledgement.getString("kind")).isEqualTo("TASK_ACK");
         assertThat(acknowledgement.getString("taskId")).isEqualTo("60");
+        assertThat(acknowledgement.get("initiatorUserId")).isEqualTo("10");
         assertThat(acknowledgement.getJSONArray("attachments")).isEmpty();
     }
 }
