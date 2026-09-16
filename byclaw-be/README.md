@@ -252,6 +252,17 @@ cp src/main/resources/application-dev.yml \
 mvn spring-boot:run -Dspring-boot.run.profiles=local
 ```
 
+### 短信验证码配置
+
+阿里云短信配置通过 `config/application.properties` 和部署配置
+`deploy/config/application.properties` 映射以下环境变量：
+`ALIYUN_SMS_ACCESS_KEY_ID`、`ALIYUN_SMS_ACCESS_KEY_SECRET`、`ALIYUN_SMS_SIGN_NAME`、
+`ALIYUN_SMS_ENDPOINT`、`ALIYUN_SMS_TEMPLATES_LOGIN`、`ALIYUN_SMS_TEMPLATES_REGISTER`。
+Endpoint 默认使用 `dysmsapi.aliyuncs.com`，登录和注册模板均须包含 `${code}` 参数。
+本地启动读取项目根目录 `.env`；Docker Compose 通过 `env_file` 注入变量，修改后需重建后端容器。
+发送接口要求有效的图形验证码及同一 Session，并依赖数据库与 Redis。
+`GET /system/session/captcha` 与 `POST /system/session/sms/send` 允许匿名访问，部署时加上配置的 context-path（例如 `/byaiService`）。放行按 HTTP 方法和完整路径匹配；图形验证码仍为两分钟有效且只能使用一次，手机号重复发送间隔和按 IP、业务类型计数的限流仍然生效。
+
 ## 技术栈
 
 - **框架**: Spring Boot 3.x, Spring Cloud, MyBatis-Plus

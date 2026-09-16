@@ -166,6 +166,15 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
                 return false;
             }
 
+            // 登录前入口仅按方法和完整应用路径放行，验证码、Session 和限流仍由业务层校验。
+            String contextPath = StringUtils.defaultString(request.getContextPath());
+            if (("GET".equals(request.getMethod())
+                    && (contextPath + "/system/session/captcha").equals(request.getRequestURI()))
+                || ("POST".equals(request.getMethod())
+                    && (contextPath + "/system/session/sms/send").equals(request.getRequestURI()))) {
+                return true;
+            }
+
             // 仅 token 预览允许匿名；携带登录凭证时仍走现有认证链。
             if ("POST".equals(request.getMethod())
                 && "/group-chats/invitations/validate".equals(request.getServletPath())) {

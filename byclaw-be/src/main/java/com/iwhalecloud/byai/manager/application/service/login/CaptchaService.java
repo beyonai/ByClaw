@@ -148,7 +148,7 @@ public class CaptchaService {
 
         if (sendResult) {
             // 更新IP发送记录
-            updateSmsRecord(ip);
+            updateSmsRecord(ip, msgType);
         }
 
         return sendResult;
@@ -202,8 +202,8 @@ public class CaptchaService {
     /**
      * 更新IP发送记录
      */
-    private void updateSmsRecord(String ip) {
-        String countKey = SMS_IP_COUNT_KEY + ip;
+    private void updateSmsRecord(String ip, String msgType) {
+        String countKey = SMS_IP_COUNT_KEY + ip + ":" + msgType;
         String count = RedisUtil.getString(countKey);
         if (count == null) {
             // 设置初始次数为1，并设置时间窗口后过期
