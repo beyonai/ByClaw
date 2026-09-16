@@ -46,6 +46,8 @@ import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatMemberUidCode
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatContextTokenService;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatDispatchPromptBuilder;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatGatewayExecutor;
+import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatSessionContextFileService;
+import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatTaskAuthorizationService;
 import com.iwhalecloud.byai.state.domain.message.dto.ByaiMessageHotDtoDto;
 import com.iwhalecloud.byai.state.domain.session.service.SessionMemberService;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
@@ -60,6 +62,8 @@ class GroupChatQueuedGatewayTest {
     private final ScriptService script = mock(ScriptService.class);
     private final SessionService sessions = mock(SessionService.class);
     private final GroupChatContextTokenService tokens = mock(GroupChatContextTokenService.class);
+    private final GroupChatSessionContextFileService historyFiles = mock(GroupChatSessionContextFileService.class);
+    private final GroupChatTaskAuthorizationService taskAuthorization = mock(GroupChatTaskAuthorizationService.class);
     private GroupChatGatewayExecutor executor;
     private ByaiGroupChatTurn turn;
     private ByaiSession session;
@@ -85,6 +89,10 @@ class GroupChatQueuedGatewayTest {
             new GroupChatDispatchPromptBuilder(), members, new GroupChatMemberUidCodec(),
             mock(ByaiGroupChatExecutionMapper.class), sequences, runner, turns, sessions);
         executor.configureTurnTransactions(mock(PlatformTransactionManager.class), tasks);
+        executor.configureContextFiles(historyFiles, taskAuthorization);
+        when(historyFiles.prepareGroupHistory(any(), any(), any(), any()))
+            .thenReturn(new GroupChatSessionContextFileService.ContextFile(
+                "GROUP_PUBLIC", "/by/.sessions/60/.byclaw/context/turn/group-history.json", "20"));
         turn = new ByaiGroupChatTurn();
         turn.setExecutionId(52L);
         turn.setAnchorExecutionId(50L);

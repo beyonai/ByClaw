@@ -30,6 +30,35 @@ class RunningChatSnapshotServiceTest {
     private final RunningChatSnapshotService runningChatSnapshotService = new RunningChatSnapshotService();
 
     @Test
+    void snapshotRecoveryKeepsFinalAndAccumulatedBodyIndependent() {
+        MessageContext context = new MessageContext();
+        context.getAnswerText().append("intermediate");
+        context.setExplicitFinalAnswer("final");
+        ChatProcessContext ctx = new ChatProcessContext(null, new AssistantChatDto());
+        ctx.setSessionId(20L);
+        ctx.setTraceId("turn");
+        ctx.setModelAnswerMessageId(21L);
+        ctx.setMessageContext(context);
+        RunningChatSnapshotResponse snapshot = ReflectionTestUtils.invokeMethod(runningChatSnapshotService,
+            "buildSnapshot", ctx);
+        assertThat(snapshot.getMessageContent()).isEqualTo("final");
+        RedisTemplate<String, Object> redis = mock(RedisTemplate.class);
+        ValueOperations<String, Object> values = mock(ValueOperations.class);
+        when(redis.opsForValue()).thenReturn(values);
+        when(values.get("byai:chat:running:snapshot:20:turn")).thenReturn(JSONObject.toJSONString(snapshot));
+        ReflectionTestUtils.setField(runningChatSnapshotService, "redisTemplate", redis);
+        ChatRuntimeState state = new ChatRuntimeState();
+        state.setSessionId(20L);
+        state.setTraceId("turn");
+        state.setModelAnswerMessageId(21L);
+        MessageContext restored = runningChatSnapshotService.hydrateMessageContext(state);
+        assertThat(restored).isNotNull();
+        assertThat(restored.returnAnswerText()).isEqualTo("intermediate");
+        assertThat(restored.persistenceContent()).isEqualTo("final");
+        assertThat(restored.getComplete()).isFalse();
+    }
+
+    @Test
     void buildSnapshot_usesFirstResponseTimeAsCreateTimeWhenPresent() {
         Date firstResponseTime = new Date(1000L);
         MessageContext messageContext = new MessageContext();

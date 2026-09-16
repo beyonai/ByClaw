@@ -120,7 +120,7 @@
     <insert id="insertBatch" parameterType="java.util.List">
         INSERT INTO byai_message (
         id, session_id, task_id, access_terminal, metadata, "role", "usage", creator_id,
-        message_id, message_struct, create_time, belong_date, message_content, related_resources,
+        message_id, message_struct, create_time, belong_date, message_content, final_content, related_resources,
         call_logs, infer_log, msg_status, project_id, res_com_ids, is_complete, archived_at, update_time
         )
         VALUES
@@ -139,6 +139,7 @@
             #{item.createTime,jdbcType=TIMESTAMP},
             #{item.belongDate,jdbcType=DATE},
             #{item.messageContent,jdbcType=VARCHAR},
+            #{item.finalContent,jdbcType=VARCHAR},
             #{item.relatedResources,jdbcType=VARCHAR},
             #{item.callLogs,jdbcType=VARCHAR},
             #{item.inferLog,jdbcType=VARCHAR},
@@ -171,6 +172,7 @@
             <if test="item.createTimeMillis != null and item.createTimeMillis != ''">create_time = to_timestamp(CAST(#{item.createTimeMillis} AS BIGINT) / 1000.0),</if>
             <if test="item.belongDateMillis != null and item.belongDateMillis != ''">belong_date = (to_timestamp(CAST(#{item.belongDateMillis} AS BIGINT) / 1000.0))::date,</if>
             <if test="item.messageContent != null">message_content = #{item.messageContent},</if>
+            <if test="item.replaceFinalContent or item.finalContent != null">final_content = #{item.finalContent,jdbcType=VARCHAR},</if>
             <if test="item.relatedResources != null">related_resources = #{item.relatedResources},</if>
             <if test="item.callLogs != null">call_logs = #{item.callLogs},</if>
             <if test="item.inferLog != null">infer_log = #{item.inferLog},</if>
@@ -229,6 +231,33 @@
           AND "usage" IN (1, 2)
           AND message_content IS NOT NULL
         ORDER BY create_time DESC, message_id DESC
+        LIMIT #{limit}
+    </select>
+
+    <select id="selectPreviousTaskAnswers" resultMap="BaseResultMap" useCache="false">
+        SELECT message_id, metadata, message_content
+        FROM byai_message
+        WHERE session_id = #{sessionId}
+          AND message_id &lt; #{beforeMessageId}
+          AND archived_at IS NULL
+          AND "usage" = 2
+          AND (is_complete = TRUE OR is_complete IS NULL)
+        ORDER BY message_id DESC
+        LIMIT #{limit}
+    </select>
+
+    <!-- 只选择公开正文列；游标和本轮边界确保完整导出不会混入当前或后续输入。 -->
+    <select id="selectTaskHistoryPage" resultMap="BaseResultMap" useCache="false">
+        SELECT message_id, session_id, "usage", creator_id, creator_name, metadata,
+               create_time, message_content, related_resources
+        FROM byai_message
+        WHERE session_id = #{sessionId}
+          AND message_id &lt; #{beforeMessageId}
+          AND message_id &gt; #{afterMessageId}
+          AND archived_at IS NULL
+          AND "usage" IN (1, 2)
+          AND message_content IS NOT NULL
+        ORDER BY message_id ASC
         LIMIT #{limit}
     </select>
 

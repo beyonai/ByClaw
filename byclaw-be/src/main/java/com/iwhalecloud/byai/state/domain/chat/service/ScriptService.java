@@ -829,6 +829,8 @@ public class ScriptService extends AbstractChatProcess {
         // 按正常完成状态落库，保持与同 pod 路径一致。
         snapshot.setMsgStatus(MsgStatus.FINISH.getCode());
         snapshot.setComplete(true);
+        // Terminal snapshot persistence must also clear a previous attempt's final body.
+        snapshot.setReplaceFinalContent(true);
         byaiMessageHotService.updateSelective(snapshot);
         ChatProcessContext completed = new ChatProcessContext(null, new AssistantChatDto());
         completed.sessionId = sessionId;

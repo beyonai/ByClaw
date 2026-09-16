@@ -41,6 +41,7 @@ import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.gateway.route.RouteService;
 import com.iwhalecloud.byai.manager.domain.connector.service.ConnectorAuthService;
 import com.iwhalecloud.byai.state.common.enums.AgentTypeEnum;
+import com.iwhalecloud.byai.state.common.exception.BdpRuntimeException;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatInfo;
 import com.iwhalecloud.byai.state.domain.chat.enums.ChatTransport;
@@ -148,6 +149,18 @@ class ScriptExistingTurnTest {
         assertThatThrownBy(() -> script.startExistingMessageTurn(dto, existing))
             .isInstanceOf(ChatTurnPreparationException.class);
         verifyNoInteractions(route);
+    }
+
+    @Test
+    void egressPreparationFailureRetainsNoDeliveryProofThroughOrdinaryErrorHandling() throws Exception {
+        ChatTurnPreparationException failure = new ChatTurnPreparationException(
+            "历史上下文准备失败，请重试", new IllegalStateException("UserFS unavailable"));
+        doThrow(failure).when(route).route(any());
+        // The real error handler still reports the startup failure when failure-message persistence is unavailable.
+        assertThatThrownBy(() -> script.startExistingMessageTurn(dto, existing))
+            .isInstanceOf(BdpRuntimeException.class)
+            .hasMessageContaining("请重试")
+            .hasCause(failure);
     }
 
     @Test

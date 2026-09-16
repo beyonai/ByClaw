@@ -194,9 +194,6 @@ public class AssistantChatService {
 
             // 处理sessionId相关逻辑,校验消息发送权限
             handleSessionLogic(outputStream, assistantChatDto);
-            GroupChatTaskChatGuard taskGuard = groupChatTaskGuardProvider.getIfAvailable();
-            groupTaskTurn = taskGuard != null && assistantChatDto != null
-                && taskGuard.beforeTurn(assistantChatDto.getSessionId());
 
             // 研发派发的会话在等承接人接单:命中确认词才把完整任务提示词换上去下发,不命中原样放行。
             applyPendingTaskConfirm(assistantChatDto);
@@ -208,6 +205,11 @@ public class AssistantChatService {
                 assistantChatDto.setAgentId(targetAgentResolver.resolveAgentId(assistantChatDto));
                 applyCallAcpAgentDelegation(assistantChatDto);
             }
+
+            // 在解析实际执行 Agent 后校验接续权限，再原子占用任务 turn。
+            GroupChatTaskChatGuard taskGuard = groupChatTaskGuardProvider.getIfAvailable();
+            groupTaskTurn = taskGuard != null && assistantChatDto != null
+                && taskGuard.beforeTurn(assistantChatDto.getSessionId(), assistantChatDto.getAgentId());
 
             // 执行聊天处理：Gateway 模式下 handleGatewayMode() 内部阻塞等待 Redis 监听器完成，
             // 返回后即可安全执行 storeMessage/afterProcess，最终由 finally 关闭流
