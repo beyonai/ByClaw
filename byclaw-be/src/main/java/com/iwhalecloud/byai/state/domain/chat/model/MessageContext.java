@@ -53,6 +53,9 @@ public class MessageContext {
      */
     private StringBuilder answerText = new StringBuilder();
 
+    /** Explicit final body is independent of streamed segments and never ends the turn. */
+    private String explicitFinalAnswer;
+
     /**
      * 结构化消息（临时对象，最后会聚合成answerMessageList）
      */
@@ -493,11 +496,11 @@ public class MessageContext {
         callLogs = answerDelta.getChoices().get(0).getDelta().getContent();
     }
 
-    /**
-     * 返回答案文本内容
-     *
-     * @return 答案文本
-     */
+    /** Prefer a validated final body for persistence without changing stream accumulation. */
+    public String persistenceContent() {
+        return StringUtils.isNotBlank(explicitFinalAnswer) ? explicitFinalAnswer : returnAnswerText();
+    }
+
     public String returnAnswerText() {
         return answerText.toString();
     }
@@ -512,7 +515,7 @@ public class MessageContext {
     }
 
     public boolean hasPersistableContent() {
-        return StringUtils.isNotBlank(returnAnswerText())
+        return StringUtils.isNotBlank(persistenceContent())
             || hasPersistableMessage(answerMessageList)
             || hasPersistableMessage(reasonMessageList)
             || CollectionUtils.isNotEmpty(chatRelatedResource)

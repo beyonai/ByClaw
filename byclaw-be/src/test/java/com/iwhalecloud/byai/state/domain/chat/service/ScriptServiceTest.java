@@ -19,6 +19,11 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.ArgumentMatchers.*;
+import com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService;
+import com.iwhalecloud.byai.state.domain.chat.model.ChatResponse;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -74,36 +79,36 @@ class ScriptServiceTest {
         ByaiMessageHotDtoDto prepared = new ByaiMessageHotDtoDto();
         prepared.setSessionId(20L);
         prepared.setMessageId(21L);
-        when(memoryMessageService.generateMessage(org.mockito.ArgumentMatchers.eq(20L),
-            org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.any(),
-            org.mockito.ArgumentMatchers.same(chatDto))).thenReturn(prepared);
+        when(memoryMessageService.generateMessage(eq(20L),
+            anyInt(), any(),
+            same(chatDto))).thenReturn(prepared);
 
         ReflectionTestUtils.invokeMethod(service, "saveUserContent", context);
 
         verify(writeBehind).enqueue("root:user:20:21", 20L, prepared, true);
-        verify(memoryMessageService, never()).save(org.mockito.ArgumentMatchers.anyLong(),
-            org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.any(),
-            org.mockito.ArgumentMatchers.any());
+        verify(memoryMessageService, never()).save(anyLong(),
+            anyInt(), any(),
+            any());
     }
 
     @Test
     void recoveredTurnBroadcastsItsPersistedCompletionWithoutAnOriginalConnection() {
-        ScriptService recoveredService = org.mockito.Mockito.spy(service);
-        com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService broadcast =
-            mock(com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService.class);
+        ScriptService recoveredService = spy(service);
+        MultiDeviceBroadcastService broadcast =
+            mock(MultiDeviceBroadcastService.class);
         ReflectionTestUtils.setField(recoveredService, "multiDeviceBroadcastService", broadcast);
         ChatProcessContext ctx = new ChatProcessContext(null, new AssistantChatDto());
         ctx.sessionId = 20L;
         ctx.userId = 1001L;
         ctx.recoveryOnly = true;
-        com.iwhalecloud.byai.state.domain.chat.model.ChatResponse response =
-            new com.iwhalecloud.byai.state.domain.chat.model.ChatResponse();
-        org.mockito.Mockito.doReturn(response).when(recoveredService)
+        ChatResponse response =
+            new ChatResponse();
+        doReturn(response).when(recoveredService)
             .resolveMemory(ctx, ctx.assistantChatDto, ctx.sessionId, ctx.messageContext, ctx.resMsg);
         recoveredService.storeMessage(ctx);
-        verify(broadcast).broadcastToUserDevices(org.mockito.ArgumentMatchers.eq(1001L),
-            org.mockito.ArgumentMatchers.eq(20L), org.mockito.ArgumentMatchers.eq("appStreamResponse"),
-            org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.isNull());
+        verify(broadcast).broadcastToUserDevices(eq(1001L),
+            eq(20L), eq("appStreamResponse"),
+            anyString(), isNull());
         assertThat(ctx.chatResponse).isSameAs(response);
     }
 
@@ -122,6 +127,8 @@ class ScriptServiceTest {
         assertThat(persisted).isTrue();
         assertThat(snapshot.getMsgStatus()).isEqualTo(MsgStatus.FINISH.getCode());
         assertThat(snapshot.isComplete()).isTrue();
+        assertThat(snapshot.getFinalContent()).isNull();
+        assertThat(snapshot.isReplaceFinalContent()).isTrue();
         verify(messageHotService).updateSelective(snapshot);
     }
 }

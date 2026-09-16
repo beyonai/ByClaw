@@ -6,4 +6,6 @@ import lombok.Data;
 public class GroupChatSettingsResponse {
     private String groupNumber;
     private boolean allowJoinByLink;
+    private boolean allowMemberAddAgent;
+    private boolean allowMemberInviteUser;
 }

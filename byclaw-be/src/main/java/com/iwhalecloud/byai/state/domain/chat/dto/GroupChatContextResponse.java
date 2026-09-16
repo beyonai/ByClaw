@@ -42,6 +42,9 @@ public class GroupChatContextResponse {
         /** 任务卡片关联的任务会话 ID，与当前群会话 ID 不同。 */
         private String taskId;
 
+        /** 任务发起者 ID，供任务消息回复权限展示；字符串保留完整 ID 精度，未知时为空。 */
+        private String initiatorUserId;
+
         private String kind;
 
         private String messageId;

@@ -209,9 +209,8 @@ public class GroupChatTurnCoordinator {
                 turn.setStatus("BLOCKED"); turn.setErrorCode("ACTIVE_TASK");
             }
             else {
-                turn.setPhase("ASSESSMENT");
-                Long assessment = candidates.createRouting(group, boundary, user, agent);
-                turn.setGatewaySessionId(String.valueOf(assessment));
+                turn.setPhase("CHAT_CONTINUATION");
+                turn.setDisposition("CHAT");
                 ByaiMessage published = task.getPublishMessageId() == null ? null : messages.selectByMessageId(task.getPublishMessageId());
                 if (published != null) {
                     envelope.put("已完成任务的公开成果", published.getMessageContent());
@@ -242,28 +241,6 @@ public class GroupChatTurnCoordinator {
         anchor.setCreateTime(new Date());
         anchors.insert(anchor);
         return anchor;
-    }
-
-    public void completeAssessment(ByaiGroupChatTurn turn, String disposition) {
-        // Keep the original queue position through the internal routing step;
-        // Business work has not run yet.
-        if ("TASK".equals(disposition)) {
-            turns.lockGroup(turn.getGroupSessionId());
-            ByaiGroupChatExecution anchor = createAnchor(turn.getGroupSessionId(), turn.getRootMessageId(),
-                turn.getInputMessageId(), turn.getPublicBoundaryMessageId(), turn.getInitiatorUserId(), turn.getTargetAgentId());
-            turn.setAnchorExecutionId(anchor.getExecutionId());
-            turn.setCandidateSessionId(anchor.getCandidateSessionId());
-            turn.setPhase("NORMAL");
-            turn.setDisposition("UNKNOWN");
-        }
-        else {
-            turn.setPhase("CHAT_CONTINUATION"); turn.setDisposition("CHAT");
-        }
-        turn.setGatewaySessionId(String.valueOf(turn.getCandidateSessionId()));
-        turn.setInputMessageId(sequence.nextVal());
-        turn.setStatus("QUEUED");
-        turn.setTraceId(null);
-        turns.resetAfterAssessment(turn);
     }
 
     @Scheduled(fixedDelayString = "${byclaw.group-chat.execution-poll-ms:1000}")
@@ -375,13 +352,12 @@ public class GroupChatTurnCoordinator {
             block(first, "ACTIVE_TASK");
             return false;
         }
-        if (task != null && "NORMAL".equals(first.getPhase())) {
-            // A queued request may outlive promotion and publication of the preceding turn.
-            Long assessment = candidates.createRouting(first.getGroupSessionId(), first.getPublicBoundaryMessageId(),
-                first.getInitiatorUserId(), first.getTargetAgentId());
-            first.setPhase("ASSESSMENT");
-            first.setGatewaySessionId(String.valueOf(assessment));
-            ByaiMessage publication = task.getPublishMessageId() == null ? null : messages.selectByMessageId(task.getPublishMessageId());
+        if ((task != null && "NORMAL".equals(first.getPhase())) || "ASSESSMENT".equals(first.getPhase())) {
+            // 排队期间任务可能已结束；旧版尚未发送的评估记录也直接转为原会话追问。
+            first.setPhase("CHAT_CONTINUATION");
+            first.setDisposition("CHAT");
+            first.setGatewaySessionId(String.valueOf(first.getCandidateSessionId()));
+            ByaiMessage publication = task == null || task.getPublishMessageId() == null ? null : messages.selectByMessageId(task.getPublishMessageId());
             if (publication != null) {
                 JSONObject input = JSON.parseObject(first.getInputContent());
                 input.put("已完成任务的公开成果", publication.getMessageContent());

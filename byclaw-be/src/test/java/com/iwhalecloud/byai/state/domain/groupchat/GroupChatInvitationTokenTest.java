@@ -32,7 +32,7 @@ class GroupChatInvitationTokenTest {
     private final com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper messages = mock(com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper.class);
     private final com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatEventPublisher events = mock(com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatEventPublisher.class);
     private final EnterpriseInfoMapper enterprises = mock(EnterpriseInfoMapper.class);
-    private final GroupChatAuthorizationService auth = new GroupChatAuthorizationService(sessions, members);
+    private final GroupChatAuthorizationService auth = new GroupChatAuthorizationService(sessions, members, extensions);
     private final GroupChatInvitationService service = new GroupChatInvitationService(
         links, sessions, extensions, members, auth, users, enterprises, mock(com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService.class));
     private final com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatApplicationService application =
@@ -79,6 +79,74 @@ class GroupChatInvitationTokenTest {
         });
     }
     @AfterEach void cleanup() { CurrentUserHolder.clearLoginInfo(); }
+
+    @Test void memberPermissionsAreIndependentAndDefaultToDisabled() {
+        owner.setUserRole("MEMBER");
+        assertThatThrownBy(() -> auth.requireInvite(20L, "AGENT")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.create(20L)).isInstanceOf(IllegalArgumentException.class);
+        ByaiSessionExt agent = new ByaiSessionExt();
+        agent.setExtParamValue("true");
+        when(extensions.findOneByExtParamCode(20L, GroupChatAuthorizationService.MEMBER_ADD_AGENT)).thenReturn(agent);
+        assertThatCode(() -> auth.requireInvite(20L, "AGENT")).doesNotThrowAnyException();
+        assertThatThrownBy(() -> auth.requireInvite(20L, "USER")).isInstanceOf(IllegalArgumentException.class);
+        ByaiSessionExt user = new ByaiSessionExt();
+        user.setExtParamValue("true");
+        when(extensions.findOneByExtParamCode(20L, GroupChatAuthorizationService.MEMBER_INVITE_USER)).thenReturn(user);
+        String token = service.create(20L).getToken();
+        assertThat(service.preview(token).getGroupName()).isEqualTo("协作组");
+        user.setExtParamValue("false");
+        assertThatThrownBy(() -> service.preview(token)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.create(20L)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test void administratorsBypassBothMemberPermissionsButNonMembersCannot() {
+        for (String role : List.of("OWNER", "ADMIN")) {
+            owner.setUserRole(role);
+            assertThatCode(() -> auth.requireInvite(20L, "USER")).doesNotThrowAnyException();
+            assertThatCode(() -> auth.requireInvite(20L, "AGENT")).doesNotThrowAnyException();
+        }
+        when(members.findSessionMember(20L, "USER", 10L)).thenReturn(null);
+        assertThatThrownBy(() -> auth.requireInvite(20L, "USER")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> auth.requireInvite(20L, "AGENT")).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test void settingsPersistEachPermissionWithoutChangingOtherSettings() {
+        var settings = new GroupChatSettingsService(sessions, extensions, members, auth, sequence,
+            mock(com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTaskMapper.class),
+            mock(com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatExecutionMapper.class), events);
+        Map<String, ByaiSessionExt> stored = new HashMap<>();
+        when(extensions.findOneByExtParamCode(eq(20L), anyString()))
+            .thenAnswer(call -> stored.get(call.getArgument(1)));
+        doAnswer(call -> {
+            ByaiSessionExt ext = call.getArgument(0);
+            stored.put(ext.getExtParamCode(), ext);
+            return null;
+        }).when(extensions).save(any());
+        assertThat(settings.settings(20L).isAllowMemberAddAgent()).isFalse();
+        assertThat(settings.settings(20L).isAllowMemberInviteUser()).isFalse();
+        org.springframework.transaction.support.TransactionSynchronizationManager.initSynchronization();
+        try {
+            var request = new com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatSettingsRequest();
+            request.setAllowMemberAddAgent(true);
+            settings.updateSettings(20L, request);
+            assertThat(settings.settings(20L).isAllowMemberAddAgent()).isTrue();
+            assertThat(settings.settings(20L).isAllowMemberInviteUser()).isFalse();
+            request = new com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatSettingsRequest();
+            request.setAllowMemberInviteUser(true);
+            settings.updateSettings(20L, request);
+            assertThat(settings.settings(20L).isAllowMemberAddAgent()).isTrue();
+            assertThat(settings.settings(20L).isAllowMemberInviteUser()).isTrue();
+            assertThat(settings.settings(20L).isAllowJoinByLink()).isTrue();
+            request.setAllowMemberInviteUser(false);
+            settings.updateSettings(20L, request);
+            assertThat(settings.settings(20L).isAllowMemberInviteUser()).isFalse();
+            owner.setUserRole("MEMBER");
+            var memberRequest = request;
+            assertThatThrownBy(() -> settings.updateSettings(20L, memberRequest)).isInstanceOf(IllegalArgumentException.class);
+        } finally {
+            org.springframework.transaction.support.TransactionSynchronizationManager.clearSynchronization();
+        }
+    }
 
     @Test void rejectsSymbolsInToken() {
         assertThatThrownBy(() -> service.preview("Ab12_-CD")).isInstanceOf(IllegalArgumentException.class);

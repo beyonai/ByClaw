@@ -1,13 +1,18 @@
 package com.iwhalecloud.byai.state.domain.groupchat;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -20,6 +25,10 @@ import org.mockito.Mockito;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import com.iwhalecloud.byai.common.message.entity.ByaiMessage;
+import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONArray;
+import com.iwhalecloud.byai.state.domain.chat.dto.GroupChatContextRequest;
+import com.iwhalecloud.byai.state.domain.chat.service.ChatTurnPreparationException;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxUserContextRunner;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.domain.users.service.UserService;
@@ -38,6 +47,8 @@ import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatMemberUidCode
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatContextTokenService;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatDispatchPromptBuilder;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatGatewayExecutor;
+import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatSessionContextFileService;
+import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatTaskAuthorizationService;
 import com.iwhalecloud.byai.state.domain.message.dto.ByaiMessageHotDtoDto;
 import com.iwhalecloud.byai.state.domain.session.service.SessionMemberService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
@@ -47,6 +58,8 @@ class GroupChatGatewayExecutorTest {
     private ScriptService script;
     private ByaiMessageMapper messages;
     private ByaiGroupChatExecutionMapper executions;
+    private final GroupChatSessionContextFileService historyFiles = mock(GroupChatSessionContextFileService.class);
+    private final GroupChatTaskAuthorizationService taskAuthorization = mock(GroupChatTaskAuthorizationService.class);
     private GroupChatGatewayExecutor executor;
     private ByaiGroupChatExecution execution;
     private ByaiMessage child;
@@ -65,6 +78,10 @@ class GroupChatGatewayExecutorTest {
         executor = new GroupChatGatewayExecutor(script, messages, users, resources, tokens,
             new GroupChatDispatchPromptBuilder(), members, new GroupChatMemberUidCodec(), executions, sequences, runner);
         executor.configureTurnTransactions(mock(PlatformTransactionManager.class), tasks);
+        executor.configureContextFiles(historyFiles, taskAuthorization);
+        when(historyFiles.prepareGroupHistory(any(), any(), any(), any()))
+            .thenReturn(new GroupChatSessionContextFileService.ContextFile(
+                "GROUP_PUBLIC", "/by/.sessions/60/.byclaw/context/turn/group-history.json", "20"));
         Users user = new Users();
         user.setUserCode("user30");
         user.setUserName("用户三十");
@@ -134,7 +151,8 @@ class GroupChatGatewayExecutorTest {
         assertThat(groupChat.get("beforeMessageId")).isEqualTo("20");
         assertThat(params).containsEntry("cwd", "/by/.sessions/60");
         context.traceId = ScriptService.getTraceId(81L, 82L);
-        assertThat(executor.decorate(context, "继续", params)).isEqualTo("继续");
+        assertThat((String) executor.decorate(context, "继续", params)).startsWith("继续")
+            .contains("group-history.json").doesNotContain("TASK_PRIVATE", "beforeMessageId", "truncation");
     }
 
     @Test
@@ -148,7 +166,7 @@ class GroupChatGatewayExecutorTest {
         context.assistantChatDto.setAgentId(40L);
         context.traceId = ScriptService.getTraceId(81L, 82L);
         Map<String, Object> params = new HashMap<>();
-        assertThat(executor.decorate(context, "继续任务", params)).isEqualTo("继续任务");
+        assertThat((String) executor.decorate(context, "继续任务", params)).startsWith("继续任务");
         Map<?, ?> reference = (Map<?, ?>) params.get("groupChat");
         assertThat(reference.get("beforeMessageId")).isEqualTo("20");
         assertThat(reference.get("contextToken")).isEqualTo("signed-context-token");
@@ -164,6 +182,7 @@ class GroupChatGatewayExecutorTest {
         context.sessionId = 60L;
         context.userId = 30L;
         context.assistantChatDto.setAgentId(40L);
+        context.userMessageId = 81L;
         context.assistantChatDto.setChatContent("修改报告");
         context.traceId = ScriptService.getTraceId(81L, 82L);
         String content = (String) executor.decorate(context, "修改报告", new HashMap<>());
@@ -172,8 +191,173 @@ class GroupChatGatewayExecutorTest {
         assertThat(context.assistantChatDto.getChatContent()).isEqualTo("修改报告");
         for (String status : List.of("PUBLISHED", "CANCELLED")) {
             task.setStatus(status);
-            assertThat(executor.decorate(context, "修改报告", new HashMap<>())).isEqualTo("修改报告");
+            doThrow(new IllegalArgumentException("Group task does not accept a new turn"))
+                .when(taskAuthorization).requireActiveAgent(60L, 40L);
+            assertThatThrownBy(() -> executor.decorate(context, "修改报告", new HashMap<>()))
+                .isInstanceOf(IllegalArgumentException.class);
         }
+    }
+
+    @Test
+    void privateTaskCanSwitchAgentsWhileKeepingOriginalGroupReferenceAndPublicationOwner() {
+        execution.setStatus("CONVERSATION");
+        execution.setTraceId(ScriptService.getTraceId(61L, 70L));
+        ByaiGroupChatTask task = new ByaiGroupChatTask();
+        task.setStatus("ACTIVE");
+        task.setTargetAgentId(40L);
+        when(tasks.selectById(60L)).thenReturn(task);
+        ChatProcessContext context = new ChatProcessContext(null, new AssistantChatDto());
+        context.sessionId = 60L;
+        context.userId = 30L;
+        context.userMessageId = 81L;
+        context.traceId = ScriptService.getTraceId(81L, 82L);
+        when(historyFiles.prepareTaskHandoffHistory(eq("user30"), any(), eq(context.traceId), eq(81L)))
+            .thenReturn(handoffHistory());
+        when(messages.selectPreviousTaskAnswers(60L, 81L, 50))
+            .thenReturn(List.of(answer(70L, 40L)), List.of(answer(80L, 41L)));
+        for (Long agentId : List.of(41L, 40L)) {
+            context.assistantChatDto.setAgentId(agentId);
+            Map<String, Object> params = new HashMap<>();
+            String result = (String) executor.decorate(context, "继续", params);
+            assertThat(result).contains("task-history.jsonl", "group-history.json", "[任务交付提醒]").doesNotContain("群聊判定协议");
+            assertThat(((Map<?, ?>) params.get("groupChat")).get("targetAgentId")).isEqualTo(40L);
+            verify(taskAuthorization).requireActiveAgent(60L, agentId);
+        }
+        assertThat(task.getTargetAgentId()).isEqualTo(40L);
+        assertThat(execution.getTargetAgentId()).isEqualTo(40L);
+    }
+
+    @Test
+    void sameAgentTaskContinuationDoesNotPrepareEitherHistoryFile() {
+        ChatProcessContext context = taskContext(41L);
+        when(messages.selectPreviousTaskAnswers(60L, 81L, 50)).thenReturn(List.of(answer(80L, 41L)));
+        String content = (String) executor.decorate(context, "继续", new HashMap<>());
+        assertThat(content).contains("[任务交付提醒]").doesNotContain("任务接手上下文", "群聊历史", ".byclaw/context");
+        verifyNoInteractions(historyFiles);
+    }
+
+    @Test
+    void originalAgentContinuationWithoutHistoricalIdentityDoesNotPrepareFiles() {
+        ChatProcessContext context = taskContext(40L);
+        assertThat((String) executor.decorate(context, "继续", new HashMap<>())).doesNotContain("任务接手上下文");
+        verifyNoInteractions(historyFiles);
+    }
+
+    @Test
+    void failedPreparationDoesNotCountAsAnAgentHandoffOnRetry() {
+        ChatProcessContext context = taskContext(41L);
+        ByaiMessage failed = answer(80L, 41L);
+        failed.setMessageContent("");
+        failed.setMetadata("{\"agentId\":\"41\",\"turnFailed\":true}");
+        when(messages.selectPreviousTaskAnswers(60L, 81L, 50)).thenReturn(List.of(failed, answer(70L, 40L)));
+        when(historyFiles.prepareTaskHandoffHistory(any(), any(), any(), any())).thenReturn(handoffHistory());
+        assertThat((String) executor.decorate(context, "重试", new HashMap<>())).contains("任务接手上下文");
+        verify(historyFiles).prepareTaskHandoffHistory(eq("user30"), any(), eq(context.traceId), eq(81L));
+        verify(historyFiles, never()).prepareGroupHistory(any(), any(), any(), any());
+    }
+
+    @Test
+    void switchingBackSearchesPastFullPageOfFailedAttemptsBeforeFallingBackToOriginalAgent() {
+        ChatProcessContext context = taskContext(40L);
+        List<ByaiMessage> failedAttempts = new ArrayList<>();
+        for (long id = 80; id >= 31; id--) {
+            ByaiMessage failed = answer(id, 40L);
+            failed.setMessageContent("");
+            failed.setMetadata("{\"agentId\":\"40\",\"turnFailed\":true}");
+            failedAttempts.add(failed);
+        }
+        when(messages.selectPreviousTaskAnswers(60L, 81L, 50)).thenReturn(failedAttempts);
+        when(messages.selectPreviousTaskAnswers(60L, 31L, 50)).thenReturn(List.of(answer(30L, 41L)));
+        when(historyFiles.prepareTaskHandoffHistory(any(), any(), any(), any())).thenReturn(handoffHistory());
+
+        assertThat((String) executor.decorate(context, "重试接手", new HashMap<>())).contains("任务接手上下文");
+
+        verify(messages).selectPreviousTaskAnswers(60L, 31L, 50);
+        verify(historyFiles).prepareTaskHandoffHistory(eq("user30"), any(), eq(context.traceId), eq(81L));
+    }
+
+    @Test
+    void failedAgentHistoryLookupBlocksDispatchInsteadOfAssumingSameAgent() {
+        ChatProcessContext context = taskContext(41L);
+        when(messages.selectPreviousTaskAnswers(60L, 81L, 50)).thenThrow(new IllegalStateException("database"));
+        assertThatThrownBy(() -> executor.decorate(context, "继续", new HashMap<>()))
+            .isInstanceOf(ChatTurnPreparationException.class).hasMessageContaining("请重试");
+        verifyNoInteractions(historyFiles);
+    }
+
+    private ChatProcessContext taskContext(Long agentId) {
+        execution.setStatus("CONVERSATION");
+        execution.setTraceId(ScriptService.getTraceId(61L, 70L));
+        ByaiGroupChatTask task = new ByaiGroupChatTask();
+        task.setStatus("ACTIVE");
+        task.setTargetAgentId(40L);
+        when(tasks.selectById(60L)).thenReturn(task);
+        ChatProcessContext context = new ChatProcessContext(null, new AssistantChatDto());
+        context.sessionId = 60L;
+        context.userId = 30L;
+        context.userMessageId = 81L;
+        context.traceId = ScriptService.getTraceId(81L, 82L);
+        context.assistantChatDto.setAgentId(agentId);
+        return context;
+    }
+
+    private ByaiMessage answer(Long messageId, Long agentId) {
+        ByaiMessage message = new ByaiMessage();
+        message.setMessageId(messageId);
+        message.setMessageContent("已完成的正文");
+        message.setMetadata("{\"agentId\":\"" + agentId + "\"}");
+        return message;
+    }
+
+    private GroupChatSessionContextFileService.TaskHandoffHistory handoffHistory() {
+        return new GroupChatSessionContextFileService.TaskHandoffHistory(
+            new GroupChatSessionContextFileService.ContextFile("GROUP_PUBLIC", "/by/group-history.json", "20"),
+            new GroupChatSessionContextFileService.ContextFile("TASK_PRIVATE", "/by/task-history.jsonl", "81"));
+    }
+
+    @Test
+    void initialDispatchCannotSwitchItsAgent() {
+        execution.setTraceId(ScriptService.getTraceId(61L, 70L));
+        ChatProcessContext context = new ChatProcessContext(null, new AssistantChatDto());
+        context.sessionId = 60L;
+        context.userId = 30L;
+        context.traceId = execution.getTraceId();
+        context.assistantChatDto.setAgentId(41L);
+        assertThatThrownBy(() -> executor.decorate(context, "继续", new HashMap<>()))
+            .hasMessageContaining("identity does not match");
+        verifyNoInteractions(historyFiles);
+    }
+
+    @Test
+    void filePreparationFailureStopsDecorationWithRetryableError() {
+        ChatProcessContext context = new ChatProcessContext(null, new AssistantChatDto());
+        context.sessionId = 60L;
+        context.userId = 30L;
+        context.userMessageId = 81L;
+        context.traceId = ScriptService.getTraceId(81L, 82L);
+        context.assistantChatDto.setAgentId(40L);
+        when(historyFiles.prepareGroupHistory(eq("user30"), any(), eq(context.traceId), eq(81L)))
+            .thenThrow(new ChatTurnPreparationException("历史上下文准备失败，请重试", new IllegalStateException("storage")));
+        assertThatThrownBy(() -> executor.decorate(context, "继续", new HashMap<>()))
+            .isInstanceOf(ChatTurnPreparationException.class).hasMessageContaining("请重试");
+    }
+
+    @Test
+    void attachmentPayloadReceivesPromptWithoutChangingOriginalContent() {
+        execution.setTraceId(ScriptService.getTraceId(61L, 70L));
+        ChatProcessContext context = new ChatProcessContext(null, new AssistantChatDto());
+        context.sessionId = 60L;
+        context.userId = 30L;
+        context.userMessageId = 61L;
+        context.traceId = execution.getTraceId();
+        context.assistantChatDto.setAgentId(40L);
+        JSONArray content = JSON.parseArray("[{\"role\":\"user\",\"content\":{\"text\":\"分析附件\",\"files\":[{\"name\":\"report.txt\"}]}}]");
+        JSONArray decorated = (JSONArray) executor.decorate(context, content, new HashMap<>());
+        assertThat(decorated.getJSONObject(0).getJSONObject("content").getString("text"))
+            .contains("群聊判定协议");
+        assertThat(content.getJSONObject(0).getJSONObject("content").getString("text")).isEqualTo("分析附件");
+        assertThat(decorated.getJSONObject(0).getJSONObject("content").getJSONArray("files"))
+            .isEqualTo(content.getJSONObject(0).getJSONObject("content").getJSONArray("files"));
     }
 
     @Test

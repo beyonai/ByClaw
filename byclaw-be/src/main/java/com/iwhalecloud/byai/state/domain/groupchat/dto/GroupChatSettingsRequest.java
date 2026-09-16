@@ -9,4 +9,6 @@ public class GroupChatSettingsRequest {
     @Size(max = 100)
     private String sessionName;
     private Boolean allowJoinByLink;
+    private Boolean allowMemberAddAgent;
+    private Boolean allowMemberInviteUser;
 }

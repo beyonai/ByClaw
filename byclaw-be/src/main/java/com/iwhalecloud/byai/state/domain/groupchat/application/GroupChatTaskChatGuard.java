@@ -20,12 +20,12 @@ public class GroupChatTaskChatGuard {
         this.taskService = taskService;
     }
 
-    public boolean beforeTurn(Long sessionId) {
+    public boolean beforeTurn(Long sessionId, Long agentId) {
         ByaiGroupChatTask task = taskMapper.selectById(sessionId);
         if (task == null) {
             return false;
         }
-        authorizationService.requireInitiator(sessionId);
+        authorizationService.requireActiveAgent(sessionId, agentId);
         if (!"ACTIVE".equals(task.getStatus()) || !taskService.startTurn(sessionId)) {
             throw new IllegalArgumentException("Group task does not accept a new turn");
         }

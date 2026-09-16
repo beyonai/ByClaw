@@ -105,6 +105,15 @@ public interface ByaiMessageMapper extends BaseMapper<ByaiMessage> {
     List<ByaiMessage> selectVisibleBeforeMessageId(@Param("sessionId") Long sessionId,
         @Param("beforeMessageId") Long beforeMessageId, @Param("limit") Integer limit);
 
+    /** 倒序读取此前的回答身份，用于判断子会话实际执行 Agent 是否切换。 */
+    List<ByaiMessage> selectPreviousTaskAnswers(@Param("sessionId") Long sessionId,
+        @Param("beforeMessageId") Long beforeMessageId, @Param("limit") Integer limit);
+
+    /** 按消息身份分页导出任务正文，不加载思考、结构段或工具记录。 */
+    List<ByaiMessage> selectTaskHistoryPage(@Param("sessionId") Long sessionId,
+        @Param("beforeMessageId") Long beforeMessageId, @Param("afterMessageId") Long afterMessageId,
+        @Param("limit") Integer limit);
+
     /**
      * 统计严格早于当前用户消息的可见群聊消息，供截断信息使用。
      */

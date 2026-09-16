@@ -6,6 +6,10 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.Date;
+import com.iwhalecloud.byai.common.constants.men.TaskOperateTypeEnum;
+import com.iwhalecloud.byai.common.message.entity.ByaiMessageHotDto;
+import com.iwhalecloud.byai.state.domain.chat.service.ChatProcessContext;
+import com.iwhalecloud.byai.state.domain.chat.service.PythonSseService;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -32,6 +36,31 @@ class MemoryMessageServiceTest {
         ReflectionTestUtils.setField(memoryMessageService, "byaiSystemConfigService", byaiSystemConfigService);
         byaiMessageHotService = mock(ByaiMessageHotService.class);
         ReflectionTestUtils.setField(memoryMessageService, "byaiMessageHotService", byaiMessageHotService);
+    }
+
+    @Test
+    void explicitFinalBodyIsPersistedAndRegenerationClearsItWhenAbsent() {
+        MessageContext context = new MessageContext();
+        context.setMessageId(21L);
+        context.setTaskId(22L);
+        context.getAnswerText().append("intermediate");
+        context.setExplicitFinalAnswer("final");
+        ByaiMessageHotDto message = memoryMessageService.generateMessage(3L,
+            ChatUseageEnum.SYSTEM_RESPONSE.getCode(), context, new AssistantChatDto());
+        assertThat(message.getMessageContent()).isEqualTo("final");
+        assertThat(message.getFinalContent()).isEqualTo("final");
+
+        MessageContext regenerated = new MessageContext();
+        new PythonSseService().accumulateEvent(
+            "{\"event\":\"answerDelta\",\"data\":{\"contentType\":\"1001\",\"choices\":[{\"delta\":{\"content\":\"new answer\"}}]}}",
+            regenerated);
+        AssistantChatDto dto = new AssistantChatDto();
+        dto.setTaskOperateType(TaskOperateTypeEnum.UPDATE);
+        memoryMessageService.updateTaskMessage(new ChatProcessContext(null, dto), message, regenerated);
+        assertThat(message.getMessageContent()).isEqualTo("new answer");
+        assertThat(message.getFinalContent()).isNull();
+        assertThat(message.isReplaceFinalContent()).isTrue();
+        assertThat(message.getMessageStruct()).contains("new answer");
     }
 
     @Test

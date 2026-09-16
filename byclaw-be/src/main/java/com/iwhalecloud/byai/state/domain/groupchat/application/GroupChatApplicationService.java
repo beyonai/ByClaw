@@ -370,7 +370,7 @@ public class GroupChatApplicationService {
     @Transactional(rollbackFor = Exception.class)
     public ByaiSessionMember invite(Long sessionId, String type, Long memberId) {
         sessionService.lockById(sessionId);
-        authorizationService.requireAdmin(sessionId);
+        authorizationService.requireInvite(sessionId, type);
         ByaiSession session = authorizationService.requireGroup(sessionId);
         if (!MemObjType.isValid(type) || memberId == null) {
             throw new IllegalArgumentException("Invalid group member");
@@ -465,9 +465,29 @@ public class GroupChatApplicationService {
         sessionService.lockById(sessionId);
         ByaiSessionMember current = authorizationService.requireCurrentUserMember(sessionId);
         if (UserRole.OWNER.name().equals(current.getUserRole())) {
-            throw new IllegalArgumentException("Group owner must transfer ownership before leaving");
+            // 在同一群锁和事务内交接后退出，避免并发退群留下无群主的工作组。
+            // 复用成员展示顺序：管理员优先，同角色按成员记录 ID 排序。
+            ByaiSessionMember successor = memberService.findOrderedGroupMembers(sessionId).stream()
+                .filter(member -> MemObjType.USER.name().equals(member.getMemObjType()))
+                .filter(member -> !Objects.equals(current.getMemObjId(), member.getMemObjId()))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("没有其他真人成员，请使用“解散工作组”"));
+            ByaiSessionMember update = new ByaiSessionMember();
+            update.setByaiSessionMemberId(successor.getByaiSessionMemberId());
+            update.setUserRole(UserRole.OWNER.name());
+            memberService.updateById(update);
         }
         memberService.deleteMember(current.getByaiSessionMemberId());
+        JSONObject event = new JSONObject();
+        event.put("type", "GROUP_CHAT_EVENT");
+        event.put("event", "MEMBER_REMOVED");
+        event.put("sessionId", String.valueOf(sessionId));
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                eventPublisher.publish(sessionId, event, null);
+            }
+        });
     }
 
     @Transactional

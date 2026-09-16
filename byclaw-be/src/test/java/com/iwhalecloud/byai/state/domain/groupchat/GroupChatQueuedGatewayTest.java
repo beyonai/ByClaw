@@ -46,6 +46,8 @@ import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatMemberUidCode
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatContextTokenService;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatDispatchPromptBuilder;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatGatewayExecutor;
+import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatSessionContextFileService;
+import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatTaskAuthorizationService;
 import com.iwhalecloud.byai.state.domain.message.dto.ByaiMessageHotDtoDto;
 import com.iwhalecloud.byai.state.domain.session.service.SessionMemberService;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
@@ -60,6 +62,8 @@ class GroupChatQueuedGatewayTest {
     private final ScriptService script = mock(ScriptService.class);
     private final SessionService sessions = mock(SessionService.class);
     private final GroupChatContextTokenService tokens = mock(GroupChatContextTokenService.class);
+    private final GroupChatSessionContextFileService historyFiles = mock(GroupChatSessionContextFileService.class);
+    private final GroupChatTaskAuthorizationService taskAuthorization = mock(GroupChatTaskAuthorizationService.class);
     private GroupChatGatewayExecutor executor;
     private ByaiGroupChatTurn turn;
     private ByaiSession session;
@@ -85,6 +89,10 @@ class GroupChatQueuedGatewayTest {
             new GroupChatDispatchPromptBuilder(), members, new GroupChatMemberUidCodec(),
             mock(ByaiGroupChatExecutionMapper.class), sequences, runner, turns, sessions);
         executor.configureTurnTransactions(mock(PlatformTransactionManager.class), tasks);
+        executor.configureContextFiles(historyFiles, taskAuthorization);
+        when(historyFiles.prepareGroupHistory(any(), any(), any(), any()))
+            .thenReturn(new GroupChatSessionContextFileService.ContextFile(
+                "GROUP_PUBLIC", "/by/.sessions/60/.byclaw/context/turn/group-history.json", "20"));
         turn = new ByaiGroupChatTurn();
         turn.setExecutionId(52L);
         turn.setAnchorExecutionId(50L);
@@ -150,29 +158,28 @@ class GroupChatQueuedGatewayTest {
     }
 
     @Test
-    void assessmentUsesIsolatedRuntimeAndSuppressesUserTransport() throws Exception {
+    void completedTaskReplyRunsDirectlyInOriginalSessionWithVisibleTransport() throws Exception {
         JSONObject input = JSON.parseObject(turn.getInputContent());
         input.put("已完成任务的公开成果", "先前发布的新闻报告");
         turn.setInputContent(input.toJSONString());
-        turn.setPhase("ASSESSMENT");
-        turn.setGatewaySessionId("600");
-        session.setSessionId(600L);
-        when(sessions.findById(600L)).thenReturn(session);
+        turn.setPhase("CHAT_CONTINUATION");
+        turn.setDisposition("CHAT");
+        ByaiGroupChatTask task = new ByaiGroupChatTask();
+        task.setStatus("PUBLISHED");
+        when(tasks.selectById(60L)).thenReturn(task);
         executor.executeTurn(turn);
         ArgumentCaptor<AssistantChatDto> request = ArgumentCaptor.forClass(AssistantChatDto.class);
-        verify(script).startExistingMessageTurn(request.capture(), any(), eq(true));
-        assertThat(request.getValue().getSessionId()).isEqualTo(600L);
+        verify(script).startExistingMessageTurn(request.capture(), any());
+        verify(script, never()).startExistingMessageTurn(any(), any(), eq(true));
+        assertThat(request.getValue().getSessionId()).isEqualTo(60L);
         assertThat(request.getValue().getChatContent()).isEqualTo(CURRENT_MESSAGE);
-        assertThat(turn.getCandidateSessionId()).isEqualTo(60L);
-        ChatProcessContext ctx = context(600L);
+        ChatProcessContext ctx = context(60L);
         when(turns.selectByTrace(ctx.traceId)).thenReturn(turn);
-        Map<String, Object> params = new HashMap<>();
-        String content = (String) executor.decorate(ctx, CURRENT_MESSAGE, params);
+        String content = (String) executor.decorate(ctx, CURRENT_MESSAGE, new HashMap<>());
         assertThat(content).startsWith(CURRENT_MESSAGE + "\n\n")
-            .contains("/by/.sessions/600/.byclaw/", "仅分类，禁止执行业务", turn.getInputContent());
-        assertThat(content).doesNotContain("[任务交付提醒]");
-        verify(tokens).issue(10L, 600L, 30L, 40L, 68L);
-        assertThat(((Map<?, ?>) params.get("groupChat")).get("beforeMessageId")).isEqualTo("68");
+            .contains("群聊追问", turn.getInputContent(), "请在群里直接 @我")
+            .doesNotContain("group-chat-disposition.json", "[任务交付提醒]");
+        assertThat(task.getStatus()).isEqualTo("PUBLISHED");
     }
 
     @Test

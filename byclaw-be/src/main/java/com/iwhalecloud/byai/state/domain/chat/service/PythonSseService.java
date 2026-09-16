@@ -35,6 +35,7 @@ import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import com.iwhalecloud.byai.state.domain.chat.dto.SuggestionQuestionVo;
 import com.iwhalecloud.byai.state.domain.chat.model.ChatRelatedResource;
 import com.iwhalecloud.byai.state.domain.chat.model.MessageContext;
+import com.iwhalecloud.byai.state.domain.chat.model.FinalAnswerContent;
 import com.iwhalecloud.byai.state.domain.men.enums.MenTaskStatusEnum;
 import com.iwhalecloud.byai.state.domain.men.enums.SystemCodeEnum;
 import com.iwhalecloud.byai.state.domain.men.enums.TaskTypeEnum;
@@ -108,6 +109,12 @@ public class PythonSseService {
         JSONObject jsonObject = JSON.parseObject(line);
         String key = jsonObject.getString("event");
         String value = jsonObject.getString("data");
+        if (FinalAnswerContent.isFinalEvent(key)) {
+            if (matchesFinalIdentity(jsonObject, ctx)) {
+                recordFinalAnswer(jsonObject, messageContext);
+            }
+            return;
+        }
         value = handleDigitExecSessionId(key, value);
         markFirstVisibleResponseTime(key, messageContext);
 
@@ -174,6 +181,40 @@ public class PythonSseService {
 
     }
 
+    /** Direct Python SSE can carry identity too; Gateway events have already passed routing checks. */
+    private boolean matchesFinalIdentity(JSONObject event, ChatProcessContext ctx) {
+        if (ctx == null) {
+            return true;
+        }
+        JSONObject payload = event;
+        try {
+            JSONObject data = event.getJSONObject("data");
+            if (data != null) {
+                payload = data;
+            }
+        }
+        catch (RuntimeException ignored) {
+            // Invalid data is rejected by the final-body decoder.
+        }
+        for (JSONObject envelope : new JSONObject[] {event, payload}) {
+            String trace = StringUtils.defaultIfBlank(envelope.getString("trace_id"), envelope.getString("traceId"));
+            String source = StringUtils.defaultIfBlank(envelope.getString("source_agent_type"),
+                envelope.getString("sourceAgentType"));
+            if ((StringUtils.isNotBlank(trace) && !ctx.isCurrentTrace(trace)) || !ctx.isTargetAgentType(source)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private void recordFinalAnswer(JSONObject event, MessageContext messageContext) {
+        String finalAnswer = FinalAnswerContent.extract(event);
+        if (messageContext != null && finalAnswer != null) {
+            // Assignment makes repeated delivery idempotent; completion still requires appStreamResponse.
+            messageContext.setExplicitFinalAnswer(finalAnswer);
+        }
+    }
+
     private void markFirstVisibleResponseTime(String eventType, MessageContext messageContext) {
         if (messageContext == null) {
             return;
@@ -191,6 +232,10 @@ public class PythonSseService {
         JSONObject jsonObject = JSON.parseObject(line);
         String key = jsonObject.getString("event");
         String value = jsonObject.getString("data");
+        if (FinalAnswerContent.isFinalEvent(key)) {
+            recordFinalAnswer(jsonObject, messageContext);
+            return;
+        }
         markFirstVisibleResponseTime(key, messageContext);
 
         if (SseResponseEventEnum.answerDelta.equals(key)) {

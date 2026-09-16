@@ -220,7 +220,9 @@ public class RunningChatSnapshotService {
                     state.getAssistantChatDto() == null ? null : state.getAssistantChatDto().getAgentType()),
                 state.getModelAnswerMessageId(),
                 snapshot.getTaskId() == null ? state.getTaskId() : snapshot.getTaskId());
-            messageContext.setAnswerText(new StringBuilder(StringUtils.defaultString(snapshot.getMessageContent())));
+            messageContext.setAnswerText(new StringBuilder(StringUtils.defaultString(
+                snapshot.getAccumulatedAnswerText(), StringUtils.defaultString(snapshot.getMessageContent()))));
+            messageContext.setExplicitFinalAnswer(snapshot.getFinalContent());
             messageContext.setResComIds(snapshot.getResComIds());
             messageContext.setMsgStatus(snapshot.getMsgStatus());
             messageContext.setComplete(Boolean.FALSE.equals(snapshot.getRunning())
@@ -401,7 +403,9 @@ public class RunningChatSnapshotService {
                 : ctx.assistantChatDto == null ? null : ctx.assistantChatDto.getMetadata());
         snapshot.setCreateTime(
             messageContext.getFirstResponseTime() == null ? new Date() : messageContext.getFirstResponseTime());
-        snapshot.setMessageContent(messageContext.returnAnswerText());
+        snapshot.setAccumulatedAnswerText(messageContext.returnAnswerText());
+        snapshot.setMessageContent(messageContext.persistenceContent());
+        snapshot.setFinalContent(messageContext.getExplicitFinalAnswer());
         snapshot.setResComIds(messageContext.getResComIds());
         snapshot.setMsgStatus(complete ? MsgStatus.FINISH.getCode() : MsgStatus.APPEND.getCode());
         snapshot.setAccessTerminal(ctx.assistantChatDto == null ? null : ctx.assistantChatDto.getAccessTerminal());

@@ -12,7 +12,7 @@ import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.state.domain.agent.enums.AgentMetaEnum;
 import com.iwhalecloud.byai.state.domain.resource.dto.ResourceVo;
 
-/** 仅在群列表读取边界生成纯文本摘要，不修改消息正文或成员引用。 */
+/** 在群列表和历史文件读取边界还原成员名称，不修改持久化正文或成员引用。 */
 public final class GroupChatMessagePreview {
     private static final Pattern MENTION = Pattern.compile(
         "\\{\\{((?:DIG_EMPLOYEE|HUMAN)_[1-9]\\d*)}}|\\[@([^]\\r\\n]+)]\\(uid=([^()\\s]+)\\)");

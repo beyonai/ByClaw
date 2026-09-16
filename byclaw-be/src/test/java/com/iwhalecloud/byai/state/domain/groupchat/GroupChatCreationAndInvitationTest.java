@@ -204,7 +204,7 @@ class GroupChatCreationAndInvitationTest {
     void invitationAddsNewHumanToProjectAndInitializesReadCursor() {
         when(messages.selectLatestMessageId(200L)).thenReturn(199L);
         ByaiSessionMember member = service.invite(200L, "USER", 20L);
-        verify(authorization).requireAdmin(200L);
+        verify(authorization).requireInvite(200L, "USER");
         verify(projectMembers).addMember(100L, 20L, "member");
         verify(members).save(member);
         assertThat(member.getLastReadMessageId()).isEqualTo(199L);
@@ -237,7 +237,7 @@ class GroupChatCreationAndInvitationTest {
 
     @Test
     void unauthorizedInvitationDoesNotWriteAnything() {
-        doThrow(new IllegalArgumentException("Admin required")).when(authorization).requireAdmin(200L);
+        doThrow(new IllegalArgumentException("Admin required")).when(authorization).requireInvite(200L, "USER");
         assertThatThrownBy(() -> service.invite(200L, "USER", 20L)).hasMessage("Admin required");
         verifyNoInteractions(projectMembers, members);
     }

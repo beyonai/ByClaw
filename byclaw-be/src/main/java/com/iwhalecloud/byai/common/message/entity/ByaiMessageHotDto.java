@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.common.message.entity;
 
 import com.alibaba.fastjson.annotation.JSONField;
 import com.fasterxml.jackson.annotation.JsonFormat;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -37,6 +38,14 @@ public class ByaiMessageHotDto {
     private Date belongDate;
 
     private String messageContent;
+
+    /** Explicit final body, separate from accumulated structured output. */
+    private String finalContent;
+
+    /** A completed regeneration may intentionally clear a previously persisted final body. */
+    @JSONField(serialize = false, deserialize = false)
+    @JsonIgnore
+    private boolean replaceFinalContent;
 
     private String relatedResources;
 

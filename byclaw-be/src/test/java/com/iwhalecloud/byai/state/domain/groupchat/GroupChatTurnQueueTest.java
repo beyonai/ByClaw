@@ -181,6 +181,35 @@ class GroupChatTurnQueueTest {
         assertThat(pending.getStatus()).isEqualTo(preparationFailed ? "FAILED" : "RUNNING");
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"PUBLISHED", "CANCELLED"})
+    void taskEndingWhileQueuedUsesOriginalSessionWithoutAssessment(String status) {
+        ByaiGroupChatTurn pending = row(11L, 60L);
+        ByaiGroupChatTask task = new ByaiGroupChatTask();
+        task.setStatus(status);
+        when(tasks.selectById(60L)).thenReturn(task);
+        coordinator.poll();
+        assertThat(sent).containsExactly(11L);
+        assertThat(pending.getPhase()).isEqualTo("CHAT_CONTINUATION");
+        assertThat(pending.getDisposition()).isEqualTo("CHAT");
+        assertThat(pending.getGatewaySessionId()).isEqualTo("60");
+        assertThat(task.getStatus()).isEqualTo(status);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"QUEUED", "RUNNING"})
+    void unsentLegacyAssessmentResumesAsDirectChat(String status) {
+        ByaiGroupChatTurn pending = row(11L, 60L);
+        pending.setPhase("ASSESSMENT");
+        pending.setStatus(status);
+        pending.setGatewaySessionId("600");
+        coordinator.poll();
+        assertThat(sent).containsExactly(11L);
+        assertThat(pending.getPhase()).isEqualTo("CHAT_CONTINUATION");
+        assertThat(pending.getDisposition()).isEqualTo("CHAT");
+        assertThat(pending.getGatewaySessionId()).isEqualTo("60");
+    }
+
     private ByaiGroupChatTurn row(long id, long session) {
         ByaiGroupChatTurn row = new ByaiGroupChatTurn();
         row.setExecutionId(id);

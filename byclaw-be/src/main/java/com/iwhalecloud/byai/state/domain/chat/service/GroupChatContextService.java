@@ -18,6 +18,8 @@ import org.springframework.web.server.ResponseStatusException;
 
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectService;
 import com.iwhalecloud.byai.manager.entity.devloop.Project;
+import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTask;
+import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTaskMapper;
 import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatAuthorizationService;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
@@ -56,6 +58,9 @@ public class GroupChatContextService {
 
     @Autowired
     private ProjectService projectService;
+
+    @Autowired
+    private ByaiGroupChatTaskMapper taskMapper;
 
     private final ByaiMessageMapper messageMapper;
 
@@ -190,6 +195,7 @@ public class GroupChatContextService {
         List<GroupChatContextResponse.Message> result = new ArrayList<>(ordered.size());
         Map<Long, SsResource> resources = new HashMap<>();
         Map<Long, String> cloudResources = new HashMap<>();
+        Map<Long, ByaiGroupChatTask> tasks = loadMessageTasks(ordered);
         for (int index = 0; index < ordered.size(); index++) {
             ByaiMessage source = ordered.get(index);
             GroupChatContextResponse.Message message = new GroupChatContextResponse.Message();
@@ -201,6 +207,12 @@ public class GroupChatContextService {
             message.setClientRequestId(toClientRequestId(source.getMetadata()));
             message.setTaskId(toMetadataString(source.getMetadata(), "taskId"));
             message.setKind(toMetadataString(source.getMetadata(), "kind"));
+            ByaiGroupChatTask task = tasks.get(messageTaskId(source));
+            // 归属以任务记录为准，不使用发言 Agent、发布人或客户端 metadata 中的用户 ID。
+            if (task != null && Objects.equals(task.getGroupSessionId(), source.getSessionId())
+                && task.getInitiatorUserId() != null) {
+                message.setInitiatorUserId(String.valueOf(task.getInitiatorUserId()));
+            }
             message.setTarget(toTarget(source));
             message.setRole(Integer.valueOf(1).equals(source.getUsage()) ? "user" : "assistant");
             message.setSpeaker(toSpeaker(source, resources));
@@ -220,6 +232,34 @@ public class GroupChatContextService {
             result.add(message);
         }
         return result;
+    }
+
+    /** 同一页的任务回执和结果去重后批量查询，兼容未保存归属信息的历史消息。 */
+    private Map<Long, ByaiGroupChatTask> loadMessageTasks(List<ByaiMessage> messages) {
+        List<Long> ids = messages.stream().map(this::messageTaskId).filter(Objects::nonNull).distinct().toList();
+        Map<Long, ByaiGroupChatTask> tasks = new HashMap<>();
+        if (!ids.isEmpty()) {
+            for (ByaiGroupChatTask task : taskMapper.selectBatchIds(ids)) {
+                tasks.put(task.getTaskSessionId(), task);
+            }
+        }
+        return tasks;
+    }
+
+    private Long messageTaskId(ByaiMessage message) {
+        String kind = toMetadataString(message.getMetadata(), "kind");
+        if (!Integer.valueOf(2).equals(message.getUsage())
+            || !("TASK_RESULT".equals(kind) || "TASK_ACK".equals(kind))) {
+            return null;
+        }
+        String taskId = toMetadataString(message.getMetadata(), "taskId");
+        try {
+            return taskId == null ? null : Long.valueOf(taskId);
+        }
+        catch (NumberFormatException ignored) {
+            // 旧消息的无效任务引用不应阻断整页历史，也不能据此猜测任务归属。
+            return null;
+        }
     }
 
     private String toClientRequestId(String metadata) {

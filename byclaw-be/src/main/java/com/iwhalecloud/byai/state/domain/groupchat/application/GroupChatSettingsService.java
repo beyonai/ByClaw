@@ -31,7 +31,7 @@ import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 
 import lombok.RequiredArgsConstructor;
 
-/** 群昵称、链接加入开关与生命周期。所有写操作先锁群，再校验权限。 */
+/** 群昵称、成员权限及链接加入开关与生命周期。所有写操作先锁群，再校验权限。 */
 @Service
 @RequiredArgsConstructor
 public class GroupChatSettingsService {
@@ -54,6 +54,8 @@ public class GroupChatSettingsService {
         GroupChatSettingsResponse response = new GroupChatSettingsResponse();
         response.setGroupNumber(String.valueOf(sessionId));
         response.setAllowJoinByLink(enabled(sessionId, LINK_ENABLED));
+        response.setAllowMemberAddAgent(authorizationService.memberPermissionEnabled(sessionId, GroupChatAuthorizationService.MEMBER_ADD_AGENT));
+        response.setAllowMemberInviteUser(authorizationService.memberPermissionEnabled(sessionId, GroupChatAuthorizationService.MEMBER_INVITE_USER));
         return response;
     }
 
@@ -68,7 +70,8 @@ public class GroupChatSettingsService {
         ByaiSession session = lockGroup(sessionId);
         authorizationService.requireAdmin(sessionId);
         if (request == null || (request.getSessionName() == null
-            && request.getAllowJoinByLink() == null)) {
+            && request.getAllowJoinByLink() == null
+            && request.getAllowMemberAddAgent() == null && request.getAllowMemberInviteUser() == null)) {
             throw new IllegalArgumentException("No group settings supplied");
         }
         if (request.getSessionName() != null) {
@@ -76,6 +79,12 @@ public class GroupChatSettingsService {
         }
         if (request.getAllowJoinByLink() != null) {
             putExt(sessionId, LINK_ENABLED, request.getAllowJoinByLink().toString());
+        }
+        if (request.getAllowMemberAddAgent() != null) {
+            putExt(sessionId, GroupChatAuthorizationService.MEMBER_ADD_AGENT, request.getAllowMemberAddAgent().toString());
+        }
+        if (request.getAllowMemberInviteUser() != null) {
+            putExt(sessionId, GroupChatAuthorizationService.MEMBER_INVITE_USER, request.getAllowMemberInviteUser().toString());
         }
         session.setUpdateBy(CurrentUserHolder.getCurrentUserId());
         sessionService.update(session);
