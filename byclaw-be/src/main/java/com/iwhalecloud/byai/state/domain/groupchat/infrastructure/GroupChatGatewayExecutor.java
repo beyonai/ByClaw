@@ -321,11 +321,12 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
                     return promptBuilder.appendChatContinuation(dispatchContent, buildMemberRoster(execution));
                 }
                 return promptBuilder.appendTaskDeliveryReminder(promptBuilder.append(dispatchContent,
-                    execution.getExecutionId(), context.sessionId, buildMemberRoster(execution)));
+                    execution.getExecutionId(), context.sessionId, buildMemberRoster(execution)), context.sessionId);
             });
         }
         // 私有任务续聊不重复分类，文件提示和交付提醒只作用于出站请求。
-        return task == null ? decorated : decorateText(decorated, promptBuilder::appendTaskDeliveryReminder);
+        return task == null ? decorated : decorateText(decorated,
+            text -> promptBuilder.appendTaskDeliveryReminder(text, context.sessionId));
     }
 
     /** 比较最近实际回答者而非初始归属，确保 B 连续对话不重复交接，切回 A 时仍会交接。 */

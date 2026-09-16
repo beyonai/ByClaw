@@ -356,3 +356,11 @@ Endpoint 默认使用 `dysmsapi.aliyuncs.com`，登录和注册模板均须包�
 字段缺失或为空时禁用回复。此字段用于 UI 展示判断，BE 仍独立执行任务发起者校验。
 
 历史文件导出会使用消息保存的成员名称快照，将 `{{DIG_EMPLOYEE_id}}` 和 `{{HUMAN_id}}` 转为 `@名称`（含群消息引用正文）。群消息读取 `metadata.resourceList`，任务用户消息优先读取 `related_resources.resourceList`，兼容 metadata 中的成员快照。无法还原名称的旧标记保留原文；数据库正文和原群历史接口保持不变。
+
+### 群任务交付信号
+
+任务交付提醒会要求 Agent 在 `/by/.sessions/{taskId}/.byclaw/task-delivery.json` 写入
+`{"schemaVersion":"1","taskSessionId":"任务ID","delivered":true}`。同一子会话的有效信号跨轮次和 Agent 保留。
+`GET /group-chat/tasks/{taskId}/delivery-status` 仅供仍在群内的任务发起人查询，返回字符串 taskId 和布尔 delivered。
+无文件/无效协议返回 false，存储故障返回可重试错误；不增加数据库状态、不直接授权或触发发布。
+前端进入、重连和每轮结束查询，按钮发送“确认完成并发布”，后续沿用现有发布卡片确认流程。
