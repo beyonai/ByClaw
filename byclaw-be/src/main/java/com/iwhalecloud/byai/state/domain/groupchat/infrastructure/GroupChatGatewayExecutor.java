@@ -149,12 +149,7 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
         turn.setTraceId(ScriptService.getTraceId(prepared.message().getMessageId(), prepared.request().getLlmMessageId()));
         userContextRunner.runAsUser(prepared.userCode(), () -> {
             try {
-                if (prepared.internal()) {
-                    scriptService.startExistingMessageTurn(prepared.request(), prepared.message(), true);
-                }
-                else {
-                    scriptService.startExistingMessageTurn(prepared.request(), prepared.message());
-                }
+                scriptService.startExistingMessageTurn(prepared.request(), prepared.message());
             }
             catch (Exception error) {
                 throw new IllegalStateException("Unable to start queued group turn", error);
@@ -230,11 +225,10 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
         if (turnMapper.bindRuntime(turn.getExecutionId(), traceId) != 1) {
             throw new IllegalStateException("Queued turn no longer owns its runtime slot");
         }
-        return new PreparedTurn(dto, existing, initiator.getUserCode(), "ASSESSMENT".equals(turn.getPhase()));
+        return new PreparedTurn(dto, existing, initiator.getUserCode());
     }
 
-    private record PreparedTurn(AssistantChatDto request, ByaiMessageHotDtoDto message, String userCode,
-        boolean internal) {
+    private record PreparedTurn(AssistantChatDto request, ByaiMessageHotDtoDto message, String userCode) {
     }
 
     @Override
@@ -278,9 +272,6 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
             }
             String dispatchContent = turn == null ? (String) content
                 : promptBuilder.appendTurnContext((String) content, turn.getInputContent());
-            if (turn != null && "ASSESSMENT".equals(turn.getPhase())) {
-                return promptBuilder.appendRoutingAssessment(dispatchContent, turn.getExecutionId(), context.sessionId);
-            }
             if (turn != null && "CHAT_CONTINUATION".equals(turn.getPhase())) {
                 return promptBuilder.appendChatContinuation(dispatchContent, buildMemberRoster(execution));
             }

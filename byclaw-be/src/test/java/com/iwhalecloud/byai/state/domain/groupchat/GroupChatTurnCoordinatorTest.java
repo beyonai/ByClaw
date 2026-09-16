@@ -126,6 +126,27 @@ class GroupChatTurnCoordinatorTest {
         assertThrows(IllegalArgumentException.class, () -> coordinator.enqueueUser(10L, 23L, 21L, 9L, 2L));
     }
     @Test
+    void publishedTaskReplyReusesReferencedSessionWithoutClassificationOrNewAnchor() {
+        ByaiGroupChatTurn original = coordinator.enqueueUser(10L, 20L, null, 1L, 2L);
+        when(turns.selectByPublicMessage(21L)).thenReturn(original);
+        ByaiGroupChatTask task = new ByaiGroupChatTask();
+        task.setStatus("PUBLISHED"); task.setPublishMessageId(21L);
+        when(tasks.selectById(original.getCandidateSessionId())).thenReturn(task);
+        ByaiGroupChatTurn reply = coordinator.enqueueUser(10L, 22L, 21L, 1L, 2L);
+        assertEquals("CHAT_CONTINUATION", reply.getPhase());
+        assertEquals("CHAT", reply.getDisposition());
+        assertEquals(original.getCandidateSessionId(), reply.getCandidateSessionId());
+        assertEquals(String.valueOf(original.getCandidateSessionId()), reply.getGatewaySessionId());
+        assertEquals("Analyze company news", JSON.parseObject(reply.getInputContent()).getString("已完成任务的公开成果"));
+        verify(candidates, times(1)).createEmpty(anyLong(), anyLong(), anyLong(), anyLong());
+        verify(anchors, times(1)).insert(any(ByaiGroupChatExecution.class));
+        // 非引用 @ 仍从新的协作链开始，允许用户重新发起产物修改任务。
+        ByaiGroupChatTurn fresh = coordinator.enqueueUser(10L, 23L, null, 1L, 2L);
+        assertEquals("NORMAL", fresh.getPhase());
+        assertNotEquals(original.getCandidateSessionId(), fresh.getCandidateSessionId());
+    }
+
+    @Test
     void inputRenderingRetainsBackgroundAndCurrentMentionResources() {
         ByaiMessage root = new ByaiMessage();
         root.setMessageContent("{{DIG_EMPLOYEE_2}} Analyze news");

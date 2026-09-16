@@ -24,7 +24,6 @@ import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatExecution;
 import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTurn;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTurnMapper;
-import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTurnCoordinator;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.users.Users;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatExecutionMapper;
@@ -51,8 +50,6 @@ import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 public class GroupChatExecutionEventHandler implements ChatTurnPersistenceObserver {
     @Autowired
     private ByaiGroupChatTurnMapper turnMapper;
-    @Autowired
-    private GroupChatTurnCoordinator turnCoordinator;
     private final ByaiMessageMapper messageMapper;
     private final GroupChatEventPublisher eventPublisher;
     private final SequenceService sequenceService;
@@ -143,6 +140,8 @@ public class GroupChatExecutionEventHandler implements ChatTurnPersistenceObserv
         if (turn == null) { return; }
         turn = lockCurrentTurn(turn);
         if (turn == null || !"RUNNING".equals(turn.getStatus())) { return; }
+        // 尚未绑定 trace 的 turn 由调度器负责恢复，观察器不能提前结束它。
+        if (turn.getTraceId() == null || retireLegacyAssessment(turn)) { return; }
         resolveDisposition(turn, false);
         if (TraceIdCodec.canDecode(turn.getTraceId())) {
             completeInitialTurn(turn, TraceIdCodec.decode(turn.getTraceId()).getModelAnswerMessageId(), false);
@@ -154,12 +153,22 @@ public class GroupChatExecutionEventHandler implements ChatTurnPersistenceObserv
         executionMapper.selectForUpdateByCandidateSessionId(snapshot.getCandidateSessionId());
         // 普通查询可能缓存了等待锁之前的 RUNNING 状态，必须锁定读取最新 turn。
         ByaiGroupChatTurn current = turnMapper.selectForUpdateById(snapshot.getExecutionId());
-        // 路由评估可能已将该 turn 转移到新会话，交由持有新会话锁的后续处理重试。
+        // 确认锁定的会话仍与读取快照一致，避免处理已变更的 turn。
         return current != null && Objects.equals(current.getGroupSessionId(), snapshot.getGroupSessionId())
             && Objects.equals(current.getCandidateSessionId(), snapshot.getCandidateSessionId()) ? current : null;
     }
 
+    /** 已发送的旧版内部评估不可作为业务答复投影，也不能在升级后盲目重发。 */
+    private boolean retireLegacyAssessment(ByaiGroupChatExecution execution) {
+        if (execution instanceof ByaiGroupChatTurn turn && "ASSESSMENT".equals(turn.getPhase())) {
+            markFailed(execution, "ASSESSMENT_RETIRED", "Routing assessment was removed; retry the group reply");
+            return true;
+        }
+        return false;
+    }
+
     private void completeInitialTurn(ByaiGroupChatExecution execution, Long answerId, boolean failed) {
+        if (retireLegacyAssessment(execution)) { return; }
         ByaiMessage answer = answerId == null ? null : messageMapper.selectByMessageId(answerId);
         if (answer == null || !Objects.equals(answer.getSessionId(), execution instanceof ByaiGroupChatTurn
                 ? Long.valueOf(execution.getGatewaySessionId()) : execution.getCandidateSessionId())
@@ -171,12 +180,6 @@ public class GroupChatExecutionEventHandler implements ChatTurnPersistenceObserv
             ? new JSONObject() : JSON.parseObject(answer.getMetadata());
         failed = failed || answerMetadata.getBooleanValue("turnFailed");
         String disposition = resolveDisposition(execution, true);
-        if (execution instanceof ByaiGroupChatTurn && "ASSESSMENT".equals(((ByaiGroupChatTurn) execution).getPhase())) {
-            if ("UNKNOWN".equals(disposition)) { return; }
-            if (failed) { markFailed(execution, "ASSESSMENT_FAILED", "Routing assessment failed"); }
-            else { turnCoordinator.completeAssessment((ByaiGroupChatTurn) execution, disposition); }
-            return;
-        }
         String finalText = finalAnswer(answer);
         GroupChatAgentMention mentions = mentionParser.parse(execution.getGroupSessionId(),
             execution.getTargetAgentId(), finalText);
@@ -223,16 +226,7 @@ public class GroupChatExecutionEventHandler implements ChatTurnPersistenceObserv
         if (disposition == null && !terminal) {
             return current;
         }
-        if (disposition == null && execution instanceof ByaiGroupChatTurn
-            && "ASSESSMENT".equals(((ByaiGroupChatTurn) execution).getPhase())) {
-            if (terminal) { markFailed(execution, "INVALID_ASSESSMENT", "Routing assessment did not produce a valid decision"); }
-            return "UNKNOWN";
-        }
         String kind = disposition == null ? "CHAT" : disposition.getKind();
-        if (execution instanceof ByaiGroupChatTurn && "ASSESSMENT".equals(((ByaiGroupChatTurn) execution).getPhase())) {
-            decideDisposition(execution, kind);
-            return kind;
-        }
         if ("TASK".equals(kind)) {
             taskService.promote(execution, disposition.getTaskName(), disposition.getAckText());
         }

@@ -43,6 +43,5 @@ public interface ByaiGroupChatTurnMapper extends BaseMapper<ByaiGroupChatTurn> {
     Long lockGroup(@Param("groupId") Long groupId);
     ByaiGroupChatExecution selectAnchor(@Param("rootId") Long rootId, @Param("agentId") Long agentId,
         @Param("userId") Long userId);
-    int resetAfterAssessment(ByaiGroupChatTurn turn);
     ByaiGroupChatTurn selectForUpdateById(@Param("turnId") Long turnId);
 }

@@ -42,9 +42,7 @@ import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatCandidat
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatExecutionCoordinator;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatMentionService;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTaskService;
-import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTurnCoordinator;
 import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatAgentMention;
-import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatDisposition;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatAgentMentionParser;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatDispositionReader;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatEventPublisher;
@@ -54,7 +52,6 @@ import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 class GroupChatTurnProjectionTest {
     private final ByaiMessageMapper messages = mock(ByaiMessageMapper.class);
     private final ByaiGroupChatTurnMapper turns = mock(ByaiGroupChatTurnMapper.class);
-    private final GroupChatTurnCoordinator coordinator = mock(GroupChatTurnCoordinator.class);
     private final GroupChatTaskService tasks = mock(GroupChatTaskService.class);
     private final GroupChatEventPublisher publisher = mock(GroupChatEventPublisher.class);
     private final GroupChatAgentMentionParser parser = mock(GroupChatAgentMentionParser.class);
@@ -72,7 +69,6 @@ class GroupChatTurnProjectionTest {
     @BeforeEach
     void setUp() {
         ReflectionTestUtils.setField(handler, "turnMapper", turns);
-        ReflectionTestUtils.setField(handler, "turnCoordinator", coordinator);
         turn = new ByaiGroupChatTurn();
         turn.setExecutionId(10L); turn.setCandidateSessionId(60L); turn.setGatewaySessionId("60");
         turn.setGroupSessionId(1L); turn.setSourceMessageId(2L); turn.setRootMessageId(2L);
@@ -92,31 +88,31 @@ class GroupChatTurnProjectionTest {
         when(messages.selectByMessageId(30L)).thenReturn(answer);
     }
 
-    @Test
-    void invalidAssessmentFailsClosedWithoutBusinessOrPublicProjection() {
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void legacyBoundAssessmentIsRetiredWithoutProjectingOrStartingBusiness(boolean reconcile) {
         turn.setPhase("ASSESSMENT");
-        handler.afterPersisted(context);
-        verify(turns).markFailed(eq(10L), eq("INVALID_ASSESSMENT"), any(), any());
-        verifyNoInteractions(coordinator, parser, publisher, tasks);
+        if (reconcile) { handler.reconcileTurn(10L); }
+        else { handler.afterPersisted(context); }
+        verify(turns).markFailed(eq(10L), eq("ASSESSMENT_RETIRED"), any(), any());
+        verifyNoInteractions(reader, parser, publisher, tasks);
         verify(messages, never()).insert(any());
     }
 
     @Test
-    void validAssessmentOnlyResetsForBusinessExecution() {
+    void observerLeavesUnboundLegacyAssessmentForSchedulerRecovery() {
         turn.setPhase("ASSESSMENT");
-        GroupChatDisposition disposition = new GroupChatDisposition(); disposition.setKind("TASK");
-        when(reader.read("user-7", 60L, 10L)).thenReturn(disposition);
-        handler.afterPersisted(context);
-        verify(coordinator).completeAssessment(turn, "TASK");
-        verifyNoInteractions(parser, publisher, tasks);
-        verify(messages, never()).insert(any());
+        turn.setTraceId(null);
+        handler.reconcileTurn(10L);
+        verify(turns, never()).markFailed(any(), any(), any(), any());
+        verifyNoInteractions(reader, parser, publisher, tasks);
     }
 
     @Test
-    void staleAssessmentCallbackCannotCompleteResetTurn() {
+    void staleCallbackCannotCompleteAnotherTurn() {
         turn.setPhase("CHAT_CONTINUATION"); turn.setTraceId("next-trace");
         handler.afterPersisted(context);
-        verifyNoInteractions(reader, coordinator, parser, publisher, tasks);
+        verifyNoInteractions(reader, parser, publisher, tasks);
     }
 
     @Test
@@ -127,7 +123,7 @@ class GroupChatTurnProjectionTest {
         handler.afterPersisted(context);
         verify(messages).insert(any());
         verify(turns).markSucceeded(eq(10L), eq(90L), any());
-        verify(tasks, never()).promote(any(), any(), any());
+        verifyNoInteractions(reader, tasks);
     }
 
     @Test

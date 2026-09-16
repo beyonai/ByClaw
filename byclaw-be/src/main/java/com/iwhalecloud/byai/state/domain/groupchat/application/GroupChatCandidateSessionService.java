@@ -40,10 +40,6 @@ public class GroupChatCandidateSessionService {
         return create(groupSessionId, sourceMessageId, initiatorUserId, targetAgentId, false, "GROUP_TASK_CANDIDATE");
     }
 
-    public Long createRouting(Long groupSessionId, Long sourceMessageId, Long initiatorUserId, Long targetAgentId) {
-        return create(groupSessionId, sourceMessageId, initiatorUserId, targetAgentId, false, "GROUP_CHAT_ROUTING");
-    }
-
     private Long create(Long groupSessionId, Long sourceMessageId, Long initiatorUserId, Long targetAgentId,
         boolean copySource, String state) {
         ByaiSession group = sessionService.findById(groupSessionId);

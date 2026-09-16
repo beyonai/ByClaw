@@ -150,29 +150,28 @@ class GroupChatQueuedGatewayTest {
     }
 
     @Test
-    void assessmentUsesIsolatedRuntimeAndSuppressesUserTransport() throws Exception {
+    void completedTaskReplyRunsDirectlyInOriginalSessionWithVisibleTransport() throws Exception {
         JSONObject input = JSON.parseObject(turn.getInputContent());
         input.put("已完成任务的公开成果", "先前发布的新闻报告");
         turn.setInputContent(input.toJSONString());
-        turn.setPhase("ASSESSMENT");
-        turn.setGatewaySessionId("600");
-        session.setSessionId(600L);
-        when(sessions.findById(600L)).thenReturn(session);
+        turn.setPhase("CHAT_CONTINUATION");
+        turn.setDisposition("CHAT");
+        ByaiGroupChatTask task = new ByaiGroupChatTask();
+        task.setStatus("PUBLISHED");
+        when(tasks.selectById(60L)).thenReturn(task);
         executor.executeTurn(turn);
         ArgumentCaptor<AssistantChatDto> request = ArgumentCaptor.forClass(AssistantChatDto.class);
-        verify(script).startExistingMessageTurn(request.capture(), any(), eq(true));
-        assertThat(request.getValue().getSessionId()).isEqualTo(600L);
+        verify(script).startExistingMessageTurn(request.capture(), any());
+        verify(script, never()).startExistingMessageTurn(any(), any(), eq(true));
+        assertThat(request.getValue().getSessionId()).isEqualTo(60L);
         assertThat(request.getValue().getChatContent()).isEqualTo(CURRENT_MESSAGE);
-        assertThat(turn.getCandidateSessionId()).isEqualTo(60L);
-        ChatProcessContext ctx = context(600L);
+        ChatProcessContext ctx = context(60L);
         when(turns.selectByTrace(ctx.traceId)).thenReturn(turn);
-        Map<String, Object> params = new HashMap<>();
-        String content = (String) executor.decorate(ctx, CURRENT_MESSAGE, params);
+        String content = (String) executor.decorate(ctx, CURRENT_MESSAGE, new HashMap<>());
         assertThat(content).startsWith(CURRENT_MESSAGE + "\n\n")
-            .contains("/by/.sessions/600/.byclaw/", "仅分类，禁止执行业务", turn.getInputContent());
-        assertThat(content).doesNotContain("[任务交付提醒]");
-        verify(tokens).issue(10L, 600L, 30L, 40L, 68L);
-        assertThat(((Map<?, ?>) params.get("groupChat")).get("beforeMessageId")).isEqualTo("68");
+            .contains("群聊追问", turn.getInputContent(), "请在群里直接 @我")
+            .doesNotContain("group-chat-disposition.json", "[任务交付提醒]");
+        assertThat(task.getStatus()).isEqualTo("PUBLISHED");
     }
 
     @Test
