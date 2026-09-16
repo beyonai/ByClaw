@@ -45,7 +45,7 @@ public class GroupChatInvitationService {
         Long userId = requireUser();
         sessions.lockById(sessionId);
         ByaiSession group = authorization.requireGroup(sessionId);
-        authorization.requireAdmin(sessionId);
+        authorization.requireInvite(sessionId, "USER");
         requireLinkEnabled(sessionId);
         requireEnterprise(group);
         requireInviter(sessionId, userId);
@@ -171,7 +171,7 @@ public class GroupChatInvitationService {
 
     private Users requireInviter(Long sessionId, Long userId) {
         ByaiSessionMember inviter = authorization.requireUserMember(sessionId, userId);
-        if (!"OWNER".equals(inviter.getUserRole()) && !"ADMIN".equals(inviter.getUserRole())) throw invalid();
+        authorization.requireMemberInvite(sessionId, inviter, "USER");
         Users user = users.findById(userId);
         if (user == null || !"A".equals(user.getState()) || "Y".equals(user.getIsLocked())
             || (user.getUserExpDate() != null && user.getUserExpDate().getTime() <= System.currentTimeMillis())) {

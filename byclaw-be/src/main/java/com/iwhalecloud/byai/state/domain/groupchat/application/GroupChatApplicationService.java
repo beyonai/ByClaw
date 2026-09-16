@@ -370,7 +370,7 @@ public class GroupChatApplicationService {
     @Transactional(rollbackFor = Exception.class)
     public ByaiSessionMember invite(Long sessionId, String type, Long memberId) {
         sessionService.lockById(sessionId);
-        authorizationService.requireAdmin(sessionId);
+        authorizationService.requireInvite(sessionId, type);
         ByaiSession session = authorizationService.requireGroup(sessionId);
         if (!MemObjType.isValid(type) || memberId == null) {
             throw new IllegalArgumentException("Invalid group member");

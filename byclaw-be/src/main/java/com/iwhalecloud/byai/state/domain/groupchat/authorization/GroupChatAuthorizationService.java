@@ -1,6 +1,6 @@
 package com.iwhalecloud.byai.state.domain.groupchat.authorization;
 
-import java.util.Objects;
+import com.iwhalecloud.byai.state.domain.session.service.SessionExtService;
 
 import org.springframework.stereotype.Service;
 
@@ -17,10 +17,14 @@ import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 @Service
 public class GroupChatAuthorizationService {
     public static final String DISSOLVED_STATE = "GROUP_DISSOLVED";
+    public static final String MEMBER_ADD_AGENT = "group_member_add_agent_enabled";
+    public static final String MEMBER_INVITE_USER = "group_member_invite_user_enabled";
+    private final SessionExtService extService;
     private final SessionService sessionService;
     private final SessionMemberService memberService;
 
-    public GroupChatAuthorizationService(SessionService sessionService, SessionMemberService memberService) {
+    public GroupChatAuthorizationService(SessionService sessionService, SessionMemberService memberService, SessionExtService extService) {
+        this.extService = extService;
         this.sessionService = sessionService;
         this.memberService = memberService;
     }
@@ -55,6 +59,27 @@ public class GroupChatAuthorizationService {
         ByaiSessionMember member = requireCurrentUserMember(sessionId);
         if (!UserRole.OWNER.name().equals(member.getUserRole()) && !UserRole.ADMIN.name().equals(member.getUserRole())) {
             throw new IllegalArgumentException("Only group owner or administrator can modify members");
+        }
+    }
+
+    /** 未配置时沿用原权限：仅群主、管理员可以添加成员。 */
+    public boolean memberPermissionEnabled(Long sessionId, String code) {
+        var ext = extService.findOneByExtParamCode(sessionId, code);
+        return ext != null && "true".equals(ext.getExtParamValue());
+    }
+
+    public void requireInvite(Long sessionId, String type) {
+        requireMemberInvite(sessionId, requireCurrentUserMember(sessionId), type);
+    }
+
+    public void requireMemberInvite(Long sessionId, ByaiSessionMember member, String type) {
+        if (!MemObjType.USER.name().equals(type) && !MemObjType.AGENT.name().equals(type)) {
+            throw new IllegalArgumentException("Invalid group member type");
+        }
+        if (UserRole.OWNER.name().equals(member.getUserRole()) || UserRole.ADMIN.name().equals(member.getUserRole())) return;
+        String code = MemObjType.AGENT.name().equals(type) ? MEMBER_ADD_AGENT : MEMBER_INVITE_USER;
+        if (!memberPermissionEnabled(sessionId, code)) {
+            throw new IllegalArgumentException("Group member invitation is disabled");
         }
     }
 
