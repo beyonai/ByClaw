@@ -191,7 +191,8 @@ public class GroupChatContextService {
         return truncated;
     }
 
-    private List<GroupChatContextResponse.Message> toMessages(List<ByaiMessage> ordered) {
+    /** 将已鉴权的公开群消息转换为统一的前端消息协议。 */
+    public List<GroupChatContextResponse.Message> toMessages(List<ByaiMessage> ordered) {
         List<GroupChatContextResponse.Message> result = new ArrayList<>(ordered.size());
         Map<Long, SsResource> resources = new HashMap<>();
         Map<Long, String> cloudResources = new HashMap<>();

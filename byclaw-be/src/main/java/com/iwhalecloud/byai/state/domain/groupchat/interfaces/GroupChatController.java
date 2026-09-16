@@ -31,6 +31,9 @@ import com.iwhalecloud.byai.state.domain.chat.service.GroupChatContextService;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatApplicationService;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatReadService;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTaskService;
+import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatMessageSearchService;
+import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatMessageSearchRequest;
+import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatMessageSearchResponse;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.DirectSessionCreateRequest;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatCreateRequest;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatDetailResponse;
@@ -56,6 +59,8 @@ public class GroupChatController {
     private final GroupChatContextService contextService;
     private final GroupChatTaskService taskService;
     private final GroupChatReadService readService;
+    @org.springframework.beans.factory.annotation.Autowired
+    private GroupChatMessageSearchService messageSearchService;
 
     public GroupChatController(GroupChatApplicationService applicationService, GroupChatContextService contextService,
         GroupChatTaskService taskService, GroupChatReadService readService) {
@@ -91,6 +96,18 @@ public class GroupChatController {
         @RequestBody GroupChatContextRequest request) {
         request.setConversationKey(String.valueOf(sessionId));
         return ResponseUtil.successResponse(contextService.load(request));
+    }
+
+    @PostMapping("/{sessionId}/messages/search")
+    public ResponseUtil<GroupChatMessageSearchResponse> searchMessages(@PathVariable Long sessionId,
+        @RequestBody(required = false) GroupChatMessageSearchRequest request) {
+        return ResponseUtil.successResponse(messageSearchService.search(sessionId, request));
+    }
+
+    @GetMapping("/{sessionId}/messages/{messageId}/context")
+    public ResponseUtil<GroupChatContextResponse> messageContext(@PathVariable Long sessionId,
+        @PathVariable Long messageId) {
+        return ResponseUtil.successResponse(messageSearchService.around(sessionId, messageId));
     }
 
     @GetMapping("/{sessionId}")

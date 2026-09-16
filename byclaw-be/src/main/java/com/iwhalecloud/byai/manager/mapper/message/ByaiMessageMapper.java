@@ -11,6 +11,7 @@ import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
 import java.util.List;
+import java.util.Date;
 
 /**
  * byai_message Mapper
@@ -103,6 +104,18 @@ public interface ByaiMessageMapper extends BaseMapper<ByaiMessage> {
      * 查询严格早于当前用户消息的最近可见群聊消息，按时间倒序返回。
      */
     List<ByaiMessage> selectVisibleBeforeMessageId(@Param("sessionId") Long sessionId,
+        @Param("beforeMessageId") Long beforeMessageId, @Param("limit") Integer limit);
+
+    ByaiMessage selectVisibleGroupMessage(@Param("sessionId") Long sessionId,
+        @Param("messageId") Long messageId);
+
+    List<ByaiMessage> selectVisibleAfterMessageId(@Param("sessionId") Long sessionId,
+        @Param("messageId") Long messageId, @Param("limit") Integer limit);
+
+    List<ByaiMessage> searchVisibleGroupMessages(@Param("sessionId") Long sessionId,
+        @Param("keyword") String keyword, @Param("scope") String scope,
+        @Param("senderType") String senderType, @Param("userId") Long userId,
+        @Param("startTime") Date startTime, @Param("endTime") Date endTime,
         @Param("beforeMessageId") Long beforeMessageId, @Param("limit") Integer limit);
 
     /** 倒序读取此前的回答身份，用于判断子会话实际执行 Agent 是否切换。 */
