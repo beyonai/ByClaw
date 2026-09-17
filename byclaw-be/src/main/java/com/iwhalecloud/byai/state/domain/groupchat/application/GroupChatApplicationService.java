@@ -339,10 +339,12 @@ public class GroupChatApplicationService {
         Map<String, Object> reply = new HashMap<>();
         reply.put("messageId", referenced.getMessageId());
         reply.put("content", referenced.getMessageContent());
-        reply.put("role", Integer.valueOf(1).equals(referenced.getUsage()) ? "USER" : "ASSISTANT");
+        boolean systemEvent = Integer.valueOf(5).equals(referenced.getUsage());
+        reply.put("usage", referenced.getUsage());
+        reply.put("role", systemEvent ? "event" : Integer.valueOf(1).equals(referenced.getUsage()) ? "USER" : "ASSISTANT");
         Map<String, Object> speaker = new HashMap<>();
-        speaker.put("type", Integer.valueOf(1).equals(referenced.getUsage()) ? "USER" : "AGENT");
-        speaker.put("displayName", referenced.getCreatorName());
+        speaker.put("type", systemEvent ? "system" : Integer.valueOf(1).equals(referenced.getUsage()) ? "USER" : "AGENT");
+        speaker.put("displayName", systemEvent ? "系统" : referenced.getCreatorName());
         reply.put("speaker", speaker);
         return reply;
     }
@@ -355,16 +357,7 @@ public class GroupChatApplicationService {
         ByaiSessionMember existing = memberService.findSessionMember(group.getSessionId(), "USER", CurrentUserHolder.getCurrentUserId());
         if (existing != null) return existing;
         ByaiSessionMember member = insertMember(group, MemObjType.USER.name(), CurrentUserHolder.getCurrentUserId());
-        JSONObject event = new JSONObject();
-        event.put("type", "GROUP_CHAT_EVENT");
-        event.put("event", "MEMBER_ADDED");
-        event.put("sessionId", String.valueOf(group.getSessionId()));
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                eventPublisher.publish(group.getSessionId(), event, null);
-            }
-        });
+        recordMemberEvent(group, member, invitationService.validatedInviterId(sessionId, token), "MEMBER_INVITED");
         return member;
     }
 
@@ -379,7 +372,9 @@ public class GroupChatApplicationService {
         if (memberService.findSessionMember(sessionId, type, memberId) != null) {
             throw new IllegalArgumentException("Member already exists");
         }
-        return insertMember(session, type, memberId);
+        ByaiSessionMember member = insertMember(session, type, memberId);
+        recordMemberEvent(session, member, CurrentUserHolder.getCurrentUserId(), "MEMBER_INVITED");
+        return member;
     }
 
     /** 两种入口在各自完成授权和重复成员检查后，共用事务内写入逻辑。 */
@@ -427,7 +422,9 @@ public class GroupChatApplicationService {
         if (target == null || UserRole.OWNER.name().equals(target.getUserRole())) {
             throw new IllegalArgumentException("Group member cannot be removed");
         }
+        ByaiSession group = authorizationService.requireGroup(sessionId);
         memberService.deleteMember(target.getByaiSessionMemberId());
+        recordMemberEvent(group, target, CurrentUserHolder.getCurrentUserId(), "MEMBER_REMOVED");
     }
 
     @Transactional
@@ -539,18 +536,112 @@ public class GroupChatApplicationService {
             ownershipEvent.put("recipientUserId", String.valueOf(successor.getMemObjId()));
             ownershipEvent.put("groupName", group == null ? "工作组" : group.getSessionName());
         }
+        ByaiSession group = authorizationService.requireGroup(sessionId);
         memberService.deleteMember(current.getByaiSessionMemberId());
+        recordMemberEvent(group, current, current.getMemObjId(), "MEMBER_LEFT");
+        if (!ownershipEvent.isEmpty()) {
+            publishAfterCommit(sessionId, ownershipEvent);
+        }
+    }
+
+    /** 成员事实和展示文案一起入库，名称快照不受后续改名或退群影响。 */
+    private void recordMemberEvent(ByaiSession group, ByaiSessionMember member, Long operatorId, String eventType) {
+        String memberName = memberDisplayName(member);
+        ByaiSessionMember operator = Objects.equals(operatorId, member.getMemObjId())
+            && MemObjType.USER.name().equals(member.getMemObjType()) ? member
+            : memberService.findSessionMember(group.getSessionId(), MemObjType.USER.name(), operatorId);
+        if (operator == null) {
+            operator = new ByaiSessionMember();
+            operator.setMemObjId(operatorId);
+            operator.setMemObjType(MemObjType.USER.name());
+        }
+        String operatorName = memberDisplayName(operator);
+        String content = switch (eventType) {
+            case "MEMBER_INVITED" -> operatorName + " 邀请 " + memberName + " 加入工作组";
+            case "MEMBER_LEFT" -> memberName + " 离开了工作组";
+            case "MEMBER_REMOVED" -> operatorName + " 将 " + memberName + " 移出工作组";
+            default -> throw new IllegalArgumentException("Unsupported membership event");
+        };
+        JSONObject detail = new JSONObject();
+        detail.put("eventType", eventType);
+        detail.put("operatorId", String.valueOf(operatorId));
+        detail.put("operatorName", operatorName);
+        detail.put("memberId", String.valueOf(member.getMemObjId()));
+        detail.put("memberType", member.getMemObjType());
+        detail.put("memberName", memberName);
+        JSONObject metadata = new JSONObject();
+        metadata.put("scene", "GROUP_CHAT");
+        metadata.put("kind", "SYSTEM_EVENT");
+        metadata.put("systemEvent", detail);
+        Long messageId = sequenceService.nextVal();
+        Date now = new Date();
+        ByaiMessage message = new ByaiMessage();
+        message.setId(messageId);
+        message.setMessageId(messageId);
+        message.setSessionId(group.getSessionId());
+        message.setProjectId(group.getProjectId());
+        message.setEnterpriseId(group.getEnterpriseId());
+        message.setCreatorId(operatorId);
+        message.setCreatorName(operatorName);
+        message.setUsage(5);
+        message.setRole("event");
+        message.setMessageContent(content);
+        message.setMetadata(metadata.toJSONString());
+        message.setIsComplete(true);
+        message.setCreateTime(now);
+        message.setUpdateTime(now);
+        messageMapper.insert(message);
+
+        JSONObject membership = new JSONObject();
+        membership.put("type", "GROUP_CHAT_EVENT");
+        membership.put("event", "MEMBER_INVITED".equals(eventType) ? "MEMBER_ADDED" : "MEMBER_REMOVED");
+        membership.put("sessionId", String.valueOf(group.getSessionId()));
+        publishAfterCommit(group.getSessionId(), membership);
         JSONObject event = new JSONObject();
         event.put("type", "GROUP_CHAT_EVENT");
-        event.put("event", "MEMBER_REMOVED");
-        event.put("sessionId", String.valueOf(sessionId));
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                eventPublisher.publish(sessionId, event, null);
-                if (!ownershipEvent.isEmpty()) eventPublisher.publish(sessionId, ownershipEvent, null);
+        event.put("event", "MESSAGE_CREATED");
+        event.put("sessionId", String.valueOf(group.getSessionId()));
+        event.put("messageId", String.valueOf(messageId));
+        event.put("usage", 5);
+        event.put("kind", "SYSTEM_EVENT");
+        event.put("role", "event");
+        event.put("content", content);
+        event.put("createdAt", now.getTime());
+        event.put("creatorId", String.valueOf(operatorId));
+        event.put("creatorName", operatorName);
+        event.put("speaker", Map.of("type", "system", "displayName", "系统"));
+        event.put("systemEvent", detail);
+        publishAfterCommit(group.getSessionId(), event);
+    }
+
+    private String memberDisplayName(ByaiSessionMember member) {
+        if (member.getMemName() != null && !member.getMemName().isBlank()) return member.getMemName();
+        if (MemObjType.USER.name().equals(member.getMemObjType()) && userService != null) {
+            Users user = userService.findById(member.getMemObjId());
+            if (user != null && user.getUserName() != null && !user.getUserName().isBlank()) return user.getUserName();
+        }
+        if (MemObjType.AGENT.name().equals(member.getMemObjType()) && resourceService != null) {
+            SsResource resource = resourceService.findById(member.getMemObjId());
+            if (resource != null && resource.getResourceName() != null && !resource.getResourceName().isBlank()) {
+                return resource.getResourceName();
             }
-        });
+        }
+        return String.valueOf(member.getMemObjId());
+    }
+
+    /** 事务提交前不发送成员或消息事件，避免回滚后前端出现不存在的历史。 */
+    private void publishAfterCommit(Long sessionId, JSONObject event) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    eventPublisher.publish(sessionId, event, null);
+                }
+            });
+        }
+        else {
+            eventPublisher.publish(sessionId, event, null);
+        }
     }
 
     @Transactional

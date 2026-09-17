@@ -297,6 +297,70 @@ class GroupChatSessionContextFileServiceTest {
         assertThatThrownBy(() -> prepare("owner", false)).isInstanceOf(ChatTurnPreparationException.class);
     }
 
+    @Test
+    void exportedFilesExcludeEventsAndEventRepliesIncludingEntireEventPages() throws Exception {
+        GroupChatContextResponse snapshot = new GroupChatContextResponse();
+        GroupChatContextResponse.Message ordinary = new GroupChatContextResponse.Message();
+        ordinary.setUsage(1);
+        ordinary.setMessageId("18");
+        ordinary.setContent("保留正文");
+        GroupChatContextResponse.ReplyReference reference = new GroupChatContextResponse.ReplyReference();
+        reference.setUsage(5);
+        reference.setContent("SECRET_EVENT_REFERENCE");
+        ordinary.setReplyTo(reference);
+        GroupChatContextResponse.Message event = new GroupChatContextResponse.Message();
+        event.setUsage(5);
+        event.setMessageId("19");
+        event.setContent("SECRET_GROUP_EVENT");
+        snapshot.setMessages(List.of(ordinary, event));
+        GroupChatContextResponse.Snapshot boundary = new GroupChatContextResponse.Snapshot();
+        boundary.setBeforeMessageId("20");
+        boundary.setLastIncludedMessageId("19");
+        snapshot.setSnapshot(boundary);
+        when(groupContext.load(request)).thenReturn(snapshot);
+        List<ByaiMessage> eventPage = LongStream.rangeClosed(1, 200).mapToObj(id -> {
+            ByaiMessage row = message(id);
+            row.setUsage(5);
+            row.setMessageContent("SECRET_TASK_EVENT");
+            return row;
+        }).toList();
+        when(messages.selectTaskHistoryPage(60L, 500L, 0L, 200)).thenReturn(eventPage);
+        when(messages.selectTaskHistoryPage(60L, 500L, 200L, 200)).thenReturn(List.of(message(201)));
+        List<ContextFile> files = prepare("system-events", true);
+        String group = body(files.get(0));
+        assertThat(group).contains("保留正文").doesNotContain("SECRET_", "SYSTEM_EVENT");
+        assertThat(new ObjectMapper().readTree(group).path("snapshot").path("lastIncludedMessageId").asText())
+            .isEqualTo("18");
+        assertThat(body(files.get(1))).contains("正文201").doesNotContain("SECRET_TASK_EVENT");
+        verify(messages).selectTaskHistoryPage(60L, 500L, 200L, 200);
+        assertThat(snapshot.getMessages()).hasSize(2);
+        snapshot.setMessages(List.of(event));
+        assertThat(new ObjectMapper().readTree(body(prepare("only-events", false).get(0))).path("messages"))
+            .isEmpty();
+    }
+
+    @Test
+    void timelineAndAgentQueriesFilterBeforePaginationWithMatchingCounts() throws Exception {
+        String resource = "com/iwhalecloud/byai/manager/mapper/message/ByaiMessageMapper.xml";
+        Configuration configuration = new Configuration();
+        try (InputStream input = getClass().getClassLoader().getResourceAsStream(resource)) {
+            new XMLMapperBuilder(input, configuration, resource, configuration.getSqlFragments()).parse();
+        }
+        for (String mode : List.of("Visible", "Timeline")) {
+            for (String operation : List.of("select", "count")) {
+                String sql = configuration.getMappedStatement(ByaiMessageMapper.class.getName() + "." + operation
+                    + mode + "BeforeMessageId").getBoundSql(Map.of("sessionId", 10L, "beforeMessageId", 20L,
+                        "limit", 2)).getSql().replaceAll("\\s+", " ");
+                assertThat(sql).contains("session_id = ?", "message_id < ?", "archived_at IS NULL",
+                    "message_content IS NOT NULL", "\"usage\" IN " + ("Timeline".equals(mode) ? "(1, 2, 5)" : "(1, 2)"));
+                if ("select".equals(operation)) {
+                    assertThat(sql).contains("ORDER BY create_time DESC, message_id DESC LIMIT ?");
+                    assertThat(sql.indexOf("\"usage\" IN")).isLessThan(sql.indexOf("LIMIT ?"));
+                }
+            }
+        }
+    }
+
     private List<ContextFile> prepare(String trace, boolean task) {
         if (task) {
             TaskHandoffHistory history = service.prepareTaskHandoffHistory("initiator", request, trace, 500L);

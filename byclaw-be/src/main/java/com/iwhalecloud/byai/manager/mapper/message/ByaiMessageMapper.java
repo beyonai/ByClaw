@@ -100,9 +100,14 @@ public interface ByaiMessageMapper extends BaseMapper<ByaiMessage> {
      */
     List<ByaiMessage> selectByQo(@Param("qo") MessageHotQo qo);
 
-    /**
-     * 查询严格早于当前用户消息的最近可见群聊消息，按时间倒序返回。
-     */
+    /** 用户会话时间线包括系统事件，Agent 查询仍使用独立的对话过滤。 */
+    List<ByaiMessage> selectTimelineBeforeMessageId(@Param("sessionId") Long sessionId,
+        @Param("beforeMessageId") Long beforeMessageId, @Param("limit") Integer limit);
+
+    Long countTimelineBeforeMessageId(@Param("sessionId") Long sessionId,
+        @Param("beforeMessageId") Long beforeMessageId);
+
+    /** 查询严格早于当前输入的对话消息，按时间倒序返回，供 Agent 上下文使用。 */
     List<ByaiMessage> selectVisibleBeforeMessageId(@Param("sessionId") Long sessionId,
         @Param("beforeMessageId") Long beforeMessageId, @Param("limit") Integer limit);
 

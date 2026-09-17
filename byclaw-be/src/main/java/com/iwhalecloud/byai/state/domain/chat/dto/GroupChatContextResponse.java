@@ -47,6 +47,11 @@ public class GroupChatContextResponse {
 
         private String kind;
 
+        /** 消息用途；5 为会话展示事件，不是模型指令。 */
+        private Integer usage;
+
+        private SystemEvent systemEvent;
+
         private String messageId;
 
         private Integer sequence;
@@ -71,6 +76,7 @@ public class GroupChatContextResponse {
 
     @Data
     public static class ReplyReference {
+        private Integer usage;
         private String messageId;
         private String content;
 
@@ -78,6 +84,17 @@ public class GroupChatContextResponse {
         private List<ResourceVo> resourceList = new ArrayList<>();
         private String role;
         private Speaker speaker;
+    }
+
+    /** 事件发生时的操作者和成员快照，ID 使用字符串避免精度丢失。 */
+    @Data
+    public static class SystemEvent {
+        private String eventType;
+        private String operatorId;
+        private String operatorName;
+        private String memberId;
+        private String memberType;
+        private String memberName;
     }
 
     @Data
@@ -112,6 +129,8 @@ public class GroupChatContextResponse {
         private String fileName;
 
         private String mediaType;
+
+        private String fileUrl;
 
         /** 云盘附件使用知识库 ID 和完整路径定位，fileId 可以为空。 */
         private String cloudResourceId;

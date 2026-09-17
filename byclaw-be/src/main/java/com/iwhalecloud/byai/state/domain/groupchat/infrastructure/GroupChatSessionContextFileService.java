@@ -182,12 +182,22 @@ public class GroupChatSessionContextFileService {
     private GroupChatContextResponse groupHistoryForExport(GroupChatContextRequest request) {
         GroupChatContextResponse snapshot = objectMapper.convertValue(Objects.requireNonNull(
             groupContextService.load(request), "Missing group snapshot"), GroupChatContextResponse.class);
+        // 查询层先过滤保证窗口完整；导出层防御性过滤，避免未来投影变化泄露事件。
+        snapshot.getMessages().removeIf(message -> Integer.valueOf(5).equals(message.getUsage()));
         for (GroupChatContextResponse.Message message : snapshot.getMessages()) {
             message.setContent(GroupChatMessagePreview.format(message.getContent(), message.getResourceList()));
             GroupChatContextResponse.ReplyReference reply = message.getReplyTo();
-            if (reply != null) {
+            if (reply != null && Integer.valueOf(5).equals(reply.getUsage())) {
+                message.setReplyTo(null);
+            }
+            else if (reply != null) {
                 reply.setContent(GroupChatMessagePreview.format(reply.getContent(), reply.getResourceList()));
             }
+        }
+        if (snapshot.getSnapshot() != null) {
+            List<GroupChatContextResponse.Message> exported = snapshot.getMessages();
+            snapshot.getSnapshot().setLastIncludedMessageId(exported.isEmpty() ? null
+                : exported.get(exported.size() - 1).getMessageId());
         }
         return snapshot;
     }
@@ -229,11 +239,13 @@ public class GroupChatSessionContextFileService {
             for (ByaiMessage message : page) {
                 if (message.getMessageId() == null || message.getMessageId() <= after
                     || message.getMessageId() >= boundary || !Objects.equals(sessionId, message.getSessionId())
-                    || !(Integer.valueOf(1).equals(message.getUsage()) || Integer.valueOf(2).equals(message.getUsage()))) {
+                    || !(Integer.valueOf(1).equals(message.getUsage()) || Integer.valueOf(2).equals(message.getUsage())
+                        || Integer.valueOf(5).equals(message.getUsage()))) {
                     throw new IOException("Invalid task history boundary or order");
                 }
                 after = message.getMessageId();
-                if (StringUtils.isBlank(message.getMessageContent())) {
+                // 被排除的事件仍推进游标，防止整页事件导致重复读取。
+                if (Integer.valueOf(5).equals(message.getUsage()) || StringUtils.isBlank(message.getMessageContent())) {
                     continue;
                 }
                 // 只投影正文和发言者字段，绝不序列化消息实体中的思考或工具内容。

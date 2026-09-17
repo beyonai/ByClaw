@@ -130,7 +130,7 @@ public class ByaiMessage {
     private Date updateTime;
 
     /**
-     * 使用次数（usage int4）
+     * 消息用途：1 用户消息，2 助手消息，5 系统事件消息（不进入 Agent 上下文）。
      */
     private Integer usage;
 
