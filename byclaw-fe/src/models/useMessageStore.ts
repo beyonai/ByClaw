@@ -349,8 +349,14 @@ export default {
 
       const oldMessageInfo = oldSessionListMap.get(sessionId);
       const oldMessageList = oldMessageInfo?.list || [];
-      const messageList =
+      const rawMessageList =
         typeof messageListUpdater === 'function' ? messageListUpdater(oldMessageList) : messageListUpdater;
+      // 消息回显乱序（issue #234）：增量写入路径（用户提问、SSE 分片、AgentTeams 多 lane 并发推送、
+      // 子会话投影）按「到达顺序」写入列表，而到达顺序不等于时间线顺序；历史加载路径
+      // （fetchMessage / getMoreSessionMessage）已用 sortMessagesByTimeline 归一。
+      // 这里在 store 这一唯一持有列表的边界补上同一不变量，保证刷新前/刷新后顺序一致，
+      // 渲染层无需再做二次排序。
+      const messageList = sortMessagesByTimeline(rawMessageList);
       // 复制一个新的 sessionListMap，避免React不更新的问题
       let newSessionListMap = action.silent ? oldSessionListMap : new Map(oldSessionListMap);
 
@@ -397,7 +403,9 @@ export default {
 
       sessionListMap.set(`${sessionId}`, {
         ...messageInfo,
-        list,
+        // 与 updateSessionMessageList 同一不变量：迟到的子会话投影必须落到它的时间线位置，
+        // 不能因为「后到达」而被追加到列表末尾（issue #234）。
+        list: sortMessagesByTimeline(list),
         total: messageInfo.total + (messageIndex >= 0 ? 0 : 1),
         childRun,
       });
