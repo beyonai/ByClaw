@@ -753,7 +753,7 @@ describe('PersonalEmailSettings provider-first flow', () => {
       checkRequest.resolve({ connectionState: 'READY', lastCheckTime: '2026-09-01T12:00:00+08:00' });
     });
     expect(await within(row).findByText('连接就绪')).toBeInTheDocument();
-    expect(within(row).getByText(/2026-09-01 12:00/)).toBeInTheDocument();
+    expect(await within(row).findByText(/2026-09-01 12:00/)).toBeInTheDocument();
   });
 
   it.each(['AUTH_REQUIRED', 'UNAVAILABLE'])(

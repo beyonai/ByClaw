@@ -58,6 +58,7 @@ import java.util.*;
 
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledOnOs;
 import org.junit.jupiter.api.condition.OS;
@@ -66,6 +67,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationContext;
+import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.context.support.StaticMessageSource;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.mock.web.MockMultipartFile;
@@ -82,6 +84,8 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class DatasetApplicationServiceTest {
 
+    private static final Locale TEST_LOCALE = new Locale("zh", "CN");
+
     @Mock
     private SsResourceService ssResourceService;
 
@@ -96,18 +100,18 @@ class DatasetApplicationServiceTest {
     @BeforeAll
     static void initI18n() {
         StaticMessageSource messageSource = new StaticMessageSource();
-        messageSource.addMessage("dataset.default.personal.delete.not.allowed", Locale.getDefault(),
+        messageSource.addMessage("dataset.default.personal.delete.not.allowed", TEST_LOCALE,
             "dataset.default.personal.delete.not.allowed");
-        messageSource.addMessage("dataset.metadata.search.resource.id.list.notempty", Locale.getDefault(),
+        messageSource.addMessage("dataset.metadata.search.resource.id.list.notempty", TEST_LOCALE,
             "Knowledge base resource identifier list cannot be empty");
-        messageSource.addMessage("dataset.metadata.search.resource.id.notnull", Locale.getDefault(),
+        messageSource.addMessage("dataset.metadata.search.resource.id.notnull", TEST_LOCALE,
             "Knowledge base resource identifier cannot be empty");
-        messageSource.addMessage("dataset.metadata.search.operation", Locale.getDefault(),
+        messageSource.addMessage("dataset.metadata.search.operation", TEST_LOCALE,
             "Search knowledge base file metadata");
-        messageSource.addMessage("dataset.pythonbuild.operation.failed", Locale.getDefault(), "{0} failed: {1}");
-        messageSource.addMessage("dataset.pythonbuild.operation.response.empty", Locale.getDefault(),
+        messageSource.addMessage("dataset.pythonbuild.operation.failed", TEST_LOCALE, "{0} failed: {1}");
+        messageSource.addMessage("dataset.pythonbuild.operation.response.empty", TEST_LOCALE,
             "{0} failed: knowledge base service returned an empty response");
-        messageSource.addMessage("user.permission.nopermission", Locale.getDefault(),
+        messageSource.addMessage("user.permission.nopermission", TEST_LOCALE,
             "No permission to manage this resource");
         ApplicationContext applicationContext = org.mockito.Mockito.mock(ApplicationContext.class);
         org.mockito.Mockito.when(applicationContext.getBean(org.springframework.context.MessageSource.class))
@@ -118,11 +122,17 @@ class DatasetApplicationServiceTest {
 
     @BeforeEach
     void setUp() {
+        LocaleContextHolder.setLocale(TEST_LOCALE);
         service = new DatasetApplicationService();
         ReflectionTestUtils.setField(service, "ssResourceService", ssResourceService);
         ReflectionTestUtils.setField(service, "authApplicationService", authApplicationService);
         ReflectionTestUtils.setField(service, "feignPythonBuildService", feignPythonBuildService);
         ReflectionTestUtils.setField(service, "datasetSystem", "");
+    }
+
+    @AfterEach
+    void tearDown() {
+        LocaleContextHolder.resetLocaleContext();
     }
 
     @Test

@@ -13,6 +13,8 @@ jobs:
   scan:
     if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
+    env:
+      TRIVY_OFFLINE_SCAN: "true"
     steps:
       - uses: actions/checkout@v6
 
@@ -28,7 +30,7 @@ jobs:
 
       - name: Upload to GitHub Security tab
         uses: github/codeql-action/upload-sarif@v4
-        if: always()
+        if: always() && hashFiles('trivy-results.sarif') != ''
         with:
           sarif_file: trivy-results.sarif
           category: trivy

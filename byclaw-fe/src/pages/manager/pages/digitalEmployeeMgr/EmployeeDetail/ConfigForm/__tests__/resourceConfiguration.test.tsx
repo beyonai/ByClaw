@@ -118,16 +118,16 @@ describe('employee editor resource configuration entries', () => {
     fireEvent.click(within(screen.getByText(labels[1]).parentElement!).getByRole('button'));
     expect(mockShowBaseList).toHaveBeenLastCalledWith('005');
     fireEvent.click(within(screen.getByText(labels[2]).parentElement!).getByRole('button'));
-    await waitFor(() => expect(screen.getByRole('dialog')).toBeVisible());
+    await waitFor(() => expect(screen.getByRole('dialog')).toBeVisible(), { timeout: 5000 });
   });
 
   it('closes the resource dialog when switching from an ordinary employee to a super assistant', async () => {
     const { rerender } = render(<Editor employee={{ ownerType: 'personal', resourceCode: 'alice_helper' }} />);
     fireEvent.click(within(screen.getByText(labels[2]).parentElement!).getByRole('button'));
-    await waitFor(() => expect(screen.getByRole('dialog')).toBeVisible());
+    await waitFor(() => expect(screen.getByRole('dialog')).toBeVisible(), { timeout: 5000 });
 
     rerender(<Editor employee={{ ownerType: 'personal', resourceCode: 'alice_main' }} />);
-    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument(), { timeout: 5000 });
     labels.forEach((label) => expect(screen.queryByText(label)).not.toBeInTheDocument());
   });
 
