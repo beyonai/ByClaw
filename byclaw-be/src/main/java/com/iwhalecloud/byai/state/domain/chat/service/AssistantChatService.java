@@ -16,6 +16,7 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -41,6 +42,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.stereotype.Service;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
@@ -638,38 +640,31 @@ public class AssistantChatService {
     }
 
     /**
-     * 总结会话内容，如果有异常，原来格式截取返回
+     * 使用 SUMMARY_CHAT_CONTENT 按当前请求 Locale 选择中英文模板；英文正文为空时回退中文。
+     * 无可用模板或生成失败时截取原文。
      *
      * @param chatContent 会话内容
      * @return 会话内容总结
      */
     private String summaryChatContent(String chatContent) {
 
-        AiPrompt aiPrompt = aiPromptService.findFirst("SUMMARY_CHAT_CONTENT");
-        if (aiPrompt == null) {
-            // 任务启动链路只需要截断会话标题，使用已有通用工具避免引入聊天基础设施类加载依赖。
-            return StringUtils.substring(chatContent.replaceAll("\\{\\{[^}]*+\\}\\}", ""), 0, 10);
-        }
-
-        String promptTemplate = aiPrompt.getPromptZhTemplate();
-
-
-        String language = CurrentUserHolder.getLanguage();
-        if (I18nUtil.ENGLISH.equalsIgnoreCase(language)) {
-            promptTemplate = aiPrompt.getPromptEnTemplate();
-        }
-
-        // 生成提示描述信息
-        String prompt = promptTemplate.replace("${chatContent}", chatContent);
         try {
-            String promptResult = aiService.generateText(prompt, aiPrompt.getModelCode());
-            // 还是要做超长处理
-            return StringUtils.substring(promptResult, 0, 255);
+            AiPrompt aiPrompt = aiPromptService.findFirst("SUMMARY_CHAT_CONTENT");
+            String promptTemplate = aiPrompt == null ? null : aiPrompt.getPromptZhTemplate();
+            if (aiPrompt != null
+                && Locale.ENGLISH.getLanguage().equalsIgnoreCase(LocaleContextHolder.getLocale().getLanguage())
+                && StringUtils.isNotBlank(aiPrompt.getPromptEnTemplate())) {
+                promptTemplate = aiPrompt.getPromptEnTemplate();
+            }
+            if (StringUtils.isNotBlank(promptTemplate)) {
+                String prompt = promptTemplate.replace("${chatContent}", chatContent);
+                String promptResult = aiService.generateText(prompt, aiPrompt.getModelCode());
+                return StringUtils.substring(promptResult, 0, 255);
+            }
         } catch (Exception e) {
             logger.error(e.getMessage(), e);
-            // 兜底策略
-            return StringUtils.substring(chatContent.replaceAll("\\{\\{[^}]*+\\}\\}", ""), 0, 10);
         }
+        return StringUtils.substring(chatContent.replaceAll("\\{\\{[^}]*+\\}\\}", ""), 0, 10);
     }
 
     /**
