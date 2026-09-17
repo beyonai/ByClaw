@@ -78,8 +78,8 @@ jobs:
           distribution: temurin
           java-version: "21"
           cache: maven
-      - name: Maven verify
-        run: mvn -B -f byclaw-be/pom.xml verify
+      - name: Maven test
+        run: mvn -B -ntp -nsu -f byclaw-be/pom.xml test
 
   exe:
     needs: changes

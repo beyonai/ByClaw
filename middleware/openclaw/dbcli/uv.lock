@@ -25,12 +25,12 @@ postgres = [
 
 [package.metadata]
 requires-dist = [
-    { name = "oracledb", marker = "extra == 'all'", specifier = ">=2,<4" },
-    { name = "oracledb", marker = "extra == 'oracle'", specifier = ">=2,<4" },
-    { name = "psycopg", extras = ["binary"], marker = "extra == 'all'", specifier = ">=3.1,<4" },
-    { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3.1,<4" },
-    { name = "pymysql", marker = "extra == 'all'", specifier = ">=1.1,<2" },
-    { name = "pymysql", marker = "extra == 'mysql'", specifier = ">=1.1,<2" },
+    { name = "oracledb", marker = "extra == 'all'", specifier = "==3.4.2" },
+    { name = "oracledb", marker = "extra == 'oracle'", specifier = "==3.4.2" },
+    { name = "psycopg", extras = ["binary"], marker = "extra == 'all'", specifier = "==3.3.5" },
+    { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = "==3.3.5" },
+    { name = "pymysql", marker = "extra == 'all'", specifier = "==1.2.0" },
+    { name = "pymysql", marker = "extra == 'mysql'", specifier = "==1.2.0" },
 ]
 provides-extras = ["postgres", "mysql", "oracle", "all"]
 

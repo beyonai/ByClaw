@@ -45,9 +45,9 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "httpx", specifier = ">=0.27,<1" },
-    { name = "jsonschema", specifier = ">=4.20,<5" },
-    { name = "redis", specifier = ">=5,<7" },
+    { name = "httpx", specifier = "==0.28.1" },
+    { name = "jsonschema", specifier = "==4.26.0" },
+    { name = "redis", specifier = "==6.4.0" },
 ]
 
 [[package]]

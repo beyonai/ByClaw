@@ -8,9 +8,9 @@ version = "0.1.0"
 description = "Service-discovered capability runtime for ByClaw skills"
 requires-python = ">=3.11"
 dependencies = [
-  "httpx>=0.27,<1",
-  "jsonschema>=4.20,<5",
-  "redis>=5,<7",
+  "httpx==0.28.1",
+  "jsonschema==4.26.0",
+  "redis==6.4.0",
 ]
 
 [project.scripts]
