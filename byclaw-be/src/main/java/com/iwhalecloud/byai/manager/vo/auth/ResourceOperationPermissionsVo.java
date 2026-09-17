@@ -78,11 +78,6 @@ public class ResourceOperationPermissionsVo {
     private boolean useApplyPending;
 
     /**
-     * 是否可审核使用申请。
-     */
-    private boolean canAuditUse;
-
-    /**
      * 是否可设为默认（仅数字员工类型有意义，其他业务类型为 false）。
      */
     private boolean canSetDefault;

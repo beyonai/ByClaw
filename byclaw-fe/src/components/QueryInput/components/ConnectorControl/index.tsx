@@ -20,7 +20,7 @@ import dayjs from 'dayjs';
 import customParseFormat from 'dayjs/plugin/customParseFormat';
 import timezone from 'dayjs/plugin/timezone';
 import utc from 'dayjs/plugin/utc';
-import { useIntl, useSelector } from '@umijs/max';
+import { getIntl, useIntl, useSelector } from '@umijs/max';
 
 import AntdIcon from '@/components/AntdIcon';
 import { OVERLAY_DRAWER_WIDTH } from '@/components/MainDrawer/constants';
@@ -277,25 +277,29 @@ const hasValidCredentialForm = (
   });
 };
 
-const imaCredentialErrorMessages: Record<string, string> = {
-  CONNECTOR_CREDENTIAL_INVALID: 'Client ID 或 API Key 无效或不匹配，请确认使用同一组最新凭据',
-  IMA_RATE_LIMITED: 'IMA 接口请求过于频繁，请稍后再试',
-  IMA_PERMISSION_DENIED: '当前 IMA 账号没有所需的笔记接口权限，请在 IMA 中确认开放接口权限',
-  IMA_SERVICE_UNAVAILABLE: '暂时无法连接 IMA 服务，请检查后端网络后重试',
-  CONNECTOR_VERIFICATION_TIMEOUT: '连接 IMA 超时，请检查后端网络或稍后重试',
-  CONNECTOR_CLI_UNAVAILABLE: 'IMA 验证组件不可用，请联系管理员检查后端部署',
-  PROVIDER_PROTOCOL_ERROR: 'IMA 验证组件版本不兼容，请联系管理员升级后端',
-  CONNECTOR_VERIFICATION_BUSY: 'IMA 凭据正在验证中，请稍候再试',
-  SESSION_ALREADY_ACTIVE: 'IMA 凭据正在验证中，请稍候再试',
-  AUTH_BINDING_FAILED: '凭据验证通过，但保存连接失败，请稍后重试',
-  CONNECTOR_MANIFEST_INVALID: 'IMA 连接器配置异常，请联系管理员',
-  PROVIDER_NOT_CONFIGURED: 'IMA 连接器尚未配置完整，请联系管理员',
-  CONNECTOR_VERIFICATION_FAILED: 'IMA 验证未通过，请稍后重试；如持续失败请联系管理员',
-};
+// 延迟翻译，避免模块加载时固定语言。
+const getImaCredentialErrorMessages = (): Record<string, string> => ({
+  CONNECTOR_CREDENTIAL_INVALID: getIntl().formatMessage({ id: 'ui.connector.invalidCredentials' }),
+  IMA_RATE_LIMITED: getIntl().formatMessage({ id: 'ui.connector.rateLimited' }),
+  IMA_PERMISSION_DENIED: getIntl().formatMessage({ id: 'ui.connector.permissionDenied' }),
+  IMA_SERVICE_UNAVAILABLE: getIntl().formatMessage({ id: 'ui.connector.unavailable' }),
+  CONNECTOR_VERIFICATION_TIMEOUT: getIntl().formatMessage({ id: 'ui.connector.timeout' }),
+  CONNECTOR_CLI_UNAVAILABLE: getIntl().formatMessage({ id: 'ui.connector.cliUnavailable' }),
+  PROVIDER_PROTOCOL_ERROR: getIntl().formatMessage({ id: 'ui.connector.protocolError' }),
+  CONNECTOR_VERIFICATION_BUSY: getIntl().formatMessage({ id: 'ui.connector.busy' }),
+  SESSION_ALREADY_ACTIVE: getIntl().formatMessage({ id: 'ui.connector.busy' }),
+  AUTH_BINDING_FAILED: getIntl().formatMessage({ id: 'ui.connector.bindingFailed' }),
+  CONNECTOR_MANIFEST_INVALID: getIntl().formatMessage({ id: 'ui.connector.invalidManifest' }),
+  PROVIDER_NOT_CONFIGURED: getIntl().formatMessage({ id: 'ui.connector.notConfigured' }),
+  CONNECTOR_VERIFICATION_FAILED: getIntl().formatMessage({ id: 'ui.connector.verificationFailed' }),
+});
 
 export const getCredentialAuthorizationError = (connector: Connector, errorCode?: string) => {
   if (connector.code === 'ima-openapi') {
-    return (errorCode && imaCredentialErrorMessages[errorCode]) || 'IMA 凭据验证失败，请检查后重试';
+    return (
+      (errorCode && getImaCredentialErrorMessages()[errorCode]) ||
+      getIntl().formatMessage({ id: 'ui.connector.credentialsFailed' })
+    );
   }
   if (connector.code === 'weixin-official-api') {
     if (errorCode === 'CONNECTOR_CREDENTIAL_INVALID') {
@@ -316,7 +320,7 @@ const ConnectorIcon = ({ connector }: { connector: Connector }) => (
   <span className={styles.connectorIcon}>{connector.icon}</span>
 );
 
-const ConnectorSelection = ({
+export const ConnectorSelection = ({
   value,
   onOpen,
   interactive = true,
@@ -325,6 +329,9 @@ const ConnectorSelection = ({
   onOpen?: () => void;
   interactive?: boolean;
 }) => {
+  // 提示与无障碍标签使用当前语言，切换语言时同步更新。
+  const intl = useIntl();
+  const viewLabel = intl.formatMessage({ id: 'connector.view' });
   if (!value.length) return null;
 
   // 工具栏空间有限，最多回显三个官方图标，其余连接器用数量汇总。
@@ -342,13 +349,16 @@ const ConnectorSelection = ({
   );
 
   return (
-    <Tooltip title={interactive ? '查看连接器' : undefined}>
+    <Tooltip title={interactive ? viewLabel : undefined}>
       {interactive ? (
-        <button className={styles.selection} type="button" aria-label="查看连接器" onClick={onOpen}>
+        <button className={styles.selection} type="button" aria-label={viewLabel} onClick={onOpen}>
           {avatarGroup}
         </button>
       ) : (
-        <span className={classNames(styles.selection, styles.selectionStatic)} aria-label="已连接连接器">
+        <span
+          className={classNames(styles.selection, styles.selectionStatic)}
+          aria-label={intl.formatMessage({ id: 'connector.connected' })}
+        >
           {avatarGroup}
         </span>
       )}
@@ -846,7 +856,7 @@ const ConnectorControl = ({
         // 不展示后端原始错误，避免错误内容意外回显用户提交的凭据。
         const requestFailureMessage =
           authorizingConnector.code === 'ima-openapi'
-            ? 'IMA 凭据验证失败，请检查网络后重试'
+            ? intl.formatMessage({ id: 'ui.connector.networkFailed' })
             : getCredentialAuthorizationError(authorizingConnector);
         message.error(requestFailureMessage);
       }

@@ -17,7 +17,7 @@ import AntdIcon from '@/components/AntdIcon';
 import useModuleEvent from '@/hooks/useModuleEvent';
 import CommonTabs from '@/components/CommonTabs';
 import { getRuntimeActualUrl } from '@/utils';
-import { getTopLevelCatalogs, normalizeCatalogTree } from '@/utils/catalog';
+import { getLocalizedCatalogName, getTopLevelCatalogs, normalizeCatalogTree } from '@/utils/catalog';
 import { queryCatalogTree, updateResource } from '@/service/digitalEmployees';
 import { queryKnowledgeCapability, type KnowledgeCapability } from '@/service/knowledgeCenter';
 import {
@@ -68,7 +68,6 @@ interface IResourceItem {
   canManageAuth?: boolean;
   canDelete?: boolean;
   canApplyUse?: boolean;
-  canAuditUse?: boolean;
   skillType?: string;
   sourceType?: string;
   version?: string;
@@ -468,10 +467,7 @@ const Resources: React.FC<Props> = ({ resourceType, installedOnly = false, onIns
           message.error(intl.formatMessage({ id: 'digitalEmployees.noPermission' }));
           return;
         }
-        if (item.canViewDetail !== true) {
-          message.error(intl.formatMessage({ id: 'digitalEmployees.noPermission' }));
-          return;
-        }
+        // 列表权限可能缺失或已过期，进入详情后由后端校验实际的使用/管理权限。
         const params = new URLSearchParams();
         if (resourceId) {
           params.set('resourceId', resourceId);
@@ -862,7 +858,7 @@ const Resources: React.FC<Props> = ({ resourceType, installedOnly = false, onIns
                 items={[
                   { label: intl.formatMessage({ id: 'digitalEmployees.skillSquare.allCategory' }), key: '' },
                   ...topLevelCatalogList.map((item) => ({
-                    label: item.catalogName,
+                    label: getLocalizedCatalogName(item, intl.locale),
                     key: `${item?.catalogId}`,
                   })),
                 ]}

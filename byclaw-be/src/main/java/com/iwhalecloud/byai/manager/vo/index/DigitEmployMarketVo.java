@@ -210,11 +210,6 @@ public class DigitEmployMarketVo {
     private Boolean canApplyUse;
 
     /**
-     * 是否可审核使用申请
-     */
-    private Boolean canAuditUse;
-
-    /**
      * 资源标签：数字员工创建/设默认时按个人/默认助理写入；
      * 前端 ResourceCard 直接展示在卡片右上角。
      */

@@ -21,7 +21,7 @@ import {
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
 // @ts-ignore
-import { useIntl } from '@umijs/max';
+import { getIntl, useIntl } from '@umijs/max';
 
 import {
   checkPersonalEmailConnection,
@@ -46,15 +46,17 @@ import styles from './index.module.less';
 
 const { Text } = Typography;
 
-const PROVIDER_NAMES: Record<string, string> = {
+// 延迟翻译，避免模块加载时固定语言。
+const getProviderNames = (): Record<string, string> => ({
   gmail: 'Gmail',
   fastmail: 'Fastmail',
-  qq: 'QQ邮箱',
-  'netease-163': '网易163邮箱',
-  'aliyun-mail': '阿里邮箱',
+  qq: getIntl().formatMessage({ id: 'ui.email.qq' }),
+  'netease-163': getIntl().formatMessage({ id: 'ui.email.netease' }),
+  'aliyun-mail': getIntl().formatMessage({ id: 'ui.email.aliyun' }),
   'microsoft-365': 'Outlook / Microsoft 365',
-  'custom-imap': '自定义 IMAP',
-};
+  iwhalecloud: 'iWhaleCloud',
+  'custom-imap': getIntl().formatMessage({ id: 'ui.email.customImap' }),
+});
 
 const DOMAIN_PROVIDERS: Record<string, string> = {
   'gmail.com': 'gmail',
@@ -67,28 +69,39 @@ const DOMAIN_PROVIDERS: Record<string, string> = {
   'live.com': 'microsoft-365',
 };
 
-const CAPABILITY_NAMES: Record<MailCapability, string> = {
-  list: '收取列表',
-  get: '读取邮件',
-  search: '搜索',
-  downloadAttachment: '下载附件',
-  send: '发送',
-  reply: '回复',
-  delete: '删除',
-};
+// 延迟翻译，避免模块加载时固定语言。
+const getCapabilityNames = (): Record<MailCapability, string> => ({
+  list: getIntl().formatMessage({ id: 'ui.email.list' }),
+  get: getIntl().formatMessage({ id: 'ui.email.read' }),
+  search: getIntl().formatMessage({ id: 'ui.email.search' }),
+  downloadAttachment: getIntl().formatMessage({ id: 'ui.email.downloadAttachment' }),
+  send: getIntl().formatMessage({ id: 'ui.email.send' }),
+  reply: getIntl().formatMessage({ id: 'ui.email.reply' }),
+  delete: getIntl().formatMessage({ id: 'ui.email.delete' }),
+});
 
-const CANONICAL_CAPABILITIES = Object.keys(CAPABILITY_NAMES) as MailCapability[];
+const CANONICAL_CAPABILITIES = [
+  'list',
+  'get',
+  'search',
+  'downloadAttachment',
+  'send',
+  'reply',
+  'delete',
+] as MailCapability[];
 
-const REQUIREMENT_TEXT: Record<string, string> = {
-  AUTHORIZE_OAUTH2: '使用服务商账号完成授权',
-  CREATE_API_TOKEN: '在 Fastmail 设置中创建 API Token',
-  ENABLE_IMAP_SMTP: '先在邮箱设置中开启 IMAP/SMTP 服务',
-  USE_AUTHORIZATION_CODE: '使用邮箱生成的授权码，不要使用登录密码',
-  ADMIN_ENABLE_THIRD_PARTY_CLIENT: '请管理员开启第三方客户端访问',
-  USE_SECURITY_PASSWORD: '使用阿里邮箱安全密码',
-  PROVIDE_IMAP_SMTP_SETTINGS: '填写 IMAP/SMTP 服务器设置',
-  USE_APP_PASSWORD: '建议使用应用专用密码',
-};
+// 延迟翻译，避免模块加载时固定语言。
+const getRequirementText = (): Record<string, string> => ({
+  AUTHORIZE_OAUTH2: getIntl().formatMessage({ id: 'ui.email.authorize' }),
+  CREATE_API_TOKEN: getIntl().formatMessage({ id: 'ui.email.createToken' }),
+  ENABLE_IMAP_SMTP: getIntl().formatMessage({ id: 'ui.email.enableImap' }),
+  USE_AUTHORIZATION_CODE: getIntl().formatMessage({ id: 'ui.email.useAuthorizationCode' }),
+  ADMIN_ENABLE_THIRD_PARTY_CLIENT: getIntl().formatMessage({ id: 'ui.email.adminEnable' }),
+  USE_SECURITY_PASSWORD: getIntl().formatMessage({ id: 'ui.email.securityPassword' }),
+  SIGN_IN_WITH_BROWSER_OR_CONFIGURE_EWS: getIntl().formatMessage({ id: 'ui.email.browserOrEws' }),
+  PROVIDE_IMAP_SMTP_SETTINGS: getIntl().formatMessage({ id: 'ui.email.serverSettings' }),
+  USE_APP_PASSWORD: getIntl().formatMessage({ id: 'ui.email.appPassword' }),
+});
 
 const encryptionOptions = [
   { label: 'TLS', value: 'tls' },
@@ -159,19 +172,25 @@ interface OAuthFlowContext {
 }
 
 const getProviderName = (provider?: Pick<MailProvider, 'code' | 'name'>) =>
-  provider ? PROVIDER_NAMES[provider.code] || provider.name : '未知服务商';
+  provider
+    ? getProviderNames()[provider.code] || provider.name
+    : getIntl().formatMessage({ id: 'ui.email.unknownProvider' });
 
 const getProviderCodeName = (code?: string) => {
-  if (!code) return '未知服务商';
-  if (PROVIDER_NAMES[code]) return PROVIDER_NAMES[code];
-  return /^[a-z0-9][a-z0-9._-]{0,63}$/i.test(code) ? code : '未知服务商';
+  if (!code) return getIntl().formatMessage({ id: 'ui.email.unknownProvider' });
+  if (getProviderNames()[code]) return getProviderNames()[code];
+  return /^[a-z0-9][a-z0-9._-]{0,63}$/i.test(code) ? code : getIntl().formatMessage({ id: 'ui.email.unknownProvider' });
 };
 
 const capabilityText = (capability: MailCapability, status?: MailCapabilityStatus) => {
-  const name = CAPABILITY_NAMES[capability];
-  if (status === 'NO') return `${name}（不支持）`;
-  if (status === 'CONDITIONAL_MOVE_OR_UIDPLUS') return `${name}（需要服务器支持 MOVE 或 UIDPLUS）`;
-  if (status?.startsWith('CONDITIONAL_')) return `${name}（需满足服务商条件）`;
+  const name = getCapabilityNames()[capability];
+  if (status === 'NO') return getIntl().formatMessage({ id: 'ui.email.unsupported' }, { v0: name });
+  if (status === 'CONDITIONAL_MOVE_OR_UIDPLUS')
+    return getIntl().formatMessage({ id: 'ui.email.moveRequired' }, { v0: name });
+  if (status === 'CONDITIONAL_EWS_ENTERPRISE_AUTH_OR_BROWSER_SSO') {
+    return getIntl().formatMessage({ id: 'ui.email.ewsRequired' }, { v0: name });
+  }
+  if (status?.startsWith('CONDITIONAL_')) return getIntl().formatMessage({ id: 'ui.email.conditional' }, { v0: name });
   return name;
 };
 
@@ -182,13 +201,15 @@ const capabilityStatus = (
 ) => statuses[capability] || (capabilities.includes(capability) ? 'YES' : 'NO');
 
 const connectionText = (account: PersonalEmailAccount) => {
-  if (account.connectionState === 'READY') return '连接就绪';
-  if (account.connectionState === 'CHECKING') return '正在检查';
+  if (account.connectionState === 'READY') return getIntl().formatMessage({ id: 'ui.email.ready' });
+  if (account.connectionState === 'CHECKING') return getIntl().formatMessage({ id: 'ui.email.checking' });
   if (account.connectionState === 'FAILED') {
-    return account.status === 'AUTH_REQUIRED' ? '连接失败：需要重新授权' : '连接失败：请检查设置';
+    return account.status === 'AUTH_REQUIRED'
+      ? getIntl().formatMessage({ id: 'ui.email.reauthorize' })
+      : getIntl().formatMessage({ id: 'ui.email.checkSettings' });
   }
-  if (account.status === 'AUTH_REQUIRED') return '等待授权';
-  return '尚未检查';
+  if (account.status === 'AUTH_REQUIRED') return getIntl().formatMessage({ id: 'ui.email.awaitingAuthorization' });
+  return getIntl().formatMessage({ id: 'ui.email.unchecked' });
 };
 
 const PersonalEmailSettings: React.FC = () => {
@@ -229,6 +250,7 @@ const PersonalEmailSettings: React.FC = () => {
   const selectedProvider = providers.find((provider) => provider.code === selectedProviderCode);
   const isCustom = selectedProvider?.code === 'custom-imap';
   const isOAuth = selectedProvider?.authType === 'OAUTH2';
+  const isIWhaleCloud = selectedProvider?.code === 'iwhalecloud';
   const selectedAuthType = Form.useWatch('authType', form) || selectedProvider?.authType;
 
   const loadAccounts = async () => {
@@ -243,7 +265,7 @@ const PersonalEmailSettings: React.FC = () => {
     } catch {
       if (!mountedRef.current || generation !== accountLoadGenerationRef.current) return;
       if (!accountsAuthoritativeRef.current) setAccountsLoadState('error');
-      message.error('邮箱账号加载失败，请稍后重试');
+      message.error(intl.formatMessage({ id: 'ui.email.loadFailed' }));
     } finally {
       if (mountedRef.current && generation === accountLoadGenerationRef.current) setLoading(false);
     }
@@ -439,7 +461,7 @@ const PersonalEmailSettings: React.FC = () => {
       await loadAccounts();
     } catch {
       if (mountedRef.current && (!context || isOAuthContextCurrent(context))) {
-        message.error('邮箱账号保存失败，请检查设置后重试');
+        message.error(intl.formatMessage({ id: 'ui.email.saveFailed' }));
       }
     } finally {
       if (mountedRef.current && (!context || isOAuthContextCurrent(context))) setSaving(false);
@@ -479,7 +501,7 @@ const PersonalEmailSettings: React.FC = () => {
       const connectors = await queryAllConnectors(provider.connectorCode);
       if (!isOAuthContextCurrent(context)) return;
       const matchingConnectors = connectors.filter((item) => item.connectorCode === provider.connectorCode);
-      if (matchingConnectors.length !== 1) throw new Error('邮箱连接器配置不唯一');
+      if (matchingConnectors.length !== 1) throw new Error(intl.formatMessage({ id: 'ui.email.ambiguousConnector' }));
       const [connector] = matchingConnectors;
       context.connectorId = connector.connectorId;
       const nextAuthorization = await startConnectorAuthorization({
@@ -499,18 +521,19 @@ const PersonalEmailSettings: React.FC = () => {
         return;
       }
       if (nextAuthorization.status !== 'pending') {
-        message.error('授权未完成，请重新发起');
+        message.error(intl.formatMessage({ id: 'ui.email.authorizationIncomplete' }));
         return;
       }
       const url = safeAuthorizationUrl(provider.code, nextAuthorization.authorizationUrl);
       if (!url) {
-        message.error('授权地址校验失败，请重新发起');
+        message.error(intl.formatMessage({ id: 'ui.email.invalidAuthorizationUrl' }));
         invalidateOAuthFlow();
         return;
       }
       window.open(url, '_blank', 'noopener,noreferrer');
     } catch {
-      if (isOAuthContextCurrent(context)) message.error('发起授权失败，请确认连接器可用后重试');
+      if (isOAuthContextCurrent(context))
+        message.error(intl.formatMessage({ id: 'ui.email.startAuthorizationFailed' }));
     } finally {
       if (isOAuthContextCurrent(context)) {
         oauthRequestPendingRef.current = false;
@@ -556,10 +579,11 @@ const PersonalEmailSettings: React.FC = () => {
         }
         if (isOAuthContextCurrent(context)) await saveValues(values, context);
       } else if (current.status !== 'pending') {
-        message.error('授权未完成，请重新发起');
+        message.error(intl.formatMessage({ id: 'ui.email.authorizationIncomplete' }));
       }
     } catch {
-      if (isOAuthContextCurrent(context)) message.error('授权状态检查失败，请稍后重试');
+      if (isOAuthContextCurrent(context))
+        message.error(intl.formatMessage({ id: 'ui.email.authorizationCheckFailed' }));
     } finally {
       if (isOAuthContextCurrent(context)) {
         authorizationStatusPendingRef.current = false;
@@ -584,7 +608,7 @@ const PersonalEmailSettings: React.FC = () => {
       message.success(intl.formatMessage({ id: successMessageId }));
       await loadAccounts();
     } catch {
-      if (mountedRef.current) message.error('邮箱账号操作失败，请稍后重试');
+      if (mountedRef.current) message.error(intl.formatMessage({ id: 'ui.email.operationFailed' }));
     } finally {
       mutationPendingRef.current.delete(accountKey);
       if (mountedRef.current) setMutatingAccountIds(new Set(mutationPendingRef.current));
@@ -632,7 +656,7 @@ const PersonalEmailSettings: React.FC = () => {
       setAccounts((items) =>
         items.map((item) => (item.accountId === record.accountId ? { ...item, connectionState: 'FAILED' } : item))
       );
-      message.error('连接检查失败，请检查账号设置');
+      message.error(intl.formatMessage({ id: 'ui.email.connectionCheckFailed' }));
     } finally {
       if (connectionGenerationRef.current.get(accountKey) === generation) {
         connectionPendingRef.current.delete(accountKey);
@@ -698,8 +722,11 @@ const PersonalEmailSettings: React.FC = () => {
             <Text type={record.connectionState === 'FAILED' ? 'danger' : undefined}>{connectionText(record)}</Text>
             <Text type="secondary">
               {record.lastCheckTime
-                ? `上次检查：${dayjs(record.lastCheckTime).format('YYYY-MM-DD HH:mm')}`
-                : '尚无检查记录'}
+                ? intl.formatMessage(
+                  { id: 'ui.email.lastChecked' },
+                  { v0: dayjs(record.lastCheckTime).format('YYYY-MM-DD HH:mm') }
+                )
+                : intl.formatMessage({ id: 'ui.email.noChecks' })}
             </Text>
             <Button
               type="link"
@@ -761,10 +788,18 @@ const PersonalEmailSettings: React.FC = () => {
   );
 
   const providerOptions = providers.map((provider) => ({ label: getProviderName(provider), value: provider.code }));
-  const secretLabel = selectedProvider?.authType === 'API_TOKEN' ? 'API Token' : '授权码或应用密码';
+  const secretLabel =
+    selectedProvider?.authType === 'API_TOKEN' ? 'API Token' : intl.formatMessage({ id: 'ui.email.secretLabel' });
   const requiresSecret =
     selectedAuthType === 'APP_PASSWORD' || selectedAuthType === 'API_TOKEN' || selectedAuthType === 'NTLM';
   const hasExistingSecret = editingAccount?.hasAuthCode && editingAccount.providerCode === selectedProvider?.code;
+  const enterpriseAuthOptions = [{ label: intl.formatMessage({ id: 'ui.email.browserSignIn' }), value: 'BROWSER_SSO' }];
+  if (advancedOpen) {
+    enterpriseAuthOptions.push(
+      { label: intl.formatMessage({ id: 'ui.email.ntlm' }), value: 'NTLM' },
+      { label: intl.formatMessage({ id: 'ui.email.kerberos' }), value: 'KERBEROS' }
+    );
+  }
 
   return (
     <div className={styles.emailSettings}>
@@ -816,7 +851,11 @@ const PersonalEmailSettings: React.FC = () => {
         destroyOnHidden
       >
         {providersLoading ? (
-          <div className={styles.catalogState} role="status" aria-label="正在加载邮箱服务商">
+          <div
+            className={styles.catalogState}
+            role="status"
+            aria-label={intl.formatMessage({ id: 'ui.email.loadingProviders' })}
+          >
             <Spin />
           </div>
         ) : providersError ? (
@@ -824,17 +863,23 @@ const PersonalEmailSettings: React.FC = () => {
             type="error"
             showIcon
             message={intl.formatMessage({ id: 'settings.email.providerLoadFailed' })}
-            action={<Button onClick={() => void loadProviders()}>重试</Button>}
+            action={
+              <Button onClick={() => void loadProviders()}> {intl.formatMessage({ id: 'ui.email.retry' })} </Button>
+            }
           />
         ) : providers.length === 0 ? (
           <Empty description={intl.formatMessage({ id: 'settings.email.noProviders' })} />
         ) : (
           <Form form={form} layout="vertical" preserve={false}>
-            <Form.Item label="邮箱服务商" name="providerCode" rules={[{ required: true, message: '请选择邮箱服务商' }]}>
+            <Form.Item
+              label={intl.formatMessage({ id: 'ui.email.provider' })}
+              name="providerCode"
+              rules={[{ required: true, message: intl.formatMessage({ id: 'ui.email.providerRequired' }) }]}
+            >
               <Select
                 options={providerOptions}
                 onChange={(value) => handleProviderChange(value)}
-                placeholder="选择邮箱服务商"
+                placeholder={intl.formatMessage({ id: 'ui.email.selectProvider' })}
               />
             </Form.Item>
             <div className={styles.formGrid}>
@@ -853,15 +898,21 @@ const PersonalEmailSettings: React.FC = () => {
                 name="name"
                 rules={[{ required: true, message: intl.formatMessage({ id: 'settings.email.accountNameRequired' }) }]}
               >
-                <Input placeholder="工作邮箱" />
+                <Input placeholder={intl.formatMessage({ id: 'ui.email.workEmail' })} />
               </Form.Item>
               <Form.Item label={intl.formatMessage({ id: 'settings.email.displayName' })} name="displayName">
-                <Input placeholder="发件人名称" />
+                <Input placeholder={intl.formatMessage({ id: 'ui.email.senderName' })} />
               </Form.Item>
             </div>
 
             {selectedProvider ? (
-              <section className={styles.providerDetails} aria-label={`${getProviderName(selectedProvider)}设置`}>
+              <section
+                className={styles.providerDetails}
+                aria-label={intl.formatMessage(
+                  { id: 'ui.email.providerSettings' },
+                  { v0: getProviderName(selectedProvider) }
+                )}
+              >
                 <div className={styles.providerHeading}>
                   <div>
                     <Text strong>{getProviderName(selectedProvider)}</Text>
@@ -869,7 +920,8 @@ const PersonalEmailSettings: React.FC = () => {
                   </div>
                   {!isCustom ? (
                     <Button type="link" onClick={() => setAdvancedOpen((open) => !open)}>
-                      高级设置
+                      {' '}
+                      {intl.formatMessage({ id: 'ui.email.advanced' })}{' '}
                     </Button>
                   ) : null}
                 </div>
@@ -877,13 +929,13 @@ const PersonalEmailSettings: React.FC = () => {
                   <Alert
                     type="info"
                     showIcon
-                    message="设置提示"
+                    message={intl.formatMessage({ id: 'ui.email.settingsTips' })}
                     description={selectedProvider.setupRequirements.map((requirement) => (
-                      <div key={requirement}>{REQUIREMENT_TEXT[requirement] || requirement}</div>
+                      <div key={requirement}>{getRequirementText()[requirement] || requirement}</div>
                     ))}
                   />
                 ) : null}
-                <div className={styles.capabilities} aria-label="邮箱能力">
+                <div className={styles.capabilities} aria-label={intl.formatMessage({ id: 'ui.email.capabilities' })}>
                   {CANONICAL_CAPABILITIES.map((capability) => {
                     const status = capabilityStatus(
                       capability,
@@ -894,26 +946,39 @@ const PersonalEmailSettings: React.FC = () => {
                   })}
                 </div>
 
+                {isIWhaleCloud ? (
+                  <>
+                    <Alert type="warning" showIcon message={intl.formatMessage({ id: 'ui.email.browserDefault' })} />
+                    <Form.Item label={intl.formatMessage({ id: 'ui.email.enterpriseAuth' })} name="authType">
+                      <Select options={enterpriseAuthOptions} />
+                    </Form.Item>
+                  </>
+                ) : null}
+
                 {isCustom ? (
                   <>
                     <div className={styles.serverSection}>
                       <h3>IMAP</h3>
                       <div className={styles.serverGrid}>
                         <Form.Item
-                          label="IMAP服务器"
+                          label={intl.formatMessage({ id: 'ui.email.imapServer' })}
                           name={['imap', 'host']}
-                          rules={[{ required: true, message: '请输入 IMAP 服务器' }]}
+                          rules={[{ required: true, message: intl.formatMessage({ id: 'ui.email.imapRequired' }) }]}
                         >
                           <Input placeholder="imap.example.com" />
                         </Form.Item>
                         <Form.Item
-                          label="IMAP端口"
+                          label={intl.formatMessage({ id: 'ui.email.imapPort' })}
                           name={['imap', 'port']}
-                          rules={[{ required: true, message: '请输入端口' }]}
+                          rules={[{ required: true, message: intl.formatMessage({ id: 'ui.email.portRequired' }) }]}
                         >
                           <InputNumber min={1} max={65535} />
                         </Form.Item>
-                        <Form.Item label="IMAP加密" name={['imap', 'encryption']} rules={[{ required: true }]}>
+                        <Form.Item
+                          label={intl.formatMessage({ id: 'ui.email.imapEncryption' })}
+                          name={['imap', 'encryption']}
+                          rules={[{ required: true }]}
+                        >
                           <Select options={encryptionOptions} />
                         </Form.Item>
                       </div>
@@ -922,27 +987,34 @@ const PersonalEmailSettings: React.FC = () => {
                       <h3>SMTP</h3>
                       <div className={styles.serverGrid}>
                         <Form.Item
-                          label="SMTP服务器"
+                          label={intl.formatMessage({ id: 'ui.email.smtpServer' })}
                           name={['smtp', 'host']}
-                          rules={[{ required: true, message: '请输入 SMTP 服务器' }]}
+                          rules={[{ required: true, message: intl.formatMessage({ id: 'ui.email.smtpRequired' }) }]}
                         >
                           <Input placeholder="smtp.example.com" />
                         </Form.Item>
                         <Form.Item
-                          label="SMTP端口"
+                          label={intl.formatMessage({ id: 'ui.email.smtpPort' })}
                           name={['smtp', 'port']}
-                          rules={[{ required: true, message: '请输入端口' }]}
+                          rules={[{ required: true, message: intl.formatMessage({ id: 'ui.email.portRequired' }) }]}
                         >
                           <InputNumber min={1} max={65535} />
                         </Form.Item>
-                        <Form.Item label="SMTP加密" name={['smtp', 'encryption']} rules={[{ required: true }]}>
+                        <Form.Item
+                          label={intl.formatMessage({ id: 'ui.email.smtpEncryption' })}
+                          name={['smtp', 'encryption']}
+                          rules={[{ required: true }]}
+                        >
                           <Select options={encryptionOptions} />
                         </Form.Item>
                       </div>
                     </div>
                   </>
                 ) : advancedOpen && (selectedProvider.imap || selectedProvider.smtp) ? (
-                  <div className={styles.readonlyServers} aria-label="服务商默认服务器">
+                  <div
+                    className={styles.readonlyServers}
+                    aria-label={intl.formatMessage({ id: 'ui.email.defaultServers' })}
+                  >
                     {selectedProvider.imap ? (
                       <Text>
                         IMAP：{selectedProvider.imap.host}:{selectedProvider.imap.port}
@@ -960,8 +1032,13 @@ const PersonalEmailSettings: React.FC = () => {
                   <Form.Item
                     label={secretLabel}
                     name="authCode"
-                    extra={hasExistingSecret ? '留空将保留现有凭据；仅在需要替换时输入新值。' : undefined}
-                    rules={[{ required: !hasExistingSecret, message: `请输入${secretLabel}` }]}
+                    extra={hasExistingSecret ? intl.formatMessage({ id: 'ui.email.keepSecret' }) : undefined}
+                    rules={[
+                      {
+                        required: !hasExistingSecret,
+                        message: intl.formatMessage({ id: 'ui.email.enterField' }, { v0: secretLabel }),
+                      },
+                    ]}
                   >
                     <Input.Password autoComplete="new-password" />
                   </Form.Item>
@@ -970,11 +1047,14 @@ const PersonalEmailSettings: React.FC = () => {
                 {isOAuth ? (
                   <div className={styles.oauthActions}>
                     <Button type="primary" loading={saving} onClick={handleOAuth}>
-                      {selectedProvider.code === 'gmail' ? '使用 Google 授权并保存' : '使用 Microsoft 授权并保存'}
+                      {selectedProvider.code === 'gmail'
+                        ? intl.formatMessage({ id: 'ui.email.googleAuthorize' })
+                        : intl.formatMessage({ id: 'ui.email.microsoftAuthorize' })}
                     </Button>
                     {authorization?.status === 'pending' ? (
                       <Button loading={saving} onClick={checkAuthorization}>
-                        检查授权状态
+                        {' '}
+                        {intl.formatMessage({ id: 'ui.email.checkAuthorization' })}{' '}
                       </Button>
                     ) : null}
                   </div>

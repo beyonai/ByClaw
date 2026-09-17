@@ -1,3 +1,5 @@
+// 用户可见提示在使用时读取当前语言，接口值与用户内容保持原样。
+import { getIntl } from '@umijs/max';
 import type { Method } from 'axios';
 
 let configPromise: Promise<IDesktopChatConfig | undefined> | undefined;
@@ -51,7 +53,7 @@ export function hasDesktopLocalHistory(): boolean {
 
 export function readDesktopLocalHistory(params: { sessionId: string; pageNum: number; pageSize: number }) {
   if (!hasDesktopLocalHistory()) {
-    return Promise.reject(new Error('当前 Desktop 版本不支持本地会话历史，请升级后重试'));
+    return Promise.reject(new Error(getIntl().formatMessage({ id: 'ui.desktop.historyUnsupported' })));
   }
   return window.byclawDesktop!.sessions!.readLocalHistory!(params);
 }

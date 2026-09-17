@@ -1227,6 +1227,18 @@ INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_nam
 }', '用户登陆初始数字员工助手模板');
 
 
+UPDATE byai.byai_super_delegations
+   SET last_activity_at = updated_at
+ WHERE started_at IS NOT NULL;
+
+INSERT INTO byai.byai_super_schema_migrations(version, name)
+SELECT 10, 'delegation_last_activity'
+WHERE NOT EXISTS (
+  SELECT 1
+    FROM byai.byai_super_schema_migrations
+   WHERE version = 10
+);
+
 INSERT INTO byai.byai_super_schema_migrations(version, name)
 SELECT 11, 'delegation_callback_deadline'
     WHERE NOT EXISTS (
@@ -1255,8 +1267,5 @@ VALUES (
            '',
            CURRENT_TIMESTAMP
        );
-COMMENT ON COLUMN byai.byai_connector_info.connector_type IS
-    '连接器类型：SYSTEM=系统内置，CUSTOM=自定义连接器，ACCOUNT_TEMPLATE=运营账号初始化模板';
-
 -- 新增项目编码字段
 UPDATE byai_project set project_code =concat('project_',project_id) where project_code is null;

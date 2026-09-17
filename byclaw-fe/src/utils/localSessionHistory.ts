@@ -1,3 +1,5 @@
+// 用户可见提示在使用时读取当前语言，接口值与用户内容保持原样。
+import { getIntl } from '@umijs/max';
 import { IMessageState, SSEEventStatus, SSEMessageType } from '@/constants/message';
 import type { IMessage, IMessageListItem } from '@/typescript/message';
 import { createMessage } from '@/utils/messgae';
@@ -54,7 +56,7 @@ export const projectLocalHistoryPage = (page: IDesktopLocalHistoryPage, sessionI
           input: block.input,
           output: block.output,
           status: block.status === 'done' ? SSEEventStatus.done : '_ERROR_',
-          ...(block.truncated ? { description: '内容已截断' } : {}),
+          ...(block.truncated ? { description: getIntl().formatMessage({ id: 'ui.desktop.truncated' }) } : {}),
         };
         thinkList.push(historyItem(message.id, block, SSEMessageType.toolCall, substance, 'toolCall'));
         return;

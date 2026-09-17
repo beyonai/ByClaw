@@ -75,6 +75,15 @@
   display: flex;
   gap: 8px;
   align-items: center;
+  min-width: 0;
+}
+
+// 名称始终单行展示，超长时省略，完整名称由 title 提供。
+.auditEmployeeNameText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .auditEmployeeAvatar {

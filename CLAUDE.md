@@ -151,11 +151,28 @@ under `deploy/migrations/versions/` and any change to
 - When the user supplies a version, use that exact version and the repository's
   established directory/file naming conventions. Do not invent another version to
   avoid a conflict unless the user explicitly asks for that.
+- For ordinary migration development, `deploy/migrations/versions/` is the only
+  writable migration location. An explicitly approved version authorizes changes only
+  in that exact `versions/<version>/` directory; it does not authorize changes under
+  `deploy/middleware/initdb/`.
+- Keep DDL and DML strictly separated. Schema statements such as `CREATE`, `ALTER`,
+  `DROP`, `TRUNCATE`, `COMMENT ON`, `GRANT`, and `REVOKE` belong only in
+  `__ddl.sql`; data statements such as `INSERT`, `UPDATE`, `DELETE`, and `MERGE`
+  belong only in `__dml.sql`. Never mix the two categories, even when their execution
+  order is related. Run `python3 deploy/migrations/merge_migrations.py --dry-run`
+  after editing a migration and fix every placement error before considering it ready.
 - Do not invoke `deploy/migrations/merge_migrations.py`, manually copy/append
   migration SQL, or otherwise merge into `deploy/middleware/initdb/` during normal
   development. This merge is a release-governance operation owned by the version
   administrator, who runs `deploy/migrations/merge_migrations.py` immediately before
   tagging a release. A development task must not perform that merge implicitly.
+- Never manually copy, append, rewrite, synchronize, repair, or deduplicate SQL under
+  `deploy/middleware/initdb/`, including `01_init.sql`, `02_ddl.sql`, `03_grant.sql`,
+  and `04_dml.sql`. Do not manually add or edit version marker blocks there, and do
+  not edit `deploy/migrations/.applied`. During an explicitly authorized release
+  operation, these generated artifacts may be changed only by
+  `deploy/migrations/merge_migrations.py`; review the generated diff and confirm each
+  pending version was appended exactly once.
 - Keep new migration work in its explicitly approved version directory; leave
   `deploy/middleware/initdb/` unchanged unless the user explicitly authorizes the
   release merge.

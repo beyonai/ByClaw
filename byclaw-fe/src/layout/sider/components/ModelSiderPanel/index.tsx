@@ -41,53 +41,57 @@ function formatModelDateTime(value: any) {
   return parsed.isValid() ? parsed.format('YYYY-MM-DD HH:mm:ss') : `${value ?? ''}`;
 }
 
+// 字段映射保存语言键，详情每次渲染时使用当前语言翻译。
 const MODEL_DETAIL_LABELS: Record<string, string> = {
-  id: '模型 ID',
-  modelId: '模型 ID',
-  displayName: '模型名称',
-  modelName: '模型名称',
-  modelType: '模型类型',
-  providerName: '提供商',
-  modelCode: '模型编码',
-  modelNo: '模型编码',
-  modelProtocol: '模型协议',
-  status: '状态',
-  isDefault: '默认对话模型',
-  contextTokens: '上下文长度',
-  maxContentToken: '最大内容 Token',
-  maxTokens: '最大输出 Token',
-  temperature: '温度',
-  topP: 'Top P',
-  frequencyPenalty: '频率惩罚',
-  presencePenalty: '存在惩罚',
-  abilities: '能力',
-  systems: '系统标签',
-  apiEndpoint: '接口地址',
-  apiToken: 'API Token',
-  apiTokenMasked: 'API Token',
-  headers: '自定义请求头',
-  connectTimeoutSec: '连接超时',
-  readTimeoutSec: '读取超时',
-  maxRetries: '最大重试次数',
-  retryIntervalSec: '重试间隔',
-  reasoningConfig: '思考配置',
-  inparamTemplate: '入参模板',
-  inParams: '入参配置',
-  in_params: '入参配置',
-  extendParam: '扩展参数',
-  updatedAt: '最近更新时间',
-  ownerType: '归属类型',
+  id: 'personalModel.detail.id',
+  modelId: 'personalModel.detail.id',
+  displayName: 'personalModel.detail.displayName',
+  modelName: 'personalModel.detail.displayName',
+  modelType: 'personalModel.detail.modelType',
+  providerName: 'personalModel.detail.providerName',
+  modelCode: 'personalModel.detail.modelCode',
+  modelNo: 'personalModel.detail.modelCode',
+  modelProtocol: 'personalModel.detail.modelProtocol',
+  status: 'personalModel.detail.status',
+  isDefault: 'personalModel.detail.isDefault',
+  contextTokens: 'personalModel.detail.contextTokens',
+  maxContentToken: 'personalModel.detail.maxContentToken',
+  maxTokens: 'personalModel.detail.maxTokens',
+  temperature: 'personalModel.detail.temperature',
+  topP: 'personalModel.detail.topP',
+  frequencyPenalty: 'personalModel.detail.frequencyPenalty',
+  presencePenalty: 'personalModel.detail.presencePenalty',
+  abilities: 'personalModel.detail.abilities',
+  systems: 'personalModel.detail.systems',
+  apiEndpoint: 'personalModel.detail.apiEndpoint',
+  apiToken: 'personalModel.detail.apiToken',
+  apiTokenMasked: 'personalModel.detail.apiToken',
+  headers: 'personalModel.detail.headers',
+  connectTimeoutSec: 'personalModel.detail.connectTimeoutSec',
+  readTimeoutSec: 'personalModel.detail.readTimeoutSec',
+  maxRetries: 'personalModel.detail.maxRetries',
+  retryIntervalSec: 'personalModel.detail.retryIntervalSec',
+  reasoningConfig: 'personalModel.detail.reasoningConfig',
+  inparamTemplate: 'personalModel.detail.inparamTemplate',
+  inParams: 'personalModel.detail.inParams',
+  in_params: 'personalModel.detail.inParams',
+  extendParam: 'personalModel.detail.extendParam',
+  updatedAt: 'personalModel.detail.updatedAt',
+  ownerType: 'personalModel.detail.ownerType',
 };
 
-function formatModelDetailValue(value: any) {
+export function formatModelDetailValue(value: any, intl: ReturnType<typeof useIntl>) {
   if (value === null || value === undefined || value === '') return '-';
-  if (typeof value === 'boolean') return value ? '是' : '否';
+  if (typeof value === 'boolean')
+    return value
+      ? intl.formatMessage({ id: 'personalModel.detail.yes' })
+      : intl.formatMessage({ id: 'personalModel.detail.no' });
   if (Array.isArray(value)) {
     return (
       value
-        .map((item) => formatModelDetailValue(item))
+        .map((item) => formatModelDetailValue(item, intl))
         .filter((item) => item !== '-')
-        .join('、') || '-'
+        .join(intl.formatMessage({ id: 'personalModel.detail.separator' })) || '-'
     );
   }
   if (typeof value === 'object') {
@@ -109,7 +113,7 @@ function isCopyableModelDetailKey(key: string) {
   ].includes(key.toLowerCase());
 }
 
-async function copyModelDetailValue(value: string) {
+async function copyModelDetailValue(value: string, intl: ReturnType<typeof useIntl>) {
   try {
     if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(value);
@@ -123,68 +127,146 @@ async function copyModelDetailValue(value: string) {
       document.execCommand('copy');
       document.body.removeChild(textarea);
     }
-    message.success('复制成功');
+    message.success(intl.formatMessage({ id: 'personalModel.detail.copySuccess' }));
   } catch {
-    message.error('复制失败');
+    message.error(intl.formatMessage({ id: 'personalModel.detail.copyFailed' }));
   }
 }
 
-function getModelDetailItems(model: any) {
+function getModelDetailItems(model: any, intl: ReturnType<typeof useIntl>) {
   if (!model) return [];
   const items: Array<{ key: string; label: string; value: any }> = [
-    { key: 'id', label: '模型 ID', value: model.id || model.modelId },
-    { key: 'displayName', label: '模型名称', value: model.displayName || model.modelName },
-    { key: 'modelType', label: '模型类型', value: model.modelType },
-    { key: 'providerName', label: '提供商', value: model.providerName },
-    { key: 'modelCode', label: '模型编码', value: model.modelCode || model.modelNo },
-    { key: 'modelProtocol', label: '模型协议', value: model.modelProtocol },
+    { key: 'id', label: intl.formatMessage({ id: 'personalModel.detail.id' }), value: model.id || model.modelId },
+    {
+      key: 'displayName',
+      label: intl.formatMessage({ id: 'personalModel.detail.displayName' }),
+      value: model.displayName || model.modelName,
+    },
+    { key: 'modelType', label: intl.formatMessage({ id: 'personalModel.detail.modelType' }), value: model.modelType },
+    {
+      key: 'providerName',
+      label: intl.formatMessage({ id: 'personalModel.detail.providerName' }),
+      value: model.providerName,
+    },
+    {
+      key: 'modelCode',
+      label: intl.formatMessage({ id: 'personalModel.detail.modelCode' }),
+      value: model.modelCode || model.modelNo,
+    },
+    {
+      key: 'modelProtocol',
+      label: intl.formatMessage({ id: 'personalModel.detail.modelProtocol' }),
+      value: model.modelProtocol,
+    },
     {
       key: 'status',
-      label: '状态',
-      value: model.status === 'ENABLED' ? '已启用' : model.status === 'DISABLED' ? '未启用' : model.status,
+      label: intl.formatMessage({ id: 'personalModel.detail.status' }),
+      value:
+        model.status === 'ENABLED'
+          ? intl.formatMessage({ id: 'personalModel.status.enabled' })
+          : model.status === 'DISABLED'
+            ? intl.formatMessage({ id: 'personalModel.status.disabled' })
+            : model.status,
     },
-    { key: 'isDefault', label: '默认对话模型', value: model.isDefault === 1 || model.isDefault === '1' },
+    {
+      key: 'isDefault',
+      label: intl.formatMessage({ id: 'personalModel.detail.isDefault' }),
+      value: model.isDefault === 1 || model.isDefault === '1',
+    },
     {
       key: 'contextTokens',
-      label: '上下文长度',
+      label: intl.formatMessage({ id: 'personalModel.detail.contextTokens' }),
       value: model.contextTokens ? `${model.contextTokens} tokens` : undefined,
     },
     {
       key: 'maxContentToken',
-      label: '最大内容 Token',
+      label: intl.formatMessage({ id: 'personalModel.detail.maxContentToken' }),
       value: model.maxContentToken,
     },
-    { key: 'maxTokens', label: '最大输出 Token', value: model.maxTokens },
-    { key: 'temperature', label: '温度', value: model.temperature },
-    { key: 'topP', label: 'Top P', value: model.topP },
-    { key: 'frequencyPenalty', label: '频率惩罚', value: model.frequencyPenalty },
-    { key: 'presencePenalty', label: '存在惩罚', value: model.presencePenalty },
-    { key: 'abilities', label: '能力', value: model.abilities },
-    { key: 'systems', label: '系统标签', value: model.systems },
-    { key: 'apiEndpoint', label: '接口地址', value: model.apiEndpoint },
-    { key: 'apiToken', label: 'API Token', value: model.apiToken ?? model.apiTokenMasked },
-    { key: 'headers', label: '自定义请求头', value: model.headers },
+    { key: 'maxTokens', label: intl.formatMessage({ id: 'personalModel.detail.maxTokens' }), value: model.maxTokens },
+    {
+      key: 'temperature',
+      label: intl.formatMessage({ id: 'personalModel.detail.temperature' }),
+      value: model.temperature,
+    },
+    { key: 'topP', label: intl.formatMessage({ id: 'personalModel.detail.topP' }), value: model.topP },
+    {
+      key: 'frequencyPenalty',
+      label: intl.formatMessage({ id: 'personalModel.detail.frequencyPenalty' }),
+      value: model.frequencyPenalty,
+    },
+    {
+      key: 'presencePenalty',
+      label: intl.formatMessage({ id: 'personalModel.detail.presencePenalty' }),
+      value: model.presencePenalty,
+    },
+    { key: 'abilities', label: intl.formatMessage({ id: 'personalModel.detail.abilities' }), value: model.abilities },
+    { key: 'systems', label: intl.formatMessage({ id: 'personalModel.detail.systems' }), value: model.systems },
+    {
+      key: 'apiEndpoint',
+      label: intl.formatMessage({ id: 'personalModel.detail.apiEndpoint' }),
+      value: model.apiEndpoint,
+    },
+    {
+      key: 'apiToken',
+      label: intl.formatMessage({ id: 'personalModel.detail.apiToken' }),
+      value: model.apiToken ?? model.apiTokenMasked,
+    },
+    { key: 'headers', label: intl.formatMessage({ id: 'personalModel.detail.headers' }), value: model.headers },
     {
       key: 'connectTimeoutSec',
-      label: '连接超时',
-      value: model.connectTimeoutSec === undefined ? undefined : `${model.connectTimeoutSec} 秒`,
+      label: intl.formatMessage({ id: 'personalModel.detail.connectTimeoutSec' }),
+      value:
+        model.connectTimeoutSec === undefined
+          ? undefined
+          : intl.formatMessage({ id: 'personalModel.detail.seconds' }, { count: model.connectTimeoutSec }),
     },
     {
       key: 'readTimeoutSec',
-      label: '读取超时',
-      value: model.readTimeoutSec === undefined ? undefined : `${model.readTimeoutSec} 秒`,
+      label: intl.formatMessage({ id: 'personalModel.detail.readTimeoutSec' }),
+      value:
+        model.readTimeoutSec === undefined
+          ? undefined
+          : intl.formatMessage({ id: 'personalModel.detail.seconds' }, { count: model.readTimeoutSec }),
     },
-    { key: 'maxRetries', label: '最大重试次数', value: model.maxRetries },
+    {
+      key: 'maxRetries',
+      label: intl.formatMessage({ id: 'personalModel.detail.maxRetries' }),
+      value: model.maxRetries,
+    },
     {
       key: 'retryIntervalSec',
-      label: '重试间隔',
-      value: model.retryIntervalSec === undefined ? undefined : `${model.retryIntervalSec} 秒`,
+      label: intl.formatMessage({ id: 'personalModel.detail.retryIntervalSec' }),
+      value:
+        model.retryIntervalSec === undefined
+          ? undefined
+          : intl.formatMessage({ id: 'personalModel.detail.seconds' }, { count: model.retryIntervalSec }),
     },
-    { key: 'reasoningConfig', label: '思考配置', value: model.reasoningConfig },
-    { key: 'inparamTemplate', label: '入参模板', value: model.inparamTemplate },
-    { key: 'inParams', label: '入参配置', value: model.inParams ?? model.in_params },
-    { key: 'extendParam', label: '扩展参数', value: model.extendParam },
-    { key: 'updatedAt', label: '最近更新时间', value: formatModelDateTime(model.updatedAt) },
+    {
+      key: 'reasoningConfig',
+      label: intl.formatMessage({ id: 'personalModel.detail.reasoningConfig' }),
+      value: model.reasoningConfig,
+    },
+    {
+      key: 'inparamTemplate',
+      label: intl.formatMessage({ id: 'personalModel.detail.inparamTemplate' }),
+      value: model.inparamTemplate,
+    },
+    {
+      key: 'inParams',
+      label: intl.formatMessage({ id: 'personalModel.detail.inParams' }),
+      value: model.inParams ?? model.in_params,
+    },
+    {
+      key: 'extendParam',
+      label: intl.formatMessage({ id: 'personalModel.detail.extendParam' }),
+      value: model.extendParam,
+    },
+    {
+      key: 'updatedAt',
+      label: intl.formatMessage({ id: 'personalModel.detail.updatedAt' }),
+      value: formatModelDateTime(model.updatedAt),
+    },
   ];
   const knownKeys = new Set([
     ...items.map((item) => item.key),
@@ -198,19 +280,23 @@ function getModelDetailItems(model: any) {
   ]);
   Object.entries(model).forEach(([key, value]) => {
     if (!knownKeys.has(key) && value !== undefined && value !== null && value !== '') {
-      items.push({ key, label: MODEL_DETAIL_LABELS[key] || key, value });
+      items.push({
+        key,
+        label: MODEL_DETAIL_LABELS[key] ? intl.formatMessage({ id: MODEL_DETAIL_LABELS[key] }) : key,
+        value,
+      });
     }
   });
 
   return items.filter(({ value }) => value !== undefined && value !== null && value !== '');
 }
 
-function getModelDetailSections(model: any) {
-  const items = getModelDetailItems(model);
+export function getModelDetailSections(model: any, intl: ReturnType<typeof useIntl>) {
+  const items = getModelDetailItems(model, intl);
   const groups = [
     {
       key: 'basic',
-      title: '基础信息',
+      title: intl.formatMessage({ id: 'personalModel.detail.section.basic' }),
       keys: new Set([
         'id',
         'displayName',
@@ -224,7 +310,7 @@ function getModelDetailSections(model: any) {
     },
     {
       key: 'connection',
-      title: '连接配置',
+      title: intl.formatMessage({ id: 'personalModel.detail.section.connection' }),
       keys: new Set([
         'apiEndpoint',
         'apiToken',
@@ -237,7 +323,7 @@ function getModelDetailSections(model: any) {
     },
     {
       key: 'parameters',
-      title: '模型参数',
+      title: intl.formatMessage({ id: 'personalModel.detail.section.parameters' }),
       keys: new Set([
         'contextTokens',
         'maxContentToken',
@@ -252,7 +338,7 @@ function getModelDetailSections(model: any) {
     },
     {
       key: 'advanced',
-      title: '其他配置',
+      title: intl.formatMessage({ id: 'personalModel.detail.section.advanced' }),
       keys: new Set([
         'reasoningConfig',
         'inparamTemplate',
@@ -428,8 +514,8 @@ const ModelSiderPanel: React.FC<ModelSiderPanelProps> = ({ embedded = false, sho
   useEffect(() => {
     setCanEditEmployee(
       isEmployeeModelPanel &&
-      `${agentDetail?.operationPermissions?.resourceId ?? ''}` === `${resourceId ?? ''}` &&
-      agentDetail?.operationPermissions?.canEdit === true
+        `${agentDetail?.operationPermissions?.resourceId ?? ''}` === `${resourceId ?? ''}` &&
+        agentDetail?.operationPermissions?.canEdit === true
     );
   }, [isEmployeeModelPanel, agentDetail, resourceId]);
 
@@ -457,7 +543,7 @@ const ModelSiderPanel: React.FC<ModelSiderPanelProps> = ({ embedded = false, sho
         setAgentDetail((current: any) => ({ ...current, prologue: JSON.stringify(nextPrologue) }));
         const modelName = model.displayName || model.modelName || model.modelCode || '';
         // 启用完成后明确提示具体模型，避免用户只看到“成功”而无法确认操作对象。
-        message.success(`启用${modelName}模型成功`);
+        message.success(intl.formatMessage({ id: 'personalModel.enableSuccess' }, { name: modelName }));
       } catch (error: any) {
         message.error(
           error?.message || intl.formatMessage({ id: 'common.operationFailed', defaultMessage: '操作失败' })
@@ -625,7 +711,7 @@ const ModelSiderPanel: React.FC<ModelSiderPanelProps> = ({ embedded = false, sho
               allowClear
               value={modelKeyword}
               prefix={<SearchOutlined />}
-              placeholder="搜索模型"
+              placeholder={intl.formatMessage({ id: 'personalModel.search' })}
               className={styles.modelSearch}
               onChange={(event) => setModelKeyword(event.target.value)}
             />
@@ -673,7 +759,7 @@ const ModelSiderPanel: React.FC<ModelSiderPanelProps> = ({ embedded = false, sho
                                 loading={`${activatingModelId ?? ''}` === `${item.id}`}
                                 onClick={(event) => event.stopPropagation()}
                               >
-                                启用
+                                {intl.formatMessage({ id: 'personalModel.action.enable' })}
                               </Button>
                             </Popconfirm>
                           </div>
@@ -693,7 +779,11 @@ const ModelSiderPanel: React.FC<ModelSiderPanelProps> = ({ embedded = false, sho
       </div>
       <Drawer
         open={Boolean(selectedModel)}
-        title={selectedModel?.displayName || selectedModel?.modelName || '模型详情'}
+        title={
+          selectedModel?.displayName ||
+          selectedModel?.modelName ||
+          intl.formatMessage({ id: 'personalModel.detail.title' })
+        }
         width="min(560px, calc(100vw - 24px))"
         destroyOnClose
         className={styles.modelDetailDrawer}
@@ -701,7 +791,7 @@ const ModelSiderPanel: React.FC<ModelSiderPanelProps> = ({ embedded = false, sho
       >
         <Spin spinning={selectedModelLoading}>
           {selectedModel &&
-            getModelDetailSections(selectedModel).map((section) => (
+            getModelDetailSections(selectedModel, intl).map((section) => (
               <Card key={section.key} className={styles.modelDetailSection} title={section.title} size="small">
                 <Descriptions column={1} size="small" bordered>
                   {section.items.map(({ key, label, value }) => (
@@ -710,7 +800,8 @@ const ModelSiderPanel: React.FC<ModelSiderPanelProps> = ({ embedded = false, sho
                         const displayValue = formatModelDetailValue(
                           key === 'abilities' && Array.isArray(value)
                             ? value.map((item) => abilityLabelMap[`${item}`] || item)
-                            : value
+                            : value,
+                          intl
                         );
                         return (
                           <div className={styles.modelDetailValueRow}>
@@ -721,9 +812,9 @@ const ModelSiderPanel: React.FC<ModelSiderPanelProps> = ({ embedded = false, sho
                                 size="small"
                                 className={styles.modelDetailCopy}
                                 icon={<CopyOutlined />}
-                                title="复制"
-                                aria-label="复制"
-                                onClick={() => void copyModelDetailValue(displayValue)}
+                                title={intl.formatMessage({ id: 'common.copy' })}
+                                aria-label={intl.formatMessage({ id: 'common.copy' })}
+                                onClick={() => void copyModelDetailValue(displayValue, intl)}
                               />
                             ) : null}
                           </div>

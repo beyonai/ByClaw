@@ -1,3 +1,5 @@
+// 用户可见提示在使用时读取当前语言，接口值与用户内容保持原样。
+import { useIntl, getIntl } from '@umijs/max';
 import { LeftOutlined, RightOutlined } from '@ant-design/icons';
 import {
   Button,
@@ -200,7 +202,10 @@ const buildTemplatePrompt = (
       values.sourceMode === 'knowledge'
         ? findOptionLabel(options.knowledgeBases, source as string | number | undefined)
         : source || '-';
-    const target = `知识库：${findOptionLabel(options.knowledgeBases, values.targetKnowledge)}`;
+    const target = getIntl().formatMessage(
+      { id: 'ui.task.knowledgeTarget' },
+      { v0: findOptionLabel(options.knowledgeBases, values.targetKnowledge) }
+    );
     detailLines.push(`采集方式：${sourceModeLabel}`, `采集来源：${sourceLabel}`, `入库位置：${target}`);
   } else if (template.templateType === 'content') {
     detailLines.push(`内容类型：${values.contentType || '-'}`, `目标受众：${values.audience || '-'}`);
@@ -269,6 +274,8 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
   knowledgeOptionsOnly = false,
   accountOptions = [],
 }) => {
+  // 界面文案随当前语言更新，业务名称与接口数据保持原值。
+  const intl = useIntl();
   const [form] = Form.useForm<TaskTemplateFormValues>();
   const [templates, setTemplates] = useState<OperationTaskTemplate[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<OperationTaskTemplate>();
@@ -332,7 +339,7 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
     try {
       const detail = await getOperationTaskTemplate(template.templateId);
       if (!detail || ['knowledge', 'object_discovery'].includes(detail.templateType)) {
-        message.warning('该任务模板已下线，请重新选择');
+        message.warning(intl.formatMessage({ id: 'ui.task.retired' }));
         return;
       }
       const resolvedTemplate = detail;
@@ -491,9 +498,9 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
             </div>
             <Form.Item
               className={styles.methodConfigField}
-              label="目标知识库"
+              label={intl.formatMessage({ id: 'ui.task.targetKnowledge' })}
               name="targetKnowledge"
-              rules={[{ required: true, message: '请选择目标知识库' }]}
+              rules={[{ required: true, message: intl.formatMessage({ id: 'ui.task.selectKnowledge' }) }]}
             >
               <Select options={availableKnowledgeOptions} showSearch optionFilterProp="label" />
             </Form.Item>

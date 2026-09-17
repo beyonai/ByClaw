@@ -528,7 +528,12 @@ public class DatasetApplicationService {
      */
     public DatasetDetailVo detail(Long resourceId) {
         validateDatasetReadablePermission(loadDatasetResource(resourceId));
-        return ssResourceService.findDatasetDetailById(resourceId);
+        DatasetDetailVo detail = ssResourceService.findDatasetDetailById(resourceId);
+        if (detail != null) {
+            detail.setOperationPermissions(authApplicationService.queryResourceOperationPermissionsBatch(
+                Collections.singletonList(resourceId)).get(resourceId));
+        }
+        return detail;
     }
 
     /***
@@ -714,7 +719,7 @@ public class DatasetApplicationService {
         // 获取知识库信息
         SsResource ssResource = loadDatasetResource(resourceId);
 
-        //validateDatasetReadablePermission(ssResource);
+        validateDatasetReadablePermission(ssResource);
 
         boolean directoryDownload = StringUtils.endsWith(StringUtils.trimToEmpty(directoryPath).replace('\\', '/'),
             "/");
@@ -1281,7 +1286,8 @@ public class DatasetApplicationService {
     private String getLastSplitName(String directoryPath) {
         if (directoryPath != null && directoryPath.contains("/")) {
             String[] splitStr = directoryPath.split("/");
-            return splitStr[splitStr.length - 1];
+            // 根目录拆分后为空，使用空名称回退到知识库名称，避免访问下标 -1。
+            return splitStr.length == 0 ? "" : splitStr[splitStr.length - 1];
         } else {
             return directoryPath;
         }

@@ -52,11 +52,6 @@ public class DigitalEmployeeVo extends DigitalEmployeeDTO {
     private Boolean canApplyUse;
 
     /**
-     * 是否可审核使用申请
-     */
-    private Boolean canAuditUse;
-
-    /**
      * 是否可设为默认个人助理
      */
     private Boolean canSetDefault;

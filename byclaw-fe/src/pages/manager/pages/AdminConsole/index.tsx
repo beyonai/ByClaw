@@ -1,11 +1,13 @@
 import { FileOutlined, FolderOutlined } from '@ant-design/icons';
-import { useSelector } from '@umijs/max';
+import { useIntl, useSelector } from '@umijs/max';
 import { Alert, Button, Card, Input, Layout, Select, Space, Tag, Tree, Typography, message } from 'antd';
 import React, { useMemo, useState } from 'react';
 
 import { runRedisCommand } from '@/pages/manager/service/AdminConsole';
 
 const AdminConsole: React.FC = () => {
+  // 界面文案随当前语言更新，业务名称与接口数据保持原值。
+  const intl = useIntl();
   const userInfo = useSelector(({ user }: any) => user.userInfo);
   const [redisResult, setRedisResult] = useState('');
   const [redisKeys, setRedisKeys] = useState<string[]>([]);
@@ -18,7 +20,7 @@ const AdminConsole: React.FC = () => {
     try {
       const res: any = await runRedisCommand(command);
       if (res?.code !== 0) {
-        message.error(res?.msg || 'Redis 查询失败');
+        message.error(res?.msg || intl.formatMessage({ id: 'ui.admin.queryFailed' }));
         return;
       }
       callback(res.data);
@@ -34,7 +36,7 @@ const AdminConsole: React.FC = () => {
       setRedisKey(key);
       const typeRes: any = await runRedisCommand(`TYPE ${key}`);
       if (typeRes?.code !== 0) {
-        message.error(typeRes?.msg || '无法读取 Key 类型');
+        message.error(typeRes?.msg || intl.formatMessage({ id: 'ui.admin.typeFailed' }));
         return;
       }
       const type = String(typeRes?.data?.result || 'string').toLowerCase();
@@ -48,7 +50,7 @@ const AdminConsole: React.FC = () => {
       };
       const detailRes: any = await runRedisCommand(commands[type] || `GET ${key}`);
       if (detailRes?.code !== 0) {
-        message.error(detailRes?.msg || 'Redis 查询失败');
+        message.error(detailRes?.msg || intl.formatMessage({ id: 'ui.admin.queryFailed' }));
         return;
       }
       setRedisResult(JSON.stringify({ type, value: detailRes?.data?.result ?? null }, null, 2));
@@ -113,31 +115,32 @@ const AdminConsole: React.FC = () => {
 
   if (userInfo?.userCode?.toLowerCase() !== 'adminvip') {
     return (
-      <div style={{ padding: 48, textAlign: 'center', color: '#666' }}>无权限访问，仅 adminvip 可使用该功能。</div>
+      <div style={{ padding: 48, textAlign: 'center', color: '#666' }}>
+        {' '}
+        {intl.formatMessage({ id: 'ui.admin.denied' })}{' '}
+      </div>
     );
   }
 
   return (
     <div style={{ padding: 24 }}>
-      <Alert
-        type="warning"
-        showIcon
-        message="仅 adminvip 可访问；只允许白名单 Redis 查询命令，危险命令由后端强制拦截。"
-      />
+      <Alert type="warning" showIcon message={intl.formatMessage({ id: 'ui.admin.policy' })} />
       <Card bodyStyle={{ padding: 0 }} style={{ marginTop: 16 }}>
         <Layout style={{ minHeight: 660, background: '#fff' }}>
           <div style={{ padding: '18px 24px 14px', borderBottom: '1px solid #eee' }}>
             <Space size="middle" wrap>
               <Typography.Title level={4} style={{ margin: 0 }}>
-                Redis 查询
+                {' '}
+                {intl.formatMessage({ id: 'ui.admin.query' })}{' '}
               </Typography.Title>
-              <Tag color="green">已连接</Tag>
-              <Typography.Text type="secondary">当前 BE 配置实例（支持单机 / 集群）</Typography.Text>
+              <Tag color="green"> {intl.formatMessage({ id: 'ui.admin.connected' })} </Tag>
+              <Typography.Text type="secondary"> {intl.formatMessage({ id: 'ui.admin.instance' })} </Typography.Text>
               <Button
                 loading={loading}
                 onClick={() => execute('PING', (data) => setRedisResult(data?.result || 'PONG'))}
               >
-                刷新连接
+                {' '}
+                {intl.formatMessage({ id: 'ui.admin.refreshConnection' })}{' '}
               </Button>
             </Space>
           </div>
@@ -157,18 +160,21 @@ const AdminConsole: React.FC = () => {
                     onClick={() => execute('SCAN 0 MATCH * COUNT 100', (data) => updateKeys(data?.result))}
                     style={{ flex: 1 }}
                   >
-                    刷新 Key
+                    {' '}
+                    {intl.formatMessage({ id: 'ui.admin.refreshKeys' })}{' '}
                   </Button>
                 </Space.Compact>
                 <Input.Search
-                  placeholder="模糊搜索 Key，例如 session 或 byai:*"
+                  placeholder={intl.formatMessage({ id: 'ui.admin.searchKeys' })}
                   allowClear
                   loading={loading}
                   onSearch={(value) =>
                     execute(`SCAN 0 MATCH ${buildMatchPattern(value)} COUNT 100`, (data) => updateKeys(data?.result))
                   }
                 />
-                <Typography.Text type="secondary">Key 列表（{redisKeys.length}）</Typography.Text>
+                <Typography.Text type="secondary">
+                  {intl.formatMessage({ id: 'ui.admin.keys' }, { count: redisKeys.length })}
+                </Typography.Text>
                 <div style={{ border: '1px solid #f0f0f0', borderRadius: 4 }}>
                   <Tree
                     showIcon
@@ -197,19 +203,20 @@ const AdminConsole: React.FC = () => {
                   <Input
                     value={redisKey}
                     onChange={(event) => setRedisKey(event.target.value)}
-                    placeholder="从左侧选择 Key，或输入后查询"
+                    placeholder={intl.formatMessage({ id: 'ui.admin.selectKey' })}
                     style={{ width: 520 }}
                   />
                   <Button loading={loading} type="primary" onClick={() => loadRedisKey(redisKey)}>
-                    查看
+                    {' '}
+                    {intl.formatMessage({ id: 'ui.admin.view' })}{' '}
                   </Button>
                 </Space>
-                <Tag color="blue">自动识别 String / Hash / List / Set / ZSet / Stream</Tag>
+                <Tag color="blue"> {intl.formatMessage({ id: 'ui.admin.detectType' })} </Tag>
                 <Input.TextArea
                   readOnly
                   value={redisResult}
                   rows={24}
-                  placeholder="Key 的值会显示在这里"
+                  placeholder={intl.formatMessage({ id: 'ui.admin.valuePlaceholder' })}
                   style={{ fontFamily: 'monospace', minHeight: 480 }}
                 />
               </Space>

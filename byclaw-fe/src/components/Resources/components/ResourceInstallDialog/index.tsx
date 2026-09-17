@@ -1,3 +1,4 @@
+// 用户可见提示在使用时读取当前语言，接口值与用户内容保持原样。
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Avatar, Checkbox, Empty, Input, List, Modal, Pagination, Tag, message } from 'antd';
 import { UserOutlined } from '@ant-design/icons';
@@ -201,7 +202,12 @@ const ResourceInstallDialog: React.FC<ResourceInstallDialogProps> = ({
   const getConfirmContent = (employees: InstallTargetEmployee[]) => {
     const names = employees.map((item) => item.resourceName).filter(Boolean);
     const displayNames =
-      names.length > 3 ? `${names.slice(0, 2).join('、')}等${names.length}个数字员工` : names.join('、');
+      names.length > 3
+        ? intl.formatMessage(
+          { id: 'ui.resource.employeeSummary' },
+          { v0: names.slice(0, 2).join(intl.formatMessage({ id: 'ui.resource.listSeparator' })), v1: names.length }
+        )
+        : names.join(intl.formatMessage({ id: 'ui.resource.listSeparator' }));
     return intl.formatMessage({ id: 'resource.installToEmployeesConfirm' }, { names: displayNames });
   };
 

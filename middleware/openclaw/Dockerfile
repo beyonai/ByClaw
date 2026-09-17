@@ -259,6 +259,26 @@ RUN set -eux; \
     ln -sf /usr/local/bin/websockify /usr/bin/websockify; \
     websockify --help >/dev/null
 
+# Install the repository-owned Python CLIs into the image's global Python 3.12
+# environment. Copy only package metadata and source so local venvs, tests, and
+# build artifacts never enter the image.
+COPY middleware/openclaw/callcli/pyproject.toml /tmp/byclaw-python-clis/callcli/pyproject.toml
+COPY middleware/openclaw/callcli/src/ /tmp/byclaw-python-clis/callcli/src/
+COPY middleware/openclaw/dbcli/pyproject.toml /tmp/byclaw-python-clis/dbcli/pyproject.toml
+COPY middleware/openclaw/dbcli/src/ /tmp/byclaw-python-clis/dbcli/src/
+COPY middleware/openclaw/kbcli/pyproject.toml /tmp/byclaw-python-clis/kbcli/pyproject.toml
+COPY middleware/openclaw/kbcli/src/ /tmp/byclaw-python-clis/kbcli/src/
+
+RUN set -eux; \
+    python3 -m pip install --no-cache-dir \
+        /tmp/byclaw-python-clis/callcli \
+        "/tmp/byclaw-python-clis/dbcli[all]" \
+        /tmp/byclaw-python-clis/kbcli; \
+    callcli --help >/dev/null; \
+    dbcli --help >/dev/null; \
+    kbcli --help >/dev/null; \
+    rm -rf /tmp/byclaw-python-clis
+
 # searxng-cli is installed from the published PyPI wheel into an isolated
 # venv.  The settings file is still mounted as an override so ByClaw can
 # customize engine whitelists/proxies without repackaging the wheel.

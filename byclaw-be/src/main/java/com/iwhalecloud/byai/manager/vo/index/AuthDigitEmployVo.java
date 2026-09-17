@@ -193,7 +193,6 @@ public class AuthDigitEmployVo {
 
     private Boolean useApplyPending;
 
-    private Boolean canAuditUse;
 
     private Boolean canRestore;
 

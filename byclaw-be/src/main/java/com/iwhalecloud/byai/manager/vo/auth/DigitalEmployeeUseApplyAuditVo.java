@@ -17,6 +17,13 @@ public class DigitalEmployeeUseApplyAuditVo extends ResourceUseApplyItemVo {
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "GMT+8")
     private Date auditTime;
 
+    /** 处理审核的用户标识，来源于权限记录的最后修改人。 */
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long auditUserId;
+
+    /** 处理审核的用户名称。 */
+    private String auditUserName;
+
     @JsonSerialize(using = ToStringSerializer.class)
     private Long resourceId;
 

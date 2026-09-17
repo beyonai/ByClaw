@@ -6,9 +6,9 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import org.junit.jupiter.api.Test;
@@ -33,6 +33,7 @@ import com.iwhalecloud.byai.manager.qo.auth.AuthQo;
 import com.iwhalecloud.byai.manager.qo.auth.DigitalEmployeeAuthQo;
 import com.iwhalecloud.byai.manager.vo.auth.DigitalEmployeeAuthVo;
 import com.iwhalecloud.byai.manager.vo.auth.ResourceAuthVo;
+import com.iwhalecloud.byai.manager.vo.auth.ResourceOperationPermissionsVo;
 import com.iwhalecloud.byai.state.domain.index.service.IndexService;
 import com.iwhalecloud.byai.state.domain.resource.service.ResourceAuthContextService;
 
@@ -97,20 +98,27 @@ class ResourceAuthApplicationServiceTest {
     }
 
     @Test
-    void listResourceAuth_doesNotFetchOperationPermissionsForSkillOptions() {
+    void listResourceAuth_fillsOperationPermissions() {
         ResourceUseAuthQo qo = new ResourceUseAuthQo();
         ResourceAuthVo resource = new ResourceAuthVo();
         resource.setResourceId(21L);
+        ResourceOperationPermissionsVo permissions = new ResourceOperationPermissionsVo();
+        permissions.setResourceId(21L);
+        permissions.setHasUsePermission(true);
+        permissions.setCanViewDetail(true);
         PageInfo<ResourceAuthVo> page = new PageInfo<>();
         page.setList(List.of(resource));
         when(privilegeGrantService.listResourceAuth(qo)).thenReturn(page);
+        when(authApplicationService.queryResourceOperationPermissionsBatch(List.of(21L)))
+            .thenReturn(Map.of(21L, permissions));
 
         ResourceAuthApplicationService service = service();
         service.listResourceAuth(qo);
 
-        verify(authApplicationService, never()).queryResourceOperationPermissionsBatch(any());
-        org.junit.jupiter.api.Assertions.assertTrue(Arrays.stream(ResourceAuthVo.class.getDeclaredFields())
-            .noneMatch(field -> "hasUsePermission".equals(field.getName())));
+        verify(authApplicationService).queryResourceOperationPermissionsBatch(List.of(21L));
+        assertThat(resource.getOperationPermissionsLoaded()).isTrue();
+        assertThat(resource.getHasUsePermission()).isTrue();
+        assertThat(resource.getCanViewDetail()).isTrue();
     }
 
     @Test

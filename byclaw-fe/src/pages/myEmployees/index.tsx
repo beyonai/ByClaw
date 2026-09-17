@@ -4,21 +4,8 @@ import useEmployeeRowRefresh, {
   updateEmployeeRow,
 } from '@/hooks/useEmployeeRowRefresh';
 import { LeftOutlined } from '@ant-design/icons';
-import { useLocation, useNavigate, useIntl } from '@umijs/max';
-import {
-  Badge,
-  Button,
-  Empty,
-  Input,
-  Popconfirm,
-  Segmented,
-  Space,
-  Spin,
-  Table,
-  Tabs,
-  Tag,
-  message,
-} from 'antd';
+import { getIntl, useLocation, useNavigate, useIntl } from '@umijs/max';
+import { Badge, Button, Empty, Input, Popconfirm, Segmented, Space, Spin, Table, Tabs, Tag, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import dayjs from 'dayjs';
@@ -133,9 +120,14 @@ const MyEmployeesPage: React.FC = () => {
     },
     [statusFilter]
   );
-  const refreshEmployee = useEmployeeRowRefresh(list, setList, () => {
-    setTotal((current) => Math.max(0, current - 1));
-  }, shouldKeepEmployee);
+  const refreshEmployee = useEmployeeRowRefresh(
+    list,
+    setList,
+    () => {
+      setTotal((current) => Math.max(0, current - 1));
+    },
+    shouldKeepEmployee
+  );
   const [pendingAuditRows, setPendingAuditRows] = useState<AuditRow[]>(() => {
     // 待审核数据由数字员工首页通过路由状态传入，避免进入“我的员工”后再次请求。
     const routeState = location.state as { pendingAuditRows?: ResourceUseApplyAuditItem[] } | null;
@@ -155,45 +147,49 @@ const MyEmployeesPage: React.FC = () => {
 
   const agentType = resourceFilter === 'group' ? '017' : undefined;
 
-  const loadEmployees = useCallback(async (requestedPage = 1) => {
-    if (activeTab === 'audit' || (requestedPage > 1 && employeeLoadingRef.current)) return;
-    const requestId = ++employeeRequestRef.current;
-    employeeLoadingRef.current = true;
-    setLoading(true);
-    if (requestedPage === 1) {
-      setList([]);
-      setTotal(0);
-      setPageNum(1);
-    }
-    try {
-      const request = activeTab === 'personal' ? queryMyCreated : queryManagedEnterpriseEmployees;
-      const type =
-        activeTab === 'enterprise' ? (enterpriseScope === 'created' ? 'owner' : 'managerExcludingOwner') : 'manageable';
-      const res = await request({
-        pageNum: requestedPage,
-        pageSize: PAGE_SIZE,
-        type,
-        agentType,
-        includeEmployeeGroup: resourceFilter === 'all',
-        keyword: debouncedKeyword.trim() || undefined,
-        ...(statusFilter === 'all' ? { includeAllResourceStatus: true } : { resourceStatus: Number(statusFilter) }),
-      });
-      if (requestId !== employeeRequestRef.current) return;
-      const nextList = normalizeList(res);
-      setList((current) => (requestedPage === 1 ? nextList : [...current, ...nextList]));
-      setPageNum(requestedPage);
-      setTotal(Number(res?.total ?? res?.data?.total ?? 0));
-    } catch (error: any) {
-      if (requestId === employeeRequestRef.current) {
-        message.error(error?.message || intl.formatMessage({ id: 'common.operateFailed' }));
+  const loadEmployees = useCallback(
+    async (requestedPage = 1) => {
+      if (activeTab === 'audit' || (requestedPage > 1 && employeeLoadingRef.current)) return;
+      const requestId = ++employeeRequestRef.current;
+      employeeLoadingRef.current = true;
+      setLoading(true);
+      if (requestedPage === 1) {
+        setList([]);
+        setTotal(0);
+        setPageNum(1);
       }
-    } finally {
-      if (requestId === employeeRequestRef.current) {
-        employeeLoadingRef.current = false;
-        setLoading(false);
+      try {
+        const request = activeTab === 'personal' ? queryMyCreated : queryManagedEnterpriseEmployees;
+        // 个人页签只查本人创建的员工，历史管理授权不再作为列表入口。
+        const type =
+          activeTab === 'enterprise' ? (enterpriseScope === 'created' ? 'owner' : 'managerExcludingOwner') : 'owner';
+        const res = await request({
+          pageNum: requestedPage,
+          pageSize: PAGE_SIZE,
+          type,
+          agentType,
+          includeEmployeeGroup: resourceFilter === 'all',
+          keyword: debouncedKeyword.trim() || undefined,
+          ...(statusFilter === 'all' ? { includeAllResourceStatus: true } : { resourceStatus: Number(statusFilter) }),
+        });
+        if (requestId !== employeeRequestRef.current) return;
+        const nextList = normalizeList(res);
+        setList((current) => (requestedPage === 1 ? nextList : [...current, ...nextList]));
+        setPageNum(requestedPage);
+        setTotal(Number(res?.total ?? res?.data?.total ?? 0));
+      } catch (error: any) {
+        if (requestId === employeeRequestRef.current) {
+          message.error(error?.message || intl.formatMessage({ id: 'common.operateFailed' }));
+        }
+      } finally {
+        if (requestId === employeeRequestRef.current) {
+          employeeLoadingRef.current = false;
+          setLoading(false);
+        }
       }
-    }
-  }, [activeTab, agentType, debouncedKeyword, enterpriseScope, intl, resourceFilter, statusFilter]);
+    },
+    [activeTab, agentType, debouncedKeyword, enterpriseScope, intl, resourceFilter, statusFilter]
+  );
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -322,20 +318,17 @@ const MyEmployeesPage: React.FC = () => {
     setAuthDrawerOpen(true);
   }, []);
 
-  const handleDelete = useCallback(
-    async (employee: IAgentCache) => {
-      const resourceId = employee.resourceId ?? employee.id;
-      if (!resourceId) return;
-      try {
-        await deleteDigitalEmployee({ resourceId: String(resourceId) });
-        message.success('删除成功');
-        removeEmployeeRow(employeeRowId(employee));
-      } catch (error: any) {
-        message.error(error?.message || '删除失败');
-      }
-    },
-    []
-  );
+  const handleDelete = useCallback(async (employee: IAgentCache) => {
+    const resourceId = employee.resourceId ?? employee.id;
+    if (!resourceId) return;
+    try {
+      await deleteDigitalEmployee({ resourceId: String(resourceId) });
+      message.success(getIntl().formatMessage({ id: 'ui.employee.deleteSuccess' }));
+      removeEmployeeRow(employeeRowId(employee));
+    } catch (error: any) {
+      message.error(error?.message || getIntl().formatMessage({ id: 'ui.employee.deleteFailed' }));
+    }
+  }, []);
 
   const handleShelfStatusChange = useCallback(
     async (employee: IAgentCache, action: 'shelf' | 'unShelf') => {
@@ -345,9 +338,26 @@ const MyEmployeesPage: React.FC = () => {
         const request = action === 'shelf' ? shelfDigitalEmployee : unShelfDigitalEmployee;
         const response: any = await request({ resourceId: String(resourceId) });
         if (response?.success === false || (response?.code !== undefined && response.code !== 0)) {
-          throw new Error(response?.msg || `${action === 'shelf' ? '上架' : '下架'}失败`);
+          throw new Error(
+            response?.msg ||
+              getIntl().formatMessage(
+                { id: 'ui.employee.actionFailed' },
+                {
+                  v0: getIntl().formatMessage({
+                    id: action === 'shelf' ? 'ui.employee.publish' : 'ui.employee.unpublish',
+                  }),
+                }
+              )
+          );
         }
-        message.success(`${action === 'shelf' ? '上架' : '下架'}成功`);
+        message.success(
+          getIntl().formatMessage(
+            { id: 'ui.employee.actionSuccess' },
+            {
+              v0: getIntl().formatMessage({ id: action === 'shelf' ? 'ui.employee.publish' : 'ui.employee.unpublish' }),
+            }
+          )
+        );
         // 仅更新操作员工的状态与权限，保留分页和滚动位置。
         const refreshPromise = refreshEmployee(employee);
         updateEmployeeRow({
@@ -356,7 +366,17 @@ const MyEmployeesPage: React.FC = () => {
         });
         await refreshPromise;
       } catch (error: any) {
-        message.error(error?.message || `${action === 'shelf' ? '上架' : '下架'}失败`);
+        message.error(
+          error?.message ||
+            getIntl().formatMessage(
+              { id: 'ui.employee.actionFailed' },
+              {
+                v0: getIntl().formatMessage({
+                  id: action === 'shelf' ? 'ui.employee.publish' : 'ui.employee.unpublish',
+                }),
+              }
+            )
+        );
       }
     },
     [refreshEmployee]
@@ -366,26 +386,66 @@ const MyEmployeesPage: React.FC = () => {
     {
       title: intl.formatMessage({ id: 'myEmployees.employeeName' }),
       dataIndex: 'resourceName',
+      // 名称列承接其余列之外的可用宽度，长名称保持单行并可悬停查看全文。
       render: (value, row) => (
         <div className={styles.auditEmployeeName}>
           <div className={styles.auditEmployeeAvatar}>{getAgentChatAvatar(row.chatAvatar || row.avatar)}</div>
-          <span>{value}</span>
+          <span className={styles.auditEmployeeNameText} title={value}>
+            {value}
+          </span>
         </div>
       ),
     },
-    { title: intl.formatMessage({ id: 'myEmployees.type' }), dataIndex: 'employeeType' },
-    { title: intl.formatMessage({ id: 'myEmployees.applicant' }), dataIndex: 'userName' },
+    // 辅助信息使用紧凑列宽，把更多空间留给数字员工名称。
+    {
+      title: intl.formatMessage({ id: 'myEmployees.type' }),
+      dataIndex: 'employeeType',
+      width: 110,
+      // 保留数据中的员工类型，渲染时再翻译以支持切换语言。
+      render: (value) =>
+        intl.formatMessage({ id: value === '数字员工组' ? 'common.digitalEmployeeGroup' : 'common.digitalEmployee' }),
+    },
+    { title: intl.formatMessage({ id: 'myEmployees.applicant' }), dataIndex: 'userName', width: 120, ellipsis: true },
     {
       title: intl.formatMessage({ id: 'myEmployees.applicationTime' }),
       dataIndex: 'applyTime',
+      width: 170,
       render: (value) => (value && dayjs(value).isValid() ? dayjs(value).format('YYYY-MM-DD HH:mm') : value || '-'),
     },
   ];
 
   if (auditFilter === 'history') {
+    // 历史记录按审核结果、审核人、处理时间排列，便于先看结论再追溯处理信息。
+    auditColumns.push({
+      title: intl.formatMessage({ id: 'myEmployees.auditResult' }),
+      dataIndex: 'applyStatus',
+      width: 120,
+      render: (value) => {
+        const status = `${value || ''}`;
+        const result = status === '审核通过' ? '通过' : status === '已驳回' ? '驳回' : status;
+        const color = result === '通过' ? 'success' : result === '驳回' ? 'error' : 'default';
+        // 状态比较沿用接口原值，仅翻译展示标签。
+        const label =
+          result === '通过'
+            ? intl.formatMessage({ id: 'ui.employee.approved' })
+            : result === '驳回'
+              ? intl.formatMessage({ id: 'ui.employee.rejected' })
+              : result;
+        return <Tag color={color}>{label || '-'}</Tag>;
+      },
+    });
+    // 审核人只对历史记录展示，待审核记录尚未产生处理人。
+    auditColumns.push({
+      title: intl.formatMessage({ id: 'myEmployees.auditor' }),
+      dataIndex: 'auditUserName',
+      width: 120,
+      ellipsis: true,
+      render: (value) => value || '-',
+    });
     auditColumns.push({
       title: intl.formatMessage({ id: 'myEmployees.processedTime' }),
       dataIndex: 'auditTime',
+      width: 170,
       render: (value) => (value && dayjs(value).isValid() ? dayjs(value).format('YYYY-MM-DD HH:mm') : value || '-'),
     });
   }
@@ -394,12 +454,14 @@ const MyEmployeesPage: React.FC = () => {
     auditColumns.push({
       title: intl.formatMessage({ id: 'myEmployees.status' }),
       dataIndex: 'applyStatus',
+      width: 100,
       render: (value) => (
         <Tag color={value === '已驳回' ? 'error' : value === '审核通过' ? 'success' : 'processing'}>{value}</Tag>
       ),
     });
     auditColumns.push({
       title: intl.formatMessage({ id: 'myEmployees.actions' }),
+      width: 150,
       render: (_: unknown, row: AuditRow) => (
         <Space>
           <Popconfirm
@@ -444,7 +506,10 @@ const MyEmployeesPage: React.FC = () => {
   );
 
   return (
-    <div id="myEmployeesScroller" className={`${styles.container} ${activeTab === 'audit' ? styles.auditContainer : ''}`}>
+    <div
+      id="myEmployeesScroller"
+      className={`${styles.container} ${activeTab === 'audit' ? styles.auditContainer : ''}`}
+    >
       <div className={styles.back} onClick={() => navigate('/digitalEmployees')}>
         <LeftOutlined /> {intl.formatMessage({ id: 'myEmployees.backToAll' })}
       </div>
@@ -543,11 +608,15 @@ const MyEmployeesPage: React.FC = () => {
                         onEdit: () => handleEdit(employee),
                         onAuth: (type) => handleAuth(employee, type),
                         onDelete: () => handleDelete(employee),
+                        // 删除数据使用独立回调，复用删除接口及成功后的列表移除逻辑。
+                        onDeleteData: () => handleDelete(employee),
                         onShelf: () => handleShelfStatusChange(employee, 'shelf'),
                         onUnShelf: () => handleShelfStatusChange(employee, 'unShelf'),
                         // 我的员工卡片统一按资源状态展示标签，并保留创建人/管理人的操作权限。
                         showDigitalEmployeeTypeTag: false,
                         enableDigitalEmployeeLifecycle: true,
+                        // 个人、企业页签统一按后端 canDelete 展示删除数据入口。
+                        enableDigitalEmployeeDelete: true,
                       }}
                     />
                   ))}
@@ -574,11 +643,14 @@ const MyEmployeesPage: React.FC = () => {
           </div>
           <Spin spinning={auditLoading} wrapperClassName={styles.auditTableSpin}>
             <div className={styles.auditTableWrap}>
+              {/* 固定辅助列宽，窄屏横向滚动，避免名称列被挤压换行。 */}
               <Table<AuditRow>
                 rowKey={(row) => `${row.resourceId}-${row.privilegeGrantId}`}
                 dataSource={auditRows}
                 pagination={false}
                 sticky
+                tableLayout="fixed"
+                scroll={{ x: 1120 }}
                 columns={auditColumns}
                 locale={{
                   emptyText: (

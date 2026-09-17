@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.state.domain.resource.vo;
 
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
+import com.iwhalecloud.byai.manager.vo.auth.ResourceOperationPermissionsVo;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -14,5 +15,7 @@ import lombok.Setter;
 public class DatasetDetailVo extends SsResource {
 
     private String type;
+
+    private ResourceOperationPermissionsVo operationPermissions;
 
 }

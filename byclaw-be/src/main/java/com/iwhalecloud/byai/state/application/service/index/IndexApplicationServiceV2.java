@@ -500,7 +500,6 @@ public class IndexApplicationServiceV2 {
         digitalEmployee.setCanDelete(permissions.isCanDelete());
         digitalEmployee.setCanApplyUse(permissions.isCanApplyUse());
         digitalEmployee.setUseApplyPending(permissions.isUseApplyPending());
-        digitalEmployee.setCanAuditUse(permissions.isCanAuditUse());
         digitalEmployee.setCanSetDefault(permissions.isCanSetDefault());
         digitalEmployee.setCanRestore(permissions.isCanRestore());
         digitalEmployee.setCanOnShelf(permissions.isCanOnShelf());
@@ -525,7 +524,6 @@ public class IndexApplicationServiceV2 {
         digitalEmployee.setCanDelete(permissions.isCanDelete());
         digitalEmployee.setCanApplyUse(permissions.isCanApplyUse());
         digitalEmployee.setUseApplyPending(permissions.isUseApplyPending());
-        digitalEmployee.setCanAuditUse(permissions.isCanAuditUse());
         digitalEmployee.setCanSetDefault(permissions.isCanSetDefault());
         digitalEmployee.setCanRestore(permissions.isCanRestore());
         digitalEmployee.setCanOnShelf(permissions.isCanOnShelf());

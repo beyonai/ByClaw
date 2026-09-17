@@ -191,7 +191,6 @@ public class DigitalEmployeePageVo {
 
     private Boolean useApplyPending;
 
-    private Boolean canAuditUse;
 
     private Boolean canSetDefault;
 

@@ -1,13 +1,41 @@
 export type FlattenedCatalog = {
   catalogId: string | number;
   catalogName: string;
+  catalogEnName?: string;
   level: number;
+};
+
+type CatalogDescriptionMetadata = {
+  desc?: string;
+  enName?: string;
 };
 
 const getParentCatalogId = (item: any) =>
   item?.pcatalogId ?? item?.pCatalogId ?? item?.parentCatalogId ?? item?.parentDirId;
 
 const getCatalogName = (item: any) => item?.catalogName ?? item?.dirName ?? item?.name ?? '';
+
+export const parseCatalogDescription = (catalogDesc: unknown): CatalogDescriptionMetadata => {
+  if (typeof catalogDesc !== 'string') return {};
+
+  try {
+    const metadata = JSON.parse(catalogDesc);
+    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return {};
+
+    const desc = metadata.catalogDesc ?? metadata.desc;
+    const enName = metadata.catalogEnName ?? metadata.enName;
+
+    return {
+      desc: typeof desc === 'string' ? desc : undefined,
+      enName: typeof enName === 'string' ? enName : undefined,
+    };
+  } catch {
+    return {};
+  }
+};
+
+export const getLocalizedCatalogName = (catalog: { catalogName?: string; catalogEnName?: string }, locale: string) =>
+  locale.includes('en') && catalog.catalogEnName ? catalog.catalogEnName : catalog.catalogName || '';
 
 const hasChildren = (list: any[] = []) =>
   list.some((item) => Array.isArray(item?.children) && item.children.length > 0);
@@ -16,9 +44,12 @@ export const normalizeCatalogTree = (list: any[] = []): any[] => {
   if (!Array.isArray(list)) return [];
 
   return list.map((item) => {
+    const descriptionMetadata = parseCatalogDescription(item?.catalogDesc);
     const normalized = {
       ...item,
       pcatalogId: getParentCatalogId(item),
+      catalogEnName: descriptionMetadata.enName,
+      catalogDisplayDesc: descriptionMetadata.desc ?? item?.catalogDesc,
     };
 
     if (Array.isArray(item?.children)) {
@@ -41,6 +72,7 @@ export const flattenCatalogTree = (list: any[] = []): FlattenedCatalog[] => {
       result.push({
         catalogId: item.catalogId,
         catalogName: getCatalogName(item),
+        catalogEnName: item.catalogEnName,
         level,
       });
 
@@ -78,6 +110,7 @@ export const flattenCatalogTree = (list: any[] = []): FlattenedCatalog[] => {
       result.push({
         catalogId: item.catalogId,
         catalogName: getCatalogName(item),
+        catalogEnName: item.catalogEnName,
         level,
       });
 
@@ -101,6 +134,7 @@ export const getTopLevelCatalogs = (list: any[] = []): FlattenedCatalog[] => {
     return {
       catalogId: item.catalogId,
       catalogName: getCatalogName(item),
+      catalogEnName: item.catalogEnName,
       level: 0,
     };
   };

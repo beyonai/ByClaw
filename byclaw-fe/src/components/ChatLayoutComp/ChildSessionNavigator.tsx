@@ -1,5 +1,5 @@
 import React from 'react';
-import { useDispatch } from '@umijs/max';
+import { useIntl, useDispatch } from '@umijs/max';
 import { Dropdown } from 'antd';
 import {
   ArrowLeftOutlined,
@@ -32,6 +32,8 @@ interface ChildSessionNavigatorProps {
 }
 
 function ChildSessionNavigator({ sessionId, currentSession }: ChildSessionNavigatorProps) {
+  // 界面文案随当前语言更新，业务名称与接口数据保持原值。
+  const intl = useIntl();
   const dispatch = useDispatch();
   const { setSessionId } = useGlobal();
   const [children, setChildren] = React.useState<ISession[]>([]);
@@ -169,7 +171,9 @@ function ChildSessionNavigator({ sessionId, currentSession }: ChildSessionNaviga
         ...baseSession,
         sessionId: childSessionId,
         parentSessionId: rootSessionId,
-        sessionName: `${metadata.child_name || previousChild?.sessionName || '子 Agent'}`,
+        sessionName: `${
+          metadata.child_name || previousChild?.sessionName || intl.formatMessage({ id: 'ui.team.childAgent' })
+        }`,
         sessionContent: `${
           message?.type === 'SCOPED_SESSION_STATUS'
             ? previousChild?.sessionContent || ''
@@ -192,7 +196,7 @@ function ChildSessionNavigator({ sessionId, currentSession }: ChildSessionNaviga
       webSocketManager.offMessage('NEW_MESSAGE', handleNewMessage);
       webSocketManager.offMessage('SCOPED_SESSION_STATUS', handleNewMessage);
     };
-  }, [dispatch, rootSessionId]);
+  }, [dispatch, intl, rootSessionId]);
 
   const navigateTo = (target: ISession) => {
     dispatch({ type: 'session/addSession', payload: target });
@@ -224,12 +228,12 @@ function ChildSessionNavigator({ sessionId, currentSession }: ChildSessionNaviga
     else if (['failed', 'error'].includes(rawStatus)) status = 'failed';
     else if (['waiting', 'waiting_user', 'blocked'].includes(rawStatus)) status = 'waiting';
     const label = {
-      running: '执行中',
-      completed: '已完成',
-      failed: '失败',
-      waiting: '等待中',
-      idle: '待命',
-      cancelled: '已停止',
+      running: intl.formatMessage({ id: 'ui.team.running' }),
+      completed: intl.formatMessage({ id: 'ui.team.completed' }),
+      failed: intl.formatMessage({ id: 'ui.team.failed' }),
+      waiting: intl.formatMessage({ id: 'ui.team.waiting' }),
+      idle: intl.formatMessage({ id: 'ui.team.idle' }),
+      cancelled: intl.formatMessage({ id: 'ui.team.stopped' }),
     }[status];
     const detail = lastTask?.subject || member?.role || getExternalSessionExt(child, 'child_role');
     return {
@@ -238,7 +242,9 @@ function ChildSessionNavigator({ sessionId, currentSession }: ChildSessionNaviga
         <span className={styles.childSessionMenuItem} data-status={status}>
           <span className={styles.childSessionMenuAvatar}>{child.sessionName?.slice(0, 1) || 'A'}</span>
           <span className={styles.childSessionMenuCopy}>
-            <strong title={child.sessionName}>{child.sessionName || '子 Agent'}</strong>
+            <strong title={child.sessionName}>
+              {child.sessionName || intl.formatMessage({ id: 'ui.team.childAgent' })}
+            </strong>
             {detail && <span title={detail}>{detail}</span>}
           </span>
           <span className={styles.childSessionStatus}>
@@ -264,7 +270,7 @@ function ChildSessionNavigator({ sessionId, currentSession }: ChildSessionNaviga
       {isChild && parent && (
         <button type="button" className={styles.parentSessionButton} onClick={() => navigateTo(parent)}>
           <ArrowLeftOutlined />
-          {parent.sessionName || '主会话'}
+          {parent.sessionName || intl.formatMessage({ id: 'ui.team.parent' })}
         </button>
       )}
       <Dropdown
@@ -279,9 +285,13 @@ function ChildSessionNavigator({ sessionId, currentSession }: ChildSessionNaviga
           },
         }}
       >
-        <button type="button" className={styles.childSessionsButton} aria-label="打开子会话列表">
+        <button
+          type="button"
+          className={styles.childSessionsButton}
+          aria-label={intl.formatMessage({ id: 'ui.team.openChildren' })}
+        >
           <TeamOutlined />
-          {visibleChildren.length} 个子代理
+          {intl.formatMessage({ id: 'ui.team.childCount' }, { count: visibleChildren.length })}
           <DownOutlined />
         </button>
       </Dropdown>

@@ -80,7 +80,6 @@ interface ISkillItem {
   canUseAuth: boolean | null;
   canDelete: boolean | null;
   canApplyUse: boolean | null;
-  canAuditUse: boolean | null;
 }
 
 type ISkill = {
@@ -180,10 +179,7 @@ export default function SuggestSkill({ agentId }: { agentId?: string }) {
 
     if (userInfo && agentId) {
       setLoading(true);
-      Promise.all([
-        fetchSkills(),
-        getCurAgentInfo(agentId || ''),
-      ])
+      Promise.all([fetchSkills(), getCurAgentInfo(agentId || '')])
         .then(([res1, res2]) => {
           let allSkills = res1 || [];
           const skills = JSON.parse(res2?.skills || '[]').map((item: ISkill) => item.resourceId);
