@@ -16,44 +16,6 @@ BEGIN
     END IF;
 END
 $$;
--- 邮箱提供商和托管凭据字段兼容存量表；先补列，再执行回填和索引创建。
-ALTER TABLE byai.po_user_mail_account ADD COLUMN provider_code VARCHAR(64);
-ALTER TABLE byai.po_user_mail_account ADD COLUMN auth_type VARCHAR(32);
-ALTER TABLE byai.po_user_mail_account ADD COLUMN credential_ref VARCHAR(200);
-ALTER TABLE byai.po_user_mail_account ADD COLUMN connector_id BIGINT;
-
--- 允许 OAuth2 等无需 IMAP/SMTP 参数的提供商账号。
-ALTER TABLE byai.po_user_mail_account
-    ALTER COLUMN imap_host DROP NOT NULL,
-    ALTER COLUMN imap_port DROP NOT NULL,
-    ALTER COLUMN smtp_host DROP NOT NULL,
-    ALTER COLUMN smtp_port DROP NOT NULL;
-
--- 存量未删除记录均为自定义 IMAP + 应用专用密码配置。
-UPDATE byai.po_user_mail_account
-SET provider_code = COALESCE(provider_code, 'custom-imap'),
-    auth_type = COALESCE(auth_type, 'APP_PASSWORD')
-WHERE delete_flag = '0'
-  AND (provider_code IS NULL OR auth_type IS NULL);
-
-ALTER TABLE byai.po_user_mail_account
-    ALTER COLUMN provider_code SET DEFAULT 'custom-imap',
-    ALTER COLUMN auth_type SET DEFAULT 'APP_PASSWORD';
-
-CREATE INDEX IF NOT EXISTS idx_po_user_mail_account_user_provider
-    ON byai.po_user_mail_account (user_id, provider_code, delete_flag);
-
-CREATE INDEX IF NOT EXISTS idx_po_user_mail_account_credential_ref
-    ON byai.po_user_mail_account (credential_ref)
-    WHERE credential_ref IS NOT NULL AND delete_flag = '0';
-
-CREATE INDEX IF NOT EXISTS idx_po_user_mail_account_connector
-    ON byai.po_user_mail_account (user_id, connector_id, delete_flag);
-
-COMMENT ON COLUMN byai.po_user_mail_account.provider_code IS '邮箱提供商路由编码，如 custom-imap、gmail、microsoft';
-COMMENT ON COLUMN byai.po_user_mail_account.auth_type IS '邮箱认证方式，如 APP_PASSWORD、OAUTH2';
-COMMENT ON COLUMN byai.po_user_mail_account.credential_ref IS '托管凭证引用，不存储明文密码或令牌';
-
 CREATE TABLE IF NOT EXISTS byai.byai_integration_env (
     env_id              BIGINT          NOT NULL,
     project_id          BIGINT          NOT NULL,
