@@ -113,6 +113,8 @@ public class GroupChatContextResponse {
 
         private String mediaType;
 
+        private String fileUrl;
+
         /** 云盘附件使用知识库 ID 和完整路径定位，fileId 可以为空。 */
         private String cloudResourceId;
 

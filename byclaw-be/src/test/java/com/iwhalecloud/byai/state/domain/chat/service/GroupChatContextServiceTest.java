@@ -224,10 +224,13 @@ class GroupChatContextServiceTest {
         source.setMetadata("{\"scene\":\"GROUP_CHAT\",\"kind\":\"TASK_RESULT\",\"files\":["
             + "{\"fileName\":\"REPORT.md\",\"filePath\":\"/results/REPORT.md\","
             + "\"cloudResourceId\":\"9007199254740993\"},null,{},\"invalid\"]}");
-        source.setRelatedResources("{\"files\":[{\"fileId\":\"10\",\"fileName\":\"input.pdf\"}]}");
+        source.setRelatedResources("{\"files\":[{\"fileId\":\"10\",\"fileName\":\"input.pdf\","
+            + "\"fileUrl\":\"/commonFile/preview?filePath=/by/input.pdf\"}]}");
         var attachments = loadSingle(source).getAttachments();
         assertThat(attachments).hasSize(2);
         assertThat(attachments.get(0).getFileId()).isEqualTo("10");
+        assertThat(attachments.get(0).getFileUrl())
+            .isEqualTo("/commonFile/preview?filePath=/by/input.pdf");
         assertThat(attachments.get(1).getFileId()).isNull();
         assertThat(attachments.get(1).getFileName()).isEqualTo("REPORT.md");
         assertThat(attachments.get(1).getFilePath()).isEqualTo("/results/REPORT.md");
