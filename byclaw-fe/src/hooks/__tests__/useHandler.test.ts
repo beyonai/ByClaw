@@ -137,6 +137,29 @@ describe('hooks/useChat/useHandler', () => {
     expect(queryProps.newQueryMsg.initialized).toBe('query');
   });
 
+  it('messageIdHandler preserves usedModel when a later stream event only carries partial metadata', () => {
+    const { result } = renderHook(() => useHandler({ addSession: jest.fn(), setSessionId: jest.fn() }));
+    const newAnswerMsg = {
+      metadata: JSON.stringify({
+        usedModel: { id: '10004014', code: 'deepseek-v4-flash', name: 'lwt-deepseek-v4-flash' },
+        resourceId: 'agent-1',
+      }),
+    } as any;
+
+    result.current.messageIdHandler({
+      sseRes: { messageId: 'm1', metadata: JSON.stringify({ traceId: 'trace-1' }) },
+      sseMsg: { event: 'appStreamResponse' },
+      newAnswerMsg,
+      newQueryMsg: {},
+    } as any);
+
+    expect(JSON.parse(newAnswerMsg.metadata)).toEqual({
+      usedModel: { id: '10004014', code: 'deepseek-v4-flash', name: 'lwt-deepseek-v4-flash' },
+      resourceId: 'agent-1',
+      traceId: 'trace-1',
+    });
+  });
+
   it('queryMessageIdHandler and resComIdsHandler assign ids directly', () => {
     const { result } = renderHook(() => useHandler({ addSession: jest.fn(), setSessionId: jest.fn() }));
     const onionsProps = {
