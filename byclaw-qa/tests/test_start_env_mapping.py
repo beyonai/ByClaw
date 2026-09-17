@@ -111,7 +111,7 @@ def test_start_maps_file_storage_minio_source_env(tmp_path: Path) -> None:
         "REDIS_KEY_SCHEMA_VERSION=",
         "BY_QA_STORAGE_PROVIDER=byclaw_knowledge_storage:build_byclaw_knowledge_storage_provider",
         "BY_QA_EVENT_PUBLISHER_PROVIDER=byclaw_knowledge_event_publisher:build_byclaw_knowledge_event_publisher",
-        "BYAI_LANGFUSE_ENABLED=false",
+        "BYAI_LANGFUSE_ENABLED=",
     ]
 
 
@@ -180,7 +180,7 @@ def test_start_accepts_redis_cluster_source_env(tmp_path: Path) -> None:
         "REDIS_KEY_SCHEMA_VERSION=v2",
         "BY_QA_STORAGE_PROVIDER=byclaw_knowledge_storage:build_byclaw_knowledge_storage_provider",
         "BY_QA_EVENT_PUBLISHER_PROVIDER=byclaw_knowledge_event_publisher:build_byclaw_knowledge_event_publisher",
-        "BYAI_LANGFUSE_ENABLED=false",
+        "BYAI_LANGFUSE_ENABLED=",
     ]
 
 
@@ -224,7 +224,7 @@ def test_start_accepts_redis_cluster_source_env_without_redis_database(tmp_path:
         "REDIS_KEY_SCHEMA_VERSION=v2",
         "BY_QA_STORAGE_PROVIDER=byclaw_knowledge_storage:build_byclaw_knowledge_storage_provider",
         "BY_QA_EVENT_PUBLISHER_PROVIDER=byclaw_knowledge_event_publisher:build_byclaw_knowledge_event_publisher",
-        "BYAI_LANGFUSE_ENABLED=false",
+        "BYAI_LANGFUSE_ENABLED=",
     ]
 
 
@@ -254,7 +254,7 @@ def test_start_rejects_redis_cluster_without_v2_key_schema(tmp_path: Path) -> No
     assert "REDIS_KEY_SCHEMA_VERSION must be v2" in result.stderr
 
 
-def test_start_maps_byai_qa_langfuse_enabled_when_target_is_unset(tmp_path: Path) -> None:
+def test_start_ignores_removed_byai_qa_langfuse_alias(tmp_path: Path) -> None:
     qa_dir = tmp_path / "byclaw-qa"
     qa_dir.mkdir()
     shutil.copy2(Path(__file__).resolve().parents[1] / "start.sh", qa_dir / "start.sh")
@@ -280,7 +280,7 @@ def test_start_maps_byai_qa_langfuse_enabled_when_target_is_unset(tmp_path: Path
     )
 
     assert result.returncode == 0, result.stderr
-    assert "BYAI_LANGFUSE_ENABLED=true" in env_log.read_text().splitlines()
+    assert "BYAI_LANGFUSE_ENABLED=" in env_log.read_text().splitlines()
 
 
 def test_start_preserves_explicit_byai_langfuse_enabled(tmp_path: Path) -> None:

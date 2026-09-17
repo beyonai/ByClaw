@@ -9,10 +9,10 @@ description = "Session-scoped SQL execution runtime for ByClaw skills"
 requires-python = ">=3.11"
 
 [project.optional-dependencies]
-postgres = ["psycopg[binary]>=3.1,<4"]
-mysql = ["PyMySQL>=1.1,<2"]
-oracle = ["oracledb>=2,<4"]
-all = ["psycopg[binary]>=3.1,<4", "PyMySQL>=1.1,<2", "oracledb>=2,<4"]
+postgres = ["psycopg[binary]==3.3.5"]
+mysql = ["PyMySQL==1.2.0"]
+oracle = ["oracledb==3.4.2"]
+all = ["psycopg[binary]==3.3.5", "PyMySQL==1.2.0", "oracledb==3.4.2"]
 
 [project.scripts]
 dbcli = "dbcli.cli:entrypoint"
