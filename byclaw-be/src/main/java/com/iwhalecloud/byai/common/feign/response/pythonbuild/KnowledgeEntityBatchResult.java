@@ -21,7 +21,11 @@ public class KnowledgeEntityBatchResult {
 
     private String scope;
 
+    private String targetPath;
+
     private String taskType;
+
+    private Integer candidateCount;
 
     private Integer eligibleCount;
 
@@ -30,6 +34,10 @@ public class KnowledgeEntityBatchResult {
     private Integer reusedCount;
 
     private Integer skippedCount;
+
+    private Integer returnedTaskCount;
+
+    private Boolean tasksTruncated;
 
     private List<Task> tasks = new ArrayList<>();
 

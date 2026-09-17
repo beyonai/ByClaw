@@ -22,6 +22,8 @@ BACKEND_PATH_PREFIX = "/byaiService/datasetController"
 RESOURCE_ID_HEADER = "X-BYCLAW-RESOURCE-ID"
 SESSION_ID_HEADER = "X-CHAT-SESSION-ID"
 KNOWLEDGE_ENTITY_ROOT = "/KnowledgeEntity"
+PROJECT_SETTINGS_PATH = "/.user_settings/_project.yaml"
+PROJECT_ENTITY_DOMAIN = "素材.实体"
 SESSION_AWARE_COMMANDS = frozenset(
     {
         "mkdir",
@@ -505,6 +507,34 @@ def _canonical_remote_path(value: str) -> str:
     return "/" + "/".join(parts)
 
 
+def _parse_project_entity_directory(content: Any) -> str | None:
+    if not isinstance(content, str) or not content.strip():
+        return None
+    try:
+        import yaml
+    except ImportError:
+        return None
+    try:
+        settings = yaml.safe_load(content)
+    except yaml.YAMLError:
+        return None
+    if not isinstance(settings, dict):
+        return None
+    raw_paths = settings.get(PROJECT_ENTITY_DOMAIN)
+    if isinstance(raw_paths, str):
+        paths = [raw_paths]
+    elif isinstance(raw_paths, list):
+        paths = raw_paths
+    else:
+        return None
+    if len(paths) != 1 or not isinstance(paths[0], str):
+        return None
+    raw_path = paths[0].strip()
+    if not raw_path.startswith("/") or ".." in raw_path.replace("\\", "/").split("/"):
+        return None
+    return _canonical_remote_path(raw_path)
+
+
 def _remote_child_path(directory_path: str, child_name: str) -> str:
     parent = _canonical_remote_path(directory_path).rstrip("/")
     return _canonical_remote_path(f"{parent}/{child_name}")
@@ -623,6 +653,13 @@ class BackendApi:
         return self.transport.request(
             method="POST",
             path=self._path("knowledgeItems/metadata/update"),
+            payload=payload,
+        )
+
+    def references(self, payload: dict[str, Any]) -> Any:
+        return self.transport.request(
+            method="POST",
+            path=self._path("knowledgeItems/references"),
             payload=payload,
         )
 
@@ -956,6 +993,35 @@ class KnowledgeManager:
         file = _compact({"resourceId": resource_id, "filePath": value.get("filePath"), "startLine": _as_int(value.get("startLine")), "endLine": _as_int(value.get("endLine")), "content": value.get("data"), "reachedEof": value.get("reachedEof")})
         return {"ok": True, "action": "read-file", "file": file}
 
+    def _references(self, args: argparse.Namespace) -> dict[str, Any]:
+        payload = {
+            "resourceId": self._resource_id(args),
+            "filePath": args.file_path,
+            "direction": args.direction,
+        }
+        value = self.api.references(payload)
+        value = value if isinstance(value, dict) else {}
+
+        def items(name: str, path_field: str) -> list[dict[str, Any]]:
+            result: list[dict[str, Any]] = []
+            for item in value.get(name, []):
+                if not isinstance(item, dict):
+                    continue
+                raw_status = item.get("status")
+                if raw_status == "resolved":
+                    status = "valid"
+                elif raw_status in {"unresolved", "broken"}:
+                    status = "invalid"
+                else:
+                    raise ValueError(f"未知的引用状态: {raw_status}")
+                result.append(_compact({"filePath": item.get(path_field), "status": status}))
+            return result
+
+        return {
+            "inbound": items("inbound", "sourcePath"),
+            "outbound": items("outbound", "targetPath"),
+        }
+
     def _search_payload(self, args: argparse.Namespace) -> dict[str, Any]:
         if any(resource_id <= 0 for resource_id in args.resource_id):
             raise ValueError("--resource-id 必须是正整数")
@@ -1192,11 +1258,15 @@ class KnowledgeManager:
                 "resourceId": _as_int(value.get("resourceId")) or resource_id,
                 "batchId": value.get("batchId"),
                 "scope": value.get("scope"),
+                "targetPath": value.get("targetPath"),
                 "taskType": value.get("taskType"),
+                "candidateCount": _as_int(value.get("candidateCount")),
                 "eligibleCount": _as_int(value.get("eligibleCount")),
                 "acceptedCount": _as_int(value.get("acceptedCount")),
                 "reusedCount": _as_int(value.get("reusedCount")),
                 "skippedCount": _as_int(value.get("skippedCount")),
+                "returnedTaskCount": _as_int(value.get("returnedTaskCount")),
+                "tasksTruncated": value.get("tasksTruncated"),
             }
         )
         batch["tasks"] = tasks
@@ -1218,12 +1288,38 @@ class KnowledgeManager:
                     if getattr(args, "directory_path", None)
                     else None
                 ),
+                "targetDirectoryPath": (
+                    args.target_directory_path.strip()
+                    if getattr(args, "target_directory_path", None)
+                    else None
+                ),
                 field_name: getattr(args, attribute_name),
                 "force": args.force,
                 "tags": getattr(args, "tag", None),
                 "extraParams": args.extra_params_json,
             }
         )
+
+    def _project_entity_directory(self, resource_id: int) -> str | None:
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=".project-settings-",
+            suffix=".yaml",
+        )
+        os.close(descriptor)
+        temporary_path = Path(temporary_name)
+        try:
+            self.api.download(
+                resource_id=resource_id,
+                target_path=PROJECT_SETTINGS_PATH,
+                output=temporary_path,
+            )
+            content = temporary_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError, ValueError):
+            return None
+        finally:
+            with suppress(FileNotFoundError):
+                temporary_path.unlink()
+        return _parse_project_entity_directory(content)
 
     def _entity_discovery(self, args: argparse.Namespace) -> dict[str, Any]:
         payload = self._entity_payload(
@@ -1242,6 +1338,10 @@ class KnowledgeManager:
             if session_id:
                 result["headers"] = {SESSION_ID_HEADER: session_id}
             return result
+        if "targetDirectoryPath" not in payload:
+            target_directory = self._project_entity_directory(payload["resourceId"])
+            if target_directory:
+                payload["targetDirectoryPath"] = target_directory
         value = self.api.entity_discovery(
             payload,
             session_id=session_id,
@@ -1270,6 +1370,10 @@ class KnowledgeManager:
             if session_id:
                 result["headers"] = {SESSION_ID_HEADER: session_id}
             return result
+        if "filePath" not in payload and "directoryPath" not in payload:
+            directory_path = self._project_entity_directory(payload["resourceId"])
+            if directory_path:
+                payload["directoryPath"] = directory_path
         value = self.api.entity_enrich(
             payload,
             session_id=session_id,
@@ -1364,6 +1468,7 @@ def build_parser() -> argparse.ArgumentParser:
         "build-status": "查询知识文件构建状态",
         "download": "下载知识库文件或目录压缩包",
         "read-file": "按行读取知识库文件内容",
+        "references": "查询文件的入站和出站引用",
         "search": "检索知识库内容切片",
         "search-file": "检索知识库相关文件",
         "metadata-search": "仅按标签或其他属性条件分页查找知识库文件",
@@ -1540,6 +1645,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="结束行号（包含该行）",
     )
 
+    references = _add_command(subparsers, "references", descriptions["references"])
+    _add_single_resource(references)
+    references.add_argument(
+        "--file-path",
+        required=True,
+        metavar="PATH",
+        help="要查询引用关系的文件绝对路径",
+    )
+    references.add_argument(
+        "--direction",
+        choices=("inbound", "outbound", "all"),
+        default="all",
+        help="查询方向（默认 all）",
+    )
+
     for name in ("search", "search-file"):
         command = _add_command(subparsers, name, descriptions[name])
         command.add_argument(
@@ -1700,6 +1820,11 @@ def build_parser() -> argparse.ArgumentParser:
         command = _add_command(subparsers, name, descriptions[name])
         _add_single_resource(command)
         if name == "entity-discovery":
+            command.description = (
+                "异步发现原始文档中的知识实体。未显式指定输出目录时，"
+                "若 /.user_settings/_project.yaml 的 素材.实体 映射有效则使用"
+                "该目录，否则输出到 /KnowledgeEntity；配置读取不要求知识构建。"
+            )
             scope = command.add_mutually_exclusive_group()
             scope.add_argument(
                 "--file-path",
@@ -1710,6 +1835,15 @@ def build_parser() -> argparse.ArgumentParser:
                 "--directory-path",
                 metavar="PATH",
                 help="知识库内原始文档目录；递归处理该目录及其子目录",
+            )
+            command.add_argument(
+                "--target-directory-path",
+                metavar="PATH",
+                help=(
+                    "KnowledgeEntity 输出目录；不传时，若 "
+                    "/.user_settings/_project.yaml 的 素材.实体 映射有效则"
+                    "使用该目录，否则使用 /KnowledgeEntity"
+                ),
             )
             command.add_argument(
                 "--max-entities",
@@ -1726,13 +1860,22 @@ def build_parser() -> argparse.ArgumentParser:
                 help="追加到本次创建或锚定实体的标签；多个标签时重复传入",
             )
         else:
-            command.add_argument(
+            command.description = (
+                "异步补全 KnowledgeEntity 文档。不传 --file-path 和 "
+                "--directory-path 时，若 /.user_settings/_project.yaml 的 "
+                "素材.实体 映射有效则递归处理该目录，否则处理整库实体；配置读取"
+                "不要求知识构建。"
+            )
+            scope = command.add_mutually_exclusive_group()
+            scope.add_argument(
                 "--file-path",
                 metavar="PATH",
-                help=(
-                    "知识库内文件路径；文件必须位于 /KnowledgeEntity；"
-                    "不传或传空白时处理全部合格实体文档"
-                ),
+                help="知识库内单个 KnowledgeEntity 文件路径",
+            )
+            scope.add_argument(
+                "--directory-path",
+                metavar="PATH",
+                help="KnowledgeEntity 目录；递归处理该目录及其子目录",
             )
             command.add_argument(
                 "--top-k",
@@ -1838,6 +1981,8 @@ def _agent_dsl(value: str) -> dict[str, Any]:
         "eq",
         "ne",
         "in",
+        "containsAll",
+        "containsAny",
         "contains",
         "exists",
         "gt",
@@ -1909,6 +2054,14 @@ def _agent_dsl(value: str) -> dict[str, Any]:
             not isinstance(leaf_value, list) or not leaf_value
         ):
             raise argparse.ArgumentTypeError("in.value 必须是非空数组")
+        if operator in {"containsAll", "containsAny"} and (
+            not isinstance(leaf_value, list)
+            or not leaf_value
+            or any(not isinstance(item, str) for item in leaf_value)
+        ):
+            raise argparse.ArgumentTypeError(
+                f"{operator}.value 必须是非空字符串数组"
+            )
         if operator in {"contains", "prefix", "wildcard"} and not isinstance(
             leaf_value, str
         ):

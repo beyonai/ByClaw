@@ -20,8 +20,11 @@ public class KnowledgeEntityEnrichRequest {
     @NotNull(message = "知识库资源标识不能为空")
     private Long resourceId;
 
-    /** KnowledgeEntity 文件路径；为空时处理固定目录中的全部符合条件实体文档。 */
+    /** KnowledgeEntity 文件路径；传入时优先于 directoryPath。 */
     private String filePath;
+
+    /** KnowledgeEntity 目录路径，递归处理子目录；未传 filePath 时生效。 */
+    private String directoryPath;
 
     @Positive(message = "证据候选数必须大于 0")
     private Integer topK = 20;

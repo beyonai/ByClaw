@@ -37,7 +37,11 @@ class RecordingTransport:
 
     def download(self, **kwargs: object) -> dict[str, object]:
         self.calls.append({"kind": "download", **kwargs})
-        return self.responses.pop(0) if self.responses else {}
+        response = self.responses.pop(0) if self.responses else {}
+        if isinstance(response, str):
+            Path(kwargs["output"]).write_text(response, encoding="utf-8")
+            return {"output": str(kwargs["output"])}
+        return response
 
     def close(self) -> None:
         return None
@@ -238,6 +242,7 @@ class BackendApiTests(unittest.TestCase):
                 "operationList": [{"propertyName": "status", "operation": "unset"}],
             }
         )
+        self.api.references({"resourceId": 1, "filePath": "/a.md", "direction": "all"})
         self.api.entity_discovery({"resourceId": 1})
         self.api.entity_enrich({"resourceId": 1})
         self.api.remove_file({"resourceId": 1})
@@ -255,6 +260,7 @@ class BackendApiTests(unittest.TestCase):
             "/byaiService/datasetController/knowledgeItems/metadataSearch",
             "/byaiService/datasetController/knowledgeItems/metadata/get",
             "/byaiService/datasetController/knowledgeItems/metadata/update",
+            "/byaiService/datasetController/knowledgeItems/references",
             "/byaiService/datasetController/knowledgeItems/entityDiscovery",
             "/byaiService/datasetController/knowledgeItems/entityEnrich",
             "/byaiService/datasetController/removeFile",
@@ -823,6 +829,59 @@ class KnowledgeManagerTests(unittest.TestCase):
         self.assertEqual(result["filePath"], "/contracts/a.md")
         self.assertEqual(result["metadata"]["tags"]["value"], ["contract"])
 
+    def test_references_returns_only_related_paths_and_statuses(self) -> None:
+        self.transport.responses = [
+            {
+                "inbound": [
+                    {
+                        "sourcePath": "/docs/overview.md",
+                        "targetPath": "/docs/a.md",
+                        "originalTarget": "a.md",
+                        "status": "resolved",
+                    }
+                ],
+                "outbound": [
+                    {
+                        "sourcePath": "/docs/a.md",
+                        "targetPath": "/docs/missing.md",
+                        "originalTarget": "missing.md",
+                        "status": "broken",
+                    }
+                ],
+            }
+        ]
+
+        result = self.manager.execute(
+            self.parse(
+                "references",
+                "--resource-id",
+                "7",
+                "--file-path",
+                "/docs/a.md",
+            )
+        )
+
+        self.assertEqual(
+            self.transport.calls[0],
+            {
+                "kind": "request",
+                "method": "POST",
+                "path": "/byaiService/datasetController/knowledgeItems/references",
+                "payload": {
+                    "resourceId": 7,
+                    "filePath": "/docs/a.md",
+                    "direction": "all",
+                },
+            },
+        )
+        self.assertEqual(
+            result,
+            {
+                "inbound": [{"filePath": "/docs/overview.md", "status": "valid"}],
+                "outbound": [{"filePath": "/docs/missing.md", "status": "invalid"}],
+            },
+        )
+
     def test_metadata_update_builds_atomic_operations_from_readable_flags(self) -> None:
         result = self.manager.execute(
             self.parse(
@@ -960,7 +1019,8 @@ class KnowledgeManagerTests(unittest.TestCase):
         valid = manager_module._agent_dsl(
             '{"and":['
             '{"eq":{"fieldName":"status","value":"active"}},'
-            '{"contains":{"fieldName":"tags","value":"contract"}}'
+            '{"containsAll":{"fieldName":"tags","value":["contract","legal"]}},'
+            '{"containsAny":{"fieldName":"tags","value":["finance","legal"]}}'
             "]}"
         )
         self.assertIn("and", valid)
@@ -970,6 +1030,8 @@ class KnowledgeManagerTests(unittest.TestCase):
             '"ne":{"fieldName":"status","value":"disabled"}}',
             '{"and":[]}',
             '{"in":{"fieldName":"status","value":[]}}',
+            '{"containsAll":{"fieldName":"tags","value":[]}}',
+            '{"containsAny":{"fieldName":"tags","value":["contract",1]}}',
             '{"exists":{"fieldName":"status","value":true}}',
             '{"not":{"not":{"not":{"not":'
             '{"eq":{"fieldName":"status","value":"active"}}}}}}}',
@@ -987,15 +1049,20 @@ class KnowledgeManagerTests(unittest.TestCase):
 
     def test_entity_discovery_submits_async_batch_and_preserves_task_ids(self) -> None:
         self.transport.responses = [
+            "素材.实体: [/entities/organization]",
             {
                 "resourceId": 7,
                 "batchId": "ed-batch-1",
                 "scope": "SINGLE_FILE",
+                "targetPath": "/docs/a.md",
                 "taskType": "ENTITY_DISCOVERY",
+                "candidateCount": 1,
                 "eligibleCount": 1,
                 "acceptedCount": 1,
                 "reusedCount": 0,
                 "skippedCount": 0,
+                "returnedTaskCount": 1,
+                "tasksTruncated": False,
                 "tasks": [
                     {
                         "taskId": "task-1",
@@ -1022,20 +1089,42 @@ class KnowledgeManagerTests(unittest.TestCase):
         )
         self.assertTrue(result["accepted"])
         self.assertEqual(result["batch"]["batchId"], "ed-batch-1")
+        self.assertEqual(result["batch"]["targetPath"], "/docs/a.md")
+        self.assertEqual(result["batch"]["candidateCount"], 1)
+        self.assertEqual(result["batch"]["returnedTaskCount"], 1)
+        self.assertFalse(result["batch"]["tasksTruncated"])
         self.assertEqual(result["batch"]["tasks"][0]["taskId"], "task-1")
         self.assertEqual(
-            self.transport.calls[0]["headers"],
+            self.transport.calls[0]["params"],
+            {
+                "resourceId": 7,
+                "directoryPath": "/.user_settings/_project.yaml",
+            },
+        )
+        self.assertEqual(self.transport.calls[0]["kind"], "download")
+        self.assertFalse(Path(self.transport.calls[0]["output"]).exists())
+        self.assertEqual(
+            self.transport.calls[1]["headers"],
             {"X-CHAT-SESSION-ID": "session-001"},
         )
         self.assertEqual(
-            self.transport.calls[0]["payload"],
+            self.transport.calls[1]["payload"],
             {
                 "resourceId": 7,
                 "filePath": "/docs/a.md",
+                "targetDirectoryPath": "/entities/organization",
                 "maxEntities": 12,
                 "force": False,
                 "extraParams": {"requestSource": "manual"},
             },
+        )
+
+    def test_project_entity_mapping_accepts_single_string_and_normalizes_path(self) -> None:
+        self.assertEqual(
+            manager_module._parse_project_entity_directory(
+                "素材.实体: /知识//实体/"
+            ),
+            "/知识/实体",
         )
 
     def test_entity_discovery_supports_recursive_directory_scope(self) -> None:
@@ -1046,6 +1135,8 @@ class KnowledgeManagerTests(unittest.TestCase):
                 "7",
                 "--directory-path",
                 " /docs/manuals ",
+                "--target-directory-path",
+                " /entities/organization ",
                 "--dry-run",
             )
         )
@@ -1058,12 +1149,32 @@ class KnowledgeManagerTests(unittest.TestCase):
                 "payload": {
                     "resourceId": 7,
                     "directoryPath": "/docs/manuals",
+                    "targetDirectoryPath": "/entities/organization",
                     "maxEntities": 12,
                     "force": False,
                 },
             },
         )
         self.assertEqual(self.transport.calls, [])
+
+    def test_entity_discovery_explicit_output_directory_skips_project_mapping(self) -> None:
+        self.transport.responses = [{"batchId": "ed-explicit"}]
+
+        self.manager.execute(
+            self.parse(
+                "entity-discovery",
+                "--resource-id",
+                "7",
+                "--target-directory-path",
+                "/explicit/entities",
+            )
+        )
+
+        self.assertEqual(len(self.transport.calls), 1)
+        self.assertEqual(
+            self.transport.calls[0]["payload"]["targetDirectoryPath"],
+            "/explicit/entities",
+        )
 
     def test_entity_discovery_accepts_repeated_tags(self) -> None:
         result = self.manager.execute(
@@ -1110,6 +1221,103 @@ class KnowledgeManagerTests(unittest.TestCase):
             },
         )
         self.assertEqual(self.transport.calls, [])
+
+    def test_entity_enrich_supports_recursive_directory_scope(self) -> None:
+        result = self.manager.execute(
+            self.parse(
+                "entity-enrich",
+                "--resource-id",
+                "7",
+                "--directory-path",
+                " /entities/organization ",
+                "--dry-run",
+            )
+        )
+        self.assertEqual(
+            result["payload"],
+            {
+                "resourceId": 7,
+                "directoryPath": "/entities/organization",
+                "topK": 20,
+                "force": False,
+            },
+        )
+        self.assertEqual(self.transport.calls, [])
+
+    def test_entity_enrich_uses_project_mapping_as_default_directory(self) -> None:
+        self.transport.responses = [
+            "素材.实体:\n  - /知识/实体",
+            {"batchId": "ee-project-default"},
+        ]
+
+        self.manager.execute(self.parse("entity-enrich", "--resource-id", "7"))
+
+        self.assertEqual(
+            self.transport.calls[0]["params"],
+            {
+                "resourceId": 7,
+                "directoryPath": "/.user_settings/_project.yaml",
+            },
+        )
+        self.assertEqual(self.transport.calls[0]["kind"], "download")
+        self.assertFalse(Path(self.transport.calls[0]["output"]).exists())
+        self.assertEqual(
+            self.transport.calls[1]["payload"],
+            {
+                "resourceId": 7,
+                "directoryPath": "/知识/实体",
+                "topK": 20,
+                "force": False,
+            },
+        )
+
+    def test_invalid_project_entity_mapping_keeps_backend_defaults(self) -> None:
+        for content in (
+            "素材.实体: [relative/path]",
+            "素材.实体: [/entities/../private]",
+            "素材.实体: [/entities/a, /entities/b]",
+            "素材.实体: [",
+            "素材: [/素材]",
+        ):
+            with self.subTest(content=content):
+                transport = RecordingTransport()
+                transport.responses = [
+                    content,
+                    {"batchId": "ee-fallback"},
+                ]
+                manager = manager_module.KnowledgeManager(
+                    manager_module.BackendApi(transport)
+                )
+
+                manager.execute(self.parse("entity-enrich", "--resource-id", "7"))
+
+                self.assertEqual(
+                    transport.calls[1]["payload"],
+                    {"resourceId": 7, "topK": 20, "force": False},
+                )
+
+    def test_missing_project_settings_keeps_backend_defaults(self) -> None:
+        class MissingSettingsTransport(RecordingTransport):
+            def download(self, **kwargs: object) -> dict[str, object]:
+                self.calls.append({"kind": "download", **kwargs})
+                raise ValueError("file not found")
+
+            def request(self, **kwargs: object) -> object:
+                self.calls.append({"kind": "request", **kwargs})
+                return {"batchId": "ee-fallback"}
+
+        transport = MissingSettingsTransport()
+        manager = manager_module.KnowledgeManager(
+            manager_module.BackendApi(transport)
+        )
+
+        manager.execute(self.parse("entity-enrich", "--resource-id", "7"))
+
+        self.assertEqual(
+            transport.calls[1]["payload"],
+            {"resourceId": 7, "topK": 20, "force": False},
+        )
+        self.assertFalse(Path(transport.calls[0]["output"]).exists())
 
     def test_entity_enrich_submits_single_file_batch(self) -> None:
         self.transport.responses = [
@@ -1170,6 +1378,15 @@ class KnowledgeManagerTests(unittest.TestCase):
                 "/docs",
             ],
             ["entity-enrich", "--resource-id", "7", "--top-k", "0"],
+            [
+                "entity-enrich",
+                "--resource-id",
+                "7",
+                "--file-path",
+                "/entities/a.md",
+                "--directory-path",
+                "/entities",
+            ],
             [
                 "entity-discovery",
                 "--resource-id",
@@ -1240,8 +1457,24 @@ class KnowledgeManagerTests(unittest.TestCase):
         discovery_help = discovery_output.getvalue()
         self.assertIn("--file-path PATH", discovery_help)
         self.assertIn("--directory-path PATH", discovery_help)
+        self.assertIn("--target-directory-path PATH", discovery_help)
         self.assertIn("--tag TAG", discovery_help)
         self.assertIn("递归处理该目录及其子目录", discovery_help)
+        normalized_discovery_help = " ".join(discovery_help.split())
+        self.assertIn("/.user_settings/_project.yaml", normalized_discovery_help)
+        self.assertIn("否则使用 /KnowledgeEntity", normalized_discovery_help)
+        self.assertIn("配置读取不要求知识构建", normalized_discovery_help)
+
+        enrich_output = io.StringIO()
+        with redirect_stdout(enrich_output), self.assertRaises(SystemExit):
+            parser.parse_args(["entity-enrich", "--help"])
+        enrich_help = enrich_output.getvalue()
+        self.assertIn("--file-path PATH", enrich_help)
+        self.assertIn("--directory-path PATH", enrich_help)
+        normalized_enrich_help = " ".join(enrich_help.split())
+        self.assertIn("/.user_settings/_project.yaml", normalized_enrich_help)
+        self.assertIn("否则处理整库实体", normalized_enrich_help)
+        self.assertIn("配置读取不要求知识构建", normalized_enrich_help)
 
     def test_main_without_arguments_prints_help(self) -> None:
         output = io.StringIO()
